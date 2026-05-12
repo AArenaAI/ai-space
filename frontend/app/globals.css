@@ -1,0 +1,396 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* 白天模式 - 暖白色调 */
+    --background: 40 20% 97%;           /* #FAF9F7 暖白背景 */
+    --foreground: 30 10% 15%;           /* #2A2826 深棕文字 */
+    
+    --card: 40 15% 96%;                 /* #F5F4F2 卡片背景 */
+    --card-foreground: 30 10% 15%;
+    
+    --popover: 40 15% 98%;
+    --popover-foreground: 30 10% 15%;
+    
+    --primary: 217 91% 60%;             /* #3B82F6 品牌蓝 */
+    --primary-foreground: 0 0% 100%;
+    
+    --secondary: 40 10% 92%;            /* #EDECEA 次级背景 */
+    --secondary-foreground: 30 10% 25%;
+    
+    --muted: 40 10% 90%;                /* #E8E7E5 静音背景 */
+    --muted-foreground: 30 5% 50%;      /* #8A8784 次级文字 */
+    
+    --accent: 217 91% 60%;              /* #3B82F6 强调 */
+    --accent-foreground: 0 0% 100%;
+    
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+    
+    --border: 40 10% 88%;               /* #E5E4E2 边框 */
+    --input: 40 10% 88%;
+    --ring: 217 91% 60%;                /* #3B82F6 焦点环 */
+    --radius: 0.75rem;
+    
+    /* 侧边栏 */
+    --sidebar-background: 40 15% 95%;   /* #F2F1EF */
+    --sidebar-foreground: 30 5% 45%;
+    --sidebar-primary: 217 91% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 40 10% 92%;
+    --sidebar-accent-foreground: 30 10% 15%;
+    --sidebar-border: 40 10% 88%;
+    --sidebar-ring: 217 91% 60%;
+    
+    /* 自定义变量 - 白天模式 */
+    --surface: #FAF9F7;                 /* 主背景 */
+    --surface-elevated: #F5F4F2;       /* 比背景亮一层 */
+    --surface-card: #FFFFFF;            /* 卡片背景 */
+    --surface-border: #E5E4E2;          /* 边框 */
+    
+    --text-primary: #2A2826;            /* 主文字 */
+    --text-secondary: #6B6966;          /* 次级文字 */
+    --text-tertiary: #9A9895;           /* 占位符 */
+    
+    --brand: #3B82F6;                   /* 品牌蓝 */
+    --brand-hover: #2563EB;
+    --brand-muted: rgba(59, 130, 246, 0.1);
+    
+    --message-user: #EFF6FF;            /* 用户消息 - 浅蓝 */
+    --message-ai: #F5F4F2;              /* AI 消息 - 浅灰 */
+  }
+  
+  .dark {
+    /* 黑夜模式 - 保持原有样式 */
+    --background: 0 0% 4%;
+    --foreground: 0 0% 93%;
+    
+    --card: 0 0% 10%;
+    --card-foreground: 0 0% 93%;
+    
+    --popover: 0 0% 10%;
+    --popover-foreground: 0 0% 93%;
+    
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    
+    --secondary: 0 0% 12%;
+    --secondary-foreground: 0 0% 93%;
+    
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 53%;
+    
+    --accent: 217 91% 60%;
+    --accent-foreground: 0 0% 100%;
+    
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    
+    --border: 0 0% 16%;
+    --input: 0 0% 16%;
+    --ring: 217 91% 60%;
+    
+    --sidebar-background: 0 0% 7%;
+    --sidebar-foreground: 0 0% 53%;
+    --sidebar-primary: 217 91% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 12%;
+    --sidebar-accent-foreground: 0 0% 93%;
+    --sidebar-border: 0 0% 16%;
+    --sidebar-ring: 217 91% 60%;
+    
+    /* 自定义变量 - 黑夜模式 */
+    --surface: #0A0A0A;
+    --surface-elevated: #111111;
+    --surface-card: #1A1A1A;
+    --surface-border: #2A2A2A;
+    
+    --text-primary: #EDEDED;
+    --text-secondary: #888888;
+    --text-tertiary: #555555;
+    
+    --brand: #3B82F6;
+    --brand-hover: #2563EB;
+    --brand-muted: rgba(59, 130, 246, 0.1);
+    
+    --message-user: #1E293B;
+    --message-ai: #1F1F1F;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  
+  html {
+    @apply antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+  
+  body {
+    @apply bg-surface text-text-primary transition-colors duration-300;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  
+  /* 选中文本颜色 */
+  ::selection {
+    background: rgba(59, 130, 246, 0.3);
+  }
+  
+  .dark ::selection {
+    background: rgba(59, 130, 246, 0.4);
+  }
+}
+
+/* 极简滚动条 */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(154, 152, 149, 0.3);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(154, 152, 149, 0.5);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(136, 136, 136, 0.3);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(136, 136, 136, 0.5);
+}
+
+/* 隐藏滚动条的类 */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* 消息气泡样式 */
+.message-bubble-user {
+  @apply rounded-2xl rounded-br-sm;
+  background: var(--message-user);
+}
+
+.message-bubble-ai {
+  @apply rounded-2xl rounded-bl-sm;
+  background: var(--message-ai);
+}
+
+/* 代码块样式 */
+.prose pre {
+  background: #0D0D0D !important;
+  border-radius: 8px;
+  padding: 1rem;
+  border: 1px solid var(--surface-border);
+}
+
+.dark .prose pre {
+  background: #0D0D0D !important;
+}
+
+.prose code {
+  background: var(--brand-muted);
+  color: var(--brand);
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.875em;
+  font-family: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, "Courier New", monospace;
+}
+
+.prose pre code {
+  background: transparent;
+  color: #EDEDED;
+  padding: 0;
+}
+
+/* 流式输出光标 */
+@keyframes cursor-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+.streaming-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1.2em;
+  background: var(--brand);
+  margin-left: 2px;
+  animation: cursor-blink 1s infinite;
+  vertical-align: middle;
+}
+
+/* 弹窗出现动画 */
+@keyframes dialog-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-dialog-appear {
+  animation: dialog-appear 150ms ease-out;
+}
+
+/* 淡入动画 */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fade-in 100ms ease-out;
+}
+
+/* 消息淡入动画 */
+@keyframes message-appear {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.message-appear {
+  animation: message-appear 200ms ease-out;
+}
+
+/* 输入框焦点样式 */
+.input-focus-ring {
+  @apply transition-all duration-200;
+  box-shadow: 0 0 0 1px var(--surface-border);
+}
+
+.input-focus-ring:focus-within {
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.5);
+}
+
+/* 模型选择器 pill 样式 */
+.model-selector-pill {
+  @apply rounded-full px-4 py-1.5 text-sm font-medium transition-colors duration-200;
+  background: transparent;
+  border: 1px solid var(--surface-border);
+  color: var(--text-secondary);
+}
+
+.model-selector-pill:hover {
+  background: var(--surface-card);
+  color: var(--text-primary);
+}
+
+.model-selector-pill.active {
+  background: var(--brand-muted);
+  border-color: rgba(59, 130, 246, 0.5);
+  color: var(--brand);
+}
+
+/* 侧边栏项目样式 */
+.sidebar-item {
+  @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150;
+  color: var(--text-secondary);
+}
+
+.sidebar-item:hover {
+  background: var(--surface-card);
+  color: var(--text-primary);
+}
+
+.sidebar-item.active {
+  background: var(--surface-card);
+  color: var(--text-primary);
+  border-left: 2px solid var(--brand);
+}
+
+/* 顶部栏分割线 */
+.header-border {
+  border-bottom: 1px solid var(--surface-border);
+}
+
+/* 发送按钮样式 */
+.send-button {
+  @apply rounded-lg p-2 transition-all duration-200;
+  background: var(--surface-elevated);
+  color: var(--text-tertiary);
+}
+
+.send-button:not(:disabled) {
+  background: var(--brand);
+  color: white;
+}
+
+.send-button:not(:disabled):hover {
+  background: var(--brand-hover);
+}
+
+/* 毛玻璃效果 */
+.glass-effect {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.dark .glass-effect {
+  background: rgba(26, 26, 26, 0.8);
+}
+
+/* 白天模式特定样式 */
+.light .prose {
+  color: var(--text-primary);
+}
+
+.light .prose strong {
+  color: var(--text-primary);
+}
+
+.light .prose p {
+  color: var(--text-primary);
+}
+
+/* 消息列表中的代码样式 - 白天模式 */
+.light .prose code {
+  background: rgba(59, 130, 246, 0.1);
+  color: #2563EB;
+}
+
+/* 对话列表加载动画 - 三点跳动 */
+@keyframes loading-bounce {
+  0%, 80%, 100% { transform: scale(0.5); opacity: 0.25; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
+.loading-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+  background-color: var(--text-secondary);
+  animation: loading-bounce 1.2s infinite ease-in-out both;
+}
+
+/* 侧边二层菜单滑入动画 */
+@keyframes slide-in-right {
+  from { transform: translateX(-20px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}

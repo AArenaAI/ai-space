@@ -1,0 +1,374 @@
+     1|<!DOCTYPE html>
+     2|<html lang="zh-CN">
+     3|<head>
+     4|  <meta charset="UTF-8">
+     5|  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     6|  <title>AI Space Logo 方案</title>
+     7|  <style>
+     8|    * { margin: 0; padding: 0; box-sizing: border-box; }
+     9|    body {
+    10|      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+    11|      background: #FAF9F7;
+    12|      color: #2A2826;
+    13|      line-height: 1.6;
+    14|    }
+    15|    .container { max-width: 1200px; margin: 0 auto; padding: 60px 24px; }
+    16|    h1 { font-size: 32px; font-weight: 600; margin-bottom: 8px; letter-spacing: -0.5px; }
+    17|    .subtitle { color: #6B6966; font-size: 15px; margin-bottom: 48px; }
+    18|    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 24px; }
+    19|
+    20|    .card {
+    21|      background: #fff;
+    22|      border: 1px solid #E5E4E2;
+    23|      border-radius: 16px;
+    24|      padding: 32px;
+    25|      transition: all 0.2s ease;
+    26|    }
+    27|    .card:hover { box-shadow: 0 8px 30px rgba(0,0,0,0.06); transform: translateY(-2px); }
+    28|    .card h3 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+    29|    .card p { font-size: 13px; color: #9A9895; margin-bottom: 20px; }
+    30|
+    31|    .preview-area {
+    32|      display: flex; gap: 20px; align-items: center; justify-content: center;
+    33|      padding: 24px; background: #FAF9F7; border-radius: 12px; margin-bottom: 16px;
+    34|    }
+    35|    .preview-area.dark {
+    36|      background: #111;
+    37|    }
+    38|    .size-label {
+    39|      font-size: 11px; color: #9A9895; text-align: center; margin-top: 6px;
+    40|    }
+    41|
+    42|    .badge {
+    43|      display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px;
+    44|      font-weight: 500; margin-left: 6px;
+    45|    }
+    46|    .badge.rec {
+    47|      background: rgba(59,130,246,0.1); color: #3B82F6;
+    48|    }
+    49|    .badge.anim {
+    50|      background: rgba(16,185,129,0.1); color: #10B981;
+    51|    }
+    52|
+    53|    .download-section {
+    54|      margin-top: 48px; padding-top: 32px; border-top: 1px solid #E5E4E2;
+    55|    }
+    56|    .download-section h2 { font-size: 20px; font-weight: 600; margin-bottom: 16px; }
+    57|    .dl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
+    58|    .dl-item {
+    59|      background: #fff; border: 1px solid #E5E4E2; border-radius: 12px; padding: 20px;
+    60|      text-align: center; cursor: pointer; transition: all 0.15s;
+    61|    }
+    62|    .dl-item:hover { border-color: #3B82F6; }
+    63|    .dl-item svg { margin: 0 auto 12px; }
+    64|    .dl-item span { font-size: 13px; color: #6B6966; }
+    65|
+    66|    @media (prefers-color-scheme: dark) {
+    67|      body { background: #0A0A0A; color: #EDEDED; }
+    68|      .subtitle { color: #888; }
+    69|      .card { background: #1A1A1A; border-color: #2A2A2A; }
+    70|      .card:hover { box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
+    71|      .preview-area { background: #111; }
+    72|      .preview-area.dark { background: #000; }
+    73|      .download-section { border-color: #2A2A2A; }
+    74|      .dl-item { background: #1A1A1A; border-color: #2A2A2A; }
+    75|      .dl-item span { color: #888; }
+    76|    }
+    77|  </style>
+    78|</head>
+    79|<body>
+    80|  <div class="container">
+    81|    <h1>AI Space Logo 方案</h1>
+    82|    <p class="subtitle">4 个设计方向，每个包含浅色 / 深色模式预览</p>
+    83|
+    84|    <div class="grid">
+    85|      <!-- 方案一：涟漪聚合 -->
+    86|      <div class="card">
+    87|        <h3>方案一：涟漪聚合 <span class="badge rec">推荐</span></h3>
+    88|        <p>中心点向外扩散，象征多模型汇聚一池</p>
+    89|        <div style="display:flex; gap:16px;">
+    90|          <div>
+    91|            <div class="preview-area">
+    92|              <svg width="96" height="96" viewBox="0 0 96 96" fill="none">
+    93|                <defs>
+    94|                  <linearGradient id="rippleGrad" x1="0" y1="0" x2="96" y2="96">
+    95|                    <stop offset="0%" stop-color="#3B82F6"/>
+    96|                    <stop offset="100%" stop-color="#60A5FA"/>
+    97|                  </linearGradient>
+    98|                </defs>
+    99|                <!-- 外层涟漪 -->
+   100|                <circle cx="48" cy="48" r="36" stroke="url(#rippleGrad)" stroke-width="2.5" opacity="0.25"/>
+   101|                <circle cx="48" cy="48" r="36" stroke="url(#rippleGrad)" stroke-width="2.5" opacity="0.25" stroke-dasharray="4 4"/>
+   102|                <!-- 中层涟漪 -->
+   103|                <circle cx="48" cy="48" r="24" stroke="url(#rippleGrad)" stroke-width="2.5" opacity="0.5"/>
+   104|                <!-- 中心点 -->
+   105|                <circle cx="48" cy="48" r="8" fill="url(#rippleGrad)"/>
+   106|                <!-- 小节点 -->
+   107|                <circle cx="48" cy="18" r="3" fill="#93C5FD" opacity="0.8"/>
+   108|                <circle cx="74" cy="58" r="3" fill="#93C5FD" opacity="0.8"/>
+   109|                <circle cx="22" cy="58" r="3" fill="#93C5FD" opacity="0.8"/>
+   110|              </svg>
+   111|            </div>
+   112|            <div class="size-label">浅色模式</div>
+   113|          </div>
+   114|          <div>
+   115|            <div class="preview-area dark">
+   116|              <svg width="96" height="96" viewBox="0 0 96 96" fill="none">
+   117|                <circle cx="48" cy="48" r="36" stroke="#60A5FA" stroke-width="2.5" opacity="0.3"/>
+   118|                <circle cx="48" cy="48" r="24" stroke="#60A5FA" stroke-width="2.5" opacity="0.6"/>
+   119|                <circle cx="48" cy="48" r="8" fill="#3B82F6"/>
+   120|                <circle cx="48" cy="18" r="3" fill="#93C5FD" opacity="0.9"/>
+   121|                <circle cx="74" cy="58" r="3" fill="#93C5FD" opacity="0.9"/>
+   122|                <circle cx="22" cy="58" r="3" fill="#93C5FD" opacity="0.9"/>
+   123|              </svg>
+   124|            </div>
+   125|            <div class="size-label">深色模式</div>
+   126|          </div>
+   127|        </div>
+   128|      </div>
+   129|
+   130|      <!-- 方案二：对话网络 -->
+   131|      <div class="card">
+   132|        <h3>方案二：对话网络</h3>
+   133|        <p>气泡 + 连接节点，表达多模型智能对话</p>
+   134|        <div style="display:flex; gap:16px;">
+   135|          <div>
+   136|            <div class="preview-area">
+   137|              <svg width="96" height="96" viewBox="0 0 96 96" fill="none">
+   138|                <defs>
+   139|                  <linearGradient id="bubbleGrad" x1="0" y1="0" x2="96" y2="96">
+   140|                    <stop offset="0%" stop-color="#3B82F6"/>
+   141|                    <stop offset="100%" stop-color="#60A5FA"/>
+   142|                  </linearGradient>
+   143|                </defs>
+   144|                <!-- 气泡轮廓 -->
+   145|                <path d="M24 28C24 23.58 27.58 20 32 20H64C68.42 20 72 23.58 72 28V52C72 56.42 68.42 60 64 60H44L32 70V60H32C27.58 60 24 56.42 24 52V28Z"
+   146|                      stroke="url(#bubbleGrad)" stroke-width="3" fill="rgba(59,130,246,0.08)"/>
+   147|                <!-- 网络节点 -->
+   148|                <circle cx="38" cy="40" r="4" fill="url(#bubbleGrad)"/>
+   149|                <circle cx="48" cy="40" r="4" fill="url(#bubbleGrad)"/>
+   150|                <circle cx="58" cy="40" r="4" fill="url(#bubbleGrad)"/>
+   151|                <line x1="38" y1="40" x2="48" y2="40" stroke="url(#bubbleGrad)" stroke-width="1.5" opacity="0.5"/>
+   152|                <line x1="48" y1="40" x2="58" y2="40" stroke="url(#bubbleGrad)" stroke-width="1.5" opacity="0.5"/>
+   153|              </svg>
+   154|            </div>
+   155|            <div class="size-label">浅色模式</div>
+   156|          </div>
+   157|          <div>
+   158|            <div class="preview-area dark">
+   159|              <svg width="96" height="96" viewBox="0 0 96 96" fill="none">
+   160|                <path d="M24 28C24 23.58 27.58 20 32 20H64C68.42 20 72 23.58 72 28V52C72 56.42 68.42 60 64 60H44L32 70V60H32C27.58 60 24 56.42 24 52V28Z"
+   161|                      stroke="#60A5FA" stroke-width="3" fill="rgba(96,165,250,0.1)"/>
+   162|                <circle cx="38" cy="40" r="4" fill="#3B82F6"/>
+   163|                <circle cx="48" cy="40" r="4" fill="#3B82F6"/>
+   164|                <circle cx="58" cy="40" r="4" fill="#3B82F6"/>
+   165|                <line x1="38" y1="40" x2="48" y2="40" stroke="#60A5FA" stroke-width="1.5" opacity="0.5"/>
+   166|                <line x1="48" y1="40" x2="58" y2="40" stroke="#60A5FA" stroke-width="1.5" opacity="0.5"/>
+   167|              </svg>
+   168|            </div>
+   169|            <div class="size-label">深色模式</div>
+   170|          </div>
+   171|        </div>
+   172|      </div>
+   173|
+   174|      <!-- 方案三：抽象 A -->
+   175|      <div class="card">
+   176|        <h3>方案三：抽象字母 A</h3>
+   177|        <p>首字母标识，横杠变"水面"漂浮节点</p>
+   178|        <div style="display:flex; gap:16px;">
+   179|          <div>
+   180|            <div class="preview-area">
+   181|              <svg width="96" height="96" viewBox="0 0 96 96" fill="none">
+   182|                <defs>
+   183|                  <linearGradient id="aGrad" x1="0" y1="0" x2="96" y2="96">
+   184|                    <stop offset="0%" stop-color="#3B82F6"/>
+   185|                    <stop offset="100%" stop-color="#60A5FA"/>
+   186|                  </linearGradient>
+   187|                </defs>
+   188|                <!-- A 的左斜杠 -->
+   189|                <line x1="32" y1="72" x2="48" y2="28" stroke="url(#aGrad)" stroke-width="5" stroke-linecap="round"/>
+   190|                <!-- A 的右斜杠 -->
+   191|                <line x1="64" y1="72" x2="48" y2="28" stroke="url(#aGrad)" stroke-width="5" stroke-linecap="round"/>
+   192|                <!-- 横杠变水面 -->
+   193|                <line x1="38" y1="54" x2="58" y2="54" stroke="url(#aGrad)" stroke-width="2.5" stroke-linecap="round" opacity="0.4"/>
+   194|                <!-- 漂浮节点 -->
+   195|                <circle cx="43" cy="52" r="3.5" fill="url(#aGrad)"/>
+   196|                <circle cx="53" cy="56" r="3.5" fill="url(#aGrad)"/>
+   197|                <!-- 底部池 -->
+   198|                <ellipse cx="48" cy="76" rx="20" ry="4" stroke="url(#aGrad)" stroke-width="1.5" opacity="0.3"/>
+   199|              </svg>
+   200|            </div>
+   201|            <div class="size-label">浅色模式</div>
+   202|          </div>
+   203|          <div>
+   204|            <div class="preview-area dark">
+   205|              <svg width="96" height="96" viewBox="0 0 96 96" fill="none">
+   206|                <line x1="32" y1="72" x2="48" y2="28" stroke="#3B82F6" stroke-width="5" stroke-linecap="round"/>
+   207|                <line x1="64" y1="72" x2="48" y2="28" stroke="#3B82F6" stroke-width="5" stroke-linecap="round"/>
+   208|                <line x1="38" y1="54" x2="58" y2="54" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round" opacity="0.5"/>
+   209|                <circle cx="43" cy="52" r="3.5" fill="#3B82F6"/>
+   210|                <circle cx="53" cy="56" r="3.5" fill="#3B82F6"/>
+   211|                <ellipse cx="48" cy="76" rx="20" ry="4" stroke="#60A5FA" stroke-width="1.5" opacity="0.3"/>
+   212|              </svg>
+   213|            </div>
+   214|            <div class="size-label">深色模式</div>
+   215|          </div>
+   216|        </div>
+   217|      </div>
+   218|
+   219|      <!-- 方案四：蜂巢 -->
+   220|      <div class="card">
+   221|        <h3>方案四：六边形蜂巢</h3>
+   222|        <p>蜂巢结构象征高效组织与多模型协作</p>
+   223|        <div style="display:flex; gap:16px;">
+   224|          <div>
+   225|            <div class="preview-area">
+   226|              <svg width="96" height="96" viewBox="0 0 96 96" fill="none">
+   227|                <defs>
+   228|                  <linearGradient id="hexGrad" x1="0" y1="0" x2="96" y2="96">
+   229|                    <stop offset="0%" stop-color="#3B82F6"/>
+   230|                    <stop offset="100%" stop-color="#60A5FA"/>
+   231|                  </linearGradient>
+   232|                </defs>
+   233|                <!-- 中心六边形 -->
+   234|                <path d="M48 26L66.5 36.5V57.5L48 68L29.5 57.5V36.5L48 26Z"
+   235|                      fill="url(#hexGrad)" opacity="0.9"/>
+   236|                <!-- 周围小六边形 -->
+   237|                <path d="M48 12L54 15.5V22.5L48 26L42 22.5V15.5L48 12Z"
+   238|                      fill="#93C5FD" opacity="0.7"/>
+   239|                <path d="M70 34L76 37.5V44.5L70 48L64 44.5V37.5L70 34Z"
+   240|                      fill="#93C5FD" opacity="0.7"/>
+   241|                <path d="M70 60L76 63.5V70.5L70 74L64 70.5V63.5L70 60Z"
+   242|                      fill="#93C5FD" opacity="0.7"/>
+   243|                <path d="M26 60L32 63.5V70.5L26 74L20 70.5V63.5L26 60Z"
+   244|                      fill="#93C5FD" opacity="0.7"/>
+   245|                <path d="M26 34L32 37.5V44.5L26 48L20 44.5V37.5L26 34Z"
+   246|                      fill="#93C5FD" opacity="0.7"/>
+   247|                <path d="M48 68L54 71.5V78.5L48 82L42 78.5V71.5L48 68Z"
+   248|                      fill="#93C5FD" opacity="0.7"/>
+   249|                <!-- 连接线 -->
+   250|                <line x1="48" y1="26" x2="48" y2="12" stroke="url(#hexGrad)" stroke-width="1" opacity="0.3"/>
+   251|                <line x1="66.5" y1="36.5" x2="70" y2="34" stroke="url(#hexGrad)" stroke-width="1" opacity="0.3"/>
+   252|                <line x1="66.5" y1="57.5" x2="70" y2="60" stroke="url(#hexGrad)" stroke-width="1" opacity="0.3"/>
+   253|                <line x1="29.5" y1="57.5" x2="26" y2="60" stroke="url(#hexGrad)" stroke-width="1" opacity="0.3"/>
+   254|                <line x1="29.5" y1="36.5" x2="26" y2="34" stroke="url(#hexGrad)" stroke-width="1" opacity="0.3"/>
+   255|                <line x1="48" y1="68" x2="48" y2="82" stroke="url(#hexGrad)" stroke-width="1" opacity="0.3"/>
+   256|              </svg>
+   257|            </div>
+   258|            <div class="size-label">浅色模式</div>
+   259|          </div>
+   260|          <div>
+   261|            <div class="preview-area dark">
+   262|              <svg width="96" height="96" viewBox="0 0 96 96" fill="none">
+   263|                <path d="M48 26L66.5 36.5V57.5L48 68L29.5 57.5V36.5L48 26Z"
+   264|                      fill="#3B82F6" opacity="0.95"/>
+   265|                <path d="M48 12L54 15.5V22.5L48 26L42 22.5V15.5L48 12Z"
+   266|                      fill="#93C5FD" opacity="0.8"/>
+   267|                <path d="M70 34L76 37.5V44.5L70 48L64 44.5V37.5L70 34Z"
+   268|                      fill="#93C5FD" opacity="0.8"/>
+   269|                <path d="M70 60L76 63.5V70.5L70 74L64 70.5V63.5L70 60Z"
+   270|                      fill="#93C5FD" opacity="0.8"/>
+   271|                <path d="M26 60L32 63.5V70.5L26 74L20 70.5V63.5L26 60Z"
+   272|                      fill="#93C5FD" opacity="0.8"/>
+   273|                <path d="M26 34L32 37.5V44.5L26 48L20 44.5V37.5L26 34Z"
+   274|                      fill="#93C5FD" opacity="0.8"/>
+   275|                <path d="M48 68L54 71.5V78.5L48 82L42 78.5V71.5L48 68Z"
+   276|                      fill="#93C5FD" opacity="0.8"/>
+   277|                <line x1="48" y1="26" x2="48" y2="12" stroke="#60A5FA" stroke-width="1" opacity="0.3"/>
+   278|                <line x1="66.5" y1="36.5" x2="70" y2="34" stroke="#60A5FA" stroke-width="1" opacity="0.3"/>
+   279|                <line x1="66.5" y1="57.5" x2="70" y2="60" stroke="#60A5FA" stroke-width="1" opacity="0.3"/>
+   280|                <line x1="29.5" y1="57.5" x2="26" y2="60" stroke="#60A5FA" stroke-width="1" opacity="0.3"/>
+   281|                <line x1="29.5" y1="36.5" x2="26" y2="34" stroke="#60A5FA" stroke-width="1" opacity="0.3"/>
+   282|                <line x1="48" y1="68" x2="48" y2="82" stroke="#60A5FA" stroke-width="1" opacity="0.3"/>
+   283|              </svg>
+   284|            </div>
+   285|            <div class="size-label">深色模式</div>
+   286|          </div>
+   287|        </div>
+   288|      </div>
+   289|    </div>
+   290|
+   291|    <!-- Favicon 小尺寸预览 -->
+   292|    <div class="download-section">
+   293|      <h2>Favicon 尺寸预览（32×32 / 16×16）</h2>
+   294|      <p class="subtitle">图标在小尺寸下的辨识度测试</p>
+   295|      <div class="dl-grid">
+   296|        <div class="dl-item">
+   297|          <svg width="32" height="32" viewBox="0 0 96 96">
+   298|            <circle cx="48" cy="48" r="36" stroke="#3B82F6" stroke-width="4" opacity="0.3"/>
+   299|            <circle cx="48" cy="48" r="24" stroke="#3B82F6" stroke-width="4" opacity="0.6"/>
+   300|            <circle cx="48" cy="48" r="10" fill="#3B82F6"/>
+   301|          </svg>
+   302|          <span>方案一 · 涟漪</span>
+   303|        </div>
+   304|        <div class="dl-item">
+   305|          <svg width="32" height="32" viewBox="0 0 96 96">
+   306|            <path d="M24 28C24 23.58 27.58 20 32 20H64C68.42 20 72 23.58 72 28V52C72 56.42 68.42 60 64 60H44L32 70V60H32C27.58 60 24 56.42 24 52V28Z"
+   307|                  stroke="#3B82F6" stroke-width="5" fill="rgba(59,130,246,0.1)"/>
+   308|            <circle cx="38" cy="40" r="5" fill="#3B82F6"/>
+   309|            <circle cx="58" cy="40" r="5" fill="#3B82F6"/>
+   310|          </svg>
+   311|          <span>方案二 · 气泡</span>
+   312|        </div>
+   313|        <div class="dl-item">
+   314|          <svg width="32" height="32" viewBox="0 0 96 96">
+   315|            <line x1="32" y1="72" x2="48" y2="28" stroke="#3B82F6" stroke-width="7" stroke-linecap="round"/>
+   316|            <line x1="64" y1="72" x2="48" y2="28" stroke="#3B82F6" stroke-width="7" stroke-linecap="round"/>
+   317|            <circle cx="43" cy="52" r="5" fill="#3B82F6"/>
+   318|            <circle cx="53" cy="56" r="5" fill="#3B82F6"/>
+   319|          </svg>
+   320|          <span>方案三 · 字母 A</span>
+   321|        </div>
+   322|        <div class="dl-item">
+   323|          <svg width="32" height="32" viewBox="0 0 96 96">
+   324|            <path d="M48 26L66.5 36.5V57.5L48 68L29.5 57.5V36.5L48 26Z"
+   325|                  fill="#3B82F6"/>
+   326|            <path d="M48 12L54 15.5V22.5L48 26L42 22.5V15.5L48 12Z"
+   327|                  fill="#93C5FD"/>
+   328|            <path d="M48 68L54 71.5V78.5L48 82L42 78.5V71.5L48 68Z"
+   329|                  fill="#93C5FD"/>
+   330|          </svg>
+   331|          <span>方案四 · 蜂巢</span>
+   332|        </div>
+   333|      </div>
+   334|    </div>
+   335|
+   336|    <!-- 文字组合预览 -->
+   337|    <div class="download-section">
+   338|      <h2>Logo + 文字组合预览</h2>
+   339|      <p class="subtitle">作为网站 header 或启动页的效果</p>
+   340|      <div class="dl-grid">
+   341|        <div class="dl-item" style="display:flex; align-items:center; gap:12px; text-align:left;">
+   342|          <svg width="36" height="36" viewBox="0 0 96 96">
+   343|            <circle cx="48" cy="48" r="36" stroke="#3B82F6" stroke-width="3" opacity="0.25"/>
+   344|            <circle cx="48" cy="48" r="24" stroke="#3B82F6" stroke-width="3" opacity="0.5"/>
+   345|            <circle cx="48" cy="48" r="8" fill="#3B82F6"/>
+   346|            <circle cx="48" cy="18" r="3" fill="#93C5FD" opacity="0.8"/>
+   347|            <circle cx="74" cy="58" r="3" fill="#93C5FD" opacity="0.8"/>
+   348|            <circle cx="22" cy="58" r="3" fill="#93C5FD" opacity="0.8"/>
+   349|          </svg>
+   350|          <div>
+   351|            <div style="font-size:16px; font-weight:600; color:#2A2826;">AI Space</div>
+   352|            <div style="font-size:11px; color:#9A9895;">模型聚合平台</div>
+   353|          </div>
+   354|        </div>
+   355|        <div class="dl-item" style="display:flex; align-items:center; gap:12px; text-align:left; background:#111;">
+   356|          <svg width="36" height="36" viewBox="0 0 96 96">
+   357|            <circle cx="48" cy="48" r="36" stroke="#60A5FA" stroke-width="3" opacity="0.3"/>
+   358|            <circle cx="48" cy="48" r="24" stroke="#60A5FA" stroke-width="3" opacity="0.6"/>
+   359|            <circle cx="48" cy="48" r="8" fill="#3B82F6"/>
+   360|            <circle cx="48" cy="18" r="3" fill="#93C5FD" opacity="0.9"/>
+   361|            <circle cx="74" cy="58" r="3" fill="#93C5FD" opacity="0.9"/>
+   362|            <circle cx="22" cy="58" r="3" fill="#93C5FD" opacity="0.9"/>
+   363|          </svg>
+   364|          <div>
+   365|            <div style="font-size:16px; font-weight:600; color:#EDEDED;">AI Space</div>
+   366|            <div style="font-size:11px; color:#888;">模型聚合平台</div>
+   367|          </div>
+   368|        </div>
+   369|      </div>
+   370|    </div>
+   371|  </div>
+   372|</body>
+   373|</html>
+   374|
