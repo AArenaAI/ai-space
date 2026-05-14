@@ -299,13 +299,17 @@ export default function MessageList({
   const [shareOpen, setShareOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
 
-  // 用户发送消息时强制 smooth 滚到底部
+  // 用户发送消息时强制 smooth 滚到底部（排除初始加载）
+  const prevLengthRef = useRef(0);
   useEffect(() => {
-    const lastMessage = messages[messages.length - 1];
-    if (lastMessage?.role === "user") {
-      scrollToBottom("smooth");
+    if (messages.length > prevLengthRef.current && prevLengthRef.current > 0) {
+      const newMessages = messages.slice(prevLengthRef.current);
+      if (newMessages.some((m) => m.role === "user")) {
+        scrollToBottom("smooth");
+      }
     }
-  }, [messages.length, scrollToBottom]);
+    prevLengthRef.current = messages.length;
+  }, [messages, scrollToBottom]);
 
   // SSE 流式输出时，RAF + 时间节流跟随（避免高频 scrollTop 设置造成视觉跳动）
   const rafRef = useRef<number>(0);
