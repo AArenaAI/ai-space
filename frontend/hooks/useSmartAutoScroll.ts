@@ -12,7 +12,6 @@ export function useSmartAutoScroll({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const isAtBottomRef = useRef(true);
-  const isAutoScrollingRef = useRef(false);
 
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -24,9 +23,8 @@ export function useSmartAutoScroll({
     return distanceToBottom <= threshold;
   }, [threshold]);
 
-  // 监听用户手动滚动：程序自动滚动期间忽略
+  // 监听滚动：总是根据当前位置更新状态，不忽略任何 scroll 事件
   const handleScroll = useCallback(() => {
-    if (isAutoScrollingRef.current) return;
     const atBottom = checkIsAtBottom();
     isAtBottomRef.current = atBottom;
     setIsAtBottom(atBottom);
@@ -39,21 +37,14 @@ export function useSmartAutoScroll({
     const bottom = bottomRef.current;
     if (!container || !bottom) return;
 
-    isAutoScrollingRef.current = true;
     isAtBottomRef.current = true;
     setIsAtBottom(true);
     setShowScrollButton(false);
 
     if (behavior === "smooth") {
-      // block: "nearest" 避免强制将元素滚到视口最底，只需进入可见区域
       bottom.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      // smooth 动画结束后恢复（300ms 后大多数浏览器已完成）
-      setTimeout(() => {
-        isAutoScrollingRef.current = false;
-      }, 300);
     } else {
       container.scrollTop = container.scrollHeight - container.clientHeight;
-      isAutoScrollingRef.current = false;
     }
   }, []);
 
@@ -65,7 +56,7 @@ export function useSmartAutoScroll({
     container.scrollTop = container.scrollHeight - container.clientHeight;
   }, []);
 
-  // 初始化时检查一次状态
+  // 初始化 + 外部依赖变化时主动检查一次
   useEffect(() => {
     if (!enabled) return;
     const atBottom = checkIsAtBottom();
