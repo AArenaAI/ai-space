@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck, ChevronDown, ChevronUp, Lightbulb, Play, Search } from "lucide-react";
+import { User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck, ChevronDown, ChevronUp, Lightbulb, Play, Search, ChevronDown as ChevronDownIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/hooks/useChat";
 import ReactMarkdown from "react-markdown";
@@ -13,6 +13,7 @@ import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { useTheme } from "@/components/theme/ThemeProvider";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import ShareDialog from "@/components/ui/ShareDialog";
+import { useSmartAutoScroll } from "@/hooks/useSmartAutoScroll";
 
 interface MessageListProps {
   messages: Message[];
@@ -279,7 +280,19 @@ export default function MessageList({
   welcomeExamples,
   onExampleClick,
 }: MessageListProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const {
+    containerRef,
+    bottomRef,
+    showScrollButton,
+    handleScroll,
+    scrollToBottom,
+    isAtBottom,
+  } = useSmartAutoScroll({
+    deps: [messages.length],
+    threshold: 120,
+    enabled: true,
+  });
+
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -287,9 +300,22 @@ export default function MessageList({
   const [shareOpen, setShareOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
 
+  // 用户发送消息时强制 smooth 滚到底部
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isLoading]);
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage?.role === "user") {
+      scrollToBottom("smooth");
+    }
+  }, [messages.length, scrollToBottom]);
+
+  // SSE 流式输出时，若用户在底部则自动跟随（用 content 变化驱动，不用 isLoading）
+  useEffect(() => {
+    const lastMessage = messages[messages.length - 1];
+    const isStreaming = isLoading && lastMessage?.role === "assistant";
+    if (isStreaming && isAtBottom) {
+      scrollToBottom("auto");
+    }
+  }, [messages, isLoading, isAtBottom, scrollToBottom]);
 
   const handleCopy = useCallback((content: string) => {
     navigator.clipboard.writeText(content);
@@ -411,8 +437,13 @@ export default function MessageList({
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-8">
-      <div className="max-w-[800px] mx-auto space-y-8">
+    <div className="relative flex-1 overflow-hidden">
+      <div
+        ref={containerRef}
+        onScroll={handleScroll}
+        className="h-full overflow-y-auto px-4 py-8"
+      >
+        <div className="max-w-[800px] mx-auto space-y-8">
         {isCompare && (
           <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-brand/5 border border-brand/20">
             <span className="text-xs font-medium text-brand">并列对比</span>
@@ -602,6 +633,21 @@ export default function MessageList({
 
         <div ref={bottomRef} />
       </div>
+      </div>
+
+      {/* 回到底部按钮 */}
+      {showScrollButton && (
+        <button
+          type="button"
+          onClick={() => scrollToBottom("smooth")}
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium
+            bg-surface-elevated border border-surface-border text-text-secondary
+            shadow-lg hover:bg-surface-card hover:text-text-primary transition-colors"
+        >
+          <ChevronDownIcon className="w-4 h-4" />
+          回到底部
+        </button>
+      )}
 
       {/* 选择模式底部工具栏 */}
       {selectMode && (
