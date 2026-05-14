@@ -286,7 +286,7 @@ export default function MessageList({
     showScrollButton,
     handleScroll,
     scrollToBottom,
-    isAtBottom,
+    followIfAtBottom,
   } = useSmartAutoScroll({
     deps: [messages.length],
     threshold: 120,
@@ -308,14 +308,26 @@ export default function MessageList({
     }
   }, [messages.length, scrollToBottom]);
 
-  // SSE 流式输出时，若用户在底部则自动跟随（用 content 变化驱动，不用 isLoading）
+  // SSE 流式输出时，用 raf 节流跟随（避免高频 scrollTop 设置造成视觉跳动）
+  const rafRef = useRef<number>(0);
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
     const isStreaming = isLoading && lastMessage?.role === "assistant";
-    if (isStreaming && isAtBottom) {
-      scrollToBottom("auto");
-    }
-  }, [messages, isLoading, isAtBottom, scrollToBottom]);
+    if (!isStreaming) return;
+
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => {
+      followIfAtBottom();
+      rafRef.current = 0;
+    });
+
+    return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = 0;
+      }
+    };
+  }, [messages, isLoading, followIfAtBottom]);
 
   const handleCopy = useCallback((content: string) => {
     navigator.clipboard.writeText(content);
