@@ -3,6 +3,7 @@ const nextConfig = {
   reactStrictMode: true,
   output: 'export',
   distDir: 'dist',
+  trailingSlash: true,
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.resolve.fallback = {

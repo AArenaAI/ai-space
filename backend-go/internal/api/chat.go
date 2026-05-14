@@ -4,6 +4,7 @@ import (
 	"aipool-backend/internal/config"
 	"aipool-backend/internal/models"
 	"aipool-backend/internal/services"
+	"aipool-backend/internal/skills"
 	"bufio"
 	"bytes"
 	"context"
@@ -19,36 +20,42 @@ import (
 )
 
 type ChatHandler struct {
-	db            *gorm.DB
-	cfg           *config.Config
-	aiService     *services.AIService
-	searchService *services.SearchService
+	db              *gorm.DB
+	cfg             *config.Config
+	aiService       *services.AIService
+	searchService   *services.SearchService
+	fileService     *services.FileService
+	retrievalSvc    *services.RetrievalService
+	contextBuilder  *services.ContextBuilder
 }
 
-func NewChatHandler(db *gorm.DB, cfg *config.Config, aiService *services.AIService, searchService *services.SearchService) *ChatHandler {
-	return &ChatHandler{db: db, cfg: cfg, aiService: aiService, searchService: searchService}
+func NewChatHandler(db *gorm.DB, cfg *config.Config, aiService *services.AIService, searchService *services.SearchService, fileService *services.FileService, retrievalSvc *services.RetrievalService, contextBuilder *services.ContextBuilder) *ChatHandler {
+	return &ChatHandler{db: db, cfg: cfg, aiService: aiService, searchService: searchService, fileService: fileService, retrievalSvc: retrievalSvc, contextBuilder: contextBuilder}
 }
 
 type ChatRequest struct {
-	Model            string   `json:"model" binding:"required"`
-	Messages         []services.Message `json:"messages" binding:"required"`
-	ConversationID   uint     `json:"conversation_id"`
-	Stream           bool     `json:"stream"`
-	Reasoning        bool     `json:"reasoning"`
-	ReasoningEffort  string   `json:"reasoning_effort"`
-	Search           bool     `json:"search"`
-	TemplateID       uint     `json:"template_id,omitempty"`
-	SkipSaveUserMsg  bool     `json:"skip_save_user_msg,omitempty"` // 对比模式后续模型调用不重复保存用户消息
+	Model           string             `json:"model" binding:"required"`
+	Messages        []services.Message `json:"messages" binding:"required"`
+	ConversationID  uint               `json:"conversation_id"`
+	Stream          bool               `json:"stream"`
+	Reasoning       bool               `json:"reasoning"`
+	ReasoningEffort string             `json:"reasoning_effort"`
+	Search          bool               `json:"search"`
+	TemplateID      uint               `json:"template_id,omitempty"`
+	SkipSaveUserMsg bool               `json:"skip_save_user_msg,omitempty"` // 对比模式后续模型调用不重复保存用户消息
+	SkillKey        string             `json:"skill_key,omitempty"`          // 指定技能 key
+	FileIDs         []string           `json:"file_ids,omitempty"`           // 关联文件的 PublicID 列表
 }
 
 type CompareRequest struct {
-	Query            string   `json:"query" binding:"required"`
-	ModelIDs         []string `json:"models" binding:"required,min=2,max=4"`
-	TemplateID       uint     `json:"template_id,omitempty"`
-	ConversationID   uint     `json:"conversation_id,omitempty"`
-	Reasoning        bool     `json:"reasoning"`
-	ReasoningEffort  string   `json:"reasoning_effort"`
-	Search           bool     `json:"search"`
+	Query           string   `json:"query" binding:"required"`
+	ModelIDs        []string `json:"models" binding:"required,min=2,max=4"`
+	TemplateID      uint     `json:"template_id,omitempty"`
+	ConversationID  uint     `json:"conversation_id,omitempty"`
+	Reasoning       bool     `json:"reasoning"`
+	ReasoningEffort string   `json:"reasoning_effort"`
+	Search          bool     `json:"search"`
+	FileIDs         []string `json:"file_ids,omitempty"`
 }
 
 type CompareResult struct {
@@ -85,6 +92,116 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 			req.Messages = append([]services.Message{systemMsg}, req.Messages...)
 		}
 	}
+
+	// ========== Skill 技能注入 ==========
+	// 只有当前端明确传递了 skill_key 时才注入，不做自动匹配（避免普通聊天被意外注入）
+	if req.SkillKey != "" {
+		injector := skills.NewInjector(skills.GetLoader())
+		var err error
+		req.Messages, err = injector.InjectSkillPrompt(req.Messages, req.SkillKey)
+		if err != nil {
+			fmt.Printf("[Chat] Skill 注入失败: %v\n", err)
+		}
+	}
+	// ========== Skill 注入结束 ==========
+
+	// ========== 文件上下文注入 ==========
+	var resolvedFileIDs []uint
+	var resolvedFileNames = make(map[uint]string)
+
+	if len(req.FileIDs) > 0 && h.fileService != nil {
+		userID := getUserID(c)
+
+		// 逐个解析 PublicID，验证权限
+		for _, publicID := range req.FileIDs {
+			file, err := h.fileService.ResolveFileByPublicID(publicID, userID)
+			if err != nil {
+				fmt.Printf("[Chat] 文件解析失败 public_id=%s: %v\n", publicID, err)
+				continue
+			}
+			resolvedFileIDs = append(resolvedFileIDs, file.ID)
+			resolvedFileNames[file.ID] = file.Filename
+		}
+
+		// 分离图片文件和普通文档
+		var imageFileIDs []uint
+		var docFileIDs []uint
+		for _, fileID := range resolvedFileIDs {
+			isImg, err := h.fileService.IsImageFile(fileID)
+			if err == nil && isImg {
+				imageFileIDs = append(imageFileIDs, fileID)
+			} else {
+				docFileIDs = append(docFileIDs, fileID)
+			}
+		}
+
+		// 处理图片：读取 base64 并附加到最后一条 user message
+		if len(imageFileIDs) > 0 {
+			var images []string
+			for _, fileID := range imageFileIDs {
+				dataURI, _, err := h.fileService.GetFileBase64DataURI(fileID)
+				if err == nil {
+					images = append(images, dataURI)
+				} else {
+					fmt.Printf("[Chat] 图片 base64 转换失败: %v\n", err)
+				}
+			}
+			for i := len(req.Messages) - 1; i >= 0; i-- {
+				if req.Messages[i].Role == "user" {
+					req.Messages[i].Images = images
+					break
+				}
+			}
+		}
+
+		// 处理普通文档：走新的 RAG 流程（语义检索 + 关键词 fallback）
+		if len(docFileIDs) > 0 && h.retrievalSvc != nil {
+			var query string
+			for i := len(req.Messages) - 1; i >= 0; i-- {
+				if req.Messages[i].Role == "user" {
+					query = req.Messages[i].Content
+					break
+				}
+			}
+
+			topK := services.DynamicTopK(req.Model)
+			results, err := h.retrievalSvc.Search(docFileIDs, query, topK, false)
+			if err == nil && len(results) > 0 {
+				// 按文件分组构造上下文
+				fileContexts := services.ExtractFileContexts(results, resolvedFileNames)
+
+				// 动态调整最大 token
+				maxTokens := 0
+				if strings.Contains(req.Model, "flash") || strings.Contains(req.Model, "8k") {
+					maxTokens = 8000
+				} else if strings.Contains(req.Model, "opus") || strings.Contains(req.Model, "200k") {
+					maxTokens = 12000
+				}
+
+				fileContext := h.contextBuilder.Build(fileContexts, query, maxTokens)
+				if fileContext != "" {
+					fileMsg := services.Message{Role: "system", Content: fileContext}
+					req.Messages = append([]services.Message{fileMsg}, req.Messages...)
+				}
+			} else if err != nil {
+				fmt.Printf("[Chat] 文件检索失败: %v\n", err)
+			}
+		}
+
+		// 保存文件与对话的关联（使用内部 ID）
+		if req.ConversationID > 0 {
+			for _, fileID := range resolvedFileIDs {
+				var existing models.ConversationFile
+				if err := h.db.Where("conversation_id = ? AND file_id = ?", req.ConversationID, fileID).First(&existing).Error; err != nil {
+					h.db.Create(&models.ConversationFile{
+						ConversationID: req.ConversationID,
+						FileID:         fileID,
+					})
+				}
+			}
+		}
+	}
+	// ========== 文件上下文注入结束 ==========
 
 	// 如果有 conversation_id，保存消息
 	if req.ConversationID > 0 {
@@ -194,112 +311,112 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 			c.Writer.Flush()
 		}
 
-	var fullContent string
-	var isOpenAIResponses bool = services.IsOpenAIResponsesModel(req.Model)
+		var fullContent string
+		var isOpenAIResponses bool = services.IsOpenAIResponsesModel(req.Model)
 
-	if isOpenAIResponses {
-		// OpenAI Responses API (GPT/o系列) 使用 Responses SSE 格式
-		content, err := h.aiService.StreamOpenAIResponses(body, c.Writer, req.Reasoning)
-		if err != nil {
-			fmt.Printf("[Chat] StreamOpenAIResponses error: %v\n", err)
-		}
-		fullContent = content
-		c.Writer.Flush()
-	} else {
-		// 非 OpenAI 模型走原有的 Chat Completions SSE 格式
-		scanner := bufio.NewScanner(body)
-		inThink := false
-
-		for scanner.Scan() {
-			line := scanner.Text()
-			if line == "" {
-				continue
+		if isOpenAIResponses {
+			// OpenAI Responses API (GPT/o系列) 使用 Responses SSE 格式
+			content, err := h.aiService.StreamOpenAIResponses(body, c.Writer, req.Reasoning)
+			if err != nil {
+				fmt.Printf("[Chat] StreamOpenAIResponses error: %v\n", err)
 			}
+			fullContent = content
+			c.Writer.Flush()
+		} else {
+			// 非 OpenAI 模型走原有的 Chat Completions SSE 格式
+			scanner := bufio.NewScanner(body)
+			inThink := false
 
-			if !bytes.HasPrefix([]byte(line), []byte("data: ")) {
-				continue
-			}
+			for scanner.Scan() {
+				line := scanner.Text()
+				if line == "" {
+					continue
+				}
 
-			data := line[6:]
-			if data == "[DONE]" {
-				if inThink {
-					c.Writer.WriteString("data: {\"choices\":[{\"delta\":{\"content\":\"</think>\"}}]}\n\n")
+				if !bytes.HasPrefix([]byte(line), []byte("data: ")) {
+					continue
+				}
+
+				data := line[6:]
+				if data == "[DONE]" {
+					if inThink {
+						c.Writer.WriteString("data: {\"choices\":[{\"delta\":{\"content\":\"</think>\"}}]}\n\n")
+						c.Writer.Flush()
+					}
+					c.Writer.WriteString("data: [DONE]\n\n")
+					c.Writer.Flush()
+					continue
+				}
+
+				var resp map[string]interface{}
+				if err := json.Unmarshal([]byte(data), &resp); err != nil {
+					c.Writer.WriteString("data: " + data + "\n\n")
+					c.Writer.Flush()
+					continue
+				}
+
+				choices, ok := resp["choices"].([]interface{})
+				if !ok || len(choices) == 0 {
+					c.Writer.WriteString("data: " + data + "\n\n")
+					c.Writer.Flush()
+					continue
+				}
+
+				choice, ok := choices[0].(map[string]interface{})
+				if !ok {
+					c.Writer.WriteString("data: " + data + "\n\n")
+					c.Writer.Flush()
+					continue
+				}
+
+				delta, ok := choice["delta"].(map[string]interface{})
+				if !ok {
+					c.Writer.WriteString("data: " + data + "\n\n")
+					c.Writer.Flush()
+					continue
+				}
+
+				reasoning, hasReasoning := delta["reasoning_content"].(string)
+				content, hasContent := delta["content"].(string)
+
+				var newContent string
+				// 只有当用户启用了深度思考时，才包装 <think> 标签
+				if req.Reasoning && hasReasoning && reasoning != "" {
+					if !inThink {
+						newContent += "<think>"
+						inThink = true
+					}
+					newContent += reasoning
+				}
+				// 重要：只有当 reasoning_content 已经完全停止时，才关闭 <think> 标签
+				// DeepSeek V4 Pro 可能在 thinking 途中就发非空 content，不能提前关闭
+				if hasContent && content != "" {
+					// reasoning_content 完全停止：要么 map 里没有这个 key，要么值为空字符串
+					reasoningStopped := !hasReasoning || reasoning == ""
+					if inThink && reasoningStopped {
+						newContent += "</think>"
+						inThink = false
+					}
+					newContent += content
+				}
+
+				if newContent != "" {
+					delta["content"] = newContent
+					delete(delta, "reasoning_content")
+					out, _ := json.Marshal(resp)
+					c.Writer.WriteString("data: " + string(out) + "\n\n")
+					c.Writer.Flush()
+					fullContent += newContent
+				} else {
+					// 尝试从普通 content 中提取
+					if contentVal, ok := delta["content"].(string); ok && contentVal != "" {
+						fullContent += contentVal
+					}
+					c.Writer.WriteString("data: " + data + "\n\n")
 					c.Writer.Flush()
 				}
-				c.Writer.WriteString("data: [DONE]\n\n")
-				c.Writer.Flush()
-				continue
-			}
-
-			var resp map[string]interface{}
-			if err := json.Unmarshal([]byte(data), &resp); err != nil {
-				c.Writer.WriteString("data: " + data + "\n\n")
-				c.Writer.Flush()
-				continue
-			}
-
-			choices, ok := resp["choices"].([]interface{})
-			if !ok || len(choices) == 0 {
-				c.Writer.WriteString("data: " + data + "\n\n")
-				c.Writer.Flush()
-				continue
-			}
-
-			choice, ok := choices[0].(map[string]interface{})
-			if !ok {
-				c.Writer.WriteString("data: " + data + "\n\n")
-				c.Writer.Flush()
-				continue
-			}
-
-			delta, ok := choice["delta"].(map[string]interface{})
-			if !ok {
-				c.Writer.WriteString("data: " + data + "\n\n")
-				c.Writer.Flush()
-				continue
-			}
-
-			reasoning, hasReasoning := delta["reasoning_content"].(string)
-			content, hasContent := delta["content"].(string)
-
-			var newContent string
-			// 只有当用户启用了深度思考时，才包装 <think> 标签
-			if req.Reasoning && hasReasoning && reasoning != "" {
-				if !inThink {
-					newContent += "<think>"
-					inThink = true
-				}
-				newContent += reasoning
-			}
-			// 重要：只有当 reasoning_content 已经完全停止时，才关闭 <think> 标签
-			// DeepSeek V4 Pro 可能在 thinking 途中就发非空 content，不能提前关闭
-			if hasContent && content != "" {
-				// reasoning_content 完全停止：要么 map 里没有这个 key，要么值为空字符串
-				reasoningStopped := !hasReasoning || reasoning == ""
-				if inThink && reasoningStopped {
-					newContent += "</think>"
-					inThink = false
-				}
-				newContent += content
-			}
-
-			if newContent != "" {
-				delta["content"] = newContent
-				delete(delta, "reasoning_content")
-				out, _ := json.Marshal(resp)
-				c.Writer.WriteString("data: " + string(out) + "\n\n")
-				c.Writer.Flush()
-				fullContent += newContent
-			} else {
-				// 尝试从普通 content 中提取
-				if contentVal, ok := delta["content"].(string); ok && contentVal != "" {
-					fullContent += contentVal
-				}
-				c.Writer.WriteString("data: " + data + "\n\n")
-				c.Writer.Flush()
 			}
 		}
-	}
 
 		// 保存 AI 响应
 		if req.ConversationID > 0 && fullContent != "" {
@@ -322,7 +439,6 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 }
 
 // ---- 辅助方法：非流式调用 AI 并返回完整内容 ----
-
 func (h *ChatHandler) callModel(ctx context.Context, modelID string, messages []services.Message, reasoning bool, reasoningEffort string, search bool) (string, error) {
 	body, err := h.aiService.ChatCompletion(ctx, modelID, messages, false, reasoning, reasoningEffort, search)
 	if err != nil {
@@ -420,7 +536,6 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 	}
 
 	userID := getUserID(c)
-
 	// 构建基础 messages
 	messages := []services.Message{
 		{Role: "user", Content: req.Query},
@@ -434,6 +549,84 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 			messages = append([]services.Message{systemMsg}, messages...)
 		}
 	}
+
+	// ========== 文件上下文注入（对比模式强制走关键词检索，确保所有模型使用相同上下文） ==========
+	var resolvedFileIDs []uint
+	var resolvedFileNames = make(map[uint]string)
+
+	if len(req.FileIDs) > 0 && h.fileService != nil {
+		userID := getUserID(c)
+
+		for _, publicID := range req.FileIDs {
+			file, err := h.fileService.ResolveFileByPublicID(publicID, userID)
+			if err != nil {
+				fmt.Printf("[Compare] 文件解析失败 public_id=%s: %v\n", publicID, err)
+				continue
+			}
+			resolvedFileIDs = append(resolvedFileIDs, file.ID)
+			resolvedFileNames[file.ID] = file.Filename
+		}
+
+		// 分离图片文件和普通文档
+		var imageFileIDs []uint
+		var docFileIDs []uint
+		for _, fileID := range resolvedFileIDs {
+			isImg, err := h.fileService.IsImageFile(fileID)
+			if err == nil && isImg {
+				imageFileIDs = append(imageFileIDs, fileID)
+			} else {
+				docFileIDs = append(docFileIDs, fileID)
+			}
+		}
+
+		// 处理图片
+		if len(imageFileIDs) > 0 {
+			var images []string
+			for _, fileID := range imageFileIDs {
+				dataURI, _, err := h.fileService.GetFileBase64DataURI(fileID)
+				if err == nil {
+					images = append(images, dataURI)
+				} else {
+					fmt.Printf("[Compare] 图片 base64 转换失败: %v\n", err)
+				}
+			}
+			for i := range messages {
+				if messages[i].Role == "user" {
+					messages[i].Images = images
+					break
+				}
+			}
+		}
+
+		// 处理普通文档：对比模式强制走关键词检索，确保各模型获得相同上下文
+		if len(docFileIDs) > 0 && h.retrievalSvc != nil {
+			results, err := h.retrievalSvc.Search(docFileIDs, req.Query, services.DynamicTopK("compare"), true)
+			if err == nil && len(results) > 0 {
+				fileContexts := services.ExtractFileContexts(results, resolvedFileNames)
+				fileContext := h.contextBuilder.Build(fileContexts, req.Query, 0)
+				if fileContext != "" {
+					fileMsg := services.Message{Role: "system", Content: fileContext}
+					messages = append([]services.Message{fileMsg}, messages...)
+				}
+			} else if err != nil {
+				fmt.Printf("[Compare] 文件检索失败: %v\n", err)
+			}
+		}
+
+		// 保存文件与对话的关联
+		if req.ConversationID > 0 {
+			for _, fileID := range resolvedFileIDs {
+				var existing models.ConversationFile
+				if err := h.db.Where("conversation_id = ? AND file_id = ?", req.ConversationID, fileID).First(&existing).Error; err != nil {
+					h.db.Create(&models.ConversationFile{
+						ConversationID: req.ConversationID,
+						FileID:         fileID,
+					})
+				}
+			}
+		}
+	}
+	// ========== 文件上下文注入结束 ==========
 
 	// 并行调用多个模型
 	type resultChan struct {
@@ -449,7 +642,6 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 			start := time.Now()
 			content, err := h.callModel(ctx, modelID, messages, req.Reasoning, req.ReasoningEffort, req.Search)
 			elapsed := time.Since(start).Milliseconds()
-
 			res := CompareResult{
 				ModelID:   modelID,
 				ModelName: findModelName(modelID),
@@ -485,70 +677,45 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 					ConversationID: conv.ID,
 					Role:           "user",
 					Content:        req.Query,
-					Model:          req.ModelIDs[0],
 					CreatedAt:      time.Now(),
-				})
-
-				// 保存每个模型的回答作为独立消息
-				now := time.Now()
-				for i, res := range ordered {
-					content := res.Content
-					if res.Error != "" {
-						content = "❌ " + res.Error
-					}
-					h.db.Create(&models.Message{
-						ConversationID: conv.ID,
-						Role:           "assistant",
-						Content:        content,
-						Model:          res.ModelID,
-						CreatedAt:      now.Add(time.Duration(i) * time.Millisecond),
-					})
-				}
-
-				// 更新对话时间和标题
-				h.db.Model(&conv).Updates(map[string]interface{}{
-					"updated_at": time.Now(),
 				})
 			}
 		} else {
-			// 新建对比对话
+			// 创建新的对比对话
+			title := req.Query
+			if len(title) > 20 {
+				title = title[:20] + "..."
+			}
 			conv := models.Conversation{
 				UserID:        userID,
-				Title:         req.Query,
+				Title:         title,
 				Model:         req.ModelIDs[0],
 				Compare:       true,
-				CompareModels: marshalJSON(req.ModelIDs),
-				CreatedAt:     time.Now(),
-				UpdatedAt:     time.Now(),
+				CompareModels: mustJSON(req.ModelIDs),
 			}
-			if err := h.db.Create(&conv).Error; err == nil {
-				conversationID = conv.ID
+			h.db.Create(&conv)
+			conversationID = conv.ID
 
-				// 保存用户消息
-				h.db.Create(&models.Message{
-					ConversationID: conv.ID,
-					Role:           "user",
-					Content:        req.Query,
-					Model:          req.ModelIDs[0],
-					CreatedAt:      time.Now(),
-				})
+			// 保存用户消息
+			h.db.Create(&models.Message{
+				ConversationID: conv.ID,
+				Role:           "user",
+				Content:        req.Query,
+				CreatedAt:      time.Now(),
+			})
+		}
+	}
 
-				// 保存每个模型的回答作为独立消息
-				now := time.Now()
-				for i, res := range ordered {
-					content := res.Content
-					if res.Error != "" {
-						content = "❌ " + res.Error
-					}
-					h.db.Create(&models.Message{
-						ConversationID: conv.ID,
-						Role:           "assistant",
-						Content:        content,
-						Model:          res.ModelID,
-						CreatedAt:      now.Add(time.Duration(i) * time.Millisecond),
-					})
-				}
-			}
+	// 保存对比记录
+	if conversationID > 0 {
+		for _, res := range ordered {
+			h.db.Create(&models.Message{
+				ConversationID: conversationID,
+				Role:           "assistant",
+				Content:        res.Content,
+				Model:          res.ModelID,
+				CreatedAt:      time.Now(),
+			})
 		}
 	}
 
@@ -558,7 +725,7 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 	})
 }
 
-func marshalJSON(v interface{}) string {
+func mustJSON(v interface{}) string {
 	b, _ := json.Marshal(v)
 	return string(b)
 }

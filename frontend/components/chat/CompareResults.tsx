@@ -6,6 +6,7 @@ import { Copy, Check, Clock, AlertCircle } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
+import { useTheme } from "@/components/theme/ThemeProvider";
 
 interface CompareResultsProps {
   results: CompareResult[];
@@ -47,6 +48,8 @@ export default function CompareResults({ results }: CompareResultsProps) {
 function ResultCard({ result }: { result: CompareResult }) {
   const [copied, setCopied] = useState(false);
   const color = findColor(result.model_id);
+  const themeCtx = useTheme();
+  const isDark = themeCtx?.theme === "dark";
 
   const handleCopy = () => {
     navigator.clipboard.writeText(result.content);
@@ -87,7 +90,7 @@ function ResultCard({ result }: { result: CompareResult }) {
             <p className="text-sm">{result.error}</p>
           </div>
         ) : (
-          <div className="prose prose-sm prose-invert max-w-none text-[14px] leading-relaxed text-text-primary">
+          <div className="prose prose-sm max-w-none text-[14px] leading-relaxed text-text-primary">
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               children={(() => {
@@ -107,11 +110,11 @@ function ResultCard({ result }: { result: CompareResult }) {
                 code({ inline, className, children, ...props }: any) {
                   const match = /language-(\w+)/.exec(className || "");
                   return !inline && match ? (
-                    <pre className="bg-[#0D0D0D] rounded-lg p-3 overflow-x-auto my-2">
+                    <pre className={cn("rounded-lg p-3 overflow-x-auto my-2", isDark ? "bg-[#0D0D0D]" : "bg-[#F6F8FA]")}>
                       <code className={className} {...props}>{children}</code>
                     </pre>
                   ) : (
-                    <code className="bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 px-1 py-0.5 rounded text-[13px] font-mono" {...props}>{children}</code>
+                    <code className={cn("px-1 py-0.5 rounded text-[13px] font-mono", isDark ? "bg-blue-900/20 text-blue-400" : "bg-blue-50 text-blue-600")} {...props}>{children}</code>
                   );
                 },
                 p({ children }) { return <p className="mb-3 last:mb-0">{children}</p>; },

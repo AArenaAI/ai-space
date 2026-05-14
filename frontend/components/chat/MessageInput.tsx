@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Send, Brain, ChevronDown, Square, Search, Columns2 } from "lucide-react";
+import { Send, Brain, ChevronDown, Square, Search, Columns2, Paperclip, X, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ChatModel } from "@/hooks/useChat";
 
@@ -18,7 +18,7 @@ export interface ReasoningConfig {
 }
 
 interface MessageInputProps {
-  onSend: (content: string, reasoning: ReasoningConfig, search: boolean) => void;
+  onSend: (content: string, reasoning: ReasoningConfig, search: boolean, attachments?: AttachedFile[], file_ids?: string[]) => void;
   onStop: () => void;
   isLoading: boolean;
   compareMode: boolean;
@@ -26,8 +26,18 @@ interface MessageInputProps {
   currentModel?: ChatModel;
 }
 
+export interface AttachedFile {
+  filename: string;
+  content: string;
+  type: string;
+  public_id?: string; // 后端返回的文件 PublicID
+  parse_status?: string; // pending | done | error
+}
+
 export default function MessageInput({ onSend, onStop, isLoading, compareMode, onToggleCompare, currentModel }: MessageInputProps) {
   const [content, setContent] = useState("");
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [uploading, setUploading] = useState(false);
   const [reasoning, setReasoning] = useState<ReasoningConfig>(() => {
     // 从 localStorage 读取用户上次保存的深度思考配置
     if (typeof window !== "undefined") {
@@ -48,6 +58,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
   });
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const prevModelRef = useRef<ChatModel | undefined>(currentModel);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -81,11 +92,58 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  // 轮询更新文件解析状态
+  useEffect(() => {
+    const pendingFiles = attachedFiles.filter((f) => f.parse_status === "pending" && f.public_id);
+    if (pendingFiles.length === 0) return;
+
+    const token = localStorage.getItem("token");
+    const interval = setInterval(async () => {
+      const updates = await Promise.all(
+        pendingFiles.map(async (f) => {
+          try {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ""}/api/files/${f.public_id}`, {
+              headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+            });
+            if (!res.ok) return null;
+            const data = await res.json();
+            return { 
+              public_id: f.public_id, 
+              parse_status: data.parse_status,
+              content: data.content ? data.content.slice(0, 8000) : undefined, // 取前8000字符避免过大
+            };
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      setAttachedFiles((prev) =>
+        prev.map((f) => {
+          const update = updates.find((u) => u && u.public_id === f.public_id);
+          if (!update) return f;
+          const next: AttachedFile = { ...f };
+          if (update.parse_status !== f.parse_status) {
+            next.parse_status = update.parse_status;
+          }
+          if (update.content && !f.content) {
+            next.content = update.content;
+          }
+          return next;
+        })
+      );
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [attachedFiles]);
+
   const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!content.trim() || isLoading) return;
-    onSend(content.trim(), reasoning, searchEnabled);
+    if ((!content.trim() && attachedFiles.length === 0) || isLoading) return;
+    const file_ids = attachedFiles.map((a) => a.public_id).filter((id): id is string => id !== undefined);
+    onSend(content.trim(), reasoning, searchEnabled, attachedFiles.length > 0 ? attachedFiles : undefined, file_ids.length > 0 ? file_ids : undefined);
     setContent("");
+    setAttachedFiles([]);
     setDropdownOpen(false);
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
@@ -123,6 +181,41 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
       localStorage.setItem("search-enabled", String(next));
       return next;
     });
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ""}/api/files/upload`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "上传失败");
+      }
+
+      const data = await res.json();
+      setAttachedFiles((prev) => [...prev, { filename: data.filename, content: data.content_preview || "", type: data.type, public_id: data.public_id, parse_status: data.parse_status || "pending" }]);
+    } catch (err: any) {
+      alert(`文件上传失败: ${err.message}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const removeAttachedFile = (index: number) => {
+    setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
   const setEffort = (effort: ReasoningEffort) => {
@@ -179,6 +272,42 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
               : "border-surface-border focus-within:border-brand/50 focus-within:shadow-[0_0_0_1px_rgba(59,130,246,0.1)]"
           )}
         >
+          {/* 文件附件标签 */}
+          {attachedFiles.length > 0 && (
+            <div className="flex flex-wrap gap-2 px-4 pt-2">
+              {attachedFiles.map((file, idx) => {
+                const status = file.parse_status || "pending";
+                const statusConfig: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
+                  pending: { color: "text-amber-400 border-amber-500/30 bg-amber-500/5", icon: <div className="w-3 h-3 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />, label: "解析中" },
+                  done: { color: "text-emerald-400 border-emerald-500/30 bg-emerald-500/5", icon: <FileText className="w-3.5 h-3.5" />, label: "已完成" },
+                  error: { color: "text-red-400 border-red-500/30 bg-red-500/5", icon: <div className="w-3 h-3 rounded-full bg-red-400" />, label: "失败" },
+                };
+                const cfg = statusConfig[status] || statusConfig.pending;
+                return (
+                  <div
+                    key={idx}
+                    className={cn(
+                      "flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 text-[12px] rounded-lg border transition-all",
+                      cfg.color
+                    )}
+                    title={cfg.label}
+                  >
+                    {cfg.icon}
+                    <span className="max-w-[120px] truncate">{file.filename}</span>
+                    <span className="text-[10px] opacity-60 ml-0.5">{cfg.label}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachedFile(idx)}
+                      className="flex items-center justify-center w-4 h-4 rounded hover:bg-black/10 transition-colors ml-0.5"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           <textarea
             ref={textareaRef}
             value={content}
@@ -190,8 +319,29 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
           />
 
           <div className="flex items-center justify-between px-3 pb-3">
-            {/* 左侧：联网搜索 + 深度思考 */}
+            {/* 左侧：文件上传 + 联网搜索 + 深度思考 */}
             <div className="flex items-center gap-2">
+              {/* 文件上传按钮 */}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading || isLoading}
+                className={cn(
+                  "flex items-center gap-1.5 pl-3 pr-3 py-1.5 text-[13px] font-medium rounded-full border transition-all duration-200",
+                  attachedFiles.length > 0
+                    ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-400"
+                    : "bg-transparent border-surface-border text-text-tertiary hover:text-text-secondary hover:border-text-tertiary/50",
+                  (uploading || isLoading) && "opacity-50 cursor-not-allowed"
+                )}
+              >
+                {uploading ? (
+                  <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Paperclip className="w-3.5 h-3.5" />
+                )}
+                <span>{uploading ? "解析中" : attachedFiles.length > 0 ? `文件(${attachedFiles.length})` : "上传文件"}</span>
+              </button>
+
               {/* 联网搜索按钮 */}
               <button
                 type="button"
@@ -429,6 +579,13 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
         <p className={cn("text-center text-[11px] mt-2 transition-all duration-300", compareMode ? "text-amber-500/50" : "text-text-tertiary/60")}>
           AI 可能会出现错误，请勿分享敏感信息
         </p>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".txt,.md,.json,.csv,.js,.ts,.go,.py,.java,.cpp,.c,.h,.hpp,.rs,.html,.css,.xml,.yaml,.yml,.log,.sql,.sh,.bash,.tsx,.jsx,.vue,.php,.rb,.swift,.kt,.scala,.r,.tex,.jpg,.jpeg,.png,.gif,.webp,.bmp,.pdf"
+          onChange={handleFileSelect}
+          className="hidden"
+        />
       </form>
     </div>
   );

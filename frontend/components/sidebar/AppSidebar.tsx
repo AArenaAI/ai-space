@@ -8,12 +8,17 @@ import {
   MessageSquare, Palette, Presentation, LogIn, LogOut,
   PanelLeftClose, MessageSquarePlus, Search, ChevronRight,
   User, Trash2, MoreHorizontal, Pencil, Pin, PinOff, Link2, Check,
-  FileText, LayoutGrid, X, Clock,
+  FileText, LayoutGrid, X, Clock, Sparkles,
+  Briefcase, FileCode, PenTool, BarChart3, Mail, ClipboardList, Terminal, GraduationCap, Languages,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import InputDialog from "@/components/ui/InputDialog";
 import { useTemplates } from "@/hooks/useTemplates";
+import SidebarUserPanel from "./SidebarUserPanel";
+
+// 模块级缓存：避免组件重新挂载时历史记录反复闪烁
+let cachedConversations: Conversation[] | null = null;
 
 interface Conversation {
   id: number;
@@ -22,6 +27,7 @@ interface Conversation {
   pinned: boolean;
   created_at: string;
   updated_at: string;
+  skill_key?: string;
 }
 
 /* ───── 辅助函数 ───── */
@@ -63,6 +69,20 @@ function sortGroupLabels(labels: string[]): string[] {
     });
   return [...fixed, ...months];
 }
+
+/* ───── 技能图标映射 ───── */
+
+const SKILL_ICON_MAP: Record<string, { icon: React.ElementType; color: string }> = {
+  "ceo-strategist":   { icon: Briefcase,       color: "text-amber-400" },
+  "code-reviewer":    { icon: FileCode,        color: "text-emerald-400" },
+  "creative-writer":  { icon: PenTool,         color: "text-pink-400" },
+  "data-analyst":     { icon: BarChart3,       color: "text-violet-400" },
+  "email-drafter":    { icon: Mail,            color: "text-teal-400" },
+  "meeting-minutes":  { icon: ClipboardList,   color: "text-teal-400" },
+  "prompt-engineer":  { icon: Terminal,        color: "text-orange-400" },
+  "thesis-assistant": { icon: GraduationCap,   color: "text-blue-400" },
+  "translator":       { icon: Languages,       color: "text-indigo-400" },
+};
 
 async function fetchConversations(): Promise<Conversation[]> {
   const token = localStorage.getItem("token");
@@ -134,9 +154,9 @@ function ConvMenu({
 /* ───── "更多" hover 展开面板 ───── */
 
 function MoreHoverPanel({
-  open, anchorEl, onClose,
+  open, anchorEl, onClose, onMouseEnter, onMouseLeave,
 }: {
-  open: boolean; anchorEl: HTMLElement | null; onClose: () => void;
+  open: boolean; anchorEl: HTMLElement | null; onClose: () => void; onMouseEnter?: () => void; onMouseLeave?: () => void;
 }) {
   const router = useRouter();
   const [pos, setPos] = useState({ top: 0, left: 0 });
@@ -179,6 +199,8 @@ function MoreHoverPanel({
         left: pos.left,
         animation: "slide-in-right 180ms ease-out",
       }}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
     >
       {groups.map((group) => (
         <div key={group.title} className="mb-4 last:mb-0">
@@ -222,11 +244,11 @@ function ConversationSkeleton() {
 
 /* ───── 主组件 ───── */
 
-export default function AppSidebar() {
+export default function AppSidebar({ skillKey }: { skillKey?: string }) {
   const [collapsed, setCollapsed] = useState(false);
   const [user, setUser] = useState<any>(null);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [conversations, setConversations] = useState<Conversation[]>(cachedConversations || []);
+  const [loading, setLoading] = useState(cachedConversations === null);
   const [currentConvId, setCurrentConvId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
@@ -252,7 +274,7 @@ export default function AppSidebar() {
     setMoreOpen(true);
   };
   const handleMoreLeave = () => {
-    moreTimerRef.current = setTimeout(() => setMoreOpen(false), 200);
+    moreTimerRef.current = setTimeout(() => setMoreOpen(false), 400);
   };
 
   /* 模板 */
@@ -288,43 +310,64 @@ export default function AppSidebar() {
   /* 加载对话 */
   const loadConversations = useCallback(async () => {
     if (!user) { setConversations([]); setLoading(false); return; }
-    setLoading(true);
+    const isFirstLoad = cachedConversations === null;
+    if (isFirstLoad) setLoading(true);
     const startTime = Date.now();
     const data = await fetchConversations();
-    const elapsed = Date.now() - startTime;
-    if (elapsed < 600) await new Promise((r) => setTimeout(r, 600 - elapsed));
+    if (isFirstLoad) {
+      const elapsed = Date.now() - startTime;
+      if (elapsed < 600) await new Promise((r) => setTimeout(r, 600 - elapsed));
+      setLoading(false);
+    }
     setConversations(data);
-    setLoading(false);
+    cachedConversations = data;
   }, [user]);
 
-  useEffect(() => { loadConversations(); }, [loadConversations, pathname]);
+  useEffect(() => { loadConversations(); }, [loadConversations]);
   useEffect(() => { const h = () => loadConversations(); window.addEventListener("conversation-created", h); return () => window.removeEventListener("conversation-created", h); }, [loadConversations]);
 
   /* 操作 */
-  const handleLogout = () => { localStorage.removeItem("token"); localStorage.removeItem("user"); setUser(null); setConversations([]); window.location.href = "/"; };
-  const handleNewChat = () => { router.push("/?t=" + Date.now()); };
+  const handleLogout = () => { localStorage.removeItem("token"); localStorage.removeItem("user"); setUser(null); setConversations([]); cachedConversations = null; window.location.href = "/"; };
+  const handleNewChat = () => {
+    if (skillKey) {
+      router.push(`/skills/chat?key=${skillKey}&t=` + Date.now());
+    } else {
+      router.push("/chat?t=" + Date.now());
+    }
+  };
   const handleDelete = (id: number) => { setDeleteTarget(id); };
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     const token = localStorage.getItem("token"); if (!token) return;
-    try { const r = await fetch(`/api/conversations/${deleteTarget}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }); if (r.ok) { setConversations(p => p.filter(c => c.id !== deleteTarget)); if (String(deleteTarget) === currentConvId) router.push("/"); } } catch {}
+    try { const r = await fetch(`/api/conversations/${deleteTarget}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }); if (r.ok) { const next = conversations.filter(c => c.id !== deleteTarget); setConversations(next); cachedConversations = next; if (String(deleteTarget) === currentConvId) {
+      if (skillKey) {
+        router.push(`/skills/chat?key=${skillKey}`);
+      } else {
+        router.push("/chat");
+      }
+    } } } catch {}
     setDeleteTarget(null);
   };
 
   const handleRename = async (newTitle: string) => {
     if (!renameTarget) return;
     const token = localStorage.getItem("token"); if (!token) return;
-    try { const r = await fetch(`/api/conversations/${renameTarget.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ title: newTitle }) }); if (r.ok) { const u = await r.json(); setConversations(p => p.map(c => c.id === u.id ? { ...c, title: u.title } : c)); } } catch {}
+    try { const r = await fetch(`/api/conversations/${renameTarget.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ title: newTitle }) }); if (r.ok) { const u = await r.json(); const next = conversations.map(c => c.id === u.id ? { ...c, title: u.title } : c); setConversations(next); cachedConversations = next; } } catch {}
     setRenameTarget(null);
   };
 
   const handleTogglePin = async (conv: Conversation) => {
     const token = localStorage.getItem("token"); if (!token) return;
-    try { const r = await fetch(`/api/conversations/${conv.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ pinned: !conv.pinned }) }); if (r.ok) { const u = await r.json(); setConversations(p => { const n = p.map(c => c.id === u.id ? { ...c, pinned: u.pinned } : c); return n.sort((a, b) => { if (a.pinned !== b.pinned) return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0); return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(); }); }); } } catch {}
+    try { const r = await fetch(`/api/conversations/${conv.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ pinned: !conv.pinned }) }); if (r.ok) { const u = await r.json(); const next = conversations.map(c => c.id === u.id ? { ...c, pinned: u.pinned } : c).sort((a, b) => { if (a.pinned !== b.pinned) return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0); return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(); }); setConversations(next); cachedConversations = next; } } catch {}
   };
 
-  const handleShare = (conv: Conversation) => { const url = `${window.location.origin}/?id=${conv.id}`; navigator.clipboard.writeText(url); };
+  const handleShare = (conv: Conversation) => {
+    const url = skillKey
+      ? `${window.location.origin}/skills/chat?key=${skillKey}&id=${conv.id}`
+      : `${window.location.origin}/chat?id=${conv.id}`;
+    navigator.clipboard.writeText(url);
+  };
 
   /* ── 渲染对话列表 ── */
   const renderConversationList = () => {
@@ -351,9 +394,17 @@ export default function AppSidebar() {
             <div className="space-y-0.5">
               {pinned.map(conv => {
                 const isActive = String(conv.id) === currentConvId;
+                const convHref = conv.skill_key
+                  ? `/skills/chat?key=${conv.skill_key}&id=${conv.id}`
+                  : `/chat?id=${conv.id}`;
+                const skillMeta = conv.skill_key ? SKILL_ICON_MAP[conv.skill_key] : null;
+                const IconComp = skillMeta ? skillMeta.icon : MessageSquare;
+                const iconColor = isActive
+                  ? (skillMeta ? skillMeta.color : "text-brand")
+                  : "text-text-tertiary group-hover:text-text-secondary";
                 return (
-                  <Link key={conv.id} href={`/?id=${conv.id}`} className={cn("group flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-brand/15 text-text-primary shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),inset_2px_0_0_0_var(--brand)]" : "text-text-secondary hover:bg-surface-card/70 hover:text-text-primary")}>
-                    <MessageSquare className={cn("w-3.5 h-3.5 shrink-0 transition-all duration-200", isActive ? "text-brand" : "text-text-tertiary group-hover:text-text-secondary")} />
+                  <Link key={conv.id} href={convHref} className={cn("group flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-brand/15 text-text-primary shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),inset_2px_0_0_0_var(--brand)]" : "text-text-secondary hover:bg-surface-card/70 hover:text-text-primary")}>
+                    <IconComp className={cn("w-3.5 h-3.5 shrink-0 transition-all duration-200", iconColor)} />
                     <Pin className="w-3 h-3 shrink-0 text-brand" />
                     <span className={cn("flex-1 truncate text-left", isActive && "font-medium")}>{conv.title || "新对话"}</span>
                     <div className="opacity-0 group-hover:opacity-100 transition-opacity"><ConvMenu onRename={() => setRenameTarget(conv)} onTogglePin={() => handleTogglePin(conv)} pinned={conv.pinned} onShare={() => handleShare(conv)} onDelete={() => handleDelete(conv.id)} /></div>
@@ -369,9 +420,17 @@ export default function AppSidebar() {
             <div className="space-y-0.5">
               {groups[label].map(conv => {
                 const isActive = String(conv.id) === currentConvId;
+                const convHref = conv.skill_key
+                  ? `/skills/chat?key=${conv.skill_key}&id=${conv.id}`
+                  : `/chat?id=${conv.id}`;
+                const skillMeta = conv.skill_key ? SKILL_ICON_MAP[conv.skill_key] : null;
+                const IconComp = skillMeta ? skillMeta.icon : MessageSquare;
+                const iconColor = isActive
+                  ? (skillMeta ? skillMeta.color : "text-brand")
+                  : "text-text-tertiary group-hover:text-text-secondary";
                 return (
-                  <Link key={conv.id} href={`/?id=${conv.id}`} className={cn("group flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-brand/15 text-text-primary shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),inset_2px_0_0_0_var(--brand)]" : "text-text-secondary hover:bg-surface-card/70 hover:text-text-primary")}>
-                    <MessageSquare className={cn("w-3.5 h-3.5 shrink-0 transition-all duration-200", isActive ? "text-brand" : "text-text-tertiary group-hover:text-text-secondary")} />
+                  <Link key={conv.id} href={convHref} className={cn("group flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-brand/15 text-text-primary shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),inset_2px_0_0_0_var(--brand)]" : "text-text-secondary hover:bg-surface-card/70 hover:text-text-primary")}>
+                    <IconComp className={cn("w-3.5 h-3.5 shrink-0 transition-all duration-200", iconColor)} />
                     <span className={cn("flex-1 truncate text-left", isActive && "font-medium")}>{conv.title || "新对话"}</span>
                     <div className="opacity-0 group-hover:opacity-100 transition-opacity"><ConvMenu onRename={() => setRenameTarget(conv)} onTogglePin={() => handleTogglePin(conv)} pinned={conv.pinned} onShare={() => handleShare(conv)} onDelete={() => handleDelete(conv.id)} /></div>
                   </Link>
@@ -393,7 +452,7 @@ export default function AppSidebar() {
 
         {/* ── Logo + 折叠 ── */}
         <div className="flex items-center h-12 px-3 border-b border-surface-border shrink-0">
-          {!collapsed && <Link href="/" className="flex-1"><span className="text-sm font-semibold text-text-primary tracking-tight">AI Space</span></Link>}
+          {!collapsed && <Link href="/chat" className="flex-1"><span className="text-sm font-semibold text-text-primary tracking-tight">AI Space</span></Link>}
           <button onClick={() => setCollapsed(!collapsed)} className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors">
             {collapsed ? <ChevronRight className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
           </button>
@@ -418,15 +477,15 @@ export default function AppSidebar() {
             <div className="py-2 flex flex-col items-center space-y-0.5">
               {/* 聊天 */}
               <Link
-                href="/"
+                href="/chat"
                 onMouseEnter={showSidebarTooltip("聊天")}
                 onMouseLeave={hideSidebarTooltip}
                 className={cn(
                   "p-2.5 rounded-xl transition-colors",
-                  pathname === "/" ? "bg-surface-card" : "hover:bg-surface-card"
+                  pathname === "/chat" ? "bg-surface-card" : "hover:bg-surface-card"
                 )}
               >
-                <MessageSquare className={cn("w-5 h-5", pathname === "/" ? "text-brand" : "text-text-tertiary")} />
+                <MessageSquare className={cn("w-5 h-5", pathname === "/chat" ? "text-brand" : "text-text-tertiary")} />
               </Link>
 
               {/* AI 画图 */}
@@ -453,6 +512,19 @@ export default function AppSidebar() {
                 )}
               >
                 <Presentation className={cn("w-5 h-5", pathname === "/ppt" || pathname?.startsWith("/ppt/") ? "text-orange-500" : "text-text-tertiary")} />
+              </Link>
+
+              {/* AI技能中心 */}
+              <Link
+                href="/skills"
+                onMouseEnter={showSidebarTooltip("AI技能中心")}
+                onMouseLeave={hideSidebarTooltip}
+                className={cn(
+                  "p-2.5 rounded-xl transition-colors",
+                  pathname === "/skills" || pathname?.startsWith("/skills/") ? "bg-surface-card" : "hover:bg-surface-card"
+                )}
+              >
+                <Sparkles className={cn("w-5 h-5", pathname === "/skills" || pathname?.startsWith("/skills/") ? "text-cyan-500" : "text-text-tertiary")} />
               </Link>
 
               {/* 更多 - hover 展开面板，不需要 tooltip */}
@@ -507,15 +579,15 @@ export default function AppSidebar() {
               <div className="space-y-0.5">
                 {/* 聊天 */}
                 <Link
-                  href="/"
+                  href="/chat"
                   className={cn(
                     "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150",
-                    pathname === "/"
+                    pathname === "/chat"
                       ? "bg-surface-card text-text-primary font-medium shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
                       : "text-text-secondary hover:bg-surface-card/60 hover:text-text-primary"
                   )}
                 >
-                  <MessageSquare className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/" ? "text-brand" : "text-text-tertiary")} />
+                  <MessageSquare className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/chat" ? "text-brand" : "text-text-tertiary")} />
                   <span>聊天</span>
                 </Link>
 
@@ -545,6 +617,20 @@ export default function AppSidebar() {
                 >
                   <Presentation className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/ppt" || pathname?.startsWith("/ppt/") ? "text-orange-500" : "text-text-tertiary")} />
                   <span>AI PPT</span>
+                </Link>
+
+                {/* AI技能中心 */}
+                <Link
+                  href="/skills"
+                  className={cn(
+                    "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150",
+                    pathname === "/skills" || pathname?.startsWith("/skills/")
+                      ? "bg-surface-card text-text-primary font-medium shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
+                      : "text-text-secondary hover:bg-surface-card/60 hover:text-text-primary"
+                  )}
+                >
+                  <Sparkles className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/skills" || pathname?.startsWith("/skills/") ? "text-cyan-500" : "text-text-tertiary")} />
+                  <span>AI技能中心</span>
                 </Link>
 
                 {/* 更多 - hover 展开 */}
@@ -580,56 +666,19 @@ export default function AppSidebar() {
         )}
 
         {/* ── 底部用户 ── */}
-        <div className="p-2 border-t border-surface-border shrink-0">
-          {collapsed ? (
-            <div className="flex flex-col items-center gap-1">
-              {user ? (
-                <button
-                  onClick={handleLogout}
-                  onMouseEnter={showSidebarTooltip("退出登录")}
-                  onMouseLeave={hideSidebarTooltip}
-                  className="p-2.5 rounded-xl hover:bg-surface-card transition-colors"
-                >
-                  <LogOut className="w-5 h-5 text-text-tertiary" />
-                </button>
-              ) : (
-                <Link
-                  href="/login"
-                  onMouseEnter={showSidebarTooltip("登录")}
-                  onMouseLeave={hideSidebarTooltip}
-                  className="p-2.5 rounded-xl hover:bg-surface-card transition-colors"
-                >
-                  <LogIn className="w-5 h-5 text-text-tertiary" />
-                </Link>
-              )}
-            </div>
-          ) : (
-            <>
-              {user ? (
-                <div className="flex items-center gap-2 px-3 py-2 rounded-lg">
-                  <div className="w-7 h-7 rounded-full bg-brand/10 flex items-center justify-center shrink-0">
-                    <User className="w-3.5 h-3.5 text-brand" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-text-primary truncate">{user.name || user.email}</p>
-                  </div>
-                  <button onClick={handleLogout} className="p-1 rounded text-text-tertiary hover:text-red-400 hover:bg-surface-card transition-colors" title="退出">
-                    <LogOut className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ) : (
-                <Link href="/login" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors">
-                  <LogIn className="w-4 h-4" />
-                  <span>登录</span>
-                </Link>
-              )}
-            </>
-          )}
+        <div className="border-t border-surface-border shrink-0">
+          <SidebarUserPanel
+            user={user}
+            collapsed={collapsed}
+            onLogout={handleLogout}
+            onShowTooltip={showSidebarTooltip}
+            onHideTooltip={hideSidebarTooltip}
+          />
         </div>
       </div>
 
       {/* 更多 hover 面板 */}
-      <MoreHoverPanel open={moreOpen} anchorEl={moreBtnRef.current} onClose={() => setMoreOpen(false)} />
+      <MoreHoverPanel open={moreOpen} anchorEl={moreBtnRef.current} onClose={() => setMoreOpen(false)} onMouseEnter={handleMoreEnter} onMouseLeave={handleMoreLeave} />
 
       {/* 收缩状态 tooltip */}
       {sidebarTooltip && typeof document !== "undefined" && createPortal(

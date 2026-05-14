@@ -34,9 +34,9 @@ BACKEND_PORT="${ARGS[1]:-9091}"
 
 # 项目路径
 PROJECT_DIR="/workspace/aipool"
-FRONTEND_DIR="$PROJECT_DIR/frontend/dist"
+FRONTEND_DIR="$PROJECT_DIR/frontend"
 BACKEND_DIR="$PROJECT_DIR/backend-go"
-BACKEND_BIN="$BACKEND_DIR/aipool-backend"
+BACKEND_BIN="$BACKEND_DIR/aipool"
 CF_BIN="/tmp/cloudflared"
 
 # 日志目录
@@ -60,10 +60,10 @@ if [ "$NO_CF" = true ]; then
 fi
 echo ""
 
-# 1. 检查前端构建文件
-if [ ! -d "$FRONTEND_DIR" ]; then
-    echo -e "${RED}[错误] 前端构建文件不存在: $FRONTEND_DIR${NC}"
-    echo "请先运行: cd /workspace/aipool/frontend && npm run build"
+# 1. 检查前端项目
+if [ ! -f "$FRONTEND_DIR/package.json" ]; then
+    echo -e "${RED}[错误] 前端项目不存在: $FRONTEND_DIR/package.json${NC}"
+    echo "请先运行: cd /workspace/aipool/frontend && npm install"
     exit 1
 fi
 
@@ -138,14 +138,8 @@ if [ "$NO_CF" = false ] && [ -n "$CF_BIN" ] && [ -f "$CF_BIN" ]; then
         sleep 1
     done
     
-    # 自动替换前端API地址
-    if [ -n "$BACKEND_URL" ]; then
-        echo -e "${GREEN}[3/4] 自动更新前端API地址...${NC}"
-        find "$FRONTEND_DIR" -type f \( -name "*.js" -o -name "*.html" \) -exec sed -i "s|http://localhost:$BACKEND_PORT|$BACKEND_URL|g" {} +
-        echo -e "${GREEN}✅ 前端API地址已更新${NC}"
-    else
-        echo -e "${YELLOW}⚠️ 未能获取后端域名，前端将使用 localhost 访问${NC}"
-    fi
+    # 开发模式下不需要替换前端API地址，前端通过 next.config.js proxy 或直连后端
+    echo -e "${YELLOW}[提示] 开发模式下前端请求 /api 将由 nginx 或 next dev proxy 处理${NC}"
     
     # 启动前端隧道
     echo -e "${GREEN}[4/4] 启动 Cloudflare 前端隧道...${NC}"
@@ -165,24 +159,12 @@ else
     echo -e "${YELLOW}[2/4] 跳过 Cloudflare 隧道 (使用固定域名)${NC}"
 fi
 
-# 7. 启动前端（在隧道和替换完成后启动，确保用户拿到最新的文件）
-# 修复：静态导出不支持 /share?slug=xxx 动态路由，需要 share/index.html
-if [ ! -d "$FRONTEND_DIR/share" ]; then
-    mkdir -p "$FRONTEND_DIR/share"
-fi
-if [ -f "$FRONTEND_DIR/share.html" ] && [ ! -f "$FRONTEND_DIR/share/index.html" ]; then
-    cp "$FRONTEND_DIR/share.html" "$FRONTEND_DIR/share/index.html"
-fi
-# 如果 share/index.html 比 share.html 旧，也更新
-if [ -f "$FRONTEND_DIR/share.html" ] && [ -f "$FRONTEND_DIR/share/index.html" ]; then
-    if [ "$FRONTEND_DIR/share.html" -nt "$FRONTEND_DIR/share/index.html" ]; then
-        cp "$FRONTEND_DIR/share.html" "$FRONTEND_DIR/share/index.html"
-    fi
-fi
+# 7. 启动前端开发服务器
+# 开发模式下使用 Next.js dev server，不需要静态文件修复
 
-echo -e "${GREEN}🚀 启动前端服务 (Python http.server) 端口: $FRONTEND_PORT...${NC}"
+echo -e "${GREEN}🚀 启动前端开发服务器 (Next.js dev) 端口: $FRONTEND_PORT...${NC}"
 cd "$FRONTEND_DIR"
-python3 -m http.server "$FRONTEND_PORT" --bind 0.0.0.0 > "$LOG_DIR/frontend.log" 2>&1 &
+npm run dev -- -p "$FRONTEND_PORT" > "$LOG_DIR/frontend.log" 2>&1 &
 FRONTEND_PID=$!
 echo "$FRONTEND_PID" >> "$PID_FILE"
 echo -e "${GREEN}✅ 前端启动成功 (PID: $FRONTEND_PID)${NC}"

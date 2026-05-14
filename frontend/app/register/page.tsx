@@ -42,7 +42,7 @@ export default function RegisterPage() {
 
       localStorage.setItem("token", data.token);
       localStorage.setItem("user", JSON.stringify(data.user));
-      router.push("/");
+      router.push("/chat");
     } catch (err: any) {
       setError(err.message);
     } finally {

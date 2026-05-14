@@ -7,7 +7,9 @@ import MessageList from "./MessageList";
 import MessageInput from "./MessageInput";
 import ModelSelector from "./ModelSelector";
 import ThemeToggle from "@/components/theme/ThemeToggle";
-import { Columns2, ChevronDown } from "lucide-react";
+import CreditBar from "@/components/credits/CreditBar";
+import { useCredits, getModelTier } from "@/hooks/useCredits";
+import { Columns2, ChevronDown, Zap, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -18,13 +20,19 @@ const COMPARE_MODELS_KEY = "compare-models";
 interface ChatInterfaceProps {
   conversationId?: number;
   models: ChatModel[];
+  skillKey?: string;
+  recommendedModel?: ChatModel;
+  welcomeTitle?: string;
+  welcomeSubtitle?: string;
+  welcomeExamples?: { title: string; desc: string; prompt: string }[];
 }
 
-export default function ChatInterface({ conversationId, models }: ChatInterfaceProps) {
+export default function ChatInterface({ conversationId, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples }: ChatInterfaceProps) {
   const [compareMode, setCompareMode] = useState(false);
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<number>(0);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [autoModelNotice, setAutoModelNotice] = useState(false);
   const router = useRouter();
 
   const {
@@ -36,12 +44,60 @@ export default function ChatInterface({ conversationId, models }: ChatInterfaceP
     stopGeneration,
     deleteMessage,
     regenerateMessage,
+    currentConversation,
+    effectiveSkillKey,
     isCompare,
     compareModels,
     sendCompareMessages,
-  } = useChat(conversationId, models);
+  } = useChat(conversationId, models, skillKey);
 
   const { templates } = useTemplates();
+  const { hasEnoughCredits, deductCredits } = useCredits();
+
+  const handleModelSelect = useCallback((model: ChatModel) => {
+    // 如果当前是 Skill 技能对话且有推荐模型，保存用户覆盖标记
+    if (effectiveSkillKey && recommendedModel) {
+      localStorage.setItem(`skill-model-override:${effectiveSkillKey}`, model.id);
+      setAutoModelNotice(false);
+    }
+    setSelectedModel(model);
+  }, [effectiveSkillKey, recommendedModel, setSelectedModel]);
+
+  // Skill 自动选择推荐模型（允许用户覆盖）
+  useEffect(() => {
+    if (!effectiveSkillKey || !recommendedModel || models.length === 0) {
+      setAutoModelNotice(false);
+      return;
+    }
+    const overrideKey = `skill-model-override:${effectiveSkillKey}`;
+    const overrideId = localStorage.getItem(overrideKey);
+    if (overrideId) {
+      // 用户之前覆盖过，使用其选择
+      const model = models.find((m) => m.id === overrideId);
+      if (model && model.id !== selectedModel.id) {
+        setSelectedModel(model);
+      }
+      setAutoModelNotice(false);
+    } else {
+      // 自动应用推荐模型
+      if (recommendedModel.id !== selectedModel.id) {
+        setSelectedModel(recommendedModel);
+      }
+      setAutoModelNotice(true);
+    }
+  }, [effectiveSkillKey, recommendedModel, models, selectedModel.id, setSelectedModel]);
+
+  // 创建对话后更新 URL（保留 skillKey 参数）
+  useEffect(() => {
+    if (currentConversation && !conversationId && effectiveSkillKey) {
+      const url = new URL(window.location.href);
+      url.searchParams.set("id", String(currentConversation));
+      if (!url.searchParams.get("key") && effectiveSkillKey) {
+        url.searchParams.set("key", effectiveSkillKey);
+      }
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, [currentConversation, conversationId, effectiveSkillKey]);
 
   // 初始化时从 localStorage 恢复对比模式状态
   useEffect(() => {
@@ -130,20 +186,46 @@ export default function ChatInterface({ conversationId, models }: ChatInterfaceP
     });
   };
 
-  const handleSend = async (content: string, reasoning: any, search: boolean) => {
+  const handleSend = async (content: string, reasoning: any, search: boolean, attachments?: { filename: string; content: string }[], file_ids?: string[]) => {
+    // 【积分限制已临时取消】保畔代码但不执行
+    /* 积分检查已注释
+    if (compareMode) {
+      // 对比模式：检查所有选中模型的积分
+      for (const modelId of selectedModels) {
+        if (!hasEnoughCredits(modelId)) {
+          const tier = getModelTier(modelId);
+          toast.error(`模型 ${models.find(m => m.id === modelId)?.name || modelId} 的${tier === "basic" ? "基础" : tier === "advanced" ? "高级" : "精英"}积分不足，请升级套餐`);
+          return;
+        }
+      }
+      // 扣减积分
+      for (const modelId of selectedModels) {
+        await deductCredits(modelId, 1);
+      }
+    } else {
+      // 单模型模式
+      if (!hasEnoughCredits(selectedModel.id)) {
+        const tier = getModelTier(selectedModel.id);
+        toast.error(`${tier === "basic" ? "基础" : tier === "advanced" ? "高级" : "精英"}积分不足，请升级套餐`);
+        return;
+      }
+      await deductCredits(selectedModel.id, 1);
+    }
+    */
+
     if (compareMode) {
       // 对比模式 - 依次流式发送给多个模型
       if (selectedModels.length < 2) {
-        toast.error("请至少选择 2 个模型");
+        toast.error("请至少选择两个模型进行对比");
         return;
       }
-      if (selectedTemplateId === 0) {
+      if (!selectedTemplateId) {
         toast.error("对比模式必须选择一个回答模板");
         return;
       }
-      await sendCompareMessages(content, selectedModels, reasoning, search, selectedTemplateId);
+      await sendCompareMessages(content, selectedModels, reasoning, search, selectedTemplateId, attachments, file_ids);
     } else {
-      sendMessage(content, reasoning, false, search, selectedTemplateId);
+      sendMessage(content, reasoning, false, search, selectedTemplateId, false, attachments, file_ids);
     }
   };
 
@@ -290,7 +372,7 @@ export default function ChatInterface({ conversationId, models }: ChatInterfaceP
           <ModelSelector
             models={models}
             selected={selectedModel}
-            onSelect={setSelectedModel}
+            onSelect={handleModelSelect}
           />
         )}
 
@@ -302,6 +384,25 @@ export default function ChatInterface({ conversationId, models }: ChatInterfaceP
           </div>
         </div>
       </header>
+
+      {/* 自动选择模型提示条 */}
+      {autoModelNotice && recommendedModel && (
+        <div className="shrink-0 px-4 py-2 bg-amber-500/5 border-b border-amber-500/10 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <Zap className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+            <span className="text-[13px] text-amber-600 dark:text-amber-400 truncate">
+              已自动启用 <span className="font-semibold">{recommendedModel.name}</span> （推荐模型）
+            </span>
+          </div>
+          <button
+            onClick={() => setAutoModelNotice(false)}
+            className="p-1 rounded-md text-amber-500/60 hover:text-amber-500 hover:bg-amber-500/10 transition-colors shrink-0"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* 消息列表 */}
       <div className="flex-1 overflow-y-auto">
         <MessageList
@@ -314,6 +415,10 @@ export default function ChatInterface({ conversationId, models }: ChatInterfaceP
           onContinueGenerate={regenerateMessage}
           isCompare={isCompare}
           compareModels={compareModels}
+          welcomeTitle={welcomeTitle}
+          welcomeSubtitle={welcomeSubtitle}
+          welcomeExamples={welcomeExamples}
+          onExampleClick={(prompt) => sendMessage(prompt, undefined, false, false, selectedTemplateId)}
         />
       </div>
 
@@ -328,6 +433,9 @@ export default function ChatInterface({ conversationId, models }: ChatInterfaceP
           currentModel={selectedModel}
         />
       </div>
+
+      {/* 积分状态栏 */}
+      <CreditBar selectedModelId={selectedModel.id} />
     </div>
   );
 }

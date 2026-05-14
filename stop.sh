@@ -25,8 +25,8 @@ fi
 
 # 方式2: 按名字杀掉残留进程
 pkill -f "aipool-backend" 2>/dev/null || true
-pkill -f "http.server 9090" 2>/dev/null || true
-pkill -f "http.server 9091" 2>/dev/null || true
+pkill -f "next dev.*9090" 2>/dev/null || true
+pkill -f "next dev.*9091" 2>/dev/null || true
 
 # 也杀掉 cloudflared（如果是本项目启动的）
 if [ -f "$LOG_DIR/cf_frontend.log" ] || [ -f "$LOG_DIR/cf_backend.log" ]; then

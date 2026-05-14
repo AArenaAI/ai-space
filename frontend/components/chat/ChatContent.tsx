@@ -17,11 +17,10 @@ export default function ChatContent() {
   const conversationId = searchParams.get("id")
     ? Number(searchParams.get("id"))
     : undefined;
-  // 用时间戳参数确保新对话能重新挂载
-  const freshKey = searchParams.get("t") || conversationId || 'new';
   const { models, loading } = useModels();
 
   if (loading || models.length === 0) return <ChatSkeleton />;
 
-  return <ChatInterface key={freshKey} conversationId={conversationId} models={models} />;
+  // 用固定 key 避免切换对话时组件重新挂载，useChat 的 effect 会正确处理 conversationId 变化
+  return <ChatInterface key="chat" conversationId={conversationId} models={models} />;
 }

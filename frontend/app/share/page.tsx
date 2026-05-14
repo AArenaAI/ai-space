@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense } from "react";
-import dynamic from "next/dynamic";
+import ShareContent from "@/components/share/ShareContent";
 
 function ShareSkeleton() {
   return (
@@ -10,11 +10,6 @@ function ShareSkeleton() {
     </div>
   );
 }
-
-const ShareContent = dynamic(() => import("@/components/share/ShareContent"), {
-  ssr: false,
-  loading: () => <ShareSkeleton />,
-});
 
 export default function SharePage() {
   return (

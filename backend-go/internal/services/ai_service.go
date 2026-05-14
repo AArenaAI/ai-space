@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,8 +22,9 @@ func NewAIService(cfg *config.Config) *AIService {
 }
 
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string   `json:"role"`
+	Content string   `json:"content"`
+	Images  []string `json:"-"` // base64 dataURIs for multimodal, not serialized
 }
 
 type ChatRequest struct {
@@ -98,10 +100,25 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 	// input 数组 — 把 user/assistant 消息按原样传入
 	inputItems := make([]map[string]interface{}, 0, len(userMessages))
 	for _, m := range userMessages {
-		inputItems = append(inputItems, map[string]interface{}{
-			"role":    m.Role,
-			"content": m.Content,
-		})
+		item := map[string]interface{}{
+			"role": m.Role,
+		}
+		if len(m.Images) > 0 && m.Role == "user" {
+			// 多模态格式
+			contentParts := []map[string]interface{}{
+				{"type": "input_text", "text": m.Content},
+			}
+			for _, img := range m.Images {
+				contentParts = append(contentParts, map[string]interface{}{
+					"type":      "input_image",
+					"image_url": img,
+				})
+			}
+			item["content"] = contentParts
+		} else {
+			item["content"] = m.Content
+		}
+		inputItems = append(inputItems, item)
 	}
 
 	reqBody := map[string]interface{}{
@@ -194,9 +211,37 @@ func (s *AIService) callAnthropic(ctx context.Context, model string, messages []
 		}
 	}
 
+	// 转换消息为 Anthropic 多模态格式
+	anthropicMessages := make([]map[string]interface{}, 0, len(userMsgs))
+	for _, m := range userMsgs {
+		msg := map[string]interface{}{
+			"role": m.Role,
+		}
+		if len(m.Images) > 0 && m.Role == "user" {
+			contentParts := []map[string]interface{}{
+				{"type": "text", "text": m.Content},
+			}
+			for _, img := range m.Images {
+				mediaType, b64Data := parseDataURI(img)
+				contentParts = append(contentParts, map[string]interface{}{
+					"type": "image",
+					"source": map[string]interface{}{
+						"type":       "base64",
+						"media_type": mediaType,
+						"data":       b64Data,
+					},
+				})
+			}
+			msg["content"] = contentParts
+		} else {
+			msg["content"] = m.Content
+		}
+		anthropicMessages = append(anthropicMessages, msg)
+	}
+
 	reqBody := map[string]interface{}{
 		"model":      model,
-		"messages":   userMsgs,
+		"messages":   anthropicMessages,
 		"stream":     stream,
 		"max_tokens": 4096,
 	}
@@ -239,9 +284,34 @@ func (s *AIService) callDeepSeek(ctx context.Context, model string, messages []M
 		baseURL = s.cfg.DeepSeekBaseURL
 	}
 
+	// 转换消息为 OpenAI 兼容多模态格式
+	deepSeekMessages := make([]map[string]interface{}, 0, len(messages))
+	for _, m := range messages {
+		msg := map[string]interface{}{
+			"role": m.Role,
+		}
+		if len(m.Images) > 0 && m.Role == "user" {
+			contentParts := []map[string]interface{}{
+				{"type": "text", "text": m.Content},
+			}
+			for _, img := range m.Images {
+				contentParts = append(contentParts, map[string]interface{}{
+					"type": "image_url",
+					"image_url": map[string]string{
+						"url": img,
+					},
+				})
+			}
+			msg["content"] = contentParts
+		} else {
+			msg["content"] = m.Content
+		}
+		deepSeekMessages = append(deepSeekMessages, msg)
+	}
+
 	reqBody := map[string]interface{}{
 		"model":    model,
-		"messages": messages,
+		"messages": deepSeekMessages,
 		"stream":   stream,
 	}
 
@@ -282,6 +352,93 @@ func (s *AIService) callDeepSeek(ctx context.Context, model string, messages []M
 
 func (s *AIService) callMoonshot(ctx context.Context, model string, messages []Message, stream bool, reasoning bool) (io.ReadCloser, error) {
 	return nil, fmt.Errorf("Moonshot 暂未实现")
+}
+
+// parseDataURI 从 data URI 中提取 MIME type 和 base64 数据
+// 格式: data:image/jpeg;base64,/9j/4AAQ...
+func parseDataURI(dataURI string) (mimeType string, data string) {
+	const prefix = "data:"
+	if !strings.HasPrefix(dataURI, prefix) {
+		return "application/octet-stream", dataURI
+	}
+	afterPrefix := dataURI[len(prefix):]
+	// 找到 ;base64, 分隔符
+	idx := strings.Index(afterPrefix, ";base64,")
+	if idx < 0 {
+		return "application/octet-stream", afterPrefix
+	}
+	mimeType = afterPrefix[:idx]
+	data = afterPrefix[idx+len(";base64,"):]
+	return mimeType, data
+}
+
+// ExtractImageContent 使用 OpenAI Vision API 提取图片描述
+func (s *AIService) ExtractImageContent(ctx context.Context, imageData []byte, mimeType string) (string, error) {
+	if s.cfg.OpenAIKey == "" {
+		return "", fmt.Errorf("未配置 OpenAI API Key")
+	}
+
+	baseURL := "https://api.openai.com"
+	if s.cfg.OpenAIBaseURL != "" {
+		baseURL = s.cfg.OpenAIBaseURL
+	}
+
+	base64Data := base64.StdEncoding.EncodeToString(imageData)
+	dataURI := fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data)
+
+	reqBody := map[string]interface{}{
+		"model": s.cfg.VisionModel,
+		"messages": []map[string]interface{}{
+			{
+				"role": "user",
+				"content": []map[string]interface{}{
+					{"type": "text", "text": "请详细描述这张图片的内容，包括文字、图表、布局等所有可见信息。如果图片主要是文字内容，请完整转录所有文字。"},
+					{"type": "image_url", "image_url": map[string]string{"url": dataURI}},
+				},
+			},
+		},
+		"max_tokens": 4096,
+	}
+
+	jsonBody, _ := json.Marshal(reqBody)
+	req, _ := http.NewRequestWithContext(ctx, "POST", baseURL+"/v1/chat/completions", bytes.NewBuffer(jsonBody))
+	req.Header.Set("Authorization", "Bearer "+s.cfg.OpenAIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("Vision API 错误: %s", string(body))
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+
+	choices, ok := result["choices"].([]interface{})
+	if !ok || len(choices) == 0 {
+		return "", fmt.Errorf("Vision API 返回空结果")
+	}
+
+	choice, ok := choices[0].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("Vision API 返回格式异常")
+	}
+
+	msg, ok := choice["message"].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("Vision API 返回缺少 message")
+	}
+
+	content, _ := msg["content"].(string)
+	return content, nil
 }
 
 // StreamOpenAIResponses 解析 Responses API 的流式 SSE 事件，将其转换为

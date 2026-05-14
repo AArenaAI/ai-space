@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme/ThemeProvider";
 import { Toaster } from "sonner";
+import AuthInterceptor from "@/components/AuthInterceptor";
 
 export const metadata: Metadata = {
   title: "AI Space - 多模型AI聚合平台",
@@ -18,8 +19,9 @@ export default function RootLayout({
     <html lang="zh-CN" suppressHydrationWarning>
       <body className="antialiased">
         <ThemeProvider>
+          <AuthInterceptor />
           {children}
-          <Toaster position="top-center" richColors />
+          <Toaster position="top-center" />
         </ThemeProvider>
       </body>
     </html>

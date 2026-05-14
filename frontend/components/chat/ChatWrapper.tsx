@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense } from "react";
-import dynamic from "next/dynamic";
+import ChatContent from "./ChatContent";
 
 function ChatSkeleton() {
   return (
@@ -10,11 +10,6 @@ function ChatSkeleton() {
     </div>
   );
 }
-
-const ChatContent = dynamic(() => import("./ChatContent"), {
-  ssr: false,
-  loading: () => <ChatSkeleton />,
-});
 
 export default function ChatWrapper() {
   return (

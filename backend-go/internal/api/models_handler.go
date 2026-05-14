@@ -21,7 +21,7 @@ var SupportedModels = []ModelInfo{
 	{ID: "gpt-5.4-mini", Name: "GPT 5.4 Mini", Provider: "OpenAI", Description: "快速、经济，日常任务首选", Color: "#10a37f", Capabilities: []string{"chat"}},
 	{ID: "gpt-5.5", Name: "GPT 5.5", Provider: "OpenAI", Description: "第五代增强版，更强推理能力", Color: "#10a37f", Capabilities: []string{"chat"}},
 	{ID: "gpt-5.5-pro", Name: "GPT 5.5 Pro", Provider: "OpenAI", Description: "旗舰级专业模型，最强的多模态能力", Color: "#10a37f", Capabilities: []string{"chat"}},
-	{ID: "gpt-image-2", Name: "GPT Image 2", Provider: "OpenAI", Description: "原生多模态模型，可对话也可生成图片", Color: "#10a37f", Capabilities: []string{"chat", "image"}},
+	{ID: "gpt-image-2", Name: "GPT Image 2", Provider: "OpenAI", Description: "原生多模态模型，可生成图片", Color: "#10a37f", Capabilities: []string{"image"}},
 	// Anthropic
 	{ID: "claude-3-5-sonnet-20241022", Name: "Claude 3.5 Sonnet", Provider: "Anthropic", Description: "代码和逻辑推理专家", Color: "#cc785c", Capabilities: []string{"chat"}},
 	// Google

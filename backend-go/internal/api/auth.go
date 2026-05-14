@@ -44,11 +44,15 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	// 创建用户
+	// 创建用户（初始化 free 套餐 + 30 基础积分）
 	user := models.User{
-		Email:    req.Email,
-		Password: req.Password,
-		Name:     req.Name,
+		Email:           req.Email,
+		Password:        req.Password,
+		Name:            req.Name,
+		BasicCredits:    30,
+		AdvancedCredits: 0,
+		EliteCredits:    0,
+		PlanTier:        "free",
 	}
 
 	if err := user.HashPassword(); err != nil {
@@ -70,9 +74,13 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, gin.H{
 		"user": gin.H{
-			"id":    user.ID,
-			"email": user.Email,
-			"name":  user.Name,
+			"id":               user.ID,
+			"email":            user.Email,
+			"name":             user.Name,
+			"basic_credits":    user.BasicCredits,
+			"advanced_credits": user.AdvancedCredits,
+			"elite_credits":    user.EliteCredits,
+			"plan_tier":        user.PlanTier,
 		},
 		"token": token,
 	})
@@ -107,9 +115,13 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"user": gin.H{
-			"id":    user.ID,
-			"email": user.Email,
-			"name":  user.Name,
+			"id":               user.ID,
+			"email":            user.Email,
+			"name":             user.Name,
+			"basic_credits":    user.BasicCredits,
+			"advanced_credits": user.AdvancedCredits,
+			"elite_credits":    user.EliteCredits,
+			"plan_tier":        user.PlanTier,
 		},
 		"token": token,
 	})

@@ -20,7 +20,7 @@ func NewConversationHandler(db *gorm.DB) *ConversationHandler {
 
 func (h *ConversationHandler) List(c *gin.Context) {
 	userID := getUserID(c)
-	
+
 	var conversations []models.Conversation
 	if err := h.db.Where("user_id = ?", userID).Order("pinned desc, updated_at desc").Find(&conversations).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取对话列表失败"})
@@ -34,8 +34,9 @@ func (h *ConversationHandler) Create(c *gin.Context) {
 	userID := getUserID(c)
 
 	var req struct {
-		Title string `json:"title"`
-		Model string `json:"model"`
+		Title     string `json:"title"`
+		Model     string `json:"model"`
+		SkillKey  string `json:"skill_key,omitempty"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -44,9 +45,10 @@ func (h *ConversationHandler) Create(c *gin.Context) {
 	}
 
 	conv := models.Conversation{
-		UserID: userID,
-		Title:  req.Title,
-		Model:  req.Model,
+		UserID:   userID,
+		Title:    req.Title,
+		Model:    req.Model,
+		SkillKey: req.SkillKey,
 	}
 
 	if err := h.db.Create(&conv).Error; err != nil {

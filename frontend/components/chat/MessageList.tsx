@@ -9,6 +9,8 @@ import remarkGfm from "remark-gfm";
 import remarkFixBold from "@/lib/remark-fix-bold";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { useTheme } from "@/components/theme/ThemeProvider";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import ShareDialog from "@/components/ui/ShareDialog";
 
@@ -22,10 +24,17 @@ interface MessageListProps {
   onContinueGenerate?: () => void;
   isCompare?: boolean;
   compareModels?: string[];
+  welcomeTitle?: string;
+  welcomeSubtitle?: string;
+  welcomeExamples?: { title: string; desc: string; prompt: string }[];
+  onExampleClick?: (prompt: string) => void;
 }
 
 function CodeBlock({ language, value }: { language: string; value: string }) {
   const [copied, setCopied] = useState(false);
+  const themeCtx = useTheme();
+  const isDark = themeCtx?.theme === "dark";
+
   const handleCopy = () => {
     navigator.clipboard.writeText(value);
     setCopied(true);
@@ -34,13 +43,22 @@ function CodeBlock({ language, value }: { language: string; value: string }) {
 
   return (
     <div className="relative group my-4 rounded-lg overflow-hidden border border-surface-border">
-      <div className="flex items-center justify-between px-3 py-2 bg-[#0D0D0D] border-b border-surface-border">
-        <span className="text-[11px] text-gray-400 font-mono uppercase">
+      <div className={cn(
+        "flex items-center justify-between px-3 py-2 border-b border-surface-border",
+        isDark ? "bg-[#0D0D0D]" : "bg-[#F6F8FA]"
+      )}>
+        <span className={cn(
+          "text-[11px] font-mono uppercase",
+          isDark ? "text-gray-400" : "text-gray-500"
+        )}>
           {language || "text"}
         </span>
         <button
           onClick={handleCopy}
-          className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+          className={cn(
+            "flex items-center gap-1 text-[11px] transition-colors opacity-0 group-hover:opacity-100",
+            isDark ? "text-gray-400 hover:text-white" : "text-gray-500 hover:text-gray-800"
+          )}
         >
           {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
           {copied ? "已复制" : "复制"}
@@ -48,8 +66,15 @@ function CodeBlock({ language, value }: { language: string; value: string }) {
       </div>
       <SyntaxHighlighter
         language={language || "text"}
-        style={vscDarkPlus}
-        customStyle={{ margin: 0, padding: "1rem", fontSize: "13px", lineHeight: "1.5", background: "#0D0D0D" }}
+        style={isDark ? vscDarkPlus : oneLight}
+        customStyle={{
+          margin: 0,
+          padding: "1rem",
+          fontSize: "13px",
+          lineHeight: "1.5",
+          background: isDark ? "#0D0D0D" : "#F6F8FA",
+          overflowX: "auto",
+        }}
       >
         {value}
       </SyntaxHighlighter>
@@ -249,6 +274,10 @@ export default function MessageList({
   onContinueGenerate,
   isCompare = false,
   compareModels = [],
+  welcomeTitle,
+  welcomeSubtitle,
+  welcomeExamples,
+  onExampleClick,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
@@ -331,23 +360,42 @@ export default function MessageList({
   };
 
   if (messages.length === 0) {
+    const hasCustomWelcome = welcomeExamples && welcomeExamples.length > 0;
+    const defaultExamples = [
+      { title: "知识问答", desc: "用通俗易懂的方式讲清一个话题，并给出3个延伸阅读方向", prompt: "用通俗易懂的方式讲清一个话题，并给出3个延伸阅读方向" },
+      { title: "写作助手", desc: "帮我把这段文字改写得更专业、更精炼，并保留原意", prompt: "帮我把这段文字改写得更专业、更精炼，并保留原意" },
+      { title: "代码辅助", desc: "解释这段代码的工作原理，并给出优化建议", prompt: "解释这段代码的工作原理，并给出优化建议" },
+    ];
+    const examples = hasCustomWelcome ? welcomeExamples : defaultExamples;
+
     return (
       <div className="flex-1 flex flex-col items-center justify-center px-4 py-12">
         <div className="text-center max-w-md">
-          <div className="w-12 h-12 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center mx-auto mb-8">
-            <span className="text-lg font-bold text-text-primary">AI</span>
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight mb-3 text-text-primary">一个入口，所有顶尖AI</h1>
-          <p className="text-text-secondary text-[15px] leading-relaxed mb-10">集成 GPT、Claude、Gemini、DeepSeek、Kimi 等主流大模型</p>
+          {hasCustomWelcome ? (
+            <>
+              <div className="w-12 h-12 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center mx-auto mb-6">
+                <Bot className="w-5 h-5 text-text-secondary" />
+              </div>
+              <h2 className="text-xl font-semibold tracking-tight mb-2 text-text-primary">{welcomeTitle}</h2>
+              {welcomeSubtitle && (
+                <p className="text-text-secondary text-sm leading-relaxed mb-8">{welcomeSubtitle}</p>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="w-12 h-12 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center mx-auto mb-8">
+                <span className="text-lg font-bold text-text-primary">AI</span>
+              </div>
+              <h1 className="text-2xl font-semibold tracking-tight mb-3 text-text-primary">一个入口，所有顶尖AI</h1>
+              <p className="text-text-secondary text-[15px] leading-relaxed mb-10">集成 GPT、Claude、Gemini、DeepSeek、Kimi 等主流大模型</p>
+            </>
+          )}
           <div className="grid grid-cols-1 gap-2 text-left">
-            {[
-              { title: "知识问答", desc: "用通俗易懂的方式讲清一个话题，并给出3个延伸阅读方向" },
-              { title: "写作助手", desc: "帮我把这段文字改写得更专业、更精炼，并保留原意" },
-              { title: "代码辅助", desc: "解释这段代码的工作原理，并给出优化建议" },
-            ].map((item, i) => (
+            {examples.map((item, i) => (
               <button
                 key={i}
-                className="group relative flex items-start gap-3 px-4 py-3 rounded-xl border border-surface-border bg-surface-elevated/50 hover:bg-surface-card transition-colors duration-200 text-left"
+                onClick={() => onExampleClick?.(item.prompt)}
+                className="group relative flex items-start gap-3 px-4 py-3 rounded-xl border border-surface-border bg-surface-elevated/50 hover:bg-surface-card transition-colors duration-200 text-left cursor-pointer"
               >
                 <span className="mt-0.5 text-[11px] font-mono text-text-tertiary">{String(i + 1).padStart(2, "0")}</span>
                 <div>
@@ -471,7 +519,7 @@ export default function MessageList({
                       )}
                     </div>
                   ) : (
-                    <div className="prose prose-sm prose-invert max-w-none">
+                    <div className="prose prose-sm max-w-none">
                       {(() => {
                         const { reasoning, answer, isThinking } = parseThinkContent(msg.content);
                         const cleanAnswer = sanitizeContent(answer);
@@ -486,7 +534,7 @@ export default function MessageList({
                                   return !inline && match ? (
                                     <CodeBlock language={match[1]} value={String(children).replace(/\n$/, "")} />
                                   ) : (
-                                    <code className="bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 px-1 py-0.5 rounded text-[13px] font-mono" {...props}>
+                                    <code className="bg-[#E8E8E8] dark:bg-[#2A2A3A] text-[#333333] dark:text-[#E0E0E0] px-1 py-0.5 rounded text-[13px] font-mono" {...props}>
                                       {children}
                                     </code>
                                   );

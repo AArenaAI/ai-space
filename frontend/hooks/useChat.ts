@@ -132,7 +132,7 @@ function persistModel(model: ChatModel) {
   } catch {}
 }
 
-export function useChat(conversationId: number | undefined, models: ChatModel[]) {
+export function useChat(conversationId: number | undefined, models: ChatModel[], skillKey?: string) {
   const defaultModel = models.length > 0 ? models[0] : ({} as ChatModel);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -144,6 +144,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[])
   const [initialized, setInitialized] = useState(false);
   const [isCompare, setIsCompare] = useState(false);
   const [compareModels, setCompareModels] = useState<string[]>([]);
+  // 从对话历史或 prop 恢复的有效 skillKey（优先级：历史 > prop）
+  const [effectiveSkillKey, setEffectiveSkillKey] = useState<string | undefined>(skillKey);
 
   // 在客户端初始化后，从 localStorage 恢复上次选择的模型
   useEffect(() => {
@@ -202,27 +204,43 @@ export function useChat(conversationId: number | undefined, models: ChatModel[])
               if (Array.isArray(parsed)) setCompareModels(parsed);
             } catch {}
           }
+          // 从历史对话恢复 skill_key（如果 URL 没有提供）
+          if (data.skill_key && !skillKey) {
+            setEffectiveSkillKey(data.skill_key);
+          }
         }
       })
       .catch(() => {
         setMessages([]);
       });
+
+    // cleanup: 切换对话或组件卸载时中止正在进行的 SSE
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+    };
   }, [conversationId]);
 
   // 创建新对话
   const createConversation = useCallback(
-    async (title: string, model: string): Promise<number | undefined> => {
+    async (title: string, model: string, sk?: string): Promise<number | undefined> => {
       const token = localStorage.getItem("token");
       if (!token) return undefined;
 
       try {
+        const body: any = { title, model };
+        if (sk && sk.trim()) {
+          body.skill_key = sk.trim();
+        }
         const res = await fetch(`${API_BASE_URL}/api/conversations`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ title, model }),
+          body: JSON.stringify(body),
         });
 
         if (!res.ok) return undefined;
@@ -309,9 +327,11 @@ export function useChat(conversationId: number | undefined, models: ChatModel[])
       modelIds: string[],
       reasoning: { enabled: boolean; effort?: string } = { enabled: false },
       search: boolean = false,
-      templateId: number = 0
+      templateId: number = 0,
+      attachments?: { filename: string; content: string }[],
+      file_ids?: string[]
     ) => {
-      if (!content.trim() || modelIds.length < 2) return;
+      if (!content.trim() && (!attachments || attachments.length === 0)) return;
 
       lastReasoningRef.current = reasoning;
       lastSearchRef.current = search;
@@ -328,6 +348,14 @@ export function useChat(conversationId: number | undefined, models: ChatModel[])
 
       // 第一个模型：带用户消息
       // 后续模型：跳过用户消息
+      let finalContent = content.trim();
+      if (attachments && attachments.length > 0) {
+        const attachmentTexts = attachments.map(
+          (a) => `[文件: ${a.filename}]\n---\n${a.content}\n---`
+        );
+        finalContent = attachmentTexts.join("\n\n") + (finalContent ? "\n\n" + finalContent : "");
+      }
+
       for (let i = 0; i < modelIds.length; i++) {
         const modelId = modelIds[i];
         const model = models.find((m) => m.id === modelId);
@@ -349,14 +377,14 @@ export function useChat(conversationId: number | undefined, models: ChatModel[])
             search: lastSearchRef.current,
             searchStatus: lastSearchRef.current ? "searching" : undefined,
           };
-          contextMessages = [...messages, { role: "user" as const, content: content.trim(), id: "", createdAt: 0 }];
+          contextMessages = [...messages, { role: "user" as const, content: finalContent, id: "", createdAt: 0 }];
           setMessages((prev) => [...prev, assistantMsg]);
         } else {
           // 第一个模型：添加用户消息 + 第一条 assistant
           const userMsg: Message = {
             id: uuidv4(),
             role: "user",
-            content: content.trim(),
+            content: finalContent,
             createdAt: Date.now(),
           };
           assistantMsg = {
@@ -377,9 +405,13 @@ export function useChat(conversationId: number | undefined, models: ChatModel[])
         abortControllerRef.current = controller;
 
         try {
+          const token = localStorage.getItem("token");
           const response = await fetch(`${API_BASE_URL}/api/chat`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
             signal: controller.signal,
             body: JSON.stringify({
               model: modelId,
@@ -391,6 +423,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[])
               search: search,
               template_id: templateId,
               skip_save_user_msg: skipUser,
+              skill_key: effectiveSkillKey || undefined,
+              file_ids: file_ids || undefined,
             }),
           });
           if (!response.ok) throw new Error("请求失败");
@@ -413,7 +447,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[])
       setIsLoading(false);
       abortControllerRef.current = null;
     },
-    [messages, models, currentConversation, createConversation, streamResponse]
+    [messages, models, currentConversation, createConversation, streamResponse, effectiveSkillKey]
   );
 
   const sendMessage = useCallback(
@@ -423,9 +457,11 @@ export function useChat(conversationId: number | undefined, models: ChatModel[])
       isRegenerate: boolean = false,
       search: boolean = false,
       templateId: number = 0,
-      skipUserMsg: boolean = false
+      skipUserMsg: boolean = false,
+      attachments?: { filename: string; content: string }[],
+      file_ids?: string[]
     ) => {
-      if (!content.trim() && !isRegenerate) return;
+      if (!content.trim() && !isRegenerate && (!attachments || attachments.length === 0)) return;
 
       lastReasoningRef.current = reasoning;
       lastSearchRef.current = search;
@@ -437,7 +473,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[])
       if (token && !convId && !isRegenerate) {
         // 自动创建新对话，标题用前 20 个字
         const title = content.trim().slice(0, 20) + (content.trim().length > 20 ? "..." : "");
-        convId = await createConversation(title, selectedModel.id);
+        convId = await createConversation(title, selectedModel.id, effectiveSkillKey);
       }
 
       let contextMessages: Message[];
@@ -467,6 +503,13 @@ export function useChat(conversationId: number | undefined, models: ChatModel[])
         });
       } else if (skipUserMsg) {
         // 对比模式中后续模型：不添加用户消息，只添加 assistant
+        let finalContent = content.trim();
+        if (attachments && attachments.length > 0) {
+          const attachmentTexts = attachments.map(
+            (a) => `[文件: ${a.filename}]\n---\n${a.content}\n---`
+          );
+          finalContent = attachmentTexts.join("\n\n") + (finalContent ? "\n\n" + finalContent : "");
+        }
         assistantMsg = {
           id: uuidv4(),
           role: "assistant",
@@ -476,13 +519,20 @@ export function useChat(conversationId: number | undefined, models: ChatModel[])
           search: lastSearchRef.current,
           searchStatus: lastSearchRef.current ? "searching" : undefined,
         };
-        contextMessages = [...messages, { role: "user", content: content.trim(), id: "", createdAt: 0 } as Message];
+        contextMessages = [...messages, { role: "user" as const, content: finalContent, id: "", createdAt: 0 }];
         setMessages((prev) => [...prev, assistantMsg]);
       } else {
+        let finalContent = content.trim();
+        if (attachments && attachments.length > 0) {
+          const attachmentTexts = attachments.map(
+            (a) => `[文件: ${a.filename}]\n---\n${a.content}\n---`
+          );
+          finalContent = attachmentTexts.join("\n\n") + (finalContent ? "\n\n" + finalContent : "");
+        }
         const userMsg: Message = {
           id: uuidv4(),
           role: "user",
-          content: content.trim(),
+          content: finalContent,
           createdAt: Date.now(),
         };
 
@@ -505,9 +555,13 @@ export function useChat(conversationId: number | undefined, models: ChatModel[])
       abortControllerRef.current = controller;
 
       try {
+        const token = localStorage.getItem("token");
         const response = await fetch(`${API_BASE_URL}/api/chat`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
           signal: controller.signal,
           body: JSON.stringify({
             model: selectedModel.id,
@@ -519,6 +573,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[])
             search: search,
             template_id: templateId,
             skip_save_user_msg: skipUserMsg,
+            skill_key: effectiveSkillKey || undefined,
+            file_ids: file_ids || undefined,
           }),
         });
 
@@ -574,7 +630,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[])
         abortControllerRef.current = null;
       }
     },
-    [messages, selectedModel, currentConversation, createConversation, streamResponse]
+    [messages, selectedModel, currentConversation, createConversation, streamResponse, effectiveSkillKey]
   );
 
   const stopGeneration = useCallback(() => {
@@ -614,6 +670,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[])
     deleteMessage,
     regenerateMessage,
     currentConversation,
+    effectiveSkillKey,
     isCompare,
     compareModels,
     sendCompareMessages,

@@ -14,6 +14,7 @@ type Conversation struct {
 	Pinned    bool           `gorm:"default:false" json:"pinned"`
 	Compare   bool           `gorm:"default:false" json:"compare"`            // 是否是对比对话
 	CompareModels string     `gorm:"type:text" json:"compare_models,omitempty"` // JSON 数组，对比选用的模型列表
+	SkillKey  string         `gorm:"index;size:64" json:"skill_key,omitempty"` // 关联的技能 key
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
