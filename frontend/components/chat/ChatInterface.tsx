@@ -404,23 +404,21 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
       )}
 
       {/* 消息列表 */}
-      <div className="flex-1 overflow-y-auto">
-        <MessageList
-          messages={messages}
-          isLoading={isLoading}
-          models={models}
-          conversationId={conversationId}
-          onDeleteMessage={deleteMessage}
-          onRegenerate={regenerateMessage}
-          onContinueGenerate={regenerateMessage}
-          isCompare={isCompare}
-          compareModels={compareModels}
-          welcomeTitle={welcomeTitle}
-          welcomeSubtitle={welcomeSubtitle}
-          welcomeExamples={welcomeExamples}
-          onExampleClick={(prompt) => sendMessage(prompt, undefined, false, false, selectedTemplateId)}
-        />
-      </div>
+      <MessageList
+        messages={messages}
+        isLoading={isLoading}
+        models={models}
+        conversationId={conversationId}
+        onDeleteMessage={deleteMessage}
+        onRegenerate={regenerateMessage}
+        onContinueGenerate={regenerateMessage}
+        isCompare={isCompare}
+        compareModels={compareModels}
+        welcomeTitle={welcomeTitle}
+        welcomeSubtitle={welcomeSubtitle}
+        welcomeExamples={welcomeExamples}
+        onExampleClick={(prompt) => sendMessage(prompt, undefined, false, false, selectedTemplateId)}
+      />
 
       {/* 输入框 */}
       <div className="shrink-0">

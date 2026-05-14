@@ -649,12 +649,12 @@ export default function MessageList({
         <button
           type="button"
           onClick={() => scrollToBottom("smooth")}
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium
+          className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 flex items-center justify-center w-10 h-10 rounded-full
             bg-surface-elevated border border-surface-border text-text-secondary
             shadow-lg hover:bg-surface-card hover:text-text-primary transition-colors"
+          aria-label="回到底部"
         >
-          <ChevronDownIcon className="w-4 h-4" />
-          回到底部
+          <ChevronDownIcon className="w-5 h-5" />
         </button>
       )}
 
