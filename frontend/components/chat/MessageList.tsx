@@ -288,7 +288,6 @@ export default function MessageList({
     scrollToBottom,
     followIfAtBottom,
   } = useSmartAutoScroll({
-    deps: [messages.length],
     threshold: 120,
     enabled: true,
   });
@@ -308,25 +307,23 @@ export default function MessageList({
     }
   }, [messages.length, scrollToBottom]);
 
-  // SSE 流式输出时，用 raf 节流跟随（避免高频 scrollTop 设置造成视觉跳动）
+  // SSE 流式输出时，RAF + 时间节流跟随（避免高频 scrollTop 设置造成视觉跳动）
   const rafRef = useRef<number>(0);
+  const lastScrollTimeRef = useRef(0);
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
     const isStreaming = isLoading && lastMessage?.role === "assistant";
     if (!isStreaming) return;
 
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = requestAnimationFrame(() => {
-      followIfAtBottom();
-      rafRef.current = 0;
-    });
+    if (rafRef.current) return; // 已有待执行的 RAF，不再重复 schedule
 
-    return () => {
-      if (rafRef.current) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = 0;
-      }
-    };
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = 0;
+      const now = Date.now();
+      if (now - lastScrollTimeRef.current < 150) return; // 150ms 时间节流
+      lastScrollTimeRef.current = now;
+      followIfAtBottom();
+    });
   }, [messages, isLoading, followIfAtBottom]);
 
   const handleCopy = useCallback((content: string) => {
