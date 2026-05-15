@@ -5,7 +5,7 @@
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 LOG_DIR="/tmp/aipool"
 PID_FILE="$LOG_DIR/pids.txt"
@@ -25,15 +25,8 @@ fi
 
 # 方式2: 按名字杀掉残留进程
 pkill -f "aipool" 2>/dev/null || true
-pkill -f "aipool-backend" 2>/dev/null || true
 pkill -f "next dev.*9090" 2>/dev/null || true
 pkill -f "next dev.*9091" 2>/dev/null || true
-
-# 也杀掉 cloudflared（如果是本项目启动的）
-if [ -f "$LOG_DIR/cf_frontend.log" ] || [ -f "$LOG_DIR/cf_backend.log" ]; then
-    pkill -f "cloudflared.*localhost:9090" 2>/dev/null || true
-    pkill -f "cloudflared.*localhost:9091" 2>/dev/null || true
-fi
 
 sleep 1
 
@@ -49,8 +42,5 @@ else
     [ -n "$PORT_9091" ] && kill -9 $PORT_9091 2>/dev/null || true
     echo -e "${GREEN}✅ 已强制清理${NC}"
 fi
-
-# 清理日志
-rm -f "$LOG_DIR/cf_frontend.log" "$LOG_DIR/cf_backend.log"
 
 echo -e "${GREEN}完成${NC}"
