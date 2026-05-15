@@ -154,6 +154,10 @@ const config: Config = {
       transitionTimingFunction: {
         'out': 'ease-out',
       },
+      boxShadow: {
+        'brand-glow': '0 0 12px rgba(59, 130, 246, 0.3)',
+        'purple-glow': '0 0 12px rgba(139, 92, 246, 0.3)',
+      },
     },
   },
   plugins: [require("tailwindcss-animate")],

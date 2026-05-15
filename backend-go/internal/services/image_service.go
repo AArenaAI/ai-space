@@ -35,6 +35,19 @@ func NewImageService(cfg *config.Config) *ImageService {
 	return &ImageService{cfg: cfg}
 }
 
+// RemoveBackground 图片背景移除 (利用 gpt-image-2 的编辑能力)
+// 返回 (OpenAI 直链 URL, base64 数据, 错误)
+func (s *ImageService) RemoveBackground(ctx context.Context, size string, imageFilePath string) (imageURL string, b64Data string, err error) {
+	prompt := "Remove the background of this image. Make the background transparent. Keep only the main subject."
+	return s.EditImage(ctx, prompt, size, imageFilePath)
+}
+
+// GenerateEditImage 通用图片编辑 (基于参考图修改，全适配 gpt-image-2)
+// 返回 (OpenAI 直链 URL, base64 数据, 错误)
+func (s *ImageService) GenerateEditImage(ctx context.Context, prompt string, size string, imageFilePath string) (imageURL string, b64Data string, err error) {
+	return s.EditImage(ctx, prompt, size, imageFilePath)
+}
+
 type DALLEImageRequest struct {
 	Model   string `json:"model"`
 	Prompt  string `json:"prompt"`

@@ -5,10 +5,10 @@ import (
 	"aipool-backend/internal/models"
 	"aipool-backend/internal/services"
 	"aipool-backend/internal/skills"
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,13 +20,13 @@ import (
 )
 
 type ChatHandler struct {
-	db              *gorm.DB
-	cfg             *config.Config
-	aiService       *services.AIService
-	searchService   *services.SearchService
-	fileService     *services.FileService
-	retrievalSvc    *services.RetrievalService
-	contextBuilder  *services.ContextBuilder
+	db             *gorm.DB
+	cfg            *config.Config
+	aiService      *services.AIService
+	searchService  *services.SearchService
+	fileService    *services.FileService
+	retrievalSvc   *services.RetrievalService
+	contextBuilder *services.ContextBuilder
 }
 
 func NewChatHandler(db *gorm.DB, cfg *config.Config, aiService *services.AIService, searchService *services.SearchService, fileService *services.FileService, retrievalSvc *services.RetrievalService, contextBuilder *services.ContextBuilder) *ChatHandler {
@@ -68,12 +68,53 @@ type CompareResult struct {
 
 // 从 model_id 查找模型显示名（从 models_handler.go 的 SupportedModels）
 func findModelName(modelID string) string {
-	for _, m := range SupportedModels {
-		if m.ID == modelID {
-			return m.Name
-		}
+	if model, ok := FindModelInfo(modelID); ok {
+		return model.Name
 	}
 	return modelID
+}
+
+func (h *ChatHandler) preprocessSearch(messages []services.Message, modelID string, searchEnabled bool, clientIP string) ([]services.Message, []services.SearchResult, bool) {
+	if !searchEnabled {
+		return messages, nil, false
+	}
+
+	if SupportsSearch(modelID) {
+		return messages, nil, true
+	}
+
+	processed := append([]services.Message(nil), messages...)
+	var query string
+	lastUserIdx := -1
+	for i := len(processed) - 1; i >= 0; i-- {
+		if processed[i].Role == "user" {
+			query = processed[i].Content
+			lastUserIdx = i
+			break
+		}
+	}
+
+	if query == "" || lastUserIdx < 0 || h.searchService == nil {
+		return processed, nil, false
+	}
+
+	timezone := services.GetUserTimezoneByIP(clientIP)
+	searchResult, sources, err := h.searchService.Search(query, timezone)
+	if err != nil {
+		fmt.Printf("[Search] 搜索失败 model=%s: %v\n", modelID, err)
+		return processed, nil, false
+	}
+	if searchResult == "" {
+		return processed, nil, false
+	}
+
+	originalContent := processed[lastUserIdx].Content
+	processed[lastUserIdx].Content = originalContent + "\n\n---\n" + searchResult + "\n---"
+
+	noCitationMsg := services.Message{Role: "system", Content: "直接回答用户的问题，回答中不要出现任何引用来源编号（如[1][2][3]等格式），不要在末尾列出引用来源或参考链接列表。"}
+	processed = append([]services.Message{noCitationMsg}, processed...)
+
+	return processed, sources, false
 }
 
 func (h *ChatHandler) Chat(c *gin.Context) {
@@ -104,6 +145,15 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		}
 	}
 	// ========== Skill 注入结束 ==========
+
+	// ========== 图表渲染指令 ==========
+	// 前端只会把 ```echarts 代码块解析成真实图表。普通 js/text 代码块只会显示为代码，
+	// 所以当用户明确要求画图表时，追加一个轻量 system prompt，要求模型输出可 JSON.parse 的 ECharts option。
+	if shouldRenderChart(req.Messages) {
+		chartMsg := services.Message{Role: "system", Content: chartRenderInstruction}
+		req.Messages = append([]services.Message{chartMsg}, req.Messages...)
+	}
+	// ========== 图表渲染指令结束 ==========
 
 	// ========== 文件上下文注入 ==========
 	var resolvedFileIDs []uint
@@ -209,56 +259,46 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		if !req.SkipSaveUserMsg {
 			userMsg := req.Messages[len(req.Messages)-1]
 			if userMsg.Role == "user" {
-				h.db.Create(&models.Message{
+				msg := models.Message{
 					ConversationID: req.ConversationID,
 					Role:           "user",
 					Content:        userMsg.Content,
 					Model:          req.Model,
 					CreatedAt:      time.Now(),
-				})
+				}
+				h.db.Create(&msg)
+
+				// 保存消息-文件关联
+				if len(resolvedFileIDs) > 0 {
+					for i, fileID := range resolvedFileIDs {
+						var file models.File
+						if err := h.db.First(&file, fileID).Error; err != nil {
+							continue
+						}
+						// 判断文件类型
+						ftype := "document"
+						if isImg, _ := h.fileService.IsImageFile(fileID); isImg {
+							ftype = "image"
+						}
+						// 保存关联
+						if i < len(req.FileIDs) {
+							h.db.Create(&models.MessageFile{
+								MessageID: msg.ID,
+								FileID:    fileID,
+								PublicID:  req.FileIDs[i],
+								Type:      ftype,
+								Filename:  file.Filename,
+							})
+						}
+					}
+				}
 			}
 		}
 	}
 
-	// 判断当前模型是否为 GPT-5x（Responses API 原生支持工具调用）
-	isGPT5x := strings.HasPrefix(req.Model, "gpt-5")
-
-	// 联网搜索：GPT-5x 用模型内置工具调用，其他模型用 API 搜索注入
 	var searchSources []services.SearchResult
 	var useSearchTool bool
-
-	if req.Search {
-		if isGPT5x {
-			// GPT-5x 系列：跳过搜索注入，由 Responses API 的 tools 参数处理
-			useSearchTool = true
-		} else {
-			// 非 OpenAI 模型：保持原有搜索注入流程
-			var query string
-			var lastUserIdx int = -1
-			for i := len(req.Messages) - 1; i >= 0; i-- {
-				if req.Messages[i].Role == "user" {
-					query = req.Messages[i].Content
-					lastUserIdx = i
-					break
-				}
-			}
-			if query != "" && lastUserIdx >= 0 {
-				clientIP := c.ClientIP()
-				timezone := services.GetUserTimezoneByIP(clientIP)
-				searchResult, sources, err := h.searchService.Search(query, timezone)
-				if err == nil && searchResult != "" {
-					searchSources = sources
-					originalContent := req.Messages[lastUserIdx].Content
-					req.Messages[lastUserIdx].Content = originalContent + "\n\n---\n" + searchResult + "\n---"
-
-					noCitationMsg := services.Message{Role: "system", Content: "直接回答用户的问题，回答中不要出现任何引用来源编号（如[1][2][3]等格式），不要在末尾列出引用来源或参考链接列表。"}
-					req.Messages = append([]services.Message{noCitationMsg}, req.Messages...)
-				} else if err != nil {
-					fmt.Printf("[Chat] 搜索失败: %v\n", err)
-				}
-			}
-		}
-	}
+	req.Messages, searchSources, useSearchTool = h.preprocessSearch(req.Messages, req.Model, req.Search, c.ClientIP())
 
 	// 深度思考的语言指令：按模板要求 → 如果没模板则按用户语言
 	if req.Reasoning && req.TemplateID == 0 {
@@ -281,7 +321,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		req.Messages = append([]services.Message{langMsg}, req.Messages...)
 	}
 
-	// 调用 AI 服务（reasoning 参数控制是否启用思考模式，search 控制 GPT-5x 工具调用）
+	// 调用 AI 服务（reasoning 参数控制是否启用思考模式，search 控制模型原生搜索工具调用）
 	body, err := h.aiService.ChatCompletion(c.Request.Context(), req.Model, req.Messages, req.Stream, req.Reasoning, req.ReasoningEffort, useSearchTool)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -293,6 +333,9 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		c.Header("Content-Type", "text/event-stream")
 		c.Header("Cache-Control", "no-cache")
 		c.Header("Connection", "keep-alive")
+		c.Header("X-Accel-Buffering", "no")
+
+		c.Writer.WriteHeaderNow()
 
 		// 如果有搜索结果，先发送搜索元数据
 		if len(searchSources) > 0 {
@@ -315,7 +358,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		var isOpenAIResponses bool = services.IsOpenAIResponsesModel(req.Model)
 
 		if isOpenAIResponses {
-			// OpenAI Responses API (GPT/o系列) 使用 Responses SSE 格式
+			// OpenAI Responses API (GPT) 使用 Responses SSE 格式
 			content, err := h.aiService.StreamOpenAIResponses(body, c.Writer, req.Reasoning)
 			if err != nil {
 				fmt.Printf("[Chat] StreamOpenAIResponses error: %v\n", err)
@@ -323,22 +366,33 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 			fullContent = content
 			c.Writer.Flush()
 		} else {
-			// 非 OpenAI 模型走原有的 Chat Completions SSE 格式
-			scanner := bufio.NewScanner(body)
+			// 非 OpenAI 模型走 Chat Completions SSE 格式，统一使用 SSEParser
+			parser := services.NewSSEParser(body)
 			inThink := false
 
-			for scanner.Scan() {
-				line := scanner.Text()
-				if line == "" {
+			for {
+				ev, err := parser.Next()
+				if err != nil {
+					if errors.Is(err, io.EOF) {
+						break
+					}
+					// 解析失败：向前端发送错误，不发 [DONE]
+					errOut, _ := json.Marshal(map[string]interface{}{
+						"choices": []map[string]interface{}{
+							{"delta": map[string]string{"content": fmt.Sprintf("❌ 上游流式响应解析失败: %v", err)}},
+						},
+					})
+					c.Writer.WriteString("data: " + string(errOut) + "\n\n")
+					c.Writer.Flush()
+					break
+				}
+
+				data := bytes.TrimSpace(ev.Data)
+				if len(data) == 0 {
 					continue
 				}
 
-				if !bytes.HasPrefix([]byte(line), []byte("data: ")) {
-					continue
-				}
-
-				data := line[6:]
-				if data == "[DONE]" {
+				if bytes.Equal(data, []byte("[DONE]")) {
 					if inThink {
 						c.Writer.WriteString("data: {\"choices\":[{\"delta\":{\"content\":\"</think>\"}}]}\n\n")
 						c.Writer.Flush()
@@ -349,29 +403,29 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 				}
 
 				var resp map[string]interface{}
-				if err := json.Unmarshal([]byte(data), &resp); err != nil {
-					c.Writer.WriteString("data: " + data + "\n\n")
+				if err := json.Unmarshal(data, &resp); err != nil {
+					c.Writer.WriteString("data: " + string(data) + "\n\n")
 					c.Writer.Flush()
 					continue
 				}
 
 				choices, ok := resp["choices"].([]interface{})
 				if !ok || len(choices) == 0 {
-					c.Writer.WriteString("data: " + data + "\n\n")
+					c.Writer.WriteString("data: " + string(data) + "\n\n")
 					c.Writer.Flush()
 					continue
 				}
 
 				choice, ok := choices[0].(map[string]interface{})
 				if !ok {
-					c.Writer.WriteString("data: " + data + "\n\n")
+					c.Writer.WriteString("data: " + string(data) + "\n\n")
 					c.Writer.Flush()
 					continue
 				}
 
 				delta, ok := choice["delta"].(map[string]interface{})
 				if !ok {
-					c.Writer.WriteString("data: " + data + "\n\n")
+					c.Writer.WriteString("data: " + string(data) + "\n\n")
 					c.Writer.Flush()
 					continue
 				}
@@ -388,8 +442,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 					}
 					newContent += reasoning
 				}
-				// 重要：只有当 reasoning_content 已经完全停止时，才关闭 <think> 标签
-				// DeepSeek V4 Pro 可能在 thinking 途中就发非空 content，不能提前关闭
+				// 重要：只有当 reasoning_content 完全停止时，才关闭 <think> 标签
 				if hasContent && content != "" {
 					// reasoning_content 完全停止：要么 map 里没有这个 key，要么值为空字符串
 					reasoningStopped := !hasReasoning || reasoning == ""
@@ -412,7 +465,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 					if contentVal, ok := delta["content"].(string); ok && contentVal != "" {
 						fullContent += contentVal
 					}
-					c.Writer.WriteString("data: " + data + "\n\n")
+					c.Writer.WriteString("data: " + string(data) + "\n\n")
 					c.Writer.Flush()
 				}
 			}
@@ -637,10 +690,17 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 	results := make(chan resultChan, len(req.ModelIDs))
 	ctx := c.Request.Context()
 
+	searchMessages, _, compareUseSearchTool := h.preprocessSearch(messages, req.ModelIDs[0], req.Search, c.ClientIP())
+
 	for i, modelID := range req.ModelIDs {
 		go func(idx int, modelID string) {
 			start := time.Now()
-			content, err := h.callModel(ctx, modelID, messages, req.Reasoning, req.ReasoningEffort, req.Search)
+			modelMessages := searchMessages
+			useSearchTool := compareUseSearchTool
+			if req.Search {
+				modelMessages, _, useSearchTool = h.preprocessSearch(messages, modelID, req.Search, c.ClientIP())
+			}
+			content, err := h.callModel(ctx, modelID, modelMessages, req.Reasoning, req.ReasoningEffort, useSearchTool)
 			elapsed := time.Since(start).Milliseconds()
 			res := CompareResult{
 				ModelID:   modelID,
@@ -728,4 +788,36 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 func mustJSON(v interface{}) string {
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+const chartRenderInstruction = `用户要求画图表/折线图/柱状图/饼图/趋势图时，必须输出一个真实可渲染图表，而不是 ASCII 示意图或只给 ECharts JS 代码。
+
+输出规则：
+1. 先用一句中文简短说明。
+2. 立即给出一个 fenced code block，语言必须是 echarts：
+` + "```echarts" + `
+{ ... }
+` + "```" + `
+3. 代码块内容必须是严格 JSON 对象，可被 JSON.parse 直接解析：
+   - 属性名必须使用双引号
+   - 字符串必须使用双引号
+   - 不要出现 const、option =、注释、函数、尾随逗号
+4. option 必须至少包含 title、tooltip、xAxis、yAxis、series。
+5. 不要再输出 ASCII 图、text 图、Mermaid、JavaScript 代码示例。`
+
+func shouldRenderChart(messages []services.Message) bool {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role != "user" {
+			continue
+		}
+		text := strings.ToLower(messages[i].Content)
+		chartWords := []string{"图表", "折线图", "柱状图", "饼图", "趋势图", "面积图", "散点图", "echarts", "chart", "line chart", "bar chart", "pie chart"}
+		for _, word := range chartWords {
+			if strings.Contains(text, word) {
+				return true
+			}
+		}
+		return false
+	}
+	return false
 }

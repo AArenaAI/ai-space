@@ -21,6 +21,7 @@ export interface Message {
   search?: boolean;
   searchSources?: SearchSource[];
   searchStatus?: "searching" | "completed";
+  files?: { public_id: string; type: string; filename: string }[];
 }
 
 export interface ChatModel {
@@ -189,6 +190,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             content: m.content,
             model: m.model,
             createdAt: new Date(m.created_at).getTime(),
+            files: m.files || undefined,
           }));
           setMessages(loadedMessages);
           // 设置当前模型
@@ -268,6 +270,25 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       if (!reader) throw new Error("无法读取流");
 
       let accumulated = "";
+      let pendingDelta = "";
+      let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const flush = () => {
+        if (flushTimer) {
+          clearTimeout(flushTimer);
+          flushTimer = null;
+        }
+        const text = pendingDelta;
+        pendingDelta = "";
+        if (!text) return;
+        accumulated += text;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsg.id ? { ...m, content: accumulated } : m
+          )
+        );
+      };
+
       try {
         while (true) {
           const { done, value } = await reader.read();
@@ -279,10 +300,13 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           for (const line of lines) {
             if (line.startsWith("data: ")) {
               const data = line.slice(6);
-              if (data === "[DONE]") break;
+              if (data === "[DONE]") {
+                flush();
+                break;
+              }
               try {
                 const parsed = JSON.parse(data);
-                // 处理搜索元数据
+                // 处理搜索元数据（实时，不缓冲）
                 if (parsed._search_meta) {
                   const meta = parsed._search_meta;
                   setMessages((prev) =>
@@ -299,14 +323,14 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
                   continue;
                 }
                 const delta = parsed.choices?.[0]?.delta?.content || "";
-                accumulated += delta;
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === assistantMsg.id
-                      ? { ...m, content: accumulated }
-                      : m
-                  )
-                );
+                pendingDelta += delta;
+
+                if (!flushTimer) {
+                  flushTimer = setTimeout(() => {
+                    flushTimer = null;
+                    flush();
+                  }, 50);
+                }
               } catch {
                 // 忽略解析失败的行
               }
@@ -314,6 +338,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           }
         }
       } finally {
+        flush(); // 流结束时强制 flush 剩余内容
         reader.releaseLock();
       }
     },
@@ -458,7 +483,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       search: boolean = false,
       templateId: number = 0,
       skipUserMsg: boolean = false,
-      attachments?: { filename: string; content: string }[],
+      attachments?: { filename: string; content: string; type: string; public_id?: string }[],
       file_ids?: string[]
     ) => {
       if (!content.trim() && !isRegenerate && (!attachments || attachments.length === 0)) return;
@@ -510,6 +535,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           );
           finalContent = attachmentTexts.join("\n\n") + (finalContent ? "\n\n" + finalContent : "");
         }
+        const userFiles = attachments?.filter(a => a.public_id).map(a => ({ public_id: a.public_id!, type: a.type, filename: a.filename })) || [];
         assistantMsg = {
           id: uuidv4(),
           role: "assistant",
@@ -519,21 +545,25 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           search: lastSearchRef.current,
           searchStatus: lastSearchRef.current ? "searching" : undefined,
         };
-        contextMessages = [...messages, { role: "user" as const, content: finalContent, id: "", createdAt: 0 }];
+        contextMessages = [...messages, { role: "user" as const, content: finalContent, id: "", createdAt: 0, files: userFiles }];
         setMessages((prev) => [...prev, assistantMsg]);
       } else {
         let finalContent = content.trim();
         if (attachments && attachments.length > 0) {
-          const attachmentTexts = attachments.map(
+          // 非图片文件才拼接内容到文本（图片在 files 中单独展示）
+          const docAttachments = attachments.filter(a => a.type !== "image");
+          const attachmentTexts = docAttachments.map(
             (a) => `[文件: ${a.filename}]\n---\n${a.content}\n---`
           );
           finalContent = attachmentTexts.join("\n\n") + (finalContent ? "\n\n" + finalContent : "");
         }
+        const userFiles = attachments?.filter(a => a.public_id).map(a => ({ public_id: a.public_id!, type: a.type, filename: a.filename })) || [];
         const userMsg: Message = {
           id: uuidv4(),
           role: "user",
           content: finalContent,
           createdAt: Date.now(),
+          files: userFiles,
         };
 
         assistantMsg = {
@@ -598,6 +628,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
                   model: m.model,
                   createdAt: new Date(m.created_at).getTime(),
                   stopped: false,
+                  files: m.files || undefined,
                 }));
                 setMessages(reloaded);
               }

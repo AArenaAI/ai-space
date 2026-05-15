@@ -33,7 +33,7 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 	if err := db.AutoMigrate(
 		&User{}, &Conversation{}, &Message{}, &ConversationShare{},
 		&CompareRecord{}, &UserSkill{},
-		&File{}, &FileChunk{}, &FileEmbedding{}, &FileEmbeddingJob{}, &ConversationFile{},
+		&File{}, &FileChunk{}, &FileEmbedding{}, &FileEmbeddingJob{}, &ConversationFile{}, &MessageFile{},
 	); err != nil {
 		return nil, err
 	}

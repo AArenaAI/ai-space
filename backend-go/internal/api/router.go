@@ -123,6 +123,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	imageHandler.AutoMigrate()
 	imageHandler.RecoverPendingJobs() // 服务启动时恢复未完成的图片生成任务
 	authorized.POST("/images/generate", imageHandler.GenerateImage)
+	authorized.POST("/images/edit", imageHandler.EditImage)
 	authorized.GET("/images", imageHandler.ListImages)
 	authorized.GET("/images/:id", imageHandler.GetImage)
 	authorized.DELETE("/images/:id", imageHandler.DeleteImage)
@@ -175,6 +176,9 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	// 文件详情（无需认证，未登录用户上传后需要查询解析状态）
 	router.GET("/api/files/:id", fileHandler.GetFile)
+
+	// 文件下载（返回文件二进制，无需认证，图片直接展示）
+	router.GET("/api/files/:id/download", fileHandler.DownloadFile)
 
 	// 公开分享路由（无需认证：通过 short slug 访问）
 	publicShare := NewShareHandler(db)

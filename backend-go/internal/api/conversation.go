@@ -70,7 +70,7 @@ func (h *ConversationHandler) Get(c *gin.Context) {
 	}
 
 	// 加载消息
-	h.db.Where("conversation_id = ?", conv.ID).Order("created_at asc").Find(&conv.Messages)
+	h.db.Where("conversation_id = ?", conv.ID).Order("created_at asc").Preload("MessageFiles").Find(&conv.Messages)
 
 	c.JSON(http.StatusOK, conv)
 }
@@ -137,7 +137,7 @@ func (h *ConversationHandler) GetMessages(c *gin.Context) {
 	}
 
 	var messages []models.Message
-	if err := h.db.Where("conversation_id = ?", convID).Order("created_at asc").Find(&messages).Error; err != nil {
+	if err := h.db.Where("conversation_id = ?", convID).Order("created_at asc").Preload("MessageFiles").Find(&messages).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取消息失败"})
 		return
 	}

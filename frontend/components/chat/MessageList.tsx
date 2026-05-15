@@ -14,6 +14,7 @@ import { useTheme } from "@/components/theme/ThemeProvider";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import ShareDialog from "@/components/ui/ShareDialog";
 import { useSmartAutoScroll } from "@/hooks/useSmartAutoScroll";
+import EChartsBlock from "./EChartsBlock";
 
 interface MessageListProps {
   messages: Message[];
@@ -549,18 +550,76 @@ export default function MessageList({
                   )}
 
                   {isUser ? (
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="text-[15px] leading-relaxed text-text-primary whitespace-pre-wrap">{msg.content}</p>
-                      {!selectMode && (
-                        <div className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-0.5">
-                          <MessageMenu
-                            onCopy={() => handleCopy(msg.content)}
-                            onDelete={() => setDeleteTarget(msg.id)}
-                            onSelectMode={enterSelectMode}
-                            showRegenerate={false}
-                          />
+                    <div className="flex flex-col gap-2">
+                      {/* 图片附件渲染 */}
+                      {msg.files && msg.files.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {msg.files.map((f, fi) => {
+                            if (f.type === "image") {
+                              return (
+                                <div key={fi} className="relative group/file rounded-xl overflow-hidden border border-surface-border bg-surface-card">
+                                  <img
+                                    src={`/api/files/${f.public_id}/download`}
+                                    alt={f.filename}
+                                    className="max-w-[200px] max-h-[200px] object-cover rounded-xl"
+                                    onError={(e) => {
+                                      (e.target as HTMLImageElement).src = "";
+                                      (e.target as HTMLImageElement).classList.add("hidden");
+                                      (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden");
+                                    }}
+                                  />
+                                  <div className="hidden text-xs text-text-tertiary px-3 py-2">图片加载失败</div>
+                                </div>
+                              );
+                            }
+                            return null;
+                          })}
                         </div>
                       )}
+                      <div className="flex items-start justify-between gap-2">
+                        {msg.content ? (
+                          <p className="text-[15px] leading-relaxed text-text-primary whitespace-pre-wrap">{msg.content}</p>
+                        ) : null}
+                        {!selectMode && (
+                          <div className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-0.5">
+                            <MessageMenu
+                              onCopy={() => handleCopy(msg.content)}
+                              onDelete={() => setDeleteTarget(msg.id)}
+                              onSelectMode={enterSelectMode}
+                              showRegenerate={false}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : isStreaming ? (
+                    // 流式期间：普通文本渲染（避免每个 token 重新解析 Markdown 造成卡顿）
+                    <div className="text-[15px] leading-relaxed text-text-primary whitespace-pre-wrap break-words">
+                      {(() => {
+                        const { reasoning, answer } = parseThinkContent(msg.content);
+                        return (
+                          <>
+                            {reasoning && (
+                              <div className="mb-3 rounded-xl border border-purple-200 dark:border-purple-800/40 overflow-hidden">
+                                <div className="flex items-center gap-2 px-3 py-2 bg-purple-50 dark:bg-[#1A1A2E]">
+                                  <Lightbulb className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
+                                  <span className="text-sm font-medium text-text-secondary">正在思考...</span>
+                                  <div className="flex gap-0.5 ml-1">
+                                    <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce" />
+                                    <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce [animation-delay:0.15s]" />
+                                    <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce [animation-delay:0.3s]" />
+                                  </div>
+                                </div>
+                                <div className="px-3 py-2.5 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap bg-slate-50 dark:bg-[#0F0F1A]">
+                                  {reasoning}
+                                </div>
+                              </div>
+                            )}
+                            <div>{sanitizeContent(answer)}</div>
+                            <StreamingCursor />
+                          </>
+                        );
+                      })()}
                     </div>
                   ) : (
                     <div className="prose prose-sm max-w-none">
@@ -575,8 +634,13 @@ export default function MessageList({
                               components={{
                                 code({ node, inline, className, children, ...props }: any) {
                                   const match = /language-(\w+)/.exec(className || "");
+                                  const lang = match?.[1] || "";
+                                  const value = String(children).replace(/\n$/, "");
+                                  if (!inline && lang === "echarts") {
+                                    return <EChartsBlock value={value} />;
+                                  }
                                   return !inline && match ? (
-                                    <CodeBlock language={match[1]} value={String(children).replace(/\n$/, "")} />
+                                    <CodeBlock language={lang} value={value} />
                                   ) : (
                                     <code className="bg-[#E8E8E8] dark:bg-[#2A2A3A] text-[#333333] dark:text-[#E0E0E0] px-1 py-0.5 rounded text-[13px] font-mono" {...props}>
                                       {children}
@@ -605,7 +669,6 @@ export default function MessageList({
                           </>
                         );
                       })()}
-                      {isStreaming && <StreamingCursor />}
                       {msg.stopped && onContinueGenerate && (
                         <button
                           onClick={onContinueGenerate}

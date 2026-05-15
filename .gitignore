@@ -30,6 +30,38 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
+# Go binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+aipool-backend
+backend-go/aipool
+backend-go/bin/
+
+# Go test cache
+*.test
+*.out
+
+# Old backend (Python)
+backend/
+
+# Build artifacts
+backend-go/uploads/*.png
+backend-go/uploads/*.jpg
+backend-go/uploads/*.jpeg
+backend-go/uploads/*.md
+
+# Data directory (user-generated)
+backend-go/data/aipool.db
+backend-go/data/images/
+
+# Root server.js & package files
+server.js
+package.json
+package-lock.json
+
 # Misc
 *.pem
 .vercel

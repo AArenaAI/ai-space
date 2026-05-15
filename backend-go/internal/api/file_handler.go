@@ -120,6 +120,19 @@ func (h *FileHandler) GetFile(c *gin.Context) {
 
 	c.JSON(http.StatusOK, file)
 }
+
+func (h *FileHandler) DownloadFile(c *gin.Context) {
+	userID := getUserID(c)
+	publicID := c.Param("id")
+
+	file, err := h.fileService.ResolveFileByPublicID(publicID, userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "文件不存在或无权访问"})
+		return
+	}
+
+	c.FileAttachment(file.StoragePath, file.Filename)
+}
 func inferFileType(filename string) string {
 	ext := ""
 	for i := len(filename) - 1; i >= 0; i-- {

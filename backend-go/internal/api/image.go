@@ -2,6 +2,7 @@ package api
 
 import (
 	"aipool-backend/internal/config"
+	"aipool-backend/internal/models"
 	"aipool-backend/internal/services"
 	"context"
 	"crypto/rand"
@@ -188,6 +189,174 @@ func saveBase64Image(b64Data string) (string, error) {
 		return "", fmt.Errorf("写入图片文件失败: %w", err)
 	}
 	return filename, nil
+}
+
+// EditImageRequest 图片编辑请求
+type EditImageRequest struct {
+	Prompt    string `json:"prompt"`                    // 编辑 prompt（替换背景时需要）
+	Size      string `json:"size"`                      // 尺寸（可选）
+	ImageURL  string `json:"image_url"`                 // 源图 URL（可选，和 image_data 二选一）
+	ImageData string `json:"image_data"`                // 源图 base64 数据（可选，和 image_url 二选一）
+	EditMode  string `json:"edit_mode" binding:"required"` // remove-bg 或 replace-bg
+}
+
+// EditImage 编辑图片（背景移除 / 背景替换）
+// 支持两种传图方式：
+// 1. image_url — 已保存在 data/images/ 目录下的图片文件名（完整 URL）
+// 2. image_data — base64 编码的图片数据
+func (h *ImageHandler) EditImage(c *gin.Context) {
+	userID := getUserID(c)
+
+	var req EditImageRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 验证编辑模式
+	if req.EditMode != "remove-bg" && req.EditMode != "replace-bg" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "edit_mode 必须是 remove-bg 或 replace-bg"})
+		return
+	}
+
+	// 替换背景时必须提供 prompt
+	if req.EditMode == "replace-bg" && req.Prompt == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "替换背景时必须提供 prompt 描述新背景"})
+		return
+	}
+
+	// 至少需要提供 image_url 或 image_data
+	if req.ImageURL == "" && req.ImageData == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "必须提供 image_url 或 image_data"})
+		return
+	}
+
+	baseURL := resolveBaseURL(c, h.cfg)
+	ctx := context.Background()
+	size := req.Size
+	if size == "" {
+		size = "1024x1024"
+	}
+
+	var imageFilePath string
+
+	if req.ImageData != "" {
+		// 方案 A: 从前端传来的 base64 数据直接保存为本地文件
+		cleanData := req.ImageData
+		// 处理可能包含的 data:image/xxx;base64, 前缀
+		if idx := strings.Index(cleanData, "base64,"); idx != -1 {
+			cleanData = cleanData[idx+7:]
+		}
+		// 去 whitespace
+		cleanData = strings.TrimSpace(cleanData)
+
+		var saveErr error
+		imageFilePath, saveErr = saveBase64ToImages(cleanData)
+		if saveErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存源图失败: " + saveErr.Error()})
+			return
+		}
+	} else {
+		// 方案 B: 支持两种方式：
+		//   - public_id (以 file_ 开头)：从上传文件库查路径
+		//   - URL/文件名：从 data/images/ 目录读取
+		var filename string
+		if strings.HasPrefix(req.ImageURL, "file_") {
+			var file models.File
+			if err := h.db.Where("public_id = ?", req.ImageURL).First(&file).Error; err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": "图片不存在"})
+				return
+			}
+			filename = filepath.Base(file.StoragePath)
+		} else {
+			parts := strings.Split(req.ImageURL, "/")
+			if len(parts) == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "无效的图片 URL"})
+				return
+			}
+			filename = parts[len(parts)-1]
+		}
+		if strings.Contains(filename, "..") || strings.Contains(filename, "/") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "非法文件名"})
+			return
+		}
+
+		imageFilePath = filepath.Join(imagesDir, filename)
+		if _, statErr := os.Stat(imageFilePath); statErr != nil {
+			// 如果 data/images/ 没有，去 uploads 目录找
+			uploadDir := "./uploads"
+			imageFilePath = filepath.Join(uploadDir, filename)
+			if _, statErr2 := os.Stat(imageFilePath); statErr2 != nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": "图片文件不存在"})
+				return
+			}
+		}
+	}
+
+	var imageURL, b64Data string
+	var err error
+
+	if req.EditMode == "remove-bg" {
+		imageURL, b64Data, err = h.imageService.RemoveBackground(ctx, size, imageFilePath)
+	} else {
+		editPrompt := req.Prompt + ". Keep the subject the same, only change the background."
+		imageURL, b64Data, err = h.imageService.GenerateEditImage(ctx, editPrompt, size, imageFilePath)
+	}
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "背景编辑失败: " + err.Error()})
+		return
+	}
+
+	// 保存结果到本地
+	var savedImageURL string
+	if b64Data != "" {
+		savedFilename, saveErr := saveBase64Image(b64Data)
+		if saveErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存编辑结果失败: " + saveErr.Error()})
+			return
+		}
+		savedImageURL = buildImageURL(baseURL, savedFilename)
+	} else {
+		savedImageURL = imageURL
+	}
+
+	// 可选：把编辑结果也记录到 DB（复用 ImageGeneration 表）
+	gen := &services.ImageGeneration{
+		UserID:            userID,
+		Prompt:            req.Prompt,
+		Size:              size,
+		ImageURL:          savedImageURL,
+		ReferenceImageURL: req.ImageURL,
+		Status:            "completed",
+	}
+	if req.EditMode == "remove-bg" {
+		gen.Prompt = "[背景移除] " + req.ImageURL
+	}
+	h.db.Create(gen)
+
+	c.JSON(http.StatusOK, gin.H{
+		"image_url": savedImageURL,
+		"id":        gen.ID,
+		"status":    "completed",
+	})
+}
+
+// saveBase64ToImages 将 base64 数据保存到 data/images/ 目录，返回完整文件路径
+func saveBase64ToImages(b64Data string) (string, error) {
+	if err := os.MkdirAll(imagesDir, 0755); err != nil {
+		return "", fmt.Errorf("创建图片目录失败: %w", err)
+	}
+	filename := generateFileName()
+	path := filepath.Join(imagesDir, filename)
+	data, err := base64.StdEncoding.DecodeString(b64Data)
+	if err != nil {
+		return "", fmt.Errorf("base64 解码失败: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return "", fmt.Errorf("写入图片文件失败: %w", err)
+	}
+	return path, nil
 }
 
 // GenerateImage 异步生成图片

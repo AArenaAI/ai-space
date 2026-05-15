@@ -31,4 +31,17 @@ type Message struct {
 	TokensUsed     int            `json:"tokens_used"`
 	CreatedAt      time.Time      `json:"created_at"`
 	DeletedAt      gorm.DeletedAt `gorm:"index" json:"-"`
+
+	// 文件关联（仅 user 消息可能有）
+	MessageFiles []MessageFile `json:"files,omitempty" gorm:"foreignKey:MessageID"`
+}
+
+// MessageFile 消息与文件的关联（用于图片显示等）
+type MessageFile struct {
+	ID        uint   `gorm:"primarykey" json:"id"`
+	MessageID uint   `gorm:"not null;index;uniqueIndex:idx_msg_file" json:"message_id"`
+	FileID    uint   `gorm:"not null;index;uniqueIndex:idx_msg_file" json:"file_id"`
+	PublicID  string `gorm:"size:64" json:"public_id"`
+	Type      string `gorm:"size:16" json:"type"`          // image / document
+	Filename  string `gorm:"size:255" json:"filename"`
 }

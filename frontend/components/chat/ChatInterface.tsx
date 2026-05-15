@@ -186,7 +186,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
     });
   };
 
-  const handleSend = async (content: string, reasoning: any, search: boolean, attachments?: { filename: string; content: string }[], file_ids?: string[]) => {
+  const handleSend = async (content: string, reasoning: any, search: boolean, attachments?: { filename: string; content: string; type: string; public_id?: string }[], file_ids?: string[]) => {
     // 【积分限制已临时取消】保畔代码但不执行
     /* 积分检查已注释
     if (compareMode) {

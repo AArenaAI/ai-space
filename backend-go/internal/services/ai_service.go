@@ -2,11 +2,11 @@ package services
 
 import (
 	"aipool-backend/internal/config"
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -52,7 +52,7 @@ func (s *AIService) ChatCompletion(ctx context.Context, model string, messages [
 }
 
 func isOpenAI(model string) bool {
-	return strings.HasPrefix(model, "gpt-5") || strings.HasPrefix(model, "o1-") || strings.HasPrefix(model, "o3-") || strings.HasPrefix(model, "o4-")
+	return strings.HasPrefix(model, "gpt-5")
 }
 
 // IsOpenAIResponsesModel 公开判断——该模型使用 Responses API (/v1/responses)
@@ -86,16 +86,20 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 		baseURL = s.cfg.OpenAIBaseURL
 	}
 
-	// 提取 system 消息到 input 开头
-	var systemInstruction string
+	// 提取 system 消息到 instructions。注意：同一次请求可能同时包含模板、技能、图表渲染等多个 system prompt，
+	// 不能只保留最后一个，否则前面的模板/功能指令会被覆盖。
+	var systemInstructions []string
 	var userMessages []Message
 	for _, m := range messages {
 		if m.Role == "system" {
-			systemInstruction = m.Content
+			if strings.TrimSpace(m.Content) != "" {
+				systemInstructions = append(systemInstructions, m.Content)
+			}
 		} else {
 			userMessages = append(userMessages, m)
 		}
 	}
+	systemInstruction := strings.Join(systemInstructions, "\n\n")
 
 	// input 数组 — 把 user/assistant 消息按原样传入
 	inputItems := make([]map[string]interface{}, 0, len(userMessages))
@@ -126,6 +130,10 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 		"input":             inputItems,
 		"stream":            stream,
 		"max_output_tokens": 8192,
+		// 默认聊天必须禁用 Responses API 内置工具。
+		// 否则 gpt-5.5 会把“画图/画折线图”等普通图表需求自动路由到 image_generation_call，
+		// 上游最终返回空 output_text，前端就只能看到 data: [DONE]。
+		"tool_choice": "none",
 	}
 
 	// instructions 字段处理 system prompt
@@ -136,11 +144,7 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 	// Reasoning / thinking 配置 — Responses API 使用嵌套对象
 	if reasoning {
 		reasoningConfig := map[string]any{}
-		isGPT5 := strings.HasPrefix(model, "gpt-5")
-		isOSeries := strings.Contains(model, "o1-") || strings.Contains(model, "o3-") || strings.Contains(model, "o4-")
-		isGPT5Search := model == "gpt-5-search-api"
-
-		if isOSeries || isGPT5 || isGPT5Search {
+		if strings.HasPrefix(model, "gpt-5") {
 			effort := "medium"
 			switch reasoningEffort {
 			case "light":
@@ -162,11 +166,13 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 		}
 	}
 
-	// web_search tools — 仅对 GPT-5x 系列启用（Responses API 原生工具调用）
+	// web_search tools — 仅在用户显式开启搜索时允许 Responses API 原生工具调用。
+	// 开启工具时必须把 tool_choice 从 none 调回 auto，否则 web_search 不会被调用。
 	if search {
 		reqBody["tools"] = []map[string]any{
 			{"type": "web_search"},
 		}
+		reqBody["tool_choice"] = "auto"
 	}
 
 	jsonBody, _ := json.Marshal(reqBody)
@@ -284,25 +290,22 @@ func (s *AIService) callDeepSeek(ctx context.Context, model string, messages []M
 		baseURL = s.cfg.DeepSeekBaseURL
 	}
 
-	// 转换消息为 OpenAI 兼容多模态格式
+	// 转换消息为 OpenAI 兼容格式
+	// 注意：DeepSeek 不支持 vision/图片输入，所以如果消息带了图片，
+	// 我们只在文本中提示用户上传了图片，不发送 image_url content parts。
 	deepSeekMessages := make([]map[string]interface{}, 0, len(messages))
 	for _, m := range messages {
 		msg := map[string]interface{}{
 			"role": m.Role,
 		}
 		if len(m.Images) > 0 && m.Role == "user" {
-			contentParts := []map[string]interface{}{
-				{"type": "text", "text": m.Content},
+			contentText := m.Content
+			if contentText == "" {
+				contentText = "用户上传了图片（共" + fmt.Sprintf("%d", len(m.Images)) + "张），但本模型是纯文本模型，无法查看图片内容。请告知用户当前模型不支持图片识别，建议切换到 GPT-5x 或 Claude 等支持多模态的模型。"
+			} else {
+				contentText += "\n\n（用户同时上传了 " + fmt.Sprintf("%d", len(m.Images)) + " 张图片，但本模型是纯文本模型，无法查看图片内容。请告知用户当前模型不支持图片识别，建议切换到 GPT-5x 或 Claude 等支持多模态的模型。）"
 			}
-			for _, img := range m.Images {
-				contentParts = append(contentParts, map[string]interface{}{
-					"type": "image_url",
-					"image_url": map[string]string{
-						"url": img,
-					},
-				})
-			}
-			msg["content"] = contentParts
+			msg["content"] = contentText
 		} else {
 			msg["content"] = m.Content
 		}
@@ -351,7 +354,106 @@ func (s *AIService) callDeepSeek(ctx context.Context, model string, messages []M
 }
 
 func (s *AIService) callMoonshot(ctx context.Context, model string, messages []Message, stream bool, reasoning bool) (io.ReadCloser, error) {
-	return nil, fmt.Errorf("Moonshot 暂未实现")
+	// 如果未单独配置 Moonshot Key，复用 OpenAI 的 Key（共享中转代理）
+	apiKey := s.cfg.MoonshotKey
+	if apiKey == "" {
+		apiKey = s.cfg.OpenAIKey
+	}
+	if apiKey == "" {
+		return nil, fmt.Errorf("未配置 Moonshot (Kimi) / OpenAI API Key")
+	}
+
+	// 如果未单独配置 Moonshot Base URL，复用 OpenAI 的 Base URL（共享中转代理）
+	baseURL := s.cfg.MoonshotBaseURL
+	if baseURL == "" {
+		baseURL = s.cfg.OpenAIBaseURL
+	}
+	if baseURL == "" {
+		baseURL = "https://api.moonshot.cn"
+	}
+
+	// 判断当前模型是否支持 vision（Kimi K2.5 及更新版本支持多模态）
+	supportsVision := isKimiVisionModel(model)
+
+	// 转换消息为 OpenAI 兼容格式
+	moonshotMessages := make([]map[string]interface{}, 0, len(messages))
+	for _, m := range messages {
+		msg := map[string]interface{}{
+			"role": m.Role,
+		}
+
+		if len(m.Images) > 0 && m.Role == "user" && supportsVision {
+			// Kimi K2.5+ 支持多模态：构建 content array
+			content := make([]map[string]interface{}, 0)
+			if m.Content != "" {
+				content = append(content, map[string]interface{}{
+					"type": "text",
+					"text": m.Content,
+				})
+			}
+			for _, img := range m.Images {
+				content = append(content, map[string]interface{}{
+					"type":     "image_url",
+					"image_url": map[string]string{"url": img},
+				})
+			}
+			msg["content"] = content
+		} else if len(m.Images) > 0 && m.Role == "user" {
+			// 旧版 moonshot-v1 不支持 vision，提示用户
+			contentText := m.Content
+			if contentText == "" {
+				contentText = "用户上传了图片（共" + fmt.Sprintf("%d", len(m.Images)) + "张），但当前模型不支持图片识别。请告知用户切换到支持多模态的模型（如 kimi-k2.5）。"
+			} else {
+				contentText += "\n\n（用户同时上传了 " + fmt.Sprintf("%d", len(m.Images)) + " 张图片，但当前模型不支持图片识别。）"
+			}
+			msg["content"] = contentText
+		} else {
+			msg["content"] = m.Content
+		}
+
+		moonshotMessages = append(moonshotMessages, msg)
+	}
+
+	reqBody := map[string]interface{}{
+		"model":       model,
+		"messages":    moonshotMessages,
+		"stream":      stream,
+		"temperature": 1.0, // Kimi 官方推荐：思考模型使用 temperature=1.0；kimi-k2.6 固定使用 1.0
+		"max_tokens":  16384, // Kimi 官方推荐 ≥ 16000，确保 reasoning_content + content 不会被截断
+	}
+
+	// Kimi 思考模式控制
+	// kimi-k2.6 默认开启思考能力；kimi-k2.5 也支持思考
+	// 当用户未启用思考时，通过 thinking=disabled 关闭
+	if strings.HasPrefix(model, "kimi-k2") && !reasoning {
+		reqBody["thinking"] = map[string]string{"type": "disabled"}
+	}
+
+	jsonBody, _ := json.Marshal(reqBody)
+	fmt.Printf("[Moonshot] model=%s reasoning=%v body_len=%d\n", model, reasoning, len(jsonBody))
+	req, _ := http.NewRequestWithContext(ctx, "POST", baseURL+"/v1/chat/completions", bytes.NewBuffer(jsonBody))
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("Moonshot API 错误: %s", string(body))
+	}
+
+	return resp.Body, nil
+}
+
+// isKimiVisionModel 判断模型是否支持多模态图片理解
+func isKimiVisionModel(model string) bool {
+	// Kimi K2.5 系列支持 vision；moonshot-v1 系列不支持
+	return strings.Contains(model, "kimi-k2.5") || strings.Contains(model, "kimi-k2.6")
 }
 
 // parseDataURI 从 data URI 中提取 MIME type 和 base64 数据
@@ -445,142 +547,148 @@ func (s *AIService) ExtractImageContent(ctx context.Context, imageData []byte, m
 // 前端 Chat Completions 格式的 data: {...} SSE，保持前端无痛迁移。
 func (s *AIService) StreamOpenAIResponses(body io.ReadCloser, w io.Writer, reasoningEnabled bool) (string, error) {
 	defer body.Close()
-	scanner := bufio.NewScanner(body)
+	parser := NewSSEParser(body)
 
-	var eventType string
 	var fullContent strings.Builder
 	var sentDone bool
 	var webSearchCount int
 	var thinkOpened bool // 是否已输出 <think>（只输出一次）
 
-	for scanner.Scan() {
-		line := scanner.Text()
+	for {
+		ev, err := parser.Next()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			// 解析失败：向前端发送错误，不发 [DONE]
+			errText := fmt.Sprintf("❌ 上游流式响应解析失败: %v", err)
+			s.writeContent(w, errText)
+			return fullContent.String(), err
+		}
 
-		if strings.HasPrefix(line, "event: ") {
-			eventType = strings.TrimPrefix(line, "event: ")
+		data := bytes.TrimSpace(ev.Data)
+		if len(data) == 0 {
 			continue
 		}
 
-		if strings.HasPrefix(line, "data: ") {
-			data := line[6:]
-			if data == "" {
+		if bytes.Equal(data, []byte("[DONE]")) {
+			break
+		}
+
+		switch ev.Event {
+		case "response.output_text.delta":
+			var evt struct {
+				Delta string `json:"delta"`
+				Index int    `json:"index"`
+			}
+			if err := json.Unmarshal(data, &evt); err != nil || evt.Delta == "" {
 				continue
 			}
+			// 最终答案开始前，关闭 <think>（如果有）
+			if reasoningEnabled && thinkOpened {
+				thinkOpened = false
+				s.writeContent(w, "</think>")
+				fullContent.WriteString("</think>")
+			}
+			s.writeContent(w, evt.Delta)
+			fullContent.WriteString(evt.Delta)
 
-			switch eventType {
-			case "response.output_text.delta":
-				var evt struct {
-					Delta string `json:"delta"`
-					Index int    `json:"index"`
-				}
-				if err := json.Unmarshal([]byte(data), &evt); err != nil || evt.Delta == "" {
+		case "response.reasoning_summary_text.delta", "response.reasoning_summary.delta", "response.reasoning.delta":
+			var evt struct {
+				Delta string `json:"delta"`
+				Index int    `json:"index"`
+			}
+			if err := json.Unmarshal(data, &evt); err != nil || evt.Delta == "" {
+				continue
+			}
+			if reasoningEnabled {
+				if !thinkOpened {
+					// 如果 think 已关闭（output_text 已经开始），后续 reasoning 事件不再重新开 <think>
+					// 否则正文中会混入不带 <think> 包裹的思考内容
+					fullContent.WriteString(evt.Delta)
 					continue
-				}
-				// 最终答案开始前，关闭 <think>（如果有）
-				if reasoningEnabled && thinkOpened {
-					thinkOpened = false
-					s.writeContent(w, "</think>")
-					fullContent.WriteString("</think>")
 				}
 				s.writeContent(w, evt.Delta)
 				fullContent.WriteString(evt.Delta)
+			}
 
-			case "response.reasoning_summary_text.delta", "response.reasoning_summary.delta", "response.reasoning.delta":
+		case "response.done":
+			if reasoningEnabled && thinkOpened {
+				thinkOpened = false
+				s.writeContent(w, "</think>")
+				fullContent.WriteString("</think>")
+			}
+			s.writeSSE(w, "[DONE]")
+			sentDone = true
+			continue
+
+		case "response.output_item.added":
+			if reasoningEnabled {
 				var evt struct {
-					Delta string `json:"delta"`
-					Index int    `json:"index"`
+					Item struct {
+						Type string `json:"type"`
+					} `json:"item"`
 				}
-				if err := json.Unmarshal([]byte(data), &evt); err != nil || evt.Delta == "" {
-					continue
-				}
-				if reasoningEnabled {
-					if !thinkOpened {
-						// 如果 think 已关闭（output_text 已经开始），后续 reasoning 事件不再重新开 <think>
-						// 否则正文中会混入不带 <think> 包裹的思考内容
-						fullContent.WriteString(evt.Delta)
-						continue
-					}
-					s.writeContent(w, evt.Delta)
-					fullContent.WriteString(evt.Delta)
-				}
-
-			case "response.done":
-				if reasoningEnabled && thinkOpened {
-					thinkOpened = false
-					s.writeContent(w, "</think>")
-					fullContent.WriteString("</think>")
-				}
-				s.writeSSE(w, "[DONE]")
-				sentDone = true
-				continue
-
-			case "response.output_item.added":
-				if reasoningEnabled {
-					var evt struct {
-						Item struct {
-							Type string `json:"type"`
-						} `json:"item"`
-					}
-					if err := json.Unmarshal([]byte(data), &evt); err == nil {
-						if evt.Item.Type == "function_call" || evt.Item.Type == "web_search_call" {
-							// 搜索提示输出在 <think> 内
+				if err := json.Unmarshal(data, &evt); err == nil {
+					if evt.Item.Type == "function_call" || evt.Item.Type == "web_search_call" {
+						// 搜索提示输出在 <think> 内
 						if !thinkOpened {
 							thinkOpened = true
 							s.writeContent(w, "<think>")
 							fullContent.WriteString("<think>")
 						}
-							webSearchCount++
-							if webSearchCount == 1 {
-								s.writeContent(w, "🔍 正在搜索相关信息...\\n\\n")
-								fullContent.WriteString("🔍 正在搜索相关信息...\\n\\n")
-							} else {
-								s.writeContent(w, "🔍 补充搜索...\\n\\n")
-								fullContent.WriteString("🔍 补充搜索...\\n\\n")
-							}
+						webSearchCount++
+						if webSearchCount == 1 {
+							s.writeContent(w, "🔍 正在搜索相关信息...\\n\\n")
+							fullContent.WriteString("🔍 正在搜索相关信息...\\n\\n")
+						} else {
+							s.writeContent(w, "🔍 补充搜索...\\n\\n")
+							fullContent.WriteString("🔍 补充搜索...\\n\\n")
 						}
 					}
 				}
-				continue
-
-			case "response.web_search_call.in_progress", "response.web_search_call.searching":
-				continue
-
-			case "response.web_search_call.completed":
-				if reasoningEnabled {
-					if !thinkOpened {
-						thinkOpened = true
-						s.writeContent(w, "<think>")
-						fullContent.WriteString("<think>")
-					}
-					s.writeContent(w, "✅ 搜索完成，正在分析结果...\\n\\n")
-					fullContent.WriteString("✅ 搜索完成，正在分析结果...\\n\\n")
-				}
-				continue
-
-			case "response.output_item.done":
-				// 不再处理 reasoning 的关闭，由 output_text.delta 或 response.done 统一关闭
-				continue
-
-			case "response.error":
-				var evt struct {
-					Code    string `json:"code"`
-					Message string `json:"message"`
-				}
-				json.Unmarshal([]byte(data), &evt)
-				s.writeContent(w, fmt.Sprintf("❌ API 错误: %s - %s", evt.Code, evt.Message))
-				fullContent.WriteString(fmt.Sprintf("❌ API 错误: %s - %s", evt.Code, evt.Message))
-				s.writeSSE(w, "[DONE]")
-				sentDone = true
-				continue
-
-			default:
-				// 忽略其他事件（response.created, response.in_progress, response.output_item.added 等）
-				continue
 			}
+			continue
+
+		case "response.web_search_call.in_progress", "response.web_search_call.searching":
+			continue
+
+		case "response.web_search_call.completed":
+			if reasoningEnabled {
+				if !thinkOpened {
+					thinkOpened = true
+					s.writeContent(w, "<think>")
+					fullContent.WriteString("<think>")
+				}
+				s.writeContent(w, "✅ 搜索完成，正在分析结果...\\n\\n")
+				fullContent.WriteString("✅ 搜索完成，正在分析结果...\\n\\n")
+			}
+			continue
+
+		case "response.output_item.done":
+			// 不再处理 reasoning 的关闭，由 output_text.delta 或 response.done 统一关闭
+			continue
+
+		case "response.error":
+			var evt struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			}
+			json.Unmarshal(data, &evt)
+			errText := fmt.Sprintf("❌ API 错误: %s - %s", evt.Code, evt.Message)
+			s.writeContent(w, errText)
+			fullContent.WriteString(errText)
+			s.writeSSE(w, "[DONE]")
+			sentDone = true
+			continue
+
+		default:
+			// 忽略其他事件（response.created, response.in_progress, response.output_item.added 等）
+			continue
 		}
 	}
 
-	// 安全兜底：如果流结束还没收到 response.done，补发 [DONE]
+	// 安全审底：如果流结束还没收到 response.done，补发 [DONE]
 	if !sentDone {
 		if reasoningEnabled && thinkOpened {
 			s.writeContent(w, "</think>")
@@ -589,7 +697,7 @@ func (s *AIService) StreamOpenAIResponses(body io.ReadCloser, w io.Writer, reaso
 		s.writeSSE(w, "[DONE]")
 	}
 
-	return strings.TrimSpace(fullContent.String()), scanner.Err()
+	return strings.TrimSpace(fullContent.String()), nil
 }
 
 func (s *AIService) writeContent(w io.Writer, text string) {

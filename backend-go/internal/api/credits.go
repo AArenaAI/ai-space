@@ -23,7 +23,8 @@ var modelTierMap = map[string]string{
 	"gpt-5.4":                   "advanced",
 	"gpt-5.5":                   "advanced",
 	"claude-3-5-sonnet-20241022": "advanced",
-	"moonshot-v1-8k":            "advanced",
+	"kimi-k2.5":                 "advanced",
+	"kimi-k2.6":                 "advanced",
 
 	// 精英等级
 	"gpt-5.5-pro":      "elite",

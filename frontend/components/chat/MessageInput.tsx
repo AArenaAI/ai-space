@@ -9,6 +9,8 @@ import { ChatModel } from "@/hooks/useChat";
 const DEEPSEEK_EFFORTS = ["high", "max"] as const;
 // GPT 模型的思考档位
 const GPT_EFFORTS = ["light", "standard", "extended", "heavy"] as const;
+// Kimi/Moonshot 模型的思考档位（只有开/关，无等级）
+const MOONSHOT_EFFORTS = [] as const;
 
 export type ReasoningEffort = "light" | "standard" | "extended" | "heavy" | "high" | "max";
 
@@ -67,6 +69,12 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     if (!dropdownOpen) return;
     if (!currentModel) return;
     const isDeepSeek = currentModel.provider === "DeepSeek";
+    const isMoonshot = currentModel.provider === "Moonshot";
+    // Moonshot/Kimi 无 effort 等级，不验证
+    if (isMoonshot) {
+      setDropdownOpen(false);
+      return;
+    }
     const validEfforts = isDeepSeek ? DEEPSEEK_EFFORTS : GPT_EFFORTS;
     if (!(validEfforts as readonly string[]).includes(reasoning.effort)) {
       const defaultEffort: ReasoningEffort = isDeepSeek ? "high" : "standard";
@@ -235,10 +243,16 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     prevModelRef.current = currentModel;
     if (prevProvider === currProvider) return; // 同厂商不重置
 
-    // 从 DeepSeek 切到 GPT 等 -> 如果当前档位是 DeepSeek 专用值(high/max)，重置为 standard
+    // Moonshot/Kimi 无 effort 等级，重置为 standard（实际无意义）
+    const isMoonshot = currProvider === "Moonshot";
     const isDeepSeek = currProvider === "DeepSeek";
-    const isGPTLike = !isDeepSeek;
-    if (isDeepSeek && (reasoning.effort === "light" || reasoning.effort === "extended" || reasoning.effort === "heavy")) {
+    const isGPTLike = !isDeepSeek && !isMoonshot;
+    if (isMoonshot) {
+      // Moonshot 无 effort 等级，设默认值但不显示下拉
+      const newEffort: ReasoningEffort = "standard";
+      setReasoning((prev) => ({ ...prev, effort: newEffort }));
+      localStorage.setItem("reasoning-effort", newEffort);
+    } else if (isDeepSeek && (reasoning.effort === "light" || reasoning.effort === "extended" || reasoning.effort === "heavy")) {
       const newEffort: ReasoningEffort = "high";
       setReasoning((prev) => ({ ...prev, effort: newEffort }));
       localStorage.setItem("reasoning-effort", newEffort);
@@ -251,7 +265,8 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
 
   const effortLabel = currentModel?.provider === "DeepSeek"
     ? (reasoning.effort === "max" ? "深度" : "")
-    : (reasoning.effort === "standard" ? "" : reasoning.effort === "extended" ? "扩展" : reasoning.effort === "heavy" ? "重度" : "省流");
+    : (currentModel?.provider === "Moonshot" ? ""
+      : (reasoning.effort === "standard" ? "" : reasoning.effort === "extended" ? "扩展" : reasoning.effort === "heavy" ? "重度" : "省流"));
 
   const effortNames: Record<string, string> = {
     light: "省流",
@@ -381,27 +396,31 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                       <span className="text-[11px] opacity-70 ml-0.5">· {effortLabel}</span>
                     )}
                   </button>
-                  <div className={cn(
-                    "w-px h-4 transition-colors duration-200",
-                    reasoning.enabled ? "bg-purple-500/30" : "bg-surface-border"
-                  )} />
-                  <button
-                    type="button"
-                    onClick={() => setDropdownOpen(!dropdownOpen)}
-                    className={cn(
-                      "flex items-center justify-center px-2 py-1.5 text-[13px] transition-all duration-200",
-                      reasoning.enabled
-                        ? "text-purple-400"
-                        : "text-text-tertiary hover:text-text-secondary"
-                    )}
-                  >
-                    <ChevronDown
-                      className={cn(
-                        "w-3 h-3 transition-transform duration-200",
-                        dropdownOpen && "rotate-180"
-                      )}
-                    />
-                  </button>
+                  {currentModel?.provider !== "Moonshot" && (
+                    <>
+                      <div className={cn(
+                        "w-px h-4 transition-colors duration-200",
+                        reasoning.enabled ? "bg-purple-500/30" : "bg-surface-border"
+                      )} />
+                      <button
+                        type="button"
+                        onClick={() => setDropdownOpen(!dropdownOpen)}
+                        className={cn(
+                          "flex items-center justify-center px-2 py-1.5 text-[13px] transition-all duration-200",
+                          reasoning.enabled
+                            ? "text-purple-400"
+                            : "text-text-tertiary hover:text-text-secondary"
+                        )}
+                      >
+                        <ChevronDown
+                          className={cn(
+                            "w-3 h-3 transition-transform duration-200",
+                            dropdownOpen && "rotate-180"
+                          )}
+                        />
+                      </button>
+                    </>
+                  )}
                 </div>
 
                 {/* 下拉浮层 */}
@@ -412,7 +431,9 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                       onClick={() => setDropdownOpen(false)}
                     />
                     <div className="absolute bottom-full left-0 mb-2 w-32 rounded-xl border border-surface-border bg-surface-elevated shadow-xl z-50 py-1 animate-fade-in">
-                      {currentModel?.provider === "DeepSeek" ? (
+                      {currentModel?.provider === "Moonshot" ? (
+                        <div className="px-4 py-3 text-sm text-text-tertiary text-center">仅开关</div>
+                      ) : currentModel?.provider === "DeepSeek" ? (
                         <>
                           <button
                             type="button"

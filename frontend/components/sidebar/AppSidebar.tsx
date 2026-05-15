@@ -8,7 +8,7 @@ import {
   MessageSquare, Palette, Presentation, LogIn, LogOut,
   PanelLeftClose, MessageSquarePlus, Search, ChevronRight,
   User, Trash2, MoreHorizontal, Pencil, Pin, PinOff, Link2, Check,
-  FileText, LayoutGrid, X, Clock, Sparkles,
+  FileText, LayoutGrid, X, Clock, Sparkles, Image, Eraser,
   Briefcase, FileCode, PenTool, BarChart3, Mail, ClipboardList, Terminal, GraduationCap, Languages,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -182,7 +182,14 @@ function MoreHoverPanel({
 
   const groups = [
     {
-      title: "工具",
+      title: "创建",
+      items: [
+        { icon: Image, label: "背景移除", href: "/image/edit?mode=remove-bg", color: "text-green-500", bg: "bg-green-500/10" },
+        { icon: Eraser, label: "背景替换", href: "/image/edit?mode=replace-bg", color: "text-purple-500", bg: "bg-purple-500/10" },
+      ],
+    },
+    {
+      title: "模板",
       items: [
         { icon: FileText, label: "回答模板", href: "/templates", color: "text-blue-500", bg: "bg-blue-500/10" },
       ],
