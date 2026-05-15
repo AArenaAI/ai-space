@@ -24,6 +24,7 @@ if [ -f "$PID_FILE" ]; then
 fi
 
 # 方式2: 按名字杀掉残留进程
+pkill -f "aipool" 2>/dev/null || true
 pkill -f "aipool-backend" 2>/dev/null || true
 pkill -f "next dev.*9090" 2>/dev/null || true
 pkill -f "next dev.*9091" 2>/dev/null || true

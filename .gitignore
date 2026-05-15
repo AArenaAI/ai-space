@@ -37,25 +37,22 @@ Thumbs.db
 *.so
 *.dylib
 aipool-backend
-backend-go/aipool
-backend-go/bin/
+backend/aipool
+backend/bin/
 
 # Go test cache
 *.test
 *.out
 
-# Old backend (Python)
-backend/
-
 # Build artifacts
-backend-go/uploads/*.png
-backend-go/uploads/*.jpg
-backend-go/uploads/*.jpeg
-backend-go/uploads/*.md
+backend/uploads/*.png
+backend/uploads/*.jpg
+backend/uploads/*.jpeg
+backend/uploads/*.md
 
 # Data directory (user-generated)
-backend-go/data/aipool.db
-backend-go/data/images/
+backend/data/aipool.db
+backend/data/images/
 
 # Root server.js & package files
 server.js
