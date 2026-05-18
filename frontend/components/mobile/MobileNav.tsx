@@ -221,7 +221,7 @@ export default function MobileNav() {
           {menuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
         </button>
         <Link href="/chat" className="flex items-center gap-2">
-          <img src="/logo.png" alt="AI Space" className="w-7 h-7 rounded-lg object-cover" />
+          <img src="/brand-logo.png" alt="AI Space" className="w-7 h-7 rounded-lg object-cover" />
           <img src="/title.png" alt="AI Space" className="h-5 w-auto object-contain" />
         </Link>
         {user ? (
@@ -236,7 +236,7 @@ export default function MobileNav() {
       <div ref={drawerRef} className={cn("md:hidden fixed top-0 left-0 z-50 h-full w-[300px] bg-surface border-r border-surface-border shadow-2xl transition-transform duration-300 ease-out flex flex-col", menuOpen ? "translate-x-0" : "-translate-x-full")}>
         <div className="flex items-center justify-between h-12 px-3 border-b border-surface-border shrink-0">
           <div className="flex items-center gap-2">
-            <img src="/logo.png" alt="AI Space" className="w-7 h-7 rounded-lg object-cover" />
+            <img src="/brand-logo.png" alt="AI Space" className="w-7 h-7 rounded-lg object-cover" />
             <img src="/title.png" alt="AI Space" className="h-5 w-auto object-contain" />
           </div>
           <button onClick={() => setMenuOpen(false)} className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"><X className="w-4 h-4" /></button>

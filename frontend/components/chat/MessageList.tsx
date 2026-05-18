@@ -423,7 +423,7 @@ export default function MessageList({
             </>
           ) : (
             <>
-              <img src="/logo.png" alt="AI Space" className="w-12 h-12 rounded-xl object-cover mx-auto mb-8" />
+              <img src="/brand-logo.png" alt="AI Space" className="w-12 h-12 rounded-xl object-cover mx-auto mb-8" />
               <h1 className="text-2xl font-semibold tracking-tight mb-3 text-text-primary">一个入口，所有顶尖AI</h1>
               <p className="text-text-secondary text-[15px] leading-relaxed mb-10">集成 GPT、Claude、Gemini、DeepSeek、Kimi 等主流大模型</p>
             </>

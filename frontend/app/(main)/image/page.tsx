@@ -100,6 +100,14 @@ function ReferenceImageStack({
   const [isHovered, setIsHovered] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
 
+  // 将 public_id 转为可预览的图片 URL
+  const resolveImageUrl = (url: string) => {
+    if (url.startsWith("file_")) {
+      return `/api/files/${url}/view`;
+    }
+    return url;
+  };
+
   // 无图：显示方形上传按钮
   if (images.length === 0) {
     return (
@@ -139,7 +147,7 @@ function ReferenceImageStack({
     return (
       <div className="relative shrink-0 group/single">
         <div className="w-9 h-9 rounded-xl overflow-hidden border border-surface-border">
-          <img src={images[0]} alt="参考图" className="w-full h-full object-cover" />
+          <img src={resolveImageUrl(images[0])} alt="参考图" className="w-full h-full object-cover" />
         </div>
         {/* 删除按钮 - 悬浮时显示 */}
         <button
@@ -202,7 +210,7 @@ function ReferenceImageStack({
                 zIndex,
               }}
             >
-              <img src={url} alt={`参考图 ${idx + 1}`} className="w-full h-full object-cover" />
+              <img src={resolveImageUrl(url)} alt={`参考图 ${idx + 1}`} className="w-full h-full object-cover" />
               {/* 删除按钮 - 悬浮时显示 */}
               <button
                 type="button"
@@ -294,7 +302,6 @@ export default function ImagePage() {
       // 使用 public_id 作为参考图标识（后端通过 file_ 前缀解析）
       const url = data.public_id || data.url || data.image_url;
       setReferenceImages((prev) => [...prev, url]);
-      toast.success("参考图上传成功");
     } catch (err: any) {
       toast.error(`上传失败: ${err.message}`);
     } finally {
@@ -916,67 +923,70 @@ interface GalleryItem {
 const GALLERY_ITEMS: GalleryItem[] = [
   {
     prompt: "A well-dressed businessman in suit sitting at cozy coffee shop, working on laptop, sunlight streaming through window, warm tones, 4k photorealistic",
-    imageUrl: "https://images.unsplash.com/photo-1600880292203-757bb62b4baf?w=600&h=400&fit=crop",
+    imageUrl: "https://images.unsplash.com/photo-1600880292203-757bb62b4baf?w=600&h=400&fit=crop&crop=face",
   },
   {
     prompt: "Mountain landscape at sunset, dramatic sky, clouds painted in orange and pink, pine trees silhouette, cinematic, National Geographic style",
-    imageUrl: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=600&h=300&fit=crop",
+    imageUrl: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=600&h=300&fit=crop&crop=entropy",
   },
   {
     prompt: "Fluffy white cat sitting on a wooden table, green eyes, soft natural lighting, shallow depth of field, ultra realistic",
-    imageUrl: "https://images.unsplash.com/photo-1513360371669-4adf3dd7dff8?w=600&h=700&fit=crop",
+    imageUrl: "https://images.unsplash.com/photo-1513360371669-4adf3dd7dff8?w=600&h=700&fit=crop&crop=face",
   },
   {
     prompt: "Cyberpunk city street at night, neon signs reflecting on wet asphalt, flying holographic ads, futuristic cars, blade runner aesthetic",
-    imageUrl: "https://images.unsplash.com/photo-1567608295988-36134612d139?w=600&h=450&fit=crop",
+    imageUrl: "https://images.unsplash.com/photo-1567608295988-36134612d139?w=600&h=450&fit=crop&crop=entropy",
   },
   {
     prompt: "Delicious gourmet burger with fresh ingredients, sesame bun, melted cheese, crispy bacon, food photography, mouth-watering detail",
-    imageUrl: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600&h=400&fit=crop",
+    imageUrl: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600&h=400&fit=crop&crop=entropy",
   },
   {
-    prompt: "Abstract geometric shapes in vibrant colors, 3D rendered art piece, smooth gradients, modern aesthetic, minimal composition",
-    imageUrl: "https://images.unsplash.com/photo-1550859492-d5da9d8e45f3?w=600&h=600&fit=crop",
+    prompt: "Abstract geometric shapes with vibrant neon colors, 3D rendered art, smooth gradients on dark background, modern aesthetic",
+    imageUrl: "https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=600&h=600&fit=crop&crop=entropy",
   },
   {
     prompt: "Ethereal fantasy forest with glowing mushrooms, ancient trees wrapped in vines, magical blue particles floating in mist, moonlight beams",
-    imageUrl: "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=600&h=750&fit=crop",
+    imageUrl: "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=600&h=750&fit=crop&crop=entropy",
   },
   {
     prompt: "Modern minimalist interior design, open concept living room with large windows, neutral colors, warm wood accents, architectural digest style",
-    imageUrl: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=600&h=350&fit=crop",
+    imageUrl: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=600&h=350&fit=crop&crop=entropy",
   },
 ];
 
 function ExampleGallery({ onUsePrompt }: { onUsePrompt: (prompt: string) => void }) {
   return (
-    <div className="mt-8 mb-4">
-      <div className="mb-6">
-        <h3 className="text-base font-semibold text-text-primary mb-4">发现</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {GALLERY_ITEMS.map((item, i) => (
-            <div
-              key={i}
-              className="group cursor-pointer rounded-2xl overflow-hidden bg-surface-card border border-surface-border hover:border-brand/40 transition-all duration-200"
-              onClick={() => onUsePrompt(item.prompt)}
-            >
-              <div className="relative overflow-hidden">
-                <img
-                  src={item.imageUrl}
-                  alt={item.prompt}
-                  className="w-full h-auto object-contain transition-transform duration-300 group-hover:scale-105"
-                  loading="lazy"
-                />
-                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center">
-                  <span className="flex items-center gap-1.5 bg-white text-gray-900 px-4 py-2 rounded-xl text-sm font-medium transform translate-y-2 group-hover:translate-y-0 transition-all duration-200">
-                    <Sparkles className="w-4 h-4" />
-                    使用模板
-                  </span>
-                </div>
+    <div className="mt-6 mb-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {GALLERY_ITEMS.map((item, i) => (
+          <div
+            key={i}
+            className="group cursor-pointer rounded-2xl overflow-hidden bg-surface-card border border-surface-border hover:border-brand/40 transition-all duration-200 flex flex-col"
+            onClick={() => onUsePrompt(item.prompt)}
+          >
+            <div className="relative overflow-hidden bg-surface-secondary/50">
+              <img
+                src={item.imageUrl}
+                alt={item.prompt}
+                className="w-full h-52 object-cover block transition-transform duration-300 group-hover:scale-105"
+                loading="lazy"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = 'none';
+                }}
+              />
+              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center">
+                <span className="flex items-center gap-1.5 bg-white text-gray-900 px-4 py-2 rounded-xl text-sm font-medium">
+                  <Sparkles className="w-4 h-4" />
+                  使用模板
+                </span>
               </div>
             </div>
-          ))}
-        </div>
+            <div className="px-3 py-2.5 text-xs text-text-secondary leading-relaxed line-clamp-2">
+              {item.prompt}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

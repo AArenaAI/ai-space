@@ -112,6 +112,9 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 		// 文件下载（返回文件二进制，无需认证，图片直接展示）
 		publicWithAuth.GET("/files/:id/download", fileHandler.DownloadFile)
+
+		// 文件内联查看（不强制下载，供 <img> 标签预览）
+		publicWithAuth.GET("/files/:id/view", fileHandler.ViewFile)
 	}
 
 	// 聊天路由（旧位置兼容，已移至 publicWithAuth）

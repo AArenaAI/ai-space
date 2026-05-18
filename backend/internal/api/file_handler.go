@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"aipool-backend/internal/services"
+	"aipool-backend/pkg/publicid"
 
 	"github.com/gin-gonic/gin"
 )
@@ -167,6 +168,24 @@ func (h *FileHandler) DownloadFile(c *gin.Context) {
 	}
 
 	c.FileAttachment(file.StoragePath, file.Filename)
+}
+
+// ViewFile 公开查看文件（内联展示，不强制下载）
+// 基于 public_id 的不可枚举性提供安全保护，不做用户权限校验
+func (h *FileHandler) ViewFile(c *gin.Context) {
+	publicID := c.Param("id")
+	if !publicid.IsFileID(publicID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的文件 ID"})
+		return
+	}
+
+	file, err := h.fileService.GetByPublicID(publicID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "文件不存在"})
+		return
+	}
+
+	c.File(file.StoragePath)
 }
 func inferFileType(filename string) string {
 	ext := ""

@@ -36,7 +36,7 @@ export default function LandingHeader() {
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2.5">
-            <img src="/logo.png" alt="AI Space" className="w-8 h-8 rounded-xl object-cover" />
+            <img src="/brand-logo.png" alt="AI Space" className="w-8 h-8 rounded-xl object-cover" />
             <img src="/title.png" alt="AI Space" className="h-6 w-auto object-contain" />
           </Link>
 
