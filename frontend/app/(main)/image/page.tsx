@@ -405,11 +405,11 @@ export default function ImagePage() {
           </button>
         </div>
 
-        <h1 className="text-2xl font-bold text-text-primary mt-2">AI灵感创作器</h1>
+        <h1 className="text-2xl font-bold text-text-primary mt-8 mb-6">AI灵感创作器</h1>
       </div>
 
       <div className="flex-1 overflow-auto px-4 md:px-6 pb-8">
-        <div className="max-w-3xl mx-auto space-y-8">
+        <div className="max-w-3xl mx-auto space-y-10">
           {/* 输入卡片 */}
           <div
             className={cn(
@@ -421,7 +421,7 @@ export default function ImagePage() {
             )}
           >
             {/* 输入区：参考图 + textarea */}
-            <div className="flex items-center gap-3 px-4 py-3">
+            <div className="flex items-center gap-3 px-4 py-2.5">
               <ReferenceImageStack
                 images={referenceImages}
                 onAdd={handleAddImage}
@@ -441,7 +441,7 @@ export default function ImagePage() {
                 disabled={isLoading || isGenerating}
                 rows={1}
                 className={cn(
-                  "flex-1 min-h-[36px] max-h-[120px] bg-transparent text-text-primary placeholder:text-text-tertiary resize-none focus:outline-none text-sm leading-5 py-2",
+                  "flex-1 min-h-[42px] max-h-[150px] bg-transparent text-text-primary placeholder:text-text-tertiary resize-none focus:outline-none text-sm leading-5 py-1.5",
                   (isLoading || isGenerating) && "opacity-60 cursor-not-allowed"
                 )}
                 onKeyDown={(e) => {
@@ -934,10 +934,6 @@ const GALLERY_ITEMS: GalleryItem[] = [
     imageUrl: "https://images.unsplash.com/photo-1513360371669-4adf3dd7dff8?w=600&h=700&fit=crop&crop=face",
   },
   {
-    prompt: "Cyberpunk city street at night, neon signs reflecting on wet asphalt, flying holographic ads, futuristic cars, blade runner aesthetic",
-    imageUrl: "https://images.unsplash.com/photo-1567608295988-36134612d139?w=600&h=450&fit=crop&crop=entropy",
-  },
-  {
     prompt: "Delicious gourmet burger with fresh ingredients, sesame bun, melted cheese, crispy bacon, food photography, mouth-watering detail",
     imageUrl: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600&h=400&fit=crop&crop=entropy",
   },
@@ -953,11 +949,53 @@ const GALLERY_ITEMS: GalleryItem[] = [
     prompt: "Modern minimalist interior design, open concept living room with large windows, neutral colors, warm wood accents, architectural digest style",
     imageUrl: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=600&h=350&fit=crop&crop=entropy",
   },
+  // ── 新增模板 8-20 ──
+  {
+    prompt: "Japanese cherry blossom trees along a riverside path at spring, petals falling in wind, soft pink tones, anime style, Studio Ghibli aesthetic",
+    imageUrl: "https://images.unsplash.com/photo-1522383225653-ed111181a951?w=600&h=450&fit=crop&crop=entropy",
+  },
+  {
+    prompt: "Majestic wolf standing on a rocky cliff under full moon, howling at the night sky, dramatic lighting, dark fantasy, ultra detailed",
+    imageUrl: "https://images.unsplash.com/photo-1568572933382-74d440642117?w=600&h=480&fit=crop&crop=entropy",
+  },
+  {
+    prompt: "Vibrant underwater coral reef with tropical fish swimming through sun rays, crystal clear water, ocean photography, National Geographic",
+    imageUrl: "https://images.unsplash.com/photo-1546026423-cc4642628d2b?w=600&h=400&fit=crop&crop=entropy",
+  },
+  {
+    prompt: "A cup of matcha latte with beautiful latte art on a wooden table, morning sunlight, cozy cafe atmosphere, food photography, macro detail",
+    imageUrl: "https://images.unsplash.com/photo-1536256263959-770b48d82b0a?w=600&h=450&fit=crop&crop=entropy",
+  },
+  {
+    prompt: "Neon-lit Tokyo street at night, rain reflecting colorful signs, crowded crosswalk, cyberpunk aesthetic, vaporwave tones, cinematic shot",
+    imageUrl: "https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?w=600&h=400&fit=crop&crop=entropy",
+  },
+  {
+    prompt: "Elegant glass skyscraper architecture against blue sky, modern cityscape, geometric patterns, corporate photography, sharp details",
+    imageUrl: "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=600&h=500&fit=crop&crop=entropy",
+  },
+  {
+    prompt: "Vintage motorcycle parked on a desert road at sunset, long shadows, warm golden tones, retro aesthetic, adventure vibe, cinematic wide shot",
+    imageUrl: "https://images.unsplash.com/photo-1558981806-ec527fa84c39?w=600&h=380&fit=crop&crop=entropy",
+  },
+  {
+    prompt: "Close-up of a hummingbird hovering near a pink flower, wings frozen in motion, green bokeh background, macro wildlife photography, high speed",
+    imageUrl: "https://images.unsplash.com/photo-1552728089-57bdde30beb3?w=600&h=600&fit=crop&crop=face",
+  },
+  {
+    prompt: "Luxury bedroom interior with large windows overlooking ocean, white curtains flowing in breeze, king size bed, resort style, serene atmosphere",
+    imageUrl: "https://images.unsplash.com/photo-1618773928121-c32242e63f39?w=600&h=420&fit=crop&crop=entropy",
+  },
+  {
+    prompt: "Crystal clear mountain lake reflecting snowy peaks at dawn, calm water mirror image, pine forest shoreline, peaceful nature landscape, wide angle",
+    imageUrl: "https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=600&h=400&fit=crop&crop=entropy",
+  },
 ];
 
 function ExampleGallery({ onUsePrompt }: { onUsePrompt: (prompt: string) => void }) {
   return (
     <div className="mt-6 mb-4">
+      <h3 className="text-base font-semibold text-text-primary mb-4">发现</h3>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {GALLERY_ITEMS.map((item, i) => (
           <div
@@ -981,9 +1019,6 @@ function ExampleGallery({ onUsePrompt }: { onUsePrompt: (prompt: string) => void
                   使用模板
                 </span>
               </div>
-            </div>
-            <div className="px-3 py-2.5 text-xs text-text-secondary leading-relaxed line-clamp-2">
-              {item.prompt}
             </div>
           </div>
         ))}
