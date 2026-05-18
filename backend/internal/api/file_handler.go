@@ -1,12 +1,16 @@
 package api
 
 import (
+	"io"
 	"net/http"
+	"strconv"
 
 	"aipool-backend/internal/services"
 
 	"github.com/gin-gonic/gin"
 )
+
+const maxFileSize = 20 * 1024 * 1024 // 20MB
 
 type FileHandler struct {
 	fileService *services.FileService
@@ -27,6 +31,15 @@ type UploadResponse struct {
 }
 
 func (h *FileHandler) UploadFile(c *gin.Context) {
+	userID := getUserID(c)
+	guestID := getGuestID(c)
+
+	// 匿名用户必须提供 guestID
+	if userID == 0 && guestID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "guest_id_required", "message": "匿名用户请先刷新页面以生成 visitor ID"})
+		return
+	}
+
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无法读取文件"})
@@ -34,27 +47,29 @@ func (h *FileHandler) UploadFile(c *gin.Context) {
 	}
 	defer file.Close()
 
-	// 暂不限制文件大小（后续如需恢复，取消下面注释即可）
-	// const maxSize = 10 * 1024 * 1024
-	// if header.Size > maxSize {
-	// 	c.JSON(http.StatusBadRequest, gin.H{"error": "文件大小不能超过 10MB"})
-	// 	return
-	// }
+	// 限制文件大小
+	if header.Size > maxFileSize {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "文件大小不能超过 20MB"})
+		return
+	}
 
-	data := make([]byte, header.Size)
-	_, err = file.Read(data)
+	data, err := io.ReadAll(file)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取文件失败"})
 		return
 	}
 
-	userID := getUserID(c)
-	if userID == 0 {
-		// 未登录用户也允许上传，使用 0 作为 userID
-		userID = 0
+	// 支持从 form 中读取 workspace_id
+	workspaceIDStr := c.Request.FormValue("workspace_id")
+	var workspaceID uint
+	if workspaceIDStr != "" {
+		wid, err := strconv.ParseUint(workspaceIDStr, 10, 32)
+		if err == nil {
+			workspaceID = uint(wid)
+		}
 	}
 
-	f, err := h.fileService.UploadAndParse(c.Request.Context(), userID, header.Filename, data)
+	f, err := h.fileService.UploadAndParse(c.Request.Context(), userID, guestID, header.Filename, data, workspaceID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "文件处理失败: " + err.Error()})
 		return
@@ -84,7 +99,17 @@ func (h *FileHandler) ListFiles(c *gin.Context) {
 		return
 	}
 
-	files, err := h.fileService.ListUserFiles(userID)
+	// 支持 workspace_id 过滤
+	workspaceIDStr := c.Query("workspace_id")
+	var workspaceID uint
+	if workspaceIDStr != "" {
+		wid, err := strconv.ParseUint(workspaceIDStr, 10, 32)
+		if err == nil {
+			workspaceID = uint(wid)
+		}
+	}
+
+	files, err := h.fileService.ListUserFiles(userID, workspaceID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取文件列表失败"})
 		return
@@ -94,9 +119,17 @@ func (h *FileHandler) ListFiles(c *gin.Context) {
 }
 
 func (h *FileHandler) DeleteFile(c *gin.Context) {
+	userID := getUserID(c)
+	guestID := getGuestID(c)
 	publicID := c.Param("id")
 	if publicID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的文件 ID"})
+		return
+	}
+
+	// 先验证文件权限
+	if _, err := h.fileService.ResolveFileByPublicID(publicID, userID, guestID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "文件不存在或无权访问"})
 		return
 	}
 
@@ -110,9 +143,10 @@ func (h *FileHandler) DeleteFile(c *gin.Context) {
 
 func (h *FileHandler) GetFile(c *gin.Context) {
 	userID := getUserID(c)
+	guestID := getGuestID(c)
 	publicID := c.Param("id")
 
-	file, err := h.fileService.ResolveFileByPublicID(publicID, userID)
+	file, err := h.fileService.ResolveFileByPublicID(publicID, userID, guestID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "文件不存在或无权访问"})
 		return
@@ -123,9 +157,10 @@ func (h *FileHandler) GetFile(c *gin.Context) {
 
 func (h *FileHandler) DownloadFile(c *gin.Context) {
 	userID := getUserID(c)
+	guestID := getGuestID(c)
 	publicID := c.Param("id")
 
-	file, err := h.fileService.ResolveFileByPublicID(publicID, userID)
+	file, err := h.fileService.ResolveFileByPublicID(publicID, userID, guestID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "文件不存在或无权访问"})
 		return

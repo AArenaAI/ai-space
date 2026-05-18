@@ -21,9 +21,14 @@ func NewAIService(cfg *config.Config) *AIService {
 }
 
 type Message struct {
-	Role    string   `json:"role"`
-	Content string   `json:"content"`
-	Images  []string `json:"-"` // base64 dataURIs for multimodal, not serialized
+	Role    string `json:"role"`
+	Content string `json:"content"`
+	// Images 存储 base64 dataURI（多模态直传），不对应文件上传 RAG 路径。
+	// 两条并行路径：
+	//   路径A（文件上传 RAG）→ parseImage → Vision → image_caption chunk → <file_context> 注入，所有模型通用。
+	//   路径B（内联多模态）  → Message.Images → 模型原生 vision API，仅支持 vision 的模型可用。
+	// 未来两者会共存：文件通过路径A提供深度解析，内联图片通过路径B提供即时视觉理解。
+	Images []string `json:"-"` // base64 dataURIs for multimodal (Path B), not serialized
 }
 
 type ChatRequest struct {
@@ -107,7 +112,10 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 			"role": m.Role,
 		}
 		if len(m.Images) > 0 && m.Role == "user" {
-			// 多模态格式
+			// [路径B] 内联多模态直传 — 将图片以 input_image 格式发送到 OpenAI Responses API。
+			// 注意：这与文件上传 RAG 路径（路径A）完全独立，
+			// 路径A的图片已通过 Vision → image_caption chunk → <file_context> 注入。
+			// 未来两条路径可共存。
 			contentParts := []map[string]interface{}{
 				{"type": "input_text", "text": m.Content},
 			}
@@ -129,9 +137,7 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 		"input":             inputItems,
 		"stream":            stream,
 		"max_output_tokens": 8192,
-		// 默认聊天必须禁用 Responses API 内置工具。
-		// 否则 gpt-5.5 会把“画图/画折线图”等普通图表需求自动路由到 image_generation_call，
-		// 上游最终返回空 output_text，前端就只能看到 data: [DONE]。
+		// 默认聊天禁用 Responses API 内置工具。
 		"tool_choice": "none",
 	}
 
@@ -197,7 +203,7 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 		return nil, fmt.Errorf("OpenAI Responses API 错误: %s", string(body))
 	}
 
-	return &AICompletionResponse{Body: resp.Body, ModelType: "openai_responses"}, nil
+	return &AICompletionResponse{Body: resp.Body, ModelType: "openai_responses", Provider: "openai", Model: model}, nil
 }
 
 func (s *AIService) callAnthropic(ctx context.Context, model string, messages []Message, stream bool, reasoning bool) (*AICompletionResponse, error) {
@@ -228,6 +234,8 @@ func (s *AIService) callAnthropic(ctx context.Context, model string, messages []
 			"role": m.Role,
 		}
 		if len(m.Images) > 0 && m.Role == "user" {
+			// [路径B] 内联多模态直传 — Claude Messages API 原生支持 base64 image source。
+			// 与文件上传 RAG 路径（路径A）完全独立，不会重复发送文件上传的图片。
 			contentParts := []map[string]interface{}{
 				{"type": "text", "text": m.Content},
 			}
@@ -282,7 +290,7 @@ func (s *AIService) callAnthropic(ctx context.Context, model string, messages []
 		return nil, fmt.Errorf("Anthropic API 错误: %s", string(body))
 	}
 
-	return &AICompletionResponse{Body: resp.Body, ModelType: "anthropic"}, nil
+	return &AICompletionResponse{Body: resp.Body, ModelType: "anthropic", Provider: "anthropic", Model: model}, nil
 }
 
 func (s *AIService) callGemini(ctx context.Context, model string, messages []Message, stream bool, reasoning bool) (*AICompletionResponse, error) {
@@ -300,8 +308,10 @@ func (s *AIService) callDeepSeek(ctx context.Context, model string, messages []M
 	}
 
 	// 转换消息为 OpenAI 兼容格式
-	// 注意：DeepSeek 不支持 vision/图片输入，所以如果消息带了图片，
+	// 注意：DeepSeek 不支持 vision/图片输入（路径B不可用），所以如果消息带了图片，
 	// 我们只在文本中提示用户上传了图片，不发送 image_url content parts。
+	// 路径B不可用时，路径A（文件上传 RAG → image_caption chunk → <file_context>）
+	// 仍然有效——所有模型（包括 DeepSeek）都能从文本形式的图片描述中获得信息。
 	deepSeekMessages := make([]map[string]interface{}, 0, len(messages))
 	for _, m := range messages {
 		msg := map[string]interface{}{
@@ -325,6 +335,13 @@ func (s *AIService) callDeepSeek(ctx context.Context, model string, messages []M
 		"model":    model,
 		"messages": deepSeekMessages,
 		"stream":   stream,
+	}
+
+	// Streaming 时添加 stream_options 以含 usage 信息
+	if stream {
+		reqBody["stream_options"] = map[string]any{
+			"include_usage": true,
+		}
 	}
 
 	// DeepSeek V4 Pro 默认启用 thinking，必须显式指定 type 来控制
@@ -364,7 +381,7 @@ func (s *AIService) callDeepSeek(ctx context.Context, model string, messages []M
 		return nil, fmt.Errorf("DeepSeek API 错误: %s", string(body))
 	}
 
-	return &AICompletionResponse{Body: resp.Body, ModelType: "deepseek"}, nil
+	return &AICompletionResponse{Body: resp.Body, ModelType: "deepseek", Provider: "deepseek", Model: model}, nil
 }
 
 func (s *AIService) callMoonshot(ctx context.Context, model string, messages []Message, stream bool, reasoning bool) (*AICompletionResponse, error) {
@@ -397,7 +414,7 @@ func (s *AIService) callMoonshot(ctx context.Context, model string, messages []M
 		}
 
 		if len(m.Images) > 0 && m.Role == "user" && supportsVision {
-			// Kimi K2.5+ 支持多模态：构建 content array
+			// [路径B] 内联多模态直传 — Kimi K2.5+ 支持多模态：构建 content array
 			content := make([]map[string]interface{}, 0)
 			if m.Content != "" {
 				content = append(content, map[string]interface{}{
@@ -436,6 +453,13 @@ func (s *AIService) callMoonshot(ctx context.Context, model string, messages []M
 		"max_tokens":  16384, // Kimi 官方推荐 ≥ 16000，确保 reasoning_content + content 不会被截断
 	}
 
+	// Streaming 时添加 stream_options 以含 usage 信息
+	if stream {
+		reqBody["stream_options"] = map[string]any{
+			"include_usage": true,
+		}
+	}
+
 	// Kimi 思考模式控制
 	// kimi-k2.6 默认开启思考能力；kimi-k2.5 也支持思考
 	// 当用户未启用思考时，通过 thinking=disabled 关闭
@@ -466,7 +490,7 @@ func (s *AIService) callMoonshot(ctx context.Context, model string, messages []M
 		return nil, fmt.Errorf("Moonshot API 错误: %s", string(body))
 	}
 
-	return &AICompletionResponse{Body: resp.Body, ModelType: "moonshot"}, nil
+	return &AICompletionResponse{Body: resp.Body, ModelType: "moonshot", Provider: "moonshot", Model: model}, nil
 }
 
 // isKimiVisionModel 判断模型是否支持多模态图片理解
@@ -493,15 +517,31 @@ func parseDataURI(dataURI string) (mimeType string, data string) {
 	return mimeType, data
 }
 
-// ExtractImageContent 使用 OpenAI Vision API 提取图片描述
-func (s *AIService) ExtractImageContent(ctx context.Context, imageData []byte, mimeType string) (string, error) {
-	if s.cfg.OpenAIKey == "" {
-		return "", fmt.Errorf("未配置 OpenAI API Key")
+// VisionUsage 记录 Vision API 的 token 消耗和费用
+type VisionUsage struct {
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+	CostRMB          float64 // 实际 RMB 花费
+}
+
+// ExtractImageContent 使用 Vision API 提取图片描述（支持 OpenAI/Qwen 等兼容接口）
+func (s *AIService) ExtractImageContent(ctx context.Context, imageData []byte, mimeType string) (string, *VisionUsage, error) {
+	// 确定 Vision 专用的 API Key 和 Base URL，为空则回退到 OpenAI 配置
+	apiKey := s.cfg.VisionAPIKey
+	if apiKey == "" {
+		apiKey = s.cfg.OpenAIKey
+	}
+	baseURL := s.cfg.VisionBaseURL
+	if baseURL == "" {
+		baseURL = s.cfg.OpenAIBaseURL
+	}
+	if baseURL == "" {
+		baseURL = "https://api.openai.com"
 	}
 
-	baseURL := "https://api.openai.com"
-	if s.cfg.OpenAIBaseURL != "" {
-		baseURL = s.cfg.OpenAIBaseURL
+	if apiKey == "" {
+		return "", nil, fmt.Errorf("未配置 Vision API Key（VISION_API_KEY 或 OPENAI_API_KEY）")
 	}
 
 	base64Data := base64.StdEncoding.EncodeToString(imageData)
@@ -523,46 +563,69 @@ func (s *AIService) ExtractImageContent(ctx context.Context, imageData []byte, m
 
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("序列化 Vision 请求失败: %w", err)
+		return "", nil, fmt.Errorf("序列化 Vision 请求失败: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/v1/chat/completions", bytes.NewBuffer(jsonBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(baseURL, "/")+"/chat/completions", bytes.NewBuffer(jsonBody))
 	if err != nil {
-		return "", fmt.Errorf("创建 Vision 请求失败: %w", err)
+		return "", nil, fmt.Errorf("创建 Vision 请求失败: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+s.cfg.OpenAIKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := DefaultAIHTTPClient.Do(req)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("Vision API 错误: %s", string(body))
+		return "", nil, fmt.Errorf("Vision API 错误: %s", string(body))
 	}
 
 	var result map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	choices, ok := result["choices"].([]interface{})
 	if !ok || len(choices) == 0 {
-		return "", fmt.Errorf("Vision API 返回空结果")
+		return "", nil, fmt.Errorf("Vision API 返回空结果")
 	}
 
 	choice, ok := choices[0].(map[string]interface{})
 	if !ok {
-		return "", fmt.Errorf("Vision API 返回格式异常")
+		return "", nil, fmt.Errorf("Vision API 返回格式异常")
 	}
 
 	msg, ok := choice["message"].(map[string]interface{})
 	if !ok {
-		return "", fmt.Errorf("Vision API 返回缺少 message")
+		return "", nil, fmt.Errorf("Vision API 返回缺少 message")
 	}
 
 	content, _ := msg["content"].(string)
-	return content, nil
+
+	// 解析 usage
+	var usage *VisionUsage
+	if usageRaw, ok := result["usage"].(map[string]interface{}); ok {
+		usage = &VisionUsage{}
+		if v, ok := usageRaw["prompt_tokens"].(float64); ok {
+			usage.PromptTokens = int(v)
+		}
+		if v, ok := usageRaw["completion_tokens"].(float64); ok {
+			usage.CompletionTokens = int(v)
+		}
+		if v, ok := usageRaw["total_tokens"].(float64); ok {
+			usage.TotalTokens = int(v)
+		}
+
+		// 根据配置的单价计算实际 RMB 花费
+		if s.cfg.VisionInputPrice > 0 || s.cfg.VisionOutputPrice > 0 {
+			cost := (float64(usage.PromptTokens)*s.cfg.VisionInputPrice +
+				float64(usage.CompletionTokens)*s.cfg.VisionOutputPrice) / 1000.0
+			usage.CostRMB = cost
+		}
+	}
+
+	return content, usage, nil
 }

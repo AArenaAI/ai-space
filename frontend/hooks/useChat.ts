@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { v4 as uuidv4 } from "uuid";
+import { getGuestId } from "@/lib/guestId";
 
 const API_BASE_URL = ""; // 使用相对路径，nginx 同域名代理 /api -> 后端
 
@@ -236,6 +237,11 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         if (sk && sk.trim()) {
           body.skill_key = sk.trim();
         }
+        // 从 localStorage 获取当前 workspace
+        const wsId = localStorage.getItem("current-workspace");
+        if (wsId) {
+          body.workspace_id = Number(wsId);
+        }
         const res = await fetch(`${API_BASE_URL}/api/conversations`, {
           method: "POST",
           headers: {
@@ -374,12 +380,6 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       // 第一个模型：带用户消息
       // 后续模型：跳过用户消息
       let finalContent = content.trim();
-      if (attachments && attachments.length > 0) {
-        const attachmentTexts = attachments.map(
-          (a) => `[文件: ${a.filename}]\n---\n${a.content}\n---`
-        );
-        finalContent = attachmentTexts.join("\n\n") + (finalContent ? "\n\n" + finalContent : "");
-      }
 
       for (let i = 0; i < modelIds.length; i++) {
         const modelId = modelIds[i];
@@ -431,12 +431,17 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
 
         try {
           const token = localStorage.getItem("token");
+          const headers: Record<string, string> = {
+            "Content-Type": "application/json",
+          };
+          if (token) {
+            headers["Authorization"] = `Bearer ${token}`;
+          } else {
+            headers["X-Guest-ID"] = getGuestId();
+          }
           const response = await fetch(`${API_BASE_URL}/api/chat`, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            },
+            headers,
             signal: controller.signal,
             body: JSON.stringify({
               model: modelId,
@@ -449,10 +454,15 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               template_id: templateId,
               skip_save_user_msg: skipUser,
               skill_key: effectiveSkillKey || undefined,
-              file_ids: file_ids || undefined,
+              message_file_ids: file_ids || undefined,
             }),
           });
-          if (!response.ok) throw new Error("请求失败");
+          if (!response.ok) {
+            const errorBody = await response.json().catch(() => ({}));
+            const errorCode = errorBody.error || "unknown";
+            const errorMsg = errorBody.message || "请求失败";
+            throw Object.assign(new Error(errorMsg), { errorCode });
+          }
           await streamResponse(response, assistantMsg, controller);
         } catch (error: any) {
           if (error.name === "AbortError") {
@@ -460,9 +470,17 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               prev.map((m) => (m.id === assistantMsg.id ? { ...m, stopped: true } : m))
             );
           } else {
+            let displayMsg: string;
+            if (error.errorCode === "file_not_ready") {
+              displayMsg = `⏳ 文件解析中，请稍后再问`;
+            } else if (error.errorCode === "guest_limit_exceeded") {
+              displayMsg = `⚠️ ${error.message || "匿名用户每日额度已用完，请登录后继续"}`;
+            } else {
+              displayMsg = `❌ ${error.message || "请求失败"}`;
+            }
             setMessages((prev) =>
               prev.map((m) =>
-                m.id === assistantMsg.id ? { ...m, content: `❌ 发送消息失败: ${error.message}` } : m
+                m.id === assistantMsg.id ? { ...m, content: displayMsg } : m
               )
             );
           }
@@ -529,12 +547,6 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       } else if (skipUserMsg) {
         // 对比模式中后续模型：不添加用户消息，只添加 assistant
         let finalContent = content.trim();
-        if (attachments && attachments.length > 0) {
-          const attachmentTexts = attachments.map(
-            (a) => `[文件: ${a.filename}]\n---\n${a.content}\n---`
-          );
-          finalContent = attachmentTexts.join("\n\n") + (finalContent ? "\n\n" + finalContent : "");
-        }
         const userFiles = attachments?.filter(a => a.public_id).map(a => ({ public_id: a.public_id!, type: a.type, filename: a.filename })) || [];
         assistantMsg = {
           id: uuidv4(),
@@ -549,14 +561,6 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         setMessages((prev) => [...prev, assistantMsg]);
       } else {
         let finalContent = content.trim();
-        if (attachments && attachments.length > 0) {
-          // 非图片文件才拼接内容到文本（图片在 files 中单独展示）
-          const docAttachments = attachments.filter(a => a.type !== "image");
-          const attachmentTexts = docAttachments.map(
-            (a) => `[文件: ${a.filename}]\n---\n${a.content}\n---`
-          );
-          finalContent = attachmentTexts.join("\n\n") + (finalContent ? "\n\n" + finalContent : "");
-        }
         const userFiles = attachments?.filter(a => a.public_id).map(a => ({ public_id: a.public_id!, type: a.type, filename: a.filename })) || [];
         const userMsg: Message = {
           id: uuidv4(),
@@ -586,12 +590,17 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
 
       try {
         const token = localStorage.getItem("token");
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+        };
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        } else {
+          headers["X-Guest-ID"] = getGuestId();
+        }
         const response = await fetch(`${API_BASE_URL}/api/chat`, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
+          headers,
           signal: controller.signal,
           body: JSON.stringify({
             model: selectedModel.id,
@@ -604,11 +613,16 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             template_id: templateId,
             skip_save_user_msg: skipUserMsg,
             skill_key: effectiveSkillKey || undefined,
-            file_ids: file_ids || undefined,
+            message_file_ids: file_ids || undefined,
           }),
         });
 
-        if (!response.ok) throw new Error("请求失败");
+        if (!response.ok) {
+          const errorBody = await response.json().catch(() => ({}));
+          const errorCode = errorBody.error || "unknown";
+          const errorMsg = errorBody.message || "请求失败";
+          throw Object.assign(new Error(errorMsg), { errorCode });
+        }
 
         await streamResponse(response, assistantMsg, controller);
 
@@ -648,10 +662,18 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             )
           );
         } else {
+          let displayMsg: string;
+          if (error.errorCode === "file_not_ready") {
+            displayMsg = `⏳ 文件解析中，请稍后再问`;
+          } else if (error.errorCode === "guest_limit_exceeded") {
+            displayMsg = `⚠️ 匿名用户每日次数用完，请登录后继续`;
+          } else {
+            displayMsg = `❌ ${error.message || "请求失败"}`;
+          }
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantMsg.id
-                ? { ...m, content: `❌ 发送消息失败: ${error.message}` }
+                ? { ...m, content: displayMsg }
                 : m
             )
           );

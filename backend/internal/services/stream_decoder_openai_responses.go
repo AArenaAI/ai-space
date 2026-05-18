@@ -74,6 +74,23 @@ func (d *OpenAIResponsesDecoder) parseEvent(name string, raw map[string]interfac
 		return &AIStreamEvent{Type: EventSearchStart, Delta: "正在搜索..."}
 	case "response.web_search_call.completed":
 		return &AIStreamEvent{Type: EventSearchDone, Delta: "搜索完成"}
+	case "response.completed":
+		// usage 信息在 response.completed 事件中
+		if resp, ok := raw["response"].(map[string]interface{}); ok {
+			if usage, ok := resp["usage"].(map[string]interface{}); ok {
+				tu := &TokenUsage{}
+				if v, ok := usage["input_tokens"].(float64); ok {
+					tu.PromptTokens = int(v)
+				}
+				if v, ok := usage["output_tokens"].(float64); ok {
+					tu.CompletionTokens = int(v)
+				}
+				if v, ok := usage["total_tokens"].(float64); ok {
+					tu.TotalTokens = int(v)
+				}
+				return &AIStreamEvent{Type: EventUsage, Usage: tu}
+			}
+		}
 	case "error":
 		msg := "unknown error"
 		if m, ok := raw["message"].(string); ok {

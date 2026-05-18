@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Image, Eraser, FileText, ChevronLeft, LayoutGrid } from "lucide-react";
+import { Image, Eraser, FileText, ChevronLeft, LayoutGrid, Type, ZoomIn } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const MORE_NAV_GROUPS = [
@@ -20,6 +20,18 @@ const MORE_NAV_GROUPS = [
         icon: Eraser,
         label: "背景替换",
         href: "/image/edit?mode=replace-bg",
+        matchPath: "/image/edit",
+      },
+      {
+        icon: Type,
+        label: "文字移除",
+        href: "/image/edit?mode=text-removal",
+        matchPath: "/image/edit",
+      },
+      {
+        icon: ZoomIn,
+        label: "画质提升",
+        href: "/image/edit?mode=upscale",
         matchPath: "/image/edit",
       },
     ],

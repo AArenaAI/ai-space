@@ -4,18 +4,18 @@ import (
 	"aipool-backend/internal/config"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
-	"net/textproto"
 	"os"
 	"time"
 )
 
 type ImageService struct {
-	cfg *config.Config
+	cfg         *config.Config
+	imageGenSvc *ImageGenService
 }
 
 type ImageGeneration struct {
@@ -27,12 +27,13 @@ type ImageGeneration struct {
 	ImageURL          string    `json:"image_url"`
 	ReferenceImageURL string    `json:"reference_image_url"` // 参考图 URL（用于 image-to-image）
 	Status            string    `json:"status"` // pending, completed, failed
+	ErrorMessage      string    `json:"error_message" gorm:"type:text"` // 失败原因
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 func NewImageService(cfg *config.Config) *ImageService {
-	return &ImageService{cfg: cfg}
+	return &ImageService{cfg: cfg, imageGenSvc: NewImageGenService()}
 }
 
 // RemoveBackground 图片背景移除 (利用 gpt-image-2 的编辑能力)
@@ -64,10 +65,11 @@ type DALLEImageResponse struct {
 }
 
 // EditImage 基于参考图编辑生成图片，返回 (OpenAI 直链 URL, base64 数据, 错误)
-// 使用官方 multipart/form-data 格式调用 /v1/images/edits，兼容中转代理的透传模式
+// 使用 JSON + base64 data URL 格式调用 /v1/images/edits，兼容中转代理的 images[] 格式
 func (s *ImageService) EditImage(ctx context.Context, prompt string, size string, referenceImagePath string) (imageURL string, b64Data string, err error) {
-	if s.cfg.OpenAIKey == "" {
-		return "", "", fmt.Errorf("未配置 OpenAI API Key")
+	apiKey := s.cfg.ImageGenAPIKey
+	if apiKey == "" {
+		return "", "", fmt.Errorf("未配置 Image Generation API Key")
 	}
 
 	// 默认尺寸
@@ -79,73 +81,57 @@ func (s *ImageService) EditImage(ctx context.Context, prompt string, size string
 	if referenceImagePath == "" {
 		return "", "", fmt.Errorf("未指定参考图文件路径")
 	}
-	imgFile, err := os.Open(referenceImagePath)
+	imgData, err := os.ReadFile(referenceImagePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", "", fmt.Errorf("参考图文件不存在: %s", referenceImagePath)
 		}
-		return "", "", fmt.Errorf("打开参考图文件失败: %w", err)
+		return "", "", fmt.Errorf("读取参考图文件失败: %w", err)
 	}
-	defer imgFile.Close()
 
 	// 检测 MIME 类型
-	imgHead := make([]byte, 512)
-	n, _ := imgFile.Read(imgHead)
-	mimeType := http.DetectContentType(imgHead[:n])
-	imgFile.Seek(0, io.SeekStart)
-
-	// 确定文件扩展名
-	ext := ".png"
+	mimeType := http.DetectContentType(imgData)
 	switch mimeType {
 	case "image/jpeg":
-		ext = ".jpg"
 	case "image/webp":
-		ext = ".webp"
 	}
+
+	// 转为 base64 data URL
+	b64 := base64.StdEncoding.EncodeToString(imgData)
+	dataURL := fmt.Sprintf("data:%s;base64,%s", mimeType, b64)
 
 	baseURL := "https://api.openai.com"
-	if s.cfg.OpenAIBaseURL != "" {
-		baseURL = s.cfg.OpenAIBaseURL
+	if s.cfg.ImageGenBaseURL != "" {
+		baseURL = s.cfg.ImageGenBaseURL
 	}
 
-	// 构建 multipart/form-data 请求体
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-
-	// image 文件字段
-	h := make(textproto.MIMEHeader)
-	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="image"; filename="reference%s"`, ext))
-	h.Set("Content-Type", mimeType)
-	part, err := writer.CreatePart(h)
-	if err != nil {
-		return "", "", fmt.Errorf("创建文件字段失败: %w", err)
-	}
-	if _, err := io.Copy(part, imgFile); err != nil {
-		return "", "", fmt.Errorf("写入文件内容失败: %w", err)
+	model := s.cfg.ImageGenModel
+	if model == "" {
+		model = "gpt-image-2"
 	}
 
-	// 其他字段
-	fields := map[string]string{
-		"model":  "gpt-image-2",
+	// 构建 JSON 请求 - 兼容中转代理的 images[] 格式
+	reqBody := map[string]interface{}{
+		"model":  model,
 		"prompt": prompt,
 		"size":   size,
-		"n":      "1",
-	}
-	for key, val := range fields {
-		if err := writer.WriteField(key, val); err != nil {
-			return "", "", fmt.Errorf("写入字段 %s 失败: %w", key, err)
-		}
-	}
-	if err := writer.Close(); err != nil {
-		return "", "", fmt.Errorf("关闭 multipart writer 失败: %w", err)
+		"n":      1,
+		"images": []map[string]string{
+			{"image_url": dataURL},
+		},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/v1/images/edits", &body)
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", "", fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/v1/images/edits", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return "", "", fmt.Errorf("创建请求失败: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+s.cfg.OpenAIKey)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 300 * time.Second}
 	resp, err := client.Do(req)
@@ -176,69 +162,11 @@ func (s *ImageService) EditImage(ctx context.Context, prompt string, size string
 }
 
 // GenerateImage 生成图片，返回 (OpenAI 直链 URL, base64 数据, 错误)
-// 如果 OpenAI 返回 url，则 imageURL 有值；如果返回 b64_json，则 b64Data 有值
+// 实际底层走 ImageGenService，统一处理各 provider 兼容 /v1/images/generations 接口。
 func (s *ImageService) GenerateImage(ctx context.Context, prompt string, size string, quality string) (imageURL string, b64Data string, err error) {
-	if s.cfg.OpenAIKey == "" {
-		return "", "", fmt.Errorf("未配置 OpenAI API Key")
-	}
-
-	// 默认尺寸
-	if size == "" {
-		size = "1024x1024"
-	}
-	// 默认质量
-	if quality == "" {
-		quality = "medium"
-	}
-
-	reqBody := DALLEImageRequest{
-		Model:   "gpt-image-2",
-		Prompt:  prompt,
-		Size:    size,
-		Quality: quality,
-		N:       1,
-	}
-
-	baseURL := "https://api.openai.com"
-	if s.cfg.OpenAIBaseURL != "" {
-		baseURL = s.cfg.OpenAIBaseURL
-	}
-
-	jsonBody, err := json.Marshal(reqBody)
+	url, err := s.imageGenSvc.Generate(ctx, s.cfg.ImageGenBaseURL, s.cfg.ImageGenAPIKey, s.cfg.ImageGenModel, prompt, size, quality)
 	if err != nil {
-		return "", "", fmt.Errorf("序列化请求失败: %w", err)
+		return "", "", err
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/v1/images/generations", bytes.NewBuffer(jsonBody))
-	if err != nil {
-		return "", "", fmt.Errorf("创建请求失败: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+s.cfg.OpenAIKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 300 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", "", fmt.Errorf("请求 OpenAI Images API 失败: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", "", fmt.Errorf("读取响应失败: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("Images API 错误 (HTTP %d): %s", resp.StatusCode, string(body))
-	}
-
-	var result DALLEImageResponse
-	if err := json.Unmarshal(body, &result); err != nil {
-		return "", "", fmt.Errorf("解析响应失败: %w", err)
-	}
-
-	if len(result.Data) == 0 {
-		return "", "", fmt.Errorf("未生成图片 (API 返回空数据)")
-	}
-
-	return result.Data[0].URL, result.Data[0].B64JSON, nil
+	return url, "", nil
 }

@@ -13,6 +13,7 @@ export interface GeneratedImage {
   size: string;
   image_url: string;
   status: string;
+  error_message?: string;
   created_at: string;
 }
 

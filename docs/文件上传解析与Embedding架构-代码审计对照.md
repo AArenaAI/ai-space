@@ -14,11 +14,11 @@
 | **PublicID 对外**，内部自增 ID 不暴露 | `file_handler.go` 所有 API 返回/查询均使用 `public_id` | ✅ 吻合 |
 | **异步解析**，上传后立即返回，后台 goroutine 解析 | `file_service.go` 的 `UploadAndParse` 中 `go parseAsync()` | ✅ 吻合 |
 | **状态分离** `parse_status` 与 `embedding_status` | 代码中确实是两个独立字段 | ✅ 吻合 |
-| **功能开关** `ENABLE_EMBEDDING` | `router.go` 中 `cfg.EnableEmbedding` 控制 embedder 初始化 | ✅ 吻合 |
+| **功能开关** `ENABLE_TEXT_EMBEDDING` | `router.go` 中 `cfg.EnableTextEmbedding` 控制 embedder 初始化 | ✅ 吻合 |
 | 解析状态流转：`pending → parsing → done` | 代码中只有 `pending → done`，**没有中间的 `parsing` 状态** | ⚠️ 略有差异 |
 | 前端轮询间隔 2 秒 | `MessageInput.tsx` 中实际是 **3 秒** | ⚠️ 略有差异 |
 | 异步摘要生成（截取前 500 字符） | `file_service.go` 的 `parseAsync` 中确实如此 | ✅ 吻合 |
-| 图片不生成 Embedding，标记 `skipped` | `file_service.go` 中 `isImageFile` 时 `embedding_status = "skipped"` | ✅ 吻合 |
+| 图片解析后生成 `image_caption` chunk，统一进入 embedding | `file_service.go` 中不再按 MIME 跳过图片，只要解析出有效文本 chunk 就创建 embedding job | ✅ 已更新 |
 
 **结论：** 整体架构与文档描述高度一致，仅存在两处实现细节差异（状态流转少一个中间态、轮询间隔不同），不影响功能。
 
@@ -77,21 +77,20 @@ func (p *FileParser) parseImage(ctx context.Context, data []byte, ext string) (*
         Pages:     1,
         Chunks:    []TextChunk{{
             Index: 0, BlockID: "img-1", Page: 1,
-            BlockType: "image_ref",
-            Text: "[图片文件]",
+            BlockType: "image_caption",
+            Text: caption,
         }},
         HasImages: true,
     }, nil
 }
 ```
-- **不调用任何 OCR 或 Vision API**，只生成一个 `image_ref` 类型的 chunk
-- `parse_status` 变为 `done`，`embedding_status = "skipped"`（图片不参与 embedding）
+- **调用 Vision API** 生成图片描述，作为 `image_caption` 类型的 chunk
+- `parse_status` 变为 `done`，`embedding_status = "pending"`（图片 caption 参与 embedding）
 
 #### 聊天使用
-- `chat.go` 中检测到 `IsImageFileByPublicID` 为 true
-- 调用 `GetFileBase64DataURI()` 将图片转为 `data:image/jpeg;base64,...`
-- 直接作为**多模态消息**传给支持 Vision 的模型（如 GPT-4o、Claude 等）
-- **不走检索系统**，图片内容由模型端直接理解
+- `chat.go` 中所有文件统一走 `RetrievalService.Search()` 检索
+- 图片内容通过 `image_caption` chunk 进入 RAG 上下文，不再 base64 直传模型
+- **统一走检索系统**，避免不同模型视觉能力不一致
 
 ---
 
@@ -120,8 +119,8 @@ func (p *FileParser) parsePDF(data []byte) (*ParseResult, error) {
 - `File.Content` 存储完整提取的文本（用于小文件直接全文发送）
 - `File.Summary` 取前 500 字符作为摘要
 
-#### Embedding 阶段（若启用 `ENABLE_EMBEDDING=true`）
-- `parseAsync` 为非图片文件创建 `FileEmbeddingJob`
+#### Embedding 阶段（若启用 `ENABLE_TEXT_EMBEDDING=true`）
+- `parseAsync` 为所有解析出有效文本 chunk 的文件创建 `FileEmbeddingJob`（不再按 MIME 类型排除图片）
 - Worker 每 5 秒轮询，**串行处理**（避免 API RPM 限制）：
   1. 加载所有 pending 的 `FileChunk`
   2. 调用 `embedder.EmbedDocuments(contents)`（batch 调用 OpenAI `/v1/embeddings`）
@@ -252,7 +251,7 @@ func (s *RetrievalService) Search(...) {
 
 | 文件类型 | 解析方式 | Embedding | 聊天使用方式 |
 |---------|---------|-----------|-------------|
-| **照片**（jpg/png/webp/gif/bmp） | 不解析内容，生成 `image_ref` chunk | ❌ skipped | 转 base64 DataURI，直接传给 Vision 模型 |
+| **照片**（jpg/png/webp/gif/bmp） | Vision API 生成 `image_caption` chunk | ✅ 若启用 | 统一走 RAG 检索，不再 base64 直传 |
 | **PDF** | 提取纯文本，按 2000 字符分块 | ✅ 若启用 | 向量检索 / 关键词检索，取 topK chunks |
 | **Markdown** | 按行解析，识别 heading/paragraph | ✅ 若启用 | 同 PDF |
 | **Excel**（xlsx） | 解析为 Markdown 表格，每 sheet 一个 chunk | ✅ 若启用 | 同 PDF |
@@ -263,6 +262,6 @@ func (s *RetrievalService) Search(...) {
 
 ## 六、备注
 
-- **Embedding 功能默认关闭**（`ENABLE_EMBEDDING=false`），此时所有文件的 chunk 仍然会被解析和存储，但聊天时只会走**关键词检索**降级方案。
+- **Embedding 功能默认关闭**（`ENABLE_TEXT_EMBEDDING=false`），此时所有文件的 chunk 仍然会被解析和存储，但聊天时只会走**关键词检索**降级方案。
 - 图片在任何情况下都不参与 embedding，这是符合文档设计的。
 - 解析状态流转中缺少 `parsing` 中间态，不影响功能但文档与代码略有出入。

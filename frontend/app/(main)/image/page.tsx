@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useImage } from "@/hooks/useImage";
 import { useImageModels, ChatModel } from "@/hooks/useModels";
 import { GeneratedImage } from "@/hooks/useImage";
@@ -20,9 +20,12 @@ import {
   Layers,
   ZoomIn,
   X,
+  Upload,
+  Paperclip,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { checkImagePrompt, formatModerationMessage } from "@/lib/imageModeration";
 
 const ASPECT_RATIOS = [
   { value: "auto", label: "Auto", w: 1, h: 1 },
@@ -93,6 +96,55 @@ export default function ImagePage() {
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [deletingIds, setDeletingIds] = useState<number[]>([]);
   const [referenceImageUrl, setReferenceImageUrl] = useState<string | null>(null);
+  const [referenceImageId, setReferenceImageId] = useState<string | null>(null);
+  const [moderationDialog, setModerationDialog] = useState<{ open: boolean; message: string }>({ open: false, message: "" });
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingImages, setUploadingImages] = useState(false);
+
+  /** 上传用户选择的图片，返回 public_id */
+  const uploadImageFile = async (file: File): Promise<string> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const token = localStorage.getItem("token");
+    const resp = await fetch("/api/files/upload", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || "上传图片失败");
+    }
+    const data = await resp.json();
+    return data.public_id;
+  };
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setUploadingImages(true);
+    try {
+      const file = files[0];
+      if (!file.type.startsWith("image/")) {
+        toast.error("请选择图片文件");
+        return;
+      }
+      const publicId = await uploadImageFile(file);
+      const blobUrl = URL.createObjectURL(file);
+      setReferenceImageUrl(blobUrl);
+      setReferenceImageId(publicId);
+      toast.success(`已添加参考图: ${file.name}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "上传图片失败");
+    } finally {
+      setUploadingImages(false);
+      e.target.value = "";
+    }
+  };
 
   // 默认选第一个画图模型
   useEffect(() => {
@@ -111,14 +163,30 @@ export default function ImagePage() {
       toast.error("请输入描述");
       return;
     }
+
+    // 违禁词前端检测
+    const matches = checkImagePrompt(prompt);
+    if (matches.length > 0) {
+      const message = formatModerationMessage(matches);
+      setModerationDialog({ open: true, message });
+      return;
+    }
+
     setIsLoading(true);
     try {
-      await generateImage(prompt, selectedAspectRatio, selectedResolution, selectedQuality, referenceImageUrl || undefined);
+      await generateImage(prompt, selectedAspectRatio, selectedResolution, selectedQuality, referenceImageId || referenceImageUrl || undefined);
       toast.success(referenceImageUrl ? "已提交基于原图的编辑请求" : "已提交生成请求");
       setPrompt("");
       setReferenceImageUrl(null);
+      setReferenceImageId(null);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "生成失败");
+      const msg = err instanceof Error ? err.message : "";
+      // 常见的违禁/内容安全错误，统一给友好提示
+      if (/content.?policy|content.?safety|content.?moderat|违禁|安全|sensitive|violation|inappropriate|restricted|content_filter|blocked/i.test(msg)) {
+        toast.error("可能有违禁词，请修改描述后重新生成");
+      } else {
+        toast.error(msg || "生成失败");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -193,7 +261,7 @@ export default function ImagePage() {
                   <span className="font-medium">基于原图编辑</span>
                   <button
                     type="button"
-                    onClick={() => setReferenceImageUrl(null)}
+                    onClick={() => { setReferenceImageUrl(null); setReferenceImageId(null); }}
                     className="ml-1 p-0.5 rounded hover:bg-brand/20 transition-colors"
                     title="取消参考"
                   >
@@ -220,6 +288,29 @@ export default function ImagePage() {
             />
             <div className="flex items-center justify-between px-3 pb-3 pt-1">
               <div className="flex items-center gap-2 flex-wrap">
+                {/* 上传图片按钮 */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={handleFileSelect}
+                />
+                <button
+                  onClick={handleUploadClick}
+                  disabled={isLoading || isGenerating || uploadingImages}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[13px] font-medium transition-all duration-200 border-surface-border text-text-secondary hover:text-text-primary hover:border-text-tertiary/50 bg-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="上传参考图片"
+                >
+                  {uploadingImages ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Paperclip className="w-3.5 h-3.5" />
+                  )}
+                  <span>{uploadingImages ? "上传中..." : "图片"}</span>
+                </button>
+
                 {/* 模型选择 */}
                 {imageModels.length > 0 && (
                   <div className="relative">
@@ -397,6 +488,7 @@ export default function ImagePage() {
                     onReuse={(p, size, refUrl) => {
                       setPrompt("");
                       setReferenceImageUrl(refUrl || null);
+                      setReferenceImageId(null);
                       if (size) {
                         const parts = size.split("x");
                         if (parts.length === 2) {
@@ -445,11 +537,78 @@ export default function ImagePage() {
         onCancel={() => setDeleteTarget(null)}
         variant="danger"
       />
+      {/* 违禁词提示弹窗 */}
+      <ModerationDialog
+        isOpen={moderationDialog.open}
+        message={moderationDialog.message}
+        onClose={() => setModerationDialog({ open: false, message: "" })}
+      />
     </div>
   );
 }
 
-// 单个图片卡片组件
+// 违禁词弹窗组件
+function ModerationDialog({ isOpen, message, onClose }: { isOpen: boolean; message: string; onClose: () => void }) {
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => { document.body.style.overflow = ""; };
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  const lines = message.split("\n");
+  const titleLine = lines[0] || "";
+  const restLines = lines.slice(1);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-[480px] mx-4 rounded-2xl bg-surface-elevated border border-surface-border shadow-2xl p-6 animate-dialog-appear">
+        <div className="flex items-start gap-3 mb-4">
+          <div className="w-10 h-10 rounded-full bg-yellow-500/15 flex items-center justify-center shrink-0">
+            <AlertCircle className="w-5 h-5 text-yellow-500" />
+          </div>
+          <div>
+            <h3 className="text-base font-semibold text-text-primary">
+              内容安全提醒
+            </h3>
+            <p className="text-sm text-text-secondary mt-1">
+              检测到您的描述包含可能被 OpenAI 内容安全策略拦截的内容，已取消本次生成请求。
+            </p>
+          </div>
+        </div>
+        <div className="mb-5 p-3 rounded-xl bg-surface border border-surface-border">
+          {restLines.map((line, i) => {
+            if (line.startsWith("•")) {
+              return (
+                <div key={i} className="text-sm text-yellow-600 dark:text-yellow-400 font-medium py-0.5">
+                  {line}
+                </div>
+              );
+            }
+            return line.trim() ? (
+              <p key={i} className="text-sm text-text-secondary mt-1 first:mt-0 leading-relaxed">
+                {line}
+              </p>
+            ) : null;
+          })}
+        </div>
+        <div className="flex justify-end">
+          <button
+            onClick={onClose}
+            className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-brand hover:bg-brand-hover transition-colors"
+          >
+            知道了，修改描述
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 function ImageCard({
   image,
   isDeleting,
@@ -493,9 +652,12 @@ function ImageCard({
         ) : isFailed ? (
           <>
             <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-text-tertiary">
-              <AlertCircle className="w-8 h-8 text-red-400/50" />
-              <span className="text-xs text-red-400/70">生成失败</span>
-              <p className="text-[11px] text-text-tertiary/60 max-w-[80%] text-center line-clamp-2 px-2">
+              <AlertCircle className="w-8 h-8 text-yellow-500/50" />
+              <span className="text-xs text-yellow-600 dark:text-yellow-400 font-medium">生成失败</span>
+              <p className="text-[11px] text-text-tertiary/70 max-w-[85%] text-center leading-relaxed px-2">
+                可能有违禁词，请修改后重新生成
+              </p>
+              <p className="text-[11px] text-text-secondary/50 max-w-[80%] text-center line-clamp-2 px-2">
                 {image.prompt}
               </p>
             </div>

@@ -25,23 +25,25 @@ type ImageHandler struct {
 	db           *gorm.DB
 	imageService *services.ImageService
 	cfg          *config.Config
+	usageService *services.UsageService
 }
 
-func NewImageHandler(db *gorm.DB, imageService *services.ImageService, cfg *config.Config) *ImageHandler {
+func NewImageHandler(db *gorm.DB, imageService *services.ImageService, cfg *config.Config, usageService *services.UsageService) *ImageHandler {
 	return &ImageHandler{
 		db:           db,
 		imageService: imageService,
 		cfg:          cfg,
+		usageService: usageService,
 	}
 }
 
 // 图片生成请求
 type GenerateImageRequest struct {
 	Prompt            string `json:"prompt" binding:"required"`
-	Size              string `json:"size"`         // 兼容旧前端：直接传像素尺寸
-	AspectRatio       string `json:"aspect_ratio"` // 纵横比：auto, 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9
-	Resolution        string `json:"resolution"`   // 分辨率：1K, 2K
-	Quality           string `json:"quality"`      // 质量：low, medium, high, auto（默认 medium）
+	Size              string `json:"size"`                // 兼容旧前端：直接传像素尺寸
+	AspectRatio       string `json:"aspect_ratio"`        // 纵横比：auto, 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9
+	Resolution        string `json:"resolution"`          // 分辨率：1K, 2K
+	Quality           string `json:"quality"`             // 质量：low, medium, high, auto（默认 medium）
 	ReferenceImageURL string `json:"reference_image_url"` // 参考图 URL（用于 image-to-image）
 }
 
@@ -193,14 +195,14 @@ func saveBase64Image(b64Data string) (string, error) {
 
 // EditImageRequest 图片编辑请求
 type EditImageRequest struct {
-	Prompt    string `json:"prompt"`                    // 编辑 prompt（替换背景时需要）
-	Size      string `json:"size"`                      // 尺寸（可选）
-	ImageURL  string `json:"image_url"`                 // 源图 URL（可选，和 image_data 二选一）
-	ImageData string `json:"image_data"`                // 源图 base64 数据（可选，和 image_url 二选一）
-	EditMode  string `json:"edit_mode" binding:"required"` // remove-bg 或 replace-bg
+	Prompt    string `json:"prompt"`                       // 编辑 prompt（替换背景、文字移除时需要）
+	Size      string `json:"size"`                         // 尺寸（可选）
+	ImageURL  string `json:"image_url"`                    // 源图 URL（可选，和 image_data 二选一）
+	ImageData string `json:"image_data"`                   // 源图 base64 数据（可选，和 image_url 二选一）
+	EditMode  string `json:"edit_mode" binding:"required"` // remove-bg / replace-bg / text-removal / upscale
 }
 
-// EditImage 编辑图片（背景移除 / 背景替换）
+// EditImage 编辑图片（背景移除 / 背景替换 / 文字移除 / 画质提升）
 // 支持两种传图方式：
 // 1. image_url — 已保存在 data/images/ 目录下的图片文件名（完整 URL）
 // 2. image_data — base64 编码的图片数据
@@ -214,14 +216,20 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 	}
 
 	// 验证编辑模式
-	if req.EditMode != "remove-bg" && req.EditMode != "replace-bg" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "edit_mode 必须是 remove-bg 或 replace-bg"})
+	validModes := map[string]bool{"remove-bg": true, "replace-bg": true, "text-removal": true, "upscale": true}
+	if !validModes[req.EditMode] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "edit_mode 必须是 remove-bg、replace-bg、text-removal 或 upscale"})
 		return
 	}
 
 	// 替换背景时必须提供 prompt
 	if req.EditMode == "replace-bg" && req.Prompt == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "替换背景时必须提供 prompt 描述新背景"})
+		return
+	}
+	// 文字移除时必须提供 prompt
+	if req.EditMode == "text-removal" && req.Prompt == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "文字移除时必须提供 prompt 描述要去除的文字"})
 		return
 	}
 
@@ -298,13 +306,28 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 
 	if req.EditMode == "remove-bg" {
 		imageURL, b64Data, err = h.imageService.RemoveBackground(ctx, size, imageFilePath)
+	} else if req.EditMode == "text-removal" {
+		editPrompt := req.Prompt + ". Remove these texts/watermarks from the image. Keep everything else intact."
+		imageURL, b64Data, err = h.imageService.GenerateEditImage(ctx, editPrompt, size, imageFilePath)
+	} else if req.EditMode == "upscale" {
+		editPrompt := "Upscale and enhance this image to 4x resolution. Add more detail, sharpen edges, improve clarity while preserving the original style and content."
+		imageURL, b64Data, err = h.imageService.GenerateEditImage(ctx, editPrompt, size, imageFilePath)
 	} else {
 		editPrompt := req.Prompt + ". Keep the subject the same, only change the background."
 		imageURL, b64Data, err = h.imageService.GenerateEditImage(ctx, editPrompt, size, imageFilePath)
 	}
 
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "背景编辑失败: " + err.Error()})
+		var errorMsg string
+		switch req.EditMode {
+		case "text-removal":
+			errorMsg = "文字移除失败: " + err.Error()
+		case "upscale":
+			errorMsg = "画质提升失败: " + err.Error()
+		default:
+			errorMsg = "背景编辑失败: " + err.Error()
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": errorMsg})
 		return
 	}
 
@@ -330,8 +353,13 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 		ReferenceImageURL: req.ImageURL,
 		Status:            "completed",
 	}
-	if req.EditMode == "remove-bg" {
+	switch req.EditMode {
+	case "remove-bg":
 		gen.Prompt = "[背景移除] " + req.ImageURL
+	case "text-removal":
+		gen.Prompt = "[文字移除] " + req.ImageURL
+	case "upscale":
+		gen.Prompt = "[画质提升] " + req.ImageURL
 	}
 	h.db.Create(gen)
 
@@ -378,18 +406,25 @@ func (h *ImageHandler) GenerateImage(c *gin.Context) {
 		quality = "medium"
 	}
 
-	// 处理参考图：从 URL 提取本地文件名
+	// 处理参考图：支持多种来源
 	var referenceImagePath string
 	if req.ReferenceImageURL != "" {
-		// URL 格式: https://host/api/images/file/<filename>
-		parts := strings.Split(req.ReferenceImageURL, "/")
-		if len(parts) > 0 {
-			filename := parts[len(parts)-1]
-			// 安全校验
-			if !strings.Contains(filename, "..") && !strings.Contains(filename, "/") {
-				refPath := filepath.Join(imagesDir, filename)
-				if _, statErr := os.Stat(refPath); statErr == nil {
-					referenceImagePath = refPath
+		if strings.HasPrefix(req.ReferenceImageURL, "file_") {
+			// 方案 A: 从文件服务上传的图片（public_id 以 file_ 开头）
+			var file models.File
+			if err := h.db.Where("public_id = ?", req.ReferenceImageURL).First(&file).Error; err == nil {
+				referenceImagePath = file.StoragePath
+			}
+		} else {
+			// 方案 B: URL 格式 — 提取文件名，在 data/images/ 目录查找
+			parts := strings.Split(req.ReferenceImageURL, "/")
+			if len(parts) > 0 {
+				filename := parts[len(parts)-1]
+				if !strings.Contains(filename, "..") && !strings.Contains(filename, "/") {
+					refPath := filepath.Join(imagesDir, filename)
+					if _, statErr := os.Stat(refPath); statErr == nil {
+						referenceImagePath = refPath
+					}
 				}
 			}
 		}
@@ -499,8 +534,19 @@ func (h *ImageHandler) processImageJob(recordID uint, prompt, size, quality, ref
 
 	if err != nil {
 		fmt.Printf("[图片生成失败] ID=%d size=%s quality=%s ref=%s err=%v\n", recordID, size, quality, referenceImagePath, err)
-		if saveErr := h.db.Model(&services.ImageGeneration{}).Where("id = ?", recordID).Update("status", "failed").Error; saveErr != nil {
+		errMsg := err.Error()
+		if saveErr := h.db.Model(&services.ImageGeneration{}).Where("id = ?", recordID).Updates(map[string]interface{}{
+			"status":        "failed",
+			"error_message": errMsg,
+		}).Error; saveErr != nil {
 			fmt.Printf("[更新状态失败] ID=%d err=%v\n", recordID, saveErr)
+		}
+		// 记录失败用量
+		if h.usageService != nil {
+			var gen services.ImageGeneration
+			if dbErr := h.db.First(&gen, recordID).Error; dbErr == nil {
+				_ = h.usageService.RecordImageUsage(gen.UserID, h.cfg.ImageGenModel, 0, nil)
+			}
 		}
 		return
 	}
@@ -513,6 +559,12 @@ func (h *ImageHandler) processImageJob(recordID uint, prompt, size, quality, ref
 			if saveErr := h.db.Model(&services.ImageGeneration{}).Where("id = ?", recordID).Update("status", "failed").Error; saveErr != nil {
 				fmt.Printf("[更新状态失败] ID=%d err=%v\n", recordID, saveErr)
 			}
+			if h.usageService != nil {
+				var gen services.ImageGeneration
+				if dbErr := h.db.First(&gen, recordID).Error; dbErr == nil {
+					_ = h.usageService.RecordImageUsage(gen.UserID, h.cfg.ImageGenModel, 0, nil)
+				}
+			}
 			return
 		}
 		imageURL = buildImageURL(baseURL, filename)
@@ -522,6 +574,12 @@ func (h *ImageHandler) processImageJob(recordID uint, prompt, size, quality, ref
 		fmt.Printf("[图片生成异常] ID=%d 未获取到 URL 或数据\n", recordID)
 		if saveErr := h.db.Model(&services.ImageGeneration{}).Where("id = ?", recordID).Update("status", "failed").Error; saveErr != nil {
 			fmt.Printf("[更新状态失败] ID=%d err=%v\n", recordID, saveErr)
+		}
+		if h.usageService != nil {
+			var gen services.ImageGeneration
+			if dbErr := h.db.First(&gen, recordID).Error; dbErr == nil {
+				_ = h.usageService.RecordImageUsage(gen.UserID, h.cfg.ImageGenModel, 0, nil)
+			}
 		}
 		return
 	}
@@ -533,6 +591,14 @@ func (h *ImageHandler) processImageJob(recordID uint, prompt, size, quality, ref
 		fmt.Printf("[更新记录失败] ID=%d err=%v\n", recordID, saveErr)
 	}
 	fmt.Printf("[图片生成成功] ID=%d url=%s\n", recordID, imageURL)
+
+	// 记录成功用量
+	if h.usageService != nil {
+		var gen services.ImageGeneration
+		if dbErr := h.db.First(&gen, recordID).Error; dbErr == nil {
+			_ = h.usageService.RecordImageUsage(gen.UserID, h.cfg.ImageGenModel, 1, nil)
+		}
+	}
 }
 
 // RecoverPendingJobs 服务启动时扫描并恢复所有 pending 状态的图片生成任务

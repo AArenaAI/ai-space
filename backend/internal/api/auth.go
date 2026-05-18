@@ -65,6 +65,19 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
+	// 创建默认工作区
+	defaultWorkspace := models.Workspace{
+		UserID:    user.ID,
+		Name:      "默认工作区",
+		Icon:      "📁",
+		Color:     "#6366f1",
+		IsDefault: true,
+	}
+	if err := h.db.Create(&defaultWorkspace).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建工作区失败"})
+		return
+	}
+
 	// 生成 token
 	token, err := middleware.GenerateToken(user.ID, user.Email, h.cfg.JWTSecret)
 	if err != nil {
@@ -74,13 +87,14 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, gin.H{
 		"user": gin.H{
-			"id":               user.ID,
-			"email":            user.Email,
-			"name":             user.Name,
-			"basic_credits":    user.BasicCredits,
-			"advanced_credits": user.AdvancedCredits,
-			"elite_credits":    user.EliteCredits,
-			"plan_tier":        user.PlanTier,
+			"id":                  user.ID,
+			"email":               user.Email,
+			"name":                user.Name,
+			"basic_credits":       user.BasicCredits,
+			"advanced_credits":    user.AdvancedCredits,
+			"elite_credits":       user.EliteCredits,
+			"plan_tier":           user.PlanTier,
+			"default_workspace_id": defaultWorkspace.ID,
 		},
 		"token": token,
 	})
@@ -113,15 +127,20 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	// 查找用户的默认工作区
+	var defaultWS models.Workspace
+	h.db.Where("user_id = ? AND is_default = ?", user.ID, true).First(&defaultWS)
+
 	c.JSON(http.StatusOK, gin.H{
 		"user": gin.H{
-			"id":               user.ID,
-			"email":            user.Email,
-			"name":             user.Name,
-			"basic_credits":    user.BasicCredits,
-			"advanced_credits": user.AdvancedCredits,
-			"elite_credits":    user.EliteCredits,
-			"plan_tier":        user.PlanTier,
+			"id":                   user.ID,
+			"email":                user.Email,
+			"name":                 user.Name,
+			"basic_credits":        user.BasicCredits,
+			"advanced_credits":     user.AdvancedCredits,
+			"elite_credits":        user.EliteCredits,
+			"plan_tier":            user.PlanTier,
+			"default_workspace_id": defaultWS.ID,
 		},
 		"token": token,
 	})

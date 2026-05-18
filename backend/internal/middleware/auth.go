@@ -64,3 +64,34 @@ func AuthMiddleware(cfg *config.Config) gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// OptionalAuthMiddleware 可选认证中间件：有合法 token 则设置 userID，无则不报错，继续执行
+func OptionalAuthMiddleware(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader != "" {
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) == 2 && parts[0] == "Bearer" {
+				tokenString := parts[1]
+				claims := &Claims{}
+				token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+					return []byte(cfg.JWTSecret), nil
+				})
+				if err == nil && token.Valid {
+					c.Set("userID", claims.UserID)
+					c.Set("email", claims.Email)
+				}
+			}
+		}
+		c.Next()
+	}
+}
+
+// GetGuestID 从请求中获取匿名用户 ID（优先 header，其次 query）
+func GetGuestID(c *gin.Context) string {
+	guestID := c.GetHeader("X-Guest-ID")
+	if guestID == "" {
+		guestID = c.Query("guest_id")
+	}
+	return guestID
+}

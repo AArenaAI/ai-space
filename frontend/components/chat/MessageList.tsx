@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck, ChevronDown, ChevronUp, Lightbulb, Play, Search, ChevronDown as ChevronDownIcon } from "lucide-react";
+import { User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck, ChevronDown, ChevronUp, Lightbulb, Play, Search, ChevronDown as ChevronDownIcon, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/hooks/useChat";
 import ReactMarkdown from "react-markdown";
@@ -574,6 +574,23 @@ export default function MessageList({
                             }
                             return null;
                           })}
+                        </div>
+                      )}
+                      {/* 非图片文件卡片 */}
+                      {msg.files && msg.files.some(f => f.type !== "image") && (
+                        <div className="flex flex-wrap gap-2">
+                          {msg.files.filter(f => f.type !== "image").map((f, fi) => (
+                            <a
+                              key={fi}
+                              href={`/api/files/${f.public_id}/download`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-card border border-surface-border hover:border-brand/30 transition-colors"
+                            >
+                              <FileText className="w-4 h-4 text-text-tertiary shrink-0" />
+                              <span className="text-[13px] text-text-secondary truncate max-w-[200px]">{f.filename}</span>
+                            </a>
+                          ))}
                         </div>
                       )}
                       <div className="flex items-start justify-between gap-2">

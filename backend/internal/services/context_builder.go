@@ -28,10 +28,17 @@ func (b *ContextBuilder) Build(fileContexts []FileContext, query string, maxToke
 		return ""
 	}
 
+	const maxTotalChars = 100000 // 100K 字符总字数硬顶
+
 	var sb strings.Builder
 	sb.WriteString("<file_context>\n")
 	sb.WriteString("<instruction>\n")
-	sb.WriteString("以下是用户上传的文件内容，请基于这些内容回答用户问题。\n")
+	sb.WriteString("以下是用户在本轮请求中上传或关联的文件内容。\n")
+	sb.WriteString("请优先基于下面的文件上下文回答问题。\n")
+	sb.WriteString("当用户问题为\"总结一下\"、\"描述一下\"、\"这是什么\"、\"分析一下\"等指代性问题时，\n")
+	sb.WriteString("默认必须指向本轮上传或关联的文件内容，而不是历史对话中的旧文件或旧图片。\n")
+	sb.WriteString("当文件内容与历史对话中的旧文件、旧图片描述冲突时，以本轮文件内容为准。\n")
+	sb.WriteString("不要把历史对话中的旧文件正文、旧图片描述或旧附件分析当成本轮上传的文件。\n")
 	sb.WriteString("如果查询与文件内容无关，请直接回答问题，不需强行引用文件。\n")
 	sb.WriteString("引用文件时请注明来源文件名称。\n")
 	sb.WriteString("</instruction>\n\n")
@@ -48,8 +55,24 @@ func (b *ContextBuilder) Build(fileContexts []FileContext, query string, maxToke
 		for _, result := range fc.Chunks {
 			chunk := result.Chunk
 			chunkText := b.formatChunk(chunk, result.Relevance)
-			chunkTokens := estimateTokens(chunkText)
 
+			remainingChars := maxTotalChars - sb.Len()
+			if remainingChars <= 0 {
+				sb.WriteString("\n... (已达到总字数上限) ...\n")
+				break
+			}
+			if len(chunkText) > remainingChars {
+				if remainingChars > len("\n... (已达到总字数上限) ...\n") {
+					marker := "\n... (已达到总字数上限) ...\n"
+					sb.WriteString(chunkText[:remainingChars-len(marker)])
+					sb.WriteString(marker)
+				} else {
+					sb.WriteString("\n... (已达到总字数上限) ...\n")
+				}
+				break
+			}
+
+			chunkTokens := estimateTokens(chunkText)
 			if maxTokens > 0 && totalTokens+chunkTokens > maxTokens {
 				sb.WriteString("\n... (已截断，达到上下文长度上限) ...\n")
 				break
@@ -60,10 +83,22 @@ func (b *ContextBuilder) Build(fileContexts []FileContext, query string, maxToke
 		}
 
 		sb.WriteString("\n")
+		if sb.Len() >= maxTotalChars {
+			break
+		}
 	}
 
 	sb.WriteString("</file_context>\n")
 	return sb.String()
+}
+
+// PreviewRunes 安全截取前 n 个字符（按 rune，不截断半个 UTF-8 字符）
+func PreviewRunes(s string, n int) string {
+	rs := []rune(s)
+	if len(rs) <= n {
+		return s
+	}
+	return string(rs[:n])
 }
 
 // formatChunk 格式化单个 chunk

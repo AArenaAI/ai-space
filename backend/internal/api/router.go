@@ -26,7 +26,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	router.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Guest-ID")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
@@ -57,7 +57,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	// Embedding provider（可用但非必需）
 	var embedder embedding.Provider
-	if cfg.EnableEmbedding && cfg.OpenAIKey != "" {
+	if cfg.EnableTextEmbedding && cfg.TextEmbeddingAPIKey != "" {
 		var err error
 		embedder, err = embedding.NewProvider(cfg)
 		if err != nil {
@@ -66,15 +66,20 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		}
 	}
 
+	// 用量记录服务
+	usageService := services.NewUsageService(cfg)
+
 	// 文件服务
 	fileParser := services.NewFileParser(cfg, aiService)
-	fileService := services.NewFileService(db, cfg, fileParser, embedder)
+	fileService := services.NewFileService(db, cfg, fileParser, embedder, usageService)
 
 	// 检索服务
 	retrievalSvc := services.NewRetrievalService(db, embedder)
 	contextBuilder := services.NewContextBuilder()
 
-	// 公开路由 - 模型列表
+	// Handler 实例（在外层定义，供公开路由和认证路由共用）
+	chatHandler := NewChatHandler(db, cfg, aiService, searchService, fileService, retrievalSvc, contextBuilder, usageService)
+	fileHandler := NewFileHandler(fileService)
 	router.GET("/api/models", GetModelsHandler)
 	router.GET("/api/models/chat", GetChatModelsHandler)
 	router.GET("/api/models/image", GetImageModelsHandler)
@@ -92,24 +97,48 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	router.GET("/api/skills/:key", skillHandler.GetSkill)
 	router.POST("/api/skills/detect", skillHandler.DetectSkill)
 
-	// 聊天路由
-	chatHandler := NewChatHandler(db, cfg, aiService, searchService, fileService, retrievalSvc, contextBuilder)
-	router.POST("/api/chat", chatHandler.Chat)
+	// 公开路由（可选认证，支持匿名用户与登录用户共用）
+	publicWithAuth := router.Group("/api")
+	publicWithAuth.Use(middleware.OptionalAuthMiddleware(cfg))
+	{
+		// 聊天路由
+		publicWithAuth.POST("/chat", chatHandler.Chat)
 
-	// 文件上传解析路由
-	fileHandler := NewFileHandler(fileService)
-	router.POST("/api/files/upload", fileHandler.UploadFile)
+		// 文件上传解析路由
+		publicWithAuth.POST("/files/upload", fileHandler.UploadFile)
 
-	// PPT服务
-	pptService := services.NewPPTService(cfg)
+		// 文件详情（无需认证，未登录用户上传后需要查询解析状态）
+		publicWithAuth.GET("/files/:id", fileHandler.GetFile)
+
+		// 文件下载（返回文件二进制，无需认证，图片直接展示）
+		publicWithAuth.GET("/files/:id/download", fileHandler.DownloadFile)
+	}
+
+	// 聊天路由（旧位置兼容，已移至 publicWithAuth）
+	// chatHandler := NewChatHandler(db, cfg, aiService, searchService, fileService, retrievalSvc, contextBuilder, usageService)
+	// router.POST("/api/chat", chatHandler.Chat)
+
+	// 文件上传解析路由（旧位置兼容，已移至 publicWithAuth）
+	// fileHandler := NewFileHandler(fileService)
+	// router.POST("/api/files/upload", fileHandler.UploadFile)
 
 	// 图片服务
 	imageService := services.NewImageService(cfg)
+	imageGenSvc := services.NewImageGenService()
+
+	// PPT服务
+	pptService := services.NewPPTService(db, cfg, imageService, imageGenSvc)
 
 	// 积分路由
 	creditsHandler := NewCreditsHandler(db, cfg)
 	router.GET("/api/models/tiers", creditsHandler.GetModelTiers)
 	router.GET("/api/plans", creditsHandler.GetPublicPlans)
+
+	// 公开对比问答（支持匿名用户，内部已有额度与权限校验）
+	publicWithAuth.POST("/chat/compare", chatHandler.CompareChat)
+
+	// 对比记录 Handler（供认证路由与公开查看共用）
+	compareRecordHandler := NewCompareRecordHandler(db)
 
 	// 需要认证的路由
 	authorized := router.Group("/api")
@@ -124,25 +153,35 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		authorized.GET("/conversations/:id/messages", convHandler.GetMessages)
 		authorized.POST("/conversations/:id/messages", convHandler.AddMessage)
 
-	// 图片路由
-	imageHandler := NewImageHandler(db, imageService, cfg)
-	imageHandler.AutoMigrate()
-	imageHandler.RecoverPendingJobs() // 服务启动时恢复未完成的图片生成任务
-	authorized.POST("/images/generate", imageHandler.GenerateImage)
-	authorized.POST("/images/edit", imageHandler.EditImage)
-	authorized.GET("/images", imageHandler.ListImages)
-	authorized.GET("/images/:id", imageHandler.GetImage)
-	authorized.DELETE("/images/:id", imageHandler.DeleteImage)
+		// 图片路由
+		imageHandler := NewImageHandler(db, imageService, cfg, usageService)
+		imageHandler.AutoMigrate()
+		imageHandler.RecoverPendingJobs() // 服务启动时恢复未完成的图片生成任务
+		authorized.POST("/images/generate", imageHandler.GenerateImage)
+		authorized.POST("/images/edit", imageHandler.EditImage)
+		authorized.GET("/images", imageHandler.ListImages)
+		authorized.GET("/images/:id", imageHandler.GetImage)
+		authorized.DELETE("/images/:id", imageHandler.DeleteImage)
 
-	// 图片文件服务（无需认证，直接访问）
-	router.GET("/api/images/file/:filename", imageHandler.ServeImageFile)
+		// 图片文件服务（无需认证，直接访问）
+		router.GET("/api/images/file/:filename", imageHandler.ServeImageFile)
 
 		// PPT路由
-		pptHandler := NewPPTHandler(db, pptService)
+		pptHandler := NewPPTHandler(db, pptService, usageService)
+		pptHandler.AutoMigrate()
 		authorized.GET("/ppt/templates", pptHandler.GetTemplates)
-		authorized.POST("/ppt/generate", pptHandler.GeneratePPT)
+		authorized.POST("/ppt", pptHandler.CreatePPT)
 		authorized.GET("/ppt", pptHandler.ListPPTs)
 		authorized.GET("/ppt/:id", pptHandler.GetPPT)
+		authorized.GET("/ppt/:id/status", pptHandler.GetPPTStatus)
+		authorized.GET("/ppt/:id/outline", pptHandler.GetPPTOutline)
+		authorized.POST("/ppt/:id/outline", pptHandler.GenerateOutline)
+		authorized.POST("/ppt/:id/confirm", pptHandler.ConfirmOutline)
+		authorized.PUT("/ppt/:id/slides/:page", pptHandler.UpdateSlide)
+		authorized.POST("/ppt/:id/slides/:page/rewrite", pptHandler.RewriteSlide)
+		authorized.POST("/ppt/:id/slides/:page/image", pptHandler.RegenerateSlideImage)
+		authorized.GET("/ppt/:id/image-jobs", pptHandler.GetPPTImageJobs)
+		authorized.GET("/ppt/:id/export/:format", pptHandler.ExportPPT)
 		authorized.DELETE("/ppt/:id", pptHandler.DeletePPT)
 
 		// 分享路由（需认证：创建分享）
@@ -150,21 +189,9 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		authorized.POST("/conversations/:id/share", shareHandler.Create)
 
 		// 对比记录路由（需认证）
-		compareRecordHandler := NewCompareRecordHandler(db)
 		authorized.POST("/compare/record", compareRecordHandler.Save)
 		authorized.GET("/compare/records", compareRecordHandler.List)
 		authorized.DELETE("/compare/record/:id", compareRecordHandler.Delete)
-
-		// 模板路由
-		templateHandler := NewTemplateHandler(db)
-		templateHandler.AutoMigrate()
-		authorized.GET("/templates", templateHandler.ListTemplates)
-		authorized.POST("/templates", templateHandler.CreateTemplate)
-		authorized.PUT("/templates/:id", templateHandler.UpdateTemplate)
-		authorized.DELETE("/templates/:id", templateHandler.DeleteTemplate)
-
-		// 对比问答（需认证，因为涉及模板和配额）
-		authorized.POST("/chat/compare", chatHandler.CompareChat)
 
 		// 技能用户自定义路由
 		authorized.POST("/skills/custom", skillHandler.CreateUserSkill)
@@ -178,21 +205,28 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		// 文件管理路由
 		authorized.GET("/files", fileHandler.ListFiles)
 		authorized.DELETE("/files/:id", fileHandler.DeleteFile)
+
+		// 工作区路由
+		workspaceHandler := NewWorkspaceHandler(db)
+		authorized.GET("/workspaces", workspaceHandler.ListWorkspaces)
+		authorized.POST("/workspaces", workspaceHandler.CreateWorkspace)
+		authorized.GET("/workspaces/:id", workspaceHandler.GetWorkspace)
+		authorized.PUT("/workspaces/:id", workspaceHandler.UpdateWorkspace)
+		authorized.DELETE("/workspaces/:id", workspaceHandler.DeleteWorkspace)
 	}
 
 	// 文件详情（无需认证，未登录用户上传后需要查询解析状态）
-	router.GET("/api/files/:id", fileHandler.GetFile)
+	// router.GET("/api/files/:id", fileHandler.GetFile)
 
 	// 文件下载（返回文件二进制，无需认证，图片直接展示）
-	router.GET("/api/files/:id/download", fileHandler.DownloadFile)
+	// router.GET("/api/files/:id/download", fileHandler.DownloadFile)
 
 	// 公开分享路由（无需认证：通过 short slug 访问）
 	publicShare := NewShareHandler(db)
 	router.GET("/api/share/:slug", publicShare.GetBySlug)
 
 	// 公开对比记录查看路由（无需认证：通过 slug 访问）
-	publicCompareRecord := NewCompareRecordHandler(db)
-	router.GET("/api/compare/share/:slug", publicCompareRecord.GetBySlug)
+	router.GET("/api/compare/share/:slug", compareRecordHandler.GetBySlug)
 
 	return router
 }

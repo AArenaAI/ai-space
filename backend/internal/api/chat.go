@@ -25,10 +25,17 @@ type ChatHandler struct {
 	fileService    *services.FileService
 	retrievalSvc   *services.RetrievalService
 	contextBuilder *services.ContextBuilder
+	usageService   *services.UsageService
 }
 
-func NewChatHandler(db *gorm.DB, cfg *config.Config, aiService *services.AIService, searchService *services.SearchService, fileService *services.FileService, retrievalSvc *services.RetrievalService, contextBuilder *services.ContextBuilder) *ChatHandler {
-	return &ChatHandler{db: db, cfg: cfg, aiService: aiService, searchService: searchService, fileService: fileService, retrievalSvc: retrievalSvc, contextBuilder: contextBuilder}
+func NewChatHandler(db *gorm.DB, cfg *config.Config, aiService *services.AIService, searchService *services.SearchService, fileService *services.FileService, retrievalSvc *services.RetrievalService, contextBuilder *services.ContextBuilder, usageService *services.UsageService) *ChatHandler {
+	return &ChatHandler{db: db, cfg: cfg, aiService: aiService, searchService: searchService, fileService: fileService, retrievalSvc: retrievalSvc, contextBuilder: contextBuilder, usageService: usageService}
+}
+
+type FileContextPolicy struct {
+	UseConversationFiles string `json:"use_conversation_files,omitempty"` // auto | always | never
+	MaxConversationFiles int    `json:"max_conversation_files,omitempty"`
+	IncludePinnedFiles   bool   `json:"include_pinned_files,omitempty"`
 }
 
 type ChatRequest struct {
@@ -41,8 +48,17 @@ type ChatRequest struct {
 	Search          bool               `json:"search"`
 	TemplateID      uint               `json:"template_id,omitempty"`
 	SkipSaveUserMsg bool               `json:"skip_save_user_msg,omitempty"` // 对比模式后续模型调用不重复保存用户消息
+	WorkspaceID  uint               `json:"workspace_id,omitempty"`
 	SkillKey        string             `json:"skill_key,omitempty"`          // 指定技能 key
-	FileIDs         []string           `json:"file_ids,omitempty"`           // 关联文件的 PublicID 列表
+
+	// 本轮消息显式附件，只用于 message_files 展示，同时默认参与本轮 RAG
+	MessageFileIDs []string `json:"message_file_ids,omitempty"`
+	// 显式选择参与本轮上下文的历史文件，不展示在当前消息气泡
+	ContextFileIDs []string `json:"context_file_ids,omitempty"`
+	// 控制是否从 conversation_files 自动选上下文文件
+	ContextPolicy FileContextPolicy `json:"context_policy,omitempty"`
+	// 兼容旧前端：旧 file_ids 等同于 message_file_ids
+	FileIDs []string `json:"file_ids,omitempty"`
 }
 
 type CompareRequest struct {
@@ -51,9 +67,14 @@ type CompareRequest struct {
 	TemplateID      uint     `json:"template_id,omitempty"`
 	ConversationID  uint     `json:"conversation_id,omitempty"`
 	Reasoning       bool     `json:"reasoning"`
+	WorkspaceID  uint     `json:"workspace_id,omitempty"`
 	ReasoningEffort string   `json:"reasoning_effort"`
 	Search          bool     `json:"search"`
-	FileIDs         []string `json:"file_ids,omitempty"`
+
+	MessageFileIDs []string          `json:"message_file_ids,omitempty"`
+	ContextFileIDs []string          `json:"context_file_ids,omitempty"`
+	ContextPolicy  FileContextPolicy `json:"context_policy,omitempty"`
+	FileIDs        []string          `json:"file_ids,omitempty"`
 }
 
 type CompareResult struct {
@@ -70,6 +91,363 @@ func findModelName(modelID string) string {
 		return model.Name
 	}
 	return modelID
+}
+
+// isFileQuestion 判断用户问题是否是针对上传文件/图片的指代性提问。
+// 注意：这里不能把单字“这”当关键词，否则“今天这个新闻”等问题会误跳过搜索。
+func isFileQuestion(query string) bool {
+	q := strings.ToLower(strings.TrimSpace(query))
+	fileKeywords := []string{
+		"图片", "照片", "截图", "这张图", "这张图片", "这张照片", "图里", "图片里",
+		"文件", "文档", "pdf", "docx", "ppt", "xlsx", "附件", "上传的",
+		"这个文件", "这份文件", "这个附件", "这个文档", "上面的文件", "上面的图片",
+		"这是什么", "是什么", "内容是什么", "什么意思", "讲什么",
+		"描述", "描述下", "总结一下", "总结", "概括", "解释", "内容",
+	}
+	for _, kw := range fileKeywords {
+		if strings.Contains(q, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+func lastUserContent(messages []services.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" {
+			return messages[i].Content
+		}
+	}
+	return ""
+}
+
+func maxFileContextTokens(model string) int {
+	if strings.Contains(model, "flash") || strings.Contains(model, "8k") {
+		return 8000
+	}
+	if strings.Contains(model, "opus") || strings.Contains(model, "200k") {
+		return 12000
+	}
+	return 0
+}
+
+func appendUniqueStrings(dst []string, values ...string) []string {
+	seen := make(map[string]struct{}, len(dst)+len(values))
+	for _, v := range dst {
+		seen[v] = struct{}{}
+	}
+	for _, v := range values {
+		if strings.TrimSpace(v) == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		dst = append(dst, v)
+	}
+	return dst
+}
+
+func mergeSystemMessages(messages []services.Message) []services.Message {
+	var fileContextParts []string
+	var otherSystemParts []string
+	var webSearchParts []string
+	var nonSystem []services.Message
+	for _, m := range messages {
+		if m.Role == "system" {
+			if strings.Contains(m.Content, "<file_context>") {
+				fileContextParts = append(fileContextParts, m.Content)
+			} else if strings.Contains(m.Content, "<web_search_context>") {
+				webSearchParts = append(webSearchParts, m.Content)
+			} else {
+				otherSystemParts = append(otherSystemParts, m.Content)
+			}
+		} else {
+			nonSystem = append(nonSystem, m)
+		}
+	}
+
+	var orderedParts []string
+	orderedParts = append(orderedParts, fileContextParts...)
+	orderedParts = append(orderedParts, otherSystemParts...)
+	orderedParts = append(orderedParts, webSearchParts...)
+	if len(orderedParts) == 0 {
+		return messages
+	}
+
+	mergedSystem := strings.Join(orderedParts, "\n\n---\n\n")
+	fmt.Printf("[Chat] merged %d system messages into one (file=%d other=%d search=%d), total length=%d\n",
+		len(orderedParts), len(fileContextParts), len(otherSystemParts), len(webSearchParts), len(mergedSystem))
+	return append([]services.Message{{Role: "system", Content: mergedSystem}}, nonSystem...)
+}
+
+func (h *ChatHandler) resolveChatFiles(publicIDs []string, userID uint, guestID string) ([]uint, map[uint]string, []models.File) {
+	publicIDs = uniquePublicIDs(publicIDs)
+	const maxFilesPerChat = 20
+	if len(publicIDs) > maxFilesPerChat {
+		fmt.Printf("[Chat] 文件数 %d 超过上限 %d，截断到前 %d 个\n", len(publicIDs), maxFilesPerChat, maxFilesPerChat)
+		publicIDs = publicIDs[:maxFilesPerChat]
+	}
+
+	var resolvedFileIDs []uint
+	resolvedFileNames := make(map[uint]string)
+	var resolvedFiles []models.File
+	for _, publicID := range publicIDs {
+		file, err := h.fileService.ResolveFileByPublicID(publicID, userID, guestID)
+		if err != nil {
+			fmt.Printf("[Chat] 文件解析失败 public_id=%s: %v\n", publicID, err)
+			continue
+		}
+		resolvedFileIDs = append(resolvedFileIDs, file.ID)
+		resolvedFileNames[file.ID] = file.Filename
+		resolvedFiles = append(resolvedFiles, *file)
+	}
+
+	return resolvedFileIDs, resolvedFileNames, resolvedFiles
+}
+
+func uniquePublicIDs(ids []string) []string {
+	seen := make(map[string]struct{}, len(ids))
+	var out []string
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func appendUniqueFiles(dst []models.File, values ...models.File) []models.File {
+	seen := make(map[uint]struct{}, len(dst)+len(values))
+	for _, f := range dst {
+		seen[f.ID] = struct{}{}
+	}
+	for _, f := range values {
+		if _, ok := seen[f.ID]; ok {
+			continue
+		}
+		seen[f.ID] = struct{}{}
+		dst = append(dst, f)
+	}
+	return dst
+}
+
+func makeFileNameMap(files []models.File) map[uint]string {
+	names := make(map[uint]string, len(files))
+	for _, f := range files {
+		names[f.ID] = f.Filename
+	}
+	return names
+}
+
+func (h *ChatHandler) loadConversationFiles(conversationID uint, userID uint, guestID string, limit int, includePinned bool) []models.File {
+	if conversationID == 0 {
+		return nil
+	}
+	if limit <= 0 {
+		limit = 8
+	}
+
+	query := h.db.
+		Table("conversation_files").
+		Select("files.*").
+		Joins("JOIN conversations ON conversations.id = conversation_files.conversation_id").
+		Joins("JOIN files ON files.id = conversation_files.file_id").
+		Where("conversation_files.conversation_id = ?", conversationID)
+	if userID > 0 {
+		query = query.Where("conversations.user_id = ?", userID)
+	} else {
+		query = query.Where("conversations.guest_id = ?", guestID)
+	}
+
+	query = query.Order("conversation_files.id DESC")
+
+	var files []models.File
+	if err := query.Limit(limit).Scan(&files).Error; err != nil {
+		fmt.Printf("[Chat] 加载会话文件失败 conversation_id=%d: %v\n", conversationID, err)
+		return nil
+	}
+	return files
+}
+
+type ChatFilePlan struct {
+	MessageFiles []models.File // 当前消息附件，写 message_files
+	ContextFiles []models.File // 显式上下文文件，不展示在消息
+	RAGFiles     []models.File // 本轮实际进入 buildFileContext 的文件
+}
+
+func (h *ChatHandler) buildChatFilePlan(req ChatRequest, userID uint, guestID string) ChatFilePlan {
+	messagePublicIDs := req.MessageFileIDs
+	if len(messagePublicIDs) == 0 && len(req.FileIDs) > 0 {
+		// 兼容旧前端：旧 file_ids 按当前消息附件处理
+		messagePublicIDs = req.FileIDs
+	}
+
+	_, _, messageFiles := h.resolveChatFiles(messagePublicIDs, userID, guestID)
+	_, _, contextFiles := h.resolveChatFiles(req.ContextFileIDs, userID, guestID)
+
+	ragFiles := appendUniqueFiles(nil, messageFiles...)
+	ragFiles = appendUniqueFiles(ragFiles, contextFiles...)
+
+	mode := req.ContextPolicy.UseConversationFiles
+	if mode == "" {
+		mode = "auto"
+	}
+
+	shouldUseConversationFiles := false
+	switch mode {
+	case "always":
+		shouldUseConversationFiles = true
+	case "never":
+		shouldUseConversationFiles = false
+	default: // auto
+		// 当本轮没有上传新文件时，自动加载该对话历史关联的文件，避免多轮对话丢失上下文
+		shouldUseConversationFiles = len(messageFiles) == 0
+	}
+
+	if shouldUseConversationFiles {
+		limit := req.ContextPolicy.MaxConversationFiles
+		if limit <= 0 {
+			limit = 8
+		}
+		conversationFiles := h.loadConversationFiles(
+			req.ConversationID,
+			userID,
+			guestID,
+			limit,
+			req.ContextPolicy.IncludePinnedFiles,
+		)
+		ragFiles = appendUniqueFiles(ragFiles, conversationFiles...)
+	}
+
+	return ChatFilePlan{
+		MessageFiles: messageFiles,
+		ContextFiles: contextFiles,
+		RAGFiles:     ragFiles,
+	}
+}
+
+func (h *ChatHandler) saveMessageFiles(messageID uint, files []models.File) {
+	for _, file := range files {
+		ftype := "document"
+		if file.HasImages || file.MimeType == "image" || strings.HasPrefix(file.MimeType, "image/") {
+			ftype = "image"
+		}
+		h.db.Create(&models.MessageFile{
+			MessageID: messageID,
+			FileID:    file.ID,
+			PublicID:  file.PublicID,
+			Type:      ftype,
+			Filename:  file.Filename,
+		})
+	}
+}
+
+func (h *ChatHandler) upsertConversationFiles(conversationID uint, files []models.File) {
+	if conversationID == 0 || len(files) == 0 {
+		return
+	}
+	for _, file := range files {
+		var existing models.ConversationFile
+		if err := h.db.Where("conversation_id = ? AND file_id = ?", conversationID, file.ID).First(&existing).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				h.db.Create(&models.ConversationFile{ConversationID: conversationID, FileID: file.ID})
+			} else {
+				fmt.Printf("[Chat] 查询会话文件失败 conversation_id=%d file_id=%d: %v\n", conversationID, file.ID, err)
+			}
+		}
+	}
+}
+
+func (h *ChatHandler) buildFileContext(files []models.File, fileNames map[uint]string, query string, model string, forceKeyword bool, logPrefix string) string {
+	if len(files) == 0 {
+		return ""
+	}
+
+	var imageFileIDs []uint
+	var docFileIDs []uint
+	for _, file := range files {
+		isImage := file.HasImages || file.MimeType == "image" || strings.HasPrefix(file.MimeType, "image/")
+		if file.ParseStatus != "done" {
+			fmt.Printf("[%s RAG] 文件尚未解析完成 fileID=%d name=%s status=%s error=%s\n", logPrefix, file.ID, file.Filename, file.ParseStatus, file.ErrorMessage)
+		}
+		if isImage {
+			imageFileIDs = append(imageFileIDs, file.ID)
+		} else {
+			docFileIDs = append(docFileIDs, file.ID)
+		}
+	}
+	fmt.Printf("[%s RAG] imageFileIDs=%v docFileIDs=%v\n", logPrefix, imageFileIDs, docFileIDs)
+
+	// [路径A] 文件上传 RAG：将上传的图片/文档分别处理
+	// 图片 → 直接注入 image_caption chunks（一次读全，不走语义检索）
+	// 文档 → RetrievalService.Search（支持语义/关键词检索）
+	// 这与下面的 callXXX 函数中 Message.Images 的路径B（内联多模态直传）完全独立。
+	var allResults []services.ChunkSearchResult
+	for _, fid := range imageFileIDs {
+		var chunks []models.FileChunk
+		if err := h.db.Where("file_id = ? AND block_type = ?", fid, "image_caption").Order("chunk_index").Find(&chunks).Error; err != nil {
+			fmt.Printf("[%s RAG] 读取图片 chunks 失败 fileID=%d: %v\n", logPrefix, fid, err)
+			continue
+		}
+		fmt.Printf("[%s RAG] 图片 fileID=%d 直接注入 %d 个 image_caption chunks\n", logPrefix, fid, len(chunks))
+		for _, c := range chunks {
+			allResults = append(allResults, services.ChunkSearchResult{Chunk: c, Score: 1.0, Relevance: "high"})
+		}
+	}
+
+	if len(docFileIDs) > 0 && h.retrievalSvc != nil {
+		if services.IsDocumentOverviewQuery(query) {
+			// 概览模式：确定性选择开头+关键词+结尾 chunks，不走语义检索
+			fmt.Printf("[%s RAG] 概览模式 query=%q，不走检索，直接选择开头+关键词+结尾 chunks\n", logPrefix, query)
+			for _, fid := range docFileIDs {
+				var chunks []models.FileChunk
+				if err := h.db.Where("file_id = ?", fid).Order("chunk_index").Find(&chunks).Error; err != nil {
+					fmt.Printf("[%s RAG] 读取文件 chunks 失败 fileID=%d: %v\n", logPrefix, fid, err)
+					continue
+				}
+				selected := services.SelectOverviewChunks(chunks, query, 40000)
+				fmt.Printf("[%s RAG] 文件 fileID=%d 概览选择 %d/%d chunks\n", logPrefix, fid, len(selected), len(chunks))
+				for _, c := range selected {
+					allResults = append(allResults, services.ChunkSearchResult{Chunk: c, Score: 1.0, Relevance: "high"})
+				}
+			}
+		} else {
+			topK := services.DynamicTopK(model)
+			results, err := h.retrievalSvc.Search(docFileIDs, query, topK, forceKeyword)
+			fmt.Printf("[%s RAG] 文档检索 docFileIDs=%v query=%q 返回 %d 结果, err=%v\n", logPrefix, docFileIDs, query, len(results), err)
+			for i, r := range results {
+				fmt.Printf("[%s RAG] result[%d]: fileID=%d score=%.4f content=%q\n", logPrefix, i, r.Chunk.FileID, r.Score, services.PreviewRunes(r.Chunk.Content, 80))
+			}
+			if err == nil {
+				allResults = append(allResults, results...)
+			}
+		}
+	}
+
+	if len(allResults) == 0 {
+		fmt.Printf("[%s RAG] no file context to inject\n", logPrefix)
+		return ""
+	}
+
+	fileContexts := services.ExtractFileContexts(allResults, fileNames)
+	for i, fc := range fileContexts {
+		fileID := uint(0)
+		if len(fc.Chunks) > 0 {
+			fileID = fc.Chunks[0].Chunk.FileID
+		}
+		fmt.Printf("[%s RAG] context[%d]: fileID=%d name=%s chunks=%d\n", logPrefix, i, fileID, fc.FileName, len(fc.Chunks))
+	}
+
+	fileContext := h.contextBuilder.Build(fileContexts, query, maxFileContextTokens(model))
+	fmt.Printf("[%s RAG] fileContext length=%d empty=%v\n", logPrefix, len(fileContext), fileContext == "")
+	return fileContext
 }
 
 func (h *ChatHandler) preprocessSearch(messages []services.Message, modelID string, searchEnabled bool, clientIP string) ([]services.Message, []services.SearchResult, bool) {
@@ -106,8 +484,15 @@ func (h *ChatHandler) preprocessSearch(messages []services.Message, modelID stri
 		return processed, nil, false
 	}
 
-	originalContent := processed[lastUserIdx].Content
-	processed[lastUserIdx].Content = originalContent + "\n\n---\n" + searchResult + "\n---"
+	// 不再把搜索结果拼到 user message 里污染问题，而是作为单独的 system message
+	// 确保上传文件上下文优先级高于搜索结果
+	searchCtx := "<web_search_context>\n"
+	searchCtx += "以下是联网搜索结果，仅用于补充外部背景。\n"
+	searchCtx += "不得替代上传文件内容。如果搜索结果与文件上下文冲突，以文件上下文为准。\n\n"
+	searchCtx += searchResult
+	searchCtx += "\n</web_search_context>"
+	searchMsg := services.Message{Role: "system", Content: searchCtx}
+	processed = append([]services.Message{searchMsg}, processed...)
 
 	noCitationMsg := services.Message{Role: "system", Content: "直接回答用户的问题，回答中不要出现任何引用来源编号（如[1][2][3]等格式），不要在末尾列出引用来源或参考链接列表。"}
 	processed = append([]services.Message{noCitationMsg}, processed...)
@@ -121,6 +506,13 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	// ========== 匿名用户检查 ==========
+	userID, guestID, ok := requireGuestOrUser(c, h.cfg, h.db)
+	if !ok {
+		return
+	}
+	// ========== 匿名用户检查结束 ==========
 
 	// 如果有模板 ID，加载模板前缀并注入到 messages 开头
 	if req.TemplateID > 0 {
@@ -153,150 +545,96 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 	}
 	// ========== 图表渲染指令结束 ==========
 
+	// ========== 保存消息与会话 ==========
+	// 如果没有 conversation_id，创建新会话（匿名用户也需要保存以便统计额度和历史文件复用）
+	conversationID := req.ConversationID
+	if conversationID == 0 {
+		lastUserQuery := lastUserContent(req.Messages)
+		title := lastUserQuery
+		if len(title) > 20 {
+			title = title[:20] + "..."
+		}
+		conv := models.Conversation{
+			UserID:       userID,
+			GuestID:      guestID,
+			Title:        title,
+			Model:        req.Model,
+			WorkspaceID:  req.WorkspaceID,
+		}
+		h.db.Create(&conv)
+		conversationID = conv.ID
+		req.ConversationID = conv.ID
+	}
+	// ========== 保存消息与会话结束 ==========
+
 	// ========== 文件上下文注入 ==========
-	var resolvedFileIDs []uint
-	var resolvedFileNames = make(map[uint]string)
+	filePlan := ChatFilePlan{}
+	query := lastUserContent(req.Messages)
 
-	if len(req.FileIDs) > 0 && h.fileService != nil {
-		userID := getUserID(c)
+	if h.fileService != nil {
+		filePlan = h.buildChatFilePlan(req, userID, guestID)
+	}
 
-		// 逐个解析 PublicID，验证权限
-		for _, publicID := range req.FileIDs {
-			file, err := h.fileService.ResolveFileByPublicID(publicID, userID)
-			if err != nil {
-				fmt.Printf("[Chat] 文件解析失败 public_id=%s: %v\n", publicID, err)
-				continue
-			}
-			resolvedFileIDs = append(resolvedFileIDs, file.ID)
-			resolvedFileNames[file.ID] = file.Filename
+	// 检查文件是否解析完成
+	for _, f := range filePlan.RAGFiles {
+		if f.ParseStatus != "done" {
+			c.JSON(http.StatusConflict, gin.H{"error": "file_not_ready", "message": "文件正在解析中，请稍后重试", "file_id": f.PublicID, "status": f.ParseStatus})
+			return
+		}
+	}
+
+	ragFileNames := makeFileNameMap(filePlan.RAGFiles)
+	if len(filePlan.RAGFiles) > 0 {
+		fileContext := h.buildFileContext(filePlan.RAGFiles, ragFileNames, query, req.Model, false, "Chat")
+		if fileContext != "" {
+			fileMsg := services.Message{Role: "system", Content: fileContext}
+			req.Messages = append([]services.Message{fileMsg}, req.Messages...)
+			fmt.Printf("[Chat RAG] injected system message with file context\n")
 		}
 
-		// 分离图片文件和普通文档
-		var imageFileIDs []uint
-		var docFileIDs []uint
-		for _, fileID := range resolvedFileIDs {
-			isImg, err := h.fileService.IsImageFile(fileID)
-			if err == nil && isImg {
-				imageFileIDs = append(imageFileIDs, fileID)
-			} else {
-				docFileIDs = append(docFileIDs, fileID)
-			}
-		}
-
-		// 处理图片：读取 base64 并附加到最后一条 user message
-		if len(imageFileIDs) > 0 {
-			var images []string
-			for _, fileID := range imageFileIDs {
-				dataURI, _, err := h.fileService.GetFileBase64DataURI(fileID)
-				if err == nil {
-					images = append(images, dataURI)
-				} else {
-					fmt.Printf("[Chat] 图片 base64 转换失败: %v\n", err)
-				}
-			}
-			for i := len(req.Messages) - 1; i >= 0; i-- {
-				if req.Messages[i].Role == "user" {
-					req.Messages[i].Images = images
-					break
-				}
-			}
-		}
-
-		// 处理普通文档：走新的 RAG 流程（语义检索 + 关键词 fallback）
-		if len(docFileIDs) > 0 && h.retrievalSvc != nil {
-			var query string
-			for i := len(req.Messages) - 1; i >= 0; i-- {
-				if req.Messages[i].Role == "user" {
-					query = req.Messages[i].Content
-					break
-				}
-			}
-
-			topK := services.DynamicTopK(req.Model)
-			results, err := h.retrievalSvc.Search(docFileIDs, query, topK, false)
-			if err == nil && len(results) > 0 {
-				// 按文件分组构造上下文
-				fileContexts := services.ExtractFileContexts(results, resolvedFileNames)
-
-				// 动态调整最大 token
-				maxTokens := 0
-				if strings.Contains(req.Model, "flash") || strings.Contains(req.Model, "8k") {
-					maxTokens = 8000
-				} else if strings.Contains(req.Model, "opus") || strings.Contains(req.Model, "200k") {
-					maxTokens = 12000
-				}
-
-				fileContext := h.contextBuilder.Build(fileContexts, query, maxTokens)
-				if fileContext != "" {
-					fileMsg := services.Message{Role: "system", Content: fileContext}
-					req.Messages = append([]services.Message{fileMsg}, req.Messages...)
-				}
-			} else if err != nil {
-				fmt.Printf("[Chat] 文件检索失败: %v\n", err)
-			}
-		}
-
-		// 保存文件与对话的关联（使用内部 ID）
-		if req.ConversationID > 0 {
-			for _, fileID := range resolvedFileIDs {
-				var existing models.ConversationFile
-				if err := h.db.Where("conversation_id = ? AND file_id = ?", req.ConversationID, fileID).First(&existing).Error; err != nil {
-					h.db.Create(&models.ConversationFile{
-						ConversationID: req.ConversationID,
-						FileID:         fileID,
-					})
-				}
-			}
-		}
+		// 保存文件与会话的关联：message_files + context_files 都进入 conversation_files 池
+		allFiles := appendUniqueFiles(nil, filePlan.MessageFiles...)
+		allFiles = appendUniqueFiles(allFiles, filePlan.ContextFiles...)
+		h.upsertConversationFiles(req.ConversationID, allFiles)
 	}
 	// ========== 文件上下文注入结束 ==========
 
-	// 如果有 conversation_id，保存消息
-	if req.ConversationID > 0 {
-		// 保存用户消息（除非标记了跳过）
-		if !req.SkipSaveUserMsg {
-			userMsg := req.Messages[len(req.Messages)-1]
-			if userMsg.Role == "user" {
-				msg := models.Message{
-					ConversationID: req.ConversationID,
-					Role:           "user",
-					Content:        userMsg.Content,
-					Model:          req.Model,
-					CreatedAt:      time.Now(),
-				}
-				h.db.Create(&msg)
+	// 保存用户消息（除非标记了跳过）
+	if !req.SkipSaveUserMsg {
+		userMsg := req.Messages[len(req.Messages)-1]
+		if userMsg.Role == "user" {
+			msg := models.Message{
+				ConversationID: conversationID,
+				Role:           "user",
+				Content:        userMsg.Content,
+				Model:          req.Model,
+				CreatedAt:      time.Now(),
+			}
+			h.db.Create(&msg)
 
-				// 保存消息-文件关联
-				if len(resolvedFileIDs) > 0 {
-					for i, fileID := range resolvedFileIDs {
-						var file models.File
-						if err := h.db.First(&file, fileID).Error; err != nil {
-							continue
-						}
-						// 判断文件类型
-						ftype := "document"
-						if isImg, _ := h.fileService.IsImageFile(fileID); isImg {
-							ftype = "image"
-						}
-						// 保存关联
-						if i < len(req.FileIDs) {
-							h.db.Create(&models.MessageFile{
-								MessageID: msg.ID,
-								FileID:    fileID,
-								PublicID:  req.FileIDs[i],
-								Type:      ftype,
-								Filename:  file.Filename,
-							})
-						}
-					}
-				}
+			// 保存消息-文件关联：只保存当前消息附件，避免历史文件污染新消息展示
+			if len(filePlan.MessageFiles) > 0 {
+				h.saveMessageFiles(msg.ID, filePlan.MessageFiles)
 			}
 		}
 	}
+	// ========== 保存消息与会话结束 ==========
 
 	var searchSources []services.SearchResult
 	var useSearchTool bool
-	req.Messages, searchSources, useSearchTool = h.preprocessSearch(req.Messages, req.Model, req.Search, c.ClientIP())
+
+	// 有文件上下文且问题是文件相关时，跳过联网搜索，避免搜索结果污染文件问答
+	lastUserQuery := ""
+	if len(req.Messages) > 0 {
+		lastUserQuery = req.Messages[len(req.Messages)-1].Content
+	}
+	if len(filePlan.RAGFiles) > 0 && isFileQuestion(lastUserQuery) {
+		fmt.Printf("[Chat] 文件问答模式，跳过联网搜索 ragFiles=%v query=%q\n", filePlan.RAGFiles, lastUserQuery)
+		searchSources = nil
+		useSearchTool = false
+	} else {
+		req.Messages, searchSources, useSearchTool = h.preprocessSearch(req.Messages, req.Model, req.Search, c.ClientIP())
+	}
 
 	// 深度思考的语言指令：按模板要求 → 如果没模板则按用户语言
 	if req.Reasoning && req.TemplateID == 0 {
@@ -318,6 +656,10 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		langMsg := services.Message{Role: "system", Content: langInstruct}
 		req.Messages = append([]services.Message{langMsg}, req.Messages...)
 	}
+
+	// 合并所有 system message 为一条，避免多个 system 导致部分模型（如 DeepSeek）只读取其中一条
+	// 按优先级排序：file_context > 其他 > web_search_context
+	req.Messages = mergeSystemMessages(req.Messages)
 
 	// 调用 AI 服务（reasoning 参数控制是否启用思考模式，search 控制模型原生搜索工具调用）
 	resp, err := h.aiService.ChatCompletion(c.Request.Context(), req.Model, req.Messages, req.Stream, req.Reasoning, req.ReasoningEffort, useSearchTool)
@@ -351,87 +693,204 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 			c.Writer.Flush()
 		}
 
-		fullContent, err := h.forwardUnifiedStream(resp, c.Writer, req.Reasoning)
+		fullContent, usage, err := h.forwardUnifiedStream(resp, c.Writer, req.Reasoning)
 		if err != nil {
 			fmt.Printf("[Chat] forwardUnifiedStream error: %v\n", err)
 		}
 		resp.Body.Close()
 
 		// 保存 AI 响应
-		if req.ConversationID > 0 && fullContent != "" {
+		if fullContent != "" {
 			h.db.Create(&models.Message{
-				ConversationID: req.ConversationID,
+				ConversationID: conversationID,
 				Role:           "assistant",
 				Content:        fullContent,
 				Model:          req.Model,
 				CreatedAt:      time.Now(),
 			})
 		}
+
+		// 记录 usage
+		if h.usageService != nil && usage != nil {
+			if err := h.usageService.RecordChatUsageWithResourceID(userID, guestID, resp.Provider, resp.Model, resp.ModelType, conversationID, usage); err != nil {
+				fmt.Printf("[Chat] 记录 usage 失败: %v\n", err)
+			}
+		}
 	} else {
-		// 非流式响应
+		// 非流式响应：读取 body，解析 usage，记录，再写回客户端
 		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "读取响应失败"})
+			return
+		}
+
+		var usage *services.TokenUsage
+		var rawResp map[string]interface{}
+		if err := json.Unmarshal(body, &rawResp); err == nil {
+			if usageRaw, ok := rawResp["usage"].(map[string]interface{}); ok {
+				usage = services.ParseOpenAIUsage(usageRaw)
+				if usage.TotalTokens == 0 {
+					usage = services.ParseAnthropicUsage(usageRaw)
+				}
+				if usage.TotalTokens == 0 {
+					usage = nil
+				}
+			}
+		}
+
+		if h.usageService != nil && usage != nil {
+			if err := h.usageService.RecordChatUsageWithResourceID(userID, guestID, resp.Provider, resp.Model, resp.ModelType, conversationID, usage); err != nil {
+				fmt.Printf("[Chat] 记录 usage 失败: %v\n", err)
+			}
+		}
+
+		// 非流式响应也保存 assistant 消息
+		if content, ok := rawResp["choices"]; ok {
+			if choices, ok := content.([]interface{}); ok && len(choices) > 0 {
+				if choice, ok := choices[0].(map[string]interface{}); ok {
+					if msgMap, ok := choice["message"].(map[string]interface{}); ok {
+						if assistantContent, ok := msgMap["content"].(string); ok && assistantContent != "" {
+							h.db.Create(&models.Message{
+								ConversationID: conversationID,
+								Role:           "assistant",
+								Content:        assistantContent,
+								Model:          req.Model,
+								CreatedAt:      time.Now(),
+							})
+						}
+					}
+				}
+			}
+		}
+
 		c.Header("Content-Type", "application/json")
-		io.Copy(c.Writer, resp.Body)
+		// 注入 conversation_id 到响应中（前端需要它来维护会话状态）
+		if rawResp == nil {
+			rawResp = make(map[string]interface{})
+		}
+		rawResp["conversation_id"] = conversationID
+		body, _ = json.Marshal(rawResp)
+		c.Writer.Write(body)
 	}
 }
 
 // forwardUnifiedStream 统一流式转发：通过 decoder factory 获取对应解码器，
-// 循环读取上游事件 → 转换 → 写入前端 SSE，返回完整内容。
-func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, w gin.ResponseWriter, reasoningEnabled bool) (string, error) {
+// 循环读取上游事件 → 转换 → 写入前端 SSE，返回完整内容和 usage。
+func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, w gin.ResponseWriter, reasoningEnabled bool) (string, *services.TokenUsage, error) {
 	decoder := services.NewDecoder(resp.ModelType, resp.Body)
 
-	var fullContent strings.Builder
-	for {
-		event, err := decoder.Next()
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			// 解析错误：向前端发送错误，不发 [DONE]
-			errOut, _ := json.Marshal(map[string]interface{}{
-				"choices": []map[string]interface{}{
-					{"delta": map[string]string{"content": fmt.Sprintf("❌ 上游流式响应解析失败: %v", err)}},
-				},
-			})
-			w.WriteString("data: " + string(errOut) + "\n\n")
-			w.Flush()
-			return fullContent.String(), err
-		}
-
-		if event.Type == services.EventDone {
-			w.WriteString("data: [DONE]\n\n")
-			w.Flush()
-			break
-		}
-
-		if event.Type == services.EventError {
-			w.WriteString("data: " + event.Message + "\n\n")
-			w.Flush()
-			continue
-		}
-
-		delta := map[string]string{"content": ""}
-		if event.Type == services.EventTextDelta {
-			delta["content"] = event.Delta
-			fullContent.WriteString(event.Delta)
-		} else if event.Type == services.EventReasoningDelta {
-			delta["reasoning_content"] = event.Delta
-			// 推理内容也累积到完整内容中（保存时需要）
-			fullContent.WriteString(event.Delta)
-		}
-
-		if delta["content"] != "" || delta["reasoning_content"] != "" {
-			out, _ := json.Marshal(map[string]interface{}{
-				"choices": []map[string]interface{}{
-					{"delta": delta},
-				},
-			})
-			w.WriteString("data: " + string(out) + "\n\n")
-			w.Flush()
-		}
+	type streamResult struct {
+		event *services.AIStreamEvent
+		err   error
 	}
 
-	return strings.TrimSpace(fullContent.String()), nil
+	results := make(chan streamResult, 1)
+	done := make(chan struct{})
+	defer close(done)
+
+	// decoder.Next() 会阻塞等待上游首个 token。放到 goroutine 中读取，
+	// 主 goroutine 用 ticker 定期向前端发送 SSE 注释心跳，避免 Cloudflare / 浏览器
+	// 在 DeepSeek 大文件请求 40-60s 无输出时把空闲连接断开。
+	go func() {
+		for {
+			event, err := decoder.Next()
+			select {
+			case results <- streamResult{event: event, err: err}:
+			case <-done:
+				return
+			}
+			if err != nil || (event != nil && event.Type == services.EventDone) {
+				return
+			}
+		}
+	}()
+
+	writeAndFlush := func(payload string) error {
+		if _, err := w.WriteString(payload); err != nil {
+			return err
+		}
+		w.Flush()
+		return nil
+	}
+
+	const heartbeatInterval = 15 * time.Second
+	heartbeat := time.NewTicker(heartbeatInterval)
+	defer heartbeat.Stop()
+
+	var fullContent strings.Builder
+	var finalUsage *services.TokenUsage
+	for {
+		select {
+		case <-heartbeat.C:
+			// SSE comment：前端 EventSource/fetch parser 会忽略以 ':' 开头的注释行，
+			// 但 Cloudflare tunnel 会把它视为有效传输，从而保持连接活跃。
+			if err := writeAndFlush(":ping\n\n"); err != nil {
+				return strings.TrimSpace(fullContent.String()), finalUsage, err
+			}
+
+		case result := <-results:
+			event, err := result.event, result.err
+			if err != nil {
+				if err == io.EOF {
+					return strings.TrimSpace(fullContent.String()), finalUsage, nil
+				}
+				// 解析错误：向前端发送错误，不发 [DONE]
+				errOut, _ := json.Marshal(map[string]interface{}{
+					"choices": []map[string]interface{}{
+						{"delta": map[string]string{"content": fmt.Sprintf("❌ 上游流式响应解析失败: %v", err)}},
+					},
+				})
+				_ = writeAndFlush("data: " + string(errOut) + "\n\n")
+				return strings.TrimSpace(fullContent.String()), finalUsage, err
+			}
+
+			if event == nil {
+				continue
+			}
+
+			// 收集 usage 信息，不转发给前端
+			if event.Type == services.EventUsage {
+				finalUsage = event.Usage
+				continue
+			}
+
+			if event.Type == services.EventDone {
+				if err := writeAndFlush("data: [DONE]\n\n"); err != nil {
+					return strings.TrimSpace(fullContent.String()), finalUsage, err
+				}
+				return strings.TrimSpace(fullContent.String()), finalUsage, nil
+			}
+
+			if event.Type == services.EventError {
+				if err := writeAndFlush("data: " + event.Message + "\n\n"); err != nil {
+					return strings.TrimSpace(fullContent.String()), finalUsage, err
+				}
+				continue
+			}
+
+			delta := map[string]string{"content": ""}
+			if event.Type == services.EventTextDelta {
+				delta["content"] = event.Delta
+				fullContent.WriteString(event.Delta)
+			} else if event.Type == services.EventReasoningDelta {
+				delta["reasoning_content"] = event.Delta
+				// 推理内容也累积到完整内容中（保存时需要）
+				fullContent.WriteString(event.Delta)
+			}
+
+			if delta["content"] != "" || delta["reasoning_content"] != "" {
+				out, _ := json.Marshal(map[string]interface{}{
+					"choices": []map[string]interface{}{
+						{"delta": delta},
+					},
+				})
+				if err := writeAndFlush("data: " + string(out) + "\n\n"); err != nil {
+					return strings.TrimSpace(fullContent.String()), finalUsage, err
+				}
+			}
+		}
+	}
 }
 
 // ---- 辅助方法：非流式调用 AI 并返回完整内容 ----
@@ -531,7 +990,13 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 		return
 	}
 
-	userID := getUserID(c)
+	// ========== 匿名用户检查 ==========
+	userID, guestID, ok := requireGuestOrUser(c, h.cfg, h.db)
+	if !ok {
+		return
+	}
+	// ========== 匿名用户检查结束 ==========
+
 	// 构建基础 messages
 	messages := []services.Message{
 		{Role: "user", Content: req.Query},
@@ -546,81 +1011,40 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 		}
 	}
 
-	// ========== 文件上下文注入（对比模式强制走关键词检索，确保所有模型使用相同上下文） ==========
-	var resolvedFileIDs []uint
-	var resolvedFileNames = make(map[uint]string)
-
-	if len(req.FileIDs) > 0 && h.fileService != nil {
-		userID := getUserID(c)
-
-		for _, publicID := range req.FileIDs {
-			file, err := h.fileService.ResolveFileByPublicID(publicID, userID)
-			if err != nil {
-				fmt.Printf("[Compare] 文件解析失败 public_id=%s: %v\n", publicID, err)
-				continue
-			}
-			resolvedFileIDs = append(resolvedFileIDs, file.ID)
-			resolvedFileNames[file.ID] = file.Filename
+	// ========== 文件上下文注入（与主 Chat 保持一致，使用 buildFileContext 分离图片与文档路径） ==========
+	filePlan := ChatFilePlan{}
+	if h.fileService != nil {
+		chatReq := ChatRequest{
+			MessageFileIDs: req.MessageFileIDs,
+			ContextFileIDs: req.ContextFileIDs,
+			ContextPolicy:  req.ContextPolicy,
+			FileIDs:        req.FileIDs,
+			ConversationID: req.ConversationID,
+			Messages:       messages,
 		}
+		filePlan = h.buildChatFilePlan(chatReq, userID, guestID)
+	}
 
-		// 分离图片文件和普通文档
-		var imageFileIDs []uint
-		var docFileIDs []uint
-		for _, fileID := range resolvedFileIDs {
-			isImg, err := h.fileService.IsImageFile(fileID)
-			if err == nil && isImg {
-				imageFileIDs = append(imageFileIDs, fileID)
-			} else {
-				docFileIDs = append(docFileIDs, fileID)
+	if len(filePlan.RAGFiles) > 0 {
+		// 检查文件是否解析完成
+		for _, f := range filePlan.RAGFiles {
+			if f.ParseStatus != "done" {
+				c.JSON(http.StatusConflict, gin.H{"error": "file_not_ready", "message": "文件正在解析中，请稍后重试", "file_id": f.PublicID, "status": f.ParseStatus})
+				return
 			}
 		}
 
-		// 处理图片
-		if len(imageFileIDs) > 0 {
-			var images []string
-			for _, fileID := range imageFileIDs {
-				dataURI, _, err := h.fileService.GetFileBase64DataURI(fileID)
-				if err == nil {
-					images = append(images, dataURI)
-				} else {
-					fmt.Printf("[Compare] 图片 base64 转换失败: %v\n", err)
-				}
-			}
-			for i := range messages {
-				if messages[i].Role == "user" {
-					messages[i].Images = images
-					break
-				}
-			}
+		ragFileNames := makeFileNameMap(filePlan.RAGFiles)
+		fileContext := h.buildFileContext(filePlan.RAGFiles, ragFileNames, req.Query, "compare", false, "Compare")
+		if fileContext != "" {
+			fileMsg := services.Message{Role: "system", Content: fileContext}
+			messages = append([]services.Message{fileMsg}, messages...)
 		}
 
-		// 处理普通文档：对比模式强制走关键词检索，确保各模型获得相同上下文
-		if len(docFileIDs) > 0 && h.retrievalSvc != nil {
-			results, err := h.retrievalSvc.Search(docFileIDs, req.Query, services.DynamicTopK("compare"), true)
-			if err == nil && len(results) > 0 {
-				fileContexts := services.ExtractFileContexts(results, resolvedFileNames)
-				fileContext := h.contextBuilder.Build(fileContexts, req.Query, 0)
-				if fileContext != "" {
-					fileMsg := services.Message{Role: "system", Content: fileContext}
-					messages = append([]services.Message{fileMsg}, messages...)
-				}
-			} else if err != nil {
-				fmt.Printf("[Compare] 文件检索失败: %v\n", err)
-			}
-		}
-
-		// 保存文件与对话的关联
-		if req.ConversationID > 0 {
-			for _, fileID := range resolvedFileIDs {
-				var existing models.ConversationFile
-				if err := h.db.Where("conversation_id = ? AND file_id = ?", req.ConversationID, fileID).First(&existing).Error; err != nil {
-					h.db.Create(&models.ConversationFile{
-						ConversationID: req.ConversationID,
-						FileID:         fileID,
-					})
-				}
-			}
-		}
+		// 保存文件与会话的关联
+		allFiles := appendUniqueFiles(nil, filePlan.MessageFiles...)
+		allFiles = appendUniqueFiles(allFiles, filePlan.ContextFiles...)
+		h.upsertConversationFiles(req.ConversationID, allFiles)
 	}
 	// ========== 文件上下文注入结束 ==========
 
@@ -668,20 +1092,30 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 
 	// 保存为用户对话
 	var conversationID uint
-	if userID > 0 {
+	if userID > 0 || guestID != "" {
 		if req.ConversationID > 0 {
 			// 已有对比对话，追加消息
 			var conv models.Conversation
-			if err := h.db.Where("id = ? AND user_id = ?", req.ConversationID, userID).First(&conv).Error; err == nil {
+			q := h.db.Where("id = ?", req.ConversationID)
+			if userID > 0 {
+				q = q.Where("user_id = ?", userID)
+			} else {
+				q = q.Where("guest_id = ?", guestID)
+			}
+			if err := q.First(&conv).Error; err == nil {
 				conversationID = conv.ID
 
 				// 保存用户消息
-				h.db.Create(&models.Message{
+				msg := models.Message{
 					ConversationID: conv.ID,
 					Role:           "user",
 					Content:        req.Query,
 					CreatedAt:      time.Now(),
-				})
+				}
+				h.db.Create(&msg)
+				if len(filePlan.MessageFiles) > 0 {
+					h.saveMessageFiles(msg.ID, filePlan.MessageFiles)
+				}
 			}
 		} else {
 			// 创建新的对比对话
@@ -691,8 +1125,10 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 			}
 			conv := models.Conversation{
 				UserID:        userID,
+				GuestID:       guestID,
 				Title:         title,
 				Model:         req.ModelIDs[0],
+				WorkspaceID:   req.WorkspaceID,
 				Compare:       true,
 				CompareModels: mustJSON(req.ModelIDs),
 			}
@@ -700,13 +1136,24 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 			conversationID = conv.ID
 
 			// 保存用户消息
-			h.db.Create(&models.Message{
+			msg := models.Message{
 				ConversationID: conv.ID,
 				Role:           "user",
 				Content:        req.Query,
 				CreatedAt:      time.Now(),
-			})
+			}
+			h.db.Create(&msg)
+			if len(filePlan.MessageFiles) > 0 {
+				h.saveMessageFiles(msg.ID, filePlan.MessageFiles)
+			}
 		}
+	}
+
+	// compare 新建会话时，前面的 upsertConversationFiles 还不知道 conversationID；这里再做一次，已有会话会被唯一索引去重。
+	if conversationID > 0 {
+		allFiles := appendUniqueFiles(nil, filePlan.MessageFiles...)
+		allFiles = appendUniqueFiles(allFiles, filePlan.ContextFiles...)
+		h.upsertConversationFiles(conversationID, allFiles)
 	}
 
 	// 保存对比记录

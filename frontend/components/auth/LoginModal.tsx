@@ -87,6 +87,10 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
 
       localStorage.setItem("token", data.token);
       localStorage.setItem("user", JSON.stringify(data.user));
+      // 保存默认工作区
+      if (data.default_workspace_id) {
+        localStorage.setItem("current-workspace", String(data.default_workspace_id));
+      }
 
       // 触发全局登录状态更新
       window.dispatchEvent(new Event("auth-changed"));

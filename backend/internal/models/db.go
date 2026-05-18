@@ -32,20 +32,23 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 	// WAL 模式优化：提升并发写入性能，避免长时间锁表
 	sqlDB, err := db.DB()
 	if err == nil {
-		sqlDB.SetMaxOpenConns(1)              // SQLite 单连接最佳实践
-		sqlDB.SetMaxIdleConns(1)              // 保持空闲连接
-		sqlDB.SetConnMaxLifetime(0)           // 不限制连接生命周期
-		db.Exec("PRAGMA journal_mode = WAL")   // 启用 WAL 模式
-		db.Exec("PRAGMA synchronous = NORMAL")  // 平衡性能与安全
-		db.Exec("PRAGMA cache_size = -64000")  // 64MB page cache
-		db.Exec("PRAGMA temp_store = MEMORY")  // 临时表存内存
+		sqlDB.SetMaxOpenConns(1)
+		sqlDB.SetMaxIdleConns(1)
+		sqlDB.SetConnMaxLifetime(0)
+		db.Exec("PRAGMA journal_mode = WAL")
+		db.Exec("PRAGMA synchronous = NORMAL")
+		db.Exec("PRAGMA cache_size = -64000")
+		db.Exec("PRAGMA temp_store = MEMORY")
 	}
 
 	// 自动迁移
 	if err := db.AutoMigrate(
 		&User{}, &Conversation{}, &Message{}, &ConversationShare{},
 		&CompareRecord{}, &UserSkill{},
+		&Workspace{},
 		&File{}, &FileChunk{}, &FileEmbedding{}, &FileEmbeddingJob{}, &ConversationFile{}, &MessageFile{},
+		&APIUsageLog{},
+		&PPTTemplate{}, &PPTGeneration{}, &PPTSlide{}, &PPTRevision{},
 	); err != nil {
 		return nil, err
 	}
@@ -66,7 +69,6 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 	return db, nil
 }
 
-// migrateFilePublicIDs 为没有 PublicID 的旧文件生成唯一 PublicID
 func migrateFilePublicIDs(db *gorm.DB) error {
 	var files []File
 	if err := db.Where("public_id = '' OR public_id IS NULL").Find(&files).Error; err != nil {
@@ -75,7 +77,6 @@ func migrateFilePublicIDs(db *gorm.DB) error {
 
 	for _, f := range files {
 		publicID := publicid.GenerateFileID()
-		// 确保唯一性，如果重复则重新生成
 		for {
 			var count int64
 			db.Model(&File{}).Where("public_id = ?", publicID).Count(&count)

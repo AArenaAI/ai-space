@@ -32,6 +32,12 @@ export default function LoginForm() {
 
       localStorage.setItem("token", data.token);
       localStorage.setItem("user", JSON.stringify(data.user));
+      // 保存默认工作区
+      if (data.default_workspace_id) {
+        localStorage.setItem("current-workspace", String(data.default_workspace_id));
+      }
+      // 登录成功后清除匿名 ID，避免已登录用户被误识别为匿名
+      import("@/lib/guestId").then(({ clearGuestId }) => clearGuestId());
       router.push(decodeURIComponent(returnUrl));
     } catch (err: any) {
       setError(err.message);

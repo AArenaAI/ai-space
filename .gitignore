@@ -39,6 +39,9 @@ Thumbs.db
 aipool-backend
 backend/aipool
 backend/bin/
+backend/main
+backend/aipool-test
+backend/aipool.bak.*
 
 # Go test cache
 *.test
@@ -50,14 +53,21 @@ backend/uploads/*.jpg
 backend/uploads/*.jpeg
 backend/uploads/*.md
 
-# Data directory (user-generated)
-backend/data/aipool.db
-backend/data/images/
+# Database & data (user-generated)
+backend/*.db
+backend/data/
+backend/uploads/
 
 # Root server.js & package files
 server.js
 package.json
 package-lock.json
+
+# TypeScript build info
+frontend/tsconfig.tsbuildinfo
+
+# Hermes
+.hermes/
 
 # Misc
 *.pem

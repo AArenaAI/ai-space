@@ -56,9 +56,27 @@ func (d *ChatSSEDecoder) Next() (*AIStreamEvent, error) {
 }
 
 func (d *ChatSSEDecoder) parseChoice(raw map[string]interface{}) *AIStreamEvent {
-	// Claude / 标准 OpenAI 格式: choices[0].delta.content
-	choices, ok := raw["choices"].([]interface{})
-	if !ok || len(choices) == 0 {
+	// OpenAI Chat Completions streaming with stream_options.include_usage:
+	// The last chunk may have choices=[] and a top-level usage object.
+	usage, hasUsage := raw["usage"].(map[string]interface{})
+	choices, hasChoices := raw["choices"].([]interface{})
+
+	if hasUsage && len(choices) == 0 {
+		// usage-only event (final chunk)
+		tu := &TokenUsage{}
+		if v, ok := usage["prompt_tokens"].(float64); ok {
+			tu.PromptTokens = int(v)
+		}
+		if v, ok := usage["completion_tokens"].(float64); ok {
+			tu.CompletionTokens = int(v)
+		}
+		if v, ok := usage["total_tokens"].(float64); ok {
+			tu.TotalTokens = int(v)
+		}
+		return &AIStreamEvent{Type: EventUsage, Usage: tu}
+	}
+
+	if !hasChoices || len(choices) == 0 {
 		return &AIStreamEvent{Type: EventTextDelta, Delta: ""}
 	}
 

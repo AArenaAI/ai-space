@@ -151,7 +151,7 @@ FileParser.Parse() → 命中 parseText()
   files.content      = "```go\npackage main...\n```"
   files.parse_status = "done"
   file_chunks[0]     = {block_type:"code", content:"...", metadata:"..."}
-  embedding_job      = pending (非图片文件)
+  embedding_job      = pending (有文本 chunk 的文件，不再按 MIME 类型排除图片)
 ```
 
 **特点**: 
@@ -276,26 +276,26 @@ FileParser.Parse() → 命中 parseXLSX()
   │
   ▼
 FileParser.Parse() → 命中 parseImage()
-  ├─ 不调用 Vision API，不 OCR
-  ├─ 仅记录: content="", has_images=true
-  └─ 生成一个占位 chunk: {block_type:"image_ref", text:"[图片文件]"}
+  ├─ 调用 Vision API（ExtractImageContent）生成图片描述
+  ├─ 记录: content=caption, has_images=true
+  └─ 生成 chunk: {block_type:"image_caption", text: caption}
 
 存储结果:
-  files.content        = "" (空)
+  files.content        = caption
   files.parse_status   = "done"
   files.has_images     = true
-  file_chunks[0]       = {block_type:"image_ref", text:"[图片文件]"}
-  files.embedding_status = "skipped" (图片文件不 embedding)
-  
+  file_chunks[0]       = {block_type:"image_caption", text: caption}
+  files.embedding_status = "pending" (若 embedder 启用且 caption 非空)
+
 实际使用:
-  聊天时前端通过 /api/files/{id}/download 获取 base64
-  直接作为 image_url 传入多模态模型 (GPT-4o / Claude / Gemini)
+  聊天时统一走 RetrievalService.Search() 检索上下文
+  图片内容通过 image_caption chunk 进入 RAG，不再 base64 直传模型
 ```
 
 **特点**:
-- 图片**不走解析/embedding 流程**，原始文件保留在磁盘
-- 聊天时由前端或后端 `GetFileBase64DataURI()` 读取并转为 `data:image/png;base64,...` 格式
-- 直接传给支持 Vision 的模型，无需文本化
+- 图片**走 Vision 解析流程**，原始文件保留在磁盘
+- 聊天时统一走 `RetrievalService.Search()` 检索，不再 base64 直传模型
+- 图片描述文本进入统一 RAG，与文档文件一致
 
 ---
 
@@ -351,8 +351,7 @@ RecoverEmbeddingJobs()
   │
   ▼
 后端获取 conversation 关联的 file_ids
-  ├─ 图片文件 → GetFileBase64DataURI() → 作为 image_url 放入 messages
-  └─ 文档文件 → GetFileContext() / GetFileContextWithQuery()
+  └─ 所有文件统一走 GetFileContext() / GetFileContextWithQuery()
       ├─ 按 chunk_index 排序
       ├─ 关键词过滤 (extractKeywords + containsAny)
       ├─ 取前 maxChunksPerFile 个 (默认全取)

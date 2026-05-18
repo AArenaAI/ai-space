@@ -42,6 +42,8 @@ export default function RegisterPage() {
 
       localStorage.setItem("token", data.token);
       localStorage.setItem("user", JSON.stringify(data.user));
+      // 注册成功后清除匿名 ID，避免已登录用户被误识别为匿名
+      import("@/lib/guestId").then(({ clearGuestId }) => clearGuestId());
       router.push("/chat");
     } catch (err: any) {
       setError(err.message);

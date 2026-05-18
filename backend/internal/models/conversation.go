@@ -9,6 +9,8 @@ import (
 type Conversation struct {
 	ID        uint           `gorm:"primarykey" json:"id"`
 	UserID    uint           `gorm:"not null;index" json:"user_id"`
+	WorkspaceID uint         `gorm:"default:0;index" json:"workspace_id"` // 所属工作区，0=默认
+	GuestID   string         `gorm:"index;size:64" json:"guest_id"`              // 匿名用户 ID
 	Title     string         `json:"title"`
 	Model     string         `json:"model"`
 	Pinned    bool           `gorm:"default:false" json:"pinned"`

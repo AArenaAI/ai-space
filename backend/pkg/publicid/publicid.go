@@ -14,7 +14,7 @@ var (
 )
 
 // GenerateFileID 生成文件的 PublicID，格式为 file_ + 16 位随机字符
-// 总长度 22，不可枚举，组合数约 36^16 ≈ 7.9e24
+// 总长度 21，不可枚举，组合数约 36^16 ≈ 7.9e24
 func GenerateFileID() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -41,5 +41,17 @@ func fallbackFileID() string {
 
 // IsFileID 检查是否为有效的文件 PublicID
 func IsFileID(s string) bool {
-	return strings.HasPrefix(s, "file_") && len(s) == 22
+	if !strings.HasPrefix(s, "file_") {
+		return false
+	}
+	rest := strings.TrimPrefix(s, "file_")
+	if len(rest) < 16 {
+		return false
+	}
+	for _, r := range rest {
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
+			return false
+		}
+	}
+	return true
 }

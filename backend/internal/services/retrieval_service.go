@@ -79,7 +79,7 @@ func (s *RetrievalService) vectorSearch(fileIDs []uint, query string, topK int) 
 	ctx := context.Background()
 
 	// 1. 计算查询向量
-	queryVec, err := s.embedder.EmbedQuery(ctx, query)
+	queryVec, _, err := s.embedder.EmbedQuery(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("查询 embedding 失败: %w", err)
 	}

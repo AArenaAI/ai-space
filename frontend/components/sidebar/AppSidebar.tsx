@@ -9,6 +9,7 @@ import {
   PanelLeftClose, MessageSquarePlus, Search, ChevronRight,
   User, Trash2, MoreHorizontal, Pencil, Pin, PinOff, Link2, Check,
   FileText, LayoutGrid, X, Clock, Sparkles, Image, Eraser,
+  Type, ZoomIn, FolderKanban,
   Briefcase, FileCode, PenTool, BarChart3, Mail, ClipboardList, Terminal, GraduationCap, Languages,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -16,6 +17,7 @@ import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import InputDialog from "@/components/ui/InputDialog";
 import { useTemplates } from "@/hooks/useTemplates";
 import SidebarUserPanel from "./SidebarUserPanel";
+import { useWorkspaces } from "@/hooks/useWorkspaces";
 
 // 模块级缓存：避免组件重新挂载时历史记录反复闪烁
 let cachedConversations: Conversation[] | null = null;
@@ -84,11 +86,12 @@ const SKILL_ICON_MAP: Record<string, { icon: React.ElementType; color: string }>
   "translator":       { icon: Languages,       color: "text-indigo-400" },
 };
 
-async function fetchConversations(): Promise<Conversation[]> {
+async function fetchConversations(workspaceId?: number): Promise<Conversation[]> {
   const token = localStorage.getItem("token");
   if (!token) return [];
   try {
-    const res = await fetch("/api/conversations", {
+    const params = workspaceId ? `?workspace_id=${workspaceId}` : "";
+    const res = await fetch(`/api/conversations${params}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return [];
@@ -186,6 +189,8 @@ function MoreHoverPanel({
       items: [
         { icon: Image, label: "背景移除", href: "/image/edit?mode=remove-bg", color: "text-green-500", bg: "bg-green-500/10" },
         { icon: Eraser, label: "背景替换", href: "/image/edit?mode=replace-bg", color: "text-purple-500", bg: "bg-purple-500/10" },
+        { icon: Type, label: "文字移除", href: "/image/edit?mode=text-removal", color: "text-amber-500", bg: "bg-amber-500/10" },
+        { icon: ZoomIn, label: "画质提升", href: "/image/edit?mode=upscale", color: "text-cyan-500", bg: "bg-cyan-500/10" },
       ],
     },
     {
@@ -263,6 +268,9 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
   const router = useRouter();
   const { templates, updateTemplate } = useTemplates();
 
+  // 工作区
+  const { workspaces, currentWS, loading: wsLoading, switchWorkspace, createWorkspace, deleteWorkspace, renameWorkspace } = useWorkspaces();
+
   /* 更多面板 */
   const [moreOpen, setMoreOpen] = useState(false);
   const moreBtnRef = useRef<HTMLButtonElement>(null);
@@ -320,7 +328,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
     const isFirstLoad = cachedConversations === null;
     if (isFirstLoad) setLoading(true);
     const startTime = Date.now();
-    const data = await fetchConversations();
+    const data = await fetchConversations(currentWS?.id);
     if (isFirstLoad) {
       const elapsed = Date.now() - startTime;
       if (elapsed < 600) await new Promise((r) => setTimeout(r, 600 - elapsed));
@@ -328,13 +336,15 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
     }
     setConversations(data);
     cachedConversations = data;
-  }, [user]);
+  }, [user, currentWS?.id]);
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
   useEffect(() => { const h = () => loadConversations(); window.addEventListener("conversation-created", h); return () => window.removeEventListener("conversation-created", h); }, [loadConversations]);
+  // 工作区切换 / 登录登出时刷新
+  useEffect(() => { const h = () => { cachedConversations = null; loadConversations(); }; window.addEventListener("workspace-changed", h); window.addEventListener("user-login", h); window.addEventListener("user-logout", h); return () => { window.removeEventListener("workspace-changed", h); window.removeEventListener("user-login", h); window.removeEventListener("user-logout", h); }; }, [loadConversations]);
 
   /* 操作 */
-  const handleLogout = () => { localStorage.removeItem("token"); localStorage.removeItem("user"); setUser(null); setConversations([]); cachedConversations = null; window.location.href = "/"; };
+  const handleLogout = () => { localStorage.removeItem("token"); localStorage.removeItem("user"); import("@/lib/guestId").then(({ getGuestId }) => getGuestId()); setUser(null); setConversations([]); cachedConversations = null; window.location.href = "/"; };
   const handleNewChat = () => {
     if (skillKey) {
       router.push(`/skills/chat?key=${skillKey}&t=` + Date.now());
@@ -459,7 +469,13 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
 
         {/* ── Logo + 折叠 ── */}
         <div className="flex items-center h-12 px-3 border-b border-surface-border shrink-0">
-          {!collapsed && <Link href="/chat" className="flex-1"><span className="text-sm font-semibold text-text-primary tracking-tight">AI Space</span></Link>}
+          {!collapsed && (
+            <div className="flex-1 min-w-0">
+              <Link href="/chat" className="block">
+                <span className="text-sm font-semibold text-text-primary tracking-tight">AI Space</span>
+              </Link>
+            </div>
+          )}
           <button onClick={() => setCollapsed(!collapsed)} className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors">
             {collapsed ? <ChevronRight className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
           </button>
@@ -493,6 +509,19 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                 )}
               >
                 <MessageSquare className={cn("w-5 h-5", pathname === "/chat" ? "text-brand" : "text-text-tertiary")} />
+              </Link>
+
+              {/* workspace空间 */}
+              <Link
+                href="/workspace"
+                onMouseEnter={showSidebarTooltip("workspace空间")}
+                onMouseLeave={hideSidebarTooltip}
+                className={cn(
+                  "p-2.5 rounded-xl transition-colors",
+                  pathname === "/workspace" ? "bg-surface-card" : "hover:bg-surface-card"
+                )}
+              >
+                <FolderKanban className={cn("w-5 h-5", pathname === "/workspace" ? "text-brand" : "text-text-tertiary")} />
               </Link>
 
               {/* AI 画图 */}
@@ -596,6 +625,20 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                 >
                   <MessageSquare className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/chat" ? "text-brand" : "text-text-tertiary")} />
                   <span>聊天</span>
+                </Link>
+
+                {/* workspace空间 */}
+                <Link
+                  href="/workspace"
+                  className={cn(
+                    "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150",
+                    pathname === "/workspace"
+                      ? "bg-surface-card text-text-primary font-medium shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
+                      : "text-text-secondary hover:bg-surface-card/60 hover:text-text-primary"
+                  )}
+                >
+                  <FolderKanban className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/workspace" ? "text-brand" : "text-text-tertiary")} />
+                  <span>workspace空间</span>
                 </Link>
 
                 {/* AI 画图 - 一级功能 */}

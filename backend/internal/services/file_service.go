@@ -20,14 +20,16 @@ import (
 
 // FileService 文件存储与检索服务
 type FileService struct {
-	db         *gorm.DB
-	parser     *FileParser
-	storageDir string
-	embedder   embedding.Provider
+	db           *gorm.DB
+	cfg          *config.Config
+	parser       *FileParser
+	storageDir   string
+	embedder     embedding.Provider
+	usageService *UsageService
 }
 
 // NewFileService 创建文件服务
-func NewFileService(db *gorm.DB, cfg *config.Config, parser *FileParser, embedder embedding.Provider) *FileService {
+func NewFileService(db *gorm.DB, cfg *config.Config, parser *FileParser, embedder embedding.Provider, usageService *UsageService) *FileService {
 	storageDir := cfg.FileStorageDir
 	if storageDir == "" {
 		storageDir = "./uploads"
@@ -38,14 +40,18 @@ func NewFileService(db *gorm.DB, cfg *config.Config, parser *FileParser, embedde
 	// 自动迁移表结构
 	db.AutoMigrate(&models.File{})
 	db.AutoMigrate(&models.FileChunk{})
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_file_chunks_file_created ON file_chunks(file_id, created_at)")
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_file_chunks_file_block_created ON file_chunks(file_id, block_type, created_at)")
 	db.AutoMigrate(&models.FileEmbedding{})
 	db.AutoMigrate(&models.FileEmbeddingJob{})
 
 	s := &FileService{
-		db:         db,
-		parser:     parser,
-		storageDir: storageDir,
-		embedder:   embedder,
+		db:           db,
+		cfg:          cfg,
+		parser:       parser,
+		storageDir:   storageDir,
+		embedder:     embedder,
+		usageService: usageService,
 	}
 
 	// 补全旧文件的 PublicID（一次性迁移）
@@ -58,7 +64,7 @@ func NewFileService(db *gorm.DB, cfg *config.Config, parser *FileParser, embedde
 }
 
 // UploadAndParse 上传并解析文件
-func (s *FileService) UploadAndParse(ctx context.Context, userID uint, filename string, data []byte) (*models.File, error) {
+func (s *FileService) UploadAndParse(ctx context.Context, userID uint, guestID, filename string, data []byte, workspaceID ...uint) (*models.File, error) {
 	// 1. 保存原始文件到磁盘
 	timestamp := time.Now().UnixNano()
 	safeName := fmt.Sprintf("%d_%d%s", userID, timestamp, filepath.Ext(filename))
@@ -68,10 +74,18 @@ func (s *FileService) UploadAndParse(ctx context.Context, userID uint, filename 
 		return nil, fmt.Errorf("保存文件失败: %w", err)
 	}
 
+	// 获取 workspace_id（可选参数）
+	wid := uint(0)
+	if len(workspaceID) > 0 {
+		wid = workspaceID[0]
+	}
+
 	// 2. 创建数据库记录
 	file := &models.File{
 		PublicID:        publicid.GenerateFileID(),
 		UserID:          userID,
+		WorkspaceID:     wid,
+		GuestID:         guestID,
 		Filename:        filename,
 		Size:            int64(len(data)),
 		StoragePath:     storagePath,
@@ -90,7 +104,7 @@ func (s *FileService) UploadAndParse(ctx context.Context, userID uint, filename 
 		// 标记为 parsing
 		s.db.Model(file).Update("parse_status", "parsing")
 
-		result, err := s.parser.Parse(ctx, data, filename)
+		result, err := s.parser.Parse(context.WithoutCancel(ctx), data, filename)
 		if err != nil {
 			s.db.Model(file).Updates(map[string]interface{}{
 				"parse_status":     "error",
@@ -114,6 +128,20 @@ func (s *FileService) UploadAndParse(ctx context.Context, userID uint, filename 
 			"token_count":  result.TokenCount,
 			"updated_at":   time.Now(),
 		}
+		if result.VisionUsage != nil {
+			updates["vision_prompt_tokens"] = result.VisionUsage.PromptTokens
+			updates["vision_completion_tokens"] = result.VisionUsage.CompletionTokens
+			updates["vision_total_tokens"] = result.VisionUsage.TotalTokens
+			updates["vision_cost_rmb"] = result.VisionUsage.CostRMB
+			if s.usageService != nil {
+				tu := &TokenUsage{
+					PromptTokens:     result.VisionUsage.PromptTokens,
+					CompletionTokens: result.VisionUsage.CompletionTokens,
+					TotalTokens:      result.VisionUsage.TotalTokens,
+				}
+				_ = s.usageService.RecordVisionUsage(file.UserID, guestID, s.cfg.VisionModel, file.ID, tu)
+			}
+		}
 		s.db.Model(file).Updates(updates)
 
 		// 保存 chunks（带上结构化字段）
@@ -134,22 +162,27 @@ func (s *FileService) UploadAndParse(ctx context.Context, userID uint, filename 
 			})
 		}
 
-		// 创建 embedding job（非图片文件且配置了 embedder）
-		if s.embedder != nil && !strings.HasPrefix(mimeType, "image/") {
+		// 创建 embedding job：所有已解析出有效文本 chunk 的文件都进入统一 RAG。
+		// 图片在解析阶段已通过 Vision 转成 image_caption 文本，因此也可以 embedding。
+		embeddableChunkCount := 0
+		for _, chunk := range result.Chunks {
+			if strings.TrimSpace(chunk.Text) != "" {
+				embeddableChunkCount++
+			}
+		}
+		if s.embedder != nil && embeddableChunkCount > 0 {
+			modelInfo := s.embedder.ModelInfo()
 			s.db.Create(&models.FileEmbeddingJob{
 				FileID:    file.ID,
-				Provider:  "openai", // TODO: 从配置读取
-				Model:     "text-embedding-3-small",
-				Dimension: 1536,
+				Provider:  modelInfo.Provider,
+				Model:     modelInfo.Model,
+				Dimension: modelInfo.Dimension,
 				Status:    "pending",
 			})
 		} else {
-			// 图片文件或未配置 embedder，跳过 embedding
-			status := "skipped"
-			if s.embedder == nil {
-				status = "disabled" // embedding 功能未启用
-			}
-			s.db.Model(file).Update("embedding_status", status)
+			// 未配置 embedder 或没有可 embedding 的文本 chunk，跳过 embedding。
+			// 注意：这里不再按 MIME 类型把图片特殊跳过；图片如果 Vision 解析出 image_caption 文本，也会创建 job。
+			s.db.Model(file).Update("embedding_status", "skipped")
 		}
 
 		// 异步生成文件摘要（如果摘要为空且内容较长）
@@ -275,9 +308,13 @@ func (s *FileService) GetFileContextWithQuery(fileIDs []uint, query string, maxC
 }
 
 // ListUserFiles 列出用户的文件
-func (s *FileService) ListUserFiles(userID uint) ([]models.File, error) {
+func (s *FileService) ListUserFiles(userID uint, workspaceID ...uint) ([]models.File, error) {
 	var files []models.File
-	if err := s.db.Where("user_id = ?", userID).Order("created_at DESC").Find(&files).Error; err != nil {
+	query := s.db.Where("user_id = ?", userID)
+	if len(workspaceID) > 0 && workspaceID[0] > 0 {
+		query = query.Where("workspace_id = ?", workspaceID[0])
+	}
+	if err := query.Order("created_at DESC").Find(&files).Error; err != nil {
 		return nil, err
 	}
 	return files, nil
@@ -444,15 +481,23 @@ func (s *FileService) GetByPublicID(publicID string) (*models.File, error) {
 }
 
 // ResolveFileByPublicID 通过 PublicID 解析文件，并进行权限校验
-// userID = 0 表示未登录用户
-func (s *FileService) ResolveFileByPublicID(publicID string, userID uint) (*models.File, error) {
+// userID = 0 表示未登录用户，guestID 用于匿名用户权限校验
+func (s *FileService) ResolveFileByPublicID(publicID string, userID uint, guestID string) (*models.File, error) {
 	file, err := s.GetByPublicID(publicID)
 	if err != nil {
 		return nil, fmt.Errorf("文件不存在: %w", err)
 	}
 
-	// 私有文件（userID > 0）只能上传者查看
-	if file.UserID > 0 && file.UserID != userID {
+	// 登录用户：只能查看自己的文件
+	if userID > 0 {
+		if file.UserID > 0 && file.UserID != userID {
+			return nil, fmt.Errorf("无权访问该文件")
+		}
+		return file, nil
+	}
+
+	// 匿名用户：guest_id 匹配或文件本身也是匿名上传
+	if file.UserID == 0 && file.GuestID != "" && file.GuestID != guestID {
 		return nil, fmt.Errorf("无权访问该文件")
 	}
 
@@ -545,9 +590,9 @@ func (s *FileService) ListPendingEmbeddingJobs(limit int) ([]models.FileEmbeddin
 // UpdateEmbeddingJobStatus 更新 embedding job 状态
 func (s *FileService) UpdateEmbeddingJobStatus(jobID uint, status string, errMsg string) error {
 	updates := map[string]interface{}{
-		"status":       status,
+		"status":        status,
 		"error_message": errMsg,
-		"updated_at":   time.Now(),
+		"updated_at":    time.Now(),
 	}
 	if status == "running" {
 		now := time.Now()
@@ -660,12 +705,23 @@ func (s *FileService) ProcessEmbeddingJob(job models.FileEmbeddingJob) error {
 	}
 
 	// batch 生成 embedding（串行处理，避免并发 RPM 限制）
-	vectors, err := s.embedder.EmbedDocuments(ctx, contents)
+	vectors, embedUsage, err := s.embedder.EmbedDocuments(ctx, contents)
 	if err != nil {
 		s.UpdateEmbeddingJobStatus(job.ID, "error", err.Error())
 		s.db.Model(&models.FileChunk{}).Where("file_id = ? AND embedding_status = ?", job.FileID, "pending").Update("embedding_status", "error")
 		s.db.Model(&models.File{}).Where("id = ?", job.FileID).Update("embedding_status", "error")
 		return fmt.Errorf("embedding 生成失败: %w", err)
+	}
+
+	modelInfo := s.embedder.ModelInfo()
+
+	// 记录 embedding 用量
+	if s.usageService != nil && embedUsage != nil {
+		// 通过 FileID 获取 UserID
+		var file models.File
+		if err := s.db.First(&file, job.FileID).Error; err == nil {
+			_ = s.usageService.RecordEmbeddingUsage(file.UserID, modelInfo.Model, job.FileID, embedUsage.TotalTokens)
+		}
 	}
 
 	// 计算 text hash
@@ -675,7 +731,6 @@ func (s *FileService) ProcessEmbeddingJob(job models.FileEmbeddingJob) error {
 	}
 
 	// 保存 embeddings
-	modelInfo := s.embedder.ModelInfo()
 	vectorFloats := make([][]float32, len(vectors))
 	for i, v := range vectors {
 		vectorFloats[i] = []float32(v)

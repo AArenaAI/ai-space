@@ -21,8 +21,18 @@ func NewConversationHandler(db *gorm.DB) *ConversationHandler {
 func (h *ConversationHandler) List(c *gin.Context) {
 	userID := getUserID(c)
 
+	// 支持 workspace_id 过滤，默认查所有
+	workspaceIDStr := c.Query("workspace_id")
+	query := h.db.Where("user_id = ?", userID)
+
+	if workspaceIDStr != "" {
+		if wid, err := strconv.ParseUint(workspaceIDStr, 10, 32); err == nil {
+			query = query.Where("workspace_id = ?", uint(wid))
+		}
+	}
+
 	var conversations []models.Conversation
-	if err := h.db.Where("user_id = ?", userID).Order("pinned desc, updated_at desc").Find(&conversations).Error; err != nil {
+	if err := query.Order("pinned desc, updated_at desc").Find(&conversations).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取对话列表失败"})
 		return
 	}
@@ -34,9 +44,10 @@ func (h *ConversationHandler) Create(c *gin.Context) {
 	userID := getUserID(c)
 
 	var req struct {
-		Title     string `json:"title"`
-		Model     string `json:"model"`
-		SkillKey  string `json:"skill_key,omitempty"`
+		Title       string `json:"title"`
+		Model       string `json:"model"`
+		SkillKey    string `json:"skill_key,omitempty"`
+		WorkspaceID uint   `json:"workspace_id,omitempty"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -44,11 +55,21 @@ func (h *ConversationHandler) Create(c *gin.Context) {
 		return
 	}
 
+	// 如果未指定 workspace_id，自动查找用户的默认工作区
+	workspaceID := req.WorkspaceID
+	if workspaceID == 0 {
+		var defaultWS models.Workspace
+		if err := h.db.Where("user_id = ? AND is_default = ?", userID, true).First(&defaultWS).Error; err == nil {
+			workspaceID = defaultWS.ID
+		}
+	}
+
 	conv := models.Conversation{
-		UserID:   userID,
-		Title:    req.Title,
-		Model:    req.Model,
-		SkillKey: req.SkillKey,
+		UserID:      userID,
+		WorkspaceID: workspaceID,
+		Title:       req.Title,
+		Model:       req.Model,
+		SkillKey:    req.SkillKey,
 	}
 
 	if err := h.db.Create(&conv).Error; err != nil {

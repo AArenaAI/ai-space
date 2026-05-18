@@ -18,13 +18,14 @@ import (
 
 // ParseResult 文件解析结果
 type ParseResult struct {
-	Content    string      // 完整文本（Markdown）
-	Summary    string      // 文件摘要
-	Pages      int         // 页数
-	Chunks     []TextChunk // 切块
-	HasImages  bool        // 是否包含图片（需要 Vision 增强）
-	HasTables  bool        // 是否包含表格
-	TokenCount int         // 总 token 数
+	Content     string       // 完整文本（Markdown）
+	Summary     string       // 文件摘要
+	Pages       int          // 页数
+	Chunks      []TextChunk  // 切块
+	HasImages   bool         // 是否包含图片（需要 Vision 增强）
+	HasTables   bool         // 是否包含表格
+	TokenCount  int          // 总 token 数
+	VisionUsage *VisionUsage // Vision API token 消耗（仅图片解析有值）
 }
 
 // TextChunk 文本块（结构化）
@@ -691,14 +692,52 @@ func parseSheetXMLStructured(xmlStr string, sharedStrings map[int]string) (strin
 	return result.String(), maxCols
 }
 
-// parseImage 解析图片（不走 Vision API，直接保存原始文件，聊天时直接传 base64给 AI）
+// parseImage 解析图片：上传解析阶段调用 Vision 生成文字描述，作为 image_caption chunk 进入统一 RAG。
 func (p *FileParser) parseImage(ctx context.Context, data []byte, ext string) (*ParseResult, error) {
+	mimeType := extToMimeType2(ext)
+	if p.aiService == nil {
+		return nil, fmt.Errorf("图片解析失败: AI 服务未初始化")
+	}
+
+	caption, usage, err := p.aiService.ExtractImageContent(ctx, data, mimeType)
+	if err != nil {
+		return nil, fmt.Errorf("图片视觉解析失败: %w", err)
+	}
+	caption = strings.TrimSpace(caption)
+	if caption == "" {
+		return nil, fmt.Errorf("图片视觉解析失败: 返回内容为空")
+	}
+
+	// 截断过长的 caption 到 500 字符，避免占用过多上下文
+	if len([]rune(caption)) > 500 {
+		caption = string([]rune(caption)[:500]) + "..."
+	}
+
+	content := fmt.Sprintf("图片视觉描述：\n%s", caption)
+	metadata := fmt.Sprintf(`{"mime_type":"%s","source":"vision"}`, mimeType)
+	chunks := chunkStructured(content, 1, "image_caption", metadata)
+	for i := range chunks {
+		chunks[i].BlockID = fmt.Sprintf("img-1-caption-%d", i+1)
+		chunks[i].BlockType = "image_caption"
+		chunks[i].Metadata = metadata
+	}
+
 	return &ParseResult{
-		Content:   "",
-		Pages:     1,
-		Chunks:    []TextChunk{{Index: 0, BlockID: "img-1", Page: 1, BlockType: "image_ref", Text: "[图片文件]"}},
-		HasImages: true,
+		Content:     content,
+		Pages:       1,
+		Chunks:      chunks,
+		HasImages:   true,
+		Summary:     firstRunes(caption, 200),
+		VisionUsage: usage,
 	}, nil
+}
+
+func firstRunes(text string, max int) string {
+	runes := []rune(strings.TrimSpace(text))
+	if len(runes) <= max {
+		return string(runes)
+	}
+	return string(runes[:max]) + "..."
 }
 
 // extToMimeType2 扩展名转 MIME 类型
@@ -818,11 +857,15 @@ func parseInt(s string) (int, error) {
 	return n, err
 }
 
-// chunkStructured 按固定长度切分文本，保留段落边界，并带上块类型和元数据
+// chunkStructured 按固定长度切分文本，优先在换行处切分，并带上块类型和元数据。
+// 目标单块 10K 字符，上限 16K 字符，相邻块保留 800 字符 overlap。
 func chunkStructured(text string, page int, blockType string, metadata string) []TextChunk {
-	chunkSize := 2000
-	overlap := 200
-	if len(text) <= chunkSize {
+	const targetChunkRunes = 10000
+	const maxChunkRunes = 16000
+	const overlapRunes = 800
+
+	runes := []rune(text)
+	if len(runes) <= targetChunkRunes {
 		return []TextChunk{{
 			Index:     0,
 			BlockID:   fmt.Sprintf("p%d-b1", page),
@@ -833,13 +876,13 @@ func chunkStructured(text string, page int, blockType string, metadata string) [
 		}}
 	}
 
+	lines := strings.Split(text, "\n")
 	var chunks []TextChunk
-	paragraphs := strings.Split(text, "\n\n")
-	var current strings.Builder
+	var buf []rune
 	chunkIdx := 0
 
 	flushChunk := func() {
-		t := strings.TrimSpace(current.String())
+		t := strings.TrimSpace(string(buf))
 		if t == "" {
 			return
 		}
@@ -854,25 +897,46 @@ func chunkStructured(text string, page int, blockType string, metadata string) [
 		chunkIdx++
 	}
 
-	for _, para := range paragraphs {
-		trimmed := strings.TrimSpace(para)
-		if trimmed == "" {
+	for _, line := range lines {
+		lineRunes := []rune(line)
+		// 单行超长：先 flush buf，然后硬切这行
+		if len(lineRunes) > maxChunkRunes {
+			if len(buf) > 0 {
+				flushChunk()
+				buf = nil
+			}
+			for i := 0; i < len(lineRunes); i += targetChunkRunes {
+				end := i + targetChunkRunes
+				if end > len(lineRunes) {
+					end = len(lineRunes)
+				}
+				chunks = append(chunks, TextChunk{
+					Index:     chunkIdx,
+					BlockID:   fmt.Sprintf("p%d-b%d", page, chunkIdx+1),
+					Page:      page,
+					BlockType: blockType,
+					Text:      string(lineRunes[i:end]),
+					Metadata:  metadata,
+				})
+				chunkIdx++
+			}
 			continue
 		}
-		if current.Len()+len(trimmed) > chunkSize && current.Len() > 0 {
+
+		// 正常行：追加到 buf
+		if len(buf) > 0 {
+			buf = append(buf, '\n')
+		}
+		buf = append(buf, lineRunes...)
+		if len(buf) >= targetChunkRunes {
 			flushChunk()
-			content := current.String()
-			if len(content) > overlap {
-				current.Reset()
-				current.WriteString(content[len(content)-overlap:])
+			// overlap
+			if len(buf) > overlapRunes {
+				buf = buf[len(buf)-overlapRunes:]
 			} else {
-				current.Reset()
+				buf = nil
 			}
 		}
-		if current.Len() > 0 {
-			current.WriteString("\n\n")
-		}
-		current.WriteString(trimmed)
 	}
 	flushChunk()
 	return chunks

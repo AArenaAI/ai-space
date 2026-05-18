@@ -15,14 +15,21 @@ type ModelInfo struct {
 	Dimension int    // 1536
 }
 
+// Usage embedding API 返回的用量信息
+type Usage struct {
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+}
+
 // Provider embedding 服务提供者接口
 // 支持批量文档 embedding 和单条查询 embedding
 type Provider interface {
 	// EmbedDocuments 批量将文本列表转为向量
-	EmbedDocuments(ctx context.Context, texts []string) ([]EmbeddingVector, error)
+	EmbedDocuments(ctx context.Context, texts []string) ([]EmbeddingVector, *Usage, error)
 
 	// EmbedQuery 将查询文本转为向量
-	EmbedQuery(ctx context.Context, query string) (EmbeddingVector, error)
+	EmbedQuery(ctx context.Context, query string) (EmbeddingVector, *Usage, error)
 
 	// ModelInfo 返回当前 provider 的模型信息
 	ModelInfo() ModelInfo

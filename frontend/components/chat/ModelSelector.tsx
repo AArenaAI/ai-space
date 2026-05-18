@@ -213,7 +213,7 @@ export default function ModelSelector({
             <div className="px-3 py-2 text-[11px] font-medium text-text-tertiary uppercase tracking-wider border-b border-surface-border">
               选择模型
             </div>
-            <div className="py-1 max-h-[70vh] overflow-y-auto">
+            <div className="py-1 max-h-[320px] overflow-y-auto scrollbar-thin">
               {/* 最近使用 */}
               {recentModels.length > 0 && (
                 <div className="px-1 pb-1 border-b border-surface-border">
