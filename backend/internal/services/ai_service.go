@@ -180,6 +180,12 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 		reqBody["tool_choice"] = "auto"
 	}
 
+	if stream {
+		// 防止长篇深度检索持续生成数分钟，前端只收到 ping/半截内容，最终被代理或浏览器超时。
+		// 短问答仍可正常完成；超出预算时上游会返回 completed/incomplete，后端再向前端发 [DONE] 或统一错误。
+		reqBody["max_output_tokens"] = maxOpenAIStreamOutputTokens(search, reasoning)
+	}
+
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("序列化 OpenAI 请求失败: %w", err)
@@ -204,6 +210,19 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 	}
 
 	return &AICompletionResponse{Body: resp.Body, ModelType: "openai_responses", Provider: "openai", Model: model}, nil
+}
+
+func maxOpenAIStreamOutputTokens(search bool, reasoning bool) int {
+	if search && reasoning {
+		return 6400
+	}
+	if search {
+		return 6400
+	}
+	if reasoning {
+		return 8192
+	}
+	return 8192
 }
 
 func (s *AIService) callAnthropic(ctx context.Context, model string, messages []Message, stream bool, reasoning bool) (*AICompletionResponse, error) {

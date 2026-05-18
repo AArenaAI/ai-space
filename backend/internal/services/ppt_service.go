@@ -167,7 +167,7 @@ func (s *PPTService) callLLM(ctx context.Context, systemPrompt, userPrompt strin
 }
 
 // GenerateOutline 生成 PPT 大纲
- func (s *PPTService) GenerateOutline(ctx context.Context, topic string, slideCount int, templateID, audience, purpose, language, sourceSummary string) (*PPTOutline, *TokenUsage, error) {
+ func (s *PPTService) GenerateOutline(ctx context.Context, topic string, slideCount int, templateID, audience, purpose, language, extraContent, referenceURL, qualityMode, sourceSummary string) (*PPTOutline, *TokenUsage, error) {
 	if slideCount < 3 {
 		slideCount = 5
 	}
@@ -194,13 +194,26 @@ func (s *PPTService) callLLM(ctx context.Context, systemPrompt, userPrompt strin
 2. 中间有 section 章节页分隔
 3. 每页包含 page/type/title/one_liner/need_image
 4. need_image 只在 cover、section、key content 页置 true
-5. 内容与主题高度相关`
+5. 内容与主题高度相关
+6. 如用户提供拓展内容/参考资料/URL，必须把其中事实、结构、案例、数据优先体现在大纲中`
 
 	userPrompt := fmt.Sprintf(`请为主题"%s"生成一份%d页的PPT大纲。
 风格模板: %s
 受众: %s
 用途: %s
-语言: %s`, topic, slideCount, templateID, audience, purpose, language)
+语言: %s
+生成深度: %s`, topic, slideCount, templateID, audience, purpose, language, qualityMode)
+	if qualityMode == "premium" {
+		userPrompt += "\n深度要求: 更完整的结构、更强论证链路、更多业务细节与可落地建议。"
+	} else if qualityMode == "fast" {
+		userPrompt += "\n深度要求: 快速生成，结构清晰，避免过度展开。"
+	}
+	if extraContent != "" {
+		userPrompt += "\n拓展内容/参考资料:\n" + extraContent
+	}
+	if referenceURL != "" {
+		userPrompt += "\n参考 URL:\n" + referenceURL
+	}
 	if sourceSummary != "" {
 		userPrompt += "\n\n参考资料摘要:\n" + sourceSummary
 	}
@@ -219,7 +232,7 @@ func (s *PPTService) callLLM(ctx context.Context, systemPrompt, userPrompt strin
 }
 
 // GenerateFullPPT 根据大纲生成完整 PPT
- func (s *PPTService) GenerateFullPPT(ctx context.Context, outline *PPTOutline, templateID, audience, purpose, language, withImages string, withNotes bool) ([]FullSlide, *TokenUsage, error) {
+ func (s *PPTService) GenerateFullPPT(ctx context.Context, outline *PPTOutline, templateID, audience, purpose, language, withImages string, withNotes bool, extraContent, referenceURL, qualityMode string) ([]FullSlide, *TokenUsage, error) {
 	systemPrompt := `你是专业 PPT 内容策划师和视觉设计师。请根据大纲生成完整 PPT JSON。
 以 JSON 格式返回，不要 Markdown 代码块，不要解释，只返纯 JSON：
 {
@@ -262,7 +275,8 @@ func (s *PPTService) callLLM(ctx context.Context, systemPrompt, userPrompt strin
 6. image.placement: background, right, left, bottom
 7. speaker_notes 是给演讲者看的，不显示在页面上
 8. content 数组装要点，每页 3-5 个
-9. 如果适合图表，添加 chart 字段并填充示例数据`
+9. 如果适合图表，添加 chart 字段并填充示例数据
+10. 如用户提供拓展内容/参考资料/URL，必须将其转化为具体页面内容、案例、论点或数据，不要泛泛而谈`
 
 	outlineJSON, _ := json.Marshal(outline)
 	userPrompt := fmt.Sprintf(`请根据以下大纲生成完整 PPT内容。
@@ -272,7 +286,19 @@ func (s *PPTService) callLLM(ctx context.Context, systemPrompt, userPrompt strin
 用途: %s
 语言: %s
 配图策略: %s
-演讲备注: %v`, string(outlineJSON), templateID, audience, purpose, language, withImages, withNotes)
+演讲备注: %v
+生成深度: %s`, string(outlineJSON), templateID, audience, purpose, language, withImages, withNotes, qualityMode)
+	if qualityMode == "premium" {
+		userPrompt += "\n深度要求: 内容要更饱满，每页要点具体、有业务判断、案例/数据/行动建议，避免空话。"
+	} else if qualityMode == "fast" {
+		userPrompt += "\n深度要求: 快速成稿，保留核心观点，内容简洁。"
+	}
+	if extraContent != "" {
+		userPrompt += "\n\n拓展内容/参考资料（生成完整内容时优先吸收，不要原样堆砌）:\n" + extraContent
+	}
+	if referenceURL != "" {
+		userPrompt += "\n\n参考 URL（用于标注来源或围绕该资料展开）:\n" + referenceURL
+	}
 
 	content, usage, err := s.callLLM(ctx, systemPrompt, userPrompt)
 	if err != nil {

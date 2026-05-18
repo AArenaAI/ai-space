@@ -4,6 +4,7 @@ const nextConfig = {
   output: 'export',
   distDir: 'dist',
   trailingSlash: true,
+  outputFileTracing: false,
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.resolve.fallback = {

@@ -3,6 +3,7 @@ package api
 import (
 	"aipool-backend/internal/models"
 	"aipool-backend/internal/services"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -87,8 +88,10 @@ func (h *PPTHandler) CreatePPT(c *gin.Context) {
 		SlideCount  int    `json:"slide_count"`
 		Language    string `json:"language"`
 		Audience    string `json:"audience"`
-		Purpose     string `json:"purpose"`
-		WithImages  string `json:"with_images"`
+		Purpose      string `json:"purpose"`
+		ExtraContent string `json:"extra_content"`
+		ReferenceURL string `json:"reference_url"`
+		WithImages   string `json:"with_images"`
 		WithNotes   bool   `json:"with_notes"`
 		QualityMode string `json:"quality_mode"`
 	}
@@ -121,8 +124,10 @@ func (h *PPTHandler) CreatePPT(c *gin.Context) {
 		SlideCount:  req.SlideCount,
 		Language:    req.Language,
 		Audience:    req.Audience,
-		Purpose:     req.Purpose,
-		WithImages:  req.WithImages,
+		Purpose:      req.Purpose,
+		ExtraContent: req.ExtraContent,
+		ReferenceURL: req.ReferenceURL,
+		WithImages:   req.WithImages,
 		WithNotes:   req.WithNotes,
 		QualityMode: req.QualityMode,
 		Status:      models.PPTStatusPending,
@@ -249,7 +254,7 @@ func (h *PPTHandler) GenerateOutline(c *gin.Context) {
 	gen.ProgressMsg = "正在策划大纲..."
 	h.db.Save(&gen)
 
-	outline, usage, err := h.pptService.GenerateOutline(c, gen.Topic, gen.SlideCount, gen.TemplateID, gen.Audience, gen.Purpose, gen.Language, "")
+	outline, usage, err := h.pptService.GenerateOutline(c, gen.Topic, gen.SlideCount, gen.TemplateID, gen.Audience, gen.Purpose, gen.Language, gen.ExtraContent, gen.ReferenceURL, gen.QualityMode, "")
 	if err != nil {
 		gen.Status = models.PPTStatusFailed
 		gen.ErrorMsg = err.Error()
@@ -282,7 +287,7 @@ func (h *PPTHandler) GenerateOutline(c *gin.Context) {
 	})
 }
 
-// ConfirmOutline 确认大纲并生成完整 PPT
+// ConfirmOutline 确认大纲并异步生成完整 PPT
 func (h *PPTHandler) ConfirmOutline(c *gin.Context) {
 	userID := getUserID(c)
 	guestID := getGuestID(c)
@@ -314,51 +319,58 @@ func (h *PPTHandler) ConfirmOutline(c *gin.Context) {
 	gen.ProgressMsg = "正在生成幻灯片内容..."
 	h.db.Save(&gen)
 
-	var outline services.PPTOutline
-	json.Unmarshal([]byte(gen.OutlineJSON), &outline)
+	// 启动后台 goroutine 异步生成
+	go func(genID uint) {
+		var g models.PPTGeneration
+		if err := h.db.First(&g, genID).Error; err != nil {
+			fmt.Printf("[ConfirmOutline] goroutine 找不到 PPT %d: %v\n", genID, err)
+			return
+		}
 
-	slides, usage, err := h.pptService.GenerateFullPPT(c, &outline, gen.TemplateID, gen.Audience, gen.Purpose, gen.Language, gen.WithImages, gen.WithNotes)
-	if err != nil {
-		gen.Status = models.PPTStatusFailed
-		gen.ErrorMsg = err.Error()
-		h.db.Save(&gen)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
+		var outline services.PPTOutline
+		json.Unmarshal([]byte(g.OutlineJSON), &outline)
 
-	if usage != nil {
-		gen.PromptTokens += usage.PromptTokens
-		gen.CompTokens += usage.CompletionTokens
-	}
+		slides, usage, err := h.pptService.GenerateFullPPT(context.Background(), &outline, g.TemplateID, g.Audience, g.Purpose, g.Language, g.WithImages, g.WithNotes, g.ExtraContent, g.ReferenceURL, g.QualityMode)
+		if err != nil {
+			g.Status = models.PPTStatusFailed
+			g.ErrorMsg = err.Error()
+			h.db.Save(&g)
+			fmt.Printf("[ConfirmOutline] 生成 PPT %d 失败: %v\n", genID, err)
+			return
+		}
 
-	// 统一保存 slides：SlidesJSON 为主，PPTSlide 表为辅
-	if err := h.saveSlides(&gen, slides); err != nil {
-		gen.Status = models.PPTStatusFailed
-		gen.ErrorMsg = err.Error()
-		h.db.Save(&gen)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
+		if usage != nil {
+			g.PromptTokens += usage.PromptTokens
+			g.CompTokens += usage.CompletionTokens
+		}
 
-	// 记录用量
-	if h.usageService != nil {
-		_ = h.usageService.RecordPPTUsage(userID, h.pptService.DocGenModel(), gen.ID, usage)
-	}
+		// 保存 slides
+		if err := h.saveSlides(&g, slides); err != nil {
+			g.Status = models.PPTStatusFailed
+			g.ErrorMsg = err.Error()
+			h.db.Save(&g)
+			fmt.Printf("[ConfirmOutline] 保存 slides %d 失败: %v\n", genID, err)
+			return
+		}
 
-		// 如果开启了配图，创建图片生成 jobs（替换裸 goroutine，由 worker 后台处理）
-		needsImages := gen.WithImages != "none" && gen.WithImages != ""
+		// 记录用量
+		if h.usageService != nil {
+			_ = h.usageService.RecordPPTUsage(g.UserID, h.pptService.DocGenModel(), g.ID, usage)
+		}
+
+		// 配图策略
+		needsImages := g.WithImages != "none" && g.WithImages != ""
 		if needsImages {
-			gen.Status = models.PPTStatusGeneratingImages
-			gen.Progress = 70
-			gen.ProgressMsg = "正在生成配图..."
-			h.db.Save(&gen)
+			g.Status = models.PPTStatusGeneratingImages
+			g.Progress = 70
+			g.ProgressMsg = "正在生成配图..."
+			h.db.Save(&g)
 
-			// 根据配图策略过滤需要生成图片的 slides
 			var jobsSlides []services.FullSlide
 			for _, s := range slides {
 				if s.Image != nil && s.Image.Needed && s.Image.Prompt != "" {
 					shouldGen := false
-					switch gen.WithImages {
+					switch g.WithImages {
 					case "cover":
 						shouldGen = s.Type == "cover"
 					case "key_slides":
@@ -373,30 +385,29 @@ func (h *PPTHandler) ConfirmOutline(c *gin.Context) {
 			}
 
 			if len(jobsSlides) > 0 {
-				if err := h.pptService.CreateImageJobs(gen.ID, jobsSlides); err != nil {
-					// job 创建失败不阻断，记录日志
+				if err := h.pptService.CreateImageJobs(g.ID, jobsSlides); err != nil {
 					fmt.Printf("[ConfirmOutline] 创建 image jobs 失败: %v\n", err)
 				}
 			} else {
-				// 无需生成的图片，直接完成
-				gen.Status = models.PPTStatusCompleted
-				gen.Progress = 100
-				gen.ProgressMsg = "完成"
-				h.db.Save(&gen)
+				g.Status = models.PPTStatusCompleted
+				g.Progress = 100
+				g.ProgressMsg = "PPT 生成完成"
+				h.db.Save(&g)
 			}
 		} else {
-			gen.Status = models.PPTStatusCompleted
-			gen.Progress = 100
-			gen.ProgressMsg = "完成"
-			h.db.Save(&gen)
+			g.Status = models.PPTStatusCompleted
+			g.Progress = 100
+			g.ProgressMsg = "PPT 生成完成"
+			h.db.Save(&g)
 		}
+	}(gen.ID)
 
-	// 立即返回，不等待图片生成
+	// 立即返回，不等待生成
 	c.JSON(http.StatusOK, gin.H{
 		"id":     gen.ID,
 		"status": gen.Status,
 		"ppt":    gen,
-		"slides": slides,
+		"slides": []services.FullSlide{},
 	})
 }
 

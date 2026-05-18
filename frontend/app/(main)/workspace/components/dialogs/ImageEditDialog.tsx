@@ -3,6 +3,7 @@
 import { useState, useRef } from "react";
 import { ImageIcon, UploadCloud, Loader2, Wand2, Eraser, Type, ImagePlus, Trash2, WandSparkles } from "lucide-react";
 import DialogShell, { THEMES } from "./DialogShell";
+import { resolveImageUrl } from "@/lib/resolveImageUrl";
 
 const EDIT_MODES = [
   { key: "remove-bg", label: "移除背景", icon: Eraser, desc: "智能识别主体并去除背景" },
@@ -34,23 +35,41 @@ export default function ImageEditDialog({ open, onClose }: { open: boolean; onCl
     if (!file) return;
     setLoading(true);
     const token = localStorage.getItem("token");
-    const form = new FormData();
-    form.append("image", file);
-    form.append("mode", mode);
-    if (prompt) form.append("prompt", prompt);
 
     try {
+      // 把文件转 base64
+      const toBase64 = (f: File): Promise<string> =>
+        new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result as string;
+            resolve(result.split(",")[1]); // 去掉 data:image/xxx;base64, 前缀
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(f);
+        });
+
+      const imageData = await toBase64(file);
+      const body: Record<string, any> = {
+        image_data: imageData,
+        edit_mode: mode,
+      };
+      if (prompt && prompt.trim()) body.prompt = prompt.trim();
+
       const res = await fetch("/api/images/edit", {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: form,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || "编辑失败");
       }
       const data = await res.json();
-      setResult(data.image_url || data.url || null);
+      setResult(resolveImageUrl(data.image_url || data.url || null));
     } catch (e: any) {
       alert(e.message || "编辑失败");
     } finally {

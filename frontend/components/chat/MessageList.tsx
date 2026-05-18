@@ -423,9 +423,7 @@ export default function MessageList({
             </>
           ) : (
             <>
-              <div className="w-12 h-12 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center mx-auto mb-8">
-                <span className="text-lg font-bold text-text-primary">AI</span>
-              </div>
+              <img src="/logo.png" alt="AI Space" className="w-12 h-12 rounded-xl object-cover mx-auto mb-8" />
               <h1 className="text-2xl font-semibold tracking-tight mb-3 text-text-primary">一个入口，所有顶尖AI</h1>
               <p className="text-text-secondary text-[15px] leading-relaxed mb-10">集成 GPT、Claude、Gemini、DeepSeek、Kimi 等主流大模型</p>
             </>
@@ -614,6 +612,16 @@ export default function MessageList({
                     <div className="text-[15px] leading-relaxed text-text-primary whitespace-pre-wrap break-words">
                       {(() => {
                         const { reasoning, answer } = parseThinkContent(msg.content);
+                        // 内容为空（等待第一个 token）：显示跳动点代替空白光标
+                        if (!reasoning && !answer.trim()) {
+                          return (
+                            <div className="flex gap-1 py-1">
+                              <div className="w-1.5 h-1.5 rounded-full bg-text-tertiary animate-bounce" />
+                              <div className="w-1.5 h-1.5 rounded-full bg-text-tertiary animate-bounce [animation-delay:0.15s]" />
+                              <div className="w-1.5 h-1.5 rounded-full bg-text-tertiary animate-bounce [animation-delay:0.3s]" />
+                            </div>
+                          );
+                        }
                         return (
                           <>
                             {reasoning && (

@@ -1,58 +1,53 @@
 package services
 
 import (
-	"bufio"
 	"encoding/json"
 	"io"
-	"strings"
 )
 
 // ChatSSEDecoder 解码标准 OpenAI / Claude / DeepSeek / Moonshot 等兼容的 SSE 流。
 type ChatSSEDecoder struct {
-	scanner *bufio.Scanner
+	parser  *SSEParser
 	reader  io.ReadCloser
 }
 
 // NewChatSSEDecoder 创建标准聊天 SSE 流解码器。
 func NewChatSSEDecoder(body io.ReadCloser) *ChatSSEDecoder {
 	return &ChatSSEDecoder{
-		scanner: bufio.NewScanner(body),
+		parser:  NewSSEParser(body),
 		reader:  body,
 	}
 }
 
 // Next 返回下一个解码后的 AIStreamEvent，io.EOF 表示流结束。
 func (d *ChatSSEDecoder) Next() (*AIStreamEvent, error) {
-	for d.scanner.Scan() {
-		line := d.scanner.Text()
+	for {
+		event, err := d.parser.Next()
+		if err != nil {
+			if err == io.EOF {
+				return &AIStreamEvent{Type: EventDone}, io.EOF
+			}
+			return nil, err
+		}
 
-		if line == "" {
+		data := string(event.Data)
+		if data == "" {
 			continue
 		}
 
 		// 处理 "data: [DONE]"
-		if line == "data: [DONE]" {
+		if data == "[DONE]" {
 			return &AIStreamEvent{Type: EventDone}, io.EOF
 		}
 
-		// 处理 "data: {...}"
-		if strings.HasPrefix(line, "data: ") {
-			data := line[6:]
-
-			var raw map[string]interface{}
-			if err := json.Unmarshal([]byte(data), &raw); err != nil {
-				// 某些模型可能返回非 JSON 的 data，跳过
-				continue
-			}
-
-			return d.parseChoice(raw), nil
+		var raw map[string]interface{}
+		if err := json.Unmarshal(event.Data, &raw); err != nil {
+			// 某些模型可能返回非 JSON 的 data，跳过
+			continue
 		}
-	}
 
-	if err := d.scanner.Err(); err != nil {
-		return nil, err
+		return d.parseChoice(raw), nil
 	}
-	return &AIStreamEvent{Type: EventDone}, io.EOF
 }
 
 func (d *ChatSSEDecoder) parseChoice(raw map[string]interface{}) *AIStreamEvent {

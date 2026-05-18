@@ -111,7 +111,7 @@ export default function ShareView({ slug }: { slug: string }) {
       <header className="sticky top-0 z-10 bg-surface/80 backdrop-blur-md border-b border-surface-border">
         <div className="max-w-[800px] mx-auto px-4 h-12 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-text-primary tracking-tight">AI Space</span>
+            <img src="/title.png" alt="AI Space" className="h-5 w-auto object-contain" />
             <span className="text-text-tertiary">/</span>
             <span className="text-sm text-text-secondary truncate max-w-[200px]">{data.title || "分享的对话"}</span>
           </div>

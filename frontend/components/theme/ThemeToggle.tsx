@@ -1,11 +1,23 @@
 "use client";
 
-import { Sun, Moon } from "lucide-react";
+import { Sun, Moon, Eye } from "lucide-react";
 import { useTheme } from "./ThemeProvider";
+
+const themeLabels: Record<string, string> = {
+  light: "白天模式",
+  dark: "夜晚模式",
+  green: "绿色护眼",
+};
+
+const themeIcons: Record<string, React.ReactNode> = {
+  light: <Sun className="w-4 h-4 text-amber-500" />,
+  dark: <Moon className="w-4 h-4 text-indigo-300" />,
+  green: <Eye className="w-4 h-4 text-emerald-600" />,
+};
 
 export default function ThemeToggle() {
   const themeContext = useTheme();
-  
+
   // 如果没有上下文（服务端渲染时），显示默认按钮
   if (!themeContext) {
     return (
@@ -14,20 +26,20 @@ export default function ThemeToggle() {
       </button>
     );
   }
-  
+
   const { theme, toggleTheme } = themeContext;
 
   return (
     <button
       onClick={toggleTheme}
-      className="relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors duration-200 hover:bg-surface-card"
-      title={theme === "dark" ? "切换到白天模式" : "切换到夜晚模式"}
+      className="relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors duration-200 hover:bg-surface-card group"
+      title={`当前：${themeLabels[theme] || theme}（点击切换）`}
     >
-      {theme === "dark" ? (
-        <Moon className="w-4 h-4 text-text-secondary" />
-      ) : (
-        <Sun className="w-4 h-4 text-amber-500" />
-      )}
+      {themeIcons[theme] || <Sun className="w-4 h-4 text-amber-500" />}
+      {/* 悬浮提示显示下一个模式 */}
+      <span className="absolute -bottom-7 left-1/2 -translate-x-1/2 text-[10px] whitespace-nowrap px-1.5 py-0.5 rounded bg-surface-card border border-surface-border text-text-tertiary opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none z-50">
+        {themeLabels[theme] || theme}
+      </span>
     </button>
   );
 }

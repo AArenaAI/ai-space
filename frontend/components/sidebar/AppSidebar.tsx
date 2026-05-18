@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
@@ -258,6 +258,14 @@ function ConversationSkeleton() {
 
 export default function AppSidebar({ skillKey }: { skillKey?: string }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("sidebar-width");
+      return saved ? Math.max(180, Math.min(500, Number(saved))) : 260;
+    }
+    return 260;
+  });
+  const isResizing = useRef(false);
   const [user, setUser] = useState<any>(null);
   const [conversations, setConversations] = useState<Conversation[]>(cachedConversations || []);
   const [loading, setLoading] = useState(cachedConversations === null);
@@ -386,6 +394,34 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
     navigator.clipboard.writeText(url);
   };
 
+  /* ── 拖拽调整宽度 ── */
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isResizing.current = true;
+    const startX = e.clientX;
+    const startWidth = sidebarWidth;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isResizing.current) return;
+      const newWidth = Math.max(180, Math.min(500, startWidth + (ev.clientX - startX)));
+      setSidebarWidth(newWidth);
+      localStorage.setItem("sidebar-width", String(newWidth));
+    };
+
+    const onMouseUp = () => {
+      isResizing.current = false;
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, [sidebarWidth]);
+
   /* ── 渲染对话列表 ── */
   const renderConversationList = () => {
     if (loading) return <ConversationSkeleton />;
@@ -465,14 +501,25 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
   return (
     <>
       {/* 侧边栏主体 */}
-      <div className={cn("flex flex-col h-full bg-surface-elevated border-r border-surface-border transition-all duration-200 ease-out", collapsed ? "w-[52px]" : "w-[260px]")}>
+      <div
+        className={cn("flex flex-col h-full bg-surface-elevated border-r border-surface-border transition-[width] duration-200 ease-out relative shrink-0", collapsed ? "w-[52px]" : "")}
+        style={{ width: collapsed ? 52 : sidebarWidth }}
+      >
 
         {/* ── Logo + 折叠 ── */}
         <div className="flex items-center h-12 px-3 border-b border-surface-border shrink-0">
           {!collapsed && (
             <div className="flex-1 min-w-0">
-              <Link href="/chat" className="block">
-                <span className="text-sm font-semibold text-text-primary tracking-tight">AI Space</span>
+              <Link href="/chat" className="flex items-center gap-2">
+                <img src="/logo.png" alt="AI Space" className="w-6 h-6 rounded-md object-cover" />
+                <img src="/title.png" alt="AI Space" className="h-5 w-auto object-contain" />
+              </Link>
+            </div>
+          )}
+          {collapsed && (
+            <div className="flex-1 flex justify-center">
+              <Link href="/chat">
+                <img src="/logo.png" alt="AI Space" className="w-7 h-7 rounded-md object-cover" />
               </Link>
             </div>
           )}
@@ -484,33 +531,23 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
         {/* ── 可滚动区域 ── */}
         {collapsed ? (
           <div className="flex-1 flex flex-col items-center overflow-visible">
-            {/* 新对话 - 对齐展开状态的 px-3 pt-3 pb-2 */}
+            {/* 聊天 - 移到顶部，保留原新对话位置 */}
             <div className="pt-3 pb-2">
-              <button
-                onClick={handleNewChat}
-                onMouseEnter={showSidebarTooltip("新对话")}
-                onMouseLeave={hideSidebarTooltip}
-                className="p-2.5 rounded-xl hover:bg-surface-card transition-colors"
-              >
-                <MessageSquarePlus className="w-5 h-5 text-brand" />
-              </button>
-            </div>
-
-            {/* 功能分组 - 对齐展开状态的 px-3 py-2 */}
-            <div className="py-2 flex flex-col items-center space-y-0.5">
-              {/* 聊天 */}
               <Link
                 href="/chat"
                 onMouseEnter={showSidebarTooltip("聊天")}
                 onMouseLeave={hideSidebarTooltip}
                 className={cn(
-                  "p-2.5 rounded-xl transition-colors",
+                  "p-2.5 rounded-xl transition-colors block",
                   pathname === "/chat" ? "bg-surface-card" : "hover:bg-surface-card"
                 )}
               >
                 <MessageSquare className={cn("w-5 h-5", pathname === "/chat" ? "text-brand" : "text-text-tertiary")} />
               </Link>
+            </div>
 
+            {/* 功能分组 - 对齐展开状态的 px-3 py-2 */}
+            <div className="py-2 flex flex-col items-center space-y-0.5">
               {/* workspace空间 */}
               <Link
                 href="/workspace"
@@ -594,17 +631,22 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto scrollbar-hide">
-            {/* ▼ 新对话大按钮（Sider 风格） */}
+            {/* ▼ 聊天大按钮（原新对话位置） */}
             <div className="px-3 pt-3 pb-2">
-              <button
-                onClick={handleNewChat}
-                className="flex items-center gap-3 w-full px-4 py-3 rounded-2xl bg-surface-card border border-surface-border shadow-sm hover:shadow-md hover:border-brand/30 transition-all duration-200 group"
+              <Link
+                href="/chat"
+                className={cn(
+                  "flex items-center gap-3 w-full px-4 py-3 rounded-2xl border shadow-sm transition-all duration-200 group",
+                  pathname === "/chat"
+                    ? "bg-surface-card border-brand/30 shadow-md"
+                    : "bg-surface-card border-surface-border hover:shadow-md hover:border-brand/30"
+                )}
               >
                 <div className="w-8 h-8 rounded-xl bg-brand/10 flex items-center justify-center shrink-0 group-hover:bg-brand/20 transition-colors">
-                  <MessageSquarePlus className="w-[18px] h-[18px] text-brand" />
+                  <MessageSquare className="w-[18px] h-[18px] text-brand" />
                 </div>
-                <span className="text-sm font-semibold text-text-primary">新对话</span>
-              </button>
+                <span className="text-sm font-semibold text-text-primary">聊天</span>
+              </Link>
             </div>
 
             {/* ▼ 功能分组 */}
@@ -613,20 +655,6 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                 <span className="text-[11px] font-semibold text-text-tertiary/70 tracking-wide">功能</span>
               </div>
               <div className="space-y-0.5">
-                {/* 聊天 */}
-                <Link
-                  href="/chat"
-                  className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150",
-                    pathname === "/chat"
-                      ? "bg-surface-card text-text-primary font-medium shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
-                      : "text-text-secondary hover:bg-surface-card/60 hover:text-text-primary"
-                  )}
-                >
-                  <MessageSquare className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/chat" ? "text-brand" : "text-text-tertiary")} />
-                  <span>聊天</span>
-                </Link>
-
                 {/* workspace空间 */}
                 <Link
                   href="/workspace"
@@ -725,6 +753,16 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
             onHideTooltip={hideSidebarTooltip}
           />
         </div>
+
+        {/* 拖拽调整宽度手柄 - 仅展开状态显示 */}
+        {!collapsed && (
+          <div
+            className="absolute top-0 right-0 z-50 w-2 h-full cursor-col-resize group"
+            onMouseDown={handleMouseDown}
+          >
+            <div className="absolute inset-0 -left-1 -right-1 rounded-full transition-all duration-150 group-hover:bg-brand/30 group-active:bg-brand/50" />
+          </div>
+        )}
       </div>
 
       {/* 更多 hover 面板 */}

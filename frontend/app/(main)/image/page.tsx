@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useImage } from "@/hooks/useImage";
 import { useImageModels, ChatModel } from "@/hooks/useModels";
 import { GeneratedImage } from "@/hooks/useImage";
@@ -20,12 +20,12 @@ import {
   Layers,
   ZoomIn,
   X,
-  Upload,
-  Paperclip,
+  Plus,
+  History,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { checkImagePrompt, formatModerationMessage } from "@/lib/imageModeration";
 
 const ASPECT_RATIOS = [
   { value: "auto", label: "Auto", w: 1, h: 1 },
@@ -81,6 +81,168 @@ function AspectIcon({ w, h, active }: { w: number; h: number; active: boolean })
   );
 }
 
+// 参考图堆叠组件
+function ReferenceImageStack({
+  images,
+  onAdd,
+  onRemove,
+  uploading,
+  onDropFile,
+  model,
+}: {
+  images: string[];
+  onAdd: () => void;
+  onRemove: (index: number) => void;
+  uploading: boolean;
+  onDropFile?: (file: File) => void;
+  model?: ChatModel;
+}) {
+  const [isHovered, setIsHovered] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  // 无图：显示方形上传按钮
+  if (images.length === 0) {
+    return (
+      <div
+        className={cn(
+          "relative shrink-0 w-9 h-9 rounded-xl bg-gray-100 dark:bg-surface-elevated border border-gray-200 dark:border-surface-border flex items-center justify-center transition-all cursor-pointer hover:border-brand/40",
+          uploading && "cursor-not-allowed opacity-60"
+        )}
+        onClick={onAdd}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        onDragLeave={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const file = e.dataTransfer.files?.[0];
+          if (file && onDropFile) onDropFile(file);
+        }}
+        title="上传参考图"
+      >
+        {uploading ? (
+          <Loader2 className="w-4 h-4 text-gray-500 dark:text-text-tertiary animate-spin" />
+        ) : (
+          <Plus className="w-4 h-4 text-gray-500 dark:text-text-tertiary" />
+        )}
+      </div>
+    );
+  }
+
+  // 单图：显示图片 + 左下角加号
+  if (images.length === 1) {
+    return (
+      <div className="relative shrink-0 group/single">
+        <div className="w-9 h-9 rounded-xl overflow-hidden border border-surface-border">
+          <img src={images[0]} alt="参考图" className="w-full h-full object-cover" />
+        </div>
+        {/* 删除按钮 - 悬浮时显示 */}
+        <button
+          type="button"
+          onClick={() => onRemove(0)}
+          className="absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full bg-surface-elevated border border-surface-border shadow-md text-gray-500 dark:text-text-secondary hover:text-red-500 hover:border-red-400 hover:bg-red-50 dark:hover:bg-red-950 flex items-center justify-center transition-all opacity-0 group-hover/single:opacity-100 z-20"
+          title="删除"
+        >
+          <X className="w-3 h-3" />
+        </button>
+        {/* 加号按钮 */}
+        <button
+          type="button"
+          onClick={onAdd}
+          disabled={uploading}
+          className="absolute -bottom-1.5 -right-1.5 w-5 h-5 rounded-full bg-surface-elevated border border-surface-border shadow-sm flex items-center justify-center hover:border-brand/50 hover:text-brand transition-all z-10"
+        >
+          {uploading ? (
+            <Loader2 className="w-2.5 h-2.5 text-text-tertiary animate-spin" />
+          ) : (
+            <Plus className="w-3 h-3 text-text-tertiary" />
+          )}
+        </button>
+      </div>
+    );
+  }
+
+  // 多图：堆叠效果，悬浮展开
+  return (
+    <div
+      className="relative shrink-0"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      <div
+        className={cn(
+          "flex items-center transition-all duration-300 ease-out",
+          isHovered ? "gap-2 px-1" : "gap-0"
+        )}
+      >
+        {images.map((url, idx) => {
+          const isLast = idx === images.length - 1;
+          // 堆叠时，后面的图向左偏移，形成堆叠
+          const stackOffset = isHovered ? 0 : -idx * 14;
+          const stackRotate = isHovered ? 0 : (idx % 2 === 0 ? 1 : -1) * (idx * 1.5);
+          const zIndex = images.length - idx;
+
+          return (
+            <div
+              key={`${url}-${idx}`}
+              className={cn(
+                "relative rounded-xl overflow-hidden border border-surface-border shadow-sm transition-all duration-300 ease-out group/item",
+                isHovered ? "hover:scale-110 hover:shadow-lg hover:z-50" : ""
+              )}
+              style={{
+                width: 36,
+                height: 36,
+                marginLeft: idx === 0 ? 0 : stackOffset,
+                transform: `rotate(${stackRotate}deg)`,
+                zIndex,
+              }}
+            >
+              <img src={url} alt={`参考图 ${idx + 1}`} className="w-full h-full object-cover" />
+              {/* 删除按钮 - 悬浮时显示 */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemove(idx);
+                }}
+                className={cn(
+                  "absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full bg-surface-elevated border border-surface-border shadow-md text-gray-500 dark:text-text-secondary hover:text-red-500 hover:border-red-400 hover:bg-red-50 dark:hover:bg-red-950 flex items-center justify-center transition-all z-30",
+                  isHovered ? "opacity-100" : "opacity-0 group-hover/item:opacity-100"
+                )}
+                title="删除"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 悬浮展开后，最后加一个加号 */}
+      {isHovered && (
+        <button
+          type="button"
+          onClick={onAdd}
+          disabled={uploading}
+          className="absolute -right-6 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-surface-elevated border border-surface-border shadow-sm flex items-center justify-center hover:border-brand/50 hover:text-brand transition-all z-10"
+          style={{ marginLeft: 8 }}
+        >
+          {uploading ? (
+            <Loader2 className="w-3 h-3 text-text-tertiary animate-spin" />
+          ) : (
+            <Plus className="w-3.5 h-3.5 text-text-tertiary" />
+          )}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function ImagePage() {
   const { images, isGenerating, generateImage, deleteImage } = useImage();
   const { models: imageModels } = useImageModels();
@@ -95,56 +257,11 @@ export default function ImagePage() {
   const [previewImage, setPreviewImage] = useState<GeneratedImage | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [deletingIds, setDeletingIds] = useState<number[]>([]);
-  const [referenceImageUrl, setReferenceImageUrl] = useState<string | null>(null);
-  const [referenceImageId, setReferenceImageId] = useState<string | null>(null);
-  const [moderationDialog, setModerationDialog] = useState<{ open: boolean; message: string }>({ open: false, message: "" });
+  const [referenceImages, setReferenceImages] = useState<string[]>([]);
+  const [uploadingRef, setUploadingRef] = useState(false);
+  const [activeTab, setActiveTab] = useState<"image" | "video">("image");
+  const [showHistory, setShowHistory] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploadingImages, setUploadingImages] = useState(false);
-
-  /** 上传用户选择的图片，返回 public_id */
-  const uploadImageFile = async (file: File): Promise<string> => {
-    const formData = new FormData();
-    formData.append("file", file);
-    const token = localStorage.getItem("token");
-    const resp = await fetch("/api/files/upload", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: formData,
-    });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(err.error || "上传图片失败");
-    }
-    const data = await resp.json();
-    return data.public_id;
-  };
-
-  const handleUploadClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    setUploadingImages(true);
-    try {
-      const file = files[0];
-      if (!file.type.startsWith("image/")) {
-        toast.error("请选择图片文件");
-        return;
-      }
-      const publicId = await uploadImageFile(file);
-      const blobUrl = URL.createObjectURL(file);
-      setReferenceImageUrl(blobUrl);
-      setReferenceImageId(publicId);
-      toast.success(`已添加参考图: ${file.name}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "上传图片失败");
-    } finally {
-      setUploadingImages(false);
-      e.target.value = "";
-    }
-  };
 
   // 默认选第一个画图模型
   useEffect(() => {
@@ -158,35 +275,67 @@ export default function ImagePage() {
 
   const hasContent = prompt.trim().length > 0;
 
+  const uploadReferenceImage = useCallback(async (file: File) => {
+    setUploadingRef(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const token = localStorage.getItem("token");
+      const res = await fetch("/api/files/upload", {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "上传失败");
+      }
+      const data = await res.json();
+      // 使用 public_id 作为参考图标识（后端通过 file_ 前缀解析）
+      const url = data.public_id || data.url || data.image_url;
+      setReferenceImages((prev) => [...prev, url]);
+      toast.success("参考图上传成功");
+    } catch (err: any) {
+      toast.error(`上传失败: ${err.message}`);
+    } finally {
+      setUploadingRef(false);
+    }
+  }, []);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    uploadReferenceImage(file);
+  };
+
+  const handleAddImage = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleRemoveImage = (index: number) => {
+    setReferenceImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const handleGenerate = async () => {
     if (!prompt.trim()) {
       toast.error("请输入描述");
       return;
     }
-
-    // 违禁词前端检测
-    const matches = checkImagePrompt(prompt);
-    if (matches.length > 0) {
-      const message = formatModerationMessage(matches);
-      setModerationDialog({ open: true, message });
-      return;
-    }
-
     setIsLoading(true);
     try {
-      await generateImage(prompt, selectedAspectRatio, selectedResolution, selectedQuality, referenceImageId || referenceImageUrl || undefined);
-      toast.success(referenceImageUrl ? "已提交基于原图的编辑请求" : "已提交生成请求");
+      await generateImage(
+        prompt,
+        selectedAspectRatio,
+        selectedResolution,
+        selectedQuality,
+        referenceImages.length > 0 ? referenceImages : undefined
+      );
+      toast.success(referenceImages.length > 0 ? "已提交参考图生成请求" : "已提交生成请求");
       setPrompt("");
-      setReferenceImageUrl(null);
-      setReferenceImageId(null);
+      setReferenceImages([]);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "";
-      // 常见的违禁/内容安全错误，统一给友好提示
-      if (/content.?policy|content.?safety|content.?moderat|违禁|安全|sensitive|violation|inappropriate|restricted|content_filter|blocked/i.test(msg)) {
-        toast.error("可能有违禁词，请修改描述后重新生成");
-      } else {
-        toast.error(msg || "生成失败");
-      }
+      toast.error(err instanceof Error ? err.message : "生成失败");
     } finally {
       setIsLoading(false);
     }
@@ -226,91 +375,80 @@ export default function ImagePage() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-surface">
-      <header className="shrink-0 h-12 flex items-center justify-between px-4 border-b border-surface-border">
-        <div className="flex items-center gap-2">
-          <ImageIcon className="w-5 h-5 text-brand" />
-          <span className="text-sm font-semibold text-text-primary">图片生成</span>
-        </div>
-      </header>
+    <div className="flex flex-col min-h-0 bg-surface">
+      {/* 隐藏的文件输入 */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleFileSelect}
+      />
 
-      <div className="flex-1 overflow-auto p-4 md:p-6">
-        <div className="max-w-3xl mx-auto space-y-6">
-          {/* 输入区域 - 对齐聊天页 MessageInput 风格 */}
+      {/* 顶部区域 */}
+      <div className="shrink-0 flex flex-col items-center pt-8 pb-4 px-4">
+        <div className="w-full max-w-3xl flex items-center justify-between">
+          <div />
+          <button
+            onClick={() => setShowHistory(!showHistory)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-text-secondary hover:text-text-primary hover:bg-surface-card transition-colors"
+          >
+            <History className="w-4 h-4" />
+            <span>历史</span>
+          </button>
+        </div>
+
+        <h1 className="text-2xl font-bold text-text-primary mt-2">AI灵感创作器</h1>
+      </div>
+
+      <div className="flex-1 overflow-auto px-4 md:px-6 pb-8">
+        <div className="max-w-3xl mx-auto space-y-8">
+          {/* 输入卡片 */}
           <div
             className={cn(
               "relative flex flex-col rounded-2xl border transition-all duration-300",
               "bg-surface-card",
-              referenceImageUrl
+              referenceImages.length > 0
                 ? "border-brand/30 focus-within:border-brand/60 focus-within:shadow-[0_0_0_1px_rgba(59,130,246,0.15),0_0_20px_rgba(59,130,246,0.08)]"
                 : "border-surface-border focus-within:border-brand/50 focus-within:shadow-[0_0_0_1px_rgba(59,130,246,0.1)]"
             )}
           >
-            {/* 参考图标示条 */}
-            {referenceImageUrl && (
-              <div className="flex items-center gap-2 px-3 pt-2.5 pb-0">
-                <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-brand/10 border border-brand/30 text-brand text-xs shadow-[0_0_8px_rgba(59,130,246,0.12)]">
-                  <div className="relative">
-                    <img
-                      src={referenceImageUrl}
-                      alt="参考图"
-                      className="w-6 h-6 rounded object-cover border border-brand/20"
-                    />
-                    <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-brand border border-surface-card" />
-                  </div>
-                  <span className="font-medium">基于原图编辑</span>
-                  <button
-                    type="button"
-                    onClick={() => { setReferenceImageUrl(null); setReferenceImageId(null); }}
-                    className="ml-1 p-0.5 rounded hover:bg-brand/20 transition-colors"
-                    title="取消参考"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-            )}
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder={referenceImageUrl ? "描述您想要对原图进行的修改..." : "尝试描述您想要创建的图像..."}
-              disabled={isLoading || isGenerating}
-              className={cn(
-                "w-full h-28 p-4 bg-transparent text-text-primary placeholder:text-text-tertiary resize-none focus:outline-none text-sm leading-relaxed",
-                (isLoading || isGenerating) && "opacity-60 cursor-not-allowed"
-              )}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  handleGenerate();
+            {/* 输入区：参考图 + textarea */}
+            <div className="flex items-center gap-3 px-4 py-3">
+              <ReferenceImageStack
+                images={referenceImages}
+                onAdd={handleAddImage}
+                onRemove={handleRemoveImage}
+                uploading={uploadingRef}
+                onDropFile={uploadReferenceImage}
+                model={currentModel}
+              />
+              <textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder={
+                  referenceImages.length > 0
+                    ? "描述您想要对参考图进行的修改..."
+                    : "尝试描述您想要创建的内容..."
                 }
-              }}
-            />
+                disabled={isLoading || isGenerating}
+                rows={1}
+                className={cn(
+                  "flex-1 min-h-[36px] max-h-[120px] bg-transparent text-text-primary placeholder:text-text-tertiary resize-none focus:outline-none text-sm leading-5 py-2",
+                  (isLoading || isGenerating) && "opacity-60 cursor-not-allowed"
+                )}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleGenerate();
+                  }
+                }}
+              />
+            </div>
+
+            {/* 底部工具栏 */}
             <div className="flex items-center justify-between px-3 pb-3 pt-1">
               <div className="flex items-center gap-2 flex-wrap">
-                {/* 上传图片按钮 */}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="hidden"
-                  onChange={handleFileSelect}
-                />
-                <button
-                  onClick={handleUploadClick}
-                  disabled={isLoading || isGenerating || uploadingImages}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[13px] font-medium transition-all duration-200 border-surface-border text-text-secondary hover:text-text-primary hover:border-text-tertiary/50 bg-transparent disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="上传参考图片"
-                >
-                  {uploadingImages ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Paperclip className="w-3.5 h-3.5" />
-                  )}
-                  <span>{uploadingImages ? "上传中..." : "图片"}</span>
-                </button>
-
                 {/* 模型选择 */}
                 {imageModels.length > 0 && (
                   <div className="relative">
@@ -375,7 +513,6 @@ export default function ImagePage() {
                     <>
                       <div className="fixed inset-0 z-40" onClick={() => setAspectMenuOpen(false)} />
                       <div className="absolute top-full left-0 mt-1.5 w-[340px] z-50 rounded-xl border border-surface-border bg-surface-elevated shadow-xl p-4 animate-fade-in">
-                        {/* 纵横比 */}
                         <div className="text-xs font-medium text-text-secondary mb-3">纵横比</div>
                         <div className="grid grid-cols-5 gap-2">
                           {ASPECT_RATIOS.map((ar) => {
@@ -397,8 +534,6 @@ export default function ImagePage() {
                             );
                           })}
                         </div>
-
-                        {/* 分辨率 */}
                         <div className="text-xs font-medium text-text-secondary mt-4 mb-2">分辨率</div>
                         <div className="flex gap-2">
                           {RESOLUTIONS.map((res) => (
@@ -422,7 +557,7 @@ export default function ImagePage() {
                   )}
                 </div>
 
-                {/* 质量选择 - pill 风格 */}
+                {/* 质量选择 */}
                 <div className="flex items-center rounded-full border border-surface-border overflow-hidden bg-transparent">
                   {QUALITIES.map((q) => (
                     <button
@@ -441,10 +576,9 @@ export default function ImagePage() {
                 </div>
               </div>
 
-              {/* 发送/停止按钮 - 对齐聊天页 */}
+              {/* 发送按钮 */}
               {isLoading || isGenerating ? (
                 <button
-                  onClick={() => { /* 图片生成一般不支持中途停止，保持禁用态 */ }}
                   disabled
                   className="flex items-center justify-center w-8 h-8 rounded-lg bg-red-500/80 text-white cursor-not-allowed"
                   title="生成中..."
@@ -458,7 +592,7 @@ export default function ImagePage() {
                   className={cn(
                     "flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200",
                     hasContent
-                      ? referenceImageUrl
+                      ? referenceImages.length > 0
                         ? "bg-brand text-white hover:bg-brand-hover shadow-[0_0_8px_rgba(59,130,246,0.25)]"
                         : "bg-brand text-white hover:bg-brand-hover"
                       : "bg-surface-elevated text-text-tertiary cursor-not-allowed"
@@ -470,38 +604,13 @@ export default function ImagePage() {
             </div>
           </div>
 
-          {/* 历史记录 */}
-          {images.length > 0 && (
-            <div>
-              <h3 className="text-xs font-medium text-text-secondary mb-3 px-1">
-                历史记录 ({images.length})
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {images.map((image) => (
-                  <ImageCard
-                    key={image.id}
-                    image={image}
-                    isDeleting={deletingIds.includes(image.id)}
-                    onDelete={handleDelete}
-                    onDownload={handleDownload}
-                    onPreview={() => setPreviewImage(image)}
-                    onReuse={(p, size, refUrl) => {
-                      setPrompt("");
-                      setReferenceImageUrl(refUrl || null);
-                      setReferenceImageId(null);
-                      if (size) {
-                        const parts = size.split("x");
-                        if (parts.length === 2) {
-                          const w = parseInt(parts[0]);
-                          const h = parseInt(parts[1]);
-                          const minDim = Math.min(w, h);
-                          setSelectedResolution(minDim >= 1400 ? "2K" : "1K");
-                        }
-                      }
-                    }}
-                  />
-                ))}
-              </div>
+          {/* 示例图库 - 总是显示，放在输入框下方 */}
+          <ExampleGallery onUsePrompt={(p: string) => { setPrompt(p); }} />
+
+          {/* 无历史记录空状态 */}
+          {images.length === 0 && !isLoading && (
+            <div className="text-center py-8 text-text-tertiary">
+              <p className="text-sm">在上方输入描述开始创作吧</p>
             </div>
           )}
 
@@ -517,98 +626,136 @@ export default function ImagePage() {
             }
           />
 
-          {images.length === 0 && !isLoading && (
-            <div className="text-center py-12 text-text-tertiary">
-              <ImageIcon className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p>还没有生成过图片</p>
-              <p className="text-sm mt-1">在上方输入描述开始创作吧</p>
+          <ConfirmDialog
+            isOpen={deleteTarget !== null}
+            title="删除图片"
+            description="确定要删除这张图片吗？此操作不可撤销。"
+            confirmText="删除"
+            cancelText="取消"
+            onConfirm={handleConfirmDelete}
+            onCancel={() => setDeleteTarget(null)}
+            variant="danger"
+          />
+
+          {/* 历史记录右侧抽屉 */}
+          {showHistory && (
+            <div className="fixed inset-0 z-50">
+              {/* 遮罩 */}
+              <div
+                className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity"
+                onClick={() => setShowHistory(false)}
+              />
+              {/* 抽屉面板 */}
+              <div className="absolute right-0 top-0 bottom-0 w-full max-w-md bg-surface-elevated border-l border-surface-border shadow-2xl flex flex-col animate-slide-in-right">
+                {/* 头部 */}
+                <div className="flex items-center justify-between px-5 py-4 border-b border-surface-border shrink-0">
+                  <h3 className="text-lg font-semibold text-text-primary">历史记录</h3>
+                  <button
+                    onClick={() => setShowHistory(false)}
+                    className="w-8 h-8 rounded-lg flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                {/* 内容 */}
+                <div className="flex-1 overflow-auto p-4 space-y-2">
+                  {images.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-full text-text-tertiary">
+                      <div className="relative w-16 h-16 mb-4">
+                        <svg className="w-14 h-14 text-text-tertiary/40 absolute left-0 top-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                          <circle cx="8.5" cy="8.5" r="1.5" />
+                          <path d="M21 15l-5-5L5 21" />
+                        </svg>
+                        <svg className="w-10 h-10 text-brand/40 absolute right-0 bottom-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                          <circle cx="8.5" cy="8.5" r="1.5" />
+                          <path d="M21 15l-5-5L5 21" />
+                        </svg>
+                      </div>
+                      <p className="text-sm">您的历史记录是空的。</p>
+                      <p className="text-sm">创建图片来填充它。</p>
+                    </div>
+                  ) : (
+                    <>
+                      {images.map((image) => (
+                        <div
+                          key={image.id}
+                          className="group flex items-start gap-3 p-3 rounded-xl bg-surface-card border border-surface-border hover:border-brand/30 transition-all"
+                        >
+                          {/* 图片缩略图 */}
+                          <div className="w-16 h-16 rounded-lg overflow-hidden bg-surface shrink-0 border border-surface-border">
+                            {image.status === "pending" ? (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <Loader2 className="w-5 h-5 text-brand/40 animate-spin" />
+                              </div>
+                            ) : image.status === "failed" ? (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <AlertCircle className="w-5 h-5 text-red-400/50" />
+                              </div>
+                            ) : (
+                              <img
+                                src={image.image_url}
+                                alt={image.prompt}
+                                className="w-full h-full object-cover cursor-pointer"
+                                onClick={() => setPreviewImage(image)}
+                              />
+                            )}
+                          </div>
+                          {/* 信息 */}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-text-primary line-clamp-1">{image.prompt}</p>
+                            <p className="text-[11px] text-text-tertiary mt-0.5">
+                              {new Date(image.created_at).toLocaleString()}
+                            </p>
+                            <div className="flex items-center gap-2 mt-1.5">
+                              <button
+                                onClick={() => {
+                                  setPrompt(image.prompt);
+                                  setShowHistory(false);
+                                  if (image.size) {
+                                    const parts = image.size.split("x");
+                                    if (parts.length === 2) {
+                                      const w = parseInt(parts[0]);
+                                      const h = parseInt(parts[1]);
+                                      const minDim = Math.min(w, h);
+                                      setSelectedResolution(minDim >= 1400 ? "2K" : "1K");
+                                    }
+                                  }
+                                }}
+                                className="text-[11px] text-brand hover:text-brand-hover flex items-center gap-0.5 transition-colors"
+                              >
+                                <RefreshCw className="w-3 h-3" />
+                                再次使用
+                              </button>
+                            </div>
+                          </div>
+                          {/* 操作 */}
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                            <button
+                              onClick={() => handleDelete(image.id)}
+                              className="w-7 h-7 rounded-lg flex items-center justify-center text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                              title="删除"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      <p className="text-center text-xs text-text-tertiary py-3">没有更多历史记录。</p>
+                    </>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </div>
       </div>
-
-      <ConfirmDialog
-        isOpen={deleteTarget !== null}
-        title="删除图片"
-        description="确定要删除这张图片吗？此操作不可撤销。"
-        confirmText="删除"
-        cancelText="取消"
-        onConfirm={handleConfirmDelete}
-        onCancel={() => setDeleteTarget(null)}
-        variant="danger"
-      />
-      {/* 违禁词提示弹窗 */}
-      <ModerationDialog
-        isOpen={moderationDialog.open}
-        message={moderationDialog.message}
-        onClose={() => setModerationDialog({ open: false, message: "" })}
-      />
     </div>
   );
 }
 
-// 违禁词弹窗组件
-function ModerationDialog({ isOpen, message, onClose }: { isOpen: boolean; message: string; onClose: () => void }) {
-  useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
-    }
-    return () => { document.body.style.overflow = ""; };
-  }, [isOpen]);
-
-  if (!isOpen) return null;
-
-  const lines = message.split("\n");
-  const titleLine = lines[0] || "";
-  const restLines = lines.slice(1);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-[480px] mx-4 rounded-2xl bg-surface-elevated border border-surface-border shadow-2xl p-6 animate-dialog-appear">
-        <div className="flex items-start gap-3 mb-4">
-          <div className="w-10 h-10 rounded-full bg-yellow-500/15 flex items-center justify-center shrink-0">
-            <AlertCircle className="w-5 h-5 text-yellow-500" />
-          </div>
-          <div>
-            <h3 className="text-base font-semibold text-text-primary">
-              内容安全提醒
-            </h3>
-            <p className="text-sm text-text-secondary mt-1">
-              检测到您的描述包含可能被 OpenAI 内容安全策略拦截的内容，已取消本次生成请求。
-            </p>
-          </div>
-        </div>
-        <div className="mb-5 p-3 rounded-xl bg-surface border border-surface-border">
-          {restLines.map((line, i) => {
-            if (line.startsWith("•")) {
-              return (
-                <div key={i} className="text-sm text-yellow-600 dark:text-yellow-400 font-medium py-0.5">
-                  {line}
-                </div>
-              );
-            }
-            return line.trim() ? (
-              <p key={i} className="text-sm text-text-secondary mt-1 first:mt-0 leading-relaxed">
-                {line}
-              </p>
-            ) : null;
-          })}
-        </div>
-        <div className="flex justify-end">
-          <button
-            onClick={onClose}
-            className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-brand hover:bg-brand-hover transition-colors"
-          >
-            知道了，修改描述
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+// 单个图片卡片组件
 function ImageCard({
   image,
   isDeleting,
@@ -622,16 +769,18 @@ function ImageCard({
   onDelete: (id: number) => void;
   onDownload: (url: string, id: number) => void;
   onPreview: () => void;
-  onReuse: (prompt: string, size: string, referenceImageUrl?: string) => void;
+  onReuse: (prompt: string, size: string, referenceImageUrls?: string[]) => void;
 }) {
   const isPending = image.status === "pending";
   const isFailed = image.status === "failed";
 
   return (
-    <div className={cn(
-      "group bg-surface-card rounded-xl border border-surface-border overflow-hidden hover:border-brand/30 transition-all duration-300",
-      isDeleting && "opacity-0 scale-95 pointer-events-none"
-    )}>
+    <div
+      className={cn(
+        "group bg-surface-card rounded-xl border border-surface-border overflow-hidden hover:border-brand/30 transition-all duration-300",
+        isDeleting && "opacity-0 scale-95 pointer-events-none"
+      )}
+    >
       <div className="aspect-square bg-surface relative">
         {isPending ? (
           <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-text-tertiary">
@@ -652,12 +801,9 @@ function ImageCard({
         ) : isFailed ? (
           <>
             <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-text-tertiary">
-              <AlertCircle className="w-8 h-8 text-yellow-500/50" />
-              <span className="text-xs text-yellow-600 dark:text-yellow-400 font-medium">生成失败</span>
-              <p className="text-[11px] text-text-tertiary/70 max-w-[85%] text-center leading-relaxed px-2">
-                可能有违禁词，请修改后重新生成
-              </p>
-              <p className="text-[11px] text-text-secondary/50 max-w-[80%] text-center line-clamp-2 px-2">
+              <AlertCircle className="w-8 h-8 text-red-400/50" />
+              <span className="text-xs text-red-400/70">生成失败</span>
+              <p className="text-[11px] text-text-tertiary/60 max-w-[80%] text-center line-clamp-2 px-2">
                 {image.prompt}
               </p>
             </div>
@@ -665,7 +811,7 @@ function ImageCard({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  onReuse(image.prompt, image.size, image.image_url);
+                  onReuse(image.prompt, image.size, []);
                 }}
                 className="p-2 rounded-lg bg-surface-elevated/90 text-text-primary hover:bg-surface-card transition-colors"
                 title="重新生成"
@@ -716,7 +862,7 @@ function ImageCard({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  onReuse(image.prompt, image.size, image.image_url);
+                  onReuse(image.prompt, image.size, []);
                 }}
                 className="p-2 rounded-lg bg-surface-elevated/90 text-text-primary hover:bg-surface-card transition-colors"
                 title="重新生成"
@@ -755,6 +901,81 @@ function ImageCard({
               )}
             </div>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ───────────────────────── 示例画廊组件 ─────────────────────────
+interface GalleryItem {
+  prompt: string;
+  imageUrl: string;
+}
+
+const GALLERY_ITEMS: GalleryItem[] = [
+  {
+    prompt: "A well-dressed businessman in suit sitting at cozy coffee shop, working on laptop, sunlight streaming through window, warm tones, 4k photorealistic",
+    imageUrl: "https://images.unsplash.com/photo-1600880292203-757bb62b4baf?w=600&h=400&fit=crop",
+  },
+  {
+    prompt: "Mountain landscape at sunset, dramatic sky, clouds painted in orange and pink, pine trees silhouette, cinematic, National Geographic style",
+    imageUrl: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=600&h=300&fit=crop",
+  },
+  {
+    prompt: "Fluffy white cat sitting on a wooden table, green eyes, soft natural lighting, shallow depth of field, ultra realistic",
+    imageUrl: "https://images.unsplash.com/photo-1513360371669-4adf3dd7dff8?w=600&h=700&fit=crop",
+  },
+  {
+    prompt: "Cyberpunk city street at night, neon signs reflecting on wet asphalt, flying holographic ads, futuristic cars, blade runner aesthetic",
+    imageUrl: "https://images.unsplash.com/photo-1567608295988-36134612d139?w=600&h=450&fit=crop",
+  },
+  {
+    prompt: "Delicious gourmet burger with fresh ingredients, sesame bun, melted cheese, crispy bacon, food photography, mouth-watering detail",
+    imageUrl: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600&h=400&fit=crop",
+  },
+  {
+    prompt: "Abstract geometric shapes in vibrant colors, 3D rendered art piece, smooth gradients, modern aesthetic, minimal composition",
+    imageUrl: "https://images.unsplash.com/photo-1550859492-d5da9d8e45f3?w=600&h=600&fit=crop",
+  },
+  {
+    prompt: "Ethereal fantasy forest with glowing mushrooms, ancient trees wrapped in vines, magical blue particles floating in mist, moonlight beams",
+    imageUrl: "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=600&h=750&fit=crop",
+  },
+  {
+    prompt: "Modern minimalist interior design, open concept living room with large windows, neutral colors, warm wood accents, architectural digest style",
+    imageUrl: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=600&h=350&fit=crop",
+  },
+];
+
+function ExampleGallery({ onUsePrompt }: { onUsePrompt: (prompt: string) => void }) {
+  return (
+    <div className="mt-8 mb-4">
+      <div className="mb-6">
+        <h3 className="text-base font-semibold text-text-primary mb-4">发现</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {GALLERY_ITEMS.map((item, i) => (
+            <div
+              key={i}
+              className="group cursor-pointer rounded-2xl overflow-hidden bg-surface-card border border-surface-border hover:border-brand/40 transition-all duration-200"
+              onClick={() => onUsePrompt(item.prompt)}
+            >
+              <div className="relative overflow-hidden">
+                <img
+                  src={item.imageUrl}
+                  alt={item.prompt}
+                  className="w-full h-auto object-contain transition-transform duration-300 group-hover:scale-105"
+                  loading="lazy"
+                />
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center">
+                  <span className="flex items-center gap-1.5 bg-white text-gray-900 px-4 py-2 rounded-xl text-sm font-medium transform translate-y-2 group-hover:translate-y-0 transition-all duration-200">
+                    <Sparkles className="w-4 h-4" />
+                    使用模板
+                  </span>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>

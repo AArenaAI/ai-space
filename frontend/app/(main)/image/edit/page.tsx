@@ -1,10 +1,13 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { Upload, Loader2, Sparkles, Eraser, Download, RotateCcw, ArrowRight, Wand2, Type, ZoomIn } from "lucide-react";
+import { useState, useRef, useEffect, useCallback, Suspense } from "react";
+import { Upload, Loader2 as Spinner, Sparkles, Eraser, Download, RotateCcw, ArrowRight, Wand2, Type, ZoomIn, ImagePlus, History, Trash2, Loader, RefreshCw, AlertCircle, Clock, Image as ImageIcon, Plus } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { useImage } from "@/hooks/useImage";
 import { toast } from "sonner";
 import BeforeAfterSlider from "@/components/ui/BeforeAfterSlider";
+import { resolveImageUrl } from "@/lib/resolveImageUrl";
 
 const API_BASE_URL = "";
 
@@ -93,6 +96,19 @@ const MODE_CONFIG = {
 const MODE_ORDER: EditMode[] = ["remove-bg", "replace-bg", "text-removal", "upscale"];
 
 export default function ImageEditPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-[400px] items-center justify-center">
+        <Spinner className="h-8 w-8 animate-spin text-text-tertiary" />
+      </div>
+    }>
+      <ImageEditContent />
+    </Suspense>
+  );
+}
+
+function ImageEditContent() {
+  const { images, deleteImage } = useImage();
   const [editMode, setEditMode] = useState<EditMode>("remove-bg");
   const [sourceUrl, setSourceUrl] = useState("");
   const [replacePrompt, setReplacePrompt] = useState("");
@@ -100,16 +116,25 @@ export default function ImageEditPage() {
   const [result, setResult] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [hoveredMode, setHoveredMode] = useState<EditMode | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [previewImage, setPreviewImage] = useState<any>(null);
+  const [deletingIds, setDeletingIds] = useState<number[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const historyRef = useRef<HTMLDivElement>(null);
   const config = MODE_CONFIG[editMode];
 
+  // 从 URL 读取初始 mode
+  const searchParams = useSearchParams();
+  const urlMode = searchParams.get("mode") as EditMode | null;
+
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    const mode = params.get("mode") as EditMode | null;
-    if (mode && MODE_ORDER.includes(mode)) setEditMode(mode);
-    else setEditMode("remove-bg");
-  }, []);
+    if (urlMode && MODE_ORDER.includes(urlMode)) {
+      setEditMode(urlMode);
+      setResult(null);
+      setSourceUrl("");
+      setReplacePrompt("");
+    }
+  }, [urlMode]);
 
   const switchMode = (mode: EditMode) => {
     setEditMode(mode);
@@ -173,7 +198,6 @@ export default function ImageEditPage() {
     setResult(null);
     const token = localStorage.getItem("token");
     try {
-      // 先上传 base64 图片到文件服务器，拿到 public_id
       const base64Resp = await fetch(sourceUrl);
       const imageBlob = await base64Resp.blob();
       const formData = new FormData();
@@ -190,7 +214,6 @@ export default function ImageEditPage() {
       }
       const uploadData = await uploadResp.json();
 
-      // 用 public_id 提交编辑
       const body: Record<string, any> = {
         image_url: uploadData.public_id,
         edit_mode: editMode,
@@ -211,7 +234,7 @@ export default function ImageEditPage() {
         throw new Error(err.error || "编辑失败");
       }
       const data = await res.json();
-      setResult(data.image_url);
+      setResult(resolveImageUrl(data.image_url));
       toast.success(config.toastSuccess);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "编辑失败");
@@ -248,6 +271,31 @@ export default function ImageEditPage() {
     toast.success("已选择示例图片");
   };
 
+  // 点击外部关闭历史面板
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (historyRef.current && !historyRef.current.contains(e.target as Node)) {
+        setHistoryOpen(false);
+      }
+    }
+    if (historyOpen) {
+      document.addEventListener("mousedown", handleClick);
+      return () => document.removeEventListener("mousedown", handleClick);
+    }
+  }, [historyOpen]);
+
+  const handleDelete = async (id: number) => {
+    setDeletingIds((prev) => [...prev, id]);
+    try {
+      await deleteImage(id);
+      toast.success("删除成功");
+    } catch {
+      toast.error("删除失败");
+    } finally {
+      setDeletingIds((prev) => prev.filter((i) => i !== id));
+    }
+  };
+
   const examples = config.examples;
   const needsPrompt = editMode === "replace-bg" || editMode === "text-removal";
 
@@ -255,318 +303,473 @@ export default function ImageEditPage() {
   const TabIcon = config.tabIcon;
 
   return (
-    <div className="flex h-full flex-col bg-[rgb(238,234,245)] text-text-primary dark:bg-surface">
-      {/* 顶部模式切换 & 标题 */}
-      <header className="shrink-0 border-b border-white/60 bg-[rgb(238,234,245)] px-6 py-5 dark:border-surface-border dark:bg-surface">
-        <div className="mx-auto flex max-w-6xl flex-col items-center gap-4">
-          <div className="text-center">
-            <h1 className="text-[22px] font-semibold tracking-tight text-text-primary">
-              {config.title}
-            </h1>
-            <p className="mt-1 text-sm text-text-secondary">
-              {config.subtitle}
-            </p>
-          </div>
-          <div
-            className="relative flex items-center rounded-full border border-white/70 bg-white/55 p-1 shadow-[0_8px_24px_rgba(80,64,120,0.06)] backdrop-blur dark:border-surface-border dark:bg-surface-card"
-            onMouseLeave={() => setHoveredMode(null)}
-          >
-            {MODE_ORDER.map((mode) => {
-              const Icon = MODE_CONFIG[mode].tabIcon;
-              const isActive = editMode === mode;
-              return (
-                <button
-                  key={mode}
-                  onClick={() => switchMode(mode)}
-                  onMouseEnter={() => setHoveredMode(mode)}
-                  onMouseLeave={() => setHoveredMode(null)}
-                  onFocus={() => setHoveredMode(mode)}
-                  onBlur={() => setHoveredMode(null)}
-                  className={cn(
-                    "flex items-center gap-2 rounded-full px-5 py-2 text-sm font-medium transition-all duration-200",
-                    isActive
-                      ? "bg-brand text-white shadow-[0_6px_16px_rgba(59,130,246,0.22)]"
-                      : "text-text-secondary hover:bg-white/70 hover:text-text-primary dark:hover:bg-surface-elevated"
-                  )}
-                >
-                  <Icon className="h-4 w-4" />
-                  {MODE_CONFIG[mode].tabLabel}
-                </button>
-              );
-            })}
-
-            {hoveredMode === "remove-bg" && (
-              <div className="pointer-events-none absolute left-0 top-[calc(100%+14px)] z-50 w-[520px] overflow-hidden rounded-[22px] border border-white/75 bg-surface-card shadow-[0_26px_70px_rgba(80,64,120,0.18),0_6px_18px_rgba(80,64,120,0.08)] backdrop-blur animate-fade-in dark:border-surface-border">
-                <div className="relative h-[235px] overflow-hidden bg-surface-elevated">
-                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_16%,rgba(255,255,255,0.78),transparent_34%),linear-gradient(135deg,var(--surface-card),var(--surface-elevated))] dark:bg-surface-elevated" />
-                  <div className="absolute left-5 top-5 text-left">
-                    <div className="inline-flex items-center gap-1.5 rounded-full border border-brand/20 bg-brand-muted px-3 py-1 text-[11px] font-medium text-brand">
-                      <Sparkles className="h-3 w-3" />
-                      AI 背景移除
-                    </div>
-                    <p className="mt-3 text-sm font-semibold text-text-primary">自动识别主体，一键去除背景</p>
-                    <p className="mt-1 text-xs text-text-tertiary">悬浮预览处理前后的动态效果</p>
-                  </div>
-
-                  <div className="absolute bottom-5 left-5 right-5 h-[128px] overflow-hidden rounded-2xl border border-surface-border bg-surface-card shadow-[0_16px_34px_rgba(80,64,120,0.12)]">
-                    <div className="absolute inset-y-0 left-0 w-[48%] overflow-hidden">
-                      <img src="/examples/remove-bg-before.png" alt="背景移除原图" className="h-full w-full object-cover" />
-                      <div className="absolute bottom-2 left-2 rounded-full bg-surface-card/90 px-2 py-0.5 text-[10px] font-medium text-text-secondary shadow-sm backdrop-blur">原图</div>
-                    </div>
-                    <div className="absolute inset-y-0 right-0 flex w-[58%] items-center justify-center bg-[linear-gradient(45deg,hsl(var(--surface-elevated))_25%,transparent_25%,transparent_75%,hsl(var(--surface-elevated))_75%),linear-gradient(45deg,hsl(var(--surface-elevated))_25%,transparent_25%,transparent_75%,hsl(var(--surface-elevated))_75%)] bg-[length:18px_18px] bg-[position:0_0,9px_9px]">
-                      <img src="/examples/remove-bg-after.png" alt="去除背景后" className="h-[118px] w-[88%] object-contain animate-[float_2.4s_ease-in-out_infinite]" />
-                      <div className="absolute bottom-2 right-2 rounded-full bg-brand px-2 py-0.5 text-[10px] font-medium text-white shadow-[0_8px_18px_rgba(59,130,246,0.24)]">去背后</div>
-                    </div>
-                    <div className="absolute bottom-0 top-0 left-[39%] w-[2px] bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.04)] animate-[gradient-shift_1.6s_ease-in-out_infinite]" />
-                  </div>
-                </div>
-              </div>
+    <>
+      {/* 顶部栏：历史按钮（对所有 editMode 共用） */}
+      <header className="shrink-0 h-12 flex items-center justify-end px-4 border-b border-surface-border bg-surface relative z-10">
+        <div className="relative" ref={historyRef}>
+          <button
+            onClick={() => setHistoryOpen(!historyOpen)}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200",
+              historyOpen
+                ? "bg-brand/10 text-brand"
+                : "text-text-secondary hover:text-text-primary hover:bg-surface-card"
             )}
-          </div>
+          >
+            <History className="w-4 h-4" />
+            <span>历史</span>
+            {images.length > 0 && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface-elevated text-text-tertiary">
+                {images.length}
+              </span>
+            )}
+          </button>
+
+          {historyOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setHistoryOpen(false)} />
+              <div className="absolute top-full right-0 mt-2 w-[360px] max-h-[70vh] overflow-auto z-50 rounded-xl border border-surface-border bg-surface-elevated shadow-2xl py-3 animate-fade-in">
+                <div className="flex items-center justify-between px-4 pb-2 border-b border-surface-border">
+                  <h3 className="text-sm font-semibold text-text-primary">生成历史</h3>
+                  <span className="text-xs text-text-tertiary">{images.length} 张</span>
+                </div>
+                {images.length === 0 ? (
+                  <div className="px-4 py-8 text-center text-text-tertiary text-sm">
+                    还没有生成过图片
+                  </div>
+                ) : (
+                  <div className="py-1">
+                    {(() => {
+                      const groups: Record<string, any[]> = {};
+                      images.forEach((img: any) => {
+                        const date = new Date(img.created_at).toLocaleDateString("zh-CN");
+                        if (!groups[date]) groups[date] = [];
+                        groups[date].push(img);
+                      });
+                      const sortedDates = Object.keys(groups).sort(
+                        (a, b) => new Date(b).getTime() - new Date(a).getTime()
+                      );
+                      return sortedDates.map((date) => (
+                        <div key={date}>
+                          <div className="px-4 py-1.5 text-[11px] font-medium text-text-tertiary sticky top-0 bg-surface-elevated">
+                            {date}
+                          </div>
+                          {groups[date].map((img: any) => (
+                            <button
+                              key={img.id}
+                              onClick={() => {
+                                setPreviewImage(img);
+                                setHistoryOpen(false);
+                              }}
+                              className="w-full flex items-center gap-3 px-4 py-2 hover:bg-surface-card transition-colors text-left group"
+                            >
+                              <div className="w-10 h-10 rounded-lg bg-surface overflow-hidden shrink-0 border border-surface-border">
+                                {img.status === "pending" ? (
+                                  <div className="w-full h-full flex items-center justify-center">
+                                    <Spinner className="w-4 h-4 animate-spin text-brand/40" />
+                                  </div>
+                                ) : img.status === "failed" ? (
+                                  <div className="w-full h-full flex items-center justify-center">
+                                    <AlertCircle className="w-4 h-4 text-yellow-500/50" />
+                                  </div>
+                                ) : (
+                                  <img
+                                    src={resolveImageUrl(img.image_url)}
+                                    alt=""
+                                    className="w-full h-full object-cover"
+                                  />
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm text-text-primary truncate">{img.prompt}</p>
+                                <p className="text-[11px] text-text-tertiary">
+                                  {new Date(img.created_at).toLocaleTimeString("zh-CN", {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })}
+                                  {img.size && ` · ${img.size}`}
+                                </p>
+                              </div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDelete(img.id);
+                                }}
+                                className="opacity-0 group-hover:opacity-100 p-1.5 rounded-md hover:bg-red-500/10 text-text-tertiary hover:text-red-500 transition-all"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </button>
+                          ))}
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </header>
 
-      {/* 主工作区 */}
-      <div className="flex-1 overflow-auto bg-[rgb(238,234,245)] px-6 py-8 md:px-10 md:py-10 dark:bg-surface">
-        <div className="mx-auto max-w-6xl space-y-8">
-          {!result ? (
-            <div className="space-y-8">
-              {/* 中央大画布上传区 */}
-              {!sourceUrl ? (
-                <div
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onDrop={handleDrop}
-                  onClick={() => fileInputRef.current?.click()}
-                  className={cn(
-                    "group relative mx-auto flex min-h-[560px] w-full max-w-5xl cursor-pointer flex-col items-center justify-center overflow-hidden rounded-[28px] border border-white/75 bg-white/86 px-8 text-center shadow-[0_24px_70px_rgba(80,64,120,0.10),0_4px_14px_rgba(80,64,120,0.05)] backdrop-blur transition-all duration-300 dark:border-surface-border dark:bg-surface-card",
-                    dragOver && "scale-[1.01] border-brand/40 shadow-[0_28px_80px_rgba(59,130,246,0.16)]"
-                  )}
-                >
-                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.85),rgba(255,255,255,0)_52%)] dark:hidden" />
-                  <div className="relative mb-7 flex h-32 w-32 items-center justify-center rounded-[34px] border border-brand/15 bg-brand-muted shadow-[0_18px_44px_rgba(59,130,246,0.12)] transition-transform duration-300 group-hover:-translate-y-1">
-                    <TabIcon className="h-12 w-12 text-brand" />
-                  </div>
-
-                  <p className="relative text-2xl font-semibold tracking-tight text-text-primary">
-                    {config.uploadHint}
-                  </p>
-                  <p className="relative mt-3 max-w-md text-sm text-text-tertiary">
-                    支持 PNG、JPG、WebP 格式，单张不超过 20MB
-                  </p>
-
-                  <div className="relative mt-9 flex items-center gap-3">
-                    <span className="text-xs text-text-tertiary">或者</span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        useExample(examples[0].before);
-                      }}
-                      className="flex items-center gap-1.5 rounded-full border border-brand/20 bg-brand-muted px-5 py-2 text-xs font-medium text-brand transition-all duration-200 hover:-translate-y-0.5 hover:border-brand/30 hover:bg-brand/15"
-                    >
-                      <Wand2 className="h-3.5 w-3.5" />
-                      试用示例图片
-                    </button>
-                  </div>
-
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    className="hidden"
-                    onChange={handleFileSelect}
-                  />
-                </div>
-              ) : (
-                <div className="mx-auto max-w-5xl space-y-5">
-                  {/* 已选图片预览 / 编辑中加载动画 */}
-                  {isEditing ? (
-                    <div className="flex min-h-[420px] flex-col items-center justify-center gap-6 overflow-hidden rounded-[28px] border border-white/75 bg-white/88 py-20 shadow-[0_24px_70px_rgba(80,64,120,0.10),0_4px_14px_rgba(80,64,120,0.05)] backdrop-blur dark:border-surface-border dark:bg-surface-card">
-                      <div className="relative h-20 w-20">
-                        <Loader2 className="h-20 w-20 animate-spin text-brand" />
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <div className="h-8 w-8 rounded-full bg-[rgb(238,234,245)] dark:bg-surface" />
+      {editMode === "remove-bg" ? (
+        <div className="flex h-full flex-col bg-surface-elevated text-text-primary dark:bg-surface">
+          <div className="flex-1 overflow-auto px-6 py-6 md:px-10 md:py-8">
+            <div className="mx-auto flex h-full max-w-6xl flex-col">
+              {!result ? (
+                <div className="flex flex-1 flex-col items-center justify-center gap-6">
+                  {/* 上传区 - 大白框（黄框区域）内部虚线上传触发区 */}
+                  {!sourceUrl ? (
+                    <div className="flex flex-1 flex-col items-center justify-center w-full">
+                      <div
+                        onDragOver={handleDragOver}
+                        onDragLeave={handleDragLeave}
+                        onDrop={handleDrop}
+                        onClick={() => fileInputRef.current?.click()}
+                        className="group mx-auto flex w-full h-full max-h-[70vh] min-h-[400px] cursor-pointer flex-col items-center justify-center rounded-2xl border border-gray-200 bg-white p-6 shadow-sm transition-all duration-200 hover:border-purple-300 dark:border-surface-border dark:bg-surface-card"
+                      >
+                        <div
+                          className={cn(
+                            "flex w-full flex-1 flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-300 bg-transparent py-20 text-center transition-all duration-200 hover:border-purple-400 hover:bg-purple-50/50 dark:border-gray-600 dark:hover:border-purple-500 dark:hover:bg-purple-500/5",
+                            dragOver && "border-purple-500 bg-purple-50/50 dark:border-purple-400 dark:bg-purple-500/5"
+                          )}
+                        >
+                          <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-purple-50 dark:bg-purple-500/10">
+                            <ImagePlus className="h-8 w-8 text-purple-500 dark:text-purple-400" />
+                          </div>
+                          <p className="text-base font-medium text-gray-800 dark:text-text-primary">
+                            单击或拖动图片至此处
+                          </p>
+                          <p className="mt-2 text-xs text-gray-500 dark:text-text-tertiary">
+                            每次使用扣除 <span className="text-purple-500 font-medium">3</span> 高级积分
+                          </p>
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="image/png,image/jpeg,image/webp"
+                            className="hidden"
+                            onChange={handleFileSelect}
+                          />
                         </div>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-base font-semibold text-text-primary">AI 正在处理</p>
-                        <p className="mt-1 text-sm text-text-tertiary">
-                          {editMode === "upscale" ? "正在增强画质，可能需要 30 秒到 2 分钟..." : "正在编辑图片，请稍候..."}
-                        </p>
                       </div>
                     </div>
                   ) : (
-                    <div className="overflow-hidden rounded-[28px] border border-white/75 bg-white/88 p-3 shadow-[0_24px_70px_rgba(80,64,120,0.10),0_4px_14px_rgba(80,64,120,0.05)] backdrop-blur dark:border-surface-border dark:bg-surface-card">
-                      <img src={sourceUrl} alt="源图" className="h-auto max-h-[520px] w-full rounded-2xl object-contain bg-surface-elevated" />
-                    </div>
-                  )}
-
-                  {/* 文字移除/替换背景 的 prompt 输入框 */}
-                  {needsPrompt && (
-                    <div className="rounded-2xl border border-white/75 bg-white/88 p-4 shadow-[0_10px_28px_rgba(80,64,120,0.06)] backdrop-blur dark:border-surface-border dark:bg-surface-card">
-                      <label className="mb-2 block text-xs font-medium text-text-secondary">
-                        {config.promptLabel}
-                      </label>
-                      <textarea
-                        value={replacePrompt}
-                        onChange={(e) => setReplacePrompt(e.target.value)}
-                        placeholder={config.promptPlaceholder}
-                        disabled={isEditing}
-                        className="h-24 w-full resize-none rounded-xl border border-surface-border bg-surface-elevated p-3 text-sm leading-relaxed text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-brand/20"
-                      />
-                    </div>
-                  )}
-
-                  {/* 确认按钮 */}
-                  <div className="flex justify-center">
-                    <button
-                      onClick={handleEdit}
-                      disabled={isEditing || (needsPrompt && !replacePrompt.trim())}
-                      className={cn(
-                        "flex items-center justify-center gap-2 rounded-full bg-brand px-9 py-3 text-sm font-semibold text-white shadow-[0_8px_20px_rgba(59,130,246,0.24)] transition-all duration-200",
-                        isEditing || (needsPrompt && !replacePrompt.trim())
-                          ? "cursor-not-allowed opacity-50"
-                          : "hover:-translate-y-0.5 hover:bg-brand-hover hover:shadow-[0_12px_28px_rgba(59,130,246,0.28)]"
-                      )}
-                    >
+                    <div className="flex flex-1 flex-col items-center justify-center gap-6 py-8 w-full">
                       {isEditing ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          处理中...
-                        </>
+                        <div className="flex h-full max-h-[70vh] min-h-[400px] w-full flex-col items-center justify-center gap-5 rounded-2xl border border-gray-200 bg-white px-10 py-16 dark:border-surface-border dark:bg-surface-card">
+                          <Spinner className="h-12 w-12 animate-spin text-purple-500" />
+                          <div className="text-center">
+                            <p className="text-base font-semibold text-gray-800 dark:text-text-primary">AI 正在处理</p>
+                            <p className="mt-1 text-sm text-gray-400 dark:text-text-tertiary">正在移除背景，请稍候...</p>
+                          </div>
+                        </div>
                       ) : (
-                        <>
-                          <TabIcon className="h-4 w-4" />
-                          {config.buttonLabel}
-                        </>
+                        <div className="flex min-h-[400px] w-full items-center justify-center overflow-hidden rounded-2xl border border-gray-200 bg-white p-3 shadow-sm dark:border-surface-border dark:bg-surface-card">
+                          <img
+                            src={sourceUrl}
+                            alt="源图"
+                            className="max-h-[60vh] rounded-xl object-contain"
+                          />
+                        </div>
                       )}
+                      {!isEditing && (
+                        <button
+                          onClick={handleEdit}
+                          className="flex items-center gap-2 rounded-lg bg-purple-500 px-8 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-purple-600 dark:bg-purple-600 dark:hover:bg-purple-500"
+                        >
+                          <Sparkles className="h-4 w-4" />
+                          确认
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 底部示例区 - 在白框外部 */}
+                  {!sourceUrl && !isEditing && (
+                    <div className="w-full shrink-0">
+                      <div className="group/video mx-auto w-full max-w-[560px] overflow-hidden rounded-[22px] border border-gray-200 bg-white shadow-sm dark:border-surface-border dark:bg-surface-card">
+                        {/* 图片区域 */}
+                        <div className="relative h-[210px] overflow-hidden p-5">
+                          {/* 默认：左右双图对比 */}
+                          <div className="flex items-center gap-4 transition-all duration-500 ease-out group-hover/video:-translate-y-2 group-hover/video:scale-[0.94] group-hover/video:opacity-0">
+                            <div className="flex-1 text-center">
+                              <img
+                                src={examples[0].before}
+                                alt="原图"
+                                className="h-40 w-full rounded-2xl object-cover bg-surface-elevated"
+                              />
+                              <div className="mt-2 text-xs font-medium text-text-tertiary">原图</div>
+                            </div>
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-purple-500 text-white shadow-[0_8px_18px_rgba(59,130,246,0.22)]">
+                              <ArrowRight className="h-5 w-5" />
+                            </div>
+                            <div className="flex-1 text-center">
+                              <div className="flex h-40 w-full items-center justify-center rounded-2xl bg-[linear-gradient(45deg,#f0f0f0_25%,transparent_25%,transparent_75%,#f0f0f0_75%),linear-gradient(45deg,#f0f0f0_25%,transparent_25%,transparent_75%,#f0f0f0_75%)] bg-[length:16px_16px] bg-[position:0_0,8px_8px] dark:bg-surface-elevated">
+                                <img
+                                  src={examples[0].after}
+                                  alt="处理后"
+                                  className="h-full w-full rounded-2xl object-contain"
+                                />
+                              </div>
+                              <div className="mt-2 text-xs font-medium text-purple-500">去背后</div>
+                            </div>
+                          </div>
+                          {/* 悬浮：BeforeAfterSlider */}
+                          <div className="pointer-events-none absolute inset-5 translate-y-4 scale-[0.98] overflow-hidden rounded-2xl border border-surface-border bg-surface-card opacity-0 shadow-[0_18px_42px_rgba(80,64,120,0.16)] transition-all duration-500 ease-out group-hover/video:translate-y-0 group-hover/video:scale-100 group-hover/video:opacity-100 group-hover/video:pointer-events-auto">
+                            <BeforeAfterSlider
+                              beforeImage={examples[0].before}
+                              afterImage={examples[0].after}
+                              beforeLabel="原图"
+                              afterLabel="去背后"
+                              className="h-full [&>*:first-child]:!aspect-auto [&>*:first-child]:!h-full border-0 rounded-none"
+                            />
+                          </div>
+                        </div>
+                        {/* 标签 + 按钮 */}
+                        <div className="flex items-center justify-between border-t border-surface-border/70 bg-surface-card/70 px-5 py-3">
+                          <span className="text-sm font-medium text-text-secondary">{examples[0].label}</span>
+                          <button
+                            onClick={() => useExample(examples[0].before)}
+                            className="flex items-center gap-1.5 rounded-full border border-purple-500/20 bg-purple-50 px-4 py-1.5 text-xs font-medium text-purple-600 transition-all duration-200 hover:border-purple-500/30 hover:bg-purple-100 dark:border-purple-500/20 dark:bg-purple-500/10 dark:text-purple-400 dark:hover:bg-purple-500/15"
+                          >
+                            <Wand2 className="h-3.5 w-3.5" />
+                            试用示例图片
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* 结果展示 */
+                <div className="mx-auto w-full max-w-5xl space-y-6 py-8">
+                  <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white p-3 shadow-sm dark:border-surface-border dark:bg-surface-card">
+                    <BeforeAfterSlider
+                      beforeImage={sourceUrl}
+                      afterImage={result}
+                      beforeLabel="原始"
+                      afterLabel={config.resultLabel}
+                    />
+                  </div>
+                  <div className="flex items-center justify-center gap-3">
+                    <button
+                      onClick={handleDownload}
+                      className="flex items-center gap-2 rounded-lg bg-purple-500 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-purple-600 dark:bg-purple-600 dark:hover:bg-purple-500"
+                    >
+                      <Download className="h-4 w-4" />
+                      下载图片
+                    </button>
+                    <button
+                      onClick={handleReset}
+                      className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-6 py-2.5 text-sm font-medium text-gray-600 shadow-sm transition-all hover:text-gray-900 dark:border-surface-border dark:bg-surface-card dark:text-text-secondary dark:hover:text-text-primary"
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                      重新上传
                     </button>
                   </div>
                 </div>
               )}
-
-              {/* 底部示例区域 */}
-              <div className="pt-2">
-                <div className="mb-5 text-center">
-                  <h3 className="text-sm font-semibold text-text-primary">
-                    {config.exampleTitle}
-                  </h3>
-                  <p className="mt-1 text-xs text-text-tertiary">
-                    {config.exampleSubtitle}
-                  </p>
-                </div>
-                <div className="flex justify-center">
-                  {examples.map((ex) => (
-                    <div
-                      key={ex.label}
-                      className="group/video w-full max-w-[520px] overflow-hidden rounded-[22px] border border-white/75 bg-white/88 shadow-[0_18px_48px_rgba(80,64,120,0.10),0_3px_10px_rgba(80,64,120,0.04)] backdrop-blur transition-all duration-300 hover:-translate-y-1 hover:border-brand/30 hover:shadow-[0_26px_70px_rgba(80,64,120,0.16),0_0_0_1px_var(--brand-muted)] dark:border-surface-border dark:bg-surface-card"
-                    >
-                      {/* Before → After 悬浮视频式预览 */}
-                      <div className="relative h-[210px] overflow-hidden p-5">
-                        {/* 默认：左右双图对比 */}
-                        <div className="flex items-center gap-4 transition-all duration-500 ease-out group-hover/video:-translate-y-2 group-hover/video:scale-[0.94] group-hover/video:opacity-0">
-                          {/* 原图 */}
-                          <div className="flex-1 text-center">
-                            <img
-                              src={ex.before}
-                              alt="原图"
-                              className="h-40 w-full rounded-2xl object-cover bg-surface-elevated"
-                            />
-                            <div className="mt-2 text-xs font-medium text-text-tertiary">原图</div>
-                          </div>
-                          {/* 箭头 */}
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand text-white shadow-[0_8px_18px_rgba(59,130,246,0.22)]">
-                            <ArrowRight className="h-5 w-5" />
-                          </div>
-                          {/* 处理后 */}
-                          <div className="flex-1 text-center">
-                            <div className="flex h-40 w-full items-center justify-center rounded-2xl bg-[linear-gradient(45deg,hsl(var(--surface-elevated))_25%,transparent_25%,transparent_75%,hsl(var(--surface-elevated))_75%),linear-gradient(45deg,hsl(var(--surface-elevated))_25%,transparent_25%,transparent_75%,hsl(var(--surface-elevated))_75%)] bg-[length:18px_18px] bg-[position:0_0,9px_9px]">
-                              <img
-                                src={ex.after}
-                                alt="处理后"
-                                className="h-full w-full rounded-2xl object-contain"
-                              />
-                            </div>
-                            <div className="mt-2 text-xs font-medium text-brand">
-                              {config.afterLabel}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Hover：视频展示效果 */}
-                        <div className="pointer-events-none absolute inset-5 translate-y-4 scale-[0.98] overflow-hidden rounded-2xl border border-surface-border bg-surface-card opacity-0 shadow-[0_18px_42px_rgba(80,64,120,0.16)] transition-all duration-500 ease-out group-hover/video:translate-y-0 group-hover/video:scale-100 group-hover/video:opacity-100">
-                          <div className="absolute inset-0 bg-[linear-gradient(110deg,transparent_0%,transparent_34%,rgba(255,255,255,0.58)_50%,transparent_66%,transparent_100%)] bg-[length:220%_100%] opacity-0 transition-opacity duration-200 group-hover/video:animate-[gradient-shift_1.2s_ease-in-out_infinite] group-hover/video:opacity-100 dark:opacity-0" />
-                          <div className="flex h-full">
-                            <div className="relative h-full w-[45%] overflow-hidden">
-                              <img src={ex.before} alt="原图预览" className="h-full w-full object-cover" />
-                              <div className="absolute inset-y-0 right-0 w-14 bg-gradient-to-r from-transparent to-surface-card" />
-                              <div className="absolute left-3 top-3 rounded-full bg-surface-card/90 px-2.5 py-1 text-[11px] font-medium text-text-secondary shadow-sm backdrop-blur">
-                                原图
-                              </div>
-                            </div>
-                            <div className="relative flex h-full flex-1 items-center justify-center bg-[linear-gradient(45deg,hsl(var(--surface-elevated))_25%,transparent_25%,transparent_75%,hsl(var(--surface-elevated))_75%),linear-gradient(45deg,hsl(var(--surface-elevated))_25%,transparent_25%,transparent_75%,hsl(var(--surface-elevated))_75%)] bg-[length:18px_18px] bg-[position:0_0,9px_9px]">
-                              <img src={ex.after} alt="去背预览" className="h-[92%] w-[92%] object-contain transition-transform duration-700 ease-out group-hover/video:scale-105" />
-                              <div className="absolute right-3 top-3 rounded-full bg-brand px-2.5 py-1 text-[11px] font-medium text-white shadow-[0_8px_18px_rgba(59,130,246,0.22)]">
-                                {config.afterLabel}
-                              </div>
-                              <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-surface-border bg-surface-card/90 px-3 py-1.5 text-[11px] font-medium text-text-secondary shadow-sm backdrop-blur">
-                                <Sparkles className="h-3 w-3 text-brand" />
-                                悬浮预览 AI 处理效果
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      {/* 标签 + 试用按钮 */}
-                      <div className="flex items-center justify-between border-t border-surface-border/70 bg-surface-card/70 px-5 py-3">
-                        <span className="text-sm font-medium text-text-secondary">{ex.label}</span>
-                        <button
-                          onClick={() => useExample(ex.before)}
-                          className="flex items-center gap-1.5 rounded-full border border-brand/20 bg-brand-muted px-4 py-1.5 text-xs font-medium text-brand transition-all duration-200 hover:border-brand/30 hover:bg-brand/15"
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="flex h-full flex-col bg-surface-elevated text-text-primary dark:bg-surface">
+          <div className="flex-1 overflow-auto px-6 py-6 md:px-10 md:py-8">
+            <div className="mx-auto flex h-full max-w-6xl flex-col">
+              {!result ? (
+                <div className="flex flex-1 flex-col items-center justify-center gap-6">
+                  {/* 上传区 */}
+                  {!sourceUrl ? (
+                    <div className="flex flex-1 flex-col items-center justify-center w-full">
+                      <div
+                        onDragOver={handleDragOver}
+                        onDragLeave={handleDragLeave}
+                        onDrop={handleDrop}
+                        onClick={() => fileInputRef.current?.click()}
+                        className="group mx-auto flex w-full h-full max-h-[70vh] min-h-[400px] cursor-pointer flex-col items-center justify-center rounded-2xl border border-gray-200 bg-white p-6 shadow-sm transition-all duration-200 hover:border-purple-300 dark:border-surface-border dark:bg-surface-card"
+                      >
+                        <div
+                          className={cn(
+                            "flex w-full flex-1 flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-300 bg-transparent py-20 text-center transition-all duration-200 hover:border-purple-400 hover:bg-purple-50/50 dark:border-gray-600 dark:hover:border-purple-500 dark:hover:bg-purple-500/5",
+                            dragOver && "border-purple-500 bg-purple-50/50 dark:border-purple-400 dark:bg-purple-500/5"
+                          )}
                         >
-                          <Wand2 className="h-3.5 w-3.5" />
-                          试用示例图片
-                        </button>
+                          <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-purple-50 dark:bg-purple-500/10">
+                            <TabIcon className="h-8 w-8 text-purple-500 dark:text-purple-400" />
+                          </div>
+                          <p className="text-base font-medium text-gray-800 dark:text-text-primary">
+                            单击或拖动图片至此处
+                          </p>
+                          <p className="mt-2 text-xs text-gray-500 dark:text-text-tertiary">
+                            支持 PNG、JPG、WebP 格式，单张不超过 20MB
+                          </p>
+                          <div className="mt-4 flex items-center gap-3">
+                            <span className="text-xs text-text-tertiary">或者</span>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                useExample(examples[0].before);
+                              }}
+                              className="flex items-center gap-1.5 rounded-full border border-purple-500/20 bg-purple-50 px-4 py-1.5 text-xs font-medium text-purple-600 transition-all duration-200 hover:bg-purple-100 dark:border-purple-500/20 dark:bg-purple-500/10 dark:text-purple-400"
+                            >
+                              <Wand2 className="h-3.5 w-3.5" />
+                              试用示例图片
+                            </button>
+                          </div>
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="image/png,image/jpeg,image/webp"
+                            className="hidden"
+                            onChange={handleFileSelect}
+                          />
+                        </div>
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          ) : (
-            /* 结果展示 */
-            <div className="mx-auto max-w-5xl space-y-6">
-              {/* Before/After 滑动对比 */}
-              <div className="overflow-hidden rounded-[28px] border border-white/75 bg-white/88 p-3 shadow-[0_24px_70px_rgba(80,64,120,0.10),0_4px_14px_rgba(80,64,120,0.05)] backdrop-blur dark:border-surface-border dark:bg-surface-card">
-                <BeforeAfterSlider
-                  beforeImage={sourceUrl}
-                  afterImage={result}
-                  beforeLabel="原始"
-                  afterLabel={config.resultLabel}
-                />
-              </div>
+                  ) : (
+                    <div className="flex flex-1 flex-col items-center justify-center gap-6 py-8 w-full">
+                      {isEditing ? (
+                        <div className="flex h-full max-h-[70vh] min-h-[400px] w-full flex-col items-center justify-center gap-5 rounded-2xl border border-gray-200 bg-white px-10 py-16 dark:border-surface-border dark:bg-surface-card">
+                          <Spinner className="h-12 w-12 animate-spin text-purple-500" />
+                          <div className="text-center">
+                            <p className="text-base font-semibold text-gray-800 dark:text-text-primary">AI 正在处理</p>
+                            <p className="mt-1 text-sm text-gray-400 dark:text-text-tertiary">
+                              {editMode === "upscale" ? "正在增强画质，可能需要 30 秒到 2 分钟..." : "正在编辑图片，请稍候..."}
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex min-h-[400px] w-full items-center justify-center overflow-hidden rounded-2xl border border-gray-200 bg-white p-3 shadow-sm dark:border-surface-border dark:bg-surface-card">
+                          <img src={sourceUrl} alt="源图" className="max-h-[60vh] rounded-xl object-contain" />
+                        </div>
+                      )}
 
-              {/* 操作按钮 */}
-              <div className="flex items-center justify-center gap-3">
-                <button
-                  onClick={handleDownload}
-                  className="flex items-center gap-2 rounded-full bg-brand px-6 py-2.5 text-sm font-semibold text-white shadow-[0_8px_20px_rgba(59,130,246,0.24)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-brand-hover"
-                >
-                  <Download className="h-4 w-4" />
-                  下载图片
-                </button>
-                <button
-                  onClick={handleReset}
-                  className="flex items-center gap-2 rounded-full border border-white/75 bg-white/88 px-6 py-2.5 text-sm font-medium text-text-secondary shadow-[0_6px_18px_rgba(80,64,120,0.06)] transition-all duration-200 hover:text-text-primary dark:border-surface-border dark:bg-surface-card"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                  重新上传
-                </button>
-              </div>
+                      {/* prompt 输入框 */}
+                      {needsPrompt && (
+                        <div className="w-full max-w-lg rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-surface-border dark:bg-surface-card">
+                          <label className="mb-2 block text-xs font-medium text-text-secondary">
+                            {config.promptLabel}
+                          </label>
+                          <textarea
+                            value={replacePrompt}
+                            onChange={(e) => setReplacePrompt(e.target.value)}
+                            placeholder={config.promptPlaceholder}
+                            disabled={isEditing}
+                            className="h-20 w-full resize-none rounded-lg border border-surface-border bg-surface-elevated p-3 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-purple-500/20"
+                          />
+                        </div>
+                      )}
+
+                      {!isEditing && (
+                        <button
+                          onClick={handleEdit}
+                          disabled={needsPrompt && !replacePrompt.trim()}
+                          className={cn(
+                            "flex items-center gap-2 rounded-lg bg-purple-500 px-8 py-2.5 text-sm font-semibold text-white shadow-sm transition-all",
+                            needsPrompt && !replacePrompt.trim()
+                              ? "opacity-50 cursor-not-allowed"
+                              : "hover:bg-purple-600 dark:bg-purple-600 dark:hover:bg-purple-500"
+                          )}
+                        >
+                          <Sparkles className="h-4 w-4" />
+                          {config.buttonLabel}
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 底部示例区 */}
+                  {!sourceUrl && !isEditing && (
+                    <div className="w-full shrink-0">
+                      {examples.map((ex) => (
+                        <div
+                          key={ex.label}
+                          className="group/video mx-auto w-full max-w-[560px] overflow-hidden rounded-[22px] border border-gray-200 bg-white shadow-sm dark:border-surface-border dark:bg-surface-card"
+                        >
+                          <div className="relative h-[210px] overflow-hidden p-5">
+                            {/* 默认：左右双图对比 */}
+                            <div className="flex items-center gap-4 transition-all duration-500 ease-out group-hover/video:-translate-y-2 group-hover/video:scale-[0.94] group-hover/video:opacity-0">
+                              <div className="flex-1 text-center">
+                                <img
+                                  src={ex.before}
+                                  alt="原图"
+                                  className="h-40 w-full rounded-2xl object-cover bg-surface-elevated"
+                                />
+                                <div className="mt-2 text-xs font-medium text-text-tertiary">原图</div>
+                              </div>
+                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-purple-500 text-white shadow-[0_8px_18px_rgba(59,130,246,0.22)]">
+                                <ArrowRight className="h-5 w-5" />
+                              </div>
+                              <div className="flex-1 text-center">
+                                <div className="flex h-40 w-full items-center justify-center rounded-2xl bg-[linear-gradient(45deg,#f0f0f0_25%,transparent_25%,transparent_75%,#f0f0f0_75%),linear-gradient(45deg,#f0f0f0_25%,transparent_25%,transparent_75%,#f0f0f0_75%)] bg-[length:16px_16px] bg-[position:0_0,8px_8px] dark:bg-surface-elevated">
+                                  <img
+                                    src={ex.after}
+                                    alt="处理后"
+                                    className="h-full w-full rounded-2xl object-contain"
+                                  />
+                                </div>
+                                <div className="mt-2 text-xs font-medium text-purple-500">{config.afterLabel}</div>
+                              </div>
+                            </div>
+                            {/* 悬浮：BeforeAfterSlider */}
+                            <div className="pointer-events-none absolute inset-5 translate-y-4 scale-[0.98] overflow-hidden rounded-2xl border border-surface-border bg-surface-card opacity-0 shadow-[0_18px_42px_rgba(80,64,120,0.16)] transition-all duration-500 ease-out group-hover/video:translate-y-0 group-hover/video:scale-100 group-hover/video:opacity-100 group-hover/video:pointer-events-auto">
+                              <BeforeAfterSlider
+                                beforeImage={ex.before}
+                                afterImage={ex.after}
+                                beforeLabel="原图"
+                                afterLabel={config.afterLabel}
+                                className="h-full [&>*:first-child]:!aspect-auto [&>*:first-child]:!h-full border-0 rounded-none"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between border-t border-surface-border/70 bg-surface-card/70 px-5 py-3">
+                            <span className="text-sm font-medium text-text-secondary">{ex.label}</span>
+                            <button
+                              onClick={() => useExample(ex.before)}
+                              className="flex items-center gap-1.5 rounded-full border border-purple-500/20 bg-purple-50 px-4 py-1.5 text-xs font-medium text-purple-600 transition-all duration-200 hover:bg-purple-100 dark:border-purple-500/20 dark:bg-purple-500/10 dark:text-purple-400"
+                            >
+                              <Wand2 className="h-3.5 w-3.5" />
+                              试用示例图片
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* 结果展示 */
+                <div className="mx-auto w-full max-w-5xl space-y-6 py-8">
+                  <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white p-3 shadow-sm dark:border-surface-border dark:bg-surface-card">
+                    <BeforeAfterSlider
+                      beforeImage={sourceUrl}
+                      afterImage={result}
+                      beforeLabel="原始"
+                      afterLabel={config.resultLabel}
+                    />
+                  </div>
+                  <div className="flex items-center justify-center gap-3">
+                    <button
+                      onClick={handleDownload}
+                      className="flex items-center gap-2 rounded-lg bg-purple-500 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-purple-600 dark:bg-purple-600 dark:hover:bg-purple-500"
+                    >
+                      <Download className="h-4 w-4" />
+                      下载图片
+                    </button>
+                    <button
+                      onClick={handleReset}
+                      className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-6 py-2.5 text-sm font-medium text-gray-600 shadow-sm transition-all hover:text-gray-900 dark:border-surface-border dark:bg-surface-card dark:text-text-secondary dark:hover:text-text-primary"
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                      重新上传
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
-      </div>
-    </div>
+      )}
+    </>
   );
 }

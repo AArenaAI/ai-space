@@ -36,12 +36,8 @@ export default function LandingHeader() {
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-brand/10 border border-brand/20 flex items-center justify-center">
-              <span className="text-sm font-bold text-brand">AI</span>
-            </div>
-            <span className="text-lg font-semibold text-text-primary tracking-tight">
-              AI Space
-            </span>
+            <img src="/logo.png" alt="AI Space" className="w-8 h-8 rounded-xl object-cover" />
+            <img src="/title.png" alt="AI Space" className="h-6 w-auto object-contain" />
           </Link>
 
           {/* Desktop Nav */}

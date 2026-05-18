@@ -1,63 +1,51 @@
 package services
 
 import (
-	"bufio"
 	"encoding/json"
 	"io"
-	"strings"
 )
 
 // OpenAIResponsesDecoder 解码 OpenAI Responses API 的 SSE 流。
 type OpenAIResponsesDecoder struct {
-	scanner *bufio.Scanner
+	parser  *SSEParser
 	reader  io.ReadCloser
 }
 
 // NewOpenAIResponsesDecoder 创建 OpenAI Responses 流解码器。
 func NewOpenAIResponsesDecoder(body io.ReadCloser) *OpenAIResponsesDecoder {
 	return &OpenAIResponsesDecoder{
-		scanner: bufio.NewScanner(body),
+		parser:  NewSSEParser(body),
 		reader:  body,
 	}
 }
 
 // Next 返回下一个解码后的 AIStreamEvent，io.EOF 表示流结束。
 func (d *OpenAIResponsesDecoder) Next() (*AIStreamEvent, error) {
-	var eventName string
-	for d.scanner.Scan() {
-		line := d.scanner.Text()
-
-		// 空行表示事件结束
-		if line == "" {
-			continue
-		}
-
-		// 解析 event 行: "event: xxx"
-		if strings.HasPrefix(line, "event: ") {
-			eventName = strings.TrimSpace(line[7:])
-			continue
-		}
-
-		// 解析 data 行: "data: {...}"
-		if strings.HasPrefix(line, "data: ") {
-			data := line[6:]
-			if data == "[DONE]" {
+	for {
+		event, err := d.parser.Next()
+		if err != nil {
+			if err == io.EOF {
 				return &AIStreamEvent{Type: EventDone}, io.EOF
 			}
-
-			var raw map[string]interface{}
-			if err := json.Unmarshal([]byte(data), &raw); err != nil {
-				return nil, err
-			}
-
-			return d.parseEvent(eventName, raw), nil
+			return nil, err
 		}
-	}
 
-	if err := d.scanner.Err(); err != nil {
-		return nil, err
+		data := string(event.Data)
+		if data == "" {
+			continue
+		}
+
+		if data == "[DONE]" {
+			return &AIStreamEvent{Type: EventDone}, io.EOF
+		}
+
+		var raw map[string]interface{}
+		if err := json.Unmarshal(event.Data, &raw); err != nil {
+			return nil, err
+		}
+
+		return d.parseEvent(event.Event, raw), nil
 	}
-	return &AIStreamEvent{Type: EventDone}, io.EOF
 }
 
 func (d *OpenAIResponsesDecoder) parseEvent(name string, raw map[string]interface{}) *AIStreamEvent {
@@ -75,7 +63,9 @@ func (d *OpenAIResponsesDecoder) parseEvent(name string, raw map[string]interfac
 	case "response.web_search_call.completed":
 		return &AIStreamEvent{Type: EventSearchDone, Delta: "搜索完成"}
 	case "response.completed":
-		// usage 信息在 response.completed 事件中
+		// usage 信息在 response.completed 事件中。返回 EventUsage 后，
+		// goroutine 会继续调用 Next()，下一次 EOF 时返回 EventDone + io.EOF，
+		// 主循环正常发送 [DONE]，不会误判为 stream_incomplete。
 		if resp, ok := raw["response"].(map[string]interface{}); ok {
 			if usage, ok := resp["usage"].(map[string]interface{}); ok {
 				tu := &TokenUsage{}
@@ -91,6 +81,33 @@ func (d *OpenAIResponsesDecoder) parseEvent(name string, raw map[string]interfac
 				return &AIStreamEvent{Type: EventUsage, Usage: tu}
 			}
 		}
+		return &AIStreamEvent{Type: EventDone}
+	case "response.incomplete":
+		msg := "上游响应未完成"
+		code := "response_incomplete"
+		if resp, ok := raw["response"].(map[string]interface{}); ok {
+			if details, ok := resp["incomplete_details"].(map[string]interface{}); ok {
+				if reason, ok := details["reason"].(string); ok && reason != "" {
+					msg = "上游响应未完成: " + reason
+					code = reason
+				}
+			}
+		}
+		return &AIStreamEvent{Type: EventError, Code: code, Message: msg}
+	case "response.failed":
+		msg := "上游响应失败"
+		code := "response_failed"
+		if resp, ok := raw["response"].(map[string]interface{}); ok {
+			if errObj, ok := resp["error"].(map[string]interface{}); ok {
+				if m, ok := errObj["message"].(string); ok && m != "" {
+					msg = m
+				}
+				if c, ok := errObj["code"].(string); ok && c != "" {
+					code = c
+				}
+			}
+		}
+		return &AIStreamEvent{Type: EventError, Code: code, Message: msg}
 	case "error":
 		msg := "unknown error"
 		if m, ok := raw["message"].(string); ok {

@@ -40,13 +40,13 @@ func NewImageService(cfg *config.Config) *ImageService {
 // 返回 (OpenAI 直链 URL, base64 数据, 错误)
 func (s *ImageService) RemoveBackground(ctx context.Context, size string, imageFilePath string) (imageURL string, b64Data string, err error) {
 	prompt := "Remove the background of this image. Make the background transparent. Keep only the main subject."
-	return s.EditImage(ctx, prompt, size, imageFilePath)
+	return s.EditImage(ctx, prompt, size, []string{imageFilePath})
 }
 
 // GenerateEditImage 通用图片编辑 (基于参考图修改，全适配 gpt-image-2)
 // 返回 (OpenAI 直链 URL, base64 数据, 错误)
 func (s *ImageService) GenerateEditImage(ctx context.Context, prompt string, size string, imageFilePath string) (imageURL string, b64Data string, err error) {
-	return s.EditImage(ctx, prompt, size, imageFilePath)
+	return s.EditImage(ctx, prompt, size, []string{imageFilePath})
 }
 
 type DALLEImageRequest struct {
@@ -65,8 +65,8 @@ type DALLEImageResponse struct {
 }
 
 // EditImage 基于参考图编辑生成图片，返回 (OpenAI 直链 URL, base64 数据, 错误)
-// 使用 JSON + base64 data URL 格式调用 /v1/images/edits，兼容中转代理的 images[] 格式
-func (s *ImageService) EditImage(ctx context.Context, prompt string, size string, referenceImagePath string) (imageURL string, b64Data string, err error) {
+// 支持单张或多张参考图，使用 JSON + base64 data URL 格式调用 /v1/images/edits
+func (s *ImageService) EditImage(ctx context.Context, prompt string, size string, referenceImagePaths []string) (imageURL string, b64Data string, err error) {
 	apiKey := s.cfg.ImageGenAPIKey
 	if apiKey == "" {
 		return "", "", fmt.Errorf("未配置 Image Generation API Key")
@@ -78,27 +78,33 @@ func (s *ImageService) EditImage(ctx context.Context, prompt string, size string
 	}
 
 	// 验证参考图文件
-	if referenceImagePath == "" {
+	if len(referenceImagePaths) == 0 {
 		return "", "", fmt.Errorf("未指定参考图文件路径")
 	}
-	imgData, err := os.ReadFile(referenceImagePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", "", fmt.Errorf("参考图文件不存在: %s", referenceImagePath)
+
+	var imagesPayload []map[string]string
+	for _, path := range referenceImagePaths {
+		imgData, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return "", "", fmt.Errorf("参考图文件不存在: %s", path)
+			}
+			return "", "", fmt.Errorf("读取参考图文件失败: %w", err)
 		}
-		return "", "", fmt.Errorf("读取参考图文件失败: %w", err)
-	}
 
-	// 检测 MIME 类型
-	mimeType := http.DetectContentType(imgData)
-	switch mimeType {
-	case "image/jpeg":
-	case "image/webp":
-	}
+		// 检测 MIME 类型
+		mimeType := http.DetectContentType(imgData)
+		switch mimeType {
+		case "image/jpeg", "image/png", "image/webp":
+		default:
+			mimeType = "image/png"
+		}
 
-	// 转为 base64 data URL
-	b64 := base64.StdEncoding.EncodeToString(imgData)
-	dataURL := fmt.Sprintf("data:%s;base64,%s", mimeType, b64)
+		// 转为 base64 data URL
+		b64 := base64.StdEncoding.EncodeToString(imgData)
+		dataURL := fmt.Sprintf("data:%s;base64,%s", mimeType, b64)
+		imagesPayload = append(imagesPayload, map[string]string{"image_url": dataURL})
+	}
 
 	baseURL := "https://api.openai.com"
 	if s.cfg.ImageGenBaseURL != "" {
@@ -116,9 +122,7 @@ func (s *ImageService) EditImage(ctx context.Context, prompt string, size string
 		"prompt": prompt,
 		"size":   size,
 		"n":      1,
-		"images": []map[string]string{
-			{"image_url": dataURL},
-		},
+		"images": imagesPayload,
 	}
 
 	jsonBody, err := json.Marshal(reqBody)

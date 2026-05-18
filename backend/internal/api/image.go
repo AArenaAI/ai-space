@@ -39,12 +39,13 @@ func NewImageHandler(db *gorm.DB, imageService *services.ImageService, cfg *conf
 
 // 图片生成请求
 type GenerateImageRequest struct {
-	Prompt            string `json:"prompt" binding:"required"`
-	Size              string `json:"size"`                // 兼容旧前端：直接传像素尺寸
-	AspectRatio       string `json:"aspect_ratio"`        // 纵横比：auto, 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9
-	Resolution        string `json:"resolution"`          // 分辨率：1K, 2K
-	Quality           string `json:"quality"`             // 质量：low, medium, high, auto（默认 medium）
-	ReferenceImageURL string `json:"reference_image_url"` // 参考图 URL（用于 image-to-image）
+	Prompt             string   `json:"prompt" binding:"required"`
+	Size               string   `json:"size"`                 // 兼容旧前端：直接传像素尺寸
+	AspectRatio        string   `json:"aspect_ratio"`         // 纵横比：auto, 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9
+	Resolution         string   `json:"resolution"`           // 分辨率：1K, 2K
+	Quality            string   `json:"quality"`              // 质量：low, medium, high, auto（默认 medium）
+	ReferenceImageURL  string   `json:"reference_image_url"`  // 兼容旧前端：单张参考图
+	ReferenceImageURLs []string `json:"reference_image_urls"` // 新前端：多张参考图
 }
 
 // roundTo16 将整数四舍五入到最接近的 16 的倍数（gpt-image-2 要求每边像素必须是 16 的倍数）
@@ -171,9 +172,9 @@ func resolveBaseURL(c *gin.Context, cfg *config.Config) string {
 	return scheme + "://" + host
 }
 
-// buildImageURL 构造图片访问 URL
+// buildImageURL 构造图片访问 URL（使用相对路径，前端自动补全 origin）
 func buildImageURL(baseURL, filename string) string {
-	return baseURL + "/api/images/file/" + filename
+	return "/api/images/file/" + filename
 }
 
 // saveBase64Image 将 base64 数据保存为本地图片文件，返回文件名
@@ -387,6 +388,31 @@ func saveBase64ToImages(b64Data string) (string, error) {
 	return path, nil
 }
 
+// resolveReferenceImagePath 将参考图 URL 解析为本地文件路径
+func (h *ImageHandler) resolveReferenceImagePath(url string) string {
+	if url == "" {
+		return ""
+	}
+	if strings.HasPrefix(url, "file_") {
+		var file models.File
+		if err := h.db.Where("public_id = ?", url).First(&file).Error; err == nil {
+			return file.StoragePath
+		}
+		return ""
+	}
+	parts := strings.Split(url, "/")
+	if len(parts) > 0 {
+		filename := parts[len(parts)-1]
+		if !strings.Contains(filename, "..") && !strings.Contains(filename, "/") {
+			refPath := filepath.Join(imagesDir, filename)
+			if _, statErr := os.Stat(refPath); statErr == nil {
+				return refPath
+			}
+		}
+	}
+	return ""
+}
+
 // GenerateImage 异步生成图片
 // 前端提交后立即返回 pending 状态，后端在 goroutine 中完成实际生成
 func (h *ImageHandler) GenerateImage(c *gin.Context) {
@@ -406,38 +432,32 @@ func (h *ImageHandler) GenerateImage(c *gin.Context) {
 		quality = "medium"
 	}
 
-	// 处理参考图：支持多种来源
-	var referenceImagePath string
-	if req.ReferenceImageURL != "" {
-		if strings.HasPrefix(req.ReferenceImageURL, "file_") {
-			// 方案 A: 从文件服务上传的图片（public_id 以 file_ 开头）
-			var file models.File
-			if err := h.db.Where("public_id = ?", req.ReferenceImageURL).First(&file).Error; err == nil {
-				referenceImagePath = file.StoragePath
-			}
-		} else {
-			// 方案 B: URL 格式 — 提取文件名，在 data/images/ 目录查找
-			parts := strings.Split(req.ReferenceImageURL, "/")
-			if len(parts) > 0 {
-				filename := parts[len(parts)-1]
-				if !strings.Contains(filename, "..") && !strings.Contains(filename, "/") {
-					refPath := filepath.Join(imagesDir, filename)
-					if _, statErr := os.Stat(refPath); statErr == nil {
-						referenceImagePath = refPath
-					}
-				}
+	// 处理参考图：支持单张兼容和多张新格式
+	var refImagePaths []string
+	var refImageURL string
+
+	if len(req.ReferenceImageURLs) > 0 {
+		for _, url := range req.ReferenceImageURLs {
+			if p := h.resolveReferenceImagePath(url); p != "" {
+				refImagePaths = append(refImagePaths, p)
 			}
 		}
+		refImageURL = strings.Join(req.ReferenceImageURLs, ",")
+	} else if req.ReferenceImageURL != "" {
+		if p := h.resolveReferenceImagePath(req.ReferenceImageURL); p != "" {
+			refImagePaths = append(refImagePaths, p)
+		}
+		refImageURL = req.ReferenceImageURL
 	}
 
 	// 创建记录
 	gen := &services.ImageGeneration{
-		UserID:            userID,
-		Prompt:            req.Prompt,
-		Size:              size,
-		Quality:           quality,
-		ReferenceImageURL: req.ReferenceImageURL,
-		Status:            "pending",
+		UserID:             userID,
+		Prompt:             req.Prompt,
+		Size:               size,
+		Quality:            quality,
+		ReferenceImageURL:  refImageURL,
+		Status:             "pending",
 	}
 	if err := h.db.Create(gen).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建记录失败: " + err.Error()})
@@ -448,7 +468,7 @@ func (h *ImageHandler) GenerateImage(c *gin.Context) {
 	baseURL := resolveBaseURL(c, h.cfg)
 
 	// 启动后台 goroutine 异步生成图片
-	go h.processImageJob(gen.ID, req.Prompt, size, quality, referenceImagePath, baseURL)
+	go h.processImageJob(gen.ID, req.Prompt, size, quality, refImagePaths, baseURL)
 
 	// 立即返回，不等待实际生成
 	c.JSON(http.StatusOK, gin.H{
@@ -518,22 +538,22 @@ func (h *ImageHandler) AutoMigrate() error {
 }
 
 // processImageJob 后台处理单个图片生成任务（用于异步 goroutine 和启动恢复）
-func (h *ImageHandler) processImageJob(recordID uint, prompt, size, quality, referenceImagePath, baseURL string) {
+func (h *ImageHandler) processImageJob(recordID uint, prompt, size, quality string, referenceImagePaths []string, baseURL string) {
 	ctx := context.Background()
 
 	var imageURL, b64Data string
 	var err error
 
-	if referenceImagePath != "" {
+	if len(referenceImagePaths) > 0 {
 		// image-to-image 模式：基于参考图编辑
-		imageURL, b64Data, err = h.imageService.EditImage(ctx, prompt, size, referenceImagePath)
+		imageURL, b64Data, err = h.imageService.EditImage(ctx, prompt, size, referenceImagePaths)
 	} else {
 		// 普通文生图模式
 		imageURL, b64Data, err = h.imageService.GenerateImage(ctx, prompt, size, quality)
 	}
 
 	if err != nil {
-		fmt.Printf("[图片生成失败] ID=%d size=%s quality=%s ref=%s err=%v\n", recordID, size, quality, referenceImagePath, err)
+		fmt.Printf("[图片生成失败] ID=%d size=%s quality=%s ref=%v err=%v\n", recordID, size, quality, referenceImagePaths, err)
 		errMsg := err.Error()
 		if saveErr := h.db.Model(&services.ImageGeneration{}).Where("id = ?", recordID).Updates(map[string]interface{}{
 			"status":        "failed",
@@ -622,20 +642,27 @@ func (h *ImageHandler) RecoverPendingJobs() {
 
 	fmt.Printf("[任务恢复] 发现 %d 个未完成的图片生成任务，正在重新执行...\n", len(pending))
 	for _, job := range pending {
-		// 从 ReferenceImageURL 提取本地文件路径
-		var referenceImagePath string
+		// 从 ReferenceImageURL 提取本地文件路径（支持多张图逗号分隔）
+		var referenceImagePaths []string
 		if job.ReferenceImageURL != "" {
-			parts := strings.Split(job.ReferenceImageURL, "/")
-			if len(parts) > 0 {
-				filename := parts[len(parts)-1]
-				if !strings.Contains(filename, "..") && !strings.Contains(filename, "/") {
-					refPath := filepath.Join(imagesDir, filename)
-					if _, statErr := os.Stat(refPath); statErr == nil {
-						referenceImagePath = refPath
+			urls := strings.Split(job.ReferenceImageURL, ",")
+			for _, url := range urls {
+				url = strings.TrimSpace(url)
+				if url == "" {
+					continue
+				}
+				parts := strings.Split(url, "/")
+				if len(parts) > 0 {
+					filename := parts[len(parts)-1]
+					if !strings.Contains(filename, "..") && !strings.Contains(filename, "/") {
+						refPath := filepath.Join(imagesDir, filename)
+						if _, statErr := os.Stat(refPath); statErr == nil {
+							referenceImagePaths = append(referenceImagePaths, refPath)
+						}
 					}
 				}
 			}
 		}
-		go h.processImageJob(job.ID, job.Prompt, job.Size, job.Quality, referenceImagePath, baseURL)
+		go h.processImageJob(job.ID, job.Prompt, job.Size, job.Quality, referenceImagePaths, baseURL)
 	}
 }

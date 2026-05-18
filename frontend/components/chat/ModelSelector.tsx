@@ -87,6 +87,18 @@ export default function ModelSelector({
   const [open, setOpen] = useState(false);
   const [collapsedGroups, _setCollapsedGroups] = useState<Set<string>>(loadCollapsedGroups);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const hoverTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 悬浮延迟打开
+  const handleMouseEnter = useCallback(() => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => setOpen(true), 150);
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => setOpen(false), 200);
+  }, []);
 
   // 构建分组
   const groups = GROUP_ORDER.map((provider) => {
@@ -111,7 +123,7 @@ export default function ModelSelector({
     });
   }, [open, selectedProvider]);
 
-  // 点击外部关闭
+  // 点击外部关闭（仅点选逻辑保留；下拉由 hover 控制，外部点击只需关闭防挡）
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -119,7 +131,10 @@ export default function ModelSelector({
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    };
   }, []);
 
   const handleSelect = useCallback(
@@ -178,10 +193,9 @@ export default function ModelSelector({
   );
 
   return (
-    <div className="relative max-w-[200px] sm:max-w-none" ref={dropdownRef}>
+    <div className="relative max-w-[200px] sm:max-w-none" ref={dropdownRef} onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave}>
       {/* Pill 形状触发按钮 */}
       <button
-        onClick={() => setOpen(!open)}
         className={cn(
           "flex items-center gap-2 px-3 py-1.5 text-sm font-medium transition-all duration-200 w-full",
           "rounded-full border",

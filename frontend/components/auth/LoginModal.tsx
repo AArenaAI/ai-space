@@ -132,9 +132,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
         <div className="px-6 py-6">
           {/* Logo */}
           <div className="text-center mb-6">
-            <div className="w-12 h-12 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center mx-auto mb-3">
-              <span className="text-lg font-bold text-text-primary">AI</span>
-            </div>
+            <img src="/logo.png" alt="AI Space" className="w-12 h-12 rounded-xl object-cover mx-auto mb-3" />
             <h2 className="text-lg font-semibold text-text-primary tracking-tight">
               {mode === "login" ? "登录 AI Space" : "注册 AI Space"}
             </h2>

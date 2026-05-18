@@ -23,6 +23,9 @@ export interface Message {
   searchSources?: SearchSource[];
   searchStatus?: "searching" | "completed";
   files?: { public_id: string; type: string; filename: string }[];
+  errorCode?: string;
+  retryable?: boolean;
+  requestId?: string;
 }
 
 export interface ChatModel {
@@ -277,6 +280,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
 
       let accumulated = "";
       let pendingDelta = "";
+      let buffer = "";
       let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
       const flush = () => {
@@ -295,53 +299,115 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         );
       };
 
+      const processEvent = (eventText: string) => {
+        const lines = eventText.split("\n");
+        let data = "";
+        for (const line of lines) {
+          if (line.startsWith(":")) continue; // SSE comment
+          if (line.startsWith("data: ")) {
+            data = line.slice(6);
+          }
+        }
+        if (!data) return;
+        if (data === "[DONE]") {
+          flush();
+          return;
+        }
+        try {
+          const parsed = JSON.parse(data);
+          // 处理 chat meta（请求追踪 ID 等）
+          if (parsed._chat_meta) {
+            const meta = parsed._chat_meta;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsg.id
+                  ? { ...m, requestId: meta.request_id || "" }
+                  : m
+              )
+            );
+            return;
+          }
+          // 处理统一错误结构
+          if (parsed._error) {
+            const err = parsed._error;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsg.id
+                  ? {
+                      ...m,
+                      content: err.message || "请求失败",
+                      errorCode: err.error_code || "unknown",
+                      retryable: err.retryable === true,
+                      requestId: err.request_id || m.requestId,
+                    }
+                  : m
+              )
+            );
+            return;
+          }
+          // 处理搜索元数据（实时，不缓冲）
+          if (parsed._search_meta) {
+            const meta = parsed._search_meta;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsg.id
+                  ? {
+                      ...m,
+                      searchStatus: meta.status,
+                      searchSources: meta.sources || [],
+                    }
+                  : m
+              )
+            );
+            return;
+          }
+          const delta = parsed.choices?.[0]?.delta?.content || "";
+          pendingDelta += delta;
+
+          if (!flushTimer) {
+            flushTimer = setTimeout(() => {
+              flushTimer = null;
+              flush();
+            }, 50);
+          }
+        } catch {
+          // JSON 解析失败时，当作文本兑底追加
+          pendingDelta += data;
+          if (!flushTimer) {
+            flushTimer = setTimeout(() => {
+              flushTimer = null;
+              flush();
+            }, 50);
+          }
+        }
+      };
+
       try {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split("\n");
+          buffer += decoder.decode(value, { stream: true });
 
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              const data = line.slice(6);
-              if (data === "[DONE]") {
-                flush();
-                break;
-              }
-              try {
-                const parsed = JSON.parse(data);
-                // 处理搜索元数据（实时，不缓冲）
-                if (parsed._search_meta) {
-                  const meta = parsed._search_meta;
-                  setMessages((prev) =>
-                    prev.map((m) =>
-                      m.id === assistantMsg.id
-                        ? {
-                            ...m,
-                            searchStatus: meta.status,
-                            searchSources: meta.sources || [],
-                          }
-                        : m
-                    )
-                  );
-                  continue;
-                }
-                const delta = parsed.choices?.[0]?.delta?.content || "";
-                pendingDelta += delta;
-
-                if (!flushTimer) {
-                  flushTimer = setTimeout(() => {
-                    flushTimer = null;
-                    flush();
-                  }, 50);
-                }
-              } catch {
-                // 忽略解析失败的行
-              }
-            }
+          // 按 \n\n 分割完整 SSE event
+          let idx;
+          while ((idx = buffer.indexOf("\n\n")) >= 0) {
+            const eventText = buffer.slice(0, idx);
+            buffer = buffer.slice(idx + 2);
+            processEvent(eventText);
           }
+        }
+
+        // 最终 flush decoder
+        buffer += decoder.decode();
+        let idx;
+        while ((idx = buffer.indexOf("\n\n")) >= 0) {
+          const eventText = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+          processEvent(eventText);
+        }
+        if (buffer.trim()) {
+          processEvent(buffer.trim());
         }
       } finally {
         flush(); // 流结束时强制 flush 剩余内容
@@ -625,32 +691,6 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         }
 
         await streamResponse(response, assistantMsg, controller);
-
-        // 流式响应完成后，重新加载消息以同步后端持久化的 uint ID
-        if (token && convId) {
-          try {
-            const reloadRes = await fetch(`${API_BASE_URL}/api/conversations/${convId}`, {
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            if (reloadRes.ok) {
-              const convData = await reloadRes.json();
-              if (convData.messages) {
-                const reloaded: Message[] = convData.messages.map((m: any) => ({
-                  id: String(m.id),
-                  role: m.role,
-                  content: m.content,
-                  model: m.model,
-                  createdAt: new Date(m.created_at).getTime(),
-                  stopped: false,
-                  files: m.files || undefined,
-                }));
-                setMessages(reloaded);
-              }
-            }
-          } catch {
-            // 静默失败，不影响用户体验
-          }
-        }
       } catch (error: any) {
         if (error.name === "AbortError") {
           // 用户主动停止

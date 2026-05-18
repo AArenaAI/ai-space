@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { ImageIcon, Wand2, Loader2, Trash2, Download, Sparkles, Palette, Images } from "lucide-react";
 import DialogShell, { THEMES } from "./DialogShell";
 import { useImage } from "@/hooks/useImage";
+import { resolveImageUrl } from "@/lib/resolveImageUrl";
 
 const ASPECTS = [
   { label: "1:1", value: "1:1" },
@@ -115,13 +116,13 @@ export default function ImageGenDialog({ open, onClose }: { open: boolean; onClo
                 ) : img.status === "error" ? (
                   <div className="flex aspect-square items-center justify-center text-xs text-red-400">{img.error_message || "生成失败"}</div>
                 ) : (
-                  <img src={img.image_url} alt={img.prompt} className="aspect-square w-full object-cover" loading="lazy" />
+                  <img src={resolveImageUrl(img.image_url)} alt={img.prompt} className="aspect-square w-full object-cover" loading="lazy" />
                 )}
                 <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-black/60 p-2 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
                   <p className="truncate text-[10px] text-white/90">{img.prompt}</p>
                   <div className="flex gap-1">
                     {img.image_url && (
-                      <a href={img.image_url} target="_blank" rel="noreferrer" className="rounded-md bg-white/20 p-1 text-white hover:bg-white/30">
+                      <a href={resolveImageUrl(img.image_url)} target="_blank" rel="noreferrer" className="rounded-md bg-white/20 p-1 text-white hover:bg-white/30">
                         <Download className="h-3 w-3" />
                       </a>
                     )}

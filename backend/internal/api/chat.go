@@ -6,6 +6,7 @@ import (
 	"aipool-backend/internal/services"
 	"aipool-backend/internal/skills"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -48,8 +49,8 @@ type ChatRequest struct {
 	Search          bool               `json:"search"`
 	TemplateID      uint               `json:"template_id,omitempty"`
 	SkipSaveUserMsg bool               `json:"skip_save_user_msg,omitempty"` // 对比模式后续模型调用不重复保存用户消息
-	WorkspaceID  uint               `json:"workspace_id,omitempty"`
-	SkillKey        string             `json:"skill_key,omitempty"`          // 指定技能 key
+	WorkspaceID     uint               `json:"workspace_id,omitempty"`
+	SkillKey        string             `json:"skill_key,omitempty"` // 指定技能 key
 
 	// 本轮消息显式附件，只用于 message_files 展示，同时默认参与本轮 RAG
 	MessageFileIDs []string `json:"message_file_ids,omitempty"`
@@ -67,7 +68,7 @@ type CompareRequest struct {
 	TemplateID      uint     `json:"template_id,omitempty"`
 	ConversationID  uint     `json:"conversation_id,omitempty"`
 	Reasoning       bool     `json:"reasoning"`
-	WorkspaceID  uint     `json:"workspace_id,omitempty"`
+	WorkspaceID     uint     `json:"workspace_id,omitempty"`
 	ReasoningEffort string   `json:"reasoning_effort"`
 	Search          bool     `json:"search"`
 
@@ -110,6 +111,19 @@ func isFileQuestion(query string) bool {
 		}
 	}
 	return false
+}
+
+// generateRequestID 生成一个 12 字符的 base62 请求追踪 ID。
+func generateRequestID() string {
+	const charset = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	b := make([]byte, 12)
+	if _, err := rand.Read(b); err != nil {
+		return "req-" + fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	for i := range b {
+		b[i] = charset[b[i]%byte(len(charset))]
+	}
+	return string(b)
 }
 
 func lastUserContent(messages []services.Message) string {
@@ -300,6 +314,7 @@ func (h *ChatHandler) buildChatFilePlan(req ChatRequest, userID uint, guestID st
 		mode = "auto"
 	}
 
+	query := lastUserContent(req.Messages)
 	shouldUseConversationFiles := false
 	switch mode {
 	case "always":
@@ -307,8 +322,15 @@ func (h *ChatHandler) buildChatFilePlan(req ChatRequest, userID uint, guestID st
 	case "never":
 		shouldUseConversationFiles = false
 	default: // auto
-		// 当本轮没有上传新文件时，自动加载该对话历史关联的文件，避免多轮对话丢失上下文
-		shouldUseConversationFiles = len(messageFiles) == 0
+		// 保守策略：只有当本轮没有上传新文件，且用户问题明显指向文件/图片时，才自动加载历史文件。
+		// 普通 follow-up 问题（如"还有呢""再说详细点"）不会污染历史文件上下文。
+		if len(messageFiles) == 0 && isFileQuestion(query) {
+			shouldUseConversationFiles = true
+			fmt.Printf("[buildChatFilePlan] auto 模式：问题指向文件，自动加载历史文件 query=%q\n", query)
+		} else {
+			fmt.Printf("[buildChatFilePlan] auto 模式：跳过历史文件。新文件=%d, 是文件问题=%v, query=%q\n",
+				len(messageFiles), isFileQuestion(query), query)
+		}
 	}
 
 	if shouldUseConversationFiles {
@@ -514,6 +536,11 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 	}
 	// ========== 匿名用户检查结束 ==========
 
+	// ========== 请求追踪 ID ==========
+	requestID := generateRequestID()
+	c.Header("X-Request-ID", requestID)
+	// ========== 请求追踪 ID 结束 ==========
+
 	// 如果有模板 ID，加载模板前缀并注入到 messages 开头
 	if req.TemplateID > 0 {
 		var tpl services.Template
@@ -555,11 +582,11 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 			title = title[:20] + "..."
 		}
 		conv := models.Conversation{
-			UserID:       userID,
-			GuestID:      guestID,
-			Title:        title,
-			Model:        req.Model,
-			WorkspaceID:  req.WorkspaceID,
+			UserID:      userID,
+			GuestID:     guestID,
+			Title:       title,
+			Model:       req.Model,
+			WorkspaceID: req.WorkspaceID,
 		}
 		h.db.Create(&conv)
 		conversationID = conv.ID
@@ -676,6 +703,21 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		c.Header("X-Accel-Buffering", "no")
 
 		c.Writer.WriteHeaderNow()
+		// 发送 chat meta 信息（请求追踪 ID、模型等）
+		metaEvent := map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{"delta": map[string]string{"content": ""}},
+			},
+			"_chat_meta": map[string]interface{}{
+				"request_id": requestID,
+				"model":      req.Model,
+				"stream":     true,
+			},
+		}
+		metaOut, _ := json.Marshal(metaEvent)
+		c.Writer.WriteString("data: " + string(metaOut) + "\n\n")
+		c.Writer.Flush()
+
 		// 如果有搜索结果，先发送搜索元数据
 		if len(searchSources) > 0 {
 			meta := map[string]interface{}{
@@ -780,6 +822,22 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, w gin.ResponseWriter, reasoningEnabled bool) (string, *services.TokenUsage, error) {
 	decoder := services.NewDecoder(resp.ModelType, resp.Body)
 
+	// 孔底：流结束但未发送 [DONE] 时，向前端推送 _error，避免前端一直等待/显示半截回复
+	doneSent := false
+	defer func() {
+		if !doneSent {
+			errOut, _ := json.Marshal(map[string]interface{}{
+				"_error": map[string]interface{}{
+					"error_code": "stream_incomplete",
+					"message":    "上游连接提前断开，请缩小问题或重试",
+					"retryable":  true,
+				},
+			})
+			w.WriteString("data: " + string(errOut) + "\n\n")
+			w.Flush()
+		}
+	}()
+
 	type streamResult struct {
 		event *services.AIStreamEvent
 		err   error
@@ -831,14 +889,31 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 
 		case result := <-results:
 			event, err := result.event, result.err
+
+			// ⚠️ 必须先检查 EventDone，再检查 io.EOF：
+			// ChatSSEDecoder.Next() 遇到 "data: [DONE]" 时同时返回
+			// EventDone 事件 + io.EOF 错误。先检查 err 会导致直接 return，
+			// [DONE] 标记永远不会发送给前端。
+			if event != nil && event.Type == services.EventDone {
+				doneSent = true
+				if err := writeAndFlush("data: [DONE]\n\n"); err != nil {
+					return strings.TrimSpace(fullContent.String()), finalUsage, err
+				}
+				return strings.TrimSpace(fullContent.String()), finalUsage, nil
+			}
+
 			if err != nil {
 				if err == io.EOF {
 					return strings.TrimSpace(fullContent.String()), finalUsage, nil
 				}
-				// 解析错误：向前端发送错误，不发 [DONE]
+				// 解析错误：向前端发送统一错误结构
+				doneSent = true
 				errOut, _ := json.Marshal(map[string]interface{}{
-					"choices": []map[string]interface{}{
-						{"delta": map[string]string{"content": fmt.Sprintf("❌ 上游流式响应解析失败: %v", err)}},
+					"_error": map[string]interface{}{
+						"error_code": "stream_parse_error",
+						"message":    fmt.Sprintf("上游流式响应解析失败: %v", err),
+						"retryable":  true,
+						"request_id": "", // 前端可以从 X-Request-ID 响应头获取
 					},
 				})
 				_ = writeAndFlush("data: " + string(errOut) + "\n\n")
@@ -855,18 +930,26 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 				continue
 			}
 
-			if event.Type == services.EventDone {
-				if err := writeAndFlush("data: [DONE]\n\n"); err != nil {
-					return strings.TrimSpace(fullContent.String()), finalUsage, err
-				}
-				return strings.TrimSpace(fullContent.String()), finalUsage, nil
-			}
-
 			if event.Type == services.EventError {
-				if err := writeAndFlush("data: " + event.Message + "\n\n"); err != nil {
+				// 统一错误结构：error_code + retryable + message。
+				// 错误已经是终态，发送后直接结束，避免 defer 再追加 stream_incomplete。
+				doneSent = true
+				errorCode := event.Code
+				if errorCode == "" {
+					errorCode = "upstream_error"
+				}
+				errOut, _ := json.Marshal(map[string]interface{}{
+					"_error": map[string]interface{}{
+						"error_code": errorCode,
+						"message":    event.Message,
+						"retryable":  true,
+						"request_id": "",
+					},
+				})
+				if err := writeAndFlush("data: " + string(errOut) + "\n\n"); err != nil {
 					return strings.TrimSpace(fullContent.String()), finalUsage, err
 				}
-				continue
+				return strings.TrimSpace(fullContent.String()), finalUsage, fmt.Errorf("upstream stream error: %s", event.Message)
 			}
 
 			delta := map[string]string{"content": ""}

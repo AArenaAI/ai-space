@@ -93,15 +93,15 @@ export function useImage() {
   }, [images, stopPolling]);
 
   const generateImage = useCallback(
-    async (prompt: string, aspectRatio: string, resolution: string, quality: string = "medium", referenceImageUrl?: string) => {
+    async (prompt: string, aspectRatio: string, resolution: string, quality: string = "medium", referenceImageUrls?: string[]) => {
       setIsGenerating(true);
       setError(null);
 
       try {
         const token = localStorage.getItem("token");
         const body: Record<string, any> = { prompt, aspect_ratio: aspectRatio, resolution, quality };
-        if (referenceImageUrl) {
-          body.reference_image_url = referenceImageUrl;
+        if (referenceImageUrls && referenceImageUrls.length > 0) {
+          body.reference_image_urls = referenceImageUrls;
         }
         const response = await fetch(`${API_BASE_URL}/api/images/generate`, {
           method: "POST",

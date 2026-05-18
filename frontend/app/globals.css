@@ -62,6 +62,63 @@
     --message-ai: #F5F4F2;              /* AI 消息 - 浅灰 */
   }
   
+  .green {
+    /* 绿色护眼模式 - 暖绿豆沙色调，参考微信读书/多看阅读护眼配色 */
+    --background: 85 18% 84%;            /* #D4E0C8 暖绿豆沙背景 */
+    --foreground: 70 8% 20%;             /* #35362E 暖灰文字 */
+    
+    --card: 85 15% 88%;                  /* #DEE8D4 卡片背景 */
+    --card-foreground: 70 8% 20%;
+    
+    --popover: 85 15% 88%;
+    --popover-foreground: 70 8% 20%;
+    
+    --primary: 217 91% 60%;             /* 品牌蓝保持不变 */
+    --primary-foreground: 0 0% 100%;
+    
+    --secondary: 85 12% 82%;            /* #D0DAC6 次级背景 */
+    --secondary-foreground: 70 6% 28%;
+    
+    --muted: 85 10% 80%;                /* #C8D2BE 静音背景 */
+    --muted-foreground: 75 6% 40%;       /* #6C6E65 次级文字 */
+    
+    --accent: 217 91% 60%;
+    --accent-foreground: 0 0% 100%;
+    
+    --destructive: 0 65% 52%;
+    --destructive-foreground: 0 0% 98%;
+    
+    --border: 80 10% 74%;               /* #B5BFAE 边框 */
+    --input: 80 10% 74%;
+    --ring: 150 35% 45%;
+    
+    --sidebar-background: 85 18% 82%;   /* #CDD9C1 */
+    --sidebar-foreground: 75 6% 38%;
+    --sidebar-primary: 150 35% 40%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 85 12% 80%;
+    --sidebar-accent-foreground: 70 8% 20%;
+    --sidebar-border: 80 10% 74%;
+    --sidebar-ring: 150 35% 45%;
+    
+    /* 自定义变量 - 绿色护眼模式 */
+    --surface: #D4E0C8;                 /* 主背景 - 暖绿豆沙 */
+    --surface-elevated: #DAE5CF;       /* 比背景亮一层 */
+    --surface-card: #E2ECD9;            /* 卡片背景 */
+    --surface-border: #B5BFAE;          /* 边框 */
+    
+    --text-primary: #35362E;            /* 主文字 - 暖灰 */
+    --text-secondary: #5C5E54;          /* 次级文字 */
+    --text-tertiary: #7A7D72;           /* 占位符 */
+    
+    --brand: #3B82F6;                   /* 品牌蓝 */
+    --brand-hover: #2563EB;
+    --brand-muted: rgba(59, 130, 246, 0.15);
+    
+    --message-user: #DAE5CF;            /* 用户消息 */
+    --message-ai: #E2ECD9;              /* AI 消息 */
+  }
+
   .dark {
     /* 黑夜模式 - 保持原有样式 */
     --background: 0 0% 4%;
@@ -136,6 +193,10 @@
   }
   
   /* 选中文本颜色 */
+.green ::selection {
+    background: rgba(59, 130, 246, 0.35);
+  }
+
   ::selection {
     background: rgba(59, 130, 246, 0.3);
   }
@@ -172,6 +233,14 @@
   background: rgba(136, 136, 136, 0.5);
 }
 
+.green ::-webkit-scrollbar-thumb {
+  background: rgba(107, 138, 109, 0.3);
+}
+
+.green ::-webkit-scrollbar-thumb:hover {
+  background: rgba(107, 138, 109, 0.5);
+}
+
 /* 隐藏滚动条的类 */
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
@@ -205,6 +274,20 @@
   background: #0D0D0D !important;
 }
 
+.green .prose pre {
+  background: #D0DCC4 !important;
+  border-color: var(--surface-border);
+}
+
+.green .prose pre code {
+  color: var(--text-primary);
+}
+
+.green .prose code {
+  background: rgba(59, 130, 246, 0.15);
+  color: #2563EB;
+}
+
 .prose code {
   background: var(--brand-muted);
   color: var(--brand);
@@ -222,6 +305,10 @@
 
 .dark .prose pre code {
   color: #EDEDED;
+}
+
+.green .light .prose strong {
+  color: var(--text-primary);
 }
 
 /* 流式输出光标 */
@@ -358,6 +445,10 @@
 
 .dark .glass-effect {
   background: rgba(26, 26, 26, 0.8);
+}
+
+.green .glass-effect {
+  background: rgba(191, 230, 195, 0.8);
 }
 
 /* 白天模式特定样式 */

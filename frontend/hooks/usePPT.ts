@@ -76,6 +76,8 @@ export interface PPTConfig {
   language: string;
   audience: string;
   purpose: string;
+  extraContent: string;
+  referenceUrl: string;
   withImages: string;
   withNotes: boolean;
   qualityMode: string;
@@ -143,6 +145,8 @@ export function usePPT() {
           language: config.language,
           audience: config.audience,
           purpose: config.purpose,
+          extra_content: config.extraContent,
+          reference_url: config.referenceUrl,
           with_images: config.withImages,
           with_notes: config.withNotes,
           quality_mode: config.qualityMode,

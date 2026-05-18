@@ -26,6 +26,8 @@ import "time"
 	Language     string    `json:"language" gorm:"default:'zh-CN'"`
 	Audience     string    `json:"audience"`
 	Purpose      string    `json:"purpose"`
+	ExtraContent string    `json:"extra_content" gorm:"type:text"`
+	ReferenceURL string    `json:"reference_url"`
 	SlideCount   int       `json:"slide_count"`
 	WithImages   string    `json:"with_images" gorm:"default:'key_slides'"` // none, cover, key_slides, all
 	WithNotes    bool      `json:"with_notes" gorm:"default:true"`

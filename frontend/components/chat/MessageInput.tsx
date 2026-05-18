@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { Send, Brain, ChevronDown, Square, Search, Columns2, Paperclip, X, FileText } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Send, Brain, ChevronDown, Square, Search, Columns2, Paperclip, X, FileText, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ChatModel } from "@/hooks/useChat";
 import { getGuestId } from "@/lib/guestId";
+import { toast } from "sonner";
 
 // DeepSeek 模型的思考档位（兼容旧值）
 const DEEPSEEK_EFFORTS = ["high", "max"] as const;
@@ -34,7 +35,8 @@ export interface AttachedFile {
   content: string;
   type: string;
   public_id?: string; // 后端返回的文件 PublicID
-  parse_status?: string; // pending | done | error
+  parse_status?: string; // pending | parsing | done | error | unsupported
+  error_message?: string; // 解析失败原因
 }
 
 export default function MessageInput({ onSend, onStop, isLoading, compareMode, onToggleCompare, currentModel }: MessageInputProps) {
@@ -59,50 +61,62 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     }
     return false;
   });
-  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [showFileTip, setShowFileTip] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const dragCounter = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const prevModelRef = useRef<ChatModel | undefined>(currentModel);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const toolsRef = useRef<HTMLDivElement>(null);
+  const toolsTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 悬浮延迟打开工具下拉
+  const handleToolsEnter = useCallback(() => {
+    if (toolsTimerRef.current) clearTimeout(toolsTimerRef.current);
+    toolsTimerRef.current = setTimeout(() => setToolsOpen(true), 120);
+  }, []);
+
+  const handleToolsLeave = useCallback(() => {
+    if (toolsTimerRef.current) clearTimeout(toolsTimerRef.current);
+    toolsTimerRef.current = setTimeout(() => setToolsOpen(false), 200);
+  }, []);
+
+  // 点击外部关闭工具下拉
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (toolsRef.current && !toolsRef.current.contains(e.target as Node)) {
+        setToolsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      if (toolsTimerRef.current) clearTimeout(toolsTimerRef.current);
+    };
+  }, []);
 
   // 当打开下拉菜单时，确保当前 effort 对当前模型有效
   useEffect(() => {
-    if (!dropdownOpen) return;
+    if (!toolsOpen) return;
     if (!currentModel) return;
     const isDeepSeek = currentModel.provider === "DeepSeek";
     const isMoonshot = currentModel.provider === "Moonshot";
     // Moonshot/Kimi 无 effort 等级，不验证
-    if (isMoonshot) {
-      setDropdownOpen(false);
-      return;
-    }
+    if (isMoonshot) return;
     const validEfforts = isDeepSeek ? DEEPSEEK_EFFORTS : GPT_EFFORTS;
     if (!(validEfforts as readonly string[]).includes(reasoning.effort)) {
       const defaultEffort: ReasoningEffort = isDeepSeek ? "high" : "standard";
       setReasoning((prev) => ({ ...prev, effort: defaultEffort }));
       localStorage.setItem("reasoning-effort", defaultEffort);
     }
-  }, [dropdownOpen, currentModel]);
+  }, [toolsOpen, currentModel]);
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 200) + "px";
   }, [content]);
-
-  // 点击外部关闭下拉
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setDropdownOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
 
   // 轮询更新文件解析状态
   useEffect(() => {
@@ -129,6 +143,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
               public_id: f.public_id, 
               parse_status: data.parse_status,
               content: data.content ? data.content.slice(0, 8000) : undefined, // 取前8000字符避免过大
+              error_message: data.error_message || undefined,
             };
           } catch {
             return null;
@@ -147,6 +162,9 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
           if (update.content && !f.content) {
             next.content = update.content;
           }
+          if (update.error_message && !f.error_message) {
+            next.error_message = update.error_message;
+          }
           return next;
         })
       );
@@ -159,7 +177,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     e?.preventDefault();
     if ((!content.trim() && attachedFiles.length === 0) || isLoading || hasParsingFiles) {
       if (hasParsingFiles) {
-        alert("文件解析中，请稍后");
+        toast.warning("文件解析中，请稍后");
       }
       return;
     }
@@ -167,7 +185,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     onSend(content.trim(), reasoning, searchEnabled, attachedFiles.length > 0 ? attachedFiles : undefined, file_ids.length > 0 ? file_ids : undefined);
     setContent("");
     setAttachedFiles([]);
-    setDropdownOpen(false);
+    setToolsOpen(false);
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
@@ -233,7 +251,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
       const data = await res.json();
       setAttachedFiles((prev) => [...prev, { filename: data.filename, content: data.content_preview || "", type: data.type, public_id: data.public_id, parse_status: data.parse_status || "pending" }]);
     } catch (err: any) {
-      alert(`文件上传失败: ${err.message}`);
+      toast.error(`文件上传失败: ${err.message}`);
     } finally {
       setUploading(false);
     }
@@ -281,13 +299,13 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     const maxSize = 20 * 1024 * 1024;
     const remainingSlots = 20 - attachedFiles.length;
     if (remainingSlots <= 0) {
-      alert("单次聊天最多关联 20 个文件");
+      toast.warning("单次聊天最多关联 20 个文件");
       return;
     }
 
     for (const file of files.slice(0, remainingSlots)) {
       if (file.size > maxSize) {
-        alert(`文件 ${file.name} 超过 20MB 限制`);
+        toast.warning(`文件 ${file.name} 超过 20MB 限制`);
         continue;
       }
       await uploadSingleFile(file);
@@ -301,7 +319,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
   const setEffort = (effort: ReasoningEffort) => {
     setReasoning({ enabled: true, effort });
     localStorage.setItem("reasoning-effort", effort);
-    setDropdownOpen(false);
+    setToolsOpen(false);
   };
 
   const hasParsingFiles = attachedFiles.some((f) => f.parse_status === "pending" || f.parse_status === "parsing");
@@ -352,6 +370,64 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
   return (
     <div className="shrink-0 px-4 pb-6 pt-2">
       <form onSubmit={handleSubmit} className="max-w-[800px] mx-auto">
+        { /* 上方面板：对比 + 附件按钮 */ }
+        <div className="flex items-center gap-2 mb-2">
+          {/* 对比模式开关 */}
+          <button
+            type="button"
+            onClick={onToggleCompare}
+            className={cn(
+              "flex items-center gap-1.5 pl-2.5 pr-3 py-1 text-[12px] font-medium rounded-full border transition-all duration-200",
+              compareMode
+                ? "bg-amber-500/10 border-amber-500/40 text-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.12)]"
+                : "bg-transparent border-surface-border text-text-tertiary hover:text-text-secondary hover:border-text-tertiary/50"
+            )}
+          >
+            <Columns2 className="w-3 h-3" />
+            <span>对比</span>
+          </button>
+
+          {/* 文件上传按钮 */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading || isLoading}
+              onMouseEnter={() => setShowFileTip(true)}
+              onMouseLeave={() => setShowFileTip(false)}
+              className={cn(
+                "flex items-center gap-1 pl-2.5 pr-3 py-1 text-[12px] font-medium rounded-full border transition-all duration-200",
+                attachedFiles.length > 0
+                  ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-400"
+                  : "bg-transparent border-surface-border text-text-tertiary hover:text-text-secondary hover:border-text-tertiary/50",
+                (uploading || isLoading) && "opacity-50 cursor-not-allowed"
+              )}
+            >
+              {uploading ? (
+                <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Paperclip className="w-3 h-3" />
+              )}
+              <span>附件{attachedFiles.length > 0 ? ` (${attachedFiles.length})` : ""}</span>
+            </button>
+            {/* 自定义 tooltip */}
+            <div
+              className={cn(
+                "absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-[220px] z-[60] pointer-events-none transition-opacity duration-200",
+                showFileTip ? "opacity-100" : "opacity-0"
+              )}
+            >
+              <div className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 shadow-lg text-[12px] leading-relaxed text-text-secondary">
+                <div className="font-medium text-text-primary mb-0.5">文件上传限制</div>
+                <div>支持: PDF, Word, PPT, Excel, 图片, 代码等</div>
+                <div>单文件 ≤ 20MB，单次最多 20 个</div>
+              </div>
+              {/* 小三角箭头 */}
+              <div className="absolute left-1/2 -translate-x-1/2 -bottom-1 w-2 h-2 rotate-45 border-r border-b border-surface-border bg-surface-card" />
+            </div>
+          </div>
+        </div>
+
         <div
           onDragOver={handleDragOver}
           onDragEnter={handleDragEnter}
@@ -385,8 +461,10 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                   pending: { color: "text-amber-400 border-amber-500/30 bg-amber-500/5", icon: <div className="w-3 h-3 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />, label: "解析中" },
                   done: { color: "text-emerald-400 border-emerald-500/30 bg-emerald-500/5", icon: <FileText className="w-3.5 h-3.5" />, label: "已完成" },
                   error: { color: "text-red-400 border-red-500/30 bg-red-500/5", icon: <div className="w-3 h-3 rounded-full bg-red-400" />, label: "失败" },
+                  unsupported: { color: "text-gray-400 border-gray-500/30 bg-gray-500/5", icon: <FileText className="w-3.5 h-3.5" />, label: "不支持" },
                 };
                 const cfg = statusConfig[status] || statusConfig.pending;
+                const isEmptyContent = status === "done" && !file.content?.trim();
                 return (
                   <div
                     key={idx}
@@ -394,11 +472,19 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                       "flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 text-[12px] rounded-lg border transition-all",
                       cfg.color
                     )}
-                    title={cfg.label}
+                    title={
+                      file.error_message
+                        ? `解析失败: ${file.error_message}`
+                        : isEmptyContent
+                        ? "文件解析完成但内容为空，可能是格式不支持或文件为空"
+                        : cfg.label
+                    }
                   >
                     {cfg.icon}
                     <span className="max-w-[120px] truncate">{file.filename}</span>
-                    <span className="text-[10px] opacity-60 ml-0.5">{cfg.label}</span>
+                    <span className="text-[10px] opacity-60 ml-0.5">
+                      {file.error_message ? "解析失败" : isEmptyContent ? "空文件" : cfg.label}
+                    </span>
                     <button
                       type="button"
                       onClick={() => removeAttachedFile(idx)}
@@ -423,262 +509,182 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
           />
 
           <div className="flex items-center justify-between px-3 pb-3">
-            {/* 左侧：文件上传 + 联网搜索 + 深度思考 */}
+            {/* 左侧：联网搜索 + 深度思考 → 合并为工具悬浮选择 */}
             <div className="flex items-center gap-2">
-              {/* 文件上传按钮 */}
-              <div className="relative">
+              {/* 工具悬浮按钮：联网搜索 + 深度思考 */}
+              <div className="relative" ref={toolsRef} onMouseEnter={handleToolsEnter} onMouseLeave={handleToolsLeave}>
                 <button
                   type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading || isLoading}
-                  onMouseEnter={() => setShowFileTip(true)}
-                  onMouseLeave={() => setShowFileTip(false)}
                   className={cn(
-                    "relative flex items-center justify-center w-8 h-8 rounded-lg border transition-all duration-200",
-                    attachedFiles.length > 0
-                      ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-400"
-                      : "bg-transparent border-surface-border text-text-tertiary hover:text-text-secondary hover:border-text-tertiary/50",
-                    (uploading || isLoading) && "opacity-50 cursor-not-allowed"
+                    "flex items-center gap-1.5 pl-3 pr-3 py-1.5 text-[13px] font-medium rounded-full border transition-all duration-200",
+                    reasoning.enabled || searchEnabled
+                      ? "border-brand/40 bg-brand-muted text-brand"
+                      : "border-surface-border bg-transparent text-text-tertiary hover:text-text-secondary hover:border-text-tertiary/50"
                   )}
                 >
-                  {uploading ? (
-                    <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <Paperclip className="w-3.5 h-3.5" />
-                  )}
-                  {attachedFiles.length > 0 && !uploading && (
-                    <span className="absolute -top-1.5 -right-1.5 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[10px] font-medium">
-                      {attachedFiles.length}
+                  <Wrench className="w-3.5 h-3.5" />
+                  <span>工具</span>
+                  {(reasoning.enabled || searchEnabled) && (
+                    <span className="text-[11px] opacity-70 ml-0.5">
+                      · {[reasoning.enabled && "深度思考", searchEnabled && "联网搜索"].filter(Boolean).join("+")}
                     </span>
                   )}
                 </button>
-                {/* 自定义 tooltip */}
-                <div
-                  className={cn(
-                    "absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-[220px] z-[60] pointer-events-none transition-opacity duration-200",
-                    showFileTip ? "opacity-100" : "opacity-0"
-                  )}
-                >
-                  <div className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 shadow-lg text-[12px] leading-relaxed text-text-secondary">
-                    <div className="font-medium text-text-primary mb-0.5">文件上传限制</div>
-                    <div>支持: PDF, Word, PPT, Excel, 图片, 代码等</div>
-                    <div>单文件 ≤ 20MB，单次最多 20 个</div>
-                  </div>
-                  {/* 小三角箭头 */}
-                  <div className="absolute left-1/2 -translate-x-1/2 -bottom-1 w-2 h-2 rotate-45 border-r border-b border-surface-border bg-surface-card" />
-                </div>
-              </div>
 
-              {/* 联网搜索按钮 */}
-              <button
-                type="button"
-                onClick={toggleSearch}
-                className={cn(
-                  "flex items-center gap-1.5 pl-3 pr-3 py-1.5 text-[13px] font-medium rounded-full border transition-all duration-200",
-                  searchEnabled
-                    ? "bg-blue-500/10 border-blue-500/40 text-blue-400"
-                    : "bg-transparent border-surface-border text-text-tertiary hover:text-text-secondary hover:border-text-tertiary/50"
-                )}
-              >
-                <Search className="w-3.5 h-3.5" />
-                <span>联网搜索</span>
-              </button>
-
-              {/* 深度思考开关 + 下拉 */}
-              <div className="relative flex items-center" ref={dropdownRef}>
-                <div className={cn(
-                  "flex items-center rounded-full border transition-all duration-200 overflow-hidden",
-                  reasoning.enabled
-                    ? "bg-purple-500/10 border-purple-500/40"
-                    : "bg-transparent border-surface-border hover:border-text-tertiary/50"
-                )}>
-                  <button
-                    type="button"
-                    onClick={toggleReasoning}
-                    className={cn(
-                      "flex items-center gap-1.5 pl-3 pr-2 py-1.5 text-[13px] font-medium transition-all duration-200",
-                      reasoning.enabled
-                        ? "text-purple-400"
-                        : "text-text-tertiary hover:text-text-secondary"
-                    )}
-                  >
-                    <Brain className="w-3.5 h-3.5" />
-                    <span>深度思考</span>
-                    {reasoning.enabled && (
-                      <span className="text-[11px] opacity-70 ml-0.5">· {effortLabel}</span>
-                    )}
-                  </button>
-                  {currentModel?.provider !== "Moonshot" && (
-                    <>
-                      <div className={cn(
-                        "w-px h-4 transition-colors duration-200",
-                        reasoning.enabled ? "bg-purple-500/30" : "bg-surface-border"
-                      )} />
+                {/* 工具悬浮下拉浮层 */}
+                {toolsOpen && (
+                  <div className="absolute bottom-full left-0 mb-2 w-48 rounded-xl border border-surface-border bg-surface-elevated shadow-xl z-50 py-1 animate-fade-in">
+                    {/* 联网搜索选项 */}
+                    <div className="px-1">
                       <button
                         type="button"
-                        onClick={() => setDropdownOpen(!dropdownOpen)}
+                        onClick={toggleSearch}
                         className={cn(
-                          "flex items-center justify-center px-2 py-1.5 text-[13px] transition-all duration-200",
-                          reasoning.enabled
-                            ? "text-purple-400"
-                            : "text-text-tertiary hover:text-text-secondary"
+                          "flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg transition-colors",
+                          searchEnabled
+                            ? "text-blue-400 bg-blue-500/10"
+                            : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                         )}
                       >
-                        <ChevronDown
-                          className={cn(
-                            "w-3 h-3 transition-transform duration-200",
-                            dropdownOpen && "rotate-180"
-                          )}
-                        />
+                        <span className={cn(
+                          "w-4 h-4 rounded border-2 flex items-center justify-center transition-colors",
+                          searchEnabled
+                            ? "bg-blue-500 border-blue-500"
+                            : "border-text-tertiary/40"
+                        )}>
+                          {searchEnabled && <span className="text-white text-[10px] font-bold">✓</span>}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <Search className="w-3.5 h-3.5" />
+                            <span>联网搜索</span>
+                          </div>
+                        </div>
                       </button>
-                    </>
-                  )}
-                </div>
-
-                {/* 下拉浮层 */}
-                {dropdownOpen && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-40"
-                      onClick={() => setDropdownOpen(false)}
-                    />
-                    <div className="absolute bottom-full left-0 mb-2 w-32 rounded-xl border border-surface-border bg-surface-elevated shadow-xl z-50 py-1 animate-fade-in">
-                      {currentModel?.provider === "Moonshot" ? (
-                        <div className="px-4 py-3 text-sm text-text-tertiary text-center">仅开关</div>
-                      ) : currentModel?.provider === "DeepSeek" ? (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => setEffort("high")}
-                            className={cn(
-                              "flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors",
-                              reasoning.effort === "high"
-                                ? "text-purple-400 bg-purple-500/10"
-                                : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
-                            )}
-                          >
-                            <span
-                              className={cn(
-                                "w-1.5 h-1.5 rounded-full",
-                                reasoning.effort === "high" ? "bg-purple-400" : "bg-text-tertiary/30"
-                              )}
-                            />
-                            标准
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setEffort("max")}
-                            className={cn(
-                              "flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors",
-                              reasoning.effort === "max"
-                                ? "text-purple-400 bg-purple-500/10"
-                                : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
-                            )}
-                          >
-                            <span
-                              className={cn(
-                                "w-1.5 h-1.5 rounded-full",
-                                reasoning.effort === "max" ? "bg-purple-400" : "bg-text-tertiary/30"
-                              )}
-                            />
-                            深度
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => setEffort("light")}
-                            className={cn(
-                              "flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors",
-                              reasoning.effort === "light"
-                                ? "text-purple-400 bg-purple-500/10"
-                                : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
-                            )}
-                          >
-                            <span
-                              className={cn(
-                                "w-1.5 h-1.5 rounded-full",
-                                reasoning.effort === "light" ? "bg-purple-400" : "bg-text-tertiary/30"
-                              )}
-                            />
-                            {effortNames.light}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setEffort("standard")}
-                            className={cn(
-                              "flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors",
-                              reasoning.effort === "standard"
-                                ? "text-purple-400 bg-purple-500/10"
-                                : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
-                            )}
-                          >
-                            <span
-                              className={cn(
-                                "w-1.5 h-1.5 rounded-full",
-                                reasoning.effort === "standard" ? "bg-purple-400" : "bg-text-tertiary/30"
-                              )}
-                            />
-                            {effortNames.standard}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setEffort("extended")}
-                            className={cn(
-                              "flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors",
-                              reasoning.effort === "extended"
-                                ? "text-purple-400 bg-purple-500/10"
-                                : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
-                            )}
-                          >
-                            <span
-                              className={cn(
-                                "w-1.5 h-1.5 rounded-full",
-                                reasoning.effort === "extended" ? "bg-purple-400" : "bg-text-tertiary/30"
-                              )}
-                            />
-                            {effortNames.extended}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setEffort("heavy")}
-                            className={cn(
-                              "flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors",
-                              reasoning.effort === "heavy"
-                                ? "text-purple-400 bg-purple-500/10"
-                                : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
-                            )}
-                          >
-                            <span
-                              className={cn(
-                                "w-1.5 h-1.5 rounded-full",
-                                reasoning.effort === "heavy" ? "bg-purple-400" : "bg-text-tertiary/30"
-                              )}
-                            />
-                            {effortNames.heavy}
-                          </button>
-                        </>
+                    </div>
+                    {/* 分割线 */}
+                    <div className="mx-2 my-1 border-t border-surface-border/50" />
+                    {/* 深度思考选项 */}
+                    <div className="px-1 pb-1">
+                      <button
+                        type="button"
+                        onClick={toggleReasoning}
+                        className={cn(
+                          "flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg transition-colors",
+                          reasoning.enabled
+                            ? "text-purple-400 bg-purple-500/10"
+                            : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
+                        )}
+                      >
+                        <span className={cn(
+                          "w-4 h-4 rounded border-2 flex items-center justify-center transition-colors",
+                          reasoning.enabled
+                            ? "bg-purple-500 border-purple-500"
+                            : "border-text-tertiary/40"
+                        )}>
+                          {reasoning.enabled && <span className="text-white text-[10px] font-bold">✓</span>}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <Brain className="w-3.5 h-3.5" />
+                            <span>深度思考</span>
+                          </div>
+                        </div>
+                      </button>
+                      {/* 思考档位（仅开启时显示） */}
+                      {reasoning.enabled && currentModel?.provider !== "Moonshot" && (
+                        <div className="ml-8 mt-1 pl-2 border-l border-surface-border/50 space-y-0.5">
+                          {currentModel?.provider === "DeepSeek" ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => setEffort("high")}
+                                className={cn(
+                                  "flex items-center gap-2 w-full px-2 py-1.5 text-xs rounded-md transition-colors",
+                                  reasoning.effort === "high"
+                                    ? "text-purple-400 bg-purple-500/10"
+                                    : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
+                                )}
+                              >
+                                <span className={cn("w-1 h-1 rounded-full", reasoning.effort === "high" ? "bg-purple-400" : "bg-text-tertiary/30")} />
+                                标准
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEffort("max")}
+                                className={cn(
+                                  "flex items-center gap-2 w-full px-2 py-1.5 text-xs rounded-md transition-colors",
+                                  reasoning.effort === "max"
+                                    ? "text-purple-400 bg-purple-500/10"
+                                    : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
+                                )}
+                              >
+                                <span className={cn("w-1 h-1 rounded-full", reasoning.effort === "max" ? "bg-purple-400" : "bg-text-tertiary/30")} />
+                                深度
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => setEffort("light")}
+                                className={cn(
+                                  "flex items-center gap-2 w-full px-2 py-1.5 text-xs rounded-md transition-colors",
+                                  reasoning.effort === "light"
+                                    ? "text-purple-400 bg-purple-500/10"
+                                    : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
+                                )}
+                              >
+                                <span className={cn("w-1 h-1 rounded-full", reasoning.effort === "light" ? "bg-purple-400" : "bg-text-tertiary/30")} />
+                                {effortNames.light}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEffort("standard")}
+                                className={cn(
+                                  "flex items-center gap-2 w-full px-2 py-1.5 text-xs rounded-md transition-colors",
+                                  reasoning.effort === "standard"
+                                    ? "text-purple-400 bg-purple-500/10"
+                                    : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
+                                )}
+                              >
+                                <span className={cn("w-1 h-1 rounded-full", reasoning.effort === "standard" ? "bg-purple-400" : "bg-text-tertiary/30")} />
+                                {effortNames.standard}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEffort("extended")}
+                                className={cn(
+                                  "flex items-center gap-2 w-full px-2 py-1.5 text-xs rounded-md transition-colors",
+                                  reasoning.effort === "extended"
+                                    ? "text-purple-400 bg-purple-500/10"
+                                    : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
+                                )}
+                              >
+                                <span className={cn("w-1 h-1 rounded-full", reasoning.effort === "extended" ? "bg-purple-400" : "bg-text-tertiary/30")} />
+                                {effortNames.extended}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEffort("heavy")}
+                                className={cn(
+                                  "flex items-center gap-2 w-full px-2 py-1.5 text-xs rounded-md transition-colors",
+                                  reasoning.effort === "heavy"
+                                    ? "text-purple-400 bg-purple-500/10"
+                                    : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
+                                )}
+                              >
+                                <span className={cn("w-1 h-1 rounded-full", reasoning.effort === "heavy" ? "bg-purple-400" : "bg-text-tertiary/30")} />
+                                {effortNames.heavy}
+                              </button>
+                            </>
+                          )}
+                        </div>
                       )}
                     </div>
-                  </>
+                  </div>
                 )}
               </div>
-
-              {/* 对比模式开关 */}
-              <button
-                type="button"
-                onClick={onToggleCompare}
-                className={cn(
-                  "flex items-center gap-1.5 pl-3 pr-3 py-1.5 text-[13px] font-medium rounded-full border transition-all duration-200",
-                  compareMode
-                    ? "bg-amber-500/10 border-amber-500/40 text-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.15)]"
-                    : "bg-transparent border-surface-border text-text-tertiary hover:text-text-secondary hover:border-text-tertiary/50"
-                )}
-              >
-                <Columns2 className="w-3.5 h-3.5" />
-                <span>对比</span>
-              </button>
             </div>
 
             {/* 发送/停止按钮 */}
