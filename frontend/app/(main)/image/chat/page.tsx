@@ -587,15 +587,6 @@ function ImageChatPageInner() {
             {/* 底部工具栏 */}
             <div className="flex items-center justify-between px-4 pb-3 pt-1">
               <div className="flex items-center gap-2">
-                {imageModels.length > 0 && (
-                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] text-text-tertiary border-surface-border">
-                    <div
-                      className="w-1.5 h-1.5 rounded-full shrink-0"
-                      style={{ backgroundColor: imageModels[0]?.color || "#999" }}
-                    />
-                    <span>{imageModels[0]?.name || "模型"}</span>
-                  </div>
-                )}
                 <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] text-text-tertiary border-surface-border">
                   <span>{initialAspect}</span>
                   <span>·</span>

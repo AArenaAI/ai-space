@@ -49,6 +49,7 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 		&File{}, &FileChunk{}, &FileEmbedding{}, &FileEmbeddingJob{}, &ConversationFile{}, &MessageFile{},
 		&APIUsageLog{},
 		&PPTTemplate{}, &PPTGeneration{}, &PPTSlide{}, &PPTRevision{},
+		&ImageChat{}, &ImageChatMessage{},
 	); err != nil {
 		return nil, err
 	}

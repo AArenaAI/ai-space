@@ -166,6 +166,17 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		authorized.GET("/images/:id", imageHandler.GetImage)
 		authorized.DELETE("/images/:id", imageHandler.DeleteImage)
 
+		// 图片会话路由
+		imageChatHandler := NewImageChatHandler(db, imageService, cfg, usageService)
+		imageChatHandler.AutoMigrate()
+		authorized.GET("/image-chats", imageChatHandler.ListImageChats)
+		authorized.POST("/image-chats", imageChatHandler.CreateImageChat)
+		authorized.GET("/image-chats/:id", imageChatHandler.GetImageChat)
+		authorized.PUT("/image-chats/:id", imageChatHandler.UpdateImageChat)
+		authorized.DELETE("/image-chats/:id", imageChatHandler.DeleteImageChat)
+		authorized.GET("/image-chats/:id/messages", imageChatHandler.ListImageChatMessages)
+		authorized.POST("/image-chats/:id/messages", imageChatHandler.SendImageChatMessage)
+
 		// 图片文件服务（无需认证，直接访问）
 		router.GET("/api/images/file/:filename", imageHandler.ServeImageFile)
 

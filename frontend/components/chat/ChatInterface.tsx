@@ -271,112 +271,107 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
       {/* 顶部栏 - 48px 高度 */}
       <header className={cn("shrink-0 h-12 flex items-center justify-between px-4 border-b transition-all duration-300", compareMode ? "border-amber-500/20" : "border-surface-border")}>
         <div className="flex items-center">
-          <img src="/brand-title.png" alt="AI Space" className="h-5 w-auto object-contain" />
+          {compareMode && selectedModels.length > 0 ? (
+            <div className="relative flex items-center">
+              <button
+                onClick={() => setModelMenuOpen(!modelMenuOpen)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-surface-border bg-surface-card text-sm text-text-primary hover:bg-surface-elevated transition-colors"
+              >
+                <Columns2 className="w-3.5 h-3.5 text-amber-400" />
+                <span>{selectedModels.length} 个模型</span>
+                <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", modelMenuOpen && "rotate-180")} />
+              </button>
+
+              {modelMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setModelMenuOpen(false)} />
+                  <div className="absolute top-full left-0 mt-2 w-[280px] z-50 rounded-xl border border-surface-border bg-surface-elevated shadow-xl overflow-hidden">
+                    <div className="px-3 py-2 text-[11px] font-medium text-text-tertiary uppercase tracking-wider border-b border-surface-border flex items-center justify-between">
+                      <span>选择对比模型</span>
+                      <span className="text-[10px] text-amber-400 font-normal normal-case">{selectedModels.length}/4</span>
+                    </div>
+                    <div className="py-1 max-h-[70vh] overflow-y-auto">
+                      {/* 最近使用 */}
+                      {(() => {
+                        const recentIds = (() => { try { return JSON.parse(localStorage.getItem("recent-models-compare") || "[]"); } catch { return []; } })();
+                        const recentModels = recentIds.map((id: string) => models.find(m => m.id === id)).filter(Boolean) as ChatModel[];
+                        return recentModels.length > 0 ? (
+                          <div className="px-1 pb-1 border-b border-surface-border">
+                            <div className="px-2 py-1 text-[10px] font-medium text-text-tertiary tracking-wider flex items-center gap-1">
+                              <span>⭐</span>
+                              最近使用
+                            </div>
+                            {recentModels.map((m: ChatModel) => (
+                              <label key={m.id} className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-left transition-colors duration-150 hover:bg-surface-card cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedModels.includes(m.id)}
+                                  onChange={(e) => { e.stopPropagation(); toggleCompareModel(m.id); }}
+                                  className="rounded border-surface-border text-amber-400 focus:ring-amber-400/40 shrink-0"
+                                />
+                                <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
+                                <span className="flex-1 text-sm truncate text-text-secondary hover:text-text-primary">{m.name}</span>
+                              </label>
+                            ))}
+                          </div>
+                        ) : null;
+                      })()}
+
+                      {/* 分组列表 */}
+                      <div className="px-1 pt-1">
+                        {[
+                          { name: "DeepSeek", label: "深度求索", icon: "D", color: "#4d6bfa" },
+                          { name: "OpenAI", label: "OpenAI", icon: "O", color: "#10a37f" },
+                          { name: "Anthropic", label: "Anthropic", icon: "A", color: "#cc785c" },
+                          { name: "Google", label: "Google", icon: "G", color: "#4285f4" },
+                          { name: "Moonshot", label: "月之暗面", icon: "K", color: "#00b96b" },
+                        ].map((grp) => {
+                          const groupModels = models.filter((m) => m.provider === grp.name);
+                          if (groupModels.length === 0) return null;
+                          return (
+                            <div key={grp.name}>
+                              <div className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-left">
+                                <div className="w-1 h-4 rounded-full shrink-0" style={{ backgroundColor: grp.color }} />
+                                <span className="flex-1 text-xs font-medium text-text-tertiary tracking-wide">{grp.label}</span>
+                                <span className="text-[10px] text-text-tertiary/60 tabular-nums">{groupModels.length}</span>
+                              </div>
+                              <div className="ml-1 pl-2 border-l border-surface-border/50">
+                                {groupModels.map((m) => (
+                                  <label key={m.id} className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-left transition-colors duration-150 hover:bg-surface-card cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedModels.includes(m.id)}
+                                      onChange={(e) => { e.stopPropagation(); toggleCompareModel(m.id); }}
+                                      className="rounded border-surface-border text-amber-400 focus:ring-amber-400/40 shrink-0"
+                                    />
+                                    <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
+                                    <span className="flex-1 text-sm truncate text-text-secondary hover:text-text-primary">{m.name}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    {selectedTemplateId > 0 && (
+                      <div className="px-3 py-2 text-[11px] text-text-tertiary border-t border-surface-border flex items-center gap-1.5">
+                        <span className="w-1 h-1 rounded-full bg-amber-400/60 shrink-0" />
+                        模板已选
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <ModelSelector
+              models={models}
+              selected={selectedModel}
+              onSelect={handleModelSelect}
+            />
+          )}
         </div>
-
-        {compareMode && selectedModels.length > 0 ? (
-          <div className="relative flex items-center">
-            <button
-              onClick={() => setModelMenuOpen(!modelMenuOpen)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-surface-border bg-surface-card text-sm text-text-primary hover:bg-surface-elevated transition-colors"
-            >
-              <Columns2 className="w-3.5 h-3.5 text-amber-400" />
-              <span>{selectedModels.length} 个模型</span>
-              <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", modelMenuOpen && "rotate-180")} />
-            </button>
-
-            {modelMenuOpen && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setModelMenuOpen(false)} />
-                <div className="absolute top-full left-0 mt-2 w-[280px] z-50 rounded-xl border border-surface-border bg-surface-elevated shadow-xl overflow-hidden">
-                  <div className="px-3 py-2 text-[11px] font-medium text-text-tertiary uppercase tracking-wider border-b border-surface-border flex items-center justify-between">
-                    <span>选择对比模型</span>
-                    <span className="text-[10px] text-amber-400 font-normal normal-case">{selectedModels.length}/4</span>
-                  </div>
-                  <div className="py-1 max-h-[70vh] overflow-y-auto">
-                    {/* 最近使用 */}
-                    {(() => {
-                      const recentIds = (() => { try { return JSON.parse(localStorage.getItem("recent-models-compare") || "[]"); } catch { return []; } })();
-                      const recentModels = recentIds.map((id: string) => models.find(m => m.id === id)).filter(Boolean) as ChatModel[];
-                      return recentModels.length > 0 ? (
-                        <div className="px-1 pb-1 border-b border-surface-border">
-                          <div className="px-2 py-1 text-[10px] font-medium text-text-tertiary tracking-wider flex items-center gap-1">
-                            <span>⭐</span>
-                            最近使用
-                          </div>
-                          {recentModels.map((m: ChatModel) => (
-                            <label key={m.id} className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-left transition-colors duration-150 hover:bg-surface-card cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={selectedModels.includes(m.id)}
-                                onChange={(e) => { e.stopPropagation(); toggleCompareModel(m.id); }}
-                                className="rounded border-surface-border text-amber-400 focus:ring-amber-400/40 shrink-0"
-                              />
-                              <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
-                              <span className="flex-1 text-sm truncate text-text-secondary hover:text-text-primary">{m.name}</span>
-                              <p className="text-[11px] text-text-tertiary hidden">{m.description}</p>
-                            </label>
-                          ))}
-                        </div>
-                      ) : null;
-                    })()}
-
-                    {/* 分组列表 */}
-                    <div className="px-1 pt-1">
-                      {[
-                        { name: "DeepSeek", label: "深度求索", icon: "D", color: "#4d6bfa" },
-                        { name: "OpenAI", label: "OpenAI", icon: "O", color: "#10a37f" },
-                        { name: "Anthropic", label: "Anthropic", icon: "A", color: "#cc785c" },
-                        { name: "Google", label: "Google", icon: "G", color: "#4285f4" },
-                        { name: "Moonshot", label: "月之暗面", icon: "K", color: "#00b96b" },
-                      ].map((grp) => {
-                        const groupModels = models.filter((m) => m.provider === grp.name);
-                        if (groupModels.length === 0) return null;
-                        return (
-                          <div key={grp.name}>
-                            <div className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-left">
-                              <div className="w-1 h-4 rounded-full shrink-0" style={{ backgroundColor: grp.color }} />
-                              <span className="flex-1 text-xs font-medium text-text-tertiary tracking-wide">{grp.label}</span>
-                              <span className="text-[10px] text-text-tertiary/60 tabular-nums">{groupModels.length}</span>
-                            </div>
-                            <div className="ml-1 pl-2 border-l border-surface-border/50">
-                              {groupModels.map((m) => (
-                                <label key={m.id} className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-left transition-colors duration-150 hover:bg-surface-card cursor-pointer">
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedModels.includes(m.id)}
-                                    onChange={(e) => { e.stopPropagation(); toggleCompareModel(m.id); }}
-                                    className="rounded border-surface-border text-amber-400 focus:ring-amber-400/40 shrink-0"
-                                  />
-                                  <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
-                                  <span className="flex-1 text-sm truncate text-text-secondary hover:text-text-primary">{m.name}</span>
-                                </label>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  {selectedTemplateId > 0 && (
-                    <div className="px-3 py-2 text-[11px] text-text-tertiary border-t border-surface-border flex items-center gap-1.5">
-                      <span className="w-1 h-1 rounded-full bg-amber-400/60 shrink-0" />
-                      模板已选
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        ) : (
-          <ModelSelector
-            models={models}
-            selected={selectedModel}
-            onSelect={handleModelSelect}
-          />
-        )}
-
-        {/* 右侧操作区 */}
         <div className="flex items-center gap-2">
           <ThemeToggle />
           <div className="w-8 h-8 rounded-full bg-surface-card border border-surface-border flex items-center justify-center">

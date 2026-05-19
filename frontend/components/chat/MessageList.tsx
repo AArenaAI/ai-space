@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/hooks/useChat";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import remarkFixBold from "@/lib/remark-fix-bold";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
@@ -122,8 +124,14 @@ function extractCitations(content: string): number[] {
 // 过滤掉搜索来源引用：去掉末尾的"引用来源：..."段落、--- 分隔线、和回答中的 [数字] 引用编号
 function sanitizeContent(content: string): string {
   let result = content;
-  
-  // 只移除搜索模块追加在末尾的来源区块；不要匹配普通正文里的“来源：AP”，否则会把新闻列表从第一条来源处截断
+
+  // 把模型常见的 [ ... ] 行间公式转为 remark-math 识别的 $$...$$（含 LaTeX \command 或 _ ^ 等特征时）
+  result = result.replace(
+    /^\[\s*([^\]]*(?:\\[a-zA-Z]+|[_^])[^\]]*)\s*\]$/gm,
+    "$$$$$1$$$$"
+  );
+
+  // 只移除搜索模块追加在末尾的来源区块；不要匹配普通正文里的"来源：AP"，否则会把新闻列表从第一条来源处截断
   result = result.replace(/\n{2,}[*_]*\s*(?:引用来源|参考来源|References|参考链接)[：:]\s*[\s\S]*$/, "");
   
   // 去掉末尾的 [数字] Title - URL 格式的列表
@@ -655,7 +663,8 @@ export default function MessageList({
                           <>
                             {reasoning && <ThinkBlock content={reasoning} isThinking={isThinking} />}
                             <ReactMarkdown
-                              remarkPlugins={[remarkGfm, remarkFixBold]}
+                              remarkPlugins={[remarkGfm, remarkFixBold, remarkMath]}
+                              rehypePlugins={[rehypeKatex]}
                               components={{
                                 code({ node, inline, className, children, ...props }: any) {
                                   const match = /language-(\w+)/.exec(className || "");
