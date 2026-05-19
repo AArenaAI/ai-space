@@ -81,14 +81,17 @@ func isMoonshot(model string) bool {
 }
 
 func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messages []Message, stream bool, reasoning bool, reasoningEffort string, search bool) (*AICompletionResponse, error) {
-	if s.cfg.OpenAIKey == "" {
+	apiKey := s.cfg.OpenAIOfficialKey
+	if apiKey == "" {
+		// 兼容旧部署：未配置官方 Key 时回退到旧 OPENAI_API_KEY。
+		apiKey = s.cfg.OpenAIKey
+	}
+	if apiKey == "" {
 		return nil, fmt.Errorf("未配置 OpenAI API Key")
 	}
 
+	// OpenAI 官方模型强制直连官方 API，不读取 OPENAI_BASE_URL，避免误走中转。
 	baseURL := "https://api.openai.com"
-	if s.cfg.OpenAIBaseURL != "" {
-		baseURL = s.cfg.OpenAIBaseURL
-	}
 
 	// 提取 system 消息到 instructions。注意：同一次请求可能同时包含模板、技能、图表渲染等多个 system prompt，
 	// 不能只保留最后一个，否则前面的模板/功能指令会被覆盖。
@@ -206,7 +209,7 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 	if err != nil {
 		return nil, fmt.Errorf("创建 OpenAI 请求失败: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+s.cfg.OpenAIKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := DefaultAIHTTPClient.Do(req)

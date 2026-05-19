@@ -18,6 +18,7 @@ type Config struct {
 	// ========== Chat Provider（对话模型，支持 OpenAI / Anthropic / Gemini / DeepSeek / Moonshot 多路并行）==========
 	OpenAIKey            string
 	OpenAIBaseURL        string  // 自定义 OpenAI 兼容 API 基础地址（用于中转/逆向）
+	OpenAIOfficialKey    string  // OpenAI 官方 API Key（直连，不走中转）
 	OpenAIInputPrice     float64 // ¥/千tokens
 	OpenAIOutputPrice    float64 // ¥/千tokens
 	AnthropicKey         string
@@ -109,6 +110,7 @@ func Load() *Config {
 
 		OpenAIKey:         getEnv("OPENAI_API_KEY", ""),
 		OpenAIBaseURL:     getEnv("OPENAI_BASE_URL", ""),
+		OpenAIOfficialKey: getEnv("OPENAI_OFFICIAL_API_KEY", ""),
 		OpenAIInputPrice:  getEnvFloat64("OPENAI_INPUT_PRICE", 0),
 		OpenAIOutputPrice: getEnvFloat64("OPENAI_OUTPUT_PRICE", 0),
 

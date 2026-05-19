@@ -716,6 +716,7 @@ export default function MessageList({
                   )}
                 </div>
               </div>
+              </div>
 
               {/* 右侧：用户头像 / AI复选框 */}
               <div className="mt-1 w-7 shrink-0">
