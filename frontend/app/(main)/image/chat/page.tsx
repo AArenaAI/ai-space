@@ -3,8 +3,7 @@
 import { Suspense } from "react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { useImage, GeneratedImage } from "@/hooks/useImage";
-import { useImageModels, ChatModel } from "@/hooks/useModels";
+import { useImageChats, useImageChatMessages, ImageChatMessage } from "@/hooks/useImageChat";
 import {
   Loader2,
   Send,
@@ -13,39 +12,37 @@ import {
   Plus,
   X,
   RefreshCw,
-  Download,
   Trash2,
-  ZoomIn,
   Copy,
   MessageSquarePlus,
   History,
+  ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import ImageLightbox from "@/components/ui/ImageLightbox";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 
-interface ChatMessage {
+interface DisplayMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   status?: "pending" | "completed" | "failed";
-  image?: GeneratedImage;
+  imageUrl?: string;
+  errorMessage?: string;
   createdAt: Date;
 }
 
-const API_BASE_URL = "";
-
-async function safeJSON(res: Response): Promise<any> {
-  const text = await res.text();
-  if (!text || text.trim() === "") {
-    throw new Error(`服务器返回空响应 (HTTP ${res.status})`);
-  }
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error(`服务器返回异常 (HTTP ${res.status}): ${text.slice(0, 100)}`);
-  }
+function msgToDisplay(m: ImageChatMessage): DisplayMessage {
+  return {
+    id: String(m.id),
+    role: m.role as "user" | "assistant",
+    content: m.content,
+    status: m.status as "pending" | "completed" | "failed",
+    imageUrl: m.image_url,
+    errorMessage: m.error_message,
+    createdAt: new Date(m.created_at),
+  };
 }
 
 export default function ImageChatPage() {
@@ -59,85 +56,95 @@ export default function ImageChatPage() {
 function ImageChatPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { images, fetchImages } = useImage();
-  const { models: imageModels } = useImageModels();
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const { chats, fetchChats, createChat, deleteChat } = useImageChats();
+  const { messages: apiMessages, fetchMessages, sendMessage } = useImageChatMessages();
+
+  const [displayMessages, setDisplayMessages] = useState<DisplayMessage[]>([]);
   const [prompt, setPrompt] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
-  const [previewImage, setPreviewImage] = useState<GeneratedImage | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [referenceImages, setReferenceImages] = useState<string[]>([]);
   const [uploadingRef, setUploadingRef] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [chatId, setChatId] = useState<number | null>(null);
+  const [pollingChatId, setPollingChatId] = useState<number | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [currentTaskId, setCurrentTaskId] = useState<number | null>(null);
 
-  // 滚动到底部
-  const [showHistory, setShowHistory] = useState(false);
-
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, []);
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
-
-  // 解析初始参数
+  // 解析 URL 参数
   const initialPrompt = searchParams.get("prompt") || "";
   const initialAspect = searchParams.get("aspect") || "1:1";
   const initialResolution = searchParams.get("resolution") || "1K";
   const initialQuality = searchParams.get("quality") || "medium";
   const initialRefs = searchParams.get("refs");
   const initialRefImages = initialRefs ? initialRefs.split(",") : [];
+  const urlChatId = searchParams.get("chatId");
 
-  // 页面加载时如果有初始 prompt，自动发起生成
+  // 初始化
   useEffect(() => {
-    if (initialPrompt && messages.length === 0) {
-      handleGenerate(initialPrompt, initialAspect, initialResolution, initialQuality, initialRefImages);
+    if (urlChatId) {
+      const id = Number(urlChatId);
+      if (!isNaN(id)) {
+        setChatId(id);
+        fetchMessages(id);
+      }
+    }
+    fetchChats();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlChatId]);
+
+  // 将 API 消息映射为显示消息
+  useEffect(() => {
+    if (apiMessages.length > 0) {
+      setDisplayMessages(apiMessages.map(msgToDisplay));
+    }
+  }, [apiMessages]);
+
+  // 滚动到底部
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [displayMessages, scrollToBottom]);
+
+  // 页面加载时如果有初始 prompt 且没有 chatId，自动发起生成
+  useEffect(() => {
+    if (initialPrompt && !urlChatId && displayMessages.length === 0) {
+      handleSend(initialPrompt, initialAspect, initialResolution, initialQuality, initialRefImages);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialPrompt]);
+  }, [initialPrompt, urlChatId]);
 
-  // 轮询当前任务状态
+  // 轮询
   useEffect(() => {
-    if (!currentTaskId) return;
+    if (!pollingChatId) return;
 
     const timer = setInterval(async () => {
       try {
-        const token = localStorage.getItem("token");
-        const res = await fetch(`${API_BASE_URL}/api/images`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) return;
-        const data = await safeJSON(res);
-        const allImages: GeneratedImage[] = data.images || [];
-        const task = allImages.find((img) => img.id === currentTaskId);
-        if (!task) return;
-
-        if (task.status === "completed" || task.status === "failed") {
+        const msgs = await fetchMessages(pollingChatId);
+        const pending = msgs.find((m) => m.role === "assistant" && m.status === "pending");
+        if (!pending) {
           clearInterval(timer);
-          setCurrentTaskId(null);
-          setMessages((prev) =>
-            prev.map((msg) =>
-              msg.role === "assistant" && msg.status === "pending" && msg.image?.id === currentTaskId
-                ? { ...msg, status: task.status as "completed" | "failed", image: task }
-                : msg
-            )
-          );
+          setPollingChatId(null);
+          setIsGenerating(false);
         }
       } catch {
-        // ignore poll errors
+        // ignore
       }
     }, 3000);
 
     pollTimer.current = timer;
     return () => clearInterval(timer);
-  }, [currentTaskId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pollingChatId]);
 
-  const handleGenerate = async (
+  const handleSend = async (
     text: string,
     aspect: string = "1:1",
     resolution: string = "1K",
@@ -150,73 +157,42 @@ function ImageChatPageInner() {
     }
     setIsGenerating(true);
 
-    // 添加用户消息
-    const userMsg: ChatMessage = {
-      id: `user-${Date.now()}`,
-      role: "user",
-      content: text,
-      createdAt: new Date(),
+    const payload = {
+      prompt: text,
+      aspect_ratio: aspect,
+      resolution,
+      quality,
+      reference_image_urls: refs.length > 0 ? refs : undefined,
     };
-
-    // 添加 AI pending 消息
-    const assistantMsg: ChatMessage = {
-      id: `assistant-${Date.now()}`,
-      role: "assistant",
-      content: text,
-      status: "pending",
-      createdAt: new Date(),
-    };
-
-    setMessages((prev) => [...prev, userMsg, assistantMsg]);
-    setPrompt("");
-    setReferenceImages([]);
 
     try {
-      const token = localStorage.getItem("token");
-      const body: Record<string, any> = {
-        prompt: text,
-        aspect_ratio: aspect,
-        resolution,
-        quality,
-      };
-      if (refs.length > 0) {
-        body.reference_image_urls = refs;
-      }
-      const response = await fetch(`${API_BASE_URL}/api/images/generate`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(body),
-      });
-
-      if (!response.ok) {
-        const err = await safeJSON(response);
-        throw new Error(err.error || `生成图片失败 (${response.status})`);
+      if (!chatId) {
+        // 创建新会话
+        const newChat = await createChat(payload);
+        setChatId(newChat.id);
+        // 更新 URL
+        router.replace(`/image/chat?chatId=${newChat.id}`);
+        setPollingChatId(newChat.id);
+        await fetchMessages(newChat.id);
+        fetchChats();
+      } else {
+        // 在现有会话中发送
+        await sendMessage(chatId, payload);
+        setPollingChatId(chatId);
+        await fetchMessages(chatId);
+        fetchChats();
       }
 
-      const data = await safeJSON(response);
-      setCurrentTaskId(data.id);
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === assistantMsg.id ? { ...msg, image: data } : msg
-        )
-      );
+      setPrompt("");
+      setReferenceImages([]);
     } catch (err: any) {
-      toast.error(err.message || "生成失败");
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === assistantMsg.id ? { ...msg, status: "failed" } : msg
-        )
-      );
-    } finally {
+      toast.error(err.message || "发送失败");
       setIsGenerating(false);
     }
   };
 
   const handleSubmit = () => {
-    handleGenerate(prompt, initialAspect, initialResolution, initialQuality, referenceImages);
+    handleSend(prompt, initialAspect, initialResolution, initialQuality, referenceImages);
   };
 
   const uploadReferenceImage = async (file: File) => {
@@ -256,7 +232,7 @@ function ImageChatPageInner() {
     setReferenceImages((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleDownload = async (url: string, id: number) => {
+  const handleDownload = async (url: string, id: string) => {
     try {
       const response = await fetch(url);
       const blob = await response.blob();
@@ -270,22 +246,13 @@ function ImageChatPageInner() {
     }
   };
 
-  const handleDelete = async (id: number) => {
-    try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(`${API_BASE_URL}/api/images/${id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) throw new Error("删除失败");
-      toast.success("删除成功");
-      setMessages((prev) => prev.filter((msg) => msg.image?.id !== id));
-    } catch {
-      toast.error("删除失败");
-    }
+  const handleDeleteMessageImage = async (msgId: string) => {
+    // 前端只是删除消息展示，后端不支持单条消息删除，跳过
+    setDeleteTargetId(null);
   };
 
-  const resolveImageUrl = (url: string) => {
+  const resolveImageUrl = (url?: string) => {
+    if (!url) return "";
     if (url.startsWith("file_")) {
       return `/api/files/${url}/view`;
     }
@@ -293,6 +260,35 @@ function ImageChatPageInner() {
   };
 
   const hasContent = prompt.trim().length > 0;
+
+  const handleNewChat = () => {
+    setChatId(null);
+    setDisplayMessages([]);
+    setPrompt("");
+    setReferenceImages([]);
+    setShowHistory(false);
+    router.replace("/image/chat");
+  };
+
+  const handleSelectChat = async (id: number) => {
+    setChatId(id);
+    setShowHistory(false);
+    router.replace(`/image/chat?chatId=${id}`);
+    await fetchMessages(id);
+  };
+
+  const handleDeleteChat = async (id: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await deleteChat(id);
+      toast.success("删除成功");
+      if (chatId === id) {
+        handleNewChat();
+      }
+    } catch {
+      toast.error("删除失败");
+    }
+  };
 
   return (
     <div className="flex flex-col h-full bg-surface">
@@ -326,7 +322,7 @@ function ImageChatPageInner() {
       {/* 聊天区域 */}
       <div className="flex-1 overflow-auto px-4 md:px-6 py-4">
         <div className="max-w-3xl mx-auto space-y-6">
-          {messages.length === 0 && !initialPrompt && (
+          {displayMessages.length === 0 && !initialPrompt && (
             <div className="flex flex-col items-center justify-center h-full text-text-tertiary py-20">
               <div className="w-16 h-16 rounded-2xl bg-surface-card border border-surface-border flex items-center justify-center mb-4">
                 <ImageIcon className="w-8 h-8 text-text-tertiary/50" />
@@ -335,7 +331,7 @@ function ImageChatPageInner() {
             </div>
           )}
 
-          {messages.map((msg) => {
+          {displayMessages.map((msg) => {
             if (msg.role === "user") {
               return (
                 <div key={msg.id} className="flex justify-end">
@@ -346,7 +342,6 @@ function ImageChatPageInner() {
               );
             }
 
-            // assistant message
             return (
               <div key={msg.id} className="flex justify-start">
                 <div className="max-w-[90%] md:max-w-[70%] space-y-2">
@@ -373,31 +368,31 @@ function ImageChatPageInner() {
                   {msg.status === "failed" && (
                     <div className="rounded-2xl rounded-tl-sm bg-red-500/5 border border-red-500/20 p-4">
                       <p className="text-sm text-red-400">生成失败，请重试</p>
-                      <p className="text-[11px] text-text-tertiary mt-1">{msg.content}</p>
+                      <p className="text-[11px] text-text-tertiary mt-1">{msg.errorMessage || msg.content}</p>
                     </div>
                   )}
 
-                  {msg.status === "completed" && msg.image && (
+                  {msg.status === "completed" && msg.imageUrl && (
                     <div className="rounded-2xl rounded-tl-sm bg-surface-card border border-surface-border overflow-hidden group">
                       <div className="relative aspect-auto">
                         <img
-                          src={msg.image.image_url}
-                          alt={msg.image.prompt}
+                          src={resolveImageUrl(msg.imageUrl)}
+                          alt={msg.content}
                           className="w-full max-h-[70vh] object-contain cursor-zoom-in bg-surface"
-                          onClick={() => setPreviewImage(msg.image!)}
+                          onClick={() => setPreviewImageUrl(resolveImageUrl(msg.imageUrl))}
                         />
                       </div>
                       <div className="px-3 py-2 border-t border-surface-border">
-                        <p className="text-xs text-text-secondary line-clamp-2">{msg.image.prompt}</p>
+                        <p className="text-xs text-text-secondary line-clamp-2">{msg.content}</p>
                         <p className="text-[10px] text-text-tertiary mt-0.5">
-                          {new Date(msg.image.created_at).toLocaleString()}
+                          {msg.createdAt.toLocaleString()}
                         </p>
                       </div>
                       {/* 图片下方工具栏 */}
                       <div className="flex items-center gap-0.5 px-3 py-2 border-t border-surface-border">
                         <button
                           onClick={() => {
-                            navigator.clipboard.writeText(msg.image!.prompt);
+                            navigator.clipboard.writeText(msg.content);
                             toast.success("提示词已复制");
                           }}
                           className="p-1.5 rounded-md hover:bg-surface-elevated text-text-tertiary hover:text-text-primary transition-colors"
@@ -407,7 +402,7 @@ function ImageChatPageInner() {
                         </button>
                         <button
                           onClick={() => {
-                            setPrompt(msg.image!.prompt);
+                            setPrompt(msg.content);
                             scrollToBottom();
                           }}
                           className="p-1.5 rounded-md hover:bg-surface-elevated text-text-tertiary hover:text-text-primary transition-colors"
@@ -417,8 +412,8 @@ function ImageChatPageInner() {
                         </button>
                         <button
                           onClick={() =>
-                            handleGenerate(
-                              msg.image!.prompt,
+                            handleSend(
+                              msg.content,
                               initialAspect,
                               initialResolution,
                               initialQuality
@@ -430,7 +425,7 @@ function ImageChatPageInner() {
                           <Send className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => setDeleteTarget(msg.image!.id)}
+                          onClick={() => setDeleteTargetId(msg.id)}
                           className="p-1.5 rounded-md hover:bg-red-500/10 text-text-tertiary hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
                           title="删除"
                         >
@@ -461,37 +456,34 @@ function ImageChatPageInner() {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            {images.length === 0 ? (
+            {chats.length === 0 ? (
               <p className="text-sm text-text-tertiary py-4 text-center">暂无历史记录</p>
             ) : (
-              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
-                {images.map((img) => (
+              <div className="space-y-1">
+                {chats.map((chat) => (
                   <div
-                    key={img.id}
-                    className="relative aspect-square rounded-xl overflow-hidden border border-surface-border cursor-pointer group"
-                    onClick={() => {
-                      const msg: ChatMessage = {
-                        id: `assistant-${img.id}`,
-                        role: "assistant",
-                        content: img.prompt,
-                        status: "completed",
-                        image: img,
-                        createdAt: new Date(img.created_at),
-                      };
-                      setMessages((prev) => [...prev, msg]);
-                      setShowHistory(false);
-                      scrollToBottom();
-                    }}
+                    key={chat.id}
+                    onClick={() => handleSelectChat(chat.id)}
+                    className={cn(
+                      "flex items-center justify-between px-3 py-2.5 rounded-xl cursor-pointer transition-colors",
+                      chatId === chat.id
+                        ? "bg-brand/10 border border-brand/20"
+                        : "hover:bg-surface-card border border-transparent"
+                    )}
                   >
-                    <img
-                      src={img.image_url}
-                      alt={img.prompt}
-                      className="w-full h-full object-cover"
-                    />
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                      <span className="text-[10px] text-white px-2 text-center line-clamp-2">
-                        {img.prompt}
-                      </span>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <ImageIcon className="w-4 h-4 text-text-tertiary shrink-0" />
+                      <span className="text-sm text-text-primary truncate">{chat.title}</span>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <ChevronRight className="w-4 h-4 text-text-tertiary" />
+                      <button
+                        onClick={(e) => handleDeleteChat(chat.id, e)}
+                        className="p-1 rounded-md hover:bg-red-500/10 text-text-tertiary hover:text-red-500 transition-colors"
+                        title="删除"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -516,14 +508,17 @@ function ImageChatPageInner() {
             {/* 右上角按钮：历史记录 + 新建会话 */}
             <div className="absolute top-2 right-2 flex items-center gap-1 z-10">
               <button
-                onClick={() => setShowHistory(!showHistory)}
+                onClick={() => {
+                  setShowHistory(!showHistory);
+                  if (!showHistory) fetchChats();
+                }}
                 className="w-7 h-7 rounded-lg flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
                 title="历史记录"
               >
                 <History className="w-4 h-4" />
               </button>
               <button
-                onClick={() => router.push("/image")}
+                onClick={handleNewChat}
                 className="w-7 h-7 rounded-lg flex items-center justify-center text-brand hover:text-brand-hover hover:bg-brand/10 transition-colors"
                 title="新建会话"
               >
@@ -621,28 +616,28 @@ function ImageChatPageInner() {
       </div>
 
       <ImageLightbox
-        isOpen={!!previewImage}
-        imageUrl={previewImage?.image_url || ""}
-        alt={previewImage?.prompt || ""}
-        onClose={() => setPreviewImage(null)}
+        isOpen={!!previewImageUrl}
+        imageUrl={previewImageUrl || ""}
+        alt=""
+        onClose={() => setPreviewImageUrl(null)}
         onDownload={
-          previewImage
-            ? () => handleDownload(previewImage.image_url, previewImage.id)
+          previewImageUrl
+            ? () => handleDownload(previewImageUrl, "preview")
             : undefined
         }
       />
 
       <ConfirmDialog
-        isOpen={deleteTarget !== null}
+        isOpen={deleteTargetId !== null}
         title="删除图片"
         description="确定要删除这张图片吗？此操作不可撤销。"
         confirmText="删除"
         cancelText="取消"
         onConfirm={() => {
-          if (deleteTarget) handleDelete(deleteTarget);
-          setDeleteTarget(null);
+          if (deleteTargetId) handleDeleteMessageImage(deleteTargetId);
+          setDeleteTargetId(null);
         }}
-        onCancel={() => setDeleteTarget(null)}
+        onCancel={() => setDeleteTargetId(null)}
         variant="danger"
       />
     </div>

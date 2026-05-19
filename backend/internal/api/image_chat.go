@@ -5,7 +5,6 @@ import (
 	"aipool-backend/internal/models"
 	"aipool-backend/internal/services"
 	"context"
-	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -416,4 +415,9 @@ func resolveRefImagePath(db *gorm.DB, url string) string {
 		}
 	}
 	return ""
+}
+
+// AutoMigrate 创建表
+func (h *ImageChatHandler) AutoMigrate() {
+	h.db.AutoMigrate(&models.ImageChat{}, &models.ImageChatMessage{})
 }

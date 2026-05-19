@@ -125,9 +125,9 @@ function extractCitations(content: string): number[] {
 function sanitizeContent(content: string): string {
   let result = content;
 
-  // 把模型常见的 [ ... ] 行间公式转为 remark-math 识别的 $$...$$（含 LaTeX \command 或 _ ^ 等特征时）
+  // 把模型常见的 [ ... ] 行间公式转为 remark-math 识别的 $$...$$（含数学符号 = + - * / ^ _ \\times 等时）
   result = result.replace(
-    /^\[\s*([^\]]*(?:\\[a-zA-Z]+|[_^])[^\]]*)\s*\]$/gm,
+    /^\[\s*([^\]]*(?:[=+\-*/^\\]|\\[a-zA-Z]+|[_^])[^\]]*)\s*\]$/gm,
     "$$$$$1$$$$"
   );
 
@@ -543,7 +543,7 @@ export default function MessageList({
                           </span>
                         )}
                       </div>
-                      <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity select-none">
                         <MessageMenu
                           onCopy={() => handleCopy(msg.content)}
                           onDelete={() => setDeleteTarget(msg.id)}
@@ -604,7 +604,7 @@ export default function MessageList({
                           <p className="text-[15px] leading-relaxed text-text-primary whitespace-pre-wrap">{msg.content}</p>
                         ) : null}
                         {!selectMode && (
-                          <div className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-0.5">
+                          <div className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-0.5 select-none">
                             <MessageMenu
                               onCopy={() => handleCopy(msg.content)}
                               onDelete={() => setDeleteTarget(msg.id)}
