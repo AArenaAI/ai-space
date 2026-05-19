@@ -494,49 +494,41 @@ export default function MessageList({
           return (
             <div
               key={msg.id}
-              className={cn(
-                "flex gap-4 animate-message-appear group",
-                isUser ? "justify-end" : "justify-start"
-              )}
+              className="flex gap-3 animate-message-appear group"
             >
-              {/* 复选框 - 选择模式 */}
-              {selectMode && (
-                <button
-                  onClick={() => toggleSelect(index)}
-                  className={cn(
-                    "mt-1 shrink-0 w-5 h-5 rounded-md border flex items-center justify-center transition-colors",
-                    isSelected
-                      ? "bg-brand border-brand text-white"
-                      : "border-surface-border text-transparent hover:border-brand/50"
-                  )}
-                >
-                  {isSelected && <SquareCheck className="w-3.5 h-3.5" />}
-                </button>
-              )}
+              {/* 左侧：AI头像 / 用户复选框 */}
+              <div className="mt-1 w-7 shrink-0">
+                {!isUser && !selectMode && (
+                  <div className="w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center">
+                    <Bot className="w-4 h-4 text-text-secondary" />
+                  </div>
+                )}
+                {isUser && selectMode && (
+                  <button
+                    onClick={() => toggleSelect(index)}
+                    className={cn(
+                      "w-5 h-5 rounded-md border flex items-center justify-center transition-colors",
+                      isSelected
+                        ? "bg-brand border-brand text-white"
+                        : "border-surface-border text-transparent hover:border-brand/50"
+                    )}
+                  >
+                    {isSelected && <SquareCheck className="w-3.5 h-3.5" />}
+                  </button>
+                )}
+              </div>
 
-              {!isUser && !selectMode && (
-                <div className="mt-1 w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center shrink-0">
-                  <Bot className="w-4 h-4 text-text-secondary" />
-                </div>
-              )}
-
-              {/* 用户消息占位，保持与AI头像对称 */}
-              {isUser && (
-                <div className={cn(
-                  "mt-1 w-7 h-7 shrink-0",
-                  !selectMode && "invisible"
-                )} />
-              )}
-
-              <div className="flex flex-col gap-1 max-w-3xl">
-                <div
-                  className={cn(
-                    "px-4 py-3 relative",
-                    isUser
-                      ? "rounded-2xl rounded-br-sm bg-[#EFF6FF] dark:bg-[#1E293B]"
-                      : "rounded-2xl rounded-bl-sm bg-[#F5F4F2] dark:bg-[#1F1F1F]"
-                  )}
-                >
+              {/* 中间内容 */}
+              <div className={cn("flex-1 flex min-w-0", isUser ? "justify-end" : "justify-start")}>
+                <div className="flex flex-col gap-1 min-w-0">
+                  <div
+                    className={cn(
+                      "px-4 py-3 relative w-fit max-w-full",
+                      isUser
+                        ? "rounded-2xl rounded-br-sm bg-[#EFF6FF] dark:bg-[#1E293B]"
+                        : "rounded-2xl rounded-bl-sm bg-[#F5F4F2] dark:bg-[#1F1F1F]"
+                    )}
+                  >
                   {isUser && !selectMode && (
                     <div className="absolute top-1.5 right-2 opacity-0 group-hover:opacity-100 transition-opacity select-none z-10">
                       <MessageMenu
@@ -725,11 +717,27 @@ export default function MessageList({
                 </div>
               </div>
 
-              {isUser && !selectMode && (
-                <div className="mt-1 w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center shrink-0">
-                  <User className="w-4 h-4 text-text-secondary" />
-                </div>
-              )}
+              {/* 右侧：用户头像 / AI复选框 */}
+              <div className="mt-1 w-7 shrink-0">
+                {isUser && !selectMode && (
+                  <div className="w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center">
+                    <User className="w-4 h-4 text-text-secondary" />
+                  </div>
+                )}
+                {!isUser && selectMode && (
+                  <button
+                    onClick={() => toggleSelect(index)}
+                    className={cn(
+                      "w-5 h-5 rounded-md border flex items-center justify-center transition-colors",
+                      isSelected
+                        ? "bg-brand border-brand text-white"
+                        : "border-surface-border text-transparent hover:border-brand/50"
+                    )}
+                  >
+                    {isSelected && <SquareCheck className="w-3.5 h-3.5" />}
+                  </button>
+                )}
+              </div>
             </div>
           );
         })}
