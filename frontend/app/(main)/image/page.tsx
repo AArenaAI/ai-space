@@ -112,10 +112,10 @@ function ReferenceImageStack({
   if (images.length === 0) {
     return (
       <div
-        className={cn(
-          "relative shrink-0 w-9 h-9 rounded-xl bg-gray-100 dark:bg-surface-elevated border border-gray-200 dark:border-surface-border flex items-center justify-center transition-all cursor-pointer hover:border-brand/40",
-          uploading && "cursor-not-allowed opacity-60"
-        )}
+          className={cn(
+            "relative shrink-0 w-9 h-9 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center transition-all cursor-pointer hover:border-brand/40",
+            uploading && "cursor-not-allowed opacity-60"
+          )}
         onClick={onAdd}
         onDragOver={(e) => {
           e.preventDefault();
@@ -267,7 +267,6 @@ export default function ImagePage() {
   const [deletingIds, setDeletingIds] = useState<number[]>([]);
   const [referenceImages, setReferenceImages] = useState<string[]>([]);
   const [uploadingRef, setUploadingRef] = useState(false);
-  const [activeTab, setActiveTab] = useState<"image" | "video">("image");
   const [showHistory, setShowHistory] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -289,7 +288,7 @@ export default function ImagePage() {
       const formData = new FormData();
       formData.append("file", file);
       const token = localStorage.getItem("token");
-      const res = await fetch("http://localhost:9091/api/files/upload", {
+      const res = await fetch("/api/files/upload", {
         method: "POST",
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
@@ -405,7 +404,7 @@ export default function ImagePage() {
           </button>
         </div>
 
-        <h1 className="text-2xl font-bold text-text-primary mt-8 mb-6">AI灵感创作器</h1>
+        <h1 className="text-2xl font-bold text-text-primary mt-8 mb-6">AI画图</h1>
       </div>
 
       <div className="flex-1 overflow-auto px-4 md:px-6 pb-8">
@@ -416,32 +415,33 @@ export default function ImagePage() {
               "relative flex flex-col rounded-2xl border transition-all duration-300",
               "bg-surface-card",
               referenceImages.length > 0
-                ? "border-brand/30 focus-within:border-brand/60 focus-within:shadow-[0_0_0_1px_rgba(59,130,246,0.15),0_0_20px_rgba(59,130,246,0.08)]"
-                : "border-surface-border focus-within:border-brand/50 focus-within:shadow-[0_0_0_1px_rgba(59,130,246,0.1)]"
+                ? "border-brand/20 focus-within:border-brand/40 focus-within:shadow-[0_0_0_1px_rgba(59,130,246,0.08)]"
+                : "border-surface-border focus-within:border-brand/30 focus-within:shadow-[0_0_0_1px_rgba(59,130,246,0.06)]"
             )}
           >
             {/* 输入区：参考图 + textarea */}
-            <div className="flex items-center gap-3 px-4 py-2.5">
-              <ReferenceImageStack
-                images={referenceImages}
-                onAdd={handleAddImage}
-                onRemove={handleRemoveImage}
-                uploading={uploadingRef}
-                onDropFile={uploadReferenceImage}
-                model={currentModel}
-              />
+            <div className="flex items-start gap-3 px-4 pt-3 pb-2">
+              <div className="mt-1">
+                <ReferenceImageStack
+                  images={referenceImages}
+                  onAdd={handleAddImage}
+                  onRemove={handleRemoveImage}
+                  uploading={uploadingRef}
+                  onDropFile={uploadReferenceImage}
+                  model={currentModel}
+                />
+              </div>
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder={
                   referenceImages.length > 0
                     ? "描述您想要对参考图进行的修改..."
-                    : "尝试描述您想要创建的内容..."
+                    : "尝试描述您想要创建的图像..."
                 }
                 disabled={isLoading || isGenerating}
-                rows={1}
                 className={cn(
-                  "flex-1 min-h-[42px] max-h-[150px] bg-transparent text-text-primary placeholder:text-text-tertiary resize-none focus:outline-none text-sm leading-5 py-1.5",
+                  "flex-1 min-h-[84px] max-h-[200px] bg-transparent text-text-primary placeholder:text-text-tertiary resize-none focus:outline-none text-[15px] leading-relaxed py-2",
                   (isLoading || isGenerating) && "opacity-60 cursor-not-allowed"
                 )}
                 onKeyDown={(e) => {
@@ -454,7 +454,7 @@ export default function ImagePage() {
             </div>
 
             {/* 底部工具栏 */}
-            <div className="flex items-center justify-between px-3 pb-3 pt-1">
+            <div className="flex items-center justify-between px-4 pb-3 pt-2">
               <div className="flex items-center gap-2 flex-wrap">
                 {/* 模型选择 */}
                 {imageModels.length > 0 && (
@@ -584,30 +584,30 @@ export default function ImagePage() {
               </div>
 
               {/* 发送按钮 */}
-              {isLoading || isGenerating ? (
-                <button
-                  disabled
-                  className="flex items-center justify-center w-8 h-8 rounded-lg bg-red-500/80 text-white cursor-not-allowed"
-                  title="生成中..."
-                >
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                </button>
-              ) : (
-                <button
-                  onClick={handleGenerate}
-                  disabled={!hasContent}
-                  className={cn(
-                    "flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200",
-                    hasContent
-                      ? referenceImages.length > 0
-                        ? "bg-brand text-white hover:bg-brand-hover shadow-[0_0_8px_rgba(59,130,246,0.25)]"
-                        : "bg-brand text-white hover:bg-brand-hover"
-                      : "bg-surface-elevated text-text-tertiary cursor-not-allowed"
-                  )}
-                >
-                  <Send className="w-3.5 h-3.5" />
-                </button>
-              )}
+                {isLoading || isGenerating ? (
+                  <button
+                    disabled
+                    className="flex items-center justify-center w-9 h-9 rounded-full bg-text-tertiary/30 text-white cursor-not-allowed"
+                    title="生成中..."
+                  >
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleGenerate}
+                    disabled={!hasContent}
+                    className={cn(
+                      "flex items-center justify-center w-9 h-9 rounded-full transition-all duration-200",
+                      hasContent
+                        ? referenceImages.length > 0
+                          ? "bg-brand text-white hover:bg-brand-hover shadow-[0_0_8px_rgba(59,130,246,0.25)]"
+                          : "bg-brand text-white hover:bg-brand-hover"
+                        : "bg-text-tertiary/20 text-text-tertiary cursor-not-allowed"
+                    )}
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
+                )}
             </div>
           </div>
 
