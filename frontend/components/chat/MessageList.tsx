@@ -520,7 +520,7 @@ export default function MessageList({
                 </div>
               )}
 
-              <div className="flex flex-col gap-1 max-w-[85%] sm:max-w-[75%]">
+              <div className="flex flex-col gap-1 max-w-3xl">
                 <div
                   className={cn(
                     "px-4 py-3 relative",
@@ -529,6 +529,16 @@ export default function MessageList({
                       : "rounded-2xl rounded-bl-sm bg-[#F5F4F2] dark:bg-[#1F1F1F]"
                   )}
                 >
+                  {isUser && !selectMode && (
+                    <div className="absolute top-1.5 right-2 opacity-0 group-hover:opacity-100 transition-opacity select-none z-10">
+                      <MessageMenu
+                        onCopy={() => handleCopy(msg.content)}
+                        onDelete={() => setDeleteTarget(msg.id)}
+                        onSelectMode={enterSelectMode}
+                        showRegenerate={false}
+                      />
+                    </div>
+                  )}
                   {!isUser && model && !selectMode && (
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
@@ -603,16 +613,6 @@ export default function MessageList({
                         {msg.content ? (
                           <p className="text-[15px] leading-relaxed text-text-primary whitespace-pre-wrap">{msg.content}</p>
                         ) : null}
-                        {!selectMode && (
-                          <div className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-0.5 select-none">
-                            <MessageMenu
-                              onCopy={() => handleCopy(msg.content)}
-                              onDelete={() => setDeleteTarget(msg.id)}
-                              onSelectMode={enterSelectMode}
-                              showRegenerate={false}
-                            />
-                          </div>
-                        )}
                       </div>
                     </div>
                   ) : isStreaming ? (

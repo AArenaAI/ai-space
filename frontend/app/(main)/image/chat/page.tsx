@@ -16,12 +16,12 @@ import {
   Copy,
   MessageSquarePlus,
   History,
-  ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import ImageLightbox from "@/components/ui/ImageLightbox";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import HistoryDrawer from "@/components/ui/HistoryDrawer";
 
 interface DisplayMessage {
   id: string;
@@ -57,7 +57,7 @@ function ImageChatPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const { chats, fetchChats, createChat, deleteChat } = useImageChats();
+  const { chats, fetchChats, createChat, deleteChat, updateChatTitle } = useImageChats();
   const { messages: apiMessages, fetchMessages, sendMessage } = useImageChatMessages();
 
   const [displayMessages, setDisplayMessages] = useState<DisplayMessage[]>([]);
@@ -277,8 +277,7 @@ function ImageChatPageInner() {
     await fetchMessages(id);
   };
 
-  const handleDeleteChat = async (id: number, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleDeleteChat = async (id: number) => {
     try {
       await deleteChat(id);
       toast.success("删除成功");
@@ -287,6 +286,15 @@ function ImageChatPageInner() {
       }
     } catch {
       toast.error("删除失败");
+    }
+  };
+
+  const handleRenameChat = async (id: number, title: string) => {
+    try {
+      await updateChatTitle(id, title);
+      toast.success("重命名成功");
+    } catch {
+      toast.error("重命名失败");
     }
   };
 
@@ -444,54 +452,23 @@ function ImageChatPageInner() {
       </div>
 
       {/* 历史记录面板 */}
-      {showHistory && (
-        <div className="shrink-0 border-t border-surface-border bg-surface-elevated px-4 md:px-6 py-3 max-h-[40vh] overflow-auto">
-          <div className="max-w-3xl mx-auto">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-text-primary">历史记录</h3>
-              <button
-                onClick={() => setShowHistory(false)}
-                className="w-7 h-7 rounded-lg flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            {chats.length === 0 ? (
-              <p className="text-sm text-text-tertiary py-4 text-center">暂无历史记录</p>
-            ) : (
-              <div className="space-y-1">
-                {chats.map((chat) => (
-                  <div
-                    key={chat.id}
-                    onClick={() => handleSelectChat(chat.id)}
-                    className={cn(
-                      "flex items-center justify-between px-3 py-2.5 rounded-xl cursor-pointer transition-colors",
-                      chatId === chat.id
-                        ? "bg-brand/10 border border-brand/20"
-                        : "hover:bg-surface-card border border-transparent"
-                    )}
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <ImageIcon className="w-4 h-4 text-text-tertiary shrink-0" />
-                      <span className="text-sm text-text-primary truncate">{chat.title}</span>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <ChevronRight className="w-4 h-4 text-text-tertiary" />
-                      <button
-                        onClick={(e) => handleDeleteChat(chat.id, e)}
-                        className="p-1 rounded-md hover:bg-red-500/10 text-text-tertiary hover:text-red-500 transition-colors"
-                        title="删除"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      <HistoryDrawer
+        isOpen={showHistory}
+        onClose={() => setShowHistory(false)}
+        title="AI画图历史"
+        items={chats.map((c) => ({
+          id: c.id,
+          title: c.title,
+          active: chatId === c.id,
+          updated_at: c.updated_at,
+        }))}
+        onSelect={handleSelectChat}
+        onNew={handleNewChat}
+        onRename={handleRenameChat}
+        onDelete={handleDeleteChat}
+        loading={false}
+        type="image"
+      />
 
       {/* 底部输入框 */}
       <div className="shrink-0 border-t border-surface-border px-4 md:px-6 py-3">
