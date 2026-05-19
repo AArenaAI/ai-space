@@ -29,6 +29,7 @@ interface DisplayMessage {
   content: string;
   status?: "pending" | "completed" | "failed";
   imageUrl?: string;
+  partialImageUrl?: string;
   errorMessage?: string;
   createdAt: Date;
 }
@@ -40,6 +41,7 @@ function msgToDisplay(m: ImageChatMessage): DisplayMessage {
     content: m.content,
     status: m.status as "pending" | "completed" | "failed",
     imageUrl: m.image_url,
+    partialImageUrl: m.partial_image_url,
     errorMessage: m.error_message,
     createdAt: new Date(m.created_at),
   };
@@ -137,7 +139,7 @@ function ImageChatPageInner() {
       } catch {
         // ignore
       }
-    }, 3000);
+    }, 1000);
 
     pollTimer.current = timer;
     return () => clearInterval(timer);
@@ -354,21 +356,38 @@ function ImageChatPageInner() {
               <div key={msg.id} className="flex justify-start">
                 <div className="max-w-[90%] md:max-w-[70%] space-y-2">
                   {msg.status === "pending" && (
-                    <div className="rounded-2xl rounded-tl-sm bg-surface-card border border-surface-border p-6">
-                      <div className="flex flex-col items-center gap-3 text-text-tertiary">
+                    <div className="rounded-2xl rounded-tl-sm bg-surface-card border border-surface-border overflow-hidden">
+                      {msg.partialImageUrl && (
                         <div className="relative">
-                          <Loader2 className="w-8 h-8 animate-spin text-brand/40" />
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            <ImageIcon className="w-3.5 h-3.5 text-brand" />
+                          <img
+                            src={resolveImageUrl(msg.partialImageUrl)}
+                            alt={msg.content}
+                            className="w-full max-h-[70vh] object-contain bg-surface"
+                          />
+                          <div className="absolute left-3 top-3 flex items-center gap-1.5 rounded-full bg-surface-card/90 border border-surface-border px-2.5 py-1 text-[11px] text-text-secondary backdrop-blur">
+                            <Loader2 className="w-3 h-3 animate-spin text-brand" />
+                            <span>生成中 · partial image</span>
                           </div>
                         </div>
-                        <div className="flex items-center gap-1.5 text-xs">
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                          <span>图片生成中...</span>
+                      )}
+                      <div className="p-6">
+                        <div className="flex flex-col items-center gap-3 text-text-tertiary">
+                          {!msg.partialImageUrl && (
+                            <div className="relative">
+                              <Loader2 className="w-8 h-8 animate-spin text-brand/40" />
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                <ImageIcon className="w-3.5 h-3.5 text-brand" />
+                              </div>
+                            </div>
+                          )}
+                          <div className="flex items-center gap-1.5 text-xs">
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            <span>{msg.partialImageUrl ? "继续细化中..." : "图片生成中..."}</span>
+                          </div>
+                          <p className="text-[11px] text-text-tertiary/60 max-w-[80%] text-center line-clamp-2">
+                            {msg.content}
+                          </p>
                         </div>
-                        <p className="text-[11px] text-text-tertiary/60 max-w-[80%] text-center line-clamp-2">
-                          {msg.content}
-                        </p>
                       </div>
                     </div>
                   )}

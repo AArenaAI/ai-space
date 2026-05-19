@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -38,6 +39,12 @@ type imageGenResponse struct {
 	} `json:"data"`
 }
 
+type ImageStreamEvent struct {
+	Type    string
+	B64JSON string
+	URL     string
+}
+
 // --- DashScope 原生格式 ---
 
 type dsContentItem struct {
@@ -46,7 +53,7 @@ type dsContentItem struct {
 }
 
 type dsMessage struct {
-	Role    string         `json:"role"`
+	Role    string          `json:"role"`
 	Content []dsContentItem `json:"content"`
 }
 
@@ -169,6 +176,124 @@ func (s *ImageGenService) generateOpenAICompatibleImage(ctx context.Context, bas
 	}
 
 	return "", fmt.Errorf("图片生成失败: API 未返回 url 或 b64_json")
+}
+
+func (s *ImageGenService) GenerateOpenAICompatibleImageStream(ctx context.Context, baseURL, apiKey, model, prompt, size, quality string, onEvent func(ImageStreamEvent) error) (string, error) {
+	if apiKey == "" {
+		return "", fmt.Errorf("未配置图片生成 API Key")
+	}
+	if baseURL == "" {
+		baseURL = "https://api.openai.com"
+	}
+	if model == "" {
+		model = "gpt-image-2"
+	}
+	if size == "" {
+		size = "1024x1024"
+	}
+
+	reqBody := map[string]any{
+		"model":          model,
+		"prompt":         prompt,
+		"size":           size,
+		"n":              1,
+		"stream":         true,
+		"partial_images": 3,
+	}
+	if quality != "" {
+		reqBody["quality"] = quality
+	}
+
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/v1/images/generations", bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+
+	client := &http.Client{Timeout: 300 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("请求图片生成 API 失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("图片生成 API 错误 (HTTP %d): %s", resp.StatusCode, string(body))
+	}
+
+	var finalURL string
+	var finalB64 string
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 1024), 32*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, ":") || !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "[DONE]" {
+			break
+		}
+
+		var event map[string]any
+		if err := json.Unmarshal([]byte(payload), &event); err != nil {
+			return "", fmt.Errorf("解析图片流事件失败: %w", err)
+		}
+		eventType, _ := event["type"].(string)
+		b64, _ := event["b64_json"].(string)
+		url, _ := event["url"].(string)
+		if b64 == "" {
+			if partial, ok := event["partial_image"].(map[string]any); ok {
+				b64, _ = partial["b64_json"].(string)
+			}
+		}
+		if data, ok := event["data"].([]any); ok && len(data) > 0 {
+			if first, ok := data[0].(map[string]any); ok {
+				if b64 == "" {
+					b64, _ = first["b64_json"].(string)
+				}
+				if url == "" {
+					url, _ = first["url"].(string)
+				}
+			}
+		}
+		if eventType == "image_generation.partial_image" && b64 != "" {
+			if onEvent != nil {
+				if err := onEvent(ImageStreamEvent{Type: eventType, B64JSON: b64}); err != nil {
+					return "", err
+				}
+			}
+			continue
+		}
+		if b64 != "" {
+			finalB64 = b64
+		}
+		if url != "" {
+			finalURL = url
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("读取图片流失败: %w", err)
+	}
+	if finalURL != "" {
+		return finalURL, nil
+	}
+	if finalB64 != "" {
+		url, err := s.saveBase64Image(finalB64)
+		if err != nil {
+			return "", fmt.Errorf("保存最终图片失败: %w", err)
+		}
+		return url, nil
+	}
+	return "", fmt.Errorf("图片生成失败: stream 未返回最终图片")
 }
 
 // --- DashScope 原生实现 ---

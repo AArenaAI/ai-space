@@ -2,17 +2,31 @@ package services
 
 import (
 	"aipool-backend/internal/config"
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
-	"mime/multipart"
-	"net/http"
+	"mime"
 	"os"
 	"path/filepath"
 	"time"
+
+	openai "github.com/openai/openai-go"
+	"github.com/openai/openai-go/option"
 )
+
+type namedContentTypeReader struct {
+	io.Reader
+	filename    string
+	contentType string
+}
+
+func (r namedContentTypeReader) Filename() string {
+	return r.filename
+}
+
+func (r namedContentTypeReader) ContentType() string {
+	return r.contentType
+}
 
 type ImageService struct {
 	cfg         *config.Config
@@ -66,8 +80,14 @@ type DALLEImageResponse struct {
 }
 
 // EditImage 基于参考图编辑生成图片，返回 (OpenAI 直链 URL, base64 数据, 错误)
-// 支持单张或多张参考图，使用 multipart/form-data 文件上传格式调用 /v1/images/edits
+// 保持旧调用签名；内部走 OpenAI SDK EditStreaming，最终图片以 base64 返回给调用方保存。
 func (s *ImageService) EditImage(ctx context.Context, prompt string, size string, referenceImagePaths []string) (imageURL string, b64Data string, err error) {
+	return s.EditImageStream(ctx, prompt, size, "", referenceImagePaths, nil)
+}
+
+// EditImageStream 基于参考图编辑生成图片，走 OpenAI SDK Images EditStreaming。
+// onEvent 会收到 image_edit.partial_image / image_edit.completed 的 base64 图片数据。
+func (s *ImageService) EditImageStream(ctx context.Context, prompt string, size string, quality string, referenceImagePaths []string, onEvent func(ImageStreamEvent) error) (imageURL string, b64Data string, err error) {
 	apiKey := s.cfg.OpenAIOfficialKey
 	if apiKey == "" {
 		apiKey = s.cfg.ImageGenAPIKey
@@ -79,92 +99,93 @@ func (s *ImageService) EditImage(ctx context.Context, prompt string, size string
 		return "", "", fmt.Errorf("未配置 Image Generation API Key")
 	}
 
-	// 默认尺寸
 	if size == "" {
 		size = "1024x1024"
 	}
-
-	// 验证参考图文件
 	if len(referenceImagePaths) == 0 {
 		return "", "", fmt.Errorf("未指定参考图文件路径")
 	}
-
-	baseURL := "https://api.openai.com"
 
 	model := s.cfg.ImageGenModel
 	if model == "" || model == "qwen-image-2.0-2026-03-03" || model == "qwen-image" {
 		model = "gpt-image-2"
 	}
 
-	// OpenAI Images Edit API 要求 multipart/form-data 上传 image 文件；不能用 JSON + base64。
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	_ = writer.WriteField("model", model)
-	_ = writer.WriteField("prompt", prompt)
-	_ = writer.WriteField("size", size)
-	_ = writer.WriteField("n", "1")
-
-	for i, path := range referenceImagePaths {
-		file, err := os.Open(path)
-		if err != nil {
-			if os.IsNotExist(err) {
+	files := make([]*os.File, 0, len(referenceImagePaths))
+	readers := make([]io.Reader, 0, len(referenceImagePaths))
+	for _, path := range referenceImagePaths {
+		file, openErr := os.Open(path)
+		if openErr != nil {
+			for _, f := range files {
+				_ = f.Close()
+			}
+			if os.IsNotExist(openErr) {
 				return "", "", fmt.Errorf("参考图文件不存在: %s", path)
 			}
-			return "", "", fmt.Errorf("打开参考图文件失败: %w", err)
+			return "", "", fmt.Errorf("打开参考图文件失败: %w", openErr)
 		}
-
-		fieldName := "image"
-		if len(referenceImagePaths) > 1 {
-			fieldName = fmt.Sprintf("image[%d]", i)
+		filename := filepath.Base(path)
+		contentType := mime.TypeByExtension(filepath.Ext(filename))
+		if contentType == "" {
+			contentType = "image/png"
 		}
-		part, err := writer.CreateFormFile(fieldName, filepath.Base(path))
-		if err != nil {
-			file.Close()
-			return "", "", fmt.Errorf("创建图片表单失败: %w", err)
+		files = append(files, file)
+		readers = append(readers, namedContentTypeReader{Reader: file, filename: filename, contentType: contentType})
+	}
+	defer func() {
+		for _, f := range files {
+			_ = f.Close()
 		}
-		if _, err := io.Copy(part, file); err != nil {
-			file.Close()
-			return "", "", fmt.Errorf("写入图片表单失败: %w", err)
+	}()
+
+	imageParam := openai.ImageEditParamsImageUnion{}
+	if len(readers) == 1 {
+		imageParam.OfFile = readers[0]
+	} else {
+		imageParam.OfFileArray = readers
+	}
+
+	params := openai.ImageEditParams{
+		Image:         imageParam,
+		Prompt:        prompt,
+		Model:         openai.ImageModel(model),
+		N:             openai.Int(1),
+		PartialImages: openai.Int(3),
+		Size:          openai.ImageEditParamsSize(size),
+	}
+	if quality != "" {
+		params.Quality = openai.ImageEditParamsQuality(quality)
+	}
+
+	client := openai.NewClient(
+		option.WithBaseURL("https://api.openai.com/v1"),
+		option.WithAPIKey(apiKey),
+	)
+	stream := client.Images.EditStreaming(ctx, params)
+	defer stream.Close()
+
+	var finalB64 string
+	for stream.Next() {
+		event := stream.Current()
+		if event.B64JSON == "" {
+			continue
 		}
-		file.Close()
+		if onEvent != nil {
+			if cbErr := onEvent(ImageStreamEvent{Type: event.Type, B64JSON: event.B64JSON}); cbErr != nil {
+				return "", "", cbErr
+			}
+		}
+		if event.Type == "image_edit.completed" {
+			finalB64 = event.B64JSON
+		}
 	}
-	if err := writer.Close(); err != nil {
-		return "", "", fmt.Errorf("关闭图片表单失败: %w", err)
+	if stream.Err() != nil {
+		return "", "", fmt.Errorf("OpenAI Images Edit stream 失败: %w", stream.Err())
 	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/v1/images/edits", &body)
-	if err != nil {
-		return "", "", fmt.Errorf("创建请求失败: %w", err)
+	if finalB64 == "" {
+		return "", "", fmt.Errorf("未生成图片 (EditStreaming 未返回 completed 图片)")
 	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-
-	client := &http.Client{Timeout: 300 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", "", fmt.Errorf("请求 OpenAI Images Edit API 失败: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", "", fmt.Errorf("读取响应失败: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("Images Edit API 错误 (HTTP %d): %s", resp.StatusCode, string(respBody))
-	}
-
-	var result DALLEImageResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", "", fmt.Errorf("解析响应失败: %w", err)
-	}
-
-	if len(result.Data) == 0 {
-		return "", "", fmt.Errorf("未生成图片 (API 返回空数据)")
-	}
-
-	return result.Data[0].URL, result.Data[0].B64JSON, nil
+	return "", finalB64, nil
 }
 
 // GenerateImage 生成图片，返回 (OpenAI 直链 URL, base64 数据, 错误)
@@ -182,6 +203,25 @@ func (s *ImageService) GenerateImage(ctx context.Context, prompt string, size st
 		model = "gpt-image-2"
 	}
 	url, err := s.imageGenSvc.Generate(ctx, "https://api.openai.com", apiKey, model, prompt, size, quality)
+	if err != nil {
+		return "", "", err
+	}
+	return url, "", nil
+}
+
+func (s *ImageService) GenerateImageStream(ctx context.Context, prompt string, size string, quality string, onEvent func(ImageStreamEvent) error) (imageURL string, b64Data string, err error) {
+	apiKey := s.cfg.OpenAIOfficialKey
+	if apiKey == "" {
+		apiKey = s.cfg.ImageGenAPIKey
+	}
+	if apiKey == "" {
+		apiKey = s.cfg.OpenAIKey
+	}
+	model := s.cfg.ImageGenModel
+	if model == "" || model == "qwen-image-2.0-2026-03-03" || model == "qwen-image" {
+		model = "gpt-image-2"
+	}
+	url, err := s.imageGenSvc.GenerateOpenAICompatibleImageStream(ctx, "https://api.openai.com", apiKey, model, prompt, size, quality, onEvent)
 	if err != nil {
 		return "", "", err
 	}

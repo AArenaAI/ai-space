@@ -3,6 +3,12 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+function cleanPathname(p: string | null): string {
+  let cleaned = (p ?? "").replace(/\.html$/, "").split("?")[0];
+  // Express 静态服务给目录加 trailing slash，如 /workspace/ → /workspace
+  if (cleaned !== "/") cleaned = cleaned.replace(/\/$/, "");
+  return cleaned;
+}
 import { createPortal } from "react-dom";
 import {
   MessageSquare, Palette, Presentation, LogIn, LogOut,
@@ -208,7 +214,7 @@ function MoreHoverPanel({
 
   return createPortal(
     <div
-      className="fixed z-[60] w-[280px] rounded-2xl border border-surface-border bg-surface-elevated shadow-2xl py-4 px-3"
+      className="fixed z-[60] w-[280px] rounded-2xl border border-surface-border bg-surface shadow-2xl py-4 px-3"
       style={{
         top: pos.top,
         left: pos.left,
@@ -316,7 +322,7 @@ function WorkHoverPanel({
 
   return createPortal(
     <div
-      className="fixed z-[60] w-[280px] rounded-2xl border border-surface-border bg-surface-elevated shadow-2xl py-4 px-3"
+      className="fixed z-[60] w-[280px] rounded-2xl border border-surface-border bg-surface shadow-2xl py-4 px-3"
       style={{
         top: pos.top,
         left: pos.left,
@@ -395,6 +401,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
   const themeCtx = useTheme();
   const theme = themeCtx?.theme || "light";
   const [collapsed, setCollapsed] = useState(false);
+  const [expandedLabels, setExpandedLabels] = useState<Set<string>>(new Set(["今天"]));
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("sidebar-width");
@@ -409,7 +416,8 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
   const [currentConvId, setCurrentConvId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
-  const pathname = usePathname();
+  const rawPathname = usePathname();
+  const pathname = cleanPathname(rawPathname);
   const router = useRouter();
   const { templates, updateTemplate } = useTemplates();
 
@@ -635,9 +643,23 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
             </div>
           </div>
         )}
-        {sortedLabels.map(label => (
+        {sortedLabels.map(label => {
+          const isExpanded = expandedLabels.has(label);
+          return (
           <div key={label}>
-            <div className="px-3 py-1 text-[11px] font-medium text-text-tertiary uppercase tracking-wider">{label}</div>
+            <button
+              onClick={() => setExpandedLabels(prev => {
+                const next = new Set(prev);
+                if (next.has(label)) next.delete(label);
+                else next.add(label);
+                return next;
+              })}
+              className="flex items-center justify-between w-full px-3 py-1 text-[11px] font-medium text-text-tertiary uppercase tracking-wider hover:text-text-secondary transition-colors"
+            >
+              <span>{label}</span>
+              <ChevronRight className={cn("w-3 h-3 transition-transform duration-200", isExpanded && "rotate-90")} />
+            </button>
+            {isExpanded && (
             <div className="space-y-0.5">
               {groups[label].map(conv => {
                 const isActive = String(conv.id) === currentConvId;
@@ -658,8 +680,10 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                 );
               })}
             </div>
+            )}
           </div>
-        ))}
+          );
+        })}
       </div>
     );
   };
@@ -713,7 +737,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                 onMouseLeave={hideSidebarTooltip}
                 className={cn(
                   "p-2.5 rounded-xl transition-colors block",
-                  pathname === "/chat" ? "bg-surface-card" : "hover:bg-surface-card"
+                  pathname === "/chat" ? "bg-brand/10 text-brand" : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
                 )}
               >
                 <MessageSquare className={cn("w-5 h-5", pathname === "/chat" ? "text-brand" : "text-text-tertiary")} />
@@ -729,7 +753,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                 onMouseLeave={hideSidebarTooltip}
                 className={cn(
                   "p-2.5 rounded-xl transition-colors",
-                  pathname === "/workspace" ? "bg-surface-card" : "hover:bg-surface-card"
+                  pathname === "/workspace" ? "bg-brand/10 text-brand" : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
                 )}
               >
                 <FolderKanban className={cn("w-5 h-5", pathname === "/workspace" ? "text-brand" : "text-text-tertiary")} />
@@ -745,8 +769,8 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                   className={cn(
                     "p-2.5 rounded-xl transition-colors",
                     pathname === "/ppt" || pathname?.startsWith("/ppt/") || pathname === "/skills" || pathname?.startsWith("/skills/")
-                      ? "bg-surface-card"
-                      : "hover:bg-surface-card"
+                      ? "bg-brand/10 text-brand"
+                      : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
                   )}
                 >
                   <Briefcase className={cn("w-5 h-5",
@@ -767,8 +791,8 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                   className={cn(
                     "p-2.5 rounded-xl transition-colors",
                     pathname === "/image" || pathname?.startsWith("/image/") || pathname === "/templates"
-                      ? "bg-surface-card"
-                      : "hover:bg-surface-card"
+                      ? "bg-brand/10 text-brand"
+                      : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
                   )}
                 >
                   <LayoutGrid className={cn("w-5 h-5", pathname === "/image" || pathname?.startsWith("/image/") || pathname === "/templates" ? "text-brand" : "text-text-tertiary")} />
@@ -801,8 +825,8 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                 className={cn(
                   "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150",
                   pathname === "/chat"
-                    ? "bg-surface-card text-text-primary font-medium shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
-                    : "text-text-secondary hover:bg-surface-card/60 hover:text-text-primary"
+                    ? "bg-brand/10 text-text-primary font-medium shadow-[inset_2px_0_0_0_var(--brand)]"
+                    : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                 )}
               >
                 <MessageSquare className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/chat" ? "text-brand" : "text-text-tertiary")} />
@@ -825,8 +849,8 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                   className={cn(
                     "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150",
                     pathname === "/workspace"
-                      ? "bg-surface-card text-text-primary font-medium shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
-                      : "text-text-secondary hover:bg-surface-card/60 hover:text-text-primary"
+                      ? "bg-brand/10 text-text-primary font-medium shadow-[inset_2px_0_0_0_var(--brand)]"
+                      : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                   )}
                 >
                   <FolderKanban className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/workspace" ? "text-brand" : "text-text-tertiary")} />
@@ -840,7 +864,12 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                 >
                   <button
                     ref={workBtnRef}
-                    className="flex items-center justify-between w-full px-3 py-2.5 rounded-xl text-sm text-text-secondary hover:bg-surface-card/60 hover:text-text-primary transition-all duration-150"
+                    className={cn(
+                      "flex items-center justify-between w-full px-3 py-2.5 rounded-xl text-sm transition-all duration-150",
+                      pathname === "/ppt" || pathname?.startsWith("/ppt/") || pathname === "/skills" || pathname?.startsWith("/skills/")
+                        ? "bg-brand/10 text-text-primary font-medium shadow-[inset_2px_0_0_0_var(--brand)]"
+                        : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
+                    )}
                   >
                     <div className="flex items-center gap-3">
                       <Briefcase className={cn("w-[18px] h-[18px] shrink-0 transition-colors",
@@ -864,8 +893,8 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                     className={cn(
                       "flex items-center justify-between w-full px-3 py-2.5 rounded-xl text-sm transition-all duration-150",
                       pathname === "/image" || pathname?.startsWith("/image/") || pathname === "/templates"
-                        ? "bg-surface-card text-text-primary font-medium shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
-                        : "text-text-secondary hover:bg-surface-card/60 hover:text-text-primary"
+                        ? "bg-brand/10 text-text-primary font-medium shadow-[inset_2px_0_0_0_var(--brand)]"
+                        : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                     )}
                   >
                     <div className="flex items-center gap-3">

@@ -87,17 +87,18 @@ export default function ModelSelector({
   const [open, setOpen] = useState(false);
   const [collapsedGroups, _setCollapsedGroups] = useState<Set<string>>(loadCollapsedGroups);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const hoverTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 悬浮延迟打开
-  const handleMouseEnter = useCallback(() => {
-    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-    hoverTimerRef.current = setTimeout(() => setOpen(true), 150);
-  }, []);
-
-  const handleMouseLeave = useCallback(() => {
-    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-    hoverTimerRef.current = setTimeout(() => setOpen(false), 200);
+  // 点击外部关闭
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
   }, []);
 
   // 构建分组
@@ -122,20 +123,6 @@ export default function ModelSelector({
       return prev;
     });
   }, [open, selectedProvider]);
-
-  // 点击外部关闭（仅点选逻辑保留；下拉由 hover 控制，外部点击只需关闭防挡）
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-    };
-  }, []);
 
   const handleSelect = useCallback(
     (model: ChatModel) => {
@@ -193,15 +180,16 @@ export default function ModelSelector({
   );
 
   return (
-    <div className="relative max-w-[200px] sm:max-w-none" ref={dropdownRef} onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave}>
-      {/* Pill 形状触发按钮 */}
+    <div className="relative max-w-[200px] sm:max-w-none" ref={dropdownRef}>
+      {/* 触发按钮 — 无边框点击式 */}
       <button
+        onClick={() => setOpen((v) => !v)}
         className={cn(
-          "flex items-center gap-2 px-3 py-1.5 text-sm font-medium transition-all duration-200 w-full",
-          "rounded-full border",
+          "flex items-center gap-2 px-2 py-1 text-sm font-medium transition-all duration-200 w-full",
+          "rounded-lg",
           open
-            ? "border-brand/50 bg-brand-muted text-brand"
-            : "border-surface-border bg-transparent text-text-secondary hover:bg-surface-card hover:text-text-primary"
+            ? "bg-surface-card text-text-primary"
+            : "bg-transparent text-text-secondary hover:bg-surface-card hover:text-text-primary"
         )}
       >
         <div
@@ -219,10 +207,10 @@ export default function ModelSelector({
         />
       </button>
 
-      {/* 下拉菜单 */}
+      {/* 下拉菜单 + 蒙版 */}
       {open && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[2px]" onClick={() => setOpen(false)} />
           <div className="absolute top-full left-0 mt-2 w-[280px] z-50 rounded-xl border border-surface-border bg-surface-elevated shadow-xl overflow-hidden">
             <div className="px-3 py-2 text-[11px] font-medium text-text-tertiary uppercase tracking-wider border-b border-surface-border">
               选择模型

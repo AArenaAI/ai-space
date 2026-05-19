@@ -1,0 +1,60 @@
+{
+  "base": "http://localhost:9091",
+  "results": [
+    {
+      "name": "生图",
+      "submit_http": 200,
+      "submit_elapsed_sec": 0.0,
+      "id": 88,
+      "created_at": "2026-05-19T20:07:25.098520073Z",
+      "status": "completed",
+      "image_url": "/api/images/file/img_1779221297_40308992.png",
+      "error_message": "",
+      "elapsed_sec": 54.03
+    },
+    {
+      "name": "背景移除",
+      "submit_http": 200,
+      "submit_elapsed_sec": 0.0,
+      "id": 89,
+      "created_at": "2026-05-19T20:08:19.124951911Z",
+      "status": "completed",
+      "image_url": "/api/images/file/30af6fe05f953e3a35fac759d74b10fa.png",
+      "error_message": "",
+      "elapsed_sec": 24.01
+    },
+    {
+      "name": "背景替换",
+      "submit_http": 200,
+      "submit_elapsed_sec": 0.0,
+      "id": 90,
+      "created_at": "2026-05-19T20:08:43.136904421Z",
+      "status": "completed",
+      "image_url": "/api/images/file/50fb7bce52a4b48d86a235af51b82c7c.png",
+      "error_message": "",
+      "elapsed_sec": 27.01
+    },
+    {
+      "name": "文字移除",
+      "submit_http": 200,
+      "submit_elapsed_sec": 0.0,
+      "id": 91,
+      "created_at": "2026-05-19T20:09:10.150677203Z",
+      "status": "completed",
+      "image_url": "/api/images/file/20082c4ff9eede82cfd9428d8f464323.png",
+      "error_message": "",
+      "elapsed_sec": 15.01
+    },
+    {
+      "name": "画质提升",
+      "submit_http": 200,
+      "submit_elapsed_sec": 0.0,
+      "id": 92,
+      "created_at": "2026-05-19T20:09:25.158470517Z",
+      "status": "completed",
+      "image_url": "/api/images/file/f932fa8f8198bbce2a5f9e8592a3b2bc.png",
+      "error_message": "",
+      "elapsed_sec": 54.02
+    }
+  ]
+}

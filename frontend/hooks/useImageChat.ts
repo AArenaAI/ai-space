@@ -14,6 +14,7 @@ export interface ImageChatMessage {
   role: string;
   content: string;
   image_url?: string;
+  partial_image_url?: string;
   status: string;
   error_message?: string;
   created_at: string;

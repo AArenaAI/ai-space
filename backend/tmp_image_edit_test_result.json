@@ -1,0 +1,48 @@
+{
+  "results": [
+    {
+      "name": "背景移除",
+      "submit_http": 200,
+      "submit_elapsed_sec": 0.01,
+      "id": 84,
+      "created_at": "2026-05-19T19:54:01.881894227Z",
+      "status": "completed",
+      "image_url": "/api/images/file/043d99efffe189fe8a5da4b2e5118708.png",
+      "error_message": "",
+      "elapsed_sec": 24.01
+    },
+    {
+      "name": "背景替换",
+      "submit_http": 200,
+      "submit_elapsed_sec": 0.0,
+      "id": 85,
+      "created_at": "2026-05-19T19:54:25.897522863Z",
+      "status": "completed",
+      "image_url": "/api/images/file/6916038a0ffa4267556d40cd2d973d5a.png",
+      "error_message": "",
+      "elapsed_sec": 30.01
+    },
+    {
+      "name": "文字移除",
+      "submit_http": 200,
+      "submit_elapsed_sec": 0.0,
+      "id": 86,
+      "created_at": "2026-05-19T19:54:55.911401412Z",
+      "status": "completed",
+      "image_url": "/api/images/file/8976616bdc8e422ac7a833a76316baad.png",
+      "error_message": "",
+      "elapsed_sec": 18.01
+    },
+    {
+      "name": "画质提升",
+      "submit_http": 200,
+      "submit_elapsed_sec": 0.0,
+      "id": 87,
+      "created_at": "2026-05-19T19:55:13.920163035Z",
+      "status": "completed",
+      "image_url": "/api/images/file/395d326f1b2a065c597fca996761aa08.png",
+      "error_message": "",
+      "elapsed_sec": 42.02
+    }
+  ]
+}

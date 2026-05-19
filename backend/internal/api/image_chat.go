@@ -257,10 +257,25 @@ func (h *ImageChatHandler) processImageChatJob(msgID uint, prompt, size, quality
 	var imageURL, b64Data string
 	var err error
 
+	onImageStreamEvent := func(event services.ImageStreamEvent) error {
+		if event.B64JSON == "" {
+			return nil
+		}
+		filename, saveErr := saveBase64Image(event.B64JSON)
+		if saveErr != nil {
+			return saveErr
+		}
+		partialURL := buildImageURL(baseURL, filename)
+		return h.db.Model(&models.ImageChatMessage{}).Where("id = ?", msgID).Updates(map[string]interface{}{
+			"partial_image_url": partialURL,
+			"status":            "pending",
+		}).Error
+	}
+
 	if len(refPaths) > 0 {
-		imageURL, b64Data, err = h.imageService.EditImage(ctx, prompt, size, refPaths)
+		imageURL, b64Data, err = h.imageService.EditImageStream(ctx, prompt, size, quality, refPaths, onImageStreamEvent)
 	} else {
-		imageURL, b64Data, err = h.imageService.GenerateImage(ctx, prompt, size, quality)
+		imageURL, b64Data, err = h.imageService.GenerateImageStream(ctx, prompt, size, quality, onImageStreamEvent)
 	}
 
 	if err != nil {
@@ -292,8 +307,9 @@ func (h *ImageChatHandler) processImageChatJob(msgID uint, prompt, size, quality
 
 	// 更新消息状态
 	h.db.Model(&models.ImageChatMessage{}).Where("id = ?", msgID).Updates(map[string]interface{}{
-		"image_url": imageURL,
-		"status":    "completed",
+		"image_url":         imageURL,
+		"partial_image_url": "",
+		"status":            "completed",
 	})
 
 	// 更新会话时间

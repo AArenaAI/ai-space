@@ -35,12 +35,12 @@ export default function ChatPage() {
   const [showLogin, setShowLogin] = useState(false);
 
   // 检测登录状态
-  useEffect(() => {
-    if (isLoggedIn === false) {
-      // 直接访问 /chat 未登录时，跳转到首页
-      router.replace("/");
-    }
-  }, [isLoggedIn, router]);
+  // useEffect(() => {
+  //   if (isLoggedIn === false) {
+  //     // 直接访问 /chat 未登录时，跳转到首页
+  //     router.replace("/");
+  //   }
+  // }, [isLoggedIn, router]);
 
   // 未加载完成时显示占位
   if (isLoggedIn === null) {
@@ -50,18 +50,6 @@ export default function ChatPage() {
           <span className="text-sm font-bold text-text-primary">AI</span>
         </div>
         <p className="text-sm text-text-secondary mt-3">加载中...</p>
-      </div>
-    );
-  }
-
-  // 未登录不渲染聊天界面（已由 useEffect 跳转）
-  if (!isLoggedIn) {
-    return (
-      <div className="flex flex-col h-screen bg-surface items-center justify-center">
-        <div className="w-10 h-10 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center animate-pulse">
-          <span className="text-sm font-bold text-text-primary">AI</span>
-        </div>
-        <p className="text-sm text-text-secondary mt-3">正在跳转...</p>
       </div>
     );
   }

@@ -22,7 +22,8 @@ export default function ChatContent() {
 
   if (loading || models.length === 0) return <ChatSkeleton />;
 
-  // 新对话按钮会刷新 t 参数；用 key 强制重置 useChat 内部状态，避免 replaceState 写入 id 后 Next searchParams 未同步导致点击无效
-  const chatKey = conversationId ? `conversation-${conversationId}` : `new-${newChatToken}`;
+  // 只用新对话按钮的 t 参数强制重置；不要用 conversationId 做 key。
+  // 第一条消息会创建新对话并把 URL 改成 ?id=xxx，如果 key 跟着变，会卸载正在流式生成的 ChatInterface，导致第一条 AI 回复不可见。
+  const chatKey = `chat-${newChatToken}`;
   return <ChatInterface key={chatKey} conversationId={conversationId} models={models} />;
 }

@@ -444,9 +444,6 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
 
         <div className="flex items-center gap-2">
           <ThemeToggle />
-          <div className="w-8 h-8 rounded-full bg-surface-card border border-surface-border flex items-center justify-center">
-            <span className="text-xs font-medium text-text-secondary">U</span>
-          </div>
         </div>
       </header>
 

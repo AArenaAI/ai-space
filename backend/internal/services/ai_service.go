@@ -11,6 +11,9 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	openai "github.com/openai/openai-go"
+	"github.com/openai/openai-go/option"
 )
 
 type AIService struct {
@@ -127,6 +130,19 @@ func normalizeDeepSeekModel(model string, reasoning bool) string {
 		return "deepseek-reasoner"
 	default:
 		return model
+	}
+}
+
+func normalizeDeepSeekReasoningEffort(effort string) string {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "", "standard", "medium":
+		return "medium"
+	case "light", "low", "minimal":
+		return "low"
+	case "extended", "heavy", "max", "xhigh", "high":
+		return "high"
+	default:
+		return effort
 	}
 }
 
@@ -621,69 +637,65 @@ func (s *AIService) callDeepSeek(ctx context.Context, model string, messages []M
 		baseURL = s.cfg.DeepSeekBaseURL
 	}
 
-	// 转换消息为 OpenAI 兼容格式
-	// 注意：DeepSeek 不支持 vision/图片输入（路径B不可用），所以如果消息带了图片，
-	// 我们只在文本中提示用户上传了图片，不发送 image_url content parts。
-	// 路径B不可用时，路径A（文件上传 RAG → image_caption chunk → <file_context>）
-	// 仍然有效——所有模型（包括 DeepSeek）都能从文本形式的图片描述中获得信息。
-	deepSeekMessages := make([]map[string]interface{}, 0, len(messages))
-	for _, m := range messages {
-		msg := map[string]interface{}{
-			"role": m.Role,
-		}
-		if len(m.Images) > 0 && m.Role == "user" {
-			contentText := m.Content
-			if contentText == "" {
-				contentText = "用户上传了图片（共" + fmt.Sprintf("%d", len(m.Images)) + "张），但本模型是纯文本模型，无法查看图片内容。请告知用户当前模型不支持图片识别，建议切换到 GPT-5x 或 Claude 等支持多模态的模型。"
-			} else {
-				contentText += "\n\n（用户同时上传了 " + fmt.Sprintf("%d", len(m.Images)) + " 张图片，但本模型是纯文本模型，无法查看图片内容。请告知用户当前模型不支持图片识别，建议切换到 GPT-5x 或 Claude 等支持多模态的模型。）"
-			}
-			msg["content"] = contentText
-		} else {
-			msg["content"] = m.Content
-		}
-		deepSeekMessages = append(deepSeekMessages, msg)
+	params := openai.ChatCompletionNewParams{
+		Model:     apiModel,
+		Messages:  deepSeekChatMessages(messages),
+		MaxTokens: openai.Int(int64(s.cfg.DeepSeekMaxTokens)),
 	}
-
-	reqBody := map[string]interface{}{
-		"model":      apiModel,
-		"messages":   deepSeekMessages,
-		"stream":     stream,
-		"max_tokens": s.cfg.DeepSeekMaxTokens,
+	if reasoning || apiModel == "deepseek-reasoner" {
+		effort := normalizeDeepSeekReasoningEffort(reasoningEffort)
+		params.ReasoningEffort = openai.ReasoningEffort(effort)
+		params.SetExtraFields(map[string]any{"thinking": map[string]any{"type": "enabled"}})
 	}
-
-	// Streaming 时添加 stream_options 以含 usage 信息
 	if stream {
-		reqBody["stream_options"] = map[string]any{
-			"include_usage": true,
+		params.StreamOptions = openai.ChatCompletionStreamOptionsParam{IncludeUsage: openai.Bool(true)}
+	}
+
+	fmt.Printf("[DeepSeek] model=%s api_model=%s reasoning=%v effort=%s stream=%v sdk=openai-go typed\n", model, apiModel, reasoning, reasoningEffort, stream)
+
+	client := openai.NewClient(
+		option.WithAPIKey(s.cfg.DeepSeekKey),
+		option.WithBaseURL(strings.TrimRight(baseURL, "/")+"/v1"),
+		option.WithHTTPClient(DefaultAIHTTPClient),
+	)
+
+	if stream {
+		streamResp := client.Chat.Completions.NewStreaming(ctx, params)
+		return &AICompletionResponse{Body: deepSeekSDKStreamBody{stream: streamResp}, Decoder: NewDeepSeekTypedStreamDecoder(streamResp), ModelType: "deepseek", Provider: "deepseek", Model: model}, nil
+	}
+
+	completion, err := client.Chat.Completions.New(ctx, params)
+	if err != nil {
+		return nil, fmt.Errorf("DeepSeek API 错误: %w", err)
+	}
+	return &AICompletionResponse{Body: io.NopCloser(strings.NewReader(completion.RawJSON())), ModelType: "deepseek", Provider: "deepseek", Model: model}, nil
+}
+
+func deepSeekChatMessages(messages []Message) []openai.ChatCompletionMessageParamUnion {
+	chatMessages := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages))
+	for _, m := range messages {
+		content := m.Content
+		if len(m.Images) > 0 && m.Role == "user" {
+			if content == "" {
+				content = "用户上传了图片（共" + fmt.Sprintf("%d", len(m.Images)) + "张），但本模型是纯文本模型，无法查看图片内容。请告知用户当前模型不支持图片识别，建议切换到 GPT-5x 或 Claude 等支持多模态的模型。"
+			} else {
+				content += "\n\n（用户同时上传了 " + fmt.Sprintf("%d", len(m.Images)) + " 张图片，但本模型是纯文本模型，无法查看图片内容。请告知用户当前模型不支持图片识别，建议切换到 GPT-5x 或 Claude 等支持多模态的模型。）"
+			}
+		}
+
+		switch m.Role {
+		case "system":
+			chatMessages = append(chatMessages, openai.SystemMessage(content))
+		case "assistant":
+			chatMessages = append(chatMessages, openai.AssistantMessage(content))
+		case "tool":
+			// 本项目消息结构没有 tool_call_id，按普通用户上下文降级，避免构造无效 tool message。
+			chatMessages = append(chatMessages, openai.UserMessage(content))
+		default:
+			chatMessages = append(chatMessages, openai.UserMessage(content))
 		}
 	}
-
-	jsonBody, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("序列化 DeepSeek 请求失败: %w", err)
-	}
-	// 日志记录实际发送的参数，便于排查
-	fmt.Printf("[DeepSeek] model=%s api_model=%s reasoning=%v effort=%s body_len=%d\n", model, apiModel, reasoning, reasoningEffort, len(jsonBody))
-	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/v1/chat/completions", bytes.NewBuffer(jsonBody))
-	if err != nil {
-		return nil, fmt.Errorf("创建 DeepSeek 请求失败: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+s.cfg.DeepSeekKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := DefaultAIHTTPClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		return nil, fmt.Errorf("DeepSeek API 错误: %s", string(body))
-	}
-
-	return &AICompletionResponse{Body: resp.Body, ModelType: "deepseek", Provider: "deepseek", Model: model}, nil
+	return chatMessages
 }
 
 func (s *AIService) callMoonshot(ctx context.Context, model string, messages []Message, stream bool, reasoning bool) (*AICompletionResponse, error) {

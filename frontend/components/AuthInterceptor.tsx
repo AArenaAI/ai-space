@@ -44,22 +44,22 @@ export default function AuthInterceptor() {
       const res = await originalFetch(input, init);
 
       // 检测 API 401 并且当前不在登录页
-      if (
-        res.status === 401 &&
-        !redirecting &&
-        typeof input === "string" &&
-        input.startsWith("/api/") &&
-        !window.location.pathname.startsWith("/login") &&
-        !window.location.pathname.startsWith("/register")
-      ) {
-        redirecting = true;
-        // 清除认证状态
-        localStorage.removeItem("token");
-        localStorage.removeItem("user");
-        // 跳转登录页，带上回来地址
-        const returnUrl = encodeURIComponent(window.location.pathname + window.location.search);
-        window.location.href = `/login?returnUrl=${returnUrl}`;
-      }
+      // if (
+      //   res.status === 401 &&
+      //   !redirecting &&
+      //   typeof input === "string" &&
+      //   input.startsWith("/api/") &&
+      //   !window.location.pathname.startsWith("/login") &&
+      //   !window.location.pathname.startsWith("/register")
+      // ) {
+      //   redirecting = true;
+      //   // 清除认证状态
+      //   localStorage.removeItem("token");
+      //   localStorage.removeItem("user");
+      //   // 跳转登录页，带上回来地址
+      //   const returnUrl = encodeURIComponent(window.location.pathname + window.location.search);
+      //   window.location.href = `/login?returnUrl=${returnUrl}`;
+      // }
 
       // 处理匿名用户特定错误码（覆盖常见的业务状态码）
       if (isApi && [400, 403, 409, 429].includes(res.status)) {

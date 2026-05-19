@@ -148,6 +148,10 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   const [compareModels, setCompareModels] = useState<string[]>([]);
   // 从对话历史或 prop 恢复的有效 skillKey（优先级：历史 > prop）
   const [effectiveSkillKey, setEffectiveSkillKey] = useState<string | undefined>(skillKey);
+  // 防止 createConversation 成功后 useEffect 因 models 等依赖变化而清空消息/重置对话
+  const shouldResetRef = useRef(true);
+  // 标记刚创建的新对话 ID，避免 useEffect 立即加载历史覆盖本地正在生成的消息
+  const justCreatedRef = useRef<number | undefined>(undefined);
 
   // 在客户端初始化后，从 localStorage 恢复上次选择的模型
   useEffect(() => {
@@ -171,20 +175,30 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     const loadController = new AbortController();
     const isLatestLoad = () => conversationLoadSeqRef.current === loadSeq;
 
-    // 切换历史对话时立即停止还在跑的 SSE，避免旧流继续改当前消息列表
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-
     if (!conversationId) {
-      setMessages([]);
       setIsLoadingHistory(false);
-      setCurrentConversation(undefined);
+      if (shouldResetRef.current) {
+        setMessages([]);
+        setCurrentConversation(undefined);
+      }
       setIsCompare(false);
       setCompareModels([]);
       setEffectiveSkillKey(skillKey);
       return () => loadController.abort();
+    }
+
+    // 如果这个对话是刚创建的，跳过加载历史（本地已经有正在生成的消息）
+    if (justCreatedRef.current === conversationId) {
+      justCreatedRef.current = undefined;
+      setIsLoadingHistory(false);
+      setCurrentConversation(conversationId);
+      return () => loadController.abort();
+    }
+
+    // 切换到已有历史对话时才停止还在跑的 SSE；刚创建的新对话不能 abort，否则第一条回复会被中断
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
     }
 
     const token = localStorage.getItem("token");
@@ -283,9 +297,14 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           body: JSON.stringify(body),
         });
 
-        if (!res.ok) return undefined;
+        if (!res.ok) {
+          console.error("createConversation failed:", res.status, await res.text().catch(() => ""));
+          return undefined;
+        }
         const data = await res.json();
         setCurrentConversation(data.id);
+        shouldResetRef.current = false; // 标记已创建对话，防止 useEffect 清空消息
+        justCreatedRef.current = data.id; // 标记刚创建，避免 useEffect 加载历史覆盖本地消息
         // 立即更新 URL，确保用户跳转/刷新后能回到当前对话
         const url = new URL(window.location.href);
         url.searchParams.set("id", String(data.id));
@@ -296,7 +315,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         // 通知侧边栏刷新列表
         window.dispatchEvent(new CustomEvent("conversation-created", { detail: data }));
         return data.id;
-      } catch {
+      } catch (err) {
+        console.error("createConversation error:", err);
         return undefined;
       }
     },
@@ -694,6 +714,21 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         // 自动创建新对话，标题用前 20 个字
         const title = content.trim().slice(0, 20) + (content.trim().length > 20 ? "..." : "");
         convId = await createConversation(title, selectedModel.id, effectiveSkillKey);
+        if (!convId) {
+          // 创建对话失败，显示错误提示并终止
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: uuidv4(),
+              role: "assistant",
+              content: "❌ 创建对话失败，请检查登录状态或刷新页面重试",
+              model: selectedModel.id,
+              createdAt: Date.now(),
+            },
+          ]);
+          setIsLoading(false);
+          return;
+        }
       }
 
       let contextMessages: Message[];

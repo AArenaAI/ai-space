@@ -13,12 +13,13 @@ type ImageChat struct {
 
 // ImageChatMessage AI画图会话中的消息
 type ImageChatMessage struct {
-	ID           uint      `json:"id" gorm:"primaryKey"`
-	ChatID       uint      `json:"chat_id" gorm:"index"`
-	Role         string    `json:"role"`                              // user, assistant
-	Content      string    `json:"content" gorm:"type:text"`          // prompt / text
-	ImageURL     string    `json:"image_url"`                         // 生成的图片URL
-	Status       string    `json:"status"`                            // pending, completed, failed
-	ErrorMessage string    `json:"error_message" gorm:"type:text"`    // 失败原因
-	CreatedAt    time.Time `json:"created_at"`
+	ID              uint      `json:"id" gorm:"primaryKey"`
+	ChatID          uint      `json:"chat_id" gorm:"index"`
+	Role            string    `json:"role"`                           // user, assistant
+	Content         string    `json:"content" gorm:"type:text"`       // prompt / text
+	ImageURL        string    `json:"image_url"`                      // 最终生成的图片URL
+	PartialImageURL string    `json:"partial_image_url"`              // streaming partial image URL
+	Status          string    `json:"status"`                         // pending, completed, failed
+	ErrorMessage    string    `json:"error_message" gorm:"type:text"` // 失败原因
+	CreatedAt       time.Time `json:"created_at"`
 }
