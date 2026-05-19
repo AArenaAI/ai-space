@@ -17,6 +17,7 @@ PROJECT_DIR="/workspace/aipool"
 FRONTEND_DIR="$PROJECT_DIR/frontend"
 BACKEND_DIR="$PROJECT_DIR/backend"
 BACKEND_BIN="$BACKEND_DIR/aipool"
+export PATH="/usr/local/go/bin:$PATH"
 LOG_DIR="/tmp/aipool"
 mkdir -p "$LOG_DIR"
 PID_FILE="$LOG_DIR/pids.txt"
@@ -44,9 +45,13 @@ for port in "$FRONTEND_PORT" "$BACKEND_PORT"; do
     fi
 done
 
-# [1/2] 启动后端
-echo -e "${GREEN}[1/2] 启动后端服务 (Go) 端口: $BACKEND_PORT...${NC}"
+# [1/2] 编译并启动后端
+echo -e "${GREEN}[1/2] 编译后端服务 (Go)...${NC}"
 cd "$BACKEND_DIR"
+go build -o aipool ./cmd/
+echo -e "${GREEN}✅ 后端编译完成${NC}"
+
+echo -e "${GREEN}[1/2] 启动后端服务 (Go) 端口: $BACKEND_PORT...${NC}"
 PORT="$BACKEND_PORT" nohup "$BACKEND_BIN" > "$LOG_DIR/backend.log" 2>&1 &
 BACKEND_PID=$!
 echo "$BACKEND_PID" >> "$PID_FILE"

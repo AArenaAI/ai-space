@@ -88,25 +88,18 @@ export const MODELS: ChatModel[] = [
     color: "#4285f4",
   },
   {
-    id: "deepseek-v4-pro",
-    name: "DeepSeek-V4 Pro",
+    id: "deepseek-chat",
+    name: "DeepSeek Chat",
     provider: "DeepSeek",
-    description: "V4 Pro 增强版，最强推理能力",
+    description: "DeepSeek 官方通用对话模型",
     color: "#4d6bfa",
   },
   {
     id: "deepseek-reasoner",
     name: "DeepSeek-R1",
     provider: "DeepSeek",
-    description: "深度思考模型，展示完整推理过程",
+    description: "DeepSeek 官方深度推理模型",
     color: "#8b5cf6",
-  },
-  {
-    id: "deepseek-v4-flash",
-    name: "DeepSeek-V4 Flash",
-    provider: "DeepSeek",
-    description: "V4 轻量版，极速响应",
-    color: "#6366f1",
   },
   {
     id: "moonshot-v1-8k",
@@ -141,9 +134,11 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   const defaultModel = models.length > 0 ? models[0] : ({} as ChatModel);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [selectedModel, setSelectedModelState] = useState<ChatModel>(defaultModel);
   const [currentConversation, setCurrentConversation] = useState<number | undefined>(conversationId);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const conversationLoadSeqRef = useRef(0);
   const lastReasoningRef = useRef<{ enabled: boolean; effort?: string }>({ enabled: false, effort: "high" });
   const lastSearchRef = useRef<boolean>(false);
   const [initialized, setInitialized] = useState(false);
@@ -170,23 +165,46 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     } catch {}
   }, []);
   useEffect(() => {
+    const loadSeq = ++conversationLoadSeqRef.current;
+    const loadController = new AbortController();
+    const isLatestLoad = () => conversationLoadSeqRef.current === loadSeq;
+
+    // 切换历史对话时立即停止还在跑的 SSE，避免旧流继续改当前消息列表
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+
     if (!conversationId) {
       setMessages([]);
+      setIsLoadingHistory(false);
       setCurrentConversation(undefined);
-      return;
+      setIsCompare(false);
+      setCompareModels([]);
+      setEffectiveSkillKey(skillKey);
+      return () => loadController.abort();
     }
 
     const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!token) {
+      setIsLoadingHistory(false);
+      return () => loadController.abort();
+    }
 
+    setIsLoadingHistory(true);
     setCurrentConversation(conversationId);
 
-    // 加载对话消息
+    // 加载对话消息：必须可取消 + 只允许最新一次切换落盘，避免快速点击历史时旧请求覆盖新会话导致白屏/卡顿
     fetch(`${API_BASE_URL}/api/conversations/${conversationId}`, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: loadController.signal,
     })
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error(`load conversation failed: ${res.status}`);
+        return res.json();
+      })
       .then((data) => {
+        if (!isLatestLoad() || loadController.signal.aborted) return;
         if (data.messages) {
           const loadedMessages: Message[] = data.messages.map((m: any) => ({
             id: String(m.id || uuidv4()),
@@ -197,37 +215,39 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             files: m.files || undefined,
           }));
           setMessages(loadedMessages);
-          // 设置当前模型
-          if (data.model) {
-            const model = models.find((m) => m.id === data.model);
-            if (model) setSelectedModel(model);
-          }
-          // 检测是否为对比对话
-          setIsCompare(!!data.compare);
-          if (data.compare_models) {
-            try {
-              const parsed = JSON.parse(data.compare_models);
-              if (Array.isArray(parsed)) setCompareModels(parsed);
-            } catch {}
-          }
-          // 从历史对话恢复 skill_key（如果 URL 没有提供）
-          if (data.skill_key && !skillKey) {
-            setEffectiveSkillKey(data.skill_key);
-          }
+        } else {
+          setMessages([]);
         }
+        setIsLoadingHistory(false);
+
+        // 设置当前模型
+        if (data.model) {
+          const model = models.find((m) => m.id === data.model);
+          if (model) setSelectedModel(model);
+        }
+        // 检测是否为对比对话
+        setIsCompare(!!data.compare);
+        if (data.compare_models) {
+          try {
+            const parsed = JSON.parse(data.compare_models);
+            setCompareModels(Array.isArray(parsed) ? parsed : []);
+          } catch {
+            setCompareModels([]);
+          }
+        } else {
+          setCompareModels([]);
+        }
+        // 从历史对话恢复 skill_key；如果历史没有，则回到 URL 传入的 skillKey
+        setEffectiveSkillKey(data.skill_key || skillKey);
       })
-      .catch(() => {
+      .catch((err) => {
+        if (!isLatestLoad() || loadController.signal.aborted || err?.name === "AbortError") return;
         setMessages([]);
+        setIsLoadingHistory(false);
       });
 
-    // cleanup: 切换对话或组件卸载时中止正在进行的 SSE
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
-      }
-    };
-  }, [conversationId]);
+    return () => loadController.abort();
+  }, [conversationId, models, setSelectedModel, skillKey]);
 
   // 创建新对话
   const createConversation = useCallback(
@@ -257,6 +277,13 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         if (!res.ok) return undefined;
         const data = await res.json();
         setCurrentConversation(data.id);
+        // 立即更新 URL，确保用户跳转/刷新后能回到当前对话
+        const url = new URL(window.location.href);
+        url.searchParams.set("id", String(data.id));
+        if (sk && !url.searchParams.get("key")) {
+          url.searchParams.set("key", sk);
+        }
+        window.history.replaceState({}, "", url.toString());
         // 通知侧边栏刷新列表
         window.dispatchEvent(new CustomEvent("conversation-created", { detail: data }));
         return data.id;
@@ -281,6 +308,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       let accumulated = "";
       let pendingDelta = "";
       let buffer = "";
+      let inReasoningBlock = false;
       let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
       const flush = () => {
@@ -310,6 +338,10 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         }
         if (!data) return;
         if (data === "[DONE]") {
+          if (inReasoningBlock) {
+            pendingDelta += "</think>";
+            inReasoningBlock = false;
+          }
           flush();
           return;
         }
@@ -361,7 +393,40 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             );
             return;
           }
-          const delta = parsed.choices?.[0]?.delta?.content || "";
+          const rawDelta = parsed.choices?.[0]?.delta || {};
+          const stringifyDelta = (value: unknown): string => {
+            if (typeof value === "string") return value;
+            if (typeof value === "number" || typeof value === "boolean") return String(value);
+            if (Array.isArray(value)) {
+              return value
+                .map((item) => stringifyDelta(item))
+                .filter(Boolean)
+                .join("");
+            }
+            if (value && typeof value === "object") {
+              const obj = value as Record<string, unknown>;
+              return stringifyDelta(
+                obj.text || obj.content || obj.summary || obj.delta || obj.value || ""
+              );
+            }
+            return "";
+          };
+          const contentDelta = stringifyDelta(rawDelta.content);
+          const reasoningDelta = stringifyDelta(rawDelta.reasoning_content || rawDelta.reasoning);
+          let delta = "";
+          if (reasoningDelta) {
+            if (!inReasoningBlock) {
+              delta += "<think>";
+              inReasoningBlock = true;
+            }
+            delta += reasoningDelta;
+          } else if (contentDelta) {
+            if (inReasoningBlock) {
+              delta += "</think>";
+              inReasoningBlock = false;
+            }
+            delta += contentDelta;
+          }
           pendingDelta += delta;
 
           if (!flushTimer) {
@@ -755,6 +820,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   return {
     messages,
     isLoading,
+    isLoadingHistory,
     selectedModel,
     setSelectedModel,
     sendMessage,

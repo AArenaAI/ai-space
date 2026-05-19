@@ -8,9 +8,10 @@ import {
   MessageSquare, Palette, Presentation, LogIn, LogOut,
   PanelLeftClose, MessageSquarePlus, Search, ChevronRight,
   User, Trash2, MoreHorizontal, Pencil, Pin, PinOff, Link2, Check,
-  FileText, LayoutGrid, X, Clock, Sparkles, Image, Eraser,
+  FileText, LayoutGrid, X, Clock, Sparkles, Image, ImageIcon, Eraser,
   Type, ZoomIn, FolderKanban,
   Briefcase, FileCode, PenTool, BarChart3, Mail, ClipboardList, Terminal, GraduationCap, Languages,
+  Zap, Shield, BookOpen, Wrench, Globe, Code2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
@@ -187,6 +188,7 @@ function MoreHoverPanel({
     {
       title: "创建",
       items: [
+        { icon: ImageIcon, label: "AI画图", href: "/image", color: "text-purple-500", bg: "bg-purple-500/10" },
         { icon: Image, label: "背景移除", href: "/image/edit?mode=remove-bg", color: "text-green-500", bg: "bg-green-500/10" },
         { icon: Eraser, label: "背景替换", href: "/image/edit?mode=replace-bg", color: "text-purple-500", bg: "bg-purple-500/10" },
         { icon: Type, label: "文字移除", href: "/image/edit?mode=text-removal", color: "text-amber-500", bg: "bg-amber-500/10" },
@@ -238,6 +240,138 @@ function MoreHoverPanel({
   );
 }
 
+/* ───── AI工作悬浮面板 ───── */
+function WorkHoverPanel({
+  open, anchorEl, onClose, onMouseEnter, onMouseLeave,
+}: {
+  open: boolean; anchorEl: HTMLElement | null; onClose: () => void; onMouseEnter?: () => void; onMouseLeave?: () => void;
+}) {
+  const router = useRouter();
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const [skills, setSkills] = useState<Array<{ key: string; title: string; description: string; icon: string; tags: string[]; is_meta?: boolean }>>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (open && anchorEl) {
+      const rect = anchorEl.getBoundingClientRect();
+      setPos({ top: rect.top, left: rect.right + 8 });
+    }
+  }, [open, anchorEl]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open, onClose]);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:9091"}/api/skills`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.skills) {
+          setSkills(data.skills.filter((s: any) => !s.is_meta));
+        } else if (Array.isArray(data)) {
+          setSkills(data.filter((s: any) => !s.is_meta));
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [open]);
+
+  const handleNavigate = (href: string) => {
+    onClose();
+    router.push(href);
+  };
+
+  const iconMap: Record<string, React.ElementType> = {
+    zap: Zap, search: Search, shield: Shield, "file-code": FileCode,
+    "book-open": BookOpen, wrench: Wrench, "pen-tool": PenTool,
+    "message-square": MessageSquare, globe: Globe, briefcase: Briefcase,
+    "code-2": Code2, "bar-chart": BarChart3, mail: Mail,
+    "clipboard-list": ClipboardList, terminal: Terminal,
+    "graduation-cap": GraduationCap, languages: Languages,
+  };
+  const colorMap: Record<string, string> = {
+    zap: "text-yellow-500", search: "text-blue-500", shield: "text-red-500",
+    "file-code": "text-cyan-500", "book-open": "text-amber-500", wrench: "text-slate-500",
+    "pen-tool": "text-pink-500", "message-square": "text-green-500", globe: "text-sky-500",
+    briefcase: "text-orange-500", "code-2": "text-indigo-500", "bar-chart": "text-emerald-500",
+    mail: "text-rose-500", "clipboard-list": "text-violet-500", terminal: "text-teal-500",
+    "graduation-cap": "text-lime-500", languages: "text-fuchsia-500",
+  };
+  const bgMap: Record<string, string> = {
+    zap: "bg-yellow-500/10", search: "bg-blue-500/10", shield: "bg-red-500/10",
+    "file-code": "bg-cyan-500/10", "book-open": "bg-amber-500/10", wrench: "bg-slate-500/10",
+    "pen-tool": "bg-pink-500/10", "message-square": "bg-green-500/10", globe: "bg-sky-500/10",
+    briefcase: "bg-orange-500/10", "code-2": "bg-indigo-500/10", "bar-chart": "bg-emerald-500/10",
+    mail: "bg-rose-500/10", "clipboard-list": "bg-violet-500/10", terminal: "bg-teal-500/10",
+    "graduation-cap": "bg-lime-500/10", languages: "bg-fuchsia-500/10",
+  };
+
+  if (!open || !anchorEl) return null;
+
+  return createPortal(
+    <div
+      className="fixed z-[60] w-[280px] rounded-2xl border border-surface-border bg-surface-elevated shadow-2xl py-4 px-3"
+      style={{
+        top: pos.top,
+        left: pos.left,
+        animation: "slide-in-right 180ms ease-out",
+      }}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    >
+      {/* AI PPT */}
+      <div className="mb-3">
+        <h3 className="text-sm font-semibold text-text-primary mb-2 px-1">工具</h3>
+        <div className="grid grid-cols-2 gap-1.5">
+          <button
+            onClick={() => handleNavigate("/ppt")}
+            className="flex items-center gap-2.5 p-2.5 rounded-xl text-left transition-all duration-150 hover:bg-surface-card group"
+          >
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-orange-500/10">
+              <Presentation className="w-4 h-4 text-orange-500" />
+            </div>
+            <span className="text-sm text-text-secondary group-hover:text-text-primary transition-colors">AI PPT</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Skills */}
+      <div className="border-t border-surface-border/40 pt-3">
+        <h3 className="text-sm font-semibold text-text-primary mb-2 px-1">智能体</h3>
+        {loading ? (
+          <div className="flex items-center justify-center py-4">
+            <div className="w-5 h-5 border-2 border-surface-border border-t-brand rounded-full animate-spin" />
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-1.5 max-h-[50vh] overflow-y-auto pr-1">
+            {skills.map((skill) => {
+              const Icon = iconMap[skill.icon] || Sparkles;
+              return (
+                <button
+                  key={skill.key}
+                  onClick={() => handleNavigate(`/skills/chat?key=${skill.key}`)}
+                  className="flex items-center gap-2.5 p-2.5 rounded-xl text-left transition-all duration-150 hover:bg-surface-card group"
+                >
+                  <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0", bgMap[skill.icon] || "bg-brand/10")}>
+                    <Icon className={cn("w-4 h-4", colorMap[skill.icon] || "text-brand")} />
+                  </div>
+                  <span className="text-sm text-text-secondary group-hover:text-text-primary transition-colors truncate">{skill.title}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 /* ───── 骨架屏 ───── */
 
 function ConversationSkeleton() {
@@ -284,6 +418,11 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
   const moreBtnRef = useRef<HTMLButtonElement>(null);
   const moreTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  /* AI工作面板 */
+  const [workOpen, setWorkOpen] = useState(false);
+  const workBtnRef = useRef<HTMLButtonElement>(null);
+  const workTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   /* 收缩状态 tooltip */
   const [sidebarTooltip, setSidebarTooltip] = useState<{text: string; x: number; y: number} | null>(null);
   const showSidebarTooltip = (text: string) => (e: React.MouseEvent) => {
@@ -298,6 +437,14 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
   };
   const handleMoreLeave = () => {
     moreTimerRef.current = setTimeout(() => setMoreOpen(false), 400);
+  };
+
+  const handleWorkEnter = () => {
+    if (workTimerRef.current) clearTimeout(workTimerRef.current);
+    setWorkOpen(true);
+  };
+  const handleWorkLeave = () => {
+    workTimerRef.current = setTimeout(() => setWorkOpen(false), 400);
   };
 
   /* 模板 */
@@ -511,15 +658,15 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
           {!collapsed && (
             <div className="flex-1 min-w-0">
               <Link href="/chat" className="flex items-center gap-2">
-                <img src="/brand-logo.png" alt="AI Space" className="w-6 h-6 rounded-md object-cover" />
-                <img src="/brand-title.png" alt="AI Space" className="h-5 w-auto object-contain" />
+                <img src="/brand-logo.png?v=2" alt="AI Space" className="w-6 h-6 rounded-md object-cover" />
+                <img src="/brand-title.png?v=2" alt="AI Space" className="h-5 w-auto object-contain" />
               </Link>
             </div>
           )}
           {collapsed && (
             <div className="flex-1 flex justify-center">
               <Link href="/chat">
-                <img src="/brand-logo.png" alt="AI Space" className="w-7 h-7 rounded-md object-cover" />
+                <img src="/brand-logo.png?v=2" alt="AI Space" className="w-7 h-7 rounded-md object-cover" />
               </Link>
             </div>
           )}
@@ -561,44 +708,27 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                 <FolderKanban className={cn("w-5 h-5", pathname === "/workspace" ? "text-brand" : "text-text-tertiary")} />
               </Link>
 
-              {/* AI 画图 */}
-              <Link
-                href="/image"
-                onMouseEnter={showSidebarTooltip("AI 画图")}
-                onMouseLeave={hideSidebarTooltip}
-                className={cn(
-                  "p-2.5 rounded-xl transition-colors",
-                  pathname === "/image" || pathname?.startsWith("/image/") ? "bg-surface-card" : "hover:bg-surface-card"
-                )}
+              {/* AI工作 - hover 展开面板 */}
+              <div
+                onMouseEnter={handleWorkEnter}
+                onMouseLeave={handleWorkLeave}
               >
-                <Palette className={cn("w-5 h-5", pathname === "/image" || pathname?.startsWith("/image/") ? "text-purple-500" : "text-text-tertiary")} />
-              </Link>
-
-              {/* AI PPT */}
-              <Link
-                href="/ppt"
-                onMouseEnter={showSidebarTooltip("AI PPT")}
-                onMouseLeave={hideSidebarTooltip}
-                className={cn(
-                  "p-2.5 rounded-xl transition-colors",
-                  pathname === "/ppt" || pathname?.startsWith("/ppt/") ? "bg-surface-card" : "hover:bg-surface-card"
-                )}
-              >
-                <Presentation className={cn("w-5 h-5", pathname === "/ppt" || pathname?.startsWith("/ppt/") ? "text-orange-500" : "text-text-tertiary")} />
-              </Link>
-
-              {/* AI技能中心 */}
-              <Link
-                href="/skills"
-                onMouseEnter={showSidebarTooltip("AI技能中心")}
-                onMouseLeave={hideSidebarTooltip}
-                className={cn(
-                  "p-2.5 rounded-xl transition-colors",
-                  pathname === "/skills" || pathname?.startsWith("/skills/") ? "bg-surface-card" : "hover:bg-surface-card"
-                )}
-              >
-                <Sparkles className={cn("w-5 h-5", pathname === "/skills" || pathname?.startsWith("/skills/") ? "text-cyan-500" : "text-text-tertiary")} />
-              </Link>
+                <button
+                  ref={workBtnRef}
+                  className={cn(
+                    "p-2.5 rounded-xl transition-colors",
+                    pathname === "/ppt" || pathname?.startsWith("/ppt/") || pathname === "/skills" || pathname?.startsWith("/skills/")
+                      ? "bg-surface-card"
+                      : "hover:bg-surface-card"
+                  )}
+                >
+                  <Briefcase className={cn("w-5 h-5",
+                    pathname === "/ppt" || pathname?.startsWith("/ppt/") || pathname === "/skills" || pathname?.startsWith("/skills/")
+                      ? "text-orange-500"
+                      : "text-text-tertiary"
+                  )} />
+                </button>
+              </div>
 
               {/* 更多 - hover 展开面板，不需要 tooltip */}
               <div
@@ -607,9 +737,14 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
               >
                 <button
                   ref={moreBtnRef}
-                  className="p-2.5 rounded-xl hover:bg-surface-card transition-colors"
+                  className={cn(
+                    "p-2.5 rounded-xl transition-colors",
+                    pathname === "/image" || pathname?.startsWith("/image/") || pathname === "/templates"
+                      ? "bg-surface-card"
+                      : "hover:bg-surface-card"
+                  )}
                 >
-                  <LayoutGrid className="w-5 h-5 text-text-tertiary" />
+                  <LayoutGrid className={cn("w-5 h-5", pathname === "/image" || pathname?.startsWith("/image/") || pathname === "/templates" ? "text-brand" : "text-text-tertiary")} />
                 </button>
               </div>
             </div>
@@ -652,7 +787,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
             {/* ▼ 功能分组 */}
             <div className="px-3 py-2">
               <div className="mb-1.5 px-1">
-                <span className="text-[11px] font-semibold text-text-tertiary/70 tracking-wide">功能</span>
+                <span className="text-[11px] font-semibold text-text-tertiary/70 tracking-wide">Agents</span>
               </div>
               <div className="space-y-0.5">
                 {/* workspace空间 */}
@@ -669,47 +804,26 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                   <span>workspace空间</span>
                 </Link>
 
-                {/* AI 画图 - 一级功能 */}
-                <Link
-                  href="/image"
-                  className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150",
-                    pathname === "/image" || pathname?.startsWith("/image/")
-                      ? "bg-surface-card text-text-primary font-medium shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
-                      : "text-text-secondary hover:bg-surface-card/60 hover:text-text-primary"
-                  )}
+                {/* AI工作 - hover 展开 */}
+                <div
+                  onMouseEnter={handleWorkEnter}
+                  onMouseLeave={handleWorkLeave}
                 >
-                  <Palette className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/image" || pathname?.startsWith("/image/") ? "text-purple-500" : "text-text-tertiary")} />
-                  <span>AI 画图</span>
-                </Link>
-
-                {/* AI PPT - 一级功能 */}
-                <Link
-                  href="/ppt"
-                  className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150",
-                    pathname === "/ppt" || pathname?.startsWith("/ppt/")
-                      ? "bg-surface-card text-text-primary font-medium shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
-                      : "text-text-secondary hover:bg-surface-card/60 hover:text-text-primary"
-                  )}
-                >
-                  <Presentation className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/ppt" || pathname?.startsWith("/ppt/") ? "text-orange-500" : "text-text-tertiary")} />
-                  <span>AI PPT</span>
-                </Link>
-
-                {/* AI技能中心 */}
-                <Link
-                  href="/skills"
-                  className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150",
-                    pathname === "/skills" || pathname?.startsWith("/skills/")
-                      ? "bg-surface-card text-text-primary font-medium shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
-                      : "text-text-secondary hover:bg-surface-card/60 hover:text-text-primary"
-                  )}
-                >
-                  <Sparkles className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/skills" || pathname?.startsWith("/skills/") ? "text-cyan-500" : "text-text-tertiary")} />
-                  <span>AI技能中心</span>
-                </Link>
+                  <button
+                    ref={workBtnRef}
+                    className="flex items-center justify-between w-full px-3 py-2.5 rounded-xl text-sm text-text-secondary hover:bg-surface-card/60 hover:text-text-primary transition-all duration-150"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Briefcase className={cn("w-[18px] h-[18px] shrink-0 transition-colors",
+                        pathname === "/ppt" || pathname?.startsWith("/ppt/") || pathname === "/skills" || pathname?.startsWith("/skills/")
+                          ? "text-orange-500"
+                          : "text-text-tertiary"
+                      )} />
+                      <span>AI工作</span>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-text-tertiary" />
+                  </button>
+                </div>
 
                 {/* 更多 - hover 展开 */}
                 <div
@@ -718,11 +832,16 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                 >
                   <button
                     ref={moreBtnRef}
-                    className="flex items-center justify-between w-full px-3 py-2.5 rounded-xl text-sm text-text-secondary hover:bg-surface-card/60 hover:text-text-primary transition-all duration-150"
+                    className={cn(
+                      "flex items-center justify-between w-full px-3 py-2.5 rounded-xl text-sm transition-all duration-150",
+                      pathname === "/image" || pathname?.startsWith("/image/") || pathname === "/templates"
+                        ? "bg-surface-card text-text-primary font-medium shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
+                        : "text-text-secondary hover:bg-surface-card/60 hover:text-text-primary"
+                    )}
                   >
                     <div className="flex items-center gap-3">
-                      <LayoutGrid className="w-[18px] h-[18px] shrink-0 text-text-tertiary" />
-                      <span>更多</span>
+                      <LayoutGrid className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/image" || pathname?.startsWith("/image/") || pathname === "/templates" ? "text-brand" : "text-text-tertiary")} />
+                      <span>AI创作</span>
                     </div>
                     <ChevronRight className="w-4 h-4 text-text-tertiary" />
                   </button>
@@ -767,6 +886,9 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
 
       {/* 更多 hover 面板 */}
       <MoreHoverPanel open={moreOpen} anchorEl={moreBtnRef.current} onClose={() => setMoreOpen(false)} onMouseEnter={handleMoreEnter} onMouseLeave={handleMoreLeave} />
+
+      {/* AI工作 hover 面板 */}
+      <WorkHoverPanel open={workOpen} anchorEl={workBtnRef.current} onClose={() => setWorkOpen(false)} onMouseEnter={handleWorkEnter} onMouseLeave={handleWorkLeave} />
 
       {/* 收缩状态 tooltip */}
       {sidebarTooltip && typeof document !== "undefined" && createPortal(

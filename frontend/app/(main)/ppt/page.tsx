@@ -482,7 +482,7 @@ export default function PPTPage() {
                           <div className="relative h-40 bg-gradient-to-br from-surface-elevated to-surface flex items-center justify-center">
                             {isIncomplete ? (
                               <div className="flex flex-col items-center gap-2">
-                                <img src="/brand-logo.png" alt="AI Space" className="w-10 h-10 rounded-lg object-cover opacity-50" />
+                                <img src="/brand-logo.png?v=2" alt="AI Space" className="w-10 h-10 rounded-lg object-cover opacity-50" />
                                 <span className="text-xs text-text-tertiary">{h.title || h.topic}</span>
                               </div>
                             ) : (

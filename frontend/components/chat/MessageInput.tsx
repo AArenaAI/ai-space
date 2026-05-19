@@ -716,9 +716,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
         </div>
 
         {/* 底部提示 */}
-        <p className={cn("text-center text-[11px] mt-2 transition-all duration-300", compareMode ? "text-amber-500/50" : "text-text-tertiary/60")}>
-          AI 可能会出现错误，请勿分享敏感信息
-        </p>
+        {/* 已删除：AI 可能会出现错误，请勿分享敏感信息 */}
         <input
           ref={fileInputRef}
           type="file"

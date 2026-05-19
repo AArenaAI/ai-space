@@ -3,13 +3,19 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Image, Eraser, FileText, ChevronLeft, LayoutGrid, Type, ZoomIn } from "lucide-react";
+import { Image, Eraser, FileText, ChevronLeft, LayoutGrid, Type, ZoomIn, ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const MORE_NAV_GROUPS = [
   {
     title: "创建",
     items: [
+      {
+        icon: ImageIcon,
+        label: "生成图片",
+        href: "/image",
+        matchPath: "/image",
+      },
       {
         icon: Image,
         label: "背景移除",
@@ -49,7 +55,7 @@ const MORE_NAV_GROUPS = [
   },
 ];
 
-export default function MoreSidebar() {
+export default function ToolsSidebar() {
   const pathname = usePathname();
   const [search, setSearch] = useState("");
 
@@ -84,7 +90,7 @@ export default function MoreSidebar() {
             <div className="space-y-0.5">
               {group.items.map((item) => {
                 const active =
-                  pathname === item.matchPath &&
+                  (pathname === item.matchPath || pathname === item.matchPath + "/") &&
                   (item.href.includes("?")
                     ? search.includes(item.href.split("?")[1])
                     : true);

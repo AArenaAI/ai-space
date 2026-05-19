@@ -15,20 +15,19 @@ import (
 
 var modelTierMap = map[string]string{
 	// 基础等级
-	"gpt-5.4-mini":       "basic",
-	"deepseek-v4-flash":  "basic",
+	"gpt-5.4-mini":         "basic",
 	"gemini-2.0-flash-exp": "basic",
 
 	// 高级等级
 	"gpt-5.4":                   "advanced",
 	"gpt-5.5":                   "advanced",
 	"claude-3-5-sonnet-20241022": "advanced",
+	"deepseek-chat":             "advanced",
 	"kimi-k2.5":                 "advanced",
 	"kimi-k2.6":                 "advanced",
 
 	// 精英等级
-	"gpt-5.5-pro":      "elite",
-	"deepseek-v4-pro":  "elite",
+	"gpt-5.5-pro":       "elite",
 	"deepseek-reasoner": "elite",
 }
 

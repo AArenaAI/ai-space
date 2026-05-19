@@ -39,9 +39,14 @@ export function useImage() {
   const fetchImages = useCallback(async () => {
     try {
       const token = localStorage.getItem("token");
-      const response = await fetch(`${API_BASE_URL}/api/images`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      if (!token) {
+        setImages([]);
+        cachedImages = [];
+        return;
+      }
+      const headers: Record<string, string> = {};
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const response = await fetch(`${API_BASE_URL}/api/images`, { headers });
       if (!response.ok) {
         const err = await safeJSON(response);
         throw new Error(err.error || `获取图片列表失败 (${response.status})`);
@@ -103,12 +108,11 @@ export function useImage() {
         if (referenceImageUrls && referenceImageUrls.length > 0) {
           body.reference_image_urls = referenceImageUrls;
         }
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (token) headers.Authorization = `Bearer ${token}`;
         const response = await fetch(`${API_BASE_URL}/api/images/generate`, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
+          headers,
           body: JSON.stringify(body),
         });
 
@@ -138,9 +142,11 @@ export function useImage() {
   const deleteImage = useCallback(async (id: number) => {
     try {
       const token = localStorage.getItem("token");
+      const headers: Record<string, string> = {};
+      if (token) headers.Authorization = `Bearer ${token}`;
       const response = await fetch(`${API_BASE_URL}/api/images/${id}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        headers,
       });
       if (!response.ok) {
         const err = await safeJSON(response);

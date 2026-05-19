@@ -79,7 +79,11 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	// Handler 实例（在外层定义，供公开路由和认证路由共用）
 	chatHandler := NewChatHandler(db, cfg, aiService, searchService, fileService, retrievalSvc, contextBuilder, usageService)
+	openAIWebhookHandler := NewOpenAIWebhookHandler(db, cfg, aiService, usageService)
 	fileHandler := NewFileHandler(fileService)
+	// OpenAI Webhook 必须是公开路由，不能走用户 JWT；签名由 OPENAI_WEBHOOK_SECRET 校验。
+	router.POST("/api/openai/webhook", openAIWebhookHandler.Handle)
+
 	router.GET("/api/models", GetModelsHandler)
 	router.GET("/api/models/chat", GetChatModelsHandler)
 	router.GET("/api/models/image", GetImageModelsHandler)
@@ -179,6 +183,14 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 		// 图片文件服务（无需认证，直接访问）
 		router.GET("/api/images/file/:filename", imageHandler.ServeImageFile)
+
+		// 回答模板路由
+		templateHandler := NewTemplateHandler(db)
+		templateHandler.AutoMigrate()
+		authorized.GET("/templates", templateHandler.ListTemplates)
+		authorized.POST("/templates", templateHandler.CreateTemplate)
+		authorized.PUT("/templates/:id", templateHandler.UpdateTemplate)
+		authorized.DELETE("/templates/:id", templateHandler.DeleteTemplate)
 
 		// PPT路由
 		pptHandler := NewPPTHandler(db, pptService, usageService)

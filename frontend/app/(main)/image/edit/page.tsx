@@ -50,7 +50,7 @@ const MODE_CONFIG = {
     promptPlaceholder: "例如：一个阳光明媚的海滩，有棕榈树和蓝天",
     promptLabel: "描述新背景",
     examples: [
-      { before: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=600&h=400&fit=crop", after: "/api/images/file/8a127baef775809a2aa8dd0d0b91a977.png", label: "海滩" },
+      { before: "/examples/replace-bg-before.png", after: "/examples/replace-bg-after.png", label: "海滩" },
     ],
   },
   "text-removal": {
@@ -69,7 +69,7 @@ const MODE_CONFIG = {
     promptPlaceholder: "例如：去除图片左上角的水印 logo",
     promptLabel: "描述要去除的文字/水印",
     examples: [
-      { before: "https://images.unsplash.com/photo-1519751138087-5bf79df7a3e0?w=600&h=400&fit=crop", after: "/api/images/file/9816e4dd351283e59eb4490e3e08a21b.png", label: "水印" },
+      { before: "/examples/text-removal-before.png", after: "/examples/text-removal-after.png", label: "水印" },
     ],
   },
   "upscale": {
@@ -88,7 +88,7 @@ const MODE_CONFIG = {
     promptPlaceholder: "",
     promptLabel: "",
     examples: [
-      { before: "https://images.unsplash.com/photo-1519751138087-5bf79df7a3e0?w=600&h=400&fit=crop", after: "/api/images/file/939b9499731e316f501c458c0a883ca4.png", label: "人像" },
+      { before: "/examples/upscale-before.png", after: "/examples/upscale-after.png", label: "人像" },
     ],
   },
 } as const;
@@ -122,6 +122,7 @@ function ImageEditContent() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
   const config = MODE_CONFIG[editMode];
+  const isRemoveBgMode = editMode === "remove-bg";
 
   // 从 URL 读取初始 mode
   const searchParams = useSearchParams();
@@ -234,6 +235,26 @@ function ImageEditContent() {
         throw new Error(err.error || "编辑失败");
       }
       const data = await res.json();
+      if (data.status === "pending" && data.id) {
+        toast.info("已开始处理，请稍候");
+        for (let i = 0; i < 120; i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+          const statusResp = await fetch(`${API_BASE_URL}/api/images/${data.id}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!statusResp.ok) continue;
+          const statusData = await statusResp.json();
+          if (statusData.status === "completed" && statusData.image_url) {
+            setResult(resolveImageUrl(statusData.image_url));
+            toast.success(config.toastSuccess);
+            return;
+          }
+          if (statusData.status === "failed") {
+            throw new Error(statusData.error_message || "编辑失败");
+          }
+        }
+        throw new Error("处理超时，请稍后到历史记录查看结果");
+      }
       setResult(resolveImageUrl(data.image_url));
       toast.success(config.toastSuccess);
     } catch (err) {
@@ -504,11 +525,11 @@ function ImageEditContent() {
                               <ArrowRight className="h-5 w-5" />
                             </div>
                             <div className="flex-1 text-center">
-                              <div className="flex h-40 w-full items-center justify-center rounded-2xl bg-[linear-gradient(45deg,#f0f0f0_25%,transparent_25%,transparent_75%,#f0f0f0_75%),linear-gradient(45deg,#f0f0f0_25%,transparent_25%,transparent_75%,#f0f0f0_75%)] bg-[length:16px_16px] bg-[position:0_0,8px_8px] dark:bg-surface-elevated">
+                              <div className="flex h-40 w-full items-center justify-center overflow-hidden rounded-2xl bg-[linear-gradient(45deg,#f0f0f0_25%,transparent_25%,transparent_75%,#f0f0f0_75%),linear-gradient(45deg,#f0f0f0_25%,transparent_25%,transparent_75%,#f0f0f0_75%)] bg-[length:16px_16px] bg-[position:0_0,8px_8px] dark:bg-surface-elevated">
                                 <img
                                   src={examples[0].after}
                                   alt="处理后"
-                                  className="h-full w-full rounded-2xl object-contain"
+                                  className="h-full w-full rounded-2xl object-cover"
                                 />
                               </div>
                               <div className="mt-2 text-xs font-medium text-purple-500">去背后</div>
@@ -701,11 +722,16 @@ function ImageEditContent() {
                                 <ArrowRight className="h-5 w-5" />
                               </div>
                               <div className="flex-1 text-center">
-                                <div className="flex h-40 w-full items-center justify-center rounded-2xl bg-[linear-gradient(45deg,#f0f0f0_25%,transparent_25%,transparent_75%,#f0f0f0_75%),linear-gradient(45deg,#f0f0f0_25%,transparent_25%,transparent_75%,#f0f0f0_75%)] bg-[length:16px_16px] bg-[position:0_0,8px_8px] dark:bg-surface-elevated">
+                                <div className={cn(
+                                  "flex h-40 w-full items-center justify-center rounded-2xl overflow-hidden",
+                                  isRemoveBgMode
+                                    ? "bg-[linear-gradient(45deg,#f0f0f0_25%,transparent_25%,transparent_75%,#f0f0f0_75%),linear-gradient(45deg,#f0f0f0_25%,transparent_25%,transparent_75%,#f0f0f0_75%)] bg-[length:16px_16px] bg-[position:0_0,8px_8px] dark:bg-surface-elevated"
+                                    : "bg-surface-elevated"
+                                )}>
                                   <img
                                     src={ex.after}
                                     alt="处理后"
-                                    className="h-full w-full rounded-2xl object-contain"
+                                    className="h-full w-full rounded-2xl object-cover"
                                   />
                                 </div>
                                 <div className="mt-2 text-xs font-medium text-purple-500">{config.afterLabel}</div>

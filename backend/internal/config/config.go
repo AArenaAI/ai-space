@@ -19,6 +19,7 @@ type Config struct {
 	OpenAIKey            string
 	OpenAIBaseURL        string  // 自定义 OpenAI 兼容 API 基础地址（用于中转/逆向）
 	OpenAIOfficialKey    string  // OpenAI 官方 API Key（直连，不走中转）
+	OpenAIWebhookSecret  string  // OpenAI Webhook signing secret（whsec_...）
 	OpenAIInputPrice     float64 // ¥/千tokens
 	OpenAIOutputPrice    float64 // ¥/千tokens
 	AnthropicKey         string
@@ -108,11 +109,12 @@ func Load() *Config {
 		JWTSecret:    getEnv("JWT_SECRET", "your-secret-key-change-in-production"),
 		FrontendURL:  getEnv("FRONTEND_URL", "http://localhost:9090"),
 
-		OpenAIKey:         getEnv("OPENAI_API_KEY", ""),
-		OpenAIBaseURL:     getEnv("OPENAI_BASE_URL", ""),
-		OpenAIOfficialKey: getEnv("OPENAI_OFFICIAL_API_KEY", ""),
-		OpenAIInputPrice:  getEnvFloat64("OPENAI_INPUT_PRICE", 0),
-		OpenAIOutputPrice: getEnvFloat64("OPENAI_OUTPUT_PRICE", 0),
+		OpenAIKey:           getEnv("OPENAI_API_KEY", ""),
+		OpenAIBaseURL:       getEnv("OPENAI_BASE_URL", ""),
+		OpenAIOfficialKey:   getEnv("OPENAI_OFFICIAL_API_KEY", ""),
+		OpenAIWebhookSecret: getEnv("OPENAI_WEBHOOK_SECRET", ""),
+		OpenAIInputPrice:    getEnvFloat64("OPENAI_INPUT_PRICE", 0),
+		OpenAIOutputPrice:   getEnvFloat64("OPENAI_OUTPUT_PRICE", 0),
 
 		AnthropicKey:         getEnv("ANTHROPIC_API_KEY", ""),
 		AnthropicBaseURL:     getEnv("ANTHROPIC_BASE_URL", ""),
@@ -196,12 +198,12 @@ func Load() *Config {
 		cfg.TextEmbeddingBaseURL = cfg.OpenAIBaseURL
 	}
 
-	// Image Generation 未单独配置时，默认复用 Chat Provider 的 OpenAI
+	// Image Generation 未单独配置时，默认复用 OpenAI 官方配置；不再回退 OPENAI_BASE_URL 中转，避免 AI 画图误走代理。
+	if cfg.ImageGenAPIKey == "" {
+		cfg.ImageGenAPIKey = cfg.OpenAIOfficialKey
+	}
 	if cfg.ImageGenAPIKey == "" {
 		cfg.ImageGenAPIKey = cfg.OpenAIKey
-	}
-	if cfg.ImageGenBaseURL == "" {
-		cfg.ImageGenBaseURL = cfg.OpenAIBaseURL
 	}
 
 	// Document Generation 未单独配置时，默认复用 Chat Provider 的 OpenAI

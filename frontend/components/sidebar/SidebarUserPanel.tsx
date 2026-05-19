@@ -2,9 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { LogOut, User, Settings, Copy, CheckCircle2 } from "lucide-react";
-import { useCredits } from "@/hooks/useCredits";
 
 interface SidebarUserPanelProps {
   user: { name?: string; email?: string } | null;
@@ -21,13 +19,7 @@ export default function SidebarUserPanel({
   onShowTooltip,
   onHideTooltip,
 }: SidebarUserPanelProps) {
-  const router = useRouter();
-  const { credits, loading } = useCredits();
   const [copied, setCopied] = useState(false);
-
-  const handleUpgrade = () => {
-    router.push("/pricing");
-  };
 
   const handleCopy = () => {
     const text = user?.email || "";
@@ -80,56 +72,11 @@ export default function SidebarUserPanel({
     );
   }
 
-  // 已登录态 — 主题适配卡片
+  // 已登录态
   return (
     <div className="p-2">
       <div className="rounded-xl bg-surface-card border border-surface-border overflow-hidden">
-        {/* 积分信息 */}
-        <div className="px-3 pt-3 pb-2">
-          <div className="flex items-center justify-center gap-4 text-sm">
-            {/* 基础积分 */}
-            <div className="flex items-center gap-1">
-              <span className="text-emerald-400 text-xs">💎</span>
-              <span className="font-mono tabular-nums text-text-primary font-medium">
-                {loading ? "-" : credits?.basic_credits ?? 0}
-              </span>
-            </div>
-            {/* 分隔 */}
-            <span className="text-text-tertiary/30">|</span>
-            {/* 高级积分 */}
-            <div className="flex items-center gap-1">
-              <span className="text-violet-400 text-xs">⚡</span>
-              <span className="font-mono tabular-nums text-text-primary font-medium">
-                {loading ? "-" : credits?.advanced_credits ?? 0}
-              </span>
-            </div>
-            {/* 分隔 */}
-            <span className="text-text-tertiary/30">|</span>
-            {/* 精英积分 */}
-            <div className="flex items-center gap-1">
-              <span className="text-amber-400 text-xs">⭐</span>
-              <span className="font-mono tabular-nums text-text-primary font-medium">
-                {loading ? "-" : credits?.elite_credits ?? 0}
-              </span>
-            </div>
-          </div>
-
-          {/* 提示文字 */}
-          <p className="text-center text-[11px] text-text-tertiary mt-1.5">
-            升级以获取更多积分
-          </p>
-
-          {/* 升级按钮 */}
-          <button
-            onClick={handleUpgrade}
-            className="w-full mt-2 py-2 rounded-lg text-sm font-medium text-slate-900 bg-gradient-to-r from-white via-purple-100 to-blue-100 hover:from-purple-50 hover:via-purple-200 hover:to-blue-200 transition-all duration-200 shadow-lg shadow-purple-500/10"
-          >
-            升级
-          </button>
-        </div>
-
-        {/* 底部用户栏 */}
-        <div className="flex items-center justify-between px-3 py-2 border-t border-surface-border">
+        <div className="flex items-center justify-between px-3 py-2">
           {/* 左侧：用户头像 + 名称 */}
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-7 h-7 rounded-full bg-gradient-to-br from-brand/20 to-purple-500/20 flex items-center justify-center shrink-0 border border-surface-border">

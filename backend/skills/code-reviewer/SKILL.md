@@ -6,7 +6,7 @@ description: 基于具体安全检查清单与度量阈值审查代码，强制�
 category: code
 icon: code-2
 color: "#22c55e"
-recommended_model: "deepseek-v4-pro"
+recommended_model: "deepseek-reasoner"
 triggers:
   - 审查代码
   - 代码审查

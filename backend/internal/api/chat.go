@@ -6,12 +6,12 @@ import (
 	"aipool-backend/internal/services"
 	"aipool-backend/internal/skills"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -111,19 +111,6 @@ func isFileQuestion(query string) bool {
 		}
 	}
 	return false
-}
-
-// generateRequestID 生成一个 12 字符的 base62 请求追踪 ID。
-func generateRequestID() string {
-	const charset = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-	b := make([]byte, 12)
-	if _, err := rand.Read(b); err != nil {
-		return "req-" + fmt.Sprintf("%d", time.Now().UnixNano())
-	}
-	for i := range b {
-		b[i] = charset[b[i]%byte(len(charset))]
-	}
-	return string(b)
 }
 
 func lastUserContent(messages []services.Message) string {
@@ -536,11 +523,6 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 	}
 	// ========== 匿名用户检查结束 ==========
 
-	// ========== 请求追踪 ID ==========
-	requestID := generateRequestID()
-	c.Header("X-Request-ID", requestID)
-	// ========== 请求追踪 ID 结束 ==========
-
 	// 如果有模板 ID，加载模板前缀并注入到 messages 开头
 	if req.TemplateID > 0 {
 		var tpl services.Template
@@ -688,6 +670,10 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 	// 按优先级排序：file_context > 其他 > web_search_context
 	req.Messages = mergeSystemMessages(req.Messages)
 
+	// GPT 5.5 后台规则仍保留 stream=true：background=true + stream=true + webhook。
+	// 前端在线时实时看流；断开后 OpenAI 后台继续跑；最终 webhook 兜底落库。
+	useBackground := services.OpenAIUsesBackground(req.Model, req.ReasoningEffort)
+
 	// 调用 AI 服务（reasoning 参数控制是否启用思考模式，search 控制模型原生搜索工具调用）
 	resp, err := h.aiService.ChatCompletion(c.Request.Context(), req.Model, req.Messages, req.Stream, req.Reasoning, req.ReasoningEffort, useSearchTool)
 	if err != nil {
@@ -695,7 +681,23 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		return
 	}
 
+	if resp.Background && !req.Stream {
+		h.handleBackgroundResponse(c, resp, conversationID, userID, guestID, req.Model, false)
+		return
+	}
+
 	if req.Stream {
+		// 先创建一条空的 assistant 消息，确保即使用户跳转/刷新也能看到生成中的消息
+		assistantMsg := models.Message{
+			ConversationID: conversationID,
+			Role:           "assistant",
+			Content:        "",
+			Model:          req.Model,
+			CreatedAt:      time.Now(),
+		}
+		h.db.Create(&assistantMsg)
+		assistantMsgID := assistantMsg.ID
+
 		// SSE 流式响应
 		c.Header("Content-Type", "text/event-stream")
 		c.Header("Cache-Control", "no-cache")
@@ -703,21 +705,6 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		c.Header("X-Accel-Buffering", "no")
 
 		c.Writer.WriteHeaderNow()
-		// 发送 chat meta 信息（请求追踪 ID、模型等）
-		metaEvent := map[string]interface{}{
-			"choices": []map[string]interface{}{
-				{"delta": map[string]string{"content": ""}},
-			},
-			"_chat_meta": map[string]interface{}{
-				"request_id": requestID,
-				"model":      req.Model,
-				"stream":     true,
-			},
-		}
-		metaOut, _ := json.Marshal(metaEvent)
-		c.Writer.WriteString("data: " + string(metaOut) + "\n\n")
-		c.Writer.Flush()
-
 		// 如果有搜索结果，先发送搜索元数据
 		if len(searchSources) > 0 {
 			meta := map[string]interface{}{
@@ -735,21 +722,23 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 			c.Writer.Flush()
 		}
 
-		fullContent, usage, err := h.forwardUnifiedStream(resp, c.Writer, req.Reasoning)
+		streamResult, usage, err := h.forwardUnifiedStream(resp, c.Writer, req.Reasoning, assistantMsgID)
 		if err != nil {
 			fmt.Printf("[Chat] forwardUnifiedStream error: %v\n", err)
 		}
 		resp.Body.Close()
 
-		// 保存 AI 响应
-		if fullContent != "" {
-			h.db.Create(&models.Message{
-				ConversationID: conversationID,
-				Role:           "assistant",
-				Content:        fullContent,
-				Model:          req.Model,
-				CreatedAt:      time.Now(),
-			})
+		// 流结束后，更新已有的 assistant 消息（先创建空消息可防止用户跳转时丢失）
+		if assistantMsgID > 0 {
+			h.db.Model(&models.Message{}).Where("id = ?", assistantMsgID).Update("content", streamResult.FullContent)
+			if useBackground && streamResult.ResponseID != "" {
+				h.createBackgroundTask(streamResult.ResponseID, userID, guestID, conversationID, assistantMsgID, req.Model, resp.Provider, "streaming", streamResult.LastSequenceNumber)
+			}
+		} else if useBackground && streamResult.ResponseID != "" {
+			// 极端情况：如果没有 assistantMsgID（不应该发生），退回到原逻辑
+			assistantMsg := models.Message{ConversationID: conversationID, Role: "assistant", Content: "后台任务已开始，完成后会自动更新结果。", Model: req.Model, CreatedAt: time.Now()}
+			h.db.Create(&assistantMsg)
+			h.createBackgroundTask(streamResult.ResponseID, userID, guestID, conversationID, assistantMsg.ID, req.Model, resp.Provider, "running", streamResult.LastSequenceNumber)
 		}
 
 		// 记录 usage
@@ -819,24 +808,114 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 
 // forwardUnifiedStream 统一流式转发：通过 decoder factory 获取对应解码器，
 // 循环读取上游事件 → 转换 → 写入前端 SSE，返回完整内容和 usage。
-func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, w gin.ResponseWriter, reasoningEnabled bool) (string, *services.TokenUsage, error) {
-	decoder := services.NewDecoder(resp.ModelType, resp.Body)
+func (h *ChatHandler) createBackgroundTask(responseID string, userID uint, guestID string, conversationID uint, assistantMessageID uint, model string, provider string, status string, lastSequenceNumber int64) {
+	if responseID == "" {
+		return
+	}
+	task := models.AIBackgroundTask{
+		ResponseID:         responseID,
+		UserID:             userID,
+		GuestID:            guestID,
+		ConversationID:     conversationID,
+		AssistantMessageID: assistantMessageID,
+		Model:              model,
+		Provider:           provider,
+		Status:             status,
+		LastSequenceNumber: lastSequenceNumber,
+		CreatedAt:          time.Now(),
+	}
+	if err := h.db.Where("response_id = ?", responseID).Assign(task).FirstOrCreate(&task).Error; err != nil {
+		fmt.Printf("[Chat] 保存后台任务失败 response_id=%s: %v\n", responseID, err)
+	}
+}
 
-	// 孔底：流结束但未发送 [DONE] 时，向前端推送 _error，避免前端一直等待/显示半截回复
-	doneSent := false
-	defer func() {
-		if !doneSent {
-			errOut, _ := json.Marshal(map[string]interface{}{
-				"_error": map[string]interface{}{
-					"error_code": "stream_incomplete",
-					"message":    "上游连接提前断开，请缩小问题或重试",
-					"retryable":  true,
-				},
-			})
-			w.WriteString("data: " + string(errOut) + "\n\n")
-			w.Flush()
-		}
-	}()
+func (h *ChatHandler) handleBackgroundResponse(c *gin.Context, resp *services.AICompletionResponse, conversationID uint, userID uint, guestID string, model string, clientWantsStream bool) {
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取后台任务响应失败"})
+		return
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "解析后台任务响应失败"})
+		return
+	}
+	responseID, _ := raw["id"].(string)
+	if responseID == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "OpenAI 后台任务未返回 response id"})
+		return
+	}
+
+	placeholder := "后台任务已开始，完成后会自动更新结果。"
+	assistantMsg := models.Message{
+		ConversationID: conversationID,
+		Role:           "assistant",
+		Content:        placeholder,
+		Model:          model,
+		CreatedAt:      time.Now(),
+	}
+	if err := h.db.Create(&assistantMsg).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存后台任务占位消息失败"})
+		return
+	}
+
+	task := models.AIBackgroundTask{
+		ResponseID:         responseID,
+		UserID:             userID,
+		GuestID:            guestID,
+		ConversationID:     conversationID,
+		AssistantMessageID: assistantMsg.ID,
+		Model:              model,
+		Provider:           resp.Provider,
+		Status:             "running",
+		CreatedAt:          time.Now(),
+	}
+	if err := h.db.Create(&task).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存后台任务失败"})
+		return
+	}
+
+	payload := gin.H{
+		"id":                   responseID,
+		"object":               "background_task",
+		"status":               "running",
+		"background":           true,
+		"conversation_id":      conversationID,
+		"assistant_message_id": assistantMsg.ID,
+		"message":              placeholder,
+	}
+
+	if clientWantsStream {
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Connection", "keep-alive")
+		out, _ := json.Marshal(map[string]any{
+			"choices":          []map[string]any{{"delta": map[string]string{"content": placeholder}}},
+			"_background_task": payload,
+		})
+		c.Writer.WriteString("data: " + string(out) + "\n\n")
+		c.Writer.WriteString("data: [DONE]\n\n")
+		c.Writer.Flush()
+		return
+	}
+
+	c.JSON(http.StatusOK, payload)
+}
+
+type UnifiedStreamResult struct {
+	FullContent        string
+	ResponseID         string
+	LastSequenceNumber int64
+}
+
+func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, w gin.ResponseWriter, reasoningEnabled bool, assistantMsgID uint) (*UnifiedStreamResult, *services.TokenUsage, error) {
+	decoder := resp.Decoder
+	if decoder == nil {
+		decoder = services.NewDecoder(resp.ModelType, resp.Body)
+	}
+	outcome := &UnifiedStreamResult{}
 
 	type streamResult struct {
 		event *services.AIStreamEvent
@@ -877,6 +956,38 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 	defer heartbeat.Stop()
 
 	var fullContent strings.Builder
+	var contentMu sync.Mutex
+	var getContent = func() string {
+		contentMu.Lock()
+		defer contentMu.Unlock()
+		return fullContent.String()
+	}
+
+	// 定期将增量内容落库，防止用户跳转/刷新时丢失生成进度
+	var dbUpdateTicker *time.Ticker
+	var dbUpdateDone chan struct{}
+	if assistantMsgID > 0 {
+		dbUpdateTicker = time.NewTicker(2 * time.Second)
+		dbUpdateDone = make(chan struct{})
+		defer func() {
+			dbUpdateTicker.Stop()
+			close(dbUpdateDone)
+		}()
+		go func() {
+			for {
+				select {
+				case <-dbUpdateTicker.C:
+					content := getContent()
+					if content != "" {
+						h.db.Model(&models.Message{}).Where("id = ?", assistantMsgID).Update("content", content)
+					}
+				case <-dbUpdateDone:
+					return
+				}
+			}
+		}()
+	}
+
 	var finalUsage *services.TokenUsage
 	for {
 		select {
@@ -884,43 +995,38 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 			// SSE comment：前端 EventSource/fetch parser 会忽略以 ':' 开头的注释行，
 			// 但 Cloudflare tunnel 会把它视为有效传输，从而保持连接活跃。
 			if err := writeAndFlush(":ping\n\n"); err != nil {
-				return strings.TrimSpace(fullContent.String()), finalUsage, err
+				outcome.FullContent = strings.TrimSpace(getContent())
+				return outcome, finalUsage, err
 			}
 
 		case result := <-results:
 			event, err := result.event, result.err
-
-			// ⚠️ 必须先检查 EventDone，再检查 io.EOF：
-			// ChatSSEDecoder.Next() 遇到 "data: [DONE]" 时同时返回
-			// EventDone 事件 + io.EOF 错误。先检查 err 会导致直接 return，
-			// [DONE] 标记永远不会发送给前端。
-			if event != nil && event.Type == services.EventDone {
-				doneSent = true
-				if err := writeAndFlush("data: [DONE]\n\n"); err != nil {
-					return strings.TrimSpace(fullContent.String()), finalUsage, err
-				}
-				return strings.TrimSpace(fullContent.String()), finalUsage, nil
-			}
-
 			if err != nil {
 				if err == io.EOF {
-					return strings.TrimSpace(fullContent.String()), finalUsage, nil
+					outcome.FullContent = strings.TrimSpace(getContent())
+					return outcome, finalUsage, nil
 				}
-				// 解析错误：向前端发送统一错误结构
-				doneSent = true
+				// 解析错误：向前端发送错误，不发 [DONE]
 				errOut, _ := json.Marshal(map[string]interface{}{
-					"_error": map[string]interface{}{
-						"error_code": "stream_parse_error",
-						"message":    fmt.Sprintf("上游流式响应解析失败: %v", err),
-						"retryable":  true,
-						"request_id": "", // 前端可以从 X-Request-ID 响应头获取
+					"choices": []map[string]interface{}{
+						{"delta": map[string]string{"content": fmt.Sprintf("❌ 上游流式响应解析失败: %v", err)}},
 					},
 				})
 				_ = writeAndFlush("data: " + string(errOut) + "\n\n")
-				return strings.TrimSpace(fullContent.String()), finalUsage, err
+				outcome.FullContent = strings.TrimSpace(getContent())
+				return outcome, finalUsage, err
 			}
 
 			if event == nil {
+				continue
+			}
+			if event.SequenceNumber > 0 {
+				outcome.LastSequenceNumber = event.SequenceNumber
+			}
+			if event.ResponseID != "" {
+				outcome.ResponseID = event.ResponseID
+			}
+			if event.Type == services.EventResponseCreated {
 				continue
 			}
 
@@ -930,36 +1036,35 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 				continue
 			}
 
+			if event.Type == services.EventDone {
+				if err := writeAndFlush("data: [DONE]\n\n"); err != nil {
+					outcome.FullContent = strings.TrimSpace(getContent())
+					return outcome, finalUsage, err
+				}
+				outcome.FullContent = strings.TrimSpace(getContent())
+				return outcome, finalUsage, nil
+			}
+
 			if event.Type == services.EventError {
-				// 统一错误结构：error_code + retryable + message。
-				// 错误已经是终态，发送后直接结束，避免 defer 再追加 stream_incomplete。
-				doneSent = true
-				errorCode := event.Code
-				if errorCode == "" {
-					errorCode = "upstream_error"
+				if err := writeAndFlush("data: " + event.Message + "\n\n"); err != nil {
+					outcome.FullContent = strings.TrimSpace(getContent())
+					return outcome, finalUsage, err
 				}
-				errOut, _ := json.Marshal(map[string]interface{}{
-					"_error": map[string]interface{}{
-						"error_code": errorCode,
-						"message":    event.Message,
-						"retryable":  true,
-						"request_id": "",
-					},
-				})
-				if err := writeAndFlush("data: " + string(errOut) + "\n\n"); err != nil {
-					return strings.TrimSpace(fullContent.String()), finalUsage, err
-				}
-				return strings.TrimSpace(fullContent.String()), finalUsage, fmt.Errorf("upstream stream error: %s", event.Message)
+				continue
 			}
 
 			delta := map[string]string{"content": ""}
 			if event.Type == services.EventTextDelta {
 				delta["content"] = event.Delta
+				contentMu.Lock()
 				fullContent.WriteString(event.Delta)
+				contentMu.Unlock()
 			} else if event.Type == services.EventReasoningDelta {
 				delta["reasoning_content"] = event.Delta
 				// 推理内容也累积到完整内容中（保存时需要）
+				contentMu.Lock()
 				fullContent.WriteString(event.Delta)
+				contentMu.Unlock()
 			}
 
 			if delta["content"] != "" || delta["reasoning_content"] != "" {
@@ -969,7 +1074,8 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 					},
 				})
 				if err := writeAndFlush("data: " + string(out) + "\n\n"); err != nil {
-					return strings.TrimSpace(fullContent.String()), finalUsage, err
+					outcome.FullContent = strings.TrimSpace(getContent())
+					return outcome, finalUsage, err
 				}
 			}
 		}

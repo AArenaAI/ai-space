@@ -53,6 +53,9 @@ func (d *OpenAIResponsesDecoder) Next() (*AIStreamEvent, error) {
 		d.eventCount++
 		parsed := d.parseEvent(event.Event, raw)
 		if parsed != nil {
+			if seq, ok := raw["sequence_number"].(float64); ok {
+				parsed.SequenceNumber = int64(seq)
+			}
 			switch parsed.Type {
 			case EventTextDelta:
 				if parsed.Delta != "" {
@@ -85,6 +88,12 @@ func (d *OpenAIResponsesDecoder) Next() (*AIStreamEvent, error) {
 
 func (d *OpenAIResponsesDecoder) parseEvent(name string, raw map[string]interface{}) *AIStreamEvent {
 	switch name {
+	case "response.created", "response.in_progress", "response.queued":
+		if resp, ok := raw["response"].(map[string]interface{}); ok {
+			if id, ok := resp["id"].(string); ok && id != "" {
+				return &AIStreamEvent{Type: EventResponseCreated, ResponseID: id}
+			}
+		}
 	case "response.output_text.delta":
 		if delta, ok := raw["delta"].(string); ok {
 			return &AIStreamEvent{Type: EventTextDelta, Delta: delta}

@@ -8,7 +8,7 @@
       "category": "business",
       "icon": "briefcase",
       "color": "#f59e0b",
-      "recommended_model": "deepseek-v4-pro",
+      "recommended_model": "deepseek-reasoner",
       "triggers": ["SWOT", "swot", "商业计划书", "市场分析", "竞争分析", "商业模式", "财务预测", "战略规划", "CEO", "战略"],
       "co_skills": ["output-quality"],
       "enabled": true
@@ -21,7 +21,7 @@
       "category": "code",
       "icon": "code-2",
       "color": "#22c55e",
-      "recommended_model": "deepseek-v4-pro",
+      "recommended_model": "deepseek-reasoner",
       "triggers": ["审查代码", "代码审查", "code review", "review code", "代码优化", "代码重构", "bug排查", "安全审计"],
       "co_skills": ["output-quality"],
       "enabled": true
@@ -60,7 +60,7 @@
       "category": "data",
       "icon": "bar-chart",
       "color": "#8b5cf6",
-      "recommended_model": "deepseek-v4-pro",
+      "recommended_model": "deepseek-reasoner",
       "triggers": ["数据分析", "可视化", "报表", "趋势", "统计", "指标", "dashboard"],
       "co_skills": ["output-quality"],
       "enabled": true
@@ -112,7 +112,7 @@
       "category": "academic",
       "icon": "graduation-cap",
       "color": "#3b82f6",
-      "recommended_model": "deepseek-v4-pro",
+      "recommended_model": "deepseek-reasoner",
       "triggers": ["论文", "论文润色", "文献总结", "降重", "引用格式", "abstract", "摘要", "文献综述", "学术写作", "查重"],
       "co_skills": ["output-quality"],
       "enabled": true

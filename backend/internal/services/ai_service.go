@@ -9,15 +9,25 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
 type AIService struct {
-	cfg *config.Config
+	cfg      *config.Config
+	adapters []ProviderAdapter
 }
 
 func NewAIService(cfg *config.Config) *AIService {
-	return &AIService{cfg: cfg}
+	service := &AIService{cfg: cfg}
+	service.adapters = []ProviderAdapter{
+		NewOpenAIAdapter(service),
+		NewAnthropicAdapter(service),
+		NewGeminiAdapter(service),
+		NewDeepSeekAdapter(service),
+		NewMoonshotAdapter(service),
+	}
+	return service
 }
 
 type Message struct {
@@ -38,21 +48,30 @@ type ChatRequest struct {
 }
 
 func (s *AIService) ChatCompletion(ctx context.Context, model string, messages []Message, stream bool, reasoning bool, reasoningEffort string, search bool) (*AICompletionResponse, error) {
-	switch {
-	case isOpenAI(model):
-		// GPT 系列走 Responses API (/v1/responses)，传入 search 以启用工具调用
-		return s.callOpenAIResponses(ctx, model, messages, stream, reasoning, reasoningEffort, search)
-	case isAnthropic(model):
-		return s.callAnthropic(ctx, model, messages, stream, reasoning)
-	case isGemini(model):
-		return s.callGemini(ctx, model, messages, stream, reasoning)
-	case isDeepSeek(model):
-		return s.callDeepSeek(ctx, model, messages, stream, reasoning, reasoningEffort)
-	case isMoonshot(model):
-		return s.callMoonshot(ctx, model, messages, stream, reasoning)
-	default:
-		return s.callOpenAIResponses(ctx, "gpt-5.4-mini", messages, stream, reasoning, reasoningEffort, search)
+	req := UnifiedAIRequest{
+		Model:           model,
+		Messages:        messages,
+		Stream:          stream,
+		Reasoning:       reasoning,
+		ReasoningEffort: reasoningEffort,
+		Search:          search,
 	}
+	adapter := s.adapterForModel(model)
+	if adapter == nil {
+		// 保持历史行为：未知模型默认回退到 OpenAI Responses mini。
+		req.Model = "gpt-5.4-mini"
+		adapter = NewOpenAIAdapter(s)
+	}
+	return adapter.ChatCompletion(ctx, req)
+}
+
+func (s *AIService) adapterForModel(model string) ProviderAdapter {
+	for _, adapter := range s.adapters {
+		if adapter.Supports(model) {
+			return adapter
+		}
+	}
+	return nil
 }
 
 func isOpenAI(model string) bool {
@@ -62,6 +81,27 @@ func isOpenAI(model string) bool {
 // IsOpenAIResponsesModel 公开判断——该模型使用 Responses API (/v1/responses)
 func IsOpenAIResponsesModel(model string) bool {
 	return isOpenAI(model)
+}
+
+// OpenAIUsesBackground 公开判断：聊天层需要在调用后把 response id 保存为后台任务。
+func OpenAIUsesBackground(model string, reasoningEffort string) bool {
+	return ShouldUseOpenAIBackground(model, reasoningEffort)
+}
+
+func ShouldUseOpenAIBackground(model string, reasoningEffort string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	effort := strings.ToLower(strings.TrimSpace(reasoningEffort))
+
+	if model == "gpt-5.5-pro" || strings.HasPrefix(model, "gpt-5.5-pro-") {
+		return true
+	}
+	if model == "gpt-5.5" || strings.HasPrefix(model, "gpt-5.5-") {
+		switch effort {
+		case "", "standard", "medium", "extended", "high", "heavy", "max", "xhigh":
+			return true
+		}
+	}
+	return false
 }
 
 func isAnthropic(model string) bool {
@@ -74,6 +114,20 @@ func isGemini(model string) bool {
 
 func isDeepSeek(model string) bool {
 	return strings.HasPrefix(model, "deepseek-")
+}
+
+func normalizeDeepSeekModel(model string, reasoning bool) string {
+	switch model {
+	case "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat":
+		if reasoning {
+			return "deepseek-reasoner"
+		}
+		return "deepseek-chat"
+	case "deepseek-reasoner":
+		return "deepseek-reasoner"
+	default:
+		return model
+	}
 }
 
 func isMoonshot(model string) bool {
@@ -135,6 +189,7 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 		inputItems = append(inputItems, item)
 	}
 
+	useBackground := ShouldUseOpenAIBackground(model, reasoningEffort)
 	reqBody := map[string]interface{}{
 		"model":             model,
 		"input":             inputItems,
@@ -142,6 +197,9 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 		"max_output_tokens": s.cfg.OpenAIMaxOutputTokens,
 		// 默认聊天禁用 Responses API 内置工具。
 		"tool_choice": "none",
+	}
+	if useBackground {
+		reqBody["background"] = true
 	}
 
 	// instructions 字段处理 system prompt
@@ -193,12 +251,13 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 	if err != nil {
 		return nil, fmt.Errorf("序列化 OpenAI 请求失败: %w", err)
 	}
-	fmt.Printf("[OpenAI Responses] model=%s stream=%v reasoning=%v effort=%s search=%v max_output_tokens=%v tool_choice=%v tools=%v input_items=%d instructions_len=%d\n",
+	fmt.Printf("[OpenAI Responses] model=%s stream=%v reasoning=%v effort=%s search=%v background=%v max_output_tokens=%v tool_choice=%v tools=%v input_items=%d instructions_len=%d\n",
 		model,
 		stream,
 		reasoning,
 		reasoningEffort,
 		search,
+		useBackground,
 		reqBody["max_output_tokens"],
 		reqBody["tool_choice"],
 		reqBody["tools"] != nil,
@@ -223,7 +282,77 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 		return nil, fmt.Errorf("OpenAI Responses API 错误: %s", string(body))
 	}
 
-	return &AICompletionResponse{Body: resp.Body, ModelType: "openai_responses", Provider: "openai", Model: model}, nil
+	return &AICompletionResponse{Body: resp.Body, ModelType: "openai_responses", Provider: "openai", Model: model, Background: useBackground}, nil
+}
+
+func (s *AIService) RetrieveOpenAIResponse(ctx context.Context, responseID string) (map[string]any, error) {
+	if adapter, ok := s.adapterForModel("gpt-5.5").(ResponseRetriever); ok {
+		return adapter.Retrieve(ctx, responseID)
+	}
+	return nil, fmt.Errorf("OpenAI adapter 不支持 retrieve")
+}
+
+func (s *AIService) retrieveOpenAIResponseHTTP(ctx context.Context, responseID string) (map[string]any, error) {
+	apiKey := s.cfg.OpenAIOfficialKey
+	if apiKey == "" {
+		apiKey = s.cfg.OpenAIKey
+	}
+	if apiKey == "" {
+		return nil, fmt.Errorf("未配置 OpenAI API Key")
+	}
+	if strings.TrimSpace(responseID) == "" {
+		return nil, fmt.Errorf("response id 为空")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.openai.com/v1/responses/"+url.PathEscape(responseID), nil)
+	if err != nil {
+		return nil, fmt.Errorf("创建 OpenAI retrieve 请求失败: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := DefaultAIHTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("OpenAI retrieve 响应错误: %s", string(body))
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("解析 OpenAI retrieve 响应失败: %w", err)
+	}
+	return raw, nil
+}
+
+func ExtractOpenAIResponseText(raw map[string]any) string {
+	if raw == nil {
+		return ""
+	}
+	if v, ok := raw["output_text"].(string); ok && strings.TrimSpace(v) != "" {
+		return strings.TrimSpace(v)
+	}
+	outputs, _ := raw["output"].([]any)
+	var parts []string
+	for _, item := range outputs {
+		itemMap, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		content, _ := itemMap["content"].([]any)
+		for _, c := range content {
+			contentMap, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+			if text, ok := contentMap["text"].(string); ok && text != "" {
+				parts = append(parts, text)
+			}
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n"))
 }
 
 func (s *AIService) streamMaxOutputTokens(search bool, reasoning bool) int {
@@ -320,14 +449,302 @@ func (s *AIService) callAnthropic(ctx context.Context, model string, messages []
 	return &AICompletionResponse{Body: resp.Body, ModelType: "anthropic", Provider: "anthropic", Model: model}, nil
 }
 
-func (s *AIService) callGemini(ctx context.Context, model string, messages []Message, stream bool, reasoning bool) (*AICompletionResponse, error) {
-	return nil, fmt.Errorf("Gemini 暂未实现")
+func (s *AIService) callGemini(ctx context.Context, model string, messages []Message, stream bool, reasoning bool, reasoningEffort string, search bool) (*AICompletionResponse, error) {
+	if s.cfg.GeminiKey == "" {
+		return nil, fmt.Errorf("未配置 Gemini API Key")
+	}
+
+	baseURL := "https://generativelanguage.googleapis.com"
+	if s.cfg.GeminiBaseURL != "" {
+		baseURL = strings.TrimRight(s.cfg.GeminiBaseURL, "/")
+	}
+
+	var systemParts []map[string]interface{}
+	contents := make([]map[string]interface{}, 0, len(messages))
+	for _, m := range messages {
+		parts := geminiPartsFromMessage(m)
+		if len(parts) == 0 {
+			continue
+		}
+		if m.Role == "system" {
+			systemParts = append(systemParts, parts...)
+			continue
+		}
+
+		role := "user"
+		if m.Role == "assistant" {
+			role = "model"
+		}
+		contents = append(contents, map[string]interface{}{
+			"role":  role,
+			"parts": parts,
+		})
+	}
+	if len(contents) == 0 {
+		contents = append(contents, map[string]interface{}{
+			"role":  "user",
+			"parts": []map[string]interface{}{{"text": ""}},
+		})
+	}
+
+	reqBody := map[string]interface{}{
+		"contents": contents,
+		"generationConfig": map[string]interface{}{
+			"maxOutputTokens": 8192,
+		},
+	}
+	if len(systemParts) > 0 {
+		reqBody["systemInstruction"] = map[string]interface{}{"parts": systemParts}
+	}
+	if reasoning {
+		thinkingLevel := "medium"
+		switch strings.ToLower(reasoningEffort) {
+		case "minimal":
+			thinkingLevel = "minimal"
+		case "low":
+			thinkingLevel = "low"
+		case "high":
+			thinkingLevel = "high"
+		}
+		genConfig := reqBody["generationConfig"].(map[string]interface{})
+		genConfig["thinkingLevel"] = thinkingLevel
+		genConfig["thinkingSummaries"] = "auto"
+		fmt.Printf("[Gemini] reasoning enabled, thinkingLevel=%s\n", thinkingLevel)
+	}
+	// Interactions API: 启用原生 Google Search 工具
+	if search {
+		reqBody["tools"] = []map[string]interface{}{
+			{"type": "google_search"},
+		}
+	}
+
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("序列化 Gemini 请求失败: %w", err)
+	}
+
+	method := "generateContent"
+	if stream {
+		method = "streamGenerateContent"
+	}
+	// 使用 Interactions API (v1alpha)
+	u, err := url.Parse(fmt.Sprintf("%s/v1alpha/models/%s:%s", baseURL, url.PathEscape(model), method))
+	if err != nil {
+		return nil, fmt.Errorf("创建 Gemini URL 失败: %w", err)
+	}
+	q := u.Query()
+	q.Set("key", s.cfg.GeminiKey)
+	if stream {
+		q.Set("alt", "sse")
+	}
+	u.RawQuery = q.Encode()
+
+	fmt.Printf("[Gemini] model=%s stream=%v search=%v contents=%d body_len=%d\n", model, stream, search, len(contents), len(jsonBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", u.String(), bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("创建 Gemini 请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := DefaultAIHTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("Gemini API 错误: %s", string(body))
+	}
+
+	if stream {
+		return &AICompletionResponse{Body: resp.Body, ModelType: "gemini", Provider: "gemini", Model: model}, nil
+	}
+
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取 Gemini 响应失败: %w", err)
+	}
+	wrapped, err := wrapGeminiGenerateContentResponse(body, model)
+	if err != nil {
+		return nil, err
+	}
+	return &AICompletionResponse{Body: io.NopCloser(bytes.NewReader(wrapped)), ModelType: "gemini", Provider: "gemini", Model: model}, nil
+}
+
+func geminiPartsFromMessage(m Message) []map[string]interface{} {
+	parts := make([]map[string]interface{}, 0, 1+len(m.Images))
+	if strings.TrimSpace(m.Content) != "" {
+		parts = append(parts, map[string]interface{}{"text": m.Content})
+	}
+	if m.Role == "user" {
+		for _, img := range m.Images {
+			mediaType, b64Data := parseDataURI(img)
+			parts = append(parts, map[string]interface{}{
+				"inlineData": map[string]interface{}{
+					"mimeType": mediaType,
+					"data":     b64Data,
+				},
+			})
+		}
+	}
+	return parts
+}
+
+func wrapGeminiGenerateContentResponse(body []byte, model string) ([]byte, error) {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("解析 Gemini 响应失败: %w", err)
+	}
+	content := extractGeminiText(raw)
+	// 追加引用来源
+	if grounding := extractGeminiGrounding(raw); grounding != "" {
+		content += grounding
+	}
+	thoughtText := extractGeminiThoughtText(raw)
+	message := map[string]interface{}{
+		"role":    "assistant",
+		"content": content,
+	}
+	if thoughtText != "" {
+		message["reasoning_content"] = thoughtText
+	}
+	wrapped := map[string]interface{}{
+		"model": model,
+		"choices": []map[string]interface{}{
+			{
+				"index":         0,
+				"message":       message,
+				"finish_reason": "stop",
+			},
+		},
+	}
+	if usage, ok := raw["usageMetadata"].(map[string]interface{}); ok {
+		wrapped["usage"] = geminiUsageToOpenAIUsage(usage)
+	}
+	out, err := json.Marshal(wrapped)
+	if err != nil {
+		return nil, fmt.Errorf("包装 Gemini 响应失败: %w", err)
+	}
+	return out, nil
+}
+
+func extractGeminiGrounding(raw map[string]interface{}) string {
+	candidates, _ := raw["candidates"].([]interface{})
+	if len(candidates) == 0 {
+		return ""
+	}
+	cand, _ := candidates[0].(map[string]interface{})
+	gm, _ := cand["groundingMetadata"].(map[string]interface{})
+	if gm == nil {
+		return ""
+	}
+	chunks, _ := gm["groundingChunks"].([]interface{})
+	if len(chunks) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n---\n🔍 参考来源：\n")
+	seen := make(map[string]bool)
+	idx := 1
+	for _, ch := range chunks {
+		chunk, _ := ch.(map[string]interface{})
+		if chunk == nil {
+			continue
+		}
+		web, _ := chunk["web"].(map[string]interface{})
+		if web == nil {
+			continue
+		}
+		uri, _ := web["uri"].(string)
+		if uri == "" || seen[uri] {
+			continue
+		}
+		seen[uri] = true
+		title, _ := web["title"].(string)
+		if title == "" {
+			title = uri
+		}
+		b.WriteString(fmt.Sprintf("%d. [%s](%s)\n", idx, title, uri))
+		idx++
+	}
+	return b.String()
+}
+
+func extractGeminiText(raw map[string]interface{}) string {
+	var b strings.Builder
+	candidates, _ := raw["candidates"].([]interface{})
+	for _, c := range candidates {
+		cand, _ := c.(map[string]interface{})
+		content, _ := cand["content"].(map[string]interface{})
+		parts, _ := content["parts"].([]interface{})
+		for _, p := range parts {
+			part, _ := p.(map[string]interface{})
+			if thought, ok := part["thought"].(bool); ok && thought {
+				continue
+			}
+			if text, ok := part["text"].(string); ok {
+				b.WriteString(text)
+			}
+		}
+	}
+	return b.String()
+}
+
+func extractGeminiThoughtText(raw map[string]interface{}) string {
+	var b strings.Builder
+	candidates, _ := raw["candidates"].([]interface{})
+	for _, c := range candidates {
+		cand, _ := c.(map[string]interface{})
+		content, _ := cand["content"].(map[string]interface{})
+		parts, _ := content["parts"].([]interface{})
+		for _, p := range parts {
+			part, _ := p.(map[string]interface{})
+			if thought, ok := part["thought"].(bool); !ok || !thought {
+				continue
+			}
+			if text, ok := part["text"].(string); ok {
+				b.WriteString(text)
+			}
+		}
+	}
+	return b.String()
+}
+
+func geminiUsageToOpenAIUsage(usage map[string]interface{}) map[string]interface{} {
+	prompt := geminiUsageInt(usage, "promptTokenCount")
+	completion := geminiUsageInt(usage, "candidatesTokenCount")
+	total := geminiUsageInt(usage, "totalTokenCount")
+	if total == 0 {
+		total = prompt + completion
+	}
+	return map[string]interface{}{
+		"prompt_tokens":     prompt,
+		"completion_tokens": completion,
+		"total_tokens":      total,
+		"gemini":            usage,
+	}
+}
+
+func geminiUsageInt(usage map[string]interface{}, key string) int {
+	switch v := usage[key].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	case json.Number:
+		i, _ := v.Int64()
+		return int(i)
+	default:
+		return 0
+	}
 }
 
 func (s *AIService) callDeepSeek(ctx context.Context, model string, messages []Message, stream bool, reasoning bool, reasoningEffort string) (*AICompletionResponse, error) {
 	if s.cfg.DeepSeekKey == "" {
 		return nil, fmt.Errorf("未配置 DeepSeek API Key")
 	}
+	apiModel := normalizeDeepSeekModel(model, reasoning)
 
 	baseURL := "https://api.deepseek.com"
 	if s.cfg.DeepSeekBaseURL != "" {
@@ -359,7 +776,7 @@ func (s *AIService) callDeepSeek(ctx context.Context, model string, messages []M
 	}
 
 	reqBody := map[string]interface{}{
-		"model":      model,
+		"model":      apiModel,
 		"messages":   deepSeekMessages,
 		"stream":     stream,
 		"max_tokens": s.cfg.DeepSeekMaxTokens,
@@ -372,25 +789,12 @@ func (s *AIService) callDeepSeek(ctx context.Context, model string, messages []M
 		}
 	}
 
-	// DeepSeek V4 Pro 默认启用 thinking，必须显式指定 type 来控制
-	if reasoning {
-		reqBody["thinking"] = map[string]string{"type": "enabled"}
-		// 默认 high，只有显式传入 max 才用 max
-		effort := "high"
-		if reasoningEffort == "max" {
-			effort = "max"
-		}
-		reqBody["reasoning_effort"] = effort
-	} else {
-		reqBody["thinking"] = map[string]string{"type": "disabled"}
-	}
-
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("序列化 DeepSeek 请求失败: %w", err)
 	}
 	// 日志记录实际发送的参数，便于排查
-	fmt.Printf("[DeepSeek] model=%s reasoning=%v effort=%s body_len=%d\n", model, reasoning, reasoningEffort, len(jsonBody))
+	fmt.Printf("[DeepSeek] model=%s api_model=%s reasoning=%v effort=%s body_len=%d\n", model, apiModel, reasoning, reasoningEffort, len(jsonBody))
 	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/v1/chat/completions", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("创建 DeepSeek 请求失败: %w", err)

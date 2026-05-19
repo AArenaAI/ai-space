@@ -7,8 +7,6 @@ import MessageList from "./MessageList";
 import MessageInput from "./MessageInput";
 import ModelSelector from "./ModelSelector";
 import ThemeToggle from "@/components/theme/ThemeToggle";
-import CreditBar from "@/components/credits/CreditBar";
-import { useCredits, getModelTier } from "@/hooks/useCredits";
 import { Columns2, ChevronDown, Zap, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -38,6 +36,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
   const {
     messages,
     isLoading,
+    isLoadingHistory,
     selectedModel,
     setSelectedModel,
     sendMessage,
@@ -52,7 +51,6 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
   } = useChat(conversationId, models, skillKey);
 
   const { templates } = useTemplates();
-  const { hasEnoughCredits, deductCredits } = useCredits();
 
   const handleModelSelect = useCallback((model: ChatModel) => {
     // 如果当前是 Skill 技能对话且有推荐模型，保存用户覆盖标记
@@ -89,7 +87,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
 
   // 创建对话后更新 URL（保留 skillKey 参数）
   useEffect(() => {
-    if (currentConversation && !conversationId && effectiveSkillKey) {
+    if (currentConversation && !conversationId) {
       const url = new URL(window.location.href);
       url.searchParams.set("id", String(currentConversation));
       if (!url.searchParams.get("key") && effectiveSkillKey) {
@@ -402,6 +400,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
       <MessageList
         messages={messages}
         isLoading={isLoading}
+        isLoadingHistory={isLoadingHistory}
         models={models}
         conversationId={conversationId}
         onDeleteMessage={deleteMessage}
@@ -416,7 +415,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
       />
 
       {/* 输入框 */}
-      <div className="shrink-0">
+      <div className={cn("shrink-0", messages.length === 0 ? "mb-80" : "")}>
         <MessageInput
           onSend={handleSend}
           onStop={handleStop}
@@ -426,9 +425,6 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
           currentModel={selectedModel}
         />
       </div>
-
-      {/* 积分状态栏 */}
-      <CreditBar selectedModelId={selectedModel.id} />
     </div>
   );
 }

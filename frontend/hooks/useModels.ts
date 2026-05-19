@@ -12,7 +12,7 @@ export interface ChatModel {
 }
 
 const DEFAULT_CHAT: ChatModel[] = [
-  { id: "gpt-5.4-mini", name: "GPT 5.4 Mini", provider: "OpenAI", description: "载入中...", color: "#10a37f", capabilities: ["chat"] },
+  { id: "gpt-5.4-mini", name: "GPT 5.4 Mini", provider: "OpenAI", description: "载入中...", color: "#10a37f", capabilities: ["chat", "reasoning"] },
 ];
 
 const DEFAULT_IMAGE: ChatModel[] = [

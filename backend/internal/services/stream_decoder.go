@@ -15,6 +15,8 @@ func NewDecoder(modelType string, body io.ReadCloser) StreamDecoder {
 	case "anthropic", "deepseek", "moonshot":
 		// Claude / DeepSeek / Moonshot 都是标准 OpenAI 兼容 SSE 格式
 		return NewChatSSEDecoder(body)
+	case "gemini":
+		return NewGeminiDecoder(body)
 	default:
 		// 未知模型也尝试用标准 SSE 解码
 		return NewChatSSEDecoder(body)

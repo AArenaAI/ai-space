@@ -24,6 +24,8 @@ import {
   Plus,
   History,
   Sparkles,
+  Eraser,
+  Type,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -602,6 +604,36 @@ export default function ImagePage() {
                     <Send className="w-4 h-4" />
                   </button>
                 )}
+            </div>
+          </div>
+
+          {/* 图编工具入口 - 与AI画图摆在一起 */}
+          <div className="mt-6 mb-2">
+            <h3 className="text-base font-semibold text-text-primary mb-4">图像编辑</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[
+                { icon: Eraser, label: "背景移除", desc: "一键去除图片背景", mode: "remove-bg", color: "text-green-500", bg: "bg-green-500/10", border: "border-green-500/20" },
+                { icon: Sparkles, label: "背景替换", desc: "AI生成新背景", mode: "replace-bg", color: "text-purple-500", bg: "bg-purple-500/10", border: "border-purple-500/20" },
+                { icon: Type, label: "文字移除", desc: "去除水印和文字", mode: "text-removal", color: "text-orange-500", bg: "bg-orange-500/10", border: "border-orange-500/20" },
+                { icon: ZoomIn, label: "画质提升", desc: "AI增强分辨率", mode: "upscale", color: "text-blue-500", bg: "bg-blue-500/10", border: "border-blue-500/20" },
+              ].map((tool) => (
+                <a
+                  key={tool.mode}
+                  href={`/image/edit?mode=${tool.mode}`}
+                  className={cn(
+                    "group flex flex-col items-start gap-2 p-4 rounded-2xl border transition-all duration-200 hover:shadow-md",
+                    "bg-surface-card border-surface-border hover:border-brand/30"
+                  )}
+                >
+                  <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center", tool.bg)}>
+                    <tool.icon className={cn("w-5 h-5", tool.color)} />
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-text-primary">{tool.label}</div>
+                    <div className="text-xs text-text-tertiary mt-0.5">{tool.desc}</div>
+                  </div>
+                </a>
+              ))}
             </div>
           </div>
 

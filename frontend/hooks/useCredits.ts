@@ -28,16 +28,15 @@ export interface DeductResult {
 // 模型等级映射（与后端保持一致）
 export const MODEL_TIER_MAP: Record<string, string> = {
   "gpt-5.4-mini": "basic",
-  "deepseek-v4-flash": "basic",
   "gemini-2.0-flash-exp": "basic",
 
   "gpt-5.4": "advanced",
   "gpt-5.5": "advanced",
   "claude-3-5-sonnet-20241022": "advanced",
+  "deepseek-chat": "advanced",
   "moonshot-v1-8k": "advanced",
 
   "gpt-5.5-pro": "elite",
-  "deepseek-v4-pro": "elite",
   "deepseek-reasoner": "elite",
 };
 

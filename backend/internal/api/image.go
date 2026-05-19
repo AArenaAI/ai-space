@@ -241,7 +241,6 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 	}
 
 	baseURL := resolveBaseURL(c, h.cfg)
-	ctx := context.Background()
 	size := req.Size
 	if size == "" {
 		size = "1024x1024"
@@ -302,57 +301,24 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 		}
 	}
 
-	var imageURL, b64Data string
-	var err error
-
-	if req.EditMode == "remove-bg" {
-		imageURL, b64Data, err = h.imageService.RemoveBackground(ctx, size, imageFilePath)
-	} else if req.EditMode == "text-removal" {
-		editPrompt := req.Prompt + ". Remove these texts/watermarks from the image. Keep everything else intact."
-		imageURL, b64Data, err = h.imageService.GenerateEditImage(ctx, editPrompt, size, imageFilePath)
-	} else if req.EditMode == "upscale" {
-		editPrompt := "Upscale and enhance this image to 4x resolution. Add more detail, sharpen edges, improve clarity while preserving the original style and content."
-		imageURL, b64Data, err = h.imageService.GenerateEditImage(ctx, editPrompt, size, imageFilePath)
-	} else {
-		editPrompt := req.Prompt + ". Keep the subject the same, only change the background."
-		imageURL, b64Data, err = h.imageService.GenerateEditImage(ctx, editPrompt, size, imageFilePath)
+	editPrompt := req.Prompt
+	switch req.EditMode {
+	case "remove-bg":
+		editPrompt = "Remove the background of this image. Make the background transparent. Keep only the main subject."
+	case "text-removal":
+		editPrompt = req.Prompt + ". Remove these texts/watermarks from the image. Keep everything else intact."
+	case "upscale":
+		editPrompt = "Upscale and enhance this image to 4x resolution. Add more detail, sharpen edges, improve clarity while preserving the original style and content."
+	default:
+		editPrompt = req.Prompt + ". Keep the subject the same, only change the background."
 	}
 
-	if err != nil {
-		var errorMsg string
-		switch req.EditMode {
-		case "text-removal":
-			errorMsg = "文字移除失败: " + err.Error()
-		case "upscale":
-			errorMsg = "画质提升失败: " + err.Error()
-		default:
-			errorMsg = "背景编辑失败: " + err.Error()
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": errorMsg})
-		return
-	}
-
-	// 保存结果到本地
-	var savedImageURL string
-	if b64Data != "" {
-		savedFilename, saveErr := saveBase64Image(b64Data)
-		if saveErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存编辑结果失败: " + saveErr.Error()})
-			return
-		}
-		savedImageURL = buildImageURL(baseURL, savedFilename)
-	} else {
-		savedImageURL = imageURL
-	}
-
-	// 可选：把编辑结果也记录到 DB（复用 ImageGeneration 表）
 	gen := &services.ImageGeneration{
 		UserID:            userID,
-		Prompt:            req.Prompt,
+		Prompt:            editPrompt,
 		Size:              size,
-		ImageURL:          savedImageURL,
 		ReferenceImageURL: req.ImageURL,
-		Status:            "completed",
+		Status:            "pending",
 	}
 	switch req.EditMode {
 	case "remove-bg":
@@ -362,12 +328,18 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 	case "upscale":
 		gen.Prompt = "[画质提升] " + req.ImageURL
 	}
-	h.db.Create(gen)
+	if err := h.db.Create(gen).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建编辑任务失败: " + err.Error()})
+		return
+	}
+
+	// 图片编辑耗时可能超过前置代理/Cloudflare 允许的同步等待时间，必须异步处理，前端按 id 轮询状态。
+	go h.processImageJob(gen.ID, editPrompt, size, "medium", []string{imageFilePath}, baseURL)
 
 	c.JSON(http.StatusOK, gin.H{
-		"image_url": savedImageURL,
-		"id":        gen.ID,
-		"status":    "completed",
+		"id":         gen.ID,
+		"status":     "pending",
+		"created_at": gen.CreatedAt,
 	})
 }
 
@@ -452,12 +424,12 @@ func (h *ImageHandler) GenerateImage(c *gin.Context) {
 
 	// 创建记录
 	gen := &services.ImageGeneration{
-		UserID:             userID,
-		Prompt:             req.Prompt,
-		Size:               size,
-		Quality:            quality,
-		ReferenceImageURL:  refImageURL,
-		Status:             "pending",
+		UserID:            userID,
+		Prompt:            req.Prompt,
+		Size:              size,
+		Quality:           quality,
+		ReferenceImageURL: refImageURL,
+		Status:            "pending",
 	}
 	if err := h.db.Create(gen).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建记录失败: " + err.Error()})
@@ -528,7 +500,18 @@ func (h *ImageHandler) ServeImageFile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "非法文件名"})
 		return
 	}
+
 	path := filepath.Join(imagesDir, filename)
+	if _, err := os.Stat(path); err != nil {
+		// 兼容后端从仓库根目录启动时，图片被保存到 ./data/images，而当前 API 包的相对目录不是同一个目录。
+		altPath := filepath.Join("..", "data", "images", filename)
+		if _, altErr := os.Stat(altPath); altErr == nil {
+			path = altPath
+		} else {
+			c.JSON(http.StatusNotFound, gin.H{"error": "图片文件不存在"})
+			return
+		}
+	}
 	c.File(path)
 }
 

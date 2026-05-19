@@ -6,7 +6,7 @@ description: 基于三段式分析框架与因果推断约束的数据分析，�
 icon: bar-chart
 color: "#8b5cf6"
 category: data
-recommended_model: deepseek-v4-pro
+recommended_model: deepseek-reasoner
 triggers:
   - 数据分析
   - 可视化

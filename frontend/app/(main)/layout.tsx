@@ -4,9 +4,9 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Menu } from "lucide-react";
 import AppSidebar from "@/components/sidebar/AppSidebar";
-import MoreSidebar from "@/components/sidebar/MoreSidebar";
+import ToolsSidebar from "@/components/sidebar/ToolsSidebar";
 
-const MORE_PAGES = ["/image/edit", "/templates"];
+const TOOLS_PAGES = ["/image", "/templates"];
 const HOVER_RAIL_PAGES = ["/workspace"];
 
 export default function MainLayout({
@@ -16,11 +16,11 @@ export default function MainLayout({
 }) {
   /* 初始固定为 false，避免静态导出 hydration mismatch */
   const pathname = usePathname();
-  const [isMorePage, setIsMorePage] = useState(false);
+  const [isToolsPage, setIsToolsPage] = useState(false);
   const [isHoverRailPage, setIsHoverRailPage] = useState(false);
 
   useEffect(() => {
-    setIsMorePage(MORE_PAGES.some((p) => pathname.startsWith(p)));
+    setIsToolsPage(TOOLS_PAGES.some((p) => pathname.startsWith(p)));
     setIsHoverRailPage(HOVER_RAIL_PAGES.some((p) => pathname === p || pathname.startsWith(`${p}/`)));
   }, [pathname]);
 
@@ -37,12 +37,12 @@ export default function MainLayout({
             <span className="mt-2 [writing-mode:vertical-rl] text-[10px] tracking-[0.2em] text-text-tertiary">MENU</span>
           </div>
           <div className="absolute inset-y-0 left-0 -translate-x-full opacity-0 shadow-2xl transition-all duration-200 group-hover/sidebar:translate-x-0 group-hover/sidebar:opacity-100">
-            {isMorePage ? <MoreSidebar /> : <AppSidebar />}
+            {isToolsPage ? <ToolsSidebar /> : <AppSidebar />}
           </div>
         </div>
       ) : (
         <div className="hidden md:flex">
-          {isMorePage ? <MoreSidebar /> : <AppSidebar />}
+          {isToolsPage ? <ToolsSidebar /> : <AppSidebar />}
         </div>
       )}
 
