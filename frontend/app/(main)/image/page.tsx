@@ -112,10 +112,10 @@ function ReferenceImageStack({
   if (images.length === 0) {
     return (
       <div
-          className={cn(
-            "relative shrink-0 w-9 h-9 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center transition-all cursor-pointer hover:border-brand/40",
-            uploading && "cursor-not-allowed opacity-60"
-          )}
+        className={cn(
+          "relative shrink-0 w-9 h-16 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center transition-all cursor-pointer hover:border-brand/40",
+          uploading && "cursor-not-allowed opacity-60"
+        )}
         onClick={onAdd}
         onDragOver={(e) => {
           e.preventDefault();
@@ -146,7 +146,7 @@ function ReferenceImageStack({
   if (images.length === 1) {
     return (
       <div className="relative shrink-0 group/single">
-        <div className="w-9 h-9 rounded-xl overflow-hidden border border-surface-border">
+        <div className="w-9 h-16 rounded-xl overflow-hidden border border-surface-border">
           <img src={resolveImageUrl(images[0])} alt="参考图" className="w-full h-full object-cover" />
         </div>
         {/* 删除按钮 - 悬浮时显示 */}
@@ -204,7 +204,7 @@ function ReferenceImageStack({
               )}
               style={{
                 width: 36,
-                height: 36,
+                height: 64,
                 marginLeft: idx === 0 ? 0 : stackOffset,
                 transform: `rotate(${stackRotate}deg)`,
                 zIndex,
