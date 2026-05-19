@@ -520,6 +520,14 @@ export default function MessageList({
                 </div>
               )}
 
+              {/* 用户消息占位，保持与AI头像对称 */}
+              {isUser && (
+                <div className={cn(
+                  "mt-1 w-7 h-7 shrink-0",
+                  !selectMode && "invisible"
+                )} />
+              )}
+
               <div className="flex flex-col gap-1 max-w-3xl">
                 <div
                   className={cn(
