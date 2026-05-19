@@ -123,8 +123,8 @@ function extractCitations(content: string): number[] {
 function sanitizeContent(content: string): string {
   let result = content;
   
-  // 匹配 "**引用来源**"、"引用来源："、"参考来源："、"References：" 等开头的末尾段落
-  result = result.replace(/\n*[*_]*\s*(?:引用来源|参考来源|来源|References|参考链接)[：:][\s\S]*$/, "");
+  // 只移除搜索模块追加在末尾的来源区块；不要匹配普通正文里的“来源：AP”，否则会把新闻列表从第一条来源处截断
+  result = result.replace(/\n{2,}[*_]*\s*(?:引用来源|参考来源|References|参考链接)[：:]\s*[\s\S]*$/, "");
   
   // 去掉末尾的 [数字] Title - URL 格式的列表
   result = result.replace(/\n*\[\d+\]\s+[^\n]*(?:\n\[\d+\]\s+[^\n]*)*$/, "");
