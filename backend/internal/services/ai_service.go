@@ -227,7 +227,9 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 				effort = reasoningEffort
 			}
 			reasoningConfig["effort"] = effort
-			reasoningConfig["summary"] = "detailed"
+			// OpenAI Responses API 不暴露原始 CoT；summary=auto 显式请求 reasoning summary，
+			// 由流式 decoder 映射为 reasoning_content，前端作为思考块展示。
+			reasoningConfig["summary"] = "auto"
 			reqBody["reasoning"] = reasoningConfig
 		}
 	}
@@ -356,6 +358,16 @@ func ExtractOpenAIResponseText(raw map[string]any) string {
 }
 
 func (s *AIService) streamMaxOutputTokens(search bool, reasoning bool) int {
+	// 只做 env 配置选择，不在代码里硬编码“深度思考/搜索”的最低 token 兜底。
+	// 需要放大预算时调 backend/.env：
+	// OPENAI_MAX_OUTPUT_TOKENS / OPENAI_MAX_OUTPUT_TOKENS_SEARCH /
+	// OPENAI_MAX_OUTPUT_TOKENS_DEEP / OPENAI_MAX_OUTPUT_TOKENS_DEEP_SEARCH。
+	if reasoning && search {
+		return s.cfg.OpenAIMaxOutputTokensDeepSearch
+	}
+	if reasoning {
+		return s.cfg.OpenAIMaxOutputTokensDeep
+	}
 	if search {
 		return s.cfg.OpenAIMaxOutputTokensSearch
 	}
@@ -447,148 +459,6 @@ func (s *AIService) callAnthropic(ctx context.Context, model string, messages []
 	}
 
 	return &AICompletionResponse{Body: resp.Body, ModelType: "anthropic", Provider: "anthropic", Model: model}, nil
-}
-
-func (s *AIService) callGemini(ctx context.Context, model string, messages []Message, stream bool, reasoning bool, reasoningEffort string, search bool) (*AICompletionResponse, error) {
-	if s.cfg.GeminiKey == "" {
-		return nil, fmt.Errorf("未配置 Gemini API Key")
-	}
-
-	baseURL := "https://generativelanguage.googleapis.com"
-	if s.cfg.GeminiBaseURL != "" {
-		baseURL = strings.TrimRight(s.cfg.GeminiBaseURL, "/")
-	}
-
-	var systemParts []map[string]interface{}
-	contents := make([]map[string]interface{}, 0, len(messages))
-	for _, m := range messages {
-		parts := geminiPartsFromMessage(m)
-		if len(parts) == 0 {
-			continue
-		}
-		if m.Role == "system" {
-			systemParts = append(systemParts, parts...)
-			continue
-		}
-
-		role := "user"
-		if m.Role == "assistant" {
-			role = "model"
-		}
-		contents = append(contents, map[string]interface{}{
-			"role":  role,
-			"parts": parts,
-		})
-	}
-	if len(contents) == 0 {
-		contents = append(contents, map[string]interface{}{
-			"role":  "user",
-			"parts": []map[string]interface{}{{"text": ""}},
-		})
-	}
-
-	reqBody := map[string]interface{}{
-		"contents": contents,
-		"generationConfig": map[string]interface{}{
-			"maxOutputTokens": 8192,
-		},
-	}
-	if len(systemParts) > 0 {
-		reqBody["systemInstruction"] = map[string]interface{}{"parts": systemParts}
-	}
-	if reasoning {
-		thinkingLevel := "medium"
-		switch strings.ToLower(reasoningEffort) {
-		case "minimal":
-			thinkingLevel = "minimal"
-		case "low":
-			thinkingLevel = "low"
-		case "high":
-			thinkingLevel = "high"
-		}
-		genConfig := reqBody["generationConfig"].(map[string]interface{})
-		genConfig["thinkingLevel"] = thinkingLevel
-		genConfig["thinkingSummaries"] = "auto"
-		fmt.Printf("[Gemini] reasoning enabled, thinkingLevel=%s\n", thinkingLevel)
-	}
-	// Interactions API: 启用原生 Google Search 工具
-	if search {
-		reqBody["tools"] = []map[string]interface{}{
-			{"type": "google_search"},
-		}
-	}
-
-	jsonBody, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("序列化 Gemini 请求失败: %w", err)
-	}
-
-	method := "generateContent"
-	if stream {
-		method = "streamGenerateContent"
-	}
-	// 使用 Interactions API (v1alpha)
-	u, err := url.Parse(fmt.Sprintf("%s/v1alpha/models/%s:%s", baseURL, url.PathEscape(model), method))
-	if err != nil {
-		return nil, fmt.Errorf("创建 Gemini URL 失败: %w", err)
-	}
-	q := u.Query()
-	q.Set("key", s.cfg.GeminiKey)
-	if stream {
-		q.Set("alt", "sse")
-	}
-	u.RawQuery = q.Encode()
-
-	fmt.Printf("[Gemini] model=%s stream=%v search=%v contents=%d body_len=%d\n", model, stream, search, len(contents), len(jsonBody))
-	req, err := http.NewRequestWithContext(ctx, "POST", u.String(), bytes.NewBuffer(jsonBody))
-	if err != nil {
-		return nil, fmt.Errorf("创建 Gemini 请求失败: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := DefaultAIHTTPClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		return nil, fmt.Errorf("Gemini API 错误: %s", string(body))
-	}
-
-	if stream {
-		return &AICompletionResponse{Body: resp.Body, ModelType: "gemini", Provider: "gemini", Model: model}, nil
-	}
-
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("读取 Gemini 响应失败: %w", err)
-	}
-	wrapped, err := wrapGeminiGenerateContentResponse(body, model)
-	if err != nil {
-		return nil, err
-	}
-	return &AICompletionResponse{Body: io.NopCloser(bytes.NewReader(wrapped)), ModelType: "gemini", Provider: "gemini", Model: model}, nil
-}
-
-func geminiPartsFromMessage(m Message) []map[string]interface{} {
-	parts := make([]map[string]interface{}, 0, 1+len(m.Images))
-	if strings.TrimSpace(m.Content) != "" {
-		parts = append(parts, map[string]interface{}{"text": m.Content})
-	}
-	if m.Role == "user" {
-		for _, img := range m.Images {
-			mediaType, b64Data := parseDataURI(img)
-			parts = append(parts, map[string]interface{}{
-				"inlineData": map[string]interface{}{
-					"mimeType": mediaType,
-					"data":     b64Data,
-				},
-			})
-		}
-	}
-	return parts
 }
 
 func wrapGeminiGenerateContentResponse(body []byte, model string) ([]byte, error) {

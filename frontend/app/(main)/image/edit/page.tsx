@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback, Suspense } from "react";
+import { useState, useRef, useEffect, useCallback, Suspense, useMemo } from "react";
 import { Upload, Loader2 as Spinner, Sparkles, Eraser, Download, RotateCcw, ArrowRight, Wand2, Type, ZoomIn, ImagePlus, History, Trash2, Loader, RefreshCw, AlertCircle, Clock, Image as ImageIcon, Plus } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useImage } from "@/hooks/useImage";
 import { toast } from "sonner";
@@ -109,7 +109,12 @@ export default function ImageEditPage() {
 
 function ImageEditContent() {
   const { images, deleteImage } = useImage();
-  const [editMode, setEditMode] = useState<EditMode>("remove-bg");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const editMode = useMemo(() => {
+    const mode = searchParams.get("mode") as EditMode | null;
+    return mode && MODE_ORDER.includes(mode) ? mode : "remove-bg";
+  }, [searchParams]);
   const [sourceUrl, setSourceUrl] = useState("");
   const [replacePrompt, setReplacePrompt] = useState("");
   const [isEditing, setIsEditing] = useState(false);
@@ -124,29 +129,11 @@ function ImageEditContent() {
   const config = MODE_CONFIG[editMode];
   const isRemoveBgMode = editMode === "remove-bg";
 
-  // 从 URL 读取初始 mode
-  const searchParams = useSearchParams();
-  const urlMode = searchParams.get("mode") as EditMode | null;
-
-  useEffect(() => {
-    if (urlMode && MODE_ORDER.includes(urlMode)) {
-      setEditMode(urlMode);
-      setResult(null);
-      setSourceUrl("");
-      setReplacePrompt("");
-    }
-  }, [urlMode]);
-
   const switchMode = (mode: EditMode) => {
-    setEditMode(mode);
     setResult(null);
     setSourceUrl("");
     setReplacePrompt("");
-    if (typeof window !== "undefined") {
-      const url = new URL(window.location.href);
-      url.searchParams.set("mode", mode);
-      window.history.replaceState({}, "", url.toString());
-    }
+    router.replace(`/image/edit?mode=${mode}`, { scroll: false });
   };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {

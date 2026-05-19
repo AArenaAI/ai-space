@@ -100,9 +100,17 @@ func (d *OpenAIResponsesTypedDecoder) parseTypedEvent(event responses.ResponseSt
 	case "response.reasoning_summary.delta":
 		return &AIStreamEvent{Type: EventReasoningDelta, Delta: fmt.Sprint(event.AsResponseReasoningSummaryDelta().Delta)}
 	case "response.web_search_call.in_progress", "response.web_search_call.searching":
-		return &AIStreamEvent{Type: EventSearchStart, Delta: "正在搜索..."}
+		return &AIStreamEvent{Type: EventSearchStart, Delta: "正在搜索网页"}
 	case "response.web_search_call.completed":
-		return &AIStreamEvent{Type: EventSearchDone, Delta: "搜索完成"}
+		return &AIStreamEvent{Type: EventSearchDone, Delta: "网页搜索完成"}
+	case "response.file_search_call.in_progress", "response.file_search_call.searching":
+		return &AIStreamEvent{Type: EventFileSearchStart, Delta: "正在检索知识库"}
+	case "response.file_search_call.completed":
+		return &AIStreamEvent{Type: EventFileSearchDone, Delta: "知识库检索完成"}
+	case "response.function_call_arguments.delta":
+		return &AIStreamEvent{Type: EventToolCallStart, Delta: "正在调用工具"}
+	case "response.function_call_arguments.done":
+		return &AIStreamEvent{Type: EventToolCallDone, Delta: "工具调用完成"}
 	case "response.completed":
 		completed := event.AsResponseCompleted()
 		if completed.Response.Usage.InputTokens > 0 || completed.Response.Usage.OutputTokens > 0 || completed.Response.Usage.TotalTokens > 0 {

@@ -33,6 +33,12 @@ func NewChatHandler(db *gorm.DB, cfg *config.Config, aiService *services.AIServi
 	return &ChatHandler{db: db, cfg: cfg, aiService: aiService, searchService: searchService, fileService: fileService, retrievalSvc: retrievalSvc, contextBuilder: contextBuilder, usageService: usageService}
 }
 
+func (h *ChatHandler) touchConversation(conversationID uint) {
+	if conversationID > 0 {
+		h.db.Model(&models.Conversation{}).Where("id = ?", conversationID).Update("updated_at", time.Now())
+	}
+}
+
 type FileContextPolicy struct {
 	UseConversationFiles string `json:"use_conversation_files,omitempty"` // auto | always | never
 	MaxConversationFiles int    `json:"max_conversation_files,omitempty"`
@@ -620,6 +626,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 				CreatedAt:      time.Now(),
 			}
 			h.db.Create(&msg)
+			h.touchConversation(conversationID)
 
 			// 保存消息-文件关联：只保存当前消息附件，避免历史文件污染新消息展示
 			if len(filePlan.MessageFiles) > 0 {
@@ -696,6 +703,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 			CreatedAt:      time.Now(),
 		}
 		h.db.Create(&assistantMsg)
+		h.touchConversation(conversationID)
 		assistantMsgID := assistantMsg.ID
 
 		// SSE 流式响应
@@ -722,7 +730,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 			c.Writer.Flush()
 		}
 
-		streamResult, usage, err := h.forwardUnifiedStream(resp, c.Writer, req.Reasoning, assistantMsgID)
+		streamResult, usage, err := h.forwardUnifiedStream(resp, c.Writer, req.Reasoning, assistantMsgID, useBackground, userID, guestID, conversationID, req.Model, resp.Provider)
 		if err != nil {
 			fmt.Printf("[Chat] forwardUnifiedStream error: %v\n", err)
 		}
@@ -731,14 +739,16 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		// 流结束后，更新已有的 assistant 消息（先创建空消息可防止用户跳转时丢失）
 		if assistantMsgID > 0 {
 			h.db.Model(&models.Message{}).Where("id = ?", assistantMsgID).Update("content", streamResult.FullContent)
+			h.touchConversation(conversationID)
 			if useBackground && streamResult.ResponseID != "" {
-				h.createBackgroundTask(streamResult.ResponseID, userID, guestID, conversationID, assistantMsgID, req.Model, resp.Provider, "streaming", streamResult.LastSequenceNumber)
+				h.createBackgroundTask(streamResult.ResponseID, userID, guestID, conversationID, assistantMsgID, req.Model, resp.Provider, "completed", streamResult.LastSequenceNumber)
 			}
 		} else if useBackground && streamResult.ResponseID != "" {
 			// 极端情况：如果没有 assistantMsgID（不应该发生），退回到原逻辑
-			assistantMsg := models.Message{ConversationID: conversationID, Role: "assistant", Content: "后台任务已开始，完成后会自动更新结果。", Model: req.Model, CreatedAt: time.Now()}
+			assistantMsg := models.Message{ConversationID: conversationID, Role: "assistant", Content: streamResult.FullContent, Model: req.Model, CreatedAt: time.Now()}
 			h.db.Create(&assistantMsg)
-			h.createBackgroundTask(streamResult.ResponseID, userID, guestID, conversationID, assistantMsg.ID, req.Model, resp.Provider, "running", streamResult.LastSequenceNumber)
+			h.touchConversation(conversationID)
+			h.createBackgroundTask(streamResult.ResponseID, userID, guestID, conversationID, assistantMsg.ID, req.Model, resp.Provider, "completed", streamResult.LastSequenceNumber)
 		}
 
 		// 记录 usage
@@ -789,6 +799,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 								Model:          req.Model,
 								CreatedAt:      time.Now(),
 							})
+							h.touchConversation(conversationID)
 						}
 					}
 				}
@@ -823,6 +834,10 @@ func (h *ChatHandler) createBackgroundTask(responseID string, userID uint, guest
 		Status:             status,
 		LastSequenceNumber: lastSequenceNumber,
 		CreatedAt:          time.Now(),
+	}
+	if status == "completed" {
+		now := time.Now()
+		task.CompletedAt = &now
 	}
 	if err := h.db.Where("response_id = ?", responseID).Assign(task).FirstOrCreate(&task).Error; err != nil {
 		fmt.Printf("[Chat] 保存后台任务失败 response_id=%s: %v\n", responseID, err)
@@ -860,6 +875,7 @@ func (h *ChatHandler) handleBackgroundResponse(c *gin.Context, resp *services.AI
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存后台任务占位消息失败"})
 		return
 	}
+	h.touchConversation(conversationID)
 
 	task := models.AIBackgroundTask{
 		ResponseID:         responseID,
@@ -910,7 +926,7 @@ type UnifiedStreamResult struct {
 	LastSequenceNumber int64
 }
 
-func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, w gin.ResponseWriter, reasoningEnabled bool, assistantMsgID uint) (*UnifiedStreamResult, *services.TokenUsage, error) {
+func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, w gin.ResponseWriter, reasoningEnabled bool, assistantMsgID uint, useBackground bool, userID uint, guestID string, conversationID uint, model string, provider string) (*UnifiedStreamResult, *services.TokenUsage, error) {
 	decoder := resp.Decoder
 	if decoder == nil {
 		decoder = services.NewDecoder(resp.ModelType, resp.Body)
@@ -956,6 +972,7 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 	defer heartbeat.Stop()
 
 	var fullContent strings.Builder
+	var reasoningPersistOpen bool
 	var contentMu sync.Mutex
 	var getContent = func() string {
 		contentMu.Lock()
@@ -1025,6 +1042,11 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 			}
 			if event.ResponseID != "" {
 				outcome.ResponseID = event.ResponseID
+				if useBackground {
+					// OpenAI background+stream 的 webhook 可能在前端流结束前就到达；
+					// 收到 response.created 后立即建立 response_id -> 本地消息映射，避免 webhook record not found。
+					h.createBackgroundTask(event.ResponseID, userID, guestID, conversationID, assistantMsgID, model, provider, "streaming", event.SequenceNumber)
+				}
 			}
 			if event.Type == services.EventResponseCreated {
 				continue
@@ -1037,6 +1059,13 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 			}
 
 			if event.Type == services.EventDone {
+				contentMu.Lock()
+				if reasoningPersistOpen {
+					fullContent.WriteString("</think>")
+					reasoningPersistOpen = false
+				}
+				contentMu.Unlock()
+
 				if err := writeAndFlush("data: [DONE]\n\n"); err != nil {
 					outcome.FullContent = strings.TrimSpace(getContent())
 					return outcome, finalUsage, err
@@ -1053,16 +1082,67 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 				continue
 			}
 
+			activityKind := ""
+			activityStatus := ""
+			switch event.Type {
+			case services.EventSearchStart:
+				activityKind = "web_search"
+				activityStatus = "searching"
+			case services.EventSearchDone:
+				activityKind = "web_search"
+				activityStatus = "completed"
+			case services.EventFileSearchStart:
+				activityKind = "file_search"
+				activityStatus = "searching"
+			case services.EventFileSearchDone:
+				activityKind = "file_search"
+				activityStatus = "completed"
+			case services.EventToolCallStart:
+				activityKind = "tool_call"
+				activityStatus = "running"
+			case services.EventToolCallDone:
+				activityKind = "tool_call"
+				activityStatus = "completed"
+			}
+			if activityKind != "" {
+				label := event.Delta
+				if label == "" {
+					label = activityKind
+				}
+				out, _ := json.Marshal(map[string]interface{}{
+					"choices": []map[string]interface{}{{"delta": map[string]string{"content": ""}}},
+					"_activity_meta": map[string]interface{}{
+						"kind":   activityKind,
+						"status": activityStatus,
+						"label":  label,
+					},
+				})
+				if err := writeAndFlush("data: " + string(out) + "\n\n"); err != nil {
+					outcome.FullContent = strings.TrimSpace(getContent())
+					return outcome, finalUsage, err
+				}
+				continue
+			}
+
 			delta := map[string]string{"content": ""}
 			if event.Type == services.EventTextDelta {
 				delta["content"] = event.Delta
 				contentMu.Lock()
+				if reasoningPersistOpen {
+					fullContent.WriteString("</think>")
+					reasoningPersistOpen = false
+				}
 				fullContent.WriteString(event.Delta)
 				contentMu.Unlock()
 			} else if event.Type == services.EventReasoningDelta {
 				delta["reasoning_content"] = event.Delta
-				// 推理内容也累积到完整内容中（保存时需要）
+				// reasoning summary 也持久化到 content 内，沿用前端已有 <think> 解析展示。
+				// 这样刷新/重新打开会话后，思考区不会丢失。
 				contentMu.Lock()
+				if !reasoningPersistOpen {
+					fullContent.WriteString("<think>")
+					reasoningPersistOpen = true
+				}
 				fullContent.WriteString(event.Delta)
 				contentMu.Unlock()
 			}
@@ -1101,7 +1181,6 @@ func (h *ChatHandler) callModel(ctx context.Context, modelID string, messages []
 			return "", fmt.Errorf("Responses API 返回空 output")
 		}
 
-		var reasoningSummary string
 		var finalContent string
 
 		for _, o := range output {
@@ -1112,14 +1191,8 @@ func (h *ChatHandler) callModel(ctx context.Context, modelID string, messages []
 			itemType, _ := item["type"].(string)
 
 			if itemType == "reasoning" {
-				// 提取 reasoning summary（如果有）
-				if summaries, ok := item["summary"].([]interface{}); ok && len(summaries) > 0 {
-					if firstSummary, ok := summaries[0].(map[string]interface{}); ok {
-						if text, ok := firstSummary["text"].(string); ok && text != "" {
-							reasoningSummary = text
-						}
-					}
-				}
+				// reasoning summary 只用于前端思考块/日志，不混入非流式正式正文。
+				continue
 			} else if itemType == "message" {
 				// 提取 message content
 				contentItems, ok := item["content"].([]interface{})
@@ -1133,11 +1206,6 @@ func (h *ChatHandler) callModel(ctx context.Context, modelID string, messages []
 				content, _ := firstContent["text"].(string)
 				finalContent += content
 			}
-		}
-
-		// 如果有 reasoning summary，包装为  标签格式
-		if reasoningSummary != "" {
-			finalContent = " " + reasoningSummary + " " + finalContent
 		}
 
 		if finalContent == "" {
@@ -1302,6 +1370,7 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 					CreatedAt:      time.Now(),
 				}
 				h.db.Create(&msg)
+				h.touchConversation(conv.ID)
 				if len(filePlan.MessageFiles) > 0 {
 					h.saveMessageFiles(msg.ID, filePlan.MessageFiles)
 				}
@@ -1332,6 +1401,7 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 				CreatedAt:      time.Now(),
 			}
 			h.db.Create(&msg)
+			h.touchConversation(conv.ID)
 			if len(filePlan.MessageFiles) > 0 {
 				h.saveMessageFiles(msg.ID, filePlan.MessageFiles)
 			}
@@ -1356,6 +1426,7 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 				CreatedAt:      time.Now(),
 			})
 		}
+		h.touchConversation(conversationID)
 	}
 
 	c.JSON(http.StatusOK, gin.H{

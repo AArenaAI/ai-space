@@ -40,12 +40,14 @@ func (d *GeminiDecoder) Next() (*AIStreamEvent, error) {
 		event, err := d.parser.Next()
 		if err != nil {
 			if err == io.EOF {
-				// 流结束前，如果有累积的引用来源，先发出引用文本
+				// 流结束前，如果有累积的引用来源，先发出引用文本。
+				// 这里必须返回 EventDone + nil，不能带 io.EOF；上层读取 goroutine
+				// 遇到 err 会直接退出，导致前端收不到 data: [DONE]，流式 UI 一直等待。
 				if citationDelta := d.flushCitations(); citationDelta != "" {
 					d.pending = append(d.pending, &AIStreamEvent{Type: EventDone})
 					return &AIStreamEvent{Type: EventTextDelta, Delta: citationDelta}, nil
 				}
-				return &AIStreamEvent{Type: EventDone}, io.EOF
+				return &AIStreamEvent{Type: EventDone}, nil
 			}
 			return nil, err
 		}

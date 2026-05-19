@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { X } from "lucide-react";
+import { useTheme } from "@/components/theme/ThemeProvider";
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -12,6 +13,8 @@ interface LoginModalProps {
 type Mode = "login" | "register";
 
 export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginModalProps) {
+  const themeCtx = useTheme();
+  const theme = themeCtx?.theme || "light";
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -132,7 +135,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
         <div className="px-6 py-6">
           {/* Logo */}
           <div className="text-center mb-6">
-            <img src="/brand-logo.png?v=2" alt="AI Space" className="w-12 h-12 rounded-xl object-cover mx-auto mb-3" />
+            <img src={theme === "dark" ? "/brand-dark-logo.png" : "/brand-light-logo.png"} alt="AI Space" className="w-12 h-12 rounded-xl object-cover mx-auto mb-3" />
             <h2 className="text-lg font-semibold text-text-primary tracking-tight">
               {mode === "login" ? "登录 AI Space" : "注册 AI Space"}
             </h2>

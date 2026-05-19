@@ -40,10 +40,12 @@ type Config struct {
 	MoonshotOutputPrice  float64 // ¥/千tokens
 
 	// ========== Max Output Tokens（各模型输出上限，默认值已适配各 API）==========
-	OpenAIMaxOutputTokens       int // OpenAI Responses API 基础输出 token 上限（默认 8192）
-	OpenAIMaxOutputTokensSearch int // OpenAI 开启搜索时的输出 token 上限（默认 6400）
-	DeepSeekMaxTokens           int // DeepSeek 输出 token 上限（默认 8192，之前未设置导致用了 API 默认值）
-	AnthropicMaxTokens          int // Anthropic 输出 token 上限（默认 4096）
+	OpenAIMaxOutputTokens           int // OpenAI Responses API 基础输出 token 上限（默认 8192）
+	OpenAIMaxOutputTokensSearch     int // OpenAI 开启搜索时的输出 token 上限（默认 6400）
+	OpenAIMaxOutputTokensDeep       int // OpenAI 深度思考输出 token 上限（默认继承 OPENAI_MAX_OUTPUT_TOKENS）
+	OpenAIMaxOutputTokensDeepSearch int // OpenAI 深度思考+搜索输出 token 上限（默认继承 OPENAI_MAX_OUTPUT_TOKENS_SEARCH）
+	DeepSeekMaxTokens               int // DeepSeek 输出 token 上限（默认 8192，之前未设置导致用了 API 默认值）
+	AnthropicMaxTokens              int // Anthropic 输出 token 上限（默认 4096）
 
 	// 联网搜索（对应 Chat Provider 的 web_search 工具，独立配置）
 	BraveSearchKey  string
@@ -136,10 +138,12 @@ func Load() *Config {
 		MoonshotInputPrice:  getEnvFloat64("MOONSHOT_INPUT_PRICE", 0),
 		MoonshotOutputPrice: getEnvFloat64("MOONSHOT_OUTPUT_PRICE", 0),
 
-		OpenAIMaxOutputTokens:       getEnvInt("OPENAI_MAX_OUTPUT_TOKENS", 8192),
-		OpenAIMaxOutputTokensSearch: getEnvInt("OPENAI_MAX_OUTPUT_TOKENS_SEARCH", 6400),
-		DeepSeekMaxTokens:           getEnvInt("DEEPSEEK_MAX_TOKENS", 8192),
-		AnthropicMaxTokens:          getEnvInt("ANTHROPIC_MAX_TOKENS", 4096),
+		OpenAIMaxOutputTokens:           getEnvInt("OPENAI_MAX_OUTPUT_TOKENS", 8192),
+		OpenAIMaxOutputTokensSearch:     getEnvInt("OPENAI_MAX_OUTPUT_TOKENS_SEARCH", 6400),
+		OpenAIMaxOutputTokensDeep:       getEnvInt("OPENAI_MAX_OUTPUT_TOKENS_DEEP", getEnvInt("OPENAI_MAX_OUTPUT_TOKENS", 8192)),
+		OpenAIMaxOutputTokensDeepSearch: getEnvInt("OPENAI_MAX_OUTPUT_TOKENS_DEEP_SEARCH", getEnvInt("OPENAI_MAX_OUTPUT_TOKENS_SEARCH", 6400)),
+		DeepSeekMaxTokens:               getEnvInt("DEEPSEEK_MAX_TOKENS", 8192),
+		AnthropicMaxTokens:              getEnvInt("ANTHROPIC_MAX_TOKENS", 4096),
 
 		BraveSearchKey:  getEnv("BRAVE_SEARCH_KEY", ""),
 		TavilySearchKey: getEnv("TAVILY_SEARCH_KEY", ""),

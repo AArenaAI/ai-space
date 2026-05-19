@@ -53,10 +53,6 @@ func openAIResponseToMap(resp *responses.Response) (map[string]any, error) {
 	return decoded, nil
 }
 
-func (a *OpenAIAdapter) ChatCompletion(ctx context.Context, req UnifiedAIRequest) (*AICompletionResponse, error) {
-	return a.service.callOpenAIResponsesSDK(ctx, req.Model, req.Messages, req.Stream, req.Reasoning, req.ReasoningEffort, req.Search)
-}
-
 func (s *AIService) openAIClient() (openai.Client, error) {
 	apiKey := s.cfg.OpenAIOfficialKey
 	if apiKey == "" {
@@ -155,7 +151,9 @@ func (s *AIService) buildOpenAIResponsesBody(model string, messages []Message, s
 				effort = reasoningEffort
 			}
 			reasoningConfig["effort"] = effort
-			reasoningConfig["summary"] = "detailed"
+			// OpenAI Responses API 不暴露原始 CoT；summary=auto 显式请求 reasoning summary，
+			// 由流式 decoder 映射为 reasoning_content，前端作为思考块展示。
+			reasoningConfig["summary"] = "auto"
 			reqBody["reasoning"] = reasoningConfig
 		}
 	}
@@ -198,15 +196,16 @@ func (s *AIService) callOpenAIResponsesSDK(ctx context.Context, model string, me
 	)
 
 	opts := openAIRequestOptionsFromBody(reqBody)
-	if stream && !useBackground {
+	if stream {
 		params := responses.ResponseNewParams{}
 		streamResp := client.Responses.NewStreaming(ctx, params, opts...)
 		return &AICompletionResponse{
-			Body:      sdkStreamBody{stream: streamResp},
-			Decoder:   NewOpenAIResponsesTypedDecoder(streamResp),
-			ModelType: "openai_responses",
-			Provider:  "openai",
-			Model:     model,
+			Body:       sdkStreamBody{stream: streamResp},
+			Decoder:    NewOpenAIResponsesTypedDecoder(streamResp),
+			ModelType:  "openai_responses",
+			Provider:   "openai",
+			Model:      model,
+			Background: useBackground,
 		}, nil
 	}
 

@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import InputDialog from "@/components/ui/InputDialog";
 import { createPortal } from "react-dom";
+import { useTheme } from "@/components/theme/ThemeProvider";
 
 const navItems = [
   { icon: MessageSquare, label: "聊天", href: "/chat" },
@@ -163,6 +164,8 @@ function ConversationSkeleton() {
 }
 
 export default function MobileNav() {
+  const themeCtx = useTheme();
+  const theme = themeCtx?.theme || "light";
   const [menuOpen, setMenuOpen] = useState(false);
   const [user, setUser] = useState<{ name?: string; email?: string } | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>(cachedConversationsMobile || []);
@@ -192,12 +195,30 @@ export default function MobileNav() {
   }, [user]);
   
   useEffect(() => { loadConversations(); }, [loadConversations]);
-  useEffect(() => { const h = () => loadConversations(); window.addEventListener("conversation-created", h); return () => window.removeEventListener("conversation-created", h); }, [loadConversations]);
+  useEffect(() => {
+    const h = () => loadConversations();
+    window.addEventListener("conversation-created", h);
+    return () => window.removeEventListener("conversation-created", h);
+  }, [loadConversations]);
+  useEffect(() => {
+    const h = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (d?.id != null && d?.title != null) {
+        const targetId = typeof d.id === "string" ? Number(d.id) : d.id;
+        const next = conversations.map(c => c.id === targetId ? { ...c, title: d.title } : c);
+        setConversations(next);
+        cachedConversationsMobile = next;
+      }
+    };
+    window.addEventListener("conversation-renamed", h);
+    return () => window.removeEventListener("conversation-renamed", h);
+  }, [conversations]);
   
   useEffect(() => { document.body.style.overflow = menuOpen ? "hidden" : ""; return () => { document.body.style.overflow = ""; }; }, [menuOpen]);
   useEffect(() => { if (!menuOpen) return; const h = (e: MouseEvent) => { if (drawerRef.current && !drawerRef.current.contains(e.target as Node)) setMenuOpen(false); }; document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h); }, [menuOpen]);
 
   const handleLogout = () => { localStorage.removeItem("token"); localStorage.removeItem("user"); import("@/lib/guestId").then(({ getGuestId }) => getGuestId()); setUser(null); setConversations([]); cachedConversationsMobile = null; setMenuOpen(false); router.push("/login"); };
+  const handleNewChat = () => { router.push(`/chat?t=${Date.now()}`); setMenuOpen(false); };
   const handleDelete = async (id: number) => {
     const token = localStorage.getItem("token"); if (!token) return;
     try { await fetch(`/api/conversations/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }); const next = conversations.filter(c => c.id !== id); setConversations(next); cachedConversationsMobile = next; if (String(id) === currentConvId) router.push("/chat"); } catch {}
@@ -205,7 +226,7 @@ export default function MobileNav() {
   };
   const handleRename = async (newTitle: string) => {
     if (!renameTarget) return; const token = localStorage.getItem("token"); if (!token) return;
-    try { const r = await fetch(`/api/conversations/${renameTarget.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ title: newTitle }) }); if (r.ok) { const u = await r.json(); const next = conversations.map(c => c.id === u.id ? { ...c, title: u.title } : c); setConversations(next); cachedConversationsMobile = next; } } catch {}
+    try { const r = await fetch(`/api/conversations/${renameTarget.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ title: newTitle }) }); if (r.ok) { const u = await r.json(); const next = conversations.map(c => c.id === u.id ? { ...c, title: u.title } : c); setConversations(next); cachedConversationsMobile = next; window.dispatchEvent(new CustomEvent("conversation-renamed", { detail: { id: u.id, title: u.title } })); } } catch {}
     setRenameTarget(null);
   };
   const handleTogglePin = async (conv: Conversation) => {
@@ -220,10 +241,10 @@ export default function MobileNav() {
         <button onClick={() => setMenuOpen(!menuOpen)} className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors" aria-label="菜单">
           {menuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
         </button>
-        <Link href="/chat" className="flex items-center gap-2">
-          <img src="/brand-logo.png?v=2" alt="AI Space" className="w-7 h-7 rounded-lg object-cover" />
-          <img src="/brand-title.png?v=2" alt="AI Space" className="h-5 w-auto object-contain" />
-        </Link>
+        <button type="button" onClick={handleNewChat} className="flex items-center gap-2">
+          <img src={theme === "dark" ? "/brand-dark-logo.png" : "/brand-light-logo.png"} alt="AI Space" className="w-7 h-7 rounded-lg object-cover" />
+          <img src={theme === "dark" ? "/brand-dark-title.png" : "/brand-light-title.png"} alt="AI Space" className="h-5 w-auto object-contain" />
+        </button>
         {user ? (
           <div className="w-7 h-7 rounded-full bg-brand/10 flex items-center justify-center"><User className="w-3.5 h-3.5 text-brand" /></div>
         ) : (
@@ -236,8 +257,8 @@ export default function MobileNav() {
       <div ref={drawerRef} className={cn("md:hidden fixed top-0 left-0 z-50 h-full w-[300px] bg-surface border-r border-surface-border shadow-2xl transition-transform duration-300 ease-out flex flex-col", menuOpen ? "translate-x-0" : "-translate-x-full")}>
         <div className="flex items-center justify-between h-12 px-3 border-b border-surface-border shrink-0">
           <div className="flex items-center gap-2">
-            <img src="/brand-logo.png?v=2" alt="AI Space" className="w-7 h-7 rounded-lg object-cover" />
-            <img src="/brand-title.png?v=2" alt="AI Space" className="h-5 w-auto object-contain" />
+            <img src={theme === "dark" ? "/brand-dark-logo.png" : "/brand-light-logo.png"} alt="AI Space" className="w-7 h-7 rounded-lg object-cover" />
+            <img src={theme === "dark" ? "/brand-dark-title.png" : "/brand-light-title.png"} alt="AI Space" className="h-5 w-auto object-contain" />
           </div>
           <button onClick={() => setMenuOpen(false)} className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"><X className="w-4 h-4" /></button>
         </div>
@@ -255,7 +276,7 @@ export default function MobileNav() {
 
         <div className="shrink-0 flex items-center justify-between px-3 h-10 border-b border-surface-border">
           <span className="text-sm font-medium text-text-primary">对话历史</span>
-          <button onClick={() => { router.push("/chat"); setMenuOpen(false); }} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-text-secondary hover:text-text-primary hover:bg-surface-card transition-colors"><MessageSquarePlus className="w-3.5 h-3.5" />新对话</button>
+          <button onClick={handleNewChat} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-text-secondary hover:text-text-primary hover:bg-surface-card transition-colors"><MessageSquarePlus className="w-3.5 h-3.5" />新对话</button>
         </div>
 
         <div className="flex-1 overflow-y-auto px-2 py-1">

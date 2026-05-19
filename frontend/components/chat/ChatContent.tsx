@@ -17,10 +17,12 @@ export default function ChatContent() {
   const conversationId = searchParams.get("id")
     ? Number(searchParams.get("id"))
     : undefined;
+  const newChatToken = searchParams.get("t") || "default";
   const { models, loading } = useModels();
 
   if (loading || models.length === 0) return <ChatSkeleton />;
 
-  // 用固定 key 避免切换对话时组件重新挂载，useChat 的 effect 会正确处理 conversationId 变化
-  return <ChatInterface key="chat" conversationId={conversationId} models={models} />;
+  // 新对话按钮会刷新 t 参数；用 key 强制重置 useChat 内部状态，避免 replaceState 写入 id 后 Next searchParams 未同步导致点击无效
+  const chatKey = conversationId ? `conversation-${conversationId}` : `new-${newChatToken}`;
+  return <ChatInterface key={chatKey} conversationId={conversationId} models={models} />;
 }

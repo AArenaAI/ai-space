@@ -19,6 +19,7 @@ import InputDialog from "@/components/ui/InputDialog";
 import { useTemplates } from "@/hooks/useTemplates";
 import SidebarUserPanel from "./SidebarUserPanel";
 import { useWorkspaces } from "@/hooks/useWorkspaces";
+import { useTheme } from "@/components/theme/ThemeProvider";
 
 // 模块级缓存：避免组件重新挂载时历史记录反复闪烁
 let cachedConversations: Conversation[] | null = null;
@@ -391,6 +392,8 @@ function ConversationSkeleton() {
 /* ───── 主组件 ───── */
 
 export default function AppSidebar({ skillKey }: { skillKey?: string }) {
+  const themeCtx = useTheme();
+  const theme = themeCtx?.theme || "light";
   const [collapsed, setCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     if (typeof window !== "undefined") {
@@ -494,17 +497,35 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
   }, [user, currentWS?.id]);
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
-  useEffect(() => { const h = () => loadConversations(); window.addEventListener("conversation-created", h); return () => window.removeEventListener("conversation-created", h); }, [loadConversations]);
+  useEffect(() => {
+    const h = () => loadConversations();
+    window.addEventListener("conversation-created", h);
+    return () => window.removeEventListener("conversation-created", h);
+  }, [loadConversations]);
+  useEffect(() => {
+    const h = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (d?.id != null && d?.title != null) {
+        const targetId = typeof d.id === "string" ? Number(d.id) : d.id;
+        const next = conversations.map(c => c.id === targetId ? { ...c, title: d.title } : c);
+        setConversations(next);
+        cachedConversations = next;
+      }
+    };
+    window.addEventListener("conversation-renamed", h);
+    return () => window.removeEventListener("conversation-renamed", h);
+  }, [conversations]);
   // 工作区切换 / 登录登出时刷新
-  useEffect(() => { const h = () => { cachedConversations = null; loadConversations(); }; window.addEventListener("workspace-changed", h); window.addEventListener("user-login", h); window.addEventListener("user-logout", h); return () => { window.removeEventListener("workspace-changed", h); window.removeEventListener("user-login", h); window.removeEventListener("user-logout", h); }; }, [loadConversations]);
+  useEffect(() => { const h = () => { cachedConversations = null; loadConversations(); }; window.addEventListener("workspace-changed", h); window.addEventListener("user-login", h); window.addEventListener("user-logout", h); window.addEventListener("conversation-updated", h); return () => { window.removeEventListener("workspace-changed", h); window.removeEventListener("user-login", h); window.removeEventListener("user-logout", h); window.removeEventListener("conversation-updated", h); }; }, [loadConversations]);
 
   /* 操作 */
   const handleLogout = () => { localStorage.removeItem("token"); localStorage.removeItem("user"); import("@/lib/guestId").then(({ getGuestId }) => getGuestId()); setUser(null); setConversations([]); cachedConversations = null; window.location.href = "/"; };
   const handleNewChat = () => {
+    const ts = Date.now();
     if (skillKey) {
-      router.push(`/skills/chat?key=${skillKey}&t=` + Date.now());
+      router.push(`/skills/chat?key=${skillKey}&t=${ts}`);
     } else {
-      router.push("/chat?t=" + Date.now());
+      router.push(`/chat?t=${ts}`);
     }
   };
   const handleDelete = (id: number) => { setDeleteTarget(id); };
@@ -525,7 +546,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
   const handleRename = async (newTitle: string) => {
     if (!renameTarget) return;
     const token = localStorage.getItem("token"); if (!token) return;
-    try { const r = await fetch(`/api/conversations/${renameTarget.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ title: newTitle }) }); if (r.ok) { const u = await r.json(); const next = conversations.map(c => c.id === u.id ? { ...c, title: u.title } : c); setConversations(next); cachedConversations = next; } } catch {}
+    try { const r = await fetch(`/api/conversations/${renameTarget.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ title: newTitle }) }); if (r.ok) { const u = await r.json(); const next = conversations.map(c => c.id === u.id ? { ...c, title: u.title } : c); setConversations(next); cachedConversations = next; window.dispatchEvent(new CustomEvent("conversation-renamed", { detail: { id: u.id, title: u.title } })); } } catch {}
     setRenameTarget(null);
   };
 
@@ -647,27 +668,32 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
 
   return (
     <>
+      {/* 占位 div：与 fixed sidebar 保持同宽，撑开文档流 */}
+      <div
+        className="hidden md:block shrink-0 h-screen"
+        style={{ width: collapsed ? 52 : sidebarWidth }}
+      />
       {/* 侧边栏主体 */}
       <div
-        className={cn("flex flex-col h-full bg-surface-elevated border-r border-surface-border transition-[width] duration-200 ease-out relative shrink-0", collapsed ? "w-[52px]" : "")}
+        className={cn("fixed left-0 top-0 z-40 flex flex-col h-screen bg-surface-elevated border-r border-surface-border rounded-r-2xl transition-[width] duration-200 ease-out", collapsed ? "w-[52px]" : "")}
         style={{ width: collapsed ? 52 : sidebarWidth }}
       >
 
-        {/* ── Logo + 折叠 ── */}
-        <div className="flex items-center h-12 px-3 border-b border-surface-border shrink-0">
+        {/* —— Logo + 折叠 —— */}
+        <div className="flex items-center h-12 px-3 shrink-0">
           {!collapsed && (
             <div className="flex-1 min-w-0">
-              <Link href="/chat" className="flex items-center gap-2">
-                <img src="/brand-logo.png?v=2" alt="AI Space" className="w-6 h-6 rounded-md object-cover" />
-                <img src="/brand-title.png?v=2" alt="AI Space" className="h-5 w-auto object-contain" />
-              </Link>
+              <button type="button" onClick={handleNewChat} className="flex items-center gap-2">
+                <img src={theme === "dark" ? "/brand-dark-logo.png" : "/brand-light-logo.png"} alt="AI Space" className="w-8 h-8 rounded-lg object-cover" />
+                <img src={theme === "dark" ? "/brand-dark-title.png" : "/brand-light-title.png"} alt="AI Space" className="h-6 w-auto object-contain" />
+              </button>
             </div>
           )}
           {collapsed && (
             <div className="flex-1 flex justify-center">
-              <Link href="/chat">
-                <img src="/brand-logo.png?v=2" alt="AI Space" className="w-7 h-7 rounded-md object-cover" />
-              </Link>
+              <button type="button" onClick={handleNewChat}>
+                <img src={theme === "dark" ? "/brand-dark-logo.png" : "/brand-light-logo.png"} alt="AI Space" className="w-8 h-8 rounded-lg object-cover" />
+              </button>
             </div>
           )}
           <button onClick={() => setCollapsed(!collapsed)} className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors">
@@ -680,8 +706,9 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
           <div className="flex-1 flex flex-col items-center overflow-visible">
             {/* 聊天 - 移到顶部，保留原新对话位置 */}
             <div className="pt-3 pb-2">
-              <Link
-                href="/chat"
+              <button
+                type="button"
+                onClick={handleNewChat}
                 onMouseEnter={showSidebarTooltip("聊天")}
                 onMouseLeave={hideSidebarTooltip}
                 className={cn(
@@ -690,7 +717,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                 )}
               >
                 <MessageSquare className={cn("w-5 h-5", pathname === "/chat" ? "text-brand" : "text-text-tertiary")} />
-              </Link>
+              </button>
             </div>
 
             {/* 功能分组 - 对齐展开状态的 px-3 py-2 */}
@@ -766,28 +793,30 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto scrollbar-hide">
-            {/* ▼ 聊天大按钮（原新对话位置） */}
+            {/* ▼ 聊天按钮 */}
             <div className="px-3 pt-3 pb-2">
-              <Link
-                href="/chat"
+              <button
+                type="button"
+                onClick={handleNewChat}
                 className={cn(
-                  "flex items-center gap-3 w-full px-4 py-3 rounded-2xl border shadow-sm transition-all duration-200 group",
+                  "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150",
                   pathname === "/chat"
-                    ? "bg-surface-card border-brand/30 shadow-md"
-                    : "bg-surface-card border-surface-border hover:shadow-md hover:border-brand/30"
+                    ? "bg-surface-card text-text-primary font-medium shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
+                    : "text-text-secondary hover:bg-surface-card/60 hover:text-text-primary"
                 )}
               >
-                <div className="w-8 h-8 rounded-xl bg-brand/10 flex items-center justify-center shrink-0 group-hover:bg-brand/20 transition-colors">
-                  <MessageSquare className="w-[18px] h-[18px] text-brand" />
-                </div>
-                <span className="text-sm font-semibold text-text-primary">聊天</span>
-              </Link>
+                <MessageSquare className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/chat" ? "text-brand" : "text-text-tertiary")} />
+                <span>聊天</span>
+              </button>
             </div>
+
+            {/* 分隔线 - 聊天与Agents之间 */}
+            <div className="mx-3 h-px bg-surface-border/40" />
 
             {/* ▼ 功能分组 */}
             <div className="px-3 py-2">
-              <div className="mb-1.5 px-1">
-                <span className="text-[11px] font-semibold text-text-tertiary/70 tracking-wide">Agents</span>
+              <div className="mb-2 px-1">
+                <span className="text-sm font-bold text-text-tertiary/80 tracking-wide">Agents</span>
               </div>
               <div className="space-y-0.5">
                 {/* workspace空间 */}
@@ -849,10 +878,13 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
               </div>
             </div>
 
+            {/* 分隔线 - Agents与历史之间 */}
+            <div className="mx-3 h-px bg-surface-border/40" />
+
             {/* ▼ 历史分组 */}
             <div className="px-3 py-2">
-              <div className="flex items-center justify-between mb-1.5 px-1">
-                <span className="text-[11px] font-semibold text-text-tertiary/70 tracking-wide">历史</span>
+              <div className="flex items-center justify-between mb-2 px-1">
+                <span className="text-sm font-bold text-text-tertiary/80 tracking-wide">历史</span>
                 <button className="p-1 rounded text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors">
                   <Search className="w-3.5 h-3.5" />
                 </button>
@@ -862,8 +894,11 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
           </div>
         )}
 
-        {/* ── 底部用户 ── */}
-        <div className="border-t border-surface-border shrink-0">
+        {/* 分隔线 - 历史与底部用户之间 */}
+        <div className="shrink-0 mx-3 h-px bg-surface-border/40" />
+
+        {/* —— 底部用户 —— */}
+        <div className="shrink-0">
           <SidebarUserPanel
             user={user}
             collapsed={collapsed}

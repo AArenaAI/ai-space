@@ -14,7 +14,7 @@ type UnifiedAIRequest struct {
 }
 
 // ProviderAdapter 是所有模型厂商的统一适配器接口。
-// 现在各 Adapter 先复用现有 HTTP 实现；后续接官方 SDK 时只改 Adapter 内部，不动 ChatHandler/业务层。
+// Provider 差异（SDK/HTTP、Responses/ChatCompletions、native Gemini 等）必须关在 Adapter 内部，不动 ChatHandler/业务层。
 type ProviderAdapter interface {
 	Name() string
 	Supports(model string) bool
@@ -31,6 +31,9 @@ type OpenAIAdapter struct{ service *AIService }
 func NewOpenAIAdapter(service *AIService) *OpenAIAdapter { return &OpenAIAdapter{service: service} }
 func (a *OpenAIAdapter) Name() string                    { return "openai" }
 func (a *OpenAIAdapter) Supports(model string) bool      { return isOpenAI(model) }
+func (a *OpenAIAdapter) ChatCompletion(ctx context.Context, req UnifiedAIRequest) (*AICompletionResponse, error) {
+	return a.service.callOpenAIResponsesSDK(ctx, req.Model, req.Messages, req.Stream, req.Reasoning, req.ReasoningEffort, req.Search)
+}
 func (a *OpenAIAdapter) Retrieve(ctx context.Context, taskID string) (map[string]any, error) {
 	return a.service.retrieveOpenAIResponseSDK(ctx, taskID)
 }
@@ -52,7 +55,7 @@ func NewGeminiAdapter(service *AIService) *GeminiAdapter { return &GeminiAdapter
 func (a *GeminiAdapter) Name() string                    { return "gemini" }
 func (a *GeminiAdapter) Supports(model string) bool      { return isGemini(model) }
 func (a *GeminiAdapter) ChatCompletion(ctx context.Context, req UnifiedAIRequest) (*AICompletionResponse, error) {
-	return a.service.callGemini(ctx, req.Model, req.Messages, req.Stream, req.Reasoning, req.ReasoningEffort, req.Search)
+	return a.service.callGeminiSDK(ctx, req.Model, req.Messages, req.Stream, req.Reasoning, req.ReasoningEffort, req.Search)
 }
 
 type DeepSeekAdapter struct{ service *AIService }

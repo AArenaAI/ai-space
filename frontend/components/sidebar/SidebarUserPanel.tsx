@@ -75,48 +75,46 @@ export default function SidebarUserPanel({
   // 已登录态
   return (
     <div className="p-2">
-      <div className="rounded-xl bg-surface-card border border-surface-border overflow-hidden">
-        <div className="flex items-center justify-between px-3 py-2">
-          {/* 左侧：用户头像 + 名称 */}
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-brand/20 to-purple-500/20 flex items-center justify-center shrink-0 border border-surface-border">
-              <span className="text-xs font-bold text-brand">
-                {(user.name || user.email || "U")[0].toUpperCase()}
-              </span>
-            </div>
-            <span className="text-xs text-text-secondary truncate">
-              {user.name || user.email}
+      <div className="flex items-center justify-between px-3 py-2">
+        {/* 左侧：用户头像 + 名称 */}
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-brand/20 to-purple-500/20 flex items-center justify-center shrink-0">
+            <span className="text-xs font-bold text-brand">
+              {(user.name || user.email || "U")[0].toUpperCase()}
             </span>
           </div>
+          <span className="text-xs text-text-secondary truncate">
+            {user.name || user.email}
+          </span>
+        </div>
 
-          {/* 右侧：操作按钮 */}
-          <div className="flex items-center gap-0.5">
-            <button
-              onClick={handleCopy}
-              className="p-1.5 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
-              title="复制邮箱"
-            >
-              {copied ? (
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-              ) : (
-                <Copy className="w-3.5 h-3.5" />
-              )}
-            </button>
-            <Link
-              href="/settings"
-              className="p-1.5 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
-              title="设置"
-            >
-              <Settings className="w-3.5 h-3.5" />
-            </Link>
-            <button
-              onClick={onLogout}
-              className="p-1.5 rounded-md text-text-tertiary hover:text-red-400 hover:bg-surface-elevated transition-colors"
-              title="退出"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-            </button>
-          </div>
+        {/* 右侧：操作按钮 */}
+        <div className="flex items-center gap-0.5">
+          <button
+            onClick={handleCopy}
+            className="p-1.5 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
+            title="复制邮箱"
+          >
+            {copied ? (
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+            ) : (
+              <Copy className="w-3.5 h-3.5" />
+            )}
+          </button>
+          <Link
+            href="/settings"
+            className="p-1.5 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
+            title="设置"
+          >
+            <Settings className="w-3.5 h-3.5" />
+          </Link>
+          <button
+            onClick={onLogout}
+            className="p-1.5 rounded-md text-text-tertiary hover:text-red-400 hover:bg-surface-card transition-colors"
+            title="退出"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
     </div>

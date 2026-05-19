@@ -10,6 +10,10 @@ const (
 	EventReasoningDelta  AIStreamEventType = "reasoning_delta"
 	EventSearchStart     AIStreamEventType = "search_start"
 	EventSearchDone      AIStreamEventType = "search_done"
+	EventFileSearchStart AIStreamEventType = "file_search_start"
+	EventFileSearchDone  AIStreamEventType = "file_search_done"
+	EventToolCallStart   AIStreamEventType = "tool_call_start"
+	EventToolCallDone    AIStreamEventType = "tool_call_done"
 	EventResponseCreated AIStreamEventType = "response_created"
 	EventUsage           AIStreamEventType = "usage"
 	EventError           AIStreamEventType = "error"
@@ -19,8 +23,8 @@ const (
 // AIStreamEvent 是统一流事件结构，所有模型响应都解码为此格式。
 type AIStreamEvent struct {
 	Type           AIStreamEventType
-	Delta          string      // 文本/推理/搜索提示增量
-	Index          int         // 搜索步骤索引（EventSearchStart 使用）
+	Delta          string      // 文本/推理/状态提示增量
+	Index          int         // 工具/搜索步骤索引
 	Usage          *TokenUsage // usage 信息（EventUsage 使用）
 	Code           string      // 错误代码（如 rate_limit_exceeded）
 	Message        string      // 错误信息

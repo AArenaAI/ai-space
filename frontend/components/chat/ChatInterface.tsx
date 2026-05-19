@@ -4,13 +4,14 @@ import { useState, useCallback, useEffect } from "react";
 import { useChat, ChatModel } from "@/hooks/useChat";
 import { useTemplates } from "@/hooks/useTemplates";
 import MessageList from "./MessageList";
-import MessageInput from "./MessageInput";
+import MessageInput, { ReasoningConfig } from "./MessageInput";
 import ModelSelector from "./ModelSelector";
 import ThemeToggle from "@/components/theme/ThemeToggle";
-import { Columns2, ChevronDown, Zap, X } from "lucide-react";
+import { Columns2, ChevronDown, Zap, X, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import InputDialog from "@/components/ui/InputDialog";
 
 const COMPARE_KEY = "compare-mode";
 const COMPARE_MODELS_KEY = "compare-models";
@@ -31,6 +32,9 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
   const [selectedTemplateId, setSelectedTemplateId] = useState<number>(0);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [autoModelNotice, setAutoModelNotice] = useState(false);
+  const [conversationTitle, setConversationTitle] = useState<string>("");
+  const [isComplexTask, setIsComplexTask] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
   const router = useRouter();
 
   const {
@@ -96,6 +100,50 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
       window.history.replaceState({}, "", url.toString());
     }
   }, [currentConversation, conversationId, effectiveSkillKey]);
+
+  // 获取对话标题
+  useEffect(() => {
+    if (!conversationId) {
+      setConversationTitle("");
+      return;
+    }
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    fetch(`/api/conversations/${conversationId}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.title) setConversationTitle(data.title);
+      })
+      .catch(() => {});
+  }, [conversationId]);
+
+  const handleRename = async (newTitle: string) => {
+    if (!conversationId || !newTitle.trim()) {
+      setRenameOpen(false);
+      return;
+    }
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    try {
+      const r = await fetch(`/api/conversations/${conversationId}`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ title: newTitle.trim() }),
+      });
+      if (r.ok) {
+        const u = await r.json();
+        setConversationTitle(u.title || newTitle.trim());
+        toast.success("重命名成功");
+        // 触发侧边栏刷新
+        window.dispatchEvent(new CustomEvent("conversation-renamed", { detail: { id: conversationId, title: u.title } }));
+      } else {
+        toast.error("重命名失败");
+      }
+    } catch {
+      toast.error("重命名失败");
+    }
+    setRenameOpen(false);
+  };
 
   // 初始化时从 localStorage 恢复对比模式状态
   useEffect(() => {
@@ -184,7 +232,12 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
     });
   };
 
-  const handleSend = async (content: string, reasoning: any, search: boolean, attachments?: { filename: string; content: string; type: string; public_id?: string }[], file_ids?: string[]) => {
+  const isComplexReasoningTask = (reasoning?: ReasoningConfig | null) => {
+    if (!reasoning?.enabled) return false;
+    return ["extended", "heavy", "high", "max"].includes(reasoning.effort);
+  };
+
+  const handleSend = async (content: string, reasoning: ReasoningConfig, search: boolean, attachments?: { filename: string; content: string; type: string; public_id?: string }[], file_ids?: string[]) => {
     // 【积分限制已临时取消】保畔代码但不执行
     /* 积分检查已注释
     if (compareMode) {
@@ -221,8 +274,12 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
         toast.error("对比模式必须选择一个回答模板");
         return;
       }
+      // 前端目前没有后端返回的任务复杂度字段，先用用户发送时选择的推理档位判断复杂任务
+      setIsComplexTask(isComplexReasoningTask(reasoning));
       await sendCompareMessages(content, selectedModels, reasoning, search, selectedTemplateId, attachments, file_ids);
     } else {
+      // 前端目前没有后端返回的任务复杂度字段，先用用户发送时选择的推理档位判断复杂任务
+      setIsComplexTask(isComplexReasoningTask(reasoning));
       sendMessage(content, reasoning, false, search, selectedTemplateId, false, attachments, file_ids);
     }
   };
@@ -265,9 +322,9 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
   };
 
   return (
-    <div className="flex flex-col h-full bg-surface">
+    <div className="flex flex-col h-full">
       {/* 顶部栏 - 48px 高度 */}
-      <header className={cn("shrink-0 h-12 flex items-center justify-between px-4 border-b transition-all duration-300", compareMode ? "border-amber-500/20" : "border-surface-border")}>
+      <header className={cn("relative shrink-0 h-12 flex items-center justify-between px-4 transition-all duration-300", compareMode ? "border-b border-amber-500/20" : "")}>
         <div className="flex items-center">
           {compareMode && selectedModels.length > 0 ? (
             <div className="relative flex items-center">
@@ -370,6 +427,21 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
             />
           )}
         </div>
+
+        {/* 中间：对话标题 + 编辑 */}
+        {conversationTitle && (
+          <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5 max-w-[50%]">
+            <span className="text-base font-bold text-text-primary truncate">{conversationTitle}</span>
+            <button
+              onClick={() => setRenameOpen(true)}
+              className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors shrink-0"
+              title="重命名"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
         <div className="flex items-center gap-2">
           <ThemeToggle />
           <div className="w-8 h-8 rounded-full bg-surface-card border border-surface-border flex items-center justify-center">
@@ -401,6 +473,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
         messages={messages}
         isLoading={isLoading}
         isLoadingHistory={isLoadingHistory}
+        isComplexTask={isComplexTask}
         models={models}
         conversationId={conversationId}
         onDeleteMessage={deleteMessage}
@@ -411,7 +484,22 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
         welcomeTitle={welcomeTitle}
         welcomeSubtitle={welcomeSubtitle}
         welcomeExamples={welcomeExamples}
-        onExampleClick={(prompt) => sendMessage(prompt, undefined, false, false, selectedTemplateId)}
+        onExampleClick={(prompt) => {
+          setIsComplexTask(false);
+          sendMessage(prompt, undefined, false, false, selectedTemplateId);
+        }}
+      />
+
+      {/* 重命名对话 */}
+      <InputDialog
+        isOpen={renameOpen}
+        title="重命名对话"
+        defaultValue={conversationTitle}
+        placeholder="输入新的对话名称"
+        confirmText="保存"
+        cancelText="取消"
+        onConfirm={handleRename}
+        onCancel={() => setRenameOpen(false)}
       />
 
       {/* 输入框 */}

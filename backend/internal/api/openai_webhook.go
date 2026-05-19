@@ -132,12 +132,12 @@ func (h *OpenAIWebhookHandler) markTaskFinished(responseID, status, result, erro
 				content = "❌ 后台任务失败：" + errorMessage
 			}
 			if content != "" {
-				if err := tx.Model(&models.Message{}).Where("id = ?", task.AssistantMessageID).Updates(map[string]any{
-					"content":    content,
-					"updated_at": now,
-				}).Error; err != nil {
+				if err := tx.Model(&models.Message{}).Where("id = ?", task.AssistantMessageID).Update("content", content).Error; err != nil {
 					return err
 				}
+			}
+			if err := tx.Model(&models.Conversation{}).Where("id = ?", task.ConversationID).Update("updated_at", now).Error; err != nil {
+				return err
 			}
 		}
 

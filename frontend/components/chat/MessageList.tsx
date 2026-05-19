@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
-import { User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck, ChevronDown, ChevronUp, Lightbulb, Play, Search, ChevronDown as ChevronDownIcon, FileText } from "lucide-react";
+import { useEffect, useRef, useState, useCallback, useMemo, memo } from "react";
+import { User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck, ChevronDown, ChevronUp, Lightbulb, Play, Search, ChevronDown as ChevronDownIcon, FileText, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/hooks/useChat";
 import ReactMarkdown from "react-markdown";
@@ -21,6 +21,8 @@ import EChartsBlock from "./EChartsBlock";
 interface MessageListProps {
   messages: Message[];
   isLoading: boolean;
+  isLoadingHistory?: boolean;
+  isComplexTask?: boolean;
   models: ChatModel[];
   conversationId?: number;
   onDeleteMessage?: (id: string) => void;
@@ -274,9 +276,138 @@ function MessageMenu({
   );
 }
 
-export default function MessageList({
+function MessageActions({
+  onCopy,
+  onDelete,
+  onRegenerate,
+  onSelectMode,
+  showRegenerate,
+  align,
+  visible,
+  createdAt,
+  completedAt,
+}: {
+  onCopy: () => void;
+  onDelete: () => void;
+  onRegenerate?: () => void;
+  onSelectMode: () => void;
+  showRegenerate: boolean;
+  align: "left" | "right";
+  visible: boolean;
+  createdAt: number;
+  completedAt?: number;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (moreRef.current && !moreRef.current.contains(e.target as Node)) {
+        setMoreOpen(false);
+      }
+    };
+    if (moreOpen) {
+      document.addEventListener("mousedown", handler);
+      return () => document.removeEventListener("mousedown", handler);
+    }
+  }, [moreOpen]);
+
+  const formatTime = (ts: number) => {
+    const d = new Date(ts);
+    const now = new Date();
+    const isToday = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+    const timeStr = d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+    if (isToday) return timeStr;
+    const month = d.getMonth() + 1;
+    const day = d.getDate();
+    return `${month}月${day}日 ${timeStr}`;
+  };
+
+  const formatDuration = (ms: number) => {
+    const totalSeconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    if (minutes > 0) return `${minutes}分${seconds}秒`;
+    return `${seconds}秒`;
+  };
+
+  const durationMs = completedAt ? completedAt - createdAt : 0;
+
+  return (
+    <div className={cn(
+      "flex items-center gap-0.5 mt-1 transition-opacity duration-200",
+      align === "right" ? "justify-end" : "justify-start",
+      visible ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+    )}>
+      <button
+        onClick={() => { onCopy(); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+        className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
+        title="复制"
+      >
+        {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+      </button>
+      {showRegenerate && onRegenerate && (
+        <button
+          onClick={onRegenerate}
+          className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
+          title="重新生成"
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+        </button>
+      )}
+      <button
+        onClick={onSelectMode}
+        className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
+        title="选择分享"
+      >
+        <Share2 className="w-3.5 h-3.5" />
+      </button>
+      <button
+        onClick={onDelete}
+        className="p-1 rounded-md text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-colors"
+        title="删除"
+      >
+        <Trash2 className="w-3.5 h-3.5" />
+      </button>
+      <div className="relative" ref={moreRef}>
+        <button
+          onClick={() => setMoreOpen(!moreOpen)}
+          className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
+          title="更多"
+        >
+          <MoreHorizontal className="w-3.5 h-3.5" />
+        </button>
+        {moreOpen && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setMoreOpen(false)} />
+            <div className={cn(
+              "absolute top-full mt-1 w-40 rounded-xl border border-surface-border bg-surface-elevated shadow-xl z-50 py-2 px-3 animate-fade-in",
+              align === "right" ? "right-0" : "left-0"
+            )}>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-text-tertiary">起始时间</span>
+                  <span className="text-text-secondary">{formatTime(createdAt)}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-text-tertiary">耗时</span>
+                  <span className="text-text-secondary">{formatDuration(durationMs)}</span>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MessageList({
   messages,
   isLoading,
+  isLoadingHistory,
+  isComplexTask = false,
   models,
   conversationId,
   onDeleteMessage,
@@ -301,12 +432,58 @@ export default function MessageList({
     enabled: true,
   });
 
+  // 缓存 ReactMarkdown components 对象，避免每次渲染都重新挂载 Markdown 节点
+  const markdownComponents = useMemo(() => ({
+    code({ node, inline, className, children, ...props }: any) {
+      const match = /language-(\w+)/.exec(className || "");
+      const lang = match?.[1] || "";
+      const value = String(children).replace(/\n$/, "");
+      if (!inline && lang === "echarts") {
+        return <EChartsBlock value={value} />;
+      }
+      return !inline && match ? (
+        <CodeBlock language={lang} value={value} />
+      ) : (
+        <code className="bg-[#E8E8E8] dark:bg-[#2A2A3A] text-[#333333] dark:text-[#E0E0E0] px-1 py-0.5 rounded text-[13px] font-mono" {...props}>
+          {children}
+        </code>
+      );
+    },
+    p({ children }: any) { return <p className="text-[15px] leading-relaxed text-text-primary mb-4 last:mb-0 [li>&]:inline [li>&]:mb-0">{children}</p>; },
+    ul({ children }: any) { return <ul className="list-disc ml-5 mb-4 space-y-1 text-text-primary">{children}</ul>; },
+    ol({ children }: any) { return <ol className="list-decimal ml-5 mb-4 space-y-1 text-text-primary">{children}</ol>; },
+    li({ children }: any) { return <li className="text-[15px] leading-relaxed">{children}</li>; },
+    h1({ children }: any) { return <h1 className="text-xl font-bold text-text-primary mb-3 mt-6">{children}</h1>; },
+    h2({ children }: any) { return <h2 className="text-lg font-bold text-text-primary mb-2 mt-5">{children}</h2>; },
+    h3({ children }: any) { return <h3 className="text-base font-bold text-text-primary mb-2 mt-4">{children}</h3>; },
+    strong({ children }: any) { return <strong className="font-bold text-text-primary">{children}</strong>; },
+    blockquote({ children }: any) { return <blockquote className="border-l-2 border-surface-border pl-4 italic text-text-secondary my-4">{children}</blockquote>; },
+    table({ children }: any) { return <div className="overflow-x-auto my-4"><table className="w-full text-sm border-collapse">{children}</table></div>; },
+    thead({ children }: any) { return <thead className="bg-surface-card border-b border-surface-border">{children}</thead>; },
+    tbody({ children }: any) { return <tbody>{children}</tbody>; },
+    tr({ children }: any) { return <tr className="border-b border-surface-border/50 hover:bg-surface-card/30 transition-colors">{children}</tr>; },
+    th({ children }: any) { return <th className="px-3 py-2.5 text-left text-[13px] font-semibold text-text-primary whitespace-nowrap">{children}</th>; },
+    td({ children }: any) { return <td className="px-3 py-2.5 text-[13px] text-text-secondary leading-relaxed">{children}</td>; },
+  }), []);
+
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [shareSlug, setShareSlug] = useState<string | undefined>(undefined);
   const [shareOpen, setShareOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
+
+  // 读取本地用户信息（必须在条件分支之前调用 Hook）
+  const [userName, setUserName] = useState<string>("");
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("user");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setUserName(parsed.name || parsed.email || "");
+      }
+    } catch {}
+  }, []);
 
   // 用户发送消息时强制 smooth 滚到底部（排除初始加载）
   const prevLengthRef = useRef(0);
@@ -408,6 +585,17 @@ export default function MessageList({
   };
 
   if (messages.length === 0) {
+    if (isLoadingHistory) {
+      return (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="flex gap-2">
+            <div className="w-2 h-2 rounded-full bg-text-tertiary animate-bounce" />
+            <div className="w-2 h-2 rounded-full bg-text-tertiary animate-bounce [animation-delay:0.15s]" />
+            <div className="w-2 h-2 rounded-full bg-text-tertiary animate-bounce [animation-delay:0.3s]" />
+          </div>
+        </div>
+      );
+    }
     const hasCustomWelcome = welcomeExamples && welcomeExamples.length > 0;
     const defaultExamples = [
       { title: "知识问答", desc: "用通俗易懂的方式讲清一个话题，并给出3个延伸阅读方向", prompt: "用通俗易懂的方式讲清一个话题，并给出3个延伸阅读方向" },
@@ -417,7 +605,7 @@ export default function MessageList({
     const examples = hasCustomWelcome ? welcomeExamples : defaultExamples;
 
     return (
-      <div className="flex-1 flex flex-col items-center justify-center px-4 py-12">
+      <div className="flex-1 flex flex-col items-center justify-start px-4 pt-48 pb-12">
         <div className="text-center max-w-md">
           {hasCustomWelcome ? (
             <>
@@ -431,26 +619,12 @@ export default function MessageList({
             </>
           ) : (
             <>
-              <img src="/brand-logo.png" alt="AI Space" className="w-12 h-12 rounded-xl object-cover mx-auto mb-8" />
-              <h1 className="text-2xl font-semibold tracking-tight mb-3 text-text-primary">一个入口，所有顶尖AI</h1>
-              <p className="text-text-secondary text-[15px] leading-relaxed mb-10">集成 GPT、Claude、Gemini、DeepSeek、Kimi 等主流大模型</p>
+              <h1 className="text-2xl font-semibold tracking-tight mb-2 text-text-primary">
+                {userName ? `${userName}，您好` : "您好"}
+              </h1>
+              <p className="text-text-secondary text-[15px] leading-relaxed">需要我们为你做些什么？</p>
             </>
           )}
-          <div className="grid grid-cols-1 gap-2 text-left">
-            {examples.map((item, i) => (
-              <button
-                key={i}
-                onClick={() => onExampleClick?.(item.prompt)}
-                className="group relative flex items-start gap-3 px-4 py-3 rounded-xl border border-surface-border bg-surface-elevated/50 hover:bg-surface-card transition-colors duration-200 text-left cursor-pointer"
-              >
-                <span className="mt-0.5 text-[11px] font-mono text-text-tertiary">{String(i + 1).padStart(2, "0")}</span>
-                <div>
-                  <div className="text-sm font-medium text-text-primary">{item.title}</div>
-                  <div className="text-[12px] text-text-secondary mt-0.5 leading-relaxed">{item.desc}</div>
-                </div>
-              </button>
-            ))}
-          </div>
         </div>
       </div>
     );
@@ -488,7 +662,7 @@ export default function MessageList({
           const isUser = msg.role === "user";
           const isLast = index === messages.length - 1;
           const isStreaming = isLast && isLoading && msg.role === "assistant";
-          const canRegenerate = !isUser && isLast && !isLoading;
+          const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading;
           const isSelected = selectedIds.has(msg.id);
 
           return (
@@ -529,39 +703,25 @@ export default function MessageList({
                         : "rounded-2xl rounded-bl-sm bg-[#F5F4F2] dark:bg-[#1F1F1F]"
                     )}
                   >
-                  {isUser && !selectMode && (
-                    <div className="absolute top-1.5 right-2 opacity-0 group-hover:opacity-100 transition-opacity select-none z-10">
-                      <MessageMenu
-                        onCopy={() => handleCopy(msg.content)}
-                        onDelete={() => setDeleteTarget(msg.id)}
-                        onSelectMode={enterSelectMode}
-                        showRegenerate={false}
-                      />
-                    </div>
-                  )}
+
                   {!isUser && model && !selectMode && (
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <div className="flex items-center gap-1.5">
-                          <div className="w-1 h-1 rounded-full" style={{ backgroundColor: model.color }} />
-                          <span className="text-[11px] text-text-tertiary">{model.name}</span>
-                        </div>
-                        {msg.search && msg.searchStatus === "searching" && (
-                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full text-amber-600 bg-amber-500/10">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-1 h-1 rounded-full" style={{ backgroundColor: model.color }} />
+                        <span className="text-[11px] text-text-tertiary">{model.name}</span>
+                      </div>
+                      {msg.activityStatus && msg.activityStatus.status !== "completed" && (
+                        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full text-amber-600 bg-amber-500/10">
+                          {msg.activityStatus.kind === "tool_call" ? (
+                            <Wrench className="w-3 h-3 animate-pulse" />
+                          ) : msg.activityStatus.kind === "file_search" ? (
+                            <FileText className="w-3 h-3 animate-pulse" />
+                          ) : (
                             <Search className="w-3 h-3 animate-pulse" />
-                            正在搜索...
-                          </span>
-                        )}
-                      </div>
-                      <div className="opacity-0 group-hover:opacity-100 transition-opacity select-none">
-                        <MessageMenu
-                          onCopy={() => handleCopy(msg.content)}
-                          onDelete={() => setDeleteTarget(msg.id)}
-                          onRegenerate={onRegenerate}
-                          onSelectMode={enterSelectMode}
-                          showRegenerate={canRegenerate}
-                        />
-                      </div>
+                          )}
+                          {msg.activityStatus.label}
+                        </span>
+                      )}
                     </div>
                   )}
 
@@ -623,10 +783,13 @@ export default function MessageList({
                         // 内容为空（等待第一个 token）：显示跳动点代替空白光标
                         if (!reasoning && !answer.trim()) {
                           return (
-                            <div className="flex gap-1 py-1">
-                              <div className="w-1.5 h-1.5 rounded-full bg-text-tertiary animate-bounce" />
-                              <div className="w-1.5 h-1.5 rounded-full bg-text-tertiary animate-bounce [animation-delay:0.15s]" />
-                              <div className="w-1.5 h-1.5 rounded-full bg-text-tertiary animate-bounce [animation-delay:0.3s]" />
+                            <div className="flex items-center gap-1.5 py-1 text-sm text-text-secondary">
+                              {isComplexTask && <span>深度推理中，片刻即达极致答案</span>}
+                              <div className="flex gap-1">
+                                <div className="w-1.5 h-1.5 rounded-full bg-text-tertiary animate-bounce" />
+                                <div className="w-1.5 h-1.5 rounded-full bg-text-tertiary animate-bounce [animation-delay:0.15s]" />
+                                <div className="w-1.5 h-1.5 rounded-full bg-text-tertiary animate-bounce [animation-delay:0.3s]" />
+                              </div>
                             </div>
                           );
                         }
@@ -654,6 +817,19 @@ export default function MessageList({
                         );
                       })()}
                     </div>
+                  ) : !msg.content ? (
+                    <div className="text-[15px] leading-relaxed text-text-secondary">
+                      <p>生成中断，可点击重新生成</p>
+                      {onRegenerate && (
+                        <button
+                          onClick={onRegenerate}
+                          className="mt-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-text-secondary hover:text-text-primary hover:bg-surface-card border border-surface-border transition-colors"
+                        >
+                          <Play className="w-3.5 h-3.5" />
+                          重新生成
+                        </button>
+                      )}
+                    </div>
                   ) : (
                     <div className="prose prose-sm max-w-none">
                       {(() => {
@@ -665,38 +841,7 @@ export default function MessageList({
                             <ReactMarkdown
                               remarkPlugins={[remarkGfm, remarkFixBold, remarkMath]}
                               rehypePlugins={[rehypeKatex]}
-                              components={{
-                                code({ node, inline, className, children, ...props }: any) {
-                                  const match = /language-(\w+)/.exec(className || "");
-                                  const lang = match?.[1] || "";
-                                  const value = String(children).replace(/\n$/, "");
-                                  if (!inline && lang === "echarts") {
-                                    return <EChartsBlock value={value} />;
-                                  }
-                                  return !inline && match ? (
-                                    <CodeBlock language={lang} value={value} />
-                                  ) : (
-                                    <code className="bg-[#E8E8E8] dark:bg-[#2A2A3A] text-[#333333] dark:text-[#E0E0E0] px-1 py-0.5 rounded text-[13px] font-mono" {...props}>
-                                      {children}
-                                    </code>
-                                  );
-                                },
-                                p({ children }) { return <p className="text-[15px] leading-relaxed text-text-primary mb-4 last:mb-0 [li>&]:inline [li>&]:mb-0">{children}</p>; },
-                                ul({ children }) { return <ul className="list-disc ml-5 mb-4 space-y-1 text-text-primary">{children}</ul>; },
-                                ol({ children }) { return <ol className="list-decimal ml-5 mb-4 space-y-1 text-text-primary">{children}</ol>; },
-                                li({ children }) { return <li className="text-[15px] leading-relaxed">{children}</li>; },
-                                h1({ children }) { return <h1 className="text-xl font-bold text-text-primary mb-3 mt-6">{children}</h1>; },
-                                h2({ children }) { return <h2 className="text-lg font-bold text-text-primary mb-2 mt-5">{children}</h2>; },
-                                h3({ children }) { return <h3 className="text-base font-bold text-text-primary mb-2 mt-4">{children}</h3>; },
-                                strong({ children }) { return <strong className="font-bold text-text-primary">{children}</strong>; },
-                                blockquote({ children }) { return <blockquote className="border-l-2 border-surface-border pl-4 italic text-text-secondary my-4">{children}</blockquote>; },
-                                table({ children }) { return <div className="overflow-x-auto my-4"><table className="w-full text-sm border-collapse">{children}</table></div>; },
-                                thead({ children }) { return <thead className="bg-surface-card border-b border-surface-border">{children}</thead>; },
-                                tbody({ children }) { return <tbody>{children}</tbody>; },
-                                tr({ children }) { return <tr className="border-b border-surface-border/50 hover:bg-surface-card/30 transition-colors">{children}</tr>; },
-                                th({ children }) { return <th className="px-3 py-2.5 text-left text-[13px] font-semibold text-text-primary whitespace-nowrap">{children}</th>; },
-                                td({ children }) { return <td className="px-3 py-2.5 text-[13px] text-text-secondary leading-relaxed">{children}</td>; },
-                              }}
+                              components={markdownComponents}
                             >
                               {cleanAnswer}
                             </ReactMarkdown>
@@ -715,6 +860,19 @@ export default function MessageList({
                     </div>
                   )}
                 </div>
+                {!selectMode && !isStreaming && (
+                  <MessageActions
+                    onCopy={() => handleCopy(msg.content)}
+                    onDelete={() => setDeleteTarget(msg.id)}
+                    onRegenerate={onRegenerate}
+                    onSelectMode={enterSelectMode}
+                    showRegenerate={canRegenerate}
+                    align={isUser ? "right" : "left"}
+                    visible={isLast}
+                    createdAt={msg.createdAt}
+                    completedAt={msg.completedAt}
+                  />
+                )}
               </div>
               </div>
 
@@ -744,17 +902,25 @@ export default function MessageList({
         })}
 
         {isLoading && messages[messages.length - 1]?.role !== "assistant" && (
-          <div className="flex gap-4 animate-message-appear">
-            <div className="mt-1 w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center shrink-0">
-              <Bot className="w-4 h-4 text-text-secondary" />
-            </div>
-            <div className="bg-[#F5F4F2] dark:bg-[#1F1F1F] rounded-2xl rounded-bl-sm px-4 py-3 flex items-center">
-              <div className="flex gap-1">
-                <div className="w-1.5 h-1.5 rounded-full bg-text-tertiary animate-bounce" />
-                <div className="w-1.5 h-1.5 rounded-full bg-text-tertiary animate-bounce [animation-delay:0.1s]" />
-                <div className="w-1.5 h-1.5 rounded-full bg-text-tertiary animate-bounce [animation-delay:0.2s]" />
+          <div className="flex gap-3 animate-message-appear">
+            <div className="mt-1 w-7 shrink-0">
+              <div className="w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center">
+                <Bot className="w-4 h-4 text-text-secondary" />
               </div>
             </div>
+            <div className="flex-1 flex justify-start">
+              <div className="bg-[#F5F4F2] dark:bg-[#1F1F1F] rounded-2xl rounded-bl-sm px-4 py-3 flex items-center">
+                <div className="flex items-center gap-1.5 text-sm text-text-secondary">
+                  {isComplexTask && <span>深度推理中，片刻即达极致答案</span>}
+                  <div className="flex gap-1">
+                    <div className="w-1.5 h-1.5 rounded-full bg-text-tertiary animate-bounce" />
+                    <div className="w-1.5 h-1.5 rounded-full bg-text-tertiary animate-bounce [animation-delay:0.1s]" />
+                    <div className="w-1.5 h-1.5 rounded-full bg-text-tertiary animate-bounce [animation-delay:0.2s]" />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="mt-1 w-7 shrink-0" />
           </div>
         )}
 
@@ -823,3 +989,5 @@ export default function MessageList({
     </div>
   );
 }
+
+export default memo(MessageList);

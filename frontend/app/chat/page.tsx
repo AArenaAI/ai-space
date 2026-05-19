@@ -67,16 +67,16 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-surface overflow-hidden">
+    <div className="flex flex-col h-screen bg-surface-elevated overflow-hidden">
       {/* 移动端导航栏 */}
       <MobileNav />
 
       {/* 主区域：侧边栏 + 聊天 */}
       <div className="flex flex-1 min-h-0">
-        <div className="hidden md:flex">
+        <div className="hidden md:block shrink-0">
           <AppSidebar />
         </div>
-        <main className="flex-1 min-w-0">
+        <main className="flex-1 min-w-0 overflow-hidden bg-surface shadow-lg shadow-black/5">
           <ChatWrapper />
         </main>
       </div>

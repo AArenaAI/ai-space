@@ -27,6 +27,7 @@ interface ShareData {
 
 function CodeBlock({ language, value }: { language: string; value: string }) {
   const themeCtx = useTheme();
+  const theme = themeCtx?.theme || "light";
   const isDark = themeCtx?.theme === "dark";
 
   return (
@@ -65,6 +66,8 @@ export default function ShareContent() {
   const [data, setData] = useState<ShareData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const themeCtx = useTheme();
+  const theme = themeCtx?.theme || "light";
 
   // 从 URL query 参数解析 slug：/share?slug=xxx
   useEffect(() => {
@@ -146,7 +149,7 @@ export default function ShareContent() {
         <header className="sticky top-0 z-10 bg-surface/80 backdrop-blur-md border-b border-surface-border">
           <div className="max-w-[1200px] mx-auto px-4 h-12 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <img src="/brand-title.png?v=2" alt="AI Space" className="h-5 w-auto object-contain" />
+              <img src={theme === "dark" ? "/brand-dark-title.png" : "/brand-light-title.png"} alt="AI Space" className="h-5 w-auto object-contain" />
               <span className="text-text-tertiary">/</span>
               <span className="text-sm text-text-secondary truncate max-w-[200px]">对比结果</span>
             </div>
@@ -231,7 +234,7 @@ export default function ShareContent() {
       <header className="sticky top-0 z-10 bg-surface/80 backdrop-blur-md border-b border-surface-border">
         <div className="max-w-[800px] mx-auto px-4 h-12 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <img src="/brand-title.png?v=2" alt="AI Space" className="h-5 w-auto object-contain" />
+            <img src={theme === "dark" ? "/brand-dark-title.png" : "/brand-light-title.png"} alt="AI Space" className="h-5 w-auto object-contain" />
             <span className="text-text-tertiary">/</span>
             <span className="text-sm text-text-secondary truncate max-w-[200px]">{data.title || "分享的对话"}</span>
           </div>

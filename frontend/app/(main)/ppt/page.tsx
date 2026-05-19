@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useTheme } from "@/components/theme/ThemeProvider";
 import { usePPT, PPTConfig, FullSlide, PPTImageJob } from "@/hooks/usePPT";
 import {
   Loader2,
@@ -93,6 +94,8 @@ const QUALITY_OPTIONS = [
 ];
 
 export default function PPTPage() {
+  const themeCtx = useTheme();
+  const theme = themeCtx?.theme || "light";
   const {
     task,
     outline,
@@ -482,7 +485,7 @@ export default function PPTPage() {
                           <div className="relative h-40 bg-gradient-to-br from-surface-elevated to-surface flex items-center justify-center">
                             {isIncomplete ? (
                               <div className="flex flex-col items-center gap-2">
-                                <img src="/brand-logo.png?v=2" alt="AI Space" className="w-10 h-10 rounded-lg object-cover opacity-50" />
+                                <img src={theme === "dark" ? "/brand-dark-logo.png" : "/brand-light-logo.png"} alt="AI Space" className="w-10 h-10 rounded-lg object-cover opacity-50" />
                                 <span className="text-xs text-text-tertiary">{h.title || h.topic}</span>
                               </div>
                             ) : (

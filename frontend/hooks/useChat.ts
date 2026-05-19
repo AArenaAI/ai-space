@@ -18,10 +18,12 @@ export interface Message {
   content: string;
   model?: string;
   createdAt: number;
+  completedAt?: number;
   stopped?: boolean;
   search?: boolean;
   searchSources?: SearchSource[];
   searchStatus?: "searching" | "completed";
+  activityStatus?: { kind: "generating" | "web_search" | "file_search" | "tool_call"; status: "running" | "searching" | "completed"; label: string };
   files?: { public_id: string; type: string; filename: string }[];
   errorCode?: string;
   retryable?: boolean;
@@ -212,8 +214,15 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             content: m.content,
             model: m.model,
             createdAt: new Date(m.created_at).getTime(),
+            completedAt: m.completed_at ? new Date(m.completed_at).getTime() : undefined,
             files: m.files || undefined,
           }));
+          // 如果后端没有返回 completedAt，用下一条消息的 createdAt 近似
+          for (let i = 0; i < loadedMessages.length - 1; i++) {
+            if (!loadedMessages[i].completedAt) {
+              loadedMessages[i].completedAt = loadedMessages[i + 1].createdAt;
+            }
+          }
           setMessages(loadedMessages);
         } else {
           setMessages([]);
@@ -377,6 +386,26 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             );
             return;
           }
+          // 处理活动状态元数据（实时，不缓冲）
+          if (parsed._activity_meta) {
+            const meta = parsed._activity_meta;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsg.id
+                  ? {
+                      ...m,
+                      activityStatus: {
+                        kind: meta.kind || "generating",
+                        status: meta.status || "running",
+                        label: meta.label || "正在生成内容",
+                      },
+                      searchStatus: meta.kind === "web_search" ? meta.status : m.searchStatus,
+                    }
+                  : m
+              )
+            );
+            return;
+          }
           // 处理搜索元数据（实时，不缓冲）
           if (parsed._search_meta) {
             const meta = parsed._search_meta;
@@ -387,6 +416,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
                       ...m,
                       searchStatus: meta.status,
                       searchSources: meta.sources || [],
+                      activityStatus: { kind: "web_search", status: "completed", label: "网页搜索完成" },
                     }
                   : m
               )
@@ -428,6 +458,15 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             delta += contentDelta;
           }
           pendingDelta += delta;
+          if (delta) {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsg.id
+                  ? { ...m, activityStatus: { kind: "generating", status: "running", label: "正在生成内容" } }
+                  : m
+              )
+            );
+          }
 
           if (!flushTimer) {
             flushTimer = setTimeout(() => {
@@ -477,6 +516,12 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       } finally {
         flush(); // 流结束时强制 flush 剩余内容
         reader.releaseLock();
+        // 记录完成时间
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsg.id ? { ...m, completedAt: Date.now() } : m
+          )
+        );
       }
     },
     []
@@ -596,9 +641,10 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           }
           await streamResponse(response, assistantMsg, controller);
         } catch (error: any) {
+          const now = Date.now();
           if (error.name === "AbortError") {
             setMessages((prev) =>
-              prev.map((m) => (m.id === assistantMsg.id ? { ...m, stopped: true } : m))
+              prev.map((m) => (m.id === assistantMsg.id ? { ...m, stopped: true, completedAt: now } : m))
             );
           } else {
             let displayMsg: string;
@@ -611,7 +657,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             }
             setMessages((prev) =>
               prev.map((m) =>
-                m.id === assistantMsg.id ? { ...m, content: displayMsg } : m
+                m.id === assistantMsg.id ? { ...m, content: displayMsg, completedAt: now } : m
               )
             );
           }
@@ -786,6 +832,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       } finally {
         setIsLoading(false);
         abortControllerRef.current = null;
+        // 通知侧边栏刷新对话列表（updated_at 可能已变化）
+        window.dispatchEvent(new CustomEvent("conversation-updated"));
       }
     },
     [messages, selectedModel, currentConversation, createConversation, streamResponse, effectiveSkillKey]

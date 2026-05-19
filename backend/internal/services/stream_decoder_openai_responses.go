@@ -102,10 +102,18 @@ func (d *OpenAIResponsesDecoder) parseEvent(name string, raw map[string]interfac
 		if delta, ok := raw["delta"].(string); ok {
 			return &AIStreamEvent{Type: EventReasoningDelta, Delta: delta}
 		}
-	case "response.web_search_call.in_progress":
-		return &AIStreamEvent{Type: EventSearchStart, Delta: "正在搜索..."}
+	case "response.web_search_call.in_progress", "response.web_search_call.searching":
+		return &AIStreamEvent{Type: EventSearchStart, Delta: "正在搜索网页"}
 	case "response.web_search_call.completed":
-		return &AIStreamEvent{Type: EventSearchDone, Delta: "搜索完成"}
+		return &AIStreamEvent{Type: EventSearchDone, Delta: "网页搜索完成"}
+	case "response.file_search_call.in_progress", "response.file_search_call.searching":
+		return &AIStreamEvent{Type: EventFileSearchStart, Delta: "正在检索知识库"}
+	case "response.file_search_call.completed":
+		return &AIStreamEvent{Type: EventFileSearchDone, Delta: "知识库检索完成"}
+	case "response.function_call_arguments.delta":
+		return &AIStreamEvent{Type: EventToolCallStart, Delta: "正在调用工具"}
+	case "response.function_call_arguments.done":
+		return &AIStreamEvent{Type: EventToolCallDone, Delta: "工具调用完成"}
 	case "response.completed":
 		// usage 信息在 response.completed 事件中。返回 EventUsage 后，
 		// goroutine 会继续调用 Next()，下一次 EOF 时返回 EventDone + io.EOF，
