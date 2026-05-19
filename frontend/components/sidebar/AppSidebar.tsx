@@ -512,7 +512,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
             <div className="flex-1 min-w-0">
               <Link href="/chat" className="flex items-center gap-2">
                 <img src="/brand-logo.png" alt="AI Space" className="w-6 h-6 rounded-md object-cover" />
-                <img src="/title.png" alt="AI Space" className="h-5 w-auto object-contain" />
+                <img src="/brand-title.png" alt="AI Space" className="h-5 w-auto object-contain" />
               </Link>
             </div>
           )}

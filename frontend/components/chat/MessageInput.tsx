@@ -505,7 +505,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
             onKeyDown={handleKeyDown}
             placeholder="问点什么..."
             rows={1}
-            className="w-full resize-none bg-transparent px-4 pt-3.5 pb-2 text-[15px] outline-none placeholder:text-text-tertiary min-h-[48px] max-h-[200px] leading-relaxed"
+            className="w-full resize-none bg-transparent px-4 pt-3.5 pb-2 text-[15px] outline-none placeholder:text-text-tertiary min-h-[62px] max-h-[260px] leading-relaxed"
           />
 
           <div className="flex items-center justify-between px-3 pb-3">

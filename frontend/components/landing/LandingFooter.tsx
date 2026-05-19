@@ -12,7 +12,7 @@ export default function LandingFooter() {
           <div className="sm:col-span-2 lg:col-span-1">
             <Link href="/" className="flex items-center gap-2.5 mb-3">
               <img src="/brand-logo.png" alt="AI Space" className="w-8 h-8 rounded-xl object-cover" />
-              <img src="/title.png" alt="AI Space" className="h-6 w-auto object-contain" />
+              <img src="/brand-title.png" alt="AI Space" className="h-6 w-auto object-contain" />
             </Link>
             <p className="text-sm text-text-secondary leading-relaxed">
               AI 聚合平台，让每个人都能便捷地使用全球最好的 AI 模型。

@@ -222,7 +222,7 @@ export default function MobileNav() {
         </button>
         <Link href="/chat" className="flex items-center gap-2">
           <img src="/brand-logo.png" alt="AI Space" className="w-7 h-7 rounded-lg object-cover" />
-          <img src="/title.png" alt="AI Space" className="h-5 w-auto object-contain" />
+          <img src="/brand-title.png" alt="AI Space" className="h-5 w-auto object-contain" />
         </Link>
         {user ? (
           <div className="w-7 h-7 rounded-full bg-brand/10 flex items-center justify-center"><User className="w-3.5 h-3.5 text-brand" /></div>
@@ -237,7 +237,7 @@ export default function MobileNav() {
         <div className="flex items-center justify-between h-12 px-3 border-b border-surface-border shrink-0">
           <div className="flex items-center gap-2">
             <img src="/brand-logo.png" alt="AI Space" className="w-7 h-7 rounded-lg object-cover" />
-            <img src="/title.png" alt="AI Space" className="h-5 w-auto object-contain" />
+            <img src="/brand-title.png" alt="AI Space" className="h-5 w-auto object-contain" />
           </div>
           <button onClick={() => setMenuOpen(false)} className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"><X className="w-4 h-4" /></button>
         </div>

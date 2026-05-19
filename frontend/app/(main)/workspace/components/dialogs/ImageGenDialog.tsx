@@ -37,31 +37,44 @@ export default function ImageGenDialog({ open, onClose }: { open: boolean; onClo
   };
 
   return (
-    <DialogShell open={open} onClose={onClose} title="图文花园" icon={<Palette className={`h-4 w-4 ${theme.primary}`} />} size="xl" theme={theme}>
-      {/* 粉色氛围提示 */}
-      <div className={`mb-3 flex items-center gap-3 rounded-xl ${theme.primaryBg} ${theme.primaryBorder} border px-4 py-2.5`}>
-        <Images className={`h-4 w-4 ${theme.primary}`} />
-        <div className="flex-1">
-          <p className="text-xs font-medium text-text-primary">创意花园</p>
-          <p className="text-[10px] text-text-tertiary">{images.length} 幅作品 · 用想象浇灌灵感</p>
-        </div>
+    <DialogShell open={open} onClose={onClose} title="AI画图" icon={<Palette className={`h-4 w-4 ${theme.primary}`} />} size="xl" theme={theme}>
+      {/* 大标题区 */}
+      <div className="mb-8 mt-2 text-center">
+        <h1 className="text-2xl font-bold tracking-tight text-text-primary">AI画图</h1>
+        <p className="mt-2 text-sm text-text-tertiary">输入提示词，AI 为你创作精美图片</p>
       </div>
 
-      {/* 生成区域 - 粉色主题 */}
-      <div className="mb-4 rounded-xl border border-surface-border bg-surface-card p-4">
+      {/* 生成区域 - 干净 spacious 风格 */}
+      <div className="mb-8 rounded-2xl border border-surface-border bg-surface-card p-6">
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder="描述你想生成的画面... 例如：一只在星空下奏乐的猫，水彩风格"
-          className="h-20 w-full resize-none bg-transparent text-sm text-text-primary outline-none placeholder:text-text-tertiary"
+          placeholder="描述你想生成的画面..."
+          className="h-24 w-full resize-none bg-transparent text-base text-text-primary outline-none placeholder:text-text-tertiary"
         />
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <div className="flex gap-1">
+
+        {/* 示例提示词标签 */}
+        {!prompt && (
+          <div className="mb-4 flex flex-wrap gap-2">
+            {["一只在星空下奏乐的猫，水彩风格", "赛博朋克风格的城市夜景", "可爱卡通风格的早餐插画"].map((tag) => (
+              <button
+                key={tag}
+                onClick={() => setPrompt(tag)}
+                className="rounded-full border border-surface-border bg-surface-elevated px-3 py-1 text-[11px] text-text-tertiary transition-colors hover:border-pink-500/30 hover:text-text-secondary"
+              >
+                {tag}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex gap-1.5">
             {ASPECTS.map((a) => (
               <button
                 key={a.value}
                 onClick={() => setAspect(a.value)}
-                className={`rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
                   aspect === a.value ? `${theme.primaryBorder} ${theme.primaryBg} ${theme.primary}` : "border-surface-border text-text-tertiary hover:text-text-secondary"
                 }`}
               >
@@ -69,12 +82,12 @@ export default function ImageGenDialog({ open, onClose }: { open: boolean; onClo
               </button>
             ))}
           </div>
-          <div className="flex gap-1">
+          <div className="flex gap-1.5">
             {QUALITIES.map((q) => (
               <button
                 key={q.value}
                 onClick={() => setQuality(q.value)}
-                className={`rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
                   quality === q.value ? `${theme.primaryBorder} ${theme.primaryBg} ${theme.primary}` : "border-surface-border text-text-tertiary hover:text-text-secondary"
                 }`}
               >
@@ -85,13 +98,13 @@ export default function ImageGenDialog({ open, onClose }: { open: boolean; onClo
           <button
             onClick={handleGenerate}
             disabled={isGenerating || !prompt.trim()}
-            className={`ml-auto flex items-center gap-1.5 rounded-lg ${theme.accent} px-4 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50`}
+            className={`ml-auto flex items-center gap-2 rounded-xl ${theme.accent} px-5 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50`}
           >
-            {isGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
             {isGenerating ? "生成中..." : "生成图片"}
           </button>
         </div>
-        {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
+        {error && <p className="mt-3 text-xs text-red-400">{error}</p>}
       </div>
 
       {/* 图片列表 */}

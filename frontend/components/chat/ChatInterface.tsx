@@ -271,7 +271,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
       {/* 顶部栏 - 48px 高度 */}
       <header className={cn("shrink-0 h-12 flex items-center justify-between px-4 border-b transition-all duration-300", compareMode ? "border-amber-500/20" : "border-surface-border")}>
         <div className="flex items-center">
-          <img src="/title.png" alt="AI Space" className="h-5 w-auto object-contain" />
+          <img src="/brand-title.png" alt="AI Space" className="h-5 w-auto object-contain" />
         </div>
 
         {compareMode && selectedModels.length > 0 ? (

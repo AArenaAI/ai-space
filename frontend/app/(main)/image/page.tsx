@@ -289,7 +289,7 @@ export default function ImagePage() {
       const formData = new FormData();
       formData.append("file", file);
       const token = localStorage.getItem("token");
-      const res = await fetch("/api/files/upload", {
+      const res = await fetch("http://localhost:9091/api/files/upload", {
         method: "POST",
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,

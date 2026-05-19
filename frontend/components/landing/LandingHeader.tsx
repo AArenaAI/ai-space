@@ -37,7 +37,7 @@ export default function LandingHeader() {
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2.5">
             <img src="/brand-logo.png" alt="AI Space" className="w-8 h-8 rounded-xl object-cover" />
-            <img src="/title.png" alt="AI Space" className="h-6 w-auto object-contain" />
+            <img src="/brand-title.png" alt="AI Space" className="h-6 w-auto object-contain" />
           </Link>
 
           {/* Desktop Nav */}
