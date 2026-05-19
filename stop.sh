@@ -23,8 +23,9 @@ if [ -f "$PID_FILE" ]; then
     rm -f "$PID_FILE"
 fi
 
-# 方式2: 按名字杀掉残留进程
-pkill -f "aipool" 2>/dev/null || true
+# 方式2: 按明确命令杀掉残留进程，避免 pkill -f "aipool" 误杀当前 /workspace/aipool shell
+pkill -f "/workspace/aipool/backend/aipool" 2>/dev/null || true
+pkill -f "node server.js" 2>/dev/null || true
 pkill -f "next dev.*9090" 2>/dev/null || true
 pkill -f "next dev.*9091" 2>/dev/null || true
 

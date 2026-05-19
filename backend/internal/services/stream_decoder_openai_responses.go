@@ -2,20 +2,25 @@ package services
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 )
 
 // OpenAIResponsesDecoder 解码 OpenAI Responses API 的 SSE 流。
 type OpenAIResponsesDecoder struct {
-	parser  *SSEParser
-	reader  io.ReadCloser
+	parser         *SSEParser
+	reader         io.ReadCloser
+	eventCount     int
+	textEvents     int
+	textChars      int
+	reasoningChars int
 }
 
 // NewOpenAIResponsesDecoder 创建 OpenAI Responses 流解码器。
 func NewOpenAIResponsesDecoder(body io.ReadCloser) *OpenAIResponsesDecoder {
 	return &OpenAIResponsesDecoder{
-		parser:  NewSSEParser(body),
-		reader:  body,
+		parser: NewSSEParser(body),
+		reader: body,
 	}
 }
 
@@ -25,6 +30,7 @@ func (d *OpenAIResponsesDecoder) Next() (*AIStreamEvent, error) {
 		event, err := d.parser.Next()
 		if err != nil {
 			if err == io.EOF {
+				fmt.Printf("[OpenAI Responses Stream] eof events=%d text_events=%d text_chars=%d reasoning_chars=%d\n", d.eventCount, d.textEvents, d.textChars, d.reasoningChars)
 				return &AIStreamEvent{Type: EventDone}, io.EOF
 			}
 			return nil, err
@@ -44,7 +50,36 @@ func (d *OpenAIResponsesDecoder) Next() (*AIStreamEvent, error) {
 			return nil, err
 		}
 
-		return d.parseEvent(event.Event, raw), nil
+		d.eventCount++
+		parsed := d.parseEvent(event.Event, raw)
+		if parsed != nil {
+			switch parsed.Type {
+			case EventTextDelta:
+				if parsed.Delta != "" {
+					d.textEvents++
+					d.textChars += len([]rune(parsed.Delta))
+				}
+			case EventReasoningDelta:
+				d.reasoningChars += len([]rune(parsed.Delta))
+			case EventUsage:
+				if parsed.Usage != nil {
+					fmt.Printf("[OpenAI Responses Stream] usage input=%d output=%d total=%d events=%d text_events=%d text_chars=%d reasoning_chars=%d\n",
+						parsed.Usage.PromptTokens,
+						parsed.Usage.CompletionTokens,
+						parsed.Usage.TotalTokens,
+						d.eventCount,
+						d.textEvents,
+						d.textChars,
+						d.reasoningChars,
+					)
+				}
+			case EventDone:
+				fmt.Printf("[OpenAI Responses Stream] done events=%d text_events=%d text_chars=%d reasoning_chars=%d last_event=%s\n", d.eventCount, d.textEvents, d.textChars, d.reasoningChars, event.Event)
+			case EventError:
+				fmt.Printf("[OpenAI Responses Stream] error code=%s message=%s events=%d text_chars=%d last_event=%s\n", parsed.Code, parsed.Message, d.eventCount, d.textChars, event.Event)
+			}
+		}
+		return parsed, nil
 	}
 }
 

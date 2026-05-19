@@ -2,7 +2,6 @@
 const nextConfig = {
   reactStrictMode: true,
   output: 'export',
-  distDir: 'dist',
   trailingSlash: true,
   outputFileTracing: false,
   webpack: (config, { isServer }) => {

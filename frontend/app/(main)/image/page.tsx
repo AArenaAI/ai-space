@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { useImage } from "@/hooks/useImage";
 import { useImageModels, ChatModel } from "@/hooks/useModels";
 import { GeneratedImage } from "@/hooks/useImage";
@@ -252,6 +253,7 @@ function ReferenceImageStack({
 }
 
 export default function ImagePage() {
+  const router = useRouter();
   const { images, isGenerating, generateImage, deleteImage } = useImage();
   const { models: imageModels } = useImageModels();
   const [prompt, setPrompt] = useState("");
@@ -328,23 +330,15 @@ export default function ImagePage() {
       toast.error("请输入描述");
       return;
     }
-    setIsLoading(true);
-    try {
-      await generateImage(
-        prompt,
-        selectedAspectRatio,
-        selectedResolution,
-        selectedQuality,
-        referenceImages.length > 0 ? referenceImages : undefined
-      );
-      toast.success(referenceImages.length > 0 ? "已提交参考图生成请求" : "已提交生成请求");
-      setPrompt("");
-      setReferenceImages([]);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "生成失败");
-    } finally {
-      setIsLoading(false);
+    const params = new URLSearchParams();
+    params.set("prompt", prompt.trim());
+    params.set("aspect", selectedAspectRatio);
+    params.set("resolution", selectedResolution);
+    params.set("quality", selectedQuality);
+    if (referenceImages.length > 0) {
+      params.set("refs", referenceImages.join(","));
     }
+    router.push(`/image/chat?${params.toString()}`);
   };
 
   const handleDelete = (id: number) => {

@@ -136,7 +136,7 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 		"model":             model,
 		"input":             inputItems,
 		"stream":            stream,
-		"max_output_tokens": 8192,
+		"max_output_tokens": s.cfg.OpenAIMaxOutputTokens,
 		// 默认聊天禁用 Responses API 内置工具。
 		"tool_choice": "none",
 	}
@@ -183,14 +183,25 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 	if stream {
 		// 防止长篇深度检索持续生成数分钟，前端只收到 ping/半截内容，最终被代理或浏览器超时。
 		// 短问答仍可正常完成；超出预算时上游会返回 completed/incomplete，后端再向前端发 [DONE] 或统一错误。
-		reqBody["max_output_tokens"] = maxOpenAIStreamOutputTokens(search, reasoning)
+		reqBody["max_output_tokens"] = s.streamMaxOutputTokens(search, reasoning)
 	}
 
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("序列化 OpenAI 请求失败: %w", err)
 	}
-	fmt.Printf("[OpenAI Responses] model=%s reasoning=%v effort=%s search=%v\n", model, reasoning, reasoningEffort, search)
+	fmt.Printf("[OpenAI Responses] model=%s stream=%v reasoning=%v effort=%s search=%v max_output_tokens=%v tool_choice=%v tools=%v input_items=%d instructions_len=%d\n",
+		model,
+		stream,
+		reasoning,
+		reasoningEffort,
+		search,
+		reqBody["max_output_tokens"],
+		reqBody["tool_choice"],
+		reqBody["tools"] != nil,
+		len(inputItems),
+		len(systemInstruction),
+	)
 	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/v1/responses", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("创建 OpenAI 请求失败: %w", err)
@@ -212,17 +223,11 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 	return &AICompletionResponse{Body: resp.Body, ModelType: "openai_responses", Provider: "openai", Model: model}, nil
 }
 
-func maxOpenAIStreamOutputTokens(search bool, reasoning bool) int {
-	if search && reasoning {
-		return 6400
-	}
+func (s *AIService) streamMaxOutputTokens(search bool, reasoning bool) int {
 	if search {
-		return 6400
+		return s.cfg.OpenAIMaxOutputTokensSearch
 	}
-	if reasoning {
-		return 8192
-	}
-	return 8192
+	return s.cfg.OpenAIMaxOutputTokens
 }
 
 func (s *AIService) callAnthropic(ctx context.Context, model string, messages []Message, stream bool, reasoning bool) (*AICompletionResponse, error) {
@@ -280,7 +285,7 @@ func (s *AIService) callAnthropic(ctx context.Context, model string, messages []
 		"model":      model,
 		"messages":   anthropicMessages,
 		"stream":     stream,
-		"max_tokens": 4096,
+		"max_tokens": s.cfg.AnthropicMaxTokens,
 	}
 	if systemMsg != "" {
 		reqBody["system"] = systemMsg
@@ -351,9 +356,10 @@ func (s *AIService) callDeepSeek(ctx context.Context, model string, messages []M
 	}
 
 	reqBody := map[string]interface{}{
-		"model":    model,
-		"messages": deepSeekMessages,
-		"stream":   stream,
+		"model":      model,
+		"messages":   deepSeekMessages,
+		"stream":     stream,
+		"max_tokens": s.cfg.DeepSeekMaxTokens,
 	}
 
 	// Streaming 时添加 stream_options 以含 usage 信息

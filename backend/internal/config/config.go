@@ -16,26 +16,32 @@ type Config struct {
 	FrontendURL  string
 
 	// ========== Chat Provider（对话模型，支持 OpenAI / Anthropic / Gemini / DeepSeek / Moonshot 多路并行）==========
-	OpenAIKey         string
-	OpenAIBaseURL     string  // 自定义 OpenAI 兼容 API 基础地址（用于中转/逆向）
-	OpenAIInputPrice  float64 // ¥/千tokens
-	OpenAIOutputPrice float64 // ¥/千tokens
+	OpenAIKey            string
+	OpenAIBaseURL        string  // 自定义 OpenAI 兼容 API 基础地址（用于中转/逆向）
+	OpenAIInputPrice     float64 // ¥/千tokens
+	OpenAIOutputPrice    float64 // ¥/千tokens
 	AnthropicKey         string
-	AnthropicBaseURL     string // 自定义 Anthropic 基础地址
+	AnthropicBaseURL     string  // 自定义 Anthropic 基础地址
 	AnthropicInputPrice  float64 // ¥/千tokens
 	AnthropicOutputPrice float64 // ¥/千tokens
-	GeminiKey         string
-	GeminiBaseURL     string
-	GeminiInputPrice  float64 // ¥/千tokens
-	GeminiOutputPrice float64 // ¥/千tokens
-	DeepSeekKey         string
-	DeepSeekBaseURL     string
-	DeepSeekInputPrice  float64 // ¥/千tokens
-	DeepSeekOutputPrice float64 // ¥/千tokens
-	MoonshotKey         string
-	MoonshotBaseURL     string
-	MoonshotInputPrice  float64 // ¥/千tokens
-	MoonshotOutputPrice float64 // ¥/千tokens
+	GeminiKey            string
+	GeminiBaseURL        string
+	GeminiInputPrice     float64 // ¥/千tokens
+	GeminiOutputPrice    float64 // ¥/千tokens
+	DeepSeekKey          string
+	DeepSeekBaseURL      string
+	DeepSeekInputPrice   float64 // ¥/千tokens
+	DeepSeekOutputPrice  float64 // ¥/千tokens
+	MoonshotKey          string
+	MoonshotBaseURL      string
+	MoonshotInputPrice   float64 // ¥/千tokens
+	MoonshotOutputPrice  float64 // ¥/千tokens
+
+	// ========== Max Output Tokens（各模型输出上限，默认值已适配各 API）==========
+	OpenAIMaxOutputTokens       int // OpenAI Responses API 基础输出 token 上限（默认 8192）
+	OpenAIMaxOutputTokensSearch int // OpenAI 开启搜索时的输出 token 上限（默认 6400）
+	DeepSeekMaxTokens           int // DeepSeek 输出 token 上限（默认 8192，之前未设置导致用了 API 默认值）
+	AnthropicMaxTokens          int // Anthropic 输出 token 上限（默认 4096）
 
 	// 联网搜索（对应 Chat Provider 的 web_search 工具，独立配置）
 	BraveSearchKey  string
@@ -58,12 +64,12 @@ type Config struct {
 	TextEmbeddingAPIKey     string // 文本向量 API Key
 
 	// ========== Image Generation Provider（图片生成，独立配置；为空则自动复用 Chat Provider 的 OpenAI）==========
-	ImageGenAPIKey       string  // 图片生成 API Key
-	ImageGenBaseURL      string  // 图片生成 API Base URL
-	ImageGenModel        string  // 图片生成模型，如 gpt-image-2
-	ImageGenInputPrice   float64 // ¥/千tokens（如果按 token 计费）
-	ImageGenOutputPrice  float64 // ¥/千tokens
-	ImageGenUnitPrice    float64 // ¥/张（如果按图片张数计费）
+	ImageGenAPIKey      string  // 图片生成 API Key
+	ImageGenBaseURL     string  // 图片生成 API Base URL
+	ImageGenModel       string  // 图片生成模型，如 gpt-image-2
+	ImageGenInputPrice  float64 // ¥/千tokens（如果按 token 计费）
+	ImageGenOutputPrice float64 // ¥/千tokens
+	ImageGenUnitPrice   float64 // ¥/张（如果按图片张数计费）
 
 	// 文件存储
 	FileStorageDir string // 用户上传文件的本地存储路径
@@ -73,16 +79,16 @@ type Config struct {
 	GuestDailyCostLimit float64 // 匿名用户每日金额上限（元，0=不限）
 
 	// ========== Document Generation Provider（文档生成：PPT / PDF / Word / Markdown 等，独立配置；为空则自动复用 Chat Provider 的 OpenAI）==========
-	DocGenAPIKey       string  // 文档生成 API Key
-	DocGenBaseURL      string  // 文档生成 API Base URL
-	DocGenModel        string  // 文档生成模型，如 gpt-4o-mini
-	DocGenInputPrice   float64 // ¥/千tokens
-	DocGenOutputPrice  float64 // ¥/千tokens
+	DocGenAPIKey      string  // 文档生成 API Key
+	DocGenBaseURL     string  // 文档生成 API Base URL
+	DocGenModel       string  // 文档生成模型，如 gpt-4o-mini
+	DocGenInputPrice  float64 // ¥/千tokens
+	DocGenOutputPrice float64 // ¥/千tokens
 
 	// ========== PPT Image Generation Provider（PPT 配图生成，独立配置；为空则自动复用 Vision Provider 的 Qwen）==========
-	PPTImageGenAPIKey   string  // PPT 配图生成 API Key
-	PPTImageGenBaseURL  string  // PPT 配图生成 API Base URL
-	PPTImageGenModel    string  // PPT 配图生成模型，如 qwen-image-2.0-2026-03-03
+	PPTImageGenAPIKey      string  // PPT 配图生成 API Key
+	PPTImageGenBaseURL     string  // PPT 配图生成 API Base URL
+	PPTImageGenModel       string  // PPT 配图生成模型，如 qwen-image-2.0-2026-03-03
 	PPTImageGenInputPrice  float64 // ¥/千tokens
 	PPTImageGenOutputPrice float64 // ¥/千tokens
 
@@ -101,8 +107,8 @@ func Load() *Config {
 		JWTSecret:    getEnv("JWT_SECRET", "your-secret-key-change-in-production"),
 		FrontendURL:  getEnv("FRONTEND_URL", "http://localhost:9090"),
 
-		OpenAIKey:        getEnv("OPENAI_API_KEY", ""),
-		OpenAIBaseURL:    getEnv("OPENAI_BASE_URL", ""),
+		OpenAIKey:         getEnv("OPENAI_API_KEY", ""),
+		OpenAIBaseURL:     getEnv("OPENAI_BASE_URL", ""),
 		OpenAIInputPrice:  getEnvFloat64("OPENAI_INPUT_PRICE", 0),
 		OpenAIOutputPrice: getEnvFloat64("OPENAI_OUTPUT_PRICE", 0),
 
@@ -125,9 +131,15 @@ func Load() *Config {
 		MoonshotBaseURL:     getEnv("MOONSHOT_BASE_URL", ""),
 		MoonshotInputPrice:  getEnvFloat64("MOONSHOT_INPUT_PRICE", 0),
 		MoonshotOutputPrice: getEnvFloat64("MOONSHOT_OUTPUT_PRICE", 0),
-		BraveSearchKey:   getEnv("BRAVE_SEARCH_KEY", ""),
-		TavilySearchKey:  getEnv("TAVILY_SEARCH_KEY", ""),
-		FileStorageDir:   getEnv("FILE_STORAGE_DIR", "./uploads"),
+
+		OpenAIMaxOutputTokens:       getEnvInt("OPENAI_MAX_OUTPUT_TOKENS", 8192),
+		OpenAIMaxOutputTokensSearch: getEnvInt("OPENAI_MAX_OUTPUT_TOKENS_SEARCH", 6400),
+		DeepSeekMaxTokens:           getEnvInt("DEEPSEEK_MAX_TOKENS", 8192),
+		AnthropicMaxTokens:          getEnvInt("ANTHROPIC_MAX_TOKENS", 4096),
+
+		BraveSearchKey:  getEnv("BRAVE_SEARCH_KEY", ""),
+		TavilySearchKey: getEnv("TAVILY_SEARCH_KEY", ""),
+		FileStorageDir:  getEnv("FILE_STORAGE_DIR", "./uploads"),
 
 		GuestDailyChatLimit: getEnvInt("GUEST_DAILY_CHAT_LIMIT", 10),
 
@@ -145,24 +157,24 @@ func Load() *Config {
 		TextEmbeddingBaseURL:    getEnv("TEXT_EMBEDDING_BASE_URL", ""),
 		TextEmbeddingAPIKey:     getEnv("TEXT_EMBEDDING_API_KEY", ""),
 
-		ImageGenAPIKey:       getEnv("IMAGE_GEN_API_KEY", ""),
-		ImageGenBaseURL:      getEnv("IMAGE_GEN_BASE_URL", ""),
-		ImageGenModel:        getEnv("IMAGE_GEN_MODEL", "gpt-image-2"),
-		ImageGenInputPrice:   getEnvFloat64("IMAGE_GEN_INPUT_PRICE", 0),
-		ImageGenOutputPrice:  getEnvFloat64("IMAGE_GEN_OUTPUT_PRICE", 0),
-		ImageGenUnitPrice:    getEnvFloat64("IMAGE_GEN_UNIT_PRICE", 0),
+		ImageGenAPIKey:      getEnv("IMAGE_GEN_API_KEY", ""),
+		ImageGenBaseURL:     getEnv("IMAGE_GEN_BASE_URL", ""),
+		ImageGenModel:       getEnv("IMAGE_GEN_MODEL", "gpt-image-2"),
+		ImageGenInputPrice:  getEnvFloat64("IMAGE_GEN_INPUT_PRICE", 0),
+		ImageGenOutputPrice: getEnvFloat64("IMAGE_GEN_OUTPUT_PRICE", 0),
+		ImageGenUnitPrice:   getEnvFloat64("IMAGE_GEN_UNIT_PRICE", 0),
 
-		DocGenAPIKey:       getEnv("DOC_GEN_API_KEY", ""),
-		DocGenBaseURL:      getEnv("DOC_GEN_BASE_URL", ""),
-		DocGenModel:        getEnv("DOC_GEN_MODEL", "gpt-4o-mini"),
-		DocGenInputPrice:   getEnvFloat64("DOC_GEN_INPUT_PRICE", 0),
-		DocGenOutputPrice:  getEnvFloat64("DOC_GEN_OUTPUT_PRICE", 0),
+		DocGenAPIKey:      getEnv("DOC_GEN_API_KEY", ""),
+		DocGenBaseURL:     getEnv("DOC_GEN_BASE_URL", ""),
+		DocGenModel:       getEnv("DOC_GEN_MODEL", "gpt-4o-mini"),
+		DocGenInputPrice:  getEnvFloat64("DOC_GEN_INPUT_PRICE", 0),
+		DocGenOutputPrice: getEnvFloat64("DOC_GEN_OUTPUT_PRICE", 0),
 
-		PPTImageGenAPIKey:       getEnv("PPT_IMAGE_GEN_API_KEY", ""),
-		PPTImageGenBaseURL:      getEnv("PPT_IMAGE_GEN_BASE_URL", ""),
-		PPTImageGenModel:        getEnv("PPT_IMAGE_GEN_MODEL", "qwen-image-2.0-2026-03-03"),
-		PPTImageGenInputPrice:   getEnvFloat64("PPT_IMAGE_GEN_INPUT_PRICE", 0),
-		PPTImageGenOutputPrice:  getEnvFloat64("PPT_IMAGE_GEN_OUTPUT_PRICE", 0),
+		PPTImageGenAPIKey:      getEnv("PPT_IMAGE_GEN_API_KEY", ""),
+		PPTImageGenBaseURL:     getEnv("PPT_IMAGE_GEN_BASE_URL", ""),
+		PPTImageGenModel:       getEnv("PPT_IMAGE_GEN_MODEL", "qwen-image-2.0-2026-03-03"),
+		PPTImageGenInputPrice:  getEnvFloat64("PPT_IMAGE_GEN_INPUT_PRICE", 0),
+		PPTImageGenOutputPrice: getEnvFloat64("PPT_IMAGE_GEN_OUTPUT_PRICE", 0),
 
 		EmbeddingInputPrice:  getEnvFloat64("EMBEDDING_INPUT_PRICE", 0),
 		EmbeddingOutputPrice: getEnvFloat64("EMBEDDING_OUTPUT_PRICE", 0),
