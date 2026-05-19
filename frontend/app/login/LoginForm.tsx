@@ -57,7 +57,7 @@ export default function LoginForm() {
             登录 AI Space
           </h1>
           <p className="text-sm text-text-secondary mt-1">
-            进入你的 AI 工作空间
+            Al Space全球一流模型稳定超体验，一键触达世界。
           </p>
         </div>
 

@@ -291,7 +291,7 @@ function ImageChatPageInner() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-surface">
+    <div className="flex flex-col h-full bg-surface overflow-hidden">
       <input
         ref={fileInputRef}
         type="file"

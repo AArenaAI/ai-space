@@ -32,7 +32,14 @@ export default function RootLayout({
         <ThemeProvider>
           <AuthInterceptor />
           {children}
-          <Toaster position="top-center" />
+          <Toaster
+            position="top-center"
+            toastOptions={{
+              duration: 3500,
+            }}
+            closeButton
+            richColors={false}
+          />
         </ThemeProvider>
       </body>
     </html>

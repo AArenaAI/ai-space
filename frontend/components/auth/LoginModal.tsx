@@ -137,7 +137,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
               {mode === "login" ? "登录 AI Space" : "注册 AI Space"}
             </h2>
             <p className="text-sm text-text-secondary mt-1">
-              {mode === "login" ? "进入你的 AI 工作空间" : "创建你的 AI 工作空间"}
+              {mode === "login" ? "Al Space全球一流模型稳定超体验，一键触达世界。" : "Al Space全球一流模型稳定超体验，一键触达世界。"}
             </p>
           </div>
 

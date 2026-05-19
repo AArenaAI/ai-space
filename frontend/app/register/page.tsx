@@ -63,7 +63,7 @@ export default function RegisterPage() {
             注册 AI Space
           </h1>
           <p className="text-sm text-text-secondary mt-1">
-            创建你的 AI 工作空间
+            Al Space全球一流模型稳定超体验，一键触达世界。
           </p>
         </div>
 
