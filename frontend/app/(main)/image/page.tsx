@@ -437,7 +437,7 @@ export default function ImagePage() {
           </button>
         </div>
 
-        <h1 className="text-2xl font-bold text-text-primary mt-8 mb-6">AI画图</h1>
+        <h1 className="text-3xl font-bold text-text-primary mt-8 mb-6">AI画图</h1>
       </div>
 
       <div className="flex-1 overflow-auto px-4 md:px-6 pb-8">
@@ -719,6 +719,7 @@ export default function ImagePage() {
               title: chat.title || "AI画图会话",
               updated_at: chat.updated_at,
               icon: "image",
+              cover_image: chat.cover_image,
             }))}
             onSelect={handleSelectChat}
             onNew={() => {
@@ -888,95 +889,157 @@ function ImageCard({
 
 // ───────────────────────── 示例画廊组件 ─────────────────────────
 interface GalleryItem {
-  title?: string;
   prompt: string;
   imageUrl: string;
 }
 
 const GALLERY_ITEMS: GalleryItem[] = [
   {
-    title: "商务人像",
+    prompt: "nostalgic backrooms aesthetic",
+    imageUrl: "/examples/discover/nostalgic-backrooms-aesthetic.png",
+  },
+  {
+    prompt: "holy cathedral of light",
+    imageUrl: "/examples/discover/holy-cathedral-of-light.png",
+  },
+  {
+    prompt: "early 2000s mall photography",
+    imageUrl: "/examples/discover/early-2000s-mall-photography.png",
+  },
+  {
+    prompt: "2003 internet aesthetic",
+    imageUrl: "/examples/discover/2003-internet-aesthetic.png",
+  },
+  {
+    prompt: "luxury lifestyle photography",
+    imageUrl: "/examples/discover/luxury-lifestyle-photography.png",
+  },
+  {
+    prompt: "cinematic lighting",
+    imageUrl: "/examples/discover/cinematic-lighting.png",
+  },
+  {
+    prompt: "japanese street fashion editorial",
+    imageUrl: "/examples/discover/japanese-street-fashion-editorial.png",
+  },
+  {
+    prompt: "xianxia fantasy world",
+    imageUrl: "/examples/discover/xianxia-fantasy-world.png",
+  },
+  {
+    prompt: "dreamy pastel world",
+    imageUrl: "/examples/discover/dreamy-pastel-world.png",
+  },
+  {
+    prompt: "abstract liquid metal art",
+    imageUrl: "/examples/discover/abstract-liquid-metal-art.png",
+  },
+  {
+    prompt: "boss fight cinematic screenshot",
+    imageUrl: "/examples/discover/boss-fight-cinematic-screenshot.png",
+  },
+  {
+    prompt: "minimalist movie poster",
+    imageUrl: "/examples/discover/minimalist-movie-poster.png",
+  },
+  {
+    prompt: "procedural low poly sandbox world editor, floating islands connected by bridges, modular buildings, stylized terrain blocks, colorful biomes, tiny civilization, cute fantasy structures, cinematic lighting, world-building showcase, voxel-inspired low poly aesthetic, clean geometry, miniature simulation world, god game perspective",
+    imageUrl: "/examples/discover/low-poly-sandbox-world-editor.png",
+  },
+  {
+    prompt: "moody black and white photography",
+    imageUrl: "/examples/discover/moody-black-and-white-photography.png",
+  },
+  {
+    prompt: "cute anime cafe aesthetic",
+    imageUrl: "/examples/discover/cute-anime-cafe-aesthetic.png",
+  },
+  {
+    prompt: "Japan Travel Route Map",
+    imageUrl: "/examples/discover/japan-travel-route-map.png",
+  },
+  {
+    prompt: "Create a one-page action comic story.",
+    imageUrl: "/examples/discover/one-page-action-comic-story.png",
+  },
+  {
+    prompt: "Help me design an anime character.",
+    imageUrl: "/examples/discover/anime-character-design.png",
+  },
+  {
+    prompt: "Douyin app live streaming interface",
+    imageUrl: "/examples/discover/douyin-live-streaming-interface.png",
+  },
+  {
+    prompt: "Music app user interface",
+    imageUrl: "/examples/discover/music-app-user-interface.png",
+  },
+  {
     prompt: "A well-dressed businessman in suit sitting at cozy coffee shop, working on laptop, sunlight streaming through window, warm tones, 4k photorealistic",
     imageUrl: "https://images.unsplash.com/photo-1600880292203-757bb62b4baf?w=600&h=400&fit=crop&crop=face",
   },
   {
-    title: "日落山景",
     prompt: "Mountain landscape at sunset, dramatic sky, clouds painted in orange and pink, pine trees silhouette, cinematic, National Geographic style",
     imageUrl: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=600&h=300&fit=crop&crop=entropy",
   },
   {
-    title: "萌宠猫咪",
     prompt: "Fluffy white cat sitting on a wooden table, green eyes, soft natural lighting, shallow depth of field, ultra realistic",
     imageUrl: "https://images.unsplash.com/photo-1513360371669-4adf3dd7dff8?w=600&h=700&fit=crop&crop=face",
   },
   {
-    title: "美食摄影",
     prompt: "Delicious gourmet burger with fresh ingredients, sesame bun, melted cheese, crispy bacon, food photography, mouth-watering detail",
     imageUrl: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600&h=400&fit=crop&crop=entropy",
   },
   {
-    title: "几何抽象",
     prompt: "Abstract geometric shapes with vibrant neon colors, 3D rendered art, smooth gradients on dark background, modern aesthetic",
     imageUrl: "https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=600&h=600&fit=crop&crop=entropy",
   },
   {
-    title: "奇幻森林",
     prompt: "Ethereal fantasy forest with glowing mushrooms, ancient trees wrapped in vines, magical blue particles floating in mist, moonlight beams",
     imageUrl: "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=600&h=750&fit=crop&crop=entropy",
   },
   {
-    title: "室内设计",
     prompt: "Modern minimalist interior design, open concept living room with large windows, neutral colors, warm wood accents, architectural digest style",
     imageUrl: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=600&h=350&fit=crop&crop=entropy",
   },
   // ── 新增模板 8-20 ──
   {
-    title: "樱花河岸",
     prompt: "Japanese cherry blossom trees along a riverside path at spring, petals falling in wind, soft pink tones, anime style, Studio Ghibli aesthetic",
     imageUrl: "https://images.unsplash.com/photo-1522383225653-ed111181a951?w=600&h=450&fit=crop&crop=entropy",
   },
   {
-    title: "月夜孤狼",
     prompt: "Majestic wolf standing on a rocky cliff under full moon, howling at the night sky, dramatic lighting, dark fantasy, ultra detailed",
     imageUrl: "https://images.unsplash.com/photo-1568572933382-74d440642117?w=600&h=480&fit=crop&crop=entropy",
   },
   {
-    title: "海底世界",
     prompt: "Vibrant underwater coral reef with tropical fish swimming through sun rays, crystal clear water, ocean photography, National Geographic",
     imageUrl: "https://images.unsplash.com/photo-1546026423-cc4642628d2b?w=600&h=400&fit=crop&crop=entropy",
   },
   {
-    title: "抹茶拿铁",
     prompt: "A cup of matcha latte with beautiful latte art on a wooden table, morning sunlight, cozy cafe atmosphere, food photography, macro detail",
     imageUrl: "https://images.unsplash.com/photo-1536256263959-770b48d82b0a?w=600&h=450&fit=crop&crop=entropy",
   },
   {
-    title: "东京夜景",
     prompt: "Neon-lit Tokyo street at night, rain reflecting colorful signs, crowded crosswalk, cyberpunk aesthetic, vaporwave tones, cinematic shot",
     imageUrl: "https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?w=600&h=400&fit=crop&crop=entropy",
   },
   {
-    title: "摩天大楼",
     prompt: "Elegant glass skyscraper architecture against blue sky, modern cityscape, geometric patterns, corporate photography, sharp details",
     imageUrl: "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=600&h=500&fit=crop&crop=entropy",
   },
   {
-    title: "复古摩托",
     prompt: "Vintage motorcycle parked on a desert road at sunset, long shadows, warm golden tones, retro aesthetic, adventure vibe, cinematic wide shot",
     imageUrl: "https://images.unsplash.com/photo-1558981806-ec527fa84c39?w=600&h=380&fit=crop&crop=entropy",
   },
   {
-    title: "蜂鸟特写",
     prompt: "Close-up of a hummingbird hovering near a pink flower, wings frozen in motion, green bokeh background, macro wildlife photography, high speed",
     imageUrl: "https://images.unsplash.com/photo-1552728089-57bdde30beb3?w=600&h=600&fit=crop&crop=face",
   },
   {
-    title: "海景卧室",
     prompt: "Luxury bedroom interior with large windows overlooking ocean, white curtains flowing in breeze, king size bed, resort style, serene atmosphere",
     imageUrl: "https://images.unsplash.com/photo-1618773928121-c32242e63f39?w=600&h=420&fit=crop&crop=entropy",
   },
   {
-    title: "湖光山色",
     prompt: "Crystal clear mountain lake reflecting snowy peaks at dawn, calm water mirror image, pine forest shoreline, peaceful nature landscape, wide angle",
     imageUrl: "https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=600&h=400&fit=crop&crop=entropy",
   },
@@ -986,11 +1049,11 @@ function ExampleGallery({ onUsePrompt }: { onUsePrompt: (prompt: string) => void
   return (
     <div className="mt-6 mb-4">
       <h3 className="text-base font-semibold text-text-primary mb-4">发现</h3>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="columns-2 md:columns-4 gap-4 space-y-4">
         {GALLERY_ITEMS.map((item, i) => (
           <div
             key={i}
-            className="group cursor-pointer rounded-2xl overflow-hidden bg-surface-card border border-surface-border hover:border-brand/40 transition-all duration-200 flex flex-col"
+            className="group cursor-pointer rounded-2xl overflow-hidden bg-surface-card border border-surface-border hover:border-brand/40 transition-all duration-200 break-inside-avoid"
             onClick={() => onUsePrompt(item.prompt)}
           >
             <div className="relative overflow-hidden bg-surface-secondary/50">
@@ -1009,10 +1072,6 @@ function ExampleGallery({ onUsePrompt }: { onUsePrompt: (prompt: string) => void
                   使用模板
                 </span>
               </div>
-            </div>
-            <div className="p-3">
-              <h4 className="text-sm font-medium text-text-primary truncate">{item.title || item.prompt.slice(0, 20)}</h4>
-              <p className="text-xs text-text-secondary mt-1 line-clamp-2">{item.prompt}</p>
             </div>
           </div>
         ))}

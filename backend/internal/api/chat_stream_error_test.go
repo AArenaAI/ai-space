@@ -47,7 +47,7 @@ func TestForwardUnifiedStreamErrorTerminatesAfterOneEvent(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(w)
 	ctx.Writer.Header().Set("Content-Type", "text/event-stream")
 
-	outcome, _, err := h.forwardUnifiedStream(resp, ctx.Writer, true, 0, false, 0, "", 0, "gpt-5.5-pro", "openai")
+	outcome, _, err := h.forwardUnifiedStream(resp, ctx.Writer, true, 0, false, 0, "", 0, "gpt-5.5-pro", "openai", nil, 0)
 	if err != nil {
 		t.Fatalf("forwardUnifiedStream returned error: %v", err)
 	}

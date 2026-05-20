@@ -134,20 +134,6 @@ func isDeepSeek(model string) bool {
 	return strings.HasPrefix(model, "deepseek-")
 }
 
-func normalizeDeepSeekModel(model string, reasoning bool) string {
-	switch model {
-	case "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat":
-		if reasoning {
-			return "deepseek-reasoner"
-		}
-		return "deepseek-chat"
-	case "deepseek-reasoner":
-		return "deepseek-reasoner"
-	default:
-		return model
-	}
-}
-
 func normalizeDeepSeekReasoningEffort(effort string) string {
 	switch strings.ToLower(strings.TrimSpace(effort)) {
 	case "", "standard", "medium":
@@ -680,7 +666,7 @@ func (s *AIService) callDeepSeek(ctx context.Context, model string, messages []M
 	if s.cfg.DeepSeekKey == "" {
 		return nil, fmt.Errorf("未配置 DeepSeek API Key")
 	}
-	apiModel := normalizeDeepSeekModel(model, reasoning)
+	apiModel := model
 
 	baseURL := "https://api.deepseek.com"
 	if s.cfg.DeepSeekBaseURL != "" {
@@ -692,7 +678,7 @@ func (s *AIService) callDeepSeek(ctx context.Context, model string, messages []M
 		Messages:  deepSeekChatMessages(messages),
 		MaxTokens: openai.Int(int64(s.cfg.DeepSeekMaxTokens)),
 	}
-	if reasoning || apiModel == "deepseek-reasoner" {
+	if reasoning || apiModel == "deepseek-v4-pro" {
 		effort := normalizeDeepSeekReasoningEffort(reasoningEffort)
 		params.ReasoningEffort = openai.ReasoningEffort(effort)
 		params.SetExtraFields(map[string]any{"thinking": map[string]any{"type": "enabled"}})

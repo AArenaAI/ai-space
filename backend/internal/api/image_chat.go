@@ -38,7 +38,44 @@ func (h *ImageChatHandler) ListImageChats(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取会话列表失败"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"chats": chats})
+
+	// 为每个会话查询首图（第一条 completed 状态的 assistant 消息图片）
+	type chatCover struct {
+		ChatID uint   `json:"chat_id"`
+		Image  string `json:"image_url"`
+	}
+	var covers []chatCover
+	chatIDs := make([]uint, 0, len(chats))
+	for _, c := range chats {
+		chatIDs = append(chatIDs, c.ID)
+	}
+	if len(chatIDs) > 0 {
+		h.db.Raw(`
+			SELECT chat_id, image_url FROM image_chat_messages
+			WHERE chat_id IN ? AND role = 'assistant' AND status = 'completed' AND image_url != ''
+			AND id = (
+				SELECT MIN(id) FROM image_chat_messages AS sub
+				WHERE sub.chat_id = image_chat_messages.chat_id AND sub.role = 'assistant' AND sub.status = 'completed' AND sub.image_url != ''
+			)
+		`, chatIDs).Scan(&covers)
+	}
+	coverMap := make(map[uint]string, len(covers))
+	for _, cv := range covers {
+		coverMap[cv.ChatID] = cv.Image
+	}
+
+	type chatWithCover struct {
+		models.ImageChat
+		CoverImage string `json:"cover_image"`
+	}
+	result := make([]chatWithCover, 0, len(chats))
+	for _, ch := range chats {
+		result = append(result, chatWithCover{
+			ImageChat:  ch,
+			CoverImage: coverMap[ch.ID],
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"chats": result})
 }
 
 // CreateImageChat 创建新会话并可选发送第一条消息生成图片

@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { getGuestId } from "@/lib/guestId";
+import { streamAppend, streamGet, streamClear } from "@/lib/streaming";
 
 const API_BASE_URL = ""; // 使用相对路径，nginx 同域名代理 /api -> 后端
 
@@ -30,6 +31,8 @@ export interface Message {
   requestId?: string;
   serverMessageId?: number;
   backgroundTaskId?: string;
+  generationTaskId?: number;
+  lastSequence?: number;
 }
 
 export interface ChatModel {
@@ -92,18 +95,18 @@ export const MODELS: ChatModel[] = [
     color: "#4285f4",
   },
   {
-    id: "deepseek-chat",
-    name: "DeepSeek Chat",
+    id: "deepseek-v4-pro",
+    name: "DeepSeek-V4 Pro",
     provider: "DeepSeek",
-    description: "DeepSeek 官方通用对话模型",
+    description: "V4 Pro 增强版，最强推理能力",
     color: "#4d6bfa",
   },
   {
-    id: "deepseek-reasoner",
-    name: "DeepSeek-R1",
+    id: "deepseek-v4-flash",
+    name: "DeepSeek-V4 Flash",
     provider: "DeepSeek",
-    description: "DeepSeek 官方深度推理模型",
-    color: "#8b5cf6",
+    description: "V4 轻量版，极速响应",
+    color: "#6366f1",
   },
   {
     id: "moonshot-v1-8k",
@@ -152,6 +155,10 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   // 从对话历史或 prop 恢复的有效 skillKey（优先级：历史 > prop）
   const [effectiveSkillKey, setEffectiveSkillKey] = useState<string | undefined>(skillKey);
   const backgroundPollersRef = useRef<Record<string, number>>({});
+  const taskStreamsRef = useRef<Record<string, AbortController>>({});
+  const abortReasonRef = useRef<"user" | "navigation" | null>(null);
+  const activeTaskStreamsRef = useRef<Record<string, { convId?: number; serverMessageId?: number; generationTaskId?: number; lastSequence?: number; content?: string }>>({});
+  const modelsKey = models.map((m) => m.id).join("|");
   // 防止 createConversation 成功后 useEffect 因 models 等依赖变化而清空消息/重置对话
   const shouldResetRef = useRef(true);
   // 标记刚创建的新对话 ID，避免 useEffect 立即加载历史覆盖本地正在生成的消息
@@ -183,6 +190,14 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     }
   }, []);
 
+  const stopTaskStream = useCallback((localMessageId: string) => {
+    const controller = taskStreamsRef.current[localMessageId];
+    if (controller) {
+      controller.abort();
+      delete taskStreamsRef.current[localMessageId];
+    }
+  }, []);
+
   const startBackgroundPolling = useCallback((convId: number | undefined, localMessageId: string, serverMessageId?: number) => {
     if (!convId || !serverMessageId || backgroundPollersRef.current[localMessageId]) return;
 
@@ -198,21 +213,22 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         const data = await res.json();
         const content = data?.message?.content || "";
         const status = data?.background_task?.status || "";
+        const isFinished = status === "completed" || status === "failed" || status === "cancelled" || status === "incomplete";
         setMessages((prev) =>
           prev.map((m) => {
             if (m.id !== localMessageId) return m;
-            const isFinished = status === "completed" || status === "failed" || (content && !content.includes("后台任务已开始"));
             return {
               ...m,
               content: content || m.content,
               serverMessageId,
-              activityStatus: isFinished ? undefined : { kind: "generating", status: "running", label: "任务繁忙，正在生成中" },
+              activityStatus: isFinished ? undefined : (content ? m.activityStatus : { kind: "generating", status: "running", label: "任务繁忙，正在生成中" }),
               completedAt: isFinished ? Date.now() : m.completedAt,
             };
           })
         );
-        if (status === "completed" || status === "failed" || (content && !content.includes("后台任务已开始"))) {
+        if (isFinished) {
           stopBackgroundPoller(localMessageId);
+          stopTaskStream(localMessageId);
           setIsLoading(false);
         }
       } catch {}
@@ -220,12 +236,190 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
 
     poll();
     backgroundPollersRef.current[localMessageId] = window.setInterval(poll, 2000);
-  }, [stopBackgroundPoller]);
+  }, [stopBackgroundPoller, stopTaskStream]);
+
+  const startTaskEventStream = useCallback((convId: number | undefined, localMessageId: string, serverMessageId?: number, after: number = 0, initialContent: string = "", generationTaskId?: number) => {
+    if (!convId || (!serverMessageId && !generationTaskId) || taskStreamsRef.current[localMessageId]) return;
+    activeTaskStreamsRef.current[localMessageId] = { convId, serverMessageId, generationTaskId, lastSequence: after || 0, content: initialContent || "" };
+    setIsLoading(true);
+
+    const token = localStorage.getItem("token");
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    } else {
+      headers["X-Guest-ID"] = getGuestId();
+    }
+
+    const controller = new AbortController();
+    taskStreamsRef.current[localMessageId] = controller;
+
+    let accumulated = initialContent || "";
+    let inReasoningBlock = false;
+    let buffer = "";
+    let sawDone = false;
+    let latestSequence = after || 0;
+
+    const stringifyDelta = (value: unknown): string => {
+      if (typeof value === "string") return value;
+      if (typeof value === "number" || typeof value === "boolean") return String(value);
+      if (Array.isArray(value)) return value.map((item) => stringifyDelta(item)).filter(Boolean).join("");
+      if (value && typeof value === "object") {
+        const obj = value as Record<string, unknown>;
+        return stringifyDelta(obj.text || obj.content || obj.summary || obj.delta || obj.value || "");
+      }
+      return "";
+    };
+
+    const processEvent = (eventText: string) => {
+      const lines = eventText.split("\n");
+      let data = "";
+      for (const line of lines) {
+        if (line.startsWith("id: ")) {
+          latestSequence = Number(line.slice(4)) || latestSequence;
+          activeTaskStreamsRef.current[localMessageId] = {
+            ...(activeTaskStreamsRef.current[localMessageId] || {}),
+            convId,
+            serverMessageId,
+            generationTaskId,
+            lastSequence: latestSequence,
+            content: accumulated,
+          };
+        }
+        if (line.startsWith(":")) continue;
+        if (line.startsWith("data: ")) data = line.slice(6);
+      }
+      if (!data) return;
+      if (data === "[DONE]") {
+        if (inReasoningBlock) {
+          accumulated += "</think>";
+          streamAppend(localMessageId, "</think>");
+          inReasoningBlock = false;
+        }
+        delete activeTaskStreamsRef.current[localMessageId];
+        sawDone = true;
+        setMessages((prev) => prev.map((m) => (m.id === localMessageId ? { ...m, completedAt: Date.now(), activityStatus: undefined } : m)));
+        setIsLoading(false);
+        return;
+      }
+      try {
+        const parsed = JSON.parse(data);
+        if (parsed._generation_task) {
+          const task = parsed._generation_task;
+          const parsedTaskId = Number(task.id || task.task_id || generationTaskId || 0) || undefined;
+          const parsedServerMessageId = Number(task.assistant_message_id || serverMessageId || 0) || undefined;
+          activeTaskStreamsRef.current[localMessageId] = {
+            ...(activeTaskStreamsRef.current[localMessageId] || {}),
+            convId,
+            serverMessageId: parsedServerMessageId,
+            generationTaskId: parsedTaskId,
+            lastSequence: latestSequence,
+            content: accumulated,
+          };
+          setMessages((prev) => prev.map((m) => (m.id === localMessageId ? { ...m, serverMessageId: parsedServerMessageId, generationTaskId: parsedTaskId, lastSequence: latestSequence, activityStatus: { kind: "generating", status: "running", label: "正在生成内容" } } : m)));
+          return;
+        }
+        if (parsed._error || parsed._error_meta) {
+          const err = parsed._error || parsed._error_meta;
+          const message = err.message || err.user_message || "请求失败";
+          setMessages((prev) => prev.map((m) => (m.id === localMessageId ? { ...m, content: accumulated || m.content || message, errorCode: err.error_code || err.code || "unknown", retryable: err.retryable === true || err.retriable === true, requestId: err.request_id || m.requestId } : m)));
+          if (!accumulated) accumulated = message;
+          return;
+        }
+        if (parsed._activity_meta) {
+          const meta = parsed._activity_meta;
+          setMessages((prev) => prev.map((m) => (m.id === localMessageId ? { ...m, activityStatus: { kind: meta.kind || "generating", status: meta.status || "running", label: meta.label || "正在生成内容" }, searchStatus: meta.kind === "web_search" ? meta.status : m.searchStatus } : m)));
+          return;
+        }
+        if (parsed._search_meta) {
+          const meta = parsed._search_meta;
+          setMessages((prev) => prev.map((m) => (m.id === localMessageId ? { ...m, searchStatus: meta.status, searchSources: meta.sources || [], activityStatus: { kind: "web_search", status: "completed", label: "网页搜索完成" } } : m)));
+          return;
+        }
+        const rawDelta = parsed.choices?.[0]?.delta || {};
+        const contentDelta = stringifyDelta(rawDelta.content);
+        const reasoningDelta = stringifyDelta(rawDelta.reasoning_content || rawDelta.reasoning);
+        let delta = "";
+        if (reasoningDelta) {
+          if (!inReasoningBlock) {
+            delta += "<think>";
+            inReasoningBlock = true;
+          }
+          delta += reasoningDelta;
+        } else if (contentDelta) {
+          if (inReasoningBlock) {
+            delta += "</think>";
+            inReasoningBlock = false;
+          }
+          delta += contentDelta;
+        }
+        if (delta) {
+          accumulated += delta;
+          activeTaskStreamsRef.current[localMessageId] = {
+            ...(activeTaskStreamsRef.current[localMessageId] || {}),
+            convId,
+            serverMessageId,
+            generationTaskId,
+            lastSequence: latestSequence,
+            content: accumulated,
+          };
+          streamAppend(localMessageId, delta);
+        }
+      } catch {
+        accumulated += data;
+        streamAppend(localMessageId, data);
+      }
+    };
+
+    (async () => {
+      try {
+        const streamUrl = generationTaskId
+          ? `${API_BASE_URL}/api/tasks/${generationTaskId}/stream?after=${after}`
+          : `${API_BASE_URL}/api/chat/tasks/${serverMessageId}/events?after=${after}`;
+        const res = await fetch(streamUrl, { headers, signal: controller.signal });
+        if (!res.ok || !res.body) throw new Error("task stream unavailable");
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let idx;
+            while ((idx = buffer.indexOf("\n\n")) >= 0) {
+              const eventText = buffer.slice(0, idx);
+              buffer = buffer.slice(idx + 2);
+              processEvent(eventText);
+            }
+          }
+          buffer += decoder.decode();
+          if (buffer.trim()) processEvent(buffer.trim());
+        } finally {
+          reader.releaseLock();
+        }
+      } catch {
+        if (!controller.signal.aborted) startBackgroundPolling(convId, localMessageId, serverMessageId);
+      } finally {
+        // 同步 streaming store 到 messages state
+        const finalContent = streamGet(localMessageId) || accumulated;
+        if (finalContent) {
+          setMessages((prev) => prev.map((m) => (m.id === localMessageId ? { ...m, content: finalContent } : m)));
+        }
+        streamClear(localMessageId);
+        delete taskStreamsRef.current[localMessageId];
+        setMessages((prev) => prev.map((m) => (m.id === localMessageId ? { ...m, lastSequence: Math.max(m.lastSequence || 0, latestSequence) } : m)));
+        if (!sawDone && !controller.signal.aborted && serverMessageId) startBackgroundPolling(convId, localMessageId, serverMessageId);
+      }
+    })();
+  }, [startBackgroundPolling]);
 
   useEffect(() => {
     return () => {
       Object.values(backgroundPollersRef.current).forEach((timer) => window.clearInterval(timer));
       backgroundPollersRef.current = {};
+      Object.values(taskStreamsRef.current).forEach((controller) => controller.abort());
+      taskStreamsRef.current = {};
+      activeTaskStreamsRef.current = {};
     };
   }, []);
 
@@ -254,15 +448,20 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       return () => loadController.abort();
     }
 
-    // 切换到已有历史对话时才停止还在跑的 SSE；刚创建的新对话不能 abort，否则第一条回复会被中断
+    // 切换到已有历史对话时只断开 /api/chat 直连 SSE；本地 task event stream 继续运行，
+    // 这样返回当前会话无需刷新也能看到正在追加的深度推理/正文。
     if (abortControllerRef.current) {
+      abortReasonRef.current = "navigation";
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
     if (compareAbortControllersRef.current.length > 0) {
+      abortReasonRef.current = "navigation";
       compareAbortControllersRef.current.forEach((controller) => controller.abort());
       compareAbortControllersRef.current = [];
     }
+
+    const activeEntries = Object.entries(activeTaskStreamsRef.current);
 
     const token = localStorage.getItem("token");
     if (!token) {
@@ -282,7 +481,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         if (!res.ok) throw new Error(`load conversation failed: ${res.status}`);
         return res.json();
       })
-      .then((data) => {
+      .then(async (data) => {
         if (!isLatestLoad() || loadController.signal.aborted) return;
         if (data.messages) {
           const loadedMessages: Message[] = data.messages.map((m: any) => ({
@@ -293,14 +492,84 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             createdAt: new Date(m.created_at).getTime(),
             completedAt: m.completed_at ? new Date(m.completed_at).getTime() : undefined,
             files: m.files || undefined,
+            serverMessageId: m.role === "assistant" ? Number(m.id || 0) || undefined : undefined,
           }));
-          // 如果后端没有返回 completedAt，用下一条消息的 createdAt 近似
+          // 如果最后一条 assistant 仍在生成，不能用“下一条消息时间”近似完成时间；
+          // 会话详情接口本身不带生成状态，必须查 /messages/:id 的 background_task.status。
+          const lastAssistant = [...loadedMessages].reverse().find((m) => m.role === "assistant" && m.serverMessageId);
+          let shouldResumePolling = false;
+          if (lastAssistant?.serverMessageId) {
+            try {
+              const statusRes = await fetch(`${API_BASE_URL}/api/conversations/${conversationId}/messages/${lastAssistant.serverMessageId}`, {
+                headers: { Authorization: `Bearer ${token}` },
+                signal: loadController.signal,
+              });
+              if (statusRes.ok) {
+                const statusData = await statusRes.json();
+                const bgTask = statusData?.background_task || {};
+                const hasTask = !!bgTask.id || !!bgTask.task_id || !!bgTask.status;
+                const status = bgTask.status || "";
+                const terminalStatus = status === "completed" || status === "failed" || status === "cancelled" || status === "incomplete";
+                shouldResumePolling = hasTask && !terminalStatus;
+                const serverContent = statusData?.message?.content || "";
+                if (serverContent) {
+                  lastAssistant.content = serverContent;
+                }
+                if (hasTask && terminalStatus && !lastAssistant.completedAt) {
+                  lastAssistant.completedAt = bgTask.completed_at
+                    ? new Date(bgTask.completed_at).getTime()
+                    : Date.now();
+                }
+                lastAssistant.generationTaskId = Number(bgTask.id || bgTask.task_id || 0) || undefined;
+                lastAssistant.lastSequence = Number(bgTask.last_sequence_number || 0) || 0;
+                if (shouldResumePolling) {
+                  lastAssistant.activityStatus = { kind: "generating", status: "running", label: "任务繁忙，正在生成中" };
+                }
+              } else {
+                shouldResumePolling = false;
+              }
+            } catch (err: any) {
+              if (loadController.signal.aborted || err?.name === "AbortError") return;
+              shouldResumePolling = false;
+            }
+          }
+          // 如果后端没有返回 completedAt，用下一条消息的 createdAt 近似；最后一条如果仍在生成则保持空。
           for (let i = 0; i < loadedMessages.length - 1; i++) {
             if (!loadedMessages[i].completedAt) {
               loadedMessages[i].completedAt = loadedMessages[i + 1].createdAt;
             }
           }
-          setMessages(loadedMessages);
+          const activeByServerMessageId = new Map(
+            activeEntries
+              .filter(([, info]) => info.convId === conversationId && info.serverMessageId)
+              .map(([localId, info]) => [String(info.serverMessageId), { localId, info }])
+          );
+          const mergedMessages = loadedMessages.map((m) => {
+            if (m.role !== "assistant") return m;
+            const active = activeByServerMessageId.get(String(m.serverMessageId || m.id));
+            if (!active) return m;
+            return {
+              ...m,
+              id: active.localId,
+              content: active.info.content || m.content,
+              serverMessageId: active.info.serverMessageId || m.serverMessageId,
+              generationTaskId: active.info.generationTaskId || m.generationTaskId,
+              lastSequence: active.info.lastSequence || m.lastSequence,
+              activityStatus: { kind: "generating" as const, status: "running" as const, label: "正在生成内容" },
+            };
+          });
+          setMessages(mergedMessages);
+          if (shouldResumePolling && lastAssistant?.serverMessageId) {
+            const active = activeByServerMessageId.get(String(lastAssistant.serverMessageId));
+            if (!active) {
+              setIsLoading(true);
+              startTaskEventStream(conversationId, lastAssistant.id, lastAssistant.serverMessageId, lastAssistant.lastSequence || 0, lastAssistant.content || "", lastAssistant.generationTaskId);
+            } else {
+              setIsLoading(true);
+            }
+          } else {
+            setIsLoading(false);
+          }
         } else {
           setMessages([]);
         }
@@ -333,7 +602,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       });
 
     return () => loadController.abort();
-  }, [conversationId, models, setSelectedModel, skillKey]);
+  }, [conversationId, modelsKey, setSelectedModel, skillKey]);
 
   // 创建新对话
   const createConversation = useCallback(
@@ -399,32 +668,18 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       if (!reader) throw new Error("无法读取流");
 
       let accumulated = "";
-      let pendingDelta = "";
       let buffer = "";
       let inReasoningBlock = false;
-      let flushTimer: ReturnType<typeof setTimeout> | null = null;
       let backgroundPollingStarted = false;
-
-      const flush = () => {
-        if (flushTimer) {
-          clearTimeout(flushTimer);
-          flushTimer = null;
-        }
-        const text = pendingDelta;
-        pendingDelta = "";
-        if (!text) return;
-        accumulated += text;
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantMsg.id ? { ...m, content: accumulated } : m
-          )
-        );
-      };
+      let latestServerMessageId: number | undefined;
+      let latestGenerationTaskId: number | undefined;
+      let latestSequence = 0;
 
       const processEvent = (eventText: string) => {
         const lines = eventText.split("\n");
         let data = "";
         for (const line of lines) {
+          if (line.startsWith("id: ")) latestSequence = Number(line.slice(4)) || latestSequence;
           if (line.startsWith(":")) continue; // SSE comment
           if (line.startsWith("data: ")) {
             data = line.slice(6);
@@ -433,10 +688,10 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         if (!data) return;
         if (data === "[DONE]") {
           if (inReasoningBlock) {
-            pendingDelta += "</think>";
+            accumulated += "</think>";
+            streamAppend(assistantMsg.id, "</think>");
             inReasoningBlock = false;
           }
-          flush();
           return;
         }
         try {
@@ -453,13 +708,38 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             );
             return;
           }
+          if (parsed._generation_task) {
+            const task = parsed._generation_task;
+            const serverMessageId = Number(task.assistant_message_id || 0) || undefined;
+            const generationTaskId = Number(task.id || task.task_id || 0) || undefined;
+            latestServerMessageId = serverMessageId;
+            latestGenerationTaskId = generationTaskId;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsg.id
+                  ? {
+                      ...m,
+                      serverMessageId,
+                      generationTaskId,
+                      lastSequence: latestSequence,
+                      activityStatus: { kind: "generating" as const, status: "running" as const, label: "正在生成内容" },
+                    }
+                  : m
+              )
+            );
+            if (generationTaskId) {
+              backgroundPollingStarted = true;
+            }
+            return;
+          }
           if (parsed._background_task) {
             const task = parsed._background_task;
             const serverMessageId = Number(task.assistant_message_id || 0) || undefined;
+            latestServerMessageId = serverMessageId;
             const taskId = task.id || "";
             const placeholder = "任务繁忙，正在生成中";
             accumulated = placeholder;
-            pendingDelta = "";
+            streamAppend(assistantMsg.id, placeholder);
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsg.id
@@ -474,21 +754,16 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               )
             );
             backgroundPollingStarted = true;
-            startBackgroundPolling(convId || currentConversation, assistantMsg.id, serverMessageId);
             return;
           }
           // 处理统一错误结构 / provider 错误元数据。错误不能继续当 delta 追加，否则 429 会重复刷屏卡死。
           if (parsed._error || parsed._error_meta) {
-            flush();
             const err = parsed._error || parsed._error_meta;
             const message = err.message || err.user_message || "请求失败";
-            pendingDelta = "";
             setMessages((prev) =>
               prev.map((m) => {
                 if (m.id !== assistantMsg.id) return m;
                 const existingContent = accumulated || m.content || "";
-                // 如果模型已经流出部分正文/思考内容，不要用 429 提示覆盖它；
-                // 否则前端会看起来“内容没了”，只能靠刷新从后端历史恢复。
                 return {
                   ...m,
                   content: existingContent || message,
@@ -574,8 +849,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             }
             delta += contentDelta;
           }
-          pendingDelta += delta;
           if (delta) {
+            accumulated += delta;
+            streamAppend(assistantMsg.id, delta);
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsg.id
@@ -584,22 +860,10 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               )
             );
           }
-
-          if (!flushTimer) {
-            flushTimer = setTimeout(() => {
-              flushTimer = null;
-              flush();
-            }, 50);
-          }
         } catch {
-          // JSON 解析失败时，当作文本兑底追加
-          pendingDelta += data;
-          if (!flushTimer) {
-            flushTimer = setTimeout(() => {
-              flushTimer = null;
-              flush();
-            }, 50);
-          }
+          // JSON 解析失败时，当作文本免底追加
+          accumulated += data;
+          streamAppend(assistantMsg.id, data);
         }
       };
 
@@ -630,22 +894,54 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         if (buffer.trim()) {
           processEvent(buffer.trim());
         }
+      } catch (err: any) {
+        const isAbort = err?.name === "AbortError" || controller.signal.aborted;
+        const abortReason = abortReasonRef.current;
+
+        // 切换会话只断开当前页面这条 SSE，后端任务继续跑；这里不能重新接 task stream，
+        // 否则旧会话的本地消息会被标成“重新执行/生成中”，并和新会话加载互相抢状态。
+        if (isAbort && abortReason === "navigation") {
+          return;
+        }
+
+        // 用户主动停止才真正停在当前 UI，不做后台续流。
+        if (isAbort && abortReason === "user") {
+          return;
+        }
+
+        // 非导航的异常断线：如果已经拿到服务端消息/任务 ID，再接后端 task event stream 续流。
+        if (latestServerMessageId || latestGenerationTaskId) {
+          startTaskEventStream(convId || currentConversation, assistantMsg.id, latestServerMessageId, latestSequence, accumulated, latestGenerationTaskId);
+          return;
+        }
+        throw err;
       } finally {
-        flush(); // 流结束时强制 flush 剩余内容
+        const abortReason = abortReasonRef.current;
         reader.releaseLock();
-        // 记录完成时间；后台任务轮询中时不清掉生成状态
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantMsg.id
-              ? (backgroundPollingStarted || m.serverMessageId
-                  ? m
-                  : { ...m, completedAt: Date.now(), activityStatus: undefined })
-              : m
-          )
-        );
+
+        // 同步 streaming store 到 messages state
+        const finalContent = streamGet(assistantMsg.id) || accumulated;
+        if (finalContent) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsg.id ? { ...m, content: finalContent } : m
+            )
+          );
+        }
+        streamClear(assistantMsg.id);
+
+        // 切会话/用户停止时不要在旧异步里把消息标 completed 或清掉生成态。
+        // 切回该会话时由历史加载 + task event stream 恢复真实状态。
+        if (!backgroundPollingStarted && abortReason !== "navigation" && abortReason !== "user") {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsg.id ? { ...m, completedAt: Date.now(), activityStatus: undefined } : m
+            )
+          );
+        }
       }
     },
-    [currentConversation, startBackgroundPolling]
+    [currentConversation, startBackgroundPolling, startTaskEventStream]
   );
 
   // 对比模式：固定两个模型并发流式展示
@@ -748,6 +1044,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         } catch (error: any) {
           const now = Date.now();
           if (error.name === "AbortError") {
+            if (abortReasonRef.current !== "user") return;
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsg.id
@@ -899,6 +1196,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
 
       setIsLoading(true);
       const controller = new AbortController();
+      abortReasonRef.current = null;
       abortControllerRef.current = controller;
 
       try {
@@ -940,14 +1238,16 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         await streamResponse(response, assistantMsg, controller, convId);
       } catch (error: any) {
         if (error.name === "AbortError") {
-          // 用户主动停止
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantMsg.id
-                ? { ...m, stopped: true }
-                : m
-            )
-          );
+          // 只有点击“停止生成”才显示中断；切换会话/页面导致的 Abort 不污染消息状态。
+          if (abortReasonRef.current === "user") {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsg.id
+                  ? { ...m, stopped: true }
+                  : m
+              )
+            );
+          }
         } else {
           const isBackgroundModel = selectedModel.id === "gpt-5.5-pro" || selectedModel.id.startsWith("gpt-5.5-pro-");
           if (isBackgroundModel && convId) {
@@ -977,8 +1277,16 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           }
         }
       } finally {
-        setIsLoading(false);
-        abortControllerRef.current = null;
+        const abortReason = abortReasonRef.current;
+        // 切换会话导致的 abort 只是断开当前页面 SSE，后端仍继续生成；不要在旧异步 finally 里改全局 loading/清 reason。
+        if (abortReason !== "navigation") {
+          const hasActiveTaskStream = Object.keys(taskStreamsRef.current).length > 0;
+          if (!hasActiveTaskStream) {
+            setIsLoading(false);
+            abortControllerRef.current = null;
+            abortReasonRef.current = null;
+          }
+        }
         // 通知侧边栏仅做本地排序/时间更新，避免每次发消息都全量重拉历史列表
         if (convId) {
           window.dispatchEvent(new CustomEvent("conversation-updated", {
@@ -991,15 +1299,39 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   );
 
   const stopGeneration = useCallback(() => {
+    const token = localStorage.getItem("token");
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    } else {
+      headers["X-Guest-ID"] = getGuestId();
+    }
+
+    const runningTasks = messages
+      .filter((m) => m.role === "assistant" && !m.completedAt && m.generationTaskId)
+      .map((m) => m.generationTaskId as number);
+
+    Array.from(new Set(runningTasks)).forEach((taskId) => {
+      fetch(`${API_BASE_URL}/api/tasks/${taskId}/cancel`, {
+        method: "POST",
+        headers,
+      }).catch(() => undefined);
+    });
+
+    Object.values(taskStreamsRef.current).forEach((controller) => controller.abort());
+    taskStreamsRef.current = {};
+
     if (abortControllerRef.current) {
+      abortReasonRef.current = "user";
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
     if (compareAbortControllersRef.current.length > 0) {
+      abortReasonRef.current = "user";
       compareAbortControllersRef.current.forEach((controller) => controller.abort());
       compareAbortControllersRef.current = [];
     }
-  }, []);
+  }, [messages]);
 
   const clearMessages = useCallback(() => {
     setMessages([]);
@@ -1038,3 +1370,4 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     sendCompareMessages,
   };
 }
+

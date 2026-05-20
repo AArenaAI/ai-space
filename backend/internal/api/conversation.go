@@ -301,15 +301,39 @@ func (h *ConversationHandler) GetMessage(c *gin.Context) {
 
 	var task models.AIBackgroundTask
 	status := ""
+	var taskPayload gin.H
 	if err := h.db.Where("assistant_message_id = ?", msg.ID).Order("updated_at DESC, id DESC").First(&task).Error; err == nil {
 		status = task.Status
+		lastSequence := task.LastSequenceNumber
+		if lastSequence == 0 {
+			var lastEvent models.AIBackgroundTaskEvent
+			if err := h.db.Where("task_id = ?", task.ID).Order("sequence_number DESC").First(&lastEvent).Error; err == nil {
+				lastSequence = lastEvent.SequenceNumber
+			}
+		}
+		taskPayload = gin.H{
+			"id":                   task.ID,
+			"task_id":              task.ID,
+			"status":               status,
+			"conversation_id":      task.ConversationID,
+			"assistant_message_id": task.AssistantMessageID,
+			"last_sequence_number": lastSequence,
+			"completed_at":         task.CompletedAt,
+			"error_message":        task.ErrorMessage,
+		}
+	}
+	if status == "" {
+		if strings.TrimSpace(msg.Content) != "" {
+			status = "completed"
+		} else {
+			status = "generating"
+		}
+		taskPayload = gin.H{"status": status}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": msg,
-		"background_task": gin.H{
-			"status": status,
-		},
+		"message":         msg,
+		"background_task": taskPayload,
 	})
 }
 

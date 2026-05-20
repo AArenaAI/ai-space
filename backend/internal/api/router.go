@@ -107,6 +107,11 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	{
 		// 聊天路由
 		publicWithAuth.POST("/chat", chatHandler.Chat)
+		publicWithAuth.GET("/chat/tasks/:message_id", chatHandler.GetTask)
+		publicWithAuth.GET("/chat/tasks/:message_id/events", chatHandler.StreamTaskEvents)
+		publicWithAuth.GET("/tasks/:task_id", chatHandler.GetGenerationTask)
+		publicWithAuth.GET("/tasks/:task_id/stream", chatHandler.StreamGenerationTaskEvents)
+		publicWithAuth.POST("/tasks/:task_id/cancel", chatHandler.CancelGenerationTask)
 
 		// 文件上传解析路由
 		publicWithAuth.POST("/files/upload", fileHandler.UploadFile)

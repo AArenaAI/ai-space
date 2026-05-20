@@ -23,13 +23,13 @@ var modelTierMap = map[string]string{
 	"gpt-5.4":                    "advanced",
 	"gpt-5.5":                    "advanced",
 	"claude-3-5-sonnet-20241022": "advanced",
-	"deepseek-chat":              "advanced",
+	"deepseek-v4-flash":          "advanced",
 	"kimi-k2.5":                  "advanced",
 	"kimi-k2.6":                  "advanced",
 
 	// 精英等级
-	"gpt-5.5-pro":       "elite",
-	"deepseek-reasoner": "elite",
+	"gpt-5.5-pro":     "elite",
+	"deepseek-v4-pro": "elite",
 }
 
 // 每日重置配额

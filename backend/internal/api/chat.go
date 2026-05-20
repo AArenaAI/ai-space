@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -678,20 +679,8 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 	req.Messages = mergeSystemMessages(req.Messages)
 
 	// GPT 5.5 后台规则仍保留 stream=true：background=true + stream=true + webhook。
-	// 前端在线时实时看流；断开后 OpenAI 后台继续跑；最终 webhook 兜底落库。
+	// 从这里开始，流式生成彻底从 HTTP handler 拆出去：handler 只创建 task，runner 独立消费上游 stream，当前请求只是订阅 task events。
 	useBackground := services.OpenAIUsesBackground(req.Model, req.ReasoningEffort)
-
-	// 调用 AI 服务（reasoning 参数控制是否启用思考模式，search 控制模型原生搜索工具调用）
-	resp, err := h.aiService.ChatCompletion(c.Request.Context(), req.Model, req.Messages, req.Stream, req.Reasoning, req.ReasoningEffort, useSearchTool)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	if resp.Background && !req.Stream {
-		h.handleBackgroundResponse(c, resp, conversationID, userID, guestID, req.Model, false)
-		return
-	}
 
 	if req.Stream {
 		// 先创建一条空的 assistant 消息，确保即使用户跳转/刷新也能看到生成中的消息
@@ -702,18 +691,33 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 			Model:          req.Model,
 			CreatedAt:      time.Now(),
 		}
-		h.db.Create(&assistantMsg)
+		if err := h.db.Create(&assistantMsg).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存 assistant 占位消息失败"})
+			return
+		}
 		h.touchConversation(conversationID)
 		assistantMsgID := assistantMsg.ID
 
-		// SSE 流式响应
-		c.Header("Content-Type", "text/event-stream")
-		c.Header("Cache-Control", "no-cache")
-		c.Header("Connection", "keep-alive")
-		c.Header("X-Accel-Buffering", "no")
+		streamTask := h.createBackgroundTask(fmt.Sprintf("stream:%d", assistantMsgID), userID, guestID, conversationID, assistantMsgID, req.Model, "", "running", 0)
+		if streamTask == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "创建生成任务失败"})
+			return
+		}
 
-		c.Writer.WriteHeaderNow()
-		// 如果有搜索结果，先发送搜索元数据
+		metaOut, _ := json.Marshal(map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{"delta": map[string]string{"content": ""}},
+			},
+			"_generation_task": map[string]interface{}{
+				"id":                   streamTask.ID,
+				"status":               "running",
+				"conversation_id":      conversationID,
+				"assistant_message_id": assistantMsgID,
+			},
+		})
+		h.persistTaskEvent(streamTask, assistantMsgID, 1, "generation_task", string(metaOut))
+
+		initialSequence := int64(1)
 		if len(searchSources) > 0 {
 			meta := map[string]interface{}{
 				"choices": []map[string]interface{}{
@@ -726,38 +730,39 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 				},
 			}
 			out, _ := json.Marshal(meta)
-			c.Writer.WriteString("data: " + string(out) + "\n\n")
-			c.Writer.Flush()
+			initialSequence = 2
+			h.persistTaskEvent(streamTask, assistantMsgID, initialSequence, "search_meta", string(out))
 		}
 
-		streamResult, usage, err := h.forwardUnifiedStream(resp, c.Writer, req.Reasoning, assistantMsgID, useBackground, userID, guestID, conversationID, req.Model, resp.Provider)
-		if err != nil {
-			fmt.Printf("[Chat] forwardUnifiedStream error: %v\n", err)
+		runnerReq := GenerationTaskRunRequest{
+			Task:               streamTask,
+			Messages:           append([]services.Message(nil), req.Messages...),
+			Model:              req.Model,
+			Reasoning:          req.Reasoning,
+			ReasoningEffort:    req.ReasoningEffort,
+			UseSearchTool:      useSearchTool,
+			UseBackground:      useBackground,
+			UserID:             userID,
+			GuestID:            guestID,
+			ConversationID:     conversationID,
+			AssistantMessageID: assistantMsgID,
+			InitialSequence:    initialSequence,
 		}
-		resp.Body.Close()
+		go h.runGenerationTask(runnerReq)
 
-		// 流结束后，更新已有的 assistant 消息（先创建空消息可防止用户跳转时丢失）
-		if assistantMsgID > 0 {
-			h.db.Model(&models.Message{}).Where("id = ?", assistantMsgID).Update("content", streamResult.FullContent)
-			h.touchConversation(conversationID)
-			if useBackground && streamResult.ResponseID != "" {
-				h.createBackgroundTask(streamResult.ResponseID, userID, guestID, conversationID, assistantMsgID, req.Model, resp.Provider, "completed", streamResult.LastSequenceNumber)
-			}
-		} else if useBackground && streamResult.ResponseID != "" {
-			// 极端情况：如果没有 assistantMsgID（不应该发生），退回到原逻辑
-			assistantMsg := models.Message{ConversationID: conversationID, Role: "assistant", Content: streamResult.FullContent, Model: req.Model, CreatedAt: time.Now()}
-			h.db.Create(&assistantMsg)
-			h.touchConversation(conversationID)
-			h.createBackgroundTask(streamResult.ResponseID, userID, guestID, conversationID, assistantMsg.ID, req.Model, resp.Provider, "completed", streamResult.LastSequenceNumber)
-		}
-
-		// 记录 usage
-		if h.usageService != nil && usage != nil {
-			if err := h.usageService.RecordChatUsageWithResourceID(userID, guestID, resp.Provider, resp.Model, resp.ModelType, conversationID, usage); err != nil {
-				fmt.Printf("[Chat] 记录 usage 失败: %v\n", err)
-			}
-		}
+		// 当前 HTTP 请求不再直连上游模型，只订阅本地 task event stream。
+		h.streamGenerationTaskEvents(c, streamTask, 0)
+		return
 	} else {
+		resp, err := h.aiService.ChatCompletion(c.Request.Context(), req.Model, req.Messages, false, req.Reasoning, req.ReasoningEffort, useSearchTool)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if resp.Background {
+			h.handleBackgroundResponse(c, resp, conversationID, userID, guestID, req.Model, false)
+			return
+		}
 		// 非流式响应：读取 body，解析 usage，记录，再写回客户端
 		defer resp.Body.Close()
 		body, err := io.ReadAll(resp.Body)
@@ -819,9 +824,9 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 
 // forwardUnifiedStream 统一流式转发：通过 decoder factory 获取对应解码器，
 // 循环读取上游事件 → 转换 → 写入前端 SSE，返回完整内容和 usage。
-func (h *ChatHandler) createBackgroundTask(responseID string, userID uint, guestID string, conversationID uint, assistantMessageID uint, model string, provider string, status string, lastSequenceNumber int64) {
+func (h *ChatHandler) createBackgroundTask(responseID string, userID uint, guestID string, conversationID uint, assistantMessageID uint, model string, provider string, status string, lastSequenceNumber int64) *models.AIBackgroundTask {
 	if responseID == "" {
-		return
+		return nil
 	}
 	task := models.AIBackgroundTask{
 		ResponseID:         responseID,
@@ -835,13 +840,166 @@ func (h *ChatHandler) createBackgroundTask(responseID string, userID uint, guest
 		LastSequenceNumber: lastSequenceNumber,
 		CreatedAt:          time.Now(),
 	}
-	if status == "completed" {
+	if status == "completed" || status == "failed" || status == "cancelled" || status == "incomplete" {
 		now := time.Now()
 		task.CompletedAt = &now
 	}
 	if err := h.db.Where("response_id = ?", responseID).Assign(task).FirstOrCreate(&task).Error; err != nil {
 		fmt.Printf("[Chat] 保存后台任务失败 response_id=%s: %v\n", responseID, err)
+		return nil
 	}
+	return &task
+}
+
+type GenerationTaskRunRequest struct {
+	Task               *models.AIBackgroundTask
+	Messages           []services.Message
+	Model              string
+	Reasoning          bool
+	ReasoningEffort    string
+	UseSearchTool      bool
+	UseBackground      bool
+	UserID             uint
+	GuestID            string
+	ConversationID     uint
+	AssistantMessageID uint
+	InitialSequence    int64
+}
+
+func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
+	if req.Task == nil || req.AssistantMessageID == 0 {
+		return
+	}
+	ctx := context.Background()
+	resp, err := h.aiService.ChatCompletion(ctx, req.Model, req.Messages, true, req.Reasoning, req.ReasoningEffort, req.UseSearchTool)
+	if err != nil {
+		h.failGenerationTask(req.Task, req.AssistantMessageID, req.ConversationID, fmt.Sprintf("上游模型请求失败: %v", err))
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.Provider != "" && req.Task.Provider != resp.Provider {
+		h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", req.Task.ID).Update("provider", resp.Provider)
+		req.Task.Provider = resp.Provider
+	}
+
+	streamResult, usage, err := h.forwardUnifiedStream(resp, nil, req.Reasoning, req.AssistantMessageID, req.UseBackground, req.UserID, req.GuestID, req.ConversationID, req.Model, resp.Provider, req.Task, req.InitialSequence)
+	if err != nil {
+		fmt.Printf("[GenerationRunner] forwardUnifiedStream error task=%d message=%d: %v\n", req.Task.ID, req.AssistantMessageID, err)
+	}
+
+	content := streamResult.FullContent
+	finalStatus := "completed"
+	if err != nil {
+		finalStatus = "failed"
+		if content == "" {
+			content = fmt.Sprintf("生成失败: %v", err)
+		}
+		seq := streamResult.LastSequenceNumber + 1
+		if seq <= req.InitialSequence {
+			seq = req.InitialSequence + 1
+		}
+		out, _ := json.Marshal(map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{"delta": map[string]string{"content": ""}},
+			},
+			"_error_meta": map[string]interface{}{"user_message": err.Error(), "code": "stream_failed"},
+		})
+		h.persistTaskEvent(req.Task, req.AssistantMessageID, seq, "error", string(out))
+		streamResult.LastSequenceNumber = seq
+	}
+	updates := map[string]interface{}{
+		"content": content,
+	}
+	_ = h.db.Model(&models.Message{}).Where("id = ?", req.AssistantMessageID).Updates(updates).Error
+	h.touchConversation(req.ConversationID)
+
+	taskUpdates := map[string]interface{}{
+		"status": finalStatus,
+		"result": content,
+	}
+	if err != nil {
+		taskUpdates["error_message"] = err.Error()
+	}
+	if streamResult.ResponseID != "" && req.UseBackground {
+		taskUpdates["response_id"] = streamResult.ResponseID
+	}
+	if streamResult.LastSequenceNumber > 0 {
+		taskUpdates["last_sequence_number"] = streamResult.LastSequenceNumber
+	}
+	now := time.Now()
+	taskUpdates["completed_at"] = &now
+	h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", req.Task.ID).Updates(taskUpdates)
+
+	if h.usageService != nil && usage != nil {
+		if err := h.usageService.RecordChatUsageWithResourceID(req.UserID, req.GuestID, resp.Provider, resp.Model, resp.ModelType, req.ConversationID, usage); err != nil {
+			fmt.Printf("[GenerationRunner] 记录 usage 失败: %v\n", err)
+		}
+	}
+}
+
+func (h *ChatHandler) failGenerationTask(task *models.AIBackgroundTask, assistantMessageID uint, conversationID uint, message string) {
+	if task == nil {
+		return
+	}
+	out, _ := json.Marshal(map[string]interface{}{
+		"choices":     []map[string]interface{}{{"delta": map[string]string{"content": message}}},
+		"_error_meta": map[string]interface{}{"user_message": message, "code": "generation_failed"},
+	})
+	seq := task.LastSequenceNumber + 1
+	if seq <= 1 {
+		seq = 2
+	}
+	h.persistTaskEvent(task, assistantMessageID, seq, "error", string(out))
+	h.persistTaskEvent(task, assistantMessageID, seq+1, "done", "[DONE]")
+	now := time.Now()
+	h.db.Model(&models.Message{}).Where("id = ?", assistantMessageID).Update("content", message)
+	h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", task.ID).Updates(map[string]interface{}{
+		"status":               "failed",
+		"error_message":        message,
+		"result":               message,
+		"last_sequence_number": seq + 1,
+		"completed_at":         &now,
+	})
+	h.touchConversation(conversationID)
+}
+
+func (h *ChatHandler) persistTaskEvent(task *models.AIBackgroundTask, assistantMessageID uint, sequenceNumber int64, eventType string, payload string) {
+	if assistantMessageID == 0 || sequenceNumber <= 0 || payload == "" {
+		return
+	}
+	if task == nil {
+		if err := h.db.Where("assistant_message_id = ?", assistantMessageID).Order("updated_at DESC, id DESC").First(&task).Error; err != nil {
+			return
+		}
+	}
+	event := models.AIBackgroundTaskEvent{
+		TaskID:             task.ID,
+		ResponseID:         task.ResponseID,
+		ConversationID:     task.ConversationID,
+		AssistantMessageID: assistantMessageID,
+		SequenceNumber:     sequenceNumber,
+		EventType:          eventType,
+		Payload:            payload,
+		CreatedAt:          time.Now(),
+	}
+	if err := h.db.Create(&event).Error; err != nil {
+		fmt.Printf("[Chat] 保存任务事件失败 message_id=%d seq=%d: %v\n", assistantMessageID, sequenceNumber, err)
+		return
+	}
+	h.db.Model(&models.AIBackgroundTask{}).Where("id = ? AND last_sequence_number < ?", task.ID, sequenceNumber).Update("last_sequence_number", sequenceNumber)
+	task.LastSequenceNumber = sequenceNumber
+}
+
+func (h *ChatHandler) isGenerationTaskCancelled(taskID uint) bool {
+	if taskID == 0 {
+		return false
+	}
+	var status string
+	if err := h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", taskID).Select("status").Scan(&status).Error; err != nil {
+		return false
+	}
+	return status == "cancelled"
 }
 
 func (h *ChatHandler) handleBackgroundResponse(c *gin.Context, resp *services.AICompletionResponse, conversationID uint, userID uint, guestID string, model string, clientWantsStream bool) {
@@ -926,7 +1084,7 @@ type UnifiedStreamResult struct {
 	LastSequenceNumber int64
 }
 
-func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, w gin.ResponseWriter, reasoningEnabled bool, assistantMsgID uint, useBackground bool, userID uint, guestID string, conversationID uint, model string, provider string) (*UnifiedStreamResult, *services.TokenUsage, error) {
+func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, w gin.ResponseWriter, reasoningEnabled bool, assistantMsgID uint, useBackground bool, userID uint, guestID string, conversationID uint, model string, provider string, streamTask *models.AIBackgroundTask, initialSequence int64) (*UnifiedStreamResult, *services.TokenUsage, error) {
 	decoder := resp.Decoder
 	if decoder == nil {
 		decoder = services.NewDecoder(resp.ModelType, resp.Body)
@@ -959,12 +1117,44 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 		}
 	}()
 
+	clientConnected := true
+	outgoingSeq := initialSequence
+	bytesSinceFlush := 0
+	lastFlush := time.Now()
 	writeAndFlush := func(payload string) error {
-		if _, err := w.WriteString(payload); err != nil {
-			return err
+		if !clientConnected || w == nil {
+			return nil
 		}
-		w.Flush()
+		if _, err := w.WriteString(payload); err != nil {
+			clientConnected = false
+			fmt.Printf("[Chat] SSE client disconnected, generation continues in backend: %v\n", err)
+			return nil
+		}
+		bytesSinceFlush += len(payload)
+		if time.Since(lastFlush) > 5*time.Millisecond || bytesSinceFlush > 128 {
+			w.Flush()
+			lastFlush = time.Now()
+			bytesSinceFlush = 0
+		}
 		return nil
+	}
+	defer func() {
+		if bytesSinceFlush > 0 {
+			w.Flush()
+		}
+	}()
+	writeDataEvent := func(eventType string, payload map[string]interface{}) error {
+		out, _ := json.Marshal(payload)
+		outgoingSeq++
+		h.persistTaskEvent(streamTask, assistantMsgID, outgoingSeq, eventType, string(out))
+		outcome.LastSequenceNumber = outgoingSeq
+		return writeAndFlush("data: " + string(out) + "\n\n")
+	}
+	writeDoneEvent := func() error {
+		outgoingSeq++
+		h.persistTaskEvent(streamTask, assistantMsgID, outgoingSeq, "done", "[DONE]")
+		outcome.LastSequenceNumber = outgoingSeq
+		return writeAndFlush("data: [DONE]\n\n")
 	}
 
 	const heartbeatInterval = 15 * time.Second
@@ -1017,6 +1207,10 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 			}
 
 		case result := <-results:
+			if streamTask != nil && h.isGenerationTaskCancelled(streamTask.ID) {
+				outcome.FullContent = strings.TrimSpace(getContent())
+				return outcome, finalUsage, fmt.Errorf("generation cancelled")
+			}
 			event, err := result.event, result.err
 			if err != nil {
 				if err == io.EOF {
@@ -1024,12 +1218,11 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 					return outcome, finalUsage, nil
 				}
 				// 解析错误：向前端发送错误，不发 [DONE]
-				errOut, _ := json.Marshal(map[string]interface{}{
+				_ = writeDataEvent("error", map[string]interface{}{
 					"choices": []map[string]interface{}{
 						{"delta": map[string]string{"content": fmt.Sprintf("❌ 上游流式响应解析失败: %v", err)}},
 					},
 				})
-				_ = writeAndFlush("data: " + string(errOut) + "\n\n")
 				outcome.FullContent = strings.TrimSpace(getContent())
 				return outcome, finalUsage, err
 			}
@@ -1044,8 +1237,18 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 				outcome.ResponseID = event.ResponseID
 				if useBackground {
 					// OpenAI background+stream 的 webhook 可能在前端流结束前就到达；
-					// 收到 response.created 后立即建立 response_id -> 本地消息映射，避免 webhook record not found。
-					h.createBackgroundTask(event.ResponseID, userID, guestID, conversationID, assistantMsgID, model, provider, "streaming", event.SequenceNumber)
+					// 必须把启动时的 stream:<message_id> task 原地升级为 response_id，避免同一 message 出现两个 task，续流查到“新 task 但无事件”。
+					if streamTask != nil && streamTask.ResponseID != event.ResponseID {
+						h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", streamTask.ID).Updates(map[string]interface{}{
+							"response_id":          event.ResponseID,
+							"status":               "streaming",
+							"last_sequence_number": outcome.LastSequenceNumber,
+						})
+						streamTask.ResponseID = event.ResponseID
+						streamTask.Status = "streaming"
+					} else if streamTask == nil {
+						streamTask = h.createBackgroundTask(event.ResponseID, userID, guestID, conversationID, assistantMsgID, model, provider, "streaming", outcome.LastSequenceNumber)
+					}
 				}
 			}
 			if event.Type == services.EventResponseCreated {
@@ -1066,7 +1269,7 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 				}
 				contentMu.Unlock()
 
-				if err := writeAndFlush("data: [DONE]\n\n"); err != nil {
+				if err := writeDoneEvent(); err != nil {
 					outcome.FullContent = strings.TrimSpace(getContent())
 					return outcome, finalUsage, err
 				}
@@ -1106,17 +1309,16 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 					"user_message":        message,
 					"suggested_actions":   event.SuggestedActions,
 				}
-				out, _ := json.Marshal(map[string]interface{}{
+				if err := writeDataEvent("error", map[string]interface{}{
 					"choices": []map[string]interface{}{
 						{"delta": map[string]string{"content": message}},
 					},
 					"_error_meta": meta,
-				})
-				if err := writeAndFlush("data: " + string(out) + "\n\n"); err != nil {
+				}); err != nil {
 					outcome.FullContent = strings.TrimSpace(getContent())
 					return outcome, finalUsage, err
 				}
-				if err := writeAndFlush("data: [DONE]\n\n"); err != nil {
+				if err := writeDoneEvent(); err != nil {
 					outcome.FullContent = strings.TrimSpace(getContent())
 					return outcome, finalUsage, err
 				}
@@ -1151,15 +1353,14 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 				if label == "" {
 					label = activityKind
 				}
-				out, _ := json.Marshal(map[string]interface{}{
+				if err := writeDataEvent("activity_meta", map[string]interface{}{
 					"choices": []map[string]interface{}{{"delta": map[string]string{"content": ""}}},
 					"_activity_meta": map[string]interface{}{
 						"kind":   activityKind,
 						"status": activityStatus,
 						"label":  label,
 					},
-				})
-				if err := writeAndFlush("data: " + string(out) + "\n\n"); err != nil {
+				}); err != nil {
 					outcome.FullContent = strings.TrimSpace(getContent())
 					return outcome, finalUsage, err
 				}
@@ -1190,16 +1391,214 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 			}
 
 			if delta["content"] != "" || delta["reasoning_content"] != "" {
-				out, _ := json.Marshal(map[string]interface{}{
+				if err := writeDataEvent("delta", map[string]interface{}{
 					"choices": []map[string]interface{}{
 						{"delta": delta},
 					},
-				})
-				if err := writeAndFlush("data: " + string(out) + "\n\n"); err != nil {
+				}); err != nil {
 					outcome.FullContent = strings.TrimSpace(getContent())
 					return outcome, finalUsage, err
 				}
 			}
+		}
+	}
+}
+
+func (h *ChatHandler) GetTask(c *gin.Context) {
+	userID, guestID := getUserID(c), getGuestID(c)
+	messageID := c.Param("message_id")
+
+	var task models.AIBackgroundTask
+	q := h.db.Where("assistant_message_id = ?", messageID)
+	if userID > 0 {
+		q = q.Where("user_id = ?", userID)
+	} else if guestID != "" {
+		q = q.Where("guest_id = ?", guestID)
+	} else {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	if err := q.Order("updated_at DESC, id DESC").First(&task).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "任务不存在"})
+		return
+	}
+	h.writeTaskSnapshot(c, task)
+}
+
+func (h *ChatHandler) GetGenerationTask(c *gin.Context) {
+	task, ok := h.loadTaskByIDForRequest(c)
+	if !ok {
+		return
+	}
+	h.writeTaskSnapshot(c, task)
+}
+
+func (h *ChatHandler) StreamTaskEvents(c *gin.Context) {
+	userID, guestID := getUserID(c), getGuestID(c)
+	messageID := c.Param("message_id")
+	after, _ := strconv.ParseInt(c.DefaultQuery("after", "0"), 10, 64)
+
+	var task models.AIBackgroundTask
+	q := h.db.Where("assistant_message_id = ?", messageID)
+	if userID > 0 {
+		q = q.Where("user_id = ?", userID)
+	} else if guestID != "" {
+		q = q.Where("guest_id = ?", guestID)
+	} else {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	if err := q.Order("updated_at DESC, id DESC").First(&task).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "任务不存在"})
+		return
+	}
+
+	h.streamGenerationTaskEvents(c, &task, after)
+}
+
+func (h *ChatHandler) StreamGenerationTaskEvents(c *gin.Context) {
+	task, ok := h.loadTaskByIDForRequest(c)
+	if !ok {
+		return
+	}
+	after, _ := strconv.ParseInt(c.DefaultQuery("after", "0"), 10, 64)
+	h.streamGenerationTaskEvents(c, &task, after)
+}
+
+func (h *ChatHandler) CancelGenerationTask(c *gin.Context) {
+	task, ok := h.loadTaskByIDForRequest(c)
+	if !ok {
+		return
+	}
+	terminal := task.Status == "completed" || task.Status == "failed" || task.Status == "cancelled" || task.Status == "incomplete"
+	if terminal {
+		h.writeTaskSnapshot(c, task)
+		return
+	}
+	message := "生成已停止"
+	seq := task.LastSequenceNumber + 1
+	if seq <= 1 {
+		seq = 2
+	}
+	out, _ := json.Marshal(map[string]interface{}{
+		"choices":     []map[string]interface{}{{"delta": map[string]string{"content": message}}},
+		"_error_meta": map[string]interface{}{"user_message": message, "code": "cancelled"},
+	})
+	h.persistTaskEvent(&task, task.AssistantMessageID, seq, "cancelled", string(out))
+	h.persistTaskEvent(&task, task.AssistantMessageID, seq+1, "done", "[DONE]")
+	now := time.Now()
+	h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", task.ID).Updates(map[string]interface{}{
+		"status":               "cancelled",
+		"error_message":        message,
+		"last_sequence_number": seq + 1,
+		"completed_at":         &now,
+	})
+	_ = h.db.First(&task, task.ID).Error
+	h.writeTaskSnapshot(c, task)
+}
+
+func (h *ChatHandler) loadTaskByIDForRequest(c *gin.Context) (models.AIBackgroundTask, bool) {
+	userID, guestID := getUserID(c), getGuestID(c)
+	taskID := c.Param("task_id")
+	var task models.AIBackgroundTask
+	q := h.db.Where("id = ?", taskID)
+	if userID > 0 {
+		q = q.Where("user_id = ?", userID)
+	} else if guestID != "" {
+		q = q.Where("guest_id = ?", guestID)
+	} else {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return task, false
+	}
+	if err := q.First(&task).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "任务不存在"})
+		return task, false
+	}
+	return task, true
+}
+
+func (h *ChatHandler) writeTaskSnapshot(c *gin.Context, task models.AIBackgroundTask) {
+	var msg models.Message
+	_ = h.db.Where("id = ? AND conversation_id = ?", task.AssistantMessageID, task.ConversationID).First(&msg).Error
+	c.JSON(http.StatusOK, gin.H{"task": task, "message": msg})
+}
+
+func (h *ChatHandler) streamGenerationTaskEvents(c *gin.Context, task *models.AIBackgroundTask, after int64) {
+	if task == nil || task.ID == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "任务不存在"})
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	c.Writer.WriteHeaderNow()
+
+	doneWritten := false
+	writeEvent := func(event models.AIBackgroundTaskEvent) bool {
+		var err error
+		if event.Payload == "[DONE]" {
+			if doneWritten {
+				after = event.SequenceNumber
+				return true
+			}
+			_, err = c.Writer.WriteString(fmt.Sprintf("id: %d\ndata: [DONE]\n\n", event.SequenceNumber))
+			doneWritten = true
+		} else {
+			_, err = c.Writer.WriteString(fmt.Sprintf("id: %d\ndata: %s\n\n", event.SequenceNumber, event.Payload))
+		}
+		if err != nil {
+			return false
+		}
+		c.Writer.Flush()
+		after = event.SequenceNumber
+		return true
+	}
+
+	deadline := time.Now().Add(90 * time.Second)
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+
+	for {
+		var events []models.AIBackgroundTaskEvent
+		if err := h.db.Where("task_id = ? AND sequence_number > ?", task.ID, after).Order("sequence_number ASC").Find(&events).Error; err == nil {
+			for _, event := range events {
+				if !writeEvent(event) {
+					return
+				}
+			}
+		}
+
+		if err := h.db.First(task, task.ID).Error; err == nil {
+			terminal := task.Status == "completed" || task.Status == "failed" || task.Status == "cancelled" || task.Status == "incomplete"
+			if terminal && after >= task.LastSequenceNumber {
+				if task.Status != "completed" && task.ErrorMessage != "" {
+					meta := map[string]interface{}{"_error_meta": map[string]interface{}{"user_message": task.ErrorMessage, "code": task.Status}}
+					out, _ := json.Marshal(meta)
+					_, _ = c.Writer.WriteString("data: " + string(out) + "\n\n")
+				}
+				if !doneWritten {
+					_, _ = c.Writer.WriteString("data: [DONE]\n\n")
+					c.Writer.Flush()
+				}
+				return
+			}
+		}
+
+		if time.Now().After(deadline) {
+			_, _ = c.Writer.WriteString(":timeout\n\n")
+			c.Writer.Flush()
+			return
+		}
+
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case <-heartbeat.C:
+			_, _ = c.Writer.WriteString(":ping\n\n")
+			c.Writer.Flush()
+		case <-time.After(700 * time.Millisecond):
 		}
 	}
 }

@@ -8,7 +8,7 @@
       "category": "business",
       "icon": "briefcase",
       "color": "#f59e0b",
-      "recommended_model": "deepseek-reasoner",
+      "recommended_model": "deepseek-v4-pro",
       "triggers": [
         "SWOT",
         "swot",
@@ -34,7 +34,7 @@
       "category": "code",
       "icon": "code-2",
       "color": "#22c55e",
-      "recommended_model": "deepseek-reasoner",
+      "recommended_model": "deepseek-v4-pro",
       "triggers": [
         "审查代码",
         "代码审查",
@@ -124,7 +124,7 @@
       "category": "data",
       "icon": "bar-chart",
       "color": "#8b5cf6",
-      "recommended_model": "deepseek-reasoner",
+      "recommended_model": "deepseek-v4-pro",
       "triggers": [
         "数据分析",
         "可视化",
@@ -213,7 +213,7 @@
       "category": "academic",
       "icon": "graduation-cap",
       "color": "#3b82f6",
-      "recommended_model": "deepseek-reasoner",
+      "recommended_model": "deepseek-v4-pro",
       "triggers": [
         "论文",
         "论文润色",

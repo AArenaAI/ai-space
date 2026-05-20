@@ -14,6 +14,7 @@ import {
   Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { resolveImageUrl } from "@/lib/resolveImageUrl";
 import ConfirmDialog from "./ConfirmDialog";
 
 export interface HistoryItem {
@@ -23,6 +24,7 @@ export interface HistoryItem {
   pinned?: boolean;
   updated_at: string;
   icon?: "chat" | "image";
+  cover_image?: string;
 }
 
 interface HistoryDrawerProps {
@@ -76,6 +78,13 @@ function groupItems(items: HistoryItem[]) {
     groups[label].push(item);
   }
   return groups;
+}
+
+function formatHistoryTime(dateStr: string): string {
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 /* 骨架屏 */
@@ -166,90 +175,263 @@ export default function HistoryDrawer({
     const isActive = item.active;
     const isEditing = editingId === item.id;
     const Icon = type === "image" ? ImageIcon : MessageSquare;
+    const hasCover = type === "image" && item.cover_image;
 
     return (
       <div
         key={item.id}
         className={cn(
-          "group flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm transition-all duration-150 cursor-pointer",
+          "group rounded-xl transition-all duration-150 cursor-pointer",
+          hasCover
+            ? "p-0 overflow-hidden border"
+            : "flex items-center gap-2 px-3 py-2.5",
           isActive
-            ? "bg-brand/10 border border-brand/20 text-text-primary"
-            : "text-text-secondary hover:bg-surface-card/70 hover:text-text-primary border border-transparent"
+            ? hasCover
+              ? "bg-brand/5 border-brand/20 text-text-primary"
+              : "bg-brand/10 border border-brand/20 text-text-primary"
+            : hasCover
+              ? "bg-surface-card border-surface-border hover:border-brand/30 hover:bg-surface-card/80 text-text-secondary"
+              : "text-text-secondary hover:bg-surface-card/70 hover:text-text-primary border border-transparent"
         )}
         onClick={() => {
           if (!isEditing) onSelect(item.id);
         }}
       >
-        {item.pinned && (
-          <Pin className="w-3 h-3 shrink-0 text-brand rotate-45" />
-        )}
-        <Icon
-          className={cn(
-            "w-3.5 h-3.5 shrink-0",
-            isActive ? "text-brand" : "text-text-tertiary group-hover:text-text-secondary"
-          )}
-        />
-
-        {isEditing ? (
-          <input
-            ref={inputRef}
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onBlur={() => {
-              if (onRename && editValue.trim()) {
-                onRename(item.id, editValue.trim());
-              }
-              setEditingId(null);
-            }}
-            onClick={(e) => e.stopPropagation()}
-            className="flex-1 min-w-0 bg-surface-card border border-brand/30 rounded-md px-2 py-1 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-brand/40"
-          />
-        ) : (
-          <span className={cn("flex-1 truncate text-left", isActive && "font-medium")}>
-            {item.title || "新对话"}
-          </span>
-        )}
-
-        {!isEditing && (
-          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-            {onTogglePin && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onTogglePin(item.id);
-                }}
-                className="p-1 rounded-md text-text-tertiary hover:text-brand hover:bg-brand/10 transition-colors"
-                title={item.pinned ? "取消置顶" : "置顶"}
-              >
-                <Pin className={cn("w-3.5 h-3.5", item.pinned && "rotate-45 text-brand")} />
-              </button>
-            )}
-            {onRename && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  startRename(item);
-                }}
-                className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
-                title="重命名"
-              >
-                <Pencil className="w-3.5 h-3.5" />
-              </button>
-            )}
-            {onDelete && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDelete(item.id);
-                }}
-                className="p-1 rounded-md text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-colors"
-                title="删除"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            )}
+        {/* 带封面图的图片会话卡片布局 */}
+        {hasCover ? (
+          <div className="flex flex-col px-3 py-2.5">
+            {/* 标题栏 */}
+            <div className="flex items-start gap-2">
+              <div className="flex min-w-0 flex-1 items-start gap-2">
+                {item.pinned && (
+                  <Pin className="mt-0.5 w-3 h-3 shrink-0 text-brand rotate-45" />
+                )}
+                {isEditing ? (
+                  <input
+                    ref={inputRef}
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    onBlur={() => {
+                      if (onRename && editValue.trim()) {
+                        onRename(item.id, editValue.trim());
+                      }
+                      setEditingId(null);
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="flex-1 min-w-0 bg-surface-card border border-brand/30 rounded-md px-2 py-1 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-brand/40"
+                  />
+                ) : (
+                  <span className={cn("line-clamp-2 text-left text-sm leading-5 text-text-primary", isActive && "font-medium")}>
+                    {item.title || "新对话"}
+                  </span>
+                )}
+              </div>
+              {!isEditing && (
+                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                  {onTogglePin && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onTogglePin(item.id);
+                      }}
+                      className="p-1 rounded-md text-text-tertiary hover:text-brand hover:bg-brand/10 transition-colors"
+                      title={item.pinned ? "取消置顶" : "置顶"}
+                    >
+                      <Pin className={cn("w-3.5 h-3.5", item.pinned && "rotate-45 text-brand")} />
+                    </button>
+                  )}
+                  {onRename && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        startRename(item);
+                      }}
+                      className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
+                      title="重命名"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  {onDelete && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(item.id);
+                      }}
+                      className="p-1 rounded-md text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                      title="删除"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+            {/* 首图 + 时间 */}
+            <div className="mt-2 flex flex-col items-start gap-1.5">
+              <div className="relative size-24 overflow-hidden rounded-lg bg-surface border border-surface-border">
+                <img
+                  src={resolveImageUrl(item.cover_image || "")}
+                  alt={item.title || "封面"}
+                  className="w-full h-full object-cover"
+                  loading="lazy"
+                />
+              </div>
+              <span className="text-[11px] leading-none text-text-tertiary">
+                {formatHistoryTime(item.updated_at)}
+              </span>
+            </div>
           </div>
+        ) : type === "image" ? (
+          /* 图片会话无封面时：仍展示标题与时间 */
+          <div className="flex w-full flex-col px-3 py-2.5">
+            <div className="flex items-start gap-2">
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                {item.pinned && (
+                  <Pin className="w-3 h-3 shrink-0 text-brand rotate-45" />
+                )}
+                {isEditing ? (
+                  <input
+                    ref={inputRef}
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    onBlur={() => {
+                      if (onRename && editValue.trim()) {
+                        onRename(item.id, editValue.trim());
+                      }
+                      setEditingId(null);
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="flex-1 min-w-0 bg-surface-card border border-brand/30 rounded-md px-2 py-1 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-brand/40"
+                  />
+                ) : (
+                  <span className={cn("line-clamp-2 text-left text-sm leading-5 text-text-primary", isActive && "font-medium")}>
+                    {item.title || "新对话"}
+                  </span>
+                )}
+              </div>
+              {!isEditing && (
+                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                  {onTogglePin && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onTogglePin(item.id);
+                      }}
+                      className="p-1 rounded-md text-text-tertiary hover:text-brand hover:bg-brand/10 transition-colors"
+                      title={item.pinned ? "取消置顶" : "置顶"}
+                    >
+                      <Pin className={cn("w-3.5 h-3.5", item.pinned && "rotate-45 text-brand")} />
+                    </button>
+                  )}
+                  {onRename && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        startRename(item);
+                      }}
+                      className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
+                      title="重命名"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  {onDelete && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(item.id);
+                      }}
+                      className="p-1 rounded-md text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                      title="删除"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+            <span className="mt-1.5 text-[11px] leading-none text-text-tertiary">
+              {formatHistoryTime(item.updated_at)}
+            </span>
+          </div>
+        ) : (
+          /* 无封面图的默认行布局 */
+          <>
+            {item.pinned && (
+              <Pin className="w-3 h-3 shrink-0 text-brand rotate-45" />
+            )}
+            <Icon
+              className={cn(
+                "w-3.5 h-3.5 shrink-0",
+                isActive ? "text-brand" : "text-text-tertiary group-hover:text-text-secondary"
+              )}
+            />
+
+            {isEditing ? (
+              <input
+                ref={inputRef}
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                onBlur={() => {
+                  if (onRename && editValue.trim()) {
+                    onRename(item.id, editValue.trim());
+                  }
+                  setEditingId(null);
+                }}
+                onClick={(e) => e.stopPropagation()}
+                className="flex-1 min-w-0 bg-surface-card border border-brand/30 rounded-md px-2 py-1 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-brand/40"
+              />
+            ) : (
+              <span className={cn("flex-1 truncate text-left", isActive && "font-medium")}>
+                {item.title || "新对话"}
+              </span>
+            )}
+
+            {!isEditing && (
+              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                {onTogglePin && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTogglePin(item.id);
+                    }}
+                    className="p-1 rounded-md text-text-tertiary hover:text-brand hover:bg-brand/10 transition-colors"
+                    title={item.pinned ? "取消置顶" : "置顶"}
+                  >
+                    <Pin className={cn("w-3.5 h-3.5", item.pinned && "rotate-45 text-brand")} />
+                  </button>
+                )}
+                {onRename && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startRename(item);
+                    }}
+                    className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
+                    title="重命名"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                {onDelete && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(item.id);
+                    }}
+                    className="p-1 rounded-md text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                    title="删除"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            )}
+          </>
         )}
       </div>
     );

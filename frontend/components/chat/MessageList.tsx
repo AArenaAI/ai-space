@@ -16,6 +16,7 @@ import { useTheme } from "@/components/theme/ThemeProvider";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import ShareDialog from "@/components/ui/ShareDialog";
 import { useSmartAutoScroll } from "@/hooks/useSmartAutoScroll";
+import { streamSubscribe, streamGet } from "@/lib/streaming";
 import EChartsBlock from "./EChartsBlock";
 
 interface MessageListProps {
@@ -115,6 +116,54 @@ function CodeBlock({ language, value }: { language: string; value: string }) {
 
 function StreamingCursor() {
   return <span className="inline-block w-[2px] h-[1.2em] bg-brand ml-0.5 animate-cursor-blink align-middle" />;
+}
+
+function StreamingText({ messageId, content, className }: { messageId: string; content: string; className?: string }) {
+  const [parsed, setParsed] = useState(() => {
+    const full = streamGet(messageId) || content;
+    return parseThinkContent(full);
+  });
+
+  useEffect(() => {
+    const initialFull = streamGet(messageId);
+    if (initialFull) {
+      setParsed(parseThinkContent(initialFull));
+    }
+
+    const unsubscribe = streamSubscribe(messageId, (delta, full) => {
+      setParsed(parseThinkContent(full));
+    });
+    return unsubscribe;
+  }, [messageId]);
+
+  const { reasoning, answer } = parsed;
+
+  return (
+    <span className={className}>
+      {reasoning && (
+        <div className="mb-3 rounded-xl border border-purple-200 dark:border-purple-800/40 overflow-hidden">
+          <div className="flex items-center gap-2 px-3 py-2 bg-purple-50 dark:bg-[#1A1A2E]">
+            <Lightbulb className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
+            <span className="text-sm font-medium text-text-secondary">正在思考...</span>
+            <div className="flex gap-0.5 ml-1">
+              <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce" />
+              <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce [animation-delay:0.15s]" />
+              <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce [animation-delay:0.3s]" />
+            </div>
+          </div>
+          <div className="px-3 py-2.5 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap bg-slate-50 dark:bg-[#0F0F1A]">
+            {reasoning}
+          </div>
+        </div>
+      )}
+      {answer ? (
+        <span className="whitespace-pre-wrap break-words">{answer}</span>
+      ) : (
+        <ThinkingDots />
+      )}
+      <StreamingCursor />
+    </span>
+  );
 }
 
 // 解析 <think>...思考过程...</think>
@@ -429,6 +478,40 @@ function MessageActions({
   );
 }
 
+// 模块级：缓存 ReactMarkdown components，避免每次渲染重新挂载 Markdown 节点
+const markdownComponents = {
+  code({ node, inline, className, children, ...props }: any) {
+    const match = /language-(\w+)/.exec(className || "");
+    const lang = match?.[1] || "";
+    const value = String(children).replace(/\n$/, "");
+    if (!inline && lang === "echarts") {
+      return <EChartsBlock value={value} />;
+    }
+    return !inline && match ? (
+      <CodeBlock language={lang} value={value} />
+    ) : (
+      <code className="bg-[#E8E8E8] dark:bg-[#2A2A3A] text-[#333333] dark:text-[#E0E0E0] px-1 py-0.5 rounded text-[13px] font-mono" {...props}>
+        {children}
+      </code>
+    );
+  },
+  p({ children }: any) { return <p className="text-[15px] leading-relaxed text-text-primary mb-4 last:mb-0 [li>&]:inline [li>&]:mb-0">{children}</p>; },
+  ul({ children }: any) { return <ul className="list-disc ml-5 mb-4 space-y-1 text-text-primary">{children}</ul>; },
+  ol({ children }: any) { return <ol className="list-decimal ml-5 mb-4 space-y-1 text-text-primary">{children}</ol>; },
+  li({ children }: any) { return <li className="text-[15px] leading-relaxed">{children}</li>; },
+  h1({ children }: any) { return <h1 className="text-xl font-bold text-text-primary mb-3 mt-6">{children}</h1>; },
+  h2({ children }: any) { return <h2 className="text-lg font-bold text-text-primary mb-2 mt-5">{children}</h2>; },
+  h3({ children }: any) { return <h3 className="text-base font-bold text-text-primary mb-2 mt-4">{children}</h3>; },
+  strong({ children }: any) { return <strong className="font-bold text-text-primary">{children}</strong>; },
+  blockquote({ children }: any) { return <blockquote className="border-l-2 border-surface-border pl-4 italic text-text-secondary my-4">{children}</blockquote>; },
+  table({ children }: any) { return <div className="overflow-x-auto my-4"><table className="w-full text-sm border-collapse">{children}</table></div>; },
+  thead({ children }: any) { return <thead className="bg-surface-card border-b border-surface-border">{children}</thead>; },
+  tbody({ children }: any) { return <tbody>{children}</tbody>; },
+  tr({ children }: any) { return <tr className="border-b border-surface-border/50 hover:bg-surface-card/30 transition-colors">{children}</tr>; },
+  th({ children }: any) { return <th className="px-3 py-2.5 text-left text-[13px] font-semibold text-text-primary whitespace-nowrap">{children}</th>; },
+  td({ children }: any) { return <td className="px-3 py-2.5 text-[13px] text-text-secondary leading-relaxed">{children}</td>; },
+};
+
 function MessageList({
   messages,
   isLoading,
@@ -459,39 +542,7 @@ function MessageList({
     enabled: true,
   });
 
-  // 缓存 ReactMarkdown components 对象，避免每次渲染都重新挂载 Markdown 节点
-  const markdownComponents = useMemo(() => ({
-    code({ node, inline, className, children, ...props }: any) {
-      const match = /language-(\w+)/.exec(className || "");
-      const lang = match?.[1] || "";
-      const value = String(children).replace(/\n$/, "");
-      if (!inline && lang === "echarts") {
-        return <EChartsBlock value={value} />;
-      }
-      return !inline && match ? (
-        <CodeBlock language={lang} value={value} />
-      ) : (
-        <code className="bg-[#E8E8E8] dark:bg-[#2A2A3A] text-[#333333] dark:text-[#E0E0E0] px-1 py-0.5 rounded text-[13px] font-mono" {...props}>
-          {children}
-        </code>
-      );
-    },
-    p({ children }: any) { return <p className="text-[15px] leading-relaxed text-text-primary mb-4 last:mb-0 [li>&]:inline [li>&]:mb-0">{children}</p>; },
-    ul({ children }: any) { return <ul className="list-disc ml-5 mb-4 space-y-1 text-text-primary">{children}</ul>; },
-    ol({ children }: any) { return <ol className="list-decimal ml-5 mb-4 space-y-1 text-text-primary">{children}</ol>; },
-    li({ children }: any) { return <li className="text-[15px] leading-relaxed">{children}</li>; },
-    h1({ children }: any) { return <h1 className="text-xl font-bold text-text-primary mb-3 mt-6">{children}</h1>; },
-    h2({ children }: any) { return <h2 className="text-lg font-bold text-text-primary mb-2 mt-5">{children}</h2>; },
-    h3({ children }: any) { return <h3 className="text-base font-bold text-text-primary mb-2 mt-4">{children}</h3>; },
-    strong({ children }: any) { return <strong className="font-bold text-text-primary">{children}</strong>; },
-    blockquote({ children }: any) { return <blockquote className="border-l-2 border-surface-border pl-4 italic text-text-secondary my-4">{children}</blockquote>; },
-    table({ children }: any) { return <div className="overflow-x-auto my-4"><table className="w-full text-sm border-collapse">{children}</table></div>; },
-    thead({ children }: any) { return <thead className="bg-surface-card border-b border-surface-border">{children}</thead>; },
-    tbody({ children }: any) { return <tbody>{children}</tbody>; },
-    tr({ children }: any) { return <tr className="border-b border-surface-border/50 hover:bg-surface-card/30 transition-colors">{children}</tr>; },
-    th({ children }: any) { return <th className="px-3 py-2.5 text-left text-[13px] font-semibold text-text-primary whitespace-nowrap">{children}</th>; },
-    td({ children }: any) { return <td className="px-3 py-2.5 text-[13px] text-text-secondary leading-relaxed">{children}</td>; },
-  }), []);
+
 
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [selectMode, setSelectMode] = useState(false);
@@ -632,42 +683,11 @@ function MessageList({
 
   const renderAssistantContent = (msg: Message, isStreaming: boolean) => {
     if (isStreaming) {
-      const { reasoning, answer } = parseThinkContent(msg.content);
-      if (!reasoning && !answer.trim()) {
-        return (
-          <div className="flex items-center gap-1.5 py-1 text-sm text-text-secondary">
-            {isComplexTask && (
-              <span className="inline-flex items-center gap-0.5">
-                <WaveText text="深度推理中，片刻即达极致答案" />
-                <ThinkingDots />
-              </span>
-            )}
-          </div>
-        );
-      }
-      return (
-        <div className="text-[15px] leading-relaxed text-text-primary whitespace-pre-wrap break-words">
-          {reasoning && (
-            <div className="mb-3 rounded-xl border border-surface-border overflow-hidden">
-              <div className="flex items-center gap-2 px-3 py-2 bg-purple-50 dark:bg-[#1A1A2E]">
-                <Lightbulb className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
-                <span className="text-sm font-medium text-text-secondary">正在思考...</span>
-              </div>
-              <div className="px-3 py-2.5 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap bg-slate-50 dark:bg-[#0F0F1A]">
-                {reasoning}
-              </div>
-            </div>
-          )}
-          <div>{sanitizeContent(answer)}</div>
-          <StreamingCursor />
-        </div>
-      );
+      return <StreamingText messageId={msg.id} content={msg.content} className="text-[15px] leading-relaxed text-text-primary" />;
     }
-
     if (!msg.content) {
       return <div className="text-[15px] leading-relaxed text-text-secondary">生成中断，可点击重新生成</div>;
     }
-
     const { reasoning, answer, isThinking } = parseThinkContent(msg.content);
     const cleanAnswer = sanitizeContent(answer);
     return (
@@ -787,7 +807,7 @@ function MessageList({
                           const model = models.find((m) => m.id === msg.model);
                           const isUser = msg.role === "user";
                           const isLast = msgIndex === colMsgs.length - 1;
-                          const isStreaming = isLast && isLoading && msg.role === "assistant";
+                          const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt;
                           const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading;
 
                           return (
@@ -1036,7 +1056,7 @@ function MessageList({
           const model = models.find((m) => m.id === msg.model);
           const isUser = msg.role === "user";
           const isLast = index === messages.length - 1;
-          const isStreaming = isLast && isLoading && msg.role === "assistant";
+          const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt;
           const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading;
           const isSelected = selectedIds.has(msg.id);
 
@@ -1150,79 +1170,9 @@ function MessageList({
                         ) : null}
                       </div>
                     </div>
-                  ) : isStreaming ? (
-                    // 流式期间：普通文本渲染（避免每个 token 重新解析 Markdown 造成卡顿）
-                    <div className="text-[15px] leading-relaxed text-text-primary whitespace-pre-wrap break-words">
-                      {(() => {
-                        const { reasoning, answer } = parseThinkContent(msg.content);
-                        // 内容为空（等待第一个 token）：显示跳动点代替空白光标
-                        if (!reasoning && !answer.trim()) {
-                          return (
-                            <div className="flex items-center gap-1.5 py-1 text-sm text-text-secondary">
-                              {isComplexTask && (
-                                <span className="inline-flex items-center gap-0.5">
-                                  <WaveText text="深度推理中，片刻即达极致答案" />
-                                  <ThinkingDots />
-                                </span>
-                              )}
-                            </div>
-                          );
-                        }
-                        return (
-                          <>
-                            {reasoning && (
-                              <div className="mb-3 rounded-xl border border-purple-200 dark:border-purple-800/40 overflow-hidden">
-                                <div className="flex items-center gap-2 px-3 py-2 bg-purple-50 dark:bg-[#1A1A2E]">
-                                  <Lightbulb className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
-                                  <span className="text-sm font-medium text-text-secondary">正在思考...</span>
-                                  <div className="flex gap-0.5 ml-1">
-                                    <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce" />
-                                    <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce [animation-delay:0.15s]" />
-                                    <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce [animation-delay:0.3s]" />
-                                  </div>
-                                </div>
-                                <div className="px-3 py-2.5 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap bg-slate-50 dark:bg-[#0F0F1A]">
-                                  {reasoning}
-                                </div>
-                              </div>
-                            )}
-                            <div>{sanitizeContent(answer)}</div>
-                            <StreamingCursor />
-                          </>
-                        );
-                      })()}
-                    </div>
-                  ) : !msg.content ? (
-                    <div className="text-[15px] leading-relaxed text-text-secondary">
-                      <p>生成中断，可点击重新生成</p>
-                      {onRegenerate && (
-                        <button
-                          onClick={onRegenerate}
-                          className="mt-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-text-secondary hover:text-text-primary hover:bg-surface-card border border-surface-border transition-colors"
-                        >
-                          <Play className="w-3.5 h-3.5" />
-                          重新生成
-                        </button>
-                      )}
-                    </div>
                   ) : (
-                    <div className="prose prose-sm max-w-none">
-                      {(() => {
-                        const { reasoning, answer, isThinking } = parseThinkContent(msg.content);
-                        const cleanAnswer = sanitizeContent(answer);
-                        return (
-                          <>
-                            {reasoning && <ThinkBlock content={reasoning} isThinking={isThinking} />}
-                            <ReactMarkdown
-                              remarkPlugins={[remarkGfm, remarkFixBold, remarkMath]}
-                              rehypePlugins={[rehypeKatex]}
-                              components={markdownComponents}
-                            >
-                              {cleanAnswer}
-                            </ReactMarkdown>
-                          </>
-                        );
-                      })()}
+                    <>
+                      {renderAssistantContent(msg, isStreaming)}
                       {msg.stopped && onContinueGenerate && (
                         <button
                           onClick={onContinueGenerate}
@@ -1232,7 +1182,7 @@ function MessageList({
                           继续生成
                         </button>
                       )}
-                    </div>
+                    </>
                   )}
                 </div>
                 {!selectMode && !isStreaming && (

@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useImageChats, useImageChatMessages, ImageChatMessage } from "@/hooks/useImageChat";
+import { useImageModels } from "@/hooks/useModels";
 import {
   Loader2,
   Send,
@@ -16,12 +17,69 @@ import {
   Copy,
   MessageSquarePlus,
   History,
+  ChevronDown,
+  Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import ImageLightbox from "@/components/ui/ImageLightbox";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import HistoryDrawer from "@/components/ui/HistoryDrawer";
+
+const ASPECT_RATIOS = [
+  { value: "auto", label: "Auto", w: 1, h: 1 },
+  { value: "1:1", label: "1:1", w: 1, h: 1 },
+  { value: "2:3", label: "2:3", w: 2, h: 3 },
+  { value: "3:2", label: "3:2", w: 3, h: 2 },
+  { value: "3:4", label: "3:4", w: 3, h: 4 },
+  { value: "4:3", label: "4:3", w: 4, h: 3 },
+  { value: "4:5", label: "4:5", w: 4, h: 5 },
+  { value: "5:4", label: "5:4", w: 5, h: 4 },
+  { value: "9:16", label: "9:16", w: 9, h: 16 },
+  { value: "16:9", label: "16:9", w: 16, h: 9 },
+  { value: "21:9", label: "21:9", w: 21, h: 9 },
+];
+
+const RESOLUTIONS = [
+  { value: "1K", label: "1K", desc: "1024px" },
+  { value: "2K", label: "2K", desc: "2048px" },
+  { value: "4K", label: "4K", desc: "3840px" },
+];
+
+const QUALITIES = [
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Med" },
+  { value: "high", label: "High" },
+  { value: "auto", label: "Auto" },
+];
+
+function AspectIcon({ w, h, active }: { w: number; h: number; active: boolean }) {
+  const isLandscape = w > h;
+  const isPortrait = h > w;
+  const maxDim = 28;
+  let boxW = maxDim;
+  let boxH = maxDim;
+  if (isLandscape) {
+    boxW = maxDim;
+    boxH = Math.max(Math.round((maxDim * h) / w), 10);
+  } else if (isPortrait) {
+    boxH = maxDim;
+    boxW = Math.max(Math.round((maxDim * w) / h), 10);
+  }
+  return (
+    <div
+      className={cn(
+        "flex items-center justify-center w-8 h-8 rounded-md border transition-colors",
+        active ? "border-brand/50 bg-brand/10" : "border-surface-border bg-surface"
+      )}
+    >
+      <div
+        className={cn("rounded-sm border-2 transition-colors", active ? "border-brand bg-brand/20" : "border-text-tertiary/50")}
+        style={{ width: boxW, height: boxH }}
+      />
+    </div>
+  );
+}
 
 interface DisplayMessage {
   id: string;
@@ -61,6 +119,7 @@ function ImageChatPageInner() {
 
   const { chats, fetchChats, createChat, deleteChat, updateChatTitle } = useImageChats();
   const { messages: apiMessages, fetchMessages, sendMessage } = useImageChatMessages();
+  const { models: imageModels } = useImageModels();
 
   const [displayMessages, setDisplayMessages] = useState<DisplayMessage[]>([]);
   const [prompt, setPrompt] = useState("");
@@ -72,12 +131,21 @@ function ImageChatPageInner() {
   const [showHistory, setShowHistory] = useState(false);
   const [chatId, setChatId] = useState<number | null>(null);
   const [pollingChatId, setPollingChatId] = useState<number | null>(null);
+  const [selectedAspectRatio, setSelectedAspectRatio] = useState("1:1");
+  const [selectedResolution, setSelectedResolution] = useState("1K");
+  const [selectedQuality, setSelectedQuality] = useState("medium");
+  const [selectedModel, setSelectedModel] = useState("");
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [aspectMenuOpen, setAspectMenuOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const shouldAutoScrollRef = useRef(true);
+  const selectedModelInfo = imageModels.find((m) => m.id === selectedModel) || imageModels[0];
+  const selectedAspect = ASPECT_RATIOS.find((item) => item.value === selectedAspectRatio) || ASPECT_RATIOS[1];
 
-  // 解析 URL 参数
   const initialPrompt = searchParams.get("prompt") || "";
   const initialAspect = searchParams.get("aspect") || "1:1";
   const initialResolution = searchParams.get("resolution") || "1K";
@@ -85,6 +153,18 @@ function ImageChatPageInner() {
   const initialRefs = searchParams.get("refs");
   const initialRefImages = initialRefs ? initialRefs.split(",") : [];
   const urlChatId = searchParams.get("chatId");
+
+  useEffect(() => {
+    if (!selectedModel && imageModels.length > 0) {
+      setSelectedModel(imageModels[0].id);
+    }
+  }, [imageModels, selectedModel]);
+
+  useEffect(() => {
+    setSelectedAspectRatio(initialAspect);
+    setSelectedResolution(initialResolution);
+    setSelectedQuality(initialQuality);
+  }, [initialAspect, initialResolution, initialQuality]);
 
   // 初始化
   useEffect(() => {
@@ -106,13 +186,21 @@ function ImageChatPageInner() {
     }
   }, [apiMessages]);
 
-  // 滚动到底部
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  const updateAutoScrollIntent = useCallback(() => {
+    const el = messagesScrollRef.current;
+    if (!el) return;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    shouldAutoScrollRef.current = distanceToBottom < 120;
+  }, []);
+
+  // 只在用户本来接近底部时自动跟随；用户上翻历史后，生成轮询不再强制拉到底部
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth", force = false) => {
+    if (!force && !shouldAutoScrollRef.current) return;
+    messagesEndRef.current?.scrollIntoView({ behavior });
   }, []);
 
   useEffect(() => {
-    scrollToBottom();
+    scrollToBottom("smooth");
   }, [displayMessages, scrollToBottom]);
 
   // 页面加载时如果有初始 prompt 且没有 chatId，自动发起生成
@@ -158,6 +246,7 @@ function ImageChatPageInner() {
       return;
     }
     setIsGenerating(true);
+    shouldAutoScrollRef.current = true;
 
     const payload = {
       prompt: text,
@@ -194,7 +283,7 @@ function ImageChatPageInner() {
   };
 
   const handleSubmit = () => {
-    handleSend(prompt, initialAspect, initialResolution, initialQuality, referenceImages);
+    handleSend(prompt, selectedAspectRatio, selectedResolution, selectedQuality, referenceImages);
   };
 
   const uploadReferenceImage = async (file: File) => {
@@ -301,7 +390,7 @@ function ImageChatPageInner() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-surface overflow-hidden">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-surface">
       <input
         ref={fileInputRef}
         type="file"
@@ -330,7 +419,11 @@ function ImageChatPageInner() {
       </div>
 
       {/* 聊天区域 */}
-      <div className="flex-1 overflow-auto px-4 md:px-6 py-4">
+      <div
+        ref={messagesScrollRef}
+        onScroll={updateAutoScrollIntent}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 md:px-6"
+      >
         <div className="max-w-3xl mx-auto space-y-6">
           {displayMessages.length === 0 && !initialPrompt && (
             <div className="flex flex-col items-center justify-center h-full text-text-tertiary py-20">
@@ -430,7 +523,7 @@ function ImageChatPageInner() {
                         <button
                           onClick={() => {
                             setPrompt(msg.content);
-                            scrollToBottom();
+                            scrollToBottom("smooth", true);
                           }}
                           className="p-1.5 rounded-md hover:bg-surface-elevated text-text-tertiary hover:text-text-primary transition-colors"
                           title="使用此提示"
@@ -480,6 +573,7 @@ function ImageChatPageInner() {
           title: c.title,
           active: chatId === c.id,
           updated_at: c.updated_at,
+          cover_image: c.cover_image,
         }))}
         onSelect={handleSelectChat}
         onNew={handleNewChat}
@@ -576,12 +670,118 @@ function ImageChatPageInner() {
             </div>
 
             {/* 底部工具栏 */}
-            <div className="flex items-center justify-between px-4 pb-3 pt-1">
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] text-text-tertiary border-surface-border">
-                  <span>{initialAspect}</span>
-                  <span>·</span>
-                  <span>{initialResolution}</span>
+            <div className="flex flex-wrap items-center justify-between gap-3 px-4 pb-3 pt-1">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* 模型选择 */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setModelMenuOpen((open) => !open)}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] text-text-secondary border-surface-border hover:border-brand/30 hover:text-text-primary transition-colors"
+                  >
+                    <Layers className="w-3 h-3" />
+                    <span>{selectedModelInfo?.name || "GPT Image 2"}</span>
+                    <ChevronDown className={cn("w-3 h-3 transition-transform", modelMenuOpen && "rotate-180")} />
+                  </button>
+                  {modelMenuOpen && (
+                    <div className="absolute left-0 bottom-full mb-2 w-56 rounded-xl border border-surface-border bg-surface-elevated p-1 shadow-xl z-30">
+                      {imageModels.map((model) => (
+                        <button
+                          key={model.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedModel(model.id);
+                            setModelMenuOpen(false);
+                          }}
+                          className={cn(
+                            "w-full rounded-lg px-3 py-2 text-left text-xs transition-colors",
+                            selectedModel === model.id
+                              ? "bg-brand/10 text-brand"
+                              : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
+                          )}
+                        >
+                          <div className="font-medium">{model.name}</div>
+                          <div className="mt-0.5 text-[10px] text-text-tertiary">{model.provider}</div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* 尺寸比例 */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setAspectMenuOpen((open) => !open)}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] text-text-secondary border-surface-border hover:border-brand/30 hover:text-text-primary transition-colors"
+                  >
+                    <span>{selectedAspect.label}</span>
+                    <ChevronDown className={cn("w-3 h-3 transition-transform", aspectMenuOpen && "rotate-180")} />
+                  </button>
+                  {aspectMenuOpen && (
+                    <div className="absolute left-0 bottom-full mb-2 w-72 rounded-xl border border-surface-border bg-surface-elevated p-3 shadow-xl z-30">
+                      <div className="mb-2 text-xs font-medium text-text-primary">图片比例</div>
+                      <div className="grid grid-cols-4 gap-2">
+                        {ASPECT_RATIOS.map((ratio) => (
+                          <button
+                            key={ratio.value}
+                            type="button"
+                            onClick={() => {
+                              setSelectedAspectRatio(ratio.value);
+                              setAspectMenuOpen(false);
+                            }}
+                            className={cn(
+                              "flex flex-col items-center gap-1 rounded-lg border px-2 py-2 text-[11px] transition-colors",
+                              selectedAspectRatio === ratio.value
+                                ? "border-brand bg-brand/10 text-brand"
+                                : "border-surface-border text-text-secondary hover:border-brand/30 hover:text-text-primary"
+                            )}
+                          >
+                            <AspectIcon w={ratio.w} h={ratio.h} active={selectedAspectRatio === ratio.value} />
+                            <span>{ratio.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 分辨率 */}
+                <div className="flex items-center rounded-full border border-surface-border p-0.5">
+                  {RESOLUTIONS.map((resolution) => (
+                    <button
+                      key={resolution.value}
+                      type="button"
+                      onClick={() => setSelectedResolution(resolution.value)}
+                      className={cn(
+                        "rounded-full px-2 py-0.5 text-[11px] transition-colors",
+                        selectedResolution === resolution.value
+                          ? "bg-brand text-white"
+                          : "text-text-tertiary hover:text-text-primary"
+                      )}
+                    >
+                      {resolution.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* 质量 */}
+                <div className="flex items-center rounded-full border border-surface-border p-0.5">
+                  {QUALITIES.map((quality) => (
+                    <button
+                      key={quality.value}
+                      type="button"
+                      onClick={() => setSelectedQuality(quality.value)}
+                      className={cn(
+                        "rounded-full px-2 py-0.5 text-[11px] transition-colors",
+                        selectedQuality === quality.value
+                          ? "bg-brand text-white"
+                          : "text-text-tertiary hover:text-text-primary"
+                      )}
+                    >
+                      {quality.label}
+                    </button>
+                  ))}
                 </div>
               </div>
 

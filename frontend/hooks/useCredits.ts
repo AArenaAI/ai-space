@@ -34,11 +34,11 @@ export const MODEL_TIER_MAP: Record<string, string> = {
   "gpt-5.4": "advanced",
   "gpt-5.5": "advanced",
   "claude-3-5-sonnet-20241022": "advanced",
-  "deepseek-chat": "advanced",
+  "deepseek-v4-flash": "advanced",
   "moonshot-v1-8k": "advanced",
 
   "gpt-5.5-pro": "elite",
-  "deepseek-reasoner": "elite",
+  "deepseek-v4-pro": "elite",
 };
 
 export function getModelTier(modelId: string): string {
