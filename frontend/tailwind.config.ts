@@ -137,6 +137,9 @@ const config: Config = {
           "0%, 100%": { opacity: "0.4", transform: "scale(1)" },
           "50%": { opacity: "0.8", transform: "scale(1.05)" },
         },
+        "shimmer": {
+          "100%": { transform: "translateX(100%)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
@@ -150,6 +153,7 @@ const config: Config = {
         "typewriter": "typewriter 2s steps(40) forwards",
         "gradient-shift": "gradient-shift 8s ease infinite",
         "pulse-glow": "pulse-glow 4s ease-in-out infinite",
+        "shimmer": "shimmer 1.5s infinite",
       },
       transitionTimingFunction: {
         'out': 'ease-out',

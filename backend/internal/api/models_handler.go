@@ -26,6 +26,7 @@ var SupportedModels = []ModelInfo{
 	// {ID: "claude-3-5-sonnet-20241022", Name: "Claude 3.5 Sonnet", Provider: "Anthropic", Description: "代码和逻辑推理专家", Color: "#cc785c", Capabilities: []string{"chat"}},
 	// Google
 	{ID: "gemini-3.1-pro-preview", Name: "Gemini 3.1 Pro", Provider: "Google", Description: "新一代旗舰推理模型，更强多模态", Color: "#4285f4", Capabilities: []string{"chat", "reasoning", "search"}},
+	{ID: "gemini-3.5-flash", Name: "Gemini 3.5 Flash", Provider: "Google", Description: "新一代高速模型，响应更快更稳", Color: "#4285f4", Capabilities: []string{"chat", "search"}},
 	{ID: "gemini-3.1-flash-lite-preview", Name: "Gemini 3.1 Flash", Provider: "Google", Description: "新一代快速模型，日常问答首选", Color: "#4285f4", Capabilities: []string{"chat", "search"}},
 	// DeepSeek
 	{ID: "deepseek-v4-pro", Name: "DeepSeek-V4 Pro", Provider: "DeepSeek", Description: "V4 Pro 增强版，最强推理能力", Color: "#4d6bfa", Capabilities: []string{"chat"}},

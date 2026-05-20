@@ -145,6 +145,9 @@ func (d *OpenAIResponsesDecoder) parseEvent(name string, raw map[string]interfac
 				}
 			}
 		}
+		if pe := ParseOpenAIProviderErrorText(msg, ""); pe != nil {
+			return providerErrorToStreamEvent(pe)
+		}
 		return &AIStreamEvent{Type: EventError, Code: code, Message: msg}
 	case "response.failed":
 		msg := "上游响应失败"
@@ -159,6 +162,9 @@ func (d *OpenAIResponsesDecoder) parseEvent(name string, raw map[string]interfac
 				}
 			}
 		}
+		if pe := ParseOpenAIProviderErrorText(msg, ""); pe != nil {
+			return providerErrorToStreamEvent(pe)
+		}
 		return &AIStreamEvent{Type: EventError, Code: code, Message: msg}
 	case "error":
 		msg := "unknown error"
@@ -168,6 +174,9 @@ func (d *OpenAIResponsesDecoder) parseEvent(name string, raw map[string]interfac
 		code := ""
 		if c, ok := raw["code"].(string); ok {
 			code = c
+		}
+		if pe := ParseOpenAIProviderErrorText(msg, ""); pe != nil {
+			return providerErrorToStreamEvent(pe)
 		}
 		return &AIStreamEvent{Type: EventError, Code: code, Message: msg}
 	}

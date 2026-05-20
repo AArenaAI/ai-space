@@ -154,6 +154,7 @@ export default function SkillChatContent() {
 
   const [skillKey, setSkillKey] = useState(urlSkillKey);
   const [skill, setSkill] = useState<Skill | null>(null);
+  const [recommendedModelId, setRecommendedModelId] = useState<string | undefined>(undefined);
   const [recommendedModel, setRecommendedModel] = useState<ChatModel | undefined>(undefined);
   const [skillLoading, setSkillLoading] = useState(true);
   const { models, loading: modelsLoading } = useModels();
@@ -184,6 +185,7 @@ export default function SkillChatContent() {
       setSkillLoading(false);
       return;
     }
+    setSkillLoading(true);
     fetch(`/api/skills/${skillKey}`)
       .then((r) => {
         if (!r.ok) throw new Error("Skill not found");
@@ -191,14 +193,24 @@ export default function SkillChatContent() {
       })
       .then((data: GoSkill) => {
         setSkill(mapGoSkill(data));
-        if (data.recommended_model) {
-          const model = models.find((m) => m.id === data.recommended_model);
-          if (model) setRecommendedModel(model);
-        }
+        setRecommendedModelId(data.recommended_model || undefined);
       })
-      .catch(() => setSkill(null))
+      .catch(() => {
+        setSkill(null);
+        setRecommendedModelId(undefined);
+        setRecommendedModel(undefined);
+      })
       .finally(() => setSkillLoading(false));
-  }, [skillKey, models]);
+  }, [skillKey]);
+
+  useEffect(() => {
+    if (!recommendedModelId) {
+      setRecommendedModel(undefined);
+      return;
+    }
+    const model = models.find((m) => m.id === recommendedModelId);
+    setRecommendedModel(model);
+  }, [recommendedModelId, models]);
 
   const Icon = skill ? ICON_MAP[skill.icon] || Sparkles : Sparkles;
   const iconColor = skill

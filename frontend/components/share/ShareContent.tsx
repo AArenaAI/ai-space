@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bot, User, Loader2, AlertCircle } from "lucide-react";
+import { Bot, User, Loader2, AlertCircle, Lightbulb, ChevronUp, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -58,6 +58,107 @@ function CodeBlock({ language, value }: { language: string; value: string }) {
         {value}
       </SyntaxHighlighter>
     </div>
+  );
+}
+
+// 解析 <think>...思考过程...</think>
+function parseThinkContent(content: string): { reasoning: string | null; answer: string; isThinking: boolean } {
+  const startIdx = content.indexOf("<think>");
+  if (startIdx === -1) return { reasoning: null, answer: content, isThinking: false };
+
+  const endIdx = content.indexOf("</think>");
+  if (endIdx === -1) {
+    return {
+      reasoning: content.slice(startIdx + 7),
+      answer: content.slice(0, startIdx),
+      isThinking: true,
+    };
+  }
+
+  return {
+    reasoning: content.slice(startIdx + 7, endIdx).trim(),
+    answer: (content.slice(0, startIdx) + content.slice(endIdx + 8)).trim(),
+    isThinking: false,
+  };
+}
+
+// 可折叠的思考过程块
+function ThinkBlock({ content }: { content: string }) {
+  const [expanded, setExpanded] = useState(() => content.length < 2000);
+
+  return (
+    <div className="mb-3 rounded-xl border border-surface-border overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 w-full px-3 py-2 text-left transition-colors
+          bg-purple-50 hover:bg-purple-100
+          dark:bg-[#1A1A2E] dark:hover:bg-[#252542]"
+      >
+        <Lightbulb className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
+        <span className="text-sm font-medium text-text-secondary flex-1">
+          深度思考{content.length >= 2000 ? " · 已折叠" : ""}
+        </span>
+        {expanded ? (
+          <ChevronUp className="w-3.5 h-3.5 text-text-tertiary shrink-0" />
+        ) : (
+          <ChevronDown className="w-3.5 h-3.5 text-text-tertiary shrink-0" />
+        )}
+      </button>
+      {expanded && (
+        <div className="px-3 py-2.5 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap
+          bg-slate-50 dark:bg-[#0F0F1A]">
+          {content}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Markdown 渲染组件映射
+const markdownComponents = {
+  code({ node, inline, className, children, ...props }: any) {
+    const match = /language-(\w+)/.exec(className || "");
+    return !inline && match ? (
+      <CodeBlock language={match[1]} value={String(children).replace(/\n$/, "")} />
+    ) : (
+      <code className="bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 px-1 py-0.5 rounded text-[13px] font-mono" {...props}>
+        {children}
+      </code>
+    );
+  },
+  p({ children }: any) { return <p className="text-[15px] leading-relaxed text-text-primary mb-4 last:mb-0 [li>&]:inline [li>&]:mb-0">{children}</p>; },
+  ul({ children }: any) { return <ul className="list-disc ml-5 mb-4 space-y-1 text-text-primary">{children}</ul>; },
+  ol({ children }: any) { return <ol className="list-decimal ml-5 mb-4 space-y-1 text-text-primary">{children}</ol>; },
+  li({ children }: any) { return <li className="text-[15px] leading-relaxed">{children}</li>; },
+  h1({ children }: any) { return <h1 className="text-xl font-bold text-text-primary mb-3 mt-6">{children}</h1>; },
+  h2({ children }: any) { return <h2 className="text-lg font-bold text-text-primary mb-2 mt-5">{children}</h2>; },
+  h3({ children }: any) { return <h3 className="text-base font-bold text-text-primary mb-2 mt-4">{children}</h3>; },
+  strong({ children }: any) { return <strong className="font-bold text-text-primary">{children}</strong>; },
+  blockquote({ children }: any) { return <blockquote className="border-l-2 border-surface-border pl-4 italic text-text-secondary my-4">{children}</blockquote>; },
+  table({ children }: any) { return <div className="overflow-x-auto my-4"><table className="w-full text-sm border-collapse">{children}</table></div>; },
+  thead({ children }: any) { return <thead className="bg-surface-card border-b border-surface-border">{children}</thead>; },
+  tbody({ children }: any) { return <tbody>{children}</tbody>; },
+  tr({ children }: any) { return <tr className="border-b border-surface-border/50 hover:bg-surface-card/30 transition-colors">{children}</tr>; },
+  th({ children }: any) { return <th className="px-3 py-2.5 text-left text-[13px] font-semibold text-text-primary whitespace-nowrap">{children}</th>; },
+  td({ children }: any) { return <td className="px-3 py-2.5 text-[13px] text-text-secondary leading-relaxed">{children}</td>; },
+};
+
+// 渲染一条 AI 消息（包含 think 解析）
+function AIMessageContent({ content, model }: { content: string; model?: string }) {
+  const { reasoning, answer } = parseThinkContent(content);
+  return (
+    <>
+      {model && (
+        <div className="flex items-center gap-1.5 mb-2">
+          <div className="w-1 h-1 rounded-full bg-brand" />
+          <span className="text-[11px] text-text-tertiary">{model}</span>
+        </div>
+      )}
+      {reasoning && <ThinkBlock content={reasoning} />}
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkFixBold]} components={markdownComponents}>
+        {answer}
+      </ReactMarkdown>
+    </>
   );
 }
 
@@ -189,29 +290,7 @@ export default function ShareContent() {
                     {res.error ? (
                       <div className="text-red-400 text-sm">{res.error}</div>
                     ) : res.content ? (
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm, remarkFixBold]}
-                        components={{
-                          code({ node, inline, className, children, ...props }: any) {
-                            const match = /language-(\w+)/.exec(className || "");
-                            return !inline && match ? (
-                              <CodeBlock language={match[1]} value={String(children).replace(/\n$/, "")} />
-                            ) : (
-                              <code className="bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 px-1 py-0.5 rounded text-[13px] font-mono" {...props}>{children}</code>
-                            );
-                          },
-                          p({ children }) { return <p className="mb-3 last:mb-0">{children}</p>; },
-                          ul({ children }) { return <ul className="list-disc ml-4 mb-3 space-y-1">{children}</ul>; },
-                          ol({ children }) { return <ol className="list-decimal ml-4 mb-3 space-y-1">{children}</ol>; },
-                          h1({ children }) { return <h1 className="text-lg font-bold mb-2 mt-4">{children}</h1>; },
-                          h2({ children }) { return <h2 className="text-base font-bold mb-2 mt-3">{children}</h2>; },
-                          h3({ children }) { return <h3 className="text-sm font-bold mb-1 mt-3">{children}</h3>; },
-                          blockquote({ children }) { return <blockquote className="border-l-2 border-surface-border pl-4 italic text-text-secondary my-4">{children}</blockquote>; },
-                          a({ href, children }) { return <a href={href} target="_blank" rel="noopener noreferrer" className="text-brand hover:underline">{children}</a>; },
-                        }}
-                      >
-                        {res.content}
-                      </ReactMarkdown>
+                      <AIMessageContent content={res.content} />
                     ) : (
                       <div className="py-6 text-center text-text-tertiary text-sm">等待回答中...</div>
                     )}
@@ -273,38 +352,7 @@ export default function ShareContent() {
                     <p className="text-[15px] leading-relaxed text-text-primary whitespace-pre-wrap">{msg.content}</p>
                   ) : (
                     <div className="prose prose-sm max-w-none">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm, remarkFixBold]}
-                        components={{
-                          code({ node, inline, className, children, ...props }: any) {
-                            const match = /language-(\w+)/.exec(className || "");
-                            return !inline && match ? (
-                              <CodeBlock language={match[1]} value={String(children).replace(/\n$/, "")} />
-                            ) : (
-                              <code className="bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 px-1 py-0.5 rounded text-[13px] font-mono" {...props}>
-                                {children}
-                              </code>
-                            );
-                          },
-                          p({ children }) { return <p className="text-[15px] leading-relaxed text-text-primary mb-4 last:mb-0 [li>&]:inline [li>&]:mb-0">{children}</p>; },
-                          ul({ children }) { return <ul className="list-disc ml-5 mb-4 space-y-1 text-text-primary">{children}</ul>; },
-                          ol({ children }) { return <ol className="list-decimal ml-5 mb-4 space-y-1 text-text-primary">{children}</ol>; },
-                          li({ children }) { return <li className="text-[15px] leading-relaxed">{children}</li>; },
-                          h1({ children }) { return <h1 className="text-xl font-bold text-text-primary mb-3 mt-6">{children}</h1>; },
-                          h2({ children }) { return <h2 className="text-lg font-bold text-text-primary mb-2 mt-5">{children}</h2>; },
-                          h3({ children }) { return <h3 className="text-base font-bold text-text-primary mb-2 mt-4">{children}</h3>; },
-                          strong({ children }) { return <strong className="font-bold text-text-primary">{children}</strong>; },
-                          blockquote({ children }) { return <blockquote className="border-l-2 border-surface-border pl-4 italic text-text-secondary my-4">{children}</blockquote>; },
-                          table({ children }) { return <div className="overflow-x-auto my-4"><table className="w-full text-sm border-collapse">{children}</table></div>; },
-                          thead({ children }) { return <thead className="bg-surface-card border-b border-surface-border">{children}</thead>; },
-                          tbody({ children }) { return <tbody>{children}</tbody>; },
-                          tr({ children }) { return <tr className="border-b border-surface-border/50 hover:bg-surface-card/30 transition-colors">{children}</tr>; },
-                          th({ children }) { return <th className="px-3 py-2.5 text-left text-[13px] font-semibold text-text-primary whitespace-nowrap">{children}</th>; },
-                          td({ children }) { return <td className="px-3 py-2.5 text-[13px] text-text-secondary leading-relaxed">{children}</td>; },
-                        }}
-                      >
-                        {msg.content}
-                      </ReactMarkdown>
+                      <AIMessageContent content={msg.content} />
                     </div>
                   )}
                 </div>

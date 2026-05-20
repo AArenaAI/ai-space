@@ -9,8 +9,21 @@
       "icon": "briefcase",
       "color": "#f59e0b",
       "recommended_model": "deepseek-reasoner",
-      "triggers": ["SWOT", "swot", "商业计划书", "市场分析", "竞争分析", "商业模式", "财务预测", "战略规划", "CEO", "战略"],
-      "co_skills": ["output-quality"],
+      "triggers": [
+        "SWOT",
+        "swot",
+        "商业计划书",
+        "市场分析",
+        "竞争分析",
+        "商业模式",
+        "财务预测",
+        "战略规划",
+        "CEO",
+        "战略"
+      ],
+      "co_skills": [
+        "output-quality"
+      ],
       "enabled": true
     },
     {
@@ -22,8 +35,19 @@
       "icon": "code-2",
       "color": "#22c55e",
       "recommended_model": "deepseek-reasoner",
-      "triggers": ["审查代码", "代码审查", "code review", "review code", "代码优化", "代码重构", "bug排查", "安全审计"],
-      "co_skills": ["output-quality"],
+      "triggers": [
+        "审查代码",
+        "代码审查",
+        "code review",
+        "review code",
+        "代码优化",
+        "代码重构",
+        "bug排查",
+        "安全审计"
+      ],
+      "co_skills": [
+        "output-quality"
+      ],
       "enabled": true
     },
     {
@@ -35,8 +59,42 @@
       "icon": "pen-tool",
       "color": "#ec4899",
       "recommended_model": "gpt-5.5",
-      "triggers": ["写作", "小说", "文案", "剧本", "诗歌", "故事", "创作"],
-      "co_skills": ["output-quality"],
+      "triggers": [
+        "写作",
+        "小说",
+        "文案",
+        "剧本",
+        "诗歌",
+        "故事",
+        "创作"
+      ],
+      "co_skills": [
+        "output-quality"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "ai-work",
+      "display_name": "AI工作助手",
+      "version": "1.0.0",
+      "description": "聚合工作流规划、任务拆解、执行跟进和交付总结的通用 AI 工作助手",
+      "category": "productivity",
+      "icon": "briefcase",
+      "color": "#0ea5e9",
+      "recommended_model": "gpt-5.5",
+      "triggers": [
+        "AI工作",
+        "工作助手",
+        "任务拆解",
+        "工作计划",
+        "执行清单",
+        "项目推进",
+        "复盘",
+        "方案"
+      ],
+      "co_skills": [
+        "output-quality"
+      ],
       "enabled": true
     },
     {
@@ -48,7 +106,13 @@
       "icon": "shield-check",
       "color": "#ef4444",
       "recommended_model": "gpt-5.5",
-      "triggers": ["质量控制", "自检", "格式检查", "冗余清理", "输出优化"],
+      "triggers": [
+        "质量控制",
+        "自检",
+        "格式检查",
+        "冗余清理",
+        "输出优化"
+      ],
       "is_meta": true,
       "enabled": true
     },
@@ -61,8 +125,18 @@
       "icon": "bar-chart",
       "color": "#8b5cf6",
       "recommended_model": "deepseek-reasoner",
-      "triggers": ["数据分析", "可视化", "报表", "趋势", "统计", "指标", "dashboard"],
-      "co_skills": ["output-quality"],
+      "triggers": [
+        "数据分析",
+        "可视化",
+        "报表",
+        "趋势",
+        "统计",
+        "指标",
+        "dashboard"
+      ],
+      "co_skills": [
+        "output-quality"
+      ],
       "enabled": true
     },
     {
@@ -74,8 +148,17 @@
       "icon": "mail",
       "color": "#06b6d4",
       "recommended_model": "gpt-5.4-mini",
-      "triggers": ["写邮件", "邮件", "email", "发邮件", "沟通", "信函"],
-      "co_skills": ["output-quality"],
+      "triggers": [
+        "写邮件",
+        "邮件",
+        "email",
+        "发邮件",
+        "沟通",
+        "信函"
+      ],
+      "co_skills": [
+        "output-quality"
+      ],
       "enabled": true
     },
     {
@@ -87,8 +170,17 @@
       "icon": "clipboard-list",
       "color": "#14b8a6",
       "recommended_model": "gpt-5.4-mini",
-      "triggers": ["会议", "纪要", "minutes", "会议记录", "总结", "action item"],
-      "co_skills": ["output-quality"],
+      "triggers": [
+        "会议",
+        "纪要",
+        "minutes",
+        "会议记录",
+        "总结",
+        "action item"
+      ],
+      "co_skills": [
+        "output-quality"
+      ],
       "enabled": true
     },
     {
@@ -100,8 +192,17 @@
       "icon": "terminal",
       "color": "#f97316",
       "recommended_model": "gpt-5.5-pro",
-      "triggers": ["prompt", "提示词", "优化提示", "提示工程", "prompt engineering", "system prompt"],
-      "co_skills": ["output-quality"],
+      "triggers": [
+        "prompt",
+        "提示词",
+        "优化提示",
+        "提示工程",
+        "prompt engineering",
+        "system prompt"
+      ],
+      "co_skills": [
+        "output-quality"
+      ],
       "enabled": true
     },
     {
@@ -113,8 +214,21 @@
       "icon": "graduation-cap",
       "color": "#3b82f6",
       "recommended_model": "deepseek-reasoner",
-      "triggers": ["论文", "论文润色", "文献总结", "降重", "引用格式", "abstract", "摘要", "文献综述", "学术写作", "查重"],
-      "co_skills": ["output-quality"],
+      "triggers": [
+        "论文",
+        "论文润色",
+        "文献总结",
+        "降重",
+        "引用格式",
+        "abstract",
+        "摘要",
+        "文献综述",
+        "学术写作",
+        "查重"
+      ],
+      "co_skills": [
+        "output-quality"
+      ],
       "enabled": true
     },
     {
@@ -126,8 +240,17 @@
       "icon": "languages",
       "color": "#6366f1",
       "recommended_model": "claude-3-7-sonnet-20250219",
-      "triggers": ["翻译", "translate", "translating", "译成", "译文", "双语"],
-      "co_skills": ["output-quality"],
+      "triggers": [
+        "翻译",
+        "translate",
+        "translating",
+        "译成",
+        "译文",
+        "双语"
+      ],
+      "co_skills": [
+        "output-quality"
+      ],
       "enabled": true
     }
   ]

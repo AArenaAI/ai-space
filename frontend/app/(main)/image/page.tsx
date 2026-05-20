@@ -3,10 +3,12 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useImage } from "@/hooks/useImage";
+import { useImageChats } from "@/hooks/useImageChat";
 import { useImageModels, ChatModel } from "@/hooks/useModels";
 import { GeneratedImage } from "@/hooks/useImage";
 import ImageLightbox from "@/components/ui/ImageLightbox";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import HistoryDrawer from "@/components/ui/HistoryDrawer";
 import {
   ImageIcon,
   Loader2,
@@ -257,6 +259,7 @@ function ReferenceImageStack({
 export default function ImagePage() {
   const router = useRouter();
   const { images, isGenerating, generateImage, deleteImage } = useImage();
+  const { chats, loading: chatsLoading, fetchChats, deleteChat, updateChatTitle } = useImageChats();
   const { models: imageModels } = useImageModels();
   const [prompt, setPrompt] = useState("");
   const [selectedAspectRatio, setSelectedAspectRatio] = useState("1:1");
@@ -280,6 +283,11 @@ export default function ImagePage() {
       setSelectedModel(imageModels[0].id);
     }
   }, [imageModels, selectedModel]);
+
+  // 历史记录使用图像会话，而不是旧的单图生成记录
+  useEffect(() => {
+    fetchChats();
+  }, [fetchChats]);
 
   const currentModel = imageModels.find((m) => m.id === selectedModel) || imageModels[0];
   const currentAspect = ASPECT_RATIOS.find((a) => a.value === selectedAspectRatio) || ASPECT_RATIOS[1];
@@ -376,8 +384,37 @@ export default function ImagePage() {
     }
   };
 
+  const handleOpenHistory = () => {
+    const nextOpen = !showHistory;
+    setShowHistory(nextOpen);
+    if (nextOpen) fetchChats();
+  };
+
+  const handleSelectChat = (id: number) => {
+    setShowHistory(false);
+    router.push(`/image/chat?chatId=${id}`);
+  };
+
+  const handleDeleteChat = async (id: number) => {
+    try {
+      await deleteChat(id);
+      toast.success("删除成功");
+    } catch {
+      toast.error("删除失败");
+    }
+  };
+
+  const handleRenameChat = async (id: number, title: string) => {
+    try {
+      await updateChatTitle(id, title);
+      toast.success("重命名成功");
+    } catch {
+      toast.error("重命名失败");
+    }
+  };
+
   return (
-    <div className="flex flex-col min-h-0 bg-surface">
+    <div className="flex h-full min-h-0 flex-col bg-surface">
       {/* 隐藏的文件输入 */}
       <input
         ref={fileInputRef}
@@ -392,7 +429,7 @@ export default function ImagePage() {
         <div className="w-full max-w-3xl flex items-center justify-between">
           <div />
           <button
-            onClick={() => setShowHistory(!showHistory)}
+            onClick={handleOpenHistory}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-text-secondary hover:text-text-primary hover:bg-surface-card transition-colors"
           >
             <History className="w-4 h-4" />
@@ -670,118 +707,27 @@ export default function ImagePage() {
             variant="danger"
           />
 
-          {/* 历史记录右侧抽屉 */}
-          {showHistory && (
-            <div className="fixed inset-0 z-50">
-              {/* 遮罩 */}
-              <div
-                className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity"
-                onClick={() => setShowHistory(false)}
-              />
-              {/* 抽屉面板 */}
-              <div className="absolute right-0 top-0 bottom-0 w-full max-w-md bg-surface-elevated border-l border-surface-border shadow-2xl flex flex-col animate-slide-in-right">
-                {/* 头部 */}
-                <div className="flex items-center justify-between px-5 py-4 border-b border-surface-border shrink-0">
-                  <h3 className="text-lg font-semibold text-text-primary">历史记录</h3>
-                  <button
-                    onClick={() => setShowHistory(false)}
-                    className="w-8 h-8 rounded-lg flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-                {/* 内容 */}
-                <div className="flex-1 overflow-auto p-4 space-y-2">
-                  {images.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full text-text-tertiary">
-                      <div className="relative w-16 h-16 mb-4">
-                        <svg className="w-14 h-14 text-text-tertiary/40 absolute left-0 top-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                          <circle cx="8.5" cy="8.5" r="1.5" />
-                          <path d="M21 15l-5-5L5 21" />
-                        </svg>
-                        <svg className="w-10 h-10 text-brand/40 absolute right-0 bottom-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                          <circle cx="8.5" cy="8.5" r="1.5" />
-                          <path d="M21 15l-5-5L5 21" />
-                        </svg>
-                      </div>
-                      <p className="text-sm">您的历史记录是空的。</p>
-                      <p className="text-sm">创建图片来填充它。</p>
-                    </div>
-                  ) : (
-                    <>
-                      {images.map((image) => (
-                        <div
-                          key={image.id}
-                          className="group flex items-start gap-3 p-3 rounded-xl bg-surface-card border border-surface-border hover:border-brand/30 transition-all"
-                        >
-                          {/* 图片缩略图 */}
-                          <div className="w-16 h-16 rounded-lg overflow-hidden bg-surface shrink-0 border border-surface-border">
-                            {image.status === "pending" ? (
-                              <div className="w-full h-full flex items-center justify-center">
-                                <Loader2 className="w-5 h-5 text-brand/40 animate-spin" />
-                              </div>
-                            ) : image.status === "failed" ? (
-                              <div className="w-full h-full flex items-center justify-center">
-                                <AlertCircle className="w-5 h-5 text-red-400/50" />
-                              </div>
-                            ) : (
-                              <img
-                                src={image.image_url}
-                                alt={image.prompt}
-                                className="w-full h-full object-cover cursor-pointer"
-                                onClick={() => setPreviewImage(image)}
-                              />
-                            )}
-                          </div>
-                          {/* 信息 */}
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-text-primary line-clamp-1">{image.prompt}</p>
-                            <p className="text-[11px] text-text-tertiary mt-0.5">
-                              {new Date(image.created_at).toLocaleString()}
-                            </p>
-                            <div className="flex items-center gap-2 mt-1.5">
-                              <button
-                                onClick={() => {
-                                  setPrompt(image.prompt);
-                                  setShowHistory(false);
-                                  if (image.size) {
-                                    const parts = image.size.split("x");
-                                    if (parts.length === 2) {
-                                      const w = parseInt(parts[0]);
-                                      const h = parseInt(parts[1]);
-                                      const minDim = Math.min(w, h);
-                                      setSelectedResolution(minDim >= 1400 ? "2K" : "1K");
-                                    }
-                                  }
-                                }}
-                                className="text-[11px] text-brand hover:text-brand-hover flex items-center gap-0.5 transition-colors"
-                              >
-                                <RefreshCw className="w-3 h-3" />
-                                再次使用
-                              </button>
-                            </div>
-                          </div>
-                          {/* 操作 */}
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                            <button
-                              onClick={() => handleDelete(image.id)}
-                              className="w-7 h-7 rounded-lg flex items-center justify-center text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-colors"
-                              title="删除"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                      <p className="text-center text-xs text-text-tertiary py-3">没有更多历史记录。</p>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
+          {/* 历史记录右侧抽屉：展示图像会话历史 */}
+          <HistoryDrawer
+            isOpen={showHistory}
+            onClose={() => setShowHistory(false)}
+            title="历史记录"
+            type="image"
+            loading={chatsLoading}
+            items={chats.map((chat) => ({
+              id: chat.id,
+              title: chat.title || "AI画图会话",
+              updated_at: chat.updated_at,
+              icon: "image",
+            }))}
+            onSelect={handleSelectChat}
+            onNew={() => {
+              setShowHistory(false);
+              router.push("/image/chat");
+            }}
+            onRename={handleRenameChat}
+            onDelete={handleDeleteChat}
+          />
         </div>
       </div>
     </div>
@@ -942,77 +888,95 @@ function ImageCard({
 
 // ───────────────────────── 示例画廊组件 ─────────────────────────
 interface GalleryItem {
+  title?: string;
   prompt: string;
   imageUrl: string;
 }
 
 const GALLERY_ITEMS: GalleryItem[] = [
   {
+    title: "商务人像",
     prompt: "A well-dressed businessman in suit sitting at cozy coffee shop, working on laptop, sunlight streaming through window, warm tones, 4k photorealistic",
     imageUrl: "https://images.unsplash.com/photo-1600880292203-757bb62b4baf?w=600&h=400&fit=crop&crop=face",
   },
   {
+    title: "日落山景",
     prompt: "Mountain landscape at sunset, dramatic sky, clouds painted in orange and pink, pine trees silhouette, cinematic, National Geographic style",
     imageUrl: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=600&h=300&fit=crop&crop=entropy",
   },
   {
+    title: "萌宠猫咪",
     prompt: "Fluffy white cat sitting on a wooden table, green eyes, soft natural lighting, shallow depth of field, ultra realistic",
     imageUrl: "https://images.unsplash.com/photo-1513360371669-4adf3dd7dff8?w=600&h=700&fit=crop&crop=face",
   },
   {
+    title: "美食摄影",
     prompt: "Delicious gourmet burger with fresh ingredients, sesame bun, melted cheese, crispy bacon, food photography, mouth-watering detail",
     imageUrl: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600&h=400&fit=crop&crop=entropy",
   },
   {
+    title: "几何抽象",
     prompt: "Abstract geometric shapes with vibrant neon colors, 3D rendered art, smooth gradients on dark background, modern aesthetic",
     imageUrl: "https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=600&h=600&fit=crop&crop=entropy",
   },
   {
+    title: "奇幻森林",
     prompt: "Ethereal fantasy forest with glowing mushrooms, ancient trees wrapped in vines, magical blue particles floating in mist, moonlight beams",
     imageUrl: "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=600&h=750&fit=crop&crop=entropy",
   },
   {
+    title: "室内设计",
     prompt: "Modern minimalist interior design, open concept living room with large windows, neutral colors, warm wood accents, architectural digest style",
     imageUrl: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=600&h=350&fit=crop&crop=entropy",
   },
   // ── 新增模板 8-20 ──
   {
+    title: "樱花河岸",
     prompt: "Japanese cherry blossom trees along a riverside path at spring, petals falling in wind, soft pink tones, anime style, Studio Ghibli aesthetic",
     imageUrl: "https://images.unsplash.com/photo-1522383225653-ed111181a951?w=600&h=450&fit=crop&crop=entropy",
   },
   {
+    title: "月夜孤狼",
     prompt: "Majestic wolf standing on a rocky cliff under full moon, howling at the night sky, dramatic lighting, dark fantasy, ultra detailed",
     imageUrl: "https://images.unsplash.com/photo-1568572933382-74d440642117?w=600&h=480&fit=crop&crop=entropy",
   },
   {
+    title: "海底世界",
     prompt: "Vibrant underwater coral reef with tropical fish swimming through sun rays, crystal clear water, ocean photography, National Geographic",
     imageUrl: "https://images.unsplash.com/photo-1546026423-cc4642628d2b?w=600&h=400&fit=crop&crop=entropy",
   },
   {
+    title: "抹茶拿铁",
     prompt: "A cup of matcha latte with beautiful latte art on a wooden table, morning sunlight, cozy cafe atmosphere, food photography, macro detail",
     imageUrl: "https://images.unsplash.com/photo-1536256263959-770b48d82b0a?w=600&h=450&fit=crop&crop=entropy",
   },
   {
+    title: "东京夜景",
     prompt: "Neon-lit Tokyo street at night, rain reflecting colorful signs, crowded crosswalk, cyberpunk aesthetic, vaporwave tones, cinematic shot",
     imageUrl: "https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?w=600&h=400&fit=crop&crop=entropy",
   },
   {
+    title: "摩天大楼",
     prompt: "Elegant glass skyscraper architecture against blue sky, modern cityscape, geometric patterns, corporate photography, sharp details",
     imageUrl: "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=600&h=500&fit=crop&crop=entropy",
   },
   {
+    title: "复古摩托",
     prompt: "Vintage motorcycle parked on a desert road at sunset, long shadows, warm golden tones, retro aesthetic, adventure vibe, cinematic wide shot",
     imageUrl: "https://images.unsplash.com/photo-1558981806-ec527fa84c39?w=600&h=380&fit=crop&crop=entropy",
   },
   {
+    title: "蜂鸟特写",
     prompt: "Close-up of a hummingbird hovering near a pink flower, wings frozen in motion, green bokeh background, macro wildlife photography, high speed",
     imageUrl: "https://images.unsplash.com/photo-1552728089-57bdde30beb3?w=600&h=600&fit=crop&crop=face",
   },
   {
+    title: "海景卧室",
     prompt: "Luxury bedroom interior with large windows overlooking ocean, white curtains flowing in breeze, king size bed, resort style, serene atmosphere",
     imageUrl: "https://images.unsplash.com/photo-1618773928121-c32242e63f39?w=600&h=420&fit=crop&crop=entropy",
   },
   {
+    title: "湖光山色",
     prompt: "Crystal clear mountain lake reflecting snowy peaks at dawn, calm water mirror image, pine forest shoreline, peaceful nature landscape, wide angle",
     imageUrl: "https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=600&h=400&fit=crop&crop=entropy",
   },
@@ -1022,7 +986,7 @@ function ExampleGallery({ onUsePrompt }: { onUsePrompt: (prompt: string) => void
   return (
     <div className="mt-6 mb-4">
       <h3 className="text-base font-semibold text-text-primary mb-4">发现</h3>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {GALLERY_ITEMS.map((item, i) => (
           <div
             key={i}
@@ -1033,7 +997,7 @@ function ExampleGallery({ onUsePrompt }: { onUsePrompt: (prompt: string) => void
               <img
                 src={item.imageUrl}
                 alt={item.prompt}
-                className="w-full h-52 object-cover block transition-transform duration-300 group-hover:scale-105"
+                className="w-full h-auto block transition-transform duration-300 group-hover:scale-105"
                 loading="lazy"
                 onError={(e) => {
                   (e.target as HTMLImageElement).style.display = 'none';
@@ -1045,6 +1009,10 @@ function ExampleGallery({ onUsePrompt }: { onUsePrompt: (prompt: string) => void
                   使用模板
                 </span>
               </div>
+            </div>
+            <div className="p-3">
+              <h4 className="text-sm font-medium text-text-primary truncate">{item.title || item.prompt.slice(0, 20)}</h4>
+              <p className="text-xs text-text-secondary mt-1 line-clamp-2">{item.prompt}</p>
             </div>
           </div>
         ))}

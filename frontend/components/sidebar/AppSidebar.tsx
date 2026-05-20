@@ -24,6 +24,7 @@ import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import InputDialog from "@/components/ui/InputDialog";
 import { useTemplates } from "@/hooks/useTemplates";
 import SidebarUserPanel from "./SidebarUserPanel";
+import AccountSettingsModal from "./AccountSettingsModal";
 import { useWorkspaces } from "@/hooks/useWorkspaces";
 import { useTheme } from "@/components/theme/ThemeProvider";
 
@@ -38,6 +39,11 @@ interface Conversation {
   created_at: string;
   updated_at: string;
   skill_key?: string;
+}
+
+interface ConversationSearchResult extends Conversation {
+  matched_content?: string;
+  matched_role?: string;
 }
 
 /* ───── 辅助函数 ───── */
@@ -66,6 +72,13 @@ function groupConversationsByTime(conversations: Conversation[]): Record<string,
 }
 
 const GROUP_ORDER = ["今天", "昨天", "七天内", "30天内"];
+
+function sortConversations(conversations: Conversation[]): Conversation[] {
+  return [...conversations].sort((a, b) => {
+    if (a.pinned !== b.pinned) return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
+    return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+  });
+}
 
 function sortGroupLabels(labels: string[]): string[] {
   const fixed = GROUP_ORDER.filter((g) => labels.includes(g));
@@ -106,6 +119,26 @@ async function fetchConversations(workspaceId?: number): Promise<Conversation[]>
     const data = await res.json();
     return Array.isArray(data) ? data : [];
   } catch { return []; }
+}
+
+async function searchConversations(keyword: string, workspaceId?: number, signal?: AbortSignal): Promise<ConversationSearchResult[]> {
+  const token = localStorage.getItem("token");
+  if (!token) return [];
+  const q = keyword.trim();
+  if (!q) return [];
+  try {
+    const params = new URLSearchParams({ q });
+    if (workspaceId) params.set("workspace_id", String(workspaceId));
+    const res = await fetch(`/api/conversations/search?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal,
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
 }
 
 /* ───── 对话项右键菜单 ───── */
@@ -255,7 +288,7 @@ function WorkHoverPanel({
 }) {
   const router = useRouter();
   const [pos, setPos] = useState({ top: 0, left: 0 });
-  const [skills, setSkills] = useState<Array<{ key: string; title: string; description: string; icon: string; tags: string[]; is_meta?: boolean }>>([]);
+  const [skills, setSkills] = useState<Array<{ key: string; title?: string; display_name?: string; description: string; icon: string; tags?: string[]; is_meta?: boolean }>>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -275,14 +308,15 @@ function WorkHoverPanel({
   useEffect(() => {
     if (!open) return;
     setLoading(true);
-    fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:9091"}/api/skills`)
+    fetch("/api/skills")
       .then((r) => r.json())
       .then((data) => {
-        if (data?.skills) {
-          setSkills(data.skills.filter((s: any) => !s.is_meta));
-        } else if (Array.isArray(data)) {
-          setSkills(data.filter((s: any) => !s.is_meta));
-        }
+        const list = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.skills)
+            ? data.skills
+            : [...(Array.isArray(data?.system_skills) ? data.system_skills : []), ...(Array.isArray(data?.custom_skills) ? data.custom_skills : [])];
+        setSkills(list.filter((s: any) => !s.is_meta));
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -336,13 +370,17 @@ function WorkHoverPanel({
         <h3 className="text-sm font-semibold text-text-primary mb-2 px-1">工具</h3>
         <div className="grid grid-cols-2 gap-1.5">
           <button
-            onClick={() => handleNavigate("/ppt")}
-            className="flex items-center gap-2.5 p-2.5 rounded-xl text-left transition-all duration-150 hover:bg-surface-card group"
+            // onClick={() => handleNavigate("/ppt")}
+            title="coming soon"
+            className="relative flex items-center gap-2.5 p-2.5 rounded-xl text-left transition-all duration-150 cursor-not-allowed opacity-60 group"
           >
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-orange-500/10">
-              <Presentation className="w-4 h-4 text-orange-500" />
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-surface-card">
+              <Presentation className="w-4 h-4 text-text-tertiary" />
             </div>
-            <span className="text-sm text-text-secondary group-hover:text-text-primary transition-colors">AI PPT</span>
+            <span className="text-sm text-text-tertiary transition-colors">AI PPT</span>
+            <span className="pointer-events-none absolute left-1/2 top-full z-10 mt-1 -translate-x-1/2 whitespace-nowrap rounded-lg bg-surface-elevated border border-surface-border px-2 py-1 text-xs text-text-secondary opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+              coming soon
+            </span>
           </button>
         </div>
       </div>
@@ -361,13 +399,17 @@ function WorkHoverPanel({
               return (
                 <button
                   key={skill.key}
-                  onClick={() => handleNavigate(`/skills/chat?key=${skill.key}`)}
-                  className="flex items-center gap-2.5 p-2.5 rounded-xl text-left transition-all duration-150 hover:bg-surface-card group"
+                  // onClick={() => handleNavigate(`/skills/chat?key=${skill.key}`)}
+                  title="coming soon"
+                  className="relative flex items-center gap-2.5 p-2.5 rounded-xl text-left transition-all duration-150 cursor-not-allowed opacity-60 group"
                 >
-                  <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0", bgMap[skill.icon] || "bg-brand/10")}>
-                    <Icon className={cn("w-4 h-4", colorMap[skill.icon] || "text-brand")} />
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-surface-card">
+                    <Icon className="w-4 h-4 text-text-tertiary" />
                   </div>
-                  <span className="text-sm text-text-secondary group-hover:text-text-primary transition-colors truncate">{skill.title}</span>
+                  <span className="text-sm text-text-tertiary transition-colors truncate">{skill.title || skill.display_name || skill.key}</span>
+                  <span className="pointer-events-none absolute left-1/2 top-full z-10 mt-1 -translate-x-1/2 whitespace-nowrap rounded-lg bg-surface-elevated border border-surface-border px-2 py-1 text-xs text-text-secondary opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                    coming soon
+                  </span>
                 </button>
               );
             })}
@@ -401,7 +443,17 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
   const themeCtx = useTheme();
   const theme = themeCtx?.theme || "light";
   const [collapsed, setCollapsed] = useState(false);
-  const [expandedLabels, setExpandedLabels] = useState<Set<string>>(new Set(["今天"]));
+  const [expandedLabels, setExpandedLabels] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set(["今天"]);
+    try {
+      const saved = localStorage.getItem("sidebar_expanded_labels");
+      if (saved) {
+        const arr = JSON.parse(saved);
+        if (Array.isArray(arr) && arr.length > 0) return new Set(arr);
+      }
+    } catch { /* ignore */ }
+    return new Set(["今天"]);
+  });
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("sidebar-width");
@@ -411,11 +463,18 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
   });
   const isResizing = useRef(false);
   const [user, setUser] = useState<any>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>(cachedConversations || []);
   const [loading, setLoading] = useState(cachedConversations === null);
   const [currentConvId, setCurrentConvId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<ConversationSearchResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchSelectedIndex, setSearchSelectedIndex] = useState(-1);
+  const searchListRef = useRef<HTMLDivElement>(null);
   const rawPathname = usePathname();
   const pathname = cleanPathname(rawPathname);
   const router = useRouter();
@@ -444,18 +503,22 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
 
   const handleMoreEnter = () => {
     if (moreTimerRef.current) clearTimeout(moreTimerRef.current);
+    if (workTimerRef.current) clearTimeout(workTimerRef.current);
+    setWorkOpen(false);
     setMoreOpen(true);
   };
   const handleMoreLeave = () => {
-    moreTimerRef.current = setTimeout(() => setMoreOpen(false), 400);
+    moreTimerRef.current = setTimeout(() => setMoreOpen(false), 160);
   };
 
   const handleWorkEnter = () => {
     if (workTimerRef.current) clearTimeout(workTimerRef.current);
+    if (moreTimerRef.current) clearTimeout(moreTimerRef.current);
+    setMoreOpen(false);
     setWorkOpen(true);
   };
   const handleWorkLeave = () => {
-    workTimerRef.current = setTimeout(() => setWorkOpen(false), 400);
+    workTimerRef.current = setTimeout(() => setWorkOpen(false), 160);
   };
 
   /* 模板 */
@@ -505,6 +568,88 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
   }, [user, currentWS?.id]);
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
+
+  /* ── 搜索 ── */
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (!q || !user) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+    setSearchLoading(true);
+    const ctrl = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        const data = await searchConversations(q, currentWS?.id, ctrl.signal);
+        if (!ctrl.signal.aborted) {
+          setSearchResults(data);
+          setSearchLoading(false);
+        }
+      } catch {
+        if (!ctrl.signal.aborted) setSearchLoading(false);
+      }
+    }, 280);
+    return () => {
+      clearTimeout(timer);
+      ctrl.abort();
+    };
+  }, [searchQuery, user, currentWS?.id]);
+
+  /* ── 关键词高亮 ── */
+  function highlightKeywordParts(text: string, keyword: string): { text: string; isMatch: boolean }[] {
+    if (!keyword.trim()) return [{ text, isMatch: false }];
+    const parts = text.split(new RegExp(`(${keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi"));
+    return parts.map((part) => ({
+      text: part,
+      isMatch: part.toLowerCase() === keyword.toLowerCase(),
+    }));
+  }
+
+  /* ── 搜索键盘导航 ── */
+  useEffect(() => {
+    setSearchSelectedIndex(-1);
+  }, [searchResults]);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSearchOpen(false);
+        return;
+      }
+      if (searchResults.length === 0) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSearchSelectedIndex((prev) => (prev + 1) % searchResults.length);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSearchSelectedIndex((prev) => (prev - 1 + searchResults.length) % searchResults.length);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const idx = searchSelectedIndex >= 0 ? searchSelectedIndex : 0;
+        const conv = searchResults[idx];
+        if (conv) {
+          const convHref = conv.skill_key
+            ? `/skills/chat?key=${conv.skill_key}&id=${conv.id}`
+            : `/chat?id=${conv.id}`;
+          router.push(convHref);
+          setSearchOpen(false);
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [searchOpen, searchResults, searchSelectedIndex, router]);
+
+  useEffect(() => {
+    if (searchSelectedIndex < 0 || !searchListRef.current) return;
+    const el = searchListRef.current.querySelector(`[data-search-idx="${searchSelectedIndex}"]`) as HTMLElement | null;
+    if (el) {
+      el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [searchSelectedIndex]);
+
   useEffect(() => {
     const h = () => loadConversations();
     window.addEventListener("conversation-created", h);
@@ -523,11 +668,28 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
     window.addEventListener("conversation-renamed", h);
     return () => window.removeEventListener("conversation-renamed", h);
   }, [conversations]);
+  useEffect(() => {
+    const h = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (d?.id == null) return;
+      const targetId = typeof d.id === "string" ? Number(d.id) : d.id;
+      const updatedAt = d.updated_at || new Date().toISOString();
+      setConversations(prev => {
+        const next = sortConversations(prev.map(c => c.id === targetId ? { ...c, updated_at: updatedAt } : c));
+        cachedConversations = next;
+        return next;
+      });
+    };
+    window.addEventListener("conversation-updated", h);
+    return () => window.removeEventListener("conversation-updated", h);
+  }, []);
   // 工作区切换 / 登录登出时刷新
-  useEffect(() => { const h = () => { cachedConversations = null; loadConversations(); }; window.addEventListener("workspace-changed", h); window.addEventListener("user-login", h); window.addEventListener("user-logout", h); window.addEventListener("conversation-updated", h); return () => { window.removeEventListener("workspace-changed", h); window.removeEventListener("user-login", h); window.removeEventListener("user-logout", h); window.removeEventListener("conversation-updated", h); }; }, [loadConversations]);
+  useEffect(() => { const h = () => { cachedConversations = null; loadConversations(); }; window.addEventListener("workspace-changed", h); window.addEventListener("user-login", h); window.addEventListener("user-logout", h); return () => { window.removeEventListener("workspace-changed", h); window.removeEventListener("user-login", h); window.removeEventListener("user-logout", h); }; }, [loadConversations]);
 
   /* 操作 */
   const handleLogout = () => { localStorage.removeItem("token"); localStorage.removeItem("user"); import("@/lib/guestId").then(({ getGuestId }) => getGuestId()); setUser(null); setConversations([]); cachedConversations = null; window.location.href = "/"; };
+  const handleUserUpdated = (nextUser: any) => { setUser(nextUser); window.dispatchEvent(new Event("user-login")); };
+  const handleAccountDeleted = () => { localStorage.removeItem("token"); localStorage.removeItem("user"); setUser(null); setConversations([]); cachedConversations = null; window.location.href = "/"; };
   const handleNewChat = () => {
     const ts = Date.now();
     if (skillKey) {
@@ -560,7 +722,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
 
   const handleTogglePin = async (conv: Conversation) => {
     const token = localStorage.getItem("token"); if (!token) return;
-    try { const r = await fetch(`/api/conversations/${conv.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ pinned: !conv.pinned }) }); if (r.ok) { const u = await r.json(); const next = conversations.map(c => c.id === u.id ? { ...c, pinned: u.pinned } : c).sort((a, b) => { if (a.pinned !== b.pinned) return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0); return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(); }); setConversations(next); cachedConversations = next; } } catch {}
+    try { const r = await fetch(`/api/conversations/${conv.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ pinned: !conv.pinned }) }); if (r.ok) { const u = await r.json(); const next = sortConversations(conversations.map(c => c.id === u.id ? { ...c, pinned: u.pinned } : c)); setConversations(next); cachedConversations = next; } } catch {}
   };
 
   const handleShare = (conv: Conversation) => {
@@ -632,7 +794,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                   ? (skillMeta ? skillMeta.color : "text-brand")
                   : "text-text-tertiary group-hover:text-text-secondary";
                 return (
-                  <Link key={conv.id} href={convHref} className={cn("group flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-brand/15 text-text-primary shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),inset_2px_0_0_0_var(--brand)]" : "text-text-secondary hover:bg-surface-card/70 hover:text-text-primary")}>
+                  <Link key={conv.id} href={convHref} className={cn("group flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-brand/10 text-brand" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
                     <IconComp className={cn("w-3.5 h-3.5 shrink-0 transition-all duration-200", iconColor)} />
                     <Pin className="w-3 h-3 shrink-0 text-brand" />
                     <span className={cn("flex-1 truncate text-left", isActive && "font-medium")}>{conv.title || "新对话"}</span>
@@ -652,6 +814,9 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                 const next = new Set(prev);
                 if (next.has(label)) next.delete(label);
                 else next.add(label);
+                try {
+                  localStorage.setItem("sidebar_expanded_labels", JSON.stringify(Array.from(next)));
+                } catch { /* ignore */ }
                 return next;
               })}
               className="flex items-center justify-between w-full px-3 py-1 text-[11px] font-medium text-text-tertiary uppercase tracking-wider hover:text-text-secondary transition-colors"
@@ -672,7 +837,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                   ? (skillMeta ? skillMeta.color : "text-brand")
                   : "text-text-tertiary group-hover:text-text-secondary";
                 return (
-                  <Link key={conv.id} href={convHref} className={cn("group flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-brand/15 text-text-primary shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),inset_2px_0_0_0_var(--brand)]" : "text-text-secondary hover:bg-surface-card/70 hover:text-text-primary")}>
+                  <Link key={conv.id} href={convHref} className={cn("group flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-brand/10 text-brand" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
                     <IconComp className={cn("w-3.5 h-3.5 shrink-0 transition-all duration-200", iconColor)} />
                     <span className={cn("flex-1 truncate text-left", isActive && "font-medium")}>{conv.title || "新对话"}</span>
                     <div className="opacity-0 group-hover:opacity-100 transition-opacity"><ConvMenu onRename={() => setRenameTarget(conv)} onTogglePin={() => handleTogglePin(conv)} pinned={conv.pinned} onShare={() => handleShare(conv)} onDelete={() => handleDelete(conv.id)} /></div>
@@ -708,10 +873,19 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
           {!collapsed && (
             <div className="flex-1 min-w-0">
               <button type="button" onClick={handleNewChat} className="flex items-center gap-2">
-                <img src={theme === "dark" ? "/brand-dark-logo.png" : "/brand-light-logo.png"} alt="AI Space" className="w-8 h-8 rounded-lg object-cover" />
-                <img src={theme === "dark" ? "/brand-dark-title.png" : "/brand-light-title.png"} alt="AI Space" className="h-6 w-auto object-contain" />
+                <img src={theme === "dark" ? "/brand-dark-logo.png" : "/brand-light-logo.png"} alt="AI Space" className="h-6 w-auto rounded-lg object-contain" />
+                <img src={theme === "dark" ? "/brand-dark-title.png" : "/brand-light-title.png"} alt="AI Space" className="h-6 w-auto object-contain ml-1.5" />
               </button>
             </div>
+          )}
+          {!collapsed && (
+            <button
+              onClick={() => { setSearchOpen(true); setSearchQuery(""); setSearchResults([]); }}
+              className="mr-1 rounded-lg p-1.5 text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
+              title="搜索对话"
+            >
+              <Search className="w-4 h-4" />
+            </button>
           )}
           {collapsed && (
             <div className="flex-1 flex justify-center">
@@ -907,16 +1081,10 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
               </div>
             </div>
 
-            {/* 分隔线 - Agents与历史之间 */}
-            <div className="mx-3 h-px bg-surface-border/40" />
-
             {/* ▼ 历史分组 */}
             <div className="px-3 py-2">
               <div className="flex items-center justify-between mb-2 px-1">
                 <span className="text-sm font-bold text-text-tertiary/80 tracking-wide">历史</span>
-                <button className="p-1 rounded text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors">
-                  <Search className="w-3.5 h-3.5" />
-                </button>
               </div>
               {renderConversationList()}
             </div>
@@ -932,6 +1100,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
             user={user}
             collapsed={collapsed}
             onLogout={handleLogout}
+            onOpenSettings={() => setSettingsOpen(true)}
             onShowTooltip={showSidebarTooltip}
             onHideTooltip={hideSidebarTooltip}
           />
@@ -966,8 +1135,147 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
       )}
 
       {/* 弹窗 */}
+      <AccountSettingsModal
+        isOpen={settingsOpen}
+        user={user}
+        onClose={() => setSettingsOpen(false)}
+        onUserUpdated={handleUserUpdated}
+        onAccountDeleted={handleAccountDeleted}
+      />
       <ConfirmDialog isOpen={!!deleteTarget} title="删除对话" description="删除后，该对话将不可恢复。" confirmText="删除" cancelText="取消" variant="danger" onConfirm={confirmDelete} onCancel={() => setDeleteTarget(null)} />
       <InputDialog isOpen={!!renameTarget} title="重命名对话" defaultValue={renameTarget?.title || ""} placeholder="输入新的对话名称" confirmText="保存" cancelText="取消" onConfirm={handleRename} onCancel={() => setRenameTarget(null)} />
+
+      {/* ── 搜索弹窗 ── */}
+      {searchOpen && createPortal(
+        <div
+          className="fixed inset-0 z-[80] flex items-start justify-center pt-[20vh]"
+          onClick={() => setSearchOpen(false)}
+        >
+          {/* 遮罩 */}
+          <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
+          {/* 弹窗内容 */}
+          <div
+            className="relative w-full max-w-xl mx-4 rounded-2xl bg-surface-card border border-surface-border shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* 搜索框 */}
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-surface-border">
+              <Search className="w-5 h-5 text-text-tertiary shrink-0" />
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="搜索对话"
+                autoFocus
+                className="flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-tertiary"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="rounded-full p-1 text-text-tertiary hover:bg-surface-elevated hover:text-text-primary transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            {/* 结果列表 */}
+            <div ref={searchListRef} className="max-h-[50vh] overflow-auto">
+              {!user ? (
+                <div className="flex flex-col items-center gap-3 py-12 text-center">
+                  <div className="flex size-10 items-center justify-center rounded-full bg-surface-elevated border border-surface-border">
+                    <MessageSquare className="w-5 h-5 text-text-tertiary" />
+                  </div>
+                  <p className="text-sm text-text-secondary">登录后可搜索对话历史</p>
+                </div>
+              ) : searchQuery.trim() ? (
+                searchLoading ? (
+                  <div className="space-y-1 py-2">
+                    {[...Array(5)].map((_, i) => (
+                      <div key={i} className="flex items-center gap-3 px-4 py-3 animate-pulse">
+                        <div className="w-8 h-8 rounded-lg bg-surface-border shrink-0" />
+                        <div className="flex-1 space-y-2">
+                          <div className="h-3.5 w-1/3 rounded bg-surface-border" />
+                          <div className="h-3 w-2/3 rounded bg-surface-border" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : searchResults.length === 0 ? (
+                  <div className="flex flex-col items-center gap-3 py-12 text-center">
+                    <div className="flex size-10 items-center justify-center rounded-full bg-surface-elevated border border-surface-border">
+                      <Search className="w-5 h-5 text-text-tertiary" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm text-text-secondary">没有找到相关对话</p>
+                      <p className="text-xs text-text-tertiary">换个关键词试试</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-0.5 py-1">
+                    <div className="px-4 py-2 text-xs text-text-tertiary border-b border-surface-border/40">
+                      找到 {searchResults.length} 个相关对话
+                    </div>
+                    {searchResults.map((conv, idx) => {
+                      const convHref = conv.skill_key
+                        ? `/skills/chat?key=${conv.skill_key}&id=${conv.id}`
+                        : `/chat?id=${conv.id}`;
+                      const skillMeta = conv.skill_key ? SKILL_ICON_MAP[conv.skill_key] : null;
+                      const IconComp = skillMeta ? skillMeta.icon : MessageSquare;
+                      const isSelected = idx === searchSelectedIndex;
+                      return (
+                        <Link
+                          key={conv.id}
+                          href={convHref}
+                          data-search-idx={idx}
+                          onClick={() => setSearchOpen(false)}
+                          onMouseEnter={() => setSearchSelectedIndex(idx)}
+                          className={cn(
+                            "group flex items-start gap-3 px-4 py-3 transition-colors",
+                            isSelected ? "bg-surface-elevated" : "hover:bg-surface-elevated"
+                          )}
+                        >
+                          <div className="flex size-8 items-center justify-center rounded-lg bg-brand/10 shrink-0 mt-0.5">
+                            <IconComp className="w-4 h-4 text-brand" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-sm font-medium text-text-primary truncate">
+                                {conv.title || "新对话"}
+                              </span>
+                              <span className="text-xs text-text-tertiary shrink-0">
+                                {new Date(conv.updated_at).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" })}
+                              </span>
+                            </div>
+                            {conv.matched_content && (
+                              <p className="mt-0.5 text-xs text-text-tertiary line-clamp-2 leading-relaxed">
+                                {highlightKeywordParts(conv.matched_content, searchQuery).map((part, i) =>
+                                  part.isMatch ? (
+                                    <strong key={i} className="font-semibold text-text-primary">{part.text}</strong>
+                                  ) : (
+                                    <span key={i}>{part.text}</span>
+                                  )
+                                )}
+                              </p>
+                            )}
+                          </div>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )
+              ) : (
+                <div className="flex flex-col items-center gap-3 py-12 text-center">
+                  <div className="flex size-10 items-center justify-center rounded-full bg-surface-elevated border border-surface-border">
+                    <Search className="w-5 h-5 text-text-tertiary" />
+                  </div>
+                  <p className="text-sm text-text-secondary">输入关键词搜索对话历史</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </>
   );
 }

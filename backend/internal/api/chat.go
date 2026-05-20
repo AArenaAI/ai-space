@@ -1075,11 +1075,53 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 			}
 
 			if event.Type == services.EventError {
-				if err := writeAndFlush("data: " + event.Message + "\n\n"); err != nil {
+				message := event.Message
+				if event.Provider == "gemini" || strings.Contains(strings.ToLower(event.Model), "gemini") {
+					message = "Gemini服务商故障，本次生成中断，请稍后重试或切换模型。"
+				} else if message == "" {
+					message = "上游模型暂时不可用，请稍后重试。"
+				}
+
+				contentMu.Lock()
+				if reasoningPersistOpen {
+					fullContent.WriteString("</think>")
+					reasoningPersistOpen = false
+				}
+				fullContent.WriteString(message)
+				contentMu.Unlock()
+
+				meta := map[string]interface{}{
+					"type":                "_error_meta",
+					"provider":            event.Provider,
+					"model":               event.Model,
+					"category":            event.ErrorKind,
+					"code":                event.Code,
+					"limit_type":          event.LimitType,
+					"limit":               event.LimitTokens,
+					"used":                event.UsedTokens,
+					"requested":           event.RequestedTokens,
+					"retry_after_ms":      event.RetryAfterMs,
+					"retry_after_seconds": float64(event.RetryAfterMs) / 1000,
+					"retriable":           event.Recoverable,
+					"user_message":        message,
+					"suggested_actions":   event.SuggestedActions,
+				}
+				out, _ := json.Marshal(map[string]interface{}{
+					"choices": []map[string]interface{}{
+						{"delta": map[string]string{"content": message}},
+					},
+					"_error_meta": meta,
+				})
+				if err := writeAndFlush("data: " + string(out) + "\n\n"); err != nil {
 					outcome.FullContent = strings.TrimSpace(getContent())
 					return outcome, finalUsage, err
 				}
-				continue
+				if err := writeAndFlush("data: [DONE]\n\n"); err != nil {
+					outcome.FullContent = strings.TrimSpace(getContent())
+					return outcome, finalUsage, err
+				}
+				outcome.FullContent = strings.TrimSpace(getContent())
+				return outcome, finalUsage, nil
 			}
 
 			activityKind := ""

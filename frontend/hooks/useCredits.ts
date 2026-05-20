@@ -29,6 +29,7 @@ export interface DeductResult {
 export const MODEL_TIER_MAP: Record<string, string> = {
   "gpt-5.4-mini": "basic",
   "gemini-2.0-flash-exp": "basic",
+  "gemini-3.5-flash": "basic",
 
   "gpt-5.4": "advanced",
   "gpt-5.5": "advanced",

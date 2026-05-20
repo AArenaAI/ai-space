@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bot, User, Loader2, AlertCircle } from "lucide-react";
+import { Bot, User, Loader2, AlertCircle, Lightbulb, ChevronUp, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -56,6 +56,59 @@ function CodeBlock({ language, value }: { language: string; value: string }) {
       >
         {value}
       </SyntaxHighlighter>
+    </div>
+  );
+}
+
+// 解析 <think>...思考过程...</think>
+function parseThinkContent(content: string): { reasoning: string | null; answer: string; isThinking: boolean } {
+  const startIdx = content.indexOf("<think>");
+  if (startIdx === -1) return { reasoning: null, answer: content, isThinking: false };
+
+  const endIdx = content.indexOf("</think>");
+  if (endIdx === -1) {
+    return {
+      reasoning: content.slice(startIdx + 7),
+      answer: content.slice(0, startIdx),
+      isThinking: true,
+    };
+  }
+
+  return {
+    reasoning: content.slice(startIdx + 7, endIdx).trim(),
+    answer: (content.slice(0, startIdx) + content.slice(endIdx + 8)).trim(),
+    isThinking: false,
+  };
+}
+
+// 可折叠的思考过程块
+function ThinkBlock({ content }: { content: string }) {
+  const [expanded, setExpanded] = useState(() => content.length < 2000);
+
+  return (
+    <div className="mb-3 rounded-xl border border-surface-border overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 w-full px-3 py-2 text-left transition-colors
+          bg-purple-50 hover:bg-purple-100
+          dark:bg-[#1A1A2E] dark:hover:bg-[#252542]"
+      >
+        <Lightbulb className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
+        <span className="text-sm font-medium text-text-secondary flex-1">
+          深度思考{content.length >= 2000 ? " · 已折叠" : ""}
+        </span>
+        {expanded ? (
+          <ChevronUp className="w-3.5 h-3.5 text-text-tertiary shrink-0" />
+        ) : (
+          <ChevronDown className="w-3.5 h-3.5 text-text-tertiary shrink-0" />
+        )}
+      </button>
+      {expanded && (
+        <div className="px-3 py-2.5 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap
+          bg-slate-50 dark:bg-[#0F0F1A]">
+          {content}
+        </div>
+      )}
     </div>
   );
 }
@@ -157,31 +210,39 @@ export default function ShareView({ slug }: { slug: string }) {
                     <p className="text-[15px] leading-relaxed text-text-primary whitespace-pre-wrap">{msg.content}</p>
                   ) : (
                     <div className="prose prose-sm max-w-none">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                          code({ node, inline, className, children, ...props }: any) {
-                            const match = /language-(\w+)/.exec(className || "");
-                            return !inline && match ? (
-                              <CodeBlock language={match[1]} value={String(children).replace(/\n$/, "")} />
-                            ) : (
-                              <code className="bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 px-1 py-0.5 rounded text-[13px] font-mono" {...props}>
-                                {children}
-                              </code>
-                            );
-                          },
-                          p({ children }) { return <p className="text-[15px] leading-relaxed text-text-primary mb-4 last:mb-0">{children}</p>; },
-                          ul({ children }) { return <ul className="list-disc list-inside mb-4 text-text-primary">{children}</ul>; },
-                          ol({ children }) { return <ol className="list-decimal list-inside mb-4 text-text-primary">{children}</ol>; },
-                          li({ children }) { return <li className="text-[15px] leading-relaxed mb-1">{children}</li>; },
-                          h1({ children }) { return <h1 className="text-lg font-semibold text-text-primary mb-3">{children}</h1>; },
-                          h2({ children }) { return <h2 className="text-base font-semibold text-text-primary mb-2">{children}</h2>; },
-                          h3({ children }) { return <h3 className="text-sm font-semibold text-text-primary mb-2">{children}</h3>; },
-                          blockquote({ children }) { return <blockquote className="border-l-2 border-surface-border pl-4 italic text-text-secondary my-4">{children}</blockquote>; },
-                        }}
-                      >
-                        {msg.content}
-                      </ReactMarkdown>
+                      {(() => {
+                        const { reasoning, answer } = parseThinkContent(msg.content);
+                        return (
+                          <>
+                            {reasoning && <ThinkBlock content={reasoning} />}
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm]}
+                              components={{
+                                code({ node, inline, className, children, ...props }: any) {
+                                  const match = /language-(\w+)/.exec(className || "");
+                                  return !inline && match ? (
+                                    <CodeBlock language={match[1]} value={String(children).replace(/\n$/, "")} />
+                                  ) : (
+                                    <code className="bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 px-1 py-0.5 rounded text-[13px] font-mono" {...props}>
+                                      {children}
+                                    </code>
+                                  );
+                                },
+                                p({ children }) { return <p className="text-[15px] leading-relaxed text-text-primary mb-4 last:mb-0">{children}</p>; },
+                                ul({ children }) { return <ul className="list-disc list-inside mb-4 text-text-primary">{children}</ul>; },
+                                ol({ children }) { return <ol className="list-decimal list-inside mb-4 text-text-primary">{children}</ol>; },
+                                li({ children }) { return <li className="text-[15px] leading-relaxed mb-1">{children}</li>; },
+                                h1({ children }) { return <h1 className="text-lg font-semibold text-text-primary mb-3">{children}</h1>; },
+                                h2({ children }) { return <h2 className="text-base font-semibold text-text-primary mb-2">{children}</h2>; },
+                                h3({ children }) { return <h3 className="text-sm font-semibold text-text-primary mb-2">{children}</h3>; },
+                                blockquote({ children }) { return <blockquote className="border-l-2 border-surface-border pl-4 italic text-text-secondary my-4">{children}</blockquote>; },
+                              }}
+                            >
+                              {answer}
+                            </ReactMarkdown>
+                          </>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>

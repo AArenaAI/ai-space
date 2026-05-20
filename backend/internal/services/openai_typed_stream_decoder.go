@@ -9,11 +9,15 @@ import (
 )
 
 type sdkStreamBody struct {
-	stream *ssestream.Stream[responses.ResponseStreamEventUnion]
+	stream  *ssestream.Stream[responses.ResponseStreamEventUnion]
+	release func()
 }
 
 func (b sdkStreamBody) Read(_ []byte) (int, error) { return 0, io.EOF }
 func (b sdkStreamBody) Close() error {
+	if b.release != nil {
+		b.release()
+	}
 	if b.stream == nil {
 		return nil
 	}
@@ -23,6 +27,7 @@ func (b sdkStreamBody) Close() error {
 // OpenAIResponsesTypedDecoder 基于 openai-go 的 typed SSE stream，避免自行解析 Responses SSE JSON。
 type OpenAIResponsesTypedDecoder struct {
 	stream         *ssestream.Stream[responses.ResponseStreamEventUnion]
+	model          string
 	eventCount     int
 	textEvents     int
 	textChars      int
@@ -30,8 +35,12 @@ type OpenAIResponsesTypedDecoder struct {
 	doneEmitted    bool
 }
 
-func NewOpenAIResponsesTypedDecoder(stream *ssestream.Stream[responses.ResponseStreamEventUnion]) *OpenAIResponsesTypedDecoder {
-	return &OpenAIResponsesTypedDecoder{stream: stream}
+func NewOpenAIResponsesTypedDecoder(stream *ssestream.Stream[responses.ResponseStreamEventUnion], model ...string) *OpenAIResponsesTypedDecoder {
+	decoder := &OpenAIResponsesTypedDecoder{stream: stream}
+	if len(model) > 0 {
+		decoder.model = model[0]
+	}
+	return decoder
 }
 
 func (d *OpenAIResponsesTypedDecoder) Next() (*AIStreamEvent, error) {
@@ -79,6 +88,10 @@ func (d *OpenAIResponsesTypedDecoder) Next() (*AIStreamEvent, error) {
 	}
 
 	if err := d.stream.Err(); err != nil {
+		d.doneEmitted = true
+		if pe := ParseOpenAIProviderError(err, d.model); pe != nil {
+			return providerErrorToStreamEvent(pe), nil
+		}
 		return nil, err
 	}
 	fmt.Printf("[OpenAI Responses SDK Stream] eof events=%d text_events=%d text_chars=%d reasoning_chars=%d\n", d.eventCount, d.textEvents, d.textChars, d.reasoningChars)
@@ -129,6 +142,9 @@ func (d *OpenAIResponsesTypedDecoder) parseTypedEvent(event responses.ResponseSt
 			msg = "上游响应未完成: " + string(incomplete.Response.IncompleteDetails.Reason)
 			code = string(incomplete.Response.IncompleteDetails.Reason)
 		}
+		if pe := ParseOpenAIProviderErrorText(msg, d.model); pe != nil {
+			return providerErrorToStreamEvent(pe)
+		}
 		return &AIStreamEvent{Type: EventError, Code: code, Message: msg}
 	case "response.failed":
 		failed := event.AsResponseFailed()
@@ -140,12 +156,21 @@ func (d *OpenAIResponsesTypedDecoder) parseTypedEvent(event responses.ResponseSt
 		if failed.Response.Error.Code != "" {
 			code = string(failed.Response.Error.Code)
 		}
+		if pe := ParseOpenAIProviderErrorText(msg, d.model); pe != nil {
+			return providerErrorToStreamEvent(pe)
+		}
 		return &AIStreamEvent{Type: EventError, Code: code, Message: msg}
 	case "error":
 		errEvent := event.AsError()
 		msg := errEvent.Message
 		if msg == "" {
 			msg = "unknown error"
+		}
+		if pe := ParseOpenAIProviderErrorText(msg, d.model); pe != nil {
+			if pe.Code == "" {
+				pe.Code = errEvent.Code
+			}
+			return providerErrorToStreamEvent(pe)
 		}
 		return &AIStreamEvent{Type: EventError, Code: errEvent.Code, Message: msg}
 	default:

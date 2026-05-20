@@ -114,11 +114,12 @@ func (s *AIService) buildOpenAIResponsesBody(model string, messages []Message, s
 	}
 
 	useBackground := ShouldUseOpenAIBackground(model, reasoningEffort)
+	maxOutputTokens := s.openAIMaxOutputTokens(model, search, reasoning)
 	reqBody := map[string]any{
 		"model":             model,
 		"input":             inputItems,
 		"stream":            stream,
-		"max_output_tokens": s.cfg.OpenAIMaxOutputTokens,
+		"max_output_tokens": maxOutputTokens,
 		// 默认聊天禁用 Responses API 内置工具。
 		"tool_choice": "none",
 	}
@@ -167,11 +168,6 @@ func (s *AIService) buildOpenAIResponsesBody(model string, messages []Message, s
 		reqBody["tool_choice"] = "auto"
 	}
 
-	if stream {
-		// 防止长篇深度检索持续生成数分钟，前端只收到 ping/半截内容，最终被代理或浏览器超时。
-		// 短问答仍可正常完成；超出预算时上游会返回 completed/incomplete，后端再向前端发 [DONE] 或统一错误。
-		reqBody["max_output_tokens"] = s.streamMaxOutputTokens(search, reasoning)
-	}
 	return reqBody, useBackground, len(inputItems), len(systemInstruction)
 }
 
@@ -195,13 +191,31 @@ func (s *AIService) callOpenAIResponsesSDK(ctx context.Context, model string, me
 		instructionsLen,
 	)
 
+	var release func()
+	if isGPT55Pro(model) {
+		limiter := openAIModelLimiterFor(model, s.cfg.OpenAIGPT55ProMaxConcurrency)
+		release, err = limiter.acquire(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if pe := limiter.reserveTPM(model, estimateOpenAIRequestedTokens(messages, maxOutputTokensFromBody(reqBody)), s.cfg.OpenAIGPT55ProTPMSoftLimit); pe != nil {
+			release()
+			return nil, pe
+		}
+		defer func() {
+			if !stream && release != nil {
+				release()
+			}
+		}()
+	}
+
 	opts := openAIRequestOptionsFromBody(reqBody)
 	if stream {
 		params := responses.ResponseNewParams{}
 		streamResp := client.Responses.NewStreaming(ctx, params, opts...)
 		return &AICompletionResponse{
-			Body:       sdkStreamBody{stream: streamResp},
-			Decoder:    NewOpenAIResponsesTypedDecoder(streamResp),
+			Body:       sdkStreamBody{stream: streamResp, release: release},
+			Decoder:    NewOpenAIResponsesTypedDecoder(streamResp, model),
 			ModelType:  "openai_responses",
 			Provider:   "openai",
 			Model:      model,
@@ -211,6 +225,9 @@ func (s *AIService) callOpenAIResponsesSDK(ctx context.Context, model string, me
 
 	resp, err := client.Responses.New(ctx, responses.ResponseNewParams{}, opts...)
 	if err != nil {
+		if pe := ParseOpenAIProviderError(err, model); pe != nil {
+			return nil, pe
+		}
 		return nil, err
 	}
 	body, err := openAIResponseToBody(resp)
@@ -232,6 +249,9 @@ func (s *AIService) retrieveOpenAIResponseSDK(ctx context.Context, responseID st
 
 	resp, err := client.Responses.Get(ctx, responseID, responses.ResponseGetParams{})
 	if err != nil {
+		if pe := ParseOpenAIProviderError(err, "gpt-5.5"); pe != nil {
+			return nil, pe
+		}
 		return nil, err
 	}
 	return openAIResponseToMap(resp)

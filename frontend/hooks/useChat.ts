@@ -28,6 +28,8 @@ export interface Message {
   errorCode?: string;
   retryable?: boolean;
   requestId?: string;
+  serverMessageId?: number;
+  backgroundTaskId?: string;
 }
 
 export interface ChatModel {
@@ -83,10 +85,10 @@ export const MODELS: ChatModel[] = [
     color: "#cc785c",
   },
   {
-    id: "gemini-2.0-flash-exp",
-    name: "Gemini 2.0 Flash",
+    id: "gemini-3.5-flash",
+    name: "Gemini 3.5 Flash",
     provider: "Google",
-    description: "超快响应速度",
+    description: "新一代高速模型，响应更快更稳",
     color: "#4285f4",
   },
   {
@@ -140,6 +142,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   const [selectedModel, setSelectedModelState] = useState<ChatModel>(defaultModel);
   const [currentConversation, setCurrentConversation] = useState<number | undefined>(conversationId);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const compareAbortControllersRef = useRef<AbortController[]>([]);
   const conversationLoadSeqRef = useRef(0);
   const lastReasoningRef = useRef<{ enabled: boolean; effort?: string }>({ enabled: false, effort: "high" });
   const lastSearchRef = useRef<boolean>(false);
@@ -148,6 +151,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   const [compareModels, setCompareModels] = useState<string[]>([]);
   // 从对话历史或 prop 恢复的有效 skillKey（优先级：历史 > prop）
   const [effectiveSkillKey, setEffectiveSkillKey] = useState<string | undefined>(skillKey);
+  const backgroundPollersRef = useRef<Record<string, number>>({});
   // 防止 createConversation 成功后 useEffect 因 models 等依赖变化而清空消息/重置对话
   const shouldResetRef = useRef(true);
   // 标记刚创建的新对话 ID，避免 useEffect 立即加载历史覆盖本地正在生成的消息
@@ -170,6 +174,61 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       localStorage.setItem(RECENT_KEY, JSON.stringify(recent.slice(0, 3)));
     } catch {}
   }, []);
+
+  const stopBackgroundPoller = useCallback((localMessageId: string) => {
+    const timer = backgroundPollersRef.current[localMessageId];
+    if (timer) {
+      window.clearInterval(timer);
+      delete backgroundPollersRef.current[localMessageId];
+    }
+  }, []);
+
+  const startBackgroundPolling = useCallback((convId: number | undefined, localMessageId: string, serverMessageId?: number) => {
+    if (!convId || !serverMessageId || backgroundPollersRef.current[localMessageId]) return;
+
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/conversations/${convId}/messages/${serverMessageId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const content = data?.message?.content || "";
+        const status = data?.background_task?.status || "";
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.id !== localMessageId) return m;
+            const isFinished = status === "completed" || status === "failed" || (content && !content.includes("后台任务已开始"));
+            return {
+              ...m,
+              content: content || m.content,
+              serverMessageId,
+              activityStatus: isFinished ? undefined : { kind: "generating", status: "running", label: "任务繁忙，正在生成中" },
+              completedAt: isFinished ? Date.now() : m.completedAt,
+            };
+          })
+        );
+        if (status === "completed" || status === "failed" || (content && !content.includes("后台任务已开始"))) {
+          stopBackgroundPoller(localMessageId);
+          setIsLoading(false);
+        }
+      } catch {}
+    };
+
+    poll();
+    backgroundPollersRef.current[localMessageId] = window.setInterval(poll, 2000);
+  }, [stopBackgroundPoller]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(backgroundPollersRef.current).forEach((timer) => window.clearInterval(timer));
+      backgroundPollersRef.current = {};
+    };
+  }, []);
+
   useEffect(() => {
     const loadSeq = ++conversationLoadSeqRef.current;
     const loadController = new AbortController();
@@ -199,6 +258,10 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
+    }
+    if (compareAbortControllersRef.current.length > 0) {
+      compareAbortControllersRef.current.forEach((controller) => controller.abort());
+      compareAbortControllersRef.current = [];
     }
 
     const token = localStorage.getItem("token");
@@ -328,7 +391,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     async (
       response: Response,
       assistantMsg: Message,
-      controller: AbortController
+      controller: AbortController,
+      convId?: number
     ): Promise<void> => {
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
@@ -339,6 +403,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       let buffer = "";
       let inReasoningBlock = false;
       let flushTimer: ReturnType<typeof setTimeout> | null = null;
+      let backgroundPollingStarted = false;
 
       const flush = () => {
         if (flushTimer) {
@@ -388,22 +453,54 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             );
             return;
           }
-          // 处理统一错误结构
-          if (parsed._error) {
-            const err = parsed._error;
+          if (parsed._background_task) {
+            const task = parsed._background_task;
+            const serverMessageId = Number(task.assistant_message_id || 0) || undefined;
+            const taskId = task.id || "";
+            const placeholder = "任务繁忙，正在生成中";
+            accumulated = placeholder;
+            pendingDelta = "";
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsg.id
                   ? {
                       ...m,
-                      content: err.message || "请求失败",
-                      errorCode: err.error_code || "unknown",
-                      retryable: err.retryable === true,
-                      requestId: err.request_id || m.requestId,
+                      content: placeholder,
+                      serverMessageId,
+                      backgroundTaskId: taskId,
+                      activityStatus: { kind: "generating", status: "running", label: placeholder },
                     }
                   : m
               )
             );
+            backgroundPollingStarted = true;
+            startBackgroundPolling(convId || currentConversation, assistantMsg.id, serverMessageId);
+            return;
+          }
+          // 处理统一错误结构 / provider 错误元数据。错误不能继续当 delta 追加，否则 429 会重复刷屏卡死。
+          if (parsed._error || parsed._error_meta) {
+            flush();
+            const err = parsed._error || parsed._error_meta;
+            const message = err.message || err.user_message || "请求失败";
+            pendingDelta = "";
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== assistantMsg.id) return m;
+                const existingContent = accumulated || m.content || "";
+                // 如果模型已经流出部分正文/思考内容，不要用 429 提示覆盖它；
+                // 否则前端会看起来“内容没了”，只能靠刷新从后端历史恢复。
+                return {
+                  ...m,
+                  content: existingContent || message,
+                  errorCode: err.error_code || err.code || "unknown",
+                  retryable: err.retryable === true || err.retriable === true,
+                  requestId: err.request_id || m.requestId,
+                };
+              })
+            );
+            if (!accumulated) {
+              accumulated = message;
+            }
             return;
           }
           // 处理活动状态元数据（实时，不缓冲）
@@ -536,18 +633,22 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       } finally {
         flush(); // 流结束时强制 flush 剩余内容
         reader.releaseLock();
-        // 记录完成时间
+        // 记录完成时间；后台任务轮询中时不清掉生成状态
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === assistantMsg.id ? { ...m, completedAt: Date.now() } : m
+            m.id === assistantMsg.id
+              ? (backgroundPollingStarted || m.serverMessageId
+                  ? m
+                  : { ...m, completedAt: Date.now(), activityStatus: undefined })
+              : m
           )
         );
       }
     },
-    []
+    [currentConversation, startBackgroundPolling]
   );
 
-  // 对比模式：依次向多个模型发送同一条消息，流式展示
+  // 对比模式：固定两个模型并发流式展示
   const sendCompareMessages = useCallback(
     async (
       content: string,
@@ -555,10 +656,13 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       reasoning: { enabled: boolean; effort?: string } = { enabled: false },
       search: boolean = false,
       templateId: number = 0,
-      attachments?: { filename: string; content: string }[],
+      attachments?: { filename: string; content: string; type?: string; public_id?: string }[],
       file_ids?: string[]
     ) => {
       if (!content.trim() && (!attachments || attachments.length === 0)) return;
+
+      const compareModelIds = modelIds.filter((id) => models.some((m) => m.id === id)).slice(0, 2);
+      if (compareModelIds.length !== 2) return;
 
       lastReasoningRef.current = reasoning;
       lastSearchRef.current = search;
@@ -569,78 +673,59 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       let convId = currentConversation;
       if (token && !convId) {
         const title = content.trim().slice(0, 20) + (content.trim().length > 20 ? "..." : "");
-        convId = await createConversation(title, modelIds[0]);
-        // 如果创建了新对话，需要更新 currentConversation
+        convId = await createConversation(title, compareModelIds[0], effectiveSkillKey);
       }
 
-      // 第一个模型：带用户消息
-      // 后续模型：跳过用户消息
-      let finalContent = content.trim();
+      const finalContent = content.trim();
+      const userFiles =
+        attachments
+          ?.filter((a) => a.public_id)
+          .map((a) => ({ public_id: a.public_id!, type: a.type || "file", filename: a.filename })) || [];
+      const userMsg: Message = {
+        id: uuidv4(),
+        role: "user",
+        content: finalContent,
+        createdAt: Date.now(),
+        files: userFiles,
+      };
+      const assistantMsgs: Message[] = compareModelIds.map((modelId) => ({
+        id: uuidv4(),
+        role: "assistant",
+        content: "",
+        model: modelId,
+        createdAt: Date.now(),
+        search: lastSearchRef.current,
+        searchStatus: lastSearchRef.current ? "searching" : undefined,
+      }));
+      const contextMessages = [...messages, userMsg];
 
-      for (let i = 0; i < modelIds.length; i++) {
-        const modelId = modelIds[i];
-        const model = models.find((m) => m.id === modelId);
-        if (!model) continue;
+      setIsCompare(true);
+      setCompareModels(compareModelIds);
+      setMessages((prev) => [...prev, userMsg, ...assistantMsgs]);
+      setIsLoading(true);
 
-        const skipUser = i > 0;
+      const controllers = assistantMsgs.map(() => new AbortController());
+      compareAbortControllersRef.current = controllers;
+      abortControllerRef.current = null;
 
-        let contextMessages: Message[];
-        let assistantMsg: Message;
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      } else {
+        headers["X-Guest-ID"] = getGuestId();
+      }
 
-        if (skipUser) {
-          // 后续模型：不添加用户消息
-          assistantMsg = {
-            id: uuidv4(),
-            role: "assistant",
-            content: "",
-            model: modelId,
-            createdAt: Date.now(),
-            search: lastSearchRef.current,
-            searchStatus: lastSearchRef.current ? "searching" : undefined,
-          };
-          contextMessages = [...messages, { role: "user" as const, content: finalContent, id: "", createdAt: 0 }];
-          setMessages((prev) => [...prev, assistantMsg]);
-        } else {
-          // 第一个模型：添加用户消息 + 第一条 assistant
-          const userMsg: Message = {
-            id: uuidv4(),
-            role: "user",
-            content: finalContent,
-            createdAt: Date.now(),
-          };
-          assistantMsg = {
-            id: uuidv4(),
-            role: "assistant",
-            content: "",
-            model: modelId,
-            createdAt: Date.now(),
-            search: lastSearchRef.current,
-            searchStatus: lastSearchRef.current ? "searching" : undefined,
-          };
-          contextMessages = [...messages, userMsg];
-          setMessages((prev) => [...prev, userMsg, assistantMsg]);
-        }
-
-        setIsLoading(true);
-        const controller = new AbortController();
-        abortControllerRef.current = controller;
-
+      const runModel = async (assistantMsg: Message, index: number) => {
+        const controller = controllers[index];
         try {
-          const token = localStorage.getItem("token");
-          const headers: Record<string, string> = {
-            "Content-Type": "application/json",
-          };
-          if (token) {
-            headers["Authorization"] = `Bearer ${token}`;
-          } else {
-            headers["X-Guest-ID"] = getGuestId();
-          }
           const response = await fetch(`${API_BASE_URL}/api/chat`, {
             method: "POST",
             headers,
             signal: controller.signal,
             body: JSON.stringify({
-              model: modelId,
+              model: assistantMsg.model,
               messages: contextMessages.map((m) => ({ role: m.role, content: m.content })),
               stream: true,
               conversation_id: convId,
@@ -648,7 +733,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               reasoning_effort: reasoning.effort || "high",
               search: search,
               template_id: templateId,
-              skip_save_user_msg: skipUser,
+              skip_save_user_msg: index > 0,
               skill_key: effectiveSkillKey || undefined,
               message_file_ids: file_ids || undefined,
             }),
@@ -659,33 +744,49 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             const errorMsg = errorBody.message || "请求失败";
             throw Object.assign(new Error(errorMsg), { errorCode });
           }
-          await streamResponse(response, assistantMsg, controller);
+          await streamResponse(response, assistantMsg, controller, convId);
         } catch (error: any) {
           const now = Date.now();
           if (error.name === "AbortError") {
             setMessages((prev) =>
-              prev.map((m) => (m.id === assistantMsg.id ? { ...m, stopped: true, completedAt: now } : m))
-            );
-          } else {
-            let displayMsg: string;
-            if (error.errorCode === "file_not_ready") {
-              displayMsg = `⏳ 文件解析中，请稍后再问`;
-            } else if (error.errorCode === "guest_limit_exceeded") {
-              displayMsg = `⚠️ ${error.message || "匿名用户每日额度已用完，请登录后继续"}`;
-            } else {
-              displayMsg = `❌ ${error.message || "请求失败"}`;
-            }
-            setMessages((prev) =>
               prev.map((m) =>
-                m.id === assistantMsg.id ? { ...m, content: displayMsg, completedAt: now } : m
+                m.id === assistantMsg.id
+                  ? { ...m, stopped: true, completedAt: now, activityStatus: undefined }
+                  : m
               )
             );
+            return;
           }
+
+          let displayMsg: string;
+          if (error.errorCode === "file_not_ready") {
+            displayMsg = `⏳ 文件解析中，请稍后再问`;
+          } else if (error.errorCode === "guest_limit_exceeded") {
+            displayMsg = `⚠️ ${error.message || "匿名用户每日额度已用完，请登录后继续"}`;
+          } else {
+            displayMsg = `❌ ${error.message || "请求失败"}`;
+          }
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsg.id
+                ? { ...m, content: displayMsg, completedAt: now, activityStatus: undefined }
+                : m
+            )
+          );
+        }
+      };
+
+      try {
+        await Promise.all(assistantMsgs.map((assistantMsg, index) => runModel(assistantMsg, index)));
+      } finally {
+        setIsLoading(false);
+        compareAbortControllersRef.current = [];
+        if (convId) {
+          window.dispatchEvent(new CustomEvent("conversation-updated", {
+            detail: { id: convId, updated_at: new Date().toISOString() },
+          }));
         }
       }
-
-      setIsLoading(false);
-      abortControllerRef.current = null;
     },
     [messages, models, currentConversation, createConversation, streamResponse, effectiveSkillKey]
   );
@@ -836,7 +937,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           throw Object.assign(new Error(errorMsg), { errorCode });
         }
 
-        await streamResponse(response, assistantMsg, controller);
+        await streamResponse(response, assistantMsg, controller, convId);
       } catch (error: any) {
         if (error.name === "AbortError") {
           // 用户主动停止
@@ -848,27 +949,42 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             )
           );
         } else {
-          let displayMsg: string;
-          if (error.errorCode === "file_not_ready") {
-            displayMsg = `⏳ 文件解析中，请稍后再问`;
-          } else if (error.errorCode === "guest_limit_exceeded") {
-            displayMsg = `⚠️ 匿名用户每日次数用完，请登录后继续`;
+          const isBackgroundModel = selectedModel.id === "gpt-5.5-pro" || selectedModel.id.startsWith("gpt-5.5-pro-");
+          if (isBackgroundModel && convId) {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsg.id
+                  ? { ...m, content: m.content || "任务繁忙，正在生成中", activityStatus: { kind: "generating", status: "running", label: "任务繁忙，正在生成中" } }
+                  : m
+              )
+            );
           } else {
-            displayMsg = `❌ ${error.message || "请求失败"}`;
+            let displayMsg: string;
+            if (error.errorCode === "file_not_ready") {
+              displayMsg = `⏳ 文件解析中，请稍后再问`;
+            } else if (error.errorCode === "guest_limit_exceeded") {
+              displayMsg = `⚠️ 匿名用户每日次数用完，请登录后继续`;
+            } else {
+              displayMsg = `❌ ${error.message || "请求失败"}`;
+            }
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsg.id
+                  ? { ...m, content: displayMsg }
+                  : m
+              )
+            );
           }
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantMsg.id
-                ? { ...m, content: displayMsg }
-                : m
-            )
-          );
         }
       } finally {
         setIsLoading(false);
         abortControllerRef.current = null;
-        // 通知侧边栏刷新对话列表（updated_at 可能已变化）
-        window.dispatchEvent(new CustomEvent("conversation-updated"));
+        // 通知侧边栏仅做本地排序/时间更新，避免每次发消息都全量重拉历史列表
+        if (convId) {
+          window.dispatchEvent(new CustomEvent("conversation-updated", {
+            detail: { id: convId, updated_at: new Date().toISOString() },
+          }));
+        }
       }
     },
     [messages, selectedModel, currentConversation, createConversation, streamResponse, effectiveSkillKey]
@@ -878,6 +994,10 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
+    }
+    if (compareAbortControllersRef.current.length > 0) {
+      compareAbortControllersRef.current.forEach((controller) => controller.abort());
+      compareAbortControllersRef.current = [];
     }
   }, []);
 

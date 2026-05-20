@@ -4,6 +4,7 @@ import (
 	"aipool-backend/internal/models"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -16,6 +17,18 @@ type ConversationHandler struct {
 
 func NewConversationHandler(db *gorm.DB) *ConversationHandler {
 	return &ConversationHandler{db: db}
+}
+
+type ConversationSearchResult struct {
+	ID             uint      `json:"id"`
+	Title          string    `json:"title"`
+	Model          string    `json:"model"`
+	SkillKey       string    `json:"skill_key"`
+	Pinned         bool      `json:"pinned"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	MatchedContent string    `json:"matched_content"`
+	MatchedRole    string    `json:"matched_role"`
 }
 
 func (h *ConversationHandler) List(c *gin.Context) {
@@ -37,7 +50,102 @@ func (h *ConversationHandler) List(c *gin.Context) {
 		return
 	}
 
+	for i := range conversations {
+		var latest models.Message
+		if err := h.db.Where("conversation_id = ? AND role = ? AND model <> ''", conversations[i].ID, "assistant").
+			Order("created_at desc, id desc").
+			First(&latest).Error; err == nil {
+			conversations[i].Model = latest.Model
+		}
+	}
+
 	c.JSON(http.StatusOK, conversations)
+}
+
+func (h *ConversationHandler) Search(c *gin.Context) {
+	userID := getUserID(c)
+	keyword := strings.TrimSpace(c.Query("q"))
+	if keyword == "" {
+		c.JSON(http.StatusOK, []ConversationSearchResult{})
+		return
+	}
+
+	like := "%" + keyword + "%"
+	titleMatchSQL := "CASE WHEN conversations.title LIKE ? THEN 1 ELSE 0 END AS title_match"
+	matchedContentSQL := "COALESCE((SELECT content FROM messages WHERE messages.conversation_id = conversations.id AND messages.content LIKE ? ORDER BY messages.created_at DESC, messages.id DESC LIMIT 1), (SELECT content FROM messages WHERE messages.conversation_id = conversations.id ORDER BY messages.created_at DESC, messages.id DESC LIMIT 1), '') AS matched_content"
+	matchedRoleSQL := "COALESCE((SELECT role FROM messages WHERE messages.conversation_id = conversations.id AND messages.content LIKE ? ORDER BY messages.created_at DESC, messages.id DESC LIMIT 1), '') AS matched_role"
+	query := h.db.Table("conversations").
+		Select("conversations.id, conversations.title, conversations.model, conversations.skill_key, conversations.pinned, conversations.created_at, conversations.updated_at, "+titleMatchSQL+", "+matchedContentSQL+", "+matchedRoleSQL, like, like, like).
+		Where("conversations.user_id = ?", userID).
+		Where("conversations.title LIKE ? OR EXISTS (SELECT 1 FROM messages WHERE messages.conversation_id = conversations.id AND messages.content LIKE ?)", like, like)
+
+	if workspaceIDStr := c.Query("workspace_id"); workspaceIDStr != "" {
+		if wid, err := strconv.ParseUint(workspaceIDStr, 10, 32); err == nil && wid > 0 {
+			query = query.Where("conversations.workspace_id = ?", uint(wid))
+		}
+	}
+
+	var results []ConversationSearchResult
+	if err := query.Order("title_match DESC, conversations.updated_at DESC").Limit(50).Scan(&results).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "搜索对话失败"})
+		return
+	}
+
+	for i := range results {
+		results[i].MatchedContent = extractContext(results[i].MatchedContent, keyword, 40)
+	}
+
+	c.JSON(http.StatusOK, results)
+}
+
+func extractContext(text, keyword string, radius int) string {
+	if text == "" {
+		return ""
+	}
+	runes := []rune(text)
+	lowerText := strings.ToLower(text)
+	lowerRunes := []rune(lowerText)
+	lowerKeyword := strings.ToLower(keyword)
+	idx := -1
+	for i := range lowerRunes {
+		if i+len([]rune(lowerKeyword)) > len(lowerRunes) {
+			break
+		}
+		match := true
+		for j, kr := range []rune(lowerKeyword) {
+			if lowerRunes[i+j] != kr {
+				match = false
+				break
+			}
+		}
+		if match {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		if len(runes) > 120 {
+			return string(runes[:120]) + "..."
+		}
+		return text
+	}
+	start := idx - radius
+	if start < 0 {
+		start = 0
+	}
+	end := idx + len([]rune(keyword)) + radius
+	if end > len(runes) {
+		end = len(runes)
+	}
+	prefix := ""
+	suffix := ""
+	if start > 0 {
+		prefix = "..."
+	}
+	if end < len(runes) {
+		suffix = "..."
+	}
+	return prefix + string(runes[start:end]) + suffix
 }
 
 func (h *ConversationHandler) Create(c *gin.Context) {
@@ -92,6 +200,13 @@ func (h *ConversationHandler) Get(c *gin.Context) {
 
 	// 加载消息
 	h.db.Where("conversation_id = ?", conv.ID).Order("created_at asc").Preload("MessageFiles").Find(&conv.Messages)
+
+	for i := len(conv.Messages) - 1; i >= 0; i-- {
+		if conv.Messages[i].Role == "assistant" && conv.Messages[i].Model != "" {
+			conv.Model = conv.Messages[i].Model
+			break
+		}
+	}
 
 	c.JSON(http.StatusOK, conv)
 }
@@ -164,6 +279,38 @@ func (h *ConversationHandler) GetMessages(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, messages)
+}
+
+func (h *ConversationHandler) GetMessage(c *gin.Context) {
+	userID := getUserID(c)
+	convID := c.Param("id")
+	messageID := c.Param("message_id")
+
+	// 验证对话属于当前用户
+	var conv models.Conversation
+	if err := h.db.Where("id = ? AND user_id = ?", convID, userID).First(&conv).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "对话不存在"})
+		return
+	}
+
+	var msg models.Message
+	if err := h.db.Where("id = ? AND conversation_id = ?", messageID, convID).Preload("MessageFiles").First(&msg).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "消息不存在"})
+		return
+	}
+
+	var task models.AIBackgroundTask
+	status := ""
+	if err := h.db.Where("assistant_message_id = ?", msg.ID).Order("updated_at DESC, id DESC").First(&task).Error; err == nil {
+		status = task.Status
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": msg,
+		"background_task": gin.H{
+			"status": status,
+		},
+	})
 }
 
 func (h *ConversationHandler) AddMessage(c *gin.Context) {

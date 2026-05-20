@@ -70,6 +70,13 @@ function groupConversationsByTime(conversations: Conversation[]): Record<string,
 
 const GROUP_ORDER = ["今天", "昨天", "七天内", "30天内"];
 
+function sortConversations(conversations: Conversation[]): Conversation[] {
+  return [...conversations].sort((a, b) => {
+    if (a.pinned !== b.pinned) return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
+    return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+  });
+}
+
 function sortGroupLabels(labels: string[]): string[] {
   const fixed = GROUP_ORDER.filter((g) => labels.includes(g));
   const months = labels
@@ -213,6 +220,21 @@ export default function MobileNav() {
     window.addEventListener("conversation-renamed", h);
     return () => window.removeEventListener("conversation-renamed", h);
   }, [conversations]);
+  useEffect(() => {
+    const h = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (d?.id == null) return;
+      const targetId = typeof d.id === "string" ? Number(d.id) : d.id;
+      const updatedAt = d.updated_at || new Date().toISOString();
+      setConversations(prev => {
+        const next = sortConversations(prev.map(c => c.id === targetId ? { ...c, updated_at: updatedAt } : c));
+        cachedConversationsMobile = next;
+        return next;
+      });
+    };
+    window.addEventListener("conversation-updated", h);
+    return () => window.removeEventListener("conversation-updated", h);
+  }, []);
   
   useEffect(() => { document.body.style.overflow = menuOpen ? "hidden" : ""; return () => { document.body.style.overflow = ""; }; }, [menuOpen]);
   useEffect(() => { if (!menuOpen) return; const h = (e: MouseEvent) => { if (drawerRef.current && !drawerRef.current.contains(e.target as Node)) setMenuOpen(false); }; document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h); }, [menuOpen]);
@@ -231,7 +253,7 @@ export default function MobileNav() {
   };
   const handleTogglePin = async (conv: Conversation) => {
     const token = localStorage.getItem("token"); if (!token) return;
-    try { const r = await fetch(`/api/conversations/${conv.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ pinned: !conv.pinned }) }); if (r.ok) { const u = await r.json(); const next = conversations.map(c => c.id === u.id ? { ...c, pinned: u.pinned } : c).sort((a, b) => { if (a.pinned !== b.pinned) return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0); return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(); }); setConversations(next); cachedConversationsMobile = next; } } catch {}
+    try { const r = await fetch(`/api/conversations/${conv.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ pinned: !conv.pinned }) }); if (r.ok) { const u = await r.json(); const next = sortConversations(conversations.map(c => c.id === u.id ? { ...c, pinned: u.pinned } : c)); setConversations(next); cachedConversationsMobile = next; } } catch {}
   };
   const handleShareConv = (conv: Conversation) => { const url = `${window.location.origin}/chat?id=${conv.id}`; navigator.clipboard.writeText(url); };
 

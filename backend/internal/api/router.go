@@ -153,11 +153,13 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	{
 		convHandler := NewConversationHandler(db)
 		authorized.GET("/conversations", convHandler.List)
+		authorized.GET("/conversations/search", convHandler.Search)
 		authorized.POST("/conversations", convHandler.Create)
 		authorized.GET("/conversations/:id", convHandler.Get)
 		authorized.PUT("/conversations/:id", convHandler.Update)
 		authorized.DELETE("/conversations/:id", convHandler.Delete)
 		authorized.GET("/conversations/:id/messages", convHandler.GetMessages)
+		authorized.GET("/conversations/:id/messages/:message_id", convHandler.GetMessage)
 		authorized.POST("/conversations/:id/messages", convHandler.AddMessage)
 
 		// 图片路由
@@ -223,6 +225,10 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		authorized.POST("/skills/custom", skillHandler.CreateUserSkill)
 		authorized.PUT("/skills/custom/:key", skillHandler.UpdateUserSkill)
 		authorized.DELETE("/skills/custom/:key", skillHandler.DeleteUserSkill)
+
+		// 用户账号路由
+		authorized.PUT("/user/profile", authHandler.UpdateProfile)
+		authorized.DELETE("/user/account", authHandler.DeleteAccount)
 
 		// 积分认证路由
 		authorized.GET("/user/credits", creditsHandler.GetCredits)

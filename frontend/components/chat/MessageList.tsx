@@ -30,10 +30,35 @@ interface MessageListProps {
   onContinueGenerate?: () => void;
   isCompare?: boolean;
   compareModels?: string[];
+  onCompareModelChange?: (index: number, modelId: string) => void;
   welcomeTitle?: string;
   welcomeSubtitle?: string;
   welcomeExamples?: { title: string; desc: string; prompt: string }[];
   onExampleClick?: (prompt: string) => void;
+}
+
+function ThinkingDots() {
+  return (
+    <span className="inline-flex items-center">
+      <span className="animate-bounce [animation-delay:0s]">.</span>
+      <span className="animate-bounce [animation-delay:0.2s]">.</span>
+      <span className="animate-bounce [animation-delay:0.4s]">.</span>
+    </span>
+  );
+}
+
+function WaveText({ text, className }: { text: string; className?: string }) {
+  return (
+    <span className={cn("relative inline-block overflow-hidden", className)}>
+      <span className="text-text-secondary">{text}</span>
+      <span
+        className="pointer-events-none absolute inset-0 block -translate-x-full animate-shimmer"
+        style={{
+          background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent)",
+        }}
+      />
+    </span>
+  );
 }
 
 function CodeBlock({ language, value }: { language: string; value: string }) {
@@ -161,7 +186,8 @@ function getCitedSources(content: string, allSources?: { title: string; url: str
 
 // 可折叠的思考过程块
 function ThinkBlock({ content, isThinking }: { content: string; isThinking: boolean }) {
-  const [expanded, setExpanded] = useState(true);
+  // GPT-5.5 Pro 的 reasoning summary 可能很长，默认展开会让历史消息渲染明显卡顿。
+  const [expanded, setExpanded] = useState(() => isThinking || content.length < 2000);
 
   return (
     <div className="mb-3 rounded-xl border border-surface-border overflow-hidden">
@@ -173,7 +199,7 @@ function ThinkBlock({ content, isThinking }: { content: string; isThinking: bool
       >
         <Lightbulb className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
         <span className="text-sm font-medium text-text-secondary flex-1">
-          {isThinking ? "正在思考..." : "深度思考"}
+          {isThinking ? "正在思考..." : `深度思考${content.length >= 2000 ? " · 已折叠" : ""}`}
         </span>
         {isThinking && (
           <div className="flex gap-0.5">
@@ -415,6 +441,7 @@ function MessageList({
   onContinueGenerate,
   isCompare = false,
   compareModels = [],
+  onCompareModelChange,
   welcomeTitle,
   welcomeSubtitle,
   welcomeExamples,
@@ -472,6 +499,7 @@ function MessageList({
   const [shareSlug, setShareSlug] = useState<string | undefined>(undefined);
   const [shareOpen, setShareOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [compareModelMenuOpen, setCompareModelMenuOpen] = useState<number | null>(null);
 
   // 读取本地用户信息（必须在条件分支之前调用 Hook）
   const [userName, setUserName] = useState<string>("");
@@ -584,6 +612,372 @@ function MessageList({
     setSharing(false);
   };
 
+
+  const compareGroups = useMemo(() => {
+    if (!isCompare) return [];
+    const groups: { user: Message; assistants: Message[] }[] = [];
+    let current: { user: Message; assistants: Message[] } | null = null;
+
+    messages.forEach((msg) => {
+      if (msg.role === "user") {
+        current = { user: msg, assistants: [] };
+        groups.push(current);
+      } else if (msg.role === "assistant" && current) {
+        current.assistants.push(msg);
+      }
+    });
+
+    return groups;
+  }, [isCompare, messages]);
+
+  const renderAssistantContent = (msg: Message, isStreaming: boolean) => {
+    if (isStreaming) {
+      const { reasoning, answer } = parseThinkContent(msg.content);
+      if (!reasoning && !answer.trim()) {
+        return (
+          <div className="flex items-center gap-1.5 py-1 text-sm text-text-secondary">
+            {isComplexTask && (
+              <span className="inline-flex items-center gap-0.5">
+                <WaveText text="深度推理中，片刻即达极致答案" />
+                <ThinkingDots />
+              </span>
+            )}
+          </div>
+        );
+      }
+      return (
+        <div className="text-[15px] leading-relaxed text-text-primary whitespace-pre-wrap break-words">
+          {reasoning && (
+            <div className="mb-3 rounded-xl border border-surface-border overflow-hidden">
+              <div className="flex items-center gap-2 px-3 py-2 bg-purple-50 dark:bg-[#1A1A2E]">
+                <Lightbulb className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
+                <span className="text-sm font-medium text-text-secondary">正在思考...</span>
+              </div>
+              <div className="px-3 py-2.5 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap bg-slate-50 dark:bg-[#0F0F1A]">
+                {reasoning}
+              </div>
+            </div>
+          )}
+          <div>{sanitizeContent(answer)}</div>
+          <StreamingCursor />
+        </div>
+      );
+    }
+
+    if (!msg.content) {
+      return <div className="text-[15px] leading-relaxed text-text-secondary">生成中断，可点击重新生成</div>;
+    }
+
+    const { reasoning, answer, isThinking } = parseThinkContent(msg.content);
+    const cleanAnswer = sanitizeContent(answer);
+    return (
+      <div className="prose prose-sm max-w-none">
+        {reasoning && <ThinkBlock content={reasoning} isThinking={isThinking} />}
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm, remarkFixBold, remarkMath]}
+          rehypePlugins={[rehypeKatex]}
+          components={markdownComponents}
+        >
+          {cleanAnswer}
+        </ReactMarkdown>
+      </div>
+    );
+  };
+
+  const renderCompareModelHeader = (modelId: string, index: number) => {
+    const model = models.find((m) => m.id === modelId);
+    const isOpen = compareModelMenuOpen === index;
+    return (
+      <div className="flex items-center justify-between gap-3 border-b border-surface-border bg-surface-card px-4 py-3">
+        <div className="relative">
+          <button
+            onClick={() => setCompareModelMenuOpen(isOpen ? null : index)}
+            className="inline-flex min-w-0 items-center gap-2 rounded-lg border border-surface-border bg-surface-elevated px-3 py-1.5 text-sm text-text-primary hover:bg-surface-card transition-colors"
+          >
+            <div
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white"
+              style={{ backgroundColor: model?.color || undefined }}
+            >
+              {(model?.name || modelId || `模型${index + 1}`).slice(0, 1).toUpperCase()}
+            </div>
+            <span className="truncate font-medium">{model?.name || modelId || `模型 ${index + 1}`}</span>
+            <ChevronDownIcon className={cn("h-3.5 w-3.5 shrink-0 text-text-tertiary transition-transform", isOpen && "rotate-180")} />
+          </button>
+
+          {isOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setCompareModelMenuOpen(null)} />
+              <div className="absolute top-full left-0 mt-2 w-[260px] z-50 rounded-xl border border-surface-border bg-surface-elevated shadow-xl overflow-hidden max-h-[70vh] overflow-y-auto">
+                <div className="px-3 py-2 text-[11px] font-medium text-text-tertiary uppercase tracking-wider border-b border-surface-border">
+                  选择模型
+                </div>
+                <div className="py-1">
+                  {models.map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={() => {
+                        onCompareModelChange?.(index, m.id);
+                        setCompareModelMenuOpen(null);
+                      }}
+                      className={cn(
+                        "flex items-center gap-3 w-full px-3 py-2 text-left transition-colors hover:bg-surface-card",
+                        m.id === modelId && "bg-brand/5"
+                      )}
+                    >
+                      <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
+                      <span className={cn("flex-1 text-sm truncate", m.id === modelId ? "text-brand font-medium" : "text-text-secondary")}>
+                        {m.name}
+                      </span>
+                      {m.id === modelId && <Check className="w-3.5 h-3.5 text-brand shrink-0" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+        <button
+          type="button"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-tertiary transition-colors hover:bg-surface-card hover:text-text-primary"
+          aria-label="关闭对比列"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    );
+  };
+
+  const renderCompareWelcome = (modelId: string, index: number) => (
+    <div key={modelId || index} className="flex min-h-[360px] flex-col overflow-hidden rounded-2xl border border-surface-border bg-surface-card shadow-sm">
+      {renderCompareModelHeader(modelId, index)}
+      <div className="flex-1 px-8 pb-10 pt-20">
+        <h2 className="text-3xl font-semibold tracking-tight text-text-primary">你好，</h2>
+        <p className="mt-3 text-xl font-medium text-text-primary">我今天能帮你什么？</p>
+      </div>
+    </div>
+  );
+
+  if (isCompare) {
+    const activeCompareModels = (compareModels && compareModels.length > 0 ? compareModels : models.slice(0, 2).map((m) => m.id)).slice(0, 2);
+
+    const columnMessages = activeCompareModels.map((modelId) =>
+      messages.filter((msg) => msg.role === "user" || msg.model === modelId)
+    );
+
+    return (
+      <div className="relative flex-1 overflow-hidden">
+        <div className="h-full px-3 py-3">
+          <div className="mx-auto h-full">
+            <div className="flex gap-3 h-full">
+              {activeCompareModels.map((modelId, colIndex) => {
+                const colMsgs = columnMessages[colIndex];
+                return (
+                  <div key={modelId} className="flex-1 min-w-0 flex flex-col h-full rounded-2xl border border-surface-border bg-surface-card shadow-sm overflow-hidden">
+                    {renderCompareModelHeader(modelId, colIndex)}
+
+                    <div className="flex-1 space-y-5 px-4 py-5 overflow-y-auto">
+                    {messages.length === 0 ? (
+                      <div className="flex flex-col pt-16 pb-10">
+                        <h2 className="text-3xl font-semibold tracking-tight text-text-primary">你好，</h2>
+                        <p className="mt-3 text-base font-medium text-text-secondary">我今天能帮你什么？</p>
+                      </div>
+                    ) : (
+                      <>
+                        {colMsgs.map((msg, msgIndex) => {
+                          const model = models.find((m) => m.id === msg.model);
+                          const isUser = msg.role === "user";
+                          const isLast = msgIndex === colMsgs.length - 1;
+                          const isStreaming = isLast && isLoading && msg.role === "assistant";
+                          const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading;
+
+                          return (
+                            <div key={`${colIndex}-${msg.id}`} className="flex gap-3 animate-message-appear group">
+                              <div className="mt-1 w-7 shrink-0">
+                                {!isUser && (
+                                  <div className="w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center">
+                                    <Bot className="w-4 h-4 text-text-secondary" />
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className={cn("flex-1 flex min-w-0", isUser ? "justify-end" : "justify-start")}>
+                                <div className="flex flex-col gap-1 min-w-0">
+                                  <div
+                                    className={cn(
+                                      "px-4 py-3 relative w-fit max-w-full",
+                                      isUser
+                                        ? "rounded-2xl rounded-br-sm bg-[#EFF6FF] dark:bg-[#1E293B]"
+                                        : "rounded-2xl rounded-bl-sm bg-[#F5F4F2] dark:bg-[#1F1F1F]"
+                                    )}
+                                  >
+                                    {!isUser && model && (
+                                      <div className="flex items-center gap-2 mb-2">
+                                        <div className="flex items-center gap-1.5">
+                                          <div className="w-1 h-1 rounded-full" style={{ backgroundColor: model.color }} />
+                                          <span className="text-[11px] text-text-tertiary">{model.name}</span>
+                                        </div>
+                                        {msg.activityStatus && msg.activityStatus.status !== "completed" && (
+                                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full text-amber-600 bg-amber-500/10">
+                                            {msg.activityStatus.kind === "tool_call" ? (
+                                              <Wrench className="w-3 h-3 animate-pulse" />
+                                            ) : msg.activityStatus.kind === "file_search" ? (
+                                              <FileText className="w-3 h-3 animate-pulse" />
+                                            ) : (
+                                              <Search className="w-3 h-3 animate-pulse" />
+                                            )}
+                                            {msg.activityStatus.label}
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    {isUser ? (
+                                      <div className="flex flex-col gap-2">
+                                        {msg.files && msg.files.length > 0 && (
+                                          <div className="flex flex-wrap gap-2">
+                                            {msg.files.map((f, fi) => {
+                                              if (f.type === "image") {
+                                                return (
+                                                  <div key={fi} className="relative group/file rounded-xl overflow-hidden border border-surface-border bg-surface-card">
+                                                    <img
+                                                      src={`/api/files/${f.public_id}/download`}
+                                                      alt={f.filename}
+                                                      className="max-w-[200px] max-h-[200px] object-cover rounded-xl"
+                                                      onError={(e) => {
+                                                        (e.target as HTMLImageElement).src = "";
+                                                        (e.target as HTMLImageElement).classList.add("hidden");
+                                                        (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden");
+                                                      }}
+                                                    />
+                                                    <div className="hidden text-xs text-text-tertiary px-3 py-2">图片加载失败</div>
+                                                  </div>
+                                                );
+                                              }
+                                              return null;
+                                            })}
+                                          </div>
+                                        )}
+                                        {msg.files && msg.files.some(f => f.type !== "image") && (
+                                          <div className="flex flex-wrap gap-2">
+                                            {msg.files.filter(f => f.type !== "image").map((f, fi) => (
+                                              <a
+                                                key={fi}
+                                                href={`/api/files/${f.public_id}/download`}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-card border border-surface-border hover:border-brand/30 transition-colors"
+                                              >
+                                                <FileText className="w-4 h-4 text-text-tertiary shrink-0" />
+                                                <span className="text-[13px] text-text-secondary truncate max-w-[200px]">{f.filename}</span>
+                                              </a>
+                                            ))}
+                                          </div>
+                                        )}
+                                        <div className="flex items-start justify-between gap-2">
+                                          {msg.content ? (
+                                            <p className="text-[15px] leading-relaxed text-text-primary whitespace-pre-wrap">{msg.content}</p>
+                                          ) : null}
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      renderAssistantContent(msg, isStreaming)
+                                    )}
+                                  </div>
+
+                                  {!isUser && !isStreaming && (
+                                    <div className="flex items-center gap-2 px-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <MessageActions
+                                        onCopy={() => handleCopy(msg.content)}
+                                        onDelete={() => setDeleteTarget(msg.id)}
+                                        onRegenerate={onRegenerate}
+                                        onSelectMode={enterSelectMode}
+                                        showRegenerate={canRegenerate}
+                                        align={isUser ? "right" : "left"}
+                                        visible={isLast}
+                                        createdAt={msg.createdAt}
+                                        completedAt={msg.completedAt}
+                                      />
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="mt-1 w-7 shrink-0">
+                                {isUser && (
+                                  <div className="w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center">
+                                    <User className="w-4 h-4 text-text-secondary" />
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+
+                        {isLoading && colMsgs[colMsgs.length - 1]?.role !== "assistant" && (
+                          <div className="flex gap-3 animate-message-appear">
+                            <div className="mt-1 w-7 shrink-0">
+                              <div className="w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center">
+                                <Bot className="w-4 h-4 text-text-secondary" />
+                              </div>
+                            </div>
+                            <div className="flex-1 flex justify-start">
+                              <div className="bg-[#F5F4F2] dark:bg-[#1F1F1F] rounded-2xl rounded-bl-sm px-4 py-3 flex items-center">
+                                <div className="flex items-center gap-1.5 text-sm text-text-secondary">
+                                  {isComplexTask && (
+                                    <span className="inline-flex items-center gap-0.5">
+                                      <WaveText text="深度推理中，片刻即达极致答案" />
+                                      <ThinkingDots />
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="mt-1 w-7 shrink-0" />
+                          </div>
+                        )}
+                      </>
+                    )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div ref={bottomRef} />
+          </div>
+        </div>
+
+        {showScrollButton && (
+          <button
+            type="button"
+            onClick={() => scrollToBottom("smooth")}
+            className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 flex items-center justify-center w-10 h-10 rounded-full
+              bg-surface-elevated border border-surface-border text-text-secondary
+              shadow-lg hover:bg-surface-card hover:text-text-primary transition-colors"
+            aria-label="回到底部"
+          >
+            <ChevronDownIcon className="w-5 h-5" />
+          </button>
+        )}
+
+        <ConfirmDialog
+          isOpen={!!deleteTarget}
+          title="删除此消息"
+          description="删除后，该消息将不可恢复。"
+          confirmText="删除"
+          cancelText="取消"
+          variant="danger"
+          onConfirm={() => {
+            if (deleteTarget && onDeleteMessage) onDeleteMessage(deleteTarget);
+            setDeleteTarget(null);
+          }}
+          onCancel={() => setDeleteTarget(null)}
+        />
+        <ShareDialog isOpen={shareOpen} slug={shareSlug} onClose={() => setShareOpen(false)} />
+      </div>
+    );
+  }
+
   if (messages.length === 0) {
     if (isLoadingHistory) {
       return (
@@ -638,25 +1032,6 @@ function MessageList({
         className="h-full overflow-y-auto px-4 py-8"
       >
         <div className="max-w-[800px] mx-auto space-y-8">
-        {isCompare && (
-          <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-brand/5 border border-brand/20">
-            <span className="text-xs font-medium text-brand">并列对比</span>
-            {compareModels && compareModels.length > 0 && (
-              <div className="flex items-center gap-1.5 ml-2">
-                <span className="text-[11px] text-text-tertiary">模型：</span>
-                {compareModels.map((m) => {
-                  const model = models.find((mod) => mod.id === m);
-                  return (
-                    <span key={m} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-text-secondary bg-surface-card">
-                      {model && <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: model.color }} />}
-                      {model?.name || m}
-                    </span>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
         {messages.map((msg, index) => {
           const model = models.find((m) => m.id === msg.model);
           const isUser = msg.role === "user";
@@ -784,12 +1159,12 @@ function MessageList({
                         if (!reasoning && !answer.trim()) {
                           return (
                             <div className="flex items-center gap-1.5 py-1 text-sm text-text-secondary">
-                              {isComplexTask && <span>深度推理中，片刻即达极致答案</span>}
-                              <div className="flex gap-1">
-                                <div className="w-1.5 h-1.5 rounded-full bg-text-tertiary animate-bounce" />
-                                <div className="w-1.5 h-1.5 rounded-full bg-text-tertiary animate-bounce [animation-delay:0.15s]" />
-                                <div className="w-1.5 h-1.5 rounded-full bg-text-tertiary animate-bounce [animation-delay:0.3s]" />
-                              </div>
+                              {isComplexTask && (
+                                <span className="inline-flex items-center gap-0.5">
+                                  <WaveText text="深度推理中，片刻即达极致答案" />
+                                  <ThinkingDots />
+                                </span>
+                              )}
                             </div>
                           );
                         }
@@ -911,12 +1286,12 @@ function MessageList({
             <div className="flex-1 flex justify-start">
               <div className="bg-[#F5F4F2] dark:bg-[#1F1F1F] rounded-2xl rounded-bl-sm px-4 py-3 flex items-center">
                 <div className="flex items-center gap-1.5 text-sm text-text-secondary">
-                  {isComplexTask && <span>深度推理中，片刻即达极致答案</span>}
-                  <div className="flex gap-1">
-                    <div className="w-1.5 h-1.5 rounded-full bg-text-tertiary animate-bounce" />
-                    <div className="w-1.5 h-1.5 rounded-full bg-text-tertiary animate-bounce [animation-delay:0.1s]" />
-                    <div className="w-1.5 h-1.5 rounded-full bg-text-tertiary animate-bounce [animation-delay:0.2s]" />
-                  </div>
+                  {isComplexTask && (
+                    <span className="inline-flex items-center gap-0.5">
+                      <WaveText text="深度推理中，片刻即达极致答案" />
+                      <ThinkingDots />
+                    </span>
+                  )}
                 </div>
               </div>
             </div>

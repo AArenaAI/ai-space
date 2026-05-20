@@ -22,8 +22,8 @@ export default function ChatContent() {
 
   if (loading || models.length === 0) return <ChatSkeleton />;
 
-  // 只用新对话按钮的 t 参数强制重置；不要用 conversationId 做 key。
-  // 第一条消息会创建新对话并把 URL 改成 ?id=xxx，如果 key 跟着变，会卸载正在流式生成的 ChatInterface，导致第一条 AI 回复不可见。
-  const chatKey = `chat-${newChatToken}`;
+  // 只在“空的新对话”用 t 参数强制重置；历史对话切换保持稳定 key，由 useChat 内部按 conversationId 加载。
+  // 否则从 /chat?t=xxx&id=123 切到 /chat?id=456 时 key 会变化，导致 ChatInterface 整体 remount，出现概率白屏/全局加载。
+  const chatKey = conversationId ? "chat" : `new-${newChatToken}`;
   return <ChatInterface key={chatKey} conversationId={conversationId} models={models} />;
 }

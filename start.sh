@@ -71,7 +71,7 @@ echo -e "${GREEN}✅ 构建完成${NC}"
 
 echo -e "${GREEN}🚀 启动前端服务 (Node.js + API proxy) 端口: $FRONTEND_PORT...${NC}"
 cd "$PROJECT_DIR"
-nohup node server.js > "$LOG_DIR/frontend.log" 2>&1 &
+PORT="$FRONTEND_PORT" nohup node server.js > "$LOG_DIR/frontend.log" 2>&1 &
 FRONTEND_PID=$!
 echo "$FRONTEND_PID" >> "$PID_FILE"
 echo -e "${GREEN}✅ 前端启动成功 (PID: $FRONTEND_PID)${NC}"

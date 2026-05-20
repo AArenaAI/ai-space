@@ -21,6 +21,21 @@ type AIService struct {
 	adapters []ProviderAdapter
 }
 
+type closeHookReadCloser struct {
+	io.ReadCloser
+	closeHook func()
+}
+
+func (c closeHookReadCloser) Close() error {
+	if c.closeHook != nil {
+		c.closeHook()
+	}
+	if c.ReadCloser == nil {
+		return nil
+	}
+	return c.ReadCloser.Close()
+}
+
 func NewAIService(cfg *config.Config) *AIService {
 	service := &AIService{cfg: cfg}
 	service.adapters = []ProviderAdapter{
@@ -206,11 +221,12 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 	}
 
 	useBackground := ShouldUseOpenAIBackground(model, reasoningEffort)
+	maxOutputTokens := s.openAIMaxOutputTokens(model, search, reasoning)
 	reqBody := map[string]interface{}{
 		"model":             model,
 		"input":             inputItems,
 		"stream":            stream,
-		"max_output_tokens": s.cfg.OpenAIMaxOutputTokens,
+		"max_output_tokens": maxOutputTokens,
 		// 默认聊天禁用 Responses API 内置工具。
 		"tool_choice": "none",
 	}
@@ -259,12 +275,6 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 		reqBody["tool_choice"] = "auto"
 	}
 
-	if stream {
-		// 防止长篇深度检索持续生成数分钟，前端只收到 ping/半截内容，最终被代理或浏览器超时。
-		// 短问答仍可正常完成；超出预算时上游会返回 completed/incomplete，后端再向前端发 [DONE] 或统一错误。
-		reqBody["max_output_tokens"] = s.streamMaxOutputTokens(search, reasoning)
-	}
-
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("序列化 OpenAI 请求失败: %w", err)
@@ -282,6 +292,24 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 		len(inputItems),
 		len(systemInstruction),
 	)
+	var release func()
+	if isGPT55Pro(model) {
+		limiter := openAIModelLimiterFor(model, s.cfg.OpenAIGPT55ProMaxConcurrency)
+		release, err = limiter.acquire(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if pe := limiter.reserveTPM(model, estimateOpenAIRequestedTokens(messages, maxOutputTokensFromBody(reqBody)), s.cfg.OpenAIGPT55ProTPMSoftLimit); pe != nil {
+			release()
+			return nil, pe
+		}
+		defer func() {
+			if !stream && release != nil {
+				release()
+			}
+		}()
+	}
+
 	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/v1/responses", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("创建 OpenAI 请求失败: %w", err)
@@ -297,10 +325,16 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		if pe := ParseOpenAIProviderErrorText(string(body), model); pe != nil {
+			if resp.StatusCode == http.StatusTooManyRequests && pe.Kind == ProviderErrorUpstream {
+				pe.Kind = ProviderErrorRateLimit
+			}
+			return nil, pe
+		}
 		return nil, fmt.Errorf("OpenAI Responses API 错误: %s", string(body))
 	}
 
-	return &AICompletionResponse{Body: resp.Body, ModelType: "openai_responses", Provider: "openai", Model: model, Background: useBackground}, nil
+	return &AICompletionResponse{Body: closeHookReadCloser{ReadCloser: resp.Body, closeHook: release}, ModelType: "openai_responses", Provider: "openai", Model: model, Background: useBackground}, nil
 }
 
 func (s *AIService) RetrieveOpenAIResponse(ctx context.Context, responseID string) (map[string]any, error) {
@@ -371,6 +405,22 @@ func ExtractOpenAIResponseText(raw map[string]any) string {
 		}
 	}
 	return strings.TrimSpace(strings.Join(parts, "\n"))
+}
+
+func (s *AIService) openAIMaxOutputTokens(model string, search bool, reasoning bool) int {
+	if isGPT55Pro(model) {
+		if reasoning && search {
+			return s.cfg.OpenAIGPT55ProMaxOutputTokensDeepSearch
+		}
+		if reasoning {
+			return s.cfg.OpenAIGPT55ProMaxOutputTokensDeep
+		}
+		if search {
+			return s.cfg.OpenAIGPT55ProMaxOutputTokensSearch
+		}
+		return s.cfg.OpenAIGPT55ProMaxOutputTokens
+	}
+	return s.streamMaxOutputTokens(search, reasoning)
 }
 
 func (s *AIService) streamMaxOutputTokens(search bool, reasoning bool) int {

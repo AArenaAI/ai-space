@@ -22,14 +22,24 @@ const (
 
 // AIStreamEvent 是统一流事件结构，所有模型响应都解码为此格式。
 type AIStreamEvent struct {
-	Type           AIStreamEventType
-	Delta          string      // 文本/推理/状态提示增量
-	Index          int         // 工具/搜索步骤索引
-	Usage          *TokenUsage // usage 信息（EventUsage 使用）
-	Code           string      // 错误代码（如 rate_limit_exceeded）
-	Message        string      // 错误信息
-	ResponseID     string      // OpenAI Responses id（background stream 续流/webhook 映射）
-	SequenceNumber int64       // OpenAI stream cursor，用于断线续流
+	Type             AIStreamEventType
+	Delta            string      // 文本/推理/状态提示增量
+	Index            int         // 工具/搜索步骤索引
+	Usage            *TokenUsage // usage 信息（EventUsage 使用）
+	Code             string      // 错误代码（如 rate_limit_exceeded）
+	Message          string      // 错误信息
+	ResponseID       string      // OpenAI Responses id（background stream 续流/webhook 映射）
+	SequenceNumber   int64       // OpenAI stream cursor，用于断线续流
+	Recoverable      bool        // 错误是否可恢复/可重试
+	RetryAfterMs     int         // 建议等待毫秒数
+	ErrorKind        string      // rate_limit / quota / upstream_error
+	Provider         string      // provider 名称
+	Model            string      // 模型名称
+	LimitType        string      // tokens_per_minute / requests_per_minute
+	LimitTokens      int         // 限额
+	UsedTokens       int         // 已用预算
+	RequestedTokens  int         // 本次请求预算
+	SuggestedActions []string    // retry_after / switch_model / reduce_output_tokens
 }
 
 // AICompletionResponse 是 ChatCompletion 的统一返回结构。

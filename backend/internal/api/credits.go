@@ -17,14 +17,15 @@ var modelTierMap = map[string]string{
 	// 基础等级
 	"gpt-5.4-mini":         "basic",
 	"gemini-2.0-flash-exp": "basic",
+	"gemini-3.5-flash":     "basic",
 
 	// 高级等级
-	"gpt-5.4":                   "advanced",
-	"gpt-5.5":                   "advanced",
+	"gpt-5.4":                    "advanced",
+	"gpt-5.5":                    "advanced",
 	"claude-3-5-sonnet-20241022": "advanced",
-	"deepseek-chat":             "advanced",
-	"kimi-k2.5":                 "advanced",
-	"kimi-k2.6":                 "advanced",
+	"deepseek-chat":              "advanced",
+	"kimi-k2.5":                  "advanced",
+	"kimi-k2.6":                  "advanced",
 
 	// 精英等级
 	"gpt-5.5-pro":       "elite",
@@ -121,12 +122,12 @@ func (h *CreditsHandler) GetCredits(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"basic_credits":     user.BasicCredits,
-		"advanced_credits":  user.AdvancedCredits,
-		"elite_credits":     user.EliteCredits,
-		"plan_tier":         user.PlanTier,
-		"credits_reset_at":  user.CreditsResetAt.Format(time.RFC3339),
-		"daily_quota":       dailyQuota[user.PlanTier],
+		"basic_credits":    user.BasicCredits,
+		"advanced_credits": user.AdvancedCredits,
+		"elite_credits":    user.EliteCredits,
+		"plan_tier":        user.PlanTier,
+		"credits_reset_at": user.CreditsResetAt.Format(time.RFC3339),
+		"daily_quota":      dailyQuota[user.PlanTier],
 		"tier_names": map[string]string{
 			"basic":    "基础",
 			"advanced": "高级",
@@ -200,26 +201,26 @@ func (h *CreditsHandler) DeductCredits(c *gin.Context) {
 	// 【积分限制已临时取消】保留检查逻辑但永远通过
 	// 如需恢复积分限制，取消下面注释：
 	/*
-	if !isUnlimited && *creditsField < req.Amount {
-		tierName := GetTierName(tier)
-		c.JSON(http.StatusPaymentRequired, gin.H{
-			"error":         "积分不足",
-			"tier":          tier,
-			"tier_name":     tierName,
-			"required":      req.Amount,
-			"remaining":     *creditsField,
-			"upgrade_tip":   "升级套餐以获取更多" + tierName + "积分",
-		})
-		return
-	}
+		if !isUnlimited && *creditsField < req.Amount {
+			tierName := GetTierName(tier)
+			c.JSON(http.StatusPaymentRequired, gin.H{
+				"error":         "积分不足",
+				"tier":          tier,
+				"tier_name":     tierName,
+				"required":      req.Amount,
+				"remaining":     *creditsField,
+				"upgrade_tip":   "升级套餐以获取更多" + tierName + "积分",
+			})
+			return
+		}
 	*/
 
 	// 扣减积分已临时取消 — 保留数据但不实际扣减
 	// 如需恢复积分扣减，取消下面注释：
 	/*
-	if !isUnlimited {
-		*creditsField -= req.Amount
-	}
+		if !isUnlimited {
+			*creditsField -= req.Amount
+		}
 	*/
 	user.UpdatedAt = now
 	h.db.Save(&user)
