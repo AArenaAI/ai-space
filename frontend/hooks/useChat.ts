@@ -694,11 +694,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             streamAppend(assistantMsg.id, "</think>");
             inReasoningBlock = false;
           }
-          if (backgroundPollingStarted) {
-            realtimeUpdate(assistantMsg.id, { activityStatus: undefined });
-          } else {
-            realtimeUpdate(assistantMsg.id, { completedAt: Date.now(), activityStatus: undefined });
-          }
+          realtimeUpdate(assistantMsg.id, { completedAt: Date.now(), activityStatus: undefined });
           return;
         }
         try {
@@ -902,7 +898,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
 
         // 切会话/用户停止时不要在旧异步里把消息标 completed。
         // 切回该会话时由历史加载 + task event stream 恢复真实状态。
-        if (!backgroundPollingStarted && abortReason !== "navigation" && abortReason !== "user") {
+        if (abortReason !== "navigation" && abortReason !== "user") {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantMsg.id ? { ...m, completedAt: Date.now() } : m
