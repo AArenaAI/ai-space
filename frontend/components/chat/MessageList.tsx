@@ -16,7 +16,8 @@ import { useTheme } from "@/components/theme/ThemeProvider";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import ShareDialog from "@/components/ui/ShareDialog";
 import { useSmartAutoScroll } from "@/hooks/useSmartAutoScroll";
-import { streamSubscribe, streamGet } from "@/lib/streaming";
+import { useMessageStream } from "@/hooks/useMessageStream";
+import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
 import EChartsBlock from "./EChartsBlock";
 
 interface MessageListProps {
@@ -118,29 +119,18 @@ function StreamingCursor() {
   return <span className="inline-block w-[2px] h-[1.2em] bg-brand ml-0.5 animate-cursor-blink align-middle" />;
 }
 
-function StreamingText({ messageId, content, className }: { messageId: string; content: string; className?: string }) {
-  const [parsed, setParsed] = useState(() => {
-    const full = streamGet(messageId) || content;
-    return parseThinkContent(full);
-  });
+function StreamingText({ messageId, content, isStreaming, className }: { messageId: string; content: string; isStreaming: boolean; className?: string }) {
+  const streamText = useMessageStream(messageId, isStreaming);
+  const effectiveText = isStreaming ? (streamText || content) : content;
+  const displayedText = useSmoothStreaming(effectiveText, isStreaming);
 
-  useEffect(() => {
-    const initialFull = streamGet(messageId);
-    if (initialFull) {
-      setParsed(parseThinkContent(initialFull));
-    }
-
-    const unsubscribe = streamSubscribe(messageId, (delta, full) => {
-      setParsed(parseThinkContent(full));
-    });
-    return unsubscribe;
-  }, [messageId]);
-
-  const { reasoning, answer } = parsed;
+  const parsed = parseThinkContent(displayedText);
+  const hasReason = !!parsed.reasoning;
+  const hasContent = !!parsed.answer.trim();
 
   return (
     <span className={className}>
-      {reasoning && (
+      {hasReason && (
         <div className="mb-3 rounded-xl border border-purple-200 dark:border-purple-800/40 overflow-hidden">
           <div className="flex items-center gap-2 px-3 py-2 bg-purple-50 dark:bg-[#1A1A2E]">
             <Lightbulb className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
@@ -152,16 +142,13 @@ function StreamingText({ messageId, content, className }: { messageId: string; c
             </div>
           </div>
           <div className="px-3 py-2.5 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap bg-slate-50 dark:bg-[#0F0F1A]">
-            {reasoning}
+            {parsed.reasoning || ""}
           </div>
         </div>
       )}
-      {answer ? (
-        <span className="whitespace-pre-wrap break-words">{answer}</span>
-      ) : (
-        <ThinkingDots />
-      )}
-      <StreamingCursor />
+      <span className="whitespace-pre-wrap break-words">{parsed.answer}</span>
+      {!hasContent && !hasReason && <ThinkingDots />}
+      {isStreaming && <StreamingCursor />}
     </span>
   );
 }
@@ -683,7 +670,7 @@ function MessageList({
 
   const renderAssistantContent = (msg: Message, isStreaming: boolean) => {
     if (isStreaming) {
-      return <StreamingText messageId={msg.id} content={msg.content} className="text-[15px] leading-relaxed text-text-primary" />;
+      return <StreamingText messageId={msg.id} content={msg.content} isStreaming={isStreaming} className="text-[15px] leading-relaxed text-text-primary" />;
     }
     if (!msg.content) {
       return <div className="text-[15px] leading-relaxed text-text-secondary">生成中断，可点击重新生成</div>;

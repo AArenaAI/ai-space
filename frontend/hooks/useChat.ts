@@ -386,9 +386,12 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
             let idx;
+            const events: string[] = [];
             while ((idx = buffer.indexOf("\n\n")) >= 0) {
-              const eventText = buffer.slice(0, idx);
+              events.push(buffer.slice(0, idx));
               buffer = buffer.slice(idx + 2);
+            }
+            for (const eventText of events) {
               processEvent(eventText);
             }
           }
@@ -852,13 +855,6 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           if (delta) {
             accumulated += delta;
             streamAppend(assistantMsg.id, delta);
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMsg.id
-                  ? { ...m, activityStatus: { kind: "generating", status: "running", label: "正在生成内容" } }
-                  : m
-              )
-            );
           }
         } catch {
           // JSON 解析失败时，当作文本免底追加
