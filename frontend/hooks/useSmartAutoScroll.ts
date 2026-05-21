@@ -17,7 +17,6 @@ export function useSmartAutoScroll({
   const isAtBottomRef = useRef(true);
   const isAutoScrollingRef = useRef(false);
   const autoScrollRafRef = useRef(0);
-  const userScrollTimestampRef = useRef(0);
   const lastScrollTopRef = useRef(0);
   const followRafRef = useRef(0);
   const isProgrammaticScrollRef = useRef(false);
@@ -46,9 +45,6 @@ export function useSmartAutoScroll({
       lastScrollTopRef.current = el.scrollTop;
 
       if (isScrollingUp) {
-        // 只有真正向上滑才记录时间戳；向下滑不应该影响自动跟底
-        userScrollTimestampRef.current = Date.now();
-
         // 用户主动向上滑：立即取消自动滚动状态，避免被拉回底部抖动
         isAutoScrollingRef.current = false;
         if (autoScrollRafRef.current) {
@@ -184,8 +180,6 @@ export function useSmartAutoScroll({
       const c = containerEl;
       const b = bottomRef.current;
       if (!c || !b) return;
-      // 用户最近 50ms 内有主动滚动，跳过（避免滚轮连续事件干扰）
-      if (Date.now() - userScrollTimestampRef.current < 50) return;
       if (!isAtBottomRef.current) return;
 
       // 去重：若已有待执行的 RAF，先取消
