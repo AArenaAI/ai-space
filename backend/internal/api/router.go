@@ -250,6 +250,14 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		authorized.GET("/workspaces/:id", workspaceHandler.GetWorkspace)
 		authorized.PUT("/workspaces/:id", workspaceHandler.UpdateWorkspace)
 		authorized.DELETE("/workspaces/:id", workspaceHandler.DeleteWorkspace)
+
+		// 收藏路由
+		favoriteHandler := NewFavoriteHandler(db)
+		authorized.POST("/favorites", favoriteHandler.Create)
+		authorized.DELETE("/favorites/:message_id", favoriteHandler.Delete)
+		authorized.GET("/favorites", favoriteHandler.List)
+		authorized.GET("/favorites/check", favoriteHandler.Check)
+		authorized.GET("/favorites/check-batch", favoriteHandler.CheckBatch)
 	}
 
 	// 文件详情（无需认证，未登录用户上传后需要查询解析状态）

@@ -50,6 +50,7 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 		&APIUsageLog{}, &AIBackgroundTask{}, &AIBackgroundTaskEvent{},
 		&PPTTemplate{}, &PPTGeneration{}, &PPTSlide{}, &PPTRevision{},
 		&ImageChat{}, &ImageChatMessage{},
+		&MessageFavorite{},
 	); err != nil {
 		return nil, err
 	}

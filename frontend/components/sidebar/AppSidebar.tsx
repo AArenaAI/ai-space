@@ -18,6 +18,7 @@ import {
   Type, ZoomIn, FolderKanban,
   Briefcase, FileCode, PenTool, BarChart3, Mail, ClipboardList, Terminal, GraduationCap, Languages,
   Zap, Shield, BookOpen, Wrench, Globe, Code2,
+  Star,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
@@ -27,6 +28,7 @@ import SidebarUserPanel from "./SidebarUserPanel";
 import AccountSettingsModal from "./AccountSettingsModal";
 import { useWorkspaces } from "@/hooks/useWorkspaces";
 import { useTheme } from "@/components/theme/ThemeProvider";
+import FavoriteList from "@/components/chat/FavoriteList";
 
 // 模块级缓存：避免组件重新挂载时历史记录反复闪烁
 let cachedConversations: Conversation[] | null = null;
@@ -492,6 +494,9 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
   const [workOpen, setWorkOpen] = useState(false);
   const workBtnRef = useRef<HTMLButtonElement>(null);
   const workTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  /* 收藏列表 */
+  const [favoriteListOpen, setFavoriteListOpen] = useState(false);
 
   /* 收缩状态 tooltip */
   const [sidebarTooltip, setSidebarTooltip] = useState<{text: string; x: number; y: number} | null>(null);
@@ -972,6 +977,19 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                   <LayoutGrid className={cn("w-5 h-5", pathname === "/image" || pathname?.startsWith("/image/") || pathname === "/templates" ? "text-brand" : "text-text-tertiary")} />
                 </button>
               </div>
+
+              {/* 收藏 */}
+              <button
+                onClick={() => setFavoriteListOpen(true)}
+                onMouseEnter={showSidebarTooltip("收藏")}
+                onMouseLeave={hideSidebarTooltip}
+                className={cn(
+                  "p-2.5 rounded-xl transition-colors",
+                  favoriteListOpen ? "bg-amber-400/10 text-amber-400" : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
+                )}
+              >
+                <Star className={cn("w-5 h-5", favoriteListOpen ? "text-amber-400 fill-amber-400" : "text-text-tertiary")} />
+              </button>
             </div>
 
             {/* 分隔线 - 功能与历史分组之间 */}
@@ -1078,6 +1096,18 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                     <ChevronRight className="w-4 h-4 text-text-tertiary" />
                   </button>
                 </div>
+
+                {/* 收藏 */}
+                <button
+                  onClick={() => setFavoriteListOpen(true)}
+                  className={cn(
+                    "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150 w-full text-left",
+                    favoriteListOpen ? "bg-amber-400/10 text-text-primary font-medium" : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
+                  )}
+                >
+                  <Star className={cn("w-[18px] h-[18px] shrink-0 transition-colors", favoriteListOpen ? "text-amber-400 fill-amber-400" : "text-text-tertiary")} />
+                  <span>收藏</span>
+                </button>
               </div>
             </div>
 
@@ -1122,6 +1152,9 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
 
       {/* AI工作 hover 面板 */}
       <WorkHoverPanel open={workOpen} anchorEl={workBtnRef.current} onClose={() => setWorkOpen(false)} onMouseEnter={handleWorkEnter} onMouseLeave={handleWorkLeave} />
+
+      {/* 收藏列表弹窗 */}
+      <FavoriteList open={favoriteListOpen} onClose={() => setFavoriteListOpen(false)} />
 
       {/* 收缩状态 tooltip */}
       {sidebarTooltip && typeof document !== "undefined" && createPortal(

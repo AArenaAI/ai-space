@@ -797,13 +797,14 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 				if choice, ok := choices[0].(map[string]interface{}); ok {
 					if msgMap, ok := choice["message"].(map[string]interface{}); ok {
 						if assistantContent, ok := msgMap["content"].(string); ok && assistantContent != "" {
-							h.db.Create(&models.Message{
-								ConversationID: conversationID,
-								Role:           "assistant",
-								Content:        assistantContent,
-								Model:          req.Model,
-								CreatedAt:      time.Now(),
-							})
+								h.db.Create(&models.Message{
+									ConversationID: conversationID,
+									Role:           "assistant",
+									Content:        assistantContent,
+									Model:          req.Model,
+									CompletedAt:    &[]time.Time{time.Now()}[0],
+									CreatedAt:      time.Now(),
+								})
 							h.touchConversation(conversationID)
 						}
 					}
@@ -909,7 +910,8 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 		streamResult.LastSequenceNumber = seq
 	}
 	updates := map[string]interface{}{
-		"content": content,
+		"content":       content,
+		"completed_at":  time.Now(),
 	}
 	_ = h.db.Model(&models.Message{}).Where("id = ?", req.AssistantMessageID).Updates(updates).Error
 	h.touchConversation(req.ConversationID)
@@ -953,7 +955,10 @@ func (h *ChatHandler) failGenerationTask(task *models.AIBackgroundTask, assistan
 	h.persistTaskEvent(task, assistantMessageID, seq, "error", string(out))
 	h.persistTaskEvent(task, assistantMessageID, seq+1, "done", "[DONE]")
 	now := time.Now()
-	h.db.Model(&models.Message{}).Where("id = ?", assistantMessageID).Update("content", message)
+	h.db.Model(&models.Message{}).Where("id = ?", assistantMessageID).Updates(map[string]interface{}{
+		"content":      message,
+		"completed_at": &now,
+	})
 	h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", task.ID).Updates(map[string]interface{}{
 		"status":               "failed",
 		"error_message":        message,
@@ -1487,6 +1492,9 @@ func (h *ChatHandler) CancelGenerationTask(c *gin.Context) {
 	h.persistTaskEvent(&task, task.AssistantMessageID, seq, "cancelled", string(out))
 	h.persistTaskEvent(&task, task.AssistantMessageID, seq+1, "done", "[DONE]")
 	now := time.Now()
+	h.db.Model(&models.Message{}).Where("id = ?", task.AssistantMessageID).Updates(map[string]interface{}{
+		"completed_at": &now,
+	})
 	h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", task.ID).Updates(map[string]interface{}{
 		"status":               "cancelled",
 		"error_message":        message,
@@ -1864,6 +1872,7 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 				Role:           "assistant",
 				Content:        res.Content,
 				Model:          res.ModelID,
+				CompletedAt:    &[]time.Time{time.Now()}[0],
 				CreatedAt:      time.Now(),
 			})
 		}

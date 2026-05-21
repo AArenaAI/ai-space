@@ -31,6 +31,7 @@ type Message struct {
 	Content        string         `gorm:"not null" json:"content"`
 	Model          string         `json:"model"`
 	TokensUsed     int            `json:"tokens_used"`
+	CompletedAt    *time.Time     `json:"completed_at,omitempty"`
 	CreatedAt      time.Time      `json:"created_at"`
 	DeletedAt      gorm.DeletedAt `gorm:"index" json:"-"`
 

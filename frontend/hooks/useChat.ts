@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { getGuestId } from "@/lib/guestId";
-import { streamAppend, streamGet, streamClear } from "@/lib/streaming";
+import { streamAppend, streamGet, streamClear, realtimeUpdate, realtimeGet, realtimeClear , RealtimeData } from "@/lib/streaming";
 
 const API_BASE_URL = ""; // 使用相对路径，nginx 同域名代理 /api -> 后端
 
@@ -298,7 +298,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         }
         delete activeTaskStreamsRef.current[localMessageId];
         sawDone = true;
-        setMessages((prev) => prev.map((m) => (m.id === localMessageId ? { ...m, completedAt: Date.now(), activityStatus: undefined } : m)));
+        realtimeUpdate(localMessageId, { completedAt: Date.now(), activityStatus: undefined });
         setIsLoading(false);
         return;
       }
@@ -316,24 +316,24 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             lastSequence: latestSequence,
             content: accumulated,
           };
-          setMessages((prev) => prev.map((m) => (m.id === localMessageId ? { ...m, serverMessageId: parsedServerMessageId, generationTaskId: parsedTaskId, lastSequence: latestSequence, activityStatus: { kind: "generating", status: "running", label: "正在生成内容" } } : m)));
+          realtimeUpdate(localMessageId, { serverMessageId: parsedServerMessageId, generationTaskId: parsedTaskId, lastSequence: latestSequence, activityStatus: { kind: "generating", status: "running", label: "正在生成内容" } });
           return;
         }
         if (parsed._error || parsed._error_meta) {
           const err = parsed._error || parsed._error_meta;
           const message = err.message || err.user_message || "请求失败";
-          setMessages((prev) => prev.map((m) => (m.id === localMessageId ? { ...m, content: accumulated || m.content || message, errorCode: err.error_code || err.code || "unknown", retryable: err.retryable === true || err.retriable === true, requestId: err.request_id || m.requestId } : m)));
+          realtimeUpdate(localMessageId, { errorCode: err.error_code || err.code || "unknown", retryable: err.retryable === true || err.retriable === true, requestId: err.request_id || realtimeGet(localMessageId)?.requestId });
           if (!accumulated) accumulated = message;
           return;
         }
         if (parsed._activity_meta) {
           const meta = parsed._activity_meta;
-          setMessages((prev) => prev.map((m) => (m.id === localMessageId ? { ...m, activityStatus: { kind: meta.kind || "generating", status: meta.status || "running", label: meta.label || "正在生成内容" }, searchStatus: meta.kind === "web_search" ? meta.status : m.searchStatus } : m)));
+          realtimeUpdate(localMessageId, { activityStatus: { kind: meta.kind || "generating", status: meta.status || "running", label: meta.label || "正在生成内容" }, searchStatus: meta.kind === "web_search" ? meta.status : undefined });
           return;
         }
         if (parsed._search_meta) {
           const meta = parsed._search_meta;
-          setMessages((prev) => prev.map((m) => (m.id === localMessageId ? { ...m, searchStatus: meta.status, searchSources: meta.sources || [], activityStatus: { kind: "web_search", status: "completed", label: "网页搜索完成" } } : m)));
+          realtimeUpdate(localMessageId, { searchStatus: meta.status, searchSources: meta.sources || [], activityStatus: { kind: "web_search", status: "completed", label: "网页搜索完成" } });
           return;
         }
         const rawDelta = parsed.choices?.[0]?.delta || {};
@@ -404,13 +404,17 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         if (!controller.signal.aborted) startBackgroundPolling(convId, localMessageId, serverMessageId);
       } finally {
         // 同步 streaming store 到 messages state
-        const finalContent = streamGet(localMessageId) || accumulated;
-        if (finalContent) {
-          setMessages((prev) => prev.map((m) => (m.id === localMessageId ? { ...m, content: finalContent } : m)));
+        const finalData = realtimeGet(localMessageId);
+        if (finalData || accumulated) {
+          setMessages((prev) => prev.map((m) => {
+            if (m.id !== localMessageId) return m;
+            const next = { ...m, content: finalData?.content || accumulated, lastSequence: Math.max(m.lastSequence || 0, latestSequence) };
+            if (finalData) Object.assign(next, finalData);
+            return next as Message;
+          }));
         }
-        streamClear(localMessageId);
+        realtimeClear(localMessageId);
         delete taskStreamsRef.current[localMessageId];
-        setMessages((prev) => prev.map((m) => (m.id === localMessageId ? { ...m, lastSequence: Math.max(m.lastSequence || 0, latestSequence) } : m)));
         if (!sawDone && !controller.signal.aborted && serverMessageId) startBackgroundPolling(convId, localMessageId, serverMessageId);
       }
     })();
@@ -536,12 +540,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               shouldResumePolling = false;
             }
           }
-          // 如果后端没有返回 completedAt，用下一条消息的 createdAt 近似；最后一条如果仍在生成则保持空。
-          for (let i = 0; i < loadedMessages.length - 1; i++) {
-            if (!loadedMessages[i].completedAt) {
-              loadedMessages[i].completedAt = loadedMessages[i + 1].createdAt;
-            }
-          }
+          // 后端已返回 completed_at，不需要近似回退
           const activeByServerMessageId = new Map(
             activeEntries
               .filter(([, info]) => info.convId === conversationId && info.serverMessageId)
@@ -695,6 +694,11 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             streamAppend(assistantMsg.id, "</think>");
             inReasoningBlock = false;
           }
+          if (backgroundPollingStarted) {
+            realtimeUpdate(assistantMsg.id, { activityStatus: undefined });
+          } else {
+            realtimeUpdate(assistantMsg.id, { completedAt: Date.now(), activityStatus: undefined });
+          }
           return;
         }
         try {
@@ -702,13 +706,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           // 处理 chat meta（请求追踪 ID 等）
           if (parsed._chat_meta) {
             const meta = parsed._chat_meta;
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMsg.id
-                  ? { ...m, requestId: meta.request_id || "" }
-                  : m
-              )
-            );
+            realtimeUpdate(assistantMsg.id, { requestId: meta.request_id || "" });
             return;
           }
           if (parsed._generation_task) {
@@ -717,19 +715,12 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             const generationTaskId = Number(task.id || task.task_id || 0) || undefined;
             latestServerMessageId = serverMessageId;
             latestGenerationTaskId = generationTaskId;
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMsg.id
-                  ? {
-                      ...m,
-                      serverMessageId,
-                      generationTaskId,
-                      lastSequence: latestSequence,
-                      activityStatus: { kind: "generating" as const, status: "running" as const, label: "正在生成内容" },
-                    }
-                  : m
-              )
-            );
+            realtimeUpdate(assistantMsg.id, {
+              serverMessageId,
+              generationTaskId,
+              lastSequence: latestSequence,
+              activityStatus: { kind: "generating", status: "running", label: "正在生成内容" },
+            });
             if (generationTaskId) {
               backgroundPollingStarted = true;
             }
@@ -743,19 +734,11 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             const placeholder = "任务繁忙，正在生成中";
             accumulated = placeholder;
             streamAppend(assistantMsg.id, placeholder);
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMsg.id
-                  ? {
-                      ...m,
-                      content: placeholder,
-                      serverMessageId,
-                      backgroundTaskId: taskId,
-                      activityStatus: { kind: "generating", status: "running", label: placeholder },
-                    }
-                  : m
-              )
-            );
+            realtimeUpdate(assistantMsg.id, {
+              serverMessageId,
+              backgroundTaskId: taskId,
+              activityStatus: { kind: "generating", status: "running", label: placeholder },
+            });
             backgroundPollingStarted = true;
             return;
           }
@@ -763,19 +746,13 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           if (parsed._error || parsed._error_meta) {
             const err = parsed._error || parsed._error_meta;
             const message = err.message || err.user_message || "请求失败";
-            setMessages((prev) =>
-              prev.map((m) => {
-                if (m.id !== assistantMsg.id) return m;
-                const existingContent = accumulated || m.content || "";
-                return {
-                  ...m,
-                  content: existingContent || message,
-                  errorCode: err.error_code || err.code || "unknown",
-                  retryable: err.retryable === true || err.retriable === true,
-                  requestId: err.request_id || m.requestId,
-                };
-              })
-            );
+            realtimeUpdate(assistantMsg.id, {
+              content: accumulated || message,
+              errorCode: err.error_code || err.code || "unknown",
+              retryable: err.retryable === true || err.retriable === true,
+              requestId: err.request_id || realtimeGet(assistantMsg.id)?.requestId,
+              activityStatus: undefined,
+            });
             if (!accumulated) {
               accumulated = message;
             }
@@ -784,38 +761,27 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           // 处理活动状态元数据（实时，不缓冲）
           if (parsed._activity_meta) {
             const meta = parsed._activity_meta;
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMsg.id
-                  ? {
-                      ...m,
-                      activityStatus: {
-                        kind: meta.kind || "generating",
-                        status: meta.status || "running",
-                        label: meta.label || "正在生成内容",
-                      },
-                      searchStatus: meta.kind === "web_search" ? meta.status : m.searchStatus,
-                    }
-                  : m
-              )
-            );
+            const patch: Partial<RealtimeData> = {
+              activityStatus: {
+                kind: meta.kind || "generating",
+                status: meta.status || "running",
+                label: meta.label || "正在生成内容",
+              },
+            };
+            if (meta.kind === "web_search") {
+              patch.searchStatus = meta.status;
+            }
+            realtimeUpdate(assistantMsg.id, patch);
             return;
           }
           // 处理搜索元数据（实时，不缓冲）
           if (parsed._search_meta) {
             const meta = parsed._search_meta;
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMsg.id
-                  ? {
-                      ...m,
-                      searchStatus: meta.status,
-                      searchSources: meta.sources || [],
-                      activityStatus: { kind: "web_search", status: "completed", label: "网页搜索完成" },
-                    }
-                  : m
-              )
-            );
+            realtimeUpdate(assistantMsg.id, {
+              searchStatus: meta.status,
+              searchSources: meta.sources || [],
+              activityStatus: { kind: "web_search", status: "completed", label: "网页搜索完成" },
+            });
             return;
           }
           const rawDelta = parsed.choices?.[0]?.delta || {};
@@ -917,21 +883,29 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
 
         // 同步 streaming store 到 messages state
         const finalContent = streamGet(assistantMsg.id) || accumulated;
-        if (finalContent) {
+        const finalData = realtimeGet(assistantMsg.id);
+        if (finalContent || finalData) {
           setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantMsg.id ? { ...m, content: finalContent } : m
-            )
+            prev.map((m) => {
+              if (m.id !== assistantMsg.id) return m;
+              const next = { ...m };
+              if (finalContent) next.content = finalContent;
+              if (finalData) {
+                Object.assign(next, finalData);
+              }
+              return next;
+            })
           );
         }
         streamClear(assistantMsg.id);
+        realtimeClear(assistantMsg.id);
 
-        // 切会话/用户停止时不要在旧异步里把消息标 completed 或清掉生成态。
+        // 切会话/用户停止时不要在旧异步里把消息标 completed。
         // 切回该会话时由历史加载 + task event stream 恢复真实状态。
         if (!backgroundPollingStarted && abortReason !== "navigation" && abortReason !== "user") {
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === assistantMsg.id ? { ...m, completedAt: Date.now(), activityStatus: undefined } : m
+              m.id === assistantMsg.id ? { ...m, completedAt: Date.now() } : m
             )
           );
         }

@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback, useMemo, memo } from "react";
-import { User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck, ChevronDown, ChevronUp, Lightbulb, Play, Search, ChevronDown as ChevronDownIcon, FileText, Wrench } from "lucide-react";
+import { User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck, ChevronDown, ChevronUp, Lightbulb, Play, Search, ChevronDown as ChevronDownIcon, FileText, Wrench, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/hooks/useChat";
+import { useFavorites } from "@/hooks/useFavorites";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -17,6 +18,7 @@ import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import ShareDialog from "@/components/ui/ShareDialog";
 import { useSmartAutoScroll } from "@/hooks/useSmartAutoScroll";
 import { useMessageStream } from "@/hooks/useMessageStream";
+import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
 import EChartsBlock from "./EChartsBlock";
 
@@ -153,6 +155,34 @@ function StreamingText({ messageId, content, isStreaming, className }: { message
   );
 }
 
+function AssistantMeta({ msg, isStreaming, model }: { msg: Message; isStreaming: boolean; model?: ChatModel }) {
+  const realtime = useMessageRealtime(isStreaming ? msg.id : "");
+  const activityStatus = realtime?.activityStatus ?? msg.activityStatus;
+
+  if (!model) return null;
+
+  return (
+    <div className="flex items-center gap-2 mb-2">
+      <div className="flex items-center gap-1.5">
+        <div className="w-1 h-1 rounded-full" style={{ backgroundColor: model.color }} />
+        <span className="text-[11px] text-text-tertiary">{model.name}</span>
+      </div>
+      {activityStatus && activityStatus.status !== "completed" && (
+        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full text-amber-600 bg-amber-500/10">
+          {activityStatus.kind === "tool_call" ? (
+            <Wrench className="w-3 h-3 animate-pulse" />
+          ) : activityStatus.kind === "file_search" ? (
+            <FileText className="w-3 h-3 animate-pulse" />
+          ) : (
+            <Search className="w-3 h-3 animate-pulse" />
+          )}
+          {activityStatus.label}
+        </span>
+      )}
+    </div>
+  );
+}
+
 // 解析 <think>...思考过程...</think>
 function parseThinkContent(content: string): { reasoning: string | null; answer: string; isThinking: boolean } {
   const startIdx = content.indexOf("<think>");
@@ -266,12 +296,16 @@ function MessageMenu({
   onDelete,
   onRegenerate,
   onSelectMode,
+  onFavorite,
+  isFavorited,
   showRegenerate,
 }: {
   onCopy: () => void;
   onDelete: () => void;
   onRegenerate?: () => void;
   onSelectMode: () => void;
+  onFavorite?: () => void;
+  isFavorited?: boolean;
   showRegenerate: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -323,6 +357,15 @@ function MessageMenu({
               <Share2 className="w-3.5 h-3.5" />
               选择分享
             </button>
+            {onFavorite && (
+              <button
+                onClick={() => { onFavorite(); setOpen(false); }}
+                className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors"
+              >
+                <Star className={cn("w-3.5 h-3.5", isFavorited && "fill-amber-400 text-amber-400")} />
+                {isFavorited ? "取消收藏" : "收藏"}
+              </button>
+            )}
             <div className="mx-2 my-1 h-px bg-surface-border" />
             <button
               onClick={() => { onDelete(); setOpen(false); }}
@@ -343,6 +386,8 @@ function MessageActions({
   onDelete,
   onRegenerate,
   onSelectMode,
+  onFavorite,
+  isFavorited,
   showRegenerate,
   align,
   visible,
@@ -353,6 +398,8 @@ function MessageActions({
   onDelete: () => void;
   onRegenerate?: () => void;
   onSelectMode: () => void;
+  onFavorite?: () => void;
+  isFavorited?: boolean;
   showRegenerate: boolean;
   align: "left" | "right";
   visible: boolean;
@@ -425,6 +472,20 @@ function MessageActions({
       >
         <Share2 className="w-3.5 h-3.5" />
       </button>
+      {onFavorite && (
+        <button
+          onClick={onFavorite}
+          className={cn(
+            "p-1 rounded-md transition-colors",
+            isFavorited
+              ? "text-amber-400 hover:text-amber-500 hover:bg-amber-400/10"
+              : "text-text-tertiary hover:text-amber-400 hover:bg-amber-400/10"
+          )}
+          title={isFavorited ? "取消收藏" : "收藏"}
+        >
+          <Star className={cn("w-3.5 h-3.5", isFavorited && "fill-amber-400")} />
+        </button>
+      )}
       <button
         onClick={onDelete}
         className="p-1 rounded-md text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-colors"
@@ -538,6 +599,19 @@ function MessageList({
   const [shareOpen, setShareOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [compareModelMenuOpen, setCompareModelMenuOpen] = useState<number | null>(null);
+
+  // 收藏功能
+  const { toggleFavorite, isFavorited, checkBatch } = useFavorites();
+
+  // 批量检查消息收藏状态
+  useEffect(() => {
+    const ids = messages
+      .map((m) => m.serverMessageId)
+      .filter((id): id is number => typeof id === "number" && id > 0);
+    if (ids.length > 0) {
+      checkBatch(ids);
+    }
+  }, [messages, checkBatch]);
 
   // 读取本地用户信息（必须在条件分支之前调用 Hook）
   const [userName, setUserName] = useState<string>("");
@@ -794,7 +868,7 @@ function MessageList({
                           const model = models.find((m) => m.id === msg.model);
                           const isUser = msg.role === "user";
                           const isLast = msgIndex === colMsgs.length - 1;
-                          const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt;
+                          const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && isLast;
                           const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading;
 
                           return (
@@ -818,24 +892,7 @@ function MessageList({
                                     )}
                                   >
                                     {!isUser && model && (
-                                      <div className="flex items-center gap-2 mb-2">
-                                        <div className="flex items-center gap-1.5">
-                                          <div className="w-1 h-1 rounded-full" style={{ backgroundColor: model.color }} />
-                                          <span className="text-[11px] text-text-tertiary">{model.name}</span>
-                                        </div>
-                                        {msg.activityStatus && msg.activityStatus.status !== "completed" && (
-                                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full text-amber-600 bg-amber-500/10">
-                                            {msg.activityStatus.kind === "tool_call" ? (
-                                              <Wrench className="w-3 h-3 animate-pulse" />
-                                            ) : msg.activityStatus.kind === "file_search" ? (
-                                              <FileText className="w-3 h-3 animate-pulse" />
-                                            ) : (
-                                              <Search className="w-3 h-3 animate-pulse" />
-                                            )}
-                                            {msg.activityStatus.label}
-                                          </span>
-                                        )}
-                                      </div>
+                                      <AssistantMeta msg={msg} isStreaming={isStreaming} model={model} />
                                     )}
 
                                     {isUser ? (
@@ -898,6 +955,8 @@ function MessageList({
                                         onDelete={() => setDeleteTarget(msg.id)}
                                         onRegenerate={onRegenerate}
                                         onSelectMode={enterSelectMode}
+                                        onFavorite={msg.serverMessageId && conversationId ? () => toggleFavorite(msg.serverMessageId!, conversationId) : undefined}
+                                        isFavorited={msg.serverMessageId ? isFavorited(msg.serverMessageId) : false}
                                         showRegenerate={canRegenerate}
                                         align={isUser ? "right" : "left"}
                                         visible={isLast}
@@ -1043,7 +1102,7 @@ function MessageList({
           const model = models.find((m) => m.id === msg.model);
           const isUser = msg.role === "user";
           const isLast = index === messages.length - 1;
-          const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt;
+          const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && isLast;
           const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading;
           const isSelected = selectedIds.has(msg.id);
 
@@ -1087,24 +1146,7 @@ function MessageList({
                   >
 
                   {!isUser && model && !selectMode && (
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-1 h-1 rounded-full" style={{ backgroundColor: model.color }} />
-                        <span className="text-[11px] text-text-tertiary">{model.name}</span>
-                      </div>
-                      {msg.activityStatus && msg.activityStatus.status !== "completed" && (
-                        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full text-amber-600 bg-amber-500/10">
-                          {msg.activityStatus.kind === "tool_call" ? (
-                            <Wrench className="w-3 h-3 animate-pulse" />
-                          ) : msg.activityStatus.kind === "file_search" ? (
-                            <FileText className="w-3 h-3 animate-pulse" />
-                          ) : (
-                            <Search className="w-3 h-3 animate-pulse" />
-                          )}
-                          {msg.activityStatus.label}
-                        </span>
-                      )}
-                    </div>
+                    <AssistantMeta msg={msg} isStreaming={isStreaming} model={model} />
                   )}
 
                   {isUser ? (
@@ -1178,6 +1220,8 @@ function MessageList({
                     onDelete={() => setDeleteTarget(msg.id)}
                     onRegenerate={onRegenerate}
                     onSelectMode={enterSelectMode}
+                    onFavorite={msg.serverMessageId && conversationId ? () => toggleFavorite(msg.serverMessageId!, conversationId) : undefined}
+                    isFavorited={msg.serverMessageId ? isFavorited(msg.serverMessageId) : false}
                     showRegenerate={canRegenerate}
                     align={isUser ? "right" : "left"}
                     visible={isLast}
