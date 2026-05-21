@@ -9,7 +9,10 @@ export function useSmartAutoScroll({
   threshold = 120,
   enabled = true,
 }: UseSmartAutoScrollOptions) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
+  const containerRef = useCallback((node: HTMLDivElement | null) => {
+    setContainerEl(node);
+  }, []);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const isAtBottomRef = useRef(true);
   const isAutoScrollingRef = useRef(false);
@@ -19,11 +22,11 @@ export function useSmartAutoScroll({
   const [showScrollButton, setShowScrollButton] = useState(false);
 
   const checkIsAtBottom = useCallback(() => {
-    const el = containerRef.current;
+    const el = containerEl;
     if (!el) return true;
     const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     return distanceToBottom <= threshold;
-  }, [threshold]);
+  }, [containerEl, threshold]);
 
   // 监听滚动：程序自动滚动期间屏蔽，避免按钮闪烁
   const handleScroll = useCallback(() => {
@@ -36,7 +39,7 @@ export function useSmartAutoScroll({
 
   // 强制滚到底部
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
-    const container = containerRef.current;
+    const container = containerEl;
     const bottom = bottomRef.current;
     if (!container || !bottom) return;
 
@@ -88,25 +91,43 @@ export function useSmartAutoScroll({
       container.scrollTop = container.scrollHeight - container.clientHeight;
       isAutoScrollingRef.current = false;
     }
-  }, []);
+  }, [containerEl]);
 
   // 流式输出跟随：只有当用户本来就在底部时才滚动
   const followIfAtBottom = useCallback(() => {
     if (!isAtBottomRef.current) return;
-    const container = containerRef.current;
+    const container = containerEl;
     if (!container) return;
     container.scrollTop = container.scrollHeight - container.clientHeight;
-  }, []);
+  }, [containerEl]);
 
-  // 初始化 + 外部依赖变化时主动检查一次
+  // 初始化 + DOM 就绪/外部依赖变化时主动检查一次
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !containerEl) return;
     const atBottom = checkIsAtBottom();
     isAtBottomRef.current = atBottom;
     setIsAtBottom(atBottom);
     setShowScrollButton(!atBottom);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled]);
+  }, [enabled, containerEl, checkIsAtBottom]);
+
+  // MutationObserver：DOM 变化时自动跟随（仅当用户在底部时）
+  useEffect(() => {
+    if (!enabled || !containerEl) return;
+
+    const handleMutation = () => {
+      const c = containerEl;
+      if (!c) return;
+      if (!isAtBottomRef.current) return;
+      c.scrollTop = c.scrollHeight - c.clientHeight;
+    };
+
+    const mo = new MutationObserver(handleMutation);
+    mo.observe(containerEl, { childList: true, subtree: true, characterData: true });
+
+    return () => {
+      mo.disconnect();
+    };
+  }, [enabled, containerEl]);
 
   return {
     containerRef,
