@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useI18n } from "@/lib/i18n";
 function cleanPathname(p: string | null): string {
   let cleaned = (p ?? "").replace(/\.html$/, "").split("?")[0];
   // Express 静态服务给目录加 trailing slash，如 /workspace/ → /workspace
@@ -49,30 +50,32 @@ interface ConversationSearchResult extends Conversation {
 
 /* ───── 辅助函数 ───── */
 
-function getTimeGroupLabel(dateStr: string): string {
+function getTimeGroupLabel(dateStr: string, t: (key: string) => string): string {
   const date = new Date(dateStr);
   const now = new Date();
   const nowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const targetDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const diffDays = Math.floor((nowDate.getTime() - targetDate.getTime()) / (1000 * 60 * 60 * 24));
-  if (diffDays <= 0) return "今天";
-  if (diffDays === 1) return "昨天";
-  if (diffDays <= 7) return "七天内";
-  if (diffDays <= 30) return "30天内";
+  if (diffDays <= 0) return t("sidebar.time.today");
+  if (diffDays === 1) return t("sidebar.time.yesterday");
+  if (diffDays <= 7) return t("sidebar.time.last7days");
+  if (diffDays <= 30) return t("sidebar.time.last30days");
   return `${date.getFullYear()}.${date.getMonth() + 1}`;
 }
 
-function groupConversationsByTime(conversations: Conversation[]): Record<string, Conversation[]> {
+function groupConversationsByTime(conversations: Conversation[], t: (key: string) => string): Record<string, Conversation[]> {
   const groups: Record<string, Conversation[]> = {};
   for (const conv of conversations) {
-    const label = getTimeGroupLabel(conv.updated_at);
+    const label = getTimeGroupLabel(conv.updated_at, t);
     if (!groups[label]) groups[label] = [];
     groups[label].push(conv);
   }
   return groups;
 }
 
-const GROUP_ORDER = ["今天", "昨天", "七天内", "30天内"];
+function getGroupOrder(t: (key: string) => string): string[] {
+  return [t("sidebar.time.today"), t("sidebar.time.yesterday"), t("sidebar.time.last7days"), t("sidebar.time.last30days")];
+}
 
 function sortConversations(conversations: Conversation[]): Conversation[] {
   return [...conversations].sort((a, b) => {
@@ -81,10 +84,11 @@ function sortConversations(conversations: Conversation[]): Conversation[] {
   });
 }
 
-function sortGroupLabels(labels: string[]): string[] {
-  const fixed = GROUP_ORDER.filter((g) => labels.includes(g));
+function sortGroupLabels(labels: string[], t: (key: string) => string): string[] {
+  const groupOrder = getGroupOrder(t);
+  const fixed = groupOrder.filter((g) => labels.includes(g));
   const months = labels
-    .filter((l) => !GROUP_ORDER.includes(l))
+    .filter((l) => !groupOrder.includes(l))
     .sort((a, b) => {
       const [ay, am] = a.split(".").map(Number);
       const [by, bm] = b.split(".").map(Number);
@@ -150,6 +154,7 @@ function ConvMenu({
   onRename: () => void; onTogglePin: () => void; pinned: boolean;
   onShare: () => void; onDelete: () => void;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -184,11 +189,11 @@ function ConvMenu({
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div id="conv-menu-dropdown" className="fixed z-50 w-36 rounded-xl border border-surface-border bg-surface-elevated shadow-xl py-1 animate-fade-in" style={{ top: menuPos.top, left: menuPos.left }}>
-            <button onClick={(e) => { e.stopPropagation(); onRename(); setOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors"><Pencil className="w-3.5 h-3.5" />重命名</button>
-            <button onClick={(e) => { e.stopPropagation(); onTogglePin(); setOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors">{pinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}{pinned ? "取消置顶" : "置顶"}</button>
-            <button onClick={(e) => { e.stopPropagation(); handleShare(); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors">{copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Link2 className="w-3.5 h-3.5" />}{copied ? "已复制" : "分享"}</button>
+            <button onClick={(e) => { e.stopPropagation(); onRename(); setOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors"><Pencil className="w-3.5 h-3.5" />{t("sidebar.menu.rename")}</button>
+            <button onClick={(e) => { e.stopPropagation(); onTogglePin(); setOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors">{pinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}{pinned ? t("sidebar.menu.unpin") : t("sidebar.menu.pin")}</button>
+            <button onClick={(e) => { e.stopPropagation(); handleShare(); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors">{copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Link2 className="w-3.5 h-3.5" />}{copied ? t("sidebar.menu.copied") : t("sidebar.menu.share")}</button>
             <div className="mx-2 my-1 h-px bg-surface-border" />
-            <button onClick={(e) => { e.stopPropagation(); onDelete(); setOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors"><Trash2 className="w-3.5 h-3.5" />删除</button>
+            <button onClick={(e) => { e.stopPropagation(); onDelete(); setOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors"><Trash2 className="w-3.5 h-3.5" />{t("sidebar.menu.delete")}</button>
           </div>
         </>, document.body
       )}
@@ -203,6 +208,7 @@ function MoreHoverPanel({
 }: {
   open: boolean; anchorEl: HTMLElement | null; onClose: () => void; onMouseEnter?: () => void; onMouseLeave?: () => void;
 }) {
+  const { t } = useI18n();
   const router = useRouter();
   const [pos, setPos] = useState({ top: 0, left: 0 });
 
@@ -227,19 +233,19 @@ function MoreHoverPanel({
 
   const groups = [
     {
-      title: "创建",
+      title: t("sidebar.panel.create"),
       items: [
-        { icon: ImageIcon, label: "AI画图", href: "/image", color: "text-purple-500", bg: "bg-purple-500/10" },
-        { icon: Image, label: "背景移除", href: "/image/edit?mode=remove-bg", color: "text-green-500", bg: "bg-green-500/10" },
-        { icon: Eraser, label: "背景替换", href: "/image/edit?mode=replace-bg", color: "text-purple-500", bg: "bg-purple-500/10" },
-        { icon: Type, label: "文字移除", href: "/image/edit?mode=text-removal", color: "text-amber-500", bg: "bg-amber-500/10" },
-        { icon: ZoomIn, label: "画质提升", href: "/image/edit?mode=upscale", color: "text-cyan-500", bg: "bg-cyan-500/10" },
+        { icon: ImageIcon, label: t("sidebar.panel.ai_draw"), href: "/image", color: "text-purple-500", bg: "bg-purple-500/10" },
+        { icon: Image, label: t("sidebar.panel.remove_bg"), href: "/image/edit?mode=remove-bg", color: "text-green-500", bg: "bg-green-500/10" },
+        { icon: Eraser, label: t("sidebar.panel.replace_bg"), href: "/image/edit?mode=replace-bg", color: "text-purple-500", bg: "bg-purple-500/10" },
+        { icon: Type, label: t("sidebar.panel.text_removal"), href: "/image/edit?mode=text-removal", color: "text-amber-500", bg: "bg-amber-500/10" },
+        { icon: ZoomIn, label: t("sidebar.panel.upscale"), href: "/image/edit?mode=upscale", color: "text-cyan-500", bg: "bg-cyan-500/10" },
       ],
     },
     {
-      title: "模板",
+      title: t("sidebar.panel.templates"),
       items: [
-        { icon: FileText, label: "回答模板", href: "/templates", color: "text-blue-500", bg: "bg-blue-500/10" },
+        { icon: FileText, label: t("sidebar.panel.answer_template"), href: "/templates", color: "text-blue-500", bg: "bg-blue-500/10" },
       ],
     },
   ];
@@ -287,6 +293,7 @@ function WorkHoverPanel({
 }: {
   open: boolean; anchorEl: HTMLElement | null; onClose: () => void; onMouseEnter?: () => void; onMouseLeave?: () => void;
 }) {
+  const { t } = useI18n();
   const router = useRouter();
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const [skills, setSkills] = useState<Array<{ key: string; title?: string; display_name?: string; description: string; icon: string; tags?: string[]; is_meta?: boolean }>>([]);
@@ -368,7 +375,7 @@ function WorkHoverPanel({
     >
       {/* AI PPT */}
       <div className="mb-3">
-        <h3 className="text-sm font-semibold text-text-primary mb-2 px-1">工具</h3>
+        <h3 className="text-sm font-semibold text-text-primary mb-2 px-1">{t("sidebar.panel.tools")}</h3>
         <div className="grid grid-cols-2 gap-1.5">
           <button
             // onClick={() => handleNavigate("/ppt")}
@@ -388,7 +395,7 @@ function WorkHoverPanel({
 
       {/* Skills */}
       <div className="border-t border-surface-border/40 pt-3">
-        <h3 className="text-sm font-semibold text-text-primary mb-2 px-1">智能体</h3>
+        <h3 className="text-sm font-semibold text-text-primary mb-2 px-1">{t("sidebar.panel.agents")}</h3>
         {loading ? (
           <div className="flex items-center justify-center py-4">
             <div className="w-5 h-5 border-2 border-surface-border border-t-brand rounded-full animate-spin" />
@@ -441,11 +448,12 @@ function ConversationSkeleton() {
 /* ───── 主组件 ───── */
 
 export default function AppSidebar({ skillKey }: { skillKey?: string }) {
+  const { t } = useI18n();
   const themeCtx = useTheme();
   const theme = themeCtx?.theme || "light";
   const [collapsed, setCollapsed] = useState(false);
   const [expandedLabels, setExpandedLabels] = useState<Set<string>>(() => {
-    if (typeof window === "undefined") return new Set(["今天"]);
+    if (typeof window === "undefined") return new Set([t("sidebar.time.today")]);
     try {
       const saved = localStorage.getItem("sidebar_expanded_labels");
       if (saved) {
@@ -453,7 +461,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
         if (Array.isArray(arr) && arr.length > 0) return new Set(arr);
       }
     } catch { /* ignore */ }
-    return new Set(["今天"]);
+    return new Set([t("sidebar.time.today")]);
   });
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     if (typeof window !== "undefined") {
@@ -768,21 +776,21 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
       return (
         <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
           <div className="flex size-8 items-center justify-center rounded-full bg-surface-card border border-surface-border"><MessageSquare className="w-4 h-4 text-text-tertiary" /></div>
-          <div className="space-y-1"><p className="text-xs text-text-secondary">暂无对话</p><p className="text-[11px] text-text-tertiary">{user ? "点击上方按钮开始聊天" : "登录后保存聊天历史"}</p></div>
+          <div className="space-y-1"><p className="text-xs text-text-secondary">{t("sidebar.empty.no_conversations")}</p><p className="text-[11px] text-text-tertiary">{user ? t("sidebar.empty.start_chat_hint") : t("sidebar.empty.login_hint")}</p></div>
         </div>
       );
     }
 
     const pinned = conversations.filter(c => c.pinned);
     const unpinned = conversations.filter(c => !c.pinned);
-    const groups = groupConversationsByTime(unpinned);
-    const sortedLabels = sortGroupLabels(Object.keys(groups));
+    const groups = groupConversationsByTime(unpinned, t);
+    const sortedLabels = sortGroupLabels(Object.keys(groups), t);
 
     return (
       <div className="space-y-3">
         {pinned.length > 0 && (
           <div>
-            <div className="px-3 py-1 text-[11px] font-medium text-text-tertiary uppercase tracking-wider">置顶</div>
+            <div className="px-3 py-1 text-[11px] font-medium text-text-tertiary uppercase tracking-wider">{t("sidebar.pinned")}</div>
             <div className="space-y-0.5">
               {pinned.map(conv => {
                 const isActive = String(conv.id) === currentConvId;
@@ -798,7 +806,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                   <Link key={conv.id} href={convHref} className={cn("group flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-brand/10 text-brand" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
                     <IconComp className={cn("w-3.5 h-3.5 shrink-0 transition-all duration-200", iconColor)} />
                     <Pin className="w-3 h-3 shrink-0 text-brand" />
-                    <span className={cn("flex-1 truncate text-left", isActive && "font-medium")}>{conv.title || "新对话"}</span>
+                    <span className={cn("flex-1 truncate text-left", isActive && "font-medium")}>{conv.title || t("sidebar.empty.new_chat")}</span>
                     <div className="opacity-0 group-hover:opacity-100 transition-opacity"><ConvMenu onRename={() => setRenameTarget(conv)} onTogglePin={() => handleTogglePin(conv)} pinned={conv.pinned} onShare={() => handleShare(conv)} onDelete={() => handleDelete(conv.id)} /></div>
                   </Link>
                 );
@@ -840,7 +848,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                 return (
                   <Link key={conv.id} href={convHref} className={cn("group flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-brand/10 text-brand" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
                     <IconComp className={cn("w-3.5 h-3.5 shrink-0 transition-all duration-200", iconColor)} />
-                    <span className={cn("flex-1 truncate text-left", isActive && "font-medium")}>{conv.title || "新对话"}</span>
+                    <span className={cn("flex-1 truncate text-left", isActive && "font-medium")}>{conv.title || t("sidebar.empty.new_chat")}</span>
                     <div className="opacity-0 group-hover:opacity-100 transition-opacity"><ConvMenu onRename={() => setRenameTarget(conv)} onTogglePin={() => handleTogglePin(conv)} pinned={conv.pinned} onShare={() => handleShare(conv)} onDelete={() => handleDelete(conv.id)} /></div>
                   </Link>
                 );
@@ -883,7 +891,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
             <button
               onClick={() => { setSearchOpen(true); setSearchQuery(""); setSearchResults([]); }}
               className="mr-1 rounded-lg p-1.5 text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
-              title="搜索对话"
+              title={t("sidebar.tooltip.search")}
             >
               <Search className="w-4 h-4" />
             </button>
@@ -908,7 +916,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
               <button
                 type="button"
                 onClick={handleNewChat}
-                onMouseEnter={showSidebarTooltip("聊天")}
+                onMouseEnter={showSidebarTooltip(t("sidebar.tooltip.chat"))}
                 onMouseLeave={hideSidebarTooltip}
                 className={cn(
                   "p-2.5 rounded-xl transition-colors block",
@@ -924,7 +932,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
               {/* workspace空间 */}
               <Link
                 href="/workspace"
-                onMouseEnter={showSidebarTooltip("workspace空间")}
+                onMouseEnter={showSidebarTooltip(t("sidebar.tooltip.workspace"))}
                 onMouseLeave={hideSidebarTooltip}
                 className={cn(
                   "p-2.5 rounded-xl transition-colors",
@@ -977,7 +985,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
               {/* 收藏 */}
               <button
                 onClick={() => setFavoriteListOpen(true)}
-                onMouseEnter={showSidebarTooltip("收藏")}
+                onMouseEnter={showSidebarTooltip(t("sidebar.tooltip.favorites"))}
                 onMouseLeave={hideSidebarTooltip}
                 className={cn(
                   "p-2.5 rounded-xl transition-colors",
@@ -995,7 +1003,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
             <div className="py-2">
               <button
                 onClick={() => setCollapsed(false)}
-                onMouseEnter={showSidebarTooltip("历史聊天")}
+                onMouseEnter={showSidebarTooltip(t("sidebar.tooltip.history"))}
                 onMouseLeave={hideSidebarTooltip}
                 className="p-2.5 rounded-xl hover:bg-surface-card transition-colors"
               >
@@ -1018,7 +1026,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                 )}
               >
                 <MessageSquare className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/chat" ? "text-brand" : "text-text-tertiary")} />
-                <span>聊天</span>
+                <span>{t("sidebar.nav.chat")}</span>
               </button>
             </div>
 
@@ -1042,7 +1050,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                   )}
                 >
                   <FolderKanban className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/workspace" ? "text-brand" : "text-text-tertiary")} />
-                  <span>workspace空间</span>
+                  <span>{t("sidebar.nav.workspace")}</span>
                 </Link>
 
                 {/* AI工作 - hover 展开 */}
@@ -1065,7 +1073,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                           ? "text-orange-500"
                           : "text-text-tertiary"
                       )} />
-                      <span>AI工作</span>
+                      <span>{t("sidebar.nav.ai_work")}</span>
                     </div>
                     <ChevronRight className="w-4 h-4 text-text-tertiary" />
                   </button>
@@ -1087,7 +1095,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                   >
                     <div className="flex items-center gap-3">
                       <LayoutGrid className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/image" || pathname?.startsWith("/image/") || pathname === "/templates" ? "text-brand" : "text-text-tertiary")} />
-                      <span>AI创作</span>
+                      <span>{t("sidebar.nav.ai_create")}</span>
                     </div>
                     <ChevronRight className="w-4 h-4 text-text-tertiary" />
                   </button>
@@ -1102,7 +1110,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                   )}
                 >
                   <Star className={cn("w-[18px] h-[18px] shrink-0 transition-colors", favoriteListOpen ? "text-amber-400 fill-amber-400" : "text-text-tertiary")} />
-                  <span>收藏</span>
+                  <span>{t("sidebar.nav.favorites")}</span>
                 </button>
               </div>
             </div>
@@ -1110,7 +1118,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
             {/* ▼ 历史分组 */}
             <div className="px-3 py-2">
               <div className="flex items-center justify-between mb-2 px-1">
-                <span className="text-sm font-bold text-text-tertiary/80 tracking-wide">历史</span>
+                <span className="text-sm font-bold text-text-tertiary/80 tracking-wide">{t("sidebar.nav.history")}</span>
               </div>
               {renderConversationList()}
             </div>
@@ -1164,8 +1172,8 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
       )}
 
       {/* 弹窗 */}
-      <ConfirmDialog isOpen={!!deleteTarget} title="删除对话" description="删除后，该对话将不可恢复。" confirmText="删除" cancelText="取消" variant="danger" onConfirm={confirmDelete} onCancel={() => setDeleteTarget(null)} />
-      <InputDialog isOpen={!!renameTarget} title="重命名对话" defaultValue={renameTarget?.title || ""} placeholder="输入新的对话名称" confirmText="保存" cancelText="取消" onConfirm={handleRename} onCancel={() => setRenameTarget(null)} />
+      <ConfirmDialog isOpen={!!deleteTarget} title={t("sidebar.dialog.delete_title")} description={t("sidebar.dialog.delete_desc")} confirmText={t("sidebar.dialog.delete_confirm")} cancelText={t("sidebar.dialog.cancel")} variant="danger" onConfirm={confirmDelete} onCancel={() => setDeleteTarget(null)} />
+      <InputDialog isOpen={!!renameTarget} title={t("sidebar.dialog.rename_title")} defaultValue={renameTarget?.title || ""} placeholder={t("sidebar.dialog.rename_placeholder")} confirmText={t("sidebar.dialog.save")} cancelText={t("sidebar.dialog.cancel")} onConfirm={handleRename} onCancel={() => setRenameTarget(null)} />
 
       {/* ── 搜索弹窗 ── */}
       {searchOpen && createPortal(
@@ -1186,7 +1194,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
               <input
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="搜索对话"
+                placeholder={t("sidebar.search.placeholder")}
                 autoFocus
                 className="flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-tertiary"
               />
@@ -1207,7 +1215,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                   <div className="flex size-10 items-center justify-center rounded-full bg-surface-elevated border border-surface-border">
                     <MessageSquare className="w-5 h-5 text-text-tertiary" />
                   </div>
-                  <p className="text-sm text-text-secondary">登录后可搜索对话历史</p>
+                  <p className="text-sm text-text-secondary">{t("sidebar.search.login_required")}</p>
                 </div>
               ) : searchQuery.trim() ? (
                 searchLoading ? (
@@ -1228,14 +1236,14 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                       <Search className="w-5 h-5 text-text-tertiary" />
                     </div>
                     <div className="space-y-1">
-                      <p className="text-sm text-text-secondary">没有找到相关对话</p>
-                      <p className="text-xs text-text-tertiary">换个关键词试试</p>
+                      <p className="text-sm text-text-secondary">{t("sidebar.search.no_results")}</p>
+                      <p className="text-xs text-text-tertiary">{t("sidebar.search.try_different")}</p>
                     </div>
                   </div>
                 ) : (
                   <div className="space-y-0.5 py-1">
                     <div className="px-4 py-2 text-xs text-text-tertiary border-b border-surface-border/40">
-                      找到 {searchResults.length} 个相关对话
+                      {t("sidebar.search.results_found")} {searchResults.length} {t("sidebar.search.results_count_suffix")}
                     </div>
                     {searchResults.map((conv, idx) => {
                       const convHref = conv.skill_key
@@ -1262,7 +1270,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-sm font-medium text-text-primary truncate">
-                                {conv.title || "新对话"}
+                                {conv.title || t("sidebar.empty.new_chat")}
                               </span>
                               <span className="text-xs text-text-tertiary shrink-0">
                                 {new Date(conv.updated_at).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" })}
@@ -1290,7 +1298,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                   <div className="flex size-10 items-center justify-center rounded-full bg-surface-elevated border border-surface-border">
                     <Search className="w-5 h-5 text-text-tertiary" />
                   </div>
-                  <p className="text-sm text-text-secondary">输入关键词搜索对话历史</p>
+                  <p className="text-sm text-text-secondary">{t("sidebar.search.enter_keyword")}</p>
                 </div>
               )}
             </div>

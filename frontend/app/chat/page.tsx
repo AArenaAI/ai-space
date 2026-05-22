@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { useI18n } from "@/lib/i18n";
 import AppSidebar from "@/components/sidebar/AppSidebar";
 import ChatWrapper from "@/components/chat/ChatWrapper";
 import MobileNav from "@/components/mobile/MobileNav";
@@ -31,6 +32,7 @@ function useAuth() {
 
 export default function ChatPage() {
   const router = useRouter();
+  const { t } = useI18n();
   const { isLoggedIn, check } = useAuth();
   const [showLogin, setShowLogin] = useState(false);
 
@@ -49,7 +51,7 @@ export default function ChatPage() {
         <div className="w-10 h-10 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center animate-pulse">
           <span className="text-sm font-bold text-text-primary">AI</span>
         </div>
-        <p className="text-sm text-text-secondary mt-3">加载中...</p>
+        <p className="text-sm text-text-secondary mt-3">{t("common.loading")}</p>
       </div>
     );
   }

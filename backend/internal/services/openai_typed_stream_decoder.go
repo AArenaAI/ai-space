@@ -152,16 +152,8 @@ func (d *OpenAIResponsesTypedDecoder) parseTypedEvent(event responses.ResponseSt
 		return &AIStreamEvent{Type: EventToolCallDone, Delta: "工具调用完成"}
 	case "response.completed":
 		completed := event.AsResponseCompleted()
-		finalText := strings.TrimSpace(extractTextFromTypedResponse(completed.Response))
-		streamedText := strings.TrimSpace(d.fullText.String())
-		if finalText != "" && streamedText != finalText && !strings.Contains(streamedText, finalText) {
-			missingText := finalText
-			if streamedText != "" && strings.HasPrefix(finalText, streamedText) {
-				missingText = strings.TrimPrefix(finalText, streamedText)
-			}
-			if missingText != "" {
-				d.pending = append(d.pending, &AIStreamEvent{Type: EventTextDelta, Delta: missingText})
-			}
+		if missingText := missingOpenAICompletedSuffix(d.fullText.String(), extractTextFromTypedResponse(completed.Response)); missingText != "" {
+			d.pending = append(d.pending, &AIStreamEvent{Type: EventTextDelta, Delta: missingText})
 		}
 		if completed.Response.Usage.InputTokens > 0 || completed.Response.Usage.OutputTokens > 0 || completed.Response.Usage.TotalTokens > 0 {
 			d.pending = append(d.pending, &AIStreamEvent{Type: EventUsage, Usage: &TokenUsage{

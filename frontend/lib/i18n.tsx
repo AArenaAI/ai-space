@@ -61,6 +61,81 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     [dict]
   );
 
+  useEffect(() => {
+    if (!mounted || typeof document === "undefined") return;
+
+    const zhDict = dictionaries["zh-CN"];
+    const enDict = dictionaries.en;
+    const zhToEn = new Map<string, string>();
+    const enToZh = new Map<string, string>();
+
+    Object.keys(zhDict).forEach((key) => {
+      const zh = zhDict[key];
+      const enValue = enDict[key];
+      if (!zh || !enValue || zh === enValue) return;
+      zhToEn.set(zh, enValue);
+      enToZh.set(enValue, zh);
+    });
+
+    const map = language === "en" ? zhToEn : enToZh;
+    const attrNames = ["placeholder", "title", "aria-label", "alt"];
+
+    const translateText = (value: string) => {
+      const trimmed = value.trim();
+      const translated = map.get(trimmed);
+      if (!translated) return value;
+      const leading = value.match(/^\s*/)?.[0] ?? "";
+      const trailing = value.match(/\s*$/)?.[0] ?? "";
+      return `${leading}${translated}${trailing}`;
+    };
+
+    const translateNode = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE && node.textContent) {
+        const next = translateText(node.textContent);
+        if (next !== node.textContent) node.textContent = next;
+        return;
+      }
+
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      const el = node as HTMLElement;
+      if (["SCRIPT", "STYLE", "TEXTAREA", "INPUT"].includes(el.tagName)) {
+        attrNames.forEach((attr) => {
+          const value = el.getAttribute(attr);
+          if (!value) return;
+          const next = translateText(value);
+          if (next !== value) el.setAttribute(attr, next);
+        });
+        return;
+      }
+
+      attrNames.forEach((attr) => {
+        const value = el.getAttribute(attr);
+        if (!value) return;
+        const next = translateText(value);
+        if (next !== value) el.setAttribute(attr, next);
+      });
+      el.childNodes.forEach(translateNode);
+    };
+
+    const run = () => translateNode(document.body);
+    run();
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.type === "characterData") translateNode(mutation.target);
+        mutation.addedNodes.forEach(translateNode);
+        if (mutation.type === "attributes") translateNode(mutation.target);
+      }
+    });
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: attrNames,
+    });
+    return () => observer.disconnect();
+  }, [language, mounted]);
+
   return (
     <I18nContext.Provider value={{ language, setLanguage, t, languages: LANGUAGES }}>
       {children}

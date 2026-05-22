@@ -236,19 +236,24 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         }
         lastContent = content;
         const isFinished = isCompleted || isHardStopped || (isSoftTerminal && terminalStableCount >= 3);
+        const streamActive = !!taskStreamsRef.current[localMessageId];
+        const liveContent = streamGet(localMessageId) || realtimeGet(localMessageId)?.content || "";
         setMessages((prev) =>
           prev.map((m) => {
             if (m.id !== localMessageId) return m;
+            // SSE / task event stream 仍在追加时，polling 只能更新状态，不能用 DB 全文覆盖内容。
+            // 否则 OpenAI completed 后 message.content 已是全文，但补尾 delta 还在路上，UI 会从半截直接跳全文。
+            const nextContent = streamActive ? (liveContent || m.content) : (content || m.content);
             return {
               ...m,
-              content: content || m.content,
+              content: nextContent,
               serverMessageId,
               activityStatus: isFinished ? undefined : { kind: "generating", status: "running", label: "任务繁忙，正在生成中" },
               completedAt: isFinished ? Date.now() : undefined,
             };
           })
         );
-        if (isFinished) {
+        if (isFinished && !streamActive) {
           stopBackgroundPoller(localMessageId);
           stopTaskStream(localMessageId);
           setIsLoading(false);
@@ -280,7 +285,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     taskStreamsRef.current[localMessageId] = controller;
 
     let accumulated = initialContent || "";
-    let inReasoningBlock = false;
+    const lastThinkOpen = accumulated.lastIndexOf("<think>");
+    const lastThinkClose = accumulated.lastIndexOf("</think>");
+    let inReasoningBlock = lastThinkOpen !== -1 && lastThinkOpen > lastThinkClose;
     let buffer = "";
     let sawDone = false;
     let latestSequence = after || 0;
@@ -387,7 +394,11 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             inReasoningBlock = true;
           }
           delta += reasoningDelta;
-        } else if (contentDelta) {
+        }
+        // OpenAI Responses can occasionally emit reasoning and visible text in the same delta.
+        // Handle content independently instead of `else if`, otherwise the visible answer may
+        // stay inside the open <think> block until a full page refresh reloads DB content.
+        if (contentDelta) {
           if (inReasoningBlock) {
             delta += "</think>";
             inReasoningBlock = false;
@@ -456,7 +467,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         }
         realtimeClear(localMessageId);
         delete taskStreamsRef.current[localMessageId];
-        if (!controller.signal.aborted && serverMessageId) {
+        // 无论是否被 abort，只要 serverMessageId 存在就兜底轮询，避免 task stream 异常中断后前端悬停
+        if (serverMessageId) {
           startBackgroundPolling(convId, localMessageId, serverMessageId);
         }
       }
@@ -796,8 +808,10 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             latestUseBackground = true;
             const taskId = task.id || "";
             const placeholder = "任务繁忙，正在生成中";
-            accumulated = placeholder;
-            streamAppend(assistantMsg.id, placeholder);
+            if (!accumulated) {
+              accumulated = placeholder;
+              streamAppend(assistantMsg.id, placeholder);
+            }
             realtimeUpdate(assistantMsg.id, {
               serverMessageId,
               backgroundTaskId: taskId,
@@ -877,7 +891,11 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               inReasoningBlock = true;
             }
             delta += reasoningDelta;
-          } else if (contentDelta) {
+          }
+          // OpenAI Responses can occasionally emit reasoning and visible text in the same delta.
+          // Handle content independently instead of `else if`, otherwise the visible answer may
+          // stay inside the open <think> block until a full page refresh reloads DB content.
+          if (contentDelta) {
             if (inReasoningBlock) {
               delta += "</think>";
               inReasoningBlock = false;
@@ -947,6 +965,12 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         const abortReason = abortReasonRef.current;
         reader.releaseLock();
 
+        // 如果 reasoning 块未关闭，自动关闭
+        if (inReasoningBlock) {
+          accumulated += "</think>";
+          streamAppend(assistantMsg.id, "</think>");
+        }
+
         // 同步 streaming store 到 messages state
         const finalContent = streamGet(assistantMsg.id) || accumulated;
         const finalData = realtimeGet(assistantMsg.id);
@@ -980,7 +1004,11 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         // 不代表已展示内容就是 DB 最终内容。即使已有部分内容，也要继续通过
         // task stream / DB polling 校准，否则会出现“输出一半直接 DONE，刷新后变完整”。
         if (sawDone && abortReason !== "navigation" && abortReason !== "user" && (latestServerMessageId || latestGenerationTaskId)) {
-          startTaskEventStream(convId || currentConversation, assistantMsg.id, latestServerMessageId, latestSequence, finalContent, latestGenerationTaskId);
+          // The initial /chat request is itself a task event stream. Its controller is
+          // still registered until this finally block finishes, so an immediate
+          // startTaskEventStream() would no-op and leave the UI stuck on partial text.
+          // DB polling is the correct post-DONE reconciler here; explicit task
+          // stream reattach is reserved for abnormal disconnects before DONE.
           if (latestServerMessageId) {
             startBackgroundPolling(convId || currentConversation, assistantMsg.id, latestServerMessageId);
           }

@@ -354,36 +354,23 @@ export default function ImagePage() {
       toast.error("请输入描述");
       return;
     }
-    if (mode === "video") {
-      if (!currentVideoModel) {
-        toast.error("无可用的视频模型");
-        return;
-      }
-      try {
-        const durationSec = parseInt(selectedDuration.replace("s", ""), 10) || 4;
-        await generateVideo({
-          prompt: prompt.trim(),
-          model: currentVideoModel.id,
-          ratio: selectedAspectRatio,
-          duration: durationSec,
-          generate_audio: musicEnabled,
-          watermark: false,
-          reference_image_urls: referenceImages.length > 0 ? referenceImages : undefined,
-        });
-        toast.success("视频生成任务已提交");
-      } catch (err: any) {
-        toast.error(err.message || "提交失败");
-      }
-      return;
-    }
     const params = new URLSearchParams();
     params.set("prompt", prompt.trim());
     params.set("aspect", selectedAspectRatio);
-    params.set("resolution", selectedResolution);
-    params.set("quality", selectedQuality);
     if (referenceImages.length > 0) {
       params.set("refs", referenceImages.join(","));
     }
+
+    if (mode === "video") {
+      if (currentVideoModel?.id) params.set("model", currentVideoModel.id);
+      params.set("duration", selectedDuration);
+      if (musicEnabled) params.set("audio", "1");
+      router.push(`/video/chat?${params.toString()}`);
+      return;
+    }
+
+    params.set("resolution", selectedResolution);
+    params.set("quality", selectedQuality);
     router.push(`/image/chat?${params.toString()}`);
   };
 
@@ -420,20 +407,49 @@ export default function ImagePage() {
     }
   };
 
+  const historyItems = [
+    ...chats.map((chat) => ({
+      id: chat.id,
+      title: chat.title || "AI画图会话",
+      updated_at: chat.updated_at,
+      icon: "image" as const,
+      source: "image" as const,
+      cover_image: chat.cover_image,
+    })),
+    ...videos
+      .filter((video: VideoGeneration) => video.status !== "pending" && video.status !== "running")
+      .map((video: VideoGeneration) => ({
+        id: video.id,
+        title: video.prompt || "AI视频任务",
+        updated_at: video.updated_at || video.created_at,
+        icon: "image" as const,
+        source: "video" as const,
+        status: video.status,
+      })),
+  ].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+
   const handleOpenHistory = () => {
     const nextOpen = !showHistory;
     setShowHistory(nextOpen);
     if (nextOpen) fetchChats();
   };
 
-  const handleSelectChat = (id: number) => {
+  const handleSelectHistory = (id: number, item: { source?: "image" | "video" }) => {
     setShowHistory(false);
+    if (item.source === "video") {
+      router.push(`/video/chat?videoId=${id}`);
+      return;
+    }
     router.push(`/image/chat?chatId=${id}`);
   };
 
-  const handleDeleteChat = async (id: number) => {
+  const handleDeleteHistory = async (id: number, item: { source?: "image" | "video" }) => {
     try {
-      await deleteChat(id);
+      if (item.source === "video") {
+        await deleteVideo(id);
+      } else {
+        await deleteChat(id);
+      }
       toast.success("删除成功");
     } catch {
       toast.error("删除失败");
@@ -538,10 +554,10 @@ export default function ImagePage() {
                     ? "描述您想要对参考图进行的修改..."
                     : "尝试描述您想要创建的图像..."
                 }
-                disabled={isLoading || isGenerating}
+                disabled={isLoading || isGenerating || videoGenerating}
                 className={cn(
                   "flex-1 min-h-[84px] max-h-[200px] bg-transparent text-text-primary placeholder:text-text-tertiary resize-none focus:outline-none text-[15px] leading-relaxed py-2",
-                  (isLoading || isGenerating) && "opacity-60 cursor-not-allowed"
+                  (isLoading || isGenerating || videoGenerating) && "opacity-60 cursor-not-allowed"
                 )}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
@@ -899,72 +915,6 @@ export default function ImagePage() {
                   <p className="text-xs text-text-tertiary line-clamp-1">{currentVideo.prompt}</p>
                 </div>
               )}
-              {/* 视频历史 */}
-              {videos.filter((v: VideoGeneration) => v.status !== "pending" && v.status !== "running").length > 0 && (
-                <div>
-                  <h3 className="text-base font-semibold text-text-primary mb-3">视频历史</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {videos.map((video: VideoGeneration) => (
-                      <div
-                        key={video.id}
-                        className="bg-surface-card rounded-xl border border-surface-border overflow-hidden hover:border-brand/30 transition-all"
-                      >
-                        <div className="aspect-video bg-surface relative">
-                          {video.status === "succeeded" && video.video_url ? (
-                            <video
-                              src={video.video_url}
-                              className="w-full h-full object-cover"
-                              controls
-                              preload="metadata"
-                            />
-                          ) : video.status === "failed" ? (
-                            <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-text-tertiary">
-                              <AlertCircle className="w-8 h-8 text-red-400/50" />
-                              <span className="text-xs text-red-400/70">生成失败</span>
-                            </div>
-                          ) : (
-                            <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-text-tertiary">
-                              <Loader2 className="w-6 h-6 animate-spin" />
-                              <span className="text-xs">处理中...</span>
-                            </div>
-                          )}
-                        </div>
-                        <div className="p-3">
-                          <p className="text-sm text-text-primary line-clamp-2">{video.prompt}</p>
-                          <div className="flex items-center justify-between mt-1">
-                            <p className="text-[11px] text-text-tertiary">
-                              {new Date(video.created_at).toLocaleString()}
-                            </p>
-                            <div className="flex items-center gap-2">
-                              {video.status === "succeeded" && video.video_url && (
-                                <a
-                                  href={video.video_url}
-                                  download
-                                  className="text-xs text-brand hover:underline"
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  下载
-                                </a>
-                              )}
-                              <button
-                                onClick={() => {
-                                  if (confirm("确定删除此视频？")) {
-                                    deleteVideo(video.id);
-                                  }
-                                }}
-                                className="text-xs text-red-400 hover:text-red-500"
-                              >
-                                删除
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
@@ -1001,13 +951,6 @@ export default function ImagePage() {
           {/* 示例图库 - 总是显示，放在输入框下方 */}
           <ExampleGallery onUsePrompt={(p: string) => { setPrompt(p); }} />
 
-          {/* 无历史记录空状态 */}
-          {images.length === 0 && !isLoading && (
-            <div className="text-center py-8 text-text-tertiary">
-              <p className="text-sm">在上方输入描述开始创作吧</p>
-            </div>
-          )}
-
           <ImageLightbox
             isOpen={!!previewImage}
             imageUrl={previewImage?.image_url || ""}
@@ -1031,27 +974,21 @@ export default function ImagePage() {
             variant="danger"
           />
 
-          {/* 历史记录右侧抽屉：展示图像会话历史 */}
+          {/* 历史记录右侧抽屉：合并展示图像会话与视频任务 */}
           <HistoryDrawer
             isOpen={showHistory}
             onClose={() => setShowHistory(false)}
             title="历史记录"
             type="image"
             loading={chatsLoading}
-            items={chats.map((chat) => ({
-              id: chat.id,
-              title: chat.title || "AI画图会话",
-              updated_at: chat.updated_at,
-              icon: "image",
-              cover_image: chat.cover_image,
-            }))}
-            onSelect={handleSelectChat}
+            items={historyItems}
+            onSelect={handleSelectHistory}
             onNew={() => {
               setShowHistory(false);
-              router.push("/image/chat");
+              router.push(mode === "video" ? "/video/chat" : "/image/chat");
             }}
             onRename={handleRenameChat}
-            onDelete={handleDeleteChat}
+            onDelete={handleDeleteHistory}
           />
         </div>
       </div>

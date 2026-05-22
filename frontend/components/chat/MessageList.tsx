@@ -128,9 +128,13 @@ function StreamingCursor() {
 function StreamingText({ messageId, content, isStreaming, className }: { messageId: string; content: string; isStreaming: boolean; className?: string }) {
   const streamText = useMessageStream(messageId, isStreaming);
   const effectiveText = isStreaming ? (streamText || content) : content;
-  const displayedText = useSmoothStreaming(effectiveText, isStreaming);
+  const hasThinkTag = effectiveText.includes("<think>");
+  const displayedText = useSmoothStreaming(effectiveText, isStreaming && !hasThinkTag);
 
-  const parsed = parseThinkContent(displayedText);
+  // 含 <think> 的消息必须用完整实时内容解析边界，不能先做打字机截断；
+  // 否则 </think> 尚未显示时正文会被临时归入思考块。
+  // 也不能拆成 reasoning/answer 两个打字机，否则两个动画追赶状态会不同步产生闪回。
+  const parsed = parseThinkContent(hasThinkTag ? effectiveText : displayedText);
   const hasReason = !!parsed.reasoning;
   const hasContent = !!parsed.answer.trim();
 

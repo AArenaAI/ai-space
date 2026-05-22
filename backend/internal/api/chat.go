@@ -872,92 +872,145 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 		return
 	}
 	ctx := context.Background()
-	resp, err := h.aiService.ChatCompletion(ctx, req.Model, req.Messages, true, req.Reasoning, services.ParseReasoningEffort(req.ReasoningEffort), req.UseSearchTool)
-	if err != nil {
-		h.failGenerationTask(req.Task, req.AssistantMessageID, req.ConversationID, fmt.Sprintf("上游模型请求失败: %v", err))
+	maxRetries := 3
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if h.isGenerationTaskCancelled(req.Task.ID) {
+			return
+		}
+		if attempt > 0 {
+			// 第一次失败后重试
+			fmt.Printf("[GenerationRunner] task=%d 重试第%d次\n", req.Task.ID, attempt)
+		}
+
+		resp, err := h.aiService.ChatCompletion(ctx, req.Model, req.Messages, true, req.Reasoning, services.ParseReasoningEffort(req.ReasoningEffort), req.UseSearchTool)
+		if err != nil {
+			// 检查是否是 rate limit 错误，且还有重试次数
+			if attempt < maxRetries {
+				if pe := services.ParseOpenAIProviderError(err, req.Model); pe != nil && pe.Kind == services.ProviderErrorRateLimit && pe.RetryAfterMs > 0 {
+					// 设置 retrying 状态，等待 Retry-After 后重试
+					waitMs := pe.RetryAfterMs
+					if waitMs < 1000 {
+						waitMs = 1000
+					}
+					jitter := time.Duration(waitMs) * time.Millisecond
+					if jitter > 60*time.Second {
+						jitter = 60 * time.Second
+					}
+					h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", req.Task.ID).Updates(map[string]interface{}{
+						"status": "retrying",
+					})
+					fmt.Printf("[GenerationRunner] task=%d rate_limit 等待 %v 后重试\n", req.Task.ID, jitter)
+					time.Sleep(jitter)
+					continue
+				}
+			}
+			// 非 rate limit 或重试次数用完
+			h.failGenerationTask(req.Task, req.AssistantMessageID, req.ConversationID, fmt.Sprintf("上游模型请求失败: %v", err))
+			return
+		}
+		defer resp.Body.Close()
+
+		if resp.Provider != "" && req.Task.Provider != resp.Provider {
+			h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", req.Task.ID).Update("provider", resp.Provider)
+			req.Task.Provider = resp.Provider
+		}
+
+		streamResult, usage, forwardErr := h.forwardUnifiedStream(resp, nil, req.Reasoning, req.AssistantMessageID, req.UseBackground, req.UserID, req.GuestID, req.ConversationID, req.Model, resp.Provider, req.Task, req.InitialSequence)
+		if forwardErr != nil {
+			fmt.Printf("[GenerationRunner] forwardUnifiedStream error task=%d message=%d: %v\n", req.Task.ID, req.AssistantMessageID, forwardErr)
+		}
+
+		// 检查是否是可恢复的 rate limit 流错误
+		if streamResult.Recoverable && streamResult.ErrorKind == string(services.ProviderErrorRateLimit) {
+			if attempt < maxRetries {
+				// 关闭上一次响应 body
+				resp.Body.Close()
+				waitMs := streamResult.RetryAfterMs
+				if waitMs <= 0 {
+					waitMs = 2000
+				}
+				jitter := time.Duration(waitMs) * time.Millisecond
+				if jitter > 60*time.Second {
+					jitter = 60 * time.Second
+				}
+				h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", req.Task.ID).Updates(map[string]interface{}{
+					"status": "retrying",
+				})
+				fmt.Printf("[GenerationRunner] task=%d stream rate_limit 等待 %v 后重试\n", req.Task.ID, jitter)
+				time.Sleep(jitter)
+				continue
+			}
+		}
+
+		// 成功完成或非可恢复错误
+		content := streamResult.FullContent
+		finalStatus := "completed"
+		if forwardErr != nil {
+			finalStatus = "failed"
+			if content == "" {
+				content = fmt.Sprintf("生成失败: %v", forwardErr)
+			}
+			seq := streamResult.LastSequenceNumber + 1
+			if seq <= req.InitialSequence {
+				seq = req.InitialSequence + 1
+			}
+			out, _ := json.Marshal(map[string]interface{}{
+				"choices": []map[string]interface{}{
+					{"delta": map[string]string{"content": ""}},
+				},
+				"_error_meta": map[string]interface{}{"user_message": forwardErr.Error(), "code": "stream_failed"},
+			})
+			h.persistTaskEvent(req.Task, req.AssistantMessageID, seq, "error", string(out))
+			streamResult.LastSequenceNumber = seq
+		} else if streamResult.ErrorMessage != "" {
+			finalStatus = "incomplete"
+			if strings.TrimSpace(content) == "" {
+				content = ""
+			}
+		} else if strings.TrimSpace(content) == "" {
+			content = "任务已完成，但未返回可展示文本。"
+		}
+		updates := map[string]interface{}{
+			"content":      content,
+			"completed_at": time.Now(),
+		}
+		_ = h.db.Model(&models.Message{}).Where("id = ?", req.AssistantMessageID).Updates(updates).Error
+		h.touchConversation(req.ConversationID)
+
+		if forwardErr == nil {
+			doneSeq := streamResult.LastSequenceNumber + 1
+			if doneSeq <= req.InitialSequence {
+				doneSeq = req.InitialSequence + 1
+			}
+			h.persistTaskEvent(req.Task, req.AssistantMessageID, doneSeq, "done", "[DONE]")
+			streamResult.LastSequenceNumber = doneSeq
+		}
+
+		taskUpdates := map[string]interface{}{
+			"status": finalStatus,
+			"result": content,
+		}
+		if streamResult.ErrorMessage != "" {
+			taskUpdates["error_message"] = streamResult.ErrorMessage
+		} else if forwardErr != nil {
+			taskUpdates["error_message"] = forwardErr.Error()
+		}
+		if streamResult.ResponseID != "" && req.UseBackground {
+			taskUpdates["response_id"] = streamResult.ResponseID
+		}
+		if streamResult.LastSequenceNumber > 0 {
+			taskUpdates["last_sequence_number"] = streamResult.LastSequenceNumber
+		}
+		now := time.Now()
+		taskUpdates["completed_at"] = &now
+		h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", req.Task.ID).Updates(taskUpdates)
+
+		if h.usageService != nil && usage != nil {
+			if err := h.usageService.RecordChatUsageWithResourceID(req.UserID, req.GuestID, resp.Provider, resp.Model, resp.ModelType, req.ConversationID, usage); err != nil {
+				fmt.Printf("[GenerationRunner] 记录 usage 失败: %v\n", err)
+			}
+		}
 		return
-	}
-	defer resp.Body.Close()
-
-	if resp.Provider != "" && req.Task.Provider != resp.Provider {
-		h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", req.Task.ID).Update("provider", resp.Provider)
-		req.Task.Provider = resp.Provider
-	}
-
-	streamResult, usage, err := h.forwardUnifiedStream(resp, nil, req.Reasoning, req.AssistantMessageID, req.UseBackground, req.UserID, req.GuestID, req.ConversationID, req.Model, resp.Provider, req.Task, req.InitialSequence)
-	if err != nil {
-		fmt.Printf("[GenerationRunner] forwardUnifiedStream error task=%d message=%d: %v\n", req.Task.ID, req.AssistantMessageID, err)
-	}
-
-	content := streamResult.FullContent
-	finalStatus := "completed"
-	if err != nil {
-		finalStatus = "failed"
-		if content == "" {
-			content = fmt.Sprintf("生成失败: %v", err)
-		}
-		seq := streamResult.LastSequenceNumber + 1
-		if seq <= req.InitialSequence {
-			seq = req.InitialSequence + 1
-		}
-		out, _ := json.Marshal(map[string]interface{}{
-			"choices": []map[string]interface{}{
-				{"delta": map[string]string{"content": ""}},
-			},
-			"_error_meta": map[string]interface{}{"user_message": err.Error(), "code": "stream_failed"},
-		})
-		h.persistTaskEvent(req.Task, req.AssistantMessageID, seq, "error", string(out))
-		streamResult.LastSequenceNumber = seq
-	} else if streamResult.ErrorMessage != "" {
-		finalStatus = "incomplete"
-		if strings.TrimSpace(content) == "" {
-			content = ""
-		}
-	} else if strings.TrimSpace(content) == "" {
-		content = "任务已完成，但未返回可展示文本。"
-	}
-	updates := map[string]interface{}{
-		"content":      content,
-		"completed_at": time.Now(),
-	}
-	_ = h.db.Model(&models.Message{}).Where("id = ?", req.AssistantMessageID).Updates(updates).Error
-	h.touchConversation(req.ConversationID)
-
-	// 后台 generation task 的 DONE 必须排在最终 message.content 落库之后。
-	// forwardUnifiedStream(w=nil) 只负责按上游顺序持久化 delta；这里在最终内容
-	// 可读之后再补一个真实 done event，task stream 才不会先 DONE 后 DB 变完整。
-	if err == nil {
-		doneSeq := streamResult.LastSequenceNumber + 1
-		if doneSeq <= req.InitialSequence {
-			doneSeq = req.InitialSequence + 1
-		}
-		h.persistTaskEvent(req.Task, req.AssistantMessageID, doneSeq, "done", "[DONE]")
-		streamResult.LastSequenceNumber = doneSeq
-	}
-
-	taskUpdates := map[string]interface{}{
-		"status": finalStatus,
-		"result": content,
-	}
-	if streamResult.ErrorMessage != "" {
-		taskUpdates["error_message"] = streamResult.ErrorMessage
-	} else if err != nil {
-		taskUpdates["error_message"] = err.Error()
-	}
-	if streamResult.ResponseID != "" && req.UseBackground {
-		taskUpdates["response_id"] = streamResult.ResponseID
-	}
-	if streamResult.LastSequenceNumber > 0 {
-		taskUpdates["last_sequence_number"] = streamResult.LastSequenceNumber
-	}
-	now := time.Now()
-	taskUpdates["completed_at"] = &now
-	h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", req.Task.ID).Updates(taskUpdates)
-
-	if h.usageService != nil && usage != nil {
-		if err := h.usageService.RecordChatUsageWithResourceID(req.UserID, req.GuestID, resp.Provider, resp.Model, resp.ModelType, req.ConversationID, usage); err != nil {
-			fmt.Printf("[GenerationRunner] 记录 usage 失败: %v\n", err)
-		}
 	}
 }
 
@@ -1112,6 +1165,7 @@ type UnifiedStreamResult struct {
 	ErrorCode          string
 	ErrorKind          string
 	Recoverable        bool
+	RetryAfterMs       int
 }
 
 func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, w gin.ResponseWriter, reasoningEnabled bool, assistantMsgID uint, useBackground bool, userID uint, guestID string, conversationID uint, model string, provider string, streamTask *models.AIBackgroundTask, initialSequence int64) (*UnifiedStreamResult, *services.TokenUsage, error) {
@@ -1181,16 +1235,19 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 		return writeAndFlush("data: " + string(out) + "\n\n")
 	}
 	writeDoneEvent := func() error {
-		// 只有当前 HTTP SSE 仍在直连前端时，才立即发送/持久化 DONE。
-		// 后台 generation task 或客户端已断开时，DONE 必须由 runGenerationTask 在
-		// 最终 message.content 落库之后再持久化，避免 task stream 先看到 DONE、
-		// 前端停止在半截内容，而刷新后 DB 又变完整。
-		if w == nil || !clientConnected {
+		// In task-stream mode (w == nil), do not persist [DONE] here.
+		// runGenerationTask must write final message.content first, then append the
+		// terminal done event. If DONE is visible before the final DB update, the
+		// frontend stops at a partial answer and only looks correct after refresh.
+		if w == nil {
 			return nil
 		}
 		outgoingSeq++
 		h.persistTaskEvent(streamTask, assistantMsgID, outgoingSeq, "done", "[DONE]")
 		outcome.LastSequenceNumber = outgoingSeq
+		if !clientConnected {
+			return nil
+		}
 		return writeAndFlush("data: [DONE]\n\n")
 	}
 
@@ -1349,6 +1406,7 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 				outcome.ErrorCode = event.Code
 				outcome.ErrorKind = event.ErrorKind
 				outcome.Recoverable = event.Recoverable
+				outcome.RetryAfterMs = event.RetryAfterMs
 
 				meta := map[string]interface{}{
 					"type":                "_error_meta",
@@ -1616,7 +1674,11 @@ func (h *ChatHandler) streamGenerationTaskEvents(c *gin.Context, task *models.AI
 		return true
 	}
 
-	deadline := time.Now().Add(90 * time.Second)
+	// Keep the task event stream open slightly less than the 15-minute Nginx timeout.
+	// OpenAI responses can continue generating in the backend after the initial /chat
+	// stream is handed off; a 90s watcher timeout made the frontend think generation
+	// was interrupted while DB/webhook completion arrived shortly after.
+	deadline := time.Now().Add(14*time.Minute + 30*time.Second)
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
 
@@ -1641,10 +1703,11 @@ func (h *ChatHandler) streamGenerationTaskEvents(c *gin.Context, task *models.AI
 						_, _ = c.Writer.WriteString("data: [DONE]\n\n")
 						c.Writer.Flush()
 					}
+				} else if !doneWritten {
+					// task 已终态但尚未发送 [DONE]，补发以确保前端正常结束
+					_, _ = c.Writer.WriteString(fmt.Sprintf("id: %d\ndata: [DONE]\n\n", after+1))
+					c.Writer.Flush()
 				}
-				// completed 状态必须依赖已持久化的 done event 结束。
-				// 不再根据 task terminal 状态合成 [DONE]，否则 task 状态/DB 更新和事件表之间
-				// 会产生“先 DONE、后最终内容可见”的重排序，破坏上游 delta -> done 顺序。
 				return
 			}
 		}

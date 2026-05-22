@@ -33,10 +33,19 @@ interface UseVideoReturn {
     reference_image_urls?: string[];
     reference_video_urls?: string[];
     reference_audio_urls?: string[];
-  }) => Promise<void>;
+  }) => Promise<VideoGeneration>;
   refreshVideo: (id: number) => Promise<VideoGeneration | null>;
   deleteVideo: (id: number) => Promise<void>;
   pollVideoStatus: (id: number) => Promise<void>;
+}
+
+function getAuthHeaders(extra?: Record<string, string>): Record<string, string> {
+  const headers: Record<string, string> = { ...(extra || {}) };
+  if (typeof window !== "undefined") {
+    const token = localStorage.getItem("token");
+    if (token) headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
 }
 
 export function useVideo(): UseVideoReturn {
@@ -48,7 +57,10 @@ export function useVideo(): UseVideoReturn {
 
   const fetchVideos = useCallback(async () => {
     try {
-      const res = await fetch("/api/videos", { credentials: "include" });
+      const res = await fetch("/api/videos", {
+        credentials: "include",
+        headers: getAuthHeaders(),
+      });
       if (!res.ok) return;
       const data = await res.json();
       if (Array.isArray(data.videos)) {
@@ -80,12 +92,12 @@ export function useVideo(): UseVideoReturn {
       reference_image_urls?: string[];
       reference_video_urls?: string[];
       reference_audio_urls?: string[];
-    }) => {
+    }): Promise<VideoGeneration> => {
       setGenerating(true);
       try {
         const res = await fetch("/api/videos", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: getAuthHeaders({ "Content-Type": "application/json" }),
           credentials: "include",
           body: JSON.stringify(payload),
         });
@@ -107,6 +119,7 @@ export function useVideo(): UseVideoReturn {
         setVideos((prev) => [newVideo, ...prev]);
         // auto start polling
         startPolling(newVideo.id);
+        return newVideo;
       } finally {
         setGenerating(false);
       }
@@ -116,21 +129,25 @@ export function useVideo(): UseVideoReturn {
 
   const refreshVideo = useCallback(async (id: number): Promise<VideoGeneration | null> => {
     try {
-      const res = await fetch(`/api/videos/${id}/refresh`, { credentials: "include" });
+      const res = await fetch(`/api/videos/${id}/refresh`, {
+        credentials: "include",
+        headers: getAuthHeaders(),
+      });
       if (!res.ok) return null;
       const data: VideoGeneration = await res.json();
       setVideos((prev) => prev.map((v) => (v.id === id ? data : v)));
-      if (currentVideo?.id === id) setCurrentVideo(data);
+      setCurrentVideo((prev) => (prev?.id === id ? data : prev));
       return data;
     } catch {
       return null;
     }
-  }, [currentVideo]);
+  }, []);
 
   const deleteVideo = useCallback(async (id: number) => {
     const res = await fetch(`/api/videos/${id}`, {
       method: "DELETE",
       credentials: "include",
+      headers: getAuthHeaders(),
     });
     if (res.ok) {
       setVideos((prev) => prev.filter((v) => v.id !== id));

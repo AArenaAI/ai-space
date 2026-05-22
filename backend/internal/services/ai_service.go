@@ -342,7 +342,11 @@ func ExtractOpenAIResponseText(raw map[string]any) string {
 		return ""
 	}
 	if v, ok := raw["output_text"].(string); ok && strings.TrimSpace(v) != "" {
-		return strings.TrimSpace(v)
+		text := strings.TrimSpace(v)
+		if reasoning := ExtractOpenAIResponseReasoning(raw); reasoning != "" {
+			return "<think>" + reasoning + "</think>\n\n" + text
+		}
+		return text
 	}
 	outputs, _ := raw["output"].([]any)
 	var parts []string
@@ -362,6 +366,45 @@ func ExtractOpenAIResponseText(raw map[string]any) string {
 			}
 		}
 	}
+	text := strings.TrimSpace(strings.Join(parts, "\n"))
+	if reasoning := ExtractOpenAIResponseReasoning(raw); reasoning != "" {
+		if text == "" {
+			return "<think>" + reasoning + "</think>"
+		}
+		return "<think>" + reasoning + "</think>\n\n" + text
+	}
+	return text
+}
+
+func ExtractOpenAIResponseReasoning(raw map[string]any) string {
+	if raw == nil {
+		return ""
+	}
+	outputs, _ := raw["output"].([]any)
+	var parts []string
+	var walk func(any)
+	walk = func(v any) {
+		switch x := v.(type) {
+		case map[string]any:
+			if typ, _ := x["type"].(string); strings.Contains(typ, "reasoning") {
+				for _, key := range []string{"text", "content", "summary", "delta"} {
+					if s, ok := x[key].(string); ok && strings.TrimSpace(s) != "" {
+						parts = append(parts, strings.TrimSpace(s))
+					}
+				}
+			}
+			for _, key := range []string{"summary", "content", "items"} {
+				if child, ok := x[key]; ok {
+					walk(child)
+				}
+			}
+		case []any:
+			for _, item := range x {
+				walk(item)
+			}
+		}
+	}
+	walk(outputs)
 	return strings.TrimSpace(strings.Join(parts, "\n"))
 }
 

@@ -9,6 +9,7 @@ import {
   Trash2,
   MessageSquare,
   Image as ImageIcon,
+  Video as VideoIcon,
   Check,
   Pin,
   Clock,
@@ -24,7 +25,9 @@ export interface HistoryItem {
   pinned?: boolean;
   updated_at: string;
   icon?: "chat" | "image";
+  source?: "image" | "video";
   cover_image?: string;
+  status?: string;
 }
 
 interface HistoryDrawerProps {
@@ -32,10 +35,10 @@ interface HistoryDrawerProps {
   onClose: () => void;
   title: string;
   items: HistoryItem[];
-  onSelect: (id: number) => void;
+  onSelect: (id: number, item: HistoryItem) => void;
   onNew?: () => void;
   onRename?: (id: number, title: string) => void;
-  onDelete?: (id: number) => void;
+  onDelete?: (id: number, item: HistoryItem) => void;
   onTogglePin?: (id: number) => void;
   loading?: boolean;
   type?: "chat" | "image";
@@ -114,7 +117,7 @@ export default function HistoryDrawer({
   loading,
   type = "chat",
 }: HistoryDrawerProps) {
-  const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<HistoryItem | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -155,13 +158,13 @@ export default function HistoryDrawer({
     setEditValue(item.title);
   };
 
-  const handleDelete = (id: number) => {
-    setDeleteTarget(id);
+  const handleDelete = (item: HistoryItem) => {
+    setDeleteTarget(item);
   };
 
   const confirmDelete = () => {
-    if (deleteTarget !== null && onDelete) {
-      onDelete(deleteTarget);
+    if (deleteTarget && onDelete) {
+      onDelete(deleteTarget.id, deleteTarget);
     }
     setDeleteTarget(null);
   };
@@ -174,12 +177,13 @@ export default function HistoryDrawer({
   const renderItem = (item: HistoryItem) => {
     const isActive = item.active;
     const isEditing = editingId === item.id;
-    const Icon = type === "image" ? ImageIcon : MessageSquare;
+    const Icon = item.source === "video" ? VideoIcon : type === "image" ? ImageIcon : MessageSquare;
     const hasCover = type === "image" && item.cover_image;
+    const isVideo = item.source === "video";
 
     return (
       <div
-        key={item.id}
+        key={`${item.source || type}:${item.id}`}
         className={cn(
           "group rounded-xl transition-all duration-150 cursor-pointer",
           hasCover
@@ -194,7 +198,7 @@ export default function HistoryDrawer({
               : "text-text-secondary hover:bg-surface-card/70 hover:text-text-primary border border-transparent"
         )}
         onClick={() => {
-          if (!isEditing) onSelect(item.id);
+          if (!isEditing) onSelect(item.id, item);
         }}
       >
         {/* 带封面图的图片会话卡片布局 */}
@@ -226,6 +230,11 @@ export default function HistoryDrawer({
                     {item.title || "新对话"}
                   </span>
                 )}
+                {isVideo && (
+                  <span className="shrink-0 rounded-md bg-brand/10 px-1.5 py-0.5 text-[10px] leading-none text-brand">
+                    视频
+                  </span>
+                )}
               </div>
               {!isEditing && (
                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
@@ -241,7 +250,7 @@ export default function HistoryDrawer({
                       <Pin className={cn("w-3.5 h-3.5", item.pinned && "rotate-45 text-brand")} />
                     </button>
                   )}
-                  {onRename && (
+                  {onRename && !isVideo && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -257,7 +266,7 @@ export default function HistoryDrawer({
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleDelete(item.id);
+                        handleDelete(item);
                       }}
                       className="p-1 rounded-md text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-colors"
                       title="删除"
@@ -311,6 +320,11 @@ export default function HistoryDrawer({
                     {item.title || "新对话"}
                   </span>
                 )}
+                {isVideo && (
+                  <span className="shrink-0 rounded-md bg-brand/10 px-1.5 py-0.5 text-[10px] leading-none text-brand">
+                    视频
+                  </span>
+                )}
               </div>
               {!isEditing && (
                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
@@ -326,7 +340,7 @@ export default function HistoryDrawer({
                       <Pin className={cn("w-3.5 h-3.5", item.pinned && "rotate-45 text-brand")} />
                     </button>
                   )}
-                  {onRename && (
+                  {onRename && !isVideo && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -342,7 +356,7 @@ export default function HistoryDrawer({
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleDelete(item.id);
+                        handleDelete(item);
                       }}
                       className="p-1 rounded-md text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-colors"
                       title="删除"
@@ -421,7 +435,7 @@ export default function HistoryDrawer({
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleDelete(item.id);
+                      handleDelete(item);
                     }}
                     className="p-1 rounded-md text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-colors"
                     title="删除"

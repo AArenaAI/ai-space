@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { ChatModel } from "@/hooks/useChat";
 import { getGuestId } from "@/lib/guestId";
 import { toast } from "sonner";
+import { useI18n } from "@/lib/i18n";
 
 // DeepSeek 模型的思考档位（兼容旧值）
 const DEEPSEEK_EFFORTS = ["high", "max"] as const;
@@ -40,6 +41,7 @@ export interface AttachedFile {
 }
 
 export default function MessageInput({ onSend, onStop, isLoading, compareMode, onToggleCompare, currentModel }: MessageInputProps) {
+  const { t } = useI18n();
   const [content, setContent] = useState("");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -177,7 +179,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     e?.preventDefault();
     if ((!content.trim() && attachedFiles.length === 0) || isLoading || hasParsingFiles) {
       if (hasParsingFiles) {
-        toast.warning("文件解析中，请稍后");
+        toast.warning(t("chat.fileParsingWait"));
       }
       return;
     }
@@ -245,7 +247,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "上传失败");
+        throw new Error(err.error || t("chat.uploadFailed"));
       }
 
       const data = await res.json();

@@ -11,6 +11,7 @@ import { Columns2, Zap, X, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import { useI18n } from "@/lib/i18n";
 import InputDialog from "@/components/ui/InputDialog";
 import ForkCompareDialog from "./ForkCompareDialog";
 
@@ -28,6 +29,7 @@ interface ChatInterfaceProps {
 }
 
 export default function ChatInterface({ conversationId, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples }: ChatInterfaceProps) {
+  const { t } = useI18n();
   const [compareMode, setCompareMode] = useState(false);
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<number>(0);
@@ -145,14 +147,14 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
       if (r.ok) {
         const u = await r.json();
         setConversationTitle(u.title || newTitle.trim());
-        toast.success("重命名成功");
+        toast.success(t("chat.renameSuccess"));
         // 触发侧边栏刷新
         window.dispatchEvent(new CustomEvent("conversation-renamed", { detail: { id: conversationId, title: u.title } }));
       } else {
-        toast.error("重命名失败");
+        toast.error(t("chat.renameFailed"));
       }
     } catch {
-      toast.error("重命名失败");
+      toast.error(t("chat.renameFailed"));
     }
     setRenameOpen(false);
   };
@@ -260,11 +262,11 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
     if (compareMode) {
       // 对比模式 - 依次流式发送给多个模型
       if (selectedModels.length < 2) {
-        toast.error("请至少选择两个模型进行对比");
+        toast.error(t("chat.compareMinModels"));
         return;
       }
       if (!selectedTemplateId) {
-        toast.error("对比模式必须选择一个回答模板");
+        toast.error(t("chat.compareNeedTemplate"));
         return;
       }
       // 前端目前没有后端返回的任务复杂度字段，先用用户发送时选择的推理档位判断复杂任务
@@ -315,7 +317,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
       // 如果有默认模板自动选上，如果没有则弹出提示
       const defaultTpl = templates.find((t) => t.is_default);
       if (!defaultTpl) {
-        toast.warning("对比模式需要模板，请先在侧边栏设置");
+        toast.warning(t("chat.compareNeedTemplateSidebar"));
       }
       localStorage.setItem(COMPARE_KEY, "true");
     } else {
@@ -336,7 +338,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
           {compareMode ? (
             <div className="flex items-center gap-1.5 text-sm text-text-secondary">
               <Columns2 className="w-3.5 h-3.5 text-amber-400" />
-              <span>对比模式</span>
+              <span>{t("chat.compareMode")}</span>
             </div>
           ) : (
             <ModelSelector
@@ -354,7 +356,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
             <button
               onClick={() => setRenameOpen(true)}
               className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors shrink-0"
-              title="重命名"
+              title={t("chat.rename")}
             >
               <Pencil className="w-3.5 h-3.5" />
             </button>
@@ -372,7 +374,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
           <div className="flex items-center gap-2 min-w-0">
             <Zap className="w-3.5 h-3.5 text-amber-500 shrink-0" />
             <span className="text-[13px] text-amber-600 dark:text-amber-400 truncate">
-              已自动启用 <span className="font-semibold">{recommendedModel.name}</span> （推荐模型）
+              {t("chat.autoModelEnabledPrefix")} <span className="font-semibold">{recommendedModel.name}</span> {t("chat.autoModelEnabledSuffix")}
             </span>
           </div>
           <button
@@ -416,11 +418,11 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
       {/* 重命名对话 */}
       <InputDialog
         isOpen={renameOpen}
-        title="重命名对话"
+        title={t("chat.renameConversation")}
         defaultValue={conversationTitle}
-        placeholder="输入新的对话名称"
-        confirmText="保存"
-        cancelText="取消"
+        placeholder={t("chat.renamePlaceholder")}
+        confirmText={t("common.save")}
+        cancelText={t("common.cancel")}
         onConfirm={handleRename}
         onCancel={() => setRenameOpen(false)}
       />
@@ -436,9 +438,9 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
           const allModelIds = [selectedModel.id, ...modelIds];
           try {
             await forkChat(forkTargetMessageId, allModelIds);
-            toast.success("已开始对比，模型回答即将显示");
+            toast.success(t("chat.compareStarted"));
           } catch (err: any) {
-            toast.error(err.message || "Fork 对比失败");
+            toast.error(err.message || t("chat.forkCompareFailed"));
           }
         }}
       />
