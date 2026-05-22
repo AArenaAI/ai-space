@@ -102,6 +102,11 @@ type Config struct {
 	PPTImageGenInputPrice  float64 // ¥/千tokens
 	PPTImageGenOutputPrice float64 // ¥/千tokens
 
+	// ========== Volcengine Video Generation Provider（火山引擎视频生成）==========
+	VolcengineAPIKey  string  // 火山引擎 Ark API Key
+	VolcengineBaseURL string  // 火山引擎 Ark Base URL（默认 https://ark.cn-beijing.volces.com/api/v3）
+	VideoGenUnitPrice float64 // ¥/次（按次计费）
+
 	// ========== Embedding Provider（文本向量）==========
 	EmbeddingInputPrice  float64 // ¥/千tokens
 	EmbeddingOutputPrice float64 // ¥/千tokens（通常为 0）
@@ -195,6 +200,10 @@ func Load() *Config {
 		PPTImageGenModel:       getEnv("PPT_IMAGE_GEN_MODEL", "qwen-image-2.0-2026-03-03"),
 		PPTImageGenInputPrice:  getEnvFloat64("PPT_IMAGE_GEN_INPUT_PRICE", 0),
 		PPTImageGenOutputPrice: getEnvFloat64("PPT_IMAGE_GEN_OUTPUT_PRICE", 0),
+
+		VolcengineAPIKey:  getEnv("VOLCENGINE_API_KEY", ""),
+		VolcengineBaseURL: getEnv("VOLCENGINE_BASE_URL", ""),
+		VideoGenUnitPrice: getEnvFloat64("VIDEO_GEN_UNIT_PRICE", 0),
 
 		EmbeddingInputPrice:  getEnvFloat64("EMBEDDING_INPUT_PRICE", 0),
 		EmbeddingOutputPrice: getEnvFloat64("EMBEDDING_OUTPUT_PRICE", 0),

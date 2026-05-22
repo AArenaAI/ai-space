@@ -25,7 +25,6 @@ import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import InputDialog from "@/components/ui/InputDialog";
 import { useTemplates } from "@/hooks/useTemplates";
 import SidebarUserPanel from "./SidebarUserPanel";
-import AccountSettingsModal from "./AccountSettingsModal";
 import { useWorkspaces } from "@/hooks/useWorkspaces";
 import { useTheme } from "@/components/theme/ThemeProvider";
 import FavoriteList from "@/components/chat/FavoriteList";
@@ -465,7 +464,6 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
   });
   const isResizing = useRef(false);
   const [user, setUser] = useState<any>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>(cachedConversations || []);
   const [loading, setLoading] = useState(cachedConversations === null);
   const [currentConvId, setCurrentConvId] = useState<string | null>(null);
@@ -693,8 +691,6 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
 
   /* 操作 */
   const handleLogout = () => { localStorage.removeItem("token"); localStorage.removeItem("user"); import("@/lib/guestId").then(({ getGuestId }) => getGuestId()); setUser(null); setConversations([]); cachedConversations = null; window.location.href = "/"; };
-  const handleUserUpdated = (nextUser: any) => { setUser(nextUser); window.dispatchEvent(new Event("user-login")); };
-  const handleAccountDeleted = () => { localStorage.removeItem("token"); localStorage.removeItem("user"); setUser(null); setConversations([]); cachedConversations = null; window.location.href = "/"; };
   const handleNewChat = () => {
     const ts = Date.now();
     if (skillKey) {
@@ -1130,7 +1126,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
             user={user}
             collapsed={collapsed}
             onLogout={handleLogout}
-            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenSettings={() => router.push("/settings")}
             onShowTooltip={showSidebarTooltip}
             onHideTooltip={hideSidebarTooltip}
           />
@@ -1168,13 +1164,6 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
       )}
 
       {/* 弹窗 */}
-      <AccountSettingsModal
-        isOpen={settingsOpen}
-        user={user}
-        onClose={() => setSettingsOpen(false)}
-        onUserUpdated={handleUserUpdated}
-        onAccountDeleted={handleAccountDeleted}
-      />
       <ConfirmDialog isOpen={!!deleteTarget} title="删除对话" description="删除后，该对话将不可恢复。" confirmText="删除" cancelText="取消" variant="danger" onConfirm={confirmDelete} onCancel={() => setDeleteTarget(null)} />
       <InputDialog isOpen={!!renameTarget} title="重命名对话" defaultValue={renameTarget?.title || ""} placeholder="输入新的对话名称" confirmText="保存" cancelText="取消" onConfirm={handleRename} onCancel={() => setRenameTarget(null)} />
 

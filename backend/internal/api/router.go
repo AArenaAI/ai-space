@@ -87,6 +87,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	router.GET("/api/models", GetModelsHandler)
 	router.GET("/api/models/chat", GetChatModelsHandler)
 	router.GET("/api/models/image", GetImageModelsHandler)
+	router.GET("/api/models/video", GetVideoModelsHandler)
 
 	// 认证路由
 	authHandler := NewAuthHandler(db, cfg)
@@ -188,6 +189,15 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		authorized.DELETE("/image-chats/:id", imageChatHandler.DeleteImageChat)
 		authorized.GET("/image-chats/:id/messages", imageChatHandler.ListImageChatMessages)
 		authorized.POST("/image-chats/:id/messages", imageChatHandler.SendImageChatMessage)
+
+		// 视频生成路由（独立，不与图片混用）
+		videoHandler := NewVideoHandler(db, cfg)
+		videoHandler.AutoMigrate()
+		authorized.GET("/videos", videoHandler.ListVideos)
+		authorized.POST("/videos", videoHandler.CreateVideo)
+		authorized.GET("/videos/:id", videoHandler.GetVideo)
+		authorized.DELETE("/videos/:id", videoHandler.DeleteVideo)
+		authorized.GET("/videos/:id/refresh", videoHandler.RefreshVideoStatus)
 
 		// 图片文件服务（无需认证，直接访问）
 		router.GET("/api/images/file/:filename", imageHandler.ServeImageFile)

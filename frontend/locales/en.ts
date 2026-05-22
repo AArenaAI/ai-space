@@ -1,0 +1,78 @@
+const translations: Record<string, string> = {
+  // Settings nav
+  "settings.title": "Settings",
+  "settings.subtitle": "Manage your account and app preferences",
+  "settings.nav.general": "General",
+  "settings.nav.templates": "Templates",
+
+  // Account
+  "account.title": "Account",
+  "account.subtitle": "Manage your profile",
+  "account.username": "Username",
+  "account.username.placeholder": "Enter username",
+  "account.email": "Email",
+  "account.email.placeholder": "Enter email",
+  "account.save": "Save",
+  "account.saving": "Saving...",
+  "account.delete.title": "Delete Account",
+  "account.delete.description": "This will permanently delete your account, conversations, files, images and workspace data.",
+  "account.delete.button": "Delete",
+  "account.delete.confirm.title": "Confirm delete account?",
+  "account.delete.confirm.description": "This action cannot be undone. You will be logged out and all account data will be removed.",
+  "account.delete.confirm.cancel": "Cancel",
+  "account.delete.confirm.submit": "Confirm Delete",
+  "account.delete.deleting": "Deleting...",
+  "account.delete.error": "Delete failed",
+  "account.update.success": "Profile updated",
+  "account.update.error": "Save failed",
+
+  "account.logout": "Logout",
+
+  // Appearance
+  "appearance.title": "Appearance",
+  "appearance.subtitle": "Customize your interface",
+  "appearance.theme": "Theme",
+  "appearance.theme.light": "Light Mode",
+  "appearance.theme.dark": "Dark Mode",
+  "appearance.theme.green": "Eye Protection",
+  "appearance.language": "Language",
+  "appearance.language.placeholder": "Select language",
+  "appearance.language.search": "Search",
+  "appearance.language.noResults": "No matching languages",
+
+  // Prompts
+  "prompts.title": "Templates",
+  "prompts.subtitle": "Create and manage response templates for side-by-side comparison",
+  "prompts.new": "New Template",
+  "prompts.empty": "No templates yet",
+  "prompts.empty.hint": 'Click "New Template" to get started',
+  "prompts.create.title": "New Template",
+  "prompts.create.name": "Template Name",
+  "prompts.create.name.placeholder": "e.g. Technical Review, Report...",
+  "prompts.create.prefix": "Response Requirements (sent as system prompt to AI)",
+  "prompts.create.prefix.placeholder": "e.g. Please answer in Chinese, number each step, and provide a summary.",
+  "prompts.create.cancel": "Cancel",
+  "prompts.create.submit": "Create",
+  "prompts.edit.save": "Save",
+  "prompts.default": "Default",
+  "prompts.setDefault": "Set Default",
+  "prompts.unsetDefault": "Unset Default",
+  "prompts.delete.confirm": "Delete this template?",
+  "prompts.delete.error": "Failed to delete template",
+  "prompts.delete.success": "Deleted",
+  "prompts.fill.required": "Please fill in template name and content",
+  "prompts.save.error": "Failed to save",
+  "prompts.create.error": "Failed to create template",
+  "prompts.create.success": "Template created",
+  "prompts.save.success": "Saved",
+
+  // Common
+  "common.loading": "Loading...",
+  "common.error": "Error",
+  "common.cancel": "Cancel",
+  "common.confirm": "Confirm",
+  "common.delete": "Delete",
+  "common.edit": "Edit",
+};
+
+export default translations;

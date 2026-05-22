@@ -164,18 +164,19 @@ func (d *OpenAIResponsesTypedDecoder) parseTypedEvent(event responses.ResponseSt
 			}
 		}
 		if completed.Response.Usage.InputTokens > 0 || completed.Response.Usage.OutputTokens > 0 || completed.Response.Usage.TotalTokens > 0 {
-			return &AIStreamEvent{Type: EventUsage, Usage: &TokenUsage{
+			d.pending = append(d.pending, &AIStreamEvent{Type: EventUsage, Usage: &TokenUsage{
 				PromptTokens:     int(completed.Response.Usage.InputTokens),
 				CompletionTokens: int(completed.Response.Usage.OutputTokens),
 				TotalTokens:      int(completed.Response.Usage.TotalTokens),
-			}}
+			}})
 		}
+		d.pending = append(d.pending, &AIStreamEvent{Type: EventDone})
 		if len(d.pending) > 0 {
 			pending := d.pending[0]
 			d.pending = d.pending[1:]
 			return pending
 		}
-		return &AIStreamEvent{Type: EventDone}
+		return nil
 	case "response.incomplete":
 		incomplete := event.AsResponseIncomplete()
 		msg := "上游响应未完成"

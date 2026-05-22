@@ -5,8 +5,10 @@ import { useTemplates, Template } from "@/hooks/useTemplates";
 import { Plus, Pencil, Trash2, Check, X, FileText, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 export default function TemplatesPage() {
+  const { t } = useI18n();
   const { templates, loading, createTemplate, updateTemplate, deleteTemplate } = useTemplates();
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
@@ -17,7 +19,7 @@ export default function TemplatesPage() {
 
   const handleCreate = async () => {
     if (!newName.trim() || !newPrefix.trim()) {
-      toast.error("请填写模板名称和内容");
+      toast.error(t("prompts.fill.required"));
       return;
     }
     try {
@@ -25,7 +27,7 @@ export default function TemplatesPage() {
       setNewName("");
       setNewPrefix("");
       setCreating(false);
-      toast.success("模板创建成功");
+      toast.success(t("prompts.create.success"));
     } catch (err: any) {
       toast.error(err.message);
     }
@@ -39,23 +41,23 @@ export default function TemplatesPage() {
 
   const saveEdit = async (id: number) => {
     if (!editName.trim() || !editPrefix.trim()) {
-      toast.error("请填写完整");
+      toast.error(t("prompts.fill.required"));
       return;
     }
     try {
       await updateTemplate(id, { name: editName.trim(), prefix: editPrefix.trim() });
       setEditingId(null);
-      toast.success("已保存");
+      toast.success(t("prompts.save.success"));
     } catch (err: any) {
       toast.error(err.message);
     }
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm("确定删除此模板？")) return;
+    if (!confirm(t("prompts.delete.confirm"))) return;
     try {
       await deleteTemplate(id);
-      toast.success("已删除");
+      toast.success(t("prompts.delete.success"));
     } catch (err: any) {
       toast.error(err.message);
     }
@@ -73,15 +75,15 @@ export default function TemplatesPage() {
     <div className="h-full flex flex-col bg-surface">
       <div className="flex items-center justify-between px-6 py-4 border-b border-surface-border shrink-0">
         <div>
-          <h1 className="text-lg font-semibold text-text-primary">回答模板</h1>
-          <p className="text-sm text-text-secondary mt-0.5">创建和管理回答模板，在并列对比问答中使用</p>
+          <h1 className="text-lg font-semibold text-text-primary">{t("prompts.title")}</h1>
+          <p className="text-sm text-text-secondary mt-0.5">{t("prompts.subtitle")}</p>
         </div>
         <button
           onClick={() => setCreating(true)}
           className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-brand text-white text-sm font-medium hover:opacity-90 transition-opacity"
         >
           <Plus className="w-4 h-4" />
-          新建模板
+          {t("prompts.new")}
         </button>
       </div>
 
@@ -89,36 +91,36 @@ export default function TemplatesPage() {
         {loading ? (
           <div className="flex items-center justify-center py-16 text-text-secondary">
             <Loader2 className="w-5 h-5 animate-spin mr-2" />
-            加载中...
+            {t("common.loading")}
           </div>
         ) : templates.length === 0 && !creating ? (
           <div className="text-center py-16">
             <FileText className="w-12 h-12 mx-auto mb-4 text-text-tertiary" />
-            <p className="text-text-secondary">暂无模板</p>
-            <p className="text-sm text-text-tertiary mt-1">点击「新建模板」开始创建</p>
+            <p className="text-text-secondary">{t("prompts.empty")}</p>
+            <p className="text-sm text-text-tertiary mt-1">{t("prompts.empty.hint")}</p>
           </div>
         ) : (
           <div className="max-w-2xl mx-auto space-y-4">
             {/* 新建模板表单 */}
             {creating && (
               <div className="rounded-xl border border-surface-border bg-surface-elevated p-4 animate-fade-in">
-                <h3 className="text-sm font-medium text-text-primary mb-3">新建模板</h3>
+                <h3 className="text-sm font-medium text-text-primary mb-3">{t("prompts.create.title")}</h3>
                 <div className="space-y-3">
                   <div>
-                    <label className="text-xs text-text-secondary mb-1 block">模板名称</label>
+                    <label className="text-xs text-text-secondary mb-1 block">{t("prompts.create.name")}</label>
                     <input
                       value={newName}
                       onChange={(e) => setNewName(e.target.value)}
-                      placeholder="例：技术答辩、中文报告..."
+                      placeholder={t("prompts.create.name.placeholder")}
                       className="w-full px-3 py-2 rounded-lg border border-surface-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-brand/40"
                     />
                   </div>
                   <div>
-                    <label className="text-xs text-text-secondary mb-1 block">回答要求（作为 system prompt 发送给 AI）</label>
+                    <label className="text-xs text-text-secondary mb-1 block">{t("prompts.create.prefix")}</label>
                     <textarea
                       value={newPrefix}
                       onChange={(e) => setNewPrefix(e.target.value)}
-                      placeholder="例如：请用中文回答，每一步要求编号，最后给出总结。"
+                      placeholder={t("prompts.create.prefix.placeholder")}
                       rows={4}
                       className="w-full px-3 py-2 rounded-lg border border-surface-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-brand/40 resize-vertical"
                     />
@@ -128,13 +130,13 @@ export default function TemplatesPage() {
                       onClick={() => setCreating(false)}
                       className="px-3 py-1.5 rounded-lg text-sm text-text-secondary hover:bg-surface-card transition-colors"
                     >
-                      取消
+                      {t("prompts.create.cancel")}
                     </button>
                     <button
                       onClick={handleCreate}
                       className="px-4 py-1.5 rounded-lg bg-brand text-white text-sm font-medium hover:opacity-90"
                     >
-                      创建
+                      {t("prompts.create.submit")}
                     </button>
                   </div>
                 </div>
@@ -180,7 +182,7 @@ export default function TemplatesPage() {
                       <div className="flex items-center gap-2">
                         <h3 className="text-sm font-medium text-text-primary">{tpl.name}</h3>
                         {tpl.is_default && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-brand/10 text-brand font-medium">默认</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-brand/10 text-brand font-medium">{t("prompts.default")}</span>
                         )}
                       </div>
                       <div className="flex items-center gap-1">
@@ -192,9 +194,9 @@ export default function TemplatesPage() {
                               ? "text-text-tertiary"
                               : "text-text-secondary hover:bg-surface-card"
                           )}
-                          title={tpl.is_default ? "取消默认" : "设为默认"}
+                          title={tpl.is_default ? t("prompts.unsetDefault") : t("prompts.setDefault")}
                         >
-                          {tpl.is_default ? "取消默认" : "设为默认"}
+                          {tpl.is_default ? t("prompts.unsetDefault") : t("prompts.setDefault")}
                         </button>
                         <button
                           onClick={() => startEdit(tpl)}

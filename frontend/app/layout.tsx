@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import "katex/dist/katex.min.css";
 import { ThemeProvider } from "@/components/theme/ThemeProvider";
+import { I18nProvider } from "@/lib/i18n";
 import { Toaster } from "sonner";
 import AuthInterceptor from "@/components/AuthInterceptor";
 
@@ -29,18 +30,20 @@ export default function RootLayout({
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <body className="antialiased">
-        <ThemeProvider>
-          <AuthInterceptor />
-          {children}
-          <Toaster
-            position="top-center"
-            toastOptions={{
-              duration: 3500,
-            }}
-            closeButton
-            richColors={false}
-          />
-        </ThemeProvider>
+        <I18nProvider>
+          <ThemeProvider>
+            <AuthInterceptor />
+            {children}
+            <Toaster
+              position="top-center"
+              toastOptions={{
+                duration: 3500,
+              }}
+              closeButton
+              richColors={false}
+            />
+          </ThemeProvider>
+        </I18nProvider>
       </body>
     </html>
   );

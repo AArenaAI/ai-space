@@ -214,6 +214,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       headers["X-Guest-ID"] = getGuestId();
     }
 
+    let terminalStableCount = 0;
+    let lastContent = "";
     const poll = async () => {
       try {
         const res = await fetch(`${API_BASE_URL}/api/conversations/${convId}/messages/${serverMessageId}`, {
@@ -223,9 +225,17 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         const data = await res.json();
         const content = data?.message?.content || "";
         const status = data?.background_task?.status || "";
-        const isTerminal = status === "completed" || status === "failed" || status === "cancelled" || status === "incomplete";
         const hasContent = content.trim().length > 0;
-        const isFinished = (status === "completed" && hasContent) || status === "failed" || status === "cancelled" || status === "incomplete";
+        const isCompleted = status === "completed" && hasContent;
+        const isHardStopped = status === "cancelled";
+        const isSoftTerminal = status === "failed" || status === "incomplete";
+        if (isSoftTerminal) {
+          terminalStableCount = content === lastContent ? terminalStableCount + 1 : 0;
+        } else {
+          terminalStableCount = 0;
+        }
+        lastContent = content;
+        const isFinished = isCompleted || isHardStopped || (isSoftTerminal && terminalStableCount >= 3);
         setMessages((prev) =>
           prev.map((m) => {
             if (m.id !== localMessageId) return m;
@@ -242,8 +252,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           stopBackgroundPoller(localMessageId);
           stopTaskStream(localMessageId);
           setIsLoading(false);
-        } else if (isTerminal && !hasContent) {
-          // 防止后端 task 状态先完成、message.content 延迟可见时，前端把空消息误判为“生成中断”。
+        } else if (status === "failed" || status === "cancelled" || status === "incomplete" || !hasContent) {
+          // terminal 状态可能先于最终 message.content 可见；多轮确认稳定前继续轮询，避免刷新后才完整。
           setIsLoading(true);
         }
       } catch {}
@@ -273,7 +283,6 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     let inReasoningBlock = false;
     let buffer = "";
     let sawDone = false;
-    let doneHasContent = false;
     let latestSequence = after || 0;
 
     const stringifyDelta = (value: unknown): string => {
@@ -315,12 +324,15 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         delete activeTaskStreamsRef.current[localMessageId];
         sawDone = true;
         const hasContent = (accumulated || streamGet(localMessageId) || realtimeGet(localMessageId)?.content || "").trim().length > 0;
-        doneHasContent = hasContent;
-        realtimeUpdate(localMessageId, hasContent
-          ? { completedAt: Date.now(), activityStatus: undefined }
-          : { completedAt: undefined, activityStatus: { kind: "generating", status: "running", label: "任务繁忙，正在生成中" } }
-        );
-        if (hasContent) setIsLoading(false);
+        // [DONE] 只代表 event stream 结束，不代表 message.content 已经是 DB 最终值。
+        // OpenAI Responses 可能在 completed/final content 阶段补尾；交给 DB polling 校准最终内容。
+        realtimeUpdate(localMessageId, {
+          completedAt: undefined,
+          activityStatus: { kind: "generating", status: "running", label: hasContent ? "正在校准最终内容" : "任务繁忙，正在生成中" },
+        });
+        if (hasContent && serverMessageId) {
+          startBackgroundPolling(convId, localMessageId, serverMessageId);
+        }
         return;
       }
       try {
@@ -444,7 +456,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         }
         realtimeClear(localMessageId);
         delete taskStreamsRef.current[localMessageId];
-        if (!controller.signal.aborted && serverMessageId && (!sawDone || !doneHasContent)) {
+        if (!controller.signal.aborted && serverMessageId) {
           startBackgroundPolling(convId, localMessageId, serverMessageId);
         }
       }
@@ -964,13 +976,12 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
 
         const hasFinalContent = (finalContent || "").trim().length > 0;
 
-        // OpenAI background/complex task 会先返回 _generation_task，然后主 /api/chat 很快 [DONE]，
-        // 真正内容仍由后端 task runner 继续生成并落库。此时不能把空 assistant 标 completed，
-        // 否则 MessageList 会因 completedAt + 空内容显示“生成中断”。主流已结束后再接 task stream，
-        // 不会和 /api/chat 双通道同时写同一条消息。
-        if (sawDone && !hasFinalContent && abortReason !== "navigation" && abortReason !== "user" && (latestServerMessageId || latestGenerationTaskId)) {
+        // OpenAI background/complex task 的 [DONE] 只代表当前 SSE/event stream 结束，
+        // 不代表已展示内容就是 DB 最终内容。即使已有部分内容，也要继续通过
+        // task stream / DB polling 校准，否则会出现“输出一半直接 DONE，刷新后变完整”。
+        if (sawDone && abortReason !== "navigation" && abortReason !== "user" && (latestServerMessageId || latestGenerationTaskId)) {
           startTaskEventStream(convId || currentConversation, assistantMsg.id, latestServerMessageId, latestSequence, finalContent, latestGenerationTaskId);
-          if (latestUseBackground && latestServerMessageId) {
+          if (latestServerMessageId) {
             startBackgroundPolling(convId || currentConversation, assistantMsg.id, latestServerMessageId);
           }
           return;

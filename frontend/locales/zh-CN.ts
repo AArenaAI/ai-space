@@ -1,0 +1,78 @@
+const translations: Record<string, string> = {
+  // 设置导航
+  "settings.title": "设置",
+  "settings.subtitle": "管理你的账号和应用偏好",
+  "settings.nav.general": "通用",
+  "settings.nav.templates": "回答模板",
+
+  // 账户
+  "account.title": "账户",
+  "account.subtitle": "管理你的个人资料",
+  "account.username": "用户名",
+  "account.username.placeholder": "输入用户名",
+  "account.email": "邮箱",
+  "account.email.placeholder": "输入邮箱",
+  "account.save": "保存",
+  "account.saving": "保存中...",
+  "account.delete.title": "删除账号",
+  "account.delete.description": "删除后会清除账号、会话、文件、图片和工作区数据，无法恢复。",
+  "account.delete.button": "删除",
+  "account.delete.confirm.title": "确认删除账号？",
+  "account.delete.confirm.description": "该操作不可撤销。删除后你将退出登录，账号相关数据会被移除。",
+  "account.delete.confirm.cancel": "取消",
+  "account.delete.confirm.submit": "确认删除",
+  "account.delete.deleting": "删除中...",
+  "account.delete.error": "删除失败",
+  "account.update.success": "资料已更新",
+  "account.update.error": "保存失败",
+
+  "account.logout": "退出登录",
+
+  // 外观
+  "appearance.title": "外观",
+  "appearance.subtitle": "自定义你的界面外观",
+  "appearance.theme": "显示模式",
+  "appearance.theme.light": "白天模式",
+  "appearance.theme.dark": "夜晚模式",
+  "appearance.theme.green": "绿色护眼",
+  "appearance.language": "显示语言",
+  "appearance.language.placeholder": "选择语言",
+  "appearance.language.search": "搜索",
+  "appearance.language.noResults": "无符合条件的语言",
+
+  // 提示词
+  "prompts.title": "回答模板",
+  "prompts.subtitle": "创建和管理回答模板，在并列对比问答中使用",
+  "prompts.new": "新建模板",
+  "prompts.empty": "暂无模板",
+  "prompts.empty.hint": "点击「新建模板」开始创建",
+  "prompts.create.title": "新建模板",
+  "prompts.create.name": "模板名称",
+  "prompts.create.name.placeholder": "例：技术答辩、中文报告...",
+  "prompts.create.prefix": "回答要求（作为 system prompt 发送给 AI）",
+  "prompts.create.prefix.placeholder": "例如：请用中文回答，每一步要求编号，最后给出总结。",
+  "prompts.create.cancel": "取消",
+  "prompts.create.submit": "创建",
+  "prompts.edit.save": "保存",
+  "prompts.default": "默认",
+  "prompts.setDefault": "设为默认",
+  "prompts.unsetDefault": "取消默认",
+  "prompts.delete.confirm": "确定删除此模板？",
+  "prompts.delete.error": "删除模板失败",
+  "prompts.delete.success": "已删除",
+  "prompts.fill.required": "请填写模板名称和内容",
+  "prompts.save.error": "保存失败",
+  "prompts.create.error": "创建模板失败",
+  "prompts.create.success": "模板创建成功",
+  "prompts.save.success": "已保存",
+
+  // 通用
+  "common.loading": "加载中...",
+  "common.error": "出错了",
+  "common.cancel": "取消",
+  "common.confirm": "确认",
+  "common.delete": "删除",
+  "common.edit": "编辑",
+};
+
+export default translations;

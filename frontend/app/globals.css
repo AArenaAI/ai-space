@@ -490,6 +490,26 @@
   to { transform: translateX(0); opacity: 1; }
 }
 
+/* Logo 呼吸 + 发光动画 */
+@keyframes logo-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.85; filter: drop-shadow(0 0 6px rgba(59,130,246,0.25)); }
+  50% { transform: scale(1.1); opacity: 1; filter: drop-shadow(0 0 16px rgba(59,130,246,0.55)); }
+}
+
+/* Logo 扩散环动画 */
+@keyframes logo-ring {
+  0% { transform: scale(0.6); opacity: 0.5; }
+  100% { transform: scale(1.5); opacity: 0; }
+}
+
+.animate-logo-breathe {
+  animation: logo-breathe 2.4s ease-in-out infinite;
+}
+
+.animate-logo-ring {
+  animation: logo-ring 1.8s ease-out infinite;
+}
+
 /* ========== Sonner Toast 样式 - 现代毛玻璃风格 ========== */
 
 /* 基础 toast */

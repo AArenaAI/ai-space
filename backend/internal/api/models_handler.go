@@ -31,7 +31,10 @@ var SupportedModels = []ModelInfo{
 	// DeepSeek
 	{ID: "deepseek-v4-pro", Name: "DeepSeek-V4 Pro", Provider: "DeepSeek", Description: "V4 Pro 增强版，最强推理能力", Color: "#4d6bfa", Capabilities: []string{"chat", "reasoning"}},
 	{ID: "deepseek-v4-flash", Name: "DeepSeek-V4 Flash", Provider: "DeepSeek", Description: "V4 轻量版，极速响应", Color: "#6366f1", Capabilities: []string{"chat"}},
-	// Moonshot / Kimi
+	// Volcengine Video
+	{ID: "doubao-seedance-2-0-fast-260128", Name: "Seedance 2.0 Fast", Provider: "Volcengine", Description: "火山引擎视频生成快速版", Color: "#ff6a00", Capabilities: []string{"video"}},
+	{ID: "doubao-seedance-2-0-260128", Name: "Seedance 2.0", Provider: "Volcengine", Description: "火山引擎视频生成标准版", Color: "#ff0050", Capabilities: []string{"video"}},
+
 	{ID: "kimi-k2.5", Name: "Kimi K2.5", Provider: "Moonshot", Description: "旗舰多模态，支持图片理解+256K上下文", Color: "#00b96b", Capabilities: []string{"chat"}},
 	{ID: "kimi-k2.6", Name: "Kimi K2.6", Provider: "Moonshot", Description: "最新旗舰版，更强多模态+推理能力", Color: "#00b96b", Capabilities: []string{"chat"}},
 }
@@ -44,6 +47,11 @@ func ChatModels() []ModelInfo {
 // ImageModels 返回支持画图的模型
 func ImageModels() []ModelInfo {
 	return ModelsByCapability("image")
+}
+
+// VideoModels 返回支持视频生成的模型
+func VideoModels() []ModelInfo {
+	return ModelsByCapability("video")
 }
 
 // ModelsByCapability 返回支持指定能力的模型

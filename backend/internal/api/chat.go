@@ -908,6 +908,11 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 		})
 		h.persistTaskEvent(req.Task, req.AssistantMessageID, seq, "error", string(out))
 		streamResult.LastSequenceNumber = seq
+	} else if streamResult.ErrorMessage != "" {
+		finalStatus = "incomplete"
+		if strings.TrimSpace(content) == "" {
+			content = ""
+		}
 	} else if strings.TrimSpace(content) == "" {
 		content = "任务已完成，但未返回可展示文本。"
 	}
@@ -918,11 +923,25 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 	_ = h.db.Model(&models.Message{}).Where("id = ?", req.AssistantMessageID).Updates(updates).Error
 	h.touchConversation(req.ConversationID)
 
+	// 后台 generation task 的 DONE 必须排在最终 message.content 落库之后。
+	// forwardUnifiedStream(w=nil) 只负责按上游顺序持久化 delta；这里在最终内容
+	// 可读之后再补一个真实 done event，task stream 才不会先 DONE 后 DB 变完整。
+	if err == nil {
+		doneSeq := streamResult.LastSequenceNumber + 1
+		if doneSeq <= req.InitialSequence {
+			doneSeq = req.InitialSequence + 1
+		}
+		h.persistTaskEvent(req.Task, req.AssistantMessageID, doneSeq, "done", "[DONE]")
+		streamResult.LastSequenceNumber = doneSeq
+	}
+
 	taskUpdates := map[string]interface{}{
 		"status": finalStatus,
 		"result": content,
 	}
-	if err != nil {
+	if streamResult.ErrorMessage != "" {
+		taskUpdates["error_message"] = streamResult.ErrorMessage
+	} else if err != nil {
 		taskUpdates["error_message"] = err.Error()
 	}
 	if streamResult.ResponseID != "" && req.UseBackground {
@@ -1089,6 +1108,10 @@ type UnifiedStreamResult struct {
 	FullContent        string
 	ResponseID         string
 	LastSequenceNumber int64
+	ErrorMessage       string
+	ErrorCode          string
+	ErrorKind          string
+	Recoverable        bool
 }
 
 func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, w gin.ResponseWriter, reasoningEnabled bool, assistantMsgID uint, useBackground bool, userID uint, guestID string, conversationID uint, model string, provider string, streamTask *models.AIBackgroundTask, initialSequence int64) (*UnifiedStreamResult, *services.TokenUsage, error) {
@@ -1158,6 +1181,13 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 		return writeAndFlush("data: " + string(out) + "\n\n")
 	}
 	writeDoneEvent := func() error {
+		// 只有当前 HTTP SSE 仍在直连前端时，才立即发送/持久化 DONE。
+		// 后台 generation task 或客户端已断开时，DONE 必须由 runGenerationTask 在
+		// 最终 message.content 落库之后再持久化，避免 task stream 先看到 DONE、
+		// 前端停止在半截内容，而刷新后 DB 又变完整。
+		if w == nil || !clientConnected {
+			return nil
+		}
 		outgoingSeq++
 		h.persistTaskEvent(streamTask, assistantMsgID, outgoingSeq, "done", "[DONE]")
 		outcome.LastSequenceNumber = outgoingSeq
@@ -1314,8 +1344,11 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 					fullContent.WriteString("</think>")
 					reasoningPersistOpen = false
 				}
-				fullContent.WriteString(message)
 				contentMu.Unlock()
+				outcome.ErrorMessage = message
+				outcome.ErrorCode = event.Code
+				outcome.ErrorKind = event.ErrorKind
+				outcome.Recoverable = event.Recoverable
 
 				meta := map[string]interface{}{
 					"type":                "_error_meta",
@@ -1335,7 +1368,7 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 				}
 				if err := writeDataEvent("error", map[string]interface{}{
 					"choices": []map[string]interface{}{
-						{"delta": map[string]string{"content": message}},
+						{"delta": map[string]string{"content": ""}},
 					},
 					"_error_meta": meta,
 				}); err != nil {
@@ -1604,11 +1637,14 @@ func (h *ChatHandler) streamGenerationTaskEvents(c *gin.Context, task *models.AI
 					meta := map[string]interface{}{"_error_meta": map[string]interface{}{"user_message": task.ErrorMessage, "code": task.Status}}
 					out, _ := json.Marshal(meta)
 					_, _ = c.Writer.WriteString("data: " + string(out) + "\n\n")
+					if !doneWritten {
+						_, _ = c.Writer.WriteString("data: [DONE]\n\n")
+						c.Writer.Flush()
+					}
 				}
-				if !doneWritten {
-					_, _ = c.Writer.WriteString("data: [DONE]\n\n")
-					c.Writer.Flush()
-				}
+				// completed 状态必须依赖已持久化的 done event 结束。
+				// 不再根据 task terminal 状态合成 [DONE]，否则 task 状态/DB 更新和事件表之间
+				// 会产生“先 DONE、后最终内容可见”的重排序，破坏上游 delta -> done 顺序。
 				return
 			}
 		}

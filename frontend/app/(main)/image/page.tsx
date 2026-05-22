@@ -4,7 +4,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useImage } from "@/hooks/useImage";
 import { useImageChats } from "@/hooks/useImageChat";
-import { useImageModels, ChatModel } from "@/hooks/useModels";
+import { useImageModels, useVideoModels, ChatModel } from "@/hooks/useModels";
+import { useVideo, VideoGeneration } from "@/hooks/useVideo";
 import { GeneratedImage } from "@/hooks/useImage";
 import ImageLightbox from "@/components/ui/ImageLightbox";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
@@ -28,6 +29,9 @@ import {
   Sparkles,
   Eraser,
   Type,
+  Video,
+  Music,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -261,6 +265,8 @@ export default function ImagePage() {
   const { images, isGenerating, generateImage, deleteImage } = useImage();
   const { chats, loading: chatsLoading, fetchChats, deleteChat, updateChatTitle } = useImageChats();
   const { models: imageModels } = useImageModels();
+  const { models: videoModels } = useVideoModels();
+  const { videos, generating: videoGenerating, generateVideo, currentVideo, deleteVideo } = useVideo();
   const [prompt, setPrompt] = useState("");
   const [selectedAspectRatio, setSelectedAspectRatio] = useState("1:1");
   const [selectedResolution, setSelectedResolution] = useState("1K");
@@ -275,7 +281,15 @@ export default function ImagePage() {
   const [referenceImages, setReferenceImages] = useState<string[]>([]);
   const [uploadingRef, setUploadingRef] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [mode, setMode] = useState<"image" | "video">("image");
+  const [selectedDuration, setSelectedDuration] = useState("4s");
+  const [durationMenuOpen, setDurationMenuOpen] = useState(false);
+  const [musicEnabled, setMusicEnabled] = useState(false);
+  const [videoModelMenuOpen, setVideoModelMenuOpen] = useState(false);
+  const [selectedVideoModel, setSelectedVideoModel] = useState(videoModels[0]?.id || "doubao-seedance-2-0-fast-260128");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const currentVideoModel = videoModels.find((m) => m.id === selectedVideoModel) || videoModels[0];
 
   // 默认选第一个画图模型
   useEffect(() => {
@@ -338,6 +352,28 @@ export default function ImagePage() {
   const handleGenerate = async () => {
     if (!prompt.trim()) {
       toast.error("请输入描述");
+      return;
+    }
+    if (mode === "video") {
+      if (!currentVideoModel) {
+        toast.error("无可用的视频模型");
+        return;
+      }
+      try {
+        const durationSec = parseInt(selectedDuration.replace("s", ""), 10) || 4;
+        await generateVideo({
+          prompt: prompt.trim(),
+          model: currentVideoModel.id,
+          ratio: selectedAspectRatio,
+          duration: durationSec,
+          generate_audio: musicEnabled,
+          watermark: false,
+          reference_image_urls: referenceImages.length > 0 ? referenceImages : undefined,
+        });
+        toast.success("视频生成任务已提交");
+      } catch (err: any) {
+        toast.error(err.message || "提交失败");
+      }
       return;
     }
     const params = new URLSearchParams();
@@ -437,7 +473,35 @@ export default function ImagePage() {
           </button>
         </div>
 
-        <h1 className="text-3xl font-bold text-text-primary mt-8 mb-6">AI画图</h1>
+        <h1 className="text-3xl font-bold text-text-primary mt-8 mb-4">AI灵感创作器</h1>
+        <div className="flex items-center justify-center mb-6">
+          <div className="inline-flex items-center bg-surface-card rounded-full p-1 border border-surface-border">
+            <button
+              onClick={() => setMode("image")}
+              className={cn(
+                "flex items-center gap-2 px-5 py-2 rounded-full text-sm font-medium transition-all",
+                mode === "image"
+                  ? "bg-white text-text-primary shadow-sm dark:bg-surface-elevated"
+                  : "text-text-tertiary hover:text-text-secondary"
+              )}
+            >
+              <ImageIcon className="w-4 h-4" />
+              图像
+            </button>
+            <button
+              onClick={() => setMode("video")}
+              className={cn(
+                "flex items-center gap-2 px-5 py-2 rounded-full text-sm font-medium transition-all",
+                mode === "video"
+                  ? "bg-white text-text-primary shadow-sm dark:bg-surface-elevated"
+                  : "text-text-tertiary hover:text-text-secondary"
+              )}
+            >
+              <Video className="w-4 h-4" />
+              视频
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto px-4 md:px-6 pb-8">
@@ -468,7 +532,9 @@ export default function ImagePage() {
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder={
-                  referenceImages.length > 0
+                  mode === "video"
+                    ? "尝试描述您想要创建的视频..."
+                    : referenceImages.length > 0
                     ? "描述您想要对参考图进行的修改..."
                     : "尝试描述您想要创建的图像..."
                 }
@@ -489,135 +555,312 @@ export default function ImagePage() {
             {/* 底部工具栏 */}
             <div className="flex items-center justify-between px-4 pb-3 pt-2">
               <div className="flex items-center gap-2 flex-wrap">
-                {/* 模型选择 */}
-                {imageModels.length > 0 && (
-                  <div className="relative">
-                    <button
-                      onClick={() => setModelMenuOpen(!modelMenuOpen)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[13px] font-medium transition-all duration-200 border-surface-border text-text-secondary hover:text-text-primary hover:border-text-tertiary/50 bg-transparent"
-                    >
-                      <div
-                        className="w-2 h-2 rounded-full shrink-0"
-                        style={{ backgroundColor: currentModel?.color || "#999" }}
-                      />
-                      <span>{currentModel?.name || "选择模型"}</span>
-                      <ChevronDown className="w-3 h-3" />
-                    </button>
-                    {modelMenuOpen && (
-                      <>
-                        <div className="fixed inset-0 z-40" onClick={() => setModelMenuOpen(false)} />
-                        <div className="absolute top-full left-0 mt-1.5 w-56 z-50 rounded-xl border border-surface-border bg-surface-elevated shadow-xl py-1 animate-fade-in">
-                          {imageModels.map((model) => (
-                            <button
-                              key={model.id}
-                              onClick={() => {
-                                setSelectedModel(model.id);
-                                setModelMenuOpen(false);
-                              }}
-                              className={cn(
-                                "flex items-center gap-3 w-full px-3 py-2.5 text-sm transition-colors text-left",
-                                selectedModel === model.id
-                                  ? "bg-brand/10 text-brand"
-                                  : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
-                              )}
-                            >
-                              <div
-                                className="w-2 h-2 rounded-full shrink-0"
-                                style={{ backgroundColor: model.color }}
-                              />
-                              <div className="flex-1">
-                                <div className="font-medium">{model.name}</div>
-                                <div className="text-[11px] text-text-tertiary">{model.description}</div>
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-                      </>
+                {mode === "image" ? (
+                  <>
+                    {/* 模型选择 */}
+                    {imageModels.length > 0 && (
+                      <div className="relative">
+                        <button
+                          onClick={() => setModelMenuOpen(!modelMenuOpen)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[13px] font-medium transition-all duration-200 border-surface-border text-text-secondary hover:text-text-primary hover:border-text-tertiary/50 bg-transparent"
+                        >
+                          <div
+                            className="w-2 h-2 rounded-full shrink-0"
+                            style={{ backgroundColor: currentModel?.color || "#999" }}
+                          />
+                          <span>{currentModel?.name || "选择模型"}</span>
+                          <ChevronDown className="w-3 h-3" />
+                        </button>
+                        {modelMenuOpen && (
+                          <>
+                            <div className="fixed inset-0 z-40" onClick={() => setModelMenuOpen(false)} />
+                            <div className="absolute top-full left-0 mt-1.5 w-56 z-50 rounded-xl border border-surface-border bg-surface-elevated shadow-xl py-1 animate-fade-in">
+                              {imageModels.map((model) => (
+                                <button
+                                  key={model.id}
+                                  onClick={() => {
+                                    setSelectedModel(model.id);
+                                    setModelMenuOpen(false);
+                                  }}
+                                  className={cn(
+                                    "flex items-center gap-3 w-full px-3 py-2.5 text-sm transition-colors text-left",
+                                    selectedModel === model.id
+                                      ? "bg-brand/10 text-brand"
+                                      : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
+                                  )}
+                                >
+                                  <div
+                                    className="w-2 h-2 rounded-full shrink-0"
+                                    style={{ backgroundColor: model.color }}
+                                  />
+                                  <div className="flex-1">
+                                    <div className="font-medium">{model.name}</div>
+                                    <div className="text-[11px] text-text-tertiary">{model.description}</div>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
                     )}
-                  </div>
-                )}
 
-                {/* 纵横比+分辨率选择 */}
-                <div className="relative">
-                  <button
-                    onClick={() => setAspectMenuOpen(!aspectMenuOpen)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[13px] font-medium transition-all duration-200 border-surface-border text-text-secondary hover:text-text-primary hover:border-text-tertiary/50 bg-transparent"
-                  >
-                    <Layers className="w-3.5 h-3.5" />
-                    <span>
-                      {currentAspect.label} · {selectedResolution}
-                    </span>
-                    <ChevronDown className="w-3 h-3" />
-                  </button>
-                  {aspectMenuOpen && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={() => setAspectMenuOpen(false)} />
-                      <div className="absolute top-full left-0 mt-1.5 w-[340px] z-50 rounded-xl border border-surface-border bg-surface-elevated shadow-xl p-4 animate-fade-in">
-                        <div className="text-xs font-medium text-text-secondary mb-3">纵横比</div>
-                        <div className="grid grid-cols-5 gap-2">
-                          {ASPECT_RATIOS.map((ar) => {
-                            const active = selectedAspectRatio === ar.value;
-                            return (
+                    {/* 纵横比+分辨率选择 */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setAspectMenuOpen(!aspectMenuOpen)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[13px] font-medium transition-all duration-200 border-surface-border text-text-secondary hover:text-text-primary hover:border-text-tertiary/50 bg-transparent"
+                      >
+                        <Layers className="w-3.5 h-3.5" />
+                        <span>
+                          {currentAspect.label} · {selectedResolution}
+                        </span>
+                        <ChevronDown className="w-3 h-3" />
+                      </button>
+                      {aspectMenuOpen && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setAspectMenuOpen(false)} />
+                          <div className="absolute top-full left-0 mt-1.5 w-[340px] z-50 rounded-xl border border-surface-border bg-surface-elevated shadow-xl p-4 animate-fade-in">
+                            <div className="text-xs font-medium text-text-secondary mb-3">纵横比</div>
+                            <div className="grid grid-cols-5 gap-2">
+                              {ASPECT_RATIOS.map((ar) => {
+                                const active = selectedAspectRatio === ar.value;
+                                return (
+                                  <button
+                                    key={ar.value}
+                                    onClick={() => setSelectedAspectRatio(ar.value)}
+                                    className={cn(
+                                      "flex flex-col items-center gap-1 px-1 py-2 rounded-lg border text-[10px] transition-all duration-200",
+                                      active
+                                        ? "bg-brand/10 border-brand/40 text-brand"
+                                        : "bg-surface border-surface-border text-text-secondary hover:border-text-tertiary/50"
+                                    )}
+                                  >
+                                    <AspectIcon w={ar.w} h={ar.h} active={active} />
+                                    <span>{ar.label}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <div className="text-xs font-medium text-text-secondary mt-4 mb-2">分辨率</div>
+                            <div className="flex gap-2">
+                              {RESOLUTIONS.map((res) => (
+                                <button
+                                  key={res.value}
+                                  onClick={() => setSelectedResolution(res.value)}
+                                  className={cn(
+                                    "flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border text-xs transition-all duration-200",
+                                    selectedResolution === res.value
+                                      ? "bg-brand/10 border-brand/40 text-brand"
+                                      : "bg-surface border-surface-border text-text-secondary hover:border-text-tertiary/50"
+                                  )}
+                                >
+                                  <span className="font-semibold">{res.label}</span>
+                                  <span className="text-[10px] opacity-70">{res.desc}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    {/* 质量选择 */}
+                    <div className="flex items-center rounded-full border border-surface-border overflow-hidden bg-transparent">
+                      {QUALITIES.map((q) => (
+                        <button
+                          key={q.value}
+                          onClick={() => setSelectedQuality(q.value)}
+                          className={cn(
+                            "px-2.5 py-1 text-[11px] font-medium transition-all duration-200",
+                            selectedQuality === q.value
+                              ? "bg-brand/10 text-brand"
+                              : "text-text-tertiary hover:text-text-secondary"
+                          )}
+                        >
+                          {q.label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {/* 视频模型选择 */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setVideoModelMenuOpen(!videoModelMenuOpen)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[13px] font-medium transition-all duration-200 border-surface-border text-text-secondary hover:text-text-primary hover:border-text-tertiary/50 bg-transparent"
+                      >
+                        <div
+                          className="w-2 h-2 rounded-full shrink-0"
+                          style={{ backgroundColor: currentVideoModel?.color || "#999" }}
+                        />
+                        <span>{currentVideoModel?.name || "选择模型"}</span>
+                        <ChevronDown className="w-3 h-3" />
+                      </button>
+                      {videoModelMenuOpen && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setVideoModelMenuOpen(false)} />
+                          <div className="absolute top-full left-0 mt-1.5 w-56 z-50 rounded-xl border border-surface-border bg-surface-elevated shadow-xl py-1 animate-fade-in">
+                            {videoModels.map((model: ChatModel) => (
                               <button
-                                key={ar.value}
-                                onClick={() => setSelectedAspectRatio(ar.value)}
+                                key={model.id}
+                                onClick={() => {
+                                  setSelectedVideoModel(model.id);
+                                  setVideoModelMenuOpen(false);
+                                }}
                                 className={cn(
-                                  "flex flex-col items-center gap-1 px-1 py-2 rounded-lg border text-[10px] transition-all duration-200",
-                                  active
-                                    ? "bg-brand/10 border-brand/40 text-brand"
-                                    : "bg-surface border-surface-border text-text-secondary hover:border-text-tertiary/50"
+                                  "flex items-center gap-3 w-full px-3 py-2.5 text-sm transition-colors text-left",
+                                  selectedVideoModel === model.id
+                                    ? "bg-brand/10 text-brand"
+                                    : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                                 )}
                               >
-                                <AspectIcon w={ar.w} h={ar.h} active={active} />
-                                <span>{ar.label}</span>
+                                <div
+                                  className="w-2 h-2 rounded-full shrink-0"
+                                  style={{ backgroundColor: model.color }}
+                                />
+                                <div className="flex-1">
+                                  <div className="font-medium">{model.name}</div>
+                                </div>
                               </button>
-                            );
-                          })}
-                        </div>
-                        <div className="text-xs font-medium text-text-secondary mt-4 mb-2">分辨率</div>
-                        <div className="flex gap-2">
-                          {RESOLUTIONS.map((res) => (
-                            <button
-                              key={res.value}
-                              onClick={() => setSelectedResolution(res.value)}
-                              className={cn(
-                                "flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border text-xs transition-all duration-200",
-                                selectedResolution === res.value
-                                  ? "bg-brand/10 border-brand/40 text-brand"
-                                  : "bg-surface border-surface-border text-text-secondary hover:border-text-tertiary/50"
-                              )}
-                            >
-                              <span className="font-semibold">{res.label}</span>
-                              <span className="text-[10px] opacity-70">{res.desc}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
 
-                {/* 质量选择 */}
-                <div className="flex items-center rounded-full border border-surface-border overflow-hidden bg-transparent">
-                  {QUALITIES.map((q) => (
+                    {/* 参考图像 */}
                     <button
-                      key={q.value}
-                      onClick={() => setSelectedQuality(q.value)}
+                      onClick={handleAddImage}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[13px] font-medium transition-all duration-200 border-surface-border text-text-secondary hover:text-text-primary hover:border-text-tertiary/50 bg-transparent"
+                    >
+                      <ImageIcon className="w-3.5 h-3.5" />
+                      <span>参考图像</span>
+                    </button>
+
+                    {/* 画幅|分辨率 */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setAspectMenuOpen(!aspectMenuOpen)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[13px] font-medium transition-all duration-200 border-surface-border text-text-secondary hover:text-text-primary hover:border-text-tertiary/50 bg-transparent"
+                      >
+                        <Layers className="w-3.5 h-3.5" />
+                        <span>
+                          {currentAspect.label} | {selectedResolution}
+                        </span>
+                        <ChevronDown className="w-3 h-3" />
+                      </button>
+                      {aspectMenuOpen && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setAspectMenuOpen(false)} />
+                          <div className="absolute top-full left-0 mt-1.5 w-[340px] z-50 rounded-xl border border-surface-border bg-surface-elevated shadow-xl p-4 animate-fade-in">
+                            <div className="text-xs font-medium text-text-secondary mb-3">纵横比</div>
+                            <div className="grid grid-cols-5 gap-2">
+                              {ASPECT_RATIOS.map((ar) => {
+                                const active = selectedAspectRatio === ar.value;
+                                return (
+                                  <button
+                                    key={ar.value}
+                                    onClick={() => setSelectedAspectRatio(ar.value)}
+                                    className={cn(
+                                      "flex flex-col items-center gap-1 px-1 py-2 rounded-lg border text-[10px] transition-all duration-200",
+                                      active
+                                        ? "bg-brand/10 border-brand/40 text-brand"
+                                        : "bg-surface border-surface-border text-text-secondary hover:border-text-tertiary/50"
+                                    )}
+                                  >
+                                    <AspectIcon w={ar.w} h={ar.h} active={active} />
+                                    <span>{ar.label}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <div className="text-xs font-medium text-text-secondary mt-4 mb-2">分辨率</div>
+                            <div className="flex gap-2">
+                              {RESOLUTIONS.map((res) => (
+                                <button
+                                  key={res.value}
+                                  onClick={() => setSelectedResolution(res.value)}
+                                  className={cn(
+                                    "flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border text-xs transition-all duration-200",
+                                    selectedResolution === res.value
+                                      ? "bg-brand/10 border-brand/40 text-brand"
+                                      : "bg-surface border-surface-border text-text-secondary hover:border-text-tertiary/50"
+                                  )}
+                                >
+                                  <span className="font-semibold">{res.label}</span>
+                                  <span className="text-[10px] opacity-70">{res.desc}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    {/* 时长选择 */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setDurationMenuOpen(!durationMenuOpen)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[13px] font-medium transition-all duration-200 border-surface-border text-text-secondary hover:text-text-primary hover:border-text-tertiary/50 bg-transparent"
+                      >
+                        <Clock className="w-3.5 h-3.5" />
+                        <span>{selectedDuration}</span>
+                        <ChevronDown className="w-3 h-3" />
+                      </button>
+                      {durationMenuOpen && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setDurationMenuOpen(false)} />
+                          <div className="absolute top-full left-0 mt-1.5 w-28 z-50 rounded-xl border border-surface-border bg-surface-elevated shadow-xl py-1 animate-fade-in">
+                            {["4s", "6s", "8s", "10s", "12s"].map((d) => (
+                              <button
+                                key={d}
+                                onClick={() => {
+                                  setSelectedDuration(d);
+                                  setDurationMenuOpen(false);
+                                }}
+                                className={cn(
+                                  "flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors text-left",
+                                  selectedDuration === d
+                                    ? "bg-brand/10 text-brand"
+                                    : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
+                                )}
+                              >
+                                <span className="font-medium">{d}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    {/* 音乐 */}
+                    <button
+                      onClick={() => setMusicEnabled(!musicEnabled)}
                       className={cn(
-                        "px-2.5 py-1 text-[11px] font-medium transition-all duration-200",
-                        selectedQuality === q.value
-                          ? "bg-brand/10 text-brand"
-                          : "text-text-tertiary hover:text-text-secondary"
+                        "flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[13px] font-medium transition-all duration-200",
+                        musicEnabled
+                          ? "border-purple-400/50 text-purple-500 bg-purple-500/10"
+                          : "border-surface-border text-text-secondary hover:text-text-primary hover:border-text-tertiary/50 bg-transparent"
                       )}
                     >
-                      {q.label}
+                      <Music className="w-3.5 h-3.5" />
+                      <span>音乐</span>
                     </button>
-                  ))}
-                </div>
+                  </>
+                )}
               </div>
 
-              {/* 发送按钮 */}
-                {isLoading || isGenerating ? (
+              <div className="flex items-center gap-2">
+                {/* 积分 */}
+                <div className="flex items-center gap-1 text-[13px] text-text-secondary">
+                  <Zap className="w-3.5 h-3.5 text-amber-500" />
+                  <span>{mode === "video" ? "70" : "5"}</span>
+                </div>
+
+                {/* 发送按钮 */}
+                {isLoading || isGenerating || (mode === "video" && videoGenerating) ? (
                   <button
                     disabled
                     className="flex items-center justify-center w-9 h-9 rounded-full bg-text-tertiary/30 text-white cursor-not-allowed"
@@ -641,8 +884,89 @@ export default function ImagePage() {
                     <Send className="w-4 h-4" />
                   </button>
                 )}
+              </div>
             </div>
           </div>
+
+          {/* 视频结果展示 */}
+          {mode === "video" && (
+            <div className="space-y-4">
+              {/* 当前正在生成的视频 */}
+              {currentVideo && (currentVideo.status === "pending" || currentVideo.status === "running") && (
+                <div className="bg-surface-card rounded-xl border border-surface-border p-6 flex flex-col items-center gap-3">
+                  <Loader2 className="w-8 h-8 text-brand animate-spin" />
+                  <p className="text-sm text-text-secondary">视频生成中... 请耐心等待</p>
+                  <p className="text-xs text-text-tertiary line-clamp-1">{currentVideo.prompt}</p>
+                </div>
+              )}
+              {/* 视频历史 */}
+              {videos.filter((v: VideoGeneration) => v.status !== "pending" && v.status !== "running").length > 0 && (
+                <div>
+                  <h3 className="text-base font-semibold text-text-primary mb-3">视频历史</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {videos.map((video: VideoGeneration) => (
+                      <div
+                        key={video.id}
+                        className="bg-surface-card rounded-xl border border-surface-border overflow-hidden hover:border-brand/30 transition-all"
+                      >
+                        <div className="aspect-video bg-surface relative">
+                          {video.status === "succeeded" && video.video_url ? (
+                            <video
+                              src={video.video_url}
+                              className="w-full h-full object-cover"
+                              controls
+                              preload="metadata"
+                            />
+                          ) : video.status === "failed" ? (
+                            <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-text-tertiary">
+                              <AlertCircle className="w-8 h-8 text-red-400/50" />
+                              <span className="text-xs text-red-400/70">生成失败</span>
+                            </div>
+                          ) : (
+                            <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-text-tertiary">
+                              <Loader2 className="w-6 h-6 animate-spin" />
+                              <span className="text-xs">处理中...</span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="p-3">
+                          <p className="text-sm text-text-primary line-clamp-2">{video.prompt}</p>
+                          <div className="flex items-center justify-between mt-1">
+                            <p className="text-[11px] text-text-tertiary">
+                              {new Date(video.created_at).toLocaleString()}
+                            </p>
+                            <div className="flex items-center gap-2">
+                              {video.status === "succeeded" && video.video_url && (
+                                <a
+                                  href={video.video_url}
+                                  download
+                                  className="text-xs text-brand hover:underline"
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  下载
+                                </a>
+                              )}
+                              <button
+                                onClick={() => {
+                                  if (confirm("确定删除此视频？")) {
+                                    deleteVideo(video.id);
+                                  }
+                                }}
+                                className="text-xs text-red-400 hover:text-red-500"
+                              >
+                                删除
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* 图编工具入口 - 与AI画图摆在一起 */}
           <div className="mt-6 mb-2">
@@ -764,11 +1088,16 @@ function ImageCard({
       <div className="aspect-square bg-surface relative">
         {isPending ? (
           <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-text-tertiary">
-            <div className="relative">
-              <Loader2 className="w-8 h-8 animate-spin text-brand/40" />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <Wand2 className="w-3.5 h-3.5 text-brand" />
-              </div>
+            <div className="relative w-16 h-16 flex items-center justify-center">
+              {/* 扩散环 */}
+              <div className="absolute inset-0 rounded-full border-2 border-brand/30 animate-logo-ring" />
+              <div className="absolute inset-0 rounded-full border-2 border-brand/20 animate-logo-ring" style={{ animationDelay: "0.9s" }} />
+              {/* Logo */}
+              <img
+                src="/brand-dark-logo.png"
+                alt="AI Space"
+                className="relative w-10 h-10 object-contain animate-logo-breathe"
+              />
             </div>
             <div className="flex items-center gap-1.5 text-xs">
               <Clock className="w-3 h-3" />

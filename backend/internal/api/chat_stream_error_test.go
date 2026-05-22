@@ -55,8 +55,11 @@ func TestForwardUnifiedStreamErrorTerminatesAfterOneEvent(t *testing.T) {
 		t.Fatalf("expected outcome")
 	}
 	body := w.Body.String()
-	if got := strings.Count(body, "\"content\":\"Rate limit reached for gpt-5.5-pro.\""); got != 1 {
-		t.Fatalf("error delta should be emitted once, got %d in body: %s", got, body)
+	if strings.Contains(body, "\"content\":\"Rate limit reached for gpt-5.5-pro.\"") {
+		t.Fatalf("error message should not be appended as assistant content, body: %s", body)
+	}
+	if got := strings.Count(body, "\"user_message\":\"Rate limit reached for gpt-5.5-pro.\""); got != 1 {
+		t.Fatalf("error meta should be emitted once, got %d in body: %s", got, body)
 	}
 	if !strings.Contains(body, "\"_error_meta\"") {
 		t.Fatalf("expected _error_meta in body: %s", body)
