@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback, useMemo, memo } from "react";
-import { User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck, ChevronDown, ChevronUp, Lightbulb, Play, Search, ChevronDown as ChevronDownIcon, FileText, Wrench, Star } from "lucide-react";
+import { User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck, ChevronDown, ChevronUp, Lightbulb, Play, Search, ChevronDown as ChevronDownIcon, FileText, Wrench, Star, Columns2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/hooks/useChat";
 import { useFavorites } from "@/hooks/useFavorites";
@@ -20,6 +20,7 @@ import { useSmartAutoScroll } from "@/hooks/useSmartAutoScroll";
 import { useMessageStream } from "@/hooks/useMessageStream";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
+import { inferGroups, InferredGroup } from "@/lib/groups";
 import EChartsBlock from "./EChartsBlock";
 
 interface MessageListProps {
@@ -39,6 +40,9 @@ interface MessageListProps {
   welcomeSubtitle?: string;
   welcomeExamples?: { title: string; desc: string; prompt: string }[];
   onExampleClick?: (prompt: string) => void;
+  groupViews?: Map<number, number>;
+  switchGroupModel?: (groupId: number, activeIndex: number) => void;
+  onForkCompare?: (messageId: number) => void;
 }
 
 function ThinkingDots() {
@@ -158,6 +162,8 @@ function StreamingText({ messageId, content, isStreaming, className }: { message
 function AssistantMeta({ msg, isStreaming, model }: { msg: Message; isStreaming: boolean; model?: ChatModel }) {
   const realtime = useMessageRealtime(isStreaming ? msg.id : "");
   const activityStatus = realtime?.activityStatus ?? msg.activityStatus;
+  const searchStatus = realtime?.searchStatus;
+  const searchSources = realtime?.searchSources;
 
   if (!model) return null;
 
@@ -167,6 +173,18 @@ function AssistantMeta({ msg, isStreaming, model }: { msg: Message; isStreaming:
         <div className="w-1 h-1 rounded-full" style={{ backgroundColor: model.color }} />
         <span className="text-[11px] text-text-tertiary">{model.name}</span>
       </div>
+      {searchStatus === "searching" && (
+        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full text-blue-600 bg-blue-500/10">
+          <Search className="w-3 h-3 animate-pulse" />
+          正在联网搜索
+        </span>
+      )}
+      {(searchStatus === "completed" || (searchSources && searchSources.length > 0)) && (
+        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full text-green-600 bg-green-500/10">
+          <Search className="w-3 h-3" />
+          已联网搜索{searchSources && searchSources.length > 0 ? `·引用${searchSources.length}个来源` : ""}
+        </span>
+      )}
       {activityStatus && activityStatus.status !== "completed" && (
         <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full text-amber-600 bg-amber-500/10">
           {activityStatus.kind === "tool_call" ? (
@@ -393,6 +411,7 @@ function MessageActions({
   visible,
   createdAt,
   completedAt,
+  onForkCompare,
 }: {
   onCopy: () => void;
   onDelete: () => void;
@@ -405,6 +424,7 @@ function MessageActions({
   visible: boolean;
   createdAt: number;
   completedAt?: number;
+  onForkCompare?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -456,6 +476,15 @@ function MessageActions({
       >
         {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
       </button>
+      {onForkCompare && align === "right" && (
+        <button
+          onClick={onForkCompare}
+          className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
+          title="对比"
+        >
+          <Columns2 className="w-3.5 h-3.5" />
+        </button>
+      )}
       {showRegenerate && onRegenerate && (
         <button
           onClick={onRegenerate}
@@ -577,6 +606,9 @@ function MessageList({
   welcomeSubtitle,
   welcomeExamples,
   onExampleClick,
+  groupViews,
+  switchGroupModel,
+  onForkCompare,
 }: MessageListProps) {
   const {
     containerRef,
@@ -599,6 +631,7 @@ function MessageList({
   const [shareOpen, setShareOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [compareModelMenuOpen, setCompareModelMenuOpen] = useState<number | null>(null);
+  const groups = useMemo(() => inferGroups(messages), [messages]);
 
   // 收藏功能
   const { toggleFavorite, isFavorited, checkBatch } = useFavorites();
@@ -742,9 +775,17 @@ function MessageList({
     return groups;
   }, [isCompare, messages]);
 
+  const isMessageGenerating = (msg: Message, isStreaming: boolean) => {
+    if (isStreaming) return true;
+    if (msg.completedAt || msg.stopped) return false;
+    if (msg.activityStatus?.status === "running" || msg.activityStatus?.status === "searching") return true;
+    return !!(msg.generationTaskId || msg.backgroundTaskId || msg.useBackground || msg.isComplexTask);
+  };
+
   const renderAssistantContent = (msg: Message, isStreaming: boolean) => {
-    if (isStreaming) {
-      return <StreamingText messageId={msg.id} content={msg.content} isStreaming={isStreaming} className="text-[15px] leading-relaxed text-text-primary" />;
+    const generating = isMessageGenerating(msg, isStreaming);
+    if (generating) {
+      return <StreamingText messageId={msg.id} content={msg.content || msg.activityStatus?.label || "任务繁忙，正在生成中"} isStreaming={true} className="text-[15px] leading-relaxed text-text-primary" />;
     }
     if (!msg.content) {
       return <div className="text-[15px] leading-relaxed text-text-secondary">生成中断，可点击重新生成</div>;
@@ -839,7 +880,11 @@ function MessageList({
   );
 
   if (isCompare) {
-    const activeCompareModels = (compareModels && compareModels.length > 0 ? compareModels : models.slice(0, 2).map((m) => m.id)).slice(0, 2);
+    // 动态列数：优先使用 compareModels，否则从消息中收集所有 model
+    const activeCompareModels =
+      compareModels && compareModels.length > 0
+        ? compareModels
+        : Array.from(new Set(messages.filter((m) => m.role === "assistant" && m.model).map((m) => m.model!)));
 
     const columnMessages = activeCompareModels.map((modelId) =>
       messages.filter((msg) => msg.role === "user" || msg.model === modelId)
@@ -869,7 +914,8 @@ function MessageList({
                           const isUser = msg.role === "user";
                           const isLast = msgIndex === colMsgs.length - 1;
                           const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && isLast;
-                          const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading;
+                          const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
+                          const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
 
                           return (
                             <div key={`${colIndex}-${msg.id}`} className="flex gap-3 animate-message-appear group">
@@ -962,6 +1008,20 @@ function MessageList({
                                         visible={isLast}
                                         createdAt={msg.createdAt}
                                         completedAt={msg.completedAt}
+                                      />
+                                    </div>
+                                  )}
+                                  {isUser && !isStreaming && (
+                                    <div className="flex items-center justify-end gap-2 px-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <MessageActions
+                                        onCopy={() => handleCopy(msg.content)}
+                                        onDelete={() => setDeleteTarget(msg.id)}
+                                        onSelectMode={enterSelectMode}
+                                        showRegenerate={false}
+                                        align="right"
+                                        visible={isLast}
+                                        createdAt={msg.createdAt}
+                                        onForkCompare={msg.serverMessageId ? () => onForkCompare?.(msg.serverMessageId!) : undefined}
                                       />
                                     </div>
                                   )}
@@ -1099,11 +1159,21 @@ function MessageList({
       >
         <div className="max-w-[800px] mx-auto space-y-8">
         {messages.map((msg, index) => {
-          const model = models.find((m) => m.id === msg.model);
+          const group = groups.find(g => g.userMessage.id === msg.id || g.assistantMessages.some(a => a.id === msg.id));
           const isUser = msg.role === "user";
+
+          // 非活跃 assistant 跳过渲染
+          if (!isUser && group && group.assistantMessages.length > 1) {
+            const activeIndex = groupViews?.get(group.id) ?? 0;
+            const activeMsg = group.assistantMessages[activeIndex] ?? group.assistantMessages[0];
+            if (msg.id !== activeMsg?.id) return null;
+          }
+
+          const model = models.find((m) => m.id === msg.model);
           const isLast = index === messages.length - 1;
           const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && isLast;
-          const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading;
+          const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
+          const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
           const isSelected = selectedIds.has(msg.id);
 
           return (
@@ -1136,6 +1206,34 @@ function MessageList({
               {/* 中间内容 */}
               <div className={cn("flex-1 flex min-w-0", isUser ? "justify-end" : "justify-start")}>
                 <div className="flex flex-col gap-1 min-w-0">
+                  {!isUser && group && group.assistantMessages.length > 1 && (
+                    <div className="flex items-center gap-1.5 mb-1">
+                      {group.assistantMessages.map((a, idx) => {
+                        const m = models.find((model) => model.id === a.model);
+                        const isActive = (groupViews?.get(group.id) ?? 0) === idx;
+                        return (
+                          <button
+                            key={a.id}
+                            onClick={() => switchGroupModel?.(group.id, idx)}
+                            className={cn(
+                              "flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] transition-colors",
+                              isActive
+                                ? "bg-brand/10 text-brand font-medium"
+                                : "bg-surface-card text-text-secondary hover:bg-surface-elevated"
+                            )}
+                          >
+                            <div
+                              className="w-3 h-3 rounded-full flex items-center justify-center text-[8px] font-bold text-white"
+                              style={{ backgroundColor: m?.color }}
+                            >
+                              {(m?.name || a.model || `模型${idx + 1}`).slice(0, 1).toUpperCase()}
+                            </div>
+                            <span className="truncate max-w-[80px]">{m?.name || a.model || `模型 ${idx + 1}`}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                   <div
                     className={cn(
                       "px-4 py-3 relative w-fit max-w-full",
@@ -1227,6 +1325,7 @@ function MessageList({
                     visible={isLast}
                     createdAt={msg.createdAt}
                     completedAt={msg.completedAt}
+                    onForkCompare={isUser && msg.serverMessageId ? () => onForkCompare?.(msg.serverMessageId!) : undefined}
                   />
                 )}
               </div>

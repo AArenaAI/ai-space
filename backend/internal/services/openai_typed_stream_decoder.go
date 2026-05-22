@@ -3,6 +3,7 @@ package services
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/openai/openai-go/packages/ssestream"
 	"github.com/openai/openai-go/responses"
@@ -33,6 +34,8 @@ type OpenAIResponsesTypedDecoder struct {
 	textChars      int
 	reasoningChars int
 	doneEmitted    bool
+	pending        []*AIStreamEvent
+	fullText       strings.Builder
 }
 
 func NewOpenAIResponsesTypedDecoder(stream *ssestream.Stream[responses.ResponseStreamEventUnion], model ...string) *OpenAIResponsesTypedDecoder {
@@ -51,38 +54,17 @@ func (d *OpenAIResponsesTypedDecoder) Next() (*AIStreamEvent, error) {
 		return nil, io.EOF
 	}
 
+	if pending := d.popPendingEvent(); pending != nil {
+		return pending, nil
+	}
+
 	for d.stream.Next() {
 		event := d.stream.Current()
 		d.eventCount++
 		parsed := d.parseTypedEvent(event)
 		if parsed != nil {
 			parsed.SequenceNumber = event.SequenceNumber
-			switch parsed.Type {
-			case EventTextDelta:
-				if parsed.Delta != "" {
-					d.textEvents++
-					d.textChars += len([]rune(parsed.Delta))
-				}
-			case EventReasoningDelta:
-				d.reasoningChars += len([]rune(parsed.Delta))
-			case EventUsage:
-				if parsed.Usage != nil {
-					fmt.Printf("[OpenAI Responses SDK Stream] usage input=%d output=%d total=%d events=%d text_events=%d text_chars=%d reasoning_chars=%d\n",
-						parsed.Usage.PromptTokens,
-						parsed.Usage.CompletionTokens,
-						parsed.Usage.TotalTokens,
-						d.eventCount,
-						d.textEvents,
-						d.textChars,
-						d.reasoningChars,
-					)
-				}
-			case EventDone:
-				d.doneEmitted = true
-				fmt.Printf("[OpenAI Responses SDK Stream] done events=%d text_events=%d text_chars=%d reasoning_chars=%d last_event=%s\n", d.eventCount, d.textEvents, d.textChars, d.reasoningChars, event.Type)
-			case EventError:
-				fmt.Printf("[OpenAI Responses SDK Stream] error code=%s message=%s events=%d text_chars=%d last_event=%s\n", parsed.Code, parsed.Message, d.eventCount, d.textChars, event.Type)
-			}
+			d.trackEvent(parsed)
 			return parsed, nil
 		}
 	}
@@ -95,8 +77,52 @@ func (d *OpenAIResponsesTypedDecoder) Next() (*AIStreamEvent, error) {
 		return nil, err
 	}
 	fmt.Printf("[OpenAI Responses SDK Stream] eof events=%d text_events=%d text_chars=%d reasoning_chars=%d\n", d.eventCount, d.textEvents, d.textChars, d.reasoningChars)
-	d.doneEmitted = true
-	return &AIStreamEvent{Type: EventDone}, nil
+	done := &AIStreamEvent{Type: EventDone}
+	d.trackEvent(done)
+	return done, nil
+}
+
+func (d *OpenAIResponsesTypedDecoder) popPendingEvent() *AIStreamEvent {
+	if len(d.pending) == 0 {
+		return nil
+	}
+	event := d.pending[0]
+	d.pending = d.pending[1:]
+	d.trackEvent(event)
+	return event
+}
+
+func (d *OpenAIResponsesTypedDecoder) trackEvent(event *AIStreamEvent) {
+	if event == nil {
+		return
+	}
+	switch event.Type {
+	case EventTextDelta:
+		if event.Delta != "" {
+			d.textEvents++
+			d.textChars += len([]rune(event.Delta))
+			d.fullText.WriteString(event.Delta)
+		}
+	case EventReasoningDelta:
+		d.reasoningChars += len([]rune(event.Delta))
+	case EventUsage:
+		if event.Usage != nil {
+			fmt.Printf("[OpenAI Responses SDK Stream] usage input=%d output=%d total=%d events=%d text_events=%d text_chars=%d reasoning_chars=%d\n",
+				event.Usage.PromptTokens,
+				event.Usage.CompletionTokens,
+				event.Usage.TotalTokens,
+				d.eventCount,
+				d.textEvents,
+				d.textChars,
+				d.reasoningChars,
+			)
+		}
+	case EventDone:
+		d.doneEmitted = true
+		fmt.Printf("[OpenAI Responses SDK Stream] done events=%d text_events=%d text_chars=%d reasoning_chars=%d\n", d.eventCount, d.textEvents, d.textChars, d.reasoningChars)
+	case EventError:
+		fmt.Printf("[OpenAI Responses SDK Stream] error code=%s message=%s events=%d text_chars=%d\n", event.Code, event.Message, d.eventCount, d.textChars)
+	}
 }
 
 func (d *OpenAIResponsesTypedDecoder) parseTypedEvent(event responses.ResponseStreamEventUnion) *AIStreamEvent {
@@ -126,12 +152,28 @@ func (d *OpenAIResponsesTypedDecoder) parseTypedEvent(event responses.ResponseSt
 		return &AIStreamEvent{Type: EventToolCallDone, Delta: "工具调用完成"}
 	case "response.completed":
 		completed := event.AsResponseCompleted()
+		finalText := strings.TrimSpace(extractTextFromTypedResponse(completed.Response))
+		streamedText := strings.TrimSpace(d.fullText.String())
+		if finalText != "" && streamedText != finalText && !strings.Contains(streamedText, finalText) {
+			missingText := finalText
+			if streamedText != "" && strings.HasPrefix(finalText, streamedText) {
+				missingText = strings.TrimPrefix(finalText, streamedText)
+			}
+			if missingText != "" {
+				d.pending = append(d.pending, &AIStreamEvent{Type: EventTextDelta, Delta: missingText})
+			}
+		}
 		if completed.Response.Usage.InputTokens > 0 || completed.Response.Usage.OutputTokens > 0 || completed.Response.Usage.TotalTokens > 0 {
 			return &AIStreamEvent{Type: EventUsage, Usage: &TokenUsage{
 				PromptTokens:     int(completed.Response.Usage.InputTokens),
 				CompletionTokens: int(completed.Response.Usage.OutputTokens),
 				TotalTokens:      int(completed.Response.Usage.TotalTokens),
 			}}
+		}
+		if len(d.pending) > 0 {
+			pending := d.pending[0]
+			d.pending = d.pending[1:]
+			return pending
 		}
 		return &AIStreamEvent{Type: EventDone}
 	case "response.incomplete":
@@ -176,4 +218,19 @@ func (d *OpenAIResponsesTypedDecoder) parseTypedEvent(event responses.ResponseSt
 	default:
 		return nil
 	}
+}
+
+func extractTextFromTypedResponse(response responses.Response) string {
+	var parts []string
+	for _, item := range response.Output {
+		if item.Type != "message" {
+			continue
+		}
+		for _, content := range item.Content {
+			if content.Text != "" {
+				parts = append(parts, content.Text)
+			}
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n"))
 }

@@ -1,0 +1,8 @@
+id: 1
+data: {"_generation_task":{"assistant_message_id":1792,"conversation_id":362,"id":275,"is_complex_task":true,"status":"running","use_background":true},"choices":[{"delta":{"content":""}}]}
+
+id: 2
+data: {"choices":[{"delta":{"content":"我是一个可以帮助回答问题、整理信息和生成内容的人工智能助手；1+1等于2。"}}]}
+
+data: [DONE]
+

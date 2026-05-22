@@ -31,7 +31,7 @@ func (s *AIService) geminiClient(ctx context.Context) (*genai.Client, error) {
 	return genai.NewClient(ctx, clientConfig)
 }
 
-func (s *AIService) callGeminiSDK(ctx context.Context, model string, messages []Message, stream bool, reasoning bool, reasoningEffort string, search bool) (*AICompletionResponse, error) {
+func (s *AIService) callGeminiSDK(ctx context.Context, model string, messages []Message, stream bool, reasoning bool, reasoningEffort ReasoningEffort, search bool) (*AICompletionResponse, error) {
 	client, err := s.geminiClient(ctx)
 	if err != nil {
 		return nil, err
@@ -62,7 +62,7 @@ func (s *AIService) callGeminiSDK(ctx context.Context, model string, messages []
 	return &AICompletionResponse{Body: body, ModelType: "gemini", Provider: "gemini", Model: model}, nil
 }
 
-func (s *AIService) buildGeminiGenerateContentRequest(messages []Message, stream bool, reasoning bool, reasoningEffort string, search bool) ([]*genai.Content, *genai.GenerateContentConfig) {
+func (s *AIService) buildGeminiGenerateContentRequest(messages []Message, stream bool, reasoning bool, reasoningEffort ReasoningEffort, search bool) ([]*genai.Content, *genai.GenerateContentConfig) {
 	var systemParts []*genai.Part
 	contents := make([]*genai.Content, 0, len(messages))
 
@@ -105,7 +105,7 @@ func (s *AIService) buildGeminiGenerateContentRequest(messages []Message, stream
 	if reasoning {
 		config.ThinkingConfig = &genai.ThinkingConfig{
 			IncludeThoughts: true,
-			ThinkingLevel:   geminiThinkingLevel(reasoningEffort),
+			ThinkingLevel:   reasoningEffort.ToGeminiValue(),
 		}
 		fmt.Printf("[Gemini SDK] reasoning enabled, thinkingLevel=%s\n", config.ThinkingConfig.ThinkingLevel)
 	}
@@ -150,19 +150,6 @@ func base64StdDecode(data string) ([]byte, error) {
 
 func base64RawDecode(data string) ([]byte, error) {
 	return base64.RawStdEncoding.DecodeString(data)
-}
-
-func geminiThinkingLevel(effort string) genai.ThinkingLevel {
-	switch strings.ToLower(strings.TrimSpace(effort)) {
-	case "minimal":
-		return genai.ThinkingLevelMinimal
-	case "low", "light":
-		return genai.ThinkingLevelLow
-	case "high", "extended", "heavy", "max", "xhigh":
-		return genai.ThinkingLevelHigh
-	default:
-		return genai.ThinkingLevelMedium
-	}
 }
 
 func geminiSDKResponseToOpenAICompatibleBody(resp *genai.GenerateContentResponse, model string) (io.ReadCloser, error) {

@@ -1,0 +1,12 @@
+id: 1
+data: {"_generation_task":{"assistant_message_id":1796,"conversation_id":364,"id":277,"is_complex_task":false,"status":"running","use_background":false},"choices":[{"delta":{"content":""}}]}
+
+id: 2
+data: {"choices":[{"delta":{"content":"我是一个由Google训练的人"}}]}
+
+id: 3
+data: {"choices":[{"delta":{"content":"工智能助手，致力于为您提供信息与解答。\n\n1+1等于2。"}}]}
+
+id: 4
+data: [DONE]
+

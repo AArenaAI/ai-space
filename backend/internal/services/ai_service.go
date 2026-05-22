@@ -65,7 +65,7 @@ type ChatRequest struct {
 	Stream   bool      `json:"stream"`
 }
 
-func (s *AIService) ChatCompletion(ctx context.Context, model string, messages []Message, stream bool, reasoning bool, reasoningEffort string, search bool) (*AICompletionResponse, error) {
+func (s *AIService) ChatCompletion(ctx context.Context, model string, messages []Message, stream bool, reasoning bool, reasoningEffort ReasoningEffort, search bool) (*AICompletionResponse, error) {
 	req := UnifiedAIRequest{
 		Model:           model,
 		Messages:        messages,
@@ -102,13 +102,13 @@ func IsOpenAIResponsesModel(model string) bool {
 }
 
 // OpenAIUsesBackground 公开判断：聊天层需要在调用后把 response id 保存为后台任务。
-func OpenAIUsesBackground(model string, reasoningEffort string) bool {
+func OpenAIUsesBackground(model string, reasoningEffort ReasoningEffort) bool {
 	return ShouldUseOpenAIBackground(model, reasoningEffort)
 }
 
-func ShouldUseOpenAIBackground(model string, reasoningEffort string) bool {
+func ShouldUseOpenAIBackground(model string, reasoningEffort ReasoningEffort) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
-	effort := strings.ToLower(strings.TrimSpace(reasoningEffort))
+	effort := reasoningEffort.String()
 
 	if model == "gpt-5.5-pro" || strings.HasPrefix(model, "gpt-5.5-pro-") {
 		return true
@@ -134,24 +134,11 @@ func isDeepSeek(model string) bool {
 	return strings.HasPrefix(model, "deepseek-")
 }
 
-func normalizeDeepSeekReasoningEffort(effort string) string {
-	switch strings.ToLower(strings.TrimSpace(effort)) {
-	case "", "standard", "medium":
-		return "medium"
-	case "light", "low", "minimal":
-		return "low"
-	case "extended", "heavy", "max", "xhigh", "high":
-		return "high"
-	default:
-		return effort
-	}
-}
-
 func isMoonshot(model string) bool {
 	return strings.HasPrefix(model, "moonshot-") || strings.HasPrefix(model, "kimi")
 }
 
-func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messages []Message, stream bool, reasoning bool, reasoningEffort string, search bool) (*AICompletionResponse, error) {
+func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messages []Message, stream bool, reasoning bool, reasoningEffort ReasoningEffort, search bool) (*AICompletionResponse, error) {
 	apiKey := s.cfg.OpenAIOfficialKey
 	if apiKey == "" {
 		// 兼容旧部署：未配置官方 Key 时回退到旧 OPENAI_API_KEY。
@@ -229,22 +216,7 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 	if reasoning {
 		reasoningConfig := map[string]any{}
 		if strings.HasPrefix(model, "gpt-5") {
-			effort := "medium"
-			switch reasoningEffort {
-			case "light":
-				effort = "low"
-			case "standard":
-				effort = "medium"
-			case "extended", "high":
-				effort = "high"
-			case "heavy", "max", "xhigh":
-				effort = "xhigh"
-			case "":
-				effort = "medium"
-			default:
-				effort = reasoningEffort
-			}
-			reasoningConfig["effort"] = effort
+			reasoningConfig["effort"] = reasoningEffort.ToOpenAIValue()
 			// OpenAI Responses API 不暴露原始 CoT；summary=auto 显式请求 reasoning summary，
 			// 由流式 decoder 映射为 reasoning_content，前端作为思考块展示。
 			reasoningConfig["summary"] = "auto"
@@ -662,7 +634,7 @@ func geminiUsageInt(usage map[string]interface{}, key string) int {
 	}
 }
 
-func (s *AIService) callDeepSeek(ctx context.Context, model string, messages []Message, stream bool, reasoning bool, reasoningEffort string) (*AICompletionResponse, error) {
+func (s *AIService) callDeepSeek(ctx context.Context, model string, messages []Message, stream bool, reasoning bool, reasoningEffort ReasoningEffort) (*AICompletionResponse, error) {
 	if s.cfg.DeepSeekKey == "" {
 		return nil, fmt.Errorf("未配置 DeepSeek API Key")
 	}
@@ -678,16 +650,22 @@ func (s *AIService) callDeepSeek(ctx context.Context, model string, messages []M
 		Messages:  deepSeekChatMessages(messages),
 		MaxTokens: openai.Int(int64(s.cfg.DeepSeekMaxTokens)),
 	}
-	if reasoning || apiModel == "deepseek-v4-pro" {
-		effort := normalizeDeepSeekReasoningEffort(reasoningEffort)
-		params.ReasoningEffort = openai.ReasoningEffort(effort)
-		params.SetExtraFields(map[string]any{"thinking": map[string]any{"type": "enabled"}})
+
+	// DeepSeek 官方文档: thinking 默认为 enabled，如果不开启必须显式设置 disabled
+	thinkingType := "disabled"
+	if reasoning {
+		thinkingType = "enabled"
+		params.ReasoningEffort = openai.ReasoningEffort(reasoningEffort.ToDeepSeekValue())
 	}
+	params.SetExtraFields(map[string]any{"thinking": map[string]any{"type": thinkingType}})
+
 	if stream {
 		params.StreamOptions = openai.ChatCompletionStreamOptionsParam{IncludeUsage: openai.Bool(true)}
 	}
 
-	fmt.Printf("[DeepSeek] model=%s api_model=%s reasoning=%v effort=%s stream=%v sdk=openai-go typed\n", model, apiModel, reasoning, reasoningEffort, stream)
+	// 序列化并打印完整参数，方便验证是否有效
+	paramsJSON, _ := json.Marshal(params)
+	fmt.Printf("[DeepSeek] model=%s api_model=%s reasoning=%v effort=%s stream=%v sdk=openai-go typed params=%s\n", model, apiModel, reasoning, reasoningEffort, stream, string(paramsJSON))
 
 	client := openai.NewClient(
 		option.WithAPIKey(s.cfg.DeepSeekKey),
@@ -696,8 +674,40 @@ func (s *AIService) callDeepSeek(ctx context.Context, model string, messages []M
 	)
 
 	if stream {
-		streamResp := client.Chat.Completions.NewStreaming(ctx, params)
-		return &AICompletionResponse{Body: deepSeekSDKStreamBody{stream: streamResp}, Decoder: NewDeepSeekTypedStreamDecoder(streamResp), ModelType: "deepseek", Provider: "deepseek", Model: model}, nil
+		// 手动发送流式请求，获取 raw body，避免 SDK 的 ssestream 遇到空 data 时 fatal error
+		paramsJSON, err := json.Marshal(params)
+		if err != nil {
+			return nil, fmt.Errorf("DeepSeek params 序列化失败: %w", err)
+		}
+		var bodyMap map[string]any
+		if err := json.Unmarshal(paramsJSON, &bodyMap); err != nil {
+			return nil, fmt.Errorf("DeepSeek params 反序列化失败: %w", err)
+		}
+		bodyMap["stream"] = true
+		finalBody, err := json.Marshal(bodyMap)
+		if err != nil {
+			return nil, fmt.Errorf("DeepSeek params 重新序列化失败: %w", err)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(baseURL, "/")+"/v1/chat/completions", bytes.NewReader(finalBody))
+		if err != nil {
+			return nil, fmt.Errorf("DeepSeek 请求构造失败: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+s.cfg.DeepSeekKey)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := DefaultAIHTTPClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("DeepSeek API 请求失败: %w", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			return nil, fmt.Errorf("DeepSeek API 错误 status=%d body=%s", resp.StatusCode, string(body))
+		}
+
+		decoder := NewDeepSeekTypedStreamDecoder(resp.Body)
+		return &AICompletionResponse{Body: resp.Body, Decoder: decoder, ModelType: "deepseek", Provider: "deepseek", Model: model}, nil
 	}
 
 	completion, err := client.Chat.Completions.New(ctx, params)

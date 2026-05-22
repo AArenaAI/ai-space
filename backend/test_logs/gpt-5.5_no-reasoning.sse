@@ -1,0 +1,5 @@
+id: 1
+data: {"_generation_task":{"assistant_message_id":1788,"conversation_id":360,"id":273,"is_complex_task":true,"status":"running","use_background":true},"choices":[{"delta":{"content":""}}]}
+
+data: [DONE]
+

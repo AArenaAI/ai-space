@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import InputDialog from "@/components/ui/InputDialog";
+import ForkCompareDialog from "./ForkCompareDialog";
 
 const COMPARE_KEY = "compare-mode";
 const COMPARE_MODELS_KEY = "compare-models";
@@ -34,6 +35,8 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
   const [conversationTitle, setConversationTitle] = useState<string>("");
   const [isComplexTask, setIsComplexTask] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
+  const [forkDialogOpen, setForkDialogOpen] = useState(false);
+  const [forkTargetMessageId, setForkTargetMessageId] = useState<number | null>(null);
   const router = useRouter();
 
   const {
@@ -49,8 +52,13 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
     currentConversation,
     effectiveSkillKey,
     isCompare,
+    setIsCompare,
     compareModels,
+    setCompareModels,
     sendCompareMessages,
+    groupViews,
+    switchGroupModel,
+    forkChat,
   } = useChat(conversationId, models, skillKey);
 
   const { templates } = useTemplates();
@@ -314,6 +322,9 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
       // 退出对比模式时清除 localStorage，防止刷新后残留
       localStorage.removeItem(COMPARE_KEY);
       localStorage.removeItem(COMPARE_MODELS_KEY);
+      // 同步清除 useChat 的对比状态，确保能完全退出
+      setIsCompare(false);
+      setCompareModels([]);
     }
   };
 
@@ -385,7 +396,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
         onRegenerate={regenerateMessage}
         onContinueGenerate={regenerateMessage}
         isCompare={compareMode || isCompare}
-        compareModels={(compareMode ? selectedModels : compareModels).slice(0, 2)}
+        compareModels={(compareMode ? selectedModels : compareModels)}
         onCompareModelChange={handleCompareModelChange}
         welcomeTitle={welcomeTitle}
         welcomeSubtitle={welcomeSubtitle}
@@ -393,6 +404,12 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
         onExampleClick={(prompt) => {
           setIsComplexTask(isComplexReasoningTask(undefined));
           sendMessage(prompt, undefined, false, false, selectedTemplateId);
+        }}
+        groupViews={groupViews}
+        switchGroupModel={switchGroupModel}
+        onForkCompare={(messageId) => {
+          setForkTargetMessageId(messageId);
+          setForkDialogOpen(true);
         }}
       />
 
@@ -406,6 +423,24 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
         cancelText="取消"
         onConfirm={handleRename}
         onCancel={() => setRenameOpen(false)}
+      />
+
+      {/* Fork 对比弹窗 */}
+      <ForkCompareDialog
+        open={forkDialogOpen}
+        onClose={() => { setForkDialogOpen(false); setForkTargetMessageId(null); }}
+        models={models}
+        currentModelId={selectedModel.id}
+        onConfirm={async (modelIds) => {
+          if (!forkTargetMessageId) return;
+          const allModelIds = [selectedModel.id, ...modelIds];
+          try {
+            await forkChat(forkTargetMessageId, allModelIds);
+            toast.success("已开始对比，模型回答即将显示");
+          } catch (err: any) {
+            toast.error(err.message || "Fork 对比失败");
+          }
+        }}
       />
 
       {/* 输入框 */}

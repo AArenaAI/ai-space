@@ -71,7 +71,7 @@ func (s *AIService) openAIClient() (openai.Client, error) {
 	), nil
 }
 
-func (s *AIService) buildOpenAIResponsesBody(model string, messages []Message, stream bool, reasoning bool, reasoningEffort string, search bool) (map[string]any, bool, int, int) {
+func (s *AIService) buildOpenAIResponsesBody(model string, messages []Message, stream bool, reasoning bool, reasoningEffort ReasoningEffort, search bool) (map[string]any, bool, int, int) {
 	// 提取 system 消息到 instructions。注意：同一次请求可能同时包含模板、技能、图表渲染等多个 system prompt，
 	// 不能只保留最后一个，否则前面的模板/功能指令会被覆盖。
 	var systemInstructions []string
@@ -136,22 +136,7 @@ func (s *AIService) buildOpenAIResponsesBody(model string, messages []Message, s
 	if reasoning {
 		reasoningConfig := map[string]any{}
 		if strings.HasPrefix(model, "gpt-5") {
-			effort := "medium"
-			switch reasoningEffort {
-			case "light":
-				effort = "low"
-			case "standard":
-				effort = "medium"
-			case "extended", "high":
-				effort = "high"
-			case "heavy", "max", "xhigh":
-				effort = "xhigh"
-			case "":
-				effort = "medium"
-			default:
-				effort = reasoningEffort
-			}
-			reasoningConfig["effort"] = effort
+			reasoningConfig["effort"] = reasoningEffort.ToOpenAIValue()
 			// OpenAI Responses API 不暴露原始 CoT；summary=auto 显式请求 reasoning summary，
 			// 由流式 decoder 映射为 reasoning_content，前端作为思考块展示。
 			reasoningConfig["summary"] = "auto"
@@ -171,7 +156,7 @@ func (s *AIService) buildOpenAIResponsesBody(model string, messages []Message, s
 	return reqBody, useBackground, len(inputItems), len(systemInstruction)
 }
 
-func (s *AIService) callOpenAIResponsesSDK(ctx context.Context, model string, messages []Message, stream bool, reasoning bool, reasoningEffort string, search bool) (*AICompletionResponse, error) {
+func (s *AIService) callOpenAIResponsesSDK(ctx context.Context, model string, messages []Message, stream bool, reasoning bool, reasoningEffort ReasoningEffort, search bool) (*AICompletionResponse, error) {
 	client, err := s.openAIClient()
 	if err != nil {
 		return nil, err

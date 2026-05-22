@@ -132,7 +132,15 @@ func (h *OpenAIWebhookHandler) markTaskFinished(responseID, status, result, erro
 				content = "❌ 后台任务失败：" + errorMessage
 			}
 			if content != "" {
-				if err := tx.Model(&models.Message{}).Where("id = ?", task.AssistantMessageID).Update("content", content).Error; err != nil {
+				var msg models.Message
+				if err := tx.Select("id", "content").Where("id = ?", task.AssistantMessageID).First(&msg).Error; err != nil {
+					return err
+				}
+				// OpenAI background+stream 场景下，前台流可能已经把 <think>...</think> 思考块增量落库。
+				// Webhook retrieve 只返回最终正文 output_text；如果直接覆盖，会导致刷新后思考块丢失。
+				// 因此：已有内容带思考块且正文未完整进入 DB 时，只补正文；已有内容已包含正文时不重复追加。
+				finalContent := mergeReasoningPersistedContent(msg.Content, content)
+				if err := tx.Model(&models.Message{}).Where("id = ?", task.AssistantMessageID).Update("content", finalContent).Error; err != nil {
 					return err
 				}
 			}
@@ -148,6 +156,26 @@ func (h *OpenAIWebhookHandler) markTaskFinished(responseID, status, result, erro
 		}
 		return nil
 	})
+}
+
+func mergeReasoningPersistedContent(existing string, finalText string) string {
+	existing = strings.TrimSpace(existing)
+	finalText = strings.TrimSpace(finalText)
+	if existing == "" {
+		return finalText
+	}
+	if finalText == "" {
+		return existing
+	}
+	// 只有保存过 <think> 的消息需要合并；普通消息仍以 retrieve 到的最终正文为准。
+	if !strings.Contains(existing, "<think>") {
+		return finalText
+	}
+	if strings.Contains(existing, finalText) {
+		return existing
+	}
+	// 如果现有内容只有思考块（或思考块后只有空白），把最终正文补在后面。
+	return existing + "\n\n" + finalText
 }
 
 func extractResponseID(data map[string]any) string {

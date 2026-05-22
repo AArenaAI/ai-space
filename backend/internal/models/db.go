@@ -51,8 +51,14 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 		&PPTTemplate{}, &PPTGeneration{}, &PPTSlide{}, &PPTRevision{},
 		&ImageChat{}, &ImageChatMessage{},
 		&MessageFavorite{},
+		&MessageGroup{}, // 新增
 	); err != nil {
 		return nil, err
+	}
+
+	// 迁移：为旧消息创建 MessageGroup（一次性）
+	if err := migrateMessageGroups(db); err != nil {
+		return nil, fmt.Errorf("迁移 MessageGroup 失败: %w", err)
 	}
 
 	// 更新旧用户缺失的积分字段
@@ -89,6 +95,62 @@ func migrateFilePublicIDs(db *gorm.DB) error {
 		}
 		if err := db.Model(&File{}).Where("id = ?", f.ID).Update("public_id", publicID).Error; err != nil {
 			return err
+		}
+	}
+
+	return nil
+}
+
+func migrateMessageGroups(db *gorm.DB) error {
+	// 检查是否已有 MessageGroup 数据
+	var count int64
+	if err := db.Model(&MessageGroup{}).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil // 已迁移过
+	}
+
+	// 遍历所有 compare=true 的 conversation
+	var conversations []Conversation
+	if err := db.Where("compare = ?", true).Find(&conversations).Error; err != nil {
+		return err
+	}
+
+	for _, conv := range conversations {
+		var messages []Message
+		if err := db.Where("conversation_id = ?", conv.ID).
+			Order("created_at asc, id asc").Find(&messages).Error; err != nil {
+			continue
+		}
+
+		var currentGroup *MessageGroup
+		groupIndex := 0
+		for i := range messages {
+			msg := &messages[i]
+
+			if msg.Role == "user" {
+				// 用户消息：创建新组
+				groupIndex = 0
+				currentGroup = &MessageGroup{
+					ConversationID: conv.ID,
+					UserMessageID:  msg.ID,
+				}
+				currentGroup.SetModels(conv.GetCompareModels())
+				if err := db.Create(currentGroup).Error; err != nil {
+					continue
+				}
+				// 用户消息本身不绑定 group
+				continue
+			}
+
+			if msg.Role == "assistant" && currentGroup != nil {
+				// assistant 消息：绑定到当前组
+				msg.GroupID = currentGroup.ID
+				msg.GroupIndex = groupIndex
+				db.Save(msg)
+				groupIndex++
+			}
 		}
 	}
 

@@ -8,6 +8,8 @@ export type RealtimeData = {
   serverMessageId?: number;
   generationTaskId?: number;
   backgroundTaskId?: string;
+  useBackground?: boolean;
+  isComplexTask?: boolean;
   lastSequence?: number;
   completedAt?: number;
   errorCode?: string;

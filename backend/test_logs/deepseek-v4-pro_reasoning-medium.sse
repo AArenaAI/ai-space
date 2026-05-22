@@ -1,0 +1,81 @@
+id: 1
+data: {"_generation_task":{"assistant_message_id":1778,"conversation_id":355,"id":268,"is_complex_task":false,"status":"running","use_background":false},"choices":[{"delta":{"content":""}}]}
+
+id: 2
+data: {"choices":[{"delta":{"content":"我是"}}]}
+
+id: 3
+data: {"choices":[{"delta":{"content":"Deep"}}]}
+
+id: 4
+data: {"choices":[{"delta":{"content":"Se"}}]}
+
+id: 5
+data: {"choices":[{"delta":{"content":"ek"}}]}
+
+id: 6
+data: {"choices":[{"delta":{"content":"，"}}]}
+
+id: 7
+data: {"choices":[{"delta":{"content":"由"}}]}
+
+id: 8
+data: {"choices":[{"delta":{"content":"深度"}}]}
+
+id: 9
+data: {"choices":[{"delta":{"content":"求"}}]}
+
+id: 10
+data: {"choices":[{"delta":{"content":"索"}}]}
+
+id: 11
+data: {"choices":[{"delta":{"content":"公司"}}]}
+
+id: 12
+data: {"choices":[{"delta":{"content":"打造的"}}]}
+
+id: 13
+data: {"choices":[{"delta":{"content":"AI"}}]}
+
+id: 14
+data: {"choices":[{"delta":{"content":"助手"}}]}
+
+id: 15
+data: {"choices":[{"delta":{"content":"，"}}]}
+
+id: 16
+data: {"choices":[{"delta":{"content":"随时"}}]}
+
+id: 17
+data: {"choices":[{"delta":{"content":"为你"}}]}
+
+id: 18
+data: {"choices":[{"delta":{"content":"提供"}}]}
+
+id: 19
+data: {"choices":[{"delta":{"content":"帮助"}}]}
+
+id: 20
+data: {"choices":[{"delta":{"content":"。"}}]}
+
+id: 21
+data: {"choices":[{"delta":{"content":"1"}}]}
+
+id: 22
+data: {"choices":[{"delta":{"content":"+"}}]}
+
+id: 23
+data: {"choices":[{"delta":{"content":"1"}}]}
+
+id: 24
+data: {"choices":[{"delta":{"content":"等于"}}]}
+
+id: 25
+data: {"choices":[{"delta":{"content":"2"}}]}
+
+id: 26
+data: {"choices":[{"delta":{"content":"。"}}]}
+
+id: 27
+data: [DONE]
+

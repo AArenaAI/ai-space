@@ -9,7 +9,7 @@ type UnifiedAIRequest struct {
 	Messages        []Message
 	Stream          bool
 	Reasoning       bool
-	ReasoningEffort string
+	ReasoningEffort ReasoningEffort
 	Search          bool
 }
 

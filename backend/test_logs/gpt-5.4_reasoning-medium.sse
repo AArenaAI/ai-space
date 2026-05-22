@@ -1,0 +1,99 @@
+id: 1
+data: {"_generation_task":{"assistant_message_id":1782,"conversation_id":357,"id":270,"is_complex_task":false,"status":"running","use_background":false},"choices":[{"delta":{"content":""}}]}
+
+id: 2
+data: {"choices":[{"delta":{"content":"我是"}}]}
+
+id: 3
+data: {"choices":[{"delta":{"content":"一个"}}]}
+
+id: 4
+data: {"choices":[{"delta":{"content":"可以"}}]}
+
+id: 5
+data: {"choices":[{"delta":{"content":"用"}}]}
+
+id: 6
+data: {"choices":[{"delta":{"content":"中文"}}]}
+
+id: 7
+data: {"choices":[{"delta":{"content":"帮助"}}]}
+
+id: 8
+data: {"choices":[{"delta":{"content":"你"}}]}
+
+id: 9
+data: {"choices":[{"delta":{"content":"解"}}]}
+
+id: 10
+data: {"choices":[{"delta":{"content":"答"}}]}
+
+id: 11
+data: {"choices":[{"delta":{"content":"问题"}}]}
+
+id: 12
+data: {"choices":[{"delta":{"content":"、"}}]}
+
+id: 13
+data: {"choices":[{"delta":{"content":"提供"}}]}
+
+id: 14
+data: {"choices":[{"delta":{"content":"信息"}}]}
+
+id: 15
+data: {"choices":[{"delta":{"content":"和"}}]}
+
+id: 16
+data: {"choices":[{"delta":{"content":"协"}}]}
+
+id: 17
+data: {"choices":[{"delta":{"content":"助"}}]}
+
+id: 18
+data: {"choices":[{"delta":{"content":"创"}}]}
+
+id: 19
+data: {"choices":[{"delta":{"content":"作"}}]}
+
+id: 20
+data: {"choices":[{"delta":{"content":"的"}}]}
+
+id: 21
+data: {"choices":[{"delta":{"content":" AI"}}]}
+
+id: 22
+data: {"choices":[{"delta":{"content":" 助"}}]}
+
+id: 23
+data: {"choices":[{"delta":{"content":"手"}}]}
+
+id: 24
+data: {"choices":[{"delta":{"content":"，"}}]}
+
+id: 25
+data: {"choices":[{"delta":{"content":"1"}}]}
+
+id: 26
+data: {"choices":[{"delta":{"content":"+"}}]}
+
+id: 27
+data: {"choices":[{"delta":{"content":"1"}}]}
+
+id: 28
+data: {"choices":[{"delta":{"content":" 等"}}]}
+
+id: 29
+data: {"choices":[{"delta":{"content":"于"}}]}
+
+id: 30
+data: {"choices":[{"delta":{"content":" "}}]}
+
+id: 31
+data: {"choices":[{"delta":{"content":"2"}}]}
+
+id: 32
+data: {"choices":[{"delta":{"content":"。"}}]}
+
+id: 33
+data: [DONE]
+

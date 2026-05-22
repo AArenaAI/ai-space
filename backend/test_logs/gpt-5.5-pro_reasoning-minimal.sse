@@ -1,0 +1,9 @@
+id: 1
+data: {"_generation_task":{"assistant_message_id":1790,"conversation_id":361,"id":274,"is_complex_task":true,"status":"running","use_background":true},"choices":[{"delta":{"content":""}}]}
+
+id: 2
+data: {"_error_meta":{"category":"upstream_error","code":"unsupported_value","limit":0,"limit_type":"","model":"gpt-5.5-pro","provider":"openai","requested":0,"retriable":false,"retry_after_ms":0,"retry_after_seconds":0,"suggested_actions":null,"type":"_error_meta","used":0,"user_message":"Unsupported value: 'minimal' is not supported with the 'gpt-5.5-pro' model. Supported values are: 'medium', 'high', and 'xhigh'."},"choices":[{"delta":{"content":"Unsupported value: 'minimal' is not supported with the 'gpt-5.5-pro' model. Supported values are: 'medium', 'high', and 'xhigh'."}}]}
+
+id: 3
+data: [DONE]
+

@@ -680,7 +680,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 
 	// GPT 5.5 后台规则仍保留 stream=true：background=true + stream=true + webhook。
 	// 从这里开始，流式生成彻底从 HTTP handler 拆出去：handler 只创建 task，runner 独立消费上游 stream，当前请求只是订阅 task events。
-	useBackground := services.OpenAIUsesBackground(req.Model, req.ReasoningEffort)
+	useBackground := services.OpenAIUsesBackground(req.Model, services.ParseReasoningEffort(req.ReasoningEffort))
 
 	if req.Stream {
 		// 先创建一条空的 assistant 消息，确保即使用户跳转/刷新也能看到生成中的消息
@@ -754,7 +754,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		h.streamGenerationTaskEvents(c, streamTask, 0)
 		return
 	} else {
-		resp, err := h.aiService.ChatCompletion(c.Request.Context(), req.Model, req.Messages, false, req.Reasoning, req.ReasoningEffort, useSearchTool)
+		resp, err := h.aiService.ChatCompletion(c.Request.Context(), req.Model, req.Messages, false, req.Reasoning, services.ParseReasoningEffort(req.ReasoningEffort), useSearchTool)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -797,14 +797,14 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 				if choice, ok := choices[0].(map[string]interface{}); ok {
 					if msgMap, ok := choice["message"].(map[string]interface{}); ok {
 						if assistantContent, ok := msgMap["content"].(string); ok && assistantContent != "" {
-								h.db.Create(&models.Message{
-									ConversationID: conversationID,
-									Role:           "assistant",
-									Content:        assistantContent,
-									Model:          req.Model,
-									CompletedAt:    &[]time.Time{time.Now()}[0],
-									CreatedAt:      time.Now(),
-								})
+							h.db.Create(&models.Message{
+								ConversationID: conversationID,
+								Role:           "assistant",
+								Content:        assistantContent,
+								Model:          req.Model,
+								CompletedAt:    &[]time.Time{time.Now()}[0],
+								CreatedAt:      time.Now(),
+							})
 							h.touchConversation(conversationID)
 						}
 					}
@@ -872,7 +872,7 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 		return
 	}
 	ctx := context.Background()
-	resp, err := h.aiService.ChatCompletion(ctx, req.Model, req.Messages, true, req.Reasoning, req.ReasoningEffort, req.UseSearchTool)
+	resp, err := h.aiService.ChatCompletion(ctx, req.Model, req.Messages, true, req.Reasoning, services.ParseReasoningEffort(req.ReasoningEffort), req.UseSearchTool)
 	if err != nil {
 		h.failGenerationTask(req.Task, req.AssistantMessageID, req.ConversationID, fmt.Sprintf("上游模型请求失败: %v", err))
 		return
@@ -908,10 +908,12 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 		})
 		h.persistTaskEvent(req.Task, req.AssistantMessageID, seq, "error", string(out))
 		streamResult.LastSequenceNumber = seq
+	} else if strings.TrimSpace(content) == "" {
+		content = "任务已完成，但未返回可展示文本。"
 	}
 	updates := map[string]interface{}{
-		"content":       content,
-		"completed_at":  time.Now(),
+		"content":      content,
+		"completed_at": time.Now(),
 	}
 	_ = h.db.Model(&models.Message{}).Where("id = ?", req.AssistantMessageID).Updates(updates).Error
 	h.touchConversation(req.ConversationID)
@@ -1219,6 +1221,23 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 			event, err := result.event, result.err
 			if err != nil {
 				if err == io.EOF {
+					// 部分 decoder（尤其 OpenAI Responses）会在读到流结束时同时返回
+					// EventDone + io.EOF。不能先按 EOF return，否则不会持久化 done
+					// event，task stream 只能靠 terminal 状态合成 [DONE]，容易在最后几段
+					// delta 落库/可见前提前结束前端流。
+					if event != nil && event.Type == services.EventDone {
+						contentMu.Lock()
+						if reasoningPersistOpen {
+							fullContent.WriteString("</think>")
+							reasoningPersistOpen = false
+						}
+						contentMu.Unlock()
+
+						if err := writeDoneEvent(); err != nil {
+							outcome.FullContent = strings.TrimSpace(getContent())
+							return outcome, finalUsage, err
+						}
+					}
 					outcome.FullContent = strings.TrimSpace(getContent())
 					return outcome, finalUsage, nil
 				}
@@ -1613,7 +1632,7 @@ func (h *ChatHandler) streamGenerationTaskEvents(c *gin.Context, task *models.AI
 
 // ---- 辅助方法：非流式调用 AI 并返回完整内容 ----
 func (h *ChatHandler) callModel(ctx context.Context, modelID string, messages []services.Message, reasoning bool, reasoningEffort string, search bool) (string, error) {
-	resp, err := h.aiService.ChatCompletion(ctx, modelID, messages, false, reasoning, reasoningEffort, search)
+	resp, err := h.aiService.ChatCompletion(ctx, modelID, messages, false, reasoning, services.ParseReasoningEffort(reasoningEffort), search)
 	if err != nil {
 		return "", err
 	}

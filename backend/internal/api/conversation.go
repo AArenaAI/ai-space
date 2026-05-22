@@ -273,12 +273,39 @@ func (h *ConversationHandler) GetMessages(c *gin.Context) {
 	}
 
 	var messages []models.Message
-	if err := h.db.Where("conversation_id = ?", convID).Order("created_at asc").Preload("MessageFiles").Find(&messages).Error; err != nil {
+	if err := h.db.Where("conversation_id = ?", convID).Order("created_at asc, id asc").Preload("MessageFiles").Find(&messages).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取消息失败"})
 		return
 	}
 
-	c.JSON(http.StatusOK, messages)
+	// 加载消息组信息
+	var groups []models.MessageGroup
+	h.db.Where("conversation_id = ?", convID).Find(&groups)
+	groupMap := make(map[uint]*models.MessageGroup)
+	for i := range groups {
+		groupMap[groups[i].ID] = &groups[i]
+	}
+
+	// 组装响应：包含 group_id / group_index
+	type MessageWithGroup struct {
+		models.Message
+		GroupID    uint     `json:"group_id,omitempty"`
+		GroupIndex int      `json:"group_index,omitempty"`
+		GroupModels []string `json:"group_models,omitempty"`
+	}
+	result := make([]MessageWithGroup, len(messages))
+	for i, m := range messages {
+		result[i] = MessageWithGroup{
+			Message:     m,
+			GroupID:     m.GroupID,
+			GroupIndex:  m.GroupIndex,
+		}
+		if g, ok := groupMap[m.GroupID]; ok {
+			result[i].GroupModels = g.GetModels()
+		}
+	}
+
+	c.JSON(http.StatusOK, result)
 }
 
 func (h *ConversationHandler) GetMessage(c *gin.Context) {

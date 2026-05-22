@@ -32,7 +32,11 @@ export interface Message {
   serverMessageId?: number;
   backgroundTaskId?: string;
   generationTaskId?: number;
+  useBackground?: boolean;
+  isComplexTask?: boolean;
   lastSequence?: number;
+  groupId?: number;
+  groupIndex?: number;
 }
 
 export interface ChatModel {
@@ -154,6 +158,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   const [compareModels, setCompareModels] = useState<string[]>([]);
   // 从对话历史或 prop 恢复的有效 skillKey（优先级：历史 > prop）
   const [effectiveSkillKey, setEffectiveSkillKey] = useState<string | undefined>(skillKey);
+  const [groupViews, setGroupViews] = useState<Map<number, number>>(new Map());
   const backgroundPollersRef = useRef<Record<string, number>>({});
   const taskStreamsRef = useRef<Record<string, AbortController>>({});
   const abortReasonRef = useRef<"user" | "navigation" | null>(null);
@@ -202,18 +207,25 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     if (!convId || !serverMessageId || backgroundPollersRef.current[localMessageId]) return;
 
     const token = localStorage.getItem("token");
-    if (!token) return;
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    } else {
+      headers["X-Guest-ID"] = getGuestId();
+    }
 
     const poll = async () => {
       try {
         const res = await fetch(`${API_BASE_URL}/api/conversations/${convId}/messages/${serverMessageId}`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers,
         });
         if (!res.ok) return;
         const data = await res.json();
         const content = data?.message?.content || "";
         const status = data?.background_task?.status || "";
-        const isFinished = status === "completed" || status === "failed" || status === "cancelled" || status === "incomplete";
+        const isTerminal = status === "completed" || status === "failed" || status === "cancelled" || status === "incomplete";
+        const hasContent = content.trim().length > 0;
+        const isFinished = (status === "completed" && hasContent) || status === "failed" || status === "cancelled" || status === "incomplete";
         setMessages((prev) =>
           prev.map((m) => {
             if (m.id !== localMessageId) return m;
@@ -221,8 +233,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               ...m,
               content: content || m.content,
               serverMessageId,
-              activityStatus: isFinished ? undefined : (content ? m.activityStatus : { kind: "generating", status: "running", label: "任务繁忙，正在生成中" }),
-              completedAt: isFinished ? Date.now() : m.completedAt,
+              activityStatus: isFinished ? undefined : { kind: "generating", status: "running", label: "任务繁忙，正在生成中" },
+              completedAt: isFinished ? Date.now() : undefined,
             };
           })
         );
@@ -230,6 +242,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           stopBackgroundPoller(localMessageId);
           stopTaskStream(localMessageId);
           setIsLoading(false);
+        } else if (isTerminal && !hasContent) {
+          // 防止后端 task 状态先完成、message.content 延迟可见时，前端把空消息误判为“生成中断”。
+          setIsLoading(true);
         }
       } catch {}
     };
@@ -258,6 +273,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     let inReasoningBlock = false;
     let buffer = "";
     let sawDone = false;
+    let doneHasContent = false;
     let latestSequence = after || 0;
 
     const stringifyDelta = (value: unknown): string => {
@@ -298,8 +314,13 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         }
         delete activeTaskStreamsRef.current[localMessageId];
         sawDone = true;
-        realtimeUpdate(localMessageId, { completedAt: Date.now(), activityStatus: undefined });
-        setIsLoading(false);
+        const hasContent = (accumulated || streamGet(localMessageId) || realtimeGet(localMessageId)?.content || "").trim().length > 0;
+        doneHasContent = hasContent;
+        realtimeUpdate(localMessageId, hasContent
+          ? { completedAt: Date.now(), activityStatus: undefined }
+          : { completedAt: undefined, activityStatus: { kind: "generating", status: "running", label: "任务繁忙，正在生成中" } }
+        );
+        if (hasContent) setIsLoading(false);
         return;
       }
       try {
@@ -316,7 +337,14 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             lastSequence: latestSequence,
             content: accumulated,
           };
-          realtimeUpdate(localMessageId, { serverMessageId: parsedServerMessageId, generationTaskId: parsedTaskId, lastSequence: latestSequence, activityStatus: { kind: "generating", status: "running", label: "正在生成内容" } });
+          realtimeUpdate(localMessageId, {
+            serverMessageId: parsedServerMessageId,
+            generationTaskId: parsedTaskId,
+            useBackground: task.use_background === true || task.background === true || task.is_complex_task === true,
+            isComplexTask: task.is_complex_task === true,
+            lastSequence: latestSequence,
+            activityStatus: { kind: "generating", status: "running", label: "正在生成内容" },
+          });
           return;
         }
         if (parsed._error || parsed._error_meta) {
@@ -328,7 +356,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         }
         if (parsed._activity_meta) {
           const meta = parsed._activity_meta;
-          realtimeUpdate(localMessageId, { activityStatus: { kind: meta.kind || "generating", status: meta.status || "running", label: meta.label || "正在生成内容" }, searchStatus: meta.kind === "web_search" ? meta.status : undefined });
+          const searchStatus = meta.kind === "web_search" ? (meta.status === "running" ? "searching" : "completed") : undefined;
+          realtimeUpdate(localMessageId, { activityStatus: { kind: meta.kind || "generating", status: meta.status || "running", label: meta.label || "正在生成内容" }, searchStatus });
           return;
         }
         if (parsed._search_meta) {
@@ -415,7 +444,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         }
         realtimeClear(localMessageId);
         delete taskStreamsRef.current[localMessageId];
-        if (!sawDone && !controller.signal.aborted && serverMessageId) startBackgroundPolling(convId, localMessageId, serverMessageId);
+        if (!controller.signal.aborted && serverMessageId && (!sawDone || !doneHasContent)) {
+          startBackgroundPolling(convId, localMessageId, serverMessageId);
+        }
       }
     })();
   }, [startBackgroundPolling]);
@@ -499,9 +530,11 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             createdAt: new Date(m.created_at).getTime(),
             completedAt: m.completed_at ? new Date(m.completed_at).getTime() : undefined,
             files: m.files || undefined,
-            serverMessageId: m.role === "assistant" ? Number(m.id || 0) || undefined : undefined,
+            serverMessageId: Number(m.id || 0) || undefined,
+            groupId: m.group_id || undefined,
+            groupIndex: m.group_index ?? undefined,
           }));
-          // 如果最后一条 assistant 仍在生成，不能用“下一条消息时间”近似完成时间；
+          // 如果最后一条 assistant 仍在生成，不能用"下一条消息时间"近似完成时间；
           // 会话详情接口本身不带生成状态，必须查 /messages/:id 的 background_task.status。
           const lastAssistant = [...loadedMessages].reverse().find((m) => m.role === "assistant" && m.serverMessageId);
           let shouldResumePolling = false;
@@ -517,12 +550,15 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
                 const hasTask = !!bgTask.id || !!bgTask.task_id || !!bgTask.status;
                 const status = bgTask.status || "";
                 const terminalStatus = status === "completed" || status === "failed" || status === "cancelled" || status === "incomplete";
-                shouldResumePolling = hasTask && !terminalStatus;
                 const serverContent = statusData?.message?.content || "";
+                const hasContent = serverContent.trim().length > 0;
                 if (serverContent) {
                   lastAssistant.content = serverContent;
                 }
-                if (hasTask && terminalStatus && !lastAssistant.completedAt) {
+                // GPT 后台任务经常先返回 terminal task，再稍后才能读到 message.content。
+                // 空内容时必须继续恢复轮询/事件流，不能把 assistant 标 completed，否则 UI 会显示“生成中断”。
+                shouldResumePolling = hasTask && (!terminalStatus || !hasContent);
+                if (hasTask && terminalStatus && hasContent && !lastAssistant.completedAt) {
                   lastAssistant.completedAt = bgTask.completed_at
                     ? new Date(bgTask.completed_at).getTime()
                     : Date.now();
@@ -530,6 +566,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
                 lastAssistant.generationTaskId = Number(bgTask.id || bgTask.task_id || 0) || undefined;
                 lastAssistant.lastSequence = Number(bgTask.last_sequence_number || 0) || 0;
                 if (shouldResumePolling) {
+                  lastAssistant.completedAt = undefined;
                   lastAssistant.activityStatus = { kind: "generating", status: "running", label: "任务繁忙，正在生成中" };
                 }
               } else {
@@ -561,6 +598,14 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             };
           });
           setMessages(mergedMessages);
+          // 从历史恢复 groupViews，默认每组显示第 0 个模型
+          const newGroupViews = new Map<number, number>();
+          mergedMessages.forEach((m) => {
+            if (m.groupId !== undefined && !newGroupViews.has(m.groupId)) {
+              newGroupViews.set(m.groupId, 0);
+            }
+          });
+          setGroupViews(newGroupViews);
           if (shouldResumePolling && lastAssistant?.serverMessageId) {
             const active = activeByServerMessageId.get(String(lastAssistant.serverMessageId));
             if (!active) {
@@ -675,6 +720,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       let backgroundPollingStarted = false;
       let latestServerMessageId: number | undefined;
       let latestGenerationTaskId: number | undefined;
+      let latestUseBackground = false;
+      let sawDone = false;
       let latestSequence = 0;
 
       const processEvent = (eventText: string) => {
@@ -694,7 +741,12 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             streamAppend(assistantMsg.id, "</think>");
             inReasoningBlock = false;
           }
-          realtimeUpdate(assistantMsg.id, { completedAt: Date.now(), activityStatus: undefined });
+          sawDone = true;
+          const hasContent = (accumulated || streamGet(assistantMsg.id) || realtimeGet(assistantMsg.id)?.content || "").trim().length > 0;
+          realtimeUpdate(assistantMsg.id, hasContent
+            ? { completedAt: Date.now(), activityStatus: undefined }
+            : { completedAt: undefined, activityStatus: { kind: "generating", status: "running", label: "任务繁忙，正在生成中" } }
+          );
           return;
         }
         try {
@@ -709,11 +761,14 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             const task = parsed._generation_task;
             const serverMessageId = Number(task.assistant_message_id || 0) || undefined;
             const generationTaskId = Number(task.id || task.task_id || 0) || undefined;
+            latestUseBackground = task.use_background === true || task.background === true || task.is_complex_task === true;
             latestServerMessageId = serverMessageId;
             latestGenerationTaskId = generationTaskId;
             realtimeUpdate(assistantMsg.id, {
               serverMessageId,
               generationTaskId,
+              useBackground: latestUseBackground,
+              isComplexTask: task.is_complex_task === true,
               lastSequence: latestSequence,
               activityStatus: { kind: "generating", status: "running", label: "正在生成内容" },
             });
@@ -726,6 +781,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             const task = parsed._background_task;
             const serverMessageId = Number(task.assistant_message_id || 0) || undefined;
             latestServerMessageId = serverMessageId;
+            latestUseBackground = true;
             const taskId = task.id || "";
             const placeholder = "任务繁忙，正在生成中";
             accumulated = placeholder;
@@ -733,6 +789,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             realtimeUpdate(assistantMsg.id, {
               serverMessageId,
               backgroundTaskId: taskId,
+              useBackground: true,
+              isComplexTask: true,
               activityStatus: { kind: "generating", status: "running", label: placeholder },
             });
             backgroundPollingStarted = true;
@@ -893,12 +951,37 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             })
           );
         }
+
+        // SSE 自然断开但没有收到 DONE：不能把空 assistant 标 completed。
+        // 后端 task runner 仍可能在生成/落库，转为可恢复 task stream / polling。
+        if (!sawDone && abortReason !== "navigation" && abortReason !== "user" && (latestServerMessageId || latestGenerationTaskId)) {
+          startTaskEventStream(convId || currentConversation, assistantMsg.id, latestServerMessageId, latestSequence, finalContent, latestGenerationTaskId);
+          if (latestUseBackground && latestServerMessageId) {
+            startBackgroundPolling(convId || currentConversation, assistantMsg.id, latestServerMessageId);
+          }
+          return;
+        }
+
+        const hasFinalContent = (finalContent || "").trim().length > 0;
+
+        // OpenAI background/complex task 会先返回 _generation_task，然后主 /api/chat 很快 [DONE]，
+        // 真正内容仍由后端 task runner 继续生成并落库。此时不能把空 assistant 标 completed，
+        // 否则 MessageList 会因 completedAt + 空内容显示“生成中断”。主流已结束后再接 task stream，
+        // 不会和 /api/chat 双通道同时写同一条消息。
+        if (sawDone && !hasFinalContent && abortReason !== "navigation" && abortReason !== "user" && (latestServerMessageId || latestGenerationTaskId)) {
+          startTaskEventStream(convId || currentConversation, assistantMsg.id, latestServerMessageId, latestSequence, finalContent, latestGenerationTaskId);
+          if (latestUseBackground && latestServerMessageId) {
+            startBackgroundPolling(convId || currentConversation, assistantMsg.id, latestServerMessageId);
+          }
+          return;
+        }
+
         streamClear(assistantMsg.id);
         realtimeClear(assistantMsg.id);
 
         // 切会话/用户停止时不要在旧异步里把消息标 completed。
         // 切回该会话时由历史加载 + task event stream 恢复真实状态。
-        if (abortReason !== "navigation" && abortReason !== "user") {
+        if (sawDone && hasFinalContent && abortReason !== "navigation" && abortReason !== "user") {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantMsg.id ? { ...m, completedAt: Date.now() } : m
@@ -923,8 +1006,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     ) => {
       if (!content.trim() && (!attachments || attachments.length === 0)) return;
 
-      const compareModelIds = modelIds.filter((id) => models.some((m) => m.id === id)).slice(0, 2);
-      if (compareModelIds.length !== 2) return;
+      const compareModelIds = modelIds.filter((id) => models.some((m) => m.id === id)).slice(0, 4);
+      if (compareModelIds.length < 2) return;
 
       lastReasoningRef.current = reasoning;
       lastSearchRef.current = search;
@@ -1318,6 +1401,84 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     }
   }, [messages, sendMessage]);
 
+  const switchGroupModel = useCallback((groupId: number, activeIndex: number) => {
+    setGroupViews((prev) => {
+      const next = new Map(prev);
+      next.set(groupId, activeIndex);
+      return next;
+    });
+  }, []);
+
+  // Fork 对比：从指定消息处 Fork 出新模型对比
+  const forkChat = useCallback(
+    async (messageId: number, modelIds: string[]) => {
+      const token = localStorage.getItem("token");
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      } else {
+        headers["X-Guest-ID"] = getGuestId();
+      }
+      const res = await fetch(`${API_BASE_URL}/api/chat/${messageId}/fork`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ models: modelIds }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Fork 对比失败");
+      }
+      const data = await res.json();
+
+      // 进入对比模式
+      setIsCompare(true);
+      const forkedModels = data.models || modelIds;
+      setCompareModels(forkedModels);
+
+      // 刷新消息列表（新 fork 的 assistant 消息已被后端创建，可立即展示占位）
+      const convId = data.conversation_id || currentConversation;
+      if (convId && token) {
+        try {
+          const refreshRes = await fetch(`${API_BASE_URL}/api/conversations/${convId}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (refreshRes.ok) {
+            const refreshData = await refreshRes.json();
+            if (refreshData.messages) {
+              const loadedMessages: Message[] = refreshData.messages.map((m: any) => ({
+                id: String(m.id || uuidv4()),
+                role: m.role,
+                content: m.content,
+                model: m.model,
+                createdAt: new Date(m.created_at).getTime(),
+                completedAt: m.completed_at ? new Date(m.completed_at).getTime() : undefined,
+                files: m.files || undefined,
+                serverMessageId: Number(m.id || 0) || undefined,
+                groupId: m.group_id || undefined,
+                groupIndex: m.group_index ?? undefined,
+              }));
+              setMessages(loadedMessages);
+              const newGroupViews = new Map<number, number>();
+              loadedMessages.forEach((m) => {
+                if (m.groupId !== undefined && !newGroupViews.has(m.groupId)) {
+                  newGroupViews.set(m.groupId, 0);
+                }
+              });
+              setGroupViews(newGroupViews);
+            }
+          }
+        } catch (e) {
+          console.error("fork refresh failed:", e);
+        }
+      }
+
+      return data;
+    },
+    [currentConversation]
+  );
+
   return {
     messages,
     isLoading,
@@ -1332,8 +1493,13 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     currentConversation,
     effectiveSkillKey,
     isCompare,
+    setIsCompare,
     compareModels,
+    setCompareModels,
     sendCompareMessages,
+    groupViews,
+    switchGroupModel,
+    forkChat,
   };
 }
 

@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 
 	"gorm.io/gorm"
@@ -24,6 +25,19 @@ type Conversation struct {
 	Messages []Message `json:"messages,omitempty" gorm:"foreignKey:ConversationID"`
 }
 
+// GetCompareModels 解析 CompareModels JSON
+func (c *Conversation) GetCompareModels() []string {
+	var m []string
+	json.Unmarshal([]byte(c.CompareModels), &m)
+	return m
+}
+
+// SetCompareModels 序列化 CompareModels
+func (c *Conversation) SetCompareModels(m []string) {
+	b, _ := json.Marshal(m)
+	c.CompareModels = string(b)
+}
+
 type Message struct {
 	ID             uint           `gorm:"primarykey" json:"id"`
 	ConversationID uint           `gorm:"not null;index" json:"conversation_id"`
@@ -34,6 +48,9 @@ type Message struct {
 	CompletedAt    *time.Time     `json:"completed_at,omitempty"`
 	CreatedAt      time.Time      `json:"created_at"`
 	DeletedAt      gorm.DeletedAt `gorm:"index" json:"-"`
+
+	GroupID    uint `gorm:"index" json:"group_id,omitempty"`    // 所属消息组
+	GroupIndex int  `json:"group_index,omitempty"`              // 在组内的顺序
 
 	// 文件关联（仅 user 消息可能有）
 	MessageFiles []MessageFile `json:"files,omitempty" gorm:"foreignKey:MessageID"`

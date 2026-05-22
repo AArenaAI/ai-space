@@ -148,6 +148,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	// 公开对比问答（支持匿名用户，内部已有额度与权限校验）
 	publicWithAuth.POST("/chat/compare", chatHandler.CompareChat)
+	// publicWithAuth.POST("/chat/:message_id/fork", chatHandler.ForkChat) // 暂未实现
 
 	// 对比记录 Handler（供认证路由与公开查看共用）
 	compareRecordHandler := NewCompareRecordHandler(db)
