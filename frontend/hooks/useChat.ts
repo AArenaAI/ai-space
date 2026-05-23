@@ -161,8 +161,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   const [effectiveSkillKey, setEffectiveSkillKey] = useState<string | undefined>(skillKey);
   const [groupViews, setGroupViews] = useState<Map<number, number>>(new Map());
   const [totalMessages, setTotalMessages] = useState(0);
+  const [loadedPersistedMessages, setLoadedPersistedMessages] = useState(0);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const hasMoreMessages = totalMessages > messages.length;
+  const hasMoreMessages = totalMessages > loadedPersistedMessages;
   const backgroundPollersRef = useRef<Record<string, number>>({});
   const taskStreamsRef = useRef<Record<string, AbortController>>({});
   const abortReasonRef = useRef<"user" | "navigation" | null>(null);
@@ -501,6 +502,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         setMessages([]);
         setCurrentConversation(undefined);
       }
+      setLoadedPersistedMessages(0);
+      setTotalMessages(0);
       setIsCompare(false);
       setCompareModels([]);
       setEffectiveSkillKey(skillKey);
@@ -512,6 +515,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       justCreatedRef.current = undefined;
       setIsLoadingHistory(false);
       setCurrentConversation(conversationId);
+      setLoadedPersistedMessages(0);
+      setTotalMessages(0);
       return () => loadController.abort();
     }
 
@@ -585,6 +590,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             };
           });
           setMessages(mergedMessages);
+          setLoadedPersistedMessages(loadedMessages.length);
           // 从历史恢复 groupViews，默认每组显示第 0 个模型
           const newGroupViews = new Map<number, number>();
           mergedMessages.forEach((m) => {
@@ -644,6 +650,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           }
         } else {
           setMessages([]);
+          setLoadedPersistedMessages(0);
           setIsLoading(false);
         }
         setIsLoadingHistory(false);
@@ -1515,6 +1522,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
                 groupIndex: m.group_index ?? undefined,
               }));
               setMessages(loadedMessages);
+              setLoadedPersistedMessages(loadedMessages.length);
               const newGroupViews = new Map<number, number>();
               loadedMessages.forEach((m) => {
                 if (m.groupId !== undefined && !newGroupViews.has(m.groupId)) {
@@ -1541,9 +1549,11 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     if (!token) return;
     setIsLoadingMore(true);
     try {
-      const offset = Math.max(0, totalMessages - messages.length - 50);
+      const limit = 50;
+      const offset = Math.max(0, totalMessages - loadedPersistedMessages - limit);
+      const expectedOlderCount = Math.max(0, totalMessages - loadedPersistedMessages - offset);
       const res = await fetch(
-        `${API_BASE_URL}/api/conversations/${currentConversation}/messages?limit=50&offset=${offset}`,
+        `${API_BASE_URL}/api/conversations/${currentConversation}/messages?limit=${expectedOlderCount || limit}&offset=${offset}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (!res.ok) return;
@@ -1562,9 +1572,14 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       }));
       setMessages((prev) => {
         const existingIds = new Set(prev.map((m) => m.serverMessageId).filter(Boolean));
-        const newOnes = olderMessages.filter((m) => !existingIds.has(m.serverMessageId));
+        const newOnes = olderMessages.filter((m) => {
+          if (!m.serverMessageId || existingIds.has(m.serverMessageId)) return false;
+          existingIds.add(m.serverMessageId);
+          return true;
+        });
         return [...newOnes, ...prev];
       });
+      setLoadedPersistedMessages((prev) => Math.min(typeof data.total === "number" ? data.total : totalMessages, prev + olderMessages.length));
       if (typeof data.total === "number") {
         setTotalMessages(data.total);
       }
@@ -1573,7 +1588,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     } finally {
       setIsLoadingMore(false);
     }
-  }, [currentConversation, isLoadingMore, hasMoreMessages, totalMessages, messages.length]);
+  }, [currentConversation, isLoadingMore, hasMoreMessages, totalMessages, loadedPersistedMessages]);
 
   return {
     messages,

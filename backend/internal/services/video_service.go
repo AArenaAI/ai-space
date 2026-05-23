@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime"
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
@@ -29,6 +30,7 @@ type CreateVideoTaskRequest struct {
 	Model           string
 	Prompt          string
 	Ratio           string
+	Resolution      string
 	Duration        int64
 	GenerateAudio   bool
 	Watermark       bool
@@ -88,10 +90,16 @@ func (s *VideoService) CreateVideoTask(ctx context.Context, req CreateVideoTaskR
 	createReq := model.CreateContentGenerationTaskRequest{
 		Model:         req.Model,
 		GenerateAudio: volcengine.Bool(req.GenerateAudio),
-		Ratio:         volcengine.String(req.Ratio),
 		Duration:      volcengine.Int64(req.Duration),
 		Watermark:     volcengine.Bool(req.Watermark),
 		Content:       content,
+	}
+	if !isSeedance20FastModel(req.Model) {
+		if req.Resolution != "" {
+			createReq.Resolution = volcengine.String(req.Resolution)
+		} else if req.Ratio != "" {
+			createReq.Ratio = volcengine.String(req.Ratio)
+		}
 	}
 
 	resp, err := s.client.CreateContentGenerationTask(ctx, createReq)
@@ -141,4 +149,8 @@ func (s *VideoService) GetVideoTask(ctx context.Context, taskID string) (*VideoT
 	}
 
 	return result, nil
+}
+
+func isSeedance20FastModel(model string) bool {
+	return strings.Contains(model, "doubao-seedance-2-0-fast") || strings.Contains(model, "seedance-2-0-fast")
 }

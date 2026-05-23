@@ -131,7 +131,7 @@ function ImageChatPageInner() {
   const [showHistory, setShowHistory] = useState(false);
   const [chatId, setChatId] = useState<number | null>(null);
   const [pollingChatId, setPollingChatId] = useState<number | null>(null);
-  const [selectedAspectRatio, setSelectedAspectRatio] = useState("1:1");
+  const [selectedAspectRatio, setSelectedAspectRatio] = useState("auto");
   const [selectedResolution, setSelectedResolution] = useState("1K");
   const [selectedQuality, setSelectedQuality] = useState("medium");
   const [selectedModel, setSelectedModel] = useState("");
@@ -144,10 +144,10 @@ function ImageChatPageInner() {
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const shouldAutoScrollRef = useRef(true);
   const selectedModelInfo = imageModels.find((m) => m.id === selectedModel) || imageModels[0];
-  const selectedAspect = ASPECT_RATIOS.find((item) => item.value === selectedAspectRatio) || ASPECT_RATIOS[1];
+  const selectedAspect = ASPECT_RATIOS.find((item) => item.value === selectedAspectRatio) || ASPECT_RATIOS[0];
 
   const initialPrompt = searchParams.get("prompt") || "";
-  const initialAspect = searchParams.get("aspect") || "1:1";
+  const initialAspect = searchParams.get("aspect") || "auto";
   const initialResolution = searchParams.get("resolution") || "1K";
   const initialQuality = searchParams.get("quality") || "medium";
   const initialRefs = searchParams.get("refs");
@@ -236,7 +236,7 @@ function ImageChatPageInner() {
 
   const handleSend = async (
     text: string,
-    aspect: string = "1:1",
+    aspect: string = "auto",
     resolution: string = "1K",
     quality: string = "medium",
     refs: string[] = []

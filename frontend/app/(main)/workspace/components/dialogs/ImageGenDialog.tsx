@@ -7,6 +7,7 @@ import { useImage } from "@/hooks/useImage";
 import { resolveImageUrl } from "@/lib/resolveImageUrl";
 
 const ASPECTS = [
+  { label: "Auto", value: "auto" },
   { label: "1:1", value: "1:1" },
   { label: "16:9", value: "16:9" },
   { label: "9:16", value: "9:16" },
@@ -22,7 +23,7 @@ const QUALITIES = [
 export default function ImageGenDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { images, isGenerating, error, generateImage, deleteImage, fetchImages } = useImage();
   const [prompt, setPrompt] = useState("");
-  const [aspect, setAspect] = useState("1:1");
+  const [aspect, setAspect] = useState("auto");
   const [quality, setQuality] = useState("medium");
   const theme = THEMES.pink;
 

@@ -319,9 +319,9 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="relative flex h-full flex-col overflow-hidden">
       {/* 顶部栏 - 48px 高度 */}
-      <header className={cn("relative shrink-0 h-12 flex items-center justify-between px-4 transition-all duration-300", compareMode ? "border-b border-amber-500/20" : "")}>
+      <header className={compareMode ? "relative shrink-0 h-12 flex items-center justify-between px-4 transition-all duration-300 border-b border-amber-500/20" : "relative shrink-0 h-12 flex items-center justify-between px-4 transition-all duration-300"}>
         <div className="flex items-center">
           {compareMode ? (
             <div className="flex items-center gap-1.5 text-sm text-text-secondary">
@@ -437,15 +437,17 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
       />
 
       {/* 输入框 */}
-      <div className={cn("shrink-0", messages.length === 0 && !compareMode ? "mb-80" : "")}>
-        <MessageInput
-          onSend={handleSend}
-          onStop={handleStop}
-          isLoading={isLoading}
-          compareMode={compareMode}
-          onToggleCompare={toggleCompareMode}
-          currentModel={selectedModel}
-        />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-surface-elevated via-surface-elevated to-transparent pt-6">
+        <div className="pointer-events-auto">
+          <MessageInput
+            onSend={handleSend}
+            onStop={handleStop}
+            isLoading={isLoading}
+            compareMode={compareMode}
+            onToggleCompare={toggleCompareMode}
+            currentModel={selectedModel}
+          />
+        </div>
       </div>
     </div>
   );

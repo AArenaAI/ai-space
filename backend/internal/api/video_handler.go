@@ -5,7 +5,9 @@ import (
 	"aipool-backend/internal/models"
 	"aipool-backend/internal/services"
 	"context"
+	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -67,18 +69,21 @@ func (h *VideoHandler) CreateVideo(c *gin.Context) {
 		modelID = "doubao-seedance-2-0-fast-260128"
 	}
 	ratio := req.Ratio
-	if ratio == "" {
-		ratio = "16:9"
-	}
 	duration := req.Duration
 	if duration <= 0 {
 		duration = 5
+	}
+
+	resolution := ""
+	if ratio != "" && ratio != "auto" {
+		resolution = resolveVideoResolution(ratio)
 	}
 
 	createReq := services.CreateVideoTaskRequest{
 		Model:           modelID,
 		Prompt:          req.Prompt,
 		Ratio:           ratio,
+		Resolution:      resolution,
 		Duration:        duration,
 		GenerateAudio:   req.GenerateAudio,
 		Watermark:       req.Watermark,
@@ -92,6 +97,7 @@ func (h *VideoHandler) CreateVideo(c *gin.Context) {
 
 	resp, err := h.videoService.CreateVideoTask(ctx, createReq)
 	if err != nil {
+		log.Printf("[Video] create task failed model=%s ratio=%s resolution=%s duration=%d audio=%v err=%v", modelID, ratio, resolution, duration, req.GenerateAudio, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create task: " + err.Error()})
 		return
 	}
@@ -212,6 +218,25 @@ func filterAndResolveURLs(urls []string) []string {
 		}
 	}
 	return result
+}
+
+// resolveVideoResolution maps aspect ratio to resolution for Seedance models
+func resolveVideoResolution(ratio string) string {
+	// Seedance models use resolution instead of ratio
+	// Supported resolutions: 480p, 540p, 720p, 1080p
+	parts := strings.Split(ratio, ":")
+	if len(parts) == 2 {
+		w, wErr := strconv.Atoi(strings.TrimSpace(parts[0]))
+		h, hErr := strconv.Atoi(strings.TrimSpace(parts[1]))
+		if wErr == nil && hErr == nil {
+			if h > w {
+				// Portrait / square
+				return "720p"
+			}
+		}
+	}
+	// Landscape or fallback
+	return "1080p"
 }
 
 // GetVideoModelsHandler returns supported video generation models

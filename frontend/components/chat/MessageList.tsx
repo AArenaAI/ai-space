@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useMemo, memo } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo, memo, type UIEvent } from "react";
 import { User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck, ChevronDown, ChevronUp, Lightbulb, Play, Search, ChevronDown as ChevronDownIcon, FileText, Wrench, Star, Columns2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/hooks/useChat";
@@ -17,12 +17,14 @@ import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { useTheme } from "@/components/theme/ThemeProvider";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import ShareDialog from "@/components/ui/ShareDialog";
-import { useSmartAutoScroll } from "@/hooks/useSmartAutoScroll";
+import { Virtuoso, VirtuosoHandle, type Components } from "react-virtuoso";
 import { useMessageStream } from "@/hooks/useMessageStream";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
 import { inferGroups, InferredGroup } from "@/lib/groups";
 import EChartsBlock from "./EChartsBlock";
+
+const CHAT_BOTTOM_SPACER = 176;
 
 interface MessageListProps {
   messages: Message[];
@@ -148,7 +150,7 @@ function StreamingText({ messageId, content, isStreaming, className }: { message
   const hasContent = !!parsed.answer.trim();
 
   return (
-    <span className={className}>
+    <div className={className}>
       {hasReason && (
         <div className="mb-3 rounded-xl border border-purple-200 dark:border-purple-800/40 overflow-hidden">
           <div className="flex items-center gap-2 px-3 py-2 bg-purple-50 dark:bg-[#1A1A2E]">
@@ -168,7 +170,7 @@ function StreamingText({ messageId, content, isStreaming, className }: { message
       <span className="whitespace-pre-wrap break-words">{parsed.answer}</span>
       {!hasContent && !hasReason && <ThinkingDots />}
       {isStreaming && <StreamingCursor />}
-    </span>
+    </div>
   );
 }
 
@@ -626,43 +628,94 @@ function MessageList({
   hasMoreMessages,
   onLoadMore,
 }: MessageListProps) {
-  const {
-    containerRef,
-    bottomRef,
-    showScrollButton,
-    handleScroll,
-    scrollToBottom,
-    followIfAtBottom,
-  } = useSmartAutoScroll({
-    threshold: 120,
-    enabled: true,
-  });
-
-  // 向上滚动加载更多历史消息
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const prevScrollHeightRef = useRef(0);
-  useEffect(() => {
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const stickToBottomRef = useRef(true);
+  const lastScrollTopRef = useRef(0);
+  const loadingMoreTriggeredRef = useRef(false);
+  const programmaticScrollUntilRef = useRef(0);
+  const bottomLockRafRef = useRef<number>(0);
+  const scrollToBottom = useCallback(() => {
+    programmaticScrollUntilRef.current = Date.now() + 240;
     const el = scrollRef.current;
-    if (!el || !onLoadMore || !hasMoreMessages) return;
-    const onScroll = () => {
-      if (el.scrollTop < 80 && !isLoadingMore && hasMoreMessages) {
-        prevScrollHeightRef.current = el.scrollHeight;
-        onLoadMore();
-      }
-    };
-    el.addEventListener("scroll", onScroll);
-    return () => el.removeEventListener("scroll", onScroll);
-  }, [onLoadMore, isLoadingMore, hasMoreMessages]);
-
-  // 加载更多后保持滚动位置
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el || !isLoadingMore) return;
-    const diff = el.scrollHeight - prevScrollHeightRef.current;
-    if (diff > 0) {
-      el.scrollTop = diff;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+      lastScrollTopRef.current = el.scrollTop;
+      return;
     }
-  }, [isLoadingMore, messages.length]);
+    virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end", behavior: "auto" });
+  }, []);
+
+  const lockBottomAfterLayout = useCallback(() => {
+    if (bottomLockRafRef.current) cancelAnimationFrame(bottomLockRafRef.current);
+    bottomLockRafRef.current = requestAnimationFrame(() => {
+      bottomLockRafRef.current = requestAnimationFrame(() => {
+        bottomLockRafRef.current = 0;
+        if (stickToBottomRef.current) scrollToBottom();
+      });
+    });
+  }, [scrollToBottom]);
+
+  const handleVirtuosoScrollerRef = useCallback((ref: Window | HTMLElement | null) => {
+    const el = ref instanceof HTMLElement ? (ref as HTMLDivElement) : null;
+    scrollRef.current = el;
+    if (el) {
+      el.style.paddingBottom = `${CHAT_BOTTOM_SPACER}px`;
+      el.style.scrollPaddingBottom = `${CHAT_BOTTOM_SPACER}px`;
+      lastScrollTopRef.current = el.scrollTop;
+    }
+  }, []);
+
+  const handleVirtuosoScroll = useCallback((event: UIEvent<HTMLElement>) => {
+    const el = event.currentTarget;
+    scrollRef.current = el as HTMLDivElement;
+
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const isScrollingUp = el.scrollTop < lastScrollTopRef.current;
+
+    // stickToBottom 表示用户意图，只在明确上滑离开底部时关闭；
+    // 不用 Virtuoso 测量过程中的临时 distance 抖动来反复切换。
+    const isProgrammaticScroll = Date.now() < programmaticScrollUntilRef.current;
+    if (!isProgrammaticScroll && isScrollingUp && distanceToBottom > 160) {
+      stickToBottomRef.current = false;
+    }
+    if (distanceToBottom <= 24) {
+      stickToBottomRef.current = true;
+    }
+    lastScrollTopRef.current = el.scrollTop;
+
+    if (el.scrollTop < 80 && !isLoadingMore && hasMoreMessages && !loadingMoreTriggeredRef.current) {
+      loadingMoreTriggeredRef.current = true;
+      onLoadMore?.();
+    }
+  }, [hasMoreMessages, isLoadingMore, onLoadMore]);
+
+  useEffect(() => {
+    if (!isLoadingMore) {
+      loadingMoreTriggeredRef.current = false;
+    }
+  }, [isLoadingMore]);
+
+  const virtuosoComponents = useMemo<Components<Message, unknown>>(() => ({
+    Header: () =>
+      hasMoreMessages ? (
+        <div className="flex justify-center py-2">
+          {isLoadingMore ? (
+            <div className="flex items-center gap-2 text-text-secondary text-sm">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              加载中...
+            </div>
+          ) : (
+            <button
+              onClick={onLoadMore}
+              className="text-sm text-text-secondary hover:text-text-primary transition-colors"
+            >
+              加载更多历史消息
+            </button>
+          )}
+        </div>
+      ) : null,
+  }), [hasMoreMessages, isLoadingMore, onLoadMore]);
 
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [selectMode, setSelectMode] = useState(false);
@@ -671,6 +724,8 @@ function MessageList({
   const [shareOpen, setShareOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [compareModelMenuOpen, setCompareModelMenuOpen] = useState<number | null>(null);
+  const [atBottom, setAtBottom] = useState(true);
+  const atBottomRef = useRef(true);
   const groups = useMemo(() => inferGroups(messages), [messages]);
   const groupByMessageId = useMemo(() => {
     const map = new Map<string, InferredGroup>();
@@ -680,6 +735,20 @@ function MessageList({
     });
     return map;
   }, [groups]);
+
+  const visibleMessages = useMemo(() => {
+    return messages.filter((msg) => {
+      const group = groupByMessageId.get(msg.id);
+      if (msg.role !== "user" && group && group.assistantMessages.length > 1) {
+        const activeIndex = groupViews?.get(group.id) ?? 0;
+        const activeMsg = group.assistantMessages[activeIndex] ?? group.assistantMessages[0];
+        return msg.id === activeMsg?.id;
+      }
+      return true;
+    });
+  }, [messages, groupByMessageId, groupViews]);
+
+
   const modelById = useMemo(() => {
     const map = new Map<string, ChatModel>();
     models.forEach((model) => map.set(model.id, model));
@@ -729,38 +798,24 @@ function MessageList({
     if (messages.length > prevLengthRef.current && prevLengthRef.current > 0) {
       const newMessages = messages.slice(prevLengthRef.current);
       if (newMessages.some((m) => m.role === "user")) {
-        scrollToBottom("smooth");
+        stickToBottomRef.current = true;
+        requestAnimationFrame(() => {
+          scrollToBottom();
+          requestAnimationFrame(scrollToBottom);
+        });
       }
     }
     prevLengthRef.current = messages.length;
   }, [messages, scrollToBottom]);
 
-  // SSE 流式输出时，RAF + 时间节流跟随（避免高频 scrollTop 设置造成视觉跳动）
-  const rafRef = useRef<number>(0);
-  const lastScrollTimeRef = useRef(0);
-  useEffect(() => {
-    const lastMessage = messages[messages.length - 1];
-    const isStreaming = isLoading && lastMessage?.role === "assistant";
-    if (!isStreaming) return;
-
-    if (rafRef.current) return; // 已有待执行的 RAF，不再重复 schedule
-
-    rafRef.current = requestAnimationFrame(() => {
-      rafRef.current = 0;
-      const now = Date.now();
-      if (now - lastScrollTimeRef.current < 150) return; // 150ms 时间节流
-      lastScrollTimeRef.current = now;
-      followIfAtBottom();
-    });
-  }, [messages, isLoading, followIfAtBottom]);
-
   const handleCopy = useCallback((content: string) => {
     navigator.clipboard.writeText(content);
   }, []);
 
-  const toggleSelect = (index: number) => {
+  const toggleSelect = (msgId: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
+      const index = messages.findIndex((m) => m.id === msgId);
       const msg = messages[index];
       if (!msg) return prev;
 
@@ -829,6 +884,45 @@ function MessageList({
     if (msg.activityStatus?.status === "running" || msg.activityStatus?.status === "searching") return true;
     return !!(msg.generationTaskId || msg.backgroundTaskId || msg.useBackground || msg.isComplexTask);
   };
+
+  const lastVisibleMessage = visibleMessages[visibleMessages.length - 1];
+  const lastVisibleIsStreaming = !!lastVisibleMessage && lastVisibleMessage.role === "assistant" && isMessageGenerating(lastVisibleMessage, isLoading && !lastVisibleMessage.completedAt);
+  const streamingMessageId = lastVisibleIsStreaming ? lastVisibleMessage.id : "";
+  const streamingText = useMessageStream(streamingMessageId, !!streamingMessageId);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !streamingMessageId) return;
+
+    const observer = new MutationObserver(() => {
+      if (!stickToBottomRef.current) return;
+      lockBottomAfterLayout();
+    });
+
+    observer.observe(el, { childList: true, subtree: true, characterData: true });
+    return () => observer.disconnect();
+  }, [streamingMessageId, lockBottomAfterLayout]);
+
+  // SSE 流式输出是同一条消息内容持续变高，不一定改变 messages 引用；
+  // 用流式文本长度触发，并只在用户仍贴近底部时跟随。
+  const rafRef = useRef<number>(0);
+  useEffect(() => {
+    if (!streamingMessageId || !stickToBottomRef.current) return;
+
+    lockBottomAfterLayout();
+    const timeout = window.setTimeout(lockBottomAfterLayout, 120);
+    return () => {
+      window.clearTimeout(timeout);
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = 0;
+      }
+      if (bottomLockRafRef.current) {
+        cancelAnimationFrame(bottomLockRafRef.current);
+        bottomLockRafRef.current = 0;
+      }
+    };
+  }, [streamingMessageId, streamingText.length, lockBottomAfterLayout]);
 
   const renderAssistantContent = (msg: Message, isStreaming: boolean) => {
     const generating = isMessageGenerating(msg, isStreaming);
@@ -1107,22 +1201,8 @@ function MessageList({
               })}
             </div>
 
-            <div ref={bottomRef} />
           </div>
         </div>
-
-        {showScrollButton && (
-          <button
-            type="button"
-            onClick={() => scrollToBottom("smooth")}
-            className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 flex items-center justify-center w-10 h-10 rounded-full
-              bg-surface-elevated border border-surface-border text-text-secondary
-              shadow-lg hover:bg-surface-card hover:text-text-primary transition-colors"
-            aria-label="回到底部"
-          >
-            <ChevronDownIcon className="w-5 h-5" />
-          </button>
-        )}
 
         <ConfirmDialog
           isOpen={!!deleteTarget}
@@ -1190,263 +1270,223 @@ function MessageList({
 
   return (
     <div className="relative flex-1 overflow-hidden">
-      <div
-        ref={(node) => {
-          containerRef(node);
-          scrollRef.current = node;
+      <Virtuoso
+        data={visibleMessages}
+        ref={virtuosoRef}
+        scrollerRef={handleVirtuosoScrollerRef}
+        followOutput={false}
+        atBottomThreshold={160}
+        atBottomStateChange={(atBottom) => {
+          atBottomRef.current = atBottom;
+          if (atBottom) stickToBottomRef.current = true;
+          setAtBottom(atBottom);
         }}
-        onScroll={handleScroll}
-        className="h-full overflow-y-auto px-4 py-8"
-      >
-        <div className="max-w-[800px] mx-auto space-y-8">
-          {/* 顶部加载更多历史消息 */}
-          {hasMoreMessages && (
-            <div className="flex justify-center py-2">
-              {isLoadingMore ? (
-                <div className="flex items-center gap-2 text-text-secondary text-sm">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  加载中...
-                </div>
-              ) : (
-                <button
-                  onClick={onLoadMore}
-                  className="text-sm text-text-secondary hover:text-text-primary transition-colors"
-                >
-                  加载更多历史消息
-                </button>
-              )}
-            </div>
-          )}
-        {messages.map((msg, index) => {
+        computeItemKey={(_, msg) => msg.id}
+        onScroll={handleVirtuosoScroll}
+        increaseViewportBy={{ top: 200, bottom: 200 }}
+        overscan={{ main: 2, reverse: 2 }}
+        components={virtuosoComponents}
+        itemContent={(index, msg) => {
           const group = groupByMessageId.get(msg.id);
           const isUser = msg.role === "user";
-
-          // 非活跃 assistant 跳过渲染
-          if (!isUser && group && group.assistantMessages.length > 1) {
-            const activeIndex = groupViews?.get(group.id) ?? 0;
-            const activeMsg = group.assistantMessages[activeIndex] ?? group.assistantMessages[0];
-            if (msg.id !== activeMsg?.id) return null;
-          }
-
           const model = msg.model ? modelById.get(msg.model) : undefined;
-          const isLast = index === messages.length - 1;
+          const isLast = index === visibleMessages.length - 1;
           const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && isLast;
           const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
           const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
           const isSelected = selectedIds.has(msg.id);
 
           return (
-            <div
-              key={msg.id}
-              className="flex gap-3 animate-message-appear group"
-            >
-              {/* 左侧：AI头像 / 用户复选框 */}
-              <div className="mt-1 w-7 shrink-0">
-                {!isUser && !selectMode && (
-                  <div className="w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center">
-                    <Bot className="w-4 h-4 text-text-secondary" />
-                  </div>
-                )}
-                {isUser && selectMode && (
-                  <button
-                    onClick={() => toggleSelect(index)}
-                    className={cn(
-                      "w-5 h-5 rounded-md border flex items-center justify-center transition-colors",
-                      isSelected
-                        ? "bg-brand border-brand text-white"
-                        : "border-surface-border text-transparent hover:border-brand/50"
-                    )}
-                  >
-                    {isSelected && <SquareCheck className="w-3.5 h-3.5" />}
-                  </button>
-                )}
-              </div>
-
-              {/* 中间内容 */}
-              <div className={cn("flex-1 flex min-w-0", isUser ? "justify-end" : "justify-start")}>
-                <div className="flex flex-col gap-1 min-w-0">
-                  {!isUser && group && group.assistantMessages.length > 1 && (
-                    <div className="flex items-center gap-1.5 mb-1">
-                      {group.assistantMessages.map((a, idx) => {
-                        const m = a.model ? modelById.get(a.model) : undefined;
-                        const isActive = (groupViews?.get(group.id) ?? 0) === idx;
-                        return (
-                          <button
-                            key={a.id}
-                            onClick={() => switchGroupModel?.(group.id, idx)}
-                            className={cn(
-                              "flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] transition-colors",
-                              isActive
-                                ? "bg-brand/10 text-brand font-medium"
-                                : "bg-surface-card text-text-secondary hover:bg-surface-elevated"
-                            )}
-                          >
-                            <div
-                              className="w-3 h-3 rounded-full flex items-center justify-center text-[8px] font-bold text-white"
-                              style={{ backgroundColor: m?.color }}
-                            >
-                              {(m?.name || a.model || `模型${idx + 1}`).slice(0, 1).toUpperCase()}
-                            </div>
-                            <span className="truncate max-w-[80px]">{m?.name || a.model || `模型 ${idx + 1}`}</span>
-                          </button>
-                        );
-                      })}
+            <div className="max-w-[800px] mx-auto px-4 py-4">
+              <div
+                key={msg.id}
+                className="flex gap-3 animate-message-appear group"
+              >
+                {/* 左侧：AI头像 / 用户复选框 */}
+                <div className="mt-1 w-7 shrink-0">
+                  {!isUser && !selectMode && (
+                    <div className="w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center">
+                      <Bot className="w-4 h-4 text-text-secondary" />
                     </div>
                   )}
-                  <div
-                    className={cn(
-                      "px-4 py-3 relative w-fit max-w-full",
-                      isUser
-                        ? "rounded-2xl rounded-br-sm bg-[#EFF6FF] dark:bg-[#1E293B]"
-                        : "rounded-2xl rounded-bl-sm bg-[#F5F4F2] dark:bg-[#1F1F1F]"
-                    )}
-                  >
-
-                  {!isUser && model && !selectMode && (
-                    <AssistantMeta msg={msg} isStreaming={isStreaming} model={model} />
-                  )}
-
-                  {isUser ? (
-                    <div className="flex flex-col gap-2">
-                      {/* 图片附件渲染 */}
-                      {msg.files && msg.files.length > 0 && (
-                        <div className="flex flex-wrap gap-2">
-                          {msg.files.map((f, fi) => {
-                            if (f.type === "image") {
-                              return (
-                                <div key={fi} className="relative group/file rounded-xl overflow-hidden border border-surface-border bg-surface-card">
-                                  <img
-                                    src={`/api/files/${f.public_id}/download`}
-                                    alt={f.filename}
-                                    className="max-w-[200px] max-h-[200px] object-cover rounded-xl"
-                                    onError={(e) => {
-                                      (e.target as HTMLImageElement).src = "";
-                                      (e.target as HTMLImageElement).classList.add("hidden");
-                                      (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden");
-                                    }}
-                                  />
-                                  <div className="hidden text-xs text-text-tertiary px-3 py-2">图片加载失败</div>
-                                </div>
-                              );
-                            }
-                            return null;
-                          })}
-                        </div>
+                  {isUser && selectMode && (
+                    <button
+                      onClick={() => toggleSelect(msg.id)}
+                      className={cn(
+                        "w-5 h-5 rounded-md border flex items-center justify-center transition-colors",
+                        isSelected
+                          ? "bg-brand border-brand text-white"
+                          : "border-surface-border text-transparent hover:border-brand/50"
                       )}
-                      {/* 非图片文件卡片 */}
-                      {msg.files && msg.files.some(f => f.type !== "image") && (
-                        <div className="flex flex-wrap gap-2">
-                          {msg.files.filter(f => f.type !== "image").map((f, fi) => (
-                            <a
-                              key={fi}
-                              href={`/api/files/${f.public_id}/download`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-card border border-surface-border hover:border-brand/30 transition-colors"
-                            >
-                              <FileText className="w-4 h-4 text-text-tertiary shrink-0" />
-                              <span className="text-[13px] text-text-secondary truncate max-w-[200px]">{f.filename}</span>
-                            </a>
-                          ))}
-                        </div>
-                      )}
-                      <div className="flex items-start justify-between gap-2">
-                        {msg.content ? (
-                          <p className="text-[15px] leading-relaxed text-text-primary whitespace-pre-wrap">{msg.content}</p>
-                        ) : null}
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      {renderAssistantContent(msg, isStreaming)}
-                      {msg.stopped && onContinueGenerate && (
-                        <button
-                          onClick={onContinueGenerate}
-                          className="mt-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-text-secondary hover:text-text-primary hover:bg-surface-card border border-surface-border transition-colors"
-                        >
-                          <Play className="w-3.5 h-3.5" />
-                          继续生成
-                        </button>
-                      )}
-                    </>
+                    >
+                      {isSelected && <SquareCheck className="w-3.5 h-3.5" />}
+                    </button>
                   )}
                 </div>
-                {!selectMode && !isStreaming && (
-                  <MessageActions
-                    onCopy={() => handleCopy(msg.content)}
-                    onDelete={() => setDeleteTarget(msg.id)}
-                    onRegenerate={onRegenerate}
-                    onSelectMode={enterSelectMode}
-                    onFavorite={msg.serverMessageId && conversationId ? () => toggleFavorite(msg.serverMessageId!, conversationId) : undefined}
-                    isFavorited={msg.serverMessageId ? isFavorited(msg.serverMessageId) : false}
-                    showRegenerate={canRegenerate}
-                    align={isUser ? "right" : "left"}
-                    visible={isLast}
-                    createdAt={msg.createdAt}
-                    completedAt={msg.completedAt}
-                    onForkCompare={isUser && msg.serverMessageId ? () => onForkCompare?.(msg.serverMessageId!) : undefined}
-                  />
-                )}
-              </div>
-              </div>
 
-              {/* 右侧：用户头像 / AI复选框 */}
-              <div className="mt-1 w-7 shrink-0">
-                {isUser && !selectMode && (
-                  <div className="w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center">
-                    <User className="w-4 h-4 text-text-secondary" />
-                  </div>
-                )}
-                {!isUser && selectMode && (
-                  <button
-                    onClick={() => toggleSelect(index)}
-                    className={cn(
-                      "w-5 h-5 rounded-md border flex items-center justify-center transition-colors",
-                      isSelected
-                        ? "bg-brand border-brand text-white"
-                        : "border-surface-border text-transparent hover:border-brand/50"
+                {/* 中间内容 */}
+                <div className={cn("flex-1 flex min-w-0", isUser ? "justify-end" : "justify-start")}>
+                  <div className="flex flex-col gap-1 min-w-0">
+                    {!isUser && group && group.assistantMessages.length > 1 && (
+                      <div className="flex items-center gap-1.5 mb-1">
+                        {group.assistantMessages.map((a, idx) => {
+                          const m = a.model ? modelById.get(a.model) : undefined;
+                          const isActive = (groupViews?.get(group.id) ?? 0) === idx;
+                          return (
+                            <button
+                              key={a.id}
+                              onClick={() => switchGroupModel?.(group.id, idx)}
+                              className={cn(
+                                "flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] transition-colors",
+                                isActive
+                                  ? "bg-brand/10 text-brand font-medium"
+                                  : "bg-surface-card text-text-secondary hover:bg-surface-elevated"
+                              )}
+                            >
+                              <div
+                                className="w-3 h-3 rounded-full flex items-center justify-center text-[8px] font-bold text-white"
+                                style={{ backgroundColor: m?.color }}
+                              >
+                                {(m?.name || a.model || `模型${idx + 1}`).slice(0, 1).toUpperCase()}
+                              </div>
+                              <span className="truncate max-w-[80px]">{m?.name || a.model || `模型 ${idx + 1}`}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
                     )}
-                  >
-                    {isSelected && <SquareCheck className="w-3.5 h-3.5" />}
-                  </button>
-                )}
+                    <div
+                      className={cn(
+                        "px-4 py-3 relative w-fit max-w-full",
+                        isUser
+                          ? "rounded-2xl rounded-br-sm bg-[#EFF6FF] dark:bg-[#1E293B]"
+                          : "rounded-2xl rounded-bl-sm bg-[#F5F4F2] dark:bg-[#1F1F1F]"
+                      )}
+                    >
+
+                    {!isUser && model && !selectMode && (
+                      <AssistantMeta msg={msg} isStreaming={isStreaming} model={model} />
+                    )}
+
+                    {isUser ? (
+                      <div className="flex flex-col gap-2">
+                        {/* 图片附件渲染 */}
+                        {msg.files && msg.files.length > 0 && (
+                          <div className="flex flex-wrap gap-2">
+                            {msg.files.map((f, fi) => {
+                              if (f.type === "image") {
+                                return (
+                                  <div key={fi} className="relative group/file rounded-xl overflow-hidden border border-surface-border bg-surface-card">
+                                    <img
+                                      src={`/api/files/${f.public_id}/download`}
+                                      alt={f.filename}
+                                      className="max-w-[200px] max-h-[200px] object-cover rounded-xl"
+                                      onError={(e) => {
+                                        (e.target as HTMLImageElement).src = "";
+                                        (e.target as HTMLImageElement).classList.add("hidden");
+                                        (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden");
+                                      }}
+                                    />
+                                    <div className="hidden text-xs text-text-tertiary px-3 py-2">图片加载失败</div>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })}
+                          </div>
+                        )}
+                        {/* 非图片文件卡片 */}
+                        {msg.files && msg.files.some(f => f.type !== "image") && (
+                          <div className="flex flex-wrap gap-2">
+                            {msg.files.filter(f => f.type !== "image").map((f, fi) => (
+                              <a
+                                key={fi}
+                                href={`/api/files/${f.public_id}/download`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-card border border-surface-border hover:border-brand/30 transition-colors"
+                              >
+                                <FileText className="w-4 h-4 text-text-tertiary shrink-0" />
+                                <span className="text-[13px] text-text-secondary truncate max-w-[200px]">{f.filename}</span>
+                              </a>
+                            ))}
+                          </div>
+                        )}
+                        <div className="flex items-start justify-between gap-2">
+                          {msg.content ? (
+                            <p className="text-[15px] leading-relaxed text-text-primary whitespace-pre-wrap">{msg.content}</p>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {renderAssistantContent(msg, isStreaming)}
+                        {msg.stopped && onContinueGenerate && (
+                          <button
+                            onClick={onContinueGenerate}
+                            className="mt-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-text-secondary hover:text-text-primary hover:bg-surface-card border border-surface-border transition-colors"
+                          >
+                            <Play className="w-3.5 h-3.5" />
+                            继续生成
+                          </button>
+                        )}
+                      </>
+                    )}
+                    </div>
+                    {!selectMode && !isStreaming && (
+                      <MessageActions
+                        onCopy={() => handleCopy(msg.content)}
+                        onDelete={() => setDeleteTarget(msg.id)}
+                        onRegenerate={onRegenerate}
+                        onSelectMode={enterSelectMode}
+                        onFavorite={msg.serverMessageId && conversationId ? () => toggleFavorite(msg.serverMessageId!, conversationId) : undefined}
+                        isFavorited={msg.serverMessageId ? isFavorited(msg.serverMessageId) : false}
+                        showRegenerate={canRegenerate}
+                        align={isUser ? "right" : "left"}
+                        visible={isLast}
+                        createdAt={msg.createdAt}
+                        completedAt={msg.completedAt}
+                        onForkCompare={isUser && msg.serverMessageId ? () => onForkCompare?.(msg.serverMessageId!) : undefined}
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {/* 右侧：用户头像 / AI复选框 */}
+                <div className="mt-1 w-7 shrink-0">
+                  {isUser && !selectMode && (
+                    <div className="w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center">
+                      <User className="w-4 h-4 text-text-secondary" />
+                    </div>
+                  )}
+                  {!isUser && selectMode && (
+                    <button
+                      onClick={() => toggleSelect(msg.id)}
+                      className={cn(
+                        "w-5 h-5 rounded-md border flex items-center justify-center transition-colors",
+                        isSelected
+                          ? "bg-brand border-brand text-white"
+                          : "border-surface-border text-transparent hover:border-brand/50"
+                      )}
+                    >
+                      {isSelected && <SquareCheck className="w-3.5 h-3.5" />}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           );
-        })}
-
-        {isLoading && messages[messages.length - 1]?.role !== "assistant" && (
-          <div className="flex gap-3 animate-message-appear">
-            <div className="mt-1 w-7 shrink-0">
-              <div className="w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center">
-                <Bot className="w-4 h-4 text-text-secondary" />
-              </div>
-            </div>
-            <div className="flex-1 flex justify-start">
-              <div className="bg-[#F5F4F2] dark:bg-[#1F1F1F] rounded-2xl rounded-bl-sm px-4 py-3 flex items-center">
-                <div className="flex items-center gap-1.5 text-sm text-text-secondary">
-                  {isComplexTask && (
-                    <span className="inline-flex items-center gap-0.5">
-                      <WaveText text="深度推理中，片刻即达极致答案" />
-                      <ThinkingDots />
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className="mt-1 w-7 shrink-0" />
-          </div>
-        )}
-
-        <div ref={bottomRef} />
-      </div>
-      </div>
+        }}
+      />
 
       {/* 回到底部按钮 */}
-      {showScrollButton && (
+      {!atBottom && (
         <button
           type="button"
-          onClick={() => scrollToBottom("smooth")}
+          onClick={() => {
+            stickToBottomRef.current = true;
+            scrollToBottom();
+          }}
           className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 flex items-center justify-center w-10 h-10 rounded-full
             bg-surface-elevated border border-surface-border text-text-secondary
             shadow-lg hover:bg-surface-card hover:text-text-primary transition-colors"

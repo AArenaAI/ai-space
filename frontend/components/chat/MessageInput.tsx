@@ -116,8 +116,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
-    el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 200) + "px";
+    el.style.height = "62px";
   }, [content]);
 
   // 轮询更新文件解析状态
@@ -189,7 +188,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     setAttachedFiles([]);
     setToolsOpen(false);
     if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = "62px";
     }
   };
 
@@ -371,7 +370,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
 
   return (
     <div className="shrink-0 px-4 pb-6 pt-2">
-      <form onSubmit={handleSubmit} className="max-w-[800px] mx-auto">
+      <form onSubmit={handleSubmit} className="max-w-[800px] mx-auto h-[118px]">
         { /* 上方面板：对比 + 附件按钮 */ }
         <div className="flex items-center gap-2 mb-2">
           {/* 对比模式开关 */}
@@ -436,7 +435,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           className={cn(
-            "relative flex flex-col rounded-2xl border transition-all duration-300",
+            "relative flex h-[86px] flex-col overflow-hidden rounded-2xl border transition-all duration-300",
             "bg-surface-card",
             dragOver
               ? "border-brand/60 border-dashed shadow-[0_0_0_1px_rgba(59,130,246,0.15),0_0_20px_rgba(59,130,246,0.1)]"
@@ -456,7 +455,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
           )}
           {/* 文件附件标签 */}
           {attachedFiles.length > 0 && (
-            <div className="flex flex-wrap gap-2 px-4 pt-2">
+            <div className="absolute left-3 right-3 top-2 z-10 flex max-h-8 flex-wrap gap-2 overflow-hidden">
               {attachedFiles.map((file, idx) => {
                 const status = file.parse_status || "pending";
                 const statusConfig: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
@@ -507,7 +506,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
             onKeyDown={handleKeyDown}
             placeholder="问点什么..."
             rows={1}
-            className="w-full resize-none bg-transparent px-4 pt-3.5 pb-2 text-[15px] outline-none placeholder:text-text-tertiary min-h-[62px] max-h-[260px] leading-relaxed"
+            className="w-full h-[62px] resize-none overflow-y-auto bg-transparent px-4 pt-3.5 pb-2 text-[15px] outline-none placeholder:text-text-tertiary leading-relaxed"
           />
 
           <div className="flex items-center justify-between px-3 pb-3">

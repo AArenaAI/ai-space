@@ -7,8 +7,10 @@ import {
   ChevronDown,
   Copy,
   Download,
+  History,
   Layers,
   Loader2,
+  MessageSquarePlus,
   Music,
   Plus,
   RefreshCw,
@@ -22,8 +24,10 @@ import { cn } from "@/lib/utils";
 import { useVideo, VideoGeneration } from "@/hooks/useVideo";
 import { useVideoModels } from "@/hooks/useModels";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import HistoryDrawer from "@/components/ui/HistoryDrawer";
 
 const ASPECT_RATIOS = [
+  { value: "auto", label: "Auto", w: 1, h: 1 },
   { value: "1:1", label: "1:1", w: 1, h: 1 },
   { value: "4:3", label: "4:3", w: 4, h: 3 },
   { value: "3:4", label: "3:4", w: 3, h: 4 },
@@ -112,7 +116,7 @@ function VideoChatPageInner() {
   const [prompt, setPrompt] = useState("");
   const [referenceImages, setReferenceImages] = useState<string[]>([]);
   const [uploadingRef, setUploadingRef] = useState(false);
-  const [selectedAspectRatio, setSelectedAspectRatio] = useState(searchParams.get("aspect") || "16:9");
+  const [selectedAspectRatio, setSelectedAspectRatio] = useState(searchParams.get("aspect") || "auto");
   const [selectedDuration, setSelectedDuration] = useState(searchParams.get("duration") || "4s");
   const [musicEnabled, setMusicEnabled] = useState(searchParams.get("audio") === "1");
   const [selectedModel, setSelectedModel] = useState(searchParams.get("model") || "");
@@ -120,6 +124,7 @@ function VideoChatPageInner() {
   const [aspectMenuOpen, setAspectMenuOpen] = useState(false);
   const [durationMenuOpen, setDurationMenuOpen] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
@@ -128,7 +133,7 @@ function VideoChatPageInner() {
   const shouldAutoScrollRef = useRef(true);
 
   const selectedModelInfo = videoModels.find((m) => m.id === selectedModel) || videoModels[0];
-  const selectedAspect = ASPECT_RATIOS.find((item) => item.value === selectedAspectRatio) || ASPECT_RATIOS[3];
+  const selectedAspect = ASPECT_RATIOS.find((item) => item.value === selectedAspectRatio) || ASPECT_RATIOS[0];
   const hasContent = prompt.trim().length > 0;
 
   useEffect(() => {
@@ -294,6 +299,29 @@ function VideoChatPageInner() {
     }
   };
 
+  const handleNewChat = () => {
+    setDisplayMessages([]);
+    setPrompt("");
+    setReferenceImages([]);
+    setDeleteTargetId(null);
+    router.replace("/video/chat");
+    setShowHistory(false);
+  };
+
+  const handleSelectVideo = (id: number) => {
+    const video = videos.find((v) => v.id === id);
+    if (!video) return;
+    setDisplayMessages(videoToMessages(video));
+    setPrompt("");
+    setReferenceImages([]);
+    setSelectedModel(video.model);
+    setSelectedAspectRatio(video.ratio);
+    setSelectedDuration(`${video.duration}s`);
+    setMusicEnabled(video.generate_audio);
+    router.replace(`/video/chat?videoId=${video.id}`);
+    setShowHistory(false);
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-surface">
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileSelect} />
@@ -434,6 +462,24 @@ function VideoChatPageInner() {
               referenceImages.length > 0 ? "border-brand/20 focus-within:border-brand/40" : "border-surface-border focus-within:border-brand/30"
             )}
           >
+            {/* 右上角按钮：历史记录 + 新建会话 */}
+            <div className="absolute top-2 right-2 flex items-center gap-1 z-10">
+              <button
+                onClick={() => setShowHistory((s) => !s)}
+                className="w-7 h-7 rounded-lg flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
+                title="历史记录"
+              >
+                <History className="w-4 h-4" />
+              </button>
+              <button
+                onClick={handleNewChat}
+                className="w-7 h-7 rounded-lg flex items-center justify-center text-brand hover:text-brand-hover hover:bg-brand/10 transition-colors"
+                title="新建会话"
+              >
+                <MessageSquarePlus className="w-4 h-4" />
+              </button>
+            </div>
+
             <div className="flex items-start gap-3 px-4 pt-3 pb-2">
               <div className="mt-1">
                 {referenceImages.length === 0 ? (
@@ -619,6 +665,30 @@ function VideoChatPageInner() {
           </div>
         </div>
       </div>
+
+      {/* 历史记录面板 */}
+      <HistoryDrawer
+        isOpen={showHistory}
+        onClose={() => setShowHistory(false)}
+        title="AI视频历史"
+        items={videos.map((v) => ({
+          id: v.id,
+          title: v.prompt,
+          active: displayMessages.some((m) => m.video?.id === v.id),
+          updated_at: v.updated_at,
+          cover_image: v.video_url,
+          source: "video" as const,
+          status: v.status,
+        }))}
+        onSelect={handleSelectVideo}
+        onNew={handleNewChat}
+        onDelete={(id) => {
+          setDeleteTargetId(id);
+          setShowHistory(false);
+        }}
+        loading={false}
+        type="image"
+      />
 
       <ConfirmDialog
         isOpen={deleteTargetId !== null}

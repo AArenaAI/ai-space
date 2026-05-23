@@ -268,7 +268,7 @@ export default function ImagePage() {
   const { models: videoModels } = useVideoModels();
   const { videos, generating: videoGenerating, generateVideo, currentVideo, deleteVideo } = useVideo();
   const [prompt, setPrompt] = useState("");
-  const [selectedAspectRatio, setSelectedAspectRatio] = useState("1:1");
+  const [selectedAspectRatio, setSelectedAspectRatio] = useState("auto");
   const [selectedResolution, setSelectedResolution] = useState("1K");
   const [selectedModel, setSelectedModel] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -304,7 +304,7 @@ export default function ImagePage() {
   }, [fetchChats]);
 
   const currentModel = imageModels.find((m) => m.id === selectedModel) || imageModels[0];
-  const currentAspect = ASPECT_RATIOS.find((a) => a.value === selectedAspectRatio) || ASPECT_RATIOS[1];
+  const currentAspect = ASPECT_RATIOS.find((a) => a.value === selectedAspectRatio) || ASPECT_RATIOS[0];
 
   const hasContent = prompt.trim().length > 0;
 
@@ -1158,157 +1158,270 @@ function ImageCard({
 interface GalleryItem {
   prompt: string;
   imageUrl: string;
+  fullImageUrl: string;
+  width: number;
+  height: number;
 }
 
 const GALLERY_ITEMS: GalleryItem[] = [
   {
     prompt: "nostalgic backrooms aesthetic",
-    imageUrl: "/examples/discover/nostalgic-backrooms-aesthetic.png",
+    imageUrl: "/examples/discover/thumbs/nostalgic-backrooms-aesthetic.webp",
+    fullImageUrl: "/examples/discover/full/nostalgic-backrooms-aesthetic.webp",
+    width: 640,
+    height: 427,
   },
   {
     prompt: "holy cathedral of light",
-    imageUrl: "/examples/discover/holy-cathedral-of-light.png",
+    imageUrl: "/examples/discover/thumbs/holy-cathedral-of-light.webp",
+    fullImageUrl: "/examples/discover/full/holy-cathedral-of-light.webp",
+    width: 640,
+    height: 960,
   },
   {
     prompt: "early 2000s mall photography",
-    imageUrl: "/examples/discover/early-2000s-mall-photography.png",
+    imageUrl: "/examples/discover/thumbs/early-2000s-mall-photography.webp",
+    fullImageUrl: "/examples/discover/full/early-2000s-mall-photography.webp",
+    width: 640,
+    height: 480,
   },
   {
     prompt: "2003 internet aesthetic",
-    imageUrl: "/examples/discover/2003-internet-aesthetic.png",
+    imageUrl: "/examples/discover/thumbs/2003-internet-aesthetic.webp",
+    fullImageUrl: "/examples/discover/full/2003-internet-aesthetic.webp",
+    width: 640,
+    height: 640,
   },
   {
     prompt: "luxury lifestyle photography",
-    imageUrl: "/examples/discover/luxury-lifestyle-photography.png",
+    imageUrl: "/examples/discover/thumbs/luxury-lifestyle-photography.webp",
+    fullImageUrl: "/examples/discover/full/luxury-lifestyle-photography.webp",
+    width: 640,
+    height: 640,
   },
   {
     prompt: "cinematic lighting",
-    imageUrl: "/examples/discover/cinematic-lighting.png",
+    imageUrl: "/examples/discover/thumbs/cinematic-lighting.webp",
+    fullImageUrl: "/examples/discover/full/cinematic-lighting.webp",
+    width: 640,
+    height: 640,
   },
   {
     prompt: "japanese street fashion editorial",
-    imageUrl: "/examples/discover/japanese-street-fashion-editorial.png",
+    imageUrl: "/examples/discover/thumbs/japanese-street-fashion-editorial.webp",
+    fullImageUrl: "/examples/discover/full/japanese-street-fashion-editorial.webp",
+    width: 640,
+    height: 960,
   },
   {
     prompt: "xianxia fantasy world",
-    imageUrl: "/examples/discover/xianxia-fantasy-world.png",
+    imageUrl: "/examples/discover/thumbs/xianxia-fantasy-world.webp",
+    fullImageUrl: "/examples/discover/full/xianxia-fantasy-world.webp",
+    width: 640,
+    height: 960,
   },
   {
     prompt: "dreamy pastel world",
-    imageUrl: "/examples/discover/dreamy-pastel-world.png",
+    imageUrl: "/examples/discover/thumbs/dreamy-pastel-world.webp",
+    fullImageUrl: "/examples/discover/full/dreamy-pastel-world.webp",
+    width: 640,
+    height: 427,
   },
   {
     prompt: "abstract liquid metal art",
-    imageUrl: "/examples/discover/abstract-liquid-metal-art.png",
+    imageUrl: "/examples/discover/thumbs/abstract-liquid-metal-art.webp",
+    fullImageUrl: "/examples/discover/full/abstract-liquid-metal-art.webp",
+    width: 640,
+    height: 960,
   },
   {
     prompt: "boss fight cinematic screenshot",
-    imageUrl: "/examples/discover/boss-fight-cinematic-screenshot.png",
+    imageUrl: "/examples/discover/thumbs/boss-fight-cinematic-screenshot.webp",
+    fullImageUrl: "/examples/discover/full/boss-fight-cinematic-screenshot.webp",
+    width: 640,
+    height: 640,
   },
   {
     prompt: "minimalist movie poster",
-    imageUrl: "/examples/discover/minimalist-movie-poster.png",
+    imageUrl: "/examples/discover/thumbs/minimalist-movie-poster.webp",
+    fullImageUrl: "/examples/discover/full/minimalist-movie-poster.webp",
+    width: 640,
+    height: 427,
   },
   {
     prompt: "procedural low poly sandbox world editor, floating islands connected by bridges, modular buildings, stylized terrain blocks, colorful biomes, tiny civilization, cute fantasy structures, cinematic lighting, world-building showcase, voxel-inspired low poly aesthetic, clean geometry, miniature simulation world, god game perspective",
-    imageUrl: "/examples/discover/low-poly-sandbox-world-editor.png",
+    imageUrl: "/examples/discover/thumbs/low-poly-sandbox-world-editor.webp",
+    fullImageUrl: "/examples/discover/full/low-poly-sandbox-world-editor.webp",
+    width: 640,
+    height: 640,
   },
   {
     prompt: "moody black and white photography",
-    imageUrl: "/examples/discover/moody-black-and-white-photography.png",
+    imageUrl: "/examples/discover/thumbs/moody-black-and-white-photography.webp",
+    fullImageUrl: "/examples/discover/full/moody-black-and-white-photography.webp",
+    width: 640,
+    height: 640,
   },
   {
     prompt: "cute anime cafe aesthetic",
-    imageUrl: "/examples/discover/cute-anime-cafe-aesthetic.png",
+    imageUrl: "/examples/discover/thumbs/cute-anime-cafe-aesthetic.webp",
+    fullImageUrl: "/examples/discover/full/cute-anime-cafe-aesthetic.webp",
+    width: 640,
+    height: 640,
   },
   {
     prompt: "Japan Travel Route Map",
-    imageUrl: "/examples/discover/japan-travel-route-map.png",
+    imageUrl: "/examples/discover/thumbs/japan-travel-route-map.webp",
+    fullImageUrl: "/examples/discover/full/japan-travel-route-map.webp",
+    width: 640,
+    height: 640,
   },
   {
     prompt: "Create a one-page action comic story.",
-    imageUrl: "/examples/discover/one-page-action-comic-story.png",
+    imageUrl: "/examples/discover/thumbs/one-page-action-comic-story.webp",
+    fullImageUrl: "/examples/discover/full/one-page-action-comic-story.webp",
+    width: 640,
+    height: 640,
   },
   {
     prompt: "Help me design an anime character.",
-    imageUrl: "/examples/discover/anime-character-design.png",
+    imageUrl: "/examples/discover/thumbs/anime-character-design.webp",
+    fullImageUrl: "/examples/discover/full/anime-character-design.webp",
+    width: 640,
+    height: 640,
   },
   {
     prompt: "Douyin app live streaming interface",
-    imageUrl: "/examples/discover/douyin-live-streaming-interface.png",
+    imageUrl: "/examples/discover/thumbs/douyin-live-streaming-interface.webp",
+    fullImageUrl: "/examples/discover/full/douyin-live-streaming-interface.webp",
+    width: 640,
+    height: 640,
   },
   {
     prompt: "Music app user interface",
-    imageUrl: "/examples/discover/music-app-user-interface.png",
+    imageUrl: "/examples/discover/thumbs/music-app-user-interface.webp",
+    fullImageUrl: "/examples/discover/full/music-app-user-interface.webp",
+    width: 640,
+    height: 640,
   },
   {
     prompt: "A well-dressed businessman in suit sitting at cozy coffee shop, working on laptop, sunlight streaming through window, warm tones, 4k photorealistic",
-    imageUrl: "https://images.unsplash.com/photo-1600880292203-757bb62b4baf?w=600&h=400&fit=crop&crop=face",
+    imageUrl: "/examples/discover/thumbs/a-well-dressed-businessman-in-suit-sitting-at-cozy-coffee-shop-w.webp",
+    fullImageUrl: "/examples/discover/full/a-well-dressed-businessman-in-suit-sitting-at-cozy-coffee-shop-w.webp",
+    width: 600,
+    height: 400,
   },
   {
     prompt: "Mountain landscape at sunset, dramatic sky, clouds painted in orange and pink, pine trees silhouette, cinematic, National Geographic style",
-    imageUrl: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=600&h=300&fit=crop&crop=entropy",
+    imageUrl: "/examples/discover/thumbs/mountain-landscape-at-sunset-dramatic-sky-clouds-painted-in-oran.webp",
+    fullImageUrl: "/examples/discover/full/mountain-landscape-at-sunset-dramatic-sky-clouds-painted-in-oran.webp",
+    width: 600,
+    height: 300,
   },
   {
     prompt: "Fluffy white cat sitting on a wooden table, green eyes, soft natural lighting, shallow depth of field, ultra realistic",
-    imageUrl: "https://images.unsplash.com/photo-1513360371669-4adf3dd7dff8?w=600&h=700&fit=crop&crop=face",
+    imageUrl: "/examples/discover/thumbs/fluffy-white-cat-sitting-on-a-wooden-table-green-eyes-soft-natur.webp",
+    fullImageUrl: "/examples/discover/full/fluffy-white-cat-sitting-on-a-wooden-table-green-eyes-soft-natur.webp",
+    width: 600,
+    height: 700,
   },
   {
     prompt: "Delicious gourmet burger with fresh ingredients, sesame bun, melted cheese, crispy bacon, food photography, mouth-watering detail",
-    imageUrl: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600&h=400&fit=crop&crop=entropy",
+    imageUrl: "/examples/discover/thumbs/delicious-gourmet-burger-with-fresh-ingredients-sesame-bun-melte.webp",
+    fullImageUrl: "/examples/discover/full/delicious-gourmet-burger-with-fresh-ingredients-sesame-bun-melte.webp",
+    width: 600,
+    height: 400,
   },
   {
     prompt: "Abstract geometric shapes with vibrant neon colors, 3D rendered art, smooth gradients on dark background, modern aesthetic",
-    imageUrl: "https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=600&h=600&fit=crop&crop=entropy",
+    imageUrl: "/examples/discover/thumbs/abstract-geometric-shapes-with-vibrant-neon-colors-3d-rendered-a.webp",
+    fullImageUrl: "/examples/discover/full/abstract-geometric-shapes-with-vibrant-neon-colors-3d-rendered-a.webp",
+    width: 600,
+    height: 600,
   },
   {
     prompt: "Ethereal fantasy forest with glowing mushrooms, ancient trees wrapped in vines, magical blue particles floating in mist, moonlight beams",
-    imageUrl: "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=600&h=750&fit=crop&crop=entropy",
+    imageUrl: "/examples/discover/thumbs/ethereal-fantasy-forest-with-glowing-mushrooms-ancient-trees-wra.webp",
+    fullImageUrl: "/examples/discover/full/ethereal-fantasy-forest-with-glowing-mushrooms-ancient-trees-wra.webp",
+    width: 600,
+    height: 750,
   },
   {
     prompt: "Modern minimalist interior design, open concept living room with large windows, neutral colors, warm wood accents, architectural digest style",
-    imageUrl: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=600&h=350&fit=crop&crop=entropy",
+    imageUrl: "/examples/discover/thumbs/modern-minimalist-interior-design-open-concept-living-room-with.webp",
+    fullImageUrl: "/examples/discover/full/modern-minimalist-interior-design-open-concept-living-room-with.webp",
+    width: 600,
+    height: 350,
   },
-  // ── 新增模板 8-20 ──
   {
     prompt: "Japanese cherry blossom trees along a riverside path at spring, petals falling in wind, soft pink tones, anime style, Studio Ghibli aesthetic",
-    imageUrl: "https://images.unsplash.com/photo-1522383225653-ed111181a951?w=600&h=450&fit=crop&crop=entropy",
+    imageUrl: "/examples/discover/thumbs/japanese-cherry-blossom-trees-along-a-riverside-path-at-spring-p.webp",
+    fullImageUrl: "/examples/discover/full/japanese-cherry-blossom-trees-along-a-riverside-path-at-spring-p.webp",
+    width: 600,
+    height: 450,
   },
   {
     prompt: "Majestic wolf standing on a rocky cliff under full moon, howling at the night sky, dramatic lighting, dark fantasy, ultra detailed",
-    imageUrl: "https://images.unsplash.com/photo-1568572933382-74d440642117?w=600&h=480&fit=crop&crop=entropy",
+    imageUrl: "/examples/discover/thumbs/majestic-wolf-standing-on-a-rocky-cliff-under-full-moon-howling.webp",
+    fullImageUrl: "/examples/discover/full/majestic-wolf-standing-on-a-rocky-cliff-under-full-moon-howling.webp",
+    width: 600,
+    height: 480,
   },
   {
     prompt: "Vibrant underwater coral reef with tropical fish swimming through sun rays, crystal clear water, ocean photography, National Geographic",
-    imageUrl: "https://images.unsplash.com/photo-1546026423-cc4642628d2b?w=600&h=400&fit=crop&crop=entropy",
+    imageUrl: "/examples/discover/thumbs/vibrant-underwater-coral-reef-with-tropical-fish-swimming-throug.webp",
+    fullImageUrl: "/examples/discover/full/vibrant-underwater-coral-reef-with-tropical-fish-swimming-throug.webp",
+    width: 600,
+    height: 400,
   },
   {
     prompt: "A cup of matcha latte with beautiful latte art on a wooden table, morning sunlight, cozy cafe atmosphere, food photography, macro detail",
-    imageUrl: "https://images.unsplash.com/photo-1536256263959-770b48d82b0a?w=600&h=450&fit=crop&crop=entropy",
+    imageUrl: "/examples/discover/thumbs/a-cup-of-matcha-latte-with-beautiful-latte-art-on-a-wooden-table.webp",
+    fullImageUrl: "/examples/discover/full/a-cup-of-matcha-latte-with-beautiful-latte-art-on-a-wooden-table.webp",
+    width: 600,
+    height: 450,
   },
   {
     prompt: "Neon-lit Tokyo street at night, rain reflecting colorful signs, crowded crosswalk, cyberpunk aesthetic, vaporwave tones, cinematic shot",
-    imageUrl: "https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?w=600&h=400&fit=crop&crop=entropy",
+    imageUrl: "/examples/discover/thumbs/neon-lit-tokyo-street-at-night-rain-reflecting-colorful-signs-cr.webp",
+    fullImageUrl: "/examples/discover/full/neon-lit-tokyo-street-at-night-rain-reflecting-colorful-signs-cr.webp",
+    width: 600,
+    height: 400,
   },
   {
     prompt: "Elegant glass skyscraper architecture against blue sky, modern cityscape, geometric patterns, corporate photography, sharp details",
-    imageUrl: "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=600&h=500&fit=crop&crop=entropy",
+    imageUrl: "/examples/discover/thumbs/elegant-glass-skyscraper-architecture-against-blue-sky-modern-ci.webp",
+    fullImageUrl: "/examples/discover/full/elegant-glass-skyscraper-architecture-against-blue-sky-modern-ci.webp",
+    width: 600,
+    height: 500,
   },
   {
     prompt: "Vintage motorcycle parked on a desert road at sunset, long shadows, warm golden tones, retro aesthetic, adventure vibe, cinematic wide shot",
-    imageUrl: "https://images.unsplash.com/photo-1558981806-ec527fa84c39?w=600&h=380&fit=crop&crop=entropy",
+    imageUrl: "/examples/discover/thumbs/vintage-motorcycle-parked-on-a-desert-road-at-sunset-long-shadow.webp",
+    fullImageUrl: "/examples/discover/full/vintage-motorcycle-parked-on-a-desert-road-at-sunset-long-shadow.webp",
+    width: 600,
+    height: 380,
   },
   {
     prompt: "Close-up of a hummingbird hovering near a pink flower, wings frozen in motion, green bokeh background, macro wildlife photography, high speed",
-    imageUrl: "https://images.unsplash.com/photo-1552728089-57bdde30beb3?w=600&h=600&fit=crop&crop=face",
+    imageUrl: "/examples/discover/thumbs/close-up-of-a-hummingbird-hovering-near-a-pink-flower-wings-froz.webp",
+    fullImageUrl: "/examples/discover/full/close-up-of-a-hummingbird-hovering-near-a-pink-flower-wings-froz.webp",
+    width: 600,
+    height: 600,
   },
   {
     prompt: "Luxury bedroom interior with large windows overlooking ocean, white curtains flowing in breeze, king size bed, resort style, serene atmosphere",
-    imageUrl: "https://images.unsplash.com/photo-1618773928121-c32242e63f39?w=600&h=420&fit=crop&crop=entropy",
+    imageUrl: "/examples/discover/thumbs/luxury-bedroom-interior-with-large-windows-overlooking-ocean-whi.webp",
+    fullImageUrl: "/examples/discover/full/luxury-bedroom-interior-with-large-windows-overlooking-ocean-whi.webp",
+    width: 600,
+    height: 420,
   },
   {
     prompt: "Crystal clear mountain lake reflecting snowy peaks at dawn, calm water mirror image, pine forest shoreline, peaceful nature landscape, wide angle",
-    imageUrl: "https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=600&h=400&fit=crop&crop=entropy",
+    imageUrl: "/examples/discover/thumbs/crystal-clear-mountain-lake-reflecting-snowy-peaks-at-dawn-calm.webp",
+    fullImageUrl: "/examples/discover/full/crystal-clear-mountain-lake-reflecting-snowy-peaks-at-dawn-calm.webp",
+    width: 600,
+    height: 400,
   },
 ];
 
@@ -1327,8 +1440,12 @@ function ExampleGallery({ onUsePrompt }: { onUsePrompt: (prompt: string) => void
               <img
                 src={item.imageUrl}
                 alt={item.prompt}
+                width={item.width}
+                height={item.height}
                 className="w-full h-auto block transition-transform duration-300 group-hover:scale-105"
-                loading="lazy"
+                loading={i < 8 ? "eager" : "lazy"}
+                fetchPriority={i < 8 ? "high" : "auto"}
+                decoding="async"
                 onError={(e) => {
                   (e.target as HTMLImageElement).style.display = 'none';
                 }}
