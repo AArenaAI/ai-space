@@ -17,14 +17,16 @@ import (
 type ImageChatHandler struct {
 	db           *gorm.DB
 	imageService *services.ImageService
+	videoService *services.VideoService
 	cfg          *config.Config
 	usageService *services.UsageService
 }
 
-func NewImageChatHandler(db *gorm.DB, imageService *services.ImageService, cfg *config.Config, usageService *services.UsageService) *ImageChatHandler {
+func NewImageChatHandler(db *gorm.DB, imageService *services.ImageService, videoService *services.VideoService, cfg *config.Config, usageService *services.UsageService) *ImageChatHandler {
 	return &ImageChatHandler{
 		db:           db,
 		imageService: imageService,
+		videoService: videoService,
 		cfg:          cfg,
 		usageService: usageService,
 	}
@@ -78,19 +80,31 @@ func (h *ImageChatHandler) ListImageChats(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"chats": result})
 }
 
-// CreateImageChat 创建新会话并可选发送第一条消息生成图片
+// CreateImageChat 创建新会话并可选发送第一条消息生成图片/视频
 func (h *ImageChatHandler) CreateImageChat(c *gin.Context) {
 	userID := getUserID(c)
 	var req struct {
-		Prompt      string   `json:"prompt"`
-		AspectRatio string   `json:"aspect_ratio"`
-		Resolution  string   `json:"resolution"`
-		Quality     string   `json:"quality"`
-		RefImages   []string `json:"reference_image_urls"`
+		Prompt            string   `json:"prompt"`
+		AspectRatio       string   `json:"aspect_ratio"`
+		Resolution        string   `json:"resolution"`
+		Quality           string   `json:"quality"`
+		RefImages         []string `json:"reference_image_urls"`
+		MediaType         string   `json:"media_type"`
+		Model             string   `json:"model"`
+		Duration          int64    `json:"duration"`
+		GenerateAudio     bool     `json:"generate_audio"`
+		Watermark         bool     `json:"watermark"`
+		ReferenceVideos   []string `json:"reference_video_urls"`
+		ReferenceAudios   []string `json:"reference_audio_urls"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+
+	mediaType := req.MediaType
+	if mediaType == "" {
+		mediaType = "image"
 	}
 
 	// 创建会话
@@ -120,29 +134,36 @@ func (h *ImageChatHandler) CreateImageChat(c *gin.Context) {
 		h.db.Create(&userMsg)
 
 		assistantMsg := models.ImageChatMessage{
-			ChatID:  chat.ID,
-			Role:    "assistant",
-			Content: req.Prompt,
-			Status:  "pending",
+			ChatID:    chat.ID,
+			Role:      "assistant",
+			Content:   req.Prompt,
+			Status:    "pending",
+			MediaType: mediaType,
+			Model:     req.Model,
+			Duration:  int(req.Duration),
+			GenerateAudio: req.GenerateAudio,
+			Watermark: req.Watermark,
 		}
 		h.db.Create(&assistantMsg)
 
-		size := resolveSizeFromReq(req.AspectRatio, req.Resolution)
-		quality := req.Quality
-		if quality == "" {
-			quality = "medium"
-		}
-
-		// 解析参考图路径
-		var refPaths []string
-		for _, url := range req.RefImages {
-			if p := resolveRefImagePath(h.db, url); p != "" {
-				refPaths = append(refPaths, p)
-			}
-		}
-
 		baseURL := resolveBaseURL(c, h.cfg)
-		go h.processImageChatJob(assistantMsg.ID, req.Prompt, size, quality, refPaths, baseURL, chat.ID)
+
+		if mediaType == "video" {
+			go h.processVideoChatJob(assistantMsg.ID, req.Prompt, req.Model, req.AspectRatio, req.Duration, req.GenerateAudio, req.Watermark, req.RefImages, req.ReferenceVideos, req.ReferenceAudios, baseURL, chat.ID)
+		} else {
+			size := resolveSizeFromReq(req.AspectRatio, req.Resolution)
+			quality := req.Quality
+			if quality == "" {
+				quality = "medium"
+			}
+			var refPaths []string
+			for _, url := range req.RefImages {
+				if p := resolveRefImagePath(h.db, url); p != "" {
+					refPaths = append(refPaths, p)
+				}
+			}
+			go h.processImageChatJob(assistantMsg.ID, req.Prompt, size, quality, refPaths, baseURL, chat.ID)
+		}
 	}
 
 	c.JSON(http.StatusOK, chat)

@@ -180,7 +180,8 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		authorized.DELETE("/images/:id", imageHandler.DeleteImage)
 
 		// 图片会话路由
-		imageChatHandler := NewImageChatHandler(db, imageService, cfg, usageService)
+		videoService := services.NewVideoService(cfg.VolcengineAPIKey, cfg.VolcengineBaseURL)
+		imageChatHandler := NewImageChatHandler(db, imageService, videoService, cfg, usageService)
 		imageChatHandler.AutoMigrate()
 		authorized.GET("/image-chats", imageChatHandler.ListImageChats)
 		authorized.POST("/image-chats", imageChatHandler.CreateImageChat)
