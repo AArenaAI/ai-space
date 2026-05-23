@@ -129,12 +129,17 @@ function StreamingText({ messageId, content, isStreaming, className }: { message
   const streamText = useMessageStream(messageId, isStreaming);
   const effectiveText = isStreaming ? (streamText || content) : content;
   const hasThinkTag = effectiveText.includes("<think>");
+  const fullParsed = parseThinkContent(effectiveText);
   const displayedText = useSmoothStreaming(effectiveText, isStreaming && !hasThinkTag);
+  const displayedReasoning = useSmoothStreaming(fullParsed.reasoning || "", isStreaming && hasThinkTag);
+  const displayedAnswer = useSmoothStreaming(fullParsed.answer, isStreaming && hasThinkTag);
 
-  // 含 <think> 的消息必须用完整实时内容解析边界，不能先做打字机截断；
+  // 含 <think> 的消息必须用完整实时内容解析边界，不能先做整段打字机截断；
   // 否则 </think> 尚未显示时正文会被临时归入思考块。
-  // 也不能拆成 reasoning/answer 两个打字机，否则两个动画追赶状态会不同步产生闪回。
-  const parsed = parseThinkContent(hasThinkTag ? effectiveText : displayedText);
+  // 解析出 reasoning / answer 后分别做打字机，让思考块和正文都逐字显示。
+  const parsed = hasThinkTag
+    ? { ...fullParsed, reasoning: fullParsed.reasoning === null ? null : displayedReasoning, answer: displayedAnswer }
+    : parseThinkContent(displayedText);
   const hasReason = !!parsed.reasoning;
   const hasContent = !!parsed.answer.trim();
 
