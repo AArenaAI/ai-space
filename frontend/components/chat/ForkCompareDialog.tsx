@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Columns2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { useI18n } from "@/lib/i18n";
 
 interface ChatModel {
   id: string;
@@ -20,6 +21,7 @@ interface ForkCompareDialogProps {
 }
 
 export default function ForkCompareDialog({ open, onClose, models, currentModelId, onConfirm }: ForkCompareDialogProps) {
+  const { t } = useI18n();
   const [selected, setSelected] = useState<string[]>([]);
 
   if (!open) return null;
@@ -30,7 +32,7 @@ export default function ForkCompareDialog({ open, onClose, models, currentModelI
         return prev.filter((m) => m !== id);
       }
       if (prev.length >= 3) {
-        toast.warning("最多选择3个模型");
+        toast.warning(t("chat.compareMaxModels"));
         return prev;
       }
       return [...prev, id];
@@ -39,7 +41,7 @@ export default function ForkCompareDialog({ open, onClose, models, currentModelI
 
   const handleConfirm = () => {
     if (selected.length === 0) {
-      toast.error("请至少选择一个模型");
+      toast.error(t("chat.compareSelectOne"));
       return;
     }
     onConfirm(selected);
@@ -56,7 +58,7 @@ export default function ForkCompareDialog({ open, onClose, models, currentModelI
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Columns2 className="w-5 h-5 text-brand" />
-            <h3 className="text-base font-semibold text-text-primary">选择对比模型</h3>
+            <h3 className="text-base font-semibold text-text-primary">{t("chat.selectCompareModels")}</h3>
           </div>
           <button onClick={onClose} className="p-1 rounded-md hover:bg-surface-card text-text-tertiary">
             <X className="w-4 h-4" />
@@ -64,7 +66,7 @@ export default function ForkCompareDialog({ open, onClose, models, currentModelI
         </div>
 
         <p className="text-sm text-text-secondary mb-4">
-          选择要与当前模型对比的其他模型（最多3个）
+          {t("chat.selectCompareModelsDesc")}
         </p>
 
         <div className="space-y-2 max-h-64 overflow-y-auto">
@@ -92,7 +94,7 @@ export default function ForkCompareDialog({ open, onClose, models, currentModelI
                   {model.name.slice(0, 1).toUpperCase()}
                 </div>
                 <span className="text-sm text-text-primary flex-1">{model.name}</span>
-                {isCurrent && <span className="text-xs text-text-tertiary">当前</span>}
+                {isCurrent && <span className="text-xs text-text-tertiary">{t("chat.current")}</span>}
                 {isSelected && !isCurrent && (
                   <div className="w-5 h-5 rounded-full bg-brand flex items-center justify-center">
                     <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
@@ -110,7 +112,7 @@ export default function ForkCompareDialog({ open, onClose, models, currentModelI
             onClick={onClose}
             className="flex-1 px-4 py-2.5 rounded-xl border border-surface-border text-sm text-text-secondary hover:bg-surface-card transition-colors"
           >
-            取消
+            {t("common.cancel")}
           </button>
           <button
             onClick={handleConfirm}
@@ -122,7 +124,7 @@ export default function ForkCompareDialog({ open, onClose, models, currentModelI
                 : "bg-surface-card text-text-tertiary cursor-not-allowed"
             )}
           >
-            开始对比
+            {t("chat.startCompare")}
           </button>
         </div>
       </div>

@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import ImageLightbox from "@/components/ui/ImageLightbox";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import NoticeDialog from "@/components/ui/NoticeDialog";
 import HistoryDrawer from "@/components/ui/HistoryDrawer";
 
 const ASPECT_RATIOS = [
@@ -129,6 +130,7 @@ function ImageChatPageInner() {
   const [referenceImages, setReferenceImages] = useState<string[]>([]);
   const [uploadingRef, setUploadingRef] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [limitDialogOpen, setLimitDialogOpen] = useState(false);
   const [chatId, setChatId] = useState<number | null>(null);
   const [pollingChatId, setPollingChatId] = useState<number | null>(null);
   const [selectedAspectRatio, setSelectedAspectRatio] = useState("auto");
@@ -277,7 +279,12 @@ function ImageChatPageInner() {
       setPrompt("");
       setReferenceImages([]);
     } catch (err: any) {
-      toast.error(err.message || "发送失败");
+      const msg = err.message || "发送失败";
+      if (msg.includes("历史记录只能保存")) {
+        setLimitDialogOpen(true);
+      } else {
+        toast.error(msg);
+      }
       setIsGenerating(false);
     }
   };
@@ -835,6 +842,14 @@ function ImageChatPageInner() {
         }}
         onCancel={() => setDeleteTargetId(null)}
         variant="danger"
+      />
+
+      <NoticeDialog
+        isOpen={limitDialogOpen}
+        title="会话数量已满"
+        description="历史记录只能保存8条会话，如需新建，请先删除旧会话。"
+        confirmText="我知道了"
+        onConfirm={() => setLimitDialogOpen(false)}
       />
     </div>
   );

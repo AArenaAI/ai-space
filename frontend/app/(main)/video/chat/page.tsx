@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 import { VideoChatMessage, useVideoChatMessages, useVideoChats } from "@/hooks/useVideoChat";
 import { useVideoModels } from "@/hooks/useModels";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import NoticeDialog from "@/components/ui/NoticeDialog";
 import HistoryDrawer from "@/components/ui/HistoryDrawer";
 
 const ASPECT_RATIOS = [
@@ -126,6 +127,7 @@ function VideoChatPageInner() {
   const [durationMenuOpen, setDurationMenuOpen] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [limitDialogOpen, setLimitDialogOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
@@ -249,14 +251,23 @@ function VideoChatPageInner() {
       await fetchMessages(chatId);
       fetchChats();
     } catch (err: any) {
-      setDisplayMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === localAssistantMessage.id
-            ? { ...msg, status: "failed", errorMessage: err.message || "提交失败" }
-            : msg
-        )
-      );
-      toast.error(err.message || "提交失败");
+      const msg = err.message || "提交失败";
+      if (msg.includes("历史记录只能保存")) {
+        setLimitDialogOpen(true);
+        // 移除刚才添加的临时消息
+        setDisplayMessages((prev) =>
+          prev.filter((m) => m.id !== localAssistantMessage.id && m.id !== localUserMessage.id)
+        );
+      } else {
+        setDisplayMessages((prev) =>
+          prev.map((msgItem) =>
+            msgItem.id === localAssistantMessage.id
+              ? { ...msgItem, status: "failed", errorMessage: msg }
+              : msgItem
+          )
+        );
+        toast.error(msg);
+      }
     } finally {
       setGenerating(false);
     }
@@ -724,6 +735,14 @@ function VideoChatPageInner() {
         onConfirm={handleConfirmDelete}
         onCancel={() => setDeleteTargetId(null)}
         variant="danger"
+      />
+
+      <NoticeDialog
+        isOpen={limitDialogOpen}
+        title="会话数量已满"
+        description="历史记录只能保存8条会话，如需新建，请先删除旧会话。"
+        confirmText="我知道了"
+        onConfirm={() => setLimitDialogOpen(false)}
       />
     </div>
   );

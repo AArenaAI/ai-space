@@ -91,8 +91,8 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
       localStorage.setItem("token", data.token);
       localStorage.setItem("user", JSON.stringify(data.user));
       // 保存默认工作区
-      if (data.default_workspace_id) {
-        localStorage.setItem("current-workspace", String(data.default_workspace_id));
+      if (data.user?.default_workspace_id) {
+        localStorage.setItem("current-workspace", String(data.user.default_workspace_id));
       }
 
       // 触发全局登录状态更新
@@ -113,15 +113,16 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
   const canClose = typeof onClose === "function";
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center px-4">
       {/* 背景遮罩 — 未登录时点击无效 */}
       <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+        className="absolute inset-0 bg-black/65 backdrop-blur-md"
         onClick={canClose ? onClose : undefined}
       />
 
       {/* 弹窗内容 */}
-      <div className="relative w-full max-w-[400px] mx-4 rounded-2xl border border-surface-border bg-surface-elevated shadow-2xl overflow-hidden">
+      <div className="relative w-full max-w-[420px] rounded-2xl border border-surface-border bg-surface-elevated shadow-2xl overflow-hidden">
+        <div className="h-1 w-full bg-brand" />
         {/* 关闭按钮 — 未登录时隐藏 */}
         {canClose && (
           <button
@@ -135,20 +136,24 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
         <div className="px-6 py-6">
           {/* Logo */}
           <div className="text-center mb-6">
-            <img src={theme === "dark" ? "/brand-dark-logo.png" : "/brand-light-logo.png"} alt="AI Space" className="w-12 h-12 rounded-xl object-cover mx-auto mb-3" />
-            <h2 className="text-lg font-semibold text-text-primary tracking-tight">
+            <img src={theme === "dark" ? "/brand-dark-logo.png" : "/brand-light-logo.png"} alt="AI Space" className="w-14 h-14 rounded-2xl object-cover mx-auto mb-4 border border-surface-border shadow-sm" />
+            <div className="inline-flex items-center rounded-full border border-surface-border bg-surface-card px-2.5 py-1 text-xs font-medium text-text-tertiary mb-3">
+              全球一流模型 · 一键触达
+            </div>
+            <h2 className="text-xl font-semibold text-text-primary tracking-tight">
               {mode === "login" ? "登录 AI Space" : "注册 AI Space"}
             </h2>
-            <p className="text-sm text-text-secondary mt-1">
-              {mode === "login" ? "Al Space全球一流模型稳定超体验，一键触达世界。" : "Al Space全球一流模型稳定超体验，一键触达世界。"}
+            <p className="text-sm text-text-secondary mt-2">
+              {mode === "login" ? "继续你的高效创作，让灵感稳定抵达。" : "创建账号，开启 AI Space 极致体验。"}
             </p>
           </div>
 
           {/* Tab 切换 */}
-          <div className="flex rounded-lg bg-surface-card border border-surface-border p-0.5 mb-5">
+          <div className="flex rounded-xl bg-surface-card border border-surface-border p-1 mb-5">
             <button
               onClick={() => switchMode("login")}
-              className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-all ${
+              type="button"
+              className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${
                 mode === "login"
                   ? "bg-surface-elevated text-text-primary shadow-sm"
                   : "text-text-tertiary hover:text-text-secondary"
@@ -158,7 +163,8 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
             </button>
             <button
               onClick={() => switchMode("register")}
-              className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-all ${
+              type="button"
+              className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${
                 mode === "register"
                   ? "bg-surface-elevated text-text-primary shadow-sm"
                   : "text-text-tertiary hover:text-text-secondary"
@@ -170,7 +176,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
 
           {/* 错误提示 */}
           {error && (
-            <div className="mb-4 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+            <div className="mb-4 px-3 py-2 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
               {error}
             </div>
           )}
@@ -187,7 +193,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="怎么称呼你"
-                  className="w-full px-3 py-2.5 rounded-lg bg-surface-card border border-surface-border text-text-primary placeholder:text-text-tertiary outline-none focus:border-brand/50 transition-colors text-sm"
+                  className="w-full px-3.5 py-3 rounded-xl bg-surface-card border border-surface-border text-text-primary placeholder:text-text-tertiary outline-none focus:border-brand/50 transition-colors text-sm"
                 />
               </div>
             )}
@@ -202,7 +208,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="your@email.com"
                 required
-                className="w-full px-3 py-2.5 rounded-lg bg-surface-card border border-surface-border text-text-primary placeholder:text-text-tertiary outline-none focus:border-brand/50 transition-colors text-sm"
+                className="w-full px-3.5 py-3 rounded-xl bg-surface-card border border-surface-border text-text-primary placeholder:text-text-tertiary outline-none focus:border-brand/50 transition-colors text-sm"
               />
             </div>
 
@@ -217,7 +223,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
                 placeholder={mode === "register" ? "至少 6 位" : "输入密码"}
                 required
                 minLength={6}
-                className="w-full px-3 py-2.5 rounded-lg bg-surface-card border border-surface-border text-text-primary placeholder:text-text-tertiary outline-none focus:border-brand/50 transition-colors text-sm"
+                className="w-full px-3.5 py-3 rounded-xl bg-surface-card border border-surface-border text-text-primary placeholder:text-text-tertiary outline-none focus:border-brand/50 transition-colors text-sm"
               />
             </div>
 
@@ -232,7 +238,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="再次输入密码"
                   required
-                  className="w-full px-3 py-2.5 rounded-lg bg-surface-card border border-surface-border text-text-primary placeholder:text-text-tertiary outline-none focus:border-brand/50 transition-colors text-sm"
+                  className="w-full px-3.5 py-3 rounded-xl bg-surface-card border border-surface-border text-text-primary placeholder:text-text-tertiary outline-none focus:border-brand/50 transition-colors text-sm"
                 />
               </div>
             )}
@@ -240,7 +246,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2.5 rounded-lg bg-brand text-white text-sm font-medium hover:bg-brand-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="w-full py-3 rounded-xl bg-brand text-white text-sm font-medium hover:bg-brand-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
             >
               {loading
                 ? mode === "login"

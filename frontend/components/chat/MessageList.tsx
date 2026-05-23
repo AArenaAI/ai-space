@@ -23,8 +23,9 @@ import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
 import { inferGroups, InferredGroup } from "@/lib/groups";
 import EChartsBlock from "./EChartsBlock";
+import { useI18n } from "@/lib/i18n";
 
-const CHAT_BOTTOM_SPACER = 24;
+const CHAT_BOTTOM_SPACER = 176;
 
 interface MessageListProps {
   messages: Message[];
@@ -628,6 +629,7 @@ function MessageList({
   hasMoreMessages,
   onLoadMore,
 }: MessageListProps) {
+  const { t } = useI18n();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const stickToBottomRef = useRef(true);
@@ -635,11 +637,13 @@ function MessageList({
   const loadingMoreTriggeredRef = useRef(false);
   const programmaticScrollUntilRef = useRef(0);
   const bottomLockRafRef = useRef<number>(0);
+  const bottomLockTimersRef = useRef<number[]>([]);
   const scrollToBottom = useCallback(() => {
-    programmaticScrollUntilRef.current = Date.now() + 240;
+    programmaticScrollUntilRef.current = Date.now() + 320;
     const el = scrollRef.current;
     if (el) {
-      el.scrollTop = el.scrollHeight;
+      const nextTop = Math.ceil(el.scrollHeight - el.clientHeight);
+      el.scrollTop = nextTop;
       lastScrollTopRef.current = el.scrollTop;
       return;
     }
@@ -648,20 +652,33 @@ function MessageList({
 
   const lockBottomAfterLayout = useCallback(() => {
     if (bottomLockRafRef.current) cancelAnimationFrame(bottomLockRafRef.current);
+    bottomLockTimersRef.current.forEach(window.clearTimeout);
+    bottomLockTimersRef.current = [];
+
+    const lock = () => {
+      if (stickToBottomRef.current) scrollToBottom();
+    };
+
     bottomLockRafRef.current = requestAnimationFrame(() => {
+      lock();
       bottomLockRafRef.current = requestAnimationFrame(() => {
         bottomLockRafRef.current = 0;
-        if (stickToBottomRef.current) scrollToBottom();
+        lock();
       });
     });
+
+    // Virtuoso 对最后一项换行后的高度测量可能晚于 RAF，补两次 post-layout 锁底，
+    // 否则每新增一行会短暂把底部 Composer 顶出一行高。
+    bottomLockTimersRef.current = [
+      window.setTimeout(lock, 80),
+      window.setTimeout(lock, 180),
+    ];
   }, [scrollToBottom]);
 
   const handleVirtuosoScrollerRef = useCallback((ref: Window | HTMLElement | null) => {
     const el = ref instanceof HTMLElement ? (ref as HTMLDivElement) : null;
     scrollRef.current = el;
     if (el) {
-      el.style.paddingBottom = `${CHAT_BOTTOM_SPACER}px`;
-      el.style.scrollPaddingBottom = `${CHAT_BOTTOM_SPACER}px`;
       lastScrollTopRef.current = el.scrollTop;
     }
   }, []);
@@ -715,6 +732,7 @@ function MessageList({
           )}
         </div>
       ) : null,
+    Footer: () => <div style={{ height: CHAT_BOTTOM_SPACER }} aria-hidden="true" />,
   }), [hasMoreMessages, isLoadingMore, onLoadMore]);
 
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
@@ -921,6 +939,8 @@ function MessageList({
         cancelAnimationFrame(bottomLockRafRef.current);
         bottomLockRafRef.current = 0;
       }
+      bottomLockTimersRef.current.forEach(window.clearTimeout);
+      bottomLockTimersRef.current = [];
     };
   }, [streamingMessageId, streamingText.length, lockBottomAfterLayout]);
 
@@ -1003,7 +1023,7 @@ function MessageList({
         <button
           type="button"
           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-tertiary transition-colors hover:bg-surface-card hover:text-text-primary"
-          aria-label="关闭对比列"
+          aria-label={t("chat.closeCompareColumn")}
         >
           <X className="h-4 w-4" />
         </button>
@@ -1015,15 +1035,15 @@ function MessageList({
     <div key={modelId || index} className="flex min-h-[360px] flex-col overflow-hidden rounded-2xl border border-surface-border bg-surface-card shadow-sm">
       {renderCompareModelHeader(modelId, index)}
       <div className="flex-1 px-8 pb-10 pt-20">
-        <h2 className="text-3xl font-semibold tracking-tight text-text-primary">你好，</h2>
-        <p className="mt-3 text-xl font-medium text-text-primary">我今天能帮你什么？</p>
+        <h2 className="text-3xl font-semibold tracking-tight text-text-primary">{t("chat.helloComma")}</h2>
+        <p className="mt-3 text-xl font-medium text-text-primary">{t("chat.howCanIHelp")}</p>
       </div>
     </div>
   );
 
   if (isCompare) {
     return (
-      <div className="relative flex-1 overflow-hidden">
+      <div className="relative flex-1 min-h-0 overflow-hidden">
         <div className="h-full px-3 py-3">
           <div className="mx-auto h-full">
             <div className="flex gap-3 h-full">
@@ -1033,11 +1053,11 @@ function MessageList({
                   <div key={modelId} className="flex-1 min-w-0 flex flex-col h-full rounded-2xl border border-surface-border bg-surface-card shadow-sm overflow-hidden">
                     {renderCompareModelHeader(modelId, colIndex)}
 
-                    <div className="flex-1 space-y-5 px-4 py-5 overflow-y-auto">
+                    <div className="flex-1 space-y-5 px-4 py-5 overflow-y-auto" style={{ paddingBottom: CHAT_BOTTOM_SPACER }}>
                     {messages.length === 0 ? (
                       <div className="flex flex-col pt-16 pb-10">
-                        <h2 className="text-3xl font-semibold tracking-tight text-text-primary">你好，</h2>
-                        <p className="mt-3 text-base font-medium text-text-secondary">我今天能帮你什么？</p>
+                        <h2 className="text-3xl font-semibold tracking-tight text-text-primary">{t("chat.helloComma")}</h2>
+                        <p className="mt-3 text-base font-medium text-text-secondary">{t("chat.howCanIHelp")}</p>
                       </div>
                     ) : (
                       <>
@@ -1091,7 +1111,7 @@ function MessageList({
                                                         (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden");
                                                       }}
                                                     />
-                                                    <div className="hidden text-xs text-text-tertiary px-3 py-2">图片加载失败</div>
+                                                    <div className="hidden text-xs text-text-tertiary px-3 py-2">{t("chat.imageLoadFailed")}</div>
                                                   </div>
                                                 );
                                               }
@@ -1183,7 +1203,7 @@ function MessageList({
                                 <div className="flex items-center gap-1.5 text-sm text-text-secondary">
                                   {isComplexTask && (
                                     <span className="inline-flex items-center gap-0.5">
-                                      <WaveText text="深度推理中，片刻即达极致答案" />
+                                      <WaveText text={t("chat.deepReasoning")} />
                                       <ThinkingDots />
                                     </span>
                                   )}
@@ -1206,10 +1226,10 @@ function MessageList({
 
         <ConfirmDialog
           isOpen={!!deleteTarget}
-          title="删除此消息"
-          description="删除后，该消息将不可恢复。"
-          confirmText="删除"
-          cancelText="取消"
+          title={t("chat.deleteMessageTitle")}
+          description={t("chat.deleteMessageDesc")}
+          confirmText={t("common.delete")}
+          cancelText={t("common.cancel")}
           variant="danger"
           onConfirm={() => {
             if (deleteTarget && onDeleteMessage) onDeleteMessage(deleteTarget);
@@ -1225,7 +1245,7 @@ function MessageList({
   if (messages.length === 0) {
     if (isLoadingHistory) {
       return (
-        <div className="flex-1 flex items-center justify-center">
+        <div className="flex-1 flex items-center justify-center" style={{ paddingBottom: CHAT_BOTTOM_SPACER }}>
           <div className="flex gap-2">
             <div className="w-2 h-2 rounded-full bg-text-tertiary animate-bounce" />
             <div className="w-2 h-2 rounded-full bg-text-tertiary animate-bounce [animation-delay:0.15s]" />
@@ -1243,7 +1263,7 @@ function MessageList({
     const examples = hasCustomWelcome ? welcomeExamples : defaultExamples;
 
     return (
-      <div className="flex-1 flex flex-col items-center justify-start px-4 pt-48 pb-12">
+      <div className="flex-1 flex flex-col items-center justify-start px-4 pt-48" style={{ paddingBottom: CHAT_BOTTOM_SPACER }}>
         <div className="text-center max-w-md">
           {hasCustomWelcome ? (
             <>
@@ -1258,9 +1278,9 @@ function MessageList({
           ) : (
             <>
               <h1 className="text-2xl font-semibold tracking-tight mb-2 text-text-primary">
-                {userName ? `${userName}，您好` : "您好"}
+                {userName ? t("chat.userGreeting").replace("{name}", userName) : t("chat.greeting")}
               </h1>
-              <p className="text-text-secondary text-[15px] leading-relaxed">需要我们为你做些什么？</p>
+              <p className="text-text-secondary text-[15px] leading-relaxed">{t("chat.whatCanWeDo")}</p>
             </>
           )}
         </div>
@@ -1269,8 +1289,9 @@ function MessageList({
   }
 
   return (
-    <div className="relative flex-1 overflow-hidden">
+    <div className="relative flex-1 min-h-0 overflow-hidden">
       <Virtuoso
+        style={{ height: "100%" }}
         data={visibleMessages}
         ref={virtuosoRef}
         scrollerRef={handleVirtuosoScrollerRef}
@@ -1283,7 +1304,7 @@ function MessageList({
         }}
         computeItemKey={(_, msg) => msg.id}
         onScroll={handleVirtuosoScroll}
-        increaseViewportBy={{ top: 200, bottom: 200 }}
+        increaseViewportBy={{ top: 200, bottom: CHAT_BOTTOM_SPACER }}
         overscan={{ main: 2, reverse: 2 }}
         components={virtuosoComponents}
         itemContent={(index, msg) => {
@@ -1387,7 +1408,7 @@ function MessageList({
                                         (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden");
                                       }}
                                     />
-                                    <div className="hidden text-xs text-text-tertiary px-3 py-2">图片加载失败</div>
+                                    <div className="hidden text-xs text-text-tertiary px-3 py-2">{t("chat.imageLoadFailed")}</div>
                                   </div>
                                 );
                               }
@@ -1487,9 +1508,10 @@ function MessageList({
             stickToBottomRef.current = true;
             scrollToBottom();
           }}
-          className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 flex items-center justify-center w-10 h-10 rounded-full
+          className="absolute left-1/2 -translate-x-1/2 z-30 flex items-center justify-center w-10 h-10 rounded-full
             bg-surface-elevated border border-surface-border text-text-secondary
             shadow-lg hover:bg-surface-card hover:text-text-primary transition-colors"
+          style={{ bottom: CHAT_BOTTOM_SPACER + 12 }}
           aria-label="回到底部"
         >
           <ChevronDownIcon className="w-5 h-5" />
@@ -1526,10 +1548,10 @@ function MessageList({
       {/* 删除消息确认弹窗 */}
       <ConfirmDialog
         isOpen={!!deleteTarget}
-        title="删除此消息"
-        description="删除后，该消息将不可恢复。"
-        confirmText="删除"
-        cancelText="取消"
+        title={t("chat.deleteMessageTitle")}
+        description={t("chat.deleteMessageDesc")}
+        confirmText={t("common.delete")}
+        cancelText={t("common.cancel")}
         variant="danger"
         onConfirm={() => {
           if (deleteTarget && onDeleteMessage) onDeleteMessage(deleteTarget);

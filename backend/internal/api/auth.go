@@ -36,12 +36,18 @@ type UpdateProfileRequest struct {
 	Name  string `json:"name"`
 }
 
+func normalizeAuthEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	req.Email = normalizeAuthEmail(req.Email)
+	req.Name = strings.TrimSpace(req.Name)
 
 	// 检查邮箱是否已注册
 	var existingUser models.User
@@ -50,37 +56,39 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	// 创建用户（初始化 free 套餐 + 30 基础积分）
-	user := models.User{
-		Email:           req.Email,
-		Password:        req.Password,
-		Name:            req.Name,
-		BasicCredits:    30,
-		AdvancedCredits: 0,
-		EliteCredits:    0,
-		PlanTier:        "free",
-	}
+	var user models.User
+	var defaultWorkspace models.Workspace
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		// 创建用户（初始化 free 套餐 + 30 基础积分）
+		user = models.User{
+			Email:           req.Email,
+			Password:        req.Password,
+			Name:            req.Name,
+			BasicCredits:    30,
+			AdvancedCredits: 0,
+			EliteCredits:    0,
+			PlanTier:        "free",
+		}
 
-	if err := user.HashPassword(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "密码加密失败"})
-		return
-	}
+		if err := user.HashPassword(); err != nil {
+			return err
+		}
 
-	if err := h.db.Create(&user).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建用户失败"})
-		return
-	}
+		if err := tx.Create(&user).Error; err != nil {
+			return err
+		}
 
-	// 创建默认工作区
-	defaultWorkspace := models.Workspace{
-		UserID:    user.ID,
-		Name:      "默认工作区",
-		Icon:      "📁",
-		Color:     "#6366f1",
-		IsDefault: true,
-	}
-	if err := h.db.Create(&defaultWorkspace).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建工作区失败"})
+		// 创建默认工作区
+		defaultWorkspace = models.Workspace{
+			UserID:    user.ID,
+			Name:      "默认工作区",
+			Icon:      "📁",
+			Color:     "#6366f1",
+			IsDefault: true,
+		}
+		return tx.Create(&defaultWorkspace).Error
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建账号失败"})
 		return
 	}
 
@@ -93,13 +101,13 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, gin.H{
 		"user": gin.H{
-			"id":                  user.ID,
-			"email":               user.Email,
-			"name":                user.Name,
-			"basic_credits":       user.BasicCredits,
-			"advanced_credits":    user.AdvancedCredits,
-			"elite_credits":       user.EliteCredits,
-			"plan_tier":           user.PlanTier,
+			"id":                   user.ID,
+			"email":                user.Email,
+			"name":                 user.Name,
+			"basic_credits":        user.BasicCredits,
+			"advanced_credits":     user.AdvancedCredits,
+			"elite_credits":        user.EliteCredits,
+			"plan_tier":            user.PlanTier,
 			"default_workspace_id": defaultWorkspace.ID,
 		},
 		"token": token,
@@ -112,6 +120,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	req.Email = normalizeAuthEmail(req.Email)
 
 	// 查找用户
 	var user models.User
@@ -187,7 +196,7 @@ func (h *AuthHandler) UpdateProfile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	req.Email = strings.TrimSpace(req.Email)
+	req.Email = normalizeAuthEmail(req.Email)
 	req.Name = strings.TrimSpace(req.Name)
 
 	var user models.User

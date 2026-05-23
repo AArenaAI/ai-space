@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { useImage } from "@/hooks/useImage";
 import { useImageChats } from "@/hooks/useImageChat";
 import { useImageModels, useVideoModels, ChatModel } from "@/hooks/useModels";
-import { useVideo, VideoGeneration } from "@/hooks/useVideo";
+import { useVideo } from "@/hooks/useVideo";
+import { useVideoChats } from "@/hooks/useVideoChat";
 import { GeneratedImage } from "@/hooks/useImage";
 import ImageLightbox from "@/components/ui/ImageLightbox";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
@@ -264,9 +265,14 @@ export default function ImagePage() {
   const router = useRouter();
   const { images, isGenerating, generateImage, deleteImage } = useImage();
   const { chats, loading: chatsLoading, fetchChats, deleteChat, updateChatTitle } = useImageChats();
+  const {
+    chats: videoChats,
+    fetchChats: fetchVideoChats,
+    deleteChat: deleteVideoChat,
+  } = useVideoChats();
   const { models: imageModels } = useImageModels();
   const { models: videoModels } = useVideoModels();
-  const { videos, generating: videoGenerating, generateVideo, currentVideo, deleteVideo } = useVideo();
+  const { generating: videoGenerating, currentVideo } = useVideo();
   const [prompt, setPrompt] = useState("");
   const [selectedAspectRatio, setSelectedAspectRatio] = useState("auto");
   const [selectedResolution, setSelectedResolution] = useState("1K");
@@ -298,10 +304,11 @@ export default function ImagePage() {
     }
   }, [imageModels, selectedModel]);
 
-  // 历史记录使用图像会话，而不是旧的单图生成记录
+  // 历史记录使用图像会话 + 视频会话，而不是旧的单次生成任务
   useEffect(() => {
     fetchChats();
-  }, [fetchChats]);
+    fetchVideoChats();
+  }, [fetchChats, fetchVideoChats]);
 
   const currentModel = imageModels.find((m) => m.id === selectedModel) || imageModels[0];
   const currentAspect = ASPECT_RATIOS.find((a) => a.value === selectedAspectRatio) || ASPECT_RATIOS[0];
@@ -416,29 +423,29 @@ export default function ImagePage() {
       source: "image" as const,
       cover_image: chat.cover_image,
     })),
-    ...videos
-      .filter((video: VideoGeneration) => video.status !== "pending" && video.status !== "running")
-      .map((video: VideoGeneration) => ({
-        id: video.id,
-        title: video.prompt || "AI视频任务",
-        updated_at: video.updated_at || video.created_at,
-        icon: "image" as const,
-        source: "video" as const,
-        status: video.status,
-        cover_image: video.video_url,
-      })),
+    ...videoChats.map((chat) => ({
+      id: chat.id,
+      title: chat.title || "AI视频会话",
+      updated_at: chat.updated_at,
+      icon: "image" as const,
+      source: "video" as const,
+      cover_image: chat.cover_video,
+    })),
   ].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
 
   const handleOpenHistory = () => {
     const nextOpen = !showHistory;
     setShowHistory(nextOpen);
-    if (nextOpen) fetchChats();
+    if (nextOpen) {
+      fetchChats();
+      fetchVideoChats();
+    }
   };
 
   const handleSelectHistory = (id: number, item: { source?: "image" | "video" }) => {
     setShowHistory(false);
     if (item.source === "video") {
-      router.push(`/video/chat?videoId=${id}`);
+      router.push(`/video/chat?chatId=${id}`);
       return;
     }
     router.push(`/image/chat?chatId=${id}`);
@@ -447,9 +454,11 @@ export default function ImagePage() {
   const handleDeleteHistory = async (id: number, item: { source?: "image" | "video" }) => {
     try {
       if (item.source === "video") {
-        await deleteVideo(id);
+        await deleteVideoChat(id);
+        fetchVideoChats();
       } else {
         await deleteChat(id);
+        fetchChats();
       }
       toast.success("删除成功");
     } catch {

@@ -43,37 +43,6 @@ function getHeaders(): Record<string, string> {
   };
 }
 
-async function hydrateChatCovers(chats: ImageChat[]): Promise<ImageChat[]> {
-  if (!chats.length) return chats;
-
-  const missingCoverChats = chats.filter((chat) => !chat.cover_image).slice(0, 20);
-  if (!missingCoverChats.length) return chats;
-
-  const coverPairs = await Promise.all(
-    missingCoverChats.map(async (chat) => {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/image-chats/${chat.id}/messages`, { headers: getHeaders() });
-        if (!res.ok) return [chat.id, ""] as const;
-        const data = await safeJSON(res);
-        const messages: ImageChatMessage[] = data.messages || [];
-        const firstImage = messages.find((message) => message.image_url)?.image_url || "";
-        return [chat.id, firstImage] as const;
-      } catch (err) {
-        console.error("hydrate image chat cover error:", err);
-        return [chat.id, ""] as const;
-      }
-    })
-  );
-
-  const coverMap = new Map(coverPairs.filter(([, cover]) => !!cover));
-  if (!coverMap.size) return chats;
-
-  return chats.map((chat) => ({
-    ...chat,
-    cover_image: chat.cover_image || coverMap.get(chat.id) || "",
-  }));
-}
-
 export function useImageChats() {
   const [chats, setChats] = useState<ImageChat[]>([]);
   const [loading, setLoading] = useState(false);
@@ -84,10 +53,7 @@ export function useImageChats() {
       const res = await fetch(`${API_BASE_URL}/api/image-chats`, { headers: getHeaders() });
       if (!res.ok) throw new Error("获取会话列表失败");
       const data = await safeJSON(res);
-      const rawChats: ImageChat[] = data.chats || [];
-      setChats(rawChats);
-      const chatsWithCovers = await hydrateChatCovers(rawChats);
-      setChats(chatsWithCovers);
+      setChats(data.chats || []);
     } catch (err: any) {
       console.error("fetch image chats error:", err);
     } finally {

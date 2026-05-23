@@ -48,8 +48,9 @@ export default function ChatPage() {
   if (isLoggedIn === null) {
     return (
       <div className="flex flex-col h-screen bg-surface items-center justify-center">
-        <div className="w-10 h-10 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center animate-pulse">
-          <span className="text-sm font-bold text-text-primary">AI</span>
+        <div className="w-10 h-10 rounded-xl border border-surface-border bg-surface-card flex items-center justify-center animate-pulse overflow-hidden">
+          <img src="/brand-light-logo.png" alt="AI Space" className="block h-full w-full object-cover dark:hidden" />
+          <img src="/brand-dark-logo.png" alt="AI Space" className="hidden h-full w-full object-cover dark:block" />
         </div>
         <p className="text-sm text-text-secondary mt-3">{t("common.loading")}</p>
       </div>

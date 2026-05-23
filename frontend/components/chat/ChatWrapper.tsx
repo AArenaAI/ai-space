@@ -15,8 +15,10 @@ function ChatSkeleton() {
 
 export default function ChatWrapper() {
   return (
-    <Suspense fallback={<ChatSkeleton />}>
-      <ChatContent />
-    </Suspense>
+    <div className="h-full min-h-0 overflow-hidden">
+      <Suspense fallback={<ChatSkeleton />}>
+        <ChatContent />
+      </Suspense>
+    </div>
   );
 }

@@ -26,5 +26,9 @@ export default function ChatContent() {
   // key 必须保持不变，否则 ChatInterface 会 remount，正在流式写入的本地 assistant 消息会丢失。
   // 历史对话通常不带 t，统一使用稳定 key，由 useChat 内部按 conversationId 加载。
   const chatKey = newChatToken !== "default" ? `new-${newChatToken}` : "chat";
-  return <ChatInterface key={chatKey} conversationId={conversationId} models={models} />;
+  return (
+    <div className="h-full min-h-0 overflow-hidden">
+      <ChatInterface key={chatKey} conversationId={conversationId} models={models} />
+    </div>
+  );
 }

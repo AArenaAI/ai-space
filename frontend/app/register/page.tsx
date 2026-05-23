@@ -42,8 +42,12 @@ export default function RegisterPage() {
 
       localStorage.setItem("token", data.token);
       localStorage.setItem("user", JSON.stringify(data.user));
+      if (data.user?.default_workspace_id) {
+        localStorage.setItem("current-workspace", String(data.user.default_workspace_id));
+      }
       // 注册成功后清除匿名 ID，避免已登录用户被误识别为匿名
       import("@/lib/guestId").then(({ clearGuestId }) => clearGuestId());
+      window.dispatchEvent(new Event("auth-changed"));
       router.push("/chat");
     } catch (err: any) {
       setError(err.message);
@@ -56,14 +60,15 @@ export default function RegisterPage() {
     <div className="min-h-screen flex items-center justify-center bg-surface px-4">
       <div className="w-full max-w-[360px]">
         <div className="text-center mb-8">
-          <div className="w-12 h-12 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center mx-auto mb-4">
-            <span className="text-lg font-bold text-text-primary">AI</span>
+          <div className="w-12 h-12 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center mx-auto mb-4 overflow-hidden">
+            <img src="/brand-light-logo.png" alt="AI Space" className="block h-full w-full object-cover dark:hidden" />
+            <img src="/brand-dark-logo.png" alt="AI Space" className="hidden h-full w-full object-cover dark:block" />
           </div>
           <h1 className="text-xl font-semibold text-text-primary tracking-tight">
             注册 AI Space
           </h1>
           <p className="text-sm text-text-secondary mt-1">
-            Al Space全球一流模型稳定超体验，一键触达世界。
+            AI Space 汇聚全球一流模型，一键开启高效创作。
           </p>
         </div>
 

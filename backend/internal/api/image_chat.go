@@ -44,7 +44,7 @@ func (h *ImageChatHandler) ListImageChats(c *gin.Context) {
 	// 为每个会话查询首图（第一条 completed 状态的 assistant 消息图片）
 	type chatCover struct {
 		ChatID uint   `json:"chat_id"`
-		Image  string `json:"image_url"`
+		Image  string `gorm:"column:image_url" json:"image_url"`
 	}
 	var covers []chatCover
 	chatIDs := make([]uint, 0, len(chats))
@@ -105,6 +105,14 @@ func (h *ImageChatHandler) CreateImageChat(c *gin.Context) {
 	mediaType := req.MediaType
 	if mediaType == "" {
 		mediaType = "image"
+	}
+
+	// 检查会话数量上限
+	var chatCount int64
+	h.db.Model(&models.ImageChat{}).Where("user_id = ?", userID).Count(&chatCount)
+	if chatCount >= 8 {
+		c.JSON(http.StatusForbidden, gin.H{"error": "历史记录只能保存8条会话，如需新建，请先删除旧会话"})
+		return
 	}
 
 	// 创建会话

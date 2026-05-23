@@ -116,7 +116,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
-    el.style.height = "62px";
+    el.style.height = "44px";
   }, [content]);
 
   // 轮询更新文件解析状态
@@ -188,7 +188,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     setAttachedFiles([]);
     setToolsOpen(false);
     if (textareaRef.current) {
-      textareaRef.current.style.height = "62px";
+      textareaRef.current.style.height = "44px";
     }
   };
 
@@ -252,7 +252,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
       const data = await res.json();
       setAttachedFiles((prev) => [...prev, { filename: data.filename, content: data.content_preview || "", type: data.type, public_id: data.public_id, parse_status: data.parse_status || "pending" }]);
     } catch (err: any) {
-      toast.error(`文件上传失败: ${err.message}`);
+      toast.error(`${t("chat.fileUploadFailedPrefix")}: ${err.message}`);
     } finally {
       setUploading(false);
     }
@@ -300,13 +300,13 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     const maxSize = 20 * 1024 * 1024;
     const remainingSlots = 20 - attachedFiles.length;
     if (remainingSlots <= 0) {
-      toast.warning("单次聊天最多关联 20 个文件");
+      toast.warning(t("chat.maxFilesWarning"));
       return;
     }
 
     for (const file of files.slice(0, remainingSlots)) {
       if (file.size > maxSize) {
-        toast.warning(`文件 ${file.name} 超过 20MB 限制`);
+        toast.warning(t("chat.fileTooLarge").replace("{name}", file.name));
         continue;
       }
       await uploadSingleFile(file);
@@ -357,15 +357,15 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
   }, [currentModel?.id]);
 
   const effortLabel = currentModel?.provider === "DeepSeek"
-    ? (reasoning.effort === "max" ? "深度" : "")
+    ? (reasoning.effort === "max" ? t("chat.reasoning.deep") : "")
     : (currentModel?.provider === "Moonshot" ? ""
-      : (reasoning.effort === "standard" ? "" : reasoning.effort === "extended" ? "扩展" : reasoning.effort === "heavy" ? "重度" : "省流"));
+      : (reasoning.effort === "standard" ? "" : reasoning.effort === "extended" ? t("chat.reasoning.extended") : reasoning.effort === "heavy" ? t("chat.reasoning.heavy") : t("chat.reasoning.light")));
 
   const effortNames: Record<string, string> = {
-    light: "省流",
-    standard: "标准",
-    extended: "扩展",
-    heavy: "重度",
+    light: t("chat.reasoning.light"),
+    standard: t("chat.reasoning.standard"),
+    extended: t("chat.reasoning.extended"),
+    heavy: t("chat.reasoning.heavy"),
   };
 
   return (
@@ -385,7 +385,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
             )}
           >
             <Columns2 className="w-3 h-3" />
-            <span>对比</span>
+            <span>{t("chat.compare")}</span>
           </button>
 
           {/* 文件上传按钮 */}
@@ -409,7 +409,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
               ) : (
                 <Paperclip className="w-3 h-3" />
               )}
-              <span>附件{attachedFiles.length > 0 ? ` (${attachedFiles.length})` : ""}</span>
+              <span>{t("chat.attachments")}{attachedFiles.length > 0 ? ` (${attachedFiles.length})` : ""}</span>
             </button>
             {/* 自定义 tooltip */}
             <div
@@ -419,9 +419,9 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
               )}
             >
               <div className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 shadow-lg text-[12px] leading-relaxed text-text-secondary">
-                <div className="font-medium text-text-primary mb-0.5">文件上传限制</div>
-                <div>支持: PDF, Word, PPT, Excel, 图片, 代码等</div>
-                <div>单文件 ≤ 20MB，单次最多 20 个</div>
+                <div className="font-medium text-text-primary mb-0.5">{t("chat.fileUploadLimitTitle")}</div>
+                <div>{t("chat.fileUploadSupport")}</div>
+                <div>{t("chat.fileUploadLimitDesc")}</div>
               </div>
               {/* 小三角箭头 */}
               <div className="absolute left-1/2 -translate-x-1/2 -bottom-1 w-2 h-2 rotate-45 border-r border-b border-surface-border bg-surface-card" />
@@ -449,7 +449,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
             <div className="absolute inset-0 z-50 flex items-center justify-center rounded-2xl bg-surface-card/95 border-2 border-dashed border-brand/40 pointer-events-none">
               <div className="flex flex-col items-center gap-2 text-text-secondary">
                 <Paperclip className="w-8 h-8 text-brand/60" />
-                <span className="text-sm font-medium">拖拽文件到此处上传</span>
+                <span className="text-sm font-medium">{t("chat.dropFilesHere")}</span>
               </div>
             </div>
           )}
@@ -459,10 +459,10 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
               {attachedFiles.map((file, idx) => {
                 const status = file.parse_status || "pending";
                 const statusConfig: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
-                  pending: { color: "text-amber-400 border-amber-500/30 bg-amber-500/5", icon: <div className="w-3 h-3 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />, label: "解析中" },
-                  done: { color: "text-emerald-400 border-emerald-500/30 bg-emerald-500/5", icon: <FileText className="w-3.5 h-3.5" />, label: "已完成" },
-                  error: { color: "text-red-400 border-red-500/30 bg-red-500/5", icon: <div className="w-3 h-3 rounded-full bg-red-400" />, label: "失败" },
-                  unsupported: { color: "text-gray-400 border-gray-500/30 bg-gray-500/5", icon: <FileText className="w-3.5 h-3.5" />, label: "不支持" },
+                  pending: { color: "text-amber-400 border-amber-500/30 bg-amber-500/5", icon: <div className="w-3 h-3 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />, label: t("chat.fileStatusParsing") },
+                  done: { color: "text-emerald-400 border-emerald-500/30 bg-emerald-500/5", icon: <FileText className="w-3.5 h-3.5" />, label: t("chat.fileStatusDone") },
+                  error: { color: "text-red-400 border-red-500/30 bg-red-500/5", icon: <div className="w-3 h-3 rounded-full bg-red-400" />, label: t("chat.fileStatusFailed") },
+                  unsupported: { color: "text-gray-400 border-gray-500/30 bg-gray-500/5", icon: <FileText className="w-3.5 h-3.5" />, label: t("chat.fileStatusUnsupported") },
                 };
                 const cfg = statusConfig[status] || statusConfig.pending;
                 const isEmptyContent = status === "done" && !file.content?.trim();
@@ -475,16 +475,16 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                     )}
                     title={
                       file.error_message
-                        ? `解析失败: ${file.error_message}`
+                        ? `${t("chat.fileParseFailed")}: ${file.error_message}`
                         : isEmptyContent
-                        ? "文件解析完成但内容为空，可能是格式不支持或文件为空"
+                        ? t("chat.fileEmptyContent")
                         : cfg.label
                     }
                   >
                     {cfg.icon}
                     <span className="max-w-[120px] truncate">{file.filename}</span>
                     <span className="text-[10px] opacity-60 ml-0.5">
-                      {file.error_message ? "解析失败" : isEmptyContent ? "空文件" : cfg.label}
+                      {file.error_message ? t("chat.fileParseFailed") : isEmptyContent ? t("chat.emptyFile") : cfg.label}
                     </span>
                     <button
                       type="button"
@@ -504,9 +504,9 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
             value={content}
             onChange={(e) => setContent(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="问点什么..."
+            placeholder={t("chat.placeholder")}
             rows={1}
-            className="w-full h-[62px] resize-none overflow-y-auto bg-transparent px-4 pt-3.5 pb-2 text-[15px] outline-none placeholder:text-text-tertiary leading-relaxed"
+            className="w-full h-[44px] shrink-0 resize-none overflow-y-auto bg-transparent px-4 pt-3.5 pb-1 text-[15px] outline-none placeholder:text-text-tertiary leading-relaxed"
           />
 
           <div className="flex items-center justify-between px-3 pb-3">
@@ -524,10 +524,10 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                   )}
                 >
                   <Wrench className="w-3.5 h-3.5" />
-                  <span>工具</span>
+                  <span>{t("chat.tools")}</span>
                   {(reasoning.enabled || searchEnabled) && (
                     <span className="text-[11px] opacity-70 ml-0.5">
-                      · {[reasoning.enabled && "深度思考", searchEnabled && "联网搜索"].filter(Boolean).join("+")}
+                      · {[reasoning.enabled && t("chat.deepThinking"), searchEnabled && t("chat.webSearch")].filter(Boolean).join("+")}
                     </span>
                   )}
                 </button>
@@ -558,7 +558,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5">
                             <Search className="w-3.5 h-3.5" />
-                            <span>联网搜索</span>
+                            <span>{t("chat.webSearch")}</span>
                           </div>
                         </div>
                       </button>
@@ -588,7 +588,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5">
                             <Brain className="w-3.5 h-3.5" />
-                            <span>深度思考</span>
+                            <span>{t("chat.deepThinking")}</span>
                           </div>
                         </div>
                       </button>
@@ -608,7 +608,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                                 )}
                               >
                                 <span className={cn("w-1 h-1 rounded-full", reasoning.effort === "high" ? "bg-purple-400" : "bg-text-tertiary/30")} />
-                                标准
+                                {t("chat.reasoning.standard")}
                               </button>
                               <button
                                 type="button"
@@ -621,7 +621,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                                 )}
                               >
                                 <span className={cn("w-1 h-1 rounded-full", reasoning.effort === "max" ? "bg-purple-400" : "bg-text-tertiary/30")} />
-                                深度
+                                {t("chat.reasoning.deep")}
                               </button>
                             </>
                           ) : (
@@ -694,7 +694,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                 type="button"
                 onClick={handleStop}
                 className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200 bg-red-500 text-white hover:bg-red-600"
-                title="停止生成"
+                title={t("chat.stopGenerating")}
               >
                 <Square className="w-3.5 h-3.5 fill-current" />
               </button>
@@ -702,7 +702,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
               <button
                 type="submit"
                 disabled={!canSubmit}
-                title={hasParsingFiles ? "文件解析中，请稍后" : "发送"}
+                title={hasParsingFiles ? t("chat.fileParsingWaitShort") : t("chat.send")}
                 className={cn(
                   "flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200",
                   canSubmit

@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -70,6 +71,11 @@ func (rl *IPRateLimiter) Allow(ip string) bool {
 func RateLimitMiddleware() gin.HandlerFunc {
 	limiter := NewIPRateLimiter()
 	return func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/api/images/file/") {
+			c.Next()
+			return
+		}
+
 		ip := c.ClientIP()
 		if !limiter.Allow(ip) {
 			c.JSON(http.StatusTooManyRequests, gin.H{"error": "请求过于频繁，请稍后再试"})

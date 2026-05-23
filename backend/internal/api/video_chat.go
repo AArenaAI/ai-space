@@ -93,6 +93,14 @@ func (h *VideoChatHandler) CreateVideoChat(c *gin.Context) {
 		return
 	}
 
+	// 检查会话数量上限
+	var chatCount int64
+	h.db.Model(&models.VideoChat{}).Where("user_id = ?", userID).Count(&chatCount)
+	if chatCount >= 8 {
+		c.JSON(http.StatusForbidden, gin.H{"error": "历史记录只能保存8条会话，如需新建，请先删除旧会话"})
+		return
+	}
+
 	title := req.Prompt
 	if title == "" {
 		title = "新视频会话"
