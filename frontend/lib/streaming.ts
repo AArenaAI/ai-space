@@ -5,6 +5,7 @@ export type RealtimeData = {
   activityStatus?: { kind: string; status: string; label: string };
   searchStatus?: "searching" | "completed";
   searchSources?: any[];
+  searchSourcesCount?: number;
   serverMessageId?: number;
   generationTaskId?: number;
   backgroundTaskId?: string;

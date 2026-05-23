@@ -95,7 +95,7 @@ function ThinkBlock({ content }: { content: string }) {
       >
         <Lightbulb className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
         <span className="text-sm font-medium text-text-secondary flex-1">
-          深度思考{content.length >= 2000 ? " · 已折叠" : ""}
+          推理过程{content.length >= 2000 ? " · 已折叠" : ""}
         </span>
         {expanded ? (
           <ChevronUp className="w-3.5 h-3.5 text-text-tertiary shrink-0" />

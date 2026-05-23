@@ -4,6 +4,7 @@ import { FileText, Lightbulb, Search, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChatModel, Message } from "@/hooks/useChat";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
+import { getActivityLabel, WEB_SEARCH_DONE_LABEL, WEB_SEARCH_LABEL } from "@/lib/chatActivityStatus";
 
 type ActivityStatus = NonNullable<Message["activityStatus"]>;
 type SearchStatus = Message["searchStatus"];
@@ -42,23 +43,20 @@ function coerceActivityStatus(activity?: ActivityStatus | RealtimeActivityStatus
 
 function normalizeActivityStatus(activity?: ActivityStatus | RealtimeActivityStatus): ActivityStatus | undefined {
   const normalized = coerceActivityStatus(activity);
-  if (!normalized || normalized.status === "completed") return undefined;
-  if (normalized.kind === "web_search" || normalized.kind === "file_search") {
-    return { ...normalized, label: normalized.label || "正在搜索" };
-  }
-  if (normalized.kind === "reasoning") {
-    return { ...normalized, label: normalized.label || "深度推理中，片刻即达极致答案" };
-  }
-  return { ...normalized, label: normalized.label || "正在生成内容" };
+  if (!normalized || normalized.kind === "reasoning") return undefined;
+  return {
+    ...normalized,
+    label: getActivityLabel(normalized.kind, normalized.status, normalized.label),
+  };
 }
 
-function getSearchStatus(searchStatus?: SearchStatus, searchSources?: unknown[]): NormalizedStatus | undefined {
-  const sourceCount = searchSources?.length || 0;
+function getSearchStatus(searchStatus?: SearchStatus, searchSources?: unknown[], searchSourcesCount?: number): NormalizedStatus | undefined {
+  const sourceCount = typeof searchSourcesCount === "number" ? searchSourcesCount : (searchSources?.length || 0);
   if (searchStatus === "searching") {
     return {
       key: "web_search:running",
       kind: "web_search",
-      label: "正在联网搜索",
+      label: WEB_SEARCH_LABEL,
       tone: "blue",
       active: true,
     };
@@ -67,7 +65,7 @@ function getSearchStatus(searchStatus?: SearchStatus, searchSources?: unknown[])
     return {
       key: "web_search:completed",
       kind: "web_search_done",
-      label: `已联网搜索${sourceCount > 0 ? ` · 引用${sourceCount}个来源` : ""}`,
+      label: `${WEB_SEARCH_DONE_LABEL}${sourceCount > 0 ? ` · 引用${sourceCount}个来源` : ""}`,
       tone: "green",
       active: false,
     };
@@ -91,30 +89,30 @@ function getActivityStatus(activity?: ActivityStatus | RealtimeActivityStatus): 
 
   if (normalized.kind === "web_search") {
     return {
-      key: "web_search:running",
+      key: `web_search:${normalized.status}`,
       kind: "web_search",
-      label: normalized.label === "正在生成内容" ? "正在联网搜索" : normalized.label,
-      tone: "blue",
-      active: true,
+      label: normalized.label,
+      tone: normalized.status === "completed" ? "green" : "blue",
+      active: normalized.status !== "completed",
     };
   }
 
   if (normalized.kind === "file_search") {
     return {
-      key: "file_search:running",
+      key: `file_search:${normalized.status}`,
       kind: "file_search",
-      label: normalized.label === "正在生成内容" ? "正在搜索文件" : normalized.label,
-      tone: "amber",
-      active: true,
+      label: normalized.label,
+      tone: normalized.status === "completed" ? "green" : "amber",
+      active: normalized.status !== "completed",
     };
   }
 
   return {
-    key: `${normalized.kind}:running`,
+    key: `${normalized.kind}:${normalized.status}`,
     kind: normalized.kind,
     label: normalized.label,
-    tone: "amber",
-    active: true,
+    tone: normalized.status === "completed" ? "green" : "amber",
+    active: normalized.status !== "completed",
   };
 }
 
@@ -122,9 +120,11 @@ function getUnifiedStatuses(params: {
   activityStatus?: ActivityStatus | RealtimeActivityStatus;
   searchStatus?: SearchStatus;
   searchSources?: unknown[];
+  searchSourcesCount?: number;
+  isCompleted?: boolean;
 }): NormalizedStatus[] {
   const activity = getActivityStatus(params.activityStatus);
-  const search = getSearchStatus(params.searchStatus, params.searchSources);
+  const search = getSearchStatus(params.searchStatus, params.searchSources, params.searchSourcesCount);
 
   // 合并搜索标签：activity_meta 和 search_meta 同时存在时，只显示一个搜索状态。
   if (activity?.kind === "web_search") {
@@ -156,7 +156,14 @@ export function AssistantMessageMeta({ msg, isStreaming, model }: { msg: Message
   const activityStatus = realtime?.activityStatus ?? msg.activityStatus;
   const searchStatus = realtime?.searchStatus ?? msg.searchStatus;
   const searchSources = realtime?.searchSources ?? msg.searchSources;
-  const statuses = getUnifiedStatuses({ activityStatus, searchStatus, searchSources });
+  const searchSourcesCount = realtime?.searchSourcesCount ?? msg.searchSourcesCount;
+  const statuses = getUnifiedStatuses({
+    activityStatus,
+    searchStatus,
+    searchSources,
+    searchSourcesCount,
+    isCompleted: !!msg.completedAt && !isStreaming,
+  });
 
   if (!model) return null;
 

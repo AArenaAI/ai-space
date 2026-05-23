@@ -25,7 +25,7 @@ import EChartsBlock from "./EChartsBlock";
 import { useI18n } from "@/lib/i18n";
 import { AssistantMessageMeta } from "./AssistantMessageMeta";
 
-const CHAT_BOTTOM_SPACER = 176;
+const CHAT_BOTTOM_SPACER = 224;
 
 interface MessageListProps {
   messages: Message[];
@@ -156,7 +156,7 @@ function StreamingText({ messageId, content, isStreaming, className }: { message
         <div className="mb-3 rounded-xl border border-purple-200 dark:border-purple-800/40 overflow-hidden">
           <div className="flex items-center gap-2 px-3 py-2 bg-purple-50 dark:bg-[#1A1A2E]">
             <Lightbulb className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
-            <span className="text-sm font-medium text-text-secondary">正在思考...</span>
+            <span className="text-sm font-medium text-text-secondary">深度推理中，片刻即达极致答案</span>
             <div className="flex gap-0.5 ml-1">
               <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce" />
               <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce [animation-delay:0.15s]" />
@@ -257,7 +257,7 @@ function ThinkBlock({ content, isThinking }: { content: string; isThinking: bool
       >
         <Lightbulb className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
         <span className="text-sm font-medium text-text-secondary flex-1">
-          {isThinking ? "正在思考..." : `深度思考${content.length >= 2000 ? " · 已折叠" : ""}`}
+          {isThinking ? "深度推理中，片刻即达极致答案" : `深度推理${content.length >= 2000 ? " · 已折叠" : ""}`}
         </span>
         {isThinking && (
           <div className="flex gap-0.5">
@@ -317,7 +317,7 @@ function MessageMenu({
     <div className="relative" ref={menuRef}>
       <button
         onClick={() => setOpen(!open)}
-        className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
+        className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
       >
         <MoreHorizontal className="w-3.5 h-3.5" />
       </button>
@@ -439,13 +439,13 @@ function MessageActions({
 
   return (
     <div className={cn(
-      "flex items-center gap-0.5 mt-1 transition-opacity duration-200",
+      "mt-1 inline-flex items-center gap-0.5 rounded-xl bg-surface-card/80 px-1 py-0.5 transition-opacity duration-200",
       align === "right" ? "justify-end" : "justify-start",
       visible ? "opacity-100" : "opacity-0 group-hover:opacity-100"
     )}>
       <button
         onClick={() => { onCopy(); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
-        className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
+        className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
         title="复制"
       >
         {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
@@ -453,7 +453,7 @@ function MessageActions({
       {onForkCompare && align === "right" && (
         <button
           onClick={onForkCompare}
-          className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
+          className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
           title="对比"
         >
           <Columns2 className="w-3.5 h-3.5" />
@@ -462,7 +462,7 @@ function MessageActions({
       {showRegenerate && onRegenerate && (
         <button
           onClick={onRegenerate}
-          className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
+          className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
           title="重新生成"
         >
           <RotateCcw className="w-3.5 h-3.5" />
@@ -470,7 +470,7 @@ function MessageActions({
       )}
       <button
         onClick={onSelectMode}
-        className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
+        className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
         title="选择分享"
       >
         <Share2 className="w-3.5 h-3.5" />
@@ -479,7 +479,7 @@ function MessageActions({
         <button
           onClick={onFavorite}
           className={cn(
-            "p-1 rounded-md transition-colors",
+            "flex h-6 w-6 items-center justify-center rounded-lg transition-colors",
             isFavorited
               ? "text-amber-400 hover:text-amber-500 hover:bg-amber-400/10"
               : "text-text-tertiary hover:text-amber-400 hover:bg-amber-400/10"
@@ -491,7 +491,7 @@ function MessageActions({
       )}
       <button
         onClick={onDelete}
-        className="p-1 rounded-md text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-colors"
+        className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-colors"
         title="删除"
       >
         <Trash2 className="w-3.5 h-3.5" />
@@ -499,7 +499,7 @@ function MessageActions({
       <div className="relative" ref={moreRef}>
         <button
           onClick={() => setMoreOpen(!moreOpen)}
-          className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
+          className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
           title="更多"
         >
           <MoreHorizontal className="w-3.5 h-3.5" />
@@ -906,7 +906,7 @@ function MessageList({
   const renderAssistantContent = (msg: Message, isStreaming: boolean) => {
     const generating = isMessageGenerating(msg, isStreaming);
     if (generating) {
-      return <StreamingText messageId={msg.id} content={msg.content || msg.activityStatus?.label || "任务繁忙，正在生成中"} isStreaming={true} className="text-[15px] leading-relaxed text-text-primary" />;
+      return <StreamingText messageId={msg.id} content={msg.content || ""} isStreaming={true} className="text-[15px] leading-relaxed text-text-primary" />;
     }
     if (!msg.content) {
       return <div className="text-[15px] leading-relaxed text-text-secondary">生成中断，可点击重新生成</div>;

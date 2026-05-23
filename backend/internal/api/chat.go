@@ -747,6 +747,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 			ConversationID:     conversationID,
 			AssistantMessageID: assistantMsgID,
 			InitialSequence:    initialSequence,
+			SearchSources:      searchSources,
 		}
 		go h.runGenerationTask(runnerReq)
 
@@ -797,14 +798,21 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 				if choice, ok := choices[0].(map[string]interface{}); ok {
 					if msgMap, ok := choice["message"].(map[string]interface{}); ok {
 						if assistantContent, ok := msgMap["content"].(string); ok && assistantContent != "" {
-							h.db.Create(&models.Message{
+							assistantMessage := models.Message{
 								ConversationID: conversationID,
 								Role:           "assistant",
 								Content:        assistantContent,
 								Model:          req.Model,
 								CompletedAt:    &[]time.Time{time.Now()}[0],
 								CreatedAt:      time.Now(),
-							})
+							}
+							if len(searchSources) > 0 {
+								if sourcesJSON, err := json.Marshal(searchSources); err == nil {
+									assistantMessage.SearchSources = string(sourcesJSON)
+									assistantMessage.SearchSourcesCount = len(searchSources)
+								}
+							}
+							h.db.Create(&assistantMessage)
 							h.touchConversation(conversationID)
 						}
 					}
@@ -865,6 +873,7 @@ type GenerationTaskRunRequest struct {
 	ConversationID     uint
 	AssistantMessageID uint
 	InitialSequence    int64
+	SearchSources      []services.SearchResult
 }
 
 func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
@@ -987,6 +996,12 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 		updates := map[string]interface{}{
 			"content":      content,
 			"completed_at": time.Now(),
+		}
+		if len(req.SearchSources) > 0 {
+			if sourcesJSON, err := json.Marshal(req.SearchSources); err == nil {
+				updates["search_sources"] = string(sourcesJSON)
+				updates["search_sources_count"] = len(req.SearchSources)
+			}
 		}
 		_ = h.db.Model(&models.Message{}).Where("id = ?", req.AssistantMessageID).Updates(updates).Error
 		h.touchConversation(req.ConversationID)

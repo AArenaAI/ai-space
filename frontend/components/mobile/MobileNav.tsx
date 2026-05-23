@@ -184,9 +184,73 @@ export default function MobileNav() {
   const pathname = usePathname();
   const router = useRouter();
   const drawerRef = useRef<HTMLDivElement>(null);
+  const historyScrollRef = useRef<HTMLDivElement>(null);
   const [currentConvId, setCurrentConvId] = useState<string | null>(null);
 
-  useEffect(() => { if (typeof window !== "undefined") { setCurrentConvId(new URLSearchParams(window.location.search).get("id")); } }, [pathname]);
+  const captureHistoryAnchor = useCallback(() => {
+    const container = historyScrollRef.current;
+    if (!container) return null;
+    const containerTop = container.getBoundingClientRect().top;
+    const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-conversation-row]"));
+    for (const row of rows) {
+      const rect = row.getBoundingClientRect();
+      if (rect.bottom >= containerTop) {
+        return {
+          id: row.dataset.conversationId,
+          offset: rect.top - containerTop,
+        };
+      }
+    }
+    return null;
+  }, []);
+
+  const restoreHistoryAnchor = useCallback((anchor: { id?: string; offset: number } | null) => {
+    if (!anchor?.id) return;
+    requestAnimationFrame(() => {
+      const container = historyScrollRef.current;
+      const row = container?.querySelector<HTMLElement>(`[data-conversation-id="${anchor.id}"]`);
+      if (!container || !row) return;
+      const containerTop = container.getBoundingClientRect().top;
+      const nextOffset = row.getBoundingClientRect().top - containerTop;
+      container.scrollTop += nextOffset - anchor.offset;
+    });
+  }, []);
+
+  const updateConversationsStable = useCallback((updater: (prev: Conversation[]) => Conversation[]) => {
+    const anchor = captureHistoryAnchor();
+    setConversations(prev => {
+      const next = updater(prev);
+      cachedConversationsMobile = next;
+      return next;
+    });
+    restoreHistoryAnchor(anchor);
+  }, [captureHistoryAnchor, restoreHistoryAnchor]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const updateConvId = () => setCurrentConvId(new URLSearchParams(window.location.search).get("id"));
+    updateConvId();
+    window.addEventListener("popstate", updateConvId);
+    const originalPushState = window.history.pushState;
+    const originalReplaceState = window.history.replaceState;
+    window.history.pushState = function (...args) {
+      const result = originalPushState.apply(this, args);
+      window.dispatchEvent(new Event("aipool-route-change"));
+      return result;
+    };
+    window.history.replaceState = function (...args) {
+      const result = originalReplaceState.apply(this, args);
+      window.dispatchEvent(new Event("aipool-route-change"));
+      return result;
+    };
+    window.addEventListener("aipool-route-change", updateConvId);
+    return () => {
+      window.removeEventListener("popstate", updateConvId);
+      window.removeEventListener("aipool-route-change", updateConvId);
+      window.history.pushState = originalPushState;
+      window.history.replaceState = originalReplaceState;
+    };
+  }, [pathname]);
   useEffect(() => { const s = localStorage.getItem("user"); if (s) try { setUser(JSON.parse(s)); } catch {} }, []);
   
   const loadConversations = useCallback(async () => {
@@ -205,47 +269,63 @@ export default function MobileNav() {
   
   useEffect(() => { loadConversations(); }, [loadConversations]);
   useEffect(() => {
-    const h = () => loadConversations();
+    const h = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (!d?.id) {
+        loadConversations();
+        return;
+      }
+      const now = new Date().toISOString();
+      const conv: Conversation = {
+        id: Number(d.id),
+        title: d.title || "新对话",
+        model: d.model || "",
+        pinned: !!d.pinned,
+        created_at: d.created_at || now,
+        updated_at: d.updated_at || now,
+      };
+      updateConversationsStable(prev => sortConversations([conv, ...prev.filter(c => c.id !== conv.id)]));
+    };
     window.addEventListener("conversation-created", h);
     return () => window.removeEventListener("conversation-created", h);
-  }, [loadConversations]);
+  }, [loadConversations, updateConversationsStable]);
   useEffect(() => {
     const h = (e: Event) => {
       const d = (e as CustomEvent).detail;
       if (d?.id != null && d?.title != null) {
         const targetId = typeof d.id === "string" ? Number(d.id) : d.id;
-        const next = conversations.map(c => c.id === targetId ? { ...c, title: d.title } : c);
-        setConversations(next);
-        cachedConversationsMobile = next;
+        updateConversationsStable(prev => prev.map(c => c.id === targetId ? { ...c, title: d.title } : c));
       }
     };
     window.addEventListener("conversation-renamed", h);
     return () => window.removeEventListener("conversation-renamed", h);
-  }, [conversations]);
+  }, [updateConversationsStable]);
   useEffect(() => {
     const h = (e: Event) => {
       const d = (e as CustomEvent).detail;
       if (d?.id == null) return;
       const targetId = typeof d.id === "string" ? Number(d.id) : d.id;
       const updatedAt = d.updated_at || new Date().toISOString();
-      setConversations(prev => {
-        const next = sortConversations(prev.map(c => c.id === targetId ? { ...c, updated_at: updatedAt } : c));
-        cachedConversationsMobile = next;
-        return next;
-      });
+      updateConversationsStable(prev => sortConversations(prev.map(c => c.id === targetId ? { ...c, updated_at: updatedAt } : c)));
     };
     window.addEventListener("conversation-updated", h);
     return () => window.removeEventListener("conversation-updated", h);
-  }, []);
+  }, [updateConversationsStable]);
   
   useEffect(() => { document.body.style.overflow = menuOpen ? "hidden" : ""; return () => { document.body.style.overflow = ""; }; }, [menuOpen]);
   useEffect(() => { if (!menuOpen) return; const h = (e: MouseEvent) => { if (drawerRef.current && !drawerRef.current.contains(e.target as Node)) setMenuOpen(false); }; document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h); }, [menuOpen]);
 
   const handleLogout = () => { localStorage.removeItem("token"); localStorage.removeItem("user"); import("@/lib/guestId").then(({ getGuestId }) => getGuestId()); setUser(null); setConversations([]); cachedConversationsMobile = null; setMenuOpen(false); router.push("/login"); };
   const handleNewChat = () => { router.push(`/chat?t=${Date.now()}`); setMenuOpen(false); };
+  const handleOpenConversation = useCallback((conv: Conversation) => {
+    setCurrentConvId(String(conv.id));
+    router.push(`/chat?id=${conv.id}`, { scroll: false });
+    setMenuOpen(false);
+  }, [router]);
+
   const handleDelete = async (id: number) => {
     const token = localStorage.getItem("token"); if (!token) return;
-    try { await fetch(`/api/conversations/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }); const next = conversations.filter(c => c.id !== id); setConversations(next); cachedConversationsMobile = next; if (String(id) === currentConvId) router.push("/chat"); } catch {}
+    try { await fetch(`/api/conversations/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }); const next = conversations.filter(c => c.id !== id); setConversations(next); cachedConversationsMobile = next; if (String(id) === currentConvId) router.push("/chat", { scroll: false }); } catch {}
     setDeleteTarget(null);
   };
   const handleRename = async (newTitle: string) => {
@@ -303,7 +383,7 @@ export default function MobileNav() {
           <button onClick={handleNewChat} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-text-secondary hover:text-text-primary hover:bg-surface-card transition-colors"><MessageSquarePlus className="w-3.5 h-3.5" />新对话</button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-2 py-1">
+        <div ref={historyScrollRef} className="flex-1 overflow-y-auto px-2 py-1">
           {!user ? (
             <div className="flex flex-col items-center gap-2 px-4 py-8 text-center"><MessageSquare className="w-5 h-5 text-text-tertiary" /><p className="text-xs text-text-tertiary">登录后查看对话历史</p></div>
           ) : loading ? (
@@ -326,10 +406,10 @@ export default function MobileNav() {
                           {pinned.map(conv => {
                             const isActive = String(conv.id) === currentConvId;
                             return (
-                              <Link key={conv.id} href={`/chat?id=${conv.id}`} onClick={() => setMenuOpen(false)} className={cn("group flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors", isActive ? "bg-surface-card text-text-primary" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
+                              <div key={conv.id} role="button" tabIndex={0} data-conversation-row data-conversation-id={conv.id} onClick={() => handleOpenConversation(conv)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleOpenConversation(conv); } }} className={cn("group flex w-full cursor-pointer items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors", isActive ? "bg-surface-card text-text-primary" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
                                 <MessageSquare className="w-3.5 h-3.5 shrink-0 text-text-tertiary" /><Pin className="w-3 h-3 shrink-0 text-brand" /><span className="flex-1 truncate text-left">{conv.title || "新对话"}</span>
                                 <div className="opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}><ConvMenu onRename={() => setRenameTarget(conv)} onTogglePin={() => handleTogglePin(conv)} pinned={conv.pinned} onShare={() => handleShareConv(conv)} onDelete={() => setDeleteTarget(conv.id)} /></div>
-                              </Link>
+                              </div>
                             );
                           })}
                         </div>
@@ -342,10 +422,10 @@ export default function MobileNav() {
                           {groups[label].map(conv => {
                             const isActive = String(conv.id) === currentConvId;
                             return (
-                              <Link key={conv.id} href={`/chat?id=${conv.id}`} onClick={() => setMenuOpen(false)} className={cn("group flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors", isActive ? "bg-surface-card text-text-primary" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
+                              <div key={conv.id} role="button" tabIndex={0} data-conversation-row data-conversation-id={conv.id} onClick={() => handleOpenConversation(conv)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleOpenConversation(conv); } }} className={cn("group flex w-full cursor-pointer items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors", isActive ? "bg-surface-card text-text-primary" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
                                 <MessageSquare className="w-3.5 h-3.5 shrink-0 text-text-tertiary" /><span className="flex-1 truncate text-left">{conv.title || "新对话"}</span>
                                 <div className="opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}><ConvMenu onRename={() => setRenameTarget(conv)} onTogglePin={() => handleTogglePin(conv)} pinned={conv.pinned} onShare={() => handleShareConv(conv)} onDelete={() => setDeleteTarget(conv.id)} /></div>
-                              </Link>
+                              </div>
                             );
                           })}
                         </div>

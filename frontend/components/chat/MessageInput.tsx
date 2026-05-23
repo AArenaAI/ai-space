@@ -389,10 +389,10 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
               onMouseLeave={() => setShowCompareTip(false)}
               aria-label={t("chat.compare")}
               className={cn(
-                "flex h-7 w-7 items-center justify-center rounded-full border transition-all duration-200",
+                "flex h-7 w-7 items-center justify-center rounded-lg transition-colors duration-200",
                 compareMode
-                  ? "bg-amber-500/10 border-amber-500/40 text-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.12)]"
-                  : "bg-transparent border-surface-border text-text-tertiary hover:text-text-secondary hover:border-text-tertiary/50"
+                  ? "bg-amber-500/10 text-amber-400"
+                  : "text-text-tertiary hover:bg-surface-card hover:text-text-secondary"
               )}
             >
               <Columns2 className="w-3.5 h-3.5" />
@@ -420,10 +420,10 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
               onMouseLeave={() => setShowFileTip(false)}
               aria-label={t("chat.attachments")}
               className={cn(
-                "flex h-7 w-7 items-center justify-center rounded-full border transition-all duration-200",
+                "flex h-7 w-7 items-center justify-center rounded-lg transition-colors duration-200",
                 attachedFiles.length > 0
-                  ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-400"
-                  : "bg-transparent border-surface-border text-text-tertiary hover:text-text-secondary hover:border-text-tertiary/50",
+                  ? "bg-emerald-500/10 text-emerald-400"
+                  : "text-text-tertiary hover:bg-surface-card hover:text-text-secondary",
                 (uploading || isLoading) && "opacity-50 cursor-not-allowed"
               )}
             >

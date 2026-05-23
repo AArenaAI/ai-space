@@ -507,6 +507,46 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
 
   /* 收藏列表 */
   const [favoriteListOpen, setFavoriteListOpen] = useState(false);
+  const historyScrollRef = useRef<HTMLDivElement>(null);
+
+  const captureHistoryAnchor = useCallback(() => {
+    const container = historyScrollRef.current;
+    if (!container) return null;
+    const containerTop = container.getBoundingClientRect().top;
+    const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-conversation-row]"));
+    for (const row of rows) {
+      const rect = row.getBoundingClientRect();
+      if (rect.bottom >= containerTop) {
+        return {
+          id: row.dataset.conversationId,
+          offset: rect.top - containerTop,
+        };
+      }
+    }
+    return null;
+  }, []);
+
+  const restoreHistoryAnchor = useCallback((anchor: { id?: string; offset: number } | null) => {
+    if (!anchor?.id) return;
+    requestAnimationFrame(() => {
+      const container = historyScrollRef.current;
+      const row = container?.querySelector<HTMLElement>(`[data-conversation-id="${anchor.id}"]`);
+      if (!container || !row) return;
+      const containerTop = container.getBoundingClientRect().top;
+      const nextOffset = row.getBoundingClientRect().top - containerTop;
+      container.scrollTop += nextOffset - anchor.offset;
+    });
+  }, []);
+
+  const updateConversationsStable = useCallback((updater: (prev: Conversation[]) => Conversation[]) => {
+    const anchor = captureHistoryAnchor();
+    setConversations(prev => {
+      const next = updater(prev);
+      cachedConversations = next;
+      return next;
+    });
+    restoreHistoryAnchor(anchor);
+  }, [captureHistoryAnchor, restoreHistoryAnchor]);
 
   /* 收缩状态 tooltip */
   const [sidebarTooltip, setSidebarTooltip] = useState<{text: string; x: number; y: number} | null>(null);
@@ -648,7 +688,8 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
           const convHref = conv.skill_key
             ? `/skills/chat?key=${conv.skill_key}&id=${conv.id}`
             : `/chat?id=${conv.id}`;
-          router.push(convHref);
+          setCurrentConvId(String(conv.id));
+          router.push(convHref, { scroll: false });
           setSearchOpen(false);
         }
       }
@@ -682,45 +723,33 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
         updated_at: d.updated_at || now,
         skill_key: d.skill_key,
       };
-      setConversations(prev => {
-        const next = sortConversations([conv, ...prev.filter(c => c.id !== conv.id)]);
-        cachedConversations = next;
-        return next;
-      });
+      updateConversationsStable(prev => sortConversations([conv, ...prev.filter(c => c.id !== conv.id)]));
     };
     window.addEventListener("conversation-created", h);
     return () => window.removeEventListener("conversation-created", h);
-  }, [loadConversations, t]);
+  }, [loadConversations, t, updateConversationsStable]);
   useEffect(() => {
     const h = (e: Event) => {
       const d = (e as CustomEvent).detail;
       if (d?.id != null && d?.title != null) {
         const targetId = typeof d.id === "string" ? Number(d.id) : d.id;
-        setConversations(prev => {
-          const next = prev.map(c => c.id === targetId ? { ...c, title: d.title } : c);
-          cachedConversations = next;
-          return next;
-        });
+        updateConversationsStable(prev => prev.map(c => c.id === targetId ? { ...c, title: d.title } : c));
       }
     };
     window.addEventListener("conversation-renamed", h);
     return () => window.removeEventListener("conversation-renamed", h);
-  }, []);
+  }, [updateConversationsStable]);
   useEffect(() => {
     const h = (e: Event) => {
       const d = (e as CustomEvent).detail;
       if (d?.id == null) return;
       const targetId = typeof d.id === "string" ? Number(d.id) : d.id;
       const updatedAt = d.updated_at || new Date().toISOString();
-      setConversations(prev => {
-        const next = sortConversations(prev.map(c => c.id === targetId ? { ...c, updated_at: updatedAt } : c));
-        cachedConversations = next;
-        return next;
-      });
+      updateConversationsStable(prev => sortConversations(prev.map(c => c.id === targetId ? { ...c, updated_at: updatedAt } : c)));
     };
     window.addEventListener("conversation-updated", h);
     return () => window.removeEventListener("conversation-updated", h);
-  }, []);
+  }, [updateConversationsStable]);
   // 工作区切换 / 登录登出时刷新
   useEffect(() => { const h = () => { cachedConversations = null; loadConversations(); }; window.addEventListener("workspace-changed", h); window.addEventListener("user-login", h); window.addEventListener("user-logout", h); return () => { window.removeEventListener("workspace-changed", h); window.removeEventListener("user-login", h); window.removeEventListener("user-logout", h); }; }, [loadConversations]);
 
@@ -767,6 +796,14 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
       : `${window.location.origin}/chat?id=${conv.id}`;
     navigator.clipboard.writeText(url);
   };
+
+  const handleOpenConversation = useCallback((conv: Conversation) => {
+    const href = conv.skill_key
+      ? `/skills/chat?key=${conv.skill_key}&id=${conv.id}`
+      : `/chat?id=${conv.id}`;
+    setCurrentConvId(String(conv.id));
+    router.push(href, { scroll: false });
+  }, [router]);
 
   /* ── 拖拽调整宽度 ── */
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -821,21 +858,18 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
             <div className="space-y-0.5">
               {pinned.map(conv => {
                 const isActive = String(conv.id) === currentConvId;
-                const convHref = conv.skill_key
-                  ? `/skills/chat?key=${conv.skill_key}&id=${conv.id}`
-                  : `/chat?id=${conv.id}`;
                 const skillMeta = conv.skill_key ? SKILL_ICON_MAP[conv.skill_key] : null;
                 const IconComp = skillMeta ? skillMeta.icon : MessageSquare;
                 const iconColor = isActive
                   ? (skillMeta ? skillMeta.color : "text-brand")
                   : "text-text-tertiary group-hover:text-text-secondary";
                 return (
-                  <Link key={conv.id} href={convHref} className={cn("group flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-brand/10 text-brand" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
+                  <div key={conv.id} role="button" tabIndex={0} data-conversation-row data-conversation-id={conv.id} onClick={() => handleOpenConversation(conv)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleOpenConversation(conv); } }} className={cn("group flex w-full cursor-pointer items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-brand/10 text-brand" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
                     <IconComp className={cn("w-3.5 h-3.5 shrink-0 transition-all duration-200", iconColor)} />
                     <Pin className="w-3 h-3 shrink-0 text-brand" />
                     <span className={cn("flex-1 truncate text-left", isActive && "font-medium")}>{conv.title || t("sidebar.empty.new_chat")}</span>
                     <div className="opacity-0 group-hover:opacity-100 transition-opacity"><ConvMenu onRename={() => setRenameTarget(conv)} onTogglePin={() => handleTogglePin(conv)} pinned={conv.pinned} onShare={() => handleShare(conv)} onDelete={() => handleDelete(conv.id)} /></div>
-                  </Link>
+                  </div>
                 );
               })}
             </div>
@@ -864,20 +898,17 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
             <div className="space-y-0.5">
               {groups[label].map(conv => {
                 const isActive = String(conv.id) === currentConvId;
-                const convHref = conv.skill_key
-                  ? `/skills/chat?key=${conv.skill_key}&id=${conv.id}`
-                  : `/chat?id=${conv.id}`;
                 const skillMeta = conv.skill_key ? SKILL_ICON_MAP[conv.skill_key] : null;
                 const IconComp = skillMeta ? skillMeta.icon : MessageSquare;
                 const iconColor = isActive
                   ? (skillMeta ? skillMeta.color : "text-brand")
                   : "text-text-tertiary group-hover:text-text-secondary";
                 return (
-                  <Link key={conv.id} href={convHref} className={cn("group flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-brand/10 text-brand" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
+                  <div key={conv.id} role="button" tabIndex={0} data-conversation-row data-conversation-id={conv.id} onClick={() => handleOpenConversation(conv)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleOpenConversation(conv); } }} className={cn("group flex w-full cursor-pointer items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-brand/10 text-brand" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
                     <IconComp className={cn("w-3.5 h-3.5 shrink-0 transition-all duration-200", iconColor)} />
                     <span className={cn("flex-1 truncate text-left", isActive && "font-medium")}>{conv.title || t("sidebar.empty.new_chat")}</span>
                     <div className="opacity-0 group-hover:opacity-100 transition-opacity"><ConvMenu onRename={() => setRenameTarget(conv)} onTogglePin={() => handleTogglePin(conv)} pinned={conv.pinned} onShare={() => handleShare(conv)} onDelete={() => handleDelete(conv.id)} /></div>
-                  </Link>
+                  </div>
                 );
               })}
             </div>
@@ -1039,7 +1070,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
             </div>
           </div>
         ) : (
-          <div className="flex-1 overflow-y-auto scrollbar-hide">
+          <div ref={historyScrollRef} className="flex-1 overflow-y-auto scrollbar-hide">
             {/* ▼ 聊天按钮 */}
             <div className="px-3 pt-3 pb-2">
               <button
@@ -1280,11 +1311,15 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                       const IconComp = skillMeta ? skillMeta.icon : MessageSquare;
                       const isSelected = idx === searchSelectedIndex;
                       return (
-                        <Link
+                        <button
                           key={conv.id}
-                          href={convHref}
+                          type="button"
                           data-search-idx={idx}
-                          onClick={() => setSearchOpen(false)}
+                          onClick={() => {
+                            setCurrentConvId(String(conv.id));
+                            router.push(convHref, { scroll: false });
+                            setSearchOpen(false);
+                          }}
                           onMouseEnter={() => setSearchSelectedIndex(idx)}
                           className={cn(
                             "group flex items-start gap-3 px-4 py-3 transition-colors",
@@ -1315,7 +1350,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                               </p>
                             )}
                           </div>
-                        </Link>
+                        </button>
                       );
                     })}
                   </div>

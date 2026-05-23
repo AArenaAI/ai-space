@@ -10,7 +10,6 @@ import {
   createBusyGeneratingStatus,
   createFinalizingStatus,
   createGeneratingStatus,
-  createReasoningStatus,
   createWebSearchDoneStatus,
 } from "@/lib/chatActivityStatus";
 
@@ -20,6 +19,19 @@ export interface SearchSource {
   title: string;
   url: string;
   description: string;
+}
+
+function parsePersistedSearchSources(raw: any): SearchSource[] | undefined {
+  const value = raw?.search_sources ?? raw?.searchSources;
+  if (!value) return undefined;
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "string") return undefined;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export interface Message {
@@ -32,6 +44,7 @@ export interface Message {
   stopped?: boolean;
   search?: boolean;
   searchSources?: SearchSource[];
+  searchSourcesCount?: number;
   searchStatus?: "searching" | "completed";
   activityStatus?: { kind: "generating" | "reasoning" | "web_search" | "file_search" | "tool_call"; status: "running" | "searching" | "completed"; label: string };
   files?: { public_id: string; type: string; filename: string }[];
@@ -383,7 +396,14 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         if (parsed._error || parsed._error_meta) {
           const err = parsed._error || parsed._error_meta;
           const message = err.message || err.user_message || "请求失败";
-          realtimeUpdate(localMessageId, { errorCode: err.error_code || err.code || "unknown", retryable: err.retryable === true || err.retriable === true, requestId: err.request_id || realtimeGet(localMessageId)?.requestId });
+          realtimeUpdate(localMessageId, {
+            errorCode: err.error_code || err.code || "unknown",
+            retryable: err.retryable === true || err.retriable === true,
+            requestId: err.request_id || realtimeGet(localMessageId)?.requestId,
+            activityStatus: undefined,
+            searchStatus: undefined,
+            searchSources: undefined,
+          });
           if (!accumulated) accumulated = message;
           return;
         }
@@ -395,7 +415,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         }
         if (parsed._search_meta) {
           const meta = parsed._search_meta;
-          realtimeUpdate(localMessageId, { searchStatus: meta.status, searchSources: meta.sources || [], activityStatus: createWebSearchDoneStatus() });
+          realtimeUpdate(localMessageId, { searchStatus: meta.status, searchSources: meta.sources || [], searchSourcesCount: typeof meta.sources_count === "number" ? meta.sources_count : undefined, activityStatus: createWebSearchDoneStatus() });
           return;
         }
         const rawDelta = parsed.choices?.[0]?.delta || {};
@@ -403,9 +423,6 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         const reasoningDelta = stringifyDelta(rawDelta.reasoning_content || rawDelta.reasoning);
         let delta = "";
         if (reasoningDelta) {
-          realtimeUpdate(localMessageId, {
-            activityStatus: createReasoningStatus(),
-          });
           if (!inReasoningBlock) {
             delta += "<think>";
             inReasoningBlock = true;
@@ -580,6 +597,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             createdAt: new Date(m.created_at).getTime(),
             completedAt: m.completed_at ? new Date(m.completed_at).getTime() : undefined,
             files: m.files || undefined,
+            searchSources: parsePersistedSearchSources(m),
+            searchSourcesCount: typeof m.search_sources_count === "number" ? m.search_sources_count : undefined,
+            searchStatus: m.search_sources_count > 0 || m.search_sources ? "completed" : undefined,
             serverMessageId: Number(m.id || 0) || undefined,
             groupId: m.group_id || undefined,
             groupIndex: m.group_index ?? undefined,
@@ -865,6 +885,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               retryable: err.retryable === true || err.retriable === true,
               requestId: err.request_id || realtimeGet(assistantMsg.id)?.requestId,
               activityStatus: undefined,
+              searchStatus: undefined,
+              searchSources: undefined,
             });
             if (!accumulated) {
               accumulated = message;
@@ -889,6 +911,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             realtimeUpdate(assistantMsg.id, {
               searchStatus: meta.status,
               searchSources: meta.sources || [],
+              searchSourcesCount: typeof meta.sources_count === "number" ? meta.sources_count : undefined,
               activityStatus: createWebSearchDoneStatus(),
             });
             return;
@@ -915,9 +938,6 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           const reasoningDelta = stringifyDelta(rawDelta.reasoning_content || rawDelta.reasoning);
           let delta = "";
           if (reasoningDelta) {
-            realtimeUpdate(assistantMsg.id, {
-              activityStatus: createReasoningStatus(),
-            });
             if (!inReasoningBlock) {
               delta += "<think>";
               inReasoningBlock = true;
@@ -1058,7 +1078,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         if (sawDone && hasFinalContent && abortReason !== "navigation" && abortReason !== "user") {
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === assistantMsg.id ? { ...m, completedAt: Date.now() } : m
+              m.id === assistantMsg.id ? { ...m, completedAt: Date.now(), activityStatus: undefined } : m
             )
           );
         }
@@ -1366,7 +1386,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsg.id
-                  ? { ...m, stopped: true }
+                  ? { ...m, stopped: true, activityStatus: undefined }
                   : m
               )
             );
@@ -1393,7 +1413,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsg.id
-                  ? { ...m, content: displayMsg }
+                  ? { ...m, content: displayMsg, activityStatus: undefined }
                   : m
               )
             );
@@ -1529,6 +1549,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
                 createdAt: new Date(m.created_at).getTime(),
                 completedAt: m.completed_at ? new Date(m.completed_at).getTime() : undefined,
                 files: m.files || undefined,
+                searchSources: parsePersistedSearchSources(m),
+                searchSourcesCount: typeof m.search_sources_count === "number" ? m.search_sources_count : undefined,
+                searchStatus: m.search_sources_count > 0 || m.search_sources ? "completed" : undefined,
                 serverMessageId: Number(m.id || 0) || undefined,
                 groupId: m.group_id || undefined,
                 groupIndex: m.group_index ?? undefined,
@@ -1578,6 +1601,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         createdAt: new Date(m.created_at).getTime(),
         completedAt: m.completed_at ? new Date(m.completed_at).getTime() : undefined,
         files: m.files || undefined,
+        searchSources: parsePersistedSearchSources(m),
+        searchSourcesCount: typeof m.search_sources_count === "number" ? m.search_sources_count : undefined,
+        searchStatus: m.search_sources_count > 0 || m.search_sources ? "completed" : undefined,
         serverMessageId: Number(m.id || 0) || undefined,
         groupId: m.group_id || undefined,
         groupIndex: m.group_index ?? undefined,

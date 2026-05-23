@@ -125,7 +125,7 @@ function StreamingText({ messageId, content, isStreaming, className }: { message
         <div className="mb-3 rounded-xl border border-purple-200 dark:border-purple-800/40 overflow-hidden">
           <div className="flex items-center gap-2 px-3 py-2 bg-purple-50 dark:bg-[#1A1A2E]">
             <Lightbulb className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
-            <span className="text-sm font-medium text-text-secondary">正在思考...</span>
+            <span className="text-sm font-medium text-text-secondary">深度推理中，片刻即达极致答案</span>
             <div className="flex gap-0.5 ml-1">
               <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce" />
               <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce [animation-delay:0.15s]" />
@@ -157,7 +157,7 @@ function ThinkBlock({ content, isThinking }: { content: string; isThinking: bool
       >
         <Lightbulb className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
         <span className="text-sm font-medium text-text-secondary flex-1">
-          {isThinking ? "正在思考..." : `深度思考${content.length >= 2000 ? " · 已折叠" : ""}`}
+          {isThinking ? "深度推理中，片刻即达极致答案" : `深度推理${content.length >= 2000 ? " · 已折叠" : ""}`}
         </span>
         {isThinking && (
           <div className="flex gap-0.5">
@@ -513,7 +513,7 @@ function ChatMessageItemRaw({
       return (
         <StreamingText
           messageId={msg.id}
-          content={msg.content || msg.activityStatus?.label || "任务繁忙，正在生成中"}
+          content={msg.content || ""}
           isStreaming={true}
           className="text-[15px] leading-relaxed text-text-primary"
         />
