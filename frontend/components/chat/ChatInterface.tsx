@@ -437,8 +437,8 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
       />
 
       {/* 输入框：脱离列表文档流，固定在底部，避免生成时挤压消息区 */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-[176px] bg-gradient-to-t from-surface-elevated via-surface-elevated to-transparent pt-6">
-        <div className="pointer-events-auto">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[70] bg-gradient-to-t from-surface-elevated via-surface-elevated to-transparent pt-6">
+        <div className="pointer-events-auto relative z-[70]">
         <MessageInput
           onSend={handleSend}
           onStop={handleStop}

@@ -14,6 +14,8 @@ const DEEPSEEK_EFFORTS = ["high", "max"] as const;
 const GPT_EFFORTS = ["light", "standard", "extended", "heavy"] as const;
 // Kimi/Moonshot 模型的思考档位（只有开/关，无等级）
 const MOONSHOT_EFFORTS = [] as const;
+const TEXTAREA_MIN_HEIGHT = 92;
+const TEXTAREA_MAX_HEIGHT = 180;
 
 export type ReasoningEffort = "light" | "standard" | "extended" | "heavy" | "high" | "max";
 
@@ -65,6 +67,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
   });
   const [toolsOpen, setToolsOpen] = useState(false);
   const [showFileTip, setShowFileTip] = useState(false);
+  const [showCompareTip, setShowCompareTip] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const dragCounter = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -116,7 +119,10 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
-    el.style.height = "44px";
+    el.style.height = `${TEXTAREA_MIN_HEIGHT}px`;
+    const nextHeight = Math.min(Math.max(el.scrollHeight, TEXTAREA_MIN_HEIGHT), TEXTAREA_MAX_HEIGHT);
+    el.style.height = `${nextHeight}px`;
+    el.style.overflowY = el.scrollHeight > TEXTAREA_MAX_HEIGHT ? "auto" : "hidden";
   }, [content]);
 
   // 轮询更新文件解析状态
@@ -188,7 +194,8 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     setAttachedFiles([]);
     setToolsOpen(false);
     if (textareaRef.current) {
-      textareaRef.current.style.height = "44px";
+      textareaRef.current.style.height = `${TEXTAREA_MIN_HEIGHT}px`;
+      textareaRef.current.style.overflowY = "hidden";
     }
   };
 
@@ -369,24 +376,39 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
   };
 
   return (
-    <div className="shrink-0 px-4 pb-6 pt-2">
-      <form onSubmit={handleSubmit} className="max-w-[800px] mx-auto h-[118px]">
+    <div className="shrink-0 px-4 pb-6 pt-6">
+      <form onSubmit={handleSubmit} className="max-w-[800px] mx-auto">
         { /* 上方面板：对比 + 附件按钮 */ }
         <div className="flex items-center gap-2 mb-2">
           {/* 对比模式开关 */}
-          <button
-            type="button"
-            onClick={onToggleCompare}
-            className={cn(
-              "flex items-center gap-1.5 pl-2.5 pr-3 py-1 text-[12px] font-medium rounded-full border transition-all duration-200",
-              compareMode
-                ? "bg-amber-500/10 border-amber-500/40 text-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.12)]"
-                : "bg-transparent border-surface-border text-text-tertiary hover:text-text-secondary hover:border-text-tertiary/50"
-            )}
-          >
-            <Columns2 className="w-3 h-3" />
-            <span>{t("chat.compare")}</span>
-          </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={onToggleCompare}
+              onMouseEnter={() => setShowCompareTip(true)}
+              onMouseLeave={() => setShowCompareTip(false)}
+              aria-label={t("chat.compare")}
+              className={cn(
+                "flex h-7 w-7 items-center justify-center rounded-full border transition-all duration-200",
+                compareMode
+                  ? "bg-amber-500/10 border-amber-500/40 text-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.12)]"
+                  : "bg-transparent border-surface-border text-text-tertiary hover:text-text-secondary hover:border-text-tertiary/50"
+              )}
+            >
+              <Columns2 className="w-3.5 h-3.5" />
+            </button>
+            <div
+              className={cn(
+                "absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-[180px] z-[90] pointer-events-none transition-opacity duration-200",
+                showCompareTip ? "opacity-100" : "opacity-0"
+              )}
+            >
+              <div className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 shadow-lg text-[12px] leading-relaxed text-text-secondary">
+                <div className="font-medium text-text-primary">{t("chat.compare")}</div>
+              </div>
+              <div className="absolute left-1/2 -translate-x-1/2 -bottom-1 w-2 h-2 rotate-45 border-r border-b border-surface-border bg-surface-card" />
+            </div>
+          </div>
 
           {/* 文件上传按钮 */}
           <div className="relative">
@@ -396,8 +418,9 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
               disabled={uploading || isLoading}
               onMouseEnter={() => setShowFileTip(true)}
               onMouseLeave={() => setShowFileTip(false)}
+              aria-label={t("chat.attachments")}
               className={cn(
-                "flex items-center gap-1 pl-2.5 pr-3 py-1 text-[12px] font-medium rounded-full border transition-all duration-200",
+                "flex h-7 w-7 items-center justify-center rounded-full border transition-all duration-200",
                 attachedFiles.length > 0
                   ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-400"
                   : "bg-transparent border-surface-border text-text-tertiary hover:text-text-secondary hover:border-text-tertiary/50",
@@ -405,16 +428,15 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
               )}
             >
               {uploading ? (
-                <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
               ) : (
-                <Paperclip className="w-3 h-3" />
+                <Paperclip className="w-3.5 h-3.5" />
               )}
-              <span>{t("chat.attachments")}{attachedFiles.length > 0 ? ` (${attachedFiles.length})` : ""}</span>
             </button>
             {/* 自定义 tooltip */}
             <div
               className={cn(
-                "absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-[220px] z-[60] pointer-events-none transition-opacity duration-200",
+                "absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-[220px] z-[90] pointer-events-none transition-opacity duration-200",
                 showFileTip ? "opacity-100" : "opacity-0"
               )}
             >
@@ -435,7 +457,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           className={cn(
-            "relative flex h-[86px] flex-col overflow-hidden rounded-2xl border transition-all duration-300",
+            "relative flex min-h-[134px] flex-col overflow-visible rounded-2xl border transition-all duration-300",
             "bg-surface-card",
             dragOver
               ? "border-brand/60 border-dashed shadow-[0_0_0_1px_rgba(59,130,246,0.15),0_0_20px_rgba(59,130,246,0.1)]"
@@ -506,7 +528,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
             onKeyDown={handleKeyDown}
             placeholder={t("chat.placeholder")}
             rows={1}
-            className="w-full h-[44px] shrink-0 resize-none overflow-y-auto bg-transparent px-4 pt-3.5 pb-1 text-[15px] outline-none placeholder:text-text-tertiary leading-relaxed"
+            className="w-full min-h-[92px] shrink-0 resize-none overflow-hidden bg-transparent px-4 pt-3.5 pb-1 text-[15px] outline-none placeholder:text-text-tertiary leading-relaxed"
           />
 
           <div className="flex items-center justify-between px-3 pb-3">
@@ -534,7 +556,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
 
                 {/* 工具悬浮下拉浮层 */}
                 {toolsOpen && (
-                  <div className="absolute bottom-full left-0 mb-2 w-48 rounded-xl border border-surface-border bg-surface-elevated shadow-xl z-50 py-1 animate-fade-in">
+                  <div className="absolute bottom-full left-0 mb-2 w-48 rounded-xl border border-surface-border bg-surface-elevated shadow-xl z-[90] py-1 animate-fade-in">
                     {/* 联网搜索选项 */}
                     <div className="px-1">
                       <button

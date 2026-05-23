@@ -3,15 +3,15 @@
 import React, { useEffect, useRef, useState, useCallback, memo } from "react";
 import {
   User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck,
-  ChevronDown, ChevronUp, Lightbulb, Play, Search, FileText, Wrench, Star, Columns2,
+  ChevronDown, ChevronUp, Lightbulb, Play, FileText, Star, Columns2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/hooks/useChat";
 import { useMessageStream } from "@/hooks/useMessageStream";
-import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
 import dynamic from "next/dynamic";
 import { InferredGroup } from "@/lib/groups";
+import { AssistantMessageMeta } from "./AssistantMessageMeta";
 
 const MarkdownRenderer = dynamic(() => import("./MarkdownRenderer"), {
   ssr: false,
@@ -141,48 +141,6 @@ function StreamingText({ messageId, content, isStreaming, className }: { message
       {!hasContent && !hasReason && <ThinkingDots />}
       {isStreaming && <StreamingCursor />}
     </span>
-  );
-}
-
-function AssistantMeta({ msg, isStreaming, model }: { msg: Message; isStreaming: boolean; model?: ChatModel }) {
-  const realtime = useMessageRealtime(isStreaming ? msg.id : "");
-  const activityStatus = realtime?.activityStatus ?? msg.activityStatus;
-  const searchStatus = realtime?.searchStatus;
-  const searchSources = realtime?.searchSources;
-
-  if (!model) return null;
-
-  return (
-    <div className="flex items-center gap-2 mb-2">
-      <div className="flex items-center gap-1.5">
-        <div className="w-1 h-1 rounded-full" style={{ backgroundColor: model.color }} />
-        <span className="text-[11px] text-text-tertiary">{model.name}</span>
-      </div>
-      {searchStatus === "searching" && (
-        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full text-blue-600 bg-blue-500/10">
-          <Search className="w-3 h-3 animate-pulse" />
-          正在联网搜索
-        </span>
-      )}
-      {(searchStatus === "completed" || (searchSources && searchSources.length > 0)) && (
-        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full text-green-600 bg-green-500/10">
-          <Search className="w-3 h-3" />
-          已联网搜索{searchSources && searchSources.length > 0 ? `·引用${searchSources.length}个来源` : ""}
-        </span>
-      )}
-      {activityStatus && activityStatus.status !== "completed" && (
-        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full text-amber-600 bg-amber-500/10">
-          {activityStatus.kind === "tool_call" ? (
-            <Wrench className="w-3 h-3 animate-pulse" />
-          ) : activityStatus.kind === "file_search" ? (
-            <FileText className="w-3 h-3 animate-pulse" />
-          ) : (
-            <Search className="w-3 h-3 animate-pulse" />
-          )}
-          {activityStatus.label}
-        </span>
-      )}
-    </div>
   );
 }
 
@@ -474,7 +432,7 @@ function MessageActions({
 
 /* ---------- 导出 ---------- */
 
-export { ThinkingDots, WaveText, StreamingCursor, StreamingText, AssistantMeta, parseThinkContent, extractCitations, sanitizeContent, getCitedSources, ThinkBlock, MessageMenu, MessageActions, isMessageGenerating };
+export { ThinkingDots, WaveText, StreamingCursor, StreamingText, AssistantMessageMeta, parseThinkContent, extractCitations, sanitizeContent, getCitedSources, ThinkBlock, MessageMenu, MessageActions, isMessageGenerating };
 
 export interface ChatMessageItemProps {
   msg: Message;
@@ -575,9 +533,9 @@ function ChatMessageItemRaw({
   };
 
   return (
-    <div className="flex gap-3 animate-message-appear group py-1">
+    <div className={cn("flex animate-message-appear group py-1", isUser ? "justify-end" : "gap-3")}>
       {/* 左侧：AI头像 / 用户复选框 */}
-      <div className="mt-1 w-7 shrink-0">
+      <div className={cn("mt-1 shrink-0", isUser && !selectMode ? "hidden" : "w-7")}>
         {!isUser && !selectMode && (
           <div className="w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center">
             <Bot className="w-4 h-4 text-text-secondary" />
@@ -600,7 +558,10 @@ function ChatMessageItemRaw({
 
       {/* 中间内容 */}
       <div className={cn("flex-1 flex min-w-0", isUser ? "justify-end" : "justify-start")}>
-        <div className="flex flex-col gap-1 min-w-0">
+        <div className={cn(
+          "flex flex-col gap-1 min-w-0",
+          isUser ? "items-end" : "items-start"
+        )}>
           {!isUser && group && group.assistantMessages.length > 1 && (
             <div className="flex items-center gap-1.5 mb-1">
               {group.assistantMessages.map((a, idx) => {
@@ -631,14 +592,14 @@ function ChatMessageItemRaw({
           )}
           <div
             className={cn(
-              "px-4 py-3 relative w-fit max-w-full",
+              "px-4 py-3 relative w-fit",
               isUser
-                ? "rounded-2xl rounded-br-sm bg-[#EFF6FF] dark:bg-[#1E293B]"
-                : "rounded-2xl rounded-bl-sm bg-[#F5F4F2] dark:bg-[#1F1F1F]"
+                ? "max-w-[720px] rounded-2xl rounded-br-sm bg-[#EFF6FF] dark:bg-[#1E293B]"
+                : "max-w-full rounded-2xl rounded-bl-sm bg-[#F5F4F2] dark:bg-[#1F1F1F]"
             )}
           >
             {!isUser && model && !selectMode && (
-              <AssistantMeta msg={msg} isStreaming={isStreaming} model={model} />
+              <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} />
             )}
 
             {isUser ? (
@@ -725,7 +686,7 @@ function ChatMessageItemRaw({
       </div>
 
       {/* 右侧：用户头像 / AI复选框 */}
-      <div className="mt-1 w-7 shrink-0">
+      <div className={cn("mt-1 shrink-0", isUser && !selectMode ? "hidden" : "w-7")}>
         {isUser && !selectMode && (
           <div className="w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center">
             <User className="w-4 h-4 text-text-secondary" />

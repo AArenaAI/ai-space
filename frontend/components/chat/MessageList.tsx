@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback, useMemo, memo, type UIEvent } from "react";
-import { User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck, ChevronDown, ChevronUp, Lightbulb, Play, Search, ChevronDown as ChevronDownIcon, FileText, Wrench, Star, Columns2, Loader2 } from "lucide-react";
+import { User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck, ChevronDown, ChevronUp, Lightbulb, Play, ChevronDown as ChevronDownIcon, FileText, Star, Columns2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/hooks/useChat";
 import { useFavorites } from "@/hooks/useFavorites";
@@ -19,11 +19,11 @@ import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import ShareDialog from "@/components/ui/ShareDialog";
 import { Virtuoso, VirtuosoHandle, type Components } from "react-virtuoso";
 import { useMessageStream } from "@/hooks/useMessageStream";
-import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
 import { inferGroups, InferredGroup } from "@/lib/groups";
 import EChartsBlock from "./EChartsBlock";
 import { useI18n } from "@/lib/i18n";
+import { AssistantMessageMeta } from "./AssistantMessageMeta";
 
 const CHAT_BOTTOM_SPACER = 176;
 
@@ -171,48 +171,6 @@ function StreamingText({ messageId, content, isStreaming, className }: { message
       <span className="whitespace-pre-wrap break-words">{parsed.answer}</span>
       {!hasContent && !hasReason && <ThinkingDots />}
       {isStreaming && <StreamingCursor />}
-    </div>
-  );
-}
-
-function AssistantMeta({ msg, isStreaming, model }: { msg: Message; isStreaming: boolean; model?: ChatModel }) {
-  const realtime = useMessageRealtime(isStreaming ? msg.id : "");
-  const activityStatus = realtime?.activityStatus ?? msg.activityStatus;
-  const searchStatus = realtime?.searchStatus;
-  const searchSources = realtime?.searchSources;
-
-  if (!model) return null;
-
-  return (
-    <div className="flex items-center gap-2 mb-2">
-      <div className="flex items-center gap-1.5">
-        <div className="w-1 h-1 rounded-full" style={{ backgroundColor: model.color }} />
-        <span className="text-[11px] text-text-tertiary">{model.name}</span>
-      </div>
-      {searchStatus === "searching" && (
-        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full text-blue-600 bg-blue-500/10">
-          <Search className="w-3 h-3 animate-pulse" />
-          正在联网搜索
-        </span>
-      )}
-      {(searchStatus === "completed" || (searchSources && searchSources.length > 0)) && (
-        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full text-green-600 bg-green-500/10">
-          <Search className="w-3 h-3" />
-          已联网搜索{searchSources && searchSources.length > 0 ? `·引用${searchSources.length}个来源` : ""}
-        </span>
-      )}
-      {activityStatus && activityStatus.status !== "completed" && (
-        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full text-amber-600 bg-amber-500/10">
-          {activityStatus.kind === "tool_call" ? (
-            <Wrench className="w-3 h-3 animate-pulse" />
-          ) : activityStatus.kind === "file_search" ? (
-            <FileText className="w-3 h-3 animate-pulse" />
-          ) : (
-            <Search className="w-3 h-3 animate-pulse" />
-          )}
-          {activityStatus.label}
-        </span>
-      )}
     </div>
   );
 }
@@ -638,6 +596,7 @@ function MessageList({
   const programmaticScrollUntilRef = useRef(0);
   const bottomLockRafRef = useRef<number>(0);
   const bottomLockTimersRef = useRef<number[]>([]);
+
   const scrollToBottom = useCallback(() => {
     programmaticScrollUntilRef.current = Date.now() + 320;
     const el = scrollRef.current;
@@ -693,7 +652,7 @@ function MessageList({
     // stickToBottom 表示用户意图，只在明确上滑离开底部时关闭；
     // 不用 Virtuoso 测量过程中的临时 distance 抖动来反复切换。
     const isProgrammaticScroll = Date.now() < programmaticScrollUntilRef.current;
-    if (!isProgrammaticScroll && isScrollingUp && distanceToBottom > 160) {
+    if (!isProgrammaticScroll && isScrollingUp && distanceToBottom > 1) {
       stickToBottomRef.current = false;
     }
     if (distanceToBottom <= 24) {
@@ -1090,7 +1049,7 @@ function MessageList({
                                     )}
                                   >
                                     {!isUser && model && (
-                                      <AssistantMeta msg={msg} isStreaming={isStreaming} model={model} />
+                                      <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} />
                                     )}
 
                                     {isUser ? (
@@ -1321,10 +1280,10 @@ function MessageList({
             <div className="max-w-[800px] mx-auto px-4 py-4">
               <div
                 key={msg.id}
-                className="flex gap-3 animate-message-appear group"
+                className={cn("flex gap-3 animate-message-appear group", isUser ? "justify-end" : "justify-start")}
               >
                 {/* 左侧：AI头像 / 用户复选框 */}
-                <div className="mt-1 w-7 shrink-0">
+                <div className={cn("mt-1 shrink-0", isUser && !selectMode ? "hidden" : "w-7")}>
                   {!isUser && !selectMode && (
                     <div className="w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center">
                       <Bot className="w-4 h-4 text-text-secondary" />
@@ -1347,7 +1306,7 @@ function MessageList({
 
                 {/* 中间内容 */}
                 <div className={cn("flex-1 flex min-w-0", isUser ? "justify-end" : "justify-start")}>
-                  <div className="flex flex-col gap-1 min-w-0">
+                  <div className={cn("flex flex-col gap-1 min-w-0", isUser ? "items-end" : "items-start")}>
                     {!isUser && group && group.assistantMessages.length > 1 && (
                       <div className="flex items-center gap-1.5 mb-1">
                         {group.assistantMessages.map((a, idx) => {
@@ -1386,7 +1345,7 @@ function MessageList({
                     >
 
                     {!isUser && model && !selectMode && (
-                      <AssistantMeta msg={msg} isStreaming={isStreaming} model={model} />
+                      <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} />
                     )}
 
                     {isUser ? (
@@ -1506,7 +1465,7 @@ function MessageList({
           type="button"
           onClick={() => {
             stickToBottomRef.current = true;
-            scrollToBottom();
+            lockBottomAfterLayout();
           }}
           className="absolute left-1/2 -translate-x-1/2 z-30 flex items-center justify-center w-10 h-10 rounded-full
             bg-surface-elevated border border-surface-border text-text-secondary

@@ -4,6 +4,15 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { getGuestId } from "@/lib/guestId";
 import { streamAppend, streamGet, streamClear, realtimeUpdate, realtimeGet, realtimeClear , RealtimeData } from "@/lib/streaming";
+import {
+  BUSY_GENERATING_LABEL,
+  createActivityStatusFromMeta,
+  createBusyGeneratingStatus,
+  createFinalizingStatus,
+  createGeneratingStatus,
+  createReasoningStatus,
+  createWebSearchDoneStatus,
+} from "@/lib/chatActivityStatus";
 
 const API_BASE_URL = ""; // 使用相对路径，nginx 同域名代理 /api -> 后端
 
@@ -24,7 +33,7 @@ export interface Message {
   search?: boolean;
   searchSources?: SearchSource[];
   searchStatus?: "searching" | "completed";
-  activityStatus?: { kind: "generating" | "web_search" | "file_search" | "tool_call"; status: "running" | "searching" | "completed"; label: string };
+  activityStatus?: { kind: "generating" | "reasoning" | "web_search" | "file_search" | "tool_call"; status: "running" | "searching" | "completed"; label: string };
   files?: { public_id: string; type: string; filename: string }[];
   errorCode?: string;
   retryable?: boolean;
@@ -253,7 +262,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               ...m,
               content: nextContent,
               serverMessageId,
-              activityStatus: isFinished ? undefined : { kind: "generating", status: "running", label: "任务繁忙，正在生成中" },
+              activityStatus: isFinished ? undefined : createBusyGeneratingStatus(),
               completedAt: isFinished ? Date.now() : undefined,
             };
           })
@@ -340,7 +349,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         // OpenAI Responses 可能在 completed/final content 阶段补尾；交给 DB polling 校准最终内容。
         realtimeUpdate(localMessageId, {
           completedAt: undefined,
-          activityStatus: { kind: "generating", status: "running", label: hasContent ? "正在校准最终内容" : "任务繁忙，正在生成中" },
+          activityStatus: createFinalizingStatus(hasContent),
         });
         if (hasContent && serverMessageId) {
           startBackgroundPolling(convId, localMessageId, serverMessageId);
@@ -367,7 +376,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             useBackground: task.use_background === true || task.background === true || task.is_complex_task === true,
             isComplexTask: task.is_complex_task === true,
             lastSequence: latestSequence,
-            activityStatus: { kind: "generating", status: "running", label: "正在生成内容" },
+            activityStatus: createGeneratingStatus(),
           });
           return;
         }
@@ -381,12 +390,12 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         if (parsed._activity_meta) {
           const meta = parsed._activity_meta;
           const searchStatus = meta.kind === "web_search" ? (meta.status === "running" ? "searching" : "completed") : undefined;
-          realtimeUpdate(localMessageId, { activityStatus: { kind: meta.kind || "generating", status: meta.status || "running", label: meta.label || "正在生成内容" }, searchStatus });
+          realtimeUpdate(localMessageId, { activityStatus: createActivityStatusFromMeta(meta), searchStatus });
           return;
         }
         if (parsed._search_meta) {
           const meta = parsed._search_meta;
-          realtimeUpdate(localMessageId, { searchStatus: meta.status, searchSources: meta.sources || [], activityStatus: { kind: "web_search", status: "completed", label: "网页搜索完成" } });
+          realtimeUpdate(localMessageId, { searchStatus: meta.status, searchSources: meta.sources || [], activityStatus: createWebSearchDoneStatus() });
           return;
         }
         const rawDelta = parsed.choices?.[0]?.delta || {};
@@ -394,6 +403,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         const reasoningDelta = stringifyDelta(rawDelta.reasoning_content || rawDelta.reasoning);
         let delta = "";
         if (reasoningDelta) {
+          realtimeUpdate(localMessageId, {
+            activityStatus: createReasoningStatus(),
+          });
           if (!inReasoningBlock) {
             delta += "<think>";
             inReasoningBlock = true;
@@ -408,6 +420,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             delta += "</think>";
             inReasoningBlock = false;
           }
+          realtimeUpdate(localMessageId, {
+            activityStatus: createGeneratingStatus(),
+          });
           delta += contentDelta;
         }
         if (delta) {
@@ -586,7 +601,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               serverMessageId: active.info.serverMessageId || m.serverMessageId,
               generationTaskId: active.info.generationTaskId || m.generationTaskId,
               lastSequence: active.info.lastSequence || m.lastSequence,
-              activityStatus: { kind: "generating" as const, status: "running" as const, label: "正在生成内容" },
+              activityStatus: createGeneratingStatus(),
             };
           });
           setMessages(mergedMessages);
@@ -634,7 +649,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
                         ? (bgTask.completed_at ? new Date(bgTask.completed_at).getTime() : Date.now())
                         : m.completedAt),
                     activityStatus: shouldResumePolling
-                      ? { kind: "generating", status: "running", label: "任务繁忙，正在生成中" }
+                      ? createBusyGeneratingStatus()
                       : m.activityStatus,
                   } as Message;
                 }));
@@ -792,7 +807,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           const hasContent = (accumulated || streamGet(assistantMsg.id) || realtimeGet(assistantMsg.id)?.content || "").trim().length > 0;
           realtimeUpdate(assistantMsg.id, hasContent
             ? { completedAt: Date.now(), activityStatus: undefined }
-            : { completedAt: undefined, activityStatus: { kind: "generating", status: "running", label: "任务繁忙，正在生成中" } }
+            : { completedAt: undefined, activityStatus: createBusyGeneratingStatus() }
           );
           return;
         }
@@ -817,7 +832,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               useBackground: latestUseBackground,
               isComplexTask: task.is_complex_task === true,
               lastSequence: latestSequence,
-              activityStatus: { kind: "generating", status: "running", label: "正在生成内容" },
+              activityStatus: createGeneratingStatus(),
             });
             if (generationTaskId) {
               backgroundPollingStarted = true;
@@ -830,17 +845,12 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             latestServerMessageId = serverMessageId;
             latestUseBackground = true;
             const taskId = task.id || "";
-            const placeholder = "任务繁忙，正在生成中";
-            if (!accumulated) {
-              accumulated = placeholder;
-              streamAppend(assistantMsg.id, placeholder);
-            }
             realtimeUpdate(assistantMsg.id, {
               serverMessageId,
               backgroundTaskId: taskId,
               useBackground: true,
               isComplexTask: true,
-              activityStatus: { kind: "generating", status: "running", label: placeholder },
+              activityStatus: createBusyGeneratingStatus(),
             });
             backgroundPollingStarted = true;
             return;
@@ -865,11 +875,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           if (parsed._activity_meta) {
             const meta = parsed._activity_meta;
             const patch: Partial<RealtimeData> = {
-              activityStatus: {
-                kind: meta.kind || "generating",
-                status: meta.status || "running",
-                label: meta.label || "正在生成内容",
-              },
+              activityStatus: createActivityStatusFromMeta(meta),
             };
             if (meta.kind === "web_search") {
               patch.searchStatus = meta.status;
@@ -883,7 +889,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             realtimeUpdate(assistantMsg.id, {
               searchStatus: meta.status,
               searchSources: meta.sources || [],
-              activityStatus: { kind: "web_search", status: "completed", label: "网页搜索完成" },
+              activityStatus: createWebSearchDoneStatus(),
             });
             return;
           }
@@ -909,6 +915,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           const reasoningDelta = stringifyDelta(rawDelta.reasoning_content || rawDelta.reasoning);
           let delta = "";
           if (reasoningDelta) {
+            realtimeUpdate(assistantMsg.id, {
+              activityStatus: createReasoningStatus(),
+            });
             if (!inReasoningBlock) {
               delta += "<think>";
               inReasoningBlock = true;
@@ -923,6 +932,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               delta += "</think>";
               inReasoningBlock = false;
             }
+            realtimeUpdate(assistantMsg.id, {
+              activityStatus: createGeneratingStatus(),
+            });
             delta += contentDelta;
           }
           if (delta) {
@@ -1365,7 +1377,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsg.id
-                  ? { ...m, content: m.content || "任务繁忙，正在生成中", activityStatus: { kind: "generating", status: "running", label: "任务繁忙，正在生成中" } }
+                  ? { ...m, activityStatus: createBusyGeneratingStatus() }
                   : m
               )
             );
