@@ -44,14 +44,17 @@ export function useFavorites() {
   const [loading, setLoading] = useState(false);
   const [listLoading, setListLoading] = useState(false);
   const fetchedRef = useRef(false);
+  const checkedIdsRef = useRef<Set<number>>(new Set());
 
   // 批量检查收藏状态
   const checkBatch = useCallback(async (messageIds: number[]) => {
-    if (messageIds.length === 0) return;
+    const ids = Array.from(new Set(messageIds.filter((id) => id > 0))).filter((id) => !checkedIdsRef.current.has(id));
+    if (ids.length === 0) return;
     const token = localStorage.getItem("token");
     if (!token) return;
+    ids.forEach((id) => checkedIdsRef.current.add(id));
     try {
-      const res = await fetch(`/api/favorites/check-batch?message_ids=${messageIds.join(",")}`, {
+      const res = await fetch(`/api/favorites/check-batch?message_ids=${ids.join(",")}`, {
         headers: getHeaders(),
       });
       if (res.ok) {
@@ -67,7 +70,7 @@ export function useFavorites() {
         });
       }
     } catch {
-      // ignore
+      ids.forEach((id) => checkedIdsRef.current.delete(id));
     }
   }, []);
 

@@ -641,6 +641,31 @@ function MessageList({
   const [sharing, setSharing] = useState(false);
   const [compareModelMenuOpen, setCompareModelMenuOpen] = useState<number | null>(null);
   const groups = useMemo(() => inferGroups(messages), [messages]);
+  const groupByMessageId = useMemo(() => {
+    const map = new Map<string, InferredGroup>();
+    groups.forEach((group) => {
+      map.set(group.userMessage.id, group);
+      group.assistantMessages.forEach((assistant) => map.set(assistant.id, group));
+    });
+    return map;
+  }, [groups]);
+  const modelById = useMemo(() => {
+    const map = new Map<string, ChatModel>();
+    models.forEach((model) => map.set(model.id, model));
+    return map;
+  }, [models]);
+  const activeCompareModels = useMemo(() => {
+    if (!isCompare) return [];
+    return compareModels && compareModels.length > 0
+      ? compareModels
+      : Array.from(new Set(messages.filter((m) => m.role === "assistant" && m.model).map((m) => m.model!)));
+  }, [compareModels, isCompare, messages]);
+  const columnMessages = useMemo(() => {
+    if (!isCompare) return [];
+    return activeCompareModels.map((modelId) =>
+      messages.filter((msg) => msg.role === "user" || msg.model === modelId)
+    );
+  }, [activeCompareModels, isCompare, messages]);
 
   // 收藏功能
   const { toggleFavorite, isFavorited, checkBatch } = useFavorites();
@@ -767,23 +792,6 @@ function MessageList({
   };
 
 
-  const compareGroups = useMemo(() => {
-    if (!isCompare) return [];
-    const groups: { user: Message; assistants: Message[] }[] = [];
-    let current: { user: Message; assistants: Message[] } | null = null;
-
-    messages.forEach((msg) => {
-      if (msg.role === "user") {
-        current = { user: msg, assistants: [] };
-        groups.push(current);
-      } else if (msg.role === "assistant" && current) {
-        current.assistants.push(msg);
-      }
-    });
-
-    return groups;
-  }, [isCompare, messages]);
-
   const isMessageGenerating = (msg: Message, isStreaming: boolean) => {
     if (isStreaming) return true;
     if (msg.completedAt || msg.stopped) return false;
@@ -816,7 +824,7 @@ function MessageList({
   };
 
   const renderCompareModelHeader = (modelId: string, index: number) => {
-    const model = models.find((m) => m.id === modelId);
+    const model = modelById.get(modelId);
     const isOpen = compareModelMenuOpen === index;
     return (
       <div className="flex items-center justify-between gap-3 border-b border-surface-border bg-surface-card px-4 py-3">
@@ -889,16 +897,6 @@ function MessageList({
   );
 
   if (isCompare) {
-    // 动态列数：优先使用 compareModels，否则从消息中收集所有 model
-    const activeCompareModels =
-      compareModels && compareModels.length > 0
-        ? compareModels
-        : Array.from(new Set(messages.filter((m) => m.role === "assistant" && m.model).map((m) => m.model!)));
-
-    const columnMessages = activeCompareModels.map((modelId) =>
-      messages.filter((msg) => msg.role === "user" || msg.model === modelId)
-    );
-
     return (
       <div className="relative flex-1 overflow-hidden">
         <div className="h-full px-3 py-3">
@@ -919,7 +917,7 @@ function MessageList({
                     ) : (
                       <>
                         {colMsgs.map((msg, msgIndex) => {
-                          const model = models.find((m) => m.id === msg.model);
+                          const model = msg.model ? modelById.get(msg.model) : undefined;
                           const isUser = msg.role === "user";
                           const isLast = msgIndex === colMsgs.length - 1;
                           const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && isLast;
@@ -1168,7 +1166,7 @@ function MessageList({
       >
         <div className="max-w-[800px] mx-auto space-y-8">
         {messages.map((msg, index) => {
-          const group = groups.find(g => g.userMessage.id === msg.id || g.assistantMessages.some(a => a.id === msg.id));
+          const group = groupByMessageId.get(msg.id);
           const isUser = msg.role === "user";
 
           // 非活跃 assistant 跳过渲染
@@ -1178,7 +1176,7 @@ function MessageList({
             if (msg.id !== activeMsg?.id) return null;
           }
 
-          const model = models.find((m) => m.id === msg.model);
+          const model = msg.model ? modelById.get(msg.model) : undefined;
           const isLast = index === messages.length - 1;
           const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && isLast;
           const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
@@ -1218,7 +1216,7 @@ function MessageList({
                   {!isUser && group && group.assistantMessages.length > 1 && (
                     <div className="flex items-center gap-1.5 mb-1">
                       {group.assistantMessages.map((a, idx) => {
-                        const m = models.find((model) => model.id === a.model);
+                        const m = a.model ? modelById.get(a.model) : undefined;
                         const isActive = (groupViews?.get(group.id) ?? 0) === idx;
                         return (
                           <button

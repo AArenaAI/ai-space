@@ -662,23 +662,46 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
   }, [searchSelectedIndex]);
 
   useEffect(() => {
-    const h = () => loadConversations();
+    const h = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (!d?.id) {
+        loadConversations();
+        return;
+      }
+      const now = new Date().toISOString();
+      const conv: Conversation = {
+        id: Number(d.id),
+        title: d.title || t("sidebar.empty.new_chat"),
+        model: d.model || "",
+        pinned: !!d.pinned,
+        created_at: d.created_at || now,
+        updated_at: d.updated_at || now,
+        skill_key: d.skill_key,
+      };
+      setConversations(prev => {
+        const next = sortConversations([conv, ...prev.filter(c => c.id !== conv.id)]);
+        cachedConversations = next;
+        return next;
+      });
+    };
     window.addEventListener("conversation-created", h);
     return () => window.removeEventListener("conversation-created", h);
-  }, [loadConversations]);
+  }, [loadConversations, t]);
   useEffect(() => {
     const h = (e: Event) => {
       const d = (e as CustomEvent).detail;
       if (d?.id != null && d?.title != null) {
         const targetId = typeof d.id === "string" ? Number(d.id) : d.id;
-        const next = conversations.map(c => c.id === targetId ? { ...c, title: d.title } : c);
-        setConversations(next);
-        cachedConversations = next;
+        setConversations(prev => {
+          const next = prev.map(c => c.id === targetId ? { ...c, title: d.title } : c);
+          cachedConversations = next;
+          return next;
+        });
       }
     };
     window.addEventListener("conversation-renamed", h);
     return () => window.removeEventListener("conversation-renamed", h);
-  }, [conversations]);
+  }, []);
   useEffect(() => {
     const h = (e: Event) => {
       const d = (e as CustomEvent).detail;

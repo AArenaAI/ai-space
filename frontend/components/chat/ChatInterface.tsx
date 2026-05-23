@@ -34,7 +34,6 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<number>(0);
   const [autoModelNotice, setAutoModelNotice] = useState(false);
-  const [conversationTitle, setConversationTitle] = useState<string>("");
   const [isComplexTask, setIsComplexTask] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [forkDialogOpen, setForkDialogOpen] = useState(false);
@@ -61,6 +60,8 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
     groupViews,
     switchGroupModel,
     forkChat,
+    conversationTitle,
+    setConversationTitle,
   } = useChat(conversationId, models, skillKey);
 
   const { templates } = useTemplates();
@@ -114,22 +115,6 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
       window.history.replaceState({}, "", url.toString());
     }
   }, [currentConversation, conversationId, effectiveSkillKey]);
-
-  // 获取对话标题
-  useEffect(() => {
-    if (!conversationId) {
-      setConversationTitle("");
-      return;
-    }
-    const token = localStorage.getItem("token");
-    if (!token) return;
-    fetch(`/api/conversations/${conversationId}`, { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data?.title) setConversationTitle(data.title);
-      })
-      .catch(() => {});
-  }, [conversationId]);
 
   const handleRename = async (newTitle: string) => {
     if (!conversationId || !newTitle.trim()) {

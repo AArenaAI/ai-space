@@ -147,6 +147,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [selectedModel, setSelectedModelState] = useState<ChatModel>(defaultModel);
+  const [conversationTitle, setConversationTitle] = useState("");
   const [currentConversation, setCurrentConversation] = useState<number | undefined>(conversationId);
   const abortControllerRef = useRef<AbortController | null>(null);
   const compareAbortControllersRef = useRef<AbortController[]>([]);
@@ -492,6 +493,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
 
     if (!conversationId) {
       setIsLoadingHistory(false);
+      setConversationTitle("");
       if (shouldResetRef.current) {
         setMessages([]);
         setCurrentConversation(undefined);
@@ -543,8 +545,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         if (!res.ok) throw new Error(`load conversation failed: ${res.status}`);
         return res.json();
       })
-      .then(async (data) => {
+      .then((data) => {
         if (!isLatestLoad() || loadController.signal.aborted) return;
+        setConversationTitle(data.title || "");
         if (data.messages) {
           const loadedMessages: Message[] = data.messages.map((m: any) => ({
             id: String(m.id || uuidv4()),
@@ -558,49 +561,6 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             groupId: m.group_id || undefined,
             groupIndex: m.group_index ?? undefined,
           }));
-          // 如果最后一条 assistant 仍在生成，不能用"下一条消息时间"近似完成时间；
-          // 会话详情接口本身不带生成状态，必须查 /messages/:id 的 background_task.status。
-          const lastAssistant = [...loadedMessages].reverse().find((m) => m.role === "assistant" && m.serverMessageId);
-          let shouldResumePolling = false;
-          if (lastAssistant?.serverMessageId) {
-            try {
-              const statusRes = await fetch(`${API_BASE_URL}/api/conversations/${conversationId}/messages/${lastAssistant.serverMessageId}`, {
-                headers: { Authorization: `Bearer ${token}` },
-                signal: loadController.signal,
-              });
-              if (statusRes.ok) {
-                const statusData = await statusRes.json();
-                const bgTask = statusData?.background_task || {};
-                const hasTask = !!bgTask.id || !!bgTask.task_id || !!bgTask.status;
-                const status = bgTask.status || "";
-                const terminalStatus = status === "completed" || status === "failed" || status === "cancelled" || status === "incomplete";
-                const serverContent = statusData?.message?.content || "";
-                const hasContent = serverContent.trim().length > 0;
-                if (serverContent) {
-                  lastAssistant.content = serverContent;
-                }
-                // GPT 后台任务经常先返回 terminal task，再稍后才能读到 message.content。
-                // 空内容时必须继续恢复轮询/事件流，不能把 assistant 标 completed，否则 UI 会显示“生成中断”。
-                shouldResumePolling = hasTask && (!terminalStatus || !hasContent);
-                if (hasTask && terminalStatus && hasContent && !lastAssistant.completedAt) {
-                  lastAssistant.completedAt = bgTask.completed_at
-                    ? new Date(bgTask.completed_at).getTime()
-                    : Date.now();
-                }
-                lastAssistant.generationTaskId = Number(bgTask.id || bgTask.task_id || 0) || undefined;
-                lastAssistant.lastSequence = Number(bgTask.last_sequence_number || 0) || 0;
-                if (shouldResumePolling) {
-                  lastAssistant.completedAt = undefined;
-                  lastAssistant.activityStatus = { kind: "generating", status: "running", label: "任务繁忙，正在生成中" };
-                }
-              } else {
-                shouldResumePolling = false;
-              }
-            } catch (err: any) {
-              if (loadController.signal.aborted || err?.name === "AbortError") return;
-              shouldResumePolling = false;
-            }
-          }
           // 后端已返回 completed_at，不需要近似回退
           const activeByServerMessageId = new Map(
             activeEntries
@@ -630,19 +590,58 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             }
           });
           setGroupViews(newGroupViews);
-          if (shouldResumePolling && lastAssistant?.serverMessageId) {
-            const active = activeByServerMessageId.get(String(lastAssistant.serverMessageId));
-            if (!active) {
-              setIsLoading(true);
-              startTaskEventStream(conversationId, lastAssistant.id, lastAssistant.serverMessageId, lastAssistant.lastSequence || 0, lastAssistant.content || "", lastAssistant.generationTaskId);
-            } else {
-              setIsLoading(true);
-            }
-          } else {
-            setIsLoading(false);
+          setIsLoading(activeByServerMessageId.size > 0);
+
+          // 先渲染历史，再异步检查最后一条 assistant 的后台状态，避免切换对话被第二个请求阻塞。
+          const lastAssistant = [...mergedMessages].reverse().find((m) => m.role === "assistant" && m.serverMessageId);
+          if (lastAssistant?.serverMessageId && !activeByServerMessageId.has(String(lastAssistant.serverMessageId))) {
+            fetch(`${API_BASE_URL}/api/conversations/${conversationId}/messages/${lastAssistant.serverMessageId}`, {
+              headers: { Authorization: `Bearer ${token}` },
+              signal: loadController.signal,
+            })
+              .then((res) => (res.ok ? res.json() : undefined))
+              .then((statusData) => {
+                if (!statusData || !isLatestLoad() || loadController.signal.aborted) return;
+                const bgTask = statusData?.background_task || {};
+                const hasTask = !!bgTask.id || !!bgTask.task_id || !!bgTask.status;
+                const status = bgTask.status || "";
+                const terminalStatus = status === "completed" || status === "failed" || status === "cancelled" || status === "incomplete";
+                const serverContent = statusData?.message?.content || "";
+                const hasContent = serverContent.trim().length > 0;
+                const shouldResumePolling = hasTask && (!terminalStatus || !hasContent);
+                const generationTaskId = Number(bgTask.id || bgTask.task_id || 0) || undefined;
+                const lastSequence = Number(bgTask.last_sequence_number || 0) || 0;
+
+                setMessages((prev) => prev.map((m) => {
+                  if (m.id !== lastAssistant.id) return m;
+                  return {
+                    ...m,
+                    content: serverContent || m.content,
+                    generationTaskId: generationTaskId || m.generationTaskId,
+                    lastSequence: lastSequence || m.lastSequence,
+                    completedAt: shouldResumePolling
+                      ? undefined
+                      : (hasTask && terminalStatus && hasContent && !m.completedAt
+                        ? (bgTask.completed_at ? new Date(bgTask.completed_at).getTime() : Date.now())
+                        : m.completedAt),
+                    activityStatus: shouldResumePolling
+                      ? { kind: "generating", status: "running", label: "任务繁忙，正在生成中" }
+                      : m.activityStatus,
+                  } as Message;
+                }));
+
+                if (shouldResumePolling) {
+                  setIsLoading(true);
+                  startTaskEventStream(conversationId, lastAssistant.id, lastAssistant.serverMessageId, lastSequence || lastAssistant.lastSequence || 0, serverContent || lastAssistant.content || "", generationTaskId);
+                }
+              })
+              .catch((err: any) => {
+                if (loadController.signal.aborted || err?.name === "AbortError") return;
+              });
           }
         } else {
           setMessages([]);
+          setIsLoading(false);
         }
         setIsLoadingHistory(false);
 
@@ -705,6 +704,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           return undefined;
         }
         const data = await res.json();
+        setConversationTitle(data.title || title);
         setCurrentConversation(data.id);
         shouldResetRef.current = false; // 标记已创建对话，防止 useEffect 清空消息
         justCreatedRef.current = data.id; // 标记刚创建，避免 useEffect 加载历史覆盖本地消息
@@ -1539,6 +1539,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     groupViews,
     switchGroupModel,
     forkChat,
+    conversationTitle,
+    setConversationTitle,
   };
 }
 
