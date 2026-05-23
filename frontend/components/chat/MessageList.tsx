@@ -24,7 +24,7 @@ import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
 import { inferGroups, InferredGroup } from "@/lib/groups";
 import EChartsBlock from "./EChartsBlock";
 
-const CHAT_BOTTOM_SPACER = 340;
+const CHAT_BOTTOM_SPACER = 24;
 
 interface MessageListProps {
   messages: Message[];

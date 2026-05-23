@@ -436,18 +436,16 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
         }}
       />
 
-      {/* 输入框 */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-surface-elevated via-surface-elevated to-transparent pt-6">
-        <div className="pointer-events-auto">
-          <MessageInput
-            onSend={handleSend}
-            onStop={handleStop}
-            isLoading={isLoading}
-            compareMode={compareMode}
-            onToggleCompare={toggleCompareMode}
-            currentModel={selectedModel}
-          />
-        </div>
+      {/* 输入框：固定高度，正常占位；不要 overlay 遮挡消息区 */}
+      <div className="shrink-0 bg-surface-elevated">
+        <MessageInput
+          onSend={handleSend}
+          onStop={handleStop}
+          isLoading={isLoading}
+          compareMode={compareMode}
+          onToggleCompare={toggleCompareMode}
+          currentModel={selectedModel}
+        />
       </div>
     </div>
   );

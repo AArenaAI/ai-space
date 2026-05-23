@@ -379,6 +379,44 @@ func (h *ImageChatHandler) processImageChatJob(msgID uint, prompt, size, quality
 	}
 }
 
+// processVideoChatJob 后台提交视频任务（兼容 image-chats 里历史遗留的 media_type=video 分支）
+func (h *ImageChatHandler) processVideoChatJob(msgID uint, prompt, model, ratio string, duration int64, generateAudio, watermark bool, refImages, refVideos, refAudios []string, baseURL string, chatID uint) {
+	ctx := context.Background()
+	if model == "" {
+		model = "doubao-seedance-2-0-fast-260128"
+	}
+	if duration == 0 {
+		duration = 5
+	}
+	result, err := h.videoService.CreateVideoTask(ctx, services.CreateVideoTaskRequest{
+		Model:           model,
+		Prompt:          prompt,
+		Ratio:           ratio,
+		Duration:        duration,
+		GenerateAudio:   generateAudio,
+		Watermark:       watermark,
+		ReferenceImages: refImages,
+		ReferenceVideos: refVideos,
+		ReferenceAudios: refAudios,
+	})
+	if err != nil {
+		h.db.Model(&models.ImageChatMessage{}).Where("id = ?", msgID).Updates(map[string]interface{}{
+			"status":        "failed",
+			"error_message": err.Error(),
+		})
+		return
+	}
+	status := result.Status
+	if status == "" {
+		status = "pending"
+	}
+	h.db.Model(&models.ImageChatMessage{}).Where("id = ?", msgID).Updates(map[string]interface{}{
+		"task_id": result.TaskID,
+		"status":  status,
+	})
+	h.db.Model(&models.ImageChat{}).Where("id = ?", chatID).Update("updated_at", time.Now())
+}
+
 // resolveSizeFromReq 将 aspect_ratio + resolution 映射为像素尺寸
 func resolveSizeFromReq(aspectRatio, resolution string) string {
 	if aspectRatio == "" && resolution == "" {
