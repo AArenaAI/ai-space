@@ -130,9 +130,9 @@ function StreamingText({ messageId, content, isStreaming, className }: { message
   const effectiveText = isStreaming ? (streamText || content) : content;
   const hasThinkTag = effectiveText.includes("<think>");
   const fullParsed = parseThinkContent(effectiveText);
-  const displayedText = useSmoothStreaming(effectiveText, isStreaming && !hasThinkTag);
-  const displayedReasoning = useSmoothStreaming(fullParsed.reasoning || "", isStreaming && hasThinkTag);
-  const displayedAnswer = useSmoothStreaming(fullParsed.answer, isStreaming && hasThinkTag);
+  const displayedText = useSmoothStreaming(effectiveText, isStreaming && !hasThinkTag, `${messageId}:full`);
+  const displayedReasoning = useSmoothStreaming(fullParsed.reasoning || "", isStreaming && hasThinkTag, `${messageId}:reasoning`);
+  const displayedAnswer = useSmoothStreaming(fullParsed.answer, isStreaming && hasThinkTag, `${messageId}:answer`);
 
   // 含 <think> 的消息必须用完整实时内容解析边界，不能先做整段打字机截断；
   // 否则 </think> 尚未显示时正文会被临时归入思考块。

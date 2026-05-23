@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
+const smoothDisplayCache = new Map<string, string>();
+
 /**
  * AMC-WebUI 风格的平滑流式文字显示 hook。
  * 通过 requestAnimationFrame 驱动打字机效果，自适应追赶速度。
@@ -8,11 +10,17 @@ import { useState, useEffect, useRef, useCallback } from "react";
  * 关键优化：RAF 动画循环不依赖 safeText，只依赖 isStreaming。
  * safeText 变化时只更新 targetTextRef，RAF 继续运行，不会被取消重启，避免追赶永远落后一帧。
  */
-export function useSmoothStreaming(text: string | undefined | null, isStreaming: boolean): string {
+export function useSmoothStreaming(text: string | undefined | null, isStreaming: boolean, cacheKey?: string): string {
   const safeText = text || "";
-  const [displayedText, setDisplayedText] = useState(isStreaming ? "" : safeText);
+  const initialText = (() => {
+    if (!isStreaming) return safeText;
+    const cached = cacheKey ? smoothDisplayCache.get(cacheKey) : undefined;
+    if (cached && safeText.startsWith(cached)) return cached;
+    return "";
+  })();
+  const [displayedText, setDisplayedText] = useState(initialText);
 
-  const displayedTextRef = useRef(isStreaming ? "" : safeText);
+  const displayedTextRef = useRef(initialText);
   const targetTextRef = useRef(safeText);
   const animationFrameRef = useRef<number | null>(null);
   const lastRenderTimeRef = useRef<number>(0);
@@ -53,6 +61,7 @@ export function useSmoothStreaming(text: string | undefined | null, isStreaming:
 
       // 总是更新内部 ref 以跟踪进度
       displayedTextRef.current = nextText;
+      if (cacheKey) smoothDisplayCache.set(cacheKey, nextText);
 
       // 渲染节流：每 60ms 或追赶完成时才触发 React state update
       const isFinishedCatchingUp = nextText.length >= targetLen;
@@ -69,6 +78,7 @@ export function useSmoothStreaming(text: string | undefined | null, isStreaming:
     } else if (currentLen > targetLen) {
       // 目标文本变短了（如 think 标签关闭后内容重组），直接同步
       displayedTextRef.current = targetTextRef.current;
+      if (cacheKey) smoothDisplayCache.set(cacheKey, targetTextRef.current);
       setDisplayedText(targetTextRef.current);
       lastRenderTimeRef.current = time;
       animationFrameRef.current = null;
@@ -76,7 +86,7 @@ export function useSmoothStreaming(text: string | undefined | null, isStreaming:
       // 已追上，停止 RAF
       animationFrameRef.current = null;
     }
-  }, []);
+  }, [cacheKey]);
 
   // Effect 1：同步目标文本。safeText 变化时只更新 ref，不触发 RAF 重启。
   // 如果动画已停止但 target 又变长了，启动新的 RAF。
@@ -86,6 +96,8 @@ export function useSmoothStreaming(text: string | undefined | null, isStreaming:
 
     if (!isStreaming) {
       displayedTextRef.current = safeText;
+      setDisplayedText(safeText);
+      if (cacheKey) smoothDisplayCache.delete(cacheKey);
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
         animationFrameRef.current = null;
@@ -97,7 +109,7 @@ export function useSmoothStreaming(text: string | undefined | null, isStreaming:
     if (!animationFrameRef.current && displayedTextRef.current.length < targetTextRef.current.length) {
       animationFrameRef.current = requestAnimationFrame(animate);
     }
-  }, [safeText, isStreaming, animate]);
+  }, [safeText, isStreaming, animate, cacheKey]);
 
   // Effect 2：isStreaming 变化时管理 RAF。只依赖 isStreaming，不依赖 safeText。
   useEffect(() => {
