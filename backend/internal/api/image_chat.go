@@ -84,18 +84,18 @@ func (h *ImageChatHandler) ListImageChats(c *gin.Context) {
 func (h *ImageChatHandler) CreateImageChat(c *gin.Context) {
 	userID := getUserID(c)
 	var req struct {
-		Prompt            string   `json:"prompt"`
-		AspectRatio       string   `json:"aspect_ratio"`
-		Resolution        string   `json:"resolution"`
-		Quality           string   `json:"quality"`
-		RefImages         []string `json:"reference_image_urls"`
-		MediaType         string   `json:"media_type"`
-		Model             string   `json:"model"`
-		Duration          int64    `json:"duration"`
-		GenerateAudio     bool     `json:"generate_audio"`
-		Watermark         bool     `json:"watermark"`
-		ReferenceVideos   []string `json:"reference_video_urls"`
-		ReferenceAudios   []string `json:"reference_audio_urls"`
+		Prompt          string   `json:"prompt"`
+		AspectRatio     string   `json:"aspect_ratio"`
+		Resolution      string   `json:"resolution"`
+		Quality         string   `json:"quality"`
+		RefImages       []string `json:"reference_image_urls"`
+		MediaType       string   `json:"media_type"`
+		Model           string   `json:"model"`
+		Duration        int64    `json:"duration"`
+		GenerateAudio   bool     `json:"generate_audio"`
+		Watermark       bool     `json:"watermark"`
+		ReferenceVideos []string `json:"reference_video_urls"`
+		ReferenceAudios []string `json:"reference_audio_urls"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -134,15 +134,15 @@ func (h *ImageChatHandler) CreateImageChat(c *gin.Context) {
 		h.db.Create(&userMsg)
 
 		assistantMsg := models.ImageChatMessage{
-			ChatID:    chat.ID,
-			Role:      "assistant",
-			Content:   req.Prompt,
-			Status:    "pending",
-			MediaType: mediaType,
-			Model:     req.Model,
-			Duration:  int(req.Duration),
+			ChatID:        chat.ID,
+			Role:          "assistant",
+			Content:       req.Prompt,
+			Status:        "pending",
+			MediaType:     mediaType,
+			Model:         req.Model,
+			Duration:      int(req.Duration),
 			GenerateAudio: req.GenerateAudio,
-			Watermark: req.Watermark,
+			Watermark:     req.Watermark,
 		}
 		h.db.Create(&assistantMsg)
 

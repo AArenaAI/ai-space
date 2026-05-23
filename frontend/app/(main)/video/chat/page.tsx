@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { useVideo, VideoGeneration } from "@/hooks/useVideo";
+import { VideoChatMessage, useVideoChatMessages, useVideoChats } from "@/hooks/useVideoChat";
 import { useVideoModels } from "@/hooks/useModels";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import HistoryDrawer from "@/components/ui/HistoryDrawer";
@@ -46,7 +46,7 @@ interface DisplayMessage {
   videoUrl?: string;
   errorMessage?: string;
   createdAt: Date;
-  video?: VideoGeneration;
+  generationId?: number;
 }
 
 function AspectIcon({ w, h, active }: { w: number; h: number; active: boolean }) {
@@ -76,26 +76,21 @@ function resolveMediaUrl(url?: string) {
   return url;
 }
 
-function videoToMessages(video: VideoGeneration): DisplayMessage[] {
-  const createdAt = new Date(video.created_at || Date.now());
-  return [
-    {
-      id: `user-${video.id}`,
-      role: "user",
-      content: video.prompt,
-      createdAt,
-    },
-    {
-      id: `assistant-${video.id}`,
-      role: "assistant",
-      content: video.prompt,
-      status: video.status,
-      videoUrl: video.video_url,
-      errorMessage: video.error_message,
-      createdAt,
-      video,
-    },
-  ];
+function messageToDisplayMessage(message: VideoChatMessage): DisplayMessage {
+  return {
+    id: `${message.role}-${message.id}`,
+    role: message.role === "user" ? "user" : "assistant",
+    content: message.content,
+    status: message.status,
+    videoUrl: message.video_url,
+    errorMessage: message.error_message,
+    createdAt: new Date(message.created_at || Date.now()),
+    generationId: message.generation_id,
+  };
+}
+
+function messagesToDisplayMessages(messages: VideoChatMessage[]): DisplayMessage[] {
+  return messages.map(messageToDisplayMessage);
 }
 
 export default function VideoChatPage() {
@@ -110,9 +105,15 @@ function VideoChatPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { models: videoModels } = useVideoModels();
-  const { videos, generating, currentVideo, generateVideo, deleteVideo } = useVideo();
+  const { chats, loading: chatsLoading, fetchChats, createChat, deleteChat } = useVideoChats();
+  const { messages, fetchMessages, sendMessage } = useVideoChatMessages();
 
   const [displayMessages, setDisplayMessages] = useState<DisplayMessage[]>([]);
+  const [currentChatId, setCurrentChatId] = useState<number | null>(() => {
+    const chatId = searchParams.get("chatId");
+    return chatId ? Number(chatId) : null;
+  });
+  const [generating, setGenerating] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [referenceImages, setReferenceImages] = useState<string[]>([]);
   const [uploadingRef, setUploadingRef] = useState(false);
@@ -164,16 +165,31 @@ function VideoChatPageInner() {
   }, [displayMessages, scrollToBottom]);
 
   useEffect(() => {
-    if (!currentVideo) return;
-    setDisplayMessages(videoToMessages(currentVideo));
-  }, [currentVideo]);
+    fetchChats();
+  }, [fetchChats]);
 
   useEffect(() => {
-    if (!currentVideo && displayMessages.length === 0 && videos.length > 0) {
-      const latest = videos[0];
-      if (latest) setDisplayMessages(videoToMessages(latest));
-    }
-  }, [videos, currentVideo, displayMessages.length]);
+    setDisplayMessages(messagesToDisplayMessages(messages));
+  }, [messages]);
+
+  useEffect(() => {
+    const chatId = searchParams.get("chatId");
+    if (!chatId) return;
+    const numericChatId = Number(chatId);
+    if (!numericChatId) return;
+    setCurrentChatId(numericChatId);
+    fetchMessages(numericChatId);
+  }, [fetchMessages, searchParams]);
+
+  useEffect(() => {
+    if (!currentChatId) return;
+    const hasPending = displayMessages.some((msg) => msg.role === "assistant" && !msg.videoUrl && ["pending", "running"].includes(msg.status || ""));
+    if (!hasPending) return;
+    const timer = window.setInterval(() => {
+      fetchMessages(currentChatId);
+    }, 8000);
+    return () => window.clearInterval(timer);
+  }, [currentChatId, displayMessages, fetchMessages]);
 
   const handleSend = useCallback(async (text: string) => {
     const cleanPrompt = text.trim();
@@ -188,24 +204,26 @@ function VideoChatPageInner() {
     }
 
     shouldAutoScrollRef.current = true;
+    const now = Date.now();
     const localUserMessage: DisplayMessage = {
-      id: `local-user-${Date.now()}`,
+      id: `local-user-${now}`,
       role: "user",
       content: cleanPrompt,
       createdAt: new Date(),
     };
     const localAssistantMessage: DisplayMessage = {
-      id: `local-assistant-${Date.now()}`,
+      id: `local-assistant-${now}`,
       role: "assistant",
       content: cleanPrompt,
       status: "pending",
       createdAt: new Date(),
     };
-    setDisplayMessages([localUserMessage, localAssistantMessage]);
+    setDisplayMessages((prev) => [...prev, localUserMessage, localAssistantMessage]);
+    setGenerating(true);
 
     try {
       const durationSec = parseInt(selectedDuration.replace("s", ""), 10) || 4;
-      const video = await generateVideo({
+      const payload = {
         prompt: cleanPrompt,
         model,
         ratio: selectedAspectRatio,
@@ -213,22 +231,36 @@ function VideoChatPageInner() {
         generate_audio: musicEnabled,
         watermark: false,
         reference_image_urls: referenceImages.length > 0 ? referenceImages : undefined,
-      });
-      setDisplayMessages(videoToMessages(video));
+      };
+
+      let chatId = currentChatId;
+      if (chatId) {
+        await sendMessage(chatId, payload);
+      } else {
+        const created = await createChat(payload);
+        chatId = created.chat_id || created.chat?.id;
+        if (!chatId) throw new Error("创建视频会话失败");
+        setCurrentChatId(chatId);
+        router.replace(`/video/chat?chatId=${chatId}`);
+      }
+
       setPrompt("");
       setReferenceImages([]);
-      router.replace(`/video/chat?videoId=${video.id}`);
+      await fetchMessages(chatId);
+      fetchChats();
     } catch (err: any) {
       setDisplayMessages((prev) =>
         prev.map((msg) =>
-          msg.role === "assistant"
+          msg.id === localAssistantMessage.id
             ? { ...msg, status: "failed", errorMessage: err.message || "提交失败" }
             : msg
         )
       );
       toast.error(err.message || "提交失败");
+    } finally {
+      setGenerating(false);
     }
-  }, [generateVideo, musicEnabled, referenceImages, router, selectedAspectRatio, selectedDuration, selectedModel, selectedModelInfo]);
+  }, [createChat, currentChatId, fetchChats, fetchMessages, musicEnabled, referenceImages, router, selectedAspectRatio, selectedDuration, selectedModel, selectedModelInfo, sendMessage]);
 
   useEffect(() => {
     const initialPrompt = searchParams.get("prompt") || "";
@@ -289,8 +321,12 @@ function VideoChatPageInner() {
   const handleConfirmDelete = async () => {
     if (!deleteTargetId) return;
     try {
-      await deleteVideo(deleteTargetId);
-      setDisplayMessages([]);
+      await deleteChat(deleteTargetId);
+      if (currentChatId === deleteTargetId) {
+        setCurrentChatId(null);
+        setDisplayMessages([]);
+        router.replace("/video/chat");
+      }
       toast.success("删除成功");
     } catch {
       toast.error("删除失败");
@@ -304,21 +340,19 @@ function VideoChatPageInner() {
     setPrompt("");
     setReferenceImages([]);
     setDeleteTargetId(null);
+    setCurrentChatId(null);
     router.replace("/video/chat");
     setShowHistory(false);
   };
 
   const handleSelectVideo = (id: number) => {
-    const video = videos.find((v) => v.id === id);
-    if (!video) return;
-    setDisplayMessages(videoToMessages(video));
+    const chat = chats.find((item) => item.id === id);
+    if (!chat) return;
+    setCurrentChatId(id);
     setPrompt("");
     setReferenceImages([]);
-    setSelectedModel(video.model);
-    setSelectedAspectRatio(video.ratio);
-    setSelectedDuration(`${video.duration}s`);
-    setMusicEnabled(video.generate_audio);
-    router.replace(`/video/chat?videoId=${video.id}`);
+    fetchMessages(id);
+    router.replace(`/video/chat?chatId=${id}`);
     setShowHistory(false);
   };
 
@@ -428,21 +462,13 @@ function VideoChatPageInner() {
                           <RefreshCw className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => handleDownload(videoUrl, msg.video?.id || "preview")}
+                          onClick={() => handleDownload(videoUrl, msg.generationId || msg.id || "preview")}
                           className="p-1.5 rounded-md hover:bg-surface-elevated text-text-tertiary hover:text-text-primary transition-colors"
                           title="下载"
                         >
                           <Download className="w-4 h-4" />
                         </button>
-                        {msg.video?.id && (
-                          <button
-                            onClick={() => setDeleteTargetId(msg.video!.id)}
-                            className="p-1.5 rounded-md hover:bg-red-500/10 text-text-tertiary hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
-                            title="删除"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
+
                       </div>
                     </div>
                   )}
@@ -671,14 +697,13 @@ function VideoChatPageInner() {
         isOpen={showHistory}
         onClose={() => setShowHistory(false)}
         title="AI视频历史"
-        items={videos.map((v) => ({
-          id: v.id,
-          title: v.prompt,
-          active: displayMessages.some((m) => m.video?.id === v.id),
-          updated_at: v.updated_at,
-          cover_image: v.video_url,
+        items={chats.map((chat) => ({
+          id: chat.id,
+          title: chat.title,
+          active: currentChatId === chat.id,
+          updated_at: chat.updated_at,
+          cover_image: chat.cover_video,
           source: "video" as const,
-          status: v.status,
         }))}
         onSelect={handleSelectVideo}
         onNew={handleNewChat}
@@ -686,14 +711,14 @@ function VideoChatPageInner() {
           setDeleteTargetId(id);
           setShowHistory(false);
         }}
-        loading={false}
+        loading={chatsLoading}
         type="image"
       />
 
       <ConfirmDialog
         isOpen={deleteTargetId !== null}
-        title="删除视频"
-        description="确定要删除这个视频吗？此操作不可撤销。"
+        title="删除视频会话"
+        description="确定要删除这个视频会话吗？此操作不可撤销。"
         confirmText="删除"
         cancelText="取消"
         onConfirm={handleConfirmDelete}

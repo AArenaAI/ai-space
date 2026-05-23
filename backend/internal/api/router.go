@@ -191,7 +191,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		authorized.GET("/image-chats/:id/messages", imageChatHandler.ListImageChatMessages)
 		authorized.POST("/image-chats/:id/messages", imageChatHandler.SendImageChatMessage)
 
-		// 视频生成路由（独立，不与图片混用）
+		// 视频生成路由（独立任务接口，兼容旧入口）
 		videoHandler := NewVideoHandler(db, cfg)
 		videoHandler.AutoMigrate()
 		authorized.GET("/videos", videoHandler.ListVideos)
@@ -199,6 +199,17 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		authorized.GET("/videos/:id", videoHandler.GetVideo)
 		authorized.DELETE("/videos/:id", videoHandler.DeleteVideo)
 		authorized.GET("/videos/:id/refresh", videoHandler.RefreshVideoStatus)
+
+		// 视频会话路由
+		videoChatHandler := NewVideoChatHandler(db, videoService, cfg)
+		videoChatHandler.AutoMigrate()
+		authorized.GET("/video-chats", videoChatHandler.ListVideoChats)
+		authorized.POST("/video-chats", videoChatHandler.CreateVideoChat)
+		authorized.GET("/video-chats/:id", videoChatHandler.GetVideoChat)
+		authorized.PUT("/video-chats/:id", videoChatHandler.UpdateVideoChat)
+		authorized.DELETE("/video-chats/:id", videoChatHandler.DeleteVideoChat)
+		authorized.GET("/video-chats/:id/messages", videoChatHandler.ListVideoChatMessages)
+		authorized.POST("/video-chats/:id/messages", videoChatHandler.SendVideoChatMessage)
 
 		// 图片文件服务（无需认证，直接访问）
 		router.GET("/api/images/file/:filename", imageHandler.ServeImageFile)
