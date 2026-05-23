@@ -94,12 +94,14 @@ async function fetchConversations(): Promise<Conversation[]> {
   const token = localStorage.getItem("token");
   if (!token) return [];
   try {
-    const res = await fetch("/api/conversations", {
+    const res = await fetch("/api/conversations?limit=200", {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return [];
     const data = await res.json();
-    return Array.isArray(data) ? data : [];
+    if (Array.isArray(data)) return data;
+    if (data && Array.isArray(data.conversations)) return data.conversations;
+    return [];
   } catch {
     return [];
   }

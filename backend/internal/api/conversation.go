@@ -34,32 +34,64 @@ type ConversationSearchResult struct {
 func (h *ConversationHandler) List(c *gin.Context) {
 	userID := getUserID(c)
 
+	// 分页参数
+	limit := 200
+	offset := 0
+	if l, err := strconv.Atoi(c.Query("limit")); err == nil && l > 0 && l <= 500 {
+		limit = l
+	}
+	if o, err := strconv.Atoi(c.Query("offset")); err == nil && o >= 0 {
+		offset = o
+	}
+
 	// 支持 workspace_id 过滤，默认查所有
 	workspaceIDStr := c.Query("workspace_id")
-	query := h.db.Where("user_id = ?", userID)
+
+	var total int64
+	countQuery := h.db.Model(&models.Conversation{}).Where("user_id = ?", userID)
+	if workspaceIDStr != "" {
+		if wid, err := strconv.ParseUint(workspaceIDStr, 10, 32); err == nil {
+			countQuery = countQuery.Where("workspace_id = ?", uint(wid))
+		}
+	}
+	countQuery.Count(&total)
+
+	type ConversationWithModel struct {
+		models.Conversation
+		LatestModel string `gorm:"column:latest_model" json:"-"`
+	}
+
+	query := h.db.Table("conversations").
+		Select("conversations.*, (SELECT model FROM messages WHERE messages.conversation_id = conversations.id AND messages.role = 'assistant' AND messages.model <> '' ORDER BY messages.created_at DESC, messages.id DESC LIMIT 1) as latest_model").
+		Where("conversations.user_id = ?", userID)
 
 	if workspaceIDStr != "" {
 		if wid, err := strconv.ParseUint(workspaceIDStr, 10, 32); err == nil {
-			query = query.Where("workspace_id = ?", uint(wid))
+			query = query.Where("conversations.workspace_id = ?", uint(wid))
 		}
 	}
 
-	var conversations []models.Conversation
-	if err := query.Order("pinned desc, updated_at desc").Find(&conversations).Error; err != nil {
+	var rows []ConversationWithModel
+	if err := query.Order("conversations.pinned DESC, conversations.updated_at DESC").
+		Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取对话列表失败"})
 		return
 	}
 
-	for i := range conversations {
-		var latest models.Message
-		if err := h.db.Where("conversation_id = ? AND role = ? AND model <> ''", conversations[i].ID, "assistant").
-			Order("created_at desc, id desc").
-			First(&latest).Error; err == nil {
-			conversations[i].Model = latest.Model
+	conversations := make([]models.Conversation, len(rows))
+	for i := range rows {
+		if rows[i].LatestModel != "" {
+			rows[i].Conversation.Model = rows[i].LatestModel
 		}
+		conversations[i] = rows[i].Conversation
 	}
 
-	c.JSON(http.StatusOK, conversations)
+	c.JSON(http.StatusOK, gin.H{
+		"conversations": conversations,
+		"total":         total,
+		"limit":         limit,
+		"offset":        offset,
+	})
 }
 
 func (h *ConversationHandler) Search(c *gin.Context) {
@@ -198,8 +230,34 @@ func (h *ConversationHandler) Get(c *gin.Context) {
 		return
 	}
 
-	// 加载消息
-	h.db.Where("conversation_id = ?", conv.ID).Order("created_at asc").Preload("MessageFiles").Find(&conv.Messages)
+	// 分页参数：不传时默认加载所有消息（兼容）
+	msgLimit := 0
+	msgTail := 0
+	if l, err := strconv.Atoi(c.Query("message_limit")); err == nil && l > 0 {
+		msgLimit = l
+	}
+	if t, err := strconv.Atoi(c.Query("message_tail")); err == nil && t > 0 {
+		msgTail = t
+	}
+
+	msgQuery := h.db.Where("conversation_id = ?", conv.ID).Order("created_at asc, id asc").Preload("MessageFiles")
+	if msgTail > 0 {
+		var total int64
+		h.db.Model(&models.Message{}).Where("conversation_id = ?", conv.ID).Count(&total)
+		offset := int(total) - msgTail
+		if offset < 0 {
+			offset = 0
+		}
+		msgQuery = msgQuery.Offset(offset)
+		if msgLimit > 0 {
+			msgQuery = msgQuery.Limit(msgLimit)
+		} else {
+			msgQuery = msgQuery.Limit(msgTail)
+		}
+	} else if msgLimit > 0 {
+		msgQuery = msgQuery.Limit(msgLimit)
+	}
+	msgQuery.Find(&conv.Messages)
 
 	for i := len(conv.Messages) - 1; i >= 0; i-- {
 		if conv.Messages[i].Role == "assistant" && conv.Messages[i].Model != "" {
@@ -272,8 +330,35 @@ func (h *ConversationHandler) GetMessages(c *gin.Context) {
 		return
 	}
 
+	limit := 50
+	offset := 0
+	tail := 0
+	if l, err := strconv.Atoi(c.Query("limit")); err == nil && l > 0 && l <= 200 {
+		limit = l
+	}
+	if o, err := strconv.Atoi(c.Query("offset")); err == nil && o >= 0 {
+		offset = o
+	}
+	if t, err := strconv.Atoi(c.Query("tail")); err == nil && t > 0 && t <= 200 {
+		tail = t
+	}
+
+	var total int64
+	h.db.Model(&models.Message{}).Where("conversation_id = ?", convID).Count(&total)
+
+	query := h.db.Where("conversation_id = ?", convID).Order("created_at asc, id asc").Preload("MessageFiles")
+	if tail > 0 && int(total) > tail {
+		offset = int(total) - tail
+	}
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if offset > 0 {
+		query = query.Offset(offset)
+	}
+
 	var messages []models.Message
-	if err := h.db.Where("conversation_id = ?", convID).Order("created_at asc, id asc").Preload("MessageFiles").Find(&messages).Error; err != nil {
+	if err := query.Find(&messages).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取消息失败"})
 		return
 	}
@@ -289,23 +374,28 @@ func (h *ConversationHandler) GetMessages(c *gin.Context) {
 	// 组装响应：包含 group_id / group_index
 	type MessageWithGroup struct {
 		models.Message
-		GroupID    uint     `json:"group_id,omitempty"`
-		GroupIndex int      `json:"group_index,omitempty"`
+		GroupID     uint     `json:"group_id,omitempty"`
+		GroupIndex  int      `json:"group_index,omitempty"`
 		GroupModels []string `json:"group_models,omitempty"`
 	}
 	result := make([]MessageWithGroup, len(messages))
 	for i, m := range messages {
 		result[i] = MessageWithGroup{
-			Message:     m,
-			GroupID:     m.GroupID,
-			GroupIndex:  m.GroupIndex,
+			Message:    m,
+			GroupID:    m.GroupID,
+			GroupIndex: m.GroupIndex,
 		}
 		if g, ok := groupMap[m.GroupID]; ok {
 			result[i].GroupModels = g.GetModels()
 		}
 	}
 
-	c.JSON(http.StatusOK, result)
+	c.JSON(http.StatusOK, gin.H{
+		"messages": result,
+		"total":    total,
+		"limit":    limit,
+		"offset":   offset,
+	})
 }
 
 func (h *ConversationHandler) GetMessage(c *gin.Context) {

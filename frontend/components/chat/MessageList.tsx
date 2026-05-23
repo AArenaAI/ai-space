@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback, useMemo, memo } from "react";
-import { User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck, ChevronDown, ChevronUp, Lightbulb, Play, Search, ChevronDown as ChevronDownIcon, FileText, Wrench, Star, Columns2 } from "lucide-react";
+import { User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck, ChevronDown, ChevronUp, Lightbulb, Play, Search, ChevronDown as ChevronDownIcon, FileText, Wrench, Star, Columns2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/hooks/useChat";
 import { useFavorites } from "@/hooks/useFavorites";
-import ReactMarkdown from "react-markdown";
+import dynamic from "next/dynamic";
+const ReactMarkdown = dynamic(() => import("react-markdown"), { ssr: false });
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -43,6 +44,9 @@ interface MessageListProps {
   groupViews?: Map<number, number>;
   switchGroupModel?: (groupId: number, activeIndex: number) => void;
   onForkCompare?: (messageId: number) => void;
+  isLoadingMore?: boolean;
+  hasMoreMessages?: boolean;
+  onLoadMore?: () => void;
 }
 
 function ThinkingDots() {
@@ -618,6 +622,9 @@ function MessageList({
   groupViews,
   switchGroupModel,
   onForkCompare,
+  isLoadingMore,
+  hasMoreMessages,
+  onLoadMore,
 }: MessageListProps) {
   const {
     containerRef,
@@ -631,7 +638,31 @@ function MessageList({
     enabled: true,
   });
 
+  // 向上滚动加载更多历史消息
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const prevScrollHeightRef = useRef(0);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !onLoadMore || !hasMoreMessages) return;
+    const onScroll = () => {
+      if (el.scrollTop < 80 && !isLoadingMore && hasMoreMessages) {
+        prevScrollHeightRef.current = el.scrollHeight;
+        onLoadMore();
+      }
+    };
+    el.addEventListener("scroll", onScroll);
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [onLoadMore, isLoadingMore, hasMoreMessages]);
 
+  // 加载更多后保持滚动位置
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !isLoadingMore) return;
+    const diff = el.scrollHeight - prevScrollHeightRef.current;
+    if (diff > 0) {
+      el.scrollTop = diff;
+    }
+  }, [isLoadingMore, messages.length]);
 
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [selectMode, setSelectMode] = useState(false);
@@ -1160,11 +1191,32 @@ function MessageList({
   return (
     <div className="relative flex-1 overflow-hidden">
       <div
-        ref={containerRef}
+        ref={(node) => {
+          containerRef(node);
+          scrollRef.current = node;
+        }}
         onScroll={handleScroll}
         className="h-full overflow-y-auto px-4 py-8"
       >
         <div className="max-w-[800px] mx-auto space-y-8">
+          {/* 顶部加载更多历史消息 */}
+          {hasMoreMessages && (
+            <div className="flex justify-center py-2">
+              {isLoadingMore ? (
+                <div className="flex items-center gap-2 text-text-secondary text-sm">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  加载中...
+                </div>
+              ) : (
+                <button
+                  onClick={onLoadMore}
+                  className="text-sm text-text-secondary hover:text-text-primary transition-colors"
+                >
+                  加载更多历史消息
+                </button>
+              )}
+            </div>
+          )}
         {messages.map((msg, index) => {
           const group = groupByMessageId.get(msg.id);
           const isUser = msg.role === "user";

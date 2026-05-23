@@ -116,13 +116,17 @@ async function fetchConversations(workspaceId?: number): Promise<Conversation[]>
   const token = localStorage.getItem("token");
   if (!token) return [];
   try {
-    const params = workspaceId ? `?workspace_id=${workspaceId}` : "";
-    const res = await fetch(`/api/conversations${params}`, {
+    const params = new URLSearchParams();
+    if (workspaceId) params.set("workspace_id", String(workspaceId));
+    params.set("limit", "200");
+    const res = await fetch(`/api/conversations?${params.toString()}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return [];
     const data = await res.json();
-    return Array.isArray(data) ? data : [];
+    if (Array.isArray(data)) return data;
+    if (data && Array.isArray(data.conversations)) return data.conversations;
+    return [];
   } catch { return []; }
 }
 

@@ -62,6 +62,9 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
     forkChat,
     conversationTitle,
     setConversationTitle,
+    isLoadingMore,
+    hasMoreMessages,
+    loadMoreMessages,
   } = useChat(conversationId, models, skillKey);
 
   const { templates } = useTemplates();
@@ -398,6 +401,9 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
           setForkTargetMessageId(messageId);
           setForkDialogOpen(true);
         }}
+        isLoadingMore={isLoadingMore}
+        hasMoreMessages={hasMoreMessages}
+        onLoadMore={loadMoreMessages}
       />
 
       {/* 重命名对话 */}

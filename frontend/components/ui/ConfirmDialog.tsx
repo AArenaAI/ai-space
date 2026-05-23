@@ -38,7 +38,7 @@ export default function ConfirmDialog({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center">
       {/* 毛玻璃背景 */}
       <div
         className="absolute inset-0 bg-black/40 backdrop-blur-sm"

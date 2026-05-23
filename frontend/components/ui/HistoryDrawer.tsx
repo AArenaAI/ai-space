@@ -178,7 +178,7 @@ export default function HistoryDrawer({
     const isActive = item.active;
     const isEditing = editingId === item.id;
     const Icon = item.source === "video" ? VideoIcon : type === "image" ? ImageIcon : MessageSquare;
-    const hasCover = type === "image" && item.cover_image;
+    const hasCover = item.cover_image;
     const isVideo = item.source === "video";
 
     return (
@@ -280,12 +280,26 @@ export default function HistoryDrawer({
             {/* 首图 + 时间 */}
             <div className="mt-2 flex flex-col items-start gap-1.5">
               <div className="relative size-24 overflow-hidden rounded-lg bg-surface border border-surface-border">
-                <img
-                  src={resolveImageUrl(item.cover_image || "")}
-                  alt={item.title || "封面"}
-                  className="w-full h-full object-cover"
-                  loading="lazy"
-                />
+                {isVideo ? (
+                  <>
+                    <video
+                      src={item.cover_image || ""}
+                      className="w-full h-full object-cover"
+                      muted
+                      preload="metadata"
+                    />
+                    <div className="absolute bottom-1 right-1 flex items-center justify-center w-6 h-6 rounded-full bg-black/60">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="white" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                    </div>
+                  </>
+                ) : (
+                  <img
+                    src={resolveImageUrl(item.cover_image || "")}
+                    alt={item.title || "封面"}
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                  />
+                )}
               </div>
               <span className="text-[11px] leading-none text-text-tertiary">
                 {formatHistoryTime(item.updated_at)}

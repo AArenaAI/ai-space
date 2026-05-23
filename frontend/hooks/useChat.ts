@@ -160,6 +160,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   // 从对话历史或 prop 恢复的有效 skillKey（优先级：历史 > prop）
   const [effectiveSkillKey, setEffectiveSkillKey] = useState<string | undefined>(skillKey);
   const [groupViews, setGroupViews] = useState<Map<number, number>>(new Map());
+  const [totalMessages, setTotalMessages] = useState(0);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const hasMoreMessages = totalMessages > messages.length;
   const backgroundPollersRef = useRef<Record<string, number>>({});
   const taskStreamsRef = useRef<Record<string, AbortController>>({});
   const abortReasonRef = useRef<"user" | "navigation" | null>(null);
@@ -536,8 +539,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     setIsLoadingHistory(true);
     setCurrentConversation(conversationId);
 
-    // 加载对话消息：必须可取消 + 只允许最新一次切换落盘，避免快速点击历史时旧请求覆盖新会话导致白屏/卡顿
-    fetch(`${API_BASE_URL}/api/conversations/${conversationId}`, {
+    // 加载对话消息：首次只加载最近50条（tail模式），向上滚动时通过 loadMoreMessages 加载更多
+    fetch(`${API_BASE_URL}/api/conversations/${conversationId}?message_tail=50`, {
       headers: { Authorization: `Bearer ${token}` },
       signal: loadController.signal,
     })
@@ -644,6 +647,19 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           setIsLoading(false);
         }
         setIsLoadingHistory(false);
+
+        // 获取消息总数，用于分页加载更多
+        fetch(`${API_BASE_URL}/api/conversations/${conversationId}/messages?limit=1`, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: loadController.signal,
+        })
+          .then((res) => (res.ok ? res.json() : undefined))
+          .then((countData) => {
+            if (countData && typeof countData.total === "number") {
+              setTotalMessages(countData.total);
+            }
+          })
+          .catch(() => {});
 
         // 设置当前模型
         if (data.model) {
@@ -1518,6 +1534,47 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     [currentConversation]
   );
 
+  // 向上滚动加载更多历史消息
+  const loadMoreMessages = useCallback(async () => {
+    if (!currentConversation || isLoadingMore || !hasMoreMessages) return;
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    setIsLoadingMore(true);
+    try {
+      const offset = Math.max(0, totalMessages - messages.length - 50);
+      const res = await fetch(
+        `${API_BASE_URL}/api/conversations/${currentConversation}/messages?limit=50&offset=${offset}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      const olderMessages: Message[] = (data.messages || []).map((m: any) => ({
+        id: String(m.id || uuidv4()),
+        role: m.role,
+        content: m.content,
+        model: m.model,
+        createdAt: new Date(m.created_at).getTime(),
+        completedAt: m.completed_at ? new Date(m.completed_at).getTime() : undefined,
+        files: m.files || undefined,
+        serverMessageId: Number(m.id || 0) || undefined,
+        groupId: m.group_id || undefined,
+        groupIndex: m.group_index ?? undefined,
+      }));
+      setMessages((prev) => {
+        const existingIds = new Set(prev.map((m) => m.serverMessageId).filter(Boolean));
+        const newOnes = olderMessages.filter((m) => !existingIds.has(m.serverMessageId));
+        return [...newOnes, ...prev];
+      });
+      if (typeof data.total === "number") {
+        setTotalMessages(data.total);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [currentConversation, isLoadingMore, hasMoreMessages, totalMessages, messages.length]);
+
   return {
     messages,
     isLoading,
@@ -1541,6 +1598,10 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     forkChat,
     conversationTitle,
     setConversationTitle,
+    totalMessages,
+    isLoadingMore,
+    hasMoreMessages,
+    loadMoreMessages,
   };
 }
 

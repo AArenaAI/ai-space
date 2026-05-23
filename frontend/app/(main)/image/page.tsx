@@ -425,6 +425,7 @@ export default function ImagePage() {
         icon: "image" as const,
         source: "video" as const,
         status: video.status,
+        cover_image: video.video_url,
       })),
   ].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
 
