@@ -944,6 +944,20 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 
 		// 成功完成或非可恢复错误
 		content := streamResult.FullContent
+		if forwardErr == nil && req.UseBackground && strings.TrimSpace(streamResult.ResponseID) != "" {
+			finalContent, finalUsage, finalErr := h.reconcileOpenAIBackgroundFinal(ctx, req.Task, req.AssistantMessageID, streamResult.ResponseID, content, streamResult.LastSequenceNumber)
+			if finalErr != nil {
+				forwardErr = finalErr
+				streamResult.ErrorMessage = finalErr.Error()
+				fmt.Printf("[GenerationRunner] OpenAI background final reconcile failed task=%d response_id=%s: %v\n", req.Task.ID, streamResult.ResponseID, finalErr)
+			} else {
+				content = finalContent
+				if finalUsage != nil {
+					usage = finalUsage
+				}
+				streamResult.LastSequenceNumber = req.Task.LastSequenceNumber
+			}
+		}
 		finalStatus := "completed"
 		if forwardErr != nil {
 			finalStatus = "failed"
@@ -1012,6 +1026,105 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 		}
 		return
 	}
+}
+
+func (h *ChatHandler) reconcileOpenAIBackgroundFinal(ctx context.Context, task *models.AIBackgroundTask, assistantMessageID uint, responseID string, streamedContent string, lastSeq int64) (string, *services.TokenUsage, error) {
+	if task == nil || assistantMessageID == 0 || strings.TrimSpace(responseID) == "" {
+		return streamedContent, nil, nil
+	}
+
+	// OpenAI background+stream can close the streaming socket before the final
+	// completed payload is fully reflected in deltas. Do not let that EOF become
+	// frontend [DONE]; retrieve the authoritative final response, append any
+	// missing suffix as normal delta events, then the caller writes DB + [DONE].
+	var raw map[string]any
+	var err error
+	completed := false
+	lastStatus := ""
+	deadline := time.Now().Add(14*time.Minute + 15*time.Second)
+	for attempt := 0; time.Now().Before(deadline); attempt++ {
+		if h.isGenerationTaskCancelled(task.ID) {
+			return streamedContent, nil, fmt.Errorf("generation cancelled")
+		}
+		retrieveCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		raw, err = h.aiService.RetrieveOpenAIResponse(retrieveCtx, responseID)
+		cancel()
+		if err == nil {
+			status, _ := raw["status"].(string)
+			lastStatus = strings.ToLower(strings.TrimSpace(status))
+			if lastStatus == "completed" {
+				completed = true
+				break
+			}
+			if lastStatus == "failed" || lastStatus == "cancelled" || lastStatus == "incomplete" {
+				return streamedContent, nil, fmt.Errorf("OpenAI response status=%s", lastStatus)
+			}
+		}
+		wait := time.Duration(500+attempt*250) * time.Millisecond
+		if wait > 5*time.Second {
+			wait = 5 * time.Second
+		}
+		time.Sleep(wait)
+	}
+	if err != nil {
+		return streamedContent, nil, err
+	}
+	if !completed {
+		if lastStatus == "" {
+			lastStatus = "unknown"
+		}
+		return streamedContent, nil, fmt.Errorf("OpenAI response not completed yet status=%s", lastStatus)
+	}
+
+	finalText := services.ExtractOpenAIResponseText(raw)
+	if strings.TrimSpace(finalText) == "" {
+		return streamedContent, parseUsageFromResponse(raw), nil
+	}
+
+	mergedContent := mergeReasoningPersistedContent(streamedContent, finalText)
+	missing := missingContentSuffix(streamedContent, mergedContent)
+	if strings.TrimSpace(missing) == "" {
+		return mergedContent, parseUsageFromResponse(raw), nil
+	}
+
+	seq := lastSeq + 1
+	if seq <= task.LastSequenceNumber {
+		seq = task.LastSequenceNumber + 1
+	}
+	out, _ := json.Marshal(map[string]interface{}{
+		"choices": []map[string]interface{}{
+			{"delta": map[string]string{"content": missing}},
+		},
+		"_reconciled_final": true,
+	})
+	h.persistTaskEvent(task, assistantMessageID, seq, "delta", string(out))
+	return mergedContent, parseUsageFromResponse(raw), nil
+}
+
+func missingContentSuffix(existing string, final string) string {
+	existing = strings.TrimSpace(existing)
+	final = strings.TrimSpace(final)
+	if final == "" || existing == final || strings.Contains(existing, final) {
+		return ""
+	}
+	if existing == "" {
+		return final
+	}
+	if strings.HasPrefix(final, existing) {
+		return strings.TrimPrefix(final, existing)
+	}
+	existingRunes := []rune(existing)
+	finalRunes := []rune(final)
+	maxOverlap := len(existingRunes)
+	if len(finalRunes) < maxOverlap {
+		maxOverlap = len(finalRunes)
+	}
+	for overlap := maxOverlap; overlap > 0; overlap-- {
+		if string(existingRunes[len(existingRunes)-overlap:]) == string(finalRunes[:overlap]) {
+			return string(finalRunes[overlap:])
+		}
+	}
+	return final
 }
 
 func (h *ChatHandler) failGenerationTask(task *models.AIBackgroundTask, assistantMessageID uint, conversationID uint, message string) {
@@ -1695,20 +1808,25 @@ func (h *ChatHandler) streamGenerationTaskEvents(c *gin.Context, task *models.AI
 		if err := h.db.First(task, task.ID).Error; err == nil {
 			terminal := task.Status == "completed" || task.Status == "failed" || task.Status == "cancelled" || task.Status == "incomplete"
 			if terminal && after >= task.LastSequenceNumber {
+				// Never synthesize a successful [DONE] from task status alone. In the
+				// OpenAI background path the runner writes final missing deltas, then the
+				// real done event, and only afterwards updates task.last_sequence_number.
+				// If this subscriber races with those writes, a synthetic after+1 DONE can
+				// overtake real tail deltas and make the frontend stop at a partial answer.
+				if doneWritten {
+					return
+				}
 				if task.Status != "completed" && task.ErrorMessage != "" {
 					meta := map[string]interface{}{"_error_meta": map[string]interface{}{"user_message": task.ErrorMessage, "code": task.Status}}
 					out, _ := json.Marshal(meta)
 					_, _ = c.Writer.WriteString("data: " + string(out) + "\n\n")
-					if !doneWritten {
-						_, _ = c.Writer.WriteString("data: [DONE]\n\n")
-						c.Writer.Flush()
-					}
-				} else if !doneWritten {
-					// task 已终态但尚未发送 [DONE]，补发以确保前端正常结束
 					_, _ = c.Writer.WriteString(fmt.Sprintf("id: %d\ndata: [DONE]\n\n", after+1))
 					c.Writer.Flush()
+					return
 				}
-				return
+				// Completed without a visible done event means the writer has not made the
+				// terminal event visible to this read yet. Keep the stream open and poll;
+				// the timeout guard below still prevents an infinite hang.
 			}
 		}
 
