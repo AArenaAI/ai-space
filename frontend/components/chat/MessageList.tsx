@@ -594,6 +594,7 @@ function MessageList({
   const lastScrollTopRef = useRef(0);
   const loadingMoreTriggeredRef = useRef(false);
   const programmaticScrollUntilRef = useRef(0);
+  const userScrollOverrideUntilRef = useRef(0);
   const bottomLockRafRef = useRef<number>(0);
   const bottomLockTimersRef = useRef<number[]>([]);
 
@@ -615,6 +616,7 @@ function MessageList({
     bottomLockTimersRef.current = [];
 
     const lock = () => {
+      if (Date.now() < userScrollOverrideUntilRef.current) return;
       if (stickToBottomRef.current) scrollToBottom();
     };
 
@@ -650,13 +652,21 @@ function MessageList({
     const isScrollingUp = el.scrollTop < lastScrollTopRef.current;
 
     // stickToBottom 表示用户意图，只在明确上滑离开底部时关闭；
-    // 不用 Virtuoso 测量过程中的临时 distance 抖动来反复切换。
+    // 用户主动上滑时立即打断补偿锁底，避免流式内容继续增长时把视图吸回底部。
     const isProgrammaticScroll = Date.now() < programmaticScrollUntilRef.current;
-    if (!isProgrammaticScroll && isScrollingUp && distanceToBottom > 1) {
+    if (isScrollingUp && distanceToBottom > 1) {
       stickToBottomRef.current = false;
+      if (bottomLockRafRef.current) {
+        cancelAnimationFrame(bottomLockRafRef.current);
+        bottomLockRafRef.current = 0;
+      }
+      bottomLockTimersRef.current.forEach(window.clearTimeout);
+      bottomLockTimersRef.current = [];
+      userScrollOverrideUntilRef.current = Date.now() + (isProgrammaticScroll ? 900 : 1600);
     }
     if (distanceToBottom <= 24) {
       stickToBottomRef.current = true;
+      userScrollOverrideUntilRef.current = 0;
     }
     lastScrollTopRef.current = el.scrollTop;
 

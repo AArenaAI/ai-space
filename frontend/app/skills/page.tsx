@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { Suspense, useState, useEffect } from "react";
 import Link from "next/link";
 import AppSidebar from "@/components/sidebar/AppSidebar";
 import MobileNav from "@/components/mobile/MobileNav";
@@ -193,10 +193,14 @@ export default function SkillsPage() {
 
   return (
     <div className="flex flex-col h-screen bg-surface overflow-hidden">
-      <MobileNav />
+      <Suspense fallback={null}>
+        <MobileNav />
+      </Suspense>
       <div className="flex flex-1 min-h-0">
         <div className="hidden md:block shrink-0">
-          <AppSidebar />
+          <Suspense fallback={null}>
+            <AppSidebar />
+          </Suspense>
         </div>
         <main className="flex-1 min-w-0 flex flex-col">
           {/* 顶部栏 */}

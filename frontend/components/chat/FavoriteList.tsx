@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Star, X, MessageSquare, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useFavorites, FavoriteItem } from "@/hooks/useFavorites";
@@ -78,6 +79,7 @@ export default function FavoriteList({ open, onClose }: FavoriteListProps) {
 
 function FavoriteCard({ item, onRemove }: { item: FavoriteItem; onRemove: () => void }) {
   const [expanded, setExpanded] = useState(false);
+  const router = useRouter();
 
   const contentPreview = item.content.length > 200 && !expanded
     ? item.content.slice(0, 200) + "..."
@@ -115,13 +117,14 @@ function FavoriteCard({ item, onRemove }: { item: FavoriteItem; onRemove: () => 
           {item.conv_title && <span className="max-w-[120px] truncate">{item.conv_title}</span>}
         </div>
         <div className="flex items-center gap-1">
-          <a
-            href={`/chat?id=${item.conv_id}`}
+          <button
+            type="button"
+            onClick={() => router.push(`/chat?id=${item.conv_id}`, { scroll: false })}
             className="p-1.5 rounded-md text-text-tertiary hover:text-brand hover:bg-brand/10 transition-colors"
             title="跳回对话"
           >
             <ExternalLink className="w-3.5 h-3.5" />
-          </a>
+          </button>
           <button
             onClick={onRemove}
             className="p-1.5 rounded-md text-text-tertiary hover:text-red-400 hover:bg-red-500/10 transition-colors"

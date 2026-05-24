@@ -953,6 +953,14 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 
 		// 成功完成或非可恢复错误
 		content := streamResult.FullContent
+		if streamResult.Recoverable && streamResult.ErrorKind == string(services.ProviderErrorRateLimit) {
+			message := streamResult.ErrorMessage
+			if strings.TrimSpace(message) == "" {
+				message = "上游模型达到速率限制，自动重试已耗尽，请稍后重试或切换模型。"
+			}
+			h.failGenerationTaskWithMeta(req.Task, req.AssistantMessageID, req.ConversationID, message, streamResult.ErrorCode, streamResult.ErrorMeta)
+			return
+		}
 		if forwardErr == nil && req.UseBackground && strings.TrimSpace(streamResult.ResponseID) != "" {
 			finalContent, finalUsage, finalErr := h.reconcileOpenAIBackgroundFinal(ctx, req.Task, req.AssistantMessageID, streamResult.ResponseID, content, streamResult.LastSequenceNumber)
 			if finalErr != nil {
@@ -1143,12 +1151,24 @@ func missingContentSuffix(existing string, final string) string {
 }
 
 func (h *ChatHandler) failGenerationTask(task *models.AIBackgroundTask, assistantMessageID uint, conversationID uint, message string) {
+	h.failGenerationTaskWithMeta(task, assistantMessageID, conversationID, message, "generation_failed", nil)
+}
+
+func (h *ChatHandler) failGenerationTaskWithMeta(task *models.AIBackgroundTask, assistantMessageID uint, conversationID uint, message string, code string, meta map[string]interface{}) {
 	if task == nil {
 		return
 	}
+	if code == "" {
+		code = "generation_failed"
+	}
+	if meta == nil {
+		meta = map[string]interface{}{}
+	}
+	meta["user_message"] = message
+	meta["code"] = code
 	out, _ := json.Marshal(map[string]interface{}{
-		"choices":     []map[string]interface{}{{"delta": map[string]string{"content": message}}},
-		"_error_meta": map[string]interface{}{"user_message": message, "code": "generation_failed"},
+		"choices":     []map[string]interface{}{{"delta": map[string]string{"content": ""}}},
+		"_error_meta": meta,
 	})
 	seq := task.LastSequenceNumber + 1
 	if seq <= 1 {
@@ -1294,6 +1314,7 @@ type UnifiedStreamResult struct {
 	ErrorKind          string
 	Recoverable        bool
 	RetryAfterMs       int
+	ErrorMeta          map[string]interface{}
 }
 
 func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, w gin.ResponseWriter, reasoningEnabled bool, assistantMsgID uint, useBackground bool, userID uint, guestID string, conversationID uint, model string, provider string, streamTask *models.AIBackgroundTask, initialSequence int64) (*UnifiedStreamResult, *services.TokenUsage, error) {
@@ -1552,6 +1573,7 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 					"user_message":        message,
 					"suggested_actions":   event.SuggestedActions,
 				}
+				outcome.ErrorMeta = meta
 				if err := writeDataEvent("error", map[string]interface{}{
 					"choices": []map[string]interface{}{
 						{"delta": map[string]string{"content": ""}},

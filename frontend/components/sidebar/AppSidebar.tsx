@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
 function cleanPathname(p: string | null): string {
   let cleaned = (p ?? "").replace(/\.html$/, "").split("?")[0];
@@ -478,7 +478,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
   const [user, setUser] = useState<any>(null);
   const [conversations, setConversations] = useState<Conversation[]>(cachedConversations || []);
   const [loading, setLoading] = useState(cachedConversations === null);
-  const [currentConvId, setCurrentConvId] = useState<string | null>(null);
+  const [optimisticConvId, setOptimisticConvId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -489,6 +489,9 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
   const searchListRef = useRef<HTMLDivElement>(null);
   const rawPathname = usePathname();
   const pathname = cleanPathname(rawPathname);
+  const searchParams = useSearchParams();
+  const routeConvId = searchParams.get("id");
+  const currentConvId = optimisticConvId ?? routeConvId;
   const router = useRouter();
   const { templates, updateTemplate } = useTemplates();
 
@@ -584,21 +587,10 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
     return 0;
   });
 
-  /* 监听当前对话 ID */
+  /* 监听当前对话 ID：跟随 Next route state，不再轮询 location */
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const updateConvId = () => {
-        setCurrentConvId(new URLSearchParams(window.location.search).get("id"));
-      };
-      updateConvId();
-      window.addEventListener("popstate", updateConvId);
-      const interval = setInterval(updateConvId, 500);
-      return () => {
-        window.removeEventListener("popstate", updateConvId);
-        clearInterval(interval);
-      };
-    }
-  }, [pathname]);
+    setOptimisticConvId(null);
+  }, [routeConvId]);
 
   /* 用户信息 */
   useEffect(() => {
@@ -618,9 +610,13 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
       if (elapsed < 600) await new Promise((r) => setTimeout(r, 600 - elapsed));
       setLoading(false);
     }
-    setConversations(data);
-    cachedConversations = data;
-  }, [user, currentWS?.id]);
+    if (isFirstLoad) {
+      setConversations(data);
+      cachedConversations = data;
+    } else {
+      updateConversationsStable(() => data);
+    }
+  }, [user, currentWS?.id, updateConversationsStable]);
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
 
@@ -688,7 +684,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
           const convHref = conv.skill_key
             ? `/skills/chat?key=${conv.skill_key}&id=${conv.id}`
             : `/chat?id=${conv.id}`;
-          setCurrentConvId(String(conv.id));
+          setOptimisticConvId(String(conv.id));
           router.push(convHref, { scroll: false });
           setSearchOpen(false);
         }
@@ -801,7 +797,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
     const href = conv.skill_key
       ? `/skills/chat?key=${conv.skill_key}&id=${conv.id}`
       : `/chat?id=${conv.id}`;
-    setCurrentConvId(String(conv.id));
+    setOptimisticConvId(String(conv.id));
     router.push(href, { scroll: false });
   }, [router]);
 
@@ -1316,7 +1312,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                           type="button"
                           data-search-idx={idx}
                           onClick={() => {
-                            setCurrentConvId(String(conv.id));
+                            setOptimisticConvId(String(conv.id));
                             router.push(convHref, { scroll: false });
                             setSearchOpen(false);
                           }}

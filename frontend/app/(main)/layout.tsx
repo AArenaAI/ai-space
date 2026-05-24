@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import AppSidebar from "@/components/sidebar/AppSidebar";
 import ToolsSidebar from "@/components/sidebar/ToolsSidebar";
@@ -23,7 +23,9 @@ export default function MainLayout({
   return (
     <div className="flex h-screen bg-surface overflow-hidden">
       <div className="hidden md:block shrink-0">
-        {isToolsPage ? <ToolsSidebar /> : <AppSidebar />}
+        <Suspense fallback={null}>
+          {isToolsPage ? <ToolsSidebar /> : <AppSidebar />}
+        </Suspense>
       </div>
 
       {/* 主内容区 */}

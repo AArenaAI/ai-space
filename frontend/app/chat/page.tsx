@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { Suspense, useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
 import AppSidebar from "@/components/sidebar/AppSidebar";
@@ -60,12 +60,16 @@ export default function ChatPage() {
   return (
     <div className="flex flex-col h-screen bg-surface-elevated overflow-hidden">
       {/* 移动端导航栏 */}
-      <MobileNav />
+      <Suspense fallback={null}>
+        <MobileNav />
+      </Suspense>
 
       {/* 主区域：侧边栏 + 聊天 */}
       <div className="flex flex-1 min-h-0">
         <div className="hidden md:block shrink-0">
-          <AppSidebar />
+          <Suspense fallback={null}>
+            <AppSidebar />
+          </Suspense>
         </div>
         <main className="flex-1 min-w-0 overflow-hidden bg-surface shadow-lg shadow-black/5">
           <ChatWrapper />

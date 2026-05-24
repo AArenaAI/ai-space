@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   MessageSquare,
   Palette,
@@ -182,6 +182,8 @@ export default function MobileNav() {
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const routeConvId = searchParams.get("id");
   const router = useRouter();
   const drawerRef = useRef<HTMLDivElement>(null);
   const historyScrollRef = useRef<HTMLDivElement>(null);
@@ -227,30 +229,8 @@ export default function MobileNav() {
   }, [captureHistoryAnchor, restoreHistoryAnchor]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const updateConvId = () => setCurrentConvId(new URLSearchParams(window.location.search).get("id"));
-    updateConvId();
-    window.addEventListener("popstate", updateConvId);
-    const originalPushState = window.history.pushState;
-    const originalReplaceState = window.history.replaceState;
-    window.history.pushState = function (...args) {
-      const result = originalPushState.apply(this, args);
-      window.dispatchEvent(new Event("aipool-route-change"));
-      return result;
-    };
-    window.history.replaceState = function (...args) {
-      const result = originalReplaceState.apply(this, args);
-      window.dispatchEvent(new Event("aipool-route-change"));
-      return result;
-    };
-    window.addEventListener("aipool-route-change", updateConvId);
-    return () => {
-      window.removeEventListener("popstate", updateConvId);
-      window.removeEventListener("aipool-route-change", updateConvId);
-      window.history.pushState = originalPushState;
-      window.history.replaceState = originalReplaceState;
-    };
-  }, [pathname]);
+    setCurrentConvId(routeConvId);
+  }, [routeConvId]);
   useEffect(() => { const s = localStorage.getItem("user"); if (s) try { setUser(JSON.parse(s)); } catch {} }, []);
   
   const loadConversations = useCallback(async () => {
@@ -263,9 +243,13 @@ export default function MobileNav() {
       if (elapsed < 600) await new Promise(r => setTimeout(r, 600 - elapsed));
       setLoading(false);
     }
-    setConversations(data);
-    cachedConversationsMobile = data;
-  }, [user]);
+    if (isFirstLoad) {
+      setConversations(data);
+      cachedConversationsMobile = data;
+    } else {
+      updateConversationsStable(() => data);
+    }
+  }, [user, updateConversationsStable]);
   
   useEffect(() => { loadConversations(); }, [loadConversations]);
   useEffect(() => {
