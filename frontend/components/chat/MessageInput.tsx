@@ -408,107 +408,94 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
   return (
     <div className="shrink-0 px-4 pb-6 pt-6">
       <form onSubmit={handleSubmit} className="max-w-[800px] mx-auto">
-        { /* 上方面板：对比 + 附件按钮 */ }
-        <div className="flex items-center gap-2 mb-2">
-          {/* 对比模式开关 */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={onToggleCompare}
-              onMouseEnter={() => setShowCompareTip(true)}
-              onMouseLeave={() => setShowCompareTip(false)}
-              aria-label={t("chat.compare")}
-              className={cn(
-                "flex h-7 w-7 items-center justify-center rounded-lg transition-colors duration-200",
-                compareMode
-                  ? "bg-amber-500/10 text-amber-400"
-                  : "text-text-tertiary hover:bg-surface-card hover:text-text-secondary"
-              )}
-            >
-              <Columns2 className="w-3.5 h-3.5" />
-            </button>
-            <div
-              className={cn(
-                "absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-[180px] z-[90] pointer-events-none transition-opacity duration-200",
-                showCompareTip ? "opacity-100" : "opacity-0"
-              )}
-            >
-              <div className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 shadow-lg text-[12px] leading-relaxed text-text-secondary">
-                <div className="font-medium text-text-primary">{t("chat.compare")}</div>
+        { /* 上方面板：左侧对比/附件 + 右侧模板/新建 */ }
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            {/* 对比模式开关 */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={onToggleCompare}
+                onMouseEnter={() => setShowCompareTip(true)}
+                onMouseLeave={() => setShowCompareTip(false)}
+                aria-label={t("chat.compare")}
+                className={cn(
+                  "flex h-7 w-7 items-center justify-center rounded-lg transition-colors duration-200",
+                  compareMode
+                    ? "bg-amber-500/10 text-amber-400"
+                    : "text-text-tertiary hover:bg-surface-card hover:text-text-secondary"
+                )}
+              >
+                <Columns2 className="w-3.5 h-3.5" />
+              </button>
+              <div
+                className={cn(
+                  "absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-[180px] z-[90] pointer-events-none transition-opacity duration-200",
+                  showCompareTip ? "opacity-100" : "opacity-0"
+                )}
+              >
+                <div className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 shadow-lg text-[12px] leading-relaxed text-text-secondary">
+                  <div className="font-medium text-text-primary">{t("chat.compare")}</div>
+                </div>
+                <div className="absolute left-1/2 -translate-x-1/2 -bottom-1 w-2 h-2 rotate-45 border-r border-b border-surface-border bg-surface-card" />
               </div>
-              <div className="absolute left-1/2 -translate-x-1/2 -bottom-1 w-2 h-2 rotate-45 border-r border-b border-surface-border bg-surface-card" />
+            </div>
+
+            {/* 文件上传按钮 */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading || isLoading}
+                onMouseEnter={() => setShowFileTip(true)}
+                onMouseLeave={() => setShowFileTip(false)}
+                aria-label={t("chat.attachments")}
+                className={cn(
+                  "flex h-7 w-7 items-center justify-center rounded-lg transition-colors duration-200",
+                  attachedFiles.length > 0
+                    ? "bg-emerald-500/10 text-emerald-400"
+                    : "text-text-tertiary hover:bg-surface-card hover:text-text-secondary",
+                  (uploading || isLoading) && "opacity-50 cursor-not-allowed"
+                )}
+              >
+                {uploading ? (
+                  <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Paperclip className="w-3.5 h-3.5" />
+                )}
+              </button>
+              {/* 自定义 tooltip */}
+              <div
+                className={cn(
+                  "absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-[220px] z-[90] pointer-events-none transition-opacity duration-200",
+                  showFileTip ? "opacity-100" : "opacity-0"
+                )}
+              >
+                <div className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 shadow-lg text-[12px] leading-relaxed text-text-secondary">
+                  <div className="font-medium text-text-primary mb-0.5">{t("chat.fileUploadLimitTitle")}</div>
+                  <div>{t("chat.fileUploadSupport")}</div>
+                  <div>{t("chat.fileUploadLimitDesc")}</div>
+                </div>
+                {/* 小三角箭头 */}
+                <div className="absolute left-1/2 -translate-x-1/2 -bottom-1 w-2 h-2 rotate-45 border-r border-b border-surface-border bg-surface-card" />
+              </div>
             </div>
           </div>
 
-          {/* 文件上传按钮 */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading || isLoading}
-              onMouseEnter={() => setShowFileTip(true)}
-              onMouseLeave={() => setShowFileTip(false)}
-              aria-label={t("chat.attachments")}
-              className={cn(
-                "flex h-7 w-7 items-center justify-center rounded-lg transition-colors duration-200",
-                attachedFiles.length > 0
-                  ? "bg-emerald-500/10 text-emerald-400"
-                  : "text-text-tertiary hover:bg-surface-card hover:text-text-secondary",
-                (uploading || isLoading) && "opacity-50 cursor-not-allowed"
-              )}
-            >
-              {uploading ? (
-                <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <Paperclip className="w-3.5 h-3.5" />
-              )}
-            </button>
-            {/* 自定义 tooltip */}
-            <div
-              className={cn(
-                "absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-[220px] z-[90] pointer-events-none transition-opacity duration-200",
-                showFileTip ? "opacity-100" : "opacity-0"
-              )}
-            >
-              <div className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 shadow-lg text-[12px] leading-relaxed text-text-secondary">
-                <div className="font-medium text-text-primary mb-0.5">{t("chat.fileUploadLimitTitle")}</div>
-                <div>{t("chat.fileUploadSupport")}</div>
-                <div>{t("chat.fileUploadLimitDesc")}</div>
-              </div>
-              {/* 小三角箭头 */}
-              <div className="absolute left-1/2 -translate-x-1/2 -bottom-1 w-2 h-2 rotate-45 border-r border-b border-surface-border bg-surface-card" />
-            </div>
-          </div>
-        </div>
-
-        <div
-          onDragOver={handleDragOver}
-          onDragEnter={handleDragEnter}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-          className={cn(
-            "relative flex min-h-[134px] flex-col overflow-visible rounded-2xl border transition-all duration-300",
-            "bg-surface-card",
-            dragOver
-              ? "border-brand/60 border-dashed shadow-[0_0_0_1px_rgba(59,130,246,0.15),0_0_20px_rgba(59,130,246,0.1)]"
-              : compareMode
-                ? "border-amber-500/30 focus-within:border-amber-500/60 focus-within:shadow-[0_0_0_1px_rgba(251,191,36,0.15),0_0_20px_rgba(251,191,36,0.08)]"
-                : "border-surface-border focus-within:border-brand/50 focus-within:shadow-[0_0_0_1px_rgba(59,130,246,0.1)]"
-          )}
-        >
-          <div className="absolute right-3 top-2 z-20 flex items-center gap-2">
+          <div className="flex items-center gap-2">
+            {/* 回答模板 */}
             <div className="relative" ref={templateRef} onMouseEnter={handleTemplateEnter} onMouseLeave={handleTemplateLeave}>
               <button
                 type="button"
-                className="flex h-8 w-8 items-center justify-center rounded-xl text-text-secondary transition-colors duration-200 hover:bg-surface-card hover:text-text-primary"
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-text-tertiary transition-colors duration-200 hover:bg-surface-card hover:text-text-secondary"
                 title={selectedTemplate ? `回答模板：${selectedTemplate.name}` : isTemplateDisabled ? "不使用模板" : "选择回答模板"}
                 aria-label={selectedTemplate ? `回答模板：${selectedTemplate.name}` : isTemplateDisabled ? "不使用模板" : "选择回答模板"}
               >
-                <SlidersHorizontal className="h-4 w-4" />
+                <SlidersHorizontal className="h-3.5 w-3.5" />
               </button>
 
               {templateOpen && (
-                <div className="absolute bottom-full right-0 mb-2 w-56 overflow-hidden rounded-xl border border-surface-border bg-surface-elevated py-1 shadow-xl z-[90] animate-fade-in">
+                <div className="absolute bottom-full right-0 z-[90] mb-2 w-56 overflow-hidden rounded-xl border border-surface-border bg-surface-elevated py-1 shadow-xl animate-fade-in">
                   <div className="px-3 py-2 text-xs font-medium text-text-tertiary">选择回答模板</div>
                   <div className="px-1 pb-1">
                     <button
@@ -530,7 +517,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                   {templates.length === 0 ? (
                     <div className="px-3 pb-3 pt-1 text-sm text-text-tertiary">暂无回答模板</div>
                   ) : (
-                    <div className="max-h-64 overflow-y-auto px-1 pb-1 border-t border-surface-border/60 pt-1">
+                    <div className="max-h-64 overflow-y-auto border-t border-surface-border/60 px-1 pb-1 pt-1">
                       {templates.map((tpl) => (
                         <button
                           key={tpl.id}
@@ -559,14 +546,30 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
             <button
               type="button"
               onClick={onNewChat}
-              className="flex h-8 w-8 items-center justify-center rounded-xl text-brand transition-colors duration-200 hover:bg-surface-card hover:text-brand-hover"
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-brand transition-colors duration-200 hover:bg-surface-card hover:text-brand-hover"
               title={t("common.newChat")}
               aria-label={t("common.newChat")}
             >
-              <MessageSquarePlus className="h-4 w-4" />
+              <MessageSquarePlus className="h-3.5 w-3.5" />
             </button>
           </div>
+        </div>
 
+        <div
+          onDragOver={handleDragOver}
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={cn(
+            "relative flex min-h-[134px] flex-col overflow-visible rounded-2xl border transition-all duration-300",
+            "bg-surface-card",
+            dragOver
+              ? "border-brand/60 border-dashed shadow-[0_0_0_1px_rgba(59,130,246,0.15),0_0_20px_rgba(59,130,246,0.1)]"
+              : compareMode
+                ? "border-amber-500/30 focus-within:border-amber-500/60 focus-within:shadow-[0_0_0_1px_rgba(251,191,36,0.15),0_0_20px_rgba(251,191,36,0.08)]"
+                : "border-surface-border focus-within:border-brand/50 focus-within:shadow-[0_0_0_1px_rgba(59,130,246,0.1)]"
+          )}
+        >
           {/* 拖拽遮罩 */}
           {dragOver && (
             <div className="absolute inset-0 z-50 flex items-center justify-center rounded-2xl bg-surface-card/95 border-2 border-dashed border-brand/40 pointer-events-none">
@@ -576,49 +579,51 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
               </div>
             </div>
           )}
-          {/* 文件附件标签 */}
+          {/* 文件附件 */}
           {attachedFiles.length > 0 && (
-            <div className="absolute left-3 right-3 top-2 z-10 flex max-h-8 flex-wrap gap-2 overflow-hidden">
-              {attachedFiles.map((file, idx) => {
-                const status = file.parse_status || "pending";
-                const statusConfig: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
-                  pending: { color: "text-amber-400 border-amber-500/30 bg-amber-500/5", icon: <div className="w-3 h-3 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />, label: t("chat.fileStatusParsing") },
-                  done: { color: "text-emerald-400 border-emerald-500/30 bg-emerald-500/5", icon: <FileText className="w-3.5 h-3.5" />, label: t("chat.fileStatusDone") },
-                  error: { color: "text-red-400 border-red-500/30 bg-red-500/5", icon: <div className="w-3 h-3 rounded-full bg-red-400" />, label: t("chat.fileStatusFailed") },
-                  unsupported: { color: "text-gray-400 border-gray-500/30 bg-gray-500/5", icon: <FileText className="w-3.5 h-3.5" />, label: t("chat.fileStatusUnsupported") },
-                };
-                const cfg = statusConfig[status] || statusConfig.pending;
-                const isEmptyContent = status === "done" && !file.content?.trim();
-                return (
-                  <div
-                    key={idx}
-                    className={cn(
-                      "flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 text-[12px] rounded-lg border transition-all",
-                      cfg.color
-                    )}
-                    title={
-                      file.error_message
-                        ? `${t("chat.fileParseFailed")}: ${file.error_message}`
-                        : isEmptyContent
-                        ? t("chat.fileEmptyContent")
-                        : cfg.label
-                    }
-                  >
-                    {cfg.icon}
-                    <span className="max-w-[120px] truncate">{file.filename}</span>
-                    <span className="text-[10px] opacity-60 ml-0.5">
-                      {file.error_message ? t("chat.fileParseFailed") : isEmptyContent ? t("chat.emptyFile") : cfg.label}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => removeAttachedFile(idx)}
-                      className="flex items-center justify-center w-4 h-4 rounded hover:bg-black/10 transition-colors ml-0.5"
+            <div className="px-4 pt-3">
+              <div className="flex flex-wrap gap-2">
+                {attachedFiles.map((file, idx) => {
+                  const status = file.parse_status || "pending";
+                  const statusConfig: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
+                    pending: { color: "text-amber-500", icon: <div className="w-4 h-4 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />, label: t("chat.fileStatusParsing") },
+                    done: { color: "text-emerald-500", icon: <FileText className="w-5 h-5" />, label: t("chat.fileStatusDone") },
+                    error: { color: "text-red-500", icon: <div className="w-4 h-4 rounded-full bg-red-500" />, label: t("chat.fileStatusFailed") },
+                    unsupported: { color: "text-gray-400", icon: <FileText className="w-5 h-5" />, label: t("chat.fileStatusUnsupported") },
+                  };
+                  const cfg = statusConfig[status] || statusConfig.pending;
+                  const isEmptyContent = status === "done" && !file.content?.trim();
+                  return (
+                    <div
+                      key={idx}
+                      className="flex items-center gap-2.5 rounded-xl border border-surface-border bg-surface-elevated px-3 py-2.5 text-[13px] transition-all"
+                      title={
+                        file.error_message
+                          ? `${t("chat.fileParseFailed")}: ${file.error_message}`
+                          : isEmptyContent
+                          ? t("chat.fileEmptyContent")
+                          : cfg.label
+                      }
                     >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                );
-              })}
+                      <div className={cn("shrink-0", cfg.color)}>{cfg.icon}</div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="max-w-[180px] truncate font-medium text-text-primary">{file.filename}</span>
+                        <span className="text-[11px] text-text-tertiary">
+                          {file.error_message ? t("chat.fileParseFailed") : isEmptyContent ? t("chat.emptyFile") : cfg.label}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeAttachedFile(idx)}
+                        className="flex items-center justify-center w-5 h-5 rounded-full hover:bg-black/5 transition-colors shrink-0"
+                      >
+                        <X className="w-3 h-3 text-text-tertiary" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-3 border-t border-surface-border/60" />
             </div>
           )}
 
@@ -629,7 +634,10 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
             onKeyDown={handleKeyDown}
             placeholder={t("chat.placeholder")}
             rows={1}
-            className="w-full min-h-[92px] shrink-0 resize-none overflow-hidden bg-transparent px-4 pt-12 pb-1 text-[15px] outline-none placeholder:text-text-tertiary leading-relaxed"
+            className={cn(
+              "w-full min-h-[92px] shrink-0 resize-none overflow-hidden bg-transparent px-4 pb-1 text-[15px] outline-none placeholder:text-text-tertiary leading-relaxed",
+              attachedFiles.length > 0 ? "pt-3" : "pt-4"
+            )}
           />
 
           <div className="flex items-center justify-between px-3 pb-3">

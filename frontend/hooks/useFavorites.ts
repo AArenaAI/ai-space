@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { getGuestId } from "@/lib/guestId";
+import { toast } from "sonner";
 
 export interface FavoriteItem {
   id: number;
@@ -78,7 +79,7 @@ export function useFavorites() {
   const addFavorite = useCallback(async (messageId: number, convId: number) => {
     const token = localStorage.getItem("token");
     if (!token) {
-      alert("请先登录");
+      toast.warning("请先登录后收藏");
       return false;
     }
     setLoading(true);
@@ -94,10 +95,13 @@ export function useFavorites() {
           next.add(messageId);
           return next;
         });
+        toast.success(res.status === 409 ? "已在收藏中" : "已收藏");
         return true;
       }
+      toast.error("收藏失败");
       return false;
     } catch {
+      toast.error("收藏失败");
       return false;
     } finally {
       setLoading(false);
@@ -107,7 +111,10 @@ export function useFavorites() {
   // 取消收藏
   const removeFavorite = useCallback(async (messageId: number) => {
     const token = localStorage.getItem("token");
-    if (!token) return false;
+    if (!token) {
+      toast.warning("请先登录后操作收藏");
+      return false;
+    }
     setLoading(true);
     try {
       const res = await fetch(`/api/favorites/${messageId}`, {
@@ -121,10 +128,13 @@ export function useFavorites() {
           return next;
         });
         setFavoriteList((prev) => prev.filter((f) => f.message_id !== messageId));
+        toast.success("已取消收藏");
         return true;
       }
+      toast.error("取消收藏失败");
       return false;
     } catch {
+      toast.error("取消收藏失败");
       return false;
     } finally {
       setLoading(false);
@@ -141,7 +151,7 @@ export function useFavorites() {
   }, [favorites, addFavorite, removeFavorite]);
 
   // 获取收藏列表
-  const fetchList = useCallback(async (page = 1, pageSize = 20) => {
+  const fetchList = useCallback(async (page = 1, pageSize = 20, append = false) => {
     const token = localStorage.getItem("token");
     if (!token) return;
     setListLoading(true);
@@ -151,7 +161,7 @@ export function useFavorites() {
       });
       if (res.ok) {
         const data: FavoritesResponse = await res.json();
-        setFavoriteList(data.items);
+        setFavoriteList((prev) => append ? [...prev, ...data.items] : data.items);
         // 同步到 favorites set
         setFavorites((prev) => {
           const next = new Set(prev);

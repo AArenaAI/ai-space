@@ -28,7 +28,6 @@ import { useTemplates } from "@/hooks/useTemplates";
 import SidebarUserPanel from "./SidebarUserPanel";
 import { useWorkspaces } from "@/hooks/useWorkspaces";
 import { useTheme } from "@/components/theme/ThemeProvider";
-import FavoriteList from "@/components/chat/FavoriteList";
 
 // 模块级缓存：避免组件重新挂载时历史记录反复闪烁
 let cachedConversations: Conversation[] | null = null;
@@ -112,7 +111,7 @@ const SKILL_ICON_MAP: Record<string, { icon: React.ElementType; color: string }>
   "translator":       { icon: Languages,       color: "text-indigo-400" },
 };
 
-async function fetchConversations(workspaceId?: number): Promise<Conversation[]> {
+async function fetchConversations(workspaceId?: number): Promise<Conversation[] | null> {
   const token = localStorage.getItem("token");
   if (!token) return [];
   try {
@@ -122,12 +121,12 @@ async function fetchConversations(workspaceId?: number): Promise<Conversation[]>
     const res = await fetch(`/api/conversations?${params.toString()}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!res.ok) return [];
+    if (!res.ok) return null;
     const data = await res.json();
     if (Array.isArray(data)) return data;
     if (data && Array.isArray(data.conversations)) return data.conversations;
-    return [];
-  } catch { return []; }
+    return null;
+  } catch { return null; }
 }
 
 async function searchConversations(keyword: string, workspaceId?: number, signal?: AbortSignal): Promise<ConversationSearchResult[]> {
@@ -502,8 +501,6 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
   const workBtnRef = useRef<HTMLButtonElement>(null);
   const workTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  /* 收藏列表 */
-  const [favoriteListOpen, setFavoriteListOpen] = useState(false);
   const historyScrollRef = useRef<HTMLDivElement>(null);
 
   const captureHistoryAnchor = useCallback(() => {
@@ -604,6 +601,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
       if (elapsed < 600) await new Promise((r) => setTimeout(r, 600 - elapsed));
       setLoading(false);
     }
+    if (data === null) return;
     if (isFirstLoad) {
       setConversations(data);
       cachedConversations = data;
@@ -1031,17 +1029,17 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
               </div>
 
               {/* 收藏 */}
-              <button
-                onClick={() => setFavoriteListOpen(true)}
+              <Link
+                href="/favorites"
                 onMouseEnter={showSidebarTooltip(t("sidebar.tooltip.favorites"))}
                 onMouseLeave={hideSidebarTooltip}
                 className={cn(
                   "p-2.5 rounded-xl transition-colors",
-                  favoriteListOpen ? "bg-amber-400/10 text-amber-400" : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
+                  pathname === "/favorites" ? "bg-amber-400/10 text-amber-400" : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
                 )}
               >
-                <Star className={cn("w-5 h-5", favoriteListOpen ? "text-amber-400 fill-amber-400" : "text-text-tertiary")} />
-              </button>
+                <Star className={cn("w-5 h-5", pathname === "/favorites" ? "text-amber-400 fill-amber-400" : "text-text-tertiary")} />
+              </Link>
             </div>
 
             {/* 分隔线 - 功能与历史分组之间 */}
@@ -1150,16 +1148,16 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                 </div>
 
                 {/* 收藏 */}
-                <button
-                  onClick={() => setFavoriteListOpen(true)}
+                <Link
+                  href="/favorites"
                   className={cn(
                     "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150 w-full text-left",
-                    favoriteListOpen ? "bg-amber-400/10 text-text-primary font-medium" : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
+                    pathname === "/favorites" ? "bg-amber-400/10 text-text-primary font-medium" : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                   )}
                 >
-                  <Star className={cn("w-[18px] h-[18px] shrink-0 transition-colors", favoriteListOpen ? "text-amber-400 fill-amber-400" : "text-text-tertiary")} />
+                  <Star className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/favorites" ? "text-amber-400 fill-amber-400" : "text-text-tertiary")} />
                   <span>{t("sidebar.nav.favorites")}</span>
-                </button>
+                </Link>
               </div>
             </div>
 
@@ -1204,9 +1202,6 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
 
       {/* AI工作 hover 面板 */}
       <WorkHoverPanel open={workOpen} anchorEl={workBtnRef.current} onClose={() => setWorkOpen(false)} onMouseEnter={handleWorkEnter} onMouseLeave={handleWorkLeave} />
-
-      {/* 收藏列表弹窗 */}
-      <FavoriteList open={favoriteListOpen} onClose={() => setFavoriteListOpen(false)} />
 
       {/* 收缩状态 tooltip */}
       {sidebarTooltip && typeof document !== "undefined" && createPortal(

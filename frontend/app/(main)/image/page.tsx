@@ -11,6 +11,7 @@ import { GeneratedImage } from "@/hooks/useImage";
 import ImageLightbox from "@/components/ui/ImageLightbox";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import HistoryDrawer from "@/components/ui/HistoryDrawer";
+import NoticeDialog from "@/components/ui/NoticeDialog";
 import {
   ImageIcon,
   Loader2,
@@ -288,6 +289,7 @@ export default function ImagePage() {
   const [referenceImages, setReferenceImages] = useState<string[]>([]);
   const [uploadingRef, setUploadingRef] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [limitDialogOpen, setLimitDialogOpen] = useState(false);
   const [mode, setMode] = useState<"image" | "video">("image");
   const [selectedDuration, setSelectedDuration] = useState("4s");
   const [durationMenuOpen, setDurationMenuOpen] = useState(false);
@@ -370,10 +372,19 @@ export default function ImagePage() {
     }
 
     if (mode === "video") {
+      if (videoChats.length >= 8) {
+        setLimitDialogOpen(true);
+        return;
+      }
       if (currentVideoModel?.id) params.set("model", currentVideoModel.id);
       params.set("duration", selectedDuration);
       if (musicEnabled) params.set("audio", "1");
       router.push(`/video/chat?${params.toString()}`);
+      return;
+    }
+
+    if (chats.length >= 8) {
+      setLimitDialogOpen(true);
       return;
     }
 
@@ -1007,10 +1018,22 @@ export default function ImagePage() {
             onSelect={handleSelectHistory}
             onNew={() => {
               setShowHistory(false);
+              if (mode === "video" ? videoChats.length >= 8 : chats.length >= 8) {
+                setLimitDialogOpen(true);
+                return;
+              }
               router.push(mode === "video" ? "/video/chat" : "/image/chat");
             }}
             onRename={handleRenameChat}
             onDelete={handleDeleteHistory}
+          />
+
+          <NoticeDialog
+            isOpen={limitDialogOpen}
+            title="会话数量已满"
+            description="历史记录只能保存8条会话，如需新建，请先删除旧会话。"
+            confirmText="我知道了"
+            onConfirm={() => setLimitDialogOpen(false)}
           />
         </div>
       </div>

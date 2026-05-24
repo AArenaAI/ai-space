@@ -412,7 +412,7 @@ function ImageChatPageInner() {
     setPrompt("");
     setReferenceImages([]);
     setShowHistory(false);
-    router.replace("/image/chat");
+    router.replace("/image");
   };
 
   const handleSelectChat = async (id: number) => {
@@ -519,8 +519,9 @@ function ImageChatPageInner() {
                           </div>
                         </div>
                       ) : (
-                        <div className="relative aspect-square bg-surface-card">
+                        <div className="relative aspect-video bg-surface-card">
                           <video
+                            key="ai-space-loading-video"
                             src="/ai-space-loading.mp4"
                             className="absolute inset-0 h-full w-full object-cover"
                             autoPlay
@@ -529,13 +530,19 @@ function ImageChatPageInner() {
                             playsInline
                             preload="auto"
                           />
-                          <div className="absolute inset-0 bg-black/25" />
-                          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10 px-6 text-center">
+                          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 z-10 px-6 text-center">
                             <div className="flex items-center gap-1.5 rounded-full bg-black/35 px-3 py-1.5 text-xs text-white backdrop-blur-sm">
                               <Loader2 className="w-3 h-3 animate-spin" />
                               <span>图片生成中...</span>
                             </div>
-                            <p className="text-[11px] text-white/75 max-w-[80%] line-clamp-2">
+                            <p className="text-[11px] text-white/80">
+                              {selectedResolution === "4K" || selectedResolution === "ultra"
+                                ? "预计用时 1～3 分钟"
+                                : selectedResolution === "2K" || selectedQuality === "high"
+                                ? "预计用时 30 秒～2 分钟"
+                                : "预计用时 15～45 秒"}
+                            </p>
+                            <p className="text-[11px] text-white/50 max-w-[80%] line-clamp-2">
                               {msg.content}
                             </p>
                           </div>

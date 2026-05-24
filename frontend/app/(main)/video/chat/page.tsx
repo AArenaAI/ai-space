@@ -355,7 +355,7 @@ function VideoChatPageInner() {
     setReferenceImages([]);
     setDeleteTargetId(null);
     setCurrentChatId(null);
-    router.replace("/video/chat");
+    router.replace("/image");
     setShowHistory(false);
   };
 
@@ -424,7 +424,7 @@ function VideoChatPageInner() {
               <div key={msg.id} className="flex justify-start">
                 <div className="w-[min(90vw,36rem)] md:w-[36rem] max-w-[90%] space-y-2">
                   {(msg.status === "pending" || msg.status === "running" || generating) && !videoUrl && (
-                    <div className="relative w-full aspect-video rounded-2xl rounded-tl-sm bg-surface-card border border-surface-border overflow-hidden">
+                    <div className="relative w-full aspect-video rounded-2xl rounded-tl-sm bg-gradient-to-br from-brand/10 via-purple-500/10 to-surface-card border border-surface-border overflow-hidden">
                       <video
                         src="/ai-space-loading.mp4"
                         className="absolute inset-0 h-full w-full object-cover"
@@ -435,12 +435,19 @@ function VideoChatPageInner() {
                         preload="auto"
                       />
                       <div className="absolute inset-0 bg-black/25" />
-                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10 px-6 text-center">
+                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 z-10 px-6 text-center">
                         <div className="flex items-center gap-1.5 rounded-full bg-black/35 px-3 py-1.5 text-sm text-white backdrop-blur-sm">
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
                           <span>视频生成中...</span>
                         </div>
-                        <p className="text-xs text-white/75 max-w-[70%] line-clamp-2">
+                        <p className="text-xs text-white/80">
+                          {selectedDuration === "8s" || selectedDuration === "10s"
+                            ? "预计用时 1～3 分钟"
+                            : selectedDuration === "5s"
+                            ? "预计用时 30 秒～2 分钟"
+                            : "预计用时 30 秒～1 分 30 秒"}
+                        </p>
+                        <p className="text-xs text-white/50 max-w-[70%] line-clamp-2">
                           {msg.content}
                         </p>
                       </div>

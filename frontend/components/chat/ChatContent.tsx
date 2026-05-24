@@ -18,6 +18,9 @@ export default function ChatContent() {
     ? Number(searchParams.get("id"))
     : undefined;
   const newChatToken = searchParams.get("t") || "default";
+  const targetMessageId = searchParams.get("message")
+    ? Number(searchParams.get("message"))
+    : undefined;
   const { models, loading } = useModels();
 
   if (loading || models.length === 0) return <ChatSkeleton />;
@@ -28,7 +31,7 @@ export default function ChatContent() {
   const chatKey = newChatToken !== "default" ? `new-${newChatToken}` : "chat";
   return (
     <div className="h-full min-h-0 overflow-hidden">
-      <ChatInterface key={chatKey} conversationId={conversationId} models={models} />
+      <ChatInterface key={chatKey} conversationId={conversationId} models={models} targetMessageId={targetMessageId} />
     </div>
   );
 }

@@ -645,12 +645,14 @@ function ImageEditContent() {
                   ) : (
                     <div className="flex flex-1 flex-col items-center justify-center gap-6 py-8 w-full">
                       {isEditing ? (
-                        <div className="flex h-full max-h-[70vh] min-h-[400px] w-full flex-col items-center justify-center gap-5 rounded-2xl border border-gray-200 bg-white px-10 py-16 dark:border-surface-border dark:bg-surface-card">
+                        <div className="flex h-full max-h-[70vh] min-h-[400px] w-full flex-col items-center justify-center gap-5 rounded-2xl border border-gray-200 bg-gradient-to-br from-purple-500/5 to-brand/5 px-10 py-16 dark:border-surface-border dark:bg-surface-card">
                           <Spinner className="h-12 w-12 animate-spin text-purple-500" />
                           <div className="text-center">
                             <p className="text-base font-semibold text-gray-800 dark:text-text-primary">AI 正在处理</p>
                             <p className="mt-1 text-sm text-gray-400 dark:text-text-tertiary">
-                              {editMode === "upscale" ? "正在增强画质，可能需要 30 秒到 2 分钟..." : "正在编辑图片，请稍候..."}
+                              {editMode === "upscale"
+                                ? "预计用时 15～45 秒"
+                                : "预计用时 5～15 秒"}
                             </p>
                           </div>
                         </div>

@@ -71,7 +71,9 @@ func (rl *IPRateLimiter) Allow(ip string) bool {
 func RateLimitMiddleware() gin.HandlerFunc {
 	limiter := NewIPRateLimiter()
 	return func(c *gin.Context) {
-		if strings.HasPrefix(c.Request.URL.Path, "/api/images/file/") {
+		path := c.Request.URL.Path
+		method := c.Request.Method
+		if strings.HasPrefix(path, "/api/images/file/") || isHighFrequencyReadEndpoint(method, path) {
 			c.Next()
 			return
 		}
@@ -84,4 +86,20 @@ func RateLimitMiddleware() gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+func isHighFrequencyReadEndpoint(method, path string) bool {
+	if method != http.MethodGet {
+		return false
+	}
+	if path == "/api/favorites" || path == "/api/favorites/check-batch" {
+		return true
+	}
+	if path == "/api/conversations" || path == "/api/conversations/search" {
+		return true
+	}
+	if strings.HasPrefix(path, "/api/conversations/") {
+		return true
+	}
+	return false
 }

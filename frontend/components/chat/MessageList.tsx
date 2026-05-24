@@ -49,7 +49,9 @@ interface MessageListProps {
   onForkCompare?: (messageId: number) => void;
   isLoadingMore?: boolean;
   hasMoreMessages?: boolean;
-  onLoadMore?: () => void;
+  onLoadMore?: () => void | Promise<void>;
+  targetMessageId?: number;
+  bottomSpacer?: number;
 }
 
 function ThinkingDots() {
@@ -586,6 +588,7 @@ function MessageList({
   isLoadingMore,
   hasMoreMessages,
   onLoadMore,
+  targetMessageId,
 }: MessageListProps) {
   const { t } = useI18n();
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -723,6 +726,11 @@ function MessageList({
     return map;
   }, [groups]);
 
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const locatedTargetKeyRef = useRef<string>("");
+  const loadingTargetKeyRef = useRef<string>("");
+  const highlightTimerRef = useRef<number | null>(null);
+
   const visibleMessages = useMemo(() => {
     return messages.filter((msg) => {
       const group = groupByMessageId.get(msg.id);
@@ -741,6 +749,59 @@ function MessageList({
     models.forEach((model) => map.set(model.id, model));
     return map;
   }, [models]);
+  useEffect(() => {
+    if (!targetMessageId) return;
+    const targetKey = `${conversationId || "new"}:${targetMessageId}`;
+    if (locatedTargetKeyRef.current === targetKey || isLoadingHistory) return;
+
+    const index = visibleMessages.findIndex((msg) => msg.serverMessageId === targetMessageId);
+    if (index < 0) {
+      if (hasMoreMessages && onLoadMore && !isLoadingMore && loadingTargetKeyRef.current !== targetKey) {
+        loadingTargetKeyRef.current = targetKey;
+        Promise.resolve(onLoadMore()).finally(() => {
+          if (loadingTargetKeyRef.current === targetKey) {
+            loadingTargetKeyRef.current = "";
+          }
+        });
+      }
+      return;
+    }
+
+    const msg = visibleMessages[index];
+    locatedTargetKeyRef.current = targetKey;
+    loadingTargetKeyRef.current = "";
+    stickToBottomRef.current = false;
+    programmaticScrollUntilRef.current = Date.now() + 700;
+    setHighlightedMessageId(msg.id);
+
+    const scrollToTarget = () => {
+      virtuosoRef.current?.scrollToIndex({ index, align: "center", behavior: "auto" });
+    };
+
+    const raf = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(scrollToTarget);
+    });
+    const settleTimer = window.setTimeout(scrollToTarget, 120);
+
+    if (highlightTimerRef.current) window.clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = window.setTimeout(() => {
+      setHighlightedMessageId(null);
+      highlightTimerRef.current = null;
+    }, 2600);
+
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(settleTimer);
+    };
+  }, [conversationId, targetMessageId, visibleMessages, isLoadingHistory, isLoadingMore, hasMoreMessages, onLoadMore]);
+
+  useEffect(() => {
+    if (!targetMessageId) {
+      locatedTargetKeyRef.current = "";
+      loadingTargetKeyRef.current = "";
+    }
+  }, [conversationId, targetMessageId]);
+
   const activeCompareModels = useMemo(() => {
     if (!isCompare) return [];
     return compareModels && compareModels.length > 0
@@ -1285,9 +1346,10 @@ function MessageList({
           const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
           const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
           const isSelected = selectedIds.has(msg.id);
+          const isHighlighted = highlightedMessageId === msg.id;
 
           return (
-            <div className="max-w-[800px] mx-auto px-4 py-4">
+            <div className={cn("max-w-[800px] mx-auto px-4 py-4 rounded-2xl transition-colors duration-500", isHighlighted && "bg-brand/10")}>
               <div
                 key={msg.id}
                 className={cn("flex gap-3 animate-message-appear group", isUser ? "justify-end" : "justify-start")}
@@ -1347,10 +1409,11 @@ function MessageList({
                     )}
                     <div
                       className={cn(
-                        "px-4 py-3 relative w-fit max-w-full",
+                        "px-4 py-3 relative w-fit max-w-full transition-shadow duration-500",
                         isUser
                           ? "rounded-2xl rounded-br-sm bg-[#EFF6FF] dark:bg-[#1E293B]"
-                          : "rounded-2xl rounded-bl-sm bg-[#F5F4F2] dark:bg-[#1F1F1F]"
+                          : "rounded-2xl rounded-bl-sm bg-[#F5F4F2] dark:bg-[#1F1F1F]",
+                        isHighlighted && "ring-2 ring-brand/40 shadow-lg shadow-brand/10"
                       )}
                     >
 

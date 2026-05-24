@@ -27,9 +27,10 @@ interface ChatInterfaceProps {
   welcomeTitle?: string;
   welcomeSubtitle?: string;
   welcomeExamples?: { title: string; desc: string; prompt: string }[];
+  targetMessageId?: number;
 }
 
-export default function ChatInterface({ conversationId, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples }: ChatInterfaceProps) {
+export default function ChatInterface({ conversationId, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId }: ChatInterfaceProps) {
   const { t, language } = useI18n();
   const [compareMode, setCompareMode] = useState(false);
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
@@ -430,6 +431,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
         isLoadingMore={isLoadingMore}
         hasMoreMessages={hasMoreMessages}
         onLoadMore={loadMoreMessages}
+        targetMessageId={currentConversation === conversationId ? targetMessageId : undefined}
       />
 
       {/* 重命名对话 */}

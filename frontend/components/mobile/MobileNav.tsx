@@ -90,20 +90,20 @@ function sortGroupLabels(labels: string[]): string[] {
   return [...fixed, ...months];
 }
 
-async function fetchConversations(): Promise<Conversation[]> {
+async function fetchConversations(): Promise<Conversation[] | null> {
   const token = localStorage.getItem("token");
   if (!token) return [];
   try {
     const res = await fetch("/api/conversations?limit=200", {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!res.ok) return [];
+    if (!res.ok) return null;
     const data = await res.json();
     if (Array.isArray(data)) return data;
     if (data && Array.isArray(data.conversations)) return data.conversations;
-    return [];
+    return null;
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -243,6 +243,7 @@ export default function MobileNav() {
       if (elapsed < 600) await new Promise(r => setTimeout(r, 600 - elapsed));
       setLoading(false);
     }
+    if (data === null) return;
     if (isFirstLoad) {
       setConversations(data);
       cachedConversationsMobile = data;
