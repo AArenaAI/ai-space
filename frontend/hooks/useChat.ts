@@ -34,6 +34,18 @@ function parsePersistedSearchSources(raw: any): SearchSource[] | undefined {
   }
 }
 
+function normalizeMessageFiles(value: any): Message["files"] {
+  if (!value) return undefined;
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "string") return undefined;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface Message {
   id: string;
   role: "user" | "assistant" | "system";
@@ -596,7 +608,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             model: m.model,
             createdAt: new Date(m.created_at).getTime(),
             completedAt: m.completed_at ? new Date(m.completed_at).getTime() : undefined,
-            files: m.files || undefined,
+            files: normalizeMessageFiles(m.files),
             searchSources: parsePersistedSearchSources(m),
             searchSourcesCount: typeof m.search_sources_count === "number" ? m.search_sources_count : undefined,
             searchStatus: m.search_sources_count > 0 || m.search_sources ? "completed" : undefined,
@@ -1551,7 +1563,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
                 model: m.model,
                 createdAt: new Date(m.created_at).getTime(),
                 completedAt: m.completed_at ? new Date(m.completed_at).getTime() : undefined,
-                files: m.files || undefined,
+                files: normalizeMessageFiles(m.files),
                 searchSources: parsePersistedSearchSources(m),
                 searchSourcesCount: typeof m.search_sources_count === "number" ? m.search_sources_count : undefined,
                 searchStatus: m.search_sources_count > 0 || m.search_sources ? "completed" : undefined,
@@ -1603,7 +1615,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         model: m.model,
         createdAt: new Date(m.created_at).getTime(),
         completedAt: m.completed_at ? new Date(m.completed_at).getTime() : undefined,
-        files: m.files || undefined,
+        files: normalizeMessageFiles(m.files),
         searchSources: parsePersistedSearchSources(m),
         searchSourcesCount: typeof m.search_sources_count === "number" ? m.search_sources_count : undefined,
         searchStatus: m.search_sources_count > 0 || m.search_sources ? "completed" : undefined,

@@ -30,6 +30,7 @@
     "echarts": "^6.0.0",
     "echarts-for-react": "^3.0.6",
     "highlight.js": "^11.9.0",
+    "html-to-image": "^1.11.13",
     "http-proxy-middleware": "^3.0.5",
     "katex": "^0.16.47",
     "lucide-react": "^0.395.0",

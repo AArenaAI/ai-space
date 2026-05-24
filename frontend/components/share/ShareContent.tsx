@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bot, User, Loader2, AlertCircle, Lightbulb, ChevronUp, ChevronDown } from "lucide-react";
+import {
+  Bot,
+  User,
+  Loader2,
+  AlertCircle,
+  Lightbulb,
+  ChevronUp,
+  ChevronDown,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -32,14 +40,18 @@ function CodeBlock({ language, value }: { language: string; value: string }) {
 
   return (
     <div className="relative group my-4 rounded-lg overflow-hidden border border-surface-border">
-      <div className={cn(
-        "flex items-center justify-between px-3 py-2 border-b border-surface-border",
-        isDark ? "bg-[#0D0D0D]" : "bg-[#F6F8FA]"
-      )}>
-        <span className={cn(
-          "text-[11px] font-mono uppercase",
-          isDark ? "text-gray-400" : "text-gray-500"
-        )}>
+      <div
+        className={cn(
+          "flex items-center justify-between px-3 py-2 border-b border-surface-border",
+          isDark ? "bg-[#0D0D0D]" : "bg-[#F6F8FA]"
+        )}
+      >
+        <span
+          className={cn(
+            "text-[11px] font-mono uppercase",
+            isDark ? "text-gray-400" : "text-gray-500"
+          )}
+        >
           {language || "text"}
         </span>
       </div>
@@ -62,7 +74,11 @@ function CodeBlock({ language, value }: { language: string; value: string }) {
 }
 
 // 解析 <think>...思考过程...</think>
-function parseThinkContent(content: string): { reasoning: string | null; answer: string; isThinking: boolean } {
+function parseThinkContent(content: string): {
+  reasoning: string | null;
+  answer: string;
+  isThinking: boolean;
+} {
   const startIdx = content.indexOf("<think>");
   if (startIdx === -1) return { reasoning: null, answer: content, isThinking: false };
 
@@ -105,8 +121,10 @@ function ThinkBlock({ content }: { content: string }) {
         )}
       </button>
       {expanded && (
-        <div className="px-3 py-2.5 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap
-          bg-slate-50 dark:bg-[#0F0F1A]">
+        <div
+          className="px-3 py-2.5 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap
+          bg-slate-50 dark:bg-[#0F0F1A]"
+        >
           {content}
         </div>
       )}
@@ -121,26 +139,81 @@ const markdownComponents = {
     return !inline && match ? (
       <CodeBlock language={match[1]} value={String(children).replace(/\n$/, "")} />
     ) : (
-      <code className="bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 px-1 py-0.5 rounded text-[13px] font-mono" {...props}>
+      <code
+        className="bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 px-1 py-0.5 rounded text-[13px] font-mono"
+        {...props}
+      >
         {children}
       </code>
     );
   },
-  p({ children }: any) { return <p className="text-[15px] leading-relaxed text-text-primary mb-4 last:mb-0 [li>&]:inline [li>&]:mb-0">{children}</p>; },
-  ul({ children }: any) { return <ul className="list-disc ml-5 mb-4 space-y-1 text-text-primary">{children}</ul>; },
-  ol({ children }: any) { return <ol className="list-decimal ml-5 mb-4 space-y-1 text-text-primary">{children}</ol>; },
-  li({ children }: any) { return <li className="text-[15px] leading-relaxed">{children}</li>; },
-  h1({ children }: any) { return <h1 className="text-xl font-bold text-text-primary mb-3 mt-6">{children}</h1>; },
-  h2({ children }: any) { return <h2 className="text-lg font-bold text-text-primary mb-2 mt-5">{children}</h2>; },
-  h3({ children }: any) { return <h3 className="text-base font-bold text-text-primary mb-2 mt-4">{children}</h3>; },
-  strong({ children }: any) { return <strong className="font-bold text-text-primary">{children}</strong>; },
-  blockquote({ children }: any) { return <blockquote className="border-l-2 border-surface-border pl-4 italic text-text-secondary my-4">{children}</blockquote>; },
-  table({ children }: any) { return <div className="overflow-x-auto my-4"><table className="w-full text-sm border-collapse">{children}</table></div>; },
-  thead({ children }: any) { return <thead className="bg-surface-card border-b border-surface-border">{children}</thead>; },
-  tbody({ children }: any) { return <tbody>{children}</tbody>; },
-  tr({ children }: any) { return <tr className="border-b border-surface-border/50 hover:bg-surface-card/30 transition-colors">{children}</tr>; },
-  th({ children }: any) { return <th className="px-3 py-2.5 text-left text-[13px] font-semibold text-text-primary whitespace-nowrap">{children}</th>; },
-  td({ children }: any) { return <td className="px-3 py-2.5 text-[13px] text-text-secondary leading-relaxed">{children}</td>; },
+  p({ children }: any) {
+    return (
+      <p className="text-[15px] leading-relaxed text-text-primary mb-4 last:mb-0 [li>&]:inline [li>&]:mb-0">
+        {children}
+      </p>
+    );
+  },
+  ul({ children }: any) {
+    return <ul className="list-disc ml-5 mb-4 space-y-1 text-text-primary">{children}</ul>;
+  },
+  ol({ children }: any) {
+    return <ol className="list-decimal ml-5 mb-4 space-y-1 text-text-primary">{children}</ol>;
+  },
+  li({ children }: any) {
+    return <li className="text-[15px] leading-relaxed">{children}</li>;
+  },
+  h1({ children }: any) {
+    return <h1 className="text-xl font-bold text-text-primary mb-3 mt-6">{children}</h1>;
+  },
+  h2({ children }: any) {
+    return <h2 className="text-lg font-bold text-text-primary mb-2 mt-5">{children}</h2>;
+  },
+  h3({ children }: any) {
+    return <h3 className="text-base font-bold text-text-primary mb-2 mt-4">{children}</h3>;
+  },
+  strong({ children }: any) {
+    return <strong className="font-bold text-text-primary">{children}</strong>;
+  },
+  blockquote({ children }: any) {
+    return (
+      <blockquote className="border-l-2 border-surface-border pl-4 italic text-text-secondary my-4">
+        {children}
+      </blockquote>
+    );
+  },
+  table({ children }: any) {
+    return (
+      <div className="overflow-x-auto my-4">
+        <table className="w-full text-sm border-collapse">{children}</table>
+      </div>
+    );
+  },
+  thead({ children }: any) {
+    return <thead className="bg-surface-card border-b border-surface-border">{children}</thead>;
+  },
+  tbody({ children }: any) {
+    return <tbody>{children}</tbody>;
+  },
+  tr({ children }: any) {
+    return (
+      <tr className="border-b border-surface-border/50 hover:bg-surface-card/30 transition-colors">
+        {children}
+      </tr>
+    );
+  },
+  th({ children }: any) {
+    return (
+      <th className="px-3 py-2.5 text-left text-[13px] font-semibold text-text-primary whitespace-nowrap">
+        {children}
+      </th>
+    );
+  },
+  td({ children }: any) {
+    return (
+      <td className="px-3 py-2.5 text-[13px] text-text-secondary leading-relaxed">{children}</td>
+    );
+  },
 };
 
 // 渲染一条 AI 消息（包含 think 解析）
@@ -189,7 +262,8 @@ export default function ShareContent() {
   useEffect(() => {
     if (!slug) return;
     // 根据 type 选择不同的 API
-    const apiPath = shareType === "compare" ? `/api/compare/share/${slug}` : `/api/share/${slug}`;
+    const apiPath =
+      shareType === "compare" ? `/api/compare/share/${slug}` : `/api/share/${slug}`;
     fetch(apiPath)
       .then(async (res) => {
         if (!res.ok) throw new Error("分享不存在或已过期");
@@ -204,6 +278,7 @@ export default function ShareContent() {
         setLoading(false);
       });
   }, [slug]);
+
 
   if (loading) {
     return (
@@ -233,7 +308,13 @@ export default function ShareContent() {
   // 对比记录渲染
   if (shareType === "compare") {
     const compareData = data as any;
-    const results: Array<{model_id: string; model_name: string; content: string; error?: string; elapsed_ms: number}> = compareData.results || [];
+    const results: Array<{
+      model_id: string;
+      model_name: string;
+      content: string;
+      error?: string;
+      elapsed_ms: number;
+    }> = compareData.results || [];
 
     // 推断颜色
     const findColor = (modelID: string): string => {
@@ -250,11 +331,17 @@ export default function ShareContent() {
         <header className="sticky top-0 z-10 bg-surface/80 backdrop-blur-md border-b border-surface-border">
           <div className="max-w-[1200px] mx-auto px-4 h-12 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <img src={theme === "dark" ? "/brand-dark-title.png" : "/brand-light-title.png"} alt="AI Space" className="h-5 w-auto object-contain" />
+              <img
+                src={theme === "dark" ? "/brand-dark-title.png" : "/brand-light-title.png"}
+                alt="AI Space"
+                className="h-5 w-auto object-contain"
+              />
               <span className="text-text-tertiary">/</span>
               <span className="text-sm text-text-secondary truncate max-w-[200px]">对比结果</span>
             </div>
-            <a href="/" className="text-sm text-brand hover:text-brand-hover transition-colors">开始对话 →</a>
+            <a href="/" className="text-sm text-brand hover:text-brand-hover transition-colors">
+              开始对话 →
+            </a>
           </div>
         </header>
 
@@ -276,7 +363,10 @@ export default function ShareContent() {
             {results.map((res) => {
               const color = findColor(res.model_id);
               return (
-                <div key={res.model_id} className="rounded-xl border border-surface-border bg-surface-elevated flex flex-col overflow-hidden">
+                <div
+                  key={res.model_id}
+                  className="rounded-xl border border-surface-border bg-surface-elevated flex flex-col overflow-hidden"
+                >
                   <div className="flex items-center gap-2 px-4 py-3 border-b border-surface-border">
                     <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
                     <span className="text-sm font-medium text-text-primary">{res.model_name}</span>
@@ -292,7 +382,9 @@ export default function ShareContent() {
                     ) : res.content ? (
                       <AIMessageContent content={res.content} />
                     ) : (
-                      <div className="py-6 text-center text-text-tertiary text-sm">等待回答中...</div>
+                      <div className="py-6 text-center text-text-tertiary text-sm">
+                        等待回答中...
+                      </div>
                     )}
                   </div>
                 </div>
@@ -313,9 +405,15 @@ export default function ShareContent() {
       <header className="sticky top-0 z-10 bg-surface/80 backdrop-blur-md border-b border-surface-border">
         <div className="max-w-[800px] mx-auto px-4 h-12 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <img src={theme === "dark" ? "/brand-dark-title.png" : "/brand-light-title.png"} alt="AI Space" className="h-5 w-auto object-contain" />
+            <img
+              src={theme === "dark" ? "/brand-dark-title.png" : "/brand-light-title.png"}
+              alt="AI Space"
+              className="h-5 w-auto object-contain"
+            />
             <span className="text-text-tertiary">/</span>
-            <span className="text-sm text-text-secondary truncate max-w-[200px]">{data.title || "分享的对话"}</span>
+            <span className="text-sm text-text-secondary truncate max-w-[200px]">
+              {data.title || "分享的对话"}
+            </span>
           </div>
           <a href="/" className="text-sm text-brand hover:text-brand-hover transition-colors">
             开始对话 →
@@ -349,7 +447,9 @@ export default function ShareContent() {
                     </div>
                   )}
                   {isUser ? (
-                    <p className="text-[15px] leading-relaxed text-text-primary whitespace-pre-wrap">{msg.content}</p>
+                    <p className="text-[15px] leading-relaxed text-text-primary whitespace-pre-wrap">
+                      {msg.content}
+                    </p>
                   ) : (
                     <div className="prose prose-sm max-w-none">
                       <AIMessageContent content={msg.content} />
@@ -372,6 +472,8 @@ export default function ShareContent() {
           </p>
         </div>
       </main>
+
+
     </div>
   );
 }

@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useMemo, memo, type UIEvent } from "react";
-import { User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck, ChevronDown, ChevronUp, Lightbulb, Play, ChevronDown as ChevronDownIcon, FileText, Star, Columns2, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState, useCallback, useMemo, memo, type Ref, type UIEvent, type ReactNode, type ButtonHTMLAttributes } from "react";
+import { User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck, ChevronDown, ChevronUp, Lightbulb, Play, ChevronDown as ChevronDownIcon, FileText, Star, Columns2, Loader2, Download, ImageIcon, Sparkles } from "lucide-react";
+import { toPng } from "html-to-image";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/hooks/useChat";
 import { useFavorites } from "@/hooks/useFavorites";
+import { toast } from "sonner";
 import dynamic from "next/dynamic";
 const ReactMarkdown = dynamic(() => import("react-markdown"), { ssr: false });
 import remarkGfm from "remark-gfm";
@@ -26,6 +28,8 @@ import { useI18n } from "@/lib/i18n";
 import { AssistantMessageMeta } from "./AssistantMessageMeta";
 
 const CHAT_BOTTOM_SPACER = 224;
+const SELECT_MODE_EXTRA_SPACER = 80;
+type SelectionMode = "share" | "favorite";
 
 interface MessageListProps {
   messages: Message[];
@@ -52,6 +56,7 @@ interface MessageListProps {
   onLoadMore?: () => void | Promise<void>;
   targetMessageId?: number;
   bottomSpacer?: number;
+  onSelectModeChange?: (active: boolean) => void;
 }
 
 function ThinkingDots() {
@@ -284,21 +289,125 @@ function ThinkBlock({ content, isThinking }: { content: string; isThinking: bool
   );
 }
 
+function ActionBar({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div className={cn(
+      "pointer-events-auto flex items-center gap-3 px-5 py-3 rounded-2xl bg-surface-elevated border border-surface-border shadow-xl",
+      className
+    )}>
+      {children}
+    </div>
+  );
+}
+
+function ActionBarGroup({ children }: { children: ReactNode }) {
+  return <div className="flex items-center gap-2">{children}</div>;
+}
+
+function ActionBarDivider() {
+  return <div className="h-4 w-px bg-surface-border" />;
+}
+
+function ActionBarButton({
+  children,
+  className,
+  variant = "secondary",
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "secondary" | "primary" }) {
+  return (
+    <button
+      {...props}
+      className={cn(
+        "flex items-center gap-1.5 rounded-lg text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+        variant === "primary"
+          ? "px-4 py-1.5 font-medium bg-brand text-white hover:bg-brand-hover"
+          : "px-3 py-1.5 text-text-secondary hover:bg-surface-card hover:text-text-primary",
+        className
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+// 导出为下拉菜单
+function ExportDropdown({
+  onExportImage,
+  onExportText,
+  disabled,
+  exporting,
+}: {
+  onExportImage: () => void;
+  onExportText: () => void;
+  disabled: boolean;
+  exporting: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    if (open) {
+      document.addEventListener("mousedown", handler);
+      return () => document.removeEventListener("mousedown", handler);
+    }
+  }, [open]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(!open)}
+        disabled={disabled}
+        className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium bg-surface-card border border-surface-border text-text-primary hover:bg-surface-elevated disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      >
+        <Download className="w-3.5 h-3.5" />
+        {exporting ? "导出中..." : "导出为"}
+        <ChevronDown className="w-3 h-3" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute bottom-full left-0 mb-1 w-36 rounded-xl border border-surface-border bg-surface-elevated shadow-xl z-50 py-1 animate-fade-in">
+            <button
+              onClick={() => { onExportImage(); setOpen(false); }}
+              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors"
+            >
+              <ImageIcon className="w-3.5 h-3.5" />
+              导出为图片
+            </button>
+            <button
+              onClick={() => { onExportText(); setOpen(false); }}
+              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              导出为 TXT
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // 消息操作菜单
 function MessageMenu({
   onCopy,
   onDelete,
   onRegenerate,
-  onSelectMode,
-  onFavorite,
+  onShareSelectMode,
+  onFavoriteSelectMode,
   isFavorited,
   showRegenerate,
 }: {
   onCopy: () => void;
   onDelete: () => void;
   onRegenerate?: () => void;
-  onSelectMode: () => void;
-  onFavorite?: () => void;
+  onShareSelectMode: () => void;
+  onFavoriteSelectMode?: () => void;
   isFavorited?: boolean;
   showRegenerate: boolean;
 }) {
@@ -345,15 +454,15 @@ function MessageMenu({
               </button>
             )}
             <button
-              onClick={() => { onSelectMode(); setOpen(false); }}
+              onClick={() => { onShareSelectMode(); setOpen(false); }}
               className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors"
             >
               <Share2 className="w-3.5 h-3.5" />
               选择分享
             </button>
-            {onFavorite && (
+            {onFavoriteSelectMode && (
               <button
-                onClick={() => { onFavorite(); setOpen(false); }}
+                onClick={() => { onFavoriteSelectMode(); setOpen(false); }}
                 className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors"
               >
                 <Star className={cn("w-3.5 h-3.5", isFavorited && "fill-amber-400 text-amber-400")} />
@@ -379,8 +488,8 @@ function MessageActions({
   onCopy,
   onDelete,
   onRegenerate,
-  onSelectMode,
-  onFavorite,
+  onShareSelectMode,
+  onFavoriteSelectMode,
   isFavorited,
   showRegenerate,
   align,
@@ -392,8 +501,8 @@ function MessageActions({
   onCopy: () => void;
   onDelete: () => void;
   onRegenerate?: () => void;
-  onSelectMode: () => void;
-  onFavorite?: () => void;
+  onShareSelectMode: () => void;
+  onFavoriteSelectMode?: () => void;
   isFavorited?: boolean;
   showRegenerate: boolean;
   align: "left" | "right";
@@ -471,15 +580,15 @@ function MessageActions({
         </button>
       )}
       <button
-        onClick={onSelectMode}
+        onClick={onShareSelectMode}
         className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
         title="选择分享"
       >
         <Share2 className="w-3.5 h-3.5" />
       </button>
-      {onFavorite && (
+      {onFavoriteSelectMode && (
         <button
-          onClick={onFavorite}
+          onClick={onFavoriteSelectMode}
           className={cn(
             "flex h-6 w-6 items-center justify-center rounded-lg transition-colors",
             isFavorited
@@ -565,6 +674,66 @@ const markdownComponents = {
   td({ children }: any) { return <td className="px-3 py-2.5 text-[13px] text-text-secondary leading-relaxed">{children}</td>; },
 };
 
+function ExportShareCard({ messages, cardRef }: { messages: Message[]; cardRef?: Ref<HTMLDivElement> }) {
+  return (
+    <div
+      ref={cardRef}
+      className="relative w-full overflow-hidden rounded-3xl p-8 shadow-2xl"
+      style={{
+        background: "linear-gradient(135deg, #111827 0%, #1e1b4b 48%, #312e81 100%)",
+      }}
+    >
+      <div className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-brand/30 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-20 -left-16 h-44 w-44 rounded-full bg-purple-500/25 blur-3xl" />
+
+      <div className="relative z-10 mb-7 flex items-center gap-3">
+        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/12 ring-1 ring-white/15">
+          <Sparkles className="h-5 w-5 text-white" />
+        </div>
+        <div>
+          <div className="text-lg font-semibold text-white">AI Space</div>
+          <div className="text-xs text-white/50">智能对话分享</div>
+        </div>
+      </div>
+
+      <div className="relative z-10 space-y-5">
+        {messages.map((msg) => {
+          const isUser = msg.role === "user";
+          return (
+            <div key={msg.id} className={cn("flex", isUser ? "justify-end" : "justify-start gap-3")}>
+              {!isUser && (
+                <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/10">
+                  <Bot className="h-4 w-4 text-white/70" />
+                </div>
+              )}
+              <div className="max-w-[82%]">
+                {!isUser && <div className="mb-1 ml-1 text-[11px] text-white/45">AI Space</div>}
+                <div
+                  className={cn(
+                    "whitespace-pre-wrap break-words rounded-2xl border px-4 py-3 text-sm leading-relaxed shadow-sm",
+                    isUser
+                      ? "rounded-br-md border-white/15 bg-white/18 text-white"
+                      : "rounded-bl-md border-white/10 bg-white/10 text-white/90"
+                  )}
+                >
+                  {msg.content || ""}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="relative z-10 mt-8 flex items-center justify-between border-t border-white/10 pt-5 text-xs text-white/45">
+        <span>{new Date().toLocaleDateString("zh-CN")}</span>
+        <span className="inline-flex items-center gap-1.5">
+          <Sparkles className="h-3 w-3" /> 由 AI Space 生成
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function MessageList({
   messages,
   isLoading,
@@ -589,6 +758,7 @@ function MessageList({
   hasMoreMessages,
   onLoadMore,
   targetMessageId,
+  onSelectModeChange,
 }: MessageListProps) {
   const { t } = useI18n();
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -685,6 +855,20 @@ function MessageList({
     }
   }, [isLoadingMore]);
 
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [selectionMode, setSelectionMode] = useState<SelectionMode | null>(null);
+  const selectMode = selectionMode !== null;
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [shareSlug, setShareSlug] = useState<string | undefined>(undefined);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportPreviewOpen, setExportPreviewOpen] = useState(false);
+  const exportCardRef = useRef<HTMLDivElement>(null);
+  const exportPreviewCardRef = useRef<HTMLDivElement>(null);
+  const [compareModelMenuOpen, setCompareModelMenuOpen] = useState<number | null>(null);
+  const [atBottom, setAtBottom] = useState(true);
+  const atBottomRef = useRef(true);
   const virtuosoComponents = useMemo<Components<Message, unknown>>(() => ({
     Header: () =>
       hasMoreMessages ? (
@@ -704,18 +888,8 @@ function MessageList({
           )}
         </div>
       ) : null,
-    Footer: () => <div style={{ height: CHAT_BOTTOM_SPACER }} aria-hidden="true" />,
-  }), [hasMoreMessages, isLoadingMore, onLoadMore]);
-
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-  const [selectMode, setSelectMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [shareSlug, setShareSlug] = useState<string | undefined>(undefined);
-  const [shareOpen, setShareOpen] = useState(false);
-  const [sharing, setSharing] = useState(false);
-  const [compareModelMenuOpen, setCompareModelMenuOpen] = useState<number | null>(null);
-  const [atBottom, setAtBottom] = useState(true);
-  const atBottomRef = useRef(true);
+    Footer: () => <div style={{ height: CHAT_BOTTOM_SPACER + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0) }} aria-hidden="true" />,
+  }), [hasMoreMessages, isLoadingMore, onLoadMore, selectMode]);
   const groups = useMemo(() => inferGroups(messages), [messages]);
   const groupByMessageId = useMemo(() => {
     const map = new Map<string, InferredGroup>();
@@ -816,7 +990,7 @@ function MessageList({
   }, [activeCompareModels, isCompare, messages]);
 
   // 收藏功能
-  const { toggleFavorite, isFavorited, checkBatch } = useFavorites();
+  const { toggleFavorite, addFavorite, isFavorited, checkBatch, loading: favoriteLoading } = useFavorites();
 
   // 批量检查消息收藏状态
   useEffect(() => {
@@ -860,6 +1034,41 @@ function MessageList({
     navigator.clipboard.writeText(content);
   }, []);
 
+  const getPairedMessageIds = useCallback((msgId: string) => {
+    const ids = new Set<string>();
+    const msg = messages.find((m) => m.id === msgId);
+    if (!msg) return ids;
+
+    const group = groupByMessageId.get(msg.id);
+    if (group) {
+      ids.add(group.userMessage.id);
+      if (msg.role === "assistant") {
+        ids.add(msg.id);
+      } else {
+        const activeIndex = groupViews?.get(group.id) ?? 0;
+        const activeAssistant = group.assistantMessages[activeIndex] ?? group.assistantMessages[0];
+        if (activeAssistant) ids.add(activeAssistant.id);
+      }
+      return ids;
+    }
+
+    const index = messages.findIndex((m) => m.id === msgId);
+    ids.add(msg.id);
+    if (msg.role === "user") {
+      const pair = messages.slice(index + 1).find((m) => m.role === "assistant");
+      if (pair) ids.add(pair.id);
+    } else if (msg.role === "assistant") {
+      const pair = [...messages.slice(0, index)].reverse().find((m) => m.role === "user");
+      if (pair) ids.add(pair.id);
+    }
+    return ids;
+  }, [messages, groupByMessageId, groupViews]);
+
+  const selectedMessages = useMemo(
+    () => messages.filter((m) => selectedIds.has(m.id)),
+    [messages, selectedIds]
+  );
+
   const toggleSelect = (msgId: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -890,14 +1099,17 @@ function MessageList({
     });
   };
 
-  const enterSelectMode = () => {
-    setSelectMode(true);
-    setSelectedIds(new Set());
+  const enterSelectMode = (mode: SelectionMode, msgId?: string) => {
+    setSelectionMode(mode);
+    setSelectedIds(msgId ? getPairedMessageIds(msgId) : new Set());
+    onSelectModeChange?.(true);
   };
 
   const exitSelectMode = () => {
-    setSelectMode(false);
+    setSelectionMode(null);
     setSelectedIds(new Set());
+    setExportPreviewOpen(false);
+    onSelectModeChange?.(false);
   };
 
   const handleShareSelected = async () => {
@@ -919,12 +1131,85 @@ function MessageList({
         const data = await res.json();
         setShareSlug(data.slug);
         setShareOpen(true);
-        exitSelectMode();
       }
     } catch {}
     setSharing(false);
   };
 
+  const handleFavoriteSelected = async () => {
+    if (!conversationId || selectedIds.size === 0 || favoriteLoading) return;
+    const token = localStorage.getItem("token");
+    if (!token) {
+      toast.warning("请先登录后收藏");
+      return;
+    }
+
+    const selectedServerIds = messages
+      .filter((m) => selectedIds.has(m.id))
+      .map((m) => m.serverMessageId)
+      .filter((id): id is number => typeof id === "number" && id > 0 && !isFavorited(id));
+
+    const uniqueIds = Array.from(new Set(selectedServerIds));
+    if (uniqueIds.length === 0) {
+      toast.success("已在收藏中");
+      return;
+    }
+
+    let successCount = 0;
+    for (const messageId of uniqueIds) {
+      const ok = await addFavorite(messageId, conversationId);
+      if (ok) successCount += 1;
+    }
+    if (successCount > 1) {
+      toast.success(`已收藏 ${successCount} 条消息`);
+    }
+  };
+
+  const handleExportImage = async () => {
+    if (selectedIds.size === 0) return;
+    setExportPreviewOpen(true);
+  };
+
+  const handleDownloadImage = async () => {
+    const exportNode = exportPreviewCardRef.current || exportCardRef.current;
+    if (selectedIds.size === 0 || !exportNode) return;
+    setExporting(true);
+    try {
+      await document.fonts?.ready;
+      const dataUrl = await toPng(exportNode, {
+        quality: 1.0,
+        pixelRatio: 2,
+        backgroundColor: "#0f172a",
+        cacheBust: true,
+      });
+      const link = document.createElement("a");
+      link.download = `AI-Space-share-${Date.now()}.png`;
+      link.href = dataUrl;
+      link.click();
+      setExportPreviewOpen(false);
+    } catch (e) {
+      console.error("Export image failed:", e);
+    }
+    setExporting(false);
+  };
+
+
+  const handleExportText = () => {
+    if (selectedIds.size === 0) return;
+    const selectedMessages = messages.filter((m) => selectedIds.has(m.id));
+    let text = "";
+    selectedMessages.forEach((msg) => {
+      const roleLabel = msg.role === "user" ? "用户" : "AI";
+      text += `[${roleLabel}]\n${msg.content || ""}\n\n`;
+    });
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.download = `AI-Space-chat-${Date.now()}.txt`;
+    link.href = url;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   const isMessageGenerating = (msg: Message, isStreaming: boolean) => {
     if (isStreaming) return true;
@@ -1182,8 +1467,8 @@ function MessageList({
                                         onCopy={() => handleCopy(msg.content)}
                                         onDelete={() => setDeleteTarget(msg.id)}
                                         onRegenerate={onRegenerate}
-                                        onSelectMode={enterSelectMode}
-                                        onFavorite={msg.serverMessageId && conversationId ? () => toggleFavorite(msg.serverMessageId!, conversationId) : undefined}
+                                        onShareSelectMode={() => enterSelectMode("share", msg.id)}
+                                        onFavoriteSelectMode={msg.serverMessageId && conversationId ? () => enterSelectMode("favorite", msg.id) : undefined}
                                         isFavorited={msg.serverMessageId ? isFavorited(msg.serverMessageId) : false}
                                         showRegenerate={canRegenerate}
                                         align={isUser ? "right" : "left"}
@@ -1198,7 +1483,9 @@ function MessageList({
                                       <MessageActions
                                         onCopy={() => handleCopy(msg.content)}
                                         onDelete={() => setDeleteTarget(msg.id)}
-                                        onSelectMode={enterSelectMode}
+                                        onShareSelectMode={() => enterSelectMode("share", msg.id)}
+                                        onFavoriteSelectMode={msg.serverMessageId && conversationId ? () => enterSelectMode("favorite", msg.id) : undefined}
+                                        isFavorited={msg.serverMessageId ? isFavorited(msg.serverMessageId) : false}
                                         showRegenerate={false}
                                         align="right"
                                         visible={isLast}
@@ -1491,8 +1778,8 @@ function MessageList({
                         onCopy={() => handleCopy(msg.content)}
                         onDelete={() => setDeleteTarget(msg.id)}
                         onRegenerate={onRegenerate}
-                        onSelectMode={enterSelectMode}
-                        onFavorite={msg.serverMessageId && conversationId ? () => toggleFavorite(msg.serverMessageId!, conversationId) : undefined}
+                        onShareSelectMode={() => enterSelectMode("share", msg.id)}
+                        onFavoriteSelectMode={msg.serverMessageId && conversationId ? () => enterSelectMode("favorite", msg.id) : undefined}
                         isFavorited={msg.serverMessageId ? isFavorited(msg.serverMessageId) : false}
                         showRegenerate={canRegenerate}
                         align={isUser ? "right" : "left"}
@@ -1543,7 +1830,7 @@ function MessageList({
           className="absolute left-1/2 -translate-x-1/2 z-30 flex items-center justify-center w-10 h-10 rounded-full
             bg-surface-elevated border border-surface-border text-text-secondary
             shadow-lg hover:bg-surface-card hover:text-text-primary transition-colors"
-          style={{ bottom: CHAT_BOTTOM_SPACER + 12 }}
+          style={{ bottom: CHAT_BOTTOM_SPACER + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0) + 12 }}
           aria-label="回到底部"
         >
           <ChevronDownIcon className="w-5 h-5" />
@@ -1552,28 +1839,60 @@ function MessageList({
 
       {/* 选择模式底部工具栏 */}
       {selectMode && (
-        <div className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-center px-4 pb-4">
-          <div className="flex items-center gap-3 px-5 py-3 rounded-2xl bg-surface-elevated border border-surface-border shadow-xl">
-            <span className="text-sm text-text-secondary">
-              已选择 <span className="text-text-primary font-medium">{selectedIds.size}</span> 条消息
-            </span>
-            <div className="h-4 w-px bg-surface-border" />
-            <button
-              onClick={exitSelectMode}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-text-secondary hover:bg-surface-card transition-colors"
-            >
-              <X className="w-3.5 h-3.5" />
-              取消
-            </button>
-            <button
-              onClick={handleShareSelected}
-              disabled={selectedIds.size === 0 || sharing}
-              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium bg-brand text-white hover:bg-brand-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              <Share2 className="w-3.5 h-3.5" />
-              {sharing ? "生成中..." : "生成分享链接"}
-            </button>
-          </div>
+        <div className="absolute bottom-0 left-0 right-0 z-[80] flex flex-wrap items-center justify-center gap-3 px-4 pb-4 pb-[max(1rem,env(safe-area-inset-bottom))] pointer-events-none">
+          <ActionBar>
+            <ActionBarGroup>
+              <ActionBarButton
+                onClick={() => {
+                  const allIds = new Set(messages.map((m) => m.id));
+                  const isAllSelected = messages.length > 0 && messages.every((m) => selectedIds.has(m.id));
+                  setSelectedIds(isAllSelected ? new Set() : allIds);
+                }}
+              >
+                <SquareCheck className="w-4 h-4" />
+                {messages.length > 0 && messages.every((m) => selectedIds.has(m.id)) ? "取消全选" : "全选"}
+              </ActionBarButton>
+              <span className="px-1 text-sm text-text-secondary">
+                已选择 <span className="text-text-primary font-medium">{selectedIds.size}</span> 条消息
+              </span>
+              <ActionBarButton onClick={exitSelectMode}>
+                <X className="w-3.5 h-3.5" />
+                取消
+              </ActionBarButton>
+            </ActionBarGroup>
+          </ActionBar>
+
+          {selectionMode === "favorite" && (
+            <ActionBar>
+              <ActionBarButton
+                onClick={handleFavoriteSelected}
+                disabled={selectedIds.size === 0 || favoriteLoading}
+                variant="primary"
+              >
+                <Star className="w-3.5 h-3.5" />
+                {favoriteLoading ? "收藏中..." : "收藏所选"}
+              </ActionBarButton>
+            </ActionBar>
+          )}
+
+          {selectionMode === "share" && (
+            <ActionBar>
+              <ExportDropdown
+                onExportImage={handleExportImage}
+                onExportText={handleExportText}
+                disabled={selectedIds.size === 0 || exporting}
+                exporting={exporting}
+              />
+              <ActionBarButton
+                onClick={handleShareSelected}
+                disabled={selectedIds.size === 0 || sharing}
+                variant="primary"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                {sharing ? "生成中..." : "生成分享链接"}
+              </ActionBarButton>
+            </ActionBar>
+          )}
         </div>
       )}
 
@@ -1594,8 +1913,53 @@ function MessageList({
 
       {/* 分享链接弹窗 */}
       <ShareDialog isOpen={shareOpen} slug={shareSlug} onClose={() => setShareOpen(false)} />
+
+      {/* 导出图片预览 */}
+      {exportPreviewOpen && selectedMessages.length > 0 && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm">
+          <button
+            type="button"
+            className="absolute inset-0 cursor-default"
+            onClick={() => setExportPreviewOpen(false)}
+            aria-label="关闭预览"
+          />
+          <div className="relative z-10 flex max-h-full w-full max-w-[620px] flex-col items-center gap-4">
+            <div className="w-full overflow-auto rounded-3xl bg-surface-elevated p-3 shadow-2xl">
+              <ExportShareCard messages={selectedMessages} cardRef={exportPreviewCardRef} />
+            </div>
+            <div className="flex items-center gap-3 rounded-2xl border border-surface-border bg-surface-elevated px-4 py-3 shadow-xl">
+              <button
+                type="button"
+                onClick={() => setExportPreviewOpen(false)}
+                className="rounded-xl px-4 py-2 text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadImage}
+                disabled={exporting}
+                className="flex items-center gap-2 rounded-xl bg-brand px-5 py-2 text-sm font-medium text-white hover:bg-brand-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                {exporting ? "导出中..." : "导出图片"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 隐藏的分享卡片（用于导出图片） */}
+      {selectMode && selectedMessages.length > 0 && (
+        <div
+          style={{ position: "fixed", left: 0, top: 0, width: "560px", opacity: 0, pointerEvents: "none", zIndex: -1 }}
+        >
+          <ExportShareCard messages={selectedMessages} cardRef={exportCardRef} />
+        </div>
+      )}
     </div>
   );
 }
 
 export default memo(MessageList);
+

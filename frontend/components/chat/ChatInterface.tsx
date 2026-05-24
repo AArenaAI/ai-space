@@ -40,6 +40,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
   const [renameOpen, setRenameOpen] = useState(false);
   const [forkDialogOpen, setForkDialogOpen] = useState(false);
   const [forkTargetMessageId, setForkTargetMessageId] = useState<number | null>(null);
+  const [messageSelectMode, setMessageSelectMode] = useState(false);
   const router = useRouter();
 
   const {
@@ -432,6 +433,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
         hasMoreMessages={hasMoreMessages}
         onLoadMore={loadMoreMessages}
         targetMessageId={currentConversation === conversationId ? targetMessageId : undefined}
+        onSelectModeChange={setMessageSelectMode}
       />
 
       {/* 重命名对话 */}
@@ -464,23 +466,25 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
         }}
       />
 
-      {/* 输入框：脱离列表文档流，固定在底部，避免生成时挤压消息区 */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[70] bg-gradient-to-t from-surface-elevated via-surface-elevated to-transparent pt-6">
-        <div className="pointer-events-auto relative z-[70]">
-        <MessageInput
-          onSend={handleSend}
-          onStop={handleStop}
-          isLoading={isLoading}
-          compareMode={compareMode}
-          onToggleCompare={toggleCompareMode}
-          currentModel={selectedModel}
-          templates={localizedTemplates}
-          selectedTemplateId={selectedTemplateId}
-          onSelectTemplate={handleTemplateSelect}
-          onNewChat={handleNewChat}
-        />
+      {!messageSelectMode && (
+        /* 输入框：脱离列表文档流，固定在底部，避免生成时挤压消息区 */
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[70] bg-gradient-to-t from-surface-elevated via-surface-elevated to-transparent pt-6">
+          <div className="pointer-events-auto relative z-[70]">
+          <MessageInput
+            onSend={handleSend}
+            onStop={handleStop}
+            isLoading={isLoading}
+            compareMode={compareMode}
+            onToggleCompare={toggleCompareMode}
+            currentModel={selectedModel}
+            templates={localizedTemplates}
+            selectedTemplateId={selectedTemplateId}
+            onSelectTemplate={handleTemplateSelect}
+            onNewChat={handleNewChat}
+          />
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
