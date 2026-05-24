@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Brain, ChevronDown, Square, Search, Columns2, Paperclip, X, FileText, Wrench } from "lucide-react";
+import { Send, Brain, ChevronDown, Square, Search, Columns2, Paperclip, X, FileText, Wrench, SlidersHorizontal, MessageSquarePlus, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ChatModel } from "@/hooks/useChat";
+import { Template } from "@/hooks/useTemplates";
 import { getGuestId } from "@/lib/guestId";
 import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
@@ -31,6 +32,10 @@ interface MessageInputProps {
   compareMode: boolean;
   onToggleCompare: () => void;
   currentModel?: ChatModel;
+  templates: Template[];
+  selectedTemplateId: number;
+  onSelectTemplate: (templateId: number) => void;
+  onNewChat: () => void;
 }
 
 export interface AttachedFile {
@@ -42,7 +47,7 @@ export interface AttachedFile {
   error_message?: string; // 解析失败原因
 }
 
-export default function MessageInput({ onSend, onStop, isLoading, compareMode, onToggleCompare, currentModel }: MessageInputProps) {
+export default function MessageInput({ onSend, onStop, isLoading, compareMode, onToggleCompare, currentModel, templates, selectedTemplateId, onSelectTemplate, onNewChat }: MessageInputProps) {
   const { t } = useI18n();
   const [content, setContent] = useState("");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
@@ -66,6 +71,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     return false;
   });
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [templateOpen, setTemplateOpen] = useState(false);
   const [showFileTip, setShowFileTip] = useState(false);
   const [showCompareTip, setShowCompareTip] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -75,6 +81,26 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
   const prevModelRef = useRef<ChatModel | undefined>(currentModel);
   const toolsRef = useRef<HTMLDivElement>(null);
   const toolsTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const templateRef = useRef<HTMLDivElement>(null);
+  const templateTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const selectedTemplate = templates.find((tpl) => tpl.id === selectedTemplateId);
+  const isTemplateDisabled = selectedTemplateId === 0;
+
+  const handleTemplateEnter = useCallback(() => {
+    if (templateTimerRef.current) clearTimeout(templateTimerRef.current);
+    templateTimerRef.current = setTimeout(() => setTemplateOpen(true), 120);
+  }, []);
+
+  const handleTemplateLeave = useCallback(() => {
+    if (templateTimerRef.current) clearTimeout(templateTimerRef.current);
+    templateTimerRef.current = setTimeout(() => setTemplateOpen(false), 200);
+  }, []);
+
+  const handleTemplateSelect = (templateId: number) => {
+    onSelectTemplate(templateId);
+    setTemplateOpen(false);
+  };
 
   // 悬浮延迟打开工具下拉
   const handleToolsEnter = useCallback(() => {
@@ -93,11 +119,15 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
       if (toolsRef.current && !toolsRef.current.contains(e.target as Node)) {
         setToolsOpen(false);
       }
+      if (templateRef.current && !templateRef.current.contains(e.target as Node)) {
+        setTemplateOpen(false);
+      }
     };
     document.addEventListener("mousedown", handler);
     return () => {
       document.removeEventListener("mousedown", handler);
       if (toolsTimerRef.current) clearTimeout(toolsTimerRef.current);
+      if (templateTimerRef.current) clearTimeout(templateTimerRef.current);
     };
   }, []);
 
@@ -466,6 +496,77 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                 : "border-surface-border focus-within:border-brand/50 focus-within:shadow-[0_0_0_1px_rgba(59,130,246,0.1)]"
           )}
         >
+          <div className="absolute right-3 top-2 z-20 flex items-center gap-2">
+            <div className="relative" ref={templateRef} onMouseEnter={handleTemplateEnter} onMouseLeave={handleTemplateLeave}>
+              <button
+                type="button"
+                className="flex h-8 w-8 items-center justify-center rounded-xl text-text-secondary transition-colors duration-200 hover:bg-surface-card hover:text-text-primary"
+                title={selectedTemplate ? `回答模板：${selectedTemplate.name}` : isTemplateDisabled ? "不使用模板" : "选择回答模板"}
+                aria-label={selectedTemplate ? `回答模板：${selectedTemplate.name}` : isTemplateDisabled ? "不使用模板" : "选择回答模板"}
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+              </button>
+
+              {templateOpen && (
+                <div className="absolute bottom-full right-0 mb-2 w-56 overflow-hidden rounded-xl border border-surface-border bg-surface-elevated py-1 shadow-xl z-[90] animate-fade-in">
+                  <div className="px-3 py-2 text-xs font-medium text-text-tertiary">选择回答模板</div>
+                  <div className="px-1 pb-1">
+                    <button
+                      type="button"
+                      onClick={() => handleTemplateSelect(0)}
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors",
+                        isTemplateDisabled
+                          ? "bg-brand-muted text-brand"
+                          : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
+                      )}
+                    >
+                      <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+                        {isTemplateDisabled && <Check className="h-3.5 w-3.5" />}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate">不使用模板</span>
+                    </button>
+                  </div>
+                  {templates.length === 0 ? (
+                    <div className="px-3 pb-3 pt-1 text-sm text-text-tertiary">暂无回答模板</div>
+                  ) : (
+                    <div className="max-h-64 overflow-y-auto px-1 pb-1 border-t border-surface-border/60 pt-1">
+                      {templates.map((tpl) => (
+                        <button
+                          key={tpl.id}
+                          type="button"
+                          onClick={() => handleTemplateSelect(tpl.id)}
+                          className={cn(
+                            "flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors",
+                            selectedTemplateId === tpl.id
+                              ? "bg-brand-muted text-brand"
+                              : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
+                          )}
+                        >
+                          <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+                            {selectedTemplateId === tpl.id && <Check className="h-3.5 w-3.5" />}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate">{tpl.name}</span>
+                          {tpl.is_default && <span className="shrink-0 rounded-full bg-surface-card px-1.5 py-0.5 text-[10px] text-text-tertiary">默认</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={onNewChat}
+              className="flex h-8 w-8 items-center justify-center rounded-xl text-brand transition-colors duration-200 hover:bg-surface-card hover:text-brand-hover"
+              title={t("common.newChat")}
+              aria-label={t("common.newChat")}
+            >
+              <MessageSquarePlus className="h-4 w-4" />
+            </button>
+          </div>
+
           {/* 拖拽遮罩 */}
           {dragOver && (
             <div className="absolute inset-0 z-50 flex items-center justify-center rounded-2xl bg-surface-card/95 border-2 border-dashed border-brand/40 pointer-events-none">
@@ -528,7 +629,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
             onKeyDown={handleKeyDown}
             placeholder={t("chat.placeholder")}
             rows={1}
-            className="w-full min-h-[92px] shrink-0 resize-none overflow-hidden bg-transparent px-4 pt-3.5 pb-1 text-[15px] outline-none placeholder:text-text-tertiary leading-relaxed"
+            className="w-full min-h-[92px] shrink-0 resize-none overflow-hidden bg-transparent px-4 pt-12 pb-1 text-[15px] outline-none placeholder:text-text-tertiary leading-relaxed"
           />
 
           <div className="flex items-center justify-between px-3 pb-3">

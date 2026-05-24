@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Image, Eraser, FileText, ChevronLeft, Type, ZoomIn, ImageIcon, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Image, Eraser, ChevronLeft, Type, ZoomIn, ImageIcon, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 
@@ -40,17 +40,6 @@ const MORE_NAV_GROUPS = [
         labelKey: "image.edit.upscale",
         href: "/image/edit?mode=upscale",
         matchPath: "/image/edit",
-      },
-    ],
-  },
-  {
-    titleKey: "sidebar.panel.templates",
-    items: [
-      {
-        icon: FileText,
-        labelKey: "sidebar.panel.answer_template",
-        href: "/templates",
-        matchPath: "/templates",
       },
     ],
   },

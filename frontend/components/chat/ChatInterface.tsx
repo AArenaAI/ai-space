@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
+import { getLocalizedDefaultTemplatePrefix, localizeSystemDefaultTemplate } from "@/lib/defaultTemplates";
 import InputDialog from "@/components/ui/InputDialog";
 import ForkCompareDialog from "./ForkCompareDialog";
 
@@ -29,7 +30,7 @@ interface ChatInterfaceProps {
 }
 
 export default function ChatInterface({ conversationId, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples }: ChatInterfaceProps) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const [compareMode, setCompareMode] = useState(false);
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<number>(0);
@@ -68,6 +69,18 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
   } = useChat(conversationId, models, skillKey);
 
   const { templates } = useTemplates();
+  const localizedTemplates = templates.map((tpl) => localizeSystemDefaultTemplate(tpl, language));
+
+  const getSelectedTemplatePayload = useCallback(() => {
+    const selectedTemplate = templates.find((tpl) => tpl.id === selectedTemplateId);
+    if (selectedTemplate?.is_default) {
+      return {
+        templateId: selectedTemplateId,
+        templatePrefix: getLocalizedDefaultTemplatePrefix(language),
+      };
+    }
+    return { templateId: selectedTemplateId, templatePrefix: undefined };
+  }, [templates, selectedTemplateId, language]);
 
   const handleModelSelect = useCallback((model: ChatModel) => {
     // 如果当前是 Skill 技能对话且有推荐模型，保存用户覆盖标记
@@ -259,16 +272,28 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
       }
       // 前端目前没有后端返回的任务复杂度字段，先用用户发送时选择的推理档位判断复杂任务
       setIsComplexTask(isComplexReasoningTask(reasoning, selectedModels));
-      await sendCompareMessages(content, selectedModels, reasoning, search, selectedTemplateId, attachments, file_ids);
+      const { templateId, templatePrefix } = getSelectedTemplatePayload();
+      await sendCompareMessages(content, selectedModels, reasoning, search, templateId, attachments, file_ids, templatePrefix);
     } else {
       // 前端目前没有后端返回的任务复杂度字段，先用用户发送时选择的推理档位判断复杂任务
       setIsComplexTask(isComplexReasoningTask(reasoning));
-      sendMessage(content, reasoning, false, search, selectedTemplateId, false, attachments, file_ids);
+      const { templateId, templatePrefix } = getSelectedTemplatePayload();
+      sendMessage(content, reasoning, false, search, templateId, false, attachments, file_ids, templatePrefix);
     }
   };
 
   const handleStop = () => {
       stopGeneration();
+  };
+
+  const handleTemplateSelect = (templateId: number) => {
+    setSelectedTemplateId(templateId);
+    localStorage.setItem("selected-template", String(templateId));
+    window.dispatchEvent(new CustomEvent("template-changed", { detail: { templateId } }));
+  };
+
+  const handleNewChat = () => {
+    router.push(`/chat?t=${Date.now()}`);
   };
 
   const handleCompareModelChange = (index: number, modelId: string) => {
@@ -393,7 +418,8 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
         welcomeExamples={welcomeExamples}
         onExampleClick={(prompt) => {
           setIsComplexTask(isComplexReasoningTask(undefined));
-          sendMessage(prompt, undefined, false, false, selectedTemplateId);
+          const { templateId, templatePrefix } = getSelectedTemplatePayload();
+          sendMessage(prompt, undefined, false, false, templateId, false, undefined, undefined, templatePrefix);
         }}
         groupViews={groupViews}
         switchGroupModel={switchGroupModel}
@@ -446,6 +472,10 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
           compareMode={compareMode}
           onToggleCompare={toggleCompareMode}
           currentModel={selectedModel}
+          templates={localizedTemplates}
+          selectedTemplateId={selectedTemplateId}
+          onSelectTemplate={handleTemplateSelect}
+          onNewChat={handleNewChat}
         />
         </div>
       </div>

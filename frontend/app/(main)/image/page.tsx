@@ -33,6 +33,7 @@ import {
   Video,
   Music,
   Zap,
+  MoreHorizontal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -412,6 +413,17 @@ export default function ImagePage() {
     } catch {
       toast.error("下载失败");
     }
+  };
+
+  const handleUseImageAsReference = (url: string) => {
+    setReferenceImages((prev) => (prev.includes(url) ? prev : [...prev, url]));
+    setMode("image");
+    toast.success("图片已放入输入框");
+  };
+
+  const handleOpenImageTool = (mode: "remove-bg" | "replace-bg" | "text-removal" | "upscale", url: string) => {
+    const params = new URLSearchParams({ mode, image: url });
+    router.push(`/image/edit?${params.toString()}`);
   };
 
   const historyItems = [
@@ -1014,6 +1026,8 @@ function ImageCard({
   onDownload,
   onPreview,
   onReuse,
+  onUseImage,
+  onEditImage,
 }: {
   image: GeneratedImage & { status?: string };
   isDeleting: boolean;
@@ -1021,6 +1035,8 @@ function ImageCard({
   onDownload: (url: string, id: number) => void;
   onPreview: () => void;
   onReuse: (prompt: string, size: string, referenceImageUrls?: string[]) => void;
+  onUseImage: (url: string) => void;
+  onEditImage: (mode: "remove-bg" | "replace-bg" | "text-removal" | "upscale", url: string) => void;
 }) {
   const isPending = image.status === "pending";
   const isFailed = image.status === "failed";
@@ -1032,28 +1048,29 @@ function ImageCard({
         isDeleting && "opacity-0 scale-95 pointer-events-none"
       )}
     >
-      <div className="aspect-square bg-surface relative">
+      <div className="aspect-square bg-surface relative overflow-hidden">
         {isPending ? (
-          <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-text-tertiary">
-            <div className="relative w-16 h-16 flex items-center justify-center">
-              {/* 扩散环 */}
-              <div className="absolute inset-0 rounded-full border-2 border-brand/30 animate-logo-ring" />
-              <div className="absolute inset-0 rounded-full border-2 border-brand/20 animate-logo-ring" style={{ animationDelay: "0.9s" }} />
-              {/* Logo */}
-              <img
-                src="/brand-dark-logo.png"
-                alt="AI Space"
-                className="relative w-10 h-10 object-contain animate-logo-breathe"
-              />
+          <>
+            <video
+              src="/ai-space-loading.mp4"
+              className="absolute inset-0 h-full w-full object-cover"
+              autoPlay
+              loop
+              muted
+              playsInline
+              preload="auto"
+            />
+            <div className="absolute inset-0 bg-black/25" />
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10 px-4 text-center">
+              <div className="flex items-center gap-1.5 rounded-full bg-black/35 px-3 py-1.5 text-xs text-white backdrop-blur-sm">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                <span>图片生成中...</span>
+              </div>
+              <p className="text-[11px] text-white/75 max-w-[80%] line-clamp-2">
+                {image.prompt}
+              </p>
             </div>
-            <div className="flex items-center gap-1.5 text-xs">
-              <Clock className="w-3 h-3" />
-              <span>图片生成中...</span>
-            </div>
-            <p className="text-[11px] text-text-tertiary/60 max-w-[80%] text-center line-clamp-2 px-2">
-              {image.prompt}
-            </p>
-          </div>
+          </>
         ) : isFailed ? (
           <>
             <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-text-tertiary">
@@ -1094,47 +1111,61 @@ function ImageCard({
               className="w-full h-full object-cover cursor-zoom-in"
               onClick={onPreview}
             />
-            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
+            <div className="absolute inset-0 bg-black/10 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none" />
+            <div className="absolute right-3 top-3 z-10 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  onPreview();
+                  onUseImage(image.image_url);
                 }}
-                className="p-2 rounded-lg bg-surface-elevated/90 text-text-primary hover:bg-surface-card transition-colors"
-                title="放大查看"
+                className="flex h-9 w-9 items-center justify-center rounded-xl bg-text-tertiary/70 text-white backdrop-blur-md transition-colors hover:bg-text-secondary"
+                title="使用此图片"
               >
-                <ZoomIn className="w-4 h-4" />
+                <ImageIcon className="w-4 h-4" />
               </button>
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   onDownload(image.image_url, image.id);
                 }}
-                className="p-2 rounded-lg bg-surface-elevated/90 text-text-primary hover:bg-surface-card transition-colors"
+                className="flex h-9 w-9 items-center justify-center rounded-xl bg-text-tertiary/70 text-white backdrop-blur-md transition-colors hover:bg-text-secondary"
                 title="下载"
               >
                 <Download className="w-4 h-4" />
               </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onReuse(image.prompt, image.size, []);
-                }}
-                className="p-2 rounded-lg bg-surface-elevated/90 text-text-primary hover:bg-surface-card transition-colors"
-                title="重新生成"
-              >
-                <RefreshCw className="w-4 h-4" />
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete(image.id);
-                }}
-                className="p-2 rounded-lg bg-red-500/90 text-white hover:bg-red-500 transition-colors"
-                title="删除"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+              <div className="group/menu relative" onClick={(e) => e.stopPropagation()}>
+                <button
+                  className="flex h-9 w-9 items-center justify-center rounded-xl bg-text-tertiary/70 text-white backdrop-blur-md transition-colors hover:bg-text-secondary"
+                  title="更多功能"
+                >
+                  <MoreHorizontal className="w-4 h-4" />
+                </button>
+                <div className="invisible absolute right-0 top-full z-20 mt-2 w-44 rounded-2xl border border-surface-border bg-surface-card p-2 opacity-0 shadow-xl transition-all duration-150 group-hover/menu:visible group-hover/menu:opacity-100">
+                  {[
+                    { label: "背景移除", icon: Eraser, mode: "remove-bg" as const },
+                    { label: "文字移除", icon: Type, mode: "text-removal" as const },
+                    { label: "区域抠除", icon: Wand2, disabled: true },
+                    { label: "局部重绘", icon: Sparkles, disabled: true },
+                    { label: "画质提升", icon: ZoomIn, mode: "upscale" as const },
+                    { label: "背景替换", icon: ImageIcon, mode: "replace-bg" as const },
+                  ].map((item) => (
+                    <button
+                      key={item.label}
+                      disabled={item.disabled}
+                      onClick={() => item.mode && onEditImage(item.mode, image.image_url)}
+                      className={cn(
+                        "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors",
+                        item.disabled
+                          ? "cursor-not-allowed text-text-tertiary/45"
+                          : "text-text-primary hover:bg-surface-elevated"
+                      )}
+                    >
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           </>
         )}

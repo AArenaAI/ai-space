@@ -1096,7 +1096,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       search: boolean = false,
       templateId: number = 0,
       attachments?: { filename: string; content: string; type?: string; public_id?: string }[],
-      file_ids?: string[]
+      file_ids?: string[],
+      templatePrefix?: string
     ) => {
       if (!content.trim() && (!attachments || attachments.length === 0)) return;
 
@@ -1172,6 +1173,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               reasoning_effort: reasoning.effort || "high",
               search: search,
               template_id: templateId,
+              template_prefix: templatePrefix,
               skip_save_user_msg: index > 0,
               skill_key: effectiveSkillKey || undefined,
               message_file_ids: file_ids || undefined,
@@ -1240,7 +1242,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       templateId: number = 0,
       skipUserMsg: boolean = false,
       attachments?: { filename: string; content: string; type: string; public_id?: string }[],
-      file_ids?: string[]
+      file_ids?: string[],
+      templatePrefix?: string
     ) => {
       if (!content.trim() && !isRegenerate && (!attachments || attachments.length === 0)) return;
 

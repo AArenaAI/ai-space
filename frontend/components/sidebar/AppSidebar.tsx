@@ -246,12 +246,6 @@ function MoreHoverPanel({
         { icon: ZoomIn, label: t("sidebar.panel.upscale"), href: "/image/edit?mode=upscale", color: "text-cyan-500", bg: "bg-cyan-500/10" },
       ],
     },
-    {
-      title: t("sidebar.panel.templates"),
-      items: [
-        { icon: FileText, label: t("sidebar.panel.answer_template"), href: "/templates", color: "text-blue-500", bg: "bg-blue-500/10" },
-      ],
-    },
   ];
 
   if (!open || !anchorEl) return null;

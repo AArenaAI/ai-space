@@ -19,6 +19,13 @@ import {
   History,
   ChevronDown,
   Layers,
+  Download,
+  MoreHorizontal,
+  Eraser,
+  Type,
+  Wand2,
+  Sparkles,
+  ZoomIn,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -26,6 +33,7 @@ import ImageLightbox from "@/components/ui/ImageLightbox";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import NoticeDialog from "@/components/ui/NoticeDialog";
 import HistoryDrawer from "@/components/ui/HistoryDrawer";
+import DeleteSuccessNotice from "@/components/ui/DeleteSuccessNotice";
 
 const ASPECT_RATIOS = [
   { value: "auto", label: "Auto", w: 1, h: 1 },
@@ -130,6 +138,7 @@ function ImageChatPageInner() {
   const [referenceImages, setReferenceImages] = useState<string[]>([]);
   const [uploadingRef, setUploadingRef] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [deleteSuccessOpen, setDeleteSuccessOpen] = useState(false);
   const [limitDialogOpen, setLimitDialogOpen] = useState(false);
   const [chatId, setChatId] = useState<number | null>(null);
   const [pollingChatId, setPollingChatId] = useState<number | null>(null);
@@ -181,12 +190,38 @@ function ImageChatPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlChatId]);
 
-  // 将 API 消息映射为显示消息
+  // 将 API 消息映射为显示消息；保留本地 optimistic pending，避免生成接口返回前页面空白
   useEffect(() => {
     if (apiMessages.length > 0) {
-      setDisplayMessages(apiMessages.map(msgToDisplay));
+      setDisplayMessages((prev) => {
+        const mapped = apiMessages.map(msgToDisplay);
+        const optimisticPending = prev.filter(
+          (m) => m.id.startsWith("optimistic-") && m.role === "assistant" && m.status === "pending"
+        );
+        const hasServerAssistant = mapped.some((m) => m.role === "assistant");
+        return hasServerAssistant ? mapped : [...mapped, ...optimisticPending];
+      });
     }
   }, [apiMessages]);
+
+  const addOptimisticPending = useCallback((text: string) => {
+    const timestamp = Date.now();
+    const userMessage: DisplayMessage = {
+      id: `optimistic-user-${timestamp}`,
+      role: "user",
+      content: text,
+      status: "completed",
+      createdAt: new Date(timestamp),
+    };
+    const assistantMessage: DisplayMessage = {
+      id: `optimistic-assistant-${timestamp}`,
+      role: "assistant",
+      content: text,
+      status: "pending",
+      createdAt: new Date(timestamp),
+    };
+    setDisplayMessages((prev) => [...prev, userMessage, assistantMessage]);
+  }, []);
 
   const updateAutoScrollIntent = useCallback(() => {
     const el = messagesScrollRef.current;
@@ -249,6 +284,7 @@ function ImageChatPageInner() {
     }
     setIsGenerating(true);
     shouldAutoScrollRef.current = true;
+    addOptimisticPending(text.trim());
 
     const payload = {
       prompt: text,
@@ -344,6 +380,17 @@ function ImageChatPageInner() {
     }
   };
 
+  const handleUseImageAsReference = (url: string) => {
+    setReferenceImages((prev) => (prev.includes(url) ? prev : [...prev, url]));
+    toast.success("图片已放入输入框");
+    scrollToBottom("smooth", true);
+  };
+
+  const handleOpenImageTool = (mode: "remove-bg" | "replace-bg" | "text-removal" | "upscale", url: string) => {
+    const params = new URLSearchParams({ mode, image: url });
+    router.push(`/image/edit?${params.toString()}`);
+  };
+
   const handleDeleteMessageImage = async (msgId: string) => {
     // 前端只是删除消息展示，后端不支持单条消息删除，跳过
     setDeleteTargetId(null);
@@ -378,7 +425,8 @@ function ImageChatPageInner() {
   const handleDeleteChat = async (id: number) => {
     try {
       await deleteChat(id);
-      toast.success("删除成功");
+      setDeleteSuccessOpen(false);
+      window.setTimeout(() => setDeleteSuccessOpen(true), 0);
       if (chatId === id) {
         handleNewChat();
       }
@@ -398,6 +446,7 @@ function ImageChatPageInner() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-surface">
+      <DeleteSuccessNotice open={deleteSuccessOpen} label="画图会话" onClose={() => setDeleteSuccessOpen(false)} />
       <input
         ref={fileInputRef}
         type="file"
@@ -454,10 +503,10 @@ function ImageChatPageInner() {
 
             return (
               <div key={msg.id} className="flex justify-start">
-                <div className="max-w-[90%] md:max-w-[70%] space-y-2">
+                <div className="w-[min(90vw,28rem)] md:w-[28rem] max-w-[90%] space-y-2">
                   {msg.status === "pending" && (
-                    <div className="rounded-2xl rounded-tl-sm bg-surface-card border border-surface-border overflow-hidden">
-                      {msg.partialImageUrl && (
+                    <div className="w-full rounded-2xl rounded-tl-sm bg-surface-card border border-surface-border overflow-hidden">
+                      {msg.partialImageUrl ? (
                         <div className="relative">
                           <img
                             src={resolveImageUrl(msg.partialImageUrl)}
@@ -469,26 +518,29 @@ function ImageChatPageInner() {
                             <span>生成中 · partial image</span>
                           </div>
                         </div>
-                      )}
-                      <div className="p-6">
-                        <div className="flex flex-col items-center gap-3 text-text-tertiary">
-                          {!msg.partialImageUrl && (
-                            <div className="relative">
-                              <Loader2 className="w-8 h-8 animate-spin text-brand/40" />
-                              <div className="absolute inset-0 flex items-center justify-center">
-                                <ImageIcon className="w-3.5 h-3.5 text-brand" />
-                              </div>
+                      ) : (
+                        <div className="relative aspect-square bg-surface-card">
+                          <video
+                            src="/ai-space-loading.mp4"
+                            className="absolute inset-0 h-full w-full object-cover"
+                            autoPlay
+                            loop
+                            muted
+                            playsInline
+                            preload="auto"
+                          />
+                          <div className="absolute inset-0 bg-black/25" />
+                          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10 px-6 text-center">
+                            <div className="flex items-center gap-1.5 rounded-full bg-black/35 px-3 py-1.5 text-xs text-white backdrop-blur-sm">
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              <span>图片生成中...</span>
                             </div>
-                          )}
-                          <div className="flex items-center gap-1.5 text-xs">
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                            <span>{msg.partialImageUrl ? "继续细化中..." : "图片生成中..."}</span>
+                            <p className="text-[11px] text-white/75 max-w-[80%] line-clamp-2">
+                              {msg.content}
+                            </p>
                           </div>
-                          <p className="text-[11px] text-text-tertiary/60 max-w-[80%] text-center line-clamp-2">
-                            {msg.content}
-                          </p>
                         </div>
-                      </div>
+                      )}
                     </div>
                   )}
 
@@ -508,6 +560,62 @@ function ImageChatPageInner() {
                           className="w-full max-h-[70vh] object-contain cursor-zoom-in bg-surface"
                           onClick={() => setPreviewImageUrl(resolveImageUrl(msg.imageUrl))}
                         />
+                        <div className="absolute inset-0 bg-black/10 opacity-0 transition-opacity duration-200 group-hover:opacity-100 pointer-events-none" />
+                        <div className="absolute right-3 top-3 z-10 flex items-center gap-2 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleUseImageAsReference(msg.imageUrl!);
+                            }}
+                            className="flex h-9 w-9 items-center justify-center rounded-xl bg-text-tertiary/70 text-white backdrop-blur-md transition-colors hover:bg-text-secondary"
+                            title="使用此图片"
+                          >
+                            <ImageIcon className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDownload(resolveImageUrl(msg.imageUrl), msg.id);
+                            }}
+                            className="flex h-9 w-9 items-center justify-center rounded-xl bg-text-tertiary/70 text-white backdrop-blur-md transition-colors hover:bg-text-secondary"
+                            title="下载"
+                          >
+                            <Download className="w-4 h-4" />
+                          </button>
+                          <div className="group/menu relative" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              className="flex h-9 w-9 items-center justify-center rounded-xl bg-text-tertiary/70 text-white backdrop-blur-md transition-colors hover:bg-text-secondary"
+                              title="更多功能"
+                            >
+                              <MoreHorizontal className="w-4 h-4" />
+                            </button>
+                            <div className="invisible absolute right-0 top-full z-20 mt-2 w-44 rounded-2xl border border-surface-border bg-surface-card p-2 opacity-0 shadow-xl transition-all duration-150 group-hover/menu:visible group-hover/menu:opacity-100">
+                              {[
+                                { label: "背景移除", icon: Eraser, mode: "remove-bg" as const },
+                                { label: "文字移除", icon: Type, mode: "text-removal" as const },
+                                { label: "区域抠除", icon: Wand2, disabled: true },
+                                { label: "局部重绘", icon: Sparkles, disabled: true },
+                                { label: "画质提升", icon: ZoomIn, mode: "upscale" as const },
+                                { label: "背景替换", icon: ImageIcon, mode: "replace-bg" as const },
+                              ].map((item) => (
+                                <button
+                                  key={item.label}
+                                  disabled={item.disabled}
+                                  onClick={() => item.mode && handleOpenImageTool(item.mode, msg.imageUrl!)}
+                                  className={cn(
+                                    "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors",
+                                    item.disabled
+                                      ? "cursor-not-allowed text-text-tertiary/45"
+                                      : "text-text-primary hover:bg-surface-elevated"
+                                  )}
+                                >
+                                  <item.icon className="h-4 w-4" />
+                                  <span>{item.label}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
                       </div>
                       <div className="px-3 py-2 border-t border-surface-border">
                         <p className="text-xs text-text-secondary line-clamp-2">{msg.content}</p>
@@ -535,7 +643,7 @@ function ImageChatPageInner() {
                           className="p-1.5 rounded-md hover:bg-surface-elevated text-text-tertiary hover:text-text-primary transition-colors"
                           title="使用此提示"
                         >
-                          <RefreshCw className="w-4 h-4" />
+                          <Send className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() =>
@@ -549,7 +657,7 @@ function ImageChatPageInner() {
                           className="p-1.5 rounded-md hover:bg-surface-elevated text-text-tertiary hover:text-text-primary transition-colors"
                           title="重新生成"
                         >
-                          <Send className="w-4 h-4" />
+                          <RefreshCw className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => setDeleteTargetId(msg.id)}

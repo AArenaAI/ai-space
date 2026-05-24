@@ -115,7 +115,8 @@ function ImageEditContent() {
     const mode = searchParams.get("mode") as EditMode | null;
     return mode && MODE_ORDER.includes(mode) ? mode : "remove-bg";
   }, [searchParams]);
-  const [sourceUrl, setSourceUrl] = useState("");
+  const initialImageUrl = searchParams.get("image") || "";
+  const [sourceUrl, setSourceUrl] = useState(initialImageUrl);
   const [replacePrompt, setReplacePrompt] = useState("");
   const [isEditing, setIsEditing] = useState(false);
   const [result, setResult] = useState<string | null>(null);
@@ -129,11 +130,18 @@ function ImageEditContent() {
   const config = MODE_CONFIG[editMode];
   const isRemoveBgMode = editMode === "remove-bg";
 
+  useEffect(() => {
+    const image = searchParams.get("image") || "";
+    setSourceUrl(image);
+    setResult(null);
+  }, [searchParams]);
+
   const switchMode = (mode: EditMode) => {
     setResult(null);
-    setSourceUrl("");
     setReplacePrompt("");
-    router.replace(`/image/edit?mode=${mode}`, { scroll: false });
+    const params = new URLSearchParams({ mode });
+    if (sourceUrl) params.set("image", sourceUrl);
+    router.replace(`/image/edit?${params.toString()}`, { scroll: false });
   };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {

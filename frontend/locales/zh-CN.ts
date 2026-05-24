@@ -151,7 +151,7 @@ const translations: Record<string, string> = {
   "sidebar.nav.history": "历史",
   "sidebar.nav.workspace": "工作区",
   "sidebar.panel.agents": "AI智能体",
-  "sidebar.panel.ai_draw": "AI画图",
+  "sidebar.panel.ai_draw": "AI灵感创作器",
   "sidebar.panel.answer_template": "回答模板",
   "sidebar.panel.create": "创作",
   "sidebar.panel.remove_bg": "去背景",

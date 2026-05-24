@@ -26,6 +26,7 @@ import { useVideoModels } from "@/hooks/useModels";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import NoticeDialog from "@/components/ui/NoticeDialog";
 import HistoryDrawer from "@/components/ui/HistoryDrawer";
+import DeleteSuccessNotice from "@/components/ui/DeleteSuccessNotice";
 
 const ASPECT_RATIOS = [
   { value: "auto", label: "Auto", w: 1, h: 1 },
@@ -127,6 +128,7 @@ function VideoChatPageInner() {
   const [durationMenuOpen, setDurationMenuOpen] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [deleteSuccessOpen, setDeleteSuccessOpen] = useState(false);
   const [limitDialogOpen, setLimitDialogOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -338,7 +340,8 @@ function VideoChatPageInner() {
         setDisplayMessages([]);
         router.replace("/video/chat");
       }
-      toast.success("删除成功");
+      setDeleteSuccessOpen(false);
+      window.setTimeout(() => setDeleteSuccessOpen(true), 0);
     } catch {
       toast.error("删除失败");
     } finally {
@@ -369,6 +372,7 @@ function VideoChatPageInner() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-surface">
+      <DeleteSuccessNotice open={deleteSuccessOpen} label="视频会话" onClose={() => setDeleteSuccessOpen(false)} />
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileSelect} />
 
       <div className="shrink-0 flex items-center gap-3 px-4 py-3 border-b border-surface-border">
@@ -418,21 +422,27 @@ function VideoChatPageInner() {
             const videoUrl = resolveMediaUrl(msg.videoUrl);
             return (
               <div key={msg.id} className="flex justify-start">
-                <div className="max-w-[90%] md:max-w-[70%] space-y-2">
+                <div className="w-[min(90vw,36rem)] md:w-[36rem] max-w-[90%] space-y-2">
                   {(msg.status === "pending" || msg.status === "running" || generating) && !videoUrl && (
-                    <div className="rounded-2xl rounded-tl-sm bg-surface-card border border-surface-border overflow-hidden p-6">
-                      <div className="flex flex-col items-center gap-3 text-text-tertiary">
-                        <div className="relative">
-                          <Loader2 className="w-8 h-8 animate-spin text-brand/40" />
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            <Video className="w-3.5 h-3.5 text-brand" />
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1.5 text-xs">
-                          <Loader2 className="w-3 h-3 animate-spin" />
+                    <div className="relative w-full aspect-video rounded-2xl rounded-tl-sm bg-surface-card border border-surface-border overflow-hidden">
+                      <video
+                        src="/ai-space-loading.mp4"
+                        className="absolute inset-0 h-full w-full object-cover"
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
+                        preload="auto"
+                      />
+                      <div className="absolute inset-0 bg-black/25" />
+                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-10 px-6 text-center">
+                        <div className="flex items-center gap-1.5 rounded-full bg-black/35 px-3 py-1.5 text-sm text-white backdrop-blur-sm">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
                           <span>视频生成中...</span>
                         </div>
-                        <p className="text-[11px] text-text-tertiary/60 max-w-[80%] text-center line-clamp-2">{msg.content}</p>
+                        <p className="text-xs text-white/75 max-w-[70%] line-clamp-2">
+                          {msg.content}
+                        </p>
                       </div>
                     </div>
                   )}
