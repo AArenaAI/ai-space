@@ -58,11 +58,14 @@ type Config struct {
 	TavilySearchKey string
 
 	// ========== Vision Provider（图片解析，独立配置；为空则自动复用 Chat Provider 的 OpenAI）==========
-	VisionAPIKey      string  // Vision API Key
-	VisionBaseURL     string  // Vision API Base URL
-	VisionModel       string  // 用于图片解析的 Vision 模型
-	VisionInputPrice  float64 // ¥/千tokens，输入单价
-	VisionOutputPrice float64 // ¥/千tokens，输出单价
+	VisionAPIKey            string  // Vision API Key
+	VisionBaseURL           string  // Vision API Base URL
+	VisionModel             string  // 用于图片解析的 Vision 模型
+	VisionInputPrice        float64 // ¥/千tokens，输入单价
+	VisionOutputPrice       float64 // ¥/千tokens，输出单价
+	VisionDocEnable         bool    // 是否启用 PDF/DOCX/PPTX 文档视觉解析增强
+	VisionDocTimeoutSeconds int     // 文档视觉解析总超时秒数
+	VisionDocMaxFileMB      int     // 文档视觉解析最大文件大小（MB）
 
 	// ========== Text Embedding Provider（文本向量 RAG 检索，独立配置；为空则自动复用 Chat Provider 的 OpenAI）==========
 	EnableTextEmbedding     bool   // 是否启用文本向量功能
@@ -168,17 +171,20 @@ func Load() *Config {
 
 		GuestDailyChatLimit: getEnvInt("GUEST_DAILY_CHAT_LIMIT", 10),
 
-		VisionAPIKey:      getEnv("VISION_API_KEY", ""),
-		VisionBaseURL:     getEnv("VISION_BASE_URL", ""),
-		VisionModel:       getEnv("VISION_MODEL", "gpt-5.4-mini"),
-		VisionInputPrice:  getEnvFloat64("VISION_INPUT_PRICE", 0),
-		VisionOutputPrice: getEnvFloat64("VISION_OUTPUT_PRICE", 0),
+		VisionAPIKey:            getEnv("VISION_API_KEY", ""),
+		VisionBaseURL:           getEnv("VISION_BASE_URL", ""),
+		VisionModel:             getEnv("VISION_MODEL", "gpt-5.4-mini"),
+		VisionInputPrice:        getEnvFloat64("VISION_INPUT_PRICE", 0),
+		VisionOutputPrice:       getEnvFloat64("VISION_OUTPUT_PRICE", 0),
+		VisionDocEnable:         getEnv("VISION_DOC_ENABLE", "true") == "true",
+		VisionDocTimeoutSeconds: getEnvInt("VISION_DOC_TIMEOUT_SECONDS", 180),
+		VisionDocMaxFileMB:      getEnvInt("VISION_DOC_MAX_FILE_MB", 20),
 
 		EnableTextEmbedding:     getEnv("ENABLE_TEXT_EMBEDDING", "") == "true",
 		TextEmbeddingProvider:   getEnv("TEXT_EMBEDDING_PROVIDER", "openai"),
 		TextEmbeddingModel:      getEnv("TEXT_EMBEDDING_MODEL", "text-embedding-v4"),
 		TextEmbeddingDimensions: getEnvInt("TEXT_EMBEDDING_DIMENSIONS", 1536),
-		TextEmbeddingBatchSize:  getEnvInt("TEXT_EMBEDDING_BATCH_SIZE", 32),
+		TextEmbeddingBatchSize:  getEnvInt("TEXT_EMBEDDING_BATCH_SIZE", 10),
 		TextEmbeddingBaseURL:    getEnv("TEXT_EMBEDDING_BASE_URL", ""),
 		TextEmbeddingAPIKey:     getEnv("TEXT_EMBEDDING_API_KEY", ""),
 

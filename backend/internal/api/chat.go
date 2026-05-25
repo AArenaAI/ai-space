@@ -352,7 +352,7 @@ func (h *ChatHandler) buildChatFilePlan(req ChatRequest, userID uint, guestID st
 func (h *ChatHandler) saveMessageFiles(messageID uint, files []models.File) {
 	for _, file := range files {
 		ftype := "document"
-		if file.HasImages || file.MimeType == "image" || strings.HasPrefix(file.MimeType, "image/") {
+		if isImageFile(file) {
 			ftype = "image"
 		}
 		h.db.Create(&models.MessageFile{
@@ -363,6 +363,10 @@ func (h *ChatHandler) saveMessageFiles(messageID uint, files []models.File) {
 			Filename:  file.Filename,
 		})
 	}
+}
+
+func isImageFile(file models.File) bool {
+	return file.MimeType == "image" || strings.HasPrefix(file.MimeType, "image/")
 }
 
 func (h *ChatHandler) upsertConversationFiles(conversationID uint, files []models.File) {
@@ -389,7 +393,7 @@ func (h *ChatHandler) buildFileContext(files []models.File, fileNames map[uint]s
 	var imageFileIDs []uint
 	var docFileIDs []uint
 	for _, file := range files {
-		isImage := file.HasImages || file.MimeType == "image" || strings.HasPrefix(file.MimeType, "image/")
+		isImage := isImageFile(file)
 		if file.ParseStatus != "done" {
 			fmt.Printf("[%s RAG] 文件尚未解析完成 fileID=%d name=%s status=%s error=%s\n", logPrefix, file.ID, file.Filename, file.ParseStatus, file.ErrorMessage)
 		}

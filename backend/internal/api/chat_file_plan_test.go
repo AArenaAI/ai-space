@@ -57,6 +57,16 @@ func createTestFile(t *testing.T, db *gorm.DB, publicID, filename, mimeType stri
 	return f
 }
 
+func createTestFileWithImages(t *testing.T, db *gorm.DB, publicID, filename, mimeType string, userID uint, guestID string) models.File {
+	t.Helper()
+	f := createTestFile(t, db, publicID, filename, mimeType, userID, guestID)
+	f.HasImages = true
+	if err := db.Save(&f).Error; err != nil {
+		t.Fatalf("mark file %s has images: %v", publicID, err)
+	}
+	return f
+}
+
 func TestBuildFileContextIncludesStartOfLargeMessageAttachment(t *testing.T) {
 	h, db := setupChatFilePlanTest(t)
 	userID := uint(42)
@@ -85,6 +95,42 @@ func TestBuildFileContextIncludesStartOfLargeMessageAttachment(t *testing.T) {
 	}
 	if strings.Contains(ctx, "### 文件: 111.md\n\n\n... (已达到总字数上限)") {
 		t.Fatalf("file context only contains truncation marker without actual content: %q", ctx[:min(len(ctx), 500)])
+	}
+}
+
+func TestPDFWithEmbeddedImagesIsTreatedAsDocumentContext(t *testing.T) {
+	h, db := setupChatFilePlanTest(t)
+	userID := uint(42)
+	pdfFile := createTestFileWithImages(t, db, "file_pdf_with_images", "氧化锆-dual-translated(1).pdf", "application/pdf", userID, "")
+
+	if err := db.Create(&models.FileChunk{
+		FileID:     pdfFile.ID,
+		ChunkIndex: 0,
+		BlockID:    "pdf-p1",
+		Page:       1,
+		BlockType:  "paragraph",
+		Content:    "牙科氧化锆论文：介绍氧化锆陶瓷、表面处理、粘接强度和临床修复。",
+	}).Error; err != nil {
+		t.Fatalf("create pdf chunk: %v", err)
+	}
+
+	ctx := h.buildFileContext([]models.File{pdfFile}, map[uint]string{pdfFile.ID: pdfFile.Filename}, "这个的主要内容是什么", "deepseek-v4-pro", false, "Test")
+	if !strings.Contains(ctx, "牙科氧化锆论文") {
+		t.Fatalf("pdf with HasImages=true should use document chunks, got: %q", ctx)
+	}
+
+	msg := models.Message{ConversationID: 1, Role: "user", Content: "这个的主要内容是什么"}
+	if err := db.Create(&msg).Error; err != nil {
+		t.Fatalf("create message: %v", err)
+	}
+	h.saveMessageFiles(msg.ID, []models.File{pdfFile})
+
+	var mf models.MessageFile
+	if err := db.Where("message_id = ?", msg.ID).First(&mf).Error; err != nil {
+		t.Fatalf("load message file: %v", err)
+	}
+	if mf.Type != "document" {
+		t.Fatalf("pdf with embedded images should persist as document, got %q", mf.Type)
 	}
 }
 

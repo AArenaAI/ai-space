@@ -571,7 +571,7 @@
    571|TEXT_EMBEDDING_PROVIDER=openai                 # 提供商：openai | gemini | local
    572|TEXT_EMBEDDING_MODEL=text-embedding-3-small    # 模型名
    573|TEXT_EMBEDDING_DIMENSIONS=1536                 # 向量维度
-   574|TEXT_EMBEDDING_BATCH_SIZE=32                   # 批量大小
+   574|TEXT_EMBEDDING_BATCH_SIZE=10                   # 批量大小
    575|TEXT_EMBEDDING_BASE_URL=                       # 自定义 API 地址（可选）
    576|TEXT_EMBEDDING_API_KEY=                        # 自定义 API Key（可选，默认复用 OPENAI_API_KEY）
    577|```

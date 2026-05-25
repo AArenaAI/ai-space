@@ -956,7 +956,7 @@ func (s *AIService) ExtractImageContent(ctx context.Context, imageData []byte, m
 			{
 				"role": "user",
 				"content": []map[string]interface{}{
-					{"type": "text", "text": "请详细描述这张图片的内容，包括文字、图表、布局等所有可见信息。如果图片主要是文字内容，请完整转录所有文字。"},
+					{"type": "text", "text": "请仔细分析这张图片/文档的内容，并按以下结构化格式输出：\n\n1. **整体概述**：图片的主题和核心内容\n2. **文字内容**：完整转录所有可见文字（保持原有格式）\n3. **表格数据**：如果有表格，用 Markdown 表格格式输出\n4. **图表描述**：如果有图表，描述其数据关系和趋势\n5. **布局说明**：描述内容的组织结构\n\n如果图片主要是文字文档，请尽可能完整转录，不要遗漏任何信息。请直接输出分析结果，不要加前缀。"},
 					{"type": "image_url", "image_url": map[string]string{"url": dataURI}},
 				},
 			},

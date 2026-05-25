@@ -64,11 +64,11 @@ func (p *FileParser) Parse(ctx context.Context, data []byte, filename string) (*
 		".rb", ".swift", ".kt", ".scala", ".r", ".matlab", ".tex":
 		return p.parseText(data, filename)
 	case ".pdf":
-		return p.parsePDF(data)
+		return p.parseDocumentWithVisionFallback(ctx, data, filename, p.parsePDF)
 	case ".docx":
-		return p.parseDOCX(data)
+		return p.parseDocumentWithVisionFallback(ctx, data, filename, p.parseDOCX)
 	case ".pptx":
-		return p.parsePPTX(data)
+		return p.parseDocumentWithVisionFallback(ctx, data, filename, p.parsePPTX)
 	case ".xlsx":
 		return p.parseXLSX(data)
 	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp":
@@ -76,6 +76,87 @@ func (p *FileParser) Parse(ctx context.Context, data []byte, filename string) (*
 	default:
 		return p.parseText(data, filename) // fallback
 	}
+}
+
+// parseDocumentWithVisionFallback 先做本地文本解析，再尝试视觉文档解析；视觉失败时回退本地结果。
+func (p *FileParser) parseDocumentWithVisionFallback(ctx context.Context, data []byte, filename string, localParser func([]byte) (*ParseResult, error)) (*ParseResult, error) {
+	localResult, localErr := localParser(data)
+
+	if p.shouldUseVisionDocumentParser(data, filename, localResult, localErr) {
+		visionResult, visionErr := p.parseComplexDocumentWithVision(ctx, data, filename)
+		if visionErr == nil && visionResult != nil && strings.TrimSpace(visionResult.Content) != "" {
+			if localResult != nil && strings.TrimSpace(localResult.Content) != "" {
+				visionResult.Content = strings.TrimSpace(localResult.Content) + "\n\n---\n\n# 视觉增强解析\n\n" + strings.TrimSpace(visionResult.Content)
+				visionResult.Chunks = append(localResult.Chunks, reindexChunks(visionResult.Chunks, len(localResult.Chunks))...)
+				visionResult.HasTables = visionResult.HasTables || localResult.HasTables
+			}
+			return visionResult, nil
+		}
+	}
+
+	if localErr != nil {
+		return nil, localErr
+	}
+	return localResult, nil
+}
+
+func (p *FileParser) shouldUseVisionDocumentParser(data []byte, filename string, localResult *ParseResult, localErr error) bool {
+	if p.cfg == nil || !p.cfg.VisionDocEnable {
+		return false
+	}
+	if p.aiService == nil {
+		return false
+	}
+	maxMB := p.cfg.VisionDocMaxFileMB
+	if maxMB <= 0 {
+		maxMB = defaultVisionDocMaxFileMB
+	}
+	if len(data) > maxMB*1024*1024 {
+		return false
+	}
+
+	ext := strings.ToLower(filepath.Ext(filename))
+	if ext == ".pptx" {
+		return true
+	}
+	if localErr != nil || localResult == nil || strings.TrimSpace(localResult.Content) == "" {
+		return true
+	}
+
+	textRunes := len([]rune(strings.TrimSpace(localResult.Content)))
+	if ext == ".pdf" {
+		pages := localResult.Pages
+		if pages <= 0 {
+			pages = 1
+		}
+		return textRunes/pages < 120
+	}
+	if ext == ".docx" {
+		return officeZipHasMedia(data, "word/media/") || textRunes < 300
+	}
+	return false
+}
+
+func officeZipHasMedia(data []byte, prefix string) bool {
+	r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return false
+	}
+	for _, f := range r.File {
+		if strings.HasPrefix(f.Name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func reindexChunks(chunks []TextChunk, offset int) []TextChunk {
+	out := make([]TextChunk, len(chunks))
+	copy(out, chunks)
+	for i := range out {
+		out[i].Index = offset + i
+	}
+	return out
 }
 
 // parseText 解析纯文本/代码文件
@@ -708,9 +789,9 @@ func (p *FileParser) parseImage(ctx context.Context, data []byte, ext string) (*
 		return nil, fmt.Errorf("图片视觉解析失败: 返回内容为空")
 	}
 
-	// 截断过长的 caption 到 500 字符，避免占用过多上下文
-	if len([]rune(caption)) > 500 {
-		caption = string([]rune(caption)[:500]) + "..."
+	// 截断过长的 caption 到 2000 字符，避占用过多上下文（之前 500 太短，浪费了 vision 模型能力）
+	if len([]rune(caption)) > 2000 {
+		caption = string([]rune(caption)[:2000]) + "..."
 	}
 
 	content := fmt.Sprintf("图片视觉描述：\n%s", caption)
