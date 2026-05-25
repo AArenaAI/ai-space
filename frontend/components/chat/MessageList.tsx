@@ -1357,188 +1357,171 @@ function MessageList({
   );
 
   if (isCompare) {
+    const compareGroups = groups;
+
+    const renderCompareUserMessage = (msg: Message) => (
+      <div key={msg.id} className="flex justify-center px-3 py-3">
+        <div className="max-w-[860px] rounded-2xl border border-surface-border bg-surface-card px-4 py-3 shadow-sm">
+          <div className="mb-2 flex items-center justify-center gap-2 text-xs text-text-tertiary">
+            <User className="h-3.5 w-3.5" />
+            <span>用户问题</span>
+          </div>
+          <div className="flex flex-col gap-2">
+            {msg.files && msg.files.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {msg.files.map((f, fi) => {
+                  if (f.type === "image") {
+                    return (
+                      <div key={fi} className="relative overflow-hidden rounded-xl border border-surface-border bg-surface-card">
+                        <img
+                          src={`/api/files/${f.public_id}/download`}
+                          alt={f.filename}
+                          className="max-h-[200px] max-w-[200px] rounded-xl object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = "";
+                            (e.target as HTMLImageElement).classList.add("hidden");
+                            (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden");
+                          }}
+                        />
+                        <div className="hidden px-3 py-2 text-xs text-text-tertiary">{t("chat.imageLoadFailed")}</div>
+                      </div>
+                    );
+                  }
+                  return null;
+                })}
+              </div>
+            )}
+            {msg.files && msg.files.some((f) => f.type !== "image") && (
+              <div className="flex flex-wrap gap-2">
+                {msg.files.filter((f) => f.type !== "image").map((f, fi) => (
+                  <a
+                    key={fi}
+                    href={`/api/files/${f.public_id}/download`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 rounded-lg border border-surface-border bg-surface-card px-3 py-1.5 transition-colors hover:border-brand/30"
+                  >
+                    <FileText className="h-4 w-4 shrink-0 text-text-tertiary" />
+                    <span className="max-w-[200px] truncate text-[13px] text-text-secondary">{f.filename}</span>
+                  </a>
+                ))}
+              </div>
+            )}
+            {msg.content ? <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-text-primary">{msg.content}</p> : null}
+          </div>
+        </div>
+      </div>
+    );
+
+    const renderCompareAssistantCard = (msg: Message | undefined, modelId: string, colIndex: number, isLastGroup: boolean) => {
+      const model = modelById.get(modelId || msg?.model || "");
+      const isStreaming = !!msg && isLoading && !msg.completedAt && isLastGroup && isMessageGenerating(msg, true);
+      const isGenerating = !!msg && isMessageGenerating(msg, isStreaming);
+      const canRegenerate = !!msg && isLastGroup && !isLoading && !isGenerating;
+
+      return (
+        <div key={msg?.id || `${modelId}-${colIndex}`} className="flex min-w-[320px] flex-1 flex-col overflow-hidden rounded-2xl border border-surface-border bg-surface-card shadow-sm">
+          {renderCompareModelHeader(modelId || msg?.model || `模型 ${colIndex + 1}`, colIndex)}
+          <div className="group flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-4">
+            {msg ? (
+              <div className="flex gap-3 animate-message-appear">
+                <div className="mt-1 w-7 shrink-0">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-surface-border bg-surface-card">
+                    <Bot className="h-4 w-4 text-text-secondary" />
+                  </div>
+                </div>
+                <div className="flex min-w-0 flex-1 flex-col gap-1">
+                  <div className="w-fit max-w-full rounded-2xl rounded-bl-sm bg-surface-elevated px-4 py-3">
+                    {model && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} />}
+                    {renderAssistantContent(msg, isStreaming)}
+                  </div>
+                  {!isStreaming && (
+                    <div className="flex items-center gap-2 px-2 opacity-0 transition-opacity group-hover:opacity-100">
+                      <MessageActions
+                        onCopy={() => handleCopy(msg.content)}
+                        onDelete={() => setDeleteTarget(msg.id)}
+                        onRegenerate={onRegenerate}
+                        onShareSelectMode={() => enterSelectMode("share", msg.id)}
+                        onFavoriteSelectMode={msg.serverMessageId && conversationId ? () => enterSelectMode("favorite", msg.id) : undefined}
+                        isFavorited={msg.serverMessageId ? isFavorited(msg.serverMessageId) : false}
+                        showRegenerate={canRegenerate}
+                        align="left"
+                        visible={isLastGroup}
+                        createdAt={msg.createdAt}
+                        completedAt={msg.completedAt}
+                        onForkCompare={msg.serverMessageId ? () => onForkCompare?.(msg.serverMessageId!) : undefined}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="flex h-full min-h-[120px] items-center justify-center rounded-2xl border border-dashed border-surface-border bg-surface-elevated/40 px-4 py-6 text-sm text-text-tertiary">
+                此模型本轮暂无回答
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
     return (
       <div className="relative flex-1 min-h-0 overflow-hidden">
-        <div className="h-full px-3 py-3">
-          <div className="mx-auto h-full">
-            <div className="flex gap-3 h-full">
-              {activeCompareModels.map((modelId, colIndex) => {
-                const colMsgs = columnMessages[colIndex];
+        <div className="h-full overflow-y-auto px-3 py-3" style={{ paddingBottom: CHAT_BOTTOM_SPACER }}>
+          {messages.length === 0 ? (
+            <div className="mx-auto grid h-full gap-3 md:grid-cols-2">
+              {(activeCompareModels.length ? activeCompareModels : compareModels).map((modelId, index) => renderCompareWelcome(modelId, index))}
+            </div>
+          ) : (
+            <div className="mx-auto flex max-w-[1440px] flex-col gap-5">
+              {compareGroups.map((group, groupIndex) => {
+                const isLastGroup = groupIndex === compareGroups.length - 1;
+                const assistants = group.assistantMessages;
+                const roundModels = group.models.length ? group.models : activeCompareModels;
+
                 return (
-                  <div key={modelId} className="flex-1 min-w-0 flex flex-col h-full rounded-2xl border border-surface-border bg-surface-card shadow-sm overflow-hidden">
-                    {renderCompareModelHeader(modelId, colIndex)}
-
-                    <div className="flex-1 space-y-5 px-4 py-5 overflow-y-auto" style={{ paddingBottom: CHAT_BOTTOM_SPACER }}>
-                    {messages.length === 0 ? (
-                      <div className="flex flex-col pt-16 pb-10">
-                        <h2 className="text-3xl font-semibold tracking-tight text-text-primary">{t("chat.helloComma")}</h2>
-                        <p className="mt-3 text-base font-medium text-text-secondary">{t("chat.howCanIHelp")}</p>
+                  <section key={group.id} className="flex flex-col gap-3">
+                    {renderCompareUserMessage(group.userMessage)}
+                    {roundModels.length > 0 ? (
+                      <div className="flex gap-3 overflow-x-auto pb-1">
+                        {roundModels.map((modelId, colIndex) => {
+                          const assistant = assistants.find((m) => m.groupIndex === colIndex) || assistants.find((m) => m.model === modelId);
+                          return renderCompareAssistantCard(assistant, modelId, colIndex, isLastGroup);
+                        })}
                       </div>
-                    ) : (
-                      <>
-                        {colMsgs.map((msg, msgIndex) => {
-                          const model = msg.model ? modelById.get(msg.model) : undefined;
-                          const isUser = msg.role === "user";
-                          const isLast = msgIndex === colMsgs.length - 1;
-                          const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && isLast;
-                          const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
-                          const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
-
-                          return (
-                            <div key={`${colIndex}-${msg.id}`} className="flex gap-3 animate-message-appear group">
+                    ) : isLoading && isLastGroup ? (
+                      <div className="flex gap-3 overflow-x-auto pb-1">
+                        {(group.models.length ? group.models : activeCompareModels).map((modelId, colIndex) => (
+                          <div key={modelId || colIndex} className="flex min-w-[320px] flex-1 flex-col overflow-hidden rounded-2xl border border-surface-border bg-surface-card shadow-sm">
+                            {renderCompareModelHeader(modelId, colIndex)}
+                            <div className="flex gap-3 px-4 py-4 animate-message-appear">
                               <div className="mt-1 w-7 shrink-0">
-                                {!isUser && (
-                                  <div className="w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center">
-                                    <Bot className="w-4 h-4 text-text-secondary" />
-                                  </div>
-                                )}
-                              </div>
-
-                              <div className={cn("flex-1 flex min-w-0", isUser ? "justify-end" : "justify-start")}>
-                                <div className="flex flex-col gap-1 min-w-0">
-                                  <div
-                                    className={cn(
-                                      "px-4 py-3 relative w-fit max-w-full",
-                                      isUser
-                                        ? "rounded-2xl rounded-br-sm bg-[#EFF6FF] dark:bg-[#1E293B]"
-                                        : "rounded-2xl rounded-bl-sm bg-[#F5F4F2] dark:bg-[#1F1F1F]"
-                                    )}
-                                  >
-                                    {!isUser && model && (
-                                      <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} />
-                                    )}
-
-                                    {isUser ? (
-                                      <div className="flex flex-col gap-2">
-                                        {msg.files && msg.files.length > 0 && (
-                                          <div className="flex flex-wrap gap-2">
-                                            {msg.files.map((f, fi) => {
-                                              if (f.type === "image") {
-                                                return (
-                                                  <div key={fi} className="relative group/file rounded-xl overflow-hidden border border-surface-border bg-surface-card">
-                                                    <img
-                                                      src={`/api/files/${f.public_id}/download`}
-                                                      alt={f.filename}
-                                                      className="max-w-[200px] max-h-[200px] object-cover rounded-xl"
-                                                      onError={(e) => {
-                                                        (e.target as HTMLImageElement).src = "";
-                                                        (e.target as HTMLImageElement).classList.add("hidden");
-                                                        (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden");
-                                                      }}
-                                                    />
-                                                    <div className="hidden text-xs text-text-tertiary px-3 py-2">{t("chat.imageLoadFailed")}</div>
-                                                  </div>
-                                                );
-                                              }
-                                              return null;
-                                            })}
-                                          </div>
-                                        )}
-                                        {msg.files && msg.files.some(f => f.type !== "image") && (
-                                          <div className="flex flex-wrap gap-2">
-                                            {msg.files.filter(f => f.type !== "image").map((f, fi) => (
-                                              <a
-                                                key={fi}
-                                                href={`/api/files/${f.public_id}/download`}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-card border border-surface-border hover:border-brand/30 transition-colors"
-                                              >
-                                                <FileText className="w-4 h-4 text-text-tertiary shrink-0" />
-                                                <span className="text-[13px] text-text-secondary truncate max-w-[200px]">{f.filename}</span>
-                                              </a>
-                                            ))}
-                                          </div>
-                                        )}
-                                        <div className="flex items-start justify-between gap-2">
-                                          {msg.content ? (
-                                            <p className="text-[15px] leading-relaxed text-text-primary whitespace-pre-wrap">{msg.content}</p>
-                                          ) : null}
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      renderAssistantContent(msg, isStreaming)
-                                    )}
-                                  </div>
-
-                                  {!isUser && !isStreaming && (
-                                    <div className="flex items-center gap-2 px-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                      <MessageActions
-                                        onCopy={() => handleCopy(msg.content)}
-                                        onDelete={() => setDeleteTarget(msg.id)}
-                                        onRegenerate={onRegenerate}
-                                        onShareSelectMode={() => enterSelectMode("share", msg.id)}
-                                        onFavoriteSelectMode={msg.serverMessageId && conversationId ? () => enterSelectMode("favorite", msg.id) : undefined}
-                                        isFavorited={msg.serverMessageId ? isFavorited(msg.serverMessageId) : false}
-                                        showRegenerate={canRegenerate}
-                                        align={isUser ? "right" : "left"}
-                                        visible={isLast}
-                                        createdAt={msg.createdAt}
-                                        completedAt={msg.completedAt}
-                                      />
-                                    </div>
-                                  )}
-                                  {isUser && !isStreaming && (
-                                    <div className="flex items-center justify-end gap-2 px-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                      <MessageActions
-                                        onCopy={() => handleCopy(msg.content)}
-                                        onDelete={() => setDeleteTarget(msg.id)}
-                                        onShareSelectMode={() => enterSelectMode("share", msg.id)}
-                                        onFavoriteSelectMode={msg.serverMessageId && conversationId ? () => enterSelectMode("favorite", msg.id) : undefined}
-                                        isFavorited={msg.serverMessageId ? isFavorited(msg.serverMessageId) : false}
-                                        showRegenerate={false}
-                                        align="right"
-                                        visible={isLast}
-                                        createdAt={msg.createdAt}
-                                        onForkCompare={msg.serverMessageId ? () => onForkCompare?.(msg.serverMessageId!) : undefined}
-                                      />
-                                    </div>
-                                  )}
+                                <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-surface-border bg-surface-card">
+                                  <Bot className="h-4 w-4 text-text-secondary" />
                                 </div>
                               </div>
-
-                              <div className="mt-1 w-7 shrink-0">
-                                {isUser && (
-                                  <div className="w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center">
-                                    <User className="w-4 h-4 text-text-secondary" />
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-
-                        {isLoading && colMsgs[colMsgs.length - 1]?.role !== "assistant" && (
-                          <div className="flex gap-3 animate-message-appear">
-                            <div className="mt-1 w-7 shrink-0">
-                              <div className="w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center">
-                                <Bot className="w-4 h-4 text-text-secondary" />
-                              </div>
-                            </div>
-                            <div className="flex-1 flex justify-start">
-                              <div className="bg-[#F5F4F2] dark:bg-[#1F1F1F] rounded-2xl rounded-bl-sm px-4 py-3 flex items-center">
-                                <div className="flex items-center gap-1.5 text-sm text-text-secondary">
-                                  {isComplexTask && (
+                              <div className="flex-1">
+                                <div className="inline-flex rounded-2xl rounded-bl-sm bg-surface-elevated px-4 py-3 text-sm text-text-secondary">
+                                  {isComplexTask ? (
                                     <span className="inline-flex items-center gap-0.5">
                                       <WaveText text={t("chat.deepReasoning")} />
                                       <ThinkingDots />
                                     </span>
+                                  ) : (
+                                    <ThinkingDots />
                                   )}
                                 </div>
                               </div>
                             </div>
-                            <div className="mt-1 w-7 shrink-0" />
                           </div>
-                        )}
-                      </>
-                    )}
-                    </div>
-                  </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </section>
                 );
               })}
             </div>
-
-          </div>
+          )}
         </div>
 
         <ConfirmDialog

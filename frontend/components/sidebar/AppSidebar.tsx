@@ -28,6 +28,7 @@ import { useTemplates } from "@/hooks/useTemplates";
 import SidebarUserPanel from "./SidebarUserPanel";
 import { useWorkspaces } from "@/hooks/useWorkspaces";
 import { useTheme } from "@/components/theme/ThemeProvider";
+import { usePlatform } from "@/hooks/usePlatform";
 
 // 模块级缓存：避免组件重新挂载时历史记录反复闪烁
 let cachedConversations: Conversation[] | null = null;
@@ -487,6 +488,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
   const currentConvId = optimisticConvId ?? routeConvId;
   const router = useRouter();
   const { templates, updateTemplate } = useTemplates();
+  const { isMac, mod } = usePlatform();
 
   // 工作区
   const { workspaces, currentWS, loading: wsLoading, switchWorkspace, createWorkspace, deleteWorkspace, renameWorkspace } = useWorkspaces();
@@ -550,6 +552,18 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
   };
   const hideSidebarTooltip = () => setSidebarTooltip(null);
 
+  /* 展开状态悬浮 tooltip */
+  const [hoverTooltip, setHoverTooltip] = useState<{text: string; x: number; y: number; placement: "below" | "right"} | null>(null);
+  const showHoverTooltip = (text: string, placement: "below" | "right") => (e: React.MouseEvent) => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    if (placement === "below") {
+      setHoverTooltip({ text, x: r.left + r.width / 2, y: r.bottom + 6, placement });
+    } else {
+      setHoverTooltip({ text, x: r.right + 8, y: r.top + r.height / 2 - 10, placement });
+    }
+  };
+  const hideHoverTooltip = () => setHoverTooltip(null);
+
   const handleMoreEnter = () => {
     if (moreTimerRef.current) clearTimeout(moreTimerRef.current);
     if (workTimerRef.current) clearTimeout(workTimerRef.current);
@@ -612,7 +626,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
 
-  /* ── 搜索 ── */
+  /* —— 搜索 —— */
   useEffect(() => {
     const q = searchQuery.trim();
     if (!q || !user) {
@@ -751,6 +765,29 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
       router.push(`/chat?t=${ts}`);
     }
   };
+
+  /* 全局快捷键 */
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const isMod = isMac ? e.metaKey : e.ctrlKey;
+      if (!isMod) return;
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) return;
+      if ((e.key === "s" || e.key === "S") && !searchOpen) {
+        e.preventDefault();
+        setSearchOpen(true);
+        setSearchQuery("");
+        setSearchResults([]);
+      }
+      if (e.key === " " && !searchOpen) {
+        e.preventDefault();
+        handleNewChat();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [isMac, searchOpen, skillKey]);
+
   const handleDelete = (id: number) => { setDeleteTarget(id); };
 
   const confirmDelete = async () => {
@@ -936,8 +973,9 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
           {!collapsed && (
             <button
               onClick={() => { setSearchOpen(true); setSearchQuery(""); setSearchResults([]); }}
-              className="mr-1 rounded-lg p-1.5 text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
-              title={t("sidebar.tooltip.search")}
+              className="mr-1 rounded-lg p-1.5 text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors flex items-center gap-1.5"
+              onMouseEnter={showHoverTooltip(`${t("sidebar.tooltip.search")} ${mod}S`, "below")}
+              onMouseLeave={hideHoverTooltip}
             >
               <Search className="w-4 h-4" />
             </button>
@@ -962,7 +1000,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
               <button
                 type="button"
                 onClick={handleNewChat}
-                onMouseEnter={showSidebarTooltip(t("sidebar.tooltip.chat"))}
+                onMouseEnter={showSidebarTooltip(`${t("sidebar.tooltip.chat")} ${mod}Space`)}
                 onMouseLeave={hideSidebarTooltip}
                 className={cn(
                   "p-2.5 rounded-xl transition-colors block",
@@ -1070,9 +1108,11 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                     ? "bg-brand/10 text-text-primary font-medium shadow-[inset_2px_0_0_0_var(--brand)]"
                     : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                 )}
+                onMouseEnter={showHoverTooltip(`${mod}Space`, "right")}
+                onMouseLeave={hideHoverTooltip}
               >
                 <MessageSquare className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/chat" ? "text-brand" : "text-text-tertiary")} />
-                <span>{t("sidebar.nav.chat")}</span>
+                <span className="flex-1 text-left">{t("sidebar.nav.chat")}</span>
               </button>
             </div>
 
@@ -1210,6 +1250,21 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
           style={{ top: sidebarTooltip.y, left: sidebarTooltip.x }}
         >
           {sidebarTooltip.text}
+        </div>,
+        document.body
+      )}
+
+      {/* 展开状态悬浮 tooltip */}
+      {hoverTooltip && typeof document !== "undefined" && createPortal(
+        <div
+          className="fixed z-[100] px-2.5 py-1.5 rounded-lg bg-surface-card border border-surface-border text-xs text-text-primary whitespace-nowrap shadow-lg pointer-events-none"
+          style={{
+            top: hoverTooltip.y,
+            left: hoverTooltip.x,
+            transform: hoverTooltip.placement === "below" ? "translateX(-50%)" : "translateY(-50%)",
+          }}
+        >
+          {hoverTooltip.text}
         </div>,
         document.body
       )}

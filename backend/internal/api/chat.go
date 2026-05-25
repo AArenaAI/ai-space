@@ -40,6 +40,47 @@ func (h *ChatHandler) touchConversation(conversationID uint) {
 	}
 }
 
+func (h *ChatHandler) createMessageGroup(conversationID uint, userMessageID uint, modelIDs []string) (*models.MessageGroup, error) {
+	group := &models.MessageGroup{
+		ConversationID: conversationID,
+		UserMessageID:  userMessageID,
+		CreatedAt:      time.Now(),
+	}
+	group.SetModels(modelIDs)
+	if err := h.db.Create(group).Error; err != nil {
+		return nil, err
+	}
+	return group, nil
+}
+
+func appendMissingStrings(values []string, extras ...string) []string {
+	seen := make(map[string]struct{}, len(values)+len(extras))
+	out := make([]string, 0, len(values)+len(extras))
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	for _, v := range extras {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
+}
+
 type FileContextPolicy struct {
 	UseConversationFiles string `json:"use_conversation_files,omitempty"` // auto | always | never
 	MaxConversationFiles int    `json:"max_conversation_files,omitempty"`
@@ -56,6 +97,10 @@ type ChatRequest struct {
 	Search          bool               `json:"search"`
 	TemplateID      uint               `json:"template_id,omitempty"`
 	SkipSaveUserMsg bool               `json:"skip_save_user_msg,omitempty"` // 对比模式后续模型调用不重复保存用户消息
+	GroupID         uint               `json:"group_id,omitempty"`           // 同一轮多模型回答复用的 MessageGroup
+	GroupIndex      *int               `json:"group_index,omitempty"`        // 当前模型在组内的顺序
+	GroupModels     []string           `json:"group_models,omitempty"`       // 本轮不可变模型快照
+	UserMessageID   uint               `json:"user_message_id,omitempty"`    // skip_save_user_msg 时复用的用户消息
 	WorkspaceID     uint               `json:"workspace_id,omitempty"`
 	SkillKey        string             `json:"skill_key,omitempty"` // 指定技能 key
 
@@ -85,13 +130,23 @@ type CompareRequest struct {
 	FileIDs        []string          `json:"file_ids,omitempty"`
 }
 
+type ForkChatRequest struct {
+	ModelIDs        []string `json:"models" binding:"required,min=1,max=4"`
+	Reasoning       bool     `json:"reasoning"`
+	ReasoningEffort string   `json:"reasoning_effort"`
+	Search          bool     `json:"search"`
+}
+
 type CompareResult struct {
 	ModelID   string `json:"model_id"`
 	ModelName string `json:"model_name"`
 	Content   string `json:"content"`
 	Error     string `json:"error,omitempty"`
 	ElapsedMs int64  `json:"elapsed_ms"`
+	MessageID uint   `json:"message_id,omitempty"`
+	GroupID   uint   `json:"group_id,omitempty"`
 }
+
 
 // 从 model_id 查找模型显示名（从 models_handler.go 的 SupportedModels）
 func findModelName(modelID string) string {
@@ -157,6 +212,85 @@ func appendUniqueStrings(dst []string, values ...string) []string {
 	return dst
 }
 
+func modelIndex(models []string, model string) int {
+	for i, m := range models {
+		if m == model {
+			return i
+		}
+	}
+	return -1
+}
+
+type chatGroupContext struct {
+	Group         *models.MessageGroup
+	UserMessageID uint
+	GroupIndex    int
+	GroupModels   []string
+}
+
+func (h *ChatHandler) ensureMessageGroup(conversationID uint, req ChatRequest, savedUserMessageID uint) (*chatGroupContext, error) {
+	modelsSnapshot := appendUniqueStrings(nil, req.GroupModels...)
+	modelsSnapshot = appendUniqueStrings(modelsSnapshot, req.Model)
+
+	userMessageID := savedUserMessageID
+	if userMessageID == 0 {
+		userMessageID = req.UserMessageID
+	}
+	if userMessageID == 0 && req.GroupID > 0 {
+		var existing models.MessageGroup
+		if err := h.db.Where("id = ? AND conversation_id = ?", req.GroupID, conversationID).First(&existing).Error; err != nil {
+			return nil, err
+		}
+		userMessageID = existing.UserMessageID
+		if len(req.GroupModels) == 0 {
+			modelsSnapshot = appendUniqueStrings(existing.GetModels(), req.Model)
+		}
+	}
+	if userMessageID == 0 {
+		return nil, fmt.Errorf("缺少用户消息，无法创建消息组")
+	}
+
+	group := models.MessageGroup{}
+	if req.GroupID > 0 {
+		if err := h.db.Where("id = ? AND conversation_id = ?", req.GroupID, conversationID).First(&group).Error; err != nil {
+			return nil, err
+		}
+		merged := appendUniqueStrings(group.GetModels(), modelsSnapshot...)
+		if len(merged) > len(group.GetModels()) {
+			group.SetModels(merged)
+			h.db.Model(&group).Update("models", group.Models)
+		}
+		modelsSnapshot = group.GetModels()
+	} else {
+		if err := h.db.Where("conversation_id = ? AND user_message_id = ?", conversationID, userMessageID).First(&group).Error; err != nil {
+			if err != gorm.ErrRecordNotFound {
+				return nil, err
+			}
+			group = models.MessageGroup{ConversationID: conversationID, UserMessageID: userMessageID, CreatedAt: time.Now()}
+			group.SetModels(modelsSnapshot)
+			if err := h.db.Create(&group).Error; err != nil {
+				return nil, err
+			}
+		} else {
+			merged := appendUniqueStrings(group.GetModels(), modelsSnapshot...)
+			if len(merged) > len(group.GetModels()) {
+				group.SetModels(merged)
+				h.db.Model(&group).Update("models", group.Models)
+			}
+		}
+		modelsSnapshot = group.GetModels()
+	}
+
+	idx := modelIndex(modelsSnapshot, req.Model)
+	if req.GroupIndex != nil {
+		idx = *req.GroupIndex
+	}
+	if idx < 0 {
+		idx = len(modelsSnapshot) - 1
+	}
+	return &chatGroupContext{Group: &group, UserMessageID: userMessageID, GroupIndex: idx, GroupModels: modelsSnapshot}, nil
+}
+
 func mergeSystemMessages(messages []services.Message) []services.Message {
 	var fileContextParts []string
 	var otherSystemParts []string
@@ -188,6 +322,25 @@ func mergeSystemMessages(messages []services.Message) []services.Message {
 	fmt.Printf("[Chat] merged %d system messages into one (file=%d other=%d search=%d), total length=%d\n",
 		len(orderedParts), len(fileContextParts), len(otherSystemParts), len(webSearchParts), len(mergedSystem))
 	return append([]services.Message{{Role: "system", Content: mergedSystem}}, nonSystem...)
+}
+
+const assistantHistoryTruncateThreshold = 1500
+const assistantHistoryTruncateTo = 300
+
+func truncateHistoryMessages(messages []services.Message) []services.Message {
+	if len(messages) == 0 {
+		return messages
+	}
+	result := make([]services.Message, len(messages))
+	copy(result, messages)
+	for i := range result {
+		if result[i].Role == "assistant" && len(result[i].Content) > assistantHistoryTruncateThreshold {
+			truncated := result[i].Content[:assistantHistoryTruncateTo]
+			result[i].Content = truncated + "\n\n[前文已省略，如需回顾请重新提问]"
+			fmt.Printf("[Chat] truncated assistant message[%d] from %d to %d chars\n", i, len(messages[i].Content), len(result[i].Content))
+		}
+	}
+	return result
 }
 
 func (h *ChatHandler) resolveChatFiles(publicIDs []string, userID uint, guestID string) ([]uint, map[uint]string, []models.File) {
@@ -620,6 +773,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 	// ========== 文件上下文注入结束 ==========
 
 	// 保存用户消息（除非标记了跳过）
+	savedUserMessageID := req.UserMessageID
 	if !req.SkipSaveUserMsg {
 		userMsg := req.Messages[len(req.Messages)-1]
 		if userMsg.Role == "user" {
@@ -631,6 +785,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 				CreatedAt:      time.Now(),
 			}
 			h.db.Create(&msg)
+			savedUserMessageID = msg.ID
 			h.touchConversation(conversationID)
 
 			// 保存消息-文件关联：只保存当前消息附件，避免历史文件污染新消息展示
@@ -638,6 +793,12 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 				h.saveMessageFiles(msg.ID, filePlan.MessageFiles)
 			}
 		}
+	}
+
+	groupCtx, err := h.ensureMessageGroup(conversationID, req, savedUserMessageID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "message_group_failed", "message": err.Error()})
+		return
 	}
 	// ========== 保存消息与会话结束 ==========
 
@@ -681,6 +842,8 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 	// 合并所有 system message 为一条，避免多个 system 导致部分模型（如 DeepSeek）只读取其中一条
 	// 按优先级排序：file_context > 其他 > web_search_context
 	req.Messages = mergeSystemMessages(req.Messages)
+	// 截断过长的历史 assistant 消息，防止旧文件总结污染新查询
+	req.Messages = truncateHistoryMessages(req.Messages)
 
 	// GPT 5.5 后台规则仍保留 stream=true：background=true + stream=true + webhook。
 	// 从这里开始，流式生成彻底从 HTTP handler 拆出去：handler 只创建 task，runner 独立消费上游 stream，当前请求只是订阅 task events。
@@ -693,6 +856,8 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 			Role:           "assistant",
 			Content:        "",
 			Model:          req.Model,
+			GroupID:        groupCtx.Group.ID,
+			GroupIndex:     groupCtx.GroupIndex,
 			CreatedAt:      time.Now(),
 		}
 		if err := h.db.Create(&assistantMsg).Error; err != nil {
@@ -717,6 +882,10 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 				"status":               "running",
 				"conversation_id":      conversationID,
 				"assistant_message_id": assistantMsgID,
+				"user_message_id":      groupCtx.UserMessageID,
+				"group_id":             groupCtx.Group.ID,
+				"group_index":          groupCtx.GroupIndex,
+				"group_models":         groupCtx.GroupModels,
 			},
 		})
 		h.persistTaskEvent(streamTask, assistantMsgID, 1, "generation_task", string(metaOut))
@@ -807,6 +976,8 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 								Role:           "assistant",
 								Content:        assistantContent,
 								Model:          req.Model,
+								GroupID:        groupCtx.Group.ID,
+								GroupIndex:     groupCtx.GroupIndex,
 								CompletedAt:    &[]time.Time{time.Now()}[0],
 								CreatedAt:      time.Now(),
 							}
@@ -830,6 +1001,9 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 			rawResp = make(map[string]interface{})
 		}
 		rawResp["conversation_id"] = conversationID
+		rawResp["group_id"] = groupCtx.Group.ID
+		rawResp["group_index"] = groupCtx.GroupIndex
+		rawResp["group_models"] = groupCtx.GroupModels
 		body, _ = json.Marshal(rawResp)
 		c.Writer.Write(body)
 	}
@@ -2075,6 +2249,7 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 
 	// 保存为用户对话
 	var conversationID uint
+	var userMessageID uint
 	if userID > 0 || guestID != "" {
 		if req.ConversationID > 0 {
 			// 已有对比对话，追加消息
@@ -2095,7 +2270,11 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 					Content:        req.Query,
 					CreatedAt:      time.Now(),
 				}
-				h.db.Create(&msg)
+				if err := h.db.Create(&msg).Error; err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "保存用户消息失败"})
+					return
+				}
+				userMessageID = msg.ID
 				h.touchConversation(conv.ID)
 				if len(filePlan.MessageFiles) > 0 {
 					h.saveMessageFiles(msg.ID, filePlan.MessageFiles)
@@ -2116,7 +2295,10 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 				Compare:       true,
 				CompareModels: mustJSON(req.ModelIDs),
 			}
-			h.db.Create(&conv)
+			if err := h.db.Create(&conv).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "创建对话失败"})
+				return
+			}
 			conversationID = conv.ID
 
 			// 保存用户消息
@@ -2126,7 +2308,11 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 				Content:        req.Query,
 				CreatedAt:      time.Now(),
 			}
-			h.db.Create(&msg)
+			if err := h.db.Create(&msg).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "保存用户消息失败"})
+				return
+			}
+			userMessageID = msg.ID
 			h.touchConversation(conv.ID)
 			if len(filePlan.MessageFiles) > 0 {
 				h.saveMessageFiles(msg.ID, filePlan.MessageFiles)
@@ -2141,17 +2327,34 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 		h.upsertConversationFiles(conversationID, allFiles)
 	}
 
-	// 保存对比记录
-	if conversationID > 0 {
-		for _, res := range ordered {
-			h.db.Create(&models.Message{
+	// 保存对比记录，并绑定到本轮 MessageGroup
+	var groupID uint
+	if conversationID > 0 && userMessageID > 0 {
+		group, err := h.createMessageGroup(conversationID, userMessageID, req.ModelIDs)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "创建消息组失败"})
+			return
+		}
+		groupID = group.ID
+
+		for idx, res := range ordered {
+			now := time.Now()
+			msg := models.Message{
 				ConversationID: conversationID,
 				Role:           "assistant",
 				Content:        res.Content,
 				Model:          res.ModelID,
-				CompletedAt:    &[]time.Time{time.Now()}[0],
-				CreatedAt:      time.Now(),
-			})
+				GroupID:        groupID,
+				GroupIndex:     idx,
+				CompletedAt:    &now,
+				CreatedAt:      now,
+			}
+			if err := h.db.Create(&msg).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "保存对比消息失败"})
+				return
+			}
+			ordered[idx].MessageID = msg.ID
+			ordered[idx].GroupID = groupID
 		}
 		h.touchConversation(conversationID)
 	}
@@ -2159,6 +2362,179 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"results":         ordered,
 		"conversation_id": conversationID,
+		"group_id":        groupID,
+	})
+}
+
+func (h *ChatHandler) ForkChat(c *gin.Context) {
+	messageID64, err := strconv.ParseUint(c.Param("message_id"), 10, 64)
+	if err != nil || messageID64 == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的消息ID"})
+		return
+	}
+
+	var req ForkChatRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	userID, guestID, ok := requireGuestOrUser(c, h.cfg, h.db)
+	if !ok {
+		return
+	}
+
+	var source models.Message
+	if err := h.db.First(&source, uint(messageID64)).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "消息不存在"})
+		return
+	}
+
+	var conv models.Conversation
+	q := h.db.Where("id = ?", source.ConversationID)
+	if userID > 0 {
+		q = q.Where("user_id = ?", userID)
+	} else {
+		q = q.Where("guest_id = ?", guestID)
+	}
+	if err := q.First(&conv).Error; err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权访问该对话"})
+		return
+	}
+
+	userMsg := source
+	if source.Role != "user" {
+		if err := h.db.Where("conversation_id = ? AND role = ? AND created_at < ?", source.ConversationID, "user", source.CreatedAt).
+			Order("created_at DESC, id DESC").First(&userMsg).Error; err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "未找到可对比的用户消息"})
+			return
+		}
+	}
+	if userMsg.Role != "user" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "只能从用户消息或其回答发起对比"})
+		return
+	}
+
+	var group models.MessageGroup
+	if source.GroupID > 0 {
+		h.db.First(&group, source.GroupID)
+	}
+	if group.ID == 0 {
+		if err := h.db.Where("conversation_id = ? AND user_message_id = ?", source.ConversationID, userMsg.ID).First(&group).Error; err != nil {
+			existingModels := req.ModelIDs
+			var existing []models.Message
+			h.db.Where("conversation_id = ? AND role = ? AND created_at > ?", source.ConversationID, "assistant", userMsg.CreatedAt).
+				Order("created_at ASC, id ASC").Find(&existing)
+			for _, msg := range existing {
+				if msg.Model != "" {
+					existingModels = appendMissingStrings(existingModels, msg.Model)
+				}
+			}
+			created, err := h.createMessageGroup(source.ConversationID, userMsg.ID, existingModels)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "创建消息组失败"})
+				return
+			}
+			group = *created
+			for idx, msg := range existing {
+				if msg.GroupID == 0 {
+					h.db.Model(&models.Message{}).Where("id = ?", msg.ID).Updates(map[string]interface{}{"group_id": group.ID, "group_index": idx})
+				}
+			}
+		}
+	}
+	if group.ID == 0 {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "消息组不可用"})
+		return
+	}
+
+	groupModels := appendMissingStrings(group.GetModels(), req.ModelIDs...)
+	group.SetModels(groupModels)
+	if err := h.db.Save(&group).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新消息组失败"})
+		return
+	}
+
+	var history []models.Message
+	if err := h.db.Where("conversation_id = ? AND created_at <= ?", source.ConversationID, userMsg.CreatedAt).
+		Order("created_at ASC, id ASC").Find(&history).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取上下文失败"})
+		return
+	}
+	messages := make([]services.Message, 0, len(history))
+	for _, msg := range history {
+		if msg.Role == "user" || msg.Role == "assistant" || msg.Role == "system" {
+			messages = append(messages, services.Message{Role: msg.Role, Content: msg.Content})
+		}
+	}
+	if len(messages) == 0 {
+		messages = []services.Message{{Role: "user", Content: userMsg.Content}}
+	}
+
+	type forkResult struct {
+		index int
+		res   CompareResult
+	}
+	results := make(chan forkResult, len(req.ModelIDs))
+	ctx := c.Request.Context()
+	searchMessages, _, useSearch := h.preprocessSearch(messages, req.ModelIDs[0], req.Search, c.ClientIP())
+	for i, modelID := range req.ModelIDs {
+		go func(idx int, modelID string) {
+			start := time.Now()
+			modelMessages := searchMessages
+			modelUseSearch := useSearch
+			if req.Search {
+				modelMessages, _, modelUseSearch = h.preprocessSearch(messages, modelID, req.Search, c.ClientIP())
+			}
+			content, err := h.callModel(ctx, modelID, modelMessages, req.Reasoning, req.ReasoningEffort, modelUseSearch)
+			res := CompareResult{ModelID: modelID, ModelName: findModelName(modelID), ElapsedMs: time.Since(start).Milliseconds(), GroupID: group.ID}
+			if err != nil {
+				res.Error = err.Error()
+			} else {
+				res.Content = content
+			}
+			results <- forkResult{index: idx, res: res}
+		}(i, modelID)
+	}
+
+	ordered := make([]CompareResult, len(req.ModelIDs))
+	for range req.ModelIDs {
+		r := <-results
+		ordered[r.index] = r.res
+	}
+
+	startIndex := len(group.GetModels()) - len(req.ModelIDs)
+	if startIndex < 0 {
+		startIndex = 0
+	}
+	for idx, res := range ordered {
+		now := time.Now()
+		msg := models.Message{
+			ConversationID: source.ConversationID,
+			Role:           "assistant",
+			Content:        res.Content,
+			Model:          res.ModelID,
+			GroupID:        group.ID,
+			GroupIndex:     startIndex + idx,
+			CompletedAt:    &now,
+			CreatedAt:      now,
+		}
+		if err := h.db.Create(&msg).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存 fork 消息失败"})
+			return
+		}
+		ordered[idx].MessageID = msg.ID
+		ordered[idx].GroupID = group.ID
+	}
+
+	h.db.Model(&models.Conversation{}).Where("id = ?", source.ConversationID).Updates(map[string]interface{}{"compare": true, "compare_models": mustJSON(group.GetModels())})
+	h.touchConversation(source.ConversationID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"results":         ordered,
+		"conversation_id": source.ConversationID,
+		"group_id":        group.ID,
+		"models":          group.GetModels(),
 	})
 }
 

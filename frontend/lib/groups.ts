@@ -18,29 +18,75 @@ export interface InferredGroup {
  * 单聊：[user, assistant, user, assistant] → 2 个 Group，每个 1 个 assistant
  * 对比：[user, assistant_A, assistant_B, user, assistant_A, assistant_B] → 2 个 Group，每个 2 个 assistant
  */
+function uniqueModels(messages: Message[], fallback?: string[]): string[] {
+  const models: string[] = [];
+  const add = (model?: string) => {
+    if (model && !models.includes(model)) models.push(model);
+  };
+  fallback?.forEach(add);
+  messages.forEach((m) => add(m.model));
+  return models;
+}
+
+function pushLegacyGroup(groups: InferredGroup[], userMessage: Message | null, assistants: Message[], nextId: () => number) {
+  if (!userMessage) return;
+  groups.push({
+    id: nextId(),
+    userMessage,
+    assistantMessages: [...assistants],
+    models: uniqueModels(assistants),
+  });
+}
+
+/**
+ * 优先按后端持久化 MessageGroup 分组；旧数据无 group_id 时再按相邻 user→assistant 推断。
+ */
 export function inferGroups(messages: Message[]): InferredGroup[] {
   const groups: InferredGroup[] = [];
-  let groupId = 1;
+  let fallbackGroupId = -1;
+  const nextFallbackId = () => fallbackGroupId--;
+  const pushedGroupIds = new Set<number>();
+
   let currentUser: Message | null = null;
   let currentAssistants: Message[] = [];
 
-  for (const msg of messages) {
-    if (msg.role === "user") {
-      if (currentUser) {
-        const models = currentAssistants
-          .map((m) => m.model)
-          .filter((m): m is string => !!m);
-        const uniqueModels: string[] = [];
-        for (const m of models) {
-          if (!uniqueModels.includes(m)) uniqueModels.push(m);
-        }
+  const flushCurrent = () => {
+    if (!currentUser) return;
+
+    const groupedAssistants = currentAssistants.filter((m) => !!m.groupId);
+    if (groupedAssistants.length > 0) {
+      const byGroupId = new Map<number, Message[]>();
+      for (const msg of groupedAssistants) {
+        if (!msg.groupId) continue;
+        const list = byGroupId.get(msg.groupId) || [];
+        list.push(msg);
+        byGroupId.set(msg.groupId, list);
+      }
+
+      for (const [id, assistants] of Array.from(byGroupId.entries())) {
+        if (pushedGroupIds.has(id)) continue;
+        pushedGroupIds.add(id);
+        const sortedAssistants = [...assistants].sort((a, b) => (a.groupIndex ?? 0) - (b.groupIndex ?? 0));
         groups.push({
-          id: groupId++,
+          id,
           userMessage: currentUser,
-          assistantMessages: [...currentAssistants],
-          models: uniqueModels,
+          assistantMessages: sortedAssistants,
+          models: uniqueModels(sortedAssistants, sortedAssistants[0]?.groupModels),
         });
       }
+
+      const legacyAssistants = currentAssistants.filter((m) => !m.groupId);
+      if (legacyAssistants.length > 0) {
+        pushLegacyGroup(groups, currentUser, legacyAssistants, nextFallbackId);
+      }
+    } else {
+      pushLegacyGroup(groups, currentUser, currentAssistants, nextFallbackId);
+    }
+  };
+
+  for (const msg of messages) {
+    if (msg.role === "user") {
+      flushCurrent();
       currentUser = msg;
       currentAssistants = [];
     } else if (msg.role === "assistant") {
@@ -48,21 +94,6 @@ export function inferGroups(messages: Message[]): InferredGroup[] {
     }
   }
 
-  if (currentUser) {
-    const models = currentAssistants
-      .map((m) => m.model)
-      .filter((m): m is string => !!m);
-    const uniqueModels: string[] = [];
-    for (const m of models) {
-      if (!uniqueModels.includes(m)) uniqueModels.push(m);
-    }
-    groups.push({
-      id: groupId++,
-      userMessage: currentUser,
-      assistantMessages: [...currentAssistants],
-      models: uniqueModels,
-    });
-  }
-
+  flushCurrent();
   return groups;
 }

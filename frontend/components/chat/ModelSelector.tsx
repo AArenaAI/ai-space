@@ -61,38 +61,22 @@ function pushRecentModel(modelId: string) {
   } catch {}
 }
 
-const COLLAPSE_KEY = "model-group-collapsed";
-
-function loadCollapsedGroups(): Set<string> {
-  if (typeof window === "undefined") return new Set();
-  try {
-    const raw = localStorage.getItem(COLLAPSE_KEY);
-    return raw ? new Set(JSON.parse(raw)) : new Set();
-  } catch {
-    return new Set();
-  }
-}
-
-function persistCollapsedGroups(groups: Set<string>) {
-  try {
-    localStorage.setItem(COLLAPSE_KEY, JSON.stringify(Array.from(groups)));
-  } catch {}
-}
-
 export default function ModelSelector({
   models,
   selected,
   onSelect,
 }: ModelSelectorProps) {
   const [open, setOpen] = useState(false);
-  const [collapsedGroups, _setCollapsedGroups] = useState<Set<string>>(loadCollapsedGroups);
+  const [hoveredProvider, setHoveredProvider] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 点击外部关闭
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setOpen(false);
+        setHoveredProvider(null);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -104,8 +88,22 @@ export default function ModelSelector({
   // 构建分组
   const groups = GROUP_ORDER.map((provider) => {
     const items = models.filter((m) => m.provider === provider);
-    return items.length > 0 ? { provider, label: PROVIDER_LABELS[provider] || provider, icon: PROVIDER_ICONS[provider] || provider[0], color: PROVIDER_COLORS[provider] || "#999", items } : null;
-  }).filter(Boolean) as { provider: string; label: string; icon: string; color: string; items: ChatModel[] }[];
+    return items.length > 0
+      ? {
+          provider,
+          label: PROVIDER_LABELS[provider] || provider,
+          icon: PROVIDER_ICONS[provider] || provider[0],
+          color: PROVIDER_COLORS[provider] || "#999",
+          items,
+        }
+      : null;
+  }).filter(Boolean) as {
+    provider: string;
+    label: string;
+    icon: string;
+    color: string;
+    items: ChatModel[];
+  }[];
 
   // 最近使用
   const recentIds = getRecentModels();
@@ -113,35 +111,38 @@ export default function ModelSelector({
     .map((id) => models.find((m) => m.id === id))
     .filter(Boolean) as ChatModel[];
 
-  // 高亮的模型属于哪个分组 — 自动展开该分组（但不覆盖用户手动折叠的记忆）
-  const selectedProvider = selected.provider;
-  useEffect(() => {
-    if (!open) return;
-    _setCollapsedGroups((prev) => {
-      // 只在用户之前没有手动折叠这个分组时才展开
-      if (prev.has(selectedProvider)) return prev;
-      return prev;
-    });
-  }, [open, selectedProvider]);
-
   const handleSelect = useCallback(
     (model: ChatModel) => {
       onSelect(model);
       pushRecentModel(model.id);
       setOpen(false);
+      setHoveredProvider(null);
     },
     [onSelect]
   );
 
-  const toggleGroup = (provider: string) => {
-    _setCollapsedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(provider)) next.delete(provider);
-      else next.add(provider);
-      persistCollapsedGroups(next);
-      return next;
-    });
+  const handleProviderEnter = (provider: string) => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    setHoveredProvider(provider);
   };
+
+  const handleProviderLeave = () => {
+    hoverTimerRef.current = setTimeout(() => {
+      setHoveredProvider(null);
+    }, 150);
+  };
+
+  const handlePopoverEnter = () => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+  };
+
+  const handlePopoverLeave = () => {
+    hoverTimerRef.current = setTimeout(() => {
+      setHoveredProvider(null);
+    }, 150);
+  };
+
+  const activeGroup = groups.find((g) => g.provider === hoveredProvider);
 
   const renderModelItem = (model: ChatModel) => (
     <button
@@ -163,7 +164,9 @@ export default function ModelSelector({
           <span
             className={cn(
               "text-sm truncate",
-              selected.id === model.id ? "font-medium text-text-primary" : "text-text-secondary group-hover:text-text-primary"
+              selected.id === model.id
+                ? "font-medium text-text-primary"
+                : "text-text-secondary group-hover:text-text-primary"
             )}
           >
             {model.name}
@@ -181,7 +184,7 @@ export default function ModelSelector({
 
   return (
     <div className="relative max-w-[200px] sm:max-w-none" ref={dropdownRef}>
-      {/* 触发按钮 — 无边框点击式 */}
+      {/* 触发按钮 */}
       <button
         onClick={() => setOpen((v) => !v)}
         className={cn(
@@ -194,7 +197,10 @@ export default function ModelSelector({
       >
         <div
           className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0"
-          style={{ backgroundColor: `${selected.color}18`, color: selected.color }}
+          style={{
+            backgroundColor: `${selected.color}18`,
+            color: selected.color,
+          }}
         >
           {PROVIDER_ICONS[selected.provider] || selected.provider[0]}
         </div>
@@ -207,65 +213,115 @@ export default function ModelSelector({
         />
       </button>
 
-      {/* 下拉菜单 + 蒙版 */}
+      {/* 下拉面板 + 蒙版 */}
       {open && (
         <>
-          <div className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[2px]" onClick={() => setOpen(false)} />
-          <div className="absolute top-full left-0 mt-2 w-[280px] z-50 rounded-xl border border-surface-border bg-surface-elevated shadow-xl overflow-hidden">
-            <div className="px-3 py-2 text-[11px] font-medium text-text-tertiary uppercase tracking-wider border-b border-surface-border">
-              选择模型
-            </div>
-            <div className="py-1 max-h-[320px] overflow-y-auto scrollbar-thin">
+          <div
+            className="fixed inset-0 z-[80] bg-black/20 backdrop-blur-[2px]"
+            onClick={() => {
+              setOpen(false);
+              setHoveredProvider(null);
+            }}
+          />
+          <div className="absolute top-full left-0 mt-2 z-[90] flex rounded-xl border border-surface-border bg-surface-elevated shadow-xl overflow-hidden">
+            {/* 左侧：提供商列表 */}
+            <div className="w-[200px] py-2">
+              <div className="px-3 py-1.5 text-[11px] font-medium text-text-tertiary uppercase tracking-wider border-b border-surface-border mb-1">
+                选择模型
+              </div>
+
               {/* 最近使用 */}
               {recentModels.length > 0 && (
-                <div className="px-1 pb-1 border-b border-surface-border">
+                <div className="px-1 pb-1 border-b border-surface-border mb-1">
                   <div className="px-2 py-1 text-[10px] font-medium text-text-tertiary tracking-wider flex items-center gap-1">
-                    <span>⭐</span>
-                    最近使用
+                    <span>⭐</span>最近使用
                   </div>
-                  {recentModels.map(renderModelItem)}
+                  {recentModels.slice(0, 3).map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={() => handleSelect(m)}
+                      className={cn(
+                        "flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-left transition-colors",
+                        selected.id === m.id
+                          ? "bg-surface-card text-text-primary"
+                          : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
+                      )}
+                    >
+                      <div
+                        className="w-1 h-3 rounded-full shrink-0"
+                        style={{ backgroundColor: m.color }}
+                      />
+                      <span className="text-xs truncate">{m.name}</span>
+                      {selected.id === m.id && (
+                        <Check className="w-3 h-3 text-brand shrink-0 ml-auto" />
+                      )}
+                    </button>
+                  ))}
                 </div>
               )}
 
-              {/* 分组列表 */}
-              <div className="px-1 pt-1">
-                {groups.map((group) => {
-                  const isCollapsed = collapsedGroups.has(group.provider);
-                  return (
-                    <div key={group.provider}>
-                      {/* 分组标题 */}
-                      <button
-                        onClick={() => toggleGroup(group.provider)}
-                        className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md hover:bg-surface-card transition-colors text-left"
-                      >
-                        <div
-                          className="w-1 h-4 rounded-full shrink-0"
-                          style={{ backgroundColor: group.color }}
-                        />
-                        <span className="flex-1 text-xs font-medium text-text-tertiary tracking-wide">
-                          {group.label}
-                        </span>
-                        <span className="text-[10px] text-text-tertiary/60 tabular-nums">
-                          {group.items.length}
-                        </span>
-                        <ChevronDown
-                          className={cn(
-                            "w-3 h-3 text-text-tertiary/60 transition-transform duration-200",
-                            !isCollapsed && "rotate-180"
-                          )}
-                        />
-                      </button>
-                      {/* 模型列表 */}
-                      {!isCollapsed && (
-                        <div className="ml-1 pl-2 border-l border-surface-border/50">
-                          {group.items.map(renderModelItem)}
-                        </div>
-                      )}
+              {/* 厂商分组列表 */}
+              <div className="px-1">
+                {groups.map((group) => (
+                  <div
+                    key={group.provider}
+                    onMouseEnter={() => handleProviderEnter(group.provider)}
+                    onMouseLeave={handleProviderLeave}
+                    className={cn(
+                      "flex items-center gap-2 px-2 py-2 rounded-md cursor-pointer transition-colors",
+                      hoveredProvider === group.provider
+                        ? "bg-surface-card text-text-primary"
+                        : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
+                    )}
+                  >
+                    <div
+                      className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0"
+                      style={{
+                        backgroundColor: `${group.color}18`,
+                        color: group.color,
+                      }}
+                    >
+                      {group.icon}
                     </div>
-                  );
-                })}
+                    <span className="flex-1 text-xs font-medium truncate">
+                      {group.label}
+                    </span>
+                    <span className="text-[10px] text-text-tertiary/60 tabular-nums">
+                      {group.items.length}
+                    </span>
+                    <ChevronDown className="w-3 h-3 text-text-tertiary/60 -rotate-90 shrink-0" />
+                  </div>
+                ))}
               </div>
             </div>
+
+            {/* 右侧：悬浮模型列表 */}
+            {activeGroup && (
+              <div
+                className="w-[260px] border-l border-surface-border py-2"
+                onMouseEnter={handlePopoverEnter}
+                onMouseLeave={handlePopoverLeave}
+              >
+                <div className="px-3 py-1.5 text-[11px] font-medium text-text-tertiary uppercase tracking-wider border-b border-surface-border mb-1 flex items-center gap-2">
+                  <div
+                    className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold"
+                    style={{
+                      backgroundColor: `${activeGroup.color}18`,
+                      color: activeGroup.color,
+                    }}
+                  >
+                    {activeGroup.icon}
+                  </div>
+                  {activeGroup.label}
+                  <span className="text-[10px] text-text-tertiary/60 tabular-nums ml-auto normal-case">
+                    {activeGroup.items.length} 个模型
+                  </span>
+                </div>
+                <div className="px-1 max-h-[320px] overflow-y-auto scrollbar-thin">
+                  {activeGroup.items.map(renderModelItem)}
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}

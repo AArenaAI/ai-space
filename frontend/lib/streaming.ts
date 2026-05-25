@@ -7,6 +7,10 @@ export type RealtimeData = {
   searchSources?: any[];
   searchSourcesCount?: number;
   serverMessageId?: number;
+  groupId?: number;
+  groupIndex?: number;
+  groupModels?: string[];
+  userMessageId?: number;
   generationTaskId?: number;
   backgroundTaskId?: string;
   useBackground?: boolean;

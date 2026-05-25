@@ -46,6 +46,34 @@ function normalizeMessageFiles(value: any): Message["files"] {
   }
 }
 
+function stripReasoningBlocks(content: string): string {
+  if (!content) return content;
+  return content
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<think>[\s\S]*$/gi, "")
+    .trim();
+}
+
+const ASSISTANT_HISTORY_TRUNCATE_THRESHOLD = 1500;
+const ASSISTANT_HISTORY_TRUNCATE_TO = 300;
+
+function truncateAssistantHistory(content: string): string {
+  if (!content || content.length <= ASSISTANT_HISTORY_TRUNCATE_THRESHOLD) return content;
+  const truncated = content.slice(0, ASSISTANT_HISTORY_TRUNCATE_TO).trim();
+  return truncated + "\n\n[前文已省略，如需回顾请重新提问]";
+}
+
+function toModelMessages(messages: Message[]) {
+  return messages
+    .map((m) => ({
+      role: m.role,
+      content: m.role === "assistant"
+        ? truncateAssistantHistory(stripReasoningBlocks(m.content))
+        : m.content,
+    }))
+    .filter((m) => m.role !== "assistant" || m.content.trim() !== "");
+}
+
 export interface Message {
   id: string;
   role: "user" | "assistant" | "system";
@@ -71,7 +99,15 @@ export interface Message {
   lastSequence?: number;
   groupId?: number;
   groupIndex?: number;
+  groupModels?: string[];
+  userMessageId?: number;
 }
+
+type CompareGroupContext = {
+  groupId?: number;
+  userMessageId?: number;
+  groupModels: string[];
+};
 
 export interface ChatModel {
   id: string;
@@ -802,8 +838,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       response: Response,
       assistantMsg: Message,
       controller: AbortController,
-      convId?: number
-    ): Promise<void> => {
+      convId?: number,
+      onGroupContext?: (context: CompareGroupContext) => void
+    ): Promise<CompareGroupContext | undefined> => {
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       if (!reader) throw new Error("无法读取流");
@@ -813,10 +850,31 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       let inReasoningBlock = false;
       let backgroundPollingStarted = false;
       let latestServerMessageId: number | undefined;
+      let latestGroupId: number | undefined = assistantMsg.groupId;
+      let latestGroupIndex: number | undefined = assistantMsg.groupIndex;
+      let latestGroupModels: string[] | undefined = assistantMsg.groupModels;
+      let latestUserMessageId: number | undefined = assistantMsg.userMessageId;
+      let groupContextNotified = false;
       let latestGenerationTaskId: number | undefined;
       let latestUseBackground = false;
       let sawDone = false;
       let latestSequence = 0;
+
+      const currentGroupContext = (): CompareGroupContext | undefined =>
+        latestGroupId || latestUserMessageId
+          ? {
+              groupId: latestGroupId,
+              userMessageId: latestUserMessageId,
+              groupModels: latestGroupModels || [],
+            }
+          : undefined;
+
+      const notifyGroupContext = () => {
+        const context = currentGroupContext();
+        if (groupContextNotified || !context?.groupId || !context.userMessageId) return;
+        groupContextNotified = true;
+        onGroupContext?.(context);
+      };
 
       const processEvent = (eventText: string) => {
         const lines = eventText.split("\n");
@@ -854,18 +912,31 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           if (parsed._generation_task) {
             const task = parsed._generation_task;
             const serverMessageId = Number(task.assistant_message_id || 0) || undefined;
+            const groupId = Number(task.group_id || 0) || undefined;
+            const groupIndex = task.group_index === 0 || task.group_index ? Number(task.group_index) : undefined;
+            const userMessageId = Number(task.user_message_id || 0) || undefined;
+            const groupModels = Array.isArray(task.group_models) ? task.group_models.filter((m: unknown): m is string => typeof m === "string" && m.length > 0) : undefined;
             const generationTaskId = Number(task.id || task.task_id || 0) || undefined;
             latestUseBackground = task.use_background === true || task.background === true || task.is_complex_task === true;
             latestServerMessageId = serverMessageId;
+            latestGroupId = groupId || latestGroupId;
+            latestGroupIndex = groupIndex ?? latestGroupIndex;
+            latestUserMessageId = userMessageId || latestUserMessageId;
+            latestGroupModels = groupModels?.length ? groupModels : latestGroupModels;
             latestGenerationTaskId = generationTaskId;
             realtimeUpdate(assistantMsg.id, {
               serverMessageId,
+              groupId: latestGroupId,
+              groupIndex: latestGroupIndex,
+              groupModels: latestGroupModels,
+              userMessageId: latestUserMessageId,
               generationTaskId,
               useBackground: latestUseBackground,
               isComplexTask: task.is_complex_task === true,
               lastSequence: latestSequence,
               activityStatus: createGeneratingStatus(),
             });
+            notifyGroupContext();
             if (generationTaskId) {
               backgroundPollingStarted = true;
             }
@@ -874,16 +945,29 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           if (parsed._background_task) {
             const task = parsed._background_task;
             const serverMessageId = Number(task.assistant_message_id || 0) || undefined;
+            const groupId = Number(task.group_id || 0) || undefined;
+            const groupIndex = task.group_index === 0 || task.group_index ? Number(task.group_index) : undefined;
+            const userMessageId = Number(task.user_message_id || 0) || undefined;
+            const groupModels = Array.isArray(task.group_models) ? task.group_models.filter((m: unknown): m is string => typeof m === "string" && m.length > 0) : undefined;
             latestServerMessageId = serverMessageId;
+            latestGroupId = groupId || latestGroupId;
+            latestGroupIndex = groupIndex ?? latestGroupIndex;
+            latestUserMessageId = userMessageId || latestUserMessageId;
+            latestGroupModels = groupModels?.length ? groupModels : latestGroupModels;
             latestUseBackground = true;
             const taskId = task.id || "";
             realtimeUpdate(assistantMsg.id, {
               serverMessageId,
+              groupId: latestGroupId,
+              groupIndex: latestGroupIndex,
+              groupModels: latestGroupModels,
+              userMessageId: latestUserMessageId,
               backgroundTaskId: taskId,
               useBackground: true,
               isComplexTask: true,
               activityStatus: createBusyGeneratingStatus(),
             });
+            notifyGroupContext();
             backgroundPollingStarted = true;
             return;
           }
@@ -1159,6 +1243,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       const controllers = assistantMsgs.map(() => new AbortController());
       compareAbortControllersRef.current = controllers;
       abortControllerRef.current = null;
+      abortReasonRef.current = null;
 
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
@@ -1169,16 +1254,39 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         headers["X-Guest-ID"] = getGuestId();
       }
 
-      const runModel = async (assistantMsg: Message, index: number) => {
+      let compareGroupContext: CompareGroupContext | undefined;
+      let resolveGroupContextReady: (context: CompareGroupContext | undefined) => void = () => {};
+      const groupContextReady = new Promise<CompareGroupContext | undefined>((resolve) => {
+        resolveGroupContextReady = resolve;
+      });
+      const groupContextTimeout = new Promise<undefined>((resolve) => {
+        window.setTimeout(() => resolve(undefined), 3000);
+      });
+      let groupContextResolved = false;
+      const setCompareGroupContext = (context?: CompareGroupContext) => {
+        if (!context) return;
+        compareGroupContext = {
+          groupId: context.groupId || compareGroupContext?.groupId,
+          userMessageId: context.userMessageId || compareGroupContext?.userMessageId,
+          groupModels: context.groupModels.length > 0 ? context.groupModels : compareModelIds,
+        };
+        if (!groupContextResolved && compareGroupContext.groupId && compareGroupContext.userMessageId) {
+          groupContextResolved = true;
+          resolveGroupContextReady(compareGroupContext);
+        }
+      };
+
+      const runModel = async (assistantMsg: Message, index: number, groupContext?: CompareGroupContext) => {
         const controller = controllers[index];
         try {
+          const requestGroupContext = groupContext || (index === 0 ? undefined : compareGroupContext);
           const response = await fetch(`${API_BASE_URL}/api/chat`, {
             method: "POST",
             headers,
             signal: controller.signal,
             body: JSON.stringify({
               model: assistantMsg.model,
-              messages: contextMessages.map((m) => ({ role: m.role, content: m.content })),
+              messages: toModelMessages(contextMessages),
               stream: true,
               conversation_id: convId,
               reasoning: reasoning.enabled,
@@ -1187,6 +1295,10 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               template_id: templateId,
               template_prefix: templatePrefix,
               skip_save_user_msg: index > 0,
+              group_id: requestGroupContext?.groupId,
+              user_message_id: requestGroupContext?.userMessageId,
+              group_index: index,
+              group_models: requestGroupContext?.groupModels?.length ? requestGroupContext.groupModels : compareModelIds,
               skill_key: effectiveSkillKey || undefined,
               message_file_ids: file_ids || undefined,
             }),
@@ -1197,10 +1309,17 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             const errorMsg = errorBody.message || "请求失败";
             throw Object.assign(new Error(errorMsg), { errorCode });
           }
-          await streamResponse(response, assistantMsg, controller, convId);
+          const context = await streamResponse(response, assistantMsg, controller, convId, index === 0 ? setCompareGroupContext : undefined);
+          if (index === 0) {
+            setCompareGroupContext(context);
+          }
         } catch (error: any) {
           const now = Date.now();
           if (error.name === "AbortError") {
+            if (index === 0 && !groupContextResolved) {
+              groupContextResolved = true;
+              resolveGroupContextReady(undefined);
+            }
             if (abortReasonRef.current !== "user") return;
             setMessages((prev) =>
               prev.map((m) =>
@@ -1227,11 +1346,18 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
                 : m
             )
           );
+          if (index === 0 && !groupContextResolved) {
+            groupContextResolved = true;
+            resolveGroupContextReady(undefined);
+          }
         }
       };
 
       try {
-        await Promise.all(assistantMsgs.map((assistantMsg, index) => runModel(assistantMsg, index)));
+        const firstRun = runModel(assistantMsgs[0], 0);
+        const context = await Promise.race([groupContextReady, groupContextTimeout]);
+        const restRuns = assistantMsgs.slice(1).map((assistantMsg, offset) => runModel(assistantMsg, offset + 1, context));
+        await Promise.all([firstRun, ...restRuns]);
       } finally {
         setIsLoading(false);
         compareAbortControllersRef.current = [];
@@ -1373,7 +1499,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           signal: controller.signal,
           body: JSON.stringify({
             model: selectedModel.id,
-            messages: contextMessages.map((m) => ({ role: m.role, content: m.content })),
+            messages: toModelMessages(contextMessages),
             stream: true,
             conversation_id: convId,
             reasoning: reasoning.enabled,
@@ -1516,7 +1642,13 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       next.set(groupId, activeIndex);
       return next;
     });
-  }, []);
+
+    const groupAssistant = messages.find((m) => m.groupId === groupId && m.groupIndex === activeIndex && m.model);
+    const model = groupAssistant?.model ? models.find((m) => m.id === groupAssistant.model) : undefined;
+    if (model) {
+      setSelectedModel(model);
+    }
+  }, [messages, models, setSelectedModel]);
 
   // Fork 对比：从指定消息处 Fork 出新模型对比
   const forkChat = useCallback(
