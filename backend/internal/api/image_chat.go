@@ -94,8 +94,6 @@ func (h *ImageChatHandler) CreateImageChat(c *gin.Context) {
 		Duration        int64    `json:"duration"`
 		GenerateAudio   bool     `json:"generate_audio"`
 		Watermark       bool     `json:"watermark"`
-		ReferenceVideos []string `json:"reference_video_urls"`
-		ReferenceAudios []string `json:"reference_audio_urls"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -157,7 +155,7 @@ func (h *ImageChatHandler) CreateImageChat(c *gin.Context) {
 		baseURL := resolveBaseURL(c, h.cfg)
 
 		if mediaType == "video" {
-			go h.processVideoChatJob(assistantMsg.ID, req.Prompt, req.Model, req.AspectRatio, req.Duration, req.GenerateAudio, req.Watermark, req.RefImages, req.ReferenceVideos, req.ReferenceAudios, baseURL, chat.ID)
+			go h.processVideoChatJob(assistantMsg.ID, req.Prompt, req.Model, req.AspectRatio, req.Duration, req.GenerateAudio, req.Watermark, req.RefImages, baseURL, chat.ID)
 		} else {
 			size := resolveSizeFromReq(req.AspectRatio, req.Resolution)
 			quality := req.Quality
@@ -388,7 +386,7 @@ func (h *ImageChatHandler) processImageChatJob(msgID uint, prompt, size, quality
 }
 
 // processVideoChatJob 后台提交视频任务（兼容 image-chats 里历史遗留的 media_type=video 分支）
-func (h *ImageChatHandler) processVideoChatJob(msgID uint, prompt, model, ratio string, duration int64, generateAudio, watermark bool, refImages, refVideos, refAudios []string, baseURL string, chatID uint) {
+func (h *ImageChatHandler) processVideoChatJob(msgID uint, prompt, model, ratio string, duration int64, generateAudio, watermark bool, refImages []string, baseURL string, chatID uint) {
 	ctx := context.Background()
 	if model == "" {
 		model = "doubao-seedance-2-0-fast-260128"
@@ -404,8 +402,6 @@ func (h *ImageChatHandler) processVideoChatJob(msgID uint, prompt, model, ratio 
 		GenerateAudio:   generateAudio,
 		Watermark:       watermark,
 		ReferenceImages: refImages,
-		ReferenceVideos: refVideos,
-		ReferenceAudios: refAudios,
 	})
 	if err != nil {
 		h.db.Model(&models.ImageChatMessage{}).Where("id = ?", msgID).Updates(map[string]interface{}{

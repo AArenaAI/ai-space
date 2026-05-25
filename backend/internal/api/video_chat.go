@@ -32,12 +32,11 @@ type videoChatRequest struct {
 	Model           string   `json:"model"`
 	Ratio           string   `json:"ratio"`
 	AspectRatio     string   `json:"aspect_ratio"`
+	Resolution      string   `json:"resolution"`
 	Duration        int64    `json:"duration"`
 	GenerateAudio   bool     `json:"generate_audio"`
 	Watermark       bool     `json:"watermark"`
 	ReferenceImages []string `json:"reference_image_urls"`
-	ReferenceVideos []string `json:"reference_video_urls"`
-	ReferenceAudios []string `json:"reference_audio_urls"`
 }
 
 // ListVideoChats 获取用户的视频会话列表
@@ -230,17 +229,13 @@ func (h *VideoChatHandler) createVideoChatMessagesAndTask(userID uint, chatID ui
 	if modelID == "" {
 		modelID = "doubao-seedance-2-0-fast-260128"
 	}
-	ratio := req.Ratio
-	if ratio == "" {
-		ratio = req.AspectRatio
+	ratioInput := req.Ratio
+	if ratioInput == "" {
+		ratioInput = req.AspectRatio
 	}
-	duration := req.Duration
-	if duration <= 0 {
-		duration = 5
-	}
-	resolution := ""
-	if ratio != "" && ratio != "auto" {
-		resolution = resolveVideoResolution(ratio)
+	ratio, duration, resolution, err := normalizeVideoGenerationParams(modelID, ratioInput, req.Resolution, req.Duration, len(req.ReferenceImages))
+	if err != nil {
+		return nil, err
 	}
 
 	userMsg := models.VideoChatMessage{ChatID: chatID, Role: "user", Content: req.Prompt}
@@ -272,8 +267,6 @@ func (h *VideoChatHandler) createVideoChatMessagesAndTask(userID uint, chatID ui
 		GenerateAudio:   req.GenerateAudio,
 		Watermark:       req.Watermark,
 		ReferenceImages: filterAndResolveURLs(req.ReferenceImages),
-		ReferenceVideos: filterAndResolveURLs(req.ReferenceVideos),
-		ReferenceAudios: filterAndResolveURLs(req.ReferenceAudios),
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -328,7 +321,7 @@ func (h *VideoChatHandler) refreshPendingVideoChatMessages(chatID uint) {
 		}
 		updates := map[string]interface{}{"status": resp.Status, "updated_at": time.Now()}
 		videoUpdates := map[string]interface{}{"status": resp.Status, "updated_at": time.Now()}
-		if resp.Status == "succeeded" {
+		if resp.Status == "succeeded" || resp.Status == "completed" {
 			updates["video_url"] = resp.VideoURL
 			videoUpdates["video_url"] = resp.VideoURL
 		}

@@ -158,8 +158,8 @@ func TestBuildChatFilePlanPlainTextDoesNotAttachHistoricalFiles(t *testing.T) {
 	if len(plan.MessageFiles) != 0 {
 		t.Fatalf("plain follow-up should not produce message attachments, got %d", len(plan.MessageFiles))
 	}
-	if len(plan.RAGFiles) != 0 {
-		t.Fatalf("plain follow-up should not auto inject historical files, got %d", len(plan.RAGFiles))
+	if len(plan.HistoricalFiles) != 0 {
+		t.Fatalf("plain follow-up should not auto inject historical files, got %d", len(plan.HistoricalFiles))
 	}
 
 	msg := models.Message{ConversationID: conv.ID, Role: "user", Content: "继续说"}
@@ -173,6 +173,38 @@ func TestBuildChatFilePlanPlainTextDoesNotAttachHistoricalFiles(t *testing.T) {
 	}
 	if messageFileCount != 0 {
 		t.Fatalf("plain follow-up persisted message_files = %d, want 0", messageFileCount)
+	}
+}
+
+func TestBuildChatFilePlanCurrentAttachmentIsIsolatedFromHistoricalAndContextFiles(t *testing.T) {
+	h, db := setupChatFilePlanTest(t)
+	userID := uint(42)
+	conv := models.Conversation{UserID: userID, Title: "test", Model: "gpt-5.4"}
+	if err := db.Create(&conv).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	oldFile := createTestFile(t, db, "file_old_a", "A.pdf", "application/pdf", userID, "")
+	newFile := createTestFile(t, db, "file_new_b", "B.md", "text/markdown", userID, "")
+	if err := db.Create(&models.ConversationFile{ConversationID: conv.ID, FileID: oldFile.ID}).Error; err != nil {
+		t.Fatalf("create old conversation file: %v", err)
+	}
+
+	req := ChatRequest{
+		ConversationID:  conv.ID,
+		MessageFileIDs:  []string{newFile.PublicID},
+		ContextFileIDs:  []string{oldFile.PublicID},
+		ContextPolicy:   FileContextPolicy{UseConversationFiles: "always"},
+		Messages:        []services.Message{{Role: "user", Content: "总结这个文件"}},
+	}
+	plan := h.buildChatFilePlan(req, userID, "")
+	if len(plan.MessageFiles) != 1 || plan.MessageFiles[0].PublicID != newFile.PublicID {
+		t.Fatalf("current turn should attach only new file B, got %#v", plan.MessageFiles)
+	}
+	if len(plan.ContextFiles) != 1 || plan.ContextFiles[0].PublicID != oldFile.PublicID {
+		t.Fatalf("explicit context files should still be resolved for audit, got %#v", plan.ContextFiles)
+	}
+	if len(plan.HistoricalFiles) != 0 {
+		t.Fatalf("current attachment turn must not inject old historical/context files, got %#v", plan.HistoricalFiles)
 	}
 }
 
@@ -200,12 +232,12 @@ func TestBuildChatFilePlanHistoricalRAGOnlyForFileQuestion(t *testing.T) {
 	if len(plan.MessageFiles) != 0 {
 		t.Fatalf("historical RAG should not show files on current bubble, got message files %d", len(plan.MessageFiles))
 	}
-	if len(plan.RAGFiles) != 3 {
-		t.Fatalf("file question should use 3 historical RAG files, got %d", len(plan.RAGFiles))
+	if len(plan.HistoricalFiles) != 3 {
+		t.Fatalf("file question should use 3 historical RAG files, got %d", len(plan.HistoricalFiles))
 	}
 
 	seen := map[string]bool{}
-	for _, f := range plan.RAGFiles {
+	for _, f := range plan.HistoricalFiles {
 		seen[f.PublicID] = true
 	}
 	for _, id := range []string{"file_json", "file_csv", "file_img"} {

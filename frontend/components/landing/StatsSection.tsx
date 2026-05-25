@@ -4,7 +4,7 @@ import { MessageSquare, ImageIcon, Users, Zap } from "lucide-react";
 import ScrollReveal from "./ScrollReveal";
 
 const stats = [
-  { icon: MessageSquare, value: "20+", label: "聚合模型", color: "text-brand" },
+  { icon: MessageSquare, value: "10+", label: "聚合模型", color: "text-brand" },
   { icon: ImageIcon, value: "4", label: "AI 创作工具", color: "text-purple-500" },
   { icon: Users, value: "10K+", label: "活跃用户", color: "text-green-500" },
   { icon: Zap, value: "<1s", label: "响应速度", color: "text-amber-500" },

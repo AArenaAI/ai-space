@@ -74,6 +74,29 @@
       "enabled": true
     },
     {
+      "key": "ai-writing-assistant",
+      "display_name": "AI写作助手",
+      "version": "1.0.0",
+      "description": "面向 AI Space 写作工作台的轻量写作 Agent，支持文档生成、持续改写、润色与多角色协作模拟",
+      "category": "content",
+      "icon": "pen-tool",
+      "color": "#ec4899",
+      "recommended_model": "gpt-5.5",
+      "triggers": [
+        "AI写作助手",
+        "写作助手",
+        "写文章",
+        "写报告",
+        "写方案",
+        "润色",
+        "改写"
+      ],
+      "co_skills": [
+        "output-quality"
+      ],
+      "enabled": true
+    },
+    {
       "key": "ai-work",
       "display_name": "AI工作助手",
       "version": "1.0.0",

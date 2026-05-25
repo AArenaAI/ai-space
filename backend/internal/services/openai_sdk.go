@@ -93,10 +93,9 @@ func (s *AIService) buildOpenAIResponsesBody(model string, messages []Message, s
 		item := map[string]any{
 			"role": m.Role,
 		}
-		if len(m.Images) > 0 && m.Role == "user" {
-			// [路径B] 内联多模态直传 — 将图片以 input_image 格式发送到 OpenAI Responses API。
-			// 注意：这与文件上传 RAG 路径（路径A）完全独立，
-			// 路径A的图片已通过 Vision → image_caption chunk → <file_context> 注入。
+		if (len(m.Images) > 0 || len(m.Files) > 0) && m.Role == "user" {
+			// [路径B] 内联多模态直传 — 将图片/当前文件以 Responses API 原生 part 发送给模型。
+			// 文件上传解析/RAG 路径仍保留为 <file_context> 兜底；这里仅服务当前附件 direct-first。
 			contentParts := []map[string]any{
 				{"type": "input_text", "text": m.Content},
 			}
@@ -105,6 +104,14 @@ func (s *AIService) buildOpenAIResponsesBody(model string, messages []Message, s
 					"type":      "input_image",
 					"image_url": img,
 				})
+			}
+			for _, file := range m.Files {
+				filePart := map[string]any{
+					"type":      "input_file",
+					"filename":  file.Filename,
+					"file_data": file.DataURI,
+				}
+				contentParts = append(contentParts, filePart)
 			}
 			item["content"] = contentParts
 		} else {

@@ -116,13 +116,24 @@ func (s *AIService) buildGeminiGenerateContentRequest(messages []Message, stream
 }
 
 func geminiSDKPartsFromMessage(m Message) []*genai.Part {
-	parts := make([]*genai.Part, 0, 1+len(m.Images))
+	parts := make([]*genai.Part, 0, 1+len(m.Images)+len(m.Files))
 	if strings.TrimSpace(m.Content) != "" {
 		parts = append(parts, genai.NewPartFromText(m.Content))
 	}
 	if m.Role == "user" {
 		for _, img := range m.Images {
 			mediaType, b64Data := parseDataURI(img)
+			data, err := decodeGeminiInlineData(b64Data)
+			if err != nil {
+				continue
+			}
+			parts = append(parts, genai.NewPartFromBytes(data, mediaType))
+		}
+		for _, file := range m.Files {
+			mediaType, b64Data := parseDataURI(file.DataURI)
+			if strings.TrimSpace(file.MimeType) != "" {
+				mediaType = file.MimeType
+			}
 			data, err := decodeGeminiInlineData(b64Data)
 			if err != nil {
 				continue

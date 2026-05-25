@@ -1,12 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { LogOut, User, Settings, Copy, CheckCircle2 } from "lucide-react";
+import { User, Settings } from "lucide-react";
 
 interface SidebarUserPanelProps {
   user: { name?: string; email?: string } | null;
   collapsed?: boolean;
-  onLogout: () => void;
   onOpenSettings?: () => void;
   onShowTooltip?: (text: string) => void;
   onHideTooltip?: () => void;
@@ -15,25 +13,22 @@ interface SidebarUserPanelProps {
 export default function SidebarUserPanel({
   user,
   collapsed,
-  onLogout,
   onOpenSettings,
   onShowTooltip,
   onHideTooltip,
 }: SidebarUserPanelProps) {
-  const [copied, setCopied] = useState(false);
-
-  // 折叠态：只显示用户头像/退出
+  // 折叠态：登录后只保留设置入口，退出登录统一放到设置页
   if (collapsed) {
     return (
       <div className="flex flex-col items-center gap-1">
         {user ? (
           <button
-            onClick={onLogout}
-            onMouseEnter={onShowTooltip ? () => onShowTooltip("退出登录") : undefined}
+            onClick={onOpenSettings}
+            onMouseEnter={onShowTooltip ? () => onShowTooltip("设置") : undefined}
             onMouseLeave={onHideTooltip}
             className="p-2.5 rounded-xl hover:bg-surface-card transition-colors"
           >
-            <LogOut className="w-5 h-5 text-text-tertiary" />
+            <Settings className="w-5 h-5 text-text-tertiary" />
           </button>
         ) : (
           <a
@@ -80,23 +75,14 @@ export default function SidebarUserPanel({
           </span>
         </div>
 
-        {/* 右侧：操作按钮 */}
-        <div className="flex items-center gap-0.5">
-          <button
-            onClick={onOpenSettings}
-            className="p-1.5 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
-            title="设置"
-          >
-            <Settings className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={onLogout}
-            className="p-1.5 rounded-md text-text-tertiary hover:text-red-400 hover:bg-surface-card transition-colors"
-            title="退出"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        {/* 右侧：设置 */}
+        <button
+          onClick={onOpenSettings}
+          className="p-1.5 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
+          title="设置"
+        >
+          <Settings className="w-3.5 h-3.5" />
+        </button>
       </div>
     </div>
   );

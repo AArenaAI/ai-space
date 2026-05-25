@@ -2,12 +2,13 @@ package api
 
 import (
 	"aipool-backend/internal/config"
+	"aipool-backend/internal/modelmeta"
 	"aipool-backend/internal/models"
 	"aipool-backend/internal/services"
 	"context"
+	"fmt"
 	"log"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -52,12 +53,11 @@ func (h *VideoHandler) CreateVideo(c *gin.Context) {
 		Prompt          string   `json:"prompt" binding:"required"`
 		Model           string   `json:"model"`
 		Ratio           string   `json:"ratio"`
+		Resolution      string   `json:"resolution"`
 		Duration        int64    `json:"duration"`
 		GenerateAudio   bool     `json:"generate_audio"`
 		Watermark       bool     `json:"watermark"`
 		ReferenceImages []string `json:"reference_image_urls"`
-		ReferenceVideos []string `json:"reference_video_urls"`
-		ReferenceAudios []string `json:"reference_audio_urls"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -68,15 +68,10 @@ func (h *VideoHandler) CreateVideo(c *gin.Context) {
 	if modelID == "" {
 		modelID = "doubao-seedance-2-0-fast-260128"
 	}
-	ratio := req.Ratio
-	duration := req.Duration
-	if duration <= 0 {
-		duration = 5
-	}
-
-	resolution := ""
-	if ratio != "" && ratio != "auto" {
-		resolution = resolveVideoResolution(ratio)
+	ratio, duration, resolution, err := normalizeVideoGenerationParams(modelID, req.Ratio, req.Resolution, req.Duration, len(req.ReferenceImages))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 
 	createReq := services.CreateVideoTaskRequest{
@@ -88,8 +83,6 @@ func (h *VideoHandler) CreateVideo(c *gin.Context) {
 		GenerateAudio:   req.GenerateAudio,
 		Watermark:       req.Watermark,
 		ReferenceImages: filterAndResolveURLs(req.ReferenceImages),
-		ReferenceVideos: filterAndResolveURLs(req.ReferenceVideos),
-		ReferenceAudios: filterAndResolveURLs(req.ReferenceAudios),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -140,13 +133,13 @@ func (h *VideoHandler) GetVideo(c *gin.Context) {
 		return
 	}
 
-	if video.Status != "succeeded" && video.Status != "failed" {
+	if video.Status != "succeeded" && video.Status != "completed" && video.Status != "failed" {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		resp, err := h.videoService.GetVideoTask(ctx, video.TaskID)
 		if err == nil && resp != nil {
 			video.Status = resp.Status
-			if resp.Status == "succeeded" {
+			if resp.Status == "succeeded" || resp.Status == "completed" {
 				video.VideoURL = resp.VideoURL
 			}
 			if resp.Status == "failed" && resp.ErrorMessage != "" {
@@ -192,7 +185,7 @@ func (h *VideoHandler) RefreshVideoStatus(c *gin.Context) {
 	}
 
 	video.Status = resp.Status
-	if resp.Status == "succeeded" {
+	if resp.Status == "succeeded" || resp.Status == "completed" {
 		video.VideoURL = resp.VideoURL
 	}
 	if resp.Status == "failed" && resp.ErrorMessage != "" {
@@ -220,30 +213,68 @@ func filterAndResolveURLs(urls []string) []string {
 	return result
 }
 
-// resolveVideoResolution maps aspect ratio to resolution for Seedance models
-func resolveVideoResolution(ratio string) string {
-	// Seedance models use resolution instead of ratio
-	// Supported resolutions: 480p, 540p, 720p, 1080p
-	parts := strings.Split(ratio, ":")
-	if len(parts) == 2 {
-		w, wErr := strconv.Atoi(strings.TrimSpace(parts[0]))
-		h, hErr := strconv.Atoi(strings.TrimSpace(parts[1]))
-		if wErr == nil && hErr == nil {
-			if h > w {
-				// Portrait / square
-				return "720p"
-			}
-		}
+var officialVideoRatios = map[string]bool{
+	"16:9":     true,
+	"4:3":      true,
+	"1:1":      true,
+	"3:4":      true,
+	"9:16":     true,
+	"21:9":     true,
+	"adaptive": true,
+}
+
+var officialVideoDurations = map[int64]bool{
+	4: true, 5: true, 6: true, 7: true, 9: true, 10: true, 11: true, 13: true, 14: true, 15: true,
+}
+
+var standardSeedanceResolutions = map[string]bool{
+	"480p": true,
+	"720p": true,
+	"1080p": true,
+}
+
+var fastSeedanceResolutions = map[string]bool{
+	"480p": true,
+	"720p": true,
+}
+
+func normalizeVideoGenerationParams(modelID string, ratio string, resolution string, duration int64, referenceImageCount int) (string, int64, string, error) {
+	if ratio == "" || ratio == "auto" {
+		ratio = "adaptive"
 	}
-	// Landscape or fallback
-	return "1080p"
+	if !officialVideoRatios[ratio] {
+		return "", 0, "", fmt.Errorf("unsupported ratio: %s", ratio)
+	}
+
+	if duration == 0 {
+		duration = 5
+	}
+	if !officialVideoDurations[duration] {
+		return "", 0, "", fmt.Errorf("duration must be one of 4, 5, 6, 7, 9, 10, 11, 13, 14, 15 seconds")
+	}
+
+	if referenceImageCount > 9 {
+		return "", 0, "", fmt.Errorf("reference images must not exceed 9")
+	}
+
+	if resolution == "" {
+		resolution = "720p"
+	}
+	allowedResolutions := standardSeedanceResolutions
+	if strings.Contains(modelID, "seedance-2-0-fast") {
+		allowedResolutions = fastSeedanceResolutions
+	}
+	if !allowedResolutions[resolution] {
+		if strings.Contains(modelID, "seedance-2-0-fast") {
+			return "", 0, "", fmt.Errorf("Seedance 2.0 Fast resolution must be 480p or 720p")
+		}
+		return "", 0, "", fmt.Errorf("Seedance 2.0 resolution must be 480p, 720p, or 1080p")
+	}
+	return ratio, duration, resolution, nil
 }
 
 // GetVideoModelsHandler returns supported video generation models
 func GetVideoModelsHandler(c *gin.Context) {
-	models := []ModelInfo{
-		{ID: "doubao-seedance-2-0-fast-260128", Name: "Seedance 2.0 Fast", Provider: "Volcengine", Description: "Fast video generation from Volcengine", Color: "#ff6a00", Capabilities: []string{"video"}},
-		{ID: "doubao-seedance-2-0-260128", Name: "Seedance 2.0", Provider: "Volcengine", Description: "Standard video generation from Volcengine", Color: "#ff0050", Capabilities: []string{"video"}},
-	}
+	models := modelmeta.VideoModels()
 	c.JSON(http.StatusOK, models)
 }

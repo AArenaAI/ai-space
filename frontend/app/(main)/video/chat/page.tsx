@@ -29,16 +29,18 @@ import HistoryDrawer from "@/components/ui/HistoryDrawer";
 import DeleteSuccessNotice from "@/components/ui/DeleteSuccessNotice";
 
 const ASPECT_RATIOS = [
-  { value: "auto", label: "Auto", w: 1, h: 1 },
-  { value: "1:1", label: "1:1", w: 1, h: 1 },
-  { value: "4:3", label: "4:3", w: 4, h: 3 },
-  { value: "3:4", label: "3:4", w: 3, h: 4 },
   { value: "16:9", label: "16:9", w: 16, h: 9 },
+  { value: "4:3", label: "4:3", w: 4, h: 3 },
+  { value: "1:1", label: "1:1", w: 1, h: 1 },
+  { value: "3:4", label: "3:4", w: 3, h: 4 },
   { value: "9:16", label: "9:16", w: 9, h: 16 },
   { value: "21:9", label: "21:9", w: 21, h: 9 },
+  { value: "adaptive", label: "adaptive", w: 1, h: 1 },
 ];
 
-const DURATIONS = ["4s", "8s", "12s"];
+const DURATIONS = ["4s", "5s", "6s", "7s", "9s", "10s", "11s", "13s", "14s", "15s"];
+const RESOLUTIONS = ["480p", "720p", "1080p"];
+const MAX_REFERENCE_IMAGES = 9;
 
 interface DisplayMessage {
   id: string;
@@ -119,13 +121,15 @@ function VideoChatPageInner() {
   const [prompt, setPrompt] = useState("");
   const [referenceImages, setReferenceImages] = useState<string[]>([]);
   const [uploadingRef, setUploadingRef] = useState(false);
-  const [selectedAspectRatio, setSelectedAspectRatio] = useState(searchParams.get("aspect") || "auto");
-  const [selectedDuration, setSelectedDuration] = useState(searchParams.get("duration") || "4s");
+  const [selectedAspectRatio, setSelectedAspectRatio] = useState(searchParams.get("aspect") || "adaptive");
+  const [selectedDuration, setSelectedDuration] = useState(searchParams.get("duration") || "5s");
   const [musicEnabled, setMusicEnabled] = useState(searchParams.get("audio") === "1");
   const [selectedModel, setSelectedModel] = useState(searchParams.get("model") || "");
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [aspectMenuOpen, setAspectMenuOpen] = useState(false);
   const [durationMenuOpen, setDurationMenuOpen] = useState(false);
+  const [selectedResolution, setSelectedResolution] = useState(searchParams.get("resolution") || "720p");
+  const [resolutionMenuOpen, setResolutionMenuOpen] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [deleteSuccessOpen, setDeleteSuccessOpen] = useState(false);
@@ -139,6 +143,8 @@ function VideoChatPageInner() {
 
   const selectedModelInfo = videoModels.find((m) => m.id === selectedModel) || videoModels[0];
   const selectedAspect = ASPECT_RATIOS.find((item) => item.value === selectedAspectRatio) || ASPECT_RATIOS[0];
+  const isFastModel = (selectedModelInfo?.id || selectedModel).includes("seedance-2-0-fast");
+  const availableResolutions = isFastModel ? RESOLUTIONS.filter((item) => item !== "1080p") : RESOLUTIONS;
   const hasContent = prompt.trim().length > 0;
 
   useEffect(() => {
@@ -146,6 +152,12 @@ function VideoChatPageInner() {
       setSelectedModel(videoModels[0].id);
     }
   }, [videoModels, selectedModel]);
+
+  useEffect(() => {
+    if (isFastModel && selectedResolution === "1080p") {
+      setSelectedResolution("720p");
+    }
+  }, [isFastModel, selectedResolution]);
 
   useEffect(() => {
     const refs = searchParams.get("refs");
@@ -226,11 +238,12 @@ function VideoChatPageInner() {
     setGenerating(true);
 
     try {
-      const durationSec = parseInt(selectedDuration.replace("s", ""), 10) || 4;
+      const durationSec = parseInt(selectedDuration.replace("s", ""), 10) || 5;
       const payload = {
         prompt: cleanPrompt,
         model,
         ratio: selectedAspectRatio,
+        resolution: selectedResolution,
         duration: durationSec,
         generate_audio: musicEnabled,
         watermark: false,
@@ -273,7 +286,7 @@ function VideoChatPageInner() {
     } finally {
       setGenerating(false);
     }
-  }, [createChat, currentChatId, fetchChats, fetchMessages, musicEnabled, referenceImages, router, selectedAspectRatio, selectedDuration, selectedModel, selectedModelInfo, sendMessage]);
+  }, [createChat, currentChatId, fetchChats, fetchMessages, musicEnabled, referenceImages, router, selectedAspectRatio, selectedDuration, selectedModel, selectedModelInfo, selectedResolution, sendMessage]);
 
   useEffect(() => {
     const initialPrompt = searchParams.get("prompt") || "";
@@ -284,6 +297,10 @@ function VideoChatPageInner() {
   }, [handleSend, searchParams, selectedModelInfo, videoModels.length]);
 
   const uploadReferenceImage = async (file: File) => {
+    if (referenceImages.length >= MAX_REFERENCE_IMAGES) {
+      toast.error(`参考图最多支持 ${MAX_REFERENCE_IMAGES} 张`);
+      return;
+    }
     setUploadingRef(true);
     try {
       const formData = new FormData();
@@ -300,7 +317,7 @@ function VideoChatPageInner() {
       }
       const data = await res.json();
       const url = data.public_id || data.url || data.image_url;
-      setReferenceImages((prev) => [...prev, url]);
+      setReferenceImages((prev) => [...prev, url].slice(0, MAX_REFERENCE_IMAGES));
     } catch (err: any) {
       toast.error(`上传失败: ${err.message}`);
     } finally {
@@ -440,13 +457,6 @@ function VideoChatPageInner() {
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
                           <span>视频生成中...</span>
                         </div>
-                        <p className="text-xs text-white/80">
-                          {selectedDuration === "8s" || selectedDuration === "10s"
-                            ? "预计用时 1～3 分钟"
-                            : selectedDuration === "5s"
-                            ? "预计用时 30 秒～2 分钟"
-                            : "预计用时 30 秒～1 分 30 秒"}
-                        </p>
                         <p className="text-xs text-white/50 max-w-[70%] line-clamp-2">
                           {msg.content}
                         </p>
@@ -650,6 +660,37 @@ function VideoChatPageInner() {
                           </button>
                         ))}
                       </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setResolutionMenuOpen((open) => !open)}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] text-text-secondary border-surface-border hover:border-brand/30 hover:text-text-primary transition-colors"
+                  >
+                    <span>{selectedResolution}</span>
+                    <ChevronDown className={cn("w-3 h-3 transition-transform", resolutionMenuOpen && "rotate-180")} />
+                  </button>
+                  {resolutionMenuOpen && (
+                    <div className="absolute left-0 bottom-full mb-2 w-28 rounded-xl border border-surface-border bg-surface-elevated p-1 shadow-xl z-30">
+                      {availableResolutions.map((resolution) => (
+                        <button
+                          key={resolution}
+                          type="button"
+                          onClick={() => {
+                            setSelectedResolution(resolution);
+                            setResolutionMenuOpen(false);
+                          }}
+                          className={cn(
+                            "w-full rounded-lg px-3 py-2 text-left text-xs transition-colors",
+                            selectedResolution === resolution ? "bg-brand/10 text-brand" : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
+                          )}
+                        >
+                          {resolution}
+                        </button>
+                      ))}
                     </div>
                   )}
                 </div>

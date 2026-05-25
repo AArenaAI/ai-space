@@ -204,7 +204,7 @@ export default function PricingPage() {
                 <span className="text-sm font-medium text-text-primary">基础模型</span>
               </div>
               <p className="text-[12px] text-text-tertiary">
-                GPT 5.4 Mini、DeepSeek V4 Flash、Gemini 2.0 Flash
+                GPT 5.4 Mini、DeepSeek V4 Flash、Gemini 3.1 Flash
               </p>
             </div>
             <div className="space-y-2">
@@ -213,7 +213,7 @@ export default function PricingPage() {
                 <span className="text-sm font-medium text-text-primary">高级模型</span>
               </div>
               <p className="text-[12px] text-text-tertiary">
-                GPT 5.4、GPT 5.5、Claude 3.5 Sonnet、Kimi k1.5
+                GPT 5.4、GPT 5.5、Gemini 3.1 Pro、Kimi K2.5
               </p>
             </div>
             <div className="space-y-2">
@@ -222,7 +222,7 @@ export default function PricingPage() {
                 <span className="text-sm font-medium text-text-primary">精英模型</span>
               </div>
               <p className="text-[12px] text-text-tertiary">
-                GPT 5.5 Pro、DeepSeek V4 Pro、DeepSeek-R1
+                GPT 5.5 Pro、DeepSeek V4 Pro、Kimi K2.6
               </p>
             </div>
           </div>

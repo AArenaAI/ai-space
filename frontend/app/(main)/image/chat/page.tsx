@@ -535,13 +535,6 @@ function ImageChatPageInner() {
                               <Loader2 className="w-3 h-3 animate-spin" />
                               <span>图片生成中...</span>
                             </div>
-                            <p className="text-[11px] text-white/80">
-                              {selectedResolution === "4K" || selectedResolution === "ultra"
-                                ? "预计用时 1～3 分钟"
-                                : selectedResolution === "2K" || selectedQuality === "high"
-                                ? "预计用时 30 秒～2 分钟"
-                                : "预计用时 15～45 秒"}
-                            </p>
                             <p className="text-[11px] text-white/50 max-w-[80%] line-clamp-2">
                               {msg.content}
                             </p>

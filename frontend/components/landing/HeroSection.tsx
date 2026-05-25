@@ -56,7 +56,7 @@ export default function HeroSection() {
 
             {/* 快捷功能标签 */}
             <div className="flex flex-wrap gap-2 justify-center lg:justify-start animate-fade-up" style={{ animationDelay: "450ms" }}>
-              {["GPT-4.1", "Claude 4", "Gemini 2.5", "GPT-image-2", "深度思考", "联网搜索"].map((tag) => (
+              {["GPT 5.5", "GPT 5.4", "Gemini 3.1", "GPT Image 2", "深度思考", "联网搜索"].map((tag) => (
                 <span
                   key={tag}
                   className="px-2.5 py-1 rounded-lg bg-surface-card border border-surface-border text-xs text-text-secondary"

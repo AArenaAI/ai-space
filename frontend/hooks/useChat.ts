@@ -155,11 +155,11 @@ export const MODELS: ChatModel[] = [
     color: "#10a37f",
   },
   {
-    id: "claude-3-5-sonnet-20241022",
-    name: "Claude 3.5 Sonnet",
-    provider: "Anthropic",
-    description: "代码和逻辑推理专家",
-    color: "#cc785c",
+    id: "gemini-3.1-pro-preview",
+    name: "Gemini 3.1 Pro",
+    provider: "Google",
+    description: "新一代旗舰推理模型，更强多模态",
+    color: "#4285f4",
   },
   {
     id: "gemini-3.5-flash",
@@ -183,10 +183,10 @@ export const MODELS: ChatModel[] = [
     color: "#6366f1",
   },
   {
-    id: "moonshot-v1-8k",
-    name: "Kimi k1.5",
+    id: "kimi-k2.6",
+    name: "Kimi K2.6",
     provider: "Moonshot",
-    description: "超长上下文，文档处理专家",
+    description: "最新旗舰版，更强多模态+推理能力",
     color: "#00b96b",
   },
 ];
@@ -651,6 +651,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             serverMessageId: Number(m.id || 0) || undefined,
             groupId: m.group_id || undefined,
             groupIndex: m.group_index ?? undefined,
+            groupModels: Array.isArray(m.group_models)
+              ? m.group_models.filter((model: unknown): model is string => typeof model === "string" && model.length > 0)
+              : undefined,
           }));
           // 后端已返回 completed_at，不需要近似回退
           const activeByServerMessageId = new Map(
@@ -1702,6 +1705,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
                 serverMessageId: Number(m.id || 0) || undefined,
                 groupId: m.group_id || undefined,
                 groupIndex: m.group_index ?? undefined,
+                groupModels: Array.isArray(m.group_models) ? m.group_models : undefined,
               }));
               setMessages(loadedMessages);
               setLoadedPersistedMessages(loadedMessages.length);

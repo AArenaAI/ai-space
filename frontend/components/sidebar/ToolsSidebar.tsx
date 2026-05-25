@@ -105,7 +105,11 @@ export default function ToolsSidebar() {
       >
       {/* 头部 */}
       <div className="shrink-0 h-14 flex items-center justify-between px-4 border-b border-surface-border">
-        {!collapsed && <img src="/brand-light-title.png" alt="AI Space" className="h-6 w-auto object-contain" />}
+        {!collapsed && (
+          <Link href="/" className="flex items-center">
+            <img src="/brand-light-title.png" alt="AI Space" className="h-6 w-auto object-contain" />
+          </Link>
+        )}
         <button
           type="button"
           onClick={() => setCollapsed(!collapsed)}

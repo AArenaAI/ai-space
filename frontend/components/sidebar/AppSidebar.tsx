@@ -402,20 +402,28 @@ function WorkHoverPanel({
           <div className="grid grid-cols-2 gap-1.5 max-h-[50vh] overflow-y-auto pr-1">
             {skills.map((skill) => {
               const Icon = iconMap[skill.icon] || Sparkles;
+              const isWritingAssistant = skill.key === "ai-writing-assistant";
               return (
                 <button
                   key={skill.key}
-                  // onClick={() => handleNavigate(`/skills/chat?key=${skill.key}`)}
-                  title="coming soon"
-                  className="relative flex items-center gap-2.5 p-2.5 rounded-xl text-left transition-all duration-150 cursor-not-allowed opacity-60 group"
+                  onClick={isWritingAssistant ? () => handleNavigate("/writing-assistant") : undefined}
+                  title={isWritingAssistant ? "AI写作助手" : "coming soon"}
+                  className={cn(
+                    "relative flex items-center gap-2.5 p-2.5 rounded-xl text-left transition-all duration-150 group",
+                    isWritingAssistant
+                      ? "hover:bg-surface-card cursor-pointer"
+                      : "cursor-not-allowed opacity-60"
+                  )}
                 >
                   <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-surface-card">
-                    <Icon className="w-4 h-4 text-text-tertiary" />
+                    <Icon className={cn("w-4 h-4", isWritingAssistant ? "text-brand" : "text-text-tertiary")} />
                   </div>
-                  <span className="text-sm text-text-tertiary transition-colors truncate">{skill.title || skill.display_name || skill.key}</span>
-                  <span className="pointer-events-none absolute left-1/2 top-full z-10 mt-1 -translate-x-1/2 whitespace-nowrap rounded-lg bg-surface-elevated border border-surface-border px-2 py-1 text-xs text-text-secondary opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
-                    coming soon
-                  </span>
+                  <span className={cn("text-sm transition-colors truncate", isWritingAssistant ? "text-text-primary" : "text-text-tertiary")}>{skill.title || skill.display_name || skill.key}</span>
+                  {!isWritingAssistant && (
+                    <span className="pointer-events-none absolute left-1/2 top-full z-10 mt-1 -translate-x-1/2 whitespace-nowrap rounded-lg bg-surface-elevated border border-surface-border px-2 py-1 text-xs text-text-secondary opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                      coming soon
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -870,8 +878,9 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
       );
     }
 
-    const pinned = conversations.filter(c => c.pinned);
-    const unpinned = conversations.filter(c => !c.pinned);
+    const sidebarConversations = conversations.filter(c => c.skill_key !== "ai-writing-assistant");
+    const pinned = sidebarConversations.filter(c => c.pinned);
+    const unpinned = sidebarConversations.filter(c => !c.pinned);
     const groups = groupConversationsByTime(unpinned, t);
     const sortedLabels = sortGroupLabels(Object.keys(groups), t);
 
@@ -964,10 +973,10 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
         <div className="flex items-center h-12 px-3 shrink-0">
           {!collapsed && (
             <div className="flex-1 min-w-0">
-              <button type="button" onClick={handleNewChat} className="flex items-center gap-2">
+              <Link href="/" className="flex items-center gap-2">
                 <img src={theme === "dark" ? "/brand-dark-logo.png" : "/brand-light-logo.png"} alt="AI Space" className="h-6 w-auto rounded-lg object-contain" />
                 <img src={theme === "dark" ? "/brand-dark-title.png" : "/brand-light-title.png"} alt="AI Space" className="h-6 w-auto object-contain ml-1.5" />
-              </button>
+              </Link>
             </div>
           )}
           {!collapsed && (
@@ -982,9 +991,9 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
           )}
           {collapsed && (
             <div className="flex-1 flex justify-center">
-              <button type="button" onClick={handleNewChat}>
+              <Link href="/">
                 <img src={theme === "dark" ? "/brand-dark-logo.png" : "/brand-light-logo.png"} alt="AI Space" className="w-8 h-8 rounded-lg object-cover" />
-              </button>
+              </Link>
             </div>
           )}
           <button onClick={() => setCollapsed(!collapsed)} className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors">
@@ -1103,16 +1112,17 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                 type="button"
                 onClick={handleNewChat}
                 className={cn(
-                  "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150",
+                  "group w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150",
                   pathname === "/chat"
                     ? "bg-brand/10 text-text-primary font-medium shadow-[inset_2px_0_0_0_var(--brand)]"
                     : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                 )}
-                onMouseEnter={showHoverTooltip(`${mod}Space`, "right")}
-                onMouseLeave={hideHoverTooltip}
               >
                 <MessageSquare className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/chat" ? "text-brand" : "text-text-tertiary")} />
                 <span className="flex-1 text-left">{t("sidebar.nav.chat")}</span>
+                <kbd className="hidden lg:inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono text-text-secondary leading-none opacity-0 group-hover:opacity-100 transition-opacity">
+                  {mod}Space
+                </kbd>
               </button>
             </div>
 
@@ -1219,7 +1229,6 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
           <SidebarUserPanel
             user={user}
             collapsed={collapsed}
-            onLogout={handleLogout}
             onOpenSettings={() => router.push("/settings")}
             onShowTooltip={showSidebarTooltip}
             onHideTooltip={hideSidebarTooltip}

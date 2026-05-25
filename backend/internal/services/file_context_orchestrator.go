@@ -1,0 +1,483 @@
+package services
+
+import (
+	"aipool-backend/internal/modelmeta"
+	"aipool-backend/internal/models"
+	"encoding/base64"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"gorm.io/gorm"
+)
+
+const (
+	DefaultCurrentFileContextChars    = 100000
+	DefaultHistoricalFileContextChars = 40000
+)
+
+// FileContextPackage 是聊天层可直接注入模型的文件上下文包。
+// Current files（本轮上传）与 historical/context files 分开处理，避免当前附件被历史文件 RAG 稀释。
+type FileContextPackage struct {
+	SystemPrompt string
+	NativeParts  []ModelPart
+	Warnings     []string
+	UsedFileIDs  []uint
+}
+
+type ModelPart struct {
+	Type     string
+	MimeType string
+	DataURI  string
+	FileID   uint
+	Filename string
+}
+
+const defaultNativeFileMaxBytes int64 = 25 * 1024 * 1024
+
+type FileContextBuildRequest struct {
+	CurrentFiles    []models.File
+	HistoricalFiles []models.File
+	Query           string
+	Model           string
+	LogPrefix       string
+}
+
+type FileContextOrchestrator struct {
+	db             *gorm.DB
+	retrievalSvc   *RetrievalService
+	contextBuilder *ContextBuilder
+}
+
+func NewFileContextOrchestrator(db *gorm.DB, retrievalSvc *RetrievalService, contextBuilder *ContextBuilder) *FileContextOrchestrator {
+	return &FileContextOrchestrator{db: db, retrievalSvc: retrievalSvc, contextBuilder: contextBuilder}
+}
+
+func (o *FileContextOrchestrator) Build(req FileContextBuildRequest) FileContextPackage {
+	logPrefix := strings.TrimSpace(req.LogPrefix)
+	if logPrefix == "" {
+		logPrefix = "FileContext"
+	}
+
+	pkg := FileContextPackage{}
+	if o == nil || o.db == nil || o.contextBuilder == nil {
+		return pkg
+	}
+
+	currentReady, currentWarnings := filterReadyFiles(req.CurrentFiles)
+	historicalReady, historicalWarnings := filterReadyFiles(req.HistoricalFiles)
+	pkg.Warnings = append(pkg.Warnings, currentWarnings...)
+	pkg.Warnings = append(pkg.Warnings, historicalWarnings...)
+
+	var parts []string
+	if len(currentReady) > 0 {
+		nativeParts, nativeWarnings := o.buildCurrentNativeParts(currentReady, req.Model, logPrefix)
+		pkg.NativeParts = append(pkg.NativeParts, nativeParts...)
+		pkg.Warnings = append(pkg.Warnings, nativeWarnings...)
+		for _, part := range nativeParts {
+			pkg.UsedFileIDs = appendUniqueUint(pkg.UsedFileIDs, part.FileID)
+		}
+
+		currentContext := o.buildDirectCurrentContext(currentReady, req.Query, req.Model, logPrefix)
+		if currentContext != "" {
+			parts = append(parts, currentContext)
+			pkg.UsedFileIDs = appendUniqueUint(pkg.UsedFileIDs, fileIDs(currentReady)...)
+		}
+	}
+
+	if len(historicalReady) > 0 && o.retrievalSvc != nil {
+		historicalContext := o.buildHistoricalContext(historicalReady, req.Query, req.Model, logPrefix)
+		if historicalContext != "" {
+			parts = append(parts, historicalContext)
+			pkg.UsedFileIDs = appendUniqueUint(pkg.UsedFileIDs, fileIDs(historicalReady)...)
+		}
+	}
+
+	if len(parts) == 0 && len(pkg.NativeParts) == 0 && len(pkg.Warnings) == 0 {
+		return pkg
+	}
+
+	var sb strings.Builder
+	sb.WriteString("<file_context>\n")
+	sb.WriteString("<instruction>\n")
+	sb.WriteString("以下是文件上下文。current_files 是用户本轮上传/附加的当前文件，优先级最高；historical_files 仅作补充。\n")
+	sb.WriteString("回答涉及文件的问题时，必须优先依据 current_files；不要把历史文件当成本轮上传文件。\n")
+	sb.WriteString("如果 warning 提示有文件未解析完成，不要猜测其内容，直接说明该文件暂不可参与回答。\n")
+	sb.WriteString("引用文件时请注明来源文件名。\n")
+	sb.WriteString("</instruction>\n\n")
+	if len(pkg.Warnings) > 0 {
+		sb.WriteString("<warnings>\n")
+		for _, w := range pkg.Warnings {
+			sb.WriteString("- ")
+			sb.WriteString(w)
+			sb.WriteString("\n")
+		}
+		sb.WriteString("</warnings>\n\n")
+	}
+	sb.WriteString(strings.Join(parts, "\n\n"))
+	if len(parts) > 0 {
+		sb.WriteString("\n")
+	}
+	sb.WriteString("</file_context>\n")
+	pkg.SystemPrompt = sb.String()
+	fmt.Printf("[%s FileContext] built current=%d historical=%d nativeParts=%d warnings=%d length=%d\n", logPrefix, len(currentReady), len(historicalReady), len(pkg.NativeParts), len(pkg.Warnings), len(pkg.SystemPrompt))
+	return pkg
+}
+
+func (o *FileContextOrchestrator) buildCurrentNativeParts(files []models.File, model string, logPrefix string) ([]ModelPart, []string) {
+	if !supportsNativeVision(model) && !supportsNativeFileInput(model) {
+		return nil, nil
+	}
+
+	var parts []ModelPart
+	var warnings []string
+	for _, file := range files {
+		if isImageModelFile(file) {
+			if !supportsNativeVision(model) {
+				continue
+			}
+			if file.Size > defaultNativeImageMaxBytes {
+				warnings = append(warnings, fmt.Sprintf("图片 %s 超过原图直传大小限制，已回退使用解析文本。", file.Filename))
+				continue
+			}
+			data, err := os.ReadFile(file.StoragePath)
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf("图片 %s 原图读取失败，已回退使用解析文本。", file.Filename))
+				fmt.Printf("[%s FileContext] native image read failed fileID=%d path=%s err=%v\n", logPrefix, file.ID, file.StoragePath, err)
+				continue
+			}
+			mimeType := strings.TrimSpace(file.MimeType)
+			if mimeType == "" || mimeType == "image" {
+				mimeType = mimeTypeFromImageExt(file.Filename)
+			}
+			parts = append(parts, ModelPart{
+				Type:     "image",
+				MimeType: mimeType,
+				DataURI:  "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data),
+				FileID:   file.ID,
+				Filename: file.Filename,
+			})
+			fmt.Printf("[%s FileContext] native image attached fileID=%d name=%s bytes=%d model=%s\n", logPrefix, file.ID, file.Filename, len(data), model)
+			continue
+		}
+
+		inputType := fileInputType(file)
+		if !supportsNativeFileInput(model) || !modelmeta.SupportsInput(model, inputType) {
+			continue
+		}
+		if file.Size > defaultNativeFileMaxBytes {
+			warnings = append(warnings, fmt.Sprintf("文件 %s 超过原文件直传大小限制，已回退使用解析文本。", file.Filename))
+			continue
+		}
+		data, err := os.ReadFile(file.StoragePath)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("文件 %s 原文件读取失败，已回退使用解析文本。", file.Filename))
+			fmt.Printf("[%s FileContext] native file read failed fileID=%d path=%s err=%v\n", logPrefix, file.ID, file.StoragePath, err)
+			continue
+		}
+		mimeType := nativeFileMimeType(file)
+		parts = append(parts, ModelPart{
+			Type:     "file",
+			MimeType: mimeType,
+			DataURI:  "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data),
+			FileID:   file.ID,
+			Filename: file.Filename,
+		})
+		fmt.Printf("[%s FileContext] native file attached fileID=%d name=%s input=%s bytes=%d model=%s\n", logPrefix, file.ID, file.Filename, inputType, len(data), model)
+	}
+	return parts, warnings
+}
+
+func (o *FileContextOrchestrator) buildDirectCurrentContext(files []models.File, query string, model string, logPrefix string) string {
+	fileNames := fileNameMap(files)
+	var contexts []FileContext
+
+	for _, file := range files {
+		chunks := o.loadDirectChunks(file, DefaultCurrentFileContextChars)
+		if len(chunks) == 0 {
+			fmt.Printf("[%s FileContext] current file has no chunks fileID=%d name=%s\n", logPrefix, file.ID, file.Filename)
+			continue
+		}
+		results := make([]ChunkSearchResult, 0, len(chunks))
+		for _, c := range chunks {
+			results = append(results, ChunkSearchResult{Chunk: c, Score: 1, Relevance: "current"})
+		}
+		contexts = append(contexts, FileContext{FileName: fileNames[file.ID], Chunks: results})
+		fmt.Printf("[%s FileContext] current direct fileID=%d chunks=%d\n", logPrefix, file.ID, len(chunks))
+	}
+
+	body := o.contextBuilder.BuildSection("current_files", contexts, query, maxFileContextTokensForModel(model), DefaultCurrentFileContextChars)
+	return body
+}
+
+func (o *FileContextOrchestrator) buildHistoricalContext(files []models.File, query string, model string, logPrefix string) string {
+	var allResults []ChunkSearchResult
+	var imageFileIDs []uint
+	var docFileIDs []uint
+	for _, file := range files {
+		if isImageModelFile(file) {
+			imageFileIDs = append(imageFileIDs, file.ID)
+		} else {
+			docFileIDs = append(docFileIDs, file.ID)
+		}
+	}
+
+	for _, fid := range imageFileIDs {
+		var chunks []models.FileChunk
+		if err := o.db.Where("file_id = ? AND block_type = ?", fid, "image_caption").Order("chunk_index").Find(&chunks).Error; err != nil {
+			fmt.Printf("[%s FileContext] historical image chunks failed fileID=%d: %v\n", logPrefix, fid, err)
+			continue
+		}
+		for _, c := range chunks {
+			allResults = append(allResults, ChunkSearchResult{Chunk: c, Score: 1, Relevance: "image_caption"})
+		}
+	}
+
+	if len(docFileIDs) > 0 {
+		if IsDocumentOverviewQuery(query) {
+			for _, fid := range docFileIDs {
+				var chunks []models.FileChunk
+				if err := o.db.Where("file_id = ?", fid).Order("chunk_index").Find(&chunks).Error; err != nil {
+					fmt.Printf("[%s FileContext] historical overview chunks failed fileID=%d: %v\n", logPrefix, fid, err)
+					continue
+				}
+				selected := SelectOverviewChunks(chunks, query, DefaultHistoricalFileContextChars)
+				for _, c := range selected {
+					allResults = append(allResults, ChunkSearchResult{Chunk: c, Score: 1, Relevance: "overview"})
+				}
+			}
+		} else {
+			results, err := o.retrievalSvc.Search(docFileIDs, query, DynamicTopK(model), false)
+			fmt.Printf("[%s FileContext] historical search docFileIDs=%v query=%q results=%d err=%v\n", logPrefix, docFileIDs, query, len(results), err)
+			if err == nil {
+				allResults = append(allResults, results...)
+			}
+		}
+	}
+
+	if len(allResults) == 0 {
+		return ""
+	}
+	contexts := ExtractFileContexts(allResults, fileNameMap(files))
+	return o.contextBuilder.BuildSection("historical_files", contexts, query, maxFileContextTokensForModel(model), DefaultHistoricalFileContextChars)
+}
+
+func (o *FileContextOrchestrator) loadDirectChunks(file models.File, maxChars int) []models.FileChunk {
+	var chunks []models.FileChunk
+	q := o.db.Where("file_id = ?", file.ID)
+	if isImageModelFile(file) {
+		q = q.Where("block_type = ?", "image_caption")
+	}
+	if err := q.Order("chunk_index").Find(&chunks).Error; err != nil {
+		return nil
+	}
+	return trimChunksByChars(chunks, maxChars)
+}
+
+func filterReadyFiles(files []models.File) ([]models.File, []string) {
+	ready := make([]models.File, 0, len(files))
+	var warnings []string
+	seen := map[uint]struct{}{}
+	for _, f := range files {
+		if _, ok := seen[f.ID]; ok {
+			continue
+		}
+		seen[f.ID] = struct{}{}
+		if f.ParseStatus != "done" {
+			status := strings.TrimSpace(f.ParseStatus)
+			if status == "" {
+				status = "unknown"
+			}
+			warnings = append(warnings, fmt.Sprintf("文件 %s 尚未解析完成（status=%s），本轮不会使用其内容。", f.Filename, status))
+			continue
+		}
+		ready = append(ready, f)
+	}
+	return ready, warnings
+}
+
+func trimChunksByChars(chunks []models.FileChunk, maxChars int) []models.FileChunk {
+	if maxChars <= 0 {
+		return chunks
+	}
+	sort.SliceStable(chunks, func(i, j int) bool { return chunks[i].ChunkIndex < chunks[j].ChunkIndex })
+	used := 0
+	out := make([]models.FileChunk, 0, len(chunks))
+	for _, c := range chunks {
+		text := c.Markdown
+		if text == "" {
+			text = c.Content
+		}
+		if text == "" {
+			continue
+		}
+		remaining := maxChars - used
+		if remaining <= 0 {
+			break
+		}
+		if len(text) > remaining {
+			if c.Markdown != "" {
+				c.Markdown = text[:remaining] + "\n...（当前文件内容已截断）..."
+			} else {
+				c.Content = text[:remaining] + "\n...（当前文件内容已截断）..."
+			}
+			out = append(out, c)
+			break
+		}
+		used += len(text)
+		out = append(out, c)
+	}
+	return out
+}
+
+func fileIDs(files []models.File) []uint {
+	ids := make([]uint, 0, len(files))
+	for _, f := range files {
+		ids = append(ids, f.ID)
+	}
+	return ids
+}
+
+func fileNameMap(files []models.File) map[uint]string {
+	names := make(map[uint]string, len(files))
+	for _, f := range files {
+		names[f.ID] = f.Filename
+	}
+	return names
+}
+
+func appendUniqueUint(dst []uint, values ...uint) []uint {
+	seen := make(map[uint]struct{}, len(dst)+len(values))
+	for _, v := range dst {
+		seen[v] = struct{}{}
+	}
+	for _, v := range values {
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		dst = append(dst, v)
+	}
+	return dst
+}
+
+func isImageModelFile(file models.File) bool {
+	return file.MimeType == "image" || strings.HasPrefix(file.MimeType, "image/")
+}
+
+const defaultNativeImageMaxBytes int64 = 20 * 1024 * 1024
+
+func supportsNativeVision(model string) bool {
+	return modelmeta.SupportsInput(model, "image")
+}
+
+func supportsNativeFileInput(model string) bool {
+	return strings.HasPrefix(model, "gpt-") || strings.HasPrefix(model, "gemini-")
+}
+
+func fileInputType(file models.File) string {
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	switch ext {
+	case ".pdf":
+		return "pdf"
+	case ".doc", ".docx":
+		return "word"
+	case ".xls", ".xlsx":
+		return "excel"
+	case ".ppt", ".pptx":
+		return "ppt"
+	case ".csv":
+		return "csv"
+	case ".txt", ".md":
+		return "txt"
+	case ".go", ".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".cpp", ".c", ".h", ".hpp", ".rs", ".php", ".rb", ".swift", ".kt", ".sql", ".sh", ".json", ".yaml", ".yml", ".toml", ".xml", ".html", ".css":
+		return "code"
+	default:
+		mimeType := strings.ToLower(strings.TrimSpace(file.MimeType))
+		if strings.Contains(mimeType, "pdf") {
+			return "pdf"
+		}
+		if strings.Contains(mimeType, "word") || strings.Contains(mimeType, "officedocument.wordprocessingml") {
+			return "word"
+		}
+		if strings.Contains(mimeType, "spreadsheet") || strings.Contains(mimeType, "excel") {
+			return "excel"
+		}
+		if strings.Contains(mimeType, "presentation") || strings.Contains(mimeType, "powerpoint") {
+			return "ppt"
+		}
+		if strings.Contains(mimeType, "csv") {
+			return "csv"
+		}
+		if strings.HasPrefix(mimeType, "text/") {
+			return "txt"
+		}
+		return ""
+	}
+}
+
+func nativeFileMimeType(file models.File) string {
+	mimeType := strings.TrimSpace(file.MimeType)
+	if mimeType != "" && mimeType != "application/octet-stream" {
+		return mimeType
+	}
+	switch strings.ToLower(filepath.Ext(file.Filename)) {
+	case ".pdf":
+		return "application/pdf"
+	case ".doc":
+		return "application/msword"
+	case ".docx":
+		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	case ".xls":
+		return "application/vnd.ms-excel"
+	case ".xlsx":
+		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	case ".ppt":
+		return "application/vnd.ms-powerpoint"
+	case ".pptx":
+		return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+	case ".csv":
+		return "text/csv"
+	case ".txt":
+		return "text/plain"
+	case ".md":
+		return "text/markdown"
+	case ".json":
+		return "application/json"
+	case ".html":
+		return "text/html"
+	case ".xml":
+		return "application/xml"
+	case ".yaml", ".yml":
+		return "application/yaml"
+	default:
+		return "text/plain"
+	}
+}
+
+func mimeTypeFromImageExt(filename string) string {
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	default:
+		return "image/png"
+	}
+}
+
+func maxFileContextTokensForModel(model string) int {
+	if strings.Contains(model, "flash") || strings.Contains(model, "8k") {
+		return 8000
+	}
+	if strings.Contains(model, "opus") || strings.Contains(model, "200k") {
+		return 12000
+	}
+	return 0
+}

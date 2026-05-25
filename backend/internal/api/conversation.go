@@ -375,7 +375,7 @@ func (h *ConversationHandler) GetMessages(c *gin.Context) {
 	type MessageWithGroup struct {
 		models.Message
 		GroupID     uint     `json:"group_id,omitempty"`
-		GroupIndex  int      `json:"group_index,omitempty"`
+		GroupIndex  int      `json:"group_index"`
 		GroupModels []string `json:"group_models,omitempty"`
 	}
 	result := make([]MessageWithGroup, len(messages))

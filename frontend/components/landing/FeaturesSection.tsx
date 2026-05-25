@@ -16,7 +16,7 @@ const features = [
   {
     icon: MessageSquare,
     title: "多模型聚合聊天",
-    desc: "同时调用 GPT-4.1、Claude 4、Gemini 2.5 等 20+ 顶级大模型，一键切换，对比回答，找到最佳答案。",
+    desc: "同时调用 GPT 5.5、GPT 5.4、Gemini 3.1、DeepSeek V4、Kimi K2.6 等顶级大模型，一键切换，对比回答，找到最佳答案。",
     color: "text-brand",
     bg: "bg-brand/10",
     border: "border-brand/20",
@@ -24,7 +24,7 @@ const features = [
   {
     icon: Palette,
     title: "AI 画图",
-    desc: "支持 GPT-image-2、DALL-E、Ideogram 等多种图像生成模型，从文字描述到艺术创作，一句话即可生成高质量图像。",
+    desc: "支持 GPT Image 2 等图像生成能力，从文字描述到艺术创作，一句话即可生成高质量图像。",
     color: "text-purple-500",
     bg: "bg-purple-500/10",
     border: "border-purple-500/20",

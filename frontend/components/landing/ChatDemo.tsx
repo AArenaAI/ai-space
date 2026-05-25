@@ -12,22 +12,22 @@ interface Message {
 }
 
 const demoMessages: Message[] = [
-  { role: "user", text: "用 Claude 4 解释量子计算，再用 GPT-4.1 对比下两者观点", delay: 500 },
-  { role: "ai", text: "Claude 4 强调逻辑推理与可解释性，量子位是计算的基本单位...", delay: 1200, icon: "brain" },
-  { role: "ai", text: "GPT-4.1 则从工程实用角度切入，更注重量子纠缠的实际应用场景...", delay: 2000, icon: "chat" },
+  { role: "user", text: "用 GPT 5.5 解释量子计算，再用 GPT 5.4 对比下两者观点", delay: 500 },
+  { role: "ai", text: "GPT 5.5 强调深度推理与可解释性，量子位是计算的基本单位...", delay: 1200, icon: "brain" },
+  { role: "ai", text: "GPT 5.4 则从工程实用角度切入，更注重量子纠缠的实际应用场景...", delay: 2000, icon: "chat" },
   { role: "user", text: "给我画一张未来城市的概念图", delay: 3200 },
-  { role: "ai", text: "正在使用 GPT-image-2 生成高质量概念图...", delay: 4000, icon: "image" },
+  { role: "ai", text: "正在使用 GPT Image 2 生成高质量概念图...", delay: 4000, icon: "image" },
   { role: "user", text: "帮我做一份关于 AI 发展历程的 PPT", delay: 5500 },
   { role: "ai", text: "正在生成 PPT 大纲，包含时间线、里程碑事件和未来展望...", delay: 6200, icon: "ppt" },
 ];
 
 function ModelBadge({ icon }: { icon: Message["icon"] }) {
   const configs = {
-    chat: { icon: Sparkles, color: "text-brand", bg: "bg-brand/10", label: "GPT-4.1" },
-    image: { icon: ImageIcon, color: "text-purple-500", bg: "bg-purple-500/10", label: "GPT-image-2" },
+    chat: { icon: Sparkles, color: "text-brand", bg: "bg-brand/10", label: "GPT 5.4" },
+    image: { icon: ImageIcon, color: "text-purple-500", bg: "bg-purple-500/10", label: "GPT Image 2" },
     ppt: { icon: Presentation, color: "text-orange-500", bg: "bg-orange-500/10", label: "AI PPT" },
     search: { icon: Search, color: "text-green-500", bg: "bg-green-500/10", label: "搜索" },
-    brain: { icon: Brain, color: "text-amber-500", bg: "bg-amber-500/10", label: "Claude 4" },
+    brain: { icon: Brain, color: "text-amber-500", bg: "bg-amber-500/10", label: "GPT 5.5" },
   };
   const cfg = icon && configs[icon] ? configs[icon] : configs.chat;
   const Icon = cfg.icon;

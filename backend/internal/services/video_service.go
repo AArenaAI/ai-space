@@ -3,8 +3,6 @@ package services
 import (
 	"context"
 	"fmt"
-	"strings"
-
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime"
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
 	"github.com/volcengine/volcengine-go-sdk/volcengine"
@@ -35,8 +33,8 @@ type CreateVideoTaskRequest struct {
 	GenerateAudio   bool
 	Watermark       bool
 	ReferenceImages []string // 可选的参考图 URL
-	ReferenceVideos []string // 可选的参考视频 URL
-	ReferenceAudios []string // 可选的参考音频 URL
+	ReferenceVideos []string // 可选的参考视频 URL（当前 SDK 分支暂不下发，仅保留 API 兼容）
+	ReferenceAudios []string // 可选的参考音频 URL（当前 SDK 分支暂不下发，仅保留 API 兼容）
 }
 
 // CreateVideoTaskResult 创建视频任务返回结果
@@ -65,28 +63,6 @@ func (s *VideoService) CreateVideoTask(ctx context.Context, req CreateVideoTaskR
 		})
 	}
 
-	// 添加参考视频
-	for _, url := range req.ReferenceVideos {
-		content = append(content, &model.CreateContentGenerationContentItem{
-			Type: model.ContentGenerationContentItemType("video_url"),
-			VideoURL: &model.VideoUrl{
-				Url: url,
-			},
-			Role: volcengine.String("reference_video"),
-		})
-	}
-
-	// 添加参考音频
-	for _, url := range req.ReferenceAudios {
-		content = append(content, &model.CreateContentGenerationContentItem{
-			Type: model.ContentGenerationContentItemType("audio_url"),
-			AudioURL: &model.AudioUrl{
-				Url: url,
-			},
-			Role: volcengine.String("reference_audio"),
-		})
-	}
-
 	createReq := model.CreateContentGenerationTaskRequest{
 		Model:         req.Model,
 		GenerateAudio: volcengine.Bool(req.GenerateAudio),
@@ -94,12 +70,11 @@ func (s *VideoService) CreateVideoTask(ctx context.Context, req CreateVideoTaskR
 		Watermark:     volcengine.Bool(req.Watermark),
 		Content:       content,
 	}
-	if !isSeedance20FastModel(req.Model) {
-		if req.Resolution != "" {
-			createReq.Resolution = volcengine.String(req.Resolution)
-		} else if req.Ratio != "" {
-			createReq.Ratio = volcengine.String(req.Ratio)
-		}
+	if req.Resolution != "" {
+		createReq.Resolution = volcengine.String(req.Resolution)
+	}
+	if req.Ratio != "" {
+		createReq.Ratio = volcengine.String(req.Ratio)
 	}
 
 	resp, err := s.client.CreateContentGenerationTask(ctx, createReq)
@@ -149,8 +124,4 @@ func (s *VideoService) GetVideoTask(ctx context.Context, taskID string) (*VideoT
 	}
 
 	return result, nil
-}
-
-func isSeedance20FastModel(model string) bool {
-	return strings.Contains(model, "doubao-seedance-2-0-fast") || strings.Contains(model, "seedance-2-0-fast")
 }

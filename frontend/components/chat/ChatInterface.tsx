@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useChat, ChatModel } from "@/hooks/useChat";
 import { useTemplates } from "@/hooks/useTemplates";
 import MessageList from "./MessageList";
 import MessageInput, { ReasoningConfig } from "./MessageInput";
 import ModelSelector from "./ModelSelector";
 import ThemeToggle from "@/components/theme/ThemeToggle";
-import { Columns2, Zap, X, Pencil } from "lucide-react";
+import { Zap, X, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -34,6 +34,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
   const { t, language } = useI18n();
   const [compareMode, setCompareMode] = useState(false);
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
+  const selectedModelsRef = useRef<string[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<number>(0);
   const [autoModelNotice, setAutoModelNotice] = useState(false);
   const [isComplexTask, setIsComplexTask] = useState(false);
@@ -42,6 +43,10 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
   const [forkTargetMessageId, setForkTargetMessageId] = useState<number | null>(null);
   const [messageSelectMode, setMessageSelectMode] = useState(false);
   const router = useRouter();
+
+  useEffect(() => {
+    selectedModelsRef.current = selectedModels;
+  }, [selectedModels]);
 
   const {
     messages,
@@ -264,7 +269,8 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
 
     if (compareMode) {
       // 对比模式 - 依次流式发送给多个模型
-      if (selectedModels.length < 2) {
+      const currentSelectedModels = selectedModelsRef.current.length ? selectedModelsRef.current : selectedModels;
+      if (currentSelectedModels.length < 2) {
         toast.error(t("chat.compareMinModels"));
         return;
       }
@@ -273,9 +279,9 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
         return;
       }
       // 前端目前没有后端返回的任务复杂度字段，先用用户发送时选择的推理档位判断复杂任务
-      setIsComplexTask(isComplexReasoningTask(reasoning, selectedModels));
+      setIsComplexTask(isComplexReasoningTask(reasoning, currentSelectedModels));
       const { templateId, templatePrefix } = getSelectedTemplatePayload();
-      await sendCompareMessages(content, selectedModels, reasoning, search, templateId, attachments, file_ids, templatePrefix);
+      await sendCompareMessages(content, currentSelectedModels, reasoning, search, templateId, attachments, file_ids, templatePrefix);
     } else {
       // 前端目前没有后端返回的任务复杂度字段，先用用户发送时选择的推理档位判断复杂任务
       setIsComplexTask(isComplexReasoningTask(reasoning));
@@ -300,10 +306,13 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
 
   const handleCompareModelChange = (index: number, modelId: string) => {
     setSelectedModels((prev) => {
-      const next = [...prev];
-      if (index < next.length) {
-        next[index] = modelId;
+      const fallback = prev.length ? prev : models.slice(0, Math.max(index + 1, 2)).map((m) => m.id);
+      const next = [...fallback];
+      while (next.length <= index) {
+        next.push(models[next.length]?.id || modelId);
       }
+      next[index] = modelId;
+      selectedModelsRef.current = next;
       localStorage.setItem(COMPARE_MODELS_KEY, JSON.stringify(next));
       return next;
     });
@@ -345,43 +354,46 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
     }
   };
 
+  const handleExitCompare = useCallback(() => {
+    setCompareMode(false);
+    localStorage.removeItem(COMPARE_KEY);
+    localStorage.removeItem(COMPARE_MODELS_KEY);
+    setIsCompare(false);
+    setCompareModels([]);
+  }, [setCompareMode, setIsCompare, setCompareModels]);
+
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
-      {/* 顶部栏 - 48px 高度 */}
-      <header className={compareMode ? "relative shrink-0 h-12 flex items-center justify-between px-4 transition-all duration-300 border-b border-amber-500/20" : "relative shrink-0 h-12 flex items-center justify-between px-4 transition-all duration-300"}>
-        <div className="flex items-center">
-          {compareMode ? (
-            <div className="flex items-center gap-1.5 text-sm text-text-secondary">
-              <Columns2 className="w-3.5 h-3.5 text-amber-400" />
-              <span>{t("chat.compareMode")}</span>
-            </div>
-          ) : (
+      {/* 顶部栏 - 对比模式下隐藏，释放垂直空间 */}
+      {!(compareMode || isCompare) && (
+        <header className="relative shrink-0 h-12 flex items-center justify-between px-4 transition-all duration-300">
+          <div className="flex items-center">
             <ModelSelector
               models={models}
               selected={selectedModel}
               onSelect={handleModelSelect}
             />
-          )}
-        </div>
-
-        {/* 中间：对话标题 + 编辑 */}
-        {conversationTitle && (
-          <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5 max-w-[50%]">
-            <span className="text-base font-bold text-text-primary truncate">{conversationTitle}</span>
-            <button
-              onClick={() => setRenameOpen(true)}
-              className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors shrink-0"
-              title={t("chat.rename")}
-            >
-              <Pencil className="w-3.5 h-3.5" />
-            </button>
           </div>
-        )}
 
-        <div className="flex items-center gap-2">
-          <ThemeToggle />
-        </div>
-      </header>
+          {/* 中间：对话标题 + 编辑 */}
+          {conversationTitle && (
+            <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5 max-w-[50%]">
+              <span className="text-base font-bold text-text-primary truncate">{conversationTitle}</span>
+              <button
+                onClick={() => setRenameOpen(true)}
+                className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors shrink-0"
+                title={t("chat.rename")}
+              >
+                <Pencil className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+          </div>
+        </header>
+      )}
 
       {/* 自动选择模型提示条 */}
       {autoModelNotice && recommendedModel && (
@@ -434,6 +446,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
         onLoadMore={loadMoreMessages}
         targetMessageId={currentConversation === conversationId ? targetMessageId : undefined}
         onSelectModeChange={setMessageSelectMode}
+        onExitCompare={handleExitCompare}
       />
 
       {/* 重命名对话 */}
@@ -468,7 +481,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
 
       {!messageSelectMode && (
         /* 输入框：脱离列表文档流，固定在底部，避免生成时挤压消息区 */
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[70] bg-gradient-to-t from-surface-elevated via-surface-elevated to-transparent pt-6">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[70] bg-gradient-to-t from-surface-elevated via-surface-elevated via-60% to-transparent pt-10">
           <div className="pointer-events-auto relative z-[70]">
           <MessageInput
             onSend={handleSend}

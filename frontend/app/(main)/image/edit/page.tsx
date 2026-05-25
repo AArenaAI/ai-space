@@ -649,11 +649,6 @@ function ImageEditContent() {
                           <Spinner className="h-12 w-12 animate-spin text-purple-500" />
                           <div className="text-center">
                             <p className="text-base font-semibold text-gray-800 dark:text-text-primary">AI 正在处理</p>
-                            <p className="mt-1 text-sm text-gray-400 dark:text-text-tertiary">
-                              {editMode === "upscale"
-                                ? "预计用时 15～45 秒"
-                                : "预计用时 5～15 秒"}
-                            </p>
                           </div>
                         </div>
                       ) : (

@@ -33,12 +33,11 @@ export interface VideoChatPayload {
   model: string;
   ratio?: string;
   aspect_ratio?: string;
+  resolution?: string;
   duration?: number;
   generate_audio?: boolean;
   watermark?: boolean;
   reference_image_urls?: string[];
-  reference_video_urls?: string[];
-  reference_audio_urls?: string[];
 }
 
 const API_BASE_URL = "";

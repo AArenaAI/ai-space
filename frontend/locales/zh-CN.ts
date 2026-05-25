@@ -175,7 +175,7 @@ const translations: Record<string, string> = {
   "sidebar.tooltip.chat": "新建对话",
   "sidebar.tooltip.favorites": "收藏",
   "sidebar.tooltip.history": "历史对话",
-  "sidebar.tooltip.search": "搜索对话",
+  "sidebar.tooltip.search": "搜索",
   "sidebar.tooltip.workspace": "工作区",
   "auth.confirmPassword": "确认密码",
   "auth.confirmPasswordPlaceholder": "再次输入密码",

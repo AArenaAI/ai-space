@@ -2,6 +2,7 @@ package api
 
 import (
 	"aipool-backend/internal/config"
+	"aipool-backend/internal/modelmeta"
 	"aipool-backend/internal/models"
 	"aipool-backend/internal/services"
 	"aipool-backend/internal/skills"
@@ -27,11 +28,12 @@ type ChatHandler struct {
 	fileService    *services.FileService
 	retrievalSvc   *services.RetrievalService
 	contextBuilder *services.ContextBuilder
+	fileContext    *services.FileContextOrchestrator
 	usageService   *services.UsageService
 }
 
 func NewChatHandler(db *gorm.DB, cfg *config.Config, aiService *services.AIService, searchService *services.SearchService, fileService *services.FileService, retrievalSvc *services.RetrievalService, contextBuilder *services.ContextBuilder, usageService *services.UsageService) *ChatHandler {
-	return &ChatHandler{db: db, cfg: cfg, aiService: aiService, searchService: searchService, fileService: fileService, retrievalSvc: retrievalSvc, contextBuilder: contextBuilder, usageService: usageService}
+	return &ChatHandler{db: db, cfg: cfg, aiService: aiService, searchService: searchService, fileService: fileService, retrievalSvc: retrievalSvc, contextBuilder: contextBuilder, fileContext: services.NewFileContextOrchestrator(db, retrievalSvc, contextBuilder), usageService: usageService}
 }
 
 func (h *ChatHandler) touchConversation(conversationID uint) {
@@ -147,10 +149,9 @@ type CompareResult struct {
 	GroupID   uint   `json:"group_id,omitempty"`
 }
 
-
 // 从 model_id 查找模型显示名（从 models_handler.go 的 SupportedModels）
 func findModelName(modelID string) string {
-	if model, ok := FindModelInfo(modelID); ok {
+	if model, ok := modelmeta.FindModelInfo(modelID); ok {
 		return model.Name
 	}
 	return modelID
@@ -407,6 +408,51 @@ func makeFileNameMap(files []models.File) map[uint]string {
 	return names
 }
 
+func applyFileContextPackage(messages []services.Message, pkg services.FileContextPackage) []services.Message {
+	if pkg.SystemPrompt != "" {
+		fileMsg := services.Message{Role: "system", Content: pkg.SystemPrompt}
+		messages = append([]services.Message{fileMsg}, messages...)
+	}
+	if len(pkg.NativeParts) == 0 {
+		return messages
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role != "user" {
+			continue
+		}
+		for _, part := range pkg.NativeParts {
+			if part.Type == "image" && strings.TrimSpace(part.DataURI) != "" {
+				messages[i].Images = append(messages[i].Images, part.DataURI)
+			} else if part.Type == "file" && strings.TrimSpace(part.DataURI) != "" {
+				messages[i].Files = append(messages[i].Files, services.NativeFile{
+					Filename: part.Filename,
+					MimeType: part.MimeType,
+					DataURI:  part.DataURI,
+					FileID:   part.FileID,
+				})
+			}
+		}
+		return messages
+	}
+	return messages
+}
+
+func countMessageImages(messages []services.Message) int {
+	total := 0
+	for _, msg := range messages {
+		total += len(msg.Images)
+	}
+	return total
+}
+
+func countMessageNativeFiles(messages []services.Message) int {
+	total := 0
+	for _, msg := range messages {
+		total += len(msg.Files)
+	}
+	return total
+}
+
 func (h *ChatHandler) loadConversationFiles(conversationID uint, userID uint, guestID string, limit int, includePinned bool) []models.File {
 	if conversationID == 0 {
 		return nil
@@ -438,9 +484,9 @@ func (h *ChatHandler) loadConversationFiles(conversationID uint, userID uint, gu
 }
 
 type ChatFilePlan struct {
-	MessageFiles []models.File // 当前消息附件，写 message_files
-	ContextFiles []models.File // 显式上下文文件，不展示在消息
-	RAGFiles     []models.File // 本轮实际进入 buildFileContext 的文件
+	MessageFiles    []models.File // 当前消息附件，写 message_files，并走 direct context
+	ContextFiles    []models.File // 显式上下文文件，不展示在消息，走历史/补充上下文
+	HistoricalFiles []models.File // 本轮可作为补充上下文的历史文件
 }
 
 func (h *ChatHandler) buildChatFilePlan(req ChatRequest, userID uint, guestID string) ChatFilePlan {
@@ -453,8 +499,15 @@ func (h *ChatHandler) buildChatFilePlan(req ChatRequest, userID uint, guestID st
 	_, _, messageFiles := h.resolveChatFiles(messagePublicIDs, userID, guestID)
 	_, _, contextFiles := h.resolveChatFiles(req.ContextFileIDs, userID, guestID)
 
-	ragFiles := appendUniqueFiles(nil, messageFiles...)
-	ragFiles = appendUniqueFiles(ragFiles, contextFiles...)
+	// 当前消息显式带了附件时，进入“当前附件隔离模式”：
+	// 只回答本轮上传/附加的文件，不把历史会话文件或显式 context_file_ids 混进来。
+	// 目标效果：上传 A 回答 A；下一轮上传 B 回答 B，而不是被 A 的历史上下文污染。
+	isCurrentAttachmentTurn := len(messageFiles) > 0
+
+	historicalFiles := appendUniqueFiles(nil, contextFiles...)
+	if isCurrentAttachmentTurn {
+		historicalFiles = nil
+	}
 
 	mode := req.ContextPolicy.UseConversationFiles
 	if mode == "" {
@@ -465,7 +518,7 @@ func (h *ChatHandler) buildChatFilePlan(req ChatRequest, userID uint, guestID st
 	shouldUseConversationFiles := false
 	switch mode {
 	case "always":
-		shouldUseConversationFiles = true
+		shouldUseConversationFiles = !isCurrentAttachmentTurn
 	case "never":
 		shouldUseConversationFiles = false
 	default: // auto
@@ -492,13 +545,13 @@ func (h *ChatHandler) buildChatFilePlan(req ChatRequest, userID uint, guestID st
 			limit,
 			req.ContextPolicy.IncludePinnedFiles,
 		)
-		ragFiles = appendUniqueFiles(ragFiles, conversationFiles...)
+		historicalFiles = appendUniqueFiles(historicalFiles, conversationFiles...)
 	}
 
 	return ChatFilePlan{
-		MessageFiles: messageFiles,
-		ContextFiles: contextFiles,
-		RAGFiles:     ragFiles,
+		MessageFiles:    messageFiles,
+		ContextFiles:    contextFiles,
+		HistoricalFiles: historicalFiles,
 	}
 }
 
@@ -628,7 +681,7 @@ func (h *ChatHandler) preprocessSearch(messages []services.Message, modelID stri
 		return messages, nil, false
 	}
 
-	if SupportsSearch(modelID) {
+	if modelmeta.SupportsSearch(modelID) {
 		return messages, nil, true
 	}
 
@@ -748,22 +801,25 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		filePlan = h.buildChatFilePlan(req, userID, guestID)
 	}
 
-	// 检查文件是否解析完成
-	for _, f := range filePlan.RAGFiles {
-		if f.ParseStatus != "done" {
-			c.JSON(http.StatusConflict, gin.H{"error": "file_not_ready", "message": "文件正在解析中，请稍后重试", "file_id": f.PublicID, "status": f.ParseStatus})
-			return
-		}
-	}
-
-	ragFileNames := makeFileNameMap(filePlan.RAGFiles)
-	if len(filePlan.RAGFiles) > 0 {
-		fileContext := h.buildFileContext(filePlan.RAGFiles, ragFileNames, query, req.Model, false, "Chat")
-		if fileContext != "" {
-			fileMsg := services.Message{Role: "system", Content: fileContext}
-			req.Messages = append([]services.Message{fileMsg}, req.Messages...)
-			fmt.Printf("[Chat RAG] injected system message with file context\n")
-		}
+	if len(filePlan.MessageFiles) > 0 || len(filePlan.HistoricalFiles) > 0 {
+		fileContextPackage := h.fileContext.Build(services.FileContextBuildRequest{
+			CurrentFiles:    filePlan.MessageFiles,
+			HistoricalFiles: filePlan.HistoricalFiles,
+			Query:           query,
+			Model:           req.Model,
+			LogPrefix:       "Chat",
+		})
+		beforeNativeImages := countMessageImages(req.Messages)
+		beforeNativeFiles := countMessageNativeFiles(req.Messages)
+		req.Messages = applyFileContextPackage(req.Messages, fileContextPackage)
+		fmt.Printf("[Chat FileContext] injected context usedFiles=%v nativeParts=%d nativeImagesAdded=%d nativeFilesAdded=%d warnings=%d systemPrompt=%v\n",
+			fileContextPackage.UsedFileIDs,
+			len(fileContextPackage.NativeParts),
+			countMessageImages(req.Messages)-beforeNativeImages,
+			countMessageNativeFiles(req.Messages)-beforeNativeFiles,
+			len(fileContextPackage.Warnings),
+			fileContextPackage.SystemPrompt != "",
+		)
 
 		// 保存文件与会话的关联：message_files + context_files 都进入 conversation_files 池
 		allFiles := appendUniqueFiles(nil, filePlan.MessageFiles...)
@@ -810,8 +866,8 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 	if len(req.Messages) > 0 {
 		lastUserQuery = req.Messages[len(req.Messages)-1].Content
 	}
-	if len(filePlan.RAGFiles) > 0 && isFileQuestion(lastUserQuery) {
-		fmt.Printf("[Chat] 文件问答模式，跳过联网搜索 ragFiles=%v query=%q\n", filePlan.RAGFiles, lastUserQuery)
+	if (len(filePlan.MessageFiles) > 0 || len(filePlan.HistoricalFiles) > 0) && isFileQuestion(lastUserQuery) {
+		fmt.Printf("[Chat] 文件问答模式，跳过联网搜索 currentFiles=%d historicalFiles=%d query=%q\n", len(filePlan.MessageFiles), len(filePlan.HistoricalFiles), lastUserQuery)
 		searchSources = nil
 		useSearchTool = false
 	} else {
@@ -2182,21 +2238,20 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 		filePlan = h.buildChatFilePlan(chatReq, userID, guestID)
 	}
 
-	if len(filePlan.RAGFiles) > 0 {
-		// 检查文件是否解析完成
-		for _, f := range filePlan.RAGFiles {
-			if f.ParseStatus != "done" {
-				c.JSON(http.StatusConflict, gin.H{"error": "file_not_ready", "message": "文件正在解析中，请稍后重试", "file_id": f.PublicID, "status": f.ParseStatus})
-				return
-			}
-		}
-
-		ragFileNames := makeFileNameMap(filePlan.RAGFiles)
-		fileContext := h.buildFileContext(filePlan.RAGFiles, ragFileNames, req.Query, "compare", false, "Compare")
-		if fileContext != "" {
-			fileMsg := services.Message{Role: "system", Content: fileContext}
-			messages = append([]services.Message{fileMsg}, messages...)
-		}
+	if len(filePlan.MessageFiles) > 0 || len(filePlan.HistoricalFiles) > 0 {
+		fileContextPackage := h.fileContext.Build(services.FileContextBuildRequest{
+			CurrentFiles:    nil,
+			HistoricalFiles: filePlan.HistoricalFiles,
+			Query:           req.Query,
+			Model:           "compare",
+			LogPrefix:       "Compare",
+		})
+		messages = applyFileContextPackage(messages, fileContextPackage)
+		fmt.Printf("[Compare FileContext] injected historical context usedFiles=%v warnings=%d systemPrompt=%v\n",
+			fileContextPackage.UsedFileIDs,
+			len(fileContextPackage.Warnings),
+			fileContextPackage.SystemPrompt != "",
+		)
 
 		// 保存文件与会话的关联
 		allFiles := appendUniqueFiles(nil, filePlan.MessageFiles...)
@@ -2219,10 +2274,31 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 	for i, modelID := range req.ModelIDs {
 		go func(idx int, modelID string) {
 			start := time.Now()
+			baseMessages := messages
+			if len(filePlan.MessageFiles) > 0 {
+				currentPkg := h.fileContext.Build(services.FileContextBuildRequest{
+					CurrentFiles:    filePlan.MessageFiles,
+					HistoricalFiles: nil,
+					Query:           req.Query,
+					Model:           modelID,
+					LogPrefix:       "Compare",
+				})
+				beforeImages := countMessageImages(baseMessages)
+				baseMessages = applyFileContextPackage(baseMessages, currentPkg)
+				fmt.Printf("[Compare FileContext] model=%s currentFiles=%d nativeParts=%d nativeImagesAdded=%d warnings=%d\n",
+					modelID,
+					len(filePlan.MessageFiles),
+					len(currentPkg.NativeParts),
+					countMessageImages(baseMessages)-beforeImages,
+					len(currentPkg.Warnings),
+				)
+			}
 			modelMessages := searchMessages
 			useSearchTool := compareUseSearchTool
 			if req.Search {
-				modelMessages, _, useSearchTool = h.preprocessSearch(messages, modelID, req.Search, c.ClientIP())
+				modelMessages, _, useSearchTool = h.preprocessSearch(baseMessages, modelID, req.Search, c.ClientIP())
+			} else {
+				modelMessages = baseMessages
 			}
 			content, err := h.callModel(ctx, modelID, modelMessages, req.Reasoning, req.ReasoningEffort, useSearchTool)
 			elapsed := time.Since(start).Milliseconds()

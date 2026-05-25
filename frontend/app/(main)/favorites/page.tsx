@@ -53,21 +53,21 @@ export default function FavoritesPage() {
 
   return (
     <div className="flex h-full flex-col bg-surface-elevated">
-      <div className="flex-1 overflow-y-auto px-6 py-6 md:px-10 md:py-8">
+      <div className="flex-1 overflow-y-auto px-6 py-4 md:px-10 md:py-6">
         <div className="mx-auto flex min-h-full w-full max-w-7xl flex-col">
-          <section className="relative overflow-hidden rounded-2xl border border-surface-border bg-surface-card px-6 py-6 md:px-8 md:py-7">
-            <div className="pointer-events-none absolute right-8 top-6 hidden h-28 w-28 rounded-full bg-brand/10 blur-3xl md:block" />
-            <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <section className="relative overflow-hidden rounded-2xl border border-surface-border bg-surface-card px-5 py-4 md:px-6 md:py-5">
+            <div className="pointer-events-none absolute right-8 top-4 hidden h-28 w-28 rounded-full bg-brand/10 blur-3xl md:block" />
+            <div className="relative flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
               <div>
-                <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-surface-border bg-surface-elevated px-3 py-1 text-xs text-text-secondary">
+                <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-surface-border bg-surface-elevated px-3 py-1 text-xs text-text-secondary">
                   <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
                   高价值回答库
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
-                  <h1 className="text-3xl font-semibold tracking-tight text-text-primary md:text-4xl">我的收藏</h1>
+                  <h1 className="text-2xl font-semibold tracking-tight text-text-primary md:text-3xl">我的收藏</h1>
                   <span className="rounded-full bg-brand px-3 py-1 text-sm font-medium text-white">{total}</span>
                 </div>
-                <p className="mt-3 max-w-2xl text-sm leading-6 text-text-secondary md:text-base">沉淀高价值回答，随时回到原对话继续追问。</p>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-text-secondary">沉淀高价值回答，随时回到原对话继续追问。</p>
               </div>
 
               <div className="relative w-full lg:w-[420px]">

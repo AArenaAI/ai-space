@@ -24,11 +24,10 @@ func NewContextBuilder() *ContextBuilder {
 // Build 从检索结果构造系统上下文
 // maxTokens: 最大允许的 token 数，0 表示不限制
 func (b *ContextBuilder) Build(fileContexts []FileContext, query string, maxTokens int) string {
-	if len(fileContexts) == 0 {
+	section := b.BuildSection("files", fileContexts, query, maxTokens, 100000)
+	if section == "" {
 		return ""
 	}
-
-	const maxTotalChars = 100000 // 100K 字符总字数硬顶
 
 	var sb strings.Builder
 	sb.WriteString("<file_context>\n")
@@ -42,7 +41,22 @@ func (b *ContextBuilder) Build(fileContexts []FileContext, query string, maxToke
 	sb.WriteString("如果查询与文件内容无关，请直接回答问题，不需强行引用文件。\n")
 	sb.WriteString("引用文件时请注明来源文件名称。\n")
 	sb.WriteString("</instruction>\n\n")
+	sb.WriteString(section)
+	sb.WriteString("\n</file_context>\n")
+	return sb.String()
+}
 
+// BuildSection 构造 file_context 内部的一个分区，不自带 <file_context> 外壳。
+func (b *ContextBuilder) BuildSection(sectionName string, fileContexts []FileContext, query string, maxTokens int, maxTotalChars int) string {
+	if len(fileContexts) == 0 {
+		return ""
+	}
+	if maxTotalChars <= 0 {
+		maxTotalChars = 100000
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("<%s>\n", sectionName))
 	totalTokens := estimateTokens(sb.String())
 
 	for _, fc := range fileContexts {
@@ -62,13 +76,11 @@ func (b *ContextBuilder) Build(fileContexts []FileContext, query string, maxToke
 				break
 			}
 			if len(chunkText) > remainingChars {
-				if remainingChars > len("\n... (已达到总字数上限) ...\n") {
-					marker := "\n... (已达到总字数上限) ...\n"
+				marker := "\n... (已达到总字数上限) ...\n"
+				if remainingChars > len(marker) {
 					sb.WriteString(chunkText[:remainingChars-len(marker)])
-					sb.WriteString(marker)
-				} else {
-					sb.WriteString("\n... (已达到总字数上限) ...\n")
 				}
+				sb.WriteString(marker)
 				break
 			}
 
@@ -88,7 +100,7 @@ func (b *ContextBuilder) Build(fileContexts []FileContext, query string, maxToke
 		}
 	}
 
-	sb.WriteString("</file_context>\n")
+	sb.WriteString(fmt.Sprintf("</%s>", sectionName))
 	return sb.String()
 }
 

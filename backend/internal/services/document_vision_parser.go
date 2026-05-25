@@ -37,6 +37,7 @@ func (p *FileParser) parseComplexDocumentWithVision(ctx context.Context, data []
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = defaultVisionDocTimeoutSeconds
 	}
+	fmt.Printf("[DocVision] start filename=%s size=%d maxMB=%d timeout=%ds\n", filename, len(data), maxMB, timeoutSeconds)
 	parseCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
 
@@ -54,11 +55,13 @@ func (p *FileParser) parseComplexDocumentWithVision(ctx context.Context, data []
 
 	pdfPath := inputPath
 	if ext == ".docx" || ext == ".pptx" {
+		fmt.Printf("[DocVision] converting office to pdf filename=%s\n", filename)
 		converted, err := convertOfficeDocumentToPDF(parseCtx, inputPath, tmpDir)
 		if err != nil {
 			return nil, err
 		}
 		pdfPath = converted
+		fmt.Printf("[DocVision] converted office to pdf filename=%s pdf=%s\n", filename, filepath.Base(pdfPath))
 	}
 
 	pageImages, err := renderPDFToPNGs(parseCtx, pdfPath, tmpDir)
@@ -68,6 +71,7 @@ func (p *FileParser) parseComplexDocumentWithVision(ctx context.Context, data []
 	if len(pageImages) == 0 {
 		return nil, fmt.Errorf("文档视觉解析失败: 未生成页面图片")
 	}
+	fmt.Printf("[DocVision] rendered pages filename=%s pages=%d\n", filename, len(pageImages))
 
 	var content strings.Builder
 	var chunks []TextChunk
@@ -75,6 +79,7 @@ func (p *FileParser) parseComplexDocumentWithVision(ctx context.Context, data []
 	hasTables := false
 
 	for i, imagePath := range pageImages {
+		fmt.Printf("[DocVision] page vision start filename=%s page=%d/%d\n", filename, i+1, len(pageImages))
 		select {
 		case <-parseCtx.Done():
 			return nil, fmt.Errorf("文档视觉解析超时: %w", parseCtx.Err())
@@ -89,6 +94,7 @@ func (p *FileParser) parseComplexDocumentWithVision(ctx context.Context, data []
 		if err != nil {
 			return nil, fmt.Errorf("第 %d 页视觉解析失败: %w", i+1, err)
 		}
+		fmt.Printf("[DocVision] page vision done filename=%s page=%d chars=%d\n", filename, i+1, len(strings.TrimSpace(pageText)))
 		pageText = strings.TrimSpace(pageText)
 		if pageText == "" {
 			continue
@@ -119,6 +125,7 @@ func (p *FileParser) parseComplexDocumentWithVision(ctx context.Context, data []
 	if resultContent == "" {
 		return nil, fmt.Errorf("文档视觉解析失败: 返回内容为空")
 	}
+	fmt.Printf("[DocVision] success filename=%s pages=%d chunks=%d chars=%d\n", filename, len(pageImages), len(chunks), len(resultContent))
 
 	return &ParseResult{
 		Content:     resultContent,

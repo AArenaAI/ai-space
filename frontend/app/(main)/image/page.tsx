@@ -59,6 +59,19 @@ const RESOLUTIONS = [
   { value: "4K", label: "4K", desc: "3840px" },
 ];
 
+const VIDEO_ASPECT_RATIOS = [
+  { value: "16:9", label: "16:9", w: 16, h: 9 },
+  { value: "4:3", label: "4:3", w: 4, h: 3 },
+  { value: "1:1", label: "1:1", w: 1, h: 1 },
+  { value: "3:4", label: "3:4", w: 3, h: 4 },
+  { value: "9:16", label: "9:16", w: 9, h: 16 },
+  { value: "21:9", label: "21:9", w: 21, h: 9 },
+  { value: "adaptive", label: "adaptive", w: 1, h: 1 },
+];
+
+const VIDEO_RESOLUTIONS = ["480p", "720p", "1080p"];
+const VIDEO_DURATIONS = ["4s", "5s", "6s", "7s", "9s", "10s", "11s", "13s", "14s", "15s"];
+
 const QUALITIES = [
   { value: "low", label: "Low" },
   { value: "medium", label: "Med" },
@@ -278,6 +291,8 @@ export default function ImagePage() {
   const [prompt, setPrompt] = useState("");
   const [selectedAspectRatio, setSelectedAspectRatio] = useState("auto");
   const [selectedResolution, setSelectedResolution] = useState("1K");
+  const [selectedVideoAspectRatio, setSelectedVideoAspectRatio] = useState("adaptive");
+  const [selectedVideoResolution, setSelectedVideoResolution] = useState("720p");
   const [selectedModel, setSelectedModel] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
@@ -291,7 +306,7 @@ export default function ImagePage() {
   const [showHistory, setShowHistory] = useState(false);
   const [limitDialogOpen, setLimitDialogOpen] = useState(false);
   const [mode, setMode] = useState<"image" | "video">("image");
-  const [selectedDuration, setSelectedDuration] = useState("4s");
+  const [selectedDuration, setSelectedDuration] = useState("5s");
   const [durationMenuOpen, setDurationMenuOpen] = useState(false);
   const [musicEnabled, setMusicEnabled] = useState(false);
   const [videoModelMenuOpen, setVideoModelMenuOpen] = useState(false);
@@ -299,6 +314,8 @@ export default function ImagePage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentVideoModel = videoModels.find((m) => m.id === selectedVideoModel) || videoModels[0];
+  const isFastVideoModel = (currentVideoModel?.id || selectedVideoModel).includes("seedance-2-0-fast");
+  const availableVideoResolutions = isFastVideoModel ? VIDEO_RESOLUTIONS.filter((res) => res !== "1080p") : VIDEO_RESOLUTIONS;
 
   // 默认选第一个画图模型
   useEffect(() => {
@@ -315,8 +332,15 @@ export default function ImagePage() {
 
   const currentModel = imageModels.find((m) => m.id === selectedModel) || imageModels[0];
   const currentAspect = ASPECT_RATIOS.find((a) => a.value === selectedAspectRatio) || ASPECT_RATIOS[0];
+  const currentVideoAspect = VIDEO_ASPECT_RATIOS.find((a) => a.value === selectedVideoAspectRatio) || VIDEO_ASPECT_RATIOS[VIDEO_ASPECT_RATIOS.length - 1];
 
   const hasContent = prompt.trim().length > 0;
+
+  useEffect(() => {
+    if (isFastVideoModel && selectedVideoResolution === "1080p") {
+      setSelectedVideoResolution("720p");
+    }
+  }, [isFastVideoModel, selectedVideoResolution]);
 
   const uploadReferenceImage = useCallback(async (file: File) => {
     setUploadingRef(true);
@@ -366,7 +390,6 @@ export default function ImagePage() {
     }
     const params = new URLSearchParams();
     params.set("prompt", prompt.trim());
-    params.set("aspect", selectedAspectRatio);
     if (referenceImages.length > 0) {
       params.set("refs", referenceImages.join(","));
     }
@@ -377,6 +400,8 @@ export default function ImagePage() {
         return;
       }
       if (currentVideoModel?.id) params.set("model", currentVideoModel.id);
+      params.set("aspect", selectedVideoAspectRatio);
+      params.set("resolution", selectedVideoResolution);
       params.set("duration", selectedDuration);
       if (musicEnabled) params.set("audio", "1");
       router.push(`/video/chat?${params.toString()}`);
@@ -388,6 +413,7 @@ export default function ImagePage() {
       return;
     }
 
+    params.set("aspect", selectedAspectRatio);
     params.set("resolution", selectedResolution);
     params.set("quality", selectedQuality);
     router.push(`/image/chat?${params.toString()}`);
@@ -788,7 +814,7 @@ export default function ImagePage() {
                       <span>参考图像</span>
                     </button>
 
-                    {/* 画幅|分辨率 */}
+                    {/* 画幅|清晰度 */}
                     <div className="relative">
                       <button
                         onClick={() => setAspectMenuOpen(!aspectMenuOpen)}
@@ -796,7 +822,7 @@ export default function ImagePage() {
                       >
                         <Layers className="w-3.5 h-3.5" />
                         <span>
-                          {currentAspect.label} | {selectedResolution}
+                          {currentVideoAspect.label} | {selectedVideoResolution}
                         </span>
                         <ChevronDown className="w-3 h-3" />
                       </button>
@@ -806,12 +832,12 @@ export default function ImagePage() {
                           <div className="absolute top-full left-0 mt-1.5 w-[340px] z-50 rounded-xl border border-surface-border bg-surface-elevated shadow-xl p-4 animate-fade-in">
                             <div className="text-xs font-medium text-text-secondary mb-3">纵横比</div>
                             <div className="grid grid-cols-5 gap-2">
-                              {ASPECT_RATIOS.map((ar) => {
-                                const active = selectedAspectRatio === ar.value;
+                              {VIDEO_ASPECT_RATIOS.map((ar) => {
+                                const active = selectedVideoAspectRatio === ar.value;
                                 return (
                                   <button
                                     key={ar.value}
-                                    onClick={() => setSelectedAspectRatio(ar.value)}
+                                    onClick={() => setSelectedVideoAspectRatio(ar.value)}
                                     className={cn(
                                       "flex flex-col items-center gap-1 px-1 py-2 rounded-lg border text-[10px] transition-all duration-200",
                                       active
@@ -825,21 +851,20 @@ export default function ImagePage() {
                                 );
                               })}
                             </div>
-                            <div className="text-xs font-medium text-text-secondary mt-4 mb-2">分辨率</div>
+                            <div className="text-xs font-medium text-text-secondary mt-4 mb-2">清晰度</div>
                             <div className="flex gap-2">
-                              {RESOLUTIONS.map((res) => (
+                              {availableVideoResolutions.map((res) => (
                                 <button
-                                  key={res.value}
-                                  onClick={() => setSelectedResolution(res.value)}
+                                  key={res}
+                                  onClick={() => setSelectedVideoResolution(res)}
                                   className={cn(
-                                    "flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border text-xs transition-all duration-200",
-                                    selectedResolution === res.value
+                                    "flex-1 flex items-center justify-center px-3 py-2 rounded-lg border text-xs font-semibold transition-all duration-200",
+                                    selectedVideoResolution === res
                                       ? "bg-brand/10 border-brand/40 text-brand"
                                       : "bg-surface border-surface-border text-text-secondary hover:border-text-tertiary/50"
                                   )}
                                 >
-                                  <span className="font-semibold">{res.label}</span>
-                                  <span className="text-[10px] opacity-70">{res.desc}</span>
+                                  {res}
                                 </button>
                               ))}
                             </div>
@@ -862,7 +887,7 @@ export default function ImagePage() {
                         <>
                           <div className="fixed inset-0 z-40" onClick={() => setDurationMenuOpen(false)} />
                           <div className="absolute top-full left-0 mt-1.5 w-28 z-50 rounded-xl border border-surface-border bg-surface-elevated shadow-xl py-1 animate-fade-in">
-                            {["4s", "6s", "8s", "10s", "12s"].map((d) => (
+                            {VIDEO_DURATIONS.map((d) => (
                               <button
                                 key={d}
                                 onClick={() => {

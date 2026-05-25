@@ -52,7 +52,7 @@ type Message struct {
 	DeletedAt          gorm.DeletedAt `gorm:"index" json:"-"`
 
 	GroupID    uint `gorm:"index" json:"group_id,omitempty"` // 所属消息组
-	GroupIndex int  `json:"group_index,omitempty"`           // 在组内的顺序
+	GroupIndex int  `json:"group_index"`                     // 在组内的顺序；0 是有效列位，不能 omitempty
 
 	// 文件关联（仅 user 消息可能有）
 	MessageFiles []MessageFile `json:"files,omitempty" gorm:"foreignKey:MessageID"`

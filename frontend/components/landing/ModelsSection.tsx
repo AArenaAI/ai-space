@@ -12,39 +12,39 @@ interface Model {
 
 const models: Model[] = [
   {
-    name: "GPT-4.1",
+    name: "GPT 5.5 Pro",
     provider: "OpenAI",
-    features: ["文本对话", "代码生成", "联网搜索"],
+    features: ["旗舰对话", "深度推理", "联网搜索"],
     color: "from-green-500/20 to-emerald-500/10",
   },
   {
-    name: "Claude 4",
-    provider: "Anthropic",
-    features: ["深度推理", "文档分析", "创意写作"],
+    name: "GPT 5.4",
+    provider: "OpenAI",
+    features: ["通用写作", "代码生成", "复杂分析"],
     color: "from-amber-500/20 to-orange-500/10",
   },
   {
-    name: "Gemini 2.5",
+    name: "Gemini 3.1 Pro",
     provider: "Google",
     features: ["多模态理解", "长上下文", "实时检索"],
     color: "from-blue-500/20 to-cyan-500/10",
   },
   {
-    name: "GPT-image-2",
+    name: "GPT Image 2",
     provider: "OpenAI",
     features: ["文生图", "图片编辑", "高分辨率"],
     color: "from-purple-500/20 to-pink-500/10",
   },
   {
-    name: "DeepSeek-V3",
+    name: "DeepSeek-V4 Pro",
     provider: "DeepSeek",
     features: ["中文优化", "数学推导", "编程辅助"],
     color: "from-rose-500/20 to-red-500/10",
   },
   {
-    name: "Qwen3-235B",
-    provider: "Alibaba",
-    features: ["多语言", "代码执行", "工具调用"],
+    name: "Kimi K2.6",
+    provider: "Moonshot",
+    features: ["多模态", "长上下文", "推理增强"],
     color: "from-indigo-500/20 to-violet-500/10",
   },
 ];
@@ -63,7 +63,7 @@ export default function ModelsSection() {
             模型聚合
           </div>
           <h2 className="text-3xl sm:text-4xl font-bold text-text-primary mb-4">
-            20+ 顶级模型，一站式调用
+            10+ 顶级模型，一站式调用
           </h2>
           <p className="text-text-secondary max-w-2xl mx-auto">
             无需切换多个平台，一个入口即可访问全球领先的 AI 模型

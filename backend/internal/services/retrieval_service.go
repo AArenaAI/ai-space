@@ -12,6 +12,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const minVectorRelevanceScore = 0.2
+
 // ChunkSearchResult 检索结果
 type ChunkSearchResult struct {
 	Chunk     models.FileChunk
@@ -125,6 +127,9 @@ func (s *RetrievalService) vectorSearch(fileIDs []uint, query string, topK int) 
 		if err := s.db.First(&chunk, scored[i].embedding.ChunkID).Error; err != nil {
 			continue
 		}
+		if scored[i].score < minVectorRelevanceScore {
+			continue
+		}
 		results = append(results, ChunkSearchResult{
 			Chunk:     chunk,
 			Score:     scored[i].score,
@@ -160,14 +165,9 @@ func (s *RetrievalService) keywordSearch(fileIDs []uint, query string, topK int)
 		}
 	}
 
-	// 如果没有匹配到，返回所有 chunks（限制数量）
+	// 关键词没有命中时不再返回前 topK，避免把无关文件开头误注入上下文。
 	if len(scored) == 0 {
-		for i, chunk := range chunks {
-			if i >= topK {
-				break
-			}
-			scored = append(scored, scoredChunk{chunk: chunk, score: 0})
-		}
+		return nil, nil
 	}
 
 	// 按分数降序排序

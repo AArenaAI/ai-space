@@ -26,8 +26,9 @@ import { inferGroups, InferredGroup } from "@/lib/groups";
 import EChartsBlock from "./EChartsBlock";
 import { useI18n } from "@/lib/i18n";
 import { AssistantMessageMeta } from "./AssistantMessageMeta";
+import ModelSelector from "./ModelSelector";
 
-const CHAT_BOTTOM_SPACER = 224;
+const CHAT_BOTTOM_SPACER = 280;
 const SELECT_MODE_EXTRA_SPACER = 80;
 type SelectionMode = "share" | "favorite";
 
@@ -57,6 +58,7 @@ interface MessageListProps {
   targetMessageId?: number;
   bottomSpacer?: number;
   onSelectModeChange?: (active: boolean) => void;
+  onExitCompare?: () => void;
 }
 
 function ThinkingDots() {
@@ -759,6 +761,7 @@ function MessageList({
   onLoadMore,
   targetMessageId,
   onSelectModeChange,
+  onExitCompare,
 }: MessageListProps) {
   const { t } = useI18n();
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -866,7 +869,6 @@ function MessageList({
   const [exportPreviewOpen, setExportPreviewOpen] = useState(false);
   const exportCardRef = useRef<HTMLDivElement>(null);
   const exportPreviewCardRef = useRef<HTMLDivElement>(null);
-  const [compareModelMenuOpen, setCompareModelMenuOpen] = useState<number | null>(null);
   const [atBottom, setAtBottom] = useState(true);
   const atBottomRef = useRef(true);
   const virtuosoComponents = useMemo<Components<Message, unknown>>(() => ({
@@ -980,7 +982,7 @@ function MessageList({
     if (!isCompare) return [];
     return compareModels && compareModels.length > 0
       ? compareModels
-      : Array.from(new Set(messages.filter((m) => m.role === "assistant" && m.model).map((m) => m.model!)));
+      : Array.from(new Set(messages.filter((m) => m.role === "assistant" && m.model).map((m) => m.model!))).slice(0, 2);
   }, [compareModels, isCompare, messages]);
   const columnMessages = useMemo(() => {
     if (!isCompare) return [];
@@ -1285,59 +1287,23 @@ function MessageList({
 
   const renderCompareModelHeader = (modelId: string, index: number) => {
     const model = modelById.get(modelId);
-    const isOpen = compareModelMenuOpen === index;
     return (
-      <div className="flex items-center justify-between gap-3 border-b border-surface-border bg-surface-card px-4 py-3">
-        <div className="relative">
-          <button
-            onClick={() => setCompareModelMenuOpen(isOpen ? null : index)}
-            className="inline-flex min-w-0 items-center gap-2 rounded-lg border border-surface-border bg-surface-elevated px-3 py-1.5 text-sm text-text-primary hover:bg-surface-card transition-colors"
-          >
-            <div
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white"
-              style={{ backgroundColor: model?.color || undefined }}
-            >
-              {(model?.name || modelId || `模型${index + 1}`).slice(0, 1).toUpperCase()}
-            </div>
-            <span className="truncate font-medium">{model?.name || modelId || `模型 ${index + 1}`}</span>
-            <ChevronDownIcon className={cn("h-3.5 w-3.5 shrink-0 text-text-tertiary transition-transform", isOpen && "rotate-180")} />
-          </button>
-
-          {isOpen && (
-            <>
-              <div className="fixed inset-0 z-40" onClick={() => setCompareModelMenuOpen(null)} />
-              <div className="absolute top-full left-0 mt-2 w-[260px] z-50 rounded-xl border border-surface-border bg-surface-elevated shadow-xl overflow-hidden max-h-[70vh] overflow-y-auto">
-                <div className="px-3 py-2 text-[11px] font-medium text-text-tertiary uppercase tracking-wider border-b border-surface-border">
-                  选择模型
-                </div>
-                <div className="py-1">
-                  {models.map((m) => (
-                    <button
-                      key={m.id}
-                      onClick={() => {
-                        onCompareModelChange?.(index, m.id);
-                        setCompareModelMenuOpen(null);
-                      }}
-                      className={cn(
-                        "flex items-center gap-3 w-full px-3 py-2 text-left transition-colors hover:bg-surface-card",
-                        m.id === modelId && "bg-brand/5"
-                      )}
-                    >
-                      <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
-                      <span className={cn("flex-1 text-sm truncate", m.id === modelId ? "text-brand font-medium" : "text-text-secondary")}>
-                        {m.name}
-                      </span>
-                      {m.id === modelId && <Check className="w-3.5 h-3.5 text-brand shrink-0" />}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </>
+      <div className="flex items-center justify-between gap-2 px-3 py-1.5">
+        <div className="min-w-0 w-fit scale-[0.92] origin-left">
+          {model ? (
+            <ModelSelector
+              models={models}
+              selected={model}
+              onSelect={(nextModel) => onCompareModelChange?.(index, nextModel.id)}
+            />
+          ) : (
+            <div className="rounded-lg px-2 py-1 text-sm font-medium text-text-secondary">{modelId || `模型 ${index + 1}`}</div>
           )}
         </div>
         <button
           type="button"
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-tertiary transition-colors hover:bg-surface-card hover:text-text-primary"
+          onClick={() => onExitCompare?.()}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-tertiary transition-colors hover:bg-surface-card hover:text-text-primary"
           aria-label={t("chat.closeCompareColumn")}
         >
           <X className="h-4 w-4" />
@@ -1347,8 +1313,17 @@ function MessageList({
   };
 
   const renderCompareWelcome = (modelId: string, index: number) => (
-    <div key={modelId || index} className="flex min-h-[360px] flex-col overflow-hidden rounded-2xl border border-surface-border bg-surface-card shadow-sm">
+    <div className="flex min-h-[360px] flex-col overflow-hidden">
       {renderCompareModelHeader(modelId, index)}
+      <div className="flex-1 px-8 pb-10 pt-20">
+        <h2 className="text-3xl font-semibold tracking-tight text-text-primary">{t("chat.helloComma")}</h2>
+        <p className="mt-3 text-xl font-medium text-text-primary">{t("chat.howCanIHelp")}</p>
+      </div>
+    </div>
+  );
+
+  const renderCompareWelcomeContent = (modelId: string, index: number) => (
+    <div className="flex min-h-[360px] flex-col">
       <div className="flex-1 px-8 pb-10 pt-20">
         <h2 className="text-3xl font-semibold tracking-tight text-text-primary">{t("chat.helloComma")}</h2>
         <p className="mt-3 text-xl font-medium text-text-primary">{t("chat.howCanIHelp")}</p>
@@ -1358,21 +1333,27 @@ function MessageList({
 
   if (isCompare) {
     const compareGroups = groups;
+    const resolveCompareAssistant = (group: InferredGroup, colIndex: number, modelId: string) => {
+      const hasSlotSnapshot = group.assistantMessages.some((m) => typeof m.groupIndex === "number");
+      if (hasSlotSnapshot) {
+        return group.assistantMessages.find((m) => m.groupIndex === colIndex);
+      }
+
+      return group.assistantMessages.find((m) => group.models[m.groupIndex ?? -1] === modelId)
+        || group.assistantMessages.find((m) => m.model === modelId)
+        || group.assistantMessages[colIndex];
+    };
 
     const renderCompareUserMessage = (msg: Message) => (
-      <div key={msg.id} className="flex justify-center px-3 py-3">
-        <div className="max-w-[860px] rounded-2xl border border-surface-border bg-surface-card px-4 py-3 shadow-sm">
-          <div className="mb-2 flex items-center justify-center gap-2 text-xs text-text-tertiary">
-            <User className="h-3.5 w-3.5" />
-            <span>用户问题</span>
-          </div>
+      <div className="flex justify-end">
+        <div className="max-w-[88%] rounded-2xl rounded-br-sm bg-[#EFF6FF] px-4 py-3 text-text-primary shadow-sm dark:bg-[#1E293B]">
           <div className="flex flex-col gap-2">
             {msg.files && msg.files.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {msg.files.map((f, fi) => {
                   if (f.type === "image") {
                     return (
-                      <div key={fi} className="relative overflow-hidden rounded-xl border border-surface-border bg-surface-card">
+                      <div key={fi} className="relative overflow-hidden rounded-xl border border-surface-border bg-surface-card/60">
                         <img
                           src={`/api/files/${f.public_id}/download`}
                           alt={f.filename}
@@ -1383,7 +1364,7 @@ function MessageList({
                             (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden");
                           }}
                         />
-                        <div className="hidden px-3 py-2 text-xs text-text-tertiary">{t("chat.imageLoadFailed")}</div>
+                        <div className="hidden px-3 py-2 text-xs text-text-primary/70">{t("chat.imageLoadFailed")}</div>
                       </div>
                     );
                   }
@@ -1399,127 +1380,123 @@ function MessageList({
                     href={`/api/files/${f.public_id}/download`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 rounded-lg border border-surface-border bg-surface-card px-3 py-1.5 transition-colors hover:border-brand/30"
+                    className="flex items-center gap-2 rounded-lg border border-surface-border bg-surface-card/60 px-3 py-1.5 transition-colors hover:bg-brand/30"
                   >
-                    <FileText className="h-4 w-4 shrink-0 text-text-tertiary" />
-                    <span className="max-w-[200px] truncate text-[13px] text-text-secondary">{f.filename}</span>
+                    <FileText className="h-4 w-4 shrink-0 text-text-primary/70" />
+                    <span className="max-w-[200px] truncate text-[13px] text-text-primary">{f.filename}</span>
                   </a>
                 ))}
               </div>
             )}
-            {msg.content ? <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-text-primary">{msg.content}</p> : null}
+            {msg.content ? <p className="whitespace-pre-wrap text-[15px] leading-relaxed">{msg.content}</p> : null}
           </div>
         </div>
       </div>
     );
 
-    const renderCompareAssistantCard = (msg: Message | undefined, modelId: string, colIndex: number, isLastGroup: boolean) => {
-      const model = modelById.get(modelId || msg?.model || "");
+    const renderCompareColumnTurn = (userMsg: Message, msg: Message | undefined, modelId: string, isLastGroup: boolean) => {
+      const model = modelById.get(msg?.model || modelId || "");
       const isStreaming = !!msg && isLoading && !msg.completedAt && isLastGroup && isMessageGenerating(msg, true);
       const isGenerating = !!msg && isMessageGenerating(msg, isStreaming);
       const canRegenerate = !!msg && isLastGroup && !isLoading && !isGenerating;
 
       return (
-        <div key={msg?.id || `${modelId}-${colIndex}`} className="flex min-w-[320px] flex-1 flex-col overflow-hidden rounded-2xl border border-surface-border bg-surface-card shadow-sm">
-          {renderCompareModelHeader(modelId || msg?.model || `模型 ${colIndex + 1}`, colIndex)}
-          <div className="group flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-4">
-            {msg ? (
-              <div className="flex gap-3 animate-message-appear">
-                <div className="mt-1 w-7 shrink-0">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-surface-border bg-surface-card">
-                    <Bot className="h-4 w-4 text-text-secondary" />
-                  </div>
+        <div key={`${userMsg.id}-${modelId}-${msg?.id || "empty"}`} className="flex flex-col gap-3 border-b border-surface-border px-4 py-4 last:border-b-0">
+          {renderCompareUserMessage(userMsg)}
+          {msg ? (
+            <div className="group flex gap-3 animate-message-appear">
+              <div className="mt-1 w-7 shrink-0">
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-surface-border bg-surface-card">
+                  <Bot className="h-4 w-4 text-text-secondary" />
                 </div>
-                <div className="flex min-w-0 flex-1 flex-col gap-1">
-                  <div className="w-fit max-w-full rounded-2xl rounded-bl-sm bg-surface-elevated px-4 py-3">
-                    {model && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} />}
-                    {renderAssistantContent(msg, isStreaming)}
+              </div>
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <div className="w-fit max-w-full rounded-2xl rounded-bl-sm bg-surface-elevated px-4 py-3">
+                  {model && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} />}
+                  {renderAssistantContent(msg, isStreaming)}
+                </div>
+                {!isStreaming && (
+                  <div className="flex items-center gap-2 px-2 opacity-0 transition-opacity group-hover:opacity-100">
+                    <MessageActions
+                      onCopy={() => handleCopy(msg.content)}
+                      onDelete={() => setDeleteTarget(msg.id)}
+                      onRegenerate={onRegenerate}
+                      onShareSelectMode={() => enterSelectMode("share", msg.id)}
+                      onFavoriteSelectMode={msg.serverMessageId && conversationId ? () => enterSelectMode("favorite", msg.id) : undefined}
+                      isFavorited={msg.serverMessageId ? isFavorited(msg.serverMessageId) : false}
+                      showRegenerate={canRegenerate}
+                      align="left"
+                      visible={isLastGroup}
+                      createdAt={msg.createdAt}
+                      completedAt={msg.completedAt}
+                      onForkCompare={msg.serverMessageId ? () => onForkCompare?.(msg.serverMessageId!) : undefined}
+                    />
                   </div>
-                  {!isStreaming && (
-                    <div className="flex items-center gap-2 px-2 opacity-0 transition-opacity group-hover:opacity-100">
-                      <MessageActions
-                        onCopy={() => handleCopy(msg.content)}
-                        onDelete={() => setDeleteTarget(msg.id)}
-                        onRegenerate={onRegenerate}
-                        onShareSelectMode={() => enterSelectMode("share", msg.id)}
-                        onFavoriteSelectMode={msg.serverMessageId && conversationId ? () => enterSelectMode("favorite", msg.id) : undefined}
-                        isFavorited={msg.serverMessageId ? isFavorited(msg.serverMessageId) : false}
-                        showRegenerate={canRegenerate}
-                        align="left"
-                        visible={isLastGroup}
-                        createdAt={msg.createdAt}
-                        completedAt={msg.completedAt}
-                        onForkCompare={msg.serverMessageId ? () => onForkCompare?.(msg.serverMessageId!) : undefined}
-                      />
-                    </div>
+                )}
+              </div>
+            </div>
+          ) : isLoading && isLastGroup ? (
+            <div className="flex gap-3 animate-message-appear">
+              <div className="mt-1 w-7 shrink-0">
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-surface-border bg-surface-card">
+                  <Bot className="h-4 w-4 text-text-secondary" />
+                </div>
+              </div>
+              <div className="flex-1">
+                <div className="inline-flex rounded-2xl rounded-bl-sm bg-surface-elevated px-4 py-3 text-sm text-text-secondary">
+                  {isComplexTask ? (
+                    <span className="inline-flex items-center gap-0.5">
+                      <WaveText text={t("chat.deepReasoning")} />
+                      <ThinkingDots />
+                    </span>
+                  ) : (
+                    <ThinkingDots />
                   )}
                 </div>
               </div>
-            ) : (
-              <div className="flex h-full min-h-[120px] items-center justify-center rounded-2xl border border-dashed border-surface-border bg-surface-elevated/40 px-4 py-6 text-sm text-text-tertiary">
-                此模型本轮暂无回答
-              </div>
-            )}
-          </div>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-dashed border-surface-border bg-surface-elevated/40 px-3 py-2 text-center text-xs text-text-tertiary">
+              当前模型未参与本轮
+            </div>
+          )}
         </div>
       );
     };
 
     return (
-      <div className="relative flex-1 min-h-0 overflow-hidden">
-        <div className="h-full overflow-y-auto px-3 py-3" style={{ paddingBottom: CHAT_BOTTOM_SPACER }}>
+      <div className="relative flex-1 min-h-0 overflow-hidden flex flex-col">
+        {/* 固定模型选择栏 */}
+        <div className="flex w-full shrink-0">
+          {(activeCompareModels.length ? activeCompareModels : compareModels).map((modelId, colIndex) => (
+            <div key={modelId || colIndex} className="flex min-w-[320px] flex-1 flex-col">
+              {renderCompareModelHeader(modelId, colIndex)}
+            </div>
+          ))}
+        </div>
+        {/* 滚动内容区域 */}
+        <div className="flex-1 overflow-y-auto px-3 py-3" style={{ paddingBottom: CHAT_BOTTOM_SPACER }}>
           {messages.length === 0 ? (
-            <div className="mx-auto grid h-full gap-3 md:grid-cols-2">
-              {(activeCompareModels.length ? activeCompareModels : compareModels).map((modelId, index) => renderCompareWelcome(modelId, index))}
+            <div className="mx-auto flex h-full max-w-[1440px]">
+              {(activeCompareModels.length ? activeCompareModels : compareModels).map((modelId, index) => (
+                <div key={modelId || index} className="flex min-w-[320px] flex-1 flex-col border-r border-surface-border last:border-r-0">
+                  {renderCompareWelcomeContent(modelId, index)}
+                </div>
+              ))}
             </div>
           ) : (
-            <div className="mx-auto flex max-w-[1440px] flex-col gap-5">
-              {compareGroups.map((group, groupIndex) => {
-                const isLastGroup = groupIndex === compareGroups.length - 1;
-                const assistants = group.assistantMessages;
-                const roundModels = group.models.length ? group.models : activeCompareModels;
-
-                return (
-                  <section key={group.id} className="flex flex-col gap-3">
-                    {renderCompareUserMessage(group.userMessage)}
-                    {roundModels.length > 0 ? (
-                      <div className="flex gap-3 overflow-x-auto pb-1">
-                        {roundModels.map((modelId, colIndex) => {
-                          const assistant = assistants.find((m) => m.groupIndex === colIndex) || assistants.find((m) => m.model === modelId);
-                          return renderCompareAssistantCard(assistant, modelId, colIndex, isLastGroup);
-                        })}
-                      </div>
-                    ) : isLoading && isLastGroup ? (
-                      <div className="flex gap-3 overflow-x-auto pb-1">
-                        {(group.models.length ? group.models : activeCompareModels).map((modelId, colIndex) => (
-                          <div key={modelId || colIndex} className="flex min-w-[320px] flex-1 flex-col overflow-hidden rounded-2xl border border-surface-border bg-surface-card shadow-sm">
-                            {renderCompareModelHeader(modelId, colIndex)}
-                            <div className="flex gap-3 px-4 py-4 animate-message-appear">
-                              <div className="mt-1 w-7 shrink-0">
-                                <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-surface-border bg-surface-card">
-                                  <Bot className="h-4 w-4 text-text-secondary" />
-                                </div>
-                              </div>
-                              <div className="flex-1">
-                                <div className="inline-flex rounded-2xl rounded-bl-sm bg-surface-elevated px-4 py-3 text-sm text-text-secondary">
-                                  {isComplexTask ? (
-                                    <span className="inline-flex items-center gap-0.5">
-                                      <WaveText text={t("chat.deepReasoning")} />
-                                      <ThinkingDots />
-                                    </span>
-                                  ) : (
-                                    <ThinkingDots />
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-                  </section>
-                );
-              })}
+            <div className="mx-auto flex max-w-[1440px] overflow-x-auto pb-1">
+              {(activeCompareModels.length ? activeCompareModels : compareModels).map((modelId, colIndex) => (
+                <div key={modelId || colIndex} className="flex min-w-[320px] flex-1 flex-col border-r border-surface-border last:border-r-0">
+                  <div className="flex flex-1 flex-col">
+                    {compareGroups.map((group, groupIndex) => {
+                      const isLastGroup = groupIndex === compareGroups.length - 1;
+                      const assistant = resolveCompareAssistant(group, colIndex, modelId);
+                      return renderCompareColumnTurn(group.userMessage, assistant, modelId, isLastGroup);
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>

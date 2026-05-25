@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Brain, ChevronDown, Square, Search, Columns2, Paperclip, X, FileText, Wrench, SlidersHorizontal, MessageSquarePlus, Check } from "lucide-react";
+import { Send, Brain, Square, Search, Columns2, Paperclip, X, FileText, Wrench, SlidersHorizontal, MessageSquarePlus, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ChatModel } from "@/hooks/useChat";
 import { Template } from "@/hooks/useTemplates";
@@ -9,16 +9,11 @@ import { getGuestId } from "@/lib/guestId";
 import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
 
-// DeepSeek 模型的思考档位（兼容旧值）
-const DEEPSEEK_EFFORTS = ["high", "max"] as const;
-// GPT 模型的思考档位
-const GPT_EFFORTS = ["light", "standard", "extended", "heavy"] as const;
-// Kimi/Moonshot 模型的思考档位（只有开/关，无等级）
-const MOONSHOT_EFFORTS = [] as const;
 const TEXTAREA_MIN_HEIGHT = 92;
 const TEXTAREA_MAX_HEIGHT = 180;
 
 export type ReasoningEffort = "light" | "standard" | "extended" | "heavy" | "high" | "max";
+export type ReasoningMode = "fast" | "think" | "expert";
 
 export interface ReasoningConfig {
   enabled: boolean;
@@ -47,23 +42,45 @@ export interface AttachedFile {
   error_message?: string; // 解析失败原因
 }
 
+function getReasoningEffortForMode(model: ChatModel | undefined, mode: ReasoningMode): ReasoningConfig {
+  if (mode === "fast") {
+    return { enabled: false, effort: "standard" };
+  }
+
+  const provider = model?.provider;
+  const modelId = model?.id || "";
+
+  if (mode === "think") {
+    if (provider === "DeepSeek") return { enabled: true, effort: "high" };
+    return { enabled: true, effort: "standard" };
+  }
+
+  if (provider === "DeepSeek") return { enabled: true, effort: "max" };
+  if (modelId === "gpt-5.5-pro" || modelId.startsWith("gpt-5.5-pro-")) {
+    return { enabled: true, effort: "extended" };
+  }
+  if (provider === "Moonshot") return { enabled: true, effort: "standard" };
+  return { enabled: true, effort: "heavy" };
+}
+
+function normalizeReasoningMode(value: string | null): ReasoningMode {
+  return value === "think" || value === "expert" || value === "fast" ? value : "fast";
+}
+
 export default function MessageInput({ onSend, onStop, isLoading, compareMode, onToggleCompare, currentModel, templates, selectedTemplateId, onSelectTemplate, onNewChat }: MessageInputProps) {
   const { t } = useI18n();
   const [content, setContent] = useState("");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [reasoning, setReasoning] = useState<ReasoningConfig>(() => {
-    // 从 localStorage 读取用户上次保存的深度思考配置
+  const [reasoningMode, setReasoningMode] = useState<ReasoningMode>(() => {
     if (typeof window !== "undefined") {
-      const savedEnabled = localStorage.getItem("reasoning-enabled");
-      const savedEffort = localStorage.getItem("reasoning-effort");
-      return {
-        enabled: savedEnabled === "true",
-        effort: (savedEffort as ReasoningEffort) || "standard",
-      };
+      const savedMode = localStorage.getItem("reasoning-mode");
+      if (savedMode) return normalizeReasoningMode(savedMode);
+      return localStorage.getItem("reasoning-enabled") === "true" ? "think" : "fast";
     }
-    return { enabled: false, effort: "standard" };
+    return "fast";
   });
+  const reasoning = getReasoningEffortForMode(currentModel, reasoningMode);
   const [searchEnabled, setSearchEnabled] = useState(() => {
     if (typeof window !== "undefined") {
       return localStorage.getItem("search-enabled") === "true";
@@ -71,6 +88,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     return false;
   });
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [reasoningOpen, setReasoningOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [showFileTip, setShowFileTip] = useState(false);
   const [showCompareTip, setShowCompareTip] = useState(false);
@@ -78,9 +96,10 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
   const dragCounter = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const prevModelRef = useRef<ChatModel | undefined>(currentModel);
   const toolsRef = useRef<HTMLDivElement>(null);
   const toolsTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const reasoningRef = useRef<HTMLDivElement>(null);
+  const reasoningTimerRef = useRef<NodeJS.Timeout | null>(null);
   const templateRef = useRef<HTMLDivElement>(null);
   const templateTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -113,11 +132,24 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     toolsTimerRef.current = setTimeout(() => setToolsOpen(false), 200);
   }, []);
 
-  // 点击外部关闭工具下拉
+  const handleReasoningEnter = useCallback(() => {
+    if (reasoningTimerRef.current) clearTimeout(reasoningTimerRef.current);
+    reasoningTimerRef.current = setTimeout(() => setReasoningOpen(true), 120);
+  }, []);
+
+  const handleReasoningLeave = useCallback(() => {
+    if (reasoningTimerRef.current) clearTimeout(reasoningTimerRef.current);
+    reasoningTimerRef.current = setTimeout(() => setReasoningOpen(false), 200);
+  }, []);
+
+  // 点击外部关闭下拉
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (toolsRef.current && !toolsRef.current.contains(e.target as Node)) {
         setToolsOpen(false);
+      }
+      if (reasoningRef.current && !reasoningRef.current.contains(e.target as Node)) {
+        setReasoningOpen(false);
       }
       if (templateRef.current && !templateRef.current.contains(e.target as Node)) {
         setTemplateOpen(false);
@@ -127,25 +159,11 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     return () => {
       document.removeEventListener("mousedown", handler);
       if (toolsTimerRef.current) clearTimeout(toolsTimerRef.current);
+      if (reasoningTimerRef.current) clearTimeout(reasoningTimerRef.current);
       if (templateTimerRef.current) clearTimeout(templateTimerRef.current);
     };
   }, []);
 
-  // 当打开下拉菜单时，确保当前 effort 对当前模型有效
-  useEffect(() => {
-    if (!toolsOpen) return;
-    if (!currentModel) return;
-    const isDeepSeek = currentModel.provider === "DeepSeek";
-    const isMoonshot = currentModel.provider === "Moonshot";
-    // Moonshot/Kimi 无 effort 等级，不验证
-    if (isMoonshot) return;
-    const validEfforts = isDeepSeek ? DEEPSEEK_EFFORTS : GPT_EFFORTS;
-    if (!(validEfforts as readonly string[]).includes(reasoning.effort)) {
-      const defaultEffort: ReasoningEffort = isDeepSeek ? "high" : "standard";
-      setReasoning((prev) => ({ ...prev, effort: defaultEffort }));
-      localStorage.setItem("reasoning-effort", defaultEffort);
-    }
-  }, [toolsOpen, currentModel]);
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -246,12 +264,13 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     onStop();
   };
 
-  const toggleReasoning = () => {
-    setReasoning((prev) => {
-      const next = { ...prev, enabled: !prev.enabled };
-      localStorage.setItem("reasoning-enabled", String(next.enabled));
-      return next;
-    });
+  const selectReasoningMode = (mode: ReasoningMode) => {
+    setReasoningMode(mode);
+    setReasoningOpen(false);
+    const next = getReasoningEffortForMode(currentModel, mode);
+    localStorage.setItem("reasoning-mode", mode);
+    localStorage.setItem("reasoning-enabled", String(next.enabled));
+    localStorage.setItem("reasoning-effort", next.effort);
   };
 
   const toggleSearch = () => {
@@ -354,56 +373,22 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const setEffort = (effort: ReasoningEffort) => {
-    setReasoning({ enabled: true, effort });
-    localStorage.setItem("reasoning-effort", effort);
-    setToolsOpen(false);
-  };
-
   const hasParsingFiles = attachedFiles.some((f) => f.parse_status === "pending" || f.parse_status === "parsing");
   const hasContent = content.trim().length > 0;
   const canSubmit = (hasContent || attachedFiles.length > 0) && !hasParsingFiles;
 
-  // 切换模型时自动重置思考档位到当前模型有效值
   useEffect(() => {
-    if (!currentModel) return;
-    if (prevModelRef.current === currentModel) return;
-    const prevProvider = prevModelRef.current?.provider;
-    const currProvider = currentModel.provider;
-    prevModelRef.current = currentModel;
-    if (prevProvider === currProvider) return; // 同厂商不重置
+    const next = getReasoningEffortForMode(currentModel, reasoningMode);
+    localStorage.setItem("reasoning-enabled", String(next.enabled));
+    localStorage.setItem("reasoning-effort", next.effort);
+  }, [currentModel?.id, reasoningMode]);
 
-    // Moonshot/Kimi 无 effort 等级，重置为 standard（实际无意义）
-    const isMoonshot = currProvider === "Moonshot";
-    const isDeepSeek = currProvider === "DeepSeek";
-    const isGPTLike = !isDeepSeek && !isMoonshot;
-    if (isMoonshot) {
-      // Moonshot 无 effort 等级，设默认值但不显示下拉
-      const newEffort: ReasoningEffort = "standard";
-      setReasoning((prev) => ({ ...prev, effort: newEffort }));
-      localStorage.setItem("reasoning-effort", newEffort);
-    } else if (isDeepSeek && (reasoning.effort === "light" || reasoning.effort === "extended" || reasoning.effort === "heavy")) {
-      const newEffort: ReasoningEffort = "high";
-      setReasoning((prev) => ({ ...prev, effort: newEffort }));
-      localStorage.setItem("reasoning-effort", newEffort);
-    } else if (isGPTLike && (reasoning.effort === "high" || reasoning.effort === "max")) {
-      const newEffort: ReasoningEffort = "standard";
-      setReasoning((prev) => ({ ...prev, effort: newEffort }));
-      localStorage.setItem("reasoning-effort", newEffort);
-    }
-  }, [currentModel?.id]);
-
-  const effortLabel = currentModel?.provider === "DeepSeek"
-    ? (reasoning.effort === "max" ? t("chat.reasoning.deep") : "")
-    : (currentModel?.provider === "Moonshot" ? ""
-      : (reasoning.effort === "standard" ? "" : reasoning.effort === "extended" ? t("chat.reasoning.extended") : reasoning.effort === "heavy" ? t("chat.reasoning.heavy") : t("chat.reasoning.light")));
-
-  const effortNames: Record<string, string> = {
-    light: t("chat.reasoning.light"),
-    standard: t("chat.reasoning.standard"),
-    extended: t("chat.reasoning.extended"),
-    heavy: t("chat.reasoning.heavy"),
-  };
+  const reasoningModes: { key: ReasoningMode; label: string; title: string }[] = [
+    { key: "fast", label: "快速", title: "快速模式：无思考" },
+    { key: "think", label: "思考", title: "思考模式：使用当前模型的正常思考强度" },
+    { key: "expert", label: "专家", title: "专家模式：使用当前模型最高思考强度，GPT 5.5 Pro 使用次高" },
+  ];
+  const currentReasoningMode = reasoningModes.find((mode) => mode.key === reasoningMode) || reasoningModes[0];
 
   return (
     <div className="shrink-0 px-4 pb-6 pt-6">
@@ -635,7 +620,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
             placeholder={t("chat.placeholder")}
             rows={1}
             className={cn(
-              "w-full min-h-[92px] shrink-0 resize-none overflow-hidden bg-transparent px-4 pb-1 text-[15px] outline-none placeholder:text-text-tertiary leading-relaxed",
+              "w-full min-h-[92px] shrink-0 resize-none overflow-hidden bg-transparent px-4 pb-1 text-[15px] font-normal leading-6 text-slate-900 outline-none placeholder:text-slate-400 [font-family:Inter,'PingFang_SC','Microsoft_YaHei',sans-serif] dark:text-text-primary dark:placeholder:text-text-tertiary",
               attachedFiles.length > 0 ? "pt-3" : "pt-4"
             )}
           />
@@ -649,17 +634,15 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                   type="button"
                   className={cn(
                     "flex items-center gap-1.5 pl-3 pr-3 py-1.5 text-[13px] font-medium rounded-full border transition-all duration-200",
-                    reasoning.enabled || searchEnabled
+                    searchEnabled
                       ? "border-brand/40 bg-brand-muted text-brand"
                       : "border-surface-border bg-transparent text-text-tertiary hover:text-text-secondary hover:border-text-tertiary/50"
                   )}
                 >
                   <Wrench className="w-3.5 h-3.5" />
                   <span>{t("chat.tools")}</span>
-                  {(reasoning.enabled || searchEnabled) && (
-                    <span className="text-[11px] opacity-70 ml-0.5">
-                      · {[reasoning.enabled && t("chat.deepThinking"), searchEnabled && t("chat.webSearch")].filter(Boolean).join("+")}
-                    </span>
+                  {searchEnabled && (
+                    <span className="text-[11px] opacity-70 ml-0.5">· {t("chat.webSearch")}</span>
                   )}
                 </button>
 
@@ -694,156 +677,83 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                         </div>
                       </button>
                     </div>
-                    {/* 分割线 */}
-                    <div className="mx-2 my-1 border-t border-surface-border/50" />
-                    {/* 深度思考选项 */}
-                    <div className="px-1 pb-1">
-                      <button
-                        type="button"
-                        onClick={toggleReasoning}
-                        className={cn(
-                          "flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg transition-colors",
-                          reasoning.enabled
-                            ? "text-purple-400 bg-purple-500/10"
-                            : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
-                        )}
-                      >
-                        <span className={cn(
-                          "w-4 h-4 rounded border-2 flex items-center justify-center transition-colors",
-                          reasoning.enabled
-                            ? "bg-purple-500 border-purple-500"
-                            : "border-text-tertiary/40"
-                        )}>
-                          {reasoning.enabled && <span className="text-white text-[10px] font-bold">✓</span>}
-                        </span>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <Brain className="w-3.5 h-3.5" />
-                            <span>{t("chat.deepThinking")}</span>
-                          </div>
-                        </div>
-                      </button>
-                      {/* 思考档位（仅开启时显示） */}
-                      {reasoning.enabled && currentModel?.provider !== "Moonshot" && (
-                        <div className="ml-8 mt-1 pl-2 border-l border-surface-border/50 space-y-0.5">
-                          {currentModel?.provider === "DeepSeek" ? (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => setEffort("high")}
-                                className={cn(
-                                  "flex items-center gap-2 w-full px-2 py-1.5 text-xs rounded-md transition-colors",
-                                  reasoning.effort === "high"
-                                    ? "text-purple-400 bg-purple-500/10"
-                                    : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
-                                )}
-                              >
-                                <span className={cn("w-1 h-1 rounded-full", reasoning.effort === "high" ? "bg-purple-400" : "bg-text-tertiary/30")} />
-                                {t("chat.reasoning.standard")}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setEffort("max")}
-                                className={cn(
-                                  "flex items-center gap-2 w-full px-2 py-1.5 text-xs rounded-md transition-colors",
-                                  reasoning.effort === "max"
-                                    ? "text-purple-400 bg-purple-500/10"
-                                    : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
-                                )}
-                              >
-                                <span className={cn("w-1 h-1 rounded-full", reasoning.effort === "max" ? "bg-purple-400" : "bg-text-tertiary/30")} />
-                                {t("chat.reasoning.deep")}
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => setEffort("light")}
-                                className={cn(
-                                  "flex items-center gap-2 w-full px-2 py-1.5 text-xs rounded-md transition-colors",
-                                  reasoning.effort === "light"
-                                    ? "text-purple-400 bg-purple-500/10"
-                                    : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
-                                )}
-                              >
-                                <span className={cn("w-1 h-1 rounded-full", reasoning.effort === "light" ? "bg-purple-400" : "bg-text-tertiary/30")} />
-                                {effortNames.light}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setEffort("standard")}
-                                className={cn(
-                                  "flex items-center gap-2 w-full px-2 py-1.5 text-xs rounded-md transition-colors",
-                                  reasoning.effort === "standard"
-                                    ? "text-purple-400 bg-purple-500/10"
-                                    : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
-                                )}
-                              >
-                                <span className={cn("w-1 h-1 rounded-full", reasoning.effort === "standard" ? "bg-purple-400" : "bg-text-tertiary/30")} />
-                                {effortNames.standard}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setEffort("extended")}
-                                className={cn(
-                                  "flex items-center gap-2 w-full px-2 py-1.5 text-xs rounded-md transition-colors",
-                                  reasoning.effort === "extended"
-                                    ? "text-purple-400 bg-purple-500/10"
-                                    : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
-                                )}
-                              >
-                                <span className={cn("w-1 h-1 rounded-full", reasoning.effort === "extended" ? "bg-purple-400" : "bg-text-tertiary/30")} />
-                                {effortNames.extended}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setEffort("heavy")}
-                                className={cn(
-                                  "flex items-center gap-2 w-full px-2 py-1.5 text-xs rounded-md transition-colors",
-                                  reasoning.effort === "heavy"
-                                    ? "text-purple-400 bg-purple-500/10"
-                                    : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
-                                )}
-                              >
-                                <span className={cn("w-1 h-1 rounded-full", reasoning.effort === "heavy" ? "bg-purple-400" : "bg-text-tertiary/30")} />
-                                {effortNames.heavy}
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      )}
-                    </div>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* 发送/停止按钮 */}
-            {isLoading ? (
-              <button
-                type="button"
-                onClick={handleStop}
-                className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200 bg-red-500 text-white hover:bg-red-600"
-                title={t("chat.stopGenerating")}
-              >
-                <Square className="w-3.5 h-3.5 fill-current" />
-              </button>
-            ) : (
-              <button
-                type="submit"
-                disabled={!canSubmit}
-                title={hasParsingFiles ? t("chat.fileParsingWaitShort") : t("chat.send")}
-                className={cn(
-                  "flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200",
-                  canSubmit
-                    ? "bg-brand text-white hover:bg-brand-hover"
-                    : "bg-surface-elevated text-text-tertiary cursor-not-allowed"
+            <div className="flex items-center gap-2">
+              <div className="relative" ref={reasoningRef} onMouseEnter={handleReasoningEnter} onMouseLeave={handleReasoningLeave}>
+                <button
+                  type="button"
+                  onClick={() => setReasoningOpen((open) => !open)}
+                  title={currentReasoningMode.title}
+                  className={cn(
+                    "flex h-8 items-center gap-1.5 rounded-xl border px-3 text-[12px] font-medium transition-all duration-200",
+                    reasoning.enabled
+                      ? "border-brand/40 bg-brand-muted text-brand"
+                      : "border-surface-border bg-surface-elevated text-text-tertiary hover:text-text-secondary hover:border-text-tertiary/50"
+                  )}
+                >
+                  <Brain className="h-3.5 w-3.5" />
+                  <span>{currentReasoningMode.label}</span>
+                </button>
+
+                {reasoningOpen && (
+                  <div className="absolute bottom-full right-0 mb-2 w-44 rounded-xl border border-surface-border bg-surface-elevated shadow-xl z-[90] py-1 animate-fade-in">
+                    {reasoningModes.map((mode) => {
+                      const active = reasoningMode === mode.key;
+                      return (
+                        <button
+                          key={mode.key}
+                          type="button"
+                          onClick={() => selectReasoningMode(mode.key)}
+                          title={mode.title}
+                          className={cn(
+                            "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors",
+                            active
+                              ? "bg-brand-muted text-brand"
+                              : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
+                          )}
+                        >
+                          <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+                            {active && <Check className="h-3.5 w-3.5" />}
+                          </span>
+                          <Brain className={cn("h-3.5 w-3.5", mode.key === "fast" && "opacity-40")} />
+                          <span>{mode.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 )}
-              >
-                <Send className="w-3.5 h-3.5" />
-              </button>
-            )}
+              </div>
+
+              {/* 发送/停止按钮 */}
+              {isLoading ? (
+                <button
+                  type="button"
+                  onClick={handleStop}
+                  className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200 bg-red-500 text-white hover:bg-red-600"
+                  title={t("chat.stopGenerating")}
+                >
+                  <Square className="w-3.5 h-3.5 fill-current" />
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!canSubmit}
+                  title={hasParsingFiles ? t("chat.fileParsingWaitShort") : t("chat.send")}
+                  className={cn(
+                    "flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200",
+                    canSubmit
+                      ? "bg-brand text-white hover:bg-brand-hover"
+                      : "bg-surface-elevated text-text-tertiary cursor-not-allowed"
+                  )}
+                >
+                  <Send className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -860,3 +770,4 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     </div>
   );
 }
+
