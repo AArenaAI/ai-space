@@ -2,57 +2,29 @@
 
 import { Check } from "lucide-react";
 import ScrollReveal from "./ScrollReveal";
+import { useI18n } from "@/lib/i18n";
 
 interface Model {
   name: string;
   provider: string;
-  features: string[];
+  featureKeys: string[];
   color: string;
 }
 
 const models: Model[] = [
-  {
-    name: "GPT 5.5 Pro",
-    provider: "OpenAI",
-    features: ["旗舰对话", "深度推理", "联网搜索"],
-    color: "from-green-500/20 to-emerald-500/10",
-  },
-  {
-    name: "GPT 5.4",
-    provider: "OpenAI",
-    features: ["通用写作", "代码生成", "复杂分析"],
-    color: "from-amber-500/20 to-orange-500/10",
-  },
-  {
-    name: "Gemini 3.1 Pro",
-    provider: "Google",
-    features: ["多模态理解", "长上下文", "实时检索"],
-    color: "from-blue-500/20 to-cyan-500/10",
-  },
-  {
-    name: "GPT Image 2",
-    provider: "OpenAI",
-    features: ["文生图", "图片编辑", "高分辨率"],
-    color: "from-purple-500/20 to-pink-500/10",
-  },
-  {
-    name: "DeepSeek-V4 Pro",
-    provider: "DeepSeek",
-    features: ["中文优化", "数学推导", "编程辅助"],
-    color: "from-rose-500/20 to-red-500/10",
-  },
-  {
-    name: "Kimi K2.6",
-    provider: "Moonshot",
-    features: ["多模态", "长上下文", "推理增强"],
-    color: "from-indigo-500/20 to-violet-500/10",
-  },
+  { name: "GPT 5.5 Pro", provider: "OpenAI", featureKeys: ["landing.models.feature.flagship", "landing.models.feature.reasoning", "landing.models.feature.webSearch"], color: "from-green-500/20 to-emerald-500/10" },
+  { name: "GPT 5.4", provider: "OpenAI", featureKeys: ["landing.models.feature.writing", "landing.models.feature.code", "landing.models.feature.analysis"], color: "from-amber-500/20 to-orange-500/10" },
+  { name: "Gemini 3.1 Pro", provider: "Google", featureKeys: ["landing.models.feature.multimodal", "landing.models.feature.longContext", "landing.models.feature.retrieval"], color: "from-blue-500/20 to-cyan-500/10" },
+  { name: "GPT Image 2", provider: "OpenAI", featureKeys: ["landing.models.feature.textToImage", "landing.models.feature.imageEdit", "landing.models.feature.highRes"], color: "from-purple-500/20 to-pink-500/10" },
+  { name: "DeepSeek-V4 Pro", provider: "DeepSeek", featureKeys: ["landing.models.feature.chinese", "landing.models.feature.math", "landing.models.feature.coding"], color: "from-rose-500/20 to-red-500/10" },
+  { name: "Kimi K2.6", provider: "Moonshot", featureKeys: ["landing.models.feature.multimodalShort", "landing.models.feature.longContext", "landing.models.feature.reasoningBoost"], color: "from-indigo-500/20 to-violet-500/10" },
 ];
 
 export default function ModelsSection() {
+  const { t } = useI18n();
+
   return (
     <section id="models" className="py-24 lg:py-32 relative overflow-hidden">
-      {/* 背景 */}
       <div className="absolute inset-0 pointer-events-none">
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-brand/[0.02] rounded-full blur-3xl" />
       </div>
@@ -60,13 +32,13 @@ export default function ModelsSection() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
         <ScrollReveal className="text-center mb-16">
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-500 text-xs font-medium mb-4">
-            模型聚合
+            {t("landing.models.badge")}
           </div>
           <h2 className="text-3xl sm:text-4xl font-semibold text-text-primary mb-4">
-            10+ 顶级模型，一站式调用
+            {t("landing.models.title")}
           </h2>
           <p className="text-sm sm:text-[15px] text-text-secondary leading-7 max-w-2xl mx-auto">
-            无需切换多个平台，一个入口即可访问全球领先的 AI 模型
+            {t("landing.models.subtitle")}
           </p>
         </ScrollReveal>
 
@@ -86,13 +58,10 @@ export default function ModelsSection() {
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
-                    {model.features.map((f) => (
-                      <span
-                        key={f}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-surface-elevated border border-surface-border text-[11px] text-text-secondary"
-                      >
+                    {model.featureKeys.map((f) => (
+                      <span key={f} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-surface-elevated border border-surface-border text-[11px] text-text-secondary">
                         <Check className="w-3 h-3 text-brand" />
-                        {f}
+                        {t(f)}
                       </span>
                     ))}
                   </div>

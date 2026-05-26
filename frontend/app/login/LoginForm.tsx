@@ -3,8 +3,10 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useI18n } from "@/lib/i18n";
 
 export default function LoginForm() {
+  const { t } = useI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
   const returnUrl = searchParams.get("returnUrl") || "/chat";
@@ -28,7 +30,7 @@ export default function LoginForm() {
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || "登录失败");
+        throw new Error(data.error || t("auth.error.loginFailed"));
       }
 
       localStorage.setItem("token", data.token);
@@ -57,10 +59,10 @@ export default function LoginForm() {
             <img src="/brand-dark-logo.png" alt="AI Space" className="hidden h-full w-full object-cover dark:block" />
           </div>
           <h1 className="text-xl font-semibold text-text-primary tracking-tight">
-            登录 AI Space
+            {t("auth.login.title")}
           </h1>
           <p className="text-sm text-text-secondary mt-1">
-            AI Space 汇聚全球一流模型，一键开启高效创作。
+            {t("auth.subtitle")}
           </p>
         </div>
 
@@ -73,7 +75,7 @@ export default function LoginForm() {
 
           <div>
             <label className="block text-sm font-medium text-text-secondary mb-1.5">
-              邮箱
+              {t("auth.email")}
             </label>
             <input
               type="email"
@@ -87,13 +89,13 @@ export default function LoginForm() {
 
           <div>
             <label className="block text-sm font-medium text-text-secondary mb-1.5">
-              密码
+              {t("auth.password")}
             </label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="输入密码"
+              placeholder={t("auth.password.placeholder")}
               required
               minLength={6}
               className="w-full px-3 py-2.5 rounded-lg bg-surface-card border border-surface-border text-text-primary placeholder:text-text-tertiary outline-none focus:border-brand/50 transition-colors text-sm"
@@ -105,14 +107,14 @@ export default function LoginForm() {
             disabled={loading}
             className="w-full py-2.5 rounded-lg bg-brand text-white text-sm font-medium hover:bg-brand-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            {loading ? "登录中..." : "登录"}
+            {loading ? t("auth.loggingIn") : t("auth.login")}
           </button>
         </form>
 
         <p className="text-center text-sm text-text-tertiary mt-6">
-          还没有账号？{" "}
+          {t("auth.noAccount")}{" "}
           <Link href="/register" className="text-brand hover:underline">
-            注册
+            {t("auth.register")}
           </Link>
         </p>
       </div>

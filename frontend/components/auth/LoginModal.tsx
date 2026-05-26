@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { X } from "lucide-react";
 import { useTheme } from "@/components/theme/ThemeProvider";
+import { useI18n } from "@/lib/i18n";
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -13,6 +14,7 @@ interface LoginModalProps {
 type Mode = "login" | "register";
 
 export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginModalProps) {
+  const { t } = useI18n();
   const themeCtx = useTheme();
   const theme = themeCtx?.theme || "light";
   const [mode, setMode] = useState<Mode>("login");
@@ -61,11 +63,11 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
 
     if (mode === "register") {
       if (password !== confirmPassword) {
-        setError("两次输入的密码不一致");
+        setError(t("auth.error.passwordMismatch"));
         return;
       }
       if (password.length < 6) {
-        setError("密码至少 6 位");
+        setError(t("auth.error.passwordMin"));
         return;
       }
     }
@@ -85,7 +87,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || (mode === "login" ? "登录失败" : "注册失败"));
+        throw new Error(data.error || (mode === "login" ? t("auth.error.loginFailed") : t("auth.error.registerFailed")));
       }
 
       localStorage.setItem("token", data.token);
@@ -138,13 +140,13 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
           <div className="text-center mb-6">
             <img src={theme === "dark" ? "/brand-dark-logo.png" : "/brand-light-logo.png"} alt="AI Space" className="w-14 h-14 rounded-2xl object-cover mx-auto mb-4 border border-surface-border shadow-sm" />
             <div className="inline-flex items-center rounded-full border border-surface-border bg-surface-card px-2.5 py-1 text-xs font-medium text-text-tertiary mb-3">
-              全球一流模型 · 一键触达
+              {t("auth.modal.badge")}
             </div>
             <h2 className="text-xl font-semibold text-text-primary tracking-tight">
-              {mode === "login" ? "登录 AI Space" : "注册 AI Space"}
+              {mode === "login" ? t("auth.login.title") : t("auth.register.title")}
             </h2>
             <p className="text-sm text-text-secondary mt-2">
-              {mode === "login" ? "继续你的高效创作，让灵感稳定抵达。" : "创建账号，开启 AI Space 极致体验。"}
+              {mode === "login" ? t("auth.modal.loginSubtitle") : t("auth.modal.registerSubtitle")}
             </p>
           </div>
 
@@ -159,7 +161,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
                   : "text-text-tertiary hover:text-text-secondary"
               }`}
             >
-              登录
+              {t("auth.login")}
             </button>
             <button
               onClick={() => switchMode("register")}
@@ -170,7 +172,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
                   : "text-text-tertiary hover:text-text-secondary"
               }`}
             >
-              注册
+              {t("auth.register")}
             </button>
           </div>
 
@@ -186,13 +188,13 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
             {mode === "register" && (
               <div>
                 <label className="block text-sm font-medium text-text-secondary mb-1.5">
-                  昵称（可选）
+                  {t("auth.name")}
                 </label>
                 <input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="怎么称呼你"
+                  placeholder={t("auth.name.placeholder")}
                   className="w-full px-3.5 py-3 rounded-xl bg-surface-card border border-surface-border text-text-primary placeholder:text-text-tertiary outline-none focus:border-brand/50 transition-colors text-sm"
                 />
               </div>
@@ -200,7 +202,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
 
             <div>
               <label className="block text-sm font-medium text-text-secondary mb-1.5">
-                邮箱
+                {t("auth.email")}
               </label>
               <input
                 type="email"
@@ -214,13 +216,13 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
 
             <div>
               <label className="block text-sm font-medium text-text-secondary mb-1.5">
-                密码
+                {t("auth.password")}
               </label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder={mode === "register" ? "至少 6 位" : "输入密码"}
+                placeholder={mode === "register" ? t("auth.password.minPlaceholder") : t("auth.password.placeholder")}
                 required
                 minLength={6}
                 className="w-full px-3.5 py-3 rounded-xl bg-surface-card border border-surface-border text-text-primary placeholder:text-text-tertiary outline-none focus:border-brand/50 transition-colors text-sm"
@@ -230,13 +232,13 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
             {mode === "register" && (
               <div>
                 <label className="block text-sm font-medium text-text-secondary mb-1.5">
-                  确认密码
+                  {t("auth.confirmPassword")}
                 </label>
                 <input
                   type="password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="再次输入密码"
+                  placeholder={t("auth.confirmPassword.placeholder")}
                   required
                   className="w-full px-3.5 py-3 rounded-xl bg-surface-card border border-surface-border text-text-primary placeholder:text-text-tertiary outline-none focus:border-brand/50 transition-colors text-sm"
                 />
@@ -250,11 +252,11 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
             >
               {loading
                 ? mode === "login"
-                  ? "登录中..."
-                  : "注册中..."
+                  ? t("auth.loggingIn")
+                  : t("auth.registering")
                 : mode === "login"
-                ? "登录"
-                : "注册"}
+                ? t("auth.login")
+                : t("auth.register")}
             </button>
           </form>
         </div>

@@ -3,8 +3,10 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useI18n } from "@/lib/i18n";
 
 export default function RegisterPage() {
+  const { t } = useI18n();
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -18,11 +20,11 @@ export default function RegisterPage() {
     setError("");
 
     if (password !== confirmPassword) {
-      setError("两次输入的密码不一致");
+      setError(t("auth.error.passwordMismatch"));
       return;
     }
     if (password.length < 6) {
-      setError("密码至少 6 位");
+      setError(t("auth.error.passwordMin"));
       return;
     }
 
@@ -37,7 +39,7 @@ export default function RegisterPage() {
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || "注册失败");
+        throw new Error(data.error || t("auth.error.registerFailed"));
       }
 
       localStorage.setItem("token", data.token);
@@ -65,10 +67,10 @@ export default function RegisterPage() {
             <img src="/brand-dark-logo.png" alt="AI Space" className="hidden h-full w-full object-cover dark:block" />
           </div>
           <h1 className="text-xl font-semibold text-text-primary tracking-tight">
-            注册 AI Space
+            {t("auth.register.title")}
           </h1>
           <p className="text-sm text-text-secondary mt-1">
-            AI Space 汇聚全球一流模型，一键开启高效创作。
+            {t("auth.subtitle")}
           </p>
         </div>
 
@@ -81,20 +83,20 @@ export default function RegisterPage() {
 
           <div>
             <label className="block text-sm font-medium text-text-secondary mb-1.5">
-              昵称（可选）
+              {t("auth.name")}
             </label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="怎么称呼你"
+              placeholder={t("auth.name.placeholder")}
               className="w-full px-3 py-2.5 rounded-lg bg-surface-card border border-surface-border text-text-primary placeholder:text-text-tertiary outline-none focus:border-brand/50 transition-colors text-sm"
             />
           </div>
 
           <div>
             <label className="block text-sm font-medium text-text-secondary mb-1.5">
-              邮箱
+              {t("auth.email")}
             </label>
             <input
               type="email"
@@ -108,13 +110,13 @@ export default function RegisterPage() {
 
           <div>
             <label className="block text-sm font-medium text-text-secondary mb-1.5">
-              密码
+              {t("auth.password")}
             </label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="至少 6 位"
+              placeholder={t("auth.password.minPlaceholder")}
               required
               minLength={6}
               className="w-full px-3 py-2.5 rounded-lg bg-surface-card border border-surface-border text-text-primary placeholder:text-text-tertiary outline-none focus:border-brand/50 transition-colors text-sm"
@@ -123,13 +125,13 @@ export default function RegisterPage() {
 
           <div>
             <label className="block text-sm font-medium text-text-secondary mb-1.5">
-              确认密码
+              {t("auth.confirmPassword")}
             </label>
             <input
               type="password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder="再次输入密码"
+              placeholder={t("auth.confirmPassword.placeholder")}
               required
               className="w-full px-3 py-2.5 rounded-lg bg-surface-card border border-surface-border text-text-primary placeholder:text-text-tertiary outline-none focus:border-brand/50 transition-colors text-sm"
             />
@@ -140,14 +142,14 @@ export default function RegisterPage() {
             disabled={loading}
             className="w-full py-2.5 rounded-lg bg-brand text-white text-sm font-medium hover:bg-brand-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            {loading ? "注册中..." : "注册"}
+            {loading ? t("auth.registering") : t("auth.register")}
           </button>
         </form>
 
         <p className="text-center text-sm text-text-tertiary mt-6">
-          已有账号？{" "}
+          {t("auth.hasAccount")}{" "}
           <Link href="/login" className="text-brand hover:underline">
-            登录
+            {t("auth.login")}
           </Link>
         </p>
       </div>

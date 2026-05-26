@@ -31,6 +31,8 @@ import ModelSelector from "./ModelSelector";
 const CHAT_BOTTOM_SPACER = 280;
 const SCROLL_TO_BOTTOM_OFFSET = 238;
 const SELECT_MODE_EXTRA_SPACER = 80;
+const LONG_REASONING_COLLAPSE_THRESHOLD = 2000;
+const LONG_MARKDOWN_LAZY_THRESHOLD = 4000;
 type SelectionMode = "share" | "favorite";
 
 interface MessageListProps {
@@ -300,7 +302,9 @@ function getCitedSources(content: string, allSources?: { title: string; url: str
 // 可折叠的思考过程块
 function ThinkBlock({ content, isThinking }: { content: string; isThinking: boolean }) {
   // GPT-5.5 Pro 的 reasoning summary 可能很长，默认展开会让历史消息渲染明显卡顿。
-  const [expanded, setExpanded] = useState(() => isThinking || content.length < 2000);
+  // 正在实时推理时保持展开；历史长推理默认折叠，避免进入旧会话时一次性渲染大段文本。
+  const shouldCollapseByDefault = !isThinking && content.length >= LONG_REASONING_COLLAPSE_THRESHOLD;
+  const [expanded, setExpanded] = useState(() => !shouldCollapseByDefault);
 
   return (
     <div className="mb-3 rounded-xl border border-surface-border overflow-hidden">
@@ -312,7 +316,7 @@ function ThinkBlock({ content, isThinking }: { content: string; isThinking: bool
       >
         <Lightbulb className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
         <span className="text-sm font-medium text-text-secondary flex-1">
-          {isThinking ? "深度推理中，片刻即达极致答案" : `深度推理${content.length >= 2000 ? " · 已折叠" : ""}`}
+          {isThinking ? "深度推理中，片刻即达极致答案" : `深度推理${shouldCollapseByDefault && !expanded ? " · 已折叠" : ""}`}
         </span>
         {isThinking && (
           <div className="flex gap-0.5">
@@ -714,6 +718,79 @@ const markdownComponents = {
   td({ children }: any) { return <td className="px-3 py-2.5 text-[13px] text-text-secondary leading-relaxed">{children}</td>; },
 };
 
+const markdownRemarkPlugins = [remarkGfm, remarkFixBold, remarkMath];
+const markdownRehypePlugins = [rehypeKatex];
+
+const MemoMarkdownRenderer = memo(function MemoMarkdownRenderer({ content }: { content: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={markdownRemarkPlugins}
+      rehypePlugins={markdownRehypePlugins}
+      components={markdownComponents}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+});
+
+function LazyMarkdownRenderer({ content }: { content: string }) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const [shouldRender, setShouldRender] = useState(() => content.length < LONG_MARKDOWN_LAZY_THRESHOLD);
+
+  useEffect(() => {
+    if (content.length < LONG_MARKDOWN_LAZY_THRESHOLD) {
+      setShouldRender(true);
+      return;
+    }
+
+    const node = hostRef.current;
+    if (!node) return;
+
+    let cancelled = false;
+    let cleanupIdle: void | (() => void);
+    const renderWhenIdle = () => {
+      const win = window as typeof window & { requestIdleCallback?: (cb: IdleRequestCallback, options?: IdleRequestOptions) => number; cancelIdleCallback?: (handle: number) => void };
+      if (win.requestIdleCallback) {
+        const idleId = win.requestIdleCallback(() => {
+          if (!cancelled) setShouldRender(true);
+        }, { timeout: 600 });
+        return () => win.cancelIdleCallback?.(idleId);
+      }
+      const timeoutId = window.setTimeout(() => {
+        if (!cancelled) setShouldRender(true);
+      }, 80);
+      return () => window.clearTimeout(timeoutId);
+    };
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        cleanupIdle = renderWhenIdle();
+        observer.disconnect();
+      }
+    }, { rootMargin: "700px 0px" });
+
+    observer.observe(node);
+
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+      cleanupIdle?.();
+    };
+  }, [content]);
+
+  return (
+    <div ref={hostRef}>
+      {shouldRender ? (
+        <MemoMarkdownRenderer content={content} />
+      ) : (
+        <div className="rounded-xl border border-surface-border bg-surface-card/50 px-3 py-2 text-sm text-text-secondary">
+          长内容准备中…
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ExportMessageContent({ msg }: { msg: Message }) {
   if (msg.role === "user") {
     return <div className="whitespace-pre-wrap break-words">{msg.content || ""}</div>;
@@ -737,13 +814,7 @@ function ExportMessageContent({ msg }: { msg: Message }) {
           </div>
         </div>
       )}
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkFixBold, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
-        components={markdownComponents}
-      >
-        {cleanAnswer}
-      </ReactMarkdown>
+      <MemoMarkdownRenderer content={cleanAnswer} />
     </div>
   );
 }
@@ -1416,13 +1487,7 @@ function MessageList({
     return (
       <div className="prose prose-sm max-w-none">
         {reasoning && <ThinkBlock content={reasoning} isThinking={isThinking} />}
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkFixBold, remarkMath]}
-          rehypePlugins={[rehypeKatex]}
-          components={markdownComponents}
-        >
-          {cleanAnswer}
-        </ReactMarkdown>
+        <LazyMarkdownRenderer content={cleanAnswer} />
       </div>
     );
   };
