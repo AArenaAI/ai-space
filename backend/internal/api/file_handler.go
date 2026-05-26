@@ -4,14 +4,17 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
+	"aipool-backend/internal/modelmeta"
 	"aipool-backend/internal/services"
 	"aipool-backend/pkg/publicid"
 
 	"github.com/gin-gonic/gin"
 )
 
-const maxFileSize = 20 * 1024 * 1024 // 20MB
+const maxFileSize = 20 * 1024 * 1024       // 20MB
+const maxVideoFileSize = 200 * 1024 * 1024 // 200MB
 
 type FileHandler struct {
 	fileService *services.FileService
@@ -48,9 +51,20 @@ func (h *FileHandler) UploadFile(c *gin.Context) {
 	}
 	defer file.Close()
 
-	// 限制文件大小
-	if header.Size > maxFileSize {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "文件大小不能超过 20MB"})
+	if _, ok := modelmeta.FileTypeByExtension(header.Filename); !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "暂不支持该文件格式"})
+		return
+	}
+
+	// 限制文件大小：普通文件 20MB，参考视频放宽到 200MB
+	limit := int64(maxFileSize)
+	limitLabel := "20MB"
+	if strings.HasPrefix(header.Header.Get("Content-Type"), "video/") {
+		limit = maxVideoFileSize
+		limitLabel = "200MB"
+	}
+	if header.Size > limit {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "文件大小不能超过 " + limitLabel})
 		return
 	}
 

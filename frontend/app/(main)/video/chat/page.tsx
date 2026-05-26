@@ -41,6 +41,7 @@ const ASPECT_RATIOS = [
 const DURATIONS = ["4s", "5s", "6s", "7s", "9s", "10s", "11s", "13s", "14s", "15s"];
 const RESOLUTIONS = ["480p", "720p", "1080p"];
 const MAX_REFERENCE_IMAGES = 9;
+const MAX_REFERENCE_VIDEOS = 3;
 
 interface DisplayMessage {
   id: string;
@@ -67,7 +68,7 @@ function AspectIcon({ w, h, active }: { w: number; h: number; active: boolean })
   return (
     <div className="flex h-8 w-8 items-center justify-center rounded-md border border-surface-border bg-surface">
       <div
-        className={cn("rounded-sm border-2 transition-colors", active ? "border-brand bg-brand/20" : "border-text-tertiary/50")}
+        className={cn("rounded-sm border-2 transition-colors", active ? "border-text-primary bg-surface-card" : "border-text-tertiary/50")}
         style={{ width: boxW, height: boxH }}
       />
     </div>
@@ -119,7 +120,14 @@ function VideoChatPageInner() {
   });
   const [generating, setGenerating] = useState(false);
   const [prompt, setPrompt] = useState("");
-  const [referenceImages, setReferenceImages] = useState<string[]>([]);
+  const [referenceImages, setReferenceImages] = useState<string[]>(() => {
+    const refs = searchParams.get("refs");
+    return refs ? refs.split(",").filter(Boolean) : [];
+  });
+  const [referenceVideos, setReferenceVideos] = useState<string[]>(() => {
+    const refs = searchParams.get("videoRefs");
+    return refs ? refs.split(",").filter(Boolean) : [];
+  });
   const [uploadingRef, setUploadingRef] = useState(false);
   const [selectedAspectRatio, setSelectedAspectRatio] = useState(searchParams.get("aspect") || "adaptive");
   const [selectedDuration, setSelectedDuration] = useState(searchParams.get("duration") || "5s");
@@ -146,6 +154,7 @@ function VideoChatPageInner() {
   const isFastModel = (selectedModelInfo?.id || selectedModel).includes("seedance-2-0-fast");
   const availableResolutions = isFastModel ? RESOLUTIONS.filter((item) => item !== "1080p") : RESOLUTIONS;
   const hasContent = prompt.trim().length > 0;
+  const hasReferenceMedia = referenceImages.length > 0 || referenceVideos.length > 0;
 
   useEffect(() => {
     if (!selectedModel && videoModels.length > 0) {
@@ -162,6 +171,8 @@ function VideoChatPageInner() {
   useEffect(() => {
     const refs = searchParams.get("refs");
     if (refs) setReferenceImages(refs.split(",").filter(Boolean));
+    const videoRefs = searchParams.get("videoRefs");
+    if (videoRefs) setReferenceVideos(videoRefs.split(",").filter(Boolean));
   }, [searchParams]);
 
   const updateAutoScrollIntent = useCallback(() => {
@@ -248,6 +259,7 @@ function VideoChatPageInner() {
         generate_audio: musicEnabled,
         watermark: false,
         reference_image_urls: referenceImages.length > 0 ? referenceImages : undefined,
+        reference_video_urls: referenceVideos.length > 0 ? referenceVideos : undefined,
       };
 
       let chatId = currentChatId;
@@ -263,6 +275,7 @@ function VideoChatPageInner() {
 
       setPrompt("");
       setReferenceImages([]);
+      setReferenceVideos([]);
       await fetchMessages(chatId);
       fetchChats();
     } catch (err: any) {
@@ -286,7 +299,7 @@ function VideoChatPageInner() {
     } finally {
       setGenerating(false);
     }
-  }, [createChat, currentChatId, fetchChats, fetchMessages, musicEnabled, referenceImages, router, selectedAspectRatio, selectedDuration, selectedModel, selectedModelInfo, selectedResolution, sendMessage]);
+  }, [createChat, currentChatId, fetchChats, fetchMessages, musicEnabled, referenceImages, referenceVideos, router, selectedAspectRatio, selectedDuration, selectedModel, selectedModelInfo, selectedResolution, sendMessage]);
 
   useEffect(() => {
     const initialPrompt = searchParams.get("prompt") || "";
@@ -296,10 +309,33 @@ function VideoChatPageInner() {
     handleSend(initialPrompt);
   }, [handleSend, searchParams, selectedModelInfo, videoModels.length]);
 
-  const uploadReferenceImage = async (file: File) => {
-    if (referenceImages.length >= MAX_REFERENCE_IMAGES) {
+  const uploadReferenceMedia = async (file: File) => {
+    const isVideo = file.type.startsWith("video/");
+    const isImage = file.type.startsWith("image/");
+    if (!isImage && !isVideo) {
+      toast.error("仅支持上传图片或视频参考素材");
+      return;
+    }
+    if (isImage && referenceImages.length >= MAX_REFERENCE_IMAGES) {
       toast.error(`参考图最多支持 ${MAX_REFERENCE_IMAGES} 张`);
       return;
+    }
+    if (isVideo && referenceVideos.length >= MAX_REFERENCE_VIDEOS) {
+      toast.error(`参考视频最多支持 ${MAX_REFERENCE_VIDEOS} 个`);
+      return;
+    }
+    if (isVideo) {
+      const allowedTypes = ["video/mp4", "video/quicktime"];
+      const allowedExts = [".mp4", ".mov"];
+      const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
+      if (!allowedTypes.includes(file.type) && !allowedExts.includes(ext)) {
+        toast.error("参考视频仅支持 mp4、mov 格式");
+        return;
+      }
+      if (file.size > 50 * 1024 * 1024) {
+        toast.error("参考视频不能超过 50 MB");
+        return;
+      }
     }
     setUploadingRef(true);
     try {
@@ -317,7 +353,11 @@ function VideoChatPageInner() {
       }
       const data = await res.json();
       const url = data.public_id || data.url || data.image_url;
-      setReferenceImages((prev) => [...prev, url].slice(0, MAX_REFERENCE_IMAGES));
+      if (isVideo) {
+        setReferenceVideos((prev) => [...prev, url].slice(0, MAX_REFERENCE_VIDEOS));
+      } else {
+        setReferenceImages((prev) => [...prev, url].slice(0, MAX_REFERENCE_IMAGES));
+      }
     } catch (err: any) {
       toast.error(`上传失败: ${err.message}`);
     } finally {
@@ -331,7 +371,7 @@ function VideoChatPageInner() {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = "";
-    uploadReferenceImage(file);
+    uploadReferenceMedia(file);
   };
 
   const handleDownload = async (url: string, id: number | string) => {
@@ -390,7 +430,7 @@ function VideoChatPageInner() {
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-surface">
       <DeleteSuccessNotice open={deleteSuccessOpen} label="视频会话" onClose={() => setDeleteSuccessOpen(false)} />
-      <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileSelect} />
+      <input ref={fileInputRef} type="file" accept="image/*,video/mp4,video/quicktime" className="hidden" onChange={handleFileSelect} />
 
       <div className="shrink-0 flex items-center gap-3 px-4 py-3 border-b border-surface-border">
         <button
@@ -523,7 +563,7 @@ function VideoChatPageInner() {
           <div
             className={cn(
               "relative flex flex-col rounded-2xl border transition-all duration-300 bg-surface-card",
-              referenceImages.length > 0 ? "border-brand/20 focus-within:border-brand/40" : "border-surface-border focus-within:border-brand/30"
+              hasReferenceMedia ? "border-brand/20 focus-within:border-brand/40" : "border-surface-border focus-within:border-brand/30"
             )}
           >
             {/* 右上角按钮：历史记录 + 新建会话 */}
@@ -545,8 +585,8 @@ function VideoChatPageInner() {
             </div>
 
             <div className="flex items-start gap-3 px-4 pt-3 pb-2">
-              <div className="mt-1">
-                {referenceImages.length === 0 ? (
+              <div className="mt-1 flex max-w-[140px] flex-wrap gap-2">
+                {!hasReferenceMedia ? (
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
@@ -555,24 +595,60 @@ function VideoChatPageInner() {
                       "relative shrink-0 w-9 h-16 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center transition-all hover:border-brand/40",
                       (uploadingRef || generating) && "cursor-not-allowed opacity-60"
                     )}
-                    title="上传参考图"
+                    title="上传参考图/视频"
                   >
                     {uploadingRef ? <Loader2 className="w-4 h-4 text-text-tertiary animate-spin" /> : <Plus className="w-4 h-4 text-text-tertiary" />}
                   </button>
                 ) : (
-                  <div className="relative shrink-0">
-                    <div className="w-9 h-16 rounded-xl overflow-hidden border border-surface-border">
-                      <img src={resolveMediaUrl(referenceImages[0])} alt="参考图" className="w-full h-full object-cover" />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setReferenceImages((prev) => prev.slice(1))}
-                      disabled={generating}
-                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-surface-elevated border border-surface-border shadow-md text-text-secondary hover:text-red-500 flex items-center justify-center z-20"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
+                  <>
+                    {referenceImages.slice(0, 2).map((url, index) => (
+                      <div key={`image-${url}-${index}`} className="relative shrink-0">
+                        <div className="w-9 h-16 rounded-xl overflow-hidden border border-surface-border">
+                          <img src={resolveMediaUrl(url)} alt="参考图" className="w-full h-full object-cover" />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setReferenceImages((prev) => prev.filter((_, i) => i !== index))}
+                          disabled={generating}
+                          className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-surface-elevated border border-surface-border shadow-md text-text-secondary hover:text-red-500 flex items-center justify-center z-20"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                    {referenceVideos.slice(0, 2).map((url, index) => (
+                      <div key={`video-${url}-${index}`} className="relative shrink-0">
+                        <div className="relative w-9 h-16 rounded-xl overflow-hidden border border-surface-border bg-surface-elevated">
+                          <video src={resolveMediaUrl(url)} className="h-full w-full object-cover" muted playsInline />
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                            <Video className="h-4 w-4 text-white" />
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setReferenceVideos((prev) => prev.filter((_, i) => i !== index))}
+                          disabled={generating}
+                          className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-surface-elevated border border-surface-border shadow-md text-text-secondary hover:text-red-500 flex items-center justify-center z-20"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                    {(referenceImages.length < MAX_REFERENCE_IMAGES || referenceVideos.length < MAX_REFERENCE_VIDEOS) && (
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={uploadingRef || generating}
+                        className={cn(
+                          "relative shrink-0 w-9 h-16 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center transition-all hover:border-brand/40",
+                          (uploadingRef || generating) && "cursor-not-allowed opacity-60"
+                        )}
+                        title="继续上传参考素材"
+                      >
+                        {uploadingRef ? <Loader2 className="w-4 h-4 text-text-tertiary animate-spin" /> : <Plus className="w-4 h-4 text-text-tertiary" />}
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
 
@@ -618,7 +694,7 @@ function VideoChatPageInner() {
                           }}
                           className={cn(
                             "w-full rounded-lg px-3 py-2 text-left text-xs transition-colors",
-                            selectedModel === model.id ? "bg-brand/10 text-brand" : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
+                            selectedModel === model.id ? "bg-surface-card text-text-primary font-medium shadow-sm" : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                           )}
                         >
                           <div className="font-medium">{model.name}</div>
@@ -652,7 +728,7 @@ function VideoChatPageInner() {
                             }}
                             className={cn(
                               "flex flex-col items-center gap-1 rounded-lg border px-2 py-2 text-[11px] transition-colors",
-                              selectedAspectRatio === ratio.value ? "border-brand bg-brand/10 text-brand" : "border-surface-border text-text-secondary hover:border-brand/30 hover:text-text-primary"
+                              selectedAspectRatio === ratio.value ? "border-surface-border bg-surface-card text-text-primary font-medium shadow-sm" : "border-surface-border text-text-secondary hover:border-text-tertiary/40 hover:text-text-primary"
                             )}
                           >
                             <AspectIcon w={ratio.w} h={ratio.h} active={selectedAspectRatio === ratio.value} />
@@ -685,7 +761,7 @@ function VideoChatPageInner() {
                           }}
                           className={cn(
                             "w-full rounded-lg px-3 py-2 text-left text-xs transition-colors",
-                            selectedResolution === resolution ? "bg-brand/10 text-brand" : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
+                            selectedResolution === resolution ? "bg-surface-card text-text-primary font-medium shadow-sm" : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                           )}
                         >
                           {resolution}
@@ -717,7 +793,7 @@ function VideoChatPageInner() {
                           }}
                           className={cn(
                             "w-full rounded-lg px-3 py-2 text-left text-xs transition-colors",
-                            selectedDuration === duration ? "bg-brand/10 text-brand" : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
+                            selectedDuration === duration ? "bg-surface-card text-text-primary font-medium shadow-sm" : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                           )}
                         >
                           {duration}
@@ -732,7 +808,7 @@ function VideoChatPageInner() {
                   onClick={() => setMusicEnabled((enabled) => !enabled)}
                   className={cn(
                     "flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] transition-colors",
-                    musicEnabled ? "border-brand bg-brand/10 text-brand" : "border-surface-border text-text-secondary hover:border-brand/30 hover:text-text-primary"
+                    musicEnabled ? "border-surface-border bg-surface-card text-text-primary font-medium shadow-sm" : "border-surface-border text-text-secondary hover:border-text-tertiary/40 hover:text-text-primary"
                   )}
                 >
                   <Music className="w-3 h-3" />

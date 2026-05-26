@@ -83,8 +83,8 @@ export default function ForkCompareDialog({ open, onClose, models, currentModelI
                   isCurrent
                     ? "border-surface-border bg-surface-card/50 opacity-50 cursor-not-allowed"
                     : isSelected
-                    ? "border-brand bg-brand/5"
-                    : "border-surface-border bg-surface-card hover:border-brand/30"
+                    ? "border-surface-border bg-surface-card text-text-primary shadow-sm"
+                    : "border-surface-border bg-surface-card hover:border-text-tertiary/40"
                 )}
               >
                 <div
@@ -96,7 +96,7 @@ export default function ForkCompareDialog({ open, onClose, models, currentModelI
                 <span className="text-sm text-text-primary flex-1">{model.name}</span>
                 {isCurrent && <span className="text-xs text-text-tertiary">{t("chat.current")}</span>}
                 {isSelected && !isCurrent && (
-                  <div className="w-5 h-5 rounded-full bg-brand flex items-center justify-center">
+                  <div className="w-5 h-5 rounded-full bg-slate-900 text-white dark:bg-text-primary dark:text-surface flex items-center justify-center">
                     <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                     </svg>

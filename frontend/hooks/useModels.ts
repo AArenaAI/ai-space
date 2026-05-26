@@ -9,6 +9,10 @@ export interface ChatModel {
   description: string;
   color: string;
   capabilities?: string[];
+  supported_inputs?: string[];
+  supported_file_extensions?: string[];
+  supported_file_mime_types?: string[];
+  file_accept?: string;
 }
 
 const DEFAULT_CHAT: ChatModel[] = [

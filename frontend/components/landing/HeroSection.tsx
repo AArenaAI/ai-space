@@ -24,7 +24,7 @@ export default function HeroSection() {
               AI 聚合平台
             </div>
 
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-text-primary leading-tight tracking-tight animate-fade-up">
+            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-semibold text-text-primary leading-tight tracking-tight animate-fade-up">
               一个入口
               <br />
               <span className="bg-gradient-to-r from-brand via-purple-500 to-brand bg-[length:200%_auto] animate-gradient-shift bg-clip-text text-transparent">
@@ -32,7 +32,7 @@ export default function HeroSection() {
               </span>
             </h1>
 
-            <p className="text-lg text-text-secondary max-w-lg mx-auto lg:mx-0 leading-relaxed animate-fade-up" style={{ animationDelay: "150ms" }}>
+            <p className="text-[15px] sm:text-base text-text-secondary max-w-lg mx-auto lg:mx-0 leading-7 animate-fade-up" style={{ animationDelay: "150ms" }}>
               聚合全球顶级大语言模型，从智能对话到 AI 创作，从图像生成到演示文稿。无需多个应用切换，一个平台满足所有 AI 需求。
             </p>
 
@@ -42,13 +42,13 @@ export default function HeroSection() {
               </AuthAwareButton>
               <a
                 href="#features"
-                className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-surface-card border border-surface-border text-text-primary font-medium hover:bg-surface-elevated transition-all duration-200 hover:-translate-y-0.5"
+                className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-surface-card border border-surface-border text-text-primary text-sm font-medium hover:bg-surface-elevated transition-all duration-200 hover:-translate-y-0.5"
               >
                 了解功能
               </a>
               <Link
                 href="/pricing"
-                className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 font-medium hover:bg-amber-500/20 transition-all duration-200 hover:-translate-y-0.5"
+                className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-sm font-medium hover:bg-amber-500/20 transition-all duration-200 hover:-translate-y-0.5"
               >
                 查看价格
               </Link>

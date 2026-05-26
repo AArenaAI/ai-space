@@ -6,10 +6,12 @@ import { Plus, Pencil, Trash2, Check, X, FileText, Loader2 } from "lucide-react"
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
+import { localizeSystemDefaultTemplate } from "@/lib/defaultTemplates";
 
 export default function TemplatesPage() {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const { templates, loading, createTemplate, updateTemplate, deleteTemplate } = useTemplates();
+  const localizedTemplates = templates.map((tpl) => localizeSystemDefaultTemplate(tpl, language));
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
   const [editPrefix, setEditPrefix] = useState("");
@@ -144,7 +146,7 @@ export default function TemplatesPage() {
             )}
 
             {/* 模板列表 */}
-            {templates.map((tpl) => (
+            {localizedTemplates.map((tpl) => (
               <div
                 key={tpl.id}
                 className={cn(

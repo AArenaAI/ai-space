@@ -191,8 +191,8 @@ export default function HistoryDrawer({
             : "flex items-center gap-2 px-3 py-2.5",
           isActive
             ? hasCover
-              ? "bg-brand/5 border-brand/20 text-text-primary"
-              : "bg-brand/10 border border-brand/20 text-text-primary"
+              ? "bg-surface-card border-surface-border text-text-primary shadow-sm"
+              : "bg-surface-card border border-surface-border text-text-primary shadow-sm"
             : hasCover
               ? "bg-surface-card border-surface-border hover:border-brand/30 hover:bg-surface-card/80 text-text-secondary"
               : "text-text-secondary hover:bg-surface-card/70 hover:text-text-primary border border-transparent"
@@ -394,7 +394,7 @@ export default function HistoryDrawer({
             <Icon
               className={cn(
                 "w-3.5 h-3.5 shrink-0",
-                isActive ? "text-brand" : "text-text-tertiary group-hover:text-text-secondary"
+                isActive ? "text-text-primary" : "text-text-tertiary group-hover:text-text-secondary"
               )}
             />
 

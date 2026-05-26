@@ -18,18 +18,18 @@ func NewTemplateHandler(db *gorm.DB) *TemplateHandler {
 }
 
 // ListTemplates 获取当前用户的模板列表
-// 如果用户没有模板，自动创建默认中文回复模板
+// 如果用户没有模板，自动创建默认模板
 func (h *TemplateHandler) ListTemplates(c *gin.Context) {
 	userID := getUserID(c)
 
 	var count int64
 	h.db.Model(&services.Template{}).Where("user_id = ?", userID).Count(&count)
 	if count == 0 {
-		// 自动创建默认中文回复模板
+		// 自动创建默认模板
 		defaultTpl := services.Template{
 			UserID:    userID,
-			Name:      "中文回复（默认）",
-			Prefix:    "你是一个专业的AI助手。请用中文回答用户的问题，确保回复清晰、准确、完整。在适当情况下使用 Markdown 格式（标题、列表、代码块等）来增强可读性。",
+			Name:      "默认模板",
+			Prefix:    "你是一个专业的AI助手。确保回复清晰、准确、完整。在适当情况下使用 Markdown 格式（标题、列表、代码块等）来增强可读性。",
 			IsDefault: true,
 		}
 		h.db.Create(&defaultTpl)

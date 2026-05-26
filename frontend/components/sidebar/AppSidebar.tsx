@@ -16,7 +16,7 @@ import {
   PanelLeftClose, MessageSquarePlus, Search, ChevronRight,
   User, Trash2, MoreHorizontal, Pencil, Pin, PinOff, Link2, Check,
   FileText, LayoutGrid, X, Clock, Sparkles, Image, ImageIcon, Eraser,
-  Type, ZoomIn, FolderKanban,
+  Type, ZoomIn,
   Briefcase, FileCode, PenTool, BarChart3, Mail, ClipboardList, Terminal, GraduationCap, Languages,
   Zap, Shield, BookOpen, Wrench, Globe, Code2,
   Star,
@@ -362,7 +362,7 @@ function WorkHoverPanel({
 
   return createPortal(
     <div
-      className="fixed z-[60] w-[280px] rounded-2xl border border-surface-border bg-surface shadow-2xl py-4 px-3"
+      className="fixed z-[60] w-[340px] rounded-2xl border border-surface-border bg-surface shadow-2xl py-4 px-3"
       style={{
         top: pos.top,
         left: pos.left,
@@ -416,7 +416,7 @@ function WorkHoverPanel({
                   )}
                 >
                   <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-surface-card">
-                    <Icon className={cn("w-4 h-4", isWritingAssistant ? "text-brand" : "text-text-tertiary")} />
+                    <Icon className={cn("w-4 h-4", isWritingAssistant ? "text-slate-900 dark:text-text-primary" : "text-text-tertiary")} />
                   </div>
                   <span className={cn("text-sm transition-colors truncate", isWritingAssistant ? "text-text-primary" : "text-text-tertiary")}>{skill.title || skill.display_name || skill.key}</span>
                   {!isWritingAssistant && (
@@ -453,7 +453,7 @@ function ConversationSkeleton() {
 
 /* ───── 主组件 ───── */
 
-export default function AppSidebar({ skillKey }: { skillKey?: string }) {
+export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skillKey?: string; resizeHandleOffset?: number }) {
   const { t } = useI18n();
   const themeCtx = useTheme();
   const theme = themeCtx?.theme || "light";
@@ -872,7 +872,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
     if (conversations.length === 0) {
       return (
         <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
-          <div className="flex size-8 items-center justify-center rounded-full bg-surface-card border border-surface-border"><MessageSquare className="w-4 h-4 text-text-tertiary" /></div>
+          <div className="flex size-8 items-center justify-center rounded-full"><MessageSquare className="w-4 h-4 text-text-tertiary" /></div>
           <div className="space-y-1"><p className="text-xs text-text-secondary">{t("sidebar.empty.no_conversations")}</p><p className="text-[11px] text-text-tertiary">{user ? t("sidebar.empty.start_chat_hint") : t("sidebar.empty.login_hint")}</p></div>
         </div>
       );
@@ -898,7 +898,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                   ? (skillMeta ? skillMeta.color : "text-brand")
                   : "text-text-tertiary group-hover:text-text-secondary";
                 return (
-                  <div key={conv.id} role="button" tabIndex={0} data-conversation-row data-conversation-id={conv.id} onClick={() => handleOpenConversation(conv)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleOpenConversation(conv); } }} className={cn("group flex w-full cursor-pointer items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-brand/10 text-brand" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
+                  <div key={conv.id} role="button" tabIndex={0} data-conversation-row data-conversation-id={conv.id} onClick={() => handleOpenConversation(conv)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleOpenConversation(conv); } }} className={cn("group flex w-full cursor-pointer items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
                     <IconComp className={cn("w-3.5 h-3.5 shrink-0 transition-all duration-200", iconColor)} />
                     <Pin className="w-3 h-3 shrink-0 text-brand" />
                     <span className={cn("flex-1 truncate text-left", isActive && "font-medium")}>{conv.title || t("sidebar.empty.new_chat")}</span>
@@ -938,7 +938,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                   ? (skillMeta ? skillMeta.color : "text-brand")
                   : "text-text-tertiary group-hover:text-text-secondary";
                 return (
-                  <div key={conv.id} role="button" tabIndex={0} data-conversation-row data-conversation-id={conv.id} onClick={() => handleOpenConversation(conv)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleOpenConversation(conv); } }} className={cn("group flex w-full cursor-pointer items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-brand/10 text-brand" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
+                  <div key={conv.id} role="button" tabIndex={0} data-conversation-row data-conversation-id={conv.id} onClick={() => handleOpenConversation(conv)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleOpenConversation(conv); } }} className={cn("group flex w-full cursor-pointer items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
                     <IconComp className={cn("w-3.5 h-3.5 shrink-0 transition-all duration-200", iconColor)} />
                     <span className={cn("flex-1 truncate text-left", isActive && "font-medium")}>{conv.title || t("sidebar.empty.new_chat")}</span>
                     <div className="opacity-0 group-hover:opacity-100 transition-opacity"><ConvMenu onRename={() => setRenameTarget(conv)} onTogglePin={() => handleTogglePin(conv)} pinned={conv.pinned} onShare={() => handleShare(conv)} onDelete={() => handleDelete(conv.id)} /></div>
@@ -965,7 +965,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
       />
       {/* 侧边栏主体 */}
       <div
-        className={cn("fixed left-0 top-0 z-40 flex flex-col h-screen bg-surface-elevated border-r border-surface-border rounded-r-2xl transition-[width] duration-200 ease-out", collapsed ? "w-[52px]" : "")}
+        className={cn("fixed left-0 top-0 z-40 flex flex-col h-screen bg-surface-elevated transition-[width] duration-200 ease-out", collapsed ? "w-[52px]" : "")}
         style={{ width: collapsed ? 52 : sidebarWidth }}
       >
 
@@ -1013,28 +1013,15 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                 onMouseLeave={hideSidebarTooltip}
                 className={cn(
                   "p-2.5 rounded-xl transition-colors block",
-                  pathname === "/chat" ? "bg-brand/10 text-brand" : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
+                  pathname === "/chat" ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]" : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
                 )}
               >
-                <MessageSquare className={cn("w-5 h-5", pathname === "/chat" ? "text-brand" : "text-text-tertiary")} />
+                <MessageSquare className={cn("w-5 h-5", pathname === "/chat" ? "text-slate-900 dark:text-text-primary" : "text-text-tertiary")} />
               </button>
             </div>
 
             {/* 功能分组 - 对齐展开状态的 px-3 py-2 */}
             <div className="py-2 flex flex-col items-center space-y-0.5">
-              {/* workspace空间 */}
-              <Link
-                href="/workspace"
-                onMouseEnter={showSidebarTooltip(t("sidebar.tooltip.workspace"))}
-                onMouseLeave={hideSidebarTooltip}
-                className={cn(
-                  "p-2.5 rounded-xl transition-colors",
-                  pathname === "/workspace" ? "bg-brand/10 text-brand" : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
-                )}
-              >
-                <FolderKanban className={cn("w-5 h-5", pathname === "/workspace" ? "text-brand" : "text-text-tertiary")} />
-              </Link>
-
               {/* AI工作 - hover 展开面板 */}
               <div
                 onMouseEnter={handleWorkEnter}
@@ -1045,7 +1032,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                   className={cn(
                     "p-2.5 rounded-xl transition-colors",
                     pathname === "/ppt" || pathname?.startsWith("/ppt/") || pathname === "/skills" || pathname?.startsWith("/skills/")
-                      ? "bg-brand/10 text-brand"
+                      ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]"
                       : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
                   )}
                 >
@@ -1067,11 +1054,11 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                   className={cn(
                     "p-2.5 rounded-xl transition-colors",
                     pathname === "/image" || pathname?.startsWith("/image/") || pathname === "/templates"
-                      ? "bg-brand/10 text-brand"
+                      ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]"
                       : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
                   )}
                 >
-                  <LayoutGrid className={cn("w-5 h-5", pathname === "/image" || pathname?.startsWith("/image/") || pathname === "/templates" ? "text-brand" : "text-text-tertiary")} />
+                  <LayoutGrid className={cn("w-5 h-5", pathname === "/image" || pathname?.startsWith("/image/") || pathname === "/templates" ? "text-slate-900 dark:text-text-primary" : "text-text-tertiary")} />
                 </button>
               </div>
 
@@ -1112,13 +1099,13 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                 type="button"
                 onClick={handleNewChat}
                 className={cn(
-                  "group w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150",
+                  "group w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-normal transition-all duration-150",
                   pathname === "/chat"
-                    ? "bg-brand/10 text-text-primary font-medium shadow-[inset_2px_0_0_0_var(--brand)]"
-                    : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
+                    ? "bg-surface-card text-slate-900 font-medium shadow-sm shadow-black/[0.02] dark:text-text-primary"
+                    : "text-slate-500 hover:bg-surface-card hover:text-slate-900 dark:text-text-secondary dark:hover:text-text-primary"
                 )}
               >
-                <MessageSquare className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/chat" ? "text-brand" : "text-text-tertiary")} />
+                <MessageSquare className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/chat" ? "text-slate-900 dark:text-text-primary" : "text-text-tertiary")} />
                 <span className="flex-1 text-left">{t("sidebar.nav.chat")}</span>
                 <kbd className="hidden lg:inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono text-text-secondary leading-none opacity-0 group-hover:opacity-100 transition-opacity">
                   {mod}Space
@@ -1132,23 +1119,9 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
             {/* ▼ 功能分组 */}
             <div className="px-3 py-2">
               <div className="mb-2 px-1">
-                <span className="text-sm font-bold text-text-tertiary/80 tracking-wide">Agents</span>
+                <span className="text-xs font-medium text-slate-400 tracking-wide dark:text-text-tertiary/80">Agents</span>
               </div>
               <div className="space-y-0.5">
-                {/* workspace空间 */}
-                <Link
-                  href="/workspace"
-                  className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150",
-                    pathname === "/workspace"
-                      ? "bg-brand/10 text-text-primary font-medium shadow-[inset_2px_0_0_0_var(--brand)]"
-                      : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
-                  )}
-                >
-                  <FolderKanban className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/workspace" ? "text-brand" : "text-text-tertiary")} />
-                  <span>{t("sidebar.nav.workspace")}</span>
-                </Link>
-
                 {/* AI工作 - hover 展开 */}
                 <div
                   onMouseEnter={handleWorkEnter}
@@ -1157,10 +1130,10 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                   <button
                     ref={workBtnRef}
                     className={cn(
-                      "flex items-center justify-between w-full px-3 py-2.5 rounded-xl text-sm transition-all duration-150",
+                      "flex items-center justify-between w-full px-3 py-2.5 rounded-xl text-sm font-normal transition-all duration-150",
                       pathname === "/ppt" || pathname?.startsWith("/ppt/") || pathname === "/skills" || pathname?.startsWith("/skills/")
-                        ? "bg-brand/10 text-text-primary font-medium shadow-[inset_2px_0_0_0_var(--brand)]"
-                        : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
+                        ? "bg-surface-card text-slate-900 font-medium shadow-sm shadow-black/[0.02] dark:text-text-primary"
+                        : "text-slate-500 hover:bg-surface-card hover:text-slate-900 dark:text-text-secondary dark:hover:text-text-primary"
                     )}
                   >
                     <div className="flex items-center gap-3">
@@ -1183,14 +1156,14 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                   <button
                     ref={moreBtnRef}
                     className={cn(
-                      "flex items-center justify-between w-full px-3 py-2.5 rounded-xl text-sm transition-all duration-150",
+                      "flex items-center justify-between w-full px-3 py-2.5 rounded-xl text-sm font-normal transition-all duration-150",
                       pathname === "/image" || pathname?.startsWith("/image/") || pathname === "/templates"
-                        ? "bg-brand/10 text-text-primary font-medium shadow-[inset_2px_0_0_0_var(--brand)]"
-                        : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
+                        ? "bg-surface-card text-slate-900 font-medium shadow-sm shadow-black/[0.02] dark:text-text-primary"
+                        : "text-slate-500 hover:bg-surface-card hover:text-slate-900 dark:text-text-secondary dark:hover:text-text-primary"
                     )}
                   >
                     <div className="flex items-center gap-3">
-                      <LayoutGrid className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/image" || pathname?.startsWith("/image/") || pathname === "/templates" ? "text-brand" : "text-text-tertiary")} />
+                      <LayoutGrid className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/image" || pathname?.startsWith("/image/") || pathname === "/templates" ? "text-slate-900 dark:text-text-primary" : "text-text-tertiary")} />
                       <span>{t("sidebar.nav.ai_create")}</span>
                     </div>
                     <ChevronRight className="w-4 h-4 text-text-tertiary" />
@@ -1201,8 +1174,8 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
                 <Link
                   href="/favorites"
                   className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150 w-full text-left",
-                    pathname === "/favorites" ? "bg-amber-400/10 text-text-primary font-medium" : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
+                    "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-normal transition-all duration-150 w-full text-left",
+                    pathname === "/favorites" ? "bg-amber-400/10 text-slate-900 font-medium dark:text-text-primary" : "text-slate-500 hover:bg-surface-card hover:text-slate-900 dark:text-text-secondary dark:hover:text-text-primary"
                   )}
                 >
                   <Star className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/favorites" ? "text-amber-400 fill-amber-400" : "text-text-tertiary")} />
@@ -1214,7 +1187,7 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
             {/* ▼ 历史分组 */}
             <div className="px-3 py-2">
               <div className="flex items-center justify-between mb-2 px-1">
-                <span className="text-sm font-bold text-text-tertiary/80 tracking-wide">{t("sidebar.nav.history")}</span>
+                <span className="text-xs font-medium text-slate-400 tracking-wide dark:text-text-tertiary/80">{t("sidebar.nav.history")}</span>
               </div>
               {renderConversationList()}
             </div>
@@ -1235,14 +1208,13 @@ export default function AppSidebar({ skillKey }: { skillKey?: string }) {
           />
         </div>
 
-        {/* 拖拽调整宽度手柄 - 仅展开状态显示 */}
+        {/* 拖拽调整宽度手柄：贴到右侧主内容左边框 */}
         {!collapsed && (
           <div
-            className="absolute top-0 right-0 z-50 w-2 h-full cursor-col-resize group"
+            className="absolute top-0 z-50 h-full w-2 -translate-x-1 cursor-col-resize"
+            style={{ left: `calc(100% + ${resizeHandleOffset}px)` }}
             onMouseDown={handleMouseDown}
-          >
-            <div className="absolute inset-0 -left-1 -right-1 rounded-full transition-all duration-150 group-hover:bg-brand/30 group-active:bg-brand/50" />
-          </div>
+          />
         )}
       </div>
 

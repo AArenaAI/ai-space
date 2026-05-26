@@ -239,7 +239,7 @@ export default function WorkspacePage() {
                   {workspaces.map((ws) => {
                     const active = ws.id === activeWS?.id;
                     return (
-                      <div key={ws.id} className={cn("group relative rounded-xl border p-2.5 transition-colors", active ? "border-brand/30 bg-brand/10" : "border-surface-border bg-surface-card hover:border-brand/20")}>
+                      <div key={ws.id} className={cn("group relative rounded-xl border p-2.5 transition-colors", active ? "border-surface-border bg-surface-card shadow-sm" : "border-surface-border bg-surface-card hover:border-text-tertiary/40")}>
                         {renaming?.id === ws.id ? (
                           <div className="flex items-center gap-1">
                             <input className="min-w-0 flex-1 rounded-lg border border-surface-border bg-surface px-2.5 py-1.5 text-sm text-text-primary outline-none focus:border-brand"
@@ -250,13 +250,13 @@ export default function WorkspacePage() {
                         ) : (
                           <button onClick={() => handleSwitch(ws)} className="flex w-full items-center gap-3 text-left">
                             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-surface-border bg-surface-elevated">
-                              <FolderKanban className={cn("h-3.5 w-3.5", active ? "text-brand" : "text-text-tertiary")} />
+                              <FolderKanban className={cn("h-3.5 w-3.5", active ? "text-text-primary" : "text-text-tertiary")} />
                             </div>
                             <div className="min-w-0 flex-1">
                               <p className="truncate text-sm font-medium text-text-primary">{ws.name}</p>
                               <p className="text-[11px] text-text-tertiary">{ws.is_default ? "默认空间" : "自定义空间"}</p>
                             </div>
-                            <ChevronDown className={cn("h-4 w-4 -rotate-90 text-text-tertiary", active && "text-brand")} />
+                            <ChevronDown className={cn("h-4 w-4 -rotate-90 text-text-tertiary", active && "text-text-primary")} />
                           </button>
                         )}
 

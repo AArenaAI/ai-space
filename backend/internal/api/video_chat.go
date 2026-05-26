@@ -5,6 +5,7 @@ import (
 	"aipool-backend/internal/models"
 	"aipool-backend/internal/services"
 	"context"
+	"log"
 	"net/http"
 	"time"
 
@@ -37,6 +38,7 @@ type videoChatRequest struct {
 	GenerateAudio   bool     `json:"generate_audio"`
 	Watermark       bool     `json:"watermark"`
 	ReferenceImages []string `json:"reference_image_urls"`
+	ReferenceVideos []string `json:"reference_video_urls"`
 }
 
 // ListVideoChats 获取用户的视频会话列表
@@ -233,7 +235,7 @@ func (h *VideoChatHandler) createVideoChatMessagesAndTask(userID uint, chatID ui
 	if ratioInput == "" {
 		ratioInput = req.AspectRatio
 	}
-	ratio, duration, resolution, err := normalizeVideoGenerationParams(modelID, ratioInput, req.Resolution, req.Duration, len(req.ReferenceImages))
+	ratio, duration, resolution, err := normalizeVideoGenerationParams(modelID, ratioInput, req.Resolution, req.Duration, len(req.ReferenceImages), len(req.ReferenceVideos))
 	if err != nil {
 		return nil, err
 	}
@@ -259,15 +261,31 @@ func (h *VideoChatHandler) createVideoChatMessagesAndTask(userID uint, chatID ui
 	}
 
 	createReq := services.CreateVideoTaskRequest{
-		Model:           modelID,
-		Prompt:          req.Prompt,
-		Ratio:           ratio,
-		Resolution:      resolution,
-		Duration:        duration,
-		GenerateAudio:   req.GenerateAudio,
-		Watermark:       req.Watermark,
-		ReferenceImages: filterAndResolveURLs(req.ReferenceImages),
+		Model:         modelID,
+		Prompt:        req.Prompt,
+		Ratio:         ratio,
+		Resolution:    resolution,
+		Duration:      duration,
+		GenerateAudio: req.GenerateAudio,
+		Watermark:     req.Watermark,
 	}
+	createReq.ReferenceImages, err = resolveVideoReferenceURLs(h.db, h.cfg, userID, req.ReferenceImages, "image")
+	if err != nil {
+		errMsg := err.Error()
+		h.db.Model(&assistantMsg).Updates(map[string]interface{}{"status": "failed", "error_message": errMsg})
+		assistantMsg.Status = "failed"
+		assistantMsg.ErrorMessage = errMsg
+		return &assistantMsg, err
+	}
+	createReq.ReferenceVideos, err = resolveVideoReferenceURLs(h.db, h.cfg, userID, req.ReferenceVideos, "video")
+	if err != nil {
+		errMsg := err.Error()
+		h.db.Model(&assistantMsg).Updates(map[string]interface{}{"status": "failed", "error_message": errMsg})
+		assistantMsg.Status = "failed"
+		assistantMsg.ErrorMessage = errMsg
+		return &assistantMsg, err
+	}
+	log.Printf("[VideoChat] create task refs images=%d videos=%d model=%s", len(createReq.ReferenceImages), len(createReq.ReferenceVideos), modelID)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	resp, err := h.videoService.CreateVideoTask(ctx, createReq)

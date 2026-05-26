@@ -79,11 +79,11 @@ function AspectIcon({ w, h, active }: { w: number; h: number; active: boolean })
     <div
       className={cn(
         "flex items-center justify-center w-8 h-8 rounded-md border transition-colors",
-        active ? "border-brand/50 bg-brand/10" : "border-surface-border bg-surface"
+        active ? "border-surface-border bg-surface-card shadow-sm" : "border-surface-border bg-surface"
       )}
     >
       <div
-        className={cn("rounded-sm border-2 transition-colors", active ? "border-brand bg-brand/20" : "border-text-tertiary/50")}
+        className={cn("rounded-sm border-2 transition-colors", active ? "border-text-primary bg-surface-card" : "border-text-tertiary/50")}
         style={{ width: boxW, height: boxH }}
       />
     </div>
@@ -811,7 +811,7 @@ function ImageChatPageInner() {
                           className={cn(
                             "w-full rounded-lg px-3 py-2 text-left text-xs transition-colors",
                             selectedModel === model.id
-                              ? "bg-brand/10 text-brand"
+                              ? "bg-surface-card text-text-primary font-medium shadow-sm"
                               : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                           )}
                         >
@@ -848,8 +848,8 @@ function ImageChatPageInner() {
                             className={cn(
                               "flex flex-col items-center gap-1 rounded-lg border px-2 py-2 text-[11px] transition-colors",
                               selectedAspectRatio === ratio.value
-                                ? "border-brand bg-brand/10 text-brand"
-                                : "border-surface-border text-text-secondary hover:border-brand/30 hover:text-text-primary"
+                                ? "border-surface-border bg-surface-card text-text-primary font-medium shadow-sm"
+                                : "border-surface-border text-text-secondary hover:border-text-tertiary/40 hover:text-text-primary"
                             )}
                           >
                             <AspectIcon w={ratio.w} h={ratio.h} active={selectedAspectRatio === ratio.value} />
@@ -871,7 +871,7 @@ function ImageChatPageInner() {
                       className={cn(
                         "rounded-full px-2 py-0.5 text-[11px] transition-colors",
                         selectedResolution === resolution.value
-                          ? "bg-brand text-white"
+                          ? "bg-surface-card text-text-primary font-medium shadow-sm"
                           : "text-text-tertiary hover:text-text-primary"
                       )}
                     >
@@ -890,7 +890,7 @@ function ImageChatPageInner() {
                       className={cn(
                         "rounded-full px-2 py-0.5 text-[11px] transition-colors",
                         selectedQuality === quality.value
-                          ? "bg-brand text-white"
+                          ? "bg-surface-card text-text-primary font-medium shadow-sm"
                           : "text-text-tertiary hover:text-text-primary"
                       )}
                     >

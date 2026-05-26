@@ -38,7 +38,7 @@ export default function AuthAwareButton({
   };
 
   const baseStyles =
-    "inline-flex items-center justify-center gap-2 transition-all duration-200 cursor-pointer";
+    "inline-flex items-center justify-center gap-2 text-sm transition-all duration-200 cursor-pointer";
 
   const variantStyles = {
     primary:

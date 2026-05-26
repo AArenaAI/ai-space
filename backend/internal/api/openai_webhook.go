@@ -174,6 +174,10 @@ func mergeReasoningPersistedContent(existing string, finalText string) string {
 	if strings.Contains(existing, finalText) {
 		return existing
 	}
+	// 如果现有内容已经打开 <think> 但还没有闭合，先补 </think>，避免最终正文被前端解析进思考块。
+	if strings.Count(existing, "<think>") > strings.Count(existing, "</think>") {
+		existing += "</think>"
+	}
 	// 如果现有内容只有思考块（或思考块后只有空白），把最终正文补在后面。
 	return existing + "\n\n" + finalText
 }

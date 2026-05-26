@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Copy, ExternalLink, Loader2, MessageSquare, Search, Star, Trash2 } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { FavoriteItem, useFavorites } from "@/hooks/useFavorites";
 import { toast } from "sonner";
 
@@ -52,7 +51,7 @@ export default function FavoritesPage() {
   };
 
   return (
-    <div className="flex h-full flex-col bg-surface-elevated">
+    <div className="flex h-full flex-col bg-surface">
       <div className="flex-1 overflow-y-auto px-6 py-4 md:px-10 md:py-6">
         <div className="mx-auto flex min-h-full w-full max-w-7xl flex-col">
           <section className="relative overflow-hidden rounded-2xl border border-surface-border bg-surface-card px-5 py-4 md:px-6 md:py-5">

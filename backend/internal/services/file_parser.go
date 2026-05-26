@@ -73,6 +73,13 @@ func (p *FileParser) Parse(ctx context.Context, data []byte, filename string) (*
 		return p.parseXLSX(data)
 	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp":
 		return p.parseImage(ctx, data, ext)
+	case ".mp4", ".mov":
+		return &ParseResult{
+			Content:    "",
+			Pages:      1,
+			Chunks:     nil,
+			TokenCount: 0,
+		}, nil
 	default:
 		return p.parseText(data, filename) // fallback
 	}

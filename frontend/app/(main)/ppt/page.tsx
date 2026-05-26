@@ -712,7 +712,7 @@ export default function PPTPage() {
                       onClick={() => setConfig((c) => ({ ...c, templateId: t.id }))}
                       className={`flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all ${
                         config.templateId === t.id
-                          ? "border-brand bg-brand/5"
+                          ? "border-surface-border bg-surface-card text-text-primary shadow-sm"
                           : "border-surface-border bg-surface-card hover:border-surface-border/80"
                       }`}
                     >
@@ -737,8 +737,8 @@ export default function PPTPage() {
                       onClick={() => setConfig((c) => ({ ...c, slideCount: n }))}
                       className={`px-4 py-2 rounded-xl text-sm border transition-colors ${
                         config.slideCount === n
-                          ? "bg-brand text-white border-brand"
-                          : "border-surface-border bg-surface-card text-text-secondary hover:border-brand/50"
+                          ? "bg-surface-card text-text-primary border-surface-border font-medium shadow-sm"
+                          : "border-surface-border bg-surface-card text-text-secondary hover:border-text-tertiary/40"
                       }`}
                     >
                       {n} 页
@@ -759,8 +759,8 @@ export default function PPTPage() {
                       onClick={() => setConfig((c) => ({ ...c, language: opt.value }))}
                       className={`px-4 py-2 rounded-xl text-sm border transition-colors ${
                         config.language === opt.value
-                          ? "bg-brand text-white border-brand"
-                          : "border-surface-border bg-surface-card text-text-secondary hover:border-brand/50"
+                          ? "bg-surface-card text-text-primary border-surface-border font-medium shadow-sm"
+                          : "border-surface-border bg-surface-card text-text-secondary hover:border-text-tertiary/40"
                       }`}
                     >
                       {opt.label}
@@ -786,8 +786,8 @@ export default function PPTPage() {
                       }
                       className={`px-3 py-1.5 rounded-xl text-sm border transition-colors ${
                         config.audience === opt
-                          ? "bg-brand/10 text-brand border-brand/30"
-                          : "border-surface-border bg-surface-card text-text-secondary hover:border-brand/50"
+                          ? "bg-surface-card text-text-primary border-surface-border font-medium shadow-sm"
+                          : "border-surface-border bg-surface-card text-text-secondary hover:border-text-tertiary/40"
                       }`}
                     >
                       {opt}
@@ -813,8 +813,8 @@ export default function PPTPage() {
                       }
                       className={`px-3 py-1.5 rounded-xl text-sm border transition-colors ${
                         config.purpose === opt
-                          ? "bg-brand/10 text-brand border-brand/30"
-                          : "border-surface-border bg-surface-card text-text-secondary hover:border-brand/50"
+                          ? "bg-surface-card text-text-primary border-surface-border font-medium shadow-sm"
+                          : "border-surface-border bg-surface-card text-text-secondary hover:border-text-tertiary/40"
                       }`}
                     >
                       {opt}
@@ -835,8 +835,8 @@ export default function PPTPage() {
                       onClick={() => setConfig((c) => ({ ...c, withImages: opt.value }))}
                       className={`px-3 py-2.5 rounded-2xl text-sm border text-center transition-colors ${
                         config.withImages === opt.value
-                          ? "bg-brand/10 text-brand border-brand/30"
-                          : "border-surface-border bg-surface-card text-text-secondary hover:border-brand/50"
+                          ? "bg-surface-card text-text-primary border-surface-border font-medium shadow-sm"
+                          : "border-surface-border bg-surface-card text-text-secondary hover:border-text-tertiary/40"
                       }`}
                     >
                       {opt.label}
@@ -859,8 +859,8 @@ export default function PPTPage() {
                         onClick={() => setConfig((c) => ({ ...c, qualityMode: opt.value }))}
                         className={`flex flex-col items-center gap-1.5 p-3 rounded-2xl border transition-colors ${
                           config.qualityMode === opt.value
-                            ? "bg-brand/10 text-brand border-brand/30"
-                            : "border-surface-border bg-surface-card text-text-secondary hover:border-brand/50"
+                            ? "bg-surface-card text-text-primary border-surface-border font-medium shadow-sm"
+                            : "border-surface-border bg-surface-card text-text-secondary hover:border-text-tertiary/40"
                         }`}
                       >
                         <Icon className="w-5 h-5" />
@@ -1150,7 +1150,7 @@ export default function PPTPage() {
                     key={s.page}
                     onClick={() => setCurrentPage(s.page)}
                     className={`px-3 py-1.5 rounded-xl text-xs whitespace-nowrap transition-colors ${
-                      s.page === currentPage ? "bg-brand text-white" : "bg-surface hover:bg-surface/80"
+                      s.page === currentPage ? "bg-surface-card text-text-primary font-medium shadow-sm" : "bg-surface hover:bg-surface/80"
                     }`}
                   >
                     {s.page}. {s.title.slice(0, 8)}

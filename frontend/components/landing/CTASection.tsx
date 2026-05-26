@@ -24,10 +24,10 @@ export default function CTASection() {
                 免费使用
               </div>
 
-              <h2 className="text-3xl sm:text-4xl font-bold text-text-primary mb-4">
+              <h2 className="text-3xl sm:text-4xl font-semibold text-text-primary mb-4">
                 准备好开始了吗？
               </h2>
-              <p className="text-text-secondary max-w-lg mx-auto mb-8">
+              <p className="text-sm sm:text-[15px] text-text-secondary leading-7 max-w-lg mx-auto mb-8">
                 立即注册 AI Space，体验全球顶级 AI 模型的强大能力。无需信用卡，注册即可使用。
               </p>
 
@@ -41,7 +41,7 @@ export default function CTASection() {
                 </AuthAwareButton>
                 <button
                   onClick={showLoginModal}
-                  className="inline-flex items-center justify-center gap-2 px-8 py-3.5 rounded-xl bg-surface-elevated border border-surface-border text-text-primary font-medium hover:bg-surface-card transition-all duration-200 hover:-translate-y-0.5 cursor-pointer"
+                  className="inline-flex items-center justify-center gap-2 px-8 py-3.5 rounded-xl bg-surface-elevated border border-surface-border text-text-primary text-sm font-medium hover:bg-surface-card transition-all duration-200 hover:-translate-y-0.5 cursor-pointer"
                 >
                   注册账号
                 </button>

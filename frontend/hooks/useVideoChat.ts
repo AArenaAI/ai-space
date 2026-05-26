@@ -38,6 +38,7 @@ export interface VideoChatPayload {
   generate_audio?: boolean;
   watermark?: boolean;
   reference_image_urls?: string[];
+  reference_video_urls?: string[];
 }
 
 const API_BASE_URL = "";

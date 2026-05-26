@@ -125,7 +125,7 @@ export default function ToolsSidebar() {
         type="button"
         onClick={handleNewChat}
         title={t("sidebar.backToChat")}
-        className="shrink-0 mx-3 mt-3 flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-text-secondary hover:text-text-primary hover:bg-surface-card transition-colors"
+        className="shrink-0 mx-3 mt-3 flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-normal text-slate-500 hover:text-slate-900 hover:bg-surface-card transition-colors dark:text-text-secondary dark:hover:text-text-primary"
       >
         <ChevronLeft className="w-4 h-4" />
         {!collapsed && t("sidebar.backToChat")}
@@ -136,7 +136,7 @@ export default function ToolsSidebar() {
         {MORE_NAV_GROUPS.map((group) => (
           <div key={group.titleKey}>
             {!collapsed && (
-              <h3 className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-2 px-1">
+              <h3 className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2 px-1 dark:text-text-tertiary">
                 {t(group.titleKey)}
               </h3>
             )}
@@ -153,13 +153,13 @@ export default function ToolsSidebar() {
                     href={item.href}
                     title={t(item.labelKey)}
                     className={cn(
-                      "flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150",
+                      "flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-normal transition-all duration-150",
                       active
-                        ? "bg-brand/10 text-brand"
-                        : "text-text-secondary hover:text-text-primary hover:bg-surface-card"
+                        ? "bg-surface-card text-slate-900 font-medium shadow-sm dark:text-text-primary"
+                        : "text-slate-500 hover:text-slate-900 hover:bg-surface-card dark:text-text-secondary dark:hover:text-text-primary"
                     )}
                   >
-                    <item.icon className={cn("w-4 h-4 shrink-0", active ? "text-brand" : "text-text-tertiary")} />
+                    <item.icon className={cn("w-4 h-4 shrink-0", active ? "text-text-primary" : "text-text-tertiary")} />
                     {!collapsed && <span>{t(item.labelKey)}</span>}
                   </Link>
                 );

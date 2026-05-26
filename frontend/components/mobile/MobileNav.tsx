@@ -356,7 +356,7 @@ export default function MobileNav() {
           {navItems.map((item) => {
             const active = pathname === item.href;
             return (
-              <Link key={item.href} href={item.href} onClick={() => setMenuOpen(false)} className={cn("flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-150", active ? "bg-surface-card text-text-primary border-l-2 border-brand" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
+              <Link key={item.href} href={item.href} onClick={() => setMenuOpen(false)} className={cn("flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-150", active ? "bg-surface-card text-text-primary font-medium shadow-sm" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
                 <item.icon className="w-4 h-4 shrink-0" /><span>{item.label}</span>
               </Link>
             );

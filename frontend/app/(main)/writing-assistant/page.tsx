@@ -10,8 +10,8 @@ import {
   FileText,
   Loader2,
   MessageSquare,
-  MoreHorizontal,
   PenLine,
+  Trash2,
   Plus,
   Search,
   Send,
@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { consumeChatStream } from "@/lib/chatStream";
 
 const WRITER_MODEL = "gpt-5.5";
 const WRITER_SKILL_KEY = "ai-writing-assistant";
@@ -54,7 +55,18 @@ type WriterDoc = {
 
 type DocSnapshot = Pick<WriterDoc, "title" | "content">;
 
+type SmoothBuffer = {
+  displayed: string;
+  target: string;
+  timer: ReturnType<typeof setTimeout> | null;
+  apply: (text: string) => void;
+  drainResolvers: Array<() => void>;
+};
+
 const quickPrompts = ["写一篇产品发布稿", "帮我起草商业计划书", "写一篇小红书种草文", "把这段内容润色成高级表达"];
+const ASSISTANT_MIN_WIDTH = 320;
+const ASSISTANT_MAX_WIDTH = 680;
+const ASSISTANT_DEFAULT_WIDTH = 420;
 
 function countWords(text: string): number {
   if (!text) return 0;
@@ -137,8 +149,42 @@ function stripJsonFence(text: string) {
   return text.replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "").trim();
 }
 
+function extractTag(text: string, tag: "TITLE" | "CONTENT" | "REPLY", allowOpen = false): string | undefined {
+  const openTag = `<${tag}>`;
+  const closeTag = `</${tag}>`;
+  const start = text.indexOf(openTag);
+  if (start < 0) return undefined;
+  const contentStart = start + openTag.length;
+  const end = text.indexOf(closeTag, contentStart);
+  if (end >= 0) return text.slice(contentStart, end).trim();
+  if (!allowOpen) return undefined;
+
+  const nextTag = text.slice(contentStart).search(/<\/?(?:TITLE|CONTENT|REPLY)>/);
+  const openContent = nextTag >= 0
+    ? text.slice(contentStart, contentStart + nextTag)
+    : text.slice(contentStart);
+  return openContent.trim();
+}
+
+function parseWriterTaggedResult(raw: string, allowOpen = false): { reply?: string; title?: string; content?: string } {
+  return {
+    reply: extractTag(raw, "REPLY", allowOpen),
+    title: extractTag(raw, "TITLE", allowOpen),
+    content: extractTag(raw, "CONTENT", allowOpen),
+  };
+}
+
 function parseWriterResult(raw: string): { reply: string; title?: string; content?: string } {
   const cleaned = stripJsonFence(raw);
+  const tagged = parseWriterTaggedResult(cleaned);
+  if (tagged.title || tagged.content || tagged.reply) {
+    return {
+      reply: tagged.reply || "已完成写作，并同步到左侧文档。",
+      title: tagged.title,
+      content: tagged.content,
+    };
+  }
+
   try {
     const parsed = JSON.parse(cleaned);
     return {
@@ -183,38 +229,85 @@ export default function WritingAssistantPage() {
   const [historySearch, setHistorySearch] = useState("");
   const [undoStack, setUndoStack] = useState<DocSnapshot[]>([]);
   const [redoStack, setRedoStack] = useState<DocSnapshot[]>([]);
+  const [assistantWidth, setAssistantWidth] = useState(ASSISTANT_DEFAULT_WIDTH);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editHistoryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingEditSnapshotRef = useRef<DocSnapshot | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const smoothBuffersRef = useRef<Record<string, SmoothBuffer>>({});
 
-  const typewriteDoc = (baseDoc: WriterDoc, targetTitle: string, targetContent: string) => {
+  const resolveSmoothDrains = (buffer: SmoothBuffer) => {
+    const resolvers = buffer.drainResolvers.splice(0);
+    resolvers.forEach((resolve) => resolve());
+  };
+
+  const pumpSmoothBuffer = (key: string) => {
+    const buffer = smoothBuffersRef.current[key];
+    if (!buffer) return;
+    if (buffer.displayed.length >= buffer.target.length) {
+      buffer.timer = null;
+      resolveSmoothDrains(buffer);
+      return;
+    }
+
+    const remaining = buffer.target.length - buffer.displayed.length;
+    const step = remaining > 600 ? 12 : remaining > 240 ? 8 : remaining > 80 ? 5 : 2;
+    buffer.displayed = buffer.target.slice(0, buffer.displayed.length + step);
+    buffer.apply(buffer.displayed);
+    buffer.timer = setTimeout(() => pumpSmoothBuffer(key), 18);
+  };
+
+  const enqueueSmoothText = (key: string, target: string, apply: (text: string) => void) => {
+    let buffer = smoothBuffersRef.current[key];
+    if (!buffer) {
+      buffer = { displayed: "", target: "", timer: null, apply, drainResolvers: [] };
+      smoothBuffersRef.current[key] = buffer;
+    }
+    buffer.apply = apply;
+    buffer.target = target;
+    if (!buffer.timer) pumpSmoothBuffer(key);
+  };
+
+  const drainSmoothText = (key: string) => {
+    const buffer = smoothBuffersRef.current[key];
+    if (!buffer || buffer.displayed.length >= buffer.target.length) return Promise.resolve();
     return new Promise<void>((resolve) => {
-      let titleIdx = 0;
-      let contentIdx = 0;
-      let phase: "title" | "content" = "title";
-
-      const tick = () => {
-        if (phase === "title") {
-          titleIdx = Math.min(titleIdx + 2, targetTitle.length);
-          setActiveDoc({ ...baseDoc, title: targetTitle.slice(0, titleIdx), content: baseDoc.content });
-          if (titleIdx >= targetTitle.length) {
-            phase = "content";
-          }
-          setTimeout(tick, 28);
-        } else {
-          contentIdx = Math.min(contentIdx + 8, targetContent.length);
-          setActiveDoc({ ...baseDoc, title: targetTitle, content: targetContent.slice(0, contentIdx) });
-          if (contentIdx >= targetContent.length) {
-            resolve();
-            return;
-          }
-          setTimeout(tick, 14);
-        }
-      };
-      tick();
+      buffer.drainResolvers.push(resolve);
     });
   };
+
+  const clearSmoothText = (key: string) => {
+    const buffer = smoothBuffersRef.current[key];
+    if (!buffer) return;
+    if (buffer.timer) clearTimeout(buffer.timer);
+    resolveSmoothDrains(buffer);
+    delete smoothBuffersRef.current[key];
+  };
+
+  const handleAssistantResizeStart = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (window.innerWidth < 768) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = assistantWidth;
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const nextWidth = Math.min(ASSISTANT_MAX_WIDTH, Math.max(ASSISTANT_MIN_WIDTH, startWidth - (moveEvent.clientX - startX)));
+      setAssistantWidth(nextWidth);
+    };
+
+    const handlePointerUp = () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+  };
+
 
   const sortedDocuments = useMemo(
     () => documents.filter((item) => item.skill_key === WRITER_SKILL_KEY).sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()),
@@ -346,14 +439,49 @@ export default function WritingAssistantPage() {
     }
   };
 
-  const callWriter = async (instruction: string, nextMode: WriterMode, doc?: WriterDoc | null, onDelta?: (delta: string) => void) => {
+  const applyWriterStream = (baseDoc: WriterDoc, fullText: string) => {
+    const partial = parseWriterTaggedResult(fullText, true);
+    if (!partial.title && !partial.content) return;
+    setActiveDoc((prev) => {
+      if (!prev || prev.conversationId !== baseDoc.conversationId) return prev;
+      return {
+        ...prev,
+        title: partial.title || prev.title,
+        content: partial.content || prev.content,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+  };
+
+  const finalizeWriterDoc = (baseDoc: WriterDoc, result: { title?: string; content?: string }) => {
+    const nextDoc = {
+      ...baseDoc,
+      title: result.title || baseDoc.title,
+      content: result.content || baseDoc.content,
+      updatedAt: new Date().toISOString(),
+    };
+    setActiveDoc(nextDoc);
+    localStorage.setItem(storageKey(nextDoc.conversationId), JSON.stringify(nextDoc));
+  };
+
+  const callWriter = async (instruction: string, nextMode: WriterMode, doc?: WriterDoc | null, onDelta?: (delta: string, fullText: string) => void) => {
     const wordLimitMatch = instruction.match(/(\d+)\s*[\u5b57\u5b57\u7b26]/);
     const wordLimitHint = wordLimitMatch
       ? `【强制约束】用户明确要求字数限制为${wordLimitMatch[1]}字，你必须严格遵守，输出内容字数（不含空格）应尽量接近该限制，误差不超过10%。`
       : "请严格遵守用户要求的字数限制。如果用户指定了字数，输出内容字数（不含空格）必须尽量接近该限制，误差不超过10%。";
 
     const systemPrompt = nextMode === "writing"
-      ? `你是 AI Space 的 AI写作助手。默认模型 ${WRITER_MODEL}。你负责生成、改写、润色和完善左侧文档。不要联网搜索。请只返回 JSON，不要 Markdown 代码块。格式：{"reply":"给用户的一句话说明","title":"文档标题","content":"完整文档正文"}。如果用户要求修改，请基于现有文档输出修改后的完整标题和完整正文。${wordLimitHint}`
+      ? `你是 AI Space 的 AI写作助手。默认模型 ${WRITER_MODEL}。你负责生成、改写、润色和完善左侧文档。不要联网搜索。必须只按下面标签格式输出，不要 Markdown 代码块，不要额外解释：
+<TITLE>
+文档标题
+</TITLE>
+<CONTENT>
+完整文档正文
+</CONTENT>
+<REPLY>
+给用户的一句话说明
+</REPLY>
+如果用户要求修改，请基于现有文档输出修改后的完整标题和完整正文。${wordLimitHint}`
       : `你是 AI Space 的 AI写作助手。默认模型 ${WRITER_MODEL}。当前是聊天模式，只回答用户问题，不要改写左侧文档，不要联网搜索。`;
 
     const currentWordCount = doc ? countWords(doc.content || "") : 0;
@@ -394,48 +522,9 @@ export default function WritingAssistantPage() {
       return extractTextFromChatResponse(data);
     }
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let fullText = "";
-
-    const handleEvent = (event: string) => {
-      const lines = event.split("\n");
-      for (const line of lines) {
-        if (!line.startsWith("data:")) continue;
-        const data = line.slice(5).trim();
-        if (!data || data === "[DONE]") continue;
-        try {
-          const parsed = JSON.parse(data);
-          if (parsed._error_meta?.user_message) {
-            throw new Error(parsed._error_meta.user_message);
-          }
-          const delta = parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.message?.content || "";
-          if (delta) {
-            fullText += delta;
-            onDelta?.(delta);
-          }
-        } catch (err) {
-          if (err instanceof Error) throw err;
-        }
-      }
-    };
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let idx = buffer.indexOf("\n\n");
-      while (idx !== -1) {
-        const event = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 2);
-        handleEvent(event);
-        idx = buffer.indexOf("\n\n");
-      }
-    }
-    if (buffer.trim()) handleEvent(buffer);
-
-    return fullText.trim();
+    return consumeChatStream(res, {
+      onDelta: (delta, fullText) => onDelta?.(delta, fullText),
+    });
   };
 
   const openDocument = (conv: Conversation) => {
@@ -459,12 +548,40 @@ export default function WritingAssistantPage() {
     setHistorySearch("");
   };
 
+  const deleteDocument = async (conv: Conversation) => {
+    const title = getDocumentDisplayTitle(conv);
+    if (!window.confirm(`确定删除「${title}」吗？删除后不可恢复。`)) return;
+    try {
+      const res = await fetch(`/api/conversations/${conv.id}`, {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || err.error || "删除失败");
+      }
+      localStorage.removeItem(storageKey(conv.id));
+      localStorage.removeItem(messagesStorageKey(conv.id));
+      localStorage.removeItem(historyStorageKey(conv.id));
+      setDocuments((prev) => prev.filter((item) => item.id !== conv.id));
+      if (activeDoc?.conversationId === conv.id) {
+        setActiveDoc(null);
+        replaceHistory([], [], conv.id);
+        setMessages([]);
+      }
+      toast.success("已删除文档");
+    } catch (e: any) {
+      toast.error(e.message || "删除失败");
+    }
+  };
+
   const handleHomeSubmit = async () => {
     const text = homeInput.trim();
     if (!text || isGenerating) return;
     setIsGenerating(true);
     setHomeInput("");
     const assistantId = `a-${Date.now()}`;
+    const smoothKey = `home-${assistantId}`;
     try {
       const title = mode === "writing" ? (text.length > 24 ? `${text.slice(0, 24)}...` : text) : "未命名";
       const conv = await createConversation(title);
@@ -477,26 +594,30 @@ export default function WritingAssistantPage() {
 
       setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: mode === "writing" ? "正在写入左侧文档..." : "", mode, createdAt: Date.now() }]);
       const appendDelta = mode === "chat"
-        ? (delta: string) => {
-            setMessages((prev) => prev.map((msg) => msg.id === assistantId ? { ...msg, content: msg.content + delta } : msg));
+        ? (_delta: string, fullText: string) => {
+            enqueueSmoothText(smoothKey, fullText, (text) => {
+              setMessages((prev) => prev.map((msg) => msg.id === assistantId ? { ...msg, content: text } : msg));
+            });
           }
-        : undefined;
+        : (_delta: string, fullText: string) => {
+            enqueueSmoothText(smoothKey, fullText, (text) => applyWriterStream(doc, text));
+          };
 
       if (mode === "writing") {
-        const raw = await callWriter(text, "writing", doc, appendDelta);
-        const result = parseWriterResult(raw);
         recordUndoSnapshot({ title: doc.title, content: doc.content }, conv.id);
-        await typewriteDoc(
-          { conversationId: conv.id, title: "", content: "", updatedAt: new Date().toISOString() },
-          result.title || title,
-          result.content || raw
-        );
+        const raw = await callWriter(text, "writing", doc, appendDelta);
+        await drainSmoothText(smoothKey);
+        const result = parseWriterResult(raw);
+        finalizeWriterDoc(doc, { title: result.title || title, content: result.content || raw });
         setMessages((prev) => prev.map((msg) => msg.id === assistantId ? { ...msg, content: result.reply || "已完成写作，并同步到左侧文档。" } : msg));
       } else {
         await callWriter(text, "chat", doc, appendDelta);
+        await drainSmoothText(smoothKey);
       }
+      clearSmoothText(smoothKey);
       loadDocuments();
     } catch (e: any) {
+      clearSmoothText(smoothKey);
       toast.error(e.message || "请求失败");
       setMessages((prev) => prev.map((msg) => msg.id === assistantId
         ? { ...msg, content: `生成失败：${e.message || "请求失败"}` }
@@ -514,31 +635,36 @@ export default function WritingAssistantPage() {
     setIsGenerating(true);
     const userMsg: ChatMessage = { id: `u-${Date.now()}`, role: "user", content: text, mode: submitMode, createdAt: Date.now() };
     const assistantId = `a-${Date.now()}`;
+    const smoothKey = `workspace-${assistantId}`;
     setMessages((prev) => [...prev, userMsg, { id: assistantId, role: "assistant", content: "", mode: submitMode, createdAt: Date.now() }]);
+    const streamBaseDoc = activeDoc;
     const appendDelta = submitMode === "chat"
-      ? (delta: string) => {
-          setMessages((prev) => prev.map((msg) => msg.id === assistantId ? { ...msg, content: msg.content + delta } : msg));
+      ? (_delta: string, fullText: string) => {
+          enqueueSmoothText(smoothKey, fullText, (text) => {
+            setMessages((prev) => prev.map((msg) => msg.id === assistantId ? { ...msg, content: text } : msg));
+          });
         }
-      : undefined;
+      : (_delta: string, fullText: string) => {
+          enqueueSmoothText(smoothKey, fullText, (text) => applyWriterStream(streamBaseDoc, text));
+        };
     if (submitMode === "writing") {
       flushPendingEditSnapshot(activeDoc.conversationId);
       setMessages((prev) => prev.map((msg) => msg.id === assistantId ? { ...msg, content: "正在写入左侧文档..." } : msg));
     }
     try {
       const raw = await callWriter(text, submitMode, activeDoc, appendDelta);
+      await drainSmoothText(smoothKey);
       if (submitMode === "writing") {
         const result = parseWriterResult(raw);
-        const currentDoc = activeDoc;
+        const currentDoc = streamBaseDoc;
         recordUndoSnapshot({ title: currentDoc.title, content: currentDoc.content }, currentDoc.conversationId);
-        await typewriteDoc(
-          { ...currentDoc, title: "", content: "", updatedAt: new Date().toISOString() },
-          result.title || currentDoc.title,
-          result.content || raw
-        );
+        finalizeWriterDoc(currentDoc, { title: result.title || currentDoc.title, content: result.content || raw });
         setMessages((prev) => prev.map((msg) => msg.id === assistantId ? { ...msg, content: result.reply || "已完成写作，并同步到左侧文档。" } : msg));
       }
+      clearSmoothText(smoothKey);
       loadDocuments();
     } catch (e: any) {
+      clearSmoothText(smoothKey);
       toast.error(e.message || "请求失败");
       setMessages((prev) => prev.map((msg) => msg.id === assistantId ? { ...msg, content: `生成失败：${e.message || "请求失败"}` } : msg));
     } finally {
@@ -705,26 +831,36 @@ export default function WritingAssistantPage() {
                     const displayTitle = localDoc?.title || doc.title || "未命名";
                     const preview = localDoc?.content?.slice(0, 100) || "";
                     return (
-                      <button
+                      <div
                         key={doc.id}
-                        onClick={() => openDocument(doc)}
-                        className="group relative flex h-[200px] flex-col justify-between rounded-2xl border border-surface-border bg-white p-5 text-left shadow-sm transition-all hover:border-brand/40 hover:bg-surface-card hover:shadow-md"
+                        className="group relative flex h-[200px] flex-col rounded-2xl border border-surface-border bg-white text-left shadow-sm transition-all hover:border-brand/40 hover:bg-surface-card hover:shadow-md"
                       >
-                        <div className="min-w-0 text-left">
-                          <h3 className="line-clamp-1 text-base font-medium text-text-primary">{displayTitle}</h3>
-                          {preview ? (
-                            <p className="mt-2 line-clamp-4 text-sm leading-relaxed text-text-secondary">{preview}</p>
-                          ) : (
-                            <p className="mt-2 text-sm text-text-tertiary">暂无内容</p>
-                          )}
-                        </div>
-                        <div className="flex items-center justify-between">
+                        <button
+                          onClick={() => openDocument(doc)}
+                          className="flex min-h-0 flex-1 flex-col justify-between p-5 text-left"
+                        >
+                          <div className="min-w-0 text-left">
+                            <h3 className="line-clamp-1 text-base font-medium text-text-primary">{displayTitle}</h3>
+                            {preview ? (
+                              <p className="mt-2 line-clamp-4 text-sm leading-relaxed text-text-secondary">{preview}</p>
+                            ) : (
+                              <p className="mt-2 text-sm text-text-tertiary">暂无内容</p>
+                            )}
+                          </div>
                           <span className="text-xs text-text-tertiary">{formatDate(doc.updated_at)}</span>
-                          <span className="text-lg text-text-secondary opacity-0 transition-opacity group-hover:opacity-100">
-                            ...
-                          </span>
-                        </div>
-                      </button>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteDocument(doc);
+                          }}
+                          aria-label={`删除${displayTitle}`}
+                          className="absolute bottom-4 right-4 flex h-8 w-8 items-center justify-center rounded-lg text-text-tertiary opacity-0 transition-all hover:bg-red-50 hover:text-red-500 group-hover:opacity-100"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     );
                   })}
                 </div>
@@ -840,7 +976,20 @@ export default function WritingAssistantPage() {
           </div>
         </section>
 
-        <aside className="flex min-h-0 w-full flex-col rounded-2xl border border-surface-border bg-surface shadow-sm md:w-[420px]">
+        <div
+          className="hidden w-3 shrink-0 cursor-col-resize items-stretch justify-center md:flex"
+          onPointerDown={handleAssistantResizeStart}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="调整写作助手宽度"
+        >
+          <div className="my-4 w-px rounded-full bg-surface-border transition-colors hover:bg-brand" />
+        </div>
+
+        <aside
+          className="flex min-h-0 w-full flex-col rounded-2xl border border-surface-border bg-surface shadow-sm md:shrink-0"
+          style={{ width: `min(100%, ${assistantWidth}px)` }}
+        >
           <div className="shrink-0 border-b border-surface-border p-4">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-base font-semibold text-text-primary">写作助手</h2>

@@ -109,12 +109,28 @@ type CompareGroupContext = {
   groupModels: string[];
 };
 
+type StreamRunResult = {
+  groupContext?: CompareGroupContext;
+  serverMessageId?: number;
+  generationTaskId?: number;
+  lastSequence: number;
+  content: string;
+  useBackground: boolean;
+  sawDone: boolean;
+  recoverable?: boolean;
+};
+
 export interface ChatModel {
   id: string;
   name: string;
   provider: string;
   description: string;
   color: string;
+  capabilities?: string[];
+  supported_inputs?: string[];
+  supported_file_extensions?: string[];
+  supported_file_mime_types?: string[];
+  file_accept?: string;
 }
 
 export interface Conversation {
@@ -331,7 +347,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         if (isFinished && !streamActive) {
           stopBackgroundPoller(localMessageId);
           stopTaskStream(localMessageId);
-          setIsLoading(false);
+          const hasOtherTaskStream = Object.keys(taskStreamsRef.current).some((id) => id !== localMessageId);
+          const hasOtherPoller = Object.keys(backgroundPollersRef.current).some((id) => id !== localMessageId);
+          setIsLoading(hasOtherTaskStream || hasOtherPoller);
         } else if (status === "failed" || status === "cancelled" || status === "incomplete" || !hasContent) {
           // terminal 状态可能先于最终 message.content 可见；多轮确认稳定前继续轮询，避免刷新后才完整。
           setIsLoading(true);
@@ -843,7 +861,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       controller: AbortController,
       convId?: number,
       onGroupContext?: (context: CompareGroupContext) => void
-    ): Promise<CompareGroupContext | undefined> => {
+    ): Promise<StreamRunResult | undefined> => {
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       if (!reader) throw new Error("无法读取流");
@@ -861,6 +879,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       let latestGenerationTaskId: number | undefined;
       let latestUseBackground = false;
       let sawDone = false;
+      let recoverable = false;
       let latestSequence = 0;
 
       const currentGroupContext = (): CompareGroupContext | undefined =>
@@ -1067,6 +1086,17 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         }
       };
 
+      const buildStreamRunResult = (contentOverride?: string): StreamRunResult => ({
+        groupContext: currentGroupContext(),
+        serverMessageId: latestServerMessageId,
+        generationTaskId: latestGenerationTaskId,
+        lastSequence: latestSequence,
+        content: contentOverride ?? (streamGet(assistantMsg.id) || accumulated),
+        useBackground: latestUseBackground,
+        sawDone,
+        recoverable,
+      });
+
       try {
         while (true) {
           const { done, value } = await reader.read();
@@ -1111,6 +1141,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
 
         // 非导航的异常断线：如果已经拿到服务端消息/任务 ID，再接后端 task event stream 续流。
         if (latestServerMessageId || latestGenerationTaskId) {
+          recoverable = true;
           startTaskEventStream(convId || currentConversation, assistantMsg.id, latestServerMessageId, latestSequence, accumulated, latestGenerationTaskId);
           return;
         }
@@ -1145,11 +1176,12 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         // SSE 自然断开但没有收到 DONE：不能把空 assistant 标 completed。
         // 后端 task runner 仍可能在生成/落库，转为可恢复 task stream / polling。
         if (!sawDone && abortReason !== "navigation" && abortReason !== "user" && (latestServerMessageId || latestGenerationTaskId)) {
+          recoverable = true;
           startTaskEventStream(convId || currentConversation, assistantMsg.id, latestServerMessageId, latestSequence, finalContent, latestGenerationTaskId);
           if (latestUseBackground && latestServerMessageId) {
             startBackgroundPolling(convId || currentConversation, assistantMsg.id, latestServerMessageId);
           }
-          return;
+          return buildStreamRunResult(finalContent);
         }
 
         const hasFinalContent = (finalContent || "").trim().length > 0;
@@ -1158,6 +1190,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         // 不代表已展示内容就是 DB 最终内容。即使已有部分内容，也要继续通过
         // task stream / DB polling 校准，否则会出现“输出一半直接 DONE，刷新后变完整”。
         if (sawDone && abortReason !== "navigation" && abortReason !== "user" && (latestServerMessageId || latestGenerationTaskId)) {
+          recoverable = true;
           // The initial /chat request is itself a task event stream. Its controller is
           // still registered until this finally block finishes, so an immediate
           // startTaskEventStream() would no-op and leave the UI stuck on partial text.
@@ -1166,7 +1199,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           if (latestServerMessageId) {
             startBackgroundPolling(convId || currentConversation, assistantMsg.id, latestServerMessageId);
           }
-          return;
+          return buildStreamRunResult(finalContent);
         }
 
         streamClear(assistantMsg.id);
@@ -1182,6 +1215,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           );
         }
       }
+
+      return buildStreamRunResult();
     },
     [currentConversation, startBackgroundPolling, startTaskEventStream]
   );
@@ -1262,9 +1297,6 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       const groupContextReady = new Promise<CompareGroupContext | undefined>((resolve) => {
         resolveGroupContextReady = resolve;
       });
-      const groupContextTimeout = new Promise<undefined>((resolve) => {
-        window.setTimeout(() => resolve(undefined), 3000);
-      });
       let groupContextResolved = false;
       const setCompareGroupContext = (context?: CompareGroupContext) => {
         if (!context) return;
@@ -1275,12 +1307,75 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         };
         if (!groupContextResolved && compareGroupContext.groupId && compareGroupContext.userMessageId) {
           groupContextResolved = true;
-          resolveGroupContextReady(compareGroupContext);
+          const resolvedContext = compareGroupContext;
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.id === userMsg.id) {
+                return { ...m, serverMessageId: resolvedContext.userMessageId };
+              }
+              if (assistantMsgs.some((assistant) => assistant.id === m.id)) {
+                const groupIndex = assistantMsgs.findIndex((assistant) => assistant.id === m.id);
+                return {
+                  ...m,
+                  groupId: resolvedContext.groupId,
+                  userMessageId: resolvedContext.userMessageId,
+                  groupModels: resolvedContext.groupModels,
+                  groupIndex: groupIndex >= 0 ? groupIndex : m.groupIndex,
+                };
+              }
+              return m;
+            })
+          );
+          resolveGroupContextReady(resolvedContext);
         }
+      };
+
+      const handleCompareRunError = (assistantMsg: Message, error: any, streamResult?: StreamRunResult) => {
+        const now = Date.now();
+        const realtime = realtimeGet(assistantMsg.id);
+        const serverMessageId = streamResult?.serverMessageId || realtime?.serverMessageId;
+        const generationTaskId = streamResult?.generationTaskId || realtime?.generationTaskId;
+        const hasRecoverableStream = !!serverMessageId || !!generationTaskId || !!taskStreamsRef.current[assistantMsg.id] || !!backgroundPollersRef.current[assistantMsg.id];
+        const isBackgroundModel = !!assistantMsg.model && (assistantMsg.model === "gpt-5.5-pro" || assistantMsg.model.startsWith("gpt-5.5-pro-"));
+
+        if (hasRecoverableStream || (isBackgroundModel && convId)) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsg.id
+                ? {
+                    ...m,
+                    serverMessageId: serverMessageId || m.serverMessageId,
+                    generationTaskId: generationTaskId || m.generationTaskId,
+                    activityStatus: createBusyGeneratingStatus(),
+                    completedAt: undefined,
+                  }
+                : m
+            )
+          );
+          if (serverMessageId) startBackgroundPolling(convId, assistantMsg.id, serverMessageId);
+          return;
+        }
+
+        let displayMsg: string;
+        if (error.errorCode === "file_not_ready") {
+          displayMsg = `⏳ 文件解析中，请稍后再问`;
+        } else if (error.errorCode === "guest_limit_exceeded") {
+          displayMsg = `⚠️ ${error.message || "匿名用户每日额度已用完，请登录后继续"}`;
+        } else {
+          displayMsg = `❌ ${error.message || "请求失败"}`;
+        }
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsg.id
+              ? { ...m, content: displayMsg, completedAt: now, activityStatus: undefined }
+              : m
+          )
+        );
       };
 
       const runModel = async (assistantMsg: Message, index: number, groupContext?: CompareGroupContext) => {
         const controller = controllers[index];
+        let streamResult: StreamRunResult | undefined;
         try {
           const requestGroupContext = groupContext || (index === 0 ? undefined : compareGroupContext);
           const response = await fetch(`${API_BASE_URL}/api/chat`, {
@@ -1312,9 +1407,27 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             const errorMsg = errorBody.message || "请求失败";
             throw Object.assign(new Error(errorMsg), { errorCode });
           }
-          const context = await streamResponse(response, assistantMsg, controller, convId, index === 0 ? setCompareGroupContext : undefined);
+          streamResult = await streamResponse(response, assistantMsg, controller, convId, index === 0 ? setCompareGroupContext : undefined);
           if (index === 0) {
-            setCompareGroupContext(context);
+            setCompareGroupContext(streamResult?.groupContext);
+          }
+          // 对比模式里，streamResponse 可能已把异常断线/后台任务切到 task stream 或 DB polling。
+          // 这不是失败，不要让外层状态把空内容渲染成“生成中断/重新生成”。
+          if (streamResult?.recoverable) {
+            const recoverableResult = streamResult;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsg.id
+                  ? {
+                      ...m,
+                      serverMessageId: recoverableResult.serverMessageId || m.serverMessageId,
+                      generationTaskId: recoverableResult.generationTaskId || m.generationTaskId,
+                      activityStatus: createBusyGeneratingStatus(),
+                      completedAt: undefined,
+                    }
+                  : m
+              )
+            );
           }
         } catch (error: any) {
           const now = Date.now();
@@ -1334,21 +1447,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             return;
           }
 
-          let displayMsg: string;
-          if (error.errorCode === "file_not_ready") {
-            displayMsg = `⏳ 文件解析中，请稍后再问`;
-          } else if (error.errorCode === "guest_limit_exceeded") {
-            displayMsg = `⚠️ ${error.message || "匿名用户每日额度已用完，请登录后继续"}`;
-          } else {
-            displayMsg = `❌ ${error.message || "请求失败"}`;
-          }
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantMsg.id
-                ? { ...m, content: displayMsg, completedAt: now, activityStatus: undefined }
-                : m
-            )
-          );
+          handleCompareRunError(assistantMsg, error, streamResult);
           if (index === 0 && !groupContextResolved) {
             groupContextResolved = true;
             resolveGroupContextReady(undefined);
@@ -1358,16 +1457,28 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
 
       try {
         const firstRun = runModel(assistantMsgs[0], 0);
-        const context = await Promise.race([groupContextReady, groupContextTimeout]);
+        const context = await groupContextReady;
+        if (!context?.groupId || !context.userMessageId) {
+          await firstRun;
+          return;
+        }
         const restRuns = assistantMsgs.slice(1).map((assistantMsg, offset) => runModel(assistantMsg, offset + 1, context));
         await Promise.all([firstRun, ...restRuns]);
       } finally {
-        setIsLoading(false);
-        compareAbortControllersRef.current = [];
-        if (convId) {
-          window.dispatchEvent(new CustomEvent("conversation-updated", {
-            detail: { id: convId, updated_at: new Date().toISOString() },
-          }));
+        const abortReason = abortReasonRef.current;
+        // 和单聊保持一致：切换会话导致的 abort 只是断开当前页面 SSE，不要污染新会话 loading/侧边栏状态。
+        if (abortReason !== "navigation") {
+          const hasActiveTaskStream = Object.keys(taskStreamsRef.current).length > 0;
+          const hasActivePoller = Object.keys(backgroundPollersRef.current).length > 0;
+          setIsLoading(hasActiveTaskStream || hasActivePoller);
+          compareAbortControllersRef.current = [];
+          abortControllerRef.current = null;
+          abortReasonRef.current = null;
+          if (convId) {
+            window.dispatchEvent(new CustomEvent("conversation-updated", {
+              detail: { id: convId, updated_at: new Date().toISOString() },
+            }));
+          }
         }
       }
     },
@@ -1645,13 +1756,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       next.set(groupId, activeIndex);
       return next;
     });
-
-    const groupAssistant = messages.find((m) => m.groupId === groupId && m.groupIndex === activeIndex && m.model);
-    const model = groupAssistant?.model ? models.find((m) => m.id === groupAssistant.model) : undefined;
-    if (model) {
-      setSelectedModel(model);
-    }
-  }, [messages, models, setSelectedModel]);
+  }, []);
 
   // Fork 对比：从指定消息处 Fork 出新模型对比
   const forkChat = useCallback(

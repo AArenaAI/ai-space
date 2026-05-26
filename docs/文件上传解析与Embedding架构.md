@@ -1,755 +1,385 @@
-     1|# AI Space — 文件上传、解析与 Embedding 架构文档
-     2|
-     3|> 版本：v1.1  
-     4|> 日期：2026-05-15  
-     5|> 状态：文件上传与解析已可用；图片在上传解析阶段文本化为 `image_caption` chunk；Embedding 由 `ENABLE_TEXT_EMBEDDING` 控制
-     6|
-     7|---
-     8|
-     9|## 目录
-    10|
-    11|1. [架构概览](#1-架构概览)
-    12|2. [数据模型](#2-数据模型)
-    13|3. [文件上传流程](#3-文件上传流程)
-    14|4. [文件解析流程](#4-文件解析流程)
-    15|5. [Embedding 架构](#5-embedding-架构)
-    16|6. [状态流转](#6-状态流转)
-    17|7. [功能开关](#7-功能开关)
-    18|8. [API 接口](#8-api-接口)
-    19|9. [未来扩展](#9-未来扩展)
-    20|
-    21|---
-    22|
-    23|## 1. 架构概览
-    24|
-    25|```
-    26|┌─────────────────────────────────────────────────────────────────────────┐
-    27|│                              用户层 (Frontend)                           │
-    28|│  上传文件 → 轮询状态 → 聊天引用文件                                      │
-    29|└─────────────────────────────────────────────────────────────────────────┘
-    30|                                    │
-    31|                                    ▼
-    32|┌─────────────────────────────────────────────────────────────────────────┐
-    33|│                              API 层 (Gin Router)                         │
-    34|│  POST /api/files/upload                                                │
-    35|│  GET  /api/files/:id                                                   │
-    36|│  GET  /api/files                                                       │
-    37|│  DELETE /api/files/:id                                                 │
-    38|└─────────────────────────────────────────────────────────────────────────┘
-    39|                                    │
-    40|                    ┌───────────────┼───────────────┐
-    41|                    ▼               ▼               ▼
-    42|            ┌───────────┐   ┌───────────┐   ┌───────────────┐
-    43|            │FileService│   │FileParser │   │RetrievalService│
-    44|            │文件服务    │   │解析服务   │   │检索服务        │
-    45|            └─────┬─────┘   └─────┬─────┘   └───────┬───────┘
-    46|                  │               │                   │
-    47|                  ▼               ▼                   ▼
-    48|            ┌───────────┐   ┌───────────┐   ┌───────────────┐
-    49|            │  File     │   │FileChunk  │   │ FileEmbedding │
-    50|            │  文件主表  │   │文本分块表 │   │ 向量存储表    │
-    51|            └───────────┘   └───────────┘   └───────────────┘
-    52|                                    │
-    53|                                    ▼
-    54|                         ┌──────────────────┐
-    55|                         │ SQLite (GORM)    │
-    56|                         │ ./data/aipool.db │
-    57|                         └──────────────────┘
-    58|```
-    59|
-    60|### 核心设计原则
-    61|
-    62|| 原则 | 说明 |
-    63||------|------|
-    64|| **PublicID 对外** | 所有 API 交互使用 `public_id`（如 `file_xxx`），内部自增 ID 不暴露 |
-    65|| **异步解析** | 文件上传后立即返回，解析在后台 goroutine 中完成 |
-    66|| **状态独立** | `parse_status` 和 `embedding_status` 分离，互不影响 |
-    67|| **功能开关** | Embedding 通过 `ENABLE_TEXT_EMBEDDING` 环境变量控制，可随时开关 |
-    68|| **图片文本化** | 图片不在聊天阶段 base64 直传；上传解析阶段通过 Vision/OCR 文本化成 `image_caption` chunk，统一进入检索上下文 |
-    69|| **降级兼容** | 无 Embedding 时，文件仍可用，聊天通过全文/关键词 fallback |
-    70|
-    71|---
-    72|
-    73|## 2. 数据模型
-    74|
-    75|### 2.1 File（文件主表）
-    76|
-    77|```go
-    78|type File struct {
-    79|    ID              uint      `gorm:"primaryKey"`           // 内部自增 ID（不对外暴露）
-    80|    PublicID        string    `gorm:"uniqueIndex;not null"` // 对外唯一标识，如 file_abc123
-    81|    UserID          uint      `gorm:"index"`                // 上传用户 ID（0=匿名）
-    82|    Filename        string                                 // 原始文件名
-    83|    MimeType        string                                 // MIME 类型
-    84|    Size            int64                                  // 文件大小（字节）
-    85|    Content         string                                 // 解析后的完整文本内容
-    86|    Summary         string                                 // 文件摘要（可选，异步生成）
-    87|    PageCount       int                                    // 页数（PDF/PPT 等）
-    88|    ParseStatus     string    // pending | parsing | done | error
-    89|    EmbeddingStatus string    // pending | indexing | done | error | skipped
-    90|    ErrorMessage    string                                 // 错误信息
-    91|    StoragePath     string                                 // 磁盘存储路径
-    92|    CreatedAt       time.Time
-    93|    UpdatedAt       time.Time
-    94|}
-    95|```
-    96|
-    97|**关键索引：**
-    98|- `public_id`：唯一索引，所有外部查询入口
-    99|- `user_id`：普通索引，用户文件列表查询
-   100|
-   101|### 2.2 FileChunk（文本分块表）
-   102|
-   103|```go
-   104|type FileChunk struct {
-   105|    ID               uint      `gorm:"primaryKey"`
-   106|    FileID           uint      `gorm:"index;not null"`       // 关联 File.ID
-   107|    ChunkIndex       int                                    // 块序号（0, 1, 2...）
-   108|    BlockType        string    // paragraph | heading | table | list | code | image_caption
-   109|    Page             int                                    // 所属页码
-   110|    BlockID          string                                 // 原始块 ID
-   111|    Content          string                                 // 块文本内容
-   112|    Markdown         string                                 // Markdown 格式（保留）
-   113|    TokenCount       int                                    // 预估 token 数
-   114|    TextHash         string    `gorm:"index"`               // 内容哈希（去重/变化检测）
-   115|    Slide            int                                    // PPT 页编号
-   116|    SheetName        string                                 // Excel sheet 名
-   117|    EmbeddingStatus  string    // pending | done | error
-   118|    Metadata         string    // JSON 扩展字段
-   119|    CreatedAt        time.Time
-   120|    UpdatedAt        time.Time
-   121|}
-   122|```
-   123|
-   124|**设计要点：**
-   125|- `text_hash`：SHA-256 前 16 字节 hex，用于检测内容变化、避免重复 embedding
-   126|- `block_type`：支持多种块类型，便于后续按类型检索（如只取表格、只取标题）
-   127|- `page`：支持页码定位，用户可直接问"第 3 页讲了什么"
-   128|
-   129|### 2.3 FileEmbedding（向量存储表）
-   130|
-   131|```go
-   132|type FileEmbedding struct {
-   133|    ID         uint      `gorm:"primaryKey"`
-   134|    FileID     uint      `gorm:"index;not null"`
-   135|    ChunkID    uint      `gorm:"not null"`
-   136|    Provider   string    // openai | gemini | local
-   137|    Model      string    // text-embedding-3-small
-   138|    Dimension  int       // 1536
-   139|    TextHash   string    // 生成时的 text_hash
-   140|    Vector     []byte    // 向量二进制（float32 数组序列化）
-   141|    CreatedAt  time.Time
-   142|    UpdatedAt  time.Time
-   143|}
-   144|```
-   145|
-   146|**唯一索引：**
-   147|```sql
-   148|UNIQUE INDEX idx_embedding_unique ON file_embeddings(
-   149|    chunk_id, provider, model, dimension, text_hash
-   150|)
-   151|```
-   152|
-   153|**作用：** 同一 chunk、同一模型、同一维度、同一内容只存一份向量，避免重复计算。
-   154|
-   155|### 2.4 FileEmbeddingJob（Embedding 任务队列）
-   156|
-   157|```go
-   158|type FileEmbeddingJob struct {
-   159|    ID          uint      `gorm:"primaryKey"`
-   160|    FileID      uint      `gorm:"index;not null"`
-   161|    Provider    string
-   162|    Model       string
-   163|    Dimension   int
-   164|    Status      string    // pending | processing | done | error
-   165|    ErrorMessage string
-   166|    Attempts    int       // 重试次数
-   167|    CreatedAt   time.Time
-   168|    UpdatedAt   time.Time
-   169|}
-   170|```
-   171|
-   172|**设计要点：**
-   173|- 独立任务表，支持服务重启后自动恢复未完成的 jobs
-   174|- `attempts` 字段支持有限重试（目前未实现指数退避）
-   175|
-   176|---
-   177|
-   178|## 3. 文件上传流程
-   179|
-   180|### 3.1 时序图
-   181|
-   182|```
-   183|用户          Frontend          Backend (Gin)        FileService         磁盘
-   184| │                │                    │                  │                │
-   185| │  选择文件      │                    │                  │                │
-   186| │───────────────>│                    │                  │                │
-   187| │                │  POST /api/files/upload               │                │
-   188| │                │────────────────────>│                  │                │
-   189| │                │                    │  保存到磁盘       │                │
-   190| │                │                    │─────────────────>│                │
-   191| │                │                    │                  │  写入文件      │
-   192| │                │                    │                  │───────────────>│
-   193| │                │                    │                  │<───────────────│
-   194| │                │                    │  创建 File 记录   │                │
-   195| │                │                    │<─────────────────│                │
-   196| │                │  返回 public_id    │                  │                │
-   197| │                │<────────────────────│                  │                │
-   198| │                │                    │                  │                │
-   199| │                │                    │  启动异步解析    │                │
-   200| │                │                    │  go parseAsync() │                │
-   201| │                │                    │─────────────────>│                │
-   202| │  轮询状态      │                    │                  │                │
-   203| │───────────────>│  GET /api/files/:public_id            │                │
-   204| │                │────────────────────>│                  │                │
-   205| │                │  返回 parse_status │                  │                │
-   206| │                │<────────────────────│                  │                │
-   207| │                │                    │                  │                │
-   208| │                │                    │  [后台] 解析完成  │                │
-   209| │                │                    │  parse_status=d  │                │
-   210| │                │                    │  one             │                │
-   211| │                │                    │                  │                │
-   212| │  轮询到 done   │                    │                  │                │
-   213| │<───────────────│                    │                  │                │
-   214|```
-   215|
-   216|### 3.2 详细步骤
-   217|
-   218|**Step 1：接收上传**
-   219|```go
-   220|// router.go
-   221|router.POST("/api/files/upload", fileHandler.UploadFile)
-   222|```
-   223|
-   224|**Step 2：保存到磁盘**
-   225|```go
-   226|// 生成存储路径：./uploads/2026/05/13/filename_xxx.ext
-   227|storagePath := generateStoragePath(filename)
-   228|// 写入磁盘
-   229|os.WriteFile(storagePath, fileData, 0644)
-   230|```
-   231|
-   232|**Step 3：创建 File 记录**
-   233|```go
-   234|file := &models.File{
-   235|    PublicID:        generatePublicID(),     // 如 file_abc123
-   236|    UserID:          userID,
-   237|    Filename:        filename,
-   238|    MimeType:        mimeType,
-   239|    Size:            len(fileData),
-   240|    ParseStatus:     "pending",
-   241|    EmbeddingStatus: "pending",
-   242|    StoragePath:     storagePath,
-   243|}
-   244|db.Create(file)
-   245|```
-   246|
-   247|**Step 4：启动异步解析**
-   248|```go
-   249|go func() {
-   250|    // 解析文件 → Content + Chunks
-   251|    result, err := parser.Parse(ctx, fileData, filename)
-   252|    if err != nil {
-   253|        db.Model(file).Update("parse_status", "error")
-   254|        return
-   255|    }
-   256|    
-   257|    // 保存解析结果
-   258|    db.Model(file).Updates(map[string]interface{}{
-   259|        "content":      result.Content,
-   260|        "summary":      result.Summary,
-   261|        "page_count":   result.PageCount,
-   262|        "parse_status": "done",
-   263|    })
-   264|    
-   265|    // 保存 chunks
-   266|    for i, chunk := range result.Chunks {
-   267|        db.Create(&models.FileChunk{
-   268|            FileID:      file.ID,
-   269|            ChunkIndex:  i,
-   270|            BlockType:   chunk.BlockType,
-   271|            Page:        chunk.Page,
-   272|            BlockID:     chunk.BlockID,
-   273|            Content:     chunk.Text,
-   274|            Markdown:    chunk.Markdown,
-   275|            TokenCount:  chunk.TokenCount,
-   276|            TextHash:    hashText(chunk.Text),  // SHA-256 前 16 字节
-   277|            Metadata:    chunk.Metadata,
-   278|        })
-   279|    }
-   280|    
-   281|    // 创建 Embedding Job：只要 embedder 启用且解析出了有效文本 chunk，就进入统一 RAG。
-   282|    // 图片会在解析阶段转成 image_caption 文本 chunk，因此不再按 MIME 类型强制跳过。
-   283|    if embedder != nil && hasNonEmptyTextChunk(result.Chunks) {
-   284|        db.Create(&models.FileEmbeddingJob{
-   285|            FileID:    file.ID,
-   286|            Provider:  modelInfo.Provider,
-   287|            Model:     modelInfo.Model,
-   288|            Dimension: modelInfo.Dimension,
-   289|            Status:    "pending",
-   290|        })
-   291|    } else {
-   292|        db.Model(file).Update("embedding_status", "skipped")
-   293|    }
-   294|}()
-   295|```
-   296|
-   297|**Step 5：返回 PublicID**
-   298|```json
-   299|{
-   300|    "public_id": "file_abc123",
-   301|    "filename": "report.pdf",
-   302|    "parse_status": "pending",
-   303|    "size": 102400
-   304|}
-   305|```
-   306|
-   307|### 3.3 前端轮询
-   308|
-   309|```javascript
-   310|// 上传后立即轮询
-   311|const pollStatus = async (publicId) => {
-   312|    const res = await fetch(`/api/files/${publicId}`);
-   313|    const data = await res.json();
-   314|    if (data.parse_status === 'done') {
-   315|        // 解析完成，可以聊天引用
-   316|        return data;
-   317|    } else if (data.parse_status === 'error') {
-   318|        // 解析失败
-   319|        throw new Error(data.error_message);
-   320|    }
-   321|    // 继续轮询
-   322|    setTimeout(() => pollStatus(publicId), 2000);
-   323|};
-   324|```
-   325|
-   326|---
-   327|
-   328|## 4. 文件解析流程
-   329|
-   330|### 4.1 支持的文件类型
-   331|
-   332|| 类型 | MIME Type | 处理方式 |
-   333||------|-----------|----------|
-   334|| 纯文本 | `text/plain` | 直接读取 |
-   335|| Markdown | `text/markdown` | 直接读取，按段落/标题等文本块切分 |
-   336|| PDF | `application/pdf` | 文本提取 + 页码 |
-   337|| Word | `application/vnd.openxmlformats-officedocument.wordprocessingml.document` | 文本提取 |
-   338|| PPT | `application/vnd.openxmlformats-officedocument.presentationml.presentation` | 幻灯片提取 |
-   339|| Excel | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` | 表格提取 |
-   340|| 图片 | `image/*` | 上传解析阶段调用 Vision/OCR 文本化，生成 `image_caption` chunk；有 embedder 时进入 embedding/RAG |
-   341|| 代码文件 | `text/x-python` 等 | 语法高亮 + 块提取 |
-   342|
-   343|### 4.2 解析结果结构
-   344|
-   345|```go
-   346|type ParseResult struct {
-   347|    Content   string        // 完整文本
-   348|    Summary   string        // 摘要（可选）
-   349|    PageCount int           // 页数
-   350|    Chunks    []Chunk       // 分块结果
-   351|}
-   352|
-   353|type Chunk struct {
-   354|    BlockType   string      // paragraph | heading | table | list | code | image_caption
-   355|    Page        int         // 页码
-   356|    BlockID     string      // 原始块 ID
-   357|    Text        string      // 纯文本
-   358|    Markdown    string      // Markdown 格式
-   359|    TokenCount  int         // 预估 token
-   360|    Metadata    string      // JSON 扩展
-   361|}
-   362|```
-   363|
-   364|### 4.3 分块策略
-   365|
-   366|当前实现为简单分块（按段落/页面），未来可扩展：
-   367|
-   368|```
-   369|简单分块（当前）
-   370|  └── 按段落切分，每段一个 chunk
-   371|
-   372|语义分块（未来）
-   373|  └── 按语义边界切分（标题-内容对、表格整体、代码块）
-   374|
-   375|重叠分块（未来）
-   376|  └── 相邻 chunk 之间有重叠，避免边界信息丢失
-   377|```
-   378|
-   379|
-   380|### 4.5 图片解析说明
-   381|
-   382|图片上传后仍会保存原文件，但聊天阶段不会再把图片 base64 data URI 直接塞进用户消息。当前链路是在解析阶段调用 Vision/OCR，把可见内容、文字、图表、布局等转成文本：
-   383|
-   384|1. `FileParser.parseImage()` 调用 `AIService.ExtractImageContent()`；
-   385|2. 返回内容包装为 `图片视觉描述：...`；
-   386|3. 生成 `BlockType=image_caption` 的 `FileChunk`，`Metadata` 标记 `source=vision` 与 MIME 类型；
-   387|4. 如果 embedding 开启且 caption 非空，创建 `FileEmbeddingJob`；
-   388|5. 聊天时只根据 `file_ids` 做检索/上下文注入，不再区分“图片直传”和“文档检索”两条通道。
-   389|
-   390|如果 Vision/OCR 不可用或返回空内容，图片解析会失败并写入 `parse_status=error`，不会伪造一个不可检索的空图片 chunk。
-   391|
-   392|### 4.4 异步摘要生成
-   393|
-   394|解析完成后，如果内容较长（>200 字符）且没有摘要，自动在后台生成：
-   395|
-   396|```go
-   397|go func() {
-   398|    summary := generateSummary(content)  // 截取前 500 字符
-   399|    db.Model(file).Update("summary", summary)
-   400|}()
-   401|```
-   402|
-   403|> ⚠️ 注意：当前实现为简单截取，未来可接入 LLM 生成智能摘要。
-   404|
-   405|---
-   406|
-   407|## 5. Embedding 架构
-   408|
-   409|### 5.1 关闭模式：DISABLED
-   410|
-   411|```
-   412|ENABLE_TEXT_EMBEDDING=false
-   413|```
-   414|
-   415|**行为：**
-   416|- `startEmbeddingWorker()` 检测到 `embedder == nil`，直接返回，不启动 worker
-   417|- `UploadAndParse` 跳过 embedding job 创建，当前实现标记 `embedding_status = "skipped"`
-   418|- 文件解析、chunk 存储、聊天引用完全不受影响
-   419|- 聊天时使用 **全文 fallback** 或 **关键词检索**
-   420|
-   421|### 5.2 启用模式：ENABLED
-   422|
-   423|```
-   424|ENABLE_TEXT_EMBEDDING=true
-   425|OPENAI_API_KEY=[REDACTED]
-   426|TEXT_EMBEDDING_BASE_URL=https://api.openai.com  # 可选，默认复用 OPENAI_BASE_URL
-   427|```
-   428|
-   429|**行为：**
-   430|- `startEmbeddingWorker()` 启动，每 5 秒轮询 pending jobs
-   431|- `UploadAndParse` 为所有已解析出有效文本 chunk 的文件创建 `FileEmbeddingJob`（包括图片的 `image_caption` chunk）
-   432|- Worker 串行处理 jobs（避免 API RPM 限制）
-   433|- 生成向量后存入 `FileEmbedding`
-   434|- `File.EmbeddingStatus` 流转：`pending` → `indexing` → `done`/`error`
-   435|
-   436|### 5.3 Embedding Worker 流程
-   437|
-   438|```
-   439|服务启动
-   440|  │
-   441|  ▼
-   442|RecoverEmbeddingJobs()  ──→ 恢复重启前未完成的 jobs（status=pending）
-   443|  │
-   444|  ▼
-   445|ticker (5s)
-   446|  │
-   447|  ▼
-   448|ListPendingEmbeddingJobs(1)  ──→ 每次取 1 个 job
-   449|  │
-   450|  ▼
-   451|ProcessEmbeddingJob(job)
-   452|  │
-   453|  ├── 1. 获取文件所有 chunks
-   454|  │
-   455|  ├── 2. 检查是否已有 embedding（通过 uniqueIndex 去重）
-   456|  │
-   457|  ├── 3. 调用 Embedder.EmbedDocuments(chunks)  
-   458|  │      └── 调用 OpenAI /v1/embeddings API
-   459|  │
-   460|  ├── 4. 保存向量到 FileEmbedding
-   461|  │
-   462|  ├── 5. 更新 job status = done
-   463|  │
-   464|  └── 6. 更新 File.EmbeddingStatus = done
-   465|```
-   466|
-   467|### 5.4 检索流程（启用时）
-   468|
-   469|```
-   470|用户提问
-   471|  │
-   472|  ▼
-   473|EmbedQuery(query)  ──→ 生成查询向量
-   474|  │
-   475|  ▼
-   476|向量相似度检索  ──→ 从 FileEmbedding 找 topK 最相似 chunk
-   477|  │
-   478|  ▼
-   479|构造上下文  ──→ 把 topK chunks 拼入 prompt
-   480|  │
-   481|  ▼
-   482|发给 LLM
-   483|```
-   484|
-   485|### 5.5 无 Embedding 时的 Fallback 策略
-   486|
-   487|| 场景 | 策略 | 说明 |
-   488||------|------|------|
-   489|| 小文件（<6000 tokens） | **全文** | 直接把完整 content 拼给模型 |
-   490|| 中等文件 | **关键词检索** | 用户问题分词，匹配 chunks，取 top 6-10 |
-   491|| 用户提到页码 | **页码定位** | 直接取对应 page 的 chunks |
-   492|| 无命中 | **摘要 + 前 N 块** | 取摘要、标题 chunks、前 3 个 chunks |
-   493|
-   494|### 5.6 聊天引用文件流程
-   495|
-   496|前端发送聊天请求时只传 `file_ids`。后端会统一调用 `RetrievalService.Search(fileIDs, query, topK, false)`：
-   497|
-   498|- embedding 已完成：优先向量检索；
-   499|- embedding 不可用或失败：降级关键词/全文 chunk 检索；
-   500|- 命中结果由 `ContextBuilder` 组装为 `<file_context>...</file_context>`，作为 system context 注入模型。
-   501|
-   502|因此图片、PDF、Markdown、代码等文件在聊天阶段都是“文本 chunk 检索 → 上下文注入”的同一条链路。
-   503|
-   504|---
-   505|
-   506|## 6. 状态流转
-   507|
-   508|### 6.1 ParseStatus（解析状态）
-   509|
-   510|```
-   511|上传文件
-   512|  │
-   513|  ▼
-   514|pending ──→ parsing ──→ done
-   515|              │
-   516|              └──→ error
-   517|```
-   518|
-   519|| 状态 | 含义 |
-   520||------|------|
-   521|| `pending` | 等待解析 |
-   522|| `parsing` | 正在解析 |
-   523|| `done` | 解析完成 |
-   524|| `error` | 解析失败 |
-   525|
-   526|### 6.2 EmbeddingStatus（语义索引状态）
-   527|
-   528|```
-   529|上传文件（embedder 启用）
-   530|  │
-   531|  ▼
-   532|pending ──→ indexing ──→ done
-   533|              │
-   534|              └──→ error
-   535|
-   536|上传文件（embedder 未启用，或没有有效文本 chunk）
-   537|  │
-   538|  ▼
-   539|skipped   ←── 不创建 embedding job
-   540|
-   541|上传图片文件
-   542|  │
-   543|  ▼
-   544|Vision/OCR 文本化为 image_caption chunk
-   545|  │
-   546|  ├── 有有效文本且 embedder 启用 → pending → indexing → done/error
-   547|  └── 视觉解析失败 → parse_status=error
-   548|```
-   549|
-   550|| 状态 | 含义 | 触发条件 |
-   551||------|------|----------|
-   552|| `pending` | 等待 embedding | 文件解析完成，embedder 启用 |
-   553|| `indexing` | 正在生成向量 | Worker 开始处理 |
-   554|| `done` | 向量生成完成 | 所有 chunks 都已 embedding |
-   555|| `error` | 向量生成失败 | API 错误、网络错误 |
-   556|| `skipped` | 跳过 | embedder 未启用，或解析后没有有效文本 chunk |
-   557|
-   558|---
-   559|
-   560|## 7. 功能开关
-   561|
-   562|### 7.1 环境变量配置
-   563|
-   564|```env
-   565|# ============================================
-   566|# Embedding 配置
-   567|# ============================================
-   568|ENABLE_TEXT_EMBEDDING=false                    # 总开关：true=启用, false=禁用
-   569|
-   570|# 以下仅在 ENABLE_TEXT_EMBEDDING=true 时生效
-   571|TEXT_EMBEDDING_PROVIDER=openai                 # 提供商：openai | gemini | local
-   572|TEXT_EMBEDDING_MODEL=text-embedding-3-small    # 模型名
-   573|TEXT_EMBEDDING_DIMENSIONS=1536                 # 向量维度
-   574|TEXT_EMBEDDING_BATCH_SIZE=10                   # 批量大小
-   575|TEXT_EMBEDDING_BASE_URL=                       # 自定义 API 地址（可选）
-   576|TEXT_EMBEDDING_API_KEY=                        # 自定义 API Key（可选，默认复用 OPENAI_API_KEY）
-   577|```
-   578|
-   579|### 7.2 开关行为对照表
-   580|
-   581|| 配置 | 上传行为 | Worker | 聊天检索 |
-   582||------|----------|--------|----------|
-   583|| `ENABLE_TEXT_EMBEDDING=false` | 不创建 job，标记 `skipped` | 不启动 | 全文/关键词 fallback |
-   584|| `ENABLE_TEXT_EMBEDDING=true`，API 正常 | 创建 job，标记 `pending` | 启动并处理 | 向量检索 |
-   585|| `ENABLE_TEXT_EMBEDDING=true`，API 失败 | 创建 job，标记 `error` | 持续重试 | 降级到全文/关键词 |
-   586|
-   587|### 7.3 动态切换
-   588|
-   589|修改 `.env` 后重启服务即可：
-   590|
-   591|```bash
-   592|# 关闭 embedding
-   593|ENABLE_TEXT_EMBEDDING=false
-   594|
-   595|# 启用 embedding（需确保 API 可用）
-   596|ENABLE_TEXT_EMBEDDING=true
-   597|TEXT_EMBEDDING_BASE_URL=https://api.openai.com
-   598|```
-   599|
-   600|> ⚠️ 注意：切换开关不会影响已有文件的状态。从关闭切换到 `true` 时，已上传且 `embedding_status=skipped` 的文件不会自动补 embedding，需要重新上传或使用管理工具批量处理。
-   601|
-   602|---
-   603|
-   604|## 8. API 接口
-   605|
-   606|### 8.1 上传文件
-   607|
-   608|```http
-   609|POST /api/files/upload
-   610|Content-Type: multipart/form-data
-   611|
-   612|file: <二进制文件>
-   613|```
-   614|
-   615|**响应：**
-   616|```json
-   617|{
-   618|    "public_id": "file_abc123",
-   619|    "filename": "report.pdf",
-   620|    "parse_status": "pending",
-   621|    "mime_type": "application/pdf",
-   622|    "size": 102400
-   623|}
-   624|```
-   625|
-   626|### 8.2 查询文件状态
-   627|
-   628|```http
-   629|GET /api/files/:public_id
-   630|```
-   631|
-   632|**响应：**
-   633|```json
-   634|{
-   635|    "id": 1,
-   636|    "public_id": "file_abc123",
-   637|    "filename": "report.pdf",
-   638|    "parse_status": "done",
-   639|    "embedding_status": "done",
-   640|    "content_preview": "这是文件内容的前 200 字符...",
-   641|    "page_count": 12,
-   642|    "size": 102400,
-   643|    "created_at": "2026-05-13T10:00:00Z",
-   644|    "updated_at": "2026-05-13T10:00:05Z"
-   645|}
-   646|```
-   647|
-   648|### 8.3 列出用户文件
-   649|
-   650|```http
-   651|GET /api/files
-   652|Authorization: Bearer ***
-   653|```
-   654|
-   655|**响应：**
-   656|```json
-   657|[
-   658|    {
-   659|        "public_id": "file_abc123",
-   660|        "filename": "report.pdf",
-   661|        "parse_status": "done",
-   662|        "embedding_status": "done",
-   663|        "size": 102400,
-   664|        "created_at": "2026-05-13T10:00:00Z"
-   665|    }
-   666|]
-   667|```
-   668|
-   669|### 8.4 删除文件
-   670|
-   671|```http
-   672|DELETE /api/files/:public_id
-   673|Authorization: Bearer ***
-   674|```
-   675|
-   676|**级联删除：**
-   677|- File 记录
-   678|- FileChunk 记录
-   679|- FileEmbedding 记录
-   680|- FileEmbeddingJob 记录
-   681|- 磁盘文件
-   682|
-   683|---
-   684|
-   685|## 9. 未来扩展
-   686|
-   687|### 9.1 V1.1 — Embedding 上线
-   688|
-   689|- [ ] 配置 `ENABLE_TEXT_EMBEDDING=true`
-   690|- [ ] 接入 OpenAI / Gemini / 本地 embedding 模型
-   691|- [ ] 批量 embedding（batch size 32）
-   692|- [ ] 指数退避重试
-   693|- [ ] 向量相似度检索（cosine similarity）
-   694|
-   695|### 9.2 V1.5 — 语义检索增强
-   696|
-   697|- [ ] Hybrid Search（向量 + 关键词混合检索）
-   698|- [ ] 重排序（Re-ranker）
-   699|- [ ] 来源引用（citations）
-   700|- [ ] 多文件联合检索
-   701|- [x] 图片 caption → text chunk → embedding
-   702|
-   703|### 9.3 V2.0 — 文件智能层
-   704|
-   705|- [ ] 自动标签生成
-   706|- [ ] 跨文件知识图谱
-   707|- [ ] 智能摘要（LLM 生成）
-   708|- [ ] 文件对比分析
-   709|- [ ] PPT/Excel 智能问答
-   710|
-   711|---
-   712|
-   713|## 附录
-   714|
-   715|### A. 文件存储路径
-   716|
-   717|```
-   718|./uploads/
-   719|├── 2026/
-   720|│   ├── 05/
-   721|│   │   ├── 13/
-   722|│   │   │   ├── report_abc123.pdf
-   723|│   │   │   └── image_def456.png
-   724|```
-   725|
-   726|### B. PublicID 生成规则
-   727|
-   728|```go
-   729|func generatePublicID() string {
-   730|    return "file_" + randomString(16)  // 如 file_abc123def456ghi7
-   731|}
-   732|```
-   733|
-   734|### C. TextHash 计算
-   735|
-   736|```go
-   737|func hashText(text string) string {
-   738|    h := sha256.Sum256([]byte(text))
-   739|    return hex.EncodeToString(h[:16])  // 前 16 字节 = 32 字符 hex
-   740|}
-   741|```
-   742|
-   743|### D. 相关代码文件
-   744|
-   745|| 文件 | 职责 |
-   746||------|------|
-   747|| `internal/models/file.go` | 数据模型定义 |
-   748|| `internal/services/file_service.go` | 文件上传、解析、embedding worker |
-   749|| `internal/services/file_parser.go` | 文件解析逻辑 |
-   750|| `internal/services/retrieval_service.go` | 检索服务（向量/关键词） |
-   751|| `internal/services/embedding/` | Embedding provider 接口和实现 |
-   752|| `internal/api/file_handler.go` | HTTP 接口处理 |
-   753|| `internal/api/router.go` | 路由注册、服务初始化 |
-   754|| `internal/config/config.go` | 配置读取 |
-   755|
+# AI Pool 文件上传、解析、Direct-First 与 RAG 架构
+
+> 版本：v2.0  
+> 更新日期：2026-05-25  
+> 状态：当前实现文档；以代码 `backend/internal/services/file_context_orchestrator.go`、`backend/internal/api/chat.go`、`backend/internal/services/ai_service.go`、`openai_sdk.go`、`gemini_sdk.go` 为准。
+
+---
+
+## 1. 当前结论
+
+AI Pool 当前文件架构不是“只做解析后塞文本”，也不是“所有文件都无条件原文件直传”。当前是 **Direct-First + 解析文本兜底 + 历史文件 RAG** 的混合架构：
+
+| 场景 | 当前处理方式 | 目的 |
+|---|---|---|
+| 本轮刚上传/附加的当前文件 `current_files` | 优先原生直传给支持的模型；同时注入解析后的 `<file_context>` | 最大化模型直接理解文件的能力，避免复杂文件只靠粗解析 |
+| 历史文件 / 已挂载上下文文件 `historical_files` | 走 chunks / RAG / overview 选择后注入 `<file_context>` | 控制 token、支持历史文件复用、避免上下文爆炸 |
+| 不支持原生文件输入的模型 | 只走解析文本 / chunks / RAG 兜底 | 保证 DeepSeek 等文本模型也能回答文件内容 |
+| 图片文件 | 支持 vision 的模型可原图直传；同时保留 `image_caption` chunk | 原生视觉优先，caption 兜底 |
+| 文件未解析完成 | 不猜内容，生成 warning，不参与回答 | 避免幻觉 |
+
+一句话：
+
+> **当前文件：能直传就直传；解析文本同时兜底。历史文件：继续 RAG。**
+
+---
+
+## 2. 总体数据流
+
+```text
+用户上传文件
+  ↓
+POST /api/files/upload
+  ↓
+FileService.UploadAndParse()
+  ├─ 原文件保存到磁盘 uploads/...
+  ├─ 创建 files 表记录 public_id / storage_path / parse_status
+  └─ 后台异步解析
+       ↓
+     FileParser.Parse()
+       ├─ text/code/md/csv → 文本/代码 chunks
+       ├─ pdf → 文本页/段落 chunks，必要时视觉描述 chunks
+       ├─ docx/pptx/xlsx → Office XML 解析为结构化 chunks
+       └─ image → vision/caption → image_caption chunk
+       ↓
+     写入 files.content + file_chunks
+       ↓
+     可选 Embedding job / file_embeddings
+
+聊天时
+  ↓
+chat.go 根据 file_ids / current file ids 查出文件
+  ↓
+FileContextOrchestrator.Build()
+  ├─ current_files:
+  │    ├─ buildCurrentNativeParts()：原文件 / 原图直传 native parts
+  │    └─ buildDirectCurrentContext()：按顺序加载 chunks，作为解析文本兜底
+  └─ historical_files:
+       └─ buildHistoricalContext()：RAG / overview / image_caption 检索
+  ↓
+applyFileContextPackage()
+  ├─ SystemPrompt 注入 <file_context>
+  └─ NativeParts 注入最后一条 user message
+       ├─ image → Message.Images
+       └─ file  → Message.Files / NativeFile
+  ↓
+Provider Adapter
+  ├─ OpenAI Responses: input_image / input_file(file_data, filename)
+  ├─ Gemini SDK: NewPartFromBytes(data, mediaType)
+  └─ 不支持 native 的模型：只使用 <file_context>
+```
+
+---
+
+## 3. 上传与解析层
+
+### 3.1 上传入口
+
+核心入口：
+
+```text
+POST /api/files/upload
+backend/internal/api/file_handler.go
+backend/internal/services/file_service.go
+```
+
+上传阶段职责：
+
+1. 接收 multipart 文件；
+2. 校验用户 / guest / workspace；
+3. 原文件落盘，保留 `storage_path`；
+4. 创建 `files` 表记录，对外返回 `public_id`；
+5. 后台 goroutine 异步解析；
+6. 解析完成后写入 `files.content` 与 `file_chunks`；
+7. 如启用 embedding，则创建并处理 embedding job。
+
+### 3.2 解析产物
+
+解析层主要产物：
+
+| 表 / 字段 | 作用 |
+|---|---|
+| `files.public_id` | 对外文件 ID，如 `file_xxx` |
+| `files.storage_path` | 原文件磁盘路径，供 direct-first 原文件读取 |
+| `files.content` | 解析后的完整文本 / Markdown |
+| `files.parse_status` | `pending / parsing / done / error / unsupported` |
+| `files.embedding_status` | `pending / indexing / done / error / skipped / disabled` |
+| `file_chunks` | 结构化文本块，供当前文件兜底和历史 RAG 使用 |
+| `file_embeddings` | 可选向量索引 |
+| `file_embedding_jobs` | 异步 embedding 任务 |
+
+### 3.3 文件类型处理
+
+| 类型 | 解析方式 | chunk 类型 |
+|---|---|---|
+| txt / md / csv | 文本读取，按结构切块 | `paragraph` / `heading` / `table` |
+| code | 文本读取，保留代码块 | `code` |
+| PDF | 文本提取，按页/块切分；复杂页面可生成视觉描述 | `paragraph` / `heading` / `table` / 视觉描述 |
+| DOCX | 解压 Office XML，抽取段落/标题/表格 | `paragraph` / `heading` / `table` |
+| PPTX | 读取 slides XML | `slide_title` / `slide_content` |
+| XLSX | 读取 worksheets XML，转 Markdown 表格 | `table` |
+| 图片 | vision/OCR/caption 文本化 | `image_caption` |
+
+---
+
+## 4. 聊天文件上下文编排
+
+核心代码：
+
+```text
+backend/internal/services/file_context_orchestrator.go
+```
+
+关键结构：
+
+```go
+type FileContextPackage struct {
+    SystemPrompt string
+    NativeParts  []ModelPart
+    Warnings     []string
+    UsedFileIDs  []uint
+}
+
+type ModelPart struct {
+    Type     string // image | file
+    MimeType string
+    DataURI  string
+    FileID   uint
+    Filename string
+}
+```
+
+### 4.1 当前文件：Direct-First
+
+当前文件指用户本轮上传/附加、随当前问题一起使用的文件。
+
+处理顺序：
+
+1. `filterReadyFiles()` 过滤 `parse_status != done` 的文件；
+2. `buildCurrentNativeParts()` 尝试读取 `storage_path` 原文件；
+3. 如果模型支持：
+   - 图片 → 生成 `ModelPart{Type: "image", DataURI: ...}`；
+   - 文档 → 生成 `ModelPart{Type: "file", DataURI: ...}`；
+4. 文件大小超过限制或读取失败时，生成 warning，回退解析文本；
+5. `buildDirectCurrentContext()` 仍然加载当前文件 chunks，作为 `<current_files>` 兜底上下文。
+
+当前限制：
+
+| 项 | 当前值 |
+|---|---|
+| 当前文件解析文本上限 | `DefaultCurrentFileContextChars = 100000` |
+| 原文件直传大小上限 | `defaultNativeFileMaxBytes = 25MB` |
+| 图片直传大小上限 | 由 `defaultNativeImageMaxBytes` 控制 |
+
+### 4.2 历史文件：RAG / Overview
+
+历史文件指已存在于会话、workspace 或 compare 上下文中的文件，不是本轮新附件。
+
+处理方式：
+
+1. 图片历史文件：直接取 `image_caption` chunks；
+2. 文档历史文件：
+   - 如果是 overview 类问题，按顺序选择概览 chunks；
+   - 否则走 `RetrievalService.Search()` 检索相关 chunks；
+3. 用 `ContextBuilder.BuildSection("historical_files", ...)` 拼进 `<file_context>`。
+
+当前限制：
+
+| 项 | 当前值 |
+|---|---|
+| 历史文件上下文上限 | `DefaultHistoricalFileContextChars = 40000` |
+| TopK | `DynamicTopK(model)` 按模型动态调整 |
+
+---
+
+## 5. 模型能力判断
+
+模型能力元数据在：
+
+```text
+backend/internal/modelmeta/modelmeta.go
+```
+
+语义：
+
+| 字段 | 含义 |
+|---|---|
+| `Capabilities` | 模型能做什么：`chat / image / search / reasoning / video` |
+| `SupportedInputs` | 模型原生支持什么输入：`text / image / pdf / word / excel / ppt / csv / txt / code / video / audio` |
+
+当前聊天文件 native 输入判断：
+
+```go
+supportsNativeFileInput(model) = strings.HasPrefix(model, "gpt-") || strings.HasPrefix(model, "gemini-")
+modelmeta.SupportsInput(model, inputType)
+```
+
+当前主要配置：
+
+| 模型族 | SupportedInputs | Direct native 行为 |
+|---|---|---|
+| GPT 聊天模型 | `text,image,pdf,word,excel,ppt,csv,txt,code` | 图片 + 文件可 direct-first |
+| Gemini 聊天模型 | `text,image,pdf,word,excel,ppt,csv,txt,code` | 图片 + 文件可 direct-first |
+| DeepSeek | `text,pdf,word,excel,ppt,csv,txt,code` | 目前不原生直传，只走解析/RAG 文本兜底 |
+| gpt-image-2 | `text` | 图片生成模型，不走聊天文件上下文链路 |
+| Seedance | `text` | 视频生成模型，不走聊天文件上下文链路 |
+
+---
+
+## 6. Provider 适配层
+
+### 6.1 OpenAI Responses
+
+相关文件：
+
+```text
+backend/internal/services/openai_sdk.go
+backend/internal/services/ai_service.go
+```
+
+当前支持：
+
+```json
+{
+  "type": "input_image",
+  "image_url": "data:image/png;base64,..."
+}
+```
+
+```json
+{
+  "type": "input_file",
+  "filename": "document.pdf",
+  "file_data": "data:application/pdf;base64,..."
+}
+```
+
+说明：
+
+- 新 SDK 路径和旧 OpenAI Responses 路径都已支持 `input_file`；
+- 当前文件 native parts 注入最后一条 user message；
+- `<file_context>` 仍作为 system message 注入，提供解析文本兜底。
+
+### 6.2 Gemini SDK
+
+相关文件：
+
+```text
+backend/internal/services/gemini_sdk.go
+```
+
+当前支持：
+
+```go
+genai.NewPartFromBytes(data, mediaType)
+```
+
+说明：
+
+- 图片和文档都会从 DataURI 解码为 bytes；
+- 以 `mediaType` 传给 Gemini；
+- 同样保留 `<file_context>` 兜底。
+
+### 6.3 纯文本/非 native 模型
+
+DeepSeek 等模型当前不走原文件 direct native 输入。
+
+它们依赖：
+
+1. 当前文件解析 chunks；
+2. 历史文件 RAG chunks；
+3. `<file_context>` prompt 注入。
+
+---
+
+## 7. 为什么复杂文件以前理解差
+
+旧架构主要依赖“解析 → chunks → prompt/RAG”。对简单文本没问题，但复杂文件容易失真：
+
+| 问题 | 表现 |
+|---|---|
+| PDF 复杂排版 | 跨栏、表格、图文混排顺序错乱 |
+| 扫描 PDF | 没有 OCR/视觉解析时文本为空或很少 |
+| PPT / Excel | 图表、公式、样式、跨 sheet 关系丢失 |
+| 图片文件 | 只能依赖 caption，不能进行细粒度视觉推理 |
+| RAG 检索片段化 | 用户要“整体总结/改写/对比”时，只拿到局部 chunks |
+| Token 上限 | 大文件无法完整塞入上下文 |
+
+因此用户会感觉：简单 txt/md/csv 能回答，复杂 PDF/PPT/XLSX/图片理解弱。
+
+当前 direct-first 的意义是：
+
+- 对 GPT/Gemini，把原文件也交给模型；
+- 平台解析文本仍保留，保证兼容和兜底；
+- 历史文件继续 RAG，避免每次都把所有历史原文件塞给模型。
+
+---
+
+## 8. 是否需要“解析大模型”
+
+快速上线阶段：**不建议把解析大模型作为上线前置条件。**
+
+当前最佳策略：
+
+1. **先上线 direct-first**：当前文件原生直传给 GPT/Gemini；
+2. **保留现有解析/RAG**：给 DeepSeek、历史文件、引用、搜索兜底；
+3. **上线后观察日志和失败样本**：重点看复杂 PDF、扫描件、图表型 PPT/Excel；
+4. **后续再引入解析大模型做增强解析**，不要阻塞上线。
+
+后续可加的解析增强：
+
+| 优先级 | 能力 | 作用 |
+|---|---|---|
+| P0 | 扫描 PDF / 图片 OCR + vision layout | 解决无文本 PDF、截图文档 |
+| P1 | PDF layout model / 多模态解析 | 保留阅读顺序、表格、图文位置 |
+| P1 | Excel 结构化 sheet 摘要 | 支持多 sheet、公式、图表解释 |
+| P2 | PPT 页面视觉摘要 | 支持图形/布局/演示逻辑理解 |
+| P2 | 文件级摘要索引 | 历史大文件先走摘要再局部检索 |
+
+---
+
+## 9. 运行时可观测性
+
+聊天注入文件上下文时会输出类似日志：
+
+```text
+[Chat FileContext] injected context usedFiles=[...] nativeParts=N nativeImagesAdded=N nativeFilesAdded=N warnings=N systemPrompt=true
+```
+
+重点看：
+
+| 指标 | 含义 |
+|---|---|
+| `nativeParts` | 本轮构造出的原生直传部件数 |
+| `nativeImagesAdded` | 实际注入最后 user message 的图片数 |
+| `nativeFilesAdded` | 实际注入最后 user message 的文件数 |
+| `warnings` | 未解析、读取失败、超大小等问题 |
+| `systemPrompt=true` | 是否注入了 `<file_context>` 解析文本兜底 |
+
+上线后如果用户反馈“文件看不懂”，先查：
+
+1. 该文件 `parse_status` 是否 `done`；
+2. 当前模型是否支持 native file input；
+3. 日志中 `nativeFilesAdded` 是否 > 0；
+4. 是否有 warning；
+5. `file_chunks` 是否为空或质量差；
+6. 是否是历史文件场景导致只走 RAG，没有原文件直传。
+
+---
+
+## 10. 当前上线判断
+
+当前架构可快速上线：
+
+- 当前上传文件：direct-first 已补齐；
+- OpenAI / Gemini native 文件输入路径已支持；
+- 解析文本兜底仍在；
+- 历史文件 RAG 不被破坏；
+- DeepSeek 等非 native 模型仍可通过 `<file_context>` 使用文件内容；
+- 复杂文件理解风险主要来自解析质量和模型 native 能力差异，不应阻塞 MVP 上线。
+
+后续优化方向不是重写上传系统，而是增强三件事：
+
+1. 复杂文件解析质量；
+2. historical files 的上下文组织策略；
+3. 引用原文/页码/表格的可视化回溯体验。

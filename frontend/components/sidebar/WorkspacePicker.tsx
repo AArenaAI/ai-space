@@ -153,19 +153,19 @@ export default function WorkspacePicker({
                           className={cn(
                             "flex-1 flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-all duration-150",
                             isActive
-                              ? "bg-brand/15 text-text-primary font-medium"
+                              ? "bg-surface-card text-text-primary font-medium shadow-sm"
                               : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                           )}
                         >
                           <FolderKanban className={cn(
                             "w-3.5 h-3.5 shrink-0",
-                            isActive ? "text-brand" : "text-text-tertiary"
+                            isActive ? "text-text-primary" : "text-text-tertiary"
                           )} />
                           <span className="flex-1 truncate text-left">{ws.name}</span>
                           {ws.is_default && (
                             <span className="text-[10px] text-text-tertiary bg-surface-card px-1.5 py-0.5 rounded">默认</span>
                           )}
-                          {isActive && <Check className="w-3 h-3 text-brand shrink-0" />}
+                          {isActive && <Check className="w-3 h-3 text-text-primary shrink-0" />}
                         </button>
                         {/* 非默认 workspace 才展示操作按钮 */}
                         {!ws.is_default && (

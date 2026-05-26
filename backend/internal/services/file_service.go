@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"aipool-backend/internal/config"
+	"aipool-backend/internal/modelmeta"
 	"aipool-backend/internal/models"
 	"aipool-backend/internal/services/embedding"
 	"aipool-backend/pkg/publicid"
@@ -373,28 +374,7 @@ func (s *FileService) IsImageFile(fileID uint) (bool, error) {
 
 // inferMimeType 推断 MIME 类型
 func inferMimeType(filename string) string {
-	ext := filepath.Ext(strings.ToLower(filename))
-	switch ext {
-	case ".pdf":
-		return "application/pdf"
-	case ".docx":
-		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-	case ".pptx":
-		return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-	case ".xlsx":
-		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-	case ".txt":
-		return "text/plain"
-	case ".md":
-		return "text/markdown"
-	case ".csv":
-		return "text/csv"
-	case ".json":
-		return "application/json"
-	case ".html":
-		return "text/html"
-	case ".xml":
-		return "application/xml"
+	switch strings.ToLower(filepath.Ext(filename)) {
 	case ".jpg", ".jpeg":
 		return "image/jpeg"
 	case ".png":
@@ -405,11 +385,8 @@ func inferMimeType(filename string) string {
 		return "image/webp"
 	case ".bmp":
 		return "image/bmp"
-	case ".svg":
-		return "image/svg+xml"
-	default:
-		return "application/octet-stream"
 	}
+	return modelmeta.MimeTypeForFile(filename)
 }
 
 // generateFileSummary 异步生成文件摘要（简单版：截取前 500 字符作为摘要）

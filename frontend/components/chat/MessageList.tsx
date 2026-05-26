@@ -29,6 +29,7 @@ import { AssistantMessageMeta } from "./AssistantMessageMeta";
 import ModelSelector from "./ModelSelector";
 
 const CHAT_BOTTOM_SPACER = 280;
+const SCROLL_TO_BOTTOM_OFFSET = 238;
 const SELECT_MODE_EXTRA_SPACER = 80;
 type SelectionMode = "share" | "favorite";
 
@@ -238,6 +239,50 @@ function sanitizeContent(content: string): string {
   result = result.replace(/(?<!\d)\[(\d+)\](?!\s*[.)])/g, "");
   
   return result.trim();
+}
+
+function normalizeExportPlainText(content: string): string {
+  return content
+    .replace(/```([\w-]+)?\n([\s\S]*?)```/g, (_match, lang, code) => {
+      const label = lang ? `代码（${lang}）` : "代码";
+      return `\n【${label}】\n${String(code).trim()}\n【代码结束】\n`;
+    })
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1（$2）")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s{0,3}>\s?/gm, "引用：")
+    .replace(/^\s{0,3}[-*+]\s+/gm, "• ")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/_([^_]+)_/g, "$1")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function formatMessageForTextExport(msg: Message, index: number, total: number): string {
+  const roleLabel = msg.role === "user" ? "用户" : "AI Space";
+  const title = `【${index + 1}/${total} ${roleLabel}】`;
+
+  if (msg.role === "user") {
+    const content = normalizeExportPlainText(msg.content || "");
+    return `${title}\n${content || "（空消息）"}`;
+  }
+
+  const { reasoning, answer, isThinking } = parseThinkContent(msg.content || "");
+  const cleanAnswer = normalizeExportPlainText(sanitizeContent(answer));
+  const cleanReasoning = reasoning ? normalizeExportPlainText(reasoning) : "";
+  const sections: string[] = [title];
+
+  if (cleanReasoning) {
+    sections.push(`【深度推理${isThinking ? "中" : ""}】\n${cleanReasoning}`);
+  }
+
+  sections.push(`【回答】\n${cleanAnswer || "（空回答）"}`);
+  return sections.join("\n\n");
 }
 
 // 根据回答内容过滤出实际被引用的来源
@@ -563,15 +608,7 @@ function MessageActions({
       >
         {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
       </button>
-      {onForkCompare && align === "right" && (
-        <button
-          onClick={onForkCompare}
-          className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
-          title="对比"
-        >
-          <Columns2 className="w-3.5 h-3.5" />
-        </button>
-      )}
+
       {showRegenerate && onRegenerate && (
         <button
           onClick={onRegenerate}
@@ -676,6 +713,40 @@ const markdownComponents = {
   td({ children }: any) { return <td className="px-3 py-2.5 text-[13px] text-text-secondary leading-relaxed">{children}</td>; },
 };
 
+function ExportMessageContent({ msg }: { msg: Message }) {
+  if (msg.role === "user") {
+    return <div className="whitespace-pre-wrap break-words">{msg.content || ""}</div>;
+  }
+
+  const { reasoning, answer, isThinking } = parseThinkContent(msg.content || "");
+  const cleanAnswer = sanitizeContent(answer);
+
+  return (
+    <div className="prose prose-sm max-w-none text-white/90">
+      {reasoning && (
+        <div className="mb-3 overflow-hidden rounded-xl border border-white/10 bg-white/8">
+          <div className="flex items-center gap-2 px-3 py-2 bg-white/10">
+            <Lightbulb className="h-3.5 w-3.5 shrink-0 text-amber-300" />
+            <span className="text-sm font-medium text-white/75">
+              {isThinking ? "深度推理中，片刻即达极致答案" : "深度推理"}
+            </span>
+          </div>
+          <div className="whitespace-pre-wrap px-3 py-2.5 text-[13px] leading-relaxed text-white/70">
+            {reasoning}
+          </div>
+        </div>
+      )}
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkFixBold, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        components={markdownComponents}
+      >
+        {cleanAnswer}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
 function ExportShareCard({ messages, cardRef }: { messages: Message[]; cardRef?: Ref<HTMLDivElement> }) {
   return (
     <div
@@ -712,13 +783,13 @@ function ExportShareCard({ messages, cardRef }: { messages: Message[]; cardRef?:
                 {!isUser && <div className="mb-1 ml-1 text-[11px] text-white/45">AI Space</div>}
                 <div
                   className={cn(
-                    "whitespace-pre-wrap break-words rounded-2xl border px-4 py-3 text-sm leading-relaxed shadow-sm",
+                    "break-words rounded-2xl border px-4 py-3 text-sm leading-relaxed shadow-sm",
                     isUser
                       ? "rounded-br-md border-white/15 bg-white/18 text-white"
                       : "rounded-bl-md border-white/10 bg-white/10 text-white/90"
                   )}
                 >
-                  {msg.content || ""}
+                  <ExportMessageContent msg={msg} />
                 </div>
               </div>
             </div>
@@ -871,7 +942,36 @@ function MessageList({
   const exportPreviewCardRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
   const atBottomRef = useRef(true);
-  const virtuosoComponents = useMemo<Components<Message, unknown>>(() => ({
+  const renderScrollToBottomButton = useCallback(() => {
+    if (atBottom) return null;
+    return (
+      <div
+        className="pointer-events-none absolute inset-x-0 z-[75] mx-auto max-w-[1440px]"
+        style={{ bottom: SCROLL_TO_BOTTOM_OFFSET + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0) }}
+      >
+        <button
+          type="button"
+          onClick={() => {
+            userScrollOverrideUntilRef.current = 0;
+            stickToBottomRef.current = true;
+            atBottomRef.current = true;
+            setAtBottom(true);
+            scrollToBottom();
+            lockBottomAfterLayout();
+          }}
+          className="pointer-events-auto absolute left-1/2 flex h-10 w-10 -translate-x-1/2 items-center justify-center rounded-full
+            border border-surface-border bg-surface-elevated/75 text-text-secondary shadow-lg backdrop-blur-md transition-all
+            hover:bg-surface-card/85 hover:text-text-primary hover:shadow-xl hover:border-surface-border/80
+            active:scale-95 active:bg-surface-card active:shadow-sm"
+          aria-label="回到底部"
+        >
+          <ChevronDownIcon className="w-5 h-5" />
+        </button>
+      </div>
+    );
+  }, [atBottom, lockBottomAfterLayout, selectMode]);
+
+  const createVirtuosoComponents = useCallback(<T,>(): Components<T, unknown> => ({
     Header: () =>
       hasMoreMessages ? (
         <div className="flex justify-center py-2">
@@ -892,6 +992,8 @@ function MessageList({
       ) : null,
     Footer: () => <div style={{ height: CHAT_BOTTOM_SPACER + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0) }} aria-hidden="true" />,
   }), [hasMoreMessages, isLoadingMore, onLoadMore, selectMode]);
+  const virtuosoComponents = useMemo(() => createVirtuosoComponents<Message>(), [createVirtuosoComponents]);
+  const compareVirtuosoComponents = useMemo(() => createVirtuosoComponents<InferredGroup>(), [createVirtuosoComponents]);
   const groups = useMemo(() => inferGroups(messages), [messages]);
   const groupByMessageId = useMemo(() => {
     const map = new Map<string, InferredGroup>();
@@ -906,6 +1008,18 @@ function MessageList({
   const locatedTargetKeyRef = useRef<string>("");
   const loadingTargetKeyRef = useRef<string>("");
   const highlightTimerRef = useRef<number | null>(null);
+  const [openAvatarDropdownGroupId, setOpenAvatarDropdownGroupId] = useState<number | null>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest(".avatar-dropdown") && !target.closest(".avatar-dropdown-trigger")) {
+        setOpenAvatarDropdownGroupId(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const visibleMessages = useMemo(() => {
     return messages.filter((msg) => {
@@ -1199,11 +1313,16 @@ function MessageList({
   const handleExportText = () => {
     if (selectedIds.size === 0) return;
     const selectedMessages = messages.filter((m) => selectedIds.has(m.id));
-    let text = "";
-    selectedMessages.forEach((msg) => {
-      const roleLabel = msg.role === "user" ? "用户" : "AI";
-      text += `[${roleLabel}]\n${msg.content || ""}\n\n`;
-    });
+    const exportedAt = new Date().toLocaleString("zh-CN", { hour12: false });
+    const separator = "\n\n────────────────────────\n\n";
+    const text = [
+      "AI Space 对话导出",
+      `导出时间：${exportedAt}`,
+      `消息数量：${selectedMessages.length}`,
+      "",
+      selectedMessages.map((msg, index) => formatMessageForTextExport(msg, index, selectedMessages.length)).join(separator),
+      "",
+    ].join("\n");
     const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -1267,6 +1386,17 @@ function MessageList({
       return <StreamingText messageId={msg.id} content={msg.content || ""} isStreaming={true} className="text-[15px] leading-relaxed text-text-primary" />;
     }
     if (!msg.content) {
+      const mayStillRecover = !msg.completedAt && !msg.stopped && !!(
+        msg.activityStatus ||
+        msg.serverMessageId ||
+        msg.generationTaskId ||
+        msg.backgroundTaskId ||
+        msg.useBackground ||
+        msg.isComplexTask
+      );
+      if (mayStillRecover) {
+        return <StreamingText messageId={msg.id} content={msg.content || ""} isStreaming={true} className="text-[15px] leading-relaxed text-text-primary" />;
+      }
       return <div className="text-[15px] leading-relaxed text-text-secondary">生成中断，可点击重新生成</div>;
     }
     const { reasoning, answer, isThinking } = parseThinkContent(msg.content);
@@ -1289,7 +1419,7 @@ function MessageList({
     const model = modelById.get(modelId);
     return (
       <div className="flex items-center justify-between gap-2 px-3 py-1.5">
-        <div className="min-w-0 w-fit scale-[0.92] origin-left">
+        <div className="flex-1 min-w-0">
           {model ? (
             <ModelSelector
               models={models}
@@ -1394,72 +1524,84 @@ function MessageList({
       </div>
     );
 
-    const renderCompareColumnTurn = (userMsg: Message, msg: Message | undefined, modelId: string, isLastGroup: boolean) => {
+    const renderCompareColumnTurn = (userMsg: Message, msg: Message | undefined, modelId: string, isLastGroup: boolean, isSingleChat: boolean) => {
       const model = modelById.get(msg?.model || modelId || "");
-      const isStreaming = !!msg && isLoading && !msg.completedAt && isLastGroup && isMessageGenerating(msg, true);
+      const hasLiveGenerationSignal = !!msg && !msg.completedAt && !msg.stopped && !!(
+        msg.activityStatus ||
+        msg.serverMessageId ||
+        msg.generationTaskId ||
+        msg.backgroundTaskId ||
+        msg.useBackground ||
+        msg.isComplexTask
+      );
+      const isStreaming = !!msg && isLastGroup && (isLoading || hasLiveGenerationSignal) && isMessageGenerating(msg, true);
       const isGenerating = !!msg && isMessageGenerating(msg, isStreaming);
-      const canRegenerate = !!msg && isLastGroup && !isLoading && !isGenerating;
+      const canRegenerate = !!msg && isLastGroup && !isStreaming && !isGenerating;
 
       return (
-        <div key={`${userMsg.id}-${modelId}-${msg?.id || "empty"}`} className="flex flex-col gap-3 border-b border-surface-border px-4 py-4 last:border-b-0">
+        <div className="flex flex-col gap-3 h-full">
           {renderCompareUserMessage(userMsg)}
-          {msg ? (
-            <div className="group flex gap-3 animate-message-appear">
-              <div className="mt-1 w-7 shrink-0">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-surface-border bg-surface-card">
-                  <Bot className="h-4 w-4 text-text-secondary" />
-                </div>
-              </div>
-              <div className="flex min-w-0 flex-1 flex-col gap-1">
-                <div className="w-fit max-w-full rounded-2xl rounded-bl-sm bg-surface-elevated px-4 py-3">
-                  {model && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} />}
-                  {renderAssistantContent(msg, isStreaming)}
-                </div>
-                {!isStreaming && (
-                  <div className="flex items-center gap-2 px-2 opacity-0 transition-opacity group-hover:opacity-100">
-                    <MessageActions
-                      onCopy={() => handleCopy(msg.content)}
-                      onDelete={() => setDeleteTarget(msg.id)}
-                      onRegenerate={onRegenerate}
-                      onShareSelectMode={() => enterSelectMode("share", msg.id)}
-                      onFavoriteSelectMode={msg.serverMessageId && conversationId ? () => enterSelectMode("favorite", msg.id) : undefined}
-                      isFavorited={msg.serverMessageId ? isFavorited(msg.serverMessageId) : false}
-                      showRegenerate={canRegenerate}
-                      align="left"
-                      visible={isLastGroup}
-                      createdAt={msg.createdAt}
-                      completedAt={msg.completedAt}
-                      onForkCompare={msg.serverMessageId ? () => onForkCompare?.(msg.serverMessageId!) : undefined}
-                    />
+          <div className="flex-1 flex flex-col">
+            {msg ? (
+              <div className="group flex gap-3 animate-message-appear">
+                <div className="mt-1 w-7 shrink-0">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-surface-border bg-surface-card">
+                    <Bot className="h-4 w-4 text-text-secondary" />
                   </div>
-                )}
-              </div>
-            </div>
-          ) : isLoading && isLastGroup ? (
-            <div className="flex gap-3 animate-message-appear">
-              <div className="mt-1 w-7 shrink-0">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-surface-border bg-surface-card">
-                  <Bot className="h-4 w-4 text-text-secondary" />
                 </div>
-              </div>
-              <div className="flex-1">
-                <div className="inline-flex rounded-2xl rounded-bl-sm bg-surface-elevated px-4 py-3 text-sm text-text-secondary">
-                  {isComplexTask ? (
-                    <span className="inline-flex items-center gap-0.5">
-                      <WaveText text={t("chat.deepReasoning")} />
-                      <ThinkingDots />
-                    </span>
-                  ) : (
-                    <ThinkingDots />
+                <div className="flex min-w-0 flex-1 flex-col gap-1">
+                  <div className="w-fit max-w-full rounded-2xl rounded-bl-sm bg-surface-elevated px-4 py-3">
+                    {model && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} />}
+                    {renderAssistantContent(msg, isStreaming)}
+                  </div>
+                  {!isStreaming && (
+                    <div className="flex items-center gap-2 px-2 opacity-0 transition-opacity group-hover:opacity-100">
+                      <MessageActions
+                        onCopy={() => handleCopy(msg.content)}
+                        onDelete={() => setDeleteTarget(msg.id)}
+                        onRegenerate={onRegenerate}
+                        onShareSelectMode={() => enterSelectMode("share", msg.id)}
+                        onFavoriteSelectMode={msg.serverMessageId && conversationId ? () => enterSelectMode("favorite", msg.id) : undefined}
+                        isFavorited={msg.serverMessageId ? isFavorited(msg.serverMessageId) : false}
+                        showRegenerate={canRegenerate}
+                        align="left"
+                        visible={isLastGroup}
+                        createdAt={msg.createdAt}
+                        completedAt={msg.completedAt}
+                        onForkCompare={msg.serverMessageId ? () => onForkCompare?.(msg.serverMessageId!) : undefined}
+                      />
+                    </div>
                   )}
                 </div>
               </div>
-            </div>
-          ) : (
-            <div className="rounded-xl border border-dashed border-surface-border bg-surface-elevated/40 px-3 py-2 text-center text-xs text-text-tertiary">
-              当前模型未参与本轮
-            </div>
-          )}
+            ) : isLoading && isLastGroup ? (
+              <div className="flex gap-3 animate-message-appear">
+                <div className="mt-1 w-7 shrink-0">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-surface-border bg-surface-card">
+                    <Bot className="h-4 w-4 text-text-secondary" />
+                  </div>
+                </div>
+                <div className="flex-1">
+                  <div className="inline-flex rounded-2xl rounded-bl-sm bg-surface-elevated px-4 py-3 text-sm text-text-secondary">
+                    {isComplexTask ? (
+                      <span className="inline-flex items-center gap-0.5">
+                        <WaveText text={t("chat.deepReasoning")} />
+                        <ThinkingDots />
+                      </span>
+                    ) : (
+                      <ThinkingDots />
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="flex-1 flex items-center justify-center">
+                <div className="rounded-xl border border-dashed border-surface-border bg-surface-elevated/40 px-3 py-2 text-center text-xs text-text-tertiary">
+                  {isSingleChat ? "单聊模式的对话" : "当前模型未参与本轮"}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       );
     };
@@ -1474,9 +1616,9 @@ function MessageList({
             </div>
           ))}
         </div>
-        {/* 滚动内容区域 */}
-        <div className="flex-1 overflow-y-auto px-3 py-3" style={{ paddingBottom: CHAT_BOTTOM_SPACER }}>
-          {messages.length === 0 ? (
+        {/* 滚动内容区域：对比模式也使用 Virtuoso，和单聊共享滚动/锁底体系 */}
+        {messages.length === 0 ? (
+          <div className="flex-1 overflow-hidden px-3 py-3">
             <div className="mx-auto flex h-full max-w-[1440px]">
               {(activeCompareModels.length ? activeCompareModels : compareModels).map((modelId, index) => (
                 <div key={modelId || index} className="flex min-w-[320px] flex-1 flex-col border-r border-surface-border last:border-r-0">
@@ -1484,22 +1626,47 @@ function MessageList({
                 </div>
               ))}
             </div>
-          ) : (
-            <div className="mx-auto flex max-w-[1440px] overflow-x-auto pb-1">
-              {(activeCompareModels.length ? activeCompareModels : compareModels).map((modelId, colIndex) => (
-                <div key={modelId || colIndex} className="flex min-w-[320px] flex-1 flex-col border-r border-surface-border last:border-r-0">
-                  <div className="flex flex-1 flex-col">
-                    {compareGroups.map((group, groupIndex) => {
-                      const isLastGroup = groupIndex === compareGroups.length - 1;
+          </div>
+        ) : (
+          <Virtuoso
+            style={{ height: "100%" }}
+            data={compareGroups}
+            ref={virtuosoRef}
+            scrollerRef={handleVirtuosoScrollerRef}
+            followOutput={false}
+            atBottomThreshold={160}
+            atBottomStateChange={(atBottom) => {
+              atBottomRef.current = atBottom;
+              if (atBottom) stickToBottomRef.current = true;
+              setAtBottom(atBottom);
+            }}
+            computeItemKey={(_, group) => group.id}
+            onScroll={handleVirtuosoScroll}
+            increaseViewportBy={{ top: 200, bottom: CHAT_BOTTOM_SPACER }}
+            overscan={{ main: 2, reverse: 2 }}
+            components={compareVirtuosoComponents}
+            itemContent={(groupIndex, group) => {
+              const isLastGroup = groupIndex === compareGroups.length - 1;
+              const isSingleChat = group.models.length <= 1;
+              return (
+                <div className="mx-auto max-w-[1440px]">
+                  <div className="flex items-stretch">
+                    {(activeCompareModels.length ? activeCompareModels : compareModels).map((modelId, colIndex) => {
                       const assistant = resolveCompareAssistant(group, colIndex, modelId);
-                      return renderCompareColumnTurn(group.userMessage, assistant, modelId, isLastGroup);
+                      return (
+                        <div key={colIndex} className="flex min-w-[320px] flex-1 flex-col px-4 py-4">
+                          {renderCompareColumnTurn(group.userMessage, assistant, modelId, isLastGroup, isSingleChat)}
+                        </div>
+                      );
                     })}
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
+              );
+            }}
+          />
+        )}
+
+        {renderScrollToBottomButton()}
 
         <ConfirmDialog
           isOpen={!!deleteTarget}
@@ -1554,10 +1721,10 @@ function MessageList({
             </>
           ) : (
             <>
-              <h1 className="text-2xl font-semibold tracking-tight mb-2 text-text-primary">
+              <h1 className="text-[32px] font-semibold leading-tight tracking-tight mb-2 text-text-primary">
                 {userName ? t("chat.userGreeting").replace("{name}", userName) : t("chat.greeting")}
               </h1>
-              <p className="text-text-secondary text-[15px] leading-relaxed">{t("chat.whatCanWeDo")}</p>
+              <p className="text-[25px] font-medium leading-tight tracking-tight text-text-primary/80">{t("chat.whatCanWeDo")}</p>
             </>
           )}
         </div>
@@ -1604,8 +1771,57 @@ function MessageList({
                 {/* 左侧：AI头像 / 用户复选框 */}
                 <div className={cn("mt-1 shrink-0", isUser && !selectMode ? "hidden" : "w-7")}>
                   {!isUser && !selectMode && (
-                    <div className="w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center">
-                      <Bot className="w-4 h-4 text-text-secondary" />
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (group && group.assistantMessages.length > 1) {
+                            setOpenAvatarDropdownGroupId((prev) => (prev === group.id ? null : group.id));
+                          }
+                        }}
+                        className={cn(
+                          "w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center relative avatar-dropdown-trigger",
+                          group && group.assistantMessages.length > 1 && "cursor-pointer hover:bg-surface-elevated"
+                        )}
+                      >
+                        <Bot className="w-4 h-4 text-text-secondary" />
+                        {group && group.assistantMessages.length > 1 && (
+                          <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-brand text-[8px] font-bold text-white flex items-center justify-center border border-white dark:border-[#1F1F1F]">
+                            {group.assistantMessages.length}
+                          </span>
+                        )}
+                      </button>
+                      {openAvatarDropdownGroupId === group?.id && group && (
+                        <div className="avatar-dropdown absolute top-full left-0 mt-1.5 z-50 w-44 rounded-xl border border-surface-border bg-surface-elevated shadow-xl py-1.5 px-1.5 flex flex-col gap-0.5">
+                          {group.assistantMessages.map((a, idx) => {
+                            const m = a.model ? modelById.get(a.model) : undefined;
+                            const isActive = (groupViews?.get(group.id) ?? 0) === idx;
+                            return (
+                              <button
+                                key={a.id}
+                                onClick={() => {
+                                  switchGroupModel?.(group.id, idx);
+                                  setOpenAvatarDropdownGroupId(null);
+                                }}
+                                className={cn(
+                                  "flex items-center gap-2 w-full px-2.5 py-2 text-left transition-colors rounded-lg",
+                                  isActive ? "bg-surface-card text-text-primary font-medium shadow-sm" : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
+                                )}
+                              >
+                                <div
+                                  className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold text-white shrink-0"
+                                  style={{ backgroundColor: m?.color }}
+                                >
+                                  {(m?.name || a.model || `模型${idx + 1}`).slice(0, 1).toUpperCase()}
+                                </div>
+                                <span className="text-xs truncate">{m?.name || a.model || `模型 ${idx + 1}`}</span>
+                                {isActive && <Check className="w-3 h-3 text-text-primary shrink-0 ml-auto" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
                   {isUser && selectMode && (
@@ -1614,8 +1830,8 @@ function MessageList({
                       className={cn(
                         "w-5 h-5 rounded-md border flex items-center justify-center transition-colors",
                         isSelected
-                          ? "bg-brand border-brand text-white"
-                          : "border-surface-border text-transparent hover:border-brand/50"
+                          ? "border-slate-900 bg-slate-900 text-white shadow-sm dark:border-text-primary dark:bg-text-primary dark:text-surface"
+                          : "border-surface-border text-transparent hover:border-text-tertiary/50"
                       )}
                     >
                       {isSelected && <SquareCheck className="w-3.5 h-3.5" />}
@@ -1626,34 +1842,7 @@ function MessageList({
                 {/* 中间内容 */}
                 <div className={cn("flex-1 flex min-w-0", isUser ? "justify-end" : "justify-start")}>
                   <div className={cn("flex flex-col gap-1 min-w-0", isUser ? "items-end" : "items-start")}>
-                    {!isUser && group && group.assistantMessages.length > 1 && (
-                      <div className="flex items-center gap-1.5 mb-1">
-                        {group.assistantMessages.map((a, idx) => {
-                          const m = a.model ? modelById.get(a.model) : undefined;
-                          const isActive = (groupViews?.get(group.id) ?? 0) === idx;
-                          return (
-                            <button
-                              key={a.id}
-                              onClick={() => switchGroupModel?.(group.id, idx)}
-                              className={cn(
-                                "flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] transition-colors",
-                                isActive
-                                  ? "bg-brand/10 text-brand font-medium"
-                                  : "bg-surface-card text-text-secondary hover:bg-surface-elevated"
-                              )}
-                            >
-                              <div
-                                className="w-3 h-3 rounded-full flex items-center justify-center text-[8px] font-bold text-white"
-                                style={{ backgroundColor: m?.color }}
-                              >
-                                {(m?.name || a.model || `模型${idx + 1}`).slice(0, 1).toUpperCase()}
-                              </div>
-                              <span className="truncate max-w-[80px]">{m?.name || a.model || `模型 ${idx + 1}`}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
+
                     <div
                       className={cn(
                         "px-4 py-3 relative w-fit max-w-full transition-shadow duration-500",
@@ -1765,8 +1954,8 @@ function MessageList({
                       className={cn(
                         "w-5 h-5 rounded-md border flex items-center justify-center transition-colors",
                         isSelected
-                          ? "bg-brand border-brand text-white"
-                          : "border-surface-border text-transparent hover:border-brand/50"
+                          ? "border-slate-900 bg-slate-900 text-white shadow-sm dark:border-text-primary dark:bg-text-primary dark:text-surface"
+                          : "border-surface-border text-transparent hover:border-text-tertiary/50"
                       )}
                     >
                       {isSelected && <SquareCheck className="w-3.5 h-3.5" />}
@@ -1779,23 +1968,7 @@ function MessageList({
         }}
       />
 
-      {/* 回到底部按钮 */}
-      {!atBottom && (
-        <button
-          type="button"
-          onClick={() => {
-            stickToBottomRef.current = true;
-            lockBottomAfterLayout();
-          }}
-          className="absolute left-1/2 -translate-x-1/2 z-30 flex items-center justify-center w-10 h-10 rounded-full
-            bg-surface-elevated border border-surface-border text-text-secondary
-            shadow-lg hover:bg-surface-card hover:text-text-primary transition-colors"
-          style={{ bottom: CHAT_BOTTOM_SPACER + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0) + 12 }}
-          aria-label="回到底部"
-        >
-          <ChevronDownIcon className="w-5 h-5" />
-        </button>
-      )}
+      {renderScrollToBottomButton()}
 
       {/* 选择模式底部工具栏 */}
       {selectMode && (

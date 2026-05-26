@@ -99,7 +99,7 @@ function AspectIcon({ w, h, active }: { w: number; h: number; active: boolean })
     <div
       className={cn(
         "rounded-[3px] border transition-colors",
-        active ? "border-brand/70 bg-brand/10" : "border-text-tertiary/30"
+        active ? "border-text-primary bg-surface-card shadow-sm" : "border-text-tertiary/30"
       )}
       style={{ width: boxW, height: boxH }}
     />
@@ -114,6 +114,7 @@ function ReferenceImageStack({
   uploading,
   onDropFile,
   model,
+  uploadTip,
 }: {
   images: string[];
   onAdd: () => void;
@@ -121,6 +122,7 @@ function ReferenceImageStack({
   uploading: boolean;
   onDropFile?: (file: File) => void;
   model?: ChatModel;
+  uploadTip?: string;
 }) {
   const [isHovered, setIsHovered] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -162,6 +164,17 @@ function ReferenceImageStack({
           <Loader2 className="w-4 h-4 text-gray-500 dark:text-text-tertiary animate-spin" />
         ) : (
           <Plus className="w-4 h-4 text-gray-500 dark:text-text-tertiary" />
+        )}
+        {uploadTip && (
+          <div
+            className="absolute -right-1 -top-1 z-20 flex h-4 w-4 items-center justify-center rounded-full border border-surface-border bg-surface-elevated text-[9px] font-medium leading-none text-text-tertiary/70 group/upload-tip"
+            onClick={(e) => e.stopPropagation()}
+          >
+            !
+            <div className="pointer-events-none absolute left-full top-0 z-30 ml-2 hidden w-64 whitespace-pre-line rounded-xl border border-surface-border bg-surface-elevated px-3 py-2 text-[11px] leading-5 text-text-secondary shadow-lg group-hover/upload-tip:block">
+              {uploadTip}
+            </div>
+          </div>
         )}
       </div>
     );
@@ -302,6 +315,7 @@ export default function ImagePage() {
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [deletingIds, setDeletingIds] = useState<number[]>([]);
   const [referenceImages, setReferenceImages] = useState<string[]>([]);
+  const [referenceVideos, setReferenceVideos] = useState<string[]>([]);
   const [uploadingRef, setUploadingRef] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [limitDialogOpen, setLimitDialogOpen] = useState(false);
@@ -335,6 +349,9 @@ export default function ImagePage() {
   const currentVideoAspect = VIDEO_ASPECT_RATIOS.find((a) => a.value === selectedVideoAspectRatio) || VIDEO_ASPECT_RATIOS[VIDEO_ASPECT_RATIOS.length - 1];
 
   const hasContent = prompt.trim().length > 0;
+  const uploadLimitTip = mode === "video"
+    ? "图片：支持常见图片格式，单张不超过 20 MB\n视频：仅支持 mp4、mov，单个不超过 50 MB\n视频时长：单个 2-15 秒，总时长不超过 15 秒\n视频规格：H.264/H.265，音频 AAC/MP3，24-60 FPS，宽高 300-6000px"
+    : "图片：支持常见图片格式，单张不超过 20 MB";
 
   useEffect(() => {
     if (isFastVideoModel && selectedVideoResolution === "1080p") {
@@ -342,7 +359,29 @@ export default function ImagePage() {
     }
   }, [isFastVideoModel, selectedVideoResolution]);
 
-  const uploadReferenceImage = useCallback(async (file: File) => {
+  const uploadReferenceMedia = useCallback(async (file: File) => {
+    const isVideo = file.type.startsWith("video/");
+    const isImage = file.type.startsWith("image/");
+
+    if (isImage && file.size > 20 * 1024 * 1024) {
+      toast.error("参考图不能超过 20 MB");
+      return;
+    }
+
+    if (mode === "video" && isVideo) {
+      const allowedTypes = ["video/mp4", "video/quicktime"];
+      const allowedExts = [".mp4", ".mov"];
+      const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
+      if (!allowedTypes.includes(file.type) && !allowedExts.includes(ext)) {
+        toast.error("参考视频仅支持 mp4、mov 格式");
+        return;
+      }
+      if (file.size > 50 * 1024 * 1024) {
+        toast.error("参考视频不能超过 50 MB");
+        return;
+      }
+    }
+
     setUploadingRef(true);
     try {
       const formData = new FormData();
@@ -360,19 +399,23 @@ export default function ImagePage() {
       const data = await res.json();
       // 使用 public_id 作为参考图标识（后端通过 file_ 前缀解析）
       const url = data.public_id || data.url || data.image_url;
-      setReferenceImages((prev) => [...prev, url]);
+      if (mode === "video" && isVideo) {
+        setReferenceVideos((prev) => [...prev, url]);
+      } else {
+        setReferenceImages((prev) => [...prev, url]);
+      }
     } catch (err: any) {
       toast.error(`上传失败: ${err.message}`);
     } finally {
       setUploadingRef(false);
     }
-  }, []);
+  }, [mode]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = "";
-    uploadReferenceImage(file);
+    uploadReferenceMedia(file);
   };
 
   const handleAddImage = () => {
@@ -381,6 +424,10 @@ export default function ImagePage() {
 
   const handleRemoveImage = (index: number) => {
     setReferenceImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleRemoveVideo = (index: number) => {
+    setReferenceVideos((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleGenerate = async () => {
@@ -404,6 +451,9 @@ export default function ImagePage() {
       params.set("resolution", selectedVideoResolution);
       params.set("duration", selectedDuration);
       if (musicEnabled) params.set("audio", "1");
+      if (referenceVideos.length > 0) {
+        params.set("videoRefs", referenceVideos.join(","));
+      }
       router.push(`/video/chat?${params.toString()}`);
       return;
     }
@@ -530,7 +580,7 @@ export default function ImagePage() {
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept={mode === "video" ? "image/*,video/mp4,video/quicktime" : "image/*"}
         className="hidden"
         onChange={handleFileSelect}
       />
@@ -586,22 +636,46 @@ export default function ImagePage() {
             className={cn(
               "relative flex flex-col rounded-2xl border transition-all duration-300",
               "bg-surface-card",
-              referenceImages.length > 0
+              referenceImages.length > 0 || referenceVideos.length > 0
                 ? "border-brand/20 focus-within:border-brand/40 focus-within:shadow-[0_0_0_1px_rgba(59,130,246,0.08)]"
                 : "border-surface-border focus-within:border-brand/30 focus-within:shadow-[0_0_0_1px_rgba(59,130,246,0.06)]"
             )}
           >
             {/* 输入区：参考图 + textarea */}
             <div className="flex items-start gap-3 px-4 pt-3 pb-2">
-              <div className="mt-1">
+              <div className="mt-1 flex gap-2">
                 <ReferenceImageStack
                   images={referenceImages}
                   onAdd={handleAddImage}
                   onRemove={handleRemoveImage}
                   uploading={uploadingRef}
-                  onDropFile={uploadReferenceImage}
+                  onDropFile={uploadReferenceMedia}
                   model={currentModel}
+                  uploadTip={uploadLimitTip}
                 />
+                {mode === "video" && referenceVideos.map((url, idx) => (
+                  <div key={`${url}-${idx}`} className="relative shrink-0 group/single">
+                    <div className="w-9 h-16 rounded-xl overflow-hidden border border-surface-border bg-surface-elevated relative">
+                      <video
+                        src={url.startsWith("file_") ? `/api/files/${url}/view` : url}
+                        className="w-full h-full object-cover"
+                        muted
+                        playsInline
+                      />
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/20 pointer-events-none">
+                        <Video className="w-4 h-4 text-white" />
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveVideo(idx)}
+                      className="absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full bg-surface-elevated border border-surface-border shadow-md text-gray-500 dark:text-text-secondary hover:text-red-500 hover:border-red-400 hover:bg-red-50 dark:hover:bg-red-950 flex items-center justify-center transition-all opacity-0 group-hover/single:opacity-100 z-20"
+                      title="删除"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
               </div>
               <textarea
                 value={prompt}
@@ -660,7 +734,7 @@ export default function ImagePage() {
                                   className={cn(
                                     "flex items-center gap-3 w-full px-3 py-2.5 text-sm transition-colors text-left",
                                     selectedModel === model.id
-                                      ? "bg-brand/10 text-brand"
+                                      ? "bg-surface-card text-text-primary font-medium shadow-sm"
                                       : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                                   )}
                                 >
@@ -707,7 +781,7 @@ export default function ImagePage() {
                                     className={cn(
                                       "flex flex-col items-center gap-1 px-1 py-2 rounded-lg border text-[10px] transition-all duration-200",
                                       active
-                                        ? "bg-brand/10 border-brand/40 text-brand"
+                                        ? "bg-surface-card border-surface-border text-text-primary font-medium shadow-sm"
                                         : "bg-surface border-surface-border text-text-secondary hover:border-text-tertiary/50"
                                     )}
                                   >
@@ -726,7 +800,7 @@ export default function ImagePage() {
                                   className={cn(
                                     "flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border text-xs transition-all duration-200",
                                     selectedResolution === res.value
-                                      ? "bg-brand/10 border-brand/40 text-brand"
+                                      ? "bg-surface-card border-surface-border text-text-primary font-medium shadow-sm"
                                       : "bg-surface border-surface-border text-text-secondary hover:border-text-tertiary/50"
                                   )}
                                 >
@@ -749,7 +823,7 @@ export default function ImagePage() {
                           className={cn(
                             "px-2.5 py-1 text-[11px] font-medium transition-all duration-200",
                             selectedQuality === q.value
-                              ? "bg-brand/10 text-brand"
+                              ? "bg-surface-card text-text-primary font-medium shadow-sm"
                               : "text-text-tertiary hover:text-text-secondary"
                           )}
                         >
@@ -787,7 +861,7 @@ export default function ImagePage() {
                                 className={cn(
                                   "flex items-center gap-3 w-full px-3 py-2.5 text-sm transition-colors text-left",
                                   selectedVideoModel === model.id
-                                    ? "bg-brand/10 text-brand"
+                                    ? "bg-surface-card text-text-primary font-medium shadow-sm"
                                     : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                                 )}
                               >
@@ -813,7 +887,6 @@ export default function ImagePage() {
                       <ImageIcon className="w-3.5 h-3.5" />
                       <span>参考图像</span>
                     </button>
-
                     {/* 画幅|清晰度 */}
                     <div className="relative">
                       <button
@@ -841,7 +914,7 @@ export default function ImagePage() {
                                     className={cn(
                                       "flex flex-col items-center gap-1 px-1 py-2 rounded-lg border text-[10px] transition-all duration-200",
                                       active
-                                        ? "bg-brand/10 border-brand/40 text-brand"
+                                        ? "bg-surface-card border-surface-border text-text-primary font-medium shadow-sm"
                                         : "bg-surface border-surface-border text-text-secondary hover:border-text-tertiary/50"
                                     )}
                                   >
@@ -860,7 +933,7 @@ export default function ImagePage() {
                                   className={cn(
                                     "flex-1 flex items-center justify-center px-3 py-2 rounded-lg border text-xs font-semibold transition-all duration-200",
                                     selectedVideoResolution === res
-                                      ? "bg-brand/10 border-brand/40 text-brand"
+                                      ? "bg-surface-card border-surface-border text-text-primary font-medium shadow-sm"
                                       : "bg-surface border-surface-border text-text-secondary hover:border-text-tertiary/50"
                                   )}
                                 >
@@ -897,7 +970,7 @@ export default function ImagePage() {
                                 className={cn(
                                   "flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors text-left",
                                   selectedDuration === d
-                                    ? "bg-brand/10 text-brand"
+                                    ? "bg-surface-card text-text-primary font-medium shadow-sm"
                                     : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                                 )}
                               >

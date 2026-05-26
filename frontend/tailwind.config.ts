@@ -109,8 +109,8 @@ const config: Config = {
           "50%": { boxShadow: "0 0 16px rgba(251,191,36,0.45), 0 0 24px rgba(251,191,36,0.15)" },
         },
         "message-appear": {
-          from: { opacity: "0", transform: "translateY(4px)" },
-          to: { opacity: "1", transform: "translateY(0)" },
+          from: { opacity: "0", transform: "translateY(8px) scale(0.97)" },
+          to: { opacity: "1", transform: "translateY(0) scale(1)" },
         },
         "fade-up": {
           from: { opacity: "0", transform: "translateY(30px)" },
@@ -146,7 +146,7 @@ const config: Config = {
         "accordion-up": "accordion-up 0.2s ease-out",
         "cursor-blink": "cursor-blink 1s infinite",
         "pulse-amber": "pulse-amber 2.5s ease-in-out infinite",
-        "message-appear": "message-appear 200ms ease-out",
+        "message-appear": "message-appear 250ms cubic-bezier(0.16, 1, 0.3, 1)",
         "fade-up": "fade-up 0.6s ease-out forwards",
         "fade-in": "fade-in 0.4s ease-out forwards",
         "float": "float 3s ease-in-out infinite",

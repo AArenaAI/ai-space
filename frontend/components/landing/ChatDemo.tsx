@@ -32,7 +32,7 @@ function ModelBadge({ icon }: { icon: Message["icon"] }) {
   const cfg = icon && configs[icon] ? configs[icon] : configs.chat;
   const Icon = cfg.icon;
   return (
-    <span className={cn("inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium", cfg.bg, cfg.color)}>
+    <span className={cn("inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium", cfg.bg, cfg.color)}>
       <Icon className="w-3 h-3" />
       {cfg.label}
     </span>
@@ -110,7 +110,7 @@ export default function ChatDemo() {
               </div>
               <div
                 className={cn(
-                  "max-w-[80%] px-3 py-2 rounded-xl text-xs leading-relaxed",
+                  "max-w-[80%] px-3 py-2 rounded-xl text-[13px] leading-relaxed",
                   msg.role === "user"
                     ? "bg-brand/10 text-text-primary rounded-br-sm"
                     : "bg-surface-elevated text-text-secondary rounded-bl-sm border border-surface-border"
@@ -144,7 +144,7 @@ export default function ChatDemo() {
         {/* 输入框 */}
         <div className="px-4 py-3 border-t border-surface-border">
           <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-surface-elevated border border-surface-border">
-            <div className="flex-1 text-xs text-text-tertiary">
+            <div className="flex-1 text-[13px] text-text-tertiary">
               输入消息...
             </div>
             <div className="w-6 h-6 rounded-lg bg-brand flex items-center justify-center">

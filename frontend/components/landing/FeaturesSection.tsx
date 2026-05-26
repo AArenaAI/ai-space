@@ -72,10 +72,10 @@ export default function FeaturesSection() {
             <Zap className="w-3.5 h-3.5" />
             核心功能
           </div>
-          <h2 className="text-3xl sm:text-4xl font-bold text-text-primary mb-4">
+          <h2 className="text-3xl sm:text-4xl font-semibold text-text-primary mb-4">
             一个平台，全面覆盖
           </h2>
-          <p className="text-text-secondary max-w-2xl mx-auto">
+          <p className="text-sm sm:text-[15px] text-text-secondary leading-7 max-w-2xl mx-auto">
             从对话到创作，从思考到搜索，AI Space 整合了你需要的所有 AI 工具
           </p>
         </ScrollReveal>
@@ -95,7 +95,7 @@ export default function FeaturesSection() {
                     >
                       <Icon className={`w-5 h-5 ${feat.color}`} />
                     </div>
-                    <h3 className="text-base font-semibold text-text-primary mb-2">
+                    <h3 className="text-[15px] font-semibold text-text-primary mb-2">
                       {feat.title}
                     </h3>
                     <p className="text-sm text-text-secondary leading-relaxed">

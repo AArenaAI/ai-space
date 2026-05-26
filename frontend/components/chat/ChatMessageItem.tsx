@@ -349,15 +349,7 @@ function MessageActions({
       >
         {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
       </button>
-      {onForkCompare && align === "right" && (
-        <button
-          onClick={onForkCompare}
-          className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
-          title="对比"
-        >
-          <Columns2 className="w-3.5 h-3.5" />
-        </button>
-      )}
+
       {showRegenerate && onRegenerate && (
         <button
           onClick={onRegenerate}
@@ -547,8 +539,8 @@ function ChatMessageItemRaw({
             className={cn(
               "w-5 h-5 rounded-md border flex items-center justify-center transition-colors",
               isSelected
-                ? "bg-brand border-brand text-white"
-                : "border-surface-border text-transparent hover:border-brand/50"
+                ? "border-slate-900 bg-slate-900 text-white shadow-sm dark:border-text-primary dark:bg-text-primary dark:text-surface"
+                : "border-surface-border text-transparent hover:border-text-tertiary/50"
             )}
           >
             {isSelected && <SquareCheck className="w-3.5 h-3.5" />}
@@ -574,8 +566,8 @@ function ChatMessageItemRaw({
                     className={cn(
                       "flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] transition-colors",
                       isActive
-                        ? "bg-brand/10 text-brand font-medium"
-                        : "bg-surface-card text-text-secondary hover:bg-surface-elevated"
+                        ? "bg-surface-card text-text-primary font-medium shadow-sm"
+                        : "bg-surface-card text-text-secondary hover:bg-surface-elevated hover:text-text-primary"
                     )}
                   >
                     <div
@@ -698,8 +690,8 @@ function ChatMessageItemRaw({
             className={cn(
               "w-5 h-5 rounded-md border flex items-center justify-center transition-colors",
               isSelected
-                ? "bg-brand border-brand text-white"
-                : "border-surface-border text-transparent hover:border-brand/50"
+                ? "border-slate-900 bg-slate-900 text-white shadow-sm dark:border-text-primary dark:bg-text-primary dark:text-surface"
+                : "border-surface-border text-transparent hover:border-text-tertiary/50"
             )}
           >
             {isSelected && <SquareCheck className="w-3.5 h-3.5" />}

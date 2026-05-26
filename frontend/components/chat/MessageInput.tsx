@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Brain, Square, Search, Columns2, Paperclip, X, FileText, Wrench, SlidersHorizontal, MessageSquarePlus, Check } from "lucide-react";
+import { Send, Brain, Square, Search, Paperclip, X, FileText, Wrench, SlidersHorizontal, MessageSquarePlus, Check, Zap, Crown, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ChatModel } from "@/hooks/useChat";
 import { Template } from "@/hooks/useTemplates";
@@ -11,6 +11,28 @@ import { useI18n } from "@/lib/i18n";
 
 const TEXTAREA_MIN_HEIGHT = 92;
 const TEXTAREA_MAX_HEIGHT = 180;
+
+const SUPPORTED_FILE_EXTENSIONS = new Set([
+  ".pdf",
+  ".xla", ".xlb", ".xlc", ".xlm", ".xls", ".xlsx", ".xlt", ".xlw", ".csv", ".tsv", ".iif",
+  ".doc", ".docx", ".dot", ".odt", ".rtf",
+  ".pot", ".ppa", ".pps", ".ppt", ".pptx", ".pwz", ".wiz",
+  ".asm", ".bat", ".c", ".cc", ".conf", ".cpp", ".css", ".cxx", ".def", ".dic", ".eml", ".h", ".hh",
+  ".htm", ".html", ".ics", ".ifb", ".in", ".js", ".json", ".ksh", ".list", ".log", ".markdown", ".md",
+  ".mht", ".mhtml", ".mime", ".mjs", ".nws", ".pl", ".py", ".rst", ".s", ".sql", ".srt", ".text",
+  ".txt", ".vcf", ".vtt", ".xml", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java", ".php", ".rb",
+  ".swift", ".kt", ".scala", ".r", ".tex", ".yaml", ".yml", ".toml", ".sh", ".bash",
+]);
+const SUPPORTED_FILE_ACCEPT = Array.from(SUPPORTED_FILE_EXTENSIONS).sort().join(",");
+
+function getFileExtension(filename: string) {
+  const idx = filename.lastIndexOf(".");
+  return idx >= 0 ? filename.slice(idx).toLowerCase() : "";
+}
+
+function isSupportedUploadFile(file: File) {
+  return SUPPORTED_FILE_EXTENSIONS.has(getFileExtension(file.name));
+}
 
 export type ReasoningEffort = "light" | "standard" | "extended" | "heavy" | "high" | "max";
 export type ReasoningMode = "fast" | "think" | "expert";
@@ -91,7 +113,6 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
   const [reasoningOpen, setReasoningOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [showFileTip, setShowFileTip] = useState(false);
-  const [showCompareTip, setShowCompareTip] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const dragCounter = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -282,6 +303,11 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
   };
 
   const uploadSingleFile = async (file: File) => {
+    if (!isSupportedUploadFile(file)) {
+      toast.warning(`暂不支持 ${getFileExtension(file.name) || "该"} 文件格式`);
+      return;
+    }
+
     setUploading(true);
     try {
       const formData = new FormData();
@@ -383,10 +409,10 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     localStorage.setItem("reasoning-effort", next.effort);
   }, [currentModel?.id, reasoningMode]);
 
-  const reasoningModes: { key: ReasoningMode; label: string; title: string }[] = [
-    { key: "fast", label: "快速", title: "快速模式：无思考" },
-    { key: "think", label: "思考", title: "思考模式：使用当前模型的正常思考强度" },
-    { key: "expert", label: "专家", title: "专家模式：使用当前模型最高思考强度，GPT 5.5 Pro 使用次高" },
+  const reasoningModes: { key: ReasoningMode; label: string; title: string; icon: React.ReactNode }[] = [
+    { key: "fast", label: "快速", title: "闪电响应，即刻出答案", icon: <Zap className="h-3.5 w-3.5" /> },
+    { key: "think", label: "思考", title: "深度推理，片刻即达极致答案", icon: <Brain className="h-3.5 w-3.5" /> },
+    { key: "expert", label: "专家", title: "专家级推演，穷尽模型顶尖能力", icon: <Crown className="h-3.5 w-3.5" /> },
   ];
   const currentReasoningMode = reasoningModes.find((mode) => mode.key === reasoningMode) || reasoningModes[0];
 
@@ -396,36 +422,6 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
         { /* 上方面板：左侧对比/附件 + 右侧模板/新建 */ }
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            {/* 对比模式开关 */}
-            <div className="relative">
-              <button
-                type="button"
-                onClick={onToggleCompare}
-                onMouseEnter={() => setShowCompareTip(true)}
-                onMouseLeave={() => setShowCompareTip(false)}
-                aria-label={t("chat.compare")}
-                className={cn(
-                  "flex h-7 w-7 items-center justify-center rounded-lg transition-colors duration-200",
-                  compareMode
-                    ? "bg-amber-500/10 text-amber-400"
-                    : "text-text-tertiary hover:bg-surface-card hover:text-text-secondary"
-                )}
-              >
-                <Columns2 className="w-3.5 h-3.5" />
-              </button>
-              <div
-                className={cn(
-                  "absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-[180px] z-[90] pointer-events-none transition-opacity duration-200",
-                  showCompareTip ? "opacity-100" : "opacity-0"
-                )}
-              >
-                <div className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 shadow-lg text-[12px] leading-relaxed text-text-secondary">
-                  <div className="font-medium text-text-primary">{t("chat.compare")}</div>
-                </div>
-                <div className="absolute left-1/2 -translate-x-1/2 -bottom-1 w-2 h-2 rotate-45 border-r border-b border-surface-border bg-surface-card" />
-              </div>
-            </div>
-
             {/* 文件上传按钮 */}
             <div className="relative">
               <button
@@ -489,7 +485,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                       className={cn(
                         "flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors",
                         isTemplateDisabled
-                          ? "bg-brand-muted text-brand"
+                          ? "bg-surface-card text-text-primary font-medium shadow-sm"
                           : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                       )}
                     >
@@ -511,7 +507,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                           className={cn(
                             "flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors",
                             selectedTemplateId === tpl.id
-                              ? "bg-brand-muted text-brand"
+                              ? "bg-surface-card text-text-primary font-medium shadow-sm"
                               : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                           )}
                         >
@@ -570,18 +566,18 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
               <div className="flex flex-wrap gap-2">
                 {attachedFiles.map((file, idx) => {
                   const status = file.parse_status || "pending";
-                  const statusConfig: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
-                    pending: { color: "text-amber-500", icon: <div className="w-4 h-4 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />, label: t("chat.fileStatusParsing") },
-                    done: { color: "text-emerald-500", icon: <FileText className="w-5 h-5" />, label: t("chat.fileStatusDone") },
-                    error: { color: "text-red-500", icon: <div className="w-4 h-4 rounded-full bg-red-500" />, label: t("chat.fileStatusFailed") },
-                    unsupported: { color: "text-gray-400", icon: <FileText className="w-5 h-5" />, label: t("chat.fileStatusUnsupported") },
+                  const statusConfig: Record<string, { icon: React.ReactNode; label: string }> = {
+                    pending: { icon: <div className="w-3.5 h-3.5 border-2 border-text-tertiary border-t-transparent rounded-full animate-spin" />, label: t("chat.fileStatusParsing") },
+                    done: { icon: <FileText className="w-4 h-4 text-text-tertiary" />, label: t("chat.fileStatusDone") },
+                    error: { icon: <div className="w-3.5 h-3.5 rounded-full bg-red-400" />, label: t("chat.fileStatusFailed") },
+                    unsupported: { icon: <FileText className="w-4 h-4 text-text-tertiary" />, label: t("chat.fileStatusUnsupported") },
                   };
                   const cfg = statusConfig[status] || statusConfig.pending;
                   const isEmptyContent = status === "done" && !file.content?.trim();
                   return (
                     <div
                       key={idx}
-                      className="flex items-center gap-2.5 rounded-xl border border-surface-border bg-surface-elevated px-3 py-2.5 text-[13px] transition-all"
+                      className="flex items-center gap-2 rounded-full border border-surface-border/30 bg-surface-card px-3 py-1.5 text-[13px] transition-all"
                       title={
                         file.error_message
                           ? `${t("chat.fileParseFailed")}: ${file.error_message}`
@@ -590,17 +586,12 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                           : cfg.label
                       }
                     >
-                      <div className={cn("shrink-0", cfg.color)}>{cfg.icon}</div>
-                      <div className="flex flex-col min-w-0">
-                        <span className="max-w-[180px] truncate font-medium text-text-primary">{file.filename}</span>
-                        <span className="text-[11px] text-text-tertiary">
-                          {file.error_message ? t("chat.fileParseFailed") : isEmptyContent ? t("chat.emptyFile") : cfg.label}
-                        </span>
-                      </div>
+                      <div className="shrink-0">{cfg.icon}</div>
+                      <span className={cn("max-w-[180px] truncate text-text-primary", status === "error" && "text-red-400")}>{file.filename}</span>
                       <button
                         type="button"
                         onClick={() => removeAttachedFile(idx)}
-                        className="flex items-center justify-center w-5 h-5 rounded-full hover:bg-black/5 transition-colors shrink-0"
+                        className="flex items-center justify-center w-4 h-4 rounded-full hover:bg-black/5 transition-colors shrink-0 ml-0.5"
                       >
                         <X className="w-3 h-3 text-text-tertiary" />
                       </button>
@@ -635,7 +626,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                   className={cn(
                     "flex items-center gap-1.5 pl-3 pr-3 py-1.5 text-[13px] font-medium rounded-full border transition-all duration-200",
                     searchEnabled
-                      ? "border-brand/40 bg-brand-muted text-brand"
+                      ? "border-surface-border bg-surface-card text-text-primary shadow-sm"
                       : "border-surface-border bg-transparent text-text-tertiary hover:text-text-secondary hover:border-text-tertiary/50"
                   )}
                 >
@@ -657,14 +648,14 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                         className={cn(
                           "flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg transition-colors",
                           searchEnabled
-                            ? "text-blue-400 bg-blue-500/10"
+                            ? "bg-surface-card text-text-primary font-medium shadow-sm"
                             : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                         )}
                       >
                         <span className={cn(
                           "w-4 h-4 rounded border-2 flex items-center justify-center transition-colors",
                           searchEnabled
-                            ? "bg-blue-500 border-blue-500"
+                            ? "bg-slate-900 border-slate-900 dark:bg-text-primary dark:border-text-primary"
                             : "border-text-tertiary/40"
                         )}>
                           {searchEnabled && <span className="text-white text-[10px] font-bold">✓</span>}
@@ -683,47 +674,61 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="relative" ref={reasoningRef} onMouseEnter={handleReasoningEnter} onMouseLeave={handleReasoningLeave}>
+              <div className="relative mr-1" ref={reasoningRef}>
                 <button
                   type="button"
                   onClick={() => setReasoningOpen((open) => !open)}
-                  title={currentReasoningMode.title}
                   className={cn(
-                    "flex h-8 items-center gap-1.5 rounded-xl border px-3 text-[12px] font-medium transition-all duration-200",
+                    "flex items-center gap-1.5 pl-3 pr-2.5 py-1.5 text-[13px] font-medium rounded-full transition-colors duration-200",
                     reasoning.enabled
-                      ? "border-brand/40 bg-brand-muted text-brand"
-                      : "border-surface-border bg-surface-elevated text-text-tertiary hover:text-text-secondary hover:border-text-tertiary/50"
+                      ? "bg-surface-card text-text-primary hover:bg-surface-elevated"
+                      : "bg-surface-card text-text-secondary hover:text-text-primary hover:bg-surface-elevated"
                   )}
                 >
-                  <Brain className="h-3.5 w-3.5" />
+                  {currentReasoningMode.icon}
                   <span>{currentReasoningMode.label}</span>
+                  <ChevronDown className="w-3.5 h-3.5 opacity-60" />
                 </button>
 
                 {reasoningOpen && (
-                  <div className="absolute bottom-full right-0 mb-2 w-44 rounded-xl border border-surface-border bg-surface-elevated shadow-xl z-[90] py-1 animate-fade-in">
-                    {reasoningModes.map((mode) => {
-                      const active = reasoningMode === mode.key;
-                      return (
-                        <button
-                          key={mode.key}
-                          type="button"
-                          onClick={() => selectReasoningMode(mode.key)}
-                          title={mode.title}
-                          className={cn(
-                            "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors",
-                            active
-                              ? "bg-brand-muted text-brand"
-                              : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
-                          )}
-                        >
-                          <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-                            {active && <Check className="h-3.5 w-3.5" />}
-                          </span>
-                          <Brain className={cn("h-3.5 w-3.5", mode.key === "fast" && "opacity-40")} />
-                          <span>{mode.label}</span>
-                        </button>
-                      );
-                    })}
+                  <div className="absolute bottom-full right-0 mb-2 w-64 rounded-xl border border-surface-border bg-surface-elevated shadow-xl z-[90] py-2 animate-fade-in overflow-hidden">
+                    <div className="px-3 py-1.5 text-[11px] font-medium text-text-tertiary uppercase tracking-wider border-b border-surface-border mb-1">
+                      选择思考强度
+                    </div>
+                    <div className="px-1 space-y-1">
+                      {reasoningModes.map((mode) => {
+                        const active = reasoningMode === mode.key;
+                        return (
+                          <button
+                            key={mode.key}
+                            type="button"
+                            onClick={() => selectReasoningMode(mode.key)}
+                            className={cn(
+                              "group flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
+                              active
+                                ? "bg-surface-card text-text-primary"
+                                : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
+                            )}
+                          >
+                            <span className={cn(
+                              "flex h-8 w-8 shrink-0 items-center justify-center rounded-full mt-0.5 transition-colors",
+                              active ? "bg-brand/10 text-brand" : "bg-surface-card text-text-tertiary group-hover:bg-brand/25 group-hover:text-brand"
+                            )}>
+                              {mode.icon}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className={cn("text-sm", active && "font-medium")}>{mode.label}</span>
+                                {active && <Check className="w-3.5 h-3.5 text-text-primary shrink-0" />}
+                              </div>
+                              <p className="text-[11px] text-text-tertiary mt-0.5 leading-snug">
+                                {mode.title}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
               </div>
@@ -762,7 +767,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
         <input
           ref={fileInputRef}
           type="file"
-          accept=".txt,.md,.json,.csv,.js,.ts,.go,.py,.java,.cpp,.c,.h,.hpp,.rs,.html,.css,.xml,.yaml,.yml,.log,.sql,.sh,.bash,.tsx,.jsx,.vue,.php,.rb,.swift,.kt,.scala,.r,.tex,.jpg,.jpeg,.png,.gif,.webp,.bmp,.pdf"
+          accept={currentModel?.file_accept || SUPPORTED_FILE_ACCEPT}
           onChange={handleFileSelect}
           className="hidden"
         />

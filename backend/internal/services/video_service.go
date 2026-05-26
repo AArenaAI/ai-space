@@ -33,8 +33,8 @@ type CreateVideoTaskRequest struct {
 	GenerateAudio   bool
 	Watermark       bool
 	ReferenceImages []string // 可选的参考图 URL
-	ReferenceVideos []string // 可选的参考视频 URL（当前 SDK 分支暂不下发，仅保留 API 兼容）
-	ReferenceAudios []string // 可选的参考音频 URL（当前 SDK 分支暂不下发，仅保留 API 兼容）
+	ReferenceVideos []string // 可选的参考视频 URL
+	ReferenceAudios []string // 可选的参考音频 URL（当前暂不下发，仅保留 API 兼容）
 }
 
 // CreateVideoTaskResult 创建视频任务返回结果
@@ -52,14 +52,38 @@ func (s *VideoService) CreateVideoTask(ctx context.Context, req CreateVideoTaskR
 		},
 	}
 
-	// 添加参考图
-	for _, url := range req.ReferenceImages {
+	// 添加参考图。
+	// 1 张图：强约束为首帧；2 张图：强约束为首尾帧；3 张及以上：按官方多模态参考图处理。
+	imageRole := func(index, total int) string {
+		if total == 1 {
+			return "first_frame"
+		}
+		if total == 2 {
+			if index == 0 {
+				return "first_frame"
+			}
+			return "last_frame"
+		}
+		return "reference_image"
+	}
+	for index, url := range req.ReferenceImages {
 		content = append(content, &model.CreateContentGenerationContentItem{
-			Type: model.ContentGenerationContentItemType("image_url"),
+			Type: model.ContentGenerationContentItemTypeImage,
 			ImageURL: &model.ImageURL{
 				URL: url,
 			},
-			Role: volcengine.String("reference_image"),
+			Role: volcengine.String(imageRole(index, len(req.ReferenceImages))),
+		})
+	}
+
+	// 添加参考视频
+	for _, url := range req.ReferenceVideos {
+		content = append(content, &model.CreateContentGenerationContentItem{
+			Type: model.ContentGenerationContentItemTypeVideo,
+			VideoURL: &model.VideoUrl{
+				Url: url,
+			},
+			Role: volcengine.String("reference_video"),
 		})
 	}
 

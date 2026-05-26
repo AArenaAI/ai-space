@@ -289,7 +289,7 @@ export default function SettingsPage() {
                 className={cn(
                   "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-base transition-all",
                   activeTab === item.id
-                    ? "bg-brand/10 text-brand font-medium"
+                    ? "bg-surface-card text-text-primary font-medium shadow-sm"
                     : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                 )}
               >

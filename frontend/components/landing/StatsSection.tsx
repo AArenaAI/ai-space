@@ -15,10 +15,10 @@ export default function StatsSection() {
     <section id="stats" className="py-20 lg:py-24 relative">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <ScrollReveal className="text-center mb-12">
-          <h2 className="text-3xl sm:text-4xl font-bold text-text-primary mb-4">
+          <h2 className="text-3xl sm:text-4xl font-semibold text-text-primary mb-4">
             数据说话
           </h2>
-          <p className="text-text-secondary max-w-xl mx-auto">
+          <p className="text-sm sm:text-[15px] text-text-secondary leading-7 max-w-xl mx-auto">
             AI Space 正在为更多用户提供高效的 AI 服务
           </p>
         </ScrollReveal>
@@ -32,7 +32,7 @@ export default function StatsSection() {
                   <div className="w-12 h-12 rounded-xl bg-surface-elevated border border-surface-border flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
                     <Icon className={`w-5 h-5 ${s.color}`} />
                   </div>
-                  <div className="text-3xl font-bold text-text-primary mb-1">{s.value}</div>
+                  <div className="text-3xl font-semibold text-text-primary mb-1">{s.value}</div>
                   <div className="text-sm text-text-secondary">{s.label}</div>
                 </div>
               </ScrollReveal>

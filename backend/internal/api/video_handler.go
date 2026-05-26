@@ -58,6 +58,7 @@ func (h *VideoHandler) CreateVideo(c *gin.Context) {
 		GenerateAudio   bool     `json:"generate_audio"`
 		Watermark       bool     `json:"watermark"`
 		ReferenceImages []string `json:"reference_image_urls"`
+		ReferenceVideos []string `json:"reference_video_urls"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -68,22 +69,32 @@ func (h *VideoHandler) CreateVideo(c *gin.Context) {
 	if modelID == "" {
 		modelID = "doubao-seedance-2-0-fast-260128"
 	}
-	ratio, duration, resolution, err := normalizeVideoGenerationParams(modelID, req.Ratio, req.Resolution, req.Duration, len(req.ReferenceImages))
+	ratio, duration, resolution, err := normalizeVideoGenerationParams(modelID, req.Ratio, req.Resolution, req.Duration, len(req.ReferenceImages), len(req.ReferenceVideos))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	createReq := services.CreateVideoTaskRequest{
-		Model:           modelID,
-		Prompt:          req.Prompt,
-		Ratio:           ratio,
-		Resolution:      resolution,
-		Duration:        duration,
-		GenerateAudio:   req.GenerateAudio,
-		Watermark:       req.Watermark,
-		ReferenceImages: filterAndResolveURLs(req.ReferenceImages),
+		Model:         modelID,
+		Prompt:        req.Prompt,
+		Ratio:         ratio,
+		Resolution:    resolution,
+		Duration:      duration,
+		GenerateAudio: req.GenerateAudio,
+		Watermark:     req.Watermark,
 	}
+	createReq.ReferenceImages, err = resolveVideoReferenceURLs(h.db, h.cfg, userID, req.ReferenceImages, "image")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	createReq.ReferenceVideos, err = resolveVideoReferenceURLs(h.db, h.cfg, userID, req.ReferenceVideos, "video")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	log.Printf("[Video] create task refs images=%d videos=%d model=%s", len(createReq.ReferenceImages), len(createReq.ReferenceVideos), modelID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -228,8 +239,8 @@ var officialVideoDurations = map[int64]bool{
 }
 
 var standardSeedanceResolutions = map[string]bool{
-	"480p": true,
-	"720p": true,
+	"480p":  true,
+	"720p":  true,
 	"1080p": true,
 }
 
@@ -238,7 +249,7 @@ var fastSeedanceResolutions = map[string]bool{
 	"720p": true,
 }
 
-func normalizeVideoGenerationParams(modelID string, ratio string, resolution string, duration int64, referenceImageCount int) (string, int64, string, error) {
+func normalizeVideoGenerationParams(modelID string, ratio string, resolution string, duration int64, referenceImageCount int, referenceVideoCount int) (string, int64, string, error) {
 	if ratio == "" || ratio == "auto" {
 		ratio = "adaptive"
 	}
@@ -255,6 +266,9 @@ func normalizeVideoGenerationParams(modelID string, ratio string, resolution str
 
 	if referenceImageCount > 9 {
 		return "", 0, "", fmt.Errorf("reference images must not exceed 9")
+	}
+	if referenceVideoCount > 3 {
+		return "", 0, "", fmt.Errorf("reference videos must not exceed 3")
 	}
 
 	if resolution == "" {

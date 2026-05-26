@@ -62,10 +62,10 @@ export default function ModelsSection() {
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-500 text-xs font-medium mb-4">
             模型聚合
           </div>
-          <h2 className="text-3xl sm:text-4xl font-bold text-text-primary mb-4">
+          <h2 className="text-3xl sm:text-4xl font-semibold text-text-primary mb-4">
             10+ 顶级模型，一站式调用
           </h2>
-          <p className="text-text-secondary max-w-2xl mx-auto">
+          <p className="text-sm sm:text-[15px] text-text-secondary leading-7 max-w-2xl mx-auto">
             无需切换多个平台，一个入口即可访问全球领先的 AI 模型
           </p>
         </ScrollReveal>
@@ -78,11 +78,11 @@ export default function ModelsSection() {
                 <div className="relative">
                   <div className="flex items-center justify-between mb-3">
                     <div>
-                      <h3 className="text-base font-semibold text-text-primary">{model.name}</h3>
+                      <h3 className="text-[15px] font-semibold text-text-primary">{model.name}</h3>
                       <p className="text-xs text-text-tertiary">{model.provider}</p>
                     </div>
                     <div className="w-8 h-8 rounded-lg bg-surface-elevated border border-surface-border flex items-center justify-center">
-                      <span className="text-xs font-bold text-brand">✓</span>
+                      <span className="text-xs font-semibold text-brand">✓</span>
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-1.5">

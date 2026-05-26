@@ -328,7 +328,7 @@ function ImageEditContent() {
             className={cn(
               "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200",
               historyOpen
-                ? "bg-brand/10 text-brand"
+                ? "bg-surface-card text-text-primary font-medium shadow-sm"
                 : "text-text-secondary hover:text-text-primary hover:bg-surface-card"
             )}
           >

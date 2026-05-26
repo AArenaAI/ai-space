@@ -172,7 +172,7 @@ export default function ModelSelector({
             {model.name}
           </span>
           {selected.id === model.id && (
-            <Check className="w-3.5 h-3.5 text-brand shrink-0" />
+            <Check className="w-3.5 h-3.5 text-text-primary shrink-0" />
           )}
         </div>
         <p className="text-[11px] text-text-tertiary mt-0.5 leading-snug">
@@ -253,7 +253,7 @@ export default function ModelSelector({
                       />
                       <span className="text-xs truncate">{m.name}</span>
                       {selected.id === m.id && (
-                        <Check className="w-3 h-3 text-brand shrink-0 ml-auto" />
+                        <Check className="w-3 h-3 text-text-primary shrink-0 ml-auto" />
                       )}
                     </button>
                   ))}

@@ -378,44 +378,7 @@ func supportsNativeFileInput(model string) bool {
 }
 
 func fileInputType(file models.File) string {
-	ext := strings.ToLower(filepath.Ext(file.Filename))
-	switch ext {
-	case ".pdf":
-		return "pdf"
-	case ".doc", ".docx":
-		return "word"
-	case ".xls", ".xlsx":
-		return "excel"
-	case ".ppt", ".pptx":
-		return "ppt"
-	case ".csv":
-		return "csv"
-	case ".txt", ".md":
-		return "txt"
-	case ".go", ".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".cpp", ".c", ".h", ".hpp", ".rs", ".php", ".rb", ".swift", ".kt", ".sql", ".sh", ".json", ".yaml", ".yml", ".toml", ".xml", ".html", ".css":
-		return "code"
-	default:
-		mimeType := strings.ToLower(strings.TrimSpace(file.MimeType))
-		if strings.Contains(mimeType, "pdf") {
-			return "pdf"
-		}
-		if strings.Contains(mimeType, "word") || strings.Contains(mimeType, "officedocument.wordprocessingml") {
-			return "word"
-		}
-		if strings.Contains(mimeType, "spreadsheet") || strings.Contains(mimeType, "excel") {
-			return "excel"
-		}
-		if strings.Contains(mimeType, "presentation") || strings.Contains(mimeType, "powerpoint") {
-			return "ppt"
-		}
-		if strings.Contains(mimeType, "csv") {
-			return "csv"
-		}
-		if strings.HasPrefix(mimeType, "text/") {
-			return "txt"
-		}
-		return ""
-	}
+	return modelmeta.FileInputType(file.Filename, file.MimeType)
 }
 
 func nativeFileMimeType(file models.File) string {
@@ -423,38 +386,7 @@ func nativeFileMimeType(file models.File) string {
 	if mimeType != "" && mimeType != "application/octet-stream" {
 		return mimeType
 	}
-	switch strings.ToLower(filepath.Ext(file.Filename)) {
-	case ".pdf":
-		return "application/pdf"
-	case ".doc":
-		return "application/msword"
-	case ".docx":
-		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-	case ".xls":
-		return "application/vnd.ms-excel"
-	case ".xlsx":
-		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-	case ".ppt":
-		return "application/vnd.ms-powerpoint"
-	case ".pptx":
-		return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-	case ".csv":
-		return "text/csv"
-	case ".txt":
-		return "text/plain"
-	case ".md":
-		return "text/markdown"
-	case ".json":
-		return "application/json"
-	case ".html":
-		return "text/html"
-	case ".xml":
-		return "application/xml"
-	case ".yaml", ".yml":
-		return "application/yaml"
-	default:
-		return "text/plain"
-	}
+	return modelmeta.MimeTypeForFile(file.Filename)
 }
 
 func mimeTypeFromImageExt(filename string) string {

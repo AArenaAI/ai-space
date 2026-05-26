@@ -4,13 +4,16 @@ package modelmeta
 // Capabilities 表示模型能执行的功能（chat/image/search/reasoning/video 等）。
 // SupportedInputs 表示模型原生支持的输入类型（text/image/pdf/word/excel/ppt/csv/txt/code/video/audio 等）。
 type ModelInfo struct {
-	ID              string   `json:"id"`
-	Name            string   `json:"name"`
-	Provider        string   `json:"provider"`
-	Description     string   `json:"description"`
-	Color           string   `json:"color"`
-	Capabilities    []string `json:"capabilities"`     // 功能：chat | image | search | reasoning | video
-	SupportedInputs []string `json:"supported_inputs"` // 输入：text | image | pdf | word | excel | ppt | csv | txt | code | video | audio
+	ID                      string   `json:"id"`
+	Name                    string   `json:"name"`
+	Provider                string   `json:"provider"`
+	Description             string   `json:"description"`
+	Color                   string   `json:"color"`
+	Capabilities            []string `json:"capabilities"`     // 功能：chat | image | search | reasoning | video
+	SupportedInputs         []string `json:"supported_inputs"` // 输入：text | image | pdf | word | excel | ppt | csv | txt | code | video | audio
+	SupportedFileExtensions []string `json:"supported_file_extensions,omitempty"`
+	SupportedFileMimeTypes  []string `json:"supported_file_mime_types,omitempty"`
+	FileAccept              string   `json:"file_accept,omitempty"`
 }
 
 var SupportedModels = []ModelInfo{
@@ -55,10 +58,17 @@ func ModelsByCapability(capability string) []ModelInfo {
 	var result []ModelInfo
 	for _, m := range SupportedModels {
 		if ModelHasCapability(m, capability) {
-			result = append(result, m)
+			result = append(result, WithFileSupport(m))
 		}
 	}
 	return result
+}
+
+func WithFileSupport(model ModelInfo) ModelInfo {
+	model.SupportedFileExtensions = FileExtensionsForInputs(model.SupportedInputs)
+	model.SupportedFileMimeTypes = FileMimeTypesForInputs(model.SupportedInputs)
+	model.FileAccept = FileAcceptForInputs(model.SupportedInputs)
+	return model
 }
 
 func ModelHasCapability(model ModelInfo, capability string) bool {
