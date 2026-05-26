@@ -303,7 +303,8 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
 
   const uploadSingleFile = async (file: File) => {
     if (!isSupportedUploadFile(file)) {
-      toast.warning(`暂不支持 ${getFileExtension(file.name) || "该"} 文件格式`);
+      const ext = getFileExtension(file.name);
+        toast.warning(ext ? t("messageInput.search.fileFormat").replace("{ext}", ext) : t("messageInput.unsupportedFile"));
       return;
     }
 
@@ -409,9 +410,9 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
   }, [currentModel?.id, reasoningMode]);
 
   const reasoningModes: { key: ReasoningMode; label: string; title: string; icon: React.ReactNode }[] = [
-    { key: "fast", label: "快速", title: "闪电响应，即刻出答案", icon: <Zap className="h-3.5 w-3.5" /> },
-    { key: "think", label: "思考", title: "深度推理，片刻即达极致答案", icon: <Brain className="h-3.5 w-3.5" /> },
-    { key: "expert", label: "专家", title: "专家级推演，穷尽模型顶尖能力", icon: <Crown className="h-3.5 w-3.5" /> },
+    { key: "fast", label: t("messageInput.thinking.fast"), title: t("messageInput.thinking.fastDesc"), icon: <Zap className="h-3.5 w-3.5" /> },
+    { key: "think", label: t("messageInput.thinking.think"), title: t("messageInput.thinking.thinkDesc"), icon: <Brain className="h-3.5 w-3.5" /> },
+    { key: "expert", label: t("messageInput.thinking.expert"), title: t("messageInput.thinking.expertDesc"), icon: <Crown className="h-3.5 w-3.5" /> },
   ];
   const currentReasoningMode = reasoningModes.find((mode) => mode.key === reasoningMode) || reasoningModes[0];
 
@@ -468,15 +469,15 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
               <button
                 type="button"
                 className="flex h-7 w-7 items-center justify-center rounded-lg text-text-tertiary transition-colors duration-200 hover:bg-surface-card hover:text-text-secondary"
-                title={selectedTemplate ? `回答模板：${selectedTemplate.name}` : isTemplateDisabled ? "不使用模板" : "选择回答模板"}
-                aria-label={selectedTemplate ? `回答模板：${selectedTemplate.name}` : isTemplateDisabled ? "不使用模板" : "选择回答模板"}
+                title={selectedTemplate ? `${t("messageInput.template.tooltip")}：${selectedTemplate.name}` : isTemplateDisabled ? t("messageInput.template.disabled") : t("messageInput.template.select")}
+                aria-label={selectedTemplate ? `${t("messageInput.template.tooltip")}：${selectedTemplate.name}` : isTemplateDisabled ? t("messageInput.template.disabled") : t("messageInput.template.select")}
               >
                 <SlidersHorizontal className="h-3.5 w-3.5" />
               </button>
 
               {templateOpen && (
                 <div className="absolute bottom-full right-0 z-[90] mb-2 w-56 overflow-hidden rounded-xl border border-surface-border bg-surface-elevated py-1 shadow-xl animate-fade-in">
-                  <div className="px-3 py-2 text-xs font-medium text-text-tertiary">选择回答模板</div>
+                  <div className="px-3 py-2 text-xs font-medium text-text-tertiary">{t("messageInput.template.select")}</div>
                   <div className="px-1 pb-1">
                     <button
                       type="button"
@@ -491,11 +492,11 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                       <span className="flex h-4 w-4 shrink-0 items-center justify-center">
                         {isTemplateDisabled && <Check className="h-3.5 w-3.5" />}
                       </span>
-                      <span className="min-w-0 flex-1 truncate">不使用模板</span>
+                      <span className="min-w-0 flex-1 truncate">{t("messageInput.template.none")}</span>
                     </button>
                   </div>
                   {templates.length === 0 ? (
-                    <div className="px-3 pb-3 pt-1 text-sm text-text-tertiary">暂无回答模板</div>
+                    <div className="px-3 pb-3 pt-1 text-sm text-text-tertiary">{t("messageInput.template.empty")}</div>
                   ) : (
                     <div className="max-h-64 overflow-y-auto border-t border-surface-border/60 px-1 pb-1 pt-1">
                       {templates.map((tpl) => (
@@ -514,7 +515,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                             {selectedTemplateId === tpl.id && <Check className="h-3.5 w-3.5" />}
                           </span>
                           <span className="min-w-0 flex-1 truncate">{tpl.name}</span>
-                          {tpl.is_default && <span className="shrink-0 rounded-full bg-surface-card px-1.5 py-0.5 text-[10px] text-text-tertiary">默认</span>}
+                          {tpl.is_default && <span className="shrink-0 rounded-full bg-surface-card px-1.5 py-0.5 text-[10px] text-text-tertiary">{t("messageInput.template.default")}</span>}
                         </button>
                       ))}
                     </div>

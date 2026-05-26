@@ -13,30 +13,25 @@ type TemplateHandler struct {
 	db *gorm.DB
 }
 
+const legacyDefaultTemplatePrefix = "你是一个专业的AI助手。确保回复清晰、准确、完整。在适当情况下使用 Markdown 格式（标题、列表、代码块等）来增强可读性。"
+
+func nonLegacyTemplateQuery(db *gorm.DB) *gorm.DB {
+	return db.Where("NOT (is_default = ? AND name = ? AND prefix = ?)", true, "默认模板", legacyDefaultTemplatePrefix)
+}
+
 func NewTemplateHandler(db *gorm.DB) *TemplateHandler {
 	return &TemplateHandler{db: db}
 }
 
 // ListTemplates 获取当前用户的模板列表
-// 如果用户没有模板，自动创建默认模板
 func (h *TemplateHandler) ListTemplates(c *gin.Context) {
 	userID := getUserID(c)
 
-	var count int64
-	h.db.Model(&services.Template{}).Where("user_id = ?", userID).Count(&count)
-	if count == 0 {
-		// 自动创建默认模板
-		defaultTpl := services.Template{
-			UserID:    userID,
-			Name:      "默认模板",
-			Prefix:    "你是一个专业的AI助手。确保回复清晰、准确、完整。在适当情况下使用 Markdown 格式（标题、列表、代码块等）来增强可读性。",
-			IsDefault: true,
-		}
-		h.db.Create(&defaultTpl)
-	}
-
 	var templates []services.Template
-	h.db.Where("user_id = ?", userID).Order("is_default desc, created_at desc").Find(&templates)
+	nonLegacyTemplateQuery(h.db).
+		Where("user_id = ?", userID).
+		Order("is_default desc, created_at desc").
+		Find(&templates)
 
 	c.JSON(http.StatusOK, templates)
 }

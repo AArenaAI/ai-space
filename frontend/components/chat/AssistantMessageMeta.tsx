@@ -4,7 +4,8 @@ import { FileText, Lightbulb, Search, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChatModel, Message } from "@/hooks/useChat";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
-import { getActivityLabel, WEB_SEARCH_DONE_LABEL, WEB_SEARCH_LABEL } from "@/lib/chatActivityStatus";
+import { getActivityLabel } from "@/lib/chatActivityStatus";
+import { useI18n } from "@/lib/i18n";
 
 type ActivityStatus = NonNullable<Message["activityStatus"]>;
 type SearchStatus = Message["searchStatus"];
@@ -41,22 +42,22 @@ function coerceActivityStatus(activity?: ActivityStatus | RealtimeActivityStatus
   return { kind, status, label: activity.label };
 }
 
-function normalizeActivityStatus(activity?: ActivityStatus | RealtimeActivityStatus): ActivityStatus | undefined {
+function normalizeActivityStatus(t: (key: string) => string, activity?: ActivityStatus | RealtimeActivityStatus): ActivityStatus | undefined {
   const normalized = coerceActivityStatus(activity);
   if (!normalized || normalized.kind === "reasoning") return undefined;
   return {
     ...normalized,
-    label: getActivityLabel(normalized.kind, normalized.status, normalized.label),
+    label: getActivityLabel(t, normalized.kind, normalized.status, normalized.label),
   };
 }
 
-function getSearchStatus(searchStatus?: SearchStatus, searchSources?: unknown[], searchSourcesCount?: number): NormalizedStatus | undefined {
+function getSearchStatus(t: (key: string) => string, searchStatus?: SearchStatus, searchSources?: unknown[], searchSourcesCount?: number): NormalizedStatus | undefined {
   const sourceCount = typeof searchSourcesCount === "number" ? searchSourcesCount : (searchSources?.length || 0);
   if (searchStatus === "searching") {
     return {
       key: "web_search:running",
       kind: "web_search",
-      label: WEB_SEARCH_LABEL,
+      label: t("chat.status.webSearch"),
       tone: "blue",
       active: true,
     };
@@ -65,7 +66,7 @@ function getSearchStatus(searchStatus?: SearchStatus, searchSources?: unknown[],
     return {
       key: "web_search:completed",
       kind: "web_search_done",
-      label: `${WEB_SEARCH_DONE_LABEL}${sourceCount > 0 ? ` · 引用${sourceCount}个来源` : ""}`,
+      label: `${t("chat.status.webSearchDone")}${sourceCount > 0 ? ` · ${t("chat.status.cited")}${sourceCount}${t("chat.status.sources")}` : ""}`,
       tone: "green",
       active: false,
     };
@@ -73,8 +74,8 @@ function getSearchStatus(searchStatus?: SearchStatus, searchSources?: unknown[],
   return undefined;
 }
 
-function getActivityStatus(activity?: ActivityStatus | RealtimeActivityStatus): NormalizedStatus | undefined {
-  const normalized = normalizeActivityStatus(activity);
+function getActivityStatus(t: (key: string) => string, activity?: ActivityStatus | RealtimeActivityStatus): NormalizedStatus | undefined {
+  const normalized = normalizeActivityStatus(t, activity);
   if (!normalized) return undefined;
 
   if (normalized.kind === "reasoning") {
@@ -116,15 +117,15 @@ function getActivityStatus(activity?: ActivityStatus | RealtimeActivityStatus): 
   };
 }
 
-function getUnifiedStatuses(params: {
+function getUnifiedStatuses(t: (key: string) => string, params: {
   activityStatus?: ActivityStatus | RealtimeActivityStatus;
   searchStatus?: SearchStatus;
   searchSources?: unknown[];
   searchSourcesCount?: number;
   isCompleted?: boolean;
 }): NormalizedStatus[] {
-  const activity = getActivityStatus(params.activityStatus);
-  const search = getSearchStatus(params.searchStatus, params.searchSources, params.searchSourcesCount);
+  const activity = getActivityStatus(t, params.activityStatus);
+  const search = getSearchStatus(t, params.searchStatus, params.searchSources, params.searchSourcesCount);
 
   // 合并搜索标签：activity_meta 和 search_meta 同时存在时，只显示一个搜索状态。
   if (activity?.kind === "web_search") {
@@ -152,12 +153,13 @@ function toneClass(tone: NormalizedStatus["tone"]) {
 }
 
 export function AssistantMessageMeta({ msg, isStreaming, model }: { msg: Message; isStreaming: boolean; model?: ChatModel }) {
+  const { t } = useI18n();
   const realtime = useMessageRealtime(isStreaming ? msg.id : "");
   const activityStatus = realtime?.activityStatus ?? msg.activityStatus;
   const searchStatus = realtime?.searchStatus ?? msg.searchStatus;
   const searchSources = realtime?.searchSources ?? msg.searchSources;
   const searchSourcesCount = realtime?.searchSourcesCount ?? msg.searchSourcesCount;
-  const statuses = getUnifiedStatuses({
+  const statuses = getUnifiedStatuses(t, {
     activityStatus,
     searchStatus,
     searchSources,

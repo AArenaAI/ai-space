@@ -73,7 +73,7 @@ export default function BeforeAfterSlider({
       onTouchStart={handleTouchStart}
     >
       {/* Before (底层 - 原始图) */}
-      <div className="relative w-full aspect-[4/3]">
+      <div className="relative w-full aspect-[4/3] max-h-[inherit]">
         <img
           src={beforeImage}
           alt={beforeLabel}

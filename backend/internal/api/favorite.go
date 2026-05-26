@@ -58,16 +58,28 @@ func (h *FavoriteHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "消息不存在"})
 		return
 	}
+	if msg.Role != "assistant" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "只能收藏 AI 回答"})
+		return
+	}
 
-	// 查找对应的用户消息
+	// 查找对应的用户消息（用 id < msg.ID 更可靠，避免 created_at 时序问题）
 	var userMsg models.Message
-	h.db.Where("conversation_id = ? AND role = ? AND created_at <= ?", req.ConvID, "user", msg.CreatedAt).
-		Order("created_at desc, id desc").
-		First(&userMsg)
+	if err := h.db.Where("conversation_id = ? AND role = ? AND id < ?", req.ConvID, "user", msg.ID).
+		Order("id desc").
+		First(&userMsg).Error; err != nil {
+		userMsg.ID = 0
+	}
 
-	// 检查是否已收藏
+	// 检查是否已收藏：对比模式同一轮回答共享 group_id，只允许收藏一次
 	var existing models.MessageFavorite
-	if err := h.db.Where("user_id = ? AND message_id = ?", userID, req.MessageID).First(&existing).Error; err == nil {
+	query := h.db.Where("user_id = ?", userID)
+	if msg.GroupID > 0 {
+		query = query.Where("group_id = ?", msg.GroupID)
+	} else {
+		query = query.Where("message_id = ?", req.MessageID)
+	}
+	if err := query.First(&existing).Error; err == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "已收藏"})
 		return
 	}
@@ -75,6 +87,7 @@ func (h *FavoriteHandler) Create(c *gin.Context) {
 	fav := models.MessageFavorite{
 		UserID:    userID,
 		MessageID: req.MessageID,
+		GroupID:   msg.GroupID,
 		ConvID:    req.ConvID,
 		UserMsgID: userMsg.ID,
 		ModelID:   msg.Model,
@@ -83,6 +96,10 @@ func (h *FavoriteHandler) Create(c *gin.Context) {
 	}
 
 	if err := h.db.Create(&fav).Error; err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			c.JSON(http.StatusConflict, gin.H{"error": "已收藏"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "收藏失败"})
 		return
 	}
@@ -105,7 +122,15 @@ func (h *FavoriteHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := h.db.Where("user_id = ? AND message_id = ?", userID, uint(messageID)).
+	var msg models.Message
+	deleteQuery := h.db.Where("user_id = ?", userID)
+	if err := h.db.First(&msg, uint(messageID)).Error; err == nil && msg.GroupID > 0 {
+		deleteQuery = deleteQuery.Where("group_id = ?", msg.GroupID)
+	} else {
+		deleteQuery = deleteQuery.Where("message_id = ?", uint(messageID))
+	}
+
+	if err := deleteQuery.
 		Delete(&models.MessageFavorite{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "取消收藏失败"})
 		return
@@ -134,9 +159,19 @@ func (h *FavoriteHandler) List(c *gin.Context) {
 	}
 	offset := (page - 1) * pageSize
 
+	keyword := strings.TrimSpace(c.Query("q"))
+
+	// 构建基础查询
 	var favs []models.MessageFavorite
-	if err := h.db.Where("user_id = ?", userID).
-		Order("created_at desc").
+	dbQuery := h.db.Where("user_id = ?", userID)
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		dbQuery = dbQuery.Where(
+			"content LIKE ? OR model_id LIKE ?",
+			like, like,
+		)
+	}
+	if err := dbQuery.Order("created_at desc").
 		Limit(pageSize).Offset(offset).
 		Find(&favs).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取收藏失败"})
@@ -144,7 +179,15 @@ func (h *FavoriteHandler) List(c *gin.Context) {
 	}
 
 	var total int64
-	h.db.Model(&models.MessageFavorite{}).Where("user_id = ?", userID).Count(&total)
+	countQuery := h.db.Model(&models.MessageFavorite{}).Where("user_id = ?", userID)
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		countQuery = countQuery.Where(
+			"content LIKE ? OR model_id LIKE ?",
+			like, like,
+		)
+	}
+	countQuery.Count(&total)
 
 	// 补充对话标题和用户问题
 	convIDs := make(map[uint]bool)
@@ -176,7 +219,7 @@ func (h *FavoriteHandler) List(c *gin.Context) {
 		for id := range userMsgIDs {
 			ids = append(ids, id)
 		}
-		h.db.Where("id IN ?", ids).Find(&msgs)
+		h.db.Where("id IN ? AND role = ?", ids, "user").Find(&msgs)
 		for _, m := range msgs {
 			userQueries[m.ID] = m.Content
 		}
@@ -184,10 +227,6 @@ func (h *FavoriteHandler) List(c *gin.Context) {
 
 	items := make([]FavoriteItem, len(favs))
 	for i, f := range favs {
-		content := f.Content
-		if len(content) > 300 {
-			content = strings.TrimSpace(content[:300]) + "..."
-		}
 		items[i] = FavoriteItem{
 			ID:        f.ID,
 			MessageID: f.MessageID,
@@ -195,7 +234,7 @@ func (h *FavoriteHandler) List(c *gin.Context) {
 			ConvID:    f.ConvID,
 			UserMsgID: f.UserMsgID,
 			ModelID:   f.ModelID,
-			Content:   content,
+			Content:   f.Content,
 			CreatedAt: f.CreatedAt,
 			ConvTitle: convTitles[f.ConvID],
 			UserQuery: userQueries[f.UserMsgID],
@@ -227,9 +266,14 @@ func (h *FavoriteHandler) Check(c *gin.Context) {
 	}
 
 	var count int64
-	h.db.Model(&models.MessageFavorite{}).
-		Where("user_id = ? AND message_id = ?", userID, uint(messageID)).
-		Count(&count)
+	var msg models.Message
+	query := h.db.Model(&models.MessageFavorite{}).Where("user_id = ?", userID)
+	if err := h.db.First(&msg, uint(messageID)).Error; err == nil && msg.GroupID > 0 {
+		query = query.Where("group_id = ?", msg.GroupID)
+	} else {
+		query = query.Where("message_id = ?", uint(messageID))
+	}
+	query.Count(&count)
 
 	c.JSON(http.StatusOK, gin.H{"favorited": count > 0})
 }
@@ -257,10 +301,37 @@ func (h *FavoriteHandler) CheckBatch(c *gin.Context) {
 
 	result := make(map[uint]bool)
 	if len(ids) > 0 {
+		var msgs []models.Message
+		h.db.Select("id, group_id").Where("id IN ?", ids).Find(&msgs)
+		messageGroups := make(map[uint]uint, len(msgs))
+		var groupIDs []uint
+		for _, msg := range msgs {
+			messageGroups[msg.ID] = msg.GroupID
+			if msg.GroupID > 0 {
+				groupIDs = append(groupIDs, msg.GroupID)
+			}
+		}
+
 		var favs []models.MessageFavorite
-		h.db.Select("message_id").Where("user_id = ? AND message_id IN ?", userID, ids).Find(&favs)
+		favQuery := h.db.Select("message_id, group_id").Where("user_id = ? AND message_id IN ?", userID, ids)
+		if len(groupIDs) > 0 {
+			favQuery = h.db.Select("message_id, group_id").Where("user_id = ? AND (message_id IN ? OR group_id IN ?)", userID, ids, groupIDs)
+		}
+		favQuery.Find(&favs)
+		favMessages := make(map[uint]bool, len(favs))
+		favGroups := make(map[uint]bool, len(favs))
 		for _, f := range favs {
-			result[f.MessageID] = true
+			if f.MessageID > 0 {
+				favMessages[f.MessageID] = true
+			}
+			if f.GroupID > 0 {
+				favGroups[f.GroupID] = true
+			}
+		}
+		for _, id := range ids {
+			if favMessages[id] || (messageGroups[id] > 0 && favGroups[messageGroups[id]]) {
+				result[id] = true
+			}
 		}
 	}
 

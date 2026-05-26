@@ -273,6 +273,15 @@ func (s *ImageGenService) GenerateOpenAICompatibleImageStream(ctx context.Contex
 			}
 			continue
 		}
+		// 检测流内的 error 事件（如内容安全过滤）
+		if errObj, ok := event["error"].(map[string]any); ok {
+			code, _ := errObj["code"].(string)
+			msg, _ := errObj["message"].(string)
+			if msg != "" {
+				return "", fmt.Errorf("图片生成 API 错误 (%s): %s", code, msg)
+			}
+			return "", fmt.Errorf("图片生成 API 返回错误事件")
+		}
 		if b64 != "" {
 			finalB64 = b64
 		}
@@ -293,7 +302,7 @@ func (s *ImageGenService) GenerateOpenAICompatibleImageStream(ctx context.Contex
 		}
 		return url, nil
 	}
-	return "", fmt.Errorf("图片生成失败: stream 未返回最终图片")
+	return "", fmt.Errorf("图片生成未完成，可能是提示词包含敏感或不合规内容，请修改后重试")
 }
 
 // --- DashScope 原生实现 ---

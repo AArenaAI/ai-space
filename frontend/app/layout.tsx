@@ -22,6 +22,30 @@ export const metadata: Metadata = {
   },
 };
 
+const preferenceInitScript = `
+(function () {
+  try {
+    var root = document.documentElement;
+    root.classList.add("prefs-pending");
+
+    var savedTheme = localStorage.getItem("theme");
+    var theme = "light";
+    if (savedTheme === "day" || savedTheme === "light") theme = "light";
+    else if (savedTheme === "night" || savedTheme === "dark") theme = "dark";
+    else if (savedTheme === "green") theme = "green";
+    else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) theme = "dark";
+
+    root.classList.remove("light", "dark", "green");
+    root.classList.add(theme);
+
+    var savedLanguage = localStorage.getItem("language");
+    if (savedLanguage) root.lang = savedLanguage;
+  } catch (e) {
+    document.documentElement.classList.remove("prefs-pending");
+  }
+})();
+`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -29,6 +53,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: preferenceInitScript }} />
+      </head>
       <body className="antialiased">
         <I18nProvider>
           <ThemeProvider>
@@ -37,9 +64,21 @@ export default function RootLayout({
             <Toaster
               position="top-center"
               toastOptions={{
-                duration: 3500,
+                duration: 2600,
+                classNames: {
+                  toast:
+                    "rounded-2xl border border-surface-border bg-surface-elevated px-4 py-3 text-text shadow-2xl shadow-black/10 backdrop-blur-xl",
+                  title: "text-sm font-medium text-text",
+                  description: "text-xs text-text-secondary",
+                  icon: "text-brand",
+                  closeButton:
+                    "border-surface-border bg-surface text-text-secondary hover:bg-surface-card hover:text-text",
+                  actionButton:
+                    "rounded-xl bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-hover",
+                  cancelButton:
+                    "rounded-xl bg-surface px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-surface-card",
+                },
               }}
-              closeButton
               richColors={false}
             />
           </ThemeProvider>

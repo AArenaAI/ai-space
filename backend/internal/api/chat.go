@@ -114,6 +114,12 @@ type ChatRequest struct {
 	ContextPolicy FileContextPolicy `json:"context_policy,omitempty"`
 	// 兼容旧前端：旧 file_ids 等同于 message_file_ids
 	FileIDs []string `json:"file_ids,omitempty"`
+	// TextFormat 用于 OpenAI Responses API 的 text.format 结构化输出，仅当非空时生效。
+	TextFormat map[string]any `json:"text_format,omitempty"`
+	// Transient runs the request without creating/saving conversation messages.
+	// Used by document-reader structured artifact generation where the output is
+	// persisted separately and must not appear in the study chat/history.
+	Transient bool `json:"transient,omitempty"`
 }
 
 type CompareRequest struct {
@@ -743,7 +749,9 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 	// 如果有模板 ID，加载模板前缀并注入到 messages 开头
 	if req.TemplateID > 0 {
 		var tpl services.Template
-		if err := h.db.First(&tpl, req.TemplateID).Error; err == nil && tpl.Prefix != "" {
+		if err := nonLegacyTemplateQuery(h.db).
+			Where("id = ? AND user_id = ?", req.TemplateID, userID).
+			First(&tpl).Error; err == nil && tpl.Prefix != "" {
 			// 在 messages 最前面插入 system 消息
 			systemMsg := services.Message{Role: "system", Content: tpl.Prefix}
 			req.Messages = append([]services.Message{systemMsg}, req.Messages...)
@@ -774,7 +782,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 	// ========== 保存消息与会话 ==========
 	// 如果没有 conversation_id，创建新会话（匿名用户也需要保存以便统计额度和历史文件复用）
 	conversationID := req.ConversationID
-	if conversationID == 0 {
+	if conversationID == 0 && !req.Transient {
 		lastUserQuery := lastUserContent(req.Messages)
 		title := lastUserQuery
 		if len(title) > 20 {
@@ -822,9 +830,11 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		)
 
 		// 保存文件与会话的关联：message_files + context_files 都进入 conversation_files 池
-		allFiles := appendUniqueFiles(nil, filePlan.MessageFiles...)
-		allFiles = appendUniqueFiles(allFiles, filePlan.ContextFiles...)
-		h.upsertConversationFiles(req.ConversationID, allFiles)
+		if !req.Transient && req.ConversationID > 0 {
+			allFiles := appendUniqueFiles(nil, filePlan.MessageFiles...)
+			allFiles = appendUniqueFiles(allFiles, filePlan.ContextFiles...)
+			h.upsertConversationFiles(req.ConversationID, allFiles)
+		}
 	}
 	// ========== 文件上下文注入结束 ==========
 
@@ -872,6 +882,37 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		useSearchTool = false
 	} else {
 		req.Messages, searchSources, useSearchTool = h.preprocessSearch(req.Messages, req.Model, req.Search, c.ClientIP())
+	}
+
+	if req.Transient {
+		if req.Stream {
+			resp, err := h.aiService.ChatCompletion(c.Request.Context(), req.Model, req.Messages, true, req.Reasoning, services.ParseReasoningEffort(req.ReasoningEffort), useSearchTool, req.TextFormat)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			defer resp.Body.Close()
+			c.Header("Content-Type", "text/event-stream")
+			c.Header("Cache-Control", "no-cache")
+			c.Header("Connection", "keep-alive")
+			_, _, _ = h.forwardUnifiedStream(resp, c.Writer, req.Reasoning, 0, false, userID, guestID, 0, req.Model, resp.Provider, nil, 0)
+			return
+		}
+
+		resp, err := h.aiService.ChatCompletion(c.Request.Context(), req.Model, req.Messages, false, req.Reasoning, services.ParseReasoningEffort(req.ReasoningEffort), useSearchTool, req.TextFormat)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "读取响应失败"})
+			return
+		}
+		c.Header("Content-Type", "application/json")
+		c.Writer.Write(body)
+		return
 	}
 
 	// 深度思考的语言指令：按模板要求 → 如果没模板则按用户语言
@@ -971,6 +1012,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 			ReasoningEffort:    req.ReasoningEffort,
 			UseSearchTool:      useSearchTool,
 			UseBackground:      useBackground,
+			TextFormat:         req.TextFormat,
 			UserID:             userID,
 			GuestID:            guestID,
 			ConversationID:     conversationID,
@@ -984,7 +1026,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		h.streamGenerationTaskEvents(c, streamTask, 0)
 		return
 	} else {
-		resp, err := h.aiService.ChatCompletion(c.Request.Context(), req.Model, req.Messages, false, req.Reasoning, services.ParseReasoningEffort(req.ReasoningEffort), useSearchTool)
+		resp, err := h.aiService.ChatCompletion(c.Request.Context(), req.Model, req.Messages, false, req.Reasoning, services.ParseReasoningEffort(req.ReasoningEffort), useSearchTool, nil)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -1102,6 +1144,7 @@ type GenerationTaskRunRequest struct {
 	ReasoningEffort    string
 	UseSearchTool      bool
 	UseBackground      bool
+	TextFormat         map[string]any
 	UserID             uint
 	GuestID            string
 	ConversationID     uint
@@ -1125,7 +1168,7 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 			fmt.Printf("[GenerationRunner] task=%d 重试第%d次\n", req.Task.ID, attempt)
 		}
 
-		resp, err := h.aiService.ChatCompletion(ctx, req.Model, req.Messages, true, req.Reasoning, services.ParseReasoningEffort(req.ReasoningEffort), req.UseSearchTool)
+		resp, err := h.aiService.ChatCompletion(ctx, req.Model, req.Messages, true, req.Reasoning, services.ParseReasoningEffort(req.ReasoningEffort), req.UseSearchTool, req.TextFormat)
 		if err != nil {
 			// 检查是否是 rate limit 错误，且还有重试次数
 			if attempt < maxRetries {
@@ -2120,7 +2163,7 @@ func (h *ChatHandler) streamGenerationTaskEvents(c *gin.Context, task *models.AI
 
 // ---- 辅助方法：非流式调用 AI 并返回完整内容 ----
 func (h *ChatHandler) callModel(ctx context.Context, modelID string, messages []services.Message, reasoning bool, reasoningEffort string, search bool) (string, error) {
-	resp, err := h.aiService.ChatCompletion(ctx, modelID, messages, false, reasoning, services.ParseReasoningEffort(reasoningEffort), search)
+	resp, err := h.aiService.ChatCompletion(ctx, modelID, messages, false, reasoning, services.ParseReasoningEffort(reasoningEffort), search, nil)
 	if err != nil {
 		return "", err
 	}
@@ -2218,7 +2261,9 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 	// 如果有模板 ID，加载模板前缀
 	if req.TemplateID > 0 {
 		var tpl services.Template
-		if err := h.db.Where("id = ? AND user_id = ?", req.TemplateID, userID).First(&tpl).Error; err == nil && tpl.Prefix != "" {
+		if err := nonLegacyTemplateQuery(h.db).
+			Where("id = ? AND user_id = ?", req.TemplateID, userID).
+			First(&tpl).Error; err == nil && tpl.Prefix != "" {
 			systemMsg := services.Message{Role: "system", Content: tpl.Prefix}
 			messages = append([]services.Message{systemMsg}, messages...)
 		}

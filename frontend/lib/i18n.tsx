@@ -78,18 +78,27 @@ interface I18nContextType {
 
 const I18nContext = createContext<I18nContextType | undefined>(undefined);
 
+function getInitialLanguage(): LanguageCode {
+  if (typeof window === "undefined") return "zh-CN";
+
+  const currentLang = document.documentElement.lang as LanguageCode;
+  if (LANGUAGES.find((l) => l.code === currentLang)) return currentLang;
+
+  const saved = localStorage.getItem("language") as LanguageCode | null;
+  if (saved && LANGUAGES.find((l) => l.code === saved)) return saved;
+
+  return "zh-CN";
+}
+
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [language, setLanguageState] = useState<LanguageCode>("zh-CN");
+  const [language, setLanguageState] = useState<LanguageCode>(getInitialLanguage);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
-    const saved = localStorage.getItem("language") as LanguageCode | null;
-    if (saved && LANGUAGES.find((l) => l.code === saved)) {
-      setLanguageState(saved);
-      document.documentElement.lang = saved;
-    }
-  }, []);
+    document.documentElement.lang = language;
+    document.documentElement.classList.remove("prefs-pending");
+  }, [language]);
 
   const setLanguage = useCallback((lang: LanguageCode) => {
     setLanguageState(lang);
@@ -106,80 +115,6 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     [dict]
   );
 
-  useEffect(() => {
-    if (!mounted || typeof document === "undefined") return;
-
-    const sourceLanguages = LANGUAGES.map((item) => item.code).filter((code) => code !== language);
-    const targetDict = dictionaries[language];
-    const map = new Map<string, string>();
-
-    sourceLanguages.forEach((sourceLanguage) => {
-      const sourceDict = dictionaries[sourceLanguage];
-      Object.keys(sourceDict).forEach((key) => {
-        const sourceValue = sourceDict[key];
-        const targetValue = targetDict[key];
-        if (!sourceValue || !targetValue || sourceValue === targetValue) return;
-        map.set(sourceValue, targetValue);
-      });
-    });
-
-    const attrNames = ["placeholder", "title", "aria-label", "alt"];
-
-    const translateText = (value: string) => {
-      const trimmed = value.trim();
-      const translated = map.get(trimmed);
-      if (!translated) return value;
-      const leading = value.match(/^\s*/)?.[0] ?? "";
-      const trailing = value.match(/\s*$/)?.[0] ?? "";
-      return `${leading}${translated}${trailing}`;
-    };
-
-    const translateNode = (node: Node) => {
-      if (node.nodeType === Node.TEXT_NODE && node.textContent) {
-        const next = translateText(node.textContent);
-        if (next !== node.textContent) node.textContent = next;
-        return;
-      }
-
-      if (node.nodeType !== Node.ELEMENT_NODE) return;
-      const el = node as HTMLElement;
-      if (["SCRIPT", "STYLE", "TEXTAREA", "INPUT"].includes(el.tagName)) {
-        attrNames.forEach((attr) => {
-          const value = el.getAttribute(attr);
-          if (!value) return;
-          const next = translateText(value);
-          if (next !== value) el.setAttribute(attr, next);
-        });
-        return;
-      }
-
-      attrNames.forEach((attr) => {
-        const value = el.getAttribute(attr);
-        if (!value) return;
-        const next = translateText(value);
-        if (next !== value) el.setAttribute(attr, next);
-      });
-      el.childNodes.forEach(translateNode);
-    };
-
-    const run = () => translateNode(document.body);
-    run();
-    const observer = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        if (mutation.type === "characterData") translateNode(mutation.target);
-        mutation.addedNodes.forEach(translateNode);
-        if (mutation.type === "attributes") translateNode(mutation.target);
-      }
-    });
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-      attributes: true,
-      attributeFilter: attrNames,
-    });
-    return () => observer.disconnect();
-  }, [language, mounted]);
 
   return (
     <I18nContext.Provider value={{ language, setLanguage, t, languages: LANGUAGES }}>

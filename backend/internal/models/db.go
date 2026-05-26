@@ -61,6 +61,14 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("迁移 MessageGroup 失败: %w", err)
 	}
 
+	// 去重：清理已有重复的收藏记录，保留最新一条
+	if err := deduplicateFavorites(db); err != nil {
+		return nil, fmt.Errorf("清理收藏重复记录失败: %w", err)
+	}
+	if err := ensureFavoriteIndexes(db); err != nil {
+		return nil, fmt.Errorf("创建收藏唯一索引失败: %w", err)
+	}
+
 	// 更新旧用户缺失的积分字段
 	if err := db.Model(&User{}).Where("basic_credits IS NULL OR basic_credits = 0").Update("basic_credits", 30).Error; err != nil {
 		return nil, err
@@ -155,4 +163,43 @@ func migrateMessageGroups(db *gorm.DB) error {
 	}
 
 	return nil
+}
+
+func deduplicateFavorites(db *gorm.DB) error {
+	// 旧收藏记录补齐 group_id，确保对比模式同一轮回答可以按组去重
+	if err := db.Exec(`
+		UPDATE message_favorites
+		SET group_id = COALESCE((SELECT messages.group_id FROM messages WHERE messages.id = message_favorites.message_id), 0)
+		WHERE group_id = 0 OR group_id IS NULL
+	`).Error; err != nil {
+		return err
+	}
+
+	// 删除同一 user_id + message_id 的重复记录，保留 id 最大的那条（最新）
+	if err := db.Exec(`
+		DELETE FROM message_favorites
+		WHERE id NOT IN (
+			SELECT MAX(id) FROM message_favorites GROUP BY user_id, message_id
+		)
+	`).Error; err != nil {
+		return err
+	}
+
+	// 删除对比模式同一 user_id + group_id 的重复记录，保留 id 最大的那条（最新）
+	return db.Exec(`
+		DELETE FROM message_favorites
+		WHERE group_id > 0
+		  AND id NOT IN (
+			SELECT MAX(id) FROM message_favorites WHERE group_id > 0 GROUP BY user_id, group_id
+		)
+	`).Error
+}
+
+func ensureFavoriteIndexes(db *gorm.DB) error {
+	// 对比模式：同一用户同一轮回答只能收藏一次；group_id=0 的普通消息仍走 user_id+message_id 唯一索引
+	return db.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_user_fav_group_unique
+		ON message_favorites(user_id, group_id)
+		WHERE group_id > 0
+	`).Error
 }

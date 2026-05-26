@@ -49,7 +49,7 @@ func (h *ConversationHandler) List(c *gin.Context) {
 	workspaceIDStr := c.Query("workspace_id")
 
 	var total int64
-	countQuery := h.db.Model(&models.Conversation{}).Where("user_id = ?", userID)
+	countQuery := h.db.Model(&models.Conversation{}).Where("user_id = ? AND deleted_at IS NULL", userID)
 	if workspaceIDStr != "" {
 		if wid, err := strconv.ParseUint(workspaceIDStr, 10, 32); err == nil {
 			countQuery = countQuery.Where("workspace_id = ?", uint(wid))
@@ -68,7 +68,8 @@ func (h *ConversationHandler) List(c *gin.Context) {
 
 	query := h.db.Table("conversations").
 		Select("conversations.*, (SELECT model FROM messages WHERE messages.conversation_id = conversations.id AND messages.role = 'assistant' AND messages.model <> '' ORDER BY messages.created_at DESC, messages.id DESC LIMIT 1) as latest_model").
-		Where("conversations.user_id = ?", userID)
+		Where("conversations.user_id = ?", userID).
+		Where("conversations.deleted_at IS NULL")
 
 	if workspaceIDStr != "" {
 		if wid, err := strconv.ParseUint(workspaceIDStr, 10, 32); err == nil {
@@ -112,13 +113,14 @@ func (h *ConversationHandler) Search(c *gin.Context) {
 
 	like := "%" + keyword + "%"
 	titleMatchSQL := "CASE WHEN conversations.title LIKE ? THEN 1 ELSE 0 END AS title_match"
-	matchedContentSQL := "COALESCE((SELECT content FROM messages WHERE messages.conversation_id = conversations.id AND messages.content LIKE ? ORDER BY messages.created_at DESC, messages.id DESC LIMIT 1), (SELECT content FROM messages WHERE messages.conversation_id = conversations.id ORDER BY messages.created_at DESC, messages.id DESC LIMIT 1), '') AS matched_content"
-	matchedRoleSQL := "COALESCE((SELECT role FROM messages WHERE messages.conversation_id = conversations.id AND messages.content LIKE ? ORDER BY messages.created_at DESC, messages.id DESC LIMIT 1), '') AS matched_role"
-	matchedMessageIDSQL := "COALESCE((SELECT id FROM messages WHERE messages.conversation_id = conversations.id AND messages.content LIKE ? ORDER BY messages.created_at DESC, messages.id DESC LIMIT 1), 0) AS matched_message_id"
+	matchedContentSQL := "COALESCE((SELECT content FROM messages WHERE messages.conversation_id = conversations.id AND messages.deleted_at IS NULL AND messages.content LIKE ? ORDER BY messages.created_at DESC, messages.id DESC LIMIT 1), (SELECT content FROM messages WHERE messages.conversation_id = conversations.id AND messages.deleted_at IS NULL ORDER BY messages.created_at DESC, messages.id DESC LIMIT 1), '') AS matched_content"
+	matchedRoleSQL := "COALESCE((SELECT role FROM messages WHERE messages.conversation_id = conversations.id AND messages.deleted_at IS NULL AND messages.content LIKE ? ORDER BY messages.created_at DESC, messages.id DESC LIMIT 1), '') AS matched_role"
+	matchedMessageIDSQL := "COALESCE((SELECT id FROM messages WHERE messages.conversation_id = conversations.id AND messages.deleted_at IS NULL AND messages.content LIKE ? ORDER BY messages.created_at DESC, messages.id DESC LIMIT 1), 0) AS matched_message_id"
 	query := h.db.Table("conversations").
 		Select("conversations.id, conversations.title, conversations.model, conversations.skill_key, conversations.pinned, conversations.created_at, conversations.updated_at, "+titleMatchSQL+", "+matchedContentSQL+", "+matchedRoleSQL+", "+matchedMessageIDSQL, like, like, like, like).
 		Where("conversations.user_id = ?", userID).
-		Where("conversations.title LIKE ? OR EXISTS (SELECT 1 FROM messages WHERE messages.conversation_id = conversations.id AND messages.content LIKE ?)", like, like)
+		Where("conversations.deleted_at IS NULL").
+		Where("conversations.title LIKE ? OR EXISTS (SELECT 1 FROM messages WHERE messages.conversation_id = conversations.id AND messages.deleted_at IS NULL AND messages.content LIKE ?)", like, like)
 
 	if workspaceIDStr := c.Query("workspace_id"); workspaceIDStr != "" {
 		if wid, err := strconv.ParseUint(workspaceIDStr, 10, 32); err == nil && wid > 0 {

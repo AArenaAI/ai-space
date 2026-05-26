@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -36,7 +37,15 @@ func NewImageChatHandler(db *gorm.DB, imageService *services.ImageService, video
 func (h *ImageChatHandler) ListImageChats(c *gin.Context) {
 	userID := getUserID(c)
 	var chats []models.ImageChat
-	if err := h.db.Where("user_id = ?", userID).Order("updated_at DESC").Find(&chats).Error; err != nil {
+	if err := h.db.Where(`
+		user_id = ? AND EXISTS (
+			SELECT 1 FROM image_chat_messages
+			WHERE image_chat_messages.chat_id = image_chats.id
+			AND role = 'assistant'
+			AND status = 'completed'
+			AND image_url != ''
+		)
+	`, userID).Order("updated_at DESC").Find(&chats).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取会话列表失败"})
 		return
 	}
@@ -84,16 +93,16 @@ func (h *ImageChatHandler) ListImageChats(c *gin.Context) {
 func (h *ImageChatHandler) CreateImageChat(c *gin.Context) {
 	userID := getUserID(c)
 	var req struct {
-		Prompt          string   `json:"prompt"`
-		AspectRatio     string   `json:"aspect_ratio"`
-		Resolution      string   `json:"resolution"`
-		Quality         string   `json:"quality"`
-		RefImages       []string `json:"reference_image_urls"`
-		MediaType       string   `json:"media_type"`
-		Model           string   `json:"model"`
-		Duration        int64    `json:"duration"`
-		GenerateAudio   bool     `json:"generate_audio"`
-		Watermark       bool     `json:"watermark"`
+		Prompt        string   `json:"prompt"`
+		AspectRatio   string   `json:"aspect_ratio"`
+		Resolution    string   `json:"resolution"`
+		Quality       string   `json:"quality"`
+		RefImages     []string `json:"reference_image_urls"`
+		MediaType     string   `json:"media_type"`
+		Model         string   `json:"model"`
+		Duration      int64    `json:"duration"`
+		GenerateAudio bool     `json:"generate_audio"`
+		Watermark     bool     `json:"watermark"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -105,9 +114,17 @@ func (h *ImageChatHandler) CreateImageChat(c *gin.Context) {
 		mediaType = "image"
 	}
 
-	// 检查会话数量上限
+	// 检查历史记录数量上限：只统计已经生成成功、有首图的会话
 	var chatCount int64
-	h.db.Model(&models.ImageChat{}).Where("user_id = ?", userID).Count(&chatCount)
+	h.db.Model(&models.ImageChat{}).Where(`
+		user_id = ? AND EXISTS (
+			SELECT 1 FROM image_chat_messages
+			WHERE image_chat_messages.chat_id = image_chats.id
+			AND role = 'assistant'
+			AND status = 'completed'
+			AND image_url != ''
+		)
+	`, userID).Count(&chatCount)
 	if chatCount >= 8 {
 		c.JSON(http.StatusForbidden, gin.H{"error": "历史记录只能保存8条会话，如需新建，请先删除旧会话"})
 		return
@@ -218,6 +235,13 @@ func (h *ImageChatHandler) DeleteImageChat(c *gin.Context) {
 	if err := h.db.Where("id = ? AND user_id = ?", chatID, userID).First(&chat).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "会话不存在"})
 		return
+	}
+
+	var messages []models.ImageChatMessage
+	h.db.Where("chat_id = ?", chat.ID).Find(&messages)
+	for _, msg := range messages {
+		deleteLocalAsset(msg.ImageURL, localImageURLPrefix, imageAssetsDir())
+		deleteLocalAsset(msg.VideoURL, localVideoURLPrefix, videoAssetsDir())
 	}
 
 	// 删除消息
@@ -343,7 +367,7 @@ func (h *ImageChatHandler) processImageChatJob(msgID uint, prompt, size, quality
 	}
 
 	if err != nil {
-		errMsg := err.Error()
+		errMsg := cleanImageGenerationErrorMessage(err)
 		h.db.Model(&models.ImageChatMessage{}).Where("id = ?", msgID).Updates(map[string]interface{}{
 			"status":        "failed",
 			"error_message": errMsg,
@@ -358,14 +382,20 @@ func (h *ImageChatHandler) processImageChatJob(msgID uint, prompt, size, quality
 	if b64Data != "" {
 		filename, saveErr := saveBase64Image(b64Data)
 		if saveErr != nil {
-			h.db.Model(&models.ImageChatMessage{}).Where("id = ?", msgID).Update("status", "failed")
+			h.db.Model(&models.ImageChatMessage{}).Where("id = ?", msgID).Updates(map[string]interface{}{
+				"status":        "failed",
+				"error_message": "图片生成成功了，但保存图片时失败。请稍后重试，",
+			})
 			return
 		}
 		imageURL = buildImageURL(baseURL, filename)
 	}
 
 	if imageURL == "" {
-		h.db.Model(&models.ImageChatMessage{}).Where("id = ?", msgID).Update("status", "failed")
+		h.db.Model(&models.ImageChatMessage{}).Where("id = ?", msgID).Updates(map[string]interface{}{
+			"status":        "failed",
+			"error_message": defaultImageGenerationErrorMessage,
+		})
 		return
 	}
 
@@ -404,9 +434,10 @@ func (h *ImageChatHandler) processVideoChatJob(msgID uint, prompt, model, ratio 
 		ReferenceImages: refImages,
 	})
 	if err != nil {
+		errMsg := cleanVideoGenerationErrorMessage(err)
 		h.db.Model(&models.ImageChatMessage{}).Where("id = ?", msgID).Updates(map[string]interface{}{
 			"status":        "failed",
-			"error_message": err.Error(),
+			"error_message": errMsg,
 		})
 		return
 	}
@@ -524,7 +555,7 @@ func resolveRefImagePath(db *gorm.DB, url string) string {
 	if len(parts) > 0 {
 		filename := parts[len(parts)-1]
 		if !strings.Contains(filename, "..") && !strings.Contains(filename, "/") {
-			refPath := "./data/images/" + filename
+			refPath := filepath.Join(imageAssetsDir(), filename)
 			if _, statErr := os.Stat(refPath); statErr == nil {
 				return refPath
 			}

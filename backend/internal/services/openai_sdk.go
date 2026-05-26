@@ -71,7 +71,7 @@ func (s *AIService) openAIClient() (openai.Client, error) {
 	), nil
 }
 
-func (s *AIService) buildOpenAIResponsesBody(model string, messages []Message, stream bool, reasoning bool, reasoningEffort ReasoningEffort, search bool) (map[string]any, bool, int, int) {
+func (s *AIService) buildOpenAIResponsesBody(model string, messages []Message, stream bool, reasoning bool, reasoningEffort ReasoningEffort, search bool, textFormat map[string]any) (map[string]any, bool, int, int) {
 	// 提取 system 消息到 instructions。注意：同一次请求可能同时包含模板、技能、图表渲染等多个 system prompt，
 	// 不能只保留最后一个，否则前面的模板/功能指令会被覆盖。
 	var systemInstructions []string
@@ -95,7 +95,7 @@ func (s *AIService) buildOpenAIResponsesBody(model string, messages []Message, s
 		}
 		if (len(m.Images) > 0 || len(m.Files) > 0) && m.Role == "user" {
 			// [路径B] 内联多模态直传 — 将图片/当前文件以 Responses API 原生 part 发送给模型。
-			// 文件上传解析/RAG 路径仍保留为 <file_context> 兜底；这里仅服务当前附件 direct-first。
+			// 文件上传解析/RAG 路径仍保留为 <file_context> 兑底；这里仅服务当前附件 direct-first。
 			contentParts := []map[string]any{
 				{"type": "input_text", "text": m.Content},
 			}
@@ -160,15 +160,20 @@ func (s *AIService) buildOpenAIResponsesBody(model string, messages []Message, s
 		reqBody["tool_choice"] = "auto"
 	}
 
+	// text.format 结构化输出 — 仅当调用方显式指定时生效
+	if textFormat != nil && len(textFormat) > 0 {
+		reqBody["text"] = textFormat
+	}
+
 	return reqBody, useBackground, len(inputItems), len(systemInstruction)
 }
 
-func (s *AIService) callOpenAIResponsesSDK(ctx context.Context, model string, messages []Message, stream bool, reasoning bool, reasoningEffort ReasoningEffort, search bool) (*AICompletionResponse, error) {
+func (s *AIService) callOpenAIResponsesSDK(ctx context.Context, model string, messages []Message, stream bool, reasoning bool, reasoningEffort ReasoningEffort, search bool, textFormat map[string]any) (*AICompletionResponse, error) {
 	client, err := s.openAIClient()
 	if err != nil {
 		return nil, err
 	}
-	reqBody, useBackground, inputCount, instructionsLen := s.buildOpenAIResponsesBody(model, messages, stream, reasoning, reasoningEffort, search)
+	reqBody, useBackground, inputCount, instructionsLen := s.buildOpenAIResponsesBody(model, messages, stream, reasoning, reasoningEffort, search, textFormat)
 	fmt.Printf("[OpenAI Responses SDK] model=%s stream=%v reasoning=%v effort=%s search=%v background=%v max_output_tokens=%v tool_choice=%v tools=%v input_items=%d instructions_len=%d\n",
 		model,
 		stream,

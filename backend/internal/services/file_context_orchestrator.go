@@ -66,20 +66,25 @@ func (o *FileContextOrchestrator) Build(req FileContextBuildRequest) FileContext
 		return pkg
 	}
 
-	currentReady, currentWarnings := filterReadyFiles(req.CurrentFiles)
+	currentNativeFiles := uniqueFilesByID(req.CurrentFiles)
+	var nativeFileIDs []uint
+	if len(currentNativeFiles) > 0 {
+		nativeParts, nativeWarnings := o.buildCurrentNativeParts(currentNativeFiles, req.Model, logPrefix)
+		pkg.NativeParts = append(pkg.NativeParts, nativeParts...)
+		pkg.Warnings = append(pkg.Warnings, nativeWarnings...)
+		for _, part := range nativeParts {
+			pkg.UsedFileIDs = appendUniqueUint(pkg.UsedFileIDs, part.FileID)
+			nativeFileIDs = appendUniqueUint(nativeFileIDs, part.FileID)
+		}
+	}
+
+	currentReady, currentWarnings := filterReadyFilesExcept(req.CurrentFiles, nativeFileIDs)
 	historicalReady, historicalWarnings := filterReadyFiles(req.HistoricalFiles)
 	pkg.Warnings = append(pkg.Warnings, currentWarnings...)
 	pkg.Warnings = append(pkg.Warnings, historicalWarnings...)
 
 	var parts []string
 	if len(currentReady) > 0 {
-		nativeParts, nativeWarnings := o.buildCurrentNativeParts(currentReady, req.Model, logPrefix)
-		pkg.NativeParts = append(pkg.NativeParts, nativeParts...)
-		pkg.Warnings = append(pkg.Warnings, nativeWarnings...)
-		for _, part := range nativeParts {
-			pkg.UsedFileIDs = appendUniqueUint(pkg.UsedFileIDs, part.FileID)
-		}
-
 		currentContext := o.buildDirectCurrentContext(currentReady, req.Query, req.Model, logPrefix)
 		if currentContext != "" {
 			parts = append(parts, currentContext)
@@ -277,15 +282,26 @@ func (o *FileContextOrchestrator) loadDirectChunks(file models.File, maxChars in
 }
 
 func filterReadyFiles(files []models.File) ([]models.File, []string) {
+	return filterReadyFilesExcept(files, nil)
+}
+
+func filterReadyFilesExcept(files []models.File, skipWarningFileIDs []uint) ([]models.File, []string) {
 	ready := make([]models.File, 0, len(files))
 	var warnings []string
 	seen := map[uint]struct{}{}
+	skipWarnings := make(map[uint]struct{}, len(skipWarningFileIDs))
+	for _, id := range skipWarningFileIDs {
+		skipWarnings[id] = struct{}{}
+	}
 	for _, f := range files {
 		if _, ok := seen[f.ID]; ok {
 			continue
 		}
 		seen[f.ID] = struct{}{}
 		if f.ParseStatus != "done" {
+			if _, ok := skipWarnings[f.ID]; ok {
+				continue
+			}
 			status := strings.TrimSpace(f.ParseStatus)
 			if status == "" {
 				status = "unknown"
@@ -296,6 +312,19 @@ func filterReadyFiles(files []models.File) ([]models.File, []string) {
 		ready = append(ready, f)
 	}
 	return ready, warnings
+}
+
+func uniqueFilesByID(files []models.File) []models.File {
+	out := make([]models.File, 0, len(files))
+	seen := map[uint]struct{}{}
+	for _, f := range files {
+		if _, ok := seen[f.ID]; ok {
+			continue
+		}
+		seen[f.ID] = struct{}{}
+		out = append(out, f)
+	}
+	return out
 }
 
 func trimChunksByChars(chunks []models.FileChunk, maxChars int) []models.FileChunk {

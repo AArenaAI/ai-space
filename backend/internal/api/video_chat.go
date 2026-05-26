@@ -45,7 +45,15 @@ type videoChatRequest struct {
 func (h *VideoChatHandler) ListVideoChats(c *gin.Context) {
 	userID := getUserID(c)
 	var chats []models.VideoChat
-	if err := h.db.Where("user_id = ?", userID).Order("updated_at DESC").Find(&chats).Error; err != nil {
+	if err := h.db.Where(`
+		user_id = ? AND EXISTS (
+			SELECT 1 FROM video_chat_messages
+			WHERE video_chat_messages.chat_id = video_chats.id
+			AND role = 'assistant'
+			AND status IN ('succeeded', 'completed')
+			AND video_url != ''
+		)
+	`, userID).Order("updated_at DESC").Find(&chats).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取视频会话列表失败"})
 		return
 	}
@@ -94,9 +102,17 @@ func (h *VideoChatHandler) CreateVideoChat(c *gin.Context) {
 		return
 	}
 
-	// 检查会话数量上限
+	// 检查历史记录数量上限：只统计已经生成成功、有首视频的会话
 	var chatCount int64
-	h.db.Model(&models.VideoChat{}).Where("user_id = ?", userID).Count(&chatCount)
+	h.db.Model(&models.VideoChat{}).Where(`
+		user_id = ? AND EXISTS (
+			SELECT 1 FROM video_chat_messages
+			WHERE video_chat_messages.chat_id = video_chats.id
+			AND role = 'assistant'
+			AND status IN ('succeeded', 'completed')
+			AND video_url != ''
+		)
+	`, userID).Count(&chatCount)
 	if chatCount >= 8 {
 		c.JSON(http.StatusForbidden, gin.H{"error": "历史记录只能保存8条会话，如需新建，请先删除旧会话"})
 		return
@@ -117,7 +133,7 @@ func (h *VideoChatHandler) CreateVideoChat(c *gin.Context) {
 
 	assistantMsg, err := h.createVideoChatMessagesAndTask(userID, chat.ID, req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": cleanVideoGenerationErrorMessage(err)})
 		return
 	}
 
@@ -170,7 +186,13 @@ func (h *VideoChatHandler) DeleteVideoChat(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "视频会话不存在"})
 		return
 	}
+	var messages []models.VideoChatMessage
+	h.db.Where("chat_id = ?", chat.ID).Find(&messages)
+	for _, msg := range messages {
+		deleteLocalAsset(msg.VideoURL, localVideoURLPrefix, videoAssetsDir())
+	}
 	h.db.Where("chat_id = ?", chat.ID).Delete(&models.VideoChatMessage{})
+	h.db.Where("chat_id = ?", chat.ID).Delete(&models.VideoGeneration{})
 	h.db.Delete(&chat)
 	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
 }
@@ -213,7 +235,7 @@ func (h *VideoChatHandler) SendVideoChatMessage(c *gin.Context) {
 
 	assistantMsg, err := h.createVideoChatMessagesAndTask(userID, chat.ID, req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": cleanVideoGenerationErrorMessage(err)})
 		return
 	}
 	h.db.Model(&chat).Update("updated_at", time.Now())
@@ -271,7 +293,7 @@ func (h *VideoChatHandler) createVideoChatMessagesAndTask(userID uint, chatID ui
 	}
 	createReq.ReferenceImages, err = resolveVideoReferenceURLs(h.db, h.cfg, userID, req.ReferenceImages, "image")
 	if err != nil {
-		errMsg := err.Error()
+		errMsg := cleanVideoGenerationErrorMessage(err)
 		h.db.Model(&assistantMsg).Updates(map[string]interface{}{"status": "failed", "error_message": errMsg})
 		assistantMsg.Status = "failed"
 		assistantMsg.ErrorMessage = errMsg
@@ -279,7 +301,7 @@ func (h *VideoChatHandler) createVideoChatMessagesAndTask(userID uint, chatID ui
 	}
 	createReq.ReferenceVideos, err = resolveVideoReferenceURLs(h.db, h.cfg, userID, req.ReferenceVideos, "video")
 	if err != nil {
-		errMsg := err.Error()
+		errMsg := cleanVideoGenerationErrorMessage(err)
 		h.db.Model(&assistantMsg).Updates(map[string]interface{}{"status": "failed", "error_message": errMsg})
 		assistantMsg.Status = "failed"
 		assistantMsg.ErrorMessage = errMsg
@@ -290,7 +312,7 @@ func (h *VideoChatHandler) createVideoChatMessagesAndTask(userID uint, chatID ui
 	defer cancel()
 	resp, err := h.videoService.CreateVideoTask(ctx, createReq)
 	if err != nil {
-		errMsg := "创建视频任务失败: " + err.Error()
+		errMsg := cleanVideoGenerationErrorMessage(err)
 		h.db.Model(&assistantMsg).Updates(map[string]interface{}{"status": "failed", "error_message": errMsg})
 		assistantMsg.Status = "failed"
 		assistantMsg.ErrorMessage = errMsg
@@ -340,12 +362,23 @@ func (h *VideoChatHandler) refreshPendingVideoChatMessages(chatID uint) {
 		updates := map[string]interface{}{"status": resp.Status, "updated_at": time.Now()}
 		videoUpdates := map[string]interface{}{"status": resp.Status, "updated_at": time.Now()}
 		if resp.Status == "succeeded" || resp.Status == "completed" {
-			updates["video_url"] = resp.VideoURL
-			videoUpdates["video_url"] = resp.VideoURL
+			localVideoURL, persistErr := persistRemoteVideoAsset(resp.VideoURL)
+			if persistErr != nil {
+				log.Printf("[VideoChat] persist video failed task=%s err=%v", msg.TaskID, persistErr)
+				cleanMsg := "视频生成成功了，但保存视频文件时失败，请稍后重试。"
+				updates["status"] = "failed"
+				updates["error_message"] = cleanMsg
+				videoUpdates["status"] = "failed"
+				videoUpdates["error_message"] = cleanMsg
+			} else {
+				updates["video_url"] = localVideoURL
+				videoUpdates["video_url"] = localVideoURL
+			}
 		}
 		if resp.Status == "failed" && resp.ErrorMessage != "" {
-			updates["error_message"] = resp.ErrorMessage
-			videoUpdates["error_message"] = resp.ErrorMessage
+			cleanMsg := cleanVideoGenerationErrorString(resp.ErrorMessage)
+			updates["error_message"] = cleanMsg
+			videoUpdates["error_message"] = cleanMsg
 		}
 		h.db.Model(&models.VideoChatMessage{}).Where("id = ?", msg.ID).Updates(updates)
 		if msg.GenerationID > 0 {

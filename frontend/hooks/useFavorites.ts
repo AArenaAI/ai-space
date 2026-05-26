@@ -25,6 +25,10 @@ export interface FavoritesResponse {
   total_page: number;
 }
 
+interface FavoriteOptions {
+  silent?: boolean;
+}
+
 function getHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -46,6 +50,7 @@ export function useFavorites() {
   const [listLoading, setListLoading] = useState(false);
   const fetchedRef = useRef(false);
   const checkedIdsRef = useRef<Set<number>>(new Set());
+  const processingRef = useRef<Set<number>>(new Set());
 
   // 批量检查收藏状态
   const checkBatch = useCallback(async (messageIds: number[]) => {
@@ -76,10 +81,10 @@ export function useFavorites() {
   }, []);
 
   // 收藏消息
-  const addFavorite = useCallback(async (messageId: number, convId: number) => {
+  const addFavorite = useCallback(async (messageId: number, convId: number, options?: FavoriteOptions) => {
     const token = localStorage.getItem("token");
     if (!token) {
-      toast.warning("请先登录后收藏");
+      if (!options?.silent) toast.warning("请先登录后收藏");
       return false;
     }
     setLoading(true);
@@ -95,13 +100,13 @@ export function useFavorites() {
           next.add(messageId);
           return next;
         });
-        toast.success(res.status === 409 ? "已在收藏中" : "已收藏");
+        if (!options?.silent) toast.success("已收藏");
         return true;
       }
-      toast.error("收藏失败");
+      if (!options?.silent) toast.error("收藏失败");
       return false;
     } catch {
-      toast.error("收藏失败");
+      if (!options?.silent) toast.error("收藏失败");
       return false;
     } finally {
       setLoading(false);
@@ -143,20 +148,30 @@ export function useFavorites() {
 
   // 切换收藏
   const toggleFavorite = useCallback(async (messageId: number, convId: number) => {
-    if (favorites.has(messageId)) {
-      return removeFavorite(messageId);
-    } else {
-      return addFavorite(messageId, convId);
+    if (processingRef.current.has(messageId)) return false;
+    processingRef.current.add(messageId);
+    try {
+      if (favorites.has(messageId)) {
+        return await removeFavorite(messageId);
+      } else {
+        return await addFavorite(messageId, convId);
+      }
+    } finally {
+      processingRef.current.delete(messageId);
     }
   }, [favorites, addFavorite, removeFavorite]);
 
   // 获取收藏列表
-  const fetchList = useCallback(async (page = 1, pageSize = 20, append = false) => {
+  const fetchList = useCallback(async (page = 1, pageSize = 20, append = false, keyword?: string) => {
     const token = localStorage.getItem("token");
     if (!token) return;
     setListLoading(true);
     try {
-      const res = await fetch(`/api/favorites?page=${page}&page_size=${pageSize}`, {
+      let url = `/api/favorites?page=${page}&page_size=${pageSize}`;
+      if (keyword?.trim()) {
+        url += `&q=${encodeURIComponent(keyword.trim())}`;
+      }
+      const res = await fetch(url, {
         headers: getHeaders(),
       });
       if (res.ok) {

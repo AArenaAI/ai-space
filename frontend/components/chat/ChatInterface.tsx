@@ -7,12 +7,11 @@ import MessageList from "./MessageList";
 import MessageInput, { ReasoningConfig } from "./MessageInput";
 import ModelSelector from "./ModelSelector";
 import ThemeToggle from "@/components/theme/ThemeToggle";
-import { Zap, X, Pencil } from "lucide-react";
+import { Zap, X, Pencil, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
-import { getLocalizedDefaultTemplatePrefix, localizeSystemDefaultTemplate } from "@/lib/defaultTemplates";
 import InputDialog from "@/components/ui/InputDialog";
 import ForkCompareDialog from "./ForkCompareDialog";
 
@@ -31,7 +30,7 @@ interface ChatInterfaceProps {
 }
 
 export default function ChatInterface({ conversationId, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId }: ChatInterfaceProps) {
-  const { t, language } = useI18n();
+  const { t } = useI18n();
   const [compareMode, setCompareMode] = useState(false);
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const selectedModelsRef = useRef<string[]>([]);
@@ -42,6 +41,16 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
   const [forkDialogOpen, setForkDialogOpen] = useState(false);
   const [forkTargetMessageId, setForkTargetMessageId] = useState<number | null>(null);
   const [messageSelectMode, setMessageSelectMode] = useState(false);
+  const [userName, setUserName] = useState<string>("");
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("user");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setUserName(parsed.name || parsed.email || "");
+      }
+    } catch {}
+  }, []);
   const router = useRouter();
 
   useEffect(() => {
@@ -76,18 +85,10 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
   } = useChat(conversationId, models, skillKey);
 
   const { templates } = useTemplates();
-  const localizedTemplates = templates.map((tpl) => localizeSystemDefaultTemplate(tpl, language));
 
   const getSelectedTemplatePayload = useCallback(() => {
-    const selectedTemplate = templates.find((tpl) => tpl.id === selectedTemplateId);
-    if (selectedTemplate?.is_default) {
-      return {
-        templateId: selectedTemplateId,
-        templatePrefix: getLocalizedDefaultTemplatePrefix(language),
-      };
-    }
     return { templateId: selectedTemplateId, templatePrefix: undefined };
-  }, [templates, selectedTemplateId, language]);
+  }, [selectedTemplateId]);
 
   const handleModelSelect = useCallback((model: ChatModel) => {
     // 如果当前是 Skill 技能对话且有推荐模型，保存用户覆盖标记
@@ -209,18 +210,6 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
     return () => window.removeEventListener("template-changed", handler);
   }, []);
 
-  // 自动选择默认模板（仅当用户还没手动选过模板时）
-  useEffect(() => {
-    const saved = localStorage.getItem("selected-template");
-    // 如果用户已经手动选过模板（localStorage 中有值），不覆盖
-    if (saved !== null) return;
-    const defaultTpl = templates.find((t) => t.is_default);
-    if (defaultTpl) {
-      setSelectedTemplateId(defaultTpl.id);
-      localStorage.setItem("selected-template", String(defaultTpl.id));
-    }
-  }, [templates]);
-
   // 进入对比对话时自动切换到对比模式并恢复模型选择
   useEffect(() => {
     if (isCompare && compareModels.length > 0) {
@@ -338,9 +327,8 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
       } else {
         setSelectedModels(models.slice(0, 2).map((m) => m.id));
       }
-      // 如果有默认模板自动选上，如果没有则弹出提示
-      const defaultTpl = templates.find((t) => t.is_default);
-      if (!defaultTpl) {
+      // 对比模式需要先选择一个回答模板
+      if (!selectedTemplateId) {
         toast.warning(t("chat.compareNeedTemplateSidebar"));
       }
       localStorage.setItem(COMPARE_KEY, "true");
@@ -361,6 +349,8 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
     setIsCompare(false);
     setCompareModels([]);
   }, [setCompareMode, setIsCompare, setCompareModels]);
+
+  const isNewEmptyChat = messages.length === 0 && !conversationId;
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
@@ -413,41 +403,88 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
         </div>
       )}
 
-      {/* 消息列表 */}
-      <MessageList
-        messages={messages}
-        isLoading={isLoading}
-        isLoadingHistory={isLoadingHistory}
-        isComplexTask={isComplexTask}
-        models={models}
-        conversationId={conversationId}
-        onDeleteMessage={deleteMessage}
-        onRegenerate={regenerateMessage}
-        onContinueGenerate={regenerateMessage}
-        isCompare={compareMode || isCompare}
-        compareModels={(compareMode ? selectedModels : compareModels)}
-        onCompareModelChange={handleCompareModelChange}
-        welcomeTitle={welcomeTitle}
-        welcomeSubtitle={welcomeSubtitle}
-        welcomeExamples={welcomeExamples}
-        onExampleClick={(prompt) => {
-          setIsComplexTask(isComplexReasoningTask(undefined));
-          const { templateId, templatePrefix } = getSelectedTemplatePayload();
-          sendMessage(prompt, undefined, false, false, templateId, false, undefined, undefined, templatePrefix);
-        }}
-        groupViews={groupViews}
-        switchGroupModel={switchGroupModel}
-        onForkCompare={(messageId) => {
-          setForkTargetMessageId(messageId);
-          setForkDialogOpen(true);
-        }}
-        isLoadingMore={isLoadingMore}
-        hasMoreMessages={hasMoreMessages}
-        onLoadMore={loadMoreMessages}
-        targetMessageId={currentConversation === conversationId ? targetMessageId : undefined}
-        onSelectModeChange={setMessageSelectMode}
-        onExitCompare={handleExitCompare}
-      />
+      {/* 消息列表 - 有消息时渲染 */}
+      {!isNewEmptyChat && (
+        <MessageList
+          messages={messages}
+          isLoading={isLoading}
+          isLoadingHistory={isLoadingHistory}
+          isComplexTask={isComplexTask}
+          models={models}
+          conversationId={conversationId}
+          onDeleteMessage={deleteMessage}
+          onRegenerate={regenerateMessage}
+          onContinueGenerate={regenerateMessage}
+          isCompare={compareMode || isCompare}
+          compareModels={(compareMode ? selectedModels : compareModels)}
+          onCompareModelChange={handleCompareModelChange}
+          welcomeTitle={welcomeTitle}
+          welcomeSubtitle={welcomeSubtitle}
+          welcomeExamples={welcomeExamples}
+          onExampleClick={(prompt) => {
+            setIsComplexTask(isComplexReasoningTask(undefined));
+            const { templateId, templatePrefix } = getSelectedTemplatePayload();
+            sendMessage(prompt, undefined, false, false, templateId, false, undefined, undefined, templatePrefix);
+          }}
+          groupViews={groupViews}
+          switchGroupModel={switchGroupModel}
+          onForkCompare={(messageId) => {
+            setForkTargetMessageId(messageId);
+            setForkDialogOpen(true);
+          }}
+          isLoadingMore={isLoadingMore}
+          hasMoreMessages={hasMoreMessages}
+          onLoadMore={loadMoreMessages}
+          targetMessageId={currentConversation === conversationId ? targetMessageId : undefined}
+          onSelectModeChange={setMessageSelectMode}
+          onExitCompare={handleExitCompare}
+        />
+      )}
+
+      {/* 空状态容器 - 始终渲染，通过 opacity/translate/scale 切换 */}
+      <div className={cn(
+        "absolute inset-0 flex flex-col items-center justify-center px-4 z-10 transition-all duration-700 ease-[cubic-bezier(0.34,1.56,0.64,1)]",
+        isNewEmptyChat
+          ? "opacity-100 translate-y-0 scale-100 pointer-events-auto"
+          : "opacity-0 -translate-y-12 scale-95 pointer-events-none"
+      )}>
+        <div className="text-center max-w-md mb-6">
+          {welcomeTitle ? (
+            <>
+              <div className="w-12 h-12 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center mx-auto mb-6">
+                <Bot className="w-5 h-5 text-text-secondary" />
+              </div>
+              <h2 className="text-xl font-semibold tracking-tight mb-2 text-text-primary">{welcomeTitle}</h2>
+              {welcomeSubtitle && (
+                <p className="text-text-secondary text-sm leading-relaxed mb-8">{welcomeSubtitle}</p>
+              )}
+            </>
+          ) : (
+            <>
+              <h1 className="text-[32px] font-semibold leading-tight tracking-tight mb-2 text-text-primary">
+                {userName ? t("chat.userGreeting").replace("{name}", userName) : t("chat.greeting")}
+              </h1>
+              <p className="text-[25px] font-medium leading-tight tracking-tight text-text-primary/80">{t("chat.whatCanWeDo")}</p>
+            </>
+          )}
+        </div>
+        {!messageSelectMode && (
+          <div className="w-full max-w-2xl relative shrink-0">
+            <MessageInput
+              onSend={handleSend}
+              onStop={handleStop}
+              isLoading={isLoading}
+              compareMode={compareMode}
+              onToggleCompare={toggleCompareMode}
+              currentModel={selectedModel}
+              templates={templates}
+              selectedTemplateId={selectedTemplateId}
+              onSelectTemplate={handleTemplateSelect}
+              onNewChat={handleNewChat}
+            />
+          </div>
+        )}
+      </div>
 
       {/* 重命名对话 */}
       <InputDialog
@@ -479,22 +516,29 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
         }}
       />
 
+      {/* 底部输入框 - 始终渲染，空状态时隐藏在下方 */}
       {!messageSelectMode && (
-        /* 输入框：脱离列表文档流，固定在底部，避免生成时挤压消息区 */
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[70] bg-gradient-to-t from-surface-elevated via-surface-elevated via-60% to-transparent pt-10">
-          <div className="pointer-events-auto relative z-[70]">
-          <MessageInput
-            onSend={handleSend}
-            onStop={handleStop}
-            isLoading={isLoading}
-            compareMode={compareMode}
-            onToggleCompare={toggleCompareMode}
-            currentModel={selectedModel}
-            templates={localizedTemplates}
-            selectedTemplateId={selectedTemplateId}
-            onSelectTemplate={handleTemplateSelect}
-            onNewChat={handleNewChat}
-          />
+        <div className={cn(
+          "z-[70] w-full absolute inset-x-0 bottom-0 transition-all duration-700 ease-[cubic-bezier(0.34,1.56,0.64,1)]",
+          isNewEmptyChat
+            ? "opacity-0 translate-y-20 scale-95 pointer-events-none"
+            : "opacity-100 translate-y-0 scale-100 pointer-events-auto"
+        )}>
+          <div className="pointer-events-none bg-gradient-to-t from-surface-elevated via-surface-elevated via-60% to-transparent pt-10">
+            <div className="pointer-events-auto relative z-[70]">
+              <MessageInput
+                onSend={handleSend}
+                onStop={handleStop}
+                isLoading={isLoading}
+                compareMode={compareMode}
+                onToggleCompare={toggleCompareMode}
+                currentModel={selectedModel}
+                templates={templates}
+                selectedTemplateId={selectedTemplateId}
+                onSelectTemplate={handleTemplateSelect}
+                onNewChat={handleNewChat}
+              />
+            </div>
           </div>
         </div>
       )}

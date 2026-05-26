@@ -18,21 +18,28 @@ function getNextTheme(current: Theme): Theme {
   return order[(idx + 1) % order.length];
 }
 
+function getInitialTheme(): Theme {
+  if (typeof window === "undefined") return "light";
+
+  const root = document.documentElement;
+  if (root.classList.contains("dark")) return "dark";
+  if (root.classList.contains("green")) return "green";
+
+  const saved = localStorage.getItem("theme");
+  if (saved === "day" || saved === "light") return "light";
+  if (saved === "night" || saved === "dark") return "dark";
+  if (saved === "green") return "green";
+  if (window.matchMedia("(prefers-color-scheme: dark)").matches) return "dark";
+
+  return "light";
+}
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>("light");
+  const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
-    const saved = localStorage.getItem("theme");
-    // 兼容旧存储值 "day"/"night"
-    if (saved === "day" || saved === "light") setTheme("light");
-    else if (saved === "night" || saved === "dark") setTheme("dark");
-    else if (saved === "green") setTheme("green");
-    // 如果没有存储值，自动检测系统偏好
-    else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-      setTheme("dark");
-    }
   }, []);
 
   useEffect(() => {

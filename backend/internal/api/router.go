@@ -159,6 +159,8 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	authorized.Use(middleware.AuthMiddleware(cfg))
 	{
 		convHandler := NewConversationHandler(db)
+		documentArtifactHandler := NewDocumentArtifactHandler(db)
+		documentArtifactHandler.AutoMigrate()
 		authorized.GET("/conversations", convHandler.List)
 		authorized.GET("/conversations/search", convHandler.Search)
 		authorized.POST("/conversations", convHandler.Create)
@@ -168,6 +170,12 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		authorized.GET("/conversations/:id/messages", convHandler.GetMessages)
 		authorized.GET("/conversations/:id/messages/:message_id", convHandler.GetMessage)
 		authorized.POST("/conversations/:id/messages", convHandler.AddMessage)
+
+		// 文档研读生成文件路由
+		authorized.GET("/document-artifacts", documentArtifactHandler.List)
+		authorized.POST("/document-artifacts", documentArtifactHandler.Create)
+		authorized.GET("/document-artifacts/:id", documentArtifactHandler.Get)
+		authorized.DELETE("/document-artifacts/:id", documentArtifactHandler.Delete)
 
 		// 图片路由
 		imageHandler := NewImageHandler(db, imageService, cfg, usageService)
@@ -211,8 +219,9 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		authorized.GET("/video-chats/:id/messages", videoChatHandler.ListVideoChatMessages)
 		authorized.POST("/video-chats/:id/messages", videoChatHandler.SendVideoChatMessage)
 
-		// 图片文件服务（无需认证，直接访问）
+		// 媒体文件服务（无需认证，直接访问）
 		router.GET("/api/images/file/:filename", imageHandler.ServeImageFile)
+		router.GET("/api/videos/file/:filename", ServeVideoFile)
 
 		// 回答模板路由
 		templateHandler := NewTemplateHandler(db)

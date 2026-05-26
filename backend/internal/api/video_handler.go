@@ -71,7 +71,7 @@ func (h *VideoHandler) CreateVideo(c *gin.Context) {
 	}
 	ratio, duration, resolution, err := normalizeVideoGenerationParams(modelID, req.Ratio, req.Resolution, req.Duration, len(req.ReferenceImages), len(req.ReferenceVideos))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": cleanVideoGenerationErrorMessage(err)})
 		return
 	}
 
@@ -86,12 +86,12 @@ func (h *VideoHandler) CreateVideo(c *gin.Context) {
 	}
 	createReq.ReferenceImages, err = resolveVideoReferenceURLs(h.db, h.cfg, userID, req.ReferenceImages, "image")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": cleanVideoGenerationErrorMessage(err)})
 		return
 	}
 	createReq.ReferenceVideos, err = resolveVideoReferenceURLs(h.db, h.cfg, userID, req.ReferenceVideos, "video")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": cleanVideoGenerationErrorMessage(err)})
 		return
 	}
 	log.Printf("[Video] create task refs images=%d videos=%d model=%s", len(createReq.ReferenceImages), len(createReq.ReferenceVideos), modelID)
@@ -102,7 +102,7 @@ func (h *VideoHandler) CreateVideo(c *gin.Context) {
 	resp, err := h.videoService.CreateVideoTask(ctx, createReq)
 	if err != nil {
 		log.Printf("[Video] create task failed model=%s ratio=%s resolution=%s duration=%d audio=%v err=%v", modelID, ratio, resolution, duration, req.GenerateAudio, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create task: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": cleanVideoGenerationErrorMessage(err)})
 		return
 	}
 
@@ -151,10 +151,17 @@ func (h *VideoHandler) GetVideo(c *gin.Context) {
 		if err == nil && resp != nil {
 			video.Status = resp.Status
 			if resp.Status == "succeeded" || resp.Status == "completed" {
-				video.VideoURL = resp.VideoURL
+				localVideoURL, persistErr := persistRemoteVideoAsset(resp.VideoURL)
+				if persistErr != nil {
+					log.Printf("[Video] persist video failed task=%s err=%v", video.TaskID, persistErr)
+					video.Status = "failed"
+					video.ErrorMessage = "视频生成成功了，但保存视频文件时失败，请稍后重试。"
+				} else {
+					video.VideoURL = localVideoURL
+				}
 			}
 			if resp.Status == "failed" && resp.ErrorMessage != "" {
-				video.ErrorMessage = resp.ErrorMessage
+				video.ErrorMessage = cleanVideoGenerationErrorString(resp.ErrorMessage)
 			}
 			h.db.Save(&video)
 		}
@@ -168,11 +175,13 @@ func (h *VideoHandler) DeleteVideo(c *gin.Context) {
 	userID := getUserID(c)
 	id := c.Param("id")
 
-	result := h.db.Where("id = ? AND user_id = ?", id, userID).Delete(&models.VideoGeneration{})
-	if result.RowsAffected == 0 {
+	var video models.VideoGeneration
+	if err := h.db.Where("id = ? AND user_id = ?", id, userID).First(&video).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Video task not found"})
 		return
 	}
+	deleteLocalAsset(video.VideoURL, localVideoURLPrefix, videoAssetsDir())
+	h.db.Delete(&video)
 	c.JSON(http.StatusOK, gin.H{"message": "Deleted successfully"})
 }
 
@@ -191,16 +200,23 @@ func (h *VideoHandler) RefreshVideoStatus(c *gin.Context) {
 	defer cancel()
 	resp, err := h.videoService.GetVideoTask(ctx, video.TaskID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query Volcengine: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": cleanVideoGenerationErrorMessage(err)})
 		return
 	}
 
 	video.Status = resp.Status
 	if resp.Status == "succeeded" || resp.Status == "completed" {
-		video.VideoURL = resp.VideoURL
+		localVideoURL, persistErr := persistRemoteVideoAsset(resp.VideoURL)
+		if persistErr != nil {
+			log.Printf("[Video] persist video failed task=%s err=%v", video.TaskID, persistErr)
+			video.Status = "failed"
+			video.ErrorMessage = "视频生成成功了，但保存视频文件时失败，请稍后重试。"
+		} else {
+			video.VideoURL = localVideoURL
+		}
 	}
 	if resp.Status == "failed" && resp.ErrorMessage != "" {
-		video.ErrorMessage = resp.ErrorMessage
+		video.ErrorMessage = cleanVideoGenerationErrorString(resp.ErrorMessage)
 	}
 	video.UpdatedAt = time.Now()
 	h.db.Save(&video)

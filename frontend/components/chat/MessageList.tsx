@@ -143,6 +143,7 @@ function StreamingCursor() {
 }
 
 function StreamingText({ messageId, content, isStreaming, className }: { messageId: string; content: string; isStreaming: boolean; className?: string }) {
+  const { t } = useI18n();
   const streamText = useMessageStream(messageId, isStreaming);
   const effectiveText = isStreaming ? (streamText || content) : content;
   const hasThinkTag = effectiveText.includes("<think>");
@@ -166,19 +167,19 @@ function StreamingText({ messageId, content, isStreaming, className }: { message
         <div className="mb-3 rounded-xl border border-purple-200 dark:border-purple-800/40 overflow-hidden">
           <div className="flex items-center gap-2 px-3 py-2 bg-purple-50 dark:bg-[#1A1A2E]">
             <Lightbulb className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
-            <span className="text-sm font-medium text-text-secondary">深度推理中，片刻即达极致答案</span>
+            <span className="text-sm font-medium text-text-secondary">{t("chat.reasoning.thinking")}</span>
             <div className="flex gap-0.5 ml-1">
               <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce" />
               <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce [animation-delay:0.15s]" />
               <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce [animation-delay:0.3s]" />
             </div>
           </div>
-          <div className="px-3 py-2.5 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap bg-slate-50 dark:bg-[#0F0F1A]">
+          <div data-i18n-skip="true" className="px-3 py-2.5 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap bg-slate-50 dark:bg-[#0F0F1A]">
             {parsed.reasoning || ""}
           </div>
         </div>
       )}
-      <span className="whitespace-pre-wrap break-words">{parsed.answer}</span>
+      <span data-i18n-skip="true" className="whitespace-pre-wrap break-words">{parsed.answer}</span>
       {!hasContent && !hasReason && <ThinkingDots />}
       {isStreaming && <StreamingCursor />}
     </div>
@@ -1275,23 +1276,20 @@ function MessageList({
     }
 
     const selectedServerIds = messages
-      .filter((m) => selectedIds.has(m.id))
+      .filter((m) => m.role === "assistant" && selectedIds.has(m.id))
       .map((m) => m.serverMessageId)
       .filter((id): id is number => typeof id === "number" && id > 0 && !isFavorited(id));
 
     const uniqueIds = Array.from(new Set(selectedServerIds));
-    if (uniqueIds.length === 0) {
-      toast.success("已在收藏中");
-      return;
-    }
+    if (uniqueIds.length === 0) return;
 
     let successCount = 0;
     for (const messageId of uniqueIds) {
-      const ok = await addFavorite(messageId, conversationId);
+      const ok = await addFavorite(messageId, conversationId, { silent: true });
       if (ok) successCount += 1;
     }
-    if (successCount > 1) {
-      toast.success(`已收藏 ${successCount} 条消息`);
+    if (successCount > 0) {
+      toast.success("已收藏");
     }
   };
 

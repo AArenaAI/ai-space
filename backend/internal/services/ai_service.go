@@ -73,7 +73,7 @@ type ChatRequest struct {
 	Stream   bool      `json:"stream"`
 }
 
-func (s *AIService) ChatCompletion(ctx context.Context, model string, messages []Message, stream bool, reasoning bool, reasoningEffort ReasoningEffort, search bool) (*AICompletionResponse, error) {
+func (s *AIService) ChatCompletion(ctx context.Context, model string, messages []Message, stream bool, reasoning bool, reasoningEffort ReasoningEffort, search bool, textFormat map[string]any) (*AICompletionResponse, error) {
 	req := UnifiedAIRequest{
 		Model:           model,
 		Messages:        messages,
@@ -81,6 +81,7 @@ func (s *AIService) ChatCompletion(ctx context.Context, model string, messages [
 		Reasoning:       reasoning,
 		ReasoningEffort: reasoningEffort,
 		Search:          search,
+		TextFormat:      textFormat,
 	}
 	adapter := s.adapterForModel(model)
 	if adapter == nil {

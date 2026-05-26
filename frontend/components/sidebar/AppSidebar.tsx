@@ -15,7 +15,7 @@ import {
   MessageSquare, Palette, Presentation, LogIn, LogOut,
   PanelLeftClose, MessageSquarePlus, Search, ChevronRight,
   User, Trash2, MoreHorizontal, Pencil, Pin, PinOff, Link2, Check,
-  FileText, LayoutGrid, X, Clock, Sparkles, Image, ImageIcon, Eraser,
+  FileText, LayoutGrid, X, Clock, Sparkles, Image, ImageIcon, Video, Eraser,
   Type, ZoomIn,
   Briefcase, FileCode, PenTool, BarChart3, Mail, ClipboardList, Terminal, GraduationCap, Languages,
   Zap, Shield, BookOpen, Wrench, Globe, Code2,
@@ -29,6 +29,13 @@ import SidebarUserPanel from "./SidebarUserPanel";
 import { useWorkspaces } from "@/hooks/useWorkspaces";
 import { useTheme } from "@/components/theme/ThemeProvider";
 import { usePlatform } from "@/hooks/usePlatform";
+import { CREATIVE_PAGE_HREFS, CREATIVE_PAGE_PATHS } from "./ToolsSidebar";
+import { WORK_PAGE_HREFS, WORK_PAGE_PATHS } from "./WorkToolsSidebar";
+
+const isPathInGroup = (pathname: string | null, paths: string[]) => {
+  const clean = cleanPathname(pathname);
+  return paths.some((path) => clean === path || clean.startsWith(`${path}/`));
+};
 
 // 模块级缓存：避免组件重新挂载时历史记录反复闪烁
 let cachedConversations: Conversation[] | null = null;
@@ -206,14 +213,26 @@ function ConvMenu({
   );
 }
 
-/* ───── "更多" hover 展开面板 ───── */
+/* ───── 悬浮面板公共组件 ───── */
 
-function MoreHoverPanel({
-  open, anchorEl, onClose, onMouseEnter, onMouseLeave,
+interface HoverPanelItem {
+  icon: React.ElementType;
+  label: string;
+  href: string;
+  color: string;
+  bg: string;
+}
+
+interface HoverPanelGroup {
+  title: string;
+  items: HoverPanelItem[];
+}
+
+function HoverPanel({
+  open, anchorEl, onClose, onMouseEnter, onMouseLeave, groups,
 }: {
-  open: boolean; anchorEl: HTMLElement | null; onClose: () => void; onMouseEnter?: () => void; onMouseLeave?: () => void;
+  open: boolean; anchorEl: HTMLElement | null; onClose: () => void; onMouseEnter?: () => void; onMouseLeave?: () => void; groups: HoverPanelGroup[];
 }) {
-  const { t } = useI18n();
   const router = useRouter();
   const [pos, setPos] = useState({ top: 0, left: 0 });
 
@@ -236,24 +255,11 @@ function MoreHoverPanel({
     router.push(href);
   };
 
-  const groups = [
-    {
-      title: t("sidebar.panel.create"),
-      items: [
-        { icon: ImageIcon, label: t("sidebar.panel.ai_draw"), href: "/image", color: "text-purple-500", bg: "bg-purple-500/10" },
-        { icon: Image, label: t("sidebar.panel.remove_bg"), href: "/image/edit?mode=remove-bg", color: "text-green-500", bg: "bg-green-500/10" },
-        { icon: Eraser, label: t("sidebar.panel.replace_bg"), href: "/image/edit?mode=replace-bg", color: "text-purple-500", bg: "bg-purple-500/10" },
-        { icon: Type, label: t("sidebar.panel.text_removal"), href: "/image/edit?mode=text-removal", color: "text-amber-500", bg: "bg-amber-500/10" },
-        { icon: ZoomIn, label: t("sidebar.panel.upscale"), href: "/image/edit?mode=upscale", color: "text-cyan-500", bg: "bg-cyan-500/10" },
-      ],
-    },
-  ];
-
   if (!open || !anchorEl) return null;
 
   return createPortal(
     <div
-      className="fixed z-[60] w-[280px] rounded-2xl border border-surface-border bg-surface shadow-2xl py-4 px-3"
+      className="fixed z-[60] w-[320px] rounded-2xl border border-surface-border bg-surface shadow-2xl py-4 px-3"
       style={{
         top: pos.top,
         left: pos.left,
@@ -270,7 +276,8 @@ function MoreHoverPanel({
               <button
                 key={item.label}
                 onClick={() => handleNavigate(item.href)}
-                className="flex items-center gap-2.5 p-2.5 rounded-xl text-left transition-all duration-150 hover:bg-surface-card group"
+                title={item.label}
+                className="flex items-center gap-2.5 p-2.5 rounded-xl text-left transition-all duration-150 hover:bg-surface-card group cursor-pointer"
               >
                 <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0", item.bg)}>
                   <item.icon className={cn("w-4 h-4", item.color)} />
@@ -281,161 +288,6 @@ function MoreHoverPanel({
           </div>
         </div>
       ))}
-    </div>,
-    document.body
-  );
-}
-
-/* ───── AI工作悬浮面板 ───── */
-function WorkHoverPanel({
-  open, anchorEl, onClose, onMouseEnter, onMouseLeave,
-}: {
-  open: boolean; anchorEl: HTMLElement | null; onClose: () => void; onMouseEnter?: () => void; onMouseLeave?: () => void;
-}) {
-  const { t } = useI18n();
-  const router = useRouter();
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-  const [skills, setSkills] = useState<Array<{ key: string; title?: string; display_name?: string; description: string; icon: string; tags?: string[]; is_meta?: boolean }>>([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (open && anchorEl) {
-      const rect = anchorEl.getBoundingClientRect();
-      setPos({ top: rect.top, left: rect.right + 8 });
-    }
-  }, [open, anchorEl]);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [open, onClose]);
-
-  useEffect(() => {
-    if (!open) return;
-    setLoading(true);
-    fetch("/api/skills")
-      .then((r) => r.json())
-      .then((data) => {
-        const list = Array.isArray(data)
-          ? data
-          : Array.isArray(data?.skills)
-            ? data.skills
-            : [...(Array.isArray(data?.system_skills) ? data.system_skills : []), ...(Array.isArray(data?.custom_skills) ? data.custom_skills : [])];
-        setSkills(list.filter((s: any) => !s.is_meta));
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [open]);
-
-  const handleNavigate = (href: string) => {
-    onClose();
-    router.push(href);
-  };
-
-  const iconMap: Record<string, React.ElementType> = {
-    zap: Zap, search: Search, shield: Shield, "file-code": FileCode,
-    "book-open": BookOpen, wrench: Wrench, "pen-tool": PenTool,
-    "message-square": MessageSquare, globe: Globe, briefcase: Briefcase,
-    "code-2": Code2, "bar-chart": BarChart3, mail: Mail,
-    "clipboard-list": ClipboardList, terminal: Terminal,
-    "graduation-cap": GraduationCap, languages: Languages,
-  };
-  const colorMap: Record<string, string> = {
-    zap: "text-yellow-500", search: "text-blue-500", shield: "text-red-500",
-    "file-code": "text-cyan-500", "book-open": "text-amber-500", wrench: "text-slate-500",
-    "pen-tool": "text-pink-500", "message-square": "text-green-500", globe: "text-sky-500",
-    briefcase: "text-orange-500", "code-2": "text-indigo-500", "bar-chart": "text-emerald-500",
-    mail: "text-rose-500", "clipboard-list": "text-violet-500", terminal: "text-teal-500",
-    "graduation-cap": "text-lime-500", languages: "text-fuchsia-500",
-  };
-  const bgMap: Record<string, string> = {
-    zap: "bg-yellow-500/10", search: "bg-blue-500/10", shield: "bg-red-500/10",
-    "file-code": "bg-cyan-500/10", "book-open": "bg-amber-500/10", wrench: "bg-slate-500/10",
-    "pen-tool": "bg-pink-500/10", "message-square": "bg-green-500/10", globe: "bg-sky-500/10",
-    briefcase: "bg-orange-500/10", "code-2": "bg-indigo-500/10", "bar-chart": "bg-emerald-500/10",
-    mail: "bg-rose-500/10", "clipboard-list": "bg-violet-500/10", terminal: "bg-teal-500/10",
-    "graduation-cap": "bg-lime-500/10", languages: "bg-fuchsia-500/10",
-  };
-
-  if (!open || !anchorEl) return null;
-
-  return createPortal(
-    <div
-      className="fixed z-[60] w-[340px] rounded-2xl border border-surface-border bg-surface shadow-2xl py-4 px-3"
-      style={{
-        top: pos.top,
-        left: pos.left,
-        animation: "slide-in-right 180ms ease-out",
-      }}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
-    >
-      {/* AI PPT */}
-      <div className="mb-3">
-        <h3 className="text-sm font-semibold text-text-primary mb-2 px-1">{t("sidebar.panel.tools")}</h3>
-        <div className="grid grid-cols-2 gap-1.5">
-          <button
-            // onClick={() => handleNavigate("/ppt")}
-            title="coming soon"
-            className="relative flex items-center gap-2.5 p-2.5 rounded-xl text-left transition-all duration-150 cursor-not-allowed opacity-60 group"
-          >
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-surface-card">
-              <Presentation className="w-4 h-4 text-text-tertiary" />
-            </div>
-            <span className="text-sm text-text-tertiary transition-colors">AI PPT</span>
-            <span className="pointer-events-none absolute left-1/2 top-full z-10 mt-1 -translate-x-1/2 whitespace-nowrap rounded-lg bg-surface-elevated border border-surface-border px-2 py-1 text-xs text-text-secondary opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
-              coming soon
-            </span>
-          </button>
-        </div>
-      </div>
-
-      {/* Skills */}
-      <div className="border-t border-surface-border/40 pt-3">
-        <h3 className="text-sm font-semibold text-text-primary mb-2 px-1">{t("sidebar.panel.agents")}</h3>
-        {loading ? (
-          <div className="flex items-center justify-center py-4">
-            <div className="w-5 h-5 border-2 border-surface-border border-t-brand rounded-full animate-spin" />
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-1.5 max-h-[50vh] overflow-y-auto pr-1">
-            {skills.map((skill) => {
-              const Icon = iconMap[skill.icon] || Sparkles;
-              const skillRouteMap: Record<string, string> = {
-                "ai-writing-assistant": "/writing-assistant",
-                translator: "/translator",
-              };
-              const route = skillRouteMap[skill.key];
-              const enabled = Boolean(route);
-              return (
-                <button
-                  key={skill.key}
-                  onClick={enabled ? () => handleNavigate(route) : undefined}
-                  title={enabled ? (skill.title || skill.display_name || skill.key) : "coming soon"}
-                  className={cn(
-                    "relative flex items-center gap-2.5 p-2.5 rounded-xl text-left transition-all duration-150 group",
-                    enabled
-                      ? "hover:bg-surface-card cursor-pointer"
-                      : "cursor-not-allowed opacity-60"
-                  )}
-                >
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-surface-card">
-                    <Icon className={cn("w-4 h-4", enabled ? "text-slate-900 dark:text-text-primary" : "text-text-tertiary")} />
-                  </div>
-                  <span className={cn("text-sm transition-colors truncate", enabled ? "text-text-primary" : "text-text-tertiary")}>{skill.title || skill.display_name || skill.key}</span>
-                  {!enabled && (
-                    <span className="pointer-events-none absolute left-1/2 top-full z-10 mt-1 -translate-x-1/2 whitespace-nowrap rounded-lg bg-surface-elevated border border-surface-border px-2 py-1 text-xs text-text-secondary opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
-                      coming soon
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
     </div>,
     document.body
   );
@@ -464,16 +316,28 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   const themeCtx = useTheme();
   const theme = themeCtx?.theme || "light";
   const [collapsed, setCollapsed] = useState(false);
+  const defaultExpandedLabels = () => new Set([
+    t("sidebar.time.today"),
+    t("sidebar.time.yesterday"),
+    t("sidebar.time.last7days"),
+  ]);
+
   const [expandedLabels, setExpandedLabels] = useState<Set<string>>(() => {
-    if (typeof window === "undefined") return new Set([t("sidebar.time.today")]);
+    const defaults = defaultExpandedLabels();
+    if (typeof window === "undefined") return defaults;
     try {
       const saved = localStorage.getItem("sidebar_expanded_labels");
       if (saved) {
         const arr = JSON.parse(saved);
-        if (Array.isArray(arr) && arr.length > 0) return new Set(arr);
+        if (Array.isArray(arr) && arr.length > 0) {
+          const next = new Set<string>(arr);
+          defaults.forEach(label => next.add(label));
+          next.delete(t("sidebar.time.last30days"));
+          return next;
+        }
       }
     } catch { /* ignore */ }
-    return new Set([t("sidebar.time.today")]);
+    return defaults;
   });
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     if (typeof window !== "undefined") {
@@ -501,6 +365,8 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   const routeConvId = searchParams.get("id");
   const currentConvId = optimisticConvId ?? routeConvId;
   const router = useRouter();
+  const isWorkRoute = isPathInGroup(pathname, WORK_PAGE_PATHS);
+  const isCreativeRoute = isPathInGroup(pathname, CREATIVE_PAGE_PATHS);
   const { templates, updateTemplate } = useTemplates();
   const { isMac, mod } = usePlatform();
 
@@ -582,6 +448,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     if (moreTimerRef.current) clearTimeout(moreTimerRef.current);
     if (workTimerRef.current) clearTimeout(workTimerRef.current);
     setWorkOpen(false);
+    CREATIVE_PAGE_HREFS.forEach((href) => router.prefetch(href));
     setMoreOpen(true);
   };
   const handleMoreLeave = () => {
@@ -592,6 +459,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     if (workTimerRef.current) clearTimeout(workTimerRef.current);
     if (moreTimerRef.current) clearTimeout(moreTimerRef.current);
     setMoreOpen(false);
+    WORK_PAGE_HREFS.forEach((href) => router.prefetch(href));
     setWorkOpen(true);
   };
   const handleWorkLeave = () => {
@@ -885,7 +753,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
       );
     }
 
-    const sidebarConversations = conversations.filter(c => c.skill_key !== "ai-writing-assistant" && c.skill_key !== "translator");
+    const sidebarConversations = conversations.filter(c => c.skill_key !== "ai-writing-assistant" && c.skill_key !== "translator" && c.skill_key !== "document-reader");
     const pinned = sidebarConversations.filter(c => c.pinned);
     const unpinned = sidebarConversations.filter(c => !c.pinned);
     const groups = groupConversationsByTime(unpinned, t);
@@ -1036,13 +904,13 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                   ref={workBtnRef}
                   className={cn(
                     "p-2.5 rounded-xl transition-colors",
-                    pathname === "/ppt" || pathname?.startsWith("/ppt/") || pathname === "/skills" || pathname?.startsWith("/skills/")
+                    isWorkRoute
                       ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]"
                       : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
                   )}
                 >
                   <Briefcase className={cn("w-5 h-5",
-                    pathname === "/ppt" || pathname?.startsWith("/ppt/") || pathname === "/skills" || pathname?.startsWith("/skills/")
+                    isWorkRoute
                       ? "text-orange-500"
                       : "text-text-tertiary"
                   )} />
@@ -1058,12 +926,12 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                   ref={moreBtnRef}
                   className={cn(
                     "p-2.5 rounded-xl transition-colors",
-                    pathname === "/image" || pathname?.startsWith("/image/") || pathname === "/templates"
+                    isCreativeRoute
                       ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]"
                       : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
                   )}
                 >
-                  <LayoutGrid className={cn("w-5 h-5", pathname === "/image" || pathname?.startsWith("/image/") || pathname === "/templates" ? "text-slate-900 dark:text-text-primary" : "text-text-tertiary")} />
+                  <LayoutGrid className={cn("w-5 h-5", isCreativeRoute ? "text-slate-900 dark:text-text-primary" : "text-text-tertiary")} />
                 </button>
               </div>
 
@@ -1136,14 +1004,14 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                     ref={workBtnRef}
                     className={cn(
                       "flex items-center justify-between w-full px-3 py-2.5 rounded-xl text-sm font-normal transition-all duration-150",
-                      pathname === "/ppt" || pathname?.startsWith("/ppt/") || pathname === "/skills" || pathname?.startsWith("/skills/")
+                      isWorkRoute
                         ? "bg-surface-card text-slate-900 font-medium shadow-sm shadow-black/[0.02] dark:text-text-primary"
                         : "text-slate-500 hover:bg-surface-card hover:text-slate-900 dark:text-text-secondary dark:hover:text-text-primary"
                     )}
                   >
                     <div className="flex items-center gap-3">
                       <Briefcase className={cn("w-[18px] h-[18px] shrink-0 transition-colors",
-                        pathname === "/ppt" || pathname?.startsWith("/ppt/") || pathname === "/skills" || pathname?.startsWith("/skills/")
+                        isWorkRoute
                           ? "text-orange-500"
                           : "text-text-tertiary"
                       )} />
@@ -1162,13 +1030,13 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                     ref={moreBtnRef}
                     className={cn(
                       "flex items-center justify-between w-full px-3 py-2.5 rounded-xl text-sm font-normal transition-all duration-150",
-                      pathname === "/image" || pathname?.startsWith("/image/") || pathname === "/templates"
+                      isCreativeRoute
                         ? "bg-surface-card text-slate-900 font-medium shadow-sm shadow-black/[0.02] dark:text-text-primary"
                         : "text-slate-500 hover:bg-surface-card hover:text-slate-900 dark:text-text-secondary dark:hover:text-text-primary"
                     )}
                   >
                     <div className="flex items-center gap-3">
-                      <LayoutGrid className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/image" || pathname?.startsWith("/image/") || pathname === "/templates" ? "text-slate-900 dark:text-text-primary" : "text-text-tertiary")} />
+                      <LayoutGrid className={cn("w-[18px] h-[18px] shrink-0 transition-colors", isCreativeRoute ? "text-slate-900 dark:text-text-primary" : "text-text-tertiary")} />
                       <span>{t("sidebar.nav.ai_create")}</span>
                     </div>
                     <ChevronRight className="w-4 h-4 text-text-tertiary" />
@@ -1224,10 +1092,45 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
       </div>
 
       {/* 更多 hover 面板 */}
-      <MoreHoverPanel open={moreOpen} anchorEl={moreBtnRef.current} onClose={() => setMoreOpen(false)} onMouseEnter={handleMoreEnter} onMouseLeave={handleMoreLeave} />
+      <HoverPanel
+        open={moreOpen}
+        anchorEl={moreBtnRef.current}
+        onClose={() => setMoreOpen(false)}
+        onMouseEnter={handleMoreEnter}
+        onMouseLeave={handleMoreLeave}
+        groups={[
+          {
+            title: t("sidebar.panel.create"),
+            items: [
+              { icon: ImageIcon, label: t("image.generateImage"), href: "/image", color: "text-purple-500", bg: "bg-purple-500/10" },
+              { icon: Video, label: t("video.generateVideo"), href: "/video", color: "text-blue-500", bg: "bg-blue-500/10" },
+              { icon: Image, label: t("sidebar.panel.remove_bg"), href: "/image/edit?mode=remove-bg", color: "text-green-500", bg: "bg-green-500/10" },
+              { icon: Eraser, label: t("sidebar.panel.replace_bg"), href: "/image/edit?mode=replace-bg", color: "text-purple-500", bg: "bg-purple-500/10" },
+              { icon: Type, label: t("sidebar.panel.text_removal"), href: "/image/edit?mode=text-removal", color: "text-amber-500", bg: "bg-amber-500/10" },
+              { icon: ZoomIn, label: t("sidebar.panel.upscale"), href: "/image/edit?mode=upscale", color: "text-cyan-500", bg: "bg-cyan-500/10" },
+            ],
+          },
+        ]}
+      />
 
       {/* AI工作 hover 面板 */}
-      <WorkHoverPanel open={workOpen} anchorEl={workBtnRef.current} onClose={() => setWorkOpen(false)} onMouseEnter={handleWorkEnter} onMouseLeave={handleWorkLeave} />
+      <HoverPanel
+        open={workOpen}
+        anchorEl={workBtnRef.current}
+        onClose={() => setWorkOpen(false)}
+        onMouseEnter={handleWorkEnter}
+        onMouseLeave={handleWorkLeave}
+        groups={[
+          {
+            title: t("sidebar.nav.ai_work"),
+            items: [
+              { icon: PenTool, label: t("work.writingAssistant"), href: "/writing-assistant", color: "text-pink-500", bg: "bg-pink-500/10" },
+              { icon: Languages, label: t("work.translator"), href: "/translator", color: "text-fuchsia-500", bg: "bg-fuchsia-500/10" },
+              { icon: FileText, label: t("work.documentReader"), href: "/document-reader", color: "text-orange-500", bg: "bg-orange-500/10" },
+            ],
+          },
+        ]}
+      />
 
       {/* 收缩状态 tooltip */}
       {sidebarTooltip && typeof document !== "undefined" && createPortal(

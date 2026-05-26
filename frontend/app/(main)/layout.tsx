@@ -1,35 +1,23 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
-import AppSidebar from "@/components/sidebar/AppSidebar";
-import ToolsSidebar from "@/components/sidebar/ToolsSidebar";
-
-const TOOLS_PAGES = ["/image", "/templates"];
+import { Suspense } from "react";
 
 export default function MainLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  /* 初始固定为 false，避免静态导出 hydration mismatch */
-  const pathname = usePathname();
-  const [isToolsPage, setIsToolsPage] = useState(false);
-
-  useEffect(() => {
-    setIsToolsPage(TOOLS_PAGES.some((p) => pathname.startsWith(p)));
-  }, [pathname]);
-
   return (
-    <div className="flex h-screen bg-surface overflow-hidden">
-      <div className="hidden md:block shrink-0">
-        <Suspense fallback={null}>
-          {isToolsPage ? <ToolsSidebar /> : <AppSidebar />}
-        </Suspense>
-      </div>
-
-      {/* 主内容区 */}
-      <main className="flex-1 min-w-0">{children}</main>
+    <div className="flex h-screen overflow-hidden bg-surface">
+      <Suspense
+        fallback={
+          <div className="flex flex-1 items-center justify-center bg-surface">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand border-t-transparent" />
+          </div>
+        }
+      >
+        {children}
+      </Suspense>
     </div>
   );
 }

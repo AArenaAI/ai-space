@@ -11,6 +11,8 @@ type UnifiedAIRequest struct {
 	Reasoning       bool
 	ReasoningEffort ReasoningEffort
 	Search          bool
+	// TextFormat 用于 OpenAI Responses API 的 text.format 结构化输出，仅当非空时生效。
+	TextFormat map[string]any
 }
 
 // ProviderAdapter 是所有模型厂商的统一适配器接口。
@@ -32,7 +34,7 @@ func NewOpenAIAdapter(service *AIService) *OpenAIAdapter { return &OpenAIAdapter
 func (a *OpenAIAdapter) Name() string                    { return "openai" }
 func (a *OpenAIAdapter) Supports(model string) bool      { return isOpenAI(model) }
 func (a *OpenAIAdapter) ChatCompletion(ctx context.Context, req UnifiedAIRequest) (*AICompletionResponse, error) {
-	return a.service.callOpenAIResponsesSDK(ctx, req.Model, req.Messages, req.Stream, req.Reasoning, req.ReasoningEffort, req.Search)
+	return a.service.callOpenAIResponsesSDK(ctx, req.Model, req.Messages, req.Stream, req.Reasoning, req.ReasoningEffort, req.Search, req.TextFormat)
 }
 func (a *OpenAIAdapter) Retrieve(ctx context.Context, taskID string) (map[string]any, error) {
 	return a.service.retrieveOpenAIResponseSDK(ctx, taskID)

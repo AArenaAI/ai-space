@@ -89,9 +89,9 @@ function FavoriteCard({ item, onRemove }: { item: FavoriteItem; onRemove: () => 
     <div className="rounded-xl border border-surface-border bg-surface-card p-4 transition-all hover:border-surface-border/80">
       {/* Query */}
       {item.user_query && (
-        <div className="flex items-start gap-2 mb-2">
-          <MessageSquare className="w-3.5 h-3.5 text-text-tertiary mt-0.5 shrink-0" />
-          <p className="text-sm text-text-secondary line-clamp-2">{item.user_query}</p>
+        <div className="mb-3 border-l-2 border-surface-border pl-3">
+          <div className="mb-1 text-xs text-text-tertiary">引用的用户输入</div>
+          <p className="line-clamp-2 text-sm text-text-secondary">{item.user_query}</p>
         </div>
       )}
 

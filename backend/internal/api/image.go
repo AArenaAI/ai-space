@@ -9,6 +9,10 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,9 +21,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
-
-// 图片存储目录（相对于工作目录）
-const imagesDir = "./data/images"
 
 type ImageHandler struct {
 	db           *gorm.DB
@@ -177,13 +178,27 @@ func buildImageURL(baseURL, filename string) string {
 	return "/api/images/file/" + filename
 }
 
+func detectImageSize(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	cfg, _, err := image.DecodeConfig(file)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%dx%d", cfg.Width, cfg.Height), nil
+}
+
 // saveBase64Image 将 base64 数据保存为本地图片文件，返回文件名
 func saveBase64Image(b64Data string) (string, error) {
-	if err := os.MkdirAll(imagesDir, 0755); err != nil {
+	if err := os.MkdirAll(imageAssetsDir(), 0755); err != nil {
 		return "", fmt.Errorf("创建图片目录失败: %w", err)
 	}
 	filename := generateFileName()
-	path := filepath.Join(imagesDir, filename)
+	path := filepath.Join(imageAssetsDir(), filename)
 	data, err := base64.StdEncoding.DecodeString(b64Data)
 	if err != nil {
 		return "", fmt.Errorf("base64 解码失败: %w", err)
@@ -242,9 +257,6 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 
 	baseURL := resolveBaseURL(c, h.cfg)
 	size := req.Size
-	if size == "" {
-		size = "1024x1024"
-	}
 
 	var imageFilePath string
 
@@ -289,7 +301,7 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 			return
 		}
 
-		imageFilePath = filepath.Join(imagesDir, filename)
+		imageFilePath = filepath.Join(imageAssetsDir(), filename)
 		if _, statErr := os.Stat(imageFilePath); statErr != nil {
 			// 如果 data/images/ 没有，去 uploads 目录找
 			uploadDir := "./uploads"
@@ -299,6 +311,17 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 				return
 			}
 		}
+	}
+
+	if size == "" && req.EditMode == "remove-bg" {
+		if detectedSize, sizeErr := detectImageSize(imageFilePath); sizeErr == nil && detectedSize != "" {
+			size = detectedSize
+		} else {
+			fmt.Printf("[背景移除] 读取源图尺寸失败 path=%s err=%v\n", imageFilePath, sizeErr)
+		}
+	}
+	if size == "" {
+		size = "1024x1024"
 	}
 
 	editPrompt := req.Prompt
@@ -338,18 +361,20 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"id":         gen.ID,
-		"status":     "pending",
+		"prompt":     gen.Prompt,
+		"size":       gen.Size,
+		"status":     gen.Status,
 		"created_at": gen.CreatedAt,
 	})
 }
 
 // saveBase64ToImages 将 base64 数据保存到 data/images/ 目录，返回完整文件路径
 func saveBase64ToImages(b64Data string) (string, error) {
-	if err := os.MkdirAll(imagesDir, 0755); err != nil {
+	if err := os.MkdirAll(imageAssetsDir(), 0755); err != nil {
 		return "", fmt.Errorf("创建图片目录失败: %w", err)
 	}
 	filename := generateFileName()
-	path := filepath.Join(imagesDir, filename)
+	path := filepath.Join(imageAssetsDir(), filename)
 	data, err := base64.StdEncoding.DecodeString(b64Data)
 	if err != nil {
 		return "", fmt.Errorf("base64 解码失败: %w", err)
@@ -376,7 +401,7 @@ func (h *ImageHandler) resolveReferenceImagePath(url string) string {
 	if len(parts) > 0 {
 		filename := parts[len(parts)-1]
 		if !strings.Contains(filename, "..") && !strings.Contains(filename, "/") {
-			refPath := filepath.Join(imagesDir, filename)
+			refPath := filepath.Join(imageAssetsDir(), filename)
 			if _, statErr := os.Stat(refPath); statErr == nil {
 				return refPath
 			}
@@ -501,7 +526,7 @@ func (h *ImageHandler) ServeImageFile(c *gin.Context) {
 		return
 	}
 
-	path := filepath.Join(imagesDir, filename)
+	path := filepath.Join(imageAssetsDir(), filename)
 	if _, err := os.Stat(path); err != nil {
 		// 兼容后端从仓库根目录启动时，图片被保存到 ./data/images，而当前 API 包的相对目录不是同一个目录。
 		altPath := filepath.Join("..", "data", "images", filename)
@@ -537,7 +562,7 @@ func (h *ImageHandler) processImageJob(recordID uint, prompt, size, quality stri
 
 	if err != nil {
 		fmt.Printf("[图片生成失败] ID=%d size=%s quality=%s ref=%v err=%v\n", recordID, size, quality, referenceImagePaths, err)
-		errMsg := err.Error()
+		errMsg := cleanImageGenerationErrorMessage(err)
 		if saveErr := h.db.Model(&services.ImageGeneration{}).Where("id = ?", recordID).Updates(map[string]interface{}{
 			"status":        "failed",
 			"error_message": errMsg,
@@ -559,7 +584,10 @@ func (h *ImageHandler) processImageJob(recordID uint, prompt, size, quality stri
 		filename, err := saveBase64Image(b64Data)
 		if err != nil {
 			fmt.Printf("[保存图片失败] ID=%d err=%v\n", recordID, err)
-			if saveErr := h.db.Model(&services.ImageGeneration{}).Where("id = ?", recordID).Update("status", "failed").Error; saveErr != nil {
+			if saveErr := h.db.Model(&services.ImageGeneration{}).Where("id = ?", recordID).Updates(map[string]interface{}{
+				"status":        "failed",
+				"error_message": "图片生成成功了，但保存图片时失败。请稍后重试，",
+			}).Error; saveErr != nil {
 				fmt.Printf("[更新状态失败] ID=%d err=%v\n", recordID, saveErr)
 			}
 			if h.usageService != nil {
@@ -575,7 +603,10 @@ func (h *ImageHandler) processImageJob(recordID uint, prompt, size, quality stri
 
 	if imageURL == "" {
 		fmt.Printf("[图片生成异常] ID=%d 未获取到 URL 或数据\n", recordID)
-		if saveErr := h.db.Model(&services.ImageGeneration{}).Where("id = ?", recordID).Update("status", "failed").Error; saveErr != nil {
+		if saveErr := h.db.Model(&services.ImageGeneration{}).Where("id = ?", recordID).Updates(map[string]interface{}{
+			"status":        "failed",
+			"error_message": defaultImageGenerationErrorMessage,
+		}).Error; saveErr != nil {
 			fmt.Printf("[更新状态失败] ID=%d err=%v\n", recordID, saveErr)
 		}
 		if h.usageService != nil {
@@ -638,7 +669,7 @@ func (h *ImageHandler) RecoverPendingJobs() {
 				if len(parts) > 0 {
 					filename := parts[len(parts)-1]
 					if !strings.Contains(filename, "..") && !strings.Contains(filename, "/") {
-						refPath := filepath.Join(imagesDir, filename)
+						refPath := filepath.Join(imageAssetsDir(), filename)
 						if _, statErr := os.Stat(refPath); statErr == nil {
 							referenceImagePaths = append(referenceImagePaths, refPath)
 						}

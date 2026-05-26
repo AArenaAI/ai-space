@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
+import { useI18n } from "@/lib/i18n";
 import { v4 as uuidv4 } from "uuid";
 import { getGuestId } from "@/lib/guestId";
 import { streamAppend, streamGet, streamClear, realtimeUpdate, realtimeGet, realtimeClear , RealtimeData } from "@/lib/streaming";
 import {
-  BUSY_GENERATING_LABEL,
   createActivityStatusFromMeta,
   createBusyGeneratingStatus,
   createFinalizingStatus,
@@ -229,6 +229,7 @@ function persistModel(model: ChatModel) {
 
 export function useChat(conversationId: number | undefined, models: ChatModel[], skillKey?: string) {
   const defaultModel = models.length > 0 ? models[0] : ({} as ChatModel);
+  const { t } = useI18n();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -339,7 +340,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               ...m,
               content: nextContent,
               serverMessageId,
-              activityStatus: isFinished ? undefined : createBusyGeneratingStatus(),
+              activityStatus: isFinished ? undefined : createBusyGeneratingStatus(t),
               completedAt: isFinished ? Date.now() : undefined,
             };
           })
@@ -428,7 +429,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         // OpenAI Responses 可能在 completed/final content 阶段补尾；交给 DB polling 校准最终内容。
         realtimeUpdate(localMessageId, {
           completedAt: undefined,
-          activityStatus: createFinalizingStatus(hasContent),
+          activityStatus: createFinalizingStatus(t, hasContent),
         });
         if (hasContent && serverMessageId) {
           startBackgroundPolling(convId, localMessageId, serverMessageId);
@@ -455,7 +456,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             useBackground: task.use_background === true || task.background === true || task.is_complex_task === true,
             isComplexTask: task.is_complex_task === true,
             lastSequence: latestSequence,
-            activityStatus: createGeneratingStatus(),
+            activityStatus: createGeneratingStatus(t),
           });
           return;
         }
@@ -476,12 +477,12 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         if (parsed._activity_meta) {
           const meta = parsed._activity_meta;
           const searchStatus = meta.kind === "web_search" ? (meta.status === "running" ? "searching" : "completed") : undefined;
-          realtimeUpdate(localMessageId, { activityStatus: createActivityStatusFromMeta(meta), searchStatus });
+          realtimeUpdate(localMessageId, { activityStatus: createActivityStatusFromMeta(t, meta), searchStatus });
           return;
         }
         if (parsed._search_meta) {
           const meta = parsed._search_meta;
-          realtimeUpdate(localMessageId, { searchStatus: meta.status, searchSources: meta.sources || [], searchSourcesCount: typeof meta.sources_count === "number" ? meta.sources_count : undefined, activityStatus: createWebSearchDoneStatus() });
+          realtimeUpdate(localMessageId, { searchStatus: meta.status, searchSources: meta.sources || [], searchSourcesCount: typeof meta.sources_count === "number" ? meta.sources_count : undefined, activityStatus: createWebSearchDoneStatus(t) });
           return;
         }
         const rawDelta = parsed.choices?.[0]?.delta || {};
@@ -504,7 +505,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             inReasoningBlock = false;
           }
           realtimeUpdate(localMessageId, {
-            activityStatus: createGeneratingStatus(),
+            activityStatus: createGeneratingStatus(t),
           });
           delta += contentDelta;
         }
@@ -690,7 +691,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               serverMessageId: active.info.serverMessageId || m.serverMessageId,
               generationTaskId: active.info.generationTaskId || m.generationTaskId,
               lastSequence: active.info.lastSequence || m.lastSequence,
-              activityStatus: createGeneratingStatus(),
+              activityStatus: createGeneratingStatus(t),
             };
           });
           setMessages(mergedMessages);
@@ -738,7 +739,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
                         ? (bgTask.completed_at ? new Date(bgTask.completed_at).getTime() : Date.now())
                         : m.completedAt),
                     activityStatus: shouldResumePolling
-                      ? createBusyGeneratingStatus()
+                      ? createBusyGeneratingStatus(t)
                       : m.activityStatus,
                   } as Message;
                 }));
@@ -919,7 +920,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           const hasContent = (accumulated || streamGet(assistantMsg.id) || realtimeGet(assistantMsg.id)?.content || "").trim().length > 0;
           realtimeUpdate(assistantMsg.id, hasContent
             ? { completedAt: Date.now(), activityStatus: undefined }
-            : { completedAt: undefined, activityStatus: createBusyGeneratingStatus() }
+            : { completedAt: undefined, activityStatus: createBusyGeneratingStatus(t) }
           );
           return;
         }
@@ -956,7 +957,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               useBackground: latestUseBackground,
               isComplexTask: task.is_complex_task === true,
               lastSequence: latestSequence,
-              activityStatus: createGeneratingStatus(),
+              activityStatus: createGeneratingStatus(t),
             });
             notifyGroupContext();
             if (generationTaskId) {
@@ -987,7 +988,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               backgroundTaskId: taskId,
               useBackground: true,
               isComplexTask: true,
-              activityStatus: createBusyGeneratingStatus(),
+              activityStatus: createBusyGeneratingStatus(t),
             });
             notifyGroupContext();
             backgroundPollingStarted = true;
@@ -1015,7 +1016,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           if (parsed._activity_meta) {
             const meta = parsed._activity_meta;
             const patch: Partial<RealtimeData> = {
-              activityStatus: createActivityStatusFromMeta(meta),
+              activityStatus: createActivityStatusFromMeta(t, meta),
             };
             if (meta.kind === "web_search") {
               patch.searchStatus = meta.status;
@@ -1030,7 +1031,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               searchStatus: meta.status,
               searchSources: meta.sources || [],
               searchSourcesCount: typeof meta.sources_count === "number" ? meta.sources_count : undefined,
-              activityStatus: createWebSearchDoneStatus(),
+              activityStatus: createWebSearchDoneStatus(t),
             });
             return;
           }
@@ -1071,7 +1072,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               inReasoningBlock = false;
             }
             realtimeUpdate(assistantMsg.id, {
-              activityStatus: createGeneratingStatus(),
+              activityStatus: createGeneratingStatus(t),
             });
             delta += contentDelta;
           }
@@ -1346,7 +1347,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
                     ...m,
                     serverMessageId: serverMessageId || m.serverMessageId,
                     generationTaskId: generationTaskId || m.generationTaskId,
-                    activityStatus: createBusyGeneratingStatus(),
+                    activityStatus: createBusyGeneratingStatus(t),
                     completedAt: undefined,
                   }
                 : m
@@ -1422,7 +1423,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
                       ...m,
                       serverMessageId: recoverableResult.serverMessageId || m.serverMessageId,
                       generationTaskId: recoverableResult.generationTaskId || m.generationTaskId,
-                      activityStatus: createBusyGeneratingStatus(),
+                      activityStatus: createBusyGeneratingStatus(t),
                       completedAt: undefined,
                     }
                   : m
@@ -1652,7 +1653,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsg.id
-                  ? { ...m, activityStatus: createBusyGeneratingStatus() }
+                  ? { ...m, activityStatus: createBusyGeneratingStatus(t) }
                   : m
               )
             );

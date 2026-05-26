@@ -12,6 +12,7 @@ import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
 import dynamic from "next/dynamic";
 import { InferredGroup } from "@/lib/groups";
 import { AssistantMessageMeta } from "./AssistantMessageMeta";
+import { useI18n } from "@/lib/i18n";
 
 const MarkdownRenderer = dynamic(() => import("./MarkdownRenderer"), {
   ssr: false,
@@ -105,6 +106,7 @@ function isMessageGenerating(msg: Message, isStreaming: boolean): boolean {
 /* ---------- 子组件 ---------- */
 
 function StreamingText({ messageId, content, isStreaming, className }: { messageId: string; content: string; isStreaming: boolean; className?: string }) {
+  const { t } = useI18n();
   const streamText = useMessageStream(messageId, isStreaming);
   const effectiveText = isStreaming ? (streamText || content) : content;
   const hasThinkTag = effectiveText.includes("<think>");
@@ -125,19 +127,19 @@ function StreamingText({ messageId, content, isStreaming, className }: { message
         <div className="mb-3 rounded-xl border border-purple-200 dark:border-purple-800/40 overflow-hidden">
           <div className="flex items-center gap-2 px-3 py-2 bg-purple-50 dark:bg-[#1A1A2E]">
             <Lightbulb className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
-            <span className="text-sm font-medium text-text-secondary">深度推理中，片刻即达极致答案</span>
+            <span className="text-sm font-medium text-text-secondary">{t("chat.reasoning.thinking")}</span>
             <div className="flex gap-0.5 ml-1">
               <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce" />
               <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce [animation-delay:0.15s]" />
               <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce [animation-delay:0.3s]" />
             </div>
           </div>
-          <div className="px-3 py-2.5 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap bg-slate-50 dark:bg-[#0F0F1A]">
+          <div data-i18n-skip="true" className="px-3 py-2.5 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap bg-slate-50 dark:bg-[#0F0F1A]">
             {parsed.reasoning || ""}
           </div>
         </div>
       )}
-      <span className="whitespace-pre-wrap break-words">{parsed.answer}</span>
+      <span data-i18n-skip="true" className="whitespace-pre-wrap break-words">{parsed.answer}</span>
       {!hasContent && !hasReason && <ThinkingDots />}
       {isStreaming && <StreamingCursor />}
     </span>
@@ -145,6 +147,7 @@ function StreamingText({ messageId, content, isStreaming, className }: { message
 }
 
 function ThinkBlock({ content, isThinking }: { content: string; isThinking: boolean }) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(() => isThinking || content.length < 2000);
 
   return (
@@ -157,7 +160,7 @@ function ThinkBlock({ content, isThinking }: { content: string; isThinking: bool
       >
         <Lightbulb className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
         <span className="text-sm font-medium text-text-secondary flex-1">
-          {isThinking ? "深度推理中，片刻即达极致答案" : `深度推理${content.length >= 2000 ? " · 已折叠" : ""}`}
+          {isThinking ? t("chat.reasoning.thinking") : `${t("chat.reasoning.title")}${content.length >= 2000 ? ` · ${t("chat.reasoning.collapsed")}` : ""}`}
         </span>
         {isThinking && (
           <div className="flex gap-0.5">
@@ -173,7 +176,7 @@ function ThinkBlock({ content, isThinking }: { content: string; isThinking: bool
         )}
       </button>
       {expanded && (
-        <div className="px-3 py-2.5 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap
+        <div data-i18n-skip="true" className="px-3 py-2.5 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap
           bg-slate-50 dark:bg-[#0F0F1A]">
           {content}
         </div>
@@ -664,7 +667,7 @@ function ChatMessageItemRaw({
               onDelete={handleDelete}
               onRegenerate={onRegenerate}
               onSelectMode={onEnterSelectMode}
-              onFavorite={msg.serverMessageId && conversationId ? handleFavorite : undefined}
+              onFavorite={!isUser && msg.serverMessageId && conversationId ? handleFavorite : undefined}
               isFavorited={isFavorited}
               showRegenerate={canRegenerate}
               align={isUser ? "right" : "left"}

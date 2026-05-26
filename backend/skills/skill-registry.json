@@ -275,6 +275,29 @@
         "output-quality"
       ],
       "enabled": true
+    },
+    {
+      "key": "document-reader",
+      "display_name": "AI 文档研读",
+      "version": "1.0.0",
+      "description": "AI 驱动的 PDF 文档智能研读，支持全文摘要、问答、关键信息提取与结构化展示",
+      "category": "productivity",
+      "icon": "file-text",
+      "color": "#f59e0b",
+      "recommended_model": "gemini-2.5-pro",
+      "triggers": [
+        "文档",
+        "PDF",
+        "研报",
+        "论文",
+        "合同",
+        "研读",
+        "解读"
+      ],
+      "co_skills": [
+        "output-quality"
+      ],
+      "enabled": true
     }
   ],
   "system_skills": []

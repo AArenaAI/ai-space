@@ -139,6 +139,17 @@ export function useImage() {
     [startPolling, images]
   );
 
+  const upsertImage = useCallback((image: GeneratedImage) => {
+    setImages((prev) => {
+      const exists = prev.some((item) => item.id === image.id);
+      const next = exists
+        ? prev.map((item) => (item.id === image.id ? { ...item, ...image } : item))
+        : [image, ...prev];
+      cachedImages = next;
+      return next;
+    });
+  }, []);
+
   const deleteImage = useCallback(async (id: number) => {
     try {
       const token = localStorage.getItem("token");
@@ -165,6 +176,8 @@ export function useImage() {
     isGenerating,
     error,
     fetchImages,
+    startPolling,
+    upsertImage,
     generateImage,
     deleteImage,
   };
