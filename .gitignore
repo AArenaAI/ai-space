@@ -66,6 +66,10 @@ package-lock.json
 # TypeScript build info
 frontend/tsconfig.tsbuildinfo
 
+# Test artifacts
+frontend/test-results/
+frontend/playwright-report/
+
 # Hermes
 .hermes/
 

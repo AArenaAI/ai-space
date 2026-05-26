@@ -1092,6 +1092,20 @@ function MessageList({
     }
   }, [conversationId, targetMessageId]);
 
+  const openedConversationBottomKeyRef = useRef("");
+  useEffect(() => {
+    if (targetMessageId || isLoadingHistory || messages.length === 0) return;
+    const key = `${conversationId || "new"}:${messages[0]?.id || ""}:${messages[messages.length - 1]?.id || ""}`;
+    if (openedConversationBottomKeyRef.current === key) return;
+    openedConversationBottomKeyRef.current = key;
+
+    stickToBottomRef.current = true;
+    atBottomRef.current = true;
+    userScrollOverrideUntilRef.current = 0;
+    setAtBottom(true);
+    lockBottomAfterLayout();
+  }, [conversationId, targetMessageId, isLoadingHistory, messages, lockBottomAfterLayout]);
+
   const activeCompareModels = useMemo(() => {
     if (!isCompare) return [];
     return compareModels && compareModels.length > 0

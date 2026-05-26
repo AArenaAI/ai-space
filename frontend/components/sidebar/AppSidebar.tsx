@@ -46,6 +46,7 @@ interface Conversation {
 interface ConversationSearchResult extends Conversation {
   matched_content?: string;
   matched_role?: string;
+  matched_message_id?: number;
 }
 
 /* ───── 辅助函数 ───── */
@@ -402,24 +403,29 @@ function WorkHoverPanel({
           <div className="grid grid-cols-2 gap-1.5 max-h-[50vh] overflow-y-auto pr-1">
             {skills.map((skill) => {
               const Icon = iconMap[skill.icon] || Sparkles;
-              const isWritingAssistant = skill.key === "ai-writing-assistant";
+              const skillRouteMap: Record<string, string> = {
+                "ai-writing-assistant": "/writing-assistant",
+                translator: "/translator",
+              };
+              const route = skillRouteMap[skill.key];
+              const enabled = Boolean(route);
               return (
                 <button
                   key={skill.key}
-                  onClick={isWritingAssistant ? () => handleNavigate("/writing-assistant") : undefined}
-                  title={isWritingAssistant ? "AI写作助手" : "coming soon"}
+                  onClick={enabled ? () => handleNavigate(route) : undefined}
+                  title={enabled ? (skill.title || skill.display_name || skill.key) : "coming soon"}
                   className={cn(
                     "relative flex items-center gap-2.5 p-2.5 rounded-xl text-left transition-all duration-150 group",
-                    isWritingAssistant
+                    enabled
                       ? "hover:bg-surface-card cursor-pointer"
                       : "cursor-not-allowed opacity-60"
                   )}
                 >
                   <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-surface-card">
-                    <Icon className={cn("w-4 h-4", isWritingAssistant ? "text-slate-900 dark:text-text-primary" : "text-text-tertiary")} />
+                    <Icon className={cn("w-4 h-4", enabled ? "text-slate-900 dark:text-text-primary" : "text-text-tertiary")} />
                   </div>
-                  <span className={cn("text-sm transition-colors truncate", isWritingAssistant ? "text-text-primary" : "text-text-tertiary")}>{skill.title || skill.display_name || skill.key}</span>
-                  {!isWritingAssistant && (
+                  <span className={cn("text-sm transition-colors truncate", enabled ? "text-text-primary" : "text-text-tertiary")}>{skill.title || skill.display_name || skill.key}</span>
+                  {!enabled && (
                     <span className="pointer-events-none absolute left-1/2 top-full z-10 mt-1 -translate-x-1/2 whitespace-nowrap rounded-lg bg-surface-elevated border border-surface-border px-2 py-1 text-xs text-text-secondary opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
                       coming soon
                     </span>
@@ -695,9 +701,10 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
         const idx = searchSelectedIndex >= 0 ? searchSelectedIndex : 0;
         const conv = searchResults[idx];
         if (conv) {
+          const targetMessageParam = conv.matched_message_id ? `&message=${conv.matched_message_id}` : "";
           const convHref = conv.skill_key
-            ? `/skills/chat?key=${conv.skill_key}&id=${conv.id}`
-            : `/chat?id=${conv.id}`;
+            ? `/skills/chat?key=${conv.skill_key}&id=${conv.id}${targetMessageParam}`
+            : `/chat?id=${conv.id}${targetMessageParam}`;
           setOptimisticConvId(String(conv.id));
           router.push(convHref, { scroll: false });
           setSearchOpen(false);
@@ -878,7 +885,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
       );
     }
 
-    const sidebarConversations = conversations.filter(c => c.skill_key !== "ai-writing-assistant");
+    const sidebarConversations = conversations.filter(c => c.skill_key !== "ai-writing-assistant" && c.skill_key !== "translator");
     const pinned = sidebarConversations.filter(c => c.pinned);
     const unpinned = sidebarConversations.filter(c => !c.pinned);
     const groups = groupConversationsByTime(unpinned, t);
@@ -972,22 +979,20 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
         {/* —— Logo + 折叠 —— */}
         <div className="flex items-center h-12 px-3 shrink-0">
           {!collapsed && (
-            <div className="flex-1 min-w-0">
-              <Link href="/" className="flex items-center gap-2">
+            <div className="flex flex-1 items-center gap-2 min-w-0">
+              <Link href="/" className="shrink-0 flex items-center">
                 <img src={theme === "dark" ? "/brand-dark-logo.png" : "/brand-light-logo.png"} alt="AI Space" className="h-6 w-auto rounded-lg object-contain" />
-                <img src={theme === "dark" ? "/brand-dark-title.png" : "/brand-light-title.png"} alt="AI Space" className="h-6 w-auto object-contain ml-1.5" />
               </Link>
+              <button
+                onClick={() => { setSearchOpen(true); setSearchQuery(""); setSearchResults([]); }}
+                className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-surface-border bg-surface-card px-2.5 py-1.5 text-left text-[13px] text-text-tertiary transition-colors hover:border-text-tertiary/50 hover:text-text-secondary"
+                onMouseEnter={showHoverTooltip(`${t("sidebar.tooltip.search")} ${mod}S`, "below")}
+                onMouseLeave={hideHoverTooltip}
+              >
+                <Search className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{t("sidebar.search.placeholder")}</span>
+              </button>
             </div>
-          )}
-          {!collapsed && (
-            <button
-              onClick={() => { setSearchOpen(true); setSearchQuery(""); setSearchResults([]); }}
-              className="mr-1 rounded-lg p-1.5 text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors flex items-center gap-1.5"
-              onMouseEnter={showHoverTooltip(`${t("sidebar.tooltip.search")} ${mod}S`, "below")}
-              onMouseLeave={hideHoverTooltip}
-            >
-              <Search className="w-4 h-4" />
-            </button>
           )}
           {collapsed && (
             <div className="flex-1 flex justify-center">
@@ -1325,9 +1330,10 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                       {t("sidebar.search.results_found")} {searchResults.length} {t("sidebar.search.results_count_suffix")}
                     </div>
                     {searchResults.map((conv, idx) => {
+                      const targetMessageParam = conv.matched_message_id ? `&message=${conv.matched_message_id}` : "";
                       const convHref = conv.skill_key
-                        ? `/skills/chat?key=${conv.skill_key}&id=${conv.id}`
-                        : `/chat?id=${conv.id}`;
+                        ? `/skills/chat?key=${conv.skill_key}&id=${conv.id}${targetMessageParam}`
+                        : `/chat?id=${conv.id}${targetMessageParam}`;
                       const skillMeta = conv.skill_key ? SKILL_ICON_MAP[conv.skill_key] : null;
                       const IconComp = skillMeta ? skillMeta.icon : MessageSquare;
                       const isSelected = idx === searchSelectedIndex;

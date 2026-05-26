@@ -261,7 +261,6 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     onSend(content.trim(), reasoning, searchEnabled, attachedFiles.length > 0 ? attachedFiles : undefined, file_ids.length > 0 ? file_ids : undefined);
     setContent("");
     setAttachedFiles([]);
-    setToolsOpen(false);
     if (textareaRef.current) {
       textareaRef.current.style.height = `${TEXTAREA_MIN_HEIGHT}px`;
       textareaRef.current.style.overflowY = "hidden";

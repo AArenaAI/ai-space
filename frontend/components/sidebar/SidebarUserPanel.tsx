@@ -50,7 +50,7 @@ export default function SidebarUserPanel({
       <div className="p-2">
         <a
           href="/login"
-          className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors"
+          className="flex min-h-11 items-center gap-2 rounded-xl px-3 py-2.5 text-sm text-text-secondary transition-colors hover:bg-surface-card hover:text-text-primary"
         >
           <User className="w-4 h-4" />
           <span>登录</span>
@@ -62,7 +62,12 @@ export default function SidebarUserPanel({
   // 已登录态
   return (
     <div className="p-2">
-      <div className="flex items-center justify-between px-3 py-2">
+      <button
+        type="button"
+        onClick={onOpenSettings}
+        className="group flex min-h-12 w-full items-center justify-between rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-surface-card"
+        title="账户与设置"
+      >
         {/* 左侧：用户头像 + 名称 */}
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-7 h-7 rounded-full bg-gradient-to-br from-brand/20 to-purple-500/20 flex items-center justify-center shrink-0">
@@ -76,14 +81,10 @@ export default function SidebarUserPanel({
         </div>
 
         {/* 右侧：设置 */}
-        <button
-          onClick={onOpenSettings}
-          className="p-1.5 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
-          title="设置"
-        >
-          <Settings className="w-3.5 h-3.5" />
-        </button>
-      </div>
+        <span className="ml-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-tertiary transition-colors group-hover:text-text-primary">
+          <Settings className="w-4 h-4" />
+        </span>
+      </button>
     </div>
   );
 }

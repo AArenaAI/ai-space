@@ -6,6 +6,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { Image, Eraser, ChevronLeft, Type, ZoomIn, ImageIcon, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
+import SidebarUserPanel from "./SidebarUserPanel";
 
 const MORE_NAV_GROUPS = [
   {
@@ -53,6 +54,8 @@ export default function ToolsSidebar() {
   const search = searchParams.toString();
   const handleNewChat = () => router.push(`/chat?t=${Date.now()}`);
   const [collapsed, setCollapsed] = useState(false);
+  const [user, setUser] = useState<any>(null);
+  const [sidebarTooltip, setSidebarTooltip] = useState<{ text: string; x: number; y: number } | null>(null);
 
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     if (typeof window === "undefined") return 260;
@@ -65,6 +68,32 @@ export default function ToolsSidebar() {
   useEffect(() => {
     localStorage.setItem("tools-sidebar-width", String(sidebarWidth));
   }, [sidebarWidth]);
+
+  useEffect(() => {
+    const refreshUser = () => {
+      const stored = localStorage.getItem("user");
+      if (!stored) {
+        setUser(null);
+        return;
+      }
+      try { setUser(JSON.parse(stored)); } catch { setUser(null); }
+    };
+    refreshUser();
+    window.addEventListener("user-login", refreshUser);
+    window.addEventListener("user-logout", refreshUser);
+    window.addEventListener("storage", refreshUser);
+    return () => {
+      window.removeEventListener("user-login", refreshUser);
+      window.removeEventListener("user-logout", refreshUser);
+      window.removeEventListener("storage", refreshUser);
+    };
+  }, []);
+
+  const showSidebarTooltip = (text: string) => (e: React.MouseEvent) => {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setSidebarTooltip({ text, x: rect.right + 8, y: rect.top + rect.height / 2 - 14 });
+  };
+  const hideSidebarTooltip = () => setSidebarTooltip(null);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -169,6 +198,18 @@ export default function ToolsSidebar() {
         ))}
       </div>
 
+      <div className="shrink-0 mx-3 h-px bg-surface-border/40" />
+
+      <div className="shrink-0">
+        <SidebarUserPanel
+          user={user}
+          collapsed={collapsed}
+          onOpenSettings={() => router.push("/settings")}
+          onShowTooltip={showSidebarTooltip}
+          onHideTooltip={hideSidebarTooltip}
+        />
+      </div>
+
       {/* 拖拽调整宽度手柄 */}
       {!collapsed && (
         <div
@@ -176,6 +217,14 @@ export default function ToolsSidebar() {
           onMouseDown={handleMouseDown}
         >
           <div className="absolute inset-0 -left-1 -right-1 rounded-full transition-all duration-150 group-hover:bg-brand/30 group-active:bg-brand/50" />
+        </div>
+      )}
+      {sidebarTooltip && (
+        <div
+          className="fixed z-[100] px-2.5 py-1.5 rounded-lg bg-surface-card border border-surface-border text-xs text-text-primary whitespace-nowrap shadow-lg pointer-events-none"
+          style={{ top: sidebarTooltip.y, left: sidebarTooltip.x }}
+        >
+          {sidebarTooltip.text}
         </div>
       )}
     </aside>

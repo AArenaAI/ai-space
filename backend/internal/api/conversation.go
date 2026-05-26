@@ -20,15 +20,16 @@ func NewConversationHandler(db *gorm.DB) *ConversationHandler {
 }
 
 type ConversationSearchResult struct {
-	ID             uint      `json:"id"`
-	Title          string    `json:"title"`
-	Model          string    `json:"model"`
-	SkillKey       string    `json:"skill_key"`
-	Pinned         bool      `json:"pinned"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	MatchedContent string    `json:"matched_content"`
-	MatchedRole    string    `json:"matched_role"`
+	ID               uint      `json:"id"`
+	Title            string    `json:"title"`
+	Model            string    `json:"model"`
+	SkillKey         string    `json:"skill_key"`
+	Pinned           bool      `json:"pinned"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	MatchedContent   string    `json:"matched_content"`
+	MatchedRole      string    `json:"matched_role"`
+	MatchedMessageID uint      `json:"matched_message_id"`
 }
 
 func (h *ConversationHandler) List(c *gin.Context) {
@@ -54,6 +55,10 @@ func (h *ConversationHandler) List(c *gin.Context) {
 			countQuery = countQuery.Where("workspace_id = ?", uint(wid))
 		}
 	}
+	skillKey := c.Query("skill_key")
+	if skillKey != "" {
+		countQuery = countQuery.Where("skill_key = ?", skillKey)
+	}
 	countQuery.Count(&total)
 
 	type ConversationWithModel struct {
@@ -69,6 +74,9 @@ func (h *ConversationHandler) List(c *gin.Context) {
 		if wid, err := strconv.ParseUint(workspaceIDStr, 10, 32); err == nil {
 			query = query.Where("conversations.workspace_id = ?", uint(wid))
 		}
+	}
+	if skillKey != "" {
+		query = query.Where("conversations.skill_key = ?", skillKey)
 	}
 
 	var rows []ConversationWithModel
@@ -106,8 +114,9 @@ func (h *ConversationHandler) Search(c *gin.Context) {
 	titleMatchSQL := "CASE WHEN conversations.title LIKE ? THEN 1 ELSE 0 END AS title_match"
 	matchedContentSQL := "COALESCE((SELECT content FROM messages WHERE messages.conversation_id = conversations.id AND messages.content LIKE ? ORDER BY messages.created_at DESC, messages.id DESC LIMIT 1), (SELECT content FROM messages WHERE messages.conversation_id = conversations.id ORDER BY messages.created_at DESC, messages.id DESC LIMIT 1), '') AS matched_content"
 	matchedRoleSQL := "COALESCE((SELECT role FROM messages WHERE messages.conversation_id = conversations.id AND messages.content LIKE ? ORDER BY messages.created_at DESC, messages.id DESC LIMIT 1), '') AS matched_role"
+	matchedMessageIDSQL := "COALESCE((SELECT id FROM messages WHERE messages.conversation_id = conversations.id AND messages.content LIKE ? ORDER BY messages.created_at DESC, messages.id DESC LIMIT 1), 0) AS matched_message_id"
 	query := h.db.Table("conversations").
-		Select("conversations.id, conversations.title, conversations.model, conversations.skill_key, conversations.pinned, conversations.created_at, conversations.updated_at, "+titleMatchSQL+", "+matchedContentSQL+", "+matchedRoleSQL, like, like, like).
+		Select("conversations.id, conversations.title, conversations.model, conversations.skill_key, conversations.pinned, conversations.created_at, conversations.updated_at, "+titleMatchSQL+", "+matchedContentSQL+", "+matchedRoleSQL+", "+matchedMessageIDSQL, like, like, like, like).
 		Where("conversations.user_id = ?", userID).
 		Where("conversations.title LIKE ? OR EXISTS (SELECT 1 FROM messages WHERE messages.conversation_id = conversations.id AND messages.content LIKE ?)", like, like)
 
@@ -115,6 +124,9 @@ func (h *ConversationHandler) Search(c *gin.Context) {
 		if wid, err := strconv.ParseUint(workspaceIDStr, 10, 32); err == nil && wid > 0 {
 			query = query.Where("conversations.workspace_id = ?", uint(wid))
 		}
+	}
+	if sk := c.Query("skill_key"); sk != "" {
+		query = query.Where("conversations.skill_key = ?", sk)
 	}
 
 	var results []ConversationSearchResult

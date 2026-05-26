@@ -29,7 +29,7 @@ var SupportedModels = []ModelInfo{
 	// Google
 	{ID: "gemini-3.1-pro-preview", Name: "Gemini 3.1 Pro", Provider: "Google", Description: "新一代旗舰推理模型，更强多模态", Color: "#4285f4", Capabilities: []string{"chat", "reasoning", "search"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
 	{ID: "gemini-3.5-flash", Name: "Gemini 3.5 Flash", Provider: "Google", Description: "新一代高速模型，响应更快更稳", Color: "#4285f4", Capabilities: []string{"chat", "search"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
-	{ID: "gemini-3.1-flash-lite-preview", Name: "Gemini 3.1 Flash", Provider: "Google", Description: "新一代快速模型，日常问答首选", Color: "#4285f4", Capabilities: []string{"chat", "search"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
+	{ID: "gemini-3.1-flash-lite", Name: "Gemini 3.1 Flash", Provider: "Google", Description: "新一代快速模型，日常问答首选", Color: "#4285f4", Capabilities: []string{"chat", "search"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
 	// Volcengine Video
 	{ID: "doubao-seedance-2-0-fast-260128", Name: "Seedance 2.0 Fast", Provider: "Volcengine", Description: "火山引擎视频生成快速版", Color: "#ff6a00", Capabilities: []string{"video"}, SupportedInputs: []string{"text"}},
 	{ID: "doubao-seedance-2-0-260128", Name: "Seedance 2.0", Provider: "Volcengine", Description: "火山引擎视频生成标准版", Color: "#ff0050", Capabilities: []string{"video"}, SupportedInputs: []string{"text"}},

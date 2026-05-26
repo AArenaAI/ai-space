@@ -658,7 +658,7 @@ function VideoChatPageInner() {
                 placeholder="尝试描述您想要创建的视频..."
                 disabled={generating}
                 className={cn(
-                  "flex-1 min-h-[60px] max-h-[160px] bg-transparent text-text-primary placeholder:text-text-tertiary resize-none focus:outline-none text-[15px] leading-relaxed py-2",
+                  "flex-1 min-h-[60px] max-h-[160px] bg-transparent text-text-primary placeholder:text-text-tertiary resize-none focus:outline-none text-[15px] leading-relaxed py-2 pr-16",
                   generating && "opacity-60 cursor-not-allowed"
                 )}
                 onKeyDown={(e) => {
