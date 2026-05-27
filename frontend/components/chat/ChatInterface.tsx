@@ -356,7 +356,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
     <div className="relative flex h-full flex-col overflow-hidden">
       {/* 顶部栏 - 对比模式下隐藏，释放垂直空间 */}
       {!(compareMode || isCompare) && (
-        <header className="relative shrink-0 h-12 flex items-center justify-between px-4 transition-all duration-300">
+        <header className="relative z-20 shrink-0 h-12 flex items-center justify-between px-4 transition-all duration-300">
           <div className="flex items-center">
             <ModelSelector
               models={models}
