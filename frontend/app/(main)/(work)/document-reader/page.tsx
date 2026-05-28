@@ -1104,6 +1104,11 @@ export default function DocumentReaderPage() {
     e.target.value = "";
   };
 
+  const openUploadDialog = useCallback(() => {
+    if (uploading) return;
+    fileInputRef.current?.click();
+  }, [uploading]);
+
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
@@ -2012,6 +2017,14 @@ Infographic rules:
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-surface">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".pdf,application/pdf"
+        className="hidden"
+        onChange={onFileInputChange}
+      />
+
       {/* ===== Center Panel: PDF Viewer ===== */}
       <main
         className={cn(
@@ -2111,15 +2124,8 @@ Infographic rules:
             </div>
 
             <div className="p-3">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf,application/pdf"
-                className="hidden"
-                onChange={onFileInputChange}
-              />
               <button
-                onClick={() => fileInputRef.current?.click()}
+                onClick={openUploadDialog}
                 disabled={uploading}
                 className={cn(
                   "flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-surface-border px-3 py-2.5 text-sm font-medium text-text-secondary transition hover:border-brand/50 hover:bg-surface-card hover:text-brand",
@@ -2334,11 +2340,12 @@ Infographic rules:
                   <p className="text-xs text-text-tertiary">{t("docReader.empty.pdfSupport")}</p>
                 </div>
                 <button
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={openUploadDialog}
+                  disabled={uploading}
                   className="mt-2 flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-sm font-medium text-white transition hover:bg-brand/90"
                 >
-                  <UploadCloud className="h-4 w-4" />
-                  {t("docReader.upload.document")}
+                  {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+                  {uploading ? t("docReader.upload.uploading") : t("docReader.upload.document")}
                 </button>
               </div>
             )}

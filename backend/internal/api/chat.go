@@ -23,7 +23,7 @@ import (
 type ChatHandler struct {
 	db             *gorm.DB
 	cfg            *config.Config
-	aiService      *services.AIService
+	aiService      chatAIService
 	searchService  *services.SearchService
 	fileService    *services.FileService
 	retrievalSvc   *services.RetrievalService
@@ -32,7 +32,7 @@ type ChatHandler struct {
 	usageService   *services.UsageService
 }
 
-func NewChatHandler(db *gorm.DB, cfg *config.Config, aiService *services.AIService, searchService *services.SearchService, fileService *services.FileService, retrievalSvc *services.RetrievalService, contextBuilder *services.ContextBuilder, usageService *services.UsageService) *ChatHandler {
+func NewChatHandler(db *gorm.DB, cfg *config.Config, aiService chatAIService, searchService *services.SearchService, fileService *services.FileService, retrievalSvc *services.RetrievalService, contextBuilder *services.ContextBuilder, usageService *services.UsageService) *ChatHandler {
 	return &ChatHandler{db: db, cfg: cfg, aiService: aiService, searchService: searchService, fileService: fileService, retrievalSvc: retrievalSvc, contextBuilder: contextBuilder, fileContext: services.NewFileContextOrchestrator(db, retrievalSvc, contextBuilder), usageService: usageService}
 }
 
@@ -1136,6 +1136,17 @@ func (h *ChatHandler) createBackgroundTask(responseID string, userID uint, guest
 	return &task
 }
 
+func rateLimitRetryDelay(waitMs int) time.Duration {
+	if waitMs <= 0 {
+		return time.Minute
+	}
+	wait := time.Duration(waitMs) * time.Millisecond
+	if wait < time.Minute {
+		return time.Minute
+	}
+	return wait
+}
+
 type GenerationTaskRunRequest struct {
 	Task               *models.AIBackgroundTask
 	Messages           []services.Message
@@ -1172,21 +1183,14 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 		if err != nil {
 			// 检查是否是 rate limit 错误，且还有重试次数
 			if attempt < maxRetries {
-				if pe := services.ParseOpenAIProviderError(err, req.Model); pe != nil && pe.Kind == services.ProviderErrorRateLimit && pe.RetryAfterMs > 0 {
+				if pe := services.ParseOpenAIProviderError(err, req.Model); pe != nil && pe.Kind == services.ProviderErrorRateLimit {
 					// 设置 retrying 状态，等待 Retry-After 后重试
-					waitMs := pe.RetryAfterMs
-					if waitMs < 1000 {
-						waitMs = 1000
-					}
-					jitter := time.Duration(waitMs) * time.Millisecond
-					if jitter > 60*time.Second {
-						jitter = 60 * time.Second
-					}
+					jitter := rateLimitRetryDelay(pe.RetryAfterMs)
 					h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", req.Task.ID).Updates(map[string]interface{}{
 						"status": "retrying",
 					})
 					fmt.Printf("[GenerationRunner] task=%d rate_limit 等待 %v 后重试\n", req.Task.ID, jitter)
-					time.Sleep(jitter)
+					generationRetrySleep(jitter)
 					continue
 				}
 			}
@@ -1211,19 +1215,12 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 			if attempt < maxRetries {
 				// 关闭上一次响应 body
 				resp.Body.Close()
-				waitMs := streamResult.RetryAfterMs
-				if waitMs <= 0 {
-					waitMs = 2000
-				}
-				jitter := time.Duration(waitMs) * time.Millisecond
-				if jitter > 60*time.Second {
-					jitter = 60 * time.Second
-				}
+				jitter := rateLimitRetryDelay(streamResult.RetryAfterMs)
 				h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", req.Task.ID).Updates(map[string]interface{}{
 					"status": "retrying",
 				})
 				fmt.Printf("[GenerationRunner] task=%d stream rate_limit 等待 %v 后重试\n", req.Task.ID, jitter)
-				time.Sleep(jitter)
+				generationRetrySleep(jitter)
 				continue
 			}
 		}
@@ -1454,18 +1451,36 @@ func (h *ChatHandler) failGenerationTaskWithMeta(task *models.AIBackgroundTask, 
 	h.persistTaskEvent(task, assistantMessageID, seq, "error", string(out))
 	h.persistTaskEvent(task, assistantMessageID, seq+1, "done", "[DONE]")
 	now := time.Now()
+	persistedContent := h.failurePersistedContent(assistantMessageID, task, message)
 	h.db.Model(&models.Message{}).Where("id = ?", assistantMessageID).Updates(map[string]interface{}{
-		"content":      message,
+		"content":      persistedContent,
 		"completed_at": &now,
 	})
 	h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", task.ID).Updates(map[string]interface{}{
 		"status":               "failed",
 		"error_message":        message,
-		"result":               message,
+		"result":               persistedContent,
 		"last_sequence_number": seq + 1,
 		"completed_at":         &now,
 	})
 	h.touchConversation(conversationID)
+}
+
+func (h *ChatHandler) failurePersistedContent(assistantMessageID uint, task *models.AIBackgroundTask, fallbackMessage string) string {
+	var msg models.Message
+	if assistantMessageID > 0 && h.db != nil {
+		if err := h.db.Select("content").Where("id = ?", assistantMessageID).First(&msg).Error; err == nil {
+			if content := strings.TrimSpace(msg.Content); content != "" {
+				return msg.Content
+			}
+		}
+	}
+	if task != nil {
+		if content := strings.TrimSpace(task.Result); content != "" {
+			return task.Result
+		}
+	}
+	return fallbackMessage
 }
 
 func (h *ChatHandler) persistTaskEvent(task *models.AIBackgroundTask, assistantMessageID uint, sequenceNumber int64, eventType string, payload string) {
