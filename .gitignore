@@ -57,6 +57,7 @@ backend/uploads/*.md
 backend/*.db
 backend/data/
 backend/uploads/
+data/
 
 # Root server.js & package files
 server.js
