@@ -3,15 +3,16 @@
 import React, { useEffect, useRef, useState, useCallback, memo } from "react";
 import {
   User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck,
-  ChevronDown, ChevronUp, Lightbulb, Play, FileText, Star, Columns2,
+  Play, FileText, Star, Columns2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/hooks/useChat";
 import { InferredGroup } from "@/lib/groups";
 import { AssistantMessageMeta } from "./AssistantMessageMeta";
-import { StreamingText } from "./StreamingText";
-import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
+import { ThinkBlock } from "./ThinkBlock";
+import { AssistantMessageContent } from "./AssistantMessageContent";
 import { useI18n } from "@/lib/i18n";
+import { parseThinkContent, extractCitations, sanitizeContent, getCitedSources, isMessageGenerating } from "@/lib/chatContent";
 
 /* ---------- 工具函数 ---------- */
 
@@ -36,99 +37,6 @@ function WaveText({ text, className }: { text: string; className?: string }) {
         }}
       />
     </span>
-  );
-}
-
-function parseThinkContent(content: string): { reasoning: string | null; answer: string; isThinking: boolean } {
-  const startIdx = content.indexOf("<think>");
-  if (startIdx === -1) return { reasoning: null, answer: content, isThinking: false };
-  const endIdx = content.indexOf("</think>");
-  if (endIdx === -1) {
-    return {
-      reasoning: content.slice(startIdx + 7),
-      answer: content.slice(0, startIdx),
-      isThinking: true,
-    };
-  }
-  return {
-    reasoning: content.slice(startIdx + 7, endIdx).trim(),
-    answer: (content.slice(0, startIdx) + content.slice(endIdx + 8)).trim(),
-    isThinking: false,
-  };
-}
-
-function sanitizeContent(content: string): string {
-  let result = content;
-  result = result.replace(
-    /^\[\s*([^\]]*(?:[=+\-*/^\\]|\\[a-zA-Z]+|[_^])[^\]]*)\s*\]$/gm,
-    "$$$$$1$$$$"
-  );
-  result = result.replace(/\n{2,}[*_]*\s*(?:引用来源|参考来源|References|参考链接)[：:]\s*[\s\S]*$/, "");
-  result = result.replace(/\n*\[\d+\]\s+[^\n]*(?:\n\[\d+\]\s+[^\n]*)*$/, "");
-  result = result.replace(/\n*---+\s*$/, "");
-  result = result.replace(/(?<!\d)\[(\d+)\](?!\s*[.)])/g, "");
-  return result.trim();
-}
-
-function extractCitations(content: string): number[] {
-  const matches = content.match(/\[(\d+)\]/g);
-  if (!matches) return [];
-  const nums = matches.map((m) => parseInt(m.slice(1, -1), 10));
-  return Array.from(new Set(nums)).sort((a, b) => a - b);
-}
-
-function getCitedSources(content: string, allSources?: { title: string; url: string; description: string }[]) {
-  if (!allSources || allSources.length === 0) return [];
-  const citations = extractCitations(content);
-  if (citations.length === 0) return [];
-  return citations
-    .filter((n) => n >= 1 && n <= allSources.length)
-    .map((n) => allSources[n - 1]);
-}
-
-function isMessageGenerating(msg: Message, isStreaming: boolean): boolean {
-  if (isStreaming) return true;
-  if (msg.completedAt || msg.stopped) return false;
-  if (msg.activityStatus?.status === "running" || msg.activityStatus?.status === "searching") return true;
-  return !!(msg.generationTaskId || msg.backgroundTaskId || msg.useBackground || msg.isComplexTask);
-}
-
-function ThinkBlock({ content, isThinking }: { content: string; isThinking: boolean }) {
-  const { t } = useI18n();
-  const [expanded, setExpanded] = useState(() => isThinking || content.length < 2000);
-
-  return (
-    <div className="mb-3 rounded-xl border border-surface-border overflow-hidden">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 w-full px-3 py-2 text-left transition-colors
-          bg-purple-50 hover:bg-purple-100
-          dark:bg-[#1A1A2E] dark:hover:bg-[#252542]"
-      >
-        <Lightbulb className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
-        <span className="text-sm font-medium text-text-secondary flex-1">
-          {isThinking ? t("chat.reasoning.thinking") : `${t("chat.reasoning.title")}${content.length >= 2000 ? ` · ${t("chat.reasoning.collapsed")}` : ""}`}
-        </span>
-        {isThinking && (
-          <div className="flex gap-0.5">
-            <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce" />
-            <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce [animation-delay:0.15s]" />
-            <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce [animation-delay:0.3s]" />
-          </div>
-        )}
-        {expanded ? (
-          <ChevronUp className="w-3.5 h-3.5 text-text-tertiary shrink-0" />
-        ) : (
-          <ChevronDown className="w-3.5 h-3.5 text-text-tertiary shrink-0" />
-        )}
-      </button>
-      {expanded && (
-        <div data-i18n-skip="true" className="px-3 py-2.5 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap
-          bg-slate-50 dark:bg-[#0F0F1A]">
-          {content}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -374,7 +282,7 @@ function MessageActions({
 
 /* ---------- 导出 ---------- */
 
-export { ThinkingDots, WaveText, StreamingText, AssistantMessageMeta, parseThinkContent, extractCitations, sanitizeContent, getCitedSources, ThinkBlock, MessageMenu, MessageActions, isMessageGenerating };
+export { ThinkingDots, WaveText, AssistantMessageMeta, AssistantMessageContent, parseThinkContent, extractCitations, sanitizeContent, getCitedSources, ThinkBlock, MessageMenu, MessageActions, isMessageGenerating };
 
 export interface ChatMessageItemProps {
   msg: Message;
@@ -448,31 +356,6 @@ function ChatMessageItemRaw({
       onForkCompare?.(msg.serverMessageId);
     }
   }, [msg.serverMessageId, onForkCompare]);
-
-  const renderAssistantContent = () => {
-    const generating = isMessageGenerating(msg, isStreaming);
-    if (generating) {
-      return (
-        <StreamingText
-          messageId={msg.id}
-          content={msg.content || ""}
-          isStreaming={true}
-          className="text-[15px] leading-relaxed text-text-primary"
-        />
-      );
-    }
-    if (!msg.content) {
-      return <div className="text-[15px] leading-relaxed text-text-secondary">生成中断，可点击重新生成</div>;
-    }
-    const { reasoning, answer, isThinking } = parseThinkContent(msg.content);
-    const cleanAnswer = sanitizeContent(answer);
-    return (
-      <div className="prose prose-sm max-w-none">
-        {reasoning && <ThinkBlock content={reasoning} isThinking={isThinking} />}
-        <DeferredMarkdownRenderer content={cleanAnswer} />
-      </div>
-    );
-  };
 
   return (
     <div className={cn("flex animate-message-appear group py-1", isUser ? "justify-end" : "gap-3")}>
@@ -594,7 +477,7 @@ function ChatMessageItemRaw({
               </div>
             ) : (
               <>
-                {renderAssistantContent()}
+                <AssistantMessageContent message={msg} isStreaming={isStreaming} />
                 {msg.stopped && onContinueGenerate && (
                   <button
                     onClick={onContinueGenerate}

@@ -375,6 +375,15 @@ function ImageChatPageInner() {
     }
   }, [apiMessages]);
 
+  useEffect(() => {
+    if (!chatId || pollingChatId) return;
+    const hasPendingAssistant = apiMessages.some((m) => m.role === "assistant" && m.status === "pending");
+    if (hasPendingAssistant) {
+      setPollingChatId(chatId);
+      setIsGenerating(true);
+    }
+  }, [apiMessages, chatId, pollingChatId]);
+
   const addOptimisticPending = useCallback((text: string) => {
     const timestamp = Date.now();
     const userMessage: DisplayMessage = {
@@ -419,18 +428,39 @@ function ImageChatPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialPrompt, urlChatId]);
 
+  const fetchImageChatMessagesDirect = useCallback(async (id: number): Promise<ImageChatMessage[]> => {
+    const token = localStorage.getItem("token");
+    const res = await fetch(`/api/image-chats/${id}/messages`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error("获取图片会话消息失败");
+    const data = await res.json().catch(() => ({}));
+    return Array.isArray(data.messages) ? data.messages : [];
+  }, []);
+
   // 轮询
   useEffect(() => {
     if (!pollingChatId) return;
+    let cancelled = false;
 
-    const timer = setInterval(async () => {
+    const syncMessages = async () => {
       try {
-        const msgs = await fetchMessages(pollingChatId);
+        const msgs = await fetchImageChatMessagesDirect(pollingChatId);
+        if (cancelled) return;
+        if (msgs.length > 0) {
+          // 轮询结果直接强制同步到当前页面，避免本地 optimistic pending 卡住，必须刷新/切页后才看到图片。
+          setDisplayMessages(msgs.map(msgToDisplay));
+        }
         const pending = msgs.find((m) => m.role === "assistant" && m.status === "pending");
         if (!pending) {
-          clearInterval(timer);
+          if (pollTimer.current) {
+            clearInterval(pollTimer.current);
+            pollTimer.current = null;
+          }
           setPollingChatId(null);
           setIsGenerating(false);
+          fetchChats();
           const latestAssistant = [...msgs].reverse().find((m) => m.role === "assistant");
           const failedMsg = latestAssistant?.status === "failed" ? latestAssistant : msgs.find((m) => m.role === "assistant" && m.status === "failed");
           if (latestAssistant && ["completed", "failed"].includes(latestAssistant.status)) {
@@ -450,12 +480,18 @@ function ImageChatPageInner() {
       } catch {
         // ignore
       }
-    }, 1000);
+    };
+
+    syncMessages();
+    const timer = setInterval(syncMessages, 1000);
 
     pollTimer.current = timer;
-    return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pollingChatId, t]);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      if (pollTimer.current === timer) pollTimer.current = null;
+    };
+  }, [fetchChats, fetchImageChatMessagesDirect, pollingChatId, t]);
 
   const handleSend = async (
     text: string,
@@ -665,7 +701,7 @@ function ImageChatPageInner() {
       />
 
       {/* 顶部标题栏 */}
-      <div className="shrink-0 flex items-center gap-3 px-4 py-3 border-b border-surface-border">
+      <div className="shrink-0 flex items-center gap-3 px-4 py-3">
         <button
           onClick={() => router.push("/image")}
           className="w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-surface-card transition-colors"

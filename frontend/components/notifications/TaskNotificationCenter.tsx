@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import {
   BackgroundTaskRecord,
   buildTaskCompletionCopy,
+  completeBackgroundTaskSilently,
   clearPendingBackgroundTasks,
   emitTaskFinished,
   getPendingBackgroundTasks,
@@ -33,6 +34,49 @@ function isTerminal(status?: string) {
 
 function isOk(status?: string, hasContent = true) {
   return status === "succeeded" || status === "completed" || (status === "" && hasContent);
+}
+
+function normalizePathWithSearch(path: string) {
+  if (!path) return "/";
+  try {
+    const url = new URL(path, window.location.origin);
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return path;
+  }
+}
+
+function normalizePathname(pathname: string) {
+  return pathname.replace(/\/+$/, "") || "/";
+}
+
+function isSameTaskPage(task: Pick<BackgroundTaskRecord | TaskFinishedNotification, "type" | "href">, currentHref: string) {
+  const target = normalizePathWithSearch(task.href);
+  const current = normalizePathWithSearch(currentHref);
+
+  try {
+    const targetUrl = new URL(target, window.location.origin);
+    const currentUrl = new URL(current, window.location.origin);
+    const targetPath = normalizePathname(targetUrl.pathname);
+    const currentPath = normalizePathname(currentUrl.pathname);
+
+    if (target === current) return true;
+    if (targetPath !== currentPath) return false;
+
+    const targetChatId = targetUrl.searchParams.get("chatId") || targetUrl.searchParams.get("id");
+    const currentChatId = currentUrl.searchParams.get("chatId") || currentUrl.searchParams.get("id");
+
+    // chat-style 图片/视频/对话任务必须精确匹配同一个会话 ID。
+    // 例如任务在 /image/chat?chatId=2，当前切到 chatId=1 时应该弹窗；仍在 chatId=2 才静默。
+    if (targetChatId || currentChatId) {
+      return Boolean(targetChatId && currentChatId && targetChatId === currentChatId);
+    }
+
+    // 旧的非 chatId 任务没有会话维度，只能按同一路由静默。
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function checkTask(task: BackgroundTaskRecord): Promise<{ done: boolean; ok: boolean } | null> {
@@ -118,7 +162,9 @@ export default function TaskNotificationCenter() {
   useEffect(() => {
     const onFinished = (event: Event) => {
       const detail = (event as CustomEvent<TaskFinishedNotification>).detail;
-      if (detail) showTaskToast(detail, router);
+      if (!detail) return;
+      if (isSameTaskPage(detail, `${window.location.pathname}${window.location.search}`)) return;
+      showTaskToast(detail, router);
     };
     window.addEventListener("background-task-finished", onFinished);
     return () => window.removeEventListener("background-task-finished", onFinished);
@@ -138,7 +184,11 @@ export default function TaskNotificationCenter() {
           try {
             const result = await checkTask(task);
             if (result?.done) {
-              emitTaskFinished(buildTaskCompletionCopy(task, result.ok));
+              if (isSameTaskPage(task, `${window.location.pathname}${window.location.search}`)) {
+                completeBackgroundTaskSilently(task.key);
+              } else {
+                emitTaskFinished(buildTaskCompletionCopy(task, result.ok));
+              }
             }
           } catch (error) {
             if (error instanceof AuthExpiredError) {

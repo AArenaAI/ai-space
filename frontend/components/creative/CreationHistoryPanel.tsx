@@ -364,7 +364,7 @@ export default function CreationHistoryPanel({
         )}
         style={{ transitionTimingFunction: "cubic-bezier(0.32, 0.72, 0, 1)" }}
       >
-        <div className="flex shrink-0 items-center justify-between border-b border-surface-border px-4 py-3.5">
+        <div className="flex shrink-0 items-center justify-between px-4 py-3.5">
           <div className="flex items-center gap-2">
             <Clock className="h-4 w-4 text-text-tertiary" />
             <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
@@ -392,7 +392,7 @@ export default function CreationHistoryPanel({
         </div>
 
         {onSearchChange && (
-          <div className="shrink-0 border-b border-surface-border/60 px-3 py-3">
+          <div className="shrink-0 px-3 py-3">
             <div className="flex items-center gap-2 rounded-xl border border-surface-border bg-surface px-3 py-2 text-text-tertiary">
               <Search className="h-4 w-4 shrink-0" />
               <input

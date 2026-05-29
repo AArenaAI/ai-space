@@ -11,6 +11,7 @@ import {
   stringifyStreamDelta,
   type ReasoningStreamState,
 } from "@/lib/chatStreamDelta";
+import { isSseDone, parseSseEvent, splitSseEvents } from "@/lib/chatSseParser";
 import {
   createActivityStatusFromMeta,
   createBusyGeneratingStatus,
@@ -432,25 +433,21 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     let latestSequence = after || 0;
 
     const processEvent = (eventText: string) => {
-      const lines = eventText.split("\n");
-      let data = "";
-      for (const line of lines) {
-        if (line.startsWith("id: ")) {
-          latestSequence = Number(line.slice(4)) || latestSequence;
-          activeTaskStreamsRef.current[localMessageId] = {
-            ...(activeTaskStreamsRef.current[localMessageId] || {}),
-            convId,
-            serverMessageId,
-            generationTaskId,
-            lastSequence: latestSequence,
-            content: accumulated,
-          };
-        }
-        if (line.startsWith(":")) continue;
-        if (line.startsWith("data: ")) data = line.slice(6);
+      const event = parseSseEvent(eventText);
+      const data = event.data;
+      if (event.id) {
+        latestSequence = Number(event.id) || latestSequence;
+        activeTaskStreamsRef.current[localMessageId] = {
+          ...(activeTaskStreamsRef.current[localMessageId] || {}),
+          convId,
+          serverMessageId,
+          generationTaskId,
+          lastSequence: latestSequence,
+          content: accumulated,
+        };
       }
       if (!data) return;
-      if (data === "[DONE]") {
+      if (isSseDone(data)) {
         if (reasoningState.inReasoningBlock) {
           accumulated += "</think>";
           streamAppend(localMessageId, { reasoning: false });
@@ -559,13 +556,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             const { done, value } = await reader.read();
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
-            let idx;
-            const events: string[] = [];
-            while ((idx = buffer.indexOf("\n\n")) >= 0) {
-              events.push(buffer.slice(0, idx));
-              buffer = buffer.slice(idx + 2);
-            }
-            for (const eventText of events) {
+            const split = splitSseEvents(buffer);
+            buffer = split.remaining;
+            for (const eventText of split.events) {
               processEvent(eventText);
             }
           }
@@ -918,17 +911,11 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       };
 
       const processEvent = (eventText: string) => {
-        const lines = eventText.split("\n");
-        let data = "";
-        for (const line of lines) {
-          if (line.startsWith("id: ")) latestSequence = Number(line.slice(4)) || latestSequence;
-          if (line.startsWith(":")) continue; // SSE comment
-          if (line.startsWith("data: ")) {
-            data = line.slice(6);
-          }
-        }
+        const event = parseSseEvent(eventText);
+        const data = event.data;
+        if (event.id) latestSequence = Number(event.id) || latestSequence;
         if (!data) return;
-        if (data === "[DONE]") {
+        if (isSseDone(data)) {
           if (reasoningState.inReasoningBlock) {
             accumulated += "</think>";
             streamAppend(assistantMsg.id, { reasoning: false });
@@ -1118,21 +1105,19 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
 
           buffer += decoder.decode(value, { stream: true });
 
-          // 按 \n\n 分割完整 SSE event
-          let idx;
-          while ((idx = buffer.indexOf("\n\n")) >= 0) {
-            const eventText = buffer.slice(0, idx);
-            buffer = buffer.slice(idx + 2);
+          // 按 SSE event 边界分割完整 event
+          const split = splitSseEvents(buffer);
+          buffer = split.remaining;
+          for (const eventText of split.events) {
             processEvent(eventText);
           }
         }
 
         // 最终 flush decoder
         buffer += decoder.decode();
-        let idx;
-        while ((idx = buffer.indexOf("\n\n")) >= 0) {
-          const eventText = buffer.slice(0, idx);
-          buffer = buffer.slice(idx + 2);
+        const split = splitSseEvents(buffer);
+        buffer = split.remaining;
+        for (const eventText of split.events) {
           processEvent(eventText);
         }
         if (buffer.trim()) {

@@ -101,6 +101,11 @@ export function completeBackgroundTask(key: string) {
   writeTasks(tasks);
 }
 
+export function completeBackgroundTaskSilently(key: string) {
+  rememberNotified(key);
+  completeBackgroundTask(key);
+}
+
 function hasNotified(key: string) {
   if (!canUseStorage()) return false;
   try {

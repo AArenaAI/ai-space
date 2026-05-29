@@ -320,6 +320,10 @@ function VideoChatPageInner() {
     if (pendingMessages.length === 0) return;
     const timer = window.setInterval(async () => {
       const msgs = await fetchMessages(currentChatId);
+      // 轮询结果直接同步到当前页面，避免生成完成后必须刷新/切页才显示视频。
+      if (msgs.length > 0) {
+        setDisplayMessages(messagesToDisplayMessages(msgs, videoErrorMessages));
+      }
       for (const msg of msgs) {
         if (msg.role !== "assistant") continue;
         if (!["succeeded", "completed", "failed"].includes(msg.status || "")) continue;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback, useMemo, memo, type Ref, type UIEvent, type ReactNode, type ButtonHTMLAttributes } from "react";
-import { User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck, ChevronDown, ChevronUp, Lightbulb, Play, ChevronDown as ChevronDownIcon, FileText, Star, Columns2, Loader2, Download, ImageIcon, Sparkles } from "lucide-react";
+import { User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck, ChevronDown, Lightbulb, Play, ChevronDown as ChevronDownIcon, FileText, Star, Columns2, Loader2, Download, ImageIcon, Sparkles } from "lucide-react";
 import { toPng } from "html-to-image";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/hooks/useChat";
@@ -28,6 +28,9 @@ import { AssistantMessageMeta } from "./AssistantMessageMeta";
 import ModelSelector from "./ModelSelector";
 import { StreamingText } from "./StreamingText";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
+import { ThinkBlock } from "./ThinkBlock";
+import { AssistantMessageContent } from "./AssistantMessageContent";
+import { parseThinkContent, sanitizeContent, extractCitations, getCitedSources, isMessageGenerating } from "@/lib/chatContent";
 
 const CHAT_BOTTOM_SPACER = 280;
 const SCROLL_TO_BOTTOM_OFFSET = 238;
@@ -141,62 +144,6 @@ function CodeBlock({ language, value }: { language: string; value: string }) {
   );
 }
 
-// 解析 <think>...思考过程...</think>
-function parseThinkContent(content: string): { reasoning: string | null; answer: string; isThinking: boolean } {
-  const startIdx = content.indexOf("<think>");
-  if (startIdx === -1) return { reasoning: null, answer: content, isThinking: false };
-
-  const endIdx = content.indexOf("</think>");
-  if (endIdx === -1) {
-    // 正在思考中，只有 <think> 没有 </think>
-    return {
-      reasoning: content.slice(startIdx + 7),
-      answer: content.slice(0, startIdx),
-      isThinking: true,
-    };
-  }
-
-  return {
-    reasoning: content.slice(startIdx + 7, endIdx).trim(),
-    answer: (content.slice(0, startIdx) + content.slice(endIdx + 8)).trim(),
-    isThinking: false,
-  };
-}
-
-// 从回答内容中提取被引用的编号
-function extractCitations(content: string): number[] {
-  const matches = content.match(/\[(\d+)\]/g);
-  if (!matches) return [];
-  const nums = matches.map((m) => parseInt(m.slice(1, -1), 10));
-  // 去重并排序
-  return Array.from(new Set(nums)).sort((a, b) => a - b);
-}
-
-// 过滤掉搜索来源引用：去掉末尾的"引用来源：..."段落、--- 分隔线、和回答中的 [数字] 引用编号
-function sanitizeContent(content: string): string {
-  let result = content;
-
-  // 把模型常见的 [ ... ] 行间公式转为 remark-math 识别的 $$...$$（含数学符号 = + - * / ^ _ \\times 等时）
-  result = result.replace(
-    /^\[\s*([^\]]*(?:[=+\-*/^\\]|\\[a-zA-Z]+|[_^])[^\]]*)\s*\]$/gm,
-    "$$$$$1$$$$"
-  );
-
-  // 只移除搜索模块追加在末尾的来源区块；不要匹配普通正文里的"来源：AP"，否则会把新闻列表从第一条来源处截断
-  result = result.replace(/\n{2,}[*_]*\s*(?:引用来源|参考来源|References|参考链接)[：:]\s*[\s\S]*$/, "");
-  
-  // 去掉末尾的 [数字] Title - URL 格式的列表
-  result = result.replace(/\n*\[\d+\]\s+[^\n]*(?:\n\[\d+\]\s+[^\n]*)*$/, "");
-  
-  // 去掉末尾的 --- 分隔线（搜索注入的分隔或 AI 自己写的）
-  result = result.replace(/\n*---+\s*$/, "");
-  
-  // 去掉行内单独的 [数字] 引用标记（但保留 Markdown 有序列表中的 [数字]）
-  result = result.replace(/(?<!\d)\[(\d+)\](?!\s*[.)])/g, "");
-  
-  return result.trim();
-}
-
 function normalizeExportPlainText(content: string): string {
   return content
     .replace(/```([\w-]+)?\n([\s\S]*?)```/g, (_match, lang, code) => {
@@ -239,59 +186,6 @@ function formatMessageForTextExport(msg: Message, index: number, total: number):
 
   sections.push(`【回答】\n${cleanAnswer || "（空回答）"}`);
   return sections.join("\n\n");
-}
-
-// 根据回答内容过滤出实际被引用的来源
-function getCitedSources(content: string, allSources?: { title: string; url: string; description: string }[]) {
-  if (!allSources || allSources.length === 0) return [];
-  const citations = extractCitations(content);
-  if (citations.length === 0) return [];
-  // 引用编号是 1-based，转换为 0-based 索引
-  return citations
-    .filter((n) => n >= 1 && n <= allSources.length)
-    .map((n) => allSources[n - 1]);
-}
-
-// 可折叠的思考过程块
-function ThinkBlock({ content, isThinking }: { content: string; isThinking: boolean }) {
-  // GPT-5.5 Pro 的 reasoning summary 可能很长，默认展开会让历史消息渲染明显卡顿。
-  // 正在实时推理时保持展开；历史长推理默认折叠，避免进入旧会话时一次性渲染大段文本。
-  const shouldCollapseByDefault = !isThinking && content.length >= LONG_REASONING_COLLAPSE_THRESHOLD;
-  const [expanded, setExpanded] = useState(() => !shouldCollapseByDefault);
-
-  return (
-    <div className="mb-3 rounded-xl border border-surface-border overflow-hidden">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 w-full px-3 py-2 text-left transition-colors
-          bg-purple-50 hover:bg-purple-100
-          dark:bg-[#1A1A2E] dark:hover:bg-[#252542]"
-      >
-        <Lightbulb className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
-        <span className="text-sm font-medium text-text-secondary flex-1">
-          {isThinking ? "深度推理中，片刻即达极致答案" : `深度推理${shouldCollapseByDefault && !expanded ? " · 已折叠" : ""}`}
-        </span>
-        {isThinking && (
-          <div className="flex gap-0.5">
-            <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce" />
-            <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce [animation-delay:0.15s]" />
-            <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce [animation-delay:0.3s]" />
-          </div>
-        )}
-        {expanded ? (
-          <ChevronUp className="w-3.5 h-3.5 text-text-tertiary shrink-0" />
-        ) : (
-          <ChevronDown className="w-3.5 h-3.5 text-text-tertiary shrink-0" />
-        )}
-      </button>
-      {expanded && (
-        <div className="px-3 py-2.5 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap
-          bg-slate-50 dark:bg-[#0F0F1A]">
-          {content}
-        </div>
-      )}
-    </div>
-  );
 }
 
 function ActionBar({ children, className }: { children: ReactNode; className?: string }) {
@@ -1317,13 +1211,6 @@ function MessageList({
     URL.revokeObjectURL(url);
   };
 
-  const isMessageGenerating = (msg: Message, isStreaming: boolean) => {
-    if (isStreaming) return true;
-    if (msg.completedAt || msg.stopped) return false;
-    if (msg.activityStatus?.status === "running" || msg.activityStatus?.status === "searching") return true;
-    return !!(msg.generationTaskId || msg.backgroundTaskId || msg.useBackground || msg.isComplexTask);
-  };
-
   const lastVisibleMessage = visibleMessages[visibleMessages.length - 1];
   const lastVisibleIsStreaming = !!lastVisibleMessage && lastVisibleMessage.role === "assistant" && isMessageGenerating(lastVisibleMessage, isLoading && !lastVisibleMessage.completedAt);
   const streamingMessageId = lastVisibleIsStreaming ? lastVisibleMessage.id : "";
@@ -1365,34 +1252,14 @@ function MessageList({
     };
   }, [streamingMessageId, streamingText.length, lockBottomAfterLayout]);
 
-  const renderAssistantContent = (msg: Message, isStreaming: boolean) => {
-    const generating = isMessageGenerating(msg, isStreaming);
-    if (generating) {
-      return <StreamingText messageId={msg.id} content={msg.content || ""} isStreaming={true} className="text-[15px] leading-relaxed text-text-primary" />;
-    }
-    if (!msg.content) {
-      const mayStillRecover = !msg.completedAt && !msg.stopped && !!(
-        msg.activityStatus ||
-        msg.serverMessageId ||
-        msg.generationTaskId ||
-        msg.backgroundTaskId ||
-        msg.useBackground ||
-        msg.isComplexTask
-      );
-      if (mayStillRecover) {
-        return <StreamingText messageId={msg.id} content={msg.content || ""} isStreaming={true} className="text-[15px] leading-relaxed text-text-primary" />;
-      }
-      return <div className="text-[15px] leading-relaxed text-text-secondary">生成中断，可点击重新生成</div>;
-    }
-    const { reasoning, answer, isThinking } = parseThinkContent(msg.content);
-    const cleanAnswer = sanitizeContent(answer);
-    return (
-      <div className="prose prose-sm max-w-none">
-        {reasoning && <ThinkBlock content={reasoning} isThinking={isThinking} />}
-        <LazyMarkdownRenderer content={cleanAnswer} />
-      </div>
-    );
-  };
+  const renderAssistantContent = (msg: Message, isStreaming: boolean) => (
+    <AssistantMessageContent
+      message={msg}
+      isStreaming={isStreaming}
+      MarkdownRenderer={LazyMarkdownRenderer}
+      recoverEmptyContent
+    />
+  );
 
   const renderCompareModelHeader = (modelId: string, index: number) => {
     const model = modelById.get(modelId);
