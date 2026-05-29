@@ -15,6 +15,7 @@ import {
 } from "@/lib/chatTaskStreamFinalizer";
 import { createTaskStreamEventHandler } from "@/lib/chatTaskStreamEventHandler";
 import { createMainStreamEventHandler } from "@/lib/chatMainStreamEventHandler";
+import { runCompareModels } from "@/lib/chatCompareRunCoordinator";
 import {
   runChatStreamLifecycle,
 } from "@/lib/chatStreamLifecycle";
@@ -48,7 +49,6 @@ import {
 } from "@/lib/chatMessageStatePatch";
 import {
   buildChatRequestHeaders,
-  buildCompareChatRequestBody,
   buildSingleChatRequestBody,
 } from "@/lib/chatRequestBuilder";
 import { toModelMessages } from "@/lib/chatHistoryTransform";
@@ -59,12 +59,7 @@ import {
   createUserChatMessage,
 } from "@/lib/chatMessageFactory";
 import {
-  getCompareRequestGroupContext,
-  isCompareGroupContextReady,
-  mergeCompareGroupContext,
-  resolveCompareRequestGroupModels,
   selectCompareModelIds,
-  shouldSkipSaveUserMessage,
   shouldStartCompare,
 } from "@/lib/chatCompareCoordinator";
 import {
@@ -947,28 +942,20 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
 
       const headers = buildChatRequestHeaders({ token, guestId: getGuestId() });
 
-      let compareGroupContext: CompareGroupContext | undefined;
-      let resolveGroupContextReady: (context: CompareGroupContext | undefined) => void = () => {};
-      const groupContextReady = new Promise<CompareGroupContext | undefined>((resolve) => {
-        resolveGroupContextReady = resolve;
-      });
-      let groupContextResolved = false;
-      const setCompareGroupContext = (context?: CompareGroupContext) => {
-        compareGroupContext = mergeCompareGroupContext({
-          incoming: context,
-          existing: compareGroupContext,
-          fallbackGroupModels: compareModelIds,
-        });
-        if (!groupContextResolved && isCompareGroupContextReady(compareGroupContext)) {
-          groupContextResolved = true;
-          const resolvedContext = compareGroupContext!;
-          setMessages((prev) => applyCompareGroupContextToMessages(prev, {
-            userMessageId: userMsg.id,
-            assistantIds: assistantMsgs.map((assistant) => assistant.id),
-            context: resolvedContext,
-          }));
-          resolveGroupContextReady(resolvedContext);
-        }
+      const handleCompareGroupContextResolved = (context: CompareGroupContext) => {
+        setMessages((prev) => applyCompareGroupContextToMessages(prev, {
+          userMessageId: userMsg.id,
+          assistantIds: assistantMsgs.map((assistant) => assistant.id),
+          context,
+        }));
+      };
+
+      const handleCompareRecoverableResult = (assistantMsg: Message, streamResult: StreamRunResult) => {
+        setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) => buildRecoverableBusyPatch({
+          serverMessageId: streamResult.serverMessageId || m.serverMessageId,
+          generationTaskId: streamResult.generationTaskId || m.generationTaskId,
+          activityStatus: createBusyGeneratingStatus(t),
+        })));
       };
 
       const handleCompareRunError = (assistantMsg: Message, error: any, streamResult?: StreamRunResult) => {
@@ -1001,90 +988,32 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         setMessages((prev) => patchMessageById(prev, assistantMsg.id, buildDisplayErrorPatch({ errorCode: error.errorCode, message: error.message, now })));
       };
 
-      const runModel = async (assistantMsg: Message, index: number, groupContext?: CompareGroupContext) => {
-        const controller = controllers[index];
-        let streamResult: StreamRunResult | undefined;
-        try {
-          const requestGroupContext = getCompareRequestGroupContext({
-            index,
-            explicitContext: groupContext,
-            currentContext: compareGroupContext,
-          });
-          const response = await fetch(`${API_BASE_URL}/api/chat`, {
-            method: "POST",
-            headers,
-            signal: controller.signal,
-            body: JSON.stringify(buildCompareChatRequestBody({
-              model: assistantMsg.model || "",
-              messages: toModelMessages(contextMessages),
-              conversationId: convId,
-              reasoningEnabled: reasoning.enabled,
-              reasoningEffort: reasoning.effort,
-              search,
-              templateId,
-              templatePrefix,
-              skipSaveUserMessage: shouldSkipSaveUserMessage(index),
-              groupId: requestGroupContext?.groupId,
-              userMessageId: requestGroupContext?.userMessageId,
-              groupIndex: index,
-              groupModels: resolveCompareRequestGroupModels({
-                requestGroupModels: requestGroupContext?.groupModels,
-                fallbackGroupModels: compareModelIds,
-              }),
-              fallbackGroupModels: compareModelIds,
-              skillKey: effectiveSkillKey,
-              messageFileIds: file_ids,
-            })),
-          });
-          if (!response.ok) {
-            const errorBody = await response.json().catch(() => ({}));
-            const errorCode = errorBody.error || "unknown";
-            const errorMsg = errorBody.message || "请求失败";
-            throw Object.assign(new Error(errorMsg), { errorCode });
-          }
-          streamResult = await streamResponse(response, assistantMsg, controller, convId, index === 0 ? setCompareGroupContext : undefined);
-          if (index === 0) {
-            setCompareGroupContext(streamResult?.groupContext);
-          }
-          // 对比模式里，streamResponse 可能已把异常断线/后台任务切到 task stream 或 DB polling。
-          // 这不是失败，不要让外层状态把空内容渲染成“生成中断/重新生成”。
-          if (streamResult?.recoverable) {
-            const recoverableResult = streamResult;
-            setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) => buildRecoverableBusyPatch({
-              serverMessageId: recoverableResult.serverMessageId || m.serverMessageId,
-              generationTaskId: recoverableResult.generationTaskId || m.generationTaskId,
-              activityStatus: createBusyGeneratingStatus(t),
-            })));
-          }
-        } catch (error: any) {
-          const now = Date.now();
-          if (error.name === "AbortError") {
-            if (index === 0 && !groupContextResolved) {
-              groupContextResolved = true;
-              resolveGroupContextReady(undefined);
-            }
-            if (abortReasonRef.current !== "user") return;
-            setMessages((prev) => patchMessageById(prev, assistantMsg.id, buildStoppedPatch(now)));
-            return;
-          }
-
-          handleCompareRunError(assistantMsg, error, streamResult);
-          if (index === 0 && !groupContextResolved) {
-            groupContextResolved = true;
-            resolveGroupContextReady(undefined);
-          }
-        }
-      };
-
       try {
-        const firstRun = runModel(assistantMsgs[0], 0);
-        const context = await groupContextReady;
-        if (!context?.groupId || !context.userMessageId) {
-          await firstRun;
-          return;
-        }
-        const restRuns = assistantMsgs.slice(1).map((assistantMsg, offset) => runModel(assistantMsg, offset + 1, context));
-        await Promise.all([firstRun, ...restRuns]);
+        await runCompareModels({
+          apiBaseUrl: API_BASE_URL,
+          headers,
+          controllers,
+          assistantMessages: assistantMsgs,
+          compareModelIds,
+          modelMessages: toModelMessages(contextMessages),
+          conversationId: convId,
+          reasoning,
+          search,
+          templateId,
+          templatePrefix,
+          skillKey: effectiveSkillKey,
+          messageFileIds: file_ids,
+          callbacks: {
+            streamResponse,
+            onGroupContextResolved: handleCompareGroupContextResolved,
+            onRecoverableResult: handleCompareRecoverableResult,
+            onAbortUser: (assistantMsg) => {
+              setMessages((prev) => patchMessageById(prev, assistantMsg.id, buildStoppedPatch(Date.now())));
+            },
+            onRunError: handleCompareRunError,
+            getAbortReason: () => abortReasonRef.current,
+          },
+        });
       } finally {
         const abortReason = abortReasonRef.current;
         // 和单聊保持一致：切换会话导致的 abort 只是断开当前页面 SSE，不要污染新会话 loading/侧边栏状态。
