@@ -6,12 +6,49 @@ import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotification
 import { v4 as uuidv4 } from "uuid";
 import { getGuestId } from "@/lib/guestId";
 import { streamAppend, streamGet, streamClear, realtimeUpdate, realtimeGet, realtimeClear , RealtimeData } from "@/lib/streaming";
-import {
-  buildStructuredStreamDelta,
-  stringifyStreamDelta,
-  type ReasoningStreamState,
-} from "@/lib/chatStreamDelta";
+import { type ReasoningStreamState } from "@/lib/chatStreamDelta";
+import { applyChatStreamDelta } from "@/lib/chatDeltaApplier";
 import { isSseDone, parseSseEvent, splitSseEvents } from "@/lib/chatSseParser";
+import { normalizeChatStreamPayload } from "@/lib/chatStreamMeta";
+import { normalizeBackgroundTaskInfo, normalizeGenerationTaskInfo } from "@/lib/chatTaskInfo";
+import {
+  buildCompletedPatch,
+  buildDisplayErrorPatch,
+  buildFinalizingPatch,
+  buildRecoverableBusyPatch,
+  buildStoppedPatch,
+  buildStreamErrorPatch,
+} from "@/lib/chatCompletionFinalizer";
+import {
+  buildChatStreamRunResult,
+  shouldMarkCompleted,
+  shouldRecoverStream,
+  shouldReconcileAfterDone,
+  type ChatStreamGroupContext,
+  type ChatStreamRunResult,
+} from "@/lib/chatStreamRunResult";
+import {
+  buildBackgroundPollingMessagePatch,
+  evaluateBackgroundTaskPoll,
+  shouldKeepBackgroundLoading,
+} from "@/lib/chatBackgroundPolling";
+import {
+  buildActiveTaskStreamState,
+  buildGenerationTaskEventPatches,
+  buildTaskActivityPatch,
+  buildTaskDeltaState,
+  buildTaskSearchPatch,
+} from "@/lib/chatTaskEventDecision";
+import {
+  applyCompareGroupContextToMessages,
+  applyFinalRealtimeDataToMessage,
+  patchMessageById,
+} from "@/lib/chatMessageStatePatch";
+import {
+  buildChatRequestHeaders,
+  buildCompareChatRequestBody,
+  buildSingleChatRequestBody,
+} from "@/lib/chatRequestBuilder";
 import {
   createActivityStatusFromMeta,
   createBusyGeneratingStatus,
@@ -118,41 +155,8 @@ export interface Message {
   userMessageId?: number;
 }
 
-type CompareGroupContext = {
-  groupId?: number;
-  userMessageId?: number;
-  groupModels: string[];
-};
-
-type StreamRunResult = {
-  groupContext?: CompareGroupContext;
-  serverMessageId?: number;
-  generationTaskId?: number;
-  lastSequence: number;
-  content: string;
-  useBackground: boolean;
-  sawDone: boolean;
-  recoverable?: boolean;
-};
-
-function appendStructuredStreamDelta(
-  messageId: string,
-  reasoningDelta: string,
-  contentDelta: string,
-  state: ReasoningStreamState
-): { legacyDelta: string; hasContentDelta: boolean } {
-  const result = buildStructuredStreamDelta(reasoningDelta, contentDelta, state);
-  for (const operation of result.operations) {
-    if (operation.type === "reasoning") {
-      streamAppend(messageId, { reasoningDelta: operation.reasoningDelta, reasoning: true });
-    } else if (operation.type === "close_reasoning") {
-      streamAppend(messageId, { reasoning: false });
-    } else {
-      streamAppend(messageId, { answerDelta: operation.answerDelta, reasoning: false });
-    }
-  }
-  return { legacyDelta: result.legacyDelta, hasContentDelta: result.hasContentDelta };
-}
+type CompareGroupContext = ChatStreamGroupContext;
+type StreamRunResult = ChatStreamRunResult;
 
 export interface ChatModel {
   id: string;
@@ -349,37 +353,32 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         });
         if (!res.ok) return;
         const data = await res.json();
-        const content = data?.message?.content || "";
-        const status = data?.background_task?.status || "";
-        const hasContent = content.trim().length > 0;
-        const isCompleted = status === "completed" && hasContent;
-        const isHardStopped = status === "cancelled";
-        const isSoftTerminal = status === "failed" || status === "incomplete";
-        if (isSoftTerminal) {
-          terminalStableCount = content === lastContent ? terminalStableCount + 1 : 0;
-        } else {
-          terminalStableCount = 0;
-        }
-        lastContent = content;
-        const isFinished = isCompleted || isHardStopped || (isSoftTerminal && terminalStableCount >= 3);
+        const pollState = evaluateBackgroundTaskPoll({
+          content: data?.message?.content || "",
+          status: data?.background_task?.status || "",
+          previousContent: lastContent,
+          terminalStableCount,
+        });
+        terminalStableCount = pollState.terminalStableCount;
+        lastContent = pollState.content;
         const streamActive = !!taskStreamsRef.current[localMessageId];
         const liveContent = streamGet(localMessageId) || realtimeGet(localMessageId)?.content || "";
-        setMessages((prev) =>
-          prev.map((m) => {
-            if (m.id !== localMessageId) return m;
-            // SSE / task event stream 仍在追加时，polling 只能更新状态，不能用 DB 全文覆盖内容。
-            // 否则 OpenAI completed 后 message.content 已是全文，但补尾 delta 还在路上，UI 会从半截直接跳全文。
-            const nextContent = streamActive ? (liveContent || m.content) : (content || m.content);
-            return {
-              ...m,
-              content: nextContent,
-              serverMessageId,
-              activityStatus: isFinished ? undefined : createBusyGeneratingStatus(t),
-              completedAt: isFinished ? Date.now() : undefined,
-            };
+        const now = Date.now();
+        setMessages((prev) => patchMessageById(prev, localMessageId, (m) =>
+          // SSE / task event stream 仍在追加时，polling 只能更新状态，不能用 DB 全文覆盖内容。
+          // 否则 OpenAI completed 后 message.content 已是全文，但补尾 delta 还在路上，UI 会从半截直接跳全文。
+          buildBackgroundPollingMessagePatch({
+            existingContent: m.content,
+            polledContent: pollState.content,
+            liveContent,
+            streamActive,
+            serverMessageId,
+            isFinished: pollState.isFinished,
+            now,
+            createBusyStatus: () => createBusyGeneratingStatus(t),
           })
-        );
-        if (isFinished && !streamActive) {
+        ));
+        if (pollState.isFinished && !streamActive) {
           stopBackgroundPoller(localMessageId);
           stopTaskStream(localMessageId);
           if (convId && serverMessageId) {
@@ -387,17 +386,17 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             emitTaskFinished({
               key: `chat:${serverMessageId}`,
               type: "chat",
-              title: isCompleted ? "长对话任务已完成" : "长对话任务未完成",
+              title: pollState.isCompleted ? "长对话任务已完成" : "长对话任务未完成",
               description: notificationTitle,
               href: `/chat?id=${convId}`,
-              ok: isCompleted,
+              ok: pollState.isCompleted,
               conversationTitle: notificationTitle,
             });
           }
           const hasOtherTaskStream = Object.keys(taskStreamsRef.current).some((id) => id !== localMessageId);
           const hasOtherPoller = Object.keys(backgroundPollersRef.current).some((id) => id !== localMessageId);
           setIsLoading(hasOtherTaskStream || hasOtherPoller);
-        } else if (status === "failed" || status === "cancelled" || status === "incomplete" || !hasContent) {
+        } else if (shouldKeepBackgroundLoading(pollState)) {
           // terminal 状态可能先于最终 message.content 可见；多轮确认稳定前继续轮询，避免刷新后才完整。
           setIsLoading(true);
         }
@@ -437,14 +436,14 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       const data = event.data;
       if (event.id) {
         latestSequence = Number(event.id) || latestSequence;
-        activeTaskStreamsRef.current[localMessageId] = {
-          ...(activeTaskStreamsRef.current[localMessageId] || {}),
+        activeTaskStreamsRef.current[localMessageId] = buildActiveTaskStreamState({
+          existing: activeTaskStreamsRef.current[localMessageId],
           convId,
           serverMessageId,
           generationTaskId,
           lastSequence: latestSequence,
           content: accumulated,
-        };
+        });
       }
       if (!data) return;
       if (isSseDone(data)) {
@@ -458,10 +457,10 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         const hasContent = (accumulated || streamGet(localMessageId) || realtimeGet(localMessageId)?.content || "").trim().length > 0;
         // [DONE] 只代表 event stream 结束，不代表 message.content 已经是 DB 最终值。
         // OpenAI Responses 可能在 completed/final content 阶段补尾；交给 DB polling 校准最终内容。
-        realtimeUpdate(localMessageId, {
-          completedAt: undefined,
-          activityStatus: createFinalizingStatus(t, hasContent),
-        });
+        realtimeUpdate(localMessageId, buildFinalizingPatch({
+          hasContent,
+          createFinalizingStatus: (hasFinalContent) => createFinalizingStatus(t, hasFinalContent),
+        }));
         if (hasContent && serverMessageId) {
           startBackgroundPolling(convId, localMessageId, serverMessageId);
         }
@@ -469,72 +468,76 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       }
       try {
         const parsed = JSON.parse(data);
-        if (parsed._generation_task) {
-          const task = parsed._generation_task;
-          const parsedTaskId = Number(task.id || task.task_id || generationTaskId || 0) || undefined;
-          const parsedServerMessageId = Number(task.assistant_message_id || serverMessageId || 0) || undefined;
-          activeTaskStreamsRef.current[localMessageId] = {
-            ...(activeTaskStreamsRef.current[localMessageId] || {}),
-            convId,
-            serverMessageId: parsedServerMessageId,
-            generationTaskId: parsedTaskId,
-            lastSequence: latestSequence,
-            content: accumulated,
-          };
-          realtimeUpdate(localMessageId, {
-            serverMessageId: parsedServerMessageId,
-            generationTaskId: parsedTaskId,
-            useBackground: task.use_background === true || task.background === true || task.is_complex_task === true,
-            isComplexTask: task.is_complex_task === true,
-            lastSequence: latestSequence,
-            activityStatus: createGeneratingStatus(t),
-          });
-          return;
-        }
-        if (parsed._error || parsed._error_meta) {
-          const err = parsed._error || parsed._error_meta;
-          const message = err.message || err.user_message || "请求失败";
-          realtimeUpdate(localMessageId, {
-            errorCode: err.error_code || err.code || "unknown",
-            retryable: err.retryable === true || err.retriable === true,
-            requestId: err.request_id || realtimeGet(localMessageId)?.requestId,
-            activityStatus: undefined,
-            searchStatus: undefined,
-            searchSources: undefined,
-          });
-          if (!accumulated) accumulated = message;
-          return;
-        }
-        if (parsed._activity_meta) {
-          const meta = parsed._activity_meta;
-          const searchStatus = meta.kind === "web_search" ? (meta.status === "running" ? "searching" : "completed") : undefined;
-          realtimeUpdate(localMessageId, { activityStatus: createActivityStatusFromMeta(t, meta), searchStatus });
-          return;
-        }
-        if (parsed._search_meta) {
-          const meta = parsed._search_meta;
-          realtimeUpdate(localMessageId, { searchStatus: meta.status, searchSources: meta.sources || [], searchSourcesCount: typeof meta.sources_count === "number" ? meta.sources_count : undefined, activityStatus: createWebSearchDoneStatus(t) });
-          return;
-        }
-        const rawDelta = parsed.choices?.[0]?.delta || {};
-        const contentDelta = stringifyStreamDelta(rawDelta.content);
-        const reasoningDelta = stringifyStreamDelta(rawDelta.reasoning_content || rawDelta.reasoning);
-        const { legacyDelta, hasContentDelta } = appendStructuredStreamDelta(localMessageId, reasoningDelta, contentDelta, reasoningState);
-        if (hasContentDelta) {
-          realtimeUpdate(localMessageId, {
-            activityStatus: createGeneratingStatus(t),
-          });
-        }
-        if (legacyDelta) {
-          accumulated += legacyDelta;
-          activeTaskStreamsRef.current[localMessageId] = {
-            ...(activeTaskStreamsRef.current[localMessageId] || {}),
-            convId,
-            serverMessageId,
-            generationTaskId,
-            lastSequence: latestSequence,
-            content: accumulated,
-          };
+        const payload = normalizeChatStreamPayload(parsed);
+        switch (payload.type) {
+          case "generation_task": {
+            const taskInfo = normalizeGenerationTaskInfo(payload.task, { generationTaskId, serverMessageId });
+            const patches = buildGenerationTaskEventPatches({
+              taskInfo,
+              convId,
+              lastSequence: latestSequence,
+              content: accumulated,
+              existingActiveState: activeTaskStreamsRef.current[localMessageId],
+              activityStatus: createGeneratingStatus(t),
+            });
+            activeTaskStreamsRef.current[localMessageId] = patches.activeState;
+            realtimeUpdate(localMessageId, patches.realtimePatch);
+            return;
+          }
+          case "error": {
+            realtimeUpdate(localMessageId, buildStreamErrorPatch({
+              errorCode: payload.errorCode,
+              retryable: payload.retryable,
+              requestId: payload.requestId || realtimeGet(localMessageId)?.requestId,
+            }));
+            if (!accumulated) accumulated = payload.message;
+            return;
+          }
+          case "activity": {
+            const meta = payload.meta;
+            realtimeUpdate(localMessageId, buildTaskActivityPatch({
+              meta,
+              activityStatus: createActivityStatusFromMeta(t, meta),
+            }));
+            return;
+          }
+          case "search": {
+            const meta = payload.meta;
+            realtimeUpdate(localMessageId, buildTaskSearchPatch({
+              meta,
+              activityStatus: createWebSearchDoneStatus(t),
+            }));
+            return;
+          }
+          case "delta": {
+            const { legacyDelta, hasContentDelta } = applyChatStreamDelta({
+              messageId: localMessageId,
+              rawDelta: payload.rawDelta,
+              reasoningState,
+              append: streamAppend,
+            });
+            if (hasContentDelta) {
+              realtimeUpdate(localMessageId, {
+                activityStatus: createGeneratingStatus(t),
+              });
+            }
+            const deltaState = buildTaskDeltaState({
+              legacyDelta,
+              accumulated,
+              existingActiveState: activeTaskStreamsRef.current[localMessageId],
+              convId,
+              serverMessageId,
+              generationTaskId,
+              lastSequence: latestSequence,
+            });
+            accumulated = deltaState.accumulated;
+            if (deltaState.activeState) {
+              activeTaskStreamsRef.current[localMessageId] = deltaState.activeState;
+            }
+            return;
+          }
+          default:
+            return;
         }
       } catch {
         accumulated += data;
@@ -573,12 +576,14 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         // 同步 streaming store 到 messages state
         const finalData = realtimeGet(localMessageId);
         if (finalData || accumulated) {
-          setMessages((prev) => prev.map((m) => {
-            if (m.id !== localMessageId) return m;
-            const next = { ...m, content: finalData?.content || accumulated, lastSequence: Math.max(m.lastSequence || 0, latestSequence) };
-            if (finalData) Object.assign(next, finalData);
-            return next as Message;
-          }));
+          setMessages((prev) => patchMessageById(prev, localMessageId, (m) =>
+            applyFinalRealtimeDataToMessage(m, {
+              finalContent: accumulated,
+              finalData,
+              latestSequence,
+              forceContentFallback: true,
+            })
+          ));
         }
         realtimeClear(localMessageId);
         delete taskStreamsRef.current[localMessageId];
@@ -931,154 +936,144 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         }
         try {
           const parsed = JSON.parse(data);
-          // 处理 chat meta（请求追踪 ID 等）
-          if (parsed._chat_meta) {
-            const meta = parsed._chat_meta;
-            realtimeUpdate(assistantMsg.id, { requestId: meta.request_id || "" });
-            return;
-          }
-          if (parsed._generation_task) {
-            const task = parsed._generation_task;
-            const serverMessageId = Number(task.assistant_message_id || 0) || undefined;
-            const groupId = Number(task.group_id || 0) || undefined;
-            const groupIndex = task.group_index === 0 || task.group_index ? Number(task.group_index) : undefined;
-            const userMessageId = Number(task.user_message_id || 0) || undefined;
-            const groupModels = Array.isArray(task.group_models) ? task.group_models.filter((m: unknown): m is string => typeof m === "string" && m.length > 0) : undefined;
-            const generationTaskId = Number(task.id || task.task_id || 0) || undefined;
-            latestUseBackground = task.use_background === true || task.background === true || task.is_complex_task === true;
-            latestServerMessageId = serverMessageId;
-            latestGroupId = groupId || latestGroupId;
-            latestGroupIndex = groupIndex ?? latestGroupIndex;
-            latestUserMessageId = userMessageId || latestUserMessageId;
-            latestGroupModels = groupModels?.length ? groupModels : latestGroupModels;
-            latestGenerationTaskId = generationTaskId;
-            realtimeUpdate(assistantMsg.id, {
-              serverMessageId,
-              groupId: latestGroupId,
-              groupIndex: latestGroupIndex,
-              groupModels: latestGroupModels,
-              userMessageId: latestUserMessageId,
-              generationTaskId,
-              useBackground: latestUseBackground,
-              isComplexTask: task.is_complex_task === true,
-              lastSequence: latestSequence,
-              activityStatus: createGeneratingStatus(t),
-            });
-            notifyGroupContext();
-            if (generationTaskId) {
+          const payload = normalizeChatStreamPayload(parsed);
+          switch (payload.type) {
+            case "chat_meta": {
+              realtimeUpdate(assistantMsg.id, { requestId: payload.requestId });
+              return;
+            }
+            case "generation_task": {
+              const taskInfo = normalizeGenerationTaskInfo(payload.task);
+              latestUseBackground = taskInfo.useBackground;
+              latestServerMessageId = taskInfo.serverMessageId;
+              latestGroupId = taskInfo.groupId || latestGroupId;
+              latestGroupIndex = taskInfo.groupIndex ?? latestGroupIndex;
+              latestUserMessageId = taskInfo.userMessageId || latestUserMessageId;
+              latestGroupModels = taskInfo.groupModels?.length ? taskInfo.groupModels : latestGroupModels;
+              latestGenerationTaskId = taskInfo.generationTaskId;
+              realtimeUpdate(assistantMsg.id, {
+                serverMessageId: taskInfo.serverMessageId,
+                groupId: latestGroupId,
+                groupIndex: latestGroupIndex,
+                groupModels: latestGroupModels,
+                userMessageId: latestUserMessageId,
+                generationTaskId: taskInfo.generationTaskId,
+                useBackground: latestUseBackground,
+                isComplexTask: taskInfo.isComplexTask,
+                lastSequence: latestSequence,
+                activityStatus: createGeneratingStatus(t),
+              });
+              notifyGroupContext();
+              if (taskInfo.generationTaskId) {
+                backgroundPollingStarted = true;
+              }
+              if (latestServerMessageId && (latestUseBackground || taskInfo.isComplexTask)) {
+                const notificationTitle = getNotificationConversationTitle(conversationTitle, assistantMsg.model || selectedModel.name);
+                registerBackgroundTask({
+                  type: "chat",
+                  id: latestServerMessageId,
+                  key: `chat:${latestServerMessageId}`,
+                  title: "长对话生成中",
+                  description: notificationTitle,
+                  href: `/chat${convId ? `?id=${convId}` : ""}`,
+                  conversationId: convId,
+                  serverMessageId: latestServerMessageId,
+                  conversationTitle: notificationTitle,
+                });
+              }
+              return;
+            }
+            case "background_task": {
+              const taskInfo = normalizeBackgroundTaskInfo(payload.task);
+              latestServerMessageId = taskInfo.serverMessageId;
+              latestGroupId = taskInfo.groupId || latestGroupId;
+              latestGroupIndex = taskInfo.groupIndex ?? latestGroupIndex;
+              latestUserMessageId = taskInfo.userMessageId || latestUserMessageId;
+              latestGroupModels = taskInfo.groupModels?.length ? taskInfo.groupModels : latestGroupModels;
+              latestUseBackground = true;
+              realtimeUpdate(assistantMsg.id, {
+                serverMessageId: taskInfo.serverMessageId,
+                groupId: latestGroupId,
+                groupIndex: latestGroupIndex,
+                groupModels: latestGroupModels,
+                userMessageId: latestUserMessageId,
+                backgroundTaskId: taskInfo.backgroundTaskId,
+                useBackground: true,
+                isComplexTask: true,
+                activityStatus: createBusyGeneratingStatus(t),
+              });
+              notifyGroupContext();
               backgroundPollingStarted = true;
+              if (taskInfo.serverMessageId) {
+                const notificationTitle = getNotificationConversationTitle(conversationTitle, assistantMsg.model || selectedModel.name);
+                registerBackgroundTask({
+                  type: "chat",
+                  id: taskInfo.serverMessageId,
+                  key: `chat:${taskInfo.serverMessageId}`,
+                  title: "长对话生成中",
+                  description: notificationTitle,
+                  href: `/chat${convId ? `?id=${convId}` : ""}`,
+                  conversationId: convId,
+                  serverMessageId: taskInfo.serverMessageId,
+                  conversationTitle: notificationTitle,
+                });
+              }
+              return;
             }
-            if (latestServerMessageId && (latestUseBackground || task.is_complex_task === true)) {
-              const notificationTitle = getNotificationConversationTitle(conversationTitle, assistantMsg.model || selectedModel.name);
-              registerBackgroundTask({
-                type: "chat",
-                id: latestServerMessageId,
-                key: `chat:${latestServerMessageId}`,
-                title: "长对话生成中",
-                description: notificationTitle,
-                href: `/chat${convId ? `?id=${convId}` : ""}`,
-                conversationId: convId,
-                serverMessageId: latestServerMessageId,
-                conversationTitle: notificationTitle,
+            case "error": {
+              realtimeUpdate(assistantMsg.id, {
+                content: accumulated || payload.message,
+                ...buildStreamErrorPatch({
+                  errorCode: payload.errorCode,
+                  retryable: payload.retryable,
+                  requestId: payload.requestId || realtimeGet(assistantMsg.id)?.requestId,
+                }),
               });
+              if (!accumulated) {
+                accumulated = payload.message;
+              }
+              return;
             }
-            return;
-          }
-          if (parsed._background_task) {
-            const task = parsed._background_task;
-            const serverMessageId = Number(task.assistant_message_id || 0) || undefined;
-            const groupId = Number(task.group_id || 0) || undefined;
-            const groupIndex = task.group_index === 0 || task.group_index ? Number(task.group_index) : undefined;
-            const userMessageId = Number(task.user_message_id || 0) || undefined;
-            const groupModels = Array.isArray(task.group_models) ? task.group_models.filter((m: unknown): m is string => typeof m === "string" && m.length > 0) : undefined;
-            latestServerMessageId = serverMessageId;
-            latestGroupId = groupId || latestGroupId;
-            latestGroupIndex = groupIndex ?? latestGroupIndex;
-            latestUserMessageId = userMessageId || latestUserMessageId;
-            latestGroupModels = groupModels?.length ? groupModels : latestGroupModels;
-            latestUseBackground = true;
-            const taskId = task.id || "";
-            realtimeUpdate(assistantMsg.id, {
-              serverMessageId,
-              groupId: latestGroupId,
-              groupIndex: latestGroupIndex,
-              groupModels: latestGroupModels,
-              userMessageId: latestUserMessageId,
-              backgroundTaskId: taskId,
-              useBackground: true,
-              isComplexTask: true,
-              activityStatus: createBusyGeneratingStatus(t),
-            });
-            notifyGroupContext();
-            backgroundPollingStarted = true;
-            if (serverMessageId) {
-              const notificationTitle = getNotificationConversationTitle(conversationTitle, assistantMsg.model || selectedModel.name);
-              registerBackgroundTask({
-                type: "chat",
-                id: serverMessageId,
-                key: `chat:${serverMessageId}`,
-                title: "长对话生成中",
-                description: notificationTitle,
-                href: `/chat${convId ? `?id=${convId}` : ""}`,
-                conversationId: convId,
-                serverMessageId,
-                conversationTitle: notificationTitle,
+            case "activity": {
+              const meta = payload.meta;
+              const patch: Partial<RealtimeData> = {
+                activityStatus: createActivityStatusFromMeta(t, meta),
+              };
+              if (meta.kind === "web_search") {
+                patch.searchStatus = meta.status;
+              }
+              realtimeUpdate(assistantMsg.id, patch);
+              return;
+            }
+            case "search": {
+              const meta = payload.meta;
+              realtimeUpdate(assistantMsg.id, {
+                searchStatus: meta.status,
+                searchSources: meta.sources || [],
+                searchSourcesCount: typeof meta.sources_count === "number" ? meta.sources_count : undefined,
+                activityStatus: createWebSearchDoneStatus(t),
               });
+              return;
             }
-            return;
-          }
-          // 处理统一错误结构 / provider 错误元数据。错误不能继续当 delta 追加，否则 429 会重复刷屏卡死。
-          if (parsed._error || parsed._error_meta) {
-            const err = parsed._error || parsed._error_meta;
-            const message = err.message || err.user_message || "请求失败";
-            realtimeUpdate(assistantMsg.id, {
-              content: accumulated || message,
-              errorCode: err.error_code || err.code || "unknown",
-              retryable: err.retryable === true || err.retriable === true,
-              requestId: err.request_id || realtimeGet(assistantMsg.id)?.requestId,
-              activityStatus: undefined,
-              searchStatus: undefined,
-              searchSources: undefined,
-            });
-            if (!accumulated) {
-              accumulated = message;
+            case "delta": {
+              const { legacyDelta, hasContentDelta } = applyChatStreamDelta({
+                messageId: assistantMsg.id,
+                rawDelta: payload.rawDelta,
+                reasoningState,
+                append: streamAppend,
+              });
+              if (hasContentDelta) {
+                realtimeUpdate(assistantMsg.id, {
+                  activityStatus: createGeneratingStatus(t),
+                });
+              }
+              if (legacyDelta) {
+                accumulated += legacyDelta;
+              }
+              return;
             }
-            return;
-          }
-          // 处理活动状态元数据（实时，不缓冲）
-          if (parsed._activity_meta) {
-            const meta = parsed._activity_meta;
-            const patch: Partial<RealtimeData> = {
-              activityStatus: createActivityStatusFromMeta(t, meta),
-            };
-            if (meta.kind === "web_search") {
-              patch.searchStatus = meta.status;
-            }
-            realtimeUpdate(assistantMsg.id, patch);
-            return;
-          }
-          // 处理搜索元数据（实时，不缓冲）
-          if (parsed._search_meta) {
-            const meta = parsed._search_meta;
-            realtimeUpdate(assistantMsg.id, {
-              searchStatus: meta.status,
-              searchSources: meta.sources || [],
-              searchSourcesCount: typeof meta.sources_count === "number" ? meta.sources_count : undefined,
-              activityStatus: createWebSearchDoneStatus(t),
-            });
-            return;
-          }
-          const rawDelta = parsed.choices?.[0]?.delta || {};
-          const contentDelta = stringifyStreamDelta(rawDelta.content);
-          const reasoningDelta = stringifyStreamDelta(rawDelta.reasoning_content || rawDelta.reasoning);
-          const { legacyDelta, hasContentDelta } = appendStructuredStreamDelta(assistantMsg.id, reasoningDelta, contentDelta, reasoningState);
-          if (hasContentDelta) {
-            realtimeUpdate(assistantMsg.id, {
-              activityStatus: createGeneratingStatus(t),
-            });
-          }
-          if (legacyDelta) {
-            accumulated += legacyDelta;
+            default:
+              return;
           }
         } catch {
           // JSON 解析失败时，当作文本免底追加
@@ -1087,12 +1082,13 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         }
       };
 
-      const buildStreamRunResult = (contentOverride?: string): StreamRunResult => ({
+      const buildStreamRunResult = (contentOverride?: string): StreamRunResult => buildChatStreamRunResult({
         groupContext: currentGroupContext(),
         serverMessageId: latestServerMessageId,
         generationTaskId: latestGenerationTaskId,
         lastSequence: latestSequence,
-        content: contentOverride ?? (streamGet(assistantMsg.id) || accumulated),
+        content: contentOverride,
+        fallbackContent: streamGet(assistantMsg.id) || accumulated,
         useBackground: latestUseBackground,
         sawDone,
         recoverable,
@@ -1160,22 +1156,19 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         const finalContent = streamGet(assistantMsg.id) || accumulated;
         const finalData = realtimeGet(assistantMsg.id);
         if (finalContent || finalData) {
-          setMessages((prev) =>
-            prev.map((m) => {
-              if (m.id !== assistantMsg.id) return m;
-              const next = { ...m };
-              if (finalContent) next.content = finalContent;
-              if (finalData) {
-                Object.assign(next, finalData);
-              }
-              return next;
-            })
-          );
+          setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) =>
+            applyFinalRealtimeDataToMessage(m, { finalContent, finalData })
+          ));
         }
 
         // SSE 自然断开但没有收到 DONE：不能把空 assistant 标 completed。
         // 后端 task runner 仍可能在生成/落库，转为可恢复 task stream / polling。
-        if (!sawDone && abortReason !== "navigation" && abortReason !== "user" && (latestServerMessageId || latestGenerationTaskId)) {
+        if (shouldRecoverStream({
+          sawDone,
+          abortReason,
+          serverMessageId: latestServerMessageId,
+          generationTaskId: latestGenerationTaskId,
+        })) {
           recoverable = true;
           startTaskEventStream(convId || currentConversation, assistantMsg.id, latestServerMessageId, latestSequence, finalContent, latestGenerationTaskId);
           if (latestUseBackground && latestServerMessageId) {
@@ -1189,7 +1182,12 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         // OpenAI background/complex task 的 [DONE] 只代表当前 SSE/event stream 结束，
         // 不代表已展示内容就是 DB 最终内容。即使已有部分内容，也要继续通过
         // task stream / DB polling 校准，否则会出现“输出一半直接 DONE，刷新后变完整”。
-        if (sawDone && abortReason !== "navigation" && abortReason !== "user" && (latestServerMessageId || latestGenerationTaskId)) {
+        if (shouldReconcileAfterDone({
+          sawDone,
+          abortReason,
+          serverMessageId: latestServerMessageId,
+          generationTaskId: latestGenerationTaskId,
+        })) {
           recoverable = true;
           // The initial /chat request is itself a task event stream. Its controller is
           // still registered until this finally block finishes, so an immediate
@@ -1207,12 +1205,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
 
         // 切会话/用户停止时不要在旧异步里把消息标 completed。
         // 切回该会话时由历史加载 + task event stream 恢复真实状态。
-        if (sawDone && hasFinalContent && abortReason !== "navigation" && abortReason !== "user") {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantMsg.id ? { ...m, completedAt: Date.now(), activityStatus: undefined } : m
-            )
-          );
+        if (shouldMarkCompleted({ sawDone, hasFinalContent, abortReason })) {
+          setMessages((prev) => patchMessageById(prev, assistantMsg.id, buildCompletedPatch(Date.now())));
         }
       }
 
@@ -1283,14 +1277,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       abortControllerRef.current = null;
       abortReasonRef.current = null;
 
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
-      } else {
-        headers["X-Guest-ID"] = getGuestId();
-      }
+      const headers = buildChatRequestHeaders({ token, guestId: getGuestId() });
 
       let compareGroupContext: CompareGroupContext | undefined;
       let resolveGroupContextReady: (context: CompareGroupContext | undefined) => void = () => {};
@@ -1308,24 +1295,11 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         if (!groupContextResolved && compareGroupContext.groupId && compareGroupContext.userMessageId) {
           groupContextResolved = true;
           const resolvedContext = compareGroupContext;
-          setMessages((prev) =>
-            prev.map((m) => {
-              if (m.id === userMsg.id) {
-                return { ...m, serverMessageId: resolvedContext.userMessageId };
-              }
-              if (assistantMsgs.some((assistant) => assistant.id === m.id)) {
-                const groupIndex = assistantMsgs.findIndex((assistant) => assistant.id === m.id);
-                return {
-                  ...m,
-                  groupId: resolvedContext.groupId,
-                  userMessageId: resolvedContext.userMessageId,
-                  groupModels: resolvedContext.groupModels,
-                  groupIndex: groupIndex >= 0 ? groupIndex : m.groupIndex,
-                };
-              }
-              return m;
-            })
-          );
+          setMessages((prev) => applyCompareGroupContextToMessages(prev, {
+            userMessageId: userMsg.id,
+            assistantIds: assistantMsgs.map((assistant) => assistant.id),
+            context: resolvedContext,
+          }));
           resolveGroupContextReady(resolvedContext);
         }
       };
@@ -1339,38 +1313,16 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         const isBackgroundModel = !!assistantMsg.model && (assistantMsg.model === "gpt-5.5-pro" || assistantMsg.model.startsWith("gpt-5.5-pro-"));
 
         if (hasRecoverableStream || (isBackgroundModel && convId)) {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantMsg.id
-                ? {
-                    ...m,
-                    serverMessageId: serverMessageId || m.serverMessageId,
-                    generationTaskId: generationTaskId || m.generationTaskId,
-                    activityStatus: createBusyGeneratingStatus(t),
-                    completedAt: undefined,
-                  }
-                : m
-            )
-          );
+          setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) => buildRecoverableBusyPatch({
+            serverMessageId: serverMessageId || m.serverMessageId,
+            generationTaskId: generationTaskId || m.generationTaskId,
+            activityStatus: createBusyGeneratingStatus(t),
+          })));
           if (serverMessageId) startBackgroundPolling(convId, assistantMsg.id, serverMessageId);
           return;
         }
 
-        let displayMsg: string;
-        if (error.errorCode === "file_not_ready") {
-          displayMsg = `⏳ 文件解析中，请稍后再问`;
-        } else if (error.errorCode === "guest_limit_exceeded") {
-          displayMsg = `⚠️ ${error.message || "匿名用户每日额度已用完，请登录后继续"}`;
-        } else {
-          displayMsg = `❌ ${error.message || "请求失败"}`;
-        }
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantMsg.id
-              ? { ...m, content: displayMsg, completedAt: now, activityStatus: undefined }
-              : m
-          )
-        );
+        setMessages((prev) => patchMessageById(prev, assistantMsg.id, buildDisplayErrorPatch({ errorCode: error.errorCode, message: error.message, now })));
       };
 
       const runModel = async (assistantMsg: Message, index: number, groupContext?: CompareGroupContext) => {
@@ -1382,24 +1334,24 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             method: "POST",
             headers,
             signal: controller.signal,
-            body: JSON.stringify({
-              model: assistantMsg.model,
+            body: JSON.stringify(buildCompareChatRequestBody({
+              model: assistantMsg.model || "",
               messages: toModelMessages(contextMessages),
-              stream: true,
-              conversation_id: convId,
-              reasoning: reasoning.enabled,
-              reasoning_effort: reasoning.effort || "high",
-              search: search,
-              template_id: templateId,
-              template_prefix: templatePrefix,
-              skip_save_user_msg: index > 0,
-              group_id: requestGroupContext?.groupId,
-              user_message_id: requestGroupContext?.userMessageId,
-              group_index: index,
-              group_models: requestGroupContext?.groupModels?.length ? requestGroupContext.groupModels : compareModelIds,
-              skill_key: effectiveSkillKey || undefined,
-              message_file_ids: file_ids || undefined,
-            }),
+              conversationId: convId,
+              reasoningEnabled: reasoning.enabled,
+              reasoningEffort: reasoning.effort,
+              search,
+              templateId,
+              templatePrefix,
+              skipSaveUserMessage: index > 0,
+              groupId: requestGroupContext?.groupId,
+              userMessageId: requestGroupContext?.userMessageId,
+              groupIndex: index,
+              groupModels: requestGroupContext?.groupModels || [],
+              fallbackGroupModels: compareModelIds,
+              skillKey: effectiveSkillKey,
+              messageFileIds: file_ids,
+            })),
           });
           if (!response.ok) {
             const errorBody = await response.json().catch(() => ({}));
@@ -1415,19 +1367,11 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           // 这不是失败，不要让外层状态把空内容渲染成“生成中断/重新生成”。
           if (streamResult?.recoverable) {
             const recoverableResult = streamResult;
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMsg.id
-                  ? {
-                      ...m,
-                      serverMessageId: recoverableResult.serverMessageId || m.serverMessageId,
-                      generationTaskId: recoverableResult.generationTaskId || m.generationTaskId,
-                      activityStatus: createBusyGeneratingStatus(t),
-                      completedAt: undefined,
-                    }
-                  : m
-              )
-            );
+            setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) => buildRecoverableBusyPatch({
+              serverMessageId: recoverableResult.serverMessageId || m.serverMessageId,
+              generationTaskId: recoverableResult.generationTaskId || m.generationTaskId,
+              activityStatus: createBusyGeneratingStatus(t),
+            })));
           }
         } catch (error: any) {
           const now = Date.now();
@@ -1437,13 +1381,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               resolveGroupContextReady(undefined);
             }
             if (abortReasonRef.current !== "user") return;
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMsg.id
-                  ? { ...m, stopped: true, completedAt: now, activityStatus: undefined }
-                  : m
-              )
-            );
+            setMessages((prev) => patchMessageById(prev, assistantMsg.id, buildStoppedPatch(now)));
             return;
           }
 
@@ -1599,31 +1537,23 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
 
       try {
         const token = localStorage.getItem("token");
-        const headers: Record<string, string> = {
-          "Content-Type": "application/json",
-        };
-        if (token) {
-          headers["Authorization"] = `Bearer ${token}`;
-        } else {
-          headers["X-Guest-ID"] = getGuestId();
-        }
+        const headers = buildChatRequestHeaders({ token, guestId: getGuestId() });
         const response = await fetch(`${API_BASE_URL}/api/chat`, {
           method: "POST",
           headers,
           signal: controller.signal,
-          body: JSON.stringify({
+          body: JSON.stringify(buildSingleChatRequestBody({
             model: selectedModel.id,
             messages: toModelMessages(contextMessages),
-            stream: true,
-            conversation_id: convId,
-            reasoning: reasoning.enabled,
-            reasoning_effort: reasoning.effort || "high",
-            search: search,
-            template_id: templateId,
-            skip_save_user_msg: skipUserMsg,
-            skill_key: effectiveSkillKey || undefined,
-            message_file_ids: file_ids || undefined,
-          }),
+            conversationId: convId,
+            reasoningEnabled: reasoning.enabled,
+            reasoningEffort: reasoning.effort,
+            search,
+            templateId,
+            skipSaveUserMessage: skipUserMsg,
+            skillKey: effectiveSkillKey,
+            messageFileIds: file_ids,
+          })),
         });
 
         if (!response.ok) {
@@ -1638,40 +1568,17 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         if (error.name === "AbortError") {
           // 只有点击“停止生成”才显示中断；切换会话/页面导致的 Abort 不污染消息状态。
           if (abortReasonRef.current === "user") {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMsg.id
-                  ? { ...m, stopped: true, activityStatus: undefined }
-                  : m
-              )
-            );
+            setMessages((prev) => patchMessageById(prev, assistantMsg.id, buildStoppedPatch()));
           }
         } else {
           const isBackgroundModel = selectedModel.id === "gpt-5.5-pro" || selectedModel.id.startsWith("gpt-5.5-pro-");
           if (isBackgroundModel && convId) {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMsg.id
-                  ? { ...m, activityStatus: createBusyGeneratingStatus(t) }
-                  : m
-              )
-            );
+            setMessages((prev) => patchMessageById(prev, assistantMsg.id, buildRecoverableBusyPatch({ activityStatus: createBusyGeneratingStatus(t) })));
           } else {
-            let displayMsg: string;
-            if (error.errorCode === "file_not_ready") {
-              displayMsg = `⏳ 文件解析中，请稍后再问`;
-            } else if (error.errorCode === "guest_limit_exceeded") {
-              displayMsg = `⚠️ 匿名用户每日次数用完，请登录后继续`;
-            } else {
-              displayMsg = `❌ ${error.message || "请求失败"}`;
-            }
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMsg.id
-                  ? { ...m, content: displayMsg, activityStatus: undefined }
-                  : m
-              )
-            );
+            setMessages((prev) => patchMessageById(prev, assistantMsg.id, buildDisplayErrorPatch({
+              errorCode: error.errorCode,
+              message: error.errorCode === "guest_limit_exceeded" ? "匿名用户每日次数用完，请登录后继续" : error.message,
+            })));
           }
         }
       } finally {
@@ -1762,14 +1669,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   const forkChat = useCallback(
     async (messageId: number, modelIds: string[]) => {
       const token = localStorage.getItem("token");
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
-      } else {
-        headers["X-Guest-ID"] = getGuestId();
-      }
+      const headers = buildChatRequestHeaders({ token, guestId: getGuestId() });
       const res = await fetch(`${API_BASE_URL}/api/chat/${messageId}/fork`, {
         method: "POST",
         headers,
