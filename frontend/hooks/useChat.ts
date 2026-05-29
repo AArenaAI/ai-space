@@ -6,17 +6,7 @@ import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotification
 import { v4 as uuidv4 } from "uuid";
 import { getGuestId } from "@/lib/guestId";
 import { streamAppend, streamGet, streamClear, realtimeUpdate, realtimeGet, realtimeClear } from "@/lib/streaming";
-import { type ReasoningStreamState } from "@/lib/chatStreamDelta";
-import { applyChatStreamDelta } from "@/lib/chatDeltaApplier";
-import { processChatStreamEvent } from "@/lib/chatStreamEventProcessor";
 import {
-  buildDeltaAccumulatedIntent,
-  buildStreamErrorIntent,
-  buildStreamSearchIntent,
-  buildTextAppendIntent,
-} from "@/lib/chatStreamActionHandler";
-import {
-  buildChatBackgroundTaskRegistration,
   getNotificationConversationTitle,
 } from "@/lib/chatBackgroundTaskRegistration";
 import {
@@ -24,6 +14,7 @@ import {
   shouldSyncTaskStreamFinalMessage,
 } from "@/lib/chatTaskStreamFinalizer";
 import { createTaskStreamEventHandler } from "@/lib/chatTaskStreamEventHandler";
+import { createMainStreamEventHandler } from "@/lib/chatMainStreamEventHandler";
 import {
   runChatStreamLifecycle,
 } from "@/lib/chatStreamLifecycle";
@@ -31,7 +22,6 @@ import {
   runTaskEventStream,
   shouldFallbackToBackgroundPollingAfterTaskStreamError,
 } from "@/lib/chatTaskStreamLifecycle";
-import { normalizeBackgroundTaskInfo, normalizeGenerationTaskInfo } from "@/lib/chatTaskInfo";
 import {
   buildCompletedPatch,
   buildDisplayErrorPatch,
@@ -46,12 +36,6 @@ import {
   type ChatStreamGroupContext,
   type ChatStreamRunResult,
 } from "@/lib/chatStreamRunResult";
-import {
-  buildChatActivityPatch,
-  buildChatBackgroundTaskPatch,
-  buildChatDonePatch,
-  buildChatGenerationTaskPatch,
-} from "@/lib/chatStreamEventDecision";
 import {
   buildBackgroundPollingMessagePatch,
   evaluateBackgroundTaskPoll,
@@ -90,11 +74,9 @@ import {
   shouldResumeTaskStreamAfterError,
 } from "@/lib/chatErrorRecovery";
 import {
-  createActivityStatusFromMeta,
   createBusyGeneratingStatus,
   createFinalizingStatus,
   createGeneratingStatus,
-  createWebSearchDoneStatus,
 } from "@/lib/chatActivityStatus";
 
 const API_BASE_URL = ""; // 使用相对路径，nginx 同域名代理 /api -> 后端
@@ -780,186 +762,43 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       convId?: number,
       onGroupContext?: (context: CompareGroupContext) => void
     ): Promise<StreamRunResult | undefined> => {
-      let accumulated = "";
-      const reasoningState: ReasoningStreamState = { inReasoningBlock: false };
-      let backgroundPollingStarted = false;
-      let latestServerMessageId: number | undefined;
-      let latestGroupId: number | undefined = assistantMsg.groupId;
-      let latestGroupIndex: number | undefined = assistantMsg.groupIndex;
-      let latestGroupModels: string[] | undefined = assistantMsg.groupModels;
-      let latestUserMessageId: number | undefined = assistantMsg.userMessageId;
-      let groupContextNotified = false;
-      let latestGenerationTaskId: number | undefined;
-      let latestUseBackground = false;
-      let sawDone = false;
-      let recoverable = false;
-      let latestSequence = 0;
-
-      const currentGroupContext = (): CompareGroupContext | undefined =>
-        latestGroupId || latestUserMessageId
-          ? {
-              groupId: latestGroupId,
-              userMessageId: latestUserMessageId,
-              groupModels: latestGroupModels || [],
-            }
-          : undefined;
-
-      const notifyGroupContext = () => {
-        const context = currentGroupContext();
-        if (groupContextNotified || !context?.groupId || !context.userMessageId) return;
-        groupContextNotified = true;
-        onGroupContext?.(context);
-      };
-
-      const processEvent = (eventText: string) => {
-        const action = processChatStreamEvent({ eventText, previousSequence: latestSequence });
-        if (action.sequence !== undefined) latestSequence = action.sequence;
-        if (action.type === "empty") return;
-        if (action.type === "done") {
-          if (reasoningState.inReasoningBlock) {
-            accumulated += "</think>";
-            streamAppend(assistantMsg.id, { reasoning: false });
-            reasoningState.inReasoningBlock = false;
-          }
-          sawDone = true;
-          const { patch } = buildChatDonePatch({
-            accumulated,
-            streamContent: streamGet(assistantMsg.id),
-            realtimeContent: realtimeGet(assistantMsg.id)?.content,
-            busyStatus: createBusyGeneratingStatus(t),
-          });
-          realtimeUpdate(assistantMsg.id, patch);
-          return;
-        }
-        if (action.type === "text") {
-          // JSON 解析失败时，当作文本免底追加
-          const intent = buildTextAppendIntent({ accumulated, data: action.data });
-          accumulated = intent.accumulated;
-          streamAppend(assistantMsg.id, intent.data);
-          return;
-        }
-        if (action.type === "payload") {
-          const { payload } = action;
-          switch (payload.type) {
-            case "chat_meta": {
-              realtimeUpdate(assistantMsg.id, { requestId: payload.requestId });
-              return;
-            }
-            case "generation_task": {
-              const taskInfo = normalizeGenerationTaskInfo(payload.task);
-              const taskDecision = buildChatGenerationTaskPatch({
-                taskInfo,
-                existingMeta: currentGroupContext() || {},
-                lastSequence: latestSequence,
-                activityStatus: createGeneratingStatus(t),
-              });
-              latestUseBackground = taskDecision.meta.useBackground;
-              latestServerMessageId = taskDecision.meta.serverMessageId;
-              latestGroupId = taskDecision.meta.groupId;
-              latestGroupIndex = taskDecision.meta.groupIndex;
-              latestUserMessageId = taskDecision.meta.userMessageId;
-              latestGroupModels = taskDecision.meta.groupModels;
-              latestGenerationTaskId = taskDecision.meta.generationTaskId;
-              realtimeUpdate(assistantMsg.id, taskDecision.patch);
-              notifyGroupContext();
-              if (taskDecision.shouldMarkBackgroundPollingStarted) {
-                backgroundPollingStarted = true;
-              }
-              if (taskDecision.shouldRegisterBackgroundTask && latestServerMessageId) {
-                registerBackgroundTask(buildChatBackgroundTaskRegistration({
-                  serverMessageId: latestServerMessageId,
-                  conversationId: convId,
-                  conversationTitle,
-                  modelName: assistantMsg.model || selectedModel.name,
-                }));
-              }
-              return;
-            }
-            case "background_task": {
-              const taskInfo = normalizeBackgroundTaskInfo(payload.task);
-              const taskDecision = buildChatBackgroundTaskPatch({
-                taskInfo,
-                existingMeta: currentGroupContext() || {},
-                activityStatus: createBusyGeneratingStatus(t),
-              });
-              latestServerMessageId = taskDecision.meta.serverMessageId;
-              latestGroupId = taskDecision.meta.groupId;
-              latestGroupIndex = taskDecision.meta.groupIndex;
-              latestUserMessageId = taskDecision.meta.userMessageId;
-              latestGroupModels = taskDecision.meta.groupModels;
-              latestUseBackground = taskDecision.meta.useBackground;
-              realtimeUpdate(assistantMsg.id, taskDecision.patch);
-              notifyGroupContext();
-              backgroundPollingStarted = true;
-              if (taskDecision.shouldRegisterBackgroundTask && latestServerMessageId) {
-                registerBackgroundTask(buildChatBackgroundTaskRegistration({
-                  serverMessageId: latestServerMessageId,
-                  conversationId: convId,
-                  conversationTitle,
-                  modelName: assistantMsg.model || selectedModel.name,
-                }));
-              }
-              return;
-            }
-            case "error": {
-              const intent = buildStreamErrorIntent({
-                payload,
-                accumulated,
-                fallbackRequestId: realtimeGet(assistantMsg.id)?.requestId,
-                includeContentInPatch: true,
-              });
-              accumulated = intent.accumulated;
-              realtimeUpdate(assistantMsg.id, intent.patch);
-              return;
-            }
-            case "activity": {
-              const meta = payload.meta;
-              realtimeUpdate(assistantMsg.id, buildChatActivityPatch({
-                meta,
-                activityStatus: createActivityStatusFromMeta(t, meta),
-              }));
-              return;
-            }
-            case "search": {
-              const meta = payload.meta;
-              realtimeUpdate(assistantMsg.id, buildStreamSearchIntent({
-                meta,
-                activityStatus: createWebSearchDoneStatus(t),
-              }).patch);
-              return;
-            }
-            case "delta": {
-              const { legacyDelta, hasContentDelta } = applyChatStreamDelta({
-                messageId: assistantMsg.id,
-                rawDelta: payload.rawDelta,
-                reasoningState,
-                append: streamAppend,
-              });
-              if (hasContentDelta) {
-                realtimeUpdate(assistantMsg.id, {
-                  activityStatus: createGeneratingStatus(t),
-                });
-              }
-              accumulated = buildDeltaAccumulatedIntent({ accumulated, legacyDelta }).accumulated;
-              return;
-            }
-            default:
-              return;
-          }
-        }
-      };
-
-      const buildStreamRunResult = (contentOverride?: string): StreamRunResult => buildChatStreamRunResult({
-        groupContext: currentGroupContext(),
-        serverMessageId: latestServerMessageId,
-        generationTaskId: latestGenerationTaskId,
-        lastSequence: latestSequence,
-        content: contentOverride,
-        fallbackContent: streamGet(assistantMsg.id) || accumulated,
-        useBackground: latestUseBackground,
-        sawDone,
-        recoverable,
+      const mainStreamHandler = createMainStreamEventHandler({
+        assistantMessageId: assistantMsg.id,
+        assistantModelName: assistantMsg.model,
+        selectedModelName: selectedModel.name,
+        conversationId: convId,
+        conversationTitle,
+        initialGroupMeta: {
+          groupId: assistantMsg.groupId,
+          groupIndex: assistantMsg.groupIndex,
+          groupModels: assistantMsg.groupModels,
+          userMessageId: assistantMsg.userMessageId,
+        },
+        t,
+        callbacks: {
+          streamAppend,
+          streamGet: () => streamGet(assistantMsg.id),
+          realtimeGet: () => realtimeGet(assistantMsg.id),
+          realtimeUpdate: (patch) => realtimeUpdate(assistantMsg.id, patch),
+          registerBackgroundTask,
+          onGroupContext,
+        },
       });
+
+      const buildStreamRunResult = (contentOverride?: string): StreamRunResult => {
+        const state = mainStreamHandler.getState();
+        return buildChatStreamRunResult({
+          groupContext: state.groupContext,
+          serverMessageId: state.serverMessageId,
+          generationTaskId: state.generationTaskId,
+          lastSequence: state.lastSequence,
+          content: contentOverride,
+          fallbackContent: streamGet(assistantMsg.id) || state.accumulated,
+          useBackground: state.useBackground,
+          sawDone: state.sawDone,
+          recoverable: state.recoverable,
+        });
+      };
 
       try {
         const lifecycleResult = await runChatStreamLifecycle({
@@ -967,31 +806,29 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           signal: controller.signal,
           getAbortReason: () => abortReasonRef.current,
           getRecoveryIds: () => ({
-            serverMessageId: latestServerMessageId,
-            generationTaskId: latestGenerationTaskId,
+            serverMessageId: mainStreamHandler.getState().serverMessageId,
+            generationTaskId: mainStreamHandler.getState().generationTaskId,
           }),
-          onEvent: processEvent,
+          onEvent: mainStreamHandler.processEvent,
         });
         if (lifecycleResult.action === "ignored") {
           return;
         }
         if (lifecycleResult.action === "resume") {
-          recoverable = true;
-          startTaskEventStream(convId || currentConversation, assistantMsg.id, latestServerMessageId, latestSequence, accumulated, latestGenerationTaskId);
+          mainStreamHandler.setRecoverable(true);
+          const state = mainStreamHandler.getState();
+          startTaskEventStream(convId || currentConversation, assistantMsg.id, state.serverMessageId, state.lastSequence, state.accumulated, state.generationTaskId);
           return;
         }
       } finally {
         const abortReason = abortReasonRef.current;
 
         // 如果 reasoning 块未关闭，自动关闭
-        if (reasoningState.inReasoningBlock) {
-          accumulated += "</think>";
-          streamAppend(assistantMsg.id, { reasoning: false });
-          reasoningState.inReasoningBlock = false;
-        }
+        mainStreamHandler.closeOpenReasoning();
+        const state = mainStreamHandler.getState();
 
         // 同步 streaming store 到 messages state
-        const finalContent = streamGet(assistantMsg.id) || accumulated;
+        const finalContent = streamGet(assistantMsg.id) || state.accumulated;
         const finalData = realtimeGet(assistantMsg.id);
         if (finalContent || finalData) {
           setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) =>
@@ -1002,15 +839,15 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         // SSE 自然断开但没有收到 DONE：不能把空 assistant 标 completed。
         // 后端 task runner 仍可能在生成/落库，转为可恢复 task stream / polling。
         if (shouldRecoverStream({
-          sawDone,
+          sawDone: state.sawDone,
           abortReason,
-          serverMessageId: latestServerMessageId,
-          generationTaskId: latestGenerationTaskId,
+          serverMessageId: state.serverMessageId,
+          generationTaskId: state.generationTaskId,
         })) {
-          recoverable = true;
-          startTaskEventStream(convId || currentConversation, assistantMsg.id, latestServerMessageId, latestSequence, finalContent, latestGenerationTaskId);
-          if (latestUseBackground && latestServerMessageId) {
-            startBackgroundPolling(convId || currentConversation, assistantMsg.id, latestServerMessageId);
+          mainStreamHandler.setRecoverable(true);
+          startTaskEventStream(convId || currentConversation, assistantMsg.id, state.serverMessageId, state.lastSequence, finalContent, state.generationTaskId);
+          if (state.useBackground && state.serverMessageId) {
+            startBackgroundPolling(convId || currentConversation, assistantMsg.id, state.serverMessageId);
           }
           return buildStreamRunResult(finalContent);
         }
@@ -1021,19 +858,19 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         // 不代表已展示内容就是 DB 最终内容。即使已有部分内容，也要继续通过
         // task stream / DB polling 校准，否则会出现“输出一半直接 DONE，刷新后变完整”。
         if (shouldReconcileAfterDone({
-          sawDone,
+          sawDone: state.sawDone,
           abortReason,
-          serverMessageId: latestServerMessageId,
-          generationTaskId: latestGenerationTaskId,
+          serverMessageId: state.serverMessageId,
+          generationTaskId: state.generationTaskId,
         })) {
-          recoverable = true;
+          mainStreamHandler.setRecoverable(true);
           // The initial /chat request is itself a task event stream. Its controller is
           // still registered until this finally block finishes, so an immediate
           // startTaskEventStream() would no-op and leave the UI stuck on partial text.
           // DB polling is the correct post-DONE reconciler here; explicit task
           // stream reattach is reserved for abnormal disconnects before DONE.
-          if (latestServerMessageId) {
-            startBackgroundPolling(convId || currentConversation, assistantMsg.id, latestServerMessageId);
+          if (state.serverMessageId) {
+            startBackgroundPolling(convId || currentConversation, assistantMsg.id, state.serverMessageId);
           }
           return buildStreamRunResult(finalContent);
         }
@@ -1043,7 +880,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
 
         // 切会话/用户停止时不要在旧异步里把消息标 completed。
         // 切回该会话时由历史加载 + task event stream 恢复真实状态。
-        if (shouldMarkCompleted({ sawDone, hasFinalContent, abortReason })) {
+        if (shouldMarkCompleted({ sawDone: state.sawDone, hasFinalContent, abortReason })) {
           setMessages((prev) => patchMessageById(prev, assistantMsg.id, buildCompletedPatch(Date.now())));
         }
       }
