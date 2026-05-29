@@ -28,6 +28,13 @@ import {
   runStopGeneration,
 } from "@/lib/chatStopGenerationCoordinator";
 import {
+  buildForkRefreshState,
+  fetchForkConversationRefresh,
+  resolveForkConversationId,
+  resolveForkedModels,
+  runForkChatRequest,
+} from "@/lib/chatForkCoordinator";
+import {
   runChatStreamLifecycle,
 } from "@/lib/chatStreamLifecycle";
 import {
@@ -1224,58 +1231,33 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     async (messageId: number, modelIds: string[]) => {
       const token = localStorage.getItem("token");
       const headers = buildChatRequestHeaders({ token, guestId: getGuestId() });
-      const res = await fetch(`${API_BASE_URL}/api/chat/${messageId}/fork`, {
-        method: "POST",
+      const data = await runForkChatRequest({
+        apiBaseUrl: API_BASE_URL,
+        messageId,
+        modelIds,
         headers,
-        body: JSON.stringify({ models: modelIds }),
       });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || "Fork 对比失败");
-      }
-      const data = await res.json();
 
       // 进入对比模式
       setIsCompare(true);
-      const forkedModels = data.models || modelIds;
-      setCompareModels(forkedModels);
+      setCompareModels(resolveForkedModels(data, modelIds));
 
       // 刷新消息列表（新 fork 的 assistant 消息已被后端创建，可立即展示占位）
-      const convId = data.conversation_id || currentConversation;
+      const convId = resolveForkConversationId(data, currentConversation);
       if (convId && token) {
         try {
-          const refreshRes = await fetch(`${API_BASE_URL}/api/conversations/${convId}`, {
-            headers: { Authorization: `Bearer ${token}` },
+          const refreshData = await fetchForkConversationRefresh({
+            apiBaseUrl: API_BASE_URL,
+            conversationId: convId,
+            token,
           });
-          if (refreshRes.ok) {
-            const refreshData = await refreshRes.json();
-            if (refreshData.messages) {
-              const loadedMessages: Message[] = refreshData.messages.map((m: any) => ({
-                id: String(m.id || uuidv4()),
-                role: m.role,
-                content: m.content,
-                model: m.model,
-                createdAt: new Date(m.created_at).getTime(),
-                completedAt: m.completed_at ? new Date(m.completed_at).getTime() : undefined,
-                files: normalizeMessageFiles(m.files),
-                searchSources: parsePersistedSearchSources(m),
-                searchSourcesCount: typeof m.search_sources_count === "number" ? m.search_sources_count : undefined,
-                searchStatus: m.search_sources_count > 0 || m.search_sources ? "completed" : undefined,
-                serverMessageId: Number(m.id || 0) || undefined,
-                groupId: m.group_id || undefined,
-                groupIndex: m.group_index ?? undefined,
-                groupModels: Array.isArray(m.group_models) ? m.group_models : undefined,
-              }));
-              setMessages(loadedMessages);
-              setLoadedPersistedMessages(loadedMessages.length);
-              const newGroupViews = new Map<number, number>();
-              loadedMessages.forEach((m) => {
-                if (m.groupId !== undefined && !newGroupViews.has(m.groupId)) {
-                  newGroupViews.set(m.groupId, 0);
-                }
-              });
-              setGroupViews(newGroupViews);
-            }
+          const refreshState = buildForkRefreshState(refreshData, {
+            fallbackId: uuidv4,
+          });
+          if (refreshState) {
+            setMessages(refreshState.messages as Message[]);
+            setLoadedPersistedMessages(refreshState.messages.length);
+            setGroupViews(refreshState.groupViews);
           }
         } catch (e) {
           console.error("fork refresh failed:", e);
