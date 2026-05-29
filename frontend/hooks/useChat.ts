@@ -10,6 +10,12 @@ import { type ReasoningStreamState } from "@/lib/chatStreamDelta";
 import { applyChatStreamDelta } from "@/lib/chatDeltaApplier";
 import { processChatStreamEvent } from "@/lib/chatStreamEventProcessor";
 import {
+  buildDeltaAccumulatedIntent,
+  buildStreamErrorIntent,
+  buildStreamSearchIntent,
+  buildTextAppendIntent,
+} from "@/lib/chatStreamActionHandler";
+import {
   runChatStreamLifecycle,
 } from "@/lib/chatStreamLifecycle";
 import {
@@ -23,7 +29,6 @@ import {
   buildFinalizingPatch,
   buildRecoverableBusyPatch,
   buildStoppedPatch,
-  buildStreamErrorPatch,
 } from "@/lib/chatCompletionFinalizer";
 import {
   buildChatStreamRunResult,
@@ -36,10 +41,8 @@ import {
 import {
   buildChatActivityPatch,
   buildChatBackgroundTaskPatch,
-  buildChatDeltaAccumulatedState,
   buildChatDonePatch,
   buildChatGenerationTaskPatch,
-  buildChatSearchPatch,
 } from "@/lib/chatStreamEventDecision";
 import {
   buildBackgroundPollingMessagePatch,
@@ -51,7 +54,6 @@ import {
   buildGenerationTaskEventPatches,
   buildTaskActivityPatch,
   buildTaskDeltaState,
-  buildTaskSearchPatch,
 } from "@/lib/chatTaskEventDecision";
 import {
   applyCompareGroupContextToMessages,
@@ -473,8 +475,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         return;
       }
       if (action.type === "text") {
-        accumulated += action.data;
-        streamAppend(localMessageId, action.data);
+        const intent = buildTextAppendIntent({ accumulated, data: action.data });
+        accumulated = intent.accumulated;
+        streamAppend(localMessageId, intent.data);
         return;
       }
       if (action.type === "payload") {
@@ -495,12 +498,13 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             return;
           }
           case "error": {
-            realtimeUpdate(localMessageId, buildStreamErrorPatch({
-              errorCode: payload.errorCode,
-              retryable: payload.retryable,
-              requestId: payload.requestId || realtimeGet(localMessageId)?.requestId,
-            }));
-            if (!accumulated) accumulated = payload.message;
+            const intent = buildStreamErrorIntent({
+              payload,
+              accumulated,
+              fallbackRequestId: realtimeGet(localMessageId)?.requestId,
+            });
+            accumulated = intent.accumulated;
+            realtimeUpdate(localMessageId, intent.patch);
             return;
           }
           case "activity": {
@@ -513,10 +517,10 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           }
           case "search": {
             const meta = payload.meta;
-            realtimeUpdate(localMessageId, buildTaskSearchPatch({
+            realtimeUpdate(localMessageId, buildStreamSearchIntent({
               meta,
               activityStatus: createWebSearchDoneStatus(t),
-            }));
+            }).patch);
             return;
           }
           case "delta": {
@@ -540,7 +544,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               generationTaskId,
               lastSequence: latestSequence,
             });
-            accumulated = deltaState.accumulated;
+            accumulated = buildDeltaAccumulatedIntent({ accumulated, legacyDelta }).accumulated;
             if (deltaState.activeState) {
               activeTaskStreamsRef.current[localMessageId] = deltaState.activeState;
             }
@@ -927,8 +931,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         }
         if (action.type === "text") {
           // JSON 解析失败时，当作文本免底追加
-          accumulated += action.data;
-          streamAppend(assistantMsg.id, action.data);
+          const intent = buildTextAppendIntent({ accumulated, data: action.data });
+          accumulated = intent.accumulated;
+          streamAppend(assistantMsg.id, intent.data);
           return;
         }
         if (action.type === "payload") {
@@ -1007,17 +1012,14 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               return;
             }
             case "error": {
-              realtimeUpdate(assistantMsg.id, {
-                content: accumulated || payload.message,
-                ...buildStreamErrorPatch({
-                  errorCode: payload.errorCode,
-                  retryable: payload.retryable,
-                  requestId: payload.requestId || realtimeGet(assistantMsg.id)?.requestId,
-                }),
+              const intent = buildStreamErrorIntent({
+                payload,
+                accumulated,
+                fallbackRequestId: realtimeGet(assistantMsg.id)?.requestId,
+                includeContentInPatch: true,
               });
-              if (!accumulated) {
-                accumulated = payload.message;
-              }
+              accumulated = intent.accumulated;
+              realtimeUpdate(assistantMsg.id, intent.patch);
               return;
             }
             case "activity": {
@@ -1030,10 +1032,10 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             }
             case "search": {
               const meta = payload.meta;
-              realtimeUpdate(assistantMsg.id, buildChatSearchPatch({
+              realtimeUpdate(assistantMsg.id, buildStreamSearchIntent({
                 meta,
                 activityStatus: createWebSearchDoneStatus(t),
-              }));
+              }).patch);
               return;
             }
             case "delta": {
@@ -1048,7 +1050,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
                   activityStatus: createGeneratingStatus(t),
                 });
               }
-              accumulated = buildChatDeltaAccumulatedState({ accumulated, legacyDelta }).accumulated;
+              accumulated = buildDeltaAccumulatedIntent({ accumulated, legacyDelta }).accumulated;
               return;
             }
             default:
