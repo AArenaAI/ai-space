@@ -58,6 +58,10 @@ import {
   decideFinalStreamReconciliation,
 } from "@/lib/chatFinalReconciliationCoordinator";
 import {
+  buildConversationNavigationPlan,
+  shouldContinueConversationRestore,
+} from "@/lib/chatNavigationResetCoordinator";
+import {
   runChatStreamLifecycle,
 } from "@/lib/chatStreamLifecycle";
 import {
@@ -492,40 +496,47 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     const loadController = new AbortController();
     const isLatestLoad = () => conversationLoadSeqRef.current === loadSeq;
 
-    if (!conversationId) {
-      setIsLoadingHistory(false);
-      setConversationTitle("");
-      if (shouldResetRef.current) {
-        setMessages([]);
-        setCurrentConversation(undefined);
+    const navigationPlan = buildConversationNavigationPlan({
+      conversationId,
+      shouldReset: shouldResetRef.current,
+      justCreatedConversationId: justCreatedRef.current,
+      skillKey,
+      hasMainAbortController: Boolean(abortControllerRef.current),
+      compareAbortControllerCount: compareAbortControllersRef.current.length,
+    });
+
+    if (navigationPlan.kind === "reset") {
+      if (navigationPlan.shouldSetLoadingHistory) setIsLoadingHistory(navigationPlan.loadingHistory);
+      if (navigationPlan.shouldClearConversationTitle) setConversationTitle(navigationPlan.conversationTitle);
+      if (navigationPlan.shouldResetMessages) setMessages([]);
+      if (navigationPlan.shouldSetCurrentConversation) setCurrentConversation(navigationPlan.currentConversation);
+      setLoadedPersistedMessages(navigationPlan.loadedPersistedMessages);
+      setTotalMessages(navigationPlan.totalMessages);
+      setIsCompare(navigationPlan.isCompare);
+      setCompareModels(navigationPlan.compareModels);
+      setEffectiveSkillKey(navigationPlan.effectiveSkillKey);
+      return () => loadController.abort();
+    }
+
+    if (navigationPlan.kind === "just_created") {
+      if (navigationPlan.shouldClearJustCreated) {
+        justCreatedRef.current = undefined;
       }
-      setLoadedPersistedMessages(0);
-      setTotalMessages(0);
-      setIsCompare(false);
-      setCompareModels([]);
-      setEffectiveSkillKey(skillKey);
+      setIsLoadingHistory(navigationPlan.loadingHistory);
+      setCurrentConversation(navigationPlan.conversationId);
+      setLoadedPersistedMessages(navigationPlan.loadedPersistedMessages);
+      setTotalMessages(navigationPlan.totalMessages);
       return () => loadController.abort();
     }
 
-    // 如果这个对话是刚创建的，跳过加载历史（本地已经有正在生成的消息）
-    if (justCreatedRef.current === conversationId) {
-      justCreatedRef.current = undefined;
-      setIsLoadingHistory(false);
-      setCurrentConversation(conversationId);
-      setLoadedPersistedMessages(0);
-      setTotalMessages(0);
-      return () => loadController.abort();
-    }
-
-    // 切换到已有历史对话时只断开 /api/chat 直连 SSE；本地 task event stream 继续运行，
-    // 这样返回当前会话无需刷新也能看到正在追加的深度推理/正文。
-    if (abortControllerRef.current) {
-      abortReasonRef.current = "navigation";
+    const { abortPlan } = navigationPlan;
+    if (abortPlan.shouldAbortMain && abortControllerRef.current) {
+      abortReasonRef.current = abortPlan.abortReason;
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
-    if (compareAbortControllersRef.current.length > 0) {
-      abortReasonRef.current = "navigation";
+    if (abortPlan.shouldAbortCompare && compareAbortControllersRef.current.length > 0) {
+      abortReasonRef.current = abortPlan.abortReason;
       compareAbortControllersRef.current.forEach((controller) => controller.abort());
       compareAbortControllersRef.current = [];
     }
@@ -533,19 +544,21 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     const activeEntries = Object.entries(activeTaskStreamsRef.current);
 
     const token = localStorage.getItem("token");
-    if (!token) {
+    if (!shouldContinueConversationRestore({ token, loadAborted: loadController.signal.aborted })) {
       setIsLoadingHistory(false);
       return () => loadController.abort();
     }
+    const loadConversationId: number = navigationPlan.conversationId;
+    const authToken: string = token as string;
 
-    setIsLoadingHistory(true);
-    setCurrentConversation(conversationId);
+    if (navigationPlan.shouldSetLoadingHistory) setIsLoadingHistory(navigationPlan.loadingHistory);
+    if (navigationPlan.shouldSetCurrentConversation) setCurrentConversation(navigationPlan.conversationId);
 
     // 加载对话消息：首次只加载最近50条（tail模式），向上滚动时通过 loadMoreMessages 加载更多
     fetchConversationRestore({
       apiBaseUrl: API_BASE_URL,
-      conversationId,
-      token,
+      conversationId: loadConversationId,
+      token: authToken,
       signal: loadController.signal,
     })
       .then((data) => {
@@ -554,7 +567,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         const restoreState = buildConversationRestoreState({
           data,
           activeEntries,
-          conversationId,
+          conversationId: loadConversationId,
           fallbackId: uuidv4,
           activeActivityStatus: createGeneratingStatus(t),
         });
@@ -570,9 +583,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           if (lastAssistant?.serverMessageId) {
             fetchConversationMessageStatus({
               apiBaseUrl: API_BASE_URL,
-              conversationId,
+              conversationId: loadConversationId,
               serverMessageId: lastAssistant.serverMessageId,
-              token,
+              token: authToken,
               signal: loadController.signal,
             })
               .then((statusData) => {
@@ -611,8 +624,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         // 获取消息总数，用于分页加载更多
         fetchConversationMessageCount({
           apiBaseUrl: API_BASE_URL,
-          conversationId,
-          token,
+          conversationId: loadConversationId,
+          token: authToken,
           signal: loadController.signal,
         })
           .then((total) => {
