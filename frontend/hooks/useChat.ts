@@ -8,8 +8,12 @@ import { getGuestId } from "@/lib/guestId";
 import { streamAppend, streamGet, streamClear, realtimeUpdate, realtimeGet, realtimeClear , RealtimeData } from "@/lib/streaming";
 import { type ReasoningStreamState } from "@/lib/chatStreamDelta";
 import { applyChatStreamDelta } from "@/lib/chatDeltaApplier";
-import { isSseDone, parseSseEvent, splitSseEvents } from "@/lib/chatSseParser";
+import { isSseDone, parseSseEvent } from "@/lib/chatSseParser";
 import { runSseStream } from "@/lib/chatSseStreamRunner";
+import {
+  runTaskEventStream,
+  shouldFallbackToBackgroundPollingAfterTaskStreamError,
+} from "@/lib/chatTaskStreamLifecycle";
 import { normalizeChatStreamPayload } from "@/lib/chatStreamMeta";
 import { normalizeBackgroundTaskInfo, normalizeGenerationTaskInfo } from "@/lib/chatTaskInfo";
 import {
@@ -541,22 +545,19 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
 
     (async () => {
       try {
-        const streamUrl = generationTaskId
-          ? `${API_BASE_URL}/api/tasks/${generationTaskId}/stream?after=${after}`
-          : `${API_BASE_URL}/api/chat/tasks/${serverMessageId}/events?after=${after}`;
-        const res = await fetch(streamUrl, { headers, signal: controller.signal });
-        if (!res.ok || !res.body) throw new Error("task stream unavailable");
-        const reader = res.body.getReader();
-        try {
-          await runSseStream({
-            reader,
-            onEvent: processEvent,
-          });
-        } finally {
-          reader.releaseLock();
-        }
+        await runTaskEventStream({
+          apiBaseUrl: API_BASE_URL,
+          serverMessageId,
+          generationTaskId,
+          after,
+          headers,
+          signal: controller.signal,
+          onEvent: processEvent,
+        });
       } catch {
-        if (!controller.signal.aborted) startBackgroundPolling(convId, localMessageId, serverMessageId);
+        if (shouldFallbackToBackgroundPollingAfterTaskStreamError(controller.signal)) {
+          startBackgroundPolling(convId, localMessageId, serverMessageId);
+        }
       } finally {
         // 同步 streaming store 到 messages state
         const finalData = realtimeGet(localMessageId);

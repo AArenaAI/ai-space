@@ -25,7 +25,8 @@
     "test:chat-compare-coordinator": "node scripts/regression/chat-compare-coordinator-regression.cjs",
     "test:chat-error-recovery": "node scripts/regression/chat-error-recovery-regression.cjs",
     "test:chat-sse-stream-runner": "node scripts/regression/chat-sse-stream-runner-regression.cjs",
-    "test:chat-regression": "npm run test:stream-delta && npm run test:streaming && npm run test:chat-content && npm run test:chat-sse-parser && npm run test:chat-stream-meta && npm run test:chat-task-info && npm run test:chat-delta-applier && npm run test:chat-completion-finalizer && npm run test:chat-stream-run-result && npm run test:chat-background-polling && npm run test:chat-task-event-decision && npm run test:chat-message-state-patch && npm run test:chat-request-builder && npm run test:chat-history-transform && npm run test:chat-message-factory && npm run test:chat-compare-coordinator && npm run test:chat-error-recovery && npm run test:chat-sse-stream-runner",
+    "test:chat-task-stream-lifecycle": "node scripts/regression/chat-task-stream-lifecycle-regression.cjs",
+    "test:chat-regression": "npm run test:stream-delta && npm run test:streaming && npm run test:chat-content && npm run test:chat-sse-parser && npm run test:chat-stream-meta && npm run test:chat-task-info && npm run test:chat-delta-applier && npm run test:chat-completion-finalizer && npm run test:chat-stream-run-result && npm run test:chat-background-polling && npm run test:chat-task-event-decision && npm run test:chat-message-state-patch && npm run test:chat-request-builder && npm run test:chat-history-transform && npm run test:chat-message-factory && npm run test:chat-compare-coordinator && npm run test:chat-error-recovery && npm run test:chat-sse-stream-runner && npm run test:chat-task-stream-lifecycle",
     "test:browser-smoke": "node scripts/regression/browser-smoke.cjs"
   },
   "dependencies": {
