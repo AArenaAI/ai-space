@@ -66,6 +66,12 @@ import {
   shouldStartCompare,
 } from "@/lib/chatCompareCoordinator";
 import {
+  resolveRecoveryIds,
+  shouldIgnoreStreamAbort,
+  shouldRecoverCompareRun,
+  shouldResumeTaskStreamAfterError,
+} from "@/lib/chatErrorRecovery";
+import {
   createActivityStatusFromMeta,
   createBusyGeneratingStatus,
   createFinalizingStatus,
@@ -1111,19 +1117,18 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         const isAbort = err?.name === "AbortError" || controller.signal.aborted;
         const abortReason = abortReasonRef.current;
 
-        // 切换会话只断开当前页面这条 SSE，后端任务继续跑；这里不能重新接 task stream，
-        // 否则旧会话的本地消息会被标成“重新执行/生成中”，并和新会话加载互相抢状态。
-        if (isAbort && abortReason === "navigation") {
+        // 切换会话/用户主动停止都不做后台续流。
+        if (shouldIgnoreStreamAbort({ isAbort, abortReason })) {
           return;
         }
 
-        // 用户主动停止才真正停在当前 UI，不做后台续流。
-        if (isAbort && abortReason === "user") {
-          return;
-        }
-
-        // 非导航的异常断线：如果已经拿到服务端消息/任务 ID，再接后端 task event stream 续流。
-        if (latestServerMessageId || latestGenerationTaskId) {
+        // 非导航/用户停止的异常断线：如果已经拿到服务端消息/任务 ID，再接后端 task event stream 续流。
+        if (shouldResumeTaskStreamAfterError({
+          isAbort,
+          abortReason,
+          serverMessageId: latestServerMessageId,
+          generationTaskId: latestGenerationTaskId,
+        })) {
           recoverable = true;
           startTaskEventStream(convId || currentConversation, assistantMsg.id, latestServerMessageId, latestSequence, accumulated, latestGenerationTaskId);
           return;
@@ -1287,12 +1292,21 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       const handleCompareRunError = (assistantMsg: Message, error: any, streamResult?: StreamRunResult) => {
         const now = Date.now();
         const realtime = realtimeGet(assistantMsg.id);
-        const serverMessageId = streamResult?.serverMessageId || realtime?.serverMessageId;
-        const generationTaskId = streamResult?.generationTaskId || realtime?.generationTaskId;
-        const hasRecoverableStream = !!serverMessageId || !!generationTaskId || !!taskStreamsRef.current[assistantMsg.id] || !!backgroundPollersRef.current[assistantMsg.id];
-        const isBackgroundModel = !!assistantMsg.model && (assistantMsg.model === "gpt-5.5-pro" || assistantMsg.model.startsWith("gpt-5.5-pro-"));
+        const { serverMessageId, generationTaskId } = resolveRecoveryIds({
+          streamServerMessageId: streamResult?.serverMessageId,
+          realtimeServerMessageId: realtime?.serverMessageId,
+          streamGenerationTaskId: streamResult?.generationTaskId,
+          realtimeGenerationTaskId: realtime?.generationTaskId,
+        });
 
-        if (hasRecoverableStream || (isBackgroundModel && convId)) {
+        if (shouldRecoverCompareRun({
+          serverMessageId,
+          generationTaskId,
+          hasTaskStream: !!taskStreamsRef.current[assistantMsg.id],
+          hasBackgroundPoller: !!backgroundPollersRef.current[assistantMsg.id],
+          model: assistantMsg.model,
+          conversationId: convId,
+        })) {
           setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) => buildRecoverableBusyPatch({
             serverMessageId: serverMessageId || m.serverMessageId,
             generationTaskId: generationTaskId || m.generationTaskId,
