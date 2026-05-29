@@ -9,7 +9,9 @@ import { streamAppend, streamGet, streamClear, realtimeUpdate, realtimeGet, real
 import { type ReasoningStreamState } from "@/lib/chatStreamDelta";
 import { applyChatStreamDelta } from "@/lib/chatDeltaApplier";
 import { isSseDone, parseSseEvent } from "@/lib/chatSseParser";
-import { runSseStream } from "@/lib/chatSseStreamRunner";
+import {
+  runChatStreamLifecycle,
+} from "@/lib/chatStreamLifecycle";
 import {
   runTaskEventStream,
   shouldFallbackToBackgroundPollingAfterTaskStreamError,
@@ -865,9 +867,6 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       convId?: number,
       onGroupContext?: (context: CompareGroupContext) => void
     ): Promise<StreamRunResult | undefined> => {
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("无法读取流");
-
       let accumulated = "";
       const reasoningState: ReasoningStreamState = { inReasoningBlock: false };
       let backgroundPollingStarted = false;
@@ -1079,34 +1078,26 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       });
 
       try {
-        await runSseStream({
-          reader,
+        const lifecycleResult = await runChatStreamLifecycle({
+          response,
+          signal: controller.signal,
+          getAbortReason: () => abortReasonRef.current,
+          getRecoveryIds: () => ({
+            serverMessageId: latestServerMessageId,
+            generationTaskId: latestGenerationTaskId,
+          }),
           onEvent: processEvent,
         });
-      } catch (err: any) {
-        const isAbort = err?.name === "AbortError" || controller.signal.aborted;
-        const abortReason = abortReasonRef.current;
-
-        // 切换会话/用户主动停止都不做后台续流。
-        if (shouldIgnoreStreamAbort({ isAbort, abortReason })) {
+        if (lifecycleResult.action === "ignored") {
           return;
         }
-
-        // 非导航/用户停止的异常断线：如果已经拿到服务端消息/任务 ID，再接后端 task event stream 续流。
-        if (shouldResumeTaskStreamAfterError({
-          isAbort,
-          abortReason,
-          serverMessageId: latestServerMessageId,
-          generationTaskId: latestGenerationTaskId,
-        })) {
+        if (lifecycleResult.action === "resume") {
           recoverable = true;
           startTaskEventStream(convId || currentConversation, assistantMsg.id, latestServerMessageId, latestSequence, accumulated, latestGenerationTaskId);
           return;
         }
-        throw err;
       } finally {
         const abortReason = abortReasonRef.current;
-        reader.releaseLock();
 
         // 如果 reasoning 块未关闭，自动关闭
         if (reasoningState.inReasoningBlock) {
