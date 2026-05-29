@@ -20,6 +20,11 @@ import {
   getNotificationConversationTitle,
 } from "@/lib/chatBackgroundTaskRegistration";
 import {
+  buildTaskStreamDoneDecision,
+  shouldStartTaskStreamFallbackPolling,
+  shouldSyncTaskStreamFinalMessage,
+} from "@/lib/chatTaskStreamFinalizer";
+import {
   runChatStreamLifecycle,
 } from "@/lib/chatStreamLifecycle";
 import {
@@ -30,7 +35,6 @@ import { normalizeBackgroundTaskInfo, normalizeGenerationTaskInfo } from "@/lib/
 import {
   buildCompletedPatch,
   buildDisplayErrorPatch,
-  buildFinalizingPatch,
   buildRecoverableBusyPatch,
   buildStoppedPatch,
 } from "@/lib/chatCompletionFinalizer";
@@ -458,14 +462,17 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         }
         delete activeTaskStreamsRef.current[localMessageId];
         sawDone = true;
-        const hasContent = (accumulated || streamGet(localMessageId) || realtimeGet(localMessageId)?.content || "").trim().length > 0;
+        const doneDecision = buildTaskStreamDoneDecision({
+          accumulated,
+          streamContent: streamGet(localMessageId),
+          realtimeContent: realtimeGet(localMessageId)?.content,
+          serverMessageId,
+          createFinalizingStatus: (hasFinalContent) => createFinalizingStatus(t, hasFinalContent),
+        });
         // [DONE] 只代表 event stream 结束，不代表 message.content 已经是 DB 最终值。
         // OpenAI Responses 可能在 completed/final content 阶段补尾；交给 DB polling 校准最终内容。
-        realtimeUpdate(localMessageId, buildFinalizingPatch({
-          hasContent,
-          createFinalizingStatus: (hasFinalContent) => createFinalizingStatus(t, hasFinalContent),
-        }));
-        if (hasContent && serverMessageId) {
+        realtimeUpdate(localMessageId, doneDecision.patch);
+        if (doneDecision.shouldStartBackgroundPolling) {
           startBackgroundPolling(convId, localMessageId, serverMessageId);
         }
         return;
@@ -570,7 +577,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       } finally {
         // 同步 streaming store 到 messages state
         const finalData = realtimeGet(localMessageId);
-        if (finalData || accumulated) {
+        if (shouldSyncTaskStreamFinalMessage({ hasFinalData: Boolean(finalData), accumulated })) {
           setMessages((prev) => patchMessageById(prev, localMessageId, (m) =>
             applyFinalRealtimeDataToMessage(m, {
               finalContent: accumulated,
@@ -583,7 +590,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         realtimeClear(localMessageId);
         delete taskStreamsRef.current[localMessageId];
         // 无论是否被 abort，只要 serverMessageId 存在就兜底轮询，避免 task stream 异常中断后前端悬停
-        if (serverMessageId) {
+        if (shouldStartTaskStreamFallbackPolling({ serverMessageId })) {
           startBackgroundPolling(convId, localMessageId, serverMessageId);
         }
       }
