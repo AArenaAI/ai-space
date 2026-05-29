@@ -49,6 +49,13 @@ import {
   buildCompareChatRequestBody,
   buildSingleChatRequestBody,
 } from "@/lib/chatRequestBuilder";
+import { toModelMessages } from "@/lib/chatHistoryTransform";
+import {
+  buildMessageFiles,
+  createAssistantChatMessage,
+  createCompareAssistantMessages,
+  createUserChatMessage,
+} from "@/lib/chatMessageFactory";
 import {
   createActivityStatusFromMeta,
   createBusyGeneratingStatus,
@@ -90,40 +97,12 @@ function normalizeMessageFiles(value: any): Message["files"] {
   }
 }
 
-function stripReasoningBlocks(content: string): string {
-  if (!content) return content;
-  return content
-    .replace(/<think>[\s\S]*?<\/think>/gi, "")
-    .replace(/<think>[\s\S]*$/gi, "")
-    .trim();
-}
-
-const ASSISTANT_HISTORY_TRUNCATE_THRESHOLD = 1500;
-const ASSISTANT_HISTORY_TRUNCATE_TO = 300;
-
 function getNotificationConversationTitle(title?: string, fallback?: string) {
   const trimmed = (title || "").trim();
   if (trimmed) return trimmed;
   const fallbackText = (fallback || "").trim();
   if (fallbackText) return fallbackText;
   return "对话任务";
-}
-
-function truncateAssistantHistory(content: string): string {
-  if (!content || content.length <= ASSISTANT_HISTORY_TRUNCATE_THRESHOLD) return content;
-  const truncated = content.slice(0, ASSISTANT_HISTORY_TRUNCATE_TO).trim();
-  return truncated + "\n\n[前文已省略，如需回顾请重新提问]";
-}
-
-function toModelMessages(messages: Message[]) {
-  return messages
-    .map((m) => ({
-      role: m.role,
-      content: m.role === "assistant"
-        ? truncateAssistantHistory(stripReasoningBlocks(m.content))
-        : m.content,
-    }))
-    .filter((m) => m.role !== "assistant" || m.content.trim() !== "");
 }
 
 export interface Message {
@@ -1245,26 +1224,19 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       }
 
       const finalContent = content.trim();
-      const userFiles =
-        attachments
-          ?.filter((a) => a.public_id)
-          .map((a) => ({ public_id: a.public_id!, type: a.type || "file", filename: a.filename })) || [];
-      const userMsg: Message = {
+      const userFiles = buildMessageFiles(attachments, { defaultType: "file" });
+      const userMsg = createUserChatMessage({
         id: uuidv4(),
-        role: "user",
         content: finalContent,
         createdAt: Date.now(),
         files: userFiles,
-      };
-      const assistantMsgs: Message[] = compareModelIds.map((modelId) => ({
-        id: uuidv4(),
-        role: "assistant",
-        content: "",
-        model: modelId,
+      }) as Message;
+      const assistantMsgs = createCompareAssistantMessages({
+        modelIds: compareModelIds,
+        ids: compareModelIds.map(() => uuidv4()),
         createdAt: Date.now(),
         search: lastSearchRef.current,
-        searchStatus: lastSearchRef.current ? "searching" : undefined,
-      }));
+      }) as Message[];
       const contextMessages = [...messages, userMsg];
 
       setIsCompare(true);
@@ -1475,15 +1447,12 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         const lastUserIndex = messages.findIndex((m) => m.id === lastUserMsg.id);
         contextMessages = messages.slice(0, lastUserIndex + 1);
 
-        assistantMsg = {
+        assistantMsg = createAssistantChatMessage({
           id: uuidv4(),
-          role: "assistant",
-          content: "",
           model: selectedModel.id,
           createdAt: Date.now(),
           search: lastSearchRef.current,
-          searchStatus: lastSearchRef.current ? "searching" : undefined,
-        };
+        }) as Message;
 
         // 更新 messages：保留到 lastUser 的消息，去掉后面的 assistant，添加新的 assistant
         setMessages((prev) => {
@@ -1493,38 +1462,31 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       } else if (skipUserMsg) {
         // 对比模式中后续模型：不添加用户消息，只添加 assistant
         let finalContent = content.trim();
-        const userFiles = attachments?.filter(a => a.public_id).map(a => ({ public_id: a.public_id!, type: a.type, filename: a.filename })) || [];
-        assistantMsg = {
+        const userFiles = buildMessageFiles(attachments);
+        assistantMsg = createAssistantChatMessage({
           id: uuidv4(),
-          role: "assistant",
-          content: "",
           model: selectedModel.id,
           createdAt: Date.now(),
           search: lastSearchRef.current,
-          searchStatus: lastSearchRef.current ? "searching" : undefined,
-        };
+        }) as Message;
         contextMessages = [...messages, { role: "user" as const, content: finalContent, id: "", createdAt: 0, files: userFiles }];
         setMessages((prev) => [...prev, assistantMsg]);
       } else {
         let finalContent = content.trim();
-        const userFiles = attachments?.filter(a => a.public_id).map(a => ({ public_id: a.public_id!, type: a.type, filename: a.filename })) || [];
-        const userMsg: Message = {
+        const userFiles = buildMessageFiles(attachments);
+        const userMsg = createUserChatMessage({
           id: uuidv4(),
-          role: "user",
           content: finalContent,
           createdAt: Date.now(),
           files: userFiles,
-        };
+        }) as Message;
 
-        assistantMsg = {
+        assistantMsg = createAssistantChatMessage({
           id: uuidv4(),
-          role: "assistant",
-          content: "",
           model: selectedModel.id,
           createdAt: Date.now(),
           search: lastSearchRef.current,
-          searchStatus: lastSearchRef.current ? "searching" : undefined,
-        };
+        }) as Message;
 
         contextMessages = [...messages, userMsg];
         setMessages((prev) => [...prev, userMsg, assistantMsg]);

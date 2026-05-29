@@ -20,7 +20,9 @@
     "test:chat-task-event-decision": "node scripts/regression/chat-task-event-decision-regression.cjs",
     "test:chat-message-state-patch": "node scripts/regression/chat-message-state-patch-regression.cjs",
     "test:chat-request-builder": "node scripts/regression/chat-request-builder-regression.cjs",
-    "test:chat-regression": "npm run test:stream-delta && npm run test:streaming && npm run test:chat-content && npm run test:chat-sse-parser && npm run test:chat-stream-meta && npm run test:chat-task-info && npm run test:chat-delta-applier && npm run test:chat-completion-finalizer && npm run test:chat-stream-run-result && npm run test:chat-background-polling && npm run test:chat-task-event-decision && npm run test:chat-message-state-patch && npm run test:chat-request-builder",
+    "test:chat-history-transform": "node scripts/regression/chat-history-transform-regression.cjs",
+    "test:chat-message-factory": "node scripts/regression/chat-message-factory-regression.cjs",
+    "test:chat-regression": "npm run test:stream-delta && npm run test:streaming && npm run test:chat-content && npm run test:chat-sse-parser && npm run test:chat-stream-meta && npm run test:chat-task-info && npm run test:chat-delta-applier && npm run test:chat-completion-finalizer && npm run test:chat-stream-run-result && npm run test:chat-background-polling && npm run test:chat-task-event-decision && npm run test:chat-message-state-patch && npm run test:chat-request-builder && npm run test:chat-history-transform && npm run test:chat-message-factory",
     "test:browser-smoke": "node scripts/regression/browser-smoke.cjs"
   },
   "dependencies": {
