@@ -5,7 +5,7 @@ import { useI18n } from "@/lib/i18n";
 import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotifications";
 import { v4 as uuidv4 } from "uuid";
 import { getGuestId } from "@/lib/guestId";
-import { streamAppend, streamGet, streamClear, realtimeUpdate, realtimeGet, realtimeClear , RealtimeData } from "@/lib/streaming";
+import { streamAppend, streamGet, streamClear, realtimeUpdate, realtimeGet, realtimeClear } from "@/lib/streaming";
 import { type ReasoningStreamState } from "@/lib/chatStreamDelta";
 import { applyChatStreamDelta } from "@/lib/chatDeltaApplier";
 import { isSseDone, parseSseEvent } from "@/lib/chatSseParser";
@@ -34,6 +34,14 @@ import {
   type ChatStreamGroupContext,
   type ChatStreamRunResult,
 } from "@/lib/chatStreamRunResult";
+import {
+  buildChatActivityPatch,
+  buildChatBackgroundTaskPatch,
+  buildChatDeltaAccumulatedState,
+  buildChatDonePatch,
+  buildChatGenerationTaskPatch,
+  buildChatSearchPatch,
+} from "@/lib/chatStreamEventDecision";
 import {
   buildBackgroundPollingMessagePatch,
   evaluateBackgroundTaskPoll,
@@ -910,11 +918,13 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             reasoningState.inReasoningBlock = false;
           }
           sawDone = true;
-          const hasContent = (accumulated || streamGet(assistantMsg.id) || realtimeGet(assistantMsg.id)?.content || "").trim().length > 0;
-          realtimeUpdate(assistantMsg.id, hasContent
-            ? { completedAt: Date.now(), activityStatus: undefined }
-            : { completedAt: undefined, activityStatus: createBusyGeneratingStatus(t) }
-          );
+          const { patch } = buildChatDonePatch({
+            accumulated,
+            streamContent: streamGet(assistantMsg.id),
+            realtimeContent: realtimeGet(assistantMsg.id)?.content,
+            busyStatus: createBusyGeneratingStatus(t),
+          });
+          realtimeUpdate(assistantMsg.id, patch);
           return;
         }
         try {
@@ -927,30 +937,25 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             }
             case "generation_task": {
               const taskInfo = normalizeGenerationTaskInfo(payload.task);
-              latestUseBackground = taskInfo.useBackground;
-              latestServerMessageId = taskInfo.serverMessageId;
-              latestGroupId = taskInfo.groupId || latestGroupId;
-              latestGroupIndex = taskInfo.groupIndex ?? latestGroupIndex;
-              latestUserMessageId = taskInfo.userMessageId || latestUserMessageId;
-              latestGroupModels = taskInfo.groupModels?.length ? taskInfo.groupModels : latestGroupModels;
-              latestGenerationTaskId = taskInfo.generationTaskId;
-              realtimeUpdate(assistantMsg.id, {
-                serverMessageId: taskInfo.serverMessageId,
-                groupId: latestGroupId,
-                groupIndex: latestGroupIndex,
-                groupModels: latestGroupModels,
-                userMessageId: latestUserMessageId,
-                generationTaskId: taskInfo.generationTaskId,
-                useBackground: latestUseBackground,
-                isComplexTask: taskInfo.isComplexTask,
+              const taskDecision = buildChatGenerationTaskPatch({
+                taskInfo,
+                existingMeta: currentGroupContext() || {},
                 lastSequence: latestSequence,
                 activityStatus: createGeneratingStatus(t),
               });
+              latestUseBackground = taskDecision.meta.useBackground;
+              latestServerMessageId = taskDecision.meta.serverMessageId;
+              latestGroupId = taskDecision.meta.groupId;
+              latestGroupIndex = taskDecision.meta.groupIndex;
+              latestUserMessageId = taskDecision.meta.userMessageId;
+              latestGroupModels = taskDecision.meta.groupModels;
+              latestGenerationTaskId = taskDecision.meta.generationTaskId;
+              realtimeUpdate(assistantMsg.id, taskDecision.patch);
               notifyGroupContext();
-              if (taskInfo.generationTaskId) {
+              if (taskDecision.shouldMarkBackgroundPollingStarted) {
                 backgroundPollingStarted = true;
               }
-              if (latestServerMessageId && (latestUseBackground || taskInfo.isComplexTask)) {
+              if (taskDecision.shouldRegisterBackgroundTask && latestServerMessageId) {
                 const notificationTitle = getNotificationConversationTitle(conversationTitle, assistantMsg.model || selectedModel.name);
                 registerBackgroundTask({
                   type: "chat",
@@ -968,36 +973,31 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             }
             case "background_task": {
               const taskInfo = normalizeBackgroundTaskInfo(payload.task);
-              latestServerMessageId = taskInfo.serverMessageId;
-              latestGroupId = taskInfo.groupId || latestGroupId;
-              latestGroupIndex = taskInfo.groupIndex ?? latestGroupIndex;
-              latestUserMessageId = taskInfo.userMessageId || latestUserMessageId;
-              latestGroupModels = taskInfo.groupModels?.length ? taskInfo.groupModels : latestGroupModels;
-              latestUseBackground = true;
-              realtimeUpdate(assistantMsg.id, {
-                serverMessageId: taskInfo.serverMessageId,
-                groupId: latestGroupId,
-                groupIndex: latestGroupIndex,
-                groupModels: latestGroupModels,
-                userMessageId: latestUserMessageId,
-                backgroundTaskId: taskInfo.backgroundTaskId,
-                useBackground: true,
-                isComplexTask: true,
+              const taskDecision = buildChatBackgroundTaskPatch({
+                taskInfo,
+                existingMeta: currentGroupContext() || {},
                 activityStatus: createBusyGeneratingStatus(t),
               });
+              latestServerMessageId = taskDecision.meta.serverMessageId;
+              latestGroupId = taskDecision.meta.groupId;
+              latestGroupIndex = taskDecision.meta.groupIndex;
+              latestUserMessageId = taskDecision.meta.userMessageId;
+              latestGroupModels = taskDecision.meta.groupModels;
+              latestUseBackground = taskDecision.meta.useBackground;
+              realtimeUpdate(assistantMsg.id, taskDecision.patch);
               notifyGroupContext();
               backgroundPollingStarted = true;
-              if (taskInfo.serverMessageId) {
+              if (taskDecision.shouldRegisterBackgroundTask && latestServerMessageId) {
                 const notificationTitle = getNotificationConversationTitle(conversationTitle, assistantMsg.model || selectedModel.name);
                 registerBackgroundTask({
                   type: "chat",
-                  id: taskInfo.serverMessageId,
-                  key: `chat:${taskInfo.serverMessageId}`,
+                  id: latestServerMessageId,
+                  key: `chat:${latestServerMessageId}`,
                   title: "长对话生成中",
                   description: notificationTitle,
                   href: `/chat${convId ? `?id=${convId}` : ""}`,
                   conversationId: convId,
-                  serverMessageId: taskInfo.serverMessageId,
+                  serverMessageId: latestServerMessageId,
                   conversationTitle: notificationTitle,
                 });
               }
@@ -1019,23 +1019,18 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             }
             case "activity": {
               const meta = payload.meta;
-              const patch: Partial<RealtimeData> = {
+              realtimeUpdate(assistantMsg.id, buildChatActivityPatch({
+                meta,
                 activityStatus: createActivityStatusFromMeta(t, meta),
-              };
-              if (meta.kind === "web_search") {
-                patch.searchStatus = meta.status;
-              }
-              realtimeUpdate(assistantMsg.id, patch);
+              }));
               return;
             }
             case "search": {
               const meta = payload.meta;
-              realtimeUpdate(assistantMsg.id, {
-                searchStatus: meta.status,
-                searchSources: meta.sources || [],
-                searchSourcesCount: typeof meta.sources_count === "number" ? meta.sources_count : undefined,
+              realtimeUpdate(assistantMsg.id, buildChatSearchPatch({
+                meta,
                 activityStatus: createWebSearchDoneStatus(t),
-              });
+              }));
               return;
             }
             case "delta": {
@@ -1050,9 +1045,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
                   activityStatus: createGeneratingStatus(t),
                 });
               }
-              if (legacyDelta) {
-                accumulated += legacyDelta;
-              }
+              accumulated = buildChatDeltaAccumulatedState({ accumulated, legacyDelta }).accumulated;
               return;
             }
             default:
