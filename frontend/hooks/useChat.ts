@@ -35,6 +35,15 @@ import {
   runForkChatRequest,
 } from "@/lib/chatForkCoordinator";
 import {
+  buildLoadMorePage,
+  fetchLoadMoreMessages,
+  mapLoadMoreMessages,
+  prependUniqueOlderMessages,
+  resolveLoadedPersistedMessages,
+  resolveTotalMessages,
+  shouldStartLoadMore,
+} from "@/lib/chatLoadMoreCoordinator";
+import {
   runChatStreamLifecycle,
 } from "@/lib/chatStreamLifecycle";
 import {
@@ -1271,48 +1280,30 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
 
   // 向上滚动加载更多历史消息
   const loadMoreMessages = useCallback(async () => {
-    if (!currentConversation || isLoadingMore || !hasMoreMessages) return;
     const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!shouldStartLoadMore({ currentConversation, isLoadingMore, hasMoreMessages, token })) return;
+    const conversationId = currentConversation as number;
+    const page = buildLoadMorePage({ totalMessages, loadedPersistedMessages });
     setIsLoadingMore(true);
     try {
-      const limit = 50;
-      const offset = Math.max(0, totalMessages - loadedPersistedMessages - limit);
-      const expectedOlderCount = Math.max(0, totalMessages - loadedPersistedMessages - offset);
-      const res = await fetch(
-        `${API_BASE_URL}/api/conversations/${currentConversation}/messages?limit=${expectedOlderCount || limit}&offset=${offset}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (!res.ok) return;
-      const data = await res.json();
-      const olderMessages: Message[] = (data.messages || []).map((m: any) => ({
-        id: String(m.id || uuidv4()),
-        role: m.role,
-        content: m.content,
-        model: m.model,
-        createdAt: new Date(m.created_at).getTime(),
-        completedAt: m.completed_at ? new Date(m.completed_at).getTime() : undefined,
-        files: normalizeMessageFiles(m.files),
-        searchSources: parsePersistedSearchSources(m),
-        searchSourcesCount: typeof m.search_sources_count === "number" ? m.search_sources_count : undefined,
-        searchStatus: m.search_sources_count > 0 || m.search_sources ? "completed" : undefined,
-        serverMessageId: Number(m.id || 0) || undefined,
-        groupId: m.group_id || undefined,
-        groupIndex: m.group_index ?? undefined,
-      }));
-      setMessages((prev) => {
-        const existingIds = new Set(prev.map((m) => m.serverMessageId).filter(Boolean));
-        const newOnes = olderMessages.filter((m) => {
-          if (!m.serverMessageId || existingIds.has(m.serverMessageId)) return false;
-          existingIds.add(m.serverMessageId);
-          return true;
-        });
-        return [...newOnes, ...prev];
+      const data = await fetchLoadMoreMessages({
+        apiBaseUrl: API_BASE_URL,
+        conversationId,
+        token: token as string,
+        page,
       });
-      setLoadedPersistedMessages((prev) => Math.min(typeof data.total === "number" ? data.total : totalMessages, prev + olderMessages.length));
-      if (typeof data.total === "number") {
-        setTotalMessages(data.total);
-      }
+      if (!data) return;
+      const olderMessages = mapLoadMoreMessages(data, { fallbackId: uuidv4 }) as Message[];
+      setMessages((prev) => prependUniqueOlderMessages(prev, olderMessages));
+      setLoadedPersistedMessages((prev) =>
+        resolveLoadedPersistedMessages({
+          previousLoaded: prev,
+          olderMessagesCount: olderMessages.length,
+          responseTotal: data.total,
+          fallbackTotal: totalMessages,
+        })
+      );
+      setTotalMessages(resolveTotalMessages(data.total, totalMessages));
     } catch {
       // ignore
     } finally {
