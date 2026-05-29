@@ -8,7 +8,7 @@ import { getGuestId } from "@/lib/guestId";
 import { streamAppend, streamGet, streamClear, realtimeUpdate, realtimeGet, realtimeClear } from "@/lib/streaming";
 import { type ReasoningStreamState } from "@/lib/chatStreamDelta";
 import { applyChatStreamDelta } from "@/lib/chatDeltaApplier";
-import { isSseDone, parseSseEvent } from "@/lib/chatSseParser";
+import { processChatStreamEvent } from "@/lib/chatStreamEventProcessor";
 import {
   runChatStreamLifecycle,
 } from "@/lib/chatStreamLifecycle";
@@ -16,7 +16,6 @@ import {
   runTaskEventStream,
   shouldFallbackToBackgroundPollingAfterTaskStreamError,
 } from "@/lib/chatTaskStreamLifecycle";
-import { normalizeChatStreamPayload } from "@/lib/chatStreamMeta";
 import { normalizeBackgroundTaskInfo, normalizeGenerationTaskInfo } from "@/lib/chatTaskInfo";
 import {
   buildCompletedPatch,
@@ -440,10 +439,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     let latestSequence = after || 0;
 
     const processEvent = (eventText: string) => {
-      const event = parseSseEvent(eventText);
-      const data = event.data;
-      if (event.id) {
-        latestSequence = Number(event.id) || latestSequence;
+      const action = processChatStreamEvent({ eventText, previousSequence: latestSequence });
+      if (action.sequence !== undefined && action.sequence !== latestSequence) {
+        latestSequence = action.sequence;
         activeTaskStreamsRef.current[localMessageId] = buildActiveTaskStreamState({
           existing: activeTaskStreamsRef.current[localMessageId],
           convId,
@@ -453,8 +451,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           content: accumulated,
         });
       }
-      if (!data) return;
-      if (isSseDone(data)) {
+      if (action.type === "empty") return;
+      if (action.type === "done") {
         if (reasoningState.inReasoningBlock) {
           accumulated += "</think>";
           streamAppend(localMessageId, { reasoning: false });
@@ -474,9 +472,13 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         }
         return;
       }
-      try {
-        const parsed = JSON.parse(data);
-        const payload = normalizeChatStreamPayload(parsed);
+      if (action.type === "text") {
+        accumulated += action.data;
+        streamAppend(localMessageId, action.data);
+        return;
+      }
+      if (action.type === "payload") {
+        const { payload } = action;
         switch (payload.type) {
           case "generation_task": {
             const taskInfo = normalizeGenerationTaskInfo(payload.task, { generationTaskId, serverMessageId });
@@ -547,9 +549,6 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           default:
             return;
         }
-      } catch {
-        accumulated += data;
-        streamAppend(localMessageId, data);
       }
     };
 
@@ -907,11 +906,10 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       };
 
       const processEvent = (eventText: string) => {
-        const event = parseSseEvent(eventText);
-        const data = event.data;
-        if (event.id) latestSequence = Number(event.id) || latestSequence;
-        if (!data) return;
-        if (isSseDone(data)) {
+        const action = processChatStreamEvent({ eventText, previousSequence: latestSequence });
+        if (action.sequence !== undefined) latestSequence = action.sequence;
+        if (action.type === "empty") return;
+        if (action.type === "done") {
           if (reasoningState.inReasoningBlock) {
             accumulated += "</think>";
             streamAppend(assistantMsg.id, { reasoning: false });
@@ -927,9 +925,14 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           realtimeUpdate(assistantMsg.id, patch);
           return;
         }
-        try {
-          const parsed = JSON.parse(data);
-          const payload = normalizeChatStreamPayload(parsed);
+        if (action.type === "text") {
+          // JSON 解析失败时，当作文本免底追加
+          accumulated += action.data;
+          streamAppend(assistantMsg.id, action.data);
+          return;
+        }
+        if (action.type === "payload") {
+          const { payload } = action;
           switch (payload.type) {
             case "chat_meta": {
               realtimeUpdate(assistantMsg.id, { requestId: payload.requestId });
@@ -1051,10 +1054,6 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             default:
               return;
           }
-        } catch {
-          // JSON 解析失败时，当作文本免底追加
-          accumulated += data;
-          streamAppend(assistantMsg.id, data);
         }
       };
 
