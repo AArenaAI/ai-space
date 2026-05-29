@@ -44,6 +44,16 @@ import {
   shouldStartLoadMore,
 } from "@/lib/chatLoadMoreCoordinator";
 import {
+  buildConversationRestoreState,
+  buildConversationStatusDecision,
+  fetchConversationMessageCount,
+  fetchConversationMessageStatus,
+  fetchConversationRestore,
+  findLastAssistantStatusTarget,
+  parseConversationCompareModels,
+  resolveConversationSkillKey,
+} from "@/lib/chatConversationRestoreCoordinator";
+import {
   runChatStreamLifecycle,
 } from "@/lib/chatStreamLifecycle";
 import {
@@ -105,31 +115,6 @@ export interface SearchSource {
   title: string;
   url: string;
   description: string;
-}
-
-function parsePersistedSearchSources(raw: any): SearchSource[] | undefined {
-  const value = raw?.search_sources ?? raw?.searchSources;
-  if (!value) return undefined;
-  if (Array.isArray(value)) return value;
-  if (typeof value !== "string") return undefined;
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function normalizeMessageFiles(value: any): Message["files"] {
-  if (!value) return undefined;
-  if (Array.isArray(value)) return value;
-  if (typeof value !== "string") return undefined;
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 export interface Message {
@@ -553,109 +538,59 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     setCurrentConversation(conversationId);
 
     // 加载对话消息：首次只加载最近50条（tail模式），向上滚动时通过 loadMoreMessages 加载更多
-    fetch(`${API_BASE_URL}/api/conversations/${conversationId}?message_tail=50`, {
-      headers: { Authorization: `Bearer ${token}` },
+    fetchConversationRestore({
+      apiBaseUrl: API_BASE_URL,
+      conversationId,
+      token,
       signal: loadController.signal,
     })
-      .then((res) => {
-        if (!res.ok) throw new Error(`load conversation failed: ${res.status}`);
-        return res.json();
-      })
       .then((data) => {
         if (!isLatestLoad() || loadController.signal.aborted) return;
         setConversationTitle(data.title || "");
-        if (data.messages) {
-          const loadedMessages: Message[] = data.messages.map((m: any) => ({
-            id: String(m.id || uuidv4()),
-            role: m.role,
-            content: m.content,
-            model: m.model,
-            createdAt: new Date(m.created_at).getTime(),
-            completedAt: m.completed_at ? new Date(m.completed_at).getTime() : undefined,
-            files: normalizeMessageFiles(m.files),
-            searchSources: parsePersistedSearchSources(m),
-            searchSourcesCount: typeof m.search_sources_count === "number" ? m.search_sources_count : undefined,
-            searchStatus: m.search_sources_count > 0 || m.search_sources ? "completed" : undefined,
-            serverMessageId: Number(m.id || 0) || undefined,
-            groupId: m.group_id || undefined,
-            groupIndex: m.group_index ?? undefined,
-            groupModels: Array.isArray(m.group_models)
-              ? m.group_models.filter((model: unknown): model is string => typeof model === "string" && model.length > 0)
-              : undefined,
-          }));
-          // 后端已返回 completed_at，不需要近似回退
-          const activeByServerMessageId = new Map(
-            activeEntries
-              .filter(([, info]) => info.convId === conversationId && info.serverMessageId)
-              .map(([localId, info]) => [String(info.serverMessageId), { localId, info }])
-          );
-          const mergedMessages = loadedMessages.map((m) => {
-            if (m.role !== "assistant") return m;
-            const active = activeByServerMessageId.get(String(m.serverMessageId || m.id));
-            if (!active) return m;
-            return {
-              ...m,
-              id: active.localId,
-              content: active.info.content || m.content,
-              serverMessageId: active.info.serverMessageId || m.serverMessageId,
-              generationTaskId: active.info.generationTaskId || m.generationTaskId,
-              lastSequence: active.info.lastSequence || m.lastSequence,
-              activityStatus: createGeneratingStatus(t),
-            };
-          });
-          setMessages(mergedMessages);
+        const restoreState = buildConversationRestoreState({
+          data,
+          activeEntries,
+          conversationId,
+          fallbackId: uuidv4,
+          activeActivityStatus: createGeneratingStatus(t),
+        });
+        if (restoreState) {
+          const { loadedMessages, mergedMessages, groupViews, activeByServerMessageId } = restoreState;
+          setMessages(mergedMessages as Message[]);
           setLoadedPersistedMessages(loadedMessages.length);
-          // 从历史恢复 groupViews，默认每组显示第 0 个模型
-          const newGroupViews = new Map<number, number>();
-          mergedMessages.forEach((m) => {
-            if (m.groupId !== undefined && !newGroupViews.has(m.groupId)) {
-              newGroupViews.set(m.groupId, 0);
-            }
-          });
-          setGroupViews(newGroupViews);
-          setIsLoading(activeByServerMessageId.size > 0);
+          setGroupViews(groupViews);
+          setIsLoading(restoreState.isLoading);
 
           // 先渲染历史，再异步检查最后一条 assistant 的后台状态，避免切换对话被第二个请求阻塞。
-          const lastAssistant = [...mergedMessages].reverse().find((m) => m.role === "assistant" && m.serverMessageId);
-          if (lastAssistant?.serverMessageId && !activeByServerMessageId.has(String(lastAssistant.serverMessageId))) {
-            fetch(`${API_BASE_URL}/api/conversations/${conversationId}/messages/${lastAssistant.serverMessageId}`, {
-              headers: { Authorization: `Bearer ${token}` },
+          const lastAssistant = findLastAssistantStatusTarget(mergedMessages, activeByServerMessageId);
+          if (lastAssistant?.serverMessageId) {
+            fetchConversationMessageStatus({
+              apiBaseUrl: API_BASE_URL,
+              conversationId,
+              serverMessageId: lastAssistant.serverMessageId,
+              token,
               signal: loadController.signal,
             })
-              .then((res) => (res.ok ? res.json() : undefined))
               .then((statusData) => {
                 if (!statusData || !isLatestLoad() || loadController.signal.aborted) return;
-                const bgTask = statusData?.background_task || {};
-                const hasTask = !!bgTask.id || !!bgTask.task_id || !!bgTask.status;
-                const status = bgTask.status || "";
-                const terminalStatus = status === "completed" || status === "failed" || status === "cancelled" || status === "incomplete";
-                const serverContent = statusData?.message?.content || "";
-                const hasContent = serverContent.trim().length > 0;
-                const shouldResumePolling = hasTask && (!terminalStatus || !hasContent);
-                const generationTaskId = Number(bgTask.id || bgTask.task_id || 0) || undefined;
-                const lastSequence = Number(bgTask.last_sequence_number || 0) || 0;
+                const decision = buildConversationStatusDecision({
+                  statusData,
+                  currentMessage: lastAssistant,
+                  busyActivityStatus: createBusyGeneratingStatus(t),
+                });
 
-                setMessages((prev) => prev.map((m) => {
-                  if (m.id !== lastAssistant.id) return m;
-                  return {
-                    ...m,
-                    content: serverContent || m.content,
-                    generationTaskId: generationTaskId || m.generationTaskId,
-                    lastSequence: lastSequence || m.lastSequence,
-                    completedAt: shouldResumePolling
-                      ? undefined
-                      : (hasTask && terminalStatus && hasContent && !m.completedAt
-                        ? (bgTask.completed_at ? new Date(bgTask.completed_at).getTime() : Date.now())
-                        : m.completedAt),
-                    activityStatus: shouldResumePolling
-                      ? createBusyGeneratingStatus(t)
-                      : m.activityStatus,
-                  } as Message;
-                }));
+                setMessages((prev) => patchMessageById(prev, lastAssistant.id, decision.patch as Partial<Message>));
 
-                if (shouldResumePolling) {
+                if (decision.shouldResumePolling && decision.resume) {
                   setIsLoading(true);
-                  startTaskEventStream(conversationId, lastAssistant.id, lastAssistant.serverMessageId, lastSequence || lastAssistant.lastSequence || 0, serverContent || lastAssistant.content || "", generationTaskId);
+                  startTaskEventStream(
+                    conversationId,
+                    lastAssistant.id,
+                    lastAssistant.serverMessageId,
+                    decision.resume.lastSequence,
+                    decision.resume.initialContent,
+                    decision.resume.generationTaskId
+                  );
                 }
               })
               .catch((err: any) => {
@@ -670,14 +605,15 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         setIsLoadingHistory(false);
 
         // 获取消息总数，用于分页加载更多
-        fetch(`${API_BASE_URL}/api/conversations/${conversationId}/messages?limit=1`, {
-          headers: { Authorization: `Bearer ${token}` },
+        fetchConversationMessageCount({
+          apiBaseUrl: API_BASE_URL,
+          conversationId,
+          token,
           signal: loadController.signal,
         })
-          .then((res) => (res.ok ? res.json() : undefined))
-          .then((countData) => {
-            if (countData && typeof countData.total === "number") {
-              setTotalMessages(countData.total);
+          .then((total) => {
+            if (typeof total === "number") {
+              setTotalMessages(total);
             }
           })
           .catch(() => {});
@@ -689,18 +625,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         }
         // 检测是否为对比对话
         setIsCompare(!!data.compare);
-        if (data.compare_models) {
-          try {
-            const parsed = JSON.parse(data.compare_models);
-            setCompareModels(Array.isArray(parsed) ? parsed : []);
-          } catch {
-            setCompareModels([]);
-          }
-        } else {
-          setCompareModels([]);
-        }
+        setCompareModels(parseConversationCompareModels(data.compare_models));
         // 从历史对话恢复 skill_key；如果历史没有，则回到 URL 传入的 skillKey
-        setEffectiveSkillKey(data.skill_key || skillKey);
+        setEffectiveSkillKey(resolveConversationSkillKey(data.skill_key, skillKey));
       })
       .catch((err) => {
         if (!isLatestLoad() || loadController.signal.aborted || err?.name === "AbortError") return;
