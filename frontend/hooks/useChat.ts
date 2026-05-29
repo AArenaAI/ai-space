@@ -20,10 +20,10 @@ import {
   getNotificationConversationTitle,
 } from "@/lib/chatBackgroundTaskRegistration";
 import {
-  buildTaskStreamDoneDecision,
   shouldStartTaskStreamFallbackPolling,
   shouldSyncTaskStreamFinalMessage,
 } from "@/lib/chatTaskStreamFinalizer";
+import { createTaskStreamEventHandler } from "@/lib/chatTaskStreamEventHandler";
 import {
   runChatStreamLifecycle,
 } from "@/lib/chatStreamLifecycle";
@@ -57,12 +57,6 @@ import {
   evaluateBackgroundTaskPoll,
   shouldKeepBackgroundLoading,
 } from "@/lib/chatBackgroundPolling";
-import {
-  buildActiveTaskStreamState,
-  buildGenerationTaskEventPatches,
-  buildTaskActivityPatch,
-  buildTaskDeltaState,
-} from "@/lib/chatTaskEventDecision";
 import {
   applyCompareGroupContextToMessages,
   applyFinalRealtimeDataToMessage,
@@ -433,131 +427,34 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     const controller = new AbortController();
     taskStreamsRef.current[localMessageId] = controller;
 
-    let accumulated = initialContent || "";
-    const lastThinkOpen = accumulated.lastIndexOf("<think>");
-    const lastThinkClose = accumulated.lastIndexOf("</think>");
-    const reasoningState: ReasoningStreamState = { inReasoningBlock: lastThinkOpen !== -1 && lastThinkOpen > lastThinkClose };
-    let sawDone = false;
-    let latestSequence = after || 0;
+    const taskEventHandler = createTaskStreamEventHandler({
+      convId,
+      localMessageId,
+      serverMessageId,
+      generationTaskId,
+      after,
+      initialContent,
+      t,
+      callbacks: {
+        getActiveState: () => activeTaskStreamsRef.current[localMessageId],
+        setActiveState: (state) => {
+          activeTaskStreamsRef.current[localMessageId] = state;
+        },
+        deleteActiveState: () => {
+          delete activeTaskStreamsRef.current[localMessageId];
+        },
+        streamAppend,
+        streamGet: () => streamGet(localMessageId),
+        realtimeGet: () => realtimeGet(localMessageId),
+        realtimeUpdate: (patch) => realtimeUpdate(localMessageId, patch),
+        startBackgroundPolling: (resolvedServerMessageId) => {
+          if (resolvedServerMessageId) {
+            startBackgroundPolling(convId, localMessageId, resolvedServerMessageId);
+          }
+        },
+      },
+    });
 
-    const processEvent = (eventText: string) => {
-      const action = processChatStreamEvent({ eventText, previousSequence: latestSequence });
-      if (action.sequence !== undefined && action.sequence !== latestSequence) {
-        latestSequence = action.sequence;
-        activeTaskStreamsRef.current[localMessageId] = buildActiveTaskStreamState({
-          existing: activeTaskStreamsRef.current[localMessageId],
-          convId,
-          serverMessageId,
-          generationTaskId,
-          lastSequence: latestSequence,
-          content: accumulated,
-        });
-      }
-      if (action.type === "empty") return;
-      if (action.type === "done") {
-        if (reasoningState.inReasoningBlock) {
-          accumulated += "</think>";
-          streamAppend(localMessageId, { reasoning: false });
-          reasoningState.inReasoningBlock = false;
-        }
-        delete activeTaskStreamsRef.current[localMessageId];
-        sawDone = true;
-        const doneDecision = buildTaskStreamDoneDecision({
-          accumulated,
-          streamContent: streamGet(localMessageId),
-          realtimeContent: realtimeGet(localMessageId)?.content,
-          serverMessageId,
-          createFinalizingStatus: (hasFinalContent) => createFinalizingStatus(t, hasFinalContent),
-        });
-        // [DONE] 只代表 event stream 结束，不代表 message.content 已经是 DB 最终值。
-        // OpenAI Responses 可能在 completed/final content 阶段补尾；交给 DB polling 校准最终内容。
-        realtimeUpdate(localMessageId, doneDecision.patch);
-        if (doneDecision.shouldStartBackgroundPolling) {
-          startBackgroundPolling(convId, localMessageId, serverMessageId);
-        }
-        return;
-      }
-      if (action.type === "text") {
-        const intent = buildTextAppendIntent({ accumulated, data: action.data });
-        accumulated = intent.accumulated;
-        streamAppend(localMessageId, intent.data);
-        return;
-      }
-      if (action.type === "payload") {
-        const { payload } = action;
-        switch (payload.type) {
-          case "generation_task": {
-            const taskInfo = normalizeGenerationTaskInfo(payload.task, { generationTaskId, serverMessageId });
-            const patches = buildGenerationTaskEventPatches({
-              taskInfo,
-              convId,
-              lastSequence: latestSequence,
-              content: accumulated,
-              existingActiveState: activeTaskStreamsRef.current[localMessageId],
-              activityStatus: createGeneratingStatus(t),
-            });
-            activeTaskStreamsRef.current[localMessageId] = patches.activeState;
-            realtimeUpdate(localMessageId, patches.realtimePatch);
-            return;
-          }
-          case "error": {
-            const intent = buildStreamErrorIntent({
-              payload,
-              accumulated,
-              fallbackRequestId: realtimeGet(localMessageId)?.requestId,
-            });
-            accumulated = intent.accumulated;
-            realtimeUpdate(localMessageId, intent.patch);
-            return;
-          }
-          case "activity": {
-            const meta = payload.meta;
-            realtimeUpdate(localMessageId, buildTaskActivityPatch({
-              meta,
-              activityStatus: createActivityStatusFromMeta(t, meta),
-            }));
-            return;
-          }
-          case "search": {
-            const meta = payload.meta;
-            realtimeUpdate(localMessageId, buildStreamSearchIntent({
-              meta,
-              activityStatus: createWebSearchDoneStatus(t),
-            }).patch);
-            return;
-          }
-          case "delta": {
-            const { legacyDelta, hasContentDelta } = applyChatStreamDelta({
-              messageId: localMessageId,
-              rawDelta: payload.rawDelta,
-              reasoningState,
-              append: streamAppend,
-            });
-            if (hasContentDelta) {
-              realtimeUpdate(localMessageId, {
-                activityStatus: createGeneratingStatus(t),
-              });
-            }
-            const deltaState = buildTaskDeltaState({
-              legacyDelta,
-              accumulated,
-              existingActiveState: activeTaskStreamsRef.current[localMessageId],
-              convId,
-              serverMessageId,
-              generationTaskId,
-              lastSequence: latestSequence,
-            });
-            accumulated = buildDeltaAccumulatedIntent({ accumulated, legacyDelta }).accumulated;
-            if (deltaState.activeState) {
-              activeTaskStreamsRef.current[localMessageId] = deltaState.activeState;
-            }
-            return;
-          }
-          default:
-            return;
-        }
-      }
-    };
 
     (async () => {
       try {
@@ -568,7 +465,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           after,
           headers,
           signal: controller.signal,
-          onEvent: processEvent,
+          onEvent: taskEventHandler.processEvent,
         });
       } catch {
         if (shouldFallbackToBackgroundPollingAfterTaskStreamError(controller.signal)) {
@@ -576,6 +473,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         }
       } finally {
         // 同步 streaming store 到 messages state
+        const accumulated = taskEventHandler.getAccumulated();
+        const latestSequence = taskEventHandler.getLatestSequence();
         const finalData = realtimeGet(localMessageId);
         if (shouldSyncTaskStreamFinalMessage({ hasFinalData: Boolean(finalData), accumulated })) {
           setMessages((prev) => patchMessageById(prev, localMessageId, (m) =>
