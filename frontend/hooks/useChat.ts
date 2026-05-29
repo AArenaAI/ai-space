@@ -62,6 +62,22 @@ import {
   shouldContinueConversationRestore,
 } from "@/lib/chatNavigationResetCoordinator";
 import {
+  buildCreateConversationBody,
+  buildCreatedConversationUrl,
+  resolveCreatedConversationTitle,
+  runCreateConversationRequest,
+  shouldCreateConversation,
+} from "@/lib/chatConversationCreateCoordinator";
+import {
+  buildConversationUpdatedEventDetail,
+  buildRecoverableResultPatch,
+  buildUserAbortStoppedPatch,
+  decideCompareRunError,
+  decideCompareRunFinally,
+  decideSingleSendError,
+  decideSingleSendFinally,
+} from "@/lib/chatRunUiCoordinator";
+import {
   runChatStreamLifecycle,
 } from "@/lib/chatStreamLifecycle";
 import {
@@ -70,15 +86,8 @@ import {
 } from "@/lib/chatTaskStreamLifecycle";
 import {
   buildCompletedPatch,
-  buildDisplayErrorPatch,
-  buildRecoverableBusyPatch,
-  buildStoppedPatch,
 } from "@/lib/chatCompletionFinalizer";
 import {
-  buildChatStreamRunResult,
-  shouldMarkCompleted,
-  shouldRecoverStream,
-  shouldReconcileAfterDone,
   type ChatStreamGroupContext,
   type ChatStreamRunResult,
 } from "@/lib/chatStreamRunResult";
@@ -106,9 +115,7 @@ import {
   shouldStartCompare,
 } from "@/lib/chatCompareCoordinator";
 import {
-  resolveRecoveryIds,
   shouldIgnoreStreamAbort,
-  shouldRecoverCompareRun,
   shouldResumeTaskStreamAfterError,
 } from "@/lib/chatErrorRecovery";
 import {
@@ -659,43 +666,31 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   const createConversation = useCallback(
     async (title: string, model: string, sk?: string): Promise<number | undefined> => {
       const token = localStorage.getItem("token");
-      if (!token) return undefined;
+      if (!shouldCreateConversation({ token })) return undefined;
 
       try {
-        const body: any = { title, model };
-        if (sk && sk.trim()) {
-          body.skill_key = sk.trim();
-        }
-        // 从 localStorage 获取当前 workspace
-        const wsId = localStorage.getItem("current-workspace");
-        if (wsId) {
-          body.workspace_id = Number(wsId);
-        }
-        const res = await fetch(`${API_BASE_URL}/api/conversations`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(body),
+        const body = buildCreateConversationBody({
+          title,
+          model,
+          skillKey: sk,
+          workspaceId: localStorage.getItem("current-workspace"),
         });
+        const data = await runCreateConversationRequest({
+          apiBaseUrl: API_BASE_URL,
+          token: token as string,
+          body,
+        });
+        if (!data) return undefined;
 
-        if (!res.ok) {
-          console.error("createConversation failed:", res.status, await res.text().catch(() => ""));
-          return undefined;
-        }
-        const data = await res.json();
-        setConversationTitle(data.title || title);
+        setConversationTitle(resolveCreatedConversationTitle(data, title));
         setCurrentConversation(data.id);
         shouldResetRef.current = false; // 标记已创建对话，防止 useEffect 清空消息
         justCreatedRef.current = data.id; // 标记刚创建，避免 useEffect 加载历史覆盖本地消息
-        // 立即更新 URL，确保用户跳转/刷新后能回到当前对话
-        const url = new URL(window.location.href);
-        url.searchParams.set("id", String(data.id));
-        if (sk && !url.searchParams.get("key")) {
-          url.searchParams.set("key", sk);
-        }
-        window.history.replaceState({}, "", url.toString());
+        window.history.replaceState({}, "", buildCreatedConversationUrl({
+          currentHref: window.location.href,
+          conversationId: data.id,
+          skillKey: sk,
+        }));
         // 通知侧边栏刷新列表
         window.dispatchEvent(new CustomEvent("conversation-created", { detail: data }));
         return data.id;
@@ -902,41 +897,35 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       };
 
       const handleCompareRecoverableResult = (assistantMsg: Message, streamResult: StreamRunResult) => {
-        setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) => buildRecoverableBusyPatch({
-          serverMessageId: streamResult.serverMessageId || m.serverMessageId,
-          generationTaskId: streamResult.generationTaskId || m.generationTaskId,
-          activityStatus: createBusyGeneratingStatus(t),
+        setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) => buildRecoverableResultPatch({
+          serverMessageId: streamResult.serverMessageId,
+          generationTaskId: streamResult.generationTaskId,
+          existingServerMessageId: m.serverMessageId,
+          existingGenerationTaskId: m.generationTaskId,
+          busyActivityStatus: createBusyGeneratingStatus(t),
         })));
       };
 
       const handleCompareRunError = (assistantMsg: Message, error: any, streamResult?: StreamRunResult) => {
-        const now = Date.now();
         const realtime = realtimeGet(assistantMsg.id);
-        const { serverMessageId, generationTaskId } = resolveRecoveryIds({
-          streamServerMessageId: streamResult?.serverMessageId,
-          realtimeServerMessageId: realtime?.serverMessageId,
-          streamGenerationTaskId: streamResult?.generationTaskId,
-          realtimeGenerationTaskId: realtime?.generationTaskId,
-        });
-
-        if (shouldRecoverCompareRun({
-          serverMessageId,
-          generationTaskId,
+        const decision = decideCompareRunError({
+          assistantModel: assistantMsg.model || "",
+          error,
+          streamResult,
+          realtime,
           hasTaskStream: !!taskStreamsRef.current[assistantMsg.id],
           hasBackgroundPoller: !!backgroundPollersRef.current[assistantMsg.id],
-          model: assistantMsg.model,
           conversationId: convId,
-        })) {
-          setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) => buildRecoverableBusyPatch({
-            serverMessageId: serverMessageId || m.serverMessageId,
-            generationTaskId: generationTaskId || m.generationTaskId,
-            activityStatus: createBusyGeneratingStatus(t),
-          })));
-          if (serverMessageId) startBackgroundPolling(convId, assistantMsg.id, serverMessageId);
-          return;
-        }
+          existingServerMessageId: assistantMsg.serverMessageId,
+          existingGenerationTaskId: assistantMsg.generationTaskId,
+          busyActivityStatus: createBusyGeneratingStatus(t),
+          now: Date.now(),
+        });
 
-        setMessages((prev) => patchMessageById(prev, assistantMsg.id, buildDisplayErrorPatch({ errorCode: error.errorCode, message: error.message, now })));
+        setMessages((prev) => patchMessageById(prev, assistantMsg.id, decision.patch));
+        if (decision.type === "recoverable_busy" && decision.shouldStartBackgroundPolling && decision.serverMessageId) {
+          startBackgroundPolling(convId, assistantMsg.id, decision.serverMessageId);
+        }
       };
 
       try {
@@ -959,27 +948,27 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             onGroupContextResolved: handleCompareGroupContextResolved,
             onRecoverableResult: handleCompareRecoverableResult,
             onAbortUser: (assistantMsg) => {
-              setMessages((prev) => patchMessageById(prev, assistantMsg.id, buildStoppedPatch(Date.now())));
+              setMessages((prev) => patchMessageById(prev, assistantMsg.id, buildUserAbortStoppedPatch(Date.now())));
             },
             onRunError: handleCompareRunError,
             getAbortReason: () => abortReasonRef.current,
           },
         });
       } finally {
-        const abortReason = abortReasonRef.current;
-        // 和单聊保持一致：切换会话导致的 abort 只是断开当前页面 SSE，不要污染新会话 loading/侧边栏状态。
-        if (abortReason !== "navigation") {
-          const hasActiveTaskStream = Object.keys(taskStreamsRef.current).length > 0;
-          const hasActivePoller = Object.keys(backgroundPollersRef.current).length > 0;
-          setIsLoading(hasActiveTaskStream || hasActivePoller);
-          compareAbortControllersRef.current = [];
-          abortControllerRef.current = null;
-          abortReasonRef.current = null;
-          if (convId) {
-            window.dispatchEvent(new CustomEvent("conversation-updated", {
-              detail: { id: convId, updated_at: new Date().toISOString() },
-            }));
-          }
+        const decision = decideCompareRunFinally({
+          abortReason: abortReasonRef.current,
+          hasActiveTaskStream: Object.keys(taskStreamsRef.current).length > 0,
+          hasActivePoller: Object.keys(backgroundPollersRef.current).length > 0,
+          conversationId: convId,
+        });
+        if (decision.shouldUpdateLoading) setIsLoading(Boolean(decision.isLoading));
+        if (decision.shouldClearCompareControllers) compareAbortControllersRef.current = [];
+        if (decision.shouldClearMainController) abortControllerRef.current = null;
+        if (decision.shouldClearAbortReason) abortReasonRef.current = null;
+        if (decision.shouldDispatchConversationUpdated && decision.conversationId) {
+          window.dispatchEvent(new CustomEvent("conversation-updated", {
+            detail: buildConversationUpdatedEventDetail(decision.conversationId, new Date().toISOString()),
+          }));
         }
       }
     },
@@ -1068,37 +1057,29 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           streamResponse,
         });
       } catch (error: any) {
-        if (error.name === "AbortError") {
-          // 只有点击“停止生成”才显示中断；切换会话/页面导致的 Abort 不污染消息状态。
-          if (abortReasonRef.current === "user") {
-            setMessages((prev) => patchMessageById(prev, assistantMsg.id, buildStoppedPatch()));
-          }
-        } else {
-          const isBackgroundModel = selectedModel.id === "gpt-5.5-pro" || selectedModel.id.startsWith("gpt-5.5-pro-");
-          if (isBackgroundModel && convId) {
-            setMessages((prev) => patchMessageById(prev, assistantMsg.id, buildRecoverableBusyPatch({ activityStatus: createBusyGeneratingStatus(t) })));
-          } else {
-            setMessages((prev) => patchMessageById(prev, assistantMsg.id, buildDisplayErrorPatch({
-              errorCode: error.errorCode,
-              message: error.errorCode === "guest_limit_exceeded" ? "匿名用户每日次数用完，请登录后继续" : error.message,
-            })));
-          }
+        const decision = decideSingleSendError({
+          error,
+          abortReason: abortReasonRef.current,
+          modelId: selectedModel.id,
+          conversationId: convId,
+          busyActivityStatus: createBusyGeneratingStatus(t),
+        });
+        if (decision.type !== "none") {
+          setMessages((prev) => patchMessageById(prev, assistantMsg.id, decision.patch));
         }
       } finally {
-        const abortReason = abortReasonRef.current;
-        // 切换会话导致的 abort 只是断开当前页面 SSE，后端仍继续生成；不要在旧异步 finally 里改全局 loading/清 reason。
-        if (abortReason !== "navigation") {
-          const hasActiveTaskStream = Object.keys(taskStreamsRef.current).length > 0;
-          if (!hasActiveTaskStream) {
-            setIsLoading(false);
-            abortControllerRef.current = null;
-            abortReasonRef.current = null;
-          }
-        }
+        const decision = decideSingleSendFinally({
+          abortReason: abortReasonRef.current,
+          hasActiveTaskStream: Object.keys(taskStreamsRef.current).length > 0,
+          conversationId: convId,
+        });
+        if (decision.shouldUpdateLoading) setIsLoading(Boolean(decision.isLoading));
+        if (decision.shouldClearMainController) abortControllerRef.current = null;
+        if (decision.shouldClearAbortReason) abortReasonRef.current = null;
         // 通知侧边栏仅做本地排序/时间更新，避免每次发消息都全量重拉历史列表
-        if (convId) {
+        if (decision.shouldDispatchConversationUpdated && decision.conversationId) {
           window.dispatchEvent(new CustomEvent("conversation-updated", {
-            detail: { id: convId, updated_at: new Date().toISOString() },
+            detail: buildConversationUpdatedEventDetail(decision.conversationId, new Date().toISOString()),
           }));
         }
       }
