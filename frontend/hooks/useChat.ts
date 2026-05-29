@@ -54,6 +54,10 @@ import {
   resolveConversationSkillKey,
 } from "@/lib/chatConversationRestoreCoordinator";
 import {
+  buildFinalStreamRunResult,
+  decideFinalStreamReconciliation,
+} from "@/lib/chatFinalReconciliationCoordinator";
+import {
   runChatStreamLifecycle,
 } from "@/lib/chatStreamLifecycle";
 import {
@@ -724,16 +728,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
 
       const buildStreamRunResult = (contentOverride?: string): StreamRunResult => {
         const state = mainStreamHandler.getState();
-        return buildChatStreamRunResult({
-          groupContext: state.groupContext,
-          serverMessageId: state.serverMessageId,
-          generationTaskId: state.generationTaskId,
-          lastSequence: state.lastSequence,
-          content: contentOverride,
-          fallbackContent: streamGet(assistantMsg.id) || state.accumulated,
-          useBackground: state.useBackground,
-          sawDone: state.sawDone,
-          recoverable: state.recoverable,
+        return buildFinalStreamRunResult({
+          state,
+          finalContent: contentOverride || streamGet(assistantMsg.id),
         });
       };
 
@@ -764,60 +761,59 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         mainStreamHandler.closeOpenReasoning();
         const state = mainStreamHandler.getState();
 
-        // 同步 streaming store 到 messages state
-        const finalContent = streamGet(assistantMsg.id) || state.accumulated;
+        // 同步 streaming store 到 messages state，并根据 stream 结果决定恢复/校准/完成状态。
+        const streamContent = streamGet(assistantMsg.id);
         const finalData = realtimeGet(assistantMsg.id);
-        if (finalContent || finalData) {
+        const finalAction = decideFinalStreamReconciliation({
+          state,
+          abortReason,
+          streamContent,
+          hasRealtimeData: Boolean(finalData),
+        });
+
+        if (finalAction.shouldSyncFinalData) {
           setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) =>
-            applyFinalRealtimeDataToMessage(m, { finalContent, finalData })
+            applyFinalRealtimeDataToMessage(m, { finalContent: finalAction.finalContent, finalData })
           ));
         }
 
-        // SSE 自然断开但没有收到 DONE：不能把空 assistant 标 completed。
-        // 后端 task runner 仍可能在生成/落库，转为可恢复 task stream / polling。
-        if (shouldRecoverStream({
-          sawDone: state.sawDone,
-          abortReason,
-          serverMessageId: state.serverMessageId,
-          generationTaskId: state.generationTaskId,
-        })) {
+        if (finalAction.type === "recover") {
           mainStreamHandler.setRecoverable(true);
-          startTaskEventStream(convId || currentConversation, assistantMsg.id, state.serverMessageId, state.lastSequence, finalContent, state.generationTaskId);
-          if (state.useBackground && state.serverMessageId) {
-            startBackgroundPolling(convId || currentConversation, assistantMsg.id, state.serverMessageId);
+          startTaskEventStream(
+            convId || currentConversation,
+            assistantMsg.id,
+            finalAction.serverMessageId,
+            finalAction.lastSequence,
+            finalAction.finalContent,
+            finalAction.generationTaskId
+          );
+          if (finalAction.shouldStartBackgroundPolling && finalAction.serverMessageId) {
+            startBackgroundPolling(convId || currentConversation, assistantMsg.id, finalAction.serverMessageId);
           }
-          return buildStreamRunResult(finalContent);
+          return finalAction.result;
         }
 
-        const hasFinalContent = (finalContent || "").trim().length > 0;
-
-        // OpenAI background/complex task 的 [DONE] 只代表当前 SSE/event stream 结束，
-        // 不代表已展示内容就是 DB 最终内容。即使已有部分内容，也要继续通过
-        // task stream / DB polling 校准，否则会出现“输出一半直接 DONE，刷新后变完整”。
-        if (shouldReconcileAfterDone({
-          sawDone: state.sawDone,
-          abortReason,
-          serverMessageId: state.serverMessageId,
-          generationTaskId: state.generationTaskId,
-        })) {
+        if (finalAction.type === "reconcile_after_done") {
           mainStreamHandler.setRecoverable(true);
           // The initial /chat request is itself a task event stream. Its controller is
           // still registered until this finally block finishes, so an immediate
           // startTaskEventStream() would no-op and leave the UI stuck on partial text.
           // DB polling is the correct post-DONE reconciler here; explicit task
           // stream reattach is reserved for abnormal disconnects before DONE.
-          if (state.serverMessageId) {
-            startBackgroundPolling(convId || currentConversation, assistantMsg.id, state.serverMessageId);
+          if (finalAction.shouldStartBackgroundPolling && finalAction.serverMessageId) {
+            startBackgroundPolling(convId || currentConversation, assistantMsg.id, finalAction.serverMessageId);
           }
-          return buildStreamRunResult(finalContent);
+          return finalAction.result;
         }
 
-        streamClear(assistantMsg.id);
-        realtimeClear(assistantMsg.id);
+        if (finalAction.shouldClearStores) {
+          streamClear(assistantMsg.id);
+          realtimeClear(assistantMsg.id);
+        }
 
         // 切会话/用户停止时不要在旧异步里把消息标 completed。
         // 切回该会话时由历史加载 + task event stream 恢复真实状态。
-        if (shouldMarkCompleted({ sawDone: state.sawDone, hasFinalContent, abortReason })) {
+        if (finalAction.shouldMarkCompleted) {
           setMessages((prev) => patchMessageById(prev, assistantMsg.id, buildCompletedPatch(Date.now())));
         }
       }
