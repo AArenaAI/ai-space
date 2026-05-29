@@ -17,6 +17,13 @@ import { createTaskStreamEventHandler } from "@/lib/chatTaskStreamEventHandler";
 import { createMainStreamEventHandler } from "@/lib/chatMainStreamEventHandler";
 import { runCompareModels } from "@/lib/chatCompareRunCoordinator";
 import {
+  applySingleSendMessagePlan,
+  buildNewConversationTitle,
+  prepareSingleSendMessages,
+  runSingleChatRequest,
+  shouldStartSingleSend,
+} from "@/lib/chatSingleSendCoordinator";
+import {
   runChatStreamLifecycle,
 } from "@/lib/chatStreamLifecycle";
 import {
@@ -49,12 +56,10 @@ import {
 } from "@/lib/chatMessageStatePatch";
 import {
   buildChatRequestHeaders,
-  buildSingleChatRequestBody,
 } from "@/lib/chatRequestBuilder";
 import { toModelMessages } from "@/lib/chatHistoryTransform";
 import {
   buildMessageFiles,
-  createAssistantChatMessage,
   createCompareAssistantMessages,
   createUserChatMessage,
 } from "@/lib/chatMessageFactory";
@@ -1047,7 +1052,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       file_ids?: string[],
       templatePrefix?: string
     ) => {
-      if (!content.trim() && !isRegenerate && (!attachments || attachments.length === 0)) return;
+      if (!shouldStartSingleSend({ content, isRegenerate, attachments })) return;
 
       lastReasoningRef.current = reasoning;
       lastSearchRef.current = search;
@@ -1057,8 +1062,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       // 确定当前对话 ID（登录状态下）
       let convId = currentConversation;
       if (token && !convId && !isRegenerate) {
-        // 自动创建新对话，标题用前 20 个字
-        const title = content.trim().slice(0, 20) + (content.trim().length > 20 ? "..." : "");
+        const title = buildNewConversationTitle(content);
         convId = await createConversation(title, selectedModel.id, effectiveSkillKey);
         if (!convId) {
           // 创建对话失败，显示错误提示并终止
@@ -1077,60 +1081,22 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         }
       }
 
-      let contextMessages: Message[];
-      let assistantMsg: Message;
+      const messagePlan = prepareSingleSendMessages<Message>({
+        content,
+        messages,
+        modelId: selectedModel.id,
+        isRegenerate,
+        skipUserMessage: skipUserMsg,
+        attachments,
+        search: lastSearchRef.current,
+        createId: uuidv4,
+        now: Date.now,
+      });
+      if (!messagePlan) return;
 
-      if (isRegenerate) {
-        // 重新生成：找到最后一条 user 消息，删掉后面的 assistant
-        const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
-        if (!lastUserMsg) return;
-        const lastUserIndex = messages.findIndex((m) => m.id === lastUserMsg.id);
-        contextMessages = messages.slice(0, lastUserIndex + 1);
-
-        assistantMsg = createAssistantChatMessage({
-          id: uuidv4(),
-          model: selectedModel.id,
-          createdAt: Date.now(),
-          search: lastSearchRef.current,
-        }) as Message;
-
-        // 更新 messages：保留到 lastUser 的消息，去掉后面的 assistant，添加新的 assistant
-        setMessages((prev) => {
-          const trimmed = prev.filter((m, i) => i <= lastUserIndex || m.role !== "assistant");
-          return [...trimmed, assistantMsg];
-        });
-      } else if (skipUserMsg) {
-        // 对比模式中后续模型：不添加用户消息，只添加 assistant
-        let finalContent = content.trim();
-        const userFiles = buildMessageFiles(attachments);
-        assistantMsg = createAssistantChatMessage({
-          id: uuidv4(),
-          model: selectedModel.id,
-          createdAt: Date.now(),
-          search: lastSearchRef.current,
-        }) as Message;
-        contextMessages = [...messages, { role: "user" as const, content: finalContent, id: "", createdAt: 0, files: userFiles }];
-        setMessages((prev) => [...prev, assistantMsg]);
-      } else {
-        let finalContent = content.trim();
-        const userFiles = buildMessageFiles(attachments);
-        const userMsg = createUserChatMessage({
-          id: uuidv4(),
-          content: finalContent,
-          createdAt: Date.now(),
-          files: userFiles,
-        }) as Message;
-
-        assistantMsg = createAssistantChatMessage({
-          id: uuidv4(),
-          model: selectedModel.id,
-          createdAt: Date.now(),
-          search: lastSearchRef.current,
-        }) as Message;
-
-        contextMessages = [...messages, userMsg];
-        setMessages((prev) => [...prev, userMsg, assistantMsg]);
-      }
+      const contextMessages = messagePlan.contextMessages;
+      const assistantMsg = messagePlan.assistantMessage;
+      setMessages((prev) => applySingleSendMessagePlan(prev, messagePlan));
 
       setIsLoading(true);
       const controller = new AbortController();
@@ -1138,34 +1104,23 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       abortControllerRef.current = controller;
 
       try {
-        const token = localStorage.getItem("token");
         const headers = buildChatRequestHeaders({ token, guestId: getGuestId() });
-        const response = await fetch(`${API_BASE_URL}/api/chat`, {
-          method: "POST",
+        await runSingleChatRequest({
+          apiBaseUrl: API_BASE_URL,
           headers,
-          signal: controller.signal,
-          body: JSON.stringify(buildSingleChatRequestBody({
-            model: selectedModel.id,
-            messages: toModelMessages(contextMessages),
-            conversationId: convId,
-            reasoningEnabled: reasoning.enabled,
-            reasoningEffort: reasoning.effort,
-            search,
-            templateId,
-            skipSaveUserMessage: skipUserMsg,
-            skillKey: effectiveSkillKey,
-            messageFileIds: file_ids,
-          })),
+          controller,
+          assistantMessage: assistantMsg,
+          modelId: selectedModel.id,
+          modelMessages: toModelMessages(contextMessages),
+          conversationId: convId,
+          reasoning,
+          search,
+          templateId,
+          skipSaveUserMessage: skipUserMsg,
+          skillKey: effectiveSkillKey,
+          messageFileIds: file_ids,
+          streamResponse,
         });
-
-        if (!response.ok) {
-          const errorBody = await response.json().catch(() => ({}));
-          const errorCode = errorBody.error || "unknown";
-          const errorMsg = errorBody.message || "请求失败";
-          throw Object.assign(new Error(errorMsg), { errorCode });
-        }
-
-        await streamResponse(response, assistantMsg, controller, convId);
       } catch (error: any) {
         if (error.name === "AbortError") {
           // 只有点击“停止生成”才显示中断；切换会话/页面导致的 Abort 不污染消息状态。
