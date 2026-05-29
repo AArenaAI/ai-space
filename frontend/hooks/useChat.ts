@@ -9,6 +9,7 @@ import { streamAppend, streamGet, streamClear, realtimeUpdate, realtimeGet, real
 import { type ReasoningStreamState } from "@/lib/chatStreamDelta";
 import { applyChatStreamDelta } from "@/lib/chatDeltaApplier";
 import { isSseDone, parseSseEvent, splitSseEvents } from "@/lib/chatSseParser";
+import { runSseStream } from "@/lib/chatSseStreamRunner";
 import { normalizeChatStreamPayload } from "@/lib/chatStreamMeta";
 import { normalizeBackgroundTaskInfo, normalizeGenerationTaskInfo } from "@/lib/chatTaskInfo";
 import {
@@ -421,7 +422,6 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     const lastThinkOpen = accumulated.lastIndexOf("<think>");
     const lastThinkClose = accumulated.lastIndexOf("</think>");
     const reasoningState: ReasoningStreamState = { inReasoningBlock: lastThinkOpen !== -1 && lastThinkOpen > lastThinkClose };
-    let buffer = "";
     let sawDone = false;
     let latestSequence = after || 0;
 
@@ -547,20 +547,11 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         const res = await fetch(streamUrl, { headers, signal: controller.signal });
         if (!res.ok || !res.body) throw new Error("task stream unavailable");
         const reader = res.body.getReader();
-        const decoder = new TextDecoder();
         try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            const split = splitSseEvents(buffer);
-            buffer = split.remaining;
-            for (const eventText of split.events) {
-              processEvent(eventText);
-            }
-          }
-          buffer += decoder.decode();
-          if (buffer.trim()) processEvent(buffer.trim());
+          await runSseStream({
+            reader,
+            onEvent: processEvent,
+          });
         } finally {
           reader.releaseLock();
         }
@@ -874,11 +865,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       onGroupContext?: (context: CompareGroupContext) => void
     ): Promise<StreamRunResult | undefined> => {
       const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
       if (!reader) throw new Error("无法读取流");
 
       let accumulated = "";
-      let buffer = "";
       const reasoningState: ReasoningStreamState = { inReasoningBlock: false };
       let backgroundPollingStarted = false;
       let latestServerMessageId: number | undefined;
@@ -1089,30 +1078,10 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       });
 
       try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-
-          // 按 SSE event 边界分割完整 event
-          const split = splitSseEvents(buffer);
-          buffer = split.remaining;
-          for (const eventText of split.events) {
-            processEvent(eventText);
-          }
-        }
-
-        // 最终 flush decoder
-        buffer += decoder.decode();
-        const split = splitSseEvents(buffer);
-        buffer = split.remaining;
-        for (const eventText of split.events) {
-          processEvent(eventText);
-        }
-        if (buffer.trim()) {
-          processEvent(buffer.trim());
-        }
+        await runSseStream({
+          reader,
+          onEvent: processEvent,
+        });
       } catch (err: any) {
         const isAbort = err?.name === "AbortError" || controller.signal.aborted;
         const abortReason = abortReasonRef.current;
