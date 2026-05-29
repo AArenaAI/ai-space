@@ -5,21 +5,22 @@ import (
 	"log"
 	"os"
 
+	"aipool-backend/internal/config"
 	"aipool-backend/internal/models"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/driver/sqlite"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
 func main() {
-	if len(os.Args) < 4 {
-		log.Fatal("Usage: resetpw <dbfile> <email> <new-password>")
+	if len(os.Args) < 3 {
+		log.Fatal("Usage: resetpw <email> <new-password>\nDatabase connection is read from DATABASE_URL / backend/.env")
 	}
-	dbfile := os.Args[1]
-	email := os.Args[2]
-	password := os.Args[3]
+	email := os.Args[1]
+	password := os.Args[2]
 
-	db, err := gorm.Open(sqlite.Open(dbfile), &gorm.Config{})
+	cfg := config.Load()
+	db, err := gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}

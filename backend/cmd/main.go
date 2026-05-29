@@ -10,7 +10,7 @@ import (
 func main() {
 	cfg := config.Load()
 
-	db, err := models.InitDB(cfg.DatabasePath)
+	db, err := models.InitDB(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("数据库初始化失败: %v", err)
 	}

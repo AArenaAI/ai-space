@@ -9,11 +9,11 @@ import (
 
 type Config struct {
 	// 基础服务配置
-	BaseURL      string
-	Port         string
-	DatabasePath string
-	JWTSecret    string
-	FrontendURL  string
+	BaseURL     string
+	Port        string
+	DatabaseURL string
+	JWTSecret   string
+	FrontendURL string
 
 	// ========== Chat Provider（对话模型，支持 OpenAI / Anthropic / Gemini / DeepSeek / Moonshot 多路并行）==========
 	OpenAIKey            string
@@ -119,11 +119,11 @@ func Load() *Config {
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		BaseURL:      getEnv("BASE_URL", ""),
-		Port:         getEnv("PORT", "9091"),
-		DatabasePath: getEnv("DATABASE_PATH", "./data/aipool.db"),
-		JWTSecret:    getEnv("JWT_SECRET", "your-secret-key-change-in-production"),
-		FrontendURL:  getEnv("FRONTEND_URL", "http://localhost:9090"),
+		BaseURL:     getEnv("BASE_URL", ""),
+		Port:        getEnv("PORT", "9091"),
+		DatabaseURL: getEnv("DATABASE_URL", "postgres://aipool:aipool@localhost:5432/aipool?sslmode=disable"),
+		JWTSecret:   getEnv("JWT_SECRET", "your-secret-key-change-in-production"),
+		FrontendURL: getEnv("FRONTEND_URL", "http://localhost:9090"),
 
 		OpenAIKey:           getEnv("OPENAI_API_KEY", ""),
 		OpenAIBaseURL:       getEnv("OPENAI_BASE_URL", ""),

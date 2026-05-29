@@ -61,7 +61,7 @@ type FileEmbedding struct {
 	Model     string `gorm:"size:128;not null;uniqueIndex:idx_embedding_unique" json:"model"`    // text-embedding-3-small
 	Dimension int    `gorm:"not null;uniqueIndex:idx_embedding_unique" json:"dimension"`         // 1536
 	TextHash  string `gorm:"size:64;not null;uniqueIndex:idx_embedding_unique" json:"text_hash"` // 用于一致性校验
-	Vector    []byte `gorm:"type:blob;not null" json:"-"`                                        // float32[] BLOB
+	Vector    []byte `gorm:"type:bytea;not null" json:"-"`                                       // float32[] binary payload
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }

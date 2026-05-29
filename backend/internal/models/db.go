@@ -2,25 +2,17 @@ package models
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"aipool-backend/pkg/publicid"
-	"gorm.io/driver/sqlite"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
 
 var DB *gorm.DB
 
-func InitDB(dbPath string) (*gorm.DB, error) {
-	// 确保目录存在
-	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, err
-	}
-
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
+func InitDB(databaseURL string) (*gorm.DB, error) {
+	db, err := gorm.Open(postgres.Open(databaseURL), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
@@ -29,16 +21,12 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 
 	DB = db
 
-	// WAL 模式优化：提升并发写入性能，避免长时间锁表
+	// PostgreSQL 连接池配置。
 	sqlDB, err := db.DB()
 	if err == nil {
-		sqlDB.SetMaxOpenConns(1)
-		sqlDB.SetMaxIdleConns(1)
+		sqlDB.SetMaxOpenConns(20)
+		sqlDB.SetMaxIdleConns(5)
 		sqlDB.SetConnMaxLifetime(0)
-		db.Exec("PRAGMA journal_mode = WAL")
-		db.Exec("PRAGMA synchronous = NORMAL")
-		db.Exec("PRAGMA cache_size = -64000")
-		db.Exec("PRAGMA temp_store = MEMORY")
 	}
 
 	// 自动迁移
