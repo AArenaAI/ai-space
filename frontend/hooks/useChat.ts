@@ -57,6 +57,15 @@ import {
   createUserChatMessage,
 } from "@/lib/chatMessageFactory";
 import {
+  getCompareRequestGroupContext,
+  isCompareGroupContextReady,
+  mergeCompareGroupContext,
+  resolveCompareRequestGroupModels,
+  selectCompareModelIds,
+  shouldSkipSaveUserMessage,
+  shouldStartCompare,
+} from "@/lib/chatCompareCoordinator";
+import {
   createActivityStatusFromMeta,
   createBusyGeneratingStatus,
   createFinalizingStatus,
@@ -1208,8 +1217,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     ) => {
       if (!content.trim() && (!attachments || attachments.length === 0)) return;
 
-      const compareModelIds = modelIds.filter((id) => models.some((m) => m.id === id)).slice(0, 4);
-      if (compareModelIds.length < 2) return;
+      const compareModelIds = selectCompareModelIds(modelIds, models);
+      if (!shouldStartCompare(compareModelIds)) return;
 
       lastReasoningRef.current = reasoning;
       lastSearchRef.current = search;
@@ -1258,15 +1267,14 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       });
       let groupContextResolved = false;
       const setCompareGroupContext = (context?: CompareGroupContext) => {
-        if (!context) return;
-        compareGroupContext = {
-          groupId: context.groupId || compareGroupContext?.groupId,
-          userMessageId: context.userMessageId || compareGroupContext?.userMessageId,
-          groupModels: context.groupModels.length > 0 ? context.groupModels : compareModelIds,
-        };
-        if (!groupContextResolved && compareGroupContext.groupId && compareGroupContext.userMessageId) {
+        compareGroupContext = mergeCompareGroupContext({
+          incoming: context,
+          existing: compareGroupContext,
+          fallbackGroupModels: compareModelIds,
+        });
+        if (!groupContextResolved && isCompareGroupContextReady(compareGroupContext)) {
           groupContextResolved = true;
-          const resolvedContext = compareGroupContext;
+          const resolvedContext = compareGroupContext!;
           setMessages((prev) => applyCompareGroupContextToMessages(prev, {
             userMessageId: userMsg.id,
             assistantIds: assistantMsgs.map((assistant) => assistant.id),
@@ -1301,7 +1309,11 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         const controller = controllers[index];
         let streamResult: StreamRunResult | undefined;
         try {
-          const requestGroupContext = groupContext || (index === 0 ? undefined : compareGroupContext);
+          const requestGroupContext = getCompareRequestGroupContext({
+            index,
+            explicitContext: groupContext,
+            currentContext: compareGroupContext,
+          });
           const response = await fetch(`${API_BASE_URL}/api/chat`, {
             method: "POST",
             headers,
@@ -1315,11 +1327,14 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               search,
               templateId,
               templatePrefix,
-              skipSaveUserMessage: index > 0,
+              skipSaveUserMessage: shouldSkipSaveUserMessage(index),
               groupId: requestGroupContext?.groupId,
               userMessageId: requestGroupContext?.userMessageId,
               groupIndex: index,
-              groupModels: requestGroupContext?.groupModels || [],
+              groupModels: resolveCompareRequestGroupModels({
+                requestGroupModels: requestGroupContext?.groupModels,
+                fallbackGroupModels: compareModelIds,
+              }),
               fallbackGroupModels: compareModelIds,
               skillKey: effectiveSkillKey,
               messageFileIds: file_ids,
