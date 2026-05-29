@@ -46,9 +46,9 @@ import {
 } from "@/lib/chatStreamRunResult";
 import {
   buildBackgroundPollingMessagePatch,
-  evaluateBackgroundTaskPoll,
   shouldKeepBackgroundLoading,
 } from "@/lib/chatBackgroundPolling";
+import { startBackgroundPollingRunner } from "@/lib/chatBackgroundPollingRunner";
 import {
   applyCompareGroupContextToMessages,
   applyFinalRealtimeDataToMessage,
@@ -330,67 +330,57 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       headers["X-Guest-ID"] = getGuestId();
     }
 
-    let terminalStableCount = 0;
-    let lastContent = "";
-    const poll = async () => {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/conversations/${convId}/messages/${serverMessageId}`, {
-          headers,
-        });
-        if (!res.ok) return;
-        const data = await res.json();
-        const pollState = evaluateBackgroundTaskPoll({
-          content: data?.message?.content || "",
-          status: data?.background_task?.status || "",
-          previousContent: lastContent,
-          terminalStableCount,
-        });
-        terminalStableCount = pollState.terminalStableCount;
-        lastContent = pollState.content;
-        const streamActive = !!taskStreamsRef.current[localMessageId];
-        const liveContent = streamGet(localMessageId) || realtimeGet(localMessageId)?.content || "";
-        const now = Date.now();
-        setMessages((prev) => patchMessageById(prev, localMessageId, (m) =>
-          // SSE / task event stream 仍在追加时，polling 只能更新状态，不能用 DB 全文覆盖内容。
-          // 否则 OpenAI completed 后 message.content 已是全文，但补尾 delta 还在路上，UI 会从半截直接跳全文。
-          buildBackgroundPollingMessagePatch({
-            existingContent: m.content,
-            polledContent: pollState.content,
-            liveContent,
-            streamActive,
-            serverMessageId,
-            isFinished: pollState.isFinished,
-            now,
-            createBusyStatus: () => createBusyGeneratingStatus(t),
-          })
-        ));
-        if (pollState.isFinished && !streamActive) {
+    const runner = startBackgroundPollingRunner({
+      apiBaseUrl: API_BASE_URL,
+      conversationId: convId,
+      serverMessageId,
+      headers,
+      callbacks: {
+        onPollState: (pollState) => {
+          const streamActive = !!taskStreamsRef.current[localMessageId];
+          const liveContent = streamGet(localMessageId) || realtimeGet(localMessageId)?.content || "";
+          const now = Date.now();
+          setMessages((prev) => patchMessageById(prev, localMessageId, (m) =>
+            // SSE / task event stream 仍在追加时，polling 只能更新状态，不能用 DB 全文覆盖内容。
+            // 否则 OpenAI completed 后 message.content 已是全文，但补尾 delta 还在路上，UI 会从半截直接跳全文。
+            buildBackgroundPollingMessagePatch({
+              existingContent: m.content,
+              polledContent: pollState.content,
+              liveContent,
+              streamActive,
+              serverMessageId,
+              isFinished: pollState.isFinished,
+              now,
+              createBusyStatus: () => createBusyGeneratingStatus(t),
+            })
+          ));
+        },
+        onFinished: (pollState) => {
           stopBackgroundPoller(localMessageId);
           stopTaskStream(localMessageId);
-          if (convId && serverMessageId) {
-            const notificationTitle = getNotificationConversationTitle(conversationTitle, selectedModel.name || selectedModel.id);
-            emitTaskFinished({
-              key: `chat:${serverMessageId}`,
-              type: "chat",
-              title: pollState.isCompleted ? "长对话任务已完成" : "长对话任务未完成",
-              description: notificationTitle,
-              href: `/chat?id=${convId}`,
-              ok: pollState.isCompleted,
-              conversationTitle: notificationTitle,
-            });
-          }
+          const notificationTitle = getNotificationConversationTitle(conversationTitle, selectedModel.name || selectedModel.id);
+          emitTaskFinished({
+            key: `chat:${serverMessageId}`,
+            type: "chat",
+            title: pollState.isCompleted ? "长对话任务已完成" : "长对话任务未完成",
+            description: notificationTitle,
+            href: `/chat?id=${convId}`,
+            ok: pollState.isCompleted,
+            conversationTitle: notificationTitle,
+          });
           const hasOtherTaskStream = Object.keys(taskStreamsRef.current).some((id) => id !== localMessageId);
           const hasOtherPoller = Object.keys(backgroundPollersRef.current).some((id) => id !== localMessageId);
           setIsLoading(hasOtherTaskStream || hasOtherPoller);
-        } else if (shouldKeepBackgroundLoading(pollState)) {
+        },
+        onKeepLoading: () => {
           // terminal 状态可能先于最终 message.content 可见；多轮确认稳定前继续轮询，避免刷新后才完整。
           setIsLoading(true);
-        }
-      } catch {}
-    };
-
-    poll();
-    backgroundPollersRef.current[localMessageId] = window.setInterval(poll, 2000);
+        },
+        shouldKeepLoading: shouldKeepBackgroundLoading,
+        isStreamActive: () => !!taskStreamsRef.current[localMessageId],
+      },
+    });
+    backgroundPollersRef.current[localMessageId] = runner.timer;
   }, [stopBackgroundPoller, stopTaskStream]);
 
   const startTaskEventStream = useCallback((convId: number | undefined, localMessageId: string, serverMessageId?: number, after: number = 0, initialContent: string = "", generationTaskId?: number) => {
