@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
+import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotifications";
 import { toast } from "sonner";
 import ImageLightbox from "@/components/ui/ImageLightbox";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
@@ -430,7 +431,18 @@ function ImageChatPageInner() {
           clearInterval(timer);
           setPollingChatId(null);
           setIsGenerating(false);
-          const failedMsg = msgs.find((m) => m.role === "assistant" && m.status === "failed");
+          const latestAssistant = [...msgs].reverse().find((m) => m.role === "assistant");
+          const failedMsg = latestAssistant?.status === "failed" ? latestAssistant : msgs.find((m) => m.role === "assistant" && m.status === "failed");
+          if (latestAssistant && ["completed", "failed"].includes(latestAssistant.status)) {
+            emitTaskFinished({
+              key: `image-chat:${latestAssistant.id}`,
+              type: "image",
+              title: latestAssistant.status === "completed" ? "图片任务已完成" : "图片任务未完成",
+              description: latestAssistant.content,
+              href: `/image/chat?chatId=${pollingChatId}`,
+              ok: latestAssistant.status === "completed" && Boolean(latestAssistant.image_url || latestAssistant.partial_image_url),
+            });
+          }
           if (failedMsg?.error_message) {
             toast.error(cleanImageErrorMessage(failedMsg.error_message, t));
           }
@@ -475,12 +487,35 @@ function ImageChatPageInner() {
         setChatId(newChat.id);
         // 更新 URL
         router.replace(`/image/chat?chatId=${newChat.id}`);
+        const initialMessages = await fetchMessages(newChat.id);
+        const assistantMsg = [...initialMessages].reverse().find((m) => m.role === "assistant" && m.status === "pending");
+        if (assistantMsg) {
+          registerBackgroundTask({
+            key: `image-chat:${assistantMsg.id}`,
+            type: "image",
+            id: assistantMsg.id,
+            title: "图片生成中",
+            description: text.trim(),
+            href: `/image/chat?chatId=${newChat.id}`,
+            conversationId: newChat.id,
+            serverMessageId: assistantMsg.id,
+          });
+        }
         setPollingChatId(newChat.id);
-        await fetchMessages(newChat.id);
         fetchChats();
       } else {
         // 在现有会话中发送
-        await sendMessage(chatId, payload);
+        const sent = await sendMessage(chatId, payload);
+        registerBackgroundTask({
+          key: `image-chat:${sent.message_id}`,
+          type: "image",
+          id: sent.message_id,
+          title: "图片生成中",
+          description: text.trim(),
+          href: `/image/chat?chatId=${chatId}`,
+          conversationId: chatId,
+          serverMessageId: sent.message_id,
+        });
         setPollingChatId(chatId);
         await fetchMessages(chatId);
         fetchChats();
@@ -855,6 +890,7 @@ function ImageChatPageInner() {
           active: chatId === c.id,
           updated_at: c.updated_at,
           cover_image: c.cover_image,
+          status: c.status,
         }))}
         onSelect={handleSelectChat}
         onNew={handleNewChat}

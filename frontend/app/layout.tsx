@@ -3,8 +3,9 @@ import "./globals.css";
 import "katex/dist/katex.min.css";
 import { ThemeProvider } from "@/components/theme/ThemeProvider";
 import { I18nProvider } from "@/lib/i18n";
-import { Toaster } from "sonner";
 import AuthInterceptor from "@/components/AuthInterceptor";
+import AppToaster from "@/components/notifications/AppToaster";
+import TaskNotificationCenter from "@/components/notifications/TaskNotificationCenter";
 
 export const metadata: Metadata = {
   title: "AI Space - 多模型AI聚合平台",
@@ -60,27 +61,9 @@ export default function RootLayout({
         <I18nProvider>
           <ThemeProvider>
             <AuthInterceptor />
+            <TaskNotificationCenter />
             {children}
-            <Toaster
-              position="top-center"
-              toastOptions={{
-                duration: 2600,
-                classNames: {
-                  toast:
-                    "rounded-2xl border border-surface-border bg-surface-elevated px-4 py-3 text-text shadow-2xl shadow-black/10 backdrop-blur-xl",
-                  title: "text-sm font-medium text-text",
-                  description: "text-xs text-text-secondary",
-                  icon: "text-brand",
-                  closeButton:
-                    "border-surface-border bg-surface text-text-secondary hover:bg-surface-card hover:text-text",
-                  actionButton:
-                    "rounded-xl bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-hover",
-                  cancelButton:
-                    "rounded-xl bg-surface px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-surface-card",
-                },
-              }}
-              richColors={false}
-            />
+            <AppToaster />
           </ThemeProvider>
         </I18nProvider>
       </body>

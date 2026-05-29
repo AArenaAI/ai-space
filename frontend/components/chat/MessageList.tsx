@@ -21,12 +21,13 @@ import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import ShareDialog from "@/components/ui/ShareDialog";
 import { Virtuoso, VirtuosoHandle, type Components } from "react-virtuoso";
 import { useMessageStream } from "@/hooks/useMessageStream";
-import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
 import { inferGroups, InferredGroup } from "@/lib/groups";
 import EChartsBlock from "./EChartsBlock";
 import { useI18n } from "@/lib/i18n";
 import { AssistantMessageMeta } from "./AssistantMessageMeta";
 import ModelSelector from "./ModelSelector";
+import { StreamingText } from "./StreamingText";
+import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
 
 const CHAT_BOTTOM_SPACER = 280;
 const SCROLL_TO_BOTTOM_OFFSET = 238;
@@ -136,54 +137,6 @@ function CodeBlock({ language, value }: { language: string; value: string }) {
       >
         {value}
       </SyntaxHighlighter>
-    </div>
-  );
-}
-
-function StreamingCursor() {
-  return <span className="inline-block w-[2px] h-[1.2em] bg-brand ml-0.5 animate-cursor-blink align-middle" />;
-}
-
-function StreamingText({ messageId, content, isStreaming, className }: { messageId: string; content: string; isStreaming: boolean; className?: string }) {
-  const { t } = useI18n();
-  const streamText = useMessageStream(messageId, isStreaming);
-  const effectiveText = isStreaming ? (streamText || content) : content;
-  const hasThinkTag = effectiveText.includes("<think>");
-  const fullParsed = parseThinkContent(effectiveText);
-  const displayedText = useSmoothStreaming(effectiveText, isStreaming && !hasThinkTag, `${messageId}:full`);
-  const displayedReasoning = useSmoothStreaming(fullParsed.reasoning || "", isStreaming && hasThinkTag, `${messageId}:reasoning`);
-  const displayedAnswer = useSmoothStreaming(fullParsed.answer, isStreaming && hasThinkTag, `${messageId}:answer`);
-
-  // 含 <think> 的消息必须用完整实时内容解析边界，不能先做整段打字机截断；
-  // 否则 </think> 尚未显示时正文会被临时归入思考块。
-  // 解析出 reasoning / answer 后分别做打字机，让思考块和正文都逐字显示。
-  const parsed = hasThinkTag
-    ? { ...fullParsed, reasoning: fullParsed.reasoning === null ? null : displayedReasoning, answer: displayedAnswer }
-    : parseThinkContent(displayedText);
-  const hasReason = !!parsed.reasoning;
-  const hasContent = !!parsed.answer.trim();
-
-  return (
-    <div className={className}>
-      {hasReason && (
-        <div className="mb-3 rounded-xl border border-purple-200 dark:border-purple-800/40 overflow-hidden">
-          <div className="flex items-center gap-2 px-3 py-2 bg-purple-50 dark:bg-[#1A1A2E]">
-            <Lightbulb className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
-            <span className="text-sm font-medium text-text-secondary">{t("chat.reasoning.thinking")}</span>
-            <div className="flex gap-0.5 ml-1">
-              <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce" />
-              <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce [animation-delay:0.15s]" />
-              <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce [animation-delay:0.3s]" />
-            </div>
-          </div>
-          <div data-i18n-skip="true" className="px-3 py-2.5 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap bg-slate-50 dark:bg-[#0F0F1A]">
-            {parsed.reasoning || ""}
-          </div>
-        </div>
-      )}
-      <span data-i18n-skip="true" className="whitespace-pre-wrap break-words">{parsed.answer}</span>
-      {!hasContent && !hasReason && <ThinkingDots />}
-      {isStreaming && <StreamingCursor />}
     </div>
   );
 }
@@ -734,61 +687,10 @@ const MemoMarkdownRenderer = memo(function MemoMarkdownRenderer({ content }: { c
 });
 
 function LazyMarkdownRenderer({ content }: { content: string }) {
-  const hostRef = useRef<HTMLDivElement | null>(null);
-  const [shouldRender, setShouldRender] = useState(() => content.length < LONG_MARKDOWN_LAZY_THRESHOLD);
-
-  useEffect(() => {
-    if (content.length < LONG_MARKDOWN_LAZY_THRESHOLD) {
-      setShouldRender(true);
-      return;
-    }
-
-    const node = hostRef.current;
-    if (!node) return;
-
-    let cancelled = false;
-    let cleanupIdle: void | (() => void);
-    const renderWhenIdle = () => {
-      const win = window as typeof window & { requestIdleCallback?: (cb: IdleRequestCallback, options?: IdleRequestOptions) => number; cancelIdleCallback?: (handle: number) => void };
-      if (win.requestIdleCallback) {
-        const idleId = win.requestIdleCallback(() => {
-          if (!cancelled) setShouldRender(true);
-        }, { timeout: 600 });
-        return () => win.cancelIdleCallback?.(idleId);
-      }
-      const timeoutId = window.setTimeout(() => {
-        if (!cancelled) setShouldRender(true);
-      }, 80);
-      return () => window.clearTimeout(timeoutId);
-    };
-
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        cleanupIdle = renderWhenIdle();
-        observer.disconnect();
-      }
-    }, { rootMargin: "700px 0px" });
-
-    observer.observe(node);
-
-    return () => {
-      cancelled = true;
-      observer.disconnect();
-      cleanupIdle?.();
-    };
-  }, [content]);
-
-  return (
-    <div ref={hostRef}>
-      {shouldRender ? (
-        <MemoMarkdownRenderer content={content} />
-      ) : (
-        <div className="rounded-xl border border-surface-border bg-surface-card/50 px-3 py-2 text-sm text-text-secondary">
-          长内容准备中…
-        </div>
-      )}
-    </div>
-  );
+  if (content.length < LONG_MARKDOWN_LAZY_THRESHOLD) {
+    return <MemoMarkdownRenderer content={content} />;
+  }
+  return <DeferredMarkdownRenderer content={content} />;
 }
 
 function ExportMessageContent({ msg }: { msg: Message }) {

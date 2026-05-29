@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
+import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotifications";
 
 const API_BASE_URL = "";
 
@@ -52,8 +53,21 @@ export function useImage() {
         throw new Error(err.error || `获取图片列表失败 (${response.status})`);
       }
       const data = await safeJSON(response);
-      setImages(data.images || []);
-      cachedImages = data.images || [];
+      const nextImages = data.images || [];
+      setImages(nextImages);
+      cachedImages = nextImages;
+      nextImages.forEach((image: GeneratedImage) => {
+        if (image.status === "succeeded" || image.status === "failed") {
+          emitTaskFinished({
+            key: `image:${image.id}`,
+            type: "image",
+            title: image.status === "succeeded" ? "图片任务已完成" : "图片任务未完成",
+            description: image.status === "succeeded" ? image.prompt : image.error_message || image.prompt,
+            href: "/image",
+            ok: image.status === "succeeded",
+          });
+        }
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "获取图片列表失败");
     }
@@ -122,6 +136,13 @@ export function useImage() {
         }
 
         const data = await safeJSON(response);
+        registerBackgroundTask({
+          type: "image",
+          id: data.id,
+          title: "图片生成中",
+          description: prompt,
+          href: "/image",
+        });
         // 立即将 pending 记录加入列表并更新缓存
         const next = [data, ...images];
         setImages(next);

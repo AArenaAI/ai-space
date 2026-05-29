@@ -23,23 +23,19 @@ if [ -f "$PID_FILE" ]; then
     rm -f "$PID_FILE"
 fi
 
-# 方式2: 按明确命令杀掉残留进程，避免 pkill -f "aipool" 误杀当前 /workspace/aipool shell
+# 方式2: 按明确命令杀掉残留后端进程，避免 pkill -f "aipool" 误杀当前 /workspace/aipool shell
+# 前端静态文件由 nginx 直接映射，stop.sh 不处理 nginx/前端端口。
 pkill -f "/workspace/aipool/backend/aipool" 2>/dev/null || true
-pkill -f "node server.js" 2>/dev/null || true
-pkill -f "next dev.*9090" 2>/dev/null || true
-pkill -f "next dev.*9091" 2>/dev/null || true
 
 sleep 1
 
-# 验证是否停止
-PORT_9090=$(lsof -ti:9090 2>/dev/null || echo "")
+# 验证后端是否停止；前端 9090 由 nginx 管理，不在这里检查/杀掉
 PORT_9091=$(lsof -ti:9091 2>/dev/null || echo "")
 
-if [ -z "$PORT_9090" ] && [ -z "$PORT_9091" ]; then
-    echo -e "${GREEN}✅ 所有服务已停止${NC}"
+if [ -z "$PORT_9091" ]; then
+    echo -e "${GREEN}✅ 后端服务已停止${NC}"
 else
-    echo -e "${RED}⚠️  仍有进程占用端口，强制杀掉...${NC}"
-    [ -n "$PORT_9090" ] && kill -9 $PORT_9090 2>/dev/null || true
+    echo -e "${RED}⚠️  后端端口 9091 仍被占用，强制杀掉...${NC}"
     [ -n "$PORT_9091" ] && kill -9 $PORT_9091 2>/dev/null || true
     echo -e "${GREEN}✅ 已强制清理${NC}"
 fi

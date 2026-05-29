@@ -7,17 +7,11 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/hooks/useChat";
-import { useMessageStream } from "@/hooks/useMessageStream";
-import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
-import dynamic from "next/dynamic";
 import { InferredGroup } from "@/lib/groups";
 import { AssistantMessageMeta } from "./AssistantMessageMeta";
+import { StreamingText } from "./StreamingText";
+import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
 import { useI18n } from "@/lib/i18n";
-
-const MarkdownRenderer = dynamic(() => import("./MarkdownRenderer"), {
-  ssr: false,
-  loading: () => <div className="h-5 w-32 rounded bg-surface-card animate-pulse" />,
-});
 
 /* ---------- 工具函数 ---------- */
 
@@ -43,10 +37,6 @@ function WaveText({ text, className }: { text: string; className?: string }) {
       />
     </span>
   );
-}
-
-function StreamingCursor() {
-  return <span className="inline-block w-[2px] h-[1.2em] bg-brand ml-0.5 animate-cursor-blink align-middle" />;
 }
 
 function parseThinkContent(content: string): { reasoning: string | null; answer: string; isThinking: boolean } {
@@ -101,49 +91,6 @@ function isMessageGenerating(msg: Message, isStreaming: boolean): boolean {
   if (msg.completedAt || msg.stopped) return false;
   if (msg.activityStatus?.status === "running" || msg.activityStatus?.status === "searching") return true;
   return !!(msg.generationTaskId || msg.backgroundTaskId || msg.useBackground || msg.isComplexTask);
-}
-
-/* ---------- 子组件 ---------- */
-
-function StreamingText({ messageId, content, isStreaming, className }: { messageId: string; content: string; isStreaming: boolean; className?: string }) {
-  const { t } = useI18n();
-  const streamText = useMessageStream(messageId, isStreaming);
-  const effectiveText = isStreaming ? (streamText || content) : content;
-  const hasThinkTag = effectiveText.includes("<think>");
-  const fullParsed = parseThinkContent(effectiveText);
-  const displayedText = useSmoothStreaming(effectiveText, isStreaming && !hasThinkTag, `${messageId}:full`);
-  const displayedReasoning = useSmoothStreaming(fullParsed.reasoning || "", isStreaming && hasThinkTag, `${messageId}:reasoning`);
-  const displayedAnswer = useSmoothStreaming(fullParsed.answer, isStreaming && hasThinkTag, `${messageId}:answer`);
-
-  const parsed = hasThinkTag
-    ? { ...fullParsed, reasoning: fullParsed.reasoning === null ? null : displayedReasoning, answer: displayedAnswer }
-    : parseThinkContent(displayedText);
-  const hasReason = !!parsed.reasoning;
-  const hasContent = !!parsed.answer.trim();
-
-  return (
-    <span className={className}>
-      {hasReason && (
-        <div className="mb-3 rounded-xl border border-purple-200 dark:border-purple-800/40 overflow-hidden">
-          <div className="flex items-center gap-2 px-3 py-2 bg-purple-50 dark:bg-[#1A1A2E]">
-            <Lightbulb className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
-            <span className="text-sm font-medium text-text-secondary">{t("chat.reasoning.thinking")}</span>
-            <div className="flex gap-0.5 ml-1">
-              <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce" />
-              <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce [animation-delay:0.15s]" />
-              <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce [animation-delay:0.3s]" />
-            </div>
-          </div>
-          <div data-i18n-skip="true" className="px-3 py-2.5 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap bg-slate-50 dark:bg-[#0F0F1A]">
-            {parsed.reasoning || ""}
-          </div>
-        </div>
-      )}
-      <span data-i18n-skip="true" className="whitespace-pre-wrap break-words">{parsed.answer}</span>
-      {!hasContent && !hasReason && <ThinkingDots />}
-      {isStreaming && <StreamingCursor />}
-    </span>
-  );
 }
 
 function ThinkBlock({ content, isThinking }: { content: string; isThinking: boolean }) {
@@ -427,7 +374,7 @@ function MessageActions({
 
 /* ---------- 导出 ---------- */
 
-export { ThinkingDots, WaveText, StreamingCursor, StreamingText, AssistantMessageMeta, parseThinkContent, extractCitations, sanitizeContent, getCitedSources, ThinkBlock, MessageMenu, MessageActions, isMessageGenerating };
+export { ThinkingDots, WaveText, StreamingText, AssistantMessageMeta, parseThinkContent, extractCitations, sanitizeContent, getCitedSources, ThinkBlock, MessageMenu, MessageActions, isMessageGenerating };
 
 export interface ChatMessageItemProps {
   msg: Message;
@@ -522,7 +469,7 @@ function ChatMessageItemRaw({
     return (
       <div className="prose prose-sm max-w-none">
         {reasoning && <ThinkBlock content={reasoning} isThinking={isThinking} />}
-        <MarkdownRenderer content={cleanAnswer} />
+        <DeferredMarkdownRenderer content={cleanAnswer} />
       </div>
     );
   };

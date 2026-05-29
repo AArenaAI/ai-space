@@ -7,6 +7,7 @@ export interface ImageChat {
   updated_at: string;
   user_id: number;
   cover_image?: string;
+  status?: string;
 }
 
 export interface ImageChatMessage {

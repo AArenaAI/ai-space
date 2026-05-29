@@ -37,53 +37,73 @@ func NewImageChatHandler(db *gorm.DB, imageService *services.ImageService, video
 func (h *ImageChatHandler) ListImageChats(c *gin.Context) {
 	userID := getUserID(c)
 	var chats []models.ImageChat
-	if err := h.db.Where(`
-		user_id = ? AND EXISTS (
-			SELECT 1 FROM image_chat_messages
-			WHERE image_chat_messages.chat_id = image_chats.id
-			AND role = 'assistant'
-			AND status = 'completed'
-			AND image_url != ''
-		)
-	`, userID).Order("updated_at DESC").Find(&chats).Error; err != nil {
+	if err := h.db.Where("user_id = ?", userID).Order("updated_at DESC").Find(&chats).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取会话列表失败"})
 		return
 	}
 
-	// 为每个会话查询首图（第一条 completed 状态的 assistant 消息图片）
 	type chatCover struct {
 		ChatID uint   `json:"chat_id"`
-		Image  string `gorm:"column:image_url" json:"image_url"`
+		URL    string `gorm:"column:url" json:"url"`
+		Status string `json:"status"`
 	}
-	var covers []chatCover
+	var successCovers []chatCover
+	var latestStates []chatCover
 	chatIDs := make([]uint, 0, len(chats))
 	for _, c := range chats {
 		chatIDs = append(chatIDs, c.ID)
 	}
 	if len(chatIDs) > 0 {
+		// 首图优先使用该会话里第一条真正生成成功的 assistant 图片。
 		h.db.Raw(`
-			SELECT chat_id, image_url FROM image_chat_messages
+			SELECT chat_id, image_url AS url, status FROM image_chat_messages
 			WHERE chat_id IN ? AND role = 'assistant' AND status = 'completed' AND image_url != ''
 			AND id = (
 				SELECT MIN(id) FROM image_chat_messages AS sub
 				WHERE sub.chat_id = image_chat_messages.chat_id AND sub.role = 'assistant' AND sub.status = 'completed' AND sub.image_url != ''
 			)
-		`, chatIDs).Scan(&covers)
+		`, chatIDs).Scan(&successCovers)
+
+		// 没有成功内容时，返回最新 assistant 消息状态，供前端展示 pending/failed 占位卡。
+		h.db.Raw(`
+			SELECT chat_id, COALESCE(NULLIF(image_url, ''), NULLIF(partial_image_url, '')) AS url, status FROM image_chat_messages
+			WHERE chat_id IN ? AND role = 'assistant'
+			AND id = (
+				SELECT MAX(id) FROM image_chat_messages AS sub
+				WHERE sub.chat_id = image_chat_messages.chat_id AND sub.role = 'assistant'
+			)
+		`, chatIDs).Scan(&latestStates)
 	}
-	coverMap := make(map[uint]string, len(covers))
-	for _, cv := range covers {
-		coverMap[cv.ChatID] = cv.Image
+	coverMap := make(map[uint]string, len(successCovers))
+	for _, cv := range successCovers {
+		coverMap[cv.ChatID] = cv.URL
+	}
+	statusMap := make(map[uint]string, len(latestStates))
+	latestURLMap := make(map[uint]string, len(latestStates))
+	for _, cv := range latestStates {
+		statusMap[cv.ChatID] = cv.Status
+		latestURLMap[cv.ChatID] = cv.URL
 	}
 
 	type chatWithCover struct {
 		models.ImageChat
 		CoverImage string `json:"cover_image"`
+		Status     string `json:"status"`
 	}
 	result := make([]chatWithCover, 0, len(chats))
 	for _, ch := range chats {
+		cover := coverMap[ch.ID]
+		status := statusMap[ch.ID]
+		if cover == "" && status == "" {
+			status = "failed"
+		}
+		if cover == "" && status == "completed" {
+			cover = latestURLMap[ch.ID]
+		}
 		result = append(result, chatWithCover{
 			ImageChat:  ch,
-			CoverImage: coverMap[ch.ID],
+			CoverImage: cover,
+			Status:     status,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"chats": result})

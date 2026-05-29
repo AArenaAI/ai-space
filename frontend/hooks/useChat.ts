@@ -2,9 +2,15 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useI18n } from "@/lib/i18n";
+import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotifications";
 import { v4 as uuidv4 } from "uuid";
 import { getGuestId } from "@/lib/guestId";
 import { streamAppend, streamGet, streamClear, realtimeUpdate, realtimeGet, realtimeClear , RealtimeData } from "@/lib/streaming";
+import {
+  buildStructuredStreamDelta,
+  stringifyStreamDelta,
+  type ReasoningStreamState,
+} from "@/lib/chatStreamDelta";
 import {
   createActivityStatusFromMeta,
   createBusyGeneratingStatus,
@@ -56,6 +62,14 @@ function stripReasoningBlocks(content: string): string {
 
 const ASSISTANT_HISTORY_TRUNCATE_THRESHOLD = 1500;
 const ASSISTANT_HISTORY_TRUNCATE_TO = 300;
+
+function getNotificationConversationTitle(title?: string, fallback?: string) {
+  const trimmed = (title || "").trim();
+  if (trimmed) return trimmed;
+  const fallbackText = (fallback || "").trim();
+  if (fallbackText) return fallbackText;
+  return "对话任务";
+}
 
 function truncateAssistantHistory(content: string): string {
   if (!content || content.length <= ASSISTANT_HISTORY_TRUNCATE_THRESHOLD) return content;
@@ -119,6 +133,25 @@ type StreamRunResult = {
   sawDone: boolean;
   recoverable?: boolean;
 };
+
+function appendStructuredStreamDelta(
+  messageId: string,
+  reasoningDelta: string,
+  contentDelta: string,
+  state: ReasoningStreamState
+): { legacyDelta: string; hasContentDelta: boolean } {
+  const result = buildStructuredStreamDelta(reasoningDelta, contentDelta, state);
+  for (const operation of result.operations) {
+    if (operation.type === "reasoning") {
+      streamAppend(messageId, { reasoningDelta: operation.reasoningDelta, reasoning: true });
+    } else if (operation.type === "close_reasoning") {
+      streamAppend(messageId, { reasoning: false });
+    } else {
+      streamAppend(messageId, { answerDelta: operation.answerDelta, reasoning: false });
+    }
+  }
+  return { legacyDelta: result.legacyDelta, hasContentDelta: result.hasContentDelta };
+}
 
 export interface ChatModel {
   id: string;
@@ -348,6 +381,18 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         if (isFinished && !streamActive) {
           stopBackgroundPoller(localMessageId);
           stopTaskStream(localMessageId);
+          if (convId && serverMessageId) {
+            const notificationTitle = getNotificationConversationTitle(conversationTitle, selectedModel.name || selectedModel.id);
+            emitTaskFinished({
+              key: `chat:${serverMessageId}`,
+              type: "chat",
+              title: isCompleted ? "长对话任务已完成" : "长对话任务未完成",
+              description: notificationTitle,
+              href: `/chat?id=${convId}`,
+              ok: isCompleted,
+              conversationTitle: notificationTitle,
+            });
+          }
           const hasOtherTaskStream = Object.keys(taskStreamsRef.current).some((id) => id !== localMessageId);
           const hasOtherPoller = Object.keys(backgroundPollersRef.current).some((id) => id !== localMessageId);
           setIsLoading(hasOtherTaskStream || hasOtherPoller);
@@ -381,21 +426,10 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     let accumulated = initialContent || "";
     const lastThinkOpen = accumulated.lastIndexOf("<think>");
     const lastThinkClose = accumulated.lastIndexOf("</think>");
-    let inReasoningBlock = lastThinkOpen !== -1 && lastThinkOpen > lastThinkClose;
+    const reasoningState: ReasoningStreamState = { inReasoningBlock: lastThinkOpen !== -1 && lastThinkOpen > lastThinkClose };
     let buffer = "";
     let sawDone = false;
     let latestSequence = after || 0;
-
-    const stringifyDelta = (value: unknown): string => {
-      if (typeof value === "string") return value;
-      if (typeof value === "number" || typeof value === "boolean") return String(value);
-      if (Array.isArray(value)) return value.map((item) => stringifyDelta(item)).filter(Boolean).join("");
-      if (value && typeof value === "object") {
-        const obj = value as Record<string, unknown>;
-        return stringifyDelta(obj.text || obj.content || obj.summary || obj.delta || obj.value || "");
-      }
-      return "";
-    };
 
     const processEvent = (eventText: string) => {
       const lines = eventText.split("\n");
@@ -417,10 +451,10 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       }
       if (!data) return;
       if (data === "[DONE]") {
-        if (inReasoningBlock) {
+        if (reasoningState.inReasoningBlock) {
           accumulated += "</think>";
-          streamAppend(localMessageId, "</think>");
-          inReasoningBlock = false;
+          streamAppend(localMessageId, { reasoning: false });
+          reasoningState.inReasoningBlock = false;
         }
         delete activeTaskStreamsRef.current[localMessageId];
         sawDone = true;
@@ -486,31 +520,16 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
           return;
         }
         const rawDelta = parsed.choices?.[0]?.delta || {};
-        const contentDelta = stringifyDelta(rawDelta.content);
-        const reasoningDelta = stringifyDelta(rawDelta.reasoning_content || rawDelta.reasoning);
-        let delta = "";
-        if (reasoningDelta) {
-          if (!inReasoningBlock) {
-            delta += "<think>";
-            inReasoningBlock = true;
-          }
-          delta += reasoningDelta;
-        }
-        // OpenAI Responses can occasionally emit reasoning and visible text in the same delta.
-        // Handle content independently instead of `else if`, otherwise the visible answer may
-        // stay inside the open <think> block until a full page refresh reloads DB content.
-        if (contentDelta) {
-          if (inReasoningBlock) {
-            delta += "</think>";
-            inReasoningBlock = false;
-          }
+        const contentDelta = stringifyStreamDelta(rawDelta.content);
+        const reasoningDelta = stringifyStreamDelta(rawDelta.reasoning_content || rawDelta.reasoning);
+        const { legacyDelta, hasContentDelta } = appendStructuredStreamDelta(localMessageId, reasoningDelta, contentDelta, reasoningState);
+        if (hasContentDelta) {
           realtimeUpdate(localMessageId, {
             activityStatus: createGeneratingStatus(t),
           });
-          delta += contentDelta;
         }
-        if (delta) {
-          accumulated += delta;
+        if (legacyDelta) {
+          accumulated += legacyDelta;
           activeTaskStreamsRef.current[localMessageId] = {
             ...(activeTaskStreamsRef.current[localMessageId] || {}),
             convId,
@@ -519,7 +538,6 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             lastSequence: latestSequence,
             content: accumulated,
           };
-          streamAppend(localMessageId, delta);
         }
       } catch {
         accumulated += data;
@@ -869,7 +887,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
 
       let accumulated = "";
       let buffer = "";
-      let inReasoningBlock = false;
+      const reasoningState: ReasoningStreamState = { inReasoningBlock: false };
       let backgroundPollingStarted = false;
       let latestServerMessageId: number | undefined;
       let latestGroupId: number | undefined = assistantMsg.groupId;
@@ -911,10 +929,10 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         }
         if (!data) return;
         if (data === "[DONE]") {
-          if (inReasoningBlock) {
+          if (reasoningState.inReasoningBlock) {
             accumulated += "</think>";
-            streamAppend(assistantMsg.id, "</think>");
-            inReasoningBlock = false;
+            streamAppend(assistantMsg.id, { reasoning: false });
+            reasoningState.inReasoningBlock = false;
           }
           sawDone = true;
           const hasContent = (accumulated || streamGet(assistantMsg.id) || realtimeGet(assistantMsg.id)?.content || "").trim().length > 0;
@@ -963,6 +981,20 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             if (generationTaskId) {
               backgroundPollingStarted = true;
             }
+            if (latestServerMessageId && (latestUseBackground || task.is_complex_task === true)) {
+              const notificationTitle = getNotificationConversationTitle(conversationTitle, assistantMsg.model || selectedModel.name);
+              registerBackgroundTask({
+                type: "chat",
+                id: latestServerMessageId,
+                key: `chat:${latestServerMessageId}`,
+                title: "长对话生成中",
+                description: notificationTitle,
+                href: `/chat${convId ? `?id=${convId}` : ""}`,
+                conversationId: convId,
+                serverMessageId: latestServerMessageId,
+                conversationTitle: notificationTitle,
+              });
+            }
             return;
           }
           if (parsed._background_task) {
@@ -992,6 +1024,20 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             });
             notifyGroupContext();
             backgroundPollingStarted = true;
+            if (serverMessageId) {
+              const notificationTitle = getNotificationConversationTitle(conversationTitle, assistantMsg.model || selectedModel.name);
+              registerBackgroundTask({
+                type: "chat",
+                id: serverMessageId,
+                key: `chat:${serverMessageId}`,
+                title: "长对话生成中",
+                description: notificationTitle,
+                href: `/chat${convId ? `?id=${convId}` : ""}`,
+                conversationId: convId,
+                serverMessageId,
+                conversationTitle: notificationTitle,
+              });
+            }
             return;
           }
           // 处理统一错误结构 / provider 错误元数据。错误不能继续当 delta 追加，否则 429 会重复刷屏卡死。
@@ -1036,49 +1082,16 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
             return;
           }
           const rawDelta = parsed.choices?.[0]?.delta || {};
-          const stringifyDelta = (value: unknown): string => {
-            if (typeof value === "string") return value;
-            if (typeof value === "number" || typeof value === "boolean") return String(value);
-            if (Array.isArray(value)) {
-              return value
-                .map((item) => stringifyDelta(item))
-                .filter(Boolean)
-                .join("");
-            }
-            if (value && typeof value === "object") {
-              const obj = value as Record<string, unknown>;
-              return stringifyDelta(
-                obj.text || obj.content || obj.summary || obj.delta || obj.value || ""
-              );
-            }
-            return "";
-          };
-          const contentDelta = stringifyDelta(rawDelta.content);
-          const reasoningDelta = stringifyDelta(rawDelta.reasoning_content || rawDelta.reasoning);
-          let delta = "";
-          if (reasoningDelta) {
-            if (!inReasoningBlock) {
-              delta += "<think>";
-              inReasoningBlock = true;
-            }
-            delta += reasoningDelta;
-          }
-          // OpenAI Responses can occasionally emit reasoning and visible text in the same delta.
-          // Handle content independently instead of `else if`, otherwise the visible answer may
-          // stay inside the open <think> block until a full page refresh reloads DB content.
-          if (contentDelta) {
-            if (inReasoningBlock) {
-              delta += "</think>";
-              inReasoningBlock = false;
-            }
+          const contentDelta = stringifyStreamDelta(rawDelta.content);
+          const reasoningDelta = stringifyStreamDelta(rawDelta.reasoning_content || rawDelta.reasoning);
+          const { legacyDelta, hasContentDelta } = appendStructuredStreamDelta(assistantMsg.id, reasoningDelta, contentDelta, reasoningState);
+          if (hasContentDelta) {
             realtimeUpdate(assistantMsg.id, {
               activityStatus: createGeneratingStatus(t),
             });
-            delta += contentDelta;
           }
-          if (delta) {
-            accumulated += delta;
-            streamAppend(assistantMsg.id, delta);
+          if (legacyDelta) {
+            accumulated += legacyDelta;
           }
         } catch {
           // JSON 解析失败时，当作文本免底追加
@@ -1152,9 +1165,10 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         reader.releaseLock();
 
         // 如果 reasoning 块未关闭，自动关闭
-        if (inReasoningBlock) {
+        if (reasoningState.inReasoningBlock) {
           accumulated += "</think>";
-          streamAppend(assistantMsg.id, "</think>");
+          streamAppend(assistantMsg.id, { reasoning: false });
+          reasoningState.inReasoningBlock = false;
         }
 
         // 同步 streaming store 到 messages state

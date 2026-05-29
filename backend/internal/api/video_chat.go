@@ -45,50 +45,70 @@ type videoChatRequest struct {
 func (h *VideoChatHandler) ListVideoChats(c *gin.Context) {
 	userID := getUserID(c)
 	var chats []models.VideoChat
-	if err := h.db.Where(`
-		user_id = ? AND EXISTS (
-			SELECT 1 FROM video_chat_messages
-			WHERE video_chat_messages.chat_id = video_chats.id
-			AND role = 'assistant'
-			AND status IN ('succeeded', 'completed')
-			AND video_url != ''
-		)
-	`, userID).Order("updated_at DESC").Find(&chats).Error; err != nil {
+	if err := h.db.Where("user_id = ?", userID).Order("updated_at DESC").Find(&chats).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取视频会话列表失败"})
 		return
 	}
 
 	type chatCover struct {
-		ChatID   uint   `json:"chat_id"`
-		VideoURL string `json:"video_url"`
+		ChatID uint   `json:"chat_id"`
+		URL    string `gorm:"column:url" json:"url"`
+		Status string `json:"status"`
 	}
 	chatIDs := make([]uint, 0, len(chats))
 	for _, ch := range chats {
 		chatIDs = append(chatIDs, ch.ID)
 	}
-	var covers []chatCover
+	var successCovers []chatCover
+	var latestStates []chatCover
 	if len(chatIDs) > 0 {
+		// 首封面优先使用该会话里第一条真正生成成功的视频。
 		h.db.Raw(`
-			SELECT chat_id, video_url FROM video_chat_messages
+			SELECT chat_id, video_url AS url, status FROM video_chat_messages
 			WHERE chat_id IN ? AND role = 'assistant' AND status IN ('succeeded', 'completed') AND video_url != ''
 			AND id = (
 				SELECT MIN(id) FROM video_chat_messages AS sub
 				WHERE sub.chat_id = video_chat_messages.chat_id AND sub.role = 'assistant' AND sub.status IN ('succeeded', 'completed') AND sub.video_url != ''
 			)
-		`, chatIDs).Scan(&covers)
+		`, chatIDs).Scan(&successCovers)
+
+		// 没有成功内容时，返回最新 assistant 消息状态，供前端展示 pending/failed 占位卡。
+		h.db.Raw(`
+			SELECT chat_id, video_url AS url, status FROM video_chat_messages
+			WHERE chat_id IN ? AND role = 'assistant'
+			AND id = (
+				SELECT MAX(id) FROM video_chat_messages AS sub
+				WHERE sub.chat_id = video_chat_messages.chat_id AND sub.role = 'assistant'
+			)
+		`, chatIDs).Scan(&latestStates)
 	}
-	coverMap := make(map[uint]string, len(covers))
-	for _, cv := range covers {
-		coverMap[cv.ChatID] = cv.VideoURL
+	coverMap := make(map[uint]string, len(successCovers))
+	for _, cv := range successCovers {
+		coverMap[cv.ChatID] = cv.URL
+	}
+	statusMap := make(map[uint]string, len(latestStates))
+	latestURLMap := make(map[uint]string, len(latestStates))
+	for _, cv := range latestStates {
+		statusMap[cv.ChatID] = cv.Status
+		latestURLMap[cv.ChatID] = cv.URL
 	}
 
 	type chatWithCover struct {
 		models.VideoChat
 		CoverVideo string `json:"cover_video"`
+		Status     string `json:"status"`
 	}
 	result := make([]chatWithCover, 0, len(chats))
 	for _, ch := range chats {
-		result = append(result, chatWithCover{VideoChat: ch, CoverVideo: coverMap[ch.ID]})
+		cover := coverMap[ch.ID]
+		status := statusMap[ch.ID]
+		if cover == "" && status == "" {
+			status = "failed"
+		}
+		if cover == "" && (status == "succeeded" || status == "completed") {
+			cover = latestURLMap[ch.ID]
+		}
+		result = append(result, chatWithCover{VideoChat: ch, CoverVideo: cover, Status: status})
 	}
 	c.JSON(http.StatusOK, gin.H{"chats": result})
 }

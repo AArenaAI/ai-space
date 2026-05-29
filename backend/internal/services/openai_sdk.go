@@ -188,23 +188,16 @@ func (s *AIService) callOpenAIResponsesSDK(ctx context.Context, model string, me
 		instructionsLen,
 	)
 
-	var release func()
-	if isGPT55Pro(model) {
-		limiter := openAIModelLimiterFor(model, s.cfg.OpenAIGPT55ProMaxConcurrency)
-		release, err = limiter.acquire(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if pe := limiter.reserveTPM(model, estimateOpenAIRequestedTokens(messages, maxOutputTokensFromBody(reqBody)), s.cfg.OpenAIGPT55ProTPMSoftLimit); pe != nil {
-			release()
-			return nil, pe
-		}
-		defer func() {
-			if !stream && release != nil {
-				release()
-			}
-		}()
+	maxOutputTokens := maxOutputTokensFromBody(reqBody)
+	release, err := s.applyProviderBudget(ctx, "openai", model, messages, maxOutputTokens)
+	if err != nil {
+		return nil, err
 	}
+	defer func() {
+		if !stream && release != nil {
+			release()
+		}
+	}()
 
 	opts := openAIRequestOptionsFromBody(reqBody)
 	if stream {

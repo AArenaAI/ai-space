@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotifications";
 
 export interface VideoGeneration {
   id: number;
@@ -116,6 +117,13 @@ export function useVideo(): UseVideoReturn {
         };
         setCurrentVideo(newVideo);
         setVideos((prev) => [newVideo, ...prev]);
+        registerBackgroundTask({
+          type: "video",
+          id: newVideo.id,
+          title: "视频生成中",
+          description: payload.prompt,
+          href: "/video",
+        });
         // auto start polling
         startPolling(newVideo.id);
         return newVideo;
@@ -136,6 +144,16 @@ export function useVideo(): UseVideoReturn {
       const data: VideoGeneration = await res.json();
       setVideos((prev) => prev.map((v) => (v.id === id ? data : v)));
       setCurrentVideo((prev) => (prev?.id === id ? data : prev));
+      if (data.status === "succeeded" || data.status === "failed") {
+        emitTaskFinished({
+          key: `video:${data.id}`,
+          type: "video",
+          title: data.status === "succeeded" ? "视频任务已完成" : "视频任务未完成",
+          description: data.status === "succeeded" ? data.prompt : data.error_message || data.prompt,
+          href: "/video",
+          ok: data.status === "succeeded",
+        });
+      }
       return data;
     } catch {
       return null;

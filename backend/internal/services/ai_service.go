@@ -264,23 +264,16 @@ func (s *AIService) callOpenAIResponses(ctx context.Context, model string, messa
 		len(inputItems),
 		len(systemInstruction),
 	)
-	var release func()
-	if isGPT55Pro(model) {
-		limiter := openAIModelLimiterFor(model, s.cfg.OpenAIGPT55ProMaxConcurrency)
-		release, err = limiter.acquire(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if pe := limiter.reserveTPM(model, estimateOpenAIRequestedTokens(messages, maxOutputTokensFromBody(reqBody)), s.cfg.OpenAIGPT55ProTPMSoftLimit); pe != nil {
-			release()
-			return nil, pe
-		}
-		defer func() {
-			if !stream && release != nil {
-				release()
-			}
-		}()
+	maxOutputTokens = maxOutputTokensFromBody(reqBody)
+	release, err := s.applyProviderBudget(ctx, "openai", model, messages, maxOutputTokens)
+	if err != nil {
+		return nil, err
 	}
+	defer func() {
+		if !stream && release != nil {
+			release()
+		}
+	}()
 
 	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/v1/responses", bytes.NewBuffer(jsonBody))
 	if err != nil {

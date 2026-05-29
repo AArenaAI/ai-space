@@ -6,7 +6,9 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -p 3000",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:streaming": "node scripts/regression/streaming-regression.cjs",
+    "test:stream-delta": "node scripts/regression/chat-stream-delta-regression.cjs"
   },
   "dependencies": {
     "@antv/g6": "^5.1.1",

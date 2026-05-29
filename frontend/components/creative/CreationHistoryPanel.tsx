@@ -116,6 +116,29 @@ function CreationHistorySkeleton() {
   );
 }
 
+function HistoryPlaceholderCover({ source, status }: { source?: "image" | "video"; status?: string }) {
+  const isGenerating = status === "pending" || status === "running";
+  const Icon = source === "video" ? VideoIcon : ImageIcon;
+  return (
+    <div className="relative flex size-24 items-center justify-center overflow-hidden rounded-lg border border-white/25 bg-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.24),0_14px_34px_rgba(0,0,0,0.08)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_18%,rgba(255,255,255,0.68),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.24),rgba(120,120,120,0.10))] dark:bg-[radial-gradient(circle_at_30%_18%,rgba(255,255,255,0.14),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.08),rgba(255,255,255,0.025))]" />
+      <div className="absolute inset-0 bg-surface-card/30 backdrop-blur-md" />
+      <div className="absolute inset-0 opacity-[0.18] [background-image:linear-gradient(45deg,rgba(255,255,255,0.75)_25%,transparent_25%,transparent_50%,rgba(255,255,255,0.75)_50%,rgba(255,255,255,0.75)_75%,transparent_75%,transparent)] [background-size:18px_18px] dark:opacity-[0.08]" />
+      <div className="absolute inset-x-2 top-2 h-px bg-white/55 dark:bg-white/12" />
+      <div className="relative flex flex-col items-center gap-2 text-center">
+        <div className="flex size-10 items-center justify-center rounded-2xl border border-white/35 bg-white/35 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/10">
+          <img src="/brand-light-logo.png" alt="AI Space" className="h-6 w-6 opacity-70 grayscale dark:hidden" />
+          <img src="/brand-dark-logo.png" alt="AI Space" className="hidden h-6 w-6 opacity-70 grayscale dark:block" />
+        </div>
+        <div className="flex items-center gap-1 rounded-full border border-white/30 bg-white/25 px-2 py-0.5 text-[10px] text-text-tertiary shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/10">
+          <Icon className="h-3 w-3 opacity-60" />
+          <span>{isGenerating ? "进行中" : "未完成"}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CreationHistoryPanel({
   isOpen,
   onClose,
@@ -213,12 +236,7 @@ export default function CreationHistoryPanel({
   const renderCover = (item: CreationHistoryItem) => {
     const isVideo = item.source === "video";
     if (!item.cover_image) {
-      const EmptyIcon = isVideo ? VideoIcon : ImageIcon;
-      return (
-        <div className="flex size-24 items-center justify-center rounded-lg border border-surface-border bg-surface text-text-tertiary">
-          <EmptyIcon className="h-6 w-6" />
-        </div>
-      );
+      return <HistoryPlaceholderCover source={item.source} status={item.status} />;
     }
 
     if (isVideo) {

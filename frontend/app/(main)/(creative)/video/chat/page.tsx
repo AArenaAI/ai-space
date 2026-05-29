@@ -29,6 +29,7 @@ import NoticeDialog from "@/components/ui/NoticeDialog";
 import CreationHistoryPanel from "@/components/creative/CreationHistoryPanel";
 import DeleteSuccessNotice from "@/components/ui/DeleteSuccessNotice";
 import { useI18n } from "@/lib/i18n";
+import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotifications";
 
 const ASPECT_RATIOS = [
   { value: "16:9", label: "16:9", w: 16, h: 9 },
@@ -315,11 +316,23 @@ function VideoChatPageInner() {
 
   useEffect(() => {
     if (!currentChatId) return;
-    const hasPending = displayMessages.some((msg) => msg.role === "assistant" && !msg.videoUrl && ["pending", "running"].includes(msg.status || ""));
-    if (!hasPending) return;
-    const timer = window.setInterval(() => {
-      fetchMessages(currentChatId);
-    }, 8000);
+    const pendingMessages = displayMessages.filter((msg) => msg.role === "assistant" && !msg.videoUrl && ["pending", "running"].includes(msg.status || ""));
+    if (pendingMessages.length === 0) return;
+    const timer = window.setInterval(async () => {
+      const msgs = await fetchMessages(currentChatId);
+      for (const msg of msgs) {
+        if (msg.role !== "assistant") continue;
+        if (!["succeeded", "completed", "failed"].includes(msg.status || "")) continue;
+        emitTaskFinished({
+          key: `video-chat:${msg.id}`,
+          type: "video",
+          title: ["succeeded", "completed"].includes(msg.status || "") ? "视频任务已完成" : "视频任务未完成",
+          description: msg.content,
+          href: `/video/chat?chatId=${currentChatId}`,
+          ok: ["succeeded", "completed"].includes(msg.status || "") && Boolean(msg.video_url),
+        });
+      }
+    }, 2000);
     return () => window.clearInterval(timer);
   }, [currentChatId, displayMessages, fetchMessages]);
 
@@ -368,14 +381,30 @@ function VideoChatPageInner() {
       };
 
       let chatId = currentChatId;
+      let messageId: number | undefined;
       if (chatId) {
-        await sendMessage(chatId, payload);
+        const sent = await sendMessage(chatId, payload);
+        messageId = sent.message_id;
       } else {
         const created = await createChat(payload);
         chatId = created.chat_id || created.chat?.id;
+        messageId = created.message_id;
         if (!chatId) throw new Error(t("video.createChatFailed"));
         setCurrentChatId(chatId);
         router.replace(`/video/chat?chatId=${chatId}`);
+      }
+
+      if (chatId && messageId) {
+        registerBackgroundTask({
+          key: `video-chat:${messageId}`,
+          type: "video",
+          id: messageId,
+          title: "视频生成中",
+          description: cleanPrompt,
+          href: `/video/chat?chatId=${chatId}`,
+          conversationId: chatId,
+          serverMessageId: messageId,
+        });
       }
 
       setPrompt("");
@@ -953,13 +982,14 @@ function VideoChatPageInner() {
         isOpen={showHistory}
         onClose={() => setShowHistory(false)}
         title={t("video.historyTitle")}
-        items={chats.map((chat) => ({
-          id: chat.id,
-          title: chat.title,
-          active: currentChatId === chat.id,
-          updated_at: chat.updated_at,
-          cover_image: chat.cover_video,
+        items={chats.map((c) => ({
+          id: c.id,
+          title: c.title,
+          active: currentChatId === c.id,
+          updated_at: c.updated_at,
           source: "video" as const,
+          cover_image: c.cover_video,
+          status: c.status,
         }))}
         onSelect={handleSelectVideo}
         onNew={handleNewChat}

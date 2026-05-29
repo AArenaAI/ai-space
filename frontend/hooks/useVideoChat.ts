@@ -7,6 +7,7 @@ export interface VideoChat {
   updated_at: string;
   user_id: number;
   cover_video?: string;
+  status?: string;
 }
 
 export interface VideoChatMessage {
