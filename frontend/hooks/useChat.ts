@@ -24,6 +24,10 @@ import {
   shouldStartSingleSend,
 } from "@/lib/chatSingleSendCoordinator";
 import {
+  cancelGenerationTask,
+  runStopGeneration,
+} from "@/lib/chatStopGenerationCoordinator";
+import {
   runChatStreamLifecycle,
 } from "@/lib/chatStreamLifecycle";
 import {
@@ -1159,30 +1163,33 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       headers["X-Guest-ID"] = getGuestId();
     }
 
-    const runningTasks = messages
-      .filter((m) => m.role === "assistant" && !m.completedAt && m.generationTaskId)
-      .map((m) => m.generationTaskId as number);
-
-    Array.from(new Set(runningTasks)).forEach((taskId) => {
-      fetch(`${API_BASE_URL}/api/tasks/${taskId}/cancel`, {
-        method: "POST",
-        headers,
-      }).catch(() => undefined);
+    runStopGeneration({
+      messages,
+      callbacks: {
+        cancelTask: (taskId) => {
+          cancelGenerationTask({
+            apiBaseUrl: API_BASE_URL,
+            taskId,
+            headers,
+          });
+        },
+        abortTaskStreams: () => {
+          Object.values(taskStreamsRef.current).forEach((controller) => controller.abort());
+          taskStreamsRef.current = {};
+        },
+        getMainAbortController: () => abortControllerRef.current,
+        clearMainAbortController: () => {
+          abortControllerRef.current = null;
+        },
+        getCompareAbortControllers: () => compareAbortControllersRef.current,
+        clearCompareAbortControllers: () => {
+          compareAbortControllersRef.current = [];
+        },
+        setAbortReason: (reason) => {
+          abortReasonRef.current = reason;
+        },
+      },
     });
-
-    Object.values(taskStreamsRef.current).forEach((controller) => controller.abort());
-    taskStreamsRef.current = {};
-
-    if (abortControllerRef.current) {
-      abortReasonRef.current = "user";
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    if (compareAbortControllersRef.current.length > 0) {
-      abortReasonRef.current = "user";
-      compareAbortControllersRef.current.forEach((controller) => controller.abort());
-      compareAbortControllersRef.current = [];
-    }
   }, [messages]);
 
   const clearMessages = useCallback(() => {
