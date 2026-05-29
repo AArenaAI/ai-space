@@ -16,6 +16,10 @@ import {
   buildTextAppendIntent,
 } from "@/lib/chatStreamActionHandler";
 import {
+  buildChatBackgroundTaskRegistration,
+  getNotificationConversationTitle,
+} from "@/lib/chatBackgroundTaskRegistration";
+import {
   runChatStreamLifecycle,
 } from "@/lib/chatStreamLifecycle";
 import {
@@ -126,14 +130,6 @@ function normalizeMessageFiles(value: any): Message["files"] {
   } catch {
     return undefined;
   }
-}
-
-function getNotificationConversationTitle(title?: string, fallback?: string) {
-  const trimmed = (title || "").trim();
-  if (trimmed) return trimmed;
-  const fallbackText = (fallback || "").trim();
-  if (fallbackText) return fallbackText;
-  return "对话任务";
 }
 
 export interface Message {
@@ -964,18 +960,12 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
                 backgroundPollingStarted = true;
               }
               if (taskDecision.shouldRegisterBackgroundTask && latestServerMessageId) {
-                const notificationTitle = getNotificationConversationTitle(conversationTitle, assistantMsg.model || selectedModel.name);
-                registerBackgroundTask({
-                  type: "chat",
-                  id: latestServerMessageId,
-                  key: `chat:${latestServerMessageId}`,
-                  title: "长对话生成中",
-                  description: notificationTitle,
-                  href: `/chat${convId ? `?id=${convId}` : ""}`,
-                  conversationId: convId,
+                registerBackgroundTask(buildChatBackgroundTaskRegistration({
                   serverMessageId: latestServerMessageId,
-                  conversationTitle: notificationTitle,
-                });
+                  conversationId: convId,
+                  conversationTitle,
+                  modelName: assistantMsg.model || selectedModel.name,
+                }));
               }
               return;
             }
@@ -996,18 +986,12 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
               notifyGroupContext();
               backgroundPollingStarted = true;
               if (taskDecision.shouldRegisterBackgroundTask && latestServerMessageId) {
-                const notificationTitle = getNotificationConversationTitle(conversationTitle, assistantMsg.model || selectedModel.name);
-                registerBackgroundTask({
-                  type: "chat",
-                  id: latestServerMessageId,
-                  key: `chat:${latestServerMessageId}`,
-                  title: "长对话生成中",
-                  description: notificationTitle,
-                  href: `/chat${convId ? `?id=${convId}` : ""}`,
-                  conversationId: convId,
+                registerBackgroundTask(buildChatBackgroundTaskRegistration({
                   serverMessageId: latestServerMessageId,
-                  conversationTitle: notificationTitle,
-                });
+                  conversationId: convId,
+                  conversationTitle,
+                  modelName: assistantMsg.model || selectedModel.name,
+                }));
               }
               return;
             }
