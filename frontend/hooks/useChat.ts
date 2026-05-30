@@ -1,14 +1,18 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
 import { useChatModelSelection } from "@/hooks/useChatModelSelection";
 import { useChatLocalActions } from "@/hooks/useChatLocalActions";
 import { useChatBackgroundPollingRuntime } from "@/hooks/useChatBackgroundPollingRuntime";
-import { useChatTaskStreamRuntime } from "@/hooks/useChatTaskStreamRuntime";
+import {
+  useChatTaskStreamRuntime,
+  useStopTaskStreamAction,
+} from "@/hooks/useChatTaskStreamRuntime";
 import { useChatMainStreamRuntime } from "@/hooks/useChatMainStreamRuntime";
 import { useChatSendRuntime } from "@/hooks/useChatSendRuntime";
 import { useChatConversationRestoreRuntime } from "@/hooks/useChatConversationRestoreRuntime";
 import { useChatGenerationControlsRuntime } from "@/hooks/useChatGenerationControlsRuntime";
+import { useChatRuntimeCleanup } from "@/hooks/useChatRuntimeCleanup";
 import {
   useChatConversationLifecycle,
   useLoadMoreMessagesAction,
@@ -131,14 +135,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   const taskStreamsRef = useRef<Record<string, AbortController>>({});
   const abortReasonRef = useRef<"user" | "navigation" | null>(null);
   const modelsKey = models.map((m) => m.id).join("|");
-
-  const stopTaskStream = useCallback((localMessageId: string) => {
-    const controller = taskStreamsRef.current[localMessageId];
-    if (controller) {
-      controller.abort();
-      delete taskStreamsRef.current[localMessageId];
-    }
-  }, []);
+  const stopTaskStream = useStopTaskStreamAction(taskStreamsRef);
 
   const {
     backgroundPollersRef,
@@ -181,12 +178,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     translate: t,
   });
 
-  useEffect(() => {
-    return () => {
-      stopAllBackgroundPollers();
-      stopAllTaskStreams();
-    };
-  }, [stopAllBackgroundPollers, stopAllTaskStreams]);
+  useChatRuntimeCleanup({ stopAllBackgroundPollers, stopAllTaskStreams });
 
   useChatConversationRestoreRuntime({
     apiBaseUrl: API_BASE_URL,

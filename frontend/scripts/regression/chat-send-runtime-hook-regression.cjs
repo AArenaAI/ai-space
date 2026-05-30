@@ -8,17 +8,27 @@ const ts = require("typescript");
 const repoRoot = path.resolve(__dirname, "../..");
 const sourceFile = path.join(repoRoot, "hooks/useChatSendRuntime.ts");
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "chat-send-runtime-"));
-const tmpFile = path.join(tmpRoot, "useChatSendRuntime.cjs");
-const source = fs.readFileSync(sourceFile, "utf8");
-
-const transformed = ts.transpileModule(source, {
-  compilerOptions: {
-    module: ts.ModuleKind.CommonJS,
-    target: ts.ScriptTarget.ES2020,
-    esModuleInterop: true,
-    jsx: ts.JsxEmit.ReactJSX,
-  },
-}).outputText;
+const compiledFiles = new Map();
+function compileHook(filename) {
+  const sourcePath = path.join(repoRoot, "hooks", filename);
+  const source = fs.readFileSync(sourcePath, "utf8");
+  const output = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+      esModuleInterop: true,
+      jsx: ts.JsxEmit.ReactJSX,
+    },
+  }).outputText;
+  const tmpPath = path.join(tmpRoot, filename.replace(/\.ts$/, ".cjs"));
+  fs.writeFileSync(tmpPath, output);
+  compiledFiles.set(`@/hooks/${filename.replace(/\.ts$/, "")}`, tmpPath);
+  return tmpPath;
+}
+compileHook("useChatConversationCreateRuntime.ts");
+compileHook("useChatSingleSendRuntime.ts");
+compileHook("useChatCompareSendRuntime.ts");
+const tmpFile = compileHook("useChatSendRuntime.ts");
 
 let singleRequestImpl = async () => {};
 let compareRunImpl = async () => {};
@@ -120,13 +130,13 @@ function loadModule(file) {
     }
     if (specifier === "@/lib/chatCompareCoordinator") return { selectCompareModelIds: (ids, models) => ids.filter((id) => models.some((m) => m.id === id)).slice(0, 4), shouldStartCompare: (ids) => ids.length >= 2 };
     if (specifier === "@/lib/chatActivityStatus") return { createBusyGeneratingStatus: () => ({ kind: "generating", label: "busy" }) };
+    if (compiledFiles.has(specifier)) return loadModule(compiledFiles.get(specifier));
     if (specifier.startsWith("@/lib/")) return {};
     return require(specifier);
   };
   new Function("require", "module", "exports", code)(localRequire, module, module.exports);
   return module.exports;
 }
-fs.writeFileSync(tmpFile, transformed);
 const { useChatSendRuntime } = loadModule(tmpFile);
 
 function stateHarness(initial = []) {

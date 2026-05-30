@@ -66,6 +66,27 @@ type StopAllTaskStreamsDeps = {
   activeTaskStreamsRef: MutableRefObject<Record<string, TaskStreamActiveState>>;
 };
 
+type StopTaskStreamDeps = {
+  taskStreamsRef: MutableRefObject<Record<string, AbortController>>;
+};
+
+export function createStopTaskStreamAction({ taskStreamsRef }: StopTaskStreamDeps) {
+  return (localMessageId: string) => {
+    const controller = taskStreamsRef.current[localMessageId];
+    if (controller) {
+      controller.abort();
+      delete taskStreamsRef.current[localMessageId];
+    }
+  };
+}
+
+export function useStopTaskStreamAction(taskStreamsRef: MutableRefObject<Record<string, AbortController>>) {
+  return useCallback(
+    createStopTaskStreamAction({ taskStreamsRef }),
+    [taskStreamsRef]
+  );
+}
+
 export function createStopAllTaskStreamsAction({
   taskStreamsRef,
   activeTaskStreamsRef,
@@ -218,6 +239,11 @@ export function useChatTaskStreamRuntime({
     [apiBaseUrl, taskStreamsRef, setMessages, setIsLoading, startBackgroundPolling, translate]
   );
 
+  const stopTaskStream = useCallback(
+    createStopTaskStreamAction({ taskStreamsRef }),
+    [taskStreamsRef]
+  );
+
   const stopAllTaskStreams = useCallback(
     createStopAllTaskStreamsAction({ taskStreamsRef, activeTaskStreamsRef }),
     [taskStreamsRef]
@@ -226,6 +252,7 @@ export function useChatTaskStreamRuntime({
   return {
     activeTaskStreamsRef,
     startTaskEventStream,
+    stopTaskStream,
     stopAllTaskStreams,
   };
 }
