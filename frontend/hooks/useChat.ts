@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useChatModelSelection } from "@/hooks/useChatModelSelection";
 import { useChatLocalActions } from "@/hooks/useChatLocalActions";
+import { useChatConversationLifecycle } from "@/hooks/useChatConversationLifecycle";
 import { useI18n } from "@/lib/i18n";
 import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotifications";
 import { v4 as uuidv4 } from "uuid";
@@ -215,11 +216,24 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const { selectedModel, setSelectedModel, initialized } = useChatModelSelection(models);
-  const [conversationTitle, setConversationTitle] = useState("");
-  const [currentConversation, setCurrentConversation] = useState<number | undefined>(conversationId);
+  const {
+    conversationTitle,
+    setConversationTitle,
+    currentConversation,
+    setCurrentConversation,
+    totalMessages,
+    setTotalMessages,
+    loadedPersistedMessages,
+    setLoadedPersistedMessages,
+    isLoadingMore,
+    setIsLoadingMore,
+    hasMoreMessages,
+    conversationLoadSeqRef,
+    shouldResetRef,
+    justCreatedRef,
+  } = useChatConversationLifecycle(conversationId);
   const abortControllerRef = useRef<AbortController | null>(null);
   const compareAbortControllersRef = useRef<AbortController[]>([]);
-  const conversationLoadSeqRef = useRef(0);
   const lastReasoningRef = useRef<{ enabled: boolean; effort?: string }>({ enabled: false, effort: "high" });
   const lastSearchRef = useRef<boolean>(false);
   const [isCompare, setIsCompare] = useState(false);
@@ -227,21 +241,11 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   // 从对话历史或 prop 恢复的有效 skillKey（优先级：历史 > prop）
   const [effectiveSkillKey, setEffectiveSkillKey] = useState<string | undefined>(skillKey);
   const [groupViews, setGroupViews] = useState<Map<number, number>>(new Map());
-  const [totalMessages, setTotalMessages] = useState(0);
-  const [loadedPersistedMessages, setLoadedPersistedMessages] = useState(0);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const hasMoreMessages = totalMessages > loadedPersistedMessages;
   const backgroundPollersRef = useRef<Record<string, number>>({});
   const taskStreamsRef = useRef<Record<string, AbortController>>({});
   const abortReasonRef = useRef<"user" | "navigation" | null>(null);
   const activeTaskStreamsRef = useRef<Record<string, { convId?: number; serverMessageId?: number; generationTaskId?: number; lastSequence?: number; content?: string }>>({});
   const modelsKey = models.map((m) => m.id).join("|");
-  // 防止 createConversation 成功后 useEffect 因 models 等依赖变化而清空消息/重置对话
-  const shouldResetRef = useRef(true);
-  // 标记刚创建的新对话 ID，避免 useEffect 立即加载历史覆盖本地正在生成的消息
-  const justCreatedRef = useRef<number | undefined>(undefined);
-
-
   const stopBackgroundPoller = useCallback((localMessageId: string) => {
     const timer = backgroundPollersRef.current[localMessageId];
     if (timer) {
