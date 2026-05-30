@@ -61,7 +61,8 @@
     "test:chat-regression": "npm run test:chat-core && npm run test:chat-stream && npm run test:chat-runtime",
     "test:browser-smoke": "node scripts/regression/browser-smoke.cjs",
     "test:chat-performance": "node scripts/regression/chat-performance-benchmark.cjs",
-    "test:chat-streaming-performance": "node scripts/regression/chat-streaming-performance.cjs"
+    "test:chat-streaming-performance": "node scripts/regression/chat-streaming-performance.cjs",
+    "test:chat-render-performance": "node scripts/regression/chat-render-performance.cjs"
   },
   "dependencies": {
     "@antv/g6": "^5.1.1",
