@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback, useMemo, memo, type Ref, type
 import { User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck, ChevronDown, Lightbulb, Play, ChevronDown as ChevronDownIcon, FileText, Star, Columns2, Loader2, Download, ImageIcon, Sparkles } from "lucide-react";
 import { toPng } from "html-to-image";
 import { cn } from "@/lib/utils";
-import { Message, ChatModel } from "@/hooks/useChat";
+import { Message, ChatModel } from "@/lib/chatTypes";
 import { useFavorites } from "@/hooks/useFavorites";
 import { toast } from "sonner";
 import dynamic from "next/dynamic";

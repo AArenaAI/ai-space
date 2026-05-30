@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComponentType } from "react";
-import { Message } from "@/hooks/useChat";
+import { Message } from "@/lib/chatTypes";
 import { cn } from "@/lib/utils";
 import { isMessageGenerating, parseThinkContent, sanitizeContent } from "@/lib/chatContent";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";

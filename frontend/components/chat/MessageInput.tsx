@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Send, Brain, Square, Search, Paperclip, X, FileText, Wrench, SlidersHorizontal, MessageSquarePlus, Check, Zap, Crown, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { ChatModel } from "@/hooks/useChat";
+import { ChatModel } from "@/lib/chatTypes";
 import { Template } from "@/hooks/useTemplates";
 import { getGuestId } from "@/lib/guestId";
 import { toast } from "sonner";

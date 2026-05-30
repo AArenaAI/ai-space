@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { useChat, ChatModel } from "@/hooks/useChat";
+import { useChat } from "@/hooks/useChat";
+import type { ChatModel } from "@/lib/chatTypes";
 import { useTemplates } from "@/hooks/useTemplates";
 import MessageList from "./MessageList";
 import MessageInput, { ReasoningConfig } from "./MessageInput";

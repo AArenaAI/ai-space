@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
+import { useChatModelSelection } from "@/hooks/useChatModelSelection";
+import { useChatLocalActions } from "@/hooks/useChatLocalActions";
 import { useI18n } from "@/lib/i18n";
 import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotifications";
 import { v4 as uuidv4 } from "uuid";
@@ -79,11 +81,7 @@ import {
 } from "@/lib/chatRunUiCoordinator";
 import {
   appendCreateConversationFailureMessage,
-  buildClearMessagesState,
   buildCreateConversationFailureMessage,
-  buildRegenerateRequest,
-  deleteMessageById,
-  switchGroupView,
 } from "@/lib/chatLocalActionCoordinator";
 import {
   runChatStreamLifecycle,
@@ -131,67 +129,19 @@ import {
   createFinalizingStatus,
   createGeneratingStatus,
 } from "@/lib/chatActivityStatus";
+import type {
+  ChatModel,
+  Conversation,
+  Message,
+  SearchSource,
+} from "@/lib/chatTypes";
 
 const API_BASE_URL = ""; // 使用相对路径，nginx 同域名代理 /api -> 后端
 
-export interface SearchSource {
-  title: string;
-  url: string;
-  description: string;
-}
-
-export interface Message {
-  id: string;
-  role: "user" | "assistant" | "system";
-  content: string;
-  model?: string;
-  createdAt: number;
-  completedAt?: number;
-  stopped?: boolean;
-  search?: boolean;
-  searchSources?: SearchSource[];
-  searchSourcesCount?: number;
-  searchStatus?: "searching" | "completed";
-  activityStatus?: { kind: "generating" | "reasoning" | "web_search" | "file_search" | "tool_call"; status: "running" | "searching" | "completed"; label: string };
-  files?: { public_id: string; type: string; filename: string }[];
-  errorCode?: string;
-  retryable?: boolean;
-  requestId?: string;
-  serverMessageId?: number;
-  backgroundTaskId?: string;
-  generationTaskId?: number;
-  useBackground?: boolean;
-  isComplexTask?: boolean;
-  lastSequence?: number;
-  groupId?: number;
-  groupIndex?: number;
-  groupModels?: string[];
-  userMessageId?: number;
-}
+export type { ChatModel, Conversation, Message, SearchSource } from "@/lib/chatTypes";
 
 type CompareGroupContext = ChatStreamGroupContext;
 type StreamRunResult = ChatStreamRunResult;
-
-export interface ChatModel {
-  id: string;
-  name: string;
-  provider: string;
-  description: string;
-  color: string;
-  capabilities?: string[];
-  supported_inputs?: string[];
-  supported_file_extensions?: string[];
-  supported_file_mime_types?: string[];
-  file_accept?: string;
-}
-
-export interface Conversation {
-  id: number;
-  title: string;
-  model: string;
-  created_at: string;
-  updated_at: string;
-}
 
 export const MODELS: ChatModel[] = [
   {
@@ -259,33 +209,12 @@ export const MODELS: ChatModel[] = [
   },
 ];
 
-const STORAGE_KEY = "selected-model";
-
-function loadSavedModel(models: ChatModel[]): ChatModel {
-  if (typeof window === "undefined") return models[0];
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const model = models.find((m) => m.id === saved);
-      if (model) return model;
-    }
-  } catch {}
-  return models[0];
-}
-
-function persistModel(model: ChatModel) {
-  try {
-    localStorage.setItem(STORAGE_KEY, model.id);
-  } catch {}
-}
-
 export function useChat(conversationId: number | undefined, models: ChatModel[], skillKey?: string) {
-  const defaultModel = models.length > 0 ? models[0] : ({} as ChatModel);
   const { t } = useI18n();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-  const [selectedModel, setSelectedModelState] = useState<ChatModel>(defaultModel);
+  const { selectedModel, setSelectedModel, initialized } = useChatModelSelection(models);
   const [conversationTitle, setConversationTitle] = useState("");
   const [currentConversation, setCurrentConversation] = useState<number | undefined>(conversationId);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -293,7 +222,6 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   const conversationLoadSeqRef = useRef(0);
   const lastReasoningRef = useRef<{ enabled: boolean; effort?: string }>({ enabled: false, effort: "high" });
   const lastSearchRef = useRef<boolean>(false);
-  const [initialized, setInitialized] = useState(false);
   const [isCompare, setIsCompare] = useState(false);
   const [compareModels, setCompareModels] = useState<string[]>([]);
   // 从对话历史或 prop 恢复的有效 skillKey（优先级：历史 > prop）
@@ -313,23 +241,6 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   // 标记刚创建的新对话 ID，避免 useEffect 立即加载历史覆盖本地正在生成的消息
   const justCreatedRef = useRef<number | undefined>(undefined);
 
-  // 在客户端初始化后，从 localStorage 恢复上次选择的模型
-  useEffect(() => {
-    const saved = loadSavedModel(models);
-    setSelectedModelState(saved);
-    setInitialized(true);
-  }, []);
-
-  const setSelectedModel = useCallback((model: ChatModel) => {
-    setSelectedModelState(model);
-    persistModel(model);
-    try {
-      const RECENT_KEY = "recent-models";
-      const recent = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]").filter((id: string) => id !== model.id);
-      recent.unshift(model.id);
-      localStorage.setItem(RECENT_KEY, JSON.stringify(recent.slice(0, 3)));
-    } catch {}
-  }, []);
 
   const stopBackgroundPoller = useCallback((localMessageId: string) => {
     const timer = backgroundPollersRef.current[localMessageId];
@@ -1129,27 +1040,20 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     });
   }, [messages]);
 
-  const clearMessages = useCallback(() => {
-    const clearState = buildClearMessagesState();
-    setMessages(clearState.messages as Message[]);
-    setCurrentConversation(clearState.currentConversation);
-  }, []);
-
-  const deleteMessage = useCallback((messageId: string) => {
-    setMessages((prev) => deleteMessageById(prev, messageId));
-  }, []);
-
-  const regenerateMessage = useCallback(async () => {
-    // 重新生成最后一条用户消息的回复
-    const request = buildRegenerateRequest(messages);
-    if (request) {
-      await sendMessage(request.content, lastReasoningRef.current, request.shouldRegenerate, lastSearchRef.current);
-    }
-  }, [messages, sendMessage]);
-
-  const switchGroupModel = useCallback((groupId: number, activeIndex: number) => {
-    setGroupViews((prev) => switchGroupView(prev, groupId, activeIndex));
-  }, []);
+  const {
+    clearMessages,
+    deleteMessage,
+    regenerateMessage,
+    switchGroupModel,
+  } = useChatLocalActions({
+    messages,
+    setMessages,
+    setCurrentConversation,
+    setGroupViews,
+    getReasoning: () => lastReasoningRef.current,
+    getSearch: () => lastSearchRef.current,
+    sendMessage,
+  });
 
   // Fork 对比：从指定消息处 Fork 出新模型对比
   const forkChat = useCallback(

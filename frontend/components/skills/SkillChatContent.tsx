@@ -7,7 +7,7 @@ import AppSidebar from "@/components/sidebar/AppSidebar";
 import MobileNav from "@/components/mobile/MobileNav";
 import ChatInterface from "@/components/chat/ChatInterface";
 import { useModels } from "@/hooks/useModels";
-import { ChatModel } from "@/hooks/useChat";
+import { ChatModel } from "@/lib/chatTypes";
 import {
   Sparkles, ArrowLeft, Zap, Search, Shield, FileCode, BookOpen,
   Wrench, PenTool, MessageSquare, Globe, Briefcase, Code2,

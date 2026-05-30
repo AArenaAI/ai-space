@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { ChatModel } from "@/hooks/useChat";
+import { ChatModel } from "@/lib/chatTypes";
 
 interface ModelSelectorProps {
   models: ChatModel[];

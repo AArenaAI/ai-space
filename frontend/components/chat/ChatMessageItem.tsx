@@ -6,7 +6,7 @@ import {
   Play, FileText, Star, Columns2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Message, ChatModel } from "@/hooks/useChat";
+import { Message, ChatModel } from "@/lib/chatTypes";
 import { InferredGroup } from "@/lib/groups";
 import { AssistantMessageMeta } from "./AssistantMessageMeta";
 import { ThinkBlock } from "./ThinkBlock";

@@ -2,7 +2,7 @@
 
 import { FileText, Lightbulb, Search, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { ChatModel, Message } from "@/hooks/useChat";
+import type { ChatModel, Message } from "@/lib/chatTypes";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 import { getActivityLabel } from "@/lib/chatActivityStatus";
 import { useI18n } from "@/lib/i18n";

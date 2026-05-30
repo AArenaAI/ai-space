@@ -1,4 +1,4 @@
-import { Message } from "@/hooks/useChat";
+import { Message } from "@/lib/chatTypes";
 
 export interface InferredGroup {
   id: number;
