@@ -3,7 +3,10 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useChatModelSelection } from "@/hooks/useChatModelSelection";
 import { useChatLocalActions } from "@/hooks/useChatLocalActions";
-import { useChatConversationLifecycle } from "@/hooks/useChatConversationLifecycle";
+import {
+  useChatConversationLifecycle,
+  useLoadMoreMessagesAction,
+} from "@/hooks/useChatConversationLifecycle";
 import { useI18n } from "@/lib/i18n";
 import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotifications";
 import { v4 as uuidv4 } from "uuid";
@@ -37,15 +40,6 @@ import {
   resolveForkedModels,
   runForkChatRequest,
 } from "@/lib/chatForkCoordinator";
-import {
-  buildLoadMorePage,
-  fetchLoadMoreMessages,
-  mapLoadMoreMessages,
-  prependUniqueOlderMessages,
-  resolveLoadedPersistedMessages,
-  resolveTotalMessages,
-  shouldStartLoadMore,
-} from "@/lib/chatLoadMoreCoordinator";
 import {
   buildConversationRestoreState,
   buildConversationStatusDecision,
@@ -1103,37 +1097,20 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   );
 
   // 向上滚动加载更多历史消息
-  const loadMoreMessages = useCallback(async () => {
-    const token = localStorage.getItem("token");
-    if (!shouldStartLoadMore({ currentConversation, isLoadingMore, hasMoreMessages, token })) return;
-    const conversationId = currentConversation as number;
-    const page = buildLoadMorePage({ totalMessages, loadedPersistedMessages });
-    setIsLoadingMore(true);
-    try {
-      const data = await fetchLoadMoreMessages({
-        apiBaseUrl: API_BASE_URL,
-        conversationId,
-        token: token as string,
-        page,
-      });
-      if (!data) return;
-      const olderMessages = mapLoadMoreMessages(data, { fallbackId: uuidv4 }) as Message[];
-      setMessages((prev) => prependUniqueOlderMessages(prev, olderMessages));
-      setLoadedPersistedMessages((prev) =>
-        resolveLoadedPersistedMessages({
-          previousLoaded: prev,
-          olderMessagesCount: olderMessages.length,
-          responseTotal: data.total,
-          fallbackTotal: totalMessages,
-        })
-      );
-      setTotalMessages(resolveTotalMessages(data.total, totalMessages));
-    } catch {
-      // ignore
-    } finally {
-      setIsLoadingMore(false);
-    }
-  }, [currentConversation, isLoadingMore, hasMoreMessages, totalMessages, loadedPersistedMessages]);
+  const loadMoreMessages = useLoadMoreMessagesAction({
+    apiBaseUrl: API_BASE_URL,
+    currentConversation,
+    isLoadingMore,
+    hasMoreMessages,
+    totalMessages,
+    loadedPersistedMessages,
+    getToken: () => localStorage.getItem("token"),
+    fallbackId: uuidv4,
+    setIsLoadingMore,
+    setMessages,
+    setLoadedPersistedMessages,
+    setTotalMessages,
+  });
 
   return {
     messages,

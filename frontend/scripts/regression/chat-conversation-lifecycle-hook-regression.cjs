@@ -9,7 +9,22 @@ const repoRoot = path.resolve(__dirname, "../..");
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "chat-conversation-lifecycle-hook-"));
 const outFile = path.join(tempDir, "useChatConversationLifecycle.cjs");
 const sourceFile = path.join(repoRoot, "hooks/useChatConversationLifecycle.ts");
-const source = fs.readFileSync(sourceFile, "utf8");
+let source = fs.readFileSync(sourceFile, "utf8");
+source = source.replace(/import type[^;]+chatTypes[^;]+;\n/g, "");
+source = source.replace(
+  /import \{\n  buildLoadMorePage,[\s\S]*?\} from "@\/lib\/chatLoadMoreCoordinator";/,
+  `function buildLoadMorePage({ totalMessages, loadedPersistedMessages }) {
+    const offset = Math.max(0, totalMessages - loadedPersistedMessages - 50);
+    const expectedOlderCount = Math.max(0, totalMessages - loadedPersistedMessages - offset);
+    return { offset, requestLimit: expectedOlderCount || 50 };
+  }
+  async function fetchLoadMoreMessages() { throw new Error("fetchLoadMoreMessages stub should be injected"); }
+  function mapLoadMoreMessages(data, { fallbackId }) { return (data.messages || []).map((message) => ({ id: fallbackId(), ...message })); }
+  function prependUniqueOlderMessages(prev, olderMessages) { return olderMessages.concat(prev); }
+  function resolveLoadedPersistedMessages({ previousLoaded, olderMessagesCount, responseTotal, fallbackTotal }) { return Math.min(responseTotal ?? fallbackTotal, previousLoaded + olderMessagesCount); }
+  function resolveTotalMessages(responseTotal, fallbackTotal) { return typeof responseTotal === "number" ? responseTotal : fallbackTotal; }
+  function shouldStartLoadMore({ currentConversation, isLoadingMore, hasMoreMessages, token }) { return !!currentConversation && !!token && !isLoadingMore && hasMoreMessages; }`
+);
 const compiled = ts.transpileModule(source, {
   compilerOptions: {
     module: ts.ModuleKind.CommonJS,
@@ -33,6 +48,7 @@ const {
   createSetCreatedConversationAction,
   createResetConversationPaginationAction,
   createSetLoadedConversationAction,
+  createLoadMoreMessagesAction,
 } = require(outFile);
 
 const tests = [];
@@ -110,6 +126,104 @@ test("createSetLoadedConversationAction applies loaded conversation metadata", (
   assert.equal(current.get(), 9);
   assert.equal(loaded.get(), 30);
   assert.equal(total.get(), 88);
+});
+
+test("createLoadMoreMessagesAction loads, prepends and updates counters", async () => {
+  const messages = createState([{ id: "existing", serverMessageId: 20 }]);
+  const loading = createState(false);
+  const loaded = createState(50);
+  const total = createState(120);
+  const fetchCalls = [];
+  const action = createLoadMoreMessagesAction({
+    apiBaseUrl: "",
+    getCurrentConversation: () => 3,
+    getIsLoadingMore: () => loading.get(),
+    getHasMoreMessages: () => true,
+    getTotalMessages: () => total.get(),
+    getLoadedPersistedMessages: () => loaded.get(),
+    getToken: () => "token",
+    fallbackId: () => "older-local",
+    setIsLoadingMore: loading.set,
+    setMessages: messages.set,
+    setLoadedPersistedMessages: loaded.set,
+    setTotalMessages: total.set,
+    fetchPage: async (request) => {
+      fetchCalls.push(request);
+      return { total: 120, messages: [{ serverMessageId: 10, content: "older" }] };
+    },
+  });
+
+  await action();
+
+  assert.equal(fetchCalls.length, 1);
+  assert.deepEqual(fetchCalls[0].page, { offset: 20, requestLimit: 50 });
+  assert.equal(loading.get(), false);
+  assert.equal(messages.get()[0].content, "older");
+  assert.equal(messages.get()[1].id, "existing");
+  assert.equal(loaded.get(), 51);
+  assert.equal(total.get(), 120);
+});
+
+test("createLoadMoreMessagesAction no-ops when guard fails", async () => {
+  const loading = createState(false);
+  const messages = createState([]);
+  const loaded = createState(0);
+  const total = createState(0);
+  let fetched = false;
+  const action = createLoadMoreMessagesAction({
+    apiBaseUrl: "",
+    getCurrentConversation: () => undefined,
+    getIsLoadingMore: () => false,
+    getHasMoreMessages: () => true,
+    getTotalMessages: () => 100,
+    getLoadedPersistedMessages: () => 50,
+    getToken: () => "token",
+    fallbackId: () => "id",
+    setIsLoadingMore: loading.set,
+    setMessages: messages.set,
+    setLoadedPersistedMessages: loaded.set,
+    setTotalMessages: total.set,
+    fetchPage: async () => {
+      fetched = true;
+      return { total: 100, messages: [] };
+    },
+  });
+
+  await action();
+
+  assert.equal(fetched, false);
+  assert.equal(loading.get(), false);
+});
+
+test("createLoadMoreMessagesAction ignores thrown fetch and clears loading", async () => {
+  const loading = createState(false);
+  const messages = createState([]);
+  const loaded = createState(50);
+  const total = createState(100);
+  const action = createLoadMoreMessagesAction({
+    apiBaseUrl: "",
+    getCurrentConversation: () => 1,
+    getIsLoadingMore: () => false,
+    getHasMoreMessages: () => true,
+    getTotalMessages: () => 100,
+    getLoadedPersistedMessages: () => 50,
+    getToken: () => "token",
+    fallbackId: () => "id",
+    setIsLoadingMore: loading.set,
+    setMessages: messages.set,
+    setLoadedPersistedMessages: loaded.set,
+    setTotalMessages: total.set,
+    fetchPage: async () => {
+      throw new Error("network");
+    },
+  });
+
+  await action();
+
+  assert.equal(loading.get(), false);
+  assert.deepEqual(messages.get(), []);
+  assert.equal(loaded.get(), 50);
+  assert.equal(total.get(), 100);
 });
 
 (async () => {
