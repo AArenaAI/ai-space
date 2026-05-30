@@ -1,0 +1,258 @@
+#!/usr/bin/env node
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const ts = require("typescript");
+
+const repoRoot = path.resolve(__dirname, "../..");
+const sourceFile = path.join(repoRoot, "hooks/useChatSendRuntime.ts");
+const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "chat-send-runtime-"));
+const tmpFile = path.join(tmpRoot, "useChatSendRuntime.cjs");
+const source = fs.readFileSync(sourceFile, "utf8");
+
+const transformed = ts.transpileModule(source, {
+  compilerOptions: {
+    module: ts.ModuleKind.CommonJS,
+    target: ts.ScriptTarget.ES2020,
+    esModuleInterop: true,
+    jsx: ts.JsxEmit.ReactJSX,
+  },
+}).outputText;
+
+let singleRequestImpl = async () => {};
+let compareRunImpl = async () => {};
+let createConversationRequestImpl = async () => ({ id: 42, title: "created" });
+let realtimeGetImpl = () => undefined;
+let uuidCounter = 0;
+const events = [];
+
+const moduleCache = new Map();
+function loadModule(file) {
+  if (moduleCache.has(file)) return moduleCache.get(file).exports;
+  const code = fs.readFileSync(file, "utf8");
+  const module = { exports: {} };
+  moduleCache.set(file, module);
+  const localRequire = (specifier) => {
+    if (specifier === "react") return { useCallback: (fn) => fn };
+    if (specifier === "uuid") return { v4: () => `uuid-${++uuidCounter}` };
+    if (specifier === "@/lib/guestId") return { getGuestId: () => "guest-id" };
+    if (specifier === "@/lib/streaming") return { realtimeGet: (...args) => realtimeGetImpl(...args) };
+    if (specifier === "@/lib/chatCompareRunCoordinator") return { runCompareModels: (...args) => compareRunImpl(...args) };
+    if (specifier === "@/lib/chatSingleSendCoordinator") {
+      return {
+        shouldStartSingleSend: ({ content, isRegenerate, attachments }) => Boolean((content || "").trim() || isRegenerate || (attachments && attachments.length)),
+        buildNewConversationTitle: (content) => content.trim().slice(0, 20) + (content.trim().length > 20 ? "..." : ""),
+        prepareSingleSendMessages: ({ content, messages, modelId, isRegenerate, skipUserMessage, attachments, search, createId, now }) => {
+          if (isRegenerate && !messages.some((m) => m.role === "user")) return undefined;
+          const assistant = { id: createId(), role: "assistant", content: "", model: modelId, createdAt: now(), searchStatus: search ? "searching" : undefined };
+          const user = skipUserMessage ? { id: createId(), role: "user", content, createdAt: now() } : { id: createId(), role: "user", content: content.trim(), files: attachments || [], createdAt: now() };
+          return {
+            assistantMessage: assistant,
+            contextMessages: [...messages, user],
+            visibleMessages: skipUserMessage ? [assistant] : [user, assistant],
+          };
+        },
+        applySingleSendMessagePlan: (prev, plan) => [...prev, ...plan.visibleMessages],
+        runSingleChatRequest: (...args) => singleRequestImpl(...args),
+      };
+    }
+    if (specifier === "@/lib/chatConversationCreateCoordinator") {
+      return {
+        shouldCreateConversation: ({ token }) => Boolean(token),
+        buildCreateConversationBody: ({ title, model, skillKey, workspaceId }) => ({ title, model, skill_key: skillKey || undefined, workspace_id: workspaceId ? Number(workspaceId) : undefined }),
+        runCreateConversationRequest: (...args) => createConversationRequestImpl(...args),
+        resolveCreatedConversationTitle: (data, fallback) => data.title || fallback,
+        buildCreatedConversationUrl: ({ currentHref, conversationId, skillKey }) => `${currentHref.split("?")[0]}?id=${conversationId}${skillKey ? `&key=${skillKey}` : ""}`,
+      };
+    }
+    if (specifier === "@/lib/chatRunUiCoordinator") {
+      return {
+        buildConversationUpdatedEventDetail: (conversationId, updatedAt) => ({ id: conversationId, updated_at: updatedAt }),
+        buildRecoverableResultPatch: ({ serverMessageId, generationTaskId, busyActivityStatus }) => ({ serverMessageId, generationTaskId, activityStatus: busyActivityStatus }),
+        buildUserAbortStoppedPatch: (now) => ({ completedAt: now, stopped: true }),
+        decideCompareRunError: ({ realtime, existingServerMessageId, busyActivityStatus }) => ({
+          type: "recoverable_busy",
+          shouldStartBackgroundPolling: true,
+          serverMessageId: realtime?.serverMessageId || existingServerMessageId || 101,
+          patch: { activityStatus: busyActivityStatus },
+        }),
+        decideCompareRunFinally: ({ abortReason, hasActiveTaskStream, hasActivePoller, conversationId }) => ({
+          shouldUpdateLoading: true,
+          isLoading: hasActiveTaskStream || hasActivePoller,
+          shouldClearCompareControllers: !abortReason,
+          shouldClearMainController: !abortReason,
+          shouldClearAbortReason: !abortReason,
+          shouldDispatchConversationUpdated: !abortReason && Boolean(conversationId),
+          conversationId,
+        }),
+        decideSingleSendError: ({ error, abortReason, busyActivityStatus }) => abortReason ? { type: "none" } : { type: "display_error", patch: { error: error?.message || "err", activityStatus: busyActivityStatus } },
+        decideSingleSendFinally: ({ abortReason, hasActiveTaskStream, conversationId }) => ({
+          shouldUpdateLoading: true,
+          isLoading: hasActiveTaskStream,
+          shouldClearMainController: !abortReason,
+          shouldClearAbortReason: !abortReason,
+          shouldDispatchConversationUpdated: !abortReason && Boolean(conversationId),
+          conversationId,
+        }),
+      };
+    }
+    if (specifier === "@/lib/chatLocalActionCoordinator") {
+      return {
+        buildCreateConversationFailureMessage: ({ id, modelId, createdAt }) => ({ id, role: "assistant", model: modelId, content: "创建对话失败", createdAt, error: "create failed" }),
+        appendCreateConversationFailureMessage: (prev, msg) => [...prev, msg],
+      };
+    }
+    if (specifier === "@/lib/chatMessageStatePatch") {
+      return {
+        patchMessageById: (messages, id, patch) => messages.map((m) => m.id === id ? (typeof patch === "function" ? patch(m) : { ...m, ...patch }) : m),
+        applyCompareGroupContextToMessages: (messages, { context }) => messages.map((m) => ({ ...m, groupId: context.groupId || m.groupId, userMessageId: context.userMessageId || m.userMessageId })),
+      };
+    }
+    if (specifier === "@/lib/chatRequestBuilder") return { buildChatRequestHeaders: ({ token, guestId }) => token ? { Authorization: `Bearer ${token}` } : { "X-Guest-ID": guestId } };
+    if (specifier === "@/lib/chatHistoryTransform") return { toModelMessages: (messages) => messages.map((m) => ({ role: m.role, content: m.content })) };
+    if (specifier === "@/lib/chatMessageFactory") {
+      return {
+        buildMessageFiles: (attachments) => (attachments || []).filter((a) => a.public_id).map((a) => ({ public_id: a.public_id, filename: a.filename, type: a.type || "file" })),
+        createUserChatMessage: ({ id, content, createdAt, files }) => ({ id, role: "user", content: content.trim(), files, createdAt }),
+        createCompareAssistantMessages: ({ modelIds, ids, createdAt, search }) => modelIds.map((modelId, i) => ({ id: ids[i], role: "assistant", content: "", model: modelId, createdAt, searchStatus: search ? "searching" : undefined })),
+      };
+    }
+    if (specifier === "@/lib/chatCompareCoordinator") return { selectCompareModelIds: (ids, models) => ids.filter((id) => models.some((m) => m.id === id)).slice(0, 4), shouldStartCompare: (ids) => ids.length >= 2 };
+    if (specifier === "@/lib/chatActivityStatus") return { createBusyGeneratingStatus: () => ({ kind: "generating", label: "busy" }) };
+    if (specifier.startsWith("@/lib/")) return {};
+    return require(specifier);
+  };
+  new Function("require", "module", "exports", code)(localRequire, module, module.exports);
+  return module.exports;
+}
+fs.writeFileSync(tmpFile, transformed);
+const { useChatSendRuntime } = loadModule(tmpFile);
+
+function stateHarness(initial = []) {
+  let messages = initial;
+  let isLoading = false;
+  let isCompare = false;
+  let compareModels = [];
+  const calls = [];
+  return {
+    get messages() { return messages; },
+    get isLoading() { return isLoading; },
+    get isCompare() { return isCompare; },
+    get compareModels() { return compareModels; },
+    calls,
+    setMessages: (updater) => { messages = typeof updater === "function" ? updater(messages) : updater; calls.push(["messages", messages]); },
+    setIsLoading: (value) => { isLoading = typeof value === "function" ? value(isLoading) : value; calls.push(["loading", isLoading]); },
+    setIsCompare: (value) => { isCompare = value; calls.push(["compare", value]); },
+    setCompareModels: (value) => { compareModels = value; calls.push(["models", value]); },
+  };
+}
+function makeRuntime(overrides = {}) {
+  const state = stateHarness(overrides.messages || []);
+  const refs = {
+    abortControllerRef: { current: null },
+    compareAbortControllersRef: { current: [] },
+    abortReasonRef: { current: null },
+    taskStreamsRef: { current: {} },
+    backgroundPollersRef: { current: {} },
+    lastReasoningRef: { current: { enabled: false, effort: "high" } },
+    lastSearchRef: { current: false },
+  };
+  const startPolls = [];
+  const runtime = useChatSendRuntime({
+    apiBaseUrl: "",
+    messages: state.messages,
+    models: [{ id: "m1", name: "M1" }, { id: "m2", name: "M2" }, { id: "m3", name: "M3" }],
+    selectedModel: { id: "m1", name: "M1" },
+    currentConversation: overrides.currentConversation,
+    effectiveSkillKey: "skill",
+    setCreatedConversation: (id, title) => events.push(["created", id, title]),
+    setMessages: state.setMessages,
+    setIsLoading: state.setIsLoading,
+    setIsCompare: state.setIsCompare,
+    setCompareModels: state.setCompareModels,
+    ...refs,
+    streamResponse: async () => overrides.streamResult,
+    startBackgroundPolling: (...args) => startPolls.push(args),
+    translate: (key) => key,
+    now: () => 1000,
+    createId: (() => { let i = 0; return () => `id-${++i}`; })(),
+    getToken: () => overrides.token ?? null,
+    getWorkspaceId: () => "7",
+    getCurrentHref: () => "http://local/chat/",
+    replaceHistory: (url) => events.push(["replace", url]),
+    dispatchWindowEvent: (event) => events.push(["event", event.type, event.detail]),
+  });
+  return { runtime, state, refs, startPolls };
+}
+
+async function testSingleSendCreatesConversationAndRunsRequest() {
+  events.length = 0;
+  let request;
+  singleRequestImpl = async (opts) => { request = opts; };
+  createConversationRequestImpl = async ({ body }) => ({ id: 42, title: body.title });
+  const { runtime, state, refs } = makeRuntime({ token: "tok" });
+  await runtime.sendMessage("hello world", { enabled: true, effort: "low" }, false, true, 3, false, [{ filename: "a", content: "", type: "file", public_id: "p" }], ["f1"], "tpl");
+  assert.equal(events.find((e) => e[0] === "created")?.[1], 42);
+  assert.equal(state.messages.length, 2);
+  assert.equal(state.messages[1].role, "assistant");
+  assert.equal(request.conversationId, 42);
+  assert.equal(request.modelId, "m1");
+  assert.deepEqual(request.messageFileIds, ["f1"]);
+  assert.equal(refs.abortControllerRef.current, null);
+  assert.equal(refs.abortReasonRef.current, null);
+  assert.ok(events.some((e) => e[0] === "event" && e[1] === "conversation-updated"));
+}
+
+async function testSingleSendCreateFailureAppendsPlaceholder() {
+  createConversationRequestImpl = async () => undefined;
+  const { runtime, state } = makeRuntime({ token: "tok" });
+  await runtime.sendMessage("hello");
+  assert.equal(state.messages.length, 1);
+  assert.equal(state.messages[0].error, "create failed");
+  assert.equal(state.isLoading, false);
+}
+
+async function testSingleSendRequestErrorPatchesAssistant() {
+  singleRequestImpl = async () => { throw new Error("boom"); };
+  const { runtime, state } = makeRuntime({ currentConversation: 9 });
+  await runtime.sendMessage("hello");
+  assert.equal(state.messages.length, 2);
+  assert.equal(state.messages[1].error, "boom");
+}
+
+async function testCompareSendStartsCompareAndRunCoordinator() {
+  let compareOpts;
+  compareRunImpl = async (opts) => {
+    compareOpts = opts;
+    opts.callbacks.onGroupContextResolved({ groupId: "g", userMessageId: "u", groupModels: ["m1", "m2"] });
+    opts.callbacks.onRunError(opts.assistantMessages[0], new Error("recover"));
+  };
+  realtimeGetImpl = () => ({ serverMessageId: 202 });
+  const { runtime, state, refs, startPolls } = makeRuntime({ currentConversation: 10, token: "tok" });
+  await runtime.sendCompareMessages("compare", ["m1", "missing", "m2"], { enabled: false }, true);
+  assert.equal(state.isCompare, true);
+  assert.deepEqual(state.compareModels, ["m1", "m2"]);
+  assert.equal(compareOpts.conversationId, 10);
+  assert.equal(compareOpts.assistantMessages.length, 2);
+  assert.equal(refs.compareAbortControllersRef.current.length, 0);
+  assert.deepEqual(startPolls[0], [10, compareOpts.assistantMessages[0].id, 202]);
+}
+
+async function testCompareGuardSkipsInvalidWidth() {
+  let ran = false;
+  compareRunImpl = async () => { ran = true; };
+  const { runtime, state } = makeRuntime({ currentConversation: 10 });
+  await runtime.sendCompareMessages("compare", ["m1"]);
+  assert.equal(ran, false);
+  assert.equal(state.messages.length, 0);
+}
+
+(async () => {
+  await testSingleSendCreatesConversationAndRunsRequest();
+  await testSingleSendCreateFailureAppendsPlaceholder();
+  await testSingleSendRequestErrorPatchesAssistant();
+  await testCompareSendStartsCompareAndRunCoordinator();
+  await testCompareGuardSkipsInvalidWidth();
+  console.log("chat send runtime hook regression passed");
+})();

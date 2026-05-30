@@ -6,6 +6,7 @@ import { useChatLocalActions } from "@/hooks/useChatLocalActions";
 import { useChatBackgroundPollingRuntime } from "@/hooks/useChatBackgroundPollingRuntime";
 import { useChatTaskStreamRuntime } from "@/hooks/useChatTaskStreamRuntime";
 import { useChatMainStreamRuntime } from "@/hooks/useChatMainStreamRuntime";
+import { useChatSendRuntime } from "@/hooks/useChatSendRuntime";
 import {
   useChatConversationLifecycle,
   useLoadMoreMessagesAction,
@@ -13,15 +14,6 @@ import {
 import { useI18n } from "@/lib/i18n";
 import { v4 as uuidv4 } from "uuid";
 import { getGuestId } from "@/lib/guestId";
-import { realtimeGet } from "@/lib/streaming";
-import { runCompareModels } from "@/lib/chatCompareRunCoordinator";
-import {
-  applySingleSendMessagePlan,
-  buildNewConversationTitle,
-  prepareSingleSendMessages,
-  runSingleChatRequest,
-  shouldStartSingleSend,
-} from "@/lib/chatSingleSendCoordinator";
 import {
   cancelGenerationTask,
   runStopGeneration,
@@ -48,50 +40,9 @@ import {
   shouldContinueConversationRestore,
 } from "@/lib/chatNavigationResetCoordinator";
 import {
-  buildCreateConversationBody,
-  buildCreatedConversationUrl,
-  resolveCreatedConversationTitle,
-  runCreateConversationRequest,
-  shouldCreateConversation,
-} from "@/lib/chatConversationCreateCoordinator";
-import {
-  buildConversationUpdatedEventDetail,
-  buildRecoverableResultPatch,
-  buildUserAbortStoppedPatch,
-  decideCompareRunError,
-  decideCompareRunFinally,
-  decideSingleSendError,
-  decideSingleSendFinally,
-} from "@/lib/chatRunUiCoordinator";
-import {
-  appendCreateConversationFailureMessage,
-  buildCreateConversationFailureMessage,
-} from "@/lib/chatLocalActionCoordinator";
-import {
-  type ChatStreamGroupContext,
-  type ChatStreamRunResult,
-} from "@/lib/chatStreamRunResult";
-import {
-  applyCompareGroupContextToMessages,
-  patchMessageById,
-} from "@/lib/chatMessageStatePatch";
-import {
   buildChatRequestHeaders,
 } from "@/lib/chatRequestBuilder";
-import { toModelMessages } from "@/lib/chatHistoryTransform";
-import {
-  buildMessageFiles,
-  createCompareAssistantMessages,
-  createUserChatMessage,
-} from "@/lib/chatMessageFactory";
-import {
-  selectCompareModelIds,
-  shouldStartCompare,
-} from "@/lib/chatCompareCoordinator";
-import {
-  shouldIgnoreStreamAbort,
-  shouldResumeTaskStreamAfterError,
-} from "@/lib/chatErrorRecovery";
+import { patchMessageById } from "@/lib/chatMessageStatePatch";
 import {
   createBusyGeneratingStatus,
   createFinalizingStatus,
@@ -107,9 +58,6 @@ import type {
 const API_BASE_URL = ""; // 使用相对路径，nginx 同域名代理 /api -> 后端
 
 export type { ChatModel, Conversation, Message, SearchSource } from "@/lib/chatTypes";
-
-type CompareGroupContext = ChatStreamGroupContext;
-type StreamRunResult = ChatStreamRunResult;
 
 export const MODELS: ChatModel[] = [
   {
@@ -249,6 +197,18 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     taskStreamsRef,
     setMessages,
     setIsLoading,
+    startBackgroundPolling,
+    translate: t,
+  });
+
+
+  const { streamResponse } = useChatMainStreamRuntime({
+    selectedModel,
+    conversationTitle,
+    currentConversation,
+    abortReasonRef,
+    setMessages,
+    startTaskEventStream,
     startBackgroundPolling,
     translate: t,
   });
@@ -416,305 +376,33 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     return () => loadController.abort();
   }, [conversationId, modelsKey, setSelectedModel, skillKey]);
 
-  // 创建新对话
-  const createConversation = useCallback(
-    async (title: string, model: string, sk?: string): Promise<number | undefined> => {
-      const token = localStorage.getItem("token");
-      if (!shouldCreateConversation({ token })) return undefined;
-
-      try {
-        const body = buildCreateConversationBody({
-          title,
-          model,
-          skillKey: sk,
-          workspaceId: localStorage.getItem("current-workspace"),
-        });
-        const data = await runCreateConversationRequest({
-          apiBaseUrl: API_BASE_URL,
-          token: token as string,
-          body,
-        });
-        if (!data) return undefined;
-
-        setCreatedConversation(data.id, resolveCreatedConversationTitle(data, title));
-        window.history.replaceState({}, "", buildCreatedConversationUrl({
-          currentHref: window.location.href,
-          conversationId: data.id,
-          skillKey: sk,
-        }));
-        // 通知侧边栏刷新列表
-        window.dispatchEvent(new CustomEvent("conversation-created", { detail: data }));
-        return data.id;
-      } catch (err) {
-        console.error("createConversation error:", err);
-        return undefined;
-      }
-    },
-    [setCreatedConversation]
-  );
-
-  const { streamResponse } = useChatMainStreamRuntime({
+  const {
+    createConversation,
+    sendCompareMessages,
+    sendMessage,
+  } = useChatSendRuntime({
+    apiBaseUrl: API_BASE_URL,
+    messages,
+    models,
     selectedModel,
-    conversationTitle,
     currentConversation,
-    abortReasonRef,
+    effectiveSkillKey,
+    setCreatedConversation,
     setMessages,
-    startTaskEventStream,
+    setIsLoading,
+    setIsCompare,
+    setCompareModels,
+    abortControllerRef,
+    compareAbortControllersRef,
+    abortReasonRef,
+    taskStreamsRef,
+    backgroundPollersRef,
+    lastReasoningRef,
+    lastSearchRef,
+    streamResponse,
     startBackgroundPolling,
     translate: t,
   });
-
-  // 对比模式：固定两个模型并发流式展示
-  const sendCompareMessages = useCallback(
-    async (
-      content: string,
-      modelIds: string[],
-      reasoning: { enabled: boolean; effort?: string } = { enabled: false },
-      search: boolean = false,
-      templateId: number = 0,
-      attachments?: { filename: string; content: string; type?: string; public_id?: string }[],
-      file_ids?: string[],
-      templatePrefix?: string
-    ) => {
-      if (!content.trim() && (!attachments || attachments.length === 0)) return;
-
-      const compareModelIds = selectCompareModelIds(modelIds, models);
-      if (!shouldStartCompare(compareModelIds)) return;
-
-      lastReasoningRef.current = reasoning;
-      lastSearchRef.current = search;
-
-      const token = localStorage.getItem("token");
-
-      // 确定当前对话 ID
-      let convId = currentConversation;
-      if (token && !convId) {
-        const title = content.trim().slice(0, 20) + (content.trim().length > 20 ? "..." : "");
-        convId = await createConversation(title, compareModelIds[0], effectiveSkillKey);
-      }
-
-      const finalContent = content.trim();
-      const userFiles = buildMessageFiles(attachments, { defaultType: "file" });
-      const userMsg = createUserChatMessage({
-        id: uuidv4(),
-        content: finalContent,
-        createdAt: Date.now(),
-        files: userFiles,
-      }) as Message;
-      const assistantMsgs = createCompareAssistantMessages({
-        modelIds: compareModelIds,
-        ids: compareModelIds.map(() => uuidv4()),
-        createdAt: Date.now(),
-        search: lastSearchRef.current,
-      }) as Message[];
-      const contextMessages = [...messages, userMsg];
-
-      setIsCompare(true);
-      setCompareModels(compareModelIds);
-      setMessages((prev) => [...prev, userMsg, ...assistantMsgs]);
-      setIsLoading(true);
-
-      const controllers = assistantMsgs.map(() => new AbortController());
-      compareAbortControllersRef.current = controllers;
-      abortControllerRef.current = null;
-      abortReasonRef.current = null;
-
-      const headers = buildChatRequestHeaders({ token, guestId: getGuestId() });
-
-      const handleCompareGroupContextResolved = (context: CompareGroupContext) => {
-        setMessages((prev) => applyCompareGroupContextToMessages(prev, {
-          userMessageId: userMsg.id,
-          assistantIds: assistantMsgs.map((assistant) => assistant.id),
-          context,
-        }));
-      };
-
-      const handleCompareRecoverableResult = (assistantMsg: Message, streamResult: StreamRunResult) => {
-        setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) => buildRecoverableResultPatch({
-          serverMessageId: streamResult.serverMessageId,
-          generationTaskId: streamResult.generationTaskId,
-          existingServerMessageId: m.serverMessageId,
-          existingGenerationTaskId: m.generationTaskId,
-          busyActivityStatus: createBusyGeneratingStatus(t),
-        })));
-      };
-
-      const handleCompareRunError = (assistantMsg: Message, error: any, streamResult?: StreamRunResult) => {
-        const realtime = realtimeGet(assistantMsg.id);
-        const decision = decideCompareRunError({
-          assistantModel: assistantMsg.model || "",
-          error,
-          streamResult,
-          realtime,
-          hasTaskStream: !!taskStreamsRef.current[assistantMsg.id],
-          hasBackgroundPoller: !!backgroundPollersRef.current[assistantMsg.id],
-          conversationId: convId,
-          existingServerMessageId: assistantMsg.serverMessageId,
-          existingGenerationTaskId: assistantMsg.generationTaskId,
-          busyActivityStatus: createBusyGeneratingStatus(t),
-          now: Date.now(),
-        });
-
-        setMessages((prev) => patchMessageById(prev, assistantMsg.id, decision.patch));
-        if (decision.type === "recoverable_busy" && decision.shouldStartBackgroundPolling && decision.serverMessageId) {
-          startBackgroundPolling(convId, assistantMsg.id, decision.serverMessageId);
-        }
-      };
-
-      try {
-        await runCompareModels({
-          apiBaseUrl: API_BASE_URL,
-          headers,
-          controllers,
-          assistantMessages: assistantMsgs,
-          compareModelIds,
-          modelMessages: toModelMessages(contextMessages),
-          conversationId: convId,
-          reasoning,
-          search,
-          templateId,
-          templatePrefix,
-          skillKey: effectiveSkillKey,
-          messageFileIds: file_ids,
-          callbacks: {
-            streamResponse,
-            onGroupContextResolved: handleCompareGroupContextResolved,
-            onRecoverableResult: handleCompareRecoverableResult,
-            onAbortUser: (assistantMsg) => {
-              setMessages((prev) => patchMessageById(prev, assistantMsg.id, buildUserAbortStoppedPatch(Date.now())));
-            },
-            onRunError: handleCompareRunError,
-            getAbortReason: () => abortReasonRef.current,
-          },
-        });
-      } finally {
-        const decision = decideCompareRunFinally({
-          abortReason: abortReasonRef.current,
-          hasActiveTaskStream: Object.keys(taskStreamsRef.current).length > 0,
-          hasActivePoller: Object.keys(backgroundPollersRef.current).length > 0,
-          conversationId: convId,
-        });
-        if (decision.shouldUpdateLoading) setIsLoading(Boolean(decision.isLoading));
-        if (decision.shouldClearCompareControllers) compareAbortControllersRef.current = [];
-        if (decision.shouldClearMainController) abortControllerRef.current = null;
-        if (decision.shouldClearAbortReason) abortReasonRef.current = null;
-        if (decision.shouldDispatchConversationUpdated && decision.conversationId) {
-          window.dispatchEvent(new CustomEvent("conversation-updated", {
-            detail: buildConversationUpdatedEventDetail(decision.conversationId, new Date().toISOString()),
-          }));
-        }
-      }
-    },
-    [messages, models, currentConversation, createConversation, streamResponse, effectiveSkillKey]
-  );
-
-  const sendMessage = useCallback(
-    async (
-      content: string,
-      reasoning: { enabled: boolean; effort?: string } = { enabled: false },
-      isRegenerate: boolean = false,
-      search: boolean = false,
-      templateId: number = 0,
-      skipUserMsg: boolean = false,
-      attachments?: { filename: string; content: string; type: string; public_id?: string }[],
-      file_ids?: string[],
-      templatePrefix?: string
-    ) => {
-      if (!shouldStartSingleSend({ content, isRegenerate, attachments })) return;
-
-      lastReasoningRef.current = reasoning;
-      lastSearchRef.current = search;
-
-      const token = localStorage.getItem("token");
-
-      // 确定当前对话 ID（登录状态下）
-      let convId = currentConversation;
-      if (token && !convId && !isRegenerate) {
-        const title = buildNewConversationTitle(content);
-        convId = await createConversation(title, selectedModel.id, effectiveSkillKey);
-        if (!convId) {
-          // 创建对话失败，显示错误提示并终止
-          const failureMessage = buildCreateConversationFailureMessage({
-            id: uuidv4(),
-            modelId: selectedModel.id,
-            createdAt: Date.now(),
-          }) as Message;
-          setMessages((prev) => appendCreateConversationFailureMessage(prev, failureMessage));
-          setIsLoading(false);
-          return;
-        }
-      }
-
-      const messagePlan = prepareSingleSendMessages<Message>({
-        content,
-        messages,
-        modelId: selectedModel.id,
-        isRegenerate,
-        skipUserMessage: skipUserMsg,
-        attachments,
-        search: lastSearchRef.current,
-        createId: uuidv4,
-        now: Date.now,
-      });
-      if (!messagePlan) return;
-
-      const contextMessages = messagePlan.contextMessages;
-      const assistantMsg = messagePlan.assistantMessage;
-      setMessages((prev) => applySingleSendMessagePlan(prev, messagePlan));
-
-      setIsLoading(true);
-      const controller = new AbortController();
-      abortReasonRef.current = null;
-      abortControllerRef.current = controller;
-
-      try {
-        const headers = buildChatRequestHeaders({ token, guestId: getGuestId() });
-        await runSingleChatRequest({
-          apiBaseUrl: API_BASE_URL,
-          headers,
-          controller,
-          assistantMessage: assistantMsg,
-          modelId: selectedModel.id,
-          modelMessages: toModelMessages(contextMessages),
-          conversationId: convId,
-          reasoning,
-          search,
-          templateId,
-          skipSaveUserMessage: skipUserMsg,
-          skillKey: effectiveSkillKey,
-          messageFileIds: file_ids,
-          streamResponse,
-        });
-      } catch (error: any) {
-        const decision = decideSingleSendError({
-          error,
-          abortReason: abortReasonRef.current,
-          modelId: selectedModel.id,
-          conversationId: convId,
-          busyActivityStatus: createBusyGeneratingStatus(t),
-        });
-        if (decision.type !== "none") {
-          setMessages((prev) => patchMessageById(prev, assistantMsg.id, decision.patch));
-        }
-      } finally {
-        const decision = decideSingleSendFinally({
-          abortReason: abortReasonRef.current,
-          hasActiveTaskStream: Object.keys(taskStreamsRef.current).length > 0,
-          conversationId: convId,
-        });
-        if (decision.shouldUpdateLoading) setIsLoading(Boolean(decision.isLoading));
-        if (decision.shouldClearMainController) abortControllerRef.current = null;
-        if (decision.shouldClearAbortReason) abortReasonRef.current = null;
-        // 通知侧边栏仅做本地排序/时间更新，避免每次发消息都全量重拉历史列表
-        if (decision.shouldDispatchConversationUpdated && decision.conversationId) {
-          window.dispatchEvent(new CustomEvent("conversation-updated", {
-            detail: buildConversationUpdatedEventDetail(decision.conversationId, new Date().toISOString()),
-          }));
-        }
-      }
-    },
-    [messages, selectedModel, currentConversation, createConversation, streamResponse, effectiveSkillKey]
-  );
 
   const stopGeneration = useCallback(() => {
     const token = localStorage.getItem("token");
