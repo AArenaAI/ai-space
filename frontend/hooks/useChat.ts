@@ -3,18 +3,16 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useChatModelSelection } from "@/hooks/useChatModelSelection";
 import { useChatLocalActions } from "@/hooks/useChatLocalActions";
+import { useChatBackgroundPollingRuntime } from "@/hooks/useChatBackgroundPollingRuntime";
 import {
   useChatConversationLifecycle,
   useLoadMoreMessagesAction,
 } from "@/hooks/useChatConversationLifecycle";
 import { useI18n } from "@/lib/i18n";
-import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotifications";
+import { registerBackgroundTask } from "@/lib/taskNotifications";
 import { v4 as uuidv4 } from "uuid";
 import { getGuestId } from "@/lib/guestId";
 import { streamAppend, streamGet, streamClear, realtimeUpdate, realtimeGet, realtimeClear } from "@/lib/streaming";
-import {
-  getNotificationConversationTitle,
-} from "@/lib/chatBackgroundTaskRegistration";
 import {
   shouldStartTaskStreamFallbackPolling,
   shouldSyncTaskStreamFinalMessage,
@@ -92,11 +90,6 @@ import {
   type ChatStreamGroupContext,
   type ChatStreamRunResult,
 } from "@/lib/chatStreamRunResult";
-import {
-  buildBackgroundPollingMessagePatch,
-  shouldKeepBackgroundLoading,
-} from "@/lib/chatBackgroundPolling";
-import { startBackgroundPollingRunner } from "@/lib/chatBackgroundPollingRunner";
 import {
   applyCompareGroupContextToMessages,
   applyFinalRealtimeDataToMessage,
@@ -239,18 +232,10 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   // 从对话历史或 prop 恢复的有效 skillKey（优先级：历史 > prop）
   const [effectiveSkillKey, setEffectiveSkillKey] = useState<string | undefined>(skillKey);
   const [groupViews, setGroupViews] = useState<Map<number, number>>(new Map());
-  const backgroundPollersRef = useRef<Record<string, number>>({});
   const taskStreamsRef = useRef<Record<string, AbortController>>({});
   const abortReasonRef = useRef<"user" | "navigation" | null>(null);
   const activeTaskStreamsRef = useRef<Record<string, { convId?: number; serverMessageId?: number; generationTaskId?: number; lastSequence?: number; content?: string }>>({});
   const modelsKey = models.map((m) => m.id).join("|");
-  const stopBackgroundPoller = useCallback((localMessageId: string) => {
-    const timer = backgroundPollersRef.current[localMessageId];
-    if (timer) {
-      window.clearInterval(timer);
-      delete backgroundPollersRef.current[localMessageId];
-    }
-  }, []);
 
   const stopTaskStream = useCallback((localMessageId: string) => {
     const controller = taskStreamsRef.current[localMessageId];
@@ -260,69 +245,21 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     }
   }, []);
 
-  const startBackgroundPolling = useCallback((convId: number | undefined, localMessageId: string, serverMessageId?: number) => {
-    if (!convId || !serverMessageId || backgroundPollersRef.current[localMessageId]) return;
-
-    const token = localStorage.getItem("token");
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    } else {
-      headers["X-Guest-ID"] = getGuestId();
-    }
-
-    const runner = startBackgroundPollingRunner({
-      apiBaseUrl: API_BASE_URL,
-      conversationId: convId,
-      serverMessageId,
-      headers,
-      callbacks: {
-        onPollState: (pollState) => {
-          const streamActive = !!taskStreamsRef.current[localMessageId];
-          const liveContent = streamGet(localMessageId) || realtimeGet(localMessageId)?.content || "";
-          const now = Date.now();
-          setMessages((prev) => patchMessageById(prev, localMessageId, (m) =>
-            // SSE / task event stream 仍在追加时，polling 只能更新状态，不能用 DB 全文覆盖内容。
-            // 否则 OpenAI completed 后 message.content 已是全文，但补尾 delta 还在路上，UI 会从半截直接跳全文。
-            buildBackgroundPollingMessagePatch({
-              existingContent: m.content,
-              polledContent: pollState.content,
-              liveContent,
-              streamActive,
-              serverMessageId,
-              isFinished: pollState.isFinished,
-              now,
-              createBusyStatus: () => createBusyGeneratingStatus(t),
-            })
-          ));
-        },
-        onFinished: (pollState) => {
-          stopBackgroundPoller(localMessageId);
-          stopTaskStream(localMessageId);
-          const notificationTitle = getNotificationConversationTitle(conversationTitle, selectedModel.name || selectedModel.id);
-          emitTaskFinished({
-            key: `chat:${serverMessageId}`,
-            type: "chat",
-            title: pollState.isCompleted ? "长对话任务已完成" : "长对话任务未完成",
-            description: notificationTitle,
-            href: `/chat?id=${convId}`,
-            ok: pollState.isCompleted,
-            conversationTitle: notificationTitle,
-          });
-          const hasOtherTaskStream = Object.keys(taskStreamsRef.current).some((id) => id !== localMessageId);
-          const hasOtherPoller = Object.keys(backgroundPollersRef.current).some((id) => id !== localMessageId);
-          setIsLoading(hasOtherTaskStream || hasOtherPoller);
-        },
-        onKeepLoading: () => {
-          // terminal 状态可能先于最终 message.content 可见；多轮确认稳定前继续轮询，避免刷新后才完整。
-          setIsLoading(true);
-        },
-        shouldKeepLoading: shouldKeepBackgroundLoading,
-        isStreamActive: () => !!taskStreamsRef.current[localMessageId],
-      },
-    });
-    backgroundPollersRef.current[localMessageId] = runner.timer;
-  }, [stopBackgroundPoller, stopTaskStream]);
+  const {
+    backgroundPollersRef,
+    stopBackgroundPoller,
+    startBackgroundPolling,
+    stopAllBackgroundPollers,
+  } = useChatBackgroundPollingRuntime({
+    apiBaseUrl: API_BASE_URL,
+    taskStreamsRef,
+    setMessages,
+    setIsLoading,
+    conversationTitle,
+    selectedModel,
+    stopTaskStream,
+    translate: t,
+  });
 
   const startTaskEventStream = useCallback((convId: number | undefined, localMessageId: string, serverMessageId?: number, after: number = 0, initialContent: string = "", generationTaskId?: number) => {
     if (!convId || (!serverMessageId && !generationTaskId) || taskStreamsRef.current[localMessageId]) return;
@@ -411,13 +348,12 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
 
   useEffect(() => {
     return () => {
-      Object.values(backgroundPollersRef.current).forEach((timer) => window.clearInterval(timer));
-      backgroundPollersRef.current = {};
+      stopAllBackgroundPollers();
       Object.values(taskStreamsRef.current).forEach((controller) => controller.abort());
       taskStreamsRef.current = {};
       activeTaskStreamsRef.current = {};
     };
-  }, []);
+  }, [stopAllBackgroundPollers]);
 
   useEffect(() => {
     const loadSeq = ++conversationLoadSeqRef.current;
