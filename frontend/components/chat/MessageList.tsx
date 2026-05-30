@@ -32,6 +32,7 @@ import { parseThinkContent, sanitizeContent, isMessageGenerating } from "@/lib/c
 
 const CHAT_BOTTOM_SPACER = 280;
 const SCROLL_TO_BOTTOM_OFFSET = 238;
+const AT_BOTTOM_THRESHOLD = 24;
 const SELECT_MODE_EXTRA_SPACER = 80;
 const LONG_MARKDOWN_LAZY_THRESHOLD = 4000;
 type SelectionMode = "share" | "favorite";
@@ -429,6 +430,21 @@ function MessageList({
   const userScrollOverrideUntilRef = useRef(0);
   const bottomLockRafRef = useRef<number>(0);
   const bottomLockTimersRef = useRef<number[]>([]);
+  const [atBottom, setAtBottom] = useState(true);
+  const atBottomRef = useRef(true);
+  const [userBrowsing, setUserBrowsing] = useState(false);
+  const userBrowsingTimerRef = useRef<number>(0);
+
+  const stopBottomLockForUserBrowse = useCallback((duration = 2500) => {
+    stickToBottomRef.current = false;
+    userScrollOverrideUntilRef.current = Date.now() + duration;
+    if (bottomLockRafRef.current) {
+      cancelAnimationFrame(bottomLockRafRef.current);
+      bottomLockRafRef.current = 0;
+    }
+    bottomLockTimersRef.current.forEach(window.clearTimeout);
+    bottomLockTimersRef.current = [];
+  }, []);
 
   const scrollToBottom = useCallback(() => {
     programmaticScrollUntilRef.current = Date.now() + 320;
@@ -487,14 +503,7 @@ function MessageList({
     // 用户主动上滑时立即打断补偿锁底，避免流式内容继续增长时把视图吸回底部。
     const isProgrammaticScroll = Date.now() < programmaticScrollUntilRef.current;
     if (isScrollingUp && distanceToBottom > 1) {
-      stickToBottomRef.current = false;
-      if (bottomLockRafRef.current) {
-        cancelAnimationFrame(bottomLockRafRef.current);
-        bottomLockRafRef.current = 0;
-      }
-      bottomLockTimersRef.current.forEach(window.clearTimeout);
-      bottomLockTimersRef.current = [];
-      userScrollOverrideUntilRef.current = Date.now() + (isProgrammaticScroll ? 900 : 1600);
+      stopBottomLockForUserBrowse(isProgrammaticScroll ? 1200 : 2500);
     }
     if (distanceToBottom <= 24) {
       stickToBottomRef.current = true;
@@ -506,7 +515,32 @@ function MessageList({
       loadingMoreTriggeredRef.current = true;
       onLoadMore?.();
     }
-  }, [hasMoreMessages, isLoadingMore, onLoadMore]);
+  }, [hasMoreMessages, isLoadingMore, onLoadMore, stopBottomLockForUserBrowse]);
+
+  const markUserBrowsing = useCallback((duration = 2500) => {
+    setUserBrowsing(true);
+    if (userBrowsingTimerRef.current) window.clearTimeout(userBrowsingTimerRef.current);
+    userBrowsingTimerRef.current = window.setTimeout(() => {
+      userBrowsingTimerRef.current = 0;
+      setUserBrowsing(false);
+    }, duration);
+  }, []);
+
+  useEffect(() => () => {
+    if (userBrowsingTimerRef.current) window.clearTimeout(userBrowsingTimerRef.current);
+  }, []);
+
+  const handleUserScrollIntent = useCallback((deltaY: number) => {
+    const el = scrollRef.current;
+    if (!el || deltaY >= 0) return;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceToBottom > 1) {
+      stopBottomLockForUserBrowse(2500);
+      markUserBrowsing(2500);
+      atBottomRef.current = false;
+      setAtBottom(false);
+    }
+  }, [markUserBrowsing, stopBottomLockForUserBrowse]);
 
   useEffect(() => {
     if (!isLoadingMore) {
@@ -525,8 +559,6 @@ function MessageList({
   const [exportPreviewOpen, setExportPreviewOpen] = useState(false);
   const exportCardRef = useRef<HTMLDivElement>(null);
   const exportPreviewCardRef = useRef<HTMLDivElement>(null);
-  const [atBottom, setAtBottom] = useState(true);
-  const atBottomRef = useRef(true);
   const renderScrollToBottomButton = useCallback(() => {
     if (atBottom) return null;
     return (
@@ -1194,19 +1226,21 @@ function MessageList({
           </div>
         ) : (
           <Virtuoso
-            style={{ height: "100%" }}
+            style={{ height: "100%", overflowAnchor: userBrowsing ? "none" : "auto" }}
             data={compareGroups}
             ref={virtuosoRef}
             scrollerRef={handleVirtuosoScrollerRef}
             followOutput={false}
-            atBottomThreshold={160}
+            atBottomThreshold={AT_BOTTOM_THRESHOLD}
             atBottomStateChange={(atBottom) => {
               atBottomRef.current = atBottom;
-              if (atBottom) stickToBottomRef.current = true;
+              if (atBottom && Date.now() >= userScrollOverrideUntilRef.current) stickToBottomRef.current = true;
               setAtBottom(atBottom);
             }}
             computeItemKey={(_, group) => group.id}
             onScroll={handleVirtuosoScroll}
+            onWheel={(event) => handleUserScrollIntent(event.deltaY)}
+            onTouchMove={() => stopBottomLockForUserBrowse(2500)}
             increaseViewportBy={{ top: 200, bottom: CHAT_BOTTOM_SPACER }}
             overscan={{ main: 2, reverse: 2 }}
             components={compareVirtuosoComponents}
@@ -1300,19 +1334,21 @@ function MessageList({
   return (
     <div className="relative flex-1 min-h-0 overflow-hidden">
       <Virtuoso
-        style={{ height: "100%" }}
+        style={{ height: "100%", overflowAnchor: userBrowsing ? "none" : "auto" }}
         data={visibleMessages}
         ref={virtuosoRef}
         scrollerRef={handleVirtuosoScrollerRef}
         followOutput={false}
-        atBottomThreshold={160}
+        atBottomThreshold={AT_BOTTOM_THRESHOLD}
         atBottomStateChange={(atBottom) => {
           atBottomRef.current = atBottom;
-          if (atBottom) stickToBottomRef.current = true;
+          if (atBottom && Date.now() >= userScrollOverrideUntilRef.current) stickToBottomRef.current = true;
           setAtBottom(atBottom);
         }}
         computeItemKey={(_, msg) => msg.id}
         onScroll={handleVirtuosoScroll}
+        onWheel={(event) => handleUserScrollIntent(event.deltaY)}
+        onTouchMove={() => stopBottomLockForUserBrowse(2500)}
         increaseViewportBy={{ top: 200, bottom: CHAT_BOTTOM_SPACER }}
         overscan={{ main: 2, reverse: 2 }}
         components={virtuosoComponents}
