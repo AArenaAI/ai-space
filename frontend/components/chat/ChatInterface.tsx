@@ -12,9 +12,14 @@ import { Zap, X, Pencil, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import { useI18n } from "@/lib/i18n";
 import InputDialog from "@/components/ui/InputDialog";
-import ForkCompareDialog from "./ForkCompareDialog";
+
+const ForkCompareDialog = dynamic(() => import("./ForkCompareDialog"), {
+  ssr: false,
+  loading: () => null,
+});
 
 const COMPARE_KEY = "compare-mode";
 const COMPARE_MODELS_KEY = "compare-models";
@@ -500,22 +505,24 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
       />
 
       {/* Fork 对比弹窗 */}
-      <ForkCompareDialog
-        open={forkDialogOpen}
-        onClose={() => { setForkDialogOpen(false); setForkTargetMessageId(null); }}
-        models={models}
-        currentModelId={selectedModel.id}
-        onConfirm={async (modelIds) => {
-          if (!forkTargetMessageId) return;
-          const allModelIds = [selectedModel.id, ...modelIds];
-          try {
-            await forkChat(forkTargetMessageId, allModelIds);
-            toast.success(t("chat.compareStarted"));
-          } catch (err: any) {
-            toast.error(err.message || t("chat.forkCompareFailed"));
-          }
-        }}
-      />
+      {forkDialogOpen && (
+        <ForkCompareDialog
+          open={forkDialogOpen}
+          onClose={() => { setForkDialogOpen(false); setForkTargetMessageId(null); }}
+          models={models}
+          currentModelId={selectedModel.id}
+          onConfirm={async (modelIds) => {
+            if (!forkTargetMessageId) return;
+            const allModelIds = [selectedModel.id, ...modelIds];
+            try {
+              await forkChat(forkTargetMessageId, allModelIds);
+              toast.success(t("chat.compareStarted"));
+            } catch (err: any) {
+              toast.error(err.message || t("chat.forkCompareFailed"));
+            }
+          }}
+        />
+      )}
 
       {/* 底部输入框 - 始终渲染，空状态时隐藏在下方 */}
       {!messageSelectMode && (

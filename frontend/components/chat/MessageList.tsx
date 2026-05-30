@@ -707,15 +707,16 @@ function MessageList({
   // 收藏功能
   const { addFavorite, isFavorited, checkBatch, loading: favoriteLoading } = useFavorites();
 
-  // 批量检查消息收藏状态
+  // 收藏状态只在用户进入收藏选择模式后批量检查，避免 /chat 首屏挂载时触发整页消息的收藏 API/状态扇出。
   useEffect(() => {
+    if (selectionMode !== "favorite") return;
     const ids = messages
       .map((m) => m.serverMessageId)
       .filter((id): id is number => typeof id === "number" && id > 0);
     if (ids.length > 0) {
       checkBatch(ids);
     }
-  }, [messages, checkBatch]);
+  }, [messages, checkBatch, selectionMode]);
 
   // 读取本地用户信息（必须在条件分支之前调用 Hook）
   const [userName, setUserName] = useState<string>("");
