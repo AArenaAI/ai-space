@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useChatModelSelection } from "@/hooks/useChatModelSelection";
 import { useChatLocalActions } from "@/hooks/useChatLocalActions";
 import { useChatBackgroundPollingRuntime } from "@/hooks/useChatBackgroundPollingRuntime";
+import { useChatTaskStreamRuntime } from "@/hooks/useChatTaskStreamRuntime";
 import {
   useChatConversationLifecycle,
   useLoadMoreMessagesAction,
@@ -13,11 +14,6 @@ import { registerBackgroundTask } from "@/lib/taskNotifications";
 import { v4 as uuidv4 } from "uuid";
 import { getGuestId } from "@/lib/guestId";
 import { streamAppend, streamGet, streamClear, realtimeUpdate, realtimeGet, realtimeClear } from "@/lib/streaming";
-import {
-  shouldStartTaskStreamFallbackPolling,
-  shouldSyncTaskStreamFinalMessage,
-} from "@/lib/chatTaskStreamFinalizer";
-import { createTaskStreamEventHandler } from "@/lib/chatTaskStreamEventHandler";
 import { createMainStreamEventHandler } from "@/lib/chatMainStreamEventHandler";
 import { runCompareModels } from "@/lib/chatCompareRunCoordinator";
 import {
@@ -79,10 +75,6 @@ import {
 import {
   runChatStreamLifecycle,
 } from "@/lib/chatStreamLifecycle";
-import {
-  runTaskEventStream,
-  shouldFallbackToBackgroundPollingAfterTaskStreamError,
-} from "@/lib/chatTaskStreamLifecycle";
 import {
   buildCompletedPatch,
 } from "@/lib/chatCompletionFinalizer";
@@ -234,7 +226,6 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   const [groupViews, setGroupViews] = useState<Map<number, number>>(new Map());
   const taskStreamsRef = useRef<Record<string, AbortController>>({});
   const abortReasonRef = useRef<"user" | "navigation" | null>(null);
-  const activeTaskStreamsRef = useRef<Record<string, { convId?: number; serverMessageId?: number; generationTaskId?: number; lastSequence?: number; content?: string }>>({});
   const modelsKey = models.map((m) => m.id).join("|");
 
   const stopTaskStream = useCallback((localMessageId: string) => {
@@ -261,99 +252,25 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     translate: t,
   });
 
-  const startTaskEventStream = useCallback((convId: number | undefined, localMessageId: string, serverMessageId?: number, after: number = 0, initialContent: string = "", generationTaskId?: number) => {
-    if (!convId || (!serverMessageId && !generationTaskId) || taskStreamsRef.current[localMessageId]) return;
-    activeTaskStreamsRef.current[localMessageId] = { convId, serverMessageId, generationTaskId, lastSequence: after || 0, content: initialContent || "" };
-    setIsLoading(true);
-
-    const token = localStorage.getItem("token");
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    } else {
-      headers["X-Guest-ID"] = getGuestId();
-    }
-
-    const controller = new AbortController();
-    taskStreamsRef.current[localMessageId] = controller;
-
-    const taskEventHandler = createTaskStreamEventHandler({
-      convId,
-      localMessageId,
-      serverMessageId,
-      generationTaskId,
-      after,
-      initialContent,
-      t,
-      callbacks: {
-        getActiveState: () => activeTaskStreamsRef.current[localMessageId],
-        setActiveState: (state) => {
-          activeTaskStreamsRef.current[localMessageId] = state;
-        },
-        deleteActiveState: () => {
-          delete activeTaskStreamsRef.current[localMessageId];
-        },
-        streamAppend,
-        streamGet: () => streamGet(localMessageId),
-        realtimeGet: () => realtimeGet(localMessageId),
-        realtimeUpdate: (patch) => realtimeUpdate(localMessageId, patch),
-        startBackgroundPolling: (resolvedServerMessageId) => {
-          if (resolvedServerMessageId) {
-            startBackgroundPolling(convId, localMessageId, resolvedServerMessageId);
-          }
-        },
-      },
-    });
-
-
-    (async () => {
-      try {
-        await runTaskEventStream({
-          apiBaseUrl: API_BASE_URL,
-          serverMessageId,
-          generationTaskId,
-          after,
-          headers,
-          signal: controller.signal,
-          onEvent: taskEventHandler.processEvent,
-        });
-      } catch {
-        if (shouldFallbackToBackgroundPollingAfterTaskStreamError(controller.signal)) {
-          startBackgroundPolling(convId, localMessageId, serverMessageId);
-        }
-      } finally {
-        // 同步 streaming store 到 messages state
-        const accumulated = taskEventHandler.getAccumulated();
-        const latestSequence = taskEventHandler.getLatestSequence();
-        const finalData = realtimeGet(localMessageId);
-        if (shouldSyncTaskStreamFinalMessage({ hasFinalData: Boolean(finalData), accumulated })) {
-          setMessages((prev) => patchMessageById(prev, localMessageId, (m) =>
-            applyFinalRealtimeDataToMessage(m, {
-              finalContent: accumulated,
-              finalData,
-              latestSequence,
-              forceContentFallback: true,
-            })
-          ));
-        }
-        realtimeClear(localMessageId);
-        delete taskStreamsRef.current[localMessageId];
-        // 无论是否被 abort，只要 serverMessageId 存在就兜底轮询，避免 task stream 异常中断后前端悬停
-        if (shouldStartTaskStreamFallbackPolling({ serverMessageId })) {
-          startBackgroundPolling(convId, localMessageId, serverMessageId);
-        }
-      }
-    })();
-  }, [startBackgroundPolling]);
+  const {
+    activeTaskStreamsRef,
+    startTaskEventStream,
+    stopAllTaskStreams,
+  } = useChatTaskStreamRuntime({
+    apiBaseUrl: API_BASE_URL,
+    taskStreamsRef,
+    setMessages,
+    setIsLoading,
+    startBackgroundPolling,
+    translate: t,
+  });
 
   useEffect(() => {
     return () => {
       stopAllBackgroundPollers();
-      Object.values(taskStreamsRef.current).forEach((controller) => controller.abort());
-      taskStreamsRef.current = {};
-      activeTaskStreamsRef.current = {};
+      stopAllTaskStreams();
     };
-  }, [stopAllBackgroundPollers]);
+  }, [stopAllBackgroundPollers, stopAllTaskStreams]);
 
   useEffect(() => {
     const loadSeq = ++conversationLoadSeqRef.current;
