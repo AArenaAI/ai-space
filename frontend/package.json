@@ -59,7 +59,8 @@
     "test:chat-stream": "npm run test:chat-background-polling-runner && npm run test:chat-task-event-decision && npm run test:chat-sse-stream-runner && npm run test:chat-task-stream-lifecycle && npm run test:chat-stream-lifecycle && npm run test:chat-stream-event-decision && npm run test:chat-stream-event-processor && npm run test:chat-stream-action-handler && npm run test:chat-task-stream-finalizer && npm run test:chat-task-stream-event-handler && npm run test:chat-main-stream-event-handler && npm run test:chat-final-reconciliation-coordinator",
     "test:chat-runtime": "npm run test:chat-compare-run-coordinator && npm run test:chat-single-send-coordinator && npm run test:chat-stop-generation-coordinator && npm run test:chat-fork-coordinator && npm run test:chat-load-more-coordinator && npm run test:chat-conversation-restore-coordinator && npm run test:chat-navigation-reset-coordinator && npm run test:chat-conversation-create-coordinator && npm run test:chat-run-ui-coordinator && npm run test:chat-local-action-coordinator && npm run test:chat-model-selection && npm run test:chat-local-actions-hook && npm run test:chat-conversation-lifecycle-hook && npm run test:chat-background-polling-runtime-hook && npm run test:chat-task-stream-runtime-hook && npm run test:chat-main-stream-runtime-hook && npm run test:chat-send-runtime-hook && npm run test:chat-conversation-restore-runtime-hook && npm run test:chat-generation-controls-runtime-hook",
     "test:chat-regression": "npm run test:chat-core && npm run test:chat-stream && npm run test:chat-runtime",
-    "test:browser-smoke": "node scripts/regression/browser-smoke.cjs"
+    "test:browser-smoke": "node scripts/regression/browser-smoke.cjs",
+    "test:chat-performance": "node scripts/regression/chat-performance-benchmark.cjs"
   },
   "dependencies": {
     "@antv/g6": "^5.1.1",
