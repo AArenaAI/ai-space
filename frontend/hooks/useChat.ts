@@ -8,27 +8,13 @@ import { useChatTaskStreamRuntime } from "@/hooks/useChatTaskStreamRuntime";
 import { useChatMainStreamRuntime } from "@/hooks/useChatMainStreamRuntime";
 import { useChatSendRuntime } from "@/hooks/useChatSendRuntime";
 import { useChatConversationRestoreRuntime } from "@/hooks/useChatConversationRestoreRuntime";
+import { useChatGenerationControlsRuntime } from "@/hooks/useChatGenerationControlsRuntime";
 import {
   useChatConversationLifecycle,
   useLoadMoreMessagesAction,
 } from "@/hooks/useChatConversationLifecycle";
 import { useI18n } from "@/lib/i18n";
 import { v4 as uuidv4 } from "uuid";
-import { getGuestId } from "@/lib/guestId";
-import {
-  cancelGenerationTask,
-  runStopGeneration,
-} from "@/lib/chatStopGenerationCoordinator";
-import {
-  buildForkRefreshState,
-  fetchForkConversationRefresh,
-  resolveForkConversationId,
-  resolveForkedModels,
-  runForkChatRequest,
-} from "@/lib/chatForkCoordinator";
-import {
-  buildChatRequestHeaders,
-} from "@/lib/chatRequestBuilder";
 import { createFinalizingStatus } from "@/lib/chatActivityStatus";
 import type {
   ChatModel,
@@ -261,43 +247,20 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     translate: t,
   });
 
-  const stopGeneration = useCallback(() => {
-    const token = localStorage.getItem("token");
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    } else {
-      headers["X-Guest-ID"] = getGuestId();
-    }
-
-    runStopGeneration({
-      messages,
-      callbacks: {
-        cancelTask: (taskId) => {
-          cancelGenerationTask({
-            apiBaseUrl: API_BASE_URL,
-            taskId,
-            headers,
-          });
-        },
-        abortTaskStreams: () => {
-          Object.values(taskStreamsRef.current).forEach((controller) => controller.abort());
-          taskStreamsRef.current = {};
-        },
-        getMainAbortController: () => abortControllerRef.current,
-        clearMainAbortController: () => {
-          abortControllerRef.current = null;
-        },
-        getCompareAbortControllers: () => compareAbortControllersRef.current,
-        clearCompareAbortControllers: () => {
-          compareAbortControllersRef.current = [];
-        },
-        setAbortReason: (reason) => {
-          abortReasonRef.current = reason;
-        },
-      },
-    });
-  }, [messages]);
+  const { stopGeneration, forkChat } = useChatGenerationControlsRuntime({
+    apiBaseUrl: API_BASE_URL,
+    messages,
+    currentConversation,
+    taskStreamsRef,
+    abortControllerRef,
+    compareAbortControllersRef,
+    abortReasonRef,
+    setIsCompare,
+    setCompareModels,
+    setMessages,
+    setLoadedPersistedMessages,
+    setGroupViews,
+  });
 
   const {
     clearMessages,
@@ -314,48 +277,6 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     sendMessage,
   });
 
-  // Fork 对比：从指定消息处 Fork 出新模型对比
-  const forkChat = useCallback(
-    async (messageId: number, modelIds: string[]) => {
-      const token = localStorage.getItem("token");
-      const headers = buildChatRequestHeaders({ token, guestId: getGuestId() });
-      const data = await runForkChatRequest({
-        apiBaseUrl: API_BASE_URL,
-        messageId,
-        modelIds,
-        headers,
-      });
-
-      // 进入对比模式
-      setIsCompare(true);
-      setCompareModels(resolveForkedModels(data, modelIds));
-
-      // 刷新消息列表（新 fork 的 assistant 消息已被后端创建，可立即展示占位）
-      const convId = resolveForkConversationId(data, currentConversation);
-      if (convId && token) {
-        try {
-          const refreshData = await fetchForkConversationRefresh({
-            apiBaseUrl: API_BASE_URL,
-            conversationId: convId,
-            token,
-          });
-          const refreshState = buildForkRefreshState(refreshData, {
-            fallbackId: uuidv4,
-          });
-          if (refreshState) {
-            setMessages(refreshState.messages as Message[]);
-            setLoadedPersistedMessages(refreshState.messages.length);
-            setGroupViews(refreshState.groupViews);
-          }
-        } catch (e) {
-          console.error("fork refresh failed:", e);
-        }
-      }
-
-      return data;
-    },
-    [currentConversation]
-  );
 
   // 向上滚动加载更多历史消息
   const loadMoreMessages = useLoadMoreMessagesAction({
