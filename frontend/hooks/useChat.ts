@@ -78,6 +78,14 @@ import {
   decideSingleSendFinally,
 } from "@/lib/chatRunUiCoordinator";
 import {
+  appendCreateConversationFailureMessage,
+  buildClearMessagesState,
+  buildCreateConversationFailureMessage,
+  buildRegenerateRequest,
+  deleteMessageById,
+  switchGroupView,
+} from "@/lib/chatLocalActionCoordinator";
+import {
   runChatStreamLifecycle,
 } from "@/lib/chatStreamLifecycle";
 import {
@@ -1001,16 +1009,12 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         convId = await createConversation(title, selectedModel.id, effectiveSkillKey);
         if (!convId) {
           // 创建对话失败，显示错误提示并终止
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: uuidv4(),
-              role: "assistant",
-              content: "❌ 创建对话失败，请检查登录状态或刷新页面重试",
-              model: selectedModel.id,
-              createdAt: Date.now(),
-            },
-          ]);
+          const failureMessage = buildCreateConversationFailureMessage({
+            id: uuidv4(),
+            modelId: selectedModel.id,
+            createdAt: Date.now(),
+          }) as Message;
+          setMessages((prev) => appendCreateConversationFailureMessage(prev, failureMessage));
           setIsLoading(false);
           return;
         }
@@ -1126,30 +1130,25 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   }, [messages]);
 
   const clearMessages = useCallback(() => {
-    setMessages([]);
-    setCurrentConversation(undefined);
+    const clearState = buildClearMessagesState();
+    setMessages(clearState.messages as Message[]);
+    setCurrentConversation(clearState.currentConversation);
   }, []);
 
   const deleteMessage = useCallback((messageId: string) => {
-    setMessages((prev) => prev.filter((m) => m.id !== messageId));
+    setMessages((prev) => deleteMessageById(prev, messageId));
   }, []);
 
   const regenerateMessage = useCallback(async () => {
     // 重新生成最后一条用户消息的回复
-    const lastUserMsg = messages
-      .filter((m) => m.role === "user")
-      .pop();
-    if (lastUserMsg) {
-      await sendMessage(lastUserMsg.content, lastReasoningRef.current, true, lastSearchRef.current);
+    const request = buildRegenerateRequest(messages);
+    if (request) {
+      await sendMessage(request.content, lastReasoningRef.current, request.shouldRegenerate, lastSearchRef.current);
     }
   }, [messages, sendMessage]);
 
   const switchGroupModel = useCallback((groupId: number, activeIndex: number) => {
-    setGroupViews((prev) => {
-      const next = new Map(prev);
-      next.set(groupId, activeIndex);
-      return next;
-    });
+    setGroupViews((prev) => switchGroupView(prev, groupId, activeIndex));
   }, []);
 
   // Fork 对比：从指定消息处 Fork 出新模型对比
