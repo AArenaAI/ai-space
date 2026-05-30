@@ -171,4 +171,16 @@ test("handles done, closes open reasoning and starts polling when content exists
   assert.deepEqual(h.calls.at(-1), ["poll", 10]);
 });
 
+test("flushes pending mixed-delta answer on done", () => {
+  const h = makeHarness();
+  h.handler.processEvent(sse({ choices: [{ delta: { reasoning_content: "why", content: "OK 42" } }] }, 8));
+  h.handler.processEvent(sse("[DONE]", 9));
+  assert.equal(h.handler.getAccumulated(), "<think>why</think>OK 42");
+  assert.deepEqual(h.calls.filter((call) => call[0] === "append"), [
+    ["append", "local-1", { reasoningDelta: "why", reasoning: true }],
+    ["append", "local-1", { reasoning: false }],
+    ["append", "local-1", { answerDelta: "OK 42", reasoning: false }],
+  ]);
+});
+
 console.log("\nchat task stream event handler regression tests passed");

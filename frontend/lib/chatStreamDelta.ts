@@ -1,5 +1,6 @@
 export type ReasoningStreamState = {
   inReasoningBlock: boolean;
+  pendingAnswerContent?: string;
 };
 
 export type StructuredStreamDeltaResult = {
@@ -39,20 +40,31 @@ export function buildStructuredStreamDelta(
     }
     legacyDelta += reasoningDelta;
     operations.push({ type: "reasoning", reasoningDelta });
+
+    // Some providers can emit reasoning and visible answer text in the same SSE
+    // delta. Product-wise the reasoning block should finish before the answer
+    // starts rendering, so hold the answer part until a later content-only delta
+    // or stream completion closes the reasoning block.
+    if (contentDelta) {
+      state.pendingAnswerContent = `${state.pendingAnswerContent || ""}${contentDelta}`;
+    }
+    return { legacyDelta, hasContentDelta: false, operations };
   }
 
   // OpenAI Responses can occasionally emit reasoning and visible text in the same delta.
   // Handle content independently instead of `else if`, otherwise the visible answer may
   // stay inside the open <think> block until a full page refresh reloads DB content.
   if (contentDelta) {
+    const answerDelta = `${state.pendingAnswerContent || ""}${contentDelta}`;
+    state.pendingAnswerContent = "";
     if (state.inReasoningBlock) {
       legacyDelta += "</think>";
       state.inReasoningBlock = false;
       operations.push({ type: "close_reasoning" });
     }
-    legacyDelta += contentDelta;
-    operations.push({ type: "answer", answerDelta: contentDelta });
+    legacyDelta += answerDelta;
+    operations.push({ type: "answer", answerDelta });
   }
 
-  return { legacyDelta, hasContentDelta: !!contentDelta, operations };
+  return { legacyDelta, hasContentDelta: operations.some((operation) => operation.type === "answer"), operations };
 }

@@ -27,6 +27,7 @@ export function buildFinalizingPatch({ createFinalizingStatus, hasContent }: Bui
   return {
     completedAt: undefined,
     activityStatus: createFinalizingStatus(hasContent),
+    searchStatus: undefined,
   };
 }
 
@@ -52,6 +53,7 @@ export function buildStoppedPatch(now?: number): ChatCompletionPatch {
     stopped: true,
     completedAt: now,
     activityStatus: undefined,
+    searchStatus: undefined,
   };
 }
 
@@ -78,6 +80,7 @@ export function buildCompletedPatch(now: number): ChatCompletionPatch {
   return {
     completedAt: now,
     activityStatus: undefined,
+    searchStatus: undefined,
   };
 }
 
@@ -105,5 +108,6 @@ export function buildDisplayErrorPatch(options: BuildDisplayErrorPatchOptions): 
     content: buildDisplayErrorMessage(options),
     completedAt: options.now,
     activityStatus: undefined,
+    searchStatus: undefined,
   };
 }

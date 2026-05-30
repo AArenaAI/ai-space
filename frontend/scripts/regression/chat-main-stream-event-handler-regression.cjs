@@ -164,8 +164,8 @@ test("handles delta payload and content status", () => {
   assert.equal(h.getRealtime().activityStatus.label, "生成中");
 });
 
-test("handles done, closes open reasoning, and marks sawDone", () => {
-  const h = makeHarness({ streamContent: "answer" });
+test("handles done, closes open reasoning, clears search status, and marks sawDone", () => {
+  const h = makeHarness({ streamContent: "answer", realtimeData: { searchStatus: "searching" } });
   h.handler.processEvent(sse({ choices: [{ delta: { reasoning_content: "hidden" } }] }));
   h.handler.processEvent(sse("[DONE]", 11));
   const state = h.handler.getState();
@@ -174,6 +174,19 @@ test("handles done, closes open reasoning, and marks sawDone", () => {
   assert.equal(state.accumulated, "<think>hidden</think>");
   assert.deepEqual(h.calls.filter((call) => call[0] === "append").at(-1), ["append", "assistant-1", { reasoning: false }]);
   assert.equal(h.getRealtime().completedAt !== undefined, true);
+  assert.equal(h.getRealtime().searchStatus, undefined);
+});
+
+test("flushes pending mixed-delta answer on done", () => {
+  const h = makeHarness();
+  h.handler.processEvent(sse({ choices: [{ delta: { reasoning_content: "why", content: "OK 42" } }] }));
+  h.handler.processEvent(sse("[DONE]", 12));
+  assert.equal(h.handler.getState().accumulated, "<think>why</think>OK 42");
+  assert.deepEqual(h.calls.filter((call) => call[0] === "append"), [
+    ["append", "assistant-1", { reasoningDelta: "why", reasoning: true }],
+    ["append", "assistant-1", { reasoning: false }],
+    ["append", "assistant-1", { answerDelta: "OK 42", reasoning: false }],
+  ]);
 });
 
 test("setRecoverable updates run state", () => {

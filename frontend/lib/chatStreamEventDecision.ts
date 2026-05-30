@@ -70,7 +70,7 @@ export function buildChatDonePatch({
   return {
     hasContent,
     patch: hasContent
-      ? { completedAt: now, activityStatus: undefined }
+      ? { completedAt: now, activityStatus: undefined, searchStatus: undefined }
       : { completedAt: undefined, activityStatus: busyStatus },
   };
 }

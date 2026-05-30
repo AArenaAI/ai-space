@@ -103,6 +103,12 @@ export function createTaskStreamEventHandler({
         callbacks.streamAppend(localMessageId, { reasoning: false });
         reasoningState.inReasoningBlock = false;
       }
+      if (reasoningState.pendingAnswerContent) {
+        const answerDelta = reasoningState.pendingAnswerContent;
+        reasoningState.pendingAnswerContent = "";
+        accumulated += answerDelta;
+        callbacks.streamAppend(localMessageId, { answerDelta, reasoning: false });
+      }
       callbacks.deleteActiveState();
       sawDone = true;
       const doneDecision = buildTaskStreamDoneDecision({

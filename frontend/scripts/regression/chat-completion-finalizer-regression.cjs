@@ -45,6 +45,7 @@ test("buildFinalizingPatch clears completedAt and sets finalizing status", () =>
   assert.deepEqual(patch, {
     completedAt: undefined,
     activityStatus: { kind: "generating", status: "running", label: "同步最终内容" },
+    searchStatus: undefined,
   });
 });
 
@@ -64,6 +65,7 @@ test("buildStoppedPatch marks stopped and completed time", () => {
     stopped: true,
     completedAt: 123,
     activityStatus: undefined,
+    searchStatus: undefined,
   });
 });
 
@@ -81,6 +83,7 @@ test("buildCompletedPatch clears activity", () => {
   assert.deepEqual(mod.buildCompletedPatch(456), {
     completedAt: 456,
     activityStatus: undefined,
+    searchStatus: undefined,
   });
 });
 
@@ -95,6 +98,7 @@ test("buildDisplayErrorPatch can omit completedAt for single chat legacy behavio
     content: "❌ 请求失败",
     completedAt: undefined,
     activityStatus: undefined,
+    searchStatus: undefined,
   });
 });
 

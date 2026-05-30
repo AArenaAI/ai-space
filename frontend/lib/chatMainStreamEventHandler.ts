@@ -114,10 +114,17 @@ export function createMainStreamEventHandler({
   };
 
   const closeOpenReasoning = () => {
-    if (!reasoningState.inReasoningBlock) return;
-    accumulated += "</think>";
-    callbacks.streamAppend(assistantMessageId, { reasoning: false });
-    reasoningState.inReasoningBlock = false;
+    if (reasoningState.inReasoningBlock) {
+      accumulated += "</think>";
+      callbacks.streamAppend(assistantMessageId, { reasoning: false });
+      reasoningState.inReasoningBlock = false;
+    }
+    if (reasoningState.pendingAnswerContent) {
+      const answerDelta = reasoningState.pendingAnswerContent;
+      reasoningState.pendingAnswerContent = "";
+      accumulated += answerDelta;
+      callbacks.streamAppend(assistantMessageId, { answerDelta, reasoning: false });
+    }
   };
 
   const applyGenerationMeta = (meta: {

@@ -65,6 +65,7 @@ test("buildTaskStreamDoneDecision finalizes and starts polling only with content
     patch: {
       completedAt: undefined,
       activityStatus: { kind: "generating", status: "running", label: "正在校准最终内容" },
+      searchStatus: undefined,
     },
     shouldStartBackgroundPolling: true,
   });
@@ -82,6 +83,7 @@ test("buildTaskStreamDoneDecision keeps finalizing busy without content", () => 
     patch: {
       completedAt: undefined,
       activityStatus: { kind: "generating", status: "running", label: "正在生成" },
+      searchStatus: undefined,
     },
     shouldStartBackgroundPolling: false,
   });

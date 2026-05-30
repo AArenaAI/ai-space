@@ -72,14 +72,22 @@ test("applies reasoning-only delta and opens reasoning state", () => {
   assert.equal(state.inReasoningBlock, true);
 });
 
-test("closes reasoning before answer in mixed delta", () => {
+test("holds answer from mixed reasoning delta until later content-only delta", () => {
   const state = { inReasoningBlock: true };
-  const { result, calls } = collect({ reasoning: " more", content: " answer" }, state);
-  assert.equal(result.legacyDelta, " more</think> answer");
-  assert.deepEqual(calls, [
+  const first = collect({ reasoning: " more", content: " answer" }, state);
+  assert.equal(first.result.legacyDelta, " more");
+  assert.equal(first.result.hasContentDelta, false);
+  assert.deepEqual(first.calls, [
     { messageId: "m1", delta: { reasoningDelta: " more", reasoning: true } },
+  ]);
+  assert.equal(state.inReasoningBlock, true);
+  assert.equal(state.pendingAnswerContent, " answer");
+
+  const second = collect({ content: " done" }, state);
+  assert.equal(second.result.legacyDelta, "</think> answer done");
+  assert.deepEqual(second.calls, [
     { messageId: "m1", delta: { reasoning: false } },
-    { messageId: "m1", delta: { answerDelta: " answer", reasoning: false } },
+    { messageId: "m1", delta: { answerDelta: " answer done", reasoning: false } },
   ]);
   assert.equal(state.inReasoningBlock, false);
 });

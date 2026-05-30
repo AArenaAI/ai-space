@@ -56,16 +56,25 @@ try {
     assert.deepEqual(result.operations, [{ type: "answer", answerDelta: "answer" }]);
   });
 
-  test("reasoning and content in same event opens then closes reasoning before answer", () => {
+  test("reasoning and content in same event holds answer until a later content-only delta", () => {
     const state = { inReasoningBlock: false };
     const result = mod.buildStructuredStreamDelta("why", "final", state);
-    assert.equal(result.legacyDelta, "<think>why</think>final");
-    assert.equal(result.hasContentDelta, true);
-    assert.equal(state.inReasoningBlock, false);
+    assert.equal(result.legacyDelta, "<think>why");
+    assert.equal(result.hasContentDelta, false);
+    assert.equal(state.inReasoningBlock, true);
+    assert.equal(state.pendingAnswerContent, "final");
     assert.deepEqual(result.operations, [
       { type: "reasoning", reasoningDelta: "why" },
+    ]);
+
+    const next = mod.buildStructuredStreamDelta("", " answer", state);
+    assert.equal(next.legacyDelta, "</think>final answer");
+    assert.equal(next.hasContentDelta, true);
+    assert.equal(state.inReasoningBlock, false);
+    assert.equal(state.pendingAnswerContent, "");
+    assert.deepEqual(next.operations, [
       { type: "close_reasoning" },
-      { type: "answer", answerDelta: "final" },
+      { type: "answer", answerDelta: "final answer" },
     ]);
   });
 

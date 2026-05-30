@@ -54,7 +54,7 @@ test("buildChatDonePatch completes when content exists", () => {
     busyStatus,
   }), {
     hasContent: true,
-    patch: { completedAt: 123, activityStatus: undefined },
+    patch: { completedAt: 123, activityStatus: undefined, searchStatus: undefined },
   });
 });
 
