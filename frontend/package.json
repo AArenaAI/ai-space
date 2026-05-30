@@ -63,7 +63,8 @@
     "test:browser-smoke": "node scripts/regression/browser-smoke.cjs",
     "test:chat-performance": "node scripts/regression/chat-performance-benchmark.cjs",
     "test:chat-streaming-performance": "node scripts/regression/chat-streaming-performance.cjs",
-    "test:chat-render-performance": "node scripts/regression/chat-render-performance.cjs"
+    "test:chat-render-performance": "node scripts/regression/chat-render-performance.cjs",
+    "test:chat-real-e2e": "node scripts/regression/chat-real-e2e.cjs"
   },
   "dependencies": {
     "@antv/g6": "^5.1.1",
