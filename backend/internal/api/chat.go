@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -1613,6 +1614,23 @@ type UnifiedStreamResult struct {
 	ErrorMeta          map[string]interface{}
 }
 
+var geminiReasoningTextPrefixPattern = regexp.MustCompile(`^\s*(思考过程|思考|分析|推理过程)\s*[:：]\s*`)
+var blankLinePattern = regexp.MustCompile(`\n\s*\n`)
+
+func splitGeminiReasoningTextDelta(delta string) (string, string) {
+	trimmed := strings.TrimSpace(delta)
+	if trimmed == "" || !geminiReasoningTextPrefixPattern.MatchString(trimmed) {
+		return "", delta
+	}
+	parts := blankLinePattern.Split(trimmed, 2)
+	if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
+		return "", delta
+	}
+	reasoning := strings.TrimSpace(parts[0])
+	answer := strings.TrimLeft(parts[1], " 	\r\n")
+	return reasoning, answer
+}
+
 func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, w gin.ResponseWriter, reasoningEnabled bool, assistantMsgID uint, useBackground bool, userID uint, guestID string, conversationID uint, model string, provider string, streamTask *models.AIBackgroundTask, initialSequence int64) (*UnifiedStreamResult, *services.TokenUsage, error) {
 	decoder := resp.Decoder
 	if decoder == nil {
@@ -1703,11 +1721,27 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 	var fullContent strings.Builder
 	var reasoningContent strings.Builder
 	var reasoningPersistOpen bool
+	var pendingGeminiReasoningText string
 	var contentMu sync.Mutex
 	var getSnapshot = func() (string, string) {
 		contentMu.Lock()
 		defer contentMu.Unlock()
 		return fullContent.String(), reasoningContent.String()
+	}
+	flushPendingGeminiReasoningText := func() error {
+		if pendingGeminiReasoningText == "" {
+			return nil
+		}
+		reasoningDelta := pendingGeminiReasoningText
+		pendingGeminiReasoningText = ""
+		contentMu.Lock()
+		reasoningContent.WriteString(reasoningDelta)
+		contentMu.Unlock()
+		return writeDataEvent("delta", map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{"delta": map[string]string{"content": "", "reasoning_content": reasoningDelta}},
+			},
+		})
 	}
 
 	// 定期将增量内容落库，防止用户跳转/刷新时丢失生成进度
@@ -1767,9 +1801,14 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 					// event，task stream 只能靠 terminal 状态合成 [DONE]，容易在最后几段
 					// delta 落库/可见前提前结束前端流。
 					if event != nil && event.Type == services.EventDone {
+						if err := flushPendingGeminiReasoningText(); err != nil {
+							content, reasoning := getSnapshot()
+							outcome.FullContent = strings.TrimSpace(content)
+							outcome.ReasoningContent = strings.TrimSpace(reasoning)
+							return outcome, finalUsage, err
+						}
 						contentMu.Lock()
 						if reasoningPersistOpen {
-							fullContent.WriteString("</think>")
 							reasoningPersistOpen = false
 						}
 						contentMu.Unlock()
@@ -1833,9 +1872,14 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 			}
 
 			if event.Type == services.EventDone {
+				if err := flushPendingGeminiReasoningText(); err != nil {
+					content, reasoning := getSnapshot()
+					outcome.FullContent = strings.TrimSpace(content)
+					outcome.ReasoningContent = strings.TrimSpace(reasoning)
+					return outcome, finalUsage, err
+				}
 				contentMu.Lock()
 				if reasoningPersistOpen {
-					fullContent.WriteString("</think>")
 					reasoningPersistOpen = false
 				}
 				contentMu.Unlock()
@@ -1862,7 +1906,6 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 
 				contentMu.Lock()
 				if reasoningPersistOpen {
-					fullContent.WriteString("</think>")
 					reasoningPersistOpen = false
 				}
 				contentMu.Unlock()
@@ -1957,25 +2000,45 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 
 			delta := map[string]string{"content": ""}
 			if event.Type == services.EventTextDelta {
-				delta["content"] = event.Delta
+				contentDelta := event.Delta
+				if reasoningEnabled && (provider == "gemini" || strings.Contains(strings.ToLower(model), "gemini")) {
+					candidate := contentDelta
+					if pendingGeminiReasoningText != "" {
+						candidate = pendingGeminiReasoningText + candidate
+						pendingGeminiReasoningText = ""
+					}
+					if geminiReasoningTextPrefixPattern.MatchString(strings.TrimSpace(candidate)) {
+						if extractedReasoning, answer := splitGeminiReasoningTextDelta(candidate); extractedReasoning != "" {
+							delta["reasoning_content"] = extractedReasoning
+							contentDelta = answer
+						} else {
+							pendingGeminiReasoningText = candidate
+							contentDelta = ""
+						}
+					}
+				}
+				delta["content"] = contentDelta
 				contentMu.Lock()
+				if reasoningDelta := delta["reasoning_content"]; reasoningDelta != "" {
+					reasoningContent.WriteString(reasoningDelta)
+				}
 				if reasoningPersistOpen {
-					fullContent.WriteString("</think>")
 					reasoningPersistOpen = false
 				}
-				fullContent.WriteString(event.Delta)
+				fullContent.WriteString(contentDelta)
 				contentMu.Unlock()
 			} else if event.Type == services.EventReasoningDelta {
-				delta["reasoning_content"] = event.Delta
-				// reasoning summary 也持久化到 content 内，沿用前端已有 <think> 解析展示。
-				// 这样刷新/重新打开会话后，思考区不会丢失。
+				reasoningDelta := event.Delta
+				if pendingGeminiReasoningText != "" {
+					reasoningDelta = pendingGeminiReasoningText + reasoningDelta
+					pendingGeminiReasoningText = ""
+				}
+				delta["reasoning_content"] = reasoningDelta
 				contentMu.Lock()
 				if !reasoningPersistOpen {
-					fullContent.WriteString("<think>")
 					reasoningPersistOpen = true
 				}
-				fullContent.WriteString(event.Delta)
-				reasoningContent.WriteString(event.Delta)
+				reasoningContent.WriteString(reasoningDelta)
 				contentMu.Unlock()
 			}
 

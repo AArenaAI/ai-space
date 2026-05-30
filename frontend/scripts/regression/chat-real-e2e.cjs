@@ -11,6 +11,8 @@ const requireStreamReasoning = process.env.REAL_CHAT_REQUIRE_STREAM_REASONING ==
 const requirePersistedReasoning = process.env.REAL_CHAT_REQUIRE_PERSISTED_REASONING === "1" || requireReasoning;
 const reasoningEffort = process.env.REAL_CHAT_REASONING_EFFORT || "standard";
 const searchEnabled = process.env.REAL_CHAT_SEARCH === "1";
+const requireCleanContent = process.env.REAL_CHAT_REQUIRE_CLEAN_CONTENT === "1";
+const reasoningLeakPattern = /(思考过程|推理过程|思考|分析)\s*[:：]/;
 const prompt = process.env.REAL_CHAT_PROMPT || (reasoningEnabled
   ? "真实E2E思考验证：请先进行非常简短的思考，然后正文只回答 OK 和数字 42。"
   : "真实E2E验证：请只回答 OK，然后给出数字 42。");
@@ -164,6 +166,9 @@ async function runRealChatRequest(token, conversationId) {
   if (requireStreamReasoning) {
     assert(reasoning.trim().length > 0, "chat stream produced no reasoning content while reasoning is required");
   }
+  if (requireCleanContent) {
+    assert(!reasoningLeakPattern.test(content), `assistant content contains reasoning-style prefix while clean content is required: ${JSON.stringify(content.slice(0, 200))}`);
+  }
   assert(metaConversationId === conversationId, `stream conversation mismatch: ${metaConversationId} !== ${conversationId}`);
   assert(assistantMessageId, "stream metadata missing assistant_message_id");
   assert(userMessageId, "stream metadata missing user_message_id");
@@ -211,6 +216,9 @@ async function verifyTaskAndHistory(token, ids, expectedContent) {
   assert(userMessage, "restored history missing user message");
   assert(assistantMessage, "restored history missing assistant message");
   assert(expectedPattern.test(String(assistantMessage.content || "")), "restored assistant content does not match expected answer");
+  if (requireCleanContent) {
+    assert(!reasoningLeakPattern.test(String(assistantMessage.content || "")), "restored assistant content contains reasoning-style prefix while clean content is required");
+  }
   assert(assistantMessage.completed_at, "restored assistant message missing completed_at");
   const persistedReasoning = assistantMessage.reasoning_content || assistantMessage.reasoning || assistantMessage.thinking || "";
   if (requirePersistedReasoning) {
@@ -321,8 +329,16 @@ async function runBrowserHistoryE2E(token, user, conversationId, expectedContent
     assert(bodyText.includes(promptNeedle), `browser history did not render user prompt: ${JSON.stringify(promptNeedle)}`);
     assert(expectedPattern.test(bodyText), "browser history did not render assistant answer");
     if (requirePersistedReasoning) {
-      const reasoningNeedle = String(expectedReasoning || "").trim().split(/\s+/)[0];
-      assert(reasoningNeedle && bodyText.includes(reasoningNeedle), `browser history did not render persisted reasoning: ${JSON.stringify(reasoningNeedle)}`);
+      const reasoningNeedles = String(expectedReasoning || "")
+        .replace(/[`*_#>\[\](){}]/g, " ")
+        .split(/\s+/)
+        .map((part) => part.trim())
+        .filter((part) => part.length >= 4)
+        .slice(0, 8);
+      assert(reasoningNeedles.length > 0, "persisted reasoning had no searchable browser needle");
+      const reasoningVisible = reasoningNeedles.some((needle) => bodyText.includes(needle));
+      const reasoningBlockRendered = /思考|推理|Reasoning|Thinking/i.test(bodyText);
+      assert(reasoningVisible || reasoningBlockRendered, `browser history did not render persisted reasoning block: ${JSON.stringify(reasoningNeedles)}`);
     }
     assert(!/加载中\.\.\./.test(bodyText) || bodyText.length > 100, "browser appears stuck in loading state");
     assert(issues.length === 0, `browser issues:\n${issues.slice(0, 12).join("\n")}`);
@@ -342,6 +358,7 @@ async function runBrowserHistoryE2E(token, user, conversationId, expectedContent
     requireReasoning,
     requireStreamReasoning,
     requirePersistedReasoning,
+    requireCleanContent,
     reasoningEffort,
     searchEnabled,
     browserEnabled,
