@@ -5,16 +5,15 @@ import { useChatModelSelection } from "@/hooks/useChatModelSelection";
 import { useChatLocalActions } from "@/hooks/useChatLocalActions";
 import { useChatBackgroundPollingRuntime } from "@/hooks/useChatBackgroundPollingRuntime";
 import { useChatTaskStreamRuntime } from "@/hooks/useChatTaskStreamRuntime";
+import { useChatMainStreamRuntime } from "@/hooks/useChatMainStreamRuntime";
 import {
   useChatConversationLifecycle,
   useLoadMoreMessagesAction,
 } from "@/hooks/useChatConversationLifecycle";
 import { useI18n } from "@/lib/i18n";
-import { registerBackgroundTask } from "@/lib/taskNotifications";
 import { v4 as uuidv4 } from "uuid";
 import { getGuestId } from "@/lib/guestId";
-import { streamAppend, streamGet, streamClear, realtimeUpdate, realtimeGet, realtimeClear } from "@/lib/streaming";
-import { createMainStreamEventHandler } from "@/lib/chatMainStreamEventHandler";
+import { realtimeGet } from "@/lib/streaming";
 import { runCompareModels } from "@/lib/chatCompareRunCoordinator";
 import {
   applySingleSendMessagePlan,
@@ -45,10 +44,6 @@ import {
   resolveConversationSkillKey,
 } from "@/lib/chatConversationRestoreCoordinator";
 import {
-  buildFinalStreamRunResult,
-  decideFinalStreamReconciliation,
-} from "@/lib/chatFinalReconciliationCoordinator";
-import {
   buildConversationNavigationPlan,
   shouldContinueConversationRestore,
 } from "@/lib/chatNavigationResetCoordinator";
@@ -73,18 +68,11 @@ import {
   buildCreateConversationFailureMessage,
 } from "@/lib/chatLocalActionCoordinator";
 import {
-  runChatStreamLifecycle,
-} from "@/lib/chatStreamLifecycle";
-import {
-  buildCompletedPatch,
-} from "@/lib/chatCompletionFinalizer";
-import {
   type ChatStreamGroupContext,
   type ChatStreamRunResult,
 } from "@/lib/chatStreamRunResult";
 import {
   applyCompareGroupContextToMessages,
-  applyFinalRealtimeDataToMessage,
   patchMessageById,
 } from "@/lib/chatMessageStatePatch";
 import {
@@ -465,134 +453,16 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     [setCreatedConversation]
   );
 
-  // 流式读取核心逻辑
-  const streamResponse = useCallback(
-    async (
-      response: Response,
-      assistantMsg: Message,
-      controller: AbortController,
-      convId?: number,
-      onGroupContext?: (context: CompareGroupContext) => void
-    ): Promise<StreamRunResult | undefined> => {
-      const mainStreamHandler = createMainStreamEventHandler({
-        assistantMessageId: assistantMsg.id,
-        assistantModelName: assistantMsg.model,
-        selectedModelName: selectedModel.name,
-        conversationId: convId,
-        conversationTitle,
-        initialGroupMeta: {
-          groupId: assistantMsg.groupId,
-          groupIndex: assistantMsg.groupIndex,
-          groupModels: assistantMsg.groupModels,
-          userMessageId: assistantMsg.userMessageId,
-        },
-        t,
-        callbacks: {
-          streamAppend,
-          streamGet: () => streamGet(assistantMsg.id),
-          realtimeGet: () => realtimeGet(assistantMsg.id),
-          realtimeUpdate: (patch) => realtimeUpdate(assistantMsg.id, patch),
-          registerBackgroundTask,
-          onGroupContext,
-        },
-      });
-
-      const buildStreamRunResult = (contentOverride?: string): StreamRunResult => {
-        const state = mainStreamHandler.getState();
-        return buildFinalStreamRunResult({
-          state,
-          finalContent: contentOverride || streamGet(assistantMsg.id),
-        });
-      };
-
-      try {
-        const lifecycleResult = await runChatStreamLifecycle({
-          response,
-          signal: controller.signal,
-          getAbortReason: () => abortReasonRef.current,
-          getRecoveryIds: () => ({
-            serverMessageId: mainStreamHandler.getState().serverMessageId,
-            generationTaskId: mainStreamHandler.getState().generationTaskId,
-          }),
-          onEvent: mainStreamHandler.processEvent,
-        });
-        if (lifecycleResult.action === "ignored") {
-          return;
-        }
-        if (lifecycleResult.action === "resume") {
-          mainStreamHandler.setRecoverable(true);
-          const state = mainStreamHandler.getState();
-          startTaskEventStream(convId || currentConversation, assistantMsg.id, state.serverMessageId, state.lastSequence, state.accumulated, state.generationTaskId);
-          return;
-        }
-      } finally {
-        const abortReason = abortReasonRef.current;
-
-        // 如果 reasoning 块未关闭，自动关闭
-        mainStreamHandler.closeOpenReasoning();
-        const state = mainStreamHandler.getState();
-
-        // 同步 streaming store 到 messages state，并根据 stream 结果决定恢复/校准/完成状态。
-        const streamContent = streamGet(assistantMsg.id);
-        const finalData = realtimeGet(assistantMsg.id);
-        const finalAction = decideFinalStreamReconciliation({
-          state,
-          abortReason,
-          streamContent,
-          hasRealtimeData: Boolean(finalData),
-        });
-
-        if (finalAction.shouldSyncFinalData) {
-          setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) =>
-            applyFinalRealtimeDataToMessage(m, { finalContent: finalAction.finalContent, finalData })
-          ));
-        }
-
-        if (finalAction.type === "recover") {
-          mainStreamHandler.setRecoverable(true);
-          startTaskEventStream(
-            convId || currentConversation,
-            assistantMsg.id,
-            finalAction.serverMessageId,
-            finalAction.lastSequence,
-            finalAction.finalContent,
-            finalAction.generationTaskId
-          );
-          if (finalAction.shouldStartBackgroundPolling && finalAction.serverMessageId) {
-            startBackgroundPolling(convId || currentConversation, assistantMsg.id, finalAction.serverMessageId);
-          }
-          return finalAction.result;
-        }
-
-        if (finalAction.type === "reconcile_after_done") {
-          mainStreamHandler.setRecoverable(true);
-          // The initial /chat request is itself a task event stream. Its controller is
-          // still registered until this finally block finishes, so an immediate
-          // startTaskEventStream() would no-op and leave the UI stuck on partial text.
-          // DB polling is the correct post-DONE reconciler here; explicit task
-          // stream reattach is reserved for abnormal disconnects before DONE.
-          if (finalAction.shouldStartBackgroundPolling && finalAction.serverMessageId) {
-            startBackgroundPolling(convId || currentConversation, assistantMsg.id, finalAction.serverMessageId);
-          }
-          return finalAction.result;
-        }
-
-        if (finalAction.shouldClearStores) {
-          streamClear(assistantMsg.id);
-          realtimeClear(assistantMsg.id);
-        }
-
-        // 切会话/用户停止时不要在旧异步里把消息标 completed。
-        // 切回该会话时由历史加载 + task event stream 恢复真实状态。
-        if (finalAction.shouldMarkCompleted) {
-          setMessages((prev) => patchMessageById(prev, assistantMsg.id, buildCompletedPatch(Date.now())));
-        }
-      }
-
-      return buildStreamRunResult();
-    },
-    [currentConversation, startBackgroundPolling, startTaskEventStream]
-  );
+  const { streamResponse } = useChatMainStreamRuntime({
+    selectedModel,
+    conversationTitle,
+    currentConversation,
+    abortReasonRef,
+    setMessages,
+    startTaskEventStream,
+    startBackgroundPolling,
+    translate: t,
+  });
 
   // 对比模式：固定两个模型并发流式展示
   const sendCompareMessages = useCallback(
