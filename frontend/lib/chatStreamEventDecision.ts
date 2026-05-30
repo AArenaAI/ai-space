@@ -24,7 +24,7 @@ export type ChatStreamRealtimePatch = ChatStreamGroupMetaState & {
   lastSequence?: number;
   completedAt?: number;
   activityStatus?: ChatActivityStatus;
-  searchStatus?: "searching" | "completed";
+  searchStatus?: "searching" | "completed" | "failed";
   searchSources?: any[];
   searchSourcesCount?: number;
   errorCode?: string;

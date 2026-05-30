@@ -2,6 +2,18 @@ type StreamingListener = (delta: string, full: string) => void;
 
 export type RealtimeActivityStatus = { kind: string; status: string; label: string };
 
+export type RuntimePhase =
+  | "idle"
+  | "starting"
+  | "thinking"
+  | "searching"
+  | "retrieving_files"
+  | "generating"
+  | "finalizing"
+  | "completed"
+  | "stopped"
+  | "failed";
+
 export type RealtimeData = {
   /**
    * Backward-compatible combined stream text. During reasoning streams this may
@@ -22,8 +34,10 @@ export type RealtimeData = {
   updatedAt?: number;
   /** Store expiry timestamp in ms. Entries are removed after this time. */
   expiresAt?: number;
+  /** Structured runtime phase for status derivation. Legacy callers may still use activity/search flags. */
+  phase?: RuntimePhase;
   activityStatus?: RealtimeActivityStatus;
-  searchStatus?: "searching" | "completed";
+  searchStatus?: "searching" | "completed" | "failed";
   searchSources?: any[];
   searchSourcesCount?: number;
   serverMessageId?: number;
@@ -162,9 +176,7 @@ function enforceMaxEntries() {
   }
 }
 
-function cleanupExpired() {
-  cleanupTimer = null;
-  const ts = now();
+export function realtimeSweepExpiredEntries(ts = now()) {
   let nextExpiry = Infinity;
   Array.from(store.entries()).forEach(([id, data]) => {
     const expiresAt = data.expiresAt || (data.updatedAt || ts) + DEFAULT_TTL_MS;
@@ -176,8 +188,14 @@ function cleanupExpired() {
       nextExpiry = Math.min(nextExpiry, expiresAt);
     }
   });
-  if (Number.isFinite(nextExpiry)) {
-    cleanupTimer = setTimeout(cleanupExpired, Math.max(1000, nextExpiry - ts));
+  return Number.isFinite(nextExpiry) ? nextExpiry : undefined;
+}
+
+function cleanupExpired() {
+  cleanupTimer = null;
+  const nextExpiry = realtimeSweepExpiredEntries();
+  if (nextExpiry !== undefined) {
+    cleanupTimer = setTimeout(cleanupExpired, Math.max(1000, nextExpiry - now()));
   }
 }
 
@@ -246,6 +264,32 @@ export function realtimeUpdate(id: string, patch: Partial<RealtimeData>) {
     Object.assign(normalized, splitLegacyContent(normalized.content));
   }
   setEntry(id, normalized);
+}
+
+export function realtimeAppendContent(id: string, text: string): void {
+  realtimeAppend(id, { contentDelta: text, reasoning: false });
+}
+
+export function realtimeSetContent(id: string, content: string): void {
+  realtimeUpdate(id, { content, answerContent: content, reasoningContent: "", isReasoning: false });
+}
+
+export function realtimeAppendReasoning(id: string, text: string): void {
+  realtimeAppend(id, { reasoningDelta: text, reasoning: true });
+}
+
+export function realtimeSetReasoning(id: string, reasoning: string): void {
+  const prev = store.get(id) || { content: "" };
+  const answerContent = prev.answerContent ?? splitLegacyContent(prev.content || "").answerContent ?? "";
+  realtimeUpdate(id, {
+    content: `${reasoning ? `<think>${reasoning}${prev.isReasoning ? "" : "</think>"}` : ""}${answerContent}`,
+    answerContent,
+    reasoningContent: reasoning,
+  });
+}
+
+export function realtimeSetPhase(id: string, phase: RuntimePhase): void {
+  realtimeUpdate(id, { phase });
 }
 
 export function realtimeGet(id: string): RealtimeData | undefined {

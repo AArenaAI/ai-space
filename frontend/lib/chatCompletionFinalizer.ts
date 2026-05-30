@@ -1,6 +1,6 @@
 export type ChatActivityStatus = {
   kind: "generating" | "reasoning" | "web_search" | "file_search" | "tool_call";
-  status: "running" | "searching" | "completed";
+  status: "running" | "searching" | "completed" | "failed";
   label: string;
 };
 
@@ -9,7 +9,7 @@ export type ChatCompletionPatch = {
   serverMessageId?: number;
   generationTaskId?: number;
   activityStatus?: ChatActivityStatus;
-  searchStatus?: "searching" | "completed";
+  searchStatus?: "searching" | "completed" | "failed";
   searchSources?: any[];
   completedAt?: number;
   errorCode?: string;

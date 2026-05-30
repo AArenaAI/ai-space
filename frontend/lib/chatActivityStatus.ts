@@ -1,6 +1,6 @@
 export type ChatActivityStatus = {
   kind: "generating" | "reasoning" | "web_search" | "file_search" | "tool_call";
-  status: "running" | "searching" | "completed";
+  status: "running" | "searching" | "completed" | "failed";
   label: string;
 };
 

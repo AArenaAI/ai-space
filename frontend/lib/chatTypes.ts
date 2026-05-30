@@ -6,7 +6,7 @@ export interface SearchSource {
 
 export type ChatActivityStatus = {
   kind: "generating" | "reasoning" | "web_search" | "file_search" | "tool_call";
-  status: "running" | "searching" | "completed";
+  status: "running" | "searching" | "completed" | "failed";
   label: string;
 };
 
@@ -27,7 +27,7 @@ export interface Message {
   search?: boolean;
   searchSources?: SearchSource[];
   searchSourcesCount?: number;
-  searchStatus?: "searching" | "completed";
+  searchStatus?: "searching" | "completed" | "failed";
   activityStatus?: ChatActivityStatus;
   files?: MessageFile[];
   errorCode?: string;

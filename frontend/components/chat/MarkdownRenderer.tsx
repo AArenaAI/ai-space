@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Check, Copy } from "lucide-react";
+import { memo, useEffect, useMemo, useState } from "react";
+import { Check, ChevronDown, Copy } from "lucide-react";
 import dynamic from "next/dynamic";
 import { cn } from "@/lib/utils";
 
@@ -15,6 +15,9 @@ const LazyEChartsBlock = dynamic(() => import("./EChartsBlock"), {
   loading: () => <div className="my-4 h-48 rounded-xl border border-surface-border bg-surface-card animate-pulse" />,
 });
 
+const LONG_CODE_CHAR_THRESHOLD = 4000;
+const LONG_CODE_LINE_THRESHOLD = 120;
+
 type MarkdownPlugin = unknown;
 
 interface MarkdownPlugins {
@@ -22,26 +25,48 @@ interface MarkdownPlugins {
   rehypePlugins: MarkdownPlugin[];
 }
 
-let cachedPlugins: MarkdownPlugins | null = null;
-let pluginPromise: Promise<MarkdownPlugins> | null = null;
+let cachedBasicPlugins: MarkdownPlugins | null = null;
+let cachedMathPlugins: MarkdownPlugins | null = null;
+let basicPluginPromise: Promise<MarkdownPlugins> | null = null;
+let mathPluginPromise: Promise<MarkdownPlugins> | null = null;
 
-function loadMarkdownPlugins() {
-  if (cachedPlugins) return Promise.resolve(cachedPlugins);
-  if (!pluginPromise) {
-    pluginPromise = Promise.all([
+function contentMayContainMath(content: string) {
+  return /(^|[^\\])\$\$?[\s\S]*?\$\$?|\\\(|\\\)|\\\[|\\\]/.test(content);
+}
+
+function loadMarkdownPlugins(withMath: boolean) {
+  if (withMath && cachedMathPlugins) return Promise.resolve(cachedMathPlugins);
+  if (!withMath && cachedBasicPlugins) return Promise.resolve(cachedBasicPlugins);
+
+  if (!basicPluginPromise) {
+    basicPluginPromise = Promise.all([
       import("remark-gfm").then((mod) => mod.default),
       import("@/lib/remark-fix-bold").then((mod) => mod.default),
-      import("remark-math").then((mod) => mod.default),
-      import("rehype-katex").then((mod) => mod.default),
-    ]).then(([remarkGfm, remarkFixBold, remarkMath, rehypeKatex]) => {
-      cachedPlugins = {
-        remarkPlugins: [remarkGfm, remarkFixBold, remarkMath],
-        rehypePlugins: [rehypeKatex],
+    ]).then(([remarkGfm, remarkFixBold]) => {
+      cachedBasicPlugins = {
+        remarkPlugins: [remarkGfm, remarkFixBold],
+        rehypePlugins: [],
       };
-      return cachedPlugins;
+      return cachedBasicPlugins;
     });
   }
-  return pluginPromise;
+
+  if (!withMath) return basicPluginPromise;
+
+  if (!mathPluginPromise) {
+    mathPluginPromise = Promise.all([
+      basicPluginPromise,
+      import("remark-math").then((mod) => mod.default),
+      import("rehype-katex").then((mod) => mod.default),
+    ]).then(([basic, remarkMath, rehypeKatex]) => {
+      cachedMathPlugins = {
+        remarkPlugins: [...basic.remarkPlugins, remarkMath],
+        rehypePlugins: [rehypeKatex],
+      };
+      return cachedMathPlugins;
+    });
+  }
+  return mathPluginPromise;
 }
 
 function MarkdownPlainFallback({ content }: { content: string }) {
@@ -54,6 +79,9 @@ function MarkdownPlainFallback({ content }: { content: string }) {
 
 function CodeBlock({ language, value }: { language: string; value: string }) {
   const [copied, setCopied] = useState(false);
+  const lineCount = value.split("\n").length;
+  const isLongCode = value.length >= LONG_CODE_CHAR_THRESHOLD || lineCount >= LONG_CODE_LINE_THRESHOLD;
+  const [expanded, setExpanded] = useState(!isLongCode);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(value);
@@ -63,35 +91,57 @@ function CodeBlock({ language, value }: { language: string; value: string }) {
 
   return (
     <div className="relative group my-4 rounded-lg overflow-hidden border border-surface-border">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-surface-border bg-[#F6F8FA] dark:bg-[#0D0D0D]">
-        <span className="text-[11px] font-mono uppercase text-gray-500 dark:text-gray-400">
+      <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-surface-border bg-[#F6F8FA] dark:bg-[#0D0D0D]">
+        <span className="min-w-0 truncate text-[11px] font-mono uppercase text-gray-500 dark:text-gray-400">
           {language || "text"}
         </span>
-        <button
-          onClick={handleCopy}
-          className="flex items-center gap-1 text-[11px] transition-colors opacity-0 group-hover:opacity-100 text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white"
-        >
-          {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-          {copied ? "已复制" : "复制"}
-        </button>
+        <div className="flex items-center gap-2">
+          {isLongCode && (
+            <button
+              type="button"
+              onClick={() => setExpanded((value) => !value)}
+              className="inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] text-gray-500 transition-colors hover:bg-surface-card hover:text-gray-800 dark:text-gray-400 dark:hover:text-white"
+            >
+              <ChevronDown className={cn("h-3 w-3 transition-transform", expanded && "rotate-180")} />
+              {expanded ? "收起" : `代码块较长，已折叠 · ${lineCount} 行`}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="flex items-center gap-1 text-[11px] transition-colors opacity-100 text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white"
+          >
+            {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+            {copied ? "已复制" : "复制"}
+          </button>
+        </div>
       </div>
-      <LazySyntaxHighlighter language={language} value={value} />
+      {expanded ? (
+        <LazySyntaxHighlighter language={language} value={value} />
+      ) : (
+        <div className="bg-[#0D1117] px-4 py-3 text-[13px] text-gray-300">
+          <pre className="max-h-28 overflow-hidden whitespace-pre-wrap break-words font-mono">{value.slice(0, 1200)}</pre>
+          <div className="mt-2 text-[11px] text-gray-500">点击展开查看完整代码并加载高亮</div>
+        </div>
+      )}
     </div>
   );
 }
 
-export default function MarkdownRenderer({ content }: { content: string }) {
-  const [plugins, setPlugins] = useState<MarkdownPlugins | null>(cachedPlugins);
+const MarkdownRenderer = memo(function MarkdownRenderer({ content }: { content: string }) {
+  const withMath = useMemo(() => contentMayContainMath(content), [content]);
+  const [plugins, setPlugins] = useState<MarkdownPlugins | null>(() => (withMath ? cachedMathPlugins : cachedBasicPlugins));
 
   useEffect(() => {
     let cancelled = false;
-    loadMarkdownPlugins().then((next) => {
+    setPlugins(withMath ? cachedMathPlugins : cachedBasicPlugins);
+    loadMarkdownPlugins(withMath).then((next) => {
       if (!cancelled) setPlugins(next);
     });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [withMath]);
 
   const markdownComponents = useMemo(() => ({
     code({ inline, className, children, ...props }: any) {
@@ -139,4 +189,6 @@ export default function MarkdownRenderer({ content }: { content: string }) {
       {content}
     </ReactMarkdown>
   );
-}
+});
+
+export default MarkdownRenderer;

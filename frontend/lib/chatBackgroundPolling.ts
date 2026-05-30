@@ -45,6 +45,43 @@ export function evaluateBackgroundTaskPoll({
   };
 }
 
+export type ShouldApplyPolledContentOptions = {
+  streamActive: boolean;
+  liveContent?: string;
+  dbContent?: string;
+  taskStatus?: string;
+};
+
+export function shouldApplyPolledContent({
+  streamActive,
+  liveContent = "",
+  dbContent = "",
+  taskStatus,
+}: ShouldApplyPolledContentOptions): boolean {
+  if (streamActive) return false;
+  if (!dbContent.trim()) return false;
+  if (dbContent.length < liveContent.length) return false;
+  return taskStatus === "completed";
+}
+
+export type SelectFinalAssistantContentOptions = {
+  existingContent?: string;
+  liveContent?: string;
+  dbContent?: string;
+  taskStatus?: string;
+};
+
+export function selectFinalAssistantContent({
+  existingContent = "",
+  liveContent = "",
+  dbContent = "",
+  taskStatus,
+}: SelectFinalAssistantContentOptions): string {
+  if (taskStatus === "completed" && dbContent.trim() && dbContent.length >= liveContent.length) return dbContent;
+  if (liveContent.trim()) return liveContent;
+  return existingContent;
+}
+
 export type BuildBackgroundPollingMessagePatchOptions = {
   existingContent: string;
   polledContent: string;
@@ -52,6 +89,7 @@ export type BuildBackgroundPollingMessagePatchOptions = {
   streamActive: boolean;
   serverMessageId?: number;
   isFinished: boolean;
+  status?: string;
   now: number;
   createBusyStatus: () => ChatActivityStatus;
 };
@@ -63,10 +101,15 @@ export function buildBackgroundPollingMessagePatch({
   streamActive,
   serverMessageId,
   isFinished,
+  status,
   now,
   createBusyStatus,
 }: BuildBackgroundPollingMessagePatchOptions): ChatCompletionPatch {
-  const content = streamActive ? (liveContent || existingContent) : (polledContent || existingContent);
+  const content = streamActive
+    ? (liveContent || existingContent)
+    : (shouldApplyPolledContent({ streamActive, liveContent, dbContent: polledContent, taskStatus: status || (isFinished ? "completed" : undefined) })
+      ? polledContent
+      : selectFinalAssistantContent({ existingContent, liveContent, dbContent: polledContent, taskStatus: status || (isFinished ? "completed" : undefined) }));
   return {
     content,
     serverMessageId,

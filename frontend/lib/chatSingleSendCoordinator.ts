@@ -16,7 +16,7 @@ export type SingleSendMessageLike = {
   createdAt: number;
   files?: any[];
   search?: boolean;
-  searchStatus?: "searching" | "completed";
+  searchStatus?: "searching" | "completed" | "failed";
 };
 
 export type SingleSendPrepareMode = "regenerate" | "skip-user" | "normal";

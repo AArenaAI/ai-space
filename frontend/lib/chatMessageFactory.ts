@@ -19,7 +19,7 @@ export type FactoryChatMessage = {
   createdAt: number;
   files?: ChatMessageFile[];
   search?: boolean;
-  searchStatus?: "searching" | "completed";
+  searchStatus?: "searching" | "completed" | "failed";
 };
 
 export function buildMessageFiles(

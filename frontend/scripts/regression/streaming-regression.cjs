@@ -116,11 +116,36 @@ test("realtimeUpdate creates immutable snapshot references", ({ mod }) => {
   assert.equal(Object.isFrozen(second), process.env.NODE_ENV !== "production");
 });
 
-test("completed entries expire through realtimeGet short TTL", ({ mod, advance }) => {
+test("explicit content, reasoning and phase APIs preserve legacy compatibility", ({ mod }) => {
+  mod.realtimeAppendContent("api", "hello");
+  mod.realtimeAppendReasoning("api", "plan");
+  mod.realtimeSetPhase("api", "thinking");
+  let data = mod.realtimeGet("api");
+  assert.equal(data.answerContent, "hello");
+  assert.equal(data.reasoningContent, "plan");
+  assert.equal(data.content, "hello<think>plan");
+  assert.equal(data.phase, "thinking");
+  assert.equal(data.isReasoning, true);
+
+  mod.realtimeSetReasoning("api", "new plan");
+  data = mod.realtimeGet("api");
+  assert.equal(data.reasoningContent, "new plan");
+  assert.equal(data.answerContent, "hello");
+
+  mod.realtimeSetContent("api", "final answer");
+  data = mod.realtimeGet("api");
+  assert.equal(data.content, "final answer");
+  assert.equal(data.answerContent, "final answer");
+  assert.equal(data.reasoningContent, "");
+  assert.equal(data.isReasoning, false);
+});
+
+test("completed entries expire through explicit sweep and realtimeGet short TTL", ({ mod, advance }) => {
   mod.streamAppend("m5", { answerDelta: "done", reasoning: false });
   mod.realtimeUpdate("m5", { completedAt: Date.now() });
   assert.ok(mod.realtimeGet("m5"));
   advance(30_001);
+  mod.realtimeSweepExpiredEntries(Date.now());
   assert.equal(mod.realtimeGet("m5"), undefined);
 });
 

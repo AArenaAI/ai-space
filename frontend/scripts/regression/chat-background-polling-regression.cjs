@@ -87,6 +87,21 @@ test("message patch prefers live stream content while stream is active", () => {
   });
 });
 
+test("shouldApplyPolledContent rejects active stream, blank db, shorter db and non-completed status", () => {
+  assert.equal(mod.shouldApplyPolledContent({ streamActive: true, liveContent: "live", dbContent: "db full", taskStatus: "completed" }), false);
+  assert.equal(mod.shouldApplyPolledContent({ streamActive: false, liveContent: "live", dbContent: "   ", taskStatus: "completed" }), false);
+  assert.equal(mod.shouldApplyPolledContent({ streamActive: false, liveContent: "live content", dbContent: "short", taskStatus: "completed" }), false);
+  assert.equal(mod.shouldApplyPolledContent({ streamActive: false, liveContent: "live", dbContent: "db full", taskStatus: "running" }), false);
+  assert.equal(mod.shouldApplyPolledContent({ streamActive: false, liveContent: "live", dbContent: "db full", taskStatus: "completed" }), true);
+});
+
+test("selectFinalAssistantContent prefers completed db then live then existing", () => {
+  assert.equal(mod.selectFinalAssistantContent({ existingContent: "old", liveContent: "live", dbContent: "db full", taskStatus: "completed" }), "db full");
+  assert.equal(mod.selectFinalAssistantContent({ existingContent: "old", liveContent: "live content", dbContent: "short", taskStatus: "completed" }), "live content");
+  assert.equal(mod.selectFinalAssistantContent({ existingContent: "old", liveContent: "live", dbContent: "db full", taskStatus: "running" }), "live");
+  assert.equal(mod.selectFinalAssistantContent({ existingContent: "old", liveContent: "", dbContent: "db full", taskStatus: "running" }), "old");
+});
+
 test("message patch uses polled content and clears activity when finished", () => {
   const patch = mod.buildBackgroundPollingMessagePatch({
     existingContent: "old",
