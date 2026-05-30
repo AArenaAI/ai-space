@@ -43,6 +43,7 @@ type Message struct {
 	ConversationID     uint           `gorm:"not null;index" json:"conversation_id"`
 	Role               string         `gorm:"not null" json:"role"` // user / assistant / system
 	Content            string         `gorm:"not null" json:"content"`
+	ReasoningContent   string         `gorm:"type:text" json:"reasoning_content,omitempty"`
 	Model              string         `json:"model"`
 	TokensUsed         int            `json:"tokens_used"`
 	SearchSources      string         `gorm:"type:text" json:"search_sources,omitempty"`

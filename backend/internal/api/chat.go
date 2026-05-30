@@ -1279,6 +1279,9 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 			"content":      content,
 			"completed_at": time.Now(),
 		}
+		if strings.TrimSpace(streamResult.ReasoningContent) != "" {
+			updates["reasoning_content"] = streamResult.ReasoningContent
+		}
 		if len(req.SearchSources) > 0 {
 			if sourcesJSON, err := json.Marshal(req.SearchSources); err == nil {
 				updates["search_sources"] = string(sourcesJSON)
@@ -1599,6 +1602,7 @@ func (h *ChatHandler) handleBackgroundResponse(c *gin.Context, resp *services.AI
 
 type UnifiedStreamResult struct {
 	FullContent        string
+	ReasoningContent   string
 	ResponseID         string
 	LastSequenceNumber int64
 	ErrorMessage       string
@@ -1697,12 +1701,13 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 	defer heartbeat.Stop()
 
 	var fullContent strings.Builder
+	var reasoningContent strings.Builder
 	var reasoningPersistOpen bool
 	var contentMu sync.Mutex
-	var getContent = func() string {
+	var getSnapshot = func() (string, string) {
 		contentMu.Lock()
 		defer contentMu.Unlock()
-		return fullContent.String()
+		return fullContent.String(), reasoningContent.String()
 	}
 
 	// 定期将增量内容落库，防止用户跳转/刷新时丢失生成进度
@@ -1719,9 +1724,13 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 			for {
 				select {
 				case <-dbUpdateTicker.C:
-					content := getContent()
+					content, reasoning := getSnapshot()
 					if content != "" {
-						h.db.Model(&models.Message{}).Where("id = ?", assistantMsgID).Update("content", content)
+						updates := map[string]interface{}{"content": content}
+						if strings.TrimSpace(reasoning) != "" {
+							updates["reasoning_content"] = reasoning
+						}
+						h.db.Model(&models.Message{}).Where("id = ?", assistantMsgID).Updates(updates)
 					}
 				case <-dbUpdateDone:
 					return
@@ -1737,13 +1746,17 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 			// SSE comment：前端 EventSource/fetch parser 会忽略以 ':' 开头的注释行，
 			// 但 Cloudflare tunnel 会把它视为有效传输，从而保持连接活跃。
 			if err := writeAndFlush(":ping\n\n"); err != nil {
-				outcome.FullContent = strings.TrimSpace(getContent())
+				content, reasoning := getSnapshot()
+				outcome.FullContent = strings.TrimSpace(content)
+				outcome.ReasoningContent = strings.TrimSpace(reasoning)
 				return outcome, finalUsage, err
 			}
 
 		case result := <-results:
 			if streamTask != nil && h.isGenerationTaskCancelled(streamTask.ID) {
-				outcome.FullContent = strings.TrimSpace(getContent())
+				content, reasoning := getSnapshot()
+				outcome.FullContent = strings.TrimSpace(content)
+				outcome.ReasoningContent = strings.TrimSpace(reasoning)
 				return outcome, finalUsage, fmt.Errorf("generation cancelled")
 			}
 			event, err := result.event, result.err
@@ -1762,11 +1775,15 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 						contentMu.Unlock()
 
 						if err := writeDoneEvent(); err != nil {
-							outcome.FullContent = strings.TrimSpace(getContent())
+							content, reasoning := getSnapshot()
+							outcome.FullContent = strings.TrimSpace(content)
+							outcome.ReasoningContent = strings.TrimSpace(reasoning)
 							return outcome, finalUsage, err
 						}
 					}
-					outcome.FullContent = strings.TrimSpace(getContent())
+					content, reasoning := getSnapshot()
+					outcome.FullContent = strings.TrimSpace(content)
+					outcome.ReasoningContent = strings.TrimSpace(reasoning)
 					return outcome, finalUsage, nil
 				}
 				// 解析错误：向前端发送错误，不发 [DONE]
@@ -1775,7 +1792,9 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 						{"delta": map[string]string{"content": fmt.Sprintf("❌ 上游流式响应解析失败: %v", err)}},
 					},
 				})
-				outcome.FullContent = strings.TrimSpace(getContent())
+				content, reasoning := getSnapshot()
+				outcome.FullContent = strings.TrimSpace(content)
+				outcome.ReasoningContent = strings.TrimSpace(reasoning)
 				return outcome, finalUsage, err
 			}
 
@@ -1822,10 +1841,14 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 				contentMu.Unlock()
 
 				if err := writeDoneEvent(); err != nil {
-					outcome.FullContent = strings.TrimSpace(getContent())
+					content, reasoning := getSnapshot()
+					outcome.FullContent = strings.TrimSpace(content)
+					outcome.ReasoningContent = strings.TrimSpace(reasoning)
 					return outcome, finalUsage, err
 				}
-				outcome.FullContent = strings.TrimSpace(getContent())
+				content, reasoning := getSnapshot()
+				outcome.FullContent = strings.TrimSpace(content)
+				outcome.ReasoningContent = strings.TrimSpace(reasoning)
 				return outcome, finalUsage, nil
 			}
 
@@ -1872,14 +1895,20 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 					},
 					"_error_meta": meta,
 				}); err != nil {
-					outcome.FullContent = strings.TrimSpace(getContent())
+					content, reasoning := getSnapshot()
+					outcome.FullContent = strings.TrimSpace(content)
+					outcome.ReasoningContent = strings.TrimSpace(reasoning)
 					return outcome, finalUsage, err
 				}
 				if err := writeDoneEvent(); err != nil {
-					outcome.FullContent = strings.TrimSpace(getContent())
+					content, reasoning := getSnapshot()
+					outcome.FullContent = strings.TrimSpace(content)
+					outcome.ReasoningContent = strings.TrimSpace(reasoning)
 					return outcome, finalUsage, err
 				}
-				outcome.FullContent = strings.TrimSpace(getContent())
+				content, reasoning := getSnapshot()
+				outcome.FullContent = strings.TrimSpace(content)
+				outcome.ReasoningContent = strings.TrimSpace(reasoning)
 				return outcome, finalUsage, nil
 			}
 
@@ -1918,7 +1947,9 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 						"label":  label,
 					},
 				}); err != nil {
-					outcome.FullContent = strings.TrimSpace(getContent())
+					content, reasoning := getSnapshot()
+					outcome.FullContent = strings.TrimSpace(content)
+					outcome.ReasoningContent = strings.TrimSpace(reasoning)
 					return outcome, finalUsage, err
 				}
 				continue
@@ -1944,6 +1975,7 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 					reasoningPersistOpen = true
 				}
 				fullContent.WriteString(event.Delta)
+				reasoningContent.WriteString(event.Delta)
 				contentMu.Unlock()
 			}
 
@@ -1953,7 +1985,9 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 						{"delta": delta},
 					},
 				}); err != nil {
-					outcome.FullContent = strings.TrimSpace(getContent())
+					content, reasoning := getSnapshot()
+					outcome.FullContent = strings.TrimSpace(content)
+					outcome.ReasoningContent = strings.TrimSpace(reasoning)
 					return outcome, finalUsage, err
 				}
 			}

@@ -2,6 +2,9 @@ export type ForkChatPersistedMessage = {
   id?: number | string;
   role: "user" | "assistant" | "system";
   content: string;
+  reasoning_content?: string;
+  reasoning?: string;
+  thinking?: string;
   model?: string;
   created_at?: string;
   completed_at?: string | null;
@@ -72,10 +75,20 @@ export function mapPersistedChatMessage(
 ): ForkChatMessage {
   const parseTime = options.parseTime || ((value: string) => new Date(value).getTime());
   const numericId = Number(message.id || 0) || undefined;
+  const reasoningContent = typeof message.reasoning_content === "string"
+    ? message.reasoning_content
+    : typeof message.reasoning === "string"
+      ? message.reasoning
+      : typeof message.thinking === "string"
+        ? message.thinking
+        : "";
+  const content = message.role === "assistant" && reasoningContent.trim() && !/<think>[\s\S]*?<\/think>/i.test(message.content || "")
+    ? `<think>${reasoningContent}</think>\n\n${message.content || ""}`.trim()
+    : message.content;
   return {
     id: String(message.id || options.fallbackId()),
     role: message.role,
-    content: message.content,
+    content,
     model: message.model,
     createdAt: message.created_at ? parseTime(message.created_at) : 0,
     completedAt: message.completed_at ? parseTime(message.completed_at) : undefined,

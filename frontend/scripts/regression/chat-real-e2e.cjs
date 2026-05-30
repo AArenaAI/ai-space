@@ -270,7 +270,7 @@ function startProxy() {
   });
 }
 
-async function runBrowserHistoryE2E(token, user, conversationId, expectedContent) {
+async function runBrowserHistoryE2E(token, user, conversationId, expectedContent, expectedReasoning = "") {
   await waitForHttpOk(`${frontendBaseUrl}/chat/`, 60000);
   const proxy = await startProxy();
   const proxyBase = `http://127.0.0.1:${proxyPort}`;
@@ -320,6 +320,10 @@ async function runBrowserHistoryE2E(token, user, conversationId, expectedContent
     const promptNeedle = prompt.slice(0, 8);
     assert(bodyText.includes(promptNeedle), `browser history did not render user prompt: ${JSON.stringify(promptNeedle)}`);
     assert(expectedPattern.test(bodyText), "browser history did not render assistant answer");
+    if (requirePersistedReasoning) {
+      const reasoningNeedle = String(expectedReasoning || "").trim().split(/\s+/)[0];
+      assert(reasoningNeedle && bodyText.includes(reasoningNeedle), `browser history did not render persisted reasoning: ${JSON.stringify(reasoningNeedle)}`);
+    }
     assert(!/加载中\.\.\./.test(bodyText) || bodyText.length > 100, "browser appears stuck in loading state");
     assert(issues.length === 0, `browser issues:\n${issues.slice(0, 12).join("\n")}`);
     return { url, bodyTextLength: bodyText.length, ignoredIssues };
@@ -378,7 +382,7 @@ async function runBrowserHistoryE2E(token, user, conversationId, expectedContent
     Object.assign(report, persistence);
 
     if (browserEnabled) {
-      const browser = await runBrowserHistoryE2E(auth.token, auth.user, stream.conversationId, stream.content);
+      const browser = await runBrowserHistoryE2E(auth.token, auth.user, stream.conversationId, stream.content, stream.reasoning);
       report.browserHistory = browser;
     }
 

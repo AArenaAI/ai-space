@@ -99,6 +99,28 @@ function response(ok, data) {
     });
   });
 
+  await test("mapPersistedChatMessage folds persisted reasoning into legacy think content", () => {
+    const message = mapPersistedChatMessage({
+      id: 43,
+      role: "assistant",
+      content: "OK 42",
+      reasoning_content: "简短思考",
+    }, {
+      fallbackId: () => "fallback",
+    });
+    assert.equal(message.content, "<think>简短思考</think>\n\nOK 42");
+
+    const legacy = mapPersistedChatMessage({
+      id: 44,
+      role: "assistant",
+      content: "<think>已有</think>\n\nOK",
+      reasoning_content: "不要重复",
+    }, {
+      fallbackId: () => "fallback",
+    });
+    assert.equal(legacy.content, "<think>已有</think>\n\nOK");
+  });
+
   await test("mapPersistedChatMessage uses fallback id and defaults optional fields", () => {
     const message = mapPersistedChatMessage({
       role: "user",
