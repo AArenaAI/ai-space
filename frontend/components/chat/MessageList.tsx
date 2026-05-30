@@ -1,41 +1,38 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useMemo, memo, type Ref, type UIEvent, type ReactNode, type ButtonHTMLAttributes } from "react";
-import { User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck, ChevronDown, Lightbulb, Play, ChevronDown as ChevronDownIcon, FileText, Star, Columns2, Loader2, Download, ImageIcon, Sparkles } from "lucide-react";
-import { toPng } from "html-to-image";
+import { useEffect, useRef, useState, useCallback, useMemo, memo, type UIEvent, type ReactNode, type ButtonHTMLAttributes } from "react";
+import { User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck, ChevronDown, Play, ChevronDown as ChevronDownIcon, FileText, Star, Loader2, Download, ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/lib/chatTypes";
 import { useFavorites } from "@/hooks/useFavorites";
 import { toast } from "sonner";
 import dynamic from "next/dynamic";
-const ReactMarkdown = dynamic(() => import("react-markdown"), { ssr: false });
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
-import remarkFixBold from "@/lib/remark-fix-bold";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
-import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
-import { useTheme } from "@/components/theme/ThemeProvider";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
-import ShareDialog from "@/components/ui/ShareDialog";
+const ShareDialog = dynamic(() => import("@/components/ui/ShareDialog"), { ssr: false });
 import { Virtuoso, VirtuosoHandle, type Components } from "react-virtuoso";
 import { useMessageStream } from "@/hooks/useMessageStream";
 import { inferGroups, InferredGroup } from "@/lib/groups";
-import EChartsBlock from "./EChartsBlock";
 import { useI18n } from "@/lib/i18n";
 import { AssistantMessageMeta } from "./AssistantMessageMeta";
 import ModelSelector from "./ModelSelector";
 import { StreamingText } from "./StreamingText";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
-import { ThinkBlock } from "./ThinkBlock";
+
+const MarkdownRenderer = dynamic(() => import("./MarkdownRenderer"), {
+  ssr: false,
+  loading: () => null,
+});
+const MessageExportPreview = dynamic(() => import("./MessageExportPreview"), {
+  ssr: false,
+  loading: () => null,
+});
 import { AssistantMessageContent } from "./AssistantMessageContent";
-import { parseThinkContent, sanitizeContent, extractCitations, getCitedSources, isMessageGenerating } from "@/lib/chatContent";
+import { parseThinkContent, sanitizeContent, isMessageGenerating } from "@/lib/chatContent";
+
 
 const CHAT_BOTTOM_SPACER = 280;
 const SCROLL_TO_BOTTOM_OFFSET = 238;
 const SELECT_MODE_EXTRA_SPACER = 80;
-const LONG_REASONING_COLLAPSE_THRESHOLD = 2000;
 const LONG_MARKDOWN_LAZY_THRESHOLD = 4000;
 type SelectionMode = "share" | "favorite";
 
@@ -92,57 +89,6 @@ function WaveText({ text, className }: { text: string; className?: string }) {
   );
 }
 
-function CodeBlock({ language, value }: { language: string; value: string }) {
-  const [copied, setCopied] = useState(false);
-  const themeCtx = useTheme();
-  const isDark = themeCtx?.theme === "dark";
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(value);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  return (
-    <div className="relative group my-4 rounded-lg overflow-hidden border border-surface-border">
-      <div className={cn(
-        "flex items-center justify-between px-3 py-2 border-b border-surface-border",
-        isDark ? "bg-[#0D0D0D]" : "bg-[#F6F8FA]"
-      )}>
-        <span className={cn(
-          "text-[11px] font-mono uppercase",
-          isDark ? "text-gray-400" : "text-gray-500"
-        )}>
-          {language || "text"}
-        </span>
-        <button
-          onClick={handleCopy}
-          className={cn(
-            "flex items-center gap-1 text-[11px] transition-colors opacity-0 group-hover:opacity-100",
-            isDark ? "text-gray-400 hover:text-white" : "text-gray-500 hover:text-gray-800"
-          )}
-        >
-          {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-          {copied ? "已复制" : "复制"}
-        </button>
-      </div>
-      <SyntaxHighlighter
-        language={language || "text"}
-        style={isDark ? vscDarkPlus : oneLight}
-        customStyle={{
-          margin: 0,
-          padding: "1rem",
-          fontSize: "13px",
-          lineHeight: "1.5",
-          background: isDark ? "#0D0D0D" : "#F6F8FA",
-          overflowX: "auto",
-        }}
-      >
-        {value}
-      </SyntaxHighlighter>
-    </div>
-  );
-}
 
 function normalizeExportPlainText(content: string): string {
   return content
@@ -203,10 +149,6 @@ function ActionBarGroup({ children }: { children: ReactNode }) {
   return <div className="flex items-center gap-2">{children}</div>;
 }
 
-function ActionBarDivider() {
-  return <div className="h-4 w-px bg-surface-border" />;
-}
-
 function ActionBarButton({
   children,
   className,
@@ -229,7 +171,6 @@ function ActionBarButton({
   );
 }
 
-// 导出为下拉菜单
 function ExportDropdown({
   onExportImage,
   onExportText,
@@ -284,97 +225,6 @@ function ExportDropdown({
             >
               <FileText className="w-3.5 h-3.5" />
               导出为 TXT
-            </button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-// 消息操作菜单
-function MessageMenu({
-  onCopy,
-  onDelete,
-  onRegenerate,
-  onShareSelectMode,
-  onFavoriteSelectMode,
-  isFavorited,
-  showRegenerate,
-}: {
-  onCopy: () => void;
-  onDelete: () => void;
-  onRegenerate?: () => void;
-  onShareSelectMode: () => void;
-  onFavoriteSelectMode?: () => void;
-  isFavorited?: boolean;
-  showRegenerate: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  return (
-    <div className="relative" ref={menuRef}>
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
-      >
-        <MoreHorizontal className="w-3.5 h-3.5" />
-      </button>
-
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full right-0 mb-1 w-36 rounded-xl border border-surface-border bg-surface-elevated shadow-xl z-50 py-1 animate-fade-in">
-            <button
-              onClick={() => { onCopy(); setOpen(false); }}
-              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors"
-            >
-              <Copy className="w-3.5 h-3.5" />
-              复制
-            </button>
-            {showRegenerate && onRegenerate && (
-              <button
-                onClick={() => { onRegenerate(); setOpen(false); }}
-                className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                重新生成
-              </button>
-            )}
-            <button
-              onClick={() => { onShareSelectMode(); setOpen(false); }}
-              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors"
-            >
-              <Share2 className="w-3.5 h-3.5" />
-              选择分享
-            </button>
-            {onFavoriteSelectMode && (
-              <button
-                onClick={() => { onFavoriteSelectMode(); setOpen(false); }}
-                className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors"
-              >
-                <Star className={cn("w-3.5 h-3.5", isFavorited && "fill-amber-400 text-amber-400")} />
-                {isFavorited ? "取消收藏" : "收藏"}
-              </button>
-            )}
-            <div className="mx-2 my-1 h-px bg-surface-border" />
-            <button
-              onClick={() => { onDelete(); setOpen(false); }}
-              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              删除
             </button>
           </div>
         </>
@@ -531,53 +381,8 @@ function MessageActions({
   );
 }
 
-// 模块级：缓存 ReactMarkdown components，避免每次渲染重新挂载 Markdown 节点
-const markdownComponents = {
-  code({ node, inline, className, children, ...props }: any) {
-    const match = /language-(\w+)/.exec(className || "");
-    const lang = match?.[1] || "";
-    const value = String(children).replace(/\n$/, "");
-    if (!inline && lang === "echarts") {
-      return <EChartsBlock value={value} />;
-    }
-    return !inline && match ? (
-      <CodeBlock language={lang} value={value} />
-    ) : (
-      <code className="bg-[#E8E8E8] dark:bg-[#2A2A3A] text-[#333333] dark:text-[#E0E0E0] px-1 py-0.5 rounded text-[13px] font-mono" {...props}>
-        {children}
-      </code>
-    );
-  },
-  p({ children }: any) { return <p className="text-[15px] leading-relaxed text-text-primary mb-4 last:mb-0 [li>&]:inline [li>&]:mb-0">{children}</p>; },
-  ul({ children }: any) { return <ul className="list-disc ml-5 mb-4 space-y-1 text-text-primary">{children}</ul>; },
-  ol({ children }: any) { return <ol className="list-decimal ml-5 mb-4 space-y-1 text-text-primary">{children}</ol>; },
-  li({ children }: any) { return <li className="text-[15px] leading-relaxed">{children}</li>; },
-  h1({ children }: any) { return <h1 className="text-xl font-bold text-text-primary mb-3 mt-6">{children}</h1>; },
-  h2({ children }: any) { return <h2 className="text-lg font-bold text-text-primary mb-2 mt-5">{children}</h2>; },
-  h3({ children }: any) { return <h3 className="text-base font-bold text-text-primary mb-2 mt-4">{children}</h3>; },
-  strong({ children }: any) { return <strong className="font-bold text-text-primary">{children}</strong>; },
-  blockquote({ children }: any) { return <blockquote className="border-l-2 border-surface-border pl-4 italic text-text-secondary my-4">{children}</blockquote>; },
-  table({ children }: any) { return <div className="overflow-x-auto my-4"><table className="w-full text-sm border-collapse">{children}</table></div>; },
-  thead({ children }: any) { return <thead className="bg-surface-card border-b border-surface-border">{children}</thead>; },
-  tbody({ children }: any) { return <tbody>{children}</tbody>; },
-  tr({ children }: any) { return <tr className="border-b border-surface-border/50 hover:bg-surface-card/30 transition-colors">{children}</tr>; },
-  th({ children }: any) { return <th className="px-3 py-2.5 text-left text-[13px] font-semibold text-text-primary whitespace-nowrap">{children}</th>; },
-  td({ children }: any) { return <td className="px-3 py-2.5 text-[13px] text-text-secondary leading-relaxed">{children}</td>; },
-};
-
-const markdownRemarkPlugins = [remarkGfm, remarkFixBold, remarkMath];
-const markdownRehypePlugins = [rehypeKatex];
-
 const MemoMarkdownRenderer = memo(function MemoMarkdownRenderer({ content }: { content: string }) {
-  return (
-    <ReactMarkdown
-      remarkPlugins={markdownRemarkPlugins}
-      rehypePlugins={markdownRehypePlugins}
-      components={markdownComponents}
-    >
-      {content}
-    </ReactMarkdown>
-  );
+  return <MarkdownRenderer content={content} />;
 });
 
 function LazyMarkdownRenderer({ content }: { content: string }) {
@@ -585,94 +390,6 @@ function LazyMarkdownRenderer({ content }: { content: string }) {
     return <MemoMarkdownRenderer content={content} />;
   }
   return <DeferredMarkdownRenderer content={content} />;
-}
-
-function ExportMessageContent({ msg }: { msg: Message }) {
-  if (msg.role === "user") {
-    return <div className="whitespace-pre-wrap break-words">{msg.content || ""}</div>;
-  }
-
-  const { reasoning, answer, isThinking } = parseThinkContent(msg.content || "");
-  const cleanAnswer = sanitizeContent(answer);
-
-  return (
-    <div className="prose prose-sm max-w-none text-white/90">
-      {reasoning && (
-        <div className="mb-3 overflow-hidden rounded-xl border border-white/10 bg-white/8">
-          <div className="flex items-center gap-2 px-3 py-2 bg-white/10">
-            <Lightbulb className="h-3.5 w-3.5 shrink-0 text-amber-300" />
-            <span className="text-sm font-medium text-white/75">
-              {isThinking ? "深度推理中，片刻即达极致答案" : "深度推理"}
-            </span>
-          </div>
-          <div className="whitespace-pre-wrap px-3 py-2.5 text-[13px] leading-relaxed text-white/70">
-            {reasoning}
-          </div>
-        </div>
-      )}
-      <MemoMarkdownRenderer content={cleanAnswer} />
-    </div>
-  );
-}
-
-function ExportShareCard({ messages, cardRef }: { messages: Message[]; cardRef?: Ref<HTMLDivElement> }) {
-  return (
-    <div
-      ref={cardRef}
-      className="relative w-full overflow-hidden rounded-3xl p-8 shadow-2xl"
-      style={{
-        background: "linear-gradient(135deg, #111827 0%, #1e1b4b 48%, #312e81 100%)",
-      }}
-    >
-      <div className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-brand/30 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-20 -left-16 h-44 w-44 rounded-full bg-purple-500/25 blur-3xl" />
-
-      <div className="relative z-10 mb-7 flex items-center gap-3">
-        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/12 ring-1 ring-white/15">
-          <Sparkles className="h-5 w-5 text-white" />
-        </div>
-        <div>
-          <div className="text-lg font-semibold text-white">AI Space</div>
-          <div className="text-xs text-white/50">智能对话分享</div>
-        </div>
-      </div>
-
-      <div className="relative z-10 space-y-5">
-        {messages.map((msg) => {
-          const isUser = msg.role === "user";
-          return (
-            <div key={msg.id} className={cn("flex", isUser ? "justify-end" : "justify-start gap-3")}>
-              {!isUser && (
-                <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/10">
-                  <Bot className="h-4 w-4 text-white/70" />
-                </div>
-              )}
-              <div className="max-w-[82%]">
-                {!isUser && <div className="mb-1 ml-1 text-[11px] text-white/45">AI Space</div>}
-                <div
-                  className={cn(
-                    "break-words rounded-2xl border px-4 py-3 text-sm leading-relaxed shadow-sm",
-                    isUser
-                      ? "rounded-br-md border-white/15 bg-white/18 text-white"
-                      : "rounded-bl-md border-white/10 bg-white/10 text-white/90"
-                  )}
-                >
-                  <ExportMessageContent msg={msg} />
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="relative z-10 mt-8 flex items-center justify-between border-t border-white/10 pt-5 text-xs text-white/45">
-        <span>{new Date().toLocaleDateString("zh-CN")}</span>
-        <span className="inline-flex items-center gap-1.5">
-          <Sparkles className="h-3 w-3" /> 由 AI Space 生成
-        </span>
-      </div>
-    </div>
-  );
 }
 
 function MessageList({
@@ -988,7 +705,7 @@ function MessageList({
   }, [activeCompareModels, isCompare, messages]);
 
   // 收藏功能
-  const { toggleFavorite, addFavorite, isFavorited, checkBatch, loading: favoriteLoading } = useFavorites();
+  const { addFavorite, isFavorited, checkBatch, loading: favoriteLoading } = useFavorites();
 
   // 批量检查消息收藏状态
   useEffect(() => {
@@ -1171,6 +888,7 @@ function MessageList({
     setExporting(true);
     try {
       await document.fonts?.ready;
+      const { toPng } = await import("html-to-image");
       const dataUrl = await toPng(exportNode, {
         quality: 1.0,
         pixelRatio: 2,
@@ -1893,48 +1611,16 @@ function MessageList({
       {/* 分享链接弹窗 */}
       <ShareDialog isOpen={shareOpen} slug={shareSlug} onClose={() => setShareOpen(false)} />
 
-      {/* 导出图片预览 */}
-      {exportPreviewOpen && selectedMessages.length > 0 && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm">
-          <button
-            type="button"
-            className="absolute inset-0 cursor-default"
-            onClick={() => setExportPreviewOpen(false)}
-            aria-label="关闭预览"
-          />
-          <div className="relative z-10 flex max-h-full w-full max-w-[620px] flex-col items-center gap-4">
-            <div className="w-full overflow-auto rounded-3xl bg-surface-elevated p-3 shadow-2xl">
-              <ExportShareCard messages={selectedMessages} cardRef={exportPreviewCardRef} />
-            </div>
-            <div className="flex items-center gap-3 rounded-2xl border border-surface-border bg-surface-elevated px-4 py-3 shadow-xl">
-              <button
-                type="button"
-                onClick={() => setExportPreviewOpen(false)}
-                className="rounded-xl px-4 py-2 text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors"
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={handleDownloadImage}
-                disabled={exporting}
-                className="flex items-center gap-2 rounded-xl bg-brand px-5 py-2 text-sm font-medium text-white hover:bg-brand-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <Download className="w-4 h-4" />
-                {exporting ? "导出中..." : "导出图片"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 隐藏的分享卡片（用于导出图片） */}
       {selectMode && selectedMessages.length > 0 && (
-        <div
-          style={{ position: "fixed", left: 0, top: 0, width: "560px", opacity: 0, pointerEvents: "none", zIndex: -1 }}
-        >
-          <ExportShareCard messages={selectedMessages} cardRef={exportCardRef} />
-        </div>
+        <MessageExportPreview
+          messages={selectedMessages}
+          previewOpen={exportPreviewOpen}
+          exporting={exporting}
+          previewCardRef={exportPreviewCardRef}
+          hiddenCardRef={exportCardRef}
+          onClose={() => setExportPreviewOpen(false)}
+          onDownload={handleDownloadImage}
+        />
       )}
     </div>
   );
