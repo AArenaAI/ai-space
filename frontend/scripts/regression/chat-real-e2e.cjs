@@ -5,7 +5,15 @@ const { chromium } = require("playwright");
 const apiBaseUrl = trimTrailingSlash(process.env.REAL_CHAT_API_BASE_URL || "http://127.0.0.1:9091");
 const frontendBaseUrl = trimTrailingSlash(process.env.REAL_CHAT_FRONTEND_BASE_URL || "http://127.0.0.1:3000");
 const model = process.env.REAL_CHAT_MODEL || "gpt-5.4-mini";
-const prompt = process.env.REAL_CHAT_PROMPT || "真实E2E验证：请只回答 OK，然后给出数字 42。";
+const reasoningEnabled = process.env.REAL_CHAT_REASONING === "1";
+const requireReasoning = process.env.REAL_CHAT_REQUIRE_REASONING === "1";
+const requireStreamReasoning = process.env.REAL_CHAT_REQUIRE_STREAM_REASONING === "1" || requireReasoning;
+const requirePersistedReasoning = process.env.REAL_CHAT_REQUIRE_PERSISTED_REASONING === "1" || requireReasoning;
+const reasoningEffort = process.env.REAL_CHAT_REASONING_EFFORT || "standard";
+const searchEnabled = process.env.REAL_CHAT_SEARCH === "1";
+const prompt = process.env.REAL_CHAT_PROMPT || (reasoningEnabled
+  ? "真实E2E思考验证：请先进行非常简短的思考，然后正文只回答 OK 和数字 42。"
+  : "真实E2E验证：请只回答 OK，然后给出数字 42。");
 const expectedPattern = new RegExp(process.env.REAL_CHAT_EXPECT || "OK[\\s\\S]*42", "i");
 const timeoutMs = Number(process.env.REAL_CHAT_TIMEOUT_MS || 120000);
 const browserEnabled = process.env.REAL_CHAT_BROWSER !== "0";
@@ -77,9 +85,9 @@ async function runRealChatRequest(token, conversationId) {
     ],
     conversation_id: conversationId,
     stream: true,
-    reasoning: false,
-    reasoning_effort: "standard",
-    search: false,
+    reasoning: reasoningEnabled,
+    reasoning_effort: reasoningEffort,
+    search: searchEnabled,
     template_id: 0,
   };
 
@@ -153,6 +161,9 @@ async function runRealChatRequest(token, conversationId) {
   assert(done, "chat stream did not emit [DONE]");
   assert(content.trim().length > 0, "chat stream produced empty assistant content");
   assert(expectedPattern.test(content), `assistant content did not match expected pattern ${expectedPattern}: ${JSON.stringify(content)}`);
+  if (requireStreamReasoning) {
+    assert(reasoning.trim().length > 0, "chat stream produced no reasoning content while reasoning is required");
+  }
   assert(metaConversationId === conversationId, `stream conversation mismatch: ${metaConversationId} !== ${conversationId}`);
   assert(assistantMessageId, "stream metadata missing assistant_message_id");
   assert(userMessageId, "stream metadata missing user_message_id");
@@ -201,6 +212,10 @@ async function verifyTaskAndHistory(token, ids, expectedContent) {
   assert(assistantMessage, "restored history missing assistant message");
   assert(expectedPattern.test(String(assistantMessage.content || "")), "restored assistant content does not match expected answer");
   assert(assistantMessage.completed_at, "restored assistant message missing completed_at");
+  const persistedReasoning = assistantMessage.reasoning_content || assistantMessage.reasoning || assistantMessage.thinking || "";
+  if (requirePersistedReasoning) {
+    assert(String(persistedReasoning).trim().length > 0, "restored assistant message missing persisted reasoning while persisted reasoning is required");
+  }
 
   const countRes = await fetch(`${apiBaseUrl}/api/conversations/${ids.conversationId}/messages?limit=1`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -209,7 +224,13 @@ async function verifyTaskAndHistory(token, ids, expectedContent) {
   const countData = await countRes.json();
   assert(Number(countData.total || 0) >= 2, `message count too small: ${JSON.stringify(countData)}`);
 
-  return { taskStatus, restoredMessages: messages.length, totalMessages: countData.total };
+  return {
+    taskStatus,
+    restoredMessages: messages.length,
+    totalMessages: countData.total,
+    persistedReasoningLength: String(persistedReasoning).length,
+    persistedAssistantCompletedAt: assistantMessage.completed_at,
+  };
 }
 
 async function waitForHttpOk(url, timeout = 60000) {
@@ -271,13 +292,19 @@ async function runBrowserHistoryE2E(token, user, conversationId, expectedContent
     if (response.status() >= 400 && !/favicon\.ico/.test(response.url())) issues.push(`response ${response.status()}: ${response.url()}`);
   });
   try {
-    await page.addInitScript(({ tokenValue, userValue }) => {
+    await page.addInitScript(({ tokenValue, userValue, reasoningEffortValue, reasoningEnabledValue, searchEnabledValue }) => {
       localStorage.setItem("token", tokenValue);
       localStorage.setItem("user", JSON.stringify(userValue));
-      localStorage.setItem("reasoning-mode", "fast");
-      localStorage.setItem("reasoning-enabled", "false");
-      localStorage.setItem("search-enabled", "false");
-    }, { tokenValue: token, userValue: user || {} });
+      localStorage.setItem("reasoning-mode", reasoningEffortValue);
+      localStorage.setItem("reasoning-enabled", reasoningEnabledValue ? "true" : "false");
+      localStorage.setItem("search-enabled", searchEnabledValue ? "true" : "false");
+    }, {
+      tokenValue: token,
+      userValue: user || {},
+      reasoningEffortValue: reasoningEffort,
+      reasoningEnabledValue: reasoningEnabled,
+      searchEnabledValue: searchEnabled,
+    });
     const url = `${proxyBase}/chat/?id=${conversationId}`;
     const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
     assert((response?.status() || 0) < 400, `browser chat history HTTP ${response?.status()}`);
@@ -290,7 +317,8 @@ async function runBrowserHistoryE2E(token, user, conversationId, expectedContent
       throw new Error(`browser history wait failed for ${JSON.stringify(expectedNeedle)} at ${currentUrl}: ${err.message}\nbody=${JSON.stringify(bodyText.slice(0, 1200))}\nissues=${issues.slice(0, 12).join("\n")}`);
     }
     const bodyText = await page.locator("body").innerText({ timeout: 5000 });
-    assert(bodyText.includes("真实E2E验证"), "browser history did not render user prompt");
+    const promptNeedle = prompt.slice(0, 8);
+    assert(bodyText.includes(promptNeedle), `browser history did not render user prompt: ${JSON.stringify(promptNeedle)}`);
     assert(expectedPattern.test(bodyText), "browser history did not render assistant answer");
     assert(!/加载中\.\.\./.test(bodyText) || bodyText.length > 100, "browser appears stuck in loading state");
     assert(issues.length === 0, `browser issues:\n${issues.slice(0, 12).join("\n")}`);
@@ -306,6 +334,12 @@ async function runBrowserHistoryE2E(token, user, conversationId, expectedContent
     apiBaseUrl,
     frontendBaseUrl,
     model,
+    reasoningEnabled,
+    requireReasoning,
+    requireStreamReasoning,
+    requirePersistedReasoning,
+    reasoningEffort,
+    searchEnabled,
     browserEnabled,
     startedAt: new Date(startedAt).toISOString(),
   };
@@ -332,6 +366,7 @@ async function runBrowserHistoryE2E(token, user, conversationId, expectedContent
       contentLength: stream.content.length,
       contentPreview: stream.content.slice(0, 120),
       reasoningLength: stream.reasoning.length,
+      streamReasoningObserved: stream.reasoning.trim().length > 0,
       assistantMessageId: stream.assistantMessageId,
       userMessageId: stream.userMessageId,
       generationTaskId: stream.generationTaskId,
