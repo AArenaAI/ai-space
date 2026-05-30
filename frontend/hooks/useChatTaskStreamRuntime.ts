@@ -18,7 +18,7 @@ import {
 } from "@/lib/chatMessageStatePatch";
 import type { Message } from "@/lib/chatTypes";
 
-type TaskStreamActiveState = {
+export type TaskStreamActiveState = {
   convId?: number;
   serverMessageId?: number;
   generationTaskId?: number;

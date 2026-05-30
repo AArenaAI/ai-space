@@ -7,6 +7,7 @@ import { useChatBackgroundPollingRuntime } from "@/hooks/useChatBackgroundPollin
 import { useChatTaskStreamRuntime } from "@/hooks/useChatTaskStreamRuntime";
 import { useChatMainStreamRuntime } from "@/hooks/useChatMainStreamRuntime";
 import { useChatSendRuntime } from "@/hooks/useChatSendRuntime";
+import { useChatConversationRestoreRuntime } from "@/hooks/useChatConversationRestoreRuntime";
 import {
   useChatConversationLifecycle,
   useLoadMoreMessagesAction,
@@ -26,28 +27,9 @@ import {
   runForkChatRequest,
 } from "@/lib/chatForkCoordinator";
 import {
-  buildConversationRestoreState,
-  buildConversationStatusDecision,
-  fetchConversationMessageCount,
-  fetchConversationMessageStatus,
-  fetchConversationRestore,
-  findLastAssistantStatusTarget,
-  parseConversationCompareModels,
-  resolveConversationSkillKey,
-} from "@/lib/chatConversationRestoreCoordinator";
-import {
-  buildConversationNavigationPlan,
-  shouldContinueConversationRestore,
-} from "@/lib/chatNavigationResetCoordinator";
-import {
   buildChatRequestHeaders,
 } from "@/lib/chatRequestBuilder";
-import { patchMessageById } from "@/lib/chatMessageStatePatch";
-import {
-  createBusyGeneratingStatus,
-  createFinalizingStatus,
-  createGeneratingStatus,
-} from "@/lib/chatActivityStatus";
+import { createFinalizingStatus } from "@/lib/chatActivityStatus";
 import type {
   ChatModel,
   Conversation,
@@ -220,161 +202,36 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     };
   }, [stopAllBackgroundPollers, stopAllTaskStreams]);
 
-  useEffect(() => {
-    const loadSeq = ++conversationLoadSeqRef.current;
-    const loadController = new AbortController();
-    const isLatestLoad = () => conversationLoadSeqRef.current === loadSeq;
-
-    const navigationPlan = buildConversationNavigationPlan({
-      conversationId,
-      shouldReset: shouldResetRef.current,
-      justCreatedConversationId: justCreatedRef.current,
-      skillKey,
-      hasMainAbortController: Boolean(abortControllerRef.current),
-      compareAbortControllerCount: compareAbortControllersRef.current.length,
-    });
-
-    if (navigationPlan.kind === "reset") {
-      if (navigationPlan.shouldSetLoadingHistory) setIsLoadingHistory(navigationPlan.loadingHistory);
-      applyNavigationResetLifecycle(navigationPlan);
-      if (navigationPlan.shouldResetMessages) setMessages([]);
-      setIsCompare(navigationPlan.isCompare);
-      setCompareModels(navigationPlan.compareModels);
-      setEffectiveSkillKey(navigationPlan.effectiveSkillKey);
-      return () => loadController.abort();
-    }
-
-    if (navigationPlan.kind === "just_created") {
-      applyJustCreatedNavigationLifecycle(navigationPlan);
-      setIsLoadingHistory(navigationPlan.loadingHistory);
-      return () => loadController.abort();
-    }
-
-    const { abortPlan } = navigationPlan;
-    if (abortPlan.shouldAbortMain && abortControllerRef.current) {
-      abortReasonRef.current = abortPlan.abortReason;
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    if (abortPlan.shouldAbortCompare && compareAbortControllersRef.current.length > 0) {
-      abortReasonRef.current = abortPlan.abortReason;
-      compareAbortControllersRef.current.forEach((controller) => controller.abort());
-      compareAbortControllersRef.current = [];
-    }
-
-    const activeEntries = Object.entries(activeTaskStreamsRef.current);
-
-    const token = localStorage.getItem("token");
-    if (!shouldContinueConversationRestore({ token, loadAborted: loadController.signal.aborted })) {
-      setIsLoadingHistory(false);
-      return () => loadController.abort();
-    }
-    const loadConversationId: number = navigationPlan.conversationId;
-    const authToken: string = token as string;
-
-    if (navigationPlan.shouldSetLoadingHistory) setIsLoadingHistory(navigationPlan.loadingHistory);
-    applyLoadExistingNavigationLifecycle(navigationPlan);
-
-    // 加载对话消息：首次只加载最近50条（tail模式），向上滚动时通过 loadMoreMessages 加载更多
-    fetchConversationRestore({
-      apiBaseUrl: API_BASE_URL,
-      conversationId: loadConversationId,
-      token: authToken,
-      signal: loadController.signal,
-    })
-      .then((data) => {
-        if (!isLatestLoad() || loadController.signal.aborted) return;
-        setConversationTitle(data.title || "");
-        const restoreState = buildConversationRestoreState({
-          data,
-          activeEntries,
-          conversationId: loadConversationId,
-          fallbackId: uuidv4,
-          activeActivityStatus: createGeneratingStatus(t),
-        });
-        if (restoreState) {
-          const { loadedMessages, mergedMessages, groupViews, activeByServerMessageId } = restoreState;
-          setMessages(mergedMessages as Message[]);
-          setLoadedPersistedMessages(loadedMessages.length);
-          setGroupViews(groupViews);
-          setIsLoading(restoreState.isLoading);
-
-          // 先渲染历史，再异步检查最后一条 assistant 的后台状态，避免切换对话被第二个请求阻塞。
-          const lastAssistant = findLastAssistantStatusTarget(mergedMessages, activeByServerMessageId);
-          if (lastAssistant?.serverMessageId) {
-            fetchConversationMessageStatus({
-              apiBaseUrl: API_BASE_URL,
-              conversationId: loadConversationId,
-              serverMessageId: lastAssistant.serverMessageId,
-              token: authToken,
-              signal: loadController.signal,
-            })
-              .then((statusData) => {
-                if (!statusData || !isLatestLoad() || loadController.signal.aborted) return;
-                const decision = buildConversationStatusDecision({
-                  statusData,
-                  currentMessage: lastAssistant,
-                  busyActivityStatus: createBusyGeneratingStatus(t),
-                });
-
-                setMessages((prev) => patchMessageById(prev, lastAssistant.id, decision.patch as Partial<Message>));
-
-                if (decision.shouldResumePolling && decision.resume) {
-                  setIsLoading(true);
-                  startTaskEventStream(
-                    conversationId,
-                    lastAssistant.id,
-                    lastAssistant.serverMessageId,
-                    decision.resume.lastSequence,
-                    decision.resume.initialContent,
-                    decision.resume.generationTaskId
-                  );
-                }
-              })
-              .catch((err: any) => {
-                if (loadController.signal.aborted || err?.name === "AbortError") return;
-              });
-          }
-        } else {
-          setMessages([]);
-          setLoadedPersistedMessages(0);
-          setIsLoading(false);
-        }
-        setIsLoadingHistory(false);
-
-        // 获取消息总数，用于分页加载更多
-        fetchConversationMessageCount({
-          apiBaseUrl: API_BASE_URL,
-          conversationId: loadConversationId,
-          token: authToken,
-          signal: loadController.signal,
-        })
-          .then((total) => {
-            if (typeof total === "number") {
-              setTotalMessages(total);
-            }
-          })
-          .catch(() => {});
-
-        // 设置当前模型
-        if (data.model) {
-          const model = models.find((m) => m.id === data.model);
-          if (model) setSelectedModel(model);
-        }
-        // 检测是否为对比对话
-        setIsCompare(!!data.compare);
-        setCompareModels(parseConversationCompareModels(data.compare_models));
-        // 从历史对话恢复 skill_key；如果历史没有，则回到 URL 传入的 skillKey
-        setEffectiveSkillKey(resolveConversationSkillKey(data.skill_key, skillKey));
-      })
-      .catch((err) => {
-        if (!isLatestLoad() || loadController.signal.aborted || err?.name === "AbortError") return;
-        setMessages([]);
-        setIsLoadingHistory(false);
-      });
-
-    return () => loadController.abort();
-  }, [conversationId, modelsKey, setSelectedModel, skillKey]);
+  useChatConversationRestoreRuntime({
+    apiBaseUrl: API_BASE_URL,
+    conversationId,
+    models,
+    modelsKey,
+    skillKey,
+    conversationLoadSeqRef,
+    shouldResetRef,
+    justCreatedRef,
+    abortControllerRef,
+    compareAbortControllersRef,
+    abortReasonRef,
+    activeTaskStreamsRef,
+    setMessages,
+    setConversationTitle,
+    setLoadedPersistedMessages,
+    setGroupViews,
+    setIsLoading,
+    setIsLoadingHistory,
+    setTotalMessages,
+    setSelectedModel,
+    setIsCompare,
+    setCompareModels,
+    setEffectiveSkillKey,
+    applyNavigationResetLifecycle,
+    applyJustCreatedNavigationLifecycle,
+    applyLoadExistingNavigationLifecycle,
+    startTaskEventStream,
+    translate: t,
+  });
 
   const {
     createConversation,
