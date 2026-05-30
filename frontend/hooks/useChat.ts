@@ -225,6 +225,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     conversationLoadSeqRef,
     shouldResetRef,
     justCreatedRef,
+    setCreatedConversation,
   } = useChatConversationLifecycle(conversationId);
   const abortControllerRef = useRef<AbortController | null>(null);
   const compareAbortControllersRef = useRef<AbortController[]>([]);
@@ -599,10 +600,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         });
         if (!data) return undefined;
 
-        setConversationTitle(resolveCreatedConversationTitle(data, title));
-        setCurrentConversation(data.id);
-        shouldResetRef.current = false; // 标记已创建对话，防止 useEffect 清空消息
-        justCreatedRef.current = data.id; // 标记刚创建，避免 useEffect 加载历史覆盖本地消息
+        setCreatedConversation(data.id, resolveCreatedConversationTitle(data, title));
         window.history.replaceState({}, "", buildCreatedConversationUrl({
           currentHref: window.location.href,
           conversationId: data.id,
@@ -616,7 +614,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         return undefined;
       }
     },
-    []
+    [setCreatedConversation]
   );
 
   // 流式读取核心逻辑

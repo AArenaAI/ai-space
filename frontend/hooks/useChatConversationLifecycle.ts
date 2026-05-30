@@ -26,6 +26,7 @@ export type ChatConversationLifecycleState = {
   conversationLoadSeqRef: MutableRefObject<number>;
   shouldResetRef: MutableRefObject<boolean>;
   justCreatedRef: MutableRefObject<number | undefined>;
+  setCreatedConversation: (conversationId: number, title: string) => void;
 };
 
 export type CreateLoadMoreMessagesActionInput = {
@@ -213,6 +214,16 @@ export function useChatConversationLifecycle(initialConversationId: number | und
     [totalMessages, loadedPersistedMessages]
   );
 
+  const setCreatedConversation = useCallback(
+    createSetCreatedConversationAction({
+      setConversationTitle,
+      setCurrentConversation,
+      shouldResetRef,
+      justCreatedRef,
+    }),
+    []
+  );
+
   return {
     conversationTitle,
     setConversationTitle,
@@ -228,5 +239,6 @@ export function useChatConversationLifecycle(initialConversationId: number | und
     conversationLoadSeqRef,
     shouldResetRef,
     justCreatedRef,
+    setCreatedConversation,
   };
 }
