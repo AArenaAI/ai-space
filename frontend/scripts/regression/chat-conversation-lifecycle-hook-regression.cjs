@@ -48,6 +48,9 @@ const {
   createSetCreatedConversationAction,
   createResetConversationPaginationAction,
   createSetLoadedConversationAction,
+  createApplyNavigationResetLifecycleAction,
+  createApplyJustCreatedNavigationLifecycleAction,
+  createApplyLoadExistingNavigationLifecycleAction,
   createLoadMoreMessagesAction,
 } = require(outFile);
 
@@ -126,6 +129,67 @@ test("createSetLoadedConversationAction applies loaded conversation metadata", (
   assert.equal(current.get(), 9);
   assert.equal(loaded.get(), 30);
   assert.equal(total.get(), 88);
+});
+
+test("navigation lifecycle reset action applies conversation metadata only when plan asks", () => {
+  const title = createState("old");
+  const current = createState(12);
+  const loaded = createState(50);
+  const total = createState(80);
+  const action = createApplyNavigationResetLifecycleAction({
+    setConversationTitle: title.set,
+    setCurrentConversation: current.set,
+    setLoadedPersistedMessages: loaded.set,
+    setTotalMessages: total.set,
+  });
+
+  action({
+    shouldClearConversationTitle: true,
+    conversationTitle: "",
+    shouldSetCurrentConversation: true,
+    currentConversation: undefined,
+    loadedPersistedMessages: 0,
+    totalMessages: 0,
+  });
+
+  assert.equal(title.get(), "");
+  assert.equal(current.get(), undefined);
+  assert.equal(loaded.get(), 0);
+  assert.equal(total.get(), 0);
+});
+
+test("just-created navigation lifecycle clears justCreated ref and pagination", () => {
+  const current = createState(undefined);
+  const loaded = createState(50);
+  const total = createState(80);
+  const justCreatedRef = { current: 9 };
+  const action = createApplyJustCreatedNavigationLifecycleAction({
+    setCurrentConversation: current.set,
+    setLoadedPersistedMessages: loaded.set,
+    setTotalMessages: total.set,
+    justCreatedRef,
+  });
+
+  action({
+    shouldClearJustCreated: true,
+    conversationId: 9,
+    loadedPersistedMessages: 0,
+    totalMessages: 0,
+  });
+
+  assert.equal(justCreatedRef.current, undefined);
+  assert.equal(current.get(), 9);
+  assert.equal(loaded.get(), 0);
+  assert.equal(total.get(), 0);
+});
+
+test("load-existing navigation lifecycle only sets current conversation when requested", () => {
+  const current = createState(1);
+  const action = createApplyLoadExistingNavigationLifecycleAction({ setCurrentConversation: current.set });
+  action({ shouldSetCurrentConversation: false, conversationId: 2 });
+  assert.equal(current.get(), 1);
+  action({ shouldSetCurrentConversation: true, conversationId: 2 });
+  assert.equal(current.get(), 2);
 });
 
 test("createLoadMoreMessagesAction loads, prepends and updates counters", async () => {

@@ -226,6 +226,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     shouldResetRef,
     justCreatedRef,
     setCreatedConversation,
+    applyNavigationResetLifecycle,
+    applyJustCreatedNavigationLifecycle,
+    applyLoadExistingNavigationLifecycle,
   } = useChatConversationLifecycle(conversationId);
   const abortControllerRef = useRef<AbortController | null>(null);
   const compareAbortControllersRef = useRef<AbortController[]>([]);
@@ -432,11 +435,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
 
     if (navigationPlan.kind === "reset") {
       if (navigationPlan.shouldSetLoadingHistory) setIsLoadingHistory(navigationPlan.loadingHistory);
-      if (navigationPlan.shouldClearConversationTitle) setConversationTitle(navigationPlan.conversationTitle);
+      applyNavigationResetLifecycle(navigationPlan);
       if (navigationPlan.shouldResetMessages) setMessages([]);
-      if (navigationPlan.shouldSetCurrentConversation) setCurrentConversation(navigationPlan.currentConversation);
-      setLoadedPersistedMessages(navigationPlan.loadedPersistedMessages);
-      setTotalMessages(navigationPlan.totalMessages);
       setIsCompare(navigationPlan.isCompare);
       setCompareModels(navigationPlan.compareModels);
       setEffectiveSkillKey(navigationPlan.effectiveSkillKey);
@@ -444,13 +444,8 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     }
 
     if (navigationPlan.kind === "just_created") {
-      if (navigationPlan.shouldClearJustCreated) {
-        justCreatedRef.current = undefined;
-      }
+      applyJustCreatedNavigationLifecycle(navigationPlan);
       setIsLoadingHistory(navigationPlan.loadingHistory);
-      setCurrentConversation(navigationPlan.conversationId);
-      setLoadedPersistedMessages(navigationPlan.loadedPersistedMessages);
-      setTotalMessages(navigationPlan.totalMessages);
       return () => loadController.abort();
     }
 
@@ -477,7 +472,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     const authToken: string = token as string;
 
     if (navigationPlan.shouldSetLoadingHistory) setIsLoadingHistory(navigationPlan.loadingHistory);
-    if (navigationPlan.shouldSetCurrentConversation) setCurrentConversation(navigationPlan.conversationId);
+    applyLoadExistingNavigationLifecycle(navigationPlan);
 
     // 加载对话消息：首次只加载最近50条（tail模式），向上滚动时通过 loadMoreMessages 加载更多
     fetchConversationRestore({

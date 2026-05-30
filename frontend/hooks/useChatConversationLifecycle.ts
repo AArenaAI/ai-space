@@ -27,6 +27,31 @@ export type ChatConversationLifecycleState = {
   shouldResetRef: MutableRefObject<boolean>;
   justCreatedRef: MutableRefObject<number | undefined>;
   setCreatedConversation: (conversationId: number, title: string) => void;
+  resetConversationPagination: () => void;
+  applyNavigationResetLifecycle: (plan: ConversationNavigationResetLifecyclePlan) => void;
+  applyJustCreatedNavigationLifecycle: (plan: ConversationJustCreatedNavigationLifecyclePlan) => void;
+  applyLoadExistingNavigationLifecycle: (plan: ConversationLoadExistingNavigationLifecyclePlan) => void;
+};
+
+export type ConversationNavigationResetLifecyclePlan = {
+  shouldClearConversationTitle?: boolean;
+  conversationTitle: string;
+  shouldSetCurrentConversation?: boolean;
+  currentConversation?: number | undefined;
+  loadedPersistedMessages: number;
+  totalMessages: number;
+};
+
+export type ConversationJustCreatedNavigationLifecyclePlan = {
+  shouldClearJustCreated?: boolean;
+  conversationId: number;
+  loadedPersistedMessages: number;
+  totalMessages: number;
+};
+
+export type ConversationLoadExistingNavigationLifecyclePlan = {
+  shouldSetCurrentConversation?: boolean;
+  conversationId: number;
 };
 
 export type CreateLoadMoreMessagesActionInput = {
@@ -105,6 +130,44 @@ export function createSetLoadedConversationAction(input: {
     input.setCurrentConversation(conversation.id);
     input.setLoadedPersistedMessages(conversation.loadedPersistedMessages);
     input.setTotalMessages(conversation.totalMessages);
+  };
+}
+
+export function createApplyNavigationResetLifecycleAction(input: {
+  setConversationTitle: Dispatch<SetStateAction<string>>;
+  setCurrentConversation: Dispatch<SetStateAction<number | undefined>>;
+  setLoadedPersistedMessages: Dispatch<SetStateAction<number>>;
+  setTotalMessages: Dispatch<SetStateAction<number>>;
+}) {
+  return (plan: ConversationNavigationResetLifecyclePlan) => {
+    if (plan.shouldClearConversationTitle) input.setConversationTitle(plan.conversationTitle);
+    if (plan.shouldSetCurrentConversation) input.setCurrentConversation(plan.currentConversation);
+    input.setLoadedPersistedMessages(plan.loadedPersistedMessages);
+    input.setTotalMessages(plan.totalMessages);
+  };
+}
+
+export function createApplyJustCreatedNavigationLifecycleAction(input: {
+  setCurrentConversation: Dispatch<SetStateAction<number | undefined>>;
+  setLoadedPersistedMessages: Dispatch<SetStateAction<number>>;
+  setTotalMessages: Dispatch<SetStateAction<number>>;
+  justCreatedRef: MutableRefObject<number | undefined>;
+}) {
+  return (plan: ConversationJustCreatedNavigationLifecyclePlan) => {
+    if (plan.shouldClearJustCreated) {
+      input.justCreatedRef.current = undefined;
+    }
+    input.setCurrentConversation(plan.conversationId);
+    input.setLoadedPersistedMessages(plan.loadedPersistedMessages);
+    input.setTotalMessages(plan.totalMessages);
+  };
+}
+
+export function createApplyLoadExistingNavigationLifecycleAction(input: {
+  setCurrentConversation: Dispatch<SetStateAction<number | undefined>>;
+}) {
+  return (plan: ConversationLoadExistingNavigationLifecyclePlan) => {
+    if (plan.shouldSetCurrentConversation) input.setCurrentConversation(plan.conversationId);
   };
 }
 
@@ -224,6 +287,36 @@ export function useChatConversationLifecycle(initialConversationId: number | und
     []
   );
 
+  const resetConversationPagination = useCallback(
+    createResetConversationPaginationAction({ setLoadedPersistedMessages, setTotalMessages }),
+    []
+  );
+
+  const applyNavigationResetLifecycle = useCallback(
+    createApplyNavigationResetLifecycleAction({
+      setConversationTitle,
+      setCurrentConversation,
+      setLoadedPersistedMessages,
+      setTotalMessages,
+    }),
+    []
+  );
+
+  const applyJustCreatedNavigationLifecycle = useCallback(
+    createApplyJustCreatedNavigationLifecycleAction({
+      setCurrentConversation,
+      setLoadedPersistedMessages,
+      setTotalMessages,
+      justCreatedRef,
+    }),
+    []
+  );
+
+  const applyLoadExistingNavigationLifecycle = useCallback(
+    createApplyLoadExistingNavigationLifecycleAction({ setCurrentConversation }),
+    []
+  );
+
   return {
     conversationTitle,
     setConversationTitle,
@@ -240,5 +333,9 @@ export function useChatConversationLifecycle(initialConversationId: number | und
     shouldResetRef,
     justCreatedRef,
     setCreatedConversation,
+    resetConversationPagination,
+    applyNavigationResetLifecycle,
+    applyJustCreatedNavigationLifecycle,
+    applyLoadExistingNavigationLifecycle,
   };
 }
