@@ -30,6 +30,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotifications";
+import { normalizeError, readApiError, showUserError } from "@/lib/errors";
 import { toast } from "sonner";
 import ImageLightbox from "@/components/ui/ImageLightbox";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
@@ -65,44 +66,11 @@ const QUALITIES = [
 ];
 
 function cleanImageErrorMessage(raw: string | null | undefined, t: (key: string) => string): string {
-  const message = (raw || "").trim();
-  if (!message) return t("image.error.default");
-  const lower = message.toLowerCase();
-
-  if (
-    lower.includes("sensitive") ||
-    lower.includes("content_filter") ||
-    lower.includes("content policy") ||
-    lower.includes("moderation") ||
-    lower.includes("risk") ||
-    message.includes("敏感") ||
-    message.includes("安全") ||
-    message.includes("违规") ||
-    message.includes("审核")
-  ) {
-    return t("image.error.sensitive");
-  }
-
-  if (lower.includes("rate limit") || lower.includes("too many requests") || lower.includes("429") || message.includes("限流") || message.includes("请求过多")) {
-    return t("image.error.rateLimit");
-  }
-
-  if (lower.includes("timeout") || lower.includes("deadline exceeded") || message.includes("超时")) {
-    return t("image.error.timeout");
-  }
-
-  if (lower.includes("quota") || lower.includes("insufficient") || lower.includes("balance") || message.includes("额度") || message.includes("余额")) {
-    return t("image.error.quota");
-  }
-
-  if (lower.includes("invalid") || lower.includes("badrequest") || lower.includes("unsupported") || lower.includes("parameter") || message.includes("参数") || message.includes("不支持")) {
-    return t("image.error.invalidSettings");
-  }
-
-  const looksDebug = message.includes("{") || message.includes("}") || lower.includes("request_id") || lower.includes("request id") || lower.includes("openai") || lower.includes("sdk") || lower.includes("base64") || lower.includes("stream") || lower.includes("b64_json") || message.length > 120;
-  if (looksDebug) return t("image.error.default");
-
-  return message;
+  return normalizeError(raw || "", {
+    module: "image",
+    fallbackTitle: t("image.error.default"),
+    fallbackMessage: t("image.error.default"),
+  }).message;
 }
 
 
@@ -561,12 +529,12 @@ function ImageChatPageInner() {
 
       setPrompt("");
       setReferenceImages([]);
-    } catch (err: any) {
-      const rawMsg = err.message || t("common.sendFailed");
-      if (rawMsg.includes("历史记录只能保存")) {
+    } catch (err) {
+      const userError = normalizeError(err, { module: "image", fallbackMessage: t("common.sendFailed") });
+      if (userError.message.includes("历史记录只能保存")) {
         setLimitDialogOpen(true);
       } else {
-        toast.error(cleanImageErrorMessage(rawMsg, t));
+        toast.error(userError.message);
       }
       setIsGenerating(false);
     }
@@ -588,14 +556,17 @@ function ImageChatPageInner() {
         body: formData,
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || t("image.uploadFailed"));
+        throw await readApiError(res);
       }
       const data = await res.json();
       const url = data.public_id || data.url || data.image_url;
       setReferenceImages((prev) => [...prev, url]);
-    } catch (err: any) {
-      toast.error(`${t("image.uploadFailed")}: ${err.message}`);
+    } catch (err) {
+      showUserError(err, {
+        module: "file",
+        fallbackTitle: t("image.uploadFailed"),
+        fallbackMessage: "参考图上传失败，请重新选择图片。",
+      });
     } finally {
       setUploadingRef(false);
     }

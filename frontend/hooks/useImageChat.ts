@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { readApiError } from "@/lib/errors";
 
 export interface ImageChat {
   id: number;
@@ -27,12 +28,12 @@ const API_BASE_URL = "";
 async function safeJSON(res: Response): Promise<any> {
   const text = await res.text();
   if (!text || text.trim() === "") {
-    throw new Error(`服务器返回空响应 (HTTP ${res.status})`);
+    return {};
   }
   try {
     return JSON.parse(text);
   } catch {
-    throw new Error(`服务器返回异常 (HTTP ${res.status}): ${text.slice(0, 100)}`);
+    throw await readApiError(new Response(text, { status: res.status, statusText: res.statusText }));
   }
 }
 
@@ -52,10 +53,10 @@ export function useImageChats() {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE_URL}/api/image-chats`, { headers: getHeaders() });
-      if (!res.ok) throw new Error("获取会话列表失败");
+      if (!res.ok) throw await readApiError(res);
       const data = await safeJSON(res);
       setChats(data.chats || []);
-    } catch (err: any) {
+    } catch (err) {
       console.error("fetch image chats error:", err);
     } finally {
       setLoading(false);
@@ -74,10 +75,7 @@ export function useImageChats() {
       headers: getHeaders(),
       body: JSON.stringify(payload),
     });
-    if (!res.ok) {
-      const err = await safeJSON(res);
-      throw new Error(err.error || "创建会话失败");
-    }
+    if (!res.ok) throw await readApiError(res);
     return safeJSON(res) as Promise<ImageChat>;
   }, []);
 
@@ -86,7 +84,7 @@ export function useImageChats() {
       method: "DELETE",
       headers: getHeaders(),
     });
-    if (!res.ok) throw new Error("删除失败");
+    if (!res.ok) throw await readApiError(res);
     setChats((prev) => prev.filter((c) => c.id !== id));
   }, []);
 
@@ -96,7 +94,7 @@ export function useImageChats() {
       headers: getHeaders(),
       body: JSON.stringify({ title }),
     });
-    if (!res.ok) throw new Error("更新失败");
+    if (!res.ok) throw await readApiError(res);
     setChats((prev) => prev.map((c) => (c.id === id ? { ...c, title } : c)));
   }, []);
 
@@ -111,12 +109,12 @@ export function useImageChatMessages() {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE_URL}/api/image-chats/${chatId}/messages`, { headers: getHeaders() });
-      if (!res.ok) throw new Error("获取消息失败");
+      if (!res.ok) throw await readApiError(res);
       const data = await safeJSON(res);
       const msgs: ImageChatMessage[] = data.messages || [];
       setMessages(msgs);
       return msgs;
-    } catch (err: any) {
+    } catch (err) {
       console.error("fetch messages error:", err);
       return [];
     } finally {
@@ -136,10 +134,7 @@ export function useImageChatMessages() {
       headers: getHeaders(),
       body: JSON.stringify(payload),
     });
-    if (!res.ok) {
-      const err = await safeJSON(res);
-      throw new Error(err.error || "发送失败");
-    }
+    if (!res.ok) throw await readApiError(res);
     return safeJSON(res) as Promise<{ message_id: number; chat_id: number; status: string }>;
   }, []);
 

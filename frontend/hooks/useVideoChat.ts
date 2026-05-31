@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { readApiError } from "@/lib/errors";
 
 export interface VideoChat {
   id: number;
@@ -47,12 +48,12 @@ const API_BASE_URL = "";
 async function safeJSON(res: Response): Promise<any> {
   const text = await res.text();
   if (!text || text.trim() === "") {
-    throw new Error(`服务器返回空响应 (HTTP ${res.status})`);
+    return {};
   }
   try {
     return JSON.parse(text);
   } catch {
-    throw new Error(`服务器返回异常 (HTTP ${res.status}): ${text.slice(0, 100)}`);
+    throw await readApiError(new Response(text, { status: res.status, statusText: res.statusText }));
   }
 }
 
@@ -72,7 +73,7 @@ export function useVideoChats() {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE_URL}/api/video-chats`, { headers: getHeaders() });
-      if (!res.ok) throw new Error("获取视频会话列表失败");
+      if (!res.ok) throw await readApiError(res);
       const data = await safeJSON(res);
       setChats(data.chats || []);
       return (data.chats || []) as VideoChat[];
@@ -90,10 +91,7 @@ export function useVideoChats() {
       headers: getHeaders(),
       body: JSON.stringify(payload),
     });
-    if (!res.ok) {
-      const err = await safeJSON(res);
-      throw new Error(err.error || "创建视频会话失败");
-    }
+    if (!res.ok) throw await readApiError(res);
     return safeJSON(res) as Promise<{ chat: VideoChat; chat_id: number; message_id: number; task_id: string; status: string }>;
   }, []);
 
@@ -102,7 +100,7 @@ export function useVideoChats() {
       method: "DELETE",
       headers: getHeaders(),
     });
-    if (!res.ok) throw new Error("删除失败");
+    if (!res.ok) throw await readApiError(res);
     setChats((prev) => prev.filter((chat) => chat.id !== id));
   }, []);
 
@@ -112,7 +110,7 @@ export function useVideoChats() {
       headers: getHeaders(),
       body: JSON.stringify({ title }),
     });
-    if (!res.ok) throw new Error("更新失败");
+    if (!res.ok) throw await readApiError(res);
     setChats((prev) => prev.map((chat) => (chat.id === id ? { ...chat, title } : chat)));
   }, []);
 
@@ -127,7 +125,7 @@ export function useVideoChatMessages() {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE_URL}/api/video-chats/${chatId}/messages`, { headers: getHeaders() });
-      if (!res.ok) throw new Error("获取视频消息失败");
+      if (!res.ok) throw await readApiError(res);
       const data = await safeJSON(res);
       const msgs: VideoChatMessage[] = data.messages || [];
       setMessages(msgs);
@@ -146,10 +144,7 @@ export function useVideoChatMessages() {
       headers: getHeaders(),
       body: JSON.stringify(payload),
     });
-    if (!res.ok) {
-      const err = await safeJSON(res);
-      throw new Error(err.error || "发送失败");
-    }
+    if (!res.ok) throw await readApiError(res);
     return safeJSON(res) as Promise<{ message_id: number; chat_id: number; task_id: string; status: string }>;
   }, []);
 
