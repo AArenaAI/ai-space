@@ -39,7 +39,7 @@ export function mapFileError(raw: string): Partial<UserFacingError> | null {
     };
   }
 
-  if (/大小|too large|exceed|exceeded|超过\s*\d+\s*(MB|M|KB|K)|不能超过/i.test(message)) {
+  if (/大小|payload too large|request entity too large|file.*(too large|exceed|exceeded)|上传.*(too large|exceed|exceeded)|超过\s*\d+\s*(MB|M|KB|K)|不能超过/i.test(message)) {
     return {
       code: "file_too_large",
       category: "file",
