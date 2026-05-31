@@ -95,13 +95,13 @@ export function StreamingText({
             </div>
           </div>
           <div data-i18n-skip="true" className="reasoning-markdown px-3 py-2.5 bg-slate-50 dark:bg-[#0F0F1A]">
-            <DeferredMarkdownRenderer content={parsed.reasoning || ""} idleTimeout={80} />
+            <DeferredMarkdownRenderer content={parsed.reasoning || ""} idleTimeout={80} keepRenderedOnContentChange />
           </div>
         </div>
       )}
       {hasContent && (
         <span data-i18n-skip="true" className="streaming-answer-markdown block break-words">
-          <DeferredMarkdownRenderer content={parsed.answer} idleTimeout={80} />
+          <DeferredMarkdownRenderer content={parsed.answer} idleTimeout={80} keepRenderedOnContentChange />
         </span>
       )}
       {!hasContent && !hasReason && <ThinkingDots />}

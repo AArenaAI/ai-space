@@ -26,6 +26,12 @@ function transpileModule(sourceFile, tmpDir) {
 function loadModule() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "chat-main-stream-handler-regression-"));
   [
+    "lib/errors/errorCatalog.ts",
+    "lib/errors/chatErrorMap.ts",
+    "lib/errors/fileErrorMap.ts",
+    "lib/errors/mediaErrorMap.ts",
+    "lib/errors/types.ts",
+    "lib/errors/normalizeError.ts",
     "lib/chatSseParser.ts",
     "lib/chatStreamMeta.ts",
     "lib/chatStreamDelta.ts",

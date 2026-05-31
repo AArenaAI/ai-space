@@ -30,17 +30,39 @@ export function DeferredMarkdownRenderer({
   content,
   rootMargin = DEFAULT_ROOT_MARGIN,
   idleTimeout = DEFAULT_IDLE_TIMEOUT,
+  keepRenderedOnContentChange = false,
 }: {
   content: string;
   rootMargin?: string;
   idleTimeout?: number;
+  keepRenderedOnContentChange?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [shouldRenderMarkdown, setShouldRenderMarkdown] = useState(false);
+  const hasRenderedMarkdownRef = useRef(false);
 
   useEffect(() => {
+    if (shouldRenderMarkdown) {
+      hasRenderedMarkdownRef.current = true;
+    }
+  }, [shouldRenderMarkdown]);
+
+  useEffect(() => {
+    if (keepRenderedOnContentChange && hasRenderedMarkdownRef.current) {
+      if (!content) {
+        hasRenderedMarkdownRef.current = false;
+        setShouldRenderMarkdown(false);
+      } else {
+        setShouldRenderMarkdown(true);
+      }
+      return;
+    }
+
     setShouldRenderMarkdown(false);
-    if (!content) return;
+    if (!content) {
+      hasRenderedMarkdownRef.current = false;
+      return;
+    }
 
     const node = hostRef.current;
     if (!node) return;
@@ -93,7 +115,7 @@ export function DeferredMarkdownRenderer({
       cancelled = true;
       cleanupIdle?.();
     };
-  }, [content, idleTimeout, rootMargin]);
+  }, [content, idleTimeout, keepRenderedOnContentChange, rootMargin]);
 
   return (
     <div ref={hostRef}>

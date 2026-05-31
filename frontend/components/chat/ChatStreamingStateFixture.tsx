@@ -62,9 +62,15 @@ export default function ChatStreamingStateFixture() {
       }, 260),
       window.setTimeout(() => {
         realtimeAppend(assistantId, { reasoning: false });
-        realtimeAppend(assistantId, { answerDelta: "最终回答 **OK** 42", reasoning: false });
+        realtimeAppend(assistantId, { answerDelta: "最终回答 **", reasoning: false });
         setPhase("answer-streaming");
       }, 650),
+      window.setTimeout(() => {
+        realtimeAppend(assistantId, { answerDelta: "OK", reasoning: false });
+      }, 820),
+      window.setTimeout(() => {
+        realtimeAppend(assistantId, { answerDelta: "** 42", reasoning: false });
+      }, 990),
       window.setTimeout(() => {
         // Simulate DONE without a search-completed meta event. This used to leave
         // the web-search badge stuck in the running state.

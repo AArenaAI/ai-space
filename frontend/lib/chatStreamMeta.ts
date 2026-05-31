@@ -1,4 +1,4 @@
-import { normalizeError } from "@/lib/errors";
+import { normalizeError } from "./errors/normalizeError";
 
 export type ChatStreamPayload =
   | { type: "chat_meta"; meta: any; requestId: string }
