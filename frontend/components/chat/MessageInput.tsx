@@ -46,6 +46,11 @@ export interface ReasoningConfig {
   effort: ReasoningEffort;
 }
 
+export type QuoteDraft = {
+  id: number;
+  text: string;
+};
+
 interface MessageInputProps {
   onSend: (content: string, reasoning: ReasoningConfig, search: boolean, attachments?: AttachedFile[], file_ids?: string[]) => void;
   onStop: () => void;
@@ -58,6 +63,7 @@ interface MessageInputProps {
   onSelectTemplate: (templateId: number) => void;
   onNewChat: () => void;
   onRecommendationContextChange?: (context: ModelRecommendationContext) => void;
+  quoteDraft?: QuoteDraft | null;
 }
 
 export interface AttachedFile {
@@ -94,7 +100,7 @@ function normalizeReasoningMode(value: string | null): ReasoningMode {
   return value === "think" || value === "expert" || value === "fast" ? value : "fast";
 }
 
-export default function MessageInput({ onSend, onStop, isLoading, compareMode, onToggleCompare, currentModel, templates, selectedTemplateId, onSelectTemplate, onNewChat, onRecommendationContextChange }: MessageInputProps) {
+export default function MessageInput({ onSend, onStop, isLoading, compareMode, onToggleCompare, currentModel, templates, selectedTemplateId, onSelectTemplate, onNewChat, onRecommendationContextChange, quoteDraft }: MessageInputProps) {
   const { t } = useI18n();
   const { isOffline, justRestored } = useNetworkStatus();
   const [content, setContent] = useState("");
@@ -209,6 +215,33 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     el.style.height = `${nextHeight}px`;
     el.style.overflowY = el.scrollHeight > TEXTAREA_MAX_HEIGHT ? "auto" : "hidden";
   }, [content]);
+
+  useEffect(() => {
+    if (!quoteDraft?.text) return;
+    const el = textareaRef.current;
+    const quote = quoteDraft.text.trim();
+    if (!quote) return;
+
+    setContent((previous) => {
+      const insertion = `${quote}\n\n`;
+      if (!previous.trim()) return insertion;
+      const selectionStart = el?.selectionStart ?? previous.length;
+      const selectionEnd = el?.selectionEnd ?? selectionStart;
+      const prefix = previous.slice(0, selectionStart);
+      const suffix = previous.slice(selectionEnd);
+      const before = prefix.endsWith("\n") || prefix.length === 0 ? prefix : `${prefix}\n`;
+      const after = suffix.startsWith("\n") || suffix.length === 0 ? suffix : `\n${suffix}`;
+      return `${before}${insertion}${after}`;
+    });
+
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      const nextCursor = textarea.value.length;
+      textarea.setSelectionRange(nextCursor, nextCursor);
+    });
+  }, [quoteDraft?.id, quoteDraft?.text]);
 
   // 轮询更新文件解析状态
   useEffect(() => {

@@ -16,19 +16,19 @@ const baseUrl = process.env.TEXT_SELECTION_FIXTURE_BASE_URL || "http://127.0.0.1
   page.on("pageerror", (err) => errors.push(err.message));
 
   try {
-    const url = `${baseUrl}/test-chat-performance/?mode=static&count=12&longEvery=0&hasMore=0`;
+    const url = `${baseUrl}/test-chat-text-selection/`;
     const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 });
     assert.ok(response && response.status() < 400, `unexpected status ${response?.status()} for ${url}`);
 
     await page.waitForSelector('[data-chat-message-row="true"]', { state: "attached", timeout: 20_000 });
-    await page.waitForFunction(() => /这是第 \d+ 轮用户消息/.test(document.body.innerText), { timeout: 20_000 });
+    await page.waitForFunction(() => document.body.innerText.includes("用于验证引用插入输入框"), { timeout: 20_000 });
 
     const selectedText = await page.evaluate(() => {
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       let node = walker.nextNode();
       while (node) {
         const text = node.textContent || "";
-        const match = text.match(/这是第 \d+ 轮用户消息/);
+        const match = text.match(/这是第 1 轮用户消息/);
         if (match?.index !== undefined) {
           const range = document.createRange();
           range.setStart(node, match.index);
@@ -47,11 +47,16 @@ const baseUrl = process.env.TEXT_SELECTION_FIXTURE_BASE_URL || "http://127.0.0.1
     const bar = page.locator('[data-testid="chat-text-selection-bar"]');
     await bar.waitFor({ state: "visible", timeout: 10_000 });
     await page.locator('[data-testid="chat-text-selection-copy-quote"]').click();
-    const clipboard = await page.evaluate(() => navigator.clipboard.readText());
-    assert.equal(clipboard, `> ${selectedText}`);
+    const textarea = page.locator('textarea').first();
+    await textarea.waitFor({ state: "visible", timeout: 10_000 });
+    await page.waitForFunction((expected) => {
+      const textarea = document.querySelector("textarea");
+      return textarea instanceof HTMLTextAreaElement && textarea.value === `> ${expected}\n\n`;
+    }, selectedText, { timeout: 10_000 });
+    const inputValue = await textarea.inputValue();
     await bar.waitFor({ state: "detached", timeout: 10_000 });
     assert.equal(errors.length, 0, `unexpected console/page errors: ${errors.slice(0, 3).join(" | ")}`);
-    console.log(JSON.stringify({ ok: true, clipboard }));
+    console.log(JSON.stringify({ ok: true, inputValue }));
   } finally {
     await browser.close();
   }

@@ -5,7 +5,7 @@ import { useChat } from "@/hooks/useChat";
 import type { ChatModel } from "@/lib/chatTypes";
 import { useTemplates } from "@/hooks/useTemplates";
 import MessageList from "./MessageList";
-import MessageInput, { ReasoningConfig } from "./MessageInput";
+import MessageInput, { ReasoningConfig, type QuoteDraft } from "./MessageInput";
 import ModelSelector from "./ModelSelector";
 import ThemeToggle from "@/components/theme/ThemeToggle";
 import { Zap, X, Pencil, Bot } from "lucide-react";
@@ -49,6 +49,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
   const [forkDialogOpen, setForkDialogOpen] = useState(false);
   const [forkTargetMessageId, setForkTargetMessageId] = useState<number | null>(null);
   const [messageSelectMode, setMessageSelectMode] = useState(false);
+  const [quoteDraft, setQuoteDraft] = useState<QuoteDraft | null>(null);
   const [modelRecommendationContext, setModelRecommendationContext] = useState<ModelRecommendationContext>();
   const [userName, setUserName] = useState<string>("");
   useEffect(() => {
@@ -292,6 +293,10 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
       stopGeneration();
   };
 
+  const handleQuoteSelection = useCallback((quote: string) => {
+    setQuoteDraft({ id: Date.now(), text: quote });
+  }, []);
+
   const handleTemplateSelect = (templateId: number) => {
     setSelectedTemplateId(templateId);
     localStorage.setItem("selected-template", String(templateId));
@@ -448,6 +453,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
           targetMessageId={currentConversation === conversationId ? targetMessageId : undefined}
           onSelectModeChange={setMessageSelectMode}
           onExitCompare={handleExitCompare}
+          onQuoteSelection={handleQuoteSelection}
         />
       )}
 
@@ -492,6 +498,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
               onSelectTemplate={handleTemplateSelect}
               onNewChat={handleNewChat}
               onRecommendationContextChange={setModelRecommendationContext}
+              quoteDraft={quoteDraft}
             />
           </div>
         )}
@@ -550,6 +557,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
                 selectedTemplateId={selectedTemplateId}
                 onSelectTemplate={handleTemplateSelect}
                 onNewChat={handleNewChat}
+                quoteDraft={quoteDraft}
               />
             </div>
           </div>

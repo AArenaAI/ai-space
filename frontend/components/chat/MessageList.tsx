@@ -71,6 +71,7 @@ interface MessageListProps {
   bottomSpacer?: number;
   onSelectModeChange?: (active: boolean) => void;
   onExitCompare?: () => void;
+  onQuoteSelection?: (quote: string) => void;
 }
 
 function normalizeExportPlainText(content: string): string {
@@ -154,6 +155,7 @@ function MessageList({
   targetMessageId,
   onSelectModeChange,
   onExitCompare,
+  onQuoteSelection,
 }: MessageListProps) {
   const { t } = useI18n();
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -544,9 +546,15 @@ function MessageList({
 
   const handleCopySelectedQuote = useCallback(async () => {
     if (!textSelection?.text) return;
-    await copyText(formatQuoteText(textSelection.text), "已复制为引用");
+    const quote = formatQuoteText(textSelection.text);
+    if (onQuoteSelection) {
+      onQuoteSelection(quote);
+      toast.success("已插入引用");
+    } else {
+      await copyText(quote, "已复制为引用");
+    }
     clearTextSelection();
-  }, [clearTextSelection, copyText, formatQuoteText, textSelection]);
+  }, [clearTextSelection, copyText, formatQuoteText, onQuoteSelection, textSelection]);
 
   const updateTextSelection = useCallback(() => {
     const selection = window.getSelection();
