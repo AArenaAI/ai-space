@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
 import { getErrorMessage, readApiError, showUserError } from "@/lib/errors";
 import { supportsModelCapability } from "@/lib/models/modelCapabilities";
+import type { ModelRecommendationContext } from "@/lib/models/modelRecommendations";
 
 const TEXTAREA_MIN_HEIGHT = 92;
 const TEXTAREA_MAX_HEIGHT = 180;
@@ -55,6 +56,7 @@ interface MessageInputProps {
   selectedTemplateId: number;
   onSelectTemplate: (templateId: number) => void;
   onNewChat: () => void;
+  onRecommendationContextChange?: (context: ModelRecommendationContext) => void;
 }
 
 export interface AttachedFile {
@@ -91,7 +93,7 @@ function normalizeReasoningMode(value: string | null): ReasoningMode {
   return value === "think" || value === "expert" || value === "fast" ? value : "fast";
 }
 
-export default function MessageInput({ onSend, onStop, isLoading, compareMode, onToggleCompare, currentModel, templates, selectedTemplateId, onSelectTemplate, onNewChat }: MessageInputProps) {
+export default function MessageInput({ onSend, onStop, isLoading, compareMode, onToggleCompare, currentModel, templates, selectedTemplateId, onSelectTemplate, onNewChat, onRecommendationContextChange }: MessageInputProps) {
   const { t } = useI18n();
   const [content, setContent] = useState("");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
@@ -130,6 +132,15 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
 
   const selectedTemplate = templates.find((tpl) => tpl.id === selectedTemplateId);
   const isTemplateDisabled = selectedTemplateId === 0;
+
+  useEffect(() => {
+    onRecommendationContextChange?.({
+      searchEnabled: effectiveSearchEnabled,
+      hasImageAttachment: attachedFiles.some((file) => file.type.startsWith("image/")),
+      hasDocumentAttachment: attachedFiles.some((file) => !file.type.startsWith("image/")),
+      inputText: content,
+    });
+  }, [attachedFiles, content, effectiveSearchEnabled, onRecommendationContextChange]);
 
   const handleTemplateEnter = useCallback(() => {
     if (templateTimerRef.current) clearTimeout(templateTimerRef.current);

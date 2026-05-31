@@ -16,6 +16,7 @@ import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { useI18n } from "@/lib/i18n";
 import InputDialog from "@/components/ui/InputDialog";
+import type { ModelRecommendationContext } from "@/lib/models/modelRecommendations";
 
 const ForkCompareDialog = dynamic(() => import("./ForkCompareDialog"), {
   ssr: false,
@@ -48,6 +49,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
   const [forkDialogOpen, setForkDialogOpen] = useState(false);
   const [forkTargetMessageId, setForkTargetMessageId] = useState<number | null>(null);
   const [messageSelectMode, setMessageSelectMode] = useState(false);
+  const [modelRecommendationContext, setModelRecommendationContext] = useState<ModelRecommendationContext>();
   const [userName, setUserName] = useState<string>("");
   useEffect(() => {
     try {
@@ -369,6 +371,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
               models={models}
               selected={selectedModel}
               onSelect={handleModelSelect}
+              recommendationContext={modelRecommendationContext}
             />
           </div>
 
@@ -488,6 +491,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
               selectedTemplateId={selectedTemplateId}
               onSelectTemplate={handleTemplateSelect}
               onNewChat={handleNewChat}
+              onRecommendationContextChange={setModelRecommendationContext}
             />
           </div>
         )}

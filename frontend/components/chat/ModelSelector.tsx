@@ -6,12 +6,14 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { ChatModel } from "@/lib/chatTypes";
 import { getModelCapabilitySummary, getPrimaryModelCapabilities } from "@/lib/models/modelCapabilities";
+import { getModelRecommendation, getRecommendedModels, isModelRecommended, type ModelRecommendationContext } from "@/lib/models/modelRecommendations";
 import { ModelCapabilityBadges } from "./ModelCapabilityBadge";
 
 interface ModelSelectorProps {
   models: ChatModel[];
   selected: ChatModel;
   onSelect: (model: ChatModel) => void;
+  recommendationContext?: ModelRecommendationContext;
 }
 
 // 厂商品牌色
@@ -86,6 +88,7 @@ export default function ModelSelector({
   models,
   selected,
   onSelect,
+  recommendationContext,
 }: ModelSelectorProps) {
   const [open, setOpen] = useState(false);
   const [hoveredProvider, setHoveredProvider] = useState<string | null>(null);
@@ -99,6 +102,16 @@ export default function ModelSelector({
     models.forEach((model) => map.set(model.id, model));
     return map;
   }, [models]);
+
+  const recommendation = useMemo(
+    () => getModelRecommendation(recommendationContext),
+    [recommendationContext]
+  );
+  const recommendedModels = useMemo(
+    () => getRecommendedModels(models, recommendation, 2),
+    [models, recommendation]
+  );
+  const selectedMatchesRecommendation = isModelRecommended(selected, recommendation);
 
   // 点击外部关闭
   useEffect(() => {
@@ -360,6 +373,33 @@ export default function ModelSelector({
               <div className="px-4 py-2 text-xs font-medium text-text-tertiary uppercase tracking-wider border-b border-surface-border mb-1.5">
                 选择模型
               </div>
+
+              {recommendation && (
+                <div className="mx-2 mb-2 rounded-xl border border-amber-500/15 bg-amber-500/5 px-3 py-2.5">
+                  <div className="flex items-center gap-1.5 text-[12px] font-medium text-amber-600 dark:text-amber-400">
+                    <span>✨</span>
+                    <span>{recommendation.title}</span>
+                  </div>
+                  <p className="mt-1 text-[12px] leading-5 text-text-secondary">
+                    {selectedMatchesRecommendation ? "当前模型适合这个任务。" : recommendation.message}
+                  </p>
+                  {!selectedMatchesRecommendation && recommendedModels.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {recommendedModels.map((model) => (
+                        <button
+                          key={model.id}
+                          type="button"
+                          onClick={() => handleSelect(model)}
+                          className="rounded-full border border-amber-500/20 bg-surface-card px-2.5 py-1 text-[11px] font-medium text-text-primary transition-colors hover:border-amber-500/40 hover:bg-amber-500/10"
+                          title={recommendation.reason}
+                        >
+                          {model.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* 收藏模型 */}
               {favoriteModels.length > 0 && (
