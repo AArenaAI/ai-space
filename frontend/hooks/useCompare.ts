@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { getErrorMessage, readApiError } from "@/lib/errors";
 
 export interface CompareResult {
   model_id: string;
@@ -50,8 +51,7 @@ export function useCompare() {
       });
 
       if (!res.ok) {
-        const err = await tryParseError(res);
-        throw new Error(err || `对比请求失败 (${res.status})`);
+        throw await readApiError(res);
       }
 
       const data = await res.json();
@@ -61,8 +61,8 @@ export function useCompare() {
       }
 
       return { results: data.results || [], conversation_id: data.conversation_id };
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(getErrorMessage(err, { module: "chat", fallbackMessage: "对比请求失败，请稍后重试。" }));
       return { results: [] };
     } finally {
       setLoading(false);
@@ -78,13 +78,4 @@ export function useCompare() {
   return { results, loading, error, conversationId, compareChat, clearResults };
 }
 
-async function tryParseError(res: Response): Promise<string> {
-  try {
-    const text = await res.text();
-    if (!text) return "";
-    const json = JSON.parse(text);
-    return json.error || json.message || text.slice(0, 200);
-  } catch {
-    return `HTTP ${res.status}`;
-  }
-}
+

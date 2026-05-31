@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
+import { getErrorMessage, readApiError } from "@/lib/errors";
 
 const API_BASE_URL = "";
 
@@ -96,11 +97,11 @@ export function useCredits() {
       const res = await fetch(`${API_BASE_URL}/api/user/credits`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error("获取积分失败");
+      if (!res.ok) throw await readApiError(res);
       const data = await res.json();
       setCredits(data);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(getErrorMessage(err, { module: "auth", fallbackMessage: "获取积分失败，请刷新重试。" }));
     } finally {
       setLoading(false);
     }
@@ -118,11 +119,11 @@ export function useCredits() {
           },
           body: JSON.stringify({ model_id: modelId, amount }),
         });
-        const data = await res.json();
         if (!res.ok) {
           // 402 Payment Required = 积分不足
-          throw new Error(data.error || "积分不足");
+          throw await readApiError(res);
         }
+        const data = await res.json();
         // 更新本地积分状态
         setCredits((prev) =>
           prev
@@ -135,8 +136,8 @@ export function useCredits() {
             : null
         );
         return data;
-      } catch (err: any) {
-        setError(err.message);
+      } catch (err) {
+        setError(getErrorMessage(err, { module: "auth", fallbackMessage: "积分不足，请升级套餐或稍后重试。" }));
         return null;
       }
     },
