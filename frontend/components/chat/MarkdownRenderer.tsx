@@ -90,7 +90,7 @@ function CodeBlock({ language, value }: { language: string; value: string }) {
   };
 
   return (
-    <div className="relative group my-4 rounded-lg overflow-hidden border border-surface-border">
+    <div data-testid="markdown-code-block" className="relative group my-4 rounded-lg overflow-hidden border border-surface-border">
       <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-surface-border bg-[#F6F8FA] dark:bg-[#0D0D0D]">
         <span className="min-w-0 truncate text-[11px] font-mono uppercase text-gray-500 dark:text-gray-400">
           {language || "text"}
@@ -144,6 +144,13 @@ const MarkdownRenderer = memo(function MarkdownRenderer({ content }: { content: 
   }, [withMath]);
 
   const markdownComponents = useMemo(() => ({
+    pre({ children }: any) {
+      // Block code is rendered by the custom `code` component below.  If we let
+      // react-markdown keep its default `<pre>` wrapper around that component,
+      // the DOM becomes `<pre><div class="code-block"><pre>...</pre></div></pre>`:
+      // visually this appears as a code block nested inside another code block.
+      return <>{children}</>;
+    },
     code({ inline, className, children, ...props }: any) {
       const match = /language-(\w+)/.exec(className || "");
       const lang = match?.[1] || "";
