@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
 import { consumeChatStream } from "@/lib/chatStream";
 import { cn } from "@/lib/utils";
+import { readApiError, showUserError } from "@/lib/errors";
 import HistoryDrawer, { type HistoryItem as DrawerHistoryItem } from "@/components/ui/HistoryDrawer";
 
 const TRANSLATOR_SKILL_KEY = "translator";
@@ -186,8 +187,7 @@ async function createConversation(title: string, model: string, t: (key: string)
     body: JSON.stringify({ title, model, skill_key: TRANSLATOR_SKILL_KEY }),
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || err.error || t("translator.error.createConv"));
+    throw await readApiError(res);
   }
   return res.json() as Promise<{ id: number }>;
 }
@@ -357,8 +357,7 @@ ${text}
         }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || err.error || t("translator.error.translate"));
+        throw await readApiError(res);
       }
       const contentType = res.headers.get("content-type") || "";
       const raw = contentType.includes("text/event-stream") && res.body
@@ -368,8 +367,8 @@ ${text}
       setRecognizedText(text);
       setTranslatedText(raw.trim());
       setStreamingText("");
-    } catch (err: any) {
-      toast.error(err.message || t("translator.error.translate"));
+    } catch (err) {
+      showUserError(err, { module: "chat", fallbackTitle: t("translator.error.translate"), fallbackMessage: t("translator.error.translate") });
     } finally {
       setIsTranslating(false);
     }

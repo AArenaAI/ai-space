@@ -24,6 +24,7 @@ import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { consumeChatStream } from "@/lib/chatStream";
+import { getErrorMessage, normalizeError, readApiError, showUserError } from "@/lib/errors";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import HistoryDrawer, { type HistoryItem as DrawerHistoryItem } from "@/components/ui/HistoryDrawer";
 
@@ -339,12 +340,12 @@ export default function WritingAssistantPage() {
     setLoadingDocs(true);
     try {
       const res = await fetch("/api/conversations?limit=200", { headers: getAuthHeaders() });
-      if (!res.ok) throw new Error(t("writer.error.loadHistory"));
+      if (!res.ok) throw await readApiError(res);
       const data = await res.json();
       const list = Array.isArray(data) ? data : data.conversations || [];
       setDocuments(list);
-    } catch (e: any) {
-      toast.error(e.message || t("writer.error.loadHistory"));
+    } catch (e) {
+      showUserError(e, { module: "chat", fallbackTitle: t("writer.error.loadHistory"), fallbackMessage: t("writer.error.loadHistory") });
     } finally {
       setLoadingDocs(false);
     }
@@ -434,7 +435,7 @@ export default function WritingAssistantPage() {
       headers: getAuthHeaders(),
       body: JSON.stringify({ title: title || t("writer.title"), model: WRITER_MODEL, skill_key: WRITER_SKILL_KEY }),
     });
-    if (!res.ok) throw new Error(t("writer.error.createDoc"));
+    if (!res.ok) throw await readApiError(res);
     return (await res.json()) as Conversation;
   };
 
@@ -449,8 +450,8 @@ export default function WritingAssistantPage() {
       replaceHistory([], [], conv.id);
       setMessages([]);
       setChatInput("");
-    } catch (e: any) {
-      toast.error(e.message || t("writer.error.createBlank"));
+    } catch (e) {
+      showUserError(e, { module: "chat", fallbackTitle: t("writer.error.createBlank"), fallbackMessage: t("writer.error.createBlank") });
     }
   };
 
@@ -526,10 +527,7 @@ export default function WritingAssistantPage() {
       headers: getAuthHeaders(),
       body: JSON.stringify(payload),
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.message || err.error || t("writer.error.generate"));
-    }
+    if (!res.ok) throw await readApiError(res);
 
     const contentType = res.headers.get("content-type") || "";
     if (!contentType.includes("text/event-stream") || !res.body) {
@@ -551,7 +549,7 @@ export default function WritingAssistantPage() {
         return recovered;
       }
       if (["failed", "cancelled", "incomplete"].includes(task.status)) {
-        throw new Error(task.error_message || t("writer.error.generate"));
+        throw normalizeError(task.error_message || t("writer.error.generate"), { module: "chat", fallbackMessage: t("writer.error.generate") });
       }
       return null;
     };
@@ -621,8 +619,7 @@ export default function WritingAssistantPage() {
         headers: getAuthHeaders(),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || err.error || t("writer.deleteFailed"));
+        throw await readApiError(res);
       }
       localStorage.removeItem(storageKey(conv.id));
       localStorage.removeItem(messagesStorageKey(conv.id));
@@ -634,8 +631,8 @@ export default function WritingAssistantPage() {
         setMessages([]);
       }
       toast.success(t("writer.success.deleted"));
-    } catch (e: any) {
-      toast.error(e.message || t("writer.deleteFailed"));
+    } catch (e) {
+      showUserError(e, { module: "chat", fallbackTitle: t("writer.deleteFailed"), fallbackMessage: t("writer.deleteFailed") });
     } finally {
       setDeleteTarget(null);
     }
@@ -687,11 +684,12 @@ export default function WritingAssistantPage() {
       }
       clearSmoothText(smoothKey);
       loadDocuments();
-    } catch (e: any) {
+    } catch (e) {
       clearSmoothText(smoothKey);
-      toast.error(e.message || t("writer.error.request"));
+      const userMessage = getErrorMessage(e, { module: "chat", fallbackMessage: t("writer.error.request") });
+      toast.error(userMessage);
       setMessages((prev) => prev.map((msg) => msg.id === assistantId
-        ? { ...msg, content: `${t("writer.error.generateFailed")}: ${e.message || t("writer.error.request")}` }
+        ? { ...msg, content: `${t("writer.error.generateFailed")}: ${userMessage}` }
         : msg
       ));
     } finally {
@@ -734,10 +732,11 @@ export default function WritingAssistantPage() {
       }
       clearSmoothText(smoothKey);
       loadDocuments();
-    } catch (e: any) {
+    } catch (e) {
       clearSmoothText(smoothKey);
-      toast.error(e.message || t("writer.error.request"));
-      setMessages((prev) => prev.map((msg) => msg.id === assistantId ? { ...msg, content: `${t("writer.error.generateFailed")}: ${e.message || t("writer.error.request")}` } : msg));
+      const userMessage = getErrorMessage(e, { module: "chat", fallbackMessage: t("writer.error.request") });
+      toast.error(userMessage);
+      setMessages((prev) => prev.map((msg) => msg.id === assistantId ? { ...msg, content: `${t("writer.error.generateFailed")}: ${userMessage}` } : msg));
     } finally {
       setIsGenerating(false);
     }

@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from "react";
 import { getGuestId } from "@/lib/guestId";
+import { getErrorMessage, readApiError } from "@/lib/errors";
 
 const API_BASE = "/api";
 
@@ -122,10 +123,11 @@ export function usePPT() {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/ppt/templates`, { headers: headers() });
+      if (!res.ok) throw await readApiError(res);
       const data = await res.json();
       setTemplates(data.templates || []);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(getErrorMessage(e, { module: "ppt", fallbackMessage: "获取 PPT 模板失败，请刷新重试。" }));
     } finally {
       setLoading(false);
     }
@@ -152,8 +154,8 @@ export function usePPT() {
           quality_mode: config.qualityMode,
         }),
       });
+      if (!res.ok) throw await readApiError(res);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "创建失败");
       setTask({
         id: data.id,
         title: config.topic,
@@ -166,8 +168,8 @@ export function usePPT() {
         created_at: new Date().toISOString(),
       });
       return data.id as number;
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(getErrorMessage(e, { module: "ppt", fallbackMessage: "PPT 创建失败，请稍后重试。" }));
       return null;
     } finally {
       setLoading(false);
@@ -182,15 +184,15 @@ export function usePPT() {
         method: "POST",
         headers: headers(),
       });
+      if (!res.ok) throw await readApiError(res);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "生成大纲失败");
       setOutline(data.outline || null);
       setTask((prev) =>
         prev ? { ...prev, status: data.status, progress: 30, progress_msg: "大纲已生成" } : prev
       );
       return data.outline as Outline;
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(getErrorMessage(e, { module: "ppt", fallbackMessage: "大纲生成失败，请稍后重试。" }));
       return null;
     } finally {
       setLoading(false);
@@ -206,8 +208,8 @@ export function usePPT() {
         headers: headers(),
         body: JSON.stringify({ outline: customOutline || null }),
       });
+      if (!res.ok) throw await readApiError(res);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "生成失败");
       setSlides(data.slides || []);
       setTask((prev) =>
         prev
@@ -221,8 +223,8 @@ export function usePPT() {
           : prev
       );
       return data as { status: string; slides: FullSlide[]; ppt: PPTTask };
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(getErrorMessage(e, { module: "ppt", fallbackMessage: "PPT 生成失败，请稍后重试。" }));
       return null;
     } finally {
       setLoading(false);
@@ -292,8 +294,8 @@ export function usePPT() {
         }
       }
       return data;
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(getErrorMessage(e, { module: "ppt", fallbackMessage: "获取 PPT 失败，请刷新重试。" }));
       return null;
     } finally {
       setLoading(false);
@@ -327,8 +329,8 @@ export function usePPT() {
         return data.slide as FullSlide;
       }
       return null;
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(getErrorMessage(e, { module: "ppt", fallbackMessage: "幻灯片重写失败，请稍后重试。" }));
       return null;
     } finally {
       setLoading(false);
@@ -352,8 +354,8 @@ export function usePPT() {
         );
       }
       return data;
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(getErrorMessage(e, { module: "ppt", fallbackMessage: "图片重新生成失败，请稍后重试。" }));
       return null;
     } finally {
       setLoading(false);
