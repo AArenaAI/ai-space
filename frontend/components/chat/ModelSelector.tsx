@@ -377,7 +377,7 @@ export default function ModelSelector({
                   <div className="px-2 py-1.5 text-[11px] font-medium text-text-tertiary tracking-wider flex items-center gap-1.5">
                     <span>🕘</span>最近使用
                   </div>
-                  {recentModels.slice(0, SHORTCUT_LIMIT).map((m) => renderShortcutModelItem(m))}
+                  {recentModels.slice(0, SHORTCUT_LIMIT).map((m) => renderShortcutModelItem(m, { showFavorite: true }))}
                 </div>
               )}
 
