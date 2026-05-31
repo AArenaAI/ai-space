@@ -166,7 +166,7 @@ const MarkdownRenderer = memo(function MarkdownRenderer({ content }: { content: 
         </code>
       );
     },
-    p({ children }: any) { return <p className="text-[15px] leading-relaxed text-text-primary mb-4 last:mb-0 [li>&]:inline [li>&]:mb-0 [.reasoning-markdown_&]:text-[13px] [.reasoning-markdown_&]:text-text-secondary">{children}</p>; },
+    p({ children }: any) { return <p className="text-[15px] leading-relaxed text-text-primary mb-4 last:mb-0 [li>&]:inline [li>&]:mb-0 [.reasoning-markdown_&]:text-[13px] [.reasoning-markdown_&]:text-text-secondary [.streaming-answer-markdown_&]:mb-0">{children}</p>; },
     ul({ children }: any) { return <ul className="list-disc ml-5 mb-4 space-y-1 text-text-primary">{children}</ul>; },
     ol({ children }: any) { return <ol className="list-decimal ml-5 mb-4 space-y-1 text-text-primary">{children}</ol>; },
     li({ children }: any) { return <li className="text-[15px] leading-relaxed">{children}</li>; },

@@ -39,11 +39,22 @@ const path = '/test-chat-streaming-state/';
     issues.push('reasoning markdown bold did not render as strong element during streaming');
   }
 
+  await page.waitForFunction(() => document.querySelector('[data-testid="fixture-phase"]')?.textContent === 'answer-streaming', null, { timeout: 10_000 });
+  await page.waitForFunction(() => document.body.innerText.includes('最终回答 OK 42'), null, { timeout: 10_000 });
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('.streaming-answer-markdown strong')).some((node) => node.textContent?.includes('OK')), null, { timeout: 10_000 });
+  const answerStreamingSnapshot = await page.evaluate(() => ({
+    phase: document.querySelector('[data-testid="fixture-phase"]')?.textContent || '',
+    answerStrongText: Array.from(document.querySelectorAll('.streaming-answer-markdown strong')).map((node) => node.textContent || '').join('|'),
+  }));
+
   await page.waitForFunction(() => document.querySelector('[data-testid="fixture-phase"]')?.textContent === 'done', null, { timeout: 10_000 });
   await page.waitForFunction(() => document.body.innerText.includes('最终回答 OK 42'), null, { timeout: 10_000 });
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('strong')).some((node) => node.textContent?.includes('最终')), null, { timeout: 10_000 });
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('strong')).some((node) => node.textContent?.includes('OK')), null, { timeout: 10_000 });
   const doneSnapshot = await page.evaluate(() => ({
     body: document.body.innerText,
     reasoningStrongText: Array.from(document.querySelectorAll('.reasoning-markdown strong')).map((node) => node.textContent || '').join('|'),
+    answerStrongText: Array.from(document.querySelectorAll('strong')).map((node) => node.textContent || '').join('|'),
     statusBadges: Array.from(document.querySelectorAll('span')).map((node) => node.textContent || '').filter(Boolean),
   }));
   if (!doneSnapshot.body.includes('最终回答 OK 42')) {
@@ -55,10 +66,16 @@ const path = '/test-chat-streaming-state/';
   if (!doneSnapshot.reasoningStrongText.includes('最终')) {
     issues.push('reasoning markdown bold did not render as strong element after completion');
   }
+  if (!answerStreamingSnapshot.answerStrongText.includes('OK')) {
+    issues.push('streaming answer markdown bold did not render as strong element while loading');
+  }
+  if (!doneSnapshot.answerStrongText.includes('OK')) {
+    issues.push('answer markdown bold did not remain a strong element after completion');
+  }
 
   await browser.close();
   if (issues.length) {
-    console.error(JSON.stringify({ ok: false, issues, mixedSnapshot, doneSnapshot }, null, 2));
+    console.error(JSON.stringify({ ok: false, issues, mixedSnapshot, answerStreamingSnapshot, doneSnapshot }, null, 2));
     process.exit(1);
   }
   console.log(JSON.stringify({ ok: true, mixedPhase: mixedSnapshot.phase, doneHasAnswer: doneSnapshot.body.includes('最终回答 OK 42') }));

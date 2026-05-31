@@ -61,10 +61,13 @@ export default function ChatStreamingStateFixture() {
         setPhase("mixed-held");
       }, 260),
       window.setTimeout(() => {
+        realtimeAppend(assistantId, { reasoning: false });
+        realtimeAppend(assistantId, { answerDelta: "最终回答 **OK** 42", reasoning: false });
+        setPhase("answer-streaming");
+      }, 650),
+      window.setTimeout(() => {
         // Simulate DONE without a search-completed meta event. This used to leave
         // the web-search badge stuck in the running state.
-        realtimeAppend(assistantId, { reasoning: false });
-        realtimeAppend(assistantId, { answerDelta: "最终回答 OK 42", reasoning: false });
         realtimeUpdate(assistantId, {
           completedAt: Date.now(),
           activityStatus: undefined,
@@ -74,7 +77,7 @@ export default function ChatStreamingStateFixture() {
         setMessages((prev) => prev.map((message) => message.id === assistantId
           ? {
               ...message,
-              content: "<think>先分析搜索结果，确认 **最终** 只输出简短回答。</think>最终回答 OK 42",
+              content: "<think>先分析搜索结果，确认 **最终** 只输出简短回答。</think>最终回答 **OK** 42",
               completedAt: Date.now(),
               activityStatus: undefined,
               searchStatus: undefined,
@@ -83,7 +86,7 @@ export default function ChatStreamingStateFixture() {
         ));
         setLoading(false);
         setPhase("done");
-      }, 900),
+      }, 1800),
     ];
 
     return () => {

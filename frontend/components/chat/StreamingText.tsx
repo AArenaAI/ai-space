@@ -99,7 +99,11 @@ export function StreamingText({
           </div>
         </div>
       )}
-      <span data-i18n-skip="true" className="whitespace-pre-wrap break-words">{parsed.answer}</span>
+      {hasContent && (
+        <span data-i18n-skip="true" className="streaming-answer-markdown block break-words">
+          <DeferredMarkdownRenderer content={parsed.answer} idleTimeout={80} />
+        </span>
+      )}
       {!hasContent && !hasReason && <ThinkingDots />}
       {isStreaming && <StreamingCursor />}
     </Host>
