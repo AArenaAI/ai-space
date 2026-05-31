@@ -45,7 +45,7 @@ const GROUP_ORDER = ["DeepSeek", "OpenAI", "Anthropic", "Google", "Moonshot"];
 
 const RECENT_KEY = "recent-models";
 const FAVORITE_KEY = "favorite-models";
-const RECENT_LIMIT = 5;
+const SHORTCUT_LIMIT = 3;
 
 function getRecentModels(): string[] {
   if (typeof window === "undefined") return [];
@@ -61,7 +61,7 @@ function pushRecentModel(modelId: string) {
   try {
     let recent = getRecentModels().filter((id) => id !== modelId);
     recent.unshift(modelId);
-    localStorage.setItem(RECENT_KEY, JSON.stringify(recent.slice(0, RECENT_LIMIT)));
+    localStorage.setItem(RECENT_KEY, JSON.stringify(recent.slice(0, SHORTCUT_LIMIT)));
   } catch {}
 }
 
@@ -88,8 +88,8 @@ export default function ModelSelector({
 }: ModelSelectorProps) {
   const [open, setOpen] = useState(false);
   const [hoveredProvider, setHoveredProvider] = useState<string | null>(null);
-  const [favoriteIds, setFavoriteIds] = useState<string[]>(() => getFavoriteModels());
-  const [recentIds, setRecentIds] = useState<string[]>(() => getRecentModels());
+  const [favoriteIds, setFavoriteIds] = useState<string[]>(() => getFavoriteModels().slice(0, SHORTCUT_LIMIT));
+  const [recentIds, setRecentIds] = useState<string[]>(() => getRecentModels().slice(0, SHORTCUT_LIMIT));
   const dropdownRef = useRef<HTMLDivElement>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -162,7 +162,7 @@ export default function ModelSelector({
     event.stopPropagation();
     const next = favoriteIds.includes(model.id)
       ? favoriteIds.filter((id) => id !== model.id)
-      : [model.id, ...favoriteIds].slice(0, 8);
+      : [model.id, ...favoriteIds].slice(0, SHORTCUT_LIMIT);
     setFavoriteIds(next);
     setFavoriteModels(next);
   }, [favoriteIds]);
@@ -368,7 +368,7 @@ export default function ModelSelector({
                   <div className="px-2 py-1.5 text-[11px] font-medium text-text-tertiary tracking-wider flex items-center gap-1.5">
                     <span>🕘</span>最近使用
                   </div>
-                  {recentModels.slice(0, RECENT_LIMIT).map((m) => renderShortcutModelItem(m))}
+                  {recentModels.slice(0, SHORTCUT_LIMIT).map((m) => renderShortcutModelItem(m))}
                 </div>
               )}
 
