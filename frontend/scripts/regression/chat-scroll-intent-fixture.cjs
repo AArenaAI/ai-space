@@ -33,7 +33,7 @@ async function getScrollState(page) {
     const url = `${baseUrl}/test-chat-performance/?mode=stream&count=120&deltas=120&deltaInterval=20&hasMore=0`;
     const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 });
     assert.ok(response && response.status() < 400, `unexpected status ${response?.status()} for ${url}`);
-    await page.waitForSelector('[data-testid="chat-performance-fixture"]', { timeout: 20_000 });
+    await page.waitForSelector('[data-testid="chat-performance-fixture"]', { state: "attached", timeout: 20_000 });
     const scroller = page.locator('[data-virtuoso-scroller]').first();
     await scroller.waitFor({ state: "attached", timeout: 20_000 });
 
