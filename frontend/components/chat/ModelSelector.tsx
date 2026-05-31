@@ -191,7 +191,7 @@ export default function ModelSelector({
   const activeGroup = groups.find((g) => g.provider === hoveredProvider);
 
   const renderShortcutModelItem = (model: ChatModel, options?: { showFavorite?: boolean }) => {
-    const capabilities = getPrimaryModelCapabilities(model, 2);
+    const capabilities = getPrimaryModelCapabilities(model, 4);
     const favorited = favoriteIds.includes(model.id);
 
     return (
