@@ -34,6 +34,8 @@ import {
   Music,
   Zap,
   MoreHorizontal,
+  Brush,
+  Paintbrush,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -71,6 +73,32 @@ const VIDEO_ASPECT_RATIOS = [
 
 const VIDEO_RESOLUTIONS = ["480p", "720p", "1080p"];
 const VIDEO_DURATIONS = ["4s", "5s", "6s", "7s", "9s", "10s", "11s", "13s", "14s", "15s"];
+const MAX_REFERENCE_VIDEO_SIZE = 200 * 1024 * 1024;
+
+
+const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"];
+const VIDEO_EXTENSIONS = [".mp4", ".mov"];
+const VIDEO_MIME_TYPES = ["video/mp4", "video/quicktime"];
+
+function fileExtension(file: File) {
+  const dot = file.name.lastIndexOf(".");
+  return dot >= 0 ? file.name.slice(dot).toLowerCase() : "";
+}
+
+function isImageFile(file: File) {
+  return file.type.startsWith("image/") || IMAGE_EXTENSIONS.includes(fileExtension(file));
+}
+
+function isVideoFile(file: File) {
+  const ext = fileExtension(file);
+  return file.type.startsWith("video/") || VIDEO_EXTENSIONS.includes(ext);
+}
+
+function isSupportedReferenceFile(file: File, mode: "image" | "video") {
+  if (isImageFile(file)) return true;
+  if (mode === "video" && isVideoFile(file)) return true;
+  return false;
+}
 
 const QUALITIES = [
   { value: "low", label: "Low" },
@@ -192,7 +220,7 @@ function ReferenceImageStack({
         <button
           type="button"
           onClick={() => onRemove(0)}
-          className="absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full bg-surface-elevated border border-surface-border shadow-md text-gray-500 dark:text-text-secondary hover:text-red-500 hover:border-red-400 hover:bg-red-50 dark:hover:bg-red-950 flex items-center justify-center transition-all opacity-0 group-hover/single:opacity-100 z-20"
+          className="absolute -right-2 -top-2 z-30 flex h-5 w-5 items-center justify-center rounded-full border border-surface-border bg-surface-elevated text-gray-500 shadow-md transition-all opacity-0 group-hover/single:opacity-100 hover:border-red-400 hover:bg-red-50 hover:text-red-500 dark:text-text-secondary dark:hover:bg-red-950"
           title={t("common.delete")}
         >
           <X className="w-3 h-3" />
@@ -238,8 +266,8 @@ function ReferenceImageStack({
             <div
               key={`${url}-${idx}`}
               className={cn(
-                "relative rounded-xl overflow-hidden border border-surface-border shadow-sm transition-all duration-300 ease-out group/item",
-                isHovered ? "hover:scale-110 hover:shadow-lg hover:z-50" : ""
+                "relative overflow-visible rounded-xl transition-all duration-300 ease-out group/item",
+                isHovered ? "hover:scale-110 hover:z-50" : ""
               )}
               style={{
                 width: 36,
@@ -249,7 +277,9 @@ function ReferenceImageStack({
                 zIndex,
               }}
             >
-              <img src={resolveImageUrl(url)} alt={`${t("image.referenceAlt")} ${idx + 1}`} className="w-full h-full object-cover" />
+              <div className="h-full w-full overflow-hidden rounded-xl border border-surface-border shadow-sm transition-shadow group-hover/item:shadow-lg">
+                <img src={resolveImageUrl(url)} alt={`${t("image.referenceAlt")} ${idx + 1}`} className="w-full h-full object-cover" />
+              </div>
               {/* 删除按钮 - 悬浮时显示 */}
               <button
                 type="button"
@@ -258,7 +288,7 @@ function ReferenceImageStack({
                   onRemove(idx);
                 }}
                 className={cn(
-                  "absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full bg-surface-elevated border border-surface-border shadow-md text-gray-500 dark:text-text-secondary hover:text-red-500 hover:border-red-400 hover:bg-red-50 dark:hover:bg-red-950 flex items-center justify-center transition-all z-30",
+                  "absolute -right-2 -top-2 z-[60] flex h-5 w-5 items-center justify-center rounded-full border border-surface-border bg-surface-elevated text-gray-500 shadow-md transition-all hover:border-red-400 hover:bg-red-50 hover:text-red-500 dark:text-text-secondary dark:hover:bg-red-950",
                   isHovered ? "opacity-100" : "opacity-0 group-hover/item:opacity-100"
                 )}
                 title={t("common.delete")}
@@ -319,6 +349,9 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
   const [referenceImages, setReferenceImages] = useState<string[]>([]);
   const [referenceVideos, setReferenceVideos] = useState<string[]>([]);
   const [uploadingRef, setUploadingRef] = useState(false);
+  const [isDragActive, setIsDragActive] = useState(false);
+  const dragDepthRef = useRef(0);
+  const uploadInFlightRef = useRef(false);
   const [showHistory, setShowHistory] = useState(false);
   const [limitDialogOpen, setLimitDialogOpen] = useState(false);
   const [mode, setMode] = useState<"image" | "video">(defaultMode);
@@ -361,63 +394,127 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
     }
   }, [isFastVideoModel, selectedVideoResolution]);
 
-  const uploadReferenceMedia = useCallback(async (file: File) => {
-    const isVideo = file.type.startsWith("video/");
-    const isImage = file.type.startsWith("image/");
+  const resetDragState = useCallback(() => {
+    dragDepthRef.current = 0;
+    setIsDragActive(false);
+  }, []);
 
-    if (isImage && file.size > 20 * 1024 * 1024) {
-      toast.error(t("image.referenceImageSize"));
+  useEffect(() => {
+    const handleGlobalDragEnd = () => resetDragState();
+    const handleGlobalDrop = () => resetDragState();
+    window.addEventListener("dragend", handleGlobalDragEnd);
+    window.addEventListener("drop", handleGlobalDrop);
+    return () => {
+      window.removeEventListener("dragend", handleGlobalDragEnd);
+      window.removeEventListener("drop", handleGlobalDrop);
+    };
+  }, [resetDragState]);
+
+  const uploadReferenceMedia = useCallback(async (input: File | File[]) => {
+    const files = (Array.isArray(input) ? input : [input]).filter(Boolean);
+    if (files.length === 0) return;
+    if (uploadInFlightRef.current) {
+      toast.info(t("image.uploadInProgress"));
       return;
     }
 
-    if (mode === "video" && isVideo) {
-      const allowedTypes = ["video/mp4", "video/quicktime"];
-      const allowedExts = [".mp4", ".mov"];
-      const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
-      if (!allowedTypes.includes(file.type) && !allowedExts.includes(ext)) {
-        toast.error(t("video.referenceVideoFormat"));
-        return;
+    const validFiles: File[] = [];
+    for (const file of files) {
+      const isImage = isImageFile(file);
+      const isVideo = isVideoFile(file);
+
+      if (!isSupportedReferenceFile(file, mode)) {
+        toast.error(mode === "video" ? t("video.referenceMediaFormat") : t("image.referenceImageFormat"));
+        continue;
       }
-      if (file.size > 50 * 1024 * 1024) {
-        toast.error(t("video.referenceVideoSize"));
-        return;
+
+      if (isImage && file.size > 20 * 1024 * 1024) {
+        toast.error(t("image.referenceImageSize"));
+        continue;
       }
+
+      if (mode === "video" && isVideo) {
+        const ext = fileExtension(file);
+        if (!(VIDEO_MIME_TYPES.includes(file.type) || VIDEO_EXTENSIONS.includes(ext))) {
+          toast.error(t("video.referenceVideoFormat"));
+          continue;
+        }
+        if (file.size > MAX_REFERENCE_VIDEO_SIZE) {
+          toast.error(t("video.referenceVideoSize"));
+          continue;
+        }
+      }
+
+      validFiles.push(file);
     }
 
+    if (validFiles.length === 0) return;
+
+    uploadInFlightRef.current = true;
     setUploadingRef(true);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const token = localStorage.getItem("token");
-      const res = await fetch("/api/files/upload", {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: formData,
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || t("image.uploadFailed"));
+      const uploadedImages: string[] = [];
+      const uploadedVideos: string[] = [];
+
+      for (const file of validFiles) {
+        const formData = new FormData();
+        formData.append("file", file);
+        const token = localStorage.getItem("token");
+        const res = await fetch("/api/files/upload", {
+          method: "POST",
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          body: formData,
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.message || err.error || t("image.uploadFailed"));
+        }
+        const data = await res.json();
+        const url = data.public_id || data.url || data.image_url;
+        if (!url) {
+          throw new Error(t("image.uploadInvalidResponse"));
+        }
+
+        if (mode === "video" && isVideoFile(file) && !isImageFile(file)) {
+          uploadedVideos.push(url);
+        } else {
+          uploadedImages.push(url);
+        }
       }
-      const data = await res.json();
-      // 使用 public_id 作为参考图标识（后端通过 file_ 前缀解析）
-      const url = data.public_id || data.url || data.image_url;
-      if (mode === "video" && isVideo) {
-        setReferenceVideos((prev) => [...prev, url]);
-      } else {
-        setReferenceImages((prev) => [...prev, url]);
+
+      if (uploadedImages.length > 0) {
+        setReferenceImages((prev) => [...prev, ...uploadedImages]);
       }
+      if (uploadedVideos.length > 0) {
+        setReferenceVideos((prev) => [...prev, ...uploadedVideos]);
+      }
+      toast.success(validFiles.length > 1 ? t("image.uploadMultipleSuccess") : t("image.uploadSuccess"));
     } catch (err: any) {
       toast.error(`${t("image.uploadFailed")}: ${err.message}`);
     } finally {
+      uploadInFlightRef.current = false;
       setUploadingRef(false);
+      resetDragState();
     }
-  }, [mode, t]);
+  }, [mode, resetDragState, t]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
     e.target.value = "";
-    uploadReferenceMedia(file);
+    if (files.length === 0) return;
+    uploadReferenceMedia(files);
+  };
+
+  const handleReferenceDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    resetDragState();
+    const files = Array.from(e.dataTransfer.files || []).filter((file) => isSupportedReferenceFile(file, mode));
+    if (files.length === 0) {
+      toast.error(mode === "video" ? t("video.referenceMediaFormat") : t("image.referenceImageFormat"));
+      return;
+    }
+    uploadReferenceMedia(files);
   };
 
   const handleAddImage = () => {
@@ -510,9 +607,9 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
     toast.success(t("image.referenceInserted"));
   };
 
-  const handleOpenImageTool = (mode: "remove-bg" | "replace-bg" | "text-removal" | "upscale", url: string) => {
+  const handleOpenImageTool = (mode: "remove-bg" | "replace-bg" | "text-removal" | "upscale" | "inpaint" | "region-brush", url: string) => {
     const params = new URLSearchParams({ mode, image: url });
-    router.push(`/image/edit?${params.toString()}`);
+    router.push(`/create?${params.toString()}`);
   };
 
   const historyItems = [
@@ -556,13 +653,14 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
     try {
       if (item.source === "video") {
         await deleteVideoChat(id);
-        fetchVideoChats();
+        await fetchVideoChats();
       } else {
         await deleteChat(id);
-        fetchChats();
+        await fetchChats();
       }
       toast.success(t("image.deleteSuccess"));
     } catch {
+      await Promise.all([fetchChats(), fetchVideoChats()]);
       toast.error(t("image.deleteFailed"));
     }
   };
@@ -582,8 +680,9 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
       <input
         ref={fileInputRef}
         type="file"
-        accept={mode === "video" ? "image/*,video/mp4,video/quicktime" : "image/*"}
+        accept={mode === "video" ? "image/*,video/mp4,video/quicktime,.mp4,.mov" : "image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp"}
         className="hidden"
+        multiple
         onChange={handleFileSelect}
       />
 
@@ -612,11 +711,42 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
             className={cn(
               "relative flex flex-col rounded-2xl border transition-all duration-300",
               "bg-surface-card",
-              referenceImages.length > 0 || referenceVideos.length > 0
+              isDragActive
+                ? "border-brand/60 bg-brand/5 shadow-[0_0_0_1px_rgba(59,130,246,0.16)]"
+                : referenceImages.length > 0 || referenceVideos.length > 0
                 ? "border-brand/20 focus-within:border-brand/40 focus-within:shadow-[0_0_0_1px_rgba(59,130,246,0.08)]"
                 : "border-surface-border focus-within:border-brand/30 focus-within:shadow-[0_0_0_1px_rgba(59,130,246,0.06)]"
             )}
+            onDragEnter={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (uploadingRef) return;
+              dragDepthRef.current += 1;
+              setIsDragActive(true);
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (e.dataTransfer) e.dataTransfer.dropEffect = uploadingRef ? "none" : "copy";
+              if (!uploadingRef && Array.from(e.dataTransfer?.types || []).includes("Files")) {
+                setIsDragActive(true);
+              }
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+              if (dragDepthRef.current === 0 || !e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                resetDragState();
+              }
+            }}
+            onDrop={handleReferenceDrop}
           >
+            {isDragActive && (
+              <div className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-xl border border-dashed border-brand/60 bg-surface-card/85 text-sm font-medium text-brand shadow-sm backdrop-blur-sm">
+                {mode === "video" ? t("video.dropReferenceMedia") : t("image.dropReferenceImage")}
+              </div>
+            )}
             {/* 输入区：参考图 + textarea */}
             <div className="flex items-start gap-3 px-4 pt-3 pb-2">
               <div className="mt-1 flex gap-2">
@@ -645,7 +775,7 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
                     <button
                       type="button"
                       onClick={() => handleRemoveVideo(idx)}
-                      className="absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full bg-surface-elevated border border-surface-border shadow-md text-gray-500 dark:text-text-secondary hover:text-red-500 hover:border-red-400 hover:bg-red-50 dark:hover:bg-red-950 flex items-center justify-center transition-all opacity-0 group-hover/single:opacity-100 z-20"
+                      className="absolute -right-2 -top-2 z-30 flex h-5 w-5 items-center justify-center rounded-full border border-surface-border bg-surface-elevated text-gray-500 shadow-md transition-all opacity-0 group-hover/single:opacity-100 hover:border-red-400 hover:bg-red-50 hover:text-red-500 dark:text-text-secondary dark:hover:bg-red-950"
                       title={t("common.delete")}
                     >
                       <X className="w-3 h-3" />
@@ -1152,7 +1282,7 @@ function ImageCard({
   onPreview: () => void;
   onReuse: (prompt: string, size: string, referenceImageUrls?: string[]) => void;
   onUseImage: (url: string) => void;
-  onEditImage: (mode: "remove-bg" | "replace-bg" | "text-removal" | "upscale", url: string) => void;
+  onEditImage: (mode: "remove-bg" | "replace-bg" | "text-removal" | "upscale" | "inpaint" | "region-brush", url: string) => void;
 }) {
   const { t } = useI18n();
   const isPending = image.status === "pending";
@@ -1263,6 +1393,8 @@ function ImageCard({
                     { label: t("image.edit.textRemoval"), icon: Type, mode: "text-removal" as const },
                     { label: t("image.edit.upscale"), icon: ZoomIn, mode: "upscale" as const },
                     { label: t("image.edit.replaceBg"), icon: ImageIcon, mode: "replace-bg" as const },
+                    { label: t("image.edit.inpaint"), icon: Brush, mode: "inpaint" as const },
+                    { label: t("image.edit.regionBrush"), icon: Paintbrush, mode: "region-brush" as const },
                   ].map((item) => (
                     <button
                       key={item.label}

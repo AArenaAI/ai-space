@@ -56,10 +56,13 @@ func (h *FileHandler) UploadFile(c *gin.Context) {
 		return
 	}
 
-	// 限制文件大小：普通文件 20MB，参考视频放宽到 200MB
+	// 限制文件大小：普通文件 20MB，参考视频放宽到 200MB。
+	// 部分浏览器/系统拖拽 MP4 时 Content-Type 可能是 application/octet-stream 或为空，
+	// 所以不能只依赖 MIME，必须同时按扩展名识别视频参考素材。
 	limit := int64(maxFileSize)
 	limitLabel := "20MB"
-	if strings.HasPrefix(header.Header.Get("Content-Type"), "video/") {
+	fileMeta, _ := modelmeta.FileTypeByExtension(header.Filename)
+	if strings.HasPrefix(header.Header.Get("Content-Type"), "video/") || fileMeta.InputType == "video" {
 		limit = maxVideoFileSize
 		limitLabel = "200MB"
 	}
@@ -217,6 +220,8 @@ func inferFileType(filename string) string {
 		return "text"
 	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp":
 		return "image"
+	case ".mp4", ".mov":
+		return "video"
 	case ".pdf":
 		return "pdf"
 	case ".docx":

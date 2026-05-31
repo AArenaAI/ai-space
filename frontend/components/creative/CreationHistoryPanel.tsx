@@ -116,7 +116,7 @@ function CreationHistorySkeleton() {
   );
 }
 
-function HistoryPlaceholderCover({ source, status }: { source?: "image" | "video"; status?: string }) {
+function HistoryPlaceholderCover({ source, status, t }: { source?: "image" | "video"; status?: string; t: (key: string) => string }) {
   const isGenerating = status === "pending" || status === "running";
   const Icon = source === "video" ? VideoIcon : ImageIcon;
   return (
@@ -132,7 +132,7 @@ function HistoryPlaceholderCover({ source, status }: { source?: "image" | "video
         </div>
         <div className="flex items-center gap-1 rounded-full border border-white/30 bg-white/25 px-2 py-0.5 text-[10px] text-text-tertiary shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/10">
           <Icon className="h-3 w-3 opacity-60" />
-          <span>{isGenerating ? "进行中" : "未完成"}</span>
+          <span>{isGenerating ? t("common.inProgress") : t("common.incomplete")}</span>
         </div>
       </div>
     </div>
@@ -236,7 +236,7 @@ export default function CreationHistoryPanel({
   const renderCover = (item: CreationHistoryItem) => {
     const isVideo = item.source === "video";
     if (!item.cover_image) {
-      return <HistoryPlaceholderCover source={item.source} status={item.status} />;
+      return <HistoryPlaceholderCover source={item.source} status={item.status} t={t} />;
     }
 
     if (isVideo) {

@@ -130,7 +130,7 @@ export default function ModuleSidebar({ groups, storageKey }: ModuleSidebarProps
         className="fixed left-0 top-0 z-40 flex h-screen flex-col rounded-r-2xl border-r border-surface-border bg-surface-elevated transition-[width] duration-200 ease-out"
         style={{ width: displayWidth }}
       >
-        <div className="flex h-14 shrink-0 items-center justify-between border-b border-surface-border px-3">
+        <div className="flex h-14 shrink-0 items-center justify-between px-3">
           {!collapsed && (
             <Link href="/" className="flex min-w-0 items-center">
               <img src="/brand-light-title.png" alt="AI Space" className="h-6 w-auto object-contain" />

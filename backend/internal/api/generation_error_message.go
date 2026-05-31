@@ -36,6 +36,9 @@ func cleanGenerationErrorString(raw string, mediaType string) string {
 	if message == "" {
 		return defaultGenerationErrorMessage(mediaType)
 	}
+	if isLocalReferenceValidationMessage(message) {
+		return message
+	}
 	lower := strings.ToLower(message)
 
 	if containsAny(lower, "sensitive", "content_filter", "contentpolicy", "content policy", "safety", "safe", "moderation", "risk", "policy_violation", "blocked", "forbidden", "inputimagesensitivecontentdetected") ||
@@ -114,7 +117,15 @@ func looksUserFacingGenerationError(message string) bool {
 	if len([]rune(message)) > 120 {
 		return false
 	}
-	return containsAny(message, "请", "失败", "无法", "不能", "稍后", "重试", "不支持", "不足")
+	return containsAny(message, "请", "失败", "无法", "不能", "稍后", "重试", "不支持", "不足", "必须", "当前", "超过", "仅支持")
+}
+
+func isLocalReferenceValidationMessage(message string) bool {
+	if looksLikeProviderDebugError(message) || len([]rune(message)) > 120 {
+		return false
+	}
+	return containsAny(message, "参考视频", "参考素材", "参考图") &&
+		containsAny(message, "必须", "不能", "仅支持", "超过", "当前", "失败", "不存在", "无权访问")
 }
 
 func looksLikeProviderDebugError(message string) bool {

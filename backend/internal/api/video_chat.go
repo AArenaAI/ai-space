@@ -153,6 +153,15 @@ func (h *VideoChatHandler) CreateVideoChat(c *gin.Context) {
 
 	assistantMsg, err := h.createVideoChatMessagesAndTask(userID, chat.ID, req)
 	if err != nil {
+		h.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Where("chat_id = ?", chat.ID).Delete(&models.VideoChatMessage{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("chat_id = ?", chat.ID).Delete(&models.VideoGeneration{}).Error; err != nil {
+				return err
+			}
+			return tx.Delete(&chat).Error
+		})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": cleanVideoGenerationErrorMessage(err)})
 		return
 	}
@@ -211,10 +220,20 @@ func (h *VideoChatHandler) DeleteVideoChat(c *gin.Context) {
 	for _, msg := range messages {
 		deleteLocalAsset(msg.VideoURL, localVideoURLPrefix, videoAssetsDir())
 	}
-	h.db.Where("chat_id = ?", chat.ID).Delete(&models.VideoChatMessage{})
-	h.db.Where("chat_id = ?", chat.ID).Delete(&models.VideoGeneration{})
-	h.db.Delete(&chat)
-	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
+
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("chat_id = ?", chat.ID).Delete(&models.VideoChatMessage{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("chat_id = ?", chat.ID).Delete(&models.VideoGeneration{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&chat).Error
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "删除视频会话失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "删除成功", "deleted_id": chat.ID})
 }
 
 // ListVideoChatMessages 获取会话消息列表，同时刷新未完成视频任务状态

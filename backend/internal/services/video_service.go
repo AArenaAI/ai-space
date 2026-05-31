@@ -55,6 +55,11 @@ func (s *VideoService) CreateVideoTask(ctx context.Context, req CreateVideoTaskR
 	// 添加参考图。
 	// 1 张图：强约束为首帧；2 张图：强约束为首尾帧；3 张及以上：按官方多模态参考图处理。
 	imageRole := func(index, total int) string {
+		// 火山 Seedance 不允许 first_frame/last_frame 与 reference_video 同时下发。
+		// 同时有参考视频时，图片统一作为弱参考图；只有纯图片参考时才强约束首/尾帧。
+		if len(req.ReferenceVideos) > 0 {
+			return "reference_image"
+		}
 		if total == 1 {
 			return "first_frame"
 		}

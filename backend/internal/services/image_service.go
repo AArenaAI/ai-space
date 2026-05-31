@@ -82,12 +82,12 @@ type DALLEImageResponse struct {
 // EditImage 基于参考图编辑生成图片，返回 (OpenAI 直链 URL, base64 数据, 错误)
 // 保持旧调用签名；内部走 OpenAI SDK EditStreaming，最终图片以 base64 返回给调用方保存。
 func (s *ImageService) EditImage(ctx context.Context, prompt string, size string, referenceImagePaths []string) (imageURL string, b64Data string, err error) {
-	return s.EditImageStream(ctx, prompt, size, "", referenceImagePaths, nil)
+	return s.EditImageStream(ctx, prompt, size, "", referenceImagePaths, "", nil)
 }
 
 // EditImageStream 基于参考图编辑生成图片，走 OpenAI SDK Images EditStreaming。
 // onEvent 会收到 image_edit.partial_image / image_edit.completed 的 base64 图片数据。
-func (s *ImageService) EditImageStream(ctx context.Context, prompt string, size string, quality string, referenceImagePaths []string, onEvent func(ImageStreamEvent) error) (imageURL string, b64Data string, err error) {
+func (s *ImageService) EditImageStream(ctx context.Context, prompt string, size string, quality string, referenceImagePaths []string, maskPath string, onEvent func(ImageStreamEvent) error) (imageURL string, b64Data string, err error) {
 	apiKey := s.cfg.OpenAIOfficialKey
 	if apiKey == "" {
 		apiKey = s.cfg.ImageGenAPIKey
@@ -132,9 +132,23 @@ func (s *ImageService) EditImageStream(ctx context.Context, prompt string, size 
 		files = append(files, file)
 		readers = append(readers, namedContentTypeReader{Reader: file, filename: filename, contentType: contentType})
 	}
+	var maskFile *os.File
+	if maskPath != "" {
+		var maskOpenErr error
+		maskFile, maskOpenErr = os.Open(maskPath)
+		if maskOpenErr != nil {
+			for _, f := range files {
+				_ = f.Close()
+			}
+			return "", "", fmt.Errorf("打开蒙版文件失败: %w", maskOpenErr)
+		}
+	}
 	defer func() {
 		for _, f := range files {
 			_ = f.Close()
+		}
+		if maskFile != nil {
+			_ = maskFile.Close()
 		}
 	}()
 
@@ -155,6 +169,9 @@ func (s *ImageService) EditImageStream(ctx context.Context, prompt string, size 
 	}
 	if quality != "" {
 		params.Quality = openai.ImageEditParamsQuality(quality)
+	}
+	if maskFile != nil {
+		params.Mask = namedContentTypeReader{Reader: maskFile, filename: filepath.Base(maskPath), contentType: "image/png"}
 	}
 
 	client := openai.NewClient(

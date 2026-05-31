@@ -3,6 +3,7 @@
 import { ArrowUpRight, CheckCircle2, ImageIcon, MessageSquareText, Video, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TaskFinishedNotification } from "@/lib/taskNotifications";
+import { useI18n } from "@/lib/i18n";
 
 function TaskIcon({ type, ok }: { type: TaskFinishedNotification["type"]; ok: boolean }) {
   if (!ok) return <XCircle className="h-4 w-4 text-text-secondary" strokeWidth={1.8} />;
@@ -17,7 +18,11 @@ interface TaskToastCardProps {
 }
 
 export default function TaskToastCard({ notification, onClick }: TaskToastCardProps) {
-  const label = notification.type === "image" ? "IMAGE" : notification.type === "video" ? "VIDEO" : "CHAT";
+  const { t } = useI18n();
+  const label = notification.type === "image" ? t("task.type.image") : notification.type === "video" ? t("task.type.video") : t("task.type.chat");
+  const titleText = notification.title?.trim() || "";
+  const descriptionText = notification.description?.trim() || "";
+  const shouldShowDescription = Boolean(descriptionText && descriptionText !== titleText);
 
   return (
     <button
@@ -46,10 +51,10 @@ export default function TaskToastCard({ notification, onClick }: TaskToastCardPr
                   <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-text-tertiary">{label}</span>
                   <span className="h-1 w-1 rounded-full bg-text-tertiary/45" />
                   <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-text-tertiary">
-                    {notification.ok ? "DONE" : "FAILED"}
+                    {notification.ok ? t("task.status.done") : t("task.status.failed")}
                   </span>
                 </div>
-                <p className="truncate text-[15px] font-semibold leading-5 tracking-[-0.01em] text-text-primary">{notification.title}</p>
+                <p className="truncate text-[15px] font-semibold leading-5 tracking-[-0.01em] text-text-primary">{titleText}</p>
               </div>
               {notification.ok ? (
                 <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-text-primary/85" strokeWidth={1.8} />
@@ -57,11 +62,11 @@ export default function TaskToastCard({ notification, onClick }: TaskToastCardPr
                 <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" strokeWidth={1.8} />
               )}
             </div>
-            {notification.description && (
-              <p className="mt-2 line-clamp-2 text-[13px] font-normal leading-5 text-text-secondary">{notification.description}</p>
+            {shouldShowDescription && (
+              <p className="mt-2 line-clamp-2 text-[13px] font-normal leading-5 text-text-secondary">{descriptionText}</p>
             )}
             <div className="mt-3 flex items-center justify-between border-t border-surface-border/80 pt-3">
-              <span className="text-[12px] font-medium text-text-secondary">点击回到任务页面</span>
+              <span className="text-[12px] font-medium text-text-secondary">{t("task.openPage")}</span>
               <span className="flex h-7 w-7 items-center justify-center rounded-full bg-text-primary text-surface transition-transform duration-300 group-hover:translate-x-0.5 group-hover:-translate-y-0.5">
                 <ArrowUpRight className="h-3.5 w-3.5" strokeWidth={1.9} />
               </span>

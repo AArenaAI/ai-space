@@ -4,19 +4,26 @@ import (
 	"aipool-backend/internal/config"
 	"aipool-backend/internal/models"
 	"aipool-backend/internal/services"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
+	"image/png"
 	_ "image/png"
+	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -25,14 +32,16 @@ import (
 type ImageHandler struct {
 	db           *gorm.DB
 	imageService *services.ImageService
+	aiService    *services.AIService
 	cfg          *config.Config
 	usageService *services.UsageService
 }
 
-func NewImageHandler(db *gorm.DB, imageService *services.ImageService, cfg *config.Config, usageService *services.UsageService) *ImageHandler {
+func NewImageHandler(db *gorm.DB, imageService *services.ImageService, aiService *services.AIService, cfg *config.Config, usageService *services.UsageService) *ImageHandler {
 	return &ImageHandler{
 		db:           db,
 		imageService: imageService,
+		aiService:    aiService,
 		cfg:          cfg,
 		usageService: usageService,
 	}
@@ -192,6 +201,21 @@ func detectImageSize(path string) (string, error) {
 	return fmt.Sprintf("%dx%d", cfg.Width, cfg.Height), nil
 }
 
+func fitImageEditRequestSize(size image.Point) string {
+	if size.X <= 0 || size.Y <= 0 {
+		return "1024x1024"
+	}
+	width := ((size.X + 15) / 16) * 16
+	height := ((size.Y + 15) / 16) * 16
+	if width < 16 {
+		width = 16
+	}
+	if height < 16 {
+		height = 16
+	}
+	return fmt.Sprintf("%dx%d", width, height)
+}
+
 // saveBase64Image 将 base64 数据保存为本地图片文件，返回文件名
 func saveBase64Image(b64Data string) (string, error) {
 	if err := os.MkdirAll(imageAssetsDir(), 0755); err != nil {
@@ -209,13 +233,287 @@ func saveBase64Image(b64Data string) (string, error) {
 	return filename, nil
 }
 
+func saveBase64ImageWithTargetSize(b64Data string, target image.Point) (string, error) {
+	if target.X <= 0 || target.Y <= 0 {
+		return saveBase64Image(b64Data)
+	}
+	if err := os.MkdirAll(imageAssetsDir(), 0755); err != nil {
+		return "", fmt.Errorf("创建图片目录失败: %w", err)
+	}
+	data, err := base64.StdEncoding.DecodeString(b64Data)
+	if err != nil {
+		return "", fmt.Errorf("base64 解码失败: %w", err)
+	}
+	src, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return "", fmt.Errorf("解码图片失败: %w", err)
+	}
+	if src.Bounds().Dx() == target.X && src.Bounds().Dy() == target.Y {
+		filename := generateFileName()
+		path := filepath.Join(imageAssetsDir(), filename)
+		if err := os.WriteFile(path, data, 0644); err != nil {
+			return "", fmt.Errorf("写入图片文件失败: %w", err)
+		}
+		return filename, nil
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, target.X, target.Y))
+	sb := src.Bounds()
+	for y := 0; y < target.Y; y++ {
+		sy := sb.Min.Y + y*sb.Dy()/target.Y
+		for x := 0; x < target.X; x++ {
+			sx := sb.Min.X + x*sb.Dx()/target.X
+			dst.Set(x, y, src.At(sx, sy))
+		}
+	}
+	filename := generateFileName()
+	path := filepath.Join(imageAssetsDir(), filename)
+	out, err := os.Create(path)
+	if err != nil {
+		return "", fmt.Errorf("创建图片文件失败: %w", err)
+	}
+	defer out.Close()
+	if err := png.Encode(out, dst); err != nil {
+		return "", fmt.Errorf("编码图片失败: %w", err)
+	}
+	return filename, nil
+}
+
 // EditImageRequest 图片编辑请求
+
+type RecognizeMaskRequest struct {
+	ImageURL    string `json:"image_url" binding:"required"`
+	MaskData    string `json:"mask_data"`
+	OverlayData string `json:"overlay_data" binding:"required"`
+	EditMode    string `json:"edit_mode"`
+}
+
+type RecognizeMaskResponse struct {
+	Label           string         `json:"label"`
+	Description     string         `json:"description"`
+	Confidence      float64        `json:"confidence"`
+	ObjectBox       map[string]int `json:"object_box,omitempty"`
+	RefinedMaskData string         `json:"refined_mask_data,omitempty"`
+	Bounds          map[string]int `json:"bounds,omitempty"`
+	Coverage        float64        `json:"coverage,omitempty"`
+}
+
+func extractFirstJSONObject(text string) string {
+	text = strings.TrimSpace(text)
+	if strings.HasPrefix(text, "```") {
+		text = strings.TrimPrefix(text, "```json")
+		text = strings.TrimPrefix(text, "```")
+		text = strings.TrimSuffix(text, "```")
+		text = strings.TrimSpace(text)
+	}
+	if strings.HasPrefix(text, "{") && strings.HasSuffix(text, "}") {
+		return text
+	}
+	re := regexp.MustCompile(`(?s)\{.*\}`)
+	return re.FindString(text)
+}
+
+func sanitizeObjectBox(box map[string]int) map[string]int {
+	if len(box) == 0 {
+		return nil
+	}
+	x, okX := box["x"]
+	y, okY := box["y"]
+	w, okW := box["width"]
+	h, okH := box["height"]
+	if !okX || !okY || !okW || !okH || w <= 4 || h <= 4 {
+		return nil
+	}
+	if x < 0 {
+		x = 0
+	}
+	if y < 0 {
+		y = 0
+	}
+	return map[string]int{"x": x, "y": y, "width": w, "height": h}
+}
+
+func (h *ImageHandler) resolveUploadedImagePath(publicID string) (string, error) {
+	publicID = strings.TrimSpace(publicID)
+	publicID = strings.TrimPrefix(publicID, "/api/files/")
+	publicID = strings.TrimSuffix(publicID, "/view")
+	publicID = strings.TrimSuffix(publicID, "/download")
+	var file models.File
+	if err := h.db.Where("public_id = ?", publicID).First(&file).Error; err != nil {
+		return "", err
+	}
+	if file.StoragePath == "" {
+		return "", fmt.Errorf("文件路径为空")
+	}
+	return file.StoragePath, nil
+}
+
+func (h *ImageHandler) refineMaskWithScript(imagePath, maskData string, objectBox map[string]int) (string, map[string]int, float64, error) {
+	scriptCandidates := []string{
+		"./scripts/refine_mask.py",
+		"backend/scripts/refine_mask.py",
+		"/home/ubuntu/workspace/ai-space/backend/scripts/refine_mask.py",
+	}
+	script := ""
+	for _, cand := range scriptCandidates {
+		if _, err := os.Stat(cand); err == nil {
+			script = cand
+			break
+		}
+	}
+	if script == "" {
+		return "", nil, 0, fmt.Errorf("分割脚本不存在")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	args := []string{script, "--image", imagePath, "--mask-data", maskData}
+	if len(objectBox) > 0 {
+		if bboxBytes, err := json.Marshal(objectBox); err == nil {
+			args = append(args, "--object-bbox", string(bboxBytes))
+		}
+	}
+	cmd := exec.CommandContext(ctx, "python3", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	outBytes, err := cmd.Output()
+	if err != nil {
+		return "", nil, 0, fmt.Errorf("分割脚本失败: %v %s", err, stderr.String())
+	}
+	var result struct {
+		OK              bool           `json:"ok"`
+		Error           string         `json:"error"`
+		Detail          string         `json:"detail"`
+		RefinedMaskData string         `json:"refined_mask_data"`
+		Bounds          map[string]int `json:"bounds"`
+		Coverage        float64        `json:"coverage"`
+	}
+	if err := json.Unmarshal(outBytes, &result); err != nil {
+		return "", nil, 0, err
+	}
+	if !result.OK || result.RefinedMaskData == "" {
+		if result.Detail != "" {
+			return "", nil, 0, fmt.Errorf("%s: %s", result.Error, result.Detail)
+		}
+		return "", nil, 0, fmt.Errorf("%s", result.Error)
+	}
+	return result.RefinedMaskData, result.Bounds, result.Coverage, nil
+}
+
+func (h *ImageHandler) RecognizeMask(c *gin.Context) {
+	var req RecognizeMaskRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误: " + err.Error()})
+		return
+	}
+	if h.aiService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "视觉识别服务未初始化"})
+		return
+	}
+	overlay := strings.TrimSpace(req.OverlayData)
+	if !strings.HasPrefix(overlay, "data:image/") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "overlay_data 必须是图片 data URL"})
+		return
+	}
+	refinedMaskData := ""
+	var refinedBounds map[string]int
+	refinedCoverage := 0.0
+	fmt.Printf("[recognize-mask] request image_url=%q overlay=%d mask=%d\n", req.ImageURL, len(req.OverlayData), len(req.MaskData))
+
+	model := h.cfg.VisionModel
+	if model == "" {
+		model = "gpt-5.4-mini"
+	}
+	prompt := `你是图像编辑工具里的物件识别器。用户用半透明紫色笔刷粗略涂抹了想处理的对象或区域。请识别紫色涂抹主要覆盖的“具体物件/主体”，不要只回答“涂抹区域”。
+
+要求：
+- 如果涂抹覆盖的是电脑，就返回 label="电脑"；覆盖的是人脸就返回 label="人脸"；覆盖的是衣服就返回 label="衣服"。
+- 如果覆盖多个对象，选面积最大或最主要的那个。
+- label 用简短中文名词，最多 6 个字。
+- description 用一句中文说明你识别到的对象和位置。
+- confidence 取 0 到 1。
+- object_box 返回该物体尽量贴边的矩形框，坐标以输入 overlay 图片左上角为原点，单位像素，格式 {"x":整数,"y":整数,"width":整数,"height":整数}。只框住这个具体物体，不要把阴影、地面、背景植物框进去。
+只输出 JSON，不要 Markdown：{"label":"电脑","description":"紫色涂抹主要覆盖桌面上的电脑","confidence":0.86,"object_box":{"x":120,"y":80,"width":320,"height":220}}`
+	resp, err := h.aiService.ChatCompletion(c.Request.Context(), model, []services.Message{
+		{Role: "system", Content: "你只输出合法 JSON。"},
+		{Role: "user", Content: prompt, Images: []string{overlay}},
+	}, false, false, services.ReasoningEffortLow, false, nil)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "物件识别失败: " + err.Error()})
+		return
+	}
+	content := ""
+	if resp != nil && resp.Body != nil {
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if readErr == nil {
+			var raw map[string]any
+			if json.Unmarshal(bodyBytes, &raw) == nil {
+				content = services.ExtractOpenAIResponseText(raw)
+				if content == "" {
+					if choices, ok := raw["choices"].([]any); ok && len(choices) > 0 {
+						if ch, ok := choices[0].(map[string]any); ok {
+							if msg, ok := ch["message"].(map[string]any); ok {
+								if c, ok := msg["content"].(string); ok {
+									content = c
+								}
+							}
+						}
+					}
+				}
+			}
+			if content == "" {
+				content = string(bodyBytes)
+			}
+		}
+	}
+	jsonText := extractFirstJSONObject(content)
+	var out RecognizeMaskResponse
+	if jsonText == "" || json.Unmarshal([]byte(jsonText), &out) != nil {
+		out = RecognizeMaskResponse{Label: "选中物件", Description: "已识别紫色涂抹覆盖的物件", Confidence: 0.5}
+	}
+	out.Label = strings.TrimSpace(out.Label)
+	out.Description = strings.TrimSpace(out.Description)
+	if out.Label == "" {
+		out.Label = "选中物件"
+	}
+	if out.Description == "" {
+		out.Description = "已识别紫色涂抹覆盖的物件"
+	}
+	if out.Confidence < 0 || out.Confidence > 1 {
+		out.Confidence = 0.5
+	}
+	objectBox := sanitizeObjectBox(out.ObjectBox)
+	out.ObjectBox = objectBox
+	if strings.TrimSpace(req.MaskData) != "" {
+		if imagePath, pathErr := h.resolveUploadedImagePath(req.ImageURL); pathErr == nil {
+			fmt.Printf("[recognize-mask] resolved image path=%q object_box=%v\n", imagePath, objectBox)
+			if maskData, bounds, coverage, refineErr := h.refineMaskWithScript(imagePath, req.MaskData, objectBox); refineErr == nil {
+				refinedMaskData = maskData
+				refinedBounds = bounds
+				refinedCoverage = coverage
+				fmt.Printf("[recognize-mask] refined ok bounds=%v coverage=%.2f mask_len=%d\n", bounds, coverage, len(maskData))
+			} else {
+				fmt.Printf("[recognize-mask] refine failed: %v\n", refineErr)
+			}
+		} else {
+			fmt.Printf("[recognize-mask] image path resolve failed: %v\n", pathErr)
+		}
+	} else {
+		fmt.Printf("[recognize-mask] empty mask_data\n")
+	}
+	out.RefinedMaskData = refinedMaskData
+	out.Bounds = refinedBounds
+	out.Coverage = refinedCoverage
+	c.JSON(http.StatusOK, out)
+}
+
 type EditImageRequest struct {
 	Prompt    string `json:"prompt"`                       // 编辑 prompt（替换背景、文字移除时需要）
 	Size      string `json:"size"`                         // 尺寸（可选）
 	ImageURL  string `json:"image_url"`                    // 源图 URL（可选，和 image_data 二选一）
 	ImageData string `json:"image_data"`                   // 源图 base64 数据（可选，和 image_url 二选一）
-	EditMode  string `json:"edit_mode" binding:"required"` // remove-bg / replace-bg / text-removal / upscale
+	MaskURL   string `json:"mask_url"`                     // 蒙版 URL/public_id（局部重绘、区域涂抹）
+	MaskData  string `json:"mask_data"`                    // 蒙版 base64 数据（局部重绘、区域涂抹）
+	EditMode  string `json:"edit_mode" binding:"required"` // remove-bg / replace-bg / text-removal / upscale / inpaint / region-brush
 }
 
 // EditImage 编辑图片（背景移除 / 背景替换 / 文字移除 / 画质提升）
@@ -232,9 +530,9 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 	}
 
 	// 验证编辑模式
-	validModes := map[string]bool{"remove-bg": true, "replace-bg": true, "text-removal": true, "upscale": true}
+	validModes := map[string]bool{"remove-bg": true, "replace-bg": true, "text-removal": true, "upscale": true, "inpaint": true, "region-brush": true}
 	if !validModes[req.EditMode] {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "edit_mode 必须是 remove-bg、replace-bg、text-removal 或 upscale"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "edit_mode 必须是 remove-bg、replace-bg、text-removal、upscale、inpaint 或 region-brush"})
 		return
 	}
 
@@ -246,6 +544,14 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 	// 文字移除时必须提供 prompt
 	if req.EditMode == "text-removal" && req.Prompt == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "文字移除时必须提供 prompt 描述要去除的文字"})
+		return
+	}
+	if req.EditMode == "inpaint" && req.Prompt == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "局部重绘时必须提供 prompt 描述要重绘的内容"})
+		return
+	}
+	if (req.EditMode == "inpaint" || req.EditMode == "region-brush") && req.MaskURL == "" && req.MaskData == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请先涂抹需要处理的区域"})
 		return
 	}
 
@@ -313,12 +619,60 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 		}
 	}
 
-	if size == "" && req.EditMode == "remove-bg" {
-		if detectedSize, sizeErr := detectImageSize(imageFilePath); sizeErr == nil && detectedSize != "" {
-			size = detectedSize
-		} else {
-			fmt.Printf("[背景移除] 读取源图尺寸失败 path=%s err=%v\n", imageFilePath, sizeErr)
+	var maskFilePath string
+	if req.MaskData != "" {
+		cleanMaskData := req.MaskData
+		if idx := strings.Index(cleanMaskData, "base64,"); idx != -1 {
+			cleanMaskData = cleanMaskData[idx+7:]
 		}
+		cleanMaskData = strings.TrimSpace(cleanMaskData)
+		var saveErr error
+		maskFilePath, saveErr = saveBase64ToImages(cleanMaskData)
+		if saveErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存蒙版失败: " + saveErr.Error()})
+			return
+		}
+	} else if req.MaskURL != "" {
+		var filename string
+		if strings.HasPrefix(req.MaskURL, "file_") {
+			var file models.File
+			if err := h.db.Where("public_id = ?", req.MaskURL).First(&file).Error; err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": "蒙版不存在"})
+				return
+			}
+			filename = filepath.Base(file.StoragePath)
+		} else {
+			parts := strings.Split(req.MaskURL, "/")
+			filename = parts[len(parts)-1]
+		}
+		if strings.Contains(filename, "..") || strings.Contains(filename, "/") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "非法蒙版文件名"})
+			return
+		}
+		maskFilePath = filepath.Join(imageAssetsDir(), filename)
+		if _, statErr := os.Stat(maskFilePath); statErr != nil {
+			uploadDir := "./uploads"
+			maskFilePath = filepath.Join(uploadDir, filename)
+			if _, statErr2 := os.Stat(maskFilePath); statErr2 != nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": "蒙版文件不存在"})
+				return
+			}
+		}
+	}
+
+	targetSize := image.Point{}
+	if detectedSize, sizeErr := detectImageSize(imageFilePath); sizeErr == nil && detectedSize != "" {
+		if parts := strings.Split(detectedSize, "x"); len(parts) == 2 {
+			fmt.Sscanf(detectedSize, "%dx%d", &targetSize.X, &targetSize.Y)
+		}
+		if size == "" && (req.EditMode == "remove-bg" || req.EditMode == "inpaint" || req.EditMode == "region-brush") {
+			size = fitImageEditRequestSize(targetSize)
+			if size != detectedSize {
+				fmt.Printf("[图片编辑] source_size=%s request_size=%s mode=%s\n", detectedSize, size, req.EditMode)
+			}
+		}
+	} else if req.EditMode == "remove-bg" || req.EditMode == "inpaint" || req.EditMode == "region-brush" {
+		fmt.Printf("[图片编辑] 读取源图尺寸失败 mode=%s path=%s err=%v\n", req.EditMode, imageFilePath, sizeErr)
 	}
 	if size == "" {
 		size = "1024x1024"
@@ -332,6 +686,14 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 		editPrompt = req.Prompt + ". Remove these texts/watermarks from the image. Keep everything else intact."
 	case "upscale":
 		editPrompt = "Upscale and enhance this image to 4x resolution. Add more detail, sharpen edges, improve clarity while preserving the original style and content."
+	case "inpaint":
+		editPrompt = "STRICT LOCAL INPAINTING TASK. The provided mask marks the ONLY editable region: transparent pixels in the mask must be replaced, fully opaque pixels must remain unchanged. First remove the original object/content inside the transparent masked area, then replace that same masked area with: " + req.Prompt + ". Do not add the requested object anywhere outside the masked area. Do not keep the original masked object visible. Preserve every unmasked pixel, composition, lighting, perspective, and identity exactly."
+	case "region-brush":
+		if req.Prompt != "" {
+			editPrompt = "Remove the object/content inside the transparent masked area and naturally fill the area using surrounding context. User note: " + req.Prompt + ". Do not add a new object unless explicitly required. Keep all unmasked pixels unchanged."
+		} else {
+			editPrompt = "Remove the object/content inside the transparent masked area. Fill the area naturally using surrounding context so the selected object disappears. Keep all unmasked pixels unchanged."
+		}
 	default:
 		editPrompt = req.Prompt + ". Keep the subject the same, only change the background."
 	}
@@ -350,6 +712,14 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 		gen.Prompt = "[文字移除] " + req.ImageURL
 	case "upscale":
 		gen.Prompt = "[画质提升] " + req.ImageURL
+	case "inpaint":
+		gen.Prompt = "[局部重绘] " + req.Prompt
+	case "region-brush":
+		if req.Prompt != "" {
+			gen.Prompt = "[区域涂抹] " + req.Prompt
+		} else {
+			gen.Prompt = "[区域涂抹] " + req.ImageURL
+		}
 	}
 	if err := h.db.Create(gen).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建编辑任务失败: " + err.Error()})
@@ -357,7 +727,7 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 	}
 
 	// 图片编辑耗时可能超过前置代理/Cloudflare 允许的同步等待时间，必须异步处理，前端按 id 轮询状态。
-	go h.processImageJob(gen.ID, editPrompt, size, "medium", []string{imageFilePath}, baseURL)
+	go h.processImageEditJob(gen.ID, editPrompt, size, "medium", []string{imageFilePath}, maskFilePath, baseURL, targetSize)
 
 	c.JSON(http.StatusOK, gin.H{
 		"id":         gen.ID,
@@ -547,14 +917,18 @@ func (h *ImageHandler) AutoMigrate() error {
 
 // processImageJob 后台处理单个图片生成任务（用于异步 goroutine 和启动恢复）
 func (h *ImageHandler) processImageJob(recordID uint, prompt, size, quality string, referenceImagePaths []string, baseURL string) {
+	h.processImageEditJob(recordID, prompt, size, quality, referenceImagePaths, "", baseURL, image.Point{})
+}
+
+func (h *ImageHandler) processImageEditJob(recordID uint, prompt, size, quality string, referenceImagePaths []string, maskPath string, baseURL string, targetSize image.Point) {
 	ctx := context.Background()
 
 	var imageURL, b64Data string
 	var err error
 
 	if len(referenceImagePaths) > 0 {
-		// image-to-image 模式：基于参考图编辑
-		imageURL, b64Data, err = h.imageService.EditImage(ctx, prompt, size, referenceImagePaths)
+		// image-to-image / mask 编辑模式：基于参考图编辑
+		imageURL, b64Data, err = h.imageService.EditImageStream(ctx, prompt, size, quality, referenceImagePaths, maskPath, nil)
 	} else {
 		// 普通文生图模式
 		imageURL, b64Data, err = h.imageService.GenerateImage(ctx, prompt, size, quality)
@@ -581,7 +955,7 @@ func (h *ImageHandler) processImageJob(recordID uint, prompt, size, quality stri
 
 	// 处理 b64_json
 	if b64Data != "" {
-		filename, err := saveBase64Image(b64Data)
+		filename, err := saveBase64ImageWithTargetSize(b64Data, targetSize)
 		if err != nil {
 			fmt.Printf("[保存图片失败] ID=%d err=%v\n", recordID, err)
 			if saveErr := h.db.Model(&services.ImageGeneration{}).Where("id = ?", recordID).Updates(map[string]interface{}{

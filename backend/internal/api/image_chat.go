@@ -264,12 +264,20 @@ func (h *ImageChatHandler) DeleteImageChat(c *gin.Context) {
 		deleteLocalAsset(msg.VideoURL, localVideoURLPrefix, videoAssetsDir())
 	}
 
-	// 删除消息
-	h.db.Where("chat_id = ?", chat.ID).Delete(&models.ImageChatMessage{})
-	// 删除会话
-	h.db.Delete(&chat)
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("chat_id = ?", chat.ID).Delete(&models.ImageChatMessage{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Table("image_generations").Where("chat_id = ?", chat.ID).Delete(nil).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&chat).Error
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "删除会话失败"})
+		return
+	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
+	c.JSON(http.StatusOK, gin.H{"message": "删除成功", "deleted_id": chat.ID})
 }
 
 // ListImageChatMessages 获取会话消息列表
@@ -381,7 +389,7 @@ func (h *ImageChatHandler) processImageChatJob(msgID uint, prompt, size, quality
 	}
 
 	if len(refPaths) > 0 {
-		imageURL, b64Data, err = h.imageService.EditImageStream(ctx, prompt, size, quality, refPaths, onImageStreamEvent)
+		imageURL, b64Data, err = h.imageService.EditImageStream(ctx, prompt, size, quality, refPaths, "", onImageStreamEvent)
 	} else {
 		imageURL, b64Data, err = h.imageService.GenerateImageStream(ctx, prompt, size, quality, onImageStreamEvent)
 	}

@@ -16,7 +16,7 @@ import {
   PanelLeftClose, MessageSquarePlus, Search, ChevronRight,
   User, Trash2, MoreHorizontal, Pencil, Pin, PinOff, Link2, Check,
   FileText, LayoutGrid, X, Clock, Sparkles, Image, ImageIcon, Video, Eraser,
-  Type, ZoomIn,
+  Type, ZoomIn, Brush, Paintbrush,
   Briefcase, FileCode, PenTool, BarChart3, Mail, ClipboardList, Terminal, GraduationCap, Languages,
   Zap, Shield, BookOpen, Wrench, Globe, Code2,
   Star,
@@ -935,10 +935,16 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                 </button>
               </div>
 
-              {/* 收藏 */}
+            </div>
+
+            {/* 分隔线 - Agents 与笔记本分组之间 */}
+            <div className="w-6 h-px bg-surface-border/40 my-2" />
+
+            {/* 笔记本分组 */}
+            <div className="py-2 flex flex-col items-center space-y-0.5">
               <Link
                 href="/favorites"
-                onMouseEnter={showSidebarTooltip(t("sidebar.tooltip.favorites"))}
+                onMouseEnter={showSidebarTooltip(`${t("sidebar.nav.notebook")} · ${t("sidebar.tooltip.favorites")}`)}
                 onMouseLeave={hideSidebarTooltip}
                 className={cn(
                   "p-2.5 rounded-xl transition-colors",
@@ -949,7 +955,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
               </Link>
             </div>
 
-            {/* 分隔线 - 功能与历史分组之间 */}
+            {/* 分隔线 - 笔记本与历史分组之间 */}
             <div className="w-6 h-px bg-surface-border/40 my-2" />
 
             {/* 历史分组 - 点击展开侧边栏 */}
@@ -1043,7 +1049,15 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                   </button>
                 </div>
 
-                {/* 收藏 */}
+              </div>
+            </div>
+
+            {/* ▼ 笔记本分组 */}
+            <div className="px-3 py-2">
+              <div className="mb-2 px-1">
+                <span className="text-xs font-medium text-slate-400 tracking-wide dark:text-text-tertiary/80">{t("sidebar.nav.notebook")}</span>
+              </div>
+              <div className="space-y-0.5">
                 <Link
                   href="/favorites"
                   className={cn(
@@ -1104,10 +1118,12 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
             items: [
               { icon: ImageIcon, label: t("image.generateImage"), href: "/image", color: "text-purple-500", bg: "bg-purple-500/10" },
               { icon: Video, label: t("video.generateVideo"), href: "/video", color: "text-blue-500", bg: "bg-blue-500/10" },
-              { icon: Image, label: t("sidebar.panel.remove_bg"), href: "/image/edit?mode=remove-bg", color: "text-green-500", bg: "bg-green-500/10" },
-              { icon: Eraser, label: t("sidebar.panel.replace_bg"), href: "/image/edit?mode=replace-bg", color: "text-purple-500", bg: "bg-purple-500/10" },
-              { icon: Type, label: t("sidebar.panel.text_removal"), href: "/image/edit?mode=text-removal", color: "text-amber-500", bg: "bg-amber-500/10" },
-              { icon: ZoomIn, label: t("sidebar.panel.upscale"), href: "/image/edit?mode=upscale", color: "text-cyan-500", bg: "bg-cyan-500/10" },
+              { icon: Image, label: t("sidebar.panel.remove_bg"), href: "/create?mode=remove-bg", color: "text-green-500", bg: "bg-green-500/10" },
+              { icon: Eraser, label: t("sidebar.panel.replace_bg"), href: "/create?mode=replace-bg", color: "text-purple-500", bg: "bg-purple-500/10" },
+              { icon: Type, label: t("sidebar.panel.text_removal"), href: "/create?mode=text-removal", color: "text-amber-500", bg: "bg-amber-500/10" },
+              { icon: ZoomIn, label: t("sidebar.panel.upscale"), href: "/create?mode=upscale", color: "text-cyan-500", bg: "bg-cyan-500/10" },
+              { icon: Brush, label: t("image.edit.inpaint"), href: "/create?mode=inpaint", color: "text-fuchsia-500", bg: "bg-fuchsia-500/10" },
+              { icon: Paintbrush, label: t("image.edit.regionBrush"), href: "/create?mode=region-brush", color: "text-rose-500", bg: "bg-rose-500/10" },
             ],
           },
         ]}

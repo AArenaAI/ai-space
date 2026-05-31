@@ -1,6 +1,6 @@
 "use client";
 
-import { Image, Eraser, Type, ZoomIn, ImageIcon, Video } from "lucide-react";
+import { Image, Eraser, Type, ZoomIn, ImageIcon, Video, Brush, Paintbrush } from "lucide-react";
 import ModuleSidebar, { type ModuleSidebarGroup } from "./ModuleSidebar";
 
 export const MORE_NAV_GROUPS: ModuleSidebarGroup[] = [
@@ -19,35 +19,52 @@ export const MORE_NAV_GROUPS: ModuleSidebarGroup[] = [
         href: "/video",
         matchPath: "/video",
       },
+    ],
+  },
+  {
+    titleKey: "sidebar.panel.tools",
+    items: [
       {
         icon: Image,
         labelKey: "image.edit.removeBg",
-        href: "/image/edit?mode=remove-bg",
-        matchPath: "/image/edit",
+        href: "/create?mode=remove-bg",
+        matchPath: "/create",
       },
       {
         icon: Eraser,
         labelKey: "image.edit.replaceBg",
-        href: "/image/edit?mode=replace-bg",
-        matchPath: "/image/edit",
+        href: "/create?mode=replace-bg",
+        matchPath: "/create",
       },
       {
         icon: Type,
         labelKey: "image.edit.textRemoval",
-        href: "/image/edit?mode=text-removal",
-        matchPath: "/image/edit",
+        href: "/create?mode=text-removal",
+        matchPath: "/create",
       },
       {
         icon: ZoomIn,
         labelKey: "image.edit.upscale",
-        href: "/image/edit?mode=upscale",
-        matchPath: "/image/edit",
+        href: "/create?mode=upscale",
+        matchPath: "/create",
+      },
+      {
+        icon: Brush,
+        labelKey: "image.edit.inpaint",
+        href: "/create?mode=inpaint",
+        matchPath: "/create",
+      },
+      {
+        icon: Paintbrush,
+        labelKey: "image.edit.regionBrush",
+        href: "/create?mode=region-brush",
+        matchPath: "/create",
       },
     ],
   },
 ];
 
-export const CREATIVE_PAGE_PATHS = ["/image", "/video", "/templates"];
+export const CREATIVE_PAGE_PATHS = ["/image", "/video", "/create", "/templates"];
 export const CREATIVE_PAGE_HREFS = MORE_NAV_GROUPS.flatMap((group) => group.items.map((item) => item.href));
 
 export default function ToolsSidebar() {

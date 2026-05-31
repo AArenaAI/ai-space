@@ -45,6 +45,23 @@ const DURATIONS = ["4s", "5s", "6s", "7s", "9s", "10s", "11s", "13s", "14s", "15
 const RESOLUTIONS = ["480p", "720p", "1080p"];
 const MAX_REFERENCE_IMAGES = 9;
 const MAX_REFERENCE_VIDEOS = 3;
+const MAX_REFERENCE_VIDEO_SIZE = 200 * 1024 * 1024;
+const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"];
+const VIDEO_EXTENSIONS = [".mp4", ".mov"];
+const VIDEO_MIME_TYPES = ["video/mp4", "video/quicktime"];
+
+function fileExtension(file: File) {
+  const dot = file.name.lastIndexOf(".");
+  return dot >= 0 ? file.name.slice(dot).toLowerCase() : "";
+}
+
+function isImageFile(file: File) {
+  return file.type.startsWith("image/") || IMAGE_EXTENSIONS.includes(fileExtension(file));
+}
+
+function isVideoFile(file: File) {
+  return file.type.startsWith("video/") || VIDEO_EXTENSIONS.includes(fileExtension(file));
+}
 
 interface DisplayMessage {
   id: string;
@@ -95,18 +112,20 @@ type VideoErrorMessages = {
   serviceBusy: string;
 };
 
-const VIDEO_ERROR_FALLBACKS: VideoErrorMessages = {
-  default: "视频生成失败，请稍后再试。若多次失败，请换个提示词或素材。",
-  privacy: "您的请求无法处理，因为参考素材可能包含真实人物或隐私信息。请更换素材后重试。",
-  sensitive: "您的请求无法处理，因为它可能包含敏感词或不合规内容。请修改提示词或更换素材后重试。",
-  invalidParams: "当前生成设置不符合视频模型要求，请调整模型、比例、分辨率、时长或参考素材后重试。",
-  timeout: "生成等待时间过长，请稍后重试。",
-  rateLimit: "当前请求人数较多，请稍后再试。",
-  quota: "当前生成服务额度不足，暂时无法完成生成。请稍后再试。",
-  serviceBusy: "视频生成服务暂时繁忙，请稍后重试。",
-};
+function getVideoErrorMessages(t: (key: string) => string): VideoErrorMessages {
+  return {
+    default: t("video.error.default"),
+    privacy: t("video.error.privacy"),
+    sensitive: t("video.error.sensitive"),
+    invalidParams: t("video.error.invalidParams"),
+    timeout: t("video.error.timeout"),
+    rateLimit: t("video.error.rateLimit"),
+    quota: t("video.error.quota"),
+    serviceBusy: t("video.error.serviceBusy"),
+  };
+}
 
-function cleanVideoErrorMessage(raw?: string, messages: VideoErrorMessages = VIDEO_ERROR_FALLBACKS) {
+function cleanVideoErrorMessage(raw: string | undefined, messages: VideoErrorMessages) {
   const text = (raw || "").trim();
   if (!text) return messages.default;
   const lower = text.toLowerCase();
@@ -204,6 +223,7 @@ export default function VideoChatPage() {
 function VideoChatPageInner() {
   const router = useRouter();
   const { t } = useI18n();
+  const videoErrorMessages = getVideoErrorMessages(t);
   const searchParams = useSearchParams();
   const { models: videoModels } = useVideoModels();
   const { chats, loading: chatsLoading, fetchChats, createChat, deleteChat } = useVideoChats();
@@ -251,17 +271,6 @@ function VideoChatPageInner() {
   const availableResolutions = isFastModel ? RESOLUTIONS.filter((item) => item !== "1080p") : RESOLUTIONS;
   const hasContent = prompt.trim().length > 0;
   const hasReferenceMedia = referenceImages.length > 0 || referenceVideos.length > 0;
-  const videoErrorMessages: VideoErrorMessages = {
-    default: t("video.error.default"),
-    privacy: t("video.error.privacy"),
-    sensitive: t("video.error.sensitive"),
-    invalidParams: t("video.error.invalidParams"),
-    timeout: t("video.error.timeout"),
-    rateLimit: t("video.error.rateLimit"),
-    quota: t("video.error.quota"),
-    serviceBusy: t("video.error.serviceBusy"),
-  };
-
   useEffect(() => {
     if (!selectedModel && videoModels.length > 0) {
       setSelectedModel(videoModels[0].id);
@@ -330,7 +339,7 @@ function VideoChatPageInner() {
         emitTaskFinished({
           key: `video-chat:${msg.id}`,
           type: "video",
-          title: ["succeeded", "completed"].includes(msg.status || "") ? "视频任务已完成" : "视频任务未完成",
+          title: ["succeeded", "completed"].includes(msg.status || "") ? t("video.task.completed") : t("video.task.incomplete"),
           description: msg.content,
           href: `/video/chat?chatId=${currentChatId}`,
           ok: ["succeeded", "completed"].includes(msg.status || "") && Boolean(msg.video_url),
@@ -403,7 +412,7 @@ function VideoChatPageInner() {
           key: `video-chat:${messageId}`,
           type: "video",
           id: messageId,
-          title: "视频生成中",
+          title: t("video.task.generating"),
           description: cleanPrompt,
           href: `/video/chat?chatId=${chatId}`,
           conversationId: chatId,
@@ -449,8 +458,8 @@ function VideoChatPageInner() {
   }, [handleSend, searchParams, selectedModelInfo, videoModels.length]);
 
   const uploadReferenceMedia = async (file: File) => {
-    const isVideo = file.type.startsWith("video/");
-    const isImage = file.type.startsWith("image/");
+    const isVideo = isVideoFile(file);
+    const isImage = isImageFile(file);
     if (!isImage && !isVideo) {
       toast.error(t("video.uploadUnsupported"));
       return;
@@ -464,14 +473,12 @@ function VideoChatPageInner() {
       return;
     }
     if (isVideo) {
-      const allowedTypes = ["video/mp4", "video/quicktime"];
-      const allowedExts = [".mp4", ".mov"];
-      const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
-      if (!allowedTypes.includes(file.type) && !allowedExts.includes(ext)) {
+      const ext = fileExtension(file);
+      if (!(VIDEO_MIME_TYPES.includes(file.type) || VIDEO_EXTENSIONS.includes(ext))) {
         toast.error(t("video.referenceVideoFormat"));
         return;
       }
-      if (file.size > 50 * 1024 * 1024) {
+      if (file.size > MAX_REFERENCE_VIDEO_SIZE) {
         toast.error(t("video.referenceVideoSize"));
         return;
       }
@@ -488,7 +495,7 @@ function VideoChatPageInner() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || t("image.uploadFailed"));
+        throw new Error(err.message || err.error || t("image.uploadFailed"));
       }
       const data = await res.json();
       const url = data.public_id || data.url || data.image_url;
@@ -950,8 +957,10 @@ function VideoChatPageInner() {
                   type="button"
                   onClick={() => setMusicEnabled((enabled) => !enabled)}
                   className={cn(
-                    "flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] transition-colors",
-                    musicEnabled ? "border-surface-border bg-surface-card text-text-primary font-medium shadow-sm" : "border-surface-border text-text-secondary hover:border-text-tertiary/40 hover:text-text-primary"
+                    "flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-medium transition-all duration-200",
+                    musicEnabled
+                      ? "border-purple-400/50 bg-purple-500/10 text-purple-500"
+                      : "border-surface-border text-text-secondary hover:border-text-tertiary/40 hover:text-text-primary"
                   )}
                 >
                   <Music className="w-3 h-3" />

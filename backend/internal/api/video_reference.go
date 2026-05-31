@@ -26,7 +26,7 @@ const (
 	maxInlineReferenceImageBytes   = 10 * 1024 * 1024
 	publicReferenceURLCheckTimeout = 5 * time.Second
 
-	maxReferenceVideoBytes       = 50 * 1024 * 1024
+	maxReferenceVideoBytes       = 200 * 1024 * 1024
 	minReferenceVideoDurationSec = 2.0
 	maxReferenceVideoDurationSec = 15.0
 	maxReferenceVideoTotalSec    = 15.0
@@ -220,7 +220,7 @@ func isSupportedVideoURL(ref string) bool {
 func validateLocalReferenceVideo(file models.File) (referenceVideoMetadata, error) {
 	var meta referenceVideoMetadata
 	if file.Size > maxReferenceVideoBytes {
-		return meta, fmt.Errorf("参考视频不能超过 50 MB，当前文件 %.1f MB", float64(file.Size)/(1024*1024))
+		return meta, fmt.Errorf("参考视频不能超过 200 MB，当前文件 %.1f MB", float64(file.Size)/(1024*1024))
 	}
 	mimeType := strings.ToLower(strings.TrimSpace(file.MimeType))
 	ext := strings.ToLower(filepath.Ext(file.Filename))

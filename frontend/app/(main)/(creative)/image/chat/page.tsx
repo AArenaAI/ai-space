@@ -21,6 +21,8 @@ import {
   Layers,
   Download,
   MoreHorizontal,
+  Brush,
+  Paintbrush,
   Eraser,
   Type,
   ZoomIn,
@@ -434,7 +436,7 @@ function ImageChatPageInner() {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       cache: "no-store",
     });
-    if (!res.ok) throw new Error("获取图片会话消息失败");
+    if (!res.ok) throw new Error(t("image.error.loadMessages"));
     const data = await res.json().catch(() => ({}));
     return Array.isArray(data.messages) ? data.messages : [];
   }, []);
@@ -467,7 +469,7 @@ function ImageChatPageInner() {
             emitTaskFinished({
               key: `image-chat:${latestAssistant.id}`,
               type: "image",
-              title: latestAssistant.status === "completed" ? "图片任务已完成" : "图片任务未完成",
+              title: latestAssistant.status === "completed" ? t("image.task.completed") : t("image.task.incomplete"),
               description: latestAssistant.content,
               href: `/image/chat?chatId=${pollingChatId}`,
               ok: latestAssistant.status === "completed" && Boolean(latestAssistant.image_url || latestAssistant.partial_image_url),
@@ -530,7 +532,7 @@ function ImageChatPageInner() {
             key: `image-chat:${assistantMsg.id}`,
             type: "image",
             id: assistantMsg.id,
-            title: "图片生成中",
+            title: t("image.task.generating"),
             description: text.trim(),
             href: `/image/chat?chatId=${newChat.id}`,
             conversationId: newChat.id,
@@ -546,7 +548,7 @@ function ImageChatPageInner() {
           key: `image-chat:${sent.message_id}`,
           type: "image",
           id: sent.message_id,
-          title: "图片生成中",
+          title: t("image.task.generating"),
           description: text.trim(),
           href: `/image/chat?chatId=${chatId}`,
           conversationId: chatId,
@@ -631,9 +633,9 @@ function ImageChatPageInner() {
     scrollToBottom("smooth", true);
   };
 
-  const handleOpenImageTool = (mode: "remove-bg" | "replace-bg" | "text-removal" | "upscale", url: string) => {
+  const handleOpenImageTool = (mode: "remove-bg" | "replace-bg" | "text-removal" | "upscale" | "inpaint" | "region-brush", url: string) => {
     const params = new URLSearchParams({ mode, image: url });
-    router.push(`/image/edit?${params.toString()}`);
+    router.push(`/create?${params.toString()}`);
   };
 
   const handleDeleteMessageImage = async (msgId: string) => {
@@ -840,6 +842,8 @@ function ImageChatPageInner() {
                                 { labelKey: "image.edit.textRemoval", icon: Type, mode: "text-removal" as const },
                                 { labelKey: "image.edit.upscale", icon: ZoomIn, mode: "upscale" as const },
                                 { labelKey: "image.edit.replaceBg", icon: ImageIcon, mode: "replace-bg" as const },
+                                { labelKey: "image.edit.inpaint", icon: Brush, mode: "inpaint" as const },
+                                { labelKey: "image.edit.regionBrush", icon: Paintbrush, mode: "region-brush" as const },
                               ].map((item) => (
                                 <button
                                   key={item.mode}

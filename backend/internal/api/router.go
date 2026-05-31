@@ -178,10 +178,11 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		authorized.DELETE("/document-artifacts/:id", documentArtifactHandler.Delete)
 
 		// 图片路由
-		imageHandler := NewImageHandler(db, imageService, cfg, usageService)
+		imageHandler := NewImageHandler(db, imageService, aiService, cfg, usageService)
 		imageHandler.AutoMigrate()
 		imageHandler.RecoverPendingJobs() // 服务启动时恢复未完成的图片生成任务
 		authorized.POST("/images/generate", imageHandler.GenerateImage)
+		authorized.POST("/images/recognize-mask", imageHandler.RecognizeMask)
 		authorized.POST("/images/edit", imageHandler.EditImage)
 		authorized.GET("/images", imageHandler.ListImages)
 		authorized.GET("/images/:id", imageHandler.GetImage)
