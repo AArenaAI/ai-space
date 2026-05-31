@@ -33,6 +33,7 @@ import { AssistantMessageContent } from "./AssistantMessageContent";
 import MessageRow from "./MessageRow";
 import CompareEmptySlot from "./CompareEmptySlot";
 import CompareLoadingSlot from "./CompareLoadingSlot";
+import TextSelectionFloatingBar, { type TextSelectionFloatingBarState } from "./TextSelectionFloatingBar";
 import { parseThinkContent, sanitizeContent, isMessageGenerating } from "@/lib/chatContent";
 
 
@@ -291,6 +292,7 @@ function MessageList({
   const [sharing, setSharing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportPreviewOpen, setExportPreviewOpen] = useState(false);
+  const [textSelection, setTextSelection] = useState<TextSelectionFloatingBarState | null>(null);
   const exportCardRef = useRef<HTMLDivElement>(null);
   const exportPreviewCardRef = useRef<HTMLDivElement>(null);
   const renderScrollToBottomButton = useCallback(() => {
@@ -515,6 +517,80 @@ function MessageList({
   const handleCopy = useCallback((content: string) => {
     navigator.clipboard.writeText(content);
   }, []);
+
+  const copyText = useCallback(async (content: string, successMessage = "已复制") => {
+    await navigator.clipboard.writeText(content);
+    toast.success(successMessage);
+  }, []);
+
+  const formatQuoteText = useCallback((content: string) => {
+    return content
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => `> ${line}`)
+      .join("\n");
+  }, []);
+
+  const clearTextSelection = useCallback(() => {
+    setTextSelection(null);
+    window.getSelection()?.removeAllRanges();
+  }, []);
+
+  const handleCopySelectedText = useCallback(async () => {
+    if (!textSelection?.text) return;
+    await copyText(textSelection.text, "已复制选中文本");
+    clearTextSelection();
+  }, [clearTextSelection, copyText, textSelection]);
+
+  const handleCopySelectedQuote = useCallback(async () => {
+    if (!textSelection?.text) return;
+    await copyText(formatQuoteText(textSelection.text), "已复制为引用");
+    clearTextSelection();
+  }, [clearTextSelection, copyText, formatQuoteText, textSelection]);
+
+  const updateTextSelection = useCallback(() => {
+    const selection = window.getSelection();
+    const rawText = selection?.toString().trim() || "";
+    if (!selection || selection.rangeCount === 0 || rawText.length < 2 || selectMode) {
+      setTextSelection(null);
+      return;
+    }
+
+    const anchorNode = selection.anchorNode;
+    const anchorElement = anchorNode instanceof Element ? anchorNode : anchorNode?.parentElement;
+    if (!anchorElement?.closest('[data-chat-message-row="true"]')) {
+      setTextSelection(null);
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      setTextSelection(null);
+      return;
+    }
+
+    setTextSelection({
+      text: rawText.slice(0, 5000),
+      top: Math.max(8, rect.top - 48),
+      left: Math.min(window.innerWidth - 120, Math.max(120, rect.left + rect.width / 2)),
+    });
+  }, [selectMode]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('[data-testid="chat-text-selection-bar"]')) return;
+      setTextSelection(null);
+    };
+    document.addEventListener("selectionchange", updateTextSelection);
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      document.removeEventListener("selectionchange", updateTextSelection);
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [updateTextSelection]);
 
   const getPairedMessageIds = useCallback((msgId: string) => {
     const ids = new Set<string>();
@@ -828,7 +904,7 @@ function MessageList({
       const canRegenerate = !!msg && isLastGroup && !isStreaming && !isGenerating;
 
       return (
-        <div className="flex flex-col gap-3 h-full">
+        <div data-chat-message-row="true" className="flex flex-col gap-3 h-full">
           {renderCompareUserMessage(userMsg)}
           <div className="flex-1 flex flex-col">
             {msg ? (
@@ -1065,6 +1141,14 @@ function MessageList({
       />
 
       {renderScrollToBottomButton()}
+
+      <TextSelectionFloatingBar
+        selection={textSelection}
+        copyLabel="复制"
+        quoteLabel="复制为引用"
+        onCopy={handleCopySelectedText}
+        onCopyQuote={handleCopySelectedQuote}
+      />
 
       {/* 选择模式底部工具栏 */}
       {selectMode && selectionMode && (

@@ -72,7 +72,7 @@ function MessageRow({
   const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
 
   return (
-    <div className={cn("max-w-[800px] mx-auto px-4 py-4 rounded-2xl transition-colors duration-500", isHighlighted && "bg-brand/10")}>
+    <div data-chat-message-row="true" className={cn("max-w-[800px] mx-auto px-4 py-4 rounded-2xl transition-colors duration-500", isHighlighted && "bg-brand/10")}>
       <div key={msg.id} className={cn("flex gap-3 animate-message-appear group", isUser ? "justify-end" : "justify-start")}>
         <div className={cn("mt-1 shrink-0", isUser && !selectMode ? "hidden" : "w-7")}>
           {!isUser && !selectMode && (
