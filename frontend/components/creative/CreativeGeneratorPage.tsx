@@ -40,6 +40,7 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
+import { readApiError, showUserError } from "@/lib/errors";
 
 const ASPECT_RATIOS = [
   { value: "auto", label: "Auto", w: 1, h: 1 },
@@ -466,8 +467,7 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
           body: formData,
         });
         if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.message || err.error || t("image.uploadFailed"));
+          throw await readApiError(res);
         }
         const data = await res.json();
         const url = data.public_id || data.url || data.image_url;
@@ -489,8 +489,12 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
         setReferenceVideos((prev) => [...prev, ...uploadedVideos]);
       }
       toast.success(validFiles.length > 1 ? t("image.uploadMultipleSuccess") : t("image.uploadSuccess"));
-    } catch (err: any) {
-      toast.error(`${t("image.uploadFailed")}: ${err.message}`);
+    } catch (err) {
+      showUserError(err, {
+        module: "file",
+        fallbackTitle: t("image.uploadFailed"),
+        fallbackMessage: mode === "video" ? "参考素材上传失败，请重新上传。" : "参考图上传失败，请重新选择图片。",
+      });
     } finally {
       uploadInFlightRef.current = false;
       setUploadingRef(false);

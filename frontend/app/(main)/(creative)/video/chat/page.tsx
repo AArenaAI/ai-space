@@ -30,6 +30,7 @@ import CreationHistoryPanel from "@/components/creative/CreationHistoryPanel";
 import DeleteSuccessNotice from "@/components/ui/DeleteSuccessNotice";
 import { useI18n } from "@/lib/i18n";
 import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotifications";
+import { normalizeError, readApiError, showUserError } from "@/lib/errors";
 
 const ASPECT_RATIOS = [
   { value: "16:9", label: "16:9", w: 16, h: 9 },
@@ -434,7 +435,8 @@ function VideoChatPageInner() {
           prev.filter((m) => m.id !== localAssistantMessage.id && m.id !== localUserMessage.id)
         );
       } else {
-        const msg = cleanVideoErrorMessage(rawMsg, videoErrorMessages);
+        const userError = normalizeError(rawMsg, { module: "video", fallbackMessage: t("video.submitFailed") });
+        const msg = cleanVideoErrorMessage(userError.message, videoErrorMessages);
         setDisplayMessages((prev) =>
           prev.map((msgItem) =>
             msgItem.id === localAssistantMessage.id
@@ -494,8 +496,7 @@ function VideoChatPageInner() {
         body: formData,
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || err.error || t("image.uploadFailed"));
+        throw await readApiError(res);
       }
       const data = await res.json();
       const url = data.public_id || data.url || data.image_url;
@@ -504,8 +505,12 @@ function VideoChatPageInner() {
       } else {
         setReferenceImages((prev) => [...prev, url].slice(0, MAX_REFERENCE_IMAGES));
       }
-    } catch (err: any) {
-      toast.error(`${t("image.uploadFailed")}: ${err.message}`);
+    } catch (err) {
+      showUserError(err, {
+        module: "file",
+        fallbackTitle: t("image.uploadFailed"),
+        fallbackMessage: "参考素材上传失败，请重新上传。",
+      });
     } finally {
       setUploadingRef(false);
     }

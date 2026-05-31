@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotifications";
+import { normalizeError, readApiError } from "@/lib/errors";
 
 export interface VideoGeneration {
   id: number;
@@ -102,8 +103,7 @@ export function useVideo(): UseVideoReturn {
           body: JSON.stringify(payload),
         });
         if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.error || "生成失败");
+          throw await readApiError(res);
         }
         const data = await res.json();
         const newVideo: VideoGeneration = {
@@ -127,6 +127,8 @@ export function useVideo(): UseVideoReturn {
         // auto start polling
         startPolling(newVideo.id);
         return newVideo;
+      } catch (err) {
+        throw normalizeError(err, { module: "video", fallbackMessage: "视频生成失败，请稍后重试。" });
       } finally {
         setGenerating(false);
       }

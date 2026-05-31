@@ -8,6 +8,7 @@ import { Template } from "@/hooks/useTemplates";
 import { getGuestId } from "@/lib/guestId";
 import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
+import { readApiError, showUserError } from "@/lib/errors";
 
 const TEXTAREA_MIN_HEIGHT = 92;
 const TEXTAREA_MAX_HEIGHT = 180;
@@ -327,14 +328,17 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || t("chat.uploadFailed"));
+        throw await readApiError(res);
       }
 
       const data = await res.json();
       setAttachedFiles((prev) => [...prev, { filename: data.filename, content: data.content_preview || "", type: data.type, public_id: data.public_id, parse_status: data.parse_status || "pending" }]);
-    } catch (err: any) {
-      toast.error(`${t("chat.fileUploadFailedPrefix")}: ${err.message}`);
+    } catch (err) {
+      showUserError(err, {
+        module: "file",
+        fallbackTitle: t("chat.uploadFailed"),
+        fallbackMessage: "文件上传失败，请重新选择文件。",
+      });
     } finally {
       setUploading(false);
     }

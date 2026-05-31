@@ -11,6 +11,7 @@ import BeforeAfterSlider from "@/components/ui/BeforeAfterSlider";
 import { resolveImageUrl } from "@/lib/resolveImageUrl";
 import CreationHistoryPanel, { type CreationHistoryItem } from "@/components/creative/CreationHistoryPanel";
 import { getGuestId } from "@/lib/guestId";
+import { normalizeError, readApiError } from "@/lib/errors";
 
 const API_BASE_URL = "";
 
@@ -138,28 +139,11 @@ const MODE_CONFIG = {
 const MODE_ORDER: EditMode[] = ["remove-bg", "replace-bg", "text-removal", "upscale", "inpaint", "region-brush"];
 
 function getUserFacingEditError(error: unknown, t: (key: string) => string) {
-  const raw = error instanceof Error ? error.message : typeof error === "string" ? error : "";
-  const message = raw.trim();
-  if (!message) return t("image.edit.error.default");
-  if (/上传图片失败|请选择图片文件|读取图片失败|请先上传或选择图片|请描述新背景|请描述要去除|请先涂抹|请描述要重绘|请先登录/.test(message)) {
-    return message;
-  }
-  if (/timeout|timed?\s*out|deadline|超时/i.test(message)) {
-    return t("image.edit.error.timeout");
-  }
-  if (/insufficient|quota|credit|balance|额度|积分|余额/i.test(message)) {
-    return t("image.edit.error.quota");
-  }
-  if (/network|fetch|Failed to fetch|ECONN|连接|网络/i.test(message)) {
-    return t("image.edit.error.network");
-  }
-  if (/rate.?limit|too many requests|429|频率|限流/i.test(message)) {
-    return t("image.edit.error.rateLimit");
-  }
-  if (message.length > 80 || /^[\[{]/.test(message) || /\b(error|exception|stack|trace|provider|openai|api|json)\b/i.test(message)) {
-    return t("image.edit.error.default");
-  }
-  return message;
+  return normalizeError(error, {
+    module: "image_edit",
+    fallbackTitle: t("image.edit.error.editFailed"),
+    fallbackMessage: t("image.edit.error.default"),
+  }).message;
 }
 
 export default function ImageEditPage() {
@@ -765,11 +749,11 @@ function ImageEditContent() {
       body: formData,
     });
     if (!uploadResp.ok) {
-      const uploadErr = await uploadResp.json().catch(() => ({}));
-      const message = uploadResp.status === 413
-        ? "识别图片过大，请换一张较小图片或稍后重试"
-        : uploadErr.message || uploadErr.error || t("image.edit.error.sourceUploadFailed");
-      throw new Error(message);
+      const apiError = await readApiError(uploadResp);
+      if (uploadResp.status === 413) {
+        throw new Error("识别图片过大，请换一张较小图片或稍后重试");
+      }
+      throw apiError;
     }
     const uploadData = await uploadResp.json();
     const publicId = uploadData?.public_id || "";
@@ -858,7 +842,7 @@ function ImageEditContent() {
     } catch (error) {
       console.warn("object segmentation failed", error);
       setRegionStep("paint");
-      toast.error(error instanceof Error ? error.message : "智能分割失败，请重新涂抹后重试");
+      toast.error(getUserFacingEditError(error, t));
     } finally {
       setIsRecognizingRegion(false);
     }
@@ -977,8 +961,7 @@ function ImageEditContent() {
           body: formData,
         });
         if (!uploadResp.ok) {
-          const uploadErr = await uploadResp.json().catch(() => ({}));
-          throw new Error(uploadErr.message || uploadErr.error || t("image.edit.error.sourceUploadFailed"));
+          throw await readApiError(uploadResp);
         }
         uploadData = await uploadResp.json();
         imagePublicId = uploadData.public_id;
@@ -1027,8 +1010,7 @@ function ImageEditContent() {
         body: JSON.stringify(body),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || t("image.edit.error.editFailed"));
+        throw await readApiError(res);
       }
       const data = await res.json();
       if (data?.id) {

@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect } from "react";
-import { toast } from "sonner";
 import { getGuestId, clearGuestId } from "@/lib/guestId";
+import { normalizeError } from "@/lib/errors";
+import { toast } from "sonner";
 
 export default function AuthInterceptor() {
   useEffect(() => {
@@ -19,6 +20,15 @@ export default function AuthInterceptor() {
 
     const originalFetch = window.fetch;
     let redirecting = false;
+    let lastToastKey = "";
+    let lastToastAt = 0;
+    const shouldToastOnce = (key: string) => {
+      const now = Date.now();
+      if (lastToastKey === key && now - lastToastAt < 2500) return false;
+      lastToastKey = key;
+      lastToastAt = now;
+      return true;
+    };
 
     window.fetch = async function (
       input: RequestInfo | URL,
@@ -61,23 +71,19 @@ export default function AuthInterceptor() {
       //   window.location.href = `/login?returnUrl=${returnUrl}`;
       // }
 
-      // 处理匿名用户特定错误码（覆盖常见的业务状态码）
-      if (isApi && [400, 403, 409, 429].includes(res.status)) {
+      // 只全局处理跨模块通用错误，业务错误交给具体页面，避免重复 toast。
+      if (isApi && [400, 401, 403, 409, 429].includes(res.status)) {
         try {
           const clone = res.clone();
           const data = await clone.json();
           if (data && typeof data === "object") {
-            const code = (data as any).error || (data as any).code || "";
-            switch (code) {
-              case "guest_id_required":
-                toast.error("请允许浏览器使用 localStorage 以使用匿名模式");
-                break;
-              case "guest_limit_exceeded":
-                toast.error((data as any).message || "匿名用户每日额度已用完，请登录后继续使用");
-                break;
-              case "file_not_ready":
-                toast.error((data as any).message || "文件正在解析中，请稍后再试");
-                break;
+            const code = String((data as any).error || (data as any).code || "");
+            const handledGlobalCodes = new Set(["guest_id_required", "guest_limit_exceeded", "file_not_ready", "login_required"]);
+            if (handledGlobalCodes.has(code) && shouldToastOnce(`${code}:${res.status}`)) {
+              const userError = normalizeError(data, { httpStatus: res.status });
+              if (userError.severity === "info") toast.info(userError.message, { description: userError.title, duration: 4200 });
+              else if (userError.severity === "warning") toast.warning(userError.message, { description: userError.title, duration: 4200 });
+              else toast.error(userError.message, { description: userError.title, duration: 4200 });
             }
           }
         } catch {

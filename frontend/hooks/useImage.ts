@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotifications";
+import { getErrorMessage, normalizeError, readApiError } from "@/lib/errors";
 
 const API_BASE_URL = "";
 
@@ -49,8 +50,7 @@ export function useImage() {
       if (token) headers.Authorization = `Bearer ${token}`;
       const response = await fetch(`${API_BASE_URL}/api/images`, { headers });
       if (!response.ok) {
-        const err = await safeJSON(response);
-        throw new Error(err.error || `获取图片列表失败 (${response.status})`);
+        throw await readApiError(response);
       }
       const data = await safeJSON(response);
       const nextImages = data.images || [];
@@ -69,7 +69,7 @@ export function useImage() {
         }
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "获取图片列表失败");
+      setError(getErrorMessage(err, { module: "image", fallbackMessage: "获取图片记录失败，请刷新重试。" }));
     }
   }, []);
 
@@ -131,8 +131,7 @@ export function useImage() {
         });
 
         if (!response.ok) {
-          const err = await safeJSON(response);
-          throw new Error(err.error || `生成图片失败 (${response.status})`);
+          throw await readApiError(response);
         }
 
         const data = await safeJSON(response);
@@ -151,8 +150,9 @@ export function useImage() {
         startPolling();
         return data;
       } catch (err) {
-        setError(err instanceof Error ? err.message : "生成图片失败");
-        throw err;
+        const userError = normalizeError(err, { module: "image", fallbackMessage: "图片生成失败，请稍后重试。" });
+        setError(userError.message);
+        throw userError;
       } finally {
         setIsGenerating(false);
       }
@@ -181,14 +181,13 @@ export function useImage() {
         headers,
       });
       if (!response.ok) {
-        const err = await safeJSON(response);
-        throw new Error(err.error || "删除失败");
+        throw await readApiError(response);
       }
       const next = images.filter((img) => img.id !== id);
       setImages(next);
       cachedImages = next;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "删除失败");
+      setError(getErrorMessage(err, { module: "image", fallbackMessage: "删除失败，请稍后重试。" }));
     }
   }, [images]);
 
