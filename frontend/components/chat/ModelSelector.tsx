@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { ChatModel } from "@/lib/chatTypes";
 import { getModelCapabilitySummary, getPrimaryModelCapabilities } from "@/lib/models/modelCapabilities";
 import { getModelRecommendation, getRecommendedModels, isModelRecommended, type ModelRecommendationContext } from "@/lib/models/modelRecommendations";
+import { getModelStatusBadge, getModelStatusLabel, isModelAvailable } from "@/lib/models/modelAvailability";
 import { ModelCapabilityBadges } from "./ModelCapabilityBadge";
 
 interface ModelSelectorProps {
@@ -112,6 +113,8 @@ export default function ModelSelector({
     [models, recommendation]
   );
   const selectedMatchesRecommendation = isModelRecommended(selected, recommendation);
+  const selectedAvailable = isModelAvailable(selected);
+  const selectedStatusLabel = getModelStatusLabel(selected);
 
   // 点击外部关闭
   useEffect(() => {
@@ -162,6 +165,7 @@ export default function ModelSelector({
 
   const handleSelect = useCallback(
     (model: ChatModel) => {
+      if (!isModelAvailable(model)) return;
       onSelect(model);
       pushRecentModel(model.id);
       setRecentIds(getRecentModels());
@@ -215,17 +219,22 @@ export default function ModelSelector({
   const renderShortcutModelItem = (model: ChatModel, options?: { showFavorite?: boolean }) => {
     const capabilities = getPrimaryModelCapabilities(model, 4);
     const favorited = favoriteIds.includes(model.id);
+    const available = isModelAvailable(model);
+    const statusBadge = getModelStatusBadge(model);
 
     return (
       <button
         key={model.id}
         onClick={() => handleSelect(model)}
+        disabled={!available}
         className={cn(
           "flex items-start gap-2.5 w-full px-3 py-2 rounded-lg text-left transition-colors group/shortcut",
+          !available && "cursor-not-allowed opacity-55",
           selected.id === model.id
             ? "bg-surface-card text-text-primary"
             : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
         )}
+        title={statusBadge || getModelCapabilitySummary(model)}
       >
         <div
           className="mt-1.5 w-1.5 h-4 rounded-full shrink-0"
@@ -235,6 +244,7 @@ export default function ModelSelector({
           <div className="flex items-center gap-1.5">
             <span className="text-[13px] font-medium truncate">{model.name}</span>
             {selected.id === model.id && <Check className="w-3.5 h-3.5 text-text-primary shrink-0" />}
+            {statusBadge && <span className="text-[10px] text-rose-500 shrink-0">{statusBadge}</span>}
           </div>
           <ModelCapabilityBadges capabilities={capabilities} compact className="mt-1" />
         </div>
@@ -265,17 +275,22 @@ export default function ModelSelector({
   const renderModelItem = (model: ChatModel) => {
     const capabilities = getPrimaryModelCapabilities(model, 4);
     const favorited = favoriteIds.includes(model.id);
+    const available = isModelAvailable(model);
+    const statusBadge = getModelStatusBadge(model);
 
     return (
       <button
         key={model.id}
         onClick={() => handleSelect(model)}
+        disabled={!available}
         className={cn(
           "flex items-start gap-3.5 w-full px-4 py-3.5 rounded-xl text-left transition-colors duration-150 group",
+          !available && "cursor-not-allowed opacity-55",
           selected.id === model.id
             ? "bg-surface-card"
             : "hover:bg-surface-card"
         )}
+        title={statusBadge || getModelCapabilitySummary(model)}
       >
         <div
           className="mt-2 w-2 h-2 rounded-full shrink-0"
@@ -296,9 +311,14 @@ export default function ModelSelector({
             {selected.id === model.id && (
               <Check className="w-3.5 h-3.5 text-text-primary shrink-0" />
             )}
+            {statusBadge && (
+              <span className="rounded-full bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-medium text-rose-500 shrink-0">
+                {statusBadge}
+              </span>
+            )}
           </div>
           <p className="text-xs text-text-tertiary mt-1 leading-relaxed line-clamp-2">
-            {model.description || getModelCapabilitySummary(model)}
+            {statusBadge || model.description || getModelCapabilitySummary(model)}
           </p>
           <ModelCapabilityBadges capabilities={capabilities} compact className="mt-2" />
         </div>
@@ -332,11 +352,12 @@ export default function ModelSelector({
         className={cn(
           "flex items-center gap-2.5 px-2.5 py-1.5 text-[15px] font-medium transition-all duration-200 w-full",
           "rounded-lg",
+          !selectedAvailable && "text-rose-500",
           open
             ? "bg-surface-card text-text-primary"
             : "bg-transparent text-text-secondary hover:bg-surface-card hover:text-text-primary"
         )}
-        title={getModelCapabilitySummary(selected)}
+        title={selectedAvailable ? getModelCapabilitySummary(selected) : selectedStatusLabel}
       >
         <div
           className="w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0"
@@ -348,6 +369,11 @@ export default function ModelSelector({
           {PROVIDER_ICONS[selected.provider] || selected.provider[0]}
         </div>
         <span className="truncate">{selected.name}</span>
+        {!selectedAvailable && (
+          <span className="rounded-full bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-medium text-rose-500 shrink-0">
+            {selectedStatusLabel}
+          </span>
+        )}
         {favoriteIds.includes(selected.id) && <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400 shrink-0" />}
         <ChevronDown
           className={cn(

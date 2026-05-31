@@ -9,7 +9,7 @@ import (
 )
 
 func GetModelsHandler(c *gin.Context) {
-	c.JSON(http.StatusOK, modelmeta.SupportedModels)
+	c.JSON(http.StatusOK, modelmeta.AllModels())
 }
 
 func GetChatModelsHandler(c *gin.Context) {

@@ -13,6 +13,9 @@ export interface ChatModel {
   supported_file_extensions?: string[];
   supported_file_mime_types?: string[];
   file_accept?: string;
+  available?: boolean;
+  status?: string;
+  status_message?: string;
 }
 
 const DEFAULT_CHAT: ChatModel[] = [

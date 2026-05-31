@@ -1,6 +1,7 @@
 import type { ChatModel } from "../chatTypes";
 import type { ModelCapability } from "./modelCapabilities";
 import { supportsModelCapability } from "./modelCapabilities";
+import { isModelAvailable } from "./modelAvailability";
 
 export interface ModelRecommendationContext {
   searchEnabled?: boolean;
@@ -87,5 +88,5 @@ export function isModelRecommended(model: ChatModel, recommendation: ModelRecomm
 
 export function getRecommendedModels(models: ChatModel[], recommendation: ModelRecommendation | null, limit = 2) {
   if (!recommendation) return [];
-  return models.filter((model) => isModelRecommended(model, recommendation)).slice(0, limit);
+  return models.filter((model) => isModelAvailable(model) && isModelRecommended(model, recommendation)).slice(0, limit);
 }

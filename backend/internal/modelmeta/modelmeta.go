@@ -14,6 +14,9 @@ type ModelInfo struct {
 	SupportedFileExtensions []string `json:"supported_file_extensions,omitempty"`
 	SupportedFileMimeTypes  []string `json:"supported_file_mime_types,omitempty"`
 	FileAccept              string   `json:"file_accept,omitempty"`
+	Available               bool     `json:"available"`
+	Status                  string   `json:"status,omitempty"`
+	StatusMessage           string   `json:"status_message,omitempty"`
 }
 
 var SupportedModels = []ModelInfo{
@@ -37,6 +40,15 @@ var SupportedModels = []ModelInfo{
 	// Moonshot
 	{ID: "kimi-k2.5", Name: "Kimi K2.5", Provider: "Moonshot", Description: "旗舰多模态，支持图片理解+256K上下文", Color: "#00b96b", Capabilities: []string{"chat"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
 	{ID: "kimi-k2.6", Name: "Kimi K2.6", Provider: "Moonshot", Description: "最新旗舰版，更强多模态+推理能力", Color: "#00b96b", Capabilities: []string{"chat"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
+}
+
+// AllModels 返回所有模型，并补齐前端展示所需的默认状态与文件能力字段。
+func AllModels() []ModelInfo {
+	var result []ModelInfo
+	for _, m := range SupportedModels {
+		result = append(result, WithFileSupport(m))
+	}
+	return result
 }
 
 // ChatModels 返回支持对话的模型
@@ -66,6 +78,12 @@ func ModelsByCapability(capability string) []ModelInfo {
 }
 
 func WithFileSupport(model ModelInfo) ModelInfo {
+	if model.Status == "" {
+		model.Status = "available"
+	}
+	if !model.Available && model.Status == "available" {
+		model.Available = true
+	}
 	model.SupportedFileExtensions = FileExtensionsForInputs(model.SupportedInputs)
 	model.SupportedFileMimeTypes = FileMimeTypesForInputs(model.SupportedInputs)
 	model.FileAccept = FileAcceptForInputs(model.SupportedInputs)
