@@ -17,7 +17,7 @@ export function ModelCapabilityBadge({ capability, compact = false }: { capabili
     <span
       className={cn(
         "inline-flex shrink-0 items-center rounded-full border font-medium leading-none",
-        compact ? "px-1.5 py-0.5 text-[9px]" : "px-2 py-1 text-[10px]",
+        compact ? "px-2 py-0.5 text-[10px]" : "px-2.5 py-1 text-[11px]",
         TONE_CLASS[capability.tone]
       )}
     >
@@ -29,10 +29,11 @@ export function ModelCapabilityBadge({ capability, compact = false }: { capabili
 export function ModelCapabilityBadges({ capabilities, compact = false, className }: { capabilities: ModelCapabilityMeta[]; compact?: boolean; className?: string }) {
   if (capabilities.length === 0) return null;
   return (
-    <div className={cn("flex flex-wrap gap-1", className)}>
+    <div className={cn("flex flex-wrap gap-1.5", className)}>
       {capabilities.map((capability) => (
         <ModelCapabilityBadge key={capability.key} capability={capability} compact={compact} />
       ))}
     </div>
   );
 }
+
