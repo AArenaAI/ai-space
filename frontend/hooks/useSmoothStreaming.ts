@@ -12,6 +12,7 @@ const smoothDisplayCache = new Map<string, string>();
  */
 export function useSmoothStreaming(text: string | undefined | null, isStreaming: boolean, cacheKey?: string): string {
   const safeText = text || "";
+  const wasStreamingRef = useRef(isStreaming);
   const initialText = (() => {
     if (!isStreaming) return safeText;
     const cached = cacheKey ? smoothDisplayCache.get(cacheKey) : undefined;
@@ -31,8 +32,12 @@ export function useSmoothStreaming(text: string | undefined | null, isStreaming:
 
   // RAF 动画函数，用 useCallback 包裹以确保引用稳定
   const animate = useCallback((time: number) => {
-    // 已停止流式，终止动画
-    if (!isStreamingRef.current) {
+    const currentTargetLen = targetTextRef.current.length;
+    const currentDisplayedLen = displayedTextRef.current.length;
+
+    // 已停止流式且没有剩余内容需要追赶，终止动画。
+    // 如果流结束时 target 仍领先 displayed，继续用 RAF 平滑补完，避免最终内容一帧跳全量。
+    if (!isStreamingRef.current && currentDisplayedLen >= currentTargetLen) {
       animationFrameRef.current = null;
       return;
     }
@@ -95,15 +100,23 @@ export function useSmoothStreaming(text: string | undefined | null, isStreaming:
     targetTextRef.current = safeText;
 
     if (!isStreaming) {
-      displayedTextRef.current = safeText;
-      setDisplayedText(safeText);
-      if (cacheKey) smoothDisplayCache.delete(cacheKey);
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null;
+      targetTextRef.current = safeText;
+      if (!wasStreamingRef.current || displayedTextRef.current.length >= safeText.length) {
+        displayedTextRef.current = safeText;
+        setDisplayedText(safeText);
+        if (cacheKey) smoothDisplayCache.delete(cacheKey);
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+          animationFrameRef.current = null;
+        }
+      } else if (!animationFrameRef.current) {
+        animationFrameRef.current = requestAnimationFrame(animate);
       }
+      wasStreamingRef.current = false;
       return;
     }
+
+    wasStreamingRef.current = true;
 
     // 动画已停止但目标又变长了，需要重新启动
     if (!animationFrameRef.current && displayedTextRef.current.length < targetTextRef.current.length) {
@@ -114,9 +127,8 @@ export function useSmoothStreaming(text: string | undefined | null, isStreaming:
   // Effect 2：isStreaming 变化时管理 RAF。只依赖 isStreaming，不依赖 safeText。
   useEffect(() => {
     if (!isStreaming) {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null;
+      if (displayedTextRef.current.length < targetTextRef.current.length && !animationFrameRef.current) {
+        animationFrameRef.current = requestAnimationFrame(animate);
       }
       return;
     }
@@ -134,5 +146,5 @@ export function useSmoothStreaming(text: string | undefined | null, isStreaming:
     };
   }, [isStreaming, animate]);
 
-  return isStreaming ? displayedText : safeText;
+  return displayedText;
 }

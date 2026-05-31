@@ -9,6 +9,7 @@ import { getGuestId } from "@/lib/guestId";
 import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
 import { getErrorMessage, readApiError, showUserError } from "@/lib/errors";
+import { supportsModelCapability } from "@/lib/models/modelCapabilities";
 
 const TEXTAREA_MIN_HEIGHT = 92;
 const TEXTAREA_MAX_HEIGHT = 180;
@@ -104,12 +105,14 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     return "fast";
   });
   const reasoning = getReasoningEffortForMode(currentModel, reasoningMode);
+  const searchSupported = currentModel ? supportsModelCapability(currentModel, "search") : false;
   const [searchEnabled, setSearchEnabled] = useState(() => {
     if (typeof window !== "undefined") {
       return localStorage.getItem("search-enabled") === "true";
     }
     return false;
   });
+  const effectiveSearchEnabled = searchSupported && searchEnabled;
   const [toolsOpen, setToolsOpen] = useState(false);
   const [reasoningOpen, setReasoningOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
@@ -259,7 +262,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
       return;
     }
     const file_ids = attachedFiles.map((a) => a.public_id).filter((id): id is string => id !== undefined);
-    onSend(content.trim(), reasoning, searchEnabled, attachedFiles.length > 0 ? attachedFiles : undefined, file_ids.length > 0 ? file_ids : undefined);
+    onSend(content.trim(), reasoning, effectiveSearchEnabled, attachedFiles.length > 0 ? attachedFiles : undefined, file_ids.length > 0 ? file_ids : undefined);
     setContent("");
     setAttachedFiles([]);
     if (textareaRef.current) {
@@ -294,7 +297,19 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     localStorage.setItem("reasoning-effort", next.effort);
   };
 
+  useEffect(() => {
+    if (searchEnabled && !searchSupported) {
+      setSearchEnabled(false);
+    }
+  }, [searchEnabled, searchSupported]);
+
   const toggleSearch = () => {
+    if (!searchSupported) {
+      toast.info("当前模型不支持联网搜索，已自动关闭搜索。请切换到支持搜索的 GPT 系列模型。");
+      setSearchEnabled(false);
+      localStorage.setItem("search-enabled", "false");
+      return;
+    }
     setSearchEnabled((prev) => {
       const next = !prev;
       localStorage.setItem("search-enabled", String(next));
@@ -629,14 +644,14 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                   type="button"
                   className={cn(
                     "flex items-center gap-1.5 pl-3 pr-3 py-1.5 text-[13px] font-medium rounded-full border transition-all duration-200",
-                    searchEnabled
+                    effectiveSearchEnabled
                       ? "border-surface-border bg-surface-card text-text-primary shadow-sm"
                       : "border-surface-border bg-transparent text-text-tertiary hover:text-text-secondary hover:border-text-tertiary/50"
                   )}
                 >
                   <Wrench className="w-3.5 h-3.5" />
                   <span>{t("chat.tools")}</span>
-                  {searchEnabled && (
+                  {effectiveSearchEnabled && (
                     <span className="text-[11px] opacity-70 ml-0.5">· {t("chat.webSearch")}</span>
                   )}
                 </button>
@@ -651,18 +666,18 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                         onClick={toggleSearch}
                         className={cn(
                           "flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg transition-colors",
-                          searchEnabled
+                          effectiveSearchEnabled
                             ? "bg-surface-card text-text-primary font-medium shadow-sm"
                             : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                         )}
                       >
                         <span className={cn(
                           "w-4 h-4 rounded border-2 flex items-center justify-center transition-colors",
-                          searchEnabled
+                          effectiveSearchEnabled
                             ? "bg-slate-900 border-slate-900 dark:bg-text-primary dark:border-text-primary"
                             : "border-text-tertiary/40"
                         )}>
-                          {searchEnabled && <span className="text-white text-[10px] font-bold">✓</span>}
+                          {effectiveSearchEnabled && <span className="text-white text-[10px] font-bold">✓</span>}
                         </span>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5">

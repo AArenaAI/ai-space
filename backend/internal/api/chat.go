@@ -692,6 +692,10 @@ func (h *ChatHandler) preprocessSearch(messages []services.Message, modelID stri
 		return messages, nil, true
 	}
 
+	// 不支持搜索能力的模型（如 DeepSeek）直接忽略 search=true，避免 fallback 搜索上下文
+	// 触发不兼容的 provider/system-message 组合导致整轮请求失败。
+	return append([]services.Message(nil), messages...), nil, false
+
 	processed := append([]services.Message(nil), messages...)
 	var query string
 	lastUserIdx := -1
