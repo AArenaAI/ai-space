@@ -1,7 +1,7 @@
 import { useCallback, useRef } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { getGuestId as defaultGetGuestId } from "@/lib/guestId";
-import { streamAppend as defaultStreamAppend, streamGet as defaultStreamGet, realtimeGet as defaultRealtimeGet, realtimeUpdate as defaultRealtimeUpdate, realtimeClear as defaultRealtimeClear } from "@/lib/streaming";
+import { realtimeAppend as defaultRealtimeAppend, realtimeGet as defaultRealtimeGet, realtimeUpdate as defaultRealtimeUpdate, realtimeClear as defaultRealtimeClear } from "@/lib/streaming";
 import type { RealtimeData } from "@/lib/streaming";
 import {
   shouldStartTaskStreamFallbackPolling,
@@ -54,8 +54,7 @@ type StartTaskEventStreamDeps = {
   createAbortController?: () => AbortController;
   createTaskStreamEventHandler?: CreateTaskStreamEventHandler;
   runTaskEventStream?: RunTaskEventStream;
-  streamAppend?: typeof defaultStreamAppend;
-  streamGet?: typeof defaultStreamGet;
+  realtimeAppend?: typeof defaultRealtimeAppend;
   realtimeGet?: typeof defaultRealtimeGet;
   realtimeUpdate?: typeof defaultRealtimeUpdate;
   realtimeClear?: typeof defaultRealtimeClear;
@@ -111,8 +110,7 @@ export function createStartTaskEventStreamAction({
   createAbortController = () => new AbortController(),
   createTaskStreamEventHandler = defaultCreateTaskStreamEventHandler,
   runTaskEventStream = defaultRunTaskEventStream,
-  streamAppend = defaultStreamAppend,
-  streamGet = defaultStreamGet,
+  realtimeAppend = defaultRealtimeAppend,
   realtimeGet = defaultRealtimeGet,
   realtimeUpdate = defaultRealtimeUpdate,
   realtimeClear = defaultRealtimeClear,
@@ -156,8 +154,8 @@ export function createStartTaskEventStreamAction({
         deleteActiveState: () => {
           delete activeTaskStreamsRef.current[localMessageId];
         },
-        streamAppend,
-        streamGet: () => streamGet(localMessageId),
+        streamAppend: realtimeAppend,
+        streamGet: () => realtimeGet(localMessageId)?.content || "",
         realtimeGet: () => realtimeGet(localMessageId),
         realtimeUpdate: (patch: Partial<RealtimeData>) => realtimeUpdate(localMessageId, patch),
         startBackgroundPolling: (resolvedServerMessageId: number | undefined) => {

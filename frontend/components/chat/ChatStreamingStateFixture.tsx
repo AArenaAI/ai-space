@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import MessageList from "./MessageList";
 import { Message, ChatModel } from "@/lib/chatTypes";
-import { realtimeClear, realtimeUpdate, streamAppend } from "@/lib/streaming";
+import { realtimeAppend, realtimeClear, realtimeUpdate } from "@/lib/streaming";
 
 const models: ChatModel[] = [
   { id: "fixture-model", name: "Fixture Model", provider: "fixture", description: "Synthetic chat state fixture", color: "#8b5cf6" },
@@ -57,14 +57,14 @@ export default function ChatStreamingStateFixture() {
         // Simulate a provider/SSE event that carries reasoning and visible answer
         // in the same payload. The frontend must show reasoning first and hold
         // the answer until reasoning is closed.
-        streamAppend(assistantId, { reasoningDelta: "先分析搜索结果，确认最终只输出简短回答。", reasoning: true });
+        realtimeAppend(assistantId, { reasoningDelta: "先分析搜索结果，确认最终只输出简短回答。", reasoning: true });
         setPhase("mixed-held");
       }, 260),
       window.setTimeout(() => {
         // Simulate DONE without a search-completed meta event. This used to leave
         // the web-search badge stuck in the running state.
-        streamAppend(assistantId, { reasoning: false });
-        streamAppend(assistantId, { answerDelta: "最终回答 OK 42", reasoning: false });
+        realtimeAppend(assistantId, { reasoning: false });
+        realtimeAppend(assistantId, { answerDelta: "最终回答 OK 42", reasoning: false });
         realtimeUpdate(assistantId, {
           completedAt: Date.now(),
           activityStatus: undefined,

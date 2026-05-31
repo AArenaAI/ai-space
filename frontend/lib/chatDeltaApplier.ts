@@ -6,7 +6,7 @@ import {
 
 export type ChatStreamAppend = (
   messageId: string,
-  delta: string | { reasoningDelta?: string; answerDelta?: string; reasoning?: boolean }
+  delta: { contentDelta?: string; reasoningDelta?: string; answerDelta?: string; reasoning?: boolean }
 ) => void;
 
 export type ApplyChatStreamDeltaOptions = {

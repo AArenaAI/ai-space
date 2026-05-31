@@ -19,7 +19,7 @@ source = source.replace(/import type[^;]+streaming[^;]+;\n/g, "");
 source = source.replace(/import type[^;]+chatTypes[^;]+;\n/g, "");
 source = source.replace(/import \{ useCallback, useRef \} from "react";\n/g, "const useCallback = (fn) => fn; const useRef = (current) => ({ current });\n");
 source = source.replace(/import \{ getGuestId as defaultGetGuestId \} from "@\/lib\/guestId";\n/g, "const defaultGetGuestId = () => 'guest';\n");
-source = source.replace(/import \{ streamAppend as defaultStreamAppend, streamGet as defaultStreamGet, realtimeGet as defaultRealtimeGet, realtimeUpdate as defaultRealtimeUpdate, realtimeClear as defaultRealtimeClear \} from "@\/lib\/streaming";\n/g, "const defaultStreamAppend = () => {}; const defaultStreamGet = () => ''; const defaultRealtimeGet = () => undefined; const defaultRealtimeUpdate = () => {}; const defaultRealtimeClear = () => {};\n");
+source = source.replace(/import \{ realtimeAppend as defaultStreamAppend, realtimeGet as defaultStreamGet, realtimeGet as defaultRealtimeGet, realtimeUpdate as defaultRealtimeUpdate, realtimeClear as defaultRealtimeClear \} from "@\/lib\/streaming";\n/g, "const defaultStreamAppend = () => {}; const defaultStreamGet = () => ''; const defaultRealtimeGet = () => undefined; const defaultRealtimeUpdate = () => {}; const defaultRealtimeClear = () => {};\n");
 source = source.replace(
   /import \{\n  shouldStartTaskStreamFallbackPolling,\n  shouldSyncTaskStreamFinalMessage,\n\} from "@\/lib\/chatTaskStreamFinalizer";\n/g,
   finalizerSource.replace(/export /g, "") + "\n"

@@ -2,7 +2,7 @@ import { useCallback, useRef } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { getGuestId as defaultGetGuestId } from "@/lib/guestId";
 import { emitTaskFinished as defaultEmitTaskFinished } from "@/lib/taskNotifications";
-import { streamGet as defaultStreamGet, realtimeGet as defaultRealtimeGet } from "@/lib/streaming";
+import { realtimeGet as defaultRealtimeGet } from "@/lib/streaming";
 import { getNotificationConversationTitle } from "@/lib/chatBackgroundTaskRegistration";
 import {
   buildBackgroundPollingMessagePatch,
@@ -41,7 +41,6 @@ export type CreateStartBackgroundPollingActionInput = {
   stopTaskStream: (localMessageId: string) => void;
   getToken?: () => string | null;
   getGuestId?: () => string;
-  streamGet?: (messageId: string) => string | undefined;
   realtimeGet?: (messageId: string) => RealtimeSnapshot;
   emitTaskFinished?: EmitTaskFinished;
   runner?: StartBackgroundPollingRunner;
@@ -63,7 +62,6 @@ export function createStopBackgroundPollerAction(input: CreateStopBackgroundPoll
 export function createStartBackgroundPollingAction(input: CreateStartBackgroundPollingActionInput) {
   const getToken = input.getToken ?? (() => localStorage.getItem("token"));
   const getGuestId = input.getGuestId ?? defaultGetGuestId;
-  const streamGet = input.streamGet ?? defaultStreamGet;
   const realtimeGet = input.realtimeGet ?? defaultRealtimeGet;
   const emitTaskFinished = input.emitTaskFinished ?? defaultEmitTaskFinished;
   const runner = input.runner ?? startBackgroundPollingRunner;
@@ -89,7 +87,7 @@ export function createStartBackgroundPollingAction(input: CreateStartBackgroundP
       callbacks: {
         onPollState: (pollState) => {
           const streamActive = !!input.taskStreamsRef.current[localMessageId];
-          const liveContent = streamGet(localMessageId) || realtimeGet(localMessageId)?.content || "";
+          const liveContent = realtimeGet(localMessageId)?.content || "";
           const currentTime = now();
           input.setMessages((prev) => patchMessageById(prev, localMessageId, (message) =>
             buildBackgroundPollingMessagePatch({

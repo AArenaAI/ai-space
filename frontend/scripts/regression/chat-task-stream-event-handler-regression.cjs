@@ -113,7 +113,7 @@ test("appends invalid JSON text and updates accumulated", () => {
   const h = makeHarness({ initialContent: "A" });
   h.handler.processEvent(sse("B", 1));
   assert.equal(h.handler.getAccumulated(), "AB");
-  assert.deepEqual(h.calls.at(-1), ["append", "local-1", "B"]);
+  assert.deepEqual(h.calls.at(-1), ["append", "local-1", { contentDelta: "B", reasoning: false }]);
 });
 
 test("handles generation task payload with active state and realtime patch", () => {

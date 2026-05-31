@@ -11,6 +11,11 @@ const requireStreamReasoning = process.env.REAL_CHAT_REQUIRE_STREAM_REASONING ==
 const requirePersistedReasoning = process.env.REAL_CHAT_REQUIRE_PERSISTED_REASONING === "1" || requireReasoning;
 const reasoningEffort = process.env.REAL_CHAT_REASONING_EFFORT || "standard";
 const searchEnabled = process.env.REAL_CHAT_SEARCH === "1";
+const mode = process.env.REAL_CHAT_MODE || "chat";
+const attachTextFile = process.env.REAL_CHAT_ATTACH_TEXT_FILE === "1";
+const cancelAfterTask = process.env.REAL_CHAT_CANCEL_AFTER_TASK === "1";
+const skipCompletedAssert = process.env.REAL_CHAT_SKIP_COMPLETED_ASSERT === "1";
+const taskRecoveryAfter = process.env.REAL_CHAT_TASK_RECOVERY_AFTER === "1";
 const requireCleanContent = process.env.REAL_CHAT_REQUIRE_CLEAN_CONTENT === "1";
 const reasoningLeakPattern = /(思考过程|推理过程|思考|分析)\s*[:：]/;
 const prompt = process.env.REAL_CHAT_PROMPT || (reasoningEnabled
@@ -71,6 +76,27 @@ async function createConversation(token) {
   return data;
 }
 
+
+async function uploadTextFile(token) {
+  if (!attachTextFile) return null;
+  const filename = process.env.REAL_CHAT_FILE_NAME || `real-chat-e2e-${Date.now()}.txt`;
+  const content = process.env.REAL_CHAT_FILE_CONTENT || "附件事实：AI_SPACE_FILE_OK 314";
+  const form = new FormData();
+  form.append("file", new Blob([content], { type: "text/plain" }), filename);
+  const res = await fetch(`${apiBaseUrl}/api/files/upload`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  const text = await res.text();
+  assert(res.ok, `file upload failed: ${res.status} ${redact(text.slice(0, 500))}`);
+  const data = JSON.parse(text);
+  const file = data.file || data;
+  const publicId = file.public_id || file.publicId || file.id;
+  assert(publicId, `file upload response missing public id: ${redact(text.slice(0, 500))}`);
+  return { publicId: String(publicId), filename, contentLength: content.length };
+}
+
 function parseSseDataChunk(raw) {
   const lines = raw.split("\n");
   const dataLines = lines.filter((line) => line.startsWith("data:"));
@@ -78,7 +104,7 @@ function parseSseDataChunk(raw) {
   return dataLines.map((line) => line.slice(5).trimStart()).join("\n");
 }
 
-async function runRealChatRequest(token, conversationId) {
+async function runRealChatRequest(token, conversationId, upload) {
   const body = {
     model,
     messages: [
@@ -92,6 +118,7 @@ async function runRealChatRequest(token, conversationId) {
     search: searchEnabled,
     template_id: 0,
   };
+  if (upload?.publicId) body.message_file_ids = [upload.publicId];
 
   const res = await fetch(`${apiBaseUrl}/api/chat`, {
     method: "POST",
@@ -152,6 +179,17 @@ async function runRealChatRequest(token, conversationId) {
         userMessageId ||= Number(task.user_message_id) || undefined;
         generationTaskId ||= Number(task.id || task.task_id) || undefined;
         lastGenerationStatus = String(task.status || lastGenerationStatus || "");
+        if (cancelAfterTask && generationTaskId) {
+          const cancelRes = await fetch(`${apiBaseUrl}/api/tasks/${generationTaskId}/cancel`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          assert(cancelRes.ok, `cancel task failed: ${cancelRes.status}`);
+          await reader.cancel().catch(() => {});
+          done = true;
+          if (!content) content = "STOP_E2E_MARKER";
+          break;
+        }
       }
       if (json.provider) provider = String(json.provider);
     }
@@ -189,6 +227,34 @@ async function runRealChatRequest(token, conversationId) {
   };
 }
 
+async function verifyTaskRecoveryStream(token, generationTaskId) {
+  if (!taskRecoveryAfter || !generationTaskId) return null;
+  const res = await fetch(`${apiBaseUrl}/api/tasks/${generationTaskId}/stream?after=0`, { headers: { Authorization: `Bearer ${token}` } });
+  assert(res.ok, `task recovery stream failed: ${res.status}`);
+  const text = await res.text();
+  assert(text.includes("data:"), "task recovery stream returned no SSE data");
+  assert(text.includes("[DONE]"), "task recovery stream missing DONE");
+  return { bytes: text.length, hasDone: true };
+}
+
+async function runCompareRequest(token, conversationId) {
+  const modelIds = (process.env.REAL_CHAT_COMPARE_MODELS || `${model},gemini-3.1-flash`).split(',').map((s) => s.trim()).filter(Boolean);
+  assert(modelIds.length >= 2, "compare requires at least two models");
+  const query = process.env.REAL_CHAT_COMPARE_QUERY || prompt;
+  const { res, text } = await fetchText(`${apiBaseUrl}/api/chat/compare`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ query, models: modelIds, conversation_id: conversationId, reasoning: reasoningEnabled, reasoning_effort: reasoningEffort, search: searchEnabled }),
+  });
+  assert(res.ok, `compare request failed: ${res.status} ${redact(text.slice(0, 800))}`);
+  const data = JSON.parse(text);
+  const results = Array.isArray(data.results) ? data.results : [];
+  assert(results.length >= 2, `compare returned too few results: ${results.length}`);
+  const okCount = results.filter((r) => expectedPattern.test(String(r.content || r.answer || ""))).length;
+  assert(okCount >= 1, "compare results did not contain expected answer");
+  return { results: results.length, okCount, conversationId };
+}
+
 async function verifyTaskAndHistory(token, ids, expectedContent) {
   const taskUrl = `${apiBaseUrl}/api/chat/tasks/${ids.assistantMessageId}`;
   const taskRes = await fetch(taskUrl, { headers: { Authorization: `Bearer ${token}` } });
@@ -199,8 +265,12 @@ async function verifyTaskAndHistory(token, ids, expectedContent) {
   const taskData = await taskRes.json();
   const taskStatus = taskData.task?.status || taskData.background_task?.status || "";
   const taskContent = taskData.message?.content || taskData.task?.result || "";
-  assert(taskStatus === "completed", `task is not completed: ${taskStatus}`);
-  assert(expectedPattern.test(taskContent || expectedContent), "task/message content does not contain expected answer");
+  if (!skipCompletedAssert) {
+    assert(taskStatus === "completed", `task is not completed: ${taskStatus}`);
+    assert(expectedPattern.test(taskContent || expectedContent), "task/message content does not contain expected answer");
+  } else {
+    assert(["completed", "cancelled", "failed", "incomplete"].includes(taskStatus), `task terminal status unexpected: ${taskStatus}`);
+  }
 
   const restoreRes = await fetch(`${apiBaseUrl}/api/conversations/${ids.conversationId}?message_tail=50`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -215,7 +285,9 @@ async function verifyTaskAndHistory(token, ids, expectedContent) {
   const assistantMessage = messages.find((m) => Number(m.id) === Number(ids.assistantMessageId) || (m.role === "assistant" && expectedPattern.test(String(m.content || ""))));
   assert(userMessage, "restored history missing user message");
   assert(assistantMessage, "restored history missing assistant message");
-  assert(expectedPattern.test(String(assistantMessage.content || "")), "restored assistant content does not match expected answer");
+  if (!skipCompletedAssert) {
+    assert(expectedPattern.test(String(assistantMessage.content || "")), "restored assistant content does not match expected answer");
+  }
   if (requireCleanContent) {
     assert(!reasoningLeakPattern.test(String(assistantMessage.content || "")), "restored assistant content contains reasoning-style prefix while clean content is required");
   }
@@ -361,6 +433,7 @@ async function runBrowserHistoryE2E(token, user, conversationId, expectedContent
     requireCleanContent,
     reasoningEffort,
     searchEnabled,
+    mode,
     browserEnabled,
     startedAt: new Date(startedAt).toISOString(),
   };
@@ -379,7 +452,18 @@ async function runBrowserHistoryE2E(token, user, conversationId, expectedContent
     const conversation = await createConversation(auth.token);
     report.conversationId = conversation.id;
 
-    const stream = await runRealChatRequest(auth.token, conversation.id);
+    if (mode === "compare") {
+      const compare = await runCompareRequest(auth.token, conversation.id);
+      Object.assign(report, { compare });
+      report.elapsedMs = Date.now() - startedAt;
+      console.log(JSON.stringify(report, null, 2));
+      console.log("chat real e2e passed");
+      return;
+    }
+
+    const upload = await uploadTextFile(auth.token);
+    if (upload) report.upload = { publicId: upload.publicId, filename: upload.filename, contentLength: upload.contentLength };
+    const stream = await runRealChatRequest(auth.token, conversation.id, upload);
     Object.assign(report, {
       streamEvents: stream.events,
       streamJsonEvents: stream.jsonEvents,
@@ -397,6 +481,8 @@ async function runBrowserHistoryE2E(token, user, conversationId, expectedContent
 
     const persistence = await verifyTaskAndHistory(auth.token, stream, stream.content);
     Object.assign(report, persistence);
+    const recovery = await verifyTaskRecoveryStream(auth.token, stream.generationTaskId);
+    if (recovery) report.taskRecovery = recovery;
 
     if (browserEnabled) {
       const browser = await runBrowserHistoryE2E(auth.token, auth.user, stream.conversationId, stream.content, stream.reasoning);

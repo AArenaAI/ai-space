@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback, useMemo, memo, type UIEvent } from "react";
-import { User, Bot, Check, Play, ChevronDown as ChevronDownIcon, FileText, Loader2, SquareCheck, X } from "lucide-react";
+import { Bot, ChevronDown as ChevronDownIcon, FileText, Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/lib/chatTypes";
 import { useFavorites } from "@/hooks/useFavorites";
@@ -30,6 +30,7 @@ const MessageExportPreview = dynamic(() => import("./MessageExportPreview"), {
   loading: () => null,
 });
 import { AssistantMessageContent } from "./AssistantMessageContent";
+import MessageRow from "./MessageRow";
 import { parseThinkContent, sanitizeContent, isMessageGenerating } from "@/lib/chatContent";
 
 
@@ -1120,159 +1121,32 @@ function MessageList({
           const isHighlighted = highlightedMessageId === msg.id;
 
           return (
-            <div className={cn("max-w-[800px] mx-auto px-4 py-4 rounded-2xl transition-colors duration-500", isHighlighted && "bg-brand/10")}>
-              <div
-                key={msg.id}
-                className={cn("flex gap-3 animate-message-appear group", isUser ? "justify-end" : "justify-start")}
-              >
-                {/* 左侧：AI头像 / 用户复选框 */}
-                <div className={cn("mt-1 shrink-0", isUser && !selectMode ? "hidden" : "w-7")}>
-                  {!isUser && !selectMode && (
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (group && group.assistantMessages.length > 1) {
-                            setOpenAvatarDropdownGroupId((prev) => (prev === group.id ? null : group.id));
-                          }
-                        }}
-                        className={cn(
-                          "w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center relative avatar-dropdown-trigger",
-                          group && group.assistantMessages.length > 1 && "cursor-pointer hover:bg-surface-elevated"
-                        )}
-                      >
-                        <Bot className="w-4 h-4 text-text-secondary" />
-                        {group && group.assistantMessages.length > 1 && (
-                          <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-brand text-[8px] font-bold text-white flex items-center justify-center border border-white dark:border-[#1F1F1F]">
-                            {group.assistantMessages.length}
-                          </span>
-                        )}
-                      </button>
-                      {openAvatarDropdownGroupId === group?.id && group && (
-                        <div className="avatar-dropdown absolute top-full left-0 mt-1.5 z-50 w-44 rounded-xl border border-surface-border bg-surface-elevated shadow-xl py-1.5 px-1.5 flex flex-col gap-0.5">
-                          {group.assistantMessages.map((a, idx) => {
-                            const m = a.model ? modelById.get(a.model) : undefined;
-                            const isActive = (groupViews?.get(group.id) ?? 0) === idx;
-                            return (
-                              <button
-                                key={a.id}
-                                onClick={() => {
-                                  switchGroupModel?.(group.id, idx);
-                                  setOpenAvatarDropdownGroupId(null);
-                                }}
-                                className={cn(
-                                  "flex items-center gap-2 w-full px-2.5 py-2 text-left transition-colors rounded-lg",
-                                  isActive ? "bg-surface-card text-text-primary font-medium shadow-sm" : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
-                                )}
-                              >
-                                <div
-                                  className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold text-white shrink-0"
-                                  style={{ backgroundColor: m?.color }}
-                                >
-                                  {(m?.name || a.model || `模型${idx + 1}`).slice(0, 1).toUpperCase()}
-                                </div>
-                                <span className="text-xs truncate">{m?.name || a.model || `模型 ${idx + 1}`}</span>
-                                {isActive && <Check className="w-3 h-3 text-text-primary shrink-0 ml-auto" />}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {isUser && selectMode && (
-                    <button
-                      onClick={() => toggleSelect(msg.id)}
-                      className={cn(
-                        "w-5 h-5 rounded-md border flex items-center justify-center transition-colors",
-                        isSelected
-                          ? "border-slate-900 bg-slate-900 text-white shadow-sm dark:border-text-primary dark:bg-text-primary dark:text-surface"
-                          : "border-surface-border text-transparent hover:border-text-tertiary/50"
-                      )}
-                    >
-                      {isSelected && <SquareCheck className="w-3.5 h-3.5" />}
-                    </button>
-                  )}
-                </div>
-
-                {/* 中间内容 */}
-                <div className={cn("flex-1 flex min-w-0", isUser ? "justify-end" : "justify-start")}>
-                  <div className={cn("flex flex-col gap-1 min-w-0", isUser ? "items-end" : "items-start")}>
-
-                    <div
-                      className={cn(
-                        "px-4 py-3 relative w-fit max-w-full transition-shadow duration-500",
-                        isUser
-                          ? "rounded-2xl rounded-br-sm bg-[#EFF6FF] dark:bg-[#1E293B]"
-                          : "rounded-2xl rounded-bl-sm bg-[#F5F4F2] dark:bg-[#1F1F1F]",
-                        isHighlighted && "ring-2 ring-brand/40 shadow-lg shadow-brand/10"
-                      )}
-                    >
-
-                    {!isUser && model && !selectMode && (
-                      <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} />
-                    )}
-
-                    {isUser ? (
-                      <UserMessageContent message={msg} imageLoadFailedLabel={t("chat.imageLoadFailed")} />
-                    ) : (
-                      <>
-                        {renderAssistantContent(msg, isStreaming)}
-                        {msg.stopped && onContinueGenerate && (
-                          <button
-                            onClick={onContinueGenerate}
-                            className="mt-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-text-secondary hover:text-text-primary hover:bg-surface-card border border-surface-border transition-colors"
-                          >
-                            <Play className="w-3.5 h-3.5" />
-                            继续生成
-                          </button>
-                        )}
-                      </>
-                    )}
-                    </div>
-                    {!selectMode && !isStreaming && (
-                      <MessageActions
-                        onCopy={() => handleCopy(msg.content)}
-                        onDelete={() => setDeleteTarget(msg.id)}
-                        onRegenerate={onRegenerate}
-                        onShareSelectMode={() => enterSelectMode("share", msg.id)}
-                        onFavoriteSelectMode={msg.serverMessageId && conversationId ? () => enterSelectMode("favorite", msg.id) : undefined}
-                        isFavorited={msg.serverMessageId ? isFavorited(msg.serverMessageId) : false}
-                        showRegenerate={canRegenerate}
-                        align={isUser ? "right" : "left"}
-                        visible={isLast}
-                        createdAt={msg.createdAt}
-                        completedAt={msg.completedAt}
-                        onForkCompare={isUser && msg.serverMessageId ? () => onForkCompare?.(msg.serverMessageId!) : undefined}
-                      />
-                    )}
-                  </div>
-                </div>
-
-                {/* 右侧：用户头像 / AI复选框 */}
-                <div className="mt-1 w-7 shrink-0">
-                  {isUser && !selectMode && (
-                    <div className="w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center">
-                      <User className="w-4 h-4 text-text-secondary" />
-                    </div>
-                  )}
-                  {!isUser && selectMode && (
-                    <button
-                      onClick={() => toggleSelect(msg.id)}
-                      className={cn(
-                        "w-5 h-5 rounded-md border flex items-center justify-center transition-colors",
-                        isSelected
-                          ? "border-slate-900 bg-slate-900 text-white shadow-sm dark:border-text-primary dark:bg-text-primary dark:text-surface"
-                          : "border-surface-border text-transparent hover:border-text-tertiary/50"
-                      )}
-                    >
-                      {isSelected && <SquareCheck className="w-3.5 h-3.5" />}
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
+            <MessageRow
+              message={msg}
+              group={group}
+              model={model}
+              isLast={isLast}
+              isLoading={isLoading}
+              selectMode={selectMode}
+              isSelected={isSelected}
+              isHighlighted={isHighlighted}
+              conversationId={conversationId}
+              groupViews={groupViews}
+              modelById={modelById}
+              openAvatarDropdownGroupId={openAvatarDropdownGroupId}
+              setOpenAvatarDropdownGroupId={setOpenAvatarDropdownGroupId}
+              switchGroupModel={switchGroupModel}
+              toggleSelect={toggleSelect}
+              handleCopy={handleCopy}
+              setDeleteTarget={setDeleteTarget}
+              enterSelectMode={enterSelectMode}
+              isFavorited={isFavorited}
+              onRegenerate={onRegenerate}
+              onContinueGenerate={onContinueGenerate}
+              onForkCompare={onForkCompare}
+              imageLoadFailedLabel={t("chat.imageLoadFailed")}
+              MarkdownRenderer={LazyMarkdownRenderer}
+            />
           );
         }}
       />

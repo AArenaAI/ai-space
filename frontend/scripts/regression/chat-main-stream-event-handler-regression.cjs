@@ -102,7 +102,7 @@ test("appends invalid JSON text and tracks accumulated content", () => {
   const h = makeHarness();
   h.handler.processEvent(sse("hello"));
   assert.equal(h.handler.getState().accumulated, "hello");
-  assert.deepEqual(h.calls.at(-1), ["append", "assistant-1", "hello"]);
+  assert.deepEqual(h.calls.at(-1), ["append", "assistant-1", { contentDelta: "hello", reasoning: false }]);
 });
 
 test("handles generation task meta, group context and registration", () => {

@@ -2,9 +2,7 @@ import { useCallback } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { registerBackgroundTask as defaultRegisterBackgroundTask } from "@/lib/taskNotifications";
 import {
-  streamAppend as defaultStreamAppend,
-  streamGet as defaultStreamGet,
-  streamClear as defaultStreamClear,
+  realtimeAppend as defaultRealtimeAppend,
   realtimeUpdate as defaultRealtimeUpdate,
   realtimeGet as defaultRealtimeGet,
   realtimeClear as defaultRealtimeClear,
@@ -53,9 +51,7 @@ type CreateMainStreamResponseDeps = {
   translate: (key: string) => string;
   createMainStreamEventHandler?: typeof defaultCreateMainStreamEventHandler;
   runChatStreamLifecycle?: typeof defaultRunChatStreamLifecycle;
-  streamAppend?: typeof defaultStreamAppend;
-  streamGet?: typeof defaultStreamGet;
-  streamClear?: typeof defaultStreamClear;
+  realtimeAppend?: typeof defaultRealtimeAppend;
   realtimeGet?: typeof defaultRealtimeGet;
   realtimeUpdate?: typeof defaultRealtimeUpdate;
   realtimeClear?: typeof defaultRealtimeClear;
@@ -74,9 +70,7 @@ export function createStreamResponseAction({
   translate,
   createMainStreamEventHandler = defaultCreateMainStreamEventHandler,
   runChatStreamLifecycle = defaultRunChatStreamLifecycle,
-  streamAppend = defaultStreamAppend,
-  streamGet = defaultStreamGet,
-  streamClear = defaultStreamClear,
+  realtimeAppend = defaultRealtimeAppend,
   realtimeGet = defaultRealtimeGet,
   realtimeUpdate = defaultRealtimeUpdate,
   realtimeClear = defaultRealtimeClear,
@@ -104,8 +98,8 @@ export function createStreamResponseAction({
       },
       t: translate,
       callbacks: {
-        streamAppend,
-        streamGet: () => streamGet(assistantMsg.id),
+        streamAppend: realtimeAppend,
+        streamGet: () => realtimeGet(assistantMsg.id)?.content || "",
         realtimeGet: () => realtimeGet(assistantMsg.id),
         realtimeUpdate: (patch: Partial<RealtimeData>) => realtimeUpdate(assistantMsg.id, patch),
         registerBackgroundTask,
@@ -117,7 +111,7 @@ export function createStreamResponseAction({
       const state = mainStreamHandler.getState();
       return buildFinalStreamRunResult({
         state,
-        finalContent: contentOverride || streamGet(assistantMsg.id),
+        finalContent: contentOverride || realtimeGet(assistantMsg.id)?.content || "",
       });
     };
 
@@ -147,7 +141,7 @@ export function createStreamResponseAction({
       mainStreamHandler.closeOpenReasoning();
       const state = mainStreamHandler.getState();
 
-      const streamContent = streamGet(assistantMsg.id);
+      const streamContent = realtimeGet(assistantMsg.id)?.content || "";
       const finalData = realtimeGet(assistantMsg.id);
       const finalAction = decideFinalStreamReconciliation({
         state,
@@ -187,7 +181,6 @@ export function createStreamResponseAction({
       }
 
       if (finalAction.shouldClearStores) {
-        streamClear(assistantMsg.id);
         realtimeClear(assistantMsg.id);
       }
 

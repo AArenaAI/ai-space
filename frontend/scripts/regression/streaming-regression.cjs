@@ -70,8 +70,8 @@ function test(name, fn) {
 }
 
 test("answer-only structured delta updates answerContent and legacy content", ({ mod }) => {
-  mod.streamAppend("m1", { answerDelta: "Hello", reasoning: false });
-  mod.streamAppend("m1", { answerDelta: " world", reasoning: false });
+  mod.realtimeAppend("m1", { answerDelta: "Hello", reasoning: false });
+  mod.realtimeAppend("m1", { answerDelta: " world", reasoning: false });
   const data = mod.realtimeGet("m1");
   assert.equal(data.content, "Hello world");
   assert.equal(data.answerContent, "Hello world");
@@ -80,29 +80,18 @@ test("answer-only structured delta updates answerContent and legacy content", ({
 });
 
 test("reasoning delta then answer delta closes legacy think block", ({ mod }) => {
-  mod.streamAppend("m2", { reasoningDelta: "plan", reasoning: true });
+  mod.realtimeAppend("m2", { reasoningDelta: "plan", reasoning: true });
   let data = mod.realtimeGet("m2");
   assert.equal(data.content, "<think>plan");
   assert.equal(data.reasoningContent, "plan");
   assert.equal(data.answerContent, "");
   assert.equal(data.isReasoning, true);
 
-  mod.streamAppend("m2", { answerDelta: "final", reasoning: false });
+  mod.realtimeAppend("m2", { answerDelta: "final", reasoning: false });
   data = mod.realtimeGet("m2");
   assert.equal(data.content, "<think>plan</think>final");
   assert.equal(data.reasoningContent, "plan");
   assert.equal(data.answerContent, "final");
-  assert.equal(data.isReasoning, false);
-});
-
-test("legacy think-tag string append remains compatible", ({ mod }) => {
-  mod.streamAppend("m3", "prefix ");
-  mod.streamAppend("m3", "<think>why</think>");
-  mod.streamAppend("m3", "answer");
-  const data = mod.realtimeGet("m3");
-  assert.equal(data.content, "prefix <think>why</think>answer");
-  assert.equal(data.answerContent, "prefix answer");
-  assert.equal(data.reasoningContent, "why");
   assert.equal(data.isReasoning, false);
 });
 
@@ -116,7 +105,7 @@ test("realtimeUpdate creates immutable snapshot references", ({ mod }) => {
   assert.equal(Object.isFrozen(second), process.env.NODE_ENV !== "production");
 });
 
-test("explicit content, reasoning and phase APIs preserve legacy compatibility", ({ mod }) => {
+test("explicit content, reasoning and phase APIs preserve structured runtime state", ({ mod }) => {
   mod.realtimeAppendContent("api", "hello");
   mod.realtimeAppendReasoning("api", "plan");
   mod.realtimeSetPhase("api", "thinking");
@@ -141,7 +130,7 @@ test("explicit content, reasoning and phase APIs preserve legacy compatibility",
 });
 
 test("completed entries expire through explicit sweep and realtimeGet short TTL", ({ mod, advance }) => {
-  mod.streamAppend("m5", { answerDelta: "done", reasoning: false });
+  mod.realtimeAppend("m5", { answerDelta: "done", reasoning: false });
   mod.realtimeUpdate("m5", { completedAt: Date.now() });
   assert.ok(mod.realtimeGet("m5"));
   advance(30_001);
@@ -150,7 +139,7 @@ test("completed entries expire through explicit sweep and realtimeGet short TTL"
 });
 
 test("active entries expire through realtimeGet long TTL", ({ mod, advance }) => {
-  mod.streamAppend("m6", { answerDelta: "active", reasoning: false });
+  mod.realtimeAppend("m6", { answerDelta: "active", reasoning: false });
   assert.ok(mod.realtimeGet("m6"));
   advance(10 * 60 * 1000 + 1);
   assert.equal(mod.realtimeGet("m6"), undefined);
@@ -158,7 +147,7 @@ test("active entries expire through realtimeGet long TTL", ({ mod, advance }) =>
 
 test("max entries evicts oldest runtime data", ({ mod }) => {
   for (let i = 0; i < 205; i += 1) {
-    mod.streamAppend(`entry-${i}`, { answerDelta: String(i), reasoning: false });
+    mod.realtimeAppend(`entry-${i}`, { answerDelta: String(i), reasoning: false });
   }
   const snapshot = mod.realtimeDebugSnapshot();
   assert.equal(Object.keys(snapshot).length, 200);

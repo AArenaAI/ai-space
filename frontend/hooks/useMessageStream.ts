@@ -1,5 +1,5 @@
 import { useCallback, useSyncExternalStore } from "react";
-import { streamSubscribe, streamGet } from "@/lib/streaming";
+import { realtimeGet, realtimeSubscribe } from "@/lib/streaming";
 
 /**
  * AMC-WebUI 风格的流式消息订阅 hook。
@@ -12,7 +12,7 @@ export function useMessageStream(messageId: string, isStreaming: boolean): strin
       if (!isStreaming || !messageId) {
         return () => {};
       }
-      return streamSubscribe(messageId, () => listener());
+      return realtimeSubscribe(messageId, listener);
     },
     [isStreaming, messageId]
   );
@@ -21,7 +21,7 @@ export function useMessageStream(messageId: string, isStreaming: boolean): strin
   // 这样流结束瞬间不会从累积文本突然跳变为空字符串。
   const getSnapshot = useCallback(() => {
     if (!messageId) return "";
-    return streamGet(messageId) || "";
+    return realtimeGet(messageId)?.content || "";
   }, [messageId]);
 
   return useSyncExternalStore(subscribe, getSnapshot, () => "");

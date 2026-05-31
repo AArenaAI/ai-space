@@ -1,5 +1,3 @@
-type StreamingListener = (delta: string, full: string) => void;
-
 export type RealtimeActivityStatus = { kind: string; status: string; label: string };
 
 export type RuntimePhase =
@@ -333,32 +331,6 @@ export function realtimeSubscribe(id: string, fn: () => void): () => void {
       subs.delete(id);
     }
   };
-}
-
-// 兼容旧 API，基于新 API 实现
-export function streamAppend(id: string, delta: RealtimeAppendPatch): void {
-  realtimeAppend(id, delta);
-}
-
-export function streamSubscribe(messageId: string, fn: StreamingListener): () => void {
-  let lastContent = streamGet(messageId);
-  const wrapper = () => {
-    const current = streamGet(messageId);
-    if (current !== lastContent) {
-      const delta = current.slice(lastContent.length);
-      lastContent = current;
-      fn(delta, current);
-    }
-  };
-  return realtimeSubscribe(messageId, wrapper);
-}
-
-export function streamGet(messageId: string): string {
-  return realtimeGet(messageId)?.content || "";
-}
-
-export function streamClear(messageId: string): void {
-  realtimeClear(messageId);
 }
 
 export function realtimeDebugSnapshot(): Record<string, RealtimeData> {

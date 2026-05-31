@@ -31,9 +31,9 @@ function loadModule(file) {
     if (specifier === "@/lib/taskNotifications") return { registerBackgroundTask: () => {} };
     if (specifier === "@/lib/streaming") {
       return {
-        streamAppend: () => {},
-        streamGet: () => "",
-        streamClear: () => {},
+        realtimeAppend: () => {},
+        realtimeGet: () => "",
+        realtimeClear: () => {},
         realtimeUpdate: () => {},
         realtimeGet: () => undefined,
         realtimeClear: () => {},
@@ -145,9 +145,9 @@ async function runAction({ handlerState = {}, lifecycleResult = { action: "compl
       opts.onEvent("event-1");
       return lifecycleResult;
     },
-    streamGet: () => streamContent,
+    realtimeGet: () => streamContent,
     realtimeGet: () => realtimeData,
-    streamClear: (id) => calls.push(["streamClear", id]),
+    realtimeClear: (id) => calls.push(["realtimeClear", id]),
     realtimeClear: (id) => calls.push(["realtimeClear", id]),
     now,
   });
@@ -161,7 +161,7 @@ async function testCompletedSyncClearAndMark() {
   assert.ok(calls.some((call) => call[0] === "setMessages"));
   assert.deepEqual(messages[0].finalData, { serverMessageId: 11 });
   assert.equal(messages[0].completedAt, 1234);
-  assert.ok(calls.some((call) => call[0] === "streamClear" && call[1] === "assistant-1"));
+  assert.ok(calls.some((call) => call[0] === "realtimeClear" && call[1] === "assistant-1"));
   assert.ok(calls.some((call) => call[0] === "realtimeClear" && call[1] === "assistant-1"));
   assert.deepEqual(handlerCalls[0], ["event", "event-1"]);
   assert.ok(handlerCalls.some((call) => call[0] === "close"));
@@ -216,7 +216,7 @@ async function testReconcileAfterDoneStartsOnlyPolling() {
 async function testIgnoredLifecycleStillRunsFinallyButNoCompletionWhenAborted() {
   const { result, calls, messages } = await runAction({ lifecycleResult: { action: "ignored" }, streamContent: "", abortReason: "user" });
   assert.equal(result, undefined);
-  assert.ok(calls.some((call) => call[0] === "streamClear"));
+  assert.ok(calls.some((call) => call[0] === "realtimeClear"));
   assert.equal(messages[0].completedAt, undefined);
 }
 

@@ -174,7 +174,7 @@ export function createMainStreamEventHandler({
     if (action.type === "text") {
       const intent = buildTextAppendIntent({ accumulated, data: action.data });
       accumulated = intent.accumulated;
-      callbacks.streamAppend(assistantMessageId, intent.data);
+      callbacks.streamAppend(assistantMessageId, { contentDelta: intent.data, reasoning: false });
       return;
     }
     if (action.type !== "payload") return;

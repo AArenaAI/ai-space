@@ -128,7 +128,7 @@ export function createTaskStreamEventHandler({
     if (action.type === "text") {
       const intent = buildTextAppendIntent({ accumulated, data: action.data });
       accumulated = intent.accumulated;
-      callbacks.streamAppend(localMessageId, intent.data);
+      callbacks.streamAppend(localMessageId, { contentDelta: intent.data, reasoning: false });
       return;
     }
     if (action.type !== "payload") return;
