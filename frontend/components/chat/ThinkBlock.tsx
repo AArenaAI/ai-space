@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronUp, Lightbulb } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
+import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
 
 const DEFAULT_COLLAPSE_THRESHOLD = 2000;
 
@@ -46,12 +47,8 @@ export function ThinkBlock({
         )}
       </button>
       {expanded && (
-        <div
-          data-i18n-skip="true"
-          className="px-3 py-2.5 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap
-          bg-slate-50 dark:bg-[#0F0F1A]"
-        >
-          {content}
+        <div data-i18n-skip="true" className="reasoning-markdown px-3 py-2.5 bg-slate-50 dark:bg-[#0F0F1A]">
+          <DeferredMarkdownRenderer content={content} />
         </div>
       )}
     </div>

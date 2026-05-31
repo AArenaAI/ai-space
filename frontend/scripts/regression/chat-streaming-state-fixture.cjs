@@ -23,9 +23,11 @@ const path = '/test-chat-streaming-state/';
   await page.waitForFunction(() => document.body.innerText.includes('正在联网搜索'), null, { timeout: 10_000 });
   await page.waitForFunction(() => document.querySelector('[data-testid="fixture-phase"]')?.textContent === 'mixed-held', null, { timeout: 10_000 });
   await page.waitForFunction(() => document.body.innerText.includes('先分析搜索结果'), null, { timeout: 10_000 });
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('.reasoning-markdown strong')).some((node) => node.textContent?.includes('最终')), null, { timeout: 10_000 });
   const mixedSnapshot = await page.evaluate(() => ({
     phase: document.querySelector('[data-testid="fixture-phase"]')?.textContent || '',
     body: document.body.innerText,
+    reasoningStrongText: Array.from(document.querySelectorAll('.reasoning-markdown strong')).map((node) => node.textContent || '').join('|'),
   }));
   if (!mixedSnapshot.body.includes('先分析搜索结果')) {
     issues.push('reasoning text did not render during mixed reasoning phase');
@@ -33,11 +35,15 @@ const path = '/test-chat-streaming-state/';
   if (mixedSnapshot.phase === 'mixed-held' && mixedSnapshot.body.includes('最终回答 OK 42')) {
     issues.push('answer appeared while mixed reasoning delta was still held');
   }
+  if (!mixedSnapshot.reasoningStrongText.includes('最终')) {
+    issues.push('reasoning markdown bold did not render as strong element during streaming');
+  }
 
   await page.waitForFunction(() => document.querySelector('[data-testid="fixture-phase"]')?.textContent === 'done', null, { timeout: 10_000 });
   await page.waitForFunction(() => document.body.innerText.includes('最终回答 OK 42'), null, { timeout: 10_000 });
   const doneSnapshot = await page.evaluate(() => ({
     body: document.body.innerText,
+    reasoningStrongText: Array.from(document.querySelectorAll('.reasoning-markdown strong')).map((node) => node.textContent || '').join('|'),
     statusBadges: Array.from(document.querySelectorAll('span')).map((node) => node.textContent || '').filter(Boolean),
   }));
   if (!doneSnapshot.body.includes('最终回答 OK 42')) {
@@ -45,6 +51,9 @@ const path = '/test-chat-streaming-state/';
   }
   if (doneSnapshot.body.includes('正在联网搜索')) {
     issues.push('web-search running badge remained after done without completed meta');
+  }
+  if (!doneSnapshot.reasoningStrongText.includes('最终')) {
+    issues.push('reasoning markdown bold did not render as strong element after completion');
   }
 
   await browser.close();

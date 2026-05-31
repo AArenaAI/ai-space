@@ -166,14 +166,14 @@ const MarkdownRenderer = memo(function MarkdownRenderer({ content }: { content: 
         </code>
       );
     },
-    p({ children }: any) { return <p className="text-[15px] leading-relaxed text-text-primary mb-4 last:mb-0 [li>&]:inline [li>&]:mb-0">{children}</p>; },
+    p({ children }: any) { return <p className="text-[15px] leading-relaxed text-text-primary mb-4 last:mb-0 [li>&]:inline [li>&]:mb-0 [.reasoning-markdown_&]:text-[13px] [.reasoning-markdown_&]:text-text-secondary">{children}</p>; },
     ul({ children }: any) { return <ul className="list-disc ml-5 mb-4 space-y-1 text-text-primary">{children}</ul>; },
     ol({ children }: any) { return <ol className="list-decimal ml-5 mb-4 space-y-1 text-text-primary">{children}</ol>; },
     li({ children }: any) { return <li className="text-[15px] leading-relaxed">{children}</li>; },
     h1({ children }: any) { return <h1 className="text-xl font-semibold text-text-primary mb-3 mt-6">{children}</h1>; },
     h2({ children }: any) { return <h2 className="text-lg font-semibold text-text-primary mb-2 mt-5">{children}</h2>; },
     h3({ children }: any) { return <h3 className="text-base font-semibold text-text-primary mb-2 mt-4">{children}</h3>; },
-    strong({ children }: any) { return <strong className="font-semibold text-text-primary">{children}</strong>; },
+    strong({ children }: any) { return <strong className="font-semibold text-text-primary [.reasoning-markdown_&]:text-text-secondary">{children}</strong>; },
     blockquote({ children }: any) { return <blockquote className="border-l-2 border-surface-border pl-4 italic text-text-secondary my-4">{children}</blockquote>; },
     table({ children }: any) { return <div className="overflow-x-auto my-4"><table className="w-full text-sm border-collapse">{children}</table></div>; },
     thead({ children }: any) { return <thead className="bg-surface-card border-b border-surface-border">{children}</thead>; },

@@ -57,7 +57,7 @@ export default function ChatStreamingStateFixture() {
         // Simulate a provider/SSE event that carries reasoning and visible answer
         // in the same payload. The frontend must show reasoning first and hold
         // the answer until reasoning is closed.
-        realtimeAppend(assistantId, { reasoningDelta: "先分析搜索结果，确认最终只输出简短回答。", reasoning: true });
+        realtimeAppend(assistantId, { reasoningDelta: "先分析搜索结果，确认 **最终** 只输出简短回答。", reasoning: true });
         setPhase("mixed-held");
       }, 260),
       window.setTimeout(() => {
@@ -74,7 +74,7 @@ export default function ChatStreamingStateFixture() {
         setMessages((prev) => prev.map((message) => message.id === assistantId
           ? {
               ...message,
-              content: "<think>先分析搜索结果，确认最终只输出简短回答。</think>最终回答 OK 42",
+              content: "<think>先分析搜索结果，确认 **最终** 只输出简短回答。</think>最终回答 OK 42",
               completedAt: Date.now(),
               activityStatus: undefined,
               searchStatus: undefined,
