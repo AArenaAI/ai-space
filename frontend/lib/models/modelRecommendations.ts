@@ -45,14 +45,9 @@ export function getModelRecommendation(context?: ModelRecommendationContext): Mo
     };
   }
 
-  if (context.searchEnabled) {
-    return {
-      capability: "search",
-      title: "当前开启联网搜索",
-      message: "建议选择支持搜索的模型。",
-      reason: "联网搜索需要模型支持搜索上下文，避免请求失败或结果不稳定。",
-    };
-  }
+  // 联网搜索不是模型硬能力限制：支持 native search 的模型走 provider tool，
+  // 其它模型会由后端注入 Tavily/Brave 第三方搜索上下文。因此开启搜索
+  // 不应再触发“必须切换到支持搜索模型”的推荐或过滤。
 
   if (CODE_PATTERN.test(context.inputText || "")) {
     return {
