@@ -44,6 +44,7 @@ import { cn } from "@/lib/utils";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import HistoryDrawer, { type HistoryItem as DrawerHistoryItem } from "@/components/ui/HistoryDrawer";
 import { consumeChatStream } from "@/lib/chatStream";
+import { getErrorMessage, normalizeError, readApiError, showUserError } from "@/lib/errors";
 import { LanguageCode, useI18n } from "@/lib/i18n";
 
 const MarkdownRenderer = dynamic(() => import("@/components/chat/MarkdownRenderer"), { ssr: false });
@@ -88,6 +89,12 @@ const LANGUAGE_NAME_MAP: Record<LanguageCode, string> = {
 
 const formatI18n = (template: string, values: Record<string, string | number>) =>
   Object.entries(values).reduce((text, [key, value]) => text.replaceAll(`{{${key}}}`, String(value)), template);
+
+const docFileError = (error: unknown, fallbackMessage: string) =>
+  getErrorMessage(error, { module: "file", fallbackMessage });
+
+const docChatError = (error: unknown, fallbackMessage: string) =>
+  getErrorMessage(error, { module: "chat", fallbackMessage });
 
 const buildLanguageConfigPrompt = (targetLanguage: string, outputFormat: "markdown" | "json") => `【Language Settings】
 - source_language: auto_detect
@@ -262,22 +269,21 @@ async function createConversation(title: string, model: string) {
     body: JSON.stringify({ title, model, skill_key: SKILL_KEY }),
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || err.error || "Failed to create session");
+    throw await readApiError(res);
   }
   return res.json() as Promise<{ id: number }>;
 }
 
 const fetchFileStatus = async (publicId: string): Promise<FileStatus> => {
   const res = await fetch(`/api/files/${publicId}`, { headers: getAuthHeaders() });
-  if (!res.ok) throw new Error("Failed to get file status");
+  if (!res.ok) throw await readApiError(res);
   return res.json();
 };
 
 const fetchDocumentArtifacts = async (kind: ArtifactKind): Promise<DocumentArtifact[]> => {
   const params = new URLSearchParams({ kind });
   const res = await fetch(`/api/document-artifacts?${params.toString()}`, { headers: getAuthHeaders() });
-  if (!res.ok) throw new Error("Failed to get artifacts");
+  if (!res.ok) throw await readApiError(res);
   const data = await res.json();
   return Array.isArray(data.artifacts) ? data.artifacts : [];
 };
@@ -303,8 +309,7 @@ const createDocumentArtifact = async (artifact: {
     }),
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || err.error || "Failed to save artifact");
+    throw await readApiError(res);
   }
   return res.json();
 };
@@ -315,8 +320,7 @@ const deleteDocumentArtifact = async (id: number): Promise<void> => {
     headers: getAuthHeaders(),
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || err.error || "Failed to delete generated file");
+    throw await readApiError(res);
   }
 };
 
@@ -325,7 +329,10 @@ async function waitForFileParsed(publicId: string, maxAttempts = 20): Promise<Fi
     const data = await fetchFileStatus(publicId);
     if (data.parse_status === "done") return data;
     if (data.parse_status === "error" || data.parse_status === "unsupported") {
-      throw new Error(data.error_message || "Document parsing failed");
+      throw normalizeError(data.error_message || "Document parsing failed", {
+        module: "file",
+        fallbackMessage: "文档解析失败，请重新上传或换一个文件。",
+      });
     }
     await new Promise((resolve) => setTimeout(resolve, 1500));
   }
@@ -911,8 +918,8 @@ export default function DocumentReaderPage() {
       setConversationId(convId);
       // load history messages
       fetch(`/api/conversations/${convId}/messages`, { headers: getAuthHeaders() })
-        .then((res) => {
-          if (!res.ok) throw new Error(t("docReader.error.loadMessages"));
+        .then(async (res) => {
+          if (!res.ok) throw await readApiError(res);
           return res.json();
         })
         .then((data: any) => {
@@ -969,7 +976,9 @@ export default function DocumentReaderPage() {
           ? {
               ...item,
               parseStatus: data.parse_status || item.parseStatus,
-              errorMessage: data.parse_status === "done" ? undefined : data.error_message || item.errorMessage,
+              errorMessage: data.parse_status === "done"
+                ? undefined
+                : docFileError(data.error_message || item.errorMessage, "文档解析失败，请重新上传或换一个文件。"),
               pageCount: data.page_count || item.pageCount,
             }
           : item
@@ -996,7 +1005,9 @@ export default function DocumentReaderPage() {
                 ? {
                     ...item,
                     parseStatus: data.parse_status || item.parseStatus,
-                    errorMessage: data.parse_status === "done" ? undefined : data.error_message || item.errorMessage,
+                    errorMessage: data.parse_status === "done"
+                      ? undefined
+                      : docFileError(data.error_message || item.errorMessage, "文档解析失败，请重新上传或换一个文件。"),
                     pageCount: data.page_count || item.pageCount,
                   }
                 : item
@@ -1039,7 +1050,7 @@ export default function DocumentReaderPage() {
           headers: getUploadHeaders(),
           body: formData,
         });
-        if (!res.ok) throw new Error(t("docReader.error.upload"));
+        if (!res.ok) throw await readApiError(res);
         const data = await res.json();
         const newFile: DocFile = {
           id: generateId(),
@@ -1050,7 +1061,9 @@ export default function DocumentReaderPage() {
           uploadedAt: new Date().toISOString(),
           url: `/api/files/${data.public_id}/view`,
           parseStatus: data.parse_status || "pending",
-          errorMessage: data.error_message,
+          errorMessage: data.error_message
+            ? docFileError(data.error_message, t("docReader.error.parse"))
+            : undefined,
         };
         setFiles((prev) => [newFile, ...prev]);
         setActiveFileId(newFile.id);
@@ -1078,19 +1091,20 @@ export default function DocumentReaderPage() {
               )
             );
             triggerSummary(newFile.publicId, newFile.name);
-          } catch (err: any) {
+          } catch (err) {
+            const userMessage = docFileError(err, t("docReader.error.parse"));
             setFiles((prev) =>
               prev.map((item) =>
                 item.publicId === newFile.publicId
-                  ? { ...item, parseStatus: "error", errorMessage: err.message || t("docReader.error.parse") }
+                  ? { ...item, parseStatus: "error", errorMessage: userMessage }
                   : item
               )
             );
-            toast.error(err.message || t("docReader.error.parse"));
+            toast.error(userMessage);
           }
         })();
-      } catch (e: any) {
-        toast.error(e.message || t("docReader.error.upload"));
+      } catch (e) {
+        showUserError(e, { module: "file", fallbackTitle: t("docReader.error.upload"), fallbackMessage: t("docReader.error.upload") });
       } finally {
         setUploading(false);
       }
@@ -1311,8 +1325,7 @@ ${buildLanguageConfigPrompt(targetLanguage, "markdown")}
         });
 
         if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.message || err.error || t("docReader.error.request"));
+          throw await readApiError(res);
         }
 
         const contentType = res.headers.get("content-type") || "";
@@ -1387,7 +1400,10 @@ ${buildLanguageConfigPrompt(targetLanguage, "markdown")}
             return recovered;
           }
           if (["failed", "cancelled", "incomplete"].includes(task.status)) {
-            throw new Error(task.error_message || t("docReader.error.send"));
+            throw normalizeError(task.error_message || t("docReader.error.send"), {
+              module: "chat",
+              fallbackMessage: t("docReader.error.send"),
+            });
           }
           return null;
         };
@@ -1424,7 +1440,7 @@ ${buildLanguageConfigPrompt(targetLanguage, "markdown")}
           fullText = finalText || fullText;
           flushFinalText(fullText);
           updateHistoryAfterCompletion();
-        } catch (err: any) {
+        } catch (err) {
           const recovered = await recoverCompletedResult();
           if (recovered) {
             fullText = recovered;
@@ -1432,15 +1448,17 @@ ${buildLanguageConfigPrompt(targetLanguage, "markdown")}
             updateHistoryAfterCompletion();
             return;
           }
-          flushFinalText(fullText || `${t("docReader.error.prefix")}${err.message || t("docReader.error.send")}`);
+          const userMessage = docChatError(err, t("docReader.error.send"));
+          flushFinalText(fullText || `${t("docReader.error.prefix")}${userMessage}`);
           throw err;
         }
-      } catch (e: any) {
-        toast.error(e.message || t("docReader.error.send"));
+      } catch (e) {
+        const userMessage = docChatError(e, t("docReader.error.send"));
+        toast.error(userMessage);
         setMessages((prev) =>
           prev.map((m) =>
             m.role === "assistant" && m.isStreaming
-              ? { ...m, content: m.content || `${t("docReader.error.prefix")}${e.message}`, isStreaming: false }
+              ? { ...m, content: m.content || `${t("docReader.error.prefix")}${userMessage}`, isStreaming: false }
               : m
           )
         );
@@ -1529,8 +1547,7 @@ Strict output rules:
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || err.error || t("docReader.error.generate"));
+        throw await readApiError(res);
       }
 
       let fullText = "";
@@ -1621,8 +1638,8 @@ Knowledge graph rules:
       });
       setGraphArtifacts((prev) => [artifact, ...prev]);
       toast.success(t("docReader.success.graph"));
-    } catch (err: any) {
-      toast.error(err.message || t("docReader.error.graphGenerate"));
+    } catch (err) {
+      toast.error(docChatError(err, t("docReader.error.graphGenerate")));
     } finally {
       setGraphLoading(false);
     }
@@ -1697,8 +1714,8 @@ Infographic rules:
       });
       setInfographicArtifacts((prev) => [artifact, ...prev]);
       toast.success(t("docReader.success.infographic"));
-    } catch (err: any) {
-      toast.error(err.message || t("docReader.error.infographicGenerate"));
+    } catch (err) {
+      toast.error(docChatError(err, t("docReader.error.infographicGenerate")));
     } finally {
       setInfographicLoading(false);
     }
@@ -2280,11 +2297,11 @@ Infographic rules:
                     }}
                     onLoadError={(error) => {
                       console.error("[PDF] load error:", error);
-                      toast.error(t("docReader.error.pdfLoad") + ": " + (error.message || ""));
+                      toast.error(docFileError(error, t("docReader.error.pdfLoad")));
                     }}
                     onSourceError={(error) => {
                       console.error("[PDF] source error:", error);
-                      toast.error(t("docReader.error.pdfSource") + ": " + (error.message || ""));
+                      toast.error(docFileError(error, t("docReader.error.pdfSource")));
                     }}
                     error={
                       <div className="flex flex-col items-center gap-3 py-10 text-center">
