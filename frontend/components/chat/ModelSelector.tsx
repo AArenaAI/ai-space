@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { Check, ChevronDown, Star } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { ChatModel } from "@/lib/chatTypes";
 import { getModelCapabilitySummary, getPrimaryModelCapabilities } from "@/lib/models/modelCapabilities";
@@ -160,6 +161,14 @@ export default function ModelSelector({
   const toggleFavorite = useCallback((model: ChatModel, event: ReactMouseEvent<HTMLElement> | KeyboardEvent<HTMLElement>) => {
     event.preventDefault();
     event.stopPropagation();
+    if (!favoriteIds.includes(model.id) && favoriteIds.length >= SHORTCUT_LIMIT) {
+      toast.info("最多收藏 3 个模型，请先取消一个收藏。", {
+        position: "top-center",
+        duration: 3000,
+        id: "model-favorite-limit",
+      });
+      return;
+    }
     const next = favoriteIds.includes(model.id)
       ? favoriteIds.filter((id) => id !== model.id)
       : [model.id, ...favoriteIds].slice(0, SHORTCUT_LIMIT);
