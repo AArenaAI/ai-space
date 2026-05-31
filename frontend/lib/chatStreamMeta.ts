@@ -1,3 +1,5 @@
+import { normalizeError } from "@/lib/errors";
+
 export type ChatStreamPayload =
   | { type: "chat_meta"; meta: any; requestId: string }
   | { type: "generation_task"; task: any }
@@ -27,10 +29,11 @@ export function normalizeChatStreamPayload(parsed: any): ChatStreamPayload {
 
   if (parsed?._error || parsed?._error_meta) {
     const error = parsed._error || parsed._error_meta;
+    const userError = normalizeError(error, { module: "chat", fallbackMessage: "请求失败，请稍后重试。" });
     return {
       type: "error",
       error,
-      message: error.message || error.user_message || "请求失败",
+      message: userError.message,
       errorCode: error.error_code || error.code || "unknown",
       retryable: error.retryable === true || error.retriable === true,
       requestId: error.request_id,

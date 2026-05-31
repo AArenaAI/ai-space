@@ -1,4 +1,5 @@
 import { runSseStream, type RunSseStreamResult, type SseStreamReader } from "./chatSseStreamRunner";
+import { normalizeError } from "@/lib/errors";
 import {
   shouldIgnoreStreamAbort,
   shouldResumeTaskStreamAfterError,
@@ -80,7 +81,7 @@ export async function runChatStreamLifecycle({
   streamRunner = runSseStream,
 }: RunChatStreamLifecycleOptions): Promise<RunChatStreamLifecycleResult> {
   const reader = response.body?.getReader();
-  if (!reader) throw new Error("无法读取流");
+  if (!reader) throw normalizeError("无法读取流", { module: "chat", fallbackMessage: "连接中断，已保留当前内容，可稍后重试。" });
 
   try {
     const streamResult = await streamRunner({ reader, onEvent });
@@ -96,7 +97,7 @@ export async function runChatStreamLifecycle({
     });
     if (decision.action === "ignore") return { action: "ignored" };
     if (decision.action === "resume") return { action: "resume" };
-    throw decision.error;
+    throw normalizeError(decision.error, { module: "chat", fallbackMessage: "连接中断，已保留当前内容，可稍后重试。" });
   } finally {
     reader.releaseLock();
   }

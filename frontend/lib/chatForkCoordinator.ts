@@ -1,3 +1,5 @@
+import { normalizeError, readApiError } from "@/lib/errors";
+
 export type ForkChatPersistedMessage = {
   id?: number | string;
   role: "user" | "assistant" | "system";
@@ -147,8 +149,7 @@ export async function runForkChatRequest({
     body: JSON.stringify({ models: modelIds }),
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || "Fork 对比失败");
+    throw normalizeError(await readApiError(res), { module: "chat", fallbackMessage: "Fork 对比失败，请稍后重试。" });
   }
   return await res.json();
 }

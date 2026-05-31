@@ -1,3 +1,5 @@
+import { normalizeError } from "@/lib/errors";
+
 export type ChatStreamCallbacks = {
   onDelta?: (delta: string, fullText: string) => void;
   onDone?: (fullText: string) => void;
@@ -24,12 +26,12 @@ function extractDeltaFromPayload(payload: any): string {
 
 function getErrorMessage(payload: any): string {
   const err = payload?._error || payload?._error_meta;
-  return err?.user_message || err?.message || err?.error || "生成失败";
+  return normalizeError(err || payload, { module: "chat", fallbackMessage: "生成失败，请稍后重试。" }).message;
 }
 
 export async function consumeChatStream(response: Response, callbacks: ChatStreamCallbacks = {}): Promise<string> {
   const reader = response.body?.getReader();
-  if (!reader) throw new Error("无法读取流");
+  if (!reader) throw normalizeError("无法读取流", { module: "chat", fallbackMessage: "连接中断，已保留当前内容，可稍后重试。" });
 
   const decoder = new TextDecoder();
   let buffer = "";

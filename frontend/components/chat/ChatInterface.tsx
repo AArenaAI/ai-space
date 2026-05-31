@@ -11,6 +11,7 @@ import ThemeToggle from "@/components/theme/ThemeToggle";
 import { Zap, X, Pencil, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { showUserError } from "@/lib/errors";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { useI18n } from "@/lib/i18n";
@@ -517,8 +518,8 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
             try {
               await forkChat(forkTargetMessageId, allModelIds);
               toast.success(t("chat.compareStarted"));
-            } catch (err: any) {
-              toast.error(err.message || t("chat.forkCompareFailed"));
+            } catch (err) {
+              showUserError(err, { module: "chat", fallbackTitle: t("chat.forkCompareFailed"), fallbackMessage: t("chat.forkCompareFailed") });
             }
           }}
         />

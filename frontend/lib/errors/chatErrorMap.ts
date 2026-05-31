@@ -16,6 +16,17 @@ export function mapChatError(raw: string): Partial<UserFacingError> | null {
     };
   }
 
+  if (/file.*not.*ready|文件.*(解析中|未解析|处理中)|parse.*pending/i.test(message)) {
+    return {
+      code: "chat_file_not_ready",
+      category: "file",
+      severity: "info",
+      title: "文件仍在解析中",
+      message: "文件仍在解析中，完成后再发送。",
+      action: "wait",
+    };
+  }
+
   if (/search.*not.*support|不支持.*搜索|联网搜索.*不支持|native search/i.test(message)) {
     return {
       code: "chat_search_not_supported",
@@ -28,7 +39,7 @@ export function mapChatError(raw: string): Partial<UserFacingError> | null {
     };
   }
 
-  if (/model.*unavailable|模型.*不可用|provider.*unavailable|上游模型暂时不可用/i.test(message)) {
+  if (/model.*unavailable|模型.*不可用|provider.*unavailable|上游模型暂时不可用|no available model|model not found/i.test(message)) {
     return {
       code: "chat_model_unavailable",
       category: "model",
@@ -40,7 +51,7 @@ export function mapChatError(raw: string): Partial<UserFacingError> | null {
     };
   }
 
-  if (/stream.*(closed|中断)|连接中断|无法读取流/i.test(message)) {
+  if (/stream.*(closed|中断|unavailable)|sse|eventsource|连接中断|无法读取流|task stream unavailable|missing task stream id/i.test(message)) {
     return {
       code: "chat_stream_interrupted",
       category: "chat",

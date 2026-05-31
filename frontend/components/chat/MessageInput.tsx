@@ -8,7 +8,7 @@ import { Template } from "@/hooks/useTemplates";
 import { getGuestId } from "@/lib/guestId";
 import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
-import { readApiError, showUserError } from "@/lib/errors";
+import { getErrorMessage, readApiError, showUserError } from "@/lib/errors";
 
 const TEXTAREA_MIN_HEIGHT = 92;
 const TEXTAREA_MAX_HEIGHT = 180;
@@ -584,7 +584,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                       className="flex items-center gap-2 rounded-full border border-surface-border/30 bg-surface-card px-3 py-1.5 text-[13px] transition-all"
                       title={
                         file.error_message
-                          ? `${t("chat.fileParseFailed")}: ${file.error_message}`
+                          ? getErrorMessage(file.error_message, { module: "file", fallbackMessage: "文件解析失败，请重新上传或换一个文件。" })
                           : isEmptyContent
                           ? t("chat.fileEmptyContent")
                           : cfg.label

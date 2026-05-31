@@ -1,4 +1,5 @@
 import { runSseStream, type RunSseStreamResult, type SseStreamReader } from "./chatSseStreamRunner";
+import { normalizeError } from "@/lib/errors";
 
 export type ChatTaskStreamReader = SseStreamReader & {
   releaseLock(): void;
@@ -42,7 +43,7 @@ export function buildTaskStreamUrl({
   if (serverMessageId) {
     return `${apiBaseUrl}/api/chat/tasks/${serverMessageId}/events?after=${after}`;
   }
-  throw new Error("missing task stream id");
+  throw normalizeError("missing task stream id", { module: "chat", fallbackMessage: "连接中断，已保留当前内容，可稍后重试。" });
 }
 
 export type RunTaskEventStreamOptions = BuildTaskStreamUrlOptions & {
@@ -63,7 +64,7 @@ export async function runTaskEventStream({
 }: RunTaskEventStreamOptions): Promise<RunSseStreamResult> {
   const streamUrl = buildTaskStreamUrl(urlOptions);
   const res = await fetchImpl(streamUrl, { headers, signal });
-  if (!res.ok || !res.body) throw new Error("task stream unavailable");
+  if (!res.ok || !res.body) throw normalizeError("task stream unavailable", { module: "chat", fallbackMessage: "连接中断，已保留当前内容，可稍后重试。" });
 
   const reader = res.body.getReader();
   try {
