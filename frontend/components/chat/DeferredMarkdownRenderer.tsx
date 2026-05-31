@@ -31,11 +31,13 @@ export function DeferredMarkdownRenderer({
   rootMargin = DEFAULT_ROOT_MARGIN,
   idleTimeout = DEFAULT_IDLE_TIMEOUT,
   keepRenderedOnContentChange = false,
+  isStreaming = false,
 }: {
   content: string;
   rootMargin?: string;
   idleTimeout?: number;
   keepRenderedOnContentChange?: boolean;
+  isStreaming?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [shouldRenderMarkdown, setShouldRenderMarkdown] = useState(false);
@@ -119,7 +121,7 @@ export function DeferredMarkdownRenderer({
 
   return (
     <div ref={hostRef}>
-      {shouldRenderMarkdown ? <MarkdownRenderer content={content} /> : <MarkdownFallback content={content} />}
+      {shouldRenderMarkdown ? <MarkdownRenderer content={content} isStreaming={isStreaming} /> : <MarkdownFallback content={content} />}
     </div>
   );
 }

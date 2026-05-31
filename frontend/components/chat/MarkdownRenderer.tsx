@@ -128,7 +128,7 @@ function CodeBlock({ language, value }: { language: string; value: string }) {
   );
 }
 
-const MarkdownRenderer = memo(function MarkdownRenderer({ content }: { content: string }) {
+const MarkdownRenderer = memo(function MarkdownRenderer({ content, isStreaming = false }: { content: string; isStreaming?: boolean }) {
   const withMath = useMemo(() => contentMayContainMath(content), [content]);
   const [plugins, setPlugins] = useState<MarkdownPlugins | null>(() => (withMath ? cachedMathPlugins : cachedBasicPlugins));
 
@@ -155,7 +155,7 @@ const MarkdownRenderer = memo(function MarkdownRenderer({ content }: { content: 
       const match = /language-(\w+)/.exec(className || "");
       const lang = match?.[1] || "";
       const value = String(children).replace(/\n$/, "");
-      if (!inline && lang === "echarts") {
+      if (!inline && lang === "echarts" && !isStreaming) {
         return <LazyEChartsBlock value={value} />;
       }
       return !inline && match ? (
@@ -181,7 +181,7 @@ const MarkdownRenderer = memo(function MarkdownRenderer({ content }: { content: 
     tr({ children }: any) { return <tr className="border-b border-surface-border/50 hover:bg-surface-card/30 transition-colors">{children}</tr>; },
     th({ children }: any) { return <th className="px-3 py-2.5 text-left text-[13px] font-semibold text-text-primary whitespace-nowrap">{children}</th>; },
     td({ children }: any) { return <td className="px-3 py-2.5 text-[13px] text-text-secondary leading-relaxed">{children}</td>; },
-  }), []);
+  }), [isStreaming]);
 
   if (!plugins) {
     return <MarkdownPlainFallback content={content} />;
