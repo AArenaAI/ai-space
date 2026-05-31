@@ -6,6 +6,7 @@ import { Plus, Pencil, Trash2, Check, X, FileText, Loader2 } from "lucide-react"
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
+import { getErrorMessage } from "@/lib/errors";
 
 export default function TemplatesPage() {
   const { t } = useI18n();
@@ -28,8 +29,8 @@ export default function TemplatesPage() {
       setNewPrefix("");
       setCreating(false);
       toast.success(t("prompts.create.success"));
-    } catch (err: any) {
-      toast.error(err.message);
+    } catch (err) {
+      toast.error(getErrorMessage(err, { fallbackMessage: "创建模板失败，请稍后重试。" }));
     }
   };
 
@@ -48,8 +49,8 @@ export default function TemplatesPage() {
       await updateTemplate(id, { name: editName.trim(), prefix: editPrefix.trim() });
       setEditingId(null);
       toast.success(t("prompts.save.success"));
-    } catch (err: any) {
-      toast.error(err.message);
+    } catch (err) {
+      toast.error(getErrorMessage(err, { fallbackMessage: "保存模板失败，请稍后重试。" }));
     }
   };
 
@@ -58,16 +59,16 @@ export default function TemplatesPage() {
     try {
       await deleteTemplate(id);
       toast.success(t("prompts.delete.success"));
-    } catch (err: any) {
-      toast.error(err.message);
+    } catch (err) {
+      toast.error(getErrorMessage(err, { fallbackMessage: "删除模板失败，请稍后重试。" }));
     }
   };
 
   const setDefault = async (id: number, isDefault: boolean) => {
     try {
       await updateTemplate(id, { is_default: !isDefault });
-    } catch (err: any) {
-      toast.error(err.message);
+    } catch (err) {
+      toast.error(getErrorMessage(err, { fallbackMessage: "设置默认模板失败，请稍后重试。" }));
     }
   };
 

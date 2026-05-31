@@ -17,6 +17,7 @@ import remarkFixBold from "@/lib/remark-fix-bold";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { useTheme } from "@/components/theme/ThemeProvider";
+import { getErrorMessage, readApiError } from "@/lib/errors";
 
 interface ShareMessage {
   id: number;
@@ -266,7 +267,7 @@ export default function ShareContent() {
       shareType === "compare" ? `/api/compare/share/${slug}` : `/api/share/${slug}`;
     fetch(apiPath)
       .then(async (res) => {
-        if (!res.ok) throw new Error("分享不存在或已过期");
+        if (!res.ok) throw await readApiError(res);
         return res.json();
       })
       .then((data) => {
@@ -274,7 +275,7 @@ export default function ShareContent() {
         setLoading(false);
       })
       .catch((err) => {
-        setError(err.message);
+        setError(getErrorMessage(err, { fallbackMessage: "分享不存在或已过期" }));
         setLoading(false);
       });
   }, [slug]);

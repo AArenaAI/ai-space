@@ -5,6 +5,7 @@ import { ImageIcon, Wand2, Loader2, Trash2, Download, Sparkles, Palette, Images 
 import DialogShell, { THEMES } from "./DialogShell";
 import { useImage } from "@/hooks/useImage";
 import { resolveImageUrl } from "@/lib/resolveImageUrl";
+import { getErrorMessage } from "@/lib/errors";
 
 const ASPECTS = [
   { label: "Auto", value: "auto" },
@@ -130,7 +131,7 @@ export default function ImageGenDialog({ open, onClose }: { open: boolean; onClo
                 ) : img.status === "failed" ? (
                   <div className="flex aspect-square flex-col items-center justify-center gap-1 px-3 text-center">
                     <p className="text-xs font-medium text-red-400">生成失败</p>
-                    <p className="text-[11px] text-text-tertiary">{img.error_message || "请稍后重试"}</p>
+                    <p className="text-[11px] text-text-tertiary">{getErrorMessage(img.error_message || "请稍后重试", { module: "image", fallbackMessage: "图片生成失败，请稍后重试。" })}</p>
                   </div>
                 ) : (
                   <img src={resolveImageUrl(img.image_url)} alt={img.prompt} className="aspect-square w-full object-cover" loading="lazy" />

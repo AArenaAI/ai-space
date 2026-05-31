@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { getErrorMessage, readApiError } from "@/lib/errors";
 
 export interface Template {
   id: number;
@@ -26,11 +27,11 @@ export function useTemplates() {
       const res = await fetch("/api/templates", {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error(`获取模板失败 (${res.status})`);
+      if (!res.ok) throw await readApiError(res);
       const data = await res.json();
       setTemplates(data);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(getErrorMessage(err, { fallbackMessage: "获取模板失败，请刷新重试。" }));
     } finally {
       setLoading(false);
     }
@@ -54,8 +55,7 @@ export function useTemplates() {
     });
 
     if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || "创建模板失败");
+      throw await readApiError(res);
     }
 
     const tpl = await res.json();
@@ -77,8 +77,7 @@ export function useTemplates() {
     });
 
     if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || "更新模板失败");
+      throw await readApiError(res);
     }
 
     const updated = await res.json();
@@ -96,8 +95,7 @@ export function useTemplates() {
     });
 
     if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || "删除模板失败");
+      throw await readApiError(res);
     }
 
     setTemplates((prev) => prev.filter((t) => t.id !== id));

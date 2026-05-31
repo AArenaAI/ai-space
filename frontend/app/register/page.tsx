@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
+import { getErrorMessage, readApiError } from "@/lib/errors";
 
 export default function RegisterPage() {
   const { t } = useI18n();
@@ -37,10 +38,10 @@ export default function RegisterPage() {
         body: JSON.stringify({ email, password, name }),
       });
 
-      const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || t("auth.error.registerFailed"));
+        throw await readApiError(res);
       }
+      const data = await res.json();
 
       localStorage.setItem("token", data.token);
       localStorage.setItem("user", JSON.stringify(data.user));
@@ -51,8 +52,8 @@ export default function RegisterPage() {
       import("@/lib/guestId").then(({ clearGuestId }) => clearGuestId());
       window.dispatchEvent(new Event("auth-changed"));
       router.push("/chat");
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(getErrorMessage(err, { module: "auth", fallbackMessage: t("auth.error.registerFailed") }));
     } finally {
       setLoading(false);
     }

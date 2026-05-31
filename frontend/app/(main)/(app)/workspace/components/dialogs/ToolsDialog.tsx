@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import DialogShell, { THEMES } from "./DialogShell";
 import { useTemplates } from "@/hooks/useTemplates";
+import { getErrorMessage } from "@/lib/errors";
 
 export default function ToolsDialog({
   open,
@@ -41,8 +42,8 @@ export default function ToolsDialog({
       setNewName("");
       setNewPrefix("");
       setCreating(false);
-    } catch (e: any) {
-      alert(e.message || "创建失败");
+    } catch (e) {
+      alert(getErrorMessage(e, { fallbackMessage: "创建失败，请稍后重试。" }));
     } finally {
       setBusy(false);
     }
@@ -56,8 +57,8 @@ export default function ToolsDialog({
         prefix: editPrefix.trim(),
       });
       setEditing(null);
-    } catch (e: any) {
-      alert(e.message || "更新失败");
+    } catch (e) {
+      alert(getErrorMessage(e, { fallbackMessage: "更新失败，请稍后重试。" }));
     } finally {
       setBusy(false);
     }
@@ -68,8 +69,8 @@ export default function ToolsDialog({
     setBusy(true);
     try {
       await deleteTemplate(id);
-    } catch (e: any) {
-      alert(e.message || "删除失败");
+    } catch (e) {
+      alert(getErrorMessage(e, { fallbackMessage: "删除失败，请稍后重试。" }));
     } finally {
       setBusy(false);
     }

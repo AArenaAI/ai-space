@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { X } from "lucide-react";
 import { useTheme } from "@/components/theme/ThemeProvider";
 import { useI18n } from "@/lib/i18n";
+import { getErrorMessage, readApiError } from "@/lib/errors";
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -85,10 +86,10 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
         body: JSON.stringify(body),
       });
 
-      const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || (mode === "login" ? t("auth.error.loginFailed") : t("auth.error.registerFailed")));
+        throw await readApiError(res);
       }
+      const data = await res.json();
 
       localStorage.setItem("token", data.token);
       localStorage.setItem("user", JSON.stringify(data.user));
@@ -102,8 +103,8 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
 
       onLoginSuccess?.();
       onClose?.();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(getErrorMessage(err, { module: "auth", fallbackMessage: mode === "login" ? t("auth.error.loginFailed") : t("auth.error.registerFailed") }));
     } finally {
       setLoading(false);
     }

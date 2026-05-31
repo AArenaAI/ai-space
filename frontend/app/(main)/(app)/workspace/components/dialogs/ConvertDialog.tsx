@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Send, Bot, User, Loader2, FileText, X, Trash2, MessageSquareText, Sparkles } from "lucide-react";
 import DialogShell, { THEMES } from "./DialogShell";
+import { getErrorMessage, readApiError } from "@/lib/errors";
 
 interface Msg {
   role: "user" | "assistant";
@@ -42,7 +43,7 @@ export default function ConvertDialog({ open, onClose, workspaceId, modelId }: {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ title: "文件转换", workspace_id: workspaceId }),
       });
-      if (!convRes.ok) throw new Error("创建对话失败");
+      if (!convRes.ok) throw await readApiError(convRes);
       const conv = await convRes.json();
 
       const body: any = { content: text, conversation_id: conv.id };
@@ -55,13 +56,13 @@ export default function ConvertDialog({ open, onClose, workspaceId, modelId }: {
         body: JSON.stringify(body),
       });
       if (!msgRes.ok) {
-        const err = await msgRes.json().catch(() => ({}));
-        throw new Error(err.error || "发送失败");
+        throw await readApiError(msgRes);
       }
       const reply = await msgRes.json();
       setMessages((prev) => [...prev, { role: "assistant", content: reply.content || "已处理完成" }]);
-    } catch (e: any) {
-      setMessages((prev) => [...prev, { role: "assistant", content: `错误：${e.message}` }]);
+    } catch (e) {
+      const userMessage = getErrorMessage(e, { module: "chat", fallbackMessage: "发送失败，请稍后重试。" });
+      setMessages((prev) => [...prev, { role: "assistant", content: `错误：${userMessage}` }]);
     } finally {
       setLoading(false);
     }

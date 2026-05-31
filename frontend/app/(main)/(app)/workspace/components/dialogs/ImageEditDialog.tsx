@@ -4,6 +4,7 @@ import { useState, useRef } from "react";
 import { ImageIcon, UploadCloud, Loader2, Wand2, Eraser, Type, ImagePlus, Trash2, WandSparkles } from "lucide-react";
 import DialogShell, { THEMES } from "./DialogShell";
 import { resolveImageUrl } from "@/lib/resolveImageUrl";
+import { readApiError, showUserError } from "@/lib/errors";
 
 const EDIT_MODES = [
   { key: "remove-bg", label: "移除背景", icon: Eraser, desc: "智能识别主体并去除背景" },
@@ -65,13 +66,12 @@ export default function ImageEditDialog({ open, onClose }: { open: boolean; onCl
         body: JSON.stringify(body),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "编辑失败");
+        throw await readApiError(res);
       }
       const data = await res.json();
       setResult(resolveImageUrl(data.image_url || data.url || null));
-    } catch (e: any) {
-      alert(e.message || "编辑失败");
+    } catch (e) {
+      showUserError(e, { module: "image", fallbackTitle: "编辑失败", fallbackMessage: "图片编辑失败，请稍后重试。" });
     } finally {
       setLoading(false);
     }

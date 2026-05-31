@@ -1,4 +1,5 @@
 "use client";
+import { getErrorMessage, readApiError } from "@/lib/errors";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -117,7 +118,7 @@ export default function WorkspacePage() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ title: query.slice(0, 30), workspace_id: activeWS.id }),
       });
-      if (!convRes.ok) throw new Error("创建对话失败");
+      if (!convRes.ok) throw await readApiError(convRes);
       const conv = await convRes.json();
 
       // 发送消息
@@ -130,13 +131,13 @@ export default function WorkspacePage() {
         body: JSON.stringify(body),
       });
       if (!msgRes.ok) {
-        const err = await msgRes.json().catch(() => ({}));
-        throw new Error(err.error || "发送失败");
+        throw await readApiError(msgRes);
       }
       const reply = await msgRes.json();
       setChatMessages((prev) => [...prev, { role: "assistant", content: reply.content || "已完成" }]);
-    } catch (e: any) {
-      setChatMessages((prev) => [...prev, { role: "assistant", content: `错误：${e.message}` }]);
+    } catch (e) {
+      const userMessage = getErrorMessage(e, { module: "chat", fallbackMessage: "发送失败，请稍后重试。" });
+      setChatMessages((prev) => [...prev, { role: "assistant", content: `错误：${userMessage}` }]);
     } finally {
       setChatLoading(false);
     }
