@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback, useMemo, memo, type UIEvent } from "react";
-import { Bot, ChevronDown as ChevronDownIcon, FileText, Loader2, X } from "lucide-react";
+import { Bot, ChevronDown as ChevronDownIcon, Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/lib/chatTypes";
 import { useFavorites } from "@/hooks/useFavorites";
@@ -831,49 +831,7 @@ function MessageList({
     const renderCompareUserMessage = (msg: Message) => (
       <div className="flex justify-end">
         <div className="max-w-[88%] rounded-2xl rounded-br-sm bg-[#EFF6FF] px-4 py-3 text-text-primary shadow-sm dark:bg-[#1E293B]">
-          <div className="flex flex-col gap-2">
-            {msg.files && msg.files.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {msg.files.map((f, fi) => {
-                  if (f.type === "image") {
-                    return (
-                      <div key={fi} className="relative overflow-hidden rounded-xl border border-surface-border bg-surface-card/60">
-                        <img
-                          src={`/api/files/${f.public_id}/download`}
-                          alt={f.filename}
-                          className="max-h-[200px] max-w-[200px] rounded-xl object-cover"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).src = "";
-                            (e.target as HTMLImageElement).classList.add("hidden");
-                            (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden");
-                          }}
-                        />
-                        <div className="hidden px-3 py-2 text-xs text-text-primary/70">{t("chat.imageLoadFailed")}</div>
-                      </div>
-                    );
-                  }
-                  return null;
-                })}
-              </div>
-            )}
-            {msg.files && msg.files.some((f) => f.type !== "image") && (
-              <div className="flex flex-wrap gap-2">
-                {msg.files.filter((f) => f.type !== "image").map((f, fi) => (
-                  <a
-                    key={fi}
-                    href={`/api/files/${f.public_id}/download`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-2 rounded-lg border border-surface-border bg-surface-card/60 px-3 py-1.5 transition-colors hover:bg-brand/30"
-                  >
-                    <FileText className="h-4 w-4 shrink-0 text-text-primary/70" />
-                    <span className="max-w-[200px] truncate text-[13px] text-text-primary">{f.filename}</span>
-                  </a>
-                ))}
-              </div>
-            )}
-            {msg.content ? <p className="whitespace-pre-wrap text-[15px] leading-relaxed">{msg.content}</p> : null}
-          </div>
+          <UserMessageContent message={msg} imageLoadFailedLabel={t("chat.imageLoadFailed")} />
         </div>
       </div>
     );
