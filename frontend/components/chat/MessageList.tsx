@@ -32,6 +32,7 @@ const MessageExportPreview = dynamic(() => import("./MessageExportPreview"), {
 import { AssistantMessageContent } from "./AssistantMessageContent";
 import MessageRow from "./MessageRow";
 import CompareEmptySlot from "./CompareEmptySlot";
+import CompareLoadingSlot from "./CompareLoadingSlot";
 import { parseThinkContent, sanitizeContent, isMessageGenerating } from "@/lib/chatContent";
 
 
@@ -70,31 +71,6 @@ interface MessageListProps {
   onSelectModeChange?: (active: boolean) => void;
   onExitCompare?: () => void;
 }
-
-function ThinkingDots() {
-  return (
-    <span className="inline-flex items-center">
-      <span className="animate-bounce [animation-delay:0s]">.</span>
-      <span className="animate-bounce [animation-delay:0.2s]">.</span>
-      <span className="animate-bounce [animation-delay:0.4s]">.</span>
-    </span>
-  );
-}
-
-function WaveText({ text, className }: { text: string; className?: string }) {
-  return (
-    <span className={cn("relative inline-block overflow-hidden", className)}>
-      <span className="text-text-secondary">{text}</span>
-      <span
-        className="pointer-events-none absolute inset-0 block -translate-x-full animate-shimmer"
-        style={{
-          background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent)",
-        }}
-      />
-    </span>
-  );
-}
-
 
 function normalizeExportPlainText(content: string): string {
   return content
@@ -888,25 +864,7 @@ function MessageList({
                 </div>
               </div>
             ) : isLoading && isLastGroup ? (
-              <div className="flex gap-3 animate-message-appear">
-                <div className="mt-1 w-7 shrink-0">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-surface-border bg-surface-card">
-                    <Bot className="h-4 w-4 text-text-secondary" />
-                  </div>
-                </div>
-                <div className="flex-1">
-                  <div className="inline-flex rounded-2xl rounded-bl-sm bg-surface-elevated px-4 py-3 text-sm text-text-secondary">
-                    {isComplexTask ? (
-                      <span className="inline-flex items-center gap-0.5">
-                        <WaveText text={t("chat.deepReasoning")} />
-                        <ThinkingDots />
-                      </span>
-                    ) : (
-                      <ThinkingDots />
-                    )}
-                  </div>
-                </div>
-              </div>
+              <CompareLoadingSlot isComplexTask={isComplexTask} deepReasoningLabel={t("chat.deepReasoning")} />
             ) : (
               <CompareEmptySlot isSingleChat={isSingleChat} />
             )}
