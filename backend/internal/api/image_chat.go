@@ -268,9 +268,6 @@ func (h *ImageChatHandler) DeleteImageChat(c *gin.Context) {
 		if err := tx.Where("chat_id = ?", chat.ID).Delete(&models.ImageChatMessage{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Table("image_generations").Where("chat_id = ?", chat.ID).Delete(nil).Error; err != nil {
-			return err
-		}
 		return tx.Delete(&chat).Error
 	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "删除会话失败"})
