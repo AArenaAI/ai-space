@@ -166,5 +166,30 @@ test("max entries evicts oldest runtime data", ({ mod }) => {
   assert.ok(mod.realtimeGet("entry-204"));
 });
 
+test("unsubscribe removes listener and expired realtimeGet notifies subscribers once", ({ mod, advance }) => {
+  let calls = 0;
+  const unsubscribe = mod.realtimeSubscribe("listener-entry", () => { calls += 1; });
+  mod.realtimeUpdate("listener-entry", { content: "active" });
+  assert.equal(calls, 1);
+  advance(10 * 60 * 1000 + 1);
+  assert.equal(mod.realtimeGet("listener-entry"), undefined);
+  assert.equal(calls, 1);
+  unsubscribe();
+  mod.realtimeUpdate("listener-entry", { content: "again" });
+  assert.equal(calls, 1);
+});
+
+test("clear removes pending runtime data and listeners", ({ mod }) => {
+  let calls = 0;
+  const unsubscribe = mod.realtimeSubscribe("clear-entry", () => { calls += 1; });
+  mod.realtimeUpdate("clear-entry", { content: "temporary" });
+  assert.equal(calls, 1);
+  mod.realtimeClear("clear-entry");
+  assert.equal(mod.realtimeGet("clear-entry"), undefined);
+  unsubscribe();
+  mod.realtimeUpdate("clear-entry", { content: "again" });
+  assert.equal(calls, 1);
+});
+
 console.log("\nstreaming regression tests passed");
 process.exit(0);

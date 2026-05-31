@@ -305,6 +305,7 @@ export function realtimeGet(id: string): RealtimeData | undefined {
 }
 
 export function realtimeClear(id: string) {
+  const hadEntry = store.has(id);
   store.delete(id);
   subs.delete(id);
   pending.delete(id);
@@ -316,6 +317,7 @@ export function realtimeClear(id: string) {
     clearTimeout(cleanupTimer);
     cleanupTimer = null;
   }
+  if (hadEntry) schedule(id);
 }
 
 export function realtimeSubscribe(id: string, fn: () => void): () => void {

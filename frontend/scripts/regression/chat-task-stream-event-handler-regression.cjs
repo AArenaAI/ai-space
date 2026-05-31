@@ -183,4 +183,21 @@ test("flushes pending mixed-delta answer on done", () => {
   ]);
 });
 
+test("complex task resume ignores duplicate sequence and keeps active state monotonic", () => {
+  const h = makeHarness({ initialContent: "seed", after: 5, activeState: {
+    convId: 7,
+    serverMessageId: 10,
+    generationTaskId: 20,
+    lastSequence: 5,
+    content: "seed",
+  } });
+  h.handler.processEvent(sse({ choices: [{ delta: { content: " stale" } }] }, 4));
+  assert.equal(h.handler.getAccumulated(), "seed");
+  assert.equal(h.getActiveState().lastSequence, 5);
+  h.handler.processEvent(sse({ choices: [{ delta: { content: " fresh" } }] }, 6));
+  assert.equal(h.handler.getAccumulated(), "seed fresh");
+  assert.equal(h.getActiveState().lastSequence, 6);
+  assert.equal(h.getActiveState().content, "seed fresh");
+});
+
 console.log("\nchat task stream event handler regression tests passed");

@@ -92,6 +92,7 @@ export function createTaskStreamEventHandler({
 
   const processEvent = (eventText: string) => {
     const action = processChatStreamEvent({ eventText, previousSequence: latestSequence });
+    if (action.sequence !== undefined && action.sequence < latestSequence && action.type !== "empty") return;
     if (action.sequence !== undefined && action.sequence !== latestSequence) {
       latestSequence = action.sequence;
       refreshActiveSequence();

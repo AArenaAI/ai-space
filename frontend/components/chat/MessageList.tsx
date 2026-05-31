@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback, useMemo, memo, type UIEvent, type ReactNode, type ButtonHTMLAttributes } from "react";
-import { User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck, ChevronDown, Play, ChevronDown as ChevronDownIcon, FileText, Star, Loader2, Download, ImageIcon } from "lucide-react";
+import { User, Bot, Check, Share2, X, SquareCheck, ChevronDown, Play, ChevronDown as ChevronDownIcon, FileText, Star, Loader2, Download, ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/lib/chatTypes";
 import { useFavorites } from "@/hooks/useFavorites";
@@ -14,6 +14,8 @@ import { useMessageStream } from "@/hooks/useMessageStream";
 import { inferGroups, InferredGroup } from "@/lib/groups";
 import { useI18n } from "@/lib/i18n";
 import { AssistantMessageMeta } from "./AssistantMessageMeta";
+import MessageActions from "./MessageActions";
+import UserMessageContent from "./UserMessageContent";
 import ModelSelector from "./ModelSelector";
 import { StreamingText } from "./StreamingText";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
@@ -230,154 +232,6 @@ function ExportDropdown({
           </div>
         </>
       )}
-    </div>
-  );
-}
-
-function MessageActions({
-  onCopy,
-  onDelete,
-  onRegenerate,
-  onShareSelectMode,
-  onFavoriteSelectMode,
-  isFavorited,
-  showRegenerate,
-  align,
-  visible,
-  createdAt,
-  completedAt,
-  onForkCompare,
-}: {
-  onCopy: () => void;
-  onDelete: () => void;
-  onRegenerate?: () => void;
-  onShareSelectMode: () => void;
-  onFavoriteSelectMode?: () => void;
-  isFavorited?: boolean;
-  showRegenerate: boolean;
-  align: "left" | "right";
-  visible: boolean;
-  createdAt: number;
-  completedAt?: number;
-  onForkCompare?: () => void;
-}) {
-  const [copied, setCopied] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
-  const moreRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (moreRef.current && !moreRef.current.contains(e.target as Node)) {
-        setMoreOpen(false);
-      }
-    };
-    if (moreOpen) {
-      document.addEventListener("mousedown", handler);
-      return () => document.removeEventListener("mousedown", handler);
-    }
-  }, [moreOpen]);
-
-  const formatTime = (ts: number) => {
-    const d = new Date(ts);
-    const now = new Date();
-    const isToday = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-    const timeStr = d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-    if (isToday) return timeStr;
-    const month = d.getMonth() + 1;
-    const day = d.getDate();
-    return `${month}月${day}日 ${timeStr}`;
-  };
-
-  const formatDuration = (ms: number) => {
-    const totalSeconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    if (minutes > 0) return `${minutes}分${seconds}秒`;
-    return `${seconds}秒`;
-  };
-
-  const durationMs = completedAt ? completedAt - createdAt : 0;
-
-  return (
-    <div className={cn(
-      "mt-1 inline-flex items-center gap-0.5 rounded-xl bg-surface-card/80 px-1 py-0.5 transition-opacity duration-200",
-      align === "right" ? "justify-end" : "justify-start",
-      visible ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-    )}>
-      <button
-        onClick={() => { onCopy(); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
-        className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
-        title="复制"
-      >
-        {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-      </button>
-
-      {showRegenerate && onRegenerate && (
-        <button
-          onClick={onRegenerate}
-          className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
-          title="重新生成"
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-        </button>
-      )}
-      <button
-        onClick={onShareSelectMode}
-        className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
-        title="选择分享"
-      >
-        <Share2 className="w-3.5 h-3.5" />
-      </button>
-      {onFavoriteSelectMode && (
-        <button
-          onClick={onFavoriteSelectMode}
-          className={cn(
-            "flex h-6 w-6 items-center justify-center rounded-lg transition-colors",
-            isFavorited
-              ? "text-amber-400 hover:text-amber-500 hover:bg-amber-400/10"
-              : "text-text-tertiary hover:text-amber-400 hover:bg-amber-400/10"
-          )}
-          title={isFavorited ? "取消收藏" : "收藏"}
-        >
-          <Star className={cn("w-3.5 h-3.5", isFavorited && "fill-amber-400")} />
-        </button>
-      )}
-      <button
-        onClick={onDelete}
-        className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-colors"
-        title="删除"
-      >
-        <Trash2 className="w-3.5 h-3.5" />
-      </button>
-      <div className="relative" ref={moreRef}>
-        <button
-          onClick={() => setMoreOpen(!moreOpen)}
-          className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
-          title="更多"
-        >
-          <MoreHorizontal className="w-3.5 h-3.5" />
-        </button>
-        {moreOpen && (
-          <>
-            <div className="fixed inset-0 z-40" onClick={() => setMoreOpen(false)} />
-            <div className={cn(
-              "absolute top-full mt-1 w-40 rounded-xl border border-surface-border bg-surface-elevated shadow-xl z-50 py-2 px-3 animate-fade-in",
-              align === "right" ? "right-0" : "left-0"
-            )}>
-              <div className="flex flex-col gap-1">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-text-tertiary">起始时间</span>
-                  <span className="text-text-secondary">{formatTime(createdAt)}</span>
-                </div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-text-tertiary">耗时</span>
-                  <span className="text-text-secondary">{formatDuration(durationMs)}</span>
-                </div>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
     </div>
   );
 }
@@ -1459,55 +1313,7 @@ function MessageList({
                     )}
 
                     {isUser ? (
-                      <div className="flex flex-col gap-2">
-                        {/* 图片附件渲染 */}
-                        {msg.files && msg.files.length > 0 && (
-                          <div className="flex flex-wrap gap-2">
-                            {msg.files.map((f, fi) => {
-                              if (f.type === "image") {
-                                return (
-                                  <div key={fi} className="relative group/file rounded-xl overflow-hidden border border-surface-border bg-surface-card">
-                                    <img
-                                      src={`/api/files/${f.public_id}/download`}
-                                      alt={f.filename}
-                                      className="max-w-[200px] max-h-[200px] object-cover rounded-xl"
-                                      onError={(e) => {
-                                        (e.target as HTMLImageElement).src = "";
-                                        (e.target as HTMLImageElement).classList.add("hidden");
-                                        (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden");
-                                      }}
-                                    />
-                                    <div className="hidden text-xs text-text-tertiary px-3 py-2">{t("chat.imageLoadFailed")}</div>
-                                  </div>
-                                );
-                              }
-                              return null;
-                            })}
-                          </div>
-                        )}
-                        {/* 非图片文件卡片 */}
-                        {msg.files && msg.files.some(f => f.type !== "image") && (
-                          <div className="flex flex-wrap gap-2">
-                            {msg.files.filter(f => f.type !== "image").map((f, fi) => (
-                              <a
-                                key={fi}
-                                href={`/api/files/${f.public_id}/download`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-card border border-surface-border hover:border-brand/30 transition-colors"
-                              >
-                                <FileText className="w-4 h-4 text-text-tertiary shrink-0" />
-                                <span className="text-[13px] text-text-secondary truncate max-w-[200px]">{f.filename}</span>
-                              </a>
-                            ))}
-                          </div>
-                        )}
-                        <div className="flex items-start justify-between gap-2">
-                          {msg.content ? (
-                            <p className="text-[15px] leading-relaxed text-text-primary whitespace-pre-wrap">{msg.content}</p>
-                          ) : null}
-                        </div>
-                      </div>
+                      <UserMessageContent message={msg} imageLoadFailedLabel={t("chat.imageLoadFailed")} />
                     ) : (
                       <>
                         {renderAssistantContent(msg, isStreaming)}

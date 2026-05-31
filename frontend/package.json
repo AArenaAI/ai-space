@@ -64,7 +64,9 @@
     "test:chat-performance": "node scripts/regression/chat-performance-benchmark.cjs",
     "test:chat-streaming-performance": "node scripts/regression/chat-streaming-performance.cjs",
     "test:chat-render-performance": "node scripts/regression/chat-render-performance.cjs",
-    "test:chat-real-e2e": "node scripts/regression/chat-real-e2e.cjs"
+    "test:chat-real-e2e": "node scripts/regression/chat-real-e2e.cjs",
+    "test:chat-real-e2e-matrix": "node scripts/regression/chat-real-e2e-matrix.cjs",
+    "test:chat-streaming-state-fixture": "node scripts/regression/chat-streaming-state-fixture.cjs"
   },
   "dependencies": {
     "@antv/g6": "^5.1.1",
