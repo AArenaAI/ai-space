@@ -688,13 +688,14 @@ func (h *ChatHandler) preprocessSearch(messages []services.Message, modelID stri
 		return messages, nil, false
 	}
 
+	// 支持 native search tool 的模型（如 GPT 系列）交给 provider 处理，避免同时注入第三方搜索上下文。
 	if modelmeta.SupportsSearch(modelID) {
 		return messages, nil, true
 	}
 
-	// 不支持搜索能力的模型（如 DeepSeek）直接忽略 search=true，避免 fallback 搜索上下文
-	// 触发不兼容的 provider/system-message 组合导致整轮请求失败。
-	return append([]services.Message(nil), messages...), nil, false
+	// 不支持 native search tool 的模型（如 DeepSeek）不能把 search tool 传给 provider，
+	// 但如果站点配置了第三方搜索服务，应当使用 Tavily/Brave fallback，把结果作为普通
+	// system context 注入，而不是直接报错或静默禁用联网搜索。
 
 	processed := append([]services.Message(nil), messages...)
 	var query string

@@ -39,27 +39,27 @@ type SearchResult struct {
 // --- Tavily API ---
 
 type tavilyRequest struct {
-	APIKey           string `json:"api_key"`
-	Query            string `json:"query"`
-	SearchDepth      string `json:"search_depth"`
-	IncludeAnswer    bool   `json:"include_answer"`
-	IncludeImages    bool   `json:"include_images"`
-	IncludeRawContent bool  `json:"include_raw_content"`
-	MaxResults       int    `json:"max_results"`
+	APIKey            string `json:"api_key"`
+	Query             string `json:"query"`
+	SearchDepth       string `json:"search_depth"`
+	IncludeAnswer     bool   `json:"include_answer"`
+	IncludeImages     bool   `json:"include_images"`
+	IncludeRawContent bool   `json:"include_raw_content"`
+	MaxResults        int    `json:"max_results"`
 }
 
 type tavilySource struct {
-	Title       string `json:"title"`
-	URL         string `json:"url"`
-	Content     string `json:"content"`
-	RawContent  string `json:"raw_content"`
+	Title      string `json:"title"`
+	URL        string `json:"url"`
+	Content    string `json:"content"`
+	RawContent string `json:"raw_content"`
 }
 
 type tavilyResponse struct {
-	Query           string         `json:"query"`
-	Answer          string         `json:"answer"`
-	Results         []tavilySource `json:"results"`
-	ResponseTime    float64        `json:"response_time"`
+	Query        string         `json:"query"`
+	Answer       string         `json:"answer"`
+	Results      []tavilySource `json:"results"`
+	ResponseTime float64        `json:"response_time"`
 }
 
 func (s *SearchService) searchTavily(query string) (string, []SearchResult, error) {
@@ -97,7 +97,11 @@ func (s *SearchService) searchTavily(query string) (string, []SearchResult, erro
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		log.Printf("[Tavily] API 返回状态码: %d, body: %s", resp.StatusCode, string(body)[:200])
+		preview := string(body)
+		if len(preview) > 200 {
+			preview = preview[:200]
+		}
+		log.Printf("[Tavily] API 返回状态码: %d, body: %s", resp.StatusCode, preview)
 		return "", nil, fmt.Errorf("Tavily API 返回状态码: %d", resp.StatusCode)
 	}
 
@@ -162,7 +166,7 @@ type braveNewsResult struct {
 }
 
 type braveResponse struct {
-	Web  struct {
+	Web struct {
 		Results []braveWebResult `json:"results"`
 	} `json:"web"`
 	News struct {

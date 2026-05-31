@@ -9,7 +9,6 @@ import { getGuestId } from "@/lib/guestId";
 import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
 import { getErrorMessage, readApiError, showUserError } from "@/lib/errors";
-import { supportsModelCapability } from "@/lib/models/modelCapabilities";
 import type { ModelRecommendationContext } from "@/lib/models/modelRecommendations";
 
 const TEXTAREA_MIN_HEIGHT = 92;
@@ -107,14 +106,13 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     return "fast";
   });
   const reasoning = getReasoningEffortForMode(currentModel, reasoningMode);
-  const searchSupported = currentModel ? supportsModelCapability(currentModel, "search") : false;
   const [searchEnabled, setSearchEnabled] = useState(() => {
     if (typeof window !== "undefined") {
       return localStorage.getItem("search-enabled") === "true";
     }
     return false;
   });
-  const effectiveSearchEnabled = searchSupported && searchEnabled;
+  const effectiveSearchEnabled = searchEnabled;
   const [toolsOpen, setToolsOpen] = useState(false);
   const [reasoningOpen, setReasoningOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
@@ -308,19 +306,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     localStorage.setItem("reasoning-effort", next.effort);
   };
 
-  useEffect(() => {
-    if (searchEnabled && !searchSupported) {
-      setSearchEnabled(false);
-    }
-  }, [searchEnabled, searchSupported]);
-
   const toggleSearch = () => {
-    if (!searchSupported) {
-      toast.info("当前模型不支持联网搜索，已自动关闭搜索。请切换到支持搜索的 GPT 系列模型。");
-      setSearchEnabled(false);
-      localStorage.setItem("search-enabled", "false");
-      return;
-    }
     setSearchEnabled((prev) => {
       const next = !prev;
       localStorage.setItem("search-enabled", String(next));
@@ -363,7 +349,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
       showUserError(err, {
         module: "file",
         fallbackTitle: t("chat.uploadFailed"),
-        fallbackMessage: "文件上传失败，请重新选择文件。",
+        fallbackMessage: t("chat.fileUploadFailedRetry"),
       });
     } finally {
       setUploading(false);
