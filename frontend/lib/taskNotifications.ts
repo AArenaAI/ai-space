@@ -1,3 +1,5 @@
+import { normalizeError } from "@/lib/errors";
+
 export type BackgroundTaskType = "image" | "video" | "chat";
 export type BackgroundTaskStatus = "pending" | "succeeded" | "failed" | "completed" | "cancelled" | "incomplete";
 
@@ -138,16 +140,31 @@ export function emitTaskFinished(notification: TaskFinishedNotification) {
   window.dispatchEvent(new CustomEvent<TaskFinishedNotification>("background-task-finished", { detail: notification }));
 }
 
+function taskModule(type: BackgroundTaskType) {
+  if (type === "video") return "video";
+  if (type === "image") return "image";
+  return "chat";
+}
+
+function normalizeTaskDescription(task: BackgroundTaskRecord, ok: boolean) {
+  if (ok) {
+    return task.type === "chat"
+      ? task.conversationTitle || task.description || "点击查看对话详情"
+      : task.description || task.title;
+  }
+  return normalizeError(task.description || task.title, {
+    module: taskModule(task.type),
+    fallbackMessage: task.type === "video" ? "视频生成失败，请稍后重试或调整描述。" : task.type === "image" ? "图片生成失败，请稍后重试或调整描述。" : "任务未完成，请稍后重试。",
+  }).message;
+}
+
 export function buildTaskCompletionCopy(task: BackgroundTaskRecord, ok: boolean): TaskFinishedNotification {
   const noun = task.type === "image" ? "图片" : task.type === "video" ? "视频" : "对话";
-  const description = task.type === "chat"
-    ? task.conversationTitle || task.description || "点击查看对话详情"
-    : task.description || task.title;
   return {
     key: task.key,
     type: task.type,
     title: ok ? `${noun}任务已完成` : `${noun}任务未完成`,
-    description,
+    description: normalizeTaskDescription(task, ok),
     href: task.href,
     ok,
     conversationTitle: task.conversationTitle,

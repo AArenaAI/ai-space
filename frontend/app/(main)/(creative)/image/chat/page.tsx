@@ -242,6 +242,9 @@ interface DisplayMessage {
 }
 
 function msgToDisplay(m: ImageChatMessage): DisplayMessage {
+  const errorMessage = m.error_message
+    ? normalizeError(m.error_message, { module: "image", fallbackMessage: "图片生成失败，请稍后重试或调整描述。" }).message
+    : undefined;
   return {
     id: String(m.id),
     role: m.role as "user" | "assistant",
@@ -249,7 +252,7 @@ function msgToDisplay(m: ImageChatMessage): DisplayMessage {
     status: m.status as "pending" | "completed" | "failed",
     imageUrl: m.image_url,
     partialImageUrl: m.partial_image_url,
-    errorMessage: m.error_message || undefined,
+    errorMessage,
     createdAt: new Date(m.created_at),
   };
 }

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotifications";
-import { normalizeError, readApiError } from "@/lib/errors";
+import { getErrorMessage, normalizeError, readApiError } from "@/lib/errors";
 
 export interface VideoGeneration {
   id: number;
@@ -151,7 +151,7 @@ export function useVideo(): UseVideoReturn {
           key: `video:${data.id}`,
           type: "video",
           title: data.status === "succeeded" ? "视频任务已完成" : "视频任务未完成",
-          description: data.status === "succeeded" ? data.prompt : data.error_message || data.prompt,
+          description: data.status === "succeeded" ? data.prompt : getErrorMessage(data.error_message || data.prompt, { module: "video", fallbackMessage: "视频生成失败，请稍后重试或调整描述。" }),
           href: "/video",
           ok: data.status === "succeeded",
         });

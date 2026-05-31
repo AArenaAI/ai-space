@@ -62,7 +62,7 @@ export function useImage() {
             key: `image:${image.id}`,
             type: "image",
             title: image.status === "succeeded" ? "图片任务已完成" : "图片任务未完成",
-            description: image.status === "succeeded" ? image.prompt : image.error_message || image.prompt,
+            description: image.status === "succeeded" ? image.prompt : getErrorMessage(image.error_message || image.prompt, { module: "image", fallbackMessage: "图片生成失败，请稍后重试或调整描述。" }),
             href: "/image",
             ok: image.status === "succeeded",
           });

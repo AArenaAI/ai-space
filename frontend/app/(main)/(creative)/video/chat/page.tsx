@@ -197,13 +197,16 @@ function cleanVideoErrorMessage(raw: string | undefined, messages: VideoErrorMes
 }
 
 function messageToDisplayMessage(message: VideoChatMessage, errorMessages: VideoErrorMessages): DisplayMessage {
+  const errorMessage = message.error_message
+    ? normalizeError(cleanVideoErrorMessage(message.error_message, errorMessages), { module: "video", fallbackMessage: errorMessages.default }).message
+    : undefined;
   return {
     id: `${message.role}-${message.id}`,
     role: message.role === "user" ? "user" : "assistant",
     content: message.content,
     status: message.status,
     videoUrl: message.video_url,
-    errorMessage: message.error_message ? cleanVideoErrorMessage(message.error_message, errorMessages) : undefined,
+    errorMessage,
     createdAt: new Date(message.created_at || Date.now()),
     generationId: message.generation_id,
   };

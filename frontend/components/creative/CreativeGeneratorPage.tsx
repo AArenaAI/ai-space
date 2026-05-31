@@ -40,7 +40,7 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
-import { readApiError, showUserError } from "@/lib/errors";
+import { getErrorMessage, readApiError, showUserError } from "@/lib/errors";
 
 const ASPECT_RATIOS = [
   { value: "auto", label: "Auto", w: 1, h: 1 },
@@ -1201,7 +1201,7 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
                   <AlertCircle className="w-8 h-8 text-red-400/60" />
                   <p className="text-sm font-medium text-red-400">{t("video.generationFailed")}</p>
                   <p className="max-w-xl text-xs text-text-tertiary">
-                    {currentVideo.error_message || t("video.failedTryLater")}
+                    {getErrorMessage(currentVideo.error_message || t("video.failedTryLater"), { module: "video", fallbackMessage: t("video.failedTryLater") })}
                   </p>
                 </div>
               )}
@@ -1328,7 +1328,7 @@ function ImageCard({
               <AlertCircle className="w-8 h-8 text-red-400/50" />
               <span className="text-xs text-red-400/70">{t("image.generationFailed")}</span>
               <p className="text-[11px] text-text-tertiary/60 max-w-[80%] text-center line-clamp-2 px-2">
-                {image.error_message || t("video.failedTryLater")}
+                {getErrorMessage(image.error_message || t("video.failedTryLater"), { module: "image", fallbackMessage: t("video.failedTryLater") })}
               </p>
             </div>
             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
