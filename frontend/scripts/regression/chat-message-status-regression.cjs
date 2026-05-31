@@ -46,6 +46,8 @@ assert.deepEqual(kinds({ message: { searchStatus: "completed", searchSourcesCoun
 assert.deepEqual(kinds({ message: {}, realtime: { content: "", phase: "finalizing" }, isStreaming: true }), ["finalizing:running:true"], "phase finalizing should render as active finalizing");
 assert.deepEqual(kinds({ message: { completedAt: 2 }, isStreaming: false }), [], "completed refreshed message should not show running by default");
 assert.deepEqual(kinds({ message: {}, realtime: { content: "", searchStatus: "failed" }, isStreaming: true }), ["web_search:failed:false"], "failed search should not be active");
+assert.deepEqual(kinds({ message: { searchStatus: "searching" }, realtime: { errorCode: "provider_error", searchStatus: "searching" }, isStreaming: true }), ["error:failed:false"], "realtime error should suppress search badges");
+assert.deepEqual(kinds({ message: { completedAt: 2, searchSourcesCount: 1 }, isStreaming: false }), ["web_search:completed:false"], "completed history with sources should keep completed search badge only");
 
 fs.rmSync(tmpDir, { recursive: true, force: true });
 console.log("chat message status regression tests passed");
