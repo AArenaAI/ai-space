@@ -89,7 +89,6 @@ export default function ModelSelector({
 }: ModelSelectorProps) {
   const [open, setOpen] = useState(false);
   const [hoveredProvider, setHoveredProvider] = useState<string | null>(null);
-  const [hoveredModel, setHoveredModel] = useState<ChatModel | null>(null);
   const [favoriteIds, setFavoriteIds] = useState<string[]>(() => getFavoriteModels().slice(0, SHORTCUT_LIMIT));
   const [recentIds, setRecentIds] = useState<string[]>(() => getRecentModels().slice(0, SHORTCUT_LIMIT));
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -107,7 +106,6 @@ export default function ModelSelector({
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setOpen(false);
         setHoveredProvider(null);
-        setHoveredModel(null);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -156,7 +154,6 @@ export default function ModelSelector({
       setRecentIds(getRecentModels());
       setOpen(false);
       setHoveredProvider(null);
-      setHoveredModel(null);
     },
     [onSelect]
   );
@@ -187,7 +184,6 @@ export default function ModelSelector({
   const handleProviderLeave = () => {
     hoverTimerRef.current = setTimeout(() => {
       setHoveredProvider(null);
-      setHoveredModel(null);
     }, 150);
   };
 
@@ -203,47 +199,6 @@ export default function ModelSelector({
 
   const activeGroup = groups.find((g) => g.provider === hoveredProvider);
 
-  const renderModelHoverCard = (model: ChatModel) => {
-    const capabilities = getPrimaryModelCapabilities(model, 4);
-    const description = model.description || getModelCapabilitySummary(model);
-
-    return (
-      <div className="w-[300px] p-3">
-        <div className="rounded-2xl bg-slate-950 px-4 py-3.5 text-white shadow-[0_18px_48px_rgba(15,23,42,0.32)] dark:bg-slate-900">
-          <div className="flex items-center gap-2.5">
-            <div
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold"
-              style={{ backgroundColor: `${model.color}24`, color: model.color }}
-            >
-              {PROVIDER_ICONS[model.provider] || model.provider[0]}
-            </div>
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold leading-5">{model.name}</div>
-              <div className="truncate text-[11px] leading-4 text-white/55">
-                {PROVIDER_LABELS[model.provider] || model.provider}
-              </div>
-            </div>
-          </div>
-          <p className="mt-3 text-[13px] leading-6 text-white/82">
-            {description}
-          </p>
-          {capabilities.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {capabilities.map((capability) => (
-                <span
-                  key={capability.key}
-                  className="rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[10px] font-medium leading-4 text-white/78"
-                >
-                  {capability.label}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
-
   const renderShortcutModelItem = (model: ChatModel, options?: { showFavorite?: boolean }) => {
     const capabilities = getPrimaryModelCapabilities(model, 4);
     const favorited = favoriteIds.includes(model.id);
@@ -252,7 +207,6 @@ export default function ModelSelector({
       <button
         key={model.id}
         onClick={() => handleSelect(model)}
-        onMouseEnter={() => setHoveredModel(model)}
         className={cn(
           "flex items-start gap-2.5 w-full px-3 py-2 rounded-lg text-left transition-colors group/shortcut",
           selected.id === model.id
@@ -303,7 +257,6 @@ export default function ModelSelector({
       <button
         key={model.id}
         onClick={() => handleSelect(model)}
-        onMouseEnter={() => setHoveredModel(model)}
         className={cn(
           "flex items-start gap-3.5 w-full px-4 py-3.5 rounded-xl text-left transition-colors duration-150 group",
           selected.id === model.id
@@ -399,7 +352,6 @@ export default function ModelSelector({
             onClick={() => {
               setOpen(false);
               setHoveredProvider(null);
-              setHoveredModel(null);
             }}
           />
           <div className="absolute top-full left-0 mt-2 z-[90] flex rounded-2xl border border-surface-border bg-surface-elevated shadow-xl overflow-hidden">
@@ -491,7 +443,6 @@ export default function ModelSelector({
                 </div>
               </div>
             )}
-            {hoveredModel && renderModelHoverCard(hoveredModel)}
           </div>
         </>
       )}
