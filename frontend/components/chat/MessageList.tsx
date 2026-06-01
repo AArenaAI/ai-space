@@ -20,7 +20,7 @@ const MarkdownRenderer = dynamic(() => import("./MarkdownRenderer"), {
   ssr: false,
   loading: () => null,
 });
-import MessageRow from "./MessageRow";
+import ChatMessageListItem from "./ChatMessageListItem";
 import CompareColumnTurn from "./CompareColumnTurn";
 import { type TextSelectionFloatingBarState } from "./TextSelectionFloatingBar";
 import ChatScrollProgress from "./ChatScrollProgress";
@@ -1214,21 +1214,17 @@ function MessageList({
         components={virtuosoComponents}
         itemContent={(index, msg) => {
           const group = groupByMessageId.get(msg.id);
-          const isUser = msg.role === "user";
           const model = msg.model ? modelById.get(msg.model) : undefined;
-          const isLast = index === visibleMessages.length - 1;
-          const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && isLast;
-          const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
-          const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
           const isSelected = selectedIds.has(msg.id);
           const isHighlighted = highlightedMessageId === msg.id;
 
           return (
-            <MessageRow
+            <ChatMessageListItem
+              index={index}
               message={msg}
+              visibleMessageCount={visibleMessages.length}
               group={group}
               model={model}
-              isLast={isLast}
               isLoading={isLoading}
               selectMode={selectMode}
               isSelected={isSelected}
