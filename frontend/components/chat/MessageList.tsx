@@ -7,7 +7,6 @@ import { Message, ChatModel } from "@/lib/chatTypes";
 import { useFavorites } from "@/hooks/useFavorites";
 import { toast } from "sonner";
 import dynamic from "next/dynamic";
-import ConfirmDialog from "@/components/ui/ConfirmDialog";
 const ShareDialog = dynamic(() => import("@/components/ui/ShareDialog"), { ssr: false });
 import { Virtuoso, VirtuosoHandle, type Components } from "react-virtuoso";
 import { useMessageStream } from "@/hooks/useMessageStream";
@@ -30,6 +29,7 @@ import ChatSelectionOverlays from "./ChatSelectionOverlays";
 import ChatScrollToBottomButton from "./ChatScrollToBottomButton";
 import ChatHistoryLoadingState from "./ChatHistoryLoadingState";
 import ChatEmptyState from "./ChatEmptyState";
+import ChatDeleteMessageDialog from "./ChatDeleteMessageDialog";
 import { parseThinkContent, sanitizeContent, isMessageGenerating } from "@/lib/chatContent";
 
 
@@ -1058,18 +1058,14 @@ function MessageList({
           onClick={handleScrollToBottomClick}
         />
 
-        <ConfirmDialog
-          isOpen={!!deleteTarget}
+        <ChatDeleteMessageDialog
+          targetId={deleteTarget}
           title={t("chat.deleteMessageTitle")}
           description={t("chat.deleteMessageDesc")}
           confirmText={t("common.delete")}
           cancelText={t("common.cancel")}
-          variant="danger"
-          onConfirm={() => {
-            if (deleteTarget && onDeleteMessage) onDeleteMessage(deleteTarget);
-            setDeleteTarget(null);
-          }}
-          onCancel={() => setDeleteTarget(null)}
+          onDelete={onDeleteMessage}
+          onClose={() => setDeleteTarget(null)}
         />
         <ShareDialog isOpen={shareOpen} slug={shareSlug} onClose={() => setShareOpen(false)} />
       </div>
@@ -1230,19 +1226,14 @@ function MessageList({
         onDownloadImage={handleDownloadImage}
       />
 
-      {/* 删除消息确认弹窗 */}
-      <ConfirmDialog
-        isOpen={!!deleteTarget}
+      <ChatDeleteMessageDialog
+        targetId={deleteTarget}
         title={t("chat.deleteMessageTitle")}
         description={t("chat.deleteMessageDesc")}
         confirmText={t("common.delete")}
         cancelText={t("common.cancel")}
-        variant="danger"
-        onConfirm={() => {
-          if (deleteTarget && onDeleteMessage) onDeleteMessage(deleteTarget);
-          setDeleteTarget(null);
-        }}
-        onCancel={() => setDeleteTarget(null)}
+        onDelete={onDeleteMessage}
+        onClose={() => setDeleteTarget(null)}
       />
 
     </div>
