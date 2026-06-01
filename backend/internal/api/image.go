@@ -219,6 +219,102 @@ func fitImageEditRequestSize(size image.Point) string {
 	return "1024x1024"
 }
 
+type editCanvasTransform struct {
+	Original image.Point
+	Canvas   image.Point
+	Content  image.Rectangle
+}
+
+func parseImageSize(size string) (image.Point, bool) {
+	var w, h int
+	if _, err := fmt.Sscanf(strings.TrimSpace(size), "%dx%d", &w, &h); err != nil || w <= 0 || h <= 0 {
+		return image.Point{}, false
+	}
+	return image.Point{X: w, Y: h}, true
+}
+
+func containRect(src, dst image.Point) image.Rectangle {
+	if src.X <= 0 || src.Y <= 0 || dst.X <= 0 || dst.Y <= 0 {
+		return image.Rect(0, 0, dst.X, dst.Y)
+	}
+	scaleX := float64(dst.X) / float64(src.X)
+	scaleY := float64(dst.Y) / float64(src.Y)
+	scale := scaleX
+	if scaleY < scale {
+		scale = scaleY
+	}
+	w := int(float64(src.X)*scale + 0.5)
+	h := int(float64(src.Y)*scale + 0.5)
+	if w < 1 {
+		w = 1
+	}
+	if h < 1 {
+		h = 1
+	}
+	if w > dst.X {
+		w = dst.X
+	}
+	if h > dst.Y {
+		h = dst.Y
+	}
+	x := (dst.X - w) / 2
+	y := (dst.Y - h) / 2
+	return image.Rect(x, y, x+w, y+h)
+}
+
+func scaleImageNearest(dst *image.RGBA, dstRect image.Rectangle, src image.Image, srcRect image.Rectangle) {
+	if dstRect.Empty() || srcRect.Empty() {
+		return
+	}
+	for y := dstRect.Min.Y; y < dstRect.Max.Y; y++ {
+		sy := srcRect.Min.Y + (y-dstRect.Min.Y)*srcRect.Dy()/dstRect.Dy()
+		if sy >= srcRect.Max.Y {
+			sy = srcRect.Max.Y - 1
+		}
+		for x := dstRect.Min.X; x < dstRect.Max.X; x++ {
+			sx := srcRect.Min.X + (x-dstRect.Min.X)*srcRect.Dx()/dstRect.Dx()
+			if sx >= srcRect.Max.X {
+				sx = srcRect.Max.X - 1
+			}
+			dst.Set(x, y, src.At(sx, sy))
+		}
+	}
+}
+
+func prepareImageEditCanvas(sourcePath, requestSize string, original image.Point) (string, editCanvasTransform, func(), error) {
+	canvas, ok := parseImageSize(requestSize)
+	if !ok || original.X <= 0 || original.Y <= 0 || (canvas.X == original.X && canvas.Y == original.Y) {
+		return sourcePath, editCanvasTransform{Original: original, Canvas: original, Content: image.Rect(0, 0, original.X, original.Y)}, func() {}, nil
+	}
+	file, err := os.Open(sourcePath)
+	if err != nil {
+		return "", editCanvasTransform{}, nil, fmt.Errorf("打开源图失败: %w", err)
+	}
+	defer file.Close()
+	src, _, err := image.Decode(file)
+	if err != nil {
+		return "", editCanvasTransform{}, nil, fmt.Errorf("解码源图失败: %w", err)
+	}
+	content := containRect(original, canvas)
+	dst := image.NewRGBA(image.Rect(0, 0, canvas.X, canvas.Y))
+	scaleImageNearest(dst, content, src, src.Bounds())
+	tmp, err := os.CreateTemp("", "aipool-edit-canvas-*.png")
+	if err != nil {
+		return "", editCanvasTransform{}, nil, fmt.Errorf("创建临时编辑画布失败: %w", err)
+	}
+	if err := png.Encode(tmp, dst); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return "", editCanvasTransform{}, nil, fmt.Errorf("编码临时编辑画布失败: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmp.Name())
+		return "", editCanvasTransform{}, nil, fmt.Errorf("写入临时编辑画布失败: %w", err)
+	}
+	cleanup := func() { _ = os.Remove(tmp.Name()) }
+	return tmp.Name(), editCanvasTransform{Original: original, Canvas: canvas, Content: content}, cleanup, nil
+}
+
 // saveBase64Image 将 base64 数据保存为本地图片文件，返回文件名
 func saveBase64Image(b64Data string) (string, error) {
 	if err := os.MkdirAll(imageAssetsDir(), 0755); err != nil {
@@ -237,6 +333,10 @@ func saveBase64Image(b64Data string) (string, error) {
 }
 
 func saveBase64ImageWithTargetSize(b64Data string, target image.Point) (string, error) {
+	return saveBase64ImageWithTransform(b64Data, target, editCanvasTransform{})
+}
+
+func saveBase64ImageWithTransform(b64Data string, target image.Point, transform editCanvasTransform) (string, error) {
 	if target.X <= 0 || target.Y <= 0 {
 		return saveBase64Image(b64Data)
 	}
@@ -251,7 +351,23 @@ func saveBase64ImageWithTargetSize(b64Data string, target image.Point) (string, 
 	if err != nil {
 		return "", fmt.Errorf("解码图片失败: %w", err)
 	}
-	if src.Bounds().Dx() == target.X && src.Bounds().Dy() == target.Y {
+	srcBounds := src.Bounds()
+	if transform.Original.X == target.X && transform.Original.Y == target.Y && transform.Canvas.X > 0 && transform.Canvas.Y > 0 && !transform.Content.Empty() {
+		canvasBounds := image.Rect(0, 0, transform.Canvas.X, transform.Canvas.Y)
+		if srcBounds.Dx() != transform.Canvas.X || srcBounds.Dy() != transform.Canvas.Y {
+			resizedCanvas := image.NewRGBA(canvasBounds)
+			scaleImageNearest(resizedCanvas, canvasBounds, src, srcBounds)
+			src = resizedCanvas
+			srcBounds = resizedCanvas.Bounds()
+		}
+		content := transform.Content.Intersect(srcBounds)
+		if !content.Empty() {
+			dst := image.NewRGBA(image.Rect(0, 0, target.X, target.Y))
+			scaleImageNearest(dst, dst.Bounds(), src, content)
+			return writePNGImage(dst)
+		}
+	}
+	if srcBounds.Dx() == target.X && srcBounds.Dy() == target.Y {
 		filename := generateFileName()
 		path := filepath.Join(imageAssetsDir(), filename)
 		if err := os.WriteFile(path, data, 0644); err != nil {
@@ -260,14 +376,11 @@ func saveBase64ImageWithTargetSize(b64Data string, target image.Point) (string, 
 		return filename, nil
 	}
 	dst := image.NewRGBA(image.Rect(0, 0, target.X, target.Y))
-	sb := src.Bounds()
-	for y := 0; y < target.Y; y++ {
-		sy := sb.Min.Y + y*sb.Dy()/target.Y
-		for x := 0; x < target.X; x++ {
-			sx := sb.Min.X + x*sb.Dx()/target.X
-			dst.Set(x, y, src.At(sx, sy))
-		}
-	}
+	scaleImageNearest(dst, dst.Bounds(), src, srcBounds)
+	return writePNGImage(dst)
+}
+
+func writePNGImage(img image.Image) (string, error) {
 	filename := generateFileName()
 	path := filepath.Join(imageAssetsDir(), filename)
 	out, err := os.Create(path)
@@ -275,7 +388,7 @@ func saveBase64ImageWithTargetSize(b64Data string, target image.Point) (string, 
 		return "", fmt.Errorf("创建图片文件失败: %w", err)
 	}
 	defer out.Close()
-	if err := png.Encode(out, dst); err != nil {
+	if err := png.Encode(out, img); err != nil {
 		return "", fmt.Errorf("编码图片失败: %w", err)
 	}
 	return filename, nil
@@ -681,6 +794,20 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 		size = "1024x1024"
 	}
 
+	providerImagePath := imageFilePath
+	canvasTransform := editCanvasTransform{Original: targetSize, Canvas: targetSize, Content: image.Rect(0, 0, targetSize.X, targetSize.Y)}
+	cleanupEditCanvas := func() {}
+	if req.EditMode == "remove-bg" && targetSize.X > 0 && targetSize.Y > 0 {
+		preparedPath, transform, cleanup, prepErr := prepareImageEditCanvas(imageFilePath, size, targetSize)
+		if prepErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "准备原尺寸编辑画布失败: " + prepErr.Error()})
+			return
+		}
+		providerImagePath = preparedPath
+		canvasTransform = transform
+		cleanupEditCanvas = cleanup
+	}
+
 	editPrompt := req.Prompt
 	switch req.EditMode {
 	case "remove-bg":
@@ -730,7 +857,10 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 	}
 
 	// 图片编辑耗时可能超过前置代理/Cloudflare 允许的同步等待时间，必须异步处理，前端按 id 轮询状态。
-	go h.processImageEditJob(gen.ID, editPrompt, size, "medium", []string{imageFilePath}, maskFilePath, baseURL, targetSize)
+	go func() {
+		defer cleanupEditCanvas()
+		h.processImageEditJob(gen.ID, editPrompt, size, "medium", []string{providerImagePath}, maskFilePath, baseURL, targetSize, canvasTransform)
+	}()
 
 	c.JSON(http.StatusOK, gin.H{
 		"id":         gen.ID,
@@ -920,10 +1050,10 @@ func (h *ImageHandler) AutoMigrate() error {
 
 // processImageJob 后台处理单个图片生成任务（用于异步 goroutine 和启动恢复）
 func (h *ImageHandler) processImageJob(recordID uint, prompt, size, quality string, referenceImagePaths []string, baseURL string) {
-	h.processImageEditJob(recordID, prompt, size, quality, referenceImagePaths, "", baseURL, image.Point{})
+	h.processImageEditJob(recordID, prompt, size, quality, referenceImagePaths, "", baseURL, image.Point{}, editCanvasTransform{})
 }
 
-func (h *ImageHandler) processImageEditJob(recordID uint, prompt, size, quality string, referenceImagePaths []string, maskPath string, baseURL string, targetSize image.Point) {
+func (h *ImageHandler) processImageEditJob(recordID uint, prompt, size, quality string, referenceImagePaths []string, maskPath string, baseURL string, targetSize image.Point, transform editCanvasTransform) {
 	ctx := context.Background()
 
 	var imageURL, b64Data string
@@ -958,7 +1088,7 @@ func (h *ImageHandler) processImageEditJob(recordID uint, prompt, size, quality 
 
 	// 处理 b64_json
 	if b64Data != "" {
-		filename, err := saveBase64ImageWithTargetSize(b64Data, targetSize)
+		filename, err := saveBase64ImageWithTransform(b64Data, targetSize, transform)
 		if err != nil {
 			fmt.Printf("[保存图片失败] ID=%d err=%v\n", recordID, err)
 			if saveErr := h.db.Model(&services.ImageGeneration{}).Where("id = ?", recordID).Updates(map[string]interface{}{
