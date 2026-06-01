@@ -12,11 +12,19 @@ const LazySyntaxHighlighter = dynamic(() => import("../LazySyntaxHighlighter"), 
 
 const LONG_CODE_CHAR_THRESHOLD = 4000;
 const LONG_CODE_LINE_THRESHOLD = 120;
+const LONG_CODE_PREVIEW_CHAR_LIMIT = 1200;
+
+function formatCodeSize(lineCount: number, charCount: number) {
+  const charLabel = charCount >= 1000 ? `${(charCount / 1000).toFixed(1)}k 字符` : `${charCount} 字符`;
+  return `${lineCount} 行 / ${charLabel}`;
+}
 
 export default function CodeBlock({ language, value }: { language: string; value: string }) {
   const [copied, setCopied] = useState(false);
   const lineCount = value.split("\n").length;
-  const isLongCode = value.length >= LONG_CODE_CHAR_THRESHOLD || lineCount >= LONG_CODE_LINE_THRESHOLD;
+  const charCount = value.length;
+  const codeSizeLabel = formatCodeSize(lineCount, charCount);
+  const isLongCode = charCount >= LONG_CODE_CHAR_THRESHOLD || lineCount >= LONG_CODE_LINE_THRESHOLD;
   const [expanded, setExpanded] = useState(!isLongCode);
 
   const handleCopy = () => {
@@ -37,15 +45,18 @@ export default function CodeBlock({ language, value }: { language: string; value
               type="button"
               onClick={() => setExpanded((value) => !value)}
               className="inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] text-gray-500 transition-colors hover:bg-surface-card hover:text-gray-800 dark:text-gray-400 dark:hover:text-white"
+              data-testid="markdown-code-collapse-toggle"
+              aria-expanded={expanded}
             >
               <ChevronDown className={cn("h-3 w-3 transition-transform", expanded && "rotate-180")} />
-              {expanded ? "收起" : `代码块较长，已折叠 · ${lineCount} 行`}
+              {expanded ? `收起 · ${codeSizeLabel}` : `代码块较长，已折叠 · ${codeSizeLabel}`}
             </button>
           )}
           <button
             type="button"
             onClick={handleCopy}
             className="flex items-center gap-1 text-[11px] transition-colors opacity-100 text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white"
+            data-testid="markdown-code-copy-button"
           >
             {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
             {copied ? "已复制" : "复制"}
@@ -55,9 +66,9 @@ export default function CodeBlock({ language, value }: { language: string; value
       {expanded ? (
         <LazySyntaxHighlighter language={language} value={value} />
       ) : (
-        <div className="bg-[#0D1117] px-4 py-3 text-[13px] text-gray-300">
-          <pre className="max-h-28 overflow-hidden whitespace-pre-wrap break-words font-mono">{value.slice(0, 1200)}</pre>
-          <div className="mt-2 text-[11px] text-gray-500">点击展开查看完整代码并加载高亮</div>
+        <div className="bg-[#0D1117] px-4 py-3 text-[13px] text-gray-300" data-testid="markdown-code-collapsed-preview">
+          <pre className="max-h-28 overflow-hidden whitespace-pre-wrap break-words font-mono">{value.slice(0, LONG_CODE_PREVIEW_CHAR_LIMIT)}</pre>
+          <div className="mt-2 text-[11px] text-gray-500">点击展开查看完整代码并加载高亮 · {codeSizeLabel}</div>
         </div>
       )}
     </div>

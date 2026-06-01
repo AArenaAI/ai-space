@@ -24,6 +24,7 @@ export type CommonChatRequestOptions = {
   model: string;
   messages: ModelMessage[];
   conversationId?: number;
+  notebookId?: number;
   reasoningEnabled: boolean;
   reasoningEffort?: string;
   search: boolean;
@@ -40,6 +41,7 @@ export function buildSingleChatRequestBody({
   model,
   messages,
   conversationId,
+  notebookId,
   reasoningEnabled,
   reasoningEffort,
   search,
@@ -53,6 +55,7 @@ export function buildSingleChatRequestBody({
     messages,
     stream: true,
     conversation_id: conversationId,
+    notebook_id: notebookId,
     reasoning: reasoningEnabled,
     reasoning_effort: reasoningEffort || "high",
     search,
@@ -77,6 +80,7 @@ export function buildCompareChatRequestBody({
   model,
   messages,
   conversationId,
+  notebookId,
   reasoningEnabled,
   reasoningEffort,
   search,
@@ -96,6 +100,7 @@ export function buildCompareChatRequestBody({
     messages,
     stream: true,
     conversation_id: conversationId,
+    notebook_id: notebookId,
     reasoning: reasoningEnabled,
     reasoning_effort: reasoningEffort || "high",
     search,

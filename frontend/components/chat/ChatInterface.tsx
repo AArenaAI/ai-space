@@ -8,7 +8,7 @@ import MessageList from "./MessageList";
 import MessageInput, { ReasoningConfig, type QuoteDraft } from "./MessageInput";
 import ModelSelector from "./ModelSelector";
 import ThemeToggle from "@/components/theme/ThemeToggle";
-import { Zap, X, Pencil, Bot } from "lucide-react";
+import { Zap, X, Pencil, Bot, BookOpen, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { showUserError } from "@/lib/errors";
@@ -28,6 +28,9 @@ const COMPARE_MODELS_KEY = "compare-models";
 
 interface ChatInterfaceProps {
   conversationId?: number;
+  notebookId?: number;
+  notebookTitle?: string;
+  notebookFileCount?: number;
   models: ChatModel[];
   skillKey?: string;
   recommendedModel?: ChatModel;
@@ -37,7 +40,7 @@ interface ChatInterfaceProps {
   targetMessageId?: number;
 }
 
-export default function ChatInterface({ conversationId, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId }: ChatInterfaceProps) {
+export default function ChatInterface({ conversationId, notebookId, notebookTitle, notebookFileCount, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId }: ChatInterfaceProps) {
   const { t } = useI18n();
   const [compareMode, setCompareMode] = useState(false);
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
@@ -92,7 +95,7 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
     isLoadingMore,
     hasMoreMessages,
     loadMoreMessages,
-  } = useChat(conversationId, models, skillKey);
+  } = useChat(conversationId, models, skillKey, notebookId);
 
   const { templates } = useTemplates();
 
@@ -145,6 +148,9 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
       url.searchParams.set("id", String(currentConversation));
       if (!url.searchParams.get("key") && effectiveSkillKey) {
         url.searchParams.set("key", effectiveSkillKey);
+      }
+      if (notebookId) {
+        url.searchParams.set("notebook_id", String(notebookId));
       }
       window.history.replaceState({}, "", url.toString());
     }
@@ -395,6 +401,16 @@ export default function ChatInterface({ conversationId, models, skillKey, recomm
           )}
 
           <div className="flex items-center gap-2">
+            {notebookId && (
+              <div className="hidden items-center gap-2 rounded-full border border-brand-border bg-brand-muted px-3 py-1.5 text-xs font-medium text-brand sm:flex">
+                <BookOpen className="h-3.5 w-3.5" />
+                <span className="max-w-[180px] truncate">{notebookTitle || t("sidebar.nav.notebook")}</span>
+                <span className="inline-flex items-center gap-1 text-brand/80">
+                  <FileText className="h-3 w-3" />
+                  {notebookFileCount ?? 0}
+                </span>
+              </div>
+            )}
             <ThemeToggle />
           </div>
         </header>

@@ -42,6 +42,7 @@ export type UseChatSingleSendRuntimeOptions = {
   messages: Message[];
   selectedModel: ChatModel;
   currentConversation: number | undefined;
+  notebookId?: number;
   effectiveSkillKey: string | undefined;
   createConversation: CreateConversationAction;
   setMessages: Dispatch<SetStateAction<Message[]>>;
@@ -64,6 +65,7 @@ export function useChatSingleSendRuntime({
   messages,
   selectedModel,
   currentConversation,
+  notebookId,
   effectiveSkillKey,
   createConversation,
   setMessages,
@@ -147,6 +149,7 @@ export function useChatSingleSendRuntime({
           modelId: selectedModel.id,
           modelMessages: toModelMessages(contextMessages),
           conversationId: convId,
+          notebookId,
           reasoning,
           search,
           templateId,
@@ -187,6 +190,7 @@ export function useChatSingleSendRuntime({
       messages,
       selectedModel,
       currentConversation,
+      notebookId,
       createConversation,
       streamResponse,
       effectiveSkillKey,

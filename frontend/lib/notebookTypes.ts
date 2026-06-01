@@ -1,0 +1,36 @@
+export type NotebookFile = {
+  id: number;
+  notebook_id: number;
+  file_id: number;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  file: {
+    id: number;
+    public_id: string;
+    filename: string;
+    mime_type: string;
+    size: number;
+    parse_status: "pending" | "parsing" | "done" | "error" | "unsupported" | string;
+    embedding_status: "pending" | "indexing" | "done" | "error" | "skipped" | string;
+    error_message?: string;
+    summary?: string;
+    page_count?: number;
+    token_count?: number;
+    created_at: string;
+    updated_at: string;
+  };
+};
+
+export type Notebook = {
+  id: number;
+  user_id: number;
+  workspace_id: number;
+  title: string;
+  description: string;
+  cover_icon: string;
+  created_at: string;
+  updated_at: string;
+  file_count?: number;
+  files?: NotebookFile[];
+};

@@ -159,6 +159,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	authorized.Use(middleware.AuthMiddleware(cfg))
 	{
 		convHandler := NewConversationHandler(db)
+		notebookHandler := NewNotebookHandler(db)
 		documentArtifactHandler := NewDocumentArtifactHandler(db)
 		documentArtifactHandler.AutoMigrate()
 		authorized.GET("/conversations", convHandler.List)
@@ -170,6 +171,16 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		authorized.GET("/conversations/:id/messages", convHandler.GetMessages)
 		authorized.GET("/conversations/:id/messages/:message_id", convHandler.GetMessage)
 		authorized.POST("/conversations/:id/messages", convHandler.AddMessage)
+
+		// 笔记本知识库路由
+		authorized.GET("/notebooks", notebookHandler.List)
+		authorized.POST("/notebooks", notebookHandler.Create)
+		authorized.GET("/notebooks/:id", notebookHandler.Get)
+		authorized.PUT("/notebooks/:id", notebookHandler.Update)
+		authorized.DELETE("/notebooks/:id", notebookHandler.Delete)
+		authorized.GET("/notebooks/:id/files", notebookHandler.ListFiles)
+		authorized.POST("/notebooks/:id/files", notebookHandler.AddFile)
+		authorized.DELETE("/notebooks/:id/files/:file_id", notebookHandler.RemoveFile)
 
 		// 文档研读生成文件路由
 		authorized.GET("/document-artifacts", documentArtifactHandler.List)

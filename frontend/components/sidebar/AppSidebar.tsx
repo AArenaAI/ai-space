@@ -13,7 +13,7 @@ function cleanPathname(p: string | null): string {
 import { createPortal } from "react-dom";
 import {
   MessageSquare, Palette, Presentation, LogIn, LogOut,
-  PanelLeftClose, MessageSquarePlus, Search, ChevronRight,
+  PanelLeftClose, MessageSquarePlus, Search, ChevronRight, Plus,
   User, Trash2, MoreHorizontal, Pencil, Pin, PinOff, Link2, Check,
   FileText, LayoutGrid, X, Clock, Sparkles, Image, ImageIcon, Video, Eraser,
   Type, ZoomIn, Brush, Paintbrush,
@@ -31,6 +31,8 @@ import { useTheme } from "@/components/theme/ThemeProvider";
 import { usePlatform } from "@/hooks/usePlatform";
 import { CREATIVE_PAGE_HREFS, CREATIVE_PAGE_PATHS } from "./ToolsSidebar";
 import { WORK_PAGE_HREFS, WORK_PAGE_PATHS } from "./WorkToolsSidebar";
+import { createNotebook, fetchNotebooks } from "@/lib/notebookApi";
+import type { Notebook } from "@/lib/notebookTypes";
 
 const isPathInGroup = (pathname: string | null, paths: string[]) => {
   const clean = cleanPathname(pathname);
@@ -55,6 +57,18 @@ interface ConversationSearchResult extends Conversation {
   matched_role?: string;
   matched_message_id?: number;
 }
+
+const NOTEBOOK_DEMOS: Array<Pick<Notebook, "id" | "title" | "description" | "file_count" | "updated_at"> & { demo?: boolean; color: string }> = [
+  { id: -1, title: "Demo: Introduction to Wisebase", description: "Learn how notebooks organize sources", file_count: 3, updated_at: new Date().toISOString(), demo: true, color: "text-violet-500 bg-violet-500/10" },
+  { id: -2, title: "Demo: Research on LLMs", description: "Research notes and source Q&A", file_count: 5, updated_at: new Date().toISOString(), demo: true, color: "text-orange-500 bg-orange-500/10" },
+  { id: -3, title: "Demo: NVIDIA Business Outlook", description: "Business analysis knowledge base", file_count: 4, updated_at: new Date().toISOString(), demo: true, color: "text-emerald-500 bg-emerald-500/10" },
+];
+
+type SidebarNotebookItem = Pick<Notebook, "id" | "title" | "description" | "file_count" | "updated_at"> & {
+  color: string;
+  itemKey: string;
+  demo?: boolean;
+};
 
 /* ───── 辅助函数 ───── */
 
@@ -358,6 +372,15 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   const [searchResults, setSearchResults] = useState<ConversationSearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchSelectedIndex, setSearchSelectedIndex] = useState(-1);
+  const [notebooks, setNotebooks] = useState<Notebook[]>([]);
+  const [notebooksLoading, setNotebooksLoading] = useState(false);
+  const [notebookCreateOpen, setNotebookCreateOpen] = useState(false);
+  const [notebookCreating, setNotebookCreating] = useState(false);
+  const [notebookOrder, setNotebookOrder] = useState<string[]>([]);
+  const [draggingNotebookKey, setDraggingNotebookKey] = useState<string | null>(null);
+  const draggingNotebookKeyRef = useRef<string | null>(null);
+  const notebookLongPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const notebookLongPressTriggeredRef = useRef(false);
   const searchListRef = useRef<HTMLDivElement>(null);
   const rawPathname = usePathname();
   const pathname = cleanPathname(rawPathname);
@@ -508,6 +531,33 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
 
+  const loadNotebooks = useCallback(async () => {
+    setNotebooksLoading(true);
+    try {
+      setNotebooks(await fetchNotebooks(currentWS?.id));
+    } catch {
+      setNotebooks([]);
+    } finally {
+      setNotebooksLoading(false);
+    }
+  }, [currentWS?.id]);
+
+  useEffect(() => { loadNotebooks(); }, [loadNotebooks]);
+
+  useEffect(() => {
+    const h = () => loadNotebooks();
+    window.addEventListener("notebook-created", h);
+    window.addEventListener("workspace-changed", h);
+    window.addEventListener("user-login", h);
+    window.addEventListener("user-logout", h);
+    return () => {
+      window.removeEventListener("notebook-created", h);
+      window.removeEventListener("workspace-changed", h);
+      window.removeEventListener("user-login", h);
+      window.removeEventListener("user-logout", h);
+    };
+  }, [loadNotebooks]);
+
   /* —— 搜索 —— */
   useEffect(() => {
     const q = searchQuery.trim();
@@ -646,6 +696,119 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
       router.push(`/skills/chat?key=${skillKey}&t=${ts}`);
     } else {
       router.push(`/chat?t=${ts}`);
+    }
+  };
+
+  const notebookOrderStorageKey = `sidebar_notebook_order_${currentWS?.id || "all"}`;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const saved = localStorage.getItem(notebookOrderStorageKey);
+      setNotebookOrder(saved ? JSON.parse(saved) : []);
+    } catch {
+      setNotebookOrder([]);
+    }
+  }, [notebookOrderStorageKey]);
+
+  const saveNotebookOrder = useCallback((next: string[]) => {
+    setNotebookOrder(next);
+    try {
+      localStorage.setItem(notebookOrderStorageKey, JSON.stringify(next));
+    } catch {
+      // 本地排序失败不影响导航功能。
+    }
+  }, [notebookOrderStorageKey]);
+
+  const sidebarNotebookItems = useMemo<SidebarNotebookItem[]>(() => {
+    const colors = ["text-violet-500 bg-violet-500/10", "text-orange-500 bg-orange-500/10", "text-emerald-500 bg-emerald-500/10"];
+    const realItems = notebooks.map((item, index) => ({
+      ...item,
+      itemKey: `notebook:${item.id}`,
+      color: colors[index % colors.length],
+    }));
+    const demoItems = NOTEBOOK_DEMOS.map((item) => ({
+      ...item,
+      itemKey: `demo:${Math.abs(item.id)}`,
+    }));
+    const grouped = [...realItems, ...demoItems];
+    const byKey = new Map(grouped.map((item) => [item.itemKey, item]));
+    const ordered = notebookOrder.map((key) => byKey.get(key)).filter(Boolean) as SidebarNotebookItem[];
+    const missingReal = realItems.filter((item) => !notebookOrder.includes(item.itemKey));
+    const missingDemo = demoItems.filter((item) => !notebookOrder.includes(item.itemKey));
+    return [...missingReal, ...ordered, ...missingDemo];
+  }, [notebooks, notebookOrder]);
+
+  const moveNotebookItem = useCallback((fromKey: string, toKey: string) => {
+    if (fromKey === toKey) return;
+    const keys = sidebarNotebookItems.map((item) => item.itemKey);
+    const fromIndex = keys.indexOf(fromKey);
+    const toIndex = keys.indexOf(toKey);
+    if (fromIndex < 0 || toIndex < 0) return;
+    const next = [...keys];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    saveNotebookOrder(next);
+  }, [saveNotebookOrder, sidebarNotebookItems]);
+
+  const startNotebookLongPress = useCallback((key: string) => {
+    notebookLongPressTriggeredRef.current = false;
+    if (notebookLongPressRef.current) clearTimeout(notebookLongPressRef.current);
+    notebookLongPressRef.current = setTimeout(() => {
+      notebookLongPressTriggeredRef.current = true;
+      draggingNotebookKeyRef.current = key;
+      setDraggingNotebookKey(key);
+    }, 280);
+  }, []);
+
+  const clearNotebookLongPress = useCallback(() => {
+    if (notebookLongPressRef.current) {
+      clearTimeout(notebookLongPressRef.current);
+      notebookLongPressRef.current = null;
+    }
+  }, []);
+
+  const finishNotebookDrag = useCallback(() => {
+    clearNotebookLongPress();
+    draggingNotebookKeyRef.current = null;
+    setDraggingNotebookKey(null);
+  }, [clearNotebookLongPress]);
+
+  useEffect(() => {
+    if (!draggingNotebookKey) return;
+    const handlePointerMove = (event: PointerEvent) => {
+      const fromKey = draggingNotebookKeyRef.current;
+      if (!fromKey) return;
+      const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-notebook-item-key]");
+      const targetKey = target?.dataset.notebookItemKey;
+      if (targetKey && targetKey !== fromKey) {
+        moveNotebookItem(fromKey, targetKey);
+      }
+    };
+    window.addEventListener("pointermove", handlePointerMove, { passive: true });
+    window.addEventListener("pointerup", finishNotebookDrag);
+    window.addEventListener("pointercancel", finishNotebookDrag);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", finishNotebookDrag);
+      window.removeEventListener("pointercancel", finishNotebookDrag);
+    };
+  }, [draggingNotebookKey, finishNotebookDrag, moveNotebookItem]);
+
+  const handleNotebookCreate = async (title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    setNotebookCreating(true);
+    try {
+      const notebook = await createNotebook({ title: trimmed, workspace_id: currentWS?.id });
+      setNotebookCreateOpen(false);
+      setNotebooks(prev => [notebook, ...prev.filter(item => item.id !== notebook.id)]);
+      window.dispatchEvent(new CustomEvent("notebook-created", { detail: { id: notebook.id, title: notebook.title } }));
+      router.push(`/notebooks/detail?notebook_id=${notebook.id}`);
+    } catch {
+      // 列表页会负责更详细的错误提示；侧边栏保持轻量，不打断用户。
+    } finally {
+      setNotebookCreating(false);
     }
   };
 
@@ -940,18 +1103,29 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
             {/* 分隔线 - Agents 与笔记本分组之间 */}
             <div className="w-6 h-px bg-surface-border/40 my-2" />
 
-            {/* 笔记本分组 */}
+            {/* 收藏 / 笔记本分组 */}
             <div className="py-2 flex flex-col items-center space-y-0.5">
               <Link
                 href="/favorites"
-                onMouseEnter={showSidebarTooltip(`${t("sidebar.nav.notebook")} · ${t("sidebar.tooltip.favorites")}`)}
+                onMouseEnter={showSidebarTooltip(t("sidebar.tooltip.favorites"))}
                 onMouseLeave={hideSidebarTooltip}
                 className={cn(
                   "p-2.5 rounded-xl transition-colors",
-                  pathname === "/favorites" ? "bg-amber-400/10 text-amber-400" : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
+                  isPathInGroup(pathname, ["/favorites"]) ? "bg-brand-muted text-brand" : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
                 )}
               >
-                <Star className={cn("w-5 h-5", pathname === "/favorites" ? "text-amber-400 fill-amber-400" : "text-text-tertiary")} />
+                <Star className={cn("w-5 h-5", isPathInGroup(pathname, ["/favorites"]) ? "text-brand" : "text-text-tertiary")} />
+              </Link>
+              <Link
+                href="/notebooks"
+                onMouseEnter={showSidebarTooltip(t("sidebar.nav.notebook"))}
+                onMouseLeave={hideSidebarTooltip}
+                className={cn(
+                  "p-2.5 rounded-xl transition-colors",
+                  isPathInGroup(pathname, ["/notebooks"]) ? "bg-brand-muted text-brand" : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
+                )}
+              >
+                <BookOpen className={cn("w-5 h-5", isPathInGroup(pathname, ["/notebooks"]) ? "text-brand" : "text-text-tertiary")} />
               </Link>
             </div>
 
@@ -1052,22 +1226,84 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
               </div>
             </div>
 
-            {/* ▼ 笔记本分组 */}
+            {/* ▼ 笔记本 / 收藏分组 */}
             <div className="px-3 py-2">
-              <div className="mb-2 px-1">
-                <span className="text-xs font-medium text-slate-400 tracking-wide dark:text-text-tertiary/80">{t("sidebar.nav.notebook")}</span>
-              </div>
               <div className="space-y-0.5">
+                <div className="flex items-center justify-between px-1 mb-1">
+                  <button
+                    type="button"
+                    onClick={() => router.push("/notebooks")}
+                    className={cn(
+                      "min-w-0 truncate rounded-md px-1 text-left text-xs font-medium tracking-wide transition hover:text-slate-700 dark:hover:text-text-secondary",
+                      isPathInGroup(pathname, ["/notebooks"]) ? "text-brand" : "text-slate-400 dark:text-text-tertiary/80"
+                    )}
+                  >
+                    {t("sidebar.nav.notebook")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setNotebookCreateOpen(true); }}
+                    title={t("notebook.new")}
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-text-tertiary transition hover:bg-surface-card hover:text-brand"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+
                 <Link
                   href="/favorites"
                   className={cn(
                     "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-normal transition-all duration-150 w-full text-left",
-                    pathname === "/favorites" ? "bg-amber-400/10 text-slate-900 font-medium dark:text-text-primary" : "text-slate-500 hover:bg-surface-card hover:text-slate-900 dark:text-text-secondary dark:hover:text-text-primary"
+                    isPathInGroup(pathname, ["/favorites"]) ? "bg-brand-muted text-text-primary font-medium" : "text-slate-500 hover:bg-surface-card hover:text-slate-900 dark:text-text-secondary dark:hover:text-text-primary"
                   )}
                 >
-                  <Star className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/favorites" ? "text-amber-400 fill-amber-400" : "text-text-tertiary")} />
-                  <span>{t("sidebar.nav.favorites")}</span>
+                  <Star className={cn("w-[18px] h-[18px] shrink-0 transition-colors", isPathInGroup(pathname, ["/favorites"]) ? "text-brand" : "text-text-tertiary")} />
+                  <span>{t("sidebar.tooltip.favorites")}</span>
                 </Link>
+
+                {notebooksLoading && notebooks.length === 0 ? (
+                  <div className="space-y-1">
+                    {[0, 1, 2].map((i) => <div key={i} className="h-9 rounded-xl bg-surface-border/50 animate-pulse" />)}
+                  </div>
+                ) : sidebarNotebookItems.map((notebook) => {
+                  const isDemo = "demo" in notebook && notebook.demo;
+                  const href = isDemo ? "/notebooks" : `/notebooks/detail?notebook_id=${notebook.id}`;
+                  return (
+                    <button
+                      key={notebook.itemKey}
+                      type="button"
+                      onPointerDown={(e) => {
+                        e.currentTarget.setPointerCapture?.(e.pointerId);
+                        startNotebookLongPress(notebook.itemKey);
+                      }}
+                      onPointerUp={finishNotebookDrag}
+                      onPointerCancel={finishNotebookDrag}
+                      onClick={(e) => {
+                        if (notebookLongPressTriggeredRef.current) {
+                          e.preventDefault();
+                          notebookLongPressTriggeredRef.current = false;
+                          return;
+                        }
+                        router.push(href);
+                      }}
+                      data-notebook-item-key={notebook.itemKey}
+                      title={notebook.title}
+                      className={cn(
+                        "group flex w-full touch-none items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-normal transition-all duration-150 select-none",
+                        draggingNotebookKey === notebook.itemKey ? "cursor-grabbing bg-brand-muted text-text-primary ring-1 ring-brand-border" : "cursor-pointer",
+                        draggingNotebookKey && draggingNotebookKey !== notebook.itemKey ? "ring-1 ring-transparent hover:ring-brand-border" : "",
+                        !isDemo && isPathInGroup(pathname, ["/notebooks"]) && searchParams.get("notebook_id") === String(notebook.id)
+                          ? "bg-brand-muted text-text-primary font-medium"
+                          : "text-slate-500 hover:bg-surface-card hover:text-slate-900 dark:text-text-secondary dark:hover:text-text-primary"
+                      )}
+                    >
+                      <span className={cn("flex w-[18px] h-[18px] shrink-0 items-center justify-center rounded-md", notebook.color || "text-brand bg-brand-muted")}>
+                        <BookOpen className="h-3.5 w-3.5" />
+                      </span>
+                      <span className="min-w-0 flex-1 truncate">{notebook.title || t("notebook.untitled")}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -1177,6 +1413,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
       {/* 弹窗 */}
       <ConfirmDialog isOpen={!!deleteTarget} title={t("sidebar.dialog.delete_title")} description={t("sidebar.dialog.delete_desc")} confirmText={t("sidebar.dialog.delete_confirm")} cancelText={t("sidebar.dialog.cancel")} variant="danger" onConfirm={confirmDelete} onCancel={() => setDeleteTarget(null)} />
       <InputDialog isOpen={!!renameTarget} title={t("sidebar.dialog.rename_title")} defaultValue={renameTarget?.title || ""} placeholder={t("sidebar.dialog.rename_placeholder")} confirmText={t("sidebar.dialog.save")} cancelText={t("sidebar.dialog.cancel")} onConfirm={handleRename} onCancel={() => setRenameTarget(null)} />
+      <InputDialog isOpen={notebookCreateOpen} title={t("notebook.createTitle")} defaultValue="" placeholder={t("notebook.createPlaceholder")} confirmText={notebookCreating ? t("common.processing") : t("common.confirm")} cancelText={t("common.cancel")} onConfirm={handleNotebookCreate} onCancel={() => setNotebookCreateOpen(false)} />
 
       {/* ── 搜索弹窗 ── */}
       {searchOpen && createPortal(

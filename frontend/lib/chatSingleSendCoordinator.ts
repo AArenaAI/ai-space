@@ -164,6 +164,7 @@ export type RunSingleChatRequestOptions<TAssistant extends SingleSendMessageLike
   modelId: string;
   modelMessages: ModelMessage[];
   conversationId?: number;
+  notebookId?: number;
   reasoning: SingleChatRunReasoningOptions;
   search: boolean;
   templateId: number;
@@ -187,6 +188,7 @@ export async function runSingleChatRequest<TAssistant extends SingleSendMessageL
   modelId,
   modelMessages,
   conversationId,
+  notebookId,
   reasoning,
   search,
   templateId,
@@ -204,6 +206,7 @@ export async function runSingleChatRequest<TAssistant extends SingleSendMessageL
       model: modelId,
       messages: modelMessages,
       conversationId,
+      notebookId,
       reasoningEnabled: reasoning.enabled,
       reasoningEffort: reasoning.effort,
       search,

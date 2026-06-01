@@ -97,7 +97,7 @@ export const MODELS: ChatModel[] = [
   },
 ];
 
-export function useChat(conversationId: number | undefined, models: ChatModel[], skillKey?: string) {
+export function useChat(conversationId: number | undefined, models: ChatModel[], skillKey?: string, notebookId?: number) {
   const { t } = useI18n();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -221,6 +221,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     models,
     selectedModel,
     currentConversation,
+    notebookId,
     effectiveSkillKey,
     setCreatedConversation,
     setMessages,

@@ -105,6 +105,7 @@ type ChatRequest struct {
 	GroupModels     []string           `json:"group_models,omitempty"`       // 本轮不可变模型快照
 	UserMessageID   uint               `json:"user_message_id,omitempty"`    // skip_save_user_msg 时复用的用户消息
 	WorkspaceID     uint               `json:"workspace_id,omitempty"`
+	NotebookID      uint               `json:"notebook_id,omitempty"` // 指定笔记本资料空间
 	SkillKey        string             `json:"skill_key,omitempty"` // 指定技能 key
 
 	// 本轮消息显式附件，只用于 message_files 展示，同时默认参与本轮 RAG
@@ -505,6 +506,7 @@ func (h *ChatHandler) buildChatFilePlan(req ChatRequest, userID uint, guestID st
 
 	_, _, messageFiles := h.resolveChatFiles(messagePublicIDs, userID, guestID)
 	_, _, contextFiles := h.resolveChatFiles(req.ContextFileIDs, userID, guestID)
+	notebookFiles := h.loadNotebookFiles(req.NotebookID, userID, guestID)
 
 	// 当前消息显式带了附件时，进入“当前附件隔离模式”：
 	// 只回答本轮上传/附加的文件，不把历史会话文件或显式 context_file_ids 混进来。
@@ -514,6 +516,10 @@ func (h *ChatHandler) buildChatFilePlan(req ChatRequest, userID uint, guestID st
 	historicalFiles := appendUniqueFiles(nil, contextFiles...)
 	if isCurrentAttachmentTurn {
 		historicalFiles = nil
+	}
+	if len(notebookFiles) > 0 && !isCurrentAttachmentTurn {
+		// 笔记本资料是显式选择的长期知识空间：默认参与本轮上下文，不要求问题命中文件关键词。
+		historicalFiles = appendUniqueFiles(historicalFiles, notebookFiles...)
 	}
 
 	mode := req.ContextPolicy.UseConversationFiles
@@ -804,6 +810,10 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		h.db.Create(&conv)
 		conversationID = conv.ID
 		req.ConversationID = conv.ID
+		h.attachNotebookConversation(req.NotebookID, conv.ID, userID)
+	}
+	if conversationID > 0 && req.NotebookID > 0 {
+		h.attachNotebookConversation(req.NotebookID, conversationID, userID)
 	}
 	// ========== 保存消息与会话结束 ==========
 
