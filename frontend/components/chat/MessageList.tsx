@@ -242,7 +242,7 @@ const ChatMessageOverview = memo(function ChatMessageOverview({ items, visible, 
           aria-hidden="true"
         />
         <div
-          className="chat-message-overview-scrollbar flex max-h-[min(520px,calc(100vh-160px))] flex-col items-end gap-1.5 overflow-hidden rounded-full bg-transparent py-2 pr-1.5 transition-[width,background-color,border-radius,box-shadow] duration-200 group-hover:w-[300px] group-hover:items-stretch group-hover:gap-1.5 group-hover:overflow-y-auto group-hover:rounded-2xl group-hover:border group-hover:border-surface-border/70 group-hover:bg-surface-elevated/95 group-hover:px-2 group-hover:pr-2 group-hover:shadow-2xl group-hover:shadow-black/20 dark:group-hover:bg-[#171717]/95"
+          className="chat-message-overview-scrollbar flex max-h-[min(520px,calc(100vh-160px))] flex-col items-end gap-1.5 overflow-hidden rounded-sm bg-transparent py-2 pr-1.5 transition-[width,background-color,box-shadow] duration-200 group-hover:w-[300px] group-hover:items-stretch group-hover:gap-1.5 group-hover:overflow-y-auto group-hover:rounded-2xl group-hover:border group-hover:border-surface-border/70 group-hover:bg-surface-elevated/95 group-hover:px-2 group-hover:pr-2 group-hover:shadow-2xl group-hover:shadow-black/20 dark:group-hover:bg-[#171717]/95"
           data-testid="chat-message-overview-panel"
         >
           {items.map((item) => (
@@ -263,7 +263,7 @@ const ChatMessageOverview = memo(function ChatMessageOverview({ items, visible, 
               </span>
               <span
                 className={cn(
-                  "h-[6px] w-[6px] shrink-0 rounded-full transition-[width,height,border-radius,background-color] duration-200 group-hover:h-[2px] group-hover:w-4 group-hover:rounded-sm",
+                  "h-[6px] w-[6px] shrink-0 rounded-full group-hover:h-[2px] group-hover:w-4 group-hover:rounded-sm",
                   item.active
                     ? "bg-brand shadow-[0_0_0_1px_rgba(255,255,255,0.16)]"
                     : "bg-slate-400/50 group-hover:bg-slate-400/60 dark:bg-slate-500/45 dark:group-hover:bg-slate-400/60 green:bg-[#405E3D]/45 green:group-hover:bg-[#405E3D]/65"
