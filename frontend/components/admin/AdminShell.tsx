@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { BarChart3, Bot, ClipboardList, CreditCard, Home, LayoutDashboard, LogOut, Settings, Shield, Users } from "lucide-react";
+import { clearAdminSession } from "@/lib/admin/api";
 import { cn } from "@/lib/utils";
 
 const ADMIN_BASE = "/admin";
@@ -21,9 +22,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    router.push("/login");
+    clearAdminSession();
+    router.push("/admin/login");
   };
 
   return (

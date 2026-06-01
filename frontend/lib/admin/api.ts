@@ -34,8 +34,27 @@ async function readErrorMessage(response: Response) {
   }
 }
 
+const ADMIN_TOKEN_KEY = "admin_token";
+const ADMIN_USER_KEY = "admin_user";
+
+export function getStoredAdminToken() {
+  return typeof window !== "undefined" ? localStorage.getItem(ADMIN_TOKEN_KEY) : null;
+}
+
+export function storeAdminSession(token: string, user: AdminUser) {
+  localStorage.setItem(ADMIN_TOKEN_KEY, token);
+  localStorage.setItem(ADMIN_USER_KEY, JSON.stringify(user));
+  window.dispatchEvent(new Event("admin-auth-changed"));
+}
+
+export function clearAdminSession() {
+  localStorage.removeItem(ADMIN_TOKEN_KEY);
+  localStorage.removeItem(ADMIN_USER_KEY);
+  window.dispatchEvent(new Event("admin-auth-changed"));
+}
+
 export async function adminFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+  const token = getStoredAdminToken();
   const response = await fetch(`/api/admin${path}`, {
     ...options,
     headers: {

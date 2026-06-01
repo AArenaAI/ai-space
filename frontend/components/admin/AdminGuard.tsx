@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Loader2, ShieldAlert } from "lucide-react";
-import { getAdminMe, AdminApiError } from "@/lib/admin/api";
+import { getAdminMe, AdminApiError, clearAdminSession, getStoredAdminToken } from "@/lib/admin/api";
 import type { AdminUser } from "@/lib/admin/types";
 
 type GuardState =
@@ -18,9 +18,9 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    const token = localStorage.getItem("token");
+    const token = getStoredAdminToken();
     if (!token) {
-      router.replace(`/login?next=${encodeURIComponent(pathname || "/admin")}`);
+      router.replace(`/admin/login?returnUrl=${encodeURIComponent(pathname || "/admin")}`);
       return;
     }
     getAdminMe()
@@ -31,7 +31,8 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
       .catch((error) => {
         if (cancelled) return;
         if (error instanceof AdminApiError && error.status === 401) {
-          router.replace(`/login?next=${encodeURIComponent(pathname || "/admin")}`);
+          clearAdminSession();
+          router.replace(`/admin/login?returnUrl=${encodeURIComponent(pathname || "/admin")}`);
           return;
         }
         setState({ status: "denied", message: error instanceof Error ? error.message : "你没有访问后台管理的权限。" });
