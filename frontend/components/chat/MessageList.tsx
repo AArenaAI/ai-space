@@ -21,7 +21,7 @@ const MarkdownRenderer = dynamic(() => import("./MarkdownRenderer"), {
   loading: () => null,
 });
 import ChatMessageListItem from "./ChatMessageListItem";
-import CompareColumnTurn from "./CompareColumnTurn";
+import ChatCompareGroupRow from "./ChatCompareGroupRow";
 import { type TextSelectionFloatingBarState } from "./TextSelectionFloatingBar";
 import ChatScrollProgress from "./ChatScrollProgress";
 import ChatMessageOverview, { type ChatMessageOverviewItem } from "./ChatMessageOverview";
@@ -1012,28 +1012,6 @@ function MessageList({
         || group.assistantMessages[colIndex];
     };
 
-    const renderCompareColumnTurn = (userMsg: Message, msg: Message | undefined, modelId: string, isLastGroup: boolean, isSingleChat: boolean) => (
-      <CompareColumnTurn
-        userMessage={userMsg}
-        assistantMessage={msg}
-        model={modelById.get(msg?.model || modelId || "")}
-        isLastGroup={isLastGroup}
-        isSingleChat={isSingleChat}
-        isLoading={isLoading}
-        isComplexTask={isComplexTask}
-        conversationId={conversationId}
-        deepReasoningLabel={t("chat.deepReasoning")}
-        imageLoadFailedLabel={t("chat.imageLoadFailed")}
-        MarkdownRenderer={LazyMarkdownRenderer}
-        onCopy={handleCopy}
-        onDelete={setDeleteTarget}
-        onRegenerate={onRegenerate}
-        onShareSelectMode={(id) => enterSelectMode("share", id)}
-        onFavoriteSelectMode={(id) => enterSelectMode("favorite", id)}
-        isFavorited={isFavorited}
-        onForkCompare={onForkCompare}
-      />
-    );
 
     return (
       <div className="relative flex-1 min-h-0 overflow-hidden flex flex-col">
@@ -1090,24 +1068,29 @@ function MessageList({
             increaseViewportBy={{ top: 200, bottom: CHAT_BOTTOM_SPACER }}
             overscan={{ main: 2, reverse: 2 }}
             components={compareVirtuosoComponents}
-            itemContent={(groupIndex, group) => {
-              const isLastGroup = groupIndex === compareGroups.length - 1;
-              const isSingleChat = group.models.length <= 1;
-              return (
-                <div className="mx-auto max-w-[1440px]">
-                  <div className="flex items-stretch">
-                    {(activeCompareModels.length ? activeCompareModels : compareModels).map((modelId, colIndex) => {
-                      const assistant = resolveCompareAssistant(group, colIndex, modelId);
-                      return (
-                        <div key={colIndex} className="flex min-w-[320px] flex-1 flex-col px-4 py-4">
-                          {renderCompareColumnTurn(group.userMessage, assistant, modelId, isLastGroup, isSingleChat)}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            }}
+            itemContent={(groupIndex, group) => (
+              <ChatCompareGroupRow
+                group={group}
+                groupIndex={groupIndex}
+                groupCount={compareGroups.length}
+                compareModels={activeCompareModels.length ? activeCompareModels : compareModels}
+                resolveAssistant={resolveCompareAssistant}
+                modelById={modelById}
+                isLoading={isLoading}
+                isComplexTask={!!isComplexTask}
+                conversationId={conversationId}
+                deepReasoningLabel={t("chat.deepReasoning")}
+                imageLoadFailedLabel={t("chat.imageLoadFailed")}
+                MarkdownRenderer={LazyMarkdownRenderer}
+                onCopy={handleCopy}
+                onDelete={setDeleteTarget}
+                onRegenerate={onRegenerate}
+                onShareSelectMode={(id) => enterSelectMode("share", id)}
+                onFavoriteSelectMode={(id) => enterSelectMode("favorite", id)}
+                isFavorited={isFavorited}
+                onForkCompare={onForkCompare}
+              />
+            )}
           />
         )}
 
