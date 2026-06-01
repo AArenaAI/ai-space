@@ -515,9 +515,9 @@ const MaskBrushEditor = forwardRef<MaskEditorHandle, {
         <div className={cn(
           embedded
             ? "relative mx-auto flex h-full min-h-0 flex-1 w-full items-center justify-center overflow-hidden rounded-xl p-3 transition-colors"
-            : "relative mx-auto flex h-[clamp(640px,78vh,820px)] min-h-[640px] w-full items-center justify-center overflow-hidden rounded-2xl border bg-white p-3 shadow-sm transition-colors dark:bg-surface-card",
-          !embedded && (recognized ? "border-purple-300 ring-4 ring-purple-500/10 dark:border-purple-500/40" : "border-gray-200 dark:border-surface-border"),
-          embedded && recognized && "ring-4 ring-purple-500/10"
+            : "relative mx-auto flex h-[clamp(640px,78vh,820px)] min-h-[640px] w-full items-center justify-center overflow-hidden rounded-2xl border bg-surface-card p-3 shadow-sm transition-colors",
+          !embedded && (recognized ? "border-[color:var(--brand-border)] ring-4 ring-[color:var(--brand-focus)]" : "border-surface-border"),
+          embedded && recognized && "ring-4 ring-[color:var(--brand-focus)]"
         )}>
           <div className="relative inline-block max-h-full max-w-full select-none">
             <img
@@ -559,7 +559,7 @@ const MaskBrushEditor = forwardRef<MaskEditorHandle, {
             />
             {recognized && maskBounds && (
               <div
-                className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full border border-purple-500/20 bg-white/95 px-3 py-1 text-xs font-semibold text-purple-700 shadow-lg backdrop-blur dark:bg-surface-card/95 dark:text-purple-300"
+                className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full border border-[color:var(--brand-border)] bg-surface-card/95 px-3 py-1 text-xs font-semibold text-brand shadow-lg backdrop-blur"
                 style={{
                   left: `${((maskBounds.x + maskBounds.width / 2) / (canvasRef.current?.width || 1)) * 100}%`,
                   top: `${((maskBounds.y + maskBounds.height / 2) / (canvasRef.current?.height || 1)) * 100}%`,
@@ -569,14 +569,14 @@ const MaskBrushEditor = forwardRef<MaskEditorHandle, {
               </div>
             )}
           </div>
-          {!loaded && <Spinner className="absolute h-8 w-8 animate-spin text-purple-500" />}
+          {!loaded && <Spinner className="absolute h-8 w-8 animate-spin text-brand" />}
           {recognized && (
-            <div className="absolute left-4 top-4 rounded-full border border-purple-500/20 bg-white/90 px-3 py-1 text-xs font-medium text-purple-600 shadow-sm backdrop-blur dark:bg-surface-card/90 dark:text-purple-400">
+            <div className="absolute left-4 top-4 rounded-full border border-[color:var(--brand-border)] bg-surface-card/90 px-3 py-1 text-xs font-medium text-brand shadow-sm backdrop-blur">
               {recognizedLabel ? `${t("image.edit.regionRecognized")}: ${recognizedLabel}` : t("image.edit.regionRecognized")}{maskBounds ? ` · ${maskBounds.coverage || 1}%` : ""}
             </div>
           )}
         </div>
-        <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm dark:border-surface-border dark:bg-surface-card">
+        <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center justify-between gap-3 rounded-xl border border-surface-border bg-surface-card px-4 py-3 shadow-sm">
           <div className="flex items-center gap-1 rounded-lg bg-surface-elevated p-1 dark:bg-surface">
             {([
               { key: "brush" as const, icon: Brush, label: t("image.edit.brush") },
@@ -590,7 +590,7 @@ const MaskBrushEditor = forwardRef<MaskEditorHandle, {
                 className={cn(
                   "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
                   tool === item.key
-                    ? "bg-white text-purple-600 shadow-sm dark:bg-surface-card dark:text-purple-400"
+                    ? "bg-surface-card text-brand shadow-sm"
                     : "text-text-secondary hover:text-text-primary"
                 )}
               >
@@ -608,7 +608,7 @@ const MaskBrushEditor = forwardRef<MaskEditorHandle, {
               value={brushSize}
               onChange={(e) => setBrushSize(Number(e.target.value))}
               disabled={disabled}
-              className="flex-1 accent-purple-500"
+              className="flex-1 accent-[var(--brand)]"
             />
             <span className="w-9 text-right text-xs text-text-tertiary">{brushSize}</span>
           </div>
@@ -616,7 +616,7 @@ const MaskBrushEditor = forwardRef<MaskEditorHandle, {
             type="button"
             disabled={disabled}
             onClick={clearMask}
-            className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:text-text-primary dark:border-surface-border"
+            className="flex items-center gap-1.5 rounded-lg border border-surface-border px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:text-text-primary"
           >
             <ResetIcon className="h-3.5 w-3.5" />
             {t("image.edit.clearMask")}
@@ -715,9 +715,9 @@ function ImageEditContent() {
   const isRegionBrushMode = editMode === "region-brush";
   const requiresRegionRecognition = editMode === "inpaint" || editMode === "region-brush";
   const isRegionRecognized = !requiresRegionRecognition || regionStep === "recognized";
-  const totalFrameClass = "mx-auto flex h-[clamp(640px,78vh,820px)] min-h-[640px] w-full flex-col rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-surface-border dark:bg-surface-card";
-  const imageSlotClass = "relative flex h-full min-h-0 flex-1 w-full items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-surface-elevated/40 dark:border-surface-border dark:bg-surface-elevated/30";
-  const uploadSlotClass = "flex h-full min-h-0 flex-1 w-full cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-300 bg-transparent py-16 text-center transition-all duration-200 hover:border-purple-400 hover:bg-purple-50/50 dark:border-gray-600 dark:hover:border-purple-500 dark:hover:bg-purple-500/5";
+  const totalFrameClass = "mx-auto flex h-[clamp(640px,78vh,820px)] min-h-[640px] w-full flex-col rounded-2xl border border-surface-border bg-surface-card p-6 shadow-sm";
+  const imageSlotClass = "relative flex h-full min-h-0 flex-1 w-full items-center justify-center overflow-hidden rounded-xl border border-surface-border bg-surface-elevated/55";
+  const uploadSlotClass = "flex h-full min-h-0 flex-1 w-full cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-300 bg-transparent py-16 text-center transition-all duration-200 hover:border-[color:var(--brand)] hover:bg-brand-muted dark:border-gray-600 dark:hover:border-[color:var(--brand)] dark:hover:bg-brand-muted";
   const resetRegionRecognition = useCallback(() => {
     setRegionStep("paint");
     setRecognizedEditMaskData("");
@@ -1176,17 +1176,17 @@ function ImageEditContent() {
                           onClick={() => fileInputRef.current?.click()}
                           className={cn(
                             uploadSlotClass,
-                            dragOver && "border-purple-500 bg-purple-50/50 dark:border-purple-400 dark:bg-purple-500/5"
+                            dragOver && "border-[color:var(--brand)] bg-brand-muted"
                           )}
                         >
-                          <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-purple-50 dark:bg-purple-500/10">
-                            <ImagePlus className="h-8 w-8 text-purple-500 dark:text-purple-400" />
+                          <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-muted">
+                            <ImagePlus className="h-8 w-8 text-brand" />
                           </div>
-                          <p className="text-base font-medium text-gray-800 dark:text-text-primary">
+                          <p className="text-base font-medium text-text-primary">
                             {t("image.edit.uploadHint")}
                           </p>
-                          <p className="mt-2 text-xs text-gray-500 dark:text-text-tertiary">
-                            {t("image.edit.creditCostPrefix")} <span className="text-purple-500 font-medium">3</span> {t("image.edit.creditCostSuffix")}
+                          <p className="mt-2 text-xs text-text-tertiary">
+                            {t("image.edit.creditCostPrefix")} <span className="text-brand font-medium">3</span> {t("image.edit.creditCostSuffix")}
                           </p>
                           <input
                             ref={fileInputRef}
@@ -1202,7 +1202,7 @@ function ImageEditContent() {
                   {/* 底部示例区 */}
                   {!sourceUrl && !isEditing && (
                     <div className="w-full shrink-0">
-                      <div className="group/video mx-auto w-full max-w-[560px] overflow-hidden rounded-[22px] border border-gray-200 bg-white shadow-sm dark:border-surface-border dark:bg-surface-card">
+                      <div className="group/video mx-auto w-full max-w-[560px] overflow-hidden rounded-[22px] border border-surface-border bg-surface-card shadow-sm">
                         {/* 图片区域 */}
                         <div className="relative h-[190px] overflow-hidden p-4">
                           {/* 默认：左右双图对比 */}
@@ -1215,7 +1215,7 @@ function ImageEditContent() {
                               />
                               <div className="mt-2 text-xs font-medium text-text-tertiary">{t("image.edit.before")}</div>
                             </div>
-                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-purple-500 text-white shadow-[0_8px_18px_rgba(59,130,246,0.22)]">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand text-white shadow-[0_8px_18px_var(--brand-shadow)]">
                               <ArrowRight className="h-5 w-5" />
                             </div>
                             <div className="flex-1 text-center">
@@ -1226,7 +1226,7 @@ function ImageEditContent() {
                                   className="h-full w-full rounded-2xl object-cover"
                                 />
                               </div>
-                              <div className="mt-2 text-xs font-medium text-purple-500">{t("image.edit.after.removeBg")}</div>
+                              <div className="mt-2 text-xs font-medium text-brand">{t("image.edit.after.removeBg")}</div>
                             </div>
                           </div>
                           {/* 悬浮：BeforeAfterSlider */}
@@ -1245,7 +1245,7 @@ function ImageEditContent() {
                           <span className="text-sm font-medium text-text-secondary">{t(examples[0].labelKey)}</span>
                           <button
                             onClick={() => useExample(examples[0].before)}
-                            className="flex items-center gap-1.5 rounded-full border border-purple-500/20 bg-purple-50 px-4 py-1.5 text-xs font-medium text-purple-600 transition-all duration-200 hover:border-purple-500/30 hover:bg-purple-100 dark:border-purple-500/20 dark:bg-purple-500/10 dark:text-purple-400 dark:hover:bg-purple-500/15"
+                            className="flex items-center gap-1.5 rounded-full border border-[color:var(--brand-border)] bg-brand-muted px-4 py-1.5 text-xs font-medium text-brand transition-all duration-200 hover:border-[color:var(--brand-focus)] hover:bg-[var(--brand-soft-hover)]"
                           >
                             <Wand2 className="h-3.5 w-3.5" />
                             {t("image.edit.tryExample")}
@@ -1259,15 +1259,15 @@ function ImageEditContent() {
                     <>
                       <div className={totalFrameClass}>
                         {isEditing ? (
-                          <div className={cn(imageSlotClass, "flex-col gap-5 bg-white px-10 py-16 dark:bg-surface-card")}>
-                            <Spinner className="h-12 w-12 animate-spin text-purple-500" />
+                          <div className={cn(imageSlotClass, "flex-col gap-5 bg-surface-card px-10 py-16")}>
+                            <Spinner className="h-12 w-12 animate-spin text-brand" />
                             <div className="text-center">
-                              <p className="text-base font-semibold text-gray-800 dark:text-text-primary">{t("image.edit.processing")}</p>
-                              <p className="mt-1 text-sm text-gray-400 dark:text-text-tertiary">{t("image.edit.processingRemoveBg")}</p>
+                              <p className="text-base font-semibold text-text-primary">{t("image.edit.processing")}</p>
+                              <p className="mt-1 text-sm text-text-tertiary">{t("image.edit.processingRemoveBg")}</p>
                             </div>
                           </div>
                         ) : (
-                          <div className={cn(imageSlotClass, "p-3 bg-white dark:bg-surface-card")}>
+                          <div className={cn(imageSlotClass, "p-3 bg-surface-card")}>
                             <img
                               src={sourceUrl}
                               alt={t("image.edit.sourceImage")}
@@ -1287,14 +1287,14 @@ function ImageEditContent() {
                           />
                           <button
                             onClick={() => fileInputRef.current?.click()}
-                            className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-6 py-2.5 text-sm font-medium text-gray-600 shadow-sm transition-all hover:text-gray-900 dark:border-surface-border dark:bg-surface-card dark:text-text-secondary dark:hover:text-text-primary"
+                            className="flex items-center gap-2 rounded-lg border border-surface-border bg-surface-card px-6 py-2.5 text-sm font-medium text-text-secondary shadow-sm transition-all hover:text-text-primary"
                           >
                             <Upload className="h-4 w-4" />
                             {t("image.edit.reupload")}
                           </button>
                           <button
                             onClick={handleEdit}
-                            className="flex items-center gap-2 rounded-lg bg-purple-500 px-8 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-purple-600 dark:bg-purple-600 dark:hover:bg-purple-500"
+                            className="flex items-center gap-2 rounded-lg bg-brand px-8 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-brand-hover"
                           >
                             <Sparkles className="h-4 w-4" />
                             {t("common.confirm")}
@@ -1308,7 +1308,7 @@ function ImageEditContent() {
               ) : (
                 /* 结果展示 */
                 <div className="mx-auto w-full max-w-[1280px] space-y-6 py-8">
-                  <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white p-3 shadow-sm dark:border-surface-border dark:bg-surface-card">
+                  <div className="overflow-hidden rounded-2xl border border-surface-border bg-surface-card p-3 shadow-sm">
                     <BeforeAfterSlider
                       beforeImage={sourceUrl}
                       afterImage={result}
@@ -1320,14 +1320,14 @@ function ImageEditContent() {
                   <div className="flex items-center justify-center gap-3">
                     <button
                       onClick={handleDownload}
-                      className="flex items-center gap-2 rounded-lg bg-purple-500 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-purple-600 dark:bg-purple-600 dark:hover:bg-purple-500"
+                      className="flex items-center gap-2 rounded-lg bg-brand px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-brand-hover"
                     >
                       <Download className="h-4 w-4" />
                       {t("image.edit.downloadImage")}
                     </button>
                     <button
                       onClick={handleReset}
-                      className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-6 py-2.5 text-sm font-medium text-gray-600 shadow-sm transition-all hover:text-gray-900 dark:border-surface-border dark:bg-surface-card dark:text-text-secondary dark:hover:text-text-primary"
+                      className="flex items-center gap-2 rounded-lg border border-surface-border bg-surface-card px-6 py-2.5 text-sm font-medium text-text-secondary shadow-sm transition-all hover:text-text-primary"
                     >
                       <RotateCcw className="h-4 w-4" />
                       {t("image.edit.reupload")}
@@ -1356,16 +1356,16 @@ function ImageEditContent() {
                           onClick={() => fileInputRef.current?.click()}
                           className={cn(
                             uploadSlotClass,
-                            dragOver && "border-purple-500 bg-purple-50/50 dark:border-purple-400 dark:bg-purple-500/5"
+                            dragOver && "border-[color:var(--brand)] bg-brand-muted"
                           )}
                         >
-                          <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-purple-50 dark:bg-purple-500/10">
-                            <TabIcon className="h-8 w-8 text-purple-500 dark:text-purple-400" />
+                          <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-muted">
+                            <TabIcon className="h-8 w-8 text-brand" />
                           </div>
-                          <p className="text-base font-medium text-gray-800 dark:text-text-primary">
+                          <p className="text-base font-medium text-text-primary">
                             {t("image.edit.uploadHint")}
                           </p>
-                          <p className="mt-2 text-xs text-gray-500 dark:text-text-tertiary">
+                          <p className="mt-2 text-xs text-text-tertiary">
                             {t("image.edit.supportedFormats")}
                           </p>
                           <div className="mt-4 flex items-center gap-3">
@@ -1375,7 +1375,7 @@ function ImageEditContent() {
                                 e.stopPropagation();
                                 useExample(examples[0].before);
                               }}
-                              className="flex items-center gap-1.5 rounded-full border border-purple-500/20 bg-purple-50 px-4 py-1.5 text-xs font-medium text-purple-600 transition-all duration-200 hover:bg-purple-100 dark:border-purple-500/20 dark:bg-purple-500/10 dark:text-purple-400"
+                              className="flex items-center gap-1.5 rounded-full border border-[color:var(--brand-border)] bg-brand-muted px-4 py-1.5 text-xs font-medium text-brand transition-all duration-200 hover:bg-[var(--brand-soft-hover)]"
                             >
                               <Wand2 className="h-3.5 w-3.5" />
                               {t("image.edit.tryExample")}
@@ -1398,7 +1398,7 @@ function ImageEditContent() {
                       {examples.map((ex) => (
                         <div
                           key={ex.labelKey}
-                          className="group/video mx-auto w-full max-w-[560px] overflow-hidden rounded-[22px] border border-gray-200 bg-white shadow-sm dark:border-surface-border dark:bg-surface-card"
+                          className="group/video mx-auto w-full max-w-[560px] overflow-hidden rounded-[22px] border border-surface-border bg-surface-card shadow-sm"
                         >
                           <div className="relative h-[190px] overflow-hidden p-4">
                             {/* 默认：左右双图对比 */}
@@ -1411,7 +1411,7 @@ function ImageEditContent() {
                                 />
                                 <div className="mt-2 text-xs font-medium text-text-tertiary">{t("image.edit.before")}</div>
                               </div>
-                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-purple-500 text-white shadow-[0_8px_18px_rgba(59,130,246,0.22)]">
+                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand text-white shadow-[0_8px_18px_var(--brand-shadow)]">
                                 <ArrowRight className="h-5 w-5" />
                               </div>
                               <div className="flex-1 text-center">
@@ -1427,7 +1427,7 @@ function ImageEditContent() {
                                     className="h-full w-full rounded-2xl object-cover"
                                   />
                                 </div>
-                                <div className="mt-2 text-xs font-medium text-purple-500">{t(config.afterLabelKey)}</div>
+                                <div className="mt-2 text-xs font-medium text-brand">{t(config.afterLabelKey)}</div>
                               </div>
                             </div>
                             {/* 悬浮：BeforeAfterSlider */}
@@ -1445,7 +1445,7 @@ function ImageEditContent() {
                             <span className="text-sm font-medium text-text-secondary">{t(ex.labelKey)}</span>
                             <button
                               onClick={() => useExample(ex.before)}
-                              className="flex items-center gap-1.5 rounded-full border border-purple-500/20 bg-purple-50 px-4 py-1.5 text-xs font-medium text-purple-600 transition-all duration-200 hover:bg-purple-100 dark:border-purple-500/20 dark:bg-purple-500/10 dark:text-purple-400"
+                              className="flex items-center gap-1.5 rounded-full border border-[color:var(--brand-border)] bg-brand-muted px-4 py-1.5 text-xs font-medium text-brand transition-all duration-200 hover:bg-[var(--brand-soft-hover)]"
                             >
                               <Wand2 className="h-3.5 w-3.5" />
                               {t("image.edit.tryExample")}
@@ -1460,17 +1460,17 @@ function ImageEditContent() {
                     <>
                       <div className={totalFrameClass}>
                         {isEditing ? (
-                          <div className={cn(imageSlotClass, "flex-col gap-5 bg-gradient-to-br from-purple-500/5 to-brand/5 px-10 py-16 dark:bg-surface-card")}>
-                            <Spinner className="h-12 w-12 animate-spin text-purple-500" />
+                          <div className={cn(imageSlotClass, "flex-col gap-5 bg-brand-muted px-10 py-16")}>
+                            <Spinner className="h-12 w-12 animate-spin text-brand" />
                             <div className="text-center">
-                              <p className="text-base font-semibold text-gray-800 dark:text-text-primary">{t("image.edit.processing")}</p>
+                              <p className="text-base font-semibold text-text-primary">{t("image.edit.processing")}</p>
                             </div>
                           </div>
                         ) : (
                           isMaskMode ? (
                             <MaskBrushEditor ref={maskEditorRef} embedded imageUrl={sourceUrl} disabled={isEditing || isRecognizingRegion} t={t} onMaskChange={resetRegionRecognition} recognized={requiresRegionRecognition && regionStep === "recognized"} recognizedLabel={recognizedObject?.label ? `${t("image.edit.selectedObject")}: ${recognizedObject.label}` : undefined} />
                           ) : (
-                            <div className={cn(imageSlotClass, "p-3 bg-white dark:bg-surface-card")}>
+                            <div className={cn(imageSlotClass, "p-3 bg-surface-card")}>
                               <img src={sourceUrl} alt={t("image.edit.sourceImage")} className="h-full max-h-full max-w-full rounded-lg object-contain" />
                             </div>
                           )
@@ -1478,7 +1478,7 @@ function ImageEditContent() {
                       </div>
 
                       {requiresRegionRecognition && !isEditing && (
-                        <div className="w-full max-w-2xl rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-surface-border dark:bg-surface-card">
+                        <div className="w-full max-w-2xl rounded-xl border border-surface-border bg-surface-card p-4 shadow-sm">
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div>
                               <p className="text-sm font-semibold text-text-primary">
@@ -1492,7 +1492,7 @@ function ImageEditContent() {
                                   : t(editMode === "inpaint" ? "image.edit.inpaintStepPaintDesc" : "image.edit.regionStepPaintDesc")}
                               </p>
                               {regionStep === "recognized" && recognizedObject?.description && (
-                                <p className="mt-2 rounded-lg bg-purple-500/10 px-3 py-2 text-xs font-medium text-purple-700 dark:text-purple-300">
+                                <p className="mt-2 rounded-lg bg-brand-muted px-3 py-2 text-xs font-medium text-brand">
                                   {recognizedObject.description}
                                 </p>
                               )}
@@ -1504,8 +1504,8 @@ function ImageEditContent() {
                               className={cn(
                                 "flex shrink-0 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all",
                                 regionStep === "recognized"
-                                  ? "border border-purple-500/20 bg-purple-50 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400"
-                                  : "bg-purple-500 text-white shadow-sm hover:bg-purple-600"
+                                  ? "border border-[color:var(--brand-border)] bg-brand-muted text-brand"
+                                  : "bg-brand text-white shadow-sm hover:bg-brand-hover"
                               )}
                             >
                               {isRecognizingRegion ? <Spinner className="h-4 w-4 animate-spin" /> : <ScanSearch className="h-4 w-4" />}
@@ -1516,7 +1516,7 @@ function ImageEditContent() {
                       )}
 
                       {needsPrompt && (
-                        <div className="w-full max-w-lg rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-surface-border dark:bg-surface-card">
+                        <div className="w-full max-w-lg rounded-xl border border-surface-border bg-surface-card p-4 shadow-sm">
                           <label className="mb-2 block text-xs font-medium text-text-secondary">
                             {config.promptLabelKey ? t(config.promptLabelKey) : ""}
                           </label>
@@ -1525,7 +1525,7 @@ function ImageEditContent() {
                             onChange={(e) => setReplacePrompt(e.target.value)}
                             placeholder={config.promptPlaceholderKey ? t(config.promptPlaceholderKey) : ""}
                             disabled={isEditing}
-                            className="h-20 w-full resize-none rounded-lg border border-surface-border bg-surface-elevated p-3 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-purple-500/20"
+                            className="h-20 w-full resize-none rounded-lg border border-surface-border bg-surface-elevated p-3 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-focus)]"
                           />
                         </div>
                       )}
@@ -1541,7 +1541,7 @@ function ImageEditContent() {
                           />
                           <button
                             onClick={() => fileInputRef.current?.click()}
-                            className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-6 py-2.5 text-sm font-medium text-gray-600 shadow-sm transition-all hover:text-gray-900 dark:border-surface-border dark:bg-surface-card dark:text-text-secondary dark:hover:text-text-primary"
+                            className="flex items-center gap-2 rounded-lg border border-surface-border bg-surface-card px-6 py-2.5 text-sm font-medium text-text-secondary shadow-sm transition-all hover:text-text-primary"
                           >
                             <Upload className="h-4 w-4" />
                             {t("image.edit.reupload")}
@@ -1550,10 +1550,10 @@ function ImageEditContent() {
                             onClick={handleEdit}
                             disabled={submitDisabled}
                             className={cn(
-                              "flex items-center gap-2 rounded-lg bg-purple-500 px-8 py-2.5 text-sm font-semibold text-white shadow-sm transition-all",
+                              "flex items-center gap-2 rounded-lg bg-brand px-8 py-2.5 text-sm font-semibold text-white shadow-sm transition-all",
                               submitDisabled
                                 ? "opacity-50 cursor-not-allowed"
-                                : "hover:bg-purple-600 dark:bg-purple-600 dark:hover:bg-purple-500"
+                                : "hover:bg-brand-hover"
                             )}
                           >
                             <Sparkles className="h-4 w-4" />
@@ -1568,7 +1568,7 @@ function ImageEditContent() {
               ) : (
                 /* 结果展示 */
                 <div className="mx-auto w-full max-w-[1280px] space-y-6 py-8">
-                  <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white p-3 shadow-sm dark:border-surface-border dark:bg-surface-card">
+                  <div className="overflow-hidden rounded-2xl border border-surface-border bg-surface-card p-3 shadow-sm">
                     <BeforeAfterSlider
                       beforeImage={sourceUrl}
                       afterImage={result}
@@ -1580,14 +1580,14 @@ function ImageEditContent() {
                   <div className="flex items-center justify-center gap-3">
                     <button
                       onClick={handleDownload}
-                      className="flex items-center gap-2 rounded-lg bg-purple-500 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-purple-600 dark:bg-purple-600 dark:hover:bg-purple-500"
+                      className="flex items-center gap-2 rounded-lg bg-brand px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-brand-hover"
                     >
                       <Download className="h-4 w-4" />
                       {t("image.edit.downloadImage")}
                     </button>
                     <button
                       onClick={handleReset}
-                      className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-6 py-2.5 text-sm font-medium text-gray-600 shadow-sm transition-all hover:text-gray-900 dark:border-surface-border dark:bg-surface-card dark:text-text-secondary dark:hover:text-text-primary"
+                      className="flex items-center gap-2 rounded-lg border border-surface-border bg-surface-card px-6 py-2.5 text-sm font-medium text-text-secondary shadow-sm transition-all hover:text-text-primary"
                     >
                       <RotateCcw className="h-4 w-4" />
                       {t("image.edit.reupload")}

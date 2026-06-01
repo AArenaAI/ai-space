@@ -131,6 +131,18 @@ type ChatScrollProgressProps = {
   onDragStateChange: (dragging: boolean) => void;
 };
 
+type ChatMessageOverviewItem = {
+  id: string;
+  label: string;
+  active: boolean;
+};
+
+type ChatMessageOverviewProps = {
+  items: ChatMessageOverviewItem[];
+  visible: boolean;
+  onJumpToMessage: (messageId: string) => void;
+};
+
 const ChatScrollProgress = memo(function ChatScrollProgress({
   scrollRatio,
   visible,
@@ -213,6 +225,53 @@ const ChatScrollProgress = memo(function ChatScrollProgress({
     </div>
   );
 });
+
+const ChatMessageOverview = memo(function ChatMessageOverview({ items, visible, onJumpToMessage }: ChatMessageOverviewProps) {
+  if (!visible || items.length < 2) return null;
+  const visibleItems = items.slice(-12);
+
+  return (
+    <div
+      className="group pointer-events-none absolute bottom-[108px] right-5 z-[96] hidden max-h-[min(520px,calc(100%-160px))] items-end sm:flex"
+      data-testid="chat-message-overview"
+    >
+      <div className="pointer-events-auto flex items-center justify-end">
+        <div
+          className="flex w-8 flex-col items-end gap-3 rounded-full px-1.5 py-2 transition-all duration-200 ease-out group-hover:w-[300px] group-hover:items-stretch group-hover:gap-1.5 group-hover:rounded-2xl group-hover:border group-hover:border-surface-border/70 group-hover:bg-surface-elevated/95 group-hover:p-2 group-hover:shadow-2xl group-hover:shadow-black/20 dark:group-hover:bg-[#171717]/95"
+          data-testid="chat-message-overview-panel"
+        >
+          {visibleItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => onJumpToMessage(item.id)}
+              className={cn(
+                "group/item flex h-4 w-full items-center justify-end rounded-lg text-left outline-none transition-all duration-200 ease-out focus-visible:ring-2 focus-visible:ring-brand/35 group-hover:h-8 group-hover:justify-between group-hover:gap-3 group-hover:px-2",
+                item.active ? "text-brand" : "text-text-secondary hover:text-text-primary"
+              )}
+              data-testid="chat-message-overview-item"
+              data-message-id={item.id}
+              aria-label={`跳转到用户消息：${item.label}`}
+            >
+              <span className="hidden min-w-0 flex-1 truncate text-xs leading-8 group-hover:block">
+                {item.label}
+              </span>
+              <span
+                className={cn(
+                  "h-1.5 w-7 shrink-0 rounded-full transition-all duration-200 ease-out group-hover:h-0.5 group-hover:w-4",
+                  item.active
+                    ? "bg-brand shadow-[0_0_0_1px_rgba(255,255,255,0.16)]"
+                    : "bg-slate-500/30 group-hover:bg-slate-400/45 dark:bg-slate-400/24 dark:group-hover:bg-slate-300/36 green:bg-[#405E3D]/35 green:group-hover:bg-[#405E3D]/55"
+                )}
+                aria-hidden="true"
+              />
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+});
 function MessageList({
   messages,
   isLoading,
@@ -258,6 +317,7 @@ function MessageList({
   const userBrowsingTimerRef = useRef<number>(0);
   const [scrollProgress, setScrollProgress] = useState({ ratio: 1, canScroll: false });
   const [, setScrollProgressDragging] = useState(false);
+  const [activeOverviewMessageId, setActiveOverviewMessageId] = useState<string | null>(null);
   const firstItemIndexRef = useRef(100_000);
   const previousVisibleMessagesRef = useRef<Message[]>([]);
   const historyPrependUntilRef = useRef(0);
@@ -364,6 +424,13 @@ function MessageList({
     }
     lastScrollTopRef.current = el.scrollTop;
     updateScrollProgressFromElement(el);
+
+    const scrollerTop = el.getBoundingClientRect().top;
+    const firstVisibleUserRow = Array.from(el.querySelectorAll<HTMLElement>('[data-chat-message-row="true"][data-message-role="user"]'))
+      .find((row) => row.getBoundingClientRect().bottom >= scrollerTop + 8);
+    if (firstVisibleUserRow?.dataset.messageId) {
+      setActiveOverviewMessageId((previous) => previous === firstVisibleUserRow.dataset.messageId ? previous : firstVisibleUserRow.dataset.messageId || null);
+    }
 
   }, [stopBottomLockForUserBrowse, updateScrollProgressFromElement]);
 
@@ -516,6 +583,14 @@ function MessageList({
   const locatedTargetKeyRef = useRef<string>("");
   const loadingTargetKeyRef = useRef<string>("");
   const highlightTimerRef = useRef<number | null>(null);
+  const highlightMessage = useCallback((messageId: string, duration = 2200) => {
+    setHighlightedMessageId(messageId);
+    if (highlightTimerRef.current) window.clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = window.setTimeout(() => {
+      setHighlightedMessageId((current) => current === messageId ? null : current);
+      highlightTimerRef.current = null;
+    }, duration);
+  }, []);
   const [openAvatarDropdownGroupId, setOpenAvatarDropdownGroupId] = useState<number | null>(null);
 
   useEffect(() => {
@@ -540,6 +615,43 @@ function MessageList({
       return true;
     });
   }, [messages, groupByMessageId, groupViews]);
+
+  const userOverviewMessages = useMemo(() => {
+    return messages
+      .filter((msg) => msg.role === "user" && msg.content.trim().length > 0)
+      .map((msg) => ({
+        id: msg.id,
+        label: normalizeExportPlainText(msg.content).replace(/\s+/g, " ").slice(0, 48) || "用户消息",
+      }));
+  }, [messages]);
+
+  useEffect(() => {
+    if (userOverviewMessages.length === 0) return;
+    setActiveOverviewMessageId((current) => current ?? userOverviewMessages[userOverviewMessages.length - 1]?.id ?? null);
+  }, [userOverviewMessages]);
+
+  const overviewItems = useMemo<ChatMessageOverviewItem[]>(() => {
+    const activeId = activeOverviewMessageId ?? userOverviewMessages[userOverviewMessages.length - 1]?.id ?? "";
+    return userOverviewMessages.map((item) => ({
+      ...item,
+      active: item.id === activeId,
+    }));
+  }, [activeOverviewMessageId, userOverviewMessages]);
+
+  const jumpToUserMessage = useCallback((messageId: string) => {
+    const index = visibleMessages.findIndex((message) => message.id === messageId);
+    if (index < 0) return;
+    programmaticScrollUntilRef.current = Date.now() + 700;
+    stopBottomLockForUserBrowse(1600);
+    setActiveOverviewMessageId(messageId);
+    highlightMessage(messageId, 2400);
+    const scrollToTarget = () => {
+      virtuosoRef.current?.scrollToIndex({ index, align: "center", behavior: "auto" });
+    };
+    scrollToTarget();
+    window.requestAnimationFrame(() => window.requestAnimationFrame(scrollToTarget));
+    window.setTimeout(scrollToTarget, 120);
+  }, [highlightMessage, stopBottomLockForUserBrowse, visibleMessages]);
 
   const previousVisibleMessages = previousVisibleMessagesRef.current;
   if (previousVisibleMessages.length > 0 && visibleMessages.length > previousVisibleMessages.length) {
@@ -596,7 +708,7 @@ function MessageList({
     loadingTargetKeyRef.current = "";
     stickToBottomRef.current = false;
     programmaticScrollUntilRef.current = Date.now() + 700;
-    setHighlightedMessageId(msg.id);
+    highlightMessage(msg.id, 2600);
 
     const scrollToTarget = () => {
       virtuosoRef.current?.scrollToIndex({ index, align: "center", behavior: "auto" });
@@ -607,17 +719,11 @@ function MessageList({
     });
     const settleTimer = window.setTimeout(scrollToTarget, 120);
 
-    if (highlightTimerRef.current) window.clearTimeout(highlightTimerRef.current);
-    highlightTimerRef.current = window.setTimeout(() => {
-      setHighlightedMessageId(null);
-      highlightTimerRef.current = null;
-    }, 2600);
-
     return () => {
       window.cancelAnimationFrame(raf);
       window.clearTimeout(settleTimer);
     };
-  }, [conversationId, targetMessageId, visibleMessages, isLoadingHistory, isLoadingMore, hasMoreMessages, onLoadMore]);
+  }, [conversationId, targetMessageId, visibleMessages, isLoadingHistory, isLoadingMore, hasMoreMessages, onLoadMore, highlightMessage]);
 
   useEffect(() => {
     if (!targetMessageId) {
@@ -1335,6 +1441,11 @@ function MessageList({
         }}
       />
 
+      <ChatMessageOverview
+        items={overviewItems}
+        visible={!selectMode && !isCompare && scrollProgress.canScroll}
+        onJumpToMessage={jumpToUserMessage}
+      />
       <ChatScrollProgress
         scrollRatio={scrollProgress.ratio}
         visible={scrollProgress.canScroll}

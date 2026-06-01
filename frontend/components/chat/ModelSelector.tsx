@@ -5,6 +5,7 @@ import { Check, ChevronDown, Star } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { ChatModel } from "@/lib/chatTypes";
+import { getModelAvatarMeta, type ModelAvatarMeta } from "@/lib/models/modelAvatars";
 import { getModelCapabilitySummary, getPrimaryModelCapabilities } from "@/lib/models/modelCapabilities";
 import { getModelRecommendation, getRecommendedModels, isModelRecommended, type ModelRecommendationContext } from "@/lib/models/modelRecommendations";
 import { getModelStatusBadge, getModelStatusLabel, isModelAvailable } from "@/lib/models/modelAvailability";
@@ -17,39 +18,30 @@ interface ModelSelectorProps {
   recommendationContext?: ModelRecommendationContext;
 }
 
-// 厂商品牌色
-const PROVIDER_COLORS: Record<string, string> = {
-  DeepSeek: "#4d6bfa",
-  OpenAI: "#10a37f",
-  Anthropic: "#cc785c",
-  Google: "#4285f4",
-  Moonshot: "#00b96b",
-};
-
-// 厂商显示名
-const PROVIDER_LABELS: Record<string, string> = {
-  DeepSeek: "深度求索",
-  OpenAI: "OpenAI",
-  Anthropic: "Anthropic",
-  Google: "Google",
-  Moonshot: "月之暗面",
-};
-
-// 厂商图标 (简写字母)
-const PROVIDER_ICONS: Record<string, string> = {
-  DeepSeek: "D",
-  OpenAI: "O",
-  Anthropic: "A",
-  Google: "G",
-  Moonshot: "K",
-};
-
 // 分组顺序（DeepSeek 排第一，因为面向国内用户）
 const GROUP_ORDER = ["DeepSeek", "OpenAI", "Anthropic", "Google", "Moonshot"];
 
 const RECENT_KEY = "recent-models";
 const FAVORITE_KEY = "favorite-models";
 const SHORTCUT_LIMIT = 3;
+
+function ModelAvatar({ meta, size = "md" }: { meta: ModelAvatarMeta; size?: "sm" | "md" | "lg" }) {
+  const Icon = meta.icon;
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full font-bold",
+        size === "sm" && "h-5 w-5 text-[9px]",
+        size === "md" && "h-6 w-6 text-[10px]",
+        size === "lg" && "h-7 w-7 text-[11px]"
+      )}
+      style={{ backgroundColor: meta.background, color: meta.color }}
+      title={meta.label}
+    >
+      {Icon ? <Icon className="h-[74%] w-[74%]" /> : meta.fallback}
+    </span>
+  );
+}
 
 function getRecentModels(): string[] {
   if (typeof window === "undefined") return [];
@@ -137,20 +129,19 @@ export default function ModelSelector({
   ];
   const groups = providerOrder.map((provider) => {
     const items = models.filter((m) => m.provider === provider);
+    const avatar = getModelAvatarMeta(items[0] || provider);
     return items.length > 0
       ? {
           provider,
-          label: PROVIDER_LABELS[provider] || provider,
-          icon: PROVIDER_ICONS[provider] || provider[0],
-          color: PROVIDER_COLORS[provider] || "#999",
+          label: avatar.label || provider,
+          avatar,
           items,
         }
       : null;
   }).filter(Boolean) as {
     provider: string;
     label: string;
-    icon: string;
-    color: string;
+    avatar: ModelAvatarMeta;
     items: ChatModel[];
   }[];
 
@@ -221,6 +212,7 @@ export default function ModelSelector({
     const favorited = favoriteIds.includes(model.id);
     const available = isModelAvailable(model);
     const statusBadge = getModelStatusBadge(model);
+    const avatar = getModelAvatarMeta(model);
 
     return (
       <button
@@ -236,10 +228,9 @@ export default function ModelSelector({
         )}
         title={statusBadge || getModelCapabilitySummary(model)}
       >
-        <div
-          className="mt-1.5 w-1.5 h-4 rounded-full shrink-0"
-          style={{ backgroundColor: model.color }}
-        />
+        <div className="mt-0.5">
+          <ModelAvatar meta={avatar} size="md" />
+        </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span className="text-[13px] font-medium truncate">{model.name}</span>
@@ -277,6 +268,7 @@ export default function ModelSelector({
     const favorited = favoriteIds.includes(model.id);
     const available = isModelAvailable(model);
     const statusBadge = getModelStatusBadge(model);
+    const avatar = getModelAvatarMeta(model);
 
     return (
       <button
@@ -292,10 +284,9 @@ export default function ModelSelector({
         )}
         title={statusBadge || getModelCapabilitySummary(model)}
       >
-        <div
-          className="mt-2 w-2 h-2 rounded-full shrink-0"
-          style={{ backgroundColor: model.color }}
-        />
+        <div className="mt-1">
+          <ModelAvatar meta={avatar} size="lg" />
+        </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span
@@ -359,15 +350,7 @@ export default function ModelSelector({
         )}
         title={selectedAvailable ? getModelCapabilitySummary(selected) : selectedStatusLabel}
       >
-        <div
-          className="w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0"
-          style={{
-            backgroundColor: `${selected.color}18`,
-            color: selected.color,
-          }}
-        >
-          {PROVIDER_ICONS[selected.provider] || selected.provider[0]}
-        </div>
+        <ModelAvatar meta={getModelAvatarMeta(selected)} size="md" />
         <span className="truncate">{selected.name}</span>
         {!selectedAvailable && (
           <span className="rounded-full bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-medium text-rose-500 shrink-0">
@@ -461,15 +444,7 @@ export default function ModelSelector({
                         : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                     )}
                   >
-                    <div
-                      className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0"
-                      style={{
-                        backgroundColor: `${group.color}18`,
-                        color: group.color,
-                      }}
-                    >
-                      {group.icon}
-                    </div>
+                    <ModelAvatar meta={group.avatar} size="lg" />
                     <span className="flex-1 text-sm font-medium truncate">
                       {group.label}
                     </span>
@@ -490,15 +465,7 @@ export default function ModelSelector({
                 onMouseLeave={handlePopoverLeave}
               >
                 <div className="px-4 py-2 text-xs font-medium text-text-tertiary uppercase tracking-wider border-b border-surface-border mb-1.5 flex items-center gap-2.5">
-                  <div
-                    className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold"
-                    style={{
-                      backgroundColor: `${activeGroup.color}18`,
-                      color: activeGroup.color,
-                    }}
-                  >
-                    {activeGroup.icon}
-                  </div>
+                  <ModelAvatar meta={activeGroup.avatar} size="sm" />
                   {activeGroup.label}
                   <span className="text-xs text-text-tertiary/60 tabular-nums ml-auto normal-case">
                     {activeGroup.items.length} 个模型

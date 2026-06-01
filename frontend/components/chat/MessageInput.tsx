@@ -660,7 +660,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                       className="flex items-center gap-2 rounded-full border border-surface-border/30 bg-surface-card px-3 py-1.5 text-[13px] transition-all"
                       title={
                         file.error_message
-                          ? getErrorMessage(file.error_message, { module: "file", fallbackMessage: "文件解析失败，请重新上传或换一个文件。" })
+                          ? getErrorMessage(file.error_message, { module: "file", fallbackMessage: t("chat.fileParseFailedRetry") })
                           : isEmptyContent
                           ? t("chat.fileEmptyContent")
                           : cfg.label
@@ -773,7 +773,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                 {reasoningOpen && (
                   <div className="absolute bottom-full right-0 mb-2 w-64 rounded-xl border border-surface-border bg-surface-elevated shadow-xl z-[90] py-2 animate-fade-in overflow-hidden">
                     <div className="px-3 py-1.5 text-[11px] font-medium text-text-tertiary uppercase tracking-wider border-b border-surface-border mb-1">
-                      选择思考强度
+                      {t("messageInput.thinking.selectIntensity")}
                     </div>
                     <div className="px-1 space-y-1">
                       {reasoningModes.map((mode) => {

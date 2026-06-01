@@ -1,0 +1,53 @@
+"use client";
+
+import MessageList from "./MessageList";
+import type { ChatModel, Message } from "@/lib/chatTypes";
+
+const models: ChatModel[] = [
+  { id: "deepseek-chat", name: "DeepSeek", provider: "deepseek", description: "DeepSeek fixture model", color: "#4f8cff" },
+];
+
+const makeTurn = (index: number): Message[] => [
+  {
+    id: `overview-user-${index}`,
+    role: "user",
+    content: index === 1
+      ? "在 dydx chain 中，撮合引擎的状态如何同步？"
+      : index === 2
+        ? "go 多线程的情况下，如何保证订单写入一致性？"
+        : index === 3
+          ? "在这套系统中，订单的存储是怎么设计的？"
+          : `先不说加速问题；就是现在的第 ${index} 个用户问题需要跳转测试。`,
+    createdAt: 1_700_000_000_000 + index * 2,
+    serverMessageId: index * 2 - 1,
+  },
+  {
+    id: `overview-assistant-${index}`,
+    role: "assistant",
+    content: Array.from({ length: 10 }, (_, line) => `第 ${index} 轮回答第 ${line + 1} 行：用于撑开消息区高度，测试右侧概览点击跳转。`).join("\n\n"),
+    model: "deepseek-chat",
+    createdAt: 1_700_000_000_000 + index * 2 + 1,
+    completedAt: 1_700_000_000_000 + index * 2 + 2,
+    serverMessageId: index * 2,
+  },
+];
+
+const messages: Message[] = Array.from({ length: 8 }, (_, index) => makeTurn(index + 1)).flat();
+
+export default function ChatMessageOverviewFixture() {
+  return (
+    <div className="flex h-screen min-h-0 flex-col bg-surface text-text-primary" data-testid="chat-message-overview-fixture">
+      <div className="shrink-0 border-b border-surface-border px-4 py-2 text-xs text-text-secondary">
+        DeepSeek-style message overview fixture
+      </div>
+      <div className="flex min-h-0 flex-1">
+        <MessageList
+          messages={messages}
+          isLoading={false}
+          models={models}
+          conversationId={2000}
+        />
+      </div>
+    </div>
+  );
+}

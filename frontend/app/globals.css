@@ -54,9 +54,13 @@
     --text-secondary: #64748B;          /* 次级文字 - slate-500 冷灰 */
     --text-tertiary: #94A3B8;           /* 占位符 - slate-400 */
     
-    --brand: #3B82F6;                   /* 品牌蓝 */
-    --brand-hover: #2563EB;
-    --brand-muted: rgba(59, 130, 246, 0.1);
+    --brand: #8B5CF6;                   /* 品牌紫 */
+    --brand-hover: #7C3AED;
+    --brand-muted: rgba(139, 92, 246, 0.1);
+    --brand-border: rgba(139, 92, 246, 0.22);
+    --brand-focus: rgba(139, 92, 246, 0.18);
+    --brand-soft-hover: rgba(139, 92, 246, 0.16);
+    --brand-shadow: rgba(139, 92, 246, 0.22);
     
     --message-user: #EFF6FF;            /* 用户消息 - 浅蓝 */
     --message-ai: #F6F7F9;              /* AI 消息 - 冷灰 */
@@ -111,9 +115,13 @@
     --text-secondary: #5C5E54;          /* 次级文字 */
     --text-tertiary: #7A7D72;           /* 占位符 */
     
-    --brand: #3B82F6;                   /* 品牌蓝 */
-    --brand-hover: #2563EB;
-    --brand-muted: rgba(59, 130, 246, 0.15);
+    --brand: #4F7F45;                   /* 护眼绿色强调色 */
+    --brand-hover: #3F6937;
+    --brand-muted: rgba(79, 127, 69, 0.14);
+    --brand-border: rgba(79, 127, 69, 0.26);
+    --brand-focus: rgba(79, 127, 69, 0.20);
+    --brand-soft-hover: rgba(79, 127, 69, 0.20);
+    --brand-shadow: rgba(79, 127, 69, 0.22);
     
     --message-user: #DAE5CF;            /* 用户消息 */
     --message-ai: #E2ECD9;              /* AI 消息 */
@@ -171,6 +179,10 @@
     --brand: #3B82F6;
     --brand-hover: #2563EB;
     --brand-muted: rgba(59, 130, 246, 0.1);
+    --brand-border: rgba(59, 130, 246, 0.22);
+    --brand-focus: rgba(59, 130, 246, 0.18);
+    --brand-soft-hover: rgba(59, 130, 246, 0.16);
+    --brand-shadow: rgba(59, 130, 246, 0.22);
     
     --message-user: #1E293B;
     --message-ai: #1F1F1F;
