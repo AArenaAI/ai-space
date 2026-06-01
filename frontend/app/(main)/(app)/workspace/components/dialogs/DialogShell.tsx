@@ -1,7 +1,7 @@
 "use client";
 
 import { X } from "lucide-react";
-import { ReactNode } from "react";
+import { ReactNode, type ClipboardEventHandler } from "react";
 
 export type DialogTheme = {
   name: string;
@@ -78,6 +78,7 @@ export default function DialogShell({
   children,
   size = "md",
   theme = THEMES.blue,
+  onPaste,
 }: {
   open: boolean;
   onClose: () => void;
@@ -86,6 +87,7 @@ export default function DialogShell({
   children: ReactNode;
   size?: "sm" | "md" | "lg" | "xl";
   theme?: DialogTheme;
+  onPaste?: ClipboardEventHandler<HTMLDivElement>;
 }) {
   if (!open) return null;
 
@@ -130,7 +132,7 @@ export default function DialogShell({
         </div>
 
         {/* 内容区 */}
-        <div className="flex-1 overflow-y-auto p-5 scrollbar-hide">
+        <div className="flex-1 overflow-y-auto p-5 scrollbar-hide" onPaste={onPaste}>
           {children}
         </div>
       </div>

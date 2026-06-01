@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
 import { getErrorMessage, readApiError, showUserError } from "@/lib/errors";
 import type { ModelRecommendationContext } from "@/lib/models/modelRecommendations";
+import { getClipboardFiles } from "@/lib/clipboardFiles";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import NetworkStatusHint from "./NetworkStatusHint";
 
@@ -439,6 +440,27 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     }
   };
 
+  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = getClipboardFiles(e);
+    if (files.length === 0) return;
+
+    e.preventDefault();
+    const maxSize = 20 * 1024 * 1024;
+    const remainingSlots = 20 - attachedFiles.length;
+    if (remainingSlots <= 0) {
+      toast.warning(t("chat.maxFilesWarning"));
+      return;
+    }
+
+    for (const file of files.slice(0, remainingSlots)) {
+      if (file.size > maxSize) {
+        toast.warning(t("chat.fileTooLarge").replace("{name}", file.name));
+        continue;
+      }
+      await uploadSingleFile(file);
+    }
+  };
+
   const removeAttachedFile = (index: number) => {
     setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
   };
@@ -688,6 +710,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
             value={content}
             onChange={(e) => setContent(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder={t("chat.placeholder")}
             rows={1}
             className={cn(

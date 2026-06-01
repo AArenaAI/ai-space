@@ -31,6 +31,7 @@ import DeleteSuccessNotice from "@/components/ui/DeleteSuccessNotice";
 import { useI18n } from "@/lib/i18n";
 import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotifications";
 import { normalizeError, readApiError, showUserError } from "@/lib/errors";
+import { getClipboardFiles } from "@/lib/clipboardFiles";
 
 const ASPECT_RATIOS = [
   { value: "16:9", label: "16:9", w: 16, h: 9 },
@@ -528,6 +529,13 @@ function VideoChatPageInner() {
     uploadReferenceMedia(file);
   };
 
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = getClipboardFiles(e);
+    if (files.length === 0) return;
+    e.preventDefault();
+    files.forEach((file) => uploadReferenceMedia(file));
+  };
+
   const handleDownload = async (url: string, id: number | string) => {
     try {
       const response = await fetch(resolveMediaUrl(url));
@@ -809,6 +817,7 @@ function VideoChatPageInner() {
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
+                onPaste={handlePaste}
                 placeholder={t("image.prompt.video")}
                 disabled={generating}
                 className={cn(

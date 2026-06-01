@@ -3,7 +3,8 @@
 import { useState, useRef, useEffect } from "react";
 import { Send, Bot, User, Loader2, FileText, X, Trash2, MessageSquareText, Sparkles } from "lucide-react";
 import DialogShell, { THEMES } from "./DialogShell";
-import { getErrorMessage, readApiError } from "@/lib/errors";
+import { getErrorMessage, readApiError, showUserError } from "@/lib/errors";
+import { getClipboardFiles } from "@/lib/clipboardFiles";
 
 interface Msg {
   role: "user" | "assistant";
@@ -68,7 +69,7 @@ export default function ConvertDialog({ open, onClose, workspaceId, modelId }: {
     }
   };
 
-  const handleFileUpload = async (files: FileList | null) => {
+  const handleFileUpload = async (files: FileList | File[] | null) => {
     if (!files || files.length === 0 || !workspaceId) return;
     const token = localStorage.getItem("token");
     for (const file of Array.from(files)) {
@@ -81,12 +82,24 @@ export default function ConvertDialog({ open, onClose, workspaceId, modelId }: {
           headers: { Authorization: `Bearer ${token}` },
           body: form,
         });
-        if (res.ok) {
-          const data = await res.json();
-          setUploadedFiles((prev) => [...prev, { id: data.id, name: data.original_name }]);
-        }
-      } catch { /* ignore */ }
+        if (!res.ok) throw await readApiError(res);
+        const data = await res.json();
+        setUploadedFiles((prev) => [...prev, { id: data.id, name: data.original_name }]);
+      } catch (err) {
+        showUserError(err, {
+          module: "file",
+          fallbackTitle: "上传失败",
+          fallbackMessage: `${file.name} 上传失败，请重新选择文件。`,
+        });
+      }
     }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const pastedFiles = getClipboardFiles(e);
+    if (pastedFiles.length === 0) return;
+    e.preventDefault();
+    handleFileUpload(pastedFiles);
   };
 
   return (
@@ -153,6 +166,7 @@ export default function ConvertDialog({ open, onClose, workspaceId, modelId }: {
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onPaste={handlePaste}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
               placeholder="请描述你想对文件做什么..."
               className="h-10 max-h-24 min-h-[2.5rem] flex-1 resize-none bg-transparent px-2 py-2 text-sm text-text-primary outline-none placeholder:text-text-tertiary"

@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotifications";
 import { normalizeError, readApiError, showUserError } from "@/lib/errors";
+import { getClipboardFiles } from "@/lib/clipboardFiles";
 import { toast } from "sonner";
 import ImageLightbox from "@/components/ui/ImageLightbox";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
@@ -582,6 +583,22 @@ function ImageChatPageInner() {
     uploadReferenceImage(file);
   };
 
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = getClipboardFiles(e);
+    if (files.length === 0) return;
+    const imageFile = files.find((file) => file.type.startsWith("image/"));
+    e.preventDefault();
+    if (!imageFile) {
+      showUserError(new Error("unsupported reference image"), {
+        module: "file",
+        fallbackTitle: t("image.uploadFailed"),
+        fallbackMessage: "请粘贴图片文件作为参考图。",
+      });
+      return;
+    }
+    uploadReferenceImage(imageFile);
+  };
+
   const handleAddImage = () => fileInputRef.current?.click();
   const handleRemoveImage = (index: number) => {
     setReferenceImages((prev) => prev.filter((_, i) => i !== index));
@@ -961,6 +978,7 @@ function ImageChatPageInner() {
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
+                onPaste={handlePaste}
                 placeholder={t("image.prompt.image")}
                 disabled={isGenerating}
                 className={cn(

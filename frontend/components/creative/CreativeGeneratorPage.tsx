@@ -41,6 +41,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
 import { getErrorMessage, readApiError, showUserError } from "@/lib/errors";
+import { getClipboardFiles } from "@/lib/clipboardFiles";
 
 const ASPECT_RATIOS = [
   { value: "auto", label: "Auto", w: 1, h: 1 },
@@ -521,6 +522,13 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
     uploadReferenceMedia(files);
   };
 
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = getClipboardFiles(e);
+    if (files.length === 0) return;
+    e.preventDefault();
+    uploadReferenceMedia(files);
+  };
+
   const handleAddImage = () => {
     fileInputRef.current?.click();
   };
@@ -790,6 +798,7 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
+                onPaste={handlePaste}
                 placeholder={
                   mode === "video"
                     ? t("image.prompt.video")

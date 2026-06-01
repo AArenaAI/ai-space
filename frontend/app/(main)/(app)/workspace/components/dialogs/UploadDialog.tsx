@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { UploadCloud, FileText, Trash2, X, Check, Loader2, FolderOpen, CloudUpload } from "lucide-react";
 import DialogShell, { THEMES } from "./DialogShell";
+import { getClipboardFiles } from "@/lib/clipboardFiles";
+import { readApiError, showUserError } from "@/lib/errors";
 
 interface FileItem {
   id: number;
@@ -37,7 +39,7 @@ export default function UploadDialog({ open, onClose, workspaceId }: { open: boo
     if (open) loadFiles();
   }, [open, loadFiles]);
 
-  const handleUpload = async (fileList: FileList | null) => {
+  const handleUpload = async (fileList: FileList | File[] | null) => {
     if (!fileList || fileList.length === 0 || !workspaceId) return;
     setUploading(true);
     const token = localStorage.getItem("token");
@@ -52,14 +54,26 @@ export default function UploadDialog({ open, onClose, workspaceId }: { open: boo
           headers: { Authorization: `Bearer ${token}` },
           body: form,
         });
-        if (res.ok) {
-          const data = await res.json();
-          uploaded.push(data);
-        }
-      } catch { /* ignore single file failure */ }
+        if (!res.ok) throw await readApiError(res);
+        const data = await res.json();
+        uploaded.push(data);
+      } catch (err) {
+        showUserError(err, {
+          module: "file",
+          fallbackTitle: "上传失败",
+          fallbackMessage: `${file.name} 上传失败，请重新选择文件。`,
+        });
+      }
     }
     setFiles((prev) => [...uploaded, ...prev]);
     setUploading(false);
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    const pastedFiles = getClipboardFiles(e);
+    if (pastedFiles.length === 0) return;
+    e.preventDefault();
+    handleUpload(pastedFiles);
   };
 
   const handleDelete = async (id: number) => {
@@ -77,7 +91,7 @@ export default function UploadDialog({ open, onClose, workspaceId }: { open: boo
   };
 
   return (
-    <DialogShell open={open} onClose={onClose} title="文件上传站" icon={<CloudUpload className={`h-4 w-4 ${theme.primary}`} />} size="lg" theme={theme}>
+    <DialogShell open={open} onClose={onClose} title="文件上传站" icon={<CloudUpload className={`h-4 w-4 ${theme.primary}`} />} size="lg" theme={theme} onPaste={handlePaste}>
       {/* 空间统计条 */}
       <div className={`mb-4 flex items-center gap-3 rounded-xl ${theme.primaryBg} ${theme.primaryBorder} border px-4 py-2.5`}>
         <FolderOpen className={`h-4 w-4 ${theme.primary}`} />
@@ -102,7 +116,7 @@ export default function UploadDialog({ open, onClose, workspaceId }: { open: boo
           <UploadCloud className={`h-7 w-7 ${theme.primary}`} />
         </div>
         <p className="text-sm font-medium text-text-primary">点击或拖拽文件到此处</p>
-        <p className="mt-1 text-[11px] text-text-tertiary">支持 PDF、图片、文档等格式</p>
+        <p className="mt-1 text-[11px] text-text-tertiary">支持 PDF、图片、文档等格式，也可直接粘贴文件</p>
         {uploading && (
           <div className={`mt-3 flex items-center justify-center gap-2 text-xs ${theme.primary}`}>
             <Loader2 className="h-3.5 w-3.5 animate-spin" />

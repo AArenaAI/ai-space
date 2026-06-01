@@ -5,6 +5,7 @@ import { ImageIcon, UploadCloud, Loader2, Wand2, Eraser, Type, ImagePlus, Trash2
 import DialogShell, { THEMES } from "./DialogShell";
 import { resolveImageUrl } from "@/lib/resolveImageUrl";
 import { readApiError, showUserError } from "@/lib/errors";
+import { getClipboardFiles } from "@/lib/clipboardFiles";
 
 const EDIT_MODES = [
   { key: "remove-bg", label: "移除背景", icon: Eraser, desc: "智能识别主体并去除背景" },
@@ -25,11 +26,26 @@ export default function ImageEditDialog({ open, onClose }: { open: boolean; onCl
 
   const handleFile = (f: File | null) => {
     if (!f) return;
+    if (!f.type.startsWith("image/")) {
+      showUserError(new Error("unsupported image file"), {
+        module: "file",
+        fallbackTitle: "文件格式不支持",
+        fallbackMessage: "请粘贴或上传图片文件。",
+      });
+      return;
+    }
     setFile(f);
     const reader = new FileReader();
     reader.onload = (e) => setPreview(e.target?.result as string);
     reader.readAsDataURL(f);
     setResult(null);
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    const imageFile = getClipboardFiles(e).find((item) => item.type.startsWith("image/"));
+    if (!imageFile) return;
+    e.preventDefault();
+    handleFile(imageFile);
   };
 
   const handleSubmit = async () => {
@@ -78,7 +94,7 @@ export default function ImageEditDialog({ open, onClose }: { open: boolean; onCl
   };
 
   return (
-    <DialogShell open={open} onClose={onClose} title="图片编辑工坊" icon={<WandSparkles className={`h-4 w-4 ${theme.primary}`} />} size="xl" theme={theme}>
+    <DialogShell open={open} onClose={onClose} title="图片编辑工坊" icon={<WandSparkles className={`h-4 w-4 ${theme.primary}`} />} size="xl" theme={theme} onPaste={handlePaste}>
       {/* 紫色工坊氛围 */}
       <div className={`mb-3 flex items-center gap-3 rounded-xl ${theme.primaryBg} ${theme.primaryBorder} border px-4 py-2.5`}>
         <Wand2 className={`h-4 w-4 ${theme.primary}`} />
@@ -113,7 +129,7 @@ export default function ImageEditDialog({ open, onClose }: { open: boolean; onCl
             <UploadCloud className={`h-7 w-7 ${theme.primary}`} />
           </div>
           <p className="text-sm font-medium text-text-primary">点击上传图片</p>
-          <p className="text-[11px] text-text-tertiary">支持 JPG、PNG、WebP 格式</p>
+          <p className="text-[11px] text-text-tertiary">支持 JPG、PNG、WebP 格式，也可直接粘贴图片</p>
         </div>
       ) : (
         <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
