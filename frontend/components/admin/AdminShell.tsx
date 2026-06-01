@@ -5,16 +5,16 @@ import { usePathname, useRouter } from "next/navigation";
 import { BarChart3, Bot, ClipboardList, CreditCard, Home, LayoutDashboard, LogOut, Settings, Shield, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const MANAGEMENT_BASE = "/management";
+const ADMIN_BASE = "/admin";
 
 const navItems = [
-  { href: MANAGEMENT_BASE, label: "总览", icon: LayoutDashboard, exact: true },
-  { href: `${MANAGEMENT_BASE}/users`, label: "用户", icon: Users },
-  { href: `${MANAGEMENT_BASE}/usage`, label: "用量", icon: BarChart3 },
-  { href: `${MANAGEMENT_BASE}/models`, label: "模型", icon: Bot },
-  { href: `${MANAGEMENT_BASE}/tasks`, label: "任务", icon: ClipboardList },
-  { href: `${MANAGEMENT_BASE}/billing`, label: "支付", icon: CreditCard, disabled: true },
-  { href: `${MANAGEMENT_BASE}/settings`, label: "设置", icon: Settings, disabled: true },
+  { href: ADMIN_BASE, label: "总览", icon: LayoutDashboard, exact: true },
+  { href: `${ADMIN_BASE}/users`, label: "用户", icon: Users },
+  { href: `${ADMIN_BASE}/usage`, label: "用量", icon: BarChart3 },
+  { href: `${ADMIN_BASE}/models`, label: "模型", icon: Bot },
+  { href: `${ADMIN_BASE}/tasks`, label: "任务", icon: ClipboardList },
+  { href: `${ADMIN_BASE}/billing`, label: "支付", icon: CreditCard, disabled: true },
+  { href: `${ADMIN_BASE}/settings`, label: "设置", icon: Settings, disabled: true },
 ];
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
