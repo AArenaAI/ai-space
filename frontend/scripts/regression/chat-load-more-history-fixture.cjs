@@ -72,7 +72,8 @@ async function readMarker(page, markerId) {
     const after = await readMarker(page, markerId);
 
     assert.ok(after.found, "marker should still be rendered after prepending older history");
-    assert.ok(after.rows > before.rows, `older history should be prepended: before ${before.rows}, after ${after.rows}`);
+    assert.ok(after.loadedOlder, "fixture should report older history loaded");
+    assert.ok(after.scrollHeight > before.scrollHeight, `older history should increase scroll height: before ${before.scrollHeight}, after ${after.scrollHeight}`);
     const topDelta = Math.abs(after.top - before.top);
     assert.ok(topDelta < 32, `marker should remain visually anchored after load more, moved ${topDelta}px (before ${before.top}, after ${after.top})`);
     const blankSamples = samples.filter((sample) => !sample.found || sample.rows === 0);

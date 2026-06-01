@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, memo, type UIEvent } from "react";
-import { Bot, ChevronDown as ChevronDownIcon, Loader2, X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/lib/chatTypes";
 import { useFavorites } from "@/hooks/useFavorites";
@@ -26,6 +26,9 @@ import { type TextSelectionFloatingBarState } from "./TextSelectionFloatingBar";
 import ChatScrollProgress from "./ChatScrollProgress";
 import ChatMessageOverview, { type ChatMessageOverviewItem } from "./ChatMessageOverview";
 import ChatSelectionOverlays from "./ChatSelectionOverlays";
+import ChatScrollToBottomButton from "./ChatScrollToBottomButton";
+import ChatHistoryLoadingState from "./ChatHistoryLoadingState";
+import ChatEmptyState from "./ChatEmptyState";
 import { parseThinkContent, sanitizeContent, isMessageGenerating } from "@/lib/chatContent";
 
 
@@ -367,34 +370,14 @@ function MessageList({
   const [textSelection, setTextSelection] = useState<TextSelectionFloatingBarState | null>(null);
   const exportCardRef = useRef<HTMLDivElement>(null);
   const exportPreviewCardRef = useRef<HTMLDivElement>(null);
-  const renderScrollToBottomButton = useCallback(() => {
-    if (atBottom) return null;
-    return (
-      <div
-        className="pointer-events-none absolute inset-x-0 z-[75] mx-auto max-w-[1440px]"
-        style={{ bottom: SCROLL_TO_BOTTOM_OFFSET + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0) }}
-      >
-        <button
-          type="button"
-          onClick={() => {
-            userScrollOverrideUntilRef.current = 0;
-            stickToBottomRef.current = true;
-            atBottomRef.current = true;
-            setAtBottom(true);
-            scrollToBottom();
-            lockBottomAfterLayout();
-          }}
-          className="pointer-events-auto absolute left-1/2 flex h-10 w-10 -translate-x-1/2 items-center justify-center rounded-full
-            border border-surface-border bg-surface-elevated/75 text-text-secondary shadow-lg backdrop-blur-md transition-all
-            hover:bg-surface-card/85 hover:text-text-primary hover:shadow-xl hover:border-surface-border/80
-            active:scale-95 active:bg-surface-card active:shadow-sm"
-          aria-label="回到底部"
-        >
-          <ChevronDownIcon className="w-5 h-5" />
-        </button>
-      </div>
-    );
-  }, [atBottom, lockBottomAfterLayout, selectMode]);
+  const handleScrollToBottomClick = useCallback(() => {
+    userScrollOverrideUntilRef.current = 0;
+    stickToBottomRef.current = true;
+    atBottomRef.current = true;
+    setAtBottom(true);
+    scrollToBottom();
+    lockBottomAfterLayout();
+  }, [lockBottomAfterLayout, scrollToBottom]);
 
   const createVirtuosoComponents = useCallback(<T,>(): Components<T, unknown> => ({
     Header: () =>
@@ -1009,17 +992,7 @@ function MessageList({
     </div>
   );
 
-  const renderHistoryLoadingState = () => (
-    <div
-      className="flex min-h-[320px] items-start justify-center px-4 pt-24 text-text-tertiary"
-      data-testid="chat-history-loading-state"
-    >
-      <div className="flex items-center gap-2 rounded-full border border-surface-border/60 bg-surface-card/45 px-3 py-2 text-xs shadow-sm backdrop-blur-sm">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        <span>正在加载聊天记录</span>
-      </div>
-    </div>
-  );
+  const renderHistoryLoadingState = () => <ChatHistoryLoadingState />;
 
   const historyLoadingComponents = useMemo(() => ({
     Header: renderHistoryLoadingState,
@@ -1144,7 +1117,11 @@ function MessageList({
           onJumpToRatio={jumpToScrollRatio}
           onDragStateChange={setScrollProgressDragging}
         />
-        {renderScrollToBottomButton()}
+        <ChatScrollToBottomButton
+          visible={!atBottom}
+          bottomOffset={SCROLL_TO_BOTTOM_OFFSET + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0)}
+          onClick={handleScrollToBottomClick}
+        />
 
         <ConfirmDialog
           isOpen={!!deleteTarget}
@@ -1182,37 +1159,17 @@ function MessageList({
         </div>
       );
     }
-    const hasCustomWelcome = welcomeExamples && welcomeExamples.length > 0;
-    const defaultExamples = [
-      { title: "知识问答", desc: "用通俗易懂的方式讲清一个话题，并给出3个延伸阅读方向", prompt: "用通俗易懂的方式讲清一个话题，并给出3个延伸阅读方向" },
-      { title: "写作助手", desc: "帮我把这段文字改写得更专业、更精炼，并保留原意", prompt: "帮我把这段文字改写得更专业、更精炼，并保留原意" },
-      { title: "代码辅助", desc: "解释这段代码的工作原理，并给出优化建议", prompt: "解释这段代码的工作原理，并给出优化建议" },
-    ];
-    const examples = hasCustomWelcome ? welcomeExamples : defaultExamples;
-
     return (
-      <div className="flex-1 flex flex-col items-center justify-start px-4 pt-48" style={{ paddingBottom: CHAT_BOTTOM_SPACER }}>
-        <div className="text-center max-w-md">
-          {hasCustomWelcome ? (
-            <>
-              <div className="w-12 h-12 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center mx-auto mb-6">
-                <Bot className="w-5 h-5 text-text-secondary" />
-              </div>
-              <h2 className="text-xl font-semibold tracking-tight mb-2 text-text-primary">{welcomeTitle}</h2>
-              {welcomeSubtitle && (
-                <p className="text-text-secondary text-sm leading-relaxed mb-8">{welcomeSubtitle}</p>
-              )}
-            </>
-          ) : (
-            <>
-              <h1 className="text-[32px] font-semibold leading-tight tracking-tight mb-2 text-text-primary">
-                {userName ? t("chat.userGreeting").replace("{name}", userName) : t("chat.greeting")}
-              </h1>
-              <p className="text-[25px] font-medium leading-tight tracking-tight text-text-primary/80">{t("chat.whatCanWeDo")}</p>
-            </>
-          )}
-        </div>
-      </div>
+      <ChatEmptyState
+        userName={userName}
+        greeting={t("chat.greeting")}
+        userGreetingTemplate={t("chat.userGreeting")}
+        whatCanWeDoLabel={t("chat.whatCanWeDo")}
+        welcomeTitle={welcomeTitle}
+        welcomeSubtitle={welcomeSubtitle}
+        welcomeExamples={welcomeExamples}
+        bottomSpacer={CHAT_BOTTOM_SPACER}
+      />
     );
   }
 
@@ -1308,7 +1265,11 @@ function MessageList({
         onJumpToRatio={jumpToScrollRatio}
         onDragStateChange={setScrollProgressDragging}
       />
-      {renderScrollToBottomButton()}
+      <ChatScrollToBottomButton
+        visible={!atBottom}
+        bottomOffset={SCROLL_TO_BOTTOM_OFFSET + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0)}
+        onClick={handleScrollToBottomClick}
+      />
 
       <ChatSelectionOverlays
         textSelection={textSelection}
