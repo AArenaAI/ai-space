@@ -29,7 +29,6 @@ async function readMetrics(page) {
       thumbRect: { x: thumbRect.x, y: thumbRect.y, width: thumbRect.width, height: thumbRect.height, right: thumbRect.right, bottom: thumbRect.bottom },
       layerZIndex: getComputedStyle(layer).zIndex,
       expectedInputZIndex: "70",
-      expectedInputSafeTop: window.innerHeight - 228,
       scrollerScrollbarWidth: nativeScrollbar.width,
       scrollerFirefoxScrollbarWidth: scrollerStyle.scrollbarWidth,
       scrollTop: scroller.scrollTop,
@@ -64,9 +63,9 @@ async function readMetrics(page) {
     assert.equal(initial.scrollerFirefoxScrollbarWidth, "none", "native chat scrollbar should be hidden in Firefox-compatible CSS");
     assert.ok(parseFloat(initial.scrollerScrollbarWidth) <= 1, `native WebKit scrollbar should be hidden, got ${initial.scrollerScrollbarWidth}`);
     assert.ok(Number(initial.layerZIndex) > Number(initial.expectedInputZIndex), `overlay z-index ${initial.layerZIndex} should be above input z-index ${initial.expectedInputZIndex}`);
-    assert.ok(initial.trackRect.bottom > initial.expectedInputSafeTop + 120, `progress track should continue into the input safe area instead of stopping above it: track bottom ${initial.trackRect.bottom}, safe top ${initial.expectedInputSafeTop}`);
-    assert.ok(initial.viewportHeight - initial.trackRect.bottom <= 24, `progress track should reach near the viewport bottom, got bottom gap ${initial.viewportHeight - initial.trackRect.bottom}`);
-    assert.ok(initial.trackRect.height > 500, "progress track should be viewport-stable and tall enough to drag through the input area");
+    assert.ok(Math.abs(initial.trackRect.y - initial.scrollerRect.y) < 2, `progress track should align to chat body top: track ${initial.trackRect.y}, scroller ${initial.scrollerRect.y}`);
+    assert.ok(Math.abs(initial.trackRect.bottom - initial.scrollerRect.bottom) < 2, `progress track should align to chat body bottom: track ${initial.trackRect.bottom}, scroller ${initial.scrollerRect.bottom}`);
+    assert.ok(Math.abs(initial.trackRect.height - initial.scrollerRect.height) < 2, `progress track height should equal chat body height: track ${initial.trackRect.height}, scroller ${initial.scrollerRect.height}`);
 
     await page.evaluate(() => {
       const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
@@ -109,7 +108,8 @@ async function readMetrics(page) {
       overlayZIndex: initial.layerZIndex,
       expectedInputZIndex: initial.expectedInputZIndex,
       trackBottom: initial.trackRect.bottom,
-      inputSafeTop: initial.expectedInputSafeTop,
+      scrollerTop: initial.scrollerRect.y,
+      scrollerBottom: initial.scrollerRect.bottom,
       draggedRatio: dragged.ratio,
       stableTrackTopDelta: Math.abs(stableAfter.trackRect.y - stableBefore.trackRect.y),
     }));

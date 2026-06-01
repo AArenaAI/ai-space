@@ -35,8 +35,6 @@ const CHAT_BOTTOM_SPACER = 280;
 const SCROLL_TO_BOTTOM_OFFSET = 238;
 const AT_BOTTOM_THRESHOLD = 24;
 const SELECT_MODE_EXTRA_SPACER = 80;
-const CHAT_SCROLL_PROGRESS_BOTTOM = 18;
-const CHAT_SCROLL_PROGRESS_TOP = 72;
 const LONG_MARKDOWN_LAZY_THRESHOLD = 4000;
 type SelectionMode = "share" | "favorite";
 
@@ -129,7 +127,6 @@ function LazyMarkdownRenderer({ content }: { content: string }) {
 type ChatScrollProgressProps = {
   scrollRatio: number;
   visible: boolean;
-  selectMode: boolean;
   onJumpToRatio: (ratio: number) => void;
   onDragStateChange: (dragging: boolean) => void;
 };
@@ -137,7 +134,6 @@ type ChatScrollProgressProps = {
 const ChatScrollProgress = memo(function ChatScrollProgress({
   scrollRatio,
   visible,
-  selectMode,
   onJumpToRatio,
   onDragStateChange,
 }: ChatScrollProgressProps) {
@@ -146,7 +142,6 @@ const ChatScrollProgress = memo(function ChatScrollProgress({
   const clampedRatio = Math.min(1, Math.max(0, Number.isFinite(scrollRatio) ? scrollRatio : 0));
   const thumbHeightPercent = 14;
   const thumbTopPercent = clampedRatio * (100 - thumbHeightPercent);
-  const bottom = CHAT_SCROLL_PROGRESS_BOTTOM + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0);
 
   const ratioFromClientY = useCallback((clientY: number) => {
     const rect = trackRef.current?.getBoundingClientRect();
@@ -185,7 +180,6 @@ const ChatScrollProgress = memo(function ChatScrollProgress({
   return (
     <div
       className="pointer-events-none absolute inset-y-0 right-1 z-[95] hidden w-7 justify-center sm:flex"
-      style={{ top: CHAT_SCROLL_PROGRESS_TOP, bottom }}
       data-testid="chat-scroll-progress-layer"
       aria-hidden="false"
     >
@@ -1099,7 +1093,6 @@ function MessageList({
         <ChatScrollProgress
           scrollRatio={scrollProgress.ratio}
           visible={scrollProgress.canScroll}
-          selectMode={selectMode}
           onJumpToRatio={jumpToScrollRatio}
           onDragStateChange={setScrollProgressDragging}
         />
@@ -1235,7 +1228,6 @@ function MessageList({
       <ChatScrollProgress
         scrollRatio={scrollProgress.ratio}
         visible={scrollProgress.canScroll}
-        selectMode={selectMode}
         onJumpToRatio={jumpToScrollRatio}
         onDragStateChange={setScrollProgressDragging}
       />
