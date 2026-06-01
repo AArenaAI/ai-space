@@ -142,8 +142,9 @@ const ChatScrollProgress = memo(function ChatScrollProgress({
   onDragStateChange,
 }: ChatScrollProgressProps) {
   const trackRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const clampedRatio = Math.min(1, Math.max(0, Number.isFinite(scrollRatio) ? scrollRatio : 0));
-  const thumbHeightPercent = 18;
+  const thumbHeightPercent = 14;
   const thumbTopPercent = clampedRatio * (100 - thumbHeightPercent);
   const bottom = CHAT_SCROLL_PROGRESS_BOTTOM + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0);
 
@@ -160,6 +161,7 @@ const ChatScrollProgress = memo(function ChatScrollProgress({
     event.stopPropagation();
     const target = event.currentTarget;
     target.setPointerCapture(event.pointerId);
+    setIsDragging(true);
     onDragStateChange(true);
     onJumpToRatio(ratioFromClientY(event.clientY));
   }, [onDragStateChange, onJumpToRatio, ratioFromClientY]);
@@ -174,6 +176,7 @@ const ChatScrollProgress = memo(function ChatScrollProgress({
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
+    setIsDragging(false);
     onDragStateChange(false);
   }, [onDragStateChange]);
 
@@ -181,7 +184,7 @@ const ChatScrollProgress = memo(function ChatScrollProgress({
 
   return (
     <div
-      className="pointer-events-none absolute inset-y-0 right-0 z-[95] hidden w-9 justify-center sm:flex"
+      className="pointer-events-none absolute inset-y-0 right-1 z-[95] hidden w-7 justify-center sm:flex"
       style={{ top: CHAT_SCROLL_PROGRESS_TOP, bottom }}
       data-testid="chat-scroll-progress-layer"
       aria-hidden="false"
@@ -195,16 +198,28 @@ const ChatScrollProgress = memo(function ChatScrollProgress({
         aria-valuenow={Math.round(clampedRatio * 100)}
         aria-label="聊天阅读进度"
         tabIndex={0}
-        className="pointer-events-auto relative h-full w-5 cursor-pointer rounded-full outline-none transition-opacity duration-200 focus-visible:ring-2 focus-visible:ring-brand/40"
+        className="group pointer-events-auto relative h-full w-5 cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-brand/35"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={finishDrag}
         onPointerCancel={finishDrag}
         data-testid="chat-scroll-progress-track"
       >
-        <div className="absolute left-1/2 top-0 h-full w-1 -translate-x-1/2 rounded-full bg-slate-500/10 dark:bg-slate-300/10 green:bg-[#4F7F45]/12" />
         <div
-          className="absolute left-1/2 w-2.5 -translate-x-1/2 rounded-full bg-slate-500/65 shadow-sm transition-colors hover:bg-slate-600/80 dark:bg-slate-300/60 dark:hover:bg-slate-200/80 green:bg-[#405E3D]/75 green:hover:bg-[#405E3D]/90"
+          className={cn(
+            "absolute left-1/2 top-0 h-full w-px -translate-x-1/2 rounded-full bg-slate-500/0 transition-all duration-200 ease-out",
+            "group-hover:w-[3px] group-hover:bg-slate-500/10 group-focus-visible:w-[3px] group-focus-visible:bg-slate-500/12",
+            "dark:group-hover:bg-slate-200/10 green:group-hover:bg-[#405E3D]/12",
+            isDragging && "w-[3px] bg-slate-500/12 dark:bg-slate-200/12 green:bg-[#405E3D]/14"
+          )}
+        />
+        <div
+          className={cn(
+            "absolute left-1/2 w-[3px] -translate-x-1/2 rounded-full bg-slate-500/45 shadow-[0_0_0_1px_rgba(255,255,255,0.25)] transition-all duration-200 ease-out",
+            "group-hover:w-1.5 group-hover:bg-slate-500/70 group-hover:shadow-sm group-focus-visible:w-1.5 group-focus-visible:bg-slate-500/70",
+            "dark:bg-slate-200/38 dark:group-hover:bg-slate-200/68 green:bg-[#405E3D]/46 green:group-hover:bg-[#405E3D]/72",
+            isDragging && "w-1.5 bg-slate-600/75 dark:bg-slate-100/75 green:bg-[#405E3D]/82"
+          )}
           style={{ top: `${thumbTopPercent}%`, height: `${thumbHeightPercent}%` }}
           data-testid="chat-scroll-progress-thumb"
         />
