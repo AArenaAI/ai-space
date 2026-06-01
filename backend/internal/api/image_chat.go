@@ -134,22 +134,6 @@ func (h *ImageChatHandler) CreateImageChat(c *gin.Context) {
 		mediaType = "image"
 	}
 
-	// 检查历史记录数量上限：只统计已经生成成功、有首图的会话
-	var chatCount int64
-	h.db.Model(&models.ImageChat{}).Where(`
-		user_id = ? AND EXISTS (
-			SELECT 1 FROM image_chat_messages
-			WHERE image_chat_messages.chat_id = image_chats.id
-			AND role = 'assistant'
-			AND status = 'completed'
-			AND image_url != ''
-		)
-	`, userID).Count(&chatCount)
-	if chatCount >= 8 {
-		c.JSON(http.StatusForbidden, gin.H{"error": "历史记录只能保存8条会话，如需新建，请先删除旧会话"})
-		return
-	}
-
 	// 创建会话
 	title := req.Prompt
 	if title == "" {
