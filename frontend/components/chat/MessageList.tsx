@@ -232,7 +232,7 @@ const ChatMessageOverview = memo(function ChatMessageOverview({ items, visible, 
 
   return (
     <div
-      className="group pointer-events-none absolute bottom-[108px] right-5 z-[96] hidden max-h-[min(520px,calc(100%-160px))] items-end sm:flex"
+      className="group pointer-events-none absolute bottom-[108px] right-5 z-[110] hidden max-h-[min(520px,calc(100%-160px))] items-end sm:flex"
       data-testid="chat-message-overview"
     >
       <div className="pointer-events-auto flex items-center justify-end">
@@ -1443,7 +1443,7 @@ function MessageList({
 
       <ChatMessageOverview
         items={overviewItems}
-        visible={!selectMode && !isCompare && scrollProgress.canScroll}
+        visible={!selectMode && !isCompare && overviewItems.length >= 2}
         onJumpToMessage={jumpToUserMessage}
       />
       <ChatScrollProgress

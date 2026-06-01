@@ -35,11 +35,13 @@ const baseUrl = process.env.CHAT_MESSAGE_OVERVIEW_FIXTURE_BASE_URL || "http://12
         width: rect?.width ?? 0,
         labelVisibleCount: labels.filter((el) => getComputedStyle(el).display !== "none").length,
         itemCount: document.querySelectorAll('[data-testid="chat-message-overview-item"]').length,
+        zIndex: getComputedStyle(panel?.closest('[data-testid="chat-message-overview"]') || panel).zIndex,
       };
     });
     assert.ok(compact.itemCount >= 4, `overview should include user message markers, got ${compact.itemCount}`);
     assert.ok(compact.width <= 72, `compact overview should be narrow, got ${compact.width}`);
     assert.equal(compact.labelVisibleCount, 0, "compact overview should hide labels before hover");
+    assert.ok(Number(compact.zIndex) >= 110, `overview should sit above chat controls, got z-index ${compact.zIndex}`);
 
     await page.hover('[data-testid="chat-message-overview-panel"]');
     await page.waitForTimeout(260);
