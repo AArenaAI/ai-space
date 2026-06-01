@@ -237,12 +237,12 @@ const ChatMessageOverview = memo(function ChatMessageOverview({ items, visible, 
       <div className="pointer-events-auto relative flex max-h-full items-center justify-end">
         {/* Invisible hover target to make right-edge hover stable */}
         <div
-          className="absolute inset-y-0 right-0 w-10 opacity-0"
+          className="absolute -right-3 inset-y-0 w-6 opacity-0"
           data-testid="chat-message-overview-hover-target"
           aria-hidden="true"
         />
         <div
-          className="chat-message-overview-scrollbar flex max-h-[min(520px,calc(100vh-160px))] w-8 flex-col items-end gap-2 overflow-hidden rounded-full bg-transparent py-2 pr-1 transition-[width,background-color,box-shadow,padding,border-color] duration-200 group-hover:w-[320px] group-hover:items-stretch group-hover:gap-1.5 group-hover:overflow-y-auto group-hover:rounded-2xl group-hover:border group-hover:border-surface-border/70 group-hover:bg-surface-elevated/95 group-hover:px-2 group-hover:pr-2 group-hover:shadow-2xl group-hover:shadow-black/20 dark:group-hover:bg-[#171717]/95"
+          className="chat-message-overview-scrollbar flex max-h-[min(520px,calc(100vh-160px))] w-8 flex-col items-end gap-2 overflow-hidden rounded-full bg-transparent py-2 pr-1 transition-[width,background-color,box-shadow,padding,border-color] duration-200 group-hover:w-[260px] group-hover:items-stretch group-hover:gap-1.5 group-hover:overflow-y-auto group-hover:rounded-2xl group-hover:border group-hover:border-surface-border/70 group-hover:bg-surface-elevated/95 group-hover:px-2 group-hover:pr-2 group-hover:shadow-2xl group-hover:shadow-black/20 dark:group-hover:bg-[#171717]/95"
           data-testid="chat-message-overview-panel"
         >
           {items.map((item) => (
@@ -263,7 +263,7 @@ const ChatMessageOverview = memo(function ChatMessageOverview({ items, visible, 
               </span>
               <span
                 className={cn(
-                  "h-[2px] w-7 shrink-0 rounded-full transition-[width,background-color,box-shadow] duration-200 group-hover:w-5",
+                  "h-[2px] w-3.5 shrink-0 rounded-full transition-[width,background-color,box-shadow] duration-200 group-hover:w-3",
                   item.active
                     ? "bg-brand shadow-[0_0_0_1px_rgba(255,255,255,0.16)]"
                     : "bg-slate-400/55 group-hover:bg-slate-400/65 dark:bg-slate-400/50 dark:group-hover:bg-slate-300/65 green:bg-[#405E3D]/55 green:group-hover:bg-[#405E3D]/72"
