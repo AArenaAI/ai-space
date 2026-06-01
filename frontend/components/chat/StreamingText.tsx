@@ -5,7 +5,7 @@ import { useI18n } from "@/lib/i18n";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 import { useMessageStream } from "@/hooks/useMessageStream";
 import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
-import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
+import StreamingMarkdownView from "./StreamingMarkdownView";
 
 function ThinkingDots() {
   return (
@@ -95,13 +95,13 @@ export function StreamingText({
             </div>
           </div>
           <div data-i18n-skip="true" className="reasoning-markdown px-3 py-2.5 bg-slate-50 dark:bg-[#0F0F1A]">
-            <DeferredMarkdownRenderer content={parsed.reasoning || ""} idleTimeout={80} keepRenderedOnContentChange isStreaming={isStreaming} />
+            <StreamingMarkdownView content={parsed.reasoning || ""} idleTimeout={80} keepRenderedOnContentChange isStreaming={isStreaming} />
           </div>
         </div>
       )}
       {hasContent && (
         <span data-i18n-skip="true" className="streaming-answer-markdown block break-words">
-          <DeferredMarkdownRenderer content={parsed.answer} idleTimeout={80} keepRenderedOnContentChange isStreaming={isStreaming} />
+          <StreamingMarkdownView content={parsed.answer} idleTimeout={80} keepRenderedOnContentChange isStreaming={isStreaming} />
         </span>
       )}
       {!hasContent && !hasReason && <ThinkingDots />}

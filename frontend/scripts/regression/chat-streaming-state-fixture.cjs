@@ -46,12 +46,16 @@ const path = '/test-chat-streaming-state/';
 
   await page.waitForFunction(() => document.querySelector('[data-testid="fixture-phase"]')?.textContent === 'done', null, { timeout: 10_000 });
   await page.waitForFunction(() => document.body.innerText.includes('最终回答 OK 42'), null, { timeout: 10_000 });
+  await page.waitForFunction(() => document.querySelector('[data-testid="complex-streaming-markdown-active"] [data-streaming-markdown-mode="plain"]'), null, { timeout: 10_000 });
+  await page.waitForFunction(() => document.querySelector('[data-testid="complex-streaming-markdown-done"] [data-streaming-markdown-mode="rich"]'), null, { timeout: 10_000 });
   await page.waitForFunction(() => Array.from(document.querySelectorAll('strong')).some((node) => node.textContent?.includes('最终')), null, { timeout: 10_000 });
   await page.waitForFunction(() => Array.from(document.querySelectorAll('strong')).some((node) => node.textContent?.includes('OK')), null, { timeout: 10_000 });
   const doneSnapshot = await page.evaluate(() => ({
     body: document.body.innerText,
     reasoningStrongText: Array.from(document.querySelectorAll('.reasoning-markdown strong')).map((node) => node.textContent || '').join('|'),
     answerStrongText: Array.from(document.querySelectorAll('strong')).map((node) => node.textContent || '').join('|'),
+    complexStreamingMode: document.querySelector('[data-testid="complex-streaming-markdown-active"] [data-streaming-markdown-mode]')?.getAttribute('data-streaming-markdown-mode') || '',
+    complexDoneMode: document.querySelector('[data-testid="complex-streaming-markdown-done"] [data-streaming-markdown-mode]')?.getAttribute('data-streaming-markdown-mode') || '',
     statusBadges: Array.from(document.querySelectorAll('span')).map((node) => node.textContent || '').filter(Boolean),
   }));
   if (!doneSnapshot.body.includes('最终回答 OK 42')) {
@@ -71,6 +75,12 @@ const path = '/test-chat-streaming-state/';
   }
   if (!doneSnapshot.answerStrongText.includes('OK')) {
     issues.push('answer markdown bold did not remain a strong element after completion');
+  }
+  if (doneSnapshot.complexStreamingMode !== 'plain') {
+    issues.push(`complex streaming markdown did not use plain fallback: ${doneSnapshot.complexStreamingMode}`);
+  }
+  if (doneSnapshot.complexDoneMode !== 'rich') {
+    issues.push(`completed complex markdown did not return to rich renderer: ${doneSnapshot.complexDoneMode}`);
   }
 
   await browser.close();

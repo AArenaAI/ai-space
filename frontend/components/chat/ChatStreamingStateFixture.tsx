@@ -2,12 +2,27 @@
 
 import { useEffect, useMemo, useState } from "react";
 import MessageList from "./MessageList";
+import StreamingMarkdownView from "./StreamingMarkdownView";
 import { Message, ChatModel } from "@/lib/chatTypes";
 import { realtimeAppend, realtimeClear, realtimeUpdate } from "@/lib/streaming";
 
 const models: ChatModel[] = [
   { id: "fixture-model", name: "Fixture Model", provider: "fixture", description: "Synthetic chat state fixture", color: "#8b5cf6" },
 ];
+
+const COMPLEX_STREAMING_MARKDOWN = [
+  "复杂 Markdown streaming fallback 样本。",
+  "",
+  "```ts",
+  "export function expensiveStreamingMarkdown() {",
+  "  return 'avoid parsing while streaming';",
+  "}",
+  "```",
+  "",
+  "| 项目 | 状态 |",
+  "| --- | --- |",
+  "| streaming | plain fallback |",
+].join("\n");
 
 function baseMessages(): Message[] {
   return [
@@ -107,6 +122,14 @@ export default function ChatStreamingStateFixture() {
     <div className="flex h-screen min-h-0 flex-col bg-surface text-text-primary" data-testid="chat-streaming-state-fixture" data-state={marker}>
       <div className="shrink-0 border-b border-surface-border px-4 py-2 text-xs text-text-secondary">
         streaming state fixture · phase=<span data-testid="fixture-phase">{phase}</span>
+      </div>
+      <div className="max-h-32 overflow-auto opacity-0 pointer-events-none" data-testid="complex-streaming-markdown-fixture" aria-hidden="true">
+        <div data-testid="complex-streaming-markdown-active">
+          <StreamingMarkdownView content={COMPLEX_STREAMING_MARKDOWN} isStreaming />
+        </div>
+        <div data-testid="complex-streaming-markdown-done">
+          <StreamingMarkdownView content={COMPLEX_STREAMING_MARKDOWN} isStreaming={false} idleTimeout={1} />
+        </div>
       </div>
       <div className="flex min-h-0 flex-1">
         <MessageList
