@@ -621,25 +621,25 @@ func mustAdminJSON(value any) string {
 func (h *AdminHandler) usageQuery(c *gin.Context) *gorm.DB {
 	query := h.db.Model(&models.APIUsageLog{})
 	if rangeRaw := strings.TrimSpace(c.Query("range")); rangeRaw != "" {
-		query = query.Where("created_at >= ?", parseRangeStart(rangeRaw))
+		query = query.Where("api_usage_logs.created_at >= ?", parseRangeStart(rangeRaw))
 	}
 	if service := strings.TrimSpace(c.Query("service")); service != "" {
-		query = query.Where("service = ?", service)
+		query = query.Where("api_usage_logs.service = ?", service)
 	}
 	if provider := strings.TrimSpace(c.Query("provider")); provider != "" {
-		query = query.Where("provider = ?", provider)
+		query = query.Where("api_usage_logs.provider = ?", provider)
 	}
 	if model := strings.TrimSpace(c.Query("model")); model != "" {
-		query = query.Where("model = ?", model)
+		query = query.Where("api_usage_logs.model = ?", model)
 	}
 	if status := strings.TrimSpace(c.Query("status")); status != "" {
-		query = query.Where("status = ?", status)
+		query = query.Where("api_usage_logs.status = ?", status)
 	}
 	if uid := parsePositiveInt(c.Query("user_id"), 0); uid > 0 {
-		query = query.Where("user_id = ?", uid)
+		query = query.Where("api_usage_logs.user_id = ?", uid)
 	}
 	if conversationID := parsePositiveInt(c.Query("conversation_id"), 0); conversationID > 0 {
-		query = query.Where("conversation_id = ?", conversationID)
+		query = query.Where("api_usage_logs.conversation_id = ?", conversationID)
 	}
 	return query
 }
