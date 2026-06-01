@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
 import { getErrorMessage, readApiError, showUserError } from "@/lib/errors";
 import type { ModelRecommendationContext } from "@/lib/models/modelRecommendations";
-import { getClipboardFiles } from "@/lib/clipboardFiles";
+import { getClipboardFilesWithHtmlImages } from "@/lib/clipboardFiles";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import NetworkStatusHint from "./NetworkStatusHint";
 
@@ -19,6 +19,7 @@ const TEXTAREA_MAX_HEIGHT = 180;
 
 const SUPPORTED_FILE_EXTENSIONS = new Set([
   ".pdf",
+  ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp",
   ".xla", ".xlb", ".xlc", ".xlm", ".xls", ".xlsx", ".xlt", ".xlw", ".csv", ".tsv", ".iif",
   ".doc", ".docx", ".dot", ".odt", ".rtf",
   ".pot", ".ppa", ".pps", ".ppt", ".pptx", ".pwz", ".wiz",
@@ -35,8 +36,19 @@ function getFileExtension(filename: string) {
   return idx >= 0 ? filename.slice(idx).toLowerCase() : "";
 }
 
+function getUploadFileExtension(file: File) {
+  const ext = getFileExtension(file.name);
+  if (ext) return ext;
+  if (file.type === "image/jpeg") return ".jpg";
+  if (file.type === "image/png") return ".png";
+  if (file.type === "image/webp") return ".webp";
+  if (file.type === "image/gif") return ".gif";
+  if (file.type === "image/bmp") return ".bmp";
+  return "";
+}
+
 function isSupportedUploadFile(file: File) {
-  return SUPPORTED_FILE_EXTENSIONS.has(getFileExtension(file.name));
+  return SUPPORTED_FILE_EXTENSIONS.has(getUploadFileExtension(file));
 }
 
 export type ReasoningEffort = "light" | "standard" | "extended" | "heavy" | "high" | "max";
@@ -441,10 +453,17 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
   };
 
   const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = getClipboardFiles(e);
-    if (files.length === 0) return;
+    const hasFileItems = Array.from(e.clipboardData?.items || []).some((item) => item.kind === "file");
+    const hasHtmlImage = /<img\b/i.test(e.clipboardData?.getData("text/html") || "");
+    if (!hasFileItems && !hasHtmlImage && (e.clipboardData?.files?.length || 0) === 0) return;
 
     e.preventDefault();
+    const files = await getClipboardFilesWithHtmlImages(e);
+    if (files.length === 0) {
+      toast.warning(t("messageInput.unsupportedFile"));
+      return;
+    }
+
     const maxSize = 20 * 1024 * 1024;
     const remainingSlots = 20 - attachedFiles.length;
     if (remainingSlots <= 0) {
