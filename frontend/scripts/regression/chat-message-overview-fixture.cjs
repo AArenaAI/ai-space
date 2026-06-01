@@ -121,7 +121,12 @@ async function switchMode(page, testId) {
     await page.waitForTimeout(250);
     assert.equal(await overviewExists(page), 0, "overview should hide in select mode");
 
-    await page.setViewportSize({ width: 640, height: 900 });
+    // select mode is owned by MessageList internal state; reload to reset it before testing later modes.
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 });
+    await page.waitForSelector('[data-testid="chat-message-overview-fixture"]', { state: "attached", timeout: 20_000 });
+    await waitForRows(page);
+
+    await page.setViewportSize({ width: 620, height: 900 });
     await switchMode(page, "overview-mode-normal");
     await waitForRows(page);
     const mobileVisible = await page.evaluate(() => {
@@ -133,8 +138,54 @@ async function switchMode(page, testId) {
     });
     assert.equal(mobileVisible, false, "overview should stay hidden on narrow screens");
 
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await switchMode(page, "overview-mode-many");
+    await waitForRows(page);
+    await page.waitForSelector('[data-testid="chat-message-overview"]', { timeout: 20_000 });
+    const manyCompact = await readCompact(page);
+    assert.equal(manyCompact.itemCount, 40, `many-message overview should keep all markers, got ${manyCompact.itemCount}`);
+    assert.ok(manyCompact.height <= 520, `many-message compact overview should be height-capped, got ${manyCompact.height}`);
+    await page.hover('[data-testid="chat-message-overview-panel"]');
+    await page.waitForTimeout(260);
+    const manyExpanded = await page.evaluate(() => {
+      const panel = document.querySelector('[data-testid="chat-message-overview-panel"]');
+      if (!panel) return null;
+      panel.scrollTop = panel.scrollHeight;
+      panel.dispatchEvent(new Event("scroll", { bubbles: true }));
+      const rect = panel.getBoundingClientRect();
+      return {
+        clientHeight: panel.clientHeight,
+        scrollHeight: panel.scrollHeight,
+        overflowY: getComputedStyle(panel).overflowY,
+        width: rect.width,
+      };
+    });
+    assert.ok(manyExpanded && manyExpanded.scrollHeight > manyExpanded.clientHeight, `many-message expanded panel should be internally scrollable: ${JSON.stringify(manyExpanded)}`);
+    assert.equal(manyExpanded.overflowY, "auto", "many-message expanded panel should use overflow-y auto");
+    assert.ok(manyExpanded.width >= 220, `many-message expanded panel should still expand, got ${manyExpanded.width}`);
+    const manyTargetId = "overview-user-40";
+    await page.click(`[data-testid="chat-message-overview-item"][data-message-id="${manyTargetId}"]`);
+    await page.waitForTimeout(650);
+    const manyJumped = await page.evaluate((id) => {
+      const row = document.querySelector(`[data-message-id="${id}"]`);
+      const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+      const rect = row?.getBoundingClientRect();
+      const scrollerRect = scroller?.getBoundingClientRect();
+      return {
+        found: Boolean(row),
+        top: rect?.top ?? -1,
+        bottom: rect?.bottom ?? -1,
+        scrollerTop: scrollerRect?.top ?? 0,
+        scrollerBottom: scrollerRect?.bottom ?? 0,
+        highlighted: row?.className.includes("bg-brand/10") ?? false,
+      };
+    }, manyTargetId);
+    assert.ok(manyJumped.found, "last many-message overview target should be rendered after click");
+    assert.ok(manyJumped.top >= manyJumped.scrollerTop && manyJumped.bottom <= manyJumped.scrollerBottom, `last many-message target should be in viewport: ${JSON.stringify(manyJumped)}`);
+    assert.ok(manyJumped.highlighted, "last many-message target should be highlighted");
+
     if (failures.length > 0) throw new Error(failures.join("\n"));
-    console.log(JSON.stringify({ ok: true, compact, expandedWidth: expanded.width, jumped, hiddenCases: ["single", "compare", "select", "mobile"] }));
+    console.log(JSON.stringify({ ok: true, compact, expandedWidth: expanded.width, jumped, hiddenCases: ["single", "compare", "select", "mobile"], many: { itemCount: manyCompact.itemCount, scrollHeight: manyExpanded.scrollHeight, clientHeight: manyExpanded.clientHeight, jumped: manyJumped } }));
   } finally {
     await browser.close();
   }

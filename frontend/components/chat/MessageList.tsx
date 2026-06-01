@@ -228,25 +228,24 @@ const ChatScrollProgress = memo(function ChatScrollProgress({
 
 const ChatMessageOverview = memo(function ChatMessageOverview({ items, visible, onJumpToMessage }: ChatMessageOverviewProps) {
   if (!visible || items.length < 2) return null;
-  const visibleItems = items.slice(-12);
 
   return (
     <div
       className="group pointer-events-none absolute bottom-[108px] right-5 z-[110] hidden max-h-[min(520px,calc(100%-160px))] items-end sm:flex"
       data-testid="chat-message-overview"
     >
-      <div className="pointer-events-auto flex items-center justify-end">
+      <div className="pointer-events-auto flex max-h-full items-center justify-end">
         <div
-          className="flex w-8 flex-col items-end gap-3 rounded-full px-1.5 py-2 transition-all duration-200 ease-out group-hover:w-[300px] group-hover:items-stretch group-hover:gap-1.5 group-hover:rounded-2xl group-hover:border group-hover:border-surface-border/70 group-hover:bg-surface-elevated/95 group-hover:p-2 group-hover:shadow-2xl group-hover:shadow-black/20 dark:group-hover:bg-[#171717]/95"
+          className="chat-message-overview-scrollbar flex max-h-[min(520px,calc(100vh-160px))] w-8 flex-col items-end gap-2 overflow-hidden rounded-full px-1.5 py-2 transition-all duration-200 ease-out group-hover:w-[300px] group-hover:items-stretch group-hover:gap-1.5 group-hover:overflow-y-auto group-hover:rounded-2xl group-hover:border group-hover:border-surface-border/70 group-hover:bg-surface-elevated/95 group-hover:p-2 group-hover:pr-1.5 group-hover:shadow-2xl group-hover:shadow-black/20 dark:group-hover:bg-[#171717]/95"
           data-testid="chat-message-overview-panel"
         >
-          {visibleItems.map((item) => (
+          {items.map((item) => (
             <button
               key={item.id}
               type="button"
               onClick={() => onJumpToMessage(item.id)}
               className={cn(
-                "group/item flex h-4 w-full items-center justify-end rounded-lg text-left outline-none transition-all duration-200 ease-out focus-visible:ring-2 focus-visible:ring-brand/35 group-hover:h-8 group-hover:justify-between group-hover:gap-3 group-hover:px-2",
+                "group/item flex min-h-3.5 w-full items-center justify-end rounded-lg text-left outline-none transition-all duration-200 ease-out focus-visible:ring-2 focus-visible:ring-brand/35 group-hover:min-h-8 group-hover:justify-between group-hover:gap-3 group-hover:px-2",
                 item.active ? "text-brand" : "text-text-secondary hover:text-text-primary"
               )}
               data-testid="chat-message-overview-item"

@@ -35,11 +35,12 @@ const makeTurn = (index: number): Message[] => [
 ];
 
 const allMessages: Message[] = Array.from({ length: 8 }, (_, index) => makeTurn(index + 1)).flat();
+const manyMessages: Message[] = Array.from({ length: 40 }, (_, index) => makeTurn(index + 1)).flat();
 const singleTurnMessages = makeTurn(1);
 
 export default function ChatMessageOverviewFixture() {
-  const [mode, setMode] = useState<"normal" | "single" | "select" | "compare">("normal");
-  const messages = mode === "single" ? singleTurnMessages : allMessages;
+  const [mode, setMode] = useState<"normal" | "single" | "select" | "compare" | "many">("normal");
+  const messages = mode === "single" ? singleTurnMessages : mode === "many" ? manyMessages : allMessages;
   const isCompare = mode === "compare";
   const compareModels = useMemo(() => isCompare ? ["deepseek-chat", "gpt-fixture"] : [], [isCompare]);
 
@@ -51,6 +52,7 @@ export default function ChatMessageOverviewFixture() {
         <button type="button" data-testid="overview-mode-single" className="rounded border border-surface-border px-2 py-1" onClick={() => setMode("single")}>single</button>
         <button type="button" data-testid="overview-mode-select" className="rounded border border-surface-border px-2 py-1" onClick={() => setMode("select")}>select</button>
         <button type="button" data-testid="overview-mode-compare" className="rounded border border-surface-border px-2 py-1" onClick={() => setMode("compare")}>compare</button>
+        <button type="button" data-testid="overview-mode-many" className="rounded border border-surface-border px-2 py-1" onClick={() => setMode("many")}>many</button>
       </div>
       <div className="flex min-h-0 flex-1">
         <MessageList
