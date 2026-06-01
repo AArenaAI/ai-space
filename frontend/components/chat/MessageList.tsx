@@ -992,6 +992,23 @@ function MessageList({
     </div>
   );
 
+  const renderHistoryLoadingState = () => (
+    <div
+      className="flex min-h-[320px] items-start justify-center px-4 pt-24 text-text-tertiary"
+      data-testid="chat-history-loading-state"
+    >
+      <div className="flex items-center gap-2 rounded-full border border-surface-border/60 bg-surface-card/45 px-3 py-2 text-xs shadow-sm backdrop-blur-sm">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        <span>正在加载聊天记录</span>
+      </div>
+    </div>
+  );
+
+  const historyLoadingComponents = useMemo(() => ({
+    Header: renderHistoryLoadingState,
+    Footer: () => <div style={{ height: CHAT_BOTTOM_SPACER + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0) }} aria-hidden="true" />,
+  }), [selectMode]);
+
   if (isCompare) {
     const compareGroups = groups;
     const resolveCompareAssistant = (group: InferredGroup, colIndex: number, modelId: string) => {
@@ -1040,15 +1057,29 @@ function MessageList({
         </div>
         {/* 滚动内容区域：对比模式也使用 Virtuoso，和单聊共享滚动/锁底体系 */}
         {messages.length === 0 ? (
-          <div className="flex-1 overflow-hidden px-3 py-3">
-            <div className="mx-auto flex h-full max-w-[1440px]">
-              {(activeCompareModels.length ? activeCompareModels : compareModels).map((modelId, index) => (
-                <div key={modelId || index} className="flex min-w-[320px] flex-1 flex-col border-r border-surface-border last:border-r-0">
-                  {renderCompareWelcomeContent(modelId, index)}
-                </div>
-              ))}
+          isLoadingHistory ? (
+            <Virtuoso
+              style={{ height: "100%", overflowAnchor: "none" }}
+              data={[] as InferredGroup[]}
+              ref={virtuosoRef}
+              scrollerRef={handleVirtuosoScrollerRef}
+              followOutput={false}
+              computeItemKey={(_, group) => group.id}
+              onScroll={handleVirtuosoScroll}
+              components={historyLoadingComponents}
+              itemContent={() => null}
+            />
+          ) : (
+            <div className="flex-1 overflow-hidden px-3 py-3">
+              <div className="mx-auto flex h-full max-w-[1440px]">
+                {(activeCompareModels.length ? activeCompareModels : compareModels).map((modelId, index) => (
+                  <div key={modelId || index} className="flex min-w-[320px] flex-1 flex-col border-r border-surface-border last:border-r-0">
+                    {renderCompareWelcomeContent(modelId, index)}
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          )
         ) : (
           <Virtuoso
             style={{ height: "100%", overflowAnchor: userBrowsing ? "none" : "auto" }}
@@ -1119,12 +1150,18 @@ function MessageList({
   if (messages.length === 0) {
     if (isLoadingHistory) {
       return (
-        <div className="flex-1 flex items-center justify-center" style={{ paddingBottom: CHAT_BOTTOM_SPACER }}>
-          <div className="flex gap-2">
-            <div className="w-2 h-2 rounded-full bg-text-tertiary animate-bounce" />
-            <div className="w-2 h-2 rounded-full bg-text-tertiary animate-bounce [animation-delay:0.15s]" />
-            <div className="w-2 h-2 rounded-full bg-text-tertiary animate-bounce [animation-delay:0.3s]" />
-          </div>
+        <div className="relative flex-1 min-h-0 overflow-hidden">
+          <Virtuoso
+            style={{ height: "100%", overflowAnchor: "none" }}
+            data={[] as Message[]}
+            ref={virtuosoRef}
+            scrollerRef={handleVirtuosoScrollerRef}
+            followOutput={false}
+            computeItemKey={(_, msg) => msg.id}
+            onScroll={handleVirtuosoScroll}
+            components={historyLoadingComponents}
+            itemContent={() => null}
+          />
         </div>
       );
     }
