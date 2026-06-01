@@ -34,8 +34,6 @@ import {
   Music,
   Zap,
   MoreHorizontal,
-  Brush,
-  Paintbrush,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -1406,8 +1404,6 @@ function ImageCard({
                     { label: t("image.edit.textRemoval"), icon: Type, mode: "text-removal" as const },
                     { label: t("image.edit.upscale"), icon: ZoomIn, mode: "upscale" as const },
                     { label: t("image.edit.replaceBg"), icon: ImageIcon, mode: "replace-bg" as const },
-                    { label: t("image.edit.inpaint"), icon: Brush, mode: "inpaint" as const },
-                    { label: t("image.edit.regionBrush"), icon: Paintbrush, mode: "region-brush" as const },
                   ].map((item) => (
                     <button
                       key={item.label}

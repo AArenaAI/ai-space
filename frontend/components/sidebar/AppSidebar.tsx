@@ -16,7 +16,7 @@ import {
   PanelLeftClose, MessageSquarePlus, Search, ChevronRight, Plus,
   User, Trash2, MoreHorizontal, Pencil, Pin, PinOff, Link2, Check,
   FileText, LayoutGrid, X, Clock, Sparkles, Image, ImageIcon, Video, Eraser,
-  Type, ZoomIn, Brush, Paintbrush,
+  Type, ZoomIn,
   Briefcase, FileCode, PenTool, BarChart3, Mail, ClipboardList, Terminal, GraduationCap, Languages,
   Zap, Shield, BookOpen, Wrench, Globe, Code2,
   Star,
@@ -1358,8 +1358,6 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
               { icon: Eraser, label: t("sidebar.panel.replace_bg"), href: "/create?mode=replace-bg", color: "text-purple-500", bg: "bg-purple-500/10" },
               { icon: Type, label: t("sidebar.panel.text_removal"), href: "/create?mode=text-removal", color: "text-amber-500", bg: "bg-amber-500/10" },
               { icon: ZoomIn, label: t("sidebar.panel.upscale"), href: "/create?mode=upscale", color: "text-cyan-500", bg: "bg-cyan-500/10" },
-              { icon: Brush, label: t("image.edit.inpaint"), href: "/create?mode=inpaint", color: "text-fuchsia-500", bg: "bg-fuchsia-500/10" },
-              { icon: Paintbrush, label: t("image.edit.regionBrush"), href: "/create?mode=region-brush", color: "text-rose-500", bg: "bg-rose-500/10" },
             ],
           },
         ]}

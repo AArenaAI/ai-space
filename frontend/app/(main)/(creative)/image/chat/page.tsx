@@ -21,8 +21,6 @@ import {
   Layers,
   Download,
   MoreHorizontal,
-  Brush,
-  Paintbrush,
   Eraser,
   Type,
   ZoomIn,
@@ -833,8 +831,6 @@ function ImageChatPageInner() {
                                 { labelKey: "image.edit.textRemoval", icon: Type, mode: "text-removal" as const },
                                 { labelKey: "image.edit.upscale", icon: ZoomIn, mode: "upscale" as const },
                                 { labelKey: "image.edit.replaceBg", icon: ImageIcon, mode: "replace-bg" as const },
-                                { labelKey: "image.edit.inpaint", icon: Brush, mode: "inpaint" as const },
-                                { labelKey: "image.edit.regionBrush", icon: Paintbrush, mode: "region-brush" as const },
                               ].map((item) => (
                                 <button
                                   key={item.mode}
