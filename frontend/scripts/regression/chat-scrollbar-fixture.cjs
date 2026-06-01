@@ -64,8 +64,9 @@ async function readMetrics(page) {
     assert.equal(initial.scrollerFirefoxScrollbarWidth, "none", "native chat scrollbar should be hidden in Firefox-compatible CSS");
     assert.ok(parseFloat(initial.scrollerScrollbarWidth) <= 1, `native WebKit scrollbar should be hidden, got ${initial.scrollerScrollbarWidth}`);
     assert.ok(Number(initial.layerZIndex) > Number(initial.expectedInputZIndex), `overlay z-index ${initial.layerZIndex} should be above input z-index ${initial.expectedInputZIndex}`);
-    assert.ok(initial.trackRect.bottom <= initial.expectedInputSafeTop + 2, `progress track should end above input safe area: track bottom ${initial.trackRect.bottom}, safe top ${initial.expectedInputSafeTop}`);
-    assert.ok(initial.trackRect.height > 300, "progress track should be viewport-stable and tall enough to drag");
+    assert.ok(initial.trackRect.bottom > initial.expectedInputSafeTop + 120, `progress track should continue into the input safe area instead of stopping above it: track bottom ${initial.trackRect.bottom}, safe top ${initial.expectedInputSafeTop}`);
+    assert.ok(initial.viewportHeight - initial.trackRect.bottom <= 24, `progress track should reach near the viewport bottom, got bottom gap ${initial.viewportHeight - initial.trackRect.bottom}`);
+    assert.ok(initial.trackRect.height > 500, "progress track should be viewport-stable and tall enough to drag through the input area");
 
     await page.evaluate(() => {
       const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');

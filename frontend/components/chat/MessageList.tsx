@@ -35,7 +35,7 @@ const CHAT_BOTTOM_SPACER = 280;
 const SCROLL_TO_BOTTOM_OFFSET = 238;
 const AT_BOTTOM_THRESHOLD = 24;
 const SELECT_MODE_EXTRA_SPACER = 80;
-const CHAT_SCROLL_PROGRESS_BOTTOM = 228;
+const CHAT_SCROLL_PROGRESS_BOTTOM = 18;
 const CHAT_SCROLL_PROGRESS_TOP = 72;
 const LONG_MARKDOWN_LAZY_THRESHOLD = 4000;
 type SelectionMode = "share" | "favorite";
@@ -205,14 +205,6 @@ const ChatScrollProgress = memo(function ChatScrollProgress({
         onPointerCancel={finishDrag}
         data-testid="chat-scroll-progress-track"
       >
-        <div
-          className={cn(
-            "absolute left-1/2 top-0 h-full w-px -translate-x-1/2 rounded-full bg-slate-500/0 transition-all duration-200 ease-out",
-            "group-hover:w-[3px] group-hover:bg-slate-500/10 group-focus-visible:w-[3px] group-focus-visible:bg-slate-500/12",
-            "dark:group-hover:bg-slate-200/10 green:group-hover:bg-[#405E3D]/12",
-            isDragging && "w-[3px] bg-slate-500/12 dark:bg-slate-200/12 green:bg-[#405E3D]/14"
-          )}
-        />
         <div
           className={cn(
             "absolute left-1/2 w-[3px] -translate-x-1/2 rounded-full bg-slate-500/45 shadow-[0_0_0_1px_rgba(255,255,255,0.25)] transition-all duration-200 ease-out",
