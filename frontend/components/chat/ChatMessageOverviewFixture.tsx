@@ -1,10 +1,12 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import MessageList from "./MessageList";
 import type { ChatModel, Message } from "@/lib/chatTypes";
 
 const models: ChatModel[] = [
   { id: "deepseek-chat", name: "DeepSeek", provider: "deepseek", description: "DeepSeek fixture model", color: "#4f8cff" },
+  { id: "gpt-fixture", name: "GPT Fixture", provider: "openai", description: "Compare fixture model", color: "#10b981" },
 ];
 
 const makeTurn = (index: number): Message[] => [
@@ -32,13 +34,23 @@ const makeTurn = (index: number): Message[] => [
   },
 ];
 
-const messages: Message[] = Array.from({ length: 8 }, (_, index) => makeTurn(index + 1)).flat();
+const allMessages: Message[] = Array.from({ length: 8 }, (_, index) => makeTurn(index + 1)).flat();
+const singleTurnMessages = makeTurn(1);
 
 export default function ChatMessageOverviewFixture() {
+  const [mode, setMode] = useState<"normal" | "single" | "select" | "compare">("normal");
+  const messages = mode === "single" ? singleTurnMessages : allMessages;
+  const isCompare = mode === "compare";
+  const compareModels = useMemo(() => isCompare ? ["deepseek-chat", "gpt-fixture"] : [], [isCompare]);
+
   return (
-    <div className="flex h-screen min-h-0 flex-col bg-surface text-text-primary" data-testid="chat-message-overview-fixture">
-      <div className="shrink-0 border-b border-surface-border px-4 py-2 text-xs text-text-secondary">
-        DeepSeek-style message overview fixture
+    <div className="flex h-screen min-h-0 flex-col bg-surface text-text-primary" data-testid="chat-message-overview-fixture" data-mode={mode}>
+      <div className="flex shrink-0 items-center gap-2 border-b border-surface-border px-4 py-2 text-xs text-text-secondary">
+        <span>DeepSeek-style message overview fixture</span>
+        <button type="button" data-testid="overview-mode-normal" className="rounded border border-surface-border px-2 py-1" onClick={() => setMode("normal")}>normal</button>
+        <button type="button" data-testid="overview-mode-single" className="rounded border border-surface-border px-2 py-1" onClick={() => setMode("single")}>single</button>
+        <button type="button" data-testid="overview-mode-select" className="rounded border border-surface-border px-2 py-1" onClick={() => setMode("select")}>select</button>
+        <button type="button" data-testid="overview-mode-compare" className="rounded border border-surface-border px-2 py-1" onClick={() => setMode("compare")}>compare</button>
       </div>
       <div className="flex min-h-0 flex-1">
         <MessageList
@@ -46,6 +58,9 @@ export default function ChatMessageOverviewFixture() {
           isLoading={false}
           models={models}
           conversationId={2000}
+          isCompare={isCompare}
+          compareModels={compareModels}
+          onSelectModeChange={(mode === "select") ? () => {} : undefined}
         />
       </div>
     </div>
