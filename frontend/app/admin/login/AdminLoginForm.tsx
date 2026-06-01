@@ -5,12 +5,27 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { LockKeyhole, ShieldCheck } from "lucide-react";
 import { clearAdminSession, getAdminMe, storeAdminSession } from "@/lib/admin/api";
-import { getErrorMessage, readApiError } from "@/lib/errors";
+import { readApiError } from "@/lib/errors";
+import type { ApiErrorPayload } from "@/lib/errors";
 
 function safeAdminReturnUrl(value: string | null) {
   if (!value || !value.startsWith("/") || value.startsWith("//")) return "/admin";
   if (!value.startsWith("/admin") || value === "/admin/login") return "/admin";
   return value;
+}
+
+function getAdminLoginErrorMessage(error: unknown) {
+  if (error && typeof error === "object" && "status" in error) {
+    const payload = error as ApiErrorPayload;
+    if (payload.status === 401 && (payload.message || payload.error)) {
+      return payload.message || payload.error || "邮箱或密码错误";
+    }
+    if (payload.status === 403) {
+      return payload.message || payload.error || "当前账号没有后台管理员权限";
+    }
+  }
+  if (error instanceof Error) return error.message;
+  return "后台登录失败，请稍后重试";
 }
 
 export default function AdminLoginForm() {
@@ -45,7 +60,7 @@ export default function AdminLoginForm() {
       storeAdminSession(data.token, user);
       router.replace(returnUrl);
     } catch (err) {
-      setError(getErrorMessage(err, { module: "auth", fallbackMessage: "后台登录失败" }));
+      setError(getAdminLoginErrorMessage(err));
     } finally {
       setLoading(false);
     }
