@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useMemo, memo, type UIEvent } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo, memo, type UIEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Bot, ChevronDown as ChevronDownIcon, Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/lib/chatTypes";
@@ -35,6 +35,8 @@ const CHAT_BOTTOM_SPACER = 280;
 const SCROLL_TO_BOTTOM_OFFSET = 238;
 const AT_BOTTOM_THRESHOLD = 24;
 const SELECT_MODE_EXTRA_SPACER = 80;
+const CHAT_SCROLL_PROGRESS_BOTTOM = 228;
+const CHAT_SCROLL_PROGRESS_TOP = 72;
 const LONG_MARKDOWN_LAZY_THRESHOLD = 4000;
 type SelectionMode = "share" | "favorite";
 
@@ -120,9 +122,96 @@ function LazyMarkdownRenderer({ content }: { content: string }) {
   if (content.length < LONG_MARKDOWN_LAZY_THRESHOLD) {
     return <MemoMarkdownRenderer content={content} />;
   }
+
   return <DeferredMarkdownRenderer content={content} />;
 }
 
+type ChatScrollProgressProps = {
+  scrollRatio: number;
+  visible: boolean;
+  selectMode: boolean;
+  onJumpToRatio: (ratio: number) => void;
+  onDragStateChange: (dragging: boolean) => void;
+};
+
+const ChatScrollProgress = memo(function ChatScrollProgress({
+  scrollRatio,
+  visible,
+  selectMode,
+  onJumpToRatio,
+  onDragStateChange,
+}: ChatScrollProgressProps) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const clampedRatio = Math.min(1, Math.max(0, Number.isFinite(scrollRatio) ? scrollRatio : 0));
+  const thumbHeightPercent = 18;
+  const thumbTopPercent = clampedRatio * (100 - thumbHeightPercent);
+  const bottom = CHAT_SCROLL_PROGRESS_BOTTOM + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0);
+
+  const ratioFromClientY = useCallback((clientY: number) => {
+    const rect = trackRef.current?.getBoundingClientRect();
+    if (!rect || rect.height <= 0) return clampedRatio;
+    const usableHeight = rect.height * (1 - thumbHeightPercent / 100);
+    if (usableHeight <= 0) return 0;
+    return Math.min(1, Math.max(0, (clientY - rect.top - (rect.height * thumbHeightPercent / 200)) / usableHeight));
+  }, [clampedRatio]);
+
+  const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const target = event.currentTarget;
+    target.setPointerCapture(event.pointerId);
+    onDragStateChange(true);
+    onJumpToRatio(ratioFromClientY(event.clientY));
+  }, [onDragStateChange, onJumpToRatio, ratioFromClientY]);
+
+  const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    event.preventDefault();
+    onJumpToRatio(ratioFromClientY(event.clientY));
+  }, [onJumpToRatio, ratioFromClientY]);
+
+  const finishDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    onDragStateChange(false);
+  }, [onDragStateChange]);
+
+  if (!visible) return null;
+
+  return (
+    <div
+      className="pointer-events-none absolute inset-y-0 right-0 z-[95] hidden w-9 justify-center sm:flex"
+      style={{ top: CHAT_SCROLL_PROGRESS_TOP, bottom }}
+      data-testid="chat-scroll-progress-layer"
+      aria-hidden="false"
+    >
+      <div
+        ref={trackRef}
+        role="scrollbar"
+        aria-orientation="vertical"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(clampedRatio * 100)}
+        aria-label="聊天阅读进度"
+        tabIndex={0}
+        className="pointer-events-auto relative h-full w-5 cursor-pointer rounded-full outline-none transition-opacity duration-200 focus-visible:ring-2 focus-visible:ring-brand/40"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={finishDrag}
+        onPointerCancel={finishDrag}
+        data-testid="chat-scroll-progress-track"
+      >
+        <div className="absolute left-1/2 top-0 h-full w-1 -translate-x-1/2 rounded-full bg-slate-500/10 dark:bg-slate-300/10 green:bg-[#4F7F45]/12" />
+        <div
+          className="absolute left-1/2 w-2.5 -translate-x-1/2 rounded-full bg-slate-500/65 shadow-sm transition-colors hover:bg-slate-600/80 dark:bg-slate-300/60 dark:hover:bg-slate-200/80 green:bg-[#405E3D]/75 green:hover:bg-[#405E3D]/90"
+          style={{ top: `${thumbTopPercent}%`, height: `${thumbHeightPercent}%` }}
+          data-testid="chat-scroll-progress-thumb"
+        />
+      </div>
+    </div>
+  );
+});
 function MessageList({
   messages,
   isLoading,
@@ -165,6 +254,8 @@ function MessageList({
   const atBottomRef = useRef(true);
   const [userBrowsing, setUserBrowsing] = useState(false);
   const userBrowsingTimerRef = useRef<number>(0);
+  const [scrollProgress, setScrollProgress] = useState({ ratio: 1, canScroll: false });
+  const [, setScrollProgressDragging] = useState(false);
 
   const stopBottomLockForUserBrowse = useCallback((duration = 2500) => {
     stickToBottomRef.current = false;
@@ -188,6 +279,31 @@ function MessageList({
     }
     virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end", behavior: "auto" });
   }, []);
+
+  const updateScrollProgressFromElement = useCallback((el: HTMLElement | null) => {
+    if (!el) {
+      setScrollProgress({ ratio: 1, canScroll: false });
+      return;
+    }
+    const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    const ratio = maxScrollTop > 0 ? Math.min(1, Math.max(0, el.scrollTop / maxScrollTop)) : 1;
+    setScrollProgress((prev) => {
+      const canScroll = maxScrollTop > 4;
+      if (prev.canScroll === canScroll && Math.abs(prev.ratio - ratio) < 0.004) return prev;
+      return { ratio, canScroll };
+    });
+  }, []);
+
+  const jumpToScrollRatio = useCallback((ratio: number) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    programmaticScrollUntilRef.current = Date.now() + 480;
+    stopBottomLockForUserBrowse(900);
+    el.scrollTop = Math.round(maxScrollTop * Math.min(1, Math.max(0, ratio)));
+    lastScrollTopRef.current = el.scrollTop;
+    updateScrollProgressFromElement(el);
+  }, [stopBottomLockForUserBrowse, updateScrollProgressFromElement]);
 
   const lockBottomAfterLayout = useCallback(() => {
     if (bottomLockRafRef.current) cancelAnimationFrame(bottomLockRafRef.current);
@@ -220,8 +336,9 @@ function MessageList({
     scrollRef.current = el;
     if (el) {
       lastScrollTopRef.current = el.scrollTop;
+      updateScrollProgressFromElement(el);
     }
-  }, []);
+  }, [updateScrollProgressFromElement]);
 
   const handleVirtuosoScroll = useCallback((event: UIEvent<HTMLElement>) => {
     const el = event.currentTarget;
@@ -241,12 +358,13 @@ function MessageList({
       userScrollOverrideUntilRef.current = 0;
     }
     lastScrollTopRef.current = el.scrollTop;
+    updateScrollProgressFromElement(el);
 
     if (el.scrollTop < 80 && !isLoadingMore && hasMoreMessages && !loadingMoreTriggeredRef.current) {
       loadingMoreTriggeredRef.current = true;
       onLoadMore?.();
     }
-  }, [hasMoreMessages, isLoadingMore, onLoadMore, stopBottomLockForUserBrowse]);
+  }, [hasMoreMessages, isLoadingMore, onLoadMore, stopBottomLockForUserBrowse, updateScrollProgressFromElement]);
 
   const markUserBrowsing = useCallback((duration = 2500) => {
     setUserBrowsing(true);
@@ -382,6 +500,17 @@ function MessageList({
     });
   }, [messages, groupByMessageId, groupViews]);
 
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    updateScrollProgressFromElement(el);
+    const raf = window.requestAnimationFrame(() => updateScrollProgressFromElement(el));
+    const timer = window.setTimeout(() => updateScrollProgressFromElement(el), 180);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+    };
+  }, [messages.length, visibleMessages.length, isLoading, isLoadingMore, updateScrollProgressFromElement]);
 
   const modelById = useMemo(() => {
     const map = new Map<string, ChatModel>();
@@ -960,6 +1089,13 @@ function MessageList({
           />
         )}
 
+        <ChatScrollProgress
+          scrollRatio={scrollProgress.ratio}
+          visible={scrollProgress.canScroll}
+          selectMode={selectMode}
+          onJumpToRatio={jumpToScrollRatio}
+          onDragStateChange={setScrollProgressDragging}
+        />
         {renderScrollToBottomButton()}
 
         <ConfirmDialog
@@ -1089,6 +1225,13 @@ function MessageList({
         }}
       />
 
+      <ChatScrollProgress
+        scrollRatio={scrollProgress.ratio}
+        visible={scrollProgress.canScroll}
+        selectMode={selectMode}
+        onJumpToRatio={jumpToScrollRatio}
+        onDragStateChange={setScrollProgressDragging}
+      />
       {renderScrollToBottomButton()}
 
       <TextSelectionFloatingBar

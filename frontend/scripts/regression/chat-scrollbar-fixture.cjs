@@ -7,27 +7,38 @@ const baseUrl = process.env.CHAT_SCROLLBAR_FIXTURE_BASE_URL || "http://127.0.0.1
 async function readMetrics(page) {
   return page.evaluate(() => {
     const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+    const layer = document.querySelector('[data-testid="chat-scroll-progress-layer"]');
+    const track = document.querySelector('[data-testid="chat-scroll-progress-track"]');
+    const thumb = document.querySelector('[data-testid="chat-scroll-progress-thumb"]');
     if (!scroller) throw new Error("virtuoso scroller not found");
-    const rect = scroller.getBoundingClientRect();
-    const scrollbar = getComputedStyle(scroller, "::-webkit-scrollbar");
-    const thumb = getComputedStyle(scroller, "::-webkit-scrollbar-thumb");
-    const track = getComputedStyle(scroller, "::-webkit-scrollbar-track");
-    const style = getComputedStyle(scroller);
+    if (!layer || !track || !thumb) throw new Error("chat scroll progress overlay not found");
+
+    const scrollerRect = scroller.getBoundingClientRect();
+    const layerRect = layer.getBoundingClientRect();
+    const trackRect = track.getBoundingClientRect();
+    const thumbRect = thumb.getBoundingClientRect();
+    const scrollerStyle = getComputedStyle(scroller);
+    const nativeScrollbar = getComputedStyle(scroller, "::-webkit-scrollbar");
     const maxScrollTop = scroller.scrollHeight - scroller.clientHeight;
+
     return {
-      rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height, right: rect.right },
+      viewportHeight: window.innerHeight,
+      scrollerRect: { x: scrollerRect.x, y: scrollerRect.y, width: scrollerRect.width, height: scrollerRect.height, right: scrollerRect.right, bottom: scrollerRect.bottom },
+      layerRect: { x: layerRect.x, y: layerRect.y, width: layerRect.width, height: layerRect.height, right: layerRect.right, bottom: layerRect.bottom },
+      trackRect: { x: trackRect.x, y: trackRect.y, width: trackRect.width, height: trackRect.height, right: trackRect.right, bottom: trackRect.bottom },
+      thumbRect: { x: thumbRect.x, y: thumbRect.y, width: thumbRect.width, height: thumbRect.height, right: thumbRect.right, bottom: thumbRect.bottom },
+      layerZIndex: getComputedStyle(layer).zIndex,
+      expectedInputZIndex: "70",
+      expectedInputSafeTop: window.innerHeight - 228,
+      scrollerScrollbarWidth: nativeScrollbar.width,
+      scrollerFirefoxScrollbarWidth: scrollerStyle.scrollbarWidth,
       scrollTop: scroller.scrollTop,
       scrollHeight: scroller.scrollHeight,
       clientHeight: scroller.clientHeight,
       maxScrollTop,
       ratio: maxScrollTop > 0 ? scroller.scrollTop / maxScrollTop : 0,
-      overflowY: style.overflowY,
-      scrollbarWidth: scrollbar.width,
-      scrollbarHeight: scrollbar.height,
-      thumbBackground: thumb.backgroundColor,
-      trackBackground: track.backgroundColor,
-      firefoxScrollbarWidth: style.scrollbarWidth,
-      firefoxScrollbarColor: style.scrollbarColor,
+      overlayValueNow: track.getAttribute("aria-valuenow"),
+      overflowY: scrollerStyle.overflowY,
     };
   });
 }
@@ -45,31 +56,48 @@ async function readMetrics(page) {
     await page.addInitScript(() => localStorage.setItem("theme", "green"));
     await page.goto(`${baseUrl}/test-chat-user-content/`, { waitUntil: "networkidle", timeout: 30_000 });
     await page.waitForSelector('[data-testid="chat-user-content-fixture"]', { timeout: 20_000 });
-    await page.waitForSelector('[data-testid="virtuoso-scroller"]', { timeout: 10_000 });
+    await page.waitForSelector('[data-testid="chat-scroll-progress-track"]', { timeout: 10_000 });
 
     const initial = await readMetrics(page);
     assert.equal(initial.overflowY, "auto", "chat scroller should own vertical scrolling");
     assert.ok(initial.maxScrollTop > 0, "fixture should be vertically scrollable");
-    assert.notEqual(initial.scrollbarWidth, "5px", "chat scrollbar should not inherit the 5px global minimal scrollbar");
-    assert.ok(parseFloat(initial.scrollbarWidth) >= 10, `chat scrollbar hit area should be at least 10px, got ${initial.scrollbarWidth}`);
-    assert.match(initial.thumbBackground, /rgba?\(/, "thumb should have an explicit background color");
-    assert.notEqual(initial.thumbBackground, "rgba(107, 138, 109, 0.3)", "green theme thumb should not use the low-contrast global scrollbar color");
+    assert.equal(initial.scrollerFirefoxScrollbarWidth, "none", "native chat scrollbar should be hidden in Firefox-compatible CSS");
+    assert.ok(parseFloat(initial.scrollerScrollbarWidth) <= 1, `native WebKit scrollbar should be hidden, got ${initial.scrollerScrollbarWidth}`);
+    assert.ok(Number(initial.layerZIndex) > Number(initial.expectedInputZIndex), `overlay z-index ${initial.layerZIndex} should be above input z-index ${initial.expectedInputZIndex}`);
+    assert.ok(initial.trackRect.bottom <= initial.expectedInputSafeTop + 2, `progress track should end above input safe area: track bottom ${initial.trackRect.bottom}, safe top ${initial.expectedInputSafeTop}`);
+    assert.ok(initial.trackRect.height > 300, "progress track should be viewport-stable and tall enough to drag");
 
     await page.evaluate(() => {
       const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
       scroller.scrollTop = 0;
+      scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
     });
-    await page.waitForTimeout(100);
+    await page.waitForTimeout(120);
     const top = await readMetrics(page);
     assert.ok(top.scrollTop <= 2, `expected scrollTop near top, got ${top.scrollTop}`);
+    assert.ok(Number(top.overlayValueNow) <= 5, `overlay should report near top, got ${top.overlayValueNow}`);
 
+    const trackBoxBeforeDrag = await page.locator('[data-testid="chat-scroll-progress-track"]').boundingBox();
+    assert.ok(trackBoxBeforeDrag, "track bounding box should exist");
+    await page.mouse.move(trackBoxBeforeDrag.x + trackBoxBeforeDrag.width / 2, trackBoxBeforeDrag.y + trackBoxBeforeDrag.height * 0.15);
+    await page.mouse.down();
+    await page.mouse.move(trackBoxBeforeDrag.x + trackBoxBeforeDrag.width / 2, trackBoxBeforeDrag.y + trackBoxBeforeDrag.height * 0.82, { steps: 10 });
+    await page.mouse.up();
+    await page.waitForTimeout(180);
+    const dragged = await readMetrics(page);
+    assert.ok(dragged.ratio > 0.65, `dragging overlay should move chat scroll progress, got ratio ${dragged.ratio}`);
+    assert.ok(Number(dragged.overlayValueNow) > 60, `overlay aria value should follow drag, got ${dragged.overlayValueNow}`);
+
+    const stableBefore = await readMetrics(page);
     await page.evaluate(() => {
       const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
-      scroller.scrollTop = scroller.scrollHeight - scroller.clientHeight;
+      scroller.scrollTop = scroller.scrollTop + 40;
+      scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
     });
-    await page.waitForTimeout(150);
-    const bottom = await readMetrics(page);
-    assert.ok(bottom.ratio > 0.95, `expected ratio near bottom, got ${bottom.ratio}`);
+    await page.waitForTimeout(160);
+    const stableAfter = await readMetrics(page);
+    assert.ok(Math.abs(stableAfter.trackRect.y - stableBefore.trackRect.y) < 1, "overlay track top should not jump when content scrolls");
+    assert.ok(Math.abs(stableAfter.trackRect.bottom - stableBefore.trackRect.bottom) < 1, "overlay track bottom should not jump when content scrolls");
 
     if (failures.length > 0) {
       throw new Error(failures.join("\n"));
@@ -77,10 +105,12 @@ async function readMetrics(page) {
 
     console.log(JSON.stringify({
       ok: true,
-      scrollbarWidth: initial.scrollbarWidth,
-      thumbBackground: initial.thumbBackground,
-      trackBackground: initial.trackBackground,
-      bottomRatio: bottom.ratio,
+      overlayZIndex: initial.layerZIndex,
+      expectedInputZIndex: initial.expectedInputZIndex,
+      trackBottom: initial.trackRect.bottom,
+      inputSafeTop: initial.expectedInputSafeTop,
+      draggedRatio: dragged.ratio,
+      stableTrackTopDelta: Math.abs(stableAfter.trackRect.y - stableBefore.trackRect.y),
     }));
   } finally {
     await browser.close();
