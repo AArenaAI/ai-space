@@ -34,7 +34,11 @@ async function scrollUntilUserMessageText(page, text) {
 
 (async () => {
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+    permissions: ["clipboard-read", "clipboard-write"],
+  });
+  const page = await context.newPage();
   const errors = [];
   page.on("console", (msg) => {
     if (msg.type() === "error" && !msg.text().includes("favicon")) errors.push(msg.text());
@@ -45,8 +49,8 @@ async function scrollUntilUserMessageText(page, text) {
     const url = `${baseUrl}/test-chat-user-content/`;
     const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 });
     assert.ok(response && response.status() < 400, `unexpected status ${response?.status()} for ${url}`);
-    await page.waitForSelector('[data-testid="chat-user-content-fixture"]', { timeout: 20_000 });
-    await page.waitForSelector('[data-chat-message-row="true"]', { timeout: 20_000 });
+    await page.waitForSelector('[data-testid="chat-user-content-fixture"]', { state: "attached", timeout: 20_000 });
+    await page.waitForSelector('[data-chat-message-row="true"]', { state: "attached", timeout: 20_000 });
 
     await scrollChat(page, "top");
     await page.waitForFunction(() => document.body.innerText.includes("需求说明.txt"), { timeout: 10_000 });
@@ -59,8 +63,10 @@ async function scrollUntilUserMessageText(page, text) {
     const longCodeBlock = page.locator('[data-testid="markdown-code-block"]').first();
     await longCodeBlock.waitFor({ state: "visible", timeout: 10_000 });
     await assert.match(await longCodeBlock.innerText(), /代码块较长，已折叠/);
-    await assert.match(await longCodeBlock.innerText(), /150 行/);
+    await assert.match(await longCodeBlock.innerText(), /150 行 \/ 5\.1k 字符/);
     await assert.equal(await longCodeBlock.locator('text=long code line 150').count(), 0, "long code should be collapsed initially");
+    await longCodeBlock.locator('[data-testid="markdown-code-copy-button"]').click();
+    await page.waitForFunction(() => navigator.clipboard.readText().then((text) => text.includes('long code line 150')), null, { timeout: 10_000 });
     await longCodeBlock.getByRole('button', { name: /代码块较长|展开|收起/ }).click();
     await page.waitForSelector('text=long code line 150', { timeout: 10_000 });
 
@@ -76,11 +82,14 @@ async function scrollUntilUserMessageText(page, text) {
     await page.waitForFunction(() => document.body.innerText.includes("展开完整消息"), { timeout: 10_000 });
     const longToggle = page.locator('[data-testid="user-message-collapse-toggle"]');
     await longToggle.waitFor({ state: "visible", timeout: 10_000 });
-    await assert.match(await longToggle.innerText(), /展开完整消息/);
-    await assert.equal(await page.locator('text=这是用户长消息第 36 行').count(), 0, "long user message should be collapsed initially");
+    await assert.match(await longToggle.innerText(), /展开完整消息 · 约 1\.8k 字 \/ 48 行/);
+    await assert.equal(await page.locator('text=这是用户长消息第 48 行').count(), 0, "long user message should be collapsed initially");
     await longToggle.click();
-    await page.waitForSelector('text=这是用户长消息第 36 行', { timeout: 10_000 });
-    await assert.match(await longToggle.innerText(), /收起长消息/);
+    await page.waitForSelector('text=这是用户长消息第 48 行', { timeout: 10_000 });
+    await assert.match(await longToggle.innerText(), /收起长消息 · 约 1\.8k 字 \/ 48 行/);
+    await longToggle.click();
+    await page.waitForTimeout(250);
+    await assert.equal(await page.locator('text=这是用户长消息第 48 行').count(), 0, "long user message should collapse again after toggling");
 
     assert.equal(errors.length, 0, `unexpected console/page errors: ${errors.slice(0, 3).join(" | ")}`);
     console.log(JSON.stringify({ ok: true, fileChips: fileChipCount, quote: true, longUser: true, longCode: true }));

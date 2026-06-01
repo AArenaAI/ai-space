@@ -7,7 +7,7 @@ const models: ChatModel[] = [
   { id: "fixture-model", name: "Fixture Model", provider: "local", description: "User content fixture model", color: "#64748b" },
 ];
 
-const longUserBody = Array.from({ length: 36 }, (_, index) => `这是用户长消息第 ${index + 1} 行，用于验证用户侧长内容折叠和展开后的完整展示。`).join("\n");
+const longUserBody = Array.from({ length: 48 }, (_, index) => `这是用户长消息第 ${index + 1} 行，用于验证用户侧长内容折叠和展开后的完整展示。`).join("\n");
 const longCode = Array.from({ length: 150 }, (_, index) => `console.log("long code line ${index + 1}");`).join("\n");
 
 const messages: Message[] = [

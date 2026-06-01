@@ -10,10 +10,15 @@ type UserMessageContentProps = {
   imageLoadFailedLabel: string;
 };
 
-const LONG_USER_MESSAGE_CHAR_THRESHOLD = 1600;
-const LONG_USER_MESSAGE_LINE_THRESHOLD = 24;
-const USER_MESSAGE_COLLAPSED_CHAR_LIMIT = 900;
-const USER_MESSAGE_COLLAPSED_LINE_LIMIT = 16;
+const LONG_USER_MESSAGE_CHAR_THRESHOLD = 2000;
+const LONG_USER_MESSAGE_LINE_THRESHOLD = 40;
+const USER_MESSAGE_COLLAPSED_CHAR_LIMIT = 1200;
+const USER_MESSAGE_COLLAPSED_LINE_LIMIT = 18;
+
+function formatUserMessageSize(lineCount: number, charCount: number) {
+  const charLabel = charCount >= 1000 ? `约 ${(charCount / 1000).toFixed(1)}k 字` : `约 ${charCount} 字`;
+  return `${charLabel} / ${lineCount} 行`;
+}
 
 function splitLeadingQuote(content: string) {
   const lines = content.split("\n");
@@ -48,15 +53,18 @@ function splitLeadingQuote(content: string) {
 
 function getCollapsedContent(content: string) {
   const lines = content.split("\n");
-  const isLong = content.length > LONG_USER_MESSAGE_CHAR_THRESHOLD || lines.length > LONG_USER_MESSAGE_LINE_THRESHOLD;
-  if (!isLong) return { isLong, preview: content };
+  const lineCount = lines.length;
+  const charCount = content.length;
+  const isLong = charCount > LONG_USER_MESSAGE_CHAR_THRESHOLD || lineCount > LONG_USER_MESSAGE_LINE_THRESHOLD;
+  const sizeLabel = formatUserMessageSize(lineCount, charCount);
+  if (!isLong) return { isLong, preview: content, sizeLabel };
 
   const previewByLines = lines.slice(0, USER_MESSAGE_COLLAPSED_LINE_LIMIT).join("\n");
   const preview = previewByLines.length > USER_MESSAGE_COLLAPSED_CHAR_LIMIT
     ? `${previewByLines.slice(0, USER_MESSAGE_COLLAPSED_CHAR_LIMIT).trimEnd()}…`
     : `${previewByLines.trimEnd()}…`;
 
-  return { isLong, preview };
+  return { isLong, preview, sizeLabel };
 }
 
 function UserMessageContent({ message, imageLoadFailedLabel }: UserMessageContentProps) {
@@ -64,7 +72,7 @@ function UserMessageContent({ message, imageLoadFailedLabel }: UserMessageConten
   const imageFiles = message.files?.filter((file) => file.type === "image") || [];
   const otherFiles = message.files?.filter((file) => file.type !== "image") || [];
   const { quote, body } = useMemo(() => splitLeadingQuote(message.content || ""), [message.content]);
-  const { isLong, preview } = useMemo(() => getCollapsedContent(body), [body]);
+  const { isLong, preview, sizeLabel } = useMemo(() => getCollapsedContent(body), [body]);
   const visibleBody = isLong && !expanded ? preview : body;
 
   return (
@@ -138,9 +146,10 @@ function UserMessageContent({ message, imageLoadFailedLabel }: UserMessageConten
             onClick={() => setExpanded((value) => !value)}
             className="inline-flex items-center gap-1 rounded-full border border-surface-border bg-surface-elevated/70 px-2.5 py-1 text-xs text-text-secondary transition-colors hover:border-brand/30 hover:text-text-primary"
             data-testid="user-message-collapse-toggle"
+            aria-expanded={expanded}
           >
             <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-180")} />
-            {expanded ? "收起长消息" : `展开完整消息 · ${body.split("\n").length} 行`}
+            {expanded ? `收起长消息 · ${sizeLabel}` : `展开完整消息 · ${sizeLabel}`}
           </button>
         ) : null}
       </div>
