@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Brain, Square, Search, Paperclip, X, FileText, Wrench, SlidersHorizontal, MessageSquarePlus, Check, Zap, Crown, ChevronDown } from "lucide-react";
+import { Send, Brain, Square, Search, Paperclip, X, FileText, Wrench, SlidersHorizontal, MessageSquarePlus, Check, Zap, Crown, ChevronDown, Quote } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ChatModel } from "@/lib/chatTypes";
 import { Template } from "@/hooks/useTemplates";
@@ -104,6 +104,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
   const { t } = useI18n();
   const { isOffline, justRestored } = useNetworkStatus();
   const [content, setContent] = useState("");
+  const [activeQuote, setActiveQuote] = useState("");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const [reasoningMode, setReasoningMode] = useState<ReasoningMode>(() => {
@@ -218,28 +219,13 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
 
   useEffect(() => {
     if (!quoteDraft?.text) return;
-    const el = textareaRef.current;
     const quote = quoteDraft.text.trim();
     if (!quote) return;
 
-    setContent((previous) => {
-      const insertion = `${quote}\n\n`;
-      if (!previous.trim()) return insertion;
-      const selectionStart = el?.selectionStart ?? previous.length;
-      const selectionEnd = el?.selectionEnd ?? selectionStart;
-      const prefix = previous.slice(0, selectionStart);
-      const suffix = previous.slice(selectionEnd);
-      const before = prefix.endsWith("\n") || prefix.length === 0 ? prefix : `${prefix}\n`;
-      const after = suffix.startsWith("\n") || suffix.length === 0 ? suffix : `\n${suffix}`;
-      return `${before}${insertion}${after}`;
-    });
+    setActiveQuote(quote);
 
     requestAnimationFrame(() => {
-      const textarea = textareaRef.current;
-      if (!textarea) return;
-      textarea.focus();
-      const nextCursor = textarea.value.length;
-      textarea.setSelectionRange(nextCursor, nextCursor);
+      textareaRef.current?.focus();
     });
   }, [quoteDraft?.id, quoteDraft?.text]);
 
@@ -300,7 +286,9 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
 
   const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
-    if ((!content.trim() && attachedFiles.length === 0) || isLoading || hasParsingFiles || isOffline) {
+    const trimmedContent = content.trim();
+    const trimmedQuote = activeQuote.trim();
+    if ((!trimmedContent && !trimmedQuote && attachedFiles.length === 0) || isLoading || hasParsingFiles || isOffline) {
       if (hasParsingFiles) {
         toast.warning(t("chat.fileParsingWait"));
       } else if (isOffline) {
@@ -309,8 +297,10 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
       return;
     }
     const file_ids = attachedFiles.map((a) => a.public_id).filter((id): id is string => id !== undefined);
-    onSend(content.trim(), reasoning, effectiveSearchEnabled, attachedFiles.length > 0 ? attachedFiles : undefined, file_ids.length > 0 ? file_ids : undefined);
+    const messageContent = trimmedQuote ? `${trimmedQuote}\n\n${trimmedContent}`.trim() : trimmedContent;
+    onSend(messageContent, reasoning, effectiveSearchEnabled, attachedFiles.length > 0 ? attachedFiles : undefined, file_ids.length > 0 ? file_ids : undefined);
     setContent("");
+    setActiveQuote("");
     setAttachedFiles([]);
     if (textareaRef.current) {
       textareaRef.current.style.height = `${TEXTAREA_MIN_HEIGHT}px`;
@@ -455,7 +445,8 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
 
   const hasParsingFiles = attachedFiles.some((f) => f.parse_status === "pending" || f.parse_status === "parsing");
   const hasContent = content.trim().length > 0;
-  const canSubmit = (hasContent || attachedFiles.length > 0) && !hasParsingFiles && !isOffline;
+  const activeQuotePreview = activeQuote.replace(/^>\s?/gm, "").trim();
+  const canSubmit = (hasContent || activeQuote.length > 0 || attachedFiles.length > 0) && !hasParsingFiles && !isOffline;
 
   useEffect(() => {
     const next = getReasoningEffortForMode(currentModel, reasoningMode);
@@ -620,6 +611,35 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
               </div>
             </div>
           )}
+          {/* 引用上下文 */}
+          {activeQuotePreview && (
+            <div className="px-4 pt-3" data-testid="chat-quote-draft">
+              <div className="relative rounded-xl border border-surface-border/60 bg-surface-elevated/70 px-3 py-2.5 pr-10 shadow-sm">
+                <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">
+                  <Quote className="h-3.5 w-3.5" />
+                  <span>引用文本</span>
+                </div>
+                <div className="line-clamp-3 whitespace-pre-wrap border-l-2 border-brand/35 pl-3 text-[13px] leading-5 text-text-secondary">
+                  {activeQuotePreview}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveQuote("");
+                    textareaRef.current?.focus();
+                  }}
+                  className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full text-text-tertiary transition-colors hover:bg-surface-card hover:text-text-primary"
+                  aria-label="清除引用"
+                  title="清除引用"
+                  data-testid="chat-quote-draft-clear"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className="mt-3 border-t border-surface-border/60" />
+            </div>
+          )}
+
           {/* 文件附件 */}
           {attachedFiles.length > 0 && (
             <div className="px-4 pt-3">

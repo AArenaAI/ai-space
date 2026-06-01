@@ -30,6 +30,7 @@ const messages: Message[] = [
 
 export default function ChatTextSelectionFixture() {
   const [quoteDraft, setQuoteDraft] = useState<QuoteDraft | null>(null);
+  const [lastSentContent, setLastSentContent] = useState("");
 
   return (
     <div className="flex h-screen min-h-0 flex-col bg-surface text-text-primary" data-testid="chat-text-selection-fixture">
@@ -45,7 +46,7 @@ export default function ChatTextSelectionFixture() {
         />
       </div>
       <MessageInput
-        onSend={(_content: string, _reasoning: ReasoningConfig) => {}}
+        onSend={(content: string, _reasoning: ReasoningConfig) => setLastSentContent(content)}
         onStop={() => {}}
         isLoading={false}
         compareMode={false}
@@ -57,6 +58,7 @@ export default function ChatTextSelectionFixture() {
         onNewChat={() => {}}
         quoteDraft={quoteDraft}
       />
+      <pre className="sr-only" data-testid="chat-text-selection-last-sent">{lastSentContent}</pre>
     </div>
   );
 }

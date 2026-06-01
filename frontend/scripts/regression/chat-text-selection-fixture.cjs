@@ -4,6 +4,29 @@ const { chromium } = require("playwright");
 
 const baseUrl = process.env.TEXT_SELECTION_FIXTURE_BASE_URL || "http://127.0.0.1:3000";
 
+async function selectFixtureText(page) {
+  return page.evaluate(() => {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node) {
+      const text = node.textContent || "";
+      const match = text.match(/这是第 1 轮用户消息/);
+      if (match?.index !== undefined) {
+        const range = document.createRange();
+        range.setStart(node, match.index);
+        range.setEnd(node, match.index + match[0].length);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        document.dispatchEvent(new Event("selectionchange"));
+        return match[0];
+      }
+      node = walker.nextNode();
+    }
+    throw new Error("target text node not found");
+  });
+}
+
 (async () => {
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -23,40 +46,43 @@ const baseUrl = process.env.TEXT_SELECTION_FIXTURE_BASE_URL || "http://127.0.0.1
     await page.waitForSelector('[data-chat-message-row="true"]', { state: "attached", timeout: 20_000 });
     await page.waitForFunction(() => document.body.innerText.includes("用于验证引用插入输入框"), { timeout: 20_000 });
 
-    const selectedText = await page.evaluate(() => {
-      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-      let node = walker.nextNode();
-      while (node) {
-        const text = node.textContent || "";
-        const match = text.match(/这是第 1 轮用户消息/);
-        if (match?.index !== undefined) {
-          const range = document.createRange();
-          range.setStart(node, match.index);
-          range.setEnd(node, match.index + match[0].length);
-          const selection = window.getSelection();
-          selection?.removeAllRanges();
-          selection?.addRange(range);
-          document.dispatchEvent(new Event("selectionchange"));
-          return match[0];
-        }
-        node = walker.nextNode();
-      }
-      throw new Error("target text node not found");
-    });
-
-    const bar = page.locator('[data-testid="chat-text-selection-bar"]');
-    await bar.waitFor({ state: "visible", timeout: 10_000 });
+    const selectedText = await selectFixtureText(page);
+    const selectionBar = page.locator('[data-testid="chat-text-selection-bar"]');
+    await selectionBar.waitFor({ state: "visible", timeout: 10_000 });
     await page.locator('[data-testid="chat-text-selection-copy-quote"]').click();
+
+    const quoteCard = page.locator('[data-testid="chat-quote-draft"]');
+    await quoteCard.waitFor({ state: "visible", timeout: 10_000 });
+    await assert.match(await quoteCard.innerText(), /引用文本/);
+    await assert.match(await quoteCard.innerText(), new RegExp(selectedText));
+
     const textarea = page.locator('textarea').first();
     await textarea.waitFor({ state: "visible", timeout: 10_000 });
+    assert.equal(await textarea.inputValue(), "", "quote should render as a card, not textarea text");
+    await selectionBar.waitFor({ state: "detached", timeout: 10_000 });
+
+    await page.locator('[data-testid="chat-quote-draft-clear"]').click();
+    await quoteCard.waitFor({ state: "detached", timeout: 10_000 });
+
+    await selectFixtureText(page);
+    await selectionBar.waitFor({ state: "visible", timeout: 10_000 });
+    await page.locator('[data-testid="chat-text-selection-copy-quote"]').click();
+    await quoteCard.waitFor({ state: "visible", timeout: 10_000 });
+
+    await textarea.fill("请基于这句话继续写。 ");
+    await textarea.press("Enter");
+    const sent = page.locator('[data-testid="chat-text-selection-last-sent"]');
     await page.waitForFunction((expected) => {
-      const textarea = document.querySelector("textarea");
-      return textarea instanceof HTMLTextAreaElement && textarea.value === `> ${expected}\n\n`;
+      const node = document.querySelector('[data-testid="chat-text-selection-last-sent"]');
+      return node?.textContent === `> ${expected}\n\n请基于这句话继续写。`;
     }, selectedText, { timeout: 10_000 });
-    const inputValue = await textarea.inputValue();
-    await bar.waitFor({ state: "detached", timeout: 10_000 });
+    const sentContent = await sent.textContent();
+    assert.equal(sentContent, `> ${selectedText}\n\n请基于这句话继续写。`);
+    await quoteCard.waitFor({ state: "detached", timeout: 10_000 });
+    assert.equal(await textarea.inputValue(), "");
+
     assert.equal(errors.length, 0, `unexpected console/page errors: ${errors.slice(0, 3).join(" | ")}`);
-    console.log(JSON.stringify({ ok: true, inputValue }));
+    console.log(JSON.stringify({ ok: true, quoteCard: selectedText, sentContent }));
   } finally {
     await browser.close();
   }
