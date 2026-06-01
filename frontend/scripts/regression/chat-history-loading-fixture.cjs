@@ -17,8 +17,7 @@ const baseUrl = process.env.CHAT_HISTORY_LOADING_FIXTURE_BASE_URL || "http://127
     await page.addInitScript(() => localStorage.setItem("theme", "green"));
     const response = await page.goto(`${baseUrl}/test-chat-history-loading/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
     assert.ok(response && response.status() < 400, `unexpected status ${response?.status()}`);
-    await page.waitForSelector('[data-testid="chat-history-loading-fixture"]', { timeout: 20_000 });
-    await page.waitForSelector('[data-chat-message-row="true"]', { timeout: 20_000 });
+    await page.waitForSelector('[data-testid="chat-history-loading-fixture"]', { state: "attached", timeout: 20_000 });
 
     const samples = [];
     const deadline = Date.now() + 1300;

@@ -14,7 +14,7 @@ async function scrollChat(page, position) {
   await page.waitForTimeout(500);
 }
 
-async function scrollUntilText(page, text) {
+async function scrollUntilUserMessageText(page, text) {
   for (const ratio of [0, 0.25, 0.5, 0.7, 0.85, 1]) {
     await page.evaluate((nextRatio) => {
       const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
@@ -23,9 +23,13 @@ async function scrollUntilText(page, text) {
       scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
     }, ratio);
     await page.waitForTimeout(500);
-    if ((await page.locator(`text=${text}`).count()) > 0) return;
+    const visibleInMessage = await page.evaluate((needle) => {
+      const rows = [...document.querySelectorAll('[data-chat-message-row="true"][data-message-role="user"]')];
+      return rows.some((row) => row.textContent?.includes(needle));
+    }, text);
+    if (visibleInMessage) return;
   }
-  throw new Error(`text not found after scrolling: ${text}`);
+  throw new Error(`user message text not found after scrolling: ${text}`);
 }
 
 (async () => {
@@ -60,7 +64,7 @@ async function scrollUntilText(page, text) {
     await longCodeBlock.getByRole('button', { name: /代码块较长|展开|收起/ }).click();
     await page.waitForSelector('text=long code line 150', { timeout: 10_000 });
 
-    await scrollUntilText(page, "请基于这段引用继续解释");
+    await scrollUntilUserMessageText(page, "请基于这段引用继续解释");
     const quoteCard = page.locator('[data-testid="user-message-quote-card"]');
     await quoteCard.waitFor({ state: "visible", timeout: 10_000 });
     const quoteText = await quoteCard.innerText();

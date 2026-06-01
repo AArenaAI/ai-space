@@ -17,7 +17,12 @@ const baseUrl = process.env.CHAT_MESSAGE_OVERVIEW_FIXTURE_BASE_URL || "http://12
     await page.addInitScript(() => localStorage.setItem("theme", "dark"));
     const response = await page.goto(`${baseUrl}/test-chat-message-overview/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
     assert.ok(response && response.status() < 400, `unexpected status ${response?.status()}`);
-    await page.waitForSelector('[data-testid="chat-message-overview-fixture"]', { timeout: 20_000 });
+    await page.waitForSelector('[data-testid="chat-message-overview-fixture"]', { state: "attached", timeout: 20_000 });
+    await page.waitForFunction(() => {
+      const fixture = document.querySelector('[data-testid="chat-message-overview-fixture"]');
+      const rect = fixture?.getBoundingClientRect();
+      return Boolean(rect && rect.width > 0 && rect.height > 0);
+    }, null, { timeout: 20_000 });
     await page.waitForSelector('[data-testid="virtuoso-scroller"]', { state: "attached", timeout: 20_000 });
     await page.waitForFunction(() => document.querySelectorAll('[data-chat-message-row="true"]').length > 0, null, { timeout: 20_000 });
     await page.waitForSelector('[data-testid="chat-message-overview"]', { timeout: 20_000 });

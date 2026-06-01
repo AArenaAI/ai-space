@@ -69,7 +69,7 @@ export default function ChatHistoryLoadingFixture() {
 
   useEffect(() => {
     const loadingTimer = window.setTimeout(() => setPhase("loading"), 180);
-    const restoredTimer = window.setTimeout(() => setPhase("restored"), 720);
+    const restoredTimer = window.setTimeout(() => setPhase("restored"), 1100);
     return () => {
       window.clearTimeout(loadingTimer);
       window.clearTimeout(restoredTimer);
