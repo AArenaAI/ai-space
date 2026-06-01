@@ -205,15 +205,18 @@ func fitImageEditRequestSize(size image.Point) string {
 	if size.X <= 0 || size.Y <= 0 {
 		return "1024x1024"
 	}
-	width := ((size.X + 15) / 16) * 16
-	height := ((size.Y + 15) / 16) * 16
-	if width < 16 {
-		width = 16
+
+	// OpenAI image edit models only accept a small set of output sizes. Do not
+	// pass arbitrary source dimensions such as 4032x3024; the edited result is
+	// resized back to the original dimensions after generation.
+	aspect := float64(size.X) / float64(size.Y)
+	if aspect >= 1.2 {
+		return "1536x1024"
 	}
-	if height < 16 {
-		height = 16
+	if aspect <= 0.85 {
+		return "1024x1536"
 	}
-	return fmt.Sprintf("%dx%d", width, height)
+	return "1024x1024"
 }
 
 // saveBase64Image 将 base64 数据保存为本地图片文件，返回文件名
