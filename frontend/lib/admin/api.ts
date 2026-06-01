@@ -55,16 +55,28 @@ export function clearAdminSession() {
 
 export async function adminFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getStoredAdminToken();
-  const response = await fetch(`/api/admin${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
-  });
-  if (!response.ok) throw new AdminApiError(await readErrorMessage(response), response.status);
-  return response.json() as Promise<T>;
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch(`/api/admin${path}`, {
+      ...options,
+      signal: options.signal || controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options.headers,
+      },
+    });
+    if (!response.ok) throw new AdminApiError(await readErrorMessage(response), response.status);
+    return response.json() as Promise<T>;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new AdminApiError("后台接口请求超时，请检查后端服务状态", 408);
+    }
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timeout);
+  }
 }
 
 function qs(params: Record<string, string | number | undefined>) {
