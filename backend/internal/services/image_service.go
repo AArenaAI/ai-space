@@ -54,7 +54,7 @@ func NewImageService(cfg *config.Config) *ImageService {
 // RemoveBackground 图片背景移除 (利用 gpt-image-2 的编辑能力)
 // 返回 (OpenAI 直链 URL, base64 数据, 错误)
 func (s *ImageService) RemoveBackground(ctx context.Context, size string, imageFilePath string) (imageURL string, b64Data string, err error) {
-	prompt := "Remove the background of this image. Make the background transparent. Keep only the main subject."
+	prompt := "Remove the background of this image and make it transparent. Keep the main subject in the EXACT same position, size, and framing as the original image. Do NOT zoom in, crop, or recompose the subject. Preserve the original composition precisely."
 	return s.EditImage(ctx, prompt, size, []string{imageFilePath})
 }
 
