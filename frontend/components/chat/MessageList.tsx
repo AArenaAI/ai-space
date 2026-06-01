@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, memo, type UIEvent } from "react";
-import { Loader2, X } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/lib/chatTypes";
 import { useFavorites } from "@/hooks/useFavorites";
@@ -13,7 +13,6 @@ import { Virtuoso, VirtuosoHandle, type Components } from "react-virtuoso";
 import { useMessageStream } from "@/hooks/useMessageStream";
 import { inferGroups, InferredGroup } from "@/lib/groups";
 import { useI18n } from "@/lib/i18n";
-import ModelSelector from "./ModelSelector";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
 
 const MarkdownRenderer = dynamic(() => import("./MarkdownRenderer"), {
@@ -22,6 +21,8 @@ const MarkdownRenderer = dynamic(() => import("./MarkdownRenderer"), {
 });
 import ChatMessageListItem from "./ChatMessageListItem";
 import ChatCompareGroupRow from "./ChatCompareGroupRow";
+import ChatCompareHeader from "./ChatCompareHeader";
+import ChatCompareWelcomeColumns from "./ChatCompareWelcomeColumns";
 import { type TextSelectionFloatingBarState } from "./TextSelectionFloatingBar";
 import ChatScrollProgress from "./ChatScrollProgress";
 import ChatMessageOverview, { type ChatMessageOverviewItem } from "./ChatMessageOverview";
@@ -946,52 +947,6 @@ function MessageList({
   }, [streamingMessageId, streamingText.length, lockBottomAfterLayout]);
 
 
-  const renderCompareModelHeader = (modelId: string, index: number) => {
-    const model = modelById.get(modelId);
-    return (
-      <div className="flex items-center justify-between gap-2 px-3 py-1.5">
-        <div className="flex-1 min-w-0">
-          {model ? (
-            <ModelSelector
-              models={models}
-              selected={model}
-              onSelect={(nextModel) => onCompareModelChange?.(index, nextModel.id)}
-            />
-          ) : (
-            <div className="rounded-lg px-2 py-1 text-sm font-medium text-text-secondary">{modelId || `模型 ${index + 1}`}</div>
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={() => onExitCompare?.()}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-tertiary transition-colors hover:bg-surface-card hover:text-text-primary"
-          aria-label={t("chat.closeCompareColumn")}
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-    );
-  };
-
-  const renderCompareWelcome = (modelId: string, index: number) => (
-    <div className="flex min-h-[360px] flex-col overflow-hidden">
-      {renderCompareModelHeader(modelId, index)}
-      <div className="flex-1 px-8 pb-10 pt-20">
-        <h2 className="text-3xl font-semibold tracking-tight text-text-primary">{t("chat.helloComma")}</h2>
-        <p className="mt-3 text-xl font-medium text-text-primary">{t("chat.howCanIHelp")}</p>
-      </div>
-    </div>
-  );
-
-  const renderCompareWelcomeContent = (modelId: string, index: number) => (
-    <div className="flex min-h-[360px] flex-col">
-      <div className="flex-1 px-8 pb-10 pt-20">
-        <h2 className="text-3xl font-semibold tracking-tight text-text-primary">{t("chat.helloComma")}</h2>
-        <p className="mt-3 text-xl font-medium text-text-primary">{t("chat.howCanIHelp")}</p>
-      </div>
-    </div>
-  );
-
   const renderHistoryLoadingState = () => <ChatHistoryLoadingState />;
 
   const historyLoadingComponents = useMemo(() => ({
@@ -1016,13 +971,14 @@ function MessageList({
     return (
       <div className="relative flex-1 min-h-0 overflow-hidden flex flex-col">
         {/* 固定模型选择栏 */}
-        <div className="flex w-full shrink-0">
-          {(activeCompareModels.length ? activeCompareModels : compareModels).map((modelId, colIndex) => (
-            <div key={modelId || colIndex} className="flex min-w-[320px] flex-1 flex-col">
-              {renderCompareModelHeader(modelId, colIndex)}
-            </div>
-          ))}
-        </div>
+        <ChatCompareHeader
+          compareModels={activeCompareModels.length ? activeCompareModels : compareModels}
+          models={models}
+          modelById={modelById}
+          closeLabel={t("chat.closeCompareColumn")}
+          onModelChange={onCompareModelChange}
+          onExitCompare={onExitCompare}
+        />
         {/* 滚动内容区域：对比模式也使用 Virtuoso，和单聊共享滚动/锁底体系 */}
         {messages.length === 0 ? (
           isLoadingHistory ? (
@@ -1038,15 +994,11 @@ function MessageList({
               itemContent={() => null}
             />
           ) : (
-            <div className="flex-1 overflow-hidden px-3 py-3">
-              <div className="mx-auto flex h-full max-w-[1440px]">
-                {(activeCompareModels.length ? activeCompareModels : compareModels).map((modelId, index) => (
-                  <div key={modelId || index} className="flex min-w-[320px] flex-1 flex-col border-r border-surface-border last:border-r-0">
-                    {renderCompareWelcomeContent(modelId, index)}
-                  </div>
-                ))}
-              </div>
-            </div>
+            <ChatCompareWelcomeColumns
+              compareModels={activeCompareModels.length ? activeCompareModels : compareModels}
+              greeting={t("chat.helloComma")}
+              prompt={t("chat.howCanIHelp")}
+            />
           )
         ) : (
           <Virtuoso
