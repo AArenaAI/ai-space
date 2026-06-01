@@ -15,17 +15,18 @@ async function overviewExists(page) {
 
 async function readCompact(page) {
   return page.evaluate(() => {
+    const rail = document.querySelector('[data-testid="chat-message-overview-rail"]');
     const panel = document.querySelector('[data-testid="chat-message-overview-panel"]');
-    const labels = [...document.querySelectorAll('[data-testid="chat-message-overview-item"] span:first-child')];
-    const firstDot = document.querySelector('[data-testid="chat-message-overview-item"] span:last-child');
-    const rect = panel?.getBoundingClientRect();
-    const root = panel?.closest('[data-testid="chat-message-overview"]');
+    const firstDot = document.querySelector('[data-testid="chat-message-overview-rail"] span');
+    const rect = rail?.getBoundingClientRect();
+    const panelStyle = panel ? getComputedStyle(panel) : null;
+    const root = rail?.closest('[data-testid="chat-message-overview"]');
     const rootRect = root?.getBoundingClientRect();
     const dotRect = firstDot?.getBoundingClientRect();
     return {
       width: rect?.width ?? 0,
       height: rect?.height ?? 0,
-      labelVisibleCount: labels.filter((el) => getComputedStyle(el).display !== "none" && getComputedStyle(el).opacity !== "0").length,
+      panelVisible: panelStyle ? panelStyle.visibility !== "hidden" && panelStyle.opacity !== "0" : false,
       itemCount: document.querySelectorAll('[data-testid="chat-message-overview-item"]').length,
       zIndex: getComputedStyle(root || panel).zIndex,
       rootRight: rootRect?.right ?? 0,
@@ -67,12 +68,13 @@ async function switchMode(page, testId) {
     const compact = await readCompact(page);
     assert.ok(compact.itemCount === 8, `overview should include 8 user message markers, got ${compact.itemCount}`);
     assert.ok(compact.width <= 32, `compact overview should be narrow, got ${compact.width}`);
-    assert.equal(compact.labelVisibleCount, 0, "compact overview should hide labels before hover");
+    assert.equal(compact.panelVisible, false, "compact overview should hide summary panel before hover");
     assert.ok(Number(compact.dotWidth) >= 24 && Number(compact.dotWidth) <= 32 && Number(compact.dotHeight) >= 1 && Number(compact.dotHeight) <= 4, `compact capsule should be a short horizontal bar, got w=${compact.dotWidth} h=${compact.dotHeight}`);
     assert.ok(Number(compact.zIndex) >= 110, `overview should sit above chat controls, got z-index ${compact.zIndex}`);
     assert.ok(compact.rootRight <= compact.viewportWidth && compact.rootLeft >= 0, `overview should stay inside viewport: ${JSON.stringify(compact)}`);
 
-    await page.hover('[data-testid="chat-message-overview-hover-target"]');
+    const beforeHoverScroll = await page.locator('[data-testid="virtuoso-scroller"]').evaluate((el) => el.scrollTop);
+    await page.hover('[data-testid="chat-message-overview-rail"]');
     await page.waitForTimeout(260);
     const expanded = await page.evaluate(() => {
       const panel = document.querySelector('[data-testid="chat-message-overview-panel"]');
@@ -88,10 +90,12 @@ async function switchMode(page, testId) {
         dotHeight: dotRect?.height ?? 0,
       };
     });
-    assert.ok(expanded.width >= 220, `hover overview should expand, got ${expanded.width}`);
+    assert.ok(expanded.width >= 300, `hover overview should show full summary panel, got ${expanded.width}`);
     assert.ok(expanded.labelVisibleCount >= 8, `hover overview should show all labels, got ${expanded.labelVisibleCount}`);
     assert.ok(expanded.text.includes("dydx chain") || expanded.text.includes("dydx"), "hover overview should show user message summaries");
     assert.ok(expanded.dotWidth >= 18 && expanded.dotWidth <= 24 && expanded.dotHeight >= 1 && expanded.dotHeight <= 4, `hover capsule should be thin bar, got w=${expanded.dotWidth} h=${expanded.dotHeight}`);
+    const afterHoverScroll = await page.locator('[data-testid="virtuoso-scroller"]').evaluate((el) => el.scrollTop);
+    assert.ok(Math.abs(afterHoverScroll - beforeHoverScroll) <= 2, `hovering overview should not jump the chat scroller: before=${beforeHoverScroll} after=${afterHoverScroll}`);
 
     const targetId = "overview-user-2";
     await page.click(`[data-testid="chat-message-overview-item"][data-message-id="${targetId}"]`);
@@ -155,7 +159,7 @@ async function switchMode(page, testId) {
     const manyCompact = await readCompact(page);
     assert.equal(manyCompact.itemCount, 40, `many-message overview should keep all markers, got ${manyCompact.itemCount}`);
     assert.ok(manyCompact.height <= 520, `many-message compact overview should be height-capped, got ${manyCompact.height}`);
-    await page.hover('[data-testid="chat-message-overview-hover-target"]');
+    await page.hover('[data-testid="chat-message-overview-rail"]');
     await page.waitForTimeout(260);
     const manyExpanded = await page.evaluate(() => {
       const panel = document.querySelector('[data-testid="chat-message-overview-panel"]');
@@ -172,7 +176,7 @@ async function switchMode(page, testId) {
     });
     assert.ok(manyExpanded && manyExpanded.scrollHeight > manyExpanded.clientHeight, `many-message expanded panel should be internally scrollable: ${JSON.stringify(manyExpanded)}`);
     assert.equal(manyExpanded.overflowY, "auto", "many-message expanded panel should use overflow-y auto");
-    assert.ok(manyExpanded.width >= 220, `many-message expanded panel should still expand, got ${manyExpanded.width}`);
+    assert.ok(manyExpanded.width >= 300, `many-message expanded panel should still show full panel, got ${manyExpanded.width}`);
     const manyTargetId = "overview-user-40";
     await page.click(`[data-testid="chat-message-overview-item"][data-message-id="${manyTargetId}"]`);
     await page.waitForTimeout(650);
