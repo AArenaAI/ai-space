@@ -28,6 +28,7 @@ import ChatMessageOverview, { type ChatMessageOverviewItem } from "./ChatMessage
 import ChatSelectionOverlays from "./ChatSelectionOverlays";
 import ChatScrollToBottomButton from "./ChatScrollToBottomButton";
 import ChatHistoryLoadingState from "./ChatHistoryLoadingState";
+import ChatHistoryLoadingVirtuoso from "./ChatHistoryLoadingVirtuoso";
 import ChatEmptyState from "./ChatEmptyState";
 import ChatDeleteMessageDialog from "./ChatDeleteMessageDialog";
 import { parseThinkContent, sanitizeContent, isMessageGenerating } from "@/lib/chatContent";
@@ -982,16 +983,13 @@ function MessageList({
         {/* 滚动内容区域：对比模式也使用 Virtuoso，和单聊共享滚动/锁底体系 */}
         {messages.length === 0 ? (
           isLoadingHistory ? (
-            <Virtuoso
-              style={{ height: "100%", overflowAnchor: "none" }}
-              data={[] as InferredGroup[]}
-              ref={virtuosoRef}
+            <ChatHistoryLoadingVirtuoso<InferredGroup>
+              data={[]}
+              virtuosoRef={virtuosoRef}
               scrollerRef={handleVirtuosoScrollerRef}
-              followOutput={false}
-              computeItemKey={(_, group) => group.id}
               onScroll={handleVirtuosoScroll}
               components={historyLoadingComponents}
-              itemContent={() => null}
+              computeItemKey={(_, group) => String(group.id)}
             />
           ) : (
             <ChatCompareWelcomeColumns
@@ -1075,19 +1073,15 @@ function MessageList({
   if (messages.length === 0) {
     if (isLoadingHistory) {
       return (
-        <div className="relative flex-1 min-h-0 overflow-hidden">
-          <Virtuoso
-            style={{ height: "100%", overflowAnchor: "none" }}
-            data={[] as Message[]}
-            ref={virtuosoRef}
-            scrollerRef={handleVirtuosoScrollerRef}
-            followOutput={false}
-            computeItemKey={(_, msg) => msg.id}
-            onScroll={handleVirtuosoScroll}
-            components={historyLoadingComponents}
-            itemContent={() => null}
-          />
-        </div>
+        <ChatHistoryLoadingVirtuoso<Message>
+          data={[]}
+          virtuosoRef={virtuosoRef}
+          scrollerRef={handleVirtuosoScrollerRef}
+          onScroll={handleVirtuosoScroll}
+          components={historyLoadingComponents}
+          computeItemKey={(_, msg) => msg.id}
+          className="relative flex-1 min-h-0 overflow-hidden"
+        />
       );
     }
     return (
