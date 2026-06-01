@@ -29,7 +29,7 @@ const ChatMessageOverview = memo(function ChatMessageOverview({ items, visible, 
 
   return (
     <div
-      className="group pointer-events-none absolute right-5 top-1/2 z-[110] hidden max-h-[min(520px,calc(100%-160px))] -translate-y-1/2 items-center sm:flex"
+      className="group pointer-events-none absolute right-5 top-1/2 z-[140] hidden max-h-[min(520px,calc(100%-160px))] -translate-y-1/2 items-center sm:flex"
       data-testid="chat-message-overview"
     >
       <div className="pointer-events-auto relative flex max-h-full items-center justify-end">
@@ -48,7 +48,7 @@ const ChatMessageOverview = memo(function ChatMessageOverview({ items, visible, 
           ))}
         </div>
         <div
-          className="chat-message-overview-scrollbar invisible absolute right-8 top-1/2 flex max-h-[min(520px,calc(100vh-160px))] w-[320px] -translate-y-1/2 flex-col gap-1.5 overflow-y-auto rounded-2xl border border-surface-border/70 bg-surface-elevated/95 px-2 py-2 opacity-0 shadow-2xl shadow-black/20 group-hover:visible group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:visible group-focus-within:pointer-events-auto group-focus-within:opacity-100 dark:bg-[#171717]/95"
+          className="chat-message-overview-scrollbar invisible absolute right-8 top-1/2 z-[150] flex max-h-[min(520px,calc(100vh-160px))] w-[320px] -translate-y-1/2 flex-col gap-1.5 overflow-y-auto rounded-2xl border border-surface-border bg-surface-elevated px-2 py-2 opacity-0 shadow-2xl shadow-black/25 group-hover:visible group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:visible group-focus-within:pointer-events-auto group-focus-within:opacity-100 dark:border-[#2b2b2b] dark:bg-[#171717]"
           data-testid="chat-message-overview-panel"
         >
           {items.map((item) => (

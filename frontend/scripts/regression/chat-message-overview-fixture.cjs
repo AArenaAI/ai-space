@@ -70,7 +70,7 @@ async function switchMode(page, testId) {
     assert.ok(compact.width <= 32, `compact overview should be narrow, got ${compact.width}`);
     assert.equal(compact.panelVisible, false, "compact overview should hide summary panel before hover");
     assert.ok(Number(compact.dotWidth) >= 24 && Number(compact.dotWidth) <= 32 && Number(compact.dotHeight) >= 1 && Number(compact.dotHeight) <= 4, `compact capsule should be a short horizontal bar, got w=${compact.dotWidth} h=${compact.dotHeight}`);
-    assert.ok(Number(compact.zIndex) >= 110, `overview should sit above chat controls, got z-index ${compact.zIndex}`);
+    assert.ok(Number(compact.zIndex) >= 140, `overview should sit above chat controls and floating panels, got z-index ${compact.zIndex}`);
     assert.ok(compact.rootRight <= compact.viewportWidth && compact.rootLeft >= 0, `overview should stay inside viewport: ${JSON.stringify(compact)}`);
 
     const beforeHoverScroll = await page.locator('[data-testid="virtuoso-scroller"]').evaluate((el) => el.scrollTop);
