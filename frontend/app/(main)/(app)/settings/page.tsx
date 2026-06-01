@@ -9,7 +9,6 @@ import {
   Check,
   ChevronDown,
   Search,
-  Shield,
 } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { useTheme } from "@/components/theme/ThemeProvider";
@@ -69,18 +68,6 @@ function AccountSection() {
             {t("account.logout")}
           </button>
         </div>
-        {user?.role === "admin" && (
-          <button
-            onClick={() => router.push("/admin")}
-            className="mt-3 flex w-full items-center justify-between rounded-2xl border border-brand/20 bg-brand/10 px-4 py-3 text-left text-sm text-brand transition-colors hover:bg-brand/15"
-          >
-            <span className="flex items-center gap-2 font-medium">
-              <Shield className="h-4 w-4" />
-              后台管理
-            </span>
-            <span className="text-xs opacity-80">Admin</span>
-          </button>
-        )}
       </div>
     </div>
   );

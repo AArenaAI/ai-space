@@ -106,7 +106,7 @@ type ChatRequest struct {
 	UserMessageID   uint               `json:"user_message_id,omitempty"`    // skip_save_user_msg 时复用的用户消息
 	WorkspaceID     uint               `json:"workspace_id,omitempty"`
 	NotebookID      uint               `json:"notebook_id,omitempty"` // 指定笔记本资料空间
-	SkillKey        string             `json:"skill_key,omitempty"` // 指定技能 key
+	SkillKey        string             `json:"skill_key,omitempty"`   // 指定技能 key
 
 	// 本轮消息显式附件，只用于 message_files 展示，同时默认参与本轮 RAG
 	MessageFileIDs []string `json:"message_file_ids,omitempty"`
@@ -825,6 +825,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		filePlan = h.buildChatFilePlan(req, userID, guestID)
 	}
 
+	var fileContextSources []services.SearchResult
 	if len(filePlan.MessageFiles) > 0 || len(filePlan.HistoricalFiles) > 0 {
 		fileContextPackage := h.fileContext.Build(services.FileContextBuildRequest{
 			CurrentFiles:    filePlan.MessageFiles,
@@ -836,6 +837,9 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		beforeNativeImages := countMessageImages(req.Messages)
 		beforeNativeFiles := countMessageNativeFiles(req.Messages)
 		req.Messages = applyFileContextPackage(req.Messages, fileContextPackage)
+		if req.NotebookID > 0 {
+			fileContextSources = normalizeFileContextSearchSources(fileContextPackage.Sources)
+		}
 		fmt.Printf("[Chat FileContext] injected context usedFiles=%v nativeParts=%d nativeImagesAdded=%d nativeFilesAdded=%d warnings=%d systemPrompt=%v\n",
 			fileContextPackage.UsedFileIDs,
 			len(fileContextPackage.NativeParts),
@@ -886,6 +890,9 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 
 	var searchSources []services.SearchResult
 	var useSearchTool bool
+	if len(fileContextSources) > 0 {
+		searchSources = fileContextSources
+	}
 
 	// 有文件上下文且问题是文件相关时，跳过联网搜索，避免搜索结果污染文件问答
 	lastUserQuery := ""
@@ -894,9 +901,8 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 	}
 	if (len(filePlan.MessageFiles) > 0 || len(filePlan.HistoricalFiles) > 0) && isFileQuestion(lastUserQuery) {
 		fmt.Printf("[Chat] 文件问答模式，跳过联网搜索 currentFiles=%d historicalFiles=%d query=%q\n", len(filePlan.MessageFiles), len(filePlan.HistoricalFiles), lastUserQuery)
-		searchSources = nil
 		useSearchTool = false
-	} else {
+	} else if len(fileContextSources) == 0 {
 		req.Messages, searchSources, useSearchTool = h.preprocessSearch(req.Messages, req.Model, req.Search, c.ClientIP())
 	}
 
@@ -1150,6 +1156,37 @@ func (h *ChatHandler) createBackgroundTask(responseID string, userID uint, guest
 		return nil
 	}
 	return &task
+}
+
+func normalizeFileContextSearchSources(sources []services.FileContextSource) []services.SearchResult {
+	if len(sources) == 0 {
+		return nil
+	}
+	out := make([]services.SearchResult, 0, len(sources))
+	for _, source := range sources {
+		title := strings.TrimSpace(source.Title)
+		if title == "" {
+			title = strings.TrimSpace(source.Filename)
+		}
+		if title == "" {
+			title = "资料文件"
+		}
+		description := strings.TrimSpace(source.Description)
+		if description == "" {
+			description = "命中文本片段"
+		}
+		out = append(out, services.SearchResult{
+			Title:       title,
+			URL:         "notebook://source",
+			Description: description,
+			Snippet:     strings.TrimSpace(source.Snippet),
+			Type:        "notebook_file",
+			Page:        source.Page,
+			Slide:       source.Slide,
+			SheetName:   source.SheetName,
+		})
+	}
+	return out
 }
 
 func rateLimitRetryDelay(waitMs int) time.Duration {

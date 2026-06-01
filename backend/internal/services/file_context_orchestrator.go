@@ -25,6 +25,20 @@ type FileContextPackage struct {
 	NativeParts  []ModelPart
 	Warnings     []string
 	UsedFileIDs  []uint
+	Sources      []FileContextSource
+}
+
+// FileContextSource 是返回给前端展示的安全来源信息，不暴露 file_id/chunk_id/metadata。
+type FileContextSource struct {
+	Title       string  `json:"title"`
+	Filename    string  `json:"filename"`
+	Description string  `json:"description"`
+	Snippet     string  `json:"snippet"`
+	Page        int     `json:"page,omitempty"`
+	Slide       int     `json:"slide,omitempty"`
+	SheetName   string  `json:"sheet_name,omitempty"`
+	Score       float64 `json:"score,omitempty"`
+	Type        string  `json:"type,omitempty"`
 }
 
 type ModelPart struct {
@@ -85,18 +99,20 @@ func (o *FileContextOrchestrator) Build(req FileContextBuildRequest) FileContext
 
 	var parts []string
 	if len(currentReady) > 0 {
-		currentContext := o.buildDirectCurrentContext(currentReady, req.Query, req.Model, logPrefix)
+		currentContext, currentSources := o.buildDirectCurrentContext(currentReady, req.Query, req.Model, logPrefix)
 		if currentContext != "" {
 			parts = append(parts, currentContext)
 			pkg.UsedFileIDs = appendUniqueUint(pkg.UsedFileIDs, fileIDs(currentReady)...)
+			pkg.Sources = append(pkg.Sources, currentSources...)
 		}
 	}
 
 	if len(historicalReady) > 0 && o.retrievalSvc != nil {
-		historicalContext := o.buildHistoricalContext(historicalReady, req.Query, req.Model, logPrefix)
+		historicalContext, historicalSources := o.buildHistoricalContext(historicalReady, req.Query, req.Model, logPrefix)
 		if historicalContext != "" {
 			parts = append(parts, historicalContext)
 			pkg.UsedFileIDs = appendUniqueUint(pkg.UsedFileIDs, fileIDs(historicalReady)...)
+			pkg.Sources = append(pkg.Sources, historicalSources...)
 		}
 	}
 
@@ -195,9 +211,10 @@ func (o *FileContextOrchestrator) buildCurrentNativeParts(files []models.File, m
 	return parts, warnings
 }
 
-func (o *FileContextOrchestrator) buildDirectCurrentContext(files []models.File, query string, model string, logPrefix string) string {
+func (o *FileContextOrchestrator) buildDirectCurrentContext(files []models.File, query string, model string, logPrefix string) (string, []FileContextSource) {
 	fileNames := fileNameMap(files)
 	var contexts []FileContext
+	var allResults []ChunkSearchResult
 
 	for _, file := range files {
 		chunks := o.loadDirectChunks(file, DefaultCurrentFileContextChars)
@@ -207,17 +224,19 @@ func (o *FileContextOrchestrator) buildDirectCurrentContext(files []models.File,
 		}
 		results := make([]ChunkSearchResult, 0, len(chunks))
 		for _, c := range chunks {
-			results = append(results, ChunkSearchResult{Chunk: c, Score: 1, Relevance: "current"})
+			result := ChunkSearchResult{Chunk: c, Score: 1, Relevance: "current"}
+			results = append(results, result)
+			allResults = append(allResults, result)
 		}
 		contexts = append(contexts, FileContext{FileName: fileNames[file.ID], Chunks: results})
 		fmt.Printf("[%s FileContext] current direct fileID=%d chunks=%d\n", logPrefix, file.ID, len(chunks))
 	}
 
 	body := o.contextBuilder.BuildSection("current_files", contexts, query, maxFileContextTokensForModel(model), DefaultCurrentFileContextChars)
-	return body
+	return body, BuildFileContextSources(allResults, fileNames, 6)
 }
 
-func (o *FileContextOrchestrator) buildHistoricalContext(files []models.File, query string, model string, logPrefix string) string {
+func (o *FileContextOrchestrator) buildHistoricalContext(files []models.File, query string, model string, logPrefix string) (string, []FileContextSource) {
 	var allResults []ChunkSearchResult
 	var imageFileIDs []uint
 	var docFileIDs []uint
@@ -263,10 +282,11 @@ func (o *FileContextOrchestrator) buildHistoricalContext(files []models.File, qu
 	}
 
 	if len(allResults) == 0 {
-		return ""
+		return "", nil
 	}
-	contexts := ExtractFileContexts(allResults, fileNameMap(files))
-	return o.contextBuilder.BuildSection("historical_files", contexts, query, maxFileContextTokensForModel(model), DefaultHistoricalFileContextChars)
+	fileNames := fileNameMap(files)
+	contexts := ExtractFileContexts(allResults, fileNames)
+	return o.contextBuilder.BuildSection("historical_files", contexts, query, maxFileContextTokensForModel(model), DefaultHistoricalFileContextChars), BuildFileContextSources(allResults, fileNames, 6)
 }
 
 func (o *FileContextOrchestrator) loadDirectChunks(file models.File, maxChars int) []models.FileChunk {
@@ -375,6 +395,78 @@ func fileNameMap(files []models.File) map[uint]string {
 		names[f.ID] = f.Filename
 	}
 	return names
+}
+
+func BuildFileContextSources(results []ChunkSearchResult, fileNames map[uint]string, limit int) []FileContextSource {
+	if limit <= 0 {
+		limit = 6
+	}
+	out := make([]FileContextSource, 0, limit)
+	seen := map[string]struct{}{}
+	for _, result := range results {
+		if len(out) >= limit {
+			break
+		}
+		chunk := result.Chunk
+		text := strings.TrimSpace(chunk.Markdown)
+		if text == "" {
+			text = strings.TrimSpace(chunk.Content)
+		}
+		if text == "" {
+			continue
+		}
+		filename := strings.TrimSpace(fileNames[chunk.FileID])
+		if filename == "" {
+			filename = "资料文件"
+		}
+		key := fmt.Sprintf("%s:%d:%s", filename, chunk.ChunkIndex, PreviewRunes(text, 32))
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		source := FileContextSource{
+			Title:       filename,
+			Filename:    filename,
+			Description: buildSourceDescription(chunk),
+			Snippet:     cleanSourceSnippet(text, 220),
+			Page:        chunk.Page,
+			Slide:       chunk.Slide,
+			SheetName:   chunk.SheetName,
+			Score:       result.Score,
+			Type:        "notebook_file",
+		}
+		out = append(out, source)
+	}
+	return out
+}
+
+func buildSourceDescription(chunk models.FileChunk) string {
+	var parts []string
+	if chunk.Page > 0 {
+		parts = append(parts, fmt.Sprintf("第 %d 页", chunk.Page))
+	}
+	if chunk.Slide > 0 {
+		parts = append(parts, fmt.Sprintf("第 %d 张幻灯片", chunk.Slide))
+	}
+	if strings.TrimSpace(chunk.SheetName) != "" {
+		parts = append(parts, fmt.Sprintf("工作表 %s", strings.TrimSpace(chunk.SheetName)))
+	}
+	if len(parts) == 0 {
+		return "命中文本片段"
+	}
+	return strings.Join(parts, " · ")
+}
+
+func cleanSourceSnippet(text string, limit int) string {
+	text = strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
+	if limit <= 0 {
+		limit = 220
+	}
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	return string(runes[:limit]) + "…"
 }
 
 func appendUniqueUint(dst []uint, values ...uint) []uint {

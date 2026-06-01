@@ -9,7 +9,7 @@ export function MetricCard({
   tone = "blue",
 }: {
   title: string;
-  value: string;
+  value: string | number;
   helper?: string;
   icon: LucideIcon;
   tone?: "blue" | "green" | "amber" | "red" | "purple";

@@ -34,6 +34,11 @@ type SearchResult struct {
 	Title       string `json:"title"`
 	URL         string `json:"url"`
 	Description string `json:"description"`
+	Snippet     string `json:"snippet,omitempty"`
+	Type        string `json:"type,omitempty"`
+	Page        int    `json:"page,omitempty"`
+	Slide       int    `json:"slide,omitempty"`
+	SheetName   string `json:"sheet_name,omitempty"`
 }
 
 // --- Tavily API ---

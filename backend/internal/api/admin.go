@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -33,6 +34,57 @@ type adminUserResponse struct {
 	EliteCredits    int       `json:"elite_credits"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type adminUsageSummaryResponse struct {
+	Requests          int64              `json:"requests"`
+	Failures          int64              `json:"failures"`
+	Successes         int64              `json:"successes"`
+	CostRMB           float64            `json:"cost_rmb"`
+	PromptTokens      int64              `json:"prompt_tokens"`
+	CompletionTokens  int64              `json:"completion_tokens"`
+	TotalTokens       int64              `json:"total_tokens"`
+	ImageCount        int64              `json:"image_count"`
+	RangeStart        time.Time          `json:"range_start"`
+	Daily             []adminUsageBucket `json:"daily"`
+	TopModels         []gin.H            `json:"top_models"`
+	ProviderBreakdown []gin.H            `json:"provider_breakdown"`
+	ServiceBreakdown  []gin.H            `json:"service_breakdown"`
+}
+
+type adminUsageBucket struct {
+	Date     string  `json:"date"`
+	Requests int64   `json:"requests"`
+	Failures int64   `json:"failures"`
+	CostRMB  float64 `json:"cost_rmb"`
+}
+
+type adminModelResponse struct {
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Provider     string   `json:"provider"`
+	Description  string   `json:"description"`
+	Color        string   `json:"color"`
+	Category     string   `json:"category"`
+	Tier         string   `json:"tier"`
+	Modalities   []string `json:"modalities"`
+	Capabilities []string `json:"capabilities"`
+}
+
+type adminTaskResponse struct {
+	ID                 uint       `json:"id"`
+	ResponseID         string     `json:"response_id"`
+	UserID             uint       `json:"user_id"`
+	GuestID            string     `json:"guest_id"`
+	ConversationID     uint       `json:"conversation_id"`
+	AssistantMessageID uint       `json:"assistant_message_id"`
+	Model              string     `json:"model"`
+	Provider           string     `json:"provider"`
+	Status             string     `json:"status"`
+	ErrorMessage       string     `json:"error_message,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+	CompletedAt        *time.Time `json:"completed_at,omitempty"`
 }
 
 func toAdminUserResponse(user models.User) adminUserResponse {
@@ -82,27 +134,10 @@ func (h *AdminHandler) Overview(c *gin.Context) {
 	h.db.Model(&models.APIUsageLog{}).Where("created_at >= ?", startOfDay).Count(&todayRequests)
 	h.db.Model(&models.APIUsageLog{}).Where("created_at >= ? AND status <> ?", startOfDay, "success").Count(&todayFailures)
 	h.db.Model(&models.APIUsageLog{}).Where("created_at >= ?", startOfDay).Select("COALESCE(SUM(total_cost_rmb), 0)").Scan(&todayCost)
-	h.db.Model(&models.AIBackgroundTask{}).Where("status IN ?", []string{"running", "pending"}).Count(&runningTasks)
+	h.db.Model(&models.AIBackgroundTask{}).Where("status IN ?", []string{"running", "pending", "streaming", "retrying"}).Count(&runningTasks)
 	h.db.Model(&models.AIBackgroundTask{}).Where("created_at >= ? AND status = ?", startOfDay, "failed").Count(&failedTasksToday)
 
-	topModels := []gin.H{}
-	rows, err := h.db.Model(&models.APIUsageLog{}).
-		Select("COALESCE(model, '') AS model, COALESCE(provider, '') AS provider, COALESCE(SUM(total_cost_rmb), 0) AS cost_rmb, COUNT(*) AS requests").
-		Where("created_at >= ?", startOfDay).
-		Group("model, provider").
-		Order("cost_rmb DESC").
-		Limit(5).Rows()
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var model, provider string
-			var cost float64
-			var requests int64
-			if err := rows.Scan(&model, &provider, &cost, &requests); err == nil {
-				topModels = append(topModels, gin.H{"model": model, "provider": provider, "cost_rmb": cost, "requests": requests})
-			}
-		}
-	}
+	topModels := h.topUsageModels(startOfDay, 5)
 
 	c.JSON(http.StatusOK, gin.H{
 		"users":  gin.H{"total": totalUsers, "today_new": todayNewUsers},
@@ -127,6 +162,12 @@ func (h *AdminHandler) ListUsers(c *gin.Context) {
 		} else {
 			query = query.Where("email ILIKE ? OR name ILIKE ?", "%"+q+"%", "%"+q+"%")
 		}
+	}
+	if role := strings.TrimSpace(c.Query("role")); role != "" {
+		query = query.Where("role = ?", role)
+	}
+	if plan := strings.TrimSpace(c.Query("plan_tier")); plan != "" {
+		query = query.Where("plan_tier = ?", plan)
 	}
 
 	var total int64
@@ -171,6 +212,7 @@ func (h *AdminHandler) UpdateUser(c *gin.Context) {
 	if !ok {
 		return
 	}
+	before := toAdminUserResponse(user)
 	var req adminUpdateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效"})
@@ -214,13 +256,16 @@ func (h *AdminHandler) UpdateUser(c *gin.Context) {
 		return
 	}
 	h.db.First(&user, user.ID)
-	c.JSON(http.StatusOK, gin.H{"user": toAdminUserResponse(user)})
+	after := toAdminUserResponse(user)
+	h.audit(c, "admin.user.update", "user", strconv.FormatUint(uint64(user.ID), 10), before, after)
+	c.JSON(http.StatusOK, gin.H{"user": after})
 }
 
 type adminAdjustCreditsRequest struct {
 	Tier   string `json:"tier" binding:"required"`
 	Amount int    `json:"amount" binding:"required"`
 	Mode   string `json:"mode"`
+	Reason string `json:"reason"`
 }
 
 func (h *AdminHandler) AdjustCredits(c *gin.Context) {
@@ -228,6 +273,7 @@ func (h *AdminHandler) AdjustCredits(c *gin.Context) {
 	if !ok {
 		return
 	}
+	before := toAdminUserResponse(user)
 	var req adminAdjustCreditsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效"})
@@ -266,23 +312,59 @@ func (h *AdminHandler) AdjustCredits(c *gin.Context) {
 		return
 	}
 
-	if err := h.db.Model(&user).Update(field, newValue).Error; err != nil {
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		reason = "admin_adjust"
+	}
+	operatorID := currentAdminID(c)
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&user).Update(field, newValue).Error; err != nil {
+			return err
+		}
+		return tx.Create(&models.CreditTransaction{
+			UserID:       user.ID,
+			Type:         "adjust",
+			Tier:         req.Tier,
+			Amount:       newValue - current,
+			BalanceAfter: newValue,
+			Reason:       reason,
+			SourceType:   "admin",
+			SourceID:     strconv.FormatUint(uint64(operatorID), 10),
+			OperatorID:   operatorID,
+		}).Error
+	}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "调整积分失败"})
 		return
 	}
 	h.db.First(&user, user.ID)
-	c.JSON(http.StatusOK, gin.H{"user": toAdminUserResponse(user)})
+	after := toAdminUserResponse(user)
+	h.audit(c, "admin.user.credits.adjust", "user", strconv.FormatUint(uint64(user.ID), 10), before, after)
+	c.JSON(http.StatusOK, gin.H{"user": after})
 }
 
 func (h *AdminHandler) UsageSummary(c *gin.Context) {
 	start := parseRangeStart(c.Query("range"))
-	var requests int64
-	var failures int64
-	var cost float64
-	h.db.Model(&models.APIUsageLog{}).Where("created_at >= ?", start).Count(&requests)
-	h.db.Model(&models.APIUsageLog{}).Where("created_at >= ? AND status <> ?", start, "success").Count(&failures)
-	h.db.Model(&models.APIUsageLog{}).Where("created_at >= ?", start).Select("COALESCE(SUM(total_cost_rmb), 0)").Scan(&cost)
-	c.JSON(http.StatusOK, gin.H{"requests": requests, "failures": failures, "cost_rmb": cost, "range_start": start})
+	var summary adminUsageSummaryResponse
+	summary.RangeStart = start
+	summary.Daily = []adminUsageBucket{}
+	summary.TopModels = []gin.H{}
+	summary.ProviderBreakdown = []gin.H{}
+	summary.ServiceBreakdown = []gin.H{}
+
+	h.db.Model(&models.APIUsageLog{}).Where("created_at >= ?", start).Count(&summary.Requests)
+	h.db.Model(&models.APIUsageLog{}).Where("created_at >= ? AND status <> ?", start, "success").Count(&summary.Failures)
+	h.db.Model(&models.APIUsageLog{}).Where("created_at >= ? AND status = ?", start, "success").Count(&summary.Successes)
+	h.db.Model(&models.APIUsageLog{}).Where("created_at >= ?", start).Select("COALESCE(SUM(total_cost_rmb), 0)").Scan(&summary.CostRMB)
+	h.db.Model(&models.APIUsageLog{}).Where("created_at >= ?", start).Select("COALESCE(SUM(prompt_tokens), 0)").Scan(&summary.PromptTokens)
+	h.db.Model(&models.APIUsageLog{}).Where("created_at >= ?", start).Select("COALESCE(SUM(completion_tokens), 0)").Scan(&summary.CompletionTokens)
+	h.db.Model(&models.APIUsageLog{}).Where("created_at >= ?", start).Select("COALESCE(SUM(total_tokens), 0)").Scan(&summary.TotalTokens)
+	h.db.Model(&models.APIUsageLog{}).Where("created_at >= ?", start).Select("COALESCE(SUM(image_count), 0)").Scan(&summary.ImageCount)
+
+	summary.Daily = h.dailyUsage(start)
+	summary.TopModels = h.topUsageModels(start, 10)
+	summary.ProviderBreakdown = h.usageBreakdown(start, "provider", 12)
+	summary.ServiceBreakdown = h.usageBreakdown(start, "service", 12)
+	c.JSON(http.StatusOK, summary)
 }
 
 func (h *AdminHandler) UsageLogs(c *gin.Context) {
@@ -298,8 +380,14 @@ func (h *AdminHandler) UsageLogs(c *gin.Context) {
 	if provider := strings.TrimSpace(c.Query("provider")); provider != "" {
 		query = query.Where("provider = ?", provider)
 	}
+	if model := strings.TrimSpace(c.Query("model")); model != "" {
+		query = query.Where("model = ?", model)
+	}
 	if status := strings.TrimSpace(c.Query("status")); status != "" {
 		query = query.Where("status = ?", status)
+	}
+	if uid := parsePositiveInt(c.Query("user_id"), 0); uid > 0 {
+		query = query.Where("user_id = ?", uid)
 	}
 	var total int64
 	query.Count(&total)
@@ -312,7 +400,39 @@ func (h *AdminHandler) UsageLogs(c *gin.Context) {
 }
 
 func (h *AdminHandler) Models(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"models": modelmeta.AllModels()})
+	items := make([]adminModelResponse, 0)
+	for _, model := range modelmeta.AllModels() {
+		modalities := []string{}
+		caps := []string{}
+		for _, cap := range model.Capabilities {
+			if cap == "search" {
+				caps = append(caps, "native_search")
+			} else {
+				caps = append(caps, cap)
+			}
+			if cap == "chat" || cap == "image" || cap == "video" || cap == "document" {
+				modalities = appendIfMissing(modalities, cap)
+			}
+		}
+		if len(modalities) == 0 {
+			modalities = []string{"chat"}
+		}
+		if len(model.SupportedFileExtensions) > 0 || containsString(model.SupportedInputs, "pdf") || containsString(model.SupportedInputs, "word") {
+			caps = appendIfMissing(caps, "file")
+		}
+		items = append(items, adminModelResponse{
+			ID:           model.ID,
+			Name:         model.Name,
+			Provider:     model.Provider,
+			Description:  model.Description,
+			Color:        model.Color,
+			Category:     firstCapability(model.Capabilities),
+			Tier:         GetModelTier(model.ID),
+			Modalities:   modalities,
+			Capabilities: caps,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"models": items, "total": len(items)})
 }
 
 func (h *AdminHandler) Tasks(c *gin.Context) {
@@ -325,6 +445,15 @@ func (h *AdminHandler) Tasks(c *gin.Context) {
 	if status := strings.TrimSpace(c.Query("status")); status != "" {
 		query = query.Where("status = ?", status)
 	}
+	if provider := strings.TrimSpace(c.Query("provider")); provider != "" {
+		query = query.Where("provider = ?", provider)
+	}
+	if model := strings.TrimSpace(c.Query("model")); model != "" {
+		query = query.Where("model = ?", model)
+	}
+	if uid := parsePositiveInt(c.Query("user_id"), 0); uid > 0 {
+		query = query.Where("user_id = ?", uid)
+	}
 	var total int64
 	query.Count(&total)
 	var tasks []models.AIBackgroundTask
@@ -332,7 +461,31 @@ func (h *AdminHandler) Tasks(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询任务失败"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"tasks": tasks, "total": total, "page": page, "page_size": pageSize})
+	items := make([]adminTaskResponse, 0, len(tasks))
+	for _, task := range tasks {
+		items = append(items, adminTaskResponse{
+			ID:                 task.ID,
+			ResponseID:         task.ResponseID,
+			UserID:             task.UserID,
+			GuestID:            task.GuestID,
+			ConversationID:     task.ConversationID,
+			AssistantMessageID: task.AssistantMessageID,
+			Model:              task.Model,
+			Provider:           task.Provider,
+			Status:             task.Status,
+			ErrorMessage:       task.ErrorMessage,
+			CreatedAt:          task.CreatedAt,
+			UpdatedAt:          task.UpdatedAt,
+			CompletedAt:        task.CompletedAt,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"tasks":     items,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+		"summary":   h.taskSummary(),
+	})
 }
 
 func (h *AdminHandler) findUserByParam(c *gin.Context) (models.User, bool) {
@@ -351,6 +504,158 @@ func (h *AdminHandler) findUserByParam(c *gin.Context) (models.User, bool) {
 		return models.User{}, false
 	}
 	return user, true
+}
+
+func (h *AdminHandler) audit(c *gin.Context, action, targetType, targetID string, before, after any) {
+	operatorID := currentAdminID(c)
+	beforeJSON := mustAdminJSON(before)
+	afterJSON := mustAdminJSON(after)
+	_ = h.db.Create(&models.AdminAuditLog{
+		OperatorID: operatorID,
+		Action:     action,
+		TargetType: targetType,
+		TargetID:   targetID,
+		BeforeJSON: beforeJSON,
+		AfterJSON:  afterJSON,
+		IP:         c.ClientIP(),
+		UserAgent:  c.GetHeader("User-Agent"),
+	}).Error
+}
+
+func currentAdminID(c *gin.Context) uint {
+	value, _ := c.Get("userID")
+	id, _ := value.(uint)
+	return id
+}
+
+func mustAdminJSON(value any) string {
+	if value == nil {
+		return ""
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func (h *AdminHandler) topUsageModels(start time.Time, limit int) []gin.H {
+	items := []gin.H{}
+	rows, err := h.db.Model(&models.APIUsageLog{}).
+		Select("COALESCE(model, '') AS model, COALESCE(provider, '') AS provider, COALESCE(SUM(total_cost_rmb), 0) AS cost_rmb, COUNT(*) AS requests, COALESCE(SUM(total_tokens), 0) AS tokens").
+		Where("created_at >= ?", start).
+		Group("model, provider").
+		Order("cost_rmb DESC").
+		Limit(limit).Rows()
+	if err != nil {
+		return items
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var model, provider string
+		var cost float64
+		var requests int64
+		var tokens int64
+		if err := rows.Scan(&model, &provider, &cost, &requests, &tokens); err == nil {
+			items = append(items, gin.H{"model": model, "provider": provider, "cost_rmb": cost, "requests": requests, "tokens": tokens})
+		}
+	}
+	return items
+}
+
+func (h *AdminHandler) usageBreakdown(start time.Time, column string, limit int) []gin.H {
+	if column != "provider" && column != "service" && column != "status" {
+		return []gin.H{}
+	}
+	items := []gin.H{}
+	rows, err := h.db.Model(&models.APIUsageLog{}).
+		Select("COALESCE("+column+", '') AS name, COUNT(*) AS requests, COALESCE(SUM(total_cost_rmb), 0) AS cost_rmb, COALESCE(SUM(CASE WHEN status <> 'success' THEN 1 ELSE 0 END), 0) AS failures").
+		Where("created_at >= ?", start).
+		Group(column).
+		Order("requests DESC").
+		Limit(limit).Rows()
+	if err != nil {
+		return items
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		var requests int64
+		var cost float64
+		var failures int64
+		if err := rows.Scan(&name, &requests, &cost, &failures); err == nil {
+			items = append(items, gin.H{"name": name, "requests": requests, "cost_rmb": cost, "failures": failures})
+		}
+	}
+	return items
+}
+
+func (h *AdminHandler) dailyUsage(start time.Time) []adminUsageBucket {
+	items := []adminUsageBucket{}
+	rows, err := h.db.Model(&models.APIUsageLog{}).
+		Select("DATE(created_at) AS day, COUNT(*) AS requests, COALESCE(SUM(CASE WHEN status <> 'success' THEN 1 ELSE 0 END), 0) AS failures, COALESCE(SUM(total_cost_rmb), 0) AS cost_rmb").
+		Where("created_at >= ?", start).
+		Group("DATE(created_at)").
+		Order("day ASC").Rows()
+	if err != nil {
+		return items
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var day time.Time
+		var requests int64
+		var failures int64
+		var cost float64
+		if err := rows.Scan(&day, &requests, &failures, &cost); err == nil {
+			items = append(items, adminUsageBucket{Date: day.Format("2006-01-02"), Requests: requests, Failures: failures, CostRMB: cost})
+		}
+	}
+	return items
+}
+
+func (h *AdminHandler) taskSummary() []gin.H {
+	items := []gin.H{}
+	rows, err := h.db.Model(&models.AIBackgroundTask{}).
+		Select("COALESCE(status, '') AS status, COUNT(*) AS count").
+		Group("status").
+		Order("count DESC").Rows()
+	if err != nil {
+		return items
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var status string
+		var count int64
+		if err := rows.Scan(&status, &count); err == nil {
+			items = append(items, gin.H{"status": status, "count": count})
+		}
+	}
+	return items
+}
+
+func appendIfMissing(items []string, value string) []string {
+	for _, item := range items {
+		if item == value {
+			return items
+		}
+	}
+	return append(items, value)
+}
+
+func containsString(items []string, value string) bool {
+	for _, item := range items {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
+func firstCapability(items []string) string {
+	if len(items) == 0 {
+		return "chat"
+	}
+	return items[0]
 }
 
 func parsePositiveInt(raw string, fallback int) int {

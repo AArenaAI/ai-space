@@ -37,6 +37,7 @@ func InitDB(databaseURL string) (*gorm.DB, error) {
 		&File{}, &FileChunk{}, &FileEmbedding{}, &FileEmbeddingJob{}, &ConversationFile{}, &MessageFile{},
 		&Notebook{}, &NotebookFile{}, &NotebookConversation{},
 		&APIUsageLog{}, &AIBackgroundTask{}, &AIBackgroundTaskEvent{},
+		&AdminAuditLog{}, &BillingPlan{}, &BillingOrder{}, &BillingSubscription{}, &PaymentEvent{}, &CreditTransaction{},
 		&PPTTemplate{}, &PPTGeneration{}, &PPTSlide{}, &PPTRevision{},
 		&ImageChat{}, &ImageChatMessage{},
 		&MessageFavorite{},
