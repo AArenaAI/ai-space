@@ -13,12 +13,8 @@ import { Virtuoso, VirtuosoHandle, type Components } from "react-virtuoso";
 import { useMessageStream } from "@/hooks/useMessageStream";
 import { inferGroups, InferredGroup } from "@/lib/groups";
 import { useI18n } from "@/lib/i18n";
-import { AssistantMessageMeta } from "./AssistantMessageMeta";
-import MessageActions from "./MessageActions";
-import UserMessageContent from "./UserMessageContent";
 import { SelectionFloatingBar } from "./MessageExportActions";
 import ModelSelector from "./ModelSelector";
-import { StreamingText } from "./StreamingText";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
 
 const MarkdownRenderer = dynamic(() => import("./MarkdownRenderer"), {
@@ -29,10 +25,8 @@ const MessageExportPreview = dynamic(() => import("./MessageExportPreview"), {
   ssr: false,
   loading: () => null,
 });
-import { AssistantMessageContent } from "./AssistantMessageContent";
 import MessageRow from "./MessageRow";
-import CompareEmptySlot from "./CompareEmptySlot";
-import CompareLoadingSlot from "./CompareLoadingSlot";
+import CompareColumnTurn from "./CompareColumnTurn";
 import TextSelectionFloatingBar, { type TextSelectionFloatingBarState } from "./TextSelectionFloatingBar";
 import { parseThinkContent, sanitizeContent, isMessageGenerating } from "@/lib/chatContent";
 
@@ -821,14 +815,6 @@ function MessageList({
     };
   }, [streamingMessageId, streamingText.length, lockBottomAfterLayout]);
 
-  const renderAssistantContent = (msg: Message, isStreaming: boolean) => (
-    <AssistantMessageContent
-      message={msg}
-      isStreaming={isStreaming}
-      MarkdownRenderer={LazyMarkdownRenderer}
-      recoverEmptyContent
-    />
-  );
 
   const renderCompareModelHeader = (modelId: string, index: number) => {
     const model = modelById.get(modelId);
@@ -889,73 +875,28 @@ function MessageList({
         || group.assistantMessages[colIndex];
     };
 
-    const renderCompareUserMessage = (msg: Message) => (
-      <div className="flex justify-end">
-        <div className="max-w-[88%] rounded-2xl rounded-br-sm bg-[#EFF6FF] px-4 py-3 text-text-primary shadow-sm dark:bg-[#1E293B]">
-          <UserMessageContent message={msg} imageLoadFailedLabel={t("chat.imageLoadFailed")} />
-        </div>
-      </div>
+    const renderCompareColumnTurn = (userMsg: Message, msg: Message | undefined, modelId: string, isLastGroup: boolean, isSingleChat: boolean) => (
+      <CompareColumnTurn
+        userMessage={userMsg}
+        assistantMessage={msg}
+        model={modelById.get(msg?.model || modelId || "")}
+        isLastGroup={isLastGroup}
+        isSingleChat={isSingleChat}
+        isLoading={isLoading}
+        isComplexTask={isComplexTask}
+        conversationId={conversationId}
+        deepReasoningLabel={t("chat.deepReasoning")}
+        imageLoadFailedLabel={t("chat.imageLoadFailed")}
+        MarkdownRenderer={LazyMarkdownRenderer}
+        onCopy={handleCopy}
+        onDelete={setDeleteTarget}
+        onRegenerate={onRegenerate}
+        onShareSelectMode={(id) => enterSelectMode("share", id)}
+        onFavoriteSelectMode={(id) => enterSelectMode("favorite", id)}
+        isFavorited={isFavorited}
+        onForkCompare={onForkCompare}
+      />
     );
-
-    const renderCompareColumnTurn = (userMsg: Message, msg: Message | undefined, modelId: string, isLastGroup: boolean, isSingleChat: boolean) => {
-      const model = modelById.get(msg?.model || modelId || "");
-      const hasLiveGenerationSignal = !!msg && !msg.completedAt && !msg.stopped && !!(
-        msg.activityStatus ||
-        msg.serverMessageId ||
-        msg.generationTaskId ||
-        msg.backgroundTaskId ||
-        msg.useBackground ||
-        msg.isComplexTask
-      );
-      const isStreaming = !!msg && isLastGroup && (isLoading || hasLiveGenerationSignal) && isMessageGenerating(msg, true);
-      const isGenerating = !!msg && isMessageGenerating(msg, isStreaming);
-      const canRegenerate = !!msg && isLastGroup && !isStreaming && !isGenerating;
-
-      return (
-        <div data-chat-message-row="true" className="flex flex-col gap-3 h-full">
-          {renderCompareUserMessage(userMsg)}
-          <div className="flex-1 flex flex-col">
-            {msg ? (
-              <div className="group flex gap-3 animate-message-appear">
-                <div className="mt-1 w-7 shrink-0">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-surface-border bg-surface-card">
-                    <Bot className="h-4 w-4 text-text-secondary" />
-                  </div>
-                </div>
-                <div className="flex min-w-0 flex-1 flex-col gap-1">
-                  <div className="w-fit max-w-full rounded-2xl rounded-bl-sm bg-surface-elevated px-4 py-3">
-                    {model && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} />}
-                    {renderAssistantContent(msg, isStreaming)}
-                  </div>
-                  {!isStreaming && (
-                    <div className="flex items-center gap-2 px-2 opacity-0 transition-opacity group-hover:opacity-100">
-                      <MessageActions
-                        onCopy={() => handleCopy(msg.content)}
-                        onDelete={() => setDeleteTarget(msg.id)}
-                        onRegenerate={onRegenerate}
-                        onShareSelectMode={() => enterSelectMode("share", msg.id)}
-                        onFavoriteSelectMode={msg.serverMessageId && conversationId ? () => enterSelectMode("favorite", msg.id) : undefined}
-                        isFavorited={msg.serverMessageId ? isFavorited(msg.serverMessageId) : false}
-                        showRegenerate={canRegenerate}
-                        align="left"
-                        visible={isLastGroup}
-                        createdAt={msg.createdAt}
-                        completedAt={msg.completedAt}
-                        onForkCompare={msg.serverMessageId ? () => onForkCompare?.(msg.serverMessageId!) : undefined}
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : isLoading && isLastGroup ? (
-              <CompareLoadingSlot isComplexTask={isComplexTask} deepReasoningLabel={t("chat.deepReasoning")} />
-            ) : (
-              <CompareEmptySlot isSingleChat={isSingleChat} />
-            )}
-          </div>
-        </div>
-      );
-    };
 
     return (
       <div className="relative flex-1 min-h-0 overflow-hidden flex flex-col">
