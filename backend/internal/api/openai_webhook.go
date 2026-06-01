@@ -150,7 +150,15 @@ func (h *OpenAIWebhookHandler) markTaskFinished(responseID, status, result, erro
 		}
 
 		if h.usageService != nil && usage != nil && usage.TotalTokens > 0 {
-			if err := h.usageService.RecordChatUsageWithResourceID(task.UserID, task.GuestID, "openai", task.Model, "openai_responses", task.ConversationID, usage); err != nil {
+			if err := h.usageService.RecordChatUsageWithContext(task.UserID, "openai", task.Model, "openai_responses", services.UsageContext{
+				GuestID:        task.GuestID,
+				ResourceType:   "message",
+				ResourceID:     task.AssistantMessageID,
+				ConversationID: task.ConversationID,
+				MessageID:      task.AssistantMessageID,
+				TaskID:         task.ID,
+				RequestID:      responseID,
+			}, usage); err != nil {
 				fmt.Printf("[OpenAI Webhook] 记录 usage 失败 response_id=%s: %v\n", responseID, err)
 			}
 		}

@@ -373,22 +373,7 @@ func (h *AdminHandler) UsageLogs(c *gin.Context) {
 	if pageSize > 100 {
 		pageSize = 100
 	}
-	query := h.db.Model(&models.APIUsageLog{})
-	if service := strings.TrimSpace(c.Query("service")); service != "" {
-		query = query.Where("service = ?", service)
-	}
-	if provider := strings.TrimSpace(c.Query("provider")); provider != "" {
-		query = query.Where("provider = ?", provider)
-	}
-	if model := strings.TrimSpace(c.Query("model")); model != "" {
-		query = query.Where("model = ?", model)
-	}
-	if status := strings.TrimSpace(c.Query("status")); status != "" {
-		query = query.Where("status = ?", status)
-	}
-	if uid := parsePositiveInt(c.Query("user_id"), 0); uid > 0 {
-		query = query.Where("user_id = ?", uid)
-	}
+	query := h.usageQuery(c)
 	var total int64
 	query.Count(&total)
 	var logs []models.APIUsageLog
@@ -397,6 +382,100 @@ func (h *AdminHandler) UsageLogs(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"logs": logs, "total": total, "page": page, "page_size": pageSize})
+}
+
+func (h *AdminHandler) UsageUsers(c *gin.Context) {
+	page := parsePositiveInt(c.Query("page"), 1)
+	pageSize := parsePositiveInt(c.Query("page_size"), 20)
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	query := h.usageQuery(c)
+	items := []gin.H{}
+	rows, err := query.
+		Select("api_usage_logs.user_id, COALESCE(users.email, '') AS email, COALESCE(users.name, '') AS name, COUNT(*) AS requests, COALESCE(SUM(api_usage_logs.total_cost_rmb), 0) AS cost_rmb, COALESCE(SUM(api_usage_logs.total_tokens), 0) AS total_tokens, COALESCE(SUM(api_usage_logs.image_count), 0) AS image_count, MAX(api_usage_logs.created_at) AS last_used_at").
+		Joins("LEFT JOIN users ON users.id = api_usage_logs.user_id").
+		Group("api_usage_logs.user_id, users.email, users.name").
+		Order("cost_rmb DESC").
+		Limit(pageSize).Offset((page - 1) * pageSize).Rows()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询用户用量失败"})
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var userID uint
+		var email, name string
+		var requests, tokens, images int64
+		var cost float64
+		var lastUsed time.Time
+		if err := rows.Scan(&userID, &email, &name, &requests, &cost, &tokens, &images, &lastUsed); err == nil {
+			services := h.usageGrouped(c, "service", 8, "user_id = ?", userID)
+			items = append(items, gin.H{"user_id": userID, "email": email, "name": name, "requests": requests, "cost_rmb": cost, "total_tokens": tokens, "image_count": images, "last_used_at": lastUsed, "services": services})
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"users": items, "page": page, "page_size": pageSize})
+}
+
+func (h *AdminHandler) UsageUserDetail(c *gin.Context) {
+	userID := parsePositiveInt(c.Param("id"), 0)
+	if userID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "用户 ID 无效"})
+		return
+	}
+	var user models.User
+	if err := h.db.First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "用户不存在"})
+		return
+	}
+	base := h.usageQuery(c).Where("user_id = ?", userID)
+	c.JSON(http.StatusOK, gin.H{
+		"user":          toAdminUserResponse(user),
+		"summary":       h.usageAggregate(base),
+		"services":      h.usageGrouped(c, "service", 20, "user_id = ?", userID),
+		"models":        h.usageModelRows(c, 50, "user_id = ?", userID),
+		"conversations": h.usageConversationRows(c, 20, "api_usage_logs.user_id = ?", userID),
+	})
+}
+
+func (h *AdminHandler) UsageModels(c *gin.Context) {
+	limit := parsePositiveInt(c.Query("limit"), 100)
+	if limit > 300 {
+		limit = 300
+	}
+	c.JSON(http.StatusOK, gin.H{"models": h.usageModelRows(c, limit)})
+}
+
+func (h *AdminHandler) UsageConversations(c *gin.Context) {
+	page := parsePositiveInt(c.Query("page"), 1)
+	pageSize := parsePositiveInt(c.Query("page_size"), 20)
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	items := h.usageConversationRows(c, pageSize, "", nil, (page-1)*pageSize)
+	c.JSON(http.StatusOK, gin.H{"conversations": items, "page": page, "page_size": pageSize})
+}
+
+func (h *AdminHandler) UsageConversationDetail(c *gin.Context) {
+	conversationID := parsePositiveInt(c.Param("id"), 0)
+	if conversationID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "对话 ID 无效"})
+		return
+	}
+	var conversation models.Conversation
+	if err := h.db.First(&conversation, conversationID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "对话不存在"})
+		return
+	}
+	base := h.usageQuery(c).Where("conversation_id = ?", conversationID)
+	var logs []models.APIUsageLog
+	base.Order("created_at DESC").Limit(100).Find(&logs)
+	c.JSON(http.StatusOK, gin.H{
+		"conversation": conversation,
+		"summary":      h.usageAggregate(base),
+		"models":       h.usageModelRows(c, 50, "conversation_id = ?", conversationID),
+		"logs":         logs,
+	})
 }
 
 func (h *AdminHandler) Models(c *gin.Context) {
@@ -537,6 +616,128 @@ func mustAdminJSON(value any) string {
 		return ""
 	}
 	return string(data)
+}
+
+func (h *AdminHandler) usageQuery(c *gin.Context) *gorm.DB {
+	query := h.db.Model(&models.APIUsageLog{})
+	if rangeRaw := strings.TrimSpace(c.Query("range")); rangeRaw != "" {
+		query = query.Where("created_at >= ?", parseRangeStart(rangeRaw))
+	}
+	if service := strings.TrimSpace(c.Query("service")); service != "" {
+		query = query.Where("service = ?", service)
+	}
+	if provider := strings.TrimSpace(c.Query("provider")); provider != "" {
+		query = query.Where("provider = ?", provider)
+	}
+	if model := strings.TrimSpace(c.Query("model")); model != "" {
+		query = query.Where("model = ?", model)
+	}
+	if status := strings.TrimSpace(c.Query("status")); status != "" {
+		query = query.Where("status = ?", status)
+	}
+	if uid := parsePositiveInt(c.Query("user_id"), 0); uid > 0 {
+		query = query.Where("user_id = ?", uid)
+	}
+	if conversationID := parsePositiveInt(c.Query("conversation_id"), 0); conversationID > 0 {
+		query = query.Where("conversation_id = ?", conversationID)
+	}
+	return query
+}
+
+func (h *AdminHandler) usageAggregate(query *gorm.DB) gin.H {
+	var out struct {
+		Requests     int64
+		Failures     int64
+		CostRMB      float64
+		TotalTokens  int64
+		PromptTokens int64
+		OutputTokens int64
+		ImageCount   int64
+	}
+	query.Select("COUNT(*) AS requests, COALESCE(SUM(CASE WHEN status <> 'success' THEN 1 ELSE 0 END), 0) AS failures, COALESCE(SUM(total_cost_rmb), 0) AS cost_rmb, COALESCE(SUM(total_tokens), 0) AS total_tokens, COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens, COALESCE(SUM(completion_tokens), 0) AS output_tokens, COALESCE(SUM(image_count), 0) AS image_count").Scan(&out)
+	return gin.H{"requests": out.Requests, "failures": out.Failures, "cost_rmb": out.CostRMB, "total_tokens": out.TotalTokens, "prompt_tokens": out.PromptTokens, "completion_tokens": out.OutputTokens, "image_count": out.ImageCount}
+}
+
+func (h *AdminHandler) usageGrouped(c *gin.Context, column string, limit int, extraWhere string, args ...any) []gin.H {
+	if column != "service" && column != "provider" && column != "status" {
+		return []gin.H{}
+	}
+	query := h.usageQuery(c)
+	if extraWhere != "" {
+		query = query.Where(extraWhere, args...)
+	}
+	items := []gin.H{}
+	rows, err := query.Select("COALESCE(" + column + ", '') AS name, COUNT(*) AS requests, COALESCE(SUM(total_cost_rmb), 0) AS cost_rmb, COALESCE(SUM(total_tokens), 0) AS tokens, COALESCE(SUM(image_count), 0) AS image_count").Group(column).Order("cost_rmb DESC").Limit(limit).Rows()
+	if err != nil {
+		return items
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		var requests, tokens, images int64
+		var cost float64
+		if err := rows.Scan(&name, &requests, &cost, &tokens, &images); err == nil {
+			items = append(items, gin.H{"name": name, "requests": requests, "cost_rmb": cost, "tokens": tokens, "image_count": images})
+		}
+	}
+	return items
+}
+
+func (h *AdminHandler) usageModelRows(c *gin.Context, limit int, extraWhereAndArgs ...any) []gin.H {
+	query := h.usageQuery(c)
+	if len(extraWhereAndArgs) > 0 {
+		where, _ := extraWhereAndArgs[0].(string)
+		if where != "" {
+			query = query.Where(where, extraWhereAndArgs[1:]...)
+		}
+	}
+	items := []gin.H{}
+	rows, err := query.Select("COALESCE(service, '') AS service, COALESCE(provider, '') AS provider, COALESCE(model, '') AS model, COUNT(*) AS requests, COALESCE(SUM(total_cost_rmb), 0) AS cost_rmb, COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens, COALESCE(SUM(completion_tokens), 0) AS completion_tokens, COALESCE(SUM(total_tokens), 0) AS total_tokens, COALESCE(SUM(image_count), 0) AS image_count").Group("service, provider, model").Order("cost_rmb DESC").Limit(limit).Rows()
+	if err != nil {
+		return items
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var service, provider, model string
+		var requests, prompt, completion, tokens, images int64
+		var cost float64
+		if err := rows.Scan(&service, &provider, &model, &requests, &cost, &prompt, &completion, &tokens, &images); err == nil {
+			items = append(items, gin.H{"service": service, "provider": provider, "model": model, "requests": requests, "cost_rmb": cost, "prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": tokens, "image_count": images})
+		}
+	}
+	return items
+}
+
+func (h *AdminHandler) usageConversationRows(c *gin.Context, limit int, extraWhere string, argsAndOffset ...any) []gin.H {
+	offset := 0
+	args := argsAndOffset
+	if len(argsAndOffset) > 0 {
+		if last, ok := argsAndOffset[len(argsAndOffset)-1].(int); ok && extraWhere == "" {
+			offset = last
+			args = argsAndOffset[:len(argsAndOffset)-1]
+		}
+	}
+	query := h.usageQuery(c).Where("conversation_id > 0")
+	if extraWhere != "" {
+		query = query.Where(extraWhere, args...)
+	}
+	items := []gin.H{}
+	rows, err := query.Select("api_usage_logs.conversation_id, COALESCE(conversations.title, '') AS title, api_usage_logs.user_id, COALESCE(users.email, '') AS email, COUNT(*) AS requests, COALESCE(SUM(api_usage_logs.total_cost_rmb), 0) AS cost_rmb, COALESCE(SUM(api_usage_logs.total_tokens), 0) AS total_tokens, MAX(api_usage_logs.created_at) AS last_used_at").Joins("LEFT JOIN conversations ON conversations.id = api_usage_logs.conversation_id").Joins("LEFT JOIN users ON users.id = api_usage_logs.user_id").Group("api_usage_logs.conversation_id, conversations.title, api_usage_logs.user_id, users.email").Order("cost_rmb DESC").Limit(limit).Offset(offset).Rows()
+	if err != nil {
+		return items
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var conversationID, userID uint
+		var title, email string
+		var requests, tokens int64
+		var cost float64
+		var lastUsed time.Time
+		if err := rows.Scan(&conversationID, &title, &userID, &email, &requests, &cost, &tokens, &lastUsed); err == nil {
+			items = append(items, gin.H{"conversation_id": conversationID, "title": title, "user_id": userID, "email": email, "requests": requests, "cost_rmb": cost, "total_tokens": tokens, "last_used_at": lastUsed, "models": h.usageModelRows(c, 8, "conversation_id = ?", conversationID)})
+		}
+	}
+	return items
 }
 
 func (h *AdminHandler) topUsageModels(start time.Time, limit int) []gin.H {

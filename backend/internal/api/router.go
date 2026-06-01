@@ -168,6 +168,11 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			admin.POST("/users/:id/credits/adjust", adminHandler.AdjustCredits)
 			admin.GET("/usage/summary", adminHandler.UsageSummary)
 			admin.GET("/usage/logs", adminHandler.UsageLogs)
+			admin.GET("/usage/users", adminHandler.UsageUsers)
+			admin.GET("/usage/users/:id", adminHandler.UsageUserDetail)
+			admin.GET("/usage/models", adminHandler.UsageModels)
+			admin.GET("/usage/conversations", adminHandler.UsageConversations)
+			admin.GET("/usage/conversations/:id", adminHandler.UsageConversationDetail)
 			admin.GET("/models", adminHandler.Models)
 			admin.GET("/tasks", adminHandler.Tasks)
 		}

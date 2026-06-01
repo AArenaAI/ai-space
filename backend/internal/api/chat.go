@@ -1079,13 +1079,8 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 			}
 		}
 
-		if h.usageService != nil && usage != nil {
-			if err := h.usageService.RecordChatUsageWithResourceID(userID, guestID, resp.Provider, resp.Model, resp.ModelType, conversationID, usage); err != nil {
-				fmt.Printf("[Chat] 记录 usage 失败: %v\n", err)
-			}
-		}
-
-		// 非流式响应也保存 assistant 消息
+		// 非流式响应也保存 assistant 消息，并在拿到 message_id 后记录精确 usage。
+		var recordedUsage bool
 		if content, ok := rawResp["choices"]; ok {
 			if choices, ok := content.([]interface{}); ok && len(choices) > 0 {
 				if choice, ok := choices[0].(map[string]interface{}); ok {
@@ -1108,10 +1103,33 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 								}
 							}
 							h.db.Create(&assistantMessage)
+							if h.usageService != nil && usage != nil {
+								if err := h.usageService.RecordChatUsageWithContext(userID, resp.Provider, resp.Model, resp.ModelType, services.UsageContext{
+									GuestID:        guestID,
+									ResourceType:   "message",
+									ResourceID:     assistantMessage.ID,
+									ConversationID: conversationID,
+									MessageID:      assistantMessage.ID,
+								}, usage); err != nil {
+									fmt.Printf("[Chat] 记录 usage 失败: %v\n", err)
+								}
+								recordedUsage = true
+							}
 							h.touchConversation(conversationID)
 						}
 					}
 				}
+			}
+		}
+
+		if !recordedUsage && h.usageService != nil && usage != nil {
+			if err := h.usageService.RecordChatUsageWithContext(userID, resp.Provider, resp.Model, resp.ModelType, services.UsageContext{
+				GuestID:        guestID,
+				ResourceType:   "conversation",
+				ResourceID:     conversationID,
+				ConversationID: conversationID,
+			}, usage); err != nil {
+				fmt.Printf("[Chat] 记录 usage 失败: %v\n", err)
 			}
 		}
 
@@ -1373,7 +1391,14 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 		h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", req.Task.ID).Updates(taskUpdates)
 
 		if h.usageService != nil && usage != nil {
-			if err := h.usageService.RecordChatUsageWithResourceID(req.UserID, req.GuestID, resp.Provider, resp.Model, resp.ModelType, req.ConversationID, usage); err != nil {
+			if err := h.usageService.RecordChatUsageWithContext(req.UserID, resp.Provider, resp.Model, resp.ModelType, services.UsageContext{
+				GuestID:        req.GuestID,
+				ResourceType:   "message",
+				ResourceID:     req.AssistantMessageID,
+				ConversationID: req.ConversationID,
+				MessageID:      req.AssistantMessageID,
+				TaskID:         req.Task.ID,
+			}, usage); err != nil {
 				fmt.Printf("[GenerationRunner] 记录 usage 失败: %v\n", err)
 			}
 		}

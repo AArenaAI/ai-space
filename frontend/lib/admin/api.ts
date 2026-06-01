@@ -2,8 +2,13 @@ import type {
   AdminModelsResponse,
   AdminOverview,
   AdminTasksResponse,
+  AdminUsageConversationDetail,
+  AdminUsageConversationsResponse,
   AdminUsageLogsResponse,
+  AdminUsageModelsResponse,
   AdminUsageSummary,
+  AdminUsageUserDetail,
+  AdminUsageUsersResponse,
   AdminUser,
   AdminUsersResponse,
 } from "./types";
@@ -39,10 +44,17 @@ export async function adminFetch<T>(path: string, options: RequestInit = {}): Pr
       ...options.headers,
     },
   });
-  if (!response.ok) {
-    throw new AdminApiError(await readErrorMessage(response), response.status);
-  }
+  if (!response.ok) throw new AdminApiError(await readErrorMessage(response), response.status);
   return response.json() as Promise<T>;
+}
+
+function qs(params: Record<string, string | number | undefined>) {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== "") search.set(key, String(value));
+  });
+  const query = search.toString();
+  return query ? `?${query}` : "";
 }
 
 export function getAdminMe() {
@@ -54,34 +66,39 @@ export function getAdminOverview() {
 }
 
 export function getAdminUsers(params: { page?: number; pageSize?: number; q?: string } = {}) {
-  const search = new URLSearchParams();
-  if (params.page) search.set("page", String(params.page));
-  if (params.pageSize) search.set("page_size", String(params.pageSize));
-  if (params.q) search.set("q", params.q);
-  const query = search.toString();
-  return adminFetch<AdminUsersResponse>(`/users${query ? `?${query}` : ""}`);
+  return adminFetch<AdminUsersResponse>(`/users${qs({ page: params.page, page_size: params.pageSize, q: params.q })}`);
 }
 
 export function updateAdminUser(id: number, patch: Partial<Pick<AdminUser, "role" | "plan_tier" | "basic_credits" | "advanced_credits" | "elite_credits" | "name">>) {
-  return adminFetch<{ user: AdminUser }>(`/users/${id}`, {
-    method: "PATCH",
-    body: JSON.stringify(patch),
-  });
+  return adminFetch<{ user: AdminUser }>(`/users/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
 export function getAdminUsageSummary(range = "7d") {
-  return adminFetch<AdminUsageSummary>(`/usage/summary?range=${encodeURIComponent(range)}`);
+  return adminFetch<AdminUsageSummary>(`/usage/summary${qs({ range })}`);
 }
 
-export function getAdminUsageLogs(params: { page?: number; pageSize?: number; status?: string; provider?: string; service?: string } = {}) {
-  const search = new URLSearchParams();
-  if (params.page) search.set("page", String(params.page));
-  if (params.pageSize) search.set("page_size", String(params.pageSize));
-  if (params.status) search.set("status", params.status);
-  if (params.provider) search.set("provider", params.provider);
-  if (params.service) search.set("service", params.service);
-  const query = search.toString();
-  return adminFetch<AdminUsageLogsResponse>(`/usage/logs${query ? `?${query}` : ""}`);
+export function getAdminUsageLogs(params: { page?: number; pageSize?: number; range?: string; status?: string; provider?: string; service?: string; model?: string; userId?: number; conversationId?: number } = {}) {
+  return adminFetch<AdminUsageLogsResponse>(`/usage/logs${qs({ page: params.page, page_size: params.pageSize, range: params.range, status: params.status, provider: params.provider, service: params.service, model: params.model, user_id: params.userId, conversation_id: params.conversationId })}`);
+}
+
+export function getAdminUsageUsers(params: { page?: number; pageSize?: number; range?: string; service?: string; provider?: string; model?: string } = {}) {
+  return adminFetch<AdminUsageUsersResponse>(`/usage/users${qs({ page: params.page, page_size: params.pageSize, range: params.range, service: params.service, provider: params.provider, model: params.model })}`);
+}
+
+export function getAdminUsageUserDetail(id: number, params: { range?: string } = {}) {
+  return adminFetch<AdminUsageUserDetail>(`/usage/users/${id}${qs({ range: params.range })}`);
+}
+
+export function getAdminUsageModels(params: { range?: string; service?: string; provider?: string; userId?: number; conversationId?: number; limit?: number } = {}) {
+  return adminFetch<AdminUsageModelsResponse>(`/usage/models${qs({ range: params.range, service: params.service, provider: params.provider, user_id: params.userId, conversation_id: params.conversationId, limit: params.limit })}`);
+}
+
+export function getAdminUsageConversations(params: { page?: number; pageSize?: number; range?: string; userId?: number; service?: string; provider?: string; model?: string } = {}) {
+  return adminFetch<AdminUsageConversationsResponse>(`/usage/conversations${qs({ page: params.page, page_size: params.pageSize, range: params.range, user_id: params.userId, service: params.service, provider: params.provider, model: params.model })}`);
+}
+
+export function getAdminUsageConversationDetail(id: number, params: { range?: string } = {}) {
+  return adminFetch<AdminUsageConversationDetail>(`/usage/conversations/${id}${qs({ range: params.range })}`);
 }
 
 export function getAdminModels() {
@@ -89,12 +106,5 @@ export function getAdminModels() {
 }
 
 export function getAdminTasks(params: { page?: number; pageSize?: number; status?: string; provider?: string; model?: string } = {}) {
-  const search = new URLSearchParams();
-  if (params.page) search.set("page", String(params.page));
-  if (params.pageSize) search.set("page_size", String(params.pageSize));
-  if (params.status) search.set("status", params.status);
-  if (params.provider) search.set("provider", params.provider);
-  if (params.model) search.set("model", params.model);
-  const query = search.toString();
-  return adminFetch<AdminTasksResponse>(`/tasks${query ? `?${query}` : ""}`);
+  return adminFetch<AdminTasksResponse>(`/tasks${qs({ page: params.page, page_size: params.pageSize, status: params.status, provider: params.provider, model: params.model })}`);
 }

@@ -14,6 +14,20 @@ type UsageService struct {
 	cfg *config.Config
 }
 
+// UsageContext carries optional business dimensions for precise admin usage drill-downs.
+type UsageContext struct {
+	GuestID        string
+	ResourceType   string
+	ResourceID     uint
+	ConversationID uint
+	MessageID      uint
+	TaskID         uint
+	WorkspaceID    uint
+	NotebookID     uint
+	RequestID      string
+	LatencyMs      int
+}
+
 func NewUsageService(cfg *config.Config) *UsageService {
 	return &UsageService{cfg: cfg}
 }
@@ -47,28 +61,38 @@ func (s *UsageService) RecordChatUsage(userID uint, provider, model, modelType s
 	}
 
 	return s.RecordUsage(&models.APIUsageLog{
-		UserID:           userID,
-		Service:          "chat",
-		Provider:         provider,
-		Model:            model,
-		ModelType:        modelType,
-		ResourceType:     "message",
-		PromptTokens:     usage.PromptTokens,
-		CompletionTokens: usage.CompletionTokens,
-		TotalTokens:      usage.TotalTokens,
-		InputCostRMB:     cost.InputCost,
-		OutputCostRMB:    cost.OutputCost,
-		TotalCostRMB:     cost.TotalCost,
-		Currency:         "RMB",
-		Status:           status,
-		Estimated:        usage.Estimated,
-		RawUsageJSON:     rawJSON,
-		CreatedAt:        time.Now(),
+		UserID:             userID,
+		Service:            "chat",
+		Provider:           provider,
+		Model:              model,
+		ModelType:          modelType,
+		ResourceType:       "message",
+		PromptTokens:       usage.PromptTokens,
+		CompletionTokens:   usage.CompletionTokens,
+		TotalTokens:        usage.TotalTokens,
+		InputCostRMB:       cost.InputCost,
+		OutputCostRMB:      cost.OutputCost,
+		TotalCostRMB:       cost.TotalCost,
+		Currency:           "RMB",
+		Status:             status,
+		PricingUnit:        "token_1k",
+		UnitCount:          float64(usage.TotalTokens) / 1000.0,
+		InputUnitPriceRMB:  inputPrice,
+		OutputUnitPriceRMB: outputPrice,
+		Estimated:          usage.Estimated,
+		RawUsageJSON:       rawJSON,
+		CreatedAt:          time.Now(),
 	})
 }
 
-// RecordChatUsageWithResourceID 记录 Chat 用量（带 resource_id）
+// RecordChatUsageWithResourceID 记录 Chat 用量（带 resource_id）。旧调用中 resourceID 历史上多为 conversation_id。
 func (s *UsageService) RecordChatUsageWithResourceID(userID uint, guestID, provider, model, modelType string, resourceID uint, usage *TokenUsage) error {
+	ctx := UsageContext{GuestID: guestID, ResourceType: "message", ResourceID: resourceID, ConversationID: resourceID, MessageID: resourceID}
+	return s.RecordChatUsageWithContext(userID, provider, model, modelType, ctx, usage)
+}
+
+// RecordChatUsageWithContext 记录 Chat 用量（带对话/消息/任务上下文）。
+func (s *UsageService) RecordChatUsageWithContext(userID uint, provider, model, modelType string, ctx UsageContext, usage *TokenUsage) error {
 	if usage == nil {
 		return nil
 	}
@@ -87,26 +111,49 @@ func (s *UsageService) RecordChatUsageWithResourceID(userID uint, guestID, provi
 		rawJSON = string(b)
 	}
 
+	resourceType := ctx.ResourceType
+	if resourceType == "" {
+		resourceType = "message"
+	}
+	resourceID := ctx.ResourceID
+	if resourceID == 0 {
+		resourceID = ctx.MessageID
+	}
+	if ctx.MessageID == 0 {
+		ctx.MessageID = resourceID
+	}
+
 	return s.RecordUsage(&models.APIUsageLog{
-		UserID:           userID,
-		GuestID:          guestID,
-		Service:          "chat",
-		Provider:         provider,
-		Model:            model,
-		ModelType:        modelType,
-		ResourceType:     "message",
-		ResourceID:       resourceID,
-		PromptTokens:     usage.PromptTokens,
-		CompletionTokens: usage.CompletionTokens,
-		TotalTokens:      usage.TotalTokens,
-		InputCostRMB:     cost.InputCost,
-		OutputCostRMB:    cost.OutputCost,
-		TotalCostRMB:     cost.TotalCost,
-		Currency:         "RMB",
-		Status:           status,
-		Estimated:        usage.Estimated,
-		RawUsageJSON:     rawJSON,
-		CreatedAt:        time.Now(),
+		UserID:             userID,
+		GuestID:            ctx.GuestID,
+		Service:            "chat",
+		Provider:           provider,
+		Model:              model,
+		ModelType:          modelType,
+		ResourceType:       resourceType,
+		ResourceID:         resourceID,
+		ConversationID:     ctx.ConversationID,
+		MessageID:          ctx.MessageID,
+		TaskID:             ctx.TaskID,
+		WorkspaceID:        ctx.WorkspaceID,
+		NotebookID:         ctx.NotebookID,
+		PromptTokens:       usage.PromptTokens,
+		CompletionTokens:   usage.CompletionTokens,
+		TotalTokens:        usage.TotalTokens,
+		InputCostRMB:       cost.InputCost,
+		OutputCostRMB:      cost.OutputCost,
+		TotalCostRMB:       cost.TotalCost,
+		Currency:           "RMB",
+		Status:             status,
+		PricingUnit:        "token_1k",
+		UnitCount:          float64(usage.TotalTokens) / 1000.0,
+		InputUnitPriceRMB:  inputPrice,
+		OutputUnitPriceRMB: outputPrice,
+		Estimated:          usage.Estimated,
+		RawUsageJSON:       rawJSON,
+		LatencyMs:          ctx.LatencyMs,
+		RequestID:          ctx.RequestID,
+		CreatedAt:          time.Now(),
 	})
 }
 
@@ -196,25 +243,30 @@ func (s *UsageService) RecordImageUsage(userID uint, model string, imageCount in
 	}
 
 	return s.RecordUsage(&models.APIUsageLog{
-		UserID:         userID,
-		Service:        "image_generation",
-		Provider:       "openai",
-		Model:          model,
-		ModelType:      "gpt",
-		ResourceType:   "image_generation",
-		PromptTokens:   promptTokens,
-		CompletionTokens: completionTokens,
-		TotalTokens:    promptTokens + completionTokens,
-		InputCostRMB:   inputCost,
-		OutputCostRMB:  outputCost,
-		TotalCostRMB:   totalCost,
-		Currency:       "RMB",
-		Status:         status,
-		ImageCount:     imageCount,
-		ImageUnitPrice: unitPrice,
-		Estimated:      estimated,
-		RawUsageJSON:   rawJSON,
-		CreatedAt:      time.Now(),
+		UserID:             userID,
+		Service:            "image_generation",
+		Provider:           "openai",
+		Model:              model,
+		ModelType:          "gpt",
+		ResourceType:       "image_generation",
+		PromptTokens:       promptTokens,
+		CompletionTokens:   completionTokens,
+		TotalTokens:        promptTokens + completionTokens,
+		InputCostRMB:       inputCost,
+		OutputCostRMB:      outputCost,
+		TotalCostRMB:       totalCost,
+		Currency:           "RMB",
+		Status:             status,
+		ImageCount:         imageCount,
+		ImageUnitPrice:     unitPrice,
+		ImageUnitPriceRMB:  unitPrice,
+		PricingUnit:        "image",
+		UnitCount:          float64(imageCount),
+		InputUnitPriceRMB:  inputPrice,
+		OutputUnitPriceRMB: outputPrice,
+		Estimated:          estimated,
+		RawUsageJSON:       rawJSON,
+		CreatedAt:          time.Now(),
 	})
 }
 
@@ -240,24 +292,28 @@ func (s *UsageService) RecordPPTUsage(userID uint, model string, resourceID uint
 	}
 
 	return s.RecordUsage(&models.APIUsageLog{
-		UserID:           userID,
-		Service:          "document_generation",
-		Provider:         "openai",
-		Model:            model,
-		ModelType:        "gpt",
-		ResourceType:     "ppt_generation",
-		ResourceID:       resourceID,
-		PromptTokens:     usage.PromptTokens,
-		CompletionTokens: usage.CompletionTokens,
-		TotalTokens:      usage.TotalTokens,
-		InputCostRMB:     cost.InputCost,
-		OutputCostRMB:    cost.OutputCost,
-		TotalCostRMB:     cost.TotalCost,
-		Currency:         "RMB",
-		Status:           status,
-		Estimated:        usage.Estimated,
-		RawUsageJSON:     rawJSON,
-		CreatedAt:        time.Now(),
+		UserID:             userID,
+		Service:            "document_generation",
+		Provider:           "openai",
+		Model:              model,
+		ModelType:          "gpt",
+		ResourceType:       "ppt_generation",
+		ResourceID:         resourceID,
+		PromptTokens:       usage.PromptTokens,
+		CompletionTokens:   usage.CompletionTokens,
+		TotalTokens:        usage.TotalTokens,
+		InputCostRMB:       cost.InputCost,
+		OutputCostRMB:      cost.OutputCost,
+		TotalCostRMB:       cost.TotalCost,
+		Currency:           "RMB",
+		Status:             status,
+		PricingUnit:        "token_1k",
+		UnitCount:          float64(usage.TotalTokens) / 1000.0,
+		InputUnitPriceRMB:  inputPrice,
+		OutputUnitPriceRMB: outputPrice,
+		Estimated:          usage.Estimated,
+		RawUsageJSON:       rawJSON,
+		CreatedAt:          time.Now(),
 	})
 }
 
@@ -283,25 +339,29 @@ func (s *UsageService) RecordVisionUsage(userID uint, guestID, model string, res
 	}
 
 	return s.RecordUsage(&models.APIUsageLog{
-		UserID:           userID,
-		GuestID:          guestID,
-		Service:          "vision",
-		Provider:         "openai",
-		Model:            model,
-		ModelType:        "gpt",
-		ResourceType:     "file",
-		ResourceID:       resourceID,
-		PromptTokens:     usage.PromptTokens,
-		CompletionTokens: usage.CompletionTokens,
-		TotalTokens:      usage.TotalTokens,
-		InputCostRMB:     cost.InputCost,
-		OutputCostRMB:    cost.OutputCost,
-		TotalCostRMB:     cost.TotalCost,
-		Currency:         "RMB",
-		Status:           status,
-		Estimated:        usage.Estimated,
-		RawUsageJSON:     rawJSON,
-		CreatedAt:        time.Now(),
+		UserID:             userID,
+		GuestID:            guestID,
+		Service:            "vision",
+		Provider:           "openai",
+		Model:              model,
+		ModelType:          "gpt",
+		ResourceType:       "file",
+		ResourceID:         resourceID,
+		PromptTokens:       usage.PromptTokens,
+		CompletionTokens:   usage.CompletionTokens,
+		TotalTokens:        usage.TotalTokens,
+		InputCostRMB:       cost.InputCost,
+		OutputCostRMB:      cost.OutputCost,
+		TotalCostRMB:       cost.TotalCost,
+		Currency:           "RMB",
+		Status:             status,
+		PricingUnit:        "token_1k",
+		UnitCount:          float64(usage.TotalTokens) / 1000.0,
+		InputUnitPriceRMB:  inputPrice,
+		OutputUnitPriceRMB: outputPrice,
+		Estimated:          usage.Estimated,
+		RawUsageJSON:       rawJSON,
+		CreatedAt:          time.Now(),
 	})
 }
 
@@ -312,22 +372,25 @@ func (s *UsageService) RecordEmbeddingUsage(userID uint, model string, resourceI
 
 	totalTokens := inputTokens
 	return s.RecordUsage(&models.APIUsageLog{
-		UserID:         userID,
-		Service:        "embedding",
-		Provider:       "openai",
-		Model:          model,
-		ModelType:      "embedding",
-		ResourceType:   "embedding_job",
-		ResourceID:     resourceID,
-		PromptTokens:   inputTokens,
-		CompletionTokens: 0,
-		TotalTokens:    totalTokens,
-		InputCostRMB:   cost,
-		OutputCostRMB:  0,
-		TotalCostRMB:   cost,
-		Currency:       "RMB",
-		Status:         "success",
-		CreatedAt:      time.Now(),
+		UserID:            userID,
+		Service:           "embedding",
+		Provider:          "openai",
+		Model:             model,
+		ModelType:         "embedding",
+		ResourceType:      "embedding_job",
+		ResourceID:        resourceID,
+		PromptTokens:      inputTokens,
+		CompletionTokens:  0,
+		TotalTokens:       totalTokens,
+		InputCostRMB:      cost,
+		OutputCostRMB:     0,
+		TotalCostRMB:      cost,
+		Currency:          "RMB",
+		Status:            "success",
+		PricingUnit:       "token_1k",
+		UnitCount:         float64(totalTokens) / 1000.0,
+		InputUnitPriceRMB: inputPrice,
+		CreatedAt:         time.Now(),
 	})
 }
 
@@ -404,7 +467,7 @@ func ParseOpenAIUsage(raw map[string]any) *TokenUsage {
 	if raw == nil {
 		return nil
 	}
-	
+
 	promptTokens := 0
 	completionTokens := 0
 	totalTokens := 0
