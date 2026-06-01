@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useMemo, memo, type UIEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, memo, type UIEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Bot, ChevronDown as ChevronDownIcon, Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/lib/chatTypes";
@@ -247,6 +247,7 @@ function MessageList({
   const stickToBottomRef = useRef(true);
   const lastScrollTopRef = useRef(0);
   const loadingMoreTriggeredRef = useRef(false);
+  const loadMoreAnchorRef = useRef<{ messageId: string; top: number; messageCount: number } | null>(null);
   const programmaticScrollUntilRef = useRef(0);
   const userScrollOverrideUntilRef = useRef(0);
   const bottomLockRafRef = useRef<number>(0);
@@ -257,6 +258,9 @@ function MessageList({
   const userBrowsingTimerRef = useRef<number>(0);
   const [scrollProgress, setScrollProgress] = useState({ ratio: 1, canScroll: false });
   const [, setScrollProgressDragging] = useState(false);
+  const firstItemIndexRef = useRef(100_000);
+  const previousVisibleMessagesRef = useRef<Message[]>([]);
+  const historyPrependUntilRef = useRef(0);
 
   const stopBottomLockForUserBrowse = useCallback((duration = 2500) => {
     stickToBottomRef.current = false;
@@ -361,11 +365,7 @@ function MessageList({
     lastScrollTopRef.current = el.scrollTop;
     updateScrollProgressFromElement(el);
 
-    if (el.scrollTop < 80 && !isLoadingMore && hasMoreMessages && !loadingMoreTriggeredRef.current) {
-      loadingMoreTriggeredRef.current = true;
-      onLoadMore?.();
-    }
-  }, [hasMoreMessages, isLoadingMore, onLoadMore, stopBottomLockForUserBrowse, updateScrollProgressFromElement]);
+  }, [stopBottomLockForUserBrowse, updateScrollProgressFromElement]);
 
   const markUserBrowsing = useCallback((duration = 2500) => {
     setUserBrowsing(true);
@@ -392,11 +392,51 @@ function MessageList({
     }
   }, [markUserBrowsing, stopBottomLockForUserBrowse]);
 
+  useLayoutEffect(() => {
+    const anchor = loadMoreAnchorRef.current;
+    const el = scrollRef.current;
+    if (!anchor || !el || messages.length <= anchor.messageCount) return;
+
+    const restoreAnchor = () => {
+      const row = el.querySelector<HTMLElement>(`[data-message-id="${anchor.messageId}"]`);
+      if (!row) return false;
+      const delta = row.getBoundingClientRect().top - anchor.top;
+      if (Math.abs(delta) > 1) {
+        programmaticScrollUntilRef.current = Date.now() + 420;
+        stopBottomLockForUserBrowse(1400);
+        el.scrollTop += delta;
+        lastScrollTopRef.current = el.scrollTop;
+        updateScrollProgressFromElement(el);
+      }
+      return true;
+    };
+
+    if (restoreAnchor()) {
+      loadMoreAnchorRef.current = null;
+      window.requestAnimationFrame(() => restoreAnchor());
+      window.setTimeout(restoreAnchor, 80);
+    } else {
+      const anchorIndex = messages.findIndex((message) => message.id === anchor.messageId);
+      if (anchorIndex >= 0) {
+        programmaticScrollUntilRef.current = Date.now() + 420;
+        stopBottomLockForUserBrowse(1400);
+        virtuosoRef.current?.scrollToIndex({ index: anchorIndex, align: "start", behavior: "auto" });
+      }
+      window.requestAnimationFrame(() => {
+        restoreAnchor();
+        loadMoreAnchorRef.current = null;
+      });
+    }
+  }, [messages, stopBottomLockForUserBrowse, updateScrollProgressFromElement]);
+
   useEffect(() => {
     if (!isLoadingMore) {
       loadingMoreTriggeredRef.current = false;
+      if (loadMoreAnchorRef.current && messages.length <= loadMoreAnchorRef.current.messageCount) {
+        loadMoreAnchorRef.current = null;
+      }
     }
-  }, [isLoadingMore]);
+  }, [isLoadingMore, messages.length]);
 
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [selectionMode, setSelectionMode] = useState<SelectionMode | null>(null);
@@ -501,6 +541,21 @@ function MessageList({
     });
   }, [messages, groupByMessageId, groupViews]);
 
+  const previousVisibleMessages = previousVisibleMessagesRef.current;
+  if (previousVisibleMessages.length > 0 && visibleMessages.length > previousVisibleMessages.length) {
+    const firstPreviousVisibleId = previousVisibleMessages[0]?.id;
+    const firstPreviousVisibleIndex = firstPreviousVisibleId
+      ? visibleMessages.findIndex((message) => message.id === firstPreviousVisibleId)
+      : -1;
+    if (firstPreviousVisibleIndex > 0) {
+      firstItemIndexRef.current -= firstPreviousVisibleIndex;
+      historyPrependUntilRef.current = Date.now() + 1600;
+      stopBottomLockForUserBrowse(1600);
+    }
+  }
+  previousVisibleMessagesRef.current = visibleMessages;
+  const firstItemIndex = firstItemIndexRef.current;
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -573,7 +628,7 @@ function MessageList({
 
   const openedConversationBottomKeyRef = useRef("");
   useEffect(() => {
-    if (targetMessageId || isLoadingHistory || messages.length === 0) return;
+    if (targetMessageId || isLoadingHistory || messages.length === 0 || Date.now() < historyPrependUntilRef.current) return;
     const key = `${conversationId || "new"}:${messages[0]?.id || ""}:${messages[messages.length - 1]?.id || ""}`;
     if (openedConversationBottomKeyRef.current === key) return;
     openedConversationBottomKeyRef.current = key;
@@ -627,7 +682,7 @@ function MessageList({
   // 用户发送消息时强制 smooth 滚到底部（排除初始加载）
   const prevLengthRef = useRef(0);
   useEffect(() => {
-    if (messages.length > prevLengthRef.current && prevLengthRef.current > 0) {
+    if (messages.length > prevLengthRef.current && prevLengthRef.current > 0 && Date.now() >= historyPrependUntilRef.current) {
       const newMessages = messages.slice(prevLengthRef.current);
       if (newMessages.some((m) => m.role === "user")) {
         stickToBottomRef.current = true;
@@ -1204,6 +1259,7 @@ function MessageList({
       <Virtuoso
         style={{ height: "100%", overflowAnchor: userBrowsing ? "none" : "auto" }}
         data={visibleMessages}
+        firstItemIndex={firstItemIndex}
         ref={virtuosoRef}
         scrollerRef={handleVirtuosoScrollerRef}
         followOutput={false}
@@ -1215,6 +1271,23 @@ function MessageList({
         }}
         computeItemKey={(_, msg) => msg.id}
         onScroll={handleVirtuosoScroll}
+        startReached={() => {
+          const el = scrollRef.current;
+          if (!el || isLoadingMore || !hasMoreMessages || loadingMoreTriggeredRef.current) return;
+          loadingMoreTriggeredRef.current = true;
+          const firstVisibleRow = Array.from(el.querySelectorAll<HTMLElement>('[data-chat-message-row="true"]'))
+            .find((row) => row.getBoundingClientRect().bottom >= el.getBoundingClientRect().top + 8);
+          const messageId = firstVisibleRow?.dataset.messageId;
+          if (messageId && firstVisibleRow) {
+            loadMoreAnchorRef.current = {
+              messageId,
+              top: firstVisibleRow.getBoundingClientRect().top,
+              messageCount: messages.length,
+            };
+          }
+          stopBottomLockForUserBrowse(1800);
+          onLoadMore?.();
+        }}
         onWheel={(event) => handleUserScrollIntent(event.deltaY)}
         onTouchMove={() => stopBottomLockForUserBrowse(2500)}
         increaseViewportBy={{ top: 200, bottom: CHAT_BOTTOM_SPACER }}

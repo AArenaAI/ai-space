@@ -73,7 +73,8 @@
     "test:chat-text-selection-fixture": "node scripts/regression/chat-text-selection-fixture.cjs",
     "test:chat-user-content-fixture": "node scripts/regression/chat-user-content-fixture.cjs",
     "test:chat-scrollbar-fixture": "node scripts/regression/chat-scrollbar-fixture.cjs",
-    "test:chat-history-loading-fixture": "node scripts/regression/chat-history-loading-fixture.cjs"
+    "test:chat-history-loading-fixture": "node scripts/regression/chat-history-loading-fixture.cjs",
+    "test:chat-load-more-history-fixture": "node scripts/regression/chat-load-more-history-fixture.cjs"
   },
   "dependencies": {
     "@antv/g6": "^5.1.1",
