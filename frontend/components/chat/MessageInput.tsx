@@ -51,6 +51,15 @@ function isSupportedUploadFile(file: File) {
   return SUPPORTED_FILE_EXTENSIONS.has(getUploadFileExtension(file));
 }
 
+function isImageAttachment(file: AttachedFile) {
+  return file.type === "image" || file.type.startsWith("image/") || [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"].includes(getFileExtension(file.filename));
+}
+
+function getFilePreviewUrl(file: AttachedFile) {
+  if (!file.public_id) return "";
+  return `${process.env.NEXT_PUBLIC_API_URL || ""}/api/files/${file.public_id}/view`;
+}
+
 export type ReasoningEffort = "light" | "standard" | "extended" | "heavy" | "high" | "max";
 export type ReasoningMode = "fast" | "think" | "expert";
 
@@ -157,8 +166,8 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
   useEffect(() => {
     onRecommendationContextChange?.({
       searchEnabled: effectiveSearchEnabled,
-      hasImageAttachment: attachedFiles.some((file) => file.type.startsWith("image/")),
-      hasDocumentAttachment: attachedFiles.some((file) => !file.type.startsWith("image/")),
+      hasImageAttachment: attachedFiles.some((file) => isImageAttachment(file)),
+      hasDocumentAttachment: attachedFiles.some((file) => !isImageAttachment(file)),
       inputText: content,
     });
   }, [attachedFiles, content, effectiveSearchEnabled, onRecommendationContextChange]);
@@ -695,17 +704,48 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                   };
                   const cfg = statusConfig[status] || statusConfig.pending;
                   const isEmptyContent = status === "done" && !file.content?.trim();
+                  const title = file.error_message
+                    ? getErrorMessage(file.error_message, { module: "file", fallbackMessage: t("chat.fileParseFailedRetry") })
+                    : isEmptyContent
+                    ? t("chat.fileEmptyContent")
+                    : cfg.label;
+                  const isImage = isImageAttachment(file);
+                  const previewUrl = getFilePreviewUrl(file);
+
+                  if (isImage && previewUrl) {
+                    return (
+                      <div
+                        key={idx}
+                        className="group relative h-24 w-24 overflow-hidden rounded-xl border border-surface-border/50 bg-surface-elevated shadow-sm transition-all"
+                        title={title}
+                      >
+                        <img src={previewUrl} alt={file.filename} className="h-full w-full object-cover" draggable={false} />
+                        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/65 via-black/25 to-transparent px-2 pb-1.5 pt-5">
+                          <span className="block truncate text-[11px] font-medium text-white drop-shadow">{file.filename}</span>
+                        </div>
+                        {status !== "done" && (
+                          <div className="absolute left-1.5 top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-black/55 px-1.5 text-white shadow-sm backdrop-blur">
+                            {cfg.icon}
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => removeAttachedFile(idx)}
+                          className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white opacity-90 shadow-sm transition-colors hover:bg-black/75"
+                          aria-label={file.filename}
+                          title={file.filename}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    );
+                  }
+
                   return (
                     <div
                       key={idx}
                       className="flex items-center gap-2 rounded-full border border-surface-border/30 bg-surface-card px-3 py-1.5 text-[13px] transition-all"
-                      title={
-                        file.error_message
-                          ? getErrorMessage(file.error_message, { module: "file", fallbackMessage: t("chat.fileParseFailedRetry") })
-                          : isEmptyContent
-                          ? t("chat.fileEmptyContent")
-                          : cfg.label
-                      }
+                      title={title}
                     >
                       <div className="shrink-0">{cfg.icon}</div>
                       <span className={cn("max-w-[180px] truncate text-text-primary", status === "error" && "text-red-400")}>{file.filename}</span>
@@ -713,6 +753,8 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                         type="button"
                         onClick={() => removeAttachedFile(idx)}
                         className="flex items-center justify-center w-4 h-4 rounded-full hover:bg-black/5 transition-colors shrink-0 ml-0.5"
+                        aria-label={file.filename}
+                        title={file.filename}
                       >
                         <X className="w-3 h-3 text-text-tertiary" />
                       </button>
