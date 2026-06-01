@@ -16,6 +16,7 @@ type User struct {
 	AdvancedCredits int            `gorm:"default:0" json:"advanced_credits"`
 	EliteCredits    int            `gorm:"default:0" json:"elite_credits"`
 	PlanTier        string         `gorm:"default:'free'" json:"plan_tier"`
+	Role            string         `gorm:"default:'user';index" json:"role"`
 	CreditsResetAt  time.Time      `json:"credits_reset_at"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`

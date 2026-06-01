@@ -65,6 +65,9 @@ func InitDB(databaseURL string) (*gorm.DB, error) {
 	if err := db.Model(&User{}).Where("plan_tier IS NULL OR plan_tier = ''").Update("plan_tier", "free").Error; err != nil {
 		return nil, err
 	}
+	if err := db.Model(&User{}).Where("role IS NULL OR role = ''").Update("role", "user").Error; err != nil {
+		return nil, err
+	}
 
 	// 为旧文件补全 PublicID（一次性迁移）
 	if err := migrateFilePublicIDs(db); err != nil {

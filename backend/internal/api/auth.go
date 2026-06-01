@@ -104,6 +104,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 			"id":                   user.ID,
 			"email":                user.Email,
 			"name":                 user.Name,
+			"role":                 user.Role,
 			"basic_credits":        user.BasicCredits,
 			"advanced_credits":     user.AdvancedCredits,
 			"elite_credits":        user.EliteCredits,
@@ -151,6 +152,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 			"id":                   user.ID,
 			"email":                user.Email,
 			"name":                 user.Name,
+			"role":                 user.Role,
 			"basic_credits":        user.BasicCredits,
 			"advanced_credits":     user.AdvancedCredits,
 			"elite_credits":        user.EliteCredits,
@@ -159,24 +161,6 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		},
 		"token": token,
 	})
-}
-
-func (h *AuthHandler) GetUserCount(c *gin.Context) {
-	var count int64
-	if err := h.db.Model(&models.User{}).Count(&count).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询用户数量失败"})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"count": count})
-}
-
-func (h *AuthHandler) GetUsers(c *gin.Context) {
-	var users []models.User
-	if err := h.db.Select("id, email, name, created_at").Order("id ASC").Find(&users).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询用户列表失败"})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"users": users, "total": len(users)})
 }
 
 func (h *AuthHandler) UpdateProfile(c *gin.Context) {
@@ -231,6 +215,7 @@ func (h *AuthHandler) UpdateProfile(c *gin.Context) {
 		"id":                   user.ID,
 		"email":                user.Email,
 		"name":                 user.Name,
+		"role":                 user.Role,
 		"basic_credits":        user.BasicCredits,
 		"advanced_credits":     user.AdvancedCredits,
 		"elite_credits":        user.EliteCredits,
@@ -252,26 +237,66 @@ func (h *AuthHandler) DeleteAccount(c *gin.Context) {
 	}
 
 	if err := h.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("user_id = ?", userID).Delete(&models.MessageFile{}).Error; err != nil { return err }
-		if err := tx.Where("user_id = ?", userID).Delete(&models.ConversationFile{}).Error; err != nil { return err }
-		if err := tx.Where("user_id = ?", userID).Delete(&models.FileEmbeddingJob{}).Error; err != nil { return err }
-		if err := tx.Where("user_id = ?", userID).Delete(&models.FileEmbedding{}).Error; err != nil { return err }
-		if err := tx.Where("user_id = ?", userID).Delete(&models.FileChunk{}).Error; err != nil { return err }
-		if err := tx.Where("user_id = ?", userID).Delete(&models.File{}).Error; err != nil { return err }
-		if err := tx.Where("user_id = ?", userID).Delete(&models.Message{}).Error; err != nil { return err }
-		if err := tx.Where("user_id = ?", userID).Delete(&models.ConversationShare{}).Error; err != nil { return err }
-		if err := tx.Where("user_id = ?", userID).Delete(&models.Conversation{}).Error; err != nil { return err }
-		if err := tx.Where("user_id = ?", userID).Delete(&models.ImageChatMessage{}).Error; err != nil { return err }
-		if err := tx.Where("user_id = ?", userID).Delete(&models.ImageChat{}).Error; err != nil { return err }
-		if err := tx.Where("user_id = ?", userID).Delete(&models.PPTRevision{}).Error; err != nil { return err }
-		if err := tx.Where("user_id = ?", userID).Delete(&models.PPTSlide{}).Error; err != nil { return err }
-		if err := tx.Where("user_id = ?", userID).Delete(&models.PPTGeneration{}).Error; err != nil { return err }
-		if err := tx.Where("user_id = ?", userID).Delete(&models.CompareRecord{}).Error; err != nil { return err }
-		if err := tx.Where("user_id = ?", userID).Delete(&models.UserSkill{}).Error; err != nil { return err }
-		if err := tx.Where("user_id = ?", userID).Delete(&models.Workspace{}).Error; err != nil { return err }
-		if err := tx.Where("user_id = ?", userID).Delete(&models.APIUsageLog{}).Error; err != nil { return err }
-		if err := tx.Where("user_id = ?", userID).Delete(&models.AIBackgroundTask{}).Error; err != nil { return err }
-		if err := tx.Delete(&models.User{}, userID).Error; err != nil { return err }
+		if err := tx.Where("user_id = ?", userID).Delete(&models.MessageFile{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.ConversationFile{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.FileEmbeddingJob{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.FileEmbedding{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.FileChunk{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.File{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.Message{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.ConversationShare{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.Conversation{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.ImageChatMessage{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.ImageChat{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.PPTRevision{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.PPTSlide{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.PPTGeneration{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.CompareRecord{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.UserSkill{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.Workspace{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.APIUsageLog{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.AIBackgroundTask{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Delete(&models.User{}, userID).Error; err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "删除账号失败"})

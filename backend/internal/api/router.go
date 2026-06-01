@@ -93,8 +93,6 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	authHandler := NewAuthHandler(db, cfg)
 	router.POST("/api/auth/register", authHandler.Register)
 	router.POST("/api/auth/login", authHandler.Login)
-	router.GET("/api/users/count", authHandler.GetUserCount)
-	router.GET("/api/users", authHandler.GetUsers)
 
 	// 技能公开路由
 	skillHandler := NewSkillHandler(db, skills.GetLoader())
@@ -158,6 +156,22 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	authorized := router.Group("/api")
 	authorized.Use(middleware.AuthMiddleware(cfg))
 	{
+		adminHandler := NewAdminHandler(db)
+		admin := authorized.Group("/admin")
+		admin.Use(middleware.AdminMiddleware(db))
+		{
+			admin.GET("/me", adminHandler.Me)
+			admin.GET("/overview", adminHandler.Overview)
+			admin.GET("/users", adminHandler.ListUsers)
+			admin.GET("/users/:id", adminHandler.GetUser)
+			admin.PATCH("/users/:id", adminHandler.UpdateUser)
+			admin.POST("/users/:id/credits/adjust", adminHandler.AdjustCredits)
+			admin.GET("/usage/summary", adminHandler.UsageSummary)
+			admin.GET("/usage/logs", adminHandler.UsageLogs)
+			admin.GET("/models", adminHandler.Models)
+			admin.GET("/tasks", adminHandler.Tasks)
+		}
+
 		convHandler := NewConversationHandler(db)
 		notebookHandler := NewNotebookHandler(db)
 		documentArtifactHandler := NewDocumentArtifactHandler(db)
