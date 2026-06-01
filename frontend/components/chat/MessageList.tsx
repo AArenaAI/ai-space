@@ -13,7 +13,6 @@ import { Virtuoso, VirtuosoHandle, type Components } from "react-virtuoso";
 import { useMessageStream } from "@/hooks/useMessageStream";
 import { inferGroups, InferredGroup } from "@/lib/groups";
 import { useI18n } from "@/lib/i18n";
-import { SelectionFloatingBar } from "./MessageExportActions";
 import ModelSelector from "./ModelSelector";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
 
@@ -21,15 +20,12 @@ const MarkdownRenderer = dynamic(() => import("./MarkdownRenderer"), {
   ssr: false,
   loading: () => null,
 });
-const MessageExportPreview = dynamic(() => import("./MessageExportPreview"), {
-  ssr: false,
-  loading: () => null,
-});
 import MessageRow from "./MessageRow";
 import CompareColumnTurn from "./CompareColumnTurn";
-import TextSelectionFloatingBar, { type TextSelectionFloatingBarState } from "./TextSelectionFloatingBar";
+import { type TextSelectionFloatingBarState } from "./TextSelectionFloatingBar";
 import ChatScrollProgress from "./ChatScrollProgress";
 import ChatMessageOverview, { type ChatMessageOverviewItem } from "./ChatMessageOverview";
+import ChatSelectionOverlays from "./ChatSelectionOverlays";
 import { parseThinkContent, sanitizeContent, isMessageGenerating } from "@/lib/chatContent";
 
 
@@ -773,6 +769,12 @@ function MessageList({
     () => messages.filter((m) => selectedIds.has(m.id)),
     [messages, selectedIds]
   );
+  const allSelected = messages.length > 0 && messages.every((m) => selectedIds.has(m.id));
+
+  const toggleSelectAll = useCallback(() => {
+    const allIds = new Set(messages.map((m) => m.id));
+    setSelectedIds(allSelected ? new Set() : allIds);
+  }, [allSelected, messages]);
 
   const toggleSelect = (msgId: string) => {
     setSelectedIds((prev) => {
@@ -1308,36 +1310,33 @@ function MessageList({
       />
       {renderScrollToBottomButton()}
 
-      <TextSelectionFloatingBar
-        selection={textSelection}
-        copyLabel="复制"
-        quoteLabel="复制为引用"
-        onCopy={handleCopySelectedText}
-        onCopyQuote={handleCopySelectedQuote}
+      <ChatSelectionOverlays
+        textSelection={textSelection}
+        onCopySelectedText={handleCopySelectedText}
+        onCopySelectedQuote={handleCopySelectedQuote}
+        selectMode={selectMode}
+        selectionMode={selectionMode}
+        selectedCount={selectedIds.size}
+        selectedMessages={selectedMessages}
+        allSelected={allSelected}
+        sharing={sharing}
+        exporting={exporting}
+        favoriteLoading={favoriteLoading}
+        shareOpen={shareOpen}
+        shareSlug={shareSlug}
+        exportPreviewOpen={exportPreviewOpen}
+        exportPreviewCardRef={exportPreviewCardRef}
+        exportCardRef={exportCardRef}
+        onCancelSelection={exitSelectMode}
+        onToggleSelectAll={toggleSelectAll}
+        onConfirmShare={handleShareSelected}
+        onConfirmFavorite={handleFavoriteSelected}
+        onExportImage={handleExportImage}
+        onExportText={handleExportText}
+        onCloseShare={() => setShareOpen(false)}
+        onCloseExportPreview={() => setExportPreviewOpen(false)}
+        onDownloadImage={handleDownloadImage}
       />
-
-      {/* 选择模式底部工具栏 */}
-      {selectMode && selectionMode && (
-        <SelectionFloatingBar
-          selectionMode={selectionMode}
-          selectedCount={selectedIds.size}
-          hasSelection={selectedIds.size > 0}
-          allSelected={messages.length > 0 && messages.every((m) => selectedIds.has(m.id))}
-          sharing={sharing}
-          exporting={exporting}
-          favoriteLoading={favoriteLoading}
-          onCancel={exitSelectMode}
-          onSelectAll={() => {
-            const allIds = new Set(messages.map((m) => m.id));
-            const isAllSelected = messages.length > 0 && messages.every((m) => selectedIds.has(m.id));
-            setSelectedIds(isAllSelected ? new Set() : allIds);
-          }}
-          onConfirmShare={handleShareSelected}
-          onConfirmFavorite={handleFavoriteSelected}
-          onExportImage={handleExportImage}
-          onExportText={handleExportText}
-        />
-      )}
 
       {/* 删除消息确认弹窗 */}
       <ConfirmDialog
@@ -1354,20 +1353,6 @@ function MessageList({
         onCancel={() => setDeleteTarget(null)}
       />
 
-      {/* 分享链接弹窗 */}
-      <ShareDialog isOpen={shareOpen} slug={shareSlug} onClose={() => setShareOpen(false)} />
-
-      {selectMode && selectedMessages.length > 0 && (
-        <MessageExportPreview
-          messages={selectedMessages}
-          previewOpen={exportPreviewOpen}
-          exporting={exporting}
-          previewCardRef={exportPreviewCardRef}
-          hiddenCardRef={exportCardRef}
-          onClose={() => setExportPreviewOpen(false)}
-          onDownload={handleDownloadImage}
-        />
-      )}
     </div>
   );
 }
