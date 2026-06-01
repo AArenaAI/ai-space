@@ -51,11 +51,11 @@ func NewImageService(cfg *config.Config) *ImageService {
 	return &ImageService{cfg: cfg, imageGenSvc: NewImageGenService()}
 }
 
-// RemoveBackground 图片背景移除 (利用 gpt-image-2 的编辑能力)
+// RemoveBackground 图片背景移除 (利用 gpt-image-1 的编辑能力，传入 background=transparent 获取透明输出)
 // 返回 (OpenAI 直链 URL, base64 数据, 错误)
 func (s *ImageService) RemoveBackground(ctx context.Context, size string, imageFilePath string) (imageURL string, b64Data string, err error) {
-	prompt := "Remove the background of this image and make it transparent. Keep the main subject in the EXACT same position, size, and framing as the original image. Do NOT zoom in, crop, or recompose the subject. Preserve the original composition precisely."
-	return s.EditImage(ctx, prompt, size, []string{imageFilePath})
+	prompt := "Remove the background and keep only the main subject. Preserve the exact same position, size, and framing of the subject. Do NOT zoom in, crop, or recompose."
+	return s.EditImageStream(ctx, prompt, size, "", []string{imageFilePath}, "", "transparent", nil)
 }
 
 // GenerateEditImage 通用图片编辑 (基于参考图修改，全适配 gpt-image-2)
@@ -82,12 +82,12 @@ type DALLEImageResponse struct {
 // EditImage 基于参考图编辑生成图片，返回 (OpenAI 直链 URL, base64 数据, 错误)
 // 保持旧调用签名；内部走 OpenAI SDK EditStreaming，最终图片以 base64 返回给调用方保存。
 func (s *ImageService) EditImage(ctx context.Context, prompt string, size string, referenceImagePaths []string) (imageURL string, b64Data string, err error) {
-	return s.EditImageStream(ctx, prompt, size, "", referenceImagePaths, "", nil)
+	return s.EditImageStream(ctx, prompt, size, "", referenceImagePaths, "", "", nil)
 }
 
 // EditImageStream 基于参考图编辑生成图片，走 OpenAI SDK Images EditStreaming。
 // onEvent 会收到 image_edit.partial_image / image_edit.completed 的 base64 图片数据。
-func (s *ImageService) EditImageStream(ctx context.Context, prompt string, size string, quality string, referenceImagePaths []string, maskPath string, onEvent func(ImageStreamEvent) error) (imageURL string, b64Data string, err error) {
+func (s *ImageService) EditImageStream(ctx context.Context, prompt string, size string, quality string, referenceImagePaths []string, maskPath string, background string, onEvent func(ImageStreamEvent) error) (imageURL string, b64Data string, err error) {
 	apiKey := s.cfg.OpenAIOfficialKey
 	if apiKey == "" {
 		apiKey = s.cfg.ImageGenAPIKey
@@ -106,10 +106,10 @@ func (s *ImageService) EditImageStream(ctx context.Context, prompt string, size 
 		return "", "", fmt.Errorf("未指定参考图文件路径")
 	}
 
-	model := s.cfg.ImageGenModel
-	if model == "" || model == "qwen-image-2.0-2026-03-03" || model == "qwen-image" {
-		model = "gpt-image-2"
-	}
+	// OpenAI images/edits endpoint only supports gpt-image-1 and dall-e-2.
+	// gpt-image-2 is NOT supported for edits; using it causes fallback to dall-e-2
+	// which only outputs 1024x1024, breaking original aspect ratio.
+	model := "gpt-image-1"
 
 	files := make([]*os.File, 0, len(referenceImagePaths))
 	readers := make([]io.Reader, 0, len(referenceImagePaths))
@@ -169,6 +169,9 @@ func (s *ImageService) EditImageStream(ctx context.Context, prompt string, size 
 	}
 	if quality != "" {
 		params.Quality = openai.ImageEditParamsQuality(quality)
+	}
+	if background != "" {
+		params.Background = openai.ImageEditParamsBackground(background)
 	}
 	if maskFile != nil {
 		params.Mask = namedContentTypeReader{Reader: maskFile, filename: filepath.Base(maskPath), contentType: "image/png"}

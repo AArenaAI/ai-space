@@ -809,9 +809,11 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 	}
 
 	editPrompt := req.Prompt
+	background := ""
 	switch req.EditMode {
 	case "remove-bg":
-		editPrompt = "Remove the background of this image. Make the background transparent. Keep only the main subject."
+		editPrompt = "Remove the background. Keep only the main subject in the exact same position, size, and framing. Do NOT zoom in, crop, or recompose."
+		background = "transparent"
 	case "text-removal":
 		editPrompt = req.Prompt + ". Remove these texts/watermarks from the image. Keep everything else intact."
 	case "upscale":
@@ -859,7 +861,7 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 	// 图片编辑耗时可能超过前置代理/Cloudflare 允许的同步等待时间，必须异步处理，前端按 id 轮询状态。
 	go func() {
 		defer cleanupEditCanvas()
-		h.processImageEditJob(gen.ID, editPrompt, size, "medium", []string{providerImagePath}, maskFilePath, baseURL, targetSize, canvasTransform)
+		h.processImageEditJob(gen.ID, editPrompt, size, "medium", []string{providerImagePath}, maskFilePath, baseURL, targetSize, canvasTransform, background)
 	}()
 
 	c.JSON(http.StatusOK, gin.H{
@@ -1050,10 +1052,10 @@ func (h *ImageHandler) AutoMigrate() error {
 
 // processImageJob 后台处理单个图片生成任务（用于异步 goroutine 和启动恢复）
 func (h *ImageHandler) processImageJob(recordID uint, prompt, size, quality string, referenceImagePaths []string, baseURL string) {
-	h.processImageEditJob(recordID, prompt, size, quality, referenceImagePaths, "", baseURL, image.Point{}, editCanvasTransform{})
+	h.processImageEditJob(recordID, prompt, size, quality, referenceImagePaths, "", baseURL, image.Point{}, editCanvasTransform{}, "")
 }
 
-func (h *ImageHandler) processImageEditJob(recordID uint, prompt, size, quality string, referenceImagePaths []string, maskPath string, baseURL string, targetSize image.Point, transform editCanvasTransform) {
+func (h *ImageHandler) processImageEditJob(recordID uint, prompt, size, quality string, referenceImagePaths []string, maskPath string, baseURL string, targetSize image.Point, transform editCanvasTransform, background string) {
 	ctx := context.Background()
 
 	var imageURL, b64Data string
@@ -1061,7 +1063,7 @@ func (h *ImageHandler) processImageEditJob(recordID uint, prompt, size, quality 
 
 	if len(referenceImagePaths) > 0 {
 		// image-to-image / mask 编辑模式：基于参考图编辑
-		imageURL, b64Data, err = h.imageService.EditImageStream(ctx, prompt, size, quality, referenceImagePaths, maskPath, nil)
+		imageURL, b64Data, err = h.imageService.EditImageStream(ctx, prompt, size, quality, referenceImagePaths, maskPath, background, nil)
 	} else {
 		// 普通文生图模式
 		imageURL, b64Data, err = h.imageService.GenerateImage(ctx, prompt, size, quality)

@@ -370,7 +370,7 @@ func (h *ImageChatHandler) processImageChatJob(msgID uint, prompt, size, quality
 	}
 
 	if len(refPaths) > 0 {
-		imageURL, b64Data, err = h.imageService.EditImageStream(ctx, prompt, size, quality, refPaths, "", onImageStreamEvent)
+		imageURL, b64Data, err = h.imageService.EditImageStream(ctx, prompt, size, quality, refPaths, "", "", onImageStreamEvent)
 	} else {
 		imageURL, b64Data, err = h.imageService.GenerateImageStream(ctx, prompt, size, quality, onImageStreamEvent)
 	}
