@@ -3,14 +3,9 @@ const path = require('path');
 
 const source = fs.readFileSync(path.join(__dirname, '../../lib/translatorFormat.ts'), 'utf8');
 const js = source
-  .replace(/type PunctuationStyle = [^;]+;\n\n/g, '')
   .replace(/export function /g, 'function ')
-  .replace(/const ASCII_WRAPPER_PAIRS: Array<\[string, string\]>/g, 'const ASCII_WRAPPER_PAIRS')
-  .replace(/const LOCALIZED_WRAPPER_PAIRS: Array<\[string, string\]>/g, 'const LOCALIZED_WRAPPER_PAIRS')
   .replace(/: RegExp/g, '')
   .replace(/\?: string/g, '')
-  .replace(/: PunctuationStyle/g, '')
-  .replace(/: \[string, string\]/g, '')
   .replace(/: string\[\]/g, '')
   .replace(/: unknown/g, '')
   .replace(/: string/g, '');
@@ -21,31 +16,39 @@ const { postProcessTranslationFormat } = moduleScope;
 
 const cases = [
   {
-    name: 'localized Japanese quote restored to source ASCII quote',
+    name: 'provider output is respected when source has ASCII quote',
     source: '"请告诉我。"',
-    translated: '「教えてください。」',
+    translated: '教えてください。',
     targetLanguage: 'ja',
-    expected: '「教えてください。」',
+    expected: '教えてください。',
   },
   {
-    name: 'English ASCII quote maps to Chinese smart quote when provider drops it',
-    source: '"Please let me know."',
-    translated: '请告诉我。',
-    targetLanguage: 'zh',
-    expected: '“请告诉我。”',
-  },
-  {
-    name: 'ASCII parentheses restored from fullwidth parentheses',
-    source: '(hello)',
-    translated: '（你好）',
+    name: 'provider output is respected when source has Chinese smart quotes',
+    source: '“你好”',
+    translated: 'Hello',
     targetLanguage: 'en',
-    expected: '(你好)',
+    expected: 'Hello',
   },
   {
-    name: 'already correct wrapper preserved',
-    source: '[hello]',
-    translated: '[你好。]',
-    expected: '[你好。]',
+    name: 'provider output is respected when source has Japanese corner quotes',
+    source: '「你好」',
+    translated: 'Hello',
+    targetLanguage: 'en',
+    expected: 'Hello',
+  },
+  {
+    name: 'provider output is respected when source has parentheses',
+    source: '(hello)',
+    translated: '你好',
+    targetLanguage: 'zh',
+    expected: '你好',
+  },
+  {
+    name: 'provider-provided wrapper is not remapped',
+    source: '“你好”',
+    translated: '« Bonjour »',
+    targetLanguage: 'fr',
+    expected: '« Bonjour »',
   },
   {
     name: 'no wrapper means no wrapper added',
@@ -60,88 +63,18 @@ const cases = [
     expected: 'Hello',
   },
   {
-    name: 'Chinese smart quotes mapped to English ASCII quotes when provider drops them',
-    source: '“你好”',
-    translated: 'Hello',
-    targetLanguage: 'en',
-    expected: '"Hello"',
-  },
-  {
-    name: 'Japanese corner quotes mapped to English ASCII quotes when provider drops them',
-    source: '「你好」',
-    translated: 'Hello',
-    targetLanguage: 'en',
-    expected: '"Hello"',
-  },
-  {
-    name: 'English ASCII quote maps to Chinese smart quote',
-    source: '"Hello"',
-    translated: '你好',
-    targetLanguage: 'zh',
-    expected: '“你好”',
-  },
-  {
-    name: 'Chinese smart quote maps to French guillemets',
-    source: '“你好”',
-    translated: 'Bonjour',
-    targetLanguage: 'fr',
-    expected: '« Bonjour »',
-  },
-  {
-    name: 'Chinese smart quote maps to German low-high quotes',
-    source: '“你好”',
-    translated: 'Hallo',
-    targetLanguage: 'de',
-    expected: '„Hallo“',
-  },
-  {
-    name: 'Chinese smart quote maps to Korean smart quotes',
-    source: '“你好”',
-    translated: '안녕하세요',
-    targetLanguage: 'ko',
-    expected: '“안녕하세요”',
-  },
-  {
-    name: 'Chinese smart quote maps to ASCII quotes for Spanish',
-    source: '“你好”',
-    translated: 'Hola',
-    targetLanguage: 'es',
-    expected: '"Hola"',
-  },
-  {
-    name: 'fullwidth parentheses map to ASCII parentheses for French',
-    source: '（必填）',
-    translated: 'obligatoire',
-    targetLanguage: 'fr',
-    expected: '(obligatoire)',
-  },
-  {
-    name: 'ASCII parentheses map to Korean fullwidth parentheses',
-    source: '(required)',
-    translated: '필수',
-    targetLanguage: 'ko',
-    expected: '（필수）',
-  },
-  {
-    name: 'unknown target language keeps source wrapper shape',
-    source: '“hello”',
-    translated: 'hello',
-    targetLanguage: 'xx',
-    expected: '“hello”',
-  },
-  {
-    name: 'boundary whitespace preserved',
+    name: 'boundary whitespace preserved without wrapper injection',
     source: '\n  "hello"  \n',
-    translated: '“你好。”',
+    translated: '你好。',
     targetLanguage: 'zh',
-    expected: '\n  “你好。”  \n',
+    expected: '\n  你好。  \n',
   },
   {
-    name: 'internal URL and punctuation untouched',
+    name: 'internal URL and punctuation untouched without outer wrapper injection',
     source: '"Visit https://a.b/c?q=1."',
-    translated: '「访问 https://a.b/c?q=1。」',
+    translated: '访问 https://a.b/c?q=1。',
     targetLanguage: 'zh',
-    expected: '“访问 https://a.b/c?q=1。”',
+    expected: '访问 https://a.b/c?q=1。',
   },
   {
     name: 'inline code content restored by position',
