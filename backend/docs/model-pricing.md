@@ -2,11 +2,23 @@
 
 AI Space usage cost accounting records a price snapshot into `api_usage_logs` when each external model/API call is written. Model-level pricing has priority over provider-level fallback prices.
 
-All prices are in RMB.
+All prices are in RMB. Model prices are not secrets, so the preferred configuration is a versioned JSON file.
 
-## Option 1: JSON table
+## Preferred: JSON file
 
-Set `MODEL_PRICES_JSON` to either an array:
+Default file path:
+
+```txt
+backend/config/model-prices.json
+```
+
+The backend reads this file automatically when started from `backend/` or from the repository root. To use another path, set:
+
+```bash
+MODEL_PRICES_FILE=/absolute/path/to/model-prices.json
+```
+
+Format:
 
 ```json
 [
@@ -26,7 +38,7 @@ Set `MODEL_PRICES_JSON` to either an array:
 ]
 ```
 
-or a keyed object:
+A keyed object is also supported:
 
 ```json
 {
@@ -41,7 +53,13 @@ or a keyed object:
 }
 ```
 
-## Option 2: per-model environment variables
+Explicit `0` prices in JSON are preserved as configured entries. Usage cost remains `0` until real prices are filled in.
+
+## Optional override 1: `MODEL_PRICES_JSON`
+
+Set `MODEL_PRICES_JSON` to the same JSON array/object format. Entries in this environment variable override the file.
+
+## Optional override 2: per-model environment variables
 
 Names are normalized as:
 
@@ -65,6 +83,8 @@ MODEL_PRICE_DEEPSEEK_DEEPSEEK_V4_PRO_INPUT=0.0
 MODEL_PRICE_DEEPSEEK_DEEPSEEK_V4_PRO_OUTPUT=0.0
 ```
 
+Per-model environment variables override both the file and `MODEL_PRICES_JSON`. They are mainly for temporary emergency overrides.
+
 Supported suffixes:
 
 - `_INPUT` — input token price, RMB per 1K tokens
@@ -73,6 +93,15 @@ Supported suffixes:
 - `_VIDEO` — video price, RMB per second
 - `_REQUEST` — request price, RMB per request
 - `_PRICING_UNIT` — `token_1k`, `image`, `video_second`, or `request`
+
+## Loading priority
+
+```txt
+backend/config/model-prices.json
+  < MODEL_PRICES_FILE if set
+  < MODEL_PRICES_JSON
+  < MODEL_PRICE_<PROVIDER>_<MODEL>_* env overrides
+```
 
 ## Fallback behavior
 

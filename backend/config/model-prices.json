@@ -1,0 +1,97 @@
+[
+  {
+    "provider": "openai",
+    "model": "gpt-5.5",
+    "pricing_unit": "token_1k",
+    "input_price_rmb": 0,
+    "output_price_rmb": 0
+  },
+  {
+    "provider": "openai",
+    "model": "gpt-5.5-pro",
+    "pricing_unit": "token_1k",
+    "input_price_rmb": 0,
+    "output_price_rmb": 0
+  },
+  {
+    "provider": "openai",
+    "model": "gpt-5.4",
+    "pricing_unit": "token_1k",
+    "input_price_rmb": 0,
+    "output_price_rmb": 0
+  },
+  {
+    "provider": "openai",
+    "model": "gpt-5.4-mini",
+    "pricing_unit": "token_1k",
+    "input_price_rmb": 0,
+    "output_price_rmb": 0
+  },
+  {
+    "provider": "openai",
+    "model": "gpt-image-2",
+    "pricing_unit": "image",
+    "image_unit_price_rmb": 0
+  },
+  {
+    "provider": "gemini",
+    "model": "gemini-3.5-flash",
+    "pricing_unit": "token_1k",
+    "input_price_rmb": 0,
+    "output_price_rmb": 0
+  },
+  {
+    "provider": "gemini",
+    "model": "gemini-3.1-flash-lite",
+    "pricing_unit": "token_1k",
+    "input_price_rmb": 0,
+    "output_price_rmb": 0
+  },
+  {
+    "provider": "gemini",
+    "model": "gemini-3.1-pro-preview",
+    "pricing_unit": "token_1k",
+    "input_price_rmb": 0,
+    "output_price_rmb": 0
+  },
+  {
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro",
+    "pricing_unit": "token_1k",
+    "input_price_rmb": 0,
+    "output_price_rmb": 0
+  },
+  {
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash",
+    "pricing_unit": "token_1k",
+    "input_price_rmb": 0,
+    "output_price_rmb": 0
+  },
+  {
+    "provider": "moonshot",
+    "model": "kimi-k2.5",
+    "pricing_unit": "token_1k",
+    "input_price_rmb": 0,
+    "output_price_rmb": 0
+  },
+  {
+    "provider": "moonshot",
+    "model": "kimi-k2.6",
+    "pricing_unit": "token_1k",
+    "input_price_rmb": 0,
+    "output_price_rmb": 0
+  },
+  {
+    "provider": "volcengine",
+    "model": "doubao-seedance-2-0-fast-260128",
+    "pricing_unit": "request",
+    "request_unit_price_rmb": 0
+  },
+  {
+    "provider": "volcengine",
+    "model": "doubao-seedance-2-0-260128",
+    "pricing_unit": "request",
+    "request_unit_price_rmb": 0
+  }
+]

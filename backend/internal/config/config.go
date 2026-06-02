@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/joho/godotenv"
@@ -320,31 +321,9 @@ func modelPriceEnvPrefix(provider, model string) string {
 
 func loadModelPrices() map[string]ModelPrice {
 	prices := map[string]ModelPrice{}
+	loadModelPricesFromFile(prices)
 	if raw := strings.TrimSpace(os.Getenv("MODEL_PRICES_JSON")); raw != "" {
-		var list []ModelPrice
-		if err := json.Unmarshal([]byte(raw), &list); err == nil {
-			for _, price := range list {
-				addModelPrice(prices, price)
-			}
-		} else {
-			var keyed map[string]ModelPrice
-			if err := json.Unmarshal([]byte(raw), &keyed); err == nil {
-				for key, price := range keyed {
-					if price.Provider == "" || price.Model == "" {
-						parts := strings.SplitN(key, ":", 2)
-						if len(parts) == 2 {
-							if price.Provider == "" {
-								price.Provider = parts[0]
-							}
-							if price.Model == "" {
-								price.Model = parts[1]
-							}
-						}
-					}
-					addModelPrice(prices, price)
-				}
-			}
-		}
+		loadModelPricesFromJSON(prices, []byte(raw))
 	}
 	for _, provider := range []string{"openai", "anthropic", "gemini", "deepseek", "moonshot", "volcengine"} {
 		for _, model := range knownModelsForProvider(provider) {
@@ -356,13 +335,60 @@ func loadModelPrices() map[string]ModelPrice {
 			price.ImageUnitPrice = getEnvFloat64(prefix+"_IMAGE", 0)
 			price.VideoUnitPrice = getEnvFloat64(prefix+"_VIDEO", 0)
 			price.RequestUnitPrice = getEnvFloat64(prefix+"_REQUEST", 0)
-			addModelPrice(prices, price)
+			addModelPrice(prices, price, false)
 		}
 	}
 	return prices
 }
 
-func addModelPrice(prices map[string]ModelPrice, price ModelPrice) {
+func loadModelPricesFromFile(prices map[string]ModelPrice) {
+	path := strings.TrimSpace(os.Getenv("MODEL_PRICES_FILE"))
+	if path == "" {
+		path = filepath.Join("config", "model-prices.json")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil && !filepath.IsAbs(path) {
+		if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+			// config.Load may be called from the repository root or from backend/.
+			alt := filepath.Join(cwd, "backend", path)
+			data, err = os.ReadFile(alt)
+		}
+	}
+	if err != nil {
+		return
+	}
+	loadModelPricesFromJSON(prices, data)
+}
+
+func loadModelPricesFromJSON(prices map[string]ModelPrice, data []byte) {
+	var list []ModelPrice
+	if err := json.Unmarshal(data, &list); err == nil {
+		for _, price := range list {
+			addModelPrice(prices, price, true)
+		}
+		return
+	}
+	var keyed map[string]ModelPrice
+	if err := json.Unmarshal(data, &keyed); err != nil {
+		return
+	}
+	for key, price := range keyed {
+		if price.Provider == "" || price.Model == "" {
+			parts := strings.SplitN(key, ":", 2)
+			if len(parts) == 2 {
+				if price.Provider == "" {
+					price.Provider = parts[0]
+				}
+				if price.Model == "" {
+					price.Model = parts[1]
+				}
+			}
+		}
+		addModelPrice(prices, price, true)
+	}
+}
+
+func addModelPrice(prices map[string]ModelPrice, price ModelPrice, allowZero bool) {
 	provider := strings.TrimSpace(price.Provider)
 	model := strings.TrimSpace(price.Model)
 	if provider == "" || model == "" {
@@ -379,7 +405,7 @@ func addModelPrice(prices map[string]ModelPrice, price ModelPrice) {
 			price.PricingUnit = "token_1k"
 		}
 	}
-	if price.InputPriceRMB <= 0 && price.OutputPriceRMB <= 0 && price.ImageUnitPrice <= 0 && price.VideoUnitPrice <= 0 && price.RequestUnitPrice <= 0 {
+	if !allowZero && price.InputPriceRMB <= 0 && price.OutputPriceRMB <= 0 && price.ImageUnitPrice <= 0 && price.VideoUnitPrice <= 0 && price.RequestUnitPrice <= 0 {
 		return
 	}
 	price.Provider = strings.ToLower(provider)
