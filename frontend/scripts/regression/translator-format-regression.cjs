@@ -47,6 +47,24 @@ const cases = [
     expected: '你好。',
   },
   {
+    name: 'no source wrapper means no wrapper added for short greeting',
+    source: '你好',
+    translated: 'Hello',
+    expected: 'Hello',
+  },
+  {
+    name: 'Chinese smart quotes restored when provider drops them',
+    source: '“你好”',
+    translated: 'Hello',
+    expected: '“Hello”',
+  },
+  {
+    name: 'Japanese corner quotes restored when provider drops them',
+    source: '「你好」',
+    translated: 'Hello',
+    expected: '「Hello」',
+  },
+  {
     name: 'boundary whitespace preserved',
     source: '\n  "hello"  \n',
     translated: '“你好。”',

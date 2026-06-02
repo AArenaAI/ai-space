@@ -110,27 +110,28 @@ export function preserveProtectedTokens(sourceText: string, translatedText: stri
   return result;
 }
 
-export function preserveOuterAsciiWrapper(sourceText: string, translatedText: string) {
+export function preserveOuterWrapper(sourceText: string, translatedText: string) {
   const sourceTrimmed = sourceText.trim();
   let result = translatedText.trim();
+  const wrapperPairs = [...ASCII_WRAPPER_PAIRS, ...LOCALIZED_WRAPPER_PAIRS];
 
-  for (const [open, close] of ASCII_WRAPPER_PAIRS) {
-    if (!sourceTrimmed.startsWith(open) || !sourceTrimmed.endsWith(close) || sourceTrimmed.length < open.length + close.length) {
+  for (const [sourceOpen, sourceClose] of wrapperPairs) {
+    if (!sourceTrimmed.startsWith(sourceOpen) || !sourceTrimmed.endsWith(sourceClose) || sourceTrimmed.length < sourceOpen.length + sourceClose.length) {
       continue;
     }
 
-    if (result.startsWith(open) && result.endsWith(close)) {
+    if (result.startsWith(sourceOpen) && result.endsWith(sourceClose)) {
       return result;
     }
 
-    for (const [localOpen, localClose] of LOCALIZED_WRAPPER_PAIRS) {
-      if (result.startsWith(localOpen) && result.endsWith(localClose)) {
-        result = result.slice(localOpen.length, result.length - localClose.length).trim();
-        return `${open}${result}${close}`;
+    for (const [resultOpen, resultClose] of wrapperPairs) {
+      if (result.startsWith(resultOpen) && result.endsWith(resultClose)) {
+        result = result.slice(resultOpen.length, result.length - resultClose.length).trim();
+        break;
       }
     }
 
-    return `${open}${result}${close}`;
+    return `${sourceOpen}${result}${sourceClose}`;
   }
 
   return translatedText;
@@ -144,6 +145,6 @@ export function preserveBoundaryWhitespace(sourceText: string, translatedText: s
 
 export function postProcessTranslationFormat(sourceText: string, translatedText: string) {
   const withProtectedTokens = preserveProtectedTokens(sourceText, translatedText);
-  const withOuterWrapper = preserveOuterAsciiWrapper(sourceText, withProtectedTokens);
+  const withOuterWrapper = preserveOuterWrapper(sourceText, withProtectedTokens);
   return preserveBoundaryWhitespace(sourceText, withOuterWrapper);
 }
