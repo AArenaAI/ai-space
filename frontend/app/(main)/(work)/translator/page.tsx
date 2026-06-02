@@ -417,7 +417,7 @@ export default function TranslatorPage() {
       }
       const data = await res.json() as { translated_text?: string; detected_source_language?: string; provider?: string };
       const raw = data.translated_text || "";
-      const formatted = postProcessTranslationFormat(inputText, raw);
+      const formatted = postProcessTranslationFormat(inputText, raw, targetLang);
       setRecognizedText(inputText);
       setTranslatedText(formatted);
       setStreamingText("");

@@ -7,6 +7,8 @@ const js = source
   .replace(/const ASCII_WRAPPER_PAIRS: Array<\[string, string\]>/g, 'const ASCII_WRAPPER_PAIRS')
   .replace(/const LOCALIZED_WRAPPER_PAIRS: Array<\[string, string\]>/g, 'const LOCALIZED_WRAPPER_PAIRS')
   .replace(/: RegExp/g, '')
+  .replace(/\?: string/g, '')
+  .replace(/: \[string, string\]/g, '')
   .replace(/: string\[\]/g, '')
   .replace(/: unknown/g, '')
   .replace(/: string/g, '');
@@ -20,18 +22,21 @@ const cases = [
     name: 'localized Japanese quote restored to source ASCII quote',
     source: '"请告诉我。"',
     translated: '「教えてください。」',
-    expected: '"教えてください。"',
+    targetLanguage: 'ja',
+    expected: '「教えてください。」',
   },
   {
-    name: 'missing ASCII quote restored without changing content punctuation',
+    name: 'English ASCII quote maps to Chinese smart quote when provider drops it',
     source: '"Please let me know."',
     translated: '请告诉我。',
-    expected: '"请告诉我。"',
+    targetLanguage: 'zh',
+    expected: '“请告诉我。”',
   },
   {
     name: 'ASCII parentheses restored from fullwidth parentheses',
     source: '(hello)',
     translated: '（你好）',
+    targetLanguage: 'en',
     expected: '(你好)',
   },
   {
@@ -53,28 +58,39 @@ const cases = [
     expected: 'Hello',
   },
   {
-    name: 'Chinese smart quotes restored when provider drops them',
+    name: 'Chinese smart quotes mapped to English ASCII quotes when provider drops them',
     source: '“你好”',
     translated: 'Hello',
-    expected: '“Hello”',
+    targetLanguage: 'en',
+    expected: '"Hello"',
   },
   {
-    name: 'Japanese corner quotes restored when provider drops them',
+    name: 'Japanese corner quotes mapped to English ASCII quotes when provider drops them',
     source: '「你好」',
     translated: 'Hello',
-    expected: '「Hello」',
+    targetLanguage: 'en',
+    expected: '"Hello"',
+  },
+  {
+    name: 'English ASCII quote maps to Chinese smart quote',
+    source: '"Hello"',
+    translated: '你好',
+    targetLanguage: 'zh',
+    expected: '“你好”',
   },
   {
     name: 'boundary whitespace preserved',
     source: '\n  "hello"  \n',
     translated: '“你好。”',
-    expected: '\n  "你好。"  \n',
+    targetLanguage: 'zh',
+    expected: '\n  “你好。”  \n',
   },
   {
     name: 'internal URL and punctuation untouched',
     source: '"Visit https://a.b/c?q=1."',
     translated: '「访问 https://a.b/c?q=1。」',
-    expected: '"访问 https://a.b/c?q=1。"',
+    targetLanguage: 'zh',
+    expected: '“访问 https://a.b/c?q=1。”',
   },
   {
     name: 'inline code content restored by position',
@@ -145,7 +161,7 @@ const cases = [
 ];
 
 for (const testCase of cases) {
-  const actual = postProcessTranslationFormat(testCase.source, testCase.translated);
+  const actual = postProcessTranslationFormat(testCase.source, testCase.translated, testCase.targetLanguage);
   if (actual !== testCase.expected) {
     console.error(`FAIL ${testCase.name}`);
     console.error('expected:', JSON.stringify(testCase.expected));

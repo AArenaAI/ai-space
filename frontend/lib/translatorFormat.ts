@@ -110,7 +110,38 @@ export function preserveProtectedTokens(sourceText: string, translatedText: stri
   return result;
 }
 
-export function preserveOuterWrapper(sourceText: string, translatedText: string) {
+function normalizeTargetLanguage(targetLanguage?: string) {
+  const lower = (targetLanguage || '').toLowerCase();
+  if (lower.startsWith('zh')) return 'zh';
+  if (lower.startsWith('ja')) return 'ja';
+  if (lower.startsWith('en')) return 'en';
+  return '';
+}
+
+function targetWrapperFor(sourceOpen: string, sourceClose: string, targetLanguage?: string): [string, string] {
+  const target = normalizeTargetLanguage(targetLanguage);
+
+  if (sourceOpen === '"' && sourceClose === '"' || sourceOpen === '“' && sourceClose === '”' || sourceOpen === '「' && sourceClose === '」') {
+    if (target === 'en') return ['"', '"'];
+    if (target === 'zh') return ['“', '”'];
+    if (target === 'ja') return ['「', '」'];
+  }
+
+  if (sourceOpen === "'" && sourceClose === "'" || sourceOpen === '‘' && sourceClose === '’') {
+    if (target === 'en') return ["'", "'"];
+    if (target === 'zh') return ['‘', '’'];
+    if (target === 'ja') return ['「', '」'];
+  }
+
+  if (sourceOpen === '(' && sourceClose === ')' || sourceOpen === '（' && sourceClose === '）') {
+    if (target === 'en') return ['(', ')'];
+    if (target === 'zh' || target === 'ja') return ['（', '）'];
+  }
+
+  return [sourceOpen, sourceClose];
+}
+
+export function preserveOuterWrapper(sourceText: string, translatedText: string, targetLanguage?: string) {
   const sourceTrimmed = sourceText.trim();
   let result = translatedText.trim();
   const wrapperPairs = [...ASCII_WRAPPER_PAIRS, ...LOCALIZED_WRAPPER_PAIRS];
@@ -120,10 +151,6 @@ export function preserveOuterWrapper(sourceText: string, translatedText: string)
       continue;
     }
 
-    if (result.startsWith(sourceOpen) && result.endsWith(sourceClose)) {
-      return result;
-    }
-
     for (const [resultOpen, resultClose] of wrapperPairs) {
       if (result.startsWith(resultOpen) && result.endsWith(resultClose)) {
         result = result.slice(resultOpen.length, result.length - resultClose.length).trim();
@@ -131,7 +158,12 @@ export function preserveOuterWrapper(sourceText: string, translatedText: string)
       }
     }
 
-    return `${sourceOpen}${result}${sourceClose}`;
+    const [targetOpen, targetClose] = targetWrapperFor(sourceOpen, sourceClose, targetLanguage);
+    if (result.startsWith(targetOpen) && result.endsWith(targetClose)) {
+      return result;
+    }
+
+    return `${targetOpen}${result}${targetClose}`;
   }
 
   return translatedText;
@@ -143,8 +175,8 @@ export function preserveBoundaryWhitespace(sourceText: string, translatedText: s
   return `${leading}${translatedText.trim()}${trailing}`;
 }
 
-export function postProcessTranslationFormat(sourceText: string, translatedText: string) {
+export function postProcessTranslationFormat(sourceText: string, translatedText: string, targetLanguage?: string) {
   const withProtectedTokens = preserveProtectedTokens(sourceText, translatedText);
-  const withOuterWrapper = preserveOuterWrapper(sourceText, withProtectedTokens);
+  const withOuterWrapper = preserveOuterWrapper(sourceText, withProtectedTokens, targetLanguage);
   return preserveBoundaryWhitespace(sourceText, withOuterWrapper);
 }

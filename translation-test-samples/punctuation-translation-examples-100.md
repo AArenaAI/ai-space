@@ -11,7 +11,7 @@
 
 - 10 类标点/格式场景，每类 10 条：ASCII 引号、本地化引号、括号/方括号、省略号、破折号、冒号/分号、问号/叹号、列表逗号、书名号/标题标记、URL/code/placeholder/email。
 - 5 个语言方向，每个方向 20 条：中文->英语、英语->简体中文、中文->日语、日语->简体中文、英语->日语。
-- 每条包含 `expected_translation` 和 `expected_punctuation_behavior`，并用 `strict_preserve_punctuation` 标出是否要求严格保留同类标点形态。
+- 每条包含 `expected_translation` 和 `expected_punctuation_behavior`，并用 `strict_preserve_punctuation` 标出是否要求严格保留标点结构；标点形态按目标语言规范映射。
 
 ## 按方向统计
 
@@ -53,5 +53,5 @@
    - `expected_translation`：严格期望译文。
    - `acceptable_translations`：可接受替代译文。
    - `expected_punctuation_behavior`：人工/脚本检查重点。
-   - `strict_preserve_punctuation=true`：外层引号、括号、URL/code/placeholder 等应严格符合。
+   - `strict_preserve_punctuation=true`：外层引号、括号、URL/code/placeholder 等结构应严格符合；引号/括号形态按目标语言规范映射，例如中译英 `“你好”` 应为 `"Hello"`。
 4. 对 `strict_preserve_punctuation=false` 的标题/自然引语样本，不应只看字符是否完全一致；应检查标题/引语边界是否在目标语言中自然保留。
