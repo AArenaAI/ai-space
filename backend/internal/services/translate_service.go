@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -33,6 +34,21 @@ type TranslateResult struct {
 	TargetLang         string `json:"target_language"`
 	Provider           string `json:"provider"`
 	Model              string `json:"model,omitempty"`
+}
+
+type SupportedLanguage struct {
+	LanguageCode  string `json:"language_code"`
+	DisplayName   string `json:"display_name"`
+	SupportSource bool   `json:"support_source"`
+	SupportTarget bool   `json:"support_target"`
+}
+
+type SupportedLanguagesResult struct {
+	Languages           []SupportedLanguage `json:"languages"`
+	DisplayLanguageCode string              `json:"display_language_code,omitempty"`
+	Provider            string              `json:"provider"`
+	Model               string              `json:"model,omitempty"`
+	TranslationModel    string              `json:"translation_model,omitempty"`
 }
 
 func NewTranslateService(cfg *config.Config) *TranslateService {
@@ -100,6 +116,77 @@ func (s *TranslateService) Translate(ctx context.Context, req TranslateRequest) 
 		Provider:           "google-cloud-translate-v3",
 		Model:              model,
 	}, nil
+}
+
+func (s *TranslateService) SupportedLanguages(ctx context.Context, displayLanguageCode string) (*SupportedLanguagesResult, error) {
+	if s.cfg.GoogleCloudProjectID == "" {
+		return nil, errors.New("Google Cloud Translation 未配置 GOOGLE_CLOUD_PROJECT_ID")
+	}
+
+	location := strings.TrimSpace(s.cfg.GoogleTranslateLocation)
+	if location == "" {
+		location = "global"
+	}
+	translationModel := normalizeGoogleTranslateModel(s.cfg.GoogleTranslateModel, s.cfg.GoogleCloudProjectID, location)
+	model := normalizeSupportedLanguagesModel(s.cfg.GoogleTranslateModel, s.cfg.GoogleCloudProjectID, location)
+	displayLanguageCode = normalizeTranslateLang(displayLanguageCode)
+	if displayLanguageCode == "" || displayLanguageCode == "auto" {
+		displayLanguageCode = "zh-CN"
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, defaultTranslateTimeout)
+	defer cancel()
+
+	client, err := translate.NewTranslationClient(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("初始化 Google Translate 客户端失败: %w", err)
+	}
+	defer client.Close()
+
+	resp, err := client.GetSupportedLanguages(ctx, &translatepb.GetSupportedLanguagesRequest{
+		Parent:              fmt.Sprintf("projects/%s/locations/%s", s.cfg.GoogleCloudProjectID, location),
+		DisplayLanguageCode: displayLanguageCode,
+		Model:               model,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("Google Translate 支持语言列表调用失败: %w", err)
+	}
+
+	languages := make([]SupportedLanguage, 0, len(resp.GetLanguages()))
+	for _, lang := range resp.GetLanguages() {
+		code := strings.TrimSpace(lang.GetLanguageCode())
+		if code == "" {
+			continue
+		}
+		languages = append(languages, SupportedLanguage{
+			LanguageCode:  code,
+			DisplayName:   lang.GetDisplayName(),
+			SupportSource: lang.GetSupportSource(),
+			SupportTarget: lang.GetSupportTarget(),
+		})
+	}
+	sort.SliceStable(languages, func(i, j int) bool {
+		if languages[i].DisplayName == languages[j].DisplayName {
+			return languages[i].LanguageCode < languages[j].LanguageCode
+		}
+		return languages[i].DisplayName < languages[j].DisplayName
+	})
+
+	return &SupportedLanguagesResult{
+		Languages:           languages,
+		DisplayLanguageCode: displayLanguageCode,
+		Provider:            "google-cloud-translate-v3",
+		Model:               model,
+		TranslationModel:    translationModel,
+	}, nil
+}
+
+func normalizeSupportedLanguagesModel(model, projectID, location string) string {
+	model = strings.TrimSpace(model)
+	if strings.Contains(model, "general/translation-llm") {
+		model = "general/nmt"
+	}
+	return normalizeGoogleTranslateModel(model, projectID, location)
 }
 
 func normalizeGoogleTranslateModel(model, projectID, location string) string {

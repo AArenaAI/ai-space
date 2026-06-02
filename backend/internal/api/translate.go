@@ -44,3 +44,18 @@ func (h *TranslateHandler) Translate(c *gin.Context) {
 
 	c.JSON(http.StatusOK, result)
 }
+
+func (h *TranslateHandler) SupportedLanguages(c *gin.Context) {
+	displayLanguage := strings.TrimSpace(c.Query("display_language"))
+	if displayLanguage == "" {
+		displayLanguage = strings.TrimSpace(c.Query("display_language_code"))
+	}
+
+	result, err := h.service.SupportedLanguages(c.Request.Context(), displayLanguage)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}

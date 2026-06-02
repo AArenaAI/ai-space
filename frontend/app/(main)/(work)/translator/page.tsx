@@ -24,9 +24,19 @@ const MAX_TEXT_LENGTH = 20000;
 const TRANSLATOR_MODEL_LABEL = "Google Translation LLM";
 
 type LangOption = {
-  labelKey: string;
+  labelKey?: string;
+  label?: string;
   promptLabel: string;
   value: string;
+  supportSource?: boolean;
+  supportTarget?: boolean;
+};
+
+type SupportedLanguageAPIItem = {
+  language_code: string;
+  display_name?: string;
+  support_source?: boolean;
+  support_target?: boolean;
 };
 
 type HistoryItem = {
@@ -36,7 +46,7 @@ type HistoryItem = {
   updated_at: string;
 };
 
-const LANGS: LangOption[] = [
+const FALLBACK_LANGS: LangOption[] = [
   { labelKey: "translator.lang.auto", promptLabel: "自动检测", value: "auto" },
   { labelKey: "translator.lang.zh", promptLabel: "中文", value: "zh" },
   { labelKey: "translator.lang.en", promptLabel: "英语", value: "en" },
@@ -106,8 +116,50 @@ function getAuthHeaders() {
   };
 }
 
-function langPromptLabel(value: string) {
-  return LANGS.find((item) => item.value === value)?.promptLabel || value;
+function getLanguageLabel(option: LangOption, t: (key: string) => string) {
+  return option.labelKey ? t(option.labelKey) : option.label || option.promptLabel || option.value;
+}
+
+function langPromptLabel(value: string, languages: LangOption[]) {
+  return languages.find((item) => item.value === value)?.promptLabel || value;
+}
+
+function toAppLanguageCode(code: string) {
+  const normalized = code.trim();
+  const lower = normalized.toLowerCase();
+  switch (lower) {
+    case "zh":
+    case "zh-cn":
+      return "zh";
+    case "tl":
+      return "fil";
+    default:
+      return normalized;
+  }
+}
+
+function toDisplayLanguageCode(language: string) {
+  if (language.startsWith("zh")) return "zh-CN";
+  return language;
+}
+
+function buildLanguageOptions(items: SupportedLanguageAPIItem[]) {
+  const seen = new Set<string>();
+  const options: LangOption[] = [];
+  for (const item of items) {
+    const value = toAppLanguageCode(item.language_code || "");
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    const label = item.display_name || value;
+    options.push({
+      value,
+      label,
+      promptLabel: label,
+      supportSource: item.support_source !== false,
+      supportTarget: item.support_target !== false,
+    });
+  }
+  return options.length ? options : FALLBACK_LANGS.filter((lang) => lang.value !== "auto");
 }
 
 function LangDropdown({
@@ -142,7 +194,7 @@ function LangDropdown({
           open && "border-brand/50 ring-1 ring-brand/30"
         )}
       >
-        <span className="flex-1 text-left">{selected ? t(selected.labelKey) : value}</span>
+        <span className="flex-1 text-left">{selected ? getLanguageLabel(selected, t) : value}</span>
         <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 text-text-tertiary transition-transform", open && "rotate-180")} />
       </button>
       {open && (
@@ -160,7 +212,7 @@ function LangDropdown({
                     : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                 )}
               >
-                {t(opt.labelKey)}
+                {getLanguageLabel(opt, t)}
               </button>
             ))}
           </div>
@@ -209,6 +261,7 @@ export default function TranslatorPage() {
   const { t, language } = useI18n();
   const [sourceLang, setSourceLang] = useState("auto");
   const [targetLang, setTargetLang] = useState("en");
+  const [languageOptions, setLanguageOptions] = useState<LangOption[]>(FALLBACK_LANGS.filter((lang) => lang.value !== "auto"));
   const [inputText, setInputText] = useState("");
   const [recognizedText, setRecognizedText] = useState("");
   const [translatedText, setTranslatedText] = useState("");
@@ -219,6 +272,27 @@ export default function TranslatorPage() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [activeHistoryId, setActiveHistoryId] = useState<number | null>(null);
+
+  const sourceLanguageOptions = [FALLBACK_LANGS[0], ...languageOptions.filter((lang) => lang.supportSource !== false)];
+  const targetLanguageOptions = languageOptions.filter((lang) => lang.value !== "auto" && lang.supportTarget !== false);
+
+  const loadSupportedLanguages = async () => {
+    try {
+      const res = await fetch(`/api/translate/languages?display_language=${encodeURIComponent(toDisplayLanguageCode(language))}`, {
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) throw await readApiError(res);
+      const data = await res.json() as { languages?: SupportedLanguageAPIItem[] };
+      const options = buildLanguageOptions(data.languages || []);
+      setLanguageOptions(options);
+      if (!options.some((lang) => lang.value === targetLang && lang.supportTarget !== false)) {
+        setTargetLang(options.find((lang) => lang.supportTarget !== false)?.value || "en");
+      }
+    } catch (err) {
+      console.warn("load supported translator languages failed", err);
+      setLanguageOptions(FALLBACK_LANGS.filter((lang) => lang.value !== "auto"));
+    }
+  };
 
   const loadHistoryList = async () => {
     const token = localStorage.getItem("token");
@@ -243,6 +317,10 @@ export default function TranslatorPage() {
     window.addEventListener("conversation-created", refresh);
     return () => window.removeEventListener("conversation-created", refresh);
   }, []);
+
+  useEffect(() => {
+    void loadSupportedLanguages();
+  }, [language]);
 
 
   const loadHistoryConversation = async (id: number) => {
@@ -414,13 +492,13 @@ export default function TranslatorPage() {
                 <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-surface-border bg-surface-card shadow-sm">
                   <div className="flex h-14 items-center gap-3 border-b border-surface-border px-5">
                     <div className="flex-1">
-                      <LangDropdown value={sourceLang} options={LANGS} onChange={setSourceLang} t={t} />
+                      <LangDropdown value={sourceLang} options={sourceLanguageOptions} onChange={setSourceLang} t={t} />
                     </div>
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface text-text-tertiary">
                       <ArrowRight className="h-4 w-4" />
                     </div>
                     <div className="flex-1">
-                      <LangDropdown value={targetLang} options={LANGS.filter((lang) => lang.value !== "auto")} onChange={setTargetLang} t={t} />
+                      <LangDropdown value={targetLang} options={targetLanguageOptions} onChange={setTargetLang} t={t} />
                     </div>
                   </div>
 

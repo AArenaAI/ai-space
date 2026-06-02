@@ -113,6 +113,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		// 专用翻译路由
 		translateHandler := NewTranslateHandler(translateService)
 		publicWithAuth.POST("/translate", translateHandler.Translate)
+		publicWithAuth.GET("/translate/languages", translateHandler.SupportedLanguages)
 		publicWithAuth.GET("/chat/tasks/:message_id", chatHandler.GetTask)
 		publicWithAuth.GET("/chat/tasks/:message_id/events", chatHandler.StreamTaskEvents)
 		publicWithAuth.GET("/tasks/:task_id", chatHandler.GetGenerationTask)
