@@ -110,32 +110,66 @@ export function preserveProtectedTokens(sourceText: string, translatedText: stri
   return result;
 }
 
-function normalizeTargetLanguage(targetLanguage?: string) {
-  const lower = (targetLanguage || '').toLowerCase();
-  if (lower.startsWith('zh')) return 'zh';
-  if (lower.startsWith('ja')) return 'ja';
-  if (lower.startsWith('en')) return 'en';
-  return '';
+type PunctuationStyle = 'ascii' | 'chinese' | 'japanese' | 'korean' | 'french' | 'german' | 'unknown';
+
+const ASCII_PUNCTUATION_LANGS = new Set([
+  'af', 'am', 'ar', 'az', 'be', 'bg', 'bn', 'ca', 'cs', 'cy', 'da', 'el', 'en', 'eo', 'es', 'et',
+  'eu', 'fa', 'fi', 'ga', 'gl', 'gu', 'he', 'hi', 'hr', 'hu', 'hy', 'id', 'is', 'it', 'ka', 'kk',
+  'kn', 'ky', 'lt', 'lv', 'mk', 'ml', 'mn', 'mr', 'ms', 'nl', 'no', 'pl', 'pt', 'ro', 'ru', 'sk',
+  'sl', 'sq', 'sr', 'sv', 'sw', 'ta', 'te', 'th', 'tr', 'uk', 'ur', 'uz', 'vi',
+]);
+
+function baseLanguageCode(targetLanguage?: string) {
+  return (targetLanguage || '').toLowerCase().split(/[-_]/)[0];
+}
+
+function punctuationStyleFor(targetLanguage?: string): PunctuationStyle {
+  const base = baseLanguageCode(targetLanguage);
+  if (base === 'zh') return 'chinese';
+  if (base === 'ja') return 'japanese';
+  if (base === 'ko') return 'korean';
+  if (base === 'fr') return 'french';
+  if (base === 'de') return 'german';
+  if (ASCII_PUNCTUATION_LANGS.has(base)) return 'ascii';
+  return 'unknown';
+}
+
+function isDoubleQuoteWrapper(open: string, close: string) {
+  return open === '"' && close === '"' || open === '“' && close === '”' || open === '「' && close === '」' || open === '『' && close === '』';
+}
+
+function isSingleQuoteWrapper(open: string, close: string) {
+  return open === "'" && close === "'" || open === '‘' && close === '’';
+}
+
+function isParenthesesWrapper(open: string, close: string) {
+  return open === '(' && close === ')' || open === '（' && close === '）';
 }
 
 function targetWrapperFor(sourceOpen: string, sourceClose: string, targetLanguage?: string): [string, string] {
-  const target = normalizeTargetLanguage(targetLanguage);
+  const style = punctuationStyleFor(targetLanguage);
 
-  if (sourceOpen === '"' && sourceClose === '"' || sourceOpen === '“' && sourceClose === '”' || sourceOpen === '「' && sourceClose === '」') {
-    if (target === 'en') return ['"', '"'];
-    if (target === 'zh') return ['“', '”'];
-    if (target === 'ja') return ['「', '」'];
+  if (isDoubleQuoteWrapper(sourceOpen, sourceClose)) {
+    if (style === 'ascii') return ['"', '"'];
+    if (style === 'chinese') return ['“', '”'];
+    if (style === 'japanese') return ['「', '」'];
+    if (style === 'korean') return ['“', '”'];
+    if (style === 'french') return ['« ', ' »'];
+    if (style === 'german') return ['„', '“'];
   }
 
-  if (sourceOpen === "'" && sourceClose === "'" || sourceOpen === '‘' && sourceClose === '’') {
-    if (target === 'en') return ["'", "'"];
-    if (target === 'zh') return ['‘', '’'];
-    if (target === 'ja') return ['「', '」'];
+  if (isSingleQuoteWrapper(sourceOpen, sourceClose)) {
+    if (style === 'ascii') return ["'", "'"];
+    if (style === 'chinese') return ['‘', '’'];
+    if (style === 'japanese') return ['「', '」'];
+    if (style === 'korean') return ['‘', '’'];
+    if (style === 'french') return ['‹ ', ' ›'];
+    if (style === 'german') return ['‚', '‘'];
   }
 
-  if (sourceOpen === '(' && sourceClose === ')' || sourceOpen === '（' && sourceClose === '）') {
-    if (target === 'en') return ['(', ')'];
-    if (target === 'zh' || target === 'ja') return ['（', '）'];
+  if (isParenthesesWrapper(sourceOpen, sourceClose)) {
+    if (style === 'ascii' || style === 'french' || style === 'german') return ['(', ')'];
+    if (style === 'chinese' || style === 'japanese' || style === 'korean') return ['（', '）'];
   }
 
   return [sourceOpen, sourceClose];

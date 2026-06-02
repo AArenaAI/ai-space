@@ -3,11 +3,13 @@ const path = require('path');
 
 const source = fs.readFileSync(path.join(__dirname, '../../lib/translatorFormat.ts'), 'utf8');
 const js = source
+  .replace(/type PunctuationStyle = [^;]+;\n\n/g, '')
   .replace(/export function /g, 'function ')
   .replace(/const ASCII_WRAPPER_PAIRS: Array<\[string, string\]>/g, 'const ASCII_WRAPPER_PAIRS')
   .replace(/const LOCALIZED_WRAPPER_PAIRS: Array<\[string, string\]>/g, 'const LOCALIZED_WRAPPER_PAIRS')
   .replace(/: RegExp/g, '')
   .replace(/\?: string/g, '')
+  .replace(/: PunctuationStyle/g, '')
   .replace(/: \[string, string\]/g, '')
   .replace(/: string\[\]/g, '')
   .replace(/: unknown/g, '')
@@ -77,6 +79,55 @@ const cases = [
     translated: '你好',
     targetLanguage: 'zh',
     expected: '“你好”',
+  },
+  {
+    name: 'Chinese smart quote maps to French guillemets',
+    source: '“你好”',
+    translated: 'Bonjour',
+    targetLanguage: 'fr',
+    expected: '« Bonjour »',
+  },
+  {
+    name: 'Chinese smart quote maps to German low-high quotes',
+    source: '“你好”',
+    translated: 'Hallo',
+    targetLanguage: 'de',
+    expected: '„Hallo“',
+  },
+  {
+    name: 'Chinese smart quote maps to Korean smart quotes',
+    source: '“你好”',
+    translated: '안녕하세요',
+    targetLanguage: 'ko',
+    expected: '“안녕하세요”',
+  },
+  {
+    name: 'Chinese smart quote maps to ASCII quotes for Spanish',
+    source: '“你好”',
+    translated: 'Hola',
+    targetLanguage: 'es',
+    expected: '"Hola"',
+  },
+  {
+    name: 'fullwidth parentheses map to ASCII parentheses for French',
+    source: '（必填）',
+    translated: 'obligatoire',
+    targetLanguage: 'fr',
+    expected: '(obligatoire)',
+  },
+  {
+    name: 'ASCII parentheses map to Korean fullwidth parentheses',
+    source: '(required)',
+    translated: '필수',
+    targetLanguage: 'ko',
+    expected: '（필수）',
+  },
+  {
+    name: 'unknown target language keeps source wrapper shape',
+    source: '“hello”',
+    translated: 'hello',
+    targetLanguage: 'xx',
+    expected: '“hello”',
   },
   {
     name: 'boundary whitespace preserved',
