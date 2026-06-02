@@ -21,7 +21,7 @@ import HistoryDrawer, { type HistoryItem as DrawerHistoryItem } from "@/componen
 
 const TRANSLATOR_SKILL_KEY = "translator";
 const MAX_TEXT_LENGTH = 20000;
-const DEFAULT_MODEL = "google-cloud-translate-v3";
+const TRANSLATOR_MODEL_LABEL = "Google Translation LLM";
 
 type LangOption = {
   labelKey: string;
@@ -321,7 +321,7 @@ export default function TranslatorPage() {
     try {
       const titleSeed = text;
       const title = titleSeed.length > 22 ? `${titleSeed.slice(0, 22)}...` : titleSeed;
-      const convId = conversationId || (await createConversation(title || t("translator.defaultTitle"), DEFAULT_MODEL, t)).id;
+      const convId = conversationId || (await createConversation(title || t("translator.defaultTitle"), TRANSLATOR_MODEL_LABEL, t)).id;
       setConversationId(convId);
 
       const res = await fetch("/api/translate", {
@@ -344,9 +344,9 @@ export default function TranslatorPage() {
       setTranslatedText(formatted);
       setStreamingText("");
 
-      await saveConversationMessage(convId, "user", text, DEFAULT_MODEL);
+      await saveConversationMessage(convId, "user", text, TRANSLATOR_MODEL_LABEL);
       await saveConversationMessage(convId, "assistant", `<SOURCE_TEXT>${text}</SOURCE_TEXT>
-<TRANSLATION>${formatted}</TRANSLATION>`, DEFAULT_MODEL);
+<TRANSLATION>${formatted}</TRANSLATION>`, TRANSLATOR_MODEL_LABEL);
     } catch (err) {
       showUserError(err, { module: "chat", fallbackTitle: t("translator.error.translate"), fallbackMessage: t("translator.error.translate") });
     } finally {
@@ -463,7 +463,7 @@ export default function TranslatorPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="inline-flex h-9 items-center rounded-xl border border-surface-border bg-surface px-3 text-sm font-medium text-text-secondary">
-                        5.4 mini
+                        {TRANSLATOR_MODEL_LABEL}
                       </div>
                       <button
                         onClick={copyResult}
