@@ -809,7 +809,7 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 	targetSize := image.Point{}
 	originalSizeLabel := ""
 	detectedSize, sizeErr := detectImageSize(imageFilePath)
-	if req.EditMode == "remove-bg" || req.EditMode == "replace-bg" || req.EditMode == "text-removal" {
+	if req.EditMode == "remove-bg" || req.EditMode == "replace-bg" || req.EditMode == "text-removal" || req.EditMode == "upscale" {
 		if visualSize, visualErr := detectVisualImageSize(imageFilePath); visualErr == nil && visualSize != "" {
 			detectedSize = visualSize
 			sizeErr = nil
@@ -822,7 +822,7 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 		if parts := strings.Split(detectedSize, "x"); len(parts) == 2 {
 			fmt.Sscanf(detectedSize, "%dx%d", &targetSize.X, &targetSize.Y)
 		}
-		if size == "" && (req.EditMode == "remove-bg" || req.EditMode == "replace-bg" || req.EditMode == "text-removal") {
+		if size == "" && (req.EditMode == "remove-bg" || req.EditMode == "replace-bg" || req.EditMode == "text-removal" || req.EditMode == "upscale") {
 			size = detectedSize
 		}
 		if size == "" && (req.EditMode == "inpaint" || req.EditMode == "region-brush") {
@@ -831,13 +831,13 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 				fmt.Printf("[图片编辑] source_size=%s request_size=%s mode=%s\n", detectedSize, size, req.EditMode)
 			}
 		}
-	} else if req.EditMode == "remove-bg" || req.EditMode == "replace-bg" || req.EditMode == "text-removal" || req.EditMode == "inpaint" || req.EditMode == "region-brush" {
+	} else if req.EditMode == "remove-bg" || req.EditMode == "replace-bg" || req.EditMode == "text-removal" || req.EditMode == "upscale" || req.EditMode == "inpaint" || req.EditMode == "region-brush" {
 		fmt.Printf("[图片编辑] 读取源图尺寸失败 mode=%s path=%s err=%v\n", req.EditMode, imageFilePath, sizeErr)
 	}
 	if size == "" {
 		size = "1024x1024"
 	}
-	if (req.EditMode == "remove-bg" || req.EditMode == "text-removal") && originalSizeLabel != "" {
+	if (req.EditMode == "remove-bg" || req.EditMode == "text-removal" || req.EditMode == "upscale") && originalSizeLabel != "" {
 		size = originalSizeLabel
 	}
 
@@ -853,7 +853,7 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 	case "text-removal":
 		editPrompt = req.Prompt + ". Remove these texts/watermarks from the image. Keep everything else intact."
 	case "upscale":
-		editPrompt = "Upscale and enhance this image to 4x resolution. Add more detail, sharpen edges, improve clarity while preserving the original style and content."
+		editPrompt = "Enhance image quality locally without changing size, aspect ratio, composition, or content."
 	case "inpaint":
 		editPrompt = "STRICT LOCAL INPAINTING TASK. The provided mask marks the ONLY editable region: transparent pixels in the mask must be replaced, fully opaque pixels must remain unchanged. First remove the original object/content inside the transparent masked area, then replace that same masked area with: " + req.Prompt + ". Do not add the requested object anywhere outside the masked area. Do not keep the original masked object visible. Preserve every unmasked pixel, composition, lighting, perspective, and identity exactly."
 	case "region-brush":
@@ -909,6 +909,10 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 		}
 		if req.EditMode == "text-removal" {
 			h.processTextRemovalJob(gen.ID, imageFilePath, req.Prompt, baseURL)
+			return
+		}
+		if req.EditMode == "upscale" {
+			h.processQualityEnhancementJob(gen.ID, imageFilePath, baseURL)
 			return
 		}
 		h.processImageEditJob(gen.ID, editPrompt, size, "medium", []string{providerImagePath}, maskFilePath, baseURL, targetSize, canvasTransform, background)
@@ -1328,6 +1332,75 @@ func (h *ImageHandler) processTextRemovalJob(recordID uint, sourcePath string, p
 		return
 	}
 	fmt.Printf("[文字消除成功] ID=%d output_size=%s url=%s stdout=%s\n", recordID, outputSize, imageURL, stdout.String())
+}
+
+func (h *ImageHandler) processQualityEnhancementJob(recordID uint, sourcePath string, baseURL string) {
+	if sourcePath == "" {
+		h.failImageGeneration(recordID, "画质高清失败：源图片路径为空")
+		return
+	}
+	if _, err := os.Stat(sourcePath); err != nil {
+		h.failImageGeneration(recordID, "画质高清失败：源图片不存在")
+		return
+	}
+	if err := os.MkdirAll(imageAssetsDir(), 0755); err != nil {
+		h.failImageGeneration(recordID, "画质高清失败：创建图片目录失败")
+		return
+	}
+
+	filename := generateFileName()
+	outputPath := filepath.Join(imageAssetsDir(), filename)
+	scriptCandidates := []string{
+		"./scripts/enhance_quality.py",
+		"backend/scripts/enhance_quality.py",
+		"/home/ubuntu/workspace/ai-space/backend/scripts/enhance_quality.py",
+	}
+	script := ""
+	for _, candidate := range scriptCandidates {
+		if _, err := os.Stat(candidate); err == nil {
+			script = candidate
+			break
+		}
+	}
+	if script == "" {
+		h.failImageGeneration(recordID, "画质高清失败：本地画质增强脚本不存在")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "python3", script, "--input", sourcePath, "--output", outputPath)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		_ = os.Remove(outputPath)
+		fmt.Printf("[画质高清失败] ID=%d err=%v stdout=%s stderr=%s\n", recordID, err, stdout.String(), stderr.String())
+		h.failImageGeneration(recordID, "画质高清失败：本地画质增强处理失败")
+		return
+	}
+
+	// The Python script normalizes EXIF orientation and verifies the output equals
+	// the visual input size. Record the output PNG's actual size; do not compare
+	// against the raw JPEG header size for phone/camera images.
+	outputSize, outputErr := detectImageSize(outputPath)
+	if outputErr != nil || outputSize == "" {
+		_ = os.Remove(outputPath)
+		fmt.Printf("[画质高清尺寸读取失败] ID=%d output=%s outputErr=%v stdout=%s stderr=%s\n", recordID, outputSize, outputErr, stdout.String(), stderr.String())
+		h.failImageGeneration(recordID, "画质高清失败：读取输出尺寸失败")
+		return
+	}
+
+	imageURL := buildImageURL(baseURL, filename)
+	if saveErr := h.db.Model(&services.ImageGeneration{}).Where("id = ?", recordID).Updates(map[string]interface{}{
+		"image_url": imageURL,
+		"status":    "completed",
+		"size":      outputSize,
+	}).Error; saveErr != nil {
+		fmt.Printf("[画质高清更新记录失败] ID=%d err=%v\n", recordID, saveErr)
+		return
+	}
+	fmt.Printf("[画质高清成功] ID=%d output_size=%s url=%s stdout=%s\n", recordID, outputSize, imageURL, stdout.String())
 }
 
 func (h *ImageHandler) processBackgroundReplacementJob(recordID uint, sourcePath string, prompt string, originalSize string, baseURL string) {
