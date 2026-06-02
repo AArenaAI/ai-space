@@ -56,6 +56,7 @@ backend/uploads/*.md
 # Database & data (user-generated)
 backend/data/
 backend/uploads/
+data/
 
 # Root server.js & package files
 server.js
