@@ -69,6 +69,9 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	// 用量记录服务
 	usageService := services.NewUsageService(cfg)
 
+	// 专用翻译服务（Google Cloud Translation）
+	translateService := services.NewTranslateService(cfg)
+
 	// 文件服务
 	fileParser := services.NewFileParser(cfg, aiService)
 	fileService := services.NewFileService(db, cfg, fileParser, embedder, usageService)
@@ -106,6 +109,10 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	{
 		// 聊天路由
 		publicWithAuth.POST("/chat", chatHandler.Chat)
+
+		// 专用翻译路由
+		translateHandler := NewTranslateHandler(translateService)
+		publicWithAuth.POST("/translate", translateHandler.Translate)
 		publicWithAuth.GET("/chat/tasks/:message_id", chatHandler.GetTask)
 		publicWithAuth.GET("/chat/tasks/:message_id/events", chatHandler.StreamTaskEvents)
 		publicWithAuth.GET("/tasks/:task_id", chatHandler.GetGenerationTask)

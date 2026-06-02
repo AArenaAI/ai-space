@@ -15,6 +15,10 @@ type Config struct {
 	JWTSecret   string
 	FrontendURL string
 
+	// ========== Google Cloud Translation（专用翻译 API，后端服务账号认证）==========
+	GoogleCloudProjectID    string
+	GoogleTranslateLocation string
+
 	// ========== Chat Provider（对话模型，支持 OpenAI / Anthropic / Gemini / DeepSeek / Moonshot 多路并行）==========
 	OpenAIKey            string
 	OpenAIBaseURL        string  // 自定义 OpenAI 兼容 API 基础地址（用于中转/逆向）
@@ -121,9 +125,12 @@ func Load() *Config {
 	cfg := &Config{
 		BaseURL:     getEnv("BASE_URL", ""),
 		Port:        getEnv("PORT", "9091"),
-		DatabaseURL: getEnv("DATABASE_URL", "postgres://aipool:aipool@localhost:5432/aipool?sslmode=disable"),
+		DatabaseURL: getEnv("DATABASE_URL", "postgres://aipool:***@localhost:5432/aipool?sslmode=disable"),
 		JWTSecret:   getEnv("JWT_SECRET", "your-secret-key-change-in-production"),
 		FrontendURL: getEnv("FRONTEND_URL", "http://localhost:9090"),
+
+		GoogleCloudProjectID:    getEnv("GOOGLE_CLOUD_PROJECT_ID", ""),
+		GoogleTranslateLocation: getEnv("GOOGLE_TRANSLATE_LOCATION", "global"),
 
 		OpenAIKey:           getEnv("OPENAI_API_KEY", ""),
 		OpenAIBaseURL:       getEnv("OPENAI_BASE_URL", ""),
