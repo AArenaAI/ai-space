@@ -9,6 +9,7 @@ import {
   Languages,
   Loader2,
   RotateCcw,
+  Search,
   Send,
   Sparkles,
 } from "lucide-react";
@@ -174,8 +175,19 @@ function LangDropdown({
   t: (key: string) => string;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const ref = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const selected = options.find((o) => o.value === value);
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredOptions = normalizedQuery
+    ? options.filter((opt) => {
+        const label = getLanguageLabel(opt, t).toLowerCase();
+        const promptLabel = opt.promptLabel.toLowerCase();
+        const code = opt.value.toLowerCase();
+        return label.includes(normalizedQuery) || promptLabel.includes(normalizedQuery) || code.includes(normalizedQuery);
+      })
+    : options;
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -185,36 +197,71 @@ function LangDropdown({
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  useEffect(() => {
+    if (!open) {
+      setQuery("");
+      return;
+    }
+    const id = window.setTimeout(() => searchInputRef.current?.focus(), 0);
+    return () => window.clearTimeout(id);
+  }, [open]);
+
   return (
     <div className="relative" ref={ref}>
       <button
+        type="button"
         onClick={() => setOpen((v) => !v)}
         className={cn(
           "flex h-10 w-full items-center justify-between gap-2 rounded-xl border border-surface-border bg-surface px-3 text-sm text-text-primary transition",
           open && "border-brand/50 ring-1 ring-brand/30"
         )}
       >
-        <span className="flex-1 text-left">{selected ? getLanguageLabel(selected, t) : value}</span>
+        <span className="flex-1 truncate text-left">{selected ? getLanguageLabel(selected, t) : value}</span>
         <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 text-text-tertiary transition-transform", open && "rotate-180")} />
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-[70]" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-[80] mt-1 max-h-80 w-40 overflow-y-auto rounded-xl border border-surface-border bg-surface-elevated shadow-xl">
-            {options.map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => { onChange(opt.value); setOpen(false); }}
-                className={cn(
-                  "flex w-full items-center px-3 py-2 text-left text-sm transition",
-                  value === opt.value
-                    ? "bg-surface-card font-medium text-text-primary"
-                    : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
-                )}
-              >
-                {getLanguageLabel(opt, t)}
-              </button>
-            ))}
+          <div className="absolute left-0 top-full z-[80] mt-1 w-64 overflow-hidden rounded-xl border border-surface-border bg-surface-elevated shadow-xl">
+            <div className="border-b border-surface-border p-2">
+              <div className="flex h-9 items-center gap-2 rounded-lg border border-surface-border bg-surface px-2.5 text-text-tertiary">
+                <Search className="h-3.5 w-3.5 shrink-0" />
+                <input
+                  ref={searchInputRef}
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") setOpen(false);
+                  }}
+                  placeholder={t("appearance.language.search")}
+                  className="min-w-0 flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-tertiary"
+                />
+              </div>
+            </div>
+            <div className="max-h-72 overflow-y-auto py-1">
+              {filteredOptions.length ? (
+                filteredOptions.map((opt) => (
+                  <button
+                    type="button"
+                    key={opt.value}
+                    onClick={() => { onChange(opt.value); setOpen(false); }}
+                    className={cn(
+                      "flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition",
+                      value === opt.value
+                        ? "bg-surface-card font-medium text-text-primary"
+                        : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
+                    )}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{getLanguageLabel(opt, t)}</span>
+                    <span className="shrink-0 text-xs uppercase text-text-tertiary">{opt.value}</span>
+                  </button>
+                ))
+              ) : (
+                <div className="px-3 py-6 text-center text-sm text-text-tertiary">
+                  {t("appearance.language.noResults")}
+                </div>
+              )}
+            </div>
           </div>
         </>
       )}
