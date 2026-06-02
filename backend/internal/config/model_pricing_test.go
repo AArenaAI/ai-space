@@ -44,6 +44,21 @@ func TestLoadModelPricesFromJSONOverridesFile(t *testing.T) {
 	}
 }
 
+func TestLoadModelPricesFromSourcePricingJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prices.json")
+	writeTestFile(t, path, `[{"provider":"moonshot","model":"kimi-k2.6","pricing_unit":"token_1k","source_currency":"USD","source_unit":"per_1m_tokens","source_input_cache_hit_price":0.16,"source_input_cache_miss_price":0.95,"source_output_price":4,"context_window_tokens":262144}]`)
+	t.Setenv("MODEL_PRICES_FILE", path)
+
+	prices := loadModelPrices()
+	price, ok := prices["moonshot:kimi-k2.6"]
+	if !ok {
+		t.Fatalf("expected moonshot:kimi-k2.6 source price")
+	}
+	if price.SourceCurrency != "USD" || price.SourceInputCacheHitPrice != 0.16 || price.SourceInputCacheMissPrice != 0.95 || price.SourceOutputPrice != 4 || price.ContextWindowTokens != 262144 {
+		t.Fatalf("unexpected source price: %+v", price)
+	}
+}
+
 func TestLoadModelPricesFromEnvOverride(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "prices.json")
 	writeTestFile(t, path, `[{"provider":"openai","model":"gpt-5.5","input_price_rmb":1,"output_price_rmb":2}]`)

@@ -2,7 +2,16 @@
 
 AI Space usage cost accounting records a price snapshot into `api_usage_logs` when each external model/API call is written. Model-level pricing has priority over provider-level fallback prices.
 
-All prices are in RMB. Model prices are not secrets, so the preferred configuration is a versioned JSON file.
+Model prices are not secrets, so the preferred configuration is a versioned JSON file.
+
+## Two price views
+
+AI Space keeps two related but different price views:
+
+1. **Original pricing** — the provider's official price and currency, e.g. OpenAI/Gemini/Moonshot in USD and DeepSeek in CNY.
+2. **Unified pricing** — the RMB price used for cost aggregation. This is calculated at usage-write time from the original price and the current exchange rate, then stored as a historical snapshot.
+
+Do not hard-code exchange rates in `model-prices.json`. USD prices are converted at runtime through a live USD→CNY lookup. The resulting `input_unit_price_rmb`, `output_unit_price_rmb`, `image_unit_price_rmb`, `total_cost_rmb`, and `exchange_rate_to_rmb` are saved into the usage ledger for traceability.
 
 ## Preferred: JSON file
 
@@ -26,14 +35,24 @@ Format:
     "provider": "openai",
     "model": "gpt-5.5",
     "pricing_unit": "token_1k",
-    "input_price_rmb": 0.0,
-    "output_price_rmb": 0.0
+    "source_currency": "USD",
+    "source_unit": "per_1m_tokens",
+    "source_input_price": 5.0,
+    "source_output_price": 30.0,
+    "pricing_basis": "standard_short_context_non_batch",
+    "source_url": "https://developers.openai.com/api/docs/pricing?latest-pricing=standard"
   },
   {
-    "provider": "openai",
-    "model": "gpt-image-2",
-    "pricing_unit": "image",
-    "image_unit_price_rmb": 0.0
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro",
+    "pricing_unit": "token_1k",
+    "source_currency": "CNY",
+    "source_unit": "per_1m_tokens",
+    "source_input_cache_hit_price": 0.025,
+    "source_input_cache_miss_price": 3.0,
+    "source_output_price": 6.0,
+    "pricing_basis": "cache_miss_input_and_output",
+    "source_url": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
   }
 ]
 ```
@@ -43,17 +62,37 @@ A keyed object is also supported:
 ```json
 {
   "openai:gpt-5.5": {
-    "input_price_rmb": 0.0,
-    "output_price_rmb": 0.0
-  },
-  "openai:gpt-image-2": {
-    "pricing_unit": "image",
-    "image_unit_price_rmb": 0.0
+    "source_currency": "USD",
+    "source_unit": "per_1m_tokens",
+    "source_input_price": 5.0,
+    "source_output_price": 30.0
   }
 }
 ```
 
-Explicit `0` prices in JSON are preserved as configured entries. Usage cost remains `0` until real prices are filled in.
+## Source-unit conversion
+
+Runtime conversion to RMB price snapshots:
+
+```txt
+per_1m_tokens -> source_price * exchange_rate / 1000 = RMB / 1K tokens
+per_1k_tokens -> source_price * exchange_rate        = RMB / 1K tokens
+per_image     -> source_price * exchange_rate        = RMB / image
+per_request   -> source_price * exchange_rate        = RMB / request
+```
+
+For providers with cache-hit/cache-miss input prices, current cost accounting uses `source_input_cache_miss_price` by default because the usage ledger does not yet distinguish cached input tokens. `source_input_cache_hit_price` is preserved for display/audit and future cached-token support.
+
+## Exchange-rate lookup
+
+USD prices are converted at usage-write time. Lookup order:
+
+1. `USD_CNY_RATE` env override, if set — useful for tests or intentionally fixed accounting periods.
+2. `https://api.frankfurter.app/latest?from=USD&to=CNY`
+3. `https://open.er-api.com/v6/latest/USD`
+4. `USD_CNY_FALLBACK` env, if set
+
+If no exchange rate can be resolved for a non-CNY source currency, the unified RMB price remains `0` rather than using a stale guessed rate.
 
 ## Optional override 1: `MODEL_PRICES_JSON`
 
@@ -78,12 +117,9 @@ MODEL_PRICE_OPENAI_GPT_5_5_PRICING_UNIT=token_1k
 
 MODEL_PRICE_OPENAI_GPT_IMAGE_2_IMAGE=0.0
 MODEL_PRICE_OPENAI_GPT_IMAGE_2_PRICING_UNIT=image
-
-MODEL_PRICE_DEEPSEEK_DEEPSEEK_V4_PRO_INPUT=0.0
-MODEL_PRICE_DEEPSEEK_DEEPSEEK_V4_PRO_OUTPUT=0.0
 ```
 
-Per-model environment variables override both the file and `MODEL_PRICES_JSON`. They are mainly for temporary emergency overrides.
+Per-model environment variables are RMB-denominated compatibility overrides and override both the file and `MODEL_PRICES_JSON`. They are mainly for temporary emergency overrides.
 
 Supported suffixes:
 
@@ -105,7 +141,7 @@ backend/config/model-prices.json
 
 ## Fallback behavior
 
-If a model-level price is not configured, the backend falls back to the existing provider/service-level settings:
+If a model-level price is not configured, the backend falls back to the existing provider/service-level RMB settings:
 
 - `OPENAI_INPUT_PRICE`, `OPENAI_OUTPUT_PRICE`
 - `GEMINI_INPUT_PRICE`, `GEMINI_OUTPUT_PRICE`
@@ -120,4 +156,4 @@ If both model-level and fallback prices are unset, usage cost remains `0`.
 
 ## Historical records
 
-Changing prices affects only new usage records. Existing rows keep their price snapshots (`input_unit_price_rmb`, `output_unit_price_rmb`, `image_unit_price_rmb`, `total_cost_rmb`) unless a separate backfill is run.
+Changing source prices or exchange rates affects only new usage records. Existing rows keep their snapshots (`source_currency`, source prices, `exchange_rate_to_rmb`, RMB unit prices, and `total_cost_rmb`) unless a separate backfill is run.

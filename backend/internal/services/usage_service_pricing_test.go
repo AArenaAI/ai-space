@@ -32,6 +32,32 @@ func TestUsageServiceModelPriceOverridesProviderFallback(t *testing.T) {
 	}
 }
 
+func TestUsageServiceConvertsSourceUSDPriceToRMB(t *testing.T) {
+	t.Setenv("USD_CNY_RATE", "7")
+	svc := NewUsageService(&config.Config{
+		ModelPrices: map[string]config.ModelPrice{
+			"moonshot:kimi-k2.6": {
+				Provider:                  "moonshot",
+				Model:                     "kimi-k2.6",
+				PricingUnit:               "token_1k",
+				SourceCurrency:            "USD",
+				SourceUnit:                "per_1m_tokens",
+				SourceInputCacheMissPrice: 0.95,
+				SourceInputCacheHitPrice:  0.16,
+				SourceOutputPrice:         4,
+			},
+		},
+	})
+
+	price := svc.getTokenPrice("moonshot", "kimi-k2.6")
+	if price.InputPriceRMB != 0.00665 || price.OutputPriceRMB != 0.028 || price.ExchangeRateToRMB != 7 {
+		t.Fatalf("expected USD source price converted to RMB/1K using cache-miss input, got %+v", price)
+	}
+	if price.SourceInputCacheHitPrice != 0.16 || price.SourceCurrency != "USD" {
+		t.Fatalf("expected original source pricing retained, got %+v", price)
+	}
+}
+
 func TestUsageServiceImageModelPriceOverridesProviderFallback(t *testing.T) {
 	svc := NewUsageService(&config.Config{
 		ImageGenUnitPrice: 0.1,

@@ -43,13 +43,23 @@ type APIUsageLog struct {
 	Currency string `json:"currency" gorm:"default:'RMB'"` // 货币，默认 RMB
 	Status   string `json:"status" gorm:"index"`           // success / failed / estimated / missing_usage / cancelled / ignored
 
-	// 价格快照，避免之后改配置导致历史成本不可追溯。
+	// 价格快照，避免之后改配置/汇率导致历史成本不可追溯。
 	PricingUnit        string  `json:"pricing_unit"` // token_1k / image / request / video_second / character
 	UnitCount          float64 `json:"unit_count"`
 	InputUnitPriceRMB  float64 `json:"input_unit_price_rmb"`
 	OutputUnitPriceRMB float64 `json:"output_unit_price_rmb"`
 	ImageUnitPrice     float64 `json:"image_unit_price"` // 兼容旧字段：单张图片价格（元/张）
 	ImageUnitPriceRMB  float64 `json:"image_unit_price_rmb"`
+
+	SourceCurrency            string  `json:"source_currency" gorm:"size:16"` // 原始官方定价币种：USD/CNY
+	SourceUnit                string  `json:"source_unit" gorm:"size:32"`     // per_1m_tokens / per_image / per_request
+	SourceInputPrice          float64 `json:"source_input_price"`
+	SourceInputCacheHitPrice  float64 `json:"source_input_cache_hit_price"`
+	SourceInputCacheMissPrice float64 `json:"source_input_cache_miss_price"`
+	SourceOutputPrice         float64 `json:"source_output_price"`
+	SourceImagePrice          float64 `json:"source_image_price"`
+	SourceRequestPrice        float64 `json:"source_request_price"`
+	ExchangeRateToRMB         float64 `json:"exchange_rate_to_rmb"` // 当次统一折算到 RMB 的汇率快照
 
 	Estimated bool `json:"estimated"` // 是否为估算值（API 未返回 usage 时使用估算）
 

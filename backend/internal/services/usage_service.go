@@ -5,6 +5,9 @@ import (
 	"aipool-backend/internal/models"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -34,6 +37,9 @@ func NewUsageService(cfg *config.Config) *UsageService {
 
 // RecordUsage 通用记录 usage 方法
 func (s *UsageService) RecordUsage(usage *models.APIUsageLog) error {
+	if usage != nil {
+		s.attachOriginalPriceSnapshot(usage)
+	}
 	if models.DB == nil {
 		return nil
 	}
@@ -60,7 +66,7 @@ func (s *UsageService) RecordChatUsage(userID uint, provider, model, modelType s
 		rawJSON = string(b)
 	}
 
-	return s.RecordUsage(&models.APIUsageLog{
+	log := &models.APIUsageLog{
 		UserID:             userID,
 		Service:            "chat",
 		Provider:           provider,
@@ -82,7 +88,9 @@ func (s *UsageService) RecordChatUsage(userID uint, provider, model, modelType s
 		Estimated:          usage.Estimated,
 		RawUsageJSON:       rawJSON,
 		CreatedAt:          time.Now(),
-	})
+	}
+	applyPriceSnapshot(log, price)
+	return s.RecordUsage(log)
 }
 
 // RecordChatUsageWithResourceID 记录 Chat 用量（带 resource_id）。旧调用中 resourceID 历史上多为 conversation_id。
@@ -123,7 +131,7 @@ func (s *UsageService) RecordChatUsageWithContext(userID uint, provider, model, 
 		ctx.MessageID = resourceID
 	}
 
-	return s.RecordUsage(&models.APIUsageLog{
+	log := &models.APIUsageLog{
 		UserID:             userID,
 		GuestID:            ctx.GuestID,
 		Service:            "chat",
@@ -154,7 +162,9 @@ func (s *UsageService) RecordChatUsageWithContext(userID uint, provider, model, 
 		LatencyMs:          ctx.LatencyMs,
 		RequestID:          ctx.RequestID,
 		CreatedAt:          time.Now(),
-	})
+	}
+	applyPriceSnapshot(log, price)
+	return s.RecordUsage(log)
 }
 
 // GetGuestDailyChatCost 获取匿名用户今日 chat 请求的金额汇总
@@ -248,7 +258,7 @@ func (s *UsageService) RecordImageUsage(userID uint, model string, imageCount in
 		unitCount = float64(promptTokens+completionTokens) / 1000.0
 	}
 
-	return s.RecordUsage(&models.APIUsageLog{
+	log := &models.APIUsageLog{
 		UserID:             userID,
 		Service:            "image_generation",
 		Provider:           "openai",
@@ -273,7 +283,9 @@ func (s *UsageService) RecordImageUsage(userID uint, model string, imageCount in
 		Estimated:          estimated,
 		RawUsageJSON:       rawJSON,
 		CreatedAt:          time.Now(),
-	})
+	}
+	applyPriceSnapshot(log, price)
+	return s.RecordUsage(log)
 }
 
 // RecordPPTUsage 记录文档生成（PPT）用量
@@ -296,7 +308,7 @@ func (s *UsageService) RecordPPTUsage(userID uint, model string, resourceID uint
 		rawJSON = string(b)
 	}
 
-	return s.RecordUsage(&models.APIUsageLog{
+	log := &models.APIUsageLog{
 		UserID:             userID,
 		Service:            "document_generation",
 		Provider:           "openai",
@@ -319,7 +331,9 @@ func (s *UsageService) RecordPPTUsage(userID uint, model string, resourceID uint
 		Estimated:          usage.Estimated,
 		RawUsageJSON:       rawJSON,
 		CreatedAt:          time.Now(),
-	})
+	}
+	applyPriceSnapshot(log, price)
+	return s.RecordUsage(log)
 }
 
 // RecordVisionUsage 记录 Vision（图片解析）用量
@@ -342,7 +356,7 @@ func (s *UsageService) RecordVisionUsage(userID uint, guestID, model string, res
 		rawJSON = string(b)
 	}
 
-	return s.RecordUsage(&models.APIUsageLog{
+	log := &models.APIUsageLog{
 		UserID:             userID,
 		GuestID:            guestID,
 		Service:            "vision",
@@ -366,7 +380,9 @@ func (s *UsageService) RecordVisionUsage(userID uint, guestID, model string, res
 		Estimated:          usage.Estimated,
 		RawUsageJSON:       rawJSON,
 		CreatedAt:          time.Now(),
-	})
+	}
+	applyPriceSnapshot(log, price)
+	return s.RecordUsage(log)
 }
 
 // RecordEmbeddingUsage 记录 Embedding 用量
@@ -375,7 +391,7 @@ func (s *UsageService) RecordEmbeddingUsage(userID uint, model string, resourceI
 	cost := models.CalculateEmbeddingCost(inputTokens, price.InputPriceRMB)
 
 	totalTokens := inputTokens
-	return s.RecordUsage(&models.APIUsageLog{
+	log := &models.APIUsageLog{
 		UserID:            userID,
 		Service:           "embedding",
 		Provider:          "openai",
@@ -395,7 +411,9 @@ func (s *UsageService) RecordEmbeddingUsage(userID uint, model string, resourceI
 		UnitCount:         float64(totalTokens) / 1000.0,
 		InputUnitPriceRMB: price.InputPriceRMB,
 		CreatedAt:         time.Now(),
-	})
+	}
+	applyPriceSnapshot(log, price)
+	return s.RecordUsage(log)
 }
 
 // getTokenPrice 获取 token 型模型价格：模型级价格优先，provider 级价格兜底。
@@ -405,31 +423,184 @@ func (s *UsageService) getTokenPrice(provider, model string) config.ModelPrice {
 }
 
 func (s *UsageService) getTokenPriceWithFallback(provider, model string, fallbackInput, fallbackOutput float64) config.ModelPrice {
-	if price, ok := s.getModelPrice(provider, model); ok && (price.InputPriceRMB > 0 || price.OutputPriceRMB > 0) {
+	if price, ok := s.getModelPrice(provider, model); ok && hasTokenPrice(price) {
 		if price.PricingUnit == "" {
 			price.PricingUnit = "token_1k"
 		}
-		return price
+		return resolveModelPrice(price)
 	}
-	return config.ModelPrice{Provider: strings.ToLower(provider), Model: strings.ToLower(model), PricingUnit: "token_1k", InputPriceRMB: fallbackInput, OutputPriceRMB: fallbackOutput}
+	return config.ModelPrice{Provider: strings.ToLower(provider), Model: strings.ToLower(model), PricingUnit: "token_1k", InputPriceRMB: fallbackInput, OutputPriceRMB: fallbackOutput, SourceCurrency: "CNY", SourceUnit: "per_1k_tokens", SourceInputPrice: fallbackInput, SourceOutputPrice: fallbackOutput, ExchangeRateToRMB: 1}
 }
 
 func (s *UsageService) getImagePrice(provider, model string) config.ModelPrice {
-	if price, ok := s.getModelPrice(provider, model); ok && (price.ImageUnitPrice > 0 || price.InputPriceRMB > 0 || price.OutputPriceRMB > 0) {
+	if price, ok := s.getModelPrice(provider, model); ok && hasImagePrice(price) {
 		if price.PricingUnit == "" {
-			if price.ImageUnitPrice > 0 {
+			if price.SourceImagePrice > 0 || price.ImageUnitPrice > 0 {
 				price.PricingUnit = "image"
 			} else {
 				price.PricingUnit = "token_1k"
 			}
 		}
-		return price
+		return resolveModelPrice(price)
 	}
 	unit := "image"
 	if s.cfg.ImageGenUnitPrice <= 0 && (s.cfg.ImageGenInputPrice > 0 || s.cfg.ImageGenOutputPrice > 0) {
 		unit = "token_1k"
 	}
-	return config.ModelPrice{Provider: strings.ToLower(provider), Model: strings.ToLower(model), PricingUnit: unit, InputPriceRMB: s.cfg.ImageGenInputPrice, OutputPriceRMB: s.cfg.ImageGenOutputPrice, ImageUnitPrice: s.cfg.ImageGenUnitPrice}
+	return config.ModelPrice{Provider: strings.ToLower(provider), Model: strings.ToLower(model), PricingUnit: unit, InputPriceRMB: s.cfg.ImageGenInputPrice, OutputPriceRMB: s.cfg.ImageGenOutputPrice, ImageUnitPrice: s.cfg.ImageGenUnitPrice, SourceCurrency: "CNY", SourceUnit: "per_1k_tokens", SourceInputPrice: s.cfg.ImageGenInputPrice, SourceOutputPrice: s.cfg.ImageGenOutputPrice, SourceImagePrice: s.cfg.ImageGenUnitPrice, ExchangeRateToRMB: 1}
+}
+
+func applyPriceSnapshot(log *models.APIUsageLog, price config.ModelPrice) {
+	if log == nil {
+		return
+	}
+	log.SourceCurrency = price.SourceCurrency
+	log.SourceUnit = price.SourceUnit
+	log.SourceInputPrice = price.SourceInputPrice
+	log.SourceInputCacheHitPrice = price.SourceInputCacheHitPrice
+	log.SourceInputCacheMissPrice = price.SourceInputCacheMissPrice
+	log.SourceOutputPrice = price.SourceOutputPrice
+	log.SourceImagePrice = price.SourceImagePrice
+	log.SourceRequestPrice = price.SourceRequestPrice
+	log.ExchangeRateToRMB = price.ExchangeRateToRMB
+}
+
+func hasTokenPrice(price config.ModelPrice) bool {
+	return price.InputPriceRMB > 0 || price.OutputPriceRMB > 0 || price.SourceInputPrice > 0 || price.SourceInputCacheMissPrice > 0 || price.SourceOutputPrice > 0
+}
+
+func hasImagePrice(price config.ModelPrice) bool {
+	return hasTokenPrice(price) || price.ImageUnitPrice > 0 || price.SourceImagePrice > 0
+}
+
+func resolveModelPrice(price config.ModelPrice) config.ModelPrice {
+	rate := exchangeRateToRMB(price.SourceCurrency)
+	if rate <= 0 {
+		return price
+	}
+	price.ExchangeRateToRMB = rate
+	if price.SourceCurrency == "" && (price.InputPriceRMB > 0 || price.OutputPriceRMB > 0 || price.ImageUnitPrice > 0 || price.RequestUnitPrice > 0) {
+		price.SourceCurrency = "CNY"
+	}
+	inputSource := price.SourceInputPrice
+	if price.SourceInputCacheMissPrice > 0 {
+		inputSource = price.SourceInputCacheMissPrice
+	}
+	if inputSource > 0 {
+		price.InputPriceRMB = convertSourceUnitToRMB(price.SourceUnit, inputSource, rate)
+	}
+	if price.SourceOutputPrice > 0 {
+		price.OutputPriceRMB = convertSourceUnitToRMB(price.SourceUnit, price.SourceOutputPrice, rate)
+	}
+	if price.SourceImagePrice > 0 {
+		price.ImageUnitPrice = convertSourceUnitToRMB(price.SourceUnit, price.SourceImagePrice, rate)
+	}
+	if price.SourceRequestPrice > 0 {
+		price.RequestUnitPrice = convertSourceUnitToRMB(price.SourceUnit, price.SourceRequestPrice, rate)
+	}
+	return price
+}
+
+func convertSourceUnitToRMB(sourceUnit string, price, rate float64) float64 {
+	switch strings.ToLower(strings.TrimSpace(sourceUnit)) {
+	case "per_1m_tokens":
+		return price * rate / 1000.0
+	case "per_1k_tokens", "per_image", "per_request", "per_video_second":
+		return price * rate
+	default:
+		return price * rate
+	}
+}
+
+func exchangeRateToRMB(currency string) float64 {
+	switch strings.ToUpper(strings.TrimSpace(currency)) {
+	case "", "CNY", "RMB":
+		return 1
+	case "USD":
+		return fetchUSDCNYRate()
+	default:
+		return 0
+	}
+}
+
+func fetchUSDCNYRate() float64 {
+	if override := strings.TrimSpace(os.Getenv("USD_CNY_RATE")); override != "" {
+		if rate, err := strconv.ParseFloat(override, 64); err == nil && rate > 0 {
+			return rate
+		}
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	if rate := fetchUSDCNYRateFromFrankfurter(client); rate > 0 {
+		return rate
+	}
+	if rate := fetchUSDCNYRateFromOpenExchange(client); rate > 0 {
+		return rate
+	}
+	if fallback := strings.TrimSpace(os.Getenv("USD_CNY_FALLBACK")); fallback != "" {
+		if rate, err := strconv.ParseFloat(fallback, 64); err == nil && rate > 0 {
+			return rate
+		}
+	}
+	return 0
+}
+
+func fetchUSDCNYRateFromFrankfurter(client *http.Client) float64 {
+	req, err := http.NewRequest("GET", "https://api.frankfurter.app/latest?from=USD&to=CNY", nil)
+	if err != nil {
+		return 0
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		Rates map[string]float64 `json:"rates"`
+	}
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 && json.NewDecoder(resp.Body).Decode(&payload) == nil {
+		return payload.Rates["CNY"]
+	}
+	return 0
+}
+
+func fetchUSDCNYRateFromOpenExchange(client *http.Client) float64 {
+	req, err := http.NewRequest("GET", "https://open.er-api.com/v6/latest/USD", nil)
+	if err != nil {
+		return 0
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		Result string             `json:"result"`
+		Rates  map[string]float64 `json:"rates"`
+	}
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 && json.NewDecoder(resp.Body).Decode(&payload) == nil && payload.Result == "success" {
+		return payload.Rates["CNY"]
+	}
+	return 0
+}
+
+func (s *UsageService) attachOriginalPriceSnapshot(usage *models.APIUsageLog) {
+	if usage == nil || usage.SourceCurrency != "" {
+		return
+	}
+	price, ok := s.getModelPrice(usage.Provider, usage.Model)
+	if !ok {
+		return
+	}
+	price = resolveModelPrice(price)
+	usage.SourceCurrency = price.SourceCurrency
+	usage.SourceUnit = price.SourceUnit
+	usage.SourceInputPrice = price.SourceInputPrice
+	usage.SourceInputCacheHitPrice = price.SourceInputCacheHitPrice
+	usage.SourceInputCacheMissPrice = price.SourceInputCacheMissPrice
+	usage.SourceOutputPrice = price.SourceOutputPrice
+	usage.SourceImagePrice = price.SourceImagePrice
+	usage.SourceRequestPrice = price.SourceRequestPrice
+	usage.ExchangeRateToRMB = price.ExchangeRateToRMB
 }
 
 func (s *UsageService) getModelPrice(provider, model string) (config.ModelPrice, bool) {

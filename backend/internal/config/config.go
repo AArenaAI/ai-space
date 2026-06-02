@@ -131,19 +131,25 @@ type ModelPrice struct {
 	Provider         string  `json:"provider"`
 	Model            string  `json:"model"`
 	PricingUnit      string  `json:"pricing_unit"`
-	InputPriceRMB    float64 `json:"input_price_rmb"`
-	OutputPriceRMB   float64 `json:"output_price_rmb"`
-	ImageUnitPrice   float64 `json:"image_unit_price_rmb"`
-	VideoUnitPrice   float64 `json:"video_unit_price_rmb"`
-	RequestUnitPrice float64 `json:"request_unit_price_rmb"`
+	InputPriceRMB    float64 `json:"input_price_rmb,omitempty"`        // 已折算 RMB / 1K tokens；仅用于 env/fallback 兼容
+	OutputPriceRMB   float64 `json:"output_price_rmb,omitempty"`       // 已折算 RMB / 1K tokens；仅用于 env/fallback 兼容
+	ImageUnitPrice   float64 `json:"image_unit_price_rmb,omitempty"`   // 已折算 RMB / 张；仅用于 env/fallback 兼容
+	VideoUnitPrice   float64 `json:"video_unit_price_rmb,omitempty"`   // 已折算 RMB / 秒；仅用于 env/fallback 兼容
+	RequestUnitPrice float64 `json:"request_unit_price_rmb,omitempty"` // 已折算 RMB / 次；仅用于 env/fallback 兼容
 
-	SourceCurrency    string  `json:"source_currency"`
-	SourceUnit        string  `json:"source_unit"`
-	SourceInputPrice  float64 `json:"source_input_price"`
-	SourceOutputPrice float64 `json:"source_output_price"`
-	FXUSDCNY          float64 `json:"fx_usd_cny"`
-	PricingBasis      string  `json:"pricing_basis"`
-	SourceURL         string  `json:"source_url"`
+	SourceCurrency            string  `json:"source_currency"`                         // USD / CNY；官方原始定价币种
+	SourceUnit                string  `json:"source_unit"`                             // per_1m_tokens / per_1k_tokens / per_image / per_request
+	SourceInputPrice          float64 `json:"source_input_price,omitempty"`            // 官方输入价；无缓存区分时使用
+	SourceInputCacheHitPrice  float64 `json:"source_input_cache_hit_price,omitempty"`  // 官方缓存命中输入价
+	SourceInputCacheMissPrice float64 `json:"source_input_cache_miss_price,omitempty"` // 官方缓存未命中输入价；当前成本默认使用它
+	SourceOutputPrice         float64 `json:"source_output_price,omitempty"`           // 官方输出价
+	SourceImagePrice          float64 `json:"source_image_price,omitempty"`            // 官方单图价
+	SourceVideoPrice          float64 `json:"source_video_price,omitempty"`            // 官方视频价
+	SourceRequestPrice        float64 `json:"source_request_price,omitempty"`          // 官方单请求价
+	ContextWindowTokens       int     `json:"context_window_tokens,omitempty"`
+	PricingBasis              string  `json:"pricing_basis"`
+	SourceURL                 string  `json:"source_url"`
+	ExchangeRateToRMB         float64 `json:"-"` // 运行时折算汇率快照，不写入价格 JSON
 }
 
 func Load() *Config {
@@ -403,22 +409,28 @@ func addModelPrice(prices map[string]ModelPrice, price ModelPrice, allowZero boo
 		return
 	}
 	if price.PricingUnit == "" {
-		if price.ImageUnitPrice > 0 {
+		if price.ImageUnitPrice > 0 || price.SourceImagePrice > 0 {
 			price.PricingUnit = "image"
-		} else if price.VideoUnitPrice > 0 {
+		} else if price.VideoUnitPrice > 0 || price.SourceVideoPrice > 0 {
 			price.PricingUnit = "video_second"
-		} else if price.RequestUnitPrice > 0 {
+		} else if price.RequestUnitPrice > 0 || price.SourceRequestPrice > 0 {
 			price.PricingUnit = "request"
 		} else {
 			price.PricingUnit = "token_1k"
 		}
 	}
-	if !allowZero && price.InputPriceRMB <= 0 && price.OutputPriceRMB <= 0 && price.ImageUnitPrice <= 0 && price.VideoUnitPrice <= 0 && price.RequestUnitPrice <= 0 {
+	if !allowZero && !hasAnyPrice(price) {
 		return
 	}
 	price.Provider = strings.ToLower(provider)
 	price.Model = strings.ToLower(model)
 	prices[normalizeModelPriceKey(price.Provider, price.Model)] = price
+}
+
+func hasAnyPrice(price ModelPrice) bool {
+	return price.InputPriceRMB > 0 || price.OutputPriceRMB > 0 || price.ImageUnitPrice > 0 || price.VideoUnitPrice > 0 || price.RequestUnitPrice > 0 ||
+		price.SourceInputPrice > 0 || price.SourceInputCacheHitPrice > 0 || price.SourceInputCacheMissPrice > 0 || price.SourceOutputPrice > 0 ||
+		price.SourceImagePrice > 0 || price.SourceVideoPrice > 0 || price.SourceRequestPrice > 0
 }
 
 func knownModelsForProvider(provider string) []string {
