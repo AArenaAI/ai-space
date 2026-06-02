@@ -22,6 +22,7 @@ import {
   createCompareAssistantMessages,
   createUserChatMessage,
 } from "@/lib/chatMessageFactory";
+import { initializeAssistantRealtimeBatch } from "@/lib/chatInitialRealtime";
 import {
   selectCompareModelIds,
   shouldStartCompare,
@@ -52,6 +53,8 @@ export type UseChatCompareSendRuntimeOptions = {
   messages: Message[];
   models: ChatModel[];
   currentConversation: number | undefined;
+  notebookId?: number;
+  notebookFileIds?: number[];
   effectiveSkillKey: string | undefined;
   createConversation: CreateConversationAction;
   setMessages: Dispatch<SetStateAction<Message[]>>;
@@ -79,6 +82,8 @@ export function useChatCompareSendRuntime({
   messages,
   models,
   currentConversation,
+  notebookId,
+  notebookFileIds,
   effectiveSkillKey,
   createConversation,
   setMessages,
@@ -143,6 +148,7 @@ export function useChatCompareSendRuntime({
       }) as Message[];
       const contextMessages = [...messages, userMsg];
 
+      initializeAssistantRealtimeBatch(assistantMsgs, userMsg.createdAt || now());
       setIsCompare(true);
       setCompareModels(compareModelIds);
       setMessages((prev) => [...prev, userMsg, ...assistantMsgs]);
@@ -204,6 +210,8 @@ export function useChatCompareSendRuntime({
           compareModelIds,
           modelMessages: toModelMessages(contextMessages),
           conversationId: convId,
+          notebookId,
+          notebookFileIds,
           reasoning,
           search,
           templateId,

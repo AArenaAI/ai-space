@@ -3,11 +3,13 @@
 import { useSearchParams } from "next/navigation";
 import { useModels } from "@/hooks/useModels";
 import ChatInterface from "./ChatInterface";
+import { useI18n } from "@/lib/i18n";
 
 function ChatSkeleton() {
+  const { t } = useI18n();
   return (
     <div className="flex flex-col h-full bg-surface items-center justify-center">
-      <div className="animate-pulse text-text-tertiary text-sm">加载中...</div>
+      <div className="animate-pulse text-text-tertiary text-sm">{t("chat.loading")}</div>
     </div>
   );
 }

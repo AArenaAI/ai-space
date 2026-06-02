@@ -54,7 +54,7 @@ test("buildChatDonePatch completes when content exists", () => {
     busyStatus,
   }), {
     hasContent: true,
-    patch: { completedAt: 123, activityStatus: undefined, searchStatus: undefined },
+    patch: { completedAt: 123, activityStatus: undefined, searchStatus: undefined, phase: "completed" },
   });
 });
 
@@ -66,7 +66,7 @@ test("buildChatDonePatch keeps busy when content is empty", () => {
     busyStatus,
   }), {
     hasContent: false,
-    patch: { completedAt: undefined, activityStatus: busyStatus },
+    patch: { completedAt: undefined, activityStatus: busyStatus, phase: "waiting_provider" },
   });
 });
 
@@ -108,6 +108,7 @@ test("buildChatGenerationTaskPatch merges meta and marks background registration
     isComplexTask: false,
     lastSequence: 7,
     activityStatus: generatingStatus,
+    phase: "waiting_provider",
   });
 });
 
@@ -152,7 +153,7 @@ test("buildChatActivityPatch only sets search status for web search", () => {
   assert.deepEqual(mod.buildChatActivityPatch({
     meta: { kind: "web_search", status: "searching" },
     activityStatus: searchStatus,
-  }), { activityStatus: searchStatus, searchStatus: "searching" });
+  }), { activityStatus: searchStatus, searchStatus: "searching", phase: "searching" });
   assert.deepEqual(mod.buildChatActivityPatch({
     meta: { kind: "tool_call", status: "running" },
     activityStatus: generatingStatus,
@@ -168,6 +169,7 @@ test("buildChatSearchPatch normalizes sources and count", () => {
     searchSources: [{ url: "u" }],
     searchSourcesCount: 1,
     activityStatus: searchStatus,
+    phase: "waiting_provider",
   });
 });
 

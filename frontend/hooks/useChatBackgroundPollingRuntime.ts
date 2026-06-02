@@ -18,7 +18,7 @@ import type { ChatModel, Message } from "@/lib/chatTypes";
 type TaskStreamsRef = MutableRefObject<Record<string, AbortController>>;
 type BackgroundPollersRef = MutableRefObject<Record<string, number>>;
 
-type RealtimeSnapshot = { content?: string } | undefined;
+type RealtimeSnapshot = { content?: string; generationStartedAt?: number; statusTimeline?: Message["statusTimeline"] } | undefined;
 
 type StartBackgroundPollingRunner = typeof startBackgroundPollingRunner;
 
@@ -87,13 +87,16 @@ export function createStartBackgroundPollingAction(input: CreateStartBackgroundP
       callbacks: {
         onPollState: (pollState) => {
           const streamActive = !!input.taskStreamsRef.current[localMessageId];
-          const liveContent = realtimeGet(localMessageId)?.content || "";
+          const realtime = realtimeGet(localMessageId);
+          const liveContent = realtime?.content || "";
           const currentTime = now();
           input.setMessages((prev) => patchMessageById(prev, localMessageId, (message) =>
             buildBackgroundPollingMessagePatch({
               existingContent: message.content,
               polledContent: pollState.content,
               liveContent,
+              generationStartedAt: realtime?.generationStartedAt ?? message.generationStartedAt,
+              statusTimeline: realtime?.statusTimeline ?? message.statusTimeline,
               streamActive,
               serverMessageId,
               isFinished: pollState.isFinished,

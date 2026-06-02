@@ -105,8 +105,9 @@ type ChatRequest struct {
 	GroupModels     []string           `json:"group_models,omitempty"`       // 本轮不可变模型快照
 	UserMessageID   uint               `json:"user_message_id,omitempty"`    // skip_save_user_msg 时复用的用户消息
 	WorkspaceID     uint               `json:"workspace_id,omitempty"`
-	NotebookID      uint               `json:"notebook_id,omitempty"` // 指定笔记本资料空间
-	SkillKey        string             `json:"skill_key,omitempty"`   // 指定技能 key
+	NotebookID      uint               `json:"notebook_id,omitempty"`       // 指定笔记本资料空间
+	NotebookFileIDs []uint             `json:"notebook_file_ids,omitempty"` // 指定本轮参与回答的笔记本资料源
+	SkillKey        string             `json:"skill_key,omitempty"`         // 指定技能 key
 
 	// 本轮消息显式附件，只用于 message_files 展示，同时默认参与本轮 RAG
 	MessageFileIDs []string `json:"message_file_ids,omitempty"`
@@ -497,6 +498,29 @@ type ChatFilePlan struct {
 	HistoricalFiles []models.File // 本轮可作为补充上下文的历史文件
 }
 
+func filterNotebookFilesByID(files []models.File, ids []uint) []models.File {
+	if ids == nil {
+		return files
+	}
+	allowed := make(map[uint]struct{}, len(ids))
+	for _, id := range ids {
+		if id == 0 {
+			continue
+		}
+		allowed[id] = struct{}{}
+	}
+	if len(allowed) == 0 {
+		return nil
+	}
+	filtered := make([]models.File, 0, len(files))
+	for _, file := range files {
+		if _, ok := allowed[file.ID]; ok {
+			filtered = append(filtered, file)
+		}
+	}
+	return filtered
+}
+
 func (h *ChatHandler) buildChatFilePlan(req ChatRequest, userID uint, guestID string) ChatFilePlan {
 	messagePublicIDs := req.MessageFileIDs
 	if len(messagePublicIDs) == 0 && len(req.FileIDs) > 0 {
@@ -507,6 +531,9 @@ func (h *ChatHandler) buildChatFilePlan(req ChatRequest, userID uint, guestID st
 	_, _, messageFiles := h.resolveChatFiles(messagePublicIDs, userID, guestID)
 	_, _, contextFiles := h.resolveChatFiles(req.ContextFileIDs, userID, guestID)
 	notebookFiles := h.loadNotebookFiles(req.NotebookID, userID, guestID)
+	if req.NotebookID > 0 && req.NotebookFileIDs != nil {
+		notebookFiles = filterNotebookFilesByID(notebookFiles, req.NotebookFileIDs)
+	}
 
 	// 当前消息显式带了附件时，进入“当前附件隔离模式”：
 	// 只回答本轮上传/附加的文件，不把历史会话文件或显式 context_file_ids 混进来。
@@ -1772,7 +1799,7 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 		outgoingSeq++
 		h.persistTaskEvent(streamTask, assistantMsgID, outgoingSeq, eventType, string(out))
 		outcome.LastSequenceNumber = outgoingSeq
-		return writeAndFlush("data: " + string(out) + "\n\n")
+		return writeAndFlush(fmt.Sprintf("id: %d\ndata: %s\n\n", outgoingSeq, string(out)))
 	}
 	writeDoneEvent := func() error {
 		// In task-stream mode (w == nil), do not persist [DONE] here.
@@ -1788,12 +1815,13 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 		if !clientConnected {
 			return nil
 		}
-		return writeAndFlush("data: [DONE]\n\n")
+		return writeAndFlush(fmt.Sprintf("id: %d\ndata: [DONE]\n\n", outgoingSeq))
 	}
 
 	const heartbeatInterval = 15 * time.Second
 	heartbeat := time.NewTicker(heartbeatInterval)
 	defer heartbeat.Stop()
+
 
 	var fullContent strings.Builder
 	var reasoningContent strings.Builder

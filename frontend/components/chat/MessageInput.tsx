@@ -19,7 +19,7 @@ const TEXTAREA_MAX_HEIGHT = 180;
 
 const SUPPORTED_FILE_EXTENSIONS = new Set([
   ".pdf",
-  ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp",
+  ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".mp4", ".mov",
   ".xla", ".xlb", ".xlc", ".xlm", ".xls", ".xlsx", ".xlt", ".xlw", ".csv", ".tsv", ".iif",
   ".doc", ".docx", ".dot", ".odt", ".rtf",
   ".pot", ".ppa", ".pps", ".ppt", ".pptx", ".pwz", ".wiz",
@@ -30,6 +30,7 @@ const SUPPORTED_FILE_EXTENSIONS = new Set([
   ".swift", ".kt", ".scala", ".r", ".tex", ".yaml", ".yml", ".toml", ".sh", ".bash",
 ]);
 const SUPPORTED_FILE_ACCEPT = Array.from(SUPPORTED_FILE_EXTENSIONS).sort().join(",");
+const IMAGE_UPLOAD_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"]);
 
 function getFileExtension(filename: string) {
   const idx = filename.lastIndexOf(".");
@@ -44,6 +45,8 @@ function getUploadFileExtension(file: File) {
   if (file.type === "image/webp") return ".webp";
   if (file.type === "image/gif") return ".gif";
   if (file.type === "image/bmp") return ".bmp";
+  if (file.type === "video/mp4") return ".mp4";
+  if (file.type === "video/quicktime") return ".mov";
   return "";
 }
 
@@ -51,8 +54,42 @@ function isSupportedUploadFile(file: File) {
   return SUPPORTED_FILE_EXTENSIONS.has(getUploadFileExtension(file));
 }
 
+function normalizeExtension(ext: string) {
+  const value = ext.trim().toLowerCase();
+  if (!value) return "";
+  return value.startsWith(".") ? value : `.${value}`;
+}
+
+function modelSupportsUploadFile(file: File, model?: ChatModel) {
+  if (!model) return true;
+  const ext = normalizeExtension(getUploadFileExtension(file));
+  const mime = file.type.trim().toLowerCase();
+  const supportedInputs = (model.supported_inputs || []).map((input) => input.trim().toLowerCase()).filter(Boolean);
+  const supportedExtensions = (model.supported_file_extensions || []).map(normalizeExtension).filter(Boolean);
+  const supportedMimeTypes = (model.supported_file_mime_types || []).map((type) => type.trim().toLowerCase()).filter(Boolean);
+
+  if (ext && supportedExtensions.length > 0 && supportedExtensions.includes(ext)) {
+    return true;
+  }
+  if (mime && supportedMimeTypes.length > 0 && supportedMimeTypes.includes(mime)) {
+    return true;
+  }
+
+  // If metadata explicitly says the model only supports text, it must not accept any attachment.
+  if (supportedInputs.length > 0) {
+    return false;
+  }
+
+  // Older cached model metadata may not include file lists or input lists. In that legacy case, only enforce the app-level allowlist.
+  return supportedExtensions.length === 0 && supportedMimeTypes.length === 0;
+}
+
+function getModelDisplayName(model?: ChatModel) {
+  return model?.name || model?.provider || model?.id || "Current model";
+}
+
 function isImageAttachment(file: AttachedFile) {
-  return file.type === "image" || file.type.startsWith("image/") || [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"].includes(getFileExtension(file.filename));
+  return file.type === "image" || file.type.startsWith("image/") || IMAGE_UPLOAD_EXTENSIONS.has(getFileExtension(file.filename));
 }
 
 function getFilePreviewUrl(file: AttachedFile) {
@@ -86,6 +123,7 @@ interface MessageInputProps {
   onNewChat: () => void;
   onRecommendationContextChange?: (context: ModelRecommendationContext) => void;
   quoteDraft?: QuoteDraft | null;
+  initialAttachedFiles?: AttachedFile[];
 }
 
 export interface AttachedFile {
@@ -122,12 +160,12 @@ function normalizeReasoningMode(value: string | null): ReasoningMode {
   return value === "think" || value === "expert" || value === "fast" ? value : "fast";
 }
 
-export default function MessageInput({ onSend, onStop, isLoading, compareMode, onToggleCompare, currentModel, templates, selectedTemplateId, onSelectTemplate, onNewChat, onRecommendationContextChange, quoteDraft }: MessageInputProps) {
+export default function MessageInput({ onSend, onStop, isLoading, compareMode, onToggleCompare, currentModel, templates, selectedTemplateId, onSelectTemplate, onNewChat, onRecommendationContextChange, quoteDraft, initialAttachedFiles }: MessageInputProps) {
   const { t } = useI18n();
   const { isOffline, justRestored } = useNetworkStatus();
   const [content, setContent] = useState("");
   const [activeQuote, setActiveQuote] = useState("");
-  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>(() => initialAttachedFiles || []);
   const [uploading, setUploading] = useState(false);
   const [reasoningMode, setReasoningMode] = useState<ReasoningMode>(() => {
     if (typeof window !== "undefined") {
@@ -310,9 +348,11 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     e?.preventDefault();
     const trimmedContent = content.trim();
     const trimmedQuote = activeQuote.trim();
-    if ((!trimmedContent && !trimmedQuote && attachedFiles.length === 0) || isLoading || hasParsingFiles || isOffline) {
+    if ((!trimmedContent && !trimmedQuote && attachedFiles.length === 0) || isLoading || hasParsingFiles || hasBlockingAttachmentFiles || isOffline) {
       if (hasParsingFiles) {
         toast.warning(t("chat.fileParsingWait"));
+      } else if (hasBlockingAttachmentFiles) {
+        toast.warning(t("chat.fileAttachmentFixErrors"));
       } else if (isOffline) {
         toast.warning(t("messageInput.network.offlineToast"));
       }
@@ -365,9 +405,24 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
   };
 
   const uploadSingleFile = async (file: File) => {
+    if (file.size <= 0) {
+      toast.warning(t("chat.emptyFile"));
+      return;
+    }
+
     if (!isSupportedUploadFile(file)) {
       const ext = getFileExtension(file.name);
-        toast.warning(ext ? t("messageInput.search.fileFormat").replace("{ext}", ext) : t("messageInput.unsupportedFile"));
+      toast.warning(ext ? t("messageInput.search.fileFormat").replace("{ext}", ext) : t("messageInput.unsupportedFile"));
+      return;
+    }
+
+    if (!modelSupportsUploadFile(file, currentModel)) {
+      const ext = getUploadFileExtension(file).toUpperCase().replace(/^\./, "") || file.type || file.name;
+      toast.error(
+        t("chat.fileUploadUnsupportedModel")
+          .replace("{model}", getModelDisplayName(currentModel))
+          .replace("{type}", ext)
+      );
       return;
     }
 
@@ -494,9 +549,10 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
   };
 
   const hasParsingFiles = attachedFiles.some((f) => f.parse_status === "pending" || f.parse_status === "parsing");
+  const hasBlockingAttachmentFiles = attachedFiles.some((f) => f.parse_status === "error" || f.parse_status === "unsupported" || (f.parse_status === "done" && !f.content?.trim() && !isImageAttachment(f)));
   const hasContent = content.trim().length > 0;
   const activeQuotePreview = activeQuote.replace(/^>\s?/gm, "").trim();
-  const canSubmit = (hasContent || activeQuote.length > 0 || attachedFiles.length > 0) && !hasParsingFiles && !isOffline;
+  const canSubmit = (hasContent || activeQuote.length > 0 || attachedFiles.length > 0) && !hasParsingFiles && !hasBlockingAttachmentFiles && !isOffline;
 
   useEffect(() => {
     const next = getReasoningEffortForMode(currentModel, reasoningMode);
@@ -667,7 +723,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
               <div className="relative rounded-xl border border-surface-border/60 bg-surface-elevated/70 px-3 py-2.5 pr-10 shadow-sm">
                 <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">
                   <Quote className="h-3.5 w-3.5" />
-                  <span>引用文本</span>
+                  <span>{t("chat.quote.title")}</span>
                 </div>
                 <div className="line-clamp-3 whitespace-pre-wrap border-l-2 border-brand/35 pl-3 text-[13px] leading-5 text-text-secondary">
                   {activeQuotePreview}
@@ -679,8 +735,8 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                     textareaRef.current?.focus();
                   }}
                   className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full text-text-tertiary transition-colors hover:bg-surface-card hover:text-text-primary"
-                  aria-label="清除引用"
-                  title="清除引用"
+                  aria-label={t("chat.quote.clear")}
+                  title={t("chat.quote.clear")}
                   data-testid="chat-quote-draft-clear"
                 >
                   <X className="h-3.5 w-3.5" />
@@ -703,13 +759,19 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                     unsupported: { icon: <FileText className="w-4 h-4 text-text-tertiary" />, label: t("chat.fileStatusUnsupported") },
                   };
                   const cfg = statusConfig[status] || statusConfig.pending;
-                  const isEmptyContent = status === "done" && !file.content?.trim();
+                  const isImage = isImageAttachment(file);
+                  const isEmptyContent = status === "done" && !file.content?.trim() && !isImage;
                   const title = file.error_message
                     ? getErrorMessage(file.error_message, { module: "file", fallbackMessage: t("chat.fileParseFailedRetry") })
                     : isEmptyContent
                     ? t("chat.fileEmptyContent")
                     : cfg.label;
-                  const isImage = isImageAttachment(file);
+                  const hasIssue = status === "error" || status === "unsupported" || isEmptyContent;
+                  const issueLabel = status === "unsupported"
+                    ? t("chat.fileStatusUnsupported")
+                    : isEmptyContent
+                    ? t("chat.fileEmptyShort")
+                    : t("chat.fileStatusFailed");
                   const previewUrl = getFilePreviewUrl(file);
 
                   if (isImage && previewUrl) {
@@ -728,6 +790,12 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                             {cfg.icon}
                           </div>
                         )}
+                        {hasIssue && (
+                          <div className="absolute inset-x-1.5 bottom-1.5 rounded-lg border border-red-300/50 bg-red-950/75 px-1.5 py-1 text-[10px] font-medium leading-tight text-red-50 shadow-sm backdrop-blur" data-testid="chat-attachment-error-label">
+                            <div>{issueLabel}</div>
+                            <div className="line-clamp-2 font-normal opacity-90">{title}</div>
+                          </div>
+                        )}
                         <button
                           type="button"
                           onClick={() => removeAttachedFile(idx)}
@@ -744,11 +812,23 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                   return (
                     <div
                       key={idx}
-                      className="flex items-center gap-2 rounded-full border border-surface-border/30 bg-surface-card px-3 py-1.5 text-[13px] transition-all"
+                      className={cn(
+                        "flex items-center gap-2 rounded-xl border bg-surface-card px-3 py-1.5 text-[13px] transition-all",
+                        hasIssue ? "border-red-400/40 bg-red-500/5" : "border-surface-border/30"
+                      )}
                       title={title}
+                      data-testid={hasIssue ? "chat-attachment-error-chip" : "chat-attachment-chip"}
                     >
                       <div className="shrink-0">{cfg.icon}</div>
-                      <span className={cn("max-w-[180px] truncate text-text-primary", status === "error" && "text-red-400")}>{file.filename}</span>
+                      <div className="min-w-0 max-w-[220px]">
+                        <div className={cn("truncate text-text-primary", hasIssue && "text-red-400")}>{file.filename}</div>
+                        {hasIssue && (
+                          <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[11px] leading-tight text-red-400" data-testid="chat-attachment-error-label">
+                            <span className="shrink-0 rounded-full bg-red-500/10 px-1.5 py-0.5 font-medium">{issueLabel}</span>
+                            <span className="truncate text-red-400/80">{title}</span>
+                          </div>
+                        )}
+                      </div>
                       <button
                         type="button"
                         onClick={() => removeAttachedFile(idx)}

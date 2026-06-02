@@ -1,12 +1,17 @@
+import { updateStatusTimeline, type ChatStatusTimelineStep } from "./chatStatusTimeline";
+
 export type RealtimeActivityStatus = { kind: string; status: string; label: string };
 
 export type RuntimePhase =
   | "idle"
   | "starting"
+  | "waiting_provider"
   | "thinking"
+  | "reasoning"
   | "searching"
   | "retrieving_files"
   | "generating"
+  | "streaming_answer"
   | "finalizing"
   | "completed"
   | "stopped"
@@ -34,6 +39,10 @@ export type RealtimeData = {
   expiresAt?: number;
   /** Structured runtime phase for status derivation. Legacy callers may still use activity/search flags. */
   phase?: RuntimePhase;
+  /** Stable start timestamp for the current generation lifecycle. Used for user-facing elapsed time. */
+  generationStartedAt?: number;
+  /** User-visible status process timeline for completed badge popover. */
+  statusTimeline?: ChatStatusTimelineStep[];
   activityStatus?: RealtimeActivityStatus;
   searchStatus?: "searching" | "completed" | "failed";
   searchSources?: any[];
@@ -69,6 +78,7 @@ export type RealtimeAppendPatch =
 
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const COMPLETED_TTL_MS = 30 * 1000;
+const FINALIZING_HOLD_TTL_MS = 5 * 1000;
 const MAX_ENTRIES = 200;
 
 const store = new Map<string, RealtimeData>();
@@ -144,13 +154,30 @@ function applyLegacyDelta(prev: RealtimeData, delta: string): Pick<RealtimeData,
 function buildNext(id: string, patch: Partial<RealtimeData>): RealtimeData {
   const prev = store.get(id) || { content: "" };
   const ts = now();
-  const next: RealtimeData = immutable({
+  const startsGeneration = !!(
+    patch.phase === "waiting_provider" ||
+    patch.phase === "searching" ||
+    patch.phase === "reasoning" ||
+    patch.phase === "streaming_answer" ||
+    patch.phase === "generating" ||
+    patch.phase === "thinking" ||
+    patch.generationTaskId ||
+    patch.backgroundTaskId ||
+    patch.activityStatus?.status === "running" ||
+    patch.searchStatus === "searching"
+  );
+  const draft: RealtimeData = {
     ...prev,
     ...patch,
     content: patch.content ?? prev.content ?? "",
+    generationStartedAt: patch.generationStartedAt ?? prev.generationStartedAt ?? (startsGeneration ? ts : undefined),
     version: ++versionCounter,
     updatedAt: ts,
-    expiresAt: ts + ttlFor({ ...prev, ...patch }),
+    expiresAt: patch.expiresAt ?? ts + ttlFor({ ...prev, ...patch }),
+  };
+  const next: RealtimeData = immutable({
+    ...draft,
+    statusTimeline: updateStatusTimeline(prev.statusTimeline, prev, draft, patch, ts),
   });
   return next;
 }
@@ -252,6 +279,7 @@ export function realtimeAppend(id: string, patch: RealtimeAppendPatch) {
     answerContent,
     reasoningContent,
     isReasoning: nextReasoning,
+    phase: nextReasoning ? "reasoning" : (answerContent.trim() ? "streaming_answer" : prev.phase),
   });
 }
 
@@ -300,6 +328,17 @@ export function realtimeGet(id: string): RealtimeData | undefined {
     return undefined;
   }
   return data;
+}
+
+export function realtimeMarkCompleted(id: string, completedAt = now()) {
+  if (!id) return;
+  const prev = store.get(id);
+  if (!prev) return;
+  setEntry(id, {
+    completedAt,
+    phase: prev.phase === "failed" || prev.phase === "stopped" ? prev.phase : "completed",
+    expiresAt: completedAt + FINALIZING_HOLD_TTL_MS,
+  });
 }
 
 export function realtimeClear(id: string) {

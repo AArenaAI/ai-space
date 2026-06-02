@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Check, Copy, Link2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 interface ShareDialogProps {
   isOpen: boolean;
@@ -11,6 +12,7 @@ interface ShareDialogProps {
 }
 
 export default function ShareDialog({ isOpen, slug, onClose }: ShareDialogProps) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -40,7 +42,7 @@ export default function ShareDialog({ isOpen, slug, onClose }: ShareDialogProps)
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-[420px] mx-4 rounded-2xl bg-surface-elevated border border-surface-border shadow-2xl p-6 animate-dialog-appear">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-base font-semibold text-text-primary">分享对话</h3>
+          <h3 className="text-base font-semibold text-text-primary">{t("chat.share.dialogTitle")}</h3>
           <button
             onClick={onClose}
             className="p-1 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
@@ -50,7 +52,7 @@ export default function ShareDialog({ isOpen, slug, onClose }: ShareDialogProps)
         </div>
 
         <p className="text-sm text-text-secondary mb-4 leading-relaxed">
-          已生成分享链接，复制后即可与他人分享这段对话。
+          {t("chat.share.dialogDescription")}
         </p>
 
         <div className="flex items-center gap-2 mb-5">
@@ -70,12 +72,12 @@ export default function ShareDialog({ isOpen, slug, onClose }: ShareDialogProps)
             {copied ? (
               <>
                 <Check className="w-4 h-4" />
-                已复制
+                {t("chat.action.copied")}
               </>
             ) : (
               <>
                 <Copy className="w-4 h-4" />
-                复制
+                {t("chat.action.copy")}
               </>
             )}
           </button>
@@ -86,7 +88,7 @@ export default function ShareDialog({ isOpen, slug, onClose }: ShareDialogProps)
             onClick={onClose}
             className="px-4 py-2 rounded-lg text-sm text-text-secondary hover:text-text-primary hover:bg-surface-card transition-colors"
           >
-            完成
+            {t("chat.share.done")}
           </button>
         </div>
       </div>

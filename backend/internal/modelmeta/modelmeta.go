@@ -21,25 +21,25 @@ type ModelInfo struct {
 
 var SupportedModels = []ModelInfo{
 	// OpenAI
-	{ID: "gpt-5.4", Name: "GPT 5.4", Provider: "OpenAI", Description: "旗舰通用模型，综合能力强", Color: "#10a37f", Capabilities: []string{"chat", "search", "reasoning"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
-	{ID: "gpt-5.4-mini", Name: "GPT 5.4 Mini", Provider: "OpenAI", Description: "快速、经济，日常任务首选", Color: "#10a37f", Capabilities: []string{"chat", "search", "reasoning"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
-	{ID: "gpt-5.5", Name: "GPT 5.5", Provider: "OpenAI", Description: "第五代增强版，更强推理能力", Color: "#10a37f", Capabilities: []string{"chat", "search", "reasoning"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
-	{ID: "gpt-5.5-pro", Name: "GPT 5.5 Pro", Provider: "OpenAI", Description: "旗舰级专业模型，最强的多模态能力", Color: "#10a37f", Capabilities: []string{"chat", "search", "reasoning"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
-	{ID: "gpt-image-2", Name: "GPT Image 2", Provider: "OpenAI", Description: "原生多模态模型，可生成图片", Color: "#10a37f", Capabilities: []string{"image"}, SupportedInputs: []string{"text"}},
+	{ID: "gpt-5.4", Name: "GPT 5.4", Provider: "OpenAI", Description: "Flagship general-purpose model with strong overall capability", Color: "#10a37f", Capabilities: []string{"chat", "search", "reasoning"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
+	{ID: "gpt-5.4-mini", Name: "GPT 5.4 Mini", Provider: "OpenAI", Description: "Fast and cost-effective for everyday tasks", Color: "#10a37f", Capabilities: []string{"chat", "search", "reasoning"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
+	{ID: "gpt-5.5", Name: "GPT 5.5", Provider: "OpenAI", Description: "Enhanced fifth-generation model with stronger reasoning", Color: "#10a37f", Capabilities: []string{"chat", "search", "reasoning"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
+	{ID: "gpt-5.5-pro", Name: "GPT 5.5 Pro", Provider: "OpenAI", Description: "Flagship professional model with top multimodal capability", Color: "#10a37f", Capabilities: []string{"chat", "search", "reasoning"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
+	{ID: "gpt-image-2", Name: "GPT Image 2", Provider: "OpenAI", Description: "Native multimodal model for image generation", Color: "#10a37f", Capabilities: []string{"image"}, SupportedInputs: []string{"text"}},
 	// DeepSeek
-	{ID: "deepseek-v4-pro", Name: "DeepSeek-V4 Pro", Provider: "DeepSeek", Description: "V4 Pro 增强版，最强推理能力", Color: "#4d6bfa", Capabilities: []string{"chat", "reasoning"}, SupportedInputs: []string{"text", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
-	{ID: "deepseek-v4-flash", Name: "DeepSeek-V4 Flash", Provider: "DeepSeek", Description: "V4 轻量版，极速响应", Color: "#6366f1", Capabilities: []string{"chat"}, SupportedInputs: []string{"text", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
+	{ID: "deepseek-v4-pro", Name: "DeepSeek-V4 Pro", Provider: "DeepSeek", Description: "Enhanced V4 Pro with the strongest reasoning capability", Color: "#4d6bfa", Capabilities: []string{"chat", "reasoning"}, SupportedInputs: []string{"text"}},
+	{ID: "deepseek-v4-flash", Name: "DeepSeek-V4 Flash", Provider: "DeepSeek", Description: "Lightweight V4 with ultra-fast responses", Color: "#6366f1", Capabilities: []string{"chat"}, SupportedInputs: []string{"text"}},
 	// Google
-	{ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", Provider: "Google", Description: "长上下文多模态文档理解模型，供文档研读等专用能力使用", Color: "#4285f4", Capabilities: []string{"document", "reasoning", "search"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
-	{ID: "gemini-3.1-pro-preview", Name: "Gemini 3.1 Pro", Provider: "Google", Description: "新一代旗舰推理模型，更强多模态", Color: "#4285f4", Capabilities: []string{"chat", "reasoning", "search"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
-	{ID: "gemini-3.5-flash", Name: "Gemini 3.5 Flash", Provider: "Google", Description: "新一代高速模型，响应更快更稳", Color: "#4285f4", Capabilities: []string{"chat", "search"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
-	{ID: "gemini-3.1-flash-lite", Name: "Gemini 3.1 Flash", Provider: "Google", Description: "新一代快速模型，日常问答首选", Color: "#4285f4", Capabilities: []string{"chat", "search"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
+	{ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", Provider: "Google", Description: "Long-context multimodal document understanding model for document research workflows", Color: "#4285f4", Capabilities: []string{"document", "reasoning", "search"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
+	{ID: "gemini-3.1-pro-preview", Name: "Gemini 3.1 Pro", Provider: "Google", Description: "Next-generation flagship reasoning model with stronger multimodal capability", Color: "#4285f4", Capabilities: []string{"chat", "reasoning", "search"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
+	{ID: "gemini-3.5-flash", Name: "Gemini 3.5 Flash", Provider: "Google", Description: "Next-generation high-speed model with faster, steadier responses", Color: "#4285f4", Capabilities: []string{"chat", "search"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
+	{ID: "gemini-3.1-flash-lite", Name: "Gemini 3.1 Flash", Provider: "Google", Description: "Next-generation fast model, ideal for everyday Q&A", Color: "#4285f4", Capabilities: []string{"chat", "search"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
 	// Volcengine Video
-	{ID: "doubao-seedance-2-0-fast-260128", Name: "Seedance 2.0 Fast", Provider: "Volcengine", Description: "火山引擎视频生成快速版", Color: "#ff6a00", Capabilities: []string{"video"}, SupportedInputs: []string{"text"}},
-	{ID: "doubao-seedance-2-0-260128", Name: "Seedance 2.0", Provider: "Volcengine", Description: "火山引擎视频生成标准版", Color: "#ff0050", Capabilities: []string{"video"}, SupportedInputs: []string{"text"}},
+	{ID: "doubao-seedance-2-0-fast-260128", Name: "Seedance 2.0 Fast", Provider: "Volcengine", Description: "Fast video generation model from Volcengine", Color: "#ff6a00", Capabilities: []string{"video"}, SupportedInputs: []string{"text"}},
+	{ID: "doubao-seedance-2-0-260128", Name: "Seedance 2.0", Provider: "Volcengine", Description: "Standard video generation model from Volcengine", Color: "#ff0050", Capabilities: []string{"video"}, SupportedInputs: []string{"text"}},
 	// Moonshot
-	{ID: "kimi-k2.5", Name: "Kimi K2.5", Provider: "Moonshot", Description: "旗舰多模态，支持图片理解+256K上下文", Color: "#00b96b", Capabilities: []string{"chat"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
-	{ID: "kimi-k2.6", Name: "Kimi K2.6", Provider: "Moonshot", Description: "最新旗舰版，更强多模态+推理能力", Color: "#00b96b", Capabilities: []string{"chat"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
+	{ID: "kimi-k2.5", Name: "Kimi K2.5", Provider: "Moonshot", Description: "Flagship multimodal model with image understanding and 256K context", Color: "#00b96b", Capabilities: []string{"chat"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
+	{ID: "kimi-k2.6", Name: "Kimi K2.6", Provider: "Moonshot", Description: "Latest flagship with stronger multimodal and reasoning capability", Color: "#00b96b", Capabilities: []string{"chat"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
 }
 
 // AllModels 返回所有模型，并补齐前端展示所需的默认状态与文件能力字段。

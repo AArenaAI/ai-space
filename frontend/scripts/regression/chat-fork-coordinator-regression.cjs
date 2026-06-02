@@ -9,7 +9,11 @@ const projectRoot = path.resolve(__dirname, "../..");
 
 function loadModule() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "chat-fork-coordinator-regression-"));
-  const source = fs.readFileSync(path.join(projectRoot, "lib/chatForkCoordinator.ts"), "utf8");
+  let source = fs.readFileSync(path.join(projectRoot, "lib/chatForkCoordinator.ts"), "utf8");
+  source = source.replace(
+    /import \{ normalizeError, readApiError \} from "@\/lib\/errors";\n/g,
+    "const normalizeError = (error, options = {}) => error instanceof Error ? error : new Error(options.fallbackMessage || String(error));\nconst readApiError = async (response, fallback) => { try { const data = await response.json(); return data && (data.error || data.message) || fallback; } catch { return fallback; } };\n"
+  );
   const output = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true, strict: true },
     fileName: path.join(projectRoot, "lib/chatForkCoordinator.ts"),
@@ -85,6 +89,7 @@ function response(ok, data) {
       id: "42",
       role: "assistant",
       content: "hello",
+      reasoningContent: undefined,
       model: "m1",
       createdAt: 0,
       completedAt: 1000,
@@ -184,7 +189,7 @@ function response(ok, data) {
         headers: {},
         fetchImpl: async () => response(false, { error: "bad fork" }),
       }),
-      /bad fork/
+      /Fork 对比失败，请稍后重试。/
     );
     await assert.rejects(
       runForkChatRequest({

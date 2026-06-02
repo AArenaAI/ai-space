@@ -51,6 +51,7 @@ export type GenerationTaskEventPatches = {
     useBackground: boolean;
     isComplexTask: boolean;
     lastSequence: number;
+    phase: "waiting_provider";
   };
 };
 
@@ -78,6 +79,7 @@ export function buildGenerationTaskEventPatches({
       isComplexTask: taskInfo.isComplexTask,
       lastSequence,
       activityStatus,
+      phase: "waiting_provider",
     },
   };
 }
@@ -91,7 +93,17 @@ export function buildTaskActivityPatch({ meta, activityStatus }: BuildTaskActivi
   const searchStatus = meta?.kind === "web_search"
     ? (meta.status === "running" ? "searching" : "completed")
     : undefined;
-  return { activityStatus, searchStatus };
+  return {
+    activityStatus,
+    searchStatus,
+    phase: meta?.kind === "web_search"
+      ? (meta.status === "running" || meta.status === "searching" ? "searching" : "waiting_provider")
+      : meta?.kind === "reasoning"
+        ? "reasoning"
+        : meta?.kind === "generating"
+          ? "streaming_answer"
+          : undefined,
+  };
 }
 
 export type BuildTaskSearchPatchOptions = {
@@ -107,6 +119,7 @@ export function buildTaskSearchPatch({ meta, activityStatus }: BuildTaskSearchPa
     searchSources: meta?.sources || [],
     searchSourcesCount: typeof meta?.sources_count === "number" ? meta.sources_count : undefined,
     activityStatus,
+    phase: meta?.status === "searching" ? "searching" : "waiting_provider",
   };
 }
 

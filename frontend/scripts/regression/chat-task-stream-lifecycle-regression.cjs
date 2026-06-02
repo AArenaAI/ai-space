@@ -15,7 +15,11 @@ const sourcePaths = [
 function loadModule() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "chat-task-stream-lifecycle-regression-"));
   for (const sourcePath of sourcePaths) {
-    const source = fs.readFileSync(sourcePath, "utf8");
+    let source = fs.readFileSync(sourcePath, "utf8");
+    source = source.replace(
+      /import \{ normalizeError \} from "@\/lib\/errors";\n/g,
+      "const normalizeError = (error) => error instanceof Error ? error : new Error(String(error));\n"
+    );
     const transpiled = ts.transpileModule(source, {
       compilerOptions: {
         module: ts.ModuleKind.CommonJS,

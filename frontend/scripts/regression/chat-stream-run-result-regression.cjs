@@ -66,12 +66,12 @@ test("buildChatStreamRunResult uses fallback content only when content is undefi
   assert.equal(mod.buildChatStreamRunResult({ fallbackContent: "fallback" }).content, "fallback");
 });
 
-test("shouldRecoverStream only recovers abnormal disconnects with ids", () => {
+test("shouldRecoverStream recovers navigation disconnects with ids but not user stops", () => {
   assert.equal(mod.shouldRecoverStream({ sawDone: false, serverMessageId: 1 }), true);
   assert.equal(mod.shouldRecoverStream({ sawDone: false, generationTaskId: 2 }), true);
   assert.equal(mod.shouldRecoverStream({ sawDone: false }), false);
   assert.equal(mod.shouldRecoverStream({ sawDone: true, serverMessageId: 1 }), false);
-  assert.equal(mod.shouldRecoverStream({ sawDone: false, abortReason: "navigation", serverMessageId: 1 }), false);
+  assert.equal(mod.shouldRecoverStream({ sawDone: false, abortReason: "navigation", serverMessageId: 1 }), true);
   assert.equal(mod.shouldRecoverStream({ sawDone: false, abortReason: "user", serverMessageId: 1 }), false);
 });
 

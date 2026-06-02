@@ -31,6 +31,7 @@ interface ChatInterfaceProps {
   notebookId?: number;
   notebookTitle?: string;
   notebookFileCount?: number;
+  notebookFileIds?: number[];
   models: ChatModel[];
   skillKey?: string;
   recommendedModel?: ChatModel;
@@ -40,7 +41,7 @@ interface ChatInterfaceProps {
   targetMessageId?: number;
 }
 
-export default function ChatInterface({ conversationId, notebookId, notebookTitle, notebookFileCount, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId }: ChatInterfaceProps) {
+export default function ChatInterface({ conversationId, notebookId, notebookTitle, notebookFileCount, notebookFileIds, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId }: ChatInterfaceProps) {
   const { t } = useI18n();
   const [compareMode, setCompareMode] = useState(false);
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
@@ -95,7 +96,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     isLoadingMore,
     hasMoreMessages,
     loadMoreMessages,
-  } = useChat(conversationId, models, skillKey, notebookId);
+  } = useChat(conversationId, models, skillKey, notebookId, notebookFileIds);
 
   const { templates } = useTemplates();
 

@@ -3,6 +3,7 @@
 import { memo } from "react";
 import { User, Bot, Check, Play, SquareCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 import type { ChatModel, Message } from "@/lib/chatTypes";
 import type { InferredGroup } from "@/lib/groups";
 import { isMessageGenerating } from "@/lib/chatContent";
@@ -66,6 +67,7 @@ function MessageRow({
   imageLoadFailedLabel,
   MarkdownRenderer,
 }: MessageRowProps) {
+  const { t } = useI18n();
   const isUser = msg.role === "user";
   const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && isLast;
   const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
@@ -115,9 +117,9 @@ function MessageRow({
                         )}
                       >
                         <div className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold text-white shrink-0" style={{ backgroundColor: avatarModel?.color }}>
-                          {(avatarModel?.name || a.model || `模型${idx + 1}`).slice(0, 1).toUpperCase()}
+                          {(avatarModel?.name || a.model || t("chat.model.fallback", { index: String(idx + 1) })).slice(0, 1).toUpperCase()}
                         </div>
-                        <span className="text-xs truncate">{avatarModel?.name || a.model || `模型 ${idx + 1}`}</span>
+                        <span className="text-xs truncate">{avatarModel?.name || a.model || t("chat.model.fallback", { index: String(idx + 1) })}</span>
                         {isActive && <Check className="w-3 h-3 text-text-primary shrink-0 ml-auto" />}
                       </button>
                     );
@@ -155,14 +157,14 @@ function MessageRow({
                 <UserMessageContent message={msg} imageLoadFailedLabel={imageLoadFailedLabel} />
               ) : (
                 <>
-                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} recoverEmptyContent />
+                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} recoverEmptyContent onRegenerate={onRegenerate} />
                   {msg.stopped && onContinueGenerate && (
                     <button
                       onClick={onContinueGenerate}
                       className="mt-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-text-secondary hover:text-text-primary hover:bg-surface-card border border-surface-border transition-colors"
                     >
                       <Play className="w-3.5 h-3.5" />
-                      继续生成
+                      {t("chat.action.continueGenerate")}
                     </button>
                   )}
                 </>
@@ -181,7 +183,7 @@ function MessageRow({
                 visible={isLast}
                 createdAt={msg.createdAt}
                 completedAt={msg.completedAt}
-                onForkCompare={isUser && msg.serverMessageId ? () => onForkCompare?.(msg.serverMessageId!) : undefined}
+                onForkCompare={undefined}
               />
             )}
           </div>

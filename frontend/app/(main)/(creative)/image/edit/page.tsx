@@ -12,6 +12,7 @@ import { resolveImageUrl } from "@/lib/resolveImageUrl";
 import CreationHistoryPanel, { type CreationHistoryItem } from "@/components/creative/CreationHistoryPanel";
 import { getGuestId } from "@/lib/guestId";
 import { normalizeError, readApiError } from "@/lib/errors";
+import type { UserFacingError } from "@/lib/errors";
 
 const API_BASE_URL = "";
 
@@ -138,12 +139,48 @@ const MODE_CONFIG = {
 
 const MODE_ORDER: EditMode[] = ["remove-bg", "replace-bg", "text-removal", "upscale", "inpaint", "region-brush"];
 
-function getUserFacingEditError(error: unknown, t: (key: string) => string) {
-  return normalizeError(error, {
+type TranslateFn = (key: string, params?: Record<string, string>) => string;
+
+const EDIT_ERROR_MESSAGE_KEYS: Partial<Record<UserFacingError["category"], string>> = {
+  auth: "image.edit.error.loginRequired",
+  quota: "image.edit.error.quota",
+  rate_limit: "image.edit.error.rateLimit",
+  network: "image.edit.error.network",
+  timeout: "image.edit.error.timeout",
+  validation: "image.edit.error.default",
+  file: "image.edit.error.file",
+  upload: "image.edit.error.uploadFailed",
+  content_policy: "image.edit.error.contentPolicy",
+  server: "image.edit.error.server",
+  image_edit: "image.edit.error.default",
+  image_generation: "image.edit.error.default",
+  unknown: "image.edit.error.default",
+};
+
+function getLocalEditErrorKey(message: string) {
+  if (/识别图片过大|image.*too large.*recogn/i.test(message)) return "image.edit.error.recognitionImageTooLarge";
+  if (/智能分割|物体轮廓|涂抹需要识别|蒙版生成失败|smart recognition|recognition.*failed|object contour|mask.*failed/i.test(message)) {
+    return "image.edit.error.recognitionFailed";
+  }
+  return null;
+}
+
+function getUserFacingEditError(error: unknown, t: TranslateFn) {
+  const rawMessage = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const localKey = getLocalEditErrorKey(rawMessage);
+  if (localKey) return t(localKey);
+
+  const normalized = normalizeError(error, {
     module: "image_edit",
     fallbackTitle: t("image.edit.error.editFailed"),
     fallbackMessage: t("image.edit.error.default"),
-  }).message;
+  });
+  const key = EDIT_ERROR_MESSAGE_KEYS[normalized.category];
+  if (key) {
+    const localized = t(key);
+    if (localized !== key) return localized;
+  }
+  return normalized.message;
 }
 
 export default function ImageEditPage() {
@@ -893,7 +930,7 @@ function ImageEditContent() {
       reader.onerror = () => toast.error(t("image.edit.error.readImageFailed"));
       reader.readAsDataURL(file);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("image.edit.error.readImageFailed"));
+      toast.error(getUserFacingEditError(err, t));
     }
     e.target.value = "";
   };
@@ -995,6 +1032,7 @@ function ImageEditContent() {
         image_url: imagePublicId,
         edit_mode: editMode,
       };
+      body.title = t(config.tabKey);
       if (editMode === "replace-bg") body.prompt = replacePrompt.trim();
       if (editMode === "inpaint") body.prompt = replacePrompt.trim();
       if (editMode === "region-brush" && replacePrompt.trim()) body.prompt = replacePrompt.trim();
@@ -1056,20 +1094,40 @@ function ImageEditContent() {
     }
   };
 
-  const handleDownload = async () => {
-    if (!result) return;
+  const downloadImageUrl = async (url: string, suffix: string) => {
     try {
-      const response = await fetch(result);
+      const response = await fetch(url);
       const blob = await response.blob();
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
-      const suffix = editMode === "upscale" ? "hd" : editMode === "text-removal" ? "clean" : editMode === "inpaint" ? "inpaint" : editMode === "region-brush" ? "brush" : "edit";
       link.download = `aispace-${suffix}-${Date.now()}.png`;
       link.click();
+      URL.revokeObjectURL(link.href);
       toast.success(t("image.downloadStarted"));
     } catch {
       toast.error(t("image.downloadFailed"));
     }
+  };
+
+  const getDownloadSuffix = () =>
+    editMode === "upscale"
+      ? "hd"
+      : editMode === "text-removal"
+        ? "clean"
+        : editMode === "inpaint"
+          ? "inpaint"
+          : editMode === "region-brush"
+            ? "brush"
+            : "edit";
+
+  const handleDownload = async () => {
+    if (!result) return;
+    await downloadImageUrl(result, getDownloadSuffix());
+  };
+
+  const handleHistoryDownload = async (_id: number, item: CreationHistoryItem) => {
+    if (!item.cover_image) return;
+    await downloadImageUrl(resolveImageUrl(item.cover_image), getDownloadSuffix());
   };
 
   const handleReset = () => {
@@ -1153,6 +1211,7 @@ function ImageEditContent() {
         title={t("image.historyTitle")}
         items={historyItems}
         onSelect={() => setHistoryOpen(false)}
+        onDownload={handleHistoryDownload}
         onDelete={(id) => handleDelete(id)}
         emptyText={t("image.historyEmpty")}
       />
@@ -1601,3 +1660,4 @@ function ImageEditContent() {
     </>
   );
 }
+

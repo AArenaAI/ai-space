@@ -1,7 +1,14 @@
+import type { ChatStatusTimelineStep } from "./chatStatusTimeline";
+
 export interface SearchSource {
   title: string;
   url: string;
   description: string;
+  snippet?: string;
+  type?: string;
+  page?: number;
+  slide?: number;
+  sheet_name?: string;
 }
 
 export type ChatActivityStatus = {
@@ -20,9 +27,12 @@ export interface Message {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  reasoningContent?: string;
   model?: string;
   createdAt: number;
   completedAt?: number;
+  generationStartedAt?: number;
+  statusTimeline?: ChatStatusTimelineStep[];
   stopped?: boolean;
   search?: boolean;
   searchSources?: SearchSource[];

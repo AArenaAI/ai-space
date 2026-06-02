@@ -780,20 +780,21 @@ func parseSheetXMLStructured(xmlStr string, sharedStrings map[int]string) (strin
 	return result.String(), maxCols
 }
 
-// parseImage 解析图片：上传解析阶段调用 Vision 生成文字描述，作为 image_caption chunk 进入统一 RAG。
+// parseImage 解析图片：上传解析阶段优先调用 Vision 生成文字描述，作为 image_caption chunk 进入统一 RAG。
+// Vision 失败时不能把图片附件标记为上传/解析失败；主聊天仍可把原图作为多模态附件发送。
 func (p *FileParser) parseImage(ctx context.Context, data []byte, ext string) (*ParseResult, error) {
 	mimeType := extToMimeType2(ext)
 	if p.aiService == nil {
-		return nil, fmt.Errorf("图片解析失败: AI 服务未初始化")
+		return imageParseFallbackResult(), nil
 	}
 
 	caption, usage, err := p.aiService.ExtractImageContent(ctx, data, mimeType)
 	if err != nil {
-		return nil, fmt.Errorf("图片视觉解析失败: %w", err)
+		return imageParseFallbackResult(), nil
 	}
 	caption = strings.TrimSpace(caption)
 	if caption == "" {
-		return nil, fmt.Errorf("图片视觉解析失败: 返回内容为空")
+		return imageParseFallbackResult(), nil
 	}
 
 	// 截断过长的 caption 到 2000 字符，避占用过多上下文（之前 500 太短，浪费了 vision 模型能力）
@@ -818,6 +819,16 @@ func (p *FileParser) parseImage(ctx context.Context, data []byte, ext string) (*
 		Summary:     firstRunes(caption, 200),
 		VisionUsage: usage,
 	}, nil
+}
+
+func imageParseFallbackResult() *ParseResult {
+	return &ParseResult{
+		Content:    "",
+		Pages:      1,
+		Chunks:     nil,
+		HasImages:  true,
+		TokenCount: 0,
+	}
 }
 
 func firstRunes(text string, max int) string {

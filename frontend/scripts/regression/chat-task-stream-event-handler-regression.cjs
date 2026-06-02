@@ -146,6 +146,7 @@ test("handles error payload with fallback request id", () => {
     activityStatus: undefined,
     searchStatus: undefined,
     searchSources: undefined,
+    phase: "failed",
   });
 });
 
@@ -159,21 +160,32 @@ test("handles search payload", () => {
 });
 
 test("handles delta payload and refreshes active content", () => {
-  const h = makeHarness({ initialContent: "Hi " });
+  const h = makeHarness({
+    initialContent: "Hi ",
+    realtimeData: { errorCode: "stream_failed", retryable: true },
+  });
   h.handler.processEvent(sse({ choices: [{ delta: { content: "there" } }] }, 8));
   assert.equal(h.handler.getAccumulated(), "Hi there");
   assert.deepEqual(h.calls.find((call) => call[0] === "append"), ["append", "local-1", { answerDelta: "there", reasoning: false }]);
   assert.equal(h.getActiveState().content, "Hi there");
   assert.equal(h.getActiveState().lastSequence, 8);
+  assert.equal(h.getRealtime().errorCode, undefined);
+  assert.equal(h.getRealtime().retryable, undefined);
 });
 
 test("handles done, closes open reasoning and starts polling when content exists", () => {
-  const h = makeHarness({ initialContent: "<think>hidden", streamContent: "answer" });
+  const h = makeHarness({
+    initialContent: "<think>hidden",
+    streamContent: "answer",
+    realtimeData: { errorCode: "stream_failed", retryable: true },
+  });
   h.handler.processEvent(sse("[DONE]", 9));
   assert.equal(h.handler.hasSeenDone(), true);
   assert.equal(h.handler.getAccumulated(), "<think>hidden</think>");
   assert.deepEqual(h.calls[1], ["append", "local-1", { reasoning: false }]);
   assert.equal(h.calls.some((call) => call[0] === "deleteActive"), true);
+  assert.equal(h.getRealtime().errorCode, undefined);
+  assert.equal(h.getRealtime().retryable, undefined);
   assert.deepEqual(h.calls.at(-1), ["poll", 10]);
 });
 
@@ -200,10 +212,33 @@ test("complex task resume ignores duplicate sequence and keeps active state mono
   h.handler.processEvent(sse({ choices: [{ delta: { content: " stale" } }] }, 4));
   assert.equal(h.handler.getAccumulated(), "seed");
   assert.equal(h.getActiveState().lastSequence, 5);
+  h.handler.processEvent(sse({ choices: [{ delta: { content: " boundary" } }] }, 5));
+  assert.equal(h.handler.getAccumulated(), "seed");
+  assert.equal(h.getActiveState().lastSequence, 5);
+  h.handler.processEvent(sse({ choices: [{ delta: { content: " fresh" } }] }, 6));
   h.handler.processEvent(sse({ choices: [{ delta: { content: " fresh" } }] }, 6));
   assert.equal(h.handler.getAccumulated(), "seed fresh");
   assert.equal(h.getActiveState().lastSequence, 6);
   assert.equal(h.getActiveState().content, "seed fresh");
+  assert.equal(h.calls.filter((call) => call[0] === "append").length, 1);
+});
+
+test("complex task resume ignores duplicate reasoning sequence", () => {
+  const h = makeHarness({ initialContent: "", after: 5, activeState: {
+    convId: 7,
+    serverMessageId: 10,
+    generationTaskId: 20,
+    lastSequence: 5,
+    content: "",
+  } });
+  h.handler.processEvent(sse({ choices: [{ delta: { reasoning_content: "plan" } }] }, 6));
+  h.handler.processEvent(sse({ choices: [{ delta: { reasoning_content: "plan" } }] }, 6));
+  assert.equal(h.handler.getAccumulated(), "<think>plan");
+  assert.equal(h.getActiveState().lastSequence, 6);
+  assert.equal(h.getActiveState().content, "<think>plan");
+  assert.deepEqual(h.calls.filter((call) => call[0] === "append"), [
+    ["append", "local-1", { reasoningDelta: "plan", reasoning: true }],
+  ]);
 });
 
 console.log("\nchat task stream event handler regression tests passed");

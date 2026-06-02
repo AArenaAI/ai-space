@@ -76,9 +76,9 @@ test("shouldIgnoreStreamAbort ignores user and navigation aborts only", () => {
   assert.equal(mod.shouldIgnoreStreamAbort({ isAbort: true, abortReason: "timeout" }), false);
 });
 
-test("shouldResumeTaskStreamAfterError skips ignored aborts", () => {
+test("shouldResumeTaskStreamAfterError skips user aborts but resumes navigation with ids", () => {
   assert.equal(mod.shouldResumeTaskStreamAfterError({ isAbort: true, abortReason: "user", serverMessageId: 1 }), false);
-  assert.equal(mod.shouldResumeTaskStreamAfterError({ isAbort: true, abortReason: "navigation", generationTaskId: 9 }), false);
+  assert.equal(mod.shouldResumeTaskStreamAfterError({ isAbort: true, abortReason: "navigation", generationTaskId: 9 }), true);
 });
 
 test("shouldResumeTaskStreamAfterError resumes when ids exist after non-ignored error", () => {

@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 export type ChatScrollProgressProps = {
   scrollRatio: number;
@@ -16,6 +17,7 @@ const ChatScrollProgress = memo(function ChatScrollProgress({
   onJumpToRatio,
   onDragStateChange,
 }: ChatScrollProgressProps) {
+  const { t } = useI18n();
   const trackRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const clampedRatio = Math.min(1, Math.max(0, Number.isFinite(scrollRatio) ? scrollRatio : 0));
@@ -69,7 +71,7 @@ const ChatScrollProgress = memo(function ChatScrollProgress({
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(clampedRatio * 100)}
-        aria-label="聊天阅读进度"
+        aria-label={t("chat.scroll.progressAria")}
         tabIndex={0}
         className="group pointer-events-auto relative h-full w-5 cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-brand/35"
         onPointerDown={handlePointerDown}

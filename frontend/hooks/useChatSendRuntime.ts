@@ -27,6 +27,7 @@ export type UseChatSendRuntimeOptions = {
   selectedModel: ChatModel;
   currentConversation: number | undefined;
   notebookId?: number;
+  notebookFileIds?: number[];
   effectiveSkillKey: string | undefined;
   setCreatedConversation: (conversationId: number, title: string) => void;
   setMessages: Dispatch<SetStateAction<Message[]>>;
@@ -59,6 +60,7 @@ export function useChatSendRuntime({
   selectedModel,
   currentConversation,
   notebookId,
+  notebookFileIds,
   effectiveSkillKey,
   setCreatedConversation,
   setMessages,
@@ -99,6 +101,7 @@ export function useChatSendRuntime({
     selectedModel,
     currentConversation,
     notebookId,
+    notebookFileIds,
     effectiveSkillKey,
     createConversation,
     setMessages,
@@ -121,6 +124,8 @@ export function useChatSendRuntime({
     messages,
     models,
     currentConversation,
+    notebookId,
+    notebookFileIds,
     effectiveSkillKey,
     createConversation,
     setMessages,

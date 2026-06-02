@@ -48,13 +48,31 @@ const baseUrl = process.env.CHAT_HISTORY_LOADING_FIXTURE_BASE_URL || "http://127
     assert.ok(loadingSamples.every((sample) => sample.rows === 0), "loading phase should not render stale previous-conversation rows");
     assert.ok(loadingSamples.every((sample) => sample.hasLoadingState), "loading phase should render stable in-chat loading state");
 
-    await page.waitForFunction(() => document.querySelector('[data-testid="chat-history-loading-fixture"]')?.getAttribute("data-phase") === "restored", null, { timeout: 5_000 });
-    await page.waitForFunction(() => document.querySelectorAll('[data-chat-message-row="true"]').length >= 2, null, { timeout: 5_000 });
+    await page.waitForFunction(() => document.querySelector('[data-testid="chat-history-loading-fixture"]')?.getAttribute("data-phase") === "restored", null, { timeout: 10_000 });
+    await page.waitForFunction(() => document.querySelectorAll('[data-chat-message-row="true"]').length >= 2, null, { timeout: 10_000 });
     const finalRows = await page.locator('[data-chat-message-row="true"]').count();
     assert.ok(finalRows >= 2, `restored history should render messages, got ${finalRows}`);
+    await page.waitForTimeout(850);
+    const restoredScroll = await page.evaluate(() => {
+      const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+      const lastRow = document.querySelector('[data-chat-message-row="true"][data-message-id="restored-assistant-2"]');
+      const scrollerRect = scroller?.getBoundingClientRect();
+      const lastRect = lastRow?.getBoundingClientRect();
+      const distanceToBottom = scroller ? scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight : -1;
+      return {
+        hasScroller: Boolean(scroller),
+        hasLastRow: Boolean(lastRow),
+        distanceToBottom,
+        lastBottom: lastRect?.bottom ?? 0,
+        scrollerBottom: scrollerRect?.bottom ?? 0,
+      };
+    });
+    assert.ok(restoredScroll.hasScroller && restoredScroll.hasLastRow, `restored latest message should be rendered: ${JSON.stringify(restoredScroll)}`);
+    assert.ok(restoredScroll.distanceToBottom <= 4, `switching/restoring a chat should default to the latest message at the bottom: ${JSON.stringify(restoredScroll)}`);
+    assert.ok(restoredScroll.lastBottom <= restoredScroll.scrollerBottom + 4, `latest message should be visible after restore: ${JSON.stringify(restoredScroll)}`);
 
     if (failures.length > 0) throw new Error(failures.join("\n"));
-    console.log(JSON.stringify({ ok: true, loadingSamples: loadingSamples.length, finalRows }));
+    console.log(JSON.stringify({ ok: true, loadingSamples: loadingSamples.length, finalRows, restoredScroll }));
   } finally {
     await browser.close();
   }

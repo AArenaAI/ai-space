@@ -58,7 +58,7 @@ export type ShouldRecoverStreamOptions = {
 };
 
 export function shouldRecoverStream({ sawDone, abortReason, serverMessageId, generationTaskId }: ShouldRecoverStreamOptions): boolean {
-  return !sawDone && abortReason !== "navigation" && abortReason !== "user" && (!!serverMessageId || !!generationTaskId);
+  return !sawDone && abortReason !== "user" && (!!serverMessageId || !!generationTaskId);
 }
 
 export function shouldReconcileAfterDone({ sawDone, abortReason, serverMessageId, generationTaskId }: ShouldRecoverStreamOptions): boolean {

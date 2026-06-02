@@ -11,7 +11,6 @@ require (
 	github.com/volcengine/volcengine-go-sdk v1.2.29
 	golang.org/x/crypto v0.36.0
 	gorm.io/driver/postgres v1.5.11
-	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.30.0
 )
 
@@ -25,7 +24,6 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/gax-go/v2 v2.13.0 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
-	github.com/mattn/go-sqlite3 v1.14.22 // indirect
 	github.com/rogpeppe/go-internal v1.15.0 // indirect
 	github.com/volcengine/volc-sdk-golang v1.0.23 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.54.0 // indirect

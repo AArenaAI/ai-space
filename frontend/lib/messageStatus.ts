@@ -1,6 +1,8 @@
 import type { ChatActivityStatus, Message } from "./chatTypes";
 import type { RealtimeData } from "./streaming";
 import { getActivityLabel } from "./chatActivityStatus";
+import { deriveUserGenerationPhase, getGenerationPhaseWithElapsedLabel, type UserGenerationPhase } from "./chatGenerationPhase";
+import { buildFallbackCompletedTimeline, getCompletedStatusLabel, type ChatStatusTimelineStep } from "./chatStatusTimeline";
 
 export type MessageDisplayStatus = {
   key: string;
@@ -12,6 +14,10 @@ export type MessageDisplayStatus = {
   count?: number;
   retryable?: boolean;
   requestId?: string;
+  generationPhase?: UserGenerationPhase;
+  statusTimeline?: ChatStatusTimelineStep[];
+  generationStartedAt?: number;
+  completedAt?: number;
 };
 
 type RealtimeActivityStatus = { kind: string; status: string; label: string };
@@ -20,10 +26,23 @@ type StatusInput = {
   message: Message;
   realtime?: RealtimeData;
   isStreaming: boolean;
-  t?: (key: string) => string;
+  t?: (key: string, params?: Record<string, string>) => string;
 };
 
 const fallbackT = (key: string) => key;
+
+function phaseToDisplayKind(phase: UserGenerationPhase): MessageDisplayStatus["kind"] {
+  if (phase === "searching") return "web_search";
+  if (phase === "reasoning") return "thinking";
+  if (phase === "finalizing") return "finalizing";
+  return "generating";
+}
+
+function phaseToTone(phase: UserGenerationPhase): MessageDisplayStatus["tone"] {
+  if (phase === "searching") return "blue";
+  if (phase === "reasoning") return "purple";
+  return "amber";
+}
 
 function coerceActivityStatus(activity?: ChatActivityStatus | RealtimeActivityStatus): ChatActivityStatus | undefined {
   if (!activity) return undefined;
@@ -86,7 +105,62 @@ export function deriveMessageStatuses({ message, realtime, isStreaming, t = fall
   const searchSources = realtime?.searchSources ?? message.searchSources;
   const searchSourcesCount = realtime?.searchSourcesCount ?? message.searchSourcesCount;
   const sourceCount = typeof searchSourcesCount === "number" ? searchSourcesCount : (searchSources?.length || 0);
+  const completedAt = realtime?.completedAt ?? message.completedAt;
+  const generationStartedAt = realtime?.generationStartedAt ?? message.generationStartedAt ?? message.createdAt;
+  const statusTimeline = realtime?.statusTimeline ?? message.statusTimeline;
+  const completedStatusTimeline = statusTimeline?.length ? statusTimeline : buildFallbackCompletedTimeline({
+    generationStartedAt,
+    completedAt,
+    searchSourcesCount: sourceCount || undefined,
+    hasReasoning: Boolean(realtime?.reasoningContent || message.reasoningContent),
+    hasAnswer: Boolean((realtime?.answerContent || realtime?.content || message.content || "").trim()),
+  });
   const statuses: MessageDisplayStatus[] = [];
+
+  if (completedAt && !isStreaming) {
+    return [{
+      key: "completed",
+      kind: "completed",
+      phase: "completed",
+      label: getCompletedStatusLabel(t, generationStartedAt, completedAt),
+      active: false,
+      tone: "green",
+      count: sourceCount || undefined,
+      statusTimeline: completedStatusTimeline,
+      generationStartedAt,
+      completedAt,
+    }];
+  }
+
+  if (searchStatus === "failed") {
+    return [{
+      key: "web_search:failed",
+      kind: "web_search",
+      phase: "failed",
+      label: t("chat.status.webSearch"),
+      active: false,
+      tone: "red",
+      count: sourceCount || undefined,
+    }];
+  }
+
+  const generationPhase = deriveUserGenerationPhase(realtime ?? message, isStreaming);
+
+  if (generationPhase) {
+    const startedAt = realtime?.generationStartedAt || realtime?.updatedAt || message.createdAt || Date.now();
+    const elapsedMs = Math.max(0, Date.now() - startedAt);
+    statuses.push({
+      key: `phase:${generationPhase}`,
+      kind: phaseToDisplayKind(generationPhase),
+      phase: "running",
+      label: getGenerationPhaseWithElapsedLabel(t, generationPhase, elapsedMs),
+      active: true,
+      tone: phaseToTone(generationPhase),
+      count: sourceCount || undefined,
+      generationPhase,
+    });
+    return statuses;
+  }
 
   if (searchStatus === "searching") {
     statuses.push({
@@ -96,16 +170,6 @@ export function deriveMessageStatuses({ message, realtime, isStreaming, t = fall
       label: t("chat.status.webSearch"),
       active: true,
       tone: "blue",
-      count: sourceCount || undefined,
-    });
-  } else if (searchStatus === "failed") {
-    statuses.push({
-      key: "web_search:failed",
-      kind: "web_search",
-      phase: "failed",
-      label: t("chat.status.webSearch"),
-      active: false,
-      tone: "red",
       count: sourceCount || undefined,
     });
   } else if (searchStatus === "completed" || sourceCount > 0) {

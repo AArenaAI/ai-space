@@ -126,7 +126,30 @@ test("reconcile_after_done action starts DB polling after DONE with server id", 
   assert.equal(action.result.content, "done text");
 });
 
-test("navigation/user abort skips recover/reconcile and completed mark", () => {
+test("navigation abort before DONE recovers task stream while user abort stops", () => {
+  const navigationAction = decideFinalStreamReconciliation({
+    state: { ...baseState, sawDone: false },
+    abortReason: "navigation",
+    streamContent: "partial",
+    hasRealtimeData: true,
+  });
+  assert.equal(navigationAction.type, "recover");
+  assert.equal(navigationAction.serverMessageId, 9);
+  assert.equal(navigationAction.generationTaskId, 5);
+  assert.equal(navigationAction.lastSequence, 12);
+  assert.equal(navigationAction.finalContent, "partial");
+
+  const userAction = decideFinalStreamReconciliation({
+    state: { ...baseState, sawDone: false },
+    abortReason: "user",
+    streamContent: "partial",
+    hasRealtimeData: false,
+  });
+  assert.equal(userAction.type, "complete_or_cleanup");
+  assert.equal(userAction.shouldMarkCompleted, false);
+});
+
+test("navigation/user abort after DONE still skips completed mark", () => {
   for (const abortReason of ["navigation", "user"]) {
     const action = decideFinalStreamReconciliation({
       state: { ...baseState, sawDone: true },

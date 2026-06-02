@@ -7,6 +7,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/components/theme/ThemeProvider";
+import { useI18n } from "@/lib/i18n";
 
 interface CompareResultsProps {
   results: CompareResult[];
@@ -31,10 +32,11 @@ function findColor(modelID: string): string {
 }
 
 export default function CompareResults({ results }: CompareResultsProps) {
+  const { t } = useI18n();
   return (
     <div className="px-4 pb-8">
       <div className="max-w-[1400px] mx-auto">
-        <div className="text-sm text-text-tertiary mb-4">对比结果</div>
+        <div className="text-sm text-text-tertiary mb-4">{t("compare.results.title")}</div>
         <div className={cn("grid gap-4", results.length <= 2 ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1 md:grid-cols-2 lg:grid-cols-3")}>
           {results.map((res) => (
             <ResultCard key={res.model_id} result={res} />
@@ -46,6 +48,7 @@ export default function CompareResults({ results }: CompareResultsProps) {
 }
 
 function ResultCard({ result }: { result: CompareResult }) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const color = findColor(result.model_id);
   const themeCtx = useTheme();
@@ -75,7 +78,7 @@ function ResultCard({ result }: { result: CompareResult }) {
           <button
             onClick={handleCopy}
             className="p-1 rounded text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
-            title="复制回答"
+            title={t("compare.results.copyAnswer")}
           >
             {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
           </button>
@@ -131,7 +134,7 @@ function ResultCard({ result }: { result: CompareResult }) {
         {/* 空内容占位 */}
         {!result.content && !result.error && (
           <div className="py-6 text-center text-text-tertiary text-sm">
-            等待回答中...
+            {t("compare.results.waiting")}
           </div>
         )}
       </div>

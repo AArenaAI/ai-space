@@ -6,20 +6,25 @@ const path = require("node:path");
 const ts = require("typescript");
 
 const projectRoot = path.resolve(__dirname, "../..");
-const sourcePath = path.join(projectRoot, "lib/streaming.ts");
-const source = fs.readFileSync(sourcePath, "utf8");
-const compiled = ts.transpileModule(source, {
-  compilerOptions: {
-    module: ts.ModuleKind.CommonJS,
-    target: ts.ScriptTarget.ES2020,
-    esModuleInterop: true,
-  },
-  fileName: sourcePath,
-}).outputText;
+const compilerOptions = {
+  module: ts.ModuleKind.CommonJS,
+  target: ts.ScriptTarget.ES2020,
+  esModuleInterop: true,
+};
+function compile(relativePath) {
+  const sourcePath = path.join(projectRoot, relativePath);
+  const source = fs.readFileSync(sourcePath, "utf8");
+  return ts.transpileModule(source, { compilerOptions, fileName: sourcePath }).outputText;
+}
+const compiled = compile("lib/streaming.ts");
+const compiledStatusTimeline = compile("lib/chatStatusTimeline.ts");
+const compiledGenerationPhase = compile("lib/chatGenerationPhase.ts");
 
 function withModule() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "streaming-regression-"));
   const tmpFile = path.join(tmpDir, "streaming.cjs");
+  fs.writeFileSync(path.join(tmpDir, "chatGenerationPhase.js"), compiledGenerationPhase, "utf8");
+  fs.writeFileSync(path.join(tmpDir, "chatStatusTimeline.js"), compiledStatusTimeline, "utf8");
   fs.writeFileSync(tmpFile, compiled, "utf8");
 
   let currentTime = 1_700_000_000_000;
@@ -136,6 +141,77 @@ test("completed entries expire through explicit sweep and realtimeGet short TTL"
   advance(30_001);
   mod.realtimeSweepExpiredEntries(Date.now());
   assert.equal(mod.realtimeGet("m5"), undefined);
+});
+
+test("mark completed keeps realtime snapshot briefly then expires", ({ mod, advance }) => {
+  mod.realtimeAppend("m-final", { reasoningDelta: "plan", reasoning: true });
+  mod.realtimeAppend("m-final", { answerDelta: "answer", reasoning: false });
+  mod.realtimeMarkCompleted("m-final", Date.now());
+  let data = mod.realtimeGet("m-final");
+  assert.ok(data);
+  assert.equal(data.reasoningContent, "plan");
+  assert.equal(data.answerContent, "answer");
+  assert.equal(data.phase, "completed");
+  advance(5_001);
+  mod.realtimeSweepExpiredEntries(Date.now());
+  assert.equal(mod.realtimeGet("m-final"), undefined);
+});
+
+test("status timeline keeps original startedAt when a running step completes", ({ mod, advance }) => {
+  mod.realtimeUpdate("timeline-order", { phase: "waiting_provider", generationStartedAt: Date.now() });
+  advance(80);
+  mod.realtimeUpdate("timeline-order", {
+    searchStatus: "searching",
+    activityStatus: { kind: "web_search", status: "running", label: "正在联网搜索" },
+    phase: "searching",
+  });
+  advance(120);
+  mod.realtimeUpdate("timeline-order", {
+    searchStatus: "completed",
+    searchSourcesCount: 3,
+    activityStatus: { kind: "web_search", status: "completed", label: "联网搜索完成" },
+  });
+  advance(120);
+  mod.realtimeAppend("timeline-order", { reasoningDelta: "plan", reasoning: true });
+  advance(120);
+  mod.realtimeAppend("timeline-order", { answerDelta: "answer", reasoning: false });
+  mod.realtimeMarkCompleted("timeline-order", Date.now());
+
+  const data = mod.realtimeGet("timeline-order");
+  const timeline = data.statusTimeline || [];
+  const searchRunning = timeline.find((step) => step.id === "web_search:running");
+  const searchCompleted = timeline.find((step) => step.id === "web_search:completed");
+  const reasoning = timeline.find((step) => step.id === "reasoning:running");
+  const answer = timeline.find((step) => step.id === "streaming_answer:running");
+
+  assert.ok(searchRunning, "search running step should be present");
+  assert.ok(searchCompleted, "search completed step should be present");
+  assert.equal(searchCompleted.startedAt, searchRunning.startedAt, "search completed should keep the original search start timestamp");
+  assert.ok((searchCompleted.endedAt || 0) > searchCompleted.startedAt, "search completed should end after it started");
+  assert.ok(reasoning.startedAt > searchCompleted.startedAt, "reasoning should start after search starts");
+  assert.ok(answer.startedAt > reasoning.startedAt, "answer should start after reasoning starts");
+});
+
+test("ordered timeline prefers semantic phase order over noisy timestamps", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "timeline-order-helper-"));
+  try {
+    fs.writeFileSync(path.join(tmpDir, "chatGenerationPhase.js"), compiledGenerationPhase, "utf8");
+    fs.writeFileSync(path.join(tmpDir, "chatStatusTimeline.js"), compiledStatusTimeline, "utf8");
+    const { getOrderedTimelineSteps } = require(path.join(tmpDir, "chatStatusTimeline.js"));
+    const steps = getOrderedTimelineSteps([
+      { id: "waiting_provider:running", kind: "waiting_provider", status: "running", startedAt: 0 },
+      { id: "web_search:completed", kind: "web_search", status: "completed", startedAt: 1, endedAt: 8, count: 8 },
+      { id: "streaming_answer:running", kind: "streaming_answer", status: "running", startedAt: 2, endedAt: 12 },
+      { id: "reasoning:running", kind: "reasoning", status: "running", startedAt: 7, endedAt: 12 },
+    ]);
+    assert.deepEqual(
+      steps.map((step) => step.id),
+      ["waiting_provider:running", "web_search:completed", "reasoning:running", "streaming_answer:running"],
+      "reasoning should display before answer generation even if its captured timestamp is later"
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test("active entries expire through realtimeGet long TTL", ({ mod, advance }) => {

@@ -1,7 +1,7 @@
 import { useCallback, useRef } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { getGuestId as defaultGetGuestId } from "@/lib/guestId";
-import { realtimeAppend as defaultRealtimeAppend, realtimeGet as defaultRealtimeGet, realtimeUpdate as defaultRealtimeUpdate, realtimeClear as defaultRealtimeClear } from "@/lib/streaming";
+import { realtimeAppend as defaultRealtimeAppend, realtimeGet as defaultRealtimeGet, realtimeUpdate as defaultRealtimeUpdate, realtimeMarkCompleted as defaultRealtimeMarkCompleted } from "@/lib/streaming";
 import type { RealtimeData } from "@/lib/streaming";
 import {
   shouldStartTaskStreamFallbackPolling,
@@ -57,7 +57,7 @@ type StartTaskEventStreamDeps = {
   realtimeAppend?: typeof defaultRealtimeAppend;
   realtimeGet?: typeof defaultRealtimeGet;
   realtimeUpdate?: typeof defaultRealtimeUpdate;
-  realtimeClear?: typeof defaultRealtimeClear;
+  realtimeMarkCompleted?: typeof defaultRealtimeMarkCompleted;
 };
 
 type StopAllTaskStreamsDeps = {
@@ -113,7 +113,7 @@ export function createStartTaskEventStreamAction({
   realtimeAppend = defaultRealtimeAppend,
   realtimeGet = defaultRealtimeGet,
   realtimeUpdate = defaultRealtimeUpdate,
-  realtimeClear = defaultRealtimeClear,
+  realtimeMarkCompleted = defaultRealtimeMarkCompleted,
 }: StartTaskEventStreamDeps) {
   return (
     convId: number | undefined,
@@ -195,7 +195,18 @@ export function createStartTaskEventStreamAction({
             })
           ));
         }
-        realtimeClear(localMessageId);
+        realtimeMarkCompleted(localMessageId);
+        const completedRealtimeData = realtimeGet(localMessageId);
+        if (completedRealtimeData?.statusTimeline?.length) {
+          setMessages((prev) => patchMessageById(prev, localMessageId, (m) =>
+            applyFinalRealtimeDataToMessage(m, {
+              finalContent: accumulated,
+              finalData: completedRealtimeData,
+              latestSequence,
+              forceContentFallback: true,
+            })
+          ));
+        }
         delete taskStreamsRef.current[localMessageId];
         if (shouldStartTaskStreamFallbackPolling({ serverMessageId })) {
           startBackgroundPolling(convId, localMessageId, serverMessageId);

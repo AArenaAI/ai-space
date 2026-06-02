@@ -19,8 +19,19 @@ interface TaskToastCardProps {
 
 export default function TaskToastCard({ notification, onClick }: TaskToastCardProps) {
   const { t } = useI18n();
-  const label = notification.type === "image" ? t("task.type.image") : notification.type === "video" ? t("task.type.video") : t("task.type.chat");
-  const titleText = notification.title?.trim() || "";
+  const safeT = (key: string) => {
+    const value = t(key);
+    return value === key ? "" : value;
+  };
+  const label = safeT(notification.type === "image" ? "task.type.image" : notification.type === "video" ? "task.type.video" : "task.type.chat") || notification.type;
+  const statusText = safeT(notification.ok ? "task.status.done" : "task.status.failed") || (notification.ok ? "Done" : "Failed");
+  const fallbackTitle = `${label} ${statusText}`;
+  const titleText =
+    (notification.type === "image"
+      ? safeT(notification.ok ? "image.task.completed" : "image.task.incomplete")
+      : notification.type === "video"
+        ? safeT(notification.ok ? "video.task.completed" : "video.task.incomplete")
+        : "") || fallbackTitle || notification.title?.trim() || "";
   const descriptionText = notification.description?.trim() || "";
   const shouldShowDescription = Boolean(descriptionText && descriptionText !== titleText);
 

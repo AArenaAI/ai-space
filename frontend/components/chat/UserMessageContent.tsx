@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { ChevronDown, FileText, Quote } from "lucide-react";
 import type { Message } from "@/lib/chatTypes";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 type UserMessageContentProps = {
   message: Message;
@@ -15,9 +16,11 @@ const LONG_USER_MESSAGE_LINE_THRESHOLD = 40;
 const USER_MESSAGE_COLLAPSED_CHAR_LIMIT = 1200;
 const USER_MESSAGE_COLLAPSED_LINE_LIMIT = 18;
 
-function formatUserMessageSize(lineCount: number, charCount: number) {
-  const charLabel = charCount >= 1000 ? `约 ${(charCount / 1000).toFixed(1)}k 字` : `约 ${charCount} 字`;
-  return `${charLabel} / ${lineCount} 行`;
+function formatUserMessageSize(lineCount: number, charCount: number, t: (key: string, params?: Record<string, string>) => string) {
+  const charLabel = charCount >= 1000
+    ? t("chat.userContent.approxKChars", { count: (charCount / 1000).toFixed(1) })
+    : t("chat.userContent.approxChars", { count: String(charCount) });
+  return t("chat.userContent.size", { chars: charLabel, lines: String(lineCount) });
 }
 
 function splitLeadingQuote(content: string) {
@@ -51,12 +54,12 @@ function splitLeadingQuote(content: string) {
   };
 }
 
-function getCollapsedContent(content: string) {
+function getCollapsedContent(content: string, t: (key: string, params?: Record<string, string>) => string) {
   const lines = content.split("\n");
   const lineCount = lines.length;
   const charCount = content.length;
   const isLong = charCount > LONG_USER_MESSAGE_CHAR_THRESHOLD || lineCount > LONG_USER_MESSAGE_LINE_THRESHOLD;
-  const sizeLabel = formatUserMessageSize(lineCount, charCount);
+  const sizeLabel = formatUserMessageSize(lineCount, charCount, t);
   if (!isLong) return { isLong, preview: content, sizeLabel };
 
   const previewByLines = lines.slice(0, USER_MESSAGE_COLLAPSED_LINE_LIMIT).join("\n");
@@ -68,11 +71,12 @@ function getCollapsedContent(content: string) {
 }
 
 function UserMessageContent({ message, imageLoadFailedLabel }: UserMessageContentProps) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const imageFiles = message.files?.filter((file) => file.type === "image") || [];
   const otherFiles = message.files?.filter((file) => file.type !== "image") || [];
   const { quote, body } = useMemo(() => splitLeadingQuote(message.content || ""), [message.content]);
-  const { isLong, preview, sizeLabel } = useMemo(() => getCollapsedContent(body), [body]);
+  const { isLong, preview, sizeLabel } = useMemo(() => getCollapsedContent(body, t), [body, t]);
   const visibleBody = isLong && !expanded ? preview : body;
 
   return (
@@ -123,7 +127,7 @@ function UserMessageContent({ message, imageLoadFailedLabel }: UserMessageConten
         >
           <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium text-text-tertiary">
             <Quote className="h-3.5 w-3.5 text-brand" />
-            引用文本
+            {t("chat.quote.title")}
           </div>
           <div className="border-l-2 border-brand/50 pl-2 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap break-words line-clamp-4">
             {quote}
@@ -149,7 +153,7 @@ function UserMessageContent({ message, imageLoadFailedLabel }: UserMessageConten
             aria-expanded={expanded}
           >
             <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-180")} />
-            {expanded ? `收起长消息 · ${sizeLabel}` : `展开完整消息 · ${sizeLabel}`}
+            {expanded ? t("chat.userContent.collapseLong", { size: sizeLabel }) : t("chat.userContent.expandFull", { size: sizeLabel })}
           </button>
         ) : null}
       </div>

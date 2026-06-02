@@ -1,4 +1,5 @@
 import type { ChatActivityStatus, ChatCompletionPatch } from "./chatCompletionFinalizer";
+import type { ChatStatusTimelineStep } from "./chatStatusTimeline";
 
 export type BackgroundTaskPollInput = {
   content?: string;
@@ -86,6 +87,8 @@ export type BuildBackgroundPollingMessagePatchOptions = {
   existingContent: string;
   polledContent: string;
   liveContent?: string;
+  generationStartedAt?: number;
+  statusTimeline?: ChatStatusTimelineStep[];
   streamActive: boolean;
   serverMessageId?: number;
   isFinished: boolean;
@@ -98,6 +101,8 @@ export function buildBackgroundPollingMessagePatch({
   existingContent,
   polledContent,
   liveContent = "",
+  generationStartedAt,
+  statusTimeline,
   streamActive,
   serverMessageId,
   isFinished,
@@ -113,6 +118,8 @@ export function buildBackgroundPollingMessagePatch({
   return {
     content,
     serverMessageId,
+    generationStartedAt,
+    statusTimeline,
     activityStatus: isFinished ? undefined : createBusyStatus(),
     completedAt: isFinished ? now : undefined,
   };

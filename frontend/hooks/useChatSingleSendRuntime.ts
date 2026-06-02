@@ -21,6 +21,7 @@ import {
 import { patchMessageById } from "@/lib/chatMessageStatePatch";
 import { buildChatRequestHeaders } from "@/lib/chatRequestBuilder";
 import { toModelMessages } from "@/lib/chatHistoryTransform";
+import { initializeAssistantRealtime } from "@/lib/chatInitialRealtime";
 import { createBusyGeneratingStatus } from "@/lib/chatActivityStatus";
 import type { ChatStreamGroupContext, ChatStreamRunResult } from "@/lib/chatStreamRunResult";
 import type { ChatModel, Message } from "@/lib/chatTypes";
@@ -43,6 +44,7 @@ export type UseChatSingleSendRuntimeOptions = {
   selectedModel: ChatModel;
   currentConversation: number | undefined;
   notebookId?: number;
+  notebookFileIds?: number[];
   effectiveSkillKey: string | undefined;
   createConversation: CreateConversationAction;
   setMessages: Dispatch<SetStateAction<Message[]>>;
@@ -66,6 +68,7 @@ export function useChatSingleSendRuntime({
   selectedModel,
   currentConversation,
   notebookId,
+  notebookFileIds,
   effectiveSkillKey,
   createConversation,
   setMessages,
@@ -132,6 +135,7 @@ export function useChatSingleSendRuntime({
 
       const contextMessages = messagePlan.contextMessages;
       const assistantMsg = messagePlan.assistantMessage;
+      initializeAssistantRealtime(assistantMsg.id, assistantMsg.createdAt || now());
       setMessages((prev) => applySingleSendMessagePlan(prev, messagePlan));
 
       setIsLoading(true);
@@ -150,6 +154,7 @@ export function useChatSingleSendRuntime({
           modelMessages: toModelMessages(contextMessages),
           conversationId: convId,
           notebookId,
+          notebookFileIds,
           reasoning,
           search,
           templateId,
@@ -191,6 +196,7 @@ export function useChatSingleSendRuntime({
       selectedModel,
       currentConversation,
       notebookId,
+      notebookFileIds,
       createConversation,
       streamResponse,
       effectiveSkillKey,

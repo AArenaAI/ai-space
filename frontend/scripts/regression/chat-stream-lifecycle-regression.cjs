@@ -16,7 +16,11 @@ const sourcePaths = [
 function loadModule() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "chat-stream-lifecycle-regression-"));
   for (const sourcePath of sourcePaths) {
-    const source = fs.readFileSync(sourcePath, "utf8");
+    let source = fs.readFileSync(sourcePath, "utf8");
+    source = source.replace(
+      /import \{ normalizeError \} from "@\/lib\/errors";\n/g,
+      "const normalizeError = (error) => error instanceof Error ? error : new Error(String(error));\n"
+    );
     const transpiled = ts.transpileModule(source, {
       compilerOptions: {
         module: ts.ModuleKind.CommonJS,
@@ -60,7 +64,7 @@ async function test(name, fn) {
 }
 
 (async () => {
-  await test("decideChatStreamError ignores user and navigation aborts", async () => {
+  await test("decideChatStreamError ignores user aborts but resumes navigation with ids", async () => {
     assert.deepEqual(mod.decideChatStreamError({
       error: Object.assign(new Error("abort"), { name: "AbortError" }),
       abortReason: "user",
@@ -71,7 +75,7 @@ async function test(name, fn) {
       signalAborted: true,
       abortReason: "navigation",
       generationTaskId: 2,
-    }), { action: "ignore" });
+    }), { action: "resume" });
   });
 
   await test("decideChatStreamError resumes when recoverable ids exist", async () => {

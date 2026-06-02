@@ -2,15 +2,21 @@
 
 import React, { useMemo } from "react";
 import dynamic from "next/dynamic";
+import { useI18n } from "@/lib/i18n";
 
 // 延迟加载，避免 SSR 时访问 DOM
+function EChartsLoading() {
+  const { t } = useI18n();
+  return (
+    <div className="h-[320px] w-full flex items-center justify-center text-text-tertiary text-sm">
+      {t("chat.chart.loading")}
+    </div>
+  );
+}
+
 const ReactECharts = dynamic(() => import("echarts-for-react"), {
   ssr: false,
-  loading: () => (
-    <div className="h-[320px] w-full flex items-center justify-center text-text-tertiary text-sm">
-      加载图表中...
-    </div>
-  ),
+  loading: () => <EChartsLoading />,
 });
 
 interface EChartsBlockProps {
@@ -18,6 +24,7 @@ interface EChartsBlockProps {
 }
 
 export default function EChartsBlock({ value }: EChartsBlockProps) {
+  const { t } = useI18n();
   const option = useMemo(() => {
     try {
       return JSON.parse(value.trim());
@@ -29,7 +36,7 @@ export default function EChartsBlock({ value }: EChartsBlockProps) {
   if (!option) {
     return (
       <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 px-4 py-3 text-sm text-red-600 dark:text-red-400">
-        图表 JSON 解析失败
+        {t("chat.chart.parseFailed")}
       </div>
     );
   }

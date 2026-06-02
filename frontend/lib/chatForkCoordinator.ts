@@ -23,6 +23,7 @@ export type ForkChatMessage = {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  reasoningContent?: string;
   model?: string;
   createdAt: number;
   completedAt?: number;
@@ -91,6 +92,7 @@ export function mapPersistedChatMessage(
     id: String(message.id || options.fallbackId()),
     role: message.role,
     content,
+    reasoningContent: reasoningContent || undefined,
     model: message.model,
     createdAt: message.created_at ? parseTime(message.created_at) : 0,
     completedAt: message.completed_at ? parseTime(message.completed_at) : undefined,

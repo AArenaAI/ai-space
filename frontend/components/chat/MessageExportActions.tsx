@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { Check, ChevronDown, Download, FileText, ImageIcon, Share2, SquareCheck, Star, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 type SelectionMode = "share" | "favorite";
 
@@ -56,6 +57,7 @@ function ExportDropdown({
   disabled: boolean;
   exporting: boolean;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -79,7 +81,7 @@ function ExportDropdown({
         className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium bg-surface-card border border-surface-border text-text-primary hover:bg-surface-elevated disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
         <Download className="w-3.5 h-3.5" />
-        {exporting ? "导出中..." : "导出为"}
+        {exporting ? t("chat.export.exporting") : t("chat.export.exportAs")}
         <ChevronDown className="w-3 h-3" />
       </button>
       {open && (
@@ -91,14 +93,14 @@ function ExportDropdown({
               className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors"
             >
               <ImageIcon className="w-3.5 h-3.5" />
-              导出为图片
+              {t("chat.export.asImage")}
             </button>
             <button
               onClick={() => { onExportText(); setOpen(false); }}
               className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors"
             >
               <FileText className="w-3.5 h-3.5" />
-              导出为 TXT
+              {t("chat.export.asTxt")}
             </button>
           </div>
         </>
@@ -136,20 +138,21 @@ export function SelectionFloatingBar({
   onExportImage: () => void;
   onExportText: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="absolute bottom-0 left-0 right-0 z-[80] flex flex-wrap items-center justify-center gap-3 px-4 pb-4 pb-[max(1rem,env(safe-area-inset-bottom))] pointer-events-none">
       <ActionBar>
         <ActionBarGroup>
           <ActionBarButton onClick={onSelectAll}>
             <SquareCheck className="w-4 h-4" />
-            {allSelected ? "取消全选" : "全选"}
+            {allSelected ? t("chat.action.deselectAll") : t("chat.action.selectAll")}
           </ActionBarButton>
           <span className="px-1 text-sm text-text-secondary">
-            已选择 <span className="text-text-primary font-medium">{selectedCount}</span> 条消息
+            {t("chat.selection.selectedCount", { count: String(selectedCount) })}
           </span>
           <ActionBarButton onClick={onCancel}>
             <X className="w-3.5 h-3.5" />
-            取消
+            {t("chat.action.cancel")}
           </ActionBarButton>
         </ActionBarGroup>
       </ActionBar>
@@ -158,7 +161,7 @@ export function SelectionFloatingBar({
         <ActionBar>
           <ActionBarButton onClick={onConfirmFavorite} disabled={!hasSelection || favoriteLoading} variant="primary">
             <Star className="w-3.5 h-3.5" />
-            {favoriteLoading ? "收藏中..." : "收藏所选"}
+            {favoriteLoading ? t("chat.action.favoriting") : t("chat.action.favoriteSelected")}
           </ActionBarButton>
         </ActionBar>
       )}
@@ -173,7 +176,7 @@ export function SelectionFloatingBar({
           />
           <ActionBarButton onClick={onConfirmShare} disabled={!hasSelection || sharing} variant="primary">
             <Share2 className="w-3.5 h-3.5" />
-            {sharing ? "生成中..." : "生成分享链接"}
+            {sharing ? t("chat.action.generating") : t("chat.action.generateShareLink")}
           </ActionBarButton>
         </ActionBar>
       )}

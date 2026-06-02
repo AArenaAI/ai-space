@@ -84,6 +84,7 @@ test("buildGenerationTaskEventPatches returns active state and realtime patch", 
       isComplexTask: true,
       lastSequence: 9,
       activityStatus,
+      phase: "waiting_provider",
     },
   });
 });
@@ -93,6 +94,7 @@ test("buildTaskActivityPatch maps web search running to searching", () => {
   assert.deepEqual(mod.buildTaskActivityPatch({ meta: { kind: "web_search", status: "running" }, activityStatus }), {
     activityStatus,
     searchStatus: "searching",
+    phase: "searching",
   });
 });
 
@@ -101,6 +103,7 @@ test("buildTaskActivityPatch maps non-running web search to completed", () => {
   assert.deepEqual(mod.buildTaskActivityPatch({ meta: { kind: "web_search", status: "completed" }, activityStatus }), {
     activityStatus,
     searchStatus: "completed",
+    phase: "waiting_provider",
   });
 });
 
@@ -109,6 +112,7 @@ test("buildTaskActivityPatch leaves searchStatus undefined for non-search activi
   assert.deepEqual(mod.buildTaskActivityPatch({ meta: { kind: "generating", status: "running" }, activityStatus }), {
     activityStatus,
     searchStatus: undefined,
+    phase: "streaming_answer",
   });
 });
 
@@ -119,6 +123,7 @@ test("buildTaskSearchPatch normalizes sources and count", () => {
     searchSources: [{ title: "a" }],
     searchSourcesCount: 1,
     activityStatus,
+    phase: "waiting_provider",
   });
 });
 

@@ -3,6 +3,7 @@ import type { ChatModel } from "@/lib/chatTypes";
 
 export type ModelAvatarMeta = {
   label: string;
+  labelEn?: string;
   color: string;
   background: string;
   icon?: ComponentType<SVGProps<SVGSVGElement>>;
@@ -11,6 +12,7 @@ export type ModelAvatarMeta = {
 
 type ProviderAvatarConfig = {
   label: string;
+  labelEn?: string;
   color: string;
   background: string;
   fallback: string;
@@ -104,6 +106,7 @@ function LlamaIcon(props: SVGProps<SVGSVGElement>) {
 const PROVIDER_AVATARS: Record<string, ProviderAvatarConfig> = {
   deepseek: {
     label: "深度求索",
+    labelEn: "DeepSeek",
     color: "#4D6BFA",
     background: "rgba(77, 107, 250, 0.12)",
     fallback: "深",
@@ -139,6 +142,7 @@ const PROVIDER_AVATARS: Record<string, ProviderAvatarConfig> = {
   },
   moonshot: {
     label: "月之暗面",
+    labelEn: "Moonshot",
     color: "#00B96B",
     background: "rgba(0, 185, 107, 0.12)",
     fallback: "月",
@@ -146,6 +150,7 @@ const PROVIDER_AVATARS: Record<string, ProviderAvatarConfig> = {
   },
   kimi: {
     label: "月之暗面",
+    labelEn: "Moonshot",
     color: "#00B96B",
     background: "rgba(0, 185, 107, 0.12)",
     fallback: "K",
@@ -153,6 +158,7 @@ const PROVIDER_AVATARS: Record<string, ProviderAvatarConfig> = {
   },
   qwen: {
     label: "通义千问",
+    labelEn: "Qwen",
     color: "#615CED",
     background: "rgba(97, 92, 237, 0.12)",
     fallback: "Q",
@@ -160,6 +166,7 @@ const PROVIDER_AVATARS: Record<string, ProviderAvatarConfig> = {
   },
   alibaba: {
     label: "通义千问",
+    labelEn: "Qwen",
     color: "#615CED",
     background: "rgba(97, 92, 237, 0.12)",
     fallback: "Q",

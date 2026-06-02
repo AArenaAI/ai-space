@@ -1,3 +1,5 @@
+import type { ChatStatusTimelineStep } from "./chatStatusTimeline";
+
 export type ChatActivityStatus = {
   kind: "generating" | "reasoning" | "web_search" | "file_search" | "tool_call";
   status: "running" | "searching" | "completed" | "failed";
@@ -16,6 +18,9 @@ export type ChatCompletionPatch = {
   retryable?: boolean;
   requestId?: string;
   stopped?: boolean;
+  phase?: "waiting_provider" | "searching" | "reasoning" | "streaming_answer" | "finalizing" | "completed" | "failed" | "stopped";
+  generationStartedAt?: number;
+  statusTimeline?: ChatStatusTimelineStep[];
 };
 
 export type BuildFinalizingPatchOptions = {
@@ -28,6 +33,7 @@ export function buildFinalizingPatch({ createFinalizingStatus, hasContent }: Bui
     completedAt: undefined,
     activityStatus: createFinalizingStatus(hasContent),
     searchStatus: undefined,
+    phase: hasContent ? "finalizing" : "waiting_provider",
   };
 }
 
@@ -45,6 +51,7 @@ export function buildStreamErrorPatch({ errorCode, retryable, requestId }: Build
     activityStatus: undefined,
     searchStatus: undefined,
     searchSources: undefined,
+    phase: "failed",
   };
 }
 
@@ -54,6 +61,7 @@ export function buildStoppedPatch(now?: number): ChatCompletionPatch {
     completedAt: now,
     activityStatus: undefined,
     searchStatus: undefined,
+    phase: "stopped",
   };
 }
 
@@ -73,6 +81,7 @@ export function buildRecoverableBusyPatch({
     generationTaskId,
     activityStatus,
     completedAt: undefined,
+    phase: "waiting_provider",
   };
 }
 
@@ -81,6 +90,7 @@ export function buildCompletedPatch(now: number): ChatCompletionPatch {
     completedAt: now,
     activityStatus: undefined,
     searchStatus: undefined,
+    phase: "completed",
   };
 }
 
@@ -109,5 +119,6 @@ export function buildDisplayErrorPatch(options: BuildDisplayErrorPatchOptions): 
     completedAt: options.now,
     activityStatus: undefined,
     searchStatus: undefined,
+    phase: "failed",
   };
 }

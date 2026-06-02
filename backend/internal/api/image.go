@@ -654,6 +654,7 @@ func (h *ImageHandler) RecognizeMask(c *gin.Context) {
 
 type EditImageRequest struct {
 	Prompt    string `json:"prompt"`                       // 编辑 prompt（替换背景、文字移除时需要）
+	Title     string `json:"title"`                        // 任务标题（可选，用于历史记录显示）
 	Size      string `json:"size"`                         // 尺寸（可选）
 	ImageURL  string `json:"image_url"`                    // 源图 URL（可选，和 image_data 二选一）
 	ImageData string `json:"image_data"`                   // 源图 base64 数据（可选，和 image_url 二选一）
@@ -870,20 +871,48 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 	}
 	switch req.EditMode {
 	case "remove-bg":
-		gen.Prompt = "[背景移除] " + req.ImageURL
-	case "replace-bg":
-		gen.Prompt = "[背景替换] " + req.Prompt
-	case "text-removal":
-		gen.Prompt = "[文字移除] " + req.ImageURL
-	case "upscale":
-		gen.Prompt = "[画质提升] " + req.ImageURL
-	case "inpaint":
-		gen.Prompt = "[局部重绘] " + req.Prompt
-	case "region-brush":
-		if req.Prompt != "" {
-			gen.Prompt = "[区域涂抹] " + req.Prompt
+		if req.Title != "" {
+			gen.Prompt = "[" + req.Title + "] " + req.ImageURL
 		} else {
-			gen.Prompt = "[区域涂抹] " + req.ImageURL
+			gen.Prompt = "[Background Removal] " + req.ImageURL
+		}
+	case "replace-bg":
+		if req.Title != "" {
+			gen.Prompt = "[" + req.Title + "] " + req.Prompt
+		} else {
+			gen.Prompt = "[Background Replacement] " + req.Prompt
+		}
+	case "text-removal":
+		if req.Title != "" {
+			gen.Prompt = "[" + req.Title + "] " + req.ImageURL
+		} else {
+			gen.Prompt = "[Text Removal] " + req.ImageURL
+		}
+	case "upscale":
+		if req.Title != "" {
+			gen.Prompt = "[" + req.Title + "] " + req.ImageURL
+		} else {
+			gen.Prompt = "[Upscale] " + req.ImageURL
+		}
+	case "inpaint":
+		if req.Title != "" {
+			gen.Prompt = "[" + req.Title + "] " + req.Prompt
+		} else {
+			gen.Prompt = "[Inpaint] " + req.Prompt
+		}
+	case "region-brush":
+		if req.Title != "" {
+			if req.Prompt != "" {
+				gen.Prompt = "[" + req.Title + "] " + req.Prompt
+			} else {
+				gen.Prompt = "[" + req.Title + "] " + req.ImageURL
+			}
+		} else {
+			if req.Prompt != "" {
+				gen.Prompt = "[Region Brush] " + req.Prompt
+			} else {
+				gen.Prompt = "[Region Brush] " + req.ImageURL
+			}
 		}
 	}
 	if err := h.db.Create(gen).Error; err != nil {

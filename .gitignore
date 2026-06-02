@@ -54,7 +54,6 @@ backend/uploads/*.jpeg
 backend/uploads/*.md
 
 # Database & data (user-generated)
-backend/*.db
 backend/data/
 backend/uploads/
 
@@ -76,3 +75,4 @@ frontend/playwright-report/
 # Misc
 *.pem
 .vercel
+translation-test-samples/

@@ -69,6 +69,7 @@ test("buildStreamErrorIntent builds task-stream error patch without content", ()
       activityStatus: undefined,
       searchStatus: undefined,
       searchSources: undefined,
+      phase: "failed",
     },
   });
 });
@@ -90,6 +91,7 @@ test("buildStreamErrorIntent can include content for main chat stream", () => {
       activityStatus: undefined,
       searchStatus: undefined,
       searchSources: undefined,
+      phase: "failed",
     },
   });
 });
@@ -105,6 +107,7 @@ test("buildStreamSearchIntent normalizes search patch", () => {
       searchSources: [{ title: "A" }],
       searchSourcesCount: 1,
       activityStatus: searchDoneStatus,
+      phase: "waiting_provider",
     },
   });
 });

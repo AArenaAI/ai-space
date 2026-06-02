@@ -30,18 +30,18 @@ export function getModelRecommendation(context?: ModelRecommendationContext): Mo
   if (context.hasImageAttachment) {
     return {
       capability: "vision",
-      title: "当前包含图片",
-      message: "建议选择支持图像理解的模型。",
-      reason: "图片附件需要视觉能力，避免模型无法读取图片内容。",
+      title: "model.recommend.vision.title",
+      message: "model.recommend.vision.message",
+      reason: "model.recommend.vision.reason",
     };
   }
 
   if (context.hasDocumentAttachment) {
     return {
       capability: "file",
-      title: "当前包含文件",
-      message: "建议选择适合文件或长上下文的模型。",
-      reason: "文件问答更依赖文档理解、长上下文和稳定检索能力。",
+      title: "model.recommend.file.title",
+      message: "model.recommend.file.message",
+      reason: "model.recommend.file.reason",
     };
   }
 
@@ -52,18 +52,18 @@ export function getModelRecommendation(context?: ModelRecommendationContext): Mo
   if (CODE_PATTERN.test(context.inputText || "")) {
     return {
       capability: "coding",
-      title: "检测到代码任务",
-      message: "建议选择代码或推理能力更强的模型。",
-      reason: "代码、报错和调试问题通常需要更强的推理与代码理解能力。",
+      title: "model.recommend.coding.title",
+      message: "model.recommend.coding.message",
+      reason: "model.recommend.coding.reason",
     };
   }
 
   if (hasLongText(context.inputText)) {
     return {
       capability: "long_context",
-      title: "当前输入较长",
-      message: "建议选择长上下文模型。",
-      reason: "长文本更适合上下文容量更大的模型，能降低遗漏信息的概率。",
+      title: "model.recommend.long_context.title",
+      message: "model.recommend.long_context.message",
+      reason: "model.recommend.long_context.reason",
     };
   }
 

@@ -72,7 +72,7 @@ const dictionaries: Record<LanguageCode, Translations> = {
 interface I18nContextType {
   language: LanguageCode;
   setLanguage: (lang: LanguageCode) => void;
-  t: (key: string) => string;
+  t: (key: string, params?: Record<string, string>) => string;
   languages: Language[];
 }
 
@@ -109,8 +109,14 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const dict = dictionaries[language] || dictionaries["en"];
 
   const t = useCallback(
-    (key: string) => {
-      return dict[key] || key;
+    (key: string, params?: Record<string, string>) => {
+      let text = dict[key] || key;
+      if (params) {
+        Object.entries(params).forEach(([k, v]) => {
+          text = text.replace(new RegExp(`{${k}}`, "g"), v);
+        });
+      }
+      return text;
     },
     [dict]
   );

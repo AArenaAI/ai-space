@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, BookOpen, FileText, Loader2, Plus, Trash2, UploadCloud, AlertCircle, CheckCircle2, Clock3 } from "lucide-react";
+import { ArrowLeft, BookOpen, FileText, Loader2, Plus, Trash2, UploadCloud, AlertCircle, CheckCircle2, Clock3, Check } from "lucide-react";
 import { toast } from "sonner";
 import ChatInterface from "@/components/chat/ChatInterface";
 import { MODELS } from "@/hooks/useChat";
@@ -22,6 +22,13 @@ function formatSize(bytes?: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function reconcileSelectedFileIds(previous: number[], files: NotebookFile[]) {
+  const available = new Set(files.map((file) => file.file_id));
+  if (previous.length === 0) return files.map((file) => file.file_id);
+  const next = previous.filter((id) => available.has(id));
+  return next.length === 0 && files.length > 0 ? files.map((file) => file.file_id) : next;
 }
 
 function statusMeta(file: NotebookFile, t: (key: string) => string) {
@@ -43,6 +50,7 @@ function NotebookDetailContent() {
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
+  const [selectedFileIds, setSelectedFileIds] = useState<number[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
@@ -51,7 +59,9 @@ function NotebookDetailContent() {
     try {
       const data = await fetchNotebook(notebookId);
       setNotebook(data.notebook);
-      setFiles(data.files || []);
+      const nextFiles = data.files || [];
+      setFiles(nextFiles);
+      setSelectedFileIds((prev) => reconcileSelectedFileIds(prev, nextFiles));
       setPageError(null);
     } catch (error) {
       const normalized = showNotebookError(error, t("notebook.loadFailed"));
@@ -74,13 +84,30 @@ function NotebookDetailContent() {
     return parse !== "error" && embed !== "error" && !(parse === "done" && (embed === "done" || embed === "skipped"));
   }), [files]);
 
+  const selectedSourceText = useMemo(() => (
+    t("notebook.selectedSources")
+      .replace("{selected}", String(selectedFileIds.length))
+      .replace("{total}", String(files.length))
+  ), [files.length, selectedFileIds.length, t]);
+
+  const toggleSource = (fileId: number) => {
+    setSelectedFileIds((prev) => {
+      if (prev.includes(fileId)) return prev.filter((id) => id !== fileId);
+      return [...prev, fileId];
+    });
+  };
+
+  const selectAllSources = () => setSelectedFileIds(files.map((file) => file.file_id));
+
   useEffect(() => {
     if (!hasProcessingFiles || !notebookId) return;
     const timer = window.setInterval(() => {
       fetchNotebook(notebookId)
         .then((data) => {
           setNotebook(data.notebook);
-          setFiles(data.files || []);
+          const nextFiles = data.files || [];
+          setFiles(nextFiles);
+          setSelectedFileIds((prev) => reconcileSelectedFileIds(prev, nextFiles));
         })
         .catch((error) => {
           const normalized = normalizeNotebookError(error, t("notebook.loadFailed"));
@@ -109,6 +136,7 @@ function NotebookDetailContent() {
       }
       if (next.length > 0) {
         setFiles((prev) => [...next, ...prev.filter((old) => !next.some((item) => item.file_id === old.file_id))]);
+        setSelectedFileIds((prev) => reconcileSelectedFileIds(prev, [...next, ...files.filter((old) => !next.some((item) => item.file_id === old.file_id))]));
         toast.success(t("notebook.uploadSuccess"));
         window.setTimeout(load, 1200);
       }
@@ -128,6 +156,7 @@ function NotebookDetailContent() {
     try {
       await removeNotebookFile(notebookId, file.file_id);
       setFiles((prev) => prev.filter((item) => item.id !== file.id));
+      setSelectedFileIds((prev) => prev.filter((id) => id !== file.file_id));
       toast.success(t("notebook.removeSuccess"));
     } catch (error) {
       showNotebookError(error, t("notebook.removeFailed"));
@@ -190,6 +219,15 @@ function NotebookDetailContent() {
             </div>
           )}
 
+          {files.length > 0 && (
+            <div className="mb-3 flex items-center justify-between rounded-2xl border border-surface-border bg-surface-card px-3 py-2">
+              <span className="text-xs text-text-tertiary">{selectedSourceText}</span>
+              <button type="button" onClick={selectAllSources} className="text-xs font-medium text-brand transition hover:text-brand-hover">
+                {t("notebook.selectAllSources")}
+              </button>
+            </div>
+          )}
+
           {files.length === 0 ? (
             <button
               onClick={() => inputRef.current?.click()}
@@ -216,9 +254,18 @@ function NotebookDetailContent() {
               {files.map((file) => {
                 const meta = statusMeta(file, t);
                 const Icon = meta.icon;
+                const selected = selectedFileIds.includes(file.file_id);
                 return (
-                  <div key={file.id} className="group rounded-2xl border border-surface-border bg-surface-card p-3 transition hover:border-brand-border">
+                  <div key={file.id} className={cn("group rounded-2xl border bg-surface-card p-3 transition hover:border-brand-border", selected ? "border-brand-border" : "border-surface-border opacity-70")}>
                     <div className="flex items-start gap-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleSource(file.file_id)}
+                        className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition", selected ? "border-brand bg-brand text-white" : "border-surface-border text-transparent hover:border-brand-border")}
+                        aria-label={selected ? "selected" : "unselected"}
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                      </button>
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-muted text-brand"><FileText className="h-4 w-4" /></div>
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-medium text-text-primary">{file.file.filename}</div>
@@ -242,6 +289,7 @@ function NotebookDetailContent() {
           notebookId={notebookId}
           notebookTitle={notebook?.title}
           notebookFileCount={files.length}
+          notebookFileIds={selectedFileIds}
           models={MODELS}
           welcomeTitle={notebook?.title || t("notebook.chatWelcomeTitle")}
           welcomeSubtitle={t("notebook.chatWelcomeSubtitle")}

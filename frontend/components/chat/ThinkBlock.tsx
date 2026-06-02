@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronUp, Lightbulb } from "lucide-react";
+import { ChevronDown, Lightbulb } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
 
-const DEFAULT_COLLAPSE_THRESHOLD = 2000;
+const DEFAULT_COLLAPSE_THRESHOLD = 0;
 
 export function ThinkBlock({
   content,
@@ -25,6 +25,7 @@ export function ThinkBlock({
     <div className="mb-3 rounded-xl border border-surface-border overflow-hidden">
       <button
         onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
         className="flex items-center gap-2 w-full px-3 py-2 text-left transition-colors
           bg-purple-50 hover:bg-purple-100
           dark:bg-[#1A1A2E] dark:hover:bg-[#252542]"
@@ -40,17 +41,23 @@ export function ThinkBlock({
             <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce [animation-delay:0.3s]" />
           </div>
         )}
-        {expanded ? (
-          <ChevronUp className="w-3.5 h-3.5 text-text-tertiary shrink-0" />
-        ) : (
-          <ChevronDown className="w-3.5 h-3.5 text-text-tertiary shrink-0" />
-        )}
+        <ChevronDown
+          className={`w-3.5 h-3.5 text-text-tertiary shrink-0 transition-transform duration-300 ease-out ${expanded ? "rotate-180" : "rotate-0"}`}
+        />
       </button>
-      {expanded && (
-        <div data-i18n-skip="true" className="reasoning-markdown px-3 py-2.5 bg-slate-50 dark:bg-[#0F0F1A]">
-          <DeferredMarkdownRenderer content={content} />
+      <div
+        aria-hidden={!expanded}
+        className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${expanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div
+            data-i18n-skip="true"
+            className={`reasoning-markdown px-3 py-2.5 bg-slate-50 dark:bg-[#0F0F1A] transition-[transform,filter] duration-300 ease-out ${expanded ? "translate-y-0 blur-0" : "-translate-y-1 blur-[1px]"}`}
+          >
+            <DeferredMarkdownRenderer content={content} />
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

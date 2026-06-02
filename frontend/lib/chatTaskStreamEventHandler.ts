@@ -78,6 +78,7 @@ export function createTaskStreamEventHandler({
   };
   let sawDone = false;
   let latestSequence = after || 0;
+  const seenSequences = new Set<number>();
 
   const refreshActiveSequence = () => {
     callbacks.setActiveState(buildActiveTaskStreamState({
@@ -92,12 +93,23 @@ export function createTaskStreamEventHandler({
 
   const processEvent = (eventText: string) => {
     const action = processChatStreamEvent({ eventText, previousSequence: latestSequence });
-    if (action.sequence !== undefined && action.sequence < latestSequence && action.type !== "empty") return;
-    if (action.sequence !== undefined && action.sequence !== latestSequence) {
-      latestSequence = action.sequence;
-      refreshActiveSequence();
+    if (action.type === "empty") {
+      if (action.sequence !== undefined && action.sequence > latestSequence) {
+        latestSequence = action.sequence;
+        refreshActiveSequence();
+      }
+      return;
     }
-    if (action.type === "empty") return;
+    if (action.sequence !== undefined) {
+      if (action.hasExplicitSequence) {
+        if (action.sequence <= after || seenSequences.has(action.sequence)) return;
+        seenSequences.add(action.sequence);
+      }
+      if (action.sequence > latestSequence) {
+        latestSequence = action.sequence;
+        refreshActiveSequence();
+      }
+    }
     if (action.type === "done") {
       if (reasoningState.inReasoningBlock) {
         accumulated += "</think>";
@@ -119,7 +131,11 @@ export function createTaskStreamEventHandler({
         serverMessageId,
         createFinalizingStatus: (hasFinalContent) => createFinalizingStatus(t, hasFinalContent),
       });
-      callbacks.realtimeUpdate(doneDecision.patch);
+      callbacks.realtimeUpdate({
+        ...doneDecision.patch,
+        errorCode: undefined,
+        retryable: undefined,
+      });
       if (doneDecision.shouldStartBackgroundPolling) {
         callbacks.startBackgroundPolling(serverMessageId);
       }
@@ -182,7 +198,11 @@ export function createTaskStreamEventHandler({
           append: callbacks.streamAppend,
         });
         if (hasContentDelta) {
-          callbacks.realtimeUpdate({ activityStatus: createGeneratingStatus(t) });
+          callbacks.realtimeUpdate({
+            activityStatus: createGeneratingStatus(t),
+            errorCode: undefined,
+            retryable: undefined,
+          });
         }
         const deltaState = buildTaskDeltaState({
           legacyDelta,

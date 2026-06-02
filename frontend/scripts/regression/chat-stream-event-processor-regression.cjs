@@ -25,6 +25,14 @@ function transpileModule(sourceFile, tmpDir) {
 
 function loadModule() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "chat-stream-event-processor-regression-"));
+  [
+    "lib/errors/errorCatalog.ts",
+    "lib/errors/chatErrorMap.ts",
+    "lib/errors/fileErrorMap.ts",
+    "lib/errors/mediaErrorMap.ts",
+    "lib/errors/types.ts",
+    "lib/errors/normalizeError.ts",
+  ].forEach((file) => transpileModule(file, tmpDir));
   transpileModule("lib/chatSseParser.ts", tmpDir);
   transpileModule("lib/chatStreamMeta.ts", tmpDir);
   transpileModule("lib/chatStreamEventProcessor.ts", tmpDir);
@@ -53,6 +61,7 @@ test("processChatStreamEvent returns empty for events without data", () => {
   assert.deepEqual(mod.processChatStreamEvent({ eventText: "id: 9\nevent: ping\n\n", previousSequence: 2 }), {
     type: "empty",
     sequence: 9,
+    hasExplicitSequence: true,
   });
 });
 
@@ -60,6 +69,7 @@ test("processChatStreamEvent detects done marker", () => {
   assert.deepEqual(mod.processChatStreamEvent({ eventText: "id: 4\ndata: [DONE]\n\n", previousSequence: 1 }), {
     type: "done",
     sequence: 4,
+    hasExplicitSequence: true,
   });
 });
 
@@ -70,6 +80,7 @@ test("processChatStreamEvent parses chat meta payload", () => {
   });
   assert.equal(result.type, "payload");
   assert.equal(result.sequence, 5);
+  assert.equal(result.hasExplicitSequence, true);
   assert.deepEqual(result.payload, { type: "chat_meta", meta: { request_id: "req_1" }, requestId: "req_1" });
 });
 
@@ -80,6 +91,7 @@ test("processChatStreamEvent normalizes generation task payload", () => {
   });
   assert.equal(result.type, "payload");
   assert.equal(result.sequence, 6);
+  assert.equal(result.hasExplicitSequence, false);
   assert.deepEqual(result.payload, { type: "generation_task", task: { id: 42, assistant_message_id: 7 } });
 });
 
@@ -90,6 +102,7 @@ test("processChatStreamEvent falls back to delta payload for choices", () => {
   assert.deepEqual(result, {
     type: "payload",
     sequence: undefined,
+    hasExplicitSequence: false,
     payload: { type: "delta", rawDelta: { content: "hi" } },
   });
 });
@@ -98,6 +111,7 @@ test("processChatStreamEvent returns text for invalid JSON", () => {
   assert.deepEqual(mod.processChatStreamEvent({ eventText: "id: 8\ndata: plain text\n\n", previousSequence: 3 }), {
     type: "text",
     sequence: 8,
+    hasExplicitSequence: true,
     data: "plain text",
   });
 });

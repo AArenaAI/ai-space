@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Columns2, Loader2, ChevronRight, Trash2, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 interface CompareRecord {
   id: number;
@@ -13,6 +14,7 @@ interface CompareRecord {
 }
 
 export default function CompareHistory() {
+  const { t, language } = useI18n();
   const [records, setRecords] = useState<CompareRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
@@ -59,7 +61,7 @@ export default function CompareHistory() {
         className="flex items-center justify-center gap-2 w-full px-3 py-2 rounded-lg border border-dashed border-surface-border text-sm text-text-secondary hover:text-text-primary hover:border-brand/50 hover:bg-surface-card transition-all"
       >
         <Columns2 className="w-4 h-4" />
-        <span>对比历史</span>
+        <span>{t("compare.history.title")}</span>
         <ChevronRight className={cn("w-3.5 h-3.5 transition-transform", open && "rotate-90")} />
       </button>
 
@@ -71,7 +73,7 @@ export default function CompareHistory() {
             </div>
           ) : records.length === 0 ? (
             <div className="py-6 text-center text-xs text-text-tertiary">
-              暂无对比记录
+              {t("compare.history.empty")}
             </div>
           ) : (
             records.map((record) => (
@@ -86,11 +88,11 @@ export default function CompareHistory() {
                   <p className="text-sm text-text-primary truncate">{record.query}</p>
                   <div className="flex items-center gap-1 mt-0.5">
                     <span className="text-[10px] text-text-tertiary">
-                      {record.models.length} 个模型
+                      {t("compare.history.modelCount", { count: String(record.models.length) })}
                     </span>
                     <span className="text-[10px] text-text-tertiary">·</span>
                     <span className="text-[10px] text-text-tertiary">
-                      {new Date(record.created_at).toLocaleDateString("zh-CN")}
+                      {new Date(record.created_at).toLocaleDateString(language)}
                     </span>
                   </div>
                 </a>
@@ -98,14 +100,14 @@ export default function CompareHistory() {
                   <a
                     href={`/share?slug=${record.slug}&type=compare`}
                     className="p-1 rounded text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
-                    title="查看"
+                    title={t("compare.history.view")}
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
                   </a>
                   <button
                     onClick={() => handleDelete(record.id)}
                     className="p-1 rounded text-text-tertiary hover:text-red-400 hover:bg-surface-card transition-colors"
-                    title="删除"
+                    title={t("chat.action.delete")}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>

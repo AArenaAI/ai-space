@@ -11,9 +11,13 @@ export type ChatSourceLike = {
 };
 
 export type MessageGenerationLike = {
+  content?: string;
   completedAt?: unknown;
+  createdAt?: number;
   stopped?: boolean;
   activityStatus?: { status?: string } | null;
+  searchStatus?: "searching" | "completed" | "failed";
+  serverMessageId?: unknown;
   generationTaskId?: unknown;
   backgroundTaskId?: unknown;
   useBackground?: boolean;
@@ -72,9 +76,16 @@ export function getCitedSources(content: string, allSources?: ChatSourceLike[]) 
     .map((n) => allSources[n - 1]);
 }
 
+const EMPTY_ASSISTANT_RECOVERY_GRACE_MS = 8_000;
+
 export function isMessageGenerating(msg: MessageGenerationLike, isStreaming: boolean): boolean {
   if (isStreaming) return true;
   if (msg.completedAt || msg.stopped) return false;
   if (msg.activityStatus?.status === "running" || msg.activityStatus?.status === "searching") return true;
-  return !!(msg.generationTaskId || msg.backgroundTaskId || msg.useBackground || msg.isComplexTask);
+  if (msg.searchStatus === "searching") return true;
+  if (msg.serverMessageId || msg.generationTaskId || msg.backgroundTaskId || msg.useBackground || msg.isComplexTask) return true;
+  if (!msg.content?.trim() && typeof msg.createdAt === "number" && Date.now() - msg.createdAt < EMPTY_ASSISTANT_RECOVERY_GRACE_MS) {
+    return true;
+  }
+  return false;
 }

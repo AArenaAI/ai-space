@@ -259,8 +259,12 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		authorized.POST("/video-chats/:id/messages", videoChatHandler.SendVideoChatMessage)
 
 		// 媒体文件服务（无需认证，直接访问）
+		// 浏览器视频/图片元素可能先发 HEAD 探测元数据；HEAD 未注册时 Gin 会返回 404，
+		// 导致生成成功的本地视频在会话页显示为黑屏 0:00。
 		router.GET("/api/images/file/:filename", imageHandler.ServeImageFile)
+		router.HEAD("/api/images/file/:filename", imageHandler.ServeImageFile)
 		router.GET("/api/videos/file/:filename", ServeVideoFile)
+		router.HEAD("/api/videos/file/:filename", ServeVideoFile)
 
 		// 回答模板路由
 		templateHandler := NewTemplateHandler(db)

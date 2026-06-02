@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bot, User, Loader2, AlertCircle, Lightbulb, ChevronUp, ChevronDown } from "lucide-react";
+import { Bot, User, Loader2, AlertCircle, Lightbulb, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -90,6 +90,7 @@ function ThinkBlock({ content }: { content: string }) {
     <div className="mb-3 rounded-xl border border-surface-border overflow-hidden">
       <button
         onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
         className="flex items-center gap-2 w-full px-3 py-2 text-left transition-colors
           bg-purple-50 hover:bg-purple-100
           dark:bg-[#1A1A2E] dark:hover:bg-[#252542]"
@@ -98,18 +99,23 @@ function ThinkBlock({ content }: { content: string }) {
         <span className="text-sm font-medium text-text-secondary flex-1">
           推理过程{content.length >= 2000 ? " · 已折叠" : ""}
         </span>
-        {expanded ? (
-          <ChevronUp className="w-3.5 h-3.5 text-text-tertiary shrink-0" />
-        ) : (
-          <ChevronDown className="w-3.5 h-3.5 text-text-tertiary shrink-0" />
-        )}
+        <ChevronDown
+          className={`w-3.5 h-3.5 text-text-tertiary shrink-0 transition-transform duration-300 ease-out ${expanded ? "rotate-180" : "rotate-0"}`}
+        />
       </button>
-      {expanded && (
-        <div className="px-3 py-2.5 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap
-          bg-slate-50 dark:bg-[#0F0F1A]">
-          {content}
+      <div
+        aria-hidden={!expanded}
+        className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${expanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div
+            className={`px-3 py-2.5 text-[13px] leading-relaxed text-text-secondary whitespace-pre-wrap
+            bg-slate-50 dark:bg-[#0F0F1A] transition-[transform,filter] duration-300 ease-out ${expanded ? "translate-y-0 blur-0" : "-translate-y-1 blur-[1px]"}`}
+          >
+            {content}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

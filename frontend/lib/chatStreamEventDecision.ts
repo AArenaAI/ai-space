@@ -30,6 +30,7 @@ export type ChatStreamRealtimePatch = ChatStreamGroupMetaState & {
   errorCode?: string;
   retryable?: boolean;
   requestId?: string;
+  phase?: "waiting_provider" | "searching" | "reasoning" | "streaming_answer" | "finalizing" | "completed" | "failed" | "stopped";
 };
 
 export type MergeStreamGroupMetaOptions = {
@@ -70,8 +71,8 @@ export function buildChatDonePatch({
   return {
     hasContent,
     patch: hasContent
-      ? { completedAt: now, activityStatus: undefined, searchStatus: undefined }
-      : { completedAt: undefined, activityStatus: busyStatus },
+      ? { completedAt: now, activityStatus: undefined, searchStatus: undefined, phase: "completed" }
+      : { completedAt: undefined, activityStatus: busyStatus, phase: "waiting_provider" },
   };
 }
 
@@ -123,6 +124,7 @@ export function buildChatGenerationTaskPatch({
       isComplexTask: taskInfo.isComplexTask,
       lastSequence,
       activityStatus,
+      phase: "waiting_provider",
     },
     shouldMarkBackgroundPollingStarted: !!taskInfo.generationTaskId,
     shouldRegisterBackgroundTask: !!taskInfo.serverMessageId && (taskInfo.useBackground || taskInfo.isComplexTask),
@@ -172,6 +174,7 @@ export function buildChatBackgroundTaskPatch({
       useBackground: true,
       isComplexTask: true,
       activityStatus,
+      phase: "waiting_provider",
     },
     shouldRegisterBackgroundTask: !!taskInfo.serverMessageId,
   };
@@ -187,6 +190,11 @@ export function buildChatActivityPatch({
   const patch: ChatStreamRealtimePatch = { activityStatus };
   if (meta?.kind === "web_search") {
     patch.searchStatus = meta.status;
+    patch.phase = meta.status === "running" || meta.status === "searching" ? "searching" : "waiting_provider";
+  } else if (meta?.kind === "reasoning") {
+    patch.phase = "reasoning";
+  } else if (meta?.kind === "generating") {
+    patch.phase = "streaming_answer";
   }
   return patch;
 }
@@ -203,6 +211,7 @@ export function buildChatSearchPatch({
     searchSources: meta?.sources || [],
     searchSourcesCount: typeof meta?.sources_count === "number" ? meta.sources_count : undefined,
     activityStatus,
+    phase: meta?.status === "searching" ? "searching" : "waiting_provider",
   };
 }
 

@@ -95,9 +95,13 @@ test("isMessageGenerating stops for completed or stopped messages", () => {
   assert.equal(mod.isMessageGenerating({ stopped: true, generationTaskId: 1 }, false), false);
 });
 
-test("isMessageGenerating detects running activity and background task hints", () => {
+test("isMessageGenerating detects running activity, searching status and recovery hints", () => {
   assert.equal(mod.isMessageGenerating({ activityStatus: { status: "searching" } }, false), true);
+  assert.equal(mod.isMessageGenerating({ searchStatus: "searching" }, false), true);
+  assert.equal(mod.isMessageGenerating({ serverMessageId: 123 }, false), true);
   assert.equal(mod.isMessageGenerating({ backgroundTaskId: "task" }, false), true);
+  assert.equal(mod.isMessageGenerating({ content: "", createdAt: Date.now() }, false), true);
+  assert.equal(mod.isMessageGenerating({ content: "", createdAt: Date.now() - 20_000 }, false), false);
   assert.equal(mod.isMessageGenerating({}, false), false);
 });
 

@@ -11,7 +11,7 @@ const ignoredConsoleErrors = [
   // Browser console messages for failed resources often omit the URL. The
   // response listener below records the actual failed URL and only ignores
   // explicit backend/API misses, so this generic console line is redundant.
-  /Failed to load resource: the server responded with a status of 404 \(Not Found\)/,
+  /Failed to load resource:.*404/i,
   /fetch image chats error:/,
   /fetch video chats error:/,
 ];

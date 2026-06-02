@@ -11,7 +11,11 @@ function loadModule() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "chat-load-more-coordinator-regression-"));
   const modules = ["chatForkCoordinator", "chatLoadMoreCoordinator"];
   for (const name of modules) {
-    const source = fs.readFileSync(path.join(projectRoot, `lib/${name}.ts`), "utf8");
+    let source = fs.readFileSync(path.join(projectRoot, `lib/${name}.ts`), "utf8");
+    source = source.replace(
+      /import \{ normalizeError, readApiError \} from "@\/lib\/errors";\n/g,
+      "const normalizeError = (error, options = {}) => error instanceof Error ? error : new Error(options.fallbackMessage || String(error));\nconst readApiError = async (response, fallback) => { try { const data = await response.json(); return data && (data.error || data.message) || fallback; } catch { return fallback; } };\n"
+    );
     const output = ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true, strict: true },
       fileName: path.join(projectRoot, `lib/${name}.ts`),

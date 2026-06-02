@@ -31,16 +31,19 @@ if (selectedNames.size && selected.length !== selectedNames.size) {
 }
 
 function parseSummary(output) {
-  const marker = 'real chat e2e summary';
-  const idx = output.lastIndexOf(marker);
-  if (idx < 0) return null;
-  const jsonStart = output.indexOf('{', idx);
-  if (jsonStart < 0) return null;
-  try {
-    return JSON.parse(output.slice(jsonStart));
-  } catch {
-    return null;
+  const marker = 'chat real e2e passed';
+  const markerIdx = output.lastIndexOf(marker);
+  const beforeMarker = markerIdx >= 0 ? output.slice(0, markerIdx) : output;
+  const jsonEnd = beforeMarker.lastIndexOf('}');
+  if (jsonEnd < 0) return null;
+  for (let idx = beforeMarker.lastIndexOf('{', jsonEnd); idx >= 0; idx = beforeMarker.lastIndexOf('{', idx - 1)) {
+    try {
+      return JSON.parse(beforeMarker.slice(idx, jsonEnd + 1));
+    } catch {
+      // Keep scanning backward: nested objects contain their own '{'.
+    }
   }
+  return null;
 }
 
 const results = [];
@@ -68,12 +71,12 @@ for (const item of selected) {
     status: child.status,
     signal: child.signal || undefined,
     elapsedMs: Date.now() - started,
-    contentLength: summary?.api?.contentLength,
-    reasoningLength: summary?.api?.reasoningLength,
-    streamDone: summary?.api?.streamDone,
-    taskStatus: summary?.api?.taskStatus,
-    persistedReasoningLength: summary?.api?.persistedReasoningLength,
-    browserHistory: Boolean(summary?.browser?.historyContentOk),
+    contentLength: summary?.contentLength,
+    reasoningLength: summary?.reasoningLength,
+    streamDone: summary?.streamDone,
+    taskStatus: summary?.taskStatus,
+    persistedReasoningLength: summary?.persistedReasoningLength,
+    browserHistory: Boolean(summary?.browserHistory),
     errorTail: passed ? undefined : output.slice(-1200),
   });
 }

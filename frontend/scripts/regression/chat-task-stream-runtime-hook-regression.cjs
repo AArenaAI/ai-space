@@ -19,7 +19,7 @@ source = source.replace(/import type[^;]+streaming[^;]+;\n/g, "");
 source = source.replace(/import type[^;]+chatTypes[^;]+;\n/g, "");
 source = source.replace(/import \{ useCallback, useRef \} from "react";\n/g, "const useCallback = (fn) => fn; const useRef = (current) => ({ current });\n");
 source = source.replace(/import \{ getGuestId as defaultGetGuestId \} from "@\/lib\/guestId";\n/g, "const defaultGetGuestId = () => 'guest';\n");
-source = source.replace(/import \{ realtimeAppend as defaultStreamAppend, realtimeGet as defaultStreamGet, realtimeGet as defaultRealtimeGet, realtimeUpdate as defaultRealtimeUpdate, realtimeClear as defaultRealtimeClear \} from "@\/lib\/streaming";\n/g, "const defaultStreamAppend = () => {}; const defaultStreamGet = () => ''; const defaultRealtimeGet = () => undefined; const defaultRealtimeUpdate = () => {}; const defaultRealtimeClear = () => {};\n");
+source = source.replace(/import \{ realtimeAppend as defaultRealtimeAppend, realtimeGet as defaultRealtimeGet, realtimeUpdate as defaultRealtimeUpdate, realtimeMarkCompleted as defaultRealtimeMarkCompleted \} from "@\/lib\/streaming";\n/g, "const defaultRealtimeAppend = () => {}; const defaultRealtimeGet = () => undefined; const defaultRealtimeUpdate = () => {}; const defaultRealtimeMarkCompleted = () => {};\n");
 source = source.replace(
   /import \{\n  shouldStartTaskStreamFallbackPolling,\n  shouldSyncTaskStreamFinalMessage,\n\} from "@\/lib\/chatTaskStreamFinalizer";\n/g,
   finalizerSource.replace(/export /g, "") + "\n"
@@ -178,10 +178,10 @@ test("done handler callback can start background polling with resolved id", asyn
   assert.deepEqual(started[0], [9, "local", 33]);
 });
 
-test("finally syncs realtime data to message, clears store, removes stream and starts fallback polling", async () => {
+test("finally syncs realtime data to message, marks realtime completed, removes stream and starts fallback polling", async () => {
   const taskStreamsRef = { current: {} };
   const messages = createState([{ id: "local", content: "old" }]);
-  const cleared = [];
+  const completed = [];
   const started = [];
   const action = createStartTaskEventStreamAction({
     apiBaseUrl: "",
@@ -200,7 +200,7 @@ test("finally syncs realtime data to message, clears store, removes stream and s
       getLatestSequence(){ return 44; },
     }),
     realtimeGet: () => ({ content: "rt", completedAt: 123 }),
-    realtimeClear: (id) => cleared.push(id),
+    realtimeMarkCompleted: (id) => completed.push(id),
     runTaskEventStream: async () => {},
   });
   action(5, "local", 9);
@@ -210,7 +210,7 @@ test("finally syncs realtime data to message, clears store, removes stream and s
   assert.equal(messages.get()[0].content, "rt");
   assert.equal(messages.get()[0].lastSequence, 44);
   assert.equal(messages.get()[0].completedAt, 123);
-  assert.deepEqual(cleared, ["local"]);
+  assert.deepEqual(completed, ["local"]);
   assert.equal(taskStreamsRef.current.local, undefined);
   assert.deepEqual(started.at(-1), [5, "local", 9]);
 });

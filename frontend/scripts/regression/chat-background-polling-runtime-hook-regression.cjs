@@ -18,7 +18,7 @@ source = source.replace(/import type[^;]+chatTypes[^;]+;\n/g, "");
 source = source.replace(/import \{ useCallback, useRef \} from "react";\n/g, "const useCallback = (fn) => fn; const useRef = (current) => ({ current });\n");
 source = source.replace(/import \{ getGuestId as defaultGetGuestId \} from "@\/lib\/guestId";\n/g, "const defaultGetGuestId = () => 'guest';\n");
 source = source.replace(/import \{ emitTaskFinished as defaultEmitTaskFinished \} from "@\/lib\/taskNotifications";\n/g, "const defaultEmitTaskFinished = () => {};\n");
-source = source.replace(/import \{ realtimeGet as defaultStreamGet, realtimeGet as defaultRealtimeGet \} from "@\/lib\/streaming";\n/g, "const defaultStreamGet = () => undefined; const defaultRealtimeGet = () => undefined;\n");
+source = source.replace(/import \{ realtimeGet as defaultRealtimeGet \} from "@\/lib\/streaming";\n/g, "const defaultRealtimeGet = () => undefined;\n");
 source = source.replace(
   /import \{ getNotificationConversationTitle \} from "@\/lib\/chatBackgroundTaskRegistration";\n/g,
   fs.readFileSync(registrationFile, "utf8").replace(/export /g, "") + "\n"
@@ -136,7 +136,7 @@ test("poll state patches message without overriding live stream content", () => 
     stopTaskStream: () => {},
     getToken: () => null,
     getGuestId: () => "guest-1",
-    realtimeGet: () => "live",
+    realtimeGet: () => ({ content: "live" }),
     runner: (opts) => {
       callbacks = opts.callbacks;
       assert.equal(opts.headers["X-Guest-ID"], "guest-1");

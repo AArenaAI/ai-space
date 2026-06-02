@@ -264,6 +264,8 @@ export function buildConversationStatusDecision({
   const shouldResumePolling = hasTask && (!terminalStatus || !hasContent);
   const generationTaskId = Number(bgTask.id || bgTask.task_id || 0) || undefined;
   const lastSequence = Number(bgTask.last_sequence_number || 0) || 0;
+  const currentMessageSequence = currentMessage.lastSequence || 0;
+  const resumeAfterSequence = hasContent ? (lastSequence || currentMessageSequence) : currentMessageSequence;
   const completedAt = shouldResumePolling
     ? undefined
     : (hasTask && terminalStatus && hasContent && !currentMessage.completedAt
@@ -289,7 +291,7 @@ export function buildConversationStatusDecision({
     resume: shouldResumePolling
       ? {
         generationTaskId,
-        lastSequence: lastSequence || currentMessage.lastSequence || 0,
+        lastSequence: resumeAfterSequence,
         initialContent: serverContent || currentMessage.content || "",
       }
       : undefined,

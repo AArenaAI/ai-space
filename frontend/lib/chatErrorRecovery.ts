@@ -60,7 +60,7 @@ export function shouldResumeTaskStreamAfterError({
   serverMessageId?: number;
   generationTaskId?: number;
 }): boolean {
-  if (shouldIgnoreStreamAbort({ isAbort, abortReason })) return false;
+  if (isAbort && abortReason === "user") return false;
   return !!serverMessageId || !!generationTaskId;
 }
 

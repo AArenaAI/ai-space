@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Star, X, MessageSquare, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useFavorites, FavoriteItem } from "@/hooks/useFavorites";
+import { useI18n } from "@/lib/i18n";
 
 interface FavoriteListProps {
   open: boolean;
@@ -12,6 +13,7 @@ interface FavoriteListProps {
 }
 
 export default function FavoriteList({ open, onClose }: FavoriteListProps) {
+  const { t } = useI18n();
   const { favoriteList, listLoading, fetchList, removeFavorite } = useFavorites();
   const [page, setPage] = useState(1);
 
@@ -30,7 +32,7 @@ export default function FavoriteList({ open, onClose }: FavoriteListProps) {
         <div className="flex items-center justify-between px-6 py-4 border-b border-surface-border">
           <div className="flex items-center gap-2">
             <Star className="w-5 h-5 text-amber-400 fill-amber-400" />
-            <h2 className="text-lg font-semibold text-text-primary">我的收藏</h2>
+            <h2 className="text-lg font-semibold text-text-primary">{t("favorites.title")}</h2>
             <span className="text-xs text-text-tertiary bg-surface-card px-2 py-0.5 rounded-full">
               {favoriteList.length}
             </span>
@@ -52,8 +54,8 @@ export default function FavoriteList({ open, onClose }: FavoriteListProps) {
           ) : favoriteList.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <Star className="w-10 h-10 text-text-tertiary/30 mb-3" />
-              <p className="text-sm text-text-secondary">暂无收藏</p>
-              <p className="text-xs text-text-tertiary mt-1">在对话中点击星标收藏喜欢的回答</p>
+              <p className="text-sm text-text-secondary">{t("favorites.empty.title")}</p>
+              <p className="text-xs text-text-tertiary mt-1">{t("favorites.empty.desc")}</p>
             </div>
           ) : (
             favoriteList.map((item) => (
@@ -69,7 +71,7 @@ export default function FavoriteList({ open, onClose }: FavoriteListProps) {
         {/* Footer - pagination placeholder */}
         {favoriteList.length > 0 && (
           <div className="px-6 py-3 border-t border-surface-border flex items-center justify-between">
-            <span className="text-xs text-text-tertiary">共 {favoriteList.length} 条收藏</span>
+            <span className="text-xs text-text-tertiary">{t("favorites.count", { count: String(favoriteList.length) })}</span>
           </div>
         )}
       </div>
@@ -78,6 +80,7 @@ export default function FavoriteList({ open, onClose }: FavoriteListProps) {
 }
 
 function FavoriteCard({ item, onRemove }: { item: FavoriteItem; onRemove: () => void }) {
+  const { t, language } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const router = useRouter();
 
@@ -90,7 +93,7 @@ function FavoriteCard({ item, onRemove }: { item: FavoriteItem; onRemove: () => 
       {/* Query */}
       {item.user_query && (
         <div className="mb-3 border-l-2 border-surface-border pl-3">
-          <div className="mb-1 text-xs text-text-tertiary">引用的用户输入</div>
+          <div className="mb-1 text-xs text-text-tertiary">{t("favorites.quotedUserInput")}</div>
           <p className="line-clamp-2 text-sm text-text-secondary">{item.user_query}</p>
         </div>
       )}
@@ -105,7 +108,7 @@ function FavoriteCard({ item, onRemove }: { item: FavoriteItem; onRemove: () => 
           onClick={() => setExpanded(!expanded)}
           className="text-xs text-brand mt-1 hover:underline"
         >
-          {expanded ? "收起" : "展开"}
+          {expanded ? t("favorites.collapse") : t("favorites.expand")}
         </button>
       )}
 
@@ -113,7 +116,7 @@ function FavoriteCard({ item, onRemove }: { item: FavoriteItem; onRemove: () => 
       <div className="flex items-center justify-between mt-3 pt-3 border-t border-surface-border/40">
         <div className="flex items-center gap-3 text-xs text-text-tertiary">
           <span>{item.model_id}</span>
-          <span>{new Date(item.created_at).toLocaleDateString("zh-CN")}</span>
+          <span>{new Date(item.created_at).toLocaleDateString(language)}</span>
           {item.conv_title && <span className="max-w-[120px] truncate">{item.conv_title}</span>}
         </div>
         <div className="flex items-center gap-1">
@@ -121,14 +124,14 @@ function FavoriteCard({ item, onRemove }: { item: FavoriteItem; onRemove: () => 
             type="button"
             onClick={() => router.push(`/chat?id=${item.conv_id}`, { scroll: false })}
             className="p-1.5 rounded-md text-text-tertiary hover:text-brand hover:bg-brand/10 transition-colors"
-            title="跳回对话"
+            title={t("favorites.backToConversation")}
           >
             <ExternalLink className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={onRemove}
             className="p-1.5 rounded-md text-text-tertiary hover:text-red-400 hover:bg-red-500/10 transition-colors"
-            title="取消收藏"
+            title={t("chat.action.unfavorite")}
           >
             <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
           </button>

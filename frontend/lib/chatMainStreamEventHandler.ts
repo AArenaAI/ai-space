@@ -96,6 +96,7 @@ export function createMainStreamEventHandler({
   let sawDone = false;
   let recoverable = false;
   let latestSequence = 0;
+  const seenSequences = new Set<number>();
 
   const currentGroupContext = (): MainStreamGroupContext | undefined =>
     latestGroupId || latestUserMessageId
@@ -157,8 +158,19 @@ export function createMainStreamEventHandler({
 
   const processEvent = (eventText: string) => {
     const action = processChatStreamEvent({ eventText, previousSequence: latestSequence });
-    if (action.sequence !== undefined) latestSequence = action.sequence;
-    if (action.type === "empty") return;
+    if (action.type === "empty") {
+      if (action.sequence !== undefined && action.sequence > latestSequence) {
+        latestSequence = action.sequence;
+      }
+      return;
+    }
+    if (action.sequence !== undefined) {
+      if (action.hasExplicitSequence) {
+        if (seenSequences.has(action.sequence)) return;
+        seenSequences.add(action.sequence);
+      }
+      if (action.sequence > latestSequence) latestSequence = action.sequence;
+    }
     if (action.type === "done") {
       closeOpenReasoning();
       sawDone = true;

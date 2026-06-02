@@ -5,7 +5,7 @@ import {
   realtimeAppend as defaultRealtimeAppend,
   realtimeUpdate as defaultRealtimeUpdate,
   realtimeGet as defaultRealtimeGet,
-  realtimeClear as defaultRealtimeClear,
+  realtimeMarkCompleted as defaultRealtimeMarkCompleted,
 } from "@/lib/streaming";
 import type { RealtimeData } from "@/lib/streaming";
 import { createMainStreamEventHandler as defaultCreateMainStreamEventHandler } from "@/lib/chatMainStreamEventHandler";
@@ -54,7 +54,7 @@ type CreateMainStreamResponseDeps = {
   realtimeAppend?: typeof defaultRealtimeAppend;
   realtimeGet?: typeof defaultRealtimeGet;
   realtimeUpdate?: typeof defaultRealtimeUpdate;
-  realtimeClear?: typeof defaultRealtimeClear;
+  realtimeMarkCompleted?: typeof defaultRealtimeMarkCompleted;
   registerBackgroundTask?: typeof defaultRegisterBackgroundTask;
   now?: () => number;
 };
@@ -73,7 +73,7 @@ export function createStreamResponseAction({
   realtimeAppend = defaultRealtimeAppend,
   realtimeGet = defaultRealtimeGet,
   realtimeUpdate = defaultRealtimeUpdate,
-  realtimeClear = defaultRealtimeClear,
+  realtimeMarkCompleted = defaultRealtimeMarkCompleted,
   registerBackgroundTask = defaultRegisterBackgroundTask,
   now = Date.now,
 }: CreateMainStreamResponseDeps) {
@@ -174,6 +174,13 @@ export function createStreamResponseAction({
 
       if (finalAction.type === "reconcile_after_done") {
         mainStreamHandler.setRecoverable(true);
+        realtimeMarkCompleted(assistantMsg.id, now());
+        const completedRealtimeData = realtimeGet(assistantMsg.id);
+        if (completedRealtimeData?.statusTimeline?.length) {
+          setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) =>
+            applyFinalRealtimeDataToMessage(m, { finalContent: finalAction.finalContent, finalData: completedRealtimeData })
+          ));
+        }
         if (finalAction.shouldStartBackgroundPolling && finalAction.serverMessageId) {
           startBackgroundPolling(convId || getCurrentConversation(), assistantMsg.id, finalAction.serverMessageId);
         }
@@ -181,7 +188,13 @@ export function createStreamResponseAction({
       }
 
       if (finalAction.shouldClearStores) {
-        realtimeClear(assistantMsg.id);
+        realtimeMarkCompleted(assistantMsg.id, now());
+        const completedRealtimeData = realtimeGet(assistantMsg.id);
+        if (completedRealtimeData?.statusTimeline?.length) {
+          setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) =>
+            applyFinalRealtimeDataToMessage(m, { finalContent: finalAction.finalContent, finalData: completedRealtimeData })
+          ));
+        }
       }
 
       if (finalAction.shouldMarkCompleted) {

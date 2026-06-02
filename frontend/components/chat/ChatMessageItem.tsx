@@ -57,6 +57,7 @@ function MessageMenu({
   isFavorited?: boolean;
   showRegenerate: boolean;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -88,7 +89,7 @@ function MessageMenu({
               className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors"
             >
               <Copy className="w-3.5 h-3.5" />
-              复制
+              {t("chat.action.copy")}
             </button>
             {showRegenerate && onRegenerate && (
               <button
@@ -96,7 +97,7 @@ function MessageMenu({
                 className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                重新生成
+                {t("chat.action.regenerate")}
               </button>
             )}
             <button
@@ -104,7 +105,7 @@ function MessageMenu({
               className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors"
             >
               <Share2 className="w-3.5 h-3.5" />
-              选择分享
+              {t("chat.action.shareSelect")}
             </button>
             {onFavorite && (
               <button
@@ -112,7 +113,7 @@ function MessageMenu({
                 className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-secondary hover:bg-surface-card hover:text-text-primary transition-colors"
               >
                 <Star className={cn("w-3.5 h-3.5", isFavorited && "fill-amber-400 text-amber-400")} />
-                {isFavorited ? "取消收藏" : "收藏"}
+                {isFavorited ? t("chat.action.unfavorite") : t("chat.action.favorite")}
               </button>
             )}
             <div className="mx-2 my-1 h-px bg-surface-border" />
@@ -121,7 +122,7 @@ function MessageMenu({
               className="flex items-center gap-2 w-full px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
             >
               <Trash2 className="w-3.5 h-3.5" />
-              删除
+              {t("chat.action.delete")}
             </button>
           </div>
         </>
@@ -157,6 +158,7 @@ function MessageActions({
   completedAt?: number;
   onForkCompare?: () => void;
 }) {
+  const { t, language } = useI18n();
   const [copied, setCopied] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
@@ -177,19 +179,17 @@ function MessageActions({
     const d = new Date(ts);
     const now = new Date();
     const isToday = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-    const timeStr = d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+    const timeStr = d.toLocaleTimeString(language, { hour: "2-digit", minute: "2-digit" });
     if (isToday) return timeStr;
-    const month = d.getMonth() + 1;
-    const day = d.getDate();
-    return `${month}月${day}日 ${timeStr}`;
+    return `${d.toLocaleDateString(language, { month: "short", day: "numeric" })} ${timeStr}`;
   };
 
   const formatDuration = (ms: number) => {
     const totalSeconds = Math.floor(ms / 1000);
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
-    if (minutes > 0) return `${minutes}分${seconds}秒`;
-    return `${seconds}秒`;
+    if (minutes > 0) return t("time.duration.minutesSeconds", { minutes: String(minutes), seconds: String(seconds) });
+    return t("time.duration.seconds", { seconds: String(seconds) });
   };
 
   const durationMs = completedAt ? completedAt - createdAt : 0;
@@ -203,7 +203,7 @@ function MessageActions({
       <button
         onClick={() => { onCopy(); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
         className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
-        title="复制"
+        title={t("chat.action.copy")}
       >
         {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
       </button>
@@ -212,7 +212,7 @@ function MessageActions({
         <button
           onClick={onRegenerate}
           className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
-          title="重新生成"
+          title={t("chat.action.regenerate")}
         >
           <RotateCcw className="w-3.5 h-3.5" />
         </button>
@@ -220,7 +220,7 @@ function MessageActions({
       <button
         onClick={onSelectMode}
         className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
-        title="选择分享"
+        title={t("chat.action.shareSelect")}
       >
         <Share2 className="w-3.5 h-3.5" />
       </button>
@@ -233,7 +233,7 @@ function MessageActions({
               ? "text-amber-400 hover:text-amber-500 hover:bg-amber-400/10"
               : "text-text-tertiary hover:text-amber-400 hover:bg-amber-400/10"
           )}
-          title={isFavorited ? "取消收藏" : "收藏"}
+          title={isFavorited ? t("chat.action.unfavorite") : t("chat.action.favorite")}
         >
           <Star className={cn("w-3.5 h-3.5", isFavorited && "fill-amber-400")} />
         </button>
@@ -241,7 +241,7 @@ function MessageActions({
       <button
         onClick={onDelete}
         className="p-1 rounded-md text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-colors"
-        title="删除"
+        title={t("chat.action.delete")}
       >
         <Trash2 className="w-3.5 h-3.5" />
       </button>
@@ -249,7 +249,7 @@ function MessageActions({
         <button
           onClick={() => setMoreOpen(!moreOpen)}
           className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
-          title="更多"
+          title={t("chat.action.more")}
         >
           <MoreHorizontal className="w-3.5 h-3.5" />
         </button>
@@ -262,13 +262,15 @@ function MessageActions({
             )}>
               <div className="flex flex-col gap-1">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-text-tertiary">起始时间</span>
+                  <span className="text-text-tertiary">{t("chat.action.startTime")}</span>
                   <span className="text-text-secondary">{formatTime(createdAt)}</span>
                 </div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-text-tertiary">耗时</span>
-                  <span className="text-text-secondary">{formatDuration(durationMs)}</span>
-                </div>
+                {completedAt && durationMs >= 0 && (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-text-tertiary">{t("chat.action.duration")}</span>
+                    <span className="text-text-secondary">{formatDuration(durationMs)}</span>
+                  </div>
+                )}
               </div>
             </div>
           </>
@@ -331,6 +333,7 @@ function ChatMessageItemRaw({
   onForkCompare,
   switchGroupModel,
 }: ChatMessageItemProps) {
+  const { t } = useI18n();
   const isUser = msg.role === "user";
   const isLast = index === messagesLength - 1;
   const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && isLast;
@@ -407,9 +410,9 @@ function ChatMessageItemRaw({
                       className="w-3 h-3 rounded-full flex items-center justify-center text-[8px] font-bold text-white"
                       style={{ backgroundColor: m?.color || model?.color }}
                     >
-                      {(m?.name || a.model || model?.name || `模型${idx + 1}`).slice(0, 1).toUpperCase()}
+                      {(m?.name || a.model || model?.name || t("chat.model.fallback", { index: String(idx + 1) })).slice(0, 1).toUpperCase()}
                     </div>
-                    <span className="truncate max-w-[80px]">{m?.name || a.model || model?.name || `模型 ${idx + 1}`}</span>
+                    <span className="truncate max-w-[80px]">{m?.name || a.model || model?.name || t("chat.model.fallback", { index: String(idx + 1) })}</span>
                   </button>
                 );
               })}
@@ -445,7 +448,7 @@ function ChatMessageItemRaw({
                                 (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden");
                               }}
                             />
-                            <div className="hidden text-xs text-text-tertiary px-3 py-2">图片加载失败</div>
+                            <div className="hidden text-xs text-text-tertiary px-3 py-2">{t("chat.imageLoadFailed")}</div>
                           </div>
                         );
                       }
@@ -484,7 +487,7 @@ function ChatMessageItemRaw({
                     className="mt-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-text-secondary hover:text-text-primary hover:bg-surface-card border border-surface-border transition-colors"
                   >
                     <Play className="w-3.5 h-3.5" />
-                    继续生成
+                    {t("chat.action.continueGenerate")}
                   </button>
                 )}
               </>
@@ -504,7 +507,7 @@ function ChatMessageItemRaw({
               visible={isLast}
               createdAt={msg.createdAt}
               completedAt={msg.completedAt}
-              onForkCompare={isUser && msg.serverMessageId ? handleForkCompare : undefined}
+              onForkCompare={undefined}
             />
           )}
         </div>

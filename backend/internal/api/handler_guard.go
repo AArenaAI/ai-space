@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"runtime/debug"
 
 	"github.com/gin-gonic/gin"
 )
@@ -13,7 +14,7 @@ func HandlerGuard() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("[PANIC] %s %s: %v\n", c.Request.Method, c.Request.URL.Path, r)
+				fmt.Printf("[PANIC] %s %s: %v\n%s\n", c.Request.Method, c.Request.URL.Path, r, debug.Stack())
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "服务器内部错误"})
 				c.Abort()
 			}

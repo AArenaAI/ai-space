@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback, useMemo, type KeyboardEvent, 
 import { Check, ChevronDown, Star } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useI18n, type LanguageCode } from "@/lib/i18n";
 import { ChatModel } from "@/lib/chatTypes";
 import { getModelAvatarMeta, type ModelAvatarMeta } from "@/lib/models/modelAvatars";
 import { getModelCapabilitySummary, getPrimaryModelCapabilities } from "@/lib/models/modelCapabilities";
@@ -24,9 +25,59 @@ const GROUP_ORDER = ["DeepSeek", "OpenAI", "Anthropic", "Google", "Moonshot"];
 const RECENT_KEY = "recent-models";
 const FAVORITE_KEY = "favorite-models";
 const SHORTCUT_LIMIT = 3;
+const CHINESE_LANGUAGES: LanguageCode[] = ["zh-CN", "zh-TW"];
 
-function ModelAvatar({ meta, size = "md" }: { meta: ModelAvatarMeta; size?: "sm" | "md" | "lg" }) {
+const PROVIDER_LABEL_OVERRIDES: Record<string, { zh: string; en: string }> = {
+  deepseek: { zh: "深度求索", en: "DeepSeek" },
+  moonshot: { zh: "月之暗面", en: "Moonshot" },
+  kimi: { zh: "月之暗面", en: "Moonshot" },
+  qwen: { zh: "通义千问", en: "Qwen" },
+  alibaba: { zh: "通义千问", en: "Qwen" },
+};
+
+const MODEL_DESCRIPTION_OVERRIDES: Record<string, { zh: string; en: string }> = {
+  "gpt-5.4": { zh: "旗舰通用模型，综合能力强", en: "Flagship general-purpose model with strong overall capability" },
+  "gpt-5.4-mini": { zh: "快速、经济，日常任务首选", en: "Fast and cost-effective for everyday tasks" },
+  "gpt-5.5": { zh: "第五代增强版，更强推理能力", en: "Enhanced fifth-generation model with stronger reasoning" },
+  "gpt-5.5-pro": { zh: "旗舰级专业模型，最强的多模态能力", en: "Flagship professional model with top multimodal capability" },
+  "gemini-2.5-pro": { zh: "长上下文多模态文档理解模型，供文档研读等专用能力使用", en: "Long-context multimodal document understanding model for document research workflows" },
+  "gemini-3.1-pro-preview": { zh: "新一代旗舰推理模型，更强多模态", en: "Next-generation flagship reasoning model with stronger multimodal capability" },
+  "gemini-3.5-flash": { zh: "新一代高速模型，响应更快更稳", en: "Next-generation high-speed model with faster, steadier responses" },
+  "gemini-3.1-flash-lite": { zh: "新一代快速模型，日常问答首选", en: "Next-generation fast model, ideal for everyday Q&A" },
+  "deepseek-v4-pro": { zh: "V4 Pro 增强版，最强推理能力", en: "Enhanced V4 Pro with the strongest reasoning capability" },
+  "deepseek-v4-flash": { zh: "V4 轻量版，极速响应", en: "Lightweight V4 with ultra-fast responses" },
+  "kimi-k2.6": { zh: "最新旗舰版，更强多模态+推理能力", en: "Latest flagship with stronger multimodal and reasoning capability" },
+};
+
+function prefersChinese(language: LanguageCode) {
+  return CHINESE_LANGUAGES.includes(language);
+}
+
+function normalizeProviderKey(value?: string) {
+  return (value || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function getLocalizedProviderLabel(provider: string, fallback: string, language: LanguageCode) {
+  const key = normalizeProviderKey(provider || fallback);
+  const matched = Object.entries(PROVIDER_LABEL_OVERRIDES).find(([candidate]) => key.includes(candidate));
+  if (!matched) return fallback || provider;
+  return prefersChinese(language) ? matched[1].zh : matched[1].en;
+}
+
+function hasCjkText(value?: string) {
+  return /[\u3400-\u9fff\uf900-\ufaff]/.test(value || "");
+}
+
+function getLocalizedModelDescription(model: ChatModel, language: LanguageCode, t: (key: string) => string) {
+  const override = MODEL_DESCRIPTION_OVERRIDES[model.id];
+  if (override) return prefersChinese(language) ? override.zh : override.en;
+  if (model.description && (prefersChinese(language) || !hasCjkText(model.description))) return model.description;
+  return t(getModelCapabilitySummary(model));
+}
+
+function ModelAvatar({ meta, size = "md", language }: { meta: ModelAvatarMeta; size?: "sm" | "md" | "lg"; language: LanguageCode }) {
   const Icon = meta.icon;
+  const label = !prefersChinese(language) && meta.labelEn ? meta.labelEn : meta.label;
   return (
     <span
       className={cn(
@@ -36,7 +87,7 @@ function ModelAvatar({ meta, size = "md" }: { meta: ModelAvatarMeta; size?: "sm"
         size === "lg" && "h-7 w-7 text-[11px]"
       )}
       style={{ backgroundColor: meta.background, color: meta.color }}
-      title={meta.label}
+      title={label}
     >
       {Icon ? <Icon className="h-[74%] w-[74%]" /> : meta.fallback}
     </span>
@@ -83,6 +134,7 @@ export default function ModelSelector({
   onSelect,
   recommendationContext,
 }: ModelSelectorProps) {
+  const { t, language } = useI18n();
   const [open, setOpen] = useState(false);
   const [hoveredProvider, setHoveredProvider] = useState<string | null>(null);
   const [favoriteIds, setFavoriteIds] = useState<string[]>(() => getFavoriteModels().slice(0, SHORTCUT_LIMIT));
@@ -133,7 +185,7 @@ export default function ModelSelector({
     return items.length > 0
       ? {
           provider,
-          label: avatar.label || provider,
+          label: getLocalizedProviderLabel(provider, avatar.label || provider, language),
           avatar,
           items,
         }
@@ -170,7 +222,7 @@ export default function ModelSelector({
     event.preventDefault();
     event.stopPropagation();
     if (!favoriteIds.includes(model.id) && favoriteIds.length >= SHORTCUT_LIMIT) {
-      toast.info("最多收藏 3 个模型，请先取消一个收藏。", {
+      toast.info(t("model.favoriteLimit"), {
         position: "top-center",
         duration: 3000,
         id: "model-favorite-limit",
@@ -226,16 +278,16 @@ export default function ModelSelector({
             ? "bg-surface-card text-text-primary"
             : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
         )}
-        title={statusBadge || getModelCapabilitySummary(model)}
+        title={statusBadge ? t(statusBadge) : t(getModelCapabilitySummary(model))}
       >
         <div className="mt-0.5">
-          <ModelAvatar meta={avatar} size="md" />
+          <ModelAvatar meta={avatar} size="md" language={language} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span className="text-[13px] font-medium truncate">{model.name}</span>
             {selected.id === model.id && <Check className="w-3.5 h-3.5 text-text-primary shrink-0" />}
-            {statusBadge && <span className="text-[10px] text-rose-500 shrink-0">{statusBadge}</span>}
+            {statusBadge && <span className="text-[10px] text-rose-500 shrink-0">{t(statusBadge)}</span>}
           </div>
           <ModelCapabilityBadges capabilities={capabilities} compact className="mt-1" />
         </div>
@@ -253,8 +305,8 @@ export default function ModelSelector({
                 ? "text-amber-400 hover:bg-amber-400/10"
                 : "text-text-tertiary opacity-0 group-hover/shortcut:opacity-100 hover:bg-surface-card hover:text-amber-400"
             )}
-            aria-label={favorited ? "取消收藏模型" : "收藏模型"}
-            title={favorited ? "取消收藏" : "收藏模型"}
+            aria-label={favorited ? t("model.unfavorite") : t("model.favorite")}
+            title={favorited ? t("model.unfavoriteShort") : t("model.favoriteShort")}
           >
             <Star className={cn("w-4 h-4", favorited && "fill-amber-400")} />
           </span>
@@ -282,10 +334,10 @@ export default function ModelSelector({
             ? "bg-surface-card"
             : "hover:bg-surface-card"
         )}
-        title={statusBadge || getModelCapabilitySummary(model)}
+        title={statusBadge ? t(statusBadge) : t(getModelCapabilitySummary(model))}
       >
         <div className="mt-1">
-          <ModelAvatar meta={avatar} size="lg" />
+          <ModelAvatar meta={avatar} size="lg" language={language} />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
@@ -304,12 +356,12 @@ export default function ModelSelector({
             )}
             {statusBadge && (
               <span className="rounded-full bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-medium text-rose-500 shrink-0">
-                {statusBadge}
+                {t(statusBadge)}
               </span>
             )}
           </div>
           <p className="text-xs text-text-tertiary mt-1 leading-relaxed line-clamp-2">
-            {statusBadge || model.description || getModelCapabilitySummary(model)}
+            {statusBadge ? t(statusBadge) : getLocalizedModelDescription(model, language, t)}
           </p>
           <ModelCapabilityBadges capabilities={capabilities} compact className="mt-2" />
         </div>
@@ -326,8 +378,8 @@ export default function ModelSelector({
               ? "text-amber-400 hover:bg-amber-400/10"
               : "text-text-tertiary opacity-0 group-hover:opacity-100 hover:bg-surface-card hover:text-amber-400"
           )}
-          aria-label={favorited ? "取消收藏模型" : "收藏模型"}
-          title={favorited ? "取消收藏" : "收藏模型"}
+          aria-label={favorited ? t("model.unfavorite") : t("model.favorite")}
+          title={favorited ? t("model.unfavoriteShort") : t("model.favoriteShort")}
         >
           <Star className={cn("w-4 h-4", favorited && "fill-amber-400")} />
         </span>
@@ -348,13 +400,13 @@ export default function ModelSelector({
             ? "bg-surface-card text-text-primary"
             : "bg-transparent text-text-secondary hover:bg-surface-card hover:text-text-primary"
         )}
-        title={selectedAvailable ? getModelCapabilitySummary(selected) : selectedStatusLabel}
+        title={selectedAvailable ? t(getModelCapabilitySummary(selected)) : t(selectedStatusLabel)}
       >
-        <ModelAvatar meta={getModelAvatarMeta(selected)} size="md" />
+        <ModelAvatar meta={getModelAvatarMeta(selected)} size="md" language={language} />
         <span className="truncate">{selected.name}</span>
         {!selectedAvailable && (
           <span className="rounded-full bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-medium text-rose-500 shrink-0">
-            {selectedStatusLabel}
+            {t(selectedStatusLabel)}
           </span>
         )}
         {favoriteIds.includes(selected.id) && <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400 shrink-0" />}
@@ -380,17 +432,17 @@ export default function ModelSelector({
             {/* 左侧：提供商列表 */}
             <div className="w-[260px] py-3">
               <div className="px-4 py-2 text-xs font-medium text-text-tertiary uppercase tracking-wider border-b border-surface-border mb-1.5">
-                选择模型
+                {t("model.selectModel")}
               </div>
 
               {recommendation && (
                 <div className="mx-2 mb-2 rounded-xl border border-amber-500/15 bg-amber-500/5 px-3 py-2.5">
                   <div className="flex items-center gap-1.5 text-[12px] font-medium text-amber-600 dark:text-amber-400">
                     <span>✨</span>
-                    <span>{recommendation.title}</span>
+                    <span>{t(recommendation.title)}</span>
                   </div>
                   <p className="mt-1 text-[12px] leading-5 text-text-secondary">
-                    {selectedMatchesRecommendation ? "当前模型适合这个任务。" : recommendation.message}
+                    {selectedMatchesRecommendation ? t("model.currentModelSuitable") : t(recommendation.message)}
                   </p>
                   {!selectedMatchesRecommendation && recommendedModels.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5">
@@ -400,7 +452,7 @@ export default function ModelSelector({
                           type="button"
                           onClick={() => handleSelect(model)}
                           className="rounded-full border border-amber-500/20 bg-surface-card px-2.5 py-1 text-[11px] font-medium text-text-primary transition-colors hover:border-amber-500/40 hover:bg-amber-500/10"
-                          title={recommendation.reason}
+                          title={t(recommendation.reason)}
                         >
                           {model.name}
                         </button>
@@ -414,7 +466,7 @@ export default function ModelSelector({
               {favoriteModels.length > 0 && (
                 <div className="px-2 pb-2 border-b border-surface-border mb-1.5">
                   <div className="px-2 py-1.5 text-[11px] font-medium text-text-tertiary tracking-wider flex items-center gap-1.5">
-                    <Star className="w-3 h-3 fill-amber-400 text-amber-400" />收藏模型
+                    <Star className="w-3 h-3 fill-amber-400 text-amber-400" />{t("model.favoriteModels")}
                   </div>
                   {favoriteModels.map((m) => renderShortcutModelItem(m, { showFavorite: true }))}
                 </div>
@@ -424,7 +476,7 @@ export default function ModelSelector({
               {recentModels.length > 0 && (
                 <div className="px-2 pb-2 border-b border-surface-border mb-1.5">
                   <div className="px-2 py-1.5 text-[11px] font-medium text-text-tertiary tracking-wider flex items-center gap-1.5">
-                    <span>🕘</span>最近使用
+                    <span>🕘</span>{t("model.recentlyUsed")}
                   </div>
                   {recentModels.slice(0, SHORTCUT_LIMIT).map((m) => renderShortcutModelItem(m, { showFavorite: true }))}
                 </div>
@@ -444,7 +496,7 @@ export default function ModelSelector({
                         : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                     )}
                   >
-                    <ModelAvatar meta={group.avatar} size="lg" />
+                    <ModelAvatar meta={group.avatar} size="lg" language={language} />
                     <span className="flex-1 text-sm font-medium truncate">
                       {group.label}
                     </span>
@@ -465,10 +517,10 @@ export default function ModelSelector({
                 onMouseLeave={handlePopoverLeave}
               >
                 <div className="px-4 py-2 text-xs font-medium text-text-tertiary uppercase tracking-wider border-b border-surface-border mb-1.5 flex items-center gap-2.5">
-                  <ModelAvatar meta={activeGroup.avatar} size="sm" />
+                  <ModelAvatar meta={activeGroup.avatar} size="sm" language={language} />
                   {activeGroup.label}
                   <span className="text-xs text-text-tertiary/60 tabular-nums ml-auto normal-case">
-                    {activeGroup.items.length} 个模型
+                    {activeGroup.items.length} {t("model.countSuffix")}
                   </span>
                 </div>
                 <div className="px-2 max-h-[440px] overflow-y-auto scrollbar-thin">

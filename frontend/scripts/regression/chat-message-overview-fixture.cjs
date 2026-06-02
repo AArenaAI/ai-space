@@ -43,6 +43,13 @@ async function switchMode(page, testId) {
   await page.waitForTimeout(250);
 }
 
+async function getActiveOverviewId(page) {
+  return page.evaluate(() => {
+    const active = document.querySelector('[data-testid="chat-message-overview-item"].text-brand');
+    return active?.getAttribute("data-message-id") || "";
+  });
+}
+
 (async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -64,6 +71,42 @@ async function switchMode(page, testId) {
     }, null, { timeout: 20_000 });
     await waitForRows(page);
     await page.waitForSelector('[data-testid="chat-message-overview"]', { timeout: 20_000 });
+    await page.waitForFunction(() => {
+      const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+      if (!scroller) return false;
+      return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 4;
+    }, null, { timeout: 20_000 });
+    // MessageList intentionally performs a few post-layout bottom locks after chat restore.
+    // Wait for that settling window before asserting that hover itself does not move the scroller.
+    await page.waitForTimeout(900);
+
+    // Default: at bottom, active overview should point to the latest user message.
+    const defaultActiveId = await getActiveOverviewId(page);
+    assert.equal(defaultActiveId, "overview-user-8", `default active overview at bottom should be the latest user message, got ${defaultActiveId}`);
+
+    // Scroll to the very top: active should switch to the earliest user message.
+    await page.evaluate(() => {
+      const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+      if (scroller) {
+        scroller.scrollTop = 0;
+        scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+      }
+    });
+    await page.waitForTimeout(150);
+    const topActiveId = await getActiveOverviewId(page);
+    assert.equal(topActiveId, "overview-user-1", `active overview at the very top should be the earliest user message, got ${topActiveId}`);
+
+    // Scroll back down to restore center-focus logic.
+    await page.evaluate(() => {
+      const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+      if (scroller) {
+        scroller.scrollTop = scroller.scrollHeight - scroller.clientHeight;
+        scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+      }
+    });
+    await page.waitForTimeout(150);
+    const bottomActiveId = await getActiveOverviewId(page);
+    assert.equal(bottomActiveId, "overview-user-8", `active overview at the very bottom should return to the latest user message, got ${bottomActiveId}`);
 
     const compact = await readCompact(page);
     assert.ok(compact.itemCount === 8, `overview should include 8 user message markers, got ${compact.itemCount}`);
@@ -105,18 +148,84 @@ async function switchMode(page, testId) {
       const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
       const rect = row?.getBoundingClientRect();
       const scrollerRect = scroller?.getBoundingClientRect();
+      const rowCenter = rect ? rect.top + rect.height / 2 : -1;
+      const scrollerCenter = scrollerRect ? scrollerRect.top + scrollerRect.height / 2 : -1;
       return {
         found: Boolean(row),
         top: rect?.top ?? -1,
         bottom: rect?.bottom ?? -1,
         scrollerTop: scrollerRect?.top ?? 0,
         scrollerBottom: scrollerRect?.bottom ?? 0,
+        centerDelta: Math.abs(rowCenter - scrollerCenter),
+        scrollerHeight: scrollerRect?.height ?? 0,
         highlighted: row?.className.includes("bg-brand/10") ?? false,
       };
     }, targetId);
     assert.ok(jumped.found, "clicked overview target should be rendered");
     assert.ok(jumped.top >= jumped.scrollerTop && jumped.bottom <= jumped.scrollerBottom, `clicked target should be in viewport: ${JSON.stringify(jumped)}`);
+    assert.ok(jumped.centerDelta <= Math.max(48, jumped.scrollerHeight * 0.08), `clicked target should be centered in the chat scroller: ${JSON.stringify(jumped)}`);
     assert.ok(jumped.highlighted, "clicked target should be highlighted");
+
+    // Let the click-jump active lock expire before testing passive scroll active-marker timing.
+    await page.waitForTimeout(950);
+    const activeSwitchTiming = await page.evaluate(async () => {
+      const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+      const target = document.querySelector('[data-chat-message-row="true"][data-message-id="overview-user-3"]');
+      if (!scroller || !target) return { ok: false, reason: "missing scroller or target" };
+      const waitFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      const activeId = () => document.querySelector('[data-testid="chat-message-overview-item"].text-brand')?.getAttribute("data-message-id") || "";
+
+      const placeTargetNearTop = () => {
+        const targetRect = target.getBoundingClientRect();
+        const scrollerRect = scroller.getBoundingClientRect();
+        scroller.scrollTop += targetRect.top - scrollerRect.top - 8;
+        scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+      };
+      placeTargetNearTop();
+      await waitFrame();
+      placeTargetNearTop();
+      await waitFrame();
+      const topActiveId = activeId();
+      const topTargetRect = target.getBoundingClientRect();
+      const topScrollerRect = scroller.getBoundingClientRect();
+      const topTargetCenter = topTargetRect.top + topTargetRect.height / 2;
+      const focusTop = topScrollerRect.top + topScrollerRect.height * 0.35;
+
+      const placeTargetAtCenter = () => {
+        const targetRect = target.getBoundingClientRect();
+        const scrollerRect = scroller.getBoundingClientRect();
+        const targetCenter = targetRect.top + targetRect.height / 2;
+        const scrollerCenter = scrollerRect.top + scrollerRect.height / 2;
+        scroller.scrollTop += targetCenter - scrollerCenter;
+        scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+      };
+      placeTargetAtCenter();
+      await waitFrame();
+      placeTargetAtCenter();
+      await waitFrame();
+      const centeredActiveId = activeId();
+      const centeredTargetRect = target.getBoundingClientRect();
+      const centeredScrollerRect = scroller.getBoundingClientRect();
+      const centeredDelta = Math.abs(
+        centeredTargetRect.top + centeredTargetRect.height / 2 - (centeredScrollerRect.top + centeredScrollerRect.height / 2)
+      );
+
+      return {
+        ok: true,
+        topActiveId,
+        topTargetTop: topTargetRect.top,
+        topScrollerTop: topScrollerRect.top,
+        topTargetCenter,
+        focusTop,
+        centeredActiveId,
+        centeredDelta,
+      };
+    });
+    assert.ok(activeSwitchTiming.ok, `active switch timing setup failed: ${JSON.stringify(activeSwitchTiming)}`);
+    assert.ok(activeSwitchTiming.topTargetCenter < activeSwitchTiming.focusTop, `premature-switch check should place next user before the center focus band: ${JSON.stringify(activeSwitchTiming)}`);
+    assert.notEqual(activeSwitchTiming.topActiveId, "overview-user-3", `overview active marker should not switch when the next user row only appears near the top: ${JSON.stringify(activeSwitchTiming)}`);
+    assert.equal(activeSwitchTiming.centeredActiveId, "overview-user-3", `overview active marker should switch once the user row reaches the center focus band: ${JSON.stringify(activeSwitchTiming)}`);
+    assert.ok(activeSwitchTiming.centeredDelta <= 48, `centered active-switch target should be close to the scroller center: ${JSON.stringify(activeSwitchTiming)}`);
 
     await switchMode(page, "overview-mode-single");
     await waitForRows(page);
@@ -185,17 +294,22 @@ async function switchMode(page, testId) {
       const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
       const rect = row?.getBoundingClientRect();
       const scrollerRect = scroller?.getBoundingClientRect();
+      const rowCenter = rect ? rect.top + rect.height / 2 : -1;
+      const scrollerCenter = scrollerRect ? scrollerRect.top + scrollerRect.height / 2 : -1;
       return {
         found: Boolean(row),
         top: rect?.top ?? -1,
         bottom: rect?.bottom ?? -1,
         scrollerTop: scrollerRect?.top ?? 0,
         scrollerBottom: scrollerRect?.bottom ?? 0,
+        centerDelta: Math.abs(rowCenter - scrollerCenter),
+        scrollerHeight: scrollerRect?.height ?? 0,
         highlighted: row?.className.includes("bg-brand/10") ?? false,
       };
     }, manyTargetId);
     assert.ok(manyJumped.found, "last many-message overview target should be rendered after click");
     assert.ok(manyJumped.top >= manyJumped.scrollerTop && manyJumped.bottom <= manyJumped.scrollerBottom, `last many-message target should be in viewport: ${JSON.stringify(manyJumped)}`);
+    assert.ok(manyJumped.centerDelta <= Math.max(48, manyJumped.scrollerHeight * 0.08), `last many-message target should be centered in the chat scroller: ${JSON.stringify(manyJumped)}`);
     assert.ok(manyJumped.highlighted, "last many-message target should be highlighted");
 
     if (failures.length > 0) throw new Error(failures.join("\n"));

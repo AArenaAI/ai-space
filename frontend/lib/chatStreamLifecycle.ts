@@ -44,9 +44,6 @@ export function decideChatStreamError({
   generationTaskId,
 }: DecideChatStreamErrorOptions): ChatStreamErrorDecision {
   const isAbort = (error as any)?.name === "AbortError" || !!signalAborted;
-  if (shouldIgnoreStreamAbort({ isAbort, abortReason })) {
-    return { action: "ignore" };
-  }
   if (shouldResumeTaskStreamAfterError({
     isAbort,
     abortReason,
@@ -54,6 +51,9 @@ export function decideChatStreamError({
     generationTaskId,
   })) {
     return { action: "resume" };
+  }
+  if (shouldIgnoreStreamAbort({ isAbort, abortReason })) {
+    return { action: "ignore" };
   }
   return { action: "throw", error };
 }
@@ -95,8 +95,8 @@ export async function runChatStreamLifecycle({
       serverMessageId,
       generationTaskId,
     });
-    if (decision.action === "ignore") return { action: "ignored" };
     if (decision.action === "resume") return { action: "resume" };
+    if (decision.action === "ignore") return { action: "ignored" };
     throw normalizeError(decision.error, { module: "chat", fallbackMessage: "连接中断，已保留当前内容，可稍后重试。" });
   } finally {
     reader.releaseLock();

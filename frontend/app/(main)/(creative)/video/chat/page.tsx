@@ -25,7 +25,6 @@ import { VideoChatMessage, useVideoChatMessages, useVideoChats } from "@/hooks/u
 import { useVideoModels } from "@/hooks/useModels";
 import ImageLightbox from "@/components/ui/ImageLightbox";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
-import NoticeDialog from "@/components/ui/NoticeDialog";
 import CreationHistoryPanel from "@/components/creative/CreationHistoryPanel";
 import DeleteSuccessNotice from "@/components/ui/DeleteSuccessNotice";
 import { useI18n } from "@/lib/i18n";
@@ -262,7 +261,6 @@ function VideoChatPageInner() {
   const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [deleteSuccessOpen, setDeleteSuccessOpen] = useState(false);
-  const [limitDialogOpen, setLimitDialogOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
@@ -432,24 +430,16 @@ function VideoChatPageInner() {
       fetchChats();
     } catch (err: any) {
       const rawMsg = err.message || t("video.submitFailed");
-      if (rawMsg.includes("历史记录只能保存")) {
-        setLimitDialogOpen(true);
-        // 移除刚才添加的临时消息
-        setDisplayMessages((prev) =>
-          prev.filter((m) => m.id !== localAssistantMessage.id && m.id !== localUserMessage.id)
-        );
-      } else {
-        const userError = normalizeError(rawMsg, { module: "video", fallbackMessage: t("video.submitFailed") });
-        const msg = cleanVideoErrorMessage(userError.message, videoErrorMessages);
-        setDisplayMessages((prev) =>
-          prev.map((msgItem) =>
-            msgItem.id === localAssistantMessage.id
-              ? { ...msgItem, status: "failed", errorMessage: msg }
-              : msgItem
-          )
-        );
-        toast.error(msg);
-      }
+      const userError = normalizeError(rawMsg, { module: "video", fallbackMessage: t("video.submitFailed") });
+      const msg = cleanVideoErrorMessage(userError.message, videoErrorMessages);
+      setDisplayMessages((prev) =>
+        prev.map((msgItem) =>
+          msgItem.id === localAssistantMessage.id
+            ? { ...msgItem, status: "failed", errorMessage: msg }
+            : msgItem
+        )
+      );
+      toast.error(msg);
     } finally {
       setGenerating(false);
     }
@@ -1041,13 +1031,6 @@ function VideoChatPageInner() {
         variant="danger"
       />
 
-      <NoticeDialog
-        isOpen={limitDialogOpen}
-        title={t("video.limitTitle")}
-        description={t("video.limitDesc")}
-        confirmText={t("video.gotIt")}
-        onConfirm={() => setLimitDialogOpen(false)}
-      />
     </div>
   );
 }

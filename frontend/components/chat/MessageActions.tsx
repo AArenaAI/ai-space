@@ -3,6 +3,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { Check, Copy, MoreHorizontal, RotateCcw, Share2, Star, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 export type MessageActionsProps = {
   onCopy: () => void;
@@ -19,23 +20,21 @@ export type MessageActionsProps = {
   onForkCompare?: () => void;
 };
 
-function formatTime(ts: number) {
+function formatTime(ts: number, language: string) {
   const d = new Date(ts);
   const now = new Date();
   const isToday = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-  const timeStr = d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  const timeStr = d.toLocaleTimeString(language, { hour: "2-digit", minute: "2-digit" });
   if (isToday) return timeStr;
-  const month = d.getMonth() + 1;
-  const day = d.getDate();
-  return `${month}月${day}日 ${timeStr}`;
+  return `${d.toLocaleDateString(language, { month: "short", day: "numeric" })} ${timeStr}`;
 }
 
-function formatDuration(ms: number) {
+function formatDuration(ms: number, t: (key: string, params?: Record<string, string>) => string) {
   const totalSeconds = Math.floor(ms / 1000);
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
-  if (minutes > 0) return `${minutes}分${seconds}秒`;
-  return `${seconds}秒`;
+  if (minutes > 0) return t("time.duration.minutesSeconds", { minutes: String(minutes), seconds: String(seconds) });
+  return t("time.duration.seconds", { seconds: String(seconds) });
 }
 
 function MessageActions({
@@ -52,6 +51,7 @@ function MessageActions({
   completedAt,
   onForkCompare,
 }: MessageActionsProps) {
+  const { t, language } = useI18n();
   const [copied, setCopied] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
@@ -71,7 +71,7 @@ function MessageActions({
   const durationMs = completedAt ? completedAt - createdAt : 0;
 
   return (
-    <div className={cn(
+    <div data-message-actions="true" className={cn(
       "mt-1 inline-flex items-center gap-0.5 rounded-xl bg-surface-card/80 px-1 py-0.5 transition-opacity duration-200",
       align === "right" ? "justify-end" : "justify-start",
       visible ? "opacity-100" : "opacity-0 group-hover:opacity-100"
@@ -79,7 +79,7 @@ function MessageActions({
       <button
         onClick={() => { onCopy(); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
         className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
-        title="复制"
+        title={t("chat.action.copy")}
       >
         {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
       </button>
@@ -88,7 +88,7 @@ function MessageActions({
         <button
           onClick={onRegenerate}
           className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
-          title="重新生成"
+          title={t("chat.action.regenerate")}
         >
           <RotateCcw className="w-3.5 h-3.5" />
         </button>
@@ -96,7 +96,7 @@ function MessageActions({
       <button
         onClick={onShareSelectMode}
         className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
-        title="选择分享"
+        title={t("chat.action.shareSelect")}
       >
         <Share2 className="w-3.5 h-3.5" />
       </button>
@@ -109,7 +109,7 @@ function MessageActions({
               ? "text-amber-400 hover:text-amber-500 hover:bg-amber-400/10"
               : "text-text-tertiary hover:text-amber-400 hover:bg-amber-400/10"
           )}
-          title={isFavorited ? "取消收藏" : "收藏"}
+          title={isFavorited ? t("chat.action.unfavorite") : t("chat.action.favorite")}
         >
           <Star className={cn("w-3.5 h-3.5", isFavorited && "fill-amber-400")} />
         </button>
@@ -117,7 +117,7 @@ function MessageActions({
       <button
         onClick={onDelete}
         className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-colors"
-        title="删除"
+        title={t("chat.action.delete")}
       >
         <Trash2 className="w-3.5 h-3.5" />
       </button>
@@ -125,7 +125,7 @@ function MessageActions({
         <button
           onClick={() => setMoreOpen(!moreOpen)}
           className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
-          title="更多"
+          title={t("chat.action.more")}
         >
           <MoreHorizontal className="w-3.5 h-3.5" />
         </button>
@@ -138,21 +138,14 @@ function MessageActions({
             )}>
               <div className="flex flex-col gap-1">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-text-tertiary">起始时间</span>
-                  <span className="text-text-secondary">{formatTime(createdAt)}</span>
+                  <span className="text-text-tertiary">{t("chat.action.startTime")}</span>
+                  <span className="text-text-secondary">{formatTime(createdAt, language)}</span>
                 </div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-text-tertiary">耗时</span>
-                  <span className="text-text-secondary">{formatDuration(durationMs)}</span>
-                </div>
-                {onForkCompare && (
-                  <button
-                    type="button"
-                    onClick={() => { setMoreOpen(false); onForkCompare(); }}
-                    className="mt-1 rounded-lg px-2 py-1 text-left text-xs text-text-secondary transition-colors hover:bg-surface-card hover:text-text-primary"
-                  >
-                    分支对比
-                  </button>
+                {completedAt && durationMs >= 0 && (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-text-tertiary">{t("chat.action.duration")}</span>
+                    <span className="text-text-secondary">{formatDuration(durationMs, t)}</span>
+                  </div>
                 )}
               </div>
             </div>

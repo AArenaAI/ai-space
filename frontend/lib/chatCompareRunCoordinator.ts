@@ -45,6 +45,8 @@ export type RunCompareModelsOptions<TAssistant extends CompareAssistantLike> = {
   compareModelIds: string[];
   modelMessages: ModelMessage[];
   conversationId?: number;
+  notebookId?: number;
+  notebookFileIds?: number[];
   reasoning: CompareRunReasoningOptions;
   search: boolean;
   templateId: number;
@@ -110,6 +112,8 @@ export function buildCompareRunRequestBody({
   compareModelIds,
   modelMessages,
   conversationId,
+  notebookId,
+  notebookFileIds,
   reasoning,
   search,
   templateId,
@@ -123,6 +127,8 @@ export function buildCompareRunRequestBody({
   compareModelIds: string[];
   modelMessages: ModelMessage[];
   conversationId?: number;
+  notebookId?: number;
+  notebookFileIds?: number[];
   reasoning: CompareRunReasoningOptions;
   search: boolean;
   templateId: number;
@@ -134,6 +140,7 @@ export function buildCompareRunRequestBody({
     model: assistant.model || "",
     messages: modelMessages,
     conversationId,
+    notebookId,
     reasoningEnabled: reasoning.enabled,
     reasoningEffort: reasoning.effort,
     search,
@@ -150,6 +157,7 @@ export function buildCompareRunRequestBody({
     fallbackGroupModels: compareModelIds,
     skillKey,
     messageFileIds,
+    notebookFileIds,
   });
 }
 

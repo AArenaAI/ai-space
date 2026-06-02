@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Check, ChevronDown, Copy } from "lucide-react";
 import dynamic from "next/dynamic";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 const LazySyntaxHighlighter = dynamic(() => import("../LazySyntaxHighlighter"), {
   ssr: false,
@@ -14,16 +15,19 @@ const LONG_CODE_CHAR_THRESHOLD = 4000;
 const LONG_CODE_LINE_THRESHOLD = 120;
 const LONG_CODE_PREVIEW_CHAR_LIMIT = 1200;
 
-function formatCodeSize(lineCount: number, charCount: number) {
-  const charLabel = charCount >= 1000 ? `${(charCount / 1000).toFixed(1)}k 字符` : `${charCount} 字符`;
-  return `${lineCount} 行 / ${charLabel}`;
+function formatCodeSize(lineCount: number, charCount: number, t: (key: string, params?: Record<string, string>) => string) {
+  const charLabel = charCount >= 1000
+    ? t("chat.code.kCharacters", { count: (charCount / 1000).toFixed(1) })
+    : t("chat.code.characters", { count: String(charCount) });
+  return t("chat.code.size", { lines: String(lineCount), chars: charLabel });
 }
 
 export default function CodeBlock({ language, value }: { language: string; value: string }) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const lineCount = value.split("\n").length;
   const charCount = value.length;
-  const codeSizeLabel = formatCodeSize(lineCount, charCount);
+  const codeSizeLabel = formatCodeSize(lineCount, charCount, t);
   const isLongCode = charCount >= LONG_CODE_CHAR_THRESHOLD || lineCount >= LONG_CODE_LINE_THRESHOLD;
   const [expanded, setExpanded] = useState(!isLongCode);
 
@@ -49,7 +53,7 @@ export default function CodeBlock({ language, value }: { language: string; value
               aria-expanded={expanded}
             >
               <ChevronDown className={cn("h-3 w-3 transition-transform", expanded && "rotate-180")} />
-              {expanded ? `收起 · ${codeSizeLabel}` : `代码块较长，已折叠 · ${codeSizeLabel}`}
+              {expanded ? t("chat.code.collapse", { size: codeSizeLabel }) : t("chat.code.longCollapsed", { size: codeSizeLabel })}
             </button>
           )}
           <button
@@ -59,7 +63,7 @@ export default function CodeBlock({ language, value }: { language: string; value
             data-testid="markdown-code-copy-button"
           >
             {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-            {copied ? "已复制" : "复制"}
+            {copied ? t("chat.action.copied") : t("chat.action.copy")}
           </button>
         </div>
       </div>
@@ -68,7 +72,7 @@ export default function CodeBlock({ language, value }: { language: string; value
       ) : (
         <div className="bg-[#0D1117] px-4 py-3 text-[13px] text-gray-300" data-testid="markdown-code-collapsed-preview">
           <pre className="max-h-28 overflow-hidden whitespace-pre-wrap break-words font-mono">{value.slice(0, LONG_CODE_PREVIEW_CHAR_LIMIT)}</pre>
-          <div className="mt-2 text-[11px] text-gray-500">点击展开查看完整代码并加载高亮 · {codeSizeLabel}</div>
+          <div className="mt-2 text-[11px] text-gray-500">{t("chat.code.expandFull", { size: codeSizeLabel })}</div>
         </div>
       )}
     </div>

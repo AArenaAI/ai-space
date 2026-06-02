@@ -1,12 +1,17 @@
+import type { ChatStatusTimelineStep } from "./chatStatusTimeline";
+
 export type ChatMessageLike = {
   id: string;
   content: string;
+  reasoningContent?: string;
   lastSequence?: number;
   serverMessageId?: number;
   groupId?: number;
   userMessageId?: number;
   groupModels?: string[];
   groupIndex?: number;
+  generationStartedAt?: number;
+  statusTimeline?: ChatStatusTimelineStep[];
 };
 
 export type MessagePatch<T> = Partial<T> | ((message: T) => Partial<T>);
@@ -35,6 +40,15 @@ export function applyFinalRealtimeDataToMessage<T extends ChatMessageLike>(
   const nextContent = realtimeContent || finalContent;
   if (nextContent || forceContentFallback) {
     next.content = nextContent || message.content;
+  }
+  if (typeof finalData?.reasoningContent === "string") {
+    next.reasoningContent = finalData.reasoningContent;
+  }
+  if (typeof finalData?.generationStartedAt === "number") {
+    next.generationStartedAt = finalData.generationStartedAt;
+  }
+  if (Array.isArray(finalData?.statusTimeline)) {
+    next.statusTimeline = finalData.statusTimeline;
   }
   if (typeof latestSequence === "number") {
     next.lastSequence = Math.max(message.lastSequence || 0, latestSequence);

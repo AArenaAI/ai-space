@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronDown } from "lucide-react";
+import { useI18n } from "@/lib/i18n";
 
 export type ChatScrollToBottomButtonProps = {
   visible: boolean;
@@ -9,6 +10,7 @@ export type ChatScrollToBottomButtonProps = {
 };
 
 export default function ChatScrollToBottomButton({ visible, bottomOffset, onClick }: ChatScrollToBottomButtonProps) {
+  const { t } = useI18n();
   if (!visible) return null;
 
   return (
@@ -23,7 +25,7 @@ export default function ChatScrollToBottomButton({ visible, bottomOffset, onClic
           border border-surface-border bg-surface-elevated/75 text-text-secondary shadow-lg backdrop-blur-md transition-all
           hover:border-surface-border/80 hover:bg-surface-card/85 hover:text-text-primary hover:shadow-xl
           active:scale-95 active:bg-surface-card active:shadow-sm"
-        aria-label="回到底部"
+        aria-label={t("chat.scroll.toBottom")}
       >
         <ChevronDown className="h-5 w-5" />
       </button>

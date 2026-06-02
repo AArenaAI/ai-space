@@ -31,6 +31,7 @@ export type CommonChatRequestOptions = {
   templateId: number;
   skillKey?: string;
   messageFileIds?: string[];
+  notebookFileIds?: number[];
 };
 
 export type SingleChatRequestOptions = CommonChatRequestOptions & {
@@ -49,6 +50,7 @@ export function buildSingleChatRequestBody({
   skipSaveUserMessage = false,
   skillKey,
   messageFileIds,
+  notebookFileIds,
 }: SingleChatRequestOptions): Record<string, any> {
   return {
     model,
@@ -63,6 +65,7 @@ export function buildSingleChatRequestBody({
     skip_save_user_msg: skipSaveUserMessage,
     skill_key: skillKey || undefined,
     message_file_ids: messageFileIds || undefined,
+    notebook_file_ids: notebookFileIds || undefined,
   };
 }
 
@@ -94,6 +97,7 @@ export function buildCompareChatRequestBody({
   fallbackGroupModels,
   skillKey,
   messageFileIds,
+  notebookFileIds,
 }: CompareChatRequestOptions): Record<string, any> {
   return {
     model,
@@ -113,5 +117,6 @@ export function buildCompareChatRequestBody({
     group_models: groupModels.length ? groupModels : fallbackGroupModels,
     skill_key: skillKey || undefined,
     message_file_ids: messageFileIds || undefined,
+    notebook_file_ids: notebookFileIds || undefined,
   };
 }

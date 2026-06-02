@@ -19,16 +19,16 @@ export interface ModelCapabilityMeta {
 }
 
 export const MODEL_CAPABILITY_META: Record<ModelCapability, ModelCapabilityMeta> = {
-  fast: { key: "fast", label: "快速", tone: "green" },
-  cheap: { key: "cheap", label: "低成本", tone: "green" },
-  strong: { key: "strong", label: "最强", tone: "purple" },
-  reasoning: { key: "reasoning", label: "推理强", tone: "purple" },
-  long_context: { key: "long_context", label: "长上下文", tone: "blue" },
-  coding: { key: "coding", label: "代码", tone: "cyan" },
-  chinese: { key: "chinese", label: "中文强", tone: "amber" },
-  vision: { key: "vision", label: "图像理解", tone: "blue" },
-  search: { key: "search", label: "支持搜索", tone: "cyan" },
-  file: { key: "file", label: "适合文件", tone: "slate" },
+  fast: { key: "fast", label: "model.capability.fast", tone: "green" },
+  cheap: { key: "cheap", label: "model.capability.cheap", tone: "green" },
+  strong: { key: "strong", label: "model.capability.strong", tone: "purple" },
+  reasoning: { key: "reasoning", label: "model.capability.reasoning", tone: "purple" },
+  long_context: { key: "long_context", label: "model.capability.long_context", tone: "blue" },
+  coding: { key: "coding", label: "model.capability.coding", tone: "cyan" },
+  chinese: { key: "chinese", label: "model.capability.chinese", tone: "amber" },
+  vision: { key: "vision", label: "model.capability.vision", tone: "blue" },
+  search: { key: "search", label: "model.capability.search", tone: "cyan" },
+  file: { key: "file", label: "model.capability.file", tone: "slate" },
 };
 
 function textOf(model: ChatModel) {
@@ -73,9 +73,15 @@ export function getModelCapabilities(model: ChatModel): ModelCapability[] {
     caps.has("document") ||
     inputs.has("file") ||
     inputs.has("document") ||
-    !!model.file_accept ||
+    inputs.has("pdf") ||
+    inputs.has("word") ||
+    inputs.has("excel") ||
+    inputs.has("ppt") ||
+    inputs.has("csv") ||
+    inputs.has("txt") ||
     (model.supported_file_extensions?.length || 0) > 0 ||
-    hasAny(text, ["file", "document", "pdf", "文档", "文件"])
+    (model.supported_file_mime_types?.length || 0) > 0 ||
+    !!model.file_accept
   ) {
     pushUnique(result, "file");
   }
@@ -117,13 +123,13 @@ export function getPrimaryModelCapabilities(model: ChatModel, limit = 4): ModelC
 
 export function getModelCapabilitySummary(model: ChatModel) {
   const capabilities = getModelCapabilities(model);
-  if (capabilities.includes("vision")) return "适合图像理解、多模态和通用任务";
-  if (capabilities.includes("reasoning")) return "适合复杂推理、代码分析和长任务";
-  if (capabilities.includes("long_context")) return "适合长文档、长上下文和资料整理";
-  if (capabilities.includes("coding")) return "适合代码、报错分析和技术问题";
-  if (capabilities.includes("fast")) return "适合日常问答和快速响应";
-  if (capabilities.includes("cheap")) return "适合高频、轻量和低成本任务";
-  return "适合通用对话任务";
+  if (capabilities.includes("vision")) return "model.summary.vision";
+  if (capabilities.includes("reasoning")) return "model.summary.reasoning";
+  if (capabilities.includes("long_context")) return "model.summary.long_context";
+  if (capabilities.includes("coding")) return "model.summary.coding";
+  if (capabilities.includes("fast")) return "model.summary.fast";
+  if (capabilities.includes("cheap")) return "model.summary.cheap";
+  return "model.summary.default";
 }
 
 export function supportsModelCapability(model: ChatModel, capability: ModelCapability) {

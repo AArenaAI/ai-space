@@ -1,6 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 import type { ModelCapabilityMeta } from "@/lib/models/modelCapabilities";
 
 const TONE_CLASS: Record<ModelCapabilityMeta["tone"], string> = {
@@ -13,6 +14,7 @@ const TONE_CLASS: Record<ModelCapabilityMeta["tone"], string> = {
 };
 
 export function ModelCapabilityBadge({ capability, compact = false }: { capability: ModelCapabilityMeta; compact?: boolean }) {
+  const { t } = useI18n();
   return (
     <span
       className={cn(
@@ -21,7 +23,7 @@ export function ModelCapabilityBadge({ capability, compact = false }: { capabili
         TONE_CLASS[capability.tone]
       )}
     >
-      {capability.label}
+      {t(capability.label)}
     </span>
   );
 }

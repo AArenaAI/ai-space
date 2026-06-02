@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, memo, type UIEvent } from "react";
-import { Loader2 } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, memo, type ComponentType, type UIEvent } from "react";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/lib/chatTypes";
 import { useFavorites } from "@/hooks/useFavorites";
@@ -13,11 +12,42 @@ import { useMessageStream } from "@/hooks/useMessageStream";
 import { inferGroups, InferredGroup } from "@/lib/groups";
 import { useI18n } from "@/lib/i18n";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
+import MarkdownPlainFallback from "./markdown/MarkdownPlainFallback";
 
-const MarkdownRenderer = dynamic(() => import("./MarkdownRenderer"), {
-  ssr: false,
-  loading: () => null,
-});
+type MarkdownRendererProps = { content: string; isStreaming?: boolean };
+let markdownRendererPromise: Promise<{ default: ComponentType<MarkdownRendererProps> }> | null = null;
+let MarkdownRendererModule: ComponentType<MarkdownRendererProps> | null = null;
+
+function loadMarkdownRenderer() {
+  if (!markdownRendererPromise) {
+    markdownRendererPromise = import("./MarkdownRenderer").then((module) => {
+      MarkdownRendererModule = module.default;
+      return { default: module.default as ComponentType<MarkdownRendererProps> };
+    });
+  }
+  return markdownRendererPromise;
+}
+
+function LoadableMarkdownRenderer({ content, isStreaming }: MarkdownRendererProps) {
+  const [Renderer, setRenderer] = useState(() => MarkdownRendererModule);
+
+  useEffect(() => {
+    if (Renderer) return;
+    let cancelled = false;
+    loadMarkdownRenderer().then((module) => {
+      if (!cancelled) setRenderer(() => module.default);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [Renderer]);
+
+  if (!Renderer) {
+    return <MarkdownPlainFallback content={content} />;
+  }
+
+  return <Renderer content={content} isStreaming={isStreaming} />;
+}
 import ChatMessageListItem from "./ChatMessageListItem";
 import ChatCompareGroupRow from "./ChatCompareGroupRow";
 import ChatCompareHeader from "./ChatCompareHeader";
@@ -71,17 +101,17 @@ interface MessageListProps {
   onQuoteSelection?: (quote: string) => void;
 }
 
-function normalizeExportPlainText(content: string): string {
+function normalizeExportPlainText(content: string, t: (key: string, params?: Record<string, string>) => string): string {
   return content
     .replace(/```([\w-]+)?\n([\s\S]*?)```/g, (_match, lang, code) => {
-      const label = lang ? `代码（${lang}）` : "代码";
-      return `\n【${label}】\n${String(code).trim()}\n【代码结束】\n`;
+      const label = lang ? t("chat.export.codeWithLanguage", { language: String(lang) }) : t("chat.export.code");
+      return `\n【${label}】\n${String(code).trim()}\n【${t("chat.export.codeEnd")}】\n`;
     })
     .replace(/`([^`]+)`/g, "$1")
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1（$2）")
     .replace(/^\s{0,3}#{1,6}\s+/gm, "")
-    .replace(/^\s{0,3}>\s?/gm, "引用：")
+    .replace(/^\s{0,3}>\s?/gm, t("chat.export.quotePrefix"))
     .replace(/^\s{0,3}[-*+]\s+/gm, "• ")
     .replace(/\*\*([^*]+)\*\*/g, "$1")
     .replace(/__([^_]+)__/g, "$1")
@@ -93,30 +123,35 @@ function normalizeExportPlainText(content: string): string {
     .trim();
 }
 
-function formatMessageForTextExport(msg: Message, index: number, total: number): string {
-  const roleLabel = msg.role === "user" ? "用户" : "AI Space";
+function formatMessageForTextExport(
+  msg: Message,
+  index: number,
+  total: number,
+  t: (key: string, params?: Record<string, string>) => string,
+): string {
+  const roleLabel = msg.role === "user" ? t("chat.export.userRole") : t("chat.export.assistantRole");
   const title = `【${index + 1}/${total} ${roleLabel}】`;
 
   if (msg.role === "user") {
-    const content = normalizeExportPlainText(msg.content || "");
-    return `${title}\n${content || "（空消息）"}`;
+    const content = normalizeExportPlainText(msg.content || "", t);
+    return `${title}\n${content || t("chat.export.emptyMessage")}`;
   }
 
   const { reasoning, answer, isThinking } = parseThinkContent(msg.content || "");
-  const cleanAnswer = normalizeExportPlainText(sanitizeContent(answer));
-  const cleanReasoning = reasoning ? normalizeExportPlainText(reasoning) : "";
+  const cleanAnswer = normalizeExportPlainText(sanitizeContent(answer), t);
+  const cleanReasoning = reasoning ? normalizeExportPlainText(reasoning, t) : "";
   const sections: string[] = [title];
 
   if (cleanReasoning) {
-    sections.push(`【深度推理${isThinking ? "中" : ""}】\n${cleanReasoning}`);
+    sections.push(`【${isThinking ? t("chat.export.reasoningInProgress") : t("chat.export.reasoning")}】\n${cleanReasoning}`);
   }
 
-  sections.push(`【回答】\n${cleanAnswer || "（空回答）"}`);
+  sections.push(`【${t("chat.export.answer")}】\n${cleanAnswer || t("chat.export.emptyAnswer")}`);
   return sections.join("\n\n");
 }
 
 const MemoMarkdownRenderer = memo(function MemoMarkdownRenderer({ content }: { content: string }) {
-  return <MarkdownRenderer content={content} />;
+  return <LoadableMarkdownRenderer content={content} />;
 });
 
 function LazyMarkdownRenderer({ content }: { content: string }) {
@@ -155,7 +190,7 @@ function MessageList({
   onExitCompare,
   onQuoteSelection,
 }: MessageListProps) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const stickToBottomRef = useRef(true);
@@ -173,7 +208,10 @@ function MessageList({
   const [scrollProgress, setScrollProgress] = useState({ ratio: 1, canScroll: false });
   const [, setScrollProgressDragging] = useState(false);
   const [activeOverviewMessageId, setActiveOverviewMessageId] = useState<string | null>(null);
+  const overviewJumpActiveRef = useRef<{ id: string; until: number } | null>(null);
+  const userOverviewMessagesRef = useRef<{ id: string; label: string }[]>([]);
   const firstItemIndexRef = useRef(100_000);
+  const [firstItemIndex, setFirstItemIndex] = useState(100_000);
   const previousVisibleMessagesRef = useRef<Message[]>([]);
   const historyPrependUntilRef = useRef(0);
 
@@ -191,13 +229,12 @@ function MessageList({
   const scrollToBottom = useCallback(() => {
     programmaticScrollUntilRef.current = Date.now() + 320;
     const el = scrollRef.current;
+    virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end", behavior: "auto" });
     if (el) {
       const nextTop = Math.ceil(el.scrollHeight - el.clientHeight);
       el.scrollTop = nextTop;
       lastScrollTopRef.current = el.scrollTop;
-      return;
     }
-    virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end", behavior: "auto" });
   }, []);
 
   const updateScrollProgressFromElement = useCallback((el: HTMLElement | null) => {
@@ -225,7 +262,7 @@ function MessageList({
     updateScrollProgressFromElement(el);
   }, [stopBottomLockForUserBrowse, updateScrollProgressFromElement]);
 
-  const lockBottomAfterLayout = useCallback(() => {
+  const lockBottomAfterLayout = useCallback((extraSettling = false) => {
     if (bottomLockRafRef.current) cancelAnimationFrame(bottomLockRafRef.current);
     bottomLockTimersRef.current.forEach(window.clearTimeout);
     bottomLockTimersRef.current = [];
@@ -243,12 +280,10 @@ function MessageList({
       });
     });
 
-    // Virtuoso 对最后一项换行后的高度测量可能晚于 RAF，补两次 post-layout 锁底，
-    // 否则每新增一行会短暂把底部 Composer 顶出一行高。
-    bottomLockTimersRef.current = [
-      window.setTimeout(lock, 80),
-      window.setTimeout(lock, 180),
-    ];
+    // Virtuoso 对最后一项换行后的高度测量可能晚于 RAF，补 post-layout 锁底。
+    // 切换会话/恢复历史时，Markdown、图片和虚拟列表测量可能更晚完成，所以额外补几次。
+    const delays = extraSettling ? [80, 180, 360, 700] : [80, 180];
+    bottomLockTimersRef.current = delays.map((delay) => window.setTimeout(lock, delay));
   }, [scrollToBottom]);
 
   const handleVirtuosoScrollerRef = useCallback((ref: Window | HTMLElement | null) => {
@@ -258,6 +293,26 @@ function MessageList({
       lastScrollTopRef.current = el.scrollTop;
       updateScrollProgressFromElement(el);
     }
+  }, [updateScrollProgressFromElement]);
+
+  const centerMessageRowInScroller = useCallback((messageId: string) => {
+    const el = scrollRef.current;
+    if (!el) return false;
+    const row = el.querySelector<HTMLElement>(`[data-chat-message-row="true"][data-message-id="${CSS.escape(messageId)}"]`);
+    if (!row) return false;
+
+    const scrollerRect = el.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    const rowCenter = rowRect.top + rowRect.height / 2;
+    const scrollerCenter = scrollerRect.top + scrollerRect.height / 2;
+    const delta = rowCenter - scrollerCenter;
+    if (Math.abs(delta) <= 2) return true;
+
+    const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    el.scrollTop = Math.min(maxScrollTop, Math.max(0, el.scrollTop + delta));
+    lastScrollTopRef.current = el.scrollTop;
+    updateScrollProgressFromElement(el);
+    return true;
   }, [updateScrollProgressFromElement]);
 
   const handleVirtuosoScroll = useCallback((event: UIEvent<HTMLElement>) => {
@@ -280,11 +335,48 @@ function MessageList({
     lastScrollTopRef.current = el.scrollTop;
     updateScrollProgressFromElement(el);
 
-    const scrollerTop = el.getBoundingClientRect().top;
-    const firstVisibleUserRow = Array.from(el.querySelectorAll<HTMLElement>('[data-chat-message-row="true"][data-message-role="user"]'))
-      .find((row) => row.getBoundingClientRect().bottom >= scrollerTop + 8);
-    if (firstVisibleUserRow?.dataset.messageId) {
-      setActiveOverviewMessageId((previous) => previous === firstVisibleUserRow.dataset.messageId ? previous : firstVisibleUserRow.dataset.messageId || null);
+    const activeOverviewJump = overviewJumpActiveRef.current;
+    if (activeOverviewJump && Date.now() < activeOverviewJump.until) {
+      setActiveOverviewMessageId((previous) => previous === activeOverviewJump.id ? previous : activeOverviewJump.id);
+      return;
+    }
+    if (activeOverviewJump) {
+      overviewJumpActiveRef.current = null;
+    }
+
+    const scrollerRect = el.getBoundingClientRect();
+
+    // Extreme positions: at very top -> earliest user message; at very bottom -> latest user message.
+    if (el.scrollTop <= 4 && userOverviewMessagesRef.current.length > 0) {
+      setActiveOverviewMessageId((previous) => previous === userOverviewMessagesRef.current[0].id ? previous : userOverviewMessagesRef.current[0].id);
+      return;
+    }
+    if (distanceToBottom <= 4 && userOverviewMessagesRef.current.length > 0) {
+      const lastId = userOverviewMessagesRef.current[userOverviewMessagesRef.current.length - 1].id;
+      setActiveOverviewMessageId((previous) => previous === lastId ? previous : lastId);
+      return;
+    }
+
+    const scrollerCenter = scrollerRect.top + scrollerRect.height / 2;
+    const focusTop = scrollerRect.top + scrollerRect.height * 0.35;
+    const focusBottom = scrollerRect.top + scrollerRect.height * 0.65;
+    const centeredUserRows = Array.from(el.querySelectorAll<HTMLElement>('[data-chat-message-row="true"][data-message-role="user"]'))
+      .map((row) => {
+        const rect = row.getBoundingClientRect();
+        const center = rect.top + rect.height / 2;
+        const crossesCenter = rect.top <= scrollerCenter && rect.bottom >= scrollerCenter;
+        const inFocusBand = center >= focusTop && center <= focusBottom;
+        return {
+          row,
+          centered: crossesCenter || inFocusBand,
+          distance: Math.abs(center - scrollerCenter),
+        };
+      })
+      .filter((entry) => entry.centered)
+      .sort((a, b) => a.distance - b.distance);
+    const centeredUserRow = centeredUserRows[0]?.row;
+    if (centeredUserRow?.dataset.messageId) {
+      setActiveOverviewMessageId((previous) => previous === centeredUserRow.dataset.messageId ? previous : centeredUserRow.dataset.messageId || null);
     }
 
   }, [stopBottomLockForUserBrowse, updateScrollProgressFromElement]);
@@ -316,45 +408,27 @@ function MessageList({
 
   useLayoutEffect(() => {
     const anchor = loadMoreAnchorRef.current;
-    const el = scrollRef.current;
-    if (!anchor || !el || messages.length <= anchor.messageCount) return;
-
-    const restoreAnchor = () => {
-      const row = el.querySelector<HTMLElement>(`[data-message-id="${anchor.messageId}"]`);
-      if (!row) return false;
-      const delta = row.getBoundingClientRect().top - anchor.top;
-      if (Math.abs(delta) > 1) {
-        programmaticScrollUntilRef.current = Date.now() + 420;
-        stopBottomLockForUserBrowse(1400);
-        el.scrollTop += delta;
-        lastScrollTopRef.current = el.scrollTop;
-        updateScrollProgressFromElement(el);
-      }
-      return true;
-    };
-
-    if (restoreAnchor()) {
-      loadMoreAnchorRef.current = null;
-      window.requestAnimationFrame(() => restoreAnchor());
-      window.setTimeout(restoreAnchor, 80);
-    } else {
-      const anchorIndex = messages.findIndex((message) => message.id === anchor.messageId);
-      if (anchorIndex >= 0) {
-        programmaticScrollUntilRef.current = Date.now() + 420;
-        stopBottomLockForUserBrowse(1400);
-        virtuosoRef.current?.scrollToIndex({ index: anchorIndex, align: "start", behavior: "auto" });
-      }
-      window.requestAnimationFrame(() => {
-        restoreAnchor();
+    if (!anchor || messages.length <= anchor.messageCount) return;
+    // Virtuoso's prepend model keeps the viewport anchored through firstItemIndex.
+    // Do not also mutate scrollTop here: with tall/late-measured rows the two anchoring systems fight,
+    // producing the visible flash/stuck-row behavior when loading older history.
+    historyPrependUntilRef.current = Math.max(historyPrependUntilRef.current, Date.now() + 1600);
+    stopBottomLockForUserBrowse(1600);
+    const timer = window.setTimeout(() => {
+      if (loadMoreAnchorRef.current?.messageId === anchor.messageId) {
         loadMoreAnchorRef.current = null;
-      });
-    }
-  }, [messages, stopBottomLockForUserBrowse, updateScrollProgressFromElement]);
+      }
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [messages, stopBottomLockForUserBrowse]);
 
   useEffect(() => {
     if (!isLoadingMore) {
-      loadingMoreTriggeredRef.current = false;
-      if (loadMoreAnchorRef.current && messages.length <= loadMoreAnchorRef.current.messageCount) {
+      // Only clear the trigger guard when messages have actually been prepended.
+      // If isLoadingMore flips to false before messages arrive, keep the guard
+      // so startReached does not fire again while the parent is still processing.
+      if (loadMoreAnchorRef.current && messages.length > loadMoreAnchorRef.current.messageCount) {
+        loadingMoreTriggeredRef.current = false;
         loadMoreAnchorRef.current = null;
       }
     }
@@ -382,26 +456,8 @@ function MessageList({
   }, [lockBottomAfterLayout, scrollToBottom]);
 
   const createVirtuosoComponents = useCallback(<T,>(): Components<T, unknown> => ({
-    Header: () =>
-      hasMoreMessages ? (
-        <div className="flex justify-center py-2">
-          {isLoadingMore ? (
-            <div className="flex items-center gap-2 text-text-secondary text-sm">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              加载中...
-            </div>
-          ) : (
-            <button
-              onClick={onLoadMore}
-              className="text-sm text-text-secondary hover:text-text-primary transition-colors"
-            >
-              加载更多历史消息
-            </button>
-          )}
-        </div>
-      ) : null,
     Footer: () => <div style={{ height: CHAT_BOTTOM_SPACER + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0) }} aria-hidden="true" />,
-  }), [hasMoreMessages, isLoadingMore, onLoadMore, selectMode]);
+  }), [selectMode]);
   const virtuosoComponents = useMemo(() => createVirtuosoComponents<Message>(), [createVirtuosoComponents]);
   const compareVirtuosoComponents = useMemo(() => createVirtuosoComponents<InferredGroup>(), [createVirtuosoComponents]);
   const groups = useMemo(() => inferGroups(messages), [messages]);
@@ -456,9 +512,11 @@ function MessageList({
       .filter((msg) => msg.role === "user" && msg.content.trim().length > 0)
       .map((msg) => ({
         id: msg.id,
-        label: normalizeExportPlainText(msg.content).replace(/\s+/g, " ").slice(0, 48) || "用户消息",
+        label: normalizeExportPlainText(msg.content, t).replace(/\s+/g, " ").slice(0, 48) || t("chat.export.userRole"),
       }));
-  }, [messages]);
+  }, [messages, t]);
+
+  userOverviewMessagesRef.current = userOverviewMessages;
 
   useEffect(() => {
     if (userOverviewMessages.length === 0) return;
@@ -476,32 +534,38 @@ function MessageList({
   const jumpToUserMessage = useCallback((messageId: string) => {
     const index = visibleMessages.findIndex((message) => message.id === messageId);
     if (index < 0) return;
-    programmaticScrollUntilRef.current = Date.now() + 700;
+    programmaticScrollUntilRef.current = Date.now() + 900;
+    overviewJumpActiveRef.current = { id: messageId, until: Date.now() + 900 };
     stopBottomLockForUserBrowse(1600);
     setActiveOverviewMessageId(messageId);
     highlightMessage(messageId, 2400);
     const scrollToTarget = () => {
       virtuosoRef.current?.scrollToIndex({ index, align: "center", behavior: "auto" });
+      window.requestAnimationFrame(() => centerMessageRowInScroller(messageId));
     };
+    const centerTarget = () => centerMessageRowInScroller(messageId);
     scrollToTarget();
     window.requestAnimationFrame(() => window.requestAnimationFrame(scrollToTarget));
     window.setTimeout(scrollToTarget, 120);
-  }, [highlightMessage, stopBottomLockForUserBrowse, visibleMessages]);
+    window.setTimeout(centerTarget, 260);
+  }, [centerMessageRowInScroller, highlightMessage, stopBottomLockForUserBrowse, visibleMessages]);
 
-  const previousVisibleMessages = previousVisibleMessagesRef.current;
-  if (previousVisibleMessages.length > 0 && visibleMessages.length > previousVisibleMessages.length) {
-    const firstPreviousVisibleId = previousVisibleMessages[0]?.id;
-    const firstPreviousVisibleIndex = firstPreviousVisibleId
-      ? visibleMessages.findIndex((message) => message.id === firstPreviousVisibleId)
-      : -1;
-    if (firstPreviousVisibleIndex > 0) {
-      firstItemIndexRef.current -= firstPreviousVisibleIndex;
-      historyPrependUntilRef.current = Date.now() + 1600;
-      stopBottomLockForUserBrowse(1600);
+  useLayoutEffect(() => {
+    const prev = previousVisibleMessagesRef.current;
+    if (prev.length > 0 && visibleMessages.length > prev.length) {
+      const firstPrevId = prev[0]?.id;
+      const firstPrevIndex = firstPrevId
+        ? visibleMessages.findIndex((m) => m.id === firstPrevId)
+        : -1;
+      if (firstPrevIndex > 0) {
+        firstItemIndexRef.current -= firstPrevIndex;
+        setFirstItemIndex(firstItemIndexRef.current);
+        historyPrependUntilRef.current = Date.now() + 1600;
+        stopBottomLockForUserBrowse(1600);
+      }
     }
-  }
-  previousVisibleMessagesRef.current = visibleMessages;
-  const firstItemIndex = firstItemIndexRef.current;
+    previousVisibleMessagesRef.current = visibleMessages;
+  }, [visibleMessages, stopBottomLockForUserBrowse]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -568,8 +632,20 @@ function MessageList({
   }, [conversationId, targetMessageId]);
 
   const openedConversationBottomKeyRef = useRef("");
+
+  // Reset prepend bookkeeping when switching conversations so the previous
+  // session's firstItemIndex offset does not corrupt the new session.
   useEffect(() => {
-    if (targetMessageId || isLoadingHistory || messages.length === 0 || Date.now() < historyPrependUntilRef.current) return;
+    firstItemIndexRef.current = 100_000;
+    setFirstItemIndex(100_000);
+    previousVisibleMessagesRef.current = [];
+    historyPrependUntilRef.current = 0;
+    loadMoreAnchorRef.current = null;
+    loadingMoreTriggeredRef.current = false;
+    openedConversationBottomKeyRef.current = "";
+  }, [conversationId]);
+  useEffect(() => {
+    if (targetMessageId || isLoadingHistory || messages.length === 0 || Date.now() < historyPrependUntilRef.current || !stickToBottomRef.current) return;
     const key = `${conversationId || "new"}:${messages[0]?.id || ""}:${messages[messages.length - 1]?.id || ""}`;
     if (openedConversationBottomKeyRef.current === key) return;
     openedConversationBottomKeyRef.current = key;
@@ -577,8 +653,15 @@ function MessageList({
     stickToBottomRef.current = true;
     atBottomRef.current = true;
     userScrollOverrideUntilRef.current = 0;
+    programmaticScrollUntilRef.current = Date.now() + 900;
+    overviewJumpActiveRef.current = null;
     setAtBottom(true);
-    lockBottomAfterLayout();
+    setUserBrowsing(false);
+    const lastUserId = userOverviewMessagesRef.current[userOverviewMessagesRef.current.length - 1]?.id;
+    if (lastUserId) {
+      setActiveOverviewMessageId((previous) => previous === lastUserId ? previous : lastUserId);
+    }
+    lockBottomAfterLayout(true);
   }, [conversationId, targetMessageId, isLoadingHistory, messages, lockBottomAfterLayout]);
 
   const activeCompareModels = useMemo(() => {
@@ -620,11 +703,20 @@ function MessageList({
     } catch {}
   }, []);
 
-  // 用户发送消息时强制 smooth 滚到底部（排除初始加载）
-  const prevLengthRef = useRef(0);
+  // 用户发送新消息时强制滚到底部；向上加载历史是 prepend，不能按长度增加误判为新发送。
+  const previousMessageEdgeRef = useRef<{ length: number; firstId: string; lastId: string }>({ length: 0, firstId: "", lastId: "" });
   useEffect(() => {
-    if (messages.length > prevLengthRef.current && prevLengthRef.current > 0 && Date.now() >= historyPrependUntilRef.current) {
-      const newMessages = messages.slice(prevLengthRef.current);
+    const previous = previousMessageEdgeRef.current;
+    const firstId = messages[0]?.id || "";
+    const lastId = messages[messages.length - 1]?.id || "";
+    const isAppendAtTail =
+      previous.length > 0 &&
+      messages.length > previous.length &&
+      previous.firstId === firstId &&
+      previous.lastId !== lastId;
+
+    if (isAppendAtTail && Date.now() >= historyPrependUntilRef.current) {
+      const newMessages = messages.slice(previous.length);
       if (newMessages.some((m) => m.role === "user")) {
         stickToBottomRef.current = true;
         requestAnimationFrame(() => {
@@ -633,17 +725,17 @@ function MessageList({
         });
       }
     }
-    prevLengthRef.current = messages.length;
+    previousMessageEdgeRef.current = { length: messages.length, firstId, lastId };
   }, [messages, scrollToBottom]);
 
   const handleCopy = useCallback((content: string) => {
     navigator.clipboard.writeText(content);
   }, []);
 
-  const copyText = useCallback(async (content: string, successMessage = "已复制") => {
+  const copyText = useCallback(async (content: string, successMessage = t("chat.toast.copied")) => {
     await navigator.clipboard.writeText(content);
     toast.success(successMessage);
-  }, []);
+  }, [t]);
 
   const formatQuoteText = useCallback((content: string) => {
     return content
@@ -660,21 +752,21 @@ function MessageList({
 
   const handleCopySelectedText = useCallback(async () => {
     if (!textSelection?.text) return;
-    await copyText(textSelection.text, "已复制选中文本");
+    await copyText(textSelection.text, t("chat.toast.copiedSelection"));
     clearTextSelection();
-  }, [clearTextSelection, copyText, textSelection]);
+  }, [clearTextSelection, copyText, t, textSelection]);
 
   const handleCopySelectedQuote = useCallback(async () => {
     if (!textSelection?.text) return;
     const quote = formatQuoteText(textSelection.text);
     if (onQuoteSelection) {
       onQuoteSelection(quote);
-      toast.success("已插入引用");
+      toast.success(t("chat.toast.quoteInserted"));
     } else {
-      await copyText(quote, "已复制为引用");
+      await copyText(quote, t("chat.toast.quoteCopied"));
     }
     clearTextSelection();
-  }, [clearTextSelection, copyText, formatQuoteText, onQuoteSelection, textSelection]);
+  }, [clearTextSelection, copyText, formatQuoteText, onQuoteSelection, t, textSelection]);
 
   const updateTextSelection = useCallback(() => {
     const selection = window.getSelection();
@@ -832,7 +924,7 @@ function MessageList({
     if (!conversationId || selectedIds.size === 0 || favoriteLoading) return;
     const token = localStorage.getItem("token");
     if (!token) {
-      toast.warning("请先登录后收藏");
+      toast.warning(t("chat.toast.favoriteLoginRequired"));
       return;
     }
 
@@ -850,7 +942,7 @@ function MessageList({
       if (ok) successCount += 1;
     }
     if (successCount > 0) {
-      toast.success("已收藏");
+      toast.success(t("chat.toast.favorited"));
     }
   };
 
@@ -887,14 +979,14 @@ function MessageList({
   const handleExportText = () => {
     if (selectedIds.size === 0) return;
     const selectedMessages = messages.filter((m) => selectedIds.has(m.id));
-    const exportedAt = new Date().toLocaleString("zh-CN", { hour12: false });
+    const exportedAt = new Date().toLocaleString(language, { hour12: false });
     const separator = "\n\n────────────────────────\n\n";
     const text = [
-      "AI Space 对话导出",
-      `导出时间：${exportedAt}`,
-      `消息数量：${selectedMessages.length}`,
+      t("chat.export.title"),
+      `${t("chat.export.exportedAt")}：${exportedAt}`,
+      `${t("chat.export.messageCount")}：${selectedMessages.length}`,
       "",
-      selectedMessages.map((msg, index) => formatMessageForTextExport(msg, index, selectedMessages.length)).join(separator),
+      selectedMessages.map((msg, index) => formatMessageForTextExport(msg, index, selectedMessages.length, t)).join(separator),
       "",
     ].join("\n");
     const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
@@ -1118,17 +1210,18 @@ function MessageList({
         startReached={() => {
           const el = scrollRef.current;
           if (!el || isLoadingMore || !hasMoreMessages || loadingMoreTriggeredRef.current) return;
-          loadingMoreTriggeredRef.current = true;
+          // Guard against duplicate triggers while the parent is still prepending messages.
+          if (loadMoreAnchorRef.current && messages.length <= loadMoreAnchorRef.current.messageCount) return;
           const firstVisibleRow = Array.from(el.querySelectorAll<HTMLElement>('[data-chat-message-row="true"]'))
             .find((row) => row.getBoundingClientRect().bottom >= el.getBoundingClientRect().top + 8);
           const messageId = firstVisibleRow?.dataset.messageId;
-          if (messageId && firstVisibleRow) {
-            loadMoreAnchorRef.current = {
-              messageId,
-              top: firstVisibleRow.getBoundingClientRect().top,
-              messageCount: messages.length,
-            };
-          }
+          if (!messageId || !firstVisibleRow) return;
+          loadingMoreTriggeredRef.current = true;
+          loadMoreAnchorRef.current = {
+            messageId,
+            top: firstVisibleRow.getBoundingClientRect().top,
+            messageCount: messages.length,
+          };
           stopBottomLockForUserBrowse(1800);
           onLoadMore?.();
         }}

@@ -11,7 +11,6 @@ import { GeneratedImage } from "@/hooks/useImage";
 import ImageLightbox from "@/components/ui/ImageLightbox";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import CreationHistoryPanel from "@/components/creative/CreationHistoryPanel";
-import NoticeDialog from "@/components/ui/NoticeDialog";
 import {
   ImageIcon,
   Loader2,
@@ -353,7 +352,6 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
   const dragDepthRef = useRef(0);
   const uploadInFlightRef = useRef(false);
   const [showHistory, setShowHistory] = useState(false);
-  const [limitDialogOpen, setLimitDialogOpen] = useState(false);
   const [mode, setMode] = useState<"image" | "video">(defaultMode);
   const [selectedDuration, setSelectedDuration] = useState("5s");
   const [durationMenuOpen, setDurationMenuOpen] = useState(false);
@@ -551,10 +549,6 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
     }
 
     if (mode === "video") {
-      if (videoChats.length >= 8) {
-        setLimitDialogOpen(true);
-        return;
-      }
       if (currentVideoModel?.id) params.set("model", currentVideoModel.id);
       params.set("aspect", selectedVideoAspectRatio);
       params.set("resolution", selectedVideoResolution);
@@ -564,11 +558,6 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
         params.set("videoRefs", referenceVideos.join(","));
       }
       router.push(`/video/chat?${params.toString()}`);
-      return;
-    }
-
-    if (chats.length >= 8) {
-      setLimitDialogOpen(true);
       return;
     }
 
@@ -1252,23 +1241,12 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
             onSelect={handleSelectHistory}
             onNew={() => {
               setShowHistory(false);
-              if (mode === "video" ? videoChats.length >= 8 : chats.length >= 8) {
-                setLimitDialogOpen(true);
-                return;
-              }
               router.push(mode === "video" ? "/video/chat" : "/image/chat");
             }}
             onRename={handleRenameChat}
             onDelete={handleDeleteHistory}
           />
 
-          <NoticeDialog
-            isOpen={limitDialogOpen}
-            title={t("video.limitTitle")}
-            description={t("video.limitDesc")}
-            confirmText={t("video.gotIt")}
-            onConfirm={() => setLimitDialogOpen(false)}
-          />
         </div>
       </div>
     </div>

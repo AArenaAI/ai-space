@@ -3,10 +3,10 @@ import type { ChatModel } from "../chatTypes";
 export type ModelAvailabilityStatus = "available" | "disabled" | "maintenance" | "quota_exhausted" | "rate_limited" | string;
 
 const STATUS_LABELS: Record<string, string> = {
-  disabled: "暂不可用",
-  maintenance: "维护中",
-  quota_exhausted: "额度不足",
-  rate_limited: "请求较多",
+  disabled: "model.status.disabled",
+  maintenance: "model.status.maintenance",
+  quota_exhausted: "model.status.quota_exhausted",
+  rate_limited: "model.status.rate_limited",
 };
 
 export function isModelAvailable(model: ChatModel) {
@@ -16,10 +16,10 @@ export function isModelAvailable(model: ChatModel) {
 }
 
 export function getModelStatusLabel(model: ChatModel) {
-  if (isModelAvailable(model)) return "可用";
+  if (isModelAvailable(model)) return "model.status.available";
   if (model.status_message) return model.status_message;
-  if (model.status) return STATUS_LABELS[model.status] || "暂不可用";
-  return "暂不可用";
+  if (model.status) return STATUS_LABELS[model.status] || "model.status.disabled";
+  return "model.status.disabled";
 }
 
 export function getModelStatusBadge(model: ChatModel) {

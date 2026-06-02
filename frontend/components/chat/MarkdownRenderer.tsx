@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useEffect, useMemo, useState } from "react";
-import dynamic from "next/dynamic";
+import ReactMarkdown from "react-markdown";
 import { createMarkdownComponents } from "./markdown/markdownComponents";
 import MarkdownPlainFallback from "./markdown/MarkdownPlainFallback";
 import {
@@ -10,8 +10,6 @@ import {
   loadMarkdownPlugins,
   type MarkdownPlugins,
 } from "./markdown/markdownPlugins";
-
-const ReactMarkdown = dynamic(() => import("react-markdown"), { ssr: false });
 
 const MarkdownRenderer = memo(function MarkdownRenderer({ content, isStreaming = false }: { content: string; isStreaming?: boolean }) {
   const withMath = useMemo(() => contentMayContainMath(content), [content]);

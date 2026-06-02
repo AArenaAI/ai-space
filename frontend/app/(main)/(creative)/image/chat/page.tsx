@@ -33,7 +33,6 @@ import { getClipboardFiles } from "@/lib/clipboardFiles";
 import { toast } from "sonner";
 import ImageLightbox from "@/components/ui/ImageLightbox";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
-import NoticeDialog from "@/components/ui/NoticeDialog";
 import CreationHistoryPanel from "@/components/creative/CreationHistoryPanel";
 import DeleteSuccessNotice from "@/components/ui/DeleteSuccessNotice";
 
@@ -282,7 +281,6 @@ function ImageChatPageInner() {
   const [uploadingRef, setUploadingRef] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [deleteSuccessOpen, setDeleteSuccessOpen] = useState(false);
-  const [limitDialogOpen, setLimitDialogOpen] = useState(false);
   const [chatId, setChatId] = useState<number | null>(null);
   const [pollingChatId, setPollingChatId] = useState<number | null>(null);
   const [selectedAspectRatio, setSelectedAspectRatio] = useState("auto");
@@ -533,11 +531,7 @@ function ImageChatPageInner() {
       setReferenceImages([]);
     } catch (err) {
       const userError = normalizeError(err, { module: "image", fallbackMessage: t("common.sendFailed") });
-      if (userError.message.includes("历史记录只能保存")) {
-        setLimitDialogOpen(true);
-      } else {
-        toast.error(userError.message);
-      }
+      toast.error(userError.message);
       setIsGenerating(false);
     }
   };
@@ -1162,13 +1156,6 @@ function ImageChatPageInner() {
         variant="danger"
       />
 
-      <NoticeDialog
-        isOpen={limitDialogOpen}
-        title={t("image.limitTitle")}
-        description={t("image.limitDescription")}
-        confirmText={t("common.gotIt")}
-        onConfirm={() => setLimitDialogOpen(false)}
-      />
     </div>
   );
 }

@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  ChevronRight,
   Clock,
+  Download,
   Image as ImageIcon,
   MessageSquarePlus,
   Pencil,
@@ -36,6 +38,7 @@ interface CreationHistoryPanelProps {
   onSelect: (id: number, item: CreationHistoryItem) => void;
   onNew?: () => void;
   onRename?: (id: number, title: string) => void;
+  onDownload?: (id: number, item: CreationHistoryItem) => void;
   onDelete?: (id: number, item: CreationHistoryItem) => void;
   loading?: boolean;
   emptyText?: string;
@@ -95,6 +98,10 @@ function groupItems(items: CreationHistoryItem[], t: (key: string) => string) {
   return groups;
 }
 
+function shouldDefaultExpandGroup(label: string, t: (key: string) => string) {
+  return label === t("sidebar.time.today") || label === t("sidebar.time.yesterday");
+}
+
 function formatHistoryTime(dateStr: string): string {
   const date = new Date(dateStr);
   if (Number.isNaN(date.getTime())) return "";
@@ -147,6 +154,7 @@ export default function CreationHistoryPanel({
   onSelect,
   onNew,
   onRename,
+  onDownload,
   onDelete,
   loading,
   emptyText,
@@ -166,6 +174,7 @@ export default function CreationHistoryPanel({
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<CreationHistoryItem | null>(null);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -196,6 +205,24 @@ export default function CreationHistoryPanel({
 
   const groups = groupItems(items, t);
   const sortedLabels = sortGroupLabels(Object.keys(groups), t);
+  const hasSearch = Boolean(searchValue?.trim());
+
+  useEffect(() => {
+    setExpandedGroups((prev) => {
+      const next: Record<string, boolean> = {};
+      for (const label of sortedLabels) {
+        next[label] = prev[label] ?? shouldDefaultExpandGroup(label, t);
+      }
+      return next;
+    });
+  }, [sortedLabels.join("|"), t]);
+
+  const toggleGroup = (label: string) => {
+    setExpandedGroups((prev) => ({
+      ...prev,
+      [label]: !(prev[label] ?? shouldDefaultExpandGroup(label, t)),
+    }));
+  };
 
   const startRename = (item: CreationHistoryItem) => {
     setEditingId(item.id);
@@ -323,6 +350,18 @@ export default function CreationHistoryPanel({
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
               )}
+              {onDownload && item.cover_image && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDownload(item.id, item);
+                  }}
+                  className="rounded-md p-1 text-text-tertiary transition-colors hover:bg-brand-muted hover:text-brand"
+                  title={t("common.download")}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                </button>
+              )}
               {onDelete && (
                 <button
                   onClick={(e) => {
@@ -420,14 +459,26 @@ export default function CreationHistoryPanel({
             </div>
           ) : (
             <div className="space-y-3">
-              {sortedLabels.map((label) => (
-                <div key={label}>
-                  <div className="px-2 py-1 text-[11px] font-medium uppercase tracking-wider text-text-tertiary">
-                    {label}
+              {sortedLabels.map((label) => {
+                const isExpanded = hasSearch || (expandedGroups[label] ?? shouldDefaultExpandGroup(label, t));
+                return (
+                  <div key={label}>
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(label)}
+                      className="flex w-full items-center justify-between rounded-lg px-2 py-1 text-left text-[11px] font-medium uppercase tracking-wider text-text-tertiary transition-colors hover:bg-surface-card hover:text-text-secondary"
+                      aria-expanded={isExpanded}
+                    >
+                      <span>{label}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] leading-none text-text-tertiary">{groups[label].length}</span>
+                        <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", isExpanded && "rotate-90")} />
+                      </div>
+                    </button>
+                    {isExpanded && <div className="mt-1 space-y-2">{groups[label].map(renderItem)}</div>}
                   </div>
-                  <div className="space-y-2">{groups[label].map(renderItem)}</div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

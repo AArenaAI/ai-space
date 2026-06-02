@@ -1,0 +1,309 @@
+import type { ChatActivityStatus, SearchSource } from "./chatTypes";
+import type { RealtimeData, RuntimePhase } from "./streaming";
+import { formatElapsedTime } from "./chatGenerationPhase";
+
+export type ChatStatusStepKind =
+  | "waiting_provider"
+  | "web_search"
+  | "file_search"
+  | "tool_call"
+  | "reasoning"
+  | "streaming_answer"
+  | "finalizing";
+
+export type ChatStatusStepStatus = "running" | "completed" | "failed" | "stopped";
+
+export type ChatStatusTimelineStep = {
+  id: string;
+  kind: ChatStatusStepKind;
+  status: ChatStatusStepStatus;
+  startedAt: number;
+  endedAt?: number;
+  count?: number;
+  label?: string;
+};
+
+type TimelineSource = Partial<Pick<RealtimeData,
+  | "phase"
+  | "generationStartedAt"
+  | "activityStatus"
+  | "searchStatus"
+  | "searchSources"
+  | "searchSourcesCount"
+  | "completedAt"
+>>;
+
+type TimelinePatch = Partial<TimelineSource>;
+
+function normalizePhaseToKind(phase?: RuntimePhase): ChatStatusStepKind | undefined {
+  if (phase === "waiting_provider" || phase === "starting") return "waiting_provider";
+  if (phase === "searching") return "web_search";
+  if (phase === "reasoning" || phase === "thinking") return "reasoning";
+  if (phase === "streaming_answer" || phase === "generating") return "streaming_answer";
+  if (phase === "finalizing") return "finalizing";
+  if (phase === "retrieving_files") return "file_search";
+  return undefined;
+}
+
+function normalizeActivityKind(kind?: string): ChatStatusStepKind | undefined {
+  if (kind === "web_search") return "web_search";
+  if (kind === "file_search") return "file_search";
+  if (kind === "tool_call") return "tool_call";
+  if (kind === "reasoning") return "reasoning";
+  if (kind === "generating") return "streaming_answer";
+  return undefined;
+}
+
+function normalizeActivityStatus(status?: string): ChatStatusStepStatus {
+  if (status === "completed") return "completed";
+  if (status === "failed") return "failed";
+  if (status === "stopped") return "stopped";
+  return "running";
+}
+
+function sourceCountFrom(data: TimelineSource): number | undefined {
+  if (typeof data.searchSourcesCount === "number") return data.searchSourcesCount;
+  const sources = data.searchSources as SearchSource[] | undefined;
+  return sources?.length || undefined;
+}
+
+function eventId(kind: ChatStatusStepKind, status: ChatStatusStepStatus) {
+  return `${kind}:${status}`;
+}
+
+function upsertStep(
+  timeline: ChatStatusTimelineStep[],
+  nextStep: Omit<ChatStatusTimelineStep, "id">,
+): ChatStatusTimelineStep[] {
+  const id = eventId(nextStep.kind, nextStep.status);
+  const existingSame = timeline.find((step) => step.id === id);
+  if (existingSame) {
+    return timeline.map((step) => step.id === id
+      ? {
+          ...step,
+          ...nextStep,
+          id,
+          startedAt: step.startedAt,
+          endedAt: nextStep.endedAt ?? step.endedAt,
+        }
+      : step);
+  }
+
+  const runningSameKind = timeline.find((step) => step.kind === nextStep.kind && step.status === "running");
+  const normalizedNextStep = nextStep.status === "running" || !runningSameKind
+    ? nextStep
+    : {
+        ...nextStep,
+        startedAt: runningSameKind.startedAt,
+        endedAt: nextStep.endedAt ?? nextStep.startedAt,
+      };
+
+  const closedTimeline = timeline.map((step) => {
+    if (step.kind !== normalizedNextStep.kind || step.status !== "running" || normalizedNextStep.status === "running") return step;
+    return { ...step, endedAt: step.endedAt ?? normalizedNextStep.endedAt ?? normalizedNextStep.startedAt };
+  });
+
+  return [...closedTimeline, { ...normalizedNextStep, id }];
+}
+
+const STEP_KIND_ORDER: Record<ChatStatusStepKind, number> = {
+  waiting_provider: 0,
+  web_search: 1,
+  file_search: 2,
+  tool_call: 3,
+  reasoning: 4,
+  streaming_answer: 5,
+  finalizing: 6,
+};
+
+const STEP_STATUS_ORDER: Record<ChatStatusStepStatus, number> = {
+  running: 0,
+  completed: 1,
+  failed: 2,
+  stopped: 3,
+};
+
+export function getOrderedTimelineSteps(steps: ChatStatusTimelineStep[] | undefined): ChatStatusTimelineStep[] {
+  if (!steps?.length) return [];
+  const terminalKinds = new Set(
+    steps
+      .filter((step) => step.status !== "running")
+      .map((step) => step.kind)
+  );
+  return steps
+    .filter((step) => !(step.status === "running" && terminalKinds.has(step.kind)))
+    .map((step, index) => ({ step, index }))
+    .sort((a, b) => {
+      const kindDiff = STEP_KIND_ORDER[a.step.kind] - STEP_KIND_ORDER[b.step.kind];
+      if (kindDiff !== 0) return kindDiff;
+      const startedDiff = (a.step.startedAt || 0) - (b.step.startedAt || 0);
+      if (startedDiff !== 0) return startedDiff;
+      const statusDiff = STEP_STATUS_ORDER[a.step.status] - STEP_STATUS_ORDER[b.step.status];
+      if (statusDiff !== 0) return statusDiff;
+      return a.index - b.index;
+    })
+    .map(({ step }) => step);
+}
+
+function deriveTimelineSteps(prev: TimelineSource, next: TimelineSource, patch: TimelinePatch, ts: number): Omit<ChatStatusTimelineStep, "id">[] {
+  const generationStartedAt = next.generationStartedAt || prev.generationStartedAt || ts;
+  const steps: Omit<ChatStatusTimelineStep, "id">[] = [];
+
+  if (patch.searchStatus === "completed" || (patch.searchSources !== undefined && sourceCountFrom(next))) {
+    steps.push({
+      kind: "web_search",
+      status: "completed",
+      startedAt: ts,
+      endedAt: ts,
+      count: sourceCountFrom(next),
+    });
+  } else if (patch.searchStatus === "failed") {
+    steps.push({ kind: "web_search", status: "failed", startedAt: ts, endedAt: ts, count: sourceCountFrom(next) });
+  } else if (patch.searchStatus === "searching") {
+    steps.push({ kind: "web_search", status: "running", startedAt: ts, count: sourceCountFrom(next) });
+  }
+
+  const activity = patch.activityStatus as ChatActivityStatus | undefined;
+  const activityKind = normalizeActivityKind(activity?.kind);
+  if (activityKind) {
+    steps.push({
+      kind: activityKind,
+      status: normalizeActivityStatus(activity?.status),
+      startedAt: ts,
+      endedAt: activity?.status === "completed" || activity?.status === "failed" ? ts : undefined,
+      label: activity?.label,
+      count: activityKind === "web_search" ? sourceCountFrom(next) : undefined,
+    });
+  }
+
+  const phaseKind = normalizePhaseToKind(patch.phase);
+  if (phaseKind && !steps.some((step) => step.kind === phaseKind && step.status === "running")) {
+    steps.push({ kind: phaseKind, status: "running", startedAt: phaseKind === "waiting_provider" ? generationStartedAt : ts });
+  }
+
+  return steps;
+}
+
+export function updateStatusTimeline(
+  previousTimeline: ChatStatusTimelineStep[] | undefined,
+  prev: TimelineSource,
+  next: TimelineSource,
+  patch: TimelinePatch,
+  ts: number,
+): ChatStatusTimelineStep[] | undefined {
+  let timeline = previousTimeline ? previousTimeline.map((step) => ({ ...step })) : [];
+  const steps = deriveTimelineSteps(prev, next, patch, ts);
+  for (const step of steps) {
+    timeline = upsertStep(timeline, step);
+  }
+  if (patch.completedAt || patch.phase === "completed" || patch.phase === "failed" || patch.phase === "stopped") {
+    timeline = timeline.map((step) => step.status === "running" ? { ...step, endedAt: step.endedAt ?? ts } : step);
+  }
+  return timeline.length ? timeline : previousTimeline;
+}
+
+export function getTimelineStepLabel(
+  t: (key: string, params?: Record<string, string>) => string,
+  step: ChatStatusTimelineStep,
+  generationStartedAt?: number,
+): string {
+  if (step.status === "completed") {
+    if (step.kind === "waiting_provider") return t("chat.status.modelResponseDone");
+    if (step.kind === "web_search") {
+      return `${t("chat.status.webSearchDone")}${step.count ? ` · ${t("chat.status.cited")}${step.count}${t("chat.status.sources")}` : ""}`;
+    }
+    if (step.kind === "file_search") return t("chat.status.fileSearchDone");
+    if (step.kind === "tool_call") return t("chat.status.toolCallDone");
+    if (step.kind === "reasoning") return t("chat.status.reasoningDone");
+    if (step.kind === "streaming_answer") return t("chat.status.answerDone");
+    if (step.kind === "finalizing") return t("chat.status.finalizingDone");
+  }
+  if (step.kind === "web_search" && step.status === "failed") return t("chat.status.webSearch");
+  if (step.status === "failed") return step.label || t("chat.status.failed");
+
+  const statusKey = {
+    waiting_provider: "chat.phase.waiting_provider",
+    web_search: "chat.phase.searching",
+    file_search: "chat.status.fileSearch",
+    tool_call: "chat.status.toolCall",
+    reasoning: "chat.phase.reasoning",
+    streaming_answer: "chat.phase.streaming_answer",
+    finalizing: "chat.phase.finalizing",
+  }[step.kind];
+  const canonicalPhaseLabel = t(statusKey);
+  const label = step.kind === "tool_call" ? (step.label || canonicalPhaseLabel) : canonicalPhaseLabel;
+  if (step.status !== "running") return label;
+  const base = generationStartedAt || step.startedAt;
+  return t("chat.phase.withElapsed", {
+    status: label,
+    elapsed: formatElapsedTime(Math.max(0, step.startedAt - base), t),
+  });
+}
+
+export function getCompletedStatusLabel(
+  t: (key: string, params?: Record<string, string>) => string,
+  generationStartedAt?: number,
+  completedAt?: number,
+): string {
+  if (generationStartedAt && completedAt) {
+    return t("chat.status.completedWithElapsed", { elapsed: formatElapsedTime(completedAt - generationStartedAt, t) });
+  }
+  return t("chat.status.completed");
+}
+
+export function buildFallbackCompletedTimeline({
+  generationStartedAt,
+  completedAt,
+  searchSourcesCount,
+  hasReasoning,
+  hasAnswer,
+}: {
+  generationStartedAt?: number;
+  completedAt?: number;
+  searchSourcesCount?: number;
+  hasReasoning?: boolean;
+  hasAnswer?: boolean;
+}): ChatStatusTimelineStep[] {
+  const start = generationStartedAt || completedAt || Date.now();
+  const end = completedAt || start;
+  const steps: ChatStatusTimelineStep[] = [{
+    id: "waiting_provider:running",
+    kind: "waiting_provider",
+    status: "running",
+    startedAt: start,
+    endedAt: end,
+  }];
+
+  if (searchSourcesCount && searchSourcesCount > 0) {
+    steps.push({
+      id: "web_search:completed",
+      kind: "web_search",
+      status: "completed",
+      startedAt: start,
+      endedAt: end,
+      count: searchSourcesCount,
+    });
+  }
+
+  if (hasReasoning) {
+    steps.push({
+      id: "reasoning:running",
+      kind: "reasoning",
+      status: "running",
+      startedAt: start,
+      endedAt: end,
+    });
+  }
+
+  if (hasAnswer !== false) {
+    steps.push({
+      id: "streaming_answer:running",
+      kind: "streaming_answer",
+      status: "running",
+      startedAt: start,
+      endedAt: end,
+    });
+  }
+
+  return steps;
+}

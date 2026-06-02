@@ -32,11 +32,9 @@ function loadModule(file) {
     if (specifier === "@/lib/streaming") {
       return {
         realtimeAppend: () => {},
-        realtimeGet: () => "",
-        realtimeClear: () => {},
         realtimeUpdate: () => {},
         realtimeGet: () => undefined,
-        realtimeClear: () => {},
+        realtimeMarkCompleted: () => {},
       };
     }
     if (specifier === "@/lib/chatMainStreamEventHandler") return { createMainStreamEventHandler: () => { throw new Error("default handler should be injected"); } };
@@ -123,6 +121,7 @@ function makeHandler(stateOverrides = {}) {
 async function runAction({ handlerState = {}, lifecycleResult = { action: "completed" }, streamContent = "streamed", realtimeData, currentConversation = 99, convId, abortReason = null, now = () => 1234 } = {}) {
   const handlerFixture = makeHandler(handlerState);
   const calls = [];
+  const resolvedRealtimeData = realtimeData === undefined ? { content: streamContent } : realtimeData;
   let messages = [makeAssistant()];
   const action = createStreamResponseAction({
     selectedModelName: "Selected Model",
@@ -145,10 +144,8 @@ async function runAction({ handlerState = {}, lifecycleResult = { action: "compl
       opts.onEvent("event-1");
       return lifecycleResult;
     },
-    realtimeGet: () => streamContent,
-    realtimeGet: () => realtimeData,
-    realtimeClear: (id) => calls.push(["realtimeClear", id]),
-    realtimeClear: (id) => calls.push(["realtimeClear", id]),
+    realtimeGet: () => resolvedRealtimeData,
+    realtimeMarkCompleted: (id, completedAt) => calls.push(["realtimeMarkCompleted", id, completedAt]),
     now,
   });
   const result = await action(makeResponse(), makeAssistant({ groupId: "g", groupIndex: 1, groupModels: ["a", "b"], userMessageId: "u" }), makeController(), convId);
@@ -156,13 +153,12 @@ async function runAction({ handlerState = {}, lifecycleResult = { action: "compl
 }
 
 async function testCompletedSyncClearAndMark() {
-  const { result, calls, messages, handlerCalls } = await runAction({ handlerState: { accumulated: "acc" }, streamContent: "streamed", realtimeData: { serverMessageId: 11 } });
+  const { result, calls, messages, handlerCalls } = await runAction({ handlerState: { accumulated: "acc" }, streamContent: "streamed", realtimeData: { content: "streamed", serverMessageId: 11 } });
   assert.equal(result.content, "streamed");
   assert.ok(calls.some((call) => call[0] === "setMessages"));
-  assert.deepEqual(messages[0].finalData, { serverMessageId: 11 });
+  assert.deepEqual(messages[0].finalData, { content: "streamed", serverMessageId: 11 });
   assert.equal(messages[0].completedAt, 1234);
-  assert.ok(calls.some((call) => call[0] === "realtimeClear" && call[1] === "assistant-1"));
-  assert.ok(calls.some((call) => call[0] === "realtimeClear" && call[1] === "assistant-1"));
+  assert.ok(calls.some((call) => call[0] === "realtimeMarkCompleted" && call[1] === "assistant-1" && call[2] === 1234));
   assert.deepEqual(handlerCalls[0], ["event", "event-1"]);
   assert.ok(handlerCalls.some((call) => call[0] === "close"));
 }
@@ -213,10 +209,36 @@ async function testReconcileAfterDoneStartsOnlyPolling() {
   assert.ok(calls.some((call) => call[0] === "poll" && call[1] === 88 && call[3] === 333));
 }
 
+async function testNavigationAbortStartsTaskStreamContinuation() {
+  const finalAction = {
+    type: "recover",
+    shouldSyncFinalData: true,
+    finalContent: "front half",
+    shouldClearStores: false,
+    shouldMarkCompleted: false,
+    serverMessageId: 111,
+    generationTaskId: 222,
+    lastSequence: 7,
+    shouldStartBackgroundPolling: false,
+    result: { recoverable: true, serverMessageId: 111, content: "front half" },
+  };
+  const { result, calls, state, messages } = await runAction({
+    handlerState: { finalAction, accumulated: "front half" },
+    convId: 55,
+    abortReason: "navigation",
+    streamContent: "front half",
+    realtimeData: { content: "front half", serverMessageId: 111, generationTaskId: 222 },
+  });
+  assert.deepEqual(result, finalAction.result);
+  assert.equal(state.recoverable, true);
+  assert.equal(messages[0].content, "front half");
+  assert.ok(calls.some((call) => call[0] === "task" && call[1] === 55 && call[2] === "assistant-1" && call[3] === 111 && call[4] === 7 && call[5] === "front half" && call[6] === 222));
+}
+
 async function testIgnoredLifecycleStillRunsFinallyButNoCompletionWhenAborted() {
   const { result, calls, messages } = await runAction({ lifecycleResult: { action: "ignored" }, streamContent: "", abortReason: "user" });
   assert.equal(result, undefined);
-  assert.ok(calls.some((call) => call[0] === "realtimeClear"));
+  assert.ok(calls.some((call) => call[0] === "realtimeMarkCompleted"));
   assert.equal(messages[0].completedAt, undefined);
 }
 
@@ -225,6 +247,7 @@ async function testIgnoredLifecycleStillRunsFinallyButNoCompletionWhenAborted() 
   await testLifecycleResumeStartsTaskAndReturnsUndefined();
   await testRecoverFinalActionStartsTaskAndPollingWithExplicitConversation();
   await testReconcileAfterDoneStartsOnlyPolling();
+  await testNavigationAbortStartsTaskStreamContinuation();
   await testIgnoredLifecycleStillRunsFinallyButNoCompletionWhenAborted();
   console.log("chat main stream runtime hook regression passed");
 })();

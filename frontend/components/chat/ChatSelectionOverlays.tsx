@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import type { RefObject } from "react";
 import type { Message } from "@/lib/chatTypes";
+import { useI18n } from "@/lib/i18n";
 import { SelectionFloatingBar } from "./MessageExportActions";
 import TextSelectionFloatingBar, { type TextSelectionFloatingBarState } from "./TextSelectionFloatingBar";
 
@@ -69,14 +70,15 @@ export default function ChatSelectionOverlays({
   onCloseExportPreview,
   onDownloadImage,
 }: ChatSelectionOverlaysProps) {
+  const { t } = useI18n();
   const hasSelection = selectedCount > 0;
 
   return (
     <>
       <TextSelectionFloatingBar
         selection={textSelection}
-        copyLabel="复制"
-        quoteLabel="复制为引用"
+        copyLabel={t("chat.action.copy")}
+        quoteLabel={t("chat.action.copyAsQuote")}
         onCopy={onCopySelectedText}
         onCopyQuote={onCopySelectedQuote}
       />

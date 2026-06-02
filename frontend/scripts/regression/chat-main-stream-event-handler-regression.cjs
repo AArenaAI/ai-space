@@ -164,10 +164,34 @@ test("handles search payload", () => {
 
 test("handles delta payload and content status", () => {
   const h = makeHarness();
-  h.handler.processEvent(sse({ choices: [{ delta: { content: "answer" } }] }));
+  h.handler.processEvent(sse({ choices: [{ delta: { content: "answer" } }] }, 6));
   assert.equal(h.handler.getState().accumulated, "answer");
+  assert.equal(h.handler.getState().lastSequence, 6);
   assert.deepEqual(h.calls.find((call) => call[0] === "append"), ["append", "assistant-1", { answerDelta: "answer", reasoning: false }]);
   assert.equal(h.getRealtime().activityStatus.label, "生成中");
+});
+
+test("main stream sequence ids advance recovery cursor and dedupe duplicate events", () => {
+  const h = makeHarness();
+  h.handler.processEvent(sse({ choices: [{ delta: { content: "A" } }] }, 1));
+  h.handler.processEvent(sse({ choices: [{ delta: { content: "B" } }] }, 2));
+  h.handler.processEvent(sse({ choices: [{ delta: { content: "B" } }] }, 2));
+  const state = h.handler.getState();
+  assert.equal(state.accumulated, "AB");
+  assert.equal(state.lastSequence, 2);
+  assert.equal(h.calls.filter((call) => call[0] === "append").length, 2);
+});
+
+test("main stream duplicate reasoning sequence appends thinking delta once", () => {
+  const h = makeHarness();
+  h.handler.processEvent(sse({ choices: [{ delta: { reasoning_content: "plan" } }] }, 3));
+  h.handler.processEvent(sse({ choices: [{ delta: { reasoning_content: "plan" } }] }, 3));
+  const state = h.handler.getState();
+  assert.equal(state.accumulated, "<think>plan");
+  assert.equal(state.lastSequence, 3);
+  assert.deepEqual(h.calls.filter((call) => call[0] === "append"), [
+    ["append", "assistant-1", { reasoningDelta: "plan", reasoning: true }],
+  ]);
 });
 
 test("handles done, closes open reasoning, clears search status, and marks sawDone", () => {

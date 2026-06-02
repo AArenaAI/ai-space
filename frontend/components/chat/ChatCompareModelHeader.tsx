@@ -2,6 +2,7 @@
 
 import { memo } from "react";
 import { X } from "lucide-react";
+import { useI18n } from "@/lib/i18n";
 import type { ChatModel } from "@/lib/chatTypes";
 import ModelSelector from "./ModelSelector";
 
@@ -24,6 +25,7 @@ function ChatCompareModelHeader({
   onModelChange,
   onExitCompare,
 }: ChatCompareModelHeaderProps) {
+  const { t } = useI18n();
   return (
     <div className="flex items-center justify-between gap-2 px-3 py-1.5">
       <div className="flex-1 min-w-0">
@@ -34,7 +36,7 @@ function ChatCompareModelHeader({
             onSelect={(nextModel) => onModelChange?.(index, nextModel.id)}
           />
         ) : (
-          <div className="rounded-lg px-2 py-1 text-sm font-medium text-text-secondary">{modelId || `模型 ${index + 1}`}</div>
+          <div className="rounded-lg px-2 py-1 text-sm font-medium text-text-secondary">{modelId || t("model.comparePlaceholder").replace("{index}", String(index + 1))}</div>
         )}
       </div>
       <button

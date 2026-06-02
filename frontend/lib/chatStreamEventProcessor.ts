@@ -2,10 +2,10 @@ import { isSseDone, parseSseEvent } from "./chatSseParser";
 import { normalizeChatStreamPayload, type ChatStreamPayload } from "./chatStreamMeta";
 
 export type ChatStreamEventAction =
-  | { type: "empty"; sequence?: number }
-  | { type: "done"; sequence?: number }
-  | { type: "payload"; sequence?: number; payload: ChatStreamPayload }
-  | { type: "text"; sequence?: number; data: string };
+  | { type: "empty"; sequence?: number; hasExplicitSequence?: boolean }
+  | { type: "done"; sequence?: number; hasExplicitSequence?: boolean }
+  | { type: "payload"; sequence?: number; hasExplicitSequence?: boolean; payload: ChatStreamPayload }
+  | { type: "text"; sequence?: number; hasExplicitSequence?: boolean; data: string };
 
 export type ProcessChatStreamEventOptions = {
   eventText: string;
@@ -20,20 +20,22 @@ export function resolveSseEventSequence(eventId: string | undefined, previousSeq
 export function processChatStreamEvent({ eventText, previousSequence }: ProcessChatStreamEventOptions): ChatStreamEventAction {
   const event = parseSseEvent(eventText);
   const sequence = resolveSseEventSequence(event.id, previousSequence);
+  const hasExplicitSequence = event.id !== undefined;
   const data = event.data;
   if (!data) {
-    return { type: "empty", sequence };
+    return { type: "empty", sequence, hasExplicitSequence };
   }
   if (isSseDone(data)) {
-    return { type: "done", sequence };
+    return { type: "done", sequence, hasExplicitSequence };
   }
   try {
     return {
       type: "payload",
       sequence,
+      hasExplicitSequence,
       payload: normalizeChatStreamPayload(JSON.parse(data)),
     };
   } catch {
-    return { type: "text", sequence, data };
+    return { type: "text", sequence, hasExplicitSequence, data };
   }
 }

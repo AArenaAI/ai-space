@@ -66,6 +66,15 @@ test("applyFinalRealtimeDataToMessage applies realtime data after fallback conte
   assert.deepEqual(next, { id: "a", content: "realtime", lastSequence: 8, serverMessageId: 9 });
 });
 
+test("applyFinalRealtimeDataToMessage preserves structured reasoning for final render", () => {
+  const next = mod.applyFinalRealtimeDataToMessage({ id: "a", content: "old" }, {
+    finalContent: "fallback",
+    finalData: { content: "answer", reasoningContent: "plan" },
+    latestSequence: 4,
+  });
+  assert.deepEqual(next, { id: "a", content: "answer", reasoningContent: "plan", lastSequence: 4 });
+});
+
 test("applyFinalRealtimeDataToMessage uses final content when realtime content is empty", () => {
   const next = mod.applyFinalRealtimeDataToMessage({ id: "a", content: "old", lastSequence: 10 }, {
     finalContent: "streamed",

@@ -171,6 +171,7 @@ export type RunSingleChatRequestOptions<TAssistant extends SingleSendMessageLike
   skipSaveUserMessage: boolean;
   skillKey?: string;
   messageFileIds?: string[];
+  notebookFileIds?: number[];
   fetchImpl?: typeof fetch;
   streamResponse: (
     response: Response,
@@ -195,6 +196,7 @@ export async function runSingleChatRequest<TAssistant extends SingleSendMessageL
   skipSaveUserMessage,
   skillKey,
   messageFileIds,
+  notebookFileIds,
   fetchImpl = fetch,
   streamResponse,
 }: RunSingleChatRequestOptions<TAssistant>): Promise<ChatStreamRunResult | undefined> {
@@ -214,6 +216,7 @@ export async function runSingleChatRequest<TAssistant extends SingleSendMessageL
       skipSaveUserMessage,
       skillKey,
       messageFileIds,
+      notebookFileIds,
     })),
   });
 
