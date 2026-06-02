@@ -136,6 +136,14 @@ type ModelPrice struct {
 	ImageUnitPrice   float64 `json:"image_unit_price_rmb"`
 	VideoUnitPrice   float64 `json:"video_unit_price_rmb"`
 	RequestUnitPrice float64 `json:"request_unit_price_rmb"`
+
+	SourceCurrency    string  `json:"source_currency"`
+	SourceUnit        string  `json:"source_unit"`
+	SourceInputPrice  float64 `json:"source_input_price"`
+	SourceOutputPrice float64 `json:"source_output_price"`
+	FXUSDCNY          float64 `json:"fx_usd_cny"`
+	PricingBasis      string  `json:"pricing_basis"`
+	SourceURL         string  `json:"source_url"`
 }
 
 func Load() *Config {

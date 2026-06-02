@@ -243,6 +243,11 @@ func (s *UsageService) RecordImageUsage(userID uint, model string, imageCount in
 		rawJSON = string(b)
 	}
 
+	unitCount := float64(imageCount)
+	if unitPrice <= 0 && (inputPrice > 0 || outputPrice > 0) {
+		unitCount = float64(promptTokens+completionTokens) / 1000.0
+	}
+
 	return s.RecordUsage(&models.APIUsageLog{
 		UserID:             userID,
 		Service:            "image_generation",
@@ -262,7 +267,7 @@ func (s *UsageService) RecordImageUsage(userID uint, model string, imageCount in
 		ImageUnitPrice:     unitPrice,
 		ImageUnitPriceRMB:  unitPrice,
 		PricingUnit:        price.PricingUnit,
-		UnitCount:          float64(imageCount),
+		UnitCount:          unitCount,
 		InputUnitPriceRMB:  inputPrice,
 		OutputUnitPriceRMB: outputPrice,
 		Estimated:          estimated,
