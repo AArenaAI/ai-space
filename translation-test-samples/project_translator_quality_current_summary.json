@@ -1,0 +1,75 @@
+{
+  "model": "gemini-3.1-flash-lite",
+  "total_selected": 30,
+  "completed": 30,
+  "errors": 0,
+  "exact_matches": 9,
+  "acceptable_matches": 11,
+  "punctuation_ok": 25,
+  "ascii_outer_ok": 30,
+  "raw_punctuation_ok": 25,
+  "raw_ascii_outer_ok": 29,
+  "postprocessed_changed": 1,
+  "exact_rate": 0.3,
+  "acceptable_rate": 0.3667,
+  "punctuation_ok_rate": 0.8333,
+  "ascii_outer_ok_rate": 1.0,
+  "strict_count": 6,
+  "strict_punctuation_ok_rate": 0.1667,
+  "raw_strict_punctuation_ok_rate": 0.1667,
+  "latency_avg_sec": 1.212,
+  "latency_p50_sec": 0.72,
+  "latency_max_sec": 6.34,
+  "by_direction": {
+    "中文->日语": {
+      "n": 1,
+      "exact": 0,
+      "acceptable": 0,
+      "punctuation_ok": 0,
+      "ascii_outer_ok": 1
+    },
+    "中文->英语": {
+      "n": 1,
+      "exact": 0,
+      "acceptable": 0,
+      "punctuation_ok": 0,
+      "ascii_outer_ok": 1
+    },
+    "德语->简体中文": {
+      "n": 1,
+      "exact": 1,
+      "acceptable": 1,
+      "punctuation_ok": 0,
+      "ascii_outer_ok": 1
+    },
+    "日语->简体中文": {
+      "n": 11,
+      "exact": 5,
+      "acceptable": 5,
+      "punctuation_ok": 11,
+      "ascii_outer_ok": 11
+    },
+    "法语->简体中文": {
+      "n": 1,
+      "exact": 0,
+      "acceptable": 0,
+      "punctuation_ok": 1,
+      "ascii_outer_ok": 1
+    },
+    "英语->简体中文": {
+      "n": 11,
+      "exact": 2,
+      "acceptable": 4,
+      "punctuation_ok": 10,
+      "ascii_outer_ok": 11
+    },
+    "韩语->简体中文": {
+      "n": 4,
+      "exact": 1,
+      "acceptable": 1,
+      "punctuation_ok": 3,
+      "ascii_outer_ok": 4
+    }
+  },
+  "output_jsonl": "/home/ubuntu/workspace/ai-space/translation-test-samples/project_translator_quality_current.jsonl"
+}

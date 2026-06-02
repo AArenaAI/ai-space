@@ -8,6 +8,7 @@
     "start": "next start -p 3000",
     "lint": "next lint",
     "test:streaming": "node scripts/regression/streaming-regression.cjs",
+    "test:translator": "node scripts/regression/translator-format-regression.cjs",
     "test:stream-delta": "node scripts/regression/chat-stream-delta-regression.cjs",
     "test:chat-content": "node scripts/regression/chat-content-regression.cjs",
     "test:chat-sse-parser": "node scripts/regression/chat-sse-parser-regression.cjs",
