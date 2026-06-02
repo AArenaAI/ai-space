@@ -809,7 +809,7 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 	targetSize := image.Point{}
 	originalSizeLabel := ""
 	detectedSize, sizeErr := detectImageSize(imageFilePath)
-	if req.EditMode == "remove-bg" || req.EditMode == "replace-bg" {
+	if req.EditMode == "remove-bg" || req.EditMode == "replace-bg" || req.EditMode == "text-removal" {
 		if visualSize, visualErr := detectVisualImageSize(imageFilePath); visualErr == nil && visualSize != "" {
 			detectedSize = visualSize
 			sizeErr = nil
@@ -822,7 +822,7 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 		if parts := strings.Split(detectedSize, "x"); len(parts) == 2 {
 			fmt.Sscanf(detectedSize, "%dx%d", &targetSize.X, &targetSize.Y)
 		}
-		if size == "" && (req.EditMode == "remove-bg" || req.EditMode == "replace-bg") {
+		if size == "" && (req.EditMode == "remove-bg" || req.EditMode == "replace-bg" || req.EditMode == "text-removal") {
 			size = detectedSize
 		}
 		if size == "" && (req.EditMode == "inpaint" || req.EditMode == "region-brush") {
@@ -831,13 +831,13 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 				fmt.Printf("[图片编辑] source_size=%s request_size=%s mode=%s\n", detectedSize, size, req.EditMode)
 			}
 		}
-	} else if req.EditMode == "remove-bg" || req.EditMode == "replace-bg" || req.EditMode == "inpaint" || req.EditMode == "region-brush" {
+	} else if req.EditMode == "remove-bg" || req.EditMode == "replace-bg" || req.EditMode == "text-removal" || req.EditMode == "inpaint" || req.EditMode == "region-brush" {
 		fmt.Printf("[图片编辑] 读取源图尺寸失败 mode=%s path=%s err=%v\n", req.EditMode, imageFilePath, sizeErr)
 	}
 	if size == "" {
 		size = "1024x1024"
 	}
-	if req.EditMode == "remove-bg" && originalSizeLabel != "" {
+	if (req.EditMode == "remove-bg" || req.EditMode == "text-removal") && originalSizeLabel != "" {
 		size = originalSizeLabel
 	}
 
@@ -905,6 +905,10 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 		}
 		if req.EditMode == "replace-bg" {
 			h.processBackgroundReplacementJob(gen.ID, imageFilePath, req.Prompt, size, baseURL)
+			return
+		}
+		if req.EditMode == "text-removal" {
+			h.processTextRemovalJob(gen.ID, imageFilePath, req.Prompt, baseURL)
 			return
 		}
 		h.processImageEditJob(gen.ID, editPrompt, size, "medium", []string{providerImagePath}, maskFilePath, baseURL, targetSize, canvasTransform, background)
@@ -1258,6 +1262,72 @@ func (h *ImageHandler) processBackgroundRemovalJob(recordID uint, sourcePath str
 		return
 	}
 	fmt.Printf("[背景移除成功] ID=%d output_size=%s url=%s stdout=%s\n", recordID, outputSize, imageURL, stdout.String())
+}
+
+func (h *ImageHandler) processTextRemovalJob(recordID uint, sourcePath string, prompt string, baseURL string) {
+	if sourcePath == "" {
+		h.failImageGeneration(recordID, "文字消除失败：源图片路径为空")
+		return
+	}
+	if _, err := os.Stat(sourcePath); err != nil {
+		h.failImageGeneration(recordID, "文字消除失败：源图片不存在")
+		return
+	}
+	if err := os.MkdirAll(imageAssetsDir(), 0755); err != nil {
+		h.failImageGeneration(recordID, "文字消除失败：创建图片目录失败")
+		return
+	}
+
+	filename := generateFileName()
+	outputPath := filepath.Join(imageAssetsDir(), filename)
+	scriptCandidates := []string{
+		"./scripts/remove_text.py",
+		"backend/scripts/remove_text.py",
+		"/home/ubuntu/workspace/ai-space/backend/scripts/remove_text.py",
+	}
+	script := ""
+	for _, candidate := range scriptCandidates {
+		if _, err := os.Stat(candidate); err == nil {
+			script = candidate
+			break
+		}
+	}
+	if script == "" {
+		h.failImageGeneration(recordID, "文字消除失败：本地文字消除脚本不存在")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "python3", script, "--input", sourcePath, "--output", outputPath, "--prompt", prompt)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		_ = os.Remove(outputPath)
+		fmt.Printf("[文字消除失败] ID=%d err=%v stdout=%s stderr=%s\n", recordID, err, stdout.String(), stderr.String())
+		h.failImageGeneration(recordID, "文字消除失败：本地文字消除处理失败")
+		return
+	}
+
+	outputSize, outputErr := detectImageSize(outputPath)
+	if outputErr != nil || outputSize == "" {
+		_ = os.Remove(outputPath)
+		fmt.Printf("[文字消除尺寸读取失败] ID=%d output=%s outputErr=%v stdout=%s stderr=%s\n", recordID, outputSize, outputErr, stdout.String(), stderr.String())
+		h.failImageGeneration(recordID, "文字消除失败：读取输出尺寸失败")
+		return
+	}
+
+	imageURL := buildImageURL(baseURL, filename)
+	if saveErr := h.db.Model(&services.ImageGeneration{}).Where("id = ?", recordID).Updates(map[string]interface{}{
+		"image_url": imageURL,
+		"status":    "completed",
+		"size":      outputSize,
+	}).Error; saveErr != nil {
+		fmt.Printf("[文字消除更新记录失败] ID=%d err=%v\n", recordID, saveErr)
+		return
+	}
+	fmt.Printf("[文字消除成功] ID=%d output_size=%s url=%s stdout=%s\n", recordID, outputSize, imageURL, stdout.String())
 }
 
 func (h *ImageHandler) processBackgroundReplacementJob(recordID uint, sourcePath string, prompt string, originalSize string, baseURL string) {
