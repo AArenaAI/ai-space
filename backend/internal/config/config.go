@@ -1,8 +1,10 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -118,6 +120,21 @@ type Config struct {
 	// ========== Embedding Provider（文本向量）==========
 	EmbeddingInputPrice  float64 // ¥/千tokens
 	EmbeddingOutputPrice float64 // ¥/千tokens（通常为 0）
+
+	// ========== Model-level pricing（模型级成本，优先于 provider 级价格）==========
+	// key 格式：provider:model，全部小写。价格单位为人民币：token_1k 表示 ¥/千 tokens，image 表示 ¥/张。
+	ModelPrices map[string]ModelPrice
+}
+
+type ModelPrice struct {
+	Provider         string  `json:"provider"`
+	Model            string  `json:"model"`
+	PricingUnit      string  `json:"pricing_unit"`
+	InputPriceRMB    float64 `json:"input_price_rmb"`
+	OutputPriceRMB   float64 `json:"output_price_rmb"`
+	ImageUnitPrice   float64 `json:"image_unit_price_rmb"`
+	VideoUnitPrice   float64 `json:"video_unit_price_rmb"`
+	RequestUnitPrice float64 `json:"request_unit_price_rmb"`
 }
 
 func Load() *Config {
@@ -223,6 +240,7 @@ func Load() *Config {
 		EmbeddingInputPrice:  getEnvFloat64("EMBEDDING_INPUT_PRICE", 0),
 		EmbeddingOutputPrice: getEnvFloat64("EMBEDDING_OUTPUT_PRICE", 0),
 	}
+	cfg.ModelPrices = loadModelPrices()
 
 	// Text Embedding 未单独配置时，优先复用 Vision Provider（Qwen 系列），其次复用 Chat Provider 的 OpenAI
 	if cfg.TextEmbeddingAPIKey == "" {
@@ -276,6 +294,114 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+func normalizeModelPriceKey(provider, model string) string {
+	return strings.ToLower(strings.TrimSpace(provider)) + ":" + strings.ToLower(strings.TrimSpace(model))
+}
+
+func modelPriceEnvPrefix(provider, model string) string {
+	raw := strings.ToUpper(strings.TrimSpace(provider) + "_" + strings.TrimSpace(model))
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range raw {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore {
+			b.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	return "MODEL_PRICE_" + strings.Trim(b.String(), "_")
+}
+
+func loadModelPrices() map[string]ModelPrice {
+	prices := map[string]ModelPrice{}
+	if raw := strings.TrimSpace(os.Getenv("MODEL_PRICES_JSON")); raw != "" {
+		var list []ModelPrice
+		if err := json.Unmarshal([]byte(raw), &list); err == nil {
+			for _, price := range list {
+				addModelPrice(prices, price)
+			}
+		} else {
+			var keyed map[string]ModelPrice
+			if err := json.Unmarshal([]byte(raw), &keyed); err == nil {
+				for key, price := range keyed {
+					if price.Provider == "" || price.Model == "" {
+						parts := strings.SplitN(key, ":", 2)
+						if len(parts) == 2 {
+							if price.Provider == "" {
+								price.Provider = parts[0]
+							}
+							if price.Model == "" {
+								price.Model = parts[1]
+							}
+						}
+					}
+					addModelPrice(prices, price)
+				}
+			}
+		}
+	}
+	for _, provider := range []string{"openai", "anthropic", "gemini", "deepseek", "moonshot", "volcengine"} {
+		for _, model := range knownModelsForProvider(provider) {
+			prefix := modelPriceEnvPrefix(provider, model)
+			price := ModelPrice{Provider: provider, Model: model}
+			price.PricingUnit = getEnv(prefix+"_PRICING_UNIT", "")
+			price.InputPriceRMB = getEnvFloat64(prefix+"_INPUT", 0)
+			price.OutputPriceRMB = getEnvFloat64(prefix+"_OUTPUT", 0)
+			price.ImageUnitPrice = getEnvFloat64(prefix+"_IMAGE", 0)
+			price.VideoUnitPrice = getEnvFloat64(prefix+"_VIDEO", 0)
+			price.RequestUnitPrice = getEnvFloat64(prefix+"_REQUEST", 0)
+			addModelPrice(prices, price)
+		}
+	}
+	return prices
+}
+
+func addModelPrice(prices map[string]ModelPrice, price ModelPrice) {
+	provider := strings.TrimSpace(price.Provider)
+	model := strings.TrimSpace(price.Model)
+	if provider == "" || model == "" {
+		return
+	}
+	if price.PricingUnit == "" {
+		if price.ImageUnitPrice > 0 {
+			price.PricingUnit = "image"
+		} else if price.VideoUnitPrice > 0 {
+			price.PricingUnit = "video_second"
+		} else if price.RequestUnitPrice > 0 {
+			price.PricingUnit = "request"
+		} else {
+			price.PricingUnit = "token_1k"
+		}
+	}
+	if price.InputPriceRMB <= 0 && price.OutputPriceRMB <= 0 && price.ImageUnitPrice <= 0 && price.VideoUnitPrice <= 0 && price.RequestUnitPrice <= 0 {
+		return
+	}
+	price.Provider = strings.ToLower(provider)
+	price.Model = strings.ToLower(model)
+	prices[normalizeModelPriceKey(price.Provider, price.Model)] = price
+}
+
+func knownModelsForProvider(provider string) []string {
+	switch strings.ToLower(provider) {
+	case "openai":
+		return []string{"gpt-5.4", "gpt-5.4-mini", "gpt-5.5", "gpt-5.5-pro", "gpt-image-2"}
+	case "gemini":
+		return []string{"gemini-2.5-pro", "gemini-3.1-pro-preview", "gemini-3.5-flash", "gemini-3.1-flash-lite"}
+	case "deepseek":
+		return []string{"deepseek-v4-pro", "deepseek-v4-flash"}
+	case "moonshot":
+		return []string{"kimi-k2.5", "kimi-k2.6"}
+	case "volcengine":
+		return []string{"doubao-seedance-2-0-fast-260128", "doubao-seedance-2-0-260128"}
+	default:
+		return nil
+	}
 }
 
 func getEnvInt(key string, defaultValue int) int {

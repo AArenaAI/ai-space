@@ -46,8 +46,8 @@ func (s *UsageService) RecordChatUsage(userID uint, provider, model, modelType s
 		return nil
 	}
 
-	inputPrice, outputPrice := s.getChatPrice(provider)
-	cost := models.CalculateTokenCost(usage.PromptTokens, usage.CompletionTokens, inputPrice, outputPrice)
+	price := s.getTokenPrice(provider, model)
+	cost := models.CalculateTokenCost(usage.PromptTokens, usage.CompletionTokens, price.InputPriceRMB, price.OutputPriceRMB)
 
 	status := "success"
 	if usage.Estimated {
@@ -75,10 +75,10 @@ func (s *UsageService) RecordChatUsage(userID uint, provider, model, modelType s
 		TotalCostRMB:       cost.TotalCost,
 		Currency:           "RMB",
 		Status:             status,
-		PricingUnit:        "token_1k",
+		PricingUnit:        price.PricingUnit,
 		UnitCount:          float64(usage.TotalTokens) / 1000.0,
-		InputUnitPriceRMB:  inputPrice,
-		OutputUnitPriceRMB: outputPrice,
+		InputUnitPriceRMB:  price.InputPriceRMB,
+		OutputUnitPriceRMB: price.OutputPriceRMB,
 		Estimated:          usage.Estimated,
 		RawUsageJSON:       rawJSON,
 		CreatedAt:          time.Now(),
@@ -97,8 +97,8 @@ func (s *UsageService) RecordChatUsageWithContext(userID uint, provider, model, 
 		return nil
 	}
 
-	inputPrice, outputPrice := s.getChatPrice(provider)
-	cost := models.CalculateTokenCost(usage.PromptTokens, usage.CompletionTokens, inputPrice, outputPrice)
+	price := s.getTokenPrice(provider, model)
+	cost := models.CalculateTokenCost(usage.PromptTokens, usage.CompletionTokens, price.InputPriceRMB, price.OutputPriceRMB)
 
 	status := "success"
 	if usage.Estimated {
@@ -145,10 +145,10 @@ func (s *UsageService) RecordChatUsageWithContext(userID uint, provider, model, 
 		TotalCostRMB:       cost.TotalCost,
 		Currency:           "RMB",
 		Status:             status,
-		PricingUnit:        "token_1k",
+		PricingUnit:        price.PricingUnit,
 		UnitCount:          float64(usage.TotalTokens) / 1000.0,
-		InputUnitPriceRMB:  inputPrice,
-		OutputUnitPriceRMB: outputPrice,
+		InputUnitPriceRMB:  price.InputPriceRMB,
+		OutputUnitPriceRMB: price.OutputPriceRMB,
 		Estimated:          usage.Estimated,
 		RawUsageJSON:       rawJSON,
 		LatencyMs:          ctx.LatencyMs,
@@ -194,10 +194,11 @@ func (s *UsageService) RecordImageUsage(userID uint, model string, imageCount in
 		completionTokens = usage.CompletionTokens
 	}
 
-	// 图片生成可能按图片张数计费或按 token 计费
-	inputPrice := s.cfg.ImageGenInputPrice
-	outputPrice := s.cfg.ImageGenOutputPrice
-	unitPrice := s.cfg.ImageGenUnitPrice
+	// 图片生成可能按图片张数计费或按 token 计费。模型级价格优先，provider 配置兜底。
+	price := s.getImagePrice("openai", model)
+	inputPrice := price.InputPriceRMB
+	outputPrice := price.OutputPriceRMB
+	unitPrice := price.ImageUnitPrice
 
 	var totalCost float64
 	var inputCost, outputCost float64
@@ -260,7 +261,7 @@ func (s *UsageService) RecordImageUsage(userID uint, model string, imageCount in
 		ImageCount:         imageCount,
 		ImageUnitPrice:     unitPrice,
 		ImageUnitPriceRMB:  unitPrice,
-		PricingUnit:        "image",
+		PricingUnit:        price.PricingUnit,
 		UnitCount:          float64(imageCount),
 		InputUnitPriceRMB:  inputPrice,
 		OutputUnitPriceRMB: outputPrice,
@@ -276,9 +277,8 @@ func (s *UsageService) RecordPPTUsage(userID uint, model string, resourceID uint
 		return nil
 	}
 
-	inputPrice := s.cfg.DocGenInputPrice
-	outputPrice := s.cfg.DocGenOutputPrice
-	cost := models.CalculateTokenCost(usage.PromptTokens, usage.CompletionTokens, inputPrice, outputPrice)
+	price := s.getTokenPriceWithFallback("openai", model, s.cfg.DocGenInputPrice, s.cfg.DocGenOutputPrice)
+	cost := models.CalculateTokenCost(usage.PromptTokens, usage.CompletionTokens, price.InputPriceRMB, price.OutputPriceRMB)
 
 	status := "success"
 	if usage.Estimated {
@@ -307,10 +307,10 @@ func (s *UsageService) RecordPPTUsage(userID uint, model string, resourceID uint
 		TotalCostRMB:       cost.TotalCost,
 		Currency:           "RMB",
 		Status:             status,
-		PricingUnit:        "token_1k",
+		PricingUnit:        price.PricingUnit,
 		UnitCount:          float64(usage.TotalTokens) / 1000.0,
-		InputUnitPriceRMB:  inputPrice,
-		OutputUnitPriceRMB: outputPrice,
+		InputUnitPriceRMB:  price.InputPriceRMB,
+		OutputUnitPriceRMB: price.OutputPriceRMB,
 		Estimated:          usage.Estimated,
 		RawUsageJSON:       rawJSON,
 		CreatedAt:          time.Now(),
@@ -323,9 +323,8 @@ func (s *UsageService) RecordVisionUsage(userID uint, guestID, model string, res
 		return nil
 	}
 
-	inputPrice := s.cfg.VisionInputPrice
-	outputPrice := s.cfg.VisionOutputPrice
-	cost := models.CalculateTokenCost(usage.PromptTokens, usage.CompletionTokens, inputPrice, outputPrice)
+	price := s.getTokenPriceWithFallback("openai", model, s.cfg.VisionInputPrice, s.cfg.VisionOutputPrice)
+	cost := models.CalculateTokenCost(usage.PromptTokens, usage.CompletionTokens, price.InputPriceRMB, price.OutputPriceRMB)
 
 	status := "success"
 	if usage.Estimated {
@@ -355,10 +354,10 @@ func (s *UsageService) RecordVisionUsage(userID uint, guestID, model string, res
 		TotalCostRMB:       cost.TotalCost,
 		Currency:           "RMB",
 		Status:             status,
-		PricingUnit:        "token_1k",
+		PricingUnit:        price.PricingUnit,
 		UnitCount:          float64(usage.TotalTokens) / 1000.0,
-		InputUnitPriceRMB:  inputPrice,
-		OutputUnitPriceRMB: outputPrice,
+		InputUnitPriceRMB:  price.InputPriceRMB,
+		OutputUnitPriceRMB: price.OutputPriceRMB,
 		Estimated:          usage.Estimated,
 		RawUsageJSON:       rawJSON,
 		CreatedAt:          time.Now(),
@@ -367,8 +366,8 @@ func (s *UsageService) RecordVisionUsage(userID uint, guestID, model string, res
 
 // RecordEmbeddingUsage 记录 Embedding 用量
 func (s *UsageService) RecordEmbeddingUsage(userID uint, model string, resourceID uint, inputTokens int) error {
-	inputPrice := s.cfg.EmbeddingInputPrice
-	cost := models.CalculateEmbeddingCost(inputTokens, inputPrice)
+	price := s.getTokenPriceWithFallback("openai", model, s.cfg.EmbeddingInputPrice, 0)
+	cost := models.CalculateEmbeddingCost(inputTokens, price.InputPriceRMB)
 
 	totalTokens := inputTokens
 	return s.RecordUsage(&models.APIUsageLog{
@@ -387,15 +386,57 @@ func (s *UsageService) RecordEmbeddingUsage(userID uint, model string, resourceI
 		TotalCostRMB:      cost,
 		Currency:          "RMB",
 		Status:            "success",
-		PricingUnit:       "token_1k",
+		PricingUnit:       price.PricingUnit,
 		UnitCount:         float64(totalTokens) / 1000.0,
-		InputUnitPriceRMB: inputPrice,
+		InputUnitPriceRMB: price.InputPriceRMB,
 		CreatedAt:         time.Now(),
 	})
 }
 
-// getChatPrice 获取对话模型的价格
-func (s *UsageService) getChatPrice(provider string) (inputPrice, outputPrice float64) {
+// getTokenPrice 获取 token 型模型价格：模型级价格优先，provider 级价格兜底。
+func (s *UsageService) getTokenPrice(provider, model string) config.ModelPrice {
+	fallbackInput, fallbackOutput := s.getProviderChatPrice(provider)
+	return s.getTokenPriceWithFallback(provider, model, fallbackInput, fallbackOutput)
+}
+
+func (s *UsageService) getTokenPriceWithFallback(provider, model string, fallbackInput, fallbackOutput float64) config.ModelPrice {
+	if price, ok := s.getModelPrice(provider, model); ok && (price.InputPriceRMB > 0 || price.OutputPriceRMB > 0) {
+		if price.PricingUnit == "" {
+			price.PricingUnit = "token_1k"
+		}
+		return price
+	}
+	return config.ModelPrice{Provider: strings.ToLower(provider), Model: strings.ToLower(model), PricingUnit: "token_1k", InputPriceRMB: fallbackInput, OutputPriceRMB: fallbackOutput}
+}
+
+func (s *UsageService) getImagePrice(provider, model string) config.ModelPrice {
+	if price, ok := s.getModelPrice(provider, model); ok && (price.ImageUnitPrice > 0 || price.InputPriceRMB > 0 || price.OutputPriceRMB > 0) {
+		if price.PricingUnit == "" {
+			if price.ImageUnitPrice > 0 {
+				price.PricingUnit = "image"
+			} else {
+				price.PricingUnit = "token_1k"
+			}
+		}
+		return price
+	}
+	unit := "image"
+	if s.cfg.ImageGenUnitPrice <= 0 && (s.cfg.ImageGenInputPrice > 0 || s.cfg.ImageGenOutputPrice > 0) {
+		unit = "token_1k"
+	}
+	return config.ModelPrice{Provider: strings.ToLower(provider), Model: strings.ToLower(model), PricingUnit: unit, InputPriceRMB: s.cfg.ImageGenInputPrice, OutputPriceRMB: s.cfg.ImageGenOutputPrice, ImageUnitPrice: s.cfg.ImageGenUnitPrice}
+}
+
+func (s *UsageService) getModelPrice(provider, model string) (config.ModelPrice, bool) {
+	if s.cfg == nil || len(s.cfg.ModelPrices) == 0 {
+		return config.ModelPrice{}, false
+	}
+	key := strings.ToLower(strings.TrimSpace(provider)) + ":" + strings.ToLower(strings.TrimSpace(model))
+	price, ok := s.cfg.ModelPrices[key]
+	return price, ok
+}
+
+func (s *UsageService) getProviderChatPrice(provider string) (inputPrice, outputPrice float64) {
 	switch strings.ToLower(provider) {
 	case "openai":
 		return s.cfg.OpenAIInputPrice, s.cfg.OpenAIOutputPrice
