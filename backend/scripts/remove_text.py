@@ -104,18 +104,80 @@ def component_filter(mask: np.ndarray, width: int, height: int) -> np.ndarray:
         aspect = w / float(h)
         fill = area / float(w * h)
         # Text/watermarks are often long/thin or clusters of small glyphs. Be
-        # conservative: square/tall merged regions are usually icons or content,
-        # not text lines.
+        # conservative: square/tall merged regions are usually icons, logos,
+        # desktop/file thumbnails, or content, not text lines. This is stricter
+        # than the first-pass glyph filter because the mask has already been
+        # dilated/merged into word-line candidates.
         if aspect < 0.12 or aspect > 80:
             continue
         if fill > 0.92:
             continue
-        if h > max(70, height * 0.10) and aspect < 2.0:
+        if h > max(24, height * 0.09) and aspect < 2.2:
+            continue
+        if h > max(28, height * 0.07) and fill > 0.58 and aspect < 2.8:
             continue
         if h > height * 0.18 and w > width * 0.25:
             continue
         cv2.drawContours(filtered, [cnt], -1, 255, thickness=cv2.FILLED)
     return filtered
+
+
+def limit_mask_coverage(mask: np.ndarray, width: int, height: int) -> np.ndarray:
+    """Keep text removal local when auto-detection becomes over-broad.
+
+    The product requirement is to remove requested text only, never to erase a
+    broad chunk of the picture. If the automatic mask covers too much of the
+    canvas, prefer doing less over damaging unrelated image content.
+    """
+    total_pixels = width * height
+    if total_pixels <= 0:
+        return mask
+
+    max_coverage = 0.10
+    if np.count_nonzero(mask) / float(total_pixels) <= max_coverage:
+        return mask
+
+    tightened = np.zeros_like(mask)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    candidates: list[tuple[float, np.ndarray]] = []
+    max_line_h = max(18, int(height * 0.07))
+    max_component_area = max(64, int(total_pixels * 0.012))
+    for cnt in contours:
+        x, y, w, h = cv2.boundingRect(cnt)
+        if w < 2 or h < 2:
+            continue
+        roi = mask[y : y + h, x : x + w]
+        area = int(np.count_nonzero(roi))
+        aspect = w / float(h)
+        fill = area / float(w * h)
+
+        # Keep compact text-line candidates; reject icon-sized blobs and dense
+        # square-ish components. For high-resolution banners/subtitles, a wide
+        # aspect ratio still allows moderately taller text.
+        if area > max_component_area and aspect < 4.0:
+            continue
+        if h > max_line_h and aspect < 3.0:
+            continue
+        if fill > 0.86 and aspect < 4.0:
+            continue
+        if h > height * 0.12 or w > width * 0.90:
+            continue
+
+        score = area * max(1.0, min(aspect, 8.0))
+        candidates.append((score, cnt))
+
+    # Add best candidates only until the mask remains safely local.
+    budget = int(total_pixels * max_coverage)
+    used = 0
+    for _, cnt in sorted(candidates, key=lambda item: item[0], reverse=True):
+        candidate = np.zeros_like(mask)
+        cv2.drawContours(candidate, [cnt], -1, 255, thickness=cv2.FILLED)
+        add = int(np.count_nonzero(cv2.bitwise_and(candidate, cv2.bitwise_not(tightened))))
+        if used + add > budget:
+            continue
+        cv2.drawContours(tightened, [cnt], -1, 255, thickness=cv2.FILLED)
+        used += add
+    return tightened
 
 
 def build_text_mask(rgb: np.ndarray) -> np.ndarray:
@@ -167,6 +229,7 @@ def build_text_mask(rgb: np.ndarray) -> np.ndarray:
     combined = cv2.dilate(combined, kernel, iterations=1)
     combined = cv2.GaussianBlur(combined, (3, 3), 0)
     _, combined = cv2.threshold(combined, 20, 255, cv2.THRESH_BINARY)
+    combined = limit_mask_coverage(combined, width, height)
     return combined
 
 
@@ -201,6 +264,11 @@ def main() -> int:
         radius = max(3, round(min(original_size) / 350))
         repaired_bgr = cv2.inpaint(bgr, mask, radius, cv2.INPAINT_TELEA)
         repaired_rgb = cv2.cvtColor(repaired_bgr, cv2.COLOR_BGR2RGB)
+        # Hard pixel-preservation guard: OpenCV inpaint is only supposed to
+        # change masked pixels, but force every unmasked pixel back to the exact
+        # original RGB value before saving. This prevents any accidental global
+        # enhancement, smoothing, color shift, resize side-effect, or redraw.
+        repaired_rgb[mask == 0] = rgb[mask == 0]
         result = Image.fromarray(repaired_rgb, mode="RGB")
 
         if result.size != original_size:
@@ -243,3 +311,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
