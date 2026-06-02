@@ -70,8 +70,8 @@ const MODE_CONFIG = {
     resultKey: "image.edit.result.removed",
     toastSuccessKey: "image.edit.toast.textRemovalSuccess",
     category: "text-removal",
-    promptPlaceholderKey: "image.edit.prompt.textRemovalPlaceholder",
-    promptLabelKey: "image.edit.prompt.textRemovalLabel",
+    promptPlaceholderKey: "",
+    promptLabelKey: "",
     examples: [
       { before: "/examples/text-removal-before.png", after: "/examples/text-removal-after.png", labelKey: "image.edit.example.watermark" },
     ],
@@ -918,8 +918,8 @@ function ImageEditContent() {
       toast.error(t("image.edit.error.uploadFirst"));
       return;
     }
-    if ((editMode === "replace-bg" || editMode === "text-removal") && !replacePrompt.trim()) {
-      toast.error(editMode === "replace-bg" ? t("image.edit.error.describeBg") : t("image.edit.error.describeText"));
+    if (editMode === "replace-bg" && !replacePrompt.trim()) {
+      toast.error(t("image.edit.error.describeBg"));
       return;
     }
     if (isMaskMode && !maskEditorRef.current?.hasMask()) {
@@ -996,7 +996,6 @@ function ImageEditContent() {
         edit_mode: editMode,
       };
       if (editMode === "replace-bg") body.prompt = replacePrompt.trim();
-      if (editMode === "text-removal") body.prompt = replacePrompt.trim();
       if (editMode === "inpaint") body.prompt = replacePrompt.trim();
       if (editMode === "region-brush" && replacePrompt.trim()) body.prompt = replacePrompt.trim();
       if (maskData) body.mask_data = maskData;
@@ -1116,8 +1115,8 @@ function ImageEditContent() {
   }, [images]);
 
   const examples = config.examples;
-  const needsPrompt = editMode === "replace-bg" || editMode === "text-removal" || (editMode === "inpaint" && regionStep === "recognized");
-  const promptRequired = editMode === "replace-bg" || editMode === "text-removal" || (editMode === "inpaint" && regionStep === "recognized");
+  const needsPrompt = editMode === "replace-bg" || (editMode === "inpaint" && regionStep === "recognized");
+  const promptRequired = editMode === "replace-bg" || (editMode === "inpaint" && regionStep === "recognized");
   const submitDisabled = (promptRequired && !replacePrompt.trim()) || (requiresRegionRecognition && regionStep !== "recognized");
 
   // 选择 TabIcon

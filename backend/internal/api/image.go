@@ -687,11 +687,6 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "替换背景时必须提供 prompt 描述新背景"})
 		return
 	}
-	// 文字移除时必须提供 prompt
-	if req.EditMode == "text-removal" && req.Prompt == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "文字移除时必须提供 prompt 描述要去除的文字"})
-		return
-	}
 	if req.EditMode == "inpaint" && req.Prompt == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "局部重绘时必须提供 prompt 描述要重绘的内容"})
 		return
@@ -851,7 +846,7 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 		editPrompt = "Remove the background. Keep only the main subject in the exact same position, size, and framing. Do NOT zoom in, crop, or recompose."
 		background = "transparent"
 	case "text-removal":
-		editPrompt = req.Prompt + ". Remove these texts/watermarks from the image. Keep everything else intact."
+		editPrompt = "Remove all detected text/watermark-like content from the image. Keep everything else intact."
 	case "upscale":
 		editPrompt = "Enhance image quality locally without changing size, aspect ratio, composition, or content."
 	case "inpaint":
