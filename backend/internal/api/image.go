@@ -201,6 +201,22 @@ func detectImageSize(path string) (string, error) {
 	return fmt.Sprintf("%dx%d", cfg.Width, cfg.Height), nil
 }
 
+func detectVisualImageSize(path string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	code := "from PIL import Image, ImageOps; import sys; im=ImageOps.exif_transpose(Image.open(sys.argv[1])); print(f'{im.size[0]}x{im.size[1]}')"
+	cmd := exec.CommandContext(ctx, "python3", "-c", code, path)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	size := strings.TrimSpace(string(out))
+	if _, ok := parseImageSize(size); !ok {
+		return "", fmt.Errorf("invalid visual size: %s", size)
+	}
+	return size, nil
+}
+
 func fitImageEditRequestSize(size image.Point) string {
 	if size.X <= 0 || size.Y <= 0 {
 		return "1024x1024"
@@ -209,6 +225,20 @@ func fitImageEditRequestSize(size image.Point) string {
 	// OpenAI image edit models only accept a small set of output sizes. Do not
 	// pass arbitrary source dimensions such as 4032x3024; the edited result is
 	// resized back to the original dimensions after generation.
+	aspect := float64(size.X) / float64(size.Y)
+	if aspect >= 1.2 {
+		return "1536x1024"
+	}
+	if aspect <= 0.85 {
+		return "1024x1536"
+	}
+	return "1024x1024"
+}
+
+func fitBackgroundGenerationSize(size image.Point) string {
+	if size.X <= 0 || size.Y <= 0 {
+		return "1024x1024"
+	}
 	aspect := float64(size.X) / float64(size.Y)
 	if aspect >= 1.2 {
 		return "1536x1024"
@@ -778,12 +808,21 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 
 	targetSize := image.Point{}
 	originalSizeLabel := ""
-	if detectedSize, sizeErr := detectImageSize(imageFilePath); sizeErr == nil && detectedSize != "" {
+	detectedSize, sizeErr := detectImageSize(imageFilePath)
+	if req.EditMode == "remove-bg" || req.EditMode == "replace-bg" {
+		if visualSize, visualErr := detectVisualImageSize(imageFilePath); visualErr == nil && visualSize != "" {
+			detectedSize = visualSize
+			sizeErr = nil
+		} else {
+			fmt.Printf("[图片编辑] 读取视觉尺寸失败 mode=%s path=%s err=%v\n", req.EditMode, imageFilePath, visualErr)
+		}
+	}
+	if sizeErr == nil && detectedSize != "" {
 		originalSizeLabel = detectedSize
 		if parts := strings.Split(detectedSize, "x"); len(parts) == 2 {
 			fmt.Sscanf(detectedSize, "%dx%d", &targetSize.X, &targetSize.Y)
 		}
-		if size == "" && req.EditMode == "remove-bg" {
+		if size == "" && (req.EditMode == "remove-bg" || req.EditMode == "replace-bg") {
 			size = detectedSize
 		}
 		if size == "" && (req.EditMode == "inpaint" || req.EditMode == "region-brush") {
@@ -792,7 +831,7 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 				fmt.Printf("[图片编辑] source_size=%s request_size=%s mode=%s\n", detectedSize, size, req.EditMode)
 			}
 		}
-	} else if req.EditMode == "remove-bg" || req.EditMode == "inpaint" || req.EditMode == "region-brush" {
+	} else if req.EditMode == "remove-bg" || req.EditMode == "replace-bg" || req.EditMode == "inpaint" || req.EditMode == "region-brush" {
 		fmt.Printf("[图片编辑] 读取源图尺寸失败 mode=%s path=%s err=%v\n", req.EditMode, imageFilePath, sizeErr)
 	}
 	if size == "" {
@@ -837,6 +876,8 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 	switch req.EditMode {
 	case "remove-bg":
 		gen.Prompt = "[背景移除] " + req.ImageURL
+	case "replace-bg":
+		gen.Prompt = "[背景替换] " + req.Prompt
 	case "text-removal":
 		gen.Prompt = "[文字移除] " + req.ImageURL
 	case "upscale":
@@ -860,6 +901,10 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 		defer cleanupEditCanvas()
 		if req.EditMode == "remove-bg" {
 			h.processBackgroundRemovalJob(gen.ID, imageFilePath, baseURL)
+			return
+		}
+		if req.EditMode == "replace-bg" {
+			h.processBackgroundReplacementJob(gen.ID, imageFilePath, req.Prompt, size, baseURL)
 			return
 		}
 		h.processImageEditJob(gen.ID, editPrompt, size, "medium", []string{providerImagePath}, maskFilePath, baseURL, targetSize, canvasTransform, background)
@@ -1213,6 +1258,146 @@ func (h *ImageHandler) processBackgroundRemovalJob(recordID uint, sourcePath str
 		return
 	}
 	fmt.Printf("[背景移除成功] ID=%d output_size=%s url=%s stdout=%s\n", recordID, outputSize, imageURL, stdout.String())
+}
+
+func (h *ImageHandler) processBackgroundReplacementJob(recordID uint, sourcePath string, prompt string, originalSize string, baseURL string) {
+	if sourcePath == "" {
+		h.failImageGeneration(recordID, "背景替换失败：源图片路径为空")
+		return
+	}
+	if _, err := os.Stat(sourcePath); err != nil {
+		h.failImageGeneration(recordID, "背景替换失败：源图片不存在")
+		return
+	}
+	if strings.TrimSpace(prompt) == "" {
+		h.failImageGeneration(recordID, "背景替换失败：缺少新背景描述")
+		return
+	}
+	if err := os.MkdirAll(imageAssetsDir(), 0755); err != nil {
+		h.failImageGeneration(recordID, "背景替换失败：创建图片目录失败")
+		return
+	}
+
+	originalPoint, _ := parseImageSize(originalSize)
+	backgroundSize := fitBackgroundGenerationSize(originalPoint)
+	backgroundPrompt := "Create only a background image, with no foreground subject, no person, no product, no main object. Background description: " + prompt
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	backgroundURL, _, err := h.imageService.GenerateImage(ctx, backgroundPrompt, backgroundSize, "medium")
+	if err != nil {
+		fmt.Printf("[背景替换-背景生成失败] ID=%d size=%s err=%v\n", recordID, backgroundSize, err)
+		h.failImageGeneration(recordID, "背景替换失败：生成新背景失败")
+		return
+	}
+	backgroundPath, cleanupBackground, err := h.localizeGeneratedImage(ctx, backgroundURL)
+	defer cleanupBackground()
+	if err != nil {
+		fmt.Printf("[背景替换-背景图本地化失败] ID=%d url=%s err=%v\n", recordID, backgroundURL, err)
+		h.failImageGeneration(recordID, "背景替换失败：读取新背景失败")
+		return
+	}
+
+	filename := generateFileName()
+	outputPath := filepath.Join(imageAssetsDir(), filename)
+	scriptCandidates := []string{
+		"./scripts/replace_background.py",
+		"backend/scripts/replace_background.py",
+		"/home/ubuntu/workspace/ai-space/backend/scripts/replace_background.py",
+	}
+	script := ""
+	for _, candidate := range scriptCandidates {
+		if _, err := os.Stat(candidate); err == nil {
+			script = candidate
+			break
+		}
+	}
+	if script == "" {
+		h.failImageGeneration(recordID, "背景替换失败：本地合成脚本不存在")
+		return
+	}
+
+	runCtx, runCancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	defer runCancel()
+	cmd := exec.CommandContext(runCtx, "python3", script, "--input", sourcePath, "--background", backgroundPath, "--output", outputPath)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		_ = os.Remove(outputPath)
+		fmt.Printf("[背景替换失败] ID=%d err=%v stdout=%s stderr=%s\n", recordID, err, stdout.String(), stderr.String())
+		h.failImageGeneration(recordID, "背景替换失败：本地合成处理失败")
+		return
+	}
+
+	outputSize, outputErr := detectImageSize(outputPath)
+	if outputErr != nil || outputSize == "" {
+		_ = os.Remove(outputPath)
+		fmt.Printf("[背景替换尺寸读取失败] ID=%d output=%s outputErr=%v stdout=%s stderr=%s\n", recordID, outputSize, outputErr, stdout.String(), stderr.String())
+		h.failImageGeneration(recordID, "背景替换失败：读取输出尺寸失败")
+		return
+	}
+
+	imageURL := buildImageURL(baseURL, filename)
+	if saveErr := h.db.Model(&services.ImageGeneration{}).Where("id = ?", recordID).Updates(map[string]interface{}{
+		"image_url": imageURL,
+		"status":    "completed",
+		"size":      outputSize,
+	}).Error; saveErr != nil {
+		fmt.Printf("[背景替换更新记录失败] ID=%d err=%v\n", recordID, saveErr)
+		return
+	}
+	fmt.Printf("[背景替换成功] ID=%d output_size=%s background_size=%s url=%s stdout=%s\n", recordID, outputSize, backgroundSize, imageURL, stdout.String())
+}
+
+func (h *ImageHandler) localizeGeneratedImage(ctx context.Context, imageURL string) (string, func(), error) {
+	cleanup := func() {}
+	imageURL = strings.TrimSpace(imageURL)
+	if imageURL == "" {
+		return "", cleanup, fmt.Errorf("图片 URL 为空")
+	}
+	if strings.HasPrefix(imageURL, "/api/images/file/") {
+		filename := strings.TrimPrefix(imageURL, "/api/images/file/")
+		if filename == "" || strings.Contains(filename, "..") || strings.Contains(filename, "/") {
+			return "", cleanup, fmt.Errorf("非法本地图片文件名")
+		}
+		path := filepath.Join(imageAssetsDir(), filename)
+		if _, err := os.Stat(path); err != nil {
+			return "", cleanup, err
+		}
+		return path, cleanup, nil
+	}
+	if strings.HasPrefix(imageURL, "http://") || strings.HasPrefix(imageURL, "https://") {
+		req, err := http.NewRequestWithContext(ctx, "GET", imageURL, nil)
+		if err != nil {
+			return "", cleanup, err
+		}
+		client := &http.Client{Timeout: 90 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return "", cleanup, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return "", cleanup, fmt.Errorf("下载图片失败 (HTTP %d)", resp.StatusCode)
+		}
+		tmp, err := os.CreateTemp("", "aipool-bg-replace-background-*.png")
+		if err != nil {
+			return "", cleanup, err
+		}
+		if _, err := io.Copy(tmp, resp.Body); err != nil {
+			_ = tmp.Close()
+			_ = os.Remove(tmp.Name())
+			return "", cleanup, err
+		}
+		if err := tmp.Close(); err != nil {
+			_ = os.Remove(tmp.Name())
+			return "", cleanup, err
+		}
+		cleanup = func() { _ = os.Remove(tmp.Name()) }
+		return tmp.Name(), cleanup, nil
+	}
+	return "", cleanup, fmt.Errorf("不支持的图片 URL: %s", imageURL)
 }
 
 func (h *ImageHandler) failImageGeneration(recordID uint, message string) {
