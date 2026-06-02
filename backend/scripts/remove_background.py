@@ -14,7 +14,7 @@ import json
 import sys
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageOps
 from rembg import remove, new_session
 
 
@@ -33,10 +33,14 @@ def main() -> int:
 
     try:
         with Image.open(input_path) as im:
-            original_size = im.size
-            source = im.convert("RGBA")
+            # Normalize EXIF orientation up front so JPEGs from phones/cameras keep
+            # the same visual orientation the browser shows. Without this, rembg/PIL
+            # may output 3024x4032 for a raw 4032x3024 JPEG with Orientation=6,
+            # causing a false size-mismatch failure.
+            source = ImageOps.exif_transpose(im).convert("RGBA")
+            original_size = source.size
 
-        # rembg performs segmentation and returns an RGBA cutout at the same size.
+        # rembg performs segmentation and returns an RGBA cutout at the same visual size.
         session = new_session(args.model)
         result = remove(source, session=session)
         if not isinstance(result, Image.Image):

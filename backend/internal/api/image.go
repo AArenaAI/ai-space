@@ -1191,12 +1191,15 @@ func (h *ImageHandler) processBackgroundRemovalJob(recordID uint, sourcePath str
 		return
 	}
 
-	inputSize, inputErr := detectImageSize(sourcePath)
+	// The Python script already normalizes EXIF orientation and verifies that the
+	// output matches the visual input size. Do not compare against Go's raw
+	// DecodeConfig size here: phone JPEGs may be raw 4032x3024 with EXIF
+	// Orientation=6 but visually 3024x4032, which would be a false mismatch.
 	outputSize, outputErr := detectImageSize(outputPath)
-	if inputErr != nil || outputErr != nil || inputSize != outputSize {
+	if outputErr != nil || outputSize == "" {
 		_ = os.Remove(outputPath)
-		fmt.Printf("[背景移除尺寸校验失败] ID=%d input=%s output=%s inputErr=%v outputErr=%v\n", recordID, inputSize, outputSize, inputErr, outputErr)
-		h.failImageGeneration(recordID, "背景移除失败：输出尺寸与原图不一致")
+		fmt.Printf("[背景移除尺寸读取失败] ID=%d output=%s outputErr=%v stdout=%s stderr=%s\n", recordID, outputSize, outputErr, stdout.String(), stderr.String())
+		h.failImageGeneration(recordID, "背景移除失败：读取输出尺寸失败")
 		return
 	}
 
@@ -1204,11 +1207,12 @@ func (h *ImageHandler) processBackgroundRemovalJob(recordID uint, sourcePath str
 	if saveErr := h.db.Model(&services.ImageGeneration{}).Where("id = ?", recordID).Updates(map[string]interface{}{
 		"image_url": imageURL,
 		"status":    "completed",
+		"size":      outputSize,
 	}).Error; saveErr != nil {
 		fmt.Printf("[背景移除更新记录失败] ID=%d err=%v\n", recordID, saveErr)
 		return
 	}
-	fmt.Printf("[背景移除成功] ID=%d input_size=%s output_size=%s url=%s\n", recordID, inputSize, outputSize, imageURL)
+	fmt.Printf("[背景移除成功] ID=%d output_size=%s url=%s stdout=%s\n", recordID, outputSize, imageURL, stdout.String())
 }
 
 func (h *ImageHandler) failImageGeneration(recordID uint, message string) {
