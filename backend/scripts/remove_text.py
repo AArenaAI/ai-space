@@ -122,7 +122,24 @@ def component_filter(mask: np.ndarray, width: int, height: int) -> np.ndarray:
     return filtered
 
 
-def limit_mask_coverage(mask: np.ndarray, width: int, height: int) -> np.ndarray:
+def is_chalkboard_scene(rgb: np.ndarray) -> bool:
+    """Detect dark boards with light, low-saturation chalk-like writing.
+
+    These images need higher mask recall than desktop/logo screenshots: the
+    background is mostly dark and the target strokes are pale chalk with dusty
+    halos. A single global 10% mask cap under-removes long word lists such as
+    classroom blackboards.
+    """
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    sat = hsv[:, :, 1]
+    val = hsv[:, :, 2]
+    dark_background = float(np.percentile(val, 55)) < 95
+    bright_low_sat = (val > 115) & (sat < 105)
+    bright_fraction = float(np.count_nonzero(bright_low_sat)) / float(val.size or 1)
+    return dark_background and 0.003 <= bright_fraction <= 0.18
+
+
+def limit_mask_coverage(mask: np.ndarray, width: int, height: int, max_coverage: float = 0.10) -> np.ndarray:
     """Keep text removal local when auto-detection becomes over-broad.
 
     The product requirement is to remove requested text only, never to erase a
@@ -133,7 +150,6 @@ def limit_mask_coverage(mask: np.ndarray, width: int, height: int) -> np.ndarray
     if total_pixels <= 0:
         return mask
 
-    max_coverage = 0.10
     if np.count_nonzero(mask) / float(total_pixels) <= max_coverage:
         return mask
 
@@ -180,9 +196,66 @@ def limit_mask_coverage(mask: np.ndarray, width: int, height: int) -> np.ndarray
     return tightened
 
 
+def build_chalkboard_mask(rgb: np.ndarray) -> np.ndarray:
+    """Higher-recall mask for light chalk strokes on dark boards.
+
+    Keeps the mask constrained to stroke/word-like components, but includes the
+    pale chalk halo around letters so inpainting does not leave readable ghosts.
+    """
+    height, width = rgb.shape[:2]
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    sat = hsv[:, :, 1]
+    val = hsv[:, :, 2]
+    board_level = float(np.percentile(val, 55))
+
+    chalk = np.zeros_like(gray)
+    chalk[((val > max(100, board_level + 38)) & (sat < 125)) | ((gray > max(105, board_level + 45)) & (sat < 150))] = 255
+
+    # Link dusty chalk strokes into letters/words but avoid swallowing the frame
+    # or the chalk stick on the bottom tray.
+    kx = max(5, width // 95)
+    ky = max(3, height // 180)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kx, ky))
+    chalk = cv2.morphologyEx(chalk, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+    filtered = np.zeros_like(chalk)
+    contours, _ = cv2.findContours(chalk, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    image_area = width * height
+    for cnt in contours:
+        x, y, w, h = cv2.boundingRect(cnt)
+        if w < 2 or h < 2:
+            continue
+        roi = chalk[y : y + h, x : x + w]
+        area = int(np.count_nonzero(roi))
+        if area < max(5, image_area // 700000) or area > image_area * 0.05:
+            continue
+        aspect = w / float(h)
+        fill = area / float(w * h)
+        if aspect < 0.06 or aspect > 95:
+            continue
+        if h > height * 0.20 or w > width * 0.78:
+            continue
+        # Bottom ledge objects (loose chalk/eraser highlights) are not board text.
+        if y > height * 0.78 and (aspect > 2.8 or fill > 0.75):
+            continue
+        if fill > 0.96 and max(w, h) > 10:
+            continue
+        cv2.drawContours(filtered, [cnt], -1, 255, thickness=cv2.FILLED)
+
+    # Include antialiased/chalk-dust halo around the selected strokes.
+    dilate_px = max(2, round(min(width, height) / 260))
+    halo_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * dilate_px + 1, 2 * dilate_px + 1))
+    filtered = cv2.dilate(filtered, halo_kernel, iterations=1)
+    filtered = cv2.GaussianBlur(filtered, (3, 3), 0)
+    _, filtered = cv2.threshold(filtered, 18, 255, cv2.THRESH_BINARY)
+    return filtered
+
+
 def build_text_mask(rgb: np.ndarray) -> np.ndarray:
     height, width = rgb.shape[:2]
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    chalkboard = is_chalkboard_scene(rgb)
 
     # Normalize illumination while preserving edges/strokes.
     gray_blur = cv2.GaussianBlur(gray, (3, 3), 0)
@@ -222,14 +295,17 @@ def build_text_mask(rgb: np.ndarray) -> np.ndarray:
     combined = merge_close_components(combined, width, height)
     combined = component_filter(combined, width, height)
 
+    if chalkboard:
+        combined = cv2.bitwise_or(combined, build_chalkboard_mask(rgb))
+
     # Slight expansion covers anti-aliased glyph edges. Keep it modest so non-text
     # parts are preserved as much as possible.
-    dilate_px = max(1, round(min(width, height) / 500))
+    dilate_px = max(2 if chalkboard else 1, round(min(width, height) / (320 if chalkboard else 500)))
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * dilate_px + 1, 2 * dilate_px + 1))
     combined = cv2.dilate(combined, kernel, iterations=1)
     combined = cv2.GaussianBlur(combined, (3, 3), 0)
     _, combined = cv2.threshold(combined, 20, 255, cv2.THRESH_BINARY)
-    combined = limit_mask_coverage(combined, width, height)
+    combined = limit_mask_coverage(combined, width, height, max_coverage=0.18 if chalkboard else 0.10)
     return combined
 
 
@@ -252,6 +328,7 @@ def main() -> int:
             source = ImageOps.exif_transpose(im).convert("RGB")
         original_size = source.size
         rgb = np.array(source)
+        chalkboard = is_chalkboard_scene(rgb)
         mask = build_text_mask(rgb)
 
         if args.mask_output:
@@ -261,7 +338,7 @@ def main() -> int:
 
         # OpenCV expects BGR. Telea inpaint changes only masked pixels.
         bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-        radius = max(3, round(min(original_size) / 350))
+        radius = max(4 if chalkboard else 3, round(min(original_size) / (220 if chalkboard else 350)))
         repaired_bgr = cv2.inpaint(bgr, mask, radius, cv2.INPAINT_TELEA)
         repaired_rgb = cv2.cvtColor(repaired_bgr, cv2.COLOR_BGR2RGB)
         # Hard pixel-preservation guard: OpenCV inpaint is only supposed to
