@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { getGuestId } from "@/lib/guestId";
+import { useI18n } from "@/lib/i18n";
 import { toast } from "sonner";
 
 export interface FavoriteItem {
@@ -44,6 +45,7 @@ function getHeaders(): Record<string, string> {
 }
 
 export function useFavorites() {
+  const { t } = useI18n();
   const [favorites, setFavorites] = useState<Set<number>>(new Set());
   const [favoriteList, setFavoriteList] = useState<FavoriteItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -84,7 +86,7 @@ export function useFavorites() {
   const addFavorite = useCallback(async (messageId: number, convId: number, options?: FavoriteOptions) => {
     const token = localStorage.getItem("token");
     if (!token) {
-      if (!options?.silent) toast.warning("请先登录后收藏");
+      if (!options?.silent) toast.warning(t("chat.toast.favoriteLoginRequired"));
       return false;
     }
     setLoading(true);
@@ -100,24 +102,24 @@ export function useFavorites() {
           next.add(messageId);
           return next;
         });
-        if (!options?.silent) toast.success("已收藏");
+        if (!options?.silent) toast.success(t("chat.toast.favorited"));
         return true;
       }
-      if (!options?.silent) toast.error("收藏失败");
+      if (!options?.silent) toast.error(t("chat.toast.favoriteFailed"));
       return false;
     } catch {
-      if (!options?.silent) toast.error("收藏失败");
+      if (!options?.silent) toast.error(t("chat.toast.favoriteFailed"));
       return false;
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   // 取消收藏
   const removeFavorite = useCallback(async (messageId: number) => {
     const token = localStorage.getItem("token");
     if (!token) {
-      toast.warning("请先登录后操作收藏");
+      toast.warning(t("chat.toast.favoriteLoginRequired"));
       return false;
     }
     setLoading(true);
@@ -133,18 +135,18 @@ export function useFavorites() {
           return next;
         });
         setFavoriteList((prev) => prev.filter((f) => f.message_id !== messageId));
-        toast.success("已取消收藏");
+        toast.success(t("chat.toast.unfavorited"));
         return true;
       }
-      toast.error("取消收藏失败");
+      toast.error(t("chat.toast.unfavoriteFailed"));
       return false;
     } catch {
-      toast.error("取消收藏失败");
+      toast.error(t("chat.toast.unfavoriteFailed"));
       return false;
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   // 切换收藏
   const toggleFavorite = useCallback(async (messageId: number, convId: number) => {

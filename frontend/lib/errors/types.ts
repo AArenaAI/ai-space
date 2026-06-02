@@ -25,6 +25,7 @@ export type UserErrorCategory =
   | "image_generation"
   | "image_edit"
   | "video_generation"
+  | "translation"
   | "chat"
   | "task"
   | "server"
@@ -53,7 +54,7 @@ export interface ApiErrorPayload {
   rawText?: string;
 }
 
-export type ErrorModule = "auth" | "chat" | "file" | "image" | "image_edit" | "video" | "template" | "ppt" | "workspace" | "server";
+export type ErrorModule = "auth" | "chat" | "file" | "image" | "image_edit" | "video" | "translate" | "template" | "ppt" | "workspace" | "server";
 
 export interface NormalizeErrorOptions {
   module?: ErrorModule;

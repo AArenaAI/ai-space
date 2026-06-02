@@ -158,6 +158,9 @@ func (s *TranslateService) SupportedLanguages(ctx context.Context, displayLangua
 		if code == "" {
 			continue
 		}
+		if isTranslationLLMModel(translationModel) && !isTranslationLLMSupportedLanguage(code) {
+			continue
+		}
 		languages = append(languages, SupportedLanguage{
 			LanguageCode:  code,
 			DisplayName:   lang.GetDisplayName(),
@@ -181,9 +184,39 @@ func (s *TranslateService) SupportedLanguages(ctx context.Context, displayLangua
 	}, nil
 }
 
+func isTranslationLLMModel(model string) bool {
+	return strings.Contains(strings.TrimSpace(model), "general/translation-llm")
+}
+
+func isTranslationLLMSupportedLanguage(code string) bool {
+	_, ok := translationLLMSupportedLanguages[strings.ToLower(strings.TrimSpace(code))]
+	return ok
+}
+
+// Google Cloud Translation LLM whitelist: languages marked as either
+// "Official Support" or "Experimental Support" in the official table.
+var translationLLMSupportedLanguages = map[string]struct{}{
+	"af": {}, "sq": {}, "am": {}, "ar-sa": {}, "ar": {}, "hy": {}, "az": {}, "eu": {}, "be": {},
+	"bn-in": {}, "bn": {}, "bs-cyrl": {}, "bs": {}, "bg": {}, "my": {}, "ca": {},
+	"zh-cn": {}, "zh-hk": {}, "zh-hans": {}, "zh-tw": {}, "zh-hant": {}, "zh": {},
+	"hr": {}, "cs": {}, "da": {}, "nl-be": {}, "nl": {},
+	"en-au": {}, "en-ca": {}, "en-nz": {}, "en-ph": {}, "en-za": {}, "en-gb": {}, "en-us": {}, "en": {},
+	"et": {}, "fil": {}, "fi": {}, "fr-ca": {}, "fr-ch": {}, "fr": {}, "fy": {}, "gl": {}, "ka": {},
+	"de": {}, "el": {}, "gn": {}, "gu": {}, "ha": {}, "he": {}, "iw": {}, "hi": {}, "hu": {}, "is": {},
+	"ig": {}, "id": {}, "ga": {}, "it": {}, "ja": {}, "kn": {}, "km": {}, "ko": {}, "ky": {}, "lo": {},
+	"lv": {}, "ln": {}, "lt": {}, "lb": {}, "mk": {}, "ms": {}, "ml": {}, "mt": {}, "mr": {}, "mn": {},
+	"ne": {}, "nb": {}, "no": {}, "or": {}, "fa": {}, "pl": {}, "pt-br": {}, "pt-pt": {}, "pt": {},
+	"pa-pk": {}, "pa": {}, "ro": {}, "ru": {}, "gd": {}, "sr": {}, "sk": {}, "sl": {}, "so": {},
+	"es-ar": {}, "es-cl": {}, "es-co": {}, "es-cr": {}, "es-ec": {}, "es-sv": {}, "es-gt": {}, "es-ht": {},
+	"es-hn": {}, "es-419": {}, "es-mx": {}, "es-ni": {}, "es-pa": {}, "es-py": {}, "es-pe": {},
+	"es-pr": {}, "es-es": {}, "es-us": {}, "es-uy": {}, "es-ve": {}, "es": {},
+	"sw": {}, "sv": {}, "tl": {}, "tg": {}, "ta": {}, "te": {}, "th": {}, "tr": {}, "uk": {},
+	"ur": {}, "uz": {}, "vi": {}, "cy": {}, "zu": {},
+}
+
 func normalizeSupportedLanguagesModel(model, projectID, location string) string {
 	model = strings.TrimSpace(model)
-	if strings.Contains(model, "general/translation-llm") {
+	if isTranslationLLMModel(model) {
 		model = "general/nmt"
 	}
 	return normalizeGoogleTranslateModel(model, projectID, location)

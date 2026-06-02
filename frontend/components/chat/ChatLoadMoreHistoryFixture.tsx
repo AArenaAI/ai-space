@@ -85,7 +85,7 @@ export default function ChatLoadMoreHistoryFixture() {
   }, [isLoadingMore, loadDelay, loadedOlder, loadedPageCount, olderPages]);
 
   return (
-    <div className="flex h-screen min-h-0 flex-col bg-surface text-text-primary" data-testid="chat-load-more-history-fixture" data-loaded-older={loadedOlder ? "true" : "false"} data-loaded-pages={loadedPageCount}>
+    <div className="flex h-screen min-h-0 flex-col bg-surface text-text-primary" data-testid="chat-load-more-history-fixture" data-loaded-older={loadedOlder ? "true" : "false"} data-loaded-pages={loadedPageCount} data-loading-more={isLoadingMore ? "true" : "false"}>
       <div className="shrink-0 border-b border-surface-border px-4 py-2 text-xs text-text-secondary">
         load more history fixture · loaded pages: <span data-testid="load-more-loaded-pages">{loadedPageCount}</span> / {pages}
       </div>

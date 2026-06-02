@@ -125,6 +125,7 @@ const translations: Record<string, string> = {
   "prompts.save.error": "Falha ao salvar",
   "prompts.save.success": "Salvo",
   "prompts.setDefault": "Definir padrão",
+  "prompts.setDefault.error": "Failed to set default template",
   "prompts.subtitle": "Crie e gerencie modelos de resposta para comparação lado a lado",
   "prompts.title": "Modelos",
   "prompts.unsetDefault": "Desdefinir padrão",
@@ -581,6 +582,9 @@ const translations: Record<string, string> = {
   "chat.toast.quoteCopied": "Copied as quote",
   "chat.toast.favoriteLoginRequired": "Please sign in to favorite",
   "chat.toast.favorited": "Favorited",
+  "chat.toast.favoriteFailed": "Favorite failed",
+  "chat.toast.unfavorited": "Favorite removed",
+  "chat.toast.unfavoriteFailed": "Remove favorite failed",
   "chat.export.title": "AI Space chat export",
   "chat.export.exportedAt": "Exported at",
   "chat.export.messageCount": "Message count",
@@ -1121,5 +1125,6 @@ const translations: Record<string, string> = {
   "chat.fileAttachmentFixErrors": "Remove or re-upload files with errors before sending.",
   "chat.fileErrorVisibleLabel": "File issue",
   "chat.fileEmptyShort": "Empty content",
+  "notebook.uploadAdditionalFailures": "{message}; {count} more files failed.",
 };
 export default translations;

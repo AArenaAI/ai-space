@@ -125,6 +125,7 @@ const translations: Record<string, string> = {
   "prompts.save.error": "저장하지 못했습니다.",
   "prompts.save.success": "저장됨",
   "prompts.setDefault": "기본값 설정",
+  "prompts.setDefault.error": "Failed to set default template",
   "prompts.subtitle": "병렬 비교를 위한 응답 템플릿 생성 및 관리",
   "prompts.title": "템플릿",
   "prompts.unsetDefault": "기본값 설정 해제",
@@ -581,6 +582,9 @@ const translations: Record<string, string> = {
   "chat.toast.quoteCopied": "Copied as quote",
   "chat.toast.favoriteLoginRequired": "Please sign in to favorite",
   "chat.toast.favorited": "Favorited",
+  "chat.toast.favoriteFailed": "Favorite failed",
+  "chat.toast.unfavorited": "Favorite removed",
+  "chat.toast.unfavoriteFailed": "Remove favorite failed",
   "chat.export.title": "AI Space chat export",
   "chat.export.exportedAt": "Exported at",
   "chat.export.messageCount": "Message count",
@@ -1121,5 +1125,6 @@ const translations: Record<string, string> = {
   "chat.fileAttachmentFixErrors": "Remove or re-upload files with errors before sending.",
   "chat.fileErrorVisibleLabel": "File issue",
   "chat.fileEmptyShort": "Empty content",
+  "notebook.uploadAdditionalFailures": "{message}; {count} more files failed.",
 };
 export default translations;

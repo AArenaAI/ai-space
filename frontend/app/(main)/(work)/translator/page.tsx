@@ -24,6 +24,27 @@ const TRANSLATOR_SKILL_KEY = "translator";
 const MAX_TEXT_LENGTH = 20000;
 const TRANSLATOR_MODEL_LABEL = "Google Translation LLM";
 
+// Google Cloud Translation LLM whitelist: languages marked as either
+// "Official Support" or "Experimental Support" in the official table.
+const TRANSLATION_LLM_SUPPORTED_LANGUAGE_CODES = new Set([
+  "af", "sq", "am", "ar-sa", "ar", "hy", "az", "eu", "be",
+  "bn-in", "bn", "bs-cyrl", "bs", "bg", "my", "ca",
+  "zh-cn", "zh-hk", "zh-hans", "zh-tw", "zh-hant", "zh",
+  "hr", "cs", "da", "nl-be", "nl",
+  "en-au", "en-ca", "en-nz", "en-ph", "en-za", "en-gb", "en-us", "en",
+  "et", "fil", "fi", "fr-ca", "fr-ch", "fr", "fy", "gl", "ka",
+  "de", "el", "gn", "gu", "ha", "he", "iw", "hi", "hu", "is",
+  "ig", "id", "ga", "it", "ja", "kn", "km", "ko", "ky", "lo",
+  "lv", "ln", "lt", "lb", "mk", "ms", "ml", "mt", "mr", "mn",
+  "ne", "nb", "no", "or", "fa", "pl", "pt-br", "pt-pt", "pt",
+  "pa-pk", "pa", "ro", "ru", "gd", "sr", "sk", "sl", "so",
+  "es-ar", "es-cl", "es-co", "es-cr", "es-ec", "es-sv", "es-gt", "es-ht",
+  "es-hn", "es-419", "es-mx", "es-ni", "es-pa", "es-py", "es-pe",
+  "es-pr", "es-es", "es-us", "es-uy", "es-ve", "es",
+  "sw", "sv", "tl", "tg", "ta", "te", "th", "tr", "uk",
+  "ur", "uz", "vi", "cy", "zu",
+]);
+
 type LangOption = {
   labelKey?: string;
   label?: string;
@@ -97,7 +118,6 @@ const FALLBACK_LANGS: LangOption[] = [
   { labelKey: "translator.lang.km", promptLabel: "高棉语", value: "km" },
   { labelKey: "translator.lang.lo", promptLabel: "老挝语", value: "lo" },
   { labelKey: "translator.lang.mn", promptLabel: "蒙古语", value: "mn" },
-  { labelKey: "translator.lang.kk", promptLabel: "哈萨克语", value: "kk" },
   { labelKey: "translator.lang.sw", promptLabel: "斯瓦希里语", value: "sw" },
   { labelKey: "translator.lang.af", promptLabel: "南非荷兰语", value: "af" },
   { labelKey: "translator.lang.zu", promptLabel: "祖鲁语", value: "zu" },
@@ -144,12 +164,32 @@ function toDisplayLanguageCode(language: string) {
   return language;
 }
 
+function toTranslationLLMLanguageCode(code: string) {
+  const lower = code.trim().toLowerCase();
+  switch (lower) {
+    case "fil":
+      return "tl";
+    case "zh":
+      return "zh-cn";
+    default:
+      return lower;
+  }
+}
+
+function isTranslationLLMSupportedLanguage(code: string) {
+  return TRANSLATION_LLM_SUPPORTED_LANGUAGE_CODES.has(toTranslationLLMLanguageCode(code));
+}
+
+function getFallbackLanguageOptions() {
+  return FALLBACK_LANGS.filter((lang) => lang.value !== "auto" && isTranslationLLMSupportedLanguage(lang.value));
+}
+
 function buildLanguageOptions(items: SupportedLanguageAPIItem[]) {
   const seen = new Set<string>();
   const options: LangOption[] = [];
   for (const item of items) {
     const value = toAppLanguageCode(item.language_code || "");
-    if (!value || seen.has(value)) continue;
+    if (!value || seen.has(value) || !isTranslationLLMSupportedLanguage(value)) continue;
     seen.add(value);
     const label = item.display_name || value;
     options.push({
@@ -160,7 +200,7 @@ function buildLanguageOptions(items: SupportedLanguageAPIItem[]) {
       supportTarget: item.support_target !== false,
     });
   }
-  return options.length ? options : FALLBACK_LANGS.filter((lang) => lang.value !== "auto");
+  return options.length ? options : getFallbackLanguageOptions();
 }
 
 function LangDropdown({
@@ -308,7 +348,7 @@ export default function TranslatorPage() {
   const { t, language } = useI18n();
   const [sourceLang, setSourceLang] = useState("auto");
   const [targetLang, setTargetLang] = useState("en");
-  const [languageOptions, setLanguageOptions] = useState<LangOption[]>(FALLBACK_LANGS.filter((lang) => lang.value !== "auto"));
+  const [languageOptions, setLanguageOptions] = useState<LangOption[]>(getFallbackLanguageOptions());
   const [inputText, setInputText] = useState("");
   const [recognizedText, setRecognizedText] = useState("");
   const [translatedText, setTranslatedText] = useState("");
@@ -337,7 +377,7 @@ export default function TranslatorPage() {
       }
     } catch (err) {
       console.warn("load supported translator languages failed", err);
-      setLanguageOptions(FALLBACK_LANGS.filter((lang) => lang.value !== "auto"));
+      setLanguageOptions(getFallbackLanguageOptions());
     }
   };
 
@@ -473,7 +513,7 @@ export default function TranslatorPage() {
       await saveConversationMessage(convId, "assistant", `<SOURCE_TEXT>${text}</SOURCE_TEXT>
 <TRANSLATION>${formatted}</TRANSLATION>`, TRANSLATOR_MODEL_LABEL);
     } catch (err) {
-      showUserError(err, { module: "chat", fallbackTitle: t("translator.error.translate"), fallbackMessage: t("translator.error.translate") });
+      showUserError(err, { module: "translate", fallbackTitle: t("translator.error.translate"), fallbackMessage: t("translator.error.translate") });
     } finally {
       setIsTranslating(false);
     }

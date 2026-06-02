@@ -2,6 +2,7 @@ import { ERROR_CATALOG } from "./errorCatalog";
 import { mapChatError } from "./chatErrorMap";
 import { mapFileError } from "./fileErrorMap";
 import { mapMediaError } from "./mediaErrorMap";
+import { mapTranslateError } from "./translateErrorMap";
 import type { ApiErrorPayload, NormalizeErrorOptions, UserFacingError } from "./types";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -27,9 +28,92 @@ function extractApiPayload(input: unknown): ApiErrorPayload {
   return {};
 }
 
+const LOCALIZED_ERROR_COPY: Record<string, Record<string, Partial<Pick<UserFacingError, "title" | "message" | "actionLabel">>>> = {
+  file_unsupported: {
+    en: {
+      title: "Unsupported file format",
+      message: "This file format is not supported. Please upload a different file.",
+      actionLabel: "Upload again",
+    },
+    "zh-CN": {
+      title: "文件格式不支持",
+      message: "文件格式不支持，请换一个文件上传。",
+      actionLabel: "重新上传",
+    },
+    "zh-TW": {
+      title: "檔案格式不支援",
+      message: "檔案格式不支援，請換一個檔案上傳。",
+      actionLabel: "重新上傳",
+    },
+  },
+  translate_language_unsupported: {
+    en: {
+      title: "Target language not supported",
+      message: "The translation service does not support this target language yet. Please choose another target language and try again.",
+      actionLabel: "Retry",
+    },
+    "zh-CN": {
+      title: "目标语言暂不支持",
+      message: "当前翻译服务暂不支持这个目标语言，请换一种目标语言后重试。",
+      actionLabel: "重试",
+    },
+    "zh-TW": {
+      title: "目標語言暫不支援",
+      message: "目前翻譯服務暫不支援這個目標語言，請換一種目標語言後重試。",
+      actionLabel: "重試",
+    },
+  },
+  translate_provider_unsupported: {
+    en: {
+      title: "Translation not supported",
+      message: "The translation service does not support this request yet. Please choose another target language or try again later.",
+      actionLabel: "Retry",
+    },
+    "zh-CN": {
+      title: "翻译暂不支持",
+      message: "当前翻译服务暂不支持这个翻译请求，请换一种目标语言或稍后重试。",
+      actionLabel: "重试",
+    },
+    "zh-TW": {
+      title: "翻譯暫不支援",
+      message: "目前翻譯服務暫不支援這個翻譯請求，請換一種目標語言或稍後重試。",
+      actionLabel: "重試",
+    },
+  },
+  translate_failed: {
+    en: {
+      title: "Translation failed",
+      message: "The translation service is temporarily unavailable. Please try again later.",
+      actionLabel: "Retry",
+    },
+    "zh-CN": {
+      title: "翻译失败",
+      message: "翻译服务暂时不可用，请稍后重试。",
+      actionLabel: "重试",
+    },
+    "zh-TW": {
+      title: "翻譯失敗",
+      message: "翻譯服務暫時不可用，請稍後重試。",
+      actionLabel: "重試",
+    },
+  },
+};
+
+function currentLanguageForErrorCopy() {
+  if (typeof document === "undefined") return "zh-CN";
+  const lang = document.documentElement.lang || localStorage.getItem("language") || "zh-CN";
+  if (lang === "zh-CN" || lang === "zh-TW") return lang;
+  return "en";
+}
+
+function localizeErrorCopy(error: UserFacingError): UserFacingError {
+  const localized = LOCALIZED_ERROR_COPY[error.code]?.[currentLanguageForErrorCopy()];
+  return localized ? { ...error, ...localized } : error;
+}
+
 function apply(input: Partial<UserFacingError>, base?: Partial<UserFacingError>): UserFacingError {
   const fallback: Partial<UserFacingError> = base || ERROR_CATALOG.unknown;
-  return {
+  return localizeErrorCopy({
     code: input.code || fallback.code || ERROR_CATALOG.unknown.code,
     category: input.category || fallback.category || ERROR_CATALOG.unknown.category,
     severity: input.severity || fallback.severity || ERROR_CATALOG.unknown.severity,
@@ -40,7 +124,7 @@ function apply(input: Partial<UserFacingError>, base?: Partial<UserFacingError>)
     debugMessage: input.debugMessage || fallback.debugMessage,
     httpStatus: input.httpStatus || fallback.httpStatus,
     raw: input.raw ?? fallback.raw,
-  };
+  });
 }
 
 function catalogFromCode(code?: string): Partial<UserFacingError> | null {
@@ -129,6 +213,8 @@ export function normalizeError(input: unknown, options: NormalizeErrorOptions = 
   const moduleMap =
     options.module === "file"
       ? mapFileError(rawMessage)
+      : options.module === "translate"
+        ? mapTranslateError(rawMessage)
       : options.module === "chat"
         ? mapChatError(rawMessage) || mapFileError(rawMessage)
         : options.module === "image" || options.module === "image_edit" || options.module === "video"

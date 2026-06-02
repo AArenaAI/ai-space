@@ -30,7 +30,7 @@ export default function TemplatesPage() {
       setCreating(false);
       toast.success(t("prompts.create.success"));
     } catch (err) {
-      toast.error(getErrorMessage(err, { fallbackMessage: "创建模板失败，请稍后重试。" }));
+      toast.error(getErrorMessage(err, { fallbackMessage: t("prompts.create.error") }));
     }
   };
 
@@ -50,7 +50,7 @@ export default function TemplatesPage() {
       setEditingId(null);
       toast.success(t("prompts.save.success"));
     } catch (err) {
-      toast.error(getErrorMessage(err, { fallbackMessage: "保存模板失败，请稍后重试。" }));
+      toast.error(getErrorMessage(err, { fallbackMessage: t("prompts.save.error") }));
     }
   };
 
@@ -60,7 +60,7 @@ export default function TemplatesPage() {
       await deleteTemplate(id);
       toast.success(t("prompts.delete.success"));
     } catch (err) {
-      toast.error(getErrorMessage(err, { fallbackMessage: "删除模板失败，请稍后重试。" }));
+      toast.error(getErrorMessage(err, { fallbackMessage: t("prompts.delete.error") }));
     }
   };
 
@@ -68,7 +68,7 @@ export default function TemplatesPage() {
     try {
       await updateTemplate(id, { is_default: !isDefault });
     } catch (err) {
-      toast.error(getErrorMessage(err, { fallbackMessage: "设置默认模板失败，请稍后重试。" }));
+      toast.error(getErrorMessage(err, { fallbackMessage: t("prompts.setDefault.error") }));
     }
   };
 

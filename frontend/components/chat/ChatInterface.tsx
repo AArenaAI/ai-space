@@ -248,30 +248,9 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
 
   const handleSend = async (content: string, reasoning: ReasoningConfig, search: boolean, attachments?: { filename: string; content: string; type: string; public_id?: string }[], file_ids?: string[]) => {
     // 【积分限制已临时取消】保畔代码但不执行
-    /* 积分检查已注释
-    if (compareMode) {
-      // 对比模式：检查所有选中模型的积分
-      for (const modelId of selectedModels) {
-        if (!hasEnoughCredits(modelId)) {
-          const tier = getModelTier(modelId);
-          toast.error(`模型 ${models.find(m => m.id === modelId)?.name || modelId} 的${tier === "basic" ? "基础" : tier === "advanced" ? "高级" : "精英"}积分不足，请升级套餐`);
-          return;
-        }
-      }
-      // 扣减积分
-      for (const modelId of selectedModels) {
-        await deductCredits(modelId, 1);
-      }
-    } else {
-      // 单模型模式
-      if (!hasEnoughCredits(selectedModel.id)) {
-        const tier = getModelTier(selectedModel.id);
-        toast.error(`${tier === "basic" ? "基础" : tier === "advanced" ? "高级" : "精英"}积分不足，请升级套餐`);
-        return;
-      }
-      await deductCredits(selectedModel.id, 1);
-    }
-    */
+    /* Credit checks are temporarily disabled.
+     * If re-enabled, route insufficient-credit messages through i18n keys instead of hardcoded copy.
+     */
 
     if (compareMode) {
       // 对比模式 - 依次流式发送给多个模型

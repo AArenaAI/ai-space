@@ -142,8 +142,11 @@ function NotebookDetailContent() {
       }
       if (failures.length > 0) {
         const message = failures[0];
-        setPageError(failures.length > 1 ? `${message}，另有 ${failures.length - 1} 个文件失败。` : message);
-        toast.error(failures.length > 1 ? `${message}，另有 ${failures.length - 1} 个文件失败。` : message);
+        const failureMessage = failures.length > 1
+          ? t("notebook.uploadAdditionalFailures", { message, count: String(failures.length - 1) })
+          : message;
+        setPageError(failureMessage);
+        toast.error(failureMessage);
       }
     } finally {
       setUploading(false);

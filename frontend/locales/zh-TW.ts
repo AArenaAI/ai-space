@@ -126,6 +126,7 @@ const translations: Record<string, string> = {
   "prompts.save.error": "保存失敗",
   "prompts.save.success": "已保存",
   "prompts.setDefault": "設爲默認",
+  "prompts.setDefault.error": "設定預設模板失敗",
   "prompts.subtitle": "創建和管理回答模板，在並列對比問答中使用",
   "prompts.title": "回答模板",
   "prompts.unsetDefault": "取消默認",
@@ -582,6 +583,9 @@ const translations: Record<string, string> = {
   "chat.toast.quoteCopied": "已複製為引用",
   "chat.toast.favoriteLoginRequired": "請先登入後收藏",
   "chat.toast.favorited": "已收藏",
+  "chat.toast.favoriteFailed": "收藏失敗",
+  "chat.toast.unfavorited": "已取消收藏",
+  "chat.toast.unfavoriteFailed": "取消收藏失敗",
   "chat.export.title": "AI Space 对话导出",
   "chat.export.exportedAt": "匯出時間",
   "chat.export.messageCount": "訊息數量",
@@ -1122,5 +1126,6 @@ const translations: Record<string, string> = {
   "chat.fileAttachmentFixErrors": "請先移除或重新上傳解析失敗的檔案。",
   "chat.fileErrorVisibleLabel": "檔案異常",
   "chat.fileEmptyShort": "內容為空",
+  "notebook.uploadAdditionalFailures": "{message}，另有 {count} 個檔案失敗。",
 };
 export default translations;

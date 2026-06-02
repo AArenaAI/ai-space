@@ -69,6 +69,8 @@ const SCROLL_TO_BOTTOM_OFFSET = 238;
 const AT_BOTTOM_THRESHOLD = 24;
 const SELECT_MODE_EXTRA_SPACER = 80;
 const LONG_MARKDOWN_LAZY_THRESHOLD = 4000;
+const HISTORY_PRELOAD_TOP_PX = 1200;
+const HISTORY_OVERSCAN_REVERSE = 8;
 type SelectionMode = "share" | "favorite";
 
 interface MessageListProps {
@@ -211,9 +213,10 @@ function MessageList({
   const overviewJumpActiveRef = useRef<{ id: string; until: number } | null>(null);
   const userOverviewMessagesRef = useRef<{ id: string; label: string }[]>([]);
   const firstItemIndexRef = useRef(100_000);
-  const [firstItemIndex, setFirstItemIndex] = useState(100_000);
   const previousVisibleMessagesRef = useRef<Message[]>([]);
   const historyPrependUntilRef = useRef(0);
+  const openedConversationBottomKeyRef = useRef("");
+  const lastConversationIdRef = useRef<number | string | undefined>(conversationId);
 
   const stopBottomLockForUserBrowse = useCallback((duration = 2500) => {
     stickToBottomRef.current = false;
@@ -550,22 +553,44 @@ function MessageList({
     window.setTimeout(centerTarget, 260);
   }, [centerMessageRowInScroller, highlightMessage, stopBottomLockForUserBrowse, visibleMessages]);
 
-  useLayoutEffect(() => {
+  const pendingFirstItemIndex = useMemo(() => {
+    if (lastConversationIdRef.current !== conversationId) {
+      return 100_000;
+    }
+
     const prev = previousVisibleMessagesRef.current;
     if (prev.length > 0 && visibleMessages.length > prev.length) {
       const firstPrevId = prev[0]?.id;
       const firstPrevIndex = firstPrevId
         ? visibleMessages.findIndex((m) => m.id === firstPrevId)
         : -1;
-      if (firstPrevIndex > 0) {
-        firstItemIndexRef.current -= firstPrevIndex;
-        setFirstItemIndex(firstItemIndexRef.current);
-        historyPrependUntilRef.current = Date.now() + 1600;
-        stopBottomLockForUserBrowse(1600);
+      const isPurePrepend = firstPrevIndex > 0 && prev.every((message, index) => visibleMessages[firstPrevIndex + index]?.id === message.id);
+      if (isPurePrepend) {
+        return firstItemIndexRef.current - firstPrevIndex;
       }
     }
+    return firstItemIndexRef.current;
+  }, [conversationId, visibleMessages]);
+
+  const didSwitchConversation = lastConversationIdRef.current !== conversationId;
+  const didPrependVisibleMessages = !didSwitchConversation && pendingFirstItemIndex !== firstItemIndexRef.current;
+  const firstItemIndex = pendingFirstItemIndex;
+
+  useLayoutEffect(() => {
+    if (didSwitchConversation) {
+      lastConversationIdRef.current = conversationId;
+      firstItemIndexRef.current = 100_000;
+      historyPrependUntilRef.current = 0;
+      loadMoreAnchorRef.current = null;
+      loadingMoreTriggeredRef.current = false;
+      openedConversationBottomKeyRef.current = "";
+    } else if (didPrependVisibleMessages) {
+      firstItemIndexRef.current = pendingFirstItemIndex;
+      historyPrependUntilRef.current = Date.now() + 1600;
+      stopBottomLockForUserBrowse(1600);
+    }
     previousVisibleMessagesRef.current = visibleMessages;
-  }, [visibleMessages, stopBottomLockForUserBrowse]);
+  }, [conversationId, didSwitchConversation, didPrependVisibleMessages, pendingFirstItemIndex, visibleMessages, stopBottomLockForUserBrowse]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -631,19 +656,6 @@ function MessageList({
     }
   }, [conversationId, targetMessageId]);
 
-  const openedConversationBottomKeyRef = useRef("");
-
-  // Reset prepend bookkeeping when switching conversations so the previous
-  // session's firstItemIndex offset does not corrupt the new session.
-  useEffect(() => {
-    firstItemIndexRef.current = 100_000;
-    setFirstItemIndex(100_000);
-    previousVisibleMessagesRef.current = [];
-    historyPrependUntilRef.current = 0;
-    loadMoreAnchorRef.current = null;
-    loadingMoreTriggeredRef.current = false;
-    openedConversationBottomKeyRef.current = "";
-  }, [conversationId]);
   useEffect(() => {
     if (targetMessageId || isLoadingHistory || messages.length === 0 || Date.now() < historyPrependUntilRef.current || !stickToBottomRef.current) return;
     const key = `${conversationId || "new"}:${messages[0]?.id || ""}:${messages[messages.length - 1]?.id || ""}`;
@@ -1107,8 +1119,8 @@ function MessageList({
             onScroll={handleVirtuosoScroll}
             onWheel={(event) => handleUserScrollIntent(event.deltaY)}
             onTouchMove={() => stopBottomLockForUserBrowse(2500)}
-            increaseViewportBy={{ top: 200, bottom: CHAT_BOTTOM_SPACER }}
-            overscan={{ main: 2, reverse: 2 }}
+            increaseViewportBy={{ top: HISTORY_PRELOAD_TOP_PX, bottom: CHAT_BOTTOM_SPACER }}
+            overscan={{ main: 2, reverse: HISTORY_OVERSCAN_REVERSE }}
             components={compareVirtuosoComponents}
             itemContent={(groupIndex, group) => (
               <ChatCompareGroupRow
@@ -1227,8 +1239,8 @@ function MessageList({
         }}
         onWheel={(event) => handleUserScrollIntent(event.deltaY)}
         onTouchMove={() => stopBottomLockForUserBrowse(2500)}
-        increaseViewportBy={{ top: 200, bottom: CHAT_BOTTOM_SPACER }}
-        overscan={{ main: 2, reverse: 2 }}
+        increaseViewportBy={{ top: HISTORY_PRELOAD_TOP_PX, bottom: CHAT_BOTTOM_SPACER }}
+        overscan={{ main: 2, reverse: HISTORY_OVERSCAN_REVERSE }}
         components={virtuosoComponents}
         itemContent={(index, msg) => {
           const group = groupByMessageId.get(msg.id);
