@@ -45,7 +45,7 @@ export default function LoginForm() {
       window.dispatchEvent(new Event("auth-changed"));
       router.push(decodeURIComponent(safeReturnUrl));
     } catch (err) {
-      setError(getErrorMessage(err, { module: "auth", fallbackMessage: t("auth.error.loginFailed") }));
+      setError(getErrorMessage(err, { module: "auth", fallbackTitle: t("auth.error.loginFailed"), fallbackMessage: t("auth.error.loginFailed") }));
     } finally {
       setLoading(false);
     }

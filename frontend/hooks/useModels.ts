@@ -31,10 +31,16 @@ const DEFAULT_VIDEO: ChatModel[] = [
   { id: "doubao-seedance-2-0-260128", name: "Seedance 2.0", provider: "Volcengine", description: "载入中...", color: "#ff0050", capabilities: ["video"] },
 ];
 
-function loadCached(key: string, fallback: ChatModel[]): ChatModel[] {
-  if (typeof window === "undefined") return fallback;
-  try { const raw = localStorage.getItem(key); if (raw) return JSON.parse(raw); } catch {}
-  return fallback;
+function loadCached(key: string, fallback: ChatModel[]): { models: ChatModel[]; cacheHit: boolean } {
+  if (typeof window === "undefined") return { models: fallback, cacheHit: false };
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return { models: parsed, cacheHit: true };
+    }
+  } catch {}
+  return { models: fallback, cacheHit: false };
 }
 
 function cacheModels(key: string, models: ChatModel[]) {
@@ -42,8 +48,9 @@ function cacheModels(key: string, models: ChatModel[]) {
 }
 
 function useModelList(endpoint: string, cacheKey: string, fallback: ChatModel[]) {
-  const [models, setModels] = useState<ChatModel[]>(() => loadCached(cacheKey, fallback));
-  const [loading, setLoading] = useState(true);
+  const [initialCache] = useState(() => loadCached(cacheKey, fallback));
+  const [models, setModels] = useState<ChatModel[]>(initialCache.models);
+  const [loading, setLoading] = useState(!initialCache.cacheHit);
 
   useEffect(() => {
     let cancelled = false;

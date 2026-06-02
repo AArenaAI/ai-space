@@ -63,6 +63,8 @@ const path = '/test-chat-streaming-state/';
   const doneImmediateSnapshot = await page.evaluate(() => ({
     answerMode: document.querySelector('.streaming-answer-markdown [data-streaming-markdown-mode]')?.getAttribute('data-streaming-markdown-mode') || '',
     rowHeight: document.querySelector('[data-chat-message-row="true"][data-message-role="assistant"]')?.getBoundingClientRect().height || 0,
+    reasoningExpanded: document.querySelector('.reasoning-markdown')?.closest('.rounded-xl')?.querySelector('button')?.getAttribute('aria-expanded') || '',
+    reasoningHeight: document.querySelector('.reasoning-markdown')?.getBoundingClientRect().height || 0,
   }));
   await page.waitForFunction(() => document.querySelector('[data-testid="complex-streaming-markdown-active"] [data-streaming-markdown-mode="plain"]'), null, { timeout: 10_000 });
   await page.waitForFunction(() => document.querySelector('[data-testid="complex-streaming-markdown-done"] [data-streaming-markdown-mode="rich"]'), null, { timeout: 10_000 });
@@ -88,6 +90,9 @@ const path = '/test-chat-streaming-state/';
   }
   if (doneSnapshot.completedIconKind !== 'completed' || doneSnapshot.completedIconSpinning) {
     issues.push(`completed status should use a non-spinning completed icon: ${doneSnapshot.completedIconKind}, spinning=${doneSnapshot.completedIconSpinning}`);
+  }
+  if (doneImmediateSnapshot.reasoningExpanded !== 'true' || doneImmediateSnapshot.reasoningHeight <= 12) {
+    issues.push(`just-completed reasoning block should remain expanded after completion to avoid scroll-height collapse: expanded=${doneImmediateSnapshot.reasoningExpanded}, height=${doneImmediateSnapshot.reasoningHeight}`);
   }
   await page.click('[data-chat-status-kind="completed"]');
   await page.waitForFunction(() => {

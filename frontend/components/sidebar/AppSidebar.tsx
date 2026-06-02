@@ -31,6 +31,8 @@ import { useTheme } from "@/components/theme/ThemeProvider";
 import { usePlatform } from "@/hooks/usePlatform";
 import { CREATIVE_PAGE_HREFS, CREATIVE_PAGE_PATHS } from "./ToolsSidebar";
 import { WORK_PAGE_HREFS, WORK_PAGE_PATHS } from "./WorkToolsSidebar";
+import { invalidateConversationSnapshot } from "@/lib/chatConversationCache";
+import { prefetchConversationSnapshot } from "@/lib/chatConversationPrefetch";
 
 
 const isPathInGroup = (pathname: string | null, paths: string[]) => {
@@ -386,6 +388,8 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   const workTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const historyScrollRef = useRef<HTMLDivElement>(null);
+  const conversationPrefetchHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const conversationPrefetchHoverControllerRef = useRef<AbortController | null>(null);
 
   const captureHistoryAnchor = useCallback(() => {
     const container = historyScrollRef.current;
@@ -680,7 +684,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     const token = localStorage.getItem("token"); if (!token) return;
-    try { const r = await fetch(`/api/conversations/${deleteTarget}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }); if (r.ok) { const next = conversations.filter(c => c.id !== deleteTarget); setConversations(next); cachedConversations = next; if (String(deleteTarget) === currentConvId) {
+    try { const r = await fetch(`/api/conversations/${deleteTarget}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }); if (r.ok) { invalidateConversationSnapshot(deleteTarget); const next = conversations.filter(c => c.id !== deleteTarget); setConversations(next); cachedConversations = next; if (String(deleteTarget) === currentConvId) {
       if (skillKey) {
         router.push(`/skills/chat?key=${skillKey}`);
       } else {
@@ -709,13 +713,78 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     navigator.clipboard.writeText(url);
   };
 
+  const prefetchConversation = useCallback((conv: Conversation, options?: { signal?: AbortSignal }) => {
+    const token = localStorage.getItem("token");
+    return prefetchConversationSnapshot({
+      conversationId: conv.id,
+      token,
+      skillKey: conv.skill_key,
+      signal: options?.signal,
+    });
+  }, []);
+
+  const scheduleConversationHoverPrefetch = useCallback((conv: Conversation) => {
+    if (String(conv.id) === currentConvId) return;
+    if (conversationPrefetchHoverTimerRef.current) clearTimeout(conversationPrefetchHoverTimerRef.current);
+    conversationPrefetchHoverControllerRef.current?.abort();
+    const controller = new AbortController();
+    conversationPrefetchHoverControllerRef.current = controller;
+    conversationPrefetchHoverTimerRef.current = setTimeout(() => {
+      prefetchConversation(conv, { signal: controller.signal });
+    }, 220);
+  }, [currentConvId, prefetchConversation]);
+
+  const cancelConversationHoverPrefetch = useCallback(() => {
+    if (conversationPrefetchHoverTimerRef.current) {
+      clearTimeout(conversationPrefetchHoverTimerRef.current);
+      conversationPrefetchHoverTimerRef.current = null;
+    }
+    conversationPrefetchHoverControllerRef.current?.abort();
+    conversationPrefetchHoverControllerRef.current = null;
+  }, []);
+
   const handleOpenConversation = useCallback((conv: Conversation) => {
     const href = conv.skill_key
       ? `/skills/chat?key=${conv.skill_key}&id=${conv.id}`
       : `/chat?id=${conv.id}`;
+    cancelConversationHoverPrefetch();
+    prefetchConversation(conv);
     setOptimisticConvId(String(conv.id));
     router.push(href, { scroll: false });
-  }, [router]);
+  }, [cancelConversationHoverPrefetch, prefetchConversation, router]);
+
+  useEffect(() => {
+    if (!user || conversations.length === 0) return;
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    const recent = sortConversations(conversations)
+      .filter((conv) => conv.skill_key !== "ai-writing-assistant" && conv.skill_key !== "translator" && conv.skill_key !== "document-reader")
+      .filter((conv) => String(conv.id) !== currentConvId)
+      .slice(0, 5);
+    if (recent.length === 0) return;
+    const controller = new AbortController();
+    let cancelled = false;
+    const run = () => {
+      if (cancelled) return;
+      recent.forEach((conv, index) => {
+        window.setTimeout(() => {
+          if (!cancelled && !controller.signal.aborted) {
+            prefetchConversationSnapshot({ conversationId: conv.id, token, skillKey: conv.skill_key, signal: controller.signal });
+          }
+        }, index * 180);
+      });
+    };
+    const requestIdle = window.requestIdleCallback ?? ((callback: IdleRequestCallback) => window.setTimeout(() => callback({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 500));
+    const cancelIdle = window.cancelIdleCallback ?? window.clearTimeout;
+    const idleId = requestIdle(run, { timeout: 2000 });
+    return () => {
+      cancelled = true;
+      cancelIdle(idleId as any);
+      controller.abort();
+    };
+  }, [conversations, currentConvId, user]);
+
+  useEffect(() => cancelConversationHoverPrefetch, [cancelConversationHoverPrefetch]);
 
   /* ── 拖拽调整宽度 ── */
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -777,7 +846,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                   ? (skillMeta ? skillMeta.color : "text-brand")
                   : "text-text-tertiary group-hover:text-text-secondary";
                 return (
-                  <div key={conv.id} role="button" tabIndex={0} data-conversation-row data-conversation-id={conv.id} onClick={() => handleOpenConversation(conv)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleOpenConversation(conv); } }} className={cn("group flex w-full cursor-pointer items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
+                  <div key={conv.id} role="button" tabIndex={0} data-conversation-row data-conversation-id={conv.id} onMouseEnter={() => scheduleConversationHoverPrefetch(conv)} onMouseLeave={cancelConversationHoverPrefetch} onClick={() => handleOpenConversation(conv)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleOpenConversation(conv); } }} className={cn("group flex w-full cursor-pointer items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
                     <IconComp className={cn("w-3.5 h-3.5 shrink-0 transition-all duration-200", iconColor)} />
                     <Pin className="w-3 h-3 shrink-0 text-brand" />
                     <span className={cn("flex-1 truncate text-left", isActive && "font-medium")}>{conv.title || t("sidebar.empty.new_chat")}</span>
@@ -817,7 +886,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                   ? (skillMeta ? skillMeta.color : "text-brand")
                   : "text-text-tertiary group-hover:text-text-secondary";
                 return (
-                  <div key={conv.id} role="button" tabIndex={0} data-conversation-row data-conversation-id={conv.id} onClick={() => handleOpenConversation(conv)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleOpenConversation(conv); } }} className={cn("group flex w-full cursor-pointer items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
+                  <div key={conv.id} role="button" tabIndex={0} data-conversation-row data-conversation-id={conv.id} onMouseEnter={() => scheduleConversationHoverPrefetch(conv)} onMouseLeave={cancelConversationHoverPrefetch} onClick={() => handleOpenConversation(conv)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleOpenConversation(conv); } }} className={cn("group flex w-full cursor-pointer items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
                     <IconComp className={cn("w-3.5 h-3.5 shrink-0 transition-all duration-200", iconColor)} />
                     <span className={cn("flex-1 truncate text-left", isActive && "font-medium")}>{conv.title || t("sidebar.empty.new_chat")}</span>
                     <div className="opacity-0 group-hover:opacity-100 transition-opacity"><ConvMenu onRename={() => setRenameTarget(conv)} onTogglePin={() => handleTogglePin(conv)} pinned={conv.pinned} onShare={() => handleShare(conv)} onDelete={() => handleDelete(conv.id)} /></div>
@@ -1259,11 +1328,16 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                           type="button"
                           data-search-idx={idx}
                           onClick={() => {
+                            prefetchConversation(conv);
                             setOptimisticConvId(String(conv.id));
                             router.push(convHref, { scroll: false });
                             setSearchOpen(false);
                           }}
-                          onMouseEnter={() => setSearchSelectedIndex(idx)}
+                          onMouseEnter={() => {
+                            setSearchSelectedIndex(idx);
+                            scheduleConversationHoverPrefetch(conv);
+                          }}
+                          onMouseLeave={cancelConversationHoverPrefetch}
                           className={cn(
                             "group flex items-start gap-3 px-4 py-3 transition-colors",
                             isSelected ? "bg-surface-elevated" : "hover:bg-surface-elevated"

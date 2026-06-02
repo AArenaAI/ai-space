@@ -25,7 +25,7 @@ const messages: Message[] = [
   {
     id: "assistant-code",
     role: "assistant",
-    content: `下面是一个长代码块，用于验证默认折叠。\n\n\`\`\`ts\n${longCode}\n\`\`\`\n\n代码块后面的正文也应该正常显示。`,
+    content: `<think>历史思考内容应该默认折叠，避免恢复旧会话时占满屏幕。</think>下面是一个长代码块，用于验证默认折叠。\n\n\`\`\`ts\n${longCode}\n\`\`\`\n\n代码块后面的正文也应该正常显示。`,
     model: "fixture-model",
     createdAt: 1_700_000_001_000,
     completedAt: 1_700_000_002_000,

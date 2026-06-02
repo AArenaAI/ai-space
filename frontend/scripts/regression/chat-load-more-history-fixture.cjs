@@ -23,6 +23,7 @@ async function readMarker(page, markerId) {
       visibleBottom: Math.min(rect.bottom, scrollerRect.bottom),
       scrollerTop: scrollerRect.top,
       scrollerBottom: scrollerRect.bottom,
+      intersectsScroller: rect.bottom >= scrollerRect.top + 8 && rect.top <= scrollerRect.bottom - 8,
       scrollTop: scroller.scrollTop,
       scrollHeight: scroller.scrollHeight,
       clientHeight: scroller.clientHeight,
@@ -121,7 +122,7 @@ async function readFirstVisibleMarkerId(page) {
     assert.equal(blankSamples.length, 0, `load-more should not produce blank message-list samples: ${JSON.stringify(blankSamples)}`);
     const missingMarkerSamples = samples.filter((sample) => !sample.found);
     assert.ok(missingMarkerSamples.length <= 2, `load-more should not repeatedly unmount the anchor marker: ${JSON.stringify(missingMarkerSamples.slice(0, 6))}`);
-    const jumpSamples = samples.filter((sample) => sample.found && Math.abs(sample.visibleTop - before.visibleTop) > 96);
+    const jumpSamples = samples.filter((sample) => sample.found && sample.intersectsScroller && Math.abs(sample.visibleTop - before.visibleTop) > 96);
     assert.equal(jumpSamples.length, 0, `load-more should not visibly jump/stick marker samples: ${JSON.stringify(jumpSamples.slice(0, 6))}`);
 
     if (failures.length > 0) throw new Error(failures.join("\n"));

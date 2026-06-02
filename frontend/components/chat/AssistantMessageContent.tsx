@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import type { ComponentType } from "react";
 import { AlertCircle, RotateCcw } from "lucide-react";
 import { Message } from "@/lib/chatTypes";
@@ -12,6 +13,23 @@ import { ThinkBlock } from "./ThinkBlock";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 
 type MarkdownRendererComponent = ComponentType<{ content: string }>;
+
+const JUST_COMPLETED_REASONING_EXPAND_MS = 5 * 60 * 1000;
+const justCompletedReasoningMessageIds = new Map<string, number>();
+
+function markJustCompletedReasoningMessage(messageId: string) {
+  justCompletedReasoningMessageIds.set(messageId, Date.now() + JUST_COMPLETED_REASONING_EXPAND_MS);
+}
+
+function shouldKeepJustCompletedReasoningExpanded(messageId: string) {
+  const expiresAt = justCompletedReasoningMessageIds.get(messageId);
+  if (!expiresAt) return false;
+  if (expiresAt < Date.now()) {
+    justCompletedReasoningMessageIds.delete(messageId);
+    return false;
+  }
+  return true;
+}
 
 function mayStillRecoverMessage(msg: Message) {
   return !msg.completedAt && !msg.stopped && !!(
@@ -48,6 +66,12 @@ export function AssistantMessageContent({
     realtime?.reasoningContent?.trim()
   );
   const finalizingRealtime = !generating && !!realtime?.completedAt && realtimeHasVisiblePayload;
+
+  useEffect(() => {
+    if ((generating || finalizingRealtime) && (realtime?.reasoningContent?.trim() || message.reasoningContent?.trim())) {
+      markJustCompletedReasoningMessage(message.id);
+    }
+  }, [finalizingRealtime, generating, message.id, message.reasoningContent, realtime?.reasoningContent]);
 
   if (generating || finalizingRealtime || (!message.content && recoverEmptyContent && mayStillRecoverMessage(message))) {
     return (
@@ -90,10 +114,11 @@ export function AssistantMessageContent({
     : message.content;
   const { reasoning, answer, isThinking } = parseThinkContent(finalContent);
   const cleanAnswer = sanitizeContent(answer);
+  const keepReasoningExpanded = shouldKeepJustCompletedReasoningExpanded(message.id);
 
   return (
     <div className={cn("prose prose-sm max-w-none", className)}>
-      {reasoning && <ThinkBlock content={reasoning} isThinking={isThinking} />}
+      {reasoning && <ThinkBlock content={reasoning} isThinking={isThinking} defaultExpanded={keepReasoningExpanded} />}
       <MarkdownRenderer content={cleanAnswer} />
     </div>
   );

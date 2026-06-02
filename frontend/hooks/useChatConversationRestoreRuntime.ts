@@ -20,6 +20,13 @@ import {
 } from "@/lib/chatNavigationResetCoordinator";
 import { patchMessageById } from "@/lib/chatMessageStatePatch";
 import {
+  areConversationMessagesEquivalent,
+  getConversationSnapshot,
+  invalidateConversationSnapshot,
+  patchConversationSnapshot,
+  setConversationSnapshot,
+} from "@/lib/chatConversationCache";
+import {
   createBusyGeneratingStatus,
   createGeneratingStatus,
 } from "@/lib/chatActivityStatus";
@@ -67,6 +74,9 @@ export type UseChatConversationRestoreRuntimeOptions = {
   translate: (key: string) => string;
   getToken?: () => string | null;
   createId?: () => string;
+  fetchRestore?: typeof fetchConversationRestore;
+  fetchMessageStatus?: typeof fetchConversationMessageStatus;
+  fetchMessageCount?: typeof fetchConversationMessageCount;
 };
 
 export function useChatConversationRestoreRuntime({
@@ -100,7 +110,23 @@ export function useChatConversationRestoreRuntime({
   translate,
   getToken = () => localStorage.getItem("token"),
   createId = uuidv4,
+  fetchRestore = fetchConversationRestore,
+  fetchMessageStatus = fetchConversationMessageStatus,
+  fetchMessageCount = fetchConversationMessageCount,
 }: UseChatConversationRestoreRuntimeOptions) {
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleConversationUpdated = (event: Event) => {
+      const conversationId = (event as CustomEvent<{ conversationId?: number | string }>).detail?.conversationId;
+      const normalized = typeof conversationId === "string" ? Number(conversationId) : conversationId;
+      if (typeof normalized === "number" && Number.isFinite(normalized)) {
+        invalidateConversationSnapshot(normalized);
+      }
+    };
+    window.addEventListener("conversation-updated", handleConversationUpdated);
+    return () => window.removeEventListener("conversation-updated", handleConversationUpdated);
+  }, []);
+
   useEffect(() => {
     const loadSeq = ++conversationLoadSeqRef.current;
     const loadController = new AbortController();
@@ -156,7 +182,48 @@ export function useChatConversationRestoreRuntime({
     if (navigationPlan.shouldSetLoadingHistory) setIsLoadingHistory(navigationPlan.loadingHistory);
     applyLoadExistingNavigationLifecycle(navigationPlan);
 
-    fetchConversationRestore({
+    const cachedSnapshot = getConversationSnapshot(loadConversationId);
+    if (cachedSnapshot) {
+      setConversationTitle(cachedSnapshot.title || "");
+      setMessages(cachedSnapshot.messages);
+      setLoadedPersistedMessages(cachedSnapshot.loadedPersistedMessages);
+      setGroupViews(cachedSnapshot.groupViews);
+      setIsLoading(cachedSnapshot.isLoading);
+      if (typeof cachedSnapshot.totalMessages === "number") {
+        setTotalMessages(cachedSnapshot.totalMessages);
+      }
+      if (cachedSnapshot.model) {
+        const model = models.find((m) => m.id === cachedSnapshot.model);
+        if (model) setSelectedModel(model);
+      }
+      setIsCompare(cachedSnapshot.isCompare);
+      setCompareModels(cachedSnapshot.compareModels);
+      setEffectiveSkillKey(cachedSnapshot.skillKey ?? skillKey);
+      setIsLoadingHistory(false);
+    } else {
+      setMessages([]);
+      setLoadedPersistedMessages(0);
+      setGroupViews(new Map());
+      setIsLoading(false);
+    }
+
+    let resolvedTotalMessages: number | undefined = cachedSnapshot?.totalMessages;
+    fetchMessageCount({
+      apiBaseUrl,
+      conversationId: loadConversationId,
+      token: authToken,
+      signal: loadController.signal,
+    })
+      .then((total) => {
+        if (typeof total === "number" && isLatestLoad() && !loadController.signal.aborted) {
+          resolvedTotalMessages = total;
+          setTotalMessages(total);
+          patchConversationSnapshot(loadConversationId, { totalMessages: total });
+        }
+      })
+      .catch(() => {});
+
+    fetchRestore({
       apiBaseUrl,
       conversationId: loadConversationId,
       token: authToken,
@@ -174,14 +241,31 @@ export function useChatConversationRestoreRuntime({
         });
         if (restoreState) {
           const { loadedMessages, mergedMessages, groupViews, activeByServerMessageId } = restoreState;
-          setMessages(mergedMessages as Message[]);
+          setMessages((prev) =>
+            areConversationMessagesEquivalent(prev, mergedMessages as Message[]) ? prev : (mergedMessages as Message[])
+          );
           setLoadedPersistedMessages(loadedMessages.length);
           setGroupViews(groupViews);
           setIsLoading(restoreState.isLoading);
+          setConversationSnapshot({
+            conversationId: loadConversationId,
+            title: data.title || "",
+            messages: mergedMessages as Message[],
+            loadedPersistedMessages: loadedMessages.length,
+            totalMessages: resolvedTotalMessages,
+            groupViews,
+            isLoading: restoreState.isLoading,
+            isCompare: !!data.compare,
+            compareModels: parseConversationCompareModels(data.compare_models),
+            model: data.model,
+            skillKey: resolveConversationSkillKey(data.skill_key, skillKey),
+            fetchedAt: Date.now(),
+            updatedAt: Date.now(),
+          });
 
           const lastAssistant = findLastAssistantStatusTarget(mergedMessages, activeByServerMessageId);
           if (lastAssistant?.serverMessageId) {
-            fetchConversationMessageStatus({
+            fetchMessageStatus({
               apiBaseUrl,
               conversationId: loadConversationId,
               serverMessageId: lastAssistant.serverMessageId,
@@ -201,7 +285,7 @@ export function useChatConversationRestoreRuntime({
                 if (decision.shouldResumePolling && decision.resume) {
                   setIsLoading(true);
                   startTaskEventStream(
-                    conversationId,
+                    loadConversationId,
                     lastAssistant.id,
                     lastAssistant.serverMessageId,
                     decision.resume.lastSequence,
@@ -218,21 +302,9 @@ export function useChatConversationRestoreRuntime({
           setMessages([]);
           setLoadedPersistedMessages(0);
           setIsLoading(false);
+          invalidateConversationSnapshot(loadConversationId);
         }
         setIsLoadingHistory(false);
-
-        fetchConversationMessageCount({
-          apiBaseUrl,
-          conversationId: loadConversationId,
-          token: authToken,
-          signal: loadController.signal,
-        })
-          .then((total) => {
-            if (typeof total === "number") {
-              setTotalMessages(total);
-            }
-          })
-          .catch(() => {});
 
         if (data.model) {
           const model = models.find((m) => m.id === data.model);

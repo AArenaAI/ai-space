@@ -1,4 +1,5 @@
 import { ERROR_CATALOG } from "./errorCatalog";
+import { mapAuthError } from "./authErrorMap";
 import { mapChatError } from "./chatErrorMap";
 import { mapFileError } from "./fileErrorMap";
 import { mapMediaError } from "./mediaErrorMap";
@@ -29,6 +30,159 @@ function extractApiPayload(input: unknown): ApiErrorPayload {
 }
 
 const LOCALIZED_ERROR_COPY: Record<string, Record<string, Partial<Pick<UserFacingError, "title" | "message" | "actionLabel">>>> = {
+  unknown_error: {
+    en: {
+      title: "Something went wrong",
+      message: "Something went wrong. Please try again later.",
+      actionLabel: "Retry",
+    },
+    "zh-CN": {
+      title: "操作失败",
+      message: "遇到了一点问题，请稍后重试。",
+      actionLabel: "重试",
+    },
+    "zh-TW": {
+      title: "操作失敗",
+      message: "遇到了一點問題，請稍後重試。",
+      actionLabel: "重試",
+    },
+  },
+  server_error: {
+    en: {
+      title: "Service temporarily unavailable",
+      message: "The service is temporarily unavailable. Please try again later.",
+      actionLabel: "Retry",
+    },
+    "zh-CN": {
+      title: "服务暂时不可用",
+      message: "服务暂时不可用，请稍后重试。",
+      actionLabel: "重试",
+    },
+    "zh-TW": {
+      title: "服務暫時不可用",
+      message: "服務暫時不可用，請稍後重試。",
+      actionLabel: "重試",
+    },
+  },
+  network_error: {
+    en: {
+      title: "Network connection issue",
+      message: "The network connection is unstable. Please check your connection and try again.",
+      actionLabel: "Retry",
+    },
+    "zh-CN": {
+      title: "网络连接异常",
+      message: "网络连接不稳定，请检查网络后重试。",
+      actionLabel: "重试",
+    },
+    "zh-TW": {
+      title: "網路連線異常",
+      message: "網路連線不穩定，請檢查網路後重試。",
+      actionLabel: "重試",
+    },
+  },
+  timeout: {
+    en: {
+      title: "Request timed out",
+      message: "This is taking longer than expected. Please try again later.",
+      actionLabel: "Retry",
+    },
+    "zh-CN": {
+      title: "请求超时",
+      message: "处理时间较长，请稍后重试。",
+      actionLabel: "重试",
+    },
+    "zh-TW": {
+      title: "請求逾時",
+      message: "處理時間較長，請稍後重試。",
+      actionLabel: "重試",
+    },
+  },
+  rate_limit: {
+    en: {
+      title: "Too many requests",
+      message: "There are too many requests right now. Please try again later or switch models.",
+      actionLabel: "Switch model",
+    },
+    "zh-CN": {
+      title: "请求过于频繁",
+      message: "当前模型请求较多，请稍后重试或切换模型。",
+      actionLabel: "切换模型",
+    },
+    "zh-TW": {
+      title: "請求過於頻繁",
+      message: "目前模型請求較多，請稍後重試或切換模型。",
+      actionLabel: "切換模型",
+    },
+  },
+  quota_insufficient: {
+    en: {
+      title: "Insufficient quota",
+      message: "Your current quota is insufficient. Please switch models or try again later.",
+      actionLabel: "Switch model",
+    },
+    "zh-CN": {
+      title: "额度不足",
+      message: "当前额度不足，请更换模型或稍后重试。",
+      actionLabel: "更换模型",
+    },
+    "zh-TW": {
+      title: "額度不足",
+      message: "目前額度不足，請更換模型或稍後重試。",
+      actionLabel: "更換模型",
+    },
+  },
+  login_required: {
+    en: {
+      title: "Sign-in required",
+      message: "Please sign in to continue.",
+      actionLabel: "Sign in",
+    },
+    "zh-CN": {
+      title: "需要登录",
+      message: "请先登录后继续使用。",
+      actionLabel: "去登录",
+    },
+    "zh-TW": {
+      title: "需要登入",
+      message: "請先登入後繼續使用。",
+      actionLabel: "去登入",
+    },
+  },
+  file_too_large: {
+    en: {
+      title: "File too large",
+      message: "The file exceeds the size limit. Please compress it and upload again.",
+      actionLabel: "Upload again",
+    },
+    "zh-CN": {
+      title: "文件过大",
+      message: "文件超过大小限制，请压缩后重新上传。",
+      actionLabel: "重新上传",
+    },
+    "zh-TW": {
+      title: "檔案過大",
+      message: "檔案超過大小限制，請壓縮後重新上傳。",
+      actionLabel: "重新上傳",
+    },
+  },
+  content_policy: {
+    en: {
+      title: "Content cannot be generated",
+      message: "This content may not meet the generation rules. Please adjust your prompt and try again.",
+      actionLabel: "Adjust prompt",
+    },
+    "zh-CN": {
+      title: "内容无法生成",
+      message: "当前内容可能不符合生成规则，请调整描述后重试。",
+      actionLabel: "调整描述",
+    },
+    "zh-TW": {
+      title: "內容無法生成",
+      message: "目前內容可能不符合生成規則，請調整描述後重試。",
+      actionLabel: "調整描述",
+    },
+  },
   file_unsupported: {
     en: {
       title: "Unsupported file format",
@@ -95,6 +249,85 @@ const LOCALIZED_ERROR_COPY: Record<string, Record<string, Partial<Pick<UserFacin
       title: "翻譯失敗",
       message: "翻譯服務暫時不可用，請稍後重試。",
       actionLabel: "重試",
+    },
+  },
+  auth_invalid_credentials: {
+    en: {
+      title: "Sign-in failed",
+      message: "The email or password is incorrect.",
+    },
+    "zh-CN": {
+      title: "登录失败",
+      message: "邮箱或密码错误。",
+    },
+    "zh-TW": {
+      title: "登入失敗",
+      message: "電子郵件或密碼錯誤。",
+    },
+  },
+  auth_email_registered: {
+    en: {
+      title: "Email already registered",
+      message: "This email is already registered. Please sign in instead.",
+      actionLabel: "Sign in",
+    },
+    "zh-CN": {
+      title: "邮箱已注册",
+      message: "该邮箱已被注册，请直接登录。",
+      actionLabel: "去登录",
+    },
+    "zh-TW": {
+      title: "電子郵件已註冊",
+      message: "此電子郵件已被註冊，請直接登入。",
+      actionLabel: "去登入",
+    },
+  },
+  auth_register_failed: {
+    en: {
+      title: "Registration failed",
+      message: "Could not create your account. Please try again later.",
+      actionLabel: "Retry",
+    },
+    "zh-CN": {
+      title: "注册失败",
+      message: "创建账号失败，请稍后重试。",
+      actionLabel: "重试",
+    },
+    "zh-TW": {
+      title: "註冊失敗",
+      message: "建立帳號失敗，請稍後重試。",
+      actionLabel: "重試",
+    },
+  },
+  auth_token_failed: {
+    en: {
+      title: "Sign-in failed",
+      message: "Could not create a sign-in session. Please try again later.",
+      actionLabel: "Retry",
+    },
+    "zh-CN": {
+      title: "登录失败",
+      message: "登录状态创建失败，请稍后重试。",
+      actionLabel: "重试",
+    },
+    "zh-TW": {
+      title: "登入失敗",
+      message: "登入狀態建立失敗，請稍後重試。",
+      actionLabel: "重試",
+    },
+  },
+  auth_invalid_input: {
+    en: {
+      title: "Check your information",
+      message: "Please check that your email and password are entered correctly.",
+    },
+    "zh-CN": {
+      title: "请检查输入",
+      message: "请检查邮箱和密码是否填写正确。",
+    },
+    "zh-TW": {
+      title: "請檢查輸入",
+      message: "請檢查電子郵件和密碼是否填寫正確。",
     },
   },
 };
@@ -211,19 +444,38 @@ export function normalizeError(input: unknown, options: NormalizeErrorOptions = 
   if (byCode) return apply({ ...byCode, httpStatus, debugMessage, raw: input }, fallbackBase);
 
   const moduleMap =
-    options.module === "file"
-      ? mapFileError(rawMessage)
-      : options.module === "translate"
-        ? mapTranslateError(rawMessage)
-      : options.module === "chat"
-        ? mapChatError(rawMessage) || mapFileError(rawMessage)
-        : options.module === "image" || options.module === "image_edit" || options.module === "video"
-          ? mapMediaError(rawMessage, options.module) || mapFileError(rawMessage)
-          : null;
+    options.module === "auth"
+      ? mapAuthError(rawMessage)
+      : options.module === "file"
+        ? mapFileError(rawMessage)
+        : options.module === "translate"
+          ? mapTranslateError(rawMessage)
+        : options.module === "chat"
+          ? mapChatError(rawMessage) || mapFileError(rawMessage)
+          : options.module === "image" || options.module === "image_edit" || options.module === "video"
+            ? mapMediaError(rawMessage, options.module) || mapFileError(rawMessage)
+            : null;
   if (moduleMap) return apply({ ...moduleMap, httpStatus, debugMessage, raw: input }, fallbackBase);
 
   const generic = mapGeneric(rawMessage, httpStatus);
   if (generic) return apply({ ...generic, httpStatus, debugMessage, raw: input }, fallbackBase);
+
+  if (options.module === "auth") {
+    return apply(
+      {
+        code: payload.code || options.fallbackCode || "auth_failed",
+        category: "auth",
+        severity: "error",
+        title: options.fallbackTitle || fallbackBase.title,
+        message: options.fallbackMessage || fallbackBase.message,
+        action: "retry",
+        httpStatus,
+        debugMessage,
+        raw: input,
+      },
+      fallbackBase
+    );
+  }
 
   if (rawMessage && shouldPassThrough(rawMessage)) {
     return apply(

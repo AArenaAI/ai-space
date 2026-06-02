@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type { Message } from "@/lib/chatTypes";
 import {
@@ -268,9 +268,14 @@ export function useChatConversationLifecycle(initialConversationId: number | und
   const [totalMessages, setTotalMessages] = useState(0);
   const [loadedPersistedMessages, setLoadedPersistedMessages] = useState(0);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+
   const conversationLoadSeqRef = useRef(0);
   const shouldResetRef = useRef(true);
   const justCreatedRef = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    setCurrentConversation((previous) => (previous === initialConversationId ? previous : initialConversationId));
+  }, [initialConversationId]);
 
   const hasMoreMessages = useMemo(
     () => hasMorePersistedMessages(totalMessages, loadedPersistedMessages),

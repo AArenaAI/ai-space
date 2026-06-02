@@ -18,6 +18,7 @@ let effectCleanup;
 let restoreImpl = async () => ({ title: "Restored", messages: [], model: "m1" });
 let statusImpl = async () => undefined;
 let countImpl = async () => undefined;
+const snapshotCache = new Map();
 
 function makeController() {
   return { aborted: false, abort() { this.aborted = true; }, signal: { aborted: false } };
@@ -67,6 +68,19 @@ function loadModule(file) {
       };
     }
     if (specifier === "@/lib/chatMessageStatePatch") return { patchMessageById: (messages, id, patch) => messages.map((m) => m.id === id ? { ...m, ...patch } : m) };
+    if (specifier === "@/lib/chatConversationCache") {
+      return {
+        getConversationSnapshot: (id) => snapshotCache.get(id),
+        setConversationSnapshot: (snapshot) => snapshotCache.set(snapshot.conversationId, snapshot),
+        patchConversationSnapshot: (id, patch) => {
+          const existing = snapshotCache.get(id);
+          if (existing) snapshotCache.set(id, { ...existing, ...patch });
+        },
+        invalidateConversationSnapshot: (id) => snapshotCache.delete(id),
+        areConversationMessagesEquivalent: (left, right) =>
+          left.length === right.length && left.every((message, index) => message.id === right[index].id && message.content === right[index].content),
+      };
+    }
     if (specifier === "@/lib/chatActivityStatus") return { createBusyGeneratingStatus: () => ({ kind: "generating", label: "busy" }), createGeneratingStatus: () => ({ kind: "generating", label: "generating" }) };
     if (specifier.startsWith("@/")) return {};
     return require(specifier);
@@ -150,6 +164,7 @@ async function testJustCreatedSkipsFetch() {
   assert.equal(fetched, false);
 }
 async function testLoadExistingRestoresStateAndCounts() {
+  snapshotCache.clear();
   restoreImpl = async () => ({ title: "T", model: "m2", compare: true, compare_models: '["m1","m2"]', skill_key: "hist", messages: [{ id: "a", role: "assistant", content: "old", serverMessageId: 12 }] });
   statusImpl = async () => undefined;
   countImpl = async () => 88;
@@ -163,8 +178,47 @@ async function testLoadExistingRestoresStateAndCounts() {
   assert.deepEqual(state.calls.find((c) => c[0] === "compareModels")?.[1], ["m1", "m2"]);
   assert.equal(state.calls.find((c) => c[0] === "skill")?.[1], "hist");
   assert.equal(state.calls.find((c) => c[0] === "total")?.[1], 88);
+  assert.equal(snapshotCache.get(9).messages[0].serverMessageId, 12);
+}
+async function testCacheMissClearsStaleMessagesBeforeRestore() {
+  snapshotCache.clear();
+  let restoreResolved;
+  restoreImpl = async () => new Promise((resolve) => { restoreResolved = resolve; });
+  statusImpl = async () => undefined;
+  countImpl = async () => undefined;
+  const { state } = runRuntime({ conversationId: 9, token: "tok" });
+  assert.deepEqual(state.calls.find((c) => c[0] === "messages")?.[1], []);
+  restoreResolved({ title: "Fresh", messages: [{ id: "fresh", role: "assistant", content: "fresh" }] });
+  await flush(); await flush();
+  assert.equal(state.messages[0].content, "fresh");
+}
+async function testCacheHitShowsSnapshotImmediatelyAndRefreshes() {
+  snapshotCache.clear();
+  snapshotCache.set(9, {
+    conversationId: 9,
+    title: "Cached",
+    messages: [{ id: "cached", role: "assistant", content: "cached" }],
+    loadedPersistedMessages: 1,
+    totalMessages: 1,
+    groupViews: new Map([[1, 0]]),
+    isLoading: false,
+    isCompare: false,
+    compareModels: [],
+    model: "m1",
+    skillKey: "cached-skill",
+  });
+  restoreImpl = async () => ({ title: "Fresh", model: "m2", messages: [{ id: "fresh", role: "assistant", content: "fresh" }] });
+  statusImpl = async () => undefined;
+  countImpl = async () => 2;
+  const { state } = runRuntime({ conversationId: 9, token: "tok" });
+  assert.equal(state.messages[0].content, "cached");
+  assert.equal(state.calls.find((c) => c[0] === "loadingHistory" && c[1] === false)?.[1], false);
+  await flush(); await flush();
+  assert.equal(state.messages[0].content, "fresh");
+  assert.equal(snapshotCache.get(9).messages[0].content, "fresh");
 }
 async function testStatusResumeStartsTaskStream() {
+  snapshotCache.clear();
   restoreImpl = async () => ({ title: "T", messages: [{ id: "a", role: "assistant", content: "", serverMessageId: 12 }] });
   statusImpl = async () => ({ content: "partial", resume: { lastSequence: 5, initialContent: "partial", generationTaskId: 99 } });
   countImpl = async () => undefined;
@@ -186,6 +240,8 @@ async function testNavigationAbortsControllers() {
   await testResetPlanClearsUiWhenAllowed();
   await testJustCreatedSkipsFetch();
   await testLoadExistingRestoresStateAndCounts();
+  await testCacheMissClearsStaleMessagesBeforeRestore();
+  await testCacheHitShowsSnapshotImmediatelyAndRefreshes();
   await testStatusResumeStartsTaskStream();
   await testNavigationAbortsControllers();
   console.log("chat conversation restore runtime hook regression passed");

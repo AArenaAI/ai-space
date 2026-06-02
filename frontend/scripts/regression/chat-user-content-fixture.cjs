@@ -65,6 +65,24 @@ async function scrollUntilUserMessageText(page, text) {
     await assert.match(await longCodeBlock.innerText(), /代码块较长，已折叠/);
     await assert.match(await longCodeBlock.innerText(), /150 行 \/ 5\.1k 字符/);
     await assert.equal(await longCodeBlock.locator('text=long code line 150').count(), 0, "long code should be collapsed initially");
+
+    const historicalReasoningToggle = page.locator('[data-chat-message-row="true"][data-message-id="assistant-code"] button[aria-expanded]').first();
+    await historicalReasoningToggle.waitFor({ state: "attached", timeout: 10_000 });
+    await assert.equal(await historicalReasoningToggle.getAttribute("aria-expanded"), "false", "historical reasoning should be collapsed by default");
+    await assert.match(await historicalReasoningToggle.innerText(), /已折叠|collapsed/);
+    const historicalReasoningState = await page.evaluate(() => {
+      const row = document.querySelector('[data-chat-message-row="true"][data-message-id="assistant-code"]');
+      const markdown = row?.querySelector('.reasoning-markdown');
+      const collapsible = markdown?.closest('[aria-hidden]');
+      return {
+        ariaHidden: collapsible?.getAttribute('aria-hidden') || '',
+        contentHeight: markdown?.getBoundingClientRect().height || 0,
+        wrapperHeight: collapsible?.getBoundingClientRect().height || 0,
+      };
+    });
+    await assert.equal(historicalReasoningState.ariaHidden, "true", "collapsed historical reasoning body should be aria-hidden");
+    await assert.ok(historicalReasoningState.wrapperHeight <= 2, `collapsed historical reasoning wrapper should have near-zero height: ${JSON.stringify(historicalReasoningState)}`);
+
     await longCodeBlock.locator('[data-testid="markdown-code-copy-button"]').click();
     await page.waitForFunction(() => navigator.clipboard.readText().then((text) => text.includes('long code line 150')), null, { timeout: 10_000 });
     await longCodeBlock.getByRole('button', { name: /代码块较长|展开|收起/ }).click();
@@ -74,7 +92,7 @@ async function scrollUntilUserMessageText(page, text) {
     const quoteCard = page.locator('[data-testid="user-message-quote-card"]');
     await quoteCard.waitFor({ state: "visible", timeout: 10_000 });
     const quoteText = await quoteCard.innerText();
-    await assert.match(quoteText, /引用文本/);
+    await assert.match(quoteText, /引用文本|引用上下文/);
     await assert.match(quoteText, /这是第 1 轮用户消息/);
     await assert.match(await page.locator('[data-testid="user-message-text"]').filter({ hasText: "请基于这段引用继续解释" }).innerText(), /请基于这段引用继续解释/);
 

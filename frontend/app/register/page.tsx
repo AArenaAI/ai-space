@@ -53,7 +53,7 @@ export default function RegisterPage() {
       window.dispatchEvent(new Event("auth-changed"));
       router.push("/chat");
     } catch (err) {
-      setError(getErrorMessage(err, { module: "auth", fallbackMessage: t("auth.error.registerFailed") }));
+      setError(getErrorMessage(err, { module: "auth", fallbackTitle: t("auth.error.registerFailed"), fallbackMessage: t("auth.error.registerFailed") }));
     } finally {
       setLoading(false);
     }

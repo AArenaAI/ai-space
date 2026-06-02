@@ -118,7 +118,8 @@ export function AssistantMessageMeta({ msg, isStreaming, model }: { msg: Message
               data-chat-generation-phase={status.generationPhase}
               data-chat-status-kind={status.kind}
               className={cn(
-                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] cursor-default",
+                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] cursor-default transition-all duration-150",
+                hasTimeline && "group-hover/status:-translate-y-0.5 group-hover/status:shadow-md group-hover/status:brightness-110 group-hover/status:saturate-125",
                 toneClass(status.tone)
               )}
             >

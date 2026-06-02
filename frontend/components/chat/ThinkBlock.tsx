@@ -11,13 +11,15 @@ export function ThinkBlock({
   content,
   isThinking,
   collapseThreshold = DEFAULT_COLLAPSE_THRESHOLD,
+  defaultExpanded = false,
 }: {
   content: string;
   isThinking: boolean;
   collapseThreshold?: number;
+  defaultExpanded?: boolean;
 }) {
   const { t } = useI18n();
-  const shouldCollapseByDefault = !isThinking && content.length >= collapseThreshold;
+  const shouldCollapseByDefault = !defaultExpanded && !isThinking && content.length >= collapseThreshold;
   const [expanded, setExpanded] = useState(() => !shouldCollapseByDefault);
   const collapsedLabel = shouldCollapseByDefault && !expanded ? ` · ${t("chat.reasoning.collapsed")}` : "";
 
