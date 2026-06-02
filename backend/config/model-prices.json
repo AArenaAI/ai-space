@@ -88,6 +88,17 @@
     "source_url": "https://ai.google.dev/gemini-api/docs/pricing?hl=zh-cn"
   },
   {
+    "provider": "gemini",
+    "model": "gemini-2.5-pro",
+    "pricing_unit": "token_1k",
+    "source_currency": "USD",
+    "source_unit": "per_1m_tokens",
+    "source_input_price": 1.25,
+    "source_output_price": 10.0,
+    "pricing_basis": "standard_paid_tier_non_batch_prompt_lte_200k_tokens",
+    "source_url": "https://ai.google.dev/gemini-api/docs/pricing?hl=zh-cn"
+  },
+  {
     "provider": "deepseek",
     "model": "deepseek-v4-pro",
     "pricing_unit": "token_1k",
@@ -130,8 +141,8 @@
     "pricing_unit": "token_1k",
     "source_currency": "USD",
     "source_unit": "per_1m_tokens",
-    "source_input_cache_hit_price": 0.10,
-    "source_input_cache_miss_price": 0.60,
+    "source_input_cache_hit_price": 0.1,
+    "source_input_cache_miss_price": 0.6,
     "source_output_price": 3.0,
     "context_window_tokens": 262144,
     "pricing_basis": "cache_miss_input_and_output",
