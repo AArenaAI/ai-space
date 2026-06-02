@@ -1,0 +1,130 @@
+{
+  "model": "google-cloud-translate-v3",
+  "requested_model": "general/translation-llm",
+  "actual_models": [
+    "projects/ai-space-498113/locations/global/models/general/translation-llm"
+  ],
+  "endpoint": "http://127.0.0.1:9091/api/translate",
+  "total_selected": 30,
+  "completed": 30,
+  "errors": 0,
+  "exact_matches": 10,
+  "acceptable_matches": 10,
+  "punctuation_ok": 25,
+  "ascii_outer_ok": 30,
+  "raw_punctuation_ok": 24,
+  "raw_ascii_outer_ok": 24,
+  "postprocessed_changed": 6,
+  "exact_rate": 0.3333,
+  "acceptable_rate": 0.3333,
+  "punctuation_ok_rate": 0.8333,
+  "ascii_outer_ok_rate": 1.0,
+  "strict_count": 6,
+  "strict_punctuation_ok_rate": 0.1667,
+  "raw_strict_punctuation_ok_rate": 0.0,
+  "latency_avg_sec": 0.266,
+  "latency_p50_sec": 0.274,
+  "latency_max_sec": 0.395,
+  "by_category": {
+    "business": {
+      "n": 5,
+      "exact": 1,
+      "acceptable": 1,
+      "punctuation_ok": 5
+    },
+    "code": {
+      "n": 2,
+      "exact": 1,
+      "acceptable": 1,
+      "punctuation_ok": 2
+    },
+    "format": {
+      "n": 2,
+      "exact": 1,
+      "acceptable": 1,
+      "punctuation_ok": 2
+    },
+    "health": {
+      "n": 4,
+      "exact": 3,
+      "acceptable": 3,
+      "punctuation_ok": 4
+    },
+    "polite": {
+      "n": 11,
+      "exact": 3,
+      "acceptable": 3,
+      "punctuation_ok": 6
+    },
+    "request": {
+      "n": 2,
+      "exact": 0,
+      "acceptable": 0,
+      "punctuation_ok": 2
+    },
+    "travel": {
+      "n": 2,
+      "exact": 1,
+      "acceptable": 1,
+      "punctuation_ok": 2
+    },
+    "uncertainty": {
+      "n": 2,
+      "exact": 0,
+      "acceptable": 0,
+      "punctuation_ok": 2
+    }
+  },
+  "by_direction": {
+    "中文->日语": {
+      "n": 1,
+      "exact": 0,
+      "acceptable": 0,
+      "punctuation_ok": 0,
+      "ascii_outer_ok": 1
+    },
+    "中文->英语": {
+      "n": 1,
+      "exact": 0,
+      "acceptable": 0,
+      "punctuation_ok": 0,
+      "ascii_outer_ok": 1
+    },
+    "德语->简体中文": {
+      "n": 1,
+      "exact": 1,
+      "acceptable": 1,
+      "punctuation_ok": 0,
+      "ascii_outer_ok": 1
+    },
+    "日语->简体中文": {
+      "n": 11,
+      "exact": 4,
+      "acceptable": 4,
+      "punctuation_ok": 11,
+      "ascii_outer_ok": 11
+    },
+    "法语->简体中文": {
+      "n": 1,
+      "exact": 1,
+      "acceptable": 1,
+      "punctuation_ok": 1,
+      "ascii_outer_ok": 1
+    },
+    "英语->简体中文": {
+      "n": 11,
+      "exact": 3,
+      "acceptable": 3,
+      "punctuation_ok": 10,
+      "ascii_outer_ok": 11
+    },
+    "韩语->简体中文": {
+      "n": 4,
+      "exact": 1,
+      "acceptable": 1,
+      "punctuation_ok": 3,
+      "ascii_outer_ok": 4
+    }
+  },
+  "output_jsonl": "/home/ubuntu/workspace/ai-space/translation-test-samples/google_translate_quality_current.jsonl"
+}
