@@ -222,7 +222,7 @@ function LangDropdown({
       {open && (
         <>
           <div className="fixed inset-0 z-[70]" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-[80] mt-1 w-64 overflow-hidden rounded-xl border border-surface-border bg-surface-elevated shadow-xl">
+          <div className="absolute left-0 top-full z-[80] mt-1 w-full overflow-hidden rounded-xl border border-surface-border bg-surface-elevated shadow-xl">
             <div className="border-b border-surface-border p-2">
               <div className="flex h-9 items-center gap-2 rounded-lg border border-surface-border bg-surface px-2.5 text-text-tertiary">
                 <Search className="h-3.5 w-3.5 shrink-0" />
