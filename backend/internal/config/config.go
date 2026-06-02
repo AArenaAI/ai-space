@@ -18,6 +18,7 @@ type Config struct {
 	// ========== Google Cloud Translation（专用翻译 API，后端服务账号认证）==========
 	GoogleCloudProjectID    string
 	GoogleTranslateLocation string
+	GoogleTranslateModel    string
 
 	// ========== Chat Provider（对话模型，支持 OpenAI / Anthropic / Gemini / DeepSeek / Moonshot 多路并行）==========
 	OpenAIKey            string
@@ -131,6 +132,7 @@ func Load() *Config {
 
 		GoogleCloudProjectID:    getEnv("GOOGLE_CLOUD_PROJECT_ID", ""),
 		GoogleTranslateLocation: getEnv("GOOGLE_TRANSLATE_LOCATION", "global"),
+		GoogleTranslateModel:    getEnv("GOOGLE_TRANSLATE_MODEL", "general/nmt"),
 
 		OpenAIKey:           getEnv("OPENAI_API_KEY", ""),
 		OpenAIBaseURL:       getEnv("OPENAI_BASE_URL", ""),

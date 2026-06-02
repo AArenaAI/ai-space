@@ -32,6 +32,7 @@ type TranslateResult struct {
 	SourceLang         string `json:"source_language,omitempty"`
 	TargetLang         string `json:"target_language"`
 	Provider           string `json:"provider"`
+	Model              string `json:"model,omitempty"`
 }
 
 func NewTranslateService(cfg *config.Config) *TranslateService {
@@ -60,6 +61,7 @@ func (s *TranslateService) Translate(ctx context.Context, req TranslateRequest) 
 	if location == "" {
 		location = "global"
 	}
+	model := normalizeGoogleTranslateModel(s.cfg.GoogleTranslateModel, s.cfg.GoogleCloudProjectID, location)
 
 	ctx, cancel := context.WithTimeout(ctx, defaultTranslateTimeout)
 	defer cancel()
@@ -75,6 +77,7 @@ func (s *TranslateService) Translate(ctx context.Context, req TranslateRequest) 
 		Contents:           []string{text},
 		TargetLanguageCode: targetLang,
 		MimeType:           mimeType,
+		Model:              model,
 	}
 	if sourceLang := normalizeTranslateLang(req.SourceLang); sourceLang != "" && sourceLang != "auto" {
 		apiReq.SourceLanguageCode = sourceLang
@@ -95,7 +98,19 @@ func (s *TranslateService) Translate(ctx context.Context, req TranslateRequest) 
 		SourceLang:         apiReq.GetSourceLanguageCode(),
 		TargetLang:         targetLang,
 		Provider:           "google-cloud-translate-v3",
+		Model:              model,
 	}, nil
+}
+
+func normalizeGoogleTranslateModel(model, projectID, location string) string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		model = "general/nmt"
+	}
+	if strings.HasPrefix(model, "projects/") {
+		return model
+	}
+	return fmt.Sprintf("projects/%s/locations/%s/models/%s", projectID, location, model)
 }
 
 func normalizeTranslateLang(lang string) string {
