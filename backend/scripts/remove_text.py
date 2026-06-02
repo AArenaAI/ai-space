@@ -34,12 +34,63 @@ def merge_close_components(mask: np.ndarray, width: int, height: int) -> np.ndar
     return merged
 
 
+def remove_skinny_full_height_artifacts(mask: np.ndarray, width: int, height: int) -> np.ndarray:
+    """Drop crop/border artifacts that run through most of the image."""
+    cleaned = mask.copy()
+    contours, _ = cv2.findContours(cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    for cnt in contours:
+        x, y, w, h = cv2.boundingRect(cnt)
+        if h > height * 0.70 and w <= max(4, int(width * 0.03)):
+            cv2.drawContours(cleaned, [cnt], -1, 0, thickness=cv2.FILLED)
+        elif w > width * 0.70 and h <= max(4, int(height * 0.03)):
+            cv2.drawContours(cleaned, [cnt], -1, 0, thickness=cv2.FILLED)
+    return cleaned
+
+
+def glyph_candidate_filter(mask: np.ndarray, width: int, height: int) -> np.ndarray:
+    """Keep only small stroke-like components before word/line merging.
+
+    This prevents non-text objects such as desktop/app icons from being joined
+    with their nearby labels and removed as one large block.
+    """
+    filtered = np.zeros_like(mask)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    image_area = width * height
+    min_area = max(3, image_area // 600000)
+    max_glyph_h = max(36, int(height * 0.07))
+    max_glyph_w = max(80, int(width * 0.45))
+    for cnt in contours:
+        x, y, w, h = cv2.boundingRect(cnt)
+        if w < 1 or h < 1:
+            continue
+        roi = mask[y : y + h, x : x + w]
+        area = int(np.count_nonzero(roi))
+        if area < min_area:
+            continue
+        fill = area / float(w * h)
+        aspect = w / float(h)
+
+        # Icons/logos and UI blocks are usually square-ish, saturated, and/or
+        # much larger than individual glyph strokes. Reject them before dilation
+        # can merge them with adjacent text labels.
+        if h > max_glyph_h and aspect < 3.0:
+            continue
+        if w > max_glyph_w and aspect < 1.8:
+            continue
+        if fill > 0.72 and 0.35 <= aspect <= 3.2 and max(w, h) > 12:
+            continue
+        if h > height * 0.20 or w > width * 0.90:
+            continue
+        cv2.drawContours(filtered, [cnt], -1, 255, thickness=cv2.FILLED)
+    return filtered
+
+
 def component_filter(mask: np.ndarray, width: int, height: int) -> np.ndarray:
     filtered = np.zeros_like(mask)
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     image_area = width * height
     min_area = max(8, image_area // 250000)
-    max_area = max(2000, image_area // 18)
+    max_area = max(2000, image_area // 22)
     for cnt in contours:
         x, y, w, h = cv2.boundingRect(cnt)
         roi = mask[y : y + h, x : x + w]
@@ -48,17 +99,20 @@ def component_filter(mask: np.ndarray, width: int, height: int) -> np.ndarray:
             continue
         if w < 2 or h < 2:
             continue
-        if w > width * 0.95 or h > height * 0.35:
+        if w > width * 0.95 or h > height * 0.28:
             continue
         aspect = w / float(h)
         fill = area / float(w * h)
-        # Text/watermarks are often long/thin or clusters of small glyphs. Keep a
-        # broad range but reject solid blocks and very tall photographic regions.
-        if aspect < 0.08 or aspect > 80:
+        # Text/watermarks are often long/thin or clusters of small glyphs. Be
+        # conservative: square/tall merged regions are usually icons or content,
+        # not text lines.
+        if aspect < 0.12 or aspect > 80:
             continue
-        if fill > 0.97:
+        if fill > 0.92:
             continue
-        if h > height * 0.22 and w > width * 0.35:
+        if h > max(70, height * 0.10) and aspect < 2.0:
+            continue
+        if h > height * 0.18 and w > width * 0.25:
             continue
         cv2.drawContours(filtered, [cnt], -1, 255, thickness=cv2.FILLED)
     return filtered
@@ -87,20 +141,21 @@ def build_text_mask(rgb: np.ndarray) -> np.ndarray:
     edges = cv2.Canny(gray_blur, 60, 180)
     candidates.append(edges)
 
-    # High-saturation/bright overlay text often used in watermarks/subtitles.
+    # Very dark strokes are reliable direct candidates. Avoid using saturation as
+    # a direct signal here: app/file icons are often saturated and sit directly
+    # above labels, so a saturated-icon mask can merge with label text and erase
+    # the whole desktop item.
     hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
     sat = hsv[:, :, 1]
     val = hsv[:, :, 2]
     color_text = np.zeros_like(gray)
-    # Saturated overlays and very dark strokes are reliable direct candidates.
-    # Do not mark all bright low-saturation pixels: light skies/walls would become
-    # one huge component and swallow nearby white text before filtering.
-    color_text[((sat > 80) & (val > 100)) | ((val < 55) & (sat < 110))] = 255
+    color_text[(val < 55) & (sat < 140)] = 255
     candidates.append(color_text)
 
     combined = np.zeros_like(gray)
     for cand in candidates:
-        combined = cv2.bitwise_or(combined, cand)
+        cand = remove_skinny_full_height_artifacts(cand, width, height)
+        combined = cv2.bitwise_or(combined, glyph_candidate_filter(cand, width, height))
 
     combined = merge_close_components(combined, width, height)
     combined = component_filter(combined, width, height)
