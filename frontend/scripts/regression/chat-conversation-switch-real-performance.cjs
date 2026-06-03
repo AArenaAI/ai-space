@@ -199,6 +199,9 @@ function summarizeRenderEvents(events, conversationId) {
       visibleMessageCount: event.visibleMessageCount,
       contentLength: event.contentLength,
       staggerMs: event.staggerMs,
+      delayMs: event.delayMs,
+      codeBlocks: event.codeBlocks,
+      tableLines: event.tableLines,
       durationMs: Math.round(event.durationMs || 0),
     }))
     .slice(-24);

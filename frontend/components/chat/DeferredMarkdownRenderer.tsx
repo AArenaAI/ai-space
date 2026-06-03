@@ -22,7 +22,8 @@ function loadMarkdownRenderer() {
 
 const DEFAULT_ROOT_MARGIN = "180px 0px";
 const DEFAULT_IDLE_TIMEOUT = 900;
-const HEAVY_MARKDOWN_LENGTH_THRESHOLD = 8_000;
+const FIRST_MARKDOWN_CHUNK_HYDRATION_DELAY_MS = 1_800;
+const HEAVY_MARKDOWN_LENGTH_THRESHOLD = 1_000;
 const HEAVY_MARKDOWN_CODE_BLOCK_THRESHOLD = 3;
 const HEAVY_MARKDOWN_TABLE_LINE_THRESHOLD = 7;
 let markdownHydrationSequence = 0;
@@ -169,6 +170,21 @@ export function DeferredMarkdownRenderer({
 
     const startIdleRender = () => {
       cleanupIdle?.();
+      const initialDelayMs = MarkdownRendererModule ? 0 : FIRST_MARKDOWN_CHUNK_HYDRATION_DELAY_MS;
+      if (initialDelayMs > 0) {
+        emitChatRenderProfileEvent("markdown-hydrate-delayed-first-chunk", {
+          contentLength: content.length,
+          delayMs: initialDelayMs,
+        });
+        let delayTimer: number | undefined = window.setTimeout(() => {
+          delayTimer = undefined;
+          if (!cancelled) cleanupIdle = renderWhenIdle();
+        }, initialDelayMs);
+        cleanupIdle = () => {
+          if (delayTimer !== undefined) window.clearTimeout(delayTimer);
+        };
+        return;
+      }
       cleanupIdle = renderWhenIdle();
     };
 
