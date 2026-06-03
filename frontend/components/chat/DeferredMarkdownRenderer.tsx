@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType } from "react";
-import { useI18n } from "@/lib/i18n";
 import MarkdownPlainFallback from "./markdown/MarkdownPlainFallback";
 
 type MarkdownRendererProps = { content: string; isStreaming?: boolean };
@@ -23,10 +22,12 @@ function loadMarkdownRenderer() {
 const DEFAULT_ROOT_MARGIN = "180px 0px";
 const DEFAULT_IDLE_TIMEOUT = 900;
 const FIRST_MARKDOWN_CHUNK_HYDRATION_DELAY_MS = 1_800;
+const HEAVY_MARKDOWN_HYDRATION_DELAY_MS = 2_400;
 const HEAVY_MARKDOWN_LENGTH_THRESHOLD = 1_000;
 const HEAVY_MARKDOWN_CODE_BLOCK_THRESHOLD = 3;
 const HEAVY_MARKDOWN_TABLE_LINE_THRESHOLD = 7;
 let markdownHydrationSequence = 0;
+let heavyMarkdownHydrationSequence = 0;
 
 function emitChatRenderProfileEvent(phase: string, detail: Record<string, unknown> = {}) {
   if (typeof window === "undefined") return;
@@ -43,6 +44,11 @@ function emitChatRenderProfileEvent(phase: string, detail: Record<string, unknow
 function nextMarkdownHydrationDelay() {
   markdownHydrationSequence = (markdownHydrationSequence + 1) % 6;
   return markdownHydrationSequence * 70;
+}
+
+function nextHeavyMarkdownHydrationDelay() {
+  heavyMarkdownHydrationSequence = (heavyMarkdownHydrationSequence + 1) % 12;
+  return heavyMarkdownHydrationSequence * 250;
 }
 
 function getMarkdownComplexity(content: string) {
@@ -77,7 +83,6 @@ export function DeferredMarkdownRenderer({
   keepRenderedOnContentChange?: boolean;
   isStreaming?: boolean;
 }) {
-  const { t } = useI18n();
   const hostRef = useRef<HTMLDivElement | null>(null);
   const complexity = useMemo(() => getMarkdownComplexity(content), [content]);
   const [shouldRenderMarkdown, setShouldRenderMarkdown] = useState(false);
@@ -121,15 +126,6 @@ export function DeferredMarkdownRenderer({
       return;
     }
 
-    if (complexity.isHeavy) {
-      emitChatRenderProfileEvent("markdown-hydrate-skipped-heavy", {
-        contentLength: content.length,
-        codeBlocks: complexity.codeBlocks,
-        tableLines: complexity.tableLines,
-      });
-      return;
-    }
-
     const node = hostRef.current;
     if (!node) return;
 
@@ -143,10 +139,12 @@ export function DeferredMarkdownRenderer({
       };
       let staggerTimer: number | undefined;
       const markReady = () => {
-        const staggerMs = nextMarkdownHydrationDelay();
+        const staggerMs = complexity.isHeavy ? nextHeavyMarkdownHydrationDelay() : nextMarkdownHydrationDelay();
         emitChatRenderProfileEvent("markdown-hydrate-scheduled", {
           contentLength: content.length,
+          codeBlocks: complexity.codeBlocks,
           staggerMs,
+          tableLines: complexity.tableLines,
         });
         staggerTimer = window.setTimeout(() => {
           if (!cancelled) setShouldRenderMarkdown(true);
@@ -170,11 +168,17 @@ export function DeferredMarkdownRenderer({
 
     const startIdleRender = () => {
       cleanupIdle?.();
-      const initialDelayMs = MarkdownRendererModule ? 0 : FIRST_MARKDOWN_CHUNK_HYDRATION_DELAY_MS;
+      const initialDelayMs = complexity.isHeavy
+        ? HEAVY_MARKDOWN_HYDRATION_DELAY_MS
+        : MarkdownRendererModule
+          ? 0
+          : FIRST_MARKDOWN_CHUNK_HYDRATION_DELAY_MS;
       if (initialDelayMs > 0) {
-        emitChatRenderProfileEvent("markdown-hydrate-delayed-first-chunk", {
+        emitChatRenderProfileEvent(complexity.isHeavy ? "markdown-hydrate-delayed-heavy" : "markdown-hydrate-delayed-first-chunk", {
           contentLength: content.length,
+          codeBlocks: complexity.codeBlocks,
           delayMs: initialDelayMs,
+          tableLines: complexity.tableLines,
         });
         let delayTimer: number | undefined = window.setTimeout(() => {
           delayTimer = undefined;
@@ -216,25 +220,7 @@ export function DeferredMarkdownRenderer({
       {shouldRenderMarkdown && Renderer ? (
         <Renderer content={content} isStreaming={isStreaming} />
       ) : (
-        <>
-          <MarkdownFallback content={content} />
-          {complexity.isHeavy && content && (
-            <button
-              type="button"
-              className="mt-2 rounded-full border border-border-subtle px-3 py-1 text-xs text-text-secondary transition-colors hover:border-brand/50 hover:text-brand"
-              onClick={() => {
-                emitChatRenderProfileEvent("markdown-hydrate-manual", {
-                  contentLength: content.length,
-                  codeBlocks: complexity.codeBlocks,
-                  tableLines: complexity.tableLines,
-                });
-                setShouldRenderMarkdown(true);
-              }}
-            >
-              {t("chat.renderRichText")}
-            </button>
-          )}
-        </>
+        <MarkdownFallback content={content} />
       )}
     </div>
   );
