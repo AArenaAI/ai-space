@@ -93,6 +93,7 @@ function MessageRow({
   const isUser = msg.role === "user";
   const forceHydrateRichText = isLast || isHighlighted;
   const [isNearViewport, setIsNearViewport] = useState(forceHydrateRichText);
+  const [isInViewport, setIsInViewport] = useState(forceHydrateRichText);
   const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && isLast;
   const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
   const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
@@ -136,6 +137,33 @@ function MessageRow({
     observer.observe(row);
     return () => observer.disconnect();
   }, [conversationId, forceHydrateRichText, isNearViewport, isUser, msg.content, msg.id]);
+
+  useEffect(() => {
+    if (isUser) return;
+    if (forceHydrateRichText) {
+      setIsInViewport(true);
+      return;
+    }
+    const row = rowRef.current;
+    if (!row || !("IntersectionObserver" in window)) {
+      setIsInViewport(true);
+      return;
+    }
+    const root = row.closest('[data-testid="virtuoso-scroller"]') as Element | null;
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries.some((entry) => entry.isIntersecting);
+      setIsInViewport(visible);
+      if (visible) {
+        emitChatRenderProfileEvent("message-row-markdown-in-viewport", {
+          conversationId,
+          messageId: msg.id,
+          contentLength: msg.content?.length || 0,
+        });
+      }
+    }, { root, rootMargin: "0px" });
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [conversationId, forceHydrateRichText, isUser, msg.content, msg.id]);
 
   return (
     <div
@@ -227,7 +255,7 @@ function MessageRow({
                 <UserMessageContent message={msg} imageLoadFailedLabel={imageLoadFailedLabel} />
               ) : (
                 <>
-                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={isNearViewport || forceHydrateRichText} recoverEmptyContent onRegenerate={onRegenerate} />
+                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={isNearViewport || forceHydrateRichText} priorityHydrateRichText={isInViewport || forceHydrateRichText} recoverEmptyContent={isLast} onRegenerate={onRegenerate} />
                   {msg.stopped && onContinueGenerate && (
                     <button
                       onClick={onContinueGenerate}

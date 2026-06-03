@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType } from "react";
+import MarkdownLiteRenderer from "./MarkdownLiteRenderer";
 import MarkdownPlainFallback from "./markdown/MarkdownPlainFallback";
 
-type MarkdownRendererProps = { content: string; isStreaming?: boolean };
+type MarkdownRendererProps = { content: string; isStreaming?: boolean; priorityHydrateRichText?: boolean };
 
 let markdownRendererPromise: Promise<{ default: ComponentType<MarkdownRendererProps> }> | null = null;
 let MarkdownRendererModule: ComponentType<MarkdownRendererProps> | null = null;
@@ -22,6 +23,7 @@ function loadMarkdownRenderer() {
 const DEFAULT_ROOT_MARGIN = "180px 0px";
 const DEFAULT_IDLE_TIMEOUT = 900;
 const FIRST_MARKDOWN_CHUNK_HYDRATION_DELAY_MS = 1_800;
+const PRIORITY_MARKDOWN_HYDRATION_DELAY_MS = 0;
 const HEAVY_MARKDOWN_HYDRATION_DELAY_MS = 2_400;
 const EXTREME_MARKDOWN_HYDRATION_DELAY_MS = 15_000;
 const HEAVY_MARKDOWN_LENGTH_THRESHOLD = 1_000;
@@ -81,6 +83,7 @@ function MarkdownFallback({ content, loading }: { content: string; loading?: boo
 export function DeferredMarkdownRenderer({
   content,
   shouldHydrateRichText = true,
+  priorityHydrateRichText = false,
   rootMargin = DEFAULT_ROOT_MARGIN,
   idleTimeout = DEFAULT_IDLE_TIMEOUT,
   keepRenderedOnContentChange = false,
@@ -88,6 +91,7 @@ export function DeferredMarkdownRenderer({
 }: {
   content: string;
   shouldHydrateRichText?: boolean;
+  priorityHydrateRichText?: boolean;
   rootMargin?: string;
   idleTimeout?: number;
   keepRenderedOnContentChange?: boolean;
@@ -159,10 +163,11 @@ export function DeferredMarkdownRenderer({
       };
       let staggerTimer: number | undefined;
       const markReady = () => {
-        const staggerMs = complexity.isHeavy ? nextHeavyMarkdownHydrationDelay() : nextMarkdownHydrationDelay();
+        const staggerMs = priorityHydrateRichText ? nextMarkdownHydrationDelay() : complexity.isHeavy ? nextHeavyMarkdownHydrationDelay() : nextMarkdownHydrationDelay();
         emitChatRenderProfileEvent("markdown-hydrate-scheduled", {
           contentLength: content.length,
           codeBlocks: complexity.codeBlocks,
+          priority: priorityHydrateRichText,
           staggerMs,
           tableLines: complexity.tableLines,
         });
@@ -191,6 +196,8 @@ export function DeferredMarkdownRenderer({
       const initialDelayMs = complexity.isHeavy
         ? complexity.isExtreme
           ? EXTREME_MARKDOWN_HYDRATION_DELAY_MS
+          : priorityHydrateRichText
+          ? PRIORITY_MARKDOWN_HYDRATION_DELAY_MS
           : HEAVY_MARKDOWN_HYDRATION_DELAY_MS
         : MarkdownRendererModule
           ? 0
@@ -201,6 +208,7 @@ export function DeferredMarkdownRenderer({
           codeBlocks: complexity.codeBlocks,
           delayMs: initialDelayMs,
           isExtreme: complexity.isExtreme,
+          priority: priorityHydrateRichText,
           tableLines: complexity.tableLines,
         });
         let delayTimer: number | undefined = window.setTimeout(() => {
@@ -236,12 +244,14 @@ export function DeferredMarkdownRenderer({
       cancelled = true;
       cleanupIdle?.();
     };
-  }, [complexity.codeBlocks, complexity.isExtreme, complexity.isHeavy, complexity.tableLines, content, idleTimeout, keepRenderedOnContentChange, rootMargin, shouldHydrateRichText]);
+  }, [complexity.codeBlocks, complexity.isExtreme, complexity.isHeavy, complexity.tableLines, content, idleTimeout, keepRenderedOnContentChange, priorityHydrateRichText, rootMargin, shouldHydrateRichText]);
 
   return (
     <div ref={hostRef}>
       {shouldRenderMarkdown && Renderer ? (
-        <Renderer content={content} isStreaming={isStreaming} />
+        <Renderer content={content} isStreaming={isStreaming} priorityHydrateRichText={priorityHydrateRichText} />
+      ) : priorityHydrateRichText ? (
+        <MarkdownLiteRenderer content={content} isStreaming={isStreaming} />
       ) : (
         <MarkdownFallback content={content} />
       )}

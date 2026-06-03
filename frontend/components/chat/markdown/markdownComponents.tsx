@@ -8,7 +8,7 @@ const LazyEChartsBlock = dynamic(() => import("../EChartsBlock"), {
   loading: () => <div className="my-4 h-48 rounded-xl border border-surface-border bg-surface-card animate-pulse" />,
 });
 
-export function createMarkdownComponents({ isStreaming = false }: { isStreaming?: boolean } = {}) {
+export function createMarkdownComponents({ isStreaming = false, lightweight = false }: { isStreaming?: boolean; lightweight?: boolean } = {}) {
   return {
     pre({ children }: any) {
       // Block code is rendered by the custom `code` component below. If we let
@@ -21,11 +21,11 @@ export function createMarkdownComponents({ isStreaming = false }: { isStreaming?
       const match = /language-(\w+)/.exec(className || "");
       const lang = match?.[1] || "";
       const value = String(children).replace(/\n$/, "");
-      if (!inline && lang === "echarts" && !isStreaming) {
+      if (!inline && lang === "echarts" && !isStreaming && !lightweight) {
         return <LazyEChartsBlock value={value} />;
       }
       return !inline && match ? (
-        <CodeBlock language={lang} value={value} />
+        <CodeBlock language={lang} value={value} lightweight={lightweight} />
       ) : (
         <code className="bg-[#E8E8E8] dark:bg-[#2A2A3A] text-[#333333] dark:text-[#E0E0E0] px-1 py-0.5 rounded text-[13px] font-mono" {...props}>
           {children}
@@ -60,7 +60,7 @@ export function createMarkdownComponents({ isStreaming = false }: { isStreaming?
       return <blockquote className="border-l-2 border-surface-border pl-4 italic text-text-secondary my-4">{children}</blockquote>;
     },
     table({ children }: any) {
-      return <div className="overflow-x-auto my-4"><table className="w-full text-sm border-collapse">{children}</table></div>;
+      return <div className="overflow-x-auto my-4"><table className="w-full text-sm border-collapse" data-markdown-lightweight={lightweight ? "true" : undefined}>{children}</table></div>;
     },
     thead({ children }: any) {
       return <thead className="bg-surface-card border-b border-surface-border">{children}</thead>;

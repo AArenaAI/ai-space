@@ -22,7 +22,7 @@ function formatCodeSize(lineCount: number, charCount: number, t: (key: string, p
   return t("chat.code.size", { lines: String(lineCount), chars: charLabel });
 }
 
-export default function CodeBlock({ language, value }: { language: string; value: string }) {
+export default function CodeBlock({ language, value, lightweight = false }: { language: string; value: string; lightweight?: boolean }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const lineCount = value.split("\n").length;
@@ -69,7 +69,11 @@ export default function CodeBlock({ language, value }: { language: string; value
       </div>
       {expanded ? (
         <div className="max-h-[400px] overflow-auto">
-          <LazySyntaxHighlighter language={language} value={value} />
+          {lightweight ? (
+            <pre className="bg-[#0D1117] px-4 py-3 text-[13px] text-gray-300 whitespace-pre-wrap break-words font-mono">{value}</pre>
+          ) : (
+            <LazySyntaxHighlighter language={language} value={value} />
+          )}
         </div>
       ) : (
         <div className="bg-[#0D1117] px-4 py-3 text-[13px] text-gray-300" data-testid="markdown-code-collapsed-preview">
