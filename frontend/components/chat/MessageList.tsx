@@ -442,7 +442,7 @@ function MessageList({
     // stickToBottom 表示用户意图，只在明确上滑离开底部时关闭；
     // 用户主动上滑时立即打断补偿锁底，避免流式内容继续增长时把视图吸回底部。
     const isProgrammaticScroll = Date.now() < programmaticScrollUntilRef.current;
-    if (isScrollingUp && distanceToBottom > 1) {
+    if (!isProgrammaticScroll && isScrollingUp && distanceToBottom > 1) {
       stopBottomLockForUserBrowse(isProgrammaticScroll ? 1200 : 2500);
     }
     if (distanceToBottom <= 24) {
@@ -772,6 +772,11 @@ function MessageList({
       loadMoreAnchorRef.current = null;
       loadingMoreTriggeredRef.current = false;
       openedConversationBottomKeyRef.current = "";
+      stickToBottomRef.current = true;
+      atBottomRef.current = true;
+      userScrollOverrideUntilRef.current = 0;
+      setAtBottom(true);
+      setUserBrowsing(false);
       previousAllVisibleMessagesRef.current = allVisibleMessages;
     } else if (didPrependVisibleMessages) {
       firstItemIndexRef.current = pendingFirstItemIndex;
