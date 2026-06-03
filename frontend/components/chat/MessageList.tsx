@@ -621,15 +621,13 @@ function MessageList({
   const jumpToUserMessage = useCallback((messageId: string) => {
     const index = visibleMessages.findIndex((message) => message.id === messageId);
     if (index < 0) return;
-    // Virtuoso prepend model: data array index must be offset by firstItemIndex.
-    const virtuosoIndex = firstItemIndexRef.current + index;
     programmaticScrollUntilRef.current = Date.now() + 900;
     overviewJumpActiveRef.current = { id: messageId, until: Date.now() + 900 };
     stopBottomLockForUserBrowse(1600);
     setActiveOverviewMessageId(messageId);
     highlightMessage(messageId, 2400);
     const scrollToTarget = () => {
-      virtuosoRef.current?.scrollToIndex({ index: virtuosoIndex, align: "center", behavior: "auto" });
+      virtuosoRef.current?.scrollToIndex({ index, align: "center", behavior: "auto" });
       window.requestAnimationFrame(() => centerMessageRowInScroller(messageId));
     };
     const centerTarget = () => centerMessageRowInScroller(messageId);
