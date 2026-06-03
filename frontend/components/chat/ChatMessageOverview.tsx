@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo } from "react";
+import { memo, useCallback, useEffect, useMemo, useState, type WheelEvent } from "react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 
@@ -19,22 +19,15 @@ export type ChatMessageOverviewProps = {
   onJumpToMessage: (messageId: string) => void;
 };
 
-function getWindow(items: ChatMessageOverviewItem[]) {
-  if (items.length <= MAX_VISIBLE) {
-    return { windowItems: items, isWheel: false };
-  }
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
 
+function getCenteredStart(items: ChatMessageOverviewItem[]) {
+  if (items.length <= MAX_VISIBLE) return 0;
   const activeIdx = items.findIndex((i) => i.active);
-  const safeIdx = Math.max(0, Math.min(items.length - 1, activeIdx));
-
-  let start = safeIdx - CENTER;
-  if (start < 0) start = 0;
-  if (start + MAX_VISIBLE > items.length) start = items.length - MAX_VISIBLE;
-
-  return {
-    windowItems: items.slice(start, start + MAX_VISIBLE),
-    isWheel: true,
-  };
+  const safeIdx = activeIdx >= 0 ? activeIdx : items.length - 1;
+  return clamp(safeIdx - CENTER, 0, items.length - MAX_VISIBLE);
 }
 
 /** 表盘流动效果：距离中心越远，opacity 和 scale 越小 */
@@ -67,8 +60,36 @@ const ChatMessageOverview = memo(function ChatMessageOverview({
   onJumpToMessage,
 }: ChatMessageOverviewProps) {
   const { t } = useI18n();
+  const [windowStart, setWindowStart] = useState(0);
 
-  const { windowItems, isWheel } = useMemo(() => getWindow(items), [items]);
+  const isWheel = items.length > MAX_VISIBLE;
+  const activeId = items.find((item) => item.active)?.id;
+  const maxStart = Math.max(0, items.length - MAX_VISIBLE);
+
+  // 主聊天区域滚动导致 active 改变时，重新把 active 放回中间窗口；
+  // 但用户在悬浮框内滚轮/触摸板滑动时，会用 windowStart 临时浏览更早/更晚数据。
+  useEffect(() => {
+    if (!isWheel) {
+      setWindowStart(0);
+      return;
+    }
+    setWindowStart(getCenteredStart(items));
+  }, [activeId, isWheel, items]);
+
+  const windowItems = useMemo(() => {
+    if (!isWheel) return items;
+    const start = clamp(windowStart, 0, maxStart);
+    return items.slice(start, start + MAX_VISIBLE);
+  }, [isWheel, items, maxStart, windowStart]);
+
+  const handleOverviewWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
+    if (!isWheel) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const direction = event.deltaY > 0 ? 1 : -1;
+    const step = clamp(Math.ceil(Math.abs(event.deltaY) / 80), 1, 4);
+    setWindowStart((current) => clamp(current + direction * step, 0, maxStart));
+  }, [isWheel, maxStart]);
 
   // 只有 1 条时不展示（< 2 已包含 0 条情况）
   if (!visible || items.length < 2) return null;
@@ -99,6 +120,7 @@ const ChatMessageOverview = memo(function ChatMessageOverview({
               ? undefined
               : { scrollbarWidth: "none", msOverflowStyle: "none" }
           }
+          onWheel={handleOverviewWheel}
           data-testid="chat-message-overview-rail"
           aria-hidden="true"
         >
@@ -123,6 +145,7 @@ const ChatMessageOverview = memo(function ChatMessageOverview({
             "invisible absolute right-8 top-1/2 z-[150] flex w-[320px] -translate-y-1/2 flex-col gap-1.5 overflow-hidden rounded-2xl border border-surface-border bg-surface-elevated px-2 py-2 opacity-0 shadow-2xl shadow-black/25 group-hover:visible group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:visible group-focus-within:pointer-events-auto group-focus-within:opacity-100 dark:border-[#2b2b2b] dark:bg-[#171717]",
             isWheel && "h-[378px]"
           )}
+          onWheel={handleOverviewWheel}
           data-testid="chat-message-overview-panel"
         >
           {/* 顶部渐隐遮罩 */}
