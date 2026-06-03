@@ -68,13 +68,23 @@ const CHAT_BOTTOM_SPACER = 280;
 const SCROLL_TO_BOTTOM_OFFSET = 238;
 const AT_BOTTOM_THRESHOLD = 24;
 const SELECT_MODE_EXTRA_SPACER = 80;
-const LONG_MARKDOWN_LAZY_THRESHOLD = 4000;
+const LONG_MARKDOWN_LAZY_THRESHOLD = 0;
 const HISTORY_PRELOAD_TOP_PX = 1200;
 const HISTORY_PRELOAD_BOTTOM_PX = CHAT_BOTTOM_SPACER;
 const FAST_SCROLL_PRELOAD_PX = 6000;
 const RETURN_TO_BOTTOM_PRELOAD_BOTTOM_PX = 6000;
 const HISTORY_OVERSCAN_REVERSE = 8;
 type SelectionMode = "share" | "favorite";
+
+function emitChatRenderProfileEvent(
+  phase: string,
+  detail: { conversationId?: number; messageCount?: number; visibleMessageCount?: number; durationMs?: number } = {}
+) {
+  if (typeof window === "undefined") return;
+  const at = typeof performance !== "undefined" ? performance.now() : Date.now();
+  window.dispatchEvent(new CustomEvent("chat-render-profile", { detail: { phase, at, ...detail } }));
+}
+
 
 interface MessageListProps {
   messages: Message[];
@@ -224,6 +234,7 @@ function MessageList({
   const historyPrependUntilRef = useRef(0);
   const openedConversationBottomKeyRef = useRef("");
   const lastConversationIdRef = useRef<number | string | undefined>(conversationId);
+  const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
 
   const stopBottomLockForUserBrowse = useCallback((duration = 2500) => {
     stickToBottomRef.current = false;
@@ -619,6 +630,16 @@ function MessageList({
       return true;
     });
   }, [messages, groupByMessageId, groupViews]);
+
+  useEffect(() => {
+    const commitAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    emitChatRenderProfileEvent("message-list-commit", {
+      conversationId,
+      messageCount: messages.length,
+      visibleMessageCount: visibleMessages.length,
+      durationMs: commitAt - renderStartedAt,
+    });
+  }, [conversationId, messages.length, renderStartedAt, visibleMessages.length]);
 
   const userOverviewMessages = useMemo(() => {
     return messages

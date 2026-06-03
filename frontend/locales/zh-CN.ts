@@ -46,6 +46,7 @@ const translations: Record<string, string> = {
   "chat.renameFailed": "重命名失败",
   "chat.renamePlaceholder": "输入新名称",
   "chat.renameSuccess": "重命名成功",
+  "chat.renderRichText": "渲染富文本",
   "chat.uploadFailed": "上传失败",
   "chat.attachments": "附件",
   "chat.closeCompareColumn": "关闭对比列",

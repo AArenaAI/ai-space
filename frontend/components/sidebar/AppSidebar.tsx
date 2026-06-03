@@ -41,6 +41,15 @@ const isPathInGroup = (pathname: string | null, paths: string[]) => {
   return paths.some((path) => clean === path || clean.startsWith(`${path}/`));
 };
 
+function emitChatRouteProfileEvent(
+  phase: string,
+  detail: { conversationId?: number; href?: string; durationMs?: number } = {}
+) {
+  if (typeof window === "undefined") return;
+  const at = typeof performance !== "undefined" ? performance.now() : Date.now();
+  window.dispatchEvent(new CustomEvent("chat-render-profile", { detail: { phase, at, ...detail } }));
+}
+
 // 模块级缓存：避免组件重新挂载时历史记录反复闪烁
 let cachedConversations: Conversation[] | null = null;
 
@@ -714,7 +723,13 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     navigator.clipboard.writeText(url);
   };
 
+  const isConversationPrefetchDisabledForTest = useCallback(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("chat-conversation-disable-prefetch") === "1";
+  }, []);
+
   const prefetchConversation = useCallback((conv: Conversation, options?: { signal?: AbortSignal }) => {
+    if (isConversationPrefetchDisabledForTest()) return;
     const token = localStorage.getItem("token");
     return prefetchConversationSnapshot({
       conversationId: conv.id,
@@ -722,7 +737,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
       skillKey: conv.skill_key,
       signal: options?.signal,
     });
-  }, []);
+  }, [isConversationPrefetchDisabledForTest]);
 
   const scheduleConversationHoverPrefetch = useCallback((conv: Conversation) => {
     if (String(conv.id) === currentConvId) return;
@@ -750,12 +765,22 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
       : `/chat?id=${conv.id}`;
     cancelConversationHoverPrefetch();
     prefetchConversation(conv);
+    const routeStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    emitChatRouteProfileEvent("route-push-start", { conversationId: conv.id, href });
     setOptimisticConvId(String(conv.id));
     router.push(href, { scroll: false });
+    window.requestAnimationFrame(() => {
+      const routeCommittedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+      emitChatRouteProfileEvent("route-push-next-frame", {
+        conversationId: conv.id,
+        href,
+        durationMs: routeCommittedAt - routeStartedAt,
+      });
+    });
   }, [cancelConversationHoverPrefetch, prefetchConversation, router]);
 
   useEffect(() => {
-    if (!user || conversations.length === 0) return;
+    if (!user || conversations.length === 0 || isConversationPrefetchDisabledForTest()) return;
     const token = localStorage.getItem("token");
     if (!token) return;
     const recent = sortConversations(conversations)
@@ -783,7 +808,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
       cancelIdle(idleId as any);
       controller.abort();
     };
-  }, [conversations, currentConvId, user]);
+  }, [conversations, currentConvId, isConversationPrefetchDisabledForTest, user]);
 
   useEffect(() => cancelConversationHoverPrefetch, [cancelConversationHoverPrefetch]);
 

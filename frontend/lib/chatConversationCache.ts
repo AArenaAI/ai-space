@@ -12,6 +12,7 @@ export type CachedConversationSnapshot = {
   compareModels: string[];
   model?: string;
   skillKey?: string;
+  snapshotVersion?: string;
   fetchedAt: number;
   updatedAt: number;
 };

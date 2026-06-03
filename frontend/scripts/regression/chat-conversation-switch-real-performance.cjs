@@ -138,6 +138,12 @@ async function waitForBodyText(page, expected) {
   await page.waitForFunction((needle) => document.body.innerText.includes(needle), expected, { timeout: timeoutMs });
 }
 
+async function clearVolatileConversationMemoryCache(page) {
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("chat-conversation-switch-test-control", { detail: { action: "clear-memory-cache" } }));
+  });
+}
+
 async function waitForPersistentSnapshot(page, conversationId) {
   await page.waitForFunction((id) => new Promise((resolve) => {
     let ownerKey;
@@ -172,14 +178,30 @@ function summarizeEvents(events, conversationId) {
   const firstSnapshot = matching.find((event) => event.phase === "first-snapshot");
   const restore = matching.find((event) => event.phase === "restore-response");
   const reconciled = matching.find((event) => event.phase === "restore-reconciled");
+  const notModified = matching.find((event) => event.phase === "restore-not-modified");
   return {
     eventCount: matching.length,
     firstSnapshotSource: firstSnapshot?.source || null,
     firstSnapshotMs: firstSnapshot ? Math.round(firstSnapshot.durationMs || 0) : null,
     restoreResponseMs: restore ? Math.round(restore.durationMs || 0) : null,
     restoreReconciledMs: reconciled ? Math.round(reconciled.durationMs || 0) : null,
+    restoreNotModifiedMs: notModified ? Math.round(notModified.durationMs || 0) : null,
     phases: byPhase,
   };
+}
+
+function summarizeRenderEvents(events, conversationId) {
+  return events
+    .filter((event) => event.conversationId === undefined || Number(event.conversationId) === Number(conversationId))
+    .map((event) => ({
+      phase: event.phase,
+      messageCount: event.messageCount,
+      visibleMessageCount: event.visibleMessageCount,
+      contentLength: event.contentLength,
+      staggerMs: event.staggerMs,
+      durationMs: Math.round(event.durationMs || 0),
+    }))
+    .slice(-24);
 }
 
 async function main() {
@@ -224,9 +246,14 @@ async function main() {
       localStorage.setItem("user", JSON.stringify(userValue || {}));
       localStorage.setItem("selected-model", modelValue);
       localStorage.setItem("recent-models", JSON.stringify([modelValue]));
+      localStorage.setItem("chat-conversation-disable-prefetch", "1");
       window.__chatSwitchPerfEvents = [];
+      window.__chatRenderProfileEvents = [];
       window.addEventListener("chat-conversation-switch-performance", (event) => {
         window.__chatSwitchPerfEvents.push(event.detail);
+      });
+      window.addEventListener("chat-render-profile", (event) => {
+        window.__chatRenderProfileEvents.push(event.detail);
       });
     }, { tokenValue: auth.token, userValue: auth.user, modelValue: model });
 
@@ -246,7 +273,9 @@ async function main() {
     log("memory hit switch to A done");
 
     await waitForPersistentSnapshot(page, convB.id);
+    await clearVolatileConversationMemoryCache(page);
     const eventsBeforeReload = await page.evaluate(() => window.__chatSwitchPerfEvents || []);
+    const renderEventsBeforeReload = await page.evaluate(() => window.__chatRenderProfileEvents || []);
 
     await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
     await waitForBodyText(page, `SWITCH_PERF_A_${suffix}`);
@@ -256,12 +285,26 @@ async function main() {
     log("indexeddb switch to B done");
 
     const eventsAfterReload = await page.evaluate(() => window.__chatSwitchPerfEvents || []);
+    const renderEventsAfterReload = await page.evaluate(() => window.__chatRenderProfileEvents || []);
     const events = [...eventsBeforeReload, ...eventsAfterReload];
+    const renderEvents = [...renderEventsBeforeReload, ...renderEventsAfterReload];
     const bEvents = events.filter((event) => Number(event.conversationId) === Number(convB.id));
     const aEvents = events.filter((event) => Number(event.conversationId) === Number(convA.id));
     const firstSnapshots = events.filter((event) => event.phase === "first-snapshot");
     assert.ok(firstSnapshots.some((event) => event.source === "backend"), `backend first-snapshot missing: ${JSON.stringify(events)}`);
     assert.ok(firstSnapshots.some((event) => event.source === "memory"), `memory first-snapshot missing: ${JSON.stringify(events)}`);
+    assert.ok(
+      bEvents.some((event) => event.phase === "first-snapshot" && event.source === "indexeddb"),
+      `indexeddb first-snapshot missing for conversation B: ${JSON.stringify(bEvents)}`
+    );
+    assert.ok(
+      renderEvents.some((event) => event.phase === "message-list-commit"),
+      `message-list render profile missing: ${JSON.stringify(renderEvents)}`
+    );
+    assert.ok(
+      renderEvents.some((event) => event.phase === "route-conversation-change" || event.phase === "route-push-start"),
+      `route profile missing: ${JSON.stringify(renderEvents)}`
+    );
     assert.equal(requestStats.messageCount, 0, `expected restore meta to avoid message count requests, got ${requestStats.messageCount}`);
     assert.equal(requestStats.messageStatus, 0, `expected restore meta to avoid message status requests, got ${requestStats.messageStatus}`);
 
@@ -276,6 +319,7 @@ async function main() {
       conversationBId: convB.id,
       conversationB: summarizeEvents(events, convB.id),
       conversationA: summarizeEvents(events, convA.id),
+      renderProfileB: summarizeRenderEvents(renderEvents, convB.id),
       indexedDbObserved: bEvents.some((event) => event.phase === "first-snapshot" && event.source === "indexeddb"),
       requestStats: { ...requestStats },
       totalEvents: events.length,

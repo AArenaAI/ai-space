@@ -49,6 +49,7 @@ const translations: Record<string, string> = {
   "chat.renameFailed": "名前変更に失敗しました",
   "chat.renamePlaceholder": "新しい名前を入力",
   "chat.renameSuccess": "名前を変更しました",
+  "chat.renderRichText": "リッチテキストを表示",
   "chat.uploadFailed": "アップロードに失敗しました",
   "chat.attachments": "添付ファイル",
   "chat.closeCompareColumn": "比較列を閉じる",

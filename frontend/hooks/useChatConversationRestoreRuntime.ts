@@ -21,6 +21,7 @@ import {
 import { patchMessageById } from "@/lib/chatMessageStatePatch";
 import {
   areConversationMessagesEquivalent,
+  clearConversationSnapshotCache,
   getConversationSnapshot,
   invalidateConversationSnapshot,
   patchConversationSnapshot,
@@ -196,6 +197,16 @@ export function useChatConversationRestoreRuntime({
 }: UseChatConversationRestoreRuntimeOptions) {
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const handleTestControl = (event: Event) => {
+      const action = (event as CustomEvent<{ action?: string }>).detail?.action;
+      if (action === "clear-memory-cache") clearConversationSnapshotCache();
+    };
+    window.addEventListener("chat-conversation-switch-test-control", handleTestControl);
+    return () => window.removeEventListener("chat-conversation-switch-test-control", handleTestControl);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
     const handleConversationUpdated = (event: Event) => {
       const conversationId = (event as CustomEvent<{ conversationId?: number | string }>).detail?.conversationId;
       const normalized = typeof conversationId === "string" ? Number(conversationId) : conversationId;
@@ -269,6 +280,8 @@ export function useChatConversationRestoreRuntime({
 
     const cachedSnapshot = getConversationSnapshot(loadConversationId);
     let hasDisplayedSnapshot = false;
+    let displayedSnapshotVersion: string | undefined = cachedSnapshot?.snapshotVersion;
+    let persistentSnapshotReady: Promise<void> = Promise.resolve();
     if (cachedSnapshot) {
       hasDisplayedSnapshot = true;
       emitConversationSwitchPerformanceEvent("first-snapshot", {
@@ -306,10 +319,11 @@ export function useChatConversationRestoreRuntime({
       setLoadedPersistedMessages(0);
       setGroupViews(new Map());
       setIsLoading(false);
-      getPersistentConversationSnapshot(loadConversationId)
+      persistentSnapshotReady = getPersistentConversationSnapshot(loadConversationId)
         .then((persistentSnapshot) => {
           if (!persistentSnapshot || !isLatestLoad() || loadController.signal.aborted || hasDisplayedSnapshot) return;
           hasDisplayedSnapshot = true;
+          displayedSnapshotVersion = persistentSnapshot.snapshotVersion;
           emitConversationSwitchPerformanceEvent("first-snapshot", {
             conversationId: loadConversationId,
             loadSeq,
@@ -352,14 +366,26 @@ export function useChatConversationRestoreRuntime({
       patchConversationSnapshot(loadConversationId, { totalMessages: total });
     };
 
-    fetchRestore({
-      apiBaseUrl,
-      conversationId: loadConversationId,
-      token: authToken,
-      signal: loadController.signal,
-    })
+    persistentSnapshotReady
+      .then(() => fetchRestore({
+        apiBaseUrl,
+        conversationId: loadConversationId,
+        token: authToken,
+        signal: loadController.signal,
+        snapshotVersion: displayedSnapshotVersion,
+      }))
       .then((data) => {
         if (!isLatestLoad() || loadController.signal.aborted) return;
+        if (data.notModified) {
+          emitConversationSwitchPerformanceEvent("restore-not-modified", {
+            conversationId: loadConversationId,
+            loadSeq,
+            source: "backend",
+            durationMs: elapsedSinceSwitchStart(),
+          });
+          setIsLoadingHistory(false);
+          return;
+        }
         emitConversationSwitchPerformanceEvent("restore-response", {
           conversationId: loadConversationId,
           loadSeq,
@@ -422,6 +448,7 @@ export function useChatConversationRestoreRuntime({
             compareModels: parseConversationCompareModels(data.compare_models),
             model: data.model,
             skillKey: resolveConversationSkillKey(data.skill_key, skillKey),
+            snapshotVersion: data.snapshot_version,
             fetchedAt: Date.now(),
             updatedAt: Date.now(),
           };

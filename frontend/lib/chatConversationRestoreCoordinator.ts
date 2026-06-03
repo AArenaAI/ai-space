@@ -6,6 +6,8 @@ import {
 } from "./chatForkCoordinator";
 
 export type ConversationRestoreResponse = {
+  notModified?: boolean;
+  snapshot_version?: string;
   title?: string;
   model?: string;
   compare?: boolean;
@@ -14,7 +16,6 @@ export type ConversationRestoreResponse = {
   messages?: ForkChatPersistedMessage[];
   total?: number;
   has_more?: boolean;
-  snapshot_version?: string;
   last_assistant_status?: ConversationRestoreStatusResponse;
 };
 
@@ -99,18 +100,23 @@ export async function fetchConversationRestore({
   conversationId,
   token,
   signal,
+  snapshotVersion,
   fetchImpl = fetch,
 }: {
   apiBaseUrl?: string;
   conversationId: number;
   token: string;
   signal?: AbortSignal;
+  snapshotVersion?: string;
   fetchImpl?: typeof fetch;
 }): Promise<ConversationRestoreResponse> {
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+  if (snapshotVersion) headers["If-None-Match"] = snapshotVersion;
   const res = await fetchImpl(buildConversationRestoreUrl({ apiBaseUrl, conversationId }), {
-    headers: { Authorization: `Bearer ${token}` },
+    headers,
     signal,
   });
+  if (res.status === 304) return { notModified: true, snapshot_version: snapshotVersion };
   if (!res.ok) throw new Error(`load conversation failed: ${res.status}`);
   return await res.json();
 }

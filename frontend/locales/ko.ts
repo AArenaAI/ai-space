@@ -43,6 +43,7 @@ const translations: Record<string, string> = {
   "chat.renameFailed": "이름 바꾸기 실패",
   "chat.renamePlaceholder": "새 이름을 입력하세요",
   "chat.renameSuccess": "이름이 변경되었습니다.",
+  "chat.renderRichText": "서식 있는 텍스트 렌더링",
   "chat.uploadFailed": "업로드 실패",
   "chat.attachments": "첨부파일",
   "chat.closeCompareColumn": "비교 열 닫기",

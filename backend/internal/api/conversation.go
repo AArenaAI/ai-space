@@ -257,6 +257,12 @@ func (h *ConversationHandler) Get(c *gin.Context) {
 
 	var total int64
 	h.db.Model(&models.Message{}).Where("conversation_id = ?", conv.ID).Count(&total)
+	snapshotVersion := fmt.Sprintf("%d:%d:%d", conv.ID, total, conv.UpdatedAt.UnixNano())
+	c.Header("ETag", snapshotVersion)
+	if c.GetHeader("If-None-Match") == snapshotVersion {
+		c.Status(http.StatusNotModified)
+		return
+	}
 
 	msgQuery := h.db.Where("conversation_id = ?", conv.ID).Order("created_at asc, id asc").Preload("MessageFiles")
 	if msgTail > 0 {
@@ -297,7 +303,7 @@ func (h *ConversationHandler) Get(c *gin.Context) {
 		"messages":         conv.Messages,
 		"total":            total,
 		"has_more":         len(conv.Messages) < int(total),
-		"snapshot_version": fmt.Sprintf("%d:%d:%d", conv.ID, total, conv.UpdatedAt.UnixNano()),
+		"snapshot_version": snapshotVersion,
 	}
 	if status := h.buildLastAssistantStatusPayload(conv.Messages); status != nil {
 		response["last_assistant_status"] = status

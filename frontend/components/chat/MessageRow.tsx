@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useEffect } from "react";
 import { User, Check, Play, SquareCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
@@ -15,6 +15,18 @@ import { AssistantMessageContent } from "./AssistantMessageContent";
 import { ModelAvatar } from "./ModelAvatar";
 
 type MarkdownRendererComponent = Parameters<typeof AssistantMessageContent>[0]["MarkdownRenderer"];
+
+function emitChatRenderProfileEvent(phase: string, detail: Record<string, unknown> = {}) {
+  if (typeof window === "undefined") return;
+  const at = typeof performance !== "undefined" ? performance.now() : Date.now();
+  window.dispatchEvent(new CustomEvent("chat-render-profile", {
+    detail: {
+      phase,
+      at,
+      ...detail,
+    },
+  }));
+}
 
 export type MessageRowProps = {
   message: Message;
@@ -70,11 +82,23 @@ function MessageRow({
   MarkdownRenderer,
 }: MessageRowProps) {
   const { t } = useI18n();
+  const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
   const isUser = msg.role === "user";
   const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && isLast;
   const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
   const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
   const assistantAvatarMeta = getModelAvatarMeta(model || msg.model || "AI");
+
+  useEffect(() => {
+    const commitAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    emitChatRenderProfileEvent("message-row-commit", {
+      conversationId,
+      messageId: msg.id,
+      role: msg.role,
+      contentLength: msg.content?.length || 0,
+      durationMs: commitAt - renderStartedAt,
+    });
+  });
 
   return (
     <div data-chat-message-row="true" data-message-id={msg.id} data-message-role={msg.role} className={cn("max-w-[800px] mx-auto px-4 py-4 rounded-2xl transition-colors duration-500", isHighlighted && "bg-brand/10")}>

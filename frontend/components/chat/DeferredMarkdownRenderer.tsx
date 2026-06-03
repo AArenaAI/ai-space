@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType } from "react";
+import { useI18n } from "@/lib/i18n";
 import MarkdownPlainFallback from "./markdown/MarkdownPlainFallback";
 
 type MarkdownRendererProps = { content: string; isStreaming?: boolean };
@@ -19,8 +20,40 @@ function loadMarkdownRenderer() {
   return markdownRendererPromise;
 }
 
-const DEFAULT_ROOT_MARGIN = "700px 0px";
-const DEFAULT_IDLE_TIMEOUT = 600;
+const DEFAULT_ROOT_MARGIN = "180px 0px";
+const DEFAULT_IDLE_TIMEOUT = 900;
+const HEAVY_MARKDOWN_LENGTH_THRESHOLD = 8_000;
+const HEAVY_MARKDOWN_CODE_BLOCK_THRESHOLD = 3;
+const HEAVY_MARKDOWN_TABLE_LINE_THRESHOLD = 7;
+let markdownHydrationSequence = 0;
+
+function emitChatRenderProfileEvent(phase: string, detail: Record<string, unknown> = {}) {
+  if (typeof window === "undefined") return;
+  const at = typeof performance !== "undefined" ? performance.now() : Date.now();
+  window.dispatchEvent(new CustomEvent("chat-render-profile", {
+    detail: {
+      phase,
+      at,
+      ...detail,
+    },
+  }));
+}
+
+function nextMarkdownHydrationDelay() {
+  markdownHydrationSequence = (markdownHydrationSequence + 1) % 6;
+  return markdownHydrationSequence * 70;
+}
+
+function getMarkdownComplexity(content: string) {
+  const codeFenceCount = content.match(/```/g)?.length || 0;
+  const codeBlocks = Math.floor(codeFenceCount / 2);
+  const tableLines = content.split("\n").filter((line) => /^\s*\|.+\|\s*$/.test(line)).length;
+  const isHeavy =
+    content.length > HEAVY_MARKDOWN_LENGTH_THRESHOLD ||
+    codeBlocks >= HEAVY_MARKDOWN_CODE_BLOCK_THRESHOLD ||
+    tableLines >= HEAVY_MARKDOWN_TABLE_LINE_THRESHOLD;
+  return { codeBlocks, isHeavy, tableLines };
+}
 
 function MarkdownFallback({ content, loading }: { content: string; loading?: boolean }) {
   if (loading) {
@@ -43,7 +76,9 @@ export function DeferredMarkdownRenderer({
   keepRenderedOnContentChange?: boolean;
   isStreaming?: boolean;
 }) {
+  const { t } = useI18n();
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const complexity = useMemo(() => getMarkdownComplexity(content), [content]);
   const [shouldRenderMarkdown, setShouldRenderMarkdown] = useState(false);
   const [Renderer, setRenderer] = useState(() => MarkdownRendererModule);
   const hasRenderedMarkdownRef = useRef(false);
@@ -62,8 +97,11 @@ export function DeferredMarkdownRenderer({
   useEffect(() => {
     if (shouldRenderMarkdown) {
       hasRenderedMarkdownRef.current = true;
+      emitChatRenderProfileEvent("markdown-hydrate-start", {
+        contentLength: content.length,
+      });
     }
-  }, [shouldRenderMarkdown]);
+  }, [content.length, shouldRenderMarkdown]);
 
   useEffect(() => {
     if (keepRenderedOnContentChange && hasRenderedMarkdownRef.current) {
@@ -82,6 +120,15 @@ export function DeferredMarkdownRenderer({
       return;
     }
 
+    if (complexity.isHeavy) {
+      emitChatRenderProfileEvent("markdown-hydrate-skipped-heavy", {
+        contentLength: content.length,
+        codeBlocks: complexity.codeBlocks,
+        tableLines: complexity.tableLines,
+      });
+      return;
+    }
+
     const node = hostRef.current;
     if (!node) return;
 
@@ -93,18 +140,31 @@ export function DeferredMarkdownRenderer({
         requestIdleCallback?: (cb: IdleRequestCallback, options?: IdleRequestOptions) => number;
         cancelIdleCallback?: (handle: number) => void;
       };
+      let staggerTimer: number | undefined;
+      const markReady = () => {
+        const staggerMs = nextMarkdownHydrationDelay();
+        emitChatRenderProfileEvent("markdown-hydrate-scheduled", {
+          contentLength: content.length,
+          staggerMs,
+        });
+        staggerTimer = window.setTimeout(() => {
+          if (!cancelled) setShouldRenderMarkdown(true);
+        }, staggerMs);
+      };
 
       if (win.requestIdleCallback) {
-        const idleId = win.requestIdleCallback(() => {
-          if (!cancelled) setShouldRenderMarkdown(true);
-        }, { timeout: idleTimeout });
-        return () => win.cancelIdleCallback?.(idleId);
+        const idleId = win.requestIdleCallback(markReady, { timeout: idleTimeout });
+        return () => {
+          win.cancelIdleCallback?.(idleId);
+          if (staggerTimer !== undefined) window.clearTimeout(staggerTimer);
+        };
       }
 
-      const timeoutId = window.setTimeout(() => {
-        if (!cancelled) setShouldRenderMarkdown(true);
-      }, Math.min(idleTimeout, 120));
-      return () => window.clearTimeout(timeoutId);
+      const timeoutId = window.setTimeout(markReady, Math.min(idleTimeout, 180));
+      return () => {
+        window.clearTimeout(timeoutId);
+        if (staggerTimer !== undefined) window.clearTimeout(staggerTimer);
+      };
     };
 
     const startIdleRender = () => {
@@ -133,11 +193,33 @@ export function DeferredMarkdownRenderer({
       cancelled = true;
       cleanupIdle?.();
     };
-  }, [content, idleTimeout, keepRenderedOnContentChange, rootMargin]);
+  }, [complexity.codeBlocks, complexity.isHeavy, complexity.tableLines, content, idleTimeout, keepRenderedOnContentChange, rootMargin]);
 
   return (
     <div ref={hostRef}>
-      {shouldRenderMarkdown && Renderer ? <Renderer content={content} isStreaming={isStreaming} /> : <MarkdownFallback content={content} />}
+      {shouldRenderMarkdown && Renderer ? (
+        <Renderer content={content} isStreaming={isStreaming} />
+      ) : (
+        <>
+          <MarkdownFallback content={content} />
+          {complexity.isHeavy && content && (
+            <button
+              type="button"
+              className="mt-2 rounded-full border border-border-subtle px-3 py-1 text-xs text-text-secondary transition-colors hover:border-brand/50 hover:text-brand"
+              onClick={() => {
+                emitChatRenderProfileEvent("markdown-hydrate-manual", {
+                  contentLength: content.length,
+                  codeBlocks: complexity.codeBlocks,
+                  tableLines: complexity.tableLines,
+                });
+                setShouldRenderMarkdown(true);
+              }}
+            >
+              {t("chat.renderRichText")}
+            </button>
+          )}
+        </>
+      )}
     </div>
   );
 }

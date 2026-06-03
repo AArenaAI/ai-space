@@ -43,6 +43,7 @@ const translations: Record<string, string> = {
   "chat.renameFailed": "Yeniden adlandırma başarısız oldu",
   "chat.renamePlaceholder": "Yeni adı girin",
   "chat.renameSuccess": "Başarıyla yeniden adlandırıldı",
+  "chat.renderRichText": "Zengin metni işle",
   "chat.uploadFailed": "Yükleme başarısız oldu",
   "chat.attachments": "Ekler",
   "chat.closeCompareColumn": "Karşılaştırma sütununu kapat",
