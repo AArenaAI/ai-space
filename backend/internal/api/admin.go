@@ -373,17 +373,19 @@ func (h *AdminHandler) UsageLogs(c *gin.Context) {
 	if pageSize > 200 {
 		pageSize = 200
 	}
-	query := h.usageQuery(c)
 	var total int64
-	query.Count(&total)
-	summary := h.usageAggregate(query)
+	if err := h.usageQuery(c).Count(&total).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "统计用量日志失败"})
+		return
+	}
+	summary := h.usageAggregate(h.usageQuery(c))
 	var logs []models.APIUsageLog
 	sortColumn := usageSortColumn(c.Query("sort"))
 	order := "DESC"
 	if strings.EqualFold(strings.TrimSpace(c.Query("order")), "asc") {
 		order = "ASC"
 	}
-	if err := query.Order(sortColumn + " " + order).Limit(pageSize).Offset((page - 1) * pageSize).Find(&logs).Error; err != nil {
+	if err := h.usageQuery(c).Order(sortColumn + " " + order).Limit(pageSize).Offset((page - 1) * pageSize).Find(&logs).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询用量日志失败"})
 		return
 	}
