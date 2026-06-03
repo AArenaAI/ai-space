@@ -15,6 +15,11 @@ type APIUsageLog struct {
 	Model     string `json:"model" gorm:"index"`                 // 具体模型名
 	ModelType string `json:"model_type"`                         // gpt / claude / deepseek / moonshot / gemini / qwen / embedding
 
+	// Usage v3 产品维度：用于后台按产品模块/功能/操作下钻。
+	Module    string `json:"module" gorm:"index:idx_usage_module"`       // chat / creative / work / workspace / admin / system
+	Feature   string `json:"feature" gorm:"index:idx_usage_feature"`     // image / video / translator / ppt / document_reader / notebook / chat
+	Operation string `json:"operation" gorm:"index:idx_usage_operation"` // text_to_image / translate_text / ppt_outline 等
+
 	// 通用业务资源追踪。
 	ResourceType string `json:"resource_type" gorm:"index"` // message / file / image_generation / ppt_generation / embedding_job
 	ResourceID   uint   `json:"resource_id" gorm:"index"`   // 对应业务表主键

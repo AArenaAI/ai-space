@@ -369,19 +369,25 @@ func (h *AdminHandler) UsageSummary(c *gin.Context) {
 
 func (h *AdminHandler) UsageLogs(c *gin.Context) {
 	page := parsePositiveInt(c.Query("page"), 1)
-	pageSize := parsePositiveInt(c.Query("page_size"), 20)
-	if pageSize > 100 {
-		pageSize = 100
+	pageSize := parsePositiveInt(c.Query("page_size"), 50)
+	if pageSize > 200 {
+		pageSize = 200
 	}
 	query := h.usageQuery(c)
 	var total int64
 	query.Count(&total)
+	summary := h.usageAggregate(query)
 	var logs []models.APIUsageLog
-	if err := query.Order("created_at DESC").Limit(pageSize).Offset((page - 1) * pageSize).Find(&logs).Error; err != nil {
+	sortColumn := usageSortColumn(c.Query("sort"))
+	order := "DESC"
+	if strings.EqualFold(strings.TrimSpace(c.Query("order")), "asc") {
+		order = "ASC"
+	}
+	if err := query.Order(sortColumn + " " + order).Limit(pageSize).Offset((page - 1) * pageSize).Find(&logs).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询用量日志失败"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"logs": logs, "total": total, "page": page, "page_size": pageSize})
+	c.JSON(http.StatusOK, gin.H{"logs": logs, "total": total, "page": page, "page_size": pageSize, "summary": summary})
 }
 
 func (h *AdminHandler) UsageUsers(c *gin.Context) {
@@ -620,8 +626,27 @@ func mustAdminJSON(value any) string {
 
 func (h *AdminHandler) usageQuery(c *gin.Context) *gorm.DB {
 	query := h.db.Model(&models.APIUsageLog{})
-	if rangeRaw := strings.TrimSpace(c.Query("range")); rangeRaw != "" {
+	if rangeRaw := strings.TrimSpace(c.Query("range")); rangeRaw != "" && !strings.EqualFold(rangeRaw, "all") {
 		query = query.Where("api_usage_logs.created_at >= ?", parseRangeStart(rangeRaw))
+	}
+	if startRaw := strings.TrimSpace(c.Query("start_date")); startRaw != "" {
+		if t, err := time.Parse("2006-01-02", startRaw); err == nil {
+			query = query.Where("api_usage_logs.created_at >= ?", t)
+		}
+	}
+	if endRaw := strings.TrimSpace(c.Query("end_date")); endRaw != "" {
+		if t, err := time.Parse("2006-01-02", endRaw); err == nil {
+			query = query.Where("api_usage_logs.created_at < ?", t.Add(24*time.Hour))
+		}
+	}
+	if module := strings.TrimSpace(c.Query("module")); module != "" {
+		query = query.Where("api_usage_logs.module = ?", module)
+	}
+	if feature := strings.TrimSpace(c.Query("feature")); feature != "" {
+		query = query.Where("api_usage_logs.feature = ?", feature)
+	}
+	if operation := strings.TrimSpace(c.Query("operation")); operation != "" {
+		query = query.Where("api_usage_logs.operation = ?", operation)
 	}
 	if service := strings.TrimSpace(c.Query("service")); service != "" {
 		query = query.Where("api_usage_logs.service = ?", service)
@@ -638,24 +663,64 @@ func (h *AdminHandler) usageQuery(c *gin.Context) *gorm.DB {
 	if uid := parsePositiveInt(c.Query("user_id"), 0); uid > 0 {
 		query = query.Where("api_usage_logs.user_id = ?", uid)
 	}
+	if guestID := strings.TrimSpace(c.Query("guest_id")); guestID != "" {
+		query = query.Where("api_usage_logs.guest_id = ?", guestID)
+	}
 	if conversationID := parsePositiveInt(c.Query("conversation_id"), 0); conversationID > 0 {
 		query = query.Where("api_usage_logs.conversation_id = ?", conversationID)
+	}
+	if messageID := parsePositiveInt(c.Query("message_id"), 0); messageID > 0 {
+		query = query.Where("api_usage_logs.message_id = ?", messageID)
+	}
+	if taskID := parsePositiveInt(c.Query("task_id"), 0); taskID > 0 {
+		query = query.Where("api_usage_logs.task_id = ?", taskID)
+	}
+	if workspaceID := parsePositiveInt(c.Query("workspace_id"), 0); workspaceID > 0 {
+		query = query.Where("api_usage_logs.workspace_id = ?", workspaceID)
+	}
+	if notebookID := parsePositiveInt(c.Query("notebook_id"), 0); notebookID > 0 {
+		query = query.Where("api_usage_logs.notebook_id = ?", notebookID)
+	}
+	if resourceType := strings.TrimSpace(c.Query("resource_type")); resourceType != "" {
+		query = query.Where("api_usage_logs.resource_type = ?", resourceType)
+	}
+	if resourceID := parsePositiveInt(c.Query("resource_id"), 0); resourceID > 0 {
+		query = query.Where("api_usage_logs.resource_id = ?", resourceID)
+	}
+	if requestID := strings.TrimSpace(c.Query("request_id")); requestID != "" {
+		query = query.Where("api_usage_logs.request_id = ?", requestID)
+	}
+	if estimated := strings.TrimSpace(c.Query("estimated")); estimated != "" {
+		query = query.Where("api_usage_logs.estimated = ?", strings.EqualFold(estimated, "true") || estimated == "1")
+	}
+	if minCost := parseFloatQuery(c.Query("min_cost")); minCost != nil {
+		query = query.Where("api_usage_logs.total_cost_rmb >= ?", *minCost)
+	}
+	if maxCost := parseFloatQuery(c.Query("max_cost")); maxCost != nil {
+		query = query.Where("api_usage_logs.total_cost_rmb <= ?", *maxCost)
+	}
+	if q := strings.TrimSpace(c.Query("q")); q != "" {
+		like := "%" + q + "%"
+		query = query.Where("api_usage_logs.model LIKE ? OR api_usage_logs.request_id LIKE ? OR api_usage_logs.raw_usage_json LIKE ? OR api_usage_logs.error_message LIKE ?", like, like, like, like)
 	}
 	return query
 }
 
 func (h *AdminHandler) usageAggregate(query *gorm.DB) gin.H {
 	var out struct {
-		Requests     int64
-		Failures     int64
-		CostRMB      float64
-		TotalTokens  int64
-		PromptTokens int64
-		OutputTokens int64
-		ImageCount   int64
+		Requests       int64
+		Failures       int64
+		CostRMB        float64
+		TotalTokens    int64
+		PromptTokens   int64
+		OutputTokens   int64
+		ImageCount     int64
+		CharacterCount int64
+		VideoSeconds   int64
+		AudioSeconds   int64
 	}
-	query.Select("COUNT(*) AS requests, COALESCE(SUM(CASE WHEN status <> 'success' THEN 1 ELSE 0 END), 0) AS failures, COALESCE(SUM(total_cost_rmb), 0) AS cost_rmb, COALESCE(SUM(total_tokens), 0) AS total_tokens, COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens, COALESCE(SUM(completion_tokens), 0) AS output_tokens, COALESCE(SUM(image_count), 0) AS image_count").Scan(&out)
-	return gin.H{"requests": out.Requests, "failures": out.Failures, "cost_rmb": out.CostRMB, "total_tokens": out.TotalTokens, "prompt_tokens": out.PromptTokens, "completion_tokens": out.OutputTokens, "image_count": out.ImageCount}
+	query.Select("COUNT(*) AS requests, COALESCE(SUM(CASE WHEN status <> 'success' THEN 1 ELSE 0 END), 0) AS failures, COALESCE(SUM(total_cost_rmb), 0) AS cost_rmb, COALESCE(SUM(total_tokens), 0) AS total_tokens, COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens, COALESCE(SUM(completion_tokens), 0) AS output_tokens, COALESCE(SUM(image_count), 0) AS image_count, COALESCE(SUM(character_count), 0) AS character_count, COALESCE(SUM(video_seconds), 0) AS video_seconds, COALESCE(SUM(audio_seconds), 0) AS audio_seconds").Scan(&out)
+	return gin.H{"requests": out.Requests, "failures": out.Failures, "cost_rmb": out.CostRMB, "total_tokens": out.TotalTokens, "prompt_tokens": out.PromptTokens, "completion_tokens": out.OutputTokens, "image_count": out.ImageCount, "character_count": out.CharacterCount, "video_seconds": out.VideoSeconds, "audio_seconds": out.AudioSeconds}
 }
 
 func (h *AdminHandler) usageGrouped(c *gin.Context, column string, limit int, extraWhere string, args ...any) []gin.H {
@@ -865,6 +930,35 @@ func parsePositiveInt(raw string, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+func parseFloatQuery(raw string) *float64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return nil
+	}
+	return &value
+}
+
+func usageSortColumn(raw string) string {
+	switch strings.TrimSpace(raw) {
+	case "cost":
+		return "total_cost_rmb"
+	case "tokens":
+		return "total_tokens"
+	case "characters":
+		return "character_count"
+	case "images":
+		return "image_count"
+	case "created_at", "":
+		return "created_at"
+	default:
+		return "created_at"
+	}
 }
 
 func parseRangeStart(raw string) time.Time {

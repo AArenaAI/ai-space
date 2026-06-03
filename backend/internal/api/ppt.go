@@ -83,17 +83,17 @@ func (h *PPTHandler) CreatePPT(c *gin.Context) {
 	guestID := getGuestID(c)
 
 	var req struct {
-		Topic       string `json:"topic" binding:"required"`
-		TemplateID  string `json:"template_id"`
-		SlideCount  int    `json:"slide_count"`
-		Language    string `json:"language"`
-		Audience    string `json:"audience"`
+		Topic        string `json:"topic" binding:"required"`
+		TemplateID   string `json:"template_id"`
+		SlideCount   int    `json:"slide_count"`
+		Language     string `json:"language"`
+		Audience     string `json:"audience"`
 		Purpose      string `json:"purpose"`
 		ExtraContent string `json:"extra_content"`
 		ReferenceURL string `json:"reference_url"`
 		WithImages   string `json:"with_images"`
-		WithNotes   bool   `json:"with_notes"`
-		QualityMode string `json:"quality_mode"`
+		WithNotes    bool   `json:"with_notes"`
+		QualityMode  string `json:"quality_mode"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -116,21 +116,21 @@ func (h *PPTHandler) CreatePPT(c *gin.Context) {
 	}
 
 	gen := models.PPTGeneration{
-		UserID:      userID,
-		GuestID:     guestID,
-		Title:       req.Topic,
-		Topic:       req.Topic,
-		TemplateID:  req.TemplateID,
-		SlideCount:  req.SlideCount,
-		Language:    req.Language,
-		Audience:    req.Audience,
+		UserID:       userID,
+		GuestID:      guestID,
+		Title:        req.Topic,
+		Topic:        req.Topic,
+		TemplateID:   req.TemplateID,
+		SlideCount:   req.SlideCount,
+		Language:     req.Language,
+		Audience:     req.Audience,
 		Purpose:      req.Purpose,
 		ExtraContent: req.ExtraContent,
 		ReferenceURL: req.ReferenceURL,
 		WithImages:   req.WithImages,
-		WithNotes:   req.WithNotes,
-		QualityMode: req.QualityMode,
-		Status:      models.PPTStatusPending,
+		WithNotes:    req.WithNotes,
+		QualityMode:  req.QualityMode,
+		Status:       models.PPTStatusPending,
 	}
 	h.db.Create(&gen)
 
@@ -277,7 +277,7 @@ func (h *PPTHandler) GenerateOutline(c *gin.Context) {
 
 	// 记录用量
 	if h.usageService != nil {
-		_ = h.usageService.RecordPPTUsage(userID, h.pptService.DocGenModel(), gen.ID, usage)
+		_ = h.usageService.RecordPPTUsageWithContext(userID, h.pptService.DocGenModel(), gen.ID, services.UsageContext{Module: "work", Feature: "ppt", Operation: "ppt_outline"}, usage)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -355,7 +355,7 @@ func (h *PPTHandler) ConfirmOutline(c *gin.Context) {
 
 		// 记录用量
 		if h.usageService != nil {
-			_ = h.usageService.RecordPPTUsage(g.UserID, h.pptService.DocGenModel(), g.ID, usage)
+			_ = h.usageService.RecordPPTUsageWithContext(g.UserID, h.pptService.DocGenModel(), g.ID, services.UsageContext{Module: "work", Feature: "ppt", Operation: "ppt_full_generation"}, usage)
 		}
 
 		// 配图策略
@@ -659,12 +659,12 @@ func (h *PPTHandler) GetPPTImageJobs(c *gin.Context) {
 	h.db.Model(&models.PPTImageJob{}).Where("ppt_id = ? AND status = ?", pptID, "failed").Count(&failed)
 
 	c.JSON(http.StatusOK, gin.H{
-		"ppt_id":   gen.ID,
-		"total":    total,
+		"ppt_id":    gen.ID,
+		"total":     total,
 		"completed": completed,
-		"pending":  pending,
-		"failed":   failed,
-		"jobs":     jobs,
+		"pending":   pending,
+		"failed":    failed,
+		"jobs":      jobs,
 	})
 }
 

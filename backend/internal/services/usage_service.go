@@ -29,10 +29,44 @@ type UsageContext struct {
 	NotebookID     uint
 	RequestID      string
 	LatencyMs      int
+	Module         string
+	Feature        string
+	Operation      string
 }
 
 func NewUsageService(cfg *config.Config) *UsageService {
 	return &UsageService{cfg: cfg}
+}
+
+func applyProductContext(log *models.APIUsageLog, ctx UsageContext, fallbackModule, fallbackFeature, fallbackOperation string) {
+	if log == nil {
+		return
+	}
+	log.Module = strings.TrimSpace(ctx.Module)
+	if log.Module == "" {
+		log.Module = fallbackModule
+	}
+	log.Feature = strings.TrimSpace(ctx.Feature)
+	if log.Feature == "" {
+		log.Feature = fallbackFeature
+	}
+	log.Operation = strings.TrimSpace(ctx.Operation)
+	if log.Operation == "" {
+		log.Operation = fallbackOperation
+	}
+}
+
+func defaultChatProductContext(ctx UsageContext) (string, string, string) {
+	if ctx.Module != "" || ctx.Feature != "" || ctx.Operation != "" {
+		return "chat", "chat", "chat_completion"
+	}
+	if ctx.WorkspaceID > 0 {
+		return "workspace", "chat", "workspace_chat_completion"
+	}
+	if ctx.NotebookID > 0 {
+		return "work", "notebook", "notebook_chat_completion"
+	}
+	return "chat", "chat", "chat_completion"
 }
 
 // RecordUsage 通用记录 usage 方法
@@ -69,6 +103,9 @@ func (s *UsageService) RecordChatUsage(userID uint, provider, model, modelType s
 	log := &models.APIUsageLog{
 		UserID:             userID,
 		Service:            "chat",
+		Module:             "chat",
+		Feature:            "chat",
+		Operation:          "chat_completion",
 		Provider:           provider,
 		Model:              model,
 		ModelType:          modelType,
@@ -163,6 +200,8 @@ func (s *UsageService) RecordChatUsageWithContext(userID uint, provider, model, 
 		RequestID:          ctx.RequestID,
 		CreatedAt:          time.Now(),
 	}
+	module, feature, operation := defaultChatProductContext(ctx)
+	applyProductContext(log, ctx, module, feature, operation)
 	applyPriceSnapshot(log, price)
 	return s.RecordUsage(log)
 }
@@ -198,6 +237,11 @@ func (s *UsageService) GetGuestDailyChatCount(guestID string) (int64, error) {
 
 // RecordImageUsage 记录图片生成用量
 func (s *UsageService) RecordImageUsage(userID uint, model string, imageCount int, usage *TokenUsage) error {
+	return s.RecordImageUsageWithContext(userID, model, imageCount, UsageContext{}, usage)
+}
+
+// RecordImageUsageWithContext 记录图片生成/编辑用量（带产品与业务上下文）。
+func (s *UsageService) RecordImageUsageWithContext(userID uint, model string, imageCount int, ctx UsageContext, usage *TokenUsage) error {
 	var promptTokens, completionTokens int
 	if usage != nil {
 		promptTokens = usage.PromptTokens
@@ -260,11 +304,18 @@ func (s *UsageService) RecordImageUsage(userID uint, model string, imageCount in
 
 	log := &models.APIUsageLog{
 		UserID:             userID,
+		GuestID:            ctx.GuestID,
 		Service:            "image_generation",
 		Provider:           "openai",
 		Model:              model,
 		ModelType:          "gpt",
 		ResourceType:       "image_generation",
+		ResourceID:         ctx.ResourceID,
+		ConversationID:     ctx.ConversationID,
+		MessageID:          ctx.MessageID,
+		TaskID:             ctx.TaskID,
+		WorkspaceID:        ctx.WorkspaceID,
+		NotebookID:         ctx.NotebookID,
 		PromptTokens:       promptTokens,
 		CompletionTokens:   completionTokens,
 		TotalTokens:        promptTokens + completionTokens,
@@ -282,14 +333,34 @@ func (s *UsageService) RecordImageUsage(userID uint, model string, imageCount in
 		OutputUnitPriceRMB: outputPrice,
 		Estimated:          estimated,
 		RawUsageJSON:       rawJSON,
+		LatencyMs:          ctx.LatencyMs,
+		RequestID:          ctx.RequestID,
 		CreatedAt:          time.Now(),
 	}
+	if ctx.ResourceType != "" {
+		log.ResourceType = ctx.ResourceType
+	}
+	service := strings.TrimSpace(log.Service)
+	operation := strings.TrimSpace(ctx.Operation)
+	if operation == "" {
+		operation = "text_to_image"
+	}
+	if operation == "image_edit" || operation == "inpaint" || operation == "region_brush" || operation == "replace_bg" {
+		service = "image_edit"
+	}
+	log.Service = service
+	applyProductContext(log, ctx, "creative", "image", operation)
 	applyPriceSnapshot(log, price)
 	return s.RecordUsage(log)
 }
 
 // RecordPPTUsage 记录文档生成（PPT）用量
 func (s *UsageService) RecordPPTUsage(userID uint, model string, resourceID uint, usage *TokenUsage) error {
+	return s.RecordPPTUsageWithContext(userID, model, resourceID, UsageContext{}, usage)
+}
+
+// RecordPPTUsageWithContext 记录文档生成（PPT）用量（带产品与业务上下文）。
+func (s *UsageService) RecordPPTUsageWithContext(userID uint, model string, resourceID uint, ctx UsageContext, usage *TokenUsage) error {
 	if usage == nil {
 		return nil
 	}
@@ -310,12 +381,18 @@ func (s *UsageService) RecordPPTUsage(userID uint, model string, resourceID uint
 
 	log := &models.APIUsageLog{
 		UserID:             userID,
+		GuestID:            ctx.GuestID,
 		Service:            "document_generation",
 		Provider:           "openai",
 		Model:              model,
 		ModelType:          "gpt",
 		ResourceType:       "ppt_generation",
 		ResourceID:         resourceID,
+		ConversationID:     ctx.ConversationID,
+		MessageID:          ctx.MessageID,
+		TaskID:             ctx.TaskID,
+		WorkspaceID:        ctx.WorkspaceID,
+		NotebookID:         ctx.NotebookID,
 		PromptTokens:       usage.PromptTokens,
 		CompletionTokens:   usage.CompletionTokens,
 		TotalTokens:        usage.TotalTokens,
@@ -330,14 +407,28 @@ func (s *UsageService) RecordPPTUsage(userID uint, model string, resourceID uint
 		OutputUnitPriceRMB: price.OutputPriceRMB,
 		Estimated:          usage.Estimated,
 		RawUsageJSON:       rawJSON,
+		LatencyMs:          ctx.LatencyMs,
+		RequestID:          ctx.RequestID,
 		CreatedAt:          time.Now(),
 	}
+	if ctx.ResourceType != "" {
+		log.ResourceType = ctx.ResourceType
+	}
+	if ctx.ResourceID > 0 {
+		log.ResourceID = ctx.ResourceID
+	}
+	applyProductContext(log, ctx, "work", "ppt", "ppt_generation")
 	applyPriceSnapshot(log, price)
 	return s.RecordUsage(log)
 }
 
 // RecordVisionUsage 记录 Vision（图片解析）用量
 func (s *UsageService) RecordVisionUsage(userID uint, guestID, model string, resourceID uint, usage *TokenUsage) error {
+	return s.RecordVisionUsageWithContext(userID, model, resourceID, UsageContext{GuestID: guestID}, usage)
+}
+
+// RecordVisionUsageWithContext 记录 Vision 用量（带产品与业务上下文）。
+func (s *UsageService) RecordVisionUsageWithContext(userID uint, model string, resourceID uint, ctx UsageContext, usage *TokenUsage) error {
 	if usage == nil {
 		return nil
 	}
@@ -358,13 +449,18 @@ func (s *UsageService) RecordVisionUsage(userID uint, guestID, model string, res
 
 	log := &models.APIUsageLog{
 		UserID:             userID,
-		GuestID:            guestID,
+		GuestID:            ctx.GuestID,
 		Service:            "vision",
 		Provider:           "openai",
 		Model:              model,
 		ModelType:          "gpt",
 		ResourceType:       "file",
 		ResourceID:         resourceID,
+		ConversationID:     ctx.ConversationID,
+		MessageID:          ctx.MessageID,
+		TaskID:             ctx.TaskID,
+		WorkspaceID:        ctx.WorkspaceID,
+		NotebookID:         ctx.NotebookID,
 		PromptTokens:       usage.PromptTokens,
 		CompletionTokens:   usage.CompletionTokens,
 		TotalTokens:        usage.TotalTokens,
@@ -379,26 +475,46 @@ func (s *UsageService) RecordVisionUsage(userID uint, guestID, model string, res
 		OutputUnitPriceRMB: price.OutputPriceRMB,
 		Estimated:          usage.Estimated,
 		RawUsageJSON:       rawJSON,
+		LatencyMs:          ctx.LatencyMs,
+		RequestID:          ctx.RequestID,
 		CreatedAt:          time.Now(),
 	}
+	if ctx.ResourceType != "" {
+		log.ResourceType = ctx.ResourceType
+	}
+	if ctx.ResourceID > 0 {
+		log.ResourceID = ctx.ResourceID
+	}
+	applyProductContext(log, ctx, "work", "document_reader", "file_vision_parse")
 	applyPriceSnapshot(log, price)
 	return s.RecordUsage(log)
 }
 
 // RecordEmbeddingUsage 记录 Embedding 用量
 func (s *UsageService) RecordEmbeddingUsage(userID uint, model string, resourceID uint, inputTokens int) error {
+	return s.RecordEmbeddingUsageWithContext(userID, model, resourceID, inputTokens, UsageContext{})
+}
+
+// RecordEmbeddingUsageWithContext 记录 Embedding 用量（带产品与业务上下文）。
+func (s *UsageService) RecordEmbeddingUsageWithContext(userID uint, model string, resourceID uint, inputTokens int, ctx UsageContext) error {
 	price := s.getTokenPriceWithFallback("openai", model, s.cfg.EmbeddingInputPrice, 0)
 	cost := models.CalculateEmbeddingCost(inputTokens, price.InputPriceRMB)
 
 	totalTokens := inputTokens
 	log := &models.APIUsageLog{
 		UserID:            userID,
+		GuestID:           ctx.GuestID,
 		Service:           "embedding",
 		Provider:          "openai",
 		Model:             model,
 		ModelType:         "embedding",
 		ResourceType:      "embedding_job",
 		ResourceID:        resourceID,
+		ConversationID:    ctx.ConversationID,
+		MessageID:         ctx.MessageID,
+		TaskID:            ctx.TaskID,
+		WorkspaceID:       ctx.WorkspaceID,
+		NotebookID:        ctx.NotebookID,
 		PromptTokens:      inputTokens,
 		CompletionTokens:  0,
 		TotalTokens:       totalTokens,
@@ -410,8 +526,17 @@ func (s *UsageService) RecordEmbeddingUsage(userID uint, model string, resourceI
 		PricingUnit:       price.PricingUnit,
 		UnitCount:         float64(totalTokens) / 1000.0,
 		InputUnitPriceRMB: price.InputPriceRMB,
+		LatencyMs:         ctx.LatencyMs,
+		RequestID:         ctx.RequestID,
 		CreatedAt:         time.Now(),
 	}
+	if ctx.ResourceType != "" {
+		log.ResourceType = ctx.ResourceType
+	}
+	if ctx.ResourceID > 0 {
+		log.ResourceID = ctx.ResourceID
+	}
+	applyProductContext(log, ctx, "work", "document_reader", "file_embedding")
 	applyPriceSnapshot(log, price)
 	return s.RecordUsage(log)
 }
@@ -482,6 +607,9 @@ func (s *UsageService) RecordVideoUsage(input VideoUsageInput) error {
 		UserID:             input.UserID,
 		GuestID:            input.GuestID,
 		Service:            "video_generation",
+		Module:             "creative",
+		Feature:            "video",
+		Operation:          "video_generation",
 		Provider:           "volcengine",
 		Model:              input.Model,
 		ModelType:          "video",

@@ -1133,8 +1133,66 @@ func (h *ImageHandler) processImageJob(recordID uint, prompt, size, quality stri
 	h.processImageEditJob(recordID, prompt, size, quality, referenceImagePaths, "", baseURL, image.Point{}, editCanvasTransform{}, "")
 }
 
+func imageOperationForJob(referenceImagePaths []string, maskPath string, background string) string {
+	if maskPath != "" {
+		return "inpaint"
+	}
+	if background == "transparent" {
+		return "remove_bg"
+	}
+	if len(referenceImagePaths) > 0 {
+		return "image_to_image"
+	}
+	return "text_to_image"
+}
+
+func (h *ImageHandler) recordImageJobUsage(recordID uint, imageCount int, operation string, usage *services.TokenUsage) {
+	if h.usageService == nil {
+		return
+	}
+	var gen services.ImageGeneration
+	if dbErr := h.db.First(&gen, recordID).Error; dbErr != nil {
+		return
+	}
+	_ = h.usageService.RecordImageUsageWithContext(gen.UserID, h.cfg.ImageGenModel, imageCount, services.UsageContext{
+		ResourceType: "image_generation",
+		ResourceID:   gen.ID,
+		Module:       "creative",
+		Feature:      "image",
+		Operation:    operation,
+	}, usage)
+}
+
+func (h *ImageHandler) recordLocalImageUtility(recordID uint, operation string) {
+	if h.usageService == nil {
+		return
+	}
+	var gen services.ImageGeneration
+	if dbErr := h.db.First(&gen, recordID).Error; dbErr != nil {
+		return
+	}
+	_ = h.usageService.RecordUsage(&models.APIUsageLog{
+		UserID:       gen.UserID,
+		Service:      "image_utility",
+		Module:       "creative",
+		Feature:      "image",
+		Operation:    operation,
+		Provider:     "local",
+		Model:        "local-image-utility",
+		ModelType:    "local",
+		ResourceType: "image_generation",
+		ResourceID:   gen.ID,
+		Status:       "success",
+		Currency:     "RMB",
+		PricingUnit:  "request",
+		UnitCount:    1,
+		CreatedAt:    time.Now(),
+	})
+}
+
 func (h *ImageHandler) processImageEditJob(recordID uint, prompt, size, quality string, referenceImagePaths []string, maskPath string, baseURL string, targetSize image.Point, transform editCanvasTransform, background string) {
 	ctx := context.Background()
+	operation := imageOperationForJob(referenceImagePaths, maskPath, background)
 
 	var imageURL, b64Data string
 	var err error
@@ -1157,12 +1215,7 @@ func (h *ImageHandler) processImageEditJob(recordID uint, prompt, size, quality 
 			fmt.Printf("[更新状态失败] ID=%d err=%v\n", recordID, saveErr)
 		}
 		// 记录失败用量
-		if h.usageService != nil {
-			var gen services.ImageGeneration
-			if dbErr := h.db.First(&gen, recordID).Error; dbErr == nil {
-				_ = h.usageService.RecordImageUsage(gen.UserID, h.cfg.ImageGenModel, 0, nil)
-			}
-		}
+		h.recordImageJobUsage(recordID, 0, operation, nil)
 		return
 	}
 
@@ -1177,12 +1230,7 @@ func (h *ImageHandler) processImageEditJob(recordID uint, prompt, size, quality 
 			}).Error; saveErr != nil {
 				fmt.Printf("[更新状态失败] ID=%d err=%v\n", recordID, saveErr)
 			}
-			if h.usageService != nil {
-				var gen services.ImageGeneration
-				if dbErr := h.db.First(&gen, recordID).Error; dbErr == nil {
-					_ = h.usageService.RecordImageUsage(gen.UserID, h.cfg.ImageGenModel, 0, nil)
-				}
-			}
+			h.recordImageJobUsage(recordID, 0, operation, nil)
 			return
 		}
 		imageURL = buildImageURL(baseURL, filename)
@@ -1196,12 +1244,7 @@ func (h *ImageHandler) processImageEditJob(recordID uint, prompt, size, quality 
 		}).Error; saveErr != nil {
 			fmt.Printf("[更新状态失败] ID=%d err=%v\n", recordID, saveErr)
 		}
-		if h.usageService != nil {
-			var gen services.ImageGeneration
-			if dbErr := h.db.First(&gen, recordID).Error; dbErr == nil {
-				_ = h.usageService.RecordImageUsage(gen.UserID, h.cfg.ImageGenModel, 0, nil)
-			}
-		}
+		h.recordImageJobUsage(recordID, 0, operation, nil)
 		return
 	}
 
@@ -1214,12 +1257,7 @@ func (h *ImageHandler) processImageEditJob(recordID uint, prompt, size, quality 
 	fmt.Printf("[图片生成成功] ID=%d url=%s\n", recordID, imageURL)
 
 	// 记录成功用量
-	if h.usageService != nil {
-		var gen services.ImageGeneration
-		if dbErr := h.db.First(&gen, recordID).Error; dbErr == nil {
-			_ = h.usageService.RecordImageUsage(gen.UserID, h.cfg.ImageGenModel, 1, nil)
-		}
-	}
+	h.recordImageJobUsage(recordID, 1, operation, nil)
 }
 
 func (h *ImageHandler) processBackgroundRemovalJob(recordID uint, sourcePath string, baseURL string) {
@@ -1290,6 +1328,7 @@ func (h *ImageHandler) processBackgroundRemovalJob(recordID uint, sourcePath str
 		return
 	}
 	fmt.Printf("[背景移除成功] ID=%d output_size=%s url=%s stdout=%s\n", recordID, outputSize, imageURL, stdout.String())
+	h.recordLocalImageUtility(recordID, "remove_bg")
 }
 
 func (h *ImageHandler) processTextRemovalJob(recordID uint, sourcePath string, prompt string, baseURL string) {
@@ -1356,6 +1395,7 @@ func (h *ImageHandler) processTextRemovalJob(recordID uint, sourcePath string, p
 		return
 	}
 	fmt.Printf("[文字消除成功] ID=%d output_size=%s url=%s stdout=%s\n", recordID, outputSize, imageURL, stdout.String())
+	h.recordLocalImageUtility(recordID, "text_removal")
 }
 
 func (h *ImageHandler) processQualityEnhancementJob(recordID uint, sourcePath string, baseURL string) {
@@ -1425,6 +1465,7 @@ func (h *ImageHandler) processQualityEnhancementJob(recordID uint, sourcePath st
 		return
 	}
 	fmt.Printf("[画质高清成功] ID=%d output_size=%s url=%s stdout=%s\n", recordID, outputSize, imageURL, stdout.String())
+	h.recordLocalImageUtility(recordID, "upscale")
 }
 
 func (h *ImageHandler) processBackgroundReplacementJob(recordID uint, sourcePath string, prompt string, originalSize string, baseURL string) {
@@ -1457,6 +1498,7 @@ func (h *ImageHandler) processBackgroundReplacementJob(recordID uint, sourcePath
 		h.failImageGeneration(recordID, "背景替换失败：生成新背景失败")
 		return
 	}
+	h.recordImageJobUsage(recordID, 1, "replace_bg_background_generation", nil)
 	backgroundPath, cleanupBackground, err := h.localizeGeneratedImage(ctx, backgroundURL)
 	defer cleanupBackground()
 	if err != nil {
@@ -1515,6 +1557,7 @@ func (h *ImageHandler) processBackgroundReplacementJob(recordID uint, sourcePath
 		return
 	}
 	fmt.Printf("[背景替换成功] ID=%d output_size=%s background_size=%s url=%s stdout=%s\n", recordID, outputSize, backgroundSize, imageURL, stdout.String())
+	h.recordLocalImageUtility(recordID, "replace_bg_composite")
 }
 
 func (h *ImageHandler) localizeGeneratedImage(ctx context.Context, imageURL string) (string, func(), error) {

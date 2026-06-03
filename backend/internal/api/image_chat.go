@@ -350,6 +350,10 @@ func (h *ImageChatHandler) SendImageChatMessage(c *gin.Context) {
 // processImageChatJob 后台生成图片
 func (h *ImageChatHandler) processImageChatJob(msgID uint, prompt, size, quality string, refPaths []string, baseURL string, chatID uint) {
 	ctx := context.Background()
+	operation := "text_to_image"
+	if len(refPaths) > 0 {
+		operation = "image_to_image"
+	}
 
 	var imageURL, b64Data string
 	var err error
@@ -381,9 +385,7 @@ func (h *ImageChatHandler) processImageChatJob(msgID uint, prompt, size, quality
 			"status":        "failed",
 			"error_message": errMsg,
 		})
-		if h.usageService != nil {
-			_ = h.usageService.RecordImageUsage(0, h.cfg.ImageGenModel, 0, nil)
-		}
+		h.recordImageChatUsage(chatID, msgID, 0, operation)
 		return
 	}
 
@@ -419,9 +421,25 @@ func (h *ImageChatHandler) processImageChatJob(msgID uint, prompt, size, quality
 	h.db.Model(&models.ImageChat{}).Where("id = ?", chatID).Update("updated_at", time.Now())
 
 	// 记录用量
-	if h.usageService != nil {
-		_ = h.usageService.RecordImageUsage(0, h.cfg.ImageGenModel, 1, nil)
+	h.recordImageChatUsage(chatID, msgID, 1, operation)
+}
+
+func (h *ImageChatHandler) recordImageChatUsage(chatID uint, msgID uint, imageCount int, operation string) {
+	if h.usageService == nil {
+		return
 	}
+	var chat models.ImageChat
+	if err := h.db.First(&chat, chatID).Error; err != nil {
+		return
+	}
+	_ = h.usageService.RecordImageUsageWithContext(chat.UserID, h.cfg.ImageGenModel, imageCount, services.UsageContext{
+		ResourceType: "image_chat_message",
+		ResourceID:   msgID,
+		MessageID:    msgID,
+		Module:       "creative",
+		Feature:      "image",
+		Operation:    operation,
+	}, nil)
 }
 
 // processVideoChatJob 后台提交视频任务（兼容 image-chats 里历史遗留的 media_type=video 分支）
