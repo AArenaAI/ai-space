@@ -70,6 +70,9 @@ const AT_BOTTOM_THRESHOLD = 24;
 const SELECT_MODE_EXTRA_SPACER = 80;
 const LONG_MARKDOWN_LAZY_THRESHOLD = 4000;
 const HISTORY_PRELOAD_TOP_PX = 1200;
+const HISTORY_PRELOAD_BOTTOM_PX = CHAT_BOTTOM_SPACER;
+const FAST_SCROLL_PRELOAD_PX = 6000;
+const RETURN_TO_BOTTOM_PRELOAD_BOTTOM_PX = 6000;
 const HISTORY_OVERSCAN_REVERSE = 8;
 type SelectionMode = "share" | "favorite";
 
@@ -210,6 +213,9 @@ function MessageList({
   const userBrowsingTimerRef = useRef<number>(0);
   const [scrollProgress, setScrollProgress] = useState({ ratio: 1, canScroll: false });
   const [, setScrollProgressDragging] = useState(false);
+  const [returnToBottomPreload, setReturnToBottomPreload] = useState(false);
+  const [fastScrollPreload, setFastScrollPreload] = useState(false);
+  const fastScrollPreloadTimerRef = useRef<number>(0);
   const [activeOverviewMessageId, setActiveOverviewMessageId] = useState<string | null>(null);
   const overviewJumpActiveRef = useRef<{ id: string; until: number } | null>(null);
   const userOverviewMessagesRef = useRef<{ id: string; label: string }[]>([]);
@@ -232,6 +238,7 @@ function MessageList({
     }
     bottomLockTimersRef.current.forEach(window.clearTimeout);
     bottomLockTimersRef.current = [];
+    setReturnToBottomPreload(false);
   }, []);
 
   const scrollToBottom = useCallback((behavior: "auto" | "smooth" = "auto") => {
@@ -256,10 +263,14 @@ function MessageList({
       const el = scrollRef.current;
       if (!el || !stickToBottomRef.current) return;
       const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-      if (distanceToBottom > 8) return;
+      if (distanceToBottom > 8) {
+        setReturnToBottomPreload(false);
+        return;
+      }
       const nextTop = Math.ceil(el.scrollHeight - el.clientHeight);
       el.scrollTop = nextTop;
       lastScrollTopRef.current = el.scrollTop;
+      setReturnToBottomPreload(false);
     }, delay));
   }, []);
 
@@ -276,8 +287,8 @@ function MessageList({
     const startTop = el.scrollTop;
     const initialTargetTop = Math.ceil(el.scrollHeight - el.clientHeight);
     const initialDistance = Math.max(0, initialTargetTop - startTop);
-    const duration = Math.min(2400, Math.max(760, initialDistance / 5));
-    const maxDuration = duration + 1600;
+    const duration = Math.min(4200, Math.max(900, initialDistance / 3));
+    const maxDuration = duration + 2200;
     const startedAt = performance.now();
     programmaticScrollUntilRef.current = Date.now() + maxDuration + 400;
 
@@ -290,6 +301,7 @@ function MessageList({
         el.scrollTop = targetTop;
         lastScrollTopRef.current = el.scrollTop;
         bottomSmoothRafRef.current = 0;
+        setReturnToBottomPreload(false);
         return;
       }
 
@@ -301,7 +313,7 @@ function MessageList({
       // continuously remeasure/re-window. Larger per-frame jumps can leave a
       // transient frame where mounted rows exist but none intersect the viewport,
       // which reads as a message flash even though the list is not blank.
-      const maxFrameDelta = 120;
+      const maxFrameDelta = 60;
       const cappedTop = Math.abs(desiredTop - currentTop) > maxFrameDelta
         ? currentTop + Math.sign(desiredTop - currentTop) * maxFrameDelta
         : desiredTop;
@@ -319,6 +331,7 @@ function MessageList({
         }
         lastScrollTopRef.current = el.scrollTop;
         bottomSmoothRafRef.current = 0;
+        if (finalTargetTop - el.scrollTop <= 8) setReturnToBottomPreload(false);
       }
     };
 
@@ -480,12 +493,24 @@ function MessageList({
 
   useEffect(() => () => {
     if (userBrowsingTimerRef.current) window.clearTimeout(userBrowsingTimerRef.current);
+    if (fastScrollPreloadTimerRef.current) window.clearTimeout(fastScrollPreloadTimerRef.current);
     if (bottomSmoothRafRef.current) window.cancelAnimationFrame(bottomSmoothRafRef.current);
   }, []);
 
   const handleUserScrollIntent = useCallback((deltaY: number) => {
     const el = scrollRef.current;
-    if (!el || deltaY >= 0) return;
+    if (!el) return;
+
+    if (Math.abs(deltaY) >= 700) {
+      setFastScrollPreload(true);
+      if (fastScrollPreloadTimerRef.current) window.clearTimeout(fastScrollPreloadTimerRef.current);
+      fastScrollPreloadTimerRef.current = window.setTimeout(() => {
+        fastScrollPreloadTimerRef.current = 0;
+        setFastScrollPreload(false);
+      }, 900);
+    }
+
+    if (deltaY >= 0) return;
     const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     if (distanceToBottom > 1) {
       stopBottomLockForUserBrowse(2500);
@@ -537,6 +562,7 @@ function MessageList({
   const exportPreviewCardRef = useRef<HTMLDivElement>(null);
   const handleScrollToBottomClick = useCallback(() => {
     userScrollOverrideUntilRef.current = 0;
+    setReturnToBottomPreload(true);
     programmaticScrollUntilRef.current = Date.now() + 3200;
     smoothScrollScrollerToBottom();
     lockBottomAfterSmoothScroll();
@@ -1203,7 +1229,10 @@ function MessageList({
             onScroll={handleVirtuosoScroll}
             onWheel={(event) => handleUserScrollIntent(event.deltaY)}
             onTouchMove={() => stopBottomLockForUserBrowse(2500)}
-            increaseViewportBy={{ top: HISTORY_PRELOAD_TOP_PX, bottom: CHAT_BOTTOM_SPACER }}
+            increaseViewportBy={{
+          top: fastScrollPreload ? FAST_SCROLL_PRELOAD_PX : HISTORY_PRELOAD_TOP_PX,
+          bottom: (returnToBottomPreload || fastScrollPreload) ? RETURN_TO_BOTTOM_PRELOAD_BOTTOM_PX : HISTORY_PRELOAD_BOTTOM_PX,
+        }}
             overscan={{ main: 2, reverse: HISTORY_OVERSCAN_REVERSE }}
             components={compareVirtuosoComponents}
             itemContent={(groupIndex, group) => (
@@ -1323,7 +1352,10 @@ function MessageList({
         }}
         onWheel={(event) => handleUserScrollIntent(event.deltaY)}
         onTouchMove={() => stopBottomLockForUserBrowse(2500)}
-        increaseViewportBy={{ top: HISTORY_PRELOAD_TOP_PX, bottom: CHAT_BOTTOM_SPACER }}
+        increaseViewportBy={{
+          top: fastScrollPreload ? FAST_SCROLL_PRELOAD_PX : HISTORY_PRELOAD_TOP_PX,
+          bottom: (returnToBottomPreload || fastScrollPreload) ? RETURN_TO_BOTTOM_PRELOAD_BOTTOM_PX : HISTORY_PRELOAD_BOTTOM_PX,
+        }}
         overscan={{ main: 2, reverse: HISTORY_OVERSCAN_REVERSE }}
         components={virtuosoComponents}
         itemContent={(index, msg) => {
