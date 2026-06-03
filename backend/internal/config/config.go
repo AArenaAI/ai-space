@@ -137,19 +137,27 @@ type ModelPrice struct {
 	VideoUnitPrice   float64 `json:"video_unit_price_rmb,omitempty"`   // 已折算 RMB / 秒；仅用于 env/fallback 兼容
 	RequestUnitPrice float64 `json:"request_unit_price_rmb,omitempty"` // 已折算 RMB / 次；仅用于 env/fallback 兼容
 
-	SourceCurrency            string  `json:"source_currency"`                         // USD / CNY；官方原始定价币种
-	SourceUnit                string  `json:"source_unit"`                             // per_1m_tokens / per_1k_tokens / per_image / per_request
-	SourceInputPrice          float64 `json:"source_input_price,omitempty"`            // 官方输入价；无缓存区分时使用
-	SourceInputCacheHitPrice  float64 `json:"source_input_cache_hit_price,omitempty"`  // 官方缓存命中输入价
-	SourceInputCacheMissPrice float64 `json:"source_input_cache_miss_price,omitempty"` // 官方缓存未命中输入价；当前成本默认使用它
-	SourceOutputPrice         float64 `json:"source_output_price,omitempty"`           // 官方输出价
-	SourceImagePrice          float64 `json:"source_image_price,omitempty"`            // 官方单图价
-	SourceVideoPrice          float64 `json:"source_video_price,omitempty"`            // 官方视频价
-	SourceRequestPrice        float64 `json:"source_request_price,omitempty"`          // 官方单请求价
-	ContextWindowTokens       int     `json:"context_window_tokens,omitempty"`
-	PricingBasis              string  `json:"pricing_basis"`
-	SourceURL                 string  `json:"source_url"`
-	ExchangeRateToRMB         float64 `json:"-"` // 运行时折算汇率快照，不写入价格 JSON
+	SourceCurrency            string             `json:"source_currency"`                         // USD / CNY；官方原始定价币种
+	SourceUnit                string             `json:"source_unit"`                             // per_1m_tokens / per_1k_tokens / per_image / per_request
+	SourceInputPrice          float64            `json:"source_input_price,omitempty"`            // 官方输入价；无缓存区分时使用
+	SourceInputCacheHitPrice  float64            `json:"source_input_cache_hit_price,omitempty"`  // 官方缓存命中输入价
+	SourceInputCacheMissPrice float64            `json:"source_input_cache_miss_price,omitempty"` // 官方缓存未命中输入价；当前成本默认使用它
+	SourceOutputPrice         float64            `json:"source_output_price,omitempty"`           // 官方输出价
+	SourceImagePrice          float64            `json:"source_image_price,omitempty"`            // 官方单图价
+	SourceVideoPrice          float64            `json:"source_video_price,omitempty"`            // 官方视频价
+	SourceRequestPrice        float64            `json:"source_request_price,omitempty"`          // 官方单请求价
+	VideoPricingRules         []VideoPricingRule `json:"video_pricing_rules,omitempty"`           // 视频生成按分辨率/输入视频条件计价
+	ContextWindowTokens       int                `json:"context_window_tokens,omitempty"`
+	PricingBasis              string             `json:"pricing_basis"`
+	SourceURL                 string             `json:"source_url"`
+	ExchangeRateToRMB         float64            `json:"-"` // 运行时折算汇率快照，不写入价格 JSON
+}
+
+type VideoPricingRule struct {
+	Resolution         string  `json:"resolution"`                     // 480p / 720p / 1080p；为空表示任意
+	InputContainsVideo *bool   `json:"input_contains_video,omitempty"` // nil 表示任意
+	SourceOutputPrice  float64 `json:"source_output_price"`            // 官方 token 输出价，配合 source_unit 使用
+	PricingBasis       string  `json:"pricing_basis,omitempty"`
 }
 
 func Load() *Config {
@@ -413,6 +421,8 @@ func addModelPrice(prices map[string]ModelPrice, price ModelPrice, allowZero boo
 			price.PricingUnit = "image"
 		} else if price.VideoUnitPrice > 0 || price.SourceVideoPrice > 0 {
 			price.PricingUnit = "video_second"
+		} else if len(price.VideoPricingRules) > 0 {
+			price.PricingUnit = "token_1k"
 		} else if price.RequestUnitPrice > 0 || price.SourceRequestPrice > 0 {
 			price.PricingUnit = "request"
 		} else {
@@ -430,7 +440,7 @@ func addModelPrice(prices map[string]ModelPrice, price ModelPrice, allowZero boo
 func hasAnyPrice(price ModelPrice) bool {
 	return price.InputPriceRMB > 0 || price.OutputPriceRMB > 0 || price.ImageUnitPrice > 0 || price.VideoUnitPrice > 0 || price.RequestUnitPrice > 0 ||
 		price.SourceInputPrice > 0 || price.SourceInputCacheHitPrice > 0 || price.SourceInputCacheMissPrice > 0 || price.SourceOutputPrice > 0 ||
-		price.SourceImagePrice > 0 || price.SourceVideoPrice > 0 || price.SourceRequestPrice > 0
+		price.SourceImagePrice > 0 || price.SourceVideoPrice > 0 || price.SourceRequestPrice > 0 || len(price.VideoPricingRules) > 0
 }
 
 func knownModelsForProvider(provider string) []string {

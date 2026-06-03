@@ -416,6 +416,101 @@ func (s *UsageService) RecordEmbeddingUsage(userID uint, model string, resourceI
 	return s.RecordUsage(log)
 }
 
+// VideoUsageInput contains the dimensions needed to price a completed video generation task.
+type VideoUsageInput struct {
+	UserID              uint
+	GuestID             string
+	Model               string
+	ResourceID          uint
+	ChatID              uint
+	MessageID           uint
+	TaskID              string
+	DurationSeconds     int
+	Resolution          string
+	ReferenceVideoCount int
+	CompletionTokens    int
+	Estimated           bool
+	Raw                 map[string]any
+}
+
+// RecordVideoUsage records Volcengine Seedance video usage. Seedance 2.0/2.0 Fast are billed by
+// usage.completion_tokens and official per-1M-token prices, not by request count or fixed seconds.
+func (s *UsageService) RecordVideoUsage(input VideoUsageInput) error {
+	if input.Model == "" {
+		return nil
+	}
+	if models.DB != nil {
+		query := models.DB.Model(&models.APIUsageLog{}).Where("service = ?", "video_generation")
+		if input.ResourceID > 0 {
+			query = query.Where("resource_type = ? AND resource_id = ?", "video_generation", input.ResourceID)
+		} else if input.TaskID != "" {
+			query = query.Where("request_id = ?", input.TaskID)
+		}
+		var existing int64
+		if err := query.Count(&existing).Error; err == nil && existing > 0 {
+			return nil
+		}
+	}
+
+	price := s.getVideoPrice("volcengine", input.Model, input.Resolution, input.ReferenceVideoCount > 0)
+	completionTokens := input.CompletionTokens
+	totalTokens := completionTokens
+	outputCost := float64(completionTokens) * price.OutputPriceRMB / 1000.0
+	status := "success"
+	if completionTokens <= 0 {
+		status = "missing_usage"
+		input.Estimated = true
+		outputCost = 0
+	}
+
+	raw := map[string]any{}
+	for k, v := range input.Raw {
+		raw[k] = v
+	}
+	if len(raw) == 0 {
+		raw["completion_tokens"] = completionTokens
+	}
+	raw["resolution"] = input.Resolution
+	raw["reference_video_count"] = input.ReferenceVideoCount
+	raw["duration_seconds"] = input.DurationSeconds
+	rawJSON := ""
+	if b, err := json.Marshal(raw); err == nil {
+		rawJSON = string(b)
+	}
+
+	log := &models.APIUsageLog{
+		UserID:             input.UserID,
+		GuestID:            input.GuestID,
+		Service:            "video_generation",
+		Provider:           "volcengine",
+		Model:              input.Model,
+		ModelType:          "video",
+		ResourceType:       "video_generation",
+		ResourceID:         input.ResourceID,
+		ConversationID:     input.ChatID,
+		MessageID:          input.MessageID,
+		PromptTokens:       0,
+		CompletionTokens:   completionTokens,
+		TotalTokens:        totalTokens,
+		VideoSeconds:       input.DurationSeconds,
+		InputCostRMB:       0,
+		OutputCostRMB:      outputCost,
+		TotalCostRMB:       outputCost,
+		Currency:           "RMB",
+		Status:             status,
+		PricingUnit:        price.PricingUnit,
+		UnitCount:          float64(totalTokens) / 1000.0,
+		InputUnitPriceRMB:  0,
+		OutputUnitPriceRMB: price.OutputPriceRMB,
+		Estimated:          input.Estimated,
+		RawUsageJSON:       rawJSON,
+		RequestID:          input.TaskID,
+		CreatedAt:          time.Now(),
+	}
+	applyPriceSnapshot(log, price)
+	return s.RecordUsage(log)
+}
+
 // getTokenPrice 获取 token 型模型价格：模型级价格优先，provider 级价格兜底。
 func (s *UsageService) getTokenPrice(provider, model string) config.ModelPrice {
 	fallbackInput, fallbackOutput := s.getProviderChatPrice(provider)
@@ -448,6 +543,49 @@ func (s *UsageService) getImagePrice(provider, model string) config.ModelPrice {
 		unit = "token_1k"
 	}
 	return config.ModelPrice{Provider: strings.ToLower(provider), Model: strings.ToLower(model), PricingUnit: unit, InputPriceRMB: s.cfg.ImageGenInputPrice, OutputPriceRMB: s.cfg.ImageGenOutputPrice, ImageUnitPrice: s.cfg.ImageGenUnitPrice, SourceCurrency: "CNY", SourceUnit: "per_1k_tokens", SourceInputPrice: s.cfg.ImageGenInputPrice, SourceOutputPrice: s.cfg.ImageGenOutputPrice, SourceImagePrice: s.cfg.ImageGenUnitPrice, ExchangeRateToRMB: 1}
+}
+
+func (s *UsageService) getVideoPrice(provider, model, resolution string, inputContainsVideo bool) config.ModelPrice {
+	if price, ok := s.getModelPrice(provider, model); ok {
+		if selected, matched := selectVideoPricingRule(price, resolution, inputContainsVideo); matched {
+			price.SourceOutputPrice = selected.SourceOutputPrice
+			if selected.PricingBasis != "" {
+				price.PricingBasis = selected.PricingBasis
+			}
+		}
+		if price.PricingUnit == "" {
+			price.PricingUnit = "token_1k"
+		}
+		return resolveModelPrice(price)
+	}
+	return config.ModelPrice{Provider: strings.ToLower(provider), Model: strings.ToLower(model), PricingUnit: "request", RequestUnitPrice: s.cfg.VideoGenUnitPrice, SourceCurrency: "CNY", SourceUnit: "per_request", SourceRequestPrice: s.cfg.VideoGenUnitPrice, ExchangeRateToRMB: 1}
+}
+
+func selectVideoPricingRule(price config.ModelPrice, resolution string, inputContainsVideo bool) (config.VideoPricingRule, bool) {
+	resolution = strings.ToLower(strings.TrimSpace(resolution))
+	if resolution == "" || resolution == "adaptive" {
+		resolution = "720p"
+	}
+	var fallback config.VideoPricingRule
+	fallbackSet := false
+	for _, rule := range price.VideoPricingRules {
+		ruleResolution := strings.ToLower(strings.TrimSpace(rule.Resolution))
+		resolutionMatches := ruleResolution == "" || ruleResolution == resolution
+		if !resolutionMatches {
+			continue
+		}
+		if rule.InputContainsVideo != nil && *rule.InputContainsVideo != inputContainsVideo {
+			continue
+		}
+		if rule.InputContainsVideo != nil {
+			return rule, true
+		}
+		if !fallbackSet {
+			fallback = rule
+			fallbackSet = true
+		}
+	}
+	return fallback, fallbackSet
 }
 
 func applyPriceSnapshot(log *models.APIUsageLog, price config.ModelPrice) {

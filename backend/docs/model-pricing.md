@@ -83,6 +83,32 @@ per_request   -> source_price * exchange_rate        = RMB / request
 
 For providers with cache-hit/cache-miss input prices, current cost accounting uses `source_input_cache_miss_price` by default because the usage ledger does not yet distinguish cached input tokens. `source_input_cache_hit_price` is preserved for display/audit and future cached-token support.
 
+## Video generation pricing
+
+Volcengine Doubao Seedance 2.0 / 2.0 Fast video generation is priced by official `usage.completion_tokens`, not by request count or a fixed seconds multiplier:
+
+```txt
+video cost = completion_tokens / 1,000,000 * official token unit price
+```
+
+The exact token count comes from the Volcengine task query response. The official formula for estimating token usage is kept only as background reference; ledger rows should use returned `completion_tokens` when available. Successful generations are recorded as `service = video_generation`, `pricing_unit = token_1k`, `source_currency = CNY`, `source_unit = per_1m_tokens`, and preserve the matched official source price snapshot.
+
+Seedance video prices vary by model, output resolution, and whether the input contains a reference video. Configure those cases with `video_pricing_rules`, for example:
+
+```json
+{
+  "provider": "volcengine",
+  "model": "doubao-seedance-2-0-fast-260128",
+  "pricing_unit": "token_1k",
+  "source_currency": "CNY",
+  "source_unit": "per_1m_tokens",
+  "video_pricing_rules": [
+    { "resolution": "720p", "input_contains_video": false, "source_output_price": 37.0 },
+    { "resolution": "720p", "input_contains_video": true, "source_output_price": 22.0 }
+  ]
+}
+```
+
 ## Exchange-rate lookup
 
 USD prices are converted at usage-write time. Lookup order:

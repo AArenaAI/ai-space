@@ -58,6 +58,36 @@ func TestUsageServiceConvertsSourceUSDPriceToRMB(t *testing.T) {
 	}
 }
 
+func TestUsageServiceSelectsSeedanceVideoPricingRule(t *testing.T) {
+	withVideo := true
+	withoutVideo := false
+	svc := NewUsageService(&config.Config{
+		ModelPrices: map[string]config.ModelPrice{
+			"volcengine:doubao-seedance-2-0-260128": {
+				Provider:       "volcengine",
+				Model:          "doubao-seedance-2-0-260128",
+				PricingUnit:    "token_1k",
+				SourceCurrency: "CNY",
+				SourceUnit:     "per_1m_tokens",
+				VideoPricingRules: []config.VideoPricingRule{
+					{Resolution: "720p", InputContainsVideo: &withoutVideo, SourceOutputPrice: 46},
+					{Resolution: "1080p", InputContainsVideo: &withoutVideo, SourceOutputPrice: 51},
+					{Resolution: "1080p", InputContainsVideo: &withVideo, SourceOutputPrice: 31},
+				},
+			},
+		},
+	})
+
+	price720 := svc.getVideoPrice("volcengine", "doubao-seedance-2-0-260128", "720p", false)
+	if price720.OutputPriceRMB != 0.046 || price720.SourceOutputPrice != 46 || price720.ExchangeRateToRMB != 1 {
+		t.Fatalf("expected 720p no-video price ¥46/1M => ¥0.046/1K, got %+v", price720)
+	}
+	price1080Video := svc.getVideoPrice("volcengine", "doubao-seedance-2-0-260128", "1080p", true)
+	if price1080Video.OutputPriceRMB != 0.031 || price1080Video.SourceOutputPrice != 31 {
+		t.Fatalf("expected 1080p with-video price ¥31/1M => ¥0.031/1K, got %+v", price1080Video)
+	}
+}
+
 func TestUsageServiceImageModelPriceOverridesProviderFallback(t *testing.T) {
 	svc := NewUsageService(&config.Config{
 		ImageGenUnitPrice: 0.1,

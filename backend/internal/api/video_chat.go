@@ -291,15 +291,18 @@ func (h *VideoChatHandler) createVideoChatMessagesAndTask(userID uint, chatID ui
 	}
 
 	assistantMsg := models.VideoChatMessage{
-		ChatID:        chatID,
-		Role:          "assistant",
-		Content:       req.Prompt,
-		Status:        "pending",
-		Model:         modelID,
-		Ratio:         ratio,
-		Duration:      duration,
-		GenerateAudio: req.GenerateAudio,
-		Watermark:     req.Watermark,
+		ChatID:              chatID,
+		Role:                "assistant",
+		Content:             req.Prompt,
+		Status:              "pending",
+		Model:               modelID,
+		Ratio:               ratio,
+		Resolution:          resolution,
+		Duration:            duration,
+		GenerateAudio:       req.GenerateAudio,
+		Watermark:           req.Watermark,
+		ReferenceImageCount: len(req.ReferenceImages),
+		ReferenceVideoCount: len(req.ReferenceVideos),
 	}
 	if err := h.db.Create(&assistantMsg).Error; err != nil {
 		return nil, err
@@ -343,26 +346,31 @@ func (h *VideoChatHandler) createVideoChatMessagesAndTask(userID uint, chatID ui
 	}
 
 	video := models.VideoGeneration{
-		UserID:        userID,
-		Prompt:        req.Prompt,
-		Model:         modelID,
-		Ratio:         ratio,
-		Duration:      duration,
-		GenerateAudio: req.GenerateAudio,
-		Watermark:     req.Watermark,
-		TaskID:        resp.TaskID,
-		ChatID:        chatID,
-		MessageID:     assistantMsg.ID,
-		Status:        resp.Status,
+		UserID:              userID,
+		Prompt:              req.Prompt,
+		Model:               modelID,
+		Ratio:               ratio,
+		Resolution:          resolution,
+		Duration:            duration,
+		GenerateAudio:       req.GenerateAudio,
+		Watermark:           req.Watermark,
+		ReferenceImageCount: len(createReq.ReferenceImages),
+		ReferenceVideoCount: len(createReq.ReferenceVideos),
+		TaskID:              resp.TaskID,
+		ChatID:              chatID,
+		MessageID:           assistantMsg.ID,
+		Status:              resp.Status,
 	}
 	if err := h.db.Create(&video).Error; err != nil {
 		return nil, err
 	}
 
 	h.db.Model(&assistantMsg).Updates(map[string]interface{}{
-		"task_id":       resp.TaskID,
-		"generation_id": video.ID,
-		"status":        resp.Status,
+		"task_id":               resp.TaskID,
+		"generation_id":         video.ID,
+		"status":                resp.Status,
+		"reference_image_count": len(createReq.ReferenceImages),
+		"reference_video_count": len(createReq.ReferenceVideos),
 	})
 	assistantMsg.TaskID = resp.TaskID
 	assistantMsg.GenerationID = video.ID
@@ -404,10 +412,54 @@ func (h *VideoChatHandler) refreshPendingVideoChatMessages(chatID uint) {
 			videoUpdates["error_message"] = cleanMsg
 		}
 		h.db.Model(&models.VideoChatMessage{}).Where("id = ?", msg.ID).Updates(updates)
+		var video models.VideoGeneration
 		if msg.GenerationID > 0 {
 			h.db.Model(&models.VideoGeneration{}).Where("id = ?", msg.GenerationID).Updates(videoUpdates)
+			h.db.Where("id = ?", msg.GenerationID).First(&video)
 		} else {
 			h.db.Model(&models.VideoGeneration{}).Where("task_id = ?", msg.TaskID).Updates(videoUpdates)
+			h.db.Where("task_id = ?", msg.TaskID).First(&video)
+		}
+		if (video.Status == "succeeded" || video.Status == "completed") && video.ID > 0 {
+			h.recordVideoUsageIfNeeded(&video, resp)
 		}
 	}
+}
+
+func (h *VideoChatHandler) recordVideoUsageIfNeeded(video *models.VideoGeneration, resp *services.VideoTaskResult) {
+	if video == nil || resp == nil || video.UsageRecorded {
+		return
+	}
+	if resp.CompletionTokens <= 0 {
+		log.Printf("[VideoChat] skip usage log without completion tokens task=%s generation=%d", video.TaskID, video.ID)
+		return
+	}
+	resolution := video.Resolution
+	if resolution == "" {
+		resolution = "720p"
+	}
+	usageSvc := services.NewUsageService(h.cfg)
+	err := usageSvc.RecordVideoUsage(services.VideoUsageInput{
+		UserID:              video.UserID,
+		Model:               video.Model,
+		ResourceID:          video.ID,
+		ChatID:              video.ChatID,
+		MessageID:           video.MessageID,
+		TaskID:              video.TaskID,
+		DurationSeconds:     int(video.Duration),
+		Resolution:          resolution,
+		ReferenceVideoCount: video.ReferenceVideoCount,
+		CompletionTokens:    resp.CompletionTokens,
+		Raw: map[string]any{
+			"completion_tokens": resp.CompletionTokens,
+			"task_id":           resp.TaskID,
+			"source":            "volcengine_get_task",
+		},
+	})
+	if err != nil {
+		log.Printf("[VideoChat] record usage failed task=%s generation=%d err=%v", video.TaskID, video.ID, err)
+		return
+	}
+	h.db.Model(video).Update("usage_recorded", true)
+	video.UsageRecorded = true
 }
