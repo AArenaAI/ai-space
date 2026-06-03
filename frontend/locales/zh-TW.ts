@@ -608,6 +608,7 @@ const translations: Record<string, string> = {
   "chat.interrupted.regenerate": "重新生成",
   "chat.scroll.progressAria": "聊天閱讀進度",
   "chat.overview.jumpToUserMessage": "跳轉到使用者訊息：{label}",
+  "chat.overview.scrollbar": "訊息導覽位置：{current}/{total}",
   "time.duration.seconds": "{seconds}秒",
   "time.duration.minutesSeconds": "{minutes}分{seconds}秒",
   "messageInput.unsupportedFile": "暫不支援該檔案格式",

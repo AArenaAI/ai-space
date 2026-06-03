@@ -607,6 +607,7 @@ const translations: Record<string, string> = {
   "chat.interrupted.regenerate": "Regenerate",
   "chat.scroll.progressAria": "Chat reading progress",
   "chat.overview.jumpToUserMessage": "Jump to user message: {label}",
+  "chat.overview.scrollbar": "संदेश ओवरव्यू स्थिति: {current}/{total}",
   "time.duration.seconds": "{seconds}s",
   "time.duration.minutesSeconds": "{minutes}m {seconds}s",
   "messageInput.unsupportedFile": "Unsupported file format",
