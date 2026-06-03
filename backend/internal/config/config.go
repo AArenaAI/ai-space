@@ -347,7 +347,7 @@ func loadModelPrices() map[string]ModelPrice {
 	if raw := strings.TrimSpace(os.Getenv("MODEL_PRICES_JSON")); raw != "" {
 		loadModelPricesFromJSON(prices, []byte(raw))
 	}
-	for _, provider := range []string{"openai", "anthropic", "gemini", "deepseek", "moonshot", "volcengine"} {
+	for _, provider := range []string{"openai", "anthropic", "gemini", "deepseek", "moonshot", "volcengine", "google-cloud-translate-v3"} {
 		for _, model := range knownModelsForProvider(provider) {
 			prefix := modelPriceEnvPrefix(provider, model)
 			price := ModelPrice{Provider: provider, Model: model}
@@ -455,6 +455,8 @@ func knownModelsForProvider(provider string) []string {
 		return []string{"kimi-k2.5", "kimi-k2.6"}
 	case "volcengine":
 		return []string{"doubao-seedance-2-0-fast-260128", "doubao-seedance-2-0-260128"}
+	case "google-cloud-translate-v3":
+		return []string{"general/nmt", "general/translation-llm"}
 	default:
 		return nil
 	}

@@ -229,5 +229,27 @@
     ],
     "pricing_basis": "official_completion_tokens_x_token_unit_price_success_only",
     "source_url": "https://www.volcengine.com/docs/82379/1544106?lang=zh#02affcb8"
+  },
+  {
+    "provider": "google-cloud-translate-v3",
+    "model": "general/nmt",
+    "pricing_unit": "character_1m",
+    "source_currency": "USD",
+    "source_unit": "per_1m_characters_source",
+    "source_input_price": 20.0,
+    "source_output_price": 0.0,
+    "pricing_basis": "google_cloud_translation_advanced_nmt_source_text_characters; charged on source characters only",
+    "source_url": "user_provided_google_cloud_translation_pricing"
+  },
+  {
+    "provider": "google-cloud-translate-v3",
+    "model": "general/translation-llm",
+    "pricing_unit": "character_1m",
+    "source_currency": "USD",
+    "source_unit": "per_1m_characters_input_output",
+    "source_input_price": 10.0,
+    "source_output_price": 10.0,
+    "pricing_basis": "google_cloud_translation_llm_input_and_output_characters; approximately $20 per 1M source characters when output length is similar",
+    "source_url": "user_provided_google_cloud_translation_pricing"
   }
 ]

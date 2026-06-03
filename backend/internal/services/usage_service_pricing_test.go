@@ -111,3 +111,48 @@ func TestUsageServiceImageModelPriceOverridesProviderFallback(t *testing.T) {
 		t.Fatalf("expected image fallback 0.1 image, got %+v", fallback)
 	}
 }
+
+func TestUsageServiceGoogleTranslateCharacterPricing(t *testing.T) {
+	t.Setenv("USD_CNY_RATE", "7")
+	svc := NewUsageService(&config.Config{
+		ModelPrices: map[string]config.ModelPrice{
+			"google-cloud-translate-v3:general/nmt": {
+				Provider:         "google-cloud-translate-v3",
+				Model:            "general/nmt",
+				PricingUnit:      "character_1m",
+				SourceCurrency:   "USD",
+				SourceUnit:       "per_1m_characters_source",
+				SourceInputPrice: 20,
+			},
+			"google-cloud-translate-v3:general/translation-llm": {
+				Provider:          "google-cloud-translate-v3",
+				Model:             "general/translation-llm",
+				PricingUnit:       "character_1m",
+				SourceCurrency:    "USD",
+				SourceUnit:        "per_1m_characters_input_output",
+				SourceInputPrice:  10,
+				SourceOutputPrice: 10,
+			},
+		},
+	})
+
+	nmt := svc.getCharacterPrice("google-cloud-translate-v3", "general/nmt")
+	if nmt.InputPriceRMB != 140 || nmt.OutputPriceRMB != 0 || nmt.PricingUnit != "character_1m" {
+		t.Fatalf("expected NMT $20/1M source chars => ¥140/1M chars, got %+v", nmt)
+	}
+
+	llm := svc.getCharacterPrice("google-cloud-translate-v3", "general/translation-llm")
+	if llm.InputPriceRMB != 70 || llm.OutputPriceRMB != 70 || llm.ExchangeRateToRMB != 7 {
+		t.Fatalf("expected Translation LLM $10+$10/1M chars => ¥70+¥70/1M chars, got %+v", llm)
+	}
+}
+
+func TestNormalizeTranslationUsageModel(t *testing.T) {
+	full := "projects/demo/locations/global/models/general/translation-llm"
+	if got := normalizeTranslationUsageModel(full); got != "general/translation-llm" {
+		t.Fatalf("expected short model path, got %q", got)
+	}
+	if got := normalizeTranslationUsageModel("general/nmt"); got != "general/nmt" {
+		t.Fatalf("expected unchanged short model, got %q", got)
+	}
+}

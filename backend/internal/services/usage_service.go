@@ -541,6 +541,86 @@ func (s *UsageService) RecordEmbeddingUsageWithContext(userID uint, model string
 	return s.RecordUsage(log)
 }
 
+// TranslationUsageInput contains character-based usage for dedicated translation APIs.
+type TranslationUsageInput struct {
+	UserID             uint
+	GuestID            string
+	Provider           string
+	Model              string
+	SourceLanguage     string
+	TargetLanguage     string
+	InputCharacters    int
+	OutputCharacters   int
+	DetectedSourceLang string
+	LatencyMs          int
+	RequestID          string
+	Raw                map[string]any
+}
+
+// RecordTranslationUsage records Google Cloud Translation usage. Google Translate is billed by
+// characters, not tokens: NMT charges source text characters; Translation LLM charges input and output characters.
+func (s *UsageService) RecordTranslationUsage(input TranslationUsageInput) error {
+	provider := strings.TrimSpace(input.Provider)
+	if provider == "" {
+		provider = "google-cloud-translate-v3"
+	}
+	model := normalizeTranslationUsageModel(input.Model)
+	if model == "" {
+		model = "general/nmt"
+	}
+	price := s.getCharacterPrice(provider, model)
+	inputChars := maxInt(input.InputCharacters, 0)
+	outputChars := maxInt(input.OutputCharacters, 0)
+	inputCost := float64(inputChars) * price.InputPriceRMB / 1_000_000.0
+	outputCost := 0.0
+	if price.OutputPriceRMB > 0 {
+		outputCost = float64(outputChars) * price.OutputPriceRMB / 1_000_000.0
+	}
+
+	raw := map[string]any{
+		"source_language":          input.SourceLanguage,
+		"target_language":          input.TargetLanguage,
+		"detected_source_language": input.DetectedSourceLang,
+		"input_characters":         inputChars,
+		"output_characters":        outputChars,
+	}
+	for k, v := range input.Raw {
+		raw[k] = v
+	}
+	rawJSON := ""
+	if b, err := json.Marshal(raw); err == nil {
+		rawJSON = string(b)
+	}
+
+	log := &models.APIUsageLog{
+		UserID:             input.UserID,
+		GuestID:            input.GuestID,
+		Service:            "translation",
+		Provider:           strings.ToLower(provider),
+		Model:              strings.ToLower(model),
+		ModelType:          "translation",
+		Module:             "work",
+		Feature:            "translator",
+		Operation:          "translate_text",
+		CharacterCount:     inputChars,
+		InputCostRMB:       inputCost,
+		OutputCostRMB:      outputCost,
+		TotalCostRMB:       inputCost + outputCost,
+		Currency:           "RMB",
+		Status:             "success",
+		PricingUnit:        price.PricingUnit,
+		UnitCount:          float64(inputChars) / 1_000_000.0,
+		InputUnitPriceRMB:  price.InputPriceRMB,
+		OutputUnitPriceRMB: price.OutputPriceRMB,
+		LatencyMs:          input.LatencyMs,
+		RequestID:          input.RequestID,
+		RawUsageJSON:       rawJSON,
+		CreatedAt:          time.Now(),
+	}
+	applyPriceSnapshot(log, price)
+	return s.RecordUsage(log)
+}
+
 // VideoUsageInput contains the dimensions needed to price a completed video generation task.
 type VideoUsageInput struct {
 	UserID              uint
@@ -689,6 +769,16 @@ func (s *UsageService) getVideoPrice(provider, model, resolution string, inputCo
 	return config.ModelPrice{Provider: strings.ToLower(provider), Model: strings.ToLower(model), PricingUnit: "request", RequestUnitPrice: s.cfg.VideoGenUnitPrice, SourceCurrency: "CNY", SourceUnit: "per_request", SourceRequestPrice: s.cfg.VideoGenUnitPrice, ExchangeRateToRMB: 1}
 }
 
+func (s *UsageService) getCharacterPrice(provider, model string) config.ModelPrice {
+	if price, ok := s.getModelPrice(provider, model); ok && hasCharacterPrice(price) {
+		if price.PricingUnit == "" {
+			price.PricingUnit = "character_1m"
+		}
+		return resolveModelPrice(price)
+	}
+	return config.ModelPrice{Provider: strings.ToLower(provider), Model: strings.ToLower(model), PricingUnit: "character_1m", SourceCurrency: "CNY", SourceUnit: "per_1m_characters", ExchangeRateToRMB: 1}
+}
+
 func selectVideoPricingRule(price config.ModelPrice, resolution string, inputContainsVideo bool) (config.VideoPricingRule, bool) {
 	resolution = strings.ToLower(strings.TrimSpace(resolution))
 	if resolution == "" || resolution == "adaptive" {
@@ -739,6 +829,10 @@ func hasImagePrice(price config.ModelPrice) bool {
 	return hasTokenPrice(price) || price.ImageUnitPrice > 0 || price.SourceImagePrice > 0
 }
 
+func hasCharacterPrice(price config.ModelPrice) bool {
+	return price.PricingUnit == "character_1m" || strings.Contains(strings.ToLower(price.SourceUnit), "character")
+}
+
 func resolveModelPrice(price config.ModelPrice) config.ModelPrice {
 	rate := exchangeRateToRMB(price.SourceCurrency)
 	if rate <= 0 {
@@ -771,11 +865,31 @@ func convertSourceUnitToRMB(sourceUnit string, price, rate float64) float64 {
 	switch strings.ToLower(strings.TrimSpace(sourceUnit)) {
 	case "per_1m_tokens":
 		return price * rate / 1000.0
+	case "per_1m_characters_source", "per_1m_characters_input_output", "per_1m_characters", "per_1m_chars":
+		return price * rate
 	case "per_1k_tokens", "per_image", "per_request", "per_video_second":
 		return price * rate
 	default:
 		return price * rate
 	}
+}
+
+func normalizeTranslationUsageModel(model string) string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return ""
+	}
+	if idx := strings.LastIndex(model, "/models/"); idx >= 0 {
+		return model[idx+len("/models/"):]
+	}
+	return model
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func exchangeRateToRMB(currency string) float64 {
