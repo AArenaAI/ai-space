@@ -32,6 +32,35 @@ async function scrollUntilUserMessageText(page, text) {
   throw new Error(`user message text not found after scrolling: ${text}`);
 }
 
+async function assertAssistantCodeAnswerStableWhileScrolling(page) {
+  const samples = [];
+  const scrollerBox = await page.locator('[data-testid="virtuoso-scroller"]').boundingBox();
+  if (!scrollerBox) throw new Error("virtuoso scroller box not found");
+  await page.mouse.move(scrollerBox.x + scrollerBox.width / 2, scrollerBox.y + scrollerBox.height / 2);
+
+  for (let step = 0; step < 80; step += 1) {
+    if (step % 8 === 0) await page.mouse.wheel(0, step < 40 ? -600 : 900);
+    await page.waitForTimeout(45);
+    samples.push(await page.evaluate(() => {
+      const row = document.querySelector('[data-chat-message-row="true"][data-message-id="assistant-code"]');
+      const rect = row?.getBoundingClientRect();
+      return {
+        height: rect?.height || 0,
+        hasAnswerText: Boolean(row?.textContent?.includes("下面是一个长代码块")) || Boolean(row?.querySelector('[data-testid="markdown-code-block"]')),
+        answerFallbackCount: [...(row?.querySelectorAll('[data-markdown-plain-fallback]') || [])].filter((el) => !el.closest('.reasoning-markdown')).length,
+        codeBlockCount: row?.querySelectorAll('[data-testid="markdown-code-block"]').length || 0,
+      };
+    }));
+  }
+
+  const missingAnswer = samples.filter((sample) => !sample.hasAnswerText);
+  await assert.equal(missingAnswer.length, 0, `assistant answer should not disappear while scrolling: ${JSON.stringify(missingAnswer.slice(0, 3))}`);
+  for (let index = 1; index < samples.length; index += 1) {
+    const drop = samples[index - 1].height - samples[index].height;
+    await assert.ok(drop <= 120, `assistant-code row should not shrink abruptly while renderer loads: ${JSON.stringify({ previous: samples[index - 1], next: samples[index], drop })}`);
+  }
+}
+
 (async () => {
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
@@ -60,11 +89,16 @@ async function scrollUntilUserMessageText(page, text) {
     await assert.match(await fileChips.nth(0).innerText(), /需求说明\.txt/);
     await assert.match(await fileChips.nth(1).innerText(), /长文档报告\.pdf/);
 
+    const initialAssistantCodeRowHeight = await page.evaluate(() => document.querySelector('[data-chat-message-row="true"][data-message-id="assistant-code"]')?.getBoundingClientRect().height || 0);
+    await assert.ok(initialAssistantCodeRowHeight < 1600, `historical long markdown fallback should not create a giant row before rich markdown loads: ${initialAssistantCodeRowHeight}`);
+
     const longCodeBlock = page.locator('[data-testid="markdown-code-block"]').first();
     await longCodeBlock.waitFor({ state: "visible", timeout: 10_000 });
     await assert.match(await longCodeBlock.innerText(), /代码块较长，已折叠/);
     await assert.match(await longCodeBlock.innerText(), /150 行 \/ 5\.1k 字符/);
     await assert.equal(await longCodeBlock.locator('text=long code line 150').count(), 0, "long code should be collapsed initially");
+
+    await assertAssistantCodeAnswerStableWhileScrolling(page);
 
     const historicalReasoningToggle = page.locator('[data-chat-message-row="true"][data-message-id="assistant-code"] button[aria-expanded]').first();
     await historicalReasoningToggle.waitFor({ state: "attached", timeout: 10_000 });

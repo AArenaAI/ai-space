@@ -70,6 +70,9 @@ const AT_BOTTOM_THRESHOLD = 24;
 const SELECT_MODE_EXTRA_SPACER = 80;
 const LONG_MARKDOWN_LAZY_THRESHOLD = 4000;
 const HISTORY_PRELOAD_TOP_PX = 1200;
+const HISTORY_PRELOAD_BOTTOM_PX = CHAT_BOTTOM_SPACER;
+const FAST_SCROLL_PRELOAD_PX = 6000;
+const RETURN_TO_BOTTOM_PRELOAD_BOTTOM_PX = 6000;
 const HISTORY_OVERSCAN_REVERSE = 8;
 type SelectionMode = "share" | "favorite";
 
@@ -203,12 +206,16 @@ function MessageList({
   const userScrollOverrideUntilRef = useRef(0);
   const bottomLockRafRef = useRef<number>(0);
   const bottomLockTimersRef = useRef<number[]>([]);
+  const bottomSmoothRafRef = useRef<number>(0);
   const [atBottom, setAtBottom] = useState(true);
   const atBottomRef = useRef(true);
   const [userBrowsing, setUserBrowsing] = useState(false);
   const userBrowsingTimerRef = useRef<number>(0);
   const [scrollProgress, setScrollProgress] = useState({ ratio: 1, canScroll: false });
   const [, setScrollProgressDragging] = useState(false);
+  const [returnToBottomPreload, setReturnToBottomPreload] = useState(false);
+  const [fastScrollPreload, setFastScrollPreload] = useState(false);
+  const fastScrollPreloadTimerRef = useRef<number>(0);
   const [activeOverviewMessageId, setActiveOverviewMessageId] = useState<string | null>(null);
   const overviewJumpActiveRef = useRef<{ id: string; until: number } | null>(null);
   const userOverviewMessagesRef = useRef<{ id: string; label: string }[]>([]);
@@ -225,20 +232,111 @@ function MessageList({
       cancelAnimationFrame(bottomLockRafRef.current);
       bottomLockRafRef.current = 0;
     }
+    if (bottomSmoothRafRef.current) {
+      cancelAnimationFrame(bottomSmoothRafRef.current);
+      bottomSmoothRafRef.current = 0;
+    }
     bottomLockTimersRef.current.forEach(window.clearTimeout);
     bottomLockTimersRef.current = [];
+    setReturnToBottomPreload(false);
   }, []);
 
-  const scrollToBottom = useCallback(() => {
+  const scrollToBottom = useCallback((behavior: "auto" | "smooth" = "auto") => {
     programmaticScrollUntilRef.current = Date.now() + 320;
     const el = scrollRef.current;
-    virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end", behavior: "auto" });
+    virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end", behavior });
     if (el) {
       const nextTop = Math.ceil(el.scrollHeight - el.clientHeight);
-      el.scrollTop = nextTop;
+      if (behavior === "smooth") {
+        el.scrollTo({ top: nextTop, behavior: "smooth" });
+      } else {
+        el.scrollTop = nextTop;
+      }
       lastScrollTopRef.current = el.scrollTop;
     }
   }, []);
+
+  const lockBottomAfterSmoothScroll = useCallback(() => {
+    bottomLockTimersRef.current.forEach(window.clearTimeout);
+    bottomLockTimersRef.current = [2600].map((delay) => window.setTimeout(() => {
+      if (Date.now() < userScrollOverrideUntilRef.current) return;
+      const el = scrollRef.current;
+      if (!el || !stickToBottomRef.current) return;
+      const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (distanceToBottom > 8) {
+        setReturnToBottomPreload(false);
+        return;
+      }
+      const nextTop = Math.ceil(el.scrollHeight - el.clientHeight);
+      el.scrollTop = nextTop;
+      lastScrollTopRef.current = el.scrollTop;
+      setReturnToBottomPreload(false);
+    }, delay));
+  }, []);
+
+  const smoothScrollScrollerToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) {
+      scrollToBottom("smooth");
+      return;
+    }
+    if (bottomSmoothRafRef.current) {
+      cancelAnimationFrame(bottomSmoothRafRef.current);
+      bottomSmoothRafRef.current = 0;
+    }
+    const startTop = el.scrollTop;
+    const initialTargetTop = Math.ceil(el.scrollHeight - el.clientHeight);
+    const initialDistance = Math.max(0, initialTargetTop - startTop);
+    const duration = Math.min(4200, Math.max(900, initialDistance / 3));
+    const maxDuration = duration + 2200;
+    const startedAt = performance.now();
+    programmaticScrollUntilRef.current = Date.now() + maxDuration + 400;
+
+    const step = (now: number) => {
+      const elapsed = now - startedAt;
+      const targetTop = Math.ceil(el.scrollHeight - el.clientHeight);
+      const remaining = targetTop - el.scrollTop;
+
+      if (remaining <= 1) {
+        el.scrollTop = targetTop;
+        lastScrollTopRef.current = el.scrollTop;
+        bottomSmoothRafRef.current = 0;
+        setReturnToBottomPreload(false);
+        return;
+      }
+
+      const progress = Math.min(1, elapsed / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const desiredTop = Math.min(targetTop, startTop + Math.max(0, targetTop - startTop) * eased);
+      const currentTop = el.scrollTop;
+      // Keep the programmatic button scroll slow enough for Virtuoso to
+      // continuously remeasure/re-window. Larger per-frame jumps can leave a
+      // transient frame where mounted rows exist but none intersect the viewport,
+      // which reads as a message flash even though the list is not blank.
+      const maxFrameDelta = 60;
+      const cappedTop = Math.abs(desiredTop - currentTop) > maxFrameDelta
+        ? currentTop + Math.sign(desiredTop - currentTop) * maxFrameDelta
+        : desiredTop;
+      el.scrollTop = Math.min(targetTop, Math.round(cappedTop));
+      lastScrollTopRef.current = el.scrollTop;
+
+      const nextRemaining = Math.ceil(el.scrollHeight - el.clientHeight) - el.scrollTop;
+      if ((progress < 1 || nextRemaining > 1) && elapsed < maxDuration) {
+        bottomSmoothRafRef.current = requestAnimationFrame(step);
+      } else {
+        const finalTargetTop = Math.ceil(el.scrollHeight - el.clientHeight);
+        const finalRemaining = finalTargetTop - el.scrollTop;
+        if (finalRemaining > 1 && finalRemaining <= maxFrameDelta) {
+          el.scrollTop = finalTargetTop;
+        }
+        lastScrollTopRef.current = el.scrollTop;
+        bottomSmoothRafRef.current = 0;
+        if (finalTargetTop - el.scrollTop <= 8) setReturnToBottomPreload(false);
+      }
+    };
+
+    bottomSmoothRafRef.current = requestAnimationFrame(step);
+  }, [scrollToBottom]);
 
   const updateScrollProgressFromElement = useCallback((el: HTMLElement | null) => {
     if (!el) {
@@ -395,11 +493,24 @@ function MessageList({
 
   useEffect(() => () => {
     if (userBrowsingTimerRef.current) window.clearTimeout(userBrowsingTimerRef.current);
+    if (fastScrollPreloadTimerRef.current) window.clearTimeout(fastScrollPreloadTimerRef.current);
+    if (bottomSmoothRafRef.current) window.cancelAnimationFrame(bottomSmoothRafRef.current);
   }, []);
 
   const handleUserScrollIntent = useCallback((deltaY: number) => {
     const el = scrollRef.current;
-    if (!el || deltaY >= 0) return;
+    if (!el) return;
+
+    if (Math.abs(deltaY) >= 700) {
+      setFastScrollPreload(true);
+      if (fastScrollPreloadTimerRef.current) window.clearTimeout(fastScrollPreloadTimerRef.current);
+      fastScrollPreloadTimerRef.current = window.setTimeout(() => {
+        fastScrollPreloadTimerRef.current = 0;
+        setFastScrollPreload(false);
+      }, 900);
+    }
+
+    if (deltaY >= 0) return;
     const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     if (distanceToBottom > 1) {
       stopBottomLockForUserBrowse(2500);
@@ -451,12 +562,11 @@ function MessageList({
   const exportPreviewCardRef = useRef<HTMLDivElement>(null);
   const handleScrollToBottomClick = useCallback(() => {
     userScrollOverrideUntilRef.current = 0;
-    stickToBottomRef.current = true;
-    atBottomRef.current = true;
-    setAtBottom(true);
-    scrollToBottom();
-    lockBottomAfterLayout();
-  }, [lockBottomAfterLayout, scrollToBottom]);
+    setReturnToBottomPreload(true);
+    programmaticScrollUntilRef.current = Date.now() + 3200;
+    smoothScrollScrollerToBottom();
+    lockBottomAfterSmoothScroll();
+  }, [lockBottomAfterSmoothScroll, smoothScrollScrollerToBottom]);
 
   const createVirtuosoComponents = useCallback(<T,>(): Components<T, unknown> => ({
     Footer: () => <div style={{ height: CHAT_BOTTOM_SPACER + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0) }} aria-hidden="true" />,
@@ -733,7 +843,7 @@ function MessageList({
         stickToBottomRef.current = true;
         requestAnimationFrame(() => {
           scrollToBottom();
-          requestAnimationFrame(scrollToBottom);
+          requestAnimationFrame(() => scrollToBottom());
         });
       }
     }
@@ -1119,7 +1229,10 @@ function MessageList({
             onScroll={handleVirtuosoScroll}
             onWheel={(event) => handleUserScrollIntent(event.deltaY)}
             onTouchMove={() => stopBottomLockForUserBrowse(2500)}
-            increaseViewportBy={{ top: HISTORY_PRELOAD_TOP_PX, bottom: CHAT_BOTTOM_SPACER }}
+            increaseViewportBy={{
+          top: fastScrollPreload ? FAST_SCROLL_PRELOAD_PX : HISTORY_PRELOAD_TOP_PX,
+          bottom: (returnToBottomPreload || fastScrollPreload) ? RETURN_TO_BOTTOM_PRELOAD_BOTTOM_PX : HISTORY_PRELOAD_BOTTOM_PX,
+        }}
             overscan={{ main: 2, reverse: HISTORY_OVERSCAN_REVERSE }}
             components={compareVirtuosoComponents}
             itemContent={(groupIndex, group) => (
@@ -1239,7 +1352,10 @@ function MessageList({
         }}
         onWheel={(event) => handleUserScrollIntent(event.deltaY)}
         onTouchMove={() => stopBottomLockForUserBrowse(2500)}
-        increaseViewportBy={{ top: HISTORY_PRELOAD_TOP_PX, bottom: CHAT_BOTTOM_SPACER }}
+        increaseViewportBy={{
+          top: fastScrollPreload ? FAST_SCROLL_PRELOAD_PX : HISTORY_PRELOAD_TOP_PX,
+          bottom: (returnToBottomPreload || fastScrollPreload) ? RETURN_TO_BOTTOM_PRELOAD_BOTTOM_PX : HISTORY_PRELOAD_BOTTOM_PX,
+        }}
         overscan={{ main: 2, reverse: HISTORY_OVERSCAN_REVERSE }}
         components={virtuosoComponents}
         itemContent={(index, msg) => {

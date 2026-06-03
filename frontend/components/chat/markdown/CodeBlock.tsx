@@ -68,7 +68,9 @@ export default function CodeBlock({ language, value }: { language: string; value
         </div>
       </div>
       {expanded ? (
-        <LazySyntaxHighlighter language={language} value={value} />
+        <div className="max-h-[400px] overflow-auto">
+          <LazySyntaxHighlighter language={language} value={value} />
+        </div>
       ) : (
         <div className="bg-[#0D1117] px-4 py-3 text-[13px] text-gray-300" data-testid="markdown-code-collapsed-preview">
           <pre className="max-h-28 overflow-hidden whitespace-pre-wrap break-words font-mono">{value.slice(0, LONG_CODE_PREVIEW_CHAR_LIMIT)}</pre>

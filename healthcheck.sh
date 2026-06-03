@@ -1,22 +1,37 @@
 #!/bin/bash
-# AI Pool 健康检查自恢复脚本
-# 每 3 分钟检查前端和后端，挂了自动重启
+# AI Space 后端健康检查自恢复脚本（测试环境：非 systemd）
+# 用法: ./healthcheck.sh
+# 说明: 前端静态文件由 nginx 映射，脚本只检查/恢复后端。
 
-BACKEND_PORT=9091
-FRONTEND_PORT=9090
-BACKEND_DIR="/workspace/aipool/backend"
-FRONTEND_DIR="/workspace/aipool"
+BACKEND_PORT="${BACKEND_PORT:-9091}"
+PROJECT_DIR="/workspace/aipool"
+BACKEND_DIR="$PROJECT_DIR/backend"
+BACKEND_BIN="$BACKEND_DIR/aipool"
+RUN_DIR="$PROJECT_DIR/run"
+LOG_DIR="$PROJECT_DIR/logs"
+BACKEND_LOG="$LOG_DIR/backend.log"
+PID_FILE="$RUN_DIR/backend.pid"
+LEGACY_PID_FILE="/tmp/aipool/pids.txt"
 
-# 检查后端
-if ! curl -sf http://localhost:$BACKEND_PORT/health > /dev/null 2>&1; then
-    echo "[$(date)] 后端 $BACKEND_PORT 挂了，正在重启..."
-    cd "$BACKEND_DIR" && PORT=$BACKEND_PORT nohup ./aipool > /dev/null 2>&1 &
-    echo "[$(date)] 后端已重启"
-fi
+mkdir -p "$RUN_DIR" "$LOG_DIR" /tmp/aipool
 
-# 检查前端
-if ! curl -sf -o /dev/null http://localhost:$FRONTEND_PORT/ > /dev/null 2>&1; then
-    echo "[$(date)] 前端 $FRONTEND_PORT 挂了，正在重启..."
-    cd "$FRONTEND_DIR" && nohup node server.js > /dev/null 2>&1 &
-    echo "[$(date)] 前端已重启"
+if ! curl -sf "http://127.0.0.1:$BACKEND_PORT/health" > /dev/null 2>&1; then
+    {
+        echo ""
+        echo "========== $(date -Is) healthcheck restarting aipool port=$BACKEND_PORT =========="
+    } >> "$BACKEND_LOG"
+
+    pid=$(lsof -ti :"$BACKEND_PORT" 2>/dev/null || true)
+    if [ -n "$pid" ]; then
+        echo "[$(date -Is)] cleaning stale port $BACKEND_PORT pid=$pid" >> "$BACKEND_LOG"
+        kill -9 $pid 2>/dev/null || true
+        sleep 1
+    fi
+
+    cd "$BACKEND_DIR" || exit 1
+    PORT="$BACKEND_PORT" nohup "$BACKEND_BIN" >> "$BACKEND_LOG" 2>&1 &
+    BACKEND_PID=$!
+    echo "$BACKEND_PID" > "$PID_FILE"
+    echo "$BACKEND_PID" > "$LEGACY_PID_FILE"
+    echo "[$(date -Is)] backend restarted pid=$BACKEND_PID log=$BACKEND_LOG" >> "$BACKEND_LOG"
 fi

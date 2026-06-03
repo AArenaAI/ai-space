@@ -1,12 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import dynamic from "next/dynamic";
+import type { ComponentType } from "react";
+import MarkdownPlainFallback from "./markdown/MarkdownPlainFallback";
 
-const MarkdownRenderer = dynamic(() => import("./MarkdownRenderer"), {
-  ssr: false,
-  loading: () => <MarkdownFallback content="" loading />,
-});
+type MarkdownRendererProps = { content: string; isStreaming?: boolean };
+
+let markdownRendererPromise: Promise<{ default: ComponentType<MarkdownRendererProps> }> | null = null;
+let MarkdownRendererModule: ComponentType<MarkdownRendererProps> | null = null;
+
+function loadMarkdownRenderer() {
+  if (!markdownRendererPromise) {
+    markdownRendererPromise = import("./MarkdownRenderer").then((module) => {
+      MarkdownRendererModule = module.default;
+      return { default: module.default as ComponentType<MarkdownRendererProps> };
+    });
+  }
+  return markdownRendererPromise;
+}
 
 const DEFAULT_ROOT_MARGIN = "700px 0px";
 const DEFAULT_IDLE_TIMEOUT = 600;
@@ -16,14 +27,7 @@ function MarkdownFallback({ content, loading }: { content: string; loading?: boo
     return <div className="h-5 w-32 rounded bg-surface-card animate-pulse" />;
   }
 
-  return (
-    <div
-      data-i18n-skip="true"
-      className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-text-primary"
-    >
-      {content}
-    </div>
-  );
+  return <MarkdownPlainFallback content={content} />;
 }
 
 export function DeferredMarkdownRenderer({
@@ -41,7 +45,19 @@ export function DeferredMarkdownRenderer({
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [shouldRenderMarkdown, setShouldRenderMarkdown] = useState(false);
+  const [Renderer, setRenderer] = useState(() => MarkdownRendererModule);
   const hasRenderedMarkdownRef = useRef(false);
+
+  useEffect(() => {
+    if (!shouldRenderMarkdown || Renderer) return;
+    let cancelled = false;
+    loadMarkdownRenderer().then((module) => {
+      if (!cancelled) setRenderer(() => module.default);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [Renderer, shouldRenderMarkdown]);
 
   useEffect(() => {
     if (shouldRenderMarkdown) {
@@ -121,7 +137,7 @@ export function DeferredMarkdownRenderer({
 
   return (
     <div ref={hostRef}>
-      {shouldRenderMarkdown ? <MarkdownRenderer content={content} isStreaming={isStreaming} /> : <MarkdownFallback content={content} />}
+      {shouldRenderMarkdown && Renderer ? <Renderer content={content} isStreaming={isStreaming} /> : <MarkdownFallback content={content} />}
     </div>
   );
 }
