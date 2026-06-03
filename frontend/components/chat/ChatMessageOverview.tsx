@@ -33,15 +33,12 @@ function getCenteredStart(items: ChatMessageOverviewItem[]) {
 /** 表盘流动效果：距离中心越远，opacity 和 scale 越小 */
 function getWheelStyle(index: number) {
   const distance = Math.abs(index - CENTER);
-  const opacity = Math.max(0.12, 1 - distance * 0.22);
   const scale = Math.max(0.72, 1 - distance * 0.07);
-  return { opacity, transform: `scaleX(${scale})` };
+  return { transform: `scaleX(${scale})` };
 }
 
 function getWheelTextStyle(index: number) {
-  const distance = Math.abs(index - CENTER);
-  const opacity = Math.max(0.25, 1 - distance * 0.18);
-  return { opacity };
+  return undefined;
 }
 
 function markerClass(active: boolean, isWheel: boolean) {
@@ -148,11 +145,6 @@ const ChatMessageOverview = memo(function ChatMessageOverview({
           onWheel={handleOverviewWheel}
           data-testid="chat-message-overview-panel"
         >
-          {/* 顶部渐隐遮罩 */}
-          {isWheel && (
-            <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-10 bg-gradient-to-b from-surface-elevated via-surface-elevated/80 to-transparent" />
-          )}
-
           {windowItems.map((item, idx) => {
             const wheelTextStyle = isWheel ? getWheelTextStyle(idx) : undefined;
             return (
@@ -189,10 +181,6 @@ const ChatMessageOverview = memo(function ChatMessageOverview({
             );
           })}
 
-          {/* 底部渐隐遮罩 */}
-          {isWheel && (
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-10 bg-gradient-to-t from-surface-elevated via-surface-elevated/80 to-transparent" />
-          )}
         </div>
       </div>
     </div>
