@@ -72,12 +72,14 @@ function MarkdownFallback({ content, loading }: { content: string; loading?: boo
 
 export function DeferredMarkdownRenderer({
   content,
+  shouldHydrateRichText = true,
   rootMargin = DEFAULT_ROOT_MARGIN,
   idleTimeout = DEFAULT_IDLE_TIMEOUT,
   keepRenderedOnContentChange = false,
   isStreaming = false,
 }: {
   content: string;
+  shouldHydrateRichText?: boolean;
   rootMargin?: string;
   idleTimeout?: number;
   keepRenderedOnContentChange?: boolean;
@@ -117,6 +119,16 @@ export function DeferredMarkdownRenderer({
       } else {
         setShouldRenderMarkdown(true);
       }
+      return;
+    }
+
+    if (!shouldHydrateRichText) {
+      if (!hasRenderedMarkdownRef.current) setShouldRenderMarkdown(false);
+      emitChatRenderProfileEvent("markdown-hydrate-waiting-for-viewport", {
+        contentLength: content.length,
+        codeBlocks: complexity.codeBlocks,
+        tableLines: complexity.tableLines,
+      });
       return;
     }
 
@@ -213,7 +225,7 @@ export function DeferredMarkdownRenderer({
       cancelled = true;
       cleanupIdle?.();
     };
-  }, [complexity.codeBlocks, complexity.isHeavy, complexity.tableLines, content, idleTimeout, keepRenderedOnContentChange, rootMargin]);
+  }, [complexity.codeBlocks, complexity.isHeavy, complexity.tableLines, content, idleTimeout, keepRenderedOnContentChange, rootMargin, shouldHydrateRichText]);
 
   return (
     <div ref={hostRef}>

@@ -12,7 +12,7 @@ import { StreamingText } from "./StreamingText";
 import { ThinkBlock } from "./ThinkBlock";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 
-type MarkdownRendererComponent = ComponentType<{ content: string }>;
+type MarkdownRendererComponent = ComponentType<{ content: string; shouldHydrateRichText?: boolean }>;
 
 const JUST_COMPLETED_REASONING_EXPAND_MS = 5 * 60 * 1000;
 const justCompletedReasoningMessageIds = new Map<string, number>();
@@ -47,6 +47,7 @@ export function AssistantMessageContent({
   isStreaming,
   className,
   MarkdownRenderer = DeferredMarkdownRenderer,
+  shouldHydrateRichText = true,
   recoverEmptyContent = false,
   onRegenerate,
 }: {
@@ -54,6 +55,7 @@ export function AssistantMessageContent({
   isStreaming: boolean;
   className?: string;
   MarkdownRenderer?: MarkdownRendererComponent;
+  shouldHydrateRichText?: boolean;
   recoverEmptyContent?: boolean;
   onRegenerate?: () => void;
 }) {
@@ -119,7 +121,7 @@ export function AssistantMessageContent({
   return (
     <div className={cn("prose prose-sm max-w-none", className)}>
       {reasoning && <ThinkBlock content={reasoning} isThinking={isThinking} defaultExpanded={keepReasoningExpanded} />}
-      <MarkdownRenderer content={cleanAnswer} />
+      <MarkdownRenderer content={cleanAnswer} shouldHydrateRichText={shouldHydrateRichText} />
     </div>
   );
 }

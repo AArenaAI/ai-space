@@ -14,7 +14,7 @@ import { useI18n } from "@/lib/i18n";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
 import MarkdownPlainFallback from "./markdown/MarkdownPlainFallback";
 
-type MarkdownRendererProps = { content: string; isStreaming?: boolean };
+type MarkdownRendererProps = { content: string; isStreaming?: boolean; shouldHydrateRichText?: boolean };
 let markdownRendererPromise: Promise<{ default: ComponentType<MarkdownRendererProps> }> | null = null;
 let MarkdownRendererModule: ComponentType<MarkdownRendererProps> | null = null;
 
@@ -167,16 +167,16 @@ function formatMessageForTextExport(
   return sections.join("\n\n");
 }
 
-const MemoMarkdownRenderer = memo(function MemoMarkdownRenderer({ content }: { content: string }) {
+const MemoMarkdownRenderer = memo(function MemoMarkdownRenderer({ content }: { content: string; shouldHydrateRichText?: boolean }) {
   return <LoadableMarkdownRenderer content={content} />;
 });
 
-function LazyMarkdownRenderer({ content }: { content: string }) {
+function LazyMarkdownRenderer({ content, shouldHydrateRichText = true }: { content: string; shouldHydrateRichText?: boolean }) {
   if (content.length < LONG_MARKDOWN_LAZY_THRESHOLD) {
-    return <MemoMarkdownRenderer content={content} />;
+    return <MemoMarkdownRenderer content={content} shouldHydrateRichText={shouldHydrateRichText} />;
   }
 
-  return <DeferredMarkdownRenderer content={content} />;
+  return <DeferredMarkdownRenderer content={content} shouldHydrateRichText={shouldHydrateRichText} />;
 }
 
 function MessageList({

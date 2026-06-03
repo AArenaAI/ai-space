@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, type CSSProperties } from "react";
+import { memo, useEffect, useRef, useState, type CSSProperties } from "react";
 import { User, Check, Play, SquareCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
@@ -20,6 +20,7 @@ const MESSAGE_ROW_CONTENT_VISIBILITY_STYLE: CSSProperties = {
   contentVisibility: "auto",
   containIntrinsicSize: "auto 180px",
 };
+const MARKDOWN_HYDRATE_ROOT_MARGIN = "1800px 0px";
 
 function emitChatRenderProfileEvent(phase: string, detail: Record<string, unknown> = {}) {
   if (typeof window === "undefined") return;
@@ -88,7 +89,10 @@ function MessageRow({
 }: MessageRowProps) {
   const { t } = useI18n();
   const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+  const rowRef = useRef<HTMLDivElement | null>(null);
   const isUser = msg.role === "user";
+  const forceHydrateRichText = isLast || isHighlighted;
+  const [isNearViewport, setIsNearViewport] = useState(forceHydrateRichText);
   const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && isLast;
   const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
   const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
@@ -105,8 +109,37 @@ function MessageRow({
     });
   });
 
+  useEffect(() => {
+    if (isUser) return;
+    if (forceHydrateRichText) {
+      setIsNearViewport(true);
+      return;
+    }
+    if (isNearViewport) return;
+    const row = rowRef.current;
+    if (!row || !("IntersectionObserver" in window)) {
+      setIsNearViewport(true);
+      return;
+    }
+    const root = row.closest('[data-testid="virtuoso-scroller"]') as Element | null;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setIsNearViewport(true);
+        emitChatRenderProfileEvent("message-row-markdown-near-viewport", {
+          conversationId,
+          messageId: msg.id,
+          contentLength: msg.content?.length || 0,
+        });
+        observer.disconnect();
+      }
+    }, { root, rootMargin: MARKDOWN_HYDRATE_ROOT_MARGIN });
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [conversationId, forceHydrateRichText, isNearViewport, isUser, msg.content, msg.id]);
+
   return (
     <div
+      ref={rowRef}
       data-chat-message-row="true"
       data-message-id={msg.id}
       data-message-role={msg.role}
@@ -194,7 +227,7 @@ function MessageRow({
                 <UserMessageContent message={msg} imageLoadFailedLabel={imageLoadFailedLabel} />
               ) : (
                 <>
-                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} recoverEmptyContent onRegenerate={onRegenerate} />
+                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={isNearViewport || forceHydrateRichText} recoverEmptyContent onRegenerate={onRegenerate} />
                   {msg.stopped && onContinueGenerate && (
                     <button
                       onClick={onContinueGenerate}
