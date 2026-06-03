@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback, useMemo, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
+import Image from "next/image";
 import { Check, ChevronDown, Star } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -78,6 +79,7 @@ function getLocalizedModelDescription(model: ChatModel, language: LanguageCode, 
 function ModelAvatar({ meta, size = "md", language }: { meta: ModelAvatarMeta; size?: "sm" | "md" | "lg"; language: LanguageCode }) {
   const Icon = meta.icon;
   const label = !prefersChinese(language) && meta.labelEn ? meta.labelEn : meta.label;
+  const pixelSize = size === "sm" ? 20 : size === "md" ? 24 : 28;
   return (
     <span
       className={cn(
@@ -89,7 +91,21 @@ function ModelAvatar({ meta, size = "md", language }: { meta: ModelAvatarMeta; s
       style={{ backgroundColor: meta.background, color: meta.color }}
       title={label}
     >
-      {Icon ? <Icon className="h-[74%] w-[74%]" /> : meta.fallback}
+      {meta.iconSrc ? (
+        <Image
+          src={meta.iconSrc}
+          alt=""
+          width={pixelSize}
+          height={pixelSize}
+          className="h-full w-full object-contain p-[3px]"
+          aria-hidden="true"
+          unoptimized
+        />
+      ) : Icon ? (
+        <Icon className="h-[74%] w-[74%]" />
+      ) : (
+        meta.fallback
+      )}
     </span>
   );
 }
