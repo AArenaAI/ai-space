@@ -69,6 +69,58 @@ const dictionaries: Record<LanguageCode, Translations> = {
   "fil": fil,
 };
 
+const LANGUAGE_CODES = new Set<LanguageCode>(LANGUAGES.map((language) => language.code));
+
+const browserLanguageMap: Record<string, LanguageCode> = {
+  zh: "zh-CN",
+  "zh-cn": "zh-CN",
+  "zh-hans": "zh-CN",
+  "zh-sg": "zh-CN",
+  "zh-tw": "zh-TW",
+  "zh-hant": "zh-TW",
+  "zh-hk": "zh-TW",
+  "zh-mo": "zh-TW",
+  en: "en",
+  ja: "ja",
+  ko: "ko",
+  id: "id",
+  th: "th",
+  vi: "vi",
+  es: "es",
+  fr: "fr",
+  de: "de",
+  pt: "pt-BR",
+  "pt-br": "pt-BR",
+  hi: "hi",
+  ru: "ru",
+  tr: "tr",
+  ms: "ms",
+  fil: "fil",
+  tl: "fil",
+};
+
+function isSupportedLanguage(value: string | null | undefined): value is LanguageCode {
+  return Boolean(value && LANGUAGE_CODES.has(value as LanguageCode));
+}
+
+function normalizeBrowserLanguage(value: string | null | undefined): LanguageCode | null {
+  if (!value) return null;
+  const normalized = value.toLowerCase();
+  if (browserLanguageMap[normalized]) return browserLanguageMap[normalized];
+  const base = normalized.split("-")[0];
+  return browserLanguageMap[base] || null;
+}
+
+function detectBrowserLanguage(): LanguageCode | null {
+  if (typeof window === "undefined") return null;
+  const candidates = navigator.languages?.length ? navigator.languages : [navigator.language];
+  for (const candidate of candidates) {
+    const language = normalizeBrowserLanguage(candidate);
+    if (language) return language;
+  }
+  return null;
+}
+
 interface I18nContextType {
   language: LanguageCode;
   setLanguage: (lang: LanguageCode) => void;
@@ -82,10 +134,13 @@ function getInitialLanguage(): LanguageCode {
   if (typeof window === "undefined") return "zh-CN";
 
   const currentLang = document.documentElement.lang as LanguageCode;
-  if (LANGUAGES.find((l) => l.code === currentLang)) return currentLang;
+  if (isSupportedLanguage(currentLang)) return currentLang;
 
   const saved = localStorage.getItem("language") as LanguageCode | null;
-  if (saved && LANGUAGES.find((l) => l.code === saved)) return saved;
+  if (isSupportedLanguage(saved)) return saved;
+
+  const browserLanguage = detectBrowserLanguage();
+  if (browserLanguage) return browserLanguage;
 
   return "zh-CN";
 }
@@ -100,9 +155,41 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     document.documentElement.classList.remove("prefs-pending");
   }, [language]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (localStorage.getItem("languageSource") === "user") return;
+
+    const browserLanguage = detectBrowserLanguage();
+    if (browserLanguage) {
+      localStorage.setItem("language", browserLanguage);
+      localStorage.setItem("languageSource", "browser");
+      setLanguageState(browserLanguage);
+      document.documentElement.lang = browserLanguage;
+      return;
+    }
+
+    const controller = new AbortController();
+    fetch("/api/locale/detect", { signal: controller.signal })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { language?: string } | null) => {
+        if (!data || !isSupportedLanguage(data.language)) return;
+        if (localStorage.getItem("languageSource") === "user") return;
+        localStorage.setItem("language", data.language);
+        localStorage.setItem("languageSource", "geo");
+        setLanguageState(data.language);
+        document.documentElement.lang = data.language;
+      })
+      .catch(() => {
+        // Locale detection is best-effort only; keep the current/default language.
+      });
+
+    return () => controller.abort();
+  }, []);
+
   const setLanguage = useCallback((lang: LanguageCode) => {
     setLanguageState(lang);
     localStorage.setItem("language", lang);
+    localStorage.setItem("languageSource", "user");
     document.documentElement.lang = lang;
   }, []);
 

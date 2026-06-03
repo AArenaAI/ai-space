@@ -91,6 +91,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	router.GET("/api/models/chat", GetChatModelsHandler)
 	router.GET("/api/models/image", GetImageModelsHandler)
 	router.GET("/api/models/video", GetVideoModelsHandler)
+	router.GET("/api/locale/detect", DetectLocale)
 
 	// 认证路由
 	authHandler := NewAuthHandler(db, cfg)
