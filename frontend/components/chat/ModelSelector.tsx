@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback, useMemo, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
-import Image from "next/image";
 import { Check, ChevronDown, Star } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -11,6 +10,7 @@ import { getModelAvatarMeta, type ModelAvatarMeta } from "@/lib/models/modelAvat
 import { getModelCapabilitySummary, getPrimaryModelCapabilities } from "@/lib/models/modelCapabilities";
 import { getModelRecommendation, getRecommendedModels, isModelRecommended, type ModelRecommendationContext } from "@/lib/models/modelRecommendations";
 import { getModelStatusBadge, getModelStatusLabel, isModelAvailable } from "@/lib/models/modelAvailability";
+import { ModelAvatar } from "./ModelAvatar";
 import { ModelCapabilityBadges } from "./ModelCapabilityBadge";
 
 interface ModelSelectorProps {
@@ -74,40 +74,6 @@ function getLocalizedModelDescription(model: ChatModel, language: LanguageCode, 
   if (override) return prefersChinese(language) ? override.zh : override.en;
   if (model.description && (prefersChinese(language) || !hasCjkText(model.description))) return model.description;
   return t(getModelCapabilitySummary(model));
-}
-
-function ModelAvatar({ meta, size = "md", language }: { meta: ModelAvatarMeta; size?: "sm" | "md" | "lg"; language: LanguageCode }) {
-  const Icon = meta.icon;
-  const label = !prefersChinese(language) && meta.labelEn ? meta.labelEn : meta.label;
-  const pixelSize = size === "sm" ? 20 : size === "md" ? 24 : 28;
-  return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full font-bold",
-        size === "sm" && "h-5 w-5 text-[9px]",
-        size === "md" && "h-6 w-6 text-[10px]",
-        size === "lg" && "h-7 w-7 text-[11px]"
-      )}
-      style={{ backgroundColor: meta.background, color: meta.color }}
-      title={label}
-    >
-      {meta.iconSrc ? (
-        <Image
-          src={meta.iconSrc}
-          alt=""
-          width={pixelSize}
-          height={pixelSize}
-          className="h-full w-full object-contain p-[3px]"
-          aria-hidden="true"
-          unoptimized
-        />
-      ) : Icon ? (
-        <Icon className="h-[74%] w-[74%]" />
-      ) : (
-        meta.fallback
-      )}
-    </span>
-  );
 }
 
 function getRecentModels(): string[] {
@@ -297,7 +263,7 @@ export default function ModelSelector({
         title={statusBadge ? t(statusBadge) : t(getModelCapabilitySummary(model))}
       >
         <div className="mt-0.5">
-          <ModelAvatar meta={avatar} size="md" language={language} />
+          <ModelAvatar meta={avatar} size="md" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
@@ -353,7 +319,7 @@ export default function ModelSelector({
         title={statusBadge ? t(statusBadge) : t(getModelCapabilitySummary(model))}
       >
         <div className="mt-1">
-          <ModelAvatar meta={avatar} size="lg" language={language} />
+          <ModelAvatar meta={avatar} size="lg" />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
@@ -418,7 +384,7 @@ export default function ModelSelector({
         )}
         title={selectedAvailable ? t(getModelCapabilitySummary(selected)) : t(selectedStatusLabel)}
       >
-        <ModelAvatar meta={getModelAvatarMeta(selected)} size="md" language={language} />
+        <ModelAvatar meta={getModelAvatarMeta(selected)} size="md" />
         <span className="truncate">{selected.name}</span>
         {!selectedAvailable && (
           <span className="rounded-full bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-medium text-rose-500 shrink-0">
@@ -512,7 +478,7 @@ export default function ModelSelector({
                         : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                     )}
                   >
-                    <ModelAvatar meta={group.avatar} size="lg" language={language} />
+                    <ModelAvatar meta={group.avatar} size="lg" />
                     <span className="flex-1 text-sm font-medium truncate">
                       {group.label}
                     </span>
@@ -533,7 +499,7 @@ export default function ModelSelector({
                 onMouseLeave={handlePopoverLeave}
               >
                 <div className="px-4 py-2 text-xs font-medium text-text-tertiary uppercase tracking-wider border-b border-surface-border mb-1.5 flex items-center gap-2.5">
-                  <ModelAvatar meta={activeGroup.avatar} size="sm" language={language} />
+                  <ModelAvatar meta={activeGroup.avatar} size="sm" />
                   {activeGroup.label}
                   <span className="text-xs text-text-tertiary/60 tabular-nums ml-auto normal-case">
                     {activeGroup.items.length} {t("model.countSuffix")}

@@ -43,6 +43,13 @@ const PROVIDER_AVATARS: Record<string, ProviderAvatarConfig> = {
     fallback: "O",
     iconSrc: `${ICON_BASE}/openai.svg`,
   },
+  gpt: {
+    label: "OpenAI",
+    color: "#111827",
+    background: "rgba(17, 24, 39, 0.10)",
+    fallback: "O",
+    iconSrc: `${ICON_BASE}/openai.svg`,
+  },
   anthropic: {
     label: "Anthropic",
     color: "#CC785C",

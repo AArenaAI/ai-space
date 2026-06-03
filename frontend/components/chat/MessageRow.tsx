@@ -1,16 +1,18 @@
 "use client";
 
 import { memo } from "react";
-import { User, Bot, Check, Play, SquareCheck } from "lucide-react";
+import { User, Check, Play, SquareCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 import type { ChatModel, Message } from "@/lib/chatTypes";
+import { getModelAvatarMeta } from "@/lib/models/modelAvatars";
 import type { InferredGroup } from "@/lib/groups";
 import { isMessageGenerating } from "@/lib/chatContent";
 import { AssistantMessageMeta } from "./AssistantMessageMeta";
 import MessageActions from "./MessageActions";
 import UserMessageContent from "./UserMessageContent";
 import { AssistantMessageContent } from "./AssistantMessageContent";
+import { ModelAvatar } from "./ModelAvatar";
 
 type MarkdownRendererComponent = Parameters<typeof AssistantMessageContent>[0]["MarkdownRenderer"];
 
@@ -72,6 +74,7 @@ function MessageRow({
   const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && isLast;
   const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
   const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
+  const assistantAvatarMeta = getModelAvatarMeta(model || msg.model || "AI");
 
   return (
     <div data-chat-message-row="true" data-message-id={msg.id} data-message-role={msg.role} className={cn("max-w-[800px] mx-auto px-4 py-4 rounded-2xl transition-colors duration-500", isHighlighted && "bg-brand/10")}>
@@ -92,7 +95,7 @@ function MessageRow({
                   group && group.assistantMessages.length > 1 && "cursor-pointer hover:bg-surface-elevated"
                 )}
               >
-                <Bot className="w-4 h-4 text-text-secondary" />
+                <ModelAvatar meta={assistantAvatarMeta} size="lg" className="h-full w-full rounded-lg" />
                 {group && group.assistantMessages.length > 1 && (
                   <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-brand text-[8px] font-bold text-white flex items-center justify-center border border-white dark:border-[#1F1F1F]">
                     {group.assistantMessages.length}
@@ -103,6 +106,7 @@ function MessageRow({
                 <div className="avatar-dropdown absolute top-full left-0 mt-1.5 z-50 w-44 rounded-xl border border-surface-border bg-surface-elevated shadow-xl py-1.5 px-1.5 flex flex-col gap-0.5">
                   {group.assistantMessages.map((a, idx) => {
                     const avatarModel = a.model ? modelById.get(a.model) : undefined;
+                    const avatarMeta = getModelAvatarMeta(avatarModel || a.model || "AI");
                     const isActive = (groupViews?.get(group.id) ?? 0) === idx;
                     return (
                       <button
@@ -116,9 +120,7 @@ function MessageRow({
                           isActive ? "bg-surface-card text-text-primary font-medium shadow-sm" : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                         )}
                       >
-                        <div className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold text-white shrink-0" style={{ backgroundColor: avatarModel?.color }}>
-                          {(avatarModel?.name || a.model || t("chat.model.fallback", { index: String(idx + 1) })).slice(0, 1).toUpperCase()}
-                        </div>
+                        <ModelAvatar meta={avatarMeta} size="xs" />
                         <span className="text-xs truncate">{avatarModel?.name || a.model || t("chat.model.fallback", { index: String(idx + 1) })}</span>
                         {isActive && <Check className="w-3 h-3 text-text-primary shrink-0 ml-auto" />}
                       </button>
