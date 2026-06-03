@@ -46,6 +46,9 @@ backend/bin/
 backend/main
 backend/aipool-test
 backend/aipool.bak.*
+backend/aipool.backup.*
+backend/test_logs/
+backend/tmp_check/
 
 # Go test cache
 *.test
