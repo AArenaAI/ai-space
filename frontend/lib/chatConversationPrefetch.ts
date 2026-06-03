@@ -10,7 +10,9 @@ import {
 import {
   hasConversationSnapshot,
   setConversationSnapshot,
+  type CachedConversationSnapshot,
 } from "@/lib/chatConversationCache";
+import { setPersistentConversationSnapshot } from "@/lib/chatConversationPersistentCache";
 import type { Message } from "@/lib/chatTypes";
 
 const DEFAULT_MAX_CONCURRENT_PREFETCHES = 2;
@@ -76,12 +78,10 @@ export async function prefetchConversationSnapshot({
     let data: ConversationRestoreResponse;
     let totalMessages: number | undefined;
     try {
-      const [restoreData, count] = await Promise.all([
-        fetchRestore({ apiBaseUrl, conversationId, token, signal }),
-        fetchCount({ apiBaseUrl, conversationId, token, signal }).catch(() => undefined),
-      ]);
-      data = restoreData;
-      totalMessages = count;
+      data = await fetchRestore({ apiBaseUrl, conversationId, token, signal });
+      totalMessages = typeof data.total === "number"
+        ? data.total
+        : await fetchCount({ apiBaseUrl, conversationId, token, signal }).catch(() => undefined);
     } catch (error: any) {
       if (signal?.aborted || error?.name === "AbortError") return false;
       return false;
@@ -97,7 +97,7 @@ export async function prefetchConversationSnapshot({
     });
     if (!restoreState) return false;
 
-    setConversationSnapshot({
+    const snapshot: CachedConversationSnapshot = {
       conversationId,
       title: data.title || "",
       messages: restoreState.mergedMessages as Message[],
@@ -111,7 +111,9 @@ export async function prefetchConversationSnapshot({
       skillKey: resolveConversationSkillKey(data.skill_key, skillKey),
       fetchedAt: Date.now(),
       updatedAt: Date.now(),
-    });
+    };
+    setConversationSnapshot(snapshot);
+    setPersistentConversationSnapshot(snapshot);
     return true;
   })().finally(() => {
     inFlightPrefetches.delete(conversationId);

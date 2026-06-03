@@ -33,6 +33,7 @@ import { CREATIVE_PAGE_HREFS, CREATIVE_PAGE_PATHS } from "./ToolsSidebar";
 import { WORK_PAGE_HREFS, WORK_PAGE_PATHS } from "./WorkToolsSidebar";
 import { invalidateConversationSnapshot } from "@/lib/chatConversationCache";
 import { prefetchConversationSnapshot } from "@/lib/chatConversationPrefetch";
+import { deletePersistentConversationSnapshot } from "@/lib/chatConversationPersistentCache";
 
 
 const isPathInGroup = (pathname: string | null, paths: string[]) => {
@@ -684,7 +685,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     const token = localStorage.getItem("token"); if (!token) return;
-    try { const r = await fetch(`/api/conversations/${deleteTarget}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }); if (r.ok) { invalidateConversationSnapshot(deleteTarget); const next = conversations.filter(c => c.id !== deleteTarget); setConversations(next); cachedConversations = next; if (String(deleteTarget) === currentConvId) {
+    try { const r = await fetch(`/api/conversations/${deleteTarget}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }); if (r.ok) { invalidateConversationSnapshot(deleteTarget); deletePersistentConversationSnapshot(deleteTarget); const next = conversations.filter(c => c.id !== deleteTarget); setConversations(next); cachedConversations = next; if (String(deleteTarget) === currentConvId) {
       if (skillKey) {
         router.push(`/skills/chat?key=${skillKey}`);
       } else {

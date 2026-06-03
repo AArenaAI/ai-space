@@ -12,6 +12,10 @@ export type ConversationRestoreResponse = {
   compare_models?: string;
   skill_key?: string;
   messages?: ForkChatPersistedMessage[];
+  total?: number;
+  has_more?: boolean;
+  snapshot_version?: string;
+  last_assistant_status?: ConversationRestoreStatusResponse;
 };
 
 export type ActiveConversationTaskStreamInfo = {

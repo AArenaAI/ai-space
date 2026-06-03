@@ -2,6 +2,7 @@ package api
 
 import (
 	"aipool-backend/internal/models"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -254,10 +255,11 @@ func (h *ConversationHandler) Get(c *gin.Context) {
 		msgTail = t
 	}
 
+	var total int64
+	h.db.Model(&models.Message{}).Where("conversation_id = ?", conv.ID).Count(&total)
+
 	msgQuery := h.db.Where("conversation_id = ?", conv.ID).Order("created_at asc, id asc").Preload("MessageFiles")
 	if msgTail > 0 {
-		var total int64
-		h.db.Model(&models.Message{}).Where("conversation_id = ?", conv.ID).Count(&total)
 		offset := int(total) - msgTail
 		if offset < 0 {
 			offset = 0
@@ -280,7 +282,28 @@ func (h *ConversationHandler) Get(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, conv)
+	response := gin.H{
+		"id":               conv.ID,
+		"user_id":          conv.UserID,
+		"workspace_id":     conv.WorkspaceID,
+		"title":            conv.Title,
+		"model":            conv.Model,
+		"compare":          conv.Compare,
+		"compare_models":   conv.CompareModels,
+		"skill_key":        conv.SkillKey,
+		"pinned":           conv.Pinned,
+		"created_at":       conv.CreatedAt,
+		"updated_at":       conv.UpdatedAt,
+		"messages":         conv.Messages,
+		"total":            total,
+		"has_more":         len(conv.Messages) < int(total),
+		"snapshot_version": fmt.Sprintf("%d:%d:%d", conv.ID, total, conv.UpdatedAt.UnixNano()),
+	}
+	if status := h.buildLastAssistantStatusPayload(conv.Messages); status != nil {
+		response["last_assistant_status"] = status
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 func (h *ConversationHandler) Delete(c *gin.Context) {
@@ -410,6 +433,56 @@ func (h *ConversationHandler) GetMessages(c *gin.Context) {
 		"limit":    limit,
 		"offset":   offset,
 	})
+}
+
+func (h *ConversationHandler) buildLastAssistantStatusPayload(messages []models.Message) gin.H {
+	var lastAssistant *models.Message
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "assistant" {
+			lastAssistant = &messages[i]
+			break
+		}
+	}
+	if lastAssistant == nil {
+		return nil
+	}
+
+	var task models.AIBackgroundTask
+	status := ""
+	var taskPayload gin.H
+	if err := h.db.Where("assistant_message_id = ?", lastAssistant.ID).Order("updated_at DESC, id DESC").First(&task).Error; err == nil {
+		status = task.Status
+		lastSequence := task.LastSequenceNumber
+		if lastSequence == 0 {
+			var lastEvent models.AIBackgroundTaskEvent
+			if err := h.db.Where("task_id = ?", task.ID).Order("sequence_number DESC").First(&lastEvent).Error; err == nil {
+				lastSequence = lastEvent.SequenceNumber
+			}
+		}
+		taskPayload = gin.H{
+			"id":                   task.ID,
+			"task_id":              task.ID,
+			"status":               status,
+			"conversation_id":      task.ConversationID,
+			"assistant_message_id": task.AssistantMessageID,
+			"last_sequence_number": lastSequence,
+			"completed_at":         task.CompletedAt,
+			"error_message":        task.ErrorMessage,
+		}
+	}
+	if status == "" {
+		if strings.TrimSpace(lastAssistant.Content) != "" {
+			status = "completed"
+		} else {
+			status = "generating"
+		}
+		taskPayload = gin.H{"status": status}
+	}
+
+	return gin.H{
+		"message":         lastAssistant,
+		"background_task": taskPayload,
+	}
 }
 
 func (h *ConversationHandler) GetMessage(c *gin.Context) {

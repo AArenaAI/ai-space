@@ -9,6 +9,7 @@ const repoRoot = path.resolve(__dirname, "../..");
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "chat-conversation-prefetch-"));
 const moduleCache = new Map();
 let uuidCounter = 0;
+const persistentSnapshots = new Map();
 
 function transpileSource(relativePath) {
   const sourcePath = path.join(repoRoot, relativePath);
@@ -32,6 +33,9 @@ function loadModule(file) {
   const localRequire = (specifier) => {
     if (specifier === "uuid") return { v4: () => `uuid-${++uuidCounter}` };
     if (specifier === "@/lib/chatConversationCache") return loadModule(cacheFile);
+    if (specifier === "@/lib/chatConversationPersistentCache") {
+      return { setPersistentConversationSnapshot: async (snapshot) => persistentSnapshots.set(snapshot.conversationId, snapshot) };
+    }
     if (specifier === "@/lib/chatConversationRestoreCoordinator") {
       return {
         fetchConversationRestore: async () => ({ title: "unused", messages: [] }),
@@ -66,6 +70,7 @@ function reset() {
   cache.resetConversationSnapshotCacheConfig();
   prefetch.clearConversationPrefetchInFlight();
   prefetch.resetConversationPrefetchConfig();
+  persistentSnapshots.clear();
 }
 
 function restoreResponse(id) {
@@ -75,6 +80,7 @@ function restoreResponse(id) {
     compare: false,
     compare_models: "[]",
     skill_key: "chat",
+    total: 2,
     messages: [
       { id: id * 10 + 1, role: "user", content: `u-${id}` },
       { id: id * 10 + 2, role: "assistant", content: `a-${id}` },
@@ -85,6 +91,7 @@ function restoreResponse(id) {
 async function testPrefetchWritesSnapshot() {
   reset();
   let restoreCalls = 0;
+  let countCalls = 0;
   const ok = await prefetch.prefetchConversationSnapshot({
     conversationId: 7,
     token: "token",
@@ -93,14 +100,19 @@ async function testPrefetchWritesSnapshot() {
       restoreCalls += 1;
       return restoreResponse(conversationId);
     },
-    fetchCount: async () => 2,
+    fetchCount: async () => {
+      countCalls += 1;
+      return 2;
+    },
   });
   assert.equal(ok, true);
   assert.equal(restoreCalls, 1);
+  assert.equal(countCalls, 0, "restore total should avoid prefetch count request");
   const snap = cache.getConversationSnapshot(7);
   assert.equal(snap.title, "Conversation 7");
   assert.equal(snap.messages.length, 2);
   assert.equal(snap.totalMessages, 2);
+  assert.equal(persistentSnapshots.get(7).messages.length, 2);
 }
 
 async function testSkipWhenCachedUnlessForced() {
