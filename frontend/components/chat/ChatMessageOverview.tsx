@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 
@@ -27,6 +27,21 @@ function markerClass(active: boolean) {
 
 const ChatMessageOverview = memo(function ChatMessageOverview({ items, visible, onJumpToMessage }: ChatMessageOverviewProps) {
   const { t } = useI18n();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const activeItemRef = useRef<HTMLButtonElement>(null);
+
+  // 自动滚动 panel 使 active item 可见
+  useEffect(() => {
+    const activeItem = activeItemRef.current;
+    const panel = panelRef.current;
+    if (!activeItem || !panel) return;
+    const panelRect = panel.getBoundingClientRect();
+    const itemRect = activeItem.getBoundingClientRect();
+    if (itemRect.top < panelRect.top || itemRect.bottom > panelRect.bottom) {
+      activeItem.scrollIntoView({ block: "nearest", behavior: "auto" });
+    }
+  }, [items]);
+
   if (!visible || items.length < 2) return null;
 
   return (
@@ -41,7 +56,8 @@ const ChatMessageOverview = memo(function ChatMessageOverview({ items, visible, 
           aria-hidden="true"
         />
         <div
-          className="flex max-h-[min(520px,calc(100vh-160px))] w-8 flex-col items-end gap-2 overflow-hidden py-2 pr-1"
+          className="flex max-h-[min(520px,calc(100vh-160px))] w-8 flex-col items-end gap-2 overflow-y-auto py-2 pr-1"
+          style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
           data-testid="chat-message-overview-rail"
           aria-hidden="true"
         >
@@ -50,12 +66,14 @@ const ChatMessageOverview = memo(function ChatMessageOverview({ items, visible, 
           ))}
         </div>
         <div
+          ref={panelRef}
           className="chat-message-overview-scrollbar invisible absolute right-8 top-1/2 z-[150] flex max-h-[min(520px,calc(100vh-160px))] w-[320px] -translate-y-1/2 flex-col gap-1.5 overflow-y-auto rounded-2xl border border-surface-border bg-surface-elevated px-2 py-2 opacity-0 shadow-2xl shadow-black/25 group-hover:visible group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:visible group-focus-within:pointer-events-auto group-focus-within:opacity-100 dark:border-[#2b2b2b] dark:bg-[#171717]"
           data-testid="chat-message-overview-panel"
         >
           {items.map((item) => (
             <button
               key={item.id}
+              ref={item.active ? activeItemRef : undefined}
               type="button"
               onClick={() => onJumpToMessage(item.id)}
               className={cn(
