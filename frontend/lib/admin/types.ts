@@ -32,6 +32,9 @@ export interface AdminUsageLog {
   user_id: number;
   guest_id: string;
   service: string;
+  module?: string;
+  feature?: string;
+  operation?: string;
   provider: string;
   model: string;
   model_type: string;
@@ -48,6 +51,9 @@ export interface AdminUsageLog {
   total_cost_rmb: number;
   status: string;
   image_count: number;
+  character_count?: number;
+  video_seconds?: number;
+  audio_seconds?: number;
   estimated: boolean;
   pricing_unit?: string;
   unit_count?: number;
@@ -77,6 +83,9 @@ export interface AdminUsageMetric {
   prompt_tokens?: number;
   completion_tokens?: number;
   image_count?: number;
+  character_count?: number;
+  video_seconds?: number;
+  audio_seconds?: number;
 }
 
 export interface AdminUsageSummary extends AdminUsageMetric {
@@ -93,6 +102,7 @@ export interface AdminUsageLogsResponse {
   total: number;
   page: number;
   page_size: number;
+  summary?: AdminUsageMetric;
 }
 
 export interface AdminUsageServiceRow extends AdminUsageMetric {

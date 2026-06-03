@@ -108,8 +108,68 @@ export function getAdminUsageSummary(range = "7d") {
   return adminFetch<AdminUsageSummary>(`/usage/summary${qs({ range })}`);
 }
 
-export function getAdminUsageLogs(params: { page?: number; pageSize?: number; range?: string; status?: string; provider?: string; service?: string; model?: string; userId?: number; conversationId?: number } = {}) {
-  return adminFetch<AdminUsageLogsResponse>(`/usage/logs${qs({ page: params.page, page_size: params.pageSize, range: params.range, status: params.status, provider: params.provider, service: params.service, model: params.model, user_id: params.userId, conversation_id: params.conversationId })}`);
+export interface AdminUsageLogParams {
+  page?: number;
+  pageSize?: number;
+  range?: string;
+  startDate?: string;
+  endDate?: string;
+  module?: string;
+  feature?: string;
+  operation?: string;
+  status?: string;
+  provider?: string;
+  service?: string;
+  model?: string;
+  userId?: number;
+  guestId?: string;
+  conversationId?: number;
+  messageId?: number;
+  taskId?: number;
+  workspaceId?: number;
+  notebookId?: number;
+  resourceType?: string;
+  resourceId?: number;
+  requestId?: string;
+  estimated?: string;
+  minCost?: number;
+  maxCost?: number;
+  q?: string;
+  sort?: string;
+  order?: "asc" | "desc";
+}
+
+export function getAdminUsageLogs(params: AdminUsageLogParams = {}) {
+  return adminFetch<AdminUsageLogsResponse>(`/usage/logs${qs({
+    page: params.page,
+    page_size: params.pageSize,
+    range: params.range,
+    start_date: params.startDate,
+    end_date: params.endDate,
+    module: params.module,
+    feature: params.feature,
+    operation: params.operation,
+    status: params.status,
+    provider: params.provider,
+    service: params.service,
+    model: params.model,
+    user_id: params.userId,
+    guest_id: params.guestId,
+    conversation_id: params.conversationId,
+    message_id: params.messageId,
+    task_id: params.taskId,
+    workspace_id: params.workspaceId,
+    notebook_id: params.notebookId,
+    resource_type: params.resourceType,
+    resource_id: params.resourceId,
+    request_id: params.requestId,
+    estimated: params.estimated,
+    min_cost: params.minCost,
+    max_cost: params.maxCost,
+    q: params.q,
+    sort: params.sort,
+    order: params.order,
+  })}`);
 }
 
 export function getAdminUsageUsers(params: { page?: number; pageSize?: number; range?: string; service?: string; provider?: string; model?: string } = {}) {

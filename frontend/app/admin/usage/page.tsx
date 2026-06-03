@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, BarChart3, Coins, MessageSquare, RefreshCw, ServerCrash, Users, Zap } from "lucide-react";
+import { AlertCircle, BarChart3, Coins, ListFilter, MessageSquare, RefreshCw, Search, ServerCrash, Users, Zap } from "lucide-react";
 import {
   getAdminUsageConversations,
   getAdminUsageLogs,
@@ -11,6 +11,7 @@ import {
 } from "@/lib/admin/api";
 import type {
   AdminUsageConversationsResponse,
+  AdminUsageLog,
   AdminUsageLogsResponse,
   AdminUsageModelsResponse,
   AdminUsageSummary,
@@ -25,36 +26,92 @@ const ranges = [
   { value: "today", label: "今天" },
   { value: "7d", label: "7 天" },
   { value: "30d", label: "30 天" },
+  { value: "all", label: "全部" },
 ];
 const tabs = [
   { value: "overview", label: "总览" },
+  { value: "ledger", label: "账本明细" },
   { value: "users", label: "用户" },
   { value: "models", label: "模块 / 模型" },
   { value: "conversations", label: "对话" },
 ] as const;
 type UsageTab = (typeof tabs)[number]["value"];
 
+type UsageFilters = {
+  range: string;
+  module: string;
+  feature: string;
+  operation: string;
+  service: string;
+  provider: string;
+  model: string;
+  status: string;
+  userId: string;
+  resourceType: string;
+  resourceId: string;
+  requestId: string;
+  q: string;
+};
+
+const defaultFilters: UsageFilters = {
+  range: "7d",
+  module: "",
+  feature: "",
+  operation: "",
+  service: "",
+  provider: "",
+  model: "",
+  status: "",
+  userId: "",
+  resourceType: "",
+  resourceId: "",
+  requestId: "",
+  q: "",
+};
+
 export default function AdminUsagePage() {
-  const [range, setRange] = useState("7d");
-  const [tab, setTab] = useState<UsageTab>("overview");
+  const [filters, setFilters] = useState<UsageFilters>(defaultFilters);
+  const [tab, setTab] = useState<UsageTab>("ledger");
   const [summary, setSummary] = useState<AdminUsageSummary | null>(null);
   const [logs, setLogs] = useState<AdminUsageLogsResponse | null>(null);
   const [users, setUsers] = useState<AdminUsageUsersResponse | null>(null);
   const [models, setModels] = useState<AdminUsageModelsResponse | null>(null);
   const [conversations, setConversations] = useState<AdminUsageConversationsResponse | null>(null);
+  const [page, setPage] = useState(1);
+  const [selectedLog, setSelectedLog] = useState<AdminUsageLog | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const logParams = useMemo(() => ({
+    page,
+    pageSize: 50,
+    range: filters.range,
+    module: filters.module,
+    feature: filters.feature,
+    operation: filters.operation,
+    service: filters.service,
+    provider: filters.provider,
+    model: filters.model,
+    status: filters.status,
+    userId: numberOrUndefined(filters.userId),
+    resourceType: filters.resourceType,
+    resourceId: numberOrUndefined(filters.resourceId),
+    requestId: filters.requestId,
+    q: filters.q,
+    sort: "created_at",
+    order: "desc" as const,
+  }), [filters, page]);
 
   const load = async () => {
     setLoading(true);
     setError(null);
     try {
       const [summaryData, logData, usersData, modelsData, conversationsData] = await Promise.all([
-        getAdminUsageSummary(range),
-        getAdminUsageLogs({ page: 1, pageSize: 30, range }),
-        getAdminUsageUsers({ page: 1, pageSize: 30, range }),
-        getAdminUsageModels({ range, limit: 120 }),
-        getAdminUsageConversations({ page: 1, pageSize: 30, range }),
+        getAdminUsageSummary(filters.range === "all" ? "30d" : filters.range),
+        getAdminUsageLogs(logParams),
+        getAdminUsageUsers({ page: 1, pageSize: 30, range: filters.range, service: filters.service, provider: filters.provider, model: filters.model }),
+        getAdminUsageModels({ range: filters.range, service: filters.service, provider: filters.provider, limit: 120 }),
+        getAdminUsageConversations({ page: 1, pageSize: 30, range: filters.range, userId: numberOrUndefined(filters.userId), service: filters.service, provider: filters.provider, model: filters.model }),
       ]);
       setSummary(summaryData);
       setLogs(logData);
@@ -70,25 +127,39 @@ export default function AdminUsagePage() {
 
   useEffect(() => {
     load();
-  }, [range]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logParams]);
 
   const maxDailyCost = useMemo(() => Math.max(0.01, ...(summary?.daily || []).map((item) => item.cost_rmb)), [summary]);
   const chatCost = summary?.service_breakdown?.find((item) => item.name === "chat")?.cost_rmb || 0;
+  const ledgerSummary = logs?.summary;
 
-  if (loading && !summary) return <div className="rounded-3xl border border-surface-border bg-surface-card p-8 text-text-secondary">正在加载用量数据…</div>;
+  const updateFilter = (key: keyof UsageFilters, value: string) => {
+    setPage(1);
+    setFilters((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const quickVideoFilter = () => {
+    setTab("ledger");
+    setPage(1);
+    setFilters((prev) => ({ ...prev, range: "all", module: "creative", feature: "video", service: "video_generation" }));
+  };
+
+  if (loading && !summary && !logs) return <div className="rounded-3xl border border-surface-border bg-surface-card p-8 text-text-secondary">正在加载用量数据…</div>;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
-          <p className="text-sm font-medium text-brand">Usage v2</p>
-          <h1 className="mt-1 text-2xl font-semibold text-text-primary">用量成本</h1>
-          <p className="mt-2 text-sm text-text-secondary">统一账本按全站、用户、模块模型、对话四层分析平台真实成本。</p>
+          <p className="text-sm font-medium text-brand">Usage v3</p>
+          <h1 className="mt-1 text-2xl font-semibold text-text-primary">用量成本账本</h1>
+          <p className="mt-2 text-sm text-text-secondary">从总览下钻到产品模块、功能、操作和每一次外部 API 调用。</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {ranges.map((item) => (
-            <button key={item.value} onClick={() => setRange(item.value)} className={cn("rounded-xl px-3 py-2 text-sm transition-colors", range === item.value ? "bg-brand text-white" : "bg-surface-card text-text-secondary hover:text-text-primary")}>{item.label}</button>
+            <button key={item.value} onClick={() => updateFilter("range", item.value)} className={cn("rounded-xl px-3 py-2 text-sm transition-colors", filters.range === item.value ? "bg-brand text-white" : "bg-surface-card text-text-secondary hover:text-text-primary")}>{item.label}</button>
           ))}
+          <button onClick={quickVideoFilter} className="rounded-xl border border-brand/30 bg-brand/10 px-3 py-2 text-sm font-medium text-brand hover:bg-brand/15">查看视频消耗</button>
           <button onClick={load} className="rounded-xl border border-surface-border bg-surface-card p-2 text-text-secondary hover:text-text-primary" aria-label="刷新"><RefreshCw className="h-4 w-4" /></button>
         </div>
       </div>
@@ -97,9 +168,9 @@ export default function AdminUsagePage() {
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <MetricCard title="总成本" value={formatRMB(summary?.cost_rmb || 0)} icon={Coins} helper={`Chat ${formatRMB(chatCost)}`} />
+        <MetricCard title="账本筛选成本" value={formatRMB(ledgerSummary?.cost_rmb || 0)} icon={ListFilter} helper={`${formatNumber(ledgerSummary?.requests || 0)} 条明细`} />
         <MetricCard title="请求数" value={formatNumber(summary?.requests || 0)} icon={BarChart3} helper={`成功 ${formatNumber(summary?.successes || 0)}`} />
-        <MetricCard title="失败数" value={formatNumber(summary?.failures || 0)} icon={ServerCrash} helper="非 success 状态" />
-        <MetricCard title="Token" value={formatNumber(summary?.total_tokens || 0)} icon={Zap} helper={`输出 ${formatNumber(summary?.completion_tokens || 0)}`} />
+        <MetricCard title="Token / 字符" value={`${formatNumber(ledgerSummary?.total_tokens || summary?.total_tokens || 0)} / ${formatNumber(ledgerSummary?.character_count || 0)}`} icon={Zap} helper={`输出 ${formatNumber(ledgerSummary?.completion_tokens || summary?.completion_tokens || 0)}`} />
         <MetricCard title="用户 / 对话" value={`${formatNumber(users?.users?.length || 0)} / ${formatNumber(conversations?.conversations?.length || 0)}`} icon={Users} helper="当前页样本" />
       </div>
 
@@ -109,15 +180,17 @@ export default function AdminUsagePage() {
         ))}
       </div>
 
-      {tab === "overview" && <Overview summary={summary} logs={logs} maxDailyCost={maxDailyCost} />}
+      {tab === "overview" && <Overview summary={summary} logs={logs} maxDailyCost={maxDailyCost} onServiceClick={(service) => { updateFilter("service", service); setTab("ledger"); }} />}
+      {tab === "ledger" && <Ledger filters={filters} updateFilter={updateFilter} logs={logs} page={page} setPage={setPage} loading={loading} onSelect={setSelectedLog} onClear={() => { setPage(1); setFilters(defaultFilters); }} />}
       {tab === "users" && <UsersUsage users={users} />}
       {tab === "models" && <ModelsUsage models={models} summary={summary} />}
       {tab === "conversations" && <ConversationsUsage conversations={conversations} />}
+      {selectedLog && <UsageLogDrawer log={selectedLog} onClose={() => setSelectedLog(null)} />}
     </div>
   );
 }
 
-function Overview({ summary, logs, maxDailyCost }: { summary: AdminUsageSummary | null; logs: AdminUsageLogsResponse | null; maxDailyCost: number }) {
+function Overview({ summary, logs, maxDailyCost, onServiceClick }: { summary: AdminUsageSummary | null; logs: AdminUsageLogsResponse | null; maxDailyCost: number; onServiceClick: (service: string) => void }) {
   return (
     <div className="space-y-6">
       <div className="grid gap-6 xl:grid-cols-[1.4fr_1fr]">
@@ -136,9 +209,64 @@ function Overview({ summary, logs, maxDailyCost }: { summary: AdminUsageSummary 
       </div>
       <div className="grid gap-6 xl:grid-cols-2">
         <Card title="模型成本排行"><ModelMini rows={summary?.top_models || []} /></Card>
-        <Card title="服务类型"><Breakdown rows={summary?.service_breakdown || []} /></Card>
+        <Card title="服务类型"><Breakdown rows={summary?.service_breakdown || []} onClickName={onServiceClick} /></Card>
       </div>
       <RecentLogs logs={logs} />
+    </div>
+  );
+}
+
+function Ledger({ filters, updateFilter, logs, page, setPage, loading, onSelect, onClear }: { filters: UsageFilters; updateFilter: (key: keyof UsageFilters, value: string) => void; logs: AdminUsageLogsResponse | null; page: number; setPage: (page: number) => void; loading: boolean; onSelect: (log: AdminUsageLog) => void; onClear: () => void }) {
+  const total = logs?.total || 0;
+  const pageSize = logs?.page_size || 50;
+  const maxPage = Math.max(1, Math.ceil(total / pageSize));
+  return (
+    <div className="space-y-6">
+      <Card title="账本筛选">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <Select label="模块" value={filters.module} onChange={(v) => updateFilter("module", v)} options={["creative", "work", "workspace", "chat", "system"]} />
+          <Select label="功能" value={filters.feature} onChange={(v) => updateFilter("feature", v)} options={["image", "video", "translator", "ppt", "document_reader", "notebook", "chat"]} />
+          <Input label="操作" value={filters.operation} onChange={(v) => updateFilter("operation", v)} placeholder="text_to_image / remove_bg" />
+          <Select label="服务" value={filters.service} onChange={(v) => updateFilter("service", v)} options={["chat", "image_generation", "image_edit", "image_utility", "video_generation", "translation", "vision", "document_generation", "embedding"]} />
+          <Input label="Provider" value={filters.provider} onChange={(v) => updateFilter("provider", v)} placeholder="openai / volcengine" />
+          <Input label="模型" value={filters.model} onChange={(v) => updateFilter("model", v)} placeholder="模型名" />
+          <Select label="状态" value={filters.status} onChange={(v) => updateFilter("status", v)} options={["success", "failed", "estimated", "missing_usage"]} />
+          <Input label="用户 ID" value={filters.userId} onChange={(v) => updateFilter("userId", v)} placeholder="123" />
+          <Input label="资源类型" value={filters.resourceType} onChange={(v) => updateFilter("resourceType", v)} placeholder="video_generation" />
+          <Input label="资源 ID" value={filters.resourceId} onChange={(v) => updateFilter("resourceId", v)} placeholder="456" />
+          <Input label="Request / Task ID" value={filters.requestId} onChange={(v) => updateFilter("requestId", v)} placeholder="火山 task id" />
+          <Input label="搜索" value={filters.q} onChange={(v) => updateFilter("q", v)} placeholder="模型 / error / raw" icon={<Search className="h-4 w-4" />} />
+        </div>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm">
+          <div className="text-text-secondary">筛选结果：<span className="font-semibold text-text-primary">{formatNumber(total)}</span> 条 · 合计 <span className="font-semibold text-text-primary">{formatRMB(logs?.summary?.cost_rmb || 0)}</span> · Tokens {formatNumber(logs?.summary?.total_tokens || 0)} · 图片 {formatNumber(logs?.summary?.image_count || 0)}</div>
+          <button onClick={onClear} className="rounded-xl border border-surface-border px-3 py-2 text-text-secondary hover:text-text-primary">清空筛选</button>
+        </div>
+      </Card>
+
+      <Card title="账本明细">
+        {loading && <div className="mb-3 rounded-xl bg-surface-elevated px-3 py-2 text-sm text-text-secondary">正在刷新账本…</div>}
+        <Table headers={["时间", "产品/功能/操作", "服务", "用户", "业务对象", "Provider / 模型", "用量", "官方单价", "成本", "状态"]}>
+          {(logs?.logs || []).map((log) => (
+            <tr key={log.id} className="border-t border-surface-border align-top hover:bg-surface-elevated/40">
+              <td className="whitespace-nowrap py-3 pr-4 text-xs">{formatDateTime(log.created_at)}</td>
+              <td className="min-w-[210px] pr-4"><div className="font-medium text-text-primary">{log.module || "-"} / {log.feature || "-"}</div><div className="text-xs text-text-tertiary">{log.operation || "-"}</div></td>
+              <td className="pr-4"><StatusBadge tone="blue">{log.service || "unknown"}</StatusBadge></td>
+              <td className="pr-4 text-xs">{log.user_id ? `U:${log.user_id}` : log.guest_id ? `G:${log.guest_id}` : "-"}</td>
+              <td className="min-w-[180px] pr-4 text-xs text-text-tertiary"><div>{log.resource_type || "-"}:{log.resource_id || "-"}</div><div>C:{log.conversation_id || "-"} M:{log.message_id || "-"}</div><div className="max-w-[180px] truncate">Req:{log.request_id || "-"}</div></td>
+              <td className="max-w-[260px] pr-4"><div className="text-text-secondary">{log.provider || "-"}</div><div className="truncate font-medium text-text-primary">{log.model || "-"}</div></td>
+              <td className="min-w-[150px] pr-4 text-xs"><UsageNumbers log={log} /></td>
+              <td className="min-w-[160px] pr-4 text-xs text-text-tertiary">{formatSourcePrice(log)}</td>
+              <td className="pr-4 font-semibold text-text-primary">{formatRMB(log.total_cost_rmb)}</td>
+              <td><button onClick={() => onSelect(log)} className="rounded-xl border border-surface-border px-2 py-1 text-xs text-text-secondary hover:text-text-primary"><StatusBadge tone={log.status === "success" ? "green" : log.status === "failed" ? "red" : "amber"}>{log.estimated ? `${log.status} · 估` : log.status || "unknown"}</StatusBadge></button></td>
+            </tr>
+          ))}
+        </Table>
+        {(logs?.logs || []).length === 0 && <Empty />}
+        <div className="mt-4 flex items-center justify-between text-sm text-text-secondary">
+          <span>第 {page} / {maxPage} 页</span>
+          <div className="flex gap-2"><button disabled={page <= 1} onClick={() => setPage(Math.max(1, page - 1))} className="rounded-xl border border-surface-border px-3 py-2 disabled:opacity-40">上一页</button><button disabled={page >= maxPage} onClick={() => setPage(Math.min(maxPage, page + 1))} className="rounded-xl border border-surface-border px-3 py-2 disabled:opacity-40">下一页</button></div>
+        </div>
+      </Card>
     </div>
   );
 }
@@ -156,17 +284,45 @@ function ConversationsUsage({ conversations }: { conversations: AdminUsageConver
 }
 
 function RecentLogs({ logs }: { logs: AdminUsageLogsResponse | null }) {
-  return <Card title="最近调用记录"><Table headers={["时间", "用户", "对话/消息", "服务", "Provider", "模型", "Token", "成本", "状态"]}>{(logs?.logs || []).map((log) => <tr key={log.id} className="border-t border-surface-border"><td className="whitespace-nowrap py-3 pr-4">{formatDateTime(log.created_at)}</td><td className="pr-4">{log.user_id || log.guest_id || "-"}</td><td className="pr-4 text-xs text-text-tertiary">C:{log.conversation_id || "-"} / M:{log.message_id || "-"}</td><td className="pr-4">{log.service || "-"}</td><td className="pr-4">{log.provider || "-"}</td><td className="max-w-[220px] truncate pr-4">{log.model || "-"}</td><td className="pr-4">{formatNumber(log.total_tokens)}</td><td className="pr-4">{formatRMB(log.total_cost_rmb)}</td><td><StatusBadge tone={log.status === "success" ? "green" : log.status === "failed" ? "red" : "amber"}>{log.estimated ? `${log.status} · 估` : log.status || "unknown"}</StatusBadge></td></tr>)}</Table></Card>;
+  return <Card title="最近调用记录"><Table headers={["时间", "产品/操作", "服务", "Provider", "模型", "Token", "成本", "状态"]}>{(logs?.logs || []).slice(0, 12).map((log) => <tr key={log.id} className="border-t border-surface-border"><td className="whitespace-nowrap py-3 pr-4">{formatDateTime(log.created_at)}</td><td className="pr-4 text-xs"><div>{log.module || "-"}/{log.feature || "-"}</div><div className="text-text-tertiary">{log.operation || "-"}</div></td><td className="pr-4">{log.service || "-"}</td><td className="pr-4">{log.provider || "-"}</td><td className="max-w-[220px] truncate pr-4">{log.model || "-"}</td><td className="pr-4">{formatNumber(log.total_tokens)}</td><td className="pr-4">{formatRMB(log.total_cost_rmb)}</td><td><StatusBadge tone={log.status === "success" ? "green" : log.status === "failed" ? "red" : "amber"}>{log.estimated ? `${log.status} · 估` : log.status || "unknown"}</StatusBadge></td></tr>)}</Table></Card>;
 }
 
-function Breakdown({ rows }: { rows: Array<{ name: string; requests: number; cost_rmb: number; failures?: number; tokens?: number }> }) {
+function UsageNumbers({ log }: { log: AdminUsageLog }) {
+  const parts = [
+    log.prompt_tokens ? `in ${formatNumber(log.prompt_tokens)}` : "",
+    log.completion_tokens ? `out ${formatNumber(log.completion_tokens)}` : "",
+    log.total_tokens ? `total ${formatNumber(log.total_tokens)}` : "",
+    log.image_count ? `img ${formatNumber(log.image_count)}` : "",
+    log.character_count ? `char ${formatNumber(log.character_count)}` : "",
+    log.video_seconds ? `video ${formatNumber(log.video_seconds)}s` : "",
+  ].filter(Boolean);
+  return <>{parts.length ? parts.map((part) => <div key={part}>{part}</div>) : "-"}</>;
+}
+
+function UsageLogDrawer({ log, onClose }: { log: AdminUsageLog; onClose: () => void }) {
+  return <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={onClose}><aside className="h-full w-full max-w-xl overflow-y-auto border-l border-surface-border bg-surface-card p-6 shadow-xl" onClick={(e) => e.stopPropagation()}><div className="mb-6 flex items-start justify-between gap-4"><div><p className="text-sm text-brand">Usage Log #{log.id}</p><h2 className="mt-1 text-xl font-semibold text-text-primary">{log.module || "-"} / {log.feature || "-"} / {log.operation || "-"}</h2></div><button onClick={onClose} className="rounded-xl border border-surface-border px-3 py-2 text-sm text-text-secondary">关闭</button></div><div className="space-y-4 text-sm"><Detail title="基础信息" rows={{ 时间: formatDateTime(log.created_at), 服务: log.service, Provider: log.provider, 模型: log.model, 状态: log.status, 估算: log.estimated ? "是" : "否" }} /><Detail title="业务关联" rows={{ 用户: log.user_id || log.guest_id || "-", 资源: `${log.resource_type || "-"}:${log.resource_id || "-"}`, 对话: log.conversation_id || "-", 消息: log.message_id || "-", 任务: log.task_id || "-", RequestID: log.request_id || "-" }} /><Detail title="用量" rows={{ PromptTokens: log.prompt_tokens || 0, CompletionTokens: log.completion_tokens || 0, TotalTokens: log.total_tokens || 0, ImageCount: log.image_count || 0, Characters: log.character_count || 0, VideoSeconds: log.video_seconds || 0 }} /><Detail title="价格快照" rows={{ 官方币种: log.source_currency || "-", 官方单位: log.source_unit || log.pricing_unit || "-", 官方输入价: log.source_input_price ?? "-", 官方输出价: log.source_output_price ?? "-", 官方图片价: log.source_image_price ?? "-", 官方请求价: log.source_request_price ?? "-", 汇率: log.exchange_rate_to_rmb ?? "-", 成本: formatRMB(log.total_cost_rmb) }} />{log.error_message && <Detail title="错误" rows={{ Error: log.error_message }} />}</div></aside></div>;
+}
+
+function Detail({ title, rows }: { title: string; rows: Record<string, string | number> }) {
+  return <section className="rounded-2xl bg-surface-elevated p-4"><h3 className="mb-3 font-medium text-text-primary">{title}</h3><div className="space-y-2">{Object.entries(rows).map(([key, value]) => <div key={key} className="grid grid-cols-[110px_1fr] gap-3"><span className="text-text-tertiary">{key}</span><span className="break-all text-text-secondary">{value}</span></div>)}</div></section>;
+}
+
+function Breakdown({ rows, onClickName }: { rows: Array<{ name: string; requests: number; cost_rmb: number; failures?: number; tokens?: number }>; onClickName?: (name: string) => void }) {
   if (rows.length === 0) return <Empty />;
-  return <div className="space-y-3">{rows.map((item) => <div key={item.name || "unknown"} className="rounded-2xl bg-surface-elevated px-4 py-3"><div className="flex items-center justify-between text-sm"><span className="font-medium text-text-primary">{item.name || "unknown"}</span><span className="font-semibold text-text-primary">{formatRMB(item.cost_rmb)}</span></div><div className="mt-1 text-xs text-text-tertiary">{formatNumber(item.requests)} 次 · 失败 {formatNumber(item.failures || 0)}{item.tokens ? ` · ${formatNumber(item.tokens)} tokens` : ""}</div></div>)}</div>;
+  return <div className="space-y-3">{rows.map((item) => <button key={item.name || "unknown"} onClick={() => onClickName?.(item.name)} className={cn("block w-full rounded-2xl bg-surface-elevated px-4 py-3 text-left", onClickName && "hover:bg-surface-hover") }><div className="flex items-center justify-between text-sm"><span className="font-medium text-text-primary">{item.name || "unknown"}</span><span className="font-semibold text-text-primary">{formatRMB(item.cost_rmb)}</span></div><div className="mt-1 text-xs text-text-tertiary">{formatNumber(item.requests)} 次 · 失败 {formatNumber(item.failures || 0)}{item.tokens ? ` · ${formatNumber(item.tokens)} tokens` : ""}</div></button>)}</div>;
 }
 
 function ModelMini({ rows }: { rows: Array<{ model: string; provider: string; cost_rmb: number; requests: number; tokens: number }> }) {
   if (rows.length === 0) return <Empty />;
   return <div className="space-y-3">{rows.map((item) => <div key={`${item.provider}-${item.model}`} className="flex items-center justify-between rounded-2xl bg-surface-elevated px-4 py-3 text-sm"><div><div className="font-medium text-text-primary">{item.model || "unknown"}</div><div className="text-xs text-text-tertiary">{item.provider || "unknown"} · {formatNumber(item.tokens)} tokens</div></div><div className="text-right"><div className="font-semibold text-text-primary">{formatRMB(item.cost_rmb)}</div><div className="text-xs text-text-tertiary">{formatNumber(item.requests)} 次</div></div></div>)}</div>;
+}
+
+function Select({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: string[] }) {
+  return <label className="text-sm"><span className="mb-1 block text-text-tertiary">{label}</span><select value={value} onChange={(e) => onChange(e.target.value)} className="w-full rounded-xl border border-surface-border bg-surface-elevated px-3 py-2 text-text-primary outline-none focus:border-brand"><option value="">全部</option>{options.map((option) => <option key={option} value={option}>{option}</option>)}</select></label>;
+}
+
+function Input({ label, value, onChange, placeholder, icon }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; icon?: React.ReactNode }) {
+  return <label className="text-sm"><span className="mb-1 block text-text-tertiary">{label}</span><div className="flex items-center gap-2 rounded-xl border border-surface-border bg-surface-elevated px-3 py-2 focus-within:border-brand">{icon}<input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="min-w-0 flex-1 bg-transparent text-text-primary outline-none placeholder:text-text-tertiary" /></div></label>;
 }
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
@@ -179,4 +335,22 @@ function Table({ headers, children }: { headers: string[]; children: React.React
 
 function Empty() {
   return <div className="rounded-2xl bg-surface-elevated p-5 text-sm text-text-secondary">暂无用量数据</div>;
+}
+
+function numberOrUndefined(value: string) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function formatSourcePrice(log: AdminUsageLog) {
+  const currency = log.source_currency || "";
+  const unit = log.source_unit || log.pricing_unit || "";
+  const prices = [
+    log.source_input_price ? `in ${currency}${log.source_input_price}` : "",
+    log.source_output_price ? `out ${currency}${log.source_output_price}` : "",
+    log.source_image_price ? `img ${currency}${log.source_image_price}` : "",
+    log.source_request_price ? `req ${currency}${log.source_request_price}` : "",
+  ].filter(Boolean);
+  if (prices.length === 0) return unit || "-";
+  return `${prices.join(" / ")} ${unit ? `/ ${unit}` : ""}`;
 }
