@@ -75,7 +75,11 @@ const FAST_SCROLL_PRELOAD_PX = 6000;
 const RETURN_TO_BOTTOM_PRELOAD_BOTTOM_PX = 6000;
 const HISTORY_OVERSCAN_REVERSE = 8;
 const INITIAL_RENDERED_MESSAGE_WINDOW = 16;
+const CONTENT_HEAVY_INITIAL_RENDERED_MESSAGE_WINDOW = 8;
 const MIN_HIDDEN_MESSAGES_TO_WINDOW = 8;
+const CONTENT_HEAVY_TOTAL_CHARS_THRESHOLD = 24_000;
+const CONTENT_HEAVY_CODE_BLOCK_THRESHOLD = 24;
+const CONTENT_HEAVY_TABLE_LINE_THRESHOLD = 80;
 type SelectionMode = "share" | "favorite";
 
 function emitChatRenderProfileEvent(
@@ -165,6 +169,19 @@ function formatMessageForTextExport(
 
   sections.push(`【${t("chat.export.answer")}】\n${cleanAnswer || t("chat.export.emptyAnswer")}`);
   return sections.join("\n\n");
+}
+
+function getMessageContentWeight(messages: Message[]) {
+  let totalChars = 0;
+  let codeBlocks = 0;
+  let tableLines = 0;
+  messages.forEach((message) => {
+    const content = message.content || "";
+    totalChars += content.length;
+    codeBlocks += Math.floor((content.match(/```/g)?.length || 0) / 2);
+    tableLines += content.split("\n").filter((line) => /^\s*\|.+\|\s*$/.test(line)).length;
+  });
+  return { codeBlocks, tableLines, totalChars };
 }
 
 const MemoMarkdownRenderer = memo(function MemoMarkdownRenderer({ content }: { content: string; shouldHydrateRichText?: boolean }) {
@@ -398,8 +415,9 @@ function MessageList({
     });
 
     // Virtuoso 对最后一项换行后的高度测量可能晚于 RAF，补 post-layout 锁底。
-    // 切换会话/恢复历史时，Markdown、图片和虚拟列表测量可能更晚完成，所以额外补几次。
-    const delays = extraSettling ? [80, 180, 360, 700] : [80, 180];
+    // 切换会话/恢复历史时，Markdown、图片和虚拟列表测量可能更晚完成。
+    // Heavy Markdown 的自动 hydrate 会延后到秒级发生；只要用户没有主动上滑，继续补偿到底部。
+    const delays = extraSettling ? [80, 180, 360, 700, 1200, 1800, 2600, 3600, 5000] : [80, 180];
     bottomLockTimersRef.current = delays.map((delay) => window.setTimeout(lock, delay));
   }, [scrollToBottom]);
 
@@ -648,9 +666,22 @@ function MessageList({
   const targetMessageWindow = targetMessageLocalIndex >= 0
     ? allVisibleMessages.length - targetMessageLocalIndex
     : 0;
-  const shouldWindowInitialMessages = allVisibleMessages.length - INITIAL_RENDERED_MESSAGE_WINDOW >= MIN_HIDDEN_MESSAGES_TO_WINDOW;
+  const contentWeight = useMemo(() => getMessageContentWeight(allVisibleMessages), [allVisibleMessages]);
+  const isContentHeavyConversation =
+    contentWeight.totalChars >= CONTENT_HEAVY_TOTAL_CHARS_THRESHOLD ||
+    contentWeight.codeBlocks >= CONTENT_HEAVY_CODE_BLOCK_THRESHOLD ||
+    contentWeight.tableLines >= CONTENT_HEAVY_TABLE_LINE_THRESHOLD;
+  const initialMessageWindow = isContentHeavyConversation
+    ? CONTENT_HEAVY_INITIAL_RENDERED_MESSAGE_WINDOW
+    : INITIAL_RENDERED_MESSAGE_WINDOW;
+  const effectiveRenderedMessageWindowState =
+    isContentHeavyConversation && renderedMessageWindow === INITIAL_RENDERED_MESSAGE_WINDOW
+      ? CONTENT_HEAVY_INITIAL_RENDERED_MESSAGE_WINDOW
+      : renderedMessageWindow;
+  const shouldWindowInitialMessages =
+    isContentHeavyConversation || allVisibleMessages.length - initialMessageWindow >= MIN_HIDDEN_MESSAGES_TO_WINDOW;
   const effectiveRenderedMessageWindow = shouldWindowInitialMessages
-    ? Math.min(Math.max(renderedMessageWindow, targetMessageWindow), allVisibleMessages.length)
+    ? Math.min(Math.max(effectiveRenderedMessageWindowState, targetMessageWindow, initialMessageWindow), allVisibleMessages.length)
     : allVisibleMessages.length;
   const visibleMessages = useMemo(() => {
     if (allVisibleMessages.length <= effectiveRenderedMessageWindow) return allVisibleMessages;

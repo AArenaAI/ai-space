@@ -23,9 +23,13 @@ const DEFAULT_ROOT_MARGIN = "180px 0px";
 const DEFAULT_IDLE_TIMEOUT = 900;
 const FIRST_MARKDOWN_CHUNK_HYDRATION_DELAY_MS = 1_800;
 const HEAVY_MARKDOWN_HYDRATION_DELAY_MS = 2_400;
+const EXTREME_MARKDOWN_HYDRATION_DELAY_MS = 15_000;
 const HEAVY_MARKDOWN_LENGTH_THRESHOLD = 1_000;
 const HEAVY_MARKDOWN_CODE_BLOCK_THRESHOLD = 3;
 const HEAVY_MARKDOWN_TABLE_LINE_THRESHOLD = 7;
+const EXTREME_MARKDOWN_LENGTH_THRESHOLD = 10_000;
+const EXTREME_MARKDOWN_CODE_BLOCK_THRESHOLD = 20;
+const EXTREME_MARKDOWN_TABLE_LINE_THRESHOLD = 100;
 let markdownHydrationSequence = 0;
 let heavyMarkdownHydrationSequence = 0;
 
@@ -59,7 +63,11 @@ function getMarkdownComplexity(content: string) {
     content.length > HEAVY_MARKDOWN_LENGTH_THRESHOLD ||
     codeBlocks >= HEAVY_MARKDOWN_CODE_BLOCK_THRESHOLD ||
     tableLines >= HEAVY_MARKDOWN_TABLE_LINE_THRESHOLD;
-  return { codeBlocks, isHeavy, tableLines };
+  const isExtreme =
+    content.length > EXTREME_MARKDOWN_LENGTH_THRESHOLD ||
+    codeBlocks >= EXTREME_MARKDOWN_CODE_BLOCK_THRESHOLD ||
+    tableLines >= EXTREME_MARKDOWN_TABLE_LINE_THRESHOLD;
+  return { codeBlocks, isExtreme, isHeavy, tableLines };
 }
 
 function MarkdownFallback({ content, loading }: { content: string; loading?: boolean }) {
@@ -181,7 +189,9 @@ export function DeferredMarkdownRenderer({
     const startIdleRender = () => {
       cleanupIdle?.();
       const initialDelayMs = complexity.isHeavy
-        ? HEAVY_MARKDOWN_HYDRATION_DELAY_MS
+        ? complexity.isExtreme
+          ? EXTREME_MARKDOWN_HYDRATION_DELAY_MS
+          : HEAVY_MARKDOWN_HYDRATION_DELAY_MS
         : MarkdownRendererModule
           ? 0
           : FIRST_MARKDOWN_CHUNK_HYDRATION_DELAY_MS;
@@ -190,6 +200,7 @@ export function DeferredMarkdownRenderer({
           contentLength: content.length,
           codeBlocks: complexity.codeBlocks,
           delayMs: initialDelayMs,
+          isExtreme: complexity.isExtreme,
           tableLines: complexity.tableLines,
         });
         let delayTimer: number | undefined = window.setTimeout(() => {
@@ -225,7 +236,7 @@ export function DeferredMarkdownRenderer({
       cancelled = true;
       cleanupIdle?.();
     };
-  }, [complexity.codeBlocks, complexity.isHeavy, complexity.tableLines, content, idleTimeout, keepRenderedOnContentChange, rootMargin, shouldHydrateRichText]);
+  }, [complexity.codeBlocks, complexity.isExtreme, complexity.isHeavy, complexity.tableLines, content, idleTimeout, keepRenderedOnContentChange, rootMargin, shouldHydrateRichText]);
 
   return (
     <div ref={hostRef}>
