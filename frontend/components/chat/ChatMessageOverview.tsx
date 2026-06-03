@@ -195,13 +195,12 @@ const ChatMessageOverview = memo(function ChatMessageOverview({
           ref={panelRef}
           className={cn(
             "invisible absolute right-8 top-1/2 z-[150] flex w-[320px] -translate-y-1/2 overflow-hidden rounded-2xl border border-surface-border bg-surface-elevated px-2 py-2 opacity-0 shadow-2xl shadow-black/25 group-hover:visible group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:visible group-focus-within:pointer-events-auto group-focus-within:opacity-100 dark:border-[#2b2b2b] dark:bg-[#171717]",
-            isWheel && "h-[378px]"
+            isWheel && "h-[378px] overflow-y-auto"
           )}
-          onWheel={handleOverviewWheel}
           data-testid="chat-message-overview-panel"
         >
           <div className="flex min-w-0 flex-1 flex-col gap-1.5 pr-2">
-            {windowItems.map((item, idx) => {
+            {items.map((item, idx) => {
               const wheelTextStyle = isWheel ? getWheelTextStyle(idx) : undefined;
               return (
                 <button
@@ -229,7 +228,7 @@ const ChatMessageOverview = memo(function ChatMessageOverview({
                       "h-[3px] shrink-0 rounded-full transition-all duration-300",
                       item.active
                         ? "bg-brand w-5 shadow-[0_0_0_1px_rgba(255,255,255,0.16)]"
-                        : "bg-slate-400/55 dark:bg-slate-400/50 w-3"
+                        : "bg-slate-400/55 dark:bg-slate-400/50 w-5"
                     )}
                     aria-hidden="true"
                   />

@@ -240,7 +240,7 @@ async function getActiveOverviewId(page) {
     await switchMode(page, "overview-mode-normal");
     await page.waitForSelector('[data-testid="chat-message-overview"]', { timeout: 20_000 });
     await page.locator('[data-chat-message-row="true"]').first().hover();
-    await page.locator('button[title="选择分享"]').first().click({ force: true });
+    await page.locator('button[title="选择分享"], button[title="Select to share"]').first().click({ force: true });
     await page.waitForTimeout(250);
     assert.equal(await overviewExists(page), 0, "overview should hide in select mode");
 
