@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect } from "react";
+import { memo, useEffect, type CSSProperties } from "react";
 import { User, Check, Play, SquareCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
@@ -15,6 +15,11 @@ import { AssistantMessageContent } from "./AssistantMessageContent";
 import { ModelAvatar } from "./ModelAvatar";
 
 type MarkdownRendererComponent = Parameters<typeof AssistantMessageContent>[0]["MarkdownRenderer"];
+
+const MESSAGE_ROW_CONTENT_VISIBILITY_STYLE: CSSProperties = {
+  contentVisibility: "auto",
+  containIntrinsicSize: "auto 180px",
+};
 
 function emitChatRenderProfileEvent(phase: string, detail: Record<string, unknown> = {}) {
   if (typeof window === "undefined") return;
@@ -101,7 +106,13 @@ function MessageRow({
   });
 
   return (
-    <div data-chat-message-row="true" data-message-id={msg.id} data-message-role={msg.role} className={cn("max-w-[800px] mx-auto px-4 py-4 rounded-2xl transition-colors duration-500", isHighlighted && "bg-brand/10")}>
+    <div
+      data-chat-message-row="true"
+      data-message-id={msg.id}
+      data-message-role={msg.role}
+      style={MESSAGE_ROW_CONTENT_VISIBILITY_STYLE}
+      className={cn("max-w-[800px] mx-auto px-4 py-4 rounded-2xl transition-colors duration-500", isHighlighted && "bg-brand/10")}
+    >
       <div key={msg.id} className={cn("flex gap-3 animate-message-appear group", isUser ? "justify-end" : "justify-start")}>
         <div className={cn("mt-1 shrink-0", isUser && !selectMode ? "hidden" : "w-7")}>
           {!isUser && !selectMode && (
