@@ -127,7 +127,11 @@ function parseLiteBlocks(markdown: string): LiteBlock[] {
   return blocks;
 }
 
-function InlineText({ text }: { text: string }) {
+function InlineText({ text, lightweightInline = false }: { text: string; lightweightInline?: boolean }) {
+  if (lightweightInline) {
+    return <span>{text}</span>;
+  }
+
   const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter(Boolean);
   return (
     <>
@@ -147,6 +151,7 @@ function InlineText({ text }: { text: string }) {
 const MarkdownLiteRenderer = memo(function MarkdownLiteRenderer({ content }: { content: string; isStreaming?: boolean }) {
   const liteContent = useMemo(() => getLiteRichContent(content), [content]);
   const blocks = useMemo(() => parseLiteBlocks(liteContent.text), [liteContent.text]);
+  const lightweightInline = liteContent.isPreview;
 
   return (
     <div data-markdown-lite-renderer={liteContent.isPreview ? "stable-preview" : "full"}>
@@ -158,21 +163,21 @@ const MarkdownLiteRenderer = memo(function MarkdownLiteRenderer({ content }: { c
             : block.level === 2
               ? "text-lg font-semibold text-text-primary mb-2 mt-5"
               : "text-base font-semibold text-text-primary mb-2 mt-4";
-          return <Heading key={index} className={className}><InlineText text={block.text} /></Heading>;
+          return <Heading key={index} className={className}><InlineText text={block.text} lightweightInline={lightweightInline} /></Heading>;
         }
         if (block.type === "ul") {
-          return <ul key={index} className="list-disc ml-5 mb-4 space-y-1 text-text-primary">{block.items.map((item, itemIndex) => <li key={itemIndex} className="text-[15px] leading-relaxed"><InlineText text={item} /></li>)}</ul>;
+          return <ul key={index} className="list-disc ml-5 mb-4 space-y-1 text-text-primary">{block.items.map((item, itemIndex) => <li key={itemIndex} className="text-[15px] leading-relaxed"><InlineText text={item} lightweightInline={lightweightInline} /></li>)}</ul>;
         }
         if (block.type === "ol") {
-          return <ol key={index} className="list-decimal ml-5 mb-4 space-y-1 text-text-primary">{block.items.map((item, itemIndex) => <li key={itemIndex} className="text-[15px] leading-relaxed"><InlineText text={item} /></li>)}</ol>;
+          return <ol key={index} className="list-decimal ml-5 mb-4 space-y-1 text-text-primary">{block.items.map((item, itemIndex) => <li key={itemIndex} className="text-[15px] leading-relaxed"><InlineText text={item} lightweightInline={lightweightInline} /></li>)}</ol>;
         }
         if (block.type === "quote") {
-          return <blockquote key={index} className="border-l-2 border-surface-border pl-4 italic text-text-secondary my-4"><InlineText text={block.text} /></blockquote>;
+          return <blockquote key={index} className="border-l-2 border-surface-border pl-4 italic text-text-secondary my-4"><InlineText text={block.text} lightweightInline={lightweightInline} /></blockquote>;
         }
         if (block.type === "code") {
           return <CodeBlock key={index} language={block.lang} value={block.value} lightweight />;
         }
-        return <p key={index} className="text-[15px] leading-relaxed text-text-primary mb-4 last:mb-0"><InlineText text={block.text} /></p>;
+        return <p key={index} className="text-[15px] leading-relaxed text-text-primary mb-4 last:mb-0"><InlineText text={block.text} lightweightInline={lightweightInline} /></p>;
       })}
     </div>
   );
