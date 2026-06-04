@@ -94,4 +94,77 @@ function ChatMessageListItem({
   );
 }
 
-export default memo(ChatMessageListItem);
+function getMessageRenderKey(message: Message) {
+  const activity = message.activityStatus;
+  return [
+    message.id,
+    message.role,
+    message.content,
+    message.reasoningContent || "",
+    message.model || "",
+    message.createdAt,
+    message.completedAt || 0,
+    message.generationStartedAt || 0,
+    message.stopped ? "stopped" : "",
+    message.search ? "search" : "",
+    message.searchStatus || "",
+    message.searchSourcesCount ?? message.searchSources?.length ?? 0,
+    activity ? `${activity.kind}:${activity.status}:${activity.label}` : "",
+    message.files?.map((file) => `${file.public_id}:${file.type}:${file.filename}`).join("|") || "",
+    message.errorCode || "",
+    message.retryable ? "retryable" : "",
+    message.serverMessageId || "",
+    message.backgroundTaskId || "",
+    message.generationTaskId || "",
+    message.isComplexTask ? "complex" : "",
+    message.lastSequence || 0,
+    message.groupId || "",
+    message.groupIndex || "",
+    message.groupModels?.join("|") || "",
+  ].join("\u0001");
+}
+
+function getGroupRenderKey(group?: InferredGroup) {
+  if (!group) return "";
+  return `${group.id}:${group.assistantMessages.map((message) => message.id).join("|")}`;
+}
+
+function getGroupModelRenderKey(group: InferredGroup | undefined, modelById: Map<string, ChatModel>) {
+  if (!group) return "";
+  return group.assistantMessages.map((message) => {
+    const model = message.model ? modelById.get(message.model) : undefined;
+    return `${message.id}:${message.model || ""}:${model?.id || ""}:${model?.name || ""}:${model?.provider || ""}:${model?.color || ""}`;
+  }).join("|");
+}
+
+function areChatMessageListItemPropsEqual(previous: ChatMessageListItemProps, next: ChatMessageListItemProps) {
+  const previousIsLast = previous.index === previous.visibleMessageCount - 1;
+  const nextIsLast = next.index === next.visibleMessageCount - 1;
+  if (previousIsLast !== nextIsLast) return false;
+  if (previous.message !== next.message && getMessageRenderKey(previous.message) !== getMessageRenderKey(next.message)) return false;
+
+  if (previous.isLoading !== next.isLoading && (previousIsLast || nextIsLast)) return false;
+  if (previous.selectMode !== next.selectMode) return false;
+  if (previous.isSelected !== next.isSelected) return false;
+  if (previous.isHighlighted !== next.isHighlighted) return false;
+  if (previous.historyPrependSettling !== next.historyPrependSettling) return false;
+  if (previous.conversationId !== next.conversationId) return false;
+  if (previous.imageLoadFailedLabel !== next.imageLoadFailedLabel) return false;
+  if (previous.MarkdownRenderer !== next.MarkdownRenderer) return false;
+  if (getGroupRenderKey(previous.group) !== getGroupRenderKey(next.group)) return false;
+  if (getGroupModelRenderKey(previous.group, previous.modelById) !== getGroupModelRenderKey(next.group, next.modelById)) return false;
+  if (previous.model?.id !== next.model?.id || previous.model?.name !== next.model?.name || previous.model?.provider !== next.model?.provider || previous.model?.color !== next.model?.color) return false;
+
+  const groupId = next.group?.id;
+  if (groupId) {
+    if ((previous.groupViews?.get(groupId) ?? 0) !== (next.groupViews?.get(groupId) ?? 0)) return false;
+    if ((previous.openAvatarDropdownGroupId === groupId) !== (next.openAvatarDropdownGroupId === groupId)) return false;
+  }
+
+  const serverMessageId = next.message.serverMessageId;
+  if (serverMessageId && previous.isFavorited(serverMessageId) !== next.isFavorited(serverMessageId)) return false;
+
+  return true;
+}
+
+export default memo(ChatMessageListItem, areChatMessageListItemPropsEqual);
