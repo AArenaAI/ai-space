@@ -51,8 +51,11 @@
     "source_unit": "per_1m_tokens",
     "source_input_price": 5.0,
     "source_output_price": 30.0,
-    "pricing_basis": "standard_non_batch_text_input_image_output_tokens; official page says use image-generation calculator for per-image estimates",
-    "source_url": "https://developers.openai.com/api/docs/pricing?latest-pricing=standard"
+    "pricing_basis": "standard_non_batch_multimodal_image_generation_tokens; text input $5/$1.25 cached, image input $8/$2 cached, image output $30 per 1M tokens; estimates used when API usage is unavailable",
+    "source_url": "https://developers.openai.com/api/docs/pricing?latest-pricing=standard",
+    "source_input_cache_hit_price": 1.25,
+    "source_image_input_price": 8.0,
+    "source_image_input_cache_hit_price": 2.0
   },
   {
     "provider": "gemini",

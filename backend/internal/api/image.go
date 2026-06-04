@@ -1146,6 +1146,78 @@ func imageOperationForJob(referenceImagePaths []string, maskPath string, backgro
 	return "text_to_image"
 }
 
+func estimateImageOutputTokens(size, quality string, imageCount int) int {
+	if imageCount <= 0 {
+		return 0
+	}
+	point, ok := parseImageSize(size)
+	if !ok || point.X <= 0 || point.Y <= 0 {
+		point = image.Point{X: 1024, Y: 1024}
+	}
+	megapixels := float64(point.X*point.Y) / float64(1024*1024)
+	if megapixels <= 0 {
+		megapixels = 1
+	}
+	qualityMultiplier := 1.0
+	switch strings.ToLower(strings.TrimSpace(quality)) {
+	case "low":
+		qualityMultiplier = 0.65
+	case "high":
+		qualityMultiplier = 1.35
+	case "auto":
+		qualityMultiplier = 1.0
+	}
+	// OpenAI bills image generation by image tokens. When the API does not return
+	// usage, keep the record as estimated and approximate from output pixels.
+	// The baseline is intentionally conservative for 1K images and scales with
+	// area/quality so admin averages are non-zero and traceable instead of free.
+	estimatedPerImage := int(4200 * megapixels * qualityMultiplier)
+	if estimatedPerImage < 1 {
+		estimatedPerImage = 1
+	}
+	return estimatedPerImage * imageCount
+}
+
+func estimateImageJobUsage(prompt, size, quality, operation string, referenceImageCount, imageCount int) *services.TokenUsage {
+	if imageCount <= 0 {
+		return nil
+	}
+	textTokens := services.EstimateTokens(prompt)
+	imageInputTokens := 0
+	if referenceImageCount > 0 {
+		point, ok := parseImageSize(size)
+		if !ok || point.X <= 0 || point.Y <= 0 {
+			point = image.Point{X: 1024, Y: 1024}
+		}
+		megapixels := float64(point.X*point.Y) / float64(1024*1024)
+		if megapixels <= 0 {
+			megapixels = 1
+		}
+		imageInputTokens = int(1800 * megapixels * float64(referenceImageCount))
+		if imageInputTokens < referenceImageCount {
+			imageInputTokens = referenceImageCount
+		}
+	}
+	imageOutputTokens := estimateImageOutputTokens(size, quality, imageCount)
+	total := textTokens + imageInputTokens + imageOutputTokens
+	raw := map[string]any{
+		"image_billing_usage": map[string]any{
+			"text_input_tokens":   textTokens,
+			"image_input_tokens":  imageInputTokens,
+			"image_output_tokens": imageOutputTokens,
+			"estimated":           true,
+			"estimated_reason":    "openai_images_usage_missing_pixel_quality_estimate",
+		},
+		"estimated":             true,
+		"estimated_reason":      "openai_images_usage_missing_pixel_quality_estimate",
+		"size":                  size,
+		"quality":               quality,
+		"operation":             operation,
+		"reference_image_count": referenceImageCount,
+	}
+	return &services.TokenUsage{PromptTokens: textTokens + imageInputTokens, CompletionTokens: imageOutputTokens, TotalTokens: total, Raw: raw, Estimated: true}
+}
+
 func (h *ImageHandler) recordImageJobUsage(recordID uint, imageCount int, operation string, usage *services.TokenUsage) {
 	if h.usageService == nil {
 		return
@@ -1153,6 +1225,16 @@ func (h *ImageHandler) recordImageJobUsage(recordID uint, imageCount int, operat
 	var gen services.ImageGeneration
 	if dbErr := h.db.First(&gen, recordID).Error; dbErr != nil {
 		return
+	}
+	if usage == nil && imageCount > 0 {
+		referenceImageCount := 0
+		if strings.TrimSpace(gen.ReferenceImageURL) != "" {
+			referenceImageCount = len(strings.Split(gen.ReferenceImageURL, ","))
+			if referenceImageCount <= 0 {
+				referenceImageCount = 1
+			}
+		}
+		usage = estimateImageJobUsage(gen.Prompt, gen.Size, gen.Quality, operation, referenceImageCount, imageCount)
 	}
 	_ = h.usageService.RecordImageUsageWithContext(gen.UserID, h.cfg.ImageGenModel, imageCount, services.UsageContext{
 		ResourceType: "image_generation",

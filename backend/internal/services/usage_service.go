@@ -235,6 +235,157 @@ func (s *UsageService) GetGuestDailyChatCount(guestID string) (int64, error) {
 	return count, err
 }
 
+type ImageBillingUsage struct {
+	TextInputTokens        int            `json:"text_input_tokens"`
+	CachedTextInputTokens  int            `json:"cached_text_input_tokens"`
+	ImageInputTokens       int            `json:"image_input_tokens"`
+	CachedImageInputTokens int            `json:"cached_image_input_tokens"`
+	ImageOutputTokens      int            `json:"image_output_tokens"`
+	Estimated              bool           `json:"estimated"`
+	EstimatedReason        string         `json:"estimated_reason,omitempty"`
+	Raw                    map[string]any `json:"raw,omitempty"`
+}
+
+func imageBillingUsageFromTokenUsage(usage *TokenUsage) *ImageBillingUsage {
+	if usage == nil || usage.Raw == nil {
+		return nil
+	}
+	if raw, ok := usage.Raw["image_billing_usage"].(map[string]any); ok {
+		return parseImageBillingUsageMap(raw)
+	}
+	if raw, ok := usage.Raw["usage"].(map[string]any); ok {
+		return parseImageBillingUsageMap(raw)
+	}
+	return parseImageBillingUsageMap(usage.Raw)
+}
+
+func parseImageBillingUsageMap(raw map[string]any) *ImageBillingUsage {
+	if raw == nil {
+		return nil
+	}
+	usage := &ImageBillingUsage{Raw: raw}
+	usage.TextInputTokens = intFromAny(firstAny(raw, "text_input_tokens", "input_text_tokens", "text_tokens"))
+	usage.CachedTextInputTokens = intFromAny(firstAny(raw, "cached_text_input_tokens", "cached_input_text_tokens", "cached_text_tokens"))
+	usage.ImageInputTokens = intFromAny(firstAny(raw, "image_input_tokens", "input_image_tokens", "image_tokens"))
+	usage.CachedImageInputTokens = intFromAny(firstAny(raw, "cached_image_input_tokens", "cached_input_image_tokens", "cached_image_tokens"))
+	usage.ImageOutputTokens = intFromAny(firstAny(raw, "image_output_tokens", "output_image_tokens", "output_tokens", "completion_tokens"))
+	if v, ok := firstAny(raw, "estimated").(bool); ok {
+		usage.Estimated = v
+	}
+	if v, ok := firstAny(raw, "estimated_reason").(string); ok {
+		usage.EstimatedReason = v
+	}
+	if details, ok := firstAny(raw, "input_tokens_details", "prompt_tokens_details").(map[string]any); ok {
+		if usage.TextInputTokens == 0 {
+			usage.TextInputTokens = intFromAny(firstAny(details, "text_tokens", "text"))
+		}
+		if usage.ImageInputTokens == 0 {
+			usage.ImageInputTokens = intFromAny(firstAny(details, "image_tokens", "image"))
+		}
+		if usage.CachedTextInputTokens == 0 {
+			usage.CachedTextInputTokens = intFromAny(firstAny(details, "cached_text_tokens", "cached_text"))
+		}
+		if usage.CachedImageInputTokens == 0 {
+			usage.CachedImageInputTokens = intFromAny(firstAny(details, "cached_image_tokens", "cached_image"))
+		}
+	}
+	if details, ok := firstAny(raw, "output_tokens_details", "completion_tokens_details").(map[string]any); ok {
+		if usage.ImageOutputTokens == 0 {
+			usage.ImageOutputTokens = intFromAny(firstAny(details, "image_tokens", "image", "image_output_tokens"))
+		}
+	}
+	if usage.TextInputTokens == 0 && usage.CachedTextInputTokens == 0 && usage.ImageInputTokens == 0 && usage.CachedImageInputTokens == 0 && usage.ImageOutputTokens == 0 {
+		return nil
+	}
+	return usage
+}
+
+func firstAny(raw map[string]any, keys ...string) any {
+	for _, key := range keys {
+		if v, ok := raw[key]; ok {
+			return v
+		}
+	}
+	return nil
+}
+
+func intFromAny(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case float32:
+		return int(n)
+	case json.Number:
+		if i, err := n.Int64(); err == nil {
+			return int(i)
+		}
+		if f, err := n.Float64(); err == nil {
+			return int(f)
+		}
+	case string:
+		if i, err := strconv.Atoi(strings.TrimSpace(n)); err == nil {
+			return i
+		}
+	}
+	return 0
+}
+
+func imageBillingCostRMB(price config.ModelPrice, usage *ImageBillingUsage) (inputCost, outputCost, totalCost float64) {
+	if usage == nil {
+		return 0, 0, 0
+	}
+	rate := price.ExchangeRateToRMB
+	if rate <= 0 {
+		rate = exchangeRateToRMB(price.SourceCurrency)
+	}
+	if rate <= 0 {
+		rate = 1
+	}
+	textInputPerK := convertSourceUnitToRMB(price.SourceUnit, price.SourceInputPrice, rate)
+	cachedTextPerK := convertSourceUnitToRMB(price.SourceUnit, price.SourceInputCacheHitPrice, rate)
+	imageInputPerK := convertSourceUnitToRMB(price.SourceUnit, price.SourceImageInputPrice, rate)
+	cachedImagePerK := convertSourceUnitToRMB(price.SourceUnit, price.SourceImageInputCacheHitPrice, rate)
+	outputPerK := convertSourceUnitToRMB(price.SourceUnit, price.SourceOutputPrice, rate)
+	inputCost = float64(usage.TextInputTokens)*textInputPerK/1000.0 + float64(usage.CachedTextInputTokens)*cachedTextPerK/1000.0 + float64(usage.ImageInputTokens)*imageInputPerK/1000.0 + float64(usage.CachedImageInputTokens)*cachedImagePerK/1000.0
+	outputCost = float64(usage.ImageOutputTokens) * outputPerK / 1000.0
+	return inputCost, outputCost, inputCost + outputCost
+}
+
+func imageBillingRawJSON(existing map[string]any, billing *ImageBillingUsage, price config.ModelPrice, size, quality, operation string) string {
+	payload := map[string]any{}
+	if existing != nil {
+		payload["provider_usage"] = existing
+	}
+	if billing != nil {
+		payload["image_billing_usage"] = billing
+	}
+	payload["image_billing_price"] = map[string]any{
+		"source_currency":                 price.SourceCurrency,
+		"source_unit":                     price.SourceUnit,
+		"source_text_input_price":         price.SourceInputPrice,
+		"source_text_cached_input_price":  price.SourceInputCacheHitPrice,
+		"source_image_input_price":        price.SourceImageInputPrice,
+		"source_image_cached_input_price": price.SourceImageInputCacheHitPrice,
+		"source_image_output_price":       price.SourceOutputPrice,
+		"exchange_rate_to_rmb":            price.ExchangeRateToRMB,
+	}
+	if size != "" {
+		payload["size"] = size
+	}
+	if quality != "" {
+		payload["quality"] = quality
+	}
+	if operation != "" {
+		payload["operation"] = operation
+	}
+	b, _ := json.Marshal(payload)
+	return string(b)
+}
+
 // RecordImageUsage 记录图片生成用量
 func (s *UsageService) RecordImageUsage(userID uint, model string, imageCount int, usage *TokenUsage) error {
 	return s.RecordImageUsageWithContext(userID, model, imageCount, UsageContext{}, usage)
@@ -243,9 +394,11 @@ func (s *UsageService) RecordImageUsage(userID uint, model string, imageCount in
 // RecordImageUsageWithContext 记录图片生成/编辑用量（带产品与业务上下文）。
 func (s *UsageService) RecordImageUsageWithContext(userID uint, model string, imageCount int, ctx UsageContext, usage *TokenUsage) error {
 	var promptTokens, completionTokens int
+	var billingUsage *ImageBillingUsage
 	if usage != nil {
 		promptTokens = usage.PromptTokens
 		completionTokens = usage.CompletionTokens
+		billingUsage = imageBillingUsageFromTokenUsage(usage)
 	}
 
 	// 图片生成可能按图片张数计费或按 token 计费。模型级价格优先，provider 配置兜底。
@@ -257,7 +410,11 @@ func (s *UsageService) RecordImageUsageWithContext(userID uint, model string, im
 	var totalCost float64
 	var inputCost, outputCost float64
 
-	if unitPrice > 0 {
+	if billingUsage != nil {
+		inputCost, outputCost, totalCost = imageBillingCostRMB(price, billingUsage)
+		promptTokens = billingUsage.TextInputTokens + billingUsage.CachedTextInputTokens + billingUsage.ImageInputTokens + billingUsage.CachedImageInputTokens
+		completionTokens = billingUsage.ImageOutputTokens
+	} else if unitPrice > 0 {
 		// 按张计费
 		totalCost = models.CalculateImageCost(imageCount, unitPrice)
 		// 同时也计算 token 费用，如果有
@@ -293,8 +450,9 @@ func (s *UsageService) RecordImageUsageWithContext(userID uint, model string, im
 
 	rawJSON := ""
 	if usage != nil && usage.Raw != nil {
-		b, _ := json.Marshal(usage.Raw)
-		rawJSON = string(b)
+		rawJSON = imageBillingRawJSON(usage.Raw, billingUsage, price, "", "", ctx.Operation)
+	} else if billingUsage != nil {
+		rawJSON = imageBillingRawJSON(nil, billingUsage, price, "", "", ctx.Operation)
 	}
 
 	unitCount := float64(imageCount)
