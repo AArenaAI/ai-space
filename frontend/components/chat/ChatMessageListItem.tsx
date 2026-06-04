@@ -16,6 +16,7 @@ export type ChatMessageListItemProps = {
   selectMode: boolean;
   isSelected: boolean;
   isHighlighted: boolean;
+  historyPrependSettling: boolean;
   conversationId?: number;
   groupViews?: Map<number, number>;
   modelById: Map<string, ChatModel>;
@@ -44,6 +45,7 @@ function ChatMessageListItem({
   selectMode,
   isSelected,
   isHighlighted,
+  historyPrependSettling,
   conversationId,
   groupViews,
   modelById,
@@ -71,6 +73,7 @@ function ChatMessageListItem({
       selectMode={selectMode}
       isSelected={isSelected}
       isHighlighted={isHighlighted}
+      historyPrependSettling={historyPrependSettling}
       conversationId={conversationId}
       groupViews={groupViews}
       modelById={modelById}

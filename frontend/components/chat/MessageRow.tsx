@@ -43,6 +43,7 @@ export type MessageRowProps = {
   selectMode: boolean;
   isSelected: boolean;
   isHighlighted: boolean;
+  historyPrependSettling: boolean;
   conversationId?: number;
   groupViews?: Map<number, number>;
   modelById: Map<string, ChatModel>;
@@ -70,6 +71,7 @@ function MessageRow({
   selectMode,
   isSelected,
   isHighlighted,
+  historyPrependSettling,
   conversationId,
   groupViews,
   modelById,
@@ -98,7 +100,6 @@ function MessageRow({
   const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
   const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
   const assistantAvatarMeta = getModelAvatarMeta(model || msg.model || "AI");
-
   useEffect(() => {
     const commitAt = typeof performance !== "undefined" ? performance.now() : Date.now();
     emitChatRenderProfileEvent("message-row-commit", {
@@ -255,7 +256,7 @@ function MessageRow({
                 <UserMessageContent message={msg} imageLoadFailedLabel={imageLoadFailedLabel} />
               ) : (
                 <>
-                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={isNearViewport || forceHydrateRichText} priorityHydrateRichText={isInViewport || forceHydrateRichText} recoverEmptyContent={isLast} onRegenerate={onRegenerate} />
+                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={!historyPrependSettling && (isNearViewport || forceHydrateRichText)} priorityHydrateRichText={!historyPrependSettling && (isInViewport || forceHydrateRichText)} recoverEmptyContent={isLast} onRegenerate={onRegenerate} />
                   {msg.stopped && onContinueGenerate && (
                     <button
                       onClick={onContinueGenerate}

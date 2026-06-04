@@ -245,7 +245,9 @@ function MessageList({
   const [returnToBottomPreload, setReturnToBottomPreload] = useState(false);
   const [fastScrollPreload, setFastScrollPreload] = useState(false);
   const [renderedMessageWindow, setRenderedMessageWindow] = useState(INITIAL_RENDERED_MESSAGE_WINDOW);
+  const [historyPrependSettling, setHistoryPrependSettling] = useState(false);
   const fastScrollPreloadTimerRef = useRef<number>(0);
+  const historyPrependSettlingTimerRef = useRef<number>(0);
   const [activeOverviewMessageId, setActiveOverviewMessageId] = useState<string | null>(null);
   const overviewJumpActiveRef = useRef<{ id: string; until: number } | null>(null);
   const overviewBottomLockUntilRef = useRef(0);
@@ -534,7 +536,18 @@ function MessageList({
   useEffect(() => () => {
     if (userBrowsingTimerRef.current) window.clearTimeout(userBrowsingTimerRef.current);
     if (fastScrollPreloadTimerRef.current) window.clearTimeout(fastScrollPreloadTimerRef.current);
+    if (historyPrependSettlingTimerRef.current) window.clearTimeout(historyPrependSettlingTimerRef.current);
     if (bottomSmoothRafRef.current) window.cancelAnimationFrame(bottomSmoothRafRef.current);
+  }, []);
+
+  const markHistoryPrependSettling = useCallback((duration = 1600) => {
+    historyPrependUntilRef.current = Math.max(historyPrependUntilRef.current, Date.now() + duration);
+    setHistoryPrependSettling(true);
+    if (historyPrependSettlingTimerRef.current) window.clearTimeout(historyPrependSettlingTimerRef.current);
+    historyPrependSettlingTimerRef.current = window.setTimeout(() => {
+      historyPrependSettlingTimerRef.current = 0;
+      setHistoryPrependSettling(false);
+    }, duration);
   }, []);
 
   const handleUserScrollIntent = useCallback((deltaY: number) => {
@@ -566,7 +579,7 @@ function MessageList({
     // Virtuoso's prepend model keeps the viewport anchored through firstItemIndex.
     // Do not also mutate scrollTop here: with tall/late-measured rows the two anchoring systems fight,
     // producing the visible flash/stuck-row behavior when loading older history.
-    historyPrependUntilRef.current = Math.max(historyPrependUntilRef.current, Date.now() + 1600);
+    markHistoryPrependSettling(1600);
     stopBottomLockForUserBrowse(1600);
     const timer = window.setTimeout(() => {
       if (loadMoreAnchorRef.current?.messageId === anchor.messageId) {
@@ -574,7 +587,7 @@ function MessageList({
       }
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [messages, stopBottomLockForUserBrowse]);
+  }, [markHistoryPrependSettling, messages, stopBottomLockForUserBrowse]);
 
   useEffect(() => {
     if (!isLoadingMore) {
@@ -811,11 +824,11 @@ function MessageList({
       previousAllVisibleMessagesRef.current = allVisibleMessages;
     } else if (didPrependVisibleMessages) {
       firstItemIndexRef.current = pendingFirstItemIndex;
-      historyPrependUntilRef.current = Date.now() + 1600;
+      markHistoryPrependSettling(1600);
       stopBottomLockForUserBrowse(1600);
     }
     previousVisibleMessagesRef.current = visibleMessages;
-  }, [allVisibleMessages, conversationId, didSwitchConversation, didPrependVisibleMessages, pendingFirstItemIndex, visibleMessages, stopBottomLockForUserBrowse]);
+  }, [allVisibleMessages, conversationId, didSwitchConversation, didPrependVisibleMessages, markHistoryPrependSettling, pendingFirstItemIndex, visibleMessages, stopBottomLockForUserBrowse]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -1517,6 +1530,7 @@ function MessageList({
               selectMode={selectMode}
               isSelected={isSelected}
               isHighlighted={isHighlighted}
+              historyPrependSettling={historyPrependSettling}
               conversationId={conversationId}
               groupViews={groupViews}
               modelById={modelById}
