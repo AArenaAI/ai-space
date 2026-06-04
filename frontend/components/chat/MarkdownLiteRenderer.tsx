@@ -3,11 +3,16 @@
 import { memo, useEffect, useMemo } from "react";
 import CodeBlock from "./markdown/CodeBlock";
 
-const MAX_LITE_RICH_CHARS = 3500;
-const MAX_LITE_RICH_LINES = 50;
-const EXTREME_LITE_LENGTH_THRESHOLD = 10_000;
-const EXTREME_LITE_CODE_BLOCK_THRESHOLD = 20;
-const EXTREME_LITE_TABLE_LINE_THRESHOLD = 100;
+const STABLE_LITE_RICH_CHARS = 3500;
+const STABLE_LITE_RICH_LINES = 50;
+const STABLE_PREVIEW_LITE_LENGTH_THRESHOLD = 10_000;
+const STABLE_PREVIEW_LITE_CODE_BLOCK_THRESHOLD = 20;
+const STABLE_PREVIEW_LITE_TABLE_LINE_THRESHOLD = 100;
+const COMPACT_LITE_RICH_CHARS = 2200;
+const COMPACT_LITE_RICH_LINES = 32;
+const COMPACT_PREVIEW_LITE_LENGTH_THRESHOLD = 3_000;
+const COMPACT_PREVIEW_LITE_CODE_BLOCK_THRESHOLD = 2;
+const COMPACT_PREVIEW_LITE_TABLE_LINE_THRESHOLD = 7;
 const LITE_PARSE_CACHE_LIMIT = 80;
 
 type LiteBlock =
@@ -45,13 +50,15 @@ function rememberLiteParse(content: string, value: Omit<LiteParseResult, "parseM
   if (oldest) liteParseCache.delete(oldest);
 }
 
-function getLiteRichContent(content: string) {
+function getLiteRichContent(content: string, compactPreview: boolean) {
   let codeFenceCount = 0;
   let tableLines = 0;
   const previewLines: string[] = [];
   let previewLength = 0;
   const lines = content.split("\n");
 
+  const maxChars = compactPreview ? COMPACT_LITE_RICH_CHARS : STABLE_LITE_RICH_CHARS;
+  const maxLines = compactPreview ? COMPACT_LITE_RICH_LINES : STABLE_LITE_RICH_LINES;
   for (const line of lines) {
     if (line.includes("```")) {
       codeFenceCount += line.split("```").length - 1;
@@ -59,9 +66,9 @@ function getLiteRichContent(content: string) {
     if (/^\s*\|.+\|\s*$/.test(line)) {
       tableLines += 1;
     }
-    if (previewLines.length < MAX_LITE_RICH_LINES && previewLength < MAX_LITE_RICH_CHARS) {
-      const nextLine = previewLength + line.length > MAX_LITE_RICH_CHARS
-        ? line.slice(0, Math.max(0, MAX_LITE_RICH_CHARS - previewLength))
+    if (previewLines.length < maxLines && previewLength < maxChars) {
+      const nextLine = previewLength + line.length > maxChars
+        ? line.slice(0, Math.max(0, maxChars - previewLength))
         : line;
       previewLines.push(nextLine);
       previewLength += nextLine.length + 1;
@@ -69,13 +76,16 @@ function getLiteRichContent(content: string) {
   }
 
   const codeBlocks = Math.floor(codeFenceCount / 2);
-  const isExtreme =
-    content.length > EXTREME_LITE_LENGTH_THRESHOLD ||
-    codeBlocks >= EXTREME_LITE_CODE_BLOCK_THRESHOLD ||
-    tableLines >= EXTREME_LITE_TABLE_LINE_THRESHOLD;
-  if (!isExtreme) return { codeBlocks, isPreview: false, tableLines, text: content };
+  const lengthThreshold = compactPreview ? COMPACT_PREVIEW_LITE_LENGTH_THRESHOLD : STABLE_PREVIEW_LITE_LENGTH_THRESHOLD;
+  const codeBlockThreshold = compactPreview ? COMPACT_PREVIEW_LITE_CODE_BLOCK_THRESHOLD : STABLE_PREVIEW_LITE_CODE_BLOCK_THRESHOLD;
+  const tableLineThreshold = compactPreview ? COMPACT_PREVIEW_LITE_TABLE_LINE_THRESHOLD : STABLE_PREVIEW_LITE_TABLE_LINE_THRESHOLD;
+  const shouldPreview =
+    content.length > lengthThreshold ||
+    codeBlocks >= codeBlockThreshold ||
+    tableLines >= tableLineThreshold;
+  if (!shouldPreview) return { codeBlocks, isPreview: false, tableLines, text: content };
 
-  return { codeBlocks, isPreview: true, tableLines, text: previewLines.join("\n").slice(0, MAX_LITE_RICH_CHARS).trimEnd() };
+  return { codeBlocks, isPreview: true, tableLines, text: previewLines.join("\n").slice(0, maxChars).trimEnd() };
 }
 
 function parseLiteBlocks(markdown: string): LiteBlock[] {
@@ -171,19 +181,20 @@ function parseLiteBlocks(markdown: string): LiteBlock[] {
   return blocks;
 }
 
-function getCachedLiteParse(content: string): LiteParseResult {
+function getCachedLiteParse(content: string, compactPreview: boolean): LiteParseResult {
   const start = typeof performance !== "undefined" ? performance.now() : Date.now();
-  const cached = liteParseCache.get(content);
+  const cacheKey = `${compactPreview ? "compact" : "stable"}:${content}`;
+  const cached = liteParseCache.get(cacheKey);
   if (cached) {
-    liteParseCache.delete(content);
-    liteParseCache.set(content, cached);
+    liteParseCache.delete(cacheKey);
+    liteParseCache.set(cacheKey, cached);
     return { ...cached, parseMs: 0, wasCacheHit: true };
   }
 
-  const liteContent = getLiteRichContent(content);
+  const liteContent = getLiteRichContent(content, compactPreview);
   const blocks = parseLiteBlocks(liteContent.text);
   const value = { ...liteContent, blocks };
-  rememberLiteParse(content, value);
+  rememberLiteParse(cacheKey, value);
   const end = typeof performance !== "undefined" ? performance.now() : Date.now();
   return { ...value, parseMs: Math.max(0, end - start), wasCacheHit: false };
 }
@@ -209,8 +220,8 @@ function InlineText({ text, lightweightInline = false }: { text: string; lightwe
   );
 }
 
-const MarkdownLiteRenderer = memo(function MarkdownLiteRenderer({ content }: { content: string; isStreaming?: boolean }) {
-  const liteContent = useMemo(() => getCachedLiteParse(content), [content]);
+const MarkdownLiteRenderer = memo(function MarkdownLiteRenderer({ content, compactPreview = true }: { content: string; isStreaming?: boolean; compactPreview?: boolean }) {
+  const liteContent = useMemo(() => getCachedLiteParse(content, compactPreview), [compactPreview, content]);
   const blocks = liteContent.blocks;
   const lightweightInline = liteContent.isPreview;
 
@@ -222,9 +233,10 @@ const MarkdownLiteRenderer = memo(function MarkdownLiteRenderer({ content }: { c
       contentLength: content.length,
       isPreview: liteContent.isPreview,
       parseMs: Number(liteContent.parseMs.toFixed(2)),
+      compactPreview,
       tableLines: liteContent.tableLines,
     });
-  }, [blocks.length, content.length, liteContent.codeBlocks, liteContent.isPreview, liteContent.parseMs, liteContent.tableLines, liteContent.wasCacheHit]);
+  }, [blocks.length, compactPreview, content.length, liteContent.codeBlocks, liteContent.isPreview, liteContent.parseMs, liteContent.tableLines, liteContent.wasCacheHit]);
 
   return (
     <div data-markdown-lite-renderer={liteContent.isPreview ? "stable-preview" : "full"}>

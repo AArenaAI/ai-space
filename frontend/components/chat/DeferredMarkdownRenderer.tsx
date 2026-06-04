@@ -76,12 +76,12 @@ function shouldUseRichLiteFallback(content: string, complexity: ReturnType<typeo
   return content.length <= 500 && complexity.codeBlocks === 0 && complexity.tableLines === 0;
 }
 
-function MarkdownFallback({ content, loading }: { content: string; loading?: boolean }) {
+function MarkdownFallback({ content, loading, compactPreview = true }: { content: string; loading?: boolean; compactPreview?: boolean }) {
   if (loading) {
     return <div className="h-5 w-32 rounded bg-surface-card animate-pulse" />;
   }
 
-  return <MarkdownPlainFallback content={content} />;
+  return <MarkdownPlainFallback content={content} compactPreview={compactPreview} />;
 }
 
 export function DeferredMarkdownRenderer({
@@ -93,6 +93,7 @@ export function DeferredMarkdownRenderer({
   keepRenderedOnContentChange = false,
   isStreaming = false,
   allowRichLiteFallback = false,
+  compactRichLitePreview = true,
 }: {
   content: string;
   shouldHydrateRichText?: boolean;
@@ -102,6 +103,7 @@ export function DeferredMarkdownRenderer({
   keepRenderedOnContentChange?: boolean;
   isStreaming?: boolean;
   allowRichLiteFallback?: boolean;
+  compactRichLitePreview?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const complexity = useMemo(() => getMarkdownComplexity(content), [content]);
@@ -257,9 +259,9 @@ export function DeferredMarkdownRenderer({
       {shouldRenderMarkdown && Renderer ? (
         <Renderer content={content} isStreaming={isStreaming} priorityHydrateRichText={priorityHydrateRichText} />
       ) : priorityHydrateRichText || (allowRichLiteFallback && shouldHydrateRichText && shouldUseRichLiteFallback(content, complexity)) ? (
-        <MarkdownLiteRenderer content={content} isStreaming={isStreaming} />
+        <MarkdownLiteRenderer content={content} isStreaming={isStreaming} compactPreview={compactRichLitePreview} />
       ) : (
-        <MarkdownFallback content={content} />
+        <MarkdownFallback content={content} compactPreview={compactRichLitePreview} />
       )}
     </div>
   );
