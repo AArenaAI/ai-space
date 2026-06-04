@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, BarChart3, ChevronDown, Coins, FilterX, ListFilter, MessageSquare, RefreshCw, Search, ServerCrash, Users, Zap } from "lucide-react";
+import { AlertCircle, BarChart3, ChevronDown, Clipboard, Coins, FilterX, ListFilter, MessageSquare, RefreshCw, Search, ServerCrash, Users, Zap } from "lucide-react";
 import {
+  getAdminUsageConversationDetail,
   getAdminUsageConversations,
   getAdminUsageLogs,
   getAdminUsageModels,
@@ -12,6 +13,7 @@ import {
   getAdminUsageUsers,
 } from "@/lib/admin/api";
 import type {
+  AdminUsageConversationDetail,
   AdminUsageConversationsResponse,
   AdminUsageLog,
   AdminUsageLogsResponse,
@@ -100,6 +102,9 @@ export default function AdminUsagePage() {
   const [selectedLog, setSelectedLog] = useState<AdminUsageLog | null>(null);
   const [selectedUserDetail, setSelectedUserDetail] = useState<AdminUsageUserDetail | null>(null);
   const [selectedUserLogs, setSelectedUserLogs] = useState<AdminUsageLog[]>([]);
+  const [selectedConversationDetail, setSelectedConversationDetail] = useState<AdminUsageConversationDetail | null>(null);
+  const [conversationDetailLoading, setConversationDetailLoading] = useState(false);
+  const [conversationDetailError, setConversationDetailError] = useState("");
   const [userDetailLoading, setUserDetailLoading] = useState(false);
   const [userDetailError, setUserDetailError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -204,6 +209,20 @@ export default function AdminUsagePage() {
     setShowAdvancedFilters(true);
   };
 
+  const openConversationDetail = async (conversationId: number) => {
+    setConversationDetailError("");
+    setConversationDetailLoading(true);
+    setSelectedConversationDetail(null);
+    try {
+      const detail = await getAdminUsageConversationDetail(conversationId, { range: filters.range });
+      setSelectedConversationDetail(detail);
+    } catch (error) {
+      setConversationDetailError(errorMessage(error, "查询对话详情失败"));
+    } finally {
+      setConversationDetailLoading(false);
+    }
+  };
+
   const activeFilterLabels = activeFilters(filters);
 
   if (loading && !summary && !logs) return <div className="rounded-3xl border border-surface-border bg-surface-card p-8 text-text-secondary">正在加载用量数据…</div>;
@@ -252,7 +271,8 @@ export default function AdminUsagePage() {
       {tab === "models" && <ModelsUsage models={models} summary={summary} error={errors.models} />}
       {tab === "conversations" && <ConversationsUsage conversations={conversations} error={errors.conversations} />}
       {selectedLog && <UsageLogDrawer log={selectedLog} onClose={() => setSelectedLog(null)} />}
-      {(selectedUserDetail || userDetailLoading || userDetailError) && <UserUsageDrawer detail={selectedUserDetail} logs={selectedUserLogs} loading={userDetailLoading} error={userDetailError} range={filters.range} onClose={() => { setSelectedUserDetail(null); setSelectedUserLogs([]); setUserDetailError(""); }} onDrilldownLedger={drilldownUserLedger} onSelectLog={(log) => { setSelectedUserDetail(null); setSelectedLog(log); }} />}
+      {(selectedUserDetail || userDetailLoading || userDetailError) && <UserUsageDrawer detail={selectedUserDetail} logs={selectedUserLogs} loading={userDetailLoading} error={userDetailError} range={filters.range} onClose={() => { setSelectedUserDetail(null); setSelectedUserLogs([]); setUserDetailError(""); }} onDrilldownLedger={drilldownUserLedger} onSelectLog={(log) => { setSelectedUserDetail(null); setSelectedLog(log); }} onSelectConversation={openConversationDetail} />}
+      {(selectedConversationDetail || conversationDetailLoading || conversationDetailError) && <ConversationUsageDrawer detail={selectedConversationDetail} loading={conversationDetailLoading} error={conversationDetailError} range={filters.range} onClose={() => { setSelectedConversationDetail(null); setConversationDetailError(""); }} onSelectLog={setSelectedLog} />}
     </div>
   );
 }
@@ -560,7 +580,7 @@ function UsageNumbers({ log }: { log: AdminUsageLog }) {
   return <>{parts.length ? parts.map((part) => <div key={part}>{part}</div>) : "-"}</>;
 }
 
-function UserUsageDrawer({ detail, logs, loading, error, range, onClose, onDrilldownLedger, onSelectLog }: { detail: AdminUsageUserDetail | null; logs: AdminUsageLog[]; loading: boolean; error: string; range: string; onClose: () => void; onDrilldownLedger: (userId: number) => void; onSelectLog: (log: AdminUsageLog) => void }) {
+function UserUsageDrawer({ detail, logs, loading, error, range, onClose, onDrilldownLedger, onSelectLog, onSelectConversation }: { detail: AdminUsageUserDetail | null; logs: AdminUsageLog[]; loading: boolean; error: string; range: string; onClose: () => void; onDrilldownLedger: (userId: number) => void; onSelectLog: (log: AdminUsageLog) => void; onSelectConversation: (conversationId: number) => void }) {
   const user = detail?.user;
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={onClose}>
@@ -604,7 +624,7 @@ function UserUsageDrawer({ detail, logs, loading, error, range, onClose, onDrill
 
             <Card title="对话消耗 Top">
               <Table headers={["对话", "请求", "Token", "成本", "最近使用"]}>
-                {(detail.conversations || []).map((item) => <tr key={item.conversation_id} className="border-t border-surface-border"><td className="py-3 pr-4"><div className="max-w-[360px] truncate font-medium text-text-primary">{item.title || `Conversation #${item.conversation_id}`}</div><div className="text-xs text-text-tertiary">ID {item.conversation_id}</div></td><td className="pr-4">{formatNumber(item.requests)}</td><td className="pr-4">{formatNumber(item.total_tokens || 0)}</td><td className="font-semibold text-text-primary">{formatRMB(item.cost_rmb)}</td><td className="whitespace-nowrap text-text-tertiary">{formatDateTime(item.last_used_at)}</td></tr>)}
+                {(detail.conversations || []).map((item) => <tr key={item.conversation_id} onClick={() => onSelectConversation(item.conversation_id)} className="cursor-pointer border-t border-surface-border hover:bg-surface-elevated/40"><td className="py-3 pr-4"><div className="max-w-[360px] truncate font-medium text-text-primary">{item.title || `Conversation #${item.conversation_id}`}</div><div className="text-xs text-text-tertiary">ID {item.conversation_id}</div></td><td className="pr-4">{formatNumber(item.requests)}</td><td className="pr-4">{formatNumber(item.total_tokens || 0)}</td><td className="font-semibold text-text-primary">{formatRMB(item.cost_rmb)}</td><td className="whitespace-nowrap text-text-tertiary">{formatDateTime(item.last_used_at)}</td></tr>)}
               </Table>
               {(detail.conversations || []).length === 0 && <Empty />}
             </Card>
@@ -627,8 +647,67 @@ function MiniMetric({ label, value }: { label: string; value: string }) {
   return <div className="rounded-2xl bg-surface-elevated px-4 py-3"><div className="text-xs text-text-tertiary">{label}</div><div className="mt-1 font-semibold text-text-primary">{value}</div></div>;
 }
 
+function ConversationUsageDrawer({ detail, loading, error, range, onClose, onSelectLog }: { detail: AdminUsageConversationDetail | null; loading: boolean; error: string; range: string; onClose: () => void; onSelectLog: (log: AdminUsageLog) => void }) {
+  const conversation = detail?.conversation;
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={onClose}>
+      <aside className="h-full w-full max-w-3xl overflow-y-auto border-l border-surface-border bg-surface-card p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm text-brand">对话用量详情 · {range}</p>
+            <h2 className="mt-1 text-xl font-semibold text-text-primary">{conversation ? (conversation.title || `Conversation #${conversation.id}`) : "正在加载对话…"}</h2>
+            {conversation && <p className="mt-1 text-sm text-text-tertiary">ID {conversation.id} · User {conversation.user_id || "-"} · {conversation.model || "-"}</p>}
+          </div>
+          <button onClick={onClose} className="rounded-xl border border-surface-border px-3 py-2 text-sm text-text-secondary">关闭</button>
+        </div>
+        {loading && <div className="rounded-2xl bg-surface-elevated p-5 text-sm text-text-secondary">正在加载对话详情…</div>}
+        {error && <InlineError message={error} />}
+        {detail && (
+          <div className="space-y-5">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <MiniMetric label="成本" value={formatRMB(detail.summary.cost_rmb || 0)} />
+              <MiniMetric label="调用" value={formatNumber(detail.summary.requests || 0)} />
+              <MiniMetric label="Tokens" value={formatNumber(detail.summary.total_tokens || 0)} />
+              <MiniMetric label="图片/字符/视频" value={`${formatNumber(detail.summary.image_count || 0)} / ${formatNumber(detail.summary.character_count || 0)} / ${formatNumber(detail.summary.video_seconds || 0)}s`} />
+            </div>
+            <Card title="模型消耗">
+              <Table headers={["Provider", "模型", "请求", "Token", "成本"]}>
+                {(detail.models || []).map((row) => <tr key={`${row.provider}-${row.model}`} className="border-t border-surface-border"><td className="py-3 pr-4 text-text-secondary">{row.provider || "-"}</td><td className="max-w-[260px] truncate pr-4 font-medium text-text-primary">{row.model || "-"}</td><td className="pr-4">{formatNumber(row.requests)}</td><td className="pr-4">{formatNumber(row.total_tokens || 0)}</td><td className="font-semibold text-text-primary">{formatRMB(row.cost_rmb)}</td></tr>)}
+              </Table>
+              {(detail.models || []).length === 0 && <Empty />}
+            </Card>
+            <Card title="对话内账本记录">
+              <Table headers={["时间", "产品/操作", "服务", "模型", "用量", "成本", "状态"]}>
+                {(detail.logs || []).map((log) => <tr key={log.id} onClick={() => onSelectLog(log)} className="cursor-pointer border-t border-surface-border hover:bg-surface-elevated/40"><td className="whitespace-nowrap py-3 pr-4 text-xs">{formatDateTime(log.created_at)}</td><td className="min-w-[180px] pr-4"><div className="font-medium text-text-primary">{log.module || "-"} / {log.feature || "-"}</div><div className="text-xs text-text-tertiary">{log.operation || "-"}</div></td><td className="pr-4"><StatusBadge tone="blue">{log.service || "unknown"}</StatusBadge></td><td className="max-w-[260px] truncate pr-4"><div className="text-xs text-text-tertiary">{log.provider || "-"}</div><div className="truncate font-medium text-text-primary">{log.model || "-"}</div></td><td className="pr-4 text-xs"><UsageNumbers log={log} /></td><td className="font-semibold text-text-primary">{formatRMB(log.total_cost_rmb)}</td><td><StatusBadge tone={log.status === "success" ? "green" : log.status === "failed" ? "red" : "amber"}>{log.estimated ? `${log.status} · 估` : log.status || "unknown"}</StatusBadge></td></tr>)}
+              </Table>
+              {(detail.logs || []).length === 0 && <Empty />}
+              <div className="mt-3 text-xs text-text-tertiary">点击任一记录可打开单条账本详情。</div>
+            </Card>
+          </div>
+        )}
+      </aside>
+    </div>
+  );
+}
+
 function UsageLogDrawer({ log, onClose }: { log: AdminUsageLog; onClose: () => void }) {
-  return <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={onClose}><aside className="h-full w-full max-w-xl overflow-y-auto border-l border-surface-border bg-surface-card p-6 shadow-xl" onClick={(e) => e.stopPropagation()}><div className="mb-6 flex items-start justify-between gap-4"><div><p className="text-sm text-brand">Usage Log #{log.id}</p><h2 className="mt-1 text-xl font-semibold text-text-primary">{log.module || "-"} / {log.feature || "-"} / {log.operation || "-"}</h2></div><button onClick={onClose} className="rounded-xl border border-surface-border px-3 py-2 text-sm text-text-secondary">关闭</button></div><div className="space-y-4 text-sm"><Detail title="基础信息" rows={{ 时间: formatDateTime(log.created_at), 服务: log.service, Provider: log.provider, 模型: log.model, 状态: log.status, 估算: log.estimated ? "是" : "否" }} /><Detail title="业务关联" rows={{ 用户: log.user_id || log.guest_id || "-", 资源: `${log.resource_type || "-"}:${log.resource_id || "-"}`, 对话: log.conversation_id || "-", 消息: log.message_id || "-", 任务: log.task_id || "-", RequestID: log.request_id || "-" }} /><Detail title="用量" rows={{ PromptTokens: log.prompt_tokens || 0, CompletionTokens: log.completion_tokens || 0, TotalTokens: log.total_tokens || 0, ImageCount: log.image_count || 0, Characters: log.character_count || 0, VideoSeconds: log.video_seconds || 0 }} /><Detail title="价格快照" rows={{ 官方币种: log.source_currency || "-", 官方单位: log.source_unit || log.pricing_unit || "-", 官方输入价: log.source_input_price ?? "-", 官方输出价: log.source_output_price ?? "-", 官方图片价: log.source_image_price ?? "-", 官方请求价: log.source_request_price ?? "-", 汇率: log.exchange_rate_to_rmb ?? "-", 成本: formatRMB(log.total_cost_rmb) }} />{log.error_message && <Detail title="错误" rows={{ Error: log.error_message }} />}</div></aside></div>;
+  const debugText = [
+    `usage_log_id=${log.id}`,
+    `request_id=${log.request_id || ""}`,
+    `user_id=${log.user_id || ""}`,
+    `guest_id=${log.guest_id || ""}`,
+    `conversation_id=${log.conversation_id || ""}`,
+    `message_id=${log.message_id || ""}`,
+    `task_id=${log.task_id || ""}`,
+    `resource=${log.resource_type || ""}:${log.resource_id || ""}`,
+    `service=${log.service || ""}`,
+    `provider=${log.provider || ""}`,
+    `model=${log.model || ""}`,
+  ].join("\n");
+  const copyDebug = () => {
+    navigator.clipboard?.writeText(debugText).catch(() => undefined);
+  };
+  return <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={onClose}><aside className="h-full w-full max-w-xl overflow-y-auto border-l border-surface-border bg-surface-card p-6 shadow-xl" onClick={(e) => e.stopPropagation()}><div className="mb-6 flex items-start justify-between gap-4"><div><p className="text-sm text-brand">Usage Log #{log.id}</p><h2 className="mt-1 text-xl font-semibold text-text-primary">{log.module || "-"} / {log.feature || "-"} / {log.operation || "-"}</h2></div><div className="flex gap-2"><button onClick={copyDebug} className="inline-flex items-center gap-2 rounded-xl border border-surface-border px-3 py-2 text-sm text-text-secondary hover:text-text-primary"><Clipboard className="h-4 w-4" />复制排查字段</button><button onClick={onClose} className="rounded-xl border border-surface-border px-3 py-2 text-sm text-text-secondary">关闭</button></div></div><div className="space-y-4 text-sm"><Detail title="基础信息" rows={{ 时间: formatDateTime(log.created_at), 服务: log.service, Provider: log.provider, 模型: log.model, 状态: log.status, 估算: log.estimated ? "是" : "否" }} /><Detail title="业务关联" rows={{ 用户: log.user_id || log.guest_id || "-", 资源: `${log.resource_type || "-"}:${log.resource_id || "-"}`, 对话: log.conversation_id || "-", 消息: log.message_id || "-", 任务: log.task_id || "-", RequestID: log.request_id || "-" }} /><Detail title="排查字段" rows={{ UsageLogID: log.id, RequestID: log.request_id || "-", UserID: log.user_id || "-", GuestID: log.guest_id || "-", ConversationID: log.conversation_id || "-", MessageID: log.message_id || "-", TaskID: log.task_id || "-", Resource: `${log.resource_type || "-"}:${log.resource_id || "-"}` }} /><Detail title="用量" rows={{ PromptTokens: log.prompt_tokens || 0, CompletionTokens: log.completion_tokens || 0, TotalTokens: log.total_tokens || 0, ImageCount: log.image_count || 0, Characters: log.character_count || 0, VideoSeconds: log.video_seconds || 0 }} /><Detail title="价格快照" rows={{ 官方币种: log.source_currency || "-", 官方单位: log.source_unit || log.pricing_unit || "-", 官方输入价: log.source_input_price ?? "-", 官方输出价: log.source_output_price ?? "-", 官方图片价: log.source_image_price ?? "-", 官方请求价: log.source_request_price ?? "-", 汇率: log.exchange_rate_to_rmb ?? "-", 成本: formatRMB(log.total_cost_rmb) }} />{log.error_message && <Detail title="错误" rows={{ Error: log.error_message }} />}</div></aside></div>;
 }
 
 function Detail({ title, rows }: { title: string; rows: Record<string, string | number> }) {
