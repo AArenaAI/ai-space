@@ -152,6 +152,16 @@ export function DeferredMarkdownRenderer({
       return;
     }
 
+    if (allowRichLiteFallback && complexity.isHeavy && !isStreaming) {
+      if (!hasRenderedMarkdownRef.current) setShouldRenderMarkdown(false);
+      emitChatRenderProfileEvent("markdown-hydrate-stable-rich-lite", {
+        contentLength: content.length,
+        codeBlocks: complexity.codeBlocks,
+        tableLines: complexity.tableLines,
+      });
+      return;
+    }
+
     setShouldRenderMarkdown(false);
     if (!content) {
       hasRenderedMarkdownRef.current = false;
@@ -250,7 +260,7 @@ export function DeferredMarkdownRenderer({
       cancelled = true;
       cleanupIdle?.();
     };
-  }, [complexity.codeBlocks, complexity.isExtreme, complexity.isHeavy, complexity.tableLines, content, idleTimeout, keepRenderedOnContentChange, priorityHydrateRichText, rootMargin, shouldHydrateRichText]);
+  }, [allowRichLiteFallback, complexity.codeBlocks, complexity.isExtreme, complexity.isHeavy, complexity.tableLines, content, idleTimeout, isStreaming, keepRenderedOnContentChange, priorityHydrateRichText, rootMargin, shouldHydrateRichText]);
 
   return (
     <div ref={hostRef}>
