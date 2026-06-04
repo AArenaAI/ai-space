@@ -1,5 +1,16 @@
 export type AdminRole = "user" | "admin";
 
+export interface AdminUserUsageSummary {
+  requests: number;
+  failures: number;
+  cost_rmb: number;
+  total_tokens: number;
+  image_count: number;
+  character_count: number;
+  video_seconds: number;
+  last_used_at?: string;
+}
+
 export interface AdminUser {
   id: number;
   email: string;
@@ -11,6 +22,7 @@ export interface AdminUser {
   elite_credits: number;
   created_at: string;
   updated_at: string;
+  usage_30d?: AdminUserUsageSummary;
 }
 
 export interface AdminOverview {

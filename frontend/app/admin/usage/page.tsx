@@ -754,32 +754,82 @@ function UsageNumbers({ log }: { log: AdminUsageLog }) {
 
 function UserUsageDrawer({ detail, logs, loading, error, range, onClose, onDrilldownLedger, onSelectLog, onSelectConversation }: { detail: AdminUsageUserDetail | null; logs: AdminUsageLog[]; loading: boolean; error: string; range: string; onClose: () => void; onDrilldownLedger: (userId: number) => void; onSelectLog: (log: AdminUsageLog) => void; onSelectConversation: (conversationId: number) => void }) {
   const user = detail?.user;
+  const summary = detail?.summary;
+  const topService = (detail?.services || [])[0];
+  const topModel = (detail?.models || [])[0];
+  const topLog = [...logs].sort((a, b) => (b.total_cost_rmb || 0) - (a.total_cost_rmb || 0))[0];
+  const failureRate = summary?.requests ? ((summary.failures || 0) / summary.requests) * 100 : 0;
+  const avgCost = summary?.requests ? (summary.cost_rmb || 0) / summary.requests : 0;
+  const imageUnit = summary?.image_count ? (summary.cost_rmb || 0) / summary.image_count : 0;
+  const videoUnit = summary?.video_seconds ? (summary.cost_rmb || 0) / summary.video_seconds : 0;
+  const charUnit = summary?.character_count ? (summary.cost_rmb || 0) / (summary.character_count / 1000) : 0;
+  const riskBadges = userRiskBadges(summary, logs);
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={onClose}>
-      <aside className="h-full w-full max-w-3xl overflow-y-auto border-l border-surface-border bg-surface-card p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
+      <aside className="h-full w-full max-w-5xl overflow-y-auto border-l border-surface-border bg-surface-card p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
         <div className="mb-6 flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm text-brand">用户用量详情 · {range}</p>
+            <p className="text-sm text-brand">用户成本画像 · {range}</p>
             <h2 className="mt-1 text-xl font-semibold text-text-primary">{user ? (user.email || `User #${user.id}`) : "正在加载用户…"}</h2>
             {user && <p className="mt-1 text-sm text-text-tertiary">{user.name || "-"} · ID {user.id} · {user.plan_tier || "-"} · {user.role}</p>}
           </div>
           <button onClick={onClose} className="rounded-xl border border-surface-border px-3 py-2 text-sm text-text-secondary">关闭</button>
         </div>
 
-        {loading && <div className="rounded-2xl bg-surface-elevated p-5 text-sm text-text-secondary">正在加载用户详情…</div>}
+        {loading && <div className="rounded-2xl bg-surface-elevated p-5 text-sm text-text-secondary">正在加载用户成本画像…</div>}
         {error && <InlineError message={error} />}
         {detail && (
           <div className="space-y-5">
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <MiniMetric label="成本" value={formatRMB(detail.summary.cost_rmb || 0)} />
-              <MiniMetric label="调用" value={formatNumber(detail.summary.requests || 0)} />
-              <MiniMetric label="Tokens" value={formatNumber(detail.summary.total_tokens || 0)} />
-              <MiniMetric label="图片/字符/视频" value={`${formatNumber(detail.summary.image_count || 0)} / ${formatNumber(detail.summary.character_count || 0)} / ${formatNumber(detail.summary.video_seconds || 0)}s`} />
+            <div className="rounded-3xl border border-surface-border bg-surface-elevated/60 p-5">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-text-primary">这个用户为什么花钱？</h3>
+                  <p className="mt-1 text-sm text-text-secondary">
+                    {topService ? `主要成本来自 ${topService.name || "unknown"}，占 ${formatRMB(topService.cost_rmb || 0)} / ${formatNumber(topService.requests || 0)} 次。` : "当前范围内还没有可解释的服务消耗。"}
+                    {topModel ? ` 主要模型是 ${topModel.model || "unknown"}。` : ""}
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {riskBadges.map((badge) => <StatusBadge key={badge} tone={badge.includes("失败") || badge.includes("高成本") ? "red" : badge.includes("视频") ? "purple" : "blue"}>{badge}</StatusBadge>)}
+                    {riskBadges.length === 0 && <StatusBadge tone="green">成本正常</StatusBadge>}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={() => onDrilldownLedger(detail.user.id)} className="rounded-xl bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-hover">查看该用户账本</button>
+                  <a href={`/admin/tasks?user_id=${detail.user.id}`} className="rounded-xl border border-surface-border bg-surface-card px-4 py-2 text-sm text-text-secondary hover:text-text-primary">查看用户任务</a>
+                </div>
+              </div>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              <button onClick={() => onDrilldownLedger(detail.user.id)} className="rounded-xl bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-hover">查看该用户账本明细</button>
-              <button onClick={onClose} className="rounded-xl border border-surface-border px-4 py-2 text-sm text-text-secondary hover:text-text-primary">返回</button>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              <MiniMetric label="总成本" value={formatRMB(summary?.cost_rmb || 0)} helper={`${formatNumber(summary?.requests || 0)} 次调用`} />
+              <MiniMetric label="平均每次" value={formatRMB(avgCost)} helper="按 usage log" />
+              <MiniMetric label="失败率" value={`${failureRate.toFixed(1)}%`} helper={`${formatNumber(summary?.failures || 0)} 次失败/非成功`} />
+              <MiniMetric label="图片单价" value={summary?.image_count ? `${formatRMB(imageUnit)}/张` : "-"} helper={`${formatNumber(summary?.image_count || 0)} 张`} />
+              <MiniMetric label="视频单价" value={summary?.video_seconds ? `${formatRMB(videoUnit)}/秒` : "-"} helper={`${formatNumber(summary?.video_seconds || 0)} 秒`} />
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-3">
+              <section className="rounded-2xl border border-surface-border bg-surface-elevated/60 p-4">
+                <div className="text-sm font-semibold text-text-primary">主要成本来源</div>
+                <div className="mt-3 space-y-3">
+                  <ExplainRow label="Top 服务" title={topService?.name || "-"} value={topService ? formatRMB(topService.cost_rmb) : "-"} helper={topService ? `${formatNumber(topService.requests)} 次` : "暂无"} />
+                  <ExplainRow label="Top 模型" title={topModel?.model || "-"} value={topModel ? formatRMB(topModel.cost_rmb) : "-"} helper={topModel ? `${topModel.provider || "unknown"} · ${formatNumber(topModel.requests)} 次` : "暂无"} />
+                  <ExplainRow label="最高单条" title={topLog ? `${topLog.module || topLog.service}/${topLog.feature || topLog.operation || topLog.model}` : "-"} value={topLog ? formatRMB(topLog.total_cost_rmb || 0) : "-"} helper={topLog ? formatDateTime(topLog.created_at) : "暂无"} />
+                </div>
+              </section>
+              <section className="rounded-2xl border border-surface-border bg-surface-elevated/60 p-4">
+                <div className="text-sm font-semibold text-text-primary">单位成本</div>
+                <div className="mt-3 space-y-3">
+                  <ExplainRow label="Token" title={`${formatNumber(summary?.total_tokens || 0)} tokens`} value={summary?.total_tokens ? `${formatRMB((summary.cost_rmb || 0) / (summary.total_tokens / 1000))}/千 tok` : "-"} helper="聊天/文档/PPT" />
+                  <ExplainRow label="翻译" title={`${formatNumber(summary?.character_count || 0)} 字符`} value={summary?.character_count ? `${formatRMB(charUnit)}/千字` : "-"} helper="Google Translate" />
+                  <ExplainRow label="媒体" title={`${formatNumber(summary?.image_count || 0)} 图 / ${formatNumber(summary?.video_seconds || 0)}s`} value={summary?.video_seconds ? `${formatRMB(videoUnit)}/秒` : summary?.image_count ? `${formatRMB(imageUnit)}/张` : "-"} helper="图片/视频" />
+                </div>
+              </section>
+              <section className="rounded-2xl border border-surface-border bg-surface-elevated/60 p-4">
+                <div className="text-sm font-semibold text-text-primary">最近高成本调用</div>
+                {topLog ? <button onClick={() => onSelectLog(topLog)} className="mt-3 block w-full rounded-xl bg-surface-card p-3 text-left hover:bg-surface-hover"><div className="flex items-center justify-between gap-3"><span className="font-medium text-text-primary">#{topLog.id}</span><span className="font-semibold text-text-primary">{formatRMB(topLog.total_cost_rmb || 0)}</span></div><div className="mt-1 text-xs text-text-tertiary">{topLog.provider}/{topLog.model}</div><div className="mt-1 text-xs text-text-tertiary">{formatDateTime(topLog.created_at)}</div></button> : <Empty />}
+              </section>
             </div>
 
             <div className="grid gap-5 xl:grid-cols-2">
@@ -815,8 +865,24 @@ function UserUsageDrawer({ detail, logs, loading, error, range, onClose, onDrill
   );
 }
 
-function MiniMetric({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-2xl bg-surface-elevated px-4 py-3"><div className="text-xs text-text-tertiary">{label}</div><div className="mt-1 font-semibold text-text-primary">{value}</div></div>;
+function MiniMetric({ label, value, helper }: { label: string; value: string; helper?: string }) {
+  return <div className="rounded-2xl bg-surface-elevated px-4 py-3"><div className="text-xs text-text-tertiary">{label}</div><div className="mt-1 font-semibold text-text-primary">{value}</div>{helper && <div className="mt-1 text-xs text-text-tertiary">{helper}</div>}</div>;
+}
+
+function ExplainRow({ label, title, value, helper }: { label: string; title: string; value: string; helper: string }) {
+  return <div className="rounded-xl bg-surface-card p-3"><div className="text-xs text-text-tertiary">{label}</div><div className="mt-1 flex items-center justify-between gap-3"><span className="truncate font-medium text-text-primary">{title}</span><span className="font-semibold text-text-primary">{value}</span></div><div className="mt-1 text-xs text-text-tertiary">{helper}</div></div>;
+}
+
+function userRiskBadges(summary: AdminUsageMetric | undefined, logs: AdminUsageLog[]) {
+  if (!summary) return [];
+  const badges: string[] = [];
+  const failureRate = summary.requests ? ((summary.failures || 0) / summary.requests) : 0;
+  if ((summary.cost_rmb || 0) >= 50) badges.push("高成本用户");
+  if ((summary.video_seconds || 0) > 0) badges.push("视频消耗");
+  if ((summary.image_count || 0) >= 20) badges.push("图片重度");
+  if (failureRate >= 0.2) badges.push("失败偏高");
+  if (logs.some((log) => log.estimated)) badges.push("含估算成本");
+  return badges.slice(0, 5);
 }
 
 function ConversationUsageDrawer({ detail, loading, error, range, onClose, onSelectLog }: { detail: AdminUsageConversationDetail | null; loading: boolean; error: string; range: string; onClose: () => void; onSelectLog: (log: AdminUsageLog) => void }) {

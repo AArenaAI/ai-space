@@ -23,17 +23,29 @@ func NewAdminHandler(db *gorm.DB) *AdminHandler {
 	return &AdminHandler{db: db}
 }
 
+type adminUserUsageSummary struct {
+	Requests       int64      `json:"requests"`
+	Failures       int64      `json:"failures"`
+	CostRMB        float64    `json:"cost_rmb"`
+	TotalTokens    int64      `json:"total_tokens"`
+	ImageCount     int64      `json:"image_count"`
+	CharacterCount int64      `json:"character_count"`
+	VideoSeconds   int64      `json:"video_seconds"`
+	LastUsedAt     *time.Time `json:"last_used_at,omitempty"`
+}
+
 type adminUserResponse struct {
-	ID              uint      `json:"id"`
-	Email           string    `json:"email"`
-	Name            string    `json:"name"`
-	Role            string    `json:"role"`
-	PlanTier        string    `json:"plan_tier"`
-	BasicCredits    int       `json:"basic_credits"`
-	AdvancedCredits int       `json:"advanced_credits"`
-	EliteCredits    int       `json:"elite_credits"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID              uint                  `json:"id"`
+	Email           string                `json:"email"`
+	Name            string                `json:"name"`
+	Role            string                `json:"role"`
+	PlanTier        string                `json:"plan_tier"`
+	BasicCredits    int                   `json:"basic_credits"`
+	AdvancedCredits int                   `json:"advanced_credits"`
+	EliteCredits    int                   `json:"elite_credits"`
+	CreatedAt       time.Time             `json:"created_at"`
+	UpdatedAt       time.Time             `json:"updated_at"`
+	Usage30D        adminUserUsageSummary `json:"usage_30d"`
 }
 
 type adminUsageSummaryResponse struct {
@@ -122,6 +134,24 @@ func toAdminUserResponse(user models.User) adminUserResponse {
 	}
 }
 
+func (h *AdminHandler) userUsageSummary(userID uint, start time.Time) adminUserUsageSummary {
+	var out adminUserUsageSummary
+	var lastUsed time.Time
+	if err := h.db.Model(&models.APIUsageLog{}).Where("user_id = ? AND created_at >= ?", userID, start).Select("COUNT(*) AS requests, COALESCE(SUM(CASE WHEN status <> 'success' THEN 1 ELSE 0 END), 0) AS failures, COALESCE(SUM(total_cost_rmb), 0) AS cost_rmb, COALESCE(SUM(total_tokens), 0) AS total_tokens, COALESCE(SUM(image_count), 0) AS image_count, COALESCE(SUM(character_count), 0) AS character_count, COALESCE(SUM(video_seconds), 0) AS video_seconds, MAX(created_at) AS last_used_at").Scan(&struct {
+		Requests       *int64
+		Failures       *int64
+		CostRMB        *float64
+		TotalTokens    *int64
+		ImageCount     *int64
+		CharacterCount *int64
+		VideoSeconds   *int64
+		LastUsedAt     *time.Time
+	}{Requests: &out.Requests, Failures: &out.Failures, CostRMB: &out.CostRMB, TotalTokens: &out.TotalTokens, ImageCount: &out.ImageCount, CharacterCount: &out.CharacterCount, VideoSeconds: &out.VideoSeconds, LastUsedAt: &lastUsed}).Error; err == nil && !lastUsed.IsZero() {
+		out.LastUsedAt = &lastUsed
+	}
+	return out
+}
+
 func (h *AdminHandler) Me(c *gin.Context) {
 	userIDValue, _ := c.Get("userID")
 	userID, _ := userIDValue.(uint)
@@ -199,8 +229,11 @@ func (h *AdminHandler) ListUsers(c *gin.Context) {
 	}
 
 	items := make([]adminUserResponse, 0, len(users))
+	usageStart := time.Now().AddDate(0, 0, -30)
 	for _, user := range users {
-		items = append(items, toAdminUserResponse(user))
+		item := toAdminUserResponse(user)
+		item.Usage30D = h.userUsageSummary(user.ID, usageStart)
+		items = append(items, item)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"users": items, "total": total, "page": page, "page_size": pageSize})
