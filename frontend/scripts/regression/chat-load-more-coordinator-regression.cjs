@@ -29,6 +29,7 @@ const {
   shouldStartLoadMore,
   buildLoadMorePage,
   buildLoadMoreMessagesUrl,
+  DEFAULT_CHAT_LOAD_MORE_PAGE_SIZE,
   fetchLoadMoreMessages,
   mapLoadMoreMessages,
   prependUniqueOlderMessages,
@@ -60,24 +61,40 @@ function response(ok, data) {
     assert.equal(shouldStartLoadMore({ currentConversation: 1, isLoadingMore: false, hasMoreMessages: true, token: null }), false);
   });
 
-  await test("buildLoadMorePage preserves legacy offset and expected count math", () => {
+  await test("buildLoadMorePage defaults to small chat history pages", () => {
+    assert.equal(DEFAULT_CHAT_LOAD_MORE_PAGE_SIZE, 8);
     assert.deepEqual(buildLoadMorePage({ totalMessages: 120, loadedPersistedMessages: 50 }), {
+      limit: 8,
+      offset: 62,
+      expectedOlderCount: 8,
+      requestLimit: 8,
+    });
+    assert.deepEqual(buildLoadMorePage({ totalMessages: 40, loadedPersistedMessages: 10 }), {
+      limit: 8,
+      offset: 22,
+      expectedOlderCount: 8,
+      requestLimit: 8,
+    });
+    assert.deepEqual(buildLoadMorePage({ totalMessages: 10, loadedPersistedMessages: 10 }), {
+      limit: 8,
+      offset: 0,
+      expectedOlderCount: 0,
+      requestLimit: 8,
+    });
+  });
+
+  await test("buildLoadMorePage still supports explicit larger page overrides", () => {
+    assert.deepEqual(buildLoadMorePage({ totalMessages: 120, loadedPersistedMessages: 50, defaultLimit: 50 }), {
       limit: 50,
       offset: 20,
       expectedOlderCount: 50,
       requestLimit: 50,
     });
-    assert.deepEqual(buildLoadMorePage({ totalMessages: 40, loadedPersistedMessages: 10 }), {
+    assert.deepEqual(buildLoadMorePage({ totalMessages: 40, loadedPersistedMessages: 10, defaultLimit: 50 }), {
       limit: 50,
       offset: 0,
       expectedOlderCount: 30,
       requestLimit: 30,
-    });
-    assert.deepEqual(buildLoadMorePage({ totalMessages: 10, loadedPersistedMessages: 10 }), {
-      limit: 50,
-      offset: 0,
-      expectedOlderCount: 0,
-      requestLimit: 50,
     });
   });
 
