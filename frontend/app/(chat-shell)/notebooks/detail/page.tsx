@@ -31,12 +31,38 @@ function reconcileSelectedFileIds(previous: number[], files: NotebookFile[]) {
   return next.length === 0 && files.length > 0 ? files.map((file) => file.file_id) : next;
 }
 
-function statusMeta(file: NotebookFile, t: (key: string) => string) {
+type Translate = (key: string, params?: Record<string, string>) => string;
+
+function isNotebookFileReady(file: NotebookFile) {
   const parse = file.file.parse_status;
   const embed = file.file.embedding_status;
-  if (parse === "error" || embed === "error") return { label: t("notebook.statusFailed"), icon: AlertCircle, className: "text-red-500 bg-red-500/10 border-red-500/20" };
-  if (parse === "done" && (embed === "done" || embed === "skipped")) return { label: t("notebook.statusReady"), icon: CheckCircle2, className: "text-emerald-500 bg-emerald-500/10 border-emerald-500/20" };
+  return parse === "done" && (embed === "done" || embed === "skipped");
+}
+
+function isNotebookFileProcessing(file: NotebookFile) {
+  const parse = file.file.parse_status;
+  const embed = file.file.embedding_status;
+  if (parse === "error" || parse === "unsupported" || embed === "error") return false;
+  return !isNotebookFileReady(file);
+}
+
+function statusMeta(file: NotebookFile, t: Translate) {
+  const parse = file.file.parse_status;
+  const embed = file.file.embedding_status;
+  if (parse === "error") return { label: t("notebook.statusParseFailed"), icon: AlertCircle, className: "text-red-500 bg-red-500/10 border-red-500/20" };
+  if (parse === "unsupported") return { label: t("notebook.statusUnsupported"), icon: AlertCircle, className: "text-text-tertiary bg-surface-hover border-surface-border" };
+  if (parse === "done" && embed === "error") return { label: t("notebook.statusIndexFailed"), icon: AlertCircle, className: "text-amber-600 bg-amber-500/10 border-amber-500/20 dark:text-amber-300" };
+  if (isNotebookFileReady(file)) return { label: t("notebook.statusReady"), icon: CheckCircle2, className: "text-emerald-500 bg-emerald-500/10 border-emerald-500/20" };
+  if (parse === "done") return { label: t("notebook.statusIndexing"), icon: Clock3, className: "text-amber-500 bg-amber-500/10 border-amber-500/20" };
   return { label: t("notebook.statusProcessing"), icon: Clock3, className: "text-amber-500 bg-amber-500/10 border-amber-500/20" };
+}
+
+function statusDetail(file: NotebookFile, t: Translate) {
+  const parse = file.file.parse_status;
+  const embed = file.file.embedding_status;
+  if (parse === "error") return file.file.error_message || t("notebook.parseFailureHint");
+  if (parse === "done" && embed === "error") return t("notebook.indexFailureHint");
+  return null;
 }
 
 function NotebookDetailContent() {
@@ -73,16 +99,9 @@ function NotebookDetailContent() {
 
   useEffect(() => { load(); }, [notebookId]);
 
-  const readyCount = useMemo(() => files.filter((file) => {
-    const meta = statusMeta(file, t);
-    return meta.label === t("notebook.statusReady");
-  }).length, [files, t]);
+  const readyCount = useMemo(() => files.filter(isNotebookFileReady).length, [files]);
 
-  const hasProcessingFiles = useMemo(() => files.some((file) => {
-    const parse = file.file.parse_status;
-    const embed = file.file.embedding_status;
-    return parse !== "error" && embed !== "error" && !(parse === "done" && (embed === "done" || embed === "skipped"));
-  }), [files]);
+  const hasProcessingFiles = useMemo(() => files.some(isNotebookFileProcessing), [files]);
 
   const selectedSourceText = useMemo(() => (
     t("notebook.selectedSources")
@@ -257,6 +276,7 @@ function NotebookDetailContent() {
               {files.map((file) => {
                 const meta = statusMeta(file, t);
                 const Icon = meta.icon;
+                const detail = statusDetail(file, t);
                 const selected = selectedFileIds.includes(file.file_id);
                 return (
                   <div key={file.id} className={cn("group rounded-2xl border bg-surface-card p-3 transition hover:border-brand-border", selected ? "border-brand-border" : "border-surface-border opacity-70")}>
@@ -277,7 +297,7 @@ function NotebookDetailContent() {
                       <button onClick={() => handleRemove(file)} className="rounded-lg p-1.5 text-text-tertiary opacity-0 transition hover:bg-red-500/10 hover:text-red-500 group-hover:opacity-100"><Trash2 className="h-3.5 w-3.5" /></button>
                     </div>
                     <div className={cn("mt-3 inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-medium", meta.className)}><Icon className="h-3 w-3" />{meta.label}</div>
-                    {file.file.error_message && <p className="mt-2 line-clamp-2 text-xs text-red-500">{file.file.error_message}</p>}
+                    {detail && <p className="mt-2 line-clamp-2 text-xs text-amber-600 dark:text-amber-300">{detail}</p>}
                   </div>
                 );
               })}
