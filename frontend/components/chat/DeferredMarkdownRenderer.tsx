@@ -72,6 +72,10 @@ function getMarkdownComplexity(content: string) {
   return { codeBlocks, isExtreme, isHeavy, tableLines };
 }
 
+function shouldUseRichLiteFallback(content: string, complexity: ReturnType<typeof getMarkdownComplexity>) {
+  return content.length <= 500 && complexity.codeBlocks === 0 && complexity.tableLines === 0;
+}
+
 function MarkdownFallback({ content, loading }: { content: string; loading?: boolean }) {
   if (loading) {
     return <div className="h-5 w-32 rounded bg-surface-card animate-pulse" />;
@@ -88,6 +92,7 @@ export function DeferredMarkdownRenderer({
   idleTimeout = DEFAULT_IDLE_TIMEOUT,
   keepRenderedOnContentChange = false,
   isStreaming = false,
+  allowRichLiteFallback = false,
 }: {
   content: string;
   shouldHydrateRichText?: boolean;
@@ -96,6 +101,7 @@ export function DeferredMarkdownRenderer({
   idleTimeout?: number;
   keepRenderedOnContentChange?: boolean;
   isStreaming?: boolean;
+  allowRichLiteFallback?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const complexity = useMemo(() => getMarkdownComplexity(content), [content]);
@@ -250,7 +256,7 @@ export function DeferredMarkdownRenderer({
     <div ref={hostRef}>
       {shouldRenderMarkdown && Renderer ? (
         <Renderer content={content} isStreaming={isStreaming} priorityHydrateRichText={priorityHydrateRichText} />
-      ) : priorityHydrateRichText ? (
+      ) : priorityHydrateRichText || (allowRichLiteFallback && shouldHydrateRichText && shouldUseRichLiteFallback(content, complexity)) ? (
         <MarkdownLiteRenderer content={content} isStreaming={isStreaming} />
       ) : (
         <MarkdownFallback content={content} />

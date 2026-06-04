@@ -12,7 +12,7 @@ import { StreamingText } from "./StreamingText";
 import { ThinkBlock } from "./ThinkBlock";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 
-type MarkdownRendererComponent = ComponentType<{ content: string; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean }>;
+type MarkdownRendererComponent = ComponentType<{ content: string; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean; allowRichLiteFallback?: boolean }>;
 
 const JUST_COMPLETED_REASONING_EXPAND_MS = 5 * 60 * 1000;
 const justCompletedReasoningMessageIds = new Map<string, number>();
@@ -49,6 +49,7 @@ export function AssistantMessageContent({
   MarkdownRenderer = DeferredMarkdownRenderer,
   shouldHydrateRichText = true,
   priorityHydrateRichText = false,
+  allowRichLiteFallback = false,
   recoverEmptyContent = false,
   onRegenerate,
 }: {
@@ -58,6 +59,7 @@ export function AssistantMessageContent({
   MarkdownRenderer?: MarkdownRendererComponent;
   shouldHydrateRichText?: boolean;
   priorityHydrateRichText?: boolean;
+  allowRichLiteFallback?: boolean;
   recoverEmptyContent?: boolean;
   onRegenerate?: () => void;
 }) {
@@ -123,7 +125,7 @@ export function AssistantMessageContent({
   return (
     <div className={cn("prose prose-sm max-w-none", className)}>
       {reasoning && <ThinkBlock content={reasoning} isThinking={isThinking} defaultExpanded={keepReasoningExpanded} />}
-      <MarkdownRenderer content={cleanAnswer} shouldHydrateRichText={shouldHydrateRichText} priorityHydrateRichText={priorityHydrateRichText} />
+      <MarkdownRenderer content={cleanAnswer} shouldHydrateRichText={shouldHydrateRichText} priorityHydrateRichText={priorityHydrateRichText} allowRichLiteFallback={allowRichLiteFallback} />
     </div>
   );
 }

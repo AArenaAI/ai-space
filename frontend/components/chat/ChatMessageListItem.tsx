@@ -17,6 +17,7 @@ export type ChatMessageListItemProps = {
   isSelected: boolean;
   isHighlighted: boolean;
   historyPrependSettling: boolean;
+  allowRichLiteFallback: boolean;
   conversationId?: number;
   groupViews?: Map<number, number>;
   modelById: Map<string, ChatModel>;
@@ -46,6 +47,7 @@ function ChatMessageListItem({
   isSelected,
   isHighlighted,
   historyPrependSettling,
+  allowRichLiteFallback,
   conversationId,
   groupViews,
   modelById,
@@ -74,6 +76,7 @@ function ChatMessageListItem({
       isSelected={isSelected}
       isHighlighted={isHighlighted}
       historyPrependSettling={historyPrependSettling}
+      allowRichLiteFallback={allowRichLiteFallback}
       conversationId={conversationId}
       groupViews={groupViews}
       modelById={modelById}
@@ -148,6 +151,7 @@ function areChatMessageListItemPropsEqual(previous: ChatMessageListItemProps, ne
   if (previous.isSelected !== next.isSelected) return false;
   if (previous.isHighlighted !== next.isHighlighted) return false;
   if (previous.historyPrependSettling !== next.historyPrependSettling) return false;
+  if (previous.allowRichLiteFallback !== next.allowRichLiteFallback) return false;
   if (previous.conversationId !== next.conversationId) return false;
   if (previous.imageLoadFailedLabel !== next.imageLoadFailedLabel) return false;
   if (previous.MarkdownRenderer !== next.MarkdownRenderer) return false;

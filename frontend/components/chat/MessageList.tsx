@@ -14,7 +14,7 @@ import { useI18n } from "@/lib/i18n";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
 import MarkdownPlainFallback from "./markdown/MarkdownPlainFallback";
 
-type MarkdownRendererProps = { content: string; isStreaming?: boolean; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean };
+type MarkdownRendererProps = { content: string; isStreaming?: boolean; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean; allowRichLiteFallback?: boolean };
 let markdownRendererPromise: Promise<{ default: ComponentType<MarkdownRendererProps> }> | null = null;
 let MarkdownRendererModule: ComponentType<MarkdownRendererProps> | null = null;
 
@@ -189,12 +189,12 @@ const MemoMarkdownRenderer = memo(function MemoMarkdownRenderer({ content }: { c
   return <LoadableMarkdownRenderer content={content} />;
 });
 
-function LazyMarkdownRenderer({ content, shouldHydrateRichText = true, priorityHydrateRichText = false }: { content: string; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean }) {
+function LazyMarkdownRenderer({ content, shouldHydrateRichText = true, priorityHydrateRichText = false, allowRichLiteFallback = false }: { content: string; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean; allowRichLiteFallback?: boolean }) {
   if (content.length < LONG_MARKDOWN_LAZY_THRESHOLD) {
     return <MemoMarkdownRenderer content={content} shouldHydrateRichText={shouldHydrateRichText} priorityHydrateRichText={priorityHydrateRichText} />;
   }
 
-  return <DeferredMarkdownRenderer content={content} shouldHydrateRichText={shouldHydrateRichText} priorityHydrateRichText={priorityHydrateRichText} />;
+  return <DeferredMarkdownRenderer content={content} shouldHydrateRichText={shouldHydrateRichText} priorityHydrateRichText={priorityHydrateRichText} allowRichLiteFallback={allowRichLiteFallback} />;
 }
 
 function MessageList({
@@ -248,8 +248,10 @@ function MessageList({
   const [fastScrollPreload, setFastScrollPreload] = useState(false);
   const [renderedMessageWindow, setRenderedMessageWindow] = useState(INITIAL_RENDERED_MESSAGE_WINDOW);
   const [historyPrependSettling, setHistoryPrependSettling] = useState(false);
+  const [historyRichLiteFallback, setHistoryRichLiteFallback] = useState(false);
   const fastScrollPreloadTimerRef = useRef<number>(0);
   const historyPrependSettlingTimerRef = useRef<number>(0);
+  const historyRichLiteFallbackTimerRef = useRef<number>(0);
   const [activeOverviewMessageId, setActiveOverviewMessageId] = useState<string | null>(null);
   const overviewJumpActiveRef = useRef<{ id: string; until: number } | null>(null);
   const overviewBottomLockUntilRef = useRef(0);
@@ -539,17 +541,24 @@ function MessageList({
     if (userBrowsingTimerRef.current) window.clearTimeout(userBrowsingTimerRef.current);
     if (fastScrollPreloadTimerRef.current) window.clearTimeout(fastScrollPreloadTimerRef.current);
     if (historyPrependSettlingTimerRef.current) window.clearTimeout(historyPrependSettlingTimerRef.current);
+    if (historyRichLiteFallbackTimerRef.current) window.clearTimeout(historyRichLiteFallbackTimerRef.current);
     if (bottomSmoothRafRef.current) window.cancelAnimationFrame(bottomSmoothRafRef.current);
   }, []);
 
   const markHistoryPrependSettling = useCallback((duration = 1600) => {
     historyPrependUntilRef.current = Math.max(historyPrependUntilRef.current, Date.now() + duration);
     setHistoryPrependSettling(true);
+    setHistoryRichLiteFallback(true);
     if (historyPrependSettlingTimerRef.current) window.clearTimeout(historyPrependSettlingTimerRef.current);
     historyPrependSettlingTimerRef.current = window.setTimeout(() => {
       historyPrependSettlingTimerRef.current = 0;
       setHistoryPrependSettling(false);
     }, duration);
+    if (historyRichLiteFallbackTimerRef.current) window.clearTimeout(historyRichLiteFallbackTimerRef.current);
+    historyRichLiteFallbackTimerRef.current = window.setTimeout(() => {
+      historyRichLiteFallbackTimerRef.current = 0;
+      setHistoryRichLiteFallback(false);
+    }, duration + 1200);
   }, []);
 
   const handleUserScrollIntent = useCallback((deltaY: number) => {
@@ -1548,6 +1557,7 @@ function MessageList({
               isSelected={isSelected}
               isHighlighted={isHighlighted}
               historyPrependSettling={historyPrependSettling}
+              allowRichLiteFallback={historyRichLiteFallback}
               conversationId={conversationId}
               groupViews={groupViews}
               modelById={modelById}
