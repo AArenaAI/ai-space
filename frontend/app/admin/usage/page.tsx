@@ -278,19 +278,13 @@ export default function AdminUsagePage() {
         </div>
       </div>
 
+      <UsageExecutiveSummary summary={summary} ledgerSummary={ledgerSummary} modules={modules?.modules || []} chatCost={chatCost} onDrilldown={applyLedgerFilters} />
+
       <QuickScenarioPanel scenarios={quickScenarios} moduleRows={modules?.modules || []} onApply={(patch, nextTab) => applyLedgerFilters(patch, nextTab)} />
 
       {activeFilterLabels.length > 0 && <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-brand/15 bg-brand/5 px-4 py-3 text-sm"><span className="font-medium text-text-primary">当前筛选</span>{activeFilterLabels.map((item) => <span key={item} className="rounded-full bg-surface-card px-3 py-1 text-text-secondary">{item}</span>)}<button onClick={clearFilters} className="ml-auto inline-flex items-center gap-1 rounded-xl border border-surface-border px-3 py-1.5 text-text-secondary hover:text-text-primary"><FilterX className="h-4 w-4" />清空</button></div>}
 
       {Object.keys(errors).length > 0 && <div className="space-y-2 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-300">{Object.entries(errors).map(([key, message]) => <div key={key} className="flex items-center gap-2"><AlertCircle className="h-4 w-4" />{message}</div>)}</div>}
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <MetricCard title="总成本" value={formatRMB(summary?.cost_rmb || 0)} icon={Coins} helper={`Chat ${formatRMB(chatCost)}`} />
-        <MetricCard title="账本筛选成本" value={formatRMB(ledgerSummary?.cost_rmb || 0)} icon={ListFilter} helper={`${formatNumber(ledgerSummary?.requests || 0)} 条 · ${avgCostPerRequestLabel(ledgerSummary)}`} />
-        <MetricCard title="请求数" value={formatNumber(summary?.requests || 0)} icon={BarChart3} helper={`成功 ${formatNumber(summary?.successes || 0)}`} />
-        <MetricCard title="Token / 字符" value={`${formatNumber(ledgerSummary?.total_tokens || summary?.total_tokens || 0)} / ${formatNumber(ledgerSummary?.character_count || 0)}`} icon={Zap} helper={`输出 ${formatNumber(ledgerSummary?.completion_tokens || summary?.completion_tokens || 0)}`} />
-        <MetricCard title="媒体均价" value={mediaAverageHeadline(ledgerSummary)} icon={Users} helper={mediaAverageHelper(ledgerSummary)} />
-      </div>
 
       <div className="flex flex-wrap gap-2 rounded-2xl border border-surface-border bg-surface-card p-2">
         {tabs.map((item) => (
@@ -309,6 +303,74 @@ export default function AdminUsagePage() {
       {(selectedConversationDetail || conversationDetailLoading || conversationDetailError) && <ConversationUsageDrawer detail={selectedConversationDetail} loading={conversationDetailLoading} error={conversationDetailError} range={filters.range} onClose={() => { setSelectedConversationDetail(null); setConversationDetailError(""); }} onSelectLog={setSelectedLog} />}
     </div>
   );
+}
+
+
+
+function UsageExecutiveSummary({ summary, ledgerSummary, modules, chatCost, onDrilldown }: { summary: AdminUsageSummary | null; ledgerSummary?: AdminUsageMetric | null; modules: AdminUsageModuleRow[]; chatCost: number; onDrilldown: (patch: Partial<UsageFilters>, nextTab?: UsageTab) => void }) {
+  const moduleGroups = groupModuleRows(modules).slice(0, 3);
+  const imageRows = modules.filter((row) => row.feature === "image");
+  const videoRows = modules.filter((row) => row.feature === "video");
+  const translatorRows = modules.filter((row) => row.feature === "translator");
+  const imageMetric = rollupModuleRows(imageRows);
+  const videoMetric = rollupModuleRows(videoRows);
+  const translatorMetric = rollupModuleRows(translatorRows);
+  const successRate = summary?.requests ? ((summary.successes || 0) / summary.requests) * 100 : 0;
+
+  return (
+    <section className="grid gap-4 xl:grid-cols-[1.1fr_1.4fr_1fr]">
+      <div className="rounded-3xl border border-brand/20 bg-gradient-to-br from-brand/10 via-surface-card to-surface-card p-6 shadow-sm">
+        <div className="text-sm font-medium text-brand">当前总览</div>
+        <div className="mt-3 text-3xl font-semibold tracking-tight text-text-primary">{formatRMB(summary?.cost_rmb || 0)}</div>
+        <div className="mt-2 text-sm text-text-secondary">总请求 {formatNumber(summary?.requests || 0)} · 成功 {formatNumber(summary?.successes || 0)} · Chat {formatRMB(chatCost)}</div>
+        <div className="mt-5 grid grid-cols-2 gap-2 text-sm">
+          <SummaryPill label="筛选成本" value={formatRMB(ledgerSummary?.cost_rmb || 0)} helper={avgCostPerRequestLabel(ledgerSummary)} />
+          <SummaryPill label="成功率" value={summary?.requests ? `${successRate.toFixed(1)}%` : "-"} helper={`失败 ${formatNumber(summary?.failures || 0)}`} />
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-surface-border bg-surface-card p-5 shadow-sm">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <h2 className="font-semibold text-text-primary">产品成本排行</h2>
+            <p className="mt-1 text-xs text-text-tertiary">点击模块直接进入对应账本。</p>
+          </div>
+          <StatusBadge tone="blue">Top {moduleGroups.length}</StatusBadge>
+        </div>
+        <div className="space-y-3">
+          {moduleGroups.length === 0 ? <Empty /> : moduleGroups.map((group, index) => (
+            <button key={group.module} onClick={() => onDrilldown({ module: group.module }, "ledger")} className="w-full rounded-2xl border border-surface-border bg-surface-elevated p-4 text-left hover:border-brand/40">
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand/10 text-sm font-semibold text-brand">{index + 1}</span><span className="font-semibold text-text-primary">{group.module}</span></div>
+                  <div className="mt-2 text-xs text-text-tertiary">{formatNumber(group.requests)} 次 · {avgCostPerRequestLabel(group)} · {unitCostLabel(group)}</div>
+                </div>
+                <div className="shrink-0 text-right"><div className="font-semibold text-text-primary">{formatRMB(group.cost)}</div><div className="text-xs text-text-tertiary">失败 {formatNumber(group.failures)}</div></div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-surface-border bg-surface-card p-5 shadow-sm">
+        <h2 className="font-semibold text-text-primary">媒体/单位成本</h2>
+        <p className="mt-1 text-xs text-text-tertiary">最常被问的单价放在首屏。</p>
+        <div className="mt-4 space-y-3">
+          <UnitCostRow label="图片" value={unitCostLabel(imageMetric)} helper={`${formatNumber(imageMetric.image_count || 0)} 张 · ${formatRMB(imageMetric.cost_rmb || 0)}`} onClick={() => onDrilldown({ module: "creative", feature: "image" }, "ledger")} />
+          <UnitCostRow label="视频" value={unitCostLabel(videoMetric)} helper={`${formatNumber(videoMetric.video_seconds || 0)}s · ${formatRMB(videoMetric.cost_rmb || 0)}`} onClick={() => onDrilldown({ module: "creative", feature: "video", operation: "video_generation", service: "video_generation" }, "ledger")} />
+          <UnitCostRow label="翻译" value={unitCostLabel(translatorMetric)} helper={`${formatNumber(translatorMetric.character_count || 0)} 字 · ${formatRMB(translatorMetric.cost_rmb || 0)}`} onClick={() => onDrilldown({ module: "work", feature: "translator", operation: "translate_text", service: "translation" }, "ledger")} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SummaryPill({ label, value, helper }: { label: string; value: string; helper: string }) {
+  return <div className="rounded-2xl bg-surface-card/80 px-4 py-3"><div className="text-xs text-text-tertiary">{label}</div><div className="mt-1 font-semibold text-text-primary">{value}</div><div className="mt-1 text-xs text-text-secondary">{helper}</div></div>;
+}
+
+function UnitCostRow({ label, value, helper, onClick }: { label: string; value: string; helper: string; onClick: () => void }) {
+  return <button onClick={onClick} className="flex w-full items-center justify-between gap-3 rounded-2xl bg-surface-elevated px-4 py-3 text-left hover:bg-surface-hover"><div><div className="font-medium text-text-primary">{label}</div><div className="text-xs text-text-tertiary">{helper}</div></div><div className="text-right font-semibold text-text-primary">{value}</div></button>;
 }
 
 
@@ -533,6 +595,18 @@ function ModulesUsage({ modules, error, onDrilldown }: { modules: AdminUsageModu
       ))}
     </div>
   );
+}
+
+function rollupModuleRows(rows: AdminUsageModuleRow[]): AdminUsageMetric {
+  return {
+    requests: sumRows(rows, "requests"),
+    failures: sumRows(rows, "failures"),
+    cost_rmb: sumRows(rows, "cost_rmb"),
+    total_tokens: sumRows(rows, "total_tokens"),
+    image_count: sumRows(rows, "image_count"),
+    character_count: sumRows(rows, "character_count"),
+    video_seconds: sumRows(rows, "video_seconds"),
+  };
 }
 
 function scenarioStat(rows: AdminUsageModuleRow[], patch: Partial<UsageFilters>) {
