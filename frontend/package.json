@@ -86,7 +86,8 @@
     "test:chat-history-loading-fixture": "node scripts/regression/chat-history-loading-fixture.cjs",
     "test:chat-conversation-switch-cache-fixture": "node scripts/regression/chat-conversation-switch-cache-fixture.cjs",
     "test:chat-load-more-history-fixture": "node scripts/regression/chat-load-more-history-fixture.cjs",
-    "test:chat-message-overview-fixture": "node scripts/regression/chat-message-overview-fixture.cjs"
+    "test:chat-message-overview-fixture": "node scripts/regression/chat-message-overview-fixture.cjs",
+    "test:chat-row-memo-fixture": "node scripts/regression/chat-row-memo-fixture.cjs"
   },
   "dependencies": {
     "@antv/g6": "^5.1.1",
