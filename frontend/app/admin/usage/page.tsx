@@ -17,6 +17,7 @@ import type {
   AdminUsageConversationsResponse,
   AdminUsageLog,
   AdminUsageLogsResponse,
+  AdminUsageMetric,
   AdminUsageModelsResponse,
   AdminUsageModulesResponse,
   AdminUsageModuleRow,
@@ -252,10 +253,10 @@ export default function AdminUsagePage() {
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <MetricCard title="总成本" value={formatRMB(summary?.cost_rmb || 0)} icon={Coins} helper={`Chat ${formatRMB(chatCost)}`} />
-        <MetricCard title="账本筛选成本" value={formatRMB(ledgerSummary?.cost_rmb || 0)} icon={ListFilter} helper={`${formatNumber(ledgerSummary?.requests || 0)} 条明细`} />
+        <MetricCard title="账本筛选成本" value={formatRMB(ledgerSummary?.cost_rmb || 0)} icon={ListFilter} helper={`${formatNumber(ledgerSummary?.requests || 0)} 条 · ${avgCostPerRequestLabel(ledgerSummary)}`} />
         <MetricCard title="请求数" value={formatNumber(summary?.requests || 0)} icon={BarChart3} helper={`成功 ${formatNumber(summary?.successes || 0)}`} />
         <MetricCard title="Token / 字符" value={`${formatNumber(ledgerSummary?.total_tokens || summary?.total_tokens || 0)} / ${formatNumber(ledgerSummary?.character_count || 0)}`} icon={Zap} helper={`输出 ${formatNumber(ledgerSummary?.completion_tokens || summary?.completion_tokens || 0)}`} />
-        <MetricCard title="用户 / 对话" value={`${formatNumber(users?.users?.length || 0)} / ${formatNumber(conversations?.conversations?.length || 0)}`} icon={Users} helper="当前页样本" />
+        <MetricCard title="媒体均价" value={mediaAverageHeadline(ledgerSummary)} icon={Users} helper={mediaAverageHelper(ledgerSummary)} />
       </div>
 
       <div className="flex flex-wrap gap-2 rounded-2xl border border-surface-border bg-surface-card p-2">
@@ -289,7 +290,8 @@ function QuickScenarioPanel({ scenarios, moduleRows, onApply }: { scenarios: Arr
             <div className="mt-1 text-xs text-text-tertiary">{item.description}</div>
             <div className="mt-3 rounded-xl bg-surface-elevated px-3 py-2 text-xs text-text-secondary">
               <div className="font-semibold text-text-primary">{formatRMB(stat.cost)}</div>
-              <div>{formatNumber(stat.requests)} 条调用</div>
+              <div>{formatNumber(stat.requests)} 条调用 · {avgCostPerRequestLabel(stat)}</div>
+              <div>{unitCostLabel(stat)}</div>
             </div>
           </button>
         );
@@ -441,10 +443,11 @@ function ModulesUsage({ modules, error, onDrilldown }: { modules: AdminUsageModu
             <h2 className="text-lg font-semibold text-text-primary">产品模块下钻</h2>
             <p className="mt-1 text-sm text-text-secondary">先看模块，再展开到功能和操作；点击任意层级可进入账本明细。</p>
           </div>
-          <div className="grid grid-cols-3 gap-2 text-sm">
+          <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
             <div className="rounded-2xl bg-surface-elevated px-4 py-3"><div className="text-text-tertiary">模块</div><div className="font-semibold text-text-primary">{groups.length}</div></div>
             <div className="rounded-2xl bg-surface-elevated px-4 py-3"><div className="text-text-tertiary">调用</div><div className="font-semibold text-text-primary">{formatNumber(sumRows(rows, "requests"))}</div></div>
             <div className="rounded-2xl bg-surface-elevated px-4 py-3"><div className="text-text-tertiary">成本</div><div className="font-semibold text-text-primary">{formatRMB(sumRows(rows, "cost_rmb"))}</div></div>
+            <div className="rounded-2xl bg-surface-elevated px-4 py-3"><div className="text-text-tertiary">平均/次</div><div className="font-semibold text-text-primary">{avgCostPerRequestLabel({ cost_rmb: sumRows(rows, "cost_rmb"), requests: sumRows(rows, "requests") })}</div></div>
           </div>
         </div>
         {error && <div className="mt-4"><InlineError message={error} /></div>}
@@ -459,7 +462,7 @@ function ModulesUsage({ modules, error, onDrilldown }: { modules: AdminUsageModu
                 <span className="rounded-full bg-brand/10 px-3 py-1 text-sm font-medium text-brand">{group.module}</span>
                 <span className="text-sm text-text-tertiary">{group.features.length} 个功能</span>
               </div>
-              <div className="mt-2 text-sm text-text-secondary">{formatNumber(group.requests)} 次调用 · 失败 {formatNumber(group.failures)} · 最近 {formatDateTime(group.lastUsedAt)}</div>
+              <div className="mt-2 text-sm text-text-secondary">{formatNumber(group.requests)} 次调用 · 失败 {formatNumber(group.failures)} · {avgCostPerRequestLabel(group)} · {unitCostLabel(group)} · 最近 {formatDateTime(group.lastUsedAt)}</div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <div className="rounded-2xl bg-surface-elevated px-4 py-2 text-right"><div className="text-xs text-text-tertiary">成本</div><div className="font-semibold text-text-primary">{formatRMB(group.cost)}</div></div>
@@ -473,7 +476,7 @@ function ModulesUsage({ modules, error, onDrilldown }: { modules: AdminUsageModu
                 <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                   <div>
                     <div className="font-medium text-text-primary">{feature.feature}</div>
-                    <div className="text-xs text-text-tertiary">{formatNumber(feature.requests)} 次 · {formatRMB(feature.cost)} · {feature.operations.length} 个操作</div>
+                    <div className="text-xs text-text-tertiary">{formatNumber(feature.requests)} 次 · {formatRMB(feature.cost)} · {avgCostPerRequestLabel(feature)} · {unitCostLabel(feature)} · {feature.operations.length} 个操作</div>
                   </div>
                   <button onClick={() => onDrilldown({ module: group.module, feature: feature.feature })} className="rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm text-text-secondary hover:text-text-primary">看功能明细</button>
                 </div>
@@ -485,7 +488,7 @@ function ModulesUsage({ modules, error, onDrilldown }: { modules: AdminUsageModu
                           <div className="truncate font-medium text-text-primary">{row.operation || "unknown"}</div>
                           <div className="mt-1 flex flex-wrap gap-1 text-xs text-text-tertiary"><span>{row.service || "unknown"}</span><span>·</span><span>{formatNumber(row.requests)} 次</span><span>·</span><span>失败 {formatNumber(row.failures || 0)}</span></div>
                         </div>
-                        <div className="shrink-0 text-right"><div className="font-semibold text-text-primary">{formatRMB(row.cost_rmb)}</div><div className="text-xs text-text-tertiary">{usageUnitSummary(row)}</div></div>
+                        <div className="shrink-0 text-right"><div className="font-semibold text-text-primary">{formatRMB(row.cost_rmb)}</div><div className="text-xs text-text-tertiary">{avgCostPerRequestLabel(row)}</div><div className="text-xs text-text-tertiary">{usageUnitSummary(row)}</div></div>
                       </div>
                     </button>
                   ))}
@@ -509,7 +512,13 @@ function scenarioStat(rows: AdminUsageModuleRow[], patch: Partial<UsageFilters>)
   });
   return {
     requests: matched.reduce((sum, row) => sum + (row.requests || 0), 0),
+    failures: matched.reduce((sum, row) => sum + (row.failures || 0), 0),
+    cost_rmb: matched.reduce((sum, row) => sum + (row.cost_rmb || 0), 0),
     cost: matched.reduce((sum, row) => sum + (row.cost_rmb || 0), 0),
+    image_count: matched.reduce((sum, row) => sum + (row.image_count || 0), 0),
+    character_count: matched.reduce((sum, row) => sum + (row.character_count || 0), 0),
+    video_seconds: matched.reduce((sum, row) => sum + (row.video_seconds || 0), 0),
+    total_tokens: matched.reduce((sum, row) => sum + (row.total_tokens || 0), 0),
   };
 }
 
@@ -529,7 +538,13 @@ function groupModuleRows(rows: AdminUsageModuleRow[]) {
     const features = Array.from(featuresMap.entries()).map(([feature, featureRows]) => ({
       feature,
       cost: sumRows(featureRows, "cost_rmb"),
+      cost_rmb: sumRows(featureRows, "cost_rmb"),
       requests: sumRows(featureRows, "requests"),
+      failures: sumRows(featureRows, "failures"),
+      image_count: sumRows(featureRows, "image_count"),
+      character_count: sumRows(featureRows, "character_count"),
+      video_seconds: sumRows(featureRows, "video_seconds"),
+      total_tokens: sumRows(featureRows, "total_tokens"),
       operations: [...featureRows].sort((a, b) => (b.cost_rmb || 0) - (a.cost_rmb || 0)),
     })).sort((a, b) => b.cost - a.cost);
 
@@ -537,14 +552,19 @@ function groupModuleRows(rows: AdminUsageModuleRow[]) {
       module,
       features,
       cost: sumRows(moduleRows, "cost_rmb"),
+      cost_rmb: sumRows(moduleRows, "cost_rmb"),
       requests: sumRows(moduleRows, "requests"),
       failures: sumRows(moduleRows, "failures"),
+      image_count: sumRows(moduleRows, "image_count"),
+      character_count: sumRows(moduleRows, "character_count"),
+      video_seconds: sumRows(moduleRows, "video_seconds"),
+      total_tokens: sumRows(moduleRows, "total_tokens"),
       lastUsedAt: latestDate(moduleRows.map((row) => row.last_used_at)),
     };
   }).sort((a, b) => b.cost - a.cost);
 }
 
-function sumRows(rows: AdminUsageModuleRow[], key: keyof Pick<AdminUsageModuleRow, "requests" | "failures" | "cost_rmb">) {
+function sumRows(rows: AdminUsageModuleRow[], key: keyof Pick<AdminUsageModuleRow, "requests" | "failures" | "cost_rmb" | "image_count" | "character_count" | "video_seconds" | "total_tokens">) {
   return rows.reduce((sum, row) => sum + (Number(row[key]) || 0), 0);
 }
 
@@ -552,12 +572,49 @@ function latestDate(values: Array<string | undefined>) {
   return values.filter(Boolean).sort().at(-1) || "";
 }
 
-function usageUnitSummary(row: AdminUsageModuleRow) {
+function usageUnitSummary(row: Pick<AdminUsageMetric, "cost_rmb" | "requests" | "image_count" | "character_count" | "video_seconds" | "total_tokens">) {
+  const unit = usageUnitLabel(row);
+  const unitCost = unitCostLabel(row);
+  if (unit === "-") return unitCost;
+  return `${unit} · ${unitCost}`;
+}
+
+function usageUnitLabel(row: Pick<AdminUsageMetric, "image_count" | "character_count" | "video_seconds" | "total_tokens">) {
   if (row.video_seconds) return `${formatNumber(row.video_seconds)}s`;
   if (row.character_count) return `${formatNumber(row.character_count)} 字`;
   if (row.image_count) return `${formatNumber(row.image_count)} 图`;
   if (row.total_tokens) return `${formatNumber(row.total_tokens)} tok`;
   return "-";
+}
+
+function avgCostPerRequestLabel(row?: Pick<AdminUsageMetric, "cost_rmb" | "requests"> | null) {
+  const requests = row?.requests || 0;
+  if (!requests) return "平均 -";
+  return `${formatRMB((row?.cost_rmb || 0) / requests)}/次`;
+}
+
+function unitCostLabel(row?: Pick<AdminUsageMetric, "cost_rmb" | "image_count" | "character_count" | "video_seconds" | "total_tokens"> | null) {
+  const cost = row?.cost_rmb || 0;
+  if (row?.image_count) return `${formatRMB(cost / row.image_count)}/张`;
+  if (row?.video_seconds) return `${formatRMB(cost / row.video_seconds)}/秒`;
+  if (row?.character_count) return `${formatRMB((cost / row.character_count) * 1000)}/千字`;
+  if (row?.total_tokens) return `${formatRMB((cost / row.total_tokens) * 1000)}/千 tok`;
+  return "单位均价 -";
+}
+
+function mediaAverageHeadline(summary?: AdminUsageMetric | null) {
+  if (summary?.image_count) return `${formatRMB((summary.cost_rmb || 0) / summary.image_count)}/张`;
+  if (summary?.video_seconds) return `${formatRMB((summary.cost_rmb || 0) / summary.video_seconds)}/秒`;
+  return avgCostPerRequestLabel(summary);
+}
+
+function mediaAverageHelper(summary?: AdminUsageMetric | null) {
+  const parts = [
+    summary?.image_count ? `图片 ${formatNumber(summary.image_count)} 张` : "",
+    summary?.video_seconds ? `视频 ${formatNumber(summary.video_seconds)}s` : "",
+    summary?.character_count ? `字符 ${formatNumber(summary.character_count)}` : "",
+  ].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "当前筛选单位成本";
 }
 
 function ConversationsUsage({ conversations, error }: { conversations: AdminUsageConversationsResponse | null; error?: string }) {
