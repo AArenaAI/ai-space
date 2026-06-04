@@ -113,15 +113,17 @@ AI Space 现有 Virtuoso 使用点：
 
 ## 3. AI Space 当前架构事实
 
-### 3.1 Restore 默认 tail=50
+### 3.1 Restore 默认 tail=32
 
 文件：`frontend/lib/chatConversationRestoreCoordinator.ts`
 
 ```ts
+export const DEFAULT_CONVERSATION_RESTORE_TAIL = 32;
+
 export function buildConversationRestoreUrl({
   apiBaseUrl = "",
   conversationId,
-  tail = 50,
+  tail = DEFAULT_CONVERSATION_RESTORE_TAIL,
 }: {
   apiBaseUrl?: string;
   conversationId: number;
@@ -143,11 +145,12 @@ if msgTail > 0 {
 }
 ```
 
-含义：
+当前状态：
 
-- 当前打开会话时后端默认返回最近 50 条；
+- `DEFAULT_CONVERSATION_RESTORE_TAIL = 32` 已落地；
+- 当前打开会话时后端默认返回最近 32 条；
 - 前端再从这些消息里做窗口裁剪；
-- 50 条 canonical tail 仍会参与 group inference、overview、缓存、diff、状态判断等。
+- 32 条 canonical tail 仍会参与 group inference、overview、缓存、diff、状态判断等。
 
 ### 3.2 MessageList 已有“尾部窗口”雏形
 
@@ -184,7 +187,7 @@ if (hasHiddenLocalMessages) {
 }
 ```
 
-即：用户到顶部后，本地隐藏消息会一次性全部展开，而不是 Open WebUI 的每次 +8。
+该问题已在 Stage 0 修复：用户到顶部后，本地隐藏消息按 `MESSAGE_WINDOW_PAGE_SIZE = 8` 分页释放，并通过 `localWindowReleaseAwaitingScrollAwayRef` guard 避免 Virtuoso 锚点补偿触发连锁释放。
 
 ### 3.3 后端已有分页接口
 
@@ -221,7 +224,7 @@ export function buildLoadMorePage({
 }
 ```
 
-当前后端基础已足够支持“小页加载”，但默认前端 page size 是 50。
+当前后端基础已足够支持“小页加载”，且默认前端 older page size 已在 Stage 1 降为 8。
 
 ## 4. 根因判断
 
@@ -229,7 +232,7 @@ export function buildLoadMorePage({
 
 ```text
 restore/cache 一次带入较多 tail 消息
-+ MessageList 本地隐藏消息一次性全展开
++ MessageList 本地/远端历史释放页过大
 + Markdown 为保护 62 做 plain/rich-lite/full 分层
 = 上滑历史时用户能看到富文本渐进过程
 ```
@@ -277,7 +280,7 @@ type ChatMessageWindowState = {
 const CHAT_INITIAL_MESSAGE_WINDOW = 12;
 const CHAT_HEAVY_INITIAL_MESSAGE_WINDOW = 8;
 const CHAT_MESSAGE_WINDOW_PAGE_SIZE = 8;
-const CHAT_RESTORE_TAIL = 32; // 第一阶段可不改；第二阶段再从 50 降到 32/24
+const CHAT_RESTORE_TAIL = 32;
 const CHAT_LOAD_MORE_PAGE_SIZE = 8;
 ```
 
@@ -293,8 +296,8 @@ const CHAT_LOAD_MORE_PAGE_SIZE = 8;
 
 ```text
 顶部触发
-如果有 hidden local messages -> 一次性展开全部
-否则 -> 后端请求 50 条 older
+如果有 hidden local messages -> 每次释放 8 条
+否则 -> 后端请求 8 条 older
 ```
 
 目标：
@@ -331,7 +334,7 @@ plain fallback -> rich-lite -> delayed full
 离窗口消息: 不参与 DOM / 不 hydrate
 ```
 
-不是“一刀切取消分层”，而是取消大多数普通历史行的 plain fallback。heavy guard 仍保留。
+已验证不能“一刀切取消分层”，也不能在普通切换或泛化 `userBrowsing` 期间启用 rich-lite fallback。当前可保留的最窄模式是：只在 history prepend 后短时间内，对短且无代码/无表格的简单消息使用 rich-lite fallback；heavy guard 仍保留。
 
 ### 5.5 IndexedDB/cache 策略
 
@@ -351,7 +354,20 @@ user:${userId}:conversation:${conversationId}
 
 ## 6. 分阶段实施计划
 
-### Stage 0：前端窗口分页实验，不改后端，不改 IndexedDB
+当前已落地提交：
+
+```text
+c15c752 perf: remove sidebar conversation load delay
+50def0d perf: delay heavy markdown hydration during chat switch
+dc76f8a perf: page local chat history window
+a4a984e perf: shrink chat history load-more pages
+6c08599 perf: reduce conversation restore tail
+16ba0d6 perf: limit rich markdown fallback to history prepend
+```
+
+截至 `16ba0d6`，固定真实 profile `62 / 12 / 116 / 608 / 264 / 607 / 606` 均保持 `distanceToBottom=0`；新用户切换性能仍保持 `message_tail=32` 且无额外 `messageCount/messageStatus` 请求。
+
+### Stage 0：前端窗口分页实验，不改后端，不改 IndexedDB（已完成）
 
 目标：验证“每次 +8”是否稳定改善体验。
 
@@ -392,7 +408,7 @@ if (hasHiddenLocalMessages) {
 - 真实 profile：62/12/116/608/264/607/606 全部 `distanceToBottom=0`；
 - 62 不得出现 message-row-commit 爆炸。
 
-### Stage 1：真实 load-more page size 从 50 降到 8/12
+### Stage 1：真实 load-more page size 从 50 降到 8（已完成）
 
 目标：后端 older page 也小页化。
 
@@ -426,7 +442,7 @@ const page = buildLoadMorePage({
 - targetMessageId 找不到时能连续加载，直到找到或无更多；
 - 真实 profile 不回退。
 
-### Stage 2：restore tail 从 50 调低到 32/24，并保留 revalidate
+### Stage 2：restore tail 从 50 调低到 32，并保留 revalidate（已完成）
 
 目标：切换会话时 canonical tail 也减少，降低 group inference、overview、cache diff 等成本。
 
@@ -455,11 +471,28 @@ const DEFAULT_CONVERSATION_RESTORE_TAIL = 32;
 - 62/12/116/608/264/607/606 贴底；
 - 新消息发送、继续生成、regenerate、compare 不破坏。
 
-### Stage 3：窗口内 Markdown 策略简化
+### Stage 3：窗口内 Markdown 策略简化（进行中：Step 3.1d 已完成）
 
 目标：解决用户看到 plain -> rich 的观感。
 
 前提：Stage 0-2 全部稳定。
+
+当前 Step 3.1d 已落地：
+
+```text
+只在 history prepend 后短时间内开启 rich-lite fallback
+仅对 content.length <= 500、无代码块、无表格的简单消息生效
+初始切换 / 普通路由 / 泛化 userBrowsing 均不启用
+```
+
+已证伪并回退的变体：
+
+```text
+全局取消 plain/rich/full 分层 -> 62 掉底且 LongTask 爆炸
+所有非 heavy fallback rich-lite -> 12 掉底
+短消息 rich-lite 但初始切换也生效 -> 62 掉底
+userBrowsing-gated rich-lite -> 62 掉底
+```
 
 改动方向：
 
@@ -515,8 +548,8 @@ npx tsc --noEmit --pretty false
 npm run test:chat-load-more-history-fixture
 npm run test:chat-history-loading-fixture
 npm run test:chat-row-memo-fixture
-npm run test:chat-load-more-coordinator-regression
-npm run test:chat-conversation-restore-coordinator-regression
+npm run test:chat-load-more-coordinator
+npm run test:chat-conversation-restore-coordinator
 NEXT_PRIVATE_BUILD_WORKER=1 npm run build
 ```
 
@@ -524,8 +557,8 @@ NEXT_PRIVATE_BUILD_WORKER=1 npm run build
 
 ```bash
 npm run test:chat-conversation-switch-cache-fixture
-npm run test:chat-conversation-persistent-cache-regression
-npm run test:chat-conversation-restore-runtime-hook-regression
+npm run test:chat-conversation-persistent-cache
+npm run test:chat-conversation-restore-runtime-hook
 ```
 
 ### 7.2 真实 profile
@@ -584,13 +617,25 @@ npm run test:chat-conversation-restore-runtime-hook-regression
    - restore tail 50 -> 32；
    - cache/restore regression。
 
-4. `perf(chat): render rich fallback for windowed messages`
-   - 在窗口稳定后改 Markdown 策略；
+4. `perf(chat): limit rich fallback to history prepend`
+   - 只在 history prepend 后的短时间窗口对短简单消息启用 rich-lite fallback；
+   - 普通切换 / 路由 / `userBrowsing` 不启用；
    - heavy guard 保留。
 
 每个提交都必须独立可回退。
 
-## 10. 结论
+## 10. 下一步建议
+
+下一步不建议继续扩大 Markdown rich-lite 范围。更安全的方向是先补一个真实上滑历史 E2E/profile 脚本，专门衡量：
+
+```text
+打开 62 或 12 -> 初始落底 -> 用户上滑触发本地 +8 / 远端 older page
+记录新进入窗口的 assistant 行是否 plain/rich-lite、anchor top delta、scrollTop、row commits、Markdown 事件数。
+```
+
+如果该脚本确认 Step 3.1d 对观感改善仍有限，再考虑把 `historyRichLiteFallback` 从全列表 boolean 收窄为“本轮 prepend 新加入 message ids”的白名单，避免 prepend 窗口内所有行 prop flip。
+
+## 11. 结论
 
 根治方案不是继续调 Markdown fallback，而是把 Open WebUI 的优点迁移到 AI Space 的 Virtuoso 架构里：
 
