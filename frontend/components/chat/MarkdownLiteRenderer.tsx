@@ -18,20 +18,36 @@ type LiteBlock =
   | { type: "code"; lang: string; value: string };
 
 function getLiteRichContent(content: string) {
-  const codeBlocks = Math.floor((content.match(/```/g)?.length || 0) / 2);
+  let codeFenceCount = 0;
+  let tableLines = 0;
+  const previewLines: string[] = [];
+  let previewLength = 0;
   const lines = content.split("\n");
-  const tableLines = lines.filter((line) => /^\s*\|.+\|\s*$/.test(line)).length;
+
+  for (const line of lines) {
+    if (line.includes("```")) {
+      codeFenceCount += line.split("```").length - 1;
+    }
+    if (/^\s*\|.+\|\s*$/.test(line)) {
+      tableLines += 1;
+    }
+    if (previewLines.length < MAX_LITE_RICH_LINES && previewLength < MAX_LITE_RICH_CHARS) {
+      const nextLine = previewLength + line.length > MAX_LITE_RICH_CHARS
+        ? line.slice(0, Math.max(0, MAX_LITE_RICH_CHARS - previewLength))
+        : line;
+      previewLines.push(nextLine);
+      previewLength += nextLine.length + 1;
+    }
+  }
+
+  const codeBlocks = Math.floor(codeFenceCount / 2);
   const isExtreme =
     content.length > EXTREME_LITE_LENGTH_THRESHOLD ||
     codeBlocks >= EXTREME_LITE_CODE_BLOCK_THRESHOLD ||
     tableLines >= EXTREME_LITE_TABLE_LINE_THRESHOLD;
   if (!isExtreme) return { isPreview: false, text: content };
 
-  let text = lines.slice(0, MAX_LITE_RICH_LINES).join("\n");
-  if (text.length > MAX_LITE_RICH_CHARS) {
-    text = text.slice(0, MAX_LITE_RICH_CHARS).trimEnd();
-  }
-  return { isPreview: true, text };
+  return { isPreview: true, text: previewLines.join("\n").slice(0, MAX_LITE_RICH_CHARS).trimEnd() };
 }
 
 function parseLiteBlocks(markdown: string): LiteBlock[] {
