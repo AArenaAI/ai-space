@@ -233,10 +233,13 @@ function MessageList({
   const loadingMoreTriggeredRef = useRef(false);
   const loadMoreAnchorRef = useRef<{ messageId: string; top: number; messageCount: number } | null>(null);
   const localWindowReleaseAwaitingScrollAwayRef = useRef(false);
+  const localWindowReleasedRef = useRef(false);
+  const localWindowReleaseIntentUntilRef = useRef(0);
   const localWindowReleaseStateRef = useRef({
     hasHiddenLocalMessages: false,
     visibleMessageCount: 0,
     allVisibleMessageCount: 0,
+    firstVisibleMessageId: "",
   });
   const programmaticScrollUntilRef = useRef(0);
   const userScrollOverrideUntilRef = useRef(0);
@@ -253,7 +256,7 @@ function MessageList({
   const [fastScrollPreload, setFastScrollPreload] = useState(false);
   const [renderedMessageWindow, setRenderedMessageWindow] = useState(INITIAL_RENDERED_MESSAGE_WINDOW);
   const [historyPrependSettling, setHistoryPrependSettling] = useState(false);
-  const [historyRichLiteFallback, setHistoryRichLiteFallback] = useState(false);
+  const [historyRichLiteFallbackMessageIds, setHistoryRichLiteFallbackMessageIds] = useState<Set<string>>(() => new Set());
   const fastScrollPreloadTimerRef = useRef<number>(0);
   const historyPrependSettlingTimerRef = useRef<number>(0);
   const historyRichLiteFallbackTimerRef = useRef<number>(0);
@@ -463,20 +466,22 @@ function MessageList({
 
   const releaseHiddenLocalMessages = useCallback((el: HTMLElement) => {
     const state = localWindowReleaseStateRef.current;
+    if (Date.now() > localWindowReleaseIntentUntilRef.current) return false;
     if (!state.hasHiddenLocalMessages || localWindowReleaseAwaitingScrollAwayRef.current) return false;
     const firstVisibleRow = Array.from(el.querySelectorAll<HTMLElement>('[data-chat-message-row="true"]'))
       .find((row) => row.getBoundingClientRect().bottom >= el.getBoundingClientRect().top + 8);
-    const messageId = firstVisibleRow?.dataset.messageId;
-    if (!messageId || !firstVisibleRow) return false;
+    const messageId = firstVisibleRow?.dataset.messageId || state.firstVisibleMessageId;
+    if (!messageId) return false;
 
     loadMoreAnchorRef.current = {
       messageId,
-      top: firstVisibleRow.getBoundingClientRect().top,
+      top: firstVisibleRow?.getBoundingClientRect().top ?? el.getBoundingClientRect().top,
       messageCount: state.visibleMessageCount,
     };
     localWindowReleaseAwaitingScrollAwayRef.current = true;
-    setRenderedMessageWindow((current) =>
-      Math.min(current + MESSAGE_WINDOW_PAGE_SIZE, state.allVisibleMessageCount)
+    localWindowReleasedRef.current = true;
+    setRenderedMessageWindow(() =>
+      Math.min(state.visibleMessageCount + MESSAGE_WINDOW_PAGE_SIZE, state.allVisibleMessageCount)
     );
     stopBottomLockForUserBrowse(1800);
     return true;
@@ -575,10 +580,12 @@ function MessageList({
     if (bottomSmoothRafRef.current) window.cancelAnimationFrame(bottomSmoothRafRef.current);
   }, []);
 
-  const markHistoryPrependSettling = useCallback((duration = 1600) => {
+  const markHistoryPrependSettling = useCallback((duration = 1600, richLiteFallbackIds: string[] = []) => {
     historyPrependUntilRef.current = Math.max(historyPrependUntilRef.current, Date.now() + duration);
     setHistoryPrependSettling(true);
-    setHistoryRichLiteFallback(true);
+    if (richLiteFallbackIds.length > 0) {
+      setHistoryRichLiteFallbackMessageIds(new Set(richLiteFallbackIds));
+    }
     if (historyPrependSettlingTimerRef.current) window.clearTimeout(historyPrependSettlingTimerRef.current);
     historyPrependSettlingTimerRef.current = window.setTimeout(() => {
       historyPrependSettlingTimerRef.current = 0;
@@ -587,7 +594,7 @@ function MessageList({
     if (historyRichLiteFallbackTimerRef.current) window.clearTimeout(historyRichLiteFallbackTimerRef.current);
     historyRichLiteFallbackTimerRef.current = window.setTimeout(() => {
       historyRichLiteFallbackTimerRef.current = 0;
-      setHistoryRichLiteFallback(false);
+      setHistoryRichLiteFallbackMessageIds(new Set());
     }, duration + 1200);
   }, []);
 
@@ -609,6 +616,7 @@ function MessageList({
       return;
     }
     if (deltaY === 0) return;
+    localWindowReleaseIntentUntilRef.current = Date.now() + 1800;
     if (deltaY < 0 && el.scrollTop <= 4 && releaseHiddenLocalMessages(el)) {
       return;
     }
@@ -636,6 +644,7 @@ function MessageList({
     }, 900);
     return () => window.clearTimeout(timer);
   }, [markHistoryPrependSettling, messages, stopBottomLockForUserBrowse]);
+
 
   useEffect(() => {
     if (!isLoadingMore) {
@@ -736,7 +745,7 @@ function MessageList({
     ? CONTENT_HEAVY_INITIAL_RENDERED_MESSAGE_WINDOW
     : INITIAL_RENDERED_MESSAGE_WINDOW;
   const effectiveRenderedMessageWindowState =
-    isContentHeavyConversation && renderedMessageWindow === INITIAL_RENDERED_MESSAGE_WINDOW
+    isContentHeavyConversation && !localWindowReleasedRef.current && renderedMessageWindow === INITIAL_RENDERED_MESSAGE_WINDOW
       ? CONTENT_HEAVY_INITIAL_RENDERED_MESSAGE_WINDOW
       : renderedMessageWindow;
   const shouldWindowInitialMessages =
@@ -754,11 +763,62 @@ function MessageList({
     hasHiddenLocalMessages,
     visibleMessageCount: visibleMessages.length,
     allVisibleMessageCount: allVisibleMessages.length,
+    firstVisibleMessageId: visibleMessages[0]?.id ?? "",
   };
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const userIsBrowsingHistory = !stickToBottomRef.current || Date.now() < userScrollOverrideUntilRef.current;
+    if (el && userIsBrowsingHistory && el.scrollTop <= 4 && el.scrollHeight - el.clientHeight > 4 && hasHiddenLocalMessages) {
+      releaseHiddenLocalMessages(el);
+    }
+  }, [hasHiddenLocalMessages, releaseHiddenLocalMessages, visibleMessages.length]);
+
+  useLayoutEffect(() => {
+    const anchor = loadMoreAnchorRef.current;
+    const el = scrollRef.current;
+    if (!anchor || !el || visibleMessages.length <= anchor.messageCount) return;
+    markHistoryPrependSettling(1600);
+    stopBottomLockForUserBrowse(1600);
+
+    let cancelled = false;
+    let raf = 0;
+    const startedAt = Date.now();
+    const restoreAnchor = () => {
+      if (cancelled) return;
+      const row = el.querySelector<HTMLElement>(`[data-chat-message-row="true"][data-message-id="${CSS.escape(anchor.messageId)}"]`);
+      if (!row) {
+        if (Date.now() - startedAt < 800) {
+          raf = window.requestAnimationFrame(restoreAnchor);
+        }
+        return;
+      }
+      const delta = row.getBoundingClientRect().top - anchor.top;
+      if (Math.abs(delta) > 4) {
+        el.scrollTop += delta;
+        lastScrollTopRef.current = el.scrollTop;
+        updateScrollProgressFromElement(el);
+      }
+      if (Date.now() - startedAt < 800) {
+        raf = window.requestAnimationFrame(restoreAnchor);
+        return;
+      }
+      if (loadMoreAnchorRef.current?.messageId === anchor.messageId) {
+        loadMoreAnchorRef.current = null;
+      }
+    };
+
+    raf = window.requestAnimationFrame(restoreAnchor);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(raf);
+    };
+  }, [markHistoryPrependSettling, messages.length, stopBottomLockForUserBrowse, updateScrollProgressFromElement, visibleMessages.length]);
 
   useEffect(() => {
     const previousAllVisibleMessages = previousAllVisibleMessagesRef.current;
-    if (previousAllVisibleMessages.length > 0 && allVisibleMessages.length > previousAllVisibleMessages.length) {
+    const hasUserHistoryAnchor = Boolean(loadMoreAnchorRef.current) || Date.now() < historyPrependUntilRef.current;
+    if (hasUserHistoryAnchor && previousAllVisibleMessages.length > 0 && allVisibleMessages.length > previousAllVisibleMessages.length) {
       const firstPreviousId = previousAllVisibleMessages[0]?.id;
       const firstPreviousIndex = firstPreviousId
         ? allVisibleMessages.findIndex((message) => message.id === firstPreviousId)
@@ -869,16 +929,27 @@ function MessageList({
       loadMoreAnchorRef.current = null;
       loadingMoreTriggeredRef.current = false;
       localWindowReleaseAwaitingScrollAwayRef.current = false;
+      localWindowReleasedRef.current = false;
+      localWindowReleaseIntentUntilRef.current = 0;
       openedConversationBottomKeyRef.current = "";
       stickToBottomRef.current = true;
       atBottomRef.current = true;
       userScrollOverrideUntilRef.current = 0;
       setAtBottom(true);
       setUserBrowsing(false);
+      setHistoryRichLiteFallbackMessageIds(new Set());
       previousAllVisibleMessagesRef.current = allVisibleMessages;
     } else if (didPrependVisibleMessages) {
+      const prev = previousVisibleMessagesRef.current;
+      const firstPrevId = prev[0]?.id;
+      const firstPrevIndex = firstPrevId
+        ? visibleMessages.findIndex((message) => message.id === firstPrevId)
+        : -1;
+      const prependedVisibleIds = firstPrevIndex > 0
+        ? visibleMessages.slice(0, firstPrevIndex).map((message) => message.id)
+        : [];
       firstItemIndexRef.current = pendingFirstItemIndex;
-      markHistoryPrependSettling(1600);
+      markHistoryPrependSettling(1600, prependedVisibleIds);
       stopBottomLockForUserBrowse(1600);
     }
     previousVisibleMessagesRef.current = visibleMessages;
@@ -1585,7 +1656,7 @@ function MessageList({
               isSelected={isSelected}
               isHighlighted={isHighlighted}
               historyPrependSettling={historyPrependSettling}
-              allowRichLiteFallback={historyRichLiteFallback}
+              allowRichLiteFallback={historyRichLiteFallbackMessageIds.has(msg.id)}
               conversationId={conversationId}
               groupViews={groupViews}
               modelById={modelById}

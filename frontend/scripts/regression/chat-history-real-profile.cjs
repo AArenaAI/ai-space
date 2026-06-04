@@ -14,6 +14,9 @@ const timeoutMs = Number(process.env.AI_SPACE_HISTORY_PROFILE_TIMEOUT_MS || 9000
 const reportPath = process.env.AI_SPACE_HISTORY_PROFILE_REPORT || `/tmp/ai-space-history-profile-${conversationId}.json`;
 const verbose = process.env.AI_SPACE_HISTORY_PROFILE_VERBOSE === "1";
 const requirePrepend = process.env.AI_SPACE_HISTORY_PROFILE_REQUIRE_PREPEND !== "0";
+const maxAnchorDeltaPx = Number(process.env.AI_SPACE_HISTORY_PROFILE_MAX_ANCHOR_DELTA_PX || 32);
+const maxPostPrependLongTaskMs = Number(process.env.AI_SPACE_HISTORY_PROFILE_MAX_POST_PREPEND_LONG_TASK_MS || 200);
+const maxLocalReleasePageSize = Number(process.env.AI_SPACE_HISTORY_PROFILE_MAX_LOCAL_RELEASE_PAGE_SIZE || 8);
 
 if (!email || !password) {
   throw new Error("missing AI_SPACE_E2E_EMAIL / AI_SPACE_E2E_PASSWORD");
@@ -214,6 +217,8 @@ async function scrollNearTop(page, baselineWindow) {
   const targetScrollTop = Number(process.env.AI_SPACE_HISTORY_PROFILE_PREPEND_TRIGGER_SCROLL_TOP || 800);
   const samples = [];
   let previous = await readState(page, "scroll-near-top-before-0");
+  let previousAnchorId = previous.firstVisible?.messageId || null;
+  let previousAnchorMarker = previousAnchorId ? await readMarker(page, previousAnchorId, "scroll-near-top-before-0-anchor") : null;
   samples.push(previous);
   for (let i = 0; i < 80; i += 1) {
     if ((previous.scroller?.scrollTop || 0) <= targetScrollTop) return { state: previous, samples, release: null };
@@ -222,8 +227,23 @@ async function scrollNearTop(page, baselineWindow) {
     const current = await readState(page, `scroll-near-top-${i}`);
     samples.push(current);
     const released = current.list.visibleMessageCount > baselineWindow.list.visibleMessageCount || current.list.hiddenLocalMessageCount < baselineWindow.list.hiddenLocalMessageCount;
-    if (released) return { state: current, samples, release: { before: previous, after: current } };
+    if (released) {
+      const anchorAfter = previousAnchorId ? await readMarker(page, previousAnchorId, `scroll-near-top-${i}-anchor-after-release`) : null;
+      return {
+        state: current,
+        samples,
+        release: {
+          before: previous,
+          after: current,
+          anchorId: previousAnchorId,
+          anchorBefore: previousAnchorMarker,
+          anchorAfter,
+        },
+      };
+    }
     previous = current;
+    previousAnchorId = previous.firstVisible?.messageId || null;
+    previousAnchorMarker = previousAnchorId ? await readMarker(page, previousAnchorId, `scroll-near-top-${i}-anchor-before-next`) : null;
   }
   const finalState = await readState(page, "scroll-near-top-final");
   samples.push(finalState);
@@ -348,9 +368,9 @@ async function main() {
     const scrollResult = await scrollNearTop(page, initial);
     const nearTop = scrollResult.state;
     const beforePrepend = scrollResult.release?.before || await readState(page, "before-prepend");
-    const anchorId = beforePrepend.firstVisible?.messageId;
+    const anchorId = scrollResult.release?.anchorId || beforePrepend.firstVisible?.messageId;
     assert.ok(anchorId, `missing first visible anchor before prepend: ${JSON.stringify(beforePrepend.scroller)}`);
-    const anchorBefore = await readMarker(page, anchorId, "anchor-before-prepend");
+    const anchorBefore = scrollResult.release?.anchorBefore || await readMarker(page, anchorId, "anchor-before-prepend");
     const eventsBeforePrepend = await page.evaluate(() => (window.__chatRenderProfileEvents || []).map((event) => ({ ...event })));
     const prependStartedAt = eventsBeforePrepend.reduce((max, event) => Math.max(max, typeof event.at === "number" ? event.at : 0), 0);
 
@@ -358,7 +378,7 @@ async function main() {
       ? { triggered: true, samples: scrollResult.samples }
       : await triggerPrepend(page, beforePrepend);
     const afterPrepend = scrollResult.release?.after || await readState(page, "after-prepend");
-    const anchorAfter = await readMarker(page, anchorId, "anchor-after-prepend");
+    const anchorAfter = scrollResult.release?.anchorAfter || await readMarker(page, anchorId, "anchor-after-prepend");
     await page.waitForTimeout(1800);
     const afterSettle = await readState(page, "after-settle");
     const anchorAfterSettle = await readMarker(page, anchorId, "anchor-after-settle");
@@ -373,6 +393,9 @@ async function main() {
 
     const topDelta = anchorBefore.found && anchorAfter.found ? Math.abs(anchorAfter.visibleTop - anchorBefore.visibleTop) : null;
     const settleTopDelta = anchorBefore.found && anchorAfterSettle.found ? Math.abs(anchorAfterSettle.visibleTop - anchorBefore.visibleTop) : null;
+    const releasedVisibleCount = Math.max(0, afterPrepend.list.visibleMessageCount - beforePrepend.list.visibleMessageCount);
+    const releasedHiddenCount = Math.max(0, beforePrepend.list.hiddenLocalMessageCount - afterPrepend.list.hiddenLocalMessageCount);
+    const changedLocalWindow = releasedVisibleCount > 0 || releasedHiddenCount > 0;
     const postPrependEvents = summarizeEvents(events, prependStartedAt);
     const postPrependLongTasks = longTasks.filter((entry) => entry.startTime >= prependStartedAt);
     const markdownAfter = afterPrepend.rows.filter((row) => row.inScroller && row.role === "assistant").map((row) => ({
@@ -398,6 +421,7 @@ async function main() {
       afterSettle,
       anchor: { id: anchorId, before: anchorBefore, after: anchorAfter, afterSettle: anchorAfterSettle, topDelta, settleTopDelta },
       scrollResult: { capturedReleaseDuringScroll: Boolean(scrollResult.release), sampleCount: scrollResult.samples.length },
+      localRelease: { releasedVisibleCount, releasedHiddenCount, changedLocalWindow, maxLocalReleasePageSize },
       prepend: { triggered: prepend.triggered, sampleCount: prepend.samples.length, samples: prepend.samples },
       markdownAfter,
       postPrependEvents,
@@ -435,6 +459,12 @@ async function main() {
       olderPageRequestDetails: requestStats.olderPageRequests,
       capturedReleaseDuringScroll: Boolean(scrollResult.release),
       prependTriggered: prepend.triggered,
+      releasedVisibleCount,
+      releasedHiddenCount,
+      changedLocalWindow,
+      maxLocalReleasePageSize,
+      maxAnchorDeltaPx,
+      maxPostPrependLongTaskMs,
       anchorTopDelta: topDelta,
       anchorSettleTopDelta: settleTopDelta,
       visibleAssistantMarkdown: markdownAfter,
@@ -451,11 +481,15 @@ async function main() {
     assert.ok(initialDistanceToBottom <= 4, `normalized initial state should land at bottom: ${initialDistanceToBottom}`);
     if (requirePrepend) {
       assert.ok(prepend.triggered, "history prepend should trigger a local release or older page request");
-      assert.ok(afterPrepend.list.visibleMessageCount > beforePrepend.list.visibleMessageCount || afterPrepend.list.hiddenLocalMessageCount < beforePrepend.list.hiddenLocalMessageCount || requestStats.olderPage > 0, `history prepend should change window or request older page: before=${JSON.stringify(beforePrepend.list)} after=${JSON.stringify(afterPrepend.list)} older=${requestStats.olderPage}`);
+      assert.ok(changedLocalWindow || requestStats.olderPage > 0, `history prepend should change window or request older page: before=${JSON.stringify(beforePrepend.list)} after=${JSON.stringify(afterPrepend.list)} older=${requestStats.olderPage}`);
     }
-    if (topDelta !== null) assert.ok(topDelta <= 96, `anchor moved too far after prepend: ${topDelta}px`);
-    if (settleTopDelta !== null) assert.ok(settleTopDelta <= 96, `anchor moved too far after settle: ${settleTopDelta}px`);
-    assert.ok(report.longTasks.postPrependTotalMs < 500, `post-prepend long tasks too high: ${report.longTasks.postPrependTotalMs}ms`);
+    if (changedLocalWindow) {
+      assert.ok(releasedVisibleCount <= maxLocalReleasePageSize, `local history release should be paged: releasedVisibleCount=${releasedVisibleCount}, max=${maxLocalReleasePageSize}`);
+      assert.ok(releasedHiddenCount <= maxLocalReleasePageSize, `local hidden history release should be paged: releasedHiddenCount=${releasedHiddenCount}, max=${maxLocalReleasePageSize}`);
+    }
+    if (topDelta !== null) assert.ok(topDelta <= maxAnchorDeltaPx, `anchor moved too far after prepend: ${topDelta}px > ${maxAnchorDeltaPx}px`);
+    if (settleTopDelta !== null) assert.ok(settleTopDelta <= maxAnchorDeltaPx, `anchor moved too far after settle: ${settleTopDelta}px > ${maxAnchorDeltaPx}px`);
+    assert.ok(report.longTasks.postPrependTotalMs <= maxPostPrependLongTaskMs, `post-prepend long tasks too high: ${report.longTasks.postPrependTotalMs}ms > ${maxPostPrependLongTaskMs}ms`);
     if (issues.length > 0) throw new Error(issues.join("\n"));
   } finally {
     await browser.close();
