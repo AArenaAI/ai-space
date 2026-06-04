@@ -189,7 +189,7 @@ function MessageRow({
       data-chat-message-row="true"
       data-message-id={msg.id}
       data-message-role={msg.role}
-      style={MESSAGE_ROW_CONTENT_VISIBILITY_STYLE}
+      style={isUser ? MESSAGE_ROW_CONTENT_VISIBILITY_STYLE : undefined}
       className={cn("max-w-[800px] mx-auto px-4 py-4 rounded-2xl transition-colors duration-500", isHighlighted && "bg-brand/10")}
     >
       <div key={msg.id} className={cn("flex gap-3 animate-message-appear group", isUser ? "justify-end" : "justify-start")}>
