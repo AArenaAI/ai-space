@@ -19,6 +19,7 @@ type LiteBlock =
   | { type: "heading"; level: 1 | 2 | 3; text: string }
   | { type: "paragraph"; text: string }
   | { type: "ul"; items: string[] }
+  | { type: "taskList"; items: { checked: boolean; text: string }[] }
   | { type: "ol"; items: string[] }
   | { type: "quote"; text: string }
   | { type: "code"; lang: string; value: string }
@@ -94,6 +95,7 @@ function parseLiteBlocks(markdown: string): LiteBlock[] {
   const blocks: LiteBlock[] = [];
   let paragraph: string[] = [];
   let listItems: string[] = [];
+  let taskItems: { checked: boolean; text: string }[] = [];
   let orderedItems: string[] = [];
   let tableRows: string[][] = [];
   let codeLang = "";
@@ -109,6 +111,10 @@ function parseLiteBlocks(markdown: string): LiteBlock[] {
     if (listItems.length) {
       blocks.push({ type: "ul", items: listItems });
       listItems = [];
+    }
+    if (taskItems.length) {
+      blocks.push({ type: "taskList", items: taskItems });
+      taskItems = [];
     }
     if (orderedItems.length) {
       blocks.push({ type: "ol", items: orderedItems });
@@ -171,10 +177,18 @@ function parseLiteBlocks(markdown: string): LiteBlock[] {
       return;
     }
 
+    const task = trimmed.match(/^[-*]\s+\[([ xX])]\s+(.+)$/);
+    if (task) {
+      flushParagraph();
+      if (listItems.length || orderedItems.length) flushList();
+      taskItems.push({ checked: task[1].toLowerCase() === "x", text: task[2] });
+      return;
+    }
+
     const unordered = trimmed.match(/^[-*]\s+(.+)$/);
     if (unordered) {
       flushParagraph();
-      orderedItems = orderedItems.length ? (flushList(), orderedItems) : orderedItems;
+      if (taskItems.length || orderedItems.length) flushList();
       listItems.push(unordered[1]);
       return;
     }
@@ -182,7 +196,7 @@ function parseLiteBlocks(markdown: string): LiteBlock[] {
     const ordered = trimmed.match(/^\d+[.)]\s+(.+)$/);
     if (ordered) {
       flushParagraph();
-      listItems = listItems.length ? (flushList(), listItems) : listItems;
+      if (listItems.length || taskItems.length) flushList();
       orderedItems.push(ordered[1]);
       return;
     }
@@ -222,12 +236,18 @@ function getCachedLiteParse(content: string, compactPreview: boolean): LiteParse
   return { ...value, parseMs: Math.max(0, end - start), wasCacheHit: false };
 }
 
+function sanitizeHref(href: string) {
+  const trimmed = href.trim();
+  if (/^(https?:|mailto:|tel:|\/)/i.test(trimmed)) return trimmed;
+  return "#";
+}
+
 function InlineText({ text, lightweightInline = false }: { text: string; lightweightInline?: boolean }) {
   if (lightweightInline) {
     return <span>{text}</span>;
   }
 
-  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter(Boolean);
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|~~[^~]+~~|\[[^\]]+\]\([^)]+\)|(?<!\*)\*[^*]+\*(?!\*)|_[^_]+_)/g).filter(Boolean);
   return (
     <>
       {parts.map((part, index) => {
@@ -236,6 +256,16 @@ function InlineText({ text, lightweightInline = false }: { text: string; lightwe
         }
         if (part.startsWith("`") && part.endsWith("`")) {
           return <code key={index} className="bg-[#E8E8E8] dark:bg-[#2A2A3A] text-[#333333] dark:text-[#E0E0E0] px-1 py-0.5 rounded text-[13px] font-mono">{part.slice(1, -1)}</code>;
+        }
+        if (part.startsWith("~~") && part.endsWith("~~")) {
+          return <del key={index} className="text-text-secondary">{part.slice(2, -2)}</del>;
+        }
+        const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+        if (link) {
+          return <a key={index} href={sanitizeHref(link[2])} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2 hover:text-primary/80">{link[1]}</a>;
+        }
+        if ((part.startsWith("*") && part.endsWith("*")) || (part.startsWith("_") && part.endsWith("_"))) {
+          return <em key={index} className="italic">{part.slice(1, -1)}</em>;
         }
         return <span key={index}>{part}</span>;
       })}
@@ -246,7 +276,7 @@ function InlineText({ text, lightweightInline = false }: { text: string; lightwe
 const MarkdownLiteRenderer = memo(function MarkdownLiteRenderer({ content, compactPreview = true }: { content: string; isStreaming?: boolean; compactPreview?: boolean }) {
   const liteContent = useMemo(() => getCachedLiteParse(content, compactPreview), [compactPreview, content]);
   const blocks = liteContent.blocks;
-  const lightweightInline = liteContent.isPreview;
+  const lightweightInline = false;
 
   useEffect(() => {
     emitChatRenderProfileEvent("markdown-lite-rendered", {
@@ -275,6 +305,18 @@ const MarkdownLiteRenderer = memo(function MarkdownLiteRenderer({ content, compa
         }
         if (block.type === "ul") {
           return <ul key={index} className="list-disc ml-5 mb-4 space-y-1 text-text-primary">{block.items.map((item, itemIndex) => <li key={itemIndex} className="text-[15px] leading-relaxed"><InlineText text={item} lightweightInline={lightweightInline} /></li>)}</ul>;
+        }
+        if (block.type === "taskList") {
+          return (
+            <ul key={index} className="ml-1 mb-4 space-y-1 text-text-primary">
+              {block.items.map((item, itemIndex) => (
+                <li key={itemIndex} className="flex items-start gap-2 text-[15px] leading-relaxed">
+                  <input type="checkbox" checked={item.checked} readOnly className="mt-1 h-4 w-4 rounded border-surface-border" />
+                  <span><InlineText text={item.text} lightweightInline={lightweightInline} /></span>
+                </li>
+              ))}
+            </ul>
+          );
         }
         if (block.type === "ol") {
           return <ol key={index} className="list-decimal ml-5 mb-4 space-y-1 text-text-primary">{block.items.map((item, itemIndex) => <li key={itemIndex} className="text-[15px] leading-relaxed"><InlineText text={item} lightweightInline={lightweightInline} /></li>)}</ol>;

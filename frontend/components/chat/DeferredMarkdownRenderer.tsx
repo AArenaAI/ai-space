@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType } from "react";
-import MarkdownLiteRenderer from "./MarkdownLiteRenderer";
 import MarkdownPlainFallback from "./markdown/MarkdownPlainFallback";
+import MarkdownTokenRenderer from "./markdown/MarkdownTokenRenderer";
 
 type MarkdownRendererProps = { content: string; isStreaming?: boolean; priorityHydrateRichText?: boolean };
 
@@ -267,7 +267,7 @@ export function DeferredMarkdownRenderer({
       {shouldRenderMarkdown && Renderer ? (
         <Renderer content={content} isStreaming={isStreaming} priorityHydrateRichText={priorityHydrateRichText} />
       ) : priorityHydrateRichText || allowRichLiteFallback || shouldUseRichLiteFallback(content, complexity) ? (
-        <MarkdownLiteRenderer content={content} isStreaming={isStreaming} compactPreview={priorityHydrateRichText ? false : compactRichLitePreview} />
+        <MarkdownTokenRenderer content={content} isStreaming={isStreaming} compactPreview={priorityHydrateRichText ? false : compactRichLitePreview} />
       ) : (
         <MarkdownFallback content={content} compactPreview={compactRichLitePreview} />
       )}
