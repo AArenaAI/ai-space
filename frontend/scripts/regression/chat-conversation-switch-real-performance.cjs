@@ -13,6 +13,7 @@ const requestStats = {
   restore: 0,
   messageCount: 0,
   messageStatus: 0,
+  restoreRequests: [],
 };
 
 function trimTrailingSlash(value) {
@@ -84,14 +85,30 @@ async function seedConversation(token, title, marker) {
 function startProxy() {
   const server = http.createServer((req, res) => {
     const targetBase = req.url.startsWith("/api/") || req.url === "/health" ? apiBaseUrl : frontendBaseUrl;
+    const requestStartedAt = Date.now();
+    const isRestoreRequest = req.method === "GET" && /^\/api\/conversations\/\d+\?/.test(req.url) && /message_tail=/.test(req.url);
     if (req.method === "GET") {
-      if (/^\/api\/conversations\/\d+\?/.test(req.url) && /message_tail=/.test(req.url)) requestStats.restore += 1;
+      if (isRestoreRequest) requestStats.restore += 1;
       if (/^\/api\/conversations\/\d+\/messages\?/.test(req.url) && /limit=1/.test(req.url)) requestStats.messageCount += 1;
       if (/^\/api\/conversations\/\d+\/messages\/\d+/.test(req.url)) requestStats.messageStatus += 1;
     }
     const target = new URL(req.url, targetBase);
     const headers = { ...req.headers, host: target.host };
     const proxyReq = http.request(target, { method: req.method, headers }, (proxyRes) => {
+      let responseBytes = 0;
+      if (isRestoreRequest) {
+        proxyRes.on("data", (chunk) => {
+          responseBytes += chunk.length || 0;
+        });
+        proxyRes.on("end", () => {
+          requestStats.restoreRequests.push({
+            status: proxyRes.statusCode || 0,
+            durationMs: Date.now() - requestStartedAt,
+            bytes: responseBytes,
+            path: redact(req.url),
+          });
+        });
+      }
       res.writeHead(proxyRes.statusCode || 502, proxyRes.headers);
       proxyRes.pipe(res);
     });
@@ -136,6 +153,30 @@ async function clickConversationRow(page, conversationId) {
 
 async function waitForBodyText(page, expected) {
   await page.waitForFunction((needle) => document.body.innerText.includes(needle), expected, { timeout: timeoutMs });
+}
+
+async function switchConversationAndMeasure(page, conversationId, expectedText, label) {
+  const startedAt = Date.now();
+  await page.waitForSelector(`[data-conversation-id="${conversationId}"]`, { state: "attached", timeout: 20000 });
+  const rowAttachedAt = Date.now();
+  const clicked = await page.evaluate((id) => {
+    const row = document.querySelector(`[data-conversation-id="${id}"]`);
+    if (!row) return false;
+    row.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+    return true;
+  }, conversationId);
+  assert.ok(clicked, `conversation row not found: ${conversationId}`);
+  const dispatchedAt = Date.now();
+  await waitForBodyText(page, expectedText);
+  const textVisibleAt = Date.now();
+  return {
+    label,
+    conversationId,
+    rowAttachedMs: rowAttachedAt - startedAt,
+    dispatchMs: dispatchedAt - rowAttachedAt,
+    dispatchToTextVisibleMs: textVisibleAt - dispatchedAt,
+    clickToTextVisibleMs: textVisibleAt - startedAt,
+  };
 }
 
 async function clearVolatileConversationMemoryCache(page) {
@@ -294,6 +335,7 @@ async function main() {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const issues = [];
+  const switchTimings = [];
 
   page.on("console", (msg) => {
     const text = msg.text();
@@ -337,13 +379,11 @@ async function main() {
     await waitForBodyText(page, `SWITCH_PERF_A_${suffix}`);
     log("loaded conversation A");
 
-    await clickConversationRow(page, convB.id);
-    await waitForBodyText(page, `SWITCH_PERF_B_${suffix}`);
+    switchTimings.push(await switchConversationAndMeasure(page, convB.id, `SWITCH_PERF_B_${suffix}`, "cache-miss-to-B"));
     await page.waitForTimeout(500);
     log("cache miss switch to B done");
 
-    await clickConversationRow(page, convA.id);
-    await waitForBodyText(page, `SWITCH_PERF_A_${suffix}`);
+    switchTimings.push(await switchConversationAndMeasure(page, convA.id, `SWITCH_PERF_A_${suffix}`, "memory-hit-to-A"));
     await page.waitForTimeout(500);
     log("memory hit switch to A done");
 
@@ -354,8 +394,7 @@ async function main() {
 
     await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
     await waitForBodyText(page, `SWITCH_PERF_A_${suffix}`);
-    await clickConversationRow(page, convB.id);
-    await waitForBodyText(page, `SWITCH_PERF_B_${suffix}`);
+    switchTimings.push(await switchConversationAndMeasure(page, convB.id, `SWITCH_PERF_B_${suffix}`, "indexeddb-hit-to-B"));
     await page.waitForTimeout(800);
     log("indexeddb switch to B done");
 
@@ -395,6 +434,7 @@ async function main() {
       conversationB: summarizeEvents(events, convB.id),
       conversationA: summarizeEvents(events, convA.id),
       renderProfileB: summarizeRenderEvents(renderEvents, convB.id),
+      switchTimings,
       indexedDbObserved: bEvents.some((event) => event.phase === "first-snapshot" && event.source === "indexeddb"),
       requestStats: { ...requestStats },
       totalEvents: events.length,

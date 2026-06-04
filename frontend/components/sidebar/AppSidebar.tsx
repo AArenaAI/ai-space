@@ -506,17 +506,15 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     if (!user) { setConversations([]); setLoading(false); return; }
     const isFirstLoad = cachedConversations === null;
     if (isFirstLoad) setLoading(true);
-    const startTime = Date.now();
     const data = await fetchConversations(currentWS?.id);
-    if (isFirstLoad) {
-      const elapsed = Date.now() - startTime;
-      if (elapsed < 600) await new Promise((r) => setTimeout(r, 600 - elapsed));
-      setLoading(false);
+    if (data === null) {
+      if (isFirstLoad) setLoading(false);
+      return;
     }
-    if (data === null) return;
     if (isFirstLoad) {
       setConversations(data);
       cachedConversations = data;
+      setLoading(false);
     } else {
       updateConversationsStable(() => data);
     }
