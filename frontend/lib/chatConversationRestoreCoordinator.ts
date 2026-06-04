@@ -61,10 +61,12 @@ export type ConversationRestoreStatusDecision = {
   };
 };
 
+export const DEFAULT_CONVERSATION_RESTORE_TAIL = 32;
+
 export function buildConversationRestoreUrl({
   apiBaseUrl = "",
   conversationId,
-  tail = 50,
+  tail = DEFAULT_CONVERSATION_RESTORE_TAIL,
 }: {
   apiBaseUrl?: string;
   conversationId: number;
