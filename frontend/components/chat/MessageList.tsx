@@ -76,6 +76,7 @@ const RETURN_TO_BOTTOM_PRELOAD_BOTTOM_PX = 6000;
 const HISTORY_OVERSCAN_REVERSE = 8;
 const INITIAL_RENDERED_MESSAGE_WINDOW = 16;
 const CONTENT_HEAVY_INITIAL_RENDERED_MESSAGE_WINDOW = 8;
+const MESSAGE_WINDOW_PAGE_SIZE = 8;
 const MIN_HIDDEN_MESSAGES_TO_WINDOW = 8;
 const CONTENT_HEAVY_TOTAL_CHARS_THRESHOLD = 24_000;
 const CONTENT_HEAVY_CODE_BLOCK_THRESHOLD = 24;
@@ -231,6 +232,7 @@ function MessageList({
   const lastScrollTopRef = useRef(0);
   const loadingMoreTriggeredRef = useRef(false);
   const loadMoreAnchorRef = useRef<{ messageId: string; top: number; messageCount: number } | null>(null);
+  const localWindowReleaseAwaitingScrollAwayRef = useRef(false);
   const programmaticScrollUntilRef = useRef(0);
   const userScrollOverrideUntilRef = useRef(0);
   const bottomLockRafRef = useRef<number>(0);
@@ -563,7 +565,11 @@ function MessageList({
       }, 900);
     }
 
-    if (deltaY >= 0) return;
+    if (deltaY > 0) {
+      localWindowReleaseAwaitingScrollAwayRef.current = false;
+      return;
+    }
+    if (deltaY === 0) return;
     const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     if (distanceToBottom > 1) {
       stopBottomLockForUserBrowse(2500);
@@ -815,6 +821,7 @@ function MessageList({
       historyPrependUntilRef.current = 0;
       loadMoreAnchorRef.current = null;
       loadingMoreTriggeredRef.current = false;
+      localWindowReleaseAwaitingScrollAwayRef.current = false;
       openedConversationBottomKeyRef.current = "";
       stickToBottomRef.current = true;
       atBottomRef.current = true;
@@ -1451,7 +1458,13 @@ function MessageList({
   }
 
   return (
-    <div className="relative flex-1 min-h-0 overflow-hidden">
+    <div
+      className="relative flex-1 min-h-0 overflow-hidden"
+      data-testid="chat-message-list"
+      data-visible-message-count={visibleMessages.length}
+      data-all-visible-message-count={allVisibleMessages.length}
+      data-hidden-local-message-count={hiddenLocalMessageCount}
+    >
       <Virtuoso
         style={{ height: "100%", overflowAnchor: userBrowsing ? "none" : "auto" }}
         data={visibleMessages}
@@ -1483,12 +1496,16 @@ function MessageList({
           if (!messageId || !firstVisibleRow) return;
 
           if (hasHiddenLocalMessages) {
+            if (localWindowReleaseAwaitingScrollAwayRef.current) return;
             loadMoreAnchorRef.current = {
               messageId,
               top: firstVisibleRow.getBoundingClientRect().top,
               messageCount: visibleMessages.length,
             };
-            setRenderedMessageWindow(allVisibleMessages.length);
+            localWindowReleaseAwaitingScrollAwayRef.current = true;
+            setRenderedMessageWindow((current) =>
+              Math.min(current + MESSAGE_WINDOW_PAGE_SIZE, allVisibleMessages.length)
+            );
             stopBottomLockForUserBrowse(1800);
             return;
           }
