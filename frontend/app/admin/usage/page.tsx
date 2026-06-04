@@ -6,6 +6,7 @@ import {
   getAdminUsageConversations,
   getAdminUsageLogs,
   getAdminUsageModels,
+  getAdminUsageModules,
   getAdminUsageSummary,
   getAdminUsageUsers,
 } from "@/lib/admin/api";
@@ -14,6 +15,7 @@ import type {
   AdminUsageLog,
   AdminUsageLogsResponse,
   AdminUsageModelsResponse,
+  AdminUsageModulesResponse,
   AdminUsageSummary,
   AdminUsageUsersResponse,
 } from "@/lib/admin/types";
@@ -32,7 +34,8 @@ const tabs = [
   { value: "overview", label: "总览" },
   { value: "ledger", label: "账本明细" },
   { value: "users", label: "用户" },
-  { value: "models", label: "模块 / 模型" },
+  { value: "modules", label: "产品模块" },
+  { value: "models", label: "模型" },
   { value: "conversations", label: "对话" },
 ] as const;
 type UsageTab = (typeof tabs)[number]["value"];
@@ -76,11 +79,12 @@ export default function AdminUsagePage() {
   const [logs, setLogs] = useState<AdminUsageLogsResponse | null>(null);
   const [users, setUsers] = useState<AdminUsageUsersResponse | null>(null);
   const [models, setModels] = useState<AdminUsageModelsResponse | null>(null);
+  const [modules, setModules] = useState<AdminUsageModulesResponse | null>(null);
   const [conversations, setConversations] = useState<AdminUsageConversationsResponse | null>(null);
   const [page, setPage] = useState(1);
   const [selectedLog, setSelectedLog] = useState<AdminUsageLog | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   const logParams = useMemo(() => ({
     page,
@@ -104,25 +108,24 @@ export default function AdminUsagePage() {
 
   const load = async () => {
     setLoading(true);
-    setError(null);
-    try {
-      const [summaryData, logData, usersData, modelsData, conversationsData] = await Promise.all([
-        getAdminUsageSummary(filters.range === "all" ? "30d" : filters.range),
-        getAdminUsageLogs(logParams),
-        getAdminUsageUsers({ page: 1, pageSize: 30, range: filters.range, service: filters.service, provider: filters.provider, model: filters.model }),
-        getAdminUsageModels({ range: filters.range, service: filters.service, provider: filters.provider, limit: 120 }),
-        getAdminUsageConversations({ page: 1, pageSize: 30, range: filters.range, userId: numberOrUndefined(filters.userId), service: filters.service, provider: filters.provider, model: filters.model }),
-      ]);
-      setSummary(summaryData);
-      setLogs(logData);
-      setUsers(usersData);
-      setModels(modelsData);
-      setConversations(conversationsData);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "加载用量数据失败");
-    } finally {
-      setLoading(false);
-    }
+    const [summaryResult, logResult, usersResult, modulesResult, modelsResult, conversationsResult] = await Promise.allSettled([
+      getAdminUsageSummary(filters.range === "all" ? "30d" : filters.range),
+      getAdminUsageLogs(logParams),
+      getAdminUsageUsers({ page: 1, pageSize: 30, range: filters.range, service: filters.service, provider: filters.provider, model: filters.model }),
+      getAdminUsageModules({ range: filters.range, module: filters.module, feature: filters.feature, operation: filters.operation, service: filters.service, provider: filters.provider, model: filters.model, limit: 160 }),
+      getAdminUsageModels({ range: filters.range, service: filters.service, provider: filters.provider, limit: 120 }),
+      getAdminUsageConversations({ page: 1, pageSize: 30, range: filters.range, userId: numberOrUndefined(filters.userId), service: filters.service, provider: filters.provider, model: filters.model }),
+    ]);
+
+    const nextErrors: Record<string, string> = {};
+    if (summaryResult.status === "fulfilled") setSummary(summaryResult.value); else nextErrors.summary = errorMessage(summaryResult.reason, "查询总览失败");
+    if (logResult.status === "fulfilled") setLogs(logResult.value); else nextErrors.ledger = errorMessage(logResult.reason, "查询用量日志失败");
+    if (usersResult.status === "fulfilled") setUsers(usersResult.value); else nextErrors.users = errorMessage(usersResult.reason, "查询用户用量失败");
+    if (modulesResult.status === "fulfilled") setModules(modulesResult.value); else nextErrors.modules = errorMessage(modulesResult.reason, "查询产品模块用量失败");
+    if (modelsResult.status === "fulfilled") setModels(modelsResult.value); else nextErrors.models = errorMessage(modelsResult.reason, "查询模型用量失败");
+    if (conversationsResult.status === "fulfilled") setConversations(conversationsResult.value); else nextErrors.conversations = errorMessage(conversationsResult.reason, "查询对话用量失败");
+    setErrors(nextErrors);
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -140,9 +143,13 @@ export default function AdminUsagePage() {
   };
 
   const quickVideoFilter = () => {
+    applyLedgerFilters({ range: "all", module: "creative", feature: "video", service: "video_generation" });
+  };
+
+  const applyLedgerFilters = (patch: Partial<UsageFilters>) => {
     setTab("ledger");
     setPage(1);
-    setFilters((prev) => ({ ...prev, range: "all", module: "creative", feature: "video", service: "video_generation" }));
+    setFilters((prev) => ({ ...prev, ...patch }));
   };
 
   if (loading && !summary && !logs) return <div className="rounded-3xl border border-surface-border bg-surface-card p-8 text-text-secondary">正在加载用量数据…</div>;
@@ -164,7 +171,7 @@ export default function AdminUsagePage() {
         </div>
       </div>
 
-      {error && <div className="flex items-center gap-2 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-300"><AlertCircle className="h-4 w-4" />{error}</div>}
+      {Object.keys(errors).length > 0 && <div className="space-y-2 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-300">{Object.entries(errors).map(([key, message]) => <div key={key} className="flex items-center gap-2"><AlertCircle className="h-4 w-4" />{message}</div>)}</div>}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <MetricCard title="总成本" value={formatRMB(summary?.cost_rmb || 0)} icon={Coins} helper={`Chat ${formatRMB(chatCost)}`} />
@@ -181,10 +188,11 @@ export default function AdminUsagePage() {
       </div>
 
       {tab === "overview" && <Overview summary={summary} logs={logs} maxDailyCost={maxDailyCost} onServiceClick={(service) => { updateFilter("service", service); setTab("ledger"); }} />}
-      {tab === "ledger" && <Ledger filters={filters} updateFilter={updateFilter} logs={logs} page={page} setPage={setPage} loading={loading} onSelect={setSelectedLog} onClear={() => { setPage(1); setFilters(defaultFilters); }} />}
-      {tab === "users" && <UsersUsage users={users} />}
-      {tab === "models" && <ModelsUsage models={models} summary={summary} />}
-      {tab === "conversations" && <ConversationsUsage conversations={conversations} />}
+      {tab === "ledger" && <Ledger filters={filters} updateFilter={updateFilter} logs={logs} page={page} setPage={setPage} loading={loading} error={errors.ledger} onSelect={setSelectedLog} onClear={() => { setPage(1); setFilters(defaultFilters); }} />}
+      {tab === "users" && <UsersUsage users={users} error={errors.users} />}
+      {tab === "modules" && <ModulesUsage modules={modules} error={errors.modules} onDrilldown={applyLedgerFilters} />}
+      {tab === "models" && <ModelsUsage models={models} summary={summary} error={errors.models} />}
+      {tab === "conversations" && <ConversationsUsage conversations={conversations} error={errors.conversations} />}
       {selectedLog && <UsageLogDrawer log={selectedLog} onClose={() => setSelectedLog(null)} />}
     </div>
   );
@@ -216,7 +224,7 @@ function Overview({ summary, logs, maxDailyCost, onServiceClick }: { summary: Ad
   );
 }
 
-function Ledger({ filters, updateFilter, logs, page, setPage, loading, onSelect, onClear }: { filters: UsageFilters; updateFilter: (key: keyof UsageFilters, value: string) => void; logs: AdminUsageLogsResponse | null; page: number; setPage: (page: number) => void; loading: boolean; onSelect: (log: AdminUsageLog) => void; onClear: () => void }) {
+function Ledger({ filters, updateFilter, logs, page, setPage, loading, error, onSelect, onClear }: { filters: UsageFilters; updateFilter: (key: keyof UsageFilters, value: string) => void; logs: AdminUsageLogsResponse | null; page: number; setPage: (page: number) => void; loading: boolean; error?: string; onSelect: (log: AdminUsageLog) => void; onClear: () => void }) {
   const total = logs?.total || 0;
   const pageSize = logs?.page_size || 50;
   const maxPage = Math.max(1, Math.ceil(total / pageSize));
@@ -245,6 +253,7 @@ function Ledger({ filters, updateFilter, logs, page, setPage, loading, onSelect,
 
       <Card title="账本明细">
         {loading && <div className="mb-3 rounded-xl bg-surface-elevated px-3 py-2 text-sm text-text-secondary">正在刷新账本…</div>}
+        {error && <InlineError message={error} />}
         <Table headers={["时间", "产品/功能/操作", "服务", "用户", "业务对象", "Provider / 模型", "用量", "官方单价", "成本", "状态"]}>
           {(logs?.logs || []).map((log) => (
             <tr key={log.id} className="border-t border-surface-border align-top hover:bg-surface-elevated/40">
@@ -271,16 +280,22 @@ function Ledger({ filters, updateFilter, logs, page, setPage, loading, onSelect,
   );
 }
 
-function UsersUsage({ users }: { users: AdminUsageUsersResponse | null }) {
-  return <Card title="用户消耗排行"><Table headers={["用户", "模块消耗", "请求", "Token/图片", "成本", "最近使用"]}>{(users?.users || []).map((user) => <tr key={user.user_id} className="border-t border-surface-border"><td className="py-3 pr-4"><div className="font-medium text-text-primary">{user.email || `User #${user.user_id}`}</div><div className="text-xs text-text-tertiary">{user.name || "-"} · ID {user.user_id}</div></td><td className="min-w-[260px] pr-4"><div className="flex flex-wrap gap-1">{(user.services || []).slice(0, 4).map((item) => <span key={item.name} className="rounded-full bg-surface-elevated px-2 py-1 text-xs text-text-secondary">{item.name || "unknown"} {formatRMB(item.cost_rmb)}</span>)}</div></td><td className="pr-4">{formatNumber(user.requests)}</td><td className="pr-4">{formatNumber(user.total_tokens || 0)} / {formatNumber(user.image_count || 0)}</td><td className="font-semibold text-text-primary">{formatRMB(user.cost_rmb)}</td><td className="whitespace-nowrap text-text-tertiary">{formatDateTime(user.last_used_at)}</td></tr>)}</Table></Card>;
+function UsersUsage({ users, error }: { users: AdminUsageUsersResponse | null; error?: string }) {
+  return <Card title="用户消耗排行">{error && <InlineError message={error} />}<Table headers={["用户", "模块消耗", "请求", "Token/图片", "成本", "最近使用"]}>{(users?.users || []).map((user) => <tr key={user.user_id} className="border-t border-surface-border"><td className="py-3 pr-4"><div className="font-medium text-text-primary">{user.email || `User #${user.user_id}`}</div><div className="text-xs text-text-tertiary">{user.name || "-"} · ID {user.user_id}</div></td><td className="min-w-[260px] pr-4"><div className="flex flex-wrap gap-1">{(user.services || []).slice(0, 4).map((item) => <span key={item.name} className="rounded-full bg-surface-elevated px-2 py-1 text-xs text-text-secondary">{item.name || "unknown"} {formatRMB(item.cost_rmb)}</span>)}</div></td><td className="pr-4">{formatNumber(user.requests)}</td><td className="pr-4">{formatNumber(user.total_tokens || 0)} / {formatNumber(user.image_count || 0)}</td><td className="font-semibold text-text-primary">{formatRMB(user.cost_rmb)}</td><td className="whitespace-nowrap text-text-tertiary">{formatDateTime(user.last_used_at)}</td></tr>)}</Table></Card>;
 }
 
-function ModelsUsage({ models, summary }: { models: AdminUsageModelsResponse | null; summary: AdminUsageSummary | null }) {
-  return <div className="space-y-6"><div className="grid gap-6 xl:grid-cols-2"><Card title="模块汇总"><Breakdown rows={summary?.service_breakdown || []} /></Card><Card title="Provider 汇总"><Breakdown rows={summary?.provider_breakdown || []} /></Card></div><Card title="模块 x 模型矩阵"><Table headers={["模块", "Provider", "模型", "请求", "Token", "图片", "成本"]}>{(models?.models || []).map((row) => <tr key={`${row.service}-${row.provider}-${row.model}`} className="border-t border-surface-border"><td className="py-3 pr-4"><StatusBadge tone="blue">{row.service || "unknown"}</StatusBadge></td><td className="pr-4 text-text-secondary">{row.provider || "unknown"}</td><td className="max-w-[340px] truncate pr-4 font-medium text-text-primary">{row.model || "unknown"}</td><td className="pr-4">{formatNumber(row.requests)}</td><td className="pr-4">{formatNumber(row.total_tokens || 0)}</td><td className="pr-4">{formatNumber(row.image_count || 0)}</td><td className="font-semibold text-text-primary">{formatRMB(row.cost_rmb)}</td></tr>)}</Table></Card></div>;
+function ModelsUsage({ models, summary, error }: { models: AdminUsageModelsResponse | null; summary: AdminUsageSummary | null; error?: string }) {
+  return <div className="space-y-6">{error && <InlineError message={error} />}<div className="grid gap-6 xl:grid-cols-2"><Card title="服务汇总"><Breakdown rows={summary?.service_breakdown || []} /></Card><Card title="Provider 汇总"><Breakdown rows={summary?.provider_breakdown || []} /></Card></div><Card title="模块 x 模型矩阵"><Table headers={["模块", "Provider", "模型", "请求", "Token", "图片", "成本"]}>{(models?.models || []).map((row) => <tr key={`${row.service}-${row.provider}-${row.model}`} className="border-t border-surface-border"><td className="py-3 pr-4"><StatusBadge tone="blue">{row.service || "unknown"}</StatusBadge></td><td className="pr-4 text-text-secondary">{row.provider || "unknown"}</td><td className="max-w-[340px] truncate pr-4 font-medium text-text-primary">{row.model || "unknown"}</td><td className="pr-4">{formatNumber(row.requests)}</td><td className="pr-4">{formatNumber(row.total_tokens || 0)}</td><td className="pr-4">{formatNumber(row.image_count || 0)}</td><td className="font-semibold text-text-primary">{formatRMB(row.cost_rmb)}</td></tr>)}</Table></Card></div>;
 }
 
-function ConversationsUsage({ conversations }: { conversations: AdminUsageConversationsResponse | null }) {
-  return <Card title="对话消耗排行"><Table headers={["对话", "用户", "模型", "请求", "Token", "成本", "最近使用"]}>{(conversations?.conversations || []).map((item) => <tr key={item.conversation_id} className="border-t border-surface-border"><td className="py-3 pr-4"><div className="max-w-[280px] truncate font-medium text-text-primary">{item.title || `Conversation #${item.conversation_id}`}</div><div className="text-xs text-text-tertiary">ID {item.conversation_id}</div></td><td className="pr-4 text-text-secondary">{item.email || item.user_id || "-"}</td><td className="min-w-[260px] pr-4"><div className="flex flex-wrap gap-1">{(item.models || []).slice(0, 3).map((model) => <span key={`${item.conversation_id}-${model.provider}-${model.model}`} className="rounded-full bg-surface-elevated px-2 py-1 text-xs text-text-secondary">{model.model || "unknown"} {formatRMB(model.cost_rmb)}</span>)}</div></td><td className="pr-4">{formatNumber(item.requests)}</td><td className="pr-4">{formatNumber(item.total_tokens || 0)}</td><td className="font-semibold text-text-primary">{formatRMB(item.cost_rmb)}</td><td className="whitespace-nowrap text-text-tertiary">{formatDateTime(item.last_used_at)}</td></tr>)}</Table></Card>;
+
+function ModulesUsage({ modules, error, onDrilldown }: { modules: AdminUsageModulesResponse | null; error?: string; onDrilldown: (patch: Partial<UsageFilters>) => void }) {
+  const rows = modules?.modules || [];
+  return <Card title="产品模块下钻"><div className="mb-4 text-sm text-text-secondary">按 module / feature / operation 聚合成本，点击“查看明细”会自动进入账本并带入筛选。</div>{error && <InlineError message={error} />}<Table headers={["产品模块", "服务", "请求/失败", "Token", "图片/字符/视频", "成本", "最近使用", "操作"]}>{rows.map((row) => <tr key={`${row.module}-${row.feature}-${row.operation}-${row.service}`} className="border-t border-surface-border"><td className="py-3 pr-4"><div className="font-medium text-text-primary">{row.module || "unknown"} / {row.feature || "unknown"}</div><div className="text-xs text-text-tertiary">{row.operation || "unknown"}</div></td><td className="pr-4"><StatusBadge tone="blue">{row.service || "unknown"}</StatusBadge></td><td className="pr-4">{formatNumber(row.requests)}<div className="text-xs text-text-tertiary">失败 {formatNumber(row.failures || 0)}</div></td><td className="pr-4"><div>{formatNumber(row.total_tokens || 0)}</div><div className="text-xs text-text-tertiary">in {formatNumber(row.prompt_tokens || 0)} / out {formatNumber(row.completion_tokens || 0)}</div></td><td className="pr-4 text-xs"><div>图片 {formatNumber(row.image_count || 0)}</div><div>字符 {formatNumber(row.character_count || 0)}</div><div>视频 {formatNumber(row.video_seconds || 0)}s</div></td><td className="pr-4 font-semibold text-text-primary">{formatRMB(row.cost_rmb)}</td><td className="whitespace-nowrap pr-4 text-text-tertiary">{formatDateTime(row.last_used_at)}</td><td><button onClick={() => onDrilldown({ module: row.module, feature: row.feature, operation: row.operation, service: row.service })} className="rounded-xl border border-surface-border px-3 py-2 text-sm text-text-secondary hover:text-text-primary">查看明细</button></td></tr>)}</Table>{rows.length === 0 && !error && <Empty />}</Card>;
+}
+
+function ConversationsUsage({ conversations, error }: { conversations: AdminUsageConversationsResponse | null; error?: string }) {
+  return <Card title="对话消耗排行">{error && <InlineError message={error} />}<Table headers={["对话", "用户", "模型", "请求", "Token", "成本", "最近使用"]}>{(conversations?.conversations || []).map((item) => <tr key={item.conversation_id} className="border-t border-surface-border"><td className="py-3 pr-4"><div className="max-w-[280px] truncate font-medium text-text-primary">{item.title || `Conversation #${item.conversation_id}`}</div><div className="text-xs text-text-tertiary">ID {item.conversation_id}</div></td><td className="pr-4 text-text-secondary">{item.email || item.user_id || "-"}</td><td className="min-w-[260px] pr-4"><div className="flex flex-wrap gap-1">{(item.models || []).slice(0, 3).map((model) => <span key={`${item.conversation_id}-${model.provider}-${model.model}`} className="rounded-full bg-surface-elevated px-2 py-1 text-xs text-text-secondary">{model.model || "unknown"} {formatRMB(model.cost_rmb)}</span>)}</div></td><td className="pr-4">{formatNumber(item.requests)}</td><td className="pr-4">{formatNumber(item.total_tokens || 0)}</td><td className="font-semibold text-text-primary">{formatRMB(item.cost_rmb)}</td><td className="whitespace-nowrap text-text-tertiary">{formatDateTime(item.last_used_at)}</td></tr>)}</Table></Card>;
 }
 
 function RecentLogs({ logs }: { logs: AdminUsageLogsResponse | null }) {
@@ -337,6 +352,10 @@ function Empty() {
   return <div className="rounded-2xl bg-surface-elevated p-5 text-sm text-text-secondary">暂无用量数据</div>;
 }
 
+function InlineError({ message }: { message: string }) {
+  return <div className="mb-3 flex items-center gap-2 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-300"><AlertCircle className="h-4 w-4" />{message}</div>;
+}
+
 function numberOrUndefined(value: string) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
@@ -353,4 +372,8 @@ function formatSourcePrice(log: AdminUsageLog) {
   ].filter(Boolean);
   if (prices.length === 0) return unit || "-";
   return `${prices.join(" / ")} ${unit ? `/ ${unit}` : ""}`;
+}
+
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
 }

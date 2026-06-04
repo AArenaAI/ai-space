@@ -6,6 +6,7 @@ import type {
   AdminUsageConversationsResponse,
   AdminUsageLogsResponse,
   AdminUsageModelsResponse,
+  AdminUsageModulesResponse,
   AdminUsageSummary,
   AdminUsageUserDetail,
   AdminUsageUsersResponse,
@@ -182,6 +183,10 @@ export function getAdminUsageUserDetail(id: number, params: { range?: string } =
 
 export function getAdminUsageModels(params: { range?: string; service?: string; provider?: string; userId?: number; conversationId?: number; limit?: number } = {}) {
   return adminFetch<AdminUsageModelsResponse>(`/usage/models${qs({ range: params.range, service: params.service, provider: params.provider, user_id: params.userId, conversation_id: params.conversationId, limit: params.limit })}`);
+}
+
+export function getAdminUsageModules(params: { range?: string; module?: string; feature?: string; operation?: string; service?: string; provider?: string; model?: string; limit?: number } = {}) {
+  return adminFetch<AdminUsageModulesResponse>(`/usage/modules${qs({ range: params.range, module: params.module, feature: params.feature, operation: params.operation, service: params.service, provider: params.provider, model: params.model, limit: params.limit })}`);
 }
 
 export function getAdminUsageConversations(params: { page?: number; pageSize?: number; range?: string; userId?: number; service?: string; provider?: string; model?: string } = {}) {

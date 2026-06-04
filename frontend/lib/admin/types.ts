@@ -111,6 +111,25 @@ export interface AdminUsageServiceRow extends AdminUsageMetric {
   image_count: number;
 }
 
+
+export interface AdminUsageModuleRow extends AdminUsageMetric {
+  module: string;
+  feature: string;
+  operation: string;
+  service: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  image_count: number;
+  character_count: number;
+  video_seconds: number;
+  last_used_at: string;
+}
+
+export interface AdminUsageModulesResponse {
+  modules: AdminUsageModuleRow[];
+}
+
 export interface AdminUsageModelRow extends AdminUsageMetric {
   service: string;
   provider: string;

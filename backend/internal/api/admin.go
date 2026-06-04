@@ -454,6 +454,35 @@ func (h *AdminHandler) UsageModels(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"models": h.usageModelRows(c, limit)})
 }
 
+func (h *AdminHandler) UsageModules(c *gin.Context) {
+	limit := parsePositiveInt(c.Query("limit"), 120)
+	if limit > 300 {
+		limit = 300
+	}
+	items := []gin.H{}
+	rows, err := h.usageQuery(c).
+		Select("COALESCE(module, '') AS module, COALESCE(feature, '') AS feature, COALESCE(operation, '') AS operation, COALESCE(service, '') AS service, COUNT(*) AS requests, COALESCE(SUM(CASE WHEN status <> 'success' THEN 1 ELSE 0 END), 0) AS failures, COALESCE(SUM(total_cost_rmb), 0) AS cost_rmb, COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens, COALESCE(SUM(completion_tokens), 0) AS completion_tokens, COALESCE(SUM(total_tokens), 0) AS total_tokens, COALESCE(SUM(image_count), 0) AS image_count, COALESCE(SUM(character_count), 0) AS character_count, COALESCE(SUM(video_seconds), 0) AS video_seconds, MAX(created_at) AS last_used_at").
+		Group("module, feature, operation, service").
+		Order("cost_rmb DESC").
+		Limit(limit).
+		Rows()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询产品模块用量失败"})
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var module, feature, operation, service string
+		var requests, failures, prompt, completion, tokens, images, characters, videoSeconds int64
+		var cost float64
+		var lastUsed time.Time
+		if err := rows.Scan(&module, &feature, &operation, &service, &requests, &failures, &cost, &prompt, &completion, &tokens, &images, &characters, &videoSeconds, &lastUsed); err == nil {
+			items = append(items, gin.H{"module": module, "feature": feature, "operation": operation, "service": service, "requests": requests, "failures": failures, "cost_rmb": cost, "prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": tokens, "image_count": images, "character_count": characters, "video_seconds": videoSeconds, "last_used_at": lastUsed})
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"modules": items})
+}
+
 func (h *AdminHandler) UsageConversations(c *gin.Context) {
 	page := parsePositiveInt(c.Query("page"), 1)
 	pageSize := parsePositiveInt(c.Query("page_size"), 20)
