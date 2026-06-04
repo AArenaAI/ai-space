@@ -176,18 +176,86 @@ function summarizeEvents(events, conversationId) {
   const matching = events.filter((event) => Number(event.conversationId) === Number(conversationId));
   const byPhase = Object.fromEntries(matching.map((event) => [`${event.phase}:${event.source || ""}`, Math.round(event.durationMs || 0)]));
   const firstSnapshot = matching.find((event) => event.phase === "first-snapshot");
+  const shellDisplayed = matching.find((event) => event.phase === "shell-displayed");
+  const revalidateStart = matching.find((event) => event.phase === "revalidate-start");
   const restore = matching.find((event) => event.phase === "restore-response");
   const reconciled = matching.find((event) => event.phase === "restore-reconciled");
   const notModified = matching.find((event) => event.phase === "restore-not-modified");
+  const snapshotSource = firstSnapshot?.snapshotSource || firstSnapshot?.source || null;
+  const revalidateEnd = notModified || reconciled || restore;
   return {
     eventCount: matching.length,
     firstSnapshotSource: firstSnapshot?.source || null,
     firstSnapshotMs: firstSnapshot ? Math.round(firstSnapshot.durationMs || 0) : null,
+    stages: {
+      cache: {
+        source: snapshotSource,
+        displayMode: firstSnapshot?.displayMode || null,
+        firstSnapshotMs: firstSnapshot ? Math.round(firstSnapshot.durationMs || 0) : null,
+      },
+      shell: {
+        displayed: Boolean(shellDisplayed),
+        shellMs: shellDisplayed ? Math.round(shellDisplayed.durationMs || 0) : null,
+      },
+      revalidate: {
+        startedMs: revalidateStart ? Math.round(revalidateStart.durationMs || 0) : null,
+        completedMs: revalidateEnd ? Math.round(revalidateEnd.durationMs || 0) : null,
+        mode: revalidateStart?.displayMode || restore?.displayMode || notModified?.displayMode || null,
+        notModified: Boolean(notModified),
+        reconciled: Boolean(reconciled),
+      },
+    },
     restoreResponseMs: restore ? Math.round(restore.durationMs || 0) : null,
     restoreReconciledMs: reconciled ? Math.round(reconciled.durationMs || 0) : null,
     restoreNotModifiedMs: notModified ? Math.round(notModified.durationMs || 0) : null,
     phases: byPhase,
+    loads: summarizeSwitchLoads(matching),
   };
+}
+
+function summarizeSwitchLoads(events) {
+  const loads = [];
+  let current = [];
+  for (const event of events) {
+    if (event.phase === "start" && current.length > 0) {
+      loads.push(current);
+      current = [];
+    }
+    current.push(event);
+  }
+  if (current.length > 0) loads.push(current);
+
+  return loads.map((loadEvents, index) => {
+    const firstSnapshot = loadEvents.find((event) => event.phase === "first-snapshot");
+    const shellDisplayed = loadEvents.find((event) => event.phase === "shell-displayed");
+    const revalidateStart = loadEvents.find((event) => event.phase === "revalidate-start");
+    const restore = loadEvents.find((event) => event.phase === "restore-response");
+    const reconciled = loadEvents.find((event) => event.phase === "restore-reconciled");
+    const notModified = loadEvents.find((event) => event.phase === "restore-not-modified");
+    const revalidateEnd = notModified || reconciled || restore;
+    return {
+      index,
+      loadSeq: loadEvents[0]?.loadSeq ?? "unknown",
+      phases: loadEvents.map((event) => event.phase),
+      cache: {
+        source: firstSnapshot?.snapshotSource || firstSnapshot?.source || null,
+        displayMode: firstSnapshot?.displayMode || null,
+        firstSnapshotMs: firstSnapshot ? Math.round(firstSnapshot.durationMs || 0) : null,
+        messageCount: firstSnapshot?.messageCount,
+      },
+      shell: {
+        displayed: Boolean(shellDisplayed),
+        shellMs: shellDisplayed ? Math.round(shellDisplayed.durationMs || 0) : null,
+      },
+      revalidate: {
+        startedMs: revalidateStart ? Math.round(revalidateStart.durationMs || 0) : null,
+        completedMs: revalidateEnd ? Math.round(revalidateEnd.durationMs || 0) : null,
+        mode: revalidateStart?.displayMode || restore?.displayMode || notModified?.displayMode || null,
+        notModified: Boolean(notModified),
+        reconciled: Boolean(reconciled),
+      },
+    };
+  });
 }
 
 function summarizeRenderEvents(events, conversationId) {

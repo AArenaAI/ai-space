@@ -46,6 +46,10 @@ type ConversationSwitchPerformanceDetail = {
   conversationId?: number;
   loadSeq?: number;
   source?: "memory" | "indexeddb" | "backend" | "miss";
+  stage?: "start" | "cache" | "shell" | "revalidate";
+  displayMode?: "cached" | "shell" | "backend" | "background" | "none";
+  snapshotSource?: "memory" | "indexeddb" | "backend" | "miss";
+  hasDisplayedSnapshot?: boolean;
   durationMs?: number;
   messageCount?: number;
   totalMessages?: number;
@@ -273,21 +277,26 @@ export function useChatConversationRestoreRuntime({
     }
     const loadConversationId: number = navigationPlan.conversationId;
     const authToken: string = token as string;
-    emitConversationSwitchPerformanceEvent("start", { conversationId: loadConversationId, loadSeq });
+    emitConversationSwitchPerformanceEvent("start", { conversationId: loadConversationId, loadSeq, stage: "start" });
 
     if (navigationPlan.shouldSetLoadingHistory) setIsLoadingHistory(navigationPlan.loadingHistory);
     applyLoadExistingNavigationLifecycle(navigationPlan);
 
     const cachedSnapshot = getConversationSnapshot(loadConversationId);
     let hasDisplayedSnapshot = false;
+    let displayedSnapshotSource: ConversationSwitchPerformanceDetail["snapshotSource"];
     let displayedSnapshotVersion: string | undefined = cachedSnapshot?.snapshotVersion;
     let persistentSnapshotReady: Promise<void> = Promise.resolve();
     if (cachedSnapshot) {
       hasDisplayedSnapshot = true;
+      displayedSnapshotSource = "memory";
       emitConversationSwitchPerformanceEvent("first-snapshot", {
         conversationId: loadConversationId,
         loadSeq,
         source: "memory",
+        stage: "cache",
+        displayMode: "cached",
+        snapshotSource: "memory",
         durationMs: elapsedSinceSwitchStart(),
         messageCount: cachedSnapshot.messages.length,
         totalMessages: cachedSnapshot.totalMessages,
@@ -313,21 +322,38 @@ export function useChatConversationRestoreRuntime({
         conversationId: loadConversationId,
         loadSeq,
         source: "miss",
+        stage: "cache",
+        displayMode: "none",
+        snapshotSource: "miss",
         durationMs: elapsedSinceSwitchStart(),
       });
       setMessages([]);
       setLoadedPersistedMessages(0);
       setGroupViews(new Map());
       setIsLoading(false);
+      emitConversationSwitchPerformanceEvent("shell-displayed", {
+        conversationId: loadConversationId,
+        loadSeq,
+        source: "miss",
+        stage: "shell",
+        displayMode: "shell",
+        snapshotSource: "miss",
+        durationMs: elapsedSinceSwitchStart(),
+        messageCount: 0,
+      });
       persistentSnapshotReady = getPersistentConversationSnapshot(loadConversationId)
-        .then((persistentSnapshot) => {
+        .then((persistentSnapshot: CachedConversationSnapshot | null | undefined) => {
           if (!persistentSnapshot || !isLatestLoad() || loadController.signal.aborted || hasDisplayedSnapshot) return;
           hasDisplayedSnapshot = true;
+          displayedSnapshotSource = "indexeddb";
           displayedSnapshotVersion = persistentSnapshot.snapshotVersion;
           emitConversationSwitchPerformanceEvent("first-snapshot", {
             conversationId: loadConversationId,
             loadSeq,
             source: "indexeddb",
+            stage: "cache",
+            displayMode: "cached",
+            snapshotSource: "indexeddb",
             durationMs: elapsedSinceSwitchStart(),
             messageCount: persistentSnapshot.messages.length,
             totalMessages: persistentSnapshot.totalMessages,
@@ -367,13 +393,25 @@ export function useChatConversationRestoreRuntime({
     };
 
     persistentSnapshotReady
-      .then(() => fetchRestore({
-        apiBaseUrl,
-        conversationId: loadConversationId,
-        token: authToken,
-        signal: loadController.signal,
-        snapshotVersion: displayedSnapshotVersion,
-      }))
+      .then(() => {
+        emitConversationSwitchPerformanceEvent("revalidate-start", {
+          conversationId: loadConversationId,
+          loadSeq,
+          source: "backend",
+          stage: "revalidate",
+          displayMode: hasDisplayedSnapshot ? "background" : "backend",
+          snapshotSource: displayedSnapshotSource ?? "miss",
+          hasDisplayedSnapshot,
+          durationMs: elapsedSinceSwitchStart(),
+        });
+        return fetchRestore({
+          apiBaseUrl,
+          conversationId: loadConversationId,
+          token: authToken,
+          signal: loadController.signal,
+          snapshotVersion: displayedSnapshotVersion,
+        });
+      })
       .then((data) => {
         if (!isLatestLoad() || loadController.signal.aborted) return;
         if (data.notModified) {
@@ -381,6 +419,9 @@ export function useChatConversationRestoreRuntime({
             conversationId: loadConversationId,
             loadSeq,
             source: "backend",
+            stage: "revalidate",
+            displayMode: "background",
+            snapshotSource: displayedSnapshotSource ?? "miss",
             durationMs: elapsedSinceSwitchStart(),
           });
           setIsLoadingHistory(false);
@@ -390,6 +431,9 @@ export function useChatConversationRestoreRuntime({
           conversationId: loadConversationId,
           loadSeq,
           source: "backend",
+          stage: "revalidate",
+          displayMode: hasDisplayedSnapshot ? "background" : "backend",
+          snapshotSource: displayedSnapshotSource ?? "miss",
           durationMs: elapsedSinceSwitchStart(),
           messageCount: Array.isArray(data.messages) ? data.messages.length : undefined,
         });
@@ -421,10 +465,14 @@ export function useChatConversationRestoreRuntime({
           const { loadedMessages, mergedMessages, groupViews, activeByServerMessageId } = restoreState;
           if (!hasDisplayedSnapshot) {
             hasDisplayedSnapshot = true;
+            displayedSnapshotSource = "backend";
             emitConversationSwitchPerformanceEvent("first-snapshot", {
               conversationId: loadConversationId,
               loadSeq,
               source: "backend",
+              stage: "cache",
+              displayMode: "backend",
+              snapshotSource: "backend",
               durationMs: elapsedSinceSwitchStart(),
               messageCount: (mergedMessages as Message[]).length,
               totalMessages: resolvedTotalMessages,
@@ -458,6 +506,9 @@ export function useChatConversationRestoreRuntime({
             conversationId: loadConversationId,
             loadSeq,
             source: "backend",
+            stage: "revalidate",
+            displayMode: displayedSnapshotSource === "backend" ? "backend" : "background",
+            snapshotSource: displayedSnapshotSource ?? "miss",
             durationMs: elapsedSinceSwitchStart(),
             messageCount: (mergedMessages as Message[]).length,
             totalMessages: resolvedTotalMessages,
