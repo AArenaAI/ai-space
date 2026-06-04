@@ -8,6 +8,7 @@ import {
   getAdminUsageModels,
   getAdminUsageModules,
   getAdminUsageSummary,
+  getAdminUsageUserDetail,
   getAdminUsageUsers,
 } from "@/lib/admin/api";
 import type {
@@ -18,6 +19,8 @@ import type {
   AdminUsageModulesResponse,
   AdminUsageModuleRow,
   AdminUsageSummary,
+  AdminUsageUserDetail,
+  AdminUsageUserRow,
   AdminUsageUsersResponse,
 } from "@/lib/admin/types";
 import { MetricCard } from "@/components/admin/MetricCard";
@@ -95,6 +98,9 @@ export default function AdminUsagePage() {
   const [conversations, setConversations] = useState<AdminUsageConversationsResponse | null>(null);
   const [page, setPage] = useState(1);
   const [selectedLog, setSelectedLog] = useState<AdminUsageLog | null>(null);
+  const [selectedUserDetail, setSelectedUserDetail] = useState<AdminUsageUserDetail | null>(null);
+  const [userDetailLoading, setUserDetailLoading] = useState(false);
+  const [userDetailError, setUserDetailError] = useState("");
   const [loading, setLoading] = useState(true);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
@@ -171,6 +177,26 @@ export default function AdminUsagePage() {
     setTab("modules");
   };
 
+  const openUserDetail = async (user: AdminUsageUserRow) => {
+    setUserDetailError("");
+    setUserDetailLoading(true);
+    try {
+      const detail = await getAdminUsageUserDetail(user.user_id, { range: filters.range });
+      setSelectedUserDetail(detail);
+    } catch (error) {
+      setUserDetailError(errorMessage(error, "查询用户详情失败"));
+      setSelectedUserDetail({ user: { id: user.user_id, email: user.email, name: user.name, role: "user", plan_tier: "", basic_credits: 0, advanced_credits: 0, elite_credits: 0, created_at: "", updated_at: "" }, summary: { requests: user.requests, failures: user.failures || 0, cost_rmb: user.cost_rmb, total_tokens: user.total_tokens || 0, image_count: user.image_count || 0 }, services: user.services || [], models: [], conversations: [] });
+    } finally {
+      setUserDetailLoading(false);
+    }
+  };
+
+  const drilldownUserLedger = (userId: number) => {
+    setSelectedUserDetail(null);
+    applyLedgerFilters({ userId: String(userId) }, "ledger");
+    setShowAdvancedFilters(true);
+  };
+
   const activeFilterLabels = activeFilters(filters);
 
   if (loading && !summary && !logs) return <div className="rounded-3xl border border-surface-border bg-surface-card p-8 text-text-secondary">正在加载用量数据…</div>;
@@ -214,11 +240,12 @@ export default function AdminUsagePage() {
 
       {tab === "overview" && <Overview summary={summary} logs={logs} maxDailyCost={maxDailyCost} onServiceClick={(service) => { updateFilter("service", service); setTab("ledger"); }} />}
       {tab === "ledger" && <Ledger filters={filters} updateFilter={updateFilter} logs={logs} page={page} setPage={setPage} loading={loading} error={errors.ledger} showAdvancedFilters={showAdvancedFilters} setShowAdvancedFilters={setShowAdvancedFilters} onSelect={setSelectedLog} onClear={clearFilters} />}
-      {tab === "users" && <UsersUsage users={users} error={errors.users} />}
+      {tab === "users" && <UsersUsage users={users} error={errors.users} onSelectUser={openUserDetail} />}
       {tab === "modules" && <ModulesUsage modules={modules} error={errors.modules} onDrilldown={applyLedgerFilters} />}
       {tab === "models" && <ModelsUsage models={models} summary={summary} error={errors.models} />}
       {tab === "conversations" && <ConversationsUsage conversations={conversations} error={errors.conversations} />}
       {selectedLog && <UsageLogDrawer log={selectedLog} onClose={() => setSelectedLog(null)} />}
+      {(selectedUserDetail || userDetailLoading || userDetailError) && <UserUsageDrawer detail={selectedUserDetail} loading={userDetailLoading} error={userDetailError} range={filters.range} onClose={() => { setSelectedUserDetail(null); setUserDetailError(""); }} onDrilldownLedger={drilldownUserLedger} />}
     </div>
   );
 }
@@ -347,8 +374,27 @@ function Ledger({ filters, updateFilter, logs, page, setPage, loading, error, sh
   );
 }
 
-function UsersUsage({ users, error }: { users: AdminUsageUsersResponse | null; error?: string }) {
-  return <Card title="用户消耗排行">{error && <InlineError message={error} />}<Table headers={["用户", "模块消耗", "请求", "Token/图片", "成本", "最近使用"]}>{(users?.users || []).map((user) => <tr key={user.user_id} className="border-t border-surface-border"><td className="py-3 pr-4"><div className="font-medium text-text-primary">{user.email || `User #${user.user_id}`}</div><div className="text-xs text-text-tertiary">{user.name || "-"} · ID {user.user_id}</div></td><td className="min-w-[260px] pr-4"><div className="flex flex-wrap gap-1">{(user.services || []).slice(0, 4).map((item) => <span key={item.name} className="rounded-full bg-surface-elevated px-2 py-1 text-xs text-text-secondary">{item.name || "unknown"} {formatRMB(item.cost_rmb)}</span>)}</div></td><td className="pr-4">{formatNumber(user.requests)}</td><td className="pr-4">{formatNumber(user.total_tokens || 0)} / {formatNumber(user.image_count || 0)}</td><td className="font-semibold text-text-primary">{formatRMB(user.cost_rmb)}</td><td className="whitespace-nowrap text-text-tertiary">{formatDateTime(user.last_used_at)}</td></tr>)}</Table></Card>;
+function UsersUsage({ users, error, onSelectUser }: { users: AdminUsageUsersResponse | null; error?: string; onSelectUser: (user: AdminUsageUserRow) => void }) {
+  return (
+    <Card title="用户消耗排行">
+      <div className="mb-4 text-sm text-text-secondary">点击用户可查看服务、模型、对话维度详情，并继续下钻到该用户账本。</div>
+      {error && <InlineError message={error} />}
+      <Table headers={["用户", "模块消耗", "请求", "Token/图片", "成本", "最近使用", "操作"]}>
+        {(users?.users || []).map((user) => (
+          <tr key={user.user_id} onClick={() => onSelectUser(user)} className="cursor-pointer border-t border-surface-border hover:bg-surface-elevated/40">
+            <td className="py-3 pr-4"><div className="font-medium text-text-primary">{user.email || `User #${user.user_id}`}</div><div className="text-xs text-text-tertiary">{user.name || "-"} · ID {user.user_id}</div></td>
+            <td className="min-w-[260px] pr-4"><div className="flex flex-wrap gap-1">{(user.services || []).slice(0, 4).map((item) => <span key={item.name} className="rounded-full bg-surface-elevated px-2 py-1 text-xs text-text-secondary">{item.name || "unknown"} {formatRMB(item.cost_rmb)}</span>)}</div></td>
+            <td className="pr-4">{formatNumber(user.requests)}</td>
+            <td className="pr-4">{formatNumber(user.total_tokens || 0)} / {formatNumber(user.image_count || 0)}</td>
+            <td className="font-semibold text-text-primary">{formatRMB(user.cost_rmb)}</td>
+            <td className="whitespace-nowrap text-text-tertiary">{formatDateTime(user.last_used_at)}</td>
+            <td><button onClick={(event) => { event.stopPropagation(); onSelectUser(user); }} className="rounded-xl border border-surface-border px-3 py-2 text-sm text-text-secondary hover:text-text-primary">详情</button></td>
+          </tr>
+        ))}
+      </Table>
+      {(users?.users || []).length === 0 && !error && <Empty />}
+    </Card>
+  );
 }
 
 function ModelsUsage({ models, summary, error }: { models: AdminUsageModelsResponse | null; summary: AdminUsageSummary | null; error?: string }) {
@@ -505,6 +551,65 @@ function UsageNumbers({ log }: { log: AdminUsageLog }) {
     log.video_seconds ? `video ${formatNumber(log.video_seconds)}s` : "",
   ].filter(Boolean);
   return <>{parts.length ? parts.map((part) => <div key={part}>{part}</div>) : "-"}</>;
+}
+
+function UserUsageDrawer({ detail, loading, error, range, onClose, onDrilldownLedger }: { detail: AdminUsageUserDetail | null; loading: boolean; error: string; range: string; onClose: () => void; onDrilldownLedger: (userId: number) => void }) {
+  const user = detail?.user;
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={onClose}>
+      <aside className="h-full w-full max-w-3xl overflow-y-auto border-l border-surface-border bg-surface-card p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm text-brand">用户用量详情 · {range}</p>
+            <h2 className="mt-1 text-xl font-semibold text-text-primary">{user ? (user.email || `User #${user.id}`) : "正在加载用户…"}</h2>
+            {user && <p className="mt-1 text-sm text-text-tertiary">{user.name || "-"} · ID {user.id} · {user.plan_tier || "-"} · {user.role}</p>}
+          </div>
+          <button onClick={onClose} className="rounded-xl border border-surface-border px-3 py-2 text-sm text-text-secondary">关闭</button>
+        </div>
+
+        {loading && <div className="rounded-2xl bg-surface-elevated p-5 text-sm text-text-secondary">正在加载用户详情…</div>}
+        {error && <InlineError message={error} />}
+        {detail && (
+          <div className="space-y-5">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <MiniMetric label="成本" value={formatRMB(detail.summary.cost_rmb || 0)} />
+              <MiniMetric label="调用" value={formatNumber(detail.summary.requests || 0)} />
+              <MiniMetric label="Tokens" value={formatNumber(detail.summary.total_tokens || 0)} />
+              <MiniMetric label="图片/字符/视频" value={`${formatNumber(detail.summary.image_count || 0)} / ${formatNumber(detail.summary.character_count || 0)} / ${formatNumber(detail.summary.video_seconds || 0)}s`} />
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => onDrilldownLedger(detail.user.id)} className="rounded-xl bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-hover">查看该用户账本明细</button>
+              <button onClick={onClose} className="rounded-xl border border-surface-border px-4 py-2 text-sm text-text-secondary hover:text-text-primary">返回</button>
+            </div>
+
+            <div className="grid gap-5 xl:grid-cols-2">
+              <Card title="服务消耗">
+                <Breakdown rows={detail.services || []} />
+              </Card>
+              <Card title="模型消耗 Top">
+                <Table headers={["Provider", "模型", "请求", "Token", "成本"]}>
+                  {(detail.models || []).slice(0, 12).map((row) => <tr key={`${row.provider}-${row.model}`} className="border-t border-surface-border"><td className="py-3 pr-4 text-text-secondary">{row.provider || "-"}</td><td className="max-w-[220px] truncate pr-4 font-medium text-text-primary">{row.model || "-"}</td><td className="pr-4">{formatNumber(row.requests)}</td><td className="pr-4">{formatNumber(row.total_tokens || 0)}</td><td className="font-semibold text-text-primary">{formatRMB(row.cost_rmb)}</td></tr>)}
+                </Table>
+                {(detail.models || []).length === 0 && <Empty />}
+              </Card>
+            </div>
+
+            <Card title="对话消耗 Top">
+              <Table headers={["对话", "请求", "Token", "成本", "最近使用"]}>
+                {(detail.conversations || []).map((item) => <tr key={item.conversation_id} className="border-t border-surface-border"><td className="py-3 pr-4"><div className="max-w-[360px] truncate font-medium text-text-primary">{item.title || `Conversation #${item.conversation_id}`}</div><div className="text-xs text-text-tertiary">ID {item.conversation_id}</div></td><td className="pr-4">{formatNumber(item.requests)}</td><td className="pr-4">{formatNumber(item.total_tokens || 0)}</td><td className="font-semibold text-text-primary">{formatRMB(item.cost_rmb)}</td><td className="whitespace-nowrap text-text-tertiary">{formatDateTime(item.last_used_at)}</td></tr>)}
+              </Table>
+              {(detail.conversations || []).length === 0 && <Empty />}
+            </Card>
+          </div>
+        )}
+      </aside>
+    </div>
+  );
+}
+
+function MiniMetric({ label, value }: { label: string; value: string }) {
+  return <div className="rounded-2xl bg-surface-elevated px-4 py-3"><div className="text-xs text-text-tertiary">{label}</div><div className="mt-1 font-semibold text-text-primary">{value}</div></div>;
 }
 
 function UsageLogDrawer({ log, onClose }: { log: AdminUsageLog; onClose: () => void }) {
