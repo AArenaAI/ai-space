@@ -256,7 +256,7 @@ function MessageRow({
                 <UserMessageContent message={msg} imageLoadFailedLabel={imageLoadFailedLabel} />
               ) : (
                 <>
-                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={!historyPrependSettling && (isNearViewport || forceHydrateRichText)} priorityHydrateRichText={!historyPrependSettling && (isInViewport || forceHydrateRichText)} recoverEmptyContent={isLast} onRegenerate={onRegenerate} />
+                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={!historyPrependSettling && (isNearViewport || forceHydrateRichText)} priorityHydrateRichText={!historyPrependSettling && forceHydrateRichText} recoverEmptyContent={isLast} onRegenerate={onRegenerate} />
                   {msg.stopped && onContinueGenerate && (
                     <button
                       onClick={onContinueGenerate}

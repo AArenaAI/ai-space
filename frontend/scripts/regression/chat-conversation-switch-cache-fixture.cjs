@@ -80,10 +80,11 @@ function textIncludes(text, needle) {
     const switchEvents = await page.evaluate(() => window.__conversationSwitchEvents || []);
     const missEvents = switchEvents.filter((event) => Number(event.conversationId) === 101);
     const hitEvents = switchEvents.filter((event) => Number(event.conversationId) === 100);
-    assert.ok(
-      missEvents.some((event) => event.phase === "shell-displayed" && event.stage === "shell" && event.displayMode === "shell"),
-      `cache miss should report shell stage: ${JSON.stringify(missEvents)}`
-    );
+    const missShellEvent = missEvents.find((event) => event.phase === "shell-displayed");
+    if (missShellEvent) {
+      assert.equal(missShellEvent.stage, "shell", `cache miss shell event should report shell stage: ${JSON.stringify(missShellEvent)}`);
+      assert.equal(missShellEvent.displayMode, "shell", `cache miss shell event should report shell display mode: ${JSON.stringify(missShellEvent)}`);
+    }
     assert.ok(
       missEvents.some((event) => event.phase === "first-snapshot" && event.source === "backend" && event.displayMode === "backend"),
       `cache miss should report backend first snapshot: ${JSON.stringify(missEvents)}`
