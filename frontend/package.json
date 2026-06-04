@@ -70,6 +70,7 @@
     "test:chat-performance": "node scripts/regression/chat-performance-benchmark.cjs",
     "test:chat-streaming-performance": "node scripts/regression/chat-streaming-performance.cjs",
     "test:chat-render-performance": "node scripts/regression/chat-render-performance.cjs",
+    "profile:chat-render": "node scripts/regression/chat-render-profile-summary.cjs",
     "test:chat-real-e2e": "node scripts/regression/chat-real-e2e.cjs",
     "test:chat-real-e2e-matrix": "node scripts/regression/chat-real-e2e-matrix.cjs",
     "test:chat-real-e2e-extra": "node scripts/regression/chat-real-e2e-extra.cjs",

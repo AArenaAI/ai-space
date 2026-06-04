@@ -200,11 +200,15 @@ function summarizeRenderEvents(events, conversationId) {
       contentLength: event.contentLength,
       staggerMs: event.staggerMs,
       delayMs: event.delayMs,
+      blockCount: event.blockCount,
+      cacheHit: event.cacheHit,
+      isPreview: event.isPreview,
+      parseMs: typeof event.parseMs === "number" ? Number(event.parseMs.toFixed(2)) : event.parseMs,
       codeBlocks: event.codeBlocks,
       tableLines: event.tableLines,
       durationMs: Math.round(event.durationMs || 0),
     }))
-    .slice(-24);
+    .slice(-32);
 }
 
 async function main() {
