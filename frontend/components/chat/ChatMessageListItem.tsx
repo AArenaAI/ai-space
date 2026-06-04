@@ -12,6 +12,7 @@ export type ChatMessageListItemProps = {
   visibleMessageCount: number;
   latestAssistantMessageId?: string;
   initialReadingAssistantIds?: Set<string>;
+  viewedAssistantIds?: Set<string>;
   group?: InferredGroup;
   model?: ChatModel;
   isLoading: boolean;
@@ -35,6 +36,7 @@ export type ChatMessageListItemProps = {
   onRegenerate?: () => void;
   onContinueGenerate?: () => void;
   onForkCompare?: (messageId: number) => void;
+  onAssistantViewed?: (messageId: string) => void;
   imageLoadFailedLabel: string;
   MarkdownRenderer: MessageRowProps["MarkdownRenderer"];
 };
@@ -45,6 +47,7 @@ function ChatMessageListItem({
   visibleMessageCount,
   latestAssistantMessageId,
   initialReadingAssistantIds,
+  viewedAssistantIds,
   group,
   model,
   isLoading,
@@ -68,6 +71,7 @@ function ChatMessageListItem({
   onRegenerate,
   onContinueGenerate,
   onForkCompare,
+  onAssistantViewed,
   imageLoadFailedLabel,
   MarkdownRenderer,
 }: ChatMessageListItemProps) {
@@ -79,6 +83,7 @@ function ChatMessageListItem({
       isLast={index === visibleMessageCount - 1}
       isLatestAssistant={message.role === "assistant" && String(message.id) === latestAssistantMessageId}
       isInitialReadingAssistant={message.role === "assistant" && !!initialReadingAssistantIds?.has(String(message.id))}
+      isViewedAssistant={message.role === "assistant" && !!viewedAssistantIds?.has(String(message.id))}
       isLoading={isLoading}
       selectMode={selectMode}
       isSelected={isSelected}
@@ -100,6 +105,7 @@ function ChatMessageListItem({
       onRegenerate={onRegenerate}
       onContinueGenerate={onContinueGenerate}
       onForkCompare={onForkCompare}
+      onAssistantViewed={onAssistantViewed}
       imageLoadFailedLabel={imageLoadFailedLabel}
       MarkdownRenderer={MarkdownRenderer}
     />
@@ -155,6 +161,7 @@ function areChatMessageListItemPropsEqual(previous: ChatMessageListItemProps, ne
   if (previousIsLast !== nextIsLast) return false;
   if ((previous.message.role === "assistant" && String(previous.message.id) === previous.latestAssistantMessageId) !== (next.message.role === "assistant" && String(next.message.id) === next.latestAssistantMessageId)) return false;
   if ((previous.message.role === "assistant" && !!previous.initialReadingAssistantIds?.has(String(previous.message.id))) !== (next.message.role === "assistant" && !!next.initialReadingAssistantIds?.has(String(next.message.id)))) return false;
+  if ((previous.message.role === "assistant" && !!previous.viewedAssistantIds?.has(String(previous.message.id))) !== (next.message.role === "assistant" && !!next.viewedAssistantIds?.has(String(next.message.id)))) return false;
   if (previous.message !== next.message && getMessageRenderKey(previous.message) !== getMessageRenderKey(next.message)) return false;
 
   if (previous.isLoading !== next.isLoading && (previousIsLast || nextIsLast)) return false;

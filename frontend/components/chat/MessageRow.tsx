@@ -41,6 +41,7 @@ export type MessageRowProps = {
   isLast: boolean;
   isLatestAssistant: boolean;
   isInitialReadingAssistant: boolean;
+  isViewedAssistant: boolean;
   isLoading: boolean;
   selectMode: boolean;
   isSelected: boolean;
@@ -64,6 +65,7 @@ export type MessageRowProps = {
   onForkCompare?: (messageId: number) => void;
   imageLoadFailedLabel: string;
   MarkdownRenderer: MarkdownRendererComponent;
+  onAssistantViewed?: (messageId: string) => void;
 };
 
 function MessageRow({
@@ -73,6 +75,7 @@ function MessageRow({
   isLast,
   isLatestAssistant,
   isInitialReadingAssistant,
+  isViewedAssistant,
   isLoading,
   selectMode,
   isSelected,
@@ -96,15 +99,16 @@ function MessageRow({
   onForkCompare,
   imageLoadFailedLabel,
   MarkdownRenderer,
+  onAssistantViewed,
 }: MessageRowProps) {
   const { t } = useI18n();
   const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
   const rowRef = useRef<HTMLDivElement | null>(null);
   const isUser = msg.role === "user";
   const forceHydrateRichText = isLatestAssistant || isHighlighted;
-  const forceStableRichLiteFallback = isInitialReadingAssistant || forceHydrateRichText;
   const [isNearViewport, setIsNearViewport] = useState(forceHydrateRichText);
   const [isInViewport, setIsInViewport] = useState(forceHydrateRichText);
+  const forceStableRichLiteFallback = isViewedAssistant || isInitialReadingAssistant || isInViewport || forceHydrateRichText;
   const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && isLatestAssistant;
   const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
   const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
@@ -164,16 +168,20 @@ function MessageRow({
       const visible = entries.some((entry) => entry.isIntersecting);
       setIsInViewport(visible);
       if (visible) {
+        onAssistantViewed?.(String(msg.id));
         emitChatRenderProfileEvent("message-row-markdown-in-viewport", {
           conversationId,
           messageId: msg.id,
+          forceStableRichLiteFallback,
+          isInitialReadingAssistant,
+          isViewedAssistant,
           contentLength: msg.content?.length || 0,
         });
       }
     }, { root, rootMargin: "0px" });
     observer.observe(row);
     return () => observer.disconnect();
-  }, [conversationId, forceHydrateRichText, isUser, msg.content, msg.id]);
+  }, [conversationId, forceHydrateRichText, forceStableRichLiteFallback, isInitialReadingAssistant, isUser, isViewedAssistant, msg.content, msg.id, onAssistantViewed]);
 
   return (
     <div

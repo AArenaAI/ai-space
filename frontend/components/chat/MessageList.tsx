@@ -14,7 +14,7 @@ import { useI18n } from "@/lib/i18n";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
 import MarkdownPlainFallback from "./markdown/MarkdownPlainFallback";
 
-type MarkdownRendererProps = { content: string; isStreaming?: boolean; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean; allowRichLiteFallback?: boolean };
+type MarkdownRendererProps = { content: string; isStreaming?: boolean; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean; allowRichLiteFallback?: boolean; compactRichLitePreview?: boolean };
 let markdownRendererPromise: Promise<{ default: ComponentType<MarkdownRendererProps> }> | null = null;
 let MarkdownRendererModule: ComponentType<MarkdownRendererProps> | null = null;
 
@@ -28,7 +28,8 @@ function loadMarkdownRenderer() {
   return markdownRendererPromise;
 }
 
-function LoadableMarkdownRenderer({ content, isStreaming }: MarkdownRendererProps) {
+function LoadableMarkdownRenderer(props: MarkdownRendererProps) {
+  const { content } = props;
   const [Renderer, setRenderer] = useState(() => MarkdownRendererModule);
 
   useEffect(() => {
@@ -46,7 +47,7 @@ function LoadableMarkdownRenderer({ content, isStreaming }: MarkdownRendererProp
     return <MarkdownPlainFallback content={content} />;
   }
 
-  return <Renderer content={content} isStreaming={isStreaming} />;
+  return <Renderer {...props} />;
 }
 import ChatMessageListItem from "./ChatMessageListItem";
 import ChatCompareGroupRow from "./ChatCompareGroupRow";
@@ -76,7 +77,7 @@ const RETURN_TO_BOTTOM_PRELOAD_BOTTOM_PX = 6000;
 const HISTORY_OVERSCAN_REVERSE = 8;
 const INITIAL_RENDERED_MESSAGE_WINDOW = 16;
 const CONTENT_HEAVY_INITIAL_RENDERED_MESSAGE_WINDOW = 8;
-const INITIAL_READING_RICH_LITE_ASSISTANT_COUNT = 3;
+const MAX_STABLE_RICH_LITE_ASSISTANTS_IN_RENDER_WINDOW = 8;
 const MESSAGE_WINDOW_PAGE_SIZE = 8;
 const MIN_HIDDEN_MESSAGES_TO_WINDOW = 8;
 const CONTENT_HEAVY_TOTAL_CHARS_THRESHOLD = 24_000;
@@ -186,16 +187,16 @@ function getMessageContentWeight(messages: Message[]) {
   return { codeBlocks, tableLines, totalChars };
 }
 
-const MemoMarkdownRenderer = memo(function MemoMarkdownRenderer({ content }: { content: string; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean }) {
-  return <LoadableMarkdownRenderer content={content} />;
+const MemoMarkdownRenderer = memo(function MemoMarkdownRenderer(props: MarkdownRendererProps) {
+  return <LoadableMarkdownRenderer {...props} />;
 });
 
-function LazyMarkdownRenderer({ content, shouldHydrateRichText = true, priorityHydrateRichText = false, allowRichLiteFallback = false }: { content: string; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean; allowRichLiteFallback?: boolean }) {
+function LazyMarkdownRenderer({ content, shouldHydrateRichText = true, priorityHydrateRichText = false, allowRichLiteFallback = false, compactRichLitePreview = true }: MarkdownRendererProps) {
   if (content.length < LONG_MARKDOWN_LAZY_THRESHOLD) {
-    return <MemoMarkdownRenderer content={content} shouldHydrateRichText={shouldHydrateRichText} priorityHydrateRichText={priorityHydrateRichText} />;
+    return <MemoMarkdownRenderer content={content} shouldHydrateRichText={shouldHydrateRichText} priorityHydrateRichText={priorityHydrateRichText} allowRichLiteFallback={allowRichLiteFallback} compactRichLitePreview={compactRichLitePreview} />;
   }
 
-  return <DeferredMarkdownRenderer content={content} shouldHydrateRichText={shouldHydrateRichText} priorityHydrateRichText={priorityHydrateRichText} allowRichLiteFallback={allowRichLiteFallback} />;
+  return <DeferredMarkdownRenderer content={content} shouldHydrateRichText={shouldHydrateRichText} priorityHydrateRichText={priorityHydrateRichText} allowRichLiteFallback={allowRichLiteFallback} compactRichLitePreview={compactRichLitePreview} />;
 }
 
 function MessageList({
@@ -618,6 +619,12 @@ function MessageList({
     }
     if (deltaY === 0) return;
     localWindowReleaseIntentUntilRef.current = Date.now() + 1800;
+    if (deltaY < 0) {
+      stopBottomLockForUserBrowse(2500);
+      markUserBrowsing(2500);
+      atBottomRef.current = false;
+      setAtBottom(false);
+    }
     if (deltaY < 0 && el.scrollTop <= 4 && releaseHiddenLocalMessages(el)) {
       return;
     }
@@ -765,17 +772,29 @@ function MessageList({
     }
     return undefined;
   }, [visibleMessages]);
-  const initialReadingAssistantIds = useMemo(() => {
+  const renderedWindowStableAssistantIds = useMemo(() => {
     const ids = new Set<string>();
     for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
       const message = visibleMessages[index];
       if (message?.role === "assistant") {
         ids.add(String(message.id));
-        if (ids.size >= INITIAL_READING_RICH_LITE_ASSISTANT_COUNT) break;
+        if (ids.size >= MAX_STABLE_RICH_LITE_ASSISTANTS_IN_RENDER_WINDOW) break;
       }
     }
     return ids;
   }, [visibleMessages]);
+  const [viewedAssistantIds, setViewedAssistantIds] = useState<Set<string>>(() => new Set());
+  const handleAssistantViewed = useCallback((messageId: string) => {
+    setViewedAssistantIds((previous) => {
+      if (previous.has(messageId)) return previous;
+      const next = new Set(previous);
+      next.add(messageId);
+      return next;
+    });
+  }, []);
+  useEffect(() => {
+    setViewedAssistantIds(new Set());
+  }, [conversationId]);
   const hiddenLocalMessageCount = allVisibleMessages.length - visibleMessages.length;
   const hasHiddenLocalMessages = hiddenLocalMessageCount > 0;
   localWindowReleaseStateRef.current = {
@@ -1669,7 +1688,8 @@ function MessageList({
               message={msg}
               visibleMessageCount={visibleMessages.length}
               latestAssistantMessageId={latestAssistantMessageId}
-              initialReadingAssistantIds={initialReadingAssistantIds}
+              initialReadingAssistantIds={renderedWindowStableAssistantIds}
+              viewedAssistantIds={viewedAssistantIds}
               group={group}
               model={model}
               isLoading={isLoading}
@@ -1693,6 +1713,7 @@ function MessageList({
               onRegenerate={onRegenerate}
               onContinueGenerate={onContinueGenerate}
               onForkCompare={onForkCompare}
+              onAssistantViewed={handleAssistantViewed}
               imageLoadFailedLabel={t("chat.imageLoadFailed")}
               MarkdownRenderer={LazyMarkdownRenderer}
             />

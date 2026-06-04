@@ -256,7 +256,7 @@ export function DeferredMarkdownRenderer({
     <div ref={hostRef}>
       {shouldRenderMarkdown && Renderer ? (
         <Renderer content={content} isStreaming={isStreaming} priorityHydrateRichText={priorityHydrateRichText} />
-      ) : priorityHydrateRichText || (allowRichLiteFallback && shouldUseRichLiteFallback(content, complexity)) ? (
+      ) : priorityHydrateRichText || allowRichLiteFallback || shouldUseRichLiteFallback(content, complexity) ? (
         <MarkdownLiteRenderer content={content} isStreaming={isStreaming} compactPreview={priorityHydrateRichText ? false : compactRichLitePreview} />
       ) : (
         <MarkdownFallback content={content} compactPreview={compactRichLitePreview} />
