@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, BarChart3, Coins, ListFilter, MessageSquare, RefreshCw, Search, ServerCrash, Users, Zap } from "lucide-react";
+import { AlertCircle, BarChart3, ChevronDown, Coins, FilterX, ListFilter, MessageSquare, RefreshCw, Search, ServerCrash, Users, Zap } from "lucide-react";
 import {
   getAdminUsageConversations,
   getAdminUsageLogs,
@@ -56,6 +56,17 @@ type UsageFilters = {
   q: string;
 };
 
+
+const quickScenarios: Array<{ label: string; description: string; patch: Partial<UsageFilters> }> = [
+  { label: "全部成本", description: "查看所有历史账本", patch: { range: "all" } },
+  { label: "普通聊天", description: "Chat 模型消耗", patch: { range: "all", module: "chat", feature: "chat", operation: "chat_completion", service: "chat" } },
+  { label: "视频生成", description: "Seedance 等视频成本", patch: { range: "all", module: "creative", feature: "video", operation: "video_generation", service: "video_generation" } },
+  { label: "图片创作", description: "生图/编辑/工具", patch: { range: "all", module: "creative", feature: "image" } },
+  { label: "翻译", description: "Google Translation", patch: { range: "all", module: "work", feature: "translator", operation: "translate_text", service: "translation" } },
+  { label: "PPT", description: "大纲/全文生成", patch: { range: "all", module: "work", feature: "ppt" } },
+  { label: "文档研读", description: "Vision/Embedding", patch: { range: "all", module: "work", feature: "document_reader" } },
+];
+
 const defaultFilters: UsageFilters = {
   range: "7d",
   module: "",
@@ -74,7 +85,7 @@ const defaultFilters: UsageFilters = {
 
 export default function AdminUsagePage() {
   const [filters, setFilters] = useState<UsageFilters>(defaultFilters);
-  const [tab, setTab] = useState<UsageTab>("ledger");
+  const [tab, setTab] = useState<UsageTab>("modules");
   const [summary, setSummary] = useState<AdminUsageSummary | null>(null);
   const [logs, setLogs] = useState<AdminUsageLogsResponse | null>(null);
   const [users, setUsers] = useState<AdminUsageUsersResponse | null>(null);
@@ -85,6 +96,7 @@ export default function AdminUsagePage() {
   const [selectedLog, setSelectedLog] = useState<AdminUsageLog | null>(null);
   const [loading, setLoading] = useState(true);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
   const logParams = useMemo(() => ({
     page,
@@ -143,14 +155,22 @@ export default function AdminUsagePage() {
   };
 
   const quickVideoFilter = () => {
-    applyLedgerFilters({ range: "all", module: "creative", feature: "video", service: "video_generation" });
+    applyLedgerFilters({ range: "all", module: "creative", feature: "video", operation: "video_generation", service: "video_generation" });
   };
 
-  const applyLedgerFilters = (patch: Partial<UsageFilters>) => {
-    setTab("ledger");
+  const applyLedgerFilters = (patch: Partial<UsageFilters>, nextTab: UsageTab = "ledger") => {
+    setTab(nextTab);
     setPage(1);
-    setFilters((prev) => ({ ...prev, ...patch }));
+    setFilters((prev) => ({ ...defaultFilters, ...prev, ...patch }));
   };
+
+  const clearFilters = () => {
+    setPage(1);
+    setFilters(defaultFilters);
+    setTab("modules");
+  };
+
+  const activeFilterLabels = activeFilters(filters);
 
   if (loading && !summary && !logs) return <div className="rounded-3xl border border-surface-border bg-surface-card p-8 text-text-secondary">正在加载用量数据…</div>;
 
@@ -171,6 +191,10 @@ export default function AdminUsagePage() {
         </div>
       </div>
 
+      <QuickScenarioPanel scenarios={quickScenarios} onApply={(patch, nextTab) => applyLedgerFilters(patch, nextTab)} />
+
+      {activeFilterLabels.length > 0 && <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-brand/15 bg-brand/5 px-4 py-3 text-sm"><span className="font-medium text-text-primary">当前筛选</span>{activeFilterLabels.map((item) => <span key={item} className="rounded-full bg-surface-card px-3 py-1 text-text-secondary">{item}</span>)}<button onClick={clearFilters} className="ml-auto inline-flex items-center gap-1 rounded-xl border border-surface-border px-3 py-1.5 text-text-secondary hover:text-text-primary"><FilterX className="h-4 w-4" />清空</button></div>}
+
       {Object.keys(errors).length > 0 && <div className="space-y-2 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-300">{Object.entries(errors).map(([key, message]) => <div key={key} className="flex items-center gap-2"><AlertCircle className="h-4 w-4" />{message}</div>)}</div>}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
@@ -188,7 +212,7 @@ export default function AdminUsagePage() {
       </div>
 
       {tab === "overview" && <Overview summary={summary} logs={logs} maxDailyCost={maxDailyCost} onServiceClick={(service) => { updateFilter("service", service); setTab("ledger"); }} />}
-      {tab === "ledger" && <Ledger filters={filters} updateFilter={updateFilter} logs={logs} page={page} setPage={setPage} loading={loading} error={errors.ledger} onSelect={setSelectedLog} onClear={() => { setPage(1); setFilters(defaultFilters); }} />}
+      {tab === "ledger" && <Ledger filters={filters} updateFilter={updateFilter} logs={logs} page={page} setPage={setPage} loading={loading} error={errors.ledger} showAdvancedFilters={showAdvancedFilters} setShowAdvancedFilters={setShowAdvancedFilters} onSelect={setSelectedLog} onClear={clearFilters} />}
       {tab === "users" && <UsersUsage users={users} error={errors.users} />}
       {tab === "modules" && <ModulesUsage modules={modules} error={errors.modules} onDrilldown={applyLedgerFilters} />}
       {tab === "models" && <ModelsUsage models={models} summary={summary} error={errors.models} />}
@@ -196,6 +220,29 @@ export default function AdminUsagePage() {
       {selectedLog && <UsageLogDrawer log={selectedLog} onClose={() => setSelectedLog(null)} />}
     </div>
   );
+}
+
+
+function QuickScenarioPanel({ scenarios, onApply }: { scenarios: Array<{ label: string; description: string; patch: Partial<UsageFilters> }>; onApply: (patch: Partial<UsageFilters>, nextTab?: UsageTab) => void }) {
+  return <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">{scenarios.map((item) => <button key={item.label} onClick={() => onApply(item.patch, item.label === "全部成本" ? "modules" : "ledger")} className="rounded-2xl border border-surface-border bg-surface-card p-4 text-left transition hover:border-brand/40 hover:bg-surface-elevated"><div className="font-medium text-text-primary">{item.label}</div><div className="mt-1 text-xs text-text-tertiary">{item.description}</div></button>)}</div>;
+}
+
+function activeFilters(filters: UsageFilters) {
+  const labels: string[] = [];
+  if (filters.range !== defaultFilters.range) labels.push(`范围: ${filters.range}`);
+  if (filters.module) labels.push(`模块: ${filters.module}`);
+  if (filters.feature) labels.push(`功能: ${filters.feature}`);
+  if (filters.operation) labels.push(`操作: ${filters.operation}`);
+  if (filters.service) labels.push(`服务: ${filters.service}`);
+  if (filters.provider) labels.push(`Provider: ${filters.provider}`);
+  if (filters.model) labels.push(`模型: ${filters.model}`);
+  if (filters.status) labels.push(`状态: ${filters.status}`);
+  if (filters.userId) labels.push(`用户: ${filters.userId}`);
+  if (filters.resourceType) labels.push(`资源: ${filters.resourceType}`);
+  if (filters.resourceId) labels.push(`资源 ID: ${filters.resourceId}`);
+  if (filters.requestId) labels.push(`Request: ${filters.requestId}`);
+  if (filters.q) labels.push(`搜索: ${filters.q}`);
+  return labels;
 }
 
 function Overview({ summary, logs, maxDailyCost, onServiceClick }: { summary: AdminUsageSummary | null; logs: AdminUsageLogsResponse | null; maxDailyCost: number; onServiceClick: (service: string) => void }) {
@@ -224,7 +271,7 @@ function Overview({ summary, logs, maxDailyCost, onServiceClick }: { summary: Ad
   );
 }
 
-function Ledger({ filters, updateFilter, logs, page, setPage, loading, error, onSelect, onClear }: { filters: UsageFilters; updateFilter: (key: keyof UsageFilters, value: string) => void; logs: AdminUsageLogsResponse | null; page: number; setPage: (page: number) => void; loading: boolean; error?: string; onSelect: (log: AdminUsageLog) => void; onClear: () => void }) {
+function Ledger({ filters, updateFilter, logs, page, setPage, loading, error, showAdvancedFilters, setShowAdvancedFilters, onSelect, onClear }: { filters: UsageFilters; updateFilter: (key: keyof UsageFilters, value: string) => void; logs: AdminUsageLogsResponse | null; page: number; setPage: (page: number) => void; loading: boolean; error?: string; showAdvancedFilters: boolean; setShowAdvancedFilters: (value: boolean) => void; onSelect: (log: AdminUsageLog) => void; onClear: () => void }) {
   const total = logs?.total || 0;
   const pageSize = logs?.page_size || 50;
   const maxPage = Math.max(1, Math.ceil(total / pageSize));
@@ -234,8 +281,12 @@ function Ledger({ filters, updateFilter, logs, page, setPage, loading, error, on
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <Select label="模块" value={filters.module} onChange={(v) => updateFilter("module", v)} options={["creative", "work", "workspace", "chat", "system"]} />
           <Select label="功能" value={filters.feature} onChange={(v) => updateFilter("feature", v)} options={["image", "video", "translator", "ppt", "document_reader", "notebook", "chat"]} />
-          <Input label="操作" value={filters.operation} onChange={(v) => updateFilter("operation", v)} placeholder="text_to_image / remove_bg" />
           <Select label="服务" value={filters.service} onChange={(v) => updateFilter("service", v)} options={["chat", "image_generation", "image_edit", "image_utility", "video_generation", "translation", "vision", "document_generation", "embedding"]} />
+          <Input label="搜索" value={filters.q} onChange={(v) => updateFilter("q", v)} placeholder="模型 / provider / 错误 / request" icon={<Search className="h-4 w-4" />} />
+        </div>
+        <button type="button" onClick={() => setShowAdvancedFilters(!showAdvancedFilters)} className="mt-3 inline-flex items-center gap-2 rounded-xl px-2 py-1 text-sm text-text-secondary hover:bg-surface-elevated hover:text-text-primary"><ChevronDown className={cn("h-4 w-4 transition-transform", showAdvancedFilters && "rotate-180")} />{showAdvancedFilters ? "收起高级筛选" : "展开高级筛选"}</button>
+        {showAdvancedFilters && <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <Input label="操作" value={filters.operation} onChange={(v) => updateFilter("operation", v)} placeholder="text_to_image / remove_bg" />
           <Input label="Provider" value={filters.provider} onChange={(v) => updateFilter("provider", v)} placeholder="openai / volcengine" />
           <Input label="模型" value={filters.model} onChange={(v) => updateFilter("model", v)} placeholder="模型名" />
           <Select label="状态" value={filters.status} onChange={(v) => updateFilter("status", v)} options={["success", "failed", "estimated", "missing_usage"]} />
@@ -243,10 +294,9 @@ function Ledger({ filters, updateFilter, logs, page, setPage, loading, error, on
           <Input label="资源类型" value={filters.resourceType} onChange={(v) => updateFilter("resourceType", v)} placeholder="video_generation" />
           <Input label="资源 ID" value={filters.resourceId} onChange={(v) => updateFilter("resourceId", v)} placeholder="456" />
           <Input label="Request / Task ID" value={filters.requestId} onChange={(v) => updateFilter("requestId", v)} placeholder="火山 task id" />
-          <Input label="搜索" value={filters.q} onChange={(v) => updateFilter("q", v)} placeholder="模型 / error / raw" icon={<Search className="h-4 w-4" />} />
-        </div>
+        </div>}
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm">
-          <div className="text-text-secondary">筛选结果：<span className="font-semibold text-text-primary">{formatNumber(total)}</span> 条 · 合计 <span className="font-semibold text-text-primary">{formatRMB(logs?.summary?.cost_rmb || 0)}</span> · Tokens {formatNumber(logs?.summary?.total_tokens || 0)} · 图片 {formatNumber(logs?.summary?.image_count || 0)}</div>
+          <div className="text-text-secondary">筛选结果：<span className="font-semibold text-text-primary">{formatNumber(total)}</span> 条 · 合计 <span className="font-semibold text-text-primary">{formatRMB(logs?.summary?.cost_rmb || 0)}</span> · Tokens {formatNumber(logs?.summary?.total_tokens || 0)} · 字符 {formatNumber(logs?.summary?.character_count || 0)} · 视频 {formatNumber(logs?.summary?.video_seconds || 0)}s</div>
           <button onClick={onClear} className="rounded-xl border border-surface-border px-3 py-2 text-text-secondary hover:text-text-primary">清空筛选</button>
         </div>
       </Card>
@@ -256,7 +306,7 @@ function Ledger({ filters, updateFilter, logs, page, setPage, loading, error, on
         {error && <InlineError message={error} />}
         <Table headers={["时间", "产品/功能/操作", "服务", "用户", "业务对象", "Provider / 模型", "用量", "官方单价", "成本", "状态"]}>
           {(logs?.logs || []).map((log) => (
-            <tr key={log.id} className="border-t border-surface-border align-top hover:bg-surface-elevated/40">
+            <tr key={log.id} onClick={() => onSelect(log)} className="cursor-pointer border-t border-surface-border align-top hover:bg-surface-elevated/40">
               <td className="whitespace-nowrap py-3 pr-4 text-xs">{formatDateTime(log.created_at)}</td>
               <td className="min-w-[210px] pr-4"><div className="font-medium text-text-primary">{log.module || "-"} / {log.feature || "-"}</div><div className="text-xs text-text-tertiary">{log.operation || "-"}</div></td>
               <td className="pr-4"><StatusBadge tone="blue">{log.service || "unknown"}</StatusBadge></td>
@@ -266,7 +316,7 @@ function Ledger({ filters, updateFilter, logs, page, setPage, loading, error, on
               <td className="min-w-[150px] pr-4 text-xs"><UsageNumbers log={log} /></td>
               <td className="min-w-[160px] pr-4 text-xs text-text-tertiary">{formatSourcePrice(log)}</td>
               <td className="pr-4 font-semibold text-text-primary">{formatRMB(log.total_cost_rmb)}</td>
-              <td><button onClick={() => onSelect(log)} className="rounded-xl border border-surface-border px-2 py-1 text-xs text-text-secondary hover:text-text-primary"><StatusBadge tone={log.status === "success" ? "green" : log.status === "failed" ? "red" : "amber"}>{log.estimated ? `${log.status} · 估` : log.status || "unknown"}</StatusBadge></button></td>
+              <td><StatusBadge tone={log.status === "success" ? "green" : log.status === "failed" ? "red" : "amber"}>{log.estimated ? `${log.status} · 估` : log.status || "unknown"}</StatusBadge></td>
             </tr>
           ))}
         </Table>
