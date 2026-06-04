@@ -757,6 +757,13 @@ function MessageList({
     if (allVisibleMessages.length <= effectiveRenderedMessageWindow) return allVisibleMessages;
     return allVisibleMessages.slice(allVisibleMessages.length - effectiveRenderedMessageWindow);
   }, [allVisibleMessages, effectiveRenderedMessageWindow]);
+  const latestAssistantMessageId = useMemo(() => {
+    for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
+      const message = visibleMessages[index];
+      if (message?.role === "assistant") return message.id;
+    }
+    return undefined;
+  }, [visibleMessages]);
   const hiddenLocalMessageCount = allVisibleMessages.length - visibleMessages.length;
   const hasHiddenLocalMessages = hiddenLocalMessageCount > 0;
   localWindowReleaseStateRef.current = {
@@ -1649,6 +1656,7 @@ function MessageList({
               index={index}
               message={msg}
               visibleMessageCount={visibleMessages.length}
+              latestAssistantMessageId={latestAssistantMessageId}
               group={group}
               model={model}
               isLoading={isLoading}
@@ -1656,6 +1664,7 @@ function MessageList({
               isSelected={isSelected}
               isHighlighted={isHighlighted}
               historyPrependSettling={historyPrependSettling}
+              deferRichTextHydration={userBrowsing}
               allowRichLiteFallback={historyRichLiteFallbackMessageIds.has(msg.id)}
               conversationId={conversationId}
               groupViews={groupViews}

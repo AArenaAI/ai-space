@@ -39,11 +39,13 @@ export type MessageRowProps = {
   group?: InferredGroup;
   model?: ChatModel;
   isLast: boolean;
+  isLatestAssistant: boolean;
   isLoading: boolean;
   selectMode: boolean;
   isSelected: boolean;
   isHighlighted: boolean;
   historyPrependSettling: boolean;
+  deferRichTextHydration: boolean;
   allowRichLiteFallback: boolean;
   conversationId?: number;
   groupViews?: Map<number, number>;
@@ -68,11 +70,13 @@ function MessageRow({
   group,
   model,
   isLast,
+  isLatestAssistant,
   isLoading,
   selectMode,
   isSelected,
   isHighlighted,
   historyPrependSettling,
+  deferRichTextHydration,
   allowRichLiteFallback,
   conversationId,
   groupViews,
@@ -95,10 +99,10 @@ function MessageRow({
   const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
   const rowRef = useRef<HTMLDivElement | null>(null);
   const isUser = msg.role === "user";
-  const forceHydrateRichText = isLast || isHighlighted;
+  const forceHydrateRichText = isLatestAssistant || isHighlighted;
   const [isNearViewport, setIsNearViewport] = useState(forceHydrateRichText);
   const [isInViewport, setIsInViewport] = useState(forceHydrateRichText);
-  const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && isLast;
+  const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && isLatestAssistant;
   const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
   const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
   const assistantAvatarMeta = getModelAvatarMeta(model || msg.model || "AI");
@@ -258,7 +262,7 @@ function MessageRow({
                 <UserMessageContent message={msg} imageLoadFailedLabel={imageLoadFailedLabel} />
               ) : (
                 <>
-                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={!historyPrependSettling && (isNearViewport || forceHydrateRichText)} priorityHydrateRichText={!historyPrependSettling && forceHydrateRichText} allowRichLiteFallback={allowRichLiteFallback} compactRichLitePreview={!historyPrependSettling} recoverEmptyContent={isLast} onRegenerate={onRegenerate} />
+                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={!historyPrependSettling && !deferRichTextHydration && (isNearViewport || forceHydrateRichText)} priorityHydrateRichText={!historyPrependSettling && !deferRichTextHydration && forceHydrateRichText} allowRichLiteFallback={allowRichLiteFallback} compactRichLitePreview={!historyPrependSettling && !forceHydrateRichText} recoverEmptyContent={isLast} onRegenerate={onRegenerate} />
                   {msg.stopped && onContinueGenerate && (
                     <button
                       onClick={onContinueGenerate}

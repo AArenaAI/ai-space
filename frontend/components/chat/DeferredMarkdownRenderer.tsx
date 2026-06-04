@@ -204,11 +204,9 @@ export function DeferredMarkdownRenderer({
       const initialDelayMs = complexity.isHeavy
         ? complexity.isExtreme
           ? EXTREME_MARKDOWN_HYDRATION_DELAY_MS
-          : priorityHydrateRichText
-          ? PRIORITY_MARKDOWN_HYDRATION_DELAY_MS
           : HEAVY_MARKDOWN_HYDRATION_DELAY_MS
-        : MarkdownRendererModule
-          ? 0
+        : priorityHydrateRichText || MarkdownRendererModule
+          ? PRIORITY_MARKDOWN_HYDRATION_DELAY_MS
           : FIRST_MARKDOWN_CHUNK_HYDRATION_DELAY_MS;
       if (initialDelayMs > 0) {
         emitChatRenderProfileEvent(complexity.isHeavy ? "markdown-hydrate-delayed-heavy" : "markdown-hydrate-delayed-first-chunk", {
@@ -259,7 +257,7 @@ export function DeferredMarkdownRenderer({
       {shouldRenderMarkdown && Renderer ? (
         <Renderer content={content} isStreaming={isStreaming} priorityHydrateRichText={priorityHydrateRichText} />
       ) : priorityHydrateRichText || (allowRichLiteFallback && shouldHydrateRichText && shouldUseRichLiteFallback(content, complexity)) ? (
-        <MarkdownLiteRenderer content={content} isStreaming={isStreaming} compactPreview={compactRichLitePreview} />
+        <MarkdownLiteRenderer content={content} isStreaming={isStreaming} compactPreview={priorityHydrateRichText ? false : compactRichLitePreview} />
       ) : (
         <MarkdownFallback content={content} compactPreview={compactRichLitePreview} />
       )}

@@ -10,6 +10,7 @@ export type ChatMessageListItemProps = {
   index: number;
   message: Message;
   visibleMessageCount: number;
+  latestAssistantMessageId?: string;
   group?: InferredGroup;
   model?: ChatModel;
   isLoading: boolean;
@@ -17,6 +18,7 @@ export type ChatMessageListItemProps = {
   isSelected: boolean;
   isHighlighted: boolean;
   historyPrependSettling: boolean;
+  deferRichTextHydration: boolean;
   allowRichLiteFallback: boolean;
   conversationId?: number;
   groupViews?: Map<number, number>;
@@ -40,6 +42,7 @@ function ChatMessageListItem({
   index,
   message,
   visibleMessageCount,
+  latestAssistantMessageId,
   group,
   model,
   isLoading,
@@ -47,6 +50,7 @@ function ChatMessageListItem({
   isSelected,
   isHighlighted,
   historyPrependSettling,
+  deferRichTextHydration,
   allowRichLiteFallback,
   conversationId,
   groupViews,
@@ -71,11 +75,13 @@ function ChatMessageListItem({
       group={group}
       model={model}
       isLast={index === visibleMessageCount - 1}
+      isLatestAssistant={message.role === "assistant" && message.id === latestAssistantMessageId}
       isLoading={isLoading}
       selectMode={selectMode}
       isSelected={isSelected}
       isHighlighted={isHighlighted}
       historyPrependSettling={historyPrependSettling}
+      deferRichTextHydration={deferRichTextHydration}
       allowRichLiteFallback={allowRichLiteFallback}
       conversationId={conversationId}
       groupViews={groupViews}
@@ -144,6 +150,7 @@ function areChatMessageListItemPropsEqual(previous: ChatMessageListItemProps, ne
   const previousIsLast = previous.index === previous.visibleMessageCount - 1;
   const nextIsLast = next.index === next.visibleMessageCount - 1;
   if (previousIsLast !== nextIsLast) return false;
+  if ((previous.message.role === "assistant" && previous.message.id === previous.latestAssistantMessageId) !== (next.message.role === "assistant" && next.message.id === next.latestAssistantMessageId)) return false;
   if (previous.message !== next.message && getMessageRenderKey(previous.message) !== getMessageRenderKey(next.message)) return false;
 
   if (previous.isLoading !== next.isLoading && (previousIsLast || nextIsLast)) return false;
@@ -151,6 +158,7 @@ function areChatMessageListItemPropsEqual(previous: ChatMessageListItemProps, ne
   if (previous.isSelected !== next.isSelected) return false;
   if (previous.isHighlighted !== next.isHighlighted) return false;
   if (previous.historyPrependSettling !== next.historyPrependSettling) return false;
+  if (previous.deferRichTextHydration !== next.deferRichTextHydration) return false;
   if (previous.allowRichLiteFallback !== next.allowRichLiteFallback) return false;
   if (previous.conversationId !== next.conversationId) return false;
   if (previous.imageLoadFailedLabel !== next.imageLoadFailedLabel) return false;
