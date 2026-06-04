@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, BarChart3, ChevronDown, Clipboard, Coins, FilterX, ListFilter, MessageSquare, RefreshCw, Search, ServerCrash, Users, Zap } from "lucide-react";
 import {
   getAdminUsageConversationDetail,
@@ -96,10 +96,12 @@ const defaultFilters: UsageFilters = {
 };
 
 export default function AdminUsagePage() {
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const [filters, setFilters] = useState<UsageFilters>(() => filtersFromSearch(searchParams));
   const [debouncedFilters, setDebouncedFilters] = useState<UsageFilters>(() => filtersFromSearch(searchParams));
-  const [tab, setTab] = useState<UsageTab>("modules");
+  const [tab, setTab] = useState<UsageTab>(() => usageTabFromSearch(searchParams));
   const [summary, setSummary] = useState<AdminUsageSummary | null>(null);
   const [logs, setLogs] = useState<AdminUsageLogsResponse | null>(null);
   const [users, setUsers] = useState<AdminUsageUsersResponse | null>(null);
@@ -118,12 +120,24 @@ export default function AdminUsagePage() {
   const [loading, setLoading] = useState(true);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [copiedViewLink, setCopiedViewLink] = useState(false);
   const loadSeqRef = useRef(0);
+  const hasMountedRef = useRef(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedFilters(filters), 450);
     return () => window.clearTimeout(timer);
   }, [filters]);
+
+  useEffect(() => {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      return;
+    }
+    const query = usageFiltersToQuery(filters, tab);
+    const nextUrl = query ? `${pathname}?${query}` : pathname;
+    router.replace(nextUrl, { scroll: false });
+  }, [filters, tab, pathname, router]);
 
   const logParams = useMemo(() => ({
     page,
@@ -266,6 +280,13 @@ export default function AdminUsagePage() {
   };
 
   const activeFilterLabels = activeFilters(filters);
+  const copyCurrentViewLink = async () => {
+    const query = usageFiltersToQuery(filters, tab);
+    const url = `${window.location.origin}${pathname}${query ? `?${query}` : ""}`;
+    await navigator.clipboard?.writeText(url);
+    setCopiedViewLink(true);
+    window.setTimeout(() => setCopiedViewLink(false), 1600);
+  };
 
   if (loading && !summary && !logs) return <div className="rounded-3xl border border-surface-border bg-surface-card p-8 text-text-secondary">正在加载用量数据…</div>;
 
@@ -282,6 +303,7 @@ export default function AdminUsagePage() {
             <button key={item.value} onClick={() => updateFilter("range", item.value)} className={cn("rounded-xl px-3 py-2 text-sm transition-colors", filters.range === item.value ? "bg-brand text-white" : "bg-surface-card text-text-secondary hover:text-text-primary")}>{item.label}</button>
           ))}
           <button onClick={quickVideoFilter} className="rounded-xl border border-brand/30 bg-brand/10 px-3 py-2 text-sm font-medium text-brand hover:bg-brand/15">查看视频消耗</button>
+          <button onClick={copyCurrentViewLink} className="inline-flex items-center gap-2 rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm text-text-secondary hover:text-text-primary"><Clipboard className="h-4 w-4" />{copiedViewLink ? "已复制" : "复制视图"}</button>
           <button onClick={load} className="rounded-xl border border-surface-border bg-surface-card p-2 text-text-secondary hover:text-text-primary" aria-label="刷新"><RefreshCw className="h-4 w-4" /></button>
         </div>
       </div>
@@ -984,6 +1006,26 @@ function Empty() {
 
 function InlineError({ message }: { message: string }) {
   return <div className="mb-3 flex items-center gap-2 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-300"><AlertCircle className="h-4 w-4" />{message}</div>;
+}
+
+function usageFiltersToQuery(filters: UsageFilters, tab: UsageTab) {
+  const params = new URLSearchParams();
+  if (tab !== "modules") params.set("tab", tab);
+  const mapping: Array<[keyof UsageFilters, string]> = [
+    ["range", "range"], ["module", "module"], ["feature", "feature"], ["operation", "operation"], ["service", "service"], ["provider", "provider"], ["model", "model"], ["status", "status"], ["userId", "user_id"], ["messageId", "message_id"], ["taskId", "task_id"], ["resourceType", "resource_type"], ["resourceId", "resource_id"], ["requestId", "request_id"], ["q", "q"],
+  ];
+  for (const [key, param] of mapping) {
+    const value = filters[key];
+    if (!value) continue;
+    if (key === "range" && value === defaultFilters.range) continue;
+    params.set(param, value);
+  }
+  return params.toString();
+}
+
+function usageTabFromSearch(params: URLSearchParams): UsageTab {
+  const tab = params.get("tab") as UsageTab | null;
+  return tabs.some((item) => item.value === tab) ? tab! : "modules";
 }
 
 function filtersFromSearch(params: URLSearchParams): UsageFilters {

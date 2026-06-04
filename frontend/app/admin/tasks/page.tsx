@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, ClipboardList, ExternalLink, Eye, PauseCircle, PlayCircle, RefreshCw, Search, ServerCrash, Wallet } from "lucide-react";
 import { getAdminTasks } from "@/lib/admin/api";
 import type { AdminTask, AdminTasksResponse, AdminTaskUsageSummary } from "@/lib/admin/types";
@@ -23,7 +23,7 @@ export default function ManagementTasksPage() {
   const [error, setError] = useState<string | null>(null);
   const requestSeq = useRef(0);
 
-  const load = async (mode: "initial" | "refresh" = "refresh") => {
+  const load = useCallback(async (mode: "initial" | "refresh" = "refresh") => {
     const seq = ++requestSeq.current;
     if (mode === "initial") setLoading(true); else setRefreshing(true);
     setError(null);
@@ -42,9 +42,9 @@ export default function ManagementTasksPage() {
         setRefreshing(false);
       }
     }
-  };
+  }, [status]);
 
-  useEffect(() => { load("initial"); }, [status]);
+  useEffect(() => { load("initial"); }, [load]);
 
   useEffect(() => {
     if (!liveRefresh || !shouldAutoRefresh(status)) return;
@@ -52,7 +52,7 @@ export default function ManagementTasksPage() {
       if (document.visibilityState === "visible") load("refresh");
     }, 10000);
     return () => window.clearInterval(timer);
-  }, [liveRefresh, status]);
+  }, [liveRefresh, status, load]);
 
   const runningCount = data?.summary?.filter((item) => activeStatuses.has(item.status)).reduce((sum, item) => sum + item.count, 0) || 0;
   const failedCount = data?.summary?.find((item) => item.status === "failed")?.count || 0;
@@ -99,7 +99,7 @@ export default function ManagementTasksPage() {
               <button key={item} onClick={() => setStatus(item)} className={cn("rounded-xl px-3 py-2 text-sm transition-colors", status === item ? "bg-brand text-white" : "bg-surface-elevated text-text-secondary hover:text-text-primary")}>{item === "all" ? "全部" : item}</button>
             ))}
           </div>
-          <div className="rounded-xl bg-surface-elevated px-3 py-2 text-xs text-text-tertiary">自动刷新间隔 10s；页面不可见时暂停</div>
+          <div className="rounded-xl bg-surface-elevated px-3 py-2 text-xs text-text-tertiary">{shouldAutoRefresh(status) ? "自动刷新间隔 10s；页面不可见时暂停" : "当前状态默认不自动刷新，避免无效请求"}</div>
         </div>
 
         <div className="overflow-x-auto">

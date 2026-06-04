@@ -629,9 +629,9 @@ func (h *AdminHandler) Tasks(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询任务失败"})
 		return
 	}
+	usageByTask, recentLogsByTask := h.taskUsageBatch(tasks)
 	items := make([]adminTaskResponse, 0, len(tasks))
 	for _, task := range tasks {
-		usage, recentLogs := h.taskUsageSummary(task)
 		items = append(items, adminTaskResponse{
 			ID:                 task.ID,
 			ResponseID:         task.ResponseID,
@@ -643,8 +643,8 @@ func (h *AdminHandler) Tasks(c *gin.Context) {
 			Provider:           task.Provider,
 			Status:             task.Status,
 			ErrorMessage:       task.ErrorMessage,
-			Usage:              usage,
-			RecentUsageLogs:    recentLogs,
+			Usage:              usageByTask[task.ID],
+			RecentUsageLogs:    recentLogsByTask[task.ID],
 			CreatedAt:          task.CreatedAt,
 			UpdatedAt:          task.UpdatedAt,
 			CompletedAt:        task.CompletedAt,
@@ -659,46 +659,90 @@ func (h *AdminHandler) Tasks(c *gin.Context) {
 	})
 }
 
-func (h *AdminHandler) taskUsageBase(task models.AIBackgroundTask) *gorm.DB {
-	query := h.db.Model(&models.APIUsageLog{})
-	clauses := []string{"task_id = ?"}
-	args := []any{task.ID}
-	if task.ResponseID != "" {
-		clauses = append(clauses, "request_id = ?")
-		args = append(args, task.ResponseID)
+func (h *AdminHandler) taskUsageBatch(tasks []models.AIBackgroundTask) (map[uint]adminTaskUsageSummary, map[uint][]models.APIUsageLog) {
+	usageByTask := make(map[uint]adminTaskUsageSummary, len(tasks))
+	recentLogsByTask := make(map[uint][]models.APIUsageLog, len(tasks))
+	if len(tasks) == 0 {
+		return usageByTask, recentLogsByTask
 	}
-	if task.AssistantMessageID > 0 {
-		clauses = append(clauses, "message_id = ?")
-		args = append(args, task.AssistantMessageID)
-	}
-	return query.Where("("+strings.Join(clauses, " OR ")+")", args...)
-}
 
-func (h *AdminHandler) taskUsageSummary(task models.AIBackgroundTask) (adminTaskUsageSummary, []models.APIUsageLog) {
-	var out adminTaskUsageSummary
-	var lastUsage time.Time
-	if err := h.taskUsageBase(task).Select("COUNT(*) AS requests, COALESCE(SUM(CASE WHEN status <> 'success' THEN 1 ELSE 0 END), 0) AS failures, COALESCE(SUM(total_cost_rmb), 0) AS cost_rmb, COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens, COALESCE(SUM(completion_tokens), 0) AS completion_tokens, COALESCE(SUM(total_tokens), 0) AS total_tokens, COALESCE(SUM(image_count), 0) AS image_count, COALESCE(SUM(character_count), 0) AS character_count, COALESCE(SUM(video_seconds), 0) AS video_seconds, COALESCE(SUM(audio_seconds), 0) AS audio_seconds, MAX(created_at) AS last_usage_at").Scan(&struct {
-		Requests         *int64
-		Failures         *int64
-		CostRMB          *float64
-		PromptTokens     *int64
-		CompletionTokens *int64
-		TotalTokens      *int64
-		ImageCount       *int64
-		CharacterCount   *int64
-		VideoSeconds     *int64
-		AudioSeconds     *int64
-		LastUsageAt      *time.Time
-	}{
-		Requests: &out.Requests, Failures: &out.Failures, CostRMB: &out.CostRMB, PromptTokens: &out.PromptTokens, CompletionTokens: &out.CompletionTokens, TotalTokens: &out.TotalTokens, ImageCount: &out.ImageCount, CharacterCount: &out.CharacterCount, VideoSeconds: &out.VideoSeconds, AudioSeconds: &out.AudioSeconds, LastUsageAt: &lastUsage,
-	}).Error; err == nil && !lastUsage.IsZero() {
-		out.LastUsageAt = &lastUsage
+	taskIDs := make([]uint, 0, len(tasks))
+	responseIDs := make([]string, 0, len(tasks))
+	messageIDs := make([]uint, 0, len(tasks))
+	byResponseID := map[string][]uint{}
+	byMessageID := map[uint][]uint{}
+	for _, task := range tasks {
+		taskIDs = append(taskIDs, task.ID)
+		if task.ResponseID != "" {
+			responseIDs = append(responseIDs, task.ResponseID)
+			byResponseID[task.ResponseID] = append(byResponseID[task.ResponseID], task.ID)
+		}
+		if task.AssistantMessageID > 0 {
+			messageIDs = append(messageIDs, task.AssistantMessageID)
+			byMessageID[task.AssistantMessageID] = append(byMessageID[task.AssistantMessageID], task.ID)
+		}
 	}
-	logs := []models.APIUsageLog{}
-	if out.Requests > 0 {
-		h.taskUsageBase(task).Order("created_at DESC").Limit(5).Find(&logs)
+
+	query := h.db.Model(&models.APIUsageLog{})
+	clauses := []string{"task_id IN ?"}
+	args := []any{taskIDs}
+	if len(responseIDs) > 0 {
+		clauses = append(clauses, "request_id IN ?")
+		args = append(args, responseIDs)
 	}
-	return out, logs
+	if len(messageIDs) > 0 {
+		clauses = append(clauses, "message_id IN ?")
+		args = append(args, messageIDs)
+	}
+	var logs []models.APIUsageLog
+	if err := query.Where("("+strings.Join(clauses, " OR ")+")", args...).Order("created_at DESC").Find(&logs).Error; err != nil {
+		return usageByTask, recentLogsByTask
+	}
+
+	seenByTask := make(map[uint]map[uint]bool, len(tasks))
+	for _, log := range logs {
+		matchedTaskIDs := make([]uint, 0, 3)
+		if log.TaskID > 0 {
+			matchedTaskIDs = append(matchedTaskIDs, log.TaskID)
+		}
+		if log.RequestID != "" {
+			matchedTaskIDs = append(matchedTaskIDs, byResponseID[log.RequestID]...)
+		}
+		if log.MessageID > 0 {
+			matchedTaskIDs = append(matchedTaskIDs, byMessageID[log.MessageID]...)
+		}
+		for _, taskID := range matchedTaskIDs {
+			if seenByTask[taskID] == nil {
+				seenByTask[taskID] = map[uint]bool{}
+			}
+			if seenByTask[taskID][log.ID] {
+				continue
+			}
+			seenByTask[taskID][log.ID] = true
+			summary := usageByTask[taskID]
+			summary.Requests++
+			if log.Status != "success" {
+				summary.Failures++
+			}
+			summary.CostRMB += log.TotalCostRMB
+			summary.PromptTokens += int64(log.PromptTokens)
+			summary.CompletionTokens += int64(log.CompletionTokens)
+			summary.TotalTokens += int64(log.TotalTokens)
+			summary.ImageCount += int64(log.ImageCount)
+			summary.CharacterCount += int64(log.CharacterCount)
+			summary.VideoSeconds += int64(log.VideoSeconds)
+			summary.AudioSeconds += int64(log.AudioSeconds)
+			createdAt := log.CreatedAt
+			if summary.LastUsageAt == nil || createdAt.After(*summary.LastUsageAt) {
+				summary.LastUsageAt = &createdAt
+			}
+			usageByTask[taskID] = summary
+			if len(recentLogsByTask[taskID]) < 5 {
+				recentLogsByTask[taskID] = append(recentLogsByTask[taskID], log)
+			}
+		}
+	}
+	return usageByTask, recentLogsByTask
 }
 
 func (h *AdminHandler) findUserByParam(c *gin.Context) (models.User, bool) {
