@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { AlertCircle, BarChart3, ChevronDown, Clipboard, Coins, FilterX, ListFilter, MessageSquare, RefreshCw, Search, ServerCrash, Users, Zap } from "lucide-react";
 import {
   getAdminUsageConversationDetail,
@@ -57,6 +58,8 @@ type UsageFilters = {
   model: string;
   status: string;
   userId: string;
+  messageId: string;
+  taskId: string;
   resourceType: string;
   resourceId: string;
   requestId: string;
@@ -84,6 +87,8 @@ const defaultFilters: UsageFilters = {
   model: "",
   status: "",
   userId: "",
+  messageId: "",
+  taskId: "",
   resourceType: "",
   resourceId: "",
   requestId: "",
@@ -91,8 +96,9 @@ const defaultFilters: UsageFilters = {
 };
 
 export default function AdminUsagePage() {
-  const [filters, setFilters] = useState<UsageFilters>(defaultFilters);
-  const [debouncedFilters, setDebouncedFilters] = useState<UsageFilters>(defaultFilters);
+  const searchParams = useSearchParams();
+  const [filters, setFilters] = useState<UsageFilters>(() => filtersFromSearch(searchParams));
+  const [debouncedFilters, setDebouncedFilters] = useState<UsageFilters>(() => filtersFromSearch(searchParams));
   const [tab, setTab] = useState<UsageTab>("modules");
   const [summary, setSummary] = useState<AdminUsageSummary | null>(null);
   const [logs, setLogs] = useState<AdminUsageLogsResponse | null>(null);
@@ -131,6 +137,8 @@ export default function AdminUsagePage() {
     model: debouncedFilters.model,
     status: debouncedFilters.status,
     userId: numberOrUndefined(debouncedFilters.userId),
+    messageId: numberOrUndefined(debouncedFilters.messageId),
+    taskId: numberOrUndefined(debouncedFilters.taskId),
     resourceType: debouncedFilters.resourceType,
     resourceId: numberOrUndefined(debouncedFilters.resourceId),
     requestId: debouncedFilters.requestId,
@@ -910,6 +918,27 @@ function Empty() {
 
 function InlineError({ message }: { message: string }) {
   return <div className="mb-3 flex items-center gap-2 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-300"><AlertCircle className="h-4 w-4" />{message}</div>;
+}
+
+function filtersFromSearch(params: URLSearchParams): UsageFilters {
+  return {
+    ...defaultFilters,
+    range: params.get("range") || defaultFilters.range,
+    module: params.get("module") || "",
+    feature: params.get("feature") || "",
+    operation: params.get("operation") || "",
+    service: params.get("service") || "",
+    provider: params.get("provider") || "",
+    model: params.get("model") || "",
+    status: params.get("status") || "",
+    userId: params.get("user_id") || "",
+    messageId: params.get("message_id") || "",
+    taskId: params.get("task_id") || "",
+    resourceType: params.get("resource_type") || "",
+    resourceId: params.get("resource_id") || "",
+    requestId: params.get("request_id") || "",
+    q: params.get("q") || "",
+  };
 }
 
 function numberOrUndefined(value: string) {

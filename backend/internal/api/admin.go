@@ -71,20 +71,36 @@ type adminModelResponse struct {
 	Capabilities []string `json:"capabilities"`
 }
 
+type adminTaskUsageSummary struct {
+	Requests         int64      `json:"requests"`
+	Failures         int64      `json:"failures"`
+	CostRMB          float64    `json:"cost_rmb"`
+	PromptTokens     int64      `json:"prompt_tokens"`
+	CompletionTokens int64      `json:"completion_tokens"`
+	TotalTokens      int64      `json:"total_tokens"`
+	ImageCount       int64      `json:"image_count"`
+	CharacterCount   int64      `json:"character_count"`
+	VideoSeconds     int64      `json:"video_seconds"`
+	AudioSeconds     int64      `json:"audio_seconds"`
+	LastUsageAt      *time.Time `json:"last_usage_at,omitempty"`
+}
+
 type adminTaskResponse struct {
-	ID                 uint       `json:"id"`
-	ResponseID         string     `json:"response_id"`
-	UserID             uint       `json:"user_id"`
-	GuestID            string     `json:"guest_id"`
-	ConversationID     uint       `json:"conversation_id"`
-	AssistantMessageID uint       `json:"assistant_message_id"`
-	Model              string     `json:"model"`
-	Provider           string     `json:"provider"`
-	Status             string     `json:"status"`
-	ErrorMessage       string     `json:"error_message,omitempty"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
-	CompletedAt        *time.Time `json:"completed_at,omitempty"`
+	ID                 uint                  `json:"id"`
+	ResponseID         string                `json:"response_id"`
+	UserID             uint                  `json:"user_id"`
+	GuestID            string                `json:"guest_id"`
+	ConversationID     uint                  `json:"conversation_id"`
+	AssistantMessageID uint                  `json:"assistant_message_id"`
+	Model              string                `json:"model"`
+	Provider           string                `json:"provider"`
+	Status             string                `json:"status"`
+	ErrorMessage       string                `json:"error_message,omitempty"`
+	Usage              adminTaskUsageSummary `json:"usage"`
+	RecentUsageLogs    []models.APIUsageLog  `json:"recent_usage_logs,omitempty"`
+	CreatedAt          time.Time             `json:"created_at"`
+	UpdatedAt          time.Time             `json:"updated_at"`
+	CompletedAt        *time.Time            `json:"completed_at,omitempty"`
 }
 
 func toAdminUserResponse(user models.User) adminUserResponse {
@@ -570,6 +586,9 @@ func (h *AdminHandler) Tasks(c *gin.Context) {
 	if uid := parsePositiveInt(c.Query("user_id"), 0); uid > 0 {
 		query = query.Where("user_id = ?", uid)
 	}
+	if requestID := strings.TrimSpace(c.Query("request_id")); requestID != "" {
+		query = query.Where("response_id = ?", requestID)
+	}
 	var total int64
 	query.Count(&total)
 	var tasks []models.AIBackgroundTask
@@ -579,6 +598,7 @@ func (h *AdminHandler) Tasks(c *gin.Context) {
 	}
 	items := make([]adminTaskResponse, 0, len(tasks))
 	for _, task := range tasks {
+		usage, recentLogs := h.taskUsageSummary(task)
 		items = append(items, adminTaskResponse{
 			ID:                 task.ID,
 			ResponseID:         task.ResponseID,
@@ -590,6 +610,8 @@ func (h *AdminHandler) Tasks(c *gin.Context) {
 			Provider:           task.Provider,
 			Status:             task.Status,
 			ErrorMessage:       task.ErrorMessage,
+			Usage:              usage,
+			RecentUsageLogs:    recentLogs,
 			CreatedAt:          task.CreatedAt,
 			UpdatedAt:          task.UpdatedAt,
 			CompletedAt:        task.CompletedAt,
@@ -602,6 +624,48 @@ func (h *AdminHandler) Tasks(c *gin.Context) {
 		"page_size": pageSize,
 		"summary":   h.taskSummary(),
 	})
+}
+
+func (h *AdminHandler) taskUsageBase(task models.AIBackgroundTask) *gorm.DB {
+	query := h.db.Model(&models.APIUsageLog{})
+	clauses := []string{"task_id = ?"}
+	args := []any{task.ID}
+	if task.ResponseID != "" {
+		clauses = append(clauses, "request_id = ?")
+		args = append(args, task.ResponseID)
+	}
+	if task.AssistantMessageID > 0 {
+		clauses = append(clauses, "message_id = ?")
+		args = append(args, task.AssistantMessageID)
+	}
+	return query.Where("("+strings.Join(clauses, " OR ")+")", args...)
+}
+
+func (h *AdminHandler) taskUsageSummary(task models.AIBackgroundTask) (adminTaskUsageSummary, []models.APIUsageLog) {
+	var out adminTaskUsageSummary
+	var lastUsage time.Time
+	if err := h.taskUsageBase(task).Select("COUNT(*) AS requests, COALESCE(SUM(CASE WHEN status <> 'success' THEN 1 ELSE 0 END), 0) AS failures, COALESCE(SUM(total_cost_rmb), 0) AS cost_rmb, COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens, COALESCE(SUM(completion_tokens), 0) AS completion_tokens, COALESCE(SUM(total_tokens), 0) AS total_tokens, COALESCE(SUM(image_count), 0) AS image_count, COALESCE(SUM(character_count), 0) AS character_count, COALESCE(SUM(video_seconds), 0) AS video_seconds, COALESCE(SUM(audio_seconds), 0) AS audio_seconds, MAX(created_at) AS last_usage_at").Scan(&struct {
+		Requests         *int64
+		Failures         *int64
+		CostRMB          *float64
+		PromptTokens     *int64
+		CompletionTokens *int64
+		TotalTokens      *int64
+		ImageCount       *int64
+		CharacterCount   *int64
+		VideoSeconds     *int64
+		AudioSeconds     *int64
+		LastUsageAt      *time.Time
+	}{
+		Requests: &out.Requests, Failures: &out.Failures, CostRMB: &out.CostRMB, PromptTokens: &out.PromptTokens, CompletionTokens: &out.CompletionTokens, TotalTokens: &out.TotalTokens, ImageCount: &out.ImageCount, CharacterCount: &out.CharacterCount, VideoSeconds: &out.VideoSeconds, AudioSeconds: &out.AudioSeconds, LastUsageAt: &lastUsage,
+	}).Error; err == nil && !lastUsage.IsZero() {
+		out.LastUsageAt = &lastUsage
+	}
+	logs := []models.APIUsageLog{}
+	if out.Requests > 0 {
+		h.taskUsageBase(task).Order("created_at DESC").Limit(5).Find(&logs)
+	}
+	return out, logs
 }
 
 func (h *AdminHandler) findUserByParam(c *gin.Context) (models.User, bool) {

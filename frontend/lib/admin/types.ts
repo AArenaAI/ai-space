@@ -208,6 +208,20 @@ export interface AdminModelsResponse {
   total: number;
 }
 
+export interface AdminTaskUsageSummary {
+  requests: number;
+  failures: number;
+  cost_rmb: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  image_count: number;
+  character_count: number;
+  video_seconds: number;
+  audio_seconds: number;
+  last_usage_at?: string;
+}
+
 export interface AdminTask {
   id: number;
   response_id: string;
@@ -219,6 +233,8 @@ export interface AdminTask {
   provider: string;
   status: string;
   error_message?: string;
+  usage?: AdminTaskUsageSummary;
+  recent_usage_logs?: AdminUsageLog[];
   created_at: string;
   updated_at: string;
   completed_at?: string;

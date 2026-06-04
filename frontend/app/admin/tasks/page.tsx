@@ -1,97 +1,282 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { AlertCircle, ClipboardList, RefreshCw, Search, ServerCrash } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AlertCircle, ClipboardList, ExternalLink, Eye, PauseCircle, PlayCircle, RefreshCw, Search, ServerCrash, Wallet } from "lucide-react";
 import { getAdminTasks } from "@/lib/admin/api";
-import type { AdminTasksResponse } from "@/lib/admin/types";
+import type { AdminTask, AdminTasksResponse, AdminTaskUsageSummary } from "@/lib/admin/types";
 import { MetricCard } from "@/components/admin/MetricCard";
 import { StatusBadge } from "@/components/admin/StatusBadge";
-import { formatDateTime, formatNumber } from "@/lib/admin/format";
+import { formatDateTime, formatNumber, formatRMB } from "@/lib/admin/format";
 import { cn } from "@/lib/utils";
 
 const statuses = ["all", "running", "streaming", "retrying", "completed", "failed", "cancelled", "incomplete"];
+const activeStatuses = new Set(["running", "streaming", "retrying"]);
 
 export default function ManagementTasksPage() {
   const [status, setStatus] = useState("all");
   const [data, setData] = useState<AdminTasksResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [liveRefresh, setLiveRefresh] = useState(true);
+  const [selectedTask, setSelectedTask] = useState<AdminTask | null>(null);
+  const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const requestSeq = useRef(0);
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (mode: "initial" | "refresh" = "refresh") => {
+    const seq = ++requestSeq.current;
+    if (mode === "initial") setLoading(true); else setRefreshing(true);
     setError(null);
     try {
       const result = await getAdminTasks({ page: 1, pageSize: 30, status: status === "all" ? undefined : status });
+      if (seq !== requestSeq.current) return;
       setData(result);
+      setLastLoadedAt(new Date());
+      setSelectedTask((prev) => prev ? result.tasks.find((task) => task.id === prev.id) || prev : prev);
     } catch (err) {
+      if (seq !== requestSeq.current) return;
       setError(err instanceof Error ? err.message : "加载任务列表失败");
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   };
 
-  useEffect(() => { load(); }, [status]);
+  useEffect(() => { load("initial"); }, [status]);
 
-  const runningCount = data?.summary?.filter((item) => ["running", "streaming", "retrying"].includes(item.status)).reduce((sum, item) => sum + item.count, 0) || 0;
+  useEffect(() => {
+    if (!liveRefresh || !shouldAutoRefresh(status)) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") load("refresh");
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [liveRefresh, status]);
+
+  const runningCount = data?.summary?.filter((item) => activeStatuses.has(item.status)).reduce((sum, item) => sum + item.count, 0) || 0;
   const failedCount = data?.summary?.find((item) => item.status === "failed")?.count || 0;
   const completedCount = data?.summary?.find((item) => item.status === "completed")?.count || 0;
+  const usageRollup = useMemo(() => rollupTaskUsage(data?.tasks || []), [data?.tasks]);
+  const costedTasks = data?.tasks.filter((task) => (task.usage?.requests || 0) > 0).length || 0;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-sm font-medium text-brand">Task Monitor</p>
-          <h1 className="mt-1 text-2xl font-semibold text-text-primary">任务监控</h1>
-          <p className="mt-2 text-sm text-text-secondary">查看后台 AI 任务状态、失败原因、Provider/Model 和关联会话消息。</p>
+          <h1 className="mt-1 text-2xl font-semibold text-text-primary">任务成本监控</h1>
+          <p className="mt-2 text-sm text-text-secondary">实时查看 AI 任务状态、已产生消耗、关联账本和失败原因，不用再跳到用户详情里找成本。</p>
         </div>
-        <button onClick={load} className="inline-flex items-center gap-2 rounded-xl border border-surface-border bg-surface-card px-4 py-2 text-sm text-text-secondary hover:text-text-primary">
-          <RefreshCw className="h-4 w-4" />刷新
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="text-xs text-text-tertiary">
+            {lastLoadedAt ? `更新于 ${lastLoadedAt.toLocaleTimeString()}` : "尚未刷新"}
+            {refreshing && <span className="ml-2 text-brand">刷新中…</span>}
+          </div>
+          <button onClick={() => setLiveRefresh((prev) => !prev)} className={cn("inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm", liveRefresh ? "border-brand/30 bg-brand/10 text-brand" : "border-surface-border bg-surface-card text-text-secondary hover:text-text-primary")}>
+            {liveRefresh ? <PauseCircle className="h-4 w-4" /> : <PlayCircle className="h-4 w-4" />}{liveRefresh ? "实时刷新中" : "开启实时刷新"}
+          </button>
+          <button onClick={() => load("refresh")} className="inline-flex items-center gap-2 rounded-xl border border-surface-border bg-surface-card px-4 py-2 text-sm text-text-secondary hover:text-text-primary">
+            <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />刷新
+          </button>
+        </div>
       </div>
 
       {error && <div className="flex items-center gap-2 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-300"><AlertCircle className="h-4 w-4" />{error}</div>}
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-5">
         <MetricCard title="任务总数" value={formatNumber(data?.total || 0)} icon={ClipboardList} helper="当前筛选结果" />
         <MetricCard title="运行中" value={formatNumber(runningCount)} icon={RefreshCw} helper="running / streaming / retrying" />
+        <MetricCard title="已关联成本" value={formatRMB(usageRollup.cost_rmb)} icon={Wallet} helper={`${costedTasks} 个任务已有账本 · ${formatNumber(usageRollup.requests)} 条 usage`} />
         <MetricCard title="失败" value={formatNumber(failedCount)} icon={ServerCrash} helper="failed" />
         <MetricCard title="完成" value={formatNumber(completedCount)} icon={ClipboardList} helper="completed" />
       </div>
 
       <section className="rounded-3xl border border-surface-border bg-surface-card p-5 shadow-sm">
-        <div className="mb-5 flex flex-wrap gap-2">
-          {statuses.map((item) => (
-            <button key={item} onClick={() => setStatus(item)} className={cn("rounded-xl px-3 py-2 text-sm transition-colors", status === item ? "bg-brand text-white" : "bg-surface-elevated text-text-secondary hover:text-text-primary")}>{item === "all" ? "全部" : item}</button>
-          ))}
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap gap-2">
+            {statuses.map((item) => (
+              <button key={item} onClick={() => setStatus(item)} className={cn("rounded-xl px-3 py-2 text-sm transition-colors", status === item ? "bg-brand text-white" : "bg-surface-elevated text-text-secondary hover:text-text-primary")}>{item === "all" ? "全部" : item}</button>
+            ))}
+          </div>
+          <div className="rounded-xl bg-surface-elevated px-3 py-2 text-xs text-text-tertiary">自动刷新间隔 10s；页面不可见时暂停</div>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
+          <table className="min-w-[1180px] w-full text-sm">
             <thead className="text-left text-xs uppercase tracking-wide text-text-tertiary">
-              <tr><th className="py-3">ID</th><th>状态</th><th>用户</th><th>Provider</th><th>模型</th><th>会话/消息</th><th>错误</th><th>创建时间</th><th>更新时间</th></tr>
+              <tr><th className="py-3">任务</th><th>状态</th><th>用户</th><th>模型</th><th>消耗</th><th>用量</th><th>账本</th><th>会话/消息</th><th>错误</th><th>更新时间</th><th></th></tr>
             </thead>
             <tbody className="divide-y divide-surface-border text-text-secondary">
               {loading ? (
-                <tr><td colSpan={9} className="py-8 text-center text-text-tertiary">正在加载任务…</td></tr>
+                <tr><td colSpan={11} className="py-8 text-center text-text-tertiary">正在加载任务…</td></tr>
               ) : (data?.tasks || []).length === 0 ? (
-                <tr><td colSpan={9} className="py-8 text-center text-text-tertiary"><Search className="mx-auto mb-2 h-5 w-5" />暂无任务</td></tr>
-              ) : data!.tasks.map((task) => (
-                <tr key={task.id}>
-                  <td className="whitespace-nowrap py-3 pr-4 font-mono text-xs">#{task.id}</td>
-                  <td className="pr-4"><StatusBadge tone={task.status === "completed" ? "green" : task.status === "failed" ? "red" : ["running", "streaming", "retrying"].includes(task.status) ? "blue" : "neutral"}>{task.status || "unknown"}</StatusBadge></td>
-                  <td className="pr-4">{task.user_id || task.guest_id || "-"}</td>
-                  <td className="pr-4">{task.provider || "-"}</td>
-                  <td className="max-w-[220px] truncate pr-4">{task.model || "-"}</td>
-                  <td className="pr-4 text-xs text-text-tertiary">C:{task.conversation_id || "-"} / M:{task.assistant_message_id || "-"}</td>
-                  <td className="max-w-[260px] truncate pr-4 text-xs text-red-500/80">{task.error_message || "-"}</td>
-                  <td className="whitespace-nowrap pr-4">{formatDateTime(task.created_at)}</td>
-                  <td className="whitespace-nowrap">{formatDateTime(task.updated_at)}</td>
-                </tr>
-              ))}
+                <tr><td colSpan={11} className="py-8 text-center text-text-tertiary"><Search className="mx-auto mb-2 h-5 w-5" />暂无任务。可以切换到“全部”或扩大状态范围。</td></tr>
+              ) : data!.tasks.map((task) => {
+                const usage = task.usage;
+                return (
+                  <tr key={task.id} className="cursor-pointer hover:bg-surface-elevated/50" onClick={() => setSelectedTask(task)}>
+                    <td className="whitespace-nowrap py-3 pr-4">
+                      <div className="font-mono text-xs text-text-primary">#{task.id}</div>
+                      <div className="mt-1 max-w-[180px] truncate text-xs text-text-tertiary">{task.response_id || "无 request id"}</div>
+                    </td>
+                    <td className="pr-4"><TaskStatus status={task.status} /></td>
+                    <td className="pr-4">{task.user_id ? `U:${task.user_id}` : task.guest_id || "-"}</td>
+                    <td className="pr-4">
+                      <div>{task.provider || "-"}</div>
+                      <div className="max-w-[220px] truncate text-xs text-text-tertiary">{task.model || "-"}</div>
+                    </td>
+                    <td className="pr-4">
+                      <div className="font-medium text-text-primary">{usage?.requests ? formatRMB(usage.cost_rmb) : "待产生"}</div>
+                      <div className="text-xs text-text-tertiary">{usage?.requests ? `${formatRMB(usage.cost_rmb / Math.max(usage.requests, 1))}/次` : "暂无 usage log"}</div>
+                    </td>
+                    <td className="pr-4 text-xs text-text-secondary">{formatUsageUnits(usage)}</td>
+                    <td className="pr-4">
+                      {usage?.requests ? <StatusBadge tone="blue">{formatNumber(usage.requests)} 条</StatusBadge> : <StatusBadge tone="neutral">0 条</StatusBadge>}
+                    </td>
+                    <td className="pr-4 text-xs text-text-tertiary">C:{task.conversation_id || "-"} / M:{task.assistant_message_id || "-"}</td>
+                    <td className="max-w-[220px] truncate pr-4 text-xs text-red-500/80">{task.error_message || "-"}</td>
+                    <td className="whitespace-nowrap pr-4">{formatDateTime(task.updated_at)}</td>
+                    <td className="text-right"><Eye className="h-4 w-4 text-text-tertiary" /></td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       </section>
+
+      {selectedTask && <TaskDrawer task={selectedTask} onClose={() => setSelectedTask(null)} />}
     </div>
   );
+}
+
+function TaskDrawer({ task, onClose }: { task: AdminTask; onClose: () => void }) {
+  const usage = task.usage;
+  const usageHref = usageLinkForTask(task);
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={onClose}>
+      <aside className="h-full w-full max-w-3xl overflow-y-auto border-l border-surface-border bg-surface-card p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-brand">任务成本详情</p>
+            <h2 className="mt-1 text-xl font-semibold text-text-primary">任务 #{task.id}</h2>
+            <p className="mt-1 text-xs text-text-tertiary">{task.response_id || "无 request id"}</p>
+          </div>
+          <button onClick={onClose} className="rounded-xl border border-surface-border px-3 py-2 text-sm text-text-secondary hover:text-text-primary">关闭</button>
+        </div>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-4">
+          <MiniMetric label="成本" value={usage?.requests ? formatRMB(usage.cost_rmb) : "待产生"} helper={`${formatNumber(usage?.requests || 0)} 条账本`} />
+          <MiniMetric label="平均" value={usage?.requests ? `${formatRMB(usage.cost_rmb / Math.max(usage.requests, 1))}/次` : "-"} helper="按关联账本" />
+          <MiniMetric label="用量" value={formatUsageUnits(usage)} helper="token / 图片 / 视频" />
+          <MiniMetric label="状态" value={task.status || "unknown"} helper={usage?.last_usage_at ? `最后账本 ${formatDateTime(usage.last_usage_at)}` : "暂无账本"} />
+        </div>
+
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <section className="rounded-2xl border border-surface-border bg-surface-elevated/60 p-4">
+            <h3 className="text-sm font-semibold text-text-primary">任务信息</h3>
+            <InfoRow label="状态" value={<TaskStatus status={task.status} />} />
+            <InfoRow label="用户" value={task.user_id ? `U:${task.user_id}` : task.guest_id || "-"} />
+            <InfoRow label="Provider" value={task.provider || "-"} />
+            <InfoRow label="模型" value={task.model || "-"} />
+            <InfoRow label="会话/消息" value={`C:${task.conversation_id || "-"} / M:${task.assistant_message_id || "-"}`} />
+            <InfoRow label="创建" value={formatDateTime(task.created_at)} />
+            <InfoRow label="更新" value={formatDateTime(task.updated_at)} />
+            {task.completed_at && <InfoRow label="完成" value={formatDateTime(task.completed_at)} />}
+          </section>
+          <section className="rounded-2xl border border-surface-border bg-surface-elevated/60 p-4">
+            <h3 className="text-sm font-semibold text-text-primary">快速动作</h3>
+            <div className="mt-3 space-y-2">
+              <a href={usageHref} className="flex items-center justify-between rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm text-text-secondary hover:text-text-primary">
+                查看完整账本 <ExternalLink className="h-4 w-4" />
+              </a>
+              {task.user_id > 0 && <a href={`/admin/usage?user_id=${task.user_id}`} className="flex items-center justify-between rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm text-text-secondary hover:text-text-primary">查看用户成本 <ExternalLink className="h-4 w-4" /></a>}
+              <button onClick={() => navigator.clipboard?.writeText(debugText(task))} className="w-full rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-left text-sm text-text-secondary hover:text-text-primary">复制排查字段</button>
+            </div>
+            {task.error_message && <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-600 dark:text-red-300">{task.error_message}</div>}
+          </section>
+        </div>
+
+        <section className="mt-5 rounded-2xl border border-surface-border bg-surface-elevated/60 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-text-primary">最近关联账本</h3>
+            <a href={usageHref} className="text-xs text-brand hover:underline">查看全部</a>
+          </div>
+          {(task.recent_usage_logs || []).length === 0 ? (
+            <div className="rounded-xl bg-surface-card px-4 py-8 text-center text-sm text-text-tertiary">暂无关联 usage log。运行中任务可能尚未完成计费，失败且未调用外部服务的任务也可能没有成本。</div>
+          ) : (
+            <div className="space-y-2">
+              {(task.recent_usage_logs || []).map((log) => (
+                <div key={log.id} className="rounded-xl border border-surface-border bg-surface-card p-3 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="font-medium text-text-primary">{log.module || log.service || "usage"} / {log.feature || log.operation || log.model}</div>
+                    <div className="font-semibold text-text-primary">{formatRMB(log.total_cost_rmb || 0)}</div>
+                  </div>
+                  <div className="mt-1 text-xs text-text-tertiary">#{log.id} · {log.provider}/{log.model} · {formatDateTime(log.created_at)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </aside>
+    </div>
+  );
+}
+
+function TaskStatus({ status }: { status: string }) {
+  return <StatusBadge tone={status === "completed" ? "green" : status === "failed" ? "red" : activeStatuses.has(status) ? "blue" : "neutral"}>{status || "unknown"}</StatusBadge>;
+}
+
+function MiniMetric({ label, value, helper }: { label: string; value: string; helper: string }) {
+  return <div className="rounded-2xl border border-surface-border bg-surface-elevated/60 p-4"><div className="text-xs text-text-tertiary">{label}</div><div className="mt-1 text-lg font-semibold text-text-primary">{value}</div><div className="mt-1 text-xs text-text-tertiary">{helper}</div></div>;
+}
+
+function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return <div className="mt-3 flex items-center justify-between gap-4 text-sm"><span className="text-text-tertiary">{label}</span><span className="text-right text-text-primary">{value}</span></div>;
+}
+
+function shouldAutoRefresh(status: string) {
+  return status === "all" || activeStatuses.has(status);
+}
+
+function rollupTaskUsage(tasks: AdminTask[]): AdminTaskUsageSummary {
+  return tasks.reduce((acc, task) => {
+    const usage = task.usage;
+    if (!usage) return acc;
+    acc.requests += usage.requests || 0;
+    acc.failures += usage.failures || 0;
+    acc.cost_rmb += usage.cost_rmb || 0;
+    acc.prompt_tokens += usage.prompt_tokens || 0;
+    acc.completion_tokens += usage.completion_tokens || 0;
+    acc.total_tokens += usage.total_tokens || 0;
+    acc.image_count += usage.image_count || 0;
+    acc.character_count += usage.character_count || 0;
+    acc.video_seconds += usage.video_seconds || 0;
+    acc.audio_seconds += usage.audio_seconds || 0;
+    return acc;
+  }, { requests: 0, failures: 0, cost_rmb: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, image_count: 0, character_count: 0, video_seconds: 0, audio_seconds: 0 });
+}
+
+function formatUsageUnits(usage?: AdminTaskUsageSummary) {
+  if (!usage || usage.requests === 0) return "-";
+  const parts = [];
+  if (usage.total_tokens) parts.push(`${formatNumber(usage.total_tokens)} tok`);
+  if (usage.image_count) parts.push(`${formatNumber(usage.image_count)} 张图`);
+  if (usage.video_seconds) parts.push(`${formatNumber(usage.video_seconds)} 秒视频`);
+  if (usage.character_count) parts.push(`${formatNumber(usage.character_count)} 字符`);
+  if (usage.audio_seconds) parts.push(`${formatNumber(usage.audio_seconds)} 秒音频`);
+  return parts.length ? parts.join(" · ") : `${formatNumber(usage.requests)} 次调用`;
+}
+
+function usageLinkForTask(task: AdminTask) {
+  const params = new URLSearchParams({ range: "all" });
+  if (task.id) params.set("task_id", String(task.id));
+  if (task.response_id) params.set("request_id", task.response_id);
+  if (task.assistant_message_id) params.set("message_id", String(task.assistant_message_id));
+  return `/admin/usage?${params.toString()}`;
+}
+
+function debugText(task: AdminTask) {
+  return JSON.stringify({ task_id: task.id, response_id: task.response_id, user_id: task.user_id, guest_id: task.guest_id, conversation_id: task.conversation_id, assistant_message_id: task.assistant_message_id, provider: task.provider, model: task.model, status: task.status, usage: task.usage }, null, 2);
 }
