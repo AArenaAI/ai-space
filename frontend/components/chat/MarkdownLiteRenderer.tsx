@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo } from "react";
 import CodeBlock from "./markdown/CodeBlock";
 
 const MAX_LITE_RICH_CHARS = 3500;
@@ -8,6 +8,7 @@ const MAX_LITE_RICH_LINES = 50;
 const EXTREME_LITE_LENGTH_THRESHOLD = 10_000;
 const EXTREME_LITE_CODE_BLOCK_THRESHOLD = 20;
 const EXTREME_LITE_TABLE_LINE_THRESHOLD = 100;
+const LITE_PARSE_CACHE_LIMIT = 80;
 
 type LiteBlock =
   | { type: "heading"; level: 1 | 2 | 3; text: string }
@@ -16,6 +17,33 @@ type LiteBlock =
   | { type: "ol"; items: string[] }
   | { type: "quote"; text: string }
   | { type: "code"; lang: string; value: string };
+
+type LiteParseResult = {
+  blocks: LiteBlock[];
+  codeBlocks: number;
+  isPreview: boolean;
+  parseMs: number;
+  tableLines: number;
+  text: string;
+  wasCacheHit: boolean;
+};
+
+const liteParseCache = new Map<string, Omit<LiteParseResult, "parseMs" | "wasCacheHit">>();
+
+function emitChatRenderProfileEvent(phase: string, detail: Record<string, unknown> = {}) {
+  if (typeof window === "undefined") return;
+  const at = typeof performance !== "undefined" ? performance.now() : Date.now();
+  window.dispatchEvent(new CustomEvent("chat-render-profile", {
+    detail: { phase, at, ...detail },
+  }));
+}
+
+function rememberLiteParse(content: string, value: Omit<LiteParseResult, "parseMs" | "wasCacheHit">) {
+  liteParseCache.set(content, value);
+  if (liteParseCache.size <= LITE_PARSE_CACHE_LIMIT) return;
+  const oldest = liteParseCache.keys().next().value;
+  if (oldest) liteParseCache.delete(oldest);
+}
 
 function getLiteRichContent(content: string) {
   let codeFenceCount = 0;
@@ -45,9 +73,9 @@ function getLiteRichContent(content: string) {
     content.length > EXTREME_LITE_LENGTH_THRESHOLD ||
     codeBlocks >= EXTREME_LITE_CODE_BLOCK_THRESHOLD ||
     tableLines >= EXTREME_LITE_TABLE_LINE_THRESHOLD;
-  if (!isExtreme) return { isPreview: false, text: content };
+  if (!isExtreme) return { codeBlocks, isPreview: false, tableLines, text: content };
 
-  return { isPreview: true, text: previewLines.join("\n").slice(0, MAX_LITE_RICH_CHARS).trimEnd() };
+  return { codeBlocks, isPreview: true, tableLines, text: previewLines.join("\n").slice(0, MAX_LITE_RICH_CHARS).trimEnd() };
 }
 
 function parseLiteBlocks(markdown: string): LiteBlock[] {
@@ -143,6 +171,23 @@ function parseLiteBlocks(markdown: string): LiteBlock[] {
   return blocks;
 }
 
+function getCachedLiteParse(content: string): LiteParseResult {
+  const start = typeof performance !== "undefined" ? performance.now() : Date.now();
+  const cached = liteParseCache.get(content);
+  if (cached) {
+    liteParseCache.delete(content);
+    liteParseCache.set(content, cached);
+    return { ...cached, parseMs: 0, wasCacheHit: true };
+  }
+
+  const liteContent = getLiteRichContent(content);
+  const blocks = parseLiteBlocks(liteContent.text);
+  const value = { ...liteContent, blocks };
+  rememberLiteParse(content, value);
+  const end = typeof performance !== "undefined" ? performance.now() : Date.now();
+  return { ...value, parseMs: Math.max(0, end - start), wasCacheHit: false };
+}
+
 function InlineText({ text, lightweightInline = false }: { text: string; lightweightInline?: boolean }) {
   if (lightweightInline) {
     return <span>{text}</span>;
@@ -165,9 +210,21 @@ function InlineText({ text, lightweightInline = false }: { text: string; lightwe
 }
 
 const MarkdownLiteRenderer = memo(function MarkdownLiteRenderer({ content }: { content: string; isStreaming?: boolean }) {
-  const liteContent = useMemo(() => getLiteRichContent(content), [content]);
-  const blocks = useMemo(() => parseLiteBlocks(liteContent.text), [liteContent.text]);
+  const liteContent = useMemo(() => getCachedLiteParse(content), [content]);
+  const blocks = liteContent.blocks;
   const lightweightInline = liteContent.isPreview;
+
+  useEffect(() => {
+    emitChatRenderProfileEvent("markdown-lite-rendered", {
+      blockCount: blocks.length,
+      cacheHit: liteContent.wasCacheHit,
+      codeBlocks: liteContent.codeBlocks,
+      contentLength: content.length,
+      isPreview: liteContent.isPreview,
+      parseMs: Number(liteContent.parseMs.toFixed(2)),
+      tableLines: liteContent.tableLines,
+    });
+  }, [blocks.length, content.length, liteContent.codeBlocks, liteContent.isPreview, liteContent.parseMs, liteContent.tableLines, liteContent.wasCacheHit]);
 
   return (
     <div data-markdown-lite-renderer={liteContent.isPreview ? "stable-preview" : "full"}>
