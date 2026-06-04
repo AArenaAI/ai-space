@@ -245,6 +245,7 @@ function MessageList({
   });
   const programmaticScrollUntilRef = useRef(0);
   const userScrollOverrideUntilRef = useRef(0);
+  const bottomLockIntentUntilRef = useRef(0);
   const bottomLockRafRef = useRef<number>(0);
   const bottomLockTimersRef = useRef<number[]>([]);
   const bottomSmoothRafRef = useRef<number>(0);
@@ -277,6 +278,7 @@ function MessageList({
   const stopBottomLockForUserBrowse = useCallback((duration = 2500) => {
     stickToBottomRef.current = false;
     userScrollOverrideUntilRef.current = Date.now() + duration;
+    bottomLockIntentUntilRef.current = 0;
     if (bottomLockRafRef.current) {
       cancelAnimationFrame(bottomLockRafRef.current);
       bottomLockRafRef.current = 0;
@@ -417,6 +419,15 @@ function MessageList({
     bottomLockTimersRef.current.forEach(window.clearTimeout);
     bottomLockTimersRef.current = [];
 
+    // During conversation open/switch, keep the "programmatic bottom lock" intent
+    // alive for the whole settling window. Virtuoso can emit internal scroll events
+    // while tall rich-lite rows are being measured; those must not be interpreted
+    // as a user browsing upward and cancel the pending bottom alignment.
+    const delays = extraSettling ? [50, 100, 180, 280, 400, 520, 620, 800, 1200, 1800, 2600, 3600, 5000] : [80, 180];
+    if (extraSettling) {
+      bottomLockIntentUntilRef.current = Date.now() + Math.max(...delays) + 250;
+    }
+
     const lock = () => {
       if (Date.now() < userScrollOverrideUntilRef.current) return;
       if (stickToBottomRef.current) scrollToBottom();
@@ -433,7 +444,6 @@ function MessageList({
     // Virtuoso 对最后一项换行后的高度测量可能晚于 RAF，补 post-layout 锁底。
     // 切换会话/恢复历史时，Markdown、图片和虚拟列表测量可能更晚完成。
     // Heavy Markdown 的自动 hydrate 会延后到秒级发生；只要用户没有主动上滑，继续补偿到底部。
-    const delays = extraSettling ? [80, 180, 360, 700, 1200, 1800, 2600, 3600, 5000] : [80, 180];
     bottomLockTimersRef.current = delays.map((delay) => window.setTimeout(lock, delay));
   }, [scrollToBottom]);
 
@@ -445,6 +455,13 @@ function MessageList({
       updateScrollProgressFromElement(el);
     }
   }, [updateScrollProgressFromElement]);
+
+  const lockBottomOnRenderedRange = useCallback(() => {
+    if (targetMessageId) return;
+    if (Date.now() >= bottomLockIntentUntilRef.current) return;
+    if (Date.now() < userScrollOverrideUntilRef.current || !stickToBottomRef.current) return;
+    scrollToBottom();
+  }, [scrollToBottom, targetMessageId]);
 
   const centerMessageRowInScroller = useCallback((messageId: string) => {
     const el = scrollRef.current;
@@ -499,7 +516,7 @@ function MessageList({
 
     // stickToBottom 表示用户意图，只在明确上滑离开底部时关闭；
     // 用户主动上滑时立即打断补偿锁底，避免流式内容继续增长时把视图吸回底部。
-    const isProgrammaticScroll = Date.now() < programmaticScrollUntilRef.current;
+    const isProgrammaticScroll = Date.now() < programmaticScrollUntilRef.current || Date.now() < bottomLockIntentUntilRef.current;
     if (!isProgrammaticScroll && isScrollingUp && distanceToBottom > 1) {
       stopBottomLockForUserBrowse(isProgrammaticScroll ? 1200 : 2500);
     }
@@ -975,6 +992,7 @@ function MessageList({
       lastConversationIdRef.current = conversationId;
       firstItemIndexRef.current = 100_000;
       historyPrependUntilRef.current = 0;
+      bottomLockIntentUntilRef.current = 0;
       loadMoreAnchorRef.current = null;
       loadingMoreTriggeredRef.current = false;
       localWindowReleaseAwaitingScrollAwayRef.current = false;
@@ -1535,6 +1553,7 @@ function MessageList({
               setAtBottom(atBottom);
             }}
             computeItemKey={(_, group) => group.id}
+            itemsRendered={lockBottomOnRenderedRange}
             onScroll={handleVirtuosoScroll}
             onWheel={(event) => handleUserScrollIntent(event.deltaY)}
             onTouchMove={() => stopBottomLockForUserBrowse(2500)}
@@ -1653,7 +1672,10 @@ function MessageList({
           setAtBottom(atBottom);
         }}
         computeItemKey={(_, msg) => msg.id}
+        itemsRendered={lockBottomOnRenderedRange}
         onScroll={handleVirtuosoScroll}
+        onWheel={(event) => handleUserScrollIntent(event.deltaY)}
+        onTouchMove={() => stopBottomLockForUserBrowse(2500)}
         startReached={() => {
           const el = scrollRef.current;
           if (!el || loadingMoreTriggeredRef.current) return;
@@ -1686,8 +1708,6 @@ function MessageList({
           stopBottomLockForUserBrowse(1800);
           onLoadMore?.();
         }}
-        onWheel={(event) => handleUserScrollIntent(event.deltaY)}
-        onTouchMove={() => stopBottomLockForUserBrowse(2500)}
         increaseViewportBy={{
           top: fastScrollPreload ? FAST_SCROLL_PRELOAD_PX : HISTORY_PRELOAD_TOP_PX,
           bottom: (returnToBottomPreload || fastScrollPreload) ? RETURN_TO_BOTTOM_PRELOAD_BOTTOM_PX : HISTORY_PRELOAD_BOTTOM_PX,
