@@ -76,6 +76,7 @@ const RETURN_TO_BOTTOM_PRELOAD_BOTTOM_PX = 6000;
 const HISTORY_OVERSCAN_REVERSE = 8;
 const INITIAL_RENDERED_MESSAGE_WINDOW = 16;
 const CONTENT_HEAVY_INITIAL_RENDERED_MESSAGE_WINDOW = 8;
+const INITIAL_READING_RICH_LITE_ASSISTANT_COUNT = 3;
 const MESSAGE_WINDOW_PAGE_SIZE = 8;
 const MIN_HIDDEN_MESSAGES_TO_WINDOW = 8;
 const CONTENT_HEAVY_TOTAL_CHARS_THRESHOLD = 24_000;
@@ -760,9 +761,20 @@ function MessageList({
   const latestAssistantMessageId = useMemo(() => {
     for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
       const message = visibleMessages[index];
-      if (message?.role === "assistant") return message.id;
+      if (message?.role === "assistant") return String(message.id);
     }
     return undefined;
+  }, [visibleMessages]);
+  const initialReadingAssistantIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
+      const message = visibleMessages[index];
+      if (message?.role === "assistant") {
+        ids.add(String(message.id));
+        if (ids.size >= INITIAL_READING_RICH_LITE_ASSISTANT_COUNT) break;
+      }
+    }
+    return ids;
   }, [visibleMessages]);
   const hiddenLocalMessageCount = allVisibleMessages.length - visibleMessages.length;
   const hasHiddenLocalMessages = hiddenLocalMessageCount > 0;
@@ -1657,6 +1669,7 @@ function MessageList({
               message={msg}
               visibleMessageCount={visibleMessages.length}
               latestAssistantMessageId={latestAssistantMessageId}
+              initialReadingAssistantIds={initialReadingAssistantIds}
               group={group}
               model={model}
               isLoading={isLoading}

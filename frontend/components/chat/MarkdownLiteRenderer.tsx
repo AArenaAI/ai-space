@@ -21,7 +21,8 @@ type LiteBlock =
   | { type: "ul"; items: string[] }
   | { type: "ol"; items: string[] }
   | { type: "quote"; text: string }
-  | { type: "code"; lang: string; value: string };
+  | { type: "code"; lang: string; value: string }
+  | { type: "table"; rows: string[][] };
 
 type LiteParseResult = {
   blocks: LiteBlock[];
@@ -94,6 +95,7 @@ function parseLiteBlocks(markdown: string): LiteBlock[] {
   let paragraph: string[] = [];
   let listItems: string[] = [];
   let orderedItems: string[] = [];
+  let tableRows: string[][] = [];
   let codeLang = "";
   let codeLines: string[] | null = null;
 
@@ -113,6 +115,14 @@ function parseLiteBlocks(markdown: string): LiteBlock[] {
       orderedItems = [];
     }
   };
+  const flushTable = () => {
+    if (tableRows.length) {
+      blocks.push({ type: "table", rows: tableRows });
+      tableRows = [];
+    }
+  };
+  const parseTableRow = (line: string) => line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+  const isTableSeparator = (cells: string[]) => cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
 
   lines.forEach((line) => {
     const fence = line.match(/^```\s*([\w-]*)/);
@@ -138,8 +148,20 @@ function parseLiteBlocks(markdown: string): LiteBlock[] {
     if (!trimmed) {
       flushParagraph();
       flushList();
+      flushTable();
       return;
     }
+
+    if (/^\s*\|.+\|\s*$/.test(line)) {
+      const cells = parseTableRow(line);
+      if (!isTableSeparator(cells)) {
+        flushParagraph();
+        flushList();
+        tableRows.push(cells);
+      }
+      return;
+    }
+    flushTable();
 
     const heading = trimmed.match(/^(#{1,3})\s+(.+)$/);
     if (heading) {
@@ -177,6 +199,7 @@ function parseLiteBlocks(markdown: string): LiteBlock[] {
 
   flushParagraph();
   flushList();
+  flushTable();
   if (codeLines) blocks.push({ type: "code", lang: codeLang, value: (codeLines as string[]).join("\n") });
   return blocks;
 }
@@ -261,6 +284,27 @@ const MarkdownLiteRenderer = memo(function MarkdownLiteRenderer({ content, compa
         }
         if (block.type === "code") {
           return <CodeBlock key={index} language={block.lang} value={block.value} lightweight />;
+        }
+        if (block.type === "table") {
+          const [header, ...bodyRows] = block.rows;
+          return (
+            <div key={index} className="my-4 max-w-full overflow-x-auto rounded-xl border border-surface-border bg-surface-card/40">
+              <table className="min-w-full border-collapse text-left text-sm text-text-primary">
+                {header && (
+                  <thead className="bg-surface-elevated/70 text-text-secondary">
+                    <tr>{header.map((cell, cellIndex) => <th key={cellIndex} className="border-b border-surface-border px-3 py-2 font-medium"><InlineText text={cell} lightweightInline={lightweightInline} /></th>)}</tr>
+                  </thead>
+                )}
+                <tbody>
+                  {bodyRows.map((row, rowIndex) => (
+                    <tr key={rowIndex} className="border-b border-surface-border/70 last:border-b-0">
+                      {row.map((cell, cellIndex) => <td key={cellIndex} className="px-3 py-2 align-top"><InlineText text={cell} lightweightInline={lightweightInline} /></td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
         }
         return <p key={index} className="text-[15px] leading-relaxed text-text-primary mb-4 last:mb-0"><InlineText text={block.text} lightweightInline={lightweightInline} /></p>;
       })}

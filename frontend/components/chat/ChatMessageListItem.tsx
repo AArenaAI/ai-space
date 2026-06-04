@@ -11,6 +11,7 @@ export type ChatMessageListItemProps = {
   message: Message;
   visibleMessageCount: number;
   latestAssistantMessageId?: string;
+  initialReadingAssistantIds?: Set<string>;
   group?: InferredGroup;
   model?: ChatModel;
   isLoading: boolean;
@@ -43,6 +44,7 @@ function ChatMessageListItem({
   message,
   visibleMessageCount,
   latestAssistantMessageId,
+  initialReadingAssistantIds,
   group,
   model,
   isLoading,
@@ -75,7 +77,8 @@ function ChatMessageListItem({
       group={group}
       model={model}
       isLast={index === visibleMessageCount - 1}
-      isLatestAssistant={message.role === "assistant" && message.id === latestAssistantMessageId}
+      isLatestAssistant={message.role === "assistant" && String(message.id) === latestAssistantMessageId}
+      isInitialReadingAssistant={message.role === "assistant" && !!initialReadingAssistantIds?.has(String(message.id))}
       isLoading={isLoading}
       selectMode={selectMode}
       isSelected={isSelected}
@@ -150,7 +153,8 @@ function areChatMessageListItemPropsEqual(previous: ChatMessageListItemProps, ne
   const previousIsLast = previous.index === previous.visibleMessageCount - 1;
   const nextIsLast = next.index === next.visibleMessageCount - 1;
   if (previousIsLast !== nextIsLast) return false;
-  if ((previous.message.role === "assistant" && previous.message.id === previous.latestAssistantMessageId) !== (next.message.role === "assistant" && next.message.id === next.latestAssistantMessageId)) return false;
+  if ((previous.message.role === "assistant" && String(previous.message.id) === previous.latestAssistantMessageId) !== (next.message.role === "assistant" && String(next.message.id) === next.latestAssistantMessageId)) return false;
+  if ((previous.message.role === "assistant" && !!previous.initialReadingAssistantIds?.has(String(previous.message.id))) !== (next.message.role === "assistant" && !!next.initialReadingAssistantIds?.has(String(next.message.id)))) return false;
   if (previous.message !== next.message && getMessageRenderKey(previous.message) !== getMessageRenderKey(next.message)) return false;
 
   if (previous.isLoading !== next.isLoading && (previousIsLast || nextIsLast)) return false;

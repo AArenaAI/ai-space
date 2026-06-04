@@ -40,6 +40,7 @@ export type MessageRowProps = {
   model?: ChatModel;
   isLast: boolean;
   isLatestAssistant: boolean;
+  isInitialReadingAssistant: boolean;
   isLoading: boolean;
   selectMode: boolean;
   isSelected: boolean;
@@ -71,6 +72,7 @@ function MessageRow({
   model,
   isLast,
   isLatestAssistant,
+  isInitialReadingAssistant,
   isLoading,
   selectMode,
   isSelected,
@@ -100,6 +102,7 @@ function MessageRow({
   const rowRef = useRef<HTMLDivElement | null>(null);
   const isUser = msg.role === "user";
   const forceHydrateRichText = isLatestAssistant || isHighlighted;
+  const forceStableRichLiteFallback = isInitialReadingAssistant || forceHydrateRichText;
   const [isNearViewport, setIsNearViewport] = useState(forceHydrateRichText);
   const [isInViewport, setIsInViewport] = useState(forceHydrateRichText);
   const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && isLatestAssistant;
@@ -262,7 +265,7 @@ function MessageRow({
                 <UserMessageContent message={msg} imageLoadFailedLabel={imageLoadFailedLabel} />
               ) : (
                 <>
-                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={!historyPrependSettling && !deferRichTextHydration && (isNearViewport || forceHydrateRichText)} priorityHydrateRichText={!historyPrependSettling && !deferRichTextHydration && forceHydrateRichText} allowRichLiteFallback={allowRichLiteFallback} compactRichLitePreview={!historyPrependSettling && !forceHydrateRichText} recoverEmptyContent={isLast} onRegenerate={onRegenerate} />
+                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={!historyPrependSettling && !deferRichTextHydration && (isNearViewport || forceHydrateRichText)} priorityHydrateRichText={!historyPrependSettling && !deferRichTextHydration && forceHydrateRichText} allowRichLiteFallback={allowRichLiteFallback || forceStableRichLiteFallback} compactRichLitePreview={!historyPrependSettling && !forceStableRichLiteFallback} recoverEmptyContent={isLast} onRegenerate={onRegenerate} />
                   {msg.stopped && onContinueGenerate && (
                     <button
                       onClick={onContinueGenerate}
