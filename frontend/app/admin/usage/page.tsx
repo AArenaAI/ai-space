@@ -16,6 +16,7 @@ import type {
   AdminUsageLogsResponse,
   AdminUsageModelsResponse,
   AdminUsageModulesResponse,
+  AdminUsageModuleRow,
   AdminUsageSummary,
   AdminUsageUsersResponse,
 } from "@/lib/admin/types";
@@ -191,7 +192,7 @@ export default function AdminUsagePage() {
         </div>
       </div>
 
-      <QuickScenarioPanel scenarios={quickScenarios} onApply={(patch, nextTab) => applyLedgerFilters(patch, nextTab)} />
+      <QuickScenarioPanel scenarios={quickScenarios} moduleRows={modules?.modules || []} onApply={(patch, nextTab) => applyLedgerFilters(patch, nextTab)} />
 
       {activeFilterLabels.length > 0 && <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-brand/15 bg-brand/5 px-4 py-3 text-sm"><span className="font-medium text-text-primary">当前筛选</span>{activeFilterLabels.map((item) => <span key={item} className="rounded-full bg-surface-card px-3 py-1 text-text-secondary">{item}</span>)}<button onClick={clearFilters} className="ml-auto inline-flex items-center gap-1 rounded-xl border border-surface-border px-3 py-1.5 text-text-secondary hover:text-text-primary"><FilterX className="h-4 w-4" />清空</button></div>}
 
@@ -223,8 +224,24 @@ export default function AdminUsagePage() {
 }
 
 
-function QuickScenarioPanel({ scenarios, onApply }: { scenarios: Array<{ label: string; description: string; patch: Partial<UsageFilters> }>; onApply: (patch: Partial<UsageFilters>, nextTab?: UsageTab) => void }) {
-  return <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">{scenarios.map((item) => <button key={item.label} onClick={() => onApply(item.patch, item.label === "全部成本" ? "modules" : "ledger")} className="rounded-2xl border border-surface-border bg-surface-card p-4 text-left transition hover:border-brand/40 hover:bg-surface-elevated"><div className="font-medium text-text-primary">{item.label}</div><div className="mt-1 text-xs text-text-tertiary">{item.description}</div></button>)}</div>;
+function QuickScenarioPanel({ scenarios, moduleRows, onApply }: { scenarios: Array<{ label: string; description: string; patch: Partial<UsageFilters> }>; moduleRows: AdminUsageModuleRow[]; onApply: (patch: Partial<UsageFilters>, nextTab?: UsageTab) => void }) {
+  return (
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
+      {scenarios.map((item) => {
+        const stat = scenarioStat(moduleRows, item.patch);
+        return (
+          <button key={item.label} onClick={() => onApply(item.patch, item.label === "全部成本" ? "modules" : "ledger")} className="rounded-2xl border border-surface-border bg-surface-card p-4 text-left transition hover:border-brand/40 hover:bg-surface-elevated">
+            <div className="font-medium text-text-primary">{item.label}</div>
+            <div className="mt-1 text-xs text-text-tertiary">{item.description}</div>
+            <div className="mt-3 rounded-xl bg-surface-elevated px-3 py-2 text-xs text-text-secondary">
+              <div className="font-semibold text-text-primary">{formatRMB(stat.cost)}</div>
+              <div>{formatNumber(stat.requests)} 条调用</div>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 function activeFilters(filters: UsageFilters) {
@@ -341,7 +358,133 @@ function ModelsUsage({ models, summary, error }: { models: AdminUsageModelsRespo
 
 function ModulesUsage({ modules, error, onDrilldown }: { modules: AdminUsageModulesResponse | null; error?: string; onDrilldown: (patch: Partial<UsageFilters>) => void }) {
   const rows = modules?.modules || [];
-  return <Card title="产品模块下钻"><div className="mb-4 text-sm text-text-secondary">按 module / feature / operation 聚合成本，点击“查看明细”会自动进入账本并带入筛选。</div>{error && <InlineError message={error} />}<Table headers={["产品模块", "服务", "请求/失败", "Token", "图片/字符/视频", "成本", "最近使用", "操作"]}>{rows.map((row) => <tr key={`${row.module}-${row.feature}-${row.operation}-${row.service}`} className="border-t border-surface-border"><td className="py-3 pr-4"><div className="font-medium text-text-primary">{row.module || "unknown"} / {row.feature || "unknown"}</div><div className="text-xs text-text-tertiary">{row.operation || "unknown"}</div></td><td className="pr-4"><StatusBadge tone="blue">{row.service || "unknown"}</StatusBadge></td><td className="pr-4">{formatNumber(row.requests)}<div className="text-xs text-text-tertiary">失败 {formatNumber(row.failures || 0)}</div></td><td className="pr-4"><div>{formatNumber(row.total_tokens || 0)}</div><div className="text-xs text-text-tertiary">in {formatNumber(row.prompt_tokens || 0)} / out {formatNumber(row.completion_tokens || 0)}</div></td><td className="pr-4 text-xs"><div>图片 {formatNumber(row.image_count || 0)}</div><div>字符 {formatNumber(row.character_count || 0)}</div><div>视频 {formatNumber(row.video_seconds || 0)}s</div></td><td className="pr-4 font-semibold text-text-primary">{formatRMB(row.cost_rmb)}</td><td className="whitespace-nowrap pr-4 text-text-tertiary">{formatDateTime(row.last_used_at)}</td><td><button onClick={() => onDrilldown({ module: row.module, feature: row.feature, operation: row.operation, service: row.service })} className="rounded-xl border border-surface-border px-3 py-2 text-sm text-text-secondary hover:text-text-primary">查看明细</button></td></tr>)}</Table>{rows.length === 0 && !error && <Empty />}</Card>;
+  const groups = groupModuleRows(rows);
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-3xl border border-surface-border bg-surface-card p-6 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-text-primary">产品模块下钻</h2>
+            <p className="mt-1 text-sm text-text-secondary">先看模块，再展开到功能和操作；点击任意层级可进入账本明细。</p>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-sm">
+            <div className="rounded-2xl bg-surface-elevated px-4 py-3"><div className="text-text-tertiary">模块</div><div className="font-semibold text-text-primary">{groups.length}</div></div>
+            <div className="rounded-2xl bg-surface-elevated px-4 py-3"><div className="text-text-tertiary">调用</div><div className="font-semibold text-text-primary">{formatNumber(sumRows(rows, "requests"))}</div></div>
+            <div className="rounded-2xl bg-surface-elevated px-4 py-3"><div className="text-text-tertiary">成本</div><div className="font-semibold text-text-primary">{formatRMB(sumRows(rows, "cost_rmb"))}</div></div>
+          </div>
+        </div>
+        {error && <div className="mt-4"><InlineError message={error} /></div>}
+        {rows.length === 0 && !error && <div className="mt-4"><Empty /></div>}
+      </div>
+
+      {groups.map((group) => (
+        <section key={group.module} className="rounded-3xl border border-surface-border bg-surface-card p-5 shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-surface-border pb-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="rounded-full bg-brand/10 px-3 py-1 text-sm font-medium text-brand">{group.module}</span>
+                <span className="text-sm text-text-tertiary">{group.features.length} 个功能</span>
+              </div>
+              <div className="mt-2 text-sm text-text-secondary">{formatNumber(group.requests)} 次调用 · 失败 {formatNumber(group.failures)} · 最近 {formatDateTime(group.lastUsedAt)}</div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="rounded-2xl bg-surface-elevated px-4 py-2 text-right"><div className="text-xs text-text-tertiary">成本</div><div className="font-semibold text-text-primary">{formatRMB(group.cost)}</div></div>
+              <button onClick={() => onDrilldown({ module: group.module })} className="rounded-xl border border-surface-border px-3 py-2 text-sm text-text-secondary hover:text-text-primary">看模块明细</button>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {group.features.map((feature) => (
+              <div key={`${group.module}-${feature.feature}`} className="rounded-2xl bg-surface-elevated p-4">
+                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <div className="font-medium text-text-primary">{feature.feature}</div>
+                    <div className="text-xs text-text-tertiary">{formatNumber(feature.requests)} 次 · {formatRMB(feature.cost)} · {feature.operations.length} 个操作</div>
+                  </div>
+                  <button onClick={() => onDrilldown({ module: group.module, feature: feature.feature })} className="rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm text-text-secondary hover:text-text-primary">看功能明细</button>
+                </div>
+                <div className="mt-3 grid gap-2 xl:grid-cols-2">
+                  {feature.operations.map((row) => (
+                    <button key={`${row.module}-${row.feature}-${row.operation}-${row.service}`} onClick={() => onDrilldown({ module: row.module, feature: row.feature, operation: row.operation, service: row.service })} className="rounded-xl border border-surface-border bg-surface-card p-3 text-left hover:border-brand/40">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate font-medium text-text-primary">{row.operation || "unknown"}</div>
+                          <div className="mt-1 flex flex-wrap gap-1 text-xs text-text-tertiary"><span>{row.service || "unknown"}</span><span>·</span><span>{formatNumber(row.requests)} 次</span><span>·</span><span>失败 {formatNumber(row.failures || 0)}</span></div>
+                        </div>
+                        <div className="shrink-0 text-right"><div className="font-semibold text-text-primary">{formatRMB(row.cost_rmb)}</div><div className="text-xs text-text-tertiary">{usageUnitSummary(row)}</div></div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function scenarioStat(rows: AdminUsageModuleRow[], patch: Partial<UsageFilters>) {
+  const matched = rows.filter((row) => {
+    if (patch.module && row.module !== patch.module) return false;
+    if (patch.feature && row.feature !== patch.feature) return false;
+    if (patch.operation && row.operation !== patch.operation) return false;
+    if (patch.service && row.service !== patch.service) return false;
+    return true;
+  });
+  return {
+    requests: matched.reduce((sum, row) => sum + (row.requests || 0), 0),
+    cost: matched.reduce((sum, row) => sum + (row.cost_rmb || 0), 0),
+  };
+}
+
+function groupModuleRows(rows: AdminUsageModuleRow[]) {
+  const modules = new Map<string, AdminUsageModuleRow[]>();
+  rows.forEach((row) => {
+    const key = row.module || "unknown";
+    modules.set(key, [...(modules.get(key) || []), row]);
+  });
+
+  return Array.from(modules.entries()).map(([module, moduleRows]) => {
+    const featuresMap = new Map<string, AdminUsageModuleRow[]>();
+    moduleRows.forEach((row) => {
+      const key = row.feature || "unknown";
+      featuresMap.set(key, [...(featuresMap.get(key) || []), row]);
+    });
+    const features = Array.from(featuresMap.entries()).map(([feature, featureRows]) => ({
+      feature,
+      cost: sumRows(featureRows, "cost_rmb"),
+      requests: sumRows(featureRows, "requests"),
+      operations: [...featureRows].sort((a, b) => (b.cost_rmb || 0) - (a.cost_rmb || 0)),
+    })).sort((a, b) => b.cost - a.cost);
+
+    return {
+      module,
+      features,
+      cost: sumRows(moduleRows, "cost_rmb"),
+      requests: sumRows(moduleRows, "requests"),
+      failures: sumRows(moduleRows, "failures"),
+      lastUsedAt: latestDate(moduleRows.map((row) => row.last_used_at)),
+    };
+  }).sort((a, b) => b.cost - a.cost);
+}
+
+function sumRows(rows: AdminUsageModuleRow[], key: keyof Pick<AdminUsageModuleRow, "requests" | "failures" | "cost_rmb">) {
+  return rows.reduce((sum, row) => sum + (Number(row[key]) || 0), 0);
+}
+
+function latestDate(values: Array<string | undefined>) {
+  return values.filter(Boolean).sort().at(-1) || "";
+}
+
+function usageUnitSummary(row: AdminUsageModuleRow) {
+  if (row.video_seconds) return `${formatNumber(row.video_seconds)}s`;
+  if (row.character_count) return `${formatNumber(row.character_count)} 字`;
+  if (row.image_count) return `${formatNumber(row.image_count)} 图`;
+  if (row.total_tokens) return `${formatNumber(row.total_tokens)} tok`;
+  return "-";
 }
 
 function ConversationsUsage({ conversations, error }: { conversations: AdminUsageConversationsResponse | null; error?: string }) {
