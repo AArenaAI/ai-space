@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, BarChart3, ChevronDown, Clipboard, Coins, FilterX, ListFilter, MessageSquare, RefreshCw, Search, ServerCrash, Users, Zap } from "lucide-react";
 import {
   getAdminUsageConversationDetail,
@@ -92,6 +92,7 @@ const defaultFilters: UsageFilters = {
 
 export default function AdminUsagePage() {
   const [filters, setFilters] = useState<UsageFilters>(defaultFilters);
+  const [debouncedFilters, setDebouncedFilters] = useState<UsageFilters>(defaultFilters);
   const [tab, setTab] = useState<UsageTab>("modules");
   const [summary, setSummary] = useState<AdminUsageSummary | null>(null);
   const [logs, setLogs] = useState<AdminUsageLogsResponse | null>(null);
@@ -111,45 +112,77 @@ export default function AdminUsagePage() {
   const [loading, setLoading] = useState(true);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const loadSeqRef = useRef(0);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedFilters(filters), 450);
+    return () => window.clearTimeout(timer);
+  }, [filters]);
 
   const logParams = useMemo(() => ({
     page,
     pageSize: 50,
-    range: filters.range,
-    module: filters.module,
-    feature: filters.feature,
-    operation: filters.operation,
-    service: filters.service,
-    provider: filters.provider,
-    model: filters.model,
-    status: filters.status,
-    userId: numberOrUndefined(filters.userId),
-    resourceType: filters.resourceType,
-    resourceId: numberOrUndefined(filters.resourceId),
-    requestId: filters.requestId,
-    q: filters.q,
+    range: debouncedFilters.range,
+    module: debouncedFilters.module,
+    feature: debouncedFilters.feature,
+    operation: debouncedFilters.operation,
+    service: debouncedFilters.service,
+    provider: debouncedFilters.provider,
+    model: debouncedFilters.model,
+    status: debouncedFilters.status,
+    userId: numberOrUndefined(debouncedFilters.userId),
+    resourceType: debouncedFilters.resourceType,
+    resourceId: numberOrUndefined(debouncedFilters.resourceId),
+    requestId: debouncedFilters.requestId,
+    q: debouncedFilters.q,
     sort: "created_at",
     order: "desc" as const,
-  }), [filters, page]);
+  }), [debouncedFilters, page]);
+
+  const aggregateFiltersKey = useMemo(() => JSON.stringify({
+    range: debouncedFilters.range,
+    module: debouncedFilters.module,
+    feature: debouncedFilters.feature,
+    operation: debouncedFilters.operation,
+    service: debouncedFilters.service,
+    provider: debouncedFilters.provider,
+    model: debouncedFilters.model,
+    userId: debouncedFilters.userId,
+  }), [debouncedFilters]);
+  const aggregateFiltersRef = useRef("");
 
   const load = async () => {
+    const seq = ++loadSeqRef.current;
+    const currentFilters = debouncedFilters;
+    const currentLogParams = logParams;
+    const shouldRefreshAggregates = aggregateFiltersRef.current !== aggregateFiltersKey;
     setLoading(true);
-    const [summaryResult, logResult, usersResult, modulesResult, modelsResult, conversationsResult] = await Promise.allSettled([
-      getAdminUsageSummary(filters.range === "all" ? "30d" : filters.range),
-      getAdminUsageLogs(logParams),
-      getAdminUsageUsers({ page: 1, pageSize: 30, range: filters.range, service: filters.service, provider: filters.provider, model: filters.model }),
-      getAdminUsageModules({ range: filters.range, module: filters.module, feature: filters.feature, operation: filters.operation, service: filters.service, provider: filters.provider, model: filters.model, limit: 160 }),
-      getAdminUsageModels({ range: filters.range, service: filters.service, provider: filters.provider, limit: 120 }),
-      getAdminUsageConversations({ page: 1, pageSize: 30, range: filters.range, userId: numberOrUndefined(filters.userId), service: filters.service, provider: filters.provider, model: filters.model }),
-    ]);
+
+    const logResult = await getAdminUsageLogs(currentLogParams)
+      .then((value) => ({ status: "fulfilled" as const, value }))
+      .catch((reason) => ({ status: "rejected" as const, reason }));
+    if (seq !== loadSeqRef.current) return;
 
     const nextErrors: Record<string, string> = {};
-    if (summaryResult.status === "fulfilled") setSummary(summaryResult.value); else nextErrors.summary = errorMessage(summaryResult.reason, "查询总览失败");
     if (logResult.status === "fulfilled") setLogs(logResult.value); else nextErrors.ledger = errorMessage(logResult.reason, "查询用量日志失败");
-    if (usersResult.status === "fulfilled") setUsers(usersResult.value); else nextErrors.users = errorMessage(usersResult.reason, "查询用户用量失败");
-    if (modulesResult.status === "fulfilled") setModules(modulesResult.value); else nextErrors.modules = errorMessage(modulesResult.reason, "查询产品模块用量失败");
-    if (modelsResult.status === "fulfilled") setModels(modelsResult.value); else nextErrors.models = errorMessage(modelsResult.reason, "查询模型用量失败");
-    if (conversationsResult.status === "fulfilled") setConversations(conversationsResult.value); else nextErrors.conversations = errorMessage(conversationsResult.reason, "查询对话用量失败");
+
+    if (shouldRefreshAggregates) {
+      const [summaryResult, usersResult, modulesResult, modelsResult, conversationsResult] = await Promise.allSettled([
+        getAdminUsageSummary(currentFilters.range === "all" ? "30d" : currentFilters.range),
+        getAdminUsageUsers({ page: 1, pageSize: 30, range: currentFilters.range, service: currentFilters.service, provider: currentFilters.provider, model: currentFilters.model }),
+        getAdminUsageModules({ range: currentFilters.range, module: currentFilters.module, feature: currentFilters.feature, operation: currentFilters.operation, service: currentFilters.service, provider: currentFilters.provider, model: currentFilters.model, limit: 160 }),
+        getAdminUsageModels({ range: currentFilters.range, service: currentFilters.service, provider: currentFilters.provider, limit: 120 }),
+        getAdminUsageConversations({ page: 1, pageSize: 30, range: currentFilters.range, userId: numberOrUndefined(currentFilters.userId), service: currentFilters.service, provider: currentFilters.provider, model: currentFilters.model }),
+      ]);
+      if (seq !== loadSeqRef.current) return;
+      if (summaryResult.status === "fulfilled") setSummary(summaryResult.value); else nextErrors.summary = errorMessage(summaryResult.reason, "查询总览失败");
+      if (usersResult.status === "fulfilled") setUsers(usersResult.value); else nextErrors.users = errorMessage(usersResult.reason, "查询用户用量失败");
+      if (modulesResult.status === "fulfilled") setModules(modulesResult.value); else nextErrors.modules = errorMessage(modulesResult.reason, "查询产品模块用量失败");
+      if (modelsResult.status === "fulfilled") setModels(modelsResult.value); else nextErrors.models = errorMessage(modelsResult.reason, "查询模型用量失败");
+      if (conversationsResult.status === "fulfilled") setConversations(conversationsResult.value); else nextErrors.conversations = errorMessage(conversationsResult.reason, "查询对话用量失败");
+      aggregateFiltersRef.current = aggregateFiltersKey;
+    }
+
     setErrors(nextErrors);
     setLoading(false);
   };
