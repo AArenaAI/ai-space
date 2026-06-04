@@ -99,6 +99,7 @@ export default function AdminUsagePage() {
   const [page, setPage] = useState(1);
   const [selectedLog, setSelectedLog] = useState<AdminUsageLog | null>(null);
   const [selectedUserDetail, setSelectedUserDetail] = useState<AdminUsageUserDetail | null>(null);
+  const [selectedUserLogs, setSelectedUserLogs] = useState<AdminUsageLog[]>([]);
   const [userDetailLoading, setUserDetailLoading] = useState(false);
   const [userDetailError, setUserDetailError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -179,13 +180,19 @@ export default function AdminUsagePage() {
 
   const openUserDetail = async (user: AdminUsageUserRow) => {
     setUserDetailError("");
+    setSelectedUserLogs([]);
     setUserDetailLoading(true);
+    const fallbackDetail: AdminUsageUserDetail = { user: { id: user.user_id, email: user.email, name: user.name, role: "user", plan_tier: "", basic_credits: 0, advanced_credits: 0, elite_credits: 0, created_at: "", updated_at: "" }, summary: { requests: user.requests, failures: user.failures || 0, cost_rmb: user.cost_rmb, total_tokens: user.total_tokens || 0, image_count: user.image_count || 0 }, services: user.services || [], models: [], conversations: [] };
+    setSelectedUserDetail(fallbackDetail);
     try {
-      const detail = await getAdminUsageUserDetail(user.user_id, { range: filters.range });
-      setSelectedUserDetail(detail);
-    } catch (error) {
-      setUserDetailError(errorMessage(error, "查询用户详情失败"));
-      setSelectedUserDetail({ user: { id: user.user_id, email: user.email, name: user.name, role: "user", plan_tier: "", basic_credits: 0, advanced_credits: 0, elite_credits: 0, created_at: "", updated_at: "" }, summary: { requests: user.requests, failures: user.failures || 0, cost_rmb: user.cost_rmb, total_tokens: user.total_tokens || 0, image_count: user.image_count || 0 }, services: user.services || [], models: [], conversations: [] });
+      const [detailResult, logsResult] = await Promise.allSettled([
+        getAdminUsageUserDetail(user.user_id, { range: filters.range }),
+        getAdminUsageLogs({ page: 1, pageSize: 20, range: filters.range, userId: user.user_id, sort: "created_at", order: "desc" }),
+      ]);
+      const messages: string[] = [];
+      if (detailResult.status === "fulfilled") setSelectedUserDetail(detailResult.value); else messages.push(errorMessage(detailResult.reason, "查询用户详情失败"));
+      if (logsResult.status === "fulfilled") setSelectedUserLogs(logsResult.value.logs || []); else messages.push(errorMessage(logsResult.reason, "查询用户最近账本失败"));
+      setUserDetailError(messages.join("；"));
     } finally {
       setUserDetailLoading(false);
     }
@@ -245,7 +252,7 @@ export default function AdminUsagePage() {
       {tab === "models" && <ModelsUsage models={models} summary={summary} error={errors.models} />}
       {tab === "conversations" && <ConversationsUsage conversations={conversations} error={errors.conversations} />}
       {selectedLog && <UsageLogDrawer log={selectedLog} onClose={() => setSelectedLog(null)} />}
-      {(selectedUserDetail || userDetailLoading || userDetailError) && <UserUsageDrawer detail={selectedUserDetail} loading={userDetailLoading} error={userDetailError} range={filters.range} onClose={() => { setSelectedUserDetail(null); setUserDetailError(""); }} onDrilldownLedger={drilldownUserLedger} />}
+      {(selectedUserDetail || userDetailLoading || userDetailError) && <UserUsageDrawer detail={selectedUserDetail} logs={selectedUserLogs} loading={userDetailLoading} error={userDetailError} range={filters.range} onClose={() => { setSelectedUserDetail(null); setSelectedUserLogs([]); setUserDetailError(""); }} onDrilldownLedger={drilldownUserLedger} onSelectLog={(log) => { setSelectedUserDetail(null); setSelectedLog(log); }} />}
     </div>
   );
 }
@@ -553,7 +560,7 @@ function UsageNumbers({ log }: { log: AdminUsageLog }) {
   return <>{parts.length ? parts.map((part) => <div key={part}>{part}</div>) : "-"}</>;
 }
 
-function UserUsageDrawer({ detail, loading, error, range, onClose, onDrilldownLedger }: { detail: AdminUsageUserDetail | null; loading: boolean; error: string; range: string; onClose: () => void; onDrilldownLedger: (userId: number) => void }) {
+function UserUsageDrawer({ detail, logs, loading, error, range, onClose, onDrilldownLedger, onSelectLog }: { detail: AdminUsageUserDetail | null; logs: AdminUsageLog[]; loading: boolean; error: string; range: string; onClose: () => void; onDrilldownLedger: (userId: number) => void; onSelectLog: (log: AdminUsageLog) => void }) {
   const user = detail?.user;
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={onClose}>
@@ -600,6 +607,14 @@ function UserUsageDrawer({ detail, loading, error, range, onClose, onDrilldownLe
                 {(detail.conversations || []).map((item) => <tr key={item.conversation_id} className="border-t border-surface-border"><td className="py-3 pr-4"><div className="max-w-[360px] truncate font-medium text-text-primary">{item.title || `Conversation #${item.conversation_id}`}</div><div className="text-xs text-text-tertiary">ID {item.conversation_id}</div></td><td className="pr-4">{formatNumber(item.requests)}</td><td className="pr-4">{formatNumber(item.total_tokens || 0)}</td><td className="font-semibold text-text-primary">{formatRMB(item.cost_rmb)}</td><td className="whitespace-nowrap text-text-tertiary">{formatDateTime(item.last_used_at)}</td></tr>)}
               </Table>
               {(detail.conversations || []).length === 0 && <Empty />}
+            </Card>
+
+            <Card title="最近 20 条账本记录">
+              <Table headers={["时间", "产品/操作", "服务", "模型", "用量", "成本", "状态"]}>
+                {logs.map((log) => <tr key={log.id} onClick={() => onSelectLog(log)} className="cursor-pointer border-t border-surface-border hover:bg-surface-elevated/40"><td className="whitespace-nowrap py-3 pr-4 text-xs">{formatDateTime(log.created_at)}</td><td className="min-w-[180px] pr-4"><div className="font-medium text-text-primary">{log.module || "-"} / {log.feature || "-"}</div><div className="text-xs text-text-tertiary">{log.operation || "-"}</div></td><td className="pr-4"><StatusBadge tone="blue">{log.service || "unknown"}</StatusBadge></td><td className="max-w-[260px] truncate pr-4"><div className="text-xs text-text-tertiary">{log.provider || "-"}</div><div className="truncate font-medium text-text-primary">{log.model || "-"}</div></td><td className="pr-4 text-xs"><UsageNumbers log={log} /></td><td className="font-semibold text-text-primary">{formatRMB(log.total_cost_rmb)}</td><td><StatusBadge tone={log.status === "success" ? "green" : log.status === "failed" ? "red" : "amber"}>{log.estimated ? `${log.status} · 估` : log.status || "unknown"}</StatusBadge></td></tr>)}
+              </Table>
+              {logs.length === 0 && !loading && <Empty />}
+              <div className="mt-3 text-xs text-text-tertiary">点击任一记录可打开单条账本详情。</div>
             </Card>
           </div>
         )}
