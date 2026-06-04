@@ -76,6 +76,7 @@
     "test:chat-real-e2e-extra": "node scripts/regression/chat-real-e2e-extra.cjs",
     "test:chat-real-live-send-e2e": "node scripts/regression/chat-real-live-send-e2e.cjs",
     "test:chat-conversation-switch-real-performance": "node scripts/regression/chat-conversation-switch-real-performance.cjs",
+    "profile:chat-history-real": "node scripts/regression/chat-history-real-profile.cjs",
     "test:chat-streaming-state-fixture": "node scripts/regression/chat-streaming-state-fixture.cjs",
     "test:chat-i18n-residue-fixture": "node scripts/regression/chat-i18n-residue-fixture.cjs",
     "test:chat-markdown-code-fixture": "node scripts/regression/chat-markdown-code-fixture.cjs",

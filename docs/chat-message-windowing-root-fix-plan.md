@@ -626,14 +626,23 @@ npm run test:chat-conversation-restore-runtime-hook
 
 ## 10. 下一步建议
 
-下一步不建议继续扩大 Markdown rich-lite 范围。更安全的方向是先补一个真实上滑历史 E2E/profile 脚本，专门衡量：
+已补充真实上滑历史 profile 脚本：
 
-```text
-打开 62 或 12 -> 初始落底 -> 用户上滑触发本地 +8 / 远端 older page
-记录新进入窗口的 assistant 行是否 plain/rich-lite、anchor top delta、scrollTop、row commits、Markdown 事件数。
+```bash
+npm run profile:chat-history-real
 ```
 
-如果该脚本确认 Step 3.1d 对观感改善仍有限，再考虑把 `historyRichLiteFallback` 从全列表 boolean 收窄为“本轮 prepend 新加入 message ids”的白名单，避免 prepend 窗口内所有行 prop flip。
+脚本通过真实账号登录、经本地 proxy 打开指定会话、记录自然初始落底、归一到底部、上滑触发本地窗口释放 / older page，并输出：
+
+```text
+visibleMessageCount / hiddenLocalMessageCount
+anchor top delta / settle delta
+Markdown plain fallback / rich-lite / full signals
+message-row / message-list / markdown render profile events
+post-prepend long tasks
+```
+
+真实 12 曾暴露一个重要问题：页面已到 `scrollTop=0`、仍有 `hiddenLocalMessageCount`，但 Virtuoso `startReached` 没触发本地 +8；当前修复是在 `onWheel(deltaY<0 && scrollTop<=4)` 和 `onScroll(scrollTop<=4)` 中复用同一个本地窗口释放 helper，作为 `startReached` 的兜底。
 
 ## 11. 结论
 

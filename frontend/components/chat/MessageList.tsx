@@ -233,6 +233,11 @@ function MessageList({
   const loadingMoreTriggeredRef = useRef(false);
   const loadMoreAnchorRef = useRef<{ messageId: string; top: number; messageCount: number } | null>(null);
   const localWindowReleaseAwaitingScrollAwayRef = useRef(false);
+  const localWindowReleaseStateRef = useRef({
+    hasHiddenLocalMessages: false,
+    visibleMessageCount: 0,
+    allVisibleMessageCount: 0,
+  });
   const programmaticScrollUntilRef = useRef(0);
   const userScrollOverrideUntilRef = useRef(0);
   const bottomLockRafRef = useRef<number>(0);
@@ -456,6 +461,27 @@ function MessageList({
     return true;
   }, [updateScrollProgressFromElement]);
 
+  const releaseHiddenLocalMessages = useCallback((el: HTMLElement) => {
+    const state = localWindowReleaseStateRef.current;
+    if (!state.hasHiddenLocalMessages || localWindowReleaseAwaitingScrollAwayRef.current) return false;
+    const firstVisibleRow = Array.from(el.querySelectorAll<HTMLElement>('[data-chat-message-row="true"]'))
+      .find((row) => row.getBoundingClientRect().bottom >= el.getBoundingClientRect().top + 8);
+    const messageId = firstVisibleRow?.dataset.messageId;
+    if (!messageId || !firstVisibleRow) return false;
+
+    loadMoreAnchorRef.current = {
+      messageId,
+      top: firstVisibleRow.getBoundingClientRect().top,
+      messageCount: state.visibleMessageCount,
+    };
+    localWindowReleaseAwaitingScrollAwayRef.current = true;
+    setRenderedMessageWindow((current) =>
+      Math.min(current + MESSAGE_WINDOW_PAGE_SIZE, state.allVisibleMessageCount)
+    );
+    stopBottomLockForUserBrowse(1800);
+    return true;
+  }, [stopBottomLockForUserBrowse]);
+
   const handleVirtuosoScroll = useCallback((event: UIEvent<HTMLElement>) => {
     const el = event.currentTarget;
     scrollRef.current = el as HTMLDivElement;
@@ -486,6 +512,10 @@ function MessageList({
     }
 
     const scrollerRect = el.getBoundingClientRect();
+
+    if (el.scrollTop <= 4 && releaseHiddenLocalMessages(el)) {
+      return;
+    }
 
     // Extreme positions: at very top -> earliest user message; at very bottom -> latest user message.
     if (el.scrollTop <= 4 && userOverviewMessagesRef.current.length > 0) {
@@ -526,7 +556,7 @@ function MessageList({
       setActiveOverviewMessageId((previous) => previous === centeredUserRow.dataset.messageId ? previous : centeredUserRow.dataset.messageId || null);
     }
 
-  }, [stopBottomLockForUserBrowse, updateScrollProgressFromElement]);
+  }, [releaseHiddenLocalMessages, stopBottomLockForUserBrowse, updateScrollProgressFromElement]);
 
   const markUserBrowsing = useCallback((duration = 2500) => {
     setUserBrowsing(true);
@@ -579,6 +609,9 @@ function MessageList({
       return;
     }
     if (deltaY === 0) return;
+    if (deltaY < 0 && el.scrollTop <= 4 && releaseHiddenLocalMessages(el)) {
+      return;
+    }
     const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     if (distanceToBottom > 1) {
       stopBottomLockForUserBrowse(2500);
@@ -586,7 +619,7 @@ function MessageList({
       atBottomRef.current = false;
       setAtBottom(false);
     }
-  }, [markUserBrowsing, stopBottomLockForUserBrowse]);
+  }, [markUserBrowsing, releaseHiddenLocalMessages, stopBottomLockForUserBrowse]);
 
   useLayoutEffect(() => {
     const anchor = loadMoreAnchorRef.current;
@@ -717,6 +750,11 @@ function MessageList({
   }, [allVisibleMessages, effectiveRenderedMessageWindow]);
   const hiddenLocalMessageCount = allVisibleMessages.length - visibleMessages.length;
   const hasHiddenLocalMessages = hiddenLocalMessageCount > 0;
+  localWindowReleaseStateRef.current = {
+    hasHiddenLocalMessages,
+    visibleMessageCount: visibleMessages.length,
+    allVisibleMessageCount: allVisibleMessages.length,
+  };
 
   useEffect(() => {
     const previousAllVisibleMessages = previousAllVisibleMessagesRef.current;
@@ -1505,17 +1543,7 @@ function MessageList({
           if (!messageId || !firstVisibleRow) return;
 
           if (hasHiddenLocalMessages) {
-            if (localWindowReleaseAwaitingScrollAwayRef.current) return;
-            loadMoreAnchorRef.current = {
-              messageId,
-              top: firstVisibleRow.getBoundingClientRect().top,
-              messageCount: visibleMessages.length,
-            };
-            localWindowReleaseAwaitingScrollAwayRef.current = true;
-            setRenderedMessageWindow((current) =>
-              Math.min(current + MESSAGE_WINDOW_PAGE_SIZE, allVisibleMessages.length)
-            );
-            stopBottomLockForUserBrowse(1800);
+            releaseHiddenLocalMessages(el);
             return;
           }
 
