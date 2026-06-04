@@ -76,8 +76,8 @@ const FAST_SCROLL_PRELOAD_PX = 6000;
 const RETURN_TO_BOTTOM_PRELOAD_BOTTOM_PX = 6000;
 const HISTORY_OVERSCAN_REVERSE = 8;
 const INITIAL_RENDERED_MESSAGE_WINDOW = 16;
-const CONTENT_HEAVY_INITIAL_RENDERED_MESSAGE_WINDOW = 8;
-const MAX_STABLE_RICH_LITE_ASSISTANTS_IN_RENDER_WINDOW = 8;
+const CONTENT_HEAVY_INITIAL_RENDERED_MESSAGE_WINDOW = 32;
+const MAX_STABLE_RICH_LITE_ASSISTANTS_IN_RENDER_WINDOW = 16;
 const MESSAGE_WINDOW_PAGE_SIZE = 8;
 const MIN_HIDDEN_MESSAGES_TO_WINDOW = 8;
 const CONTENT_HEAVY_TOTAL_CHARS_THRESHOLD = 24_000;
@@ -233,7 +233,7 @@ function MessageList({
   const stickToBottomRef = useRef(true);
   const lastScrollTopRef = useRef(0);
   const loadingMoreTriggeredRef = useRef(false);
-  const loadMoreAnchorRef = useRef<{ messageId: string; top: number; messageCount: number } | null>(null);
+  const loadMoreAnchorRef = useRef<{ messageId: string; top: number; messageCount: number; source?: "local-window" | "remote-history" } | null>(null);
   const localWindowReleaseAwaitingScrollAwayRef = useRef(false);
   const localWindowReleasedRef = useRef(false);
   const localWindowReleaseIntentUntilRef = useRef(0);
@@ -479,6 +479,7 @@ function MessageList({
       messageId,
       top: firstVisibleRow?.getBoundingClientRect().top ?? el.getBoundingClientRect().top,
       messageCount: state.visibleMessageCount,
+      source: "local-window",
     };
     localWindowReleaseAwaitingScrollAwayRef.current = true;
     localWindowReleasedRef.current = true;
@@ -828,6 +829,16 @@ function MessageList({
       if (!row) {
         if (Date.now() - startedAt < 800) {
           raf = window.requestAnimationFrame(restoreAnchor);
+        }
+        return;
+      }
+      if (anchor.source === "local-window") {
+        // Local window release happens while the user is actively browsing upward.
+        // Do not compensate scrollTop in the opposite direction; that creates the
+        // visible stuck-row/back-and-forth flicker. Remote history prepend still
+        // uses anchor restoration below.
+        if (loadMoreAnchorRef.current?.messageId === anchor.messageId) {
+          loadMoreAnchorRef.current = null;
         }
         return;
       }
@@ -1652,7 +1663,13 @@ function MessageList({
           if (!messageId || !firstVisibleRow) return;
 
           if (hasHiddenLocalMessages) {
-            releaseHiddenLocalMessages(el);
+            // Virtuoso can report startReached early while scrolling through a very tall row.
+            // Releasing the local window at that point prepends items above the anchor and
+            // causes a visible opposite-direction scroll compensation. Only release local
+            // hidden messages when the real scroller is actually at the top edge.
+            if (el.scrollTop <= 24) {
+              releaseHiddenLocalMessages(el);
+            }
             return;
           }
 
@@ -1664,6 +1681,7 @@ function MessageList({
             messageId,
             top: firstVisibleRow.getBoundingClientRect().top,
             messageCount: messages.length,
+            source: "remote-history",
           };
           stopBottomLockForUserBrowse(1800);
           onLoadMore?.();
