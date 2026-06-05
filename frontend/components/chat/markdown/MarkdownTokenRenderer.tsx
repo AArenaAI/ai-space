@@ -46,18 +46,19 @@ export default function MarkdownTokenRenderer({
   const heightGuardTimerRef = useRef<number | null>(null);
   const [doc, setDoc] = useState<MarkdownTokenDocument | null>(() => {
     const cached = peekCachedMarkdownTokens(cacheKey);
-    if (cached && !isStreaming && shouldSkipTokenUpgradeForUserBrowse()) return null;
+    if (cached && !isStreaming && !priorityHydrateRichText && shouldSkipTokenUpgradeForUserBrowse()) return null;
     return cached;
   });
   const [renderedBlockCount, setRenderedBlockCount] = useState(INITIAL_TOKEN_BLOCK_BUDGET);
   const [guardMinHeight, setGuardMinHeight] = useState<number | null>(null);
 
   const applyTokenDocument = (next: MarkdownTokenDocument | null, guardHeight = false) => {
-    if (next && !isStreaming && shouldSkipTokenUpgradeForUserBrowse()) {
+    if (next && !isStreaming && !priorityHydrateRichText && shouldSkipTokenUpgradeForUserBrowse()) {
       emitChatRenderProfileEvent("markdown-token-upgrade-skipped-browse", {
         compactPreview,
         contentLength: content.length,
         messageId,
+        priority: priorityHydrateRichText,
       });
       setDoc(null);
       return;
@@ -119,7 +120,7 @@ export default function MarkdownTokenRenderer({
     const scheduleNextBatch = () => {
       window.setTimeout(() => {
         if (cancelled) return;
-        if (!isStreaming && shouldSkipTokenUpgradeForUserBrowse()) {
+        if (!isStreaming && !priorityHydrateRichText && shouldSkipTokenUpgradeForUserBrowse()) {
           emitChatRenderProfileEvent("markdown-token-batch-skipped-browse", {
             blockCount: doc.tokens.length,
             compactPreview,
