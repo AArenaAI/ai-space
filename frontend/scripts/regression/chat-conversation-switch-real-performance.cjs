@@ -366,6 +366,7 @@ async function main() {
       localStorage.setItem("chat-conversation-disable-prefetch", "1");
       window.__chatSwitchPerfEvents = [];
       window.__chatRenderProfileEvents = [];
+      window.__AI_SPACE_CHAT_PROFILE_ENABLED = true;
       window.addEventListener("chat-conversation-switch-performance", (event) => {
         window.__chatSwitchPerfEvents.push(event.detail);
       });

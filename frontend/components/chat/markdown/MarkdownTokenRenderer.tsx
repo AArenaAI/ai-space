@@ -9,19 +9,12 @@ import {
 import { tokenizeMarkdownAsync } from "@/lib/markdown/markdownTokenWorkerClient";
 import type { MarkdownTokenDocument } from "@/lib/markdown/markdownTokenTypes";
 import MarkdownBlockTokenRenderer from "./MarkdownBlockTokenRenderer";
+import { emitChatRenderProfileEvent } from "@/lib/chatRenderProfile";
 
 const INITIAL_TOKEN_BLOCK_BUDGET = 32;
 const TOKEN_BLOCK_BATCH_SIZE = 32;
 const TOKEN_UPGRADE_HEIGHT_GUARD_MS = 1200;
 const TOKEN_UPGRADE_BOTTOM_DISTANCE_THRESHOLD = 48;
-
-function emitChatRenderProfileEvent(phase: string, detail: Record<string, unknown> = {}) {
-  if (typeof window === "undefined") return;
-  const at = typeof performance !== "undefined" ? performance.now() : Date.now();
-  window.dispatchEvent(new CustomEvent("chat-render-profile", {
-    detail: { phase, at, ...detail },
-  }));
-}
 
 function shouldSkipTokenUpgradeForUserBrowse() {
   if (typeof window !== "undefined") {

@@ -13,6 +13,7 @@ import MessageActions from "./MessageActions";
 import UserMessageContent from "./UserMessageContent";
 import { AssistantMessageContent } from "./AssistantMessageContent";
 import { ModelAvatar } from "./ModelAvatar";
+import { emitChatRenderProfileEvent } from "@/lib/chatRenderProfile";
 
 type MarkdownRendererComponent = Parameters<typeof AssistantMessageContent>[0]["MarkdownRenderer"];
 
@@ -28,18 +29,6 @@ function shouldSkipViewportObserversForAssistant(content?: string) {
   const hasCodeFence = content.includes("```");
   const hasTableLine = /(^|\n)\s*\|.+\|\s*(\n|$)/.test(content);
   return !hasCodeFence && !hasTableLine;
-}
-
-function emitChatRenderProfileEvent(phase: string, detail: Record<string, unknown> = {}) {
-  if (typeof window === "undefined") return;
-  const at = typeof performance !== "undefined" ? performance.now() : Date.now();
-  window.dispatchEvent(new CustomEvent("chat-render-profile", {
-    detail: {
-      phase,
-      at,
-      ...detail,
-    },
-  }));
 }
 
 export type MessageRowProps = {

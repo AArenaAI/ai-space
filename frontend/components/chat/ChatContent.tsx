@@ -5,18 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useModels } from "@/hooks/useModels";
 import ChatInterface from "./ChatInterface";
 import { useI18n } from "@/lib/i18n";
-
-function emitChatRenderProfileEvent(phase: string, detail: Record<string, unknown> = {}) {
-  if (typeof window === "undefined") return;
-  const at = typeof performance !== "undefined" ? performance.now() : Date.now();
-  window.dispatchEvent(new CustomEvent("chat-render-profile", {
-    detail: {
-      phase,
-      at,
-      ...detail,
-    },
-  }));
-}
+import { emitChatRenderProfileEvent } from "@/lib/chatRenderProfile";
 
 function ChatSkeleton() {
   const { t } = useI18n();

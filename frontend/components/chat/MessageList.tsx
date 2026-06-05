@@ -14,6 +14,7 @@ import { useI18n } from "@/lib/i18n";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
 import MarkdownPlainFallback from "./markdown/MarkdownPlainFallback";
 import { preheatMarkdownTokens } from "@/lib/markdown/markdownTokenWorkerClient";
+import { emitChatRenderProfileEvent } from "@/lib/chatRenderProfile";
 
 type MarkdownRendererProps = { content: string; isStreaming?: boolean; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean; allowRichLiteFallback?: boolean; compactRichLitePreview?: boolean; messageId?: string | number };
 let markdownRendererPromise: Promise<{ default: ComponentType<MarkdownRendererProps> }> | null = null;
@@ -88,16 +89,6 @@ const CONTENT_HEAVY_TOTAL_CHARS_THRESHOLD = 24_000;
 const CONTENT_HEAVY_CODE_BLOCK_THRESHOLD = 24;
 const CONTENT_HEAVY_TABLE_LINE_THRESHOLD = 80;
 type SelectionMode = "share" | "favorite";
-
-function emitChatRenderProfileEvent(
-  phase: string,
-  detail: { conversationId?: number; messageCount?: number; visibleMessageCount?: number; durationMs?: number } = {}
-) {
-  if (typeof window === "undefined") return;
-  const at = typeof performance !== "undefined" ? performance.now() : Date.now();
-  window.dispatchEvent(new CustomEvent("chat-render-profile", { detail: { phase, at, ...detail } }));
-}
-
 
 interface MessageListProps {
   messages: Message[];

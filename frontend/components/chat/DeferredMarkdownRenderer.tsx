@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType } from "react";
 import MarkdownPlainFallback from "./markdown/MarkdownPlainFallback";
 import MarkdownTokenRenderer from "./markdown/MarkdownTokenRenderer";
+import { emitChatRenderProfileEvent } from "@/lib/chatRenderProfile";
 
 type MarkdownRendererProps = { content: string; isStreaming?: boolean; priorityHydrateRichText?: boolean; messageId?: string | number };
 
@@ -34,18 +35,6 @@ const EXTREME_MARKDOWN_CODE_BLOCK_THRESHOLD = 20;
 const EXTREME_MARKDOWN_TABLE_LINE_THRESHOLD = 100;
 let markdownHydrationSequence = 0;
 let heavyMarkdownHydrationSequence = 0;
-
-function emitChatRenderProfileEvent(phase: string, detail: Record<string, unknown> = {}) {
-  if (typeof window === "undefined") return;
-  const at = typeof performance !== "undefined" ? performance.now() : Date.now();
-  window.dispatchEvent(new CustomEvent("chat-render-profile", {
-    detail: {
-      phase,
-      at,
-      ...detail,
-    },
-  }));
-}
 
 function nextMarkdownHydrationDelay() {
   markdownHydrationSequence = (markdownHydrationSequence + 1) % 6;

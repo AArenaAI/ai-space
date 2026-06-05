@@ -76,6 +76,7 @@ export default function ChatRowMemoFixture() {
   const handleRegenerate = useCallback(() => {}, []);
 
   useEffect(() => {
+    (window as Window & { __AI_SPACE_CHAT_PROFILE_ENABLED?: boolean }).__AI_SPACE_CHAT_PROFILE_ENABLED = true;
     const onProfile = (event: Event) => {
       const detail = (event as CustomEvent<RenderEvent>).detail;
       eventsRef.current.push(detail);

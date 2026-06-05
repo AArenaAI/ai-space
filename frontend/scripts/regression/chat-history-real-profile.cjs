@@ -343,6 +343,7 @@ async function main() {
       localStorage.setItem("user", JSON.stringify(userValue || {}));
       localStorage.setItem("theme", "green");
       window.__chatRenderProfileEvents = [];
+      window.__AI_SPACE_CHAT_PROFILE_ENABLED = true;
       window.__longTasks = [];
       try {
         new PerformanceObserver((list) => {

@@ -2,6 +2,7 @@
 
 import { memo, useEffect, useMemo } from "react";
 import CodeBlock from "./markdown/CodeBlock";
+import { emitChatRenderProfileEvent } from "@/lib/chatRenderProfile";
 
 const STABLE_LITE_RICH_CHARS = 3500;
 const STABLE_LITE_RICH_LINES = 50;
@@ -36,14 +37,6 @@ type LiteParseResult = {
 };
 
 const liteParseCache = new Map<string, Omit<LiteParseResult, "parseMs" | "wasCacheHit">>();
-
-function emitChatRenderProfileEvent(phase: string, detail: Record<string, unknown> = {}) {
-  if (typeof window === "undefined") return;
-  const at = typeof performance !== "undefined" ? performance.now() : Date.now();
-  window.dispatchEvent(new CustomEvent("chat-render-profile", {
-    detail: { phase, at, ...detail },
-  }));
-}
 
 function rememberLiteParse(content: string, value: Omit<LiteParseResult, "parseMs" | "wasCacheHit">) {
   liteParseCache.set(content, value);

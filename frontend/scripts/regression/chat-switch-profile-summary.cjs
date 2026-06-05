@@ -225,6 +225,7 @@ function summarize(allResults) {
       localStorage.setItem("token", token);
       localStorage.setItem("user", JSON.stringify(user || {}));
       window.__chatRenderProfileEvents = [];
+      window.__AI_SPACE_CHAT_PROFILE_ENABLED = true;
       window.__AI_SPACE_CHAT_ROW_PROFILE_DETAIL = true;
       window.__longTasks = [];
       window.__fetchProfileEvents = [];
