@@ -135,6 +135,7 @@ const translations: Record<string, string> = {
   "notebook.renameFailed": "Rename failed",
   "notebook.renamePrompt": "Enter notebook name",
   "notebook.renameSuccess": "Name updated",
+  "notebook.resizeSources": "Drag to resize the sources panel",
   "notebook.searchPlaceholder": "Search notebooks...",
   "notebook.selectAllSources": "Select all",
   "notebook.selectedSources": "{selected}/{total} sources selected for answers",

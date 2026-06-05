@@ -135,6 +135,7 @@ const translations: Record<string, string> = {
   "notebook.renameFailed": "重命名失败",
   "notebook.renamePrompt": "输入笔记本名称",
   "notebook.renameSuccess": "名称已更新",
+  "notebook.resizeSources": "拖动调整资料栏宽度",
   "notebook.searchPlaceholder": "搜索笔记本...",
   "notebook.selectAllSources": "全选",
   "notebook.selectedSources": "已选择 {selected}/{total} 个资料参与回答",

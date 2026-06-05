@@ -31,6 +31,10 @@ function reconcileSelectedFileIds(previous: number[], files: NotebookFile[]) {
   return next.length === 0 && files.length > 0 ? files.map((file) => file.file_id) : next;
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
 type Translate = (key: string, params?: Record<string, string>) => string;
 
 function isNotebookFileReady(file: NotebookFile) {
@@ -77,6 +81,7 @@ function NotebookDetailContent() {
   const [dragActive, setDragActive] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
   const [selectedFileIds, setSelectedFileIds] = useState<number[]>([]);
+  const [sourcesWidth, setSourcesWidth] = useState(340);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
@@ -198,6 +203,25 @@ function NotebookDetailContent() {
     }
   };
 
+  const startSourcesResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = sourcesWidth;
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      setSourcesWidth(clamp(startWidth + moveEvent.clientX - startX, 260, 520));
+    };
+    const handlePointerUp = () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+  };
+
   if (loading && !notebook) {
     return <div className="flex h-full items-center justify-center bg-surface"><Loader2 className="h-6 w-6 animate-spin text-brand" /></div>;
   }
@@ -208,7 +232,7 @@ function NotebookDetailContent() {
 
   return (
     <div className="flex h-full min-h-0 bg-surface text-text-primary">
-      <aside className="hidden h-full w-[340px] shrink-0 flex-col border-r border-surface-border bg-surface-elevated/80 lg:flex">
+      <aside className="hidden h-full shrink-0 flex-col bg-surface-elevated/80 lg:flex" style={{ width: sourcesWidth }}>
         <div className="border-b border-surface-border p-5">
           <Link href="/notebooks" className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-text-tertiary transition hover:text-text-primary">
             <ArrowLeft className="h-3.5 w-3.5" />{t("notebook.back")}
@@ -305,6 +329,17 @@ function NotebookDetailContent() {
           )}
         </div>
       </aside>
+
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={t("notebook.resizeSources")}
+        title={t("notebook.resizeSources")}
+        onPointerDown={startSourcesResize}
+        className="group hidden h-full w-2 shrink-0 cursor-col-resize items-stretch justify-center bg-surface-elevated/80 lg:flex"
+      >
+        <div className="h-full w-px bg-surface-border transition group-hover:w-0.5 group-hover:bg-brand/60" />
+      </div>
 
       <section className="min-w-0 flex-1">
         <ChatInterface
