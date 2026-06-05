@@ -24,11 +24,22 @@ const MESSAGE_ROW_CONTENT_VISIBILITY_STYLE: CSSProperties = {
 const MARKDOWN_HYDRATE_ROOT_MARGIN = "1800px 0px";
 const SIMPLE_ASSISTANT_VIEWPORT_OBSERVER_SKIP_LENGTH = 500;
 
+function getMarkdownWeight(content?: string) {
+  const text = content || "";
+  const codeFenceCount = (text.match(/```/g) || []).length;
+  const tableLineCount = text.split("\n").filter((line) => /^\s*\|.+\|\s*$/.test(line)).length;
+  return {
+    codeFenceCount,
+    tableLineCount,
+    hasCodeFence: codeFenceCount > 0,
+    hasTableLine: tableLineCount > 0,
+  };
+}
+
 function shouldSkipViewportObserversForAssistant(content?: string) {
   if (!content || content.length > SIMPLE_ASSISTANT_VIEWPORT_OBSERVER_SKIP_LENGTH) return false;
-  const hasCodeFence = content.includes("```");
-  const hasTableLine = /(^|\n)\s*\|.+\|\s*(\n|$)/.test(content);
-  return !hasCodeFence && !hasTableLine;
+  const weight = getMarkdownWeight(content);
+  return !weight.hasCodeFence && !weight.hasTableLine;
 }
 
 export type MessageRowProps = {
@@ -114,13 +125,24 @@ function MessageRow({
   const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
   const assistantAvatarMeta = getModelAvatarMeta(model || msg.model || "AI");
   const rowProfileDetailEnabled = typeof window !== "undefined" && Boolean((window as Window & { __AI_SPACE_CHAT_ROW_PROFILE_DETAIL?: boolean }).__AI_SPACE_CHAT_ROW_PROFILE_DETAIL);
+  const markdownWeight = rowProfileDetailEnabled ? getMarkdownWeight(msg.content) : null;
+  const groupActiveIndex = group ? groupViews?.get(group.id) ?? 0 : undefined;
+  const groupActiveMessageId = group && groupActiveIndex !== undefined ? group.assistantMessages[groupActiveIndex]?.id : undefined;
   const profileSnapshot = rowProfileDetailEnabled ? {
     allowRichLiteFallback,
     canRegenerate,
+    codeFenceCount: markdownWeight?.codeFenceCount || 0,
+    contentLength: msg.content?.length || 0,
     deferRichTextHydration,
     forceHydrateRichText,
     forceStableRichLiteFallback,
+    groupActiveIndex: groupActiveIndex ?? null,
+    groupId: group?.id ?? null,
+    groupSize: group?.assistantMessages.length || 0,
+    hasCodeFence: markdownWeight?.hasCodeFence || false,
+    hasTableLine: markdownWeight?.hasTableLine || false,
     historyPrependSettling,
+    isActiveGroupMessage: groupActiveMessageId ? String(groupActiveMessageId) === String(msg.id) : true,
     isGenerating,
     isHighlighted,
     isInViewport,
@@ -134,6 +156,8 @@ function MessageRow({
     isViewedAssistant,
     openAvatarDropdown: openAvatarDropdownGroupId === group?.id,
     selectMode,
+    skipViewportObservers,
+    tableLineCount: markdownWeight?.tableLineCount || 0,
   } : null;
   const previousProfileSnapshot = profileSnapshotRef.current;
   const changedProfileKeys = profileSnapshot

@@ -86,6 +86,55 @@ function topChangedKeys(events, limit = 16) {
     .map(([key, count]) => ({ key, count }));
 }
 
+function contentBucket(event) {
+  if (event.role === "user") return "user";
+  const length = Number(event.contentLength || 0);
+  const codeFenceCount = Number(event.codeFenceCount || 0);
+  const tableLineCount = Number(event.tableLineCount || 0);
+  if (event.skipViewportObservers) return "assistant-simple-skip-observer";
+  if (codeFenceCount >= 10 || tableLineCount >= 20 || length >= 5000) return "assistant-heavy";
+  if (length >= 500) return "assistant-medium";
+  return "assistant-short";
+}
+
+function lifecycleBucket(event) {
+  if (event.isLatestAssistant) return "latest";
+  if (event.isInitialReadingAssistant) return "initial-reading";
+  if (event.isInViewport) return "in-viewport";
+  if (event.isNearViewport) return "near-viewport";
+  return "offscreen";
+}
+
+function topRowCommitBuckets(events, filterFn, limit = 16) {
+  const buckets = new Map();
+  for (const event of events) {
+    if (event.phase !== "message-row-commit") continue;
+    if (filterFn && !filterFn(event)) continue;
+    const key = `${contentBucket(event)}|${lifecycleBucket(event)}|group:${Number(event.groupSize || 0) > 1 ? "multi" : "single"}|active:${event.isActiveGroupMessage === false ? "no" : "yes"}`;
+    const current = buckets.get(key) || {
+      bucket: key,
+      count: 0,
+      durationMsTotal: 0,
+      contentLengthMax: 0,
+      examples: [],
+    };
+    current.count += 1;
+    current.durationMsTotal += Number(event.durationMs || 0);
+    current.contentLengthMax = Math.max(current.contentLengthMax, Number(event.contentLength || 0));
+    if (current.examples.length < 5) current.examples.push(String(event.messageId || "unknown"));
+    buckets.set(key, current);
+  }
+  return [...buckets.values()]
+    .sort((a, b) => b.count - a.count || b.durationMsTotal - a.durationMsTotal)
+    .slice(0, limit)
+    .map((entry) => ({
+      ...entry,
+      durationMsTotal: round(entry.durationMsTotal, 1),
+      durationMsAvg: round(entry.durationMsTotal / Math.max(1, entry.count), 2),
+      examples: [...new Set(entry.examples)],
+    }));
+}
+
 function createProxy() {
   const server = http.createServer((req, res) => {
     const targetBase = req.url.startsWith("/api/") || req.url === "/health" ? apiBaseUrl : frontendBaseUrl;
@@ -210,6 +259,8 @@ function summarize(allResults) {
     topLiteMessages: topEntriesByCount(allRecentEvents, "markdown-lite-rendered"),
     topRowCommitMessages: topEntriesByCount(allRecentEvents, "message-row-commit"),
     topRowChangedKeys: topChangedKeys(allRecentEvents),
+    topRowMountBuckets: topRowCommitBuckets(allRecentEvents, (event) => Array.isArray(event.changedKeys) && event.changedKeys.includes("mount")),
+    topRowUnknownBuckets: topRowCommitBuckets(allRecentEvents, (event) => !Array.isArray(event.changedKeys) || event.changedKeys.length === 0),
     topTokenMessages: topEntriesByCount(allRecentEvents, "markdown-token-rendered"),
     byCid,
   };
