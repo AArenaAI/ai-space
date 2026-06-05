@@ -66,6 +66,7 @@ export type NotebookStudioArtifact =
     };
 
 type NotebookStudioPanelProps = {
+  width?: number;
   artifacts: NotebookStudioArtifact[];
   activeArtifactId: string | null;
   generatingType?: NotebookStudioActionId | null;
@@ -262,6 +263,7 @@ function ArtifactMenu({
 }
 
 export function NotebookStudioPanel({
+  width = 390,
   artifacts,
   activeArtifactId,
   generatingType,
@@ -287,7 +289,7 @@ export function NotebookStudioPanel({
   ];
 
   return (
-    <aside className="flex h-full w-[390px] shrink-0 flex-col border-l border-surface-border bg-surface-elevated/70">
+    <aside className="flex h-full shrink-0 flex-col bg-surface-elevated/70" style={{ width }}>
       <div className="border-b border-surface-border p-4">
         <div className="mb-3 flex items-center justify-between">
           <div>

@@ -260,6 +260,7 @@ const translations: Record<string, string> = {
   "notebook.renamePrompt": "Enter notebook name",
   "notebook.renameSuccess": "Name updated",
   "notebook.resizeSources": "Drag to resize the sources panel",
+  "notebook.resizeStudio": "Drag to resize the Studio panel",
   "notebook.searchPlaceholder": "Search notebooks...",
   "notebook.searchNewSources": "Search the web for new sources",
   "notebook.selectAllSources": "Select all",

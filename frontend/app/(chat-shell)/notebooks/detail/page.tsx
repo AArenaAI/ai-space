@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { ArrowLeft, BookOpen, FileText, Globe, Loader2, Plus, Trash2, UploadCloud, AlertCircle, CheckCircle2, Clock3, Check } from "lucide-react";
@@ -169,6 +169,7 @@ function NotebookDetailContent() {
   const [pageError, setPageError] = useState<string | null>(null);
   const [selectedFileIds, setSelectedFileIds] = useState<number[]>([]);
   const [sourcesWidth, setSourcesWidth] = useState(340);
+  const [studioWidth, setStudioWidth] = useState(390);
   const [previewSource, setPreviewSource] = useState<NotebookFile | null>(null);
   const [previewData, setPreviewData] = useState<NotebookFileContent | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -176,6 +177,7 @@ function NotebookDetailContent() {
   const [studioArtifacts, setStudioArtifacts] = useState<NotebookStudioArtifact[]>([]);
   const [activeStudioArtifactId, setActiveStudioArtifactId] = useState<string | null>(null);
   const [generatingStudioType, setGeneratingStudioType] = useState<NotebookStudioActionId | null>(null);
+  const layoutRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const loadStudioArtifacts = async () => {
     if (!notebookId) return;
@@ -218,6 +220,49 @@ function NotebookDetailContent() {
       .replace("{selected}", String(selectedFileIds.length))
       .replace("{total}", String(files.length))
   ), [files.length, selectedFileIds.length, t]);
+
+  const startPaneResize = (pane: "sources" | "studio", event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startSourcesWidth = sourcesWidth;
+    const startStudioWidth = studioWidth;
+    const containerWidth = layoutRef.current?.clientWidth || window.innerWidth;
+    const minSourcesWidth = 260;
+    const maxSourcesWidth = 560;
+    const minStudioWidth = 300;
+    const maxStudioWidth = 760;
+    const minCenterWidth = 420;
+    const handleSpace = 16;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      if (pane === "sources") {
+        const maxByCenter = containerWidth - startStudioWidth - minCenterWidth - handleSpace;
+        setSourcesWidth(clamp(startSourcesWidth + deltaX, minSourcesWidth, Math.min(maxSourcesWidth, maxByCenter)));
+        return;
+      }
+      const maxByCenter = containerWidth - startSourcesWidth - minCenterWidth - handleSpace;
+      setStudioWidth(clamp(startStudioWidth - deltaX, minStudioWidth, Math.min(maxStudioWidth, maxByCenter)));
+    };
+
+    const stopResize = () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", stopResize);
+    window.addEventListener("pointercancel", stopResize);
+  };
 
   const toggleSource = (fileId: number) => {
     setSelectedFileIds((prev) => {
@@ -561,8 +606,8 @@ function NotebookDetailContent() {
 
   return (
     <>
-    <div className="flex h-full min-h-0 overflow-x-auto bg-surface text-text-primary">
-      <aside className="flex h-full w-[340px] shrink-0 flex-col border-r border-surface-border bg-surface-elevated/80">
+    <div ref={layoutRef} className="flex h-full min-h-0 overflow-x-auto bg-surface text-text-primary">
+      <aside className="flex h-full shrink-0 flex-col bg-surface-elevated/80" style={{ width: sourcesWidth }}>
         <div className="border-b border-surface-border p-5">
           <Link href="/notebooks" className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-text-tertiary transition hover:text-text-primary">
             <ArrowLeft className="h-3.5 w-3.5" />{t("notebook.back")}
@@ -669,7 +714,18 @@ function NotebookDetailContent() {
         </div>
       </aside>
 
-      <section className="min-w-0 flex-1">
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={t("notebook.resizeSources")}
+        title={t("notebook.resizeSources")}
+        onPointerDown={(event) => startPaneResize("sources", event)}
+        className="group relative z-10 h-full w-2 shrink-0 cursor-col-resize touch-none bg-transparent"
+      >
+        <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-surface-border transition group-hover:w-1 group-hover:bg-brand" />
+      </div>
+
+      <section className="min-w-[420px] flex-1">
         <ChatInterface
           conversationId={conversationId}
           notebookId={notebookId}
@@ -686,7 +742,18 @@ function NotebookDetailContent() {
           ]}
         />
       </section>
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={t("notebook.resizeStudio")}
+        title={t("notebook.resizeStudio")}
+        onPointerDown={(event) => startPaneResize("studio", event)}
+        className="group relative z-10 h-full w-2 shrink-0 cursor-col-resize touch-none bg-transparent"
+      >
+        <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-surface-border transition group-hover:w-1 group-hover:bg-brand" />
+      </div>
       <NotebookStudioPanel
+        width={studioWidth}
         artifacts={studioArtifacts}
         activeArtifactId={activeStudioArtifactId}
         generatingType={generatingStudioType}

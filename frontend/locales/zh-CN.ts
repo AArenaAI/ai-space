@@ -260,6 +260,7 @@ const translations: Record<string, string> = {
   "notebook.renamePrompt": "输入笔记本名称",
   "notebook.renameSuccess": "名称已更新",
   "notebook.resizeSources": "拖动调整资料栏宽度",
+  "notebook.resizeStudio": "拖动调整 Studio 区宽度",
   "notebook.searchPlaceholder": "搜索笔记本...",
   "notebook.searchNewSources": "在网络中搜索新来源",
   "notebook.selectAllSources": "全选",
