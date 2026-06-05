@@ -928,10 +928,18 @@ function MessageList({
     emitChatRenderProfileEvent("message-list-commit", {
       conversationId,
       messageCount: messages.length,
+      allVisibleMessageCount: allVisibleMessages.length,
       visibleMessageCount: visibleMessages.length,
+      hiddenLocalMessageCount,
+      renderedMessageWindow,
+      effectiveRenderedMessageWindow,
+      initialMessageWindow,
+      targetMessageWindow,
+      isContentHeavyConversation,
+      contentWeight,
       durationMs: commitAt - renderStartedAt,
     });
-  }, [conversationId, messages.length, renderStartedAt, visibleMessages.length]);
+  }, [allVisibleMessages.length, contentWeight, conversationId, effectiveRenderedMessageWindow, hiddenLocalMessageCount, initialMessageWindow, isContentHeavyConversation, messages.length, renderedMessageWindow, renderStartedAt, targetMessageWindow, visibleMessages.length]);
 
   useEffect(() => {
     setRenderedMessageWindow(INITIAL_RENDERED_MESSAGE_WINDOW);

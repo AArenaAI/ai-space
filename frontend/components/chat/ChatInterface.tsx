@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useChat } from "@/hooks/useChat";
 import type { ChatModel } from "@/lib/chatTypes";
 import { useTemplates } from "@/hooks/useTemplates";
@@ -17,6 +17,7 @@ import dynamic from "next/dynamic";
 import { useI18n } from "@/lib/i18n";
 import InputDialog from "@/components/ui/InputDialog";
 import type { ModelRecommendationContext } from "@/lib/models/modelRecommendations";
+import { emitChatRenderProfileEvent } from "@/lib/chatRenderProfile";
 
 const ForkCompareDialog = dynamic(() => import("./ForkCompareDialog"), {
   ssr: false,
@@ -42,6 +43,7 @@ interface ChatInterfaceProps {
 }
 
 export default function ChatInterface({ conversationId, notebookId, notebookTitle, notebookFileCount, notebookFileIds, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId }: ChatInterfaceProps) {
+  const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
   const { t } = useI18n();
   const [compareMode, setCompareMode] = useState(false);
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
@@ -99,6 +101,25 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   } = useChat(conversationId, models, skillKey, notebookId, notebookFileIds);
 
   const { templates } = useTemplates();
+
+  const chatInterfaceProfile = useMemo(() => ({
+    conversationId,
+    currentConversation,
+    messageCount: messages.length,
+    isLoading,
+    isLoadingHistory,
+    isCompare: compareMode || isCompare,
+    notebookId,
+    targetMessageId,
+  }), [conversationId, currentConversation, messages.length, isLoading, isLoadingHistory, compareMode, isCompare, notebookId, targetMessageId]);
+
+  useEffect(() => {
+    const commitAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    emitChatRenderProfileEvent("chat-interface-commit", {
+      ...chatInterfaceProfile,
+      durationMs: commitAt - renderStartedAt,
+    });
+  }, [chatInterfaceProfile, renderStartedAt]);
 
   const getSelectedTemplatePayload = useCallback(() => {
     return { templateId: selectedTemplateId, templatePrefix: undefined };

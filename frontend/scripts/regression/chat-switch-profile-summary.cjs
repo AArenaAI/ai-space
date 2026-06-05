@@ -226,6 +226,38 @@ function topMessageActionsBuckets(events, limit = 8) {
     }));
 }
 
+function topMessageListBuckets(events, limit = 8) {
+  const buckets = new Map();
+  for (const event of events) {
+    if (event.phase !== "message-list-commit") continue;
+    const visible = Number(event.visibleMessageCount || 0);
+    const hidden = Number(event.hiddenLocalMessageCount || 0);
+    const effectiveWindow = Number(event.effectiveRenderedMessageWindow || 0);
+    const initialWindow = Number(event.initialMessageWindow || 0);
+    const key = `heavy:${event.isContentHeavyConversation ? "yes" : "no"}|visible:${visible}|hidden:${hidden}|window:${effectiveWindow}|initial:${initialWindow}`;
+    const current = buckets.get(key) || {
+      bucket: key,
+      count: 0,
+      durationMsTotal: 0,
+      messageCountMax: 0,
+      totalCharsMax: 0,
+    };
+    current.count += 1;
+    current.durationMsTotal += Number(event.durationMs || 0);
+    current.messageCountMax = Math.max(current.messageCountMax, Number(event.messageCount || 0));
+    current.totalCharsMax = Math.max(current.totalCharsMax, Number(event.contentWeight?.totalChars || 0));
+    buckets.set(key, current);
+  }
+  return Array.from(buckets.values())
+    .sort((a, b) => b.count - a.count || b.durationMsTotal - a.durationMsTotal)
+    .slice(0, limit)
+    .map((entry) => ({
+      ...entry,
+      durationMsTotal: round(entry.durationMsTotal, 1),
+      durationMsAvg: round(entry.durationMsTotal / Math.max(1, entry.count), 2),
+    }));
+}
+
 function createProxy() {
   const server = http.createServer((req, res) => {
     const targetBase = req.url.startsWith("/api/") || req.url === "/health" ? apiBaseUrl : frontendBaseUrl;
@@ -438,6 +470,7 @@ function summarize(allResults) {
       liteBeforeBottom0: stats(timelineValues("liteBeforeBottom0")),
       tokenBeforeBottom0: stats(timelineValues("tokenBeforeBottom0")),
     },
+    chatInterfaceCommitCount: stats(allResults.map((result) => Number(result.eventCounts?.["chat-interface-commit"] || 0))),
     rowCommitCount: stats(allResults.map((result) => Number(result.eventCounts?.["message-row-commit"] || 0))),
     listCommitCount: stats(allResults.map((result) => Number(result.eventCounts?.["message-list-commit"] || 0))),
     markdownLiteCount: stats(allResults.map((result) => Number(result.eventCounts?.["markdown-lite-rendered"] || 0))),
@@ -458,6 +491,7 @@ function summarize(allResults) {
     topRowChangedKeys: topChangedKeys(allRecentEvents),
     topRowMountBuckets: topRowCommitBuckets(allRecentEvents, (event) => Array.isArray(event.changedKeys) && event.changedKeys.includes("mount")),
     topRowUnknownBuckets: topRowCommitBuckets(allRecentEvents, (event) => !Array.isArray(event.changedKeys) || event.changedKeys.length === 0),
+    topMessageListBuckets: topMessageListBuckets(allRecentEvents),
     topAssistantMetaMessages: topEntriesByCount(allRecentEvents, "assistant-message-meta-commit"),
     topAssistantMetaBuckets: topAssistantMetaBuckets(allRecentEvents),
     topUserContentMessages: topEntriesByCount(allRecentEvents, "user-message-content-commit"),
