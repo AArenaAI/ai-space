@@ -70,6 +70,22 @@ function topEntriesByCount(events, phase, limit = 10) {
     .map((entry) => ({ ...entry, parseMsTotal: round(entry.parseMsTotal, 2) }));
 }
 
+function topChangedKeys(events, limit = 16) {
+  const counts = new Map();
+  for (const event of events) {
+    if (event.phase !== "message-row-commit") continue;
+    const keys = Array.isArray(event.changedKeys) && event.changedKeys.length > 0 ? event.changedKeys : ["unknown"];
+    for (const key of keys) {
+      const value = String(key || "unknown");
+      counts.set(value, (counts.get(value) || 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, limit)
+    .map(([key, count]) => ({ key, count }));
+}
+
 function createProxy() {
   const server = http.createServer((req, res) => {
     const targetBase = req.url.startsWith("/api/") || req.url === "/health" ? apiBaseUrl : frontendBaseUrl;
@@ -193,6 +209,7 @@ function summarize(allResults) {
     unknownTokenCount: allRecentEvents.filter((event) => event.phase === "markdown-token-rendered" && !event.messageId).length,
     topLiteMessages: topEntriesByCount(allRecentEvents, "markdown-lite-rendered"),
     topRowCommitMessages: topEntriesByCount(allRecentEvents, "message-row-commit"),
+    topRowChangedKeys: topChangedKeys(allRecentEvents),
     topTokenMessages: topEntriesByCount(allRecentEvents, "markdown-token-rendered"),
     byCid,
   };
@@ -208,6 +225,7 @@ function summarize(allResults) {
       localStorage.setItem("token", token);
       localStorage.setItem("user", JSON.stringify(user || {}));
       window.__chatRenderProfileEvents = [];
+      window.__AI_SPACE_CHAT_ROW_PROFILE_DETAIL = true;
       window.__longTasks = [];
       window.__fetchProfileEvents = [];
       window.addEventListener("chat-render-profile", (event) => window.__chatRenderProfileEvents.push(event.detail));

@@ -104,6 +104,7 @@ function MessageRow({
   const { t } = useI18n();
   const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
   const rowRef = useRef<HTMLDivElement | null>(null);
+  const profileSnapshotRef = useRef<Record<string, unknown> | null>(null);
   const isUser = msg.role === "user";
   const forceHydrateRichText = isLatestAssistant || isHighlighted;
   const [isNearViewport, setIsNearViewport] = useState(forceHydrateRichText);
@@ -113,14 +114,47 @@ function MessageRow({
   const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
   const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
   const assistantAvatarMeta = getModelAvatarMeta(model || msg.model || "AI");
+  const rowProfileDetailEnabled = typeof window !== "undefined" && Boolean((window as Window & { __AI_SPACE_CHAT_ROW_PROFILE_DETAIL?: boolean }).__AI_SPACE_CHAT_ROW_PROFILE_DETAIL);
+  const profileSnapshot = rowProfileDetailEnabled ? {
+    allowRichLiteFallback,
+    canRegenerate,
+    deferRichTextHydration,
+    forceHydrateRichText,
+    forceStableRichLiteFallback,
+    historyPrependSettling,
+    isGenerating,
+    isHighlighted,
+    isInViewport,
+    isInitialReadingAssistant,
+    isLast,
+    isLatestAssistant,
+    isLoading,
+    isNearViewport,
+    isSelected,
+    isStreaming,
+    isViewedAssistant,
+    openAvatarDropdown: openAvatarDropdownGroupId === group?.id,
+    selectMode,
+  } : null;
+  const previousProfileSnapshot = profileSnapshotRef.current;
+  const changedProfileKeys = profileSnapshot
+    ? previousProfileSnapshot
+      ? Object.entries(profileSnapshot)
+        .filter(([key, value]) => previousProfileSnapshot[key] !== value)
+        .map(([key]) => key)
+      : ["mount"]
+    : undefined;
+  if (profileSnapshot) profileSnapshotRef.current = profileSnapshot;
   useEffect(() => {
     const commitAt = typeof performance !== "undefined" ? performance.now() : Date.now();
     emitChatRenderProfileEvent("message-row-commit", {
       conversationId,
       messageId: msg.id,
       role: msg.role,
+      ...(changedProfileKeys ? { changedKeys: changedProfileKeys } : {}),
       contentLength: msg.content?.length || 0,
       durationMs: commitAt - renderStartedAt,
+      ...(profileSnapshot || {}),
     });
   });
 

@@ -24,6 +24,10 @@ function emitChatRenderProfileEvent(phase: string, detail: Record<string, unknow
 }
 
 function shouldSkipTokenUpgradeForUserBrowse() {
+  if (typeof window !== "undefined") {
+    const browseUntil = (window as Window & { __AI_SPACE_CHAT_USER_BROWSE_UNTIL?: number }).__AI_SPACE_CHAT_USER_BROWSE_UNTIL || 0;
+    if (Date.now() < browseUntil) return true;
+  }
   if (typeof document === "undefined") return false;
   const scroller = document.querySelector<HTMLElement>('[data-testid="virtuoso-scroller"]');
   if (!scroller) return false;
@@ -45,7 +49,11 @@ export default function MarkdownTokenRenderer({
   const cacheKey = useMemo(() => getMarkdownTokenCacheKey({ content, compactPreview }), [compactPreview, content]);
   const rootRef = useRef<HTMLDivElement>(null);
   const heightGuardTimerRef = useRef<number | null>(null);
-  const [doc, setDoc] = useState<MarkdownTokenDocument | null>(() => peekCachedMarkdownTokens(cacheKey));
+  const [doc, setDoc] = useState<MarkdownTokenDocument | null>(() => {
+    const cached = peekCachedMarkdownTokens(cacheKey);
+    if (cached && !isStreaming && shouldSkipTokenUpgradeForUserBrowse()) return null;
+    return cached;
+  });
   const [renderedBlockCount, setRenderedBlockCount] = useState(INITIAL_TOKEN_BLOCK_BUDGET);
   const [guardMinHeight, setGuardMinHeight] = useState<number | null>(null);
 
@@ -105,6 +113,16 @@ export default function MarkdownTokenRenderer({
     const scheduleNextBatch = () => {
       window.setTimeout(() => {
         if (cancelled) return;
+        if (!isStreaming && shouldSkipTokenUpgradeForUserBrowse()) {
+          emitChatRenderProfileEvent("markdown-token-batch-skipped-browse", {
+            blockCount: doc.tokens.length,
+            compactPreview,
+            contentLength: content.length,
+            messageId,
+            renderedBlockCount,
+          });
+          return;
+        }
         setRenderedBlockCount((current) => Math.min(current + TOKEN_BLOCK_BATCH_SIZE, doc.tokens.length));
       }, 120);
     };

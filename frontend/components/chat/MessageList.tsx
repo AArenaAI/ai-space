@@ -282,6 +282,9 @@ function MessageList({
   const stopBottomLockForUserBrowse = useCallback((duration = 2500) => {
     stickToBottomRef.current = false;
     userScrollOverrideUntilRef.current = Date.now() + duration;
+    if (typeof window !== "undefined") {
+      (window as Window & { __AI_SPACE_CHAT_USER_BROWSE_UNTIL?: number }).__AI_SPACE_CHAT_USER_BROWSE_UNTIL = userScrollOverrideUntilRef.current;
+    }
     bottomLockIntentUntilRef.current = 0;
     if (bottomLockRafRef.current) {
       cancelAnimationFrame(bottomLockRafRef.current);
