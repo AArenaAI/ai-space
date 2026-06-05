@@ -421,7 +421,7 @@ function MessageList({
     // alive for the whole settling window. Virtuoso can emit internal scroll events
     // while tall rich-lite rows are being measured; those must not be interpreted
     // as a user browsing upward and cancel the pending bottom alignment.
-    const delays = extraSettling ? [50, 100, 180, 280, 400, 520, 620, 800, 1200, 1800, 2600, 3600, 5000] : [80, 180];
+    const delays = extraSettling ? [50, 100, 180, 280, 400, 520, 620, 800, 1200, 1800, 2200, 2600, 3600, 5000] : [80, 180];
     if (extraSettling) {
       bottomLockIntentUntilRef.current = Date.now() + Math.max(...delays) + 250;
     }
