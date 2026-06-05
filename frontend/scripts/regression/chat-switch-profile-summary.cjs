@@ -446,6 +446,12 @@ function analyzeOfflineTokenBlocks(messagesByCid, limit = 16) {
     .slice(0, limit);
 }
 
+function analyzeOfflineTokenBlocksByCid(messagesByCid, limit = 12) {
+  return Object.fromEntries(
+    Object.entries(messagesByCid || {}).map(([cid, message]) => [cid, analyzeOfflineTokenBlocks({ [cid]: message }, limit)])
+  );
+}
+
 async function fetchLatestAssistantMessages(token, cids) {
   const result = {};
   for (const cid of [...new Set(cids)]) {
@@ -763,6 +769,7 @@ function summarize(allResults, latestAssistantMessagesByCid = {}) {
     topMessageActionsBuckets: topMessageActionsBuckets(allRecentEvents),
     topCodeBlockBuckets: topCodeBlockBuckets(allRecentEvents),
     topOfflineTokenBlockBuckets: analyzeOfflineTokenBlocks(latestAssistantMessagesByCid),
+    offlineTokenBlockBucketsByCid: analyzeOfflineTokenBlocksByCid(latestAssistantMessagesByCid),
     latestAssistantMessageIds: Object.fromEntries(Object.entries(latestAssistantMessagesByCid).map(([cid, message]) => [cid, String(message.id || "")])),
     topTokenMessages: topEntriesByCount(allRecentEvents, "markdown-token-rendered"),
     slowBottom0Samples: summarizeSlowBottom0Samples(allResults),
