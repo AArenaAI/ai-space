@@ -514,6 +514,60 @@ async function sample(page, cid, startedAt, switchTimeline = {}) {
   }, { cid, startedAt, switchTimeline });
 }
 
+function summarizeSlowBottom0Samples(allResults, limit = 8) {
+  return allResults
+    .map((result) => {
+      const timeline = result.switchTimeline || {};
+      const events = result.recentEvents || [];
+      const conversationFetch = (result.fetches || []).find((fetchEvent) => String(fetchEvent.url || "").includes(`/api/conversations/${result.cid}`));
+      const bottom0Ms = Number(timeline.bottom0Ms || 0);
+      return {
+        cid: result.cid,
+        bottom0Ms,
+        wallMs: Number(result.wallMs || 0),
+        longMax: Number(result.longMax || 0),
+        longTotal: Number(result.longTotal || 0),
+        distanceToBottom: Number(result.scroller?.distanceToBottom || 0),
+        rowCount: Number(result.rowCount || 0),
+        visibleCount: Array.isArray(result.visibleIds) ? result.visibleIds.length : 0,
+        timeline: {
+          urlMs: Number(timeline.urlMs || 0),
+          firstRowsMs: Number(timeline.firstRowsMs || 0),
+          rowsChangedMs: Number(timeline.rowsChangedMs || 0),
+          conversationFetchDoneMs: Number(timeline.conversationFetchDoneMs || 0),
+          longTaskBeforeBottom0Total: Number(timeline.longTaskBeforeBottom0Total || 0),
+          longTaskBeforeBottom0Max: Number(timeline.longTaskBeforeBottom0Max || 0),
+          rowCommitBeforeBottom0: Number(timeline.rowCommitBeforeBottom0 || 0),
+          listCommitBeforeBottom0: Number(timeline.listCommitBeforeBottom0 || 0),
+          liteBeforeBottom0: Number(timeline.liteBeforeBottom0 || 0),
+          tokenBeforeBottom0: Number(timeline.tokenBeforeBottom0 || 0),
+        },
+        conversationFetch: conversationFetch ? {
+          dur: Number(conversationFetch.dur || 0),
+          ok: conversationFetch.ok,
+          status: conversationFetch.status,
+        } : null,
+        eventCounts: {
+          row: Number(result.eventCounts?.["message-row-commit"] || 0),
+          list: Number(result.eventCounts?.["message-list-commit"] || 0),
+          lite: Number(result.eventCounts?.["markdown-lite-rendered"] || 0),
+          token: Number(result.eventCounts?.["markdown-token-rendered"] || 0),
+          codeBlock: Number(result.eventCounts?.["markdown-code-block-commit"] || 0),
+          messageActions: Number(result.eventCounts?.["message-actions-commit"] || 0),
+          assistantMeta: Number(result.eventCounts?.["assistant-message-meta-commit"] || 0),
+          userContent: Number(result.eventCounts?.["user-message-content-commit"] || 0),
+        },
+        topRowMountBuckets: topRowCommitBuckets(events, (event) => Array.isArray(event.changedKeys) && event.changedKeys.includes("mount"), 4),
+        topMarkdownLiteBuckets: topMarkdownLiteBuckets(events, 4),
+        topCodeBlockBuckets: topCodeBlockBuckets(events, 4),
+        topMessageListBuckets: topMessageListBuckets(events, 4),
+      };
+    })
+    .filter((sample) => Number.isFinite(sample.bottom0Ms) && sample.bottom0Ms > 0)
+    .sort((a, b) => b.bottom0Ms - a.bottom0Ms || b.longTotal - a.longTotal)
+    .slice(0, limit);
+}
+
 function summarize(allResults) {
   const values = (key) => allResults.map((result) => Number(result[key] || 0));
   const timelineValues = (key) => allResults.map((result) => Number(result.switchTimeline?.[key]));
@@ -595,6 +649,7 @@ function summarize(allResults) {
     topMessageActionsBuckets: topMessageActionsBuckets(allRecentEvents),
     topCodeBlockBuckets: topCodeBlockBuckets(allRecentEvents),
     topTokenMessages: topEntriesByCount(allRecentEvents, "markdown-token-rendered"),
+    slowBottom0Samples: summarizeSlowBottom0Samples(allResults),
     byCid,
   };
 }
