@@ -109,6 +109,24 @@ export async function createNotebookArtifact(input: {
   return parseNotebookResponse<NotebookArtifact>(response, "保存 Studio 输出失败");
 }
 
+export async function generateNotebookArtifact(input: {
+  notebookId: number;
+  type: string;
+  file_ids?: number[];
+  language?: string;
+}): Promise<NotebookArtifact> {
+  const response = await fetch(`/api/notebooks/${input.notebookId}/artifacts/generate`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type: input.type,
+      file_ids: input.file_ids || [],
+      language: input.language,
+    }),
+  });
+  return parseNotebookResponse<NotebookArtifact>(response, "生成 Studio 输出失败");
+}
+
 export async function updateNotebookArtifact(notebookId: number, artifactId: number, input: { title: string; subtitle?: string }): Promise<NotebookArtifact> {
   const response = await fetch(`/api/notebooks/${notebookId}/artifacts/${artifactId}`, {
     method: "PUT",

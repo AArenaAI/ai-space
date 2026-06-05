@@ -10,10 +10,10 @@ import { NotebookSourcePreviewDrawer } from "@/components/notebook/NotebookSourc
 import { NotebookStudioPanel, type NotebookStudioActionId, type NotebookStudioArtifact, type NotebookStudioTableRow, type NotebookStudioTextSection } from "@/components/notebook/NotebookStudioPanel";
 import { NotebookUrlSourceDialog } from "@/components/notebook/NotebookUrlSourceDialog";
 import { MODELS } from "@/hooks/useChat";
-import { addNotebookFile, addNotebookUrlSource, createNotebookArtifact, deleteNotebookArtifact, fetchNotebook, fetchNotebookArtifacts, fetchNotebookFileContent, removeNotebookFile, updateNotebook, updateNotebookArtifact } from "@/lib/notebookApi";
+import { addNotebookFile, addNotebookUrlSource, deleteNotebookArtifact, fetchNotebook, fetchNotebookArtifacts, fetchNotebookFileContent, generateNotebookArtifact, removeNotebookFile, updateNotebook, updateNotebookArtifact } from "@/lib/notebookApi";
 import { normalizeNotebookError, showNotebookError, uploadNotebookSourceFile } from "@/lib/notebookErrors";
 import type { Notebook, NotebookArtifact as PersistedNotebookArtifact, NotebookFile, NotebookFileContent } from "@/lib/notebookTypes";
-import { useI18n } from "@/lib/i18n";
+import { useI18n, type LanguageCode } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 function currentWorkspaceId(): string | null {
@@ -135,7 +135,7 @@ function downloadTextFile(filename: string, content: string, type: string) {
 }
 
 function NotebookDetailContent() {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const searchParams = useSearchParams();
   const notebookId = Number(searchParams.get("notebook_id") || searchParams.get("id"));
   const conversationId = searchParams.get("conversation_id") ? Number(searchParams.get("conversation_id")) : undefined;
@@ -436,17 +436,11 @@ function NotebookDetailContent() {
     if (!notebookId) return;
     setGeneratingStudioType(type);
     try {
-      const sourceCount = scopedStudioFiles().length;
-      const artifactType = type === "table" ? "data-table" : type;
-      const artifactTitleKey = type === "table" ? "notebook.studio.tableArtifactTitle" : `notebook.studio.${type}ArtifactTitle`;
-      const artifactSubtitleKey = type === "table" ? "notebook.studio.tableArtifactSubtitle" : `notebook.studio.${type}ArtifactSubtitle`;
-      const saved = await createNotebookArtifact({
+      const saved = await generateNotebookArtifact({
         notebookId,
-        type: artifactType,
-        title: t(artifactTitleKey, { title: notebook?.title || t("notebook.untitled") }),
-        subtitle: t(artifactSubtitleKey, { count: String(sourceCount) }),
-        source_count: sourceCount,
-        content: type === "table" ? { rows: buildStudioTableRows() } : { sections: buildStudioTextSections(type) },
+        type,
+        file_ids: selectedFileIds,
+        language: language as LanguageCode,
       });
       const artifact = toStudioArtifact(saved);
       if (artifact) {

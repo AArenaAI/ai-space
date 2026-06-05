@@ -432,44 +432,37 @@ func (h *NotebookHandler) CreateArtifact(c *gin.Context) {
 	}
 	artifactType := strings.TrimSpace(req.Type)
 	title := strings.TrimSpace(req.Title)
-	if artifactType == "" || len(artifactType) > 64 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的输出类型"})
+	artifact, ok := h.saveNotebookArtifact(c, nb, artifactType, title, strings.TrimSpace(req.Subtitle), req.Content, req.SourceCount)
+	if !ok {
 		return
 	}
-	if title == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少输出文件标题"})
+	c.JSON(http.StatusOK, notebookArtifactResponse(artifact))
+}
+
+func (h *NotebookHandler) GenerateArtifact(c *gin.Context) {
+	nb, ok := h.loadNotebook(c)
+	if !ok {
 		return
 	}
-	content := []byte(strings.TrimSpace(string(req.Content)))
-	if len(content) == 0 || string(content) == "null" {
-		content = []byte("{}")
+	var req struct {
+		Type     string `json:"type"`
+		FileIDs  []uint `json:"file_ids"`
+		Language string `json:"language"`
 	}
-	if len(content) > 1024*1024 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "输出文件内容过大"})
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	var decoded any
-	if err := json.Unmarshal(content, &decoded); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "输出文件内容不是有效 JSON"})
+	files := h.loadNotebookGenerationFiles(nb.ID, getUserID(c))
+	draft, err := buildGeneratedNotebookArtifactDraft(req.Type, nb.Title, files, req.FileIDs, req.Language)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	artifact := models.NotebookArtifact{
-		NotebookID:  nb.ID,
-		UserID:      getUserID(c),
-		Type:        artifactType,
-		Title:       title,
-		Subtitle:    strings.TrimSpace(req.Subtitle),
-		Content:     string(content),
-		SourceCount: req.SourceCount,
-	}
-	if artifact.SourceCount < 0 {
-		artifact.SourceCount = 0
-	}
-	if err := h.db.Create(&artifact).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存输出文件失败"})
+	artifact, ok := h.saveNotebookArtifact(c, nb, draft.Type, draft.Title, draft.Subtitle, draft.Content, draft.SourceCount)
+	if !ok {
 		return
 	}
-	h.db.Model(&models.Notebook{}).Where("id = ?", nb.ID).Update("updated_at", time.Now())
 	c.JSON(http.StatusOK, notebookArtifactResponse(artifact))
 }
 
@@ -535,6 +528,61 @@ func (h *NotebookHandler) DeleteArtifact(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func (h *NotebookHandler) saveNotebookArtifact(c *gin.Context, nb models.Notebook, artifactType string, title string, subtitle string, rawContent json.RawMessage, sourceCount int) (models.NotebookArtifact, bool) {
+	artifactType = strings.TrimSpace(artifactType)
+	title = strings.TrimSpace(title)
+	if artifactType == "" || len(artifactType) > 64 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的输出类型"})
+		return models.NotebookArtifact{}, false
+	}
+	if title == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少输出文件标题"})
+		return models.NotebookArtifact{}, false
+	}
+	content := []byte(strings.TrimSpace(string(rawContent)))
+	if len(content) == 0 || string(content) == "null" {
+		content = []byte("{}")
+	}
+	if len(content) > 1024*1024 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "输出文件内容过大"})
+		return models.NotebookArtifact{}, false
+	}
+	var decoded any
+	if err := json.Unmarshal(content, &decoded); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "输出文件内容不是有效 JSON"})
+		return models.NotebookArtifact{}, false
+	}
+	artifact := models.NotebookArtifact{
+		NotebookID:  nb.ID,
+		UserID:      getUserID(c),
+		Type:        artifactType,
+		Title:       title,
+		Subtitle:    strings.TrimSpace(subtitle),
+		Content:     string(content),
+		SourceCount: sourceCount,
+	}
+	if artifact.SourceCount < 0 {
+		artifact.SourceCount = 0
+	}
+	if err := h.db.Create(&artifact).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存输出文件失败"})
+		return models.NotebookArtifact{}, false
+	}
+	h.db.Model(&models.Notebook{}).Where("id = ?", nb.ID).Update("updated_at", time.Now())
+	return artifact, true
+}
+
+func (h *NotebookHandler) loadNotebookGenerationFiles(notebookID uint, userID uint) []models.File {
+	var files []models.File
+	h.db.Table("notebook_files").
+		Select("files.*").
+		Joins("JOIN files ON files.id = notebook_files.file_id").
+		Where("notebook_files.notebook_id = ? AND files.user_id = ?", notebookID, userID).
+		Order("notebook_files.sort_order ASC, notebook_files.id DESC").
+		Scan(&files)
+	return files
 }
 
 func notebookArtifactResponse(artifact models.NotebookArtifact) NotebookArtifactResponse {
