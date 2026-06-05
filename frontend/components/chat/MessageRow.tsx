@@ -128,6 +128,7 @@ function MessageRow({
   const markdownWeight = rowProfileDetailEnabled ? getMarkdownWeight(msg.content) : null;
   const groupActiveIndex = group ? groupViews?.get(group.id) ?? 0 : undefined;
   const groupActiveMessageId = group && groupActiveIndex !== undefined ? group.assistantMessages[groupActiveIndex]?.id : undefined;
+  const isGroupedAssistantMessage = !isUser && Boolean(group && group.assistantMessages.length > 1);
   const profileSnapshot = rowProfileDetailEnabled ? {
     allowRichLiteFallback,
     canRegenerate,
@@ -142,7 +143,8 @@ function MessageRow({
     hasCodeFence: markdownWeight?.hasCodeFence || false,
     hasTableLine: markdownWeight?.hasTableLine || false,
     historyPrependSettling,
-    isActiveGroupMessage: groupActiveMessageId ? String(groupActiveMessageId) === String(msg.id) : true,
+    groupActiveState: isGroupedAssistantMessage ? (String(groupActiveMessageId) === String(msg.id) ? "active" : "inactive") : "na",
+    isActiveGroupMessage: isGroupedAssistantMessage ? String(groupActiveMessageId) === String(msg.id) : true,
     isGenerating,
     isHighlighted,
     isInViewport,

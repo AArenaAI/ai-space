@@ -110,7 +110,9 @@ function topRowCommitBuckets(events, filterFn, limit = 16) {
   for (const event of events) {
     if (event.phase !== "message-row-commit") continue;
     if (filterFn && !filterFn(event)) continue;
-    const key = `${contentBucket(event)}|${lifecycleBucket(event)}|group:${Number(event.groupSize || 0) > 1 ? "multi" : "single"}|active:${event.isActiveGroupMessage === false ? "no" : "yes"}`;
+    const groupKind = Number(event.groupSize || 0) > 1 ? "multi" : "single";
+    const activeState = event.groupActiveState || (groupKind === "multi" ? (event.isActiveGroupMessage === false ? "inactive" : "active") : "na");
+    const key = `${contentBucket(event)}|${lifecycleBucket(event)}|group:${groupKind}|active:${activeState}`;
     const current = buckets.get(key) || {
       bucket: key,
       count: 0,
