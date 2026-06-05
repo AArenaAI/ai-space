@@ -258,6 +258,56 @@ function topMessageListBuckets(events, limit = 8) {
     }));
 }
 
+function topMarkdownLiteBuckets(events, limit = 10) {
+  const buckets = new Map();
+  for (const event of events) {
+    if (event.phase !== "markdown-lite-rendered") continue;
+    const contentLength = Number(event.contentLength || 0);
+    const blockCount = Number(event.blockCount || 0);
+    const blockSummary = event.blockSummary || {};
+    const lengthBucket = contentLength > 10000
+      ? ">10k"
+      : contentLength > 3000
+        ? "3k-10k"
+        : contentLength > 1000
+          ? "1k-3k"
+          : contentLength > 500
+            ? "500-1k"
+            : "<=500";
+    const blockBucket = blockCount > 32
+      ? ">32"
+      : blockCount > 16
+        ? "17-32"
+        : blockCount > 8
+          ? "9-16"
+          : "<=8";
+    const key = `compact:${event.compactPreview ? "yes" : "no"}|cache:${event.cacheHit ? "hit" : "miss"}|preview:${event.isPreview ? "yes" : "no"}|len:${lengthBucket}|blocks:${blockBucket}|code:${Number(event.codeBlocks || 0) > 0 ? "yes" : "no"}|table:${Number(event.tableLines || 0) > 0 ? "yes" : "no"}|types:p${Number(blockSummary.paragraph || 0)}-l${Number(blockSummary.list || 0)}-c${Number(blockSummary.code || 0)}-t${Number(blockSummary.table || 0)}`;
+    const current = buckets.get(key) || {
+      bucket: key,
+      count: 0,
+      parseMsTotal: 0,
+      contentLengthMax: 0,
+      blockCountMax: 0,
+      examples: [],
+    };
+    current.count += 1;
+    current.parseMsTotal += Number(event.parseMs || 0);
+    current.contentLengthMax = Math.max(current.contentLengthMax, contentLength);
+    current.blockCountMax = Math.max(current.blockCountMax, blockCount);
+    if (event.messageId && current.examples.length < 3) current.examples.push(String(event.messageId));
+    buckets.set(key, current);
+  }
+  return Array.from(buckets.values())
+    .sort((a, b) => b.count - a.count || b.parseMsTotal - a.parseMsTotal)
+    .slice(0, limit)
+    .map((entry) => ({
+      ...entry,
+      parseMsTotal: round(entry.parseMsTotal, 1),
+      parseMsAvg: round(entry.parseMsTotal / Math.max(1, entry.count), 2),
+      examples: [...new Set(entry.examples)],
+    }));
+}
+
 function createProxy() {
   const server = http.createServer((req, res) => {
     const targetBase = req.url.startsWith("/api/") || req.url === "/health" ? apiBaseUrl : frontendBaseUrl;
@@ -487,6 +537,7 @@ function summarize(allResults) {
     unknownLiteCount: allRecentEvents.filter((event) => event.phase === "markdown-lite-rendered" && !event.messageId).length,
     unknownTokenCount: allRecentEvents.filter((event) => event.phase === "markdown-token-rendered" && !event.messageId).length,
     topLiteMessages: topEntriesByCount(allRecentEvents, "markdown-lite-rendered"),
+    topMarkdownLiteBuckets: topMarkdownLiteBuckets(allRecentEvents),
     topRowCommitMessages: topEntriesByCount(allRecentEvents, "message-row-commit"),
     topRowChangedKeys: topChangedKeys(allRecentEvents),
     topRowMountBuckets: topRowCommitBuckets(allRecentEvents, (event) => Array.isArray(event.changedKeys) && event.changedKeys.includes("mount")),

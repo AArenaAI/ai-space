@@ -2,7 +2,7 @@
 
 import { memo, useEffect, useMemo } from "react";
 import CodeBlock from "./markdown/CodeBlock";
-import { emitChatRenderProfileEvent } from "@/lib/chatRenderProfile";
+import { emitChatRenderProfileEvent, isChatRenderProfileEnabled } from "@/lib/chatRenderProfile";
 
 const STABLE_LITE_RICH_CHARS = 3500;
 const STABLE_LITE_RICH_LINES = 50;
@@ -270,10 +270,31 @@ const MarkdownLiteRenderer = memo(function MarkdownLiteRenderer({ content, compa
   const liteContent = useMemo(() => getCachedLiteParse(content, compactPreview), [compactPreview, content]);
   const blocks = liteContent.blocks;
   const lightweightInline = false;
+  const profileBlockSummary = useMemo(() => {
+    if (!isChatRenderProfileEnabled()) return null;
+    const summary = {
+      heading: 0,
+      list: 0,
+      paragraph: 0,
+      quote: 0,
+      code: 0,
+      table: 0,
+    };
+    for (const block of blocks) {
+      if (block.type === "heading") summary.heading += 1;
+      else if (block.type === "ul" || block.type === "ol" || block.type === "taskList") summary.list += 1;
+      else if (block.type === "paragraph") summary.paragraph += 1;
+      else if (block.type === "quote") summary.quote += 1;
+      else if (block.type === "code") summary.code += 1;
+      else if (block.type === "table") summary.table += 1;
+    }
+    return summary;
+  }, [blocks]);
 
   useEffect(() => {
     emitChatRenderProfileEvent("markdown-lite-rendered", {
       blockCount: blocks.length,
+      blockSummary: profileBlockSummary,
       cacheHit: liteContent.wasCacheHit,
       codeBlocks: liteContent.codeBlocks,
       contentLength: content.length,
@@ -283,7 +304,7 @@ const MarkdownLiteRenderer = memo(function MarkdownLiteRenderer({ content, compa
       compactPreview,
       tableLines: liteContent.tableLines,
     });
-  }, [blocks.length, compactPreview, content.length, liteContent.codeBlocks, liteContent.isPreview, liteContent.parseMs, liteContent.tableLines, liteContent.wasCacheHit, messageId]);
+  }, [blocks.length, compactPreview, content.length, liteContent.codeBlocks, liteContent.isPreview, liteContent.parseMs, liteContent.tableLines, liteContent.wasCacheHit, messageId, profileBlockSummary]);
 
   return (
     <div data-markdown-lite-renderer={liteContent.isPreview ? "stable-preview" : "full"}>
