@@ -353,6 +353,44 @@ function topCodeBlockBuckets(events, limit = 8) {
     }));
 }
 
+function summarizeConversationSwitchEvents(allResults) {
+  const events = allResults.flatMap((result) =>
+    (result.conversationSwitchEvents || []).map((event) => ({
+      ...event,
+      cid: result.cid,
+    }))
+  );
+  const phases = [...new Set(events.map((event) => event.phase).filter(Boolean))].sort();
+  const byPhase = Object.fromEntries(
+    phases.map((phase) => {
+      const phaseEvents = events.filter((event) => event.phase === phase);
+      return [phase, {
+        count: phaseEvents.length,
+        durationMs: stats(phaseEvents.map((event) => Number(event.durationMs || event.relativeMs || 0))),
+        displayModes: histogram(phaseEvents, (event) => event.displayMode || "none"),
+        sources: histogram(phaseEvents, (event) => event.source || "none"),
+        snapshotSources: histogram(phaseEvents, (event) => event.snapshotSource || "none"),
+      }];
+    })
+  );
+  return {
+    total: events.length,
+    byPhase,
+    perSample: allResults.slice(-12).map((result) => ({
+      cid: result.cid,
+      events: (result.conversationSwitchEvents || []).map((event) => ({
+        phase: event.phase,
+        durationMs: event.durationMs,
+        displayMode: event.displayMode,
+        source: event.source,
+        snapshotSource: event.snapshotSource,
+        messageCount: event.messageCount,
+        totalMessages: event.totalMessages,
+      })),
+    })),
+  };
+}
+
 function inlineTextLength(tokens = []) {
   return tokens.reduce((sum, token) => {
     if (!token) return sum;
@@ -578,6 +616,14 @@ async function sample(page, cid, startedAt, switchTimeline = {}) {
       };
     });
     const events = (window.__chatRenderProfileEvents || []).filter((event) => event.at >= startedAt - 20);
+    const conversationSwitchEvents = (window.__conversationSwitchProfileEvents || [])
+      .filter((event) => event.at >= startedAt - 20)
+      .filter((event) => event.conversationId == null || String(event.conversationId) === String(cid))
+      .map((event) => ({
+        ...event,
+        relativeMs: relativeMs(event.at),
+        durationMs: Number.isFinite(event.at) ? Math.round(event.at - startedAt) : undefined,
+      }));
     const longTasks = (window.__longTasks || []).filter((task) => task.startTime >= startedAt - 20);
     const fetches = (window.__fetchProfileEvents || []).filter((event) => event.at >= startedAt - 20 || event.end >= startedAt - 20);
     const timeline = { ...switchTimeline };
@@ -615,6 +661,7 @@ async function sample(page, cid, startedAt, switchTimeline = {}) {
         return acc;
       }, {}),
       recentEvents: events.slice(-50),
+      conversationSwitchEvents,
       longMax: Math.round(Math.max(0, ...longTasks.map((task) => task.duration || 0))),
       longTotal: Math.round(longTasks.reduce((sum, task) => sum + (task.duration || 0), 0)),
       longTasks: longTasks.map((task) => ({ startTime: Math.round(task.startTime), duration: Math.round(task.duration) })),
@@ -773,6 +820,7 @@ function summarize(allResults, latestAssistantMessagesByCid = {}) {
     latestAssistantMessageIds: Object.fromEntries(Object.entries(latestAssistantMessagesByCid).map(([cid, message]) => [cid, String(message.id || "")])),
     topTokenMessages: topEntriesByCount(allRecentEvents, "markdown-token-rendered"),
     slowBottom0Samples: summarizeSlowBottom0Samples(allResults),
+    conversationSwitchEvents: summarizeConversationSwitchEvents(allResults),
     byCid,
   };
 }
@@ -792,7 +840,9 @@ function summarize(allResults, latestAssistantMessagesByCid = {}) {
       window.__AI_SPACE_CHAT_ROW_PROFILE_DETAIL = true;
       window.__longTasks = [];
       window.__fetchProfileEvents = [];
+      window.__conversationSwitchProfileEvents = [];
       window.addEventListener("chat-render-profile", (event) => window.__chatRenderProfileEvents.push(event.detail));
+      window.addEventListener("chat-conversation-switch-performance", (event) => window.__conversationSwitchProfileEvents.push(event.detail));
       try {
         new PerformanceObserver((list) => {
           for (const entry of list.getEntries()) window.__longTasks.push({ startTime: entry.startTime, duration: entry.duration });
