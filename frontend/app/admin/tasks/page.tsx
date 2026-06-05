@@ -11,9 +11,18 @@ import { cn } from "@/lib/utils";
 
 const statuses = ["all", "running", "streaming", "retrying", "completed", "failed", "cancelled", "incomplete"];
 const activeStatuses = new Set(["running", "streaming", "retrying"]);
+const billingFilters = [
+  { key: "all", label: "全部计费" },
+  { key: "charged", label: "已计费" },
+  { key: "pending", label: "计费中" },
+  { key: "unlinked", label: "未关联" },
+  { key: "free_failed", label: "失败无成本" },
+] as const;
+type BillingFilter = typeof billingFilters[number]["key"];
 
 export default function ManagementTasksPage() {
   const [status, setStatus] = useState("all");
+  const [billingFilter, setBillingFilter] = useState<BillingFilter>("all");
   const [data, setData] = useState<AdminTasksResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -57,8 +66,11 @@ export default function ManagementTasksPage() {
   const runningCount = data?.summary?.filter((item) => activeStatuses.has(item.status)).reduce((sum, item) => sum + item.count, 0) || 0;
   const failedCount = data?.summary?.find((item) => item.status === "failed")?.count || 0;
   const completedCount = data?.summary?.find((item) => item.status === "completed")?.count || 0;
-  const usageRollup = useMemo(() => rollupTaskUsage(data?.tasks || []), [data?.tasks]);
-  const costedTasks = data?.tasks.filter((task) => (task.usage?.requests || 0) > 0).length || 0;
+  const allTasks = data?.tasks || [];
+  const visibleTasks = useMemo(() => allTasks.filter((task) => matchesBillingFilter(task, billingFilter)), [allTasks, billingFilter]);
+  const usageRollup = useMemo(() => rollupTaskUsage(visibleTasks), [visibleTasks]);
+  const billingStats = useMemo(() => summarizeBillingStates(allTasks), [allTasks]);
+  const costedTasks = visibleTasks.filter((task) => (task.usage?.requests || 0) > 0).length;
 
   return (
     <div className="space-y-6">
@@ -84,11 +96,12 @@ export default function ManagementTasksPage() {
 
       {error && <div className="flex items-center gap-2 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-300"><AlertCircle className="h-4 w-4" />{error}</div>}
 
-      <div className="grid gap-4 md:grid-cols-5">
-        <MetricCard title="任务总数" value={formatNumber(data?.total || 0)} icon={ClipboardList} helper="当前筛选结果" />
+      <div className="grid gap-4 md:grid-cols-6">
+        <MetricCard title="任务总数" value={formatNumber(data?.total || 0)} icon={ClipboardList} helper="当前状态筛选结果" />
         <MetricCard title="运行中" value={formatNumber(runningCount)} icon={RefreshCw} helper="running / streaming / retrying" />
         <MetricCard title="已关联成本" value={formatRMB(usageRollup.cost_rmb)} icon={Wallet} helper={`${costedTasks} 个任务已有账本 · ${formatNumber(usageRollup.requests)} 条 usage`} />
-        <MetricCard title="失败" value={formatNumber(failedCount)} icon={ServerCrash} helper="failed" />
+        <MetricCard title="计费中" value={formatNumber(billingStats.pending)} icon={RefreshCw} helper="运行中且尚未写账本" />
+        <MetricCard title="失败无成本" value={formatNumber(billingStats.free_failed)} icon={ServerCrash} helper="失败且无外部调用成本" />
         <MetricCard title="完成" value={formatNumber(completedCount)} icon={ClipboardList} helper="completed" />
       </div>
 
@@ -102,6 +115,23 @@ export default function ManagementTasksPage() {
           <div className="rounded-xl bg-surface-elevated px-3 py-2 text-xs text-text-tertiary">{shouldAutoRefresh(status) ? "自动刷新间隔 10s；页面不可见时暂停" : "当前状态默认不自动刷新，避免无效请求"}</div>
         </div>
 
+        <div className="mb-5 rounded-2xl border border-surface-border bg-surface-elevated/60 p-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-text-primary">计费状态</h2>
+              <p className="mt-1 text-xs text-text-tertiary">区分“任务还在跑所以未计费”和“失败/完成但没有关联到账本”，避免把正常待计费误判成成本丢失。</p>
+            </div>
+            <div className="text-xs text-text-tertiary">当前显示 {formatNumber(visibleTasks.length)} / {formatNumber(allTasks.length)} 条</div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {billingFilters.map((item) => (
+              <button key={item.key} onClick={() => setBillingFilter(item.key)} className={cn("rounded-xl px-3 py-2 text-sm transition-colors", billingFilter === item.key ? "bg-brand text-white" : "bg-surface-card text-text-secondary hover:text-text-primary")}>
+                {item.label} <span className="ml-1 text-xs opacity-75">{formatNumber(billingStats[item.key])}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="overflow-x-auto">
           <table className="min-w-[1180px] w-full text-sm">
             <thead className="text-left text-xs uppercase tracking-wide text-text-tertiary">
@@ -110,10 +140,13 @@ export default function ManagementTasksPage() {
             <tbody className="divide-y divide-surface-border text-text-secondary">
               {loading ? (
                 <tr><td colSpan={11} className="py-8 text-center text-text-tertiary">正在加载任务…</td></tr>
-              ) : (data?.tasks || []).length === 0 ? (
+              ) : allTasks.length === 0 ? (
                 <tr><td colSpan={11} className="py-8 text-center text-text-tertiary"><Search className="mx-auto mb-2 h-5 w-5" />暂无任务。可以切换到“全部”或扩大状态范围。</td></tr>
-              ) : data!.tasks.map((task) => {
+              ) : visibleTasks.length === 0 ? (
+                <tr><td colSpan={11} className="py-8 text-center text-text-tertiary"><Search className="mx-auto mb-2 h-5 w-5" />当前计费状态筛选下没有任务，可以切换到“全部计费”。</td></tr>
+              ) : visibleTasks.map((task) => {
                 const usage = task.usage;
+                const billing = billingState(task);
                 return (
                   <tr key={task.id} className="cursor-pointer hover:bg-surface-elevated/50" onClick={() => setSelectedTask(task)}>
                     <td className="whitespace-nowrap py-3 pr-4">
@@ -127,12 +160,12 @@ export default function ManagementTasksPage() {
                       <div className="max-w-[220px] truncate text-xs text-text-tertiary">{task.model || "-"}</div>
                     </td>
                     <td className="pr-4">
-                      <div className="font-medium text-text-primary">{usage?.requests ? formatRMB(usage.cost_rmb) : "待产生"}</div>
-                      <div className="text-xs text-text-tertiary">{usage?.requests ? `${formatRMB(usage.cost_rmb / Math.max(usage.requests, 1))}/次` : "暂无 usage log"}</div>
+                      <div className="font-medium text-text-primary">{usage?.requests ? formatRMB(usage.cost_rmb) : billing.label}</div>
+                      <div className="text-xs text-text-tertiary">{usage?.requests ? `${formatRMB(usage.cost_rmb / Math.max(usage.requests, 1))}/次` : billing.helper}</div>
                     </td>
                     <td className="pr-4 text-xs text-text-secondary">{formatUsageUnits(usage)}</td>
                     <td className="pr-4">
-                      {usage?.requests ? <StatusBadge tone="blue">{formatNumber(usage.requests)} 条</StatusBadge> : <StatusBadge tone="neutral">0 条</StatusBadge>}
+                      {usage?.requests ? <StatusBadge tone="blue">{formatNumber(usage.requests)} 条</StatusBadge> : <StatusBadge tone={billing.tone}>{billing.short}</StatusBadge>}
                     </td>
                     <td className="pr-4 text-xs text-text-tertiary">C:{task.conversation_id || "-"} / M:{task.assistant_message_id || "-"}</td>
                     <td className="max-w-[220px] truncate pr-4 text-xs text-red-500/80">{task.error_message || "-"}</td>
@@ -153,6 +186,7 @@ export default function ManagementTasksPage() {
 
 function TaskDrawer({ task, onClose }: { task: AdminTask; onClose: () => void }) {
   const usage = task.usage;
+  const billing = billingState(task);
   const usageHref = usageLinkForTask(task);
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={onClose}>
@@ -167,11 +201,18 @@ function TaskDrawer({ task, onClose }: { task: AdminTask; onClose: () => void })
         </div>
 
         <div className="mt-5 grid gap-3 sm:grid-cols-4">
-          <MiniMetric label="成本" value={usage?.requests ? formatRMB(usage.cost_rmb) : "待产生"} helper={`${formatNumber(usage?.requests || 0)} 条账本`} />
+          <MiniMetric label="成本" value={usage?.requests ? formatRMB(usage.cost_rmb) : billing.label} helper={usage?.requests ? `${formatNumber(usage.requests)} 条账本` : billing.helper} />
           <MiniMetric label="平均" value={usage?.requests ? `${formatRMB(usage.cost_rmb / Math.max(usage.requests, 1))}/次` : "-"} helper="按关联账本" />
           <MiniMetric label="用量" value={formatUsageUnits(usage)} helper="token / 图片 / 视频" />
-          <MiniMetric label="状态" value={task.status || "unknown"} helper={usage?.last_usage_at ? `最后账本 ${formatDateTime(usage.last_usage_at)}` : "暂无账本"} />
+          <MiniMetric label="计费状态" value={billing.label} helper={usage?.last_usage_at ? `最后账本 ${formatDateTime(usage.last_usage_at)}` : billing.helper} />
         </div>
+
+        {!usage?.requests && (
+          <div className={cn("mt-5 rounded-2xl border p-4 text-sm", billing.key === "unlinked" ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200" : "border-surface-border bg-surface-elevated/60 text-text-secondary")}>
+            <div className="font-medium text-text-primary">{billing.label}</div>
+            <div className="mt-1 text-xs">{billing.explain}</div>
+          </div>
+        )}
 
         <div className="mt-5 grid gap-4 lg:grid-cols-2">
           <section className="rounded-2xl border border-surface-border bg-surface-elevated/60 p-4">
@@ -238,6 +279,29 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
 
 function shouldAutoRefresh(status: string) {
   return status === "all" || activeStatuses.has(status);
+}
+
+type BillingStateKey = "charged" | "pending" | "unlinked" | "free_failed";
+
+function billingState(task: AdminTask): { key: BillingStateKey; label: string; short: string; helper: string; explain: string; tone: "green" | "blue" | "red" | "neutral" } {
+  const requests = task.usage?.requests || 0;
+  if (requests > 0) return { key: "charged", label: "已计费", short: `${formatNumber(requests)} 条`, helper: `${formatNumber(requests)} 条 usage`, explain: "该任务已经关联到 usage ledger，可下钻查看每条外部调用。", tone: "green" };
+  if (activeStatuses.has(task.status)) return { key: "pending", label: "计费中", short: "待写入", helper: "完成后写账本", explain: "任务仍在运行或重试中，外部调用完成后才会写入 usage ledger。", tone: "blue" };
+  if (task.status === "failed" || task.status === "cancelled" || task.status === "incomplete") return { key: "free_failed", label: "无成本", short: "无成本", helper: "失败/取消未计费", explain: "任务失败、取消或未完成，且没有关联到外部 API 调用账本；如果确实调用了外部服务，需要检查 task_id/message_id 写入链路。", tone: "neutral" };
+  return { key: "unlinked", label: "未关联", short: "未关联", helper: "暂无 usage log", explain: "任务已结束但没有关联 usage log。可能是历史任务、非计费任务，或写账本时缺少 task_id/message_id 关联，需要下钻排查。", tone: "red" };
+}
+
+function matchesBillingFilter(task: AdminTask, filter: BillingFilter) {
+  if (filter === "all") return true;
+  return billingState(task).key === filter;
+}
+
+function summarizeBillingStates(tasks: AdminTask[]): Record<BillingFilter, number> {
+  const stats: Record<BillingFilter, number> = { all: tasks.length, charged: 0, pending: 0, unlinked: 0, free_failed: 0 };
+  tasks.forEach((task) => {
+    stats[billingState(task).key] += 1;
+  });
+  return stats;
 }
 
 function rollupTaskUsage(tasks: AdminTask[]): AdminTaskUsageSummary {

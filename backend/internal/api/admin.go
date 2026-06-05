@@ -607,7 +607,7 @@ func (h *AdminHandler) Tasks(c *gin.Context) {
 		pageSize = 100
 	}
 	query := h.db.Model(&models.AIBackgroundTask{})
-	if status := strings.TrimSpace(c.Query("status")); status != "" {
+	if status := strings.TrimSpace(c.Query("status")); status != "" && !strings.EqualFold(status, "all") {
 		query = query.Where("status = ?", status)
 	}
 	if provider := strings.TrimSpace(c.Query("provider")); provider != "" {
