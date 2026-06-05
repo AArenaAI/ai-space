@@ -385,7 +385,7 @@ async function sample(page, cid, startedAt, switchTimeline = {}) {
         status: fetchEvent.status,
       })).slice(-20),
     };
-  }, { cid, startedAt });
+  }, { cid, startedAt, switchTimeline });
 }
 
 function summarize(allResults) {
