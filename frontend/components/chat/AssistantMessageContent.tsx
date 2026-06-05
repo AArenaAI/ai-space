@@ -126,7 +126,18 @@ export function AssistantMessageContent({
 
   return (
     <div className={cn("prose prose-sm max-w-none", className)}>
-      {reasoning && <ThinkBlock content={reasoning} isThinking={isThinking} defaultExpanded={keepReasoningExpanded} />}
+      {reasoning && (
+        <ThinkBlock
+          content={reasoning}
+          isThinking={isThinking}
+          defaultExpanded={keepReasoningExpanded}
+          shouldHydrateRichText={shouldHydrateRichText}
+          priorityHydrateRichText={priorityHydrateRichText}
+          allowRichLiteFallback={allowRichLiteFallback}
+          compactRichLitePreview={compactRichLitePreview}
+          messageId={message.id}
+        />
+      )}
       <MarkdownRenderer content={cleanAnswer} shouldHydrateRichText={shouldHydrateRichText} priorityHydrateRichText={priorityHydrateRichText} allowRichLiteFallback={allowRichLiteFallback} compactRichLitePreview={compactRichLitePreview} messageId={message.id} />
     </div>
   );

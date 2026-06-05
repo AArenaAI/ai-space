@@ -12,11 +12,21 @@ export function ThinkBlock({
   isThinking,
   collapseThreshold = DEFAULT_COLLAPSE_THRESHOLD,
   defaultExpanded = false,
+  shouldHydrateRichText = true,
+  priorityHydrateRichText = false,
+  allowRichLiteFallback = false,
+  compactRichLitePreview = true,
+  messageId,
 }: {
   content: string;
   isThinking: boolean;
   collapseThreshold?: number;
   defaultExpanded?: boolean;
+  shouldHydrateRichText?: boolean;
+  priorityHydrateRichText?: boolean;
+  allowRichLiteFallback?: boolean;
+  compactRichLitePreview?: boolean;
+  messageId?: string | number;
 }) {
   const { t } = useI18n();
   const shouldCollapseByDefault = !defaultExpanded && !isThinking && content.length >= collapseThreshold;
@@ -56,7 +66,14 @@ export function ThinkBlock({
             data-i18n-skip="true"
             className={`reasoning-markdown px-3 py-2.5 bg-slate-50 dark:bg-[#0F0F1A] transition-[transform,filter] duration-300 ease-out ${expanded ? "translate-y-0 blur-0" : "-translate-y-1 blur-[1px]"}`}
           >
-            <DeferredMarkdownRenderer content={content} />
+            <DeferredMarkdownRenderer
+              content={content}
+              shouldHydrateRichText={shouldHydrateRichText}
+              priorityHydrateRichText={priorityHydrateRichText}
+              allowRichLiteFallback={allowRichLiteFallback}
+              compactRichLitePreview={compactRichLitePreview}
+              messageId={messageId}
+            />
           </div>
         </div>
       </div>
