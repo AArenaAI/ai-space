@@ -258,7 +258,7 @@ export function DeferredMarkdownRenderer({
       {shouldRenderMarkdown && Renderer ? (
         <Renderer content={content} isStreaming={isStreaming} priorityHydrateRichText={priorityHydrateRichText} messageId={messageId} />
       ) : priorityHydrateRichText || allowRichLiteFallback || shouldUseRichLiteFallback(content, complexity) ? (
-        <MarkdownTokenRenderer content={content} isStreaming={isStreaming} compactPreview={priorityHydrateRichText ? false : compactRichLitePreview} messageId={messageId} />
+        <MarkdownTokenRenderer content={content} isStreaming={isStreaming} compactPreview={priorityHydrateRichText ? false : compactRichLitePreview} messageId={messageId} priorityHydrateRichText={priorityHydrateRichText} />
       ) : (
         <MarkdownFallback content={content} compactPreview={compactRichLitePreview} messageId={messageId} />
       )}

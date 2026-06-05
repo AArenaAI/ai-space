@@ -33,11 +33,13 @@ export default function MarkdownTokenRenderer({
   compactPreview = true,
   isStreaming = false,
   messageId,
+  priorityHydrateRichText = false,
 }: {
   content: string;
   compactPreview?: boolean;
   isStreaming?: boolean;
   messageId?: string | number;
+  priorityHydrateRichText?: boolean;
 }) {
   const cacheKey = useMemo(() => getMarkdownTokenCacheKey({ content, compactPreview }), [compactPreview, content]);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -87,7 +89,15 @@ export default function MarkdownTokenRenderer({
     if (cached) return;
 
     let cancelled = false;
-    const parseDelay = isStreaming ? 360 : 1800;
+    const parseDelay = isStreaming ? 360 : priorityHydrateRichText ? 0 : 1800;
+    emitChatRenderProfileEvent("markdown-token-parse-scheduled", {
+      compactPreview,
+      contentLength: content.length,
+      isStreaming,
+      messageId,
+      parseDelay,
+      priority: priorityHydrateRichText,
+    });
     const timer = window.setTimeout(() => {
       if (cancelled) return;
       tokenizeMarkdownAsync({ content, compactPreview }).then((next) => {
@@ -98,7 +108,7 @@ export default function MarkdownTokenRenderer({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [cacheKey, compactPreview, content, isStreaming]);
+  }, [cacheKey, compactPreview, content, isStreaming, messageId, priorityHydrateRichText]);
 
   useEffect(() => {
     if (!doc || renderedBlockCount >= doc.tokens.length) return;
