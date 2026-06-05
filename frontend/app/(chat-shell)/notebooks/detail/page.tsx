@@ -698,11 +698,15 @@ function NotebookDetailContent() {
                         <Check className="h-3.5 w-3.5" />
                       </button>
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-muted text-brand"><FileText className="h-4 w-4" /></div>
-                      <div className="min-w-0 flex-1">
+                      <div className="min-w-0 flex-1 overflow-hidden">
                         <div className="truncate text-sm font-medium text-text-primary">{file.file.filename}</div>
-                        <div className="mt-1 flex items-center gap-2 text-[11px] text-text-tertiary"><span>{formatSize(file.file.size)}</span><span>·</span><span>{file.file.mime_type || "file"}</span></div>
+                        <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] text-text-tertiary">
+                          <span className="shrink-0">{formatSize(file.file.size)}</span>
+                          <span className="shrink-0">·</span>
+                          <span className="min-w-0 truncate" title={file.file.mime_type || "file"}>{file.file.mime_type || "file"}</span>
+                        </div>
                       </div>
-                      <button onClick={(event) => { event.stopPropagation(); handleRemove(file); }} className="rounded-lg p-1.5 text-text-tertiary opacity-0 transition hover:bg-red-500/10 hover:text-red-500 group-hover:opacity-100"><Trash2 className="h-3.5 w-3.5" /></button>
+                      <button onClick={(event) => { event.stopPropagation(); handleRemove(file); }} className="shrink-0 rounded-lg p-1.5 text-text-tertiary opacity-0 transition hover:bg-red-500/10 hover:text-red-500 group-hover:opacity-100"><Trash2 className="h-3.5 w-3.5" /></button>
                     </div>
                     <div className={cn("mt-3 inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-medium", meta.className)}><Icon className="h-3 w-3" />{meta.label}</div>
                     {detail && <p className="mt-2 line-clamp-2 text-xs text-amber-600 dark:text-amber-300">{detail}</p>}

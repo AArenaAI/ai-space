@@ -74,8 +74,8 @@ export function NotebookSourcePreviewDrawer({ open, source, data, loading, error
               {t("notebook.previewTitle")}
             </div>
             <h2 className="truncate text-xl font-semibold text-text-primary">{file?.filename || t("notebook.source")}</h2>
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-tertiary">
-              <span>{file?.mime_type || "—"}</span>
+            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2 text-xs text-text-tertiary">
+              <span className="max-w-full truncate" title={file?.mime_type || "—"}>{file?.mime_type || "—"}</span>
               <span>·</span>
               <span>{formatBytes(file?.size)}</span>
               {file?.page_count ? <><span>·</span><span>{t("notebook.previewPages", { count: String(file.page_count) })}</span></> : null}
