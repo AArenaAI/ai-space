@@ -1,6 +1,7 @@
 "use client";
 
-import { BarChart3, ChevronRight, Copy, Download, FileQuestion, FileText, Layers3, Loader2, Map, MoreHorizontal, Pencil, Presentation, Sparkles, Table2, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { BarChart3, ChevronLeft, ChevronRight, Copy, Download, ExternalLink, FileQuestion, FileText, Layers3, Loader2, Map, MoreHorizontal, Pencil, Presentation, RefreshCw, Sparkles, Table2, Trash2 } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -68,12 +69,14 @@ type NotebookStudioPanelProps = {
   artifacts: NotebookStudioArtifact[];
   activeArtifactId: string | null;
   generatingType?: NotebookStudioActionId | null;
+  selectedSourceCount?: number;
   onGenerate: (type: NotebookStudioActionId) => void;
-  onOpenArtifact: (artifactId: string) => void;
+  onOpenArtifact: (artifactId: string | null) => void;
   onRenameArtifact?: (artifact: NotebookStudioArtifact) => void;
   onDeleteArtifact?: (artifact: NotebookStudioArtifact) => void;
   onCopyArtifact?: (artifact: NotebookStudioArtifact) => void;
   onDownloadArtifact?: (artifact: NotebookStudioArtifact) => void;
+  onExportTableToGoogleSheets?: (artifact: Extract<NotebookStudioArtifact, { type: "table" }>) => void;
 };
 
 const actionIconMap: Record<NotebookStudioActionId, typeof Table2> = {
@@ -122,29 +125,29 @@ function renderTextArtifact(artifact: Extract<NotebookStudioArtifact, { type: "s
   );
 }
 
-function renderTableArtifact(artifact: Extract<NotebookStudioArtifact, { type: "table" }>, t: (key: string, params?: Record<string, string>) => string) {
+function renderTableArtifact(artifact: Extract<NotebookStudioArtifact, { type: "table" }>, t: (key: string, params?: Record<string, string>) => string, expanded = false) {
   return (
-    <div className="max-h-[460px] overflow-auto rounded-3xl border border-surface-border bg-surface-card shadow-sm">
-      <table className="min-w-[760px] border-collapse text-left text-xs">
-        <thead className="sticky top-0 z-10 bg-surface-elevated text-text-tertiary">
+    <div className={cn("overflow-auto rounded-2xl border border-surface-border bg-surface-card shadow-sm", expanded ? "min-h-0 flex-1" : "max-h-[460px]")}>
+      <table className="min-w-[780px] border-collapse text-left text-xs">
+        <thead className="sticky top-0 z-10 bg-surface-elevated text-text-primary">
           <tr>
-            <th className="border-b border-surface-border px-3 py-2 font-semibold">{t("notebook.studio.columnModule")}</th>
-            <th className="border-b border-surface-border px-3 py-2 font-semibold">{t("notebook.studio.columnCapability")}</th>
-            <th className="border-b border-surface-border px-3 py-2 font-semibold">{t("notebook.studio.columnStatus")}</th>
-            <th className="border-b border-surface-border px-3 py-2 font-semibold">{t("notebook.studio.columnImplementation")}</th>
-            <th className="border-b border-surface-border px-3 py-2 font-semibold">{t("notebook.studio.columnValue")}</th>
-            <th className="border-b border-surface-border px-3 py-2 font-semibold">{t("notebook.studio.columnSource")}</th>
+            <th className="border-b border-surface-border px-3 py-3 font-semibold">{t("notebook.studio.columnModule")}</th>
+            <th className="border-b border-surface-border px-3 py-3 font-semibold">{t("notebook.studio.columnCapability")}</th>
+            <th className="border-b border-surface-border px-3 py-3 font-semibold [writing-mode:vertical-rl]">{t("notebook.studio.columnStatus")}</th>
+            <th className="border-b border-surface-border px-3 py-3 font-semibold">{t("notebook.studio.columnImplementation")}</th>
+            <th className="border-b border-surface-border px-3 py-3 font-semibold">{t("notebook.studio.columnValue")}</th>
+            <th className="border-b border-surface-border px-3 py-3 font-semibold">{t("notebook.studio.columnSource")}</th>
           </tr>
         </thead>
         <tbody>
           {artifact.rows.map((row, index) => (
             <tr key={`${row.module}-${index}`} className="align-top hover:bg-surface-hover/60">
-              <td className="border-b border-surface-border px-3 py-3 font-semibold text-text-primary">{row.module}</td>
-              <td className="border-b border-surface-border px-3 py-3 leading-5 text-text-secondary">{row.capability}</td>
-              <td className="border-b border-surface-border px-3 py-3 text-text-secondary">{row.status}</td>
-              <td className="border-b border-surface-border px-3 py-3 leading-5 text-text-secondary">{row.implementation}</td>
-              <td className="border-b border-surface-border px-3 py-3 leading-5 text-text-secondary">{row.value}</td>
-              <td className="border-b border-surface-border px-3 py-3 text-brand">{row.source}</td>
+              <td className="border-b border-surface-border px-3 py-4 font-semibold text-text-primary">{row.module}</td>
+              <td className="border-b border-surface-border px-3 py-4 leading-5 text-text-secondary">{row.capability}</td>
+              <td className="border-b border-surface-border px-3 py-4 text-center font-medium text-text-secondary [writing-mode:vertical-rl]">{row.status}</td>
+              <td className="border-b border-surface-border px-3 py-4 leading-5 text-text-secondary">{row.implementation}</td>
+              <td className="border-b border-surface-border px-3 py-4 leading-5 text-text-secondary">{row.value}</td>
+              <td className="border-b border-surface-border px-3 py-4 font-medium text-brand">{row.source}</td>
             </tr>
           ))}
         </tbody>
@@ -188,10 +191,10 @@ function renderMindmapArtifact(artifact: Extract<NotebookStudioArtifact, { type:
   );
 }
 
-function renderActiveArtifact(artifact: NotebookStudioArtifact, t: (key: string, params?: Record<string, string>) => string) {
+function renderActiveArtifact(artifact: NotebookStudioArtifact, t: (key: string, params?: Record<string, string>) => string, expanded = false) {
   switch (artifact.type) {
     case "table":
-      return renderTableArtifact(artifact, t);
+      return renderTableArtifact(artifact, t, expanded);
     case "mindmap":
       return renderMindmapArtifact(artifact);
     default:
@@ -199,18 +202,80 @@ function renderActiveArtifact(artifact: NotebookStudioArtifact, t: (key: string,
   }
 }
 
+function GeneratingTableCard({ sourceCount, t }: { sourceCount: number; t: (key: string, params?: Record<string, string>) => string }) {
+  return (
+    <div className="mb-3 rounded-2xl border border-surface-border bg-surface-card px-3 py-3 shadow-sm">
+      <div className="flex items-center gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-surface-elevated text-brand">
+          <RefreshCw className="h-5 w-5 animate-spin" />
+        </div>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-text-primary">{t("notebook.studio.generatingTable")}</div>
+          <div className="mt-1 text-xs text-text-tertiary">{t("notebook.studio.basedOnSources", { count: String(sourceCount) })}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ArtifactMenu({
+  artifact,
+  open,
+  onToggle,
+  onRenameArtifact,
+  onCopyArtifact,
+  onDownloadArtifact,
+  onExportTableToGoogleSheets,
+  onDeleteArtifact,
+  t,
+}: {
+  artifact: NotebookStudioArtifact;
+  open: boolean;
+  onToggle: () => void;
+  onRenameArtifact?: (artifact: NotebookStudioArtifact) => void;
+  onCopyArtifact?: (artifact: NotebookStudioArtifact) => void;
+  onDownloadArtifact?: (artifact: NotebookStudioArtifact) => void;
+  onExportTableToGoogleSheets?: (artifact: Extract<NotebookStudioArtifact, { type: "table" }>) => void;
+  onDeleteArtifact?: (artifact: NotebookStudioArtifact) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const closeAndRun = (callback?: () => void) => {
+    onToggle();
+    callback?.();
+  };
+  return (
+    <div className="relative ml-auto">
+      <button type="button" onClick={onToggle} className="rounded-lg p-1.5 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" title={t("notebook.studio.moreActions")}>
+        <MoreHorizontal className="h-4 w-4" />
+      </button>
+      {open && (
+        <div className="absolute bottom-full right-0 z-20 mb-2 w-52 overflow-hidden rounded-2xl border border-surface-border bg-surface-card py-1 text-xs shadow-xl">
+          {onRenameArtifact && <button type="button" onClick={() => closeAndRun(() => onRenameArtifact(artifact))} className="flex w-full items-center gap-2 px-3 py-2 text-left text-text-secondary hover:bg-surface-hover hover:text-text-primary"><Pencil className="h-3.5 w-3.5" />{t("notebook.studio.renameOutput")}</button>}
+          {onCopyArtifact && <button type="button" onClick={() => closeAndRun(() => onCopyArtifact(artifact))} className="flex w-full items-center gap-2 px-3 py-2 text-left text-text-secondary hover:bg-surface-hover hover:text-text-primary"><Copy className="h-3.5 w-3.5" />{t("notebook.studio.copyOutput")}</button>}
+          {onDownloadArtifact && <button type="button" onClick={() => closeAndRun(() => onDownloadArtifact(artifact))} className="flex w-full items-center gap-2 px-3 py-2 text-left text-text-secondary hover:bg-surface-hover hover:text-text-primary"><Download className="h-3.5 w-3.5" />{artifact.type === "table" ? t("notebook.studio.downloadCsv") : t("notebook.studio.downloadOutput")}</button>}
+          {artifact.type === "table" && onExportTableToGoogleSheets && <button type="button" onClick={() => closeAndRun(() => onExportTableToGoogleSheets(artifact))} className="flex w-full items-center gap-2 px-3 py-2 text-left text-text-secondary hover:bg-surface-hover hover:text-text-primary"><ExternalLink className="h-3.5 w-3.5" />{t("notebook.studio.exportGoogleSheets")}</button>}
+          {onDeleteArtifact && <button type="button" onClick={() => closeAndRun(() => onDeleteArtifact(artifact))} className="flex w-full items-center gap-2 px-3 py-2 text-left text-red-500 hover:bg-red-500/10"><Trash2 className="h-3.5 w-3.5" />{t("notebook.studio.deleteOutput")}</button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function NotebookStudioPanel({
   artifacts,
   activeArtifactId,
   generatingType,
+  selectedSourceCount = 0,
   onGenerate,
   onOpenArtifact,
   onRenameArtifact,
   onDeleteArtifact,
   onCopyArtifact,
   onDownloadArtifact,
+  onExportTableToGoogleSheets,
 }: NotebookStudioPanelProps) {
   const { t } = useI18n();
+  const [openMenuArtifactId, setOpenMenuArtifactId] = useState<string | null>(null);
   const activeArtifact = artifacts.find((artifact) => artifact.id === activeArtifactId) || null;
   const actions: Array<{ id: NotebookStudioActionId; title: string; desc: string; accent: string }> = [
     { id: "table", title: t("notebook.studio.table"), desc: t("notebook.studio.tableDesc"), accent: "from-emerald-500/15 to-cyan-500/10 text-emerald-500" },
@@ -257,6 +322,41 @@ export function NotebookStudioPanel({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col">
+        {activeArtifact ? (
+          <div className="flex min-h-0 flex-1 flex-col bg-surface-card">
+            <div className="flex items-start gap-3 border-b border-surface-border px-4 py-3">
+              <button type="button" onClick={() => onOpenArtifact(null)} className="mt-0.5 rounded-lg p-1.5 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" title={t("notebook.studio.backToOutputs")}>
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] font-medium text-text-tertiary">Studio &gt; {activeArtifact.type === "table" ? t("notebook.studio.table") : activeArtifact.type}</div>
+                <h3 className="mt-1 line-clamp-2 text-base font-semibold text-text-primary">{activeArtifact.title}</h3>
+                <button type="button" className="mt-2 rounded-full border border-surface-border bg-surface-elevated px-2.5 py-1 text-[11px] font-medium text-text-secondary hover:border-brand-border hover:text-brand">
+                  {t("notebook.studio.viewSources", { count: String(activeArtifact.sourceCount) })}
+                </button>
+              </div>
+              <ArtifactMenu
+                artifact={activeArtifact}
+                open={openMenuArtifactId === activeArtifact.id}
+                onToggle={() => setOpenMenuArtifactId((current) => current === activeArtifact.id ? null : activeArtifact.id)}
+                onRenameArtifact={onRenameArtifact}
+                onCopyArtifact={onCopyArtifact}
+                onDownloadArtifact={onDownloadArtifact}
+                onExportTableToGoogleSheets={onExportTableToGoogleSheets}
+                onDeleteArtifact={onDeleteArtifact}
+                t={t}
+              />
+            </div>
+            <div className="flex min-h-0 flex-1 flex-col overflow-auto p-4">
+              {renderActiveArtifact(activeArtifact, t, true)}
+              <div className="mt-3 flex items-center gap-2 border-t border-surface-border pt-3">
+                <button type="button" className="rounded-full border border-surface-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-emerald-500/40 hover:text-emerald-500">{t("notebook.studio.good")}</button>
+                <button type="button" className="rounded-full border border-surface-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-red-500/40 hover:text-red-500">{t("notebook.studio.bad")}</button>
+              </div>
+            </div>
+          </div>
+        ) : (
+        <>
         <div className="flex items-center justify-between border-b border-surface-border px-4 py-3">
           <div>
             <h3 className="text-sm font-semibold text-text-primary">{t("notebook.studio.outputs")}</h3>
@@ -264,6 +364,7 @@ export function NotebookStudioPanel({
           </div>
           <MoreHorizontal className="h-4 w-4 text-text-tertiary" />
         </div>
+        {generatingType === "table" && <div className="p-4 pb-0"><GeneratingTableCard sourceCount={selectedSourceCount} t={t} /></div>}
         {artifacts.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-card text-text-tertiary"><Layers3 className="h-5 w-5" /></div>
@@ -302,6 +403,8 @@ export function NotebookStudioPanel({
               </div>
             )}
           </div>
+        )}
+        </>
         )}
       </div>
     </aside>

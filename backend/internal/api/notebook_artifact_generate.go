@@ -138,7 +138,7 @@ func buildNotebookArtifactAIMessages(generationType string, notebookTitle string
 	for _, source := range sources {
 		fmt.Fprintf(&b, "[%d] %s\nSummary: %s\nExcerpt: %s\n\n", source.Index, source.File.Filename, fallbackText(source.Summary, "无摘要"), fallbackText(source.Excerpt, "无正文摘录"))
 	}
-	b.WriteString("Return strict JSON only with keys: title, subtitle, content. For summary/faq/briefing content must be {\"sections\":[{\"heading\":string,\"body\":string,\"bullets\":[string]}]}. For table content must be {\"rows\":[{\"module\":string,\"capability\":string,\"status\":string,\"implementation\":string,\"value\":string,\"source\":string}]}. For mindmap content must be {\"nodes\":[{\"id\":string,\"label\":string,\"summary\":string,\"source\":string}],\"edges\":[{\"from\":string,\"to\":string,\"label\":string}]}. Cite sources using bracket numbers such as [1].")
+	b.WriteString("Return strict JSON only with keys: title, subtitle, content. For summary/faq/briefing content must be {\"sections\":[{\"heading\":string,\"body\":string,\"bullets\":[string]}]}. For table content must be {\"rows\":[{\"module\":string,\"capability\":string,\"status\":string,\"implementation\":string,\"value\":string,\"source\":string}]}; organize factual table rows from the uploaded source summaries/excerpts, not file parsing/indexing statuses. Choose row and column content that makes comparison clear; source must cite bracket numbers such as [1]. For mindmap content must be {\"nodes\":[{\"id\":string,\"label\":string,\"summary\":string,\"source\":string}],\"edges\":[{\"from\":string,\"to\":string,\"label\":string}]}. Cite sources using bracket numbers such as [1].")
 	return []services.Message{
 		{Role: "system", Content: "You generate structured Notebook Studio artifacts. Return valid JSON only; no markdown fences."},
 		{Role: "user", Content: b.String()},
@@ -234,16 +234,111 @@ func isNotebookGenerationFileReady(file models.File) bool {
 func buildNotebookGeneratedTableRows(sources []notebookGenerationSource) []notebookStudioTableRow {
 	rows := make([]notebookStudioTableRow, 0, len(sources))
 	for _, source := range sources {
+		factText := fallbackText(source.Summary, source.Excerpt)
+		detailText := fallbackText(source.Excerpt, source.Summary)
 		rows = append(rows, notebookStudioTableRow{
-			Module:         source.File.Filename,
-			Capability:     fallbackText(source.Summary, "已解析资料，可用于问答和 Studio 输出"),
-			Status:         "已就绪",
-			Implementation: fmt.Sprintf("解析状态 %s，索引状态 %s", source.File.ParseStatus, source.File.EmbeddingStatus),
-			Value:          "可作为当前笔记本生成、问答和对比分析的知识来源",
+			Module:         notebookTableTopic(source),
+			Capability:     truncateNotebookTableCell(factText, 120),
+			Status:         notebookTableStatus(detailText),
+			Implementation: notebookTableMethod(detailText),
+			Value:          notebookTableValue(detailText),
 			Source:         fmt.Sprintf("[%d]", source.Index),
 		})
 	}
 	return rows
+}
+
+func notebookTableTopic(source notebookGenerationSource) string {
+	text := strings.TrimSpace(source.Summary)
+	if text == "" {
+		text = strings.TrimSpace(source.Excerpt)
+	}
+	for _, separator := range []string{"：", ":", "。", "\n"} {
+		if index := strings.Index(text, separator); index > 0 && index <= 28 {
+			return truncateNotebookTableCell(text[:index], 42)
+		}
+	}
+	filename := strings.TrimSpace(source.File.Filename)
+	if filename != "" {
+		return truncateNotebookTableCell(strings.TrimSuffix(filename, notebookFileExtension(filename)), 42)
+	}
+	return fmt.Sprintf("资料 %d", source.Index)
+}
+
+func notebookFileExtension(filename string) string {
+	lastDot := strings.LastIndex(filename, ".")
+	if lastDot <= 0 || lastDot == len(filename)-1 {
+		return ""
+	}
+	return filename[lastDot:]
+}
+
+func notebookTableStatus(text string) string {
+	if containsAnyNotebookText(text, []string{"风险", "缺口", "待验证", "不确定", "失败", "限制"}) {
+		return "需核查"
+	}
+	if containsAnyNotebookText(text, []string{"成熟", "完成", "已上线", "结论", "支持", "包括", "需要"}) {
+		return "已整理"
+	}
+	return "资料要点"
+}
+
+func notebookTableMethod(text string) string {
+	sentences := splitNotebookSentences(text)
+	for _, sentence := range sentences {
+		if containsAnyNotebookText(sentence, []string{"通过", "采用", "支持", "包括", "整理", "输出", "上传", "引用"}) {
+			return truncateNotebookTableCell(sentence, 140)
+		}
+	}
+	return truncateNotebookTableCell(fallbackText(text, "从上传资料中提取关键事实并整理为表格"), 140)
+}
+
+func notebookTableValue(text string) string {
+	sentences := splitNotebookSentences(text)
+	for _, sentence := range sentences {
+		if containsAnyNotebookText(sentence, []string{"价值", "优势", "减少", "提升", "用户", "场景", "结论", "差异化"}) {
+			return truncateNotebookTableCell(sentence, 140)
+		}
+	}
+	if len(sentences) > 1 {
+		return truncateNotebookTableCell(sentences[len(sentences)-1], 140)
+	}
+	return "可用于后续问答、对比分析和 Studio 输出"
+}
+
+func splitNotebookSentences(text string) []string {
+	text = strings.ReplaceAll(text, "\r", "\n")
+	parts := strings.FieldsFunc(text, func(r rune) bool {
+		return r == '。' || r == '！' || r == '？' || r == '\n' || r == ';' || r == '；'
+	})
+	sentences := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			sentences = append(sentences, part)
+		}
+	}
+	return sentences
+}
+
+func containsAnyNotebookText(text string, needles []string) bool {
+	for _, needle := range needles {
+		if strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func truncateNotebookTableCell(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "暂无摘要"
+	}
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "…"
 }
 
 func buildNotebookGeneratedMindmap(notebookTitle string, sources []notebookGenerationSource) map[string]any {

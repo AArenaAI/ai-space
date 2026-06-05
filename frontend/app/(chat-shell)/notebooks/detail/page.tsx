@@ -527,6 +527,12 @@ function NotebookDetailContent() {
     toast.success(t("notebook.studio.downloadSuccess"));
   };
 
+  const handleExportTableToGoogleSheets = (artifact: Extract<NotebookStudioArtifact, { type: "table" }>) => {
+    const base = safeFilename(artifact.title);
+    downloadTextFile(`${base}.csv`, artifactToCsv(artifact), "text/csv;charset=utf-8");
+    toast.success(t("notebook.studio.googleSheetsExportHint"));
+  };
+
   const handleRename = async () => {
     if (!notebook) return;
     const title = window.prompt(t("notebook.renamePrompt"), notebook.title)?.trim();
@@ -679,12 +685,14 @@ function NotebookDetailContent() {
         artifacts={studioArtifacts}
         activeArtifactId={activeStudioArtifactId}
         generatingType={generatingStudioType}
+        selectedSourceCount={selectedFileIds.length || readyCount}
         onGenerate={handleStudioGenerate}
         onOpenArtifact={setActiveStudioArtifactId}
         onRenameArtifact={handleRenameArtifact}
         onDeleteArtifact={handleDeleteArtifact}
         onCopyArtifact={handleCopyArtifact}
         onDownloadArtifact={handleDownloadArtifact}
+        onExportTableToGoogleSheets={handleExportTableToGoogleSheets}
       />
     </div>
     <NotebookUrlSourceDialog
