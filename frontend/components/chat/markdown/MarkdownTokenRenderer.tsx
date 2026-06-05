@@ -6,7 +6,7 @@ import {
   getMarkdownTokenCacheKey,
   peekCachedMarkdownTokens,
 } from "@/lib/markdown/markdownTokenCache";
-import { tokenizeMarkdown } from "@/lib/markdown/markdownTokenize";
+import { tokenizeMarkdownAsync } from "@/lib/markdown/markdownTokenWorkerClient";
 import type { MarkdownTokenDocument } from "@/lib/markdown/markdownTokenTypes";
 import MarkdownBlockTokenRenderer from "./MarkdownBlockTokenRenderer";
 
@@ -39,8 +39,9 @@ export default function MarkdownTokenRenderer({
     const parseDelay = isStreaming ? 360 : 1800;
     const timer = window.setTimeout(() => {
       if (cancelled) return;
-      const next = tokenizeMarkdown({ content, compactPreview });
-      if (!cancelled) setDoc(next);
+      tokenizeMarkdownAsync({ content, compactPreview }).then((next) => {
+        if (!cancelled) setDoc(next);
+      });
     }, parseDelay);
     return () => {
       cancelled = true;
@@ -67,6 +68,7 @@ export default function MarkdownTokenRenderer({
       hasTable: doc.featureFlags.hasTable,
       isStreaming,
       parseMs: Number(doc.parseMs.toFixed(2)),
+      tokenizerSource: doc.tokenizerSource || "unknown",
       truncated: doc.truncated,
     });
   }, [compactPreview, content.length, doc, isStreaming]);

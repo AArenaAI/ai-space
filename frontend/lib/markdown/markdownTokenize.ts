@@ -164,6 +164,7 @@ export function tokenizeMarkdown({ content, compactPreview = true }: { content: 
     truncated,
     parseMs: Math.max(0, ended - started),
     cacheHit: false,
+    tokenizerSource: "main",
     featureFlags: detectFeatures(tokens),
   };
   setCachedMarkdownTokens(key, doc);

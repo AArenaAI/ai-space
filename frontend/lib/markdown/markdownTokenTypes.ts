@@ -27,6 +27,7 @@ export type MarkdownTokenDocument = {
   truncated: boolean;
   parseMs: number;
   cacheHit: boolean;
+  tokenizerSource?: "main" | "worker";
   featureFlags: {
     hasCode: boolean;
     hasTable: boolean;
