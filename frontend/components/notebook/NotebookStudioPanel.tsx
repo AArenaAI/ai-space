@@ -21,6 +21,19 @@ export type NotebookStudioTextSection = {
   bullets?: string[];
 };
 
+export type NotebookStudioMindmapNode = {
+  id: string;
+  label: string;
+  summary?: string;
+  source?: string;
+};
+
+export type NotebookStudioMindmapEdge = {
+  from: string;
+  to: string;
+  label?: string;
+};
+
 export type NotebookStudioArtifact =
   | {
       id: string;
@@ -39,6 +52,16 @@ export type NotebookStudioArtifact =
       createdAt: string;
       sourceCount: number;
       sections: NotebookStudioTextSection[];
+    }
+  | {
+      id: string;
+      type: "mindmap";
+      title: string;
+      subtitle: string;
+      createdAt: string;
+      sourceCount: number;
+      nodes: NotebookStudioMindmapNode[];
+      edges: NotebookStudioMindmapEdge[];
     };
 
 type NotebookStudioPanelProps = {
@@ -67,6 +90,7 @@ const artifactIconMap: Record<NotebookStudioArtifact["type"], typeof Table2> = {
   summary: FileText,
   faq: FileQuestion,
   briefing: BarChart3,
+  mindmap: Map,
 };
 
 function formatTime(value: string) {
@@ -127,6 +151,52 @@ function renderTableArtifact(artifact: Extract<NotebookStudioArtifact, { type: "
       </table>
     </div>
   );
+}
+
+function renderMindmapArtifact(artifact: Extract<NotebookStudioArtifact, { type: "mindmap" }>) {
+  const root = artifact.nodes.find((node) => node.id === "root") || artifact.nodes[0];
+  const childNodes = artifact.nodes.filter((node) => node.id !== root?.id);
+  return (
+    <div className="space-y-3 p-4">
+      {root && (
+        <div className="rounded-3xl border border-brand-border bg-brand-muted/30 p-4 text-center">
+          <div className="text-sm font-semibold text-text-primary">{root.label}</div>
+          {root.summary && <p className="mt-2 text-xs leading-5 text-text-secondary">{root.summary}</p>}
+        </div>
+      )}
+      <div className="space-y-2.5">
+        {childNodes.map((node) => {
+          const incoming = artifact.edges.find((edge) => edge.to === node.id);
+          return (
+            <div key={node.id} className="rounded-2xl border border-surface-border bg-surface-elevated/60 p-3">
+              <div className="flex items-start gap-2">
+                <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-violet-500" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold text-text-primary">{node.label}</div>
+                  {node.summary && <p className="mt-1.5 text-xs leading-5 text-text-secondary">{node.summary}</p>}
+                  <div className="mt-2 flex items-center gap-2 text-[11px] text-text-tertiary">
+                    {incoming?.label && <span>{incoming.label}</span>}
+                    {node.source && <span className="text-brand">{node.source}</span>}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function renderActiveArtifact(artifact: NotebookStudioArtifact, t: (key: string, params?: Record<string, string>) => string) {
+  switch (artifact.type) {
+    case "table":
+      return renderTableArtifact(artifact, t);
+    case "mindmap":
+      return renderMindmapArtifact(artifact);
+    default:
+      return renderTextArtifact(artifact);
+  }
 }
 
 export function NotebookStudioPanel({
@@ -228,7 +298,7 @@ export function NotebookStudioPanel({
             </div>
             {activeArtifact && (
               <div className="mt-4">
-                {activeArtifact.type === "table" ? renderTableArtifact(activeArtifact, t) : renderTextArtifact(activeArtifact)}
+                {renderActiveArtifact(activeArtifact, t)}
               </div>
             )}
           </div>

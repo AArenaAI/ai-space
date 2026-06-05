@@ -48,6 +48,19 @@ type notebookStudioTableRow struct {
 	Source         string `json:"source"`
 }
 
+type notebookStudioMindmapNode struct {
+	ID      string `json:"id"`
+	Label   string `json:"label"`
+	Summary string `json:"summary,omitempty"`
+	Source  string `json:"source,omitempty"`
+}
+
+type notebookStudioMindmapEdge struct {
+	From  string `json:"from"`
+	To    string `json:"to"`
+	Label string `json:"label,omitempty"`
+}
+
 func buildGeneratedNotebookArtifactDraft(generationType string, notebookTitle string, files []models.File, selectedFileIDs []uint, language string) (generatedNotebookArtifactDraft, error) {
 	generationType = strings.TrimSpace(generationType)
 	artifactType, ok := notebookArtifactTypeForGeneration(generationType)
@@ -69,6 +82,8 @@ func buildGeneratedNotebookArtifactDraft(generationType string, notebookTitle st
 	switch generationType {
 	case "table":
 		payload = map[string]any{"rows": buildNotebookGeneratedTableRows(sources)}
+	case "mindmap":
+		payload = buildNotebookGeneratedMindmap(notebookTitle, sources)
 	case "summary", "faq", "briefing":
 		payload = map[string]any{"sections": buildNotebookGeneratedTextSections(generationType, notebookTitle, sources, language)}
 	}
@@ -123,7 +138,7 @@ func buildNotebookArtifactAIMessages(generationType string, notebookTitle string
 	for _, source := range sources {
 		fmt.Fprintf(&b, "[%d] %s\nSummary: %s\nExcerpt: %s\n\n", source.Index, source.File.Filename, fallbackText(source.Summary, "无摘要"), fallbackText(source.Excerpt, "无正文摘录"))
 	}
-	b.WriteString("Return strict JSON only with keys: title, subtitle, content. For summary/faq/briefing content must be {\"sections\":[{\"heading\":string,\"body\":string,\"bullets\":[string]}]}. For table content must be {\"rows\":[{\"module\":string,\"capability\":string,\"status\":string,\"implementation\":string,\"value\":string,\"source\":string}]}. Cite sources using bracket numbers such as [1].")
+	b.WriteString("Return strict JSON only with keys: title, subtitle, content. For summary/faq/briefing content must be {\"sections\":[{\"heading\":string,\"body\":string,\"bullets\":[string]}]}. For table content must be {\"rows\":[{\"module\":string,\"capability\":string,\"status\":string,\"implementation\":string,\"value\":string,\"source\":string}]}. For mindmap content must be {\"nodes\":[{\"id\":string,\"label\":string,\"summary\":string,\"source\":string}],\"edges\":[{\"from\":string,\"to\":string,\"label\":string}]}. Cite sources using bracket numbers such as [1].")
 	return []services.Message{
 		{Role: "system", Content: "You generate structured Notebook Studio artifacts. Return valid JSON only; no markdown fences."},
 		{Role: "user", Content: b.String()},
@@ -157,7 +172,7 @@ func notebookArtifactTypeForGeneration(generationType string) (string, bool) {
 	switch generationType {
 	case "table":
 		return "data-table", true
-	case "summary", "faq", "briefing":
+	case "summary", "faq", "briefing", "mindmap":
 		return generationType, true
 	default:
 		return "", false
@@ -231,6 +246,31 @@ func buildNotebookGeneratedTableRows(sources []notebookGenerationSource) []noteb
 	return rows
 }
 
+func buildNotebookGeneratedMindmap(notebookTitle string, sources []notebookGenerationSource) map[string]any {
+	nodes := []notebookStudioMindmapNode{{ID: "root", Label: notebookTitle, Summary: fmt.Sprintf("基于 %d 个资料源生成的知识结构", len(sources))}}
+	edges := make([]notebookStudioMindmapEdge, 0, len(sources)*2)
+	for _, source := range sources {
+		sourceID := fmt.Sprintf("source-%d", source.Index)
+		summary := fallbackText(source.Summary, source.Excerpt)
+		nodes = append(nodes, notebookStudioMindmapNode{ID: sourceID, Label: source.File.Filename, Summary: summary, Source: fmt.Sprintf("[%d]", source.Index)})
+		edges = append(edges, notebookStudioMindmapEdge{From: "root", To: sourceID, Label: "资料源"})
+		if strings.TrimSpace(summary) != "" {
+			ideaID := fmt.Sprintf("idea-%d", source.Index)
+			nodes = append(nodes, notebookStudioMindmapNode{ID: ideaID, Label: truncateNotebookMindmapLabel(summary), Summary: source.Excerpt, Source: fmt.Sprintf("[%d]", source.Index)})
+			edges = append(edges, notebookStudioMindmapEdge{From: sourceID, To: ideaID, Label: "关键要点"})
+		}
+	}
+	return map[string]any{"nodes": nodes, "edges": edges}
+}
+
+func truncateNotebookMindmapLabel(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= 36 {
+		return value
+	}
+	return value[:36] + "…"
+}
+
 func buildNotebookGeneratedTextSections(generationType string, notebookTitle string, sources []notebookGenerationSource, language string) []notebookStudioTextSection {
 	bullets := make([]string, 0, len(sources))
 	for _, source := range sources {
@@ -266,6 +306,8 @@ func notebookGeneratedArtifactTitle(generationType string, notebookTitle string)
 		return fmt.Sprintf("%s · FAQ", notebookTitle)
 	case "briefing":
 		return fmt.Sprintf("%s · 简报", notebookTitle)
+	case "mindmap":
+		return fmt.Sprintf("%s · 思维导图", notebookTitle)
 	default:
 		return fmt.Sprintf("%s · 摘要", notebookTitle)
 	}

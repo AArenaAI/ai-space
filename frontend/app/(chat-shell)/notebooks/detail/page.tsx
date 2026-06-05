@@ -7,7 +7,7 @@ import { ArrowLeft, BookOpen, FileText, Globe, Loader2, Plus, Trash2, UploadClou
 import { toast } from "sonner";
 import ChatInterface from "@/components/chat/ChatInterface";
 import { NotebookSourcePreviewDrawer } from "@/components/notebook/NotebookSourcePreviewDrawer";
-import { NotebookStudioPanel, type NotebookStudioActionId, type NotebookStudioArtifact, type NotebookStudioTableRow, type NotebookStudioTextSection } from "@/components/notebook/NotebookStudioPanel";
+import { NotebookStudioPanel, type NotebookStudioActionId, type NotebookStudioArtifact, type NotebookStudioMindmapEdge, type NotebookStudioMindmapNode, type NotebookStudioTableRow, type NotebookStudioTextSection } from "@/components/notebook/NotebookStudioPanel";
 import { NotebookUrlSourceDialog } from "@/components/notebook/NotebookUrlSourceDialog";
 import { MODELS } from "@/hooks/useChat";
 import { addNotebookFile, addNotebookUrlSource, deleteNotebookArtifact, fetchNotebook, fetchNotebookArtifacts, fetchNotebookFileContent, generateNotebookArtifact, removeNotebookFile, updateNotebook, updateNotebookArtifact } from "@/lib/notebookApi";
@@ -69,7 +69,7 @@ function statusDetail(file: NotebookFile, t: Translate) {
 }
 
 function toStudioArtifact(artifact: PersistedNotebookArtifact): NotebookStudioArtifact | null {
-  const content = artifact.content as { rows?: NotebookStudioTableRow[]; sections?: NotebookStudioTextSection[] } | null;
+  const content = artifact.content as { rows?: NotebookStudioTableRow[]; sections?: NotebookStudioTextSection[]; nodes?: NotebookStudioMindmapNode[]; edges?: NotebookStudioMindmapEdge[] } | null;
   const base = {
     id: String(artifact.id),
     title: artifact.title,
@@ -83,6 +83,14 @@ function toStudioArtifact(artifact: PersistedNotebookArtifact): NotebookStudioAr
   if (artifact.type === "summary" || artifact.type === "faq" || artifact.type === "briefing") {
     return { ...base, type: artifact.type, sections: Array.isArray(content?.sections) ? content.sections : [] };
   }
+  if (artifact.type === "mindmap") {
+    return {
+      ...base,
+      type: "mindmap",
+      nodes: Array.isArray(content?.nodes) ? content.nodes : [],
+      edges: Array.isArray(content?.edges) ? content.edges : [],
+    };
+  }
   return null;
 }
 
@@ -92,22 +100,34 @@ function safeFilename(value: string) {
 
 function artifactToMarkdown(artifact: NotebookStudioArtifact) {
   const lines = [`# ${artifact.title}`, "", artifact.subtitle, ""].filter((line) => line !== undefined);
-  if (artifact.type === "table") {
-    lines.push("| 功能模块 / 来源 | 具体能力 / 内容摘要 | 状态 | 核心技术 / 处理方式 | 业务价值 | 来源 |");
-    lines.push("| --- | --- | --- | --- | --- | --- |");
-    artifact.rows.forEach((row) => {
-      lines.push(`| ${row.module} | ${row.capability} | ${row.status} | ${row.implementation} | ${row.value} | ${row.source} |`);
-    });
-  } else {
-    artifact.sections.forEach((section) => {
-      lines.push(`## ${section.heading}`);
-      if (section.body) lines.push("", section.body);
-      if (section.bullets?.length) {
-        lines.push("");
-        section.bullets.forEach((bullet) => lines.push(`- ${bullet}`));
+  switch (artifact.type) {
+    case "table":
+      lines.push("| 功能模块 / 来源 | 具体能力 / 内容摘要 | 状态 | 核心技术 / 处理方式 | 业务价值 | 来源 |");
+      lines.push("| --- | --- | --- | --- | --- | --- |");
+      artifact.rows.forEach((row) => {
+        lines.push(`| ${row.module} | ${row.capability} | ${row.status} | ${row.implementation} | ${row.value} | ${row.source} |`);
+      });
+      break;
+    case "mindmap":
+      lines.push("## 节点", "");
+      artifact.nodes.forEach((node) => {
+        lines.push(`- ${node.label}${node.source ? ` ${node.source}` : ""}${node.summary ? `：${node.summary}` : ""}`);
+      });
+      if (artifact.edges.length) {
+        lines.push("", "## 关系", "");
+        artifact.edges.forEach((edge) => lines.push(`- ${edge.from} → ${edge.to}${edge.label ? `：${edge.label}` : ""}`));
       }
-      lines.push("");
-    });
+      break;
+    default:
+      artifact.sections.forEach((section) => {
+        lines.push(`## ${section.heading}`);
+        if (section.body) lines.push("", section.body);
+        if (section.bullets?.length) {
+          lines.push("");
+          section.bullets.forEach((bullet) => lines.push(`- ${bullet}`));
+        }
+        lines.push("");
+      });
   }
   return lines.join("\n").trim() + "\n";
 }
@@ -429,7 +449,7 @@ function NotebookDetailContent() {
   };
 
   const handleStudioGenerate = async (type: NotebookStudioActionId) => {
-    if (type === "mindmap" || type === "slides") {
+    if (type === "slides") {
       toast.info(t("notebook.studio.comingSoon"));
       return;
     }

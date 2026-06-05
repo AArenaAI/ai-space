@@ -49,11 +49,43 @@ func TestBuildGeneratedNotebookArtifactDraftUsesSelectedReadySources(t *testing.
 	}
 }
 
-func TestBuildGeneratedNotebookArtifactDraftRejectsUnsupportedTypesAndEmptySources(t *testing.T) {
-	readyFiles := []models.File{{ID: 1, Filename: "资料.md", ParseStatus: "done", EmbeddingStatus: "done", Content: "有效内容"}}
-	if _, err := buildGeneratedNotebookArtifactDraft("mindmap", "知识库", readyFiles, nil, "zh-CN"); err == nil {
-		t.Fatalf("unsupported generation type should fail")
+func TestBuildGeneratedNotebookArtifactDraftSupportsMindmapAndRejectsSlides(t *testing.T) {
+	readyFiles := []models.File{
+		{ID: 1, Filename: "产品方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "产品定位", Content: "AI Space 是知识工作台。"},
+		{ID: 2, Filename: "技术架构.md", ParseStatus: "done", EmbeddingStatus: "skipped", Summary: "技术架构", Content: "Notebook 通过资料、问答和 Studio 输出组织知识。"},
 	}
+	draft, err := buildGeneratedNotebookArtifactDraft("mindmap", "知识库", readyFiles, nil, "zh-CN")
+	if err != nil {
+		t.Fatalf("mindmap generation should be supported: %v", err)
+	}
+	if draft.Type != "mindmap" {
+		t.Fatalf("draft.Type = %q, want mindmap", draft.Type)
+	}
+	var content struct {
+		Nodes []struct {
+			ID    string `json:"id"`
+			Label string `json:"label"`
+		} `json:"nodes"`
+		Edges []struct {
+			From string `json:"from"`
+			To   string `json:"to"`
+		} `json:"edges"`
+	}
+	if err := json.Unmarshal(draft.Content, &content); err != nil {
+		t.Fatalf("mindmap content should be valid JSON: %v", err)
+	}
+	if len(content.Nodes) < 3 || len(content.Edges) < 2 {
+		t.Fatalf("mindmap should include root/source nodes and edges, got nodes=%d edges=%d content=%s", len(content.Nodes), len(content.Edges), string(draft.Content))
+	}
+	if !strings.Contains(string(draft.Content), "产品方案.md") || !strings.Contains(string(draft.Content), "技术架构.md") {
+		t.Fatalf("mindmap content should include source names, got %s", string(draft.Content))
+	}
+	if _, err := buildGeneratedNotebookArtifactDraft("slides", "知识库", readyFiles, nil, "zh-CN"); err == nil {
+		t.Fatalf("slides generation should remain unsupported")
+	}
+}
+
+func TestBuildGeneratedNotebookArtifactDraftRejectsEmptySources(t *testing.T) {
 	failedFiles := []models.File{{ID: 2, Filename: "失败.pdf", ParseStatus: "error", EmbeddingStatus: "pending", Content: "失败"}}
 	if _, err := buildGeneratedNotebookArtifactDraft("summary", "知识库", failedFiles, nil, "zh-CN"); err == nil {
 		t.Fatalf("generation without ready sources should fail")
