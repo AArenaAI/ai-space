@@ -163,7 +163,10 @@ type VideoPricingRule struct {
 }
 
 func Load() *Config {
-	_ = godotenv.Load()
+	// Prefer the repository .env for this deployed backend. The process may inherit
+	// stale variables from the shell/supervisor; using Overload keeps .env changes
+	// authoritative after restarts.
+	_ = godotenv.Overload()
 
 	cfg := &Config{
 		BaseURL:     getEnv("BASE_URL", ""),

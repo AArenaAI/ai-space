@@ -57,7 +57,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	// Embedding provider（可用但非必需）
 	var embedder embedding.Provider
-	if cfg.EnableTextEmbedding && cfg.TextEmbeddingAPIKey != "" {
+	if cfg.EnableTextEmbedding && embedding.HasConfiguredProviderKey(cfg) {
 		var err error
 		embedder, err = embedding.NewProvider(cfg)
 		if err != nil {

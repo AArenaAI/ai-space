@@ -84,9 +84,10 @@ func InitDB(databaseURL string) (*gorm.DB, error) {
 }
 
 func migrateUnconfiguredEmbeddingFailures(db *gorm.DB) error {
-	// Router only creates the embedding provider when TEXT_EMBEDDING_API_KEY is configured.
-	// If it is empty, parsed files should be treated as embedding-skipped instead of failed.
-	if strings.TrimSpace(os.Getenv("TEXT_EMBEDDING_API_KEY")) != "" {
+	// Only mark parsed files as embedding-skipped when no configured embedding provider has a usable key.
+	// Provider-specific fallback keys (for example GEMINI_API_KEY when TEXT_EMBEDDING_PROVIDER=gemini)
+	// must be treated as configured, otherwise a restart would incorrectly skip indexable files.
+	if textEmbeddingProviderConfigured() {
 		return nil
 	}
 
@@ -102,6 +103,20 @@ func migrateUnconfiguredEmbeddingFailures(db *gorm.DB) error {
 			"status":        "done",
 			"error_message": "skipped: text embedding api key is not configured",
 		}).Error
+}
+
+func textEmbeddingProviderConfigured() bool {
+	if strings.TrimSpace(os.Getenv("TEXT_EMBEDDING_API_KEY")) != "" {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("TEXT_EMBEDDING_PROVIDER"))) {
+	case "gemini":
+		return strings.TrimSpace(os.Getenv("GEMINI_API_KEY")) != ""
+	case "openai", "":
+		return strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != ""
+	default:
+		return false
+	}
 }
 
 func migrateFilePublicIDs(db *gorm.DB) error {
