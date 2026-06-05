@@ -290,6 +290,41 @@ export function NotebookStudioPanel({
 
   return (
     <aside className="flex h-full shrink-0 flex-col bg-surface-elevated/70" style={{ width }}>
+      {activeArtifact ? (
+        <div className="flex min-h-0 flex-1 flex-col bg-surface-card">
+          <div className="flex items-start gap-3 border-b border-surface-border px-4 py-3">
+            <button type="button" onClick={() => onOpenArtifact(null)} className="mt-0.5 rounded-lg p-1.5 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" title={t("notebook.studio.backToOutputs")}>
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <div className="min-w-0 flex-1">
+              <div className="text-[11px] font-medium text-text-tertiary">Studio &gt; {activeArtifact.type === "table" ? t("notebook.studio.table") : activeArtifact.type}</div>
+              <h3 className="mt-1 line-clamp-2 text-base font-semibold text-text-primary">{activeArtifact.title}</h3>
+              <button type="button" className="mt-2 rounded-full border border-surface-border bg-surface-elevated px-2.5 py-1 text-[11px] font-medium text-text-secondary hover:border-brand-border hover:text-brand">
+                {t("notebook.studio.viewSources", { count: String(activeArtifact.sourceCount) })}
+              </button>
+            </div>
+            <ArtifactMenu
+              artifact={activeArtifact}
+              open={openMenuArtifactId === activeArtifact.id}
+              onToggle={() => setOpenMenuArtifactId((current) => current === activeArtifact.id ? null : activeArtifact.id)}
+              onRenameArtifact={onRenameArtifact}
+              onCopyArtifact={onCopyArtifact}
+              onDownloadArtifact={onDownloadArtifact}
+              onExportTableToGoogleSheets={onExportTableToGoogleSheets}
+              onDeleteArtifact={onDeleteArtifact}
+              t={t}
+            />
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col overflow-auto p-4">
+            {renderActiveArtifact(activeArtifact, t, true)}
+            <div className="mt-3 flex items-center gap-2 border-t border-surface-border pt-3">
+              <button type="button" className="rounded-full border border-surface-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-emerald-500/40 hover:text-emerald-500">{t("notebook.studio.good")}</button>
+              <button type="button" className="rounded-full border border-surface-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-red-500/40 hover:text-red-500">{t("notebook.studio.bad")}</button>
+            </div>
+          </div>
+        </div>
+      ) : (
+      <>
       <div className="border-b border-surface-border p-4">
         <div className="mb-3 flex items-center justify-between">
           <div>
@@ -324,41 +359,6 @@ export function NotebookStudioPanel({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col">
-        {activeArtifact ? (
-          <div className="flex min-h-0 flex-1 flex-col bg-surface-card">
-            <div className="flex items-start gap-3 border-b border-surface-border px-4 py-3">
-              <button type="button" onClick={() => onOpenArtifact(null)} className="mt-0.5 rounded-lg p-1.5 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" title={t("notebook.studio.backToOutputs")}>
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              <div className="min-w-0 flex-1">
-                <div className="text-[11px] font-medium text-text-tertiary">Studio &gt; {activeArtifact.type === "table" ? t("notebook.studio.table") : activeArtifact.type}</div>
-                <h3 className="mt-1 line-clamp-2 text-base font-semibold text-text-primary">{activeArtifact.title}</h3>
-                <button type="button" className="mt-2 rounded-full border border-surface-border bg-surface-elevated px-2.5 py-1 text-[11px] font-medium text-text-secondary hover:border-brand-border hover:text-brand">
-                  {t("notebook.studio.viewSources", { count: String(activeArtifact.sourceCount) })}
-                </button>
-              </div>
-              <ArtifactMenu
-                artifact={activeArtifact}
-                open={openMenuArtifactId === activeArtifact.id}
-                onToggle={() => setOpenMenuArtifactId((current) => current === activeArtifact.id ? null : activeArtifact.id)}
-                onRenameArtifact={onRenameArtifact}
-                onCopyArtifact={onCopyArtifact}
-                onDownloadArtifact={onDownloadArtifact}
-                onExportTableToGoogleSheets={onExportTableToGoogleSheets}
-                onDeleteArtifact={onDeleteArtifact}
-                t={t}
-              />
-            </div>
-            <div className="flex min-h-0 flex-1 flex-col overflow-auto p-4">
-              {renderActiveArtifact(activeArtifact, t, true)}
-              <div className="mt-3 flex items-center gap-2 border-t border-surface-border pt-3">
-                <button type="button" className="rounded-full border border-surface-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-emerald-500/40 hover:text-emerald-500">{t("notebook.studio.good")}</button>
-                <button type="button" className="rounded-full border border-surface-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-red-500/40 hover:text-red-500">{t("notebook.studio.bad")}</button>
-              </div>
-            </div>
-          </div>
-        ) : (
-        <>
         <div className="flex items-center justify-between border-b border-surface-border px-4 py-3">
           <div>
             <h3 className="text-sm font-semibold text-text-primary">{t("notebook.studio.outputs")}</h3>
@@ -377,17 +377,16 @@ export function NotebookStudioPanel({
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
             <div className="space-y-2.5">
               {artifacts.map((artifact) => {
-                const isActive = artifact.id === activeArtifactId;
                 const Icon = artifactIconMap[artifact.type];
                 return (
-                  <div key={artifact.id} className={cn("rounded-2xl border bg-surface-card transition", isActive ? "border-brand-border bg-brand-muted/30" : "border-surface-border")}>
+                  <div key={artifact.id} className="rounded-2xl border border-surface-border bg-surface-card transition">
                     <button type="button" onClick={() => onOpenArtifact(artifact.id)} className="flex w-full items-center gap-3 p-3 text-left">
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500"><Icon className="h-4 w-4" /></div>
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-semibold text-text-primary">{artifact.title}</div>
                         <div className="mt-1 flex items-center gap-1.5 text-[11px] text-text-tertiary"><span>{artifact.subtitle}</span><span>·</span><span>{formatTime(artifact.createdAt)}</span></div>
                       </div>
-                      <ChevronRight className={cn("h-4 w-4 shrink-0 text-text-tertiary transition", isActive && "rotate-90 text-brand")} />
+                      <ChevronRight className="h-4 w-4 shrink-0 text-text-tertiary transition" />
                     </button>
                     <div className="flex items-center gap-1 border-t border-surface-border/70 px-3 py-2">
                       {onRenameArtifact && <button type="button" onClick={() => onRenameArtifact(artifact)} className="rounded-lg p-1.5 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" title={t("notebook.studio.renameOutput")}><Pencil className="h-3.5 w-3.5" /></button>}
@@ -399,16 +398,11 @@ export function NotebookStudioPanel({
                 );
               })}
             </div>
-            {activeArtifact && (
-              <div className="mt-4">
-                {renderActiveArtifact(activeArtifact, t)}
-              </div>
-            )}
           </div>
         )}
-        </>
-        )}
       </div>
+      </>
+      )}
     </aside>
   );
 }
