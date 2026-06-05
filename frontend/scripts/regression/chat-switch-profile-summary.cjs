@@ -2,6 +2,7 @@
 const fs = require("node:fs");
 const http = require("node:http");
 const { chromium } = require("playwright");
+const { marked } = require("marked");
 
 const apiBaseUrl = process.env.REAL_API_BASE_URL || "http://127.0.0.1:9091";
 const frontendBaseUrl = process.env.FRONTEND_BASE_URL || "http://127.0.0.1:3012";
@@ -352,6 +353,114 @@ function topCodeBlockBuckets(events, limit = 8) {
     }));
 }
 
+function inlineTextLength(tokens = []) {
+  return tokens.reduce((sum, token) => {
+    if (!token) return sum;
+    if (typeof token.text === "string") sum += token.text.length;
+    if (typeof token.raw === "string" && !token.text) sum += token.raw.length;
+    if (Array.isArray(token.tokens)) sum += inlineTextLength(token.tokens);
+    return sum;
+  }, 0);
+}
+
+function tokenSizeBucket(value) {
+  if (value > 4000) return ">4k";
+  if (value > 1200) return "1.2k-4k";
+  if (value > 500) return "500-1.2k";
+  return "<=500";
+}
+
+function collectOfflineBlockBuckets(tokens = [], nested = false, out = []) {
+  for (const token of tokens || []) {
+    if (!token || token.type === "space") continue;
+    if (token.type === "list") {
+      out.push({ type: "list", nested, itemCount: (token.items || []).length, sizeBucket: tokenSizeBucket((token.items || []).length * 40) });
+      for (const item of token.items || []) collectOfflineBlockBuckets(item.tokens || [], true, out);
+      continue;
+    }
+    if (token.type === "blockquote") {
+      out.push({ type: "blockquote", nested, itemCount: (token.tokens || []).length, sizeBucket: tokenSizeBucket((token.tokens || []).length * 40) });
+      collectOfflineBlockBuckets(token.tokens || [], true, out);
+      continue;
+    }
+    if (token.type === "code") {
+      const text = String(token.text || "");
+      const lineCount = text ? text.split("\n").length : 0;
+      out.push({ type: "code", nested, charCount: text.length, lineCount, lang: token.lang || "text", sizeBucket: tokenSizeBucket(Math.max(text.length, lineCount * 40)) });
+      continue;
+    }
+    if (token.type === "table") {
+      const rowCount = (token.rows || []).length;
+      const columnCount = (token.header || []).length || (token.rows?.[0] || []).length || 0;
+      out.push({ type: "table", nested, rowCount, columnCount, sizeBucket: tokenSizeBucket(rowCount * Math.max(columnCount, 1) * 60) });
+      continue;
+    }
+    if (token.type === "heading" || token.type === "paragraph") {
+      const charCount = inlineTextLength(token.tokens || []);
+      out.push({ type: token.type, nested, charCount, inlineTokenCount: (token.tokens || []).length, sizeBucket: tokenSizeBucket(charCount) });
+      continue;
+    }
+    const rawLength = String(token.raw || token.text || "").length;
+    out.push({ type: token.type || "unknown", nested, charCount: rawLength, sizeBucket: tokenSizeBucket(rawLength) });
+  }
+  return out;
+}
+
+function analyzeOfflineTokenBlocks(messagesByCid, limit = 16) {
+  const buckets = new Map();
+  for (const [cid, message] of Object.entries(messagesByCid || {})) {
+    const content = String(message?.content || "");
+    if (!content) continue;
+    const tokens = marked.lexer(content, { gfm: true, breaks: false }).filter((token) => token.type !== "space");
+    const blocks = collectOfflineBlockBuckets(tokens);
+    const seenForDocument = new Set();
+    for (const block of blocks) {
+      const key = `type:${block.type}|nested:${block.nested ? "yes" : "no"}|size:${block.sizeBucket}`;
+      const current = buckets.get(key) || {
+        bucket: key,
+        count: 0,
+        documentCount: 0,
+        charCountMax: 0,
+        columnCountMax: 0,
+        itemCountMax: 0,
+        lineCountMax: 0,
+        rowCountMax: 0,
+        examples: [],
+      };
+      current.count += 1;
+      current.charCountMax = Math.max(current.charCountMax, Number(block.charCount || 0));
+      current.columnCountMax = Math.max(current.columnCountMax, Number(block.columnCount || 0));
+      current.itemCountMax = Math.max(current.itemCountMax, Number(block.itemCount || 0));
+      current.lineCountMax = Math.max(current.lineCountMax, Number(block.lineCount || 0));
+      current.rowCountMax = Math.max(current.rowCountMax, Number(block.rowCount || 0));
+      if (!seenForDocument.has(key)) {
+        current.documentCount += 1;
+        seenForDocument.add(key);
+      }
+      if (message.id && current.examples.length < 5 && !current.examples.includes(String(message.id))) current.examples.push(String(message.id));
+      buckets.set(key, current);
+    }
+  }
+  return Array.from(buckets.values())
+    .sort((a, b) => b.count - a.count || a.bucket.localeCompare(b.bucket))
+    .slice(0, limit);
+}
+
+async function fetchLatestAssistantMessages(token, cids) {
+  const result = {};
+  for (const cid of [...new Set(cids)]) {
+    const response = await fetch(`${apiBaseUrl}/api/conversations/${cid}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) continue;
+    const data = await response.json();
+    const messages = Array.isArray(data.messages) ? data.messages : Array.isArray(data.data?.messages) ? data.data.messages : [];
+    const latest = [...messages].reverse().find((message) => message.role === "assistant" && String(message.content || "").trim());
+    if (latest) result[cid] = latest;
+  }
+  return result;
+}
+
 function createProxy() {
   const server = http.createServer((req, res) => {
     const targetBase = req.url.startsWith("/api/") || req.url === "/health" ? apiBaseUrl : frontendBaseUrl;
@@ -571,7 +680,7 @@ function summarizeSlowBottom0Samples(allResults, limit = 8) {
     .slice(0, limit);
 }
 
-function summarize(allResults) {
+function summarize(allResults, latestAssistantMessagesByCid = {}) {
   const values = (key) => allResults.map((result) => Number(result[key] || 0));
   const timelineValues = (key) => allResults.map((result) => Number(result.switchTimeline?.[key]));
   const allRecentEvents = allResults.flatMap((result) => result.recentEvents || []);
@@ -653,6 +762,8 @@ function summarize(allResults) {
     topUserContentBuckets: topUserContentBuckets(allRecentEvents),
     topMessageActionsBuckets: topMessageActionsBuckets(allRecentEvents),
     topCodeBlockBuckets: topCodeBlockBuckets(allRecentEvents),
+    topOfflineTokenBlockBuckets: analyzeOfflineTokenBlocks(latestAssistantMessagesByCid),
+    latestAssistantMessageIds: Object.fromEntries(Object.entries(latestAssistantMessagesByCid).map(([cid, message]) => [cid, String(message.id || "")])),
     topTokenMessages: topEntriesByCount(allRecentEvents, "markdown-token-rendered"),
     slowBottom0Samples: summarizeSlowBottom0Samples(allResults),
     byCid,
@@ -663,6 +774,7 @@ function summarize(allResults) {
   const server = await createProxy();
   try {
     const { token, user } = await login();
+    const latestAssistantMessagesByCid = await fetchLatestAssistantMessages(token, sequence);
     const browser = await chromium.launch({ headless: true, args: ["--disable-dev-shm-usage"] });
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     await page.addInitScript(({ token, user, port }) => {
@@ -712,7 +824,7 @@ function summarize(allResults) {
     }
     await browser.close();
 
-    const summary = summarize(allResults);
+    const summary = summarize(allResults, latestAssistantMessagesByCid);
     const payload = { summary, results: allResults };
     fs.writeFileSync(outPath, JSON.stringify(payload, null, 2));
     console.log(JSON.stringify(summary, null, 2));

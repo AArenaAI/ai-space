@@ -6,6 +6,7 @@ import {
   getMarkdownTokenCacheKey,
   peekCachedMarkdownTokens,
 } from "@/lib/markdown/markdownTokenCache";
+import { tokenizeMarkdown } from "@/lib/markdown/markdownTokenize";
 import { tokenizeMarkdownAsync } from "@/lib/markdown/markdownTokenWorkerClient";
 import type { MarkdownTokenDocument } from "@/lib/markdown/markdownTokenTypes";
 import MarkdownBlockTokenRenderer from "./MarkdownBlockTokenRenderer";
@@ -47,6 +48,9 @@ export default function MarkdownTokenRenderer({
   const [doc, setDoc] = useState<MarkdownTokenDocument | null>(() => {
     const cached = peekCachedMarkdownTokens(cacheKey);
     if (cached && !isStreaming && !priorityHydrateRichText && shouldSkipTokenUpgradeForUserBrowse()) return null;
+    if (!cached && priorityHydrateRichText && !isStreaming) {
+      return tokenizeMarkdown({ content, compactPreview });
+    }
     return cached;
   });
   const [renderedBlockCount, setRenderedBlockCount] = useState(INITIAL_TOKEN_BLOCK_BUDGET);
