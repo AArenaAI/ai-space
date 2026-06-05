@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 )
 
@@ -110,7 +111,7 @@ func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, 
 	}
 	sources := selectNotebookGenerationSources(files, selectedFileIDs)
 	messages := buildNotebookArtifactAIMessages(generationType, notebookTitle, sources, language)
-	resp, err := aiService.ChatCompletion(ctx, notebookArtifactAIModel(), messages, false, false, "", false, nil)
+	resp, err := aiService.ChatCompletion(ctx, notebookArtifactAIModel(generationType), messages, false, false, "", false, nil)
 	if err != nil || resp == nil || resp.Body == nil {
 		return fallback, nil
 	}
@@ -121,6 +122,9 @@ func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, 
 	}
 	draft, err := parseAINotebookArtifactResponse(body, fallback)
 	if err != nil {
+		return fallback, nil
+	}
+	if generationType == "table" && !notebookTableDraftLooksUseful(draft.Content) {
 		return fallback, nil
 	}
 	return draft, nil
@@ -138,7 +142,11 @@ func buildNotebookArtifactAIMessages(generationType string, notebookTitle string
 	for _, source := range sources {
 		fmt.Fprintf(&b, "[%d] %s\nSummary: %s\nExcerpt: %s\n\n", source.Index, source.File.Filename, fallbackText(source.Summary, "无摘要"), fallbackText(source.Excerpt, "无正文摘录"))
 	}
-	b.WriteString("Return strict JSON only with keys: title, subtitle, content. For summary/faq/briefing content must be {\"sections\":[{\"heading\":string,\"body\":string,\"bullets\":[string]}]}. For table content must be {\"rows\":[{\"module\":string,\"capability\":string,\"status\":string,\"implementation\":string,\"value\":string,\"source\":string}]}; organize factual table rows from the uploaded source summaries/excerpts, not file parsing/indexing statuses. Choose row and column content that makes comparison clear; source must cite bracket numbers such as [1]. For mindmap content must be {\"nodes\":[{\"id\":string,\"label\":string,\"summary\":string,\"source\":string}],\"edges\":[{\"from\":string,\"to\":string,\"label\":string}]}. Cite sources using bracket numbers such as [1].")
+	if generationType == "table" {
+		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For table content must be {\"rows\":[{\"module\":string,\"capability\":string,\"status\":string,\"implementation\":string,\"value\":string,\"source\":string}]}. You MUST read the uploaded source text and extract a functional/specification table: each row is one product feature, capability, module, workflow, scenario, or business item described in the documents. Use columns as: module=模块名称, capability=核心功能, status=当前状态/成熟度, implementation=差异化竞争优势, value=对标产品/参照对象/适用场景, source=bracket citations like [1]. Do NOT create a file list, parse/index status checklist, or one row per file. If one document describes multiple functions, output multiple rows from that same document. Prefer 6-12 high-signal rows when enough content exists. Keep all cells grounded in the source text.\n")
+	} else {
+		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For summary/faq/briefing content must be {\"sections\":[{\"heading\":string,\"body\":string,\"bullets\":[string]}]}. For mindmap content must be {\"nodes\":[{\"id\":string,\"label\":string,\"summary\":string,\"source\":string}],\"edges\":[{\"from\":string,\"to\":string,\"label\":string}]}. Cite sources using bracket numbers such as [1].")
+	}
 	return []services.Message{
 		{Role: "system", Content: "You generate structured Notebook Studio artifacts. Return valid JSON only; no markdown fences."},
 		{Role: "user", Content: b.String()},
@@ -164,8 +172,36 @@ func parseAINotebookArtifactResponse(body []byte, fallback generatedNotebookArti
 	return fallback, nil
 }
 
-func notebookArtifactAIModel() string {
+func notebookArtifactAIModel(generationType string) string {
+	if generationType == "table" {
+		return "gpt-5.5"
+	}
 	return "gpt-5.4-mini"
+}
+
+func notebookTableDraftLooksUseful(content json.RawMessage) bool {
+	var payload struct {
+		Rows []notebookStudioTableRow `json:"rows"`
+	}
+	if err := json.Unmarshal(content, &payload); err != nil {
+		return false
+	}
+	if len(payload.Rows) == 0 {
+		return false
+	}
+	statusChecklistSignals := []string{"解析状态", "索引状态", "parse_status", "embedding_status", "已就绪", "处理完成后可参与", "文件状态", "资料源", "mime_type"}
+	contentSignals := []string{"功能", "能力", "模块", "场景", "优势", "对标", "聊天", "问答", "生成", "检索", "导出", "部署", "产品", "用户"}
+	contentRows := 0
+	for _, row := range payload.Rows {
+		combined := strings.Join([]string{row.Module, row.Capability, row.Status, row.Implementation, row.Value}, " ")
+		if containsAnyNotebookText(combined, statusChecklistSignals) {
+			return false
+		}
+		if containsAnyNotebookText(combined, contentSignals) {
+			contentRows++
+		}
+	}
+	return contentRows >= len(payload.Rows)/2+1
 }
 
 func notebookArtifactTypeForGeneration(generationType string) (string, bool) {
@@ -200,8 +236,8 @@ func selectNotebookGenerationSources(files []models.File, selectedFileIDs []uint
 		if excerpt == "" {
 			excerpt = summary
 		}
-		if len(excerpt) > 1200 {
-			excerpt = excerpt[:1200]
+		if len(excerpt) > 8000 {
+			excerpt = excerpt[:8000]
 		}
 		if summary == "" {
 			summary = excerpt
@@ -232,20 +268,284 @@ func isNotebookGenerationFileReady(file models.File) bool {
 }
 
 func buildNotebookGeneratedTableRows(sources []notebookGenerationSource) []notebookStudioTableRow {
-	rows := make([]notebookStudioTableRow, 0, len(sources))
+	rows := make([]notebookStudioTableRow, 0, len(sources)*3)
 	for _, source := range sources {
-		factText := fallbackText(source.Summary, source.Excerpt)
-		detailText := fallbackText(source.Excerpt, source.Summary)
-		rows = append(rows, notebookStudioTableRow{
-			Module:         notebookTableTopic(source),
-			Capability:     truncateNotebookTableCell(factText, 120),
-			Status:         notebookTableStatus(detailText),
-			Implementation: notebookTableMethod(detailText),
-			Value:          notebookTableValue(detailText),
-			Source:         fmt.Sprintf("[%d]", source.Index),
-		})
+		rows = append(rows, extractNotebookTableRowsFromSource(source)...)
 	}
 	return rows
+}
+
+func extractNotebookTableRowsFromSource(source notebookGenerationSource) []notebookStudioTableRow {
+	text := fallbackText(source.Excerpt, source.Summary)
+	if rows := extractNotebookExistingTableRows(source, text); len(rows) > 0 {
+		return rows
+	}
+	blocks := splitNotebookFeatureBlocks(text)
+	rows := make([]notebookStudioTableRow, 0, len(blocks))
+	for _, block := range blocks {
+		row := notebookTableRowFromBlock(source, block.title, block.body)
+		if strings.TrimSpace(row.Module) != "" && strings.TrimSpace(row.Capability) != "" {
+			rows = append(rows, row)
+		}
+	}
+	if len(rows) > 0 {
+		return rows
+	}
+	return []notebookStudioTableRow{notebookTableRowFromBlock(source, notebookTableTopic(source), text)}
+}
+
+func extractNotebookExistingTableRows(source notebookGenerationSource, text string) []notebookStudioTableRow {
+	if !strings.Contains(text, "模块") || !strings.Contains(text, "能力") {
+		return nil
+	}
+	lines := strings.Split(strings.ReplaceAll(text, "\r", "\n"), "\n")
+	rows := make([]notebookStudioTableRow, 0)
+	var current *notebookStudioTableRow
+	for _, raw := range lines {
+		line := normalizeNotebookTableLine(raw)
+		if line == "" {
+			continue
+		}
+		if strings.Contains(line, "模块") && strings.Contains(line, "能力") {
+			continue
+		}
+		module, rest, ok := splitNotebookTableFeatureLine(line)
+		if ok {
+			if current != nil {
+				rows = append(rows, *current)
+			}
+			status := extractNotebookStatusToken(rest)
+			capability := removeNotebookStatusTokens(rest)
+			current = &notebookStudioTableRow{
+				Module:         truncateNotebookTableCell(cleanNotebookModuleName(module), 42),
+				Capability:     truncateNotebookTableCell(capability, 180),
+				Status:         fallbackText(status, "资料要点"),
+				Implementation: notebookTableAdvantageForModule(module, text),
+				Value:          notebookTableBenchmarkForModule(module),
+				Source:         fmt.Sprintf("[%d]", source.Index),
+			}
+			continue
+		}
+		if current != nil && looksLikeNotebookSectionHeading(line) {
+			rows = append(rows, *current)
+			current = nil
+			if len(rows) >= 3 {
+				break
+			}
+			continue
+		}
+		if current != nil {
+			status := extractNotebookStatusToken(line)
+			if status != "" && current.Status == "资料要点" {
+				current.Status = status
+				line = removeNotebookStatusTokens(line)
+			}
+			if line != "" && len([]rune(current.Capability)) < 170 {
+				current.Capability = truncateNotebookTableCell(strings.TrimSpace(current.Capability+" "+line), 180)
+			}
+		}
+	}
+	if current != nil {
+		rows = append(rows, *current)
+	}
+	if len(rows) < 3 {
+		return nil
+	}
+	return rows
+}
+
+func normalizeNotebookTableLine(line string) string {
+	line = regexp.MustCompile(`\s+`).ReplaceAllString(strings.TrimSpace(line), " ")
+	line = strings.Trim(line, "│| ")
+	return strings.TrimSpace(line)
+}
+
+func splitNotebookTableFeatureLine(line string) (string, string, bool) {
+	clean := strings.TrimSpace(regexp.MustCompile(`^[\p{So}\p{Sk}\p{S}\p{P}]+\s*`).ReplaceAllString(line, ""))
+	if clean == "" {
+		return "", "", false
+	}
+	candidates := []string{"多模型聊天", "并列对比", "图片生成", "图片编辑", "技能系统", "PPT 生成", "PPT生成", "文件解析", "对话分享", "积分体系", "回答模板", "认证系统", "主题切换", "品牌标识", "品牌色系", "主题体系", "页面路由", "着陆页", "视频生成", "Notebook", "Studio 数据表格"}
+	for _, candidate := range candidates {
+		if strings.HasPrefix(clean, candidate) {
+			return candidate, strings.TrimSpace(strings.TrimPrefix(clean, candidate)), true
+		}
+	}
+	parts := strings.Fields(clean)
+	if len(parts) < 2 {
+		return "", "", false
+	}
+	module := parts[0]
+	if len(parts) >= 3 && len([]rune(parts[0])) <= 4 && looksLikeNotebookFeatureTitle(parts[0]+parts[1]) {
+		module = parts[0] + parts[1]
+		return module, strings.Join(parts[2:], " "), true
+	}
+	if looksLikeNotebookFeatureTitle(module) {
+		return module, strings.Join(parts[1:], " "), true
+	}
+	return "", "", false
+}
+
+func extractNotebookStatusToken(text string) string {
+	for _, status := range []string{"✅ 成熟", "成熟", "建设中", "规划中", "需核查", "可用", "已上线"} {
+		if strings.Contains(text, status) {
+			return strings.TrimSpace(strings.TrimPrefix(status, "✅"))
+		}
+	}
+	return ""
+}
+
+func removeNotebookStatusTokens(text string) string {
+	for _, token := range []string{"✅ 成熟", "✅", "成熟", "建设中", "规划中", "需核查", "可用", "已上线"} {
+		text = strings.ReplaceAll(text, token, "")
+	}
+	return strings.TrimSpace(text)
+}
+
+func cleanNotebookModuleName(module string) string {
+	module = regexp.MustCompile(`^[\p{So}\p{Sk}\p{S}\p{P}\s]+`).ReplaceAllString(module, "")
+	return strings.TrimSpace(strings.Trim(module, "✅️\ufe0f "))
+}
+
+func looksLikeNotebookSectionHeading(line string) bool {
+	return regexp.MustCompile(`^\d+(?:\.\d+)?\s+`).MatchString(line) || strings.HasPrefix(line, "AI Space")
+}
+
+func notebookTableAdvantageForModule(module string, text string) string {
+	if strings.Contains(module, "多模型") {
+		return "统一接入多家主流模型，支持按任务切换和管理不同模型能力"
+	}
+	if strings.Contains(module, "并列对比") {
+		return "同一问题可同时比较两个模型输出，便于选型和质量判断"
+	}
+	if strings.Contains(module, "图片") {
+		return "把生成、编辑、质量控制集中在同一产品工作流中"
+	}
+	if strings.Contains(module, "文件解析") || strings.Contains(module, "Notebook") {
+		return "将资料解析、分块、Embedding 和向量检索整合为可引用 RAG 流水线"
+	}
+	if strings.Contains(module, "白标") || strings.Contains(module, "品牌") || strings.Contains(module, "主题") {
+		return "通过组件、CSS 变量和路由配置支持低成本品牌化定制"
+	}
+	if containsAnyNotebookText(text, []string{"差异化", "优势", "定制"}) {
+		return "从资料中的产品优势和能力描述整理，可结合来源继续核查"
+	}
+	return "从资料正文抽取的功能能力，可用于后续对比和复核"
+}
+
+func notebookTableBenchmarkForModule(module string) string {
+	if strings.Contains(module, "多模型") || strings.Contains(module, "并列") {
+		return "ChatGPT、Poe、OpenRouter"
+	}
+	if strings.Contains(module, "图片") {
+		return "ChatGPT Images、Midjourney、Adobe Firefly"
+	}
+	if strings.Contains(module, "文件解析") || strings.Contains(module, "Notebook") {
+		return "NotebookLM、Claude Projects"
+	}
+	if strings.Contains(module, "PPT") {
+		return "Gamma、Tome、Canva"
+	}
+	if strings.Contains(module, "品牌") || strings.Contains(module, "白标") {
+		return "企业白标 AI 平台、定制化 SaaS"
+	}
+	return "按资料场景复核"
+}
+
+type notebookFeatureBlock struct {
+	title string
+	body  string
+}
+
+func splitNotebookFeatureBlocks(text string) []notebookFeatureBlock {
+	text = strings.ReplaceAll(strings.TrimSpace(text), "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	if text == "" {
+		return nil
+	}
+
+	headingRe := regexp.MustCompile(`(?m)^\s*(?:#{1,4}\s*|(?:\d+|[一二三四五六七八九十]+)[、.)．]\s*|[-*]\s*)?([^\n：:]{2,40})\s*$`)
+	matches := headingRe.FindAllStringSubmatchIndex(text, -1)
+	blocks := make([]notebookFeatureBlock, 0)
+	for i, match := range matches {
+		title := strings.TrimSpace(text[match[2]:match[3]])
+		if !looksLikeNotebookFeatureTitle(title) {
+			continue
+		}
+		bodyStart := match[1]
+		bodyEnd := len(text)
+		if i+1 < len(matches) {
+			bodyEnd = matches[i+1][0]
+		}
+		body := strings.TrimSpace(text[bodyStart:bodyEnd])
+		if body != "" {
+			blocks = append(blocks, notebookFeatureBlock{title: title, body: body})
+		}
+	}
+	if len(blocks) > 0 {
+		return blocks
+	}
+
+	sentences := splitNotebookSentences(text)
+	for _, sentence := range sentences {
+		if !looksLikeNotebookFeatureSentence(sentence) {
+			continue
+		}
+		blocks = append(blocks, notebookFeatureBlock{title: inferNotebookFeatureTitle(sentence), body: sentence})
+	}
+	return blocks
+}
+
+func looksLikeNotebookFeatureTitle(title string) bool {
+	title = strings.TrimSpace(title)
+	if len([]rune(title)) < 2 || len([]rune(title)) > 34 {
+		return false
+	}
+	return containsAnyNotebookText(title, []string{"功能", "模块", "聊天", "问答", "表格", "Studio", "Notebook", "图片", "视频", "解析", "检索", "生成", "部署", "积分", "白标", "工作流", "搜索", "导出", "多模型"})
+}
+
+func looksLikeNotebookFeatureSentence(sentence string) bool {
+	return containsAnyNotebookText(sentence, []string{"核心能力", "核心功能", "功能包括", "支持", "模块", "用户场景", "能力包括", "可用于", "输出", "导出"})
+}
+
+func inferNotebookFeatureTitle(sentence string) string {
+	sentence = strings.TrimSpace(sentence)
+	for _, separator := range []string{"：", ":", "包括", "支持", "是"} {
+		if index := strings.Index(sentence, separator); index > 1 && index <= 30 {
+			return truncateNotebookTableCell(sentence[:index], 42)
+		}
+	}
+	return truncateNotebookTableCell(sentence, 42)
+}
+
+func notebookTableRowFromBlock(source notebookGenerationSource, title string, body string) notebookStudioTableRow {
+	return notebookStudioTableRow{
+		Module:         truncateNotebookTableCell(fallbackText(title, notebookTableTopic(source)), 42),
+		Capability:     truncateNotebookTableCell(extractNotebookLabeledValue(body, []string{"核心功能", "核心能力", "具体能力", "功能"}, firstNotebookUsefulSentence(body)), 180),
+		Status:         truncateNotebookTableCell(extractNotebookLabeledValue(body, []string{"当前状态", "状态", "成熟度"}, notebookTableStatus(body)), 60),
+		Implementation: truncateNotebookTableCell(extractNotebookLabeledValue(body, []string{"差异化竞争优势", "差异化优势", "竞争优势", "优势", "价值"}, notebookTableMethod(body)), 180),
+		Value:          truncateNotebookTableCell(extractNotebookLabeledValue(body, []string{"对标产品", "参照对象", "对标", "适用场景", "场景"}, notebookTableValue(body)), 160),
+		Source:         fmt.Sprintf("[%d]", source.Index),
+	}
+}
+
+func extractNotebookLabeledValue(text string, labels []string, fallback string) string {
+	for _, label := range labels {
+		pattern := regexp.MustCompile(regexp.QuoteMeta(label) + `\s*[：:]\s*([^。\n；;]+)`)
+		if match := pattern.FindStringSubmatch(text); len(match) > 1 {
+			return strings.TrimSpace(match[1])
+		}
+	}
+	return fallback
+}
+
+func firstNotebookUsefulSentence(text string) string {
+	for _, sentence := range splitNotebookSentences(text) {
+		if strings.TrimSpace(sentence) != "" {
+			return sentence
+		}
+	}
+	return text
 }
 
 func notebookTableTopic(source notebookGenerationSource) string {

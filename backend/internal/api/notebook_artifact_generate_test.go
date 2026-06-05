@@ -51,7 +51,7 @@ func TestBuildGeneratedNotebookArtifactDraftUsesSelectedReadySources(t *testing.
 
 func TestBuildGeneratedNotebookArtifactDraftBuildsDataTableFromSourceContent(t *testing.T) {
 	files := []models.File{
-		{ID: 1, Filename: "竞品分析.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "产品对比：AI Space 支持多模型聊天、Notebook 资料问答和 Studio 结构化输出。", Content: "AI Space 的核心能力包括多模型聊天、Notebook 资料问答、Studio 数据表格。差异化优势是统一知识空间和可引用来源。"},
+		{ID: 1, Filename: "AI Space 产品方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "AI Space 功能与优势", Content: "## 多模型聊天\n核心功能：流式对话、多模型切换、历史管理。当前状态：成熟。差异化竞争优势：统一接入 OpenAI、Claude、Gemini、DeepSeek 等模型，适合不同任务选型。对标产品：ChatGPT、Poe。\n## Notebook 资料问答\n核心功能：PDF/Office/网页资料解析、Embedding、向量检索、引用核查。当前状态：成熟。差异化竞争优势：全自研 RAG 流水线，资料可跨对话复用。对标产品：NotebookLM、Claude Projects。\n## Studio 数据表格\n核心功能：阅读选中资料后按功能模块整理为结构化表格。当前状态：建设中。差异化竞争优势：把文档内容直接转成可导出、可复核的表格。对标产品：Notion AI、NotebookLM。"},
 		{ID: 2, Filename: "投研报告.pdf", ParseStatus: "done", EmbeddingStatus: "skipped", Summary: "市场结论：知识工作用户需要资料整理、引用核查和表格化对比。", Content: "用户场景包括上传报告、按来源整理关键观点、输出表格并导出。商业价值是减少人工整理时间。"},
 	}
 
@@ -68,11 +68,11 @@ func TestBuildGeneratedNotebookArtifactDraftBuildsDataTableFromSourceContent(t *
 	if err := json.Unmarshal(draft.Content, &content); err != nil {
 		t.Fatalf("table content should be valid JSON: %v", err)
 	}
-	if len(content.Rows) != 2 {
-		t.Fatalf("expected one content row per ready source, got %d content=%s", len(content.Rows), string(draft.Content))
+	if len(content.Rows) < 4 {
+		t.Fatalf("expected multiple function rows extracted from source content, got %d content=%s", len(content.Rows), string(draft.Content))
 	}
 	encoded := string(draft.Content)
-	if !containsAll(encoded, []string{"AI Space", "多模型聊天", "Notebook", "资料整理", "[1]", "[2]"}) {
+	if !containsAll(encoded, []string{"多模型聊天", "Notebook 资料问答", "Studio 数据表格", "统一接入", "ChatGPT", "NotebookLM", "[1]", "[2]"}) {
 		t.Fatalf("table should organize source facts and citations, got %s", encoded)
 	}
 	if strings.Contains(encoded, "解析状态") || strings.Contains(encoded, "索引状态") || strings.Contains(encoded, "已就绪") {
