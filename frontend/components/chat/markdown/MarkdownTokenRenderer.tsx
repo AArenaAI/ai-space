@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import MarkdownLiteRenderer from "../MarkdownLiteRenderer";
 import {
   getMarkdownTokenCacheKey,
@@ -9,6 +9,10 @@ import {
 import { tokenizeMarkdownAsync } from "@/lib/markdown/markdownTokenWorkerClient";
 import type { MarkdownTokenDocument } from "@/lib/markdown/markdownTokenTypes";
 import MarkdownBlockTokenRenderer from "./MarkdownBlockTokenRenderer";
+
+const INITIAL_TOKEN_BLOCK_BUDGET = 32;
+const TOKEN_BLOCK_BATCH_SIZE = 32;
+const TOKEN_UPGRADE_HEIGHT_GUARD_MS = 1200;
 
 function emitChatRenderProfileEvent(phase: string, detail: Record<string, unknown> = {}) {
   if (typeof window === "undefined") return;
@@ -28,11 +32,37 @@ export default function MarkdownTokenRenderer({
   isStreaming?: boolean;
 }) {
   const cacheKey = useMemo(() => getMarkdownTokenCacheKey({ content, compactPreview }), [compactPreview, content]);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const heightGuardTimerRef = useRef<number | null>(null);
   const [doc, setDoc] = useState<MarkdownTokenDocument | null>(() => peekCachedMarkdownTokens(cacheKey));
+  const [renderedBlockCount, setRenderedBlockCount] = useState(INITIAL_TOKEN_BLOCK_BUDGET);
+  const [guardMinHeight, setGuardMinHeight] = useState<number | null>(null);
+
+  const applyTokenDocument = (next: MarkdownTokenDocument | null, guardHeight = false) => {
+    if (guardHeight) {
+      const currentHeight = rootRef.current?.getBoundingClientRect().height || 0;
+      if (currentHeight > 0) {
+        setGuardMinHeight(currentHeight);
+        if (heightGuardTimerRef.current !== null) window.clearTimeout(heightGuardTimerRef.current);
+        heightGuardTimerRef.current = window.setTimeout(() => {
+          heightGuardTimerRef.current = null;
+          setGuardMinHeight(null);
+        }, TOKEN_UPGRADE_HEIGHT_GUARD_MS);
+      }
+    }
+    setRenderedBlockCount(Math.min(INITIAL_TOKEN_BLOCK_BUDGET, Math.max(next?.tokens.length || INITIAL_TOKEN_BLOCK_BUDGET, 1)));
+    setDoc(next);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (heightGuardTimerRef.current !== null) window.clearTimeout(heightGuardTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     const cached = peekCachedMarkdownTokens(cacheKey);
-    setDoc(cached);
+    applyTokenDocument(cached);
     if (cached) return;
 
     let cancelled = false;
@@ -40,7 +70,7 @@ export default function MarkdownTokenRenderer({
     const timer = window.setTimeout(() => {
       if (cancelled) return;
       tokenizeMarkdownAsync({ content, compactPreview }).then((next) => {
-        if (!cancelled) setDoc(next);
+        if (!cancelled) applyTokenDocument(next, true);
       });
     }, parseDelay);
     return () => {
@@ -48,6 +78,21 @@ export default function MarkdownTokenRenderer({
       window.clearTimeout(timer);
     };
   }, [cacheKey, compactPreview, content, isStreaming]);
+
+  useEffect(() => {
+    if (!doc || renderedBlockCount >= doc.tokens.length) return;
+    let cancelled = false;
+    const scheduleNextBatch = () => {
+      window.setTimeout(() => {
+        if (cancelled) return;
+        setRenderedBlockCount((current) => Math.min(current + TOKEN_BLOCK_BATCH_SIZE, doc.tokens.length));
+      }, 120);
+    };
+    scheduleNextBatch();
+    return () => {
+      cancelled = true;
+    };
+  }, [doc, renderedBlockCount]);
 
   useEffect(() => {
     if (!doc) {
@@ -68,22 +113,29 @@ export default function MarkdownTokenRenderer({
       hasTable: doc.featureFlags.hasTable,
       isStreaming,
       parseMs: Number(doc.parseMs.toFixed(2)),
+      renderedBlockCount,
       tokenizerSource: doc.tokenizerSource || "unknown",
       truncated: doc.truncated,
     });
-  }, [compactPreview, content.length, doc, isStreaming]);
+  }, [compactPreview, content.length, doc, isStreaming, renderedBlockCount]);
 
   if (!doc) {
     return (
-      <div data-markdown-token-renderer="deferred-lite">
+      <div ref={rootRef} data-markdown-token-renderer="deferred-lite">
         <MarkdownLiteRenderer content={content} compactPreview={compactPreview} isStreaming={isStreaming} />
       </div>
     );
   }
 
+  const visibleTokens = doc.tokens.slice(0, renderedBlockCount);
+
   return (
-    <div data-markdown-token-renderer={doc.truncated ? "preview" : "stable"}>
-      {doc.tokens.map((token, index) => <MarkdownBlockTokenRenderer key={index} token={token} />)}
+    <div
+      ref={rootRef}
+      data-markdown-token-renderer={doc.truncated ? "preview" : "stable"}
+      style={guardMinHeight ? { minHeight: `${Math.ceil(guardMinHeight)}px` } : undefined}
+    >
+      {visibleTokens.map((token, index) => <MarkdownBlockTokenRenderer key={index} token={token} />)}
     </div>
   );
 }
