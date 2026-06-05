@@ -221,6 +221,10 @@ function NotebookDetailContent() {
       .replace("{total}", String(files.length))
   ), [files.length, selectedFileIds.length, t]);
 
+  const allSourcesSelected = useMemo(() => (
+    files.length > 0 && files.every((file) => selectedFileIds.includes(file.file_id))
+  ), [files, selectedFileIds]);
+
   const startPaneResize = (pane: "sources" | "studio", event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     const startX = event.clientX;
@@ -271,7 +275,13 @@ function NotebookDetailContent() {
     });
   };
 
-  const selectAllSources = () => setSelectedFileIds(files.map((file) => file.file_id));
+  const selectAllSources = () => {
+    if (allSourcesSelected) {
+      setSelectedFileIds([]);
+      return;
+    }
+    setSelectedFileIds(files.map((file) => file.file_id));
+  };
 
   useEffect(() => {
     if (!hasProcessingFiles || !notebookId) return;
@@ -652,7 +662,7 @@ function NotebookDetailContent() {
           {files.length > 0 && (
             <div className="mb-3 flex items-center justify-between rounded-2xl border border-surface-border bg-surface-card px-3 py-2">
               <span className="text-xs text-text-tertiary">{selectedSourceText}</span>
-              <button type="button" onClick={selectAllSources} className="text-xs font-medium text-brand transition hover:text-brand-hover">
+              <button type="button" onClick={selectAllSources} className="rounded-lg px-2.5 py-1 text-sm font-semibold text-brand transition hover:bg-brand-muted hover:text-brand-hover">
                 {t("notebook.selectAllSources")}
               </button>
             </div>
