@@ -123,10 +123,39 @@ function topRowCommitBuckets(events, filterFn, limit = 16) {
     current.count += 1;
     current.durationMsTotal += Number(event.durationMs || 0);
     current.contentLengthMax = Math.max(current.contentLengthMax, Number(event.contentLength || 0));
-    if (current.examples.length < 5) current.examples.push(String(event.messageId || "unknown"));
+    if (current.examples.length < 5 && event.messageId) current.examples.push(String(event.messageId));
     buckets.set(key, current);
   }
-  return [...buckets.values()]
+  return Array.from(buckets.values())
+    .sort((a, b) => b.count - a.count || b.durationMsTotal - a.durationMsTotal)
+    .slice(0, limit)
+    .map((entry) => ({
+      ...entry,
+      durationMsTotal: round(entry.durationMsTotal, 1),
+      durationMsAvg: round(entry.durationMsTotal / Math.max(1, entry.count), 2),
+      examples: [...new Set(entry.examples)],
+    }));
+}
+
+function topAssistantMetaBuckets(events, limit = 8) {
+  const buckets = new Map();
+  for (const event of events) {
+    if (event.phase !== "assistant-message-meta-commit") continue;
+    const key = `realtime:${event.realtimeSubscriptionEnabled === false ? "disabled" : "enabled"}|streaming:${event.isStreaming ? "yes" : "no"}|statuses:${event.statusCount || 0}|timeline:${event.hasTimeline ? "yes" : "no"}`;
+    const current = buckets.get(key) || {
+      bucket: key,
+      count: 0,
+      durationMsTotal: 0,
+      contentLengthMax: 0,
+      examples: [],
+    };
+    current.count += 1;
+    current.durationMsTotal += Number(event.durationMs || 0);
+    current.contentLengthMax = Math.max(current.contentLengthMax, Number(event.contentLength || 0));
+    if (current.examples.length < 5 && event.messageId) current.examples.push(String(event.messageId));
+    buckets.set(key, current);
+  }
+  return Array.from(buckets.values())
     .sort((a, b) => b.count - a.count || b.durationMsTotal - a.durationMsTotal)
     .slice(0, limit)
     .map((entry) => ({
@@ -265,6 +294,7 @@ function summarize(allResults) {
     topRowMountBuckets: topRowCommitBuckets(allRecentEvents, (event) => Array.isArray(event.changedKeys) && event.changedKeys.includes("mount")),
     topRowUnknownBuckets: topRowCommitBuckets(allRecentEvents, (event) => !Array.isArray(event.changedKeys) || event.changedKeys.length === 0),
     topAssistantMetaMessages: topEntriesByCount(allRecentEvents, "assistant-message-meta-commit"),
+    topAssistantMetaBuckets: topAssistantMetaBuckets(allRecentEvents),
     topTokenMessages: topEntriesByCount(allRecentEvents, "markdown-token-rendered"),
     byCid,
   };

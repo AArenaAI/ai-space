@@ -95,7 +95,8 @@ export function AssistantMessageMeta({ msg, isStreaming, model }: { msg: Message
   const renderStartedAt = profileEnabled ? (typeof performance !== "undefined" ? performance.now() : Date.now()) : 0;
   const { t } = useI18n();
   const [, setTick] = useState(0);
-  const realtime = useMessageRealtime(msg.id);
+  const realtimeSubscriptionEnabled = isStreaming || !(msg.completedAt || msg.errorCode || msg.stopped);
+  const realtime = useMessageRealtime(msg.id, realtimeSubscriptionEnabled);
   const statuses = useMemo(
     () => deriveMessageStatuses({ message: msg, realtime, isStreaming, t }),
     [isStreaming, msg, realtime, t]
@@ -119,6 +120,7 @@ export function AssistantMessageMeta({ msg, isStreaming, model }: { msg: Message
       hasActiveGenerationPhase,
       hasTimeline,
       isStreaming,
+      realtimeSubscriptionEnabled,
       modelId: model?.id || msg.model || "",
       durationMs: commitAt - renderStartedAt,
     });
