@@ -311,7 +311,12 @@ function NotebookDetailContent() {
     setPreviewError(null);
     setPreviewLoading(true);
     try {
-      setPreviewData(await fetchNotebookFileContent(notebookId, file.file_id));
+      const data = await fetchNotebookFileContent(notebookId, file.file_id);
+      setPreviewData(data);
+      if (data.file) {
+        setPreviewSource((current) => current && current.file_id === file.file_id ? { ...current, file: data.file } : current);
+        setFiles((prev) => prev.map((item) => item.file_id === file.file_id ? { ...item, file: data.file } : item));
+      }
     } catch (error) {
       const normalized = normalizeNotebookError(error, t("notebook.previewLoadFailed"));
       setPreviewError(normalized.message);

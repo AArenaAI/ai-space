@@ -27,7 +27,7 @@ export async function createNotebook(input: { title: string; description?: strin
 }
 
 export async function fetchNotebook(id: number): Promise<{ notebook: Notebook; files: NotebookFile[] }> {
-  const response = await fetch(`/api/notebooks/${id}`, { headers: authHeaders() });
+  const response = await fetch(`/api/notebooks/${id}`, { headers: authHeaders(), cache: "no-store" });
   return parseNotebookResponse<{ notebook: Notebook; files: NotebookFile[] }>(response, "加载笔记本失败");
 }
 
@@ -66,6 +66,7 @@ export async function addNotebookUrlSource(notebookId: number, url: string): Pro
 export async function fetchNotebookFileContent(notebookId: number, fileId: number): Promise<NotebookFileContent> {
   const response = await fetch(`/api/notebooks/${notebookId}/files/${fileId}/content`, {
     headers: authHeaders(),
+    cache: "no-store",
   });
   return parseNotebookResponse<NotebookFileContent>(response, "加载资料内容失败");
 }

@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -230,6 +232,10 @@ func codeLanguage(ext string) string {
 
 // parsePDF 解析 PDF（结构化：检测表格、生成 BlockID）
 func (p *FileParser) parsePDF(data []byte) (*ParseResult, error) {
+	if result, err := p.parsePDFWithPoppler(data); err == nil && result != nil && hasReadablePDFText(result.Content) {
+		return result, nil
+	}
+
 	tmpFile, err := os.CreateTemp("", "*.pdf")
 	if err != nil {
 		return nil, fmt.Errorf("创建临时文件失败: %w", err)
@@ -285,6 +291,102 @@ func (p *FileParser) parsePDF(data []byte) (*ParseResult, error) {
 		Chunks:    chunks,
 		HasTables: hasTables,
 	}, nil
+}
+
+func (p *FileParser) parsePDFWithPoppler(data []byte) (*ParseResult, error) {
+	if _, err := exec.LookPath("pdftotext"); err != nil {
+		return nil, err
+	}
+
+	tmpFile, err := os.CreateTemp("", "*.pdf")
+	if err != nil {
+		return nil, fmt.Errorf("创建临时 PDF 文件失败: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	if _, err := tmpFile.Write(data); err != nil {
+		tmpFile.Close()
+		return nil, fmt.Errorf("写入临时 PDF 文件失败: %w", err)
+	}
+	tmpFile.Close()
+
+	out, err := exec.Command("pdftotext", "-layout", "-enc", "UTF-8", tmpFile.Name(), "-").Output()
+	if err != nil {
+		return nil, fmt.Errorf("pdftotext 解析 PDF 失败: %w", err)
+	}
+	content := normalizeExtractedPDFText(string(out))
+	if strings.TrimSpace(content) == "" {
+		return nil, fmt.Errorf("pdftotext 解析 PDF 内容为空")
+	}
+
+	chunks := chunkPDFTextByPage(content)
+	if len(chunks) == 0 {
+		chunks = chunkStructured(content, 1, "paragraph", `{"source":"pdftotext"}`)
+	}
+	hasTables := false
+	for _, chunk := range chunks {
+		if chunk.BlockType == "table" || strings.Contains(chunk.Text, "|") {
+			hasTables = true
+			break
+		}
+	}
+
+	return &ParseResult{
+		Content:   content,
+		Pages:     max(1, strings.Count(content, "\f")+1),
+		Chunks:    chunks,
+		HasTables: hasTables,
+	}, nil
+}
+
+func normalizeExtractedPDFText(text string) string {
+	text = strings.ReplaceAll(text, "\x00", "")
+	text = regexp.MustCompile(`[	 ]+\n`).ReplaceAllString(text, "\n")
+	text = regexp.MustCompile(`\n{4,}`).ReplaceAllString(text, "\n\n\n")
+	return strings.TrimSpace(text)
+}
+
+func chunkPDFTextByPage(content string) []TextChunk {
+	pages := strings.Split(content, "\f")
+	var chunks []TextChunk
+	for i, page := range pages {
+		pageText := strings.TrimSpace(page)
+		if pageText == "" {
+			continue
+		}
+		blocks := detectBlocks(pageText, i+1)
+		for j := range blocks {
+			blocks[j].Index = len(chunks)
+			blocks[j].BlockID = fmt.Sprintf("p%d-b%d", i+1, j+1)
+			blocks[j].Page = i + 1
+			if blocks[j].Metadata == "" {
+				blocks[j].Metadata = `{"source":"pdftotext"}`
+			}
+			chunks = append(chunks, blocks[j])
+		}
+	}
+	return chunks
+}
+
+func hasReadablePDFText(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return false
+	}
+	runes := []rune(trimmed)
+	bad := 0
+	letters := 0
+	for _, r := range runes {
+		if r == '�' || r < 32 && r != '\n' && r != '\r' && r != '	' && r != '\f' {
+			bad++
+		}
+		if r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '\u4e00' && r <= '\u9fff' {
+			letters++
+		}
+	}
+	if len(runes) > 0 && float64(bad)/float64(len(runes)) > 0.02 {
+		return false
+	}
+	return letters >= 20
 }
 
 // detectBlocks 将页面文本检测为不同类型的 block
