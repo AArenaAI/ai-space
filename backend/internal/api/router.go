@@ -188,7 +188,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		}
 
 		convHandler := NewConversationHandler(db)
-		notebookHandler := NewNotebookHandler(db)
+		notebookHandler := NewNotebookHandler(db, fileService)
 		documentArtifactHandler := NewDocumentArtifactHandler(db)
 		documentArtifactHandler.AutoMigrate()
 		authorized.GET("/conversations", convHandler.List)
@@ -209,7 +209,13 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		authorized.DELETE("/notebooks/:id", notebookHandler.Delete)
 		authorized.GET("/notebooks/:id/files", notebookHandler.ListFiles)
 		authorized.POST("/notebooks/:id/files", notebookHandler.AddFile)
+		authorized.POST("/notebooks/:id/sources/url", notebookHandler.AddURLSource)
+		authorized.GET("/notebooks/:id/files/:file_id/content", notebookHandler.GetFileContent)
 		authorized.DELETE("/notebooks/:id/files/:file_id", notebookHandler.RemoveFile)
+		authorized.GET("/notebooks/:id/artifacts", notebookHandler.ListArtifacts)
+		authorized.POST("/notebooks/:id/artifacts", notebookHandler.CreateArtifact)
+		authorized.PUT("/notebooks/:id/artifacts/:artifact_id", notebookHandler.UpdateArtifact)
+		authorized.DELETE("/notebooks/:id/artifacts/:artifact_id", notebookHandler.DeleteArtifact)
 
 		// 文档研读生成文件路由
 		authorized.GET("/document-artifacts", documentArtifactHandler.List)

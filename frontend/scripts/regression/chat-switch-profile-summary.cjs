@@ -257,14 +257,71 @@ async function login() {
   return { token: data.token || data.access_token || data.accessToken, user: data.user || data.data?.user || { email } };
 }
 
-async function sample(page, cid, startedAt) {
+async function clickConversationAndMeasure(page, cid) {
+  return page.evaluate(async (targetCid) => {
+    const row = document.querySelector(`[data-conversation-id="${targetCid}"]`);
+    if (!row) return { clicked: false, startedAt: performance.now(), timeline: {} };
+
+    row.scrollIntoView({ block: "center" });
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+
+    const startedAt = performance.now();
+    const beforeRows = document.querySelectorAll('[data-chat-message-row="true"]').length;
+    const timeline = {};
+
+    row.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+    row.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+    let lastRows = beforeRows;
+    let lastDistanceToBottom = null;
+    for (let frame = 0; frame < 90; frame += 1) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const now = performance.now();
+      const rows = Array.from(document.querySelectorAll('[data-chat-message-row="true"]'));
+      const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+      const distanceToBottom = scroller
+        ? Math.round(scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight)
+        : null;
+      const hrefMatches = location.search.includes(`id=${targetCid}`);
+      if (hrefMatches && timeline.urlMs == null) timeline.urlMs = Math.round(now - startedAt);
+      if (hrefMatches && rows.length > 0 && rows.length !== beforeRows && timeline.rowsChangedMs == null) timeline.rowsChangedMs = Math.round(now - startedAt);
+      if (hrefMatches && rows.some((candidate) => candidate.getAttribute("data-message-id")) && timeline.firstRowsMs == null) timeline.firstRowsMs = Math.round(now - startedAt);
+      if (hrefMatches && distanceToBottom === 0 && rows.length > 0 && timeline.bottom0Ms == null) timeline.bottom0Ms = Math.round(now - startedAt);
+      lastRows = rows.length;
+      lastDistanceToBottom = distanceToBottom;
+      if (timeline.urlMs != null && timeline.firstRowsMs != null && timeline.bottom0Ms != null && now - startedAt > 260) break;
+    }
+
+    return {
+      clicked: true,
+      startedAt,
+      timeline: {
+        ...timeline,
+        beforeRows,
+        lastRows,
+        lastDistanceToBottom,
+      },
+    };
+  }, cid);
+}
+
+function relativeMs(value, startedAt) {
+  if (!Number.isFinite(value)) return undefined;
+  return Math.round(value - startedAt);
+}
+
+async function sample(page, cid, startedAt, switchTimeline = {}) {
   await page.waitForFunction((expectedCid) => {
     const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
     const rows = document.querySelectorAll('[data-chat-message-row="true"]');
     return !!scroller && rows.length > 0 && location.search.includes(`id=${expectedCid}`);
   }, cid, { timeout: 30_000 });
   await page.waitForTimeout(350);
-  return page.evaluate(({ cid, startedAt }) => {
+  return page.evaluate(({ cid, startedAt, switchTimeline }) => {
+    const relativeMs = (value) => {
+      if (!Number.isFinite(value)) return undefined;
+      return Math.round(value - startedAt);
+    };
     const now = performance.now();
     const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
     const rows = Array.from(document.querySelectorAll('[data-chat-message-row="true"]')).map((row) => {
@@ -281,9 +338,27 @@ async function sample(page, cid, startedAt) {
     const events = (window.__chatRenderProfileEvents || []).filter((event) => event.at >= startedAt - 20);
     const longTasks = (window.__longTasks || []).filter((task) => task.startTime >= startedAt - 20);
     const fetches = (window.__fetchProfileEvents || []).filter((event) => event.at >= startedAt - 20 || event.end >= startedAt - 20);
+    const timeline = { ...switchTimeline };
+    const bottom0Deadline = Number.isFinite(timeline.bottom0Ms) ? startedAt + timeline.bottom0Ms : undefined;
+    const firstFetch = fetches[0];
+    const conversationFetch = fetches.find((fetchEvent) => String(fetchEvent.url || "").includes(`/api/conversations/${cid}`));
+    const longTasksBeforeBottom0 = bottom0Deadline ? longTasks.filter((task) => task.startTime <= bottom0Deadline) : [];
+    const eventsBeforeBottom0 = bottom0Deadline ? events.filter((event) => event.at <= bottom0Deadline) : [];
+    timeline.firstFetchStartMs = firstFetch ? relativeMs(firstFetch.at, startedAt) : undefined;
+    timeline.firstFetchDoneMs = firstFetch ? relativeMs(firstFetch.end || now, startedAt) : undefined;
+    timeline.conversationFetchStartMs = conversationFetch ? relativeMs(conversationFetch.at, startedAt) : undefined;
+    timeline.conversationFetchDoneMs = conversationFetch ? relativeMs(conversationFetch.end || now, startedAt) : undefined;
+    timeline.longTaskBeforeBottom0Count = longTasksBeforeBottom0.length;
+    timeline.longTaskBeforeBottom0Total = Math.round(longTasksBeforeBottom0.reduce((sum, task) => sum + (task.duration || 0), 0));
+    timeline.longTaskBeforeBottom0Max = Math.round(Math.max(0, ...longTasksBeforeBottom0.map((task) => task.duration || 0)));
+    timeline.rowCommitBeforeBottom0 = eventsBeforeBottom0.filter((event) => event.phase === "message-row-commit").length;
+    timeline.listCommitBeforeBottom0 = eventsBeforeBottom0.filter((event) => event.phase === "message-list-commit").length;
+    timeline.liteBeforeBottom0 = eventsBeforeBottom0.filter((event) => event.phase === "markdown-lite-rendered").length;
+    timeline.tokenBeforeBottom0 = eventsBeforeBottom0.filter((event) => event.phase === "markdown-token-rendered").length;
     return {
       cid,
       elapsedMs: Math.round(now - startedAt),
+      switchTimeline: timeline,
       href: location.href,
       scroller: scroller ? {
         scrollTop: Math.round(scroller.scrollTop),
@@ -315,6 +390,7 @@ async function sample(page, cid, startedAt) {
 
 function summarize(allResults) {
   const values = (key) => allResults.map((result) => Number(result[key] || 0));
+  const timelineValues = (key) => allResults.map((result) => Number(result.switchTimeline?.[key]));
   const allRecentEvents = allResults.flatMap((result) => result.recentEvents || []);
   const byCid = {};
   for (const cid of [...new Set(allResults.map((result) => result.cid))].sort((a, b) => Number(a) - Number(b))) {
@@ -324,6 +400,16 @@ function summarize(allResults) {
       wallMs: stats(group.map((result) => result.wallMs)),
       longMax: stats(group.map((result) => result.longMax)),
       distanceToBottomNonZero: group.filter((result) => Number(result.scroller?.distanceToBottom || 0) !== 0).length,
+      switchTimeline: {
+        urlMs: stats(group.map((result) => Number(result.switchTimeline?.urlMs))),
+        firstRowsMs: stats(group.map((result) => Number(result.switchTimeline?.firstRowsMs))),
+        rowsChangedMs: stats(group.map((result) => Number(result.switchTimeline?.rowsChangedMs))),
+        bottom0Ms: stats(group.map((result) => Number(result.switchTimeline?.bottom0Ms))),
+        conversationFetchDoneMs: stats(group.map((result) => Number(result.switchTimeline?.conversationFetchDoneMs))),
+        longTaskBeforeBottom0Total: stats(group.map((result) => Number(result.switchTimeline?.longTaskBeforeBottom0Total))),
+        rowCommitBeforeBottom0: stats(group.map((result) => Number(result.switchTimeline?.rowCommitBeforeBottom0))),
+        liteBeforeBottom0: stats(group.map((result) => Number(result.switchTimeline?.liteBeforeBottom0))),
+      },
     };
   }
   return {
@@ -335,6 +421,23 @@ function summarize(allResults) {
     wallMs: stats(values("wallMs")),
     longMax: stats(values("longMax")),
     longTotal: stats(values("longTotal")),
+    switchTimeline: {
+      urlMs: stats(timelineValues("urlMs")),
+      firstRowsMs: stats(timelineValues("firstRowsMs")),
+      rowsChangedMs: stats(timelineValues("rowsChangedMs")),
+      bottom0Ms: stats(timelineValues("bottom0Ms")),
+      firstFetchStartMs: stats(timelineValues("firstFetchStartMs")),
+      firstFetchDoneMs: stats(timelineValues("firstFetchDoneMs")),
+      conversationFetchStartMs: stats(timelineValues("conversationFetchStartMs")),
+      conversationFetchDoneMs: stats(timelineValues("conversationFetchDoneMs")),
+      longTaskBeforeBottom0Count: stats(timelineValues("longTaskBeforeBottom0Count")),
+      longTaskBeforeBottom0Total: stats(timelineValues("longTaskBeforeBottom0Total")),
+      longTaskBeforeBottom0Max: stats(timelineValues("longTaskBeforeBottom0Max")),
+      rowCommitBeforeBottom0: stats(timelineValues("rowCommitBeforeBottom0")),
+      listCommitBeforeBottom0: stats(timelineValues("listCommitBeforeBottom0")),
+      liteBeforeBottom0: stats(timelineValues("liteBeforeBottom0")),
+      tokenBeforeBottom0: stats(timelineValues("tokenBeforeBottom0")),
+    },
     rowCommitCount: stats(allResults.map((result) => Number(result.eventCounts?.["message-row-commit"] || 0))),
     listCommitCount: stats(allResults.map((result) => Number(result.eventCounts?.["message-list-commit"] || 0))),
     markdownLiteCount: stats(allResults.map((result) => Number(result.eventCounts?.["markdown-lite-rendered"] || 0))),
@@ -406,18 +509,10 @@ function summarize(allResults) {
       await page.goto(`http://127.0.0.1:${proxyPort}/chat/?id=${sequence[0]}`, { waitUntil: "networkidle" });
       await page.waitForSelector("[data-conversation-row]", { state: "attached", timeout: 30_000 });
       for (const cid of sequence.slice(1)) {
-        const startedAt = await page.evaluate(() => performance.now());
         const wallStart = Date.now();
-        const clicked = await page.evaluate((targetCid) => {
-          const row = document.querySelector(`[data-conversation-id="${targetCid}"]`);
-          if (!row) return false;
-          row.scrollIntoView({ block: "center" });
-          row.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
-          row.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-          return true;
-        }, cid);
-        if (!clicked) throw new Error(`conversation row not found: ${cid}`);
-        const result = await sample(page, cid, startedAt);
+        const clickResult = await clickConversationAndMeasure(page, cid);
+        if (!clickResult.clicked) throw new Error(`conversation row not found: ${cid}`);
+        const result = await sample(page, cid, clickResult.startedAt, clickResult.timeline);
         result.run = run;
         result.wallMs = Date.now() - wallStart;
         allResults.push(result);

@@ -2,7 +2,15 @@ package api
 
 import (
 	"aipool-backend/internal/models"
+	"aipool-backend/internal/services"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -12,16 +20,17 @@ import (
 )
 
 type NotebookHandler struct {
-	db *gorm.DB
+	db          *gorm.DB
+	fileService *services.FileService
 }
 
-func NewNotebookHandler(db *gorm.DB) *NotebookHandler {
-	return &NotebookHandler{db: db}
+func NewNotebookHandler(db *gorm.DB, fileService *services.FileService) *NotebookHandler {
+	return &NotebookHandler{db: db, fileService: fileService}
 }
 
 type NotebookListItem struct {
 	models.Notebook
-	FileCount int64        `json:"file_count"`
+	FileCount int64         `json:"file_count"`
 	Files     []models.File `json:"files,omitempty"`
 }
 
@@ -33,6 +42,50 @@ type NotebookFileItem struct {
 	CreatedAt  time.Time   `json:"created_at"`
 	UpdatedAt  time.Time   `json:"updated_at"`
 	File       models.File `json:"file"`
+}
+
+type NotebookFileContentResponse struct {
+	File    NotebookFileContentMeta    `json:"file"`
+	Text    string                     `json:"content"`
+	Chunks  []NotebookFileContentChunk `json:"chunks"`
+	HasMore bool                       `json:"has_more"`
+}
+
+type NotebookFileContentMeta struct {
+	ID              uint      `json:"id"`
+	PublicID        string    `json:"public_id"`
+	Filename        string    `json:"filename"`
+	MimeType        string    `json:"mime_type"`
+	Size            int64     `json:"size"`
+	ParseStatus     string    `json:"parse_status"`
+	EmbeddingStatus string    `json:"embedding_status"`
+	ErrorMessage    string    `json:"error_message,omitempty"`
+	Summary         string    `json:"summary,omitempty"`
+	PageCount       int       `json:"page_count,omitempty"`
+	TokenCount      int       `json:"token_count,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type NotebookFileContentChunk struct {
+	Index     int    `json:"index"`
+	Page      int    `json:"page,omitempty"`
+	Slide     int    `json:"slide,omitempty"`
+	SheetName string `json:"sheet_name,omitempty"`
+	BlockType string `json:"block_type,omitempty"`
+	Content   string `json:"content"`
+}
+
+type NotebookArtifactResponse struct {
+	ID          uint            `json:"id"`
+	NotebookID  uint            `json:"notebook_id"`
+	Type        string          `json:"type"`
+	Title       string          `json:"title"`
+	Subtitle    string          `json:"subtitle"`
+	Content     json.RawMessage `json:"content"`
+	SourceCount int             `json:"source_count"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
 }
 
 func (h *NotebookHandler) List(c *gin.Context) {
@@ -204,6 +257,123 @@ func (h *NotebookHandler) AddFile(c *gin.Context) {
 	c.JSON(http.StatusOK, link)
 }
 
+func (h *NotebookHandler) AddURLSource(c *gin.Context) {
+	nb, ok := h.loadNotebook(c)
+	if !ok {
+		return
+	}
+	if h.fileService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "资料处理服务暂不可用"})
+		return
+	}
+	userID := getUserID(c)
+	var req struct {
+		URL       string `json:"url"`
+		SortOrder int    `json:"sort_order"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	inputURL := strings.TrimSpace(req.URL)
+	if inputURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请输入网页链接"})
+		return
+	}
+	page, err := fetchNotebookURLSource(c.Request.Context(), inputURL)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	filename := notebookURLSourceFilename(page.Title, page.URL)
+	content := fmt.Sprintf("# %s\n\n来源：%s\n\n%s\n", page.Title, page.URL, page.Content)
+	file, err := h.fileService.UploadAndParse(c.Request.Context(), userID, "", filename, []byte(content), nb.WorkspaceID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "网页资料处理失败"})
+		return
+	}
+	link := models.NotebookFile{NotebookID: nb.ID, FileID: file.ID, SortOrder: req.SortOrder}
+	if err := h.db.Where("notebook_id = ? AND file_id = ?", nb.ID, file.ID).FirstOrCreate(&link).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "添加网页资料失败"})
+		return
+	}
+	h.db.Model(&models.Notebook{}).Where("id = ?", nb.ID).Update("updated_at", time.Now())
+	link.File = *file
+	c.JSON(http.StatusOK, link)
+}
+
+func (h *NotebookHandler) GetFileContent(c *gin.Context) {
+	nb, ok := h.loadNotebook(c)
+	if !ok {
+		return
+	}
+	fileIDParam := c.Param("file_id")
+	fid64, err := strconv.ParseUint(fileIDParam, 10, 32)
+	if err != nil || fid64 == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的文件 ID"})
+		return
+	}
+
+	var link models.NotebookFile
+	if err := h.db.Preload("File").Where("notebook_id = ? AND file_id = ?", nb.ID, uint(fid64)).First(&link).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "资料不存在或无权访问"})
+		return
+	}
+	file := link.File
+	content := file.Content
+	hasMore := false
+	const maxContentChars = 120000
+	if len(content) > maxContentChars {
+		content = content[:maxContentChars]
+		hasMore = true
+	}
+
+	var chunks []models.FileChunk
+	h.db.Where("file_id = ?", file.ID).Order("chunk_index ASC").Limit(200).Find(&chunks)
+	chunkItems := make([]NotebookFileContentChunk, 0, len(chunks))
+	for _, chunk := range chunks {
+		text := strings.TrimSpace(chunk.Markdown)
+		if text == "" {
+			text = strings.TrimSpace(chunk.Content)
+		}
+		if text == "" {
+			continue
+		}
+		if len(text) > 8000 {
+			text = text[:8000]
+		}
+		chunkItems = append(chunkItems, NotebookFileContentChunk{
+			Index:     chunk.ChunkIndex,
+			Page:      chunk.Page,
+			Slide:     chunk.Slide,
+			SheetName: chunk.SheetName,
+			BlockType: chunk.BlockType,
+			Content:   text,
+		})
+	}
+
+	c.JSON(http.StatusOK, NotebookFileContentResponse{
+		File: NotebookFileContentMeta{
+			ID:              file.ID,
+			PublicID:        file.PublicID,
+			Filename:        file.Filename,
+			MimeType:        file.MimeType,
+			Size:            file.Size,
+			ParseStatus:     file.ParseStatus,
+			EmbeddingStatus: file.EmbeddingStatus,
+			ErrorMessage:    file.ErrorMessage,
+			Summary:         file.Summary,
+			PageCount:       file.PageCount,
+			TokenCount:      file.TokenCount,
+			CreatedAt:       file.CreatedAt,
+			UpdatedAt:       file.UpdatedAt,
+		},
+		Text:    content,
+		Chunks:  chunkItems,
+		HasMore: hasMore,
+	})
+}
+
 func (h *NotebookHandler) RemoveFile(c *gin.Context) {
 	nb, ok := h.loadNotebook(c)
 	if !ok {
@@ -221,6 +391,162 @@ func (h *NotebookHandler) RemoveFile(c *gin.Context) {
 	}
 	h.db.Model(&models.Notebook{}).Where("id = ?", nb.ID).Update("updated_at", time.Now())
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func (h *NotebookHandler) ListArtifacts(c *gin.Context) {
+	nb, ok := h.loadNotebook(c)
+	if !ok {
+		return
+	}
+	var artifacts []models.NotebookArtifact
+	query := h.db.Where("notebook_id = ? AND user_id = ?", nb.ID, getUserID(c))
+	if artifactType := strings.TrimSpace(c.Query("type")); artifactType != "" {
+		query = query.Where("type = ?", artifactType)
+	}
+	if err := query.Order("created_at DESC").Limit(100).Find(&artifacts).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取输出文件失败"})
+		return
+	}
+	items := make([]NotebookArtifactResponse, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		items = append(items, notebookArtifactResponse(artifact))
+	}
+	c.JSON(http.StatusOK, gin.H{"artifacts": items})
+}
+
+func (h *NotebookHandler) CreateArtifact(c *gin.Context) {
+	nb, ok := h.loadNotebook(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		Type        string          `json:"type"`
+		Title       string          `json:"title"`
+		Subtitle    string          `json:"subtitle"`
+		Content     json.RawMessage `json:"content"`
+		SourceCount int             `json:"source_count"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	artifactType := strings.TrimSpace(req.Type)
+	title := strings.TrimSpace(req.Title)
+	if artifactType == "" || len(artifactType) > 64 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的输出类型"})
+		return
+	}
+	if title == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少输出文件标题"})
+		return
+	}
+	content := []byte(strings.TrimSpace(string(req.Content)))
+	if len(content) == 0 || string(content) == "null" {
+		content = []byte("{}")
+	}
+	if len(content) > 1024*1024 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "输出文件内容过大"})
+		return
+	}
+	var decoded any
+	if err := json.Unmarshal(content, &decoded); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "输出文件内容不是有效 JSON"})
+		return
+	}
+	artifact := models.NotebookArtifact{
+		NotebookID:  nb.ID,
+		UserID:      getUserID(c),
+		Type:        artifactType,
+		Title:       title,
+		Subtitle:    strings.TrimSpace(req.Subtitle),
+		Content:     string(content),
+		SourceCount: req.SourceCount,
+	}
+	if artifact.SourceCount < 0 {
+		artifact.SourceCount = 0
+	}
+	if err := h.db.Create(&artifact).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存输出文件失败"})
+		return
+	}
+	h.db.Model(&models.Notebook{}).Where("id = ?", nb.ID).Update("updated_at", time.Now())
+	c.JSON(http.StatusOK, notebookArtifactResponse(artifact))
+}
+
+func (h *NotebookHandler) UpdateArtifact(c *gin.Context) {
+	nb, ok := h.loadNotebook(c)
+	if !ok {
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("artifact_id"), 10, 32)
+	if err != nil || id == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的输出文件 ID"})
+		return
+	}
+	var req struct {
+		Title    string `json:"title"`
+		Subtitle string `json:"subtitle"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少输出文件标题"})
+		return
+	}
+	if len(title) > 255 || len(req.Subtitle) > 255 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "输出文件标题过长"})
+		return
+	}
+	var artifact models.NotebookArtifact
+	if err := h.db.Where("id = ? AND notebook_id = ? AND user_id = ?", uint(id), nb.ID, getUserID(c)).First(&artifact).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "输出文件不存在或无权访问"})
+		return
+	}
+	artifact.Title = title
+	artifact.Subtitle = strings.TrimSpace(req.Subtitle)
+	if err := h.db.Save(&artifact).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新输出文件失败"})
+		return
+	}
+	h.db.Model(&models.Notebook{}).Where("id = ?", nb.ID).Update("updated_at", time.Now())
+	c.JSON(http.StatusOK, notebookArtifactResponse(artifact))
+}
+
+func (h *NotebookHandler) DeleteArtifact(c *gin.Context) {
+	nb, ok := h.loadNotebook(c)
+	if !ok {
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("artifact_id"), 10, 32)
+	if err != nil || id == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的输出文件 ID"})
+		return
+	}
+	result := h.db.Where("id = ? AND notebook_id = ? AND user_id = ?", uint(id), nb.ID, getUserID(c)).Delete(&models.NotebookArtifact{})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "删除输出文件失败"})
+		return
+	}
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "输出文件不存在或无权访问"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func notebookArtifactResponse(artifact models.NotebookArtifact) NotebookArtifactResponse {
+	content := json.RawMessage(strings.TrimSpace(artifact.Content))
+	if len(content) == 0 {
+		content = json.RawMessage("{}")
+	}
+	return NotebookArtifactResponse{
+		ID: artifact.ID, NotebookID: artifact.NotebookID, Type: artifact.Type,
+		Title: artifact.Title, Subtitle: artifact.Subtitle, Content: content,
+		SourceCount: artifact.SourceCount, CreatedAt: artifact.CreatedAt, UpdatedAt: artifact.UpdatedAt,
+	}
 }
 
 func (h *NotebookHandler) listNotebookFiles(notebookID uint) []NotebookFileItem {
@@ -275,6 +601,136 @@ func parseUintQuery(c *gin.Context, key string) uint {
 		return 0
 	}
 	return uint(parsed)
+}
+
+type notebookURLPage struct {
+	URL     string
+	Title   string
+	Content string
+}
+
+func fetchNotebookURLSource(ctx context.Context, rawURL string) (notebookURLPage, error) {
+	parsed, err := url.ParseRequestURI(rawURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return notebookURLPage{}, fmt.Errorf("请输入有效的网页链接")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return notebookURLPage{}, fmt.Errorf("仅支持 http 或 https 网页链接")
+	}
+	if isPrivateNotebookURLHost(parsed.Hostname()) {
+		return notebookURLPage{}, fmt.Errorf("不支持添加内网或本机地址")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return notebookURLPage{}, fmt.Errorf("无法读取网页链接")
+	}
+	req.Header.Set("User-Agent", "AI-Space-Notebook/1.0")
+	client := &http.Client{Timeout: 12 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return notebookURLPage{}, fmt.Errorf("网页抓取失败，请稍后重试")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return notebookURLPage{}, fmt.Errorf("网页抓取失败，状态码 %d", resp.StatusCode)
+	}
+	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
+	if contentType != "" && !strings.Contains(contentType, "text/html") && !strings.Contains(contentType, "text/plain") {
+		return notebookURLPage{}, fmt.Errorf("暂不支持这个网页内容类型")
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
+	if err != nil {
+		return notebookURLPage{}, fmt.Errorf("读取网页内容失败")
+	}
+	title, content := extractNotebookURLText(string(body), parsed.String())
+	if strings.TrimSpace(content) == "" || len(strings.TrimSpace(content)) < 80 {
+		return notebookURLPage{}, fmt.Errorf("网页正文内容为空或过短")
+	}
+	return notebookURLPage{URL: parsed.String(), Title: title, Content: content}, nil
+}
+
+func isPrivateNotebookURLHost(host string) bool {
+	host = strings.TrimSpace(strings.ToLower(host))
+	if host == "localhost" || host == "" {
+		return true
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return true
+	}
+	for _, ip := range ips {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+			return true
+		}
+	}
+	return false
+}
+
+func extractNotebookURLText(html string, fallbackTitle string) (string, string) {
+	text := html
+	title := firstRegexGroup(`(?is)<title[^>]*>(.*?)</title>`, html)
+	text = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`).ReplaceAllString(text, " ")
+	text = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`).ReplaceAllString(text, " ")
+	text = regexp.MustCompile(`(?is)<noscript[^>]*>.*?</noscript>`).ReplaceAllString(text, " ")
+	text = regexp.MustCompile(`(?is)</(p|div|section|article|header|footer|li|h[1-6]|tr)>`).ReplaceAllString(text, "\n")
+	text = regexp.MustCompile(`(?is)<br\s*/?>`).ReplaceAllString(text, "\n")
+	text = regexp.MustCompile(`(?is)<[^>]+>`).ReplaceAllString(text, " ")
+	text = htmlEntityDecode(text)
+	text = normalizeNotebookURLWhitespace(text)
+	title = normalizeNotebookURLWhitespace(htmlEntityDecode(title))
+	if title == "" {
+		title = fallbackTitle
+	}
+	if len(text) > 120000 {
+		text = text[:120000]
+	}
+	return title, text
+}
+
+func firstRegexGroup(pattern, text string) string {
+	matches := regexp.MustCompile(pattern).FindStringSubmatch(text)
+	if len(matches) < 2 {
+		return ""
+	}
+	return matches[1]
+}
+
+func htmlEntityDecode(text string) string {
+	replacements := map[string]string{
+		"&nbsp;": " ", "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": "\"", "&#39;": "'",
+	}
+	for old, next := range replacements {
+		text = strings.ReplaceAll(text, old, next)
+	}
+	return text
+}
+
+func normalizeNotebookURLWhitespace(text string) string {
+	lines := strings.Split(text, "\n")
+	var out []string
+	for _, line := range lines {
+		line = strings.Join(strings.Fields(line), " ")
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+func notebookURLSourceFilename(title string, sourceURL string) string {
+	name := strings.TrimSpace(title)
+	if name == "" {
+		name = sourceURL
+	}
+	name = regexp.MustCompile(`[^\p{Han}\p{L}\p{N}._-]+`).ReplaceAllString(name, "-")
+	name = strings.Trim(name, "-._")
+	if name == "" {
+		name = "web-source"
+	}
+	if len(name) > 80 {
+		name = name[:80]
+	}
+	return name + ".md"
 }
 
 func (h *ChatHandler) loadNotebookFiles(notebookID uint, userID uint, guestID string) []models.File {
