@@ -2,6 +2,8 @@ package models
 
 import (
 	"fmt"
+	"os"
+	"strings"
 
 	"aipool-backend/pkg/publicid"
 	"gorm.io/driver/postgres"
@@ -74,8 +76,32 @@ func InitDB(databaseURL string) (*gorm.DB, error) {
 	if err := migrateFilePublicIDs(db); err != nil {
 		return nil, fmt.Errorf("迁移文件 PublicID 失败: %w", err)
 	}
+	if err := migrateUnconfiguredEmbeddingFailures(db); err != nil {
+		return nil, fmt.Errorf("迁移未配置 embedding 的文件状态失败: %w", err)
+	}
 
 	return db, nil
+}
+
+func migrateUnconfiguredEmbeddingFailures(db *gorm.DB) error {
+	// Router only creates the embedding provider when TEXT_EMBEDDING_API_KEY is configured.
+	// If it is empty, parsed files should be treated as embedding-skipped instead of failed.
+	if strings.TrimSpace(os.Getenv("TEXT_EMBEDDING_API_KEY")) != "" {
+		return nil
+	}
+
+	if err := db.Model(&File{}).
+		Where("parse_status = ? AND embedding_status IN ?", "done", []string{"pending", "indexing", "error"}).
+		Update("embedding_status", "skipped").Error; err != nil {
+		return err
+	}
+
+	return db.Model(&FileEmbeddingJob{}).
+		Where("status IN ?", []string{"pending", "running", "error"}).
+		Updates(map[string]interface{}{
+			"status":        "done",
+			"error_message": "skipped: text embedding api key is not configured",
+		}).Error
 }
 
 func migrateFilePublicIDs(db *gorm.DB) error {
