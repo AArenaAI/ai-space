@@ -21,6 +21,14 @@ const MESSAGE_ROW_CONTENT_VISIBILITY_STYLE: CSSProperties = {
   containIntrinsicSize: "auto 180px",
 };
 const MARKDOWN_HYDRATE_ROOT_MARGIN = "1800px 0px";
+const SIMPLE_ASSISTANT_VIEWPORT_OBSERVER_SKIP_LENGTH = 500;
+
+function shouldSkipViewportObserversForAssistant(content?: string) {
+  if (!content || content.length > SIMPLE_ASSISTANT_VIEWPORT_OBSERVER_SKIP_LENGTH) return false;
+  const hasCodeFence = content.includes("```");
+  const hasTableLine = /(^|\n)\s*\|.+\|\s*(\n|$)/.test(content);
+  return !hasCodeFence && !hasTableLine;
+}
 
 function emitChatRenderProfileEvent(phase: string, detail: Record<string, unknown> = {}) {
   if (typeof window === "undefined") return;
@@ -107,8 +115,10 @@ function MessageRow({
   const profileSnapshotRef = useRef<Record<string, unknown> | null>(null);
   const isUser = msg.role === "user";
   const forceHydrateRichText = isLatestAssistant || isHighlighted;
-  const [isNearViewport, setIsNearViewport] = useState(forceHydrateRichText);
-  const [isInViewport, setIsInViewport] = useState(forceHydrateRichText);
+  const skipViewportObservers = !isUser && shouldSkipViewportObserversForAssistant(msg.content);
+  const initialViewportState = forceHydrateRichText || skipViewportObservers;
+  const [isNearViewport, setIsNearViewport] = useState(initialViewportState);
+  const [isInViewport, setIsInViewport] = useState(initialViewportState);
   const forceStableRichLiteFallback = isViewedAssistant || isInitialReadingAssistant || isInViewport || forceHydrateRichText;
   const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && isLatestAssistant;
   const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
@@ -160,6 +170,10 @@ function MessageRow({
 
   useEffect(() => {
     if (isUser) return;
+    if (skipViewportObservers) {
+      setIsNearViewport(true);
+      return;
+    }
     if (forceHydrateRichText) {
       setIsNearViewport(true);
       return;
@@ -184,10 +198,14 @@ function MessageRow({
     }, { root, rootMargin: MARKDOWN_HYDRATE_ROOT_MARGIN });
     observer.observe(row);
     return () => observer.disconnect();
-  }, [conversationId, forceHydrateRichText, isNearViewport, isUser, msg.content, msg.id]);
+  }, [conversationId, forceHydrateRichText, isNearViewport, isUser, msg.content, msg.id, skipViewportObservers]);
 
   useEffect(() => {
     if (isUser) return;
+    if (skipViewportObservers) {
+      setIsInViewport(true);
+      return;
+    }
     if (forceHydrateRichText) {
       setIsInViewport(true);
       return;
@@ -215,7 +233,7 @@ function MessageRow({
     }, { root, rootMargin: "0px" });
     observer.observe(row);
     return () => observer.disconnect();
-  }, [conversationId, forceHydrateRichText, forceStableRichLiteFallback, isInitialReadingAssistant, isUser, isViewedAssistant, msg.content, msg.id, onAssistantViewed]);
+  }, [conversationId, forceHydrateRichText, forceStableRichLiteFallback, isInitialReadingAssistant, isUser, isViewedAssistant, msg.content, msg.id, onAssistantViewed, skipViewportObservers]);
 
   return (
     <div
