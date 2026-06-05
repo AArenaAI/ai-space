@@ -328,7 +328,7 @@ function topCodeBlockBuckets(events, limit = 8) {
         : lineCount > 10
           ? "11-40"
           : "<=10";
-    const key = `light:${event.lightweight ? "yes" : "no"}|long:${event.isLongCode ? "yes" : "no"}|expanded:${event.expanded ? "yes" : "no"}|chars:${charBucket}|lines:${lineBucket}|lang:${event.language || "text"}`;
+    const key = `light:${event.lightweight ? "yes" : "no"}|long:${event.isLongCode ? "yes" : "no"}|expanded:${event.expanded ? "yes" : "no"}|body:${event.bodyMode || "unknown"}|copy:${event.hasCopyButton ? "yes" : "no"}|collapse:${event.hasCollapseButton ? "yes" : "no"}|label:${event.hasSizeLabel ? "yes" : "no"}|chars:${charBucket}|lines:${lineBucket}|lang:${event.language || "text"}`;
     const current = buckets.get(key) || {
       bucket: key,
       count: 0,

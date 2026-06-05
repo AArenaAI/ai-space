@@ -25,6 +25,7 @@ function formatCodeSize(lineCount: number, charCount: number, t: (key: string, p
 
 function CodeBlockProfileProbe({
   charCount,
+  copied,
   expanded,
   isLongCode,
   language,
@@ -33,6 +34,7 @@ function CodeBlockProfileProbe({
   renderStartedAt,
 }: {
   charCount: number;
+  copied: boolean;
   expanded: boolean;
   isLongCode: boolean;
   language: string;
@@ -42,16 +44,22 @@ function CodeBlockProfileProbe({
 }) {
   useEffect(() => {
     const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const bodyMode = expanded ? (lightweight ? "lightweight-pre" : "syntax-highlighter") : "collapsed-preview";
     emitChatRenderProfileEvent("markdown-code-block-commit", {
+      bodyMode,
       charCount,
+      copyState: copied ? "copied" : "idle",
       durationMs: Number((now - renderStartedAt).toFixed(2)),
       expanded,
+      hasCollapseButton: isLongCode,
+      hasCopyButton: true,
+      hasSizeLabel: isLongCode,
       isLongCode,
       language: language || "text",
       lightweight,
       lineCount,
     });
-  }, [charCount, expanded, isLongCode, language, lightweight, lineCount, renderStartedAt]);
+  }, [charCount, copied, expanded, isLongCode, language, lightweight, lineCount, renderStartedAt]);
   return null;
 }
 
@@ -77,6 +85,7 @@ export default function CodeBlock({ language, value, lightweight = false }: { la
       {profileEnabled && (
         <CodeBlockProfileProbe
           charCount={charCount}
+          copied={copied}
           expanded={expanded}
           isLongCode={isLongCode}
           language={language}
