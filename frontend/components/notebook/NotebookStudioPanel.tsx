@@ -128,27 +128,27 @@ function renderTextArtifact(artifact: Extract<NotebookStudioArtifact, { type: "s
 
 function renderTableArtifact(artifact: Extract<NotebookStudioArtifact, { type: "table" }>, t: (key: string, params?: Record<string, string>) => string, expanded = false) {
   return (
-    <div className={cn("overflow-auto rounded-2xl border border-surface-border bg-surface-card shadow-sm", expanded ? "min-h-0 flex-1" : "max-h-[460px]")}>
-      <table className="min-w-[780px] border-collapse text-left text-xs">
-        <thead className="sticky top-0 z-10 bg-surface-elevated text-text-primary">
+    <div className={cn("overflow-auto border border-surface-border bg-surface-card", expanded ? "min-h-0 flex-1 rounded-lg shadow-none" : "max-h-[460px] rounded-2xl shadow-sm")}>
+      <table className={cn("border-collapse text-left", expanded ? "min-w-[960px] text-[13px]" : "min-w-[780px] text-xs")}>
+        <thead className="sticky top-0 z-10 bg-surface-elevated/95 text-text-primary">
           <tr>
-            <th className="border-b border-surface-border px-3 py-3 font-semibold">{t("notebook.studio.columnModule")}</th>
-            <th className="border-b border-surface-border px-3 py-3 font-semibold">{t("notebook.studio.columnCapability")}</th>
-            <th className="border-b border-surface-border px-3 py-3 font-semibold [writing-mode:vertical-rl]">{t("notebook.studio.columnStatus")}</th>
-            <th className="border-b border-surface-border px-3 py-3 font-semibold">{t("notebook.studio.columnImplementation")}</th>
-            <th className="border-b border-surface-border px-3 py-3 font-semibold">{t("notebook.studio.columnValue")}</th>
-            <th className="border-b border-surface-border px-3 py-3 font-semibold">{t("notebook.studio.columnSource")}</th>
+            <th className={cn("border-b border-surface-border font-semibold", expanded ? "px-4 py-3.5 text-[13px]" : "px-3 py-3")}>{t("notebook.studio.columnModule")}</th>
+            <th className={cn("border-b border-surface-border font-semibold", expanded ? "px-4 py-3.5 text-[13px]" : "px-3 py-3")}>{t("notebook.studio.columnCapability")}</th>
+            <th className={cn("border-b border-surface-border font-semibold [writing-mode:vertical-rl]", expanded ? "px-3 py-3.5 text-[13px]" : "px-3 py-3")}>{t("notebook.studio.columnStatus")}</th>
+            <th className={cn("border-b border-surface-border font-semibold", expanded ? "px-4 py-3.5 text-[13px]" : "px-3 py-3")}>{t("notebook.studio.columnImplementation")}</th>
+            <th className={cn("border-b border-surface-border font-semibold", expanded ? "px-4 py-3.5 text-[13px]" : "px-3 py-3")}>{t("notebook.studio.columnValue")}</th>
+            <th className={cn("border-b border-surface-border font-semibold", expanded ? "px-4 py-3.5 text-[13px]" : "px-3 py-3")}>{t("notebook.studio.columnSource")}</th>
           </tr>
         </thead>
         <tbody>
           {artifact.rows.map((row, index) => (
             <tr key={`${row.module}-${index}`} className="align-top hover:bg-surface-hover/60">
-              <td className="border-b border-surface-border px-3 py-4 font-semibold text-text-primary">{row.module}</td>
-              <td className="border-b border-surface-border px-3 py-4 leading-5 text-text-secondary">{row.capability}</td>
-              <td className="border-b border-surface-border px-3 py-4 text-center font-medium text-text-secondary [writing-mode:vertical-rl]">{row.status}</td>
-              <td className="border-b border-surface-border px-3 py-4 leading-5 text-text-secondary">{row.implementation}</td>
-              <td className="border-b border-surface-border px-3 py-4 leading-5 text-text-secondary">{row.value}</td>
-              <td className="border-b border-surface-border px-3 py-4 font-medium text-brand">{row.source}</td>
+              <td className={cn("border-b border-surface-border font-semibold text-text-primary", expanded ? "px-4 py-[18px] leading-6" : "px-3 py-4")}>{row.module}</td>
+              <td className={cn("border-b border-surface-border text-text-secondary", expanded ? "px-4 py-[18px] leading-6" : "px-3 py-4 leading-5")}>{row.capability}</td>
+              <td className={cn("border-b border-surface-border text-center font-medium text-text-secondary [writing-mode:vertical-rl]", expanded ? "px-3 py-[18px] leading-6" : "px-3 py-4")}>{row.status}</td>
+              <td className={cn("border-b border-surface-border text-text-secondary", expanded ? "px-4 py-[18px] leading-6" : "px-3 py-4 leading-5")}>{row.implementation}</td>
+              <td className={cn("border-b border-surface-border text-text-secondary", expanded ? "px-4 py-[18px] leading-6" : "px-3 py-4 leading-5")}>{row.value}</td>
+              <td className={cn("border-b border-surface-border font-medium text-brand", expanded ? "px-4 py-[18px] leading-6" : "px-3 py-4")}>{row.source}</td>
             </tr>
           ))}
         </tbody>
@@ -292,14 +292,14 @@ export function NotebookStudioPanel({
     <aside className="flex h-full shrink-0 flex-col bg-surface-elevated/70" style={{ width }}>
       {activeArtifact ? (
         <div className="flex min-h-0 flex-1 flex-col bg-surface-card">
-          <div className="flex items-start gap-3 border-b border-surface-border px-4 py-3">
-            <button type="button" onClick={() => onOpenArtifact(null)} className="mt-0.5 rounded-lg p-1.5 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" title={t("notebook.studio.backToOutputs")}>
+          <div className="flex items-start gap-3 border-b border-surface-border bg-surface-card px-4 py-4">
+            <button type="button" onClick={() => onOpenArtifact(null)} className="mt-1 rounded-lg p-1.5 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" title={t("notebook.studio.backToOutputs")}>
               <ChevronLeft className="h-4 w-4" />
             </button>
             <div className="min-w-0 flex-1">
-              <div className="text-[11px] font-medium text-text-tertiary">Studio &gt; {activeArtifact.type === "table" ? t("notebook.studio.table") : activeArtifact.type}</div>
-              <h3 className="mt-1 line-clamp-2 text-base font-semibold text-text-primary">{activeArtifact.title}</h3>
-              <button type="button" className="mt-2 rounded-full border border-surface-border bg-surface-elevated px-2.5 py-1 text-[11px] font-medium text-text-secondary hover:border-brand-border hover:text-brand">
+              <div className="text-[11px] font-medium leading-4 text-text-tertiary">Studio &gt; {activeArtifact.type === "table" ? t("notebook.studio.table") : activeArtifact.type}</div>
+              <h3 className="mt-1 line-clamp-2 text-lg font-bold leading-6 tracking-[-0.01em] text-text-primary">{activeArtifact.title}</h3>
+              <button type="button" className="mt-2.5 rounded-full border border-surface-border bg-surface-elevated px-3 py-1 text-[11px] font-medium text-text-secondary hover:border-brand-border hover:text-brand">
                 {t("notebook.studio.viewSources", { count: String(activeArtifact.sourceCount) })}
               </button>
             </div>
@@ -315,7 +315,7 @@ export function NotebookStudioPanel({
               t={t}
             />
           </div>
-          <div className="flex min-h-0 flex-1 flex-col overflow-auto p-4">
+          <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-surface-card p-4">
             {renderActiveArtifact(activeArtifact, t, true)}
             <div className="mt-3 flex items-center gap-2 border-t border-surface-border pt-3">
               <button type="button" className="rounded-full border border-surface-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-emerald-500/40 hover:text-emerald-500">{t("notebook.studio.good")}</button>
