@@ -1,5 +1,5 @@
 import type { MarkdownTokenDocument } from "./markdownTokenTypes";
-import { getMarkdownTokenCacheKey, setCachedMarkdownTokens } from "./markdownTokenCache";
+import { getMarkdownTokenCacheKey, peekCachedMarkdownTokens, setCachedMarkdownTokens } from "./markdownTokenCache";
 import { tokenizeMarkdown } from "./markdownTokenize";
 
 let worker: Worker | null = null;
@@ -67,4 +67,14 @@ export function tokenizeMarkdownAsync({ content, compactPreview }: { content: st
   }).catch(() => tokenizeMarkdown({ content, compactPreview }));
   inFlightByCacheKey.set(cacheKey, request);
   return request;
+}
+
+export function preheatMarkdownTokens({ content, compactPreview }: { content: string; compactPreview: boolean }): void {
+  if (typeof window === "undefined" || !content.trim()) return;
+  const cacheKey = getMarkdownTokenCacheKey({ content, compactPreview });
+  if (peekCachedMarkdownTokens(cacheKey)) return;
+  if (inFlightByCacheKey.has(cacheKey)) return;
+  window.setTimeout(() => {
+    tokenizeMarkdownAsync({ content, compactPreview }).catch(() => undefined);
+  }, 0);
 }

@@ -13,6 +13,7 @@ import { inferGroups, InferredGroup } from "@/lib/groups";
 import { useI18n } from "@/lib/i18n";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
 import MarkdownPlainFallback from "./markdown/MarkdownPlainFallback";
+import { preheatMarkdownTokens } from "@/lib/markdown/markdownTokenWorkerClient";
 
 type MarkdownRendererProps = { content: string; isStreaming?: boolean; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean; allowRichLiteFallback?: boolean; compactRichLitePreview?: boolean; messageId?: string | number };
 let markdownRendererPromise: Promise<{ default: ComponentType<MarkdownRendererProps> }> | null = null;
@@ -78,6 +79,9 @@ const HISTORY_OVERSCAN_REVERSE = 8;
 const INITIAL_RENDERED_MESSAGE_WINDOW = 16;
 const CONTENT_HEAVY_INITIAL_RENDERED_MESSAGE_WINDOW = 32;
 const MAX_STABLE_RICH_LITE_ASSISTANTS_IN_RENDER_WINDOW = 16;
+const MARKDOWN_TOKEN_PREHEAT_DELAY_MS = 2600;
+const MARKDOWN_TOKEN_PREHEAT_MAX_ASSISTANTS = 4;
+const MARKDOWN_TOKEN_PREHEAT_MIN_CONTENT_LENGTH = 500;
 const MESSAGE_WINDOW_PAGE_SIZE = 8;
 const MIN_HIDDEN_MESSAGES_TO_WINDOW = 8;
 const CONTENT_HEAVY_TOTAL_CHARS_THRESHOLD = 24_000;
@@ -790,6 +794,33 @@ function MessageList({
     }
     return undefined;
   }, [visibleMessages]);
+
+  useEffect(() => {
+    if (targetMessageId || isLoadingHistory || visibleMessages.length === 0) return;
+    const candidates = visibleMessages
+      .filter((message) => message.role === "assistant" && (message.content?.length || 0) >= MARKDOWN_TOKEN_PREHEAT_MIN_CONTENT_LENGTH)
+      .slice(-MARKDOWN_TOKEN_PREHEAT_MAX_ASSISTANTS);
+    if (candidates.length === 0) return;
+    const timer = window.setTimeout(() => {
+      const scroller = scrollRef.current;
+      const distanceToBottom = scroller
+        ? scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
+        : 0;
+      if (!stickToBottomRef.current || Date.now() < userScrollOverrideUntilRef.current || distanceToBottom > 48) {
+        return;
+      }
+      candidates.forEach((message) => {
+        preheatMarkdownTokens({ content: message.content || "", compactPreview: false });
+      });
+      emitChatRenderProfileEvent("markdown-token-preheat", {
+        conversationId,
+        messageCount: candidates.length,
+        visibleMessageCount: visibleMessages.length,
+      });
+    }, MARKDOWN_TOKEN_PREHEAT_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [conversationId, isLoadingHistory, targetMessageId, visibleMessages]);
+
   const renderedWindowStableAssistantIds = useMemo(() => {
     const ids = new Set<string>();
     for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {

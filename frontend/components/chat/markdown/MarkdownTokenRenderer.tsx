@@ -13,6 +13,7 @@ import MarkdownBlockTokenRenderer from "./MarkdownBlockTokenRenderer";
 const INITIAL_TOKEN_BLOCK_BUDGET = 32;
 const TOKEN_BLOCK_BATCH_SIZE = 32;
 const TOKEN_UPGRADE_HEIGHT_GUARD_MS = 1200;
+const TOKEN_UPGRADE_BOTTOM_DISTANCE_THRESHOLD = 48;
 
 function emitChatRenderProfileEvent(phase: string, detail: Record<string, unknown> = {}) {
   if (typeof window === "undefined") return;
@@ -20,6 +21,14 @@ function emitChatRenderProfileEvent(phase: string, detail: Record<string, unknow
   window.dispatchEvent(new CustomEvent("chat-render-profile", {
     detail: { phase, at, ...detail },
   }));
+}
+
+function shouldSkipTokenUpgradeForUserBrowse() {
+  if (typeof document === "undefined") return false;
+  const scroller = document.querySelector<HTMLElement>('[data-testid="virtuoso-scroller"]');
+  if (!scroller) return false;
+  const distanceToBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+  return distanceToBottom > TOKEN_UPGRADE_BOTTOM_DISTANCE_THRESHOLD;
 }
 
 export default function MarkdownTokenRenderer({
@@ -41,6 +50,15 @@ export default function MarkdownTokenRenderer({
   const [guardMinHeight, setGuardMinHeight] = useState<number | null>(null);
 
   const applyTokenDocument = (next: MarkdownTokenDocument | null, guardHeight = false) => {
+    if (next && !isStreaming && shouldSkipTokenUpgradeForUserBrowse()) {
+      emitChatRenderProfileEvent("markdown-token-upgrade-skipped-browse", {
+        compactPreview,
+        contentLength: content.length,
+        messageId,
+      });
+      setDoc(null);
+      return;
+    }
     if (guardHeight) {
       const currentHeight = rootRef.current?.getBoundingClientRect().height || 0;
       if (currentHeight > 0) {
