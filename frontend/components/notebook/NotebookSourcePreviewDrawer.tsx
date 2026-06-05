@@ -50,14 +50,7 @@ export function NotebookSourcePreviewDrawer({ open, source, data, loading, error
   const { t } = useI18n();
   const [query, setQuery] = useState("");
   const file = data?.file || source?.file || null;
-  const chunks = data?.chunks || [];
   const content = data?.content || "";
-
-  const filteredChunks = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return chunks;
-    return chunks.filter((chunk) => chunk.content.toLowerCase().includes(q));
-  }, [chunks, query]);
 
   const contentMatches = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -144,13 +137,6 @@ export function NotebookSourcePreviewDrawer({ open, source, data, loading, error
             <div className="rounded-2xl border border-border bg-surface-muted p-4 text-sm text-text-secondary">{t("notebook.previewEmpty")}</div>
           ) : (
             <div className="space-y-5">
-              {data.file.summary ? (
-                <section className="rounded-2xl border border-border bg-surface-muted p-4">
-                  <h3 className="mb-2 text-sm font-semibold text-text-primary">{t("notebook.previewSummary")}</h3>
-                  <p className="whitespace-pre-wrap text-sm leading-6 text-text-secondary">{data.file.summary}</p>
-                </section>
-              ) : null}
-
               {query.trim() && contentMatches.length > 0 ? (
                 <section className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-900/50 dark:bg-amber-950/20">
                   <h3 className="mb-3 text-sm font-semibold text-amber-900 dark:text-amber-200">{t("notebook.previewMatches", { count: String(contentMatches.length) })}</h3>
@@ -162,25 +148,9 @@ export function NotebookSourcePreviewDrawer({ open, source, data, loading, error
 
               <section>
                 <div className="mb-3 flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-text-primary">{t("notebook.previewChunks")}</h3>
-                  <span className="text-xs text-text-tertiary">{filteredChunks.length}/{chunks.length}</span>
+                  <h3 className="text-sm font-semibold text-text-primary">{t("notebook.previewContent")}</h3>
                 </div>
-                {filteredChunks.length > 0 ? (
-                  <div className="space-y-3">
-                    {filteredChunks.map((chunk) => (
-                      <article key={`${chunk.index}-${chunk.page || 0}-${chunk.slide || 0}`} className="rounded-2xl border border-border bg-surface-muted p-4">
-                        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-text-tertiary">
-                          <span>{t("notebook.previewChunk", { index: String(chunk.index + 1) })}</span>
-                          {chunk.page ? <span>{t("notebook.previewPage", { page: String(chunk.page) })}</span> : null}
-                          {chunk.slide ? <span>{t("notebook.previewSlide", { slide: String(chunk.slide) })}</span> : null}
-                          {chunk.sheet_name ? <span>{chunk.sheet_name}</span> : null}
-                          {chunk.block_type ? <span>{chunk.block_type}</span> : null}
-                        </div>
-                        <p className="whitespace-pre-wrap text-sm leading-7 text-text-secondary">{highlightText(chunk.content, query)}</p>
-                      </article>
-                    ))}
-                  </div>
-                ) : content ? (
+                {content ? (
                   <pre className="whitespace-pre-wrap rounded-2xl border border-border bg-surface-muted p-4 text-sm leading-7 text-text-secondary">{highlightText(content, query)}</pre>
                 ) : (
                   <div className="rounded-2xl border border-border bg-surface-muted p-4 text-sm text-text-secondary">{t("notebook.previewNoContent")}</div>

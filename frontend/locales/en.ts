@@ -244,6 +244,7 @@ const translations: Record<string, string> = {
   "notebook.studio.tableReadyValue": "Ready for Notebook Q&A, citations, and generated artifacts.",
   "notebook.studio.tablePendingValue": "The source is still processing and will be available after indexing.",
   "notebook.previewSearchPlaceholder": "Search inside this source",
+  "notebook.previewContent": "Source content",
   "notebook.previewSummary": "Summary",
   "notebook.previewChunks": "Parsed chunks",
   "notebook.previewChunk": "Chunk {index}",

@@ -244,6 +244,7 @@ const translations: Record<string, string> = {
   "notebook.studio.tableReadyValue": "可参与 Notebook 问答、引用和后续制品生成。",
   "notebook.studio.tablePendingValue": "资料仍在处理，处理完成后可参与问答和输出生成。",
   "notebook.previewSearchPlaceholder": "搜索当前资料内容",
+  "notebook.previewContent": "资料内容",
   "notebook.previewSummary": "摘要",
   "notebook.previewChunks": "分段内容",
   "notebook.previewChunk": "分段 {index}",
