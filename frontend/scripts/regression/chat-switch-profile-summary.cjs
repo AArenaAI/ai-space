@@ -413,6 +413,7 @@ async function clickConversationAndMeasure(page, cid) {
       if (hrefMatches && rows.length > 0 && rows.length !== beforeRows && timeline.rowsChangedMs == null) timeline.rowsChangedMs = Math.round(now - startedAt);
       if (hrefMatches && rows.some((candidate) => candidate.getAttribute("data-message-id")) && timeline.firstRowsMs == null) timeline.firstRowsMs = Math.round(now - startedAt);
       if (hrefMatches && distanceToBottom === 0 && rows.length > 0 && timeline.bottom0Ms == null) timeline.bottom0Ms = Math.round(now - startedAt);
+      if (hrefMatches && distanceToBottom === 0 && rows.length > 0) timeline.lastBottom0Ms = Math.round(now - startedAt);
       lastRows = rows.length;
       lastDistanceToBottom = distanceToBottom;
       if (timeline.urlMs != null && timeline.firstRowsMs != null && timeline.bottom0Ms != null && now - startedAt > 260) break;
@@ -524,6 +525,7 @@ function summarizeSlowBottom0Samples(allResults, limit = 8) {
       return {
         cid: result.cid,
         bottom0Ms,
+        lastBottom0Ms: Number(timeline.lastBottom0Ms || 0),
         wallMs: Number(result.wallMs || 0),
         longMax: Number(result.longMax || 0),
         longTotal: Number(result.longTotal || 0),
@@ -541,6 +543,7 @@ function summarizeSlowBottom0Samples(allResults, limit = 8) {
           listCommitBeforeBottom0: Number(timeline.listCommitBeforeBottom0 || 0),
           liteBeforeBottom0: Number(timeline.liteBeforeBottom0 || 0),
           tokenBeforeBottom0: Number(timeline.tokenBeforeBottom0 || 0),
+          lastBottom0Ms: Number(timeline.lastBottom0Ms || 0),
         },
         conversationFetch: conversationFetch ? {
           dur: Number(conversationFetch.dur || 0),
@@ -585,6 +588,7 @@ function summarize(allResults) {
         firstRowsMs: stats(group.map((result) => Number(result.switchTimeline?.firstRowsMs))),
         rowsChangedMs: stats(group.map((result) => Number(result.switchTimeline?.rowsChangedMs))),
         bottom0Ms: stats(group.map((result) => Number(result.switchTimeline?.bottom0Ms))),
+        lastBottom0Ms: stats(group.map((result) => Number(result.switchTimeline?.lastBottom0Ms))),
         conversationFetchDoneMs: stats(group.map((result) => Number(result.switchTimeline?.conversationFetchDoneMs))),
         longTaskBeforeBottom0Total: stats(group.map((result) => Number(result.switchTimeline?.longTaskBeforeBottom0Total))),
         rowCommitBeforeBottom0: stats(group.map((result) => Number(result.switchTimeline?.rowCommitBeforeBottom0))),
@@ -606,6 +610,7 @@ function summarize(allResults) {
       firstRowsMs: stats(timelineValues("firstRowsMs")),
       rowsChangedMs: stats(timelineValues("rowsChangedMs")),
       bottom0Ms: stats(timelineValues("bottom0Ms")),
+      lastBottom0Ms: stats(timelineValues("lastBottom0Ms")),
       firstFetchStartMs: stats(timelineValues("firstFetchStartMs")),
       firstFetchDoneMs: stats(timelineValues("firstFetchDoneMs")),
       conversationFetchStartMs: stats(timelineValues("conversationFetchStartMs")),
