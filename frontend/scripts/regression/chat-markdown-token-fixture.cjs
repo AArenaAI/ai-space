@@ -21,7 +21,10 @@ const baseUrl = process.env.CHAT_MARKDOWN_TOKEN_FIXTURE_BASE_URL || "http://127.
     const response = await page.goto(`${baseUrl}/test-chat-markdown-token/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
     assert.ok(response && response.status() < 400, `unexpected status ${response?.status()}`);
     await page.waitForSelector('[data-testid="markdown-token-fixture"]', { state: "attached", timeout: 20_000 });
-    await page.waitForTimeout(300);
+    await page.waitForFunction(() => {
+      const root = document.querySelector('[data-testid="markdown-token-fixture"]');
+      return root?.querySelector('[data-markdown-token-renderer="stable"], [data-markdown-token-renderer="preview"]');
+    }, undefined, { timeout: 4_000 });
 
     const result = await page.evaluate(() => {
       const root = document.querySelector('[data-testid="markdown-token-fixture"]');
