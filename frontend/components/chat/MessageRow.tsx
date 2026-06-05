@@ -120,7 +120,8 @@ function MessageRow({
   const [isNearViewport, setIsNearViewport] = useState(initialViewportState);
   const [isInViewport, setIsInViewport] = useState(initialViewportState);
   const forceStableRichLiteFallback = isViewedAssistant || isInitialReadingAssistant || isInViewport || forceHydrateRichText;
-  const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && isLatestAssistant;
+  const hasAssistantGenerationTask = Boolean(msg.generationTaskId || msg.backgroundTaskId || msg.activityStatus);
+  const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && !msg.errorCode && !msg.stopped && isLatestAssistant && hasAssistantGenerationTask;
   const canBypassBrowsingHydrationDefer = forceHydrateRichText && !isStreaming;
   const blockRichTextHydration = historyPrependSettling || (deferRichTextHydration && !canBypassBrowsingHydrationDefer);
   const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);

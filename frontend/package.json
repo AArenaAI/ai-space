@@ -90,6 +90,7 @@
     "profile:chat-switch-summary": "node scripts/regression/chat-switch-profile-summary.cjs",
     "test:chat-load-more-history-fixture": "node scripts/regression/chat-load-more-history-fixture.cjs",
     "test:chat-message-overview-fixture": "node scripts/regression/chat-message-overview-fixture.cjs",
+    "test:chat-latest-render-stability": "node scripts/regression/chat-latest-render-stability.cjs",
     "test:chat-row-memo-fixture": "node scripts/regression/chat-row-memo-fixture.cjs"
   },
   "dependencies": {
