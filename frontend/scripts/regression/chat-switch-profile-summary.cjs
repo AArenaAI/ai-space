@@ -308,6 +308,50 @@ function topMarkdownLiteBuckets(events, limit = 10) {
     }));
 }
 
+function topCodeBlockBuckets(events, limit = 8) {
+  const buckets = new Map();
+  for (const event of events) {
+    if (event.phase !== "markdown-code-block-commit") continue;
+    const charCount = Number(event.charCount || 0);
+    const lineCount = Number(event.lineCount || 0);
+    const charBucket = charCount > 4000
+      ? ">4k"
+      : charCount > 1200
+        ? "1.2k-4k"
+        : charCount > 500
+          ? "500-1.2k"
+          : "<=500";
+    const lineBucket = lineCount > 120
+      ? ">120"
+      : lineCount > 40
+        ? "41-120"
+        : lineCount > 10
+          ? "11-40"
+          : "<=10";
+    const key = `light:${event.lightweight ? "yes" : "no"}|long:${event.isLongCode ? "yes" : "no"}|expanded:${event.expanded ? "yes" : "no"}|chars:${charBucket}|lines:${lineBucket}|lang:${event.language || "text"}`;
+    const current = buckets.get(key) || {
+      bucket: key,
+      count: 0,
+      durationMsTotal: 0,
+      charCountMax: 0,
+      lineCountMax: 0,
+    };
+    current.count += 1;
+    current.durationMsTotal += Number(event.durationMs || 0);
+    current.charCountMax = Math.max(current.charCountMax, charCount);
+    current.lineCountMax = Math.max(current.lineCountMax, lineCount);
+    buckets.set(key, current);
+  }
+  return Array.from(buckets.values())
+    .sort((a, b) => b.count - a.count || b.durationMsTotal - a.durationMsTotal)
+    .slice(0, limit)
+    .map((entry) => ({
+      ...entry,
+      durationMsTotal: round(entry.durationMsTotal, 1),
+      durationMsAvg: round(entry.durationMsTotal / Math.max(1, entry.count), 2),
+    }));
+}
+
 function createProxy() {
   const server = http.createServer((req, res) => {
     const targetBase = req.url.startsWith("/api/") || req.url === "/health" ? apiBaseUrl : frontendBaseUrl;
@@ -529,6 +573,7 @@ function summarize(allResults) {
     assistantMetaCommitCount: stats(allResults.map((result) => Number(result.eventCounts?.["assistant-message-meta-commit"] || 0))),
     userContentCommitCount: stats(allResults.map((result) => Number(result.eventCounts?.["user-message-content-commit"] || 0))),
     messageActionsCommitCount: stats(allResults.map((result) => Number(result.eventCounts?.["message-actions-commit"] || 0))),
+    codeBlockCommitCount: stats(allResults.map((result) => Number(result.eventCounts?.["markdown-code-block-commit"] || 0))),
     eventPhaseTotals: allResults.reduce((acc, result) => {
       for (const [phase, count] of Object.entries(result.eventCounts || {})) acc[phase] = (acc[phase] || 0) + Number(count || 0);
       return acc;
@@ -548,6 +593,7 @@ function summarize(allResults) {
     topUserContentMessages: topEntriesByCount(allRecentEvents, "user-message-content-commit"),
     topUserContentBuckets: topUserContentBuckets(allRecentEvents),
     topMessageActionsBuckets: topMessageActionsBuckets(allRecentEvents),
+    topCodeBlockBuckets: topCodeBlockBuckets(allRecentEvents),
     topTokenMessages: topEntriesByCount(allRecentEvents, "markdown-token-rendered"),
     byCid,
   };

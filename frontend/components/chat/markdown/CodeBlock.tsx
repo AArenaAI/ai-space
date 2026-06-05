@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, ChevronDown, Copy } from "lucide-react";
 import dynamic from "next/dynamic";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
+import { emitChatRenderProfileEvent, isChatRenderProfileEnabled } from "@/lib/chatRenderProfile";
 
 const LazySyntaxHighlighter = dynamic(() => import("../LazySyntaxHighlighter"), {
   ssr: false,
@@ -22,7 +23,41 @@ function formatCodeSize(lineCount: number, charCount: number, t: (key: string, p
   return t("chat.code.size", { lines: String(lineCount), chars: charLabel });
 }
 
+function CodeBlockProfileProbe({
+  charCount,
+  expanded,
+  isLongCode,
+  language,
+  lightweight,
+  lineCount,
+  renderStartedAt,
+}: {
+  charCount: number;
+  expanded: boolean;
+  isLongCode: boolean;
+  language: string;
+  lightweight: boolean;
+  lineCount: number;
+  renderStartedAt: number;
+}) {
+  useEffect(() => {
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    emitChatRenderProfileEvent("markdown-code-block-commit", {
+      charCount,
+      durationMs: Number((now - renderStartedAt).toFixed(2)),
+      expanded,
+      isLongCode,
+      language: language || "text",
+      lightweight,
+      lineCount,
+    });
+  }, [charCount, expanded, isLongCode, language, lightweight, lineCount, renderStartedAt]);
+  return null;
+}
+
 export default function CodeBlock({ language, value, lightweight = false }: { language: string; value: string; lightweight?: boolean }) {
+  const profileEnabled = isChatRenderProfileEnabled();
+  const renderStartedAt = profileEnabled ? (typeof performance !== "undefined" ? performance.now() : Date.now()) : 0;
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const lineCount = value.split("\n").length;
@@ -39,6 +74,17 @@ export default function CodeBlock({ language, value, lightweight = false }: { la
 
   return (
     <div data-testid="markdown-code-block" className="relative group my-4 rounded-lg overflow-hidden border border-surface-border">
+      {profileEnabled && (
+        <CodeBlockProfileProbe
+          charCount={charCount}
+          expanded={expanded}
+          isLongCode={isLongCode}
+          language={language}
+          lightweight={lightweight}
+          lineCount={lineCount}
+          renderStartedAt={renderStartedAt}
+        />
+      )}
       <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-surface-border bg-[#F6F8FA] dark:bg-[#0D0D0D]">
         <span className="min-w-0 truncate text-[11px] font-mono uppercase text-gray-500 dark:text-gray-400">
           {language || "text"}
