@@ -121,6 +121,8 @@ function MessageRow({
   const [isInViewport, setIsInViewport] = useState(initialViewportState);
   const forceStableRichLiteFallback = isViewedAssistant || isInitialReadingAssistant || isInViewport || forceHydrateRichText;
   const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && isLatestAssistant;
+  const canBypassBrowsingHydrationDefer = forceHydrateRichText && !isStreaming;
+  const blockRichTextHydration = historyPrependSettling || (deferRichTextHydration && !canBypassBrowsingHydrationDefer);
   const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
   const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
   const assistantAvatarMeta = getModelAvatarMeta(model || msg.model || "AI");
@@ -131,6 +133,8 @@ function MessageRow({
   const isGroupedAssistantMessage = !isUser && Boolean(group && group.assistantMessages.length > 1);
   const profileSnapshot = rowProfileDetailEnabled ? {
     allowRichLiteFallback,
+    blockRichTextHydration,
+    canBypassBrowsingHydrationDefer,
     canRegenerate,
     codeFenceCount: markdownWeight?.codeFenceCount || 0,
     contentLength: msg.content?.length || 0,
@@ -340,7 +344,7 @@ function MessageRow({
                 <UserMessageContent message={msg} imageLoadFailedLabel={imageLoadFailedLabel} />
               ) : (
                 <>
-                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={!historyPrependSettling && !deferRichTextHydration && (isNearViewport || forceHydrateRichText)} priorityHydrateRichText={!historyPrependSettling && !deferRichTextHydration && forceHydrateRichText} allowRichLiteFallback={allowRichLiteFallback || forceStableRichLiteFallback} compactRichLitePreview={!historyPrependSettling && !forceStableRichLiteFallback} recoverEmptyContent={isLast} onRegenerate={onRegenerate} />
+                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={!blockRichTextHydration && (isNearViewport || forceHydrateRichText)} priorityHydrateRichText={!blockRichTextHydration && forceHydrateRichText} allowRichLiteFallback={allowRichLiteFallback || forceStableRichLiteFallback} compactRichLitePreview={!historyPrependSettling && !forceStableRichLiteFallback} recoverEmptyContent={isLast} onRegenerate={onRegenerate} />
                   {msg.stopped && onContinueGenerate && (
                     <button
                       onClick={onContinueGenerate}
