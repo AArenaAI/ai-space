@@ -202,6 +202,30 @@ function topUserContentBuckets(events, limit = 8) {
     }));
 }
 
+function topMessageActionsBuckets(events, limit = 8) {
+  const buckets = new Map();
+  for (const event of events) {
+    if (event.phase !== "message-actions-commit") continue;
+    const key = `align:${event.align || "unknown"}|visible:${event.visible ? "yes" : "no"}|regen:${event.showRegenerate ? "yes" : "no"}|favorite:${event.hasFavoriteAction ? "yes" : "no"}`;
+    const current = buckets.get(key) || {
+      bucket: key,
+      count: 0,
+      durationMsTotal: 0,
+    };
+    current.count += 1;
+    current.durationMsTotal += Number(event.durationMs || 0);
+    buckets.set(key, current);
+  }
+  return Array.from(buckets.values())
+    .sort((a, b) => b.count - a.count || b.durationMsTotal - a.durationMsTotal)
+    .slice(0, limit)
+    .map((entry) => ({
+      ...entry,
+      durationMsTotal: round(entry.durationMsTotal, 1),
+      durationMsAvg: round(entry.durationMsTotal / Math.max(1, entry.count), 2),
+    }));
+}
+
 function createProxy() {
   const server = http.createServer((req, res) => {
     const targetBase = req.url.startsWith("/api/") || req.url === "/health" ? apiBaseUrl : frontendBaseUrl;
@@ -318,6 +342,7 @@ function summarize(allResults) {
     markdownDeferredCount: stats(allResults.map((result) => Number(result.eventCounts?.["markdown-token-deferred"] || 0))),
     assistantMetaCommitCount: stats(allResults.map((result) => Number(result.eventCounts?.["assistant-message-meta-commit"] || 0))),
     userContentCommitCount: stats(allResults.map((result) => Number(result.eventCounts?.["user-message-content-commit"] || 0))),
+    messageActionsCommitCount: stats(allResults.map((result) => Number(result.eventCounts?.["message-actions-commit"] || 0))),
     eventPhaseTotals: allResults.reduce((acc, result) => {
       for (const [phase, count] of Object.entries(result.eventCounts || {})) acc[phase] = (acc[phase] || 0) + Number(count || 0);
       return acc;
@@ -334,6 +359,7 @@ function summarize(allResults) {
     topAssistantMetaBuckets: topAssistantMetaBuckets(allRecentEvents),
     topUserContentMessages: topEntriesByCount(allRecentEvents, "user-message-content-commit"),
     topUserContentBuckets: topUserContentBuckets(allRecentEvents),
+    topMessageActionsBuckets: topMessageActionsBuckets(allRecentEvents),
     topTokenMessages: topEntriesByCount(allRecentEvents, "markdown-token-rendered"),
     byCid,
   };

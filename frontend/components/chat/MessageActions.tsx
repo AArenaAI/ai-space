@@ -4,6 +4,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { Check, Copy, MoreHorizontal, RotateCcw, Share2, Star, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
+import { emitChatRenderProfileEvent, isChatRenderProfileEnabled } from "@/lib/chatRenderProfile";
 
 export type MessageActionsProps = {
   onCopy: () => void;
@@ -51,10 +52,28 @@ function MessageActions({
   completedAt,
   onForkCompare,
 }: MessageActionsProps) {
+  const profileEnabled = isChatRenderProfileEnabled();
+  const renderStartedAt = profileEnabled ? (typeof performance !== "undefined" ? performance.now() : Date.now()) : 0;
   const { t, language } = useI18n();
   const [copied, setCopied] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!profileEnabled) return;
+    const commitAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    emitChatRenderProfileEvent("message-actions-commit", {
+      align,
+      visible,
+      showRegenerate: Boolean(showRegenerate && onRegenerate),
+      hasFavoriteAction: Boolean(onFavoriteSelectMode),
+      isFavorited: Boolean(isFavorited),
+      hasForkCompare: Boolean(onForkCompare),
+      moreOpen,
+      copied,
+      durationMs: commitAt - renderStartedAt,
+    });
+  });
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
