@@ -188,7 +188,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		}
 
 		convHandler := NewConversationHandler(db)
-		notebookHandler := NewNotebookHandler(db, fileService)
+		notebookHandler := NewNotebookHandler(db, fileService, aiService)
 		documentArtifactHandler := NewDocumentArtifactHandler(db)
 		documentArtifactHandler.AutoMigrate()
 		authorized.GET("/conversations", convHandler.List)

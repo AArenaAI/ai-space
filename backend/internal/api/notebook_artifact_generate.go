@@ -2,8 +2,11 @@ package api
 
 import (
 	"aipool-backend/internal/models"
+	"aipool-backend/internal/services"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -13,6 +16,12 @@ type generatedNotebookArtifactDraft struct {
 	Subtitle    string
 	Content     json.RawMessage
 	SourceCount int
+}
+
+type notebookGeneratedAIResponse struct {
+	Title    string          `json:"title"`
+	Subtitle string          `json:"subtitle"`
+	Content  json.RawMessage `json:"content"`
 }
 
 type notebookGenerationSource struct {
@@ -74,6 +83,74 @@ func buildGeneratedNotebookArtifactDraft(generationType string, notebookTitle st
 		Content:     content,
 		SourceCount: len(sources),
 	}, nil
+}
+
+func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, generationType string, notebookTitle string, files []models.File, selectedFileIDs []uint, language string) (generatedNotebookArtifactDraft, error) {
+	fallback, err := buildGeneratedNotebookArtifactDraft(generationType, notebookTitle, files, selectedFileIDs, language)
+	if err != nil {
+		return generatedNotebookArtifactDraft{}, err
+	}
+	if aiService == nil {
+		return fallback, nil
+	}
+	sources := selectNotebookGenerationSources(files, selectedFileIDs)
+	messages := buildNotebookArtifactAIMessages(generationType, notebookTitle, sources, language)
+	resp, err := aiService.ChatCompletion(ctx, notebookArtifactAIModel(), messages, false, false, "", false, nil)
+	if err != nil || resp == nil || resp.Body == nil {
+		return fallback, nil
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
+	if err != nil {
+		return fallback, nil
+	}
+	draft, err := parseAINotebookArtifactResponse(body, fallback)
+	if err != nil {
+		return fallback, nil
+	}
+	return draft, nil
+}
+
+func buildNotebookArtifactAIMessages(generationType string, notebookTitle string, sources []notebookGenerationSource, language string) []services.Message {
+	if strings.TrimSpace(language) == "" {
+		language = "zh-CN"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Notebook: %s\n", fallbackText(notebookTitle, "未命名笔记本"))
+	fmt.Fprintf(&b, "Artifact type: %s\n", generationType)
+	fmt.Fprintf(&b, "Language: %s\n\n", language)
+	b.WriteString("Sources:\n")
+	for _, source := range sources {
+		fmt.Fprintf(&b, "[%d] %s\nSummary: %s\nExcerpt: %s\n\n", source.Index, source.File.Filename, fallbackText(source.Summary, "无摘要"), fallbackText(source.Excerpt, "无正文摘录"))
+	}
+	b.WriteString("Return strict JSON only with keys: title, subtitle, content. For summary/faq/briefing content must be {\"sections\":[{\"heading\":string,\"body\":string,\"bullets\":[string]}]}. For table content must be {\"rows\":[{\"module\":string,\"capability\":string,\"status\":string,\"implementation\":string,\"value\":string,\"source\":string}]}. Cite sources using bracket numbers such as [1].")
+	return []services.Message{
+		{Role: "system", Content: "You generate structured Notebook Studio artifacts. Return valid JSON only; no markdown fences."},
+		{Role: "user", Content: b.String()},
+	}
+}
+
+func parseAINotebookArtifactResponse(body []byte, fallback generatedNotebookArtifactDraft) (generatedNotebookArtifactDraft, error) {
+	text := strings.TrimSpace(string(body))
+	text = strings.TrimPrefix(text, "```json")
+	text = strings.TrimPrefix(text, "```")
+	text = strings.TrimSuffix(text, "```")
+	text = strings.TrimSpace(text)
+	var ai notebookGeneratedAIResponse
+	if err := json.Unmarshal([]byte(text), &ai); err != nil {
+		return generatedNotebookArtifactDraft{}, err
+	}
+	if len(ai.Content) == 0 || !json.Valid(ai.Content) {
+		return generatedNotebookArtifactDraft{}, fmt.Errorf("AI artifact content is not valid JSON")
+	}
+	fallback.Title = fallbackText(ai.Title, fallback.Title)
+	fallback.Subtitle = fallbackText(ai.Subtitle, fallback.Subtitle)
+	fallback.Content = ai.Content
+	return fallback, nil
+}
+
+func notebookArtifactAIModel() string {
+	return "gpt-5.4-mini"
 }
 
 func notebookArtifactTypeForGeneration(generationType string) (string, bool) {

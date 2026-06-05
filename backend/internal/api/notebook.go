@@ -22,10 +22,15 @@ import (
 type NotebookHandler struct {
 	db          *gorm.DB
 	fileService *services.FileService
+	aiService   chatAIService
 }
 
-func NewNotebookHandler(db *gorm.DB, fileService *services.FileService) *NotebookHandler {
-	return &NotebookHandler{db: db, fileService: fileService}
+func NewNotebookHandler(db *gorm.DB, fileService *services.FileService, aiService ...chatAIService) *NotebookHandler {
+	h := &NotebookHandler{db: db, fileService: fileService}
+	if len(aiService) > 0 {
+		h.aiService = aiService[0]
+	}
+	return h
 }
 
 type NotebookListItem struct {
@@ -454,7 +459,7 @@ func (h *NotebookHandler) GenerateArtifact(c *gin.Context) {
 		return
 	}
 	files := h.loadNotebookGenerationFiles(nb.ID, getUserID(c))
-	draft, err := buildGeneratedNotebookArtifactDraft(req.Type, nb.Title, files, req.FileIDs, req.Language)
+	draft, err := buildAINotebookArtifactDraft(c.Request.Context(), h.aiService, req.Type, nb.Title, files, req.FileIDs, req.Language)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
