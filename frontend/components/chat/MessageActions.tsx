@@ -38,6 +38,48 @@ function formatDuration(ms: number, t: (key: string, params?: Record<string, str
   return t("time.duration.seconds", { seconds: String(seconds) });
 }
 
+function nowMs() {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+function MessageActionsProfileProbe({
+  align,
+  visible,
+  showRegenerate,
+  hasFavoriteAction,
+  isFavorited,
+  hasForkCompare,
+  moreOpen,
+  copied,
+  renderStartedAt,
+}: {
+  align: MessageActionsProps["align"];
+  visible: boolean;
+  showRegenerate: boolean;
+  hasFavoriteAction: boolean;
+  isFavorited: boolean;
+  hasForkCompare: boolean;
+  moreOpen: boolean;
+  copied: boolean;
+  renderStartedAt: number;
+}) {
+  useEffect(() => {
+    const commitAt = nowMs();
+    emitChatRenderProfileEvent("message-actions-commit", {
+      align,
+      visible,
+      showRegenerate,
+      hasFavoriteAction,
+      isFavorited,
+      hasForkCompare,
+      moreOpen,
+      copied,
+      durationMs: commitAt - renderStartedAt,
+    });
+  });
+  return null;
+}
+
 function MessageActions({
   onCopy,
   onDelete,
@@ -53,27 +95,11 @@ function MessageActions({
   onForkCompare,
 }: MessageActionsProps) {
   const profileEnabled = isChatRenderProfileEnabled();
-  const renderStartedAt = profileEnabled ? (typeof performance !== "undefined" ? performance.now() : Date.now()) : 0;
+  const renderStartedAt = profileEnabled ? nowMs() : 0;
   const { t, language } = useI18n();
   const [copied, setCopied] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!profileEnabled) return;
-    const commitAt = typeof performance !== "undefined" ? performance.now() : Date.now();
-    emitChatRenderProfileEvent("message-actions-commit", {
-      align,
-      visible,
-      showRegenerate: Boolean(showRegenerate && onRegenerate),
-      hasFavoriteAction: Boolean(onFavoriteSelectMode),
-      isFavorited: Boolean(isFavorited),
-      hasForkCompare: Boolean(onForkCompare),
-      moreOpen,
-      copied,
-      durationMs: commitAt - renderStartedAt,
-    });
-  });
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -95,6 +121,19 @@ function MessageActions({
       align === "right" ? "justify-end" : "justify-start",
       visible ? "opacity-100" : "opacity-0 group-hover:opacity-100"
     )}>
+      {profileEnabled && (
+        <MessageActionsProfileProbe
+          align={align}
+          visible={visible}
+          showRegenerate={Boolean(showRegenerate && onRegenerate)}
+          hasFavoriteAction={Boolean(onFavoriteSelectMode)}
+          isFavorited={Boolean(isFavorited)}
+          hasForkCompare={Boolean(onForkCompare)}
+          moreOpen={moreOpen}
+          copied={copied}
+          renderStartedAt={renderStartedAt}
+        />
+      )}
       <button
         onClick={() => { onCopy(); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
         className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
