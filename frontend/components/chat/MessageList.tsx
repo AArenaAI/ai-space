@@ -536,13 +536,15 @@ function MessageList({
 
     const scrollerRect = el.getBoundingClientRect();
 
-    if (el.scrollTop <= 4 && releaseHiddenLocalMessages(el)) {
-      return;
-    }
-
     // Extreme positions: at very top -> earliest user message; at very bottom -> latest user message.
     if (el.scrollTop <= 4 && userOverviewMessagesRef.current.length > 0) {
+      // Reaching the absolute top is an explicit browse-away signal, even if it
+      // happens while an initial bottom-lock settling timer is still pending.
+      // Otherwise the post-layout bottom lock can immediately pull the scroller
+      // back to the bottom and leave the overview marker stuck on the latest item.
+      stopBottomLockForUserBrowse(2500);
       setActiveOverviewMessageId((previous) => previous === userOverviewMessagesRef.current[0].id ? previous : userOverviewMessagesRef.current[0].id);
+      releaseHiddenLocalMessages(el);
       return;
     }
     if (distanceToBottom <= 4 && userOverviewMessagesRef.current.length > 0) {
