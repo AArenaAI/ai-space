@@ -251,6 +251,7 @@ function summarize(allResults) {
     markdownLiteCount: stats(allResults.map((result) => Number(result.eventCounts?.["markdown-lite-rendered"] || 0))),
     markdownTokenCount: stats(allResults.map((result) => Number(result.eventCounts?.["markdown-token-rendered"] || 0))),
     markdownDeferredCount: stats(allResults.map((result) => Number(result.eventCounts?.["markdown-token-deferred"] || 0))),
+    assistantMetaCommitCount: stats(allResults.map((result) => Number(result.eventCounts?.["assistant-message-meta-commit"] || 0))),
     eventPhaseTotals: allResults.reduce((acc, result) => {
       for (const [phase, count] of Object.entries(result.eventCounts || {})) acc[phase] = (acc[phase] || 0) + Number(count || 0);
       return acc;
@@ -263,6 +264,7 @@ function summarize(allResults) {
     topRowChangedKeys: topChangedKeys(allRecentEvents),
     topRowMountBuckets: topRowCommitBuckets(allRecentEvents, (event) => Array.isArray(event.changedKeys) && event.changedKeys.includes("mount")),
     topRowUnknownBuckets: topRowCommitBuckets(allRecentEvents, (event) => !Array.isArray(event.changedKeys) || event.changedKeys.length === 0),
+    topAssistantMetaMessages: topEntriesByCount(allRecentEvents, "assistant-message-meta-commit"),
     topTokenMessages: topEntriesByCount(allRecentEvents, "markdown-token-rendered"),
     byCid,
   };
