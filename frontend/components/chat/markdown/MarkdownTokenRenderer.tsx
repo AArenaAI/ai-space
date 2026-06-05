@@ -26,10 +26,12 @@ export default function MarkdownTokenRenderer({
   content,
   compactPreview = true,
   isStreaming = false,
+  messageId,
 }: {
   content: string;
   compactPreview?: boolean;
   isStreaming?: boolean;
+  messageId?: string | number;
 }) {
   const cacheKey = useMemo(() => getMarkdownTokenCacheKey({ content, compactPreview }), [compactPreview, content]);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -112,17 +114,18 @@ export default function MarkdownTokenRenderer({
       hasLinks: doc.featureFlags.hasLinks,
       hasTable: doc.featureFlags.hasTable,
       isStreaming,
+      messageId,
       parseMs: Number(doc.parseMs.toFixed(2)),
       renderedBlockCount,
       tokenizerSource: doc.tokenizerSource || "unknown",
       truncated: doc.truncated,
     });
-  }, [compactPreview, content.length, doc, isStreaming, renderedBlockCount]);
+  }, [compactPreview, content.length, doc, isStreaming, messageId, renderedBlockCount]);
 
   if (!doc) {
     return (
       <div ref={rootRef} data-markdown-token-renderer="deferred-lite">
-        <MarkdownLiteRenderer content={content} compactPreview={compactPreview} isStreaming={isStreaming} />
+        <MarkdownLiteRenderer content={content} compactPreview={compactPreview} isStreaming={isStreaming} messageId={messageId} />
       </div>
     );
   }

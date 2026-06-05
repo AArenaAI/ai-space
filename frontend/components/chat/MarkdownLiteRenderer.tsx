@@ -273,7 +273,7 @@ function InlineText({ text, lightweightInline = false }: { text: string; lightwe
   );
 }
 
-const MarkdownLiteRenderer = memo(function MarkdownLiteRenderer({ content, compactPreview = true }: { content: string; isStreaming?: boolean; compactPreview?: boolean }) {
+const MarkdownLiteRenderer = memo(function MarkdownLiteRenderer({ content, compactPreview = true, messageId }: { content: string; isStreaming?: boolean; compactPreview?: boolean; messageId?: string | number }) {
   const liteContent = useMemo(() => getCachedLiteParse(content, compactPreview), [compactPreview, content]);
   const blocks = liteContent.blocks;
   const lightweightInline = false;
@@ -285,11 +285,12 @@ const MarkdownLiteRenderer = memo(function MarkdownLiteRenderer({ content, compa
       codeBlocks: liteContent.codeBlocks,
       contentLength: content.length,
       isPreview: liteContent.isPreview,
+      messageId,
       parseMs: Number(liteContent.parseMs.toFixed(2)),
       compactPreview,
       tableLines: liteContent.tableLines,
     });
-  }, [blocks.length, compactPreview, content.length, liteContent.codeBlocks, liteContent.isPreview, liteContent.parseMs, liteContent.tableLines, liteContent.wasCacheHit]);
+  }, [blocks.length, compactPreview, content.length, liteContent.codeBlocks, liteContent.isPreview, liteContent.parseMs, liteContent.tableLines, liteContent.wasCacheHit, messageId]);
 
   return (
     <div data-markdown-lite-renderer={liteContent.isPreview ? "stable-preview" : "full"}>

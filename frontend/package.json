@@ -87,6 +87,7 @@
     "test:chat-scrollbar-fixture": "node scripts/regression/chat-scrollbar-fixture.cjs",
     "test:chat-history-loading-fixture": "node scripts/regression/chat-history-loading-fixture.cjs",
     "test:chat-conversation-switch-cache-fixture": "node scripts/regression/chat-conversation-switch-cache-fixture.cjs",
+    "profile:chat-switch-summary": "node scripts/regression/chat-switch-profile-summary.cjs",
     "test:chat-load-more-history-fixture": "node scripts/regression/chat-load-more-history-fixture.cjs",
     "test:chat-message-overview-fixture": "node scripts/regression/chat-message-overview-fixture.cjs",
     "test:chat-row-memo-fixture": "node scripts/regression/chat-row-memo-fixture.cjs"

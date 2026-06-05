@@ -14,7 +14,7 @@ import { useI18n } from "@/lib/i18n";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
 import MarkdownPlainFallback from "./markdown/MarkdownPlainFallback";
 
-type MarkdownRendererProps = { content: string; isStreaming?: boolean; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean; allowRichLiteFallback?: boolean; compactRichLitePreview?: boolean };
+type MarkdownRendererProps = { content: string; isStreaming?: boolean; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean; allowRichLiteFallback?: boolean; compactRichLitePreview?: boolean; messageId?: string | number };
 let markdownRendererPromise: Promise<{ default: ComponentType<MarkdownRendererProps> }> | null = null;
 let MarkdownRendererModule: ComponentType<MarkdownRendererProps> | null = null;
 
@@ -44,7 +44,7 @@ function LoadableMarkdownRenderer(props: MarkdownRendererProps) {
   }, [Renderer]);
 
   if (!Renderer) {
-    return <MarkdownPlainFallback content={content} />;
+    return <MarkdownPlainFallback content={content} messageId={props.messageId} />;
   }
 
   return <Renderer {...props} />;
@@ -191,12 +191,12 @@ const MemoMarkdownRenderer = memo(function MemoMarkdownRenderer(props: MarkdownR
   return <LoadableMarkdownRenderer {...props} />;
 });
 
-function LazyMarkdownRenderer({ content, shouldHydrateRichText = true, priorityHydrateRichText = false, allowRichLiteFallback = false, compactRichLitePreview = true }: MarkdownRendererProps) {
+function LazyMarkdownRenderer({ content, shouldHydrateRichText = true, priorityHydrateRichText = false, allowRichLiteFallback = false, compactRichLitePreview = true, messageId }: MarkdownRendererProps) {
   if (content.length < LONG_MARKDOWN_LAZY_THRESHOLD) {
-    return <MemoMarkdownRenderer content={content} shouldHydrateRichText={shouldHydrateRichText} priorityHydrateRichText={priorityHydrateRichText} allowRichLiteFallback={allowRichLiteFallback} compactRichLitePreview={compactRichLitePreview} />;
+    return <MemoMarkdownRenderer content={content} shouldHydrateRichText={shouldHydrateRichText} priorityHydrateRichText={priorityHydrateRichText} allowRichLiteFallback={allowRichLiteFallback} compactRichLitePreview={compactRichLitePreview} messageId={messageId} />;
   }
 
-  return <DeferredMarkdownRenderer content={content} shouldHydrateRichText={shouldHydrateRichText} priorityHydrateRichText={priorityHydrateRichText} allowRichLiteFallback={allowRichLiteFallback} compactRichLitePreview={compactRichLitePreview} />;
+  return <DeferredMarkdownRenderer content={content} shouldHydrateRichText={shouldHydrateRichText} priorityHydrateRichText={priorityHydrateRichText} allowRichLiteFallback={allowRichLiteFallback} compactRichLitePreview={compactRichLitePreview} messageId={messageId} />;
 }
 
 function MessageList({

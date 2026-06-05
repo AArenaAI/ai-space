@@ -5,7 +5,7 @@ import type { ComponentType } from "react";
 import MarkdownPlainFallback from "./markdown/MarkdownPlainFallback";
 import MarkdownTokenRenderer from "./markdown/MarkdownTokenRenderer";
 
-type MarkdownRendererProps = { content: string; isStreaming?: boolean; priorityHydrateRichText?: boolean };
+type MarkdownRendererProps = { content: string; isStreaming?: boolean; priorityHydrateRichText?: boolean; messageId?: string | number };
 
 let markdownRendererPromise: Promise<{ default: ComponentType<MarkdownRendererProps> }> | null = null;
 let MarkdownRendererModule: ComponentType<MarkdownRendererProps> | null = null;
@@ -76,12 +76,12 @@ function shouldUseRichLiteFallback(content: string, complexity: ReturnType<typeo
   return content.length <= 500 && complexity.codeBlocks === 0 && complexity.tableLines === 0;
 }
 
-function MarkdownFallback({ content, loading, compactPreview = true }: { content: string; loading?: boolean; compactPreview?: boolean }) {
+function MarkdownFallback({ content, loading, compactPreview = true, messageId }: { content: string; loading?: boolean; compactPreview?: boolean; messageId?: string | number }) {
   if (loading) {
     return <div className="h-5 w-32 rounded bg-surface-card animate-pulse" />;
   }
 
-  return <MarkdownPlainFallback content={content} compactPreview={compactPreview} />;
+  return <MarkdownPlainFallback content={content} compactPreview={compactPreview} messageId={messageId} />;
 }
 
 export function DeferredMarkdownRenderer({
@@ -94,6 +94,7 @@ export function DeferredMarkdownRenderer({
   isStreaming = false,
   allowRichLiteFallback = false,
   compactRichLitePreview = true,
+  messageId,
 }: {
   content: string;
   shouldHydrateRichText?: boolean;
@@ -104,6 +105,7 @@ export function DeferredMarkdownRenderer({
   isStreaming?: boolean;
   allowRichLiteFallback?: boolean;
   compactRichLitePreview?: boolean;
+  messageId?: string | number;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const complexity = useMemo(() => getMarkdownComplexity(content), [content]);
@@ -265,11 +267,11 @@ export function DeferredMarkdownRenderer({
   return (
     <div ref={hostRef}>
       {shouldRenderMarkdown && Renderer ? (
-        <Renderer content={content} isStreaming={isStreaming} priorityHydrateRichText={priorityHydrateRichText} />
+        <Renderer content={content} isStreaming={isStreaming} priorityHydrateRichText={priorityHydrateRichText} messageId={messageId} />
       ) : priorityHydrateRichText || allowRichLiteFallback || shouldUseRichLiteFallback(content, complexity) ? (
-        <MarkdownTokenRenderer content={content} isStreaming={isStreaming} compactPreview={priorityHydrateRichText ? false : compactRichLitePreview} />
+        <MarkdownTokenRenderer content={content} isStreaming={isStreaming} compactPreview={priorityHydrateRichText ? false : compactRichLitePreview} messageId={messageId} />
       ) : (
-        <MarkdownFallback content={content} compactPreview={compactRichLitePreview} />
+        <MarkdownFallback content={content} compactPreview={compactRichLitePreview} messageId={messageId} />
       )}
     </div>
   );
