@@ -166,6 +166,42 @@ function topAssistantMetaBuckets(events, limit = 8) {
     }));
 }
 
+function topUserContentBuckets(events, limit = 8) {
+  const buckets = new Map();
+  for (const event of events) {
+    if (event.phase !== "user-message-content-commit") continue;
+    const fileKind = Number(event.imageFileCount || 0) > 0
+      ? "image"
+      : Number(event.otherFileCount || 0) > 0
+        ? "file"
+        : "text";
+    const length = Number(event.contentLength || 0);
+    const lengthKind = length >= 2000 ? "long" : length >= 500 ? "medium" : "short";
+    const key = `${lengthKind}|${fileKind}|quote:${event.hasQuote ? "yes" : "no"}|collapsed:${event.isLong ? "yes" : "no"}`;
+    const current = buckets.get(key) || {
+      bucket: key,
+      count: 0,
+      durationMsTotal: 0,
+      contentLengthMax: 0,
+      examples: [],
+    };
+    current.count += 1;
+    current.durationMsTotal += Number(event.durationMs || 0);
+    current.contentLengthMax = Math.max(current.contentLengthMax, length);
+    if (current.examples.length < 5 && event.messageId) current.examples.push(String(event.messageId));
+    buckets.set(key, current);
+  }
+  return Array.from(buckets.values())
+    .sort((a, b) => b.count - a.count || b.durationMsTotal - a.durationMsTotal)
+    .slice(0, limit)
+    .map((entry) => ({
+      ...entry,
+      durationMsTotal: round(entry.durationMsTotal, 1),
+      durationMsAvg: round(entry.durationMsTotal / Math.max(1, entry.count), 2),
+      examples: [...new Set(entry.examples)],
+    }));
+}
+
 function createProxy() {
   const server = http.createServer((req, res) => {
     const targetBase = req.url.startsWith("/api/") || req.url === "/health" ? apiBaseUrl : frontendBaseUrl;
@@ -281,6 +317,7 @@ function summarize(allResults) {
     markdownTokenCount: stats(allResults.map((result) => Number(result.eventCounts?.["markdown-token-rendered"] || 0))),
     markdownDeferredCount: stats(allResults.map((result) => Number(result.eventCounts?.["markdown-token-deferred"] || 0))),
     assistantMetaCommitCount: stats(allResults.map((result) => Number(result.eventCounts?.["assistant-message-meta-commit"] || 0))),
+    userContentCommitCount: stats(allResults.map((result) => Number(result.eventCounts?.["user-message-content-commit"] || 0))),
     eventPhaseTotals: allResults.reduce((acc, result) => {
       for (const [phase, count] of Object.entries(result.eventCounts || {})) acc[phase] = (acc[phase] || 0) + Number(count || 0);
       return acc;
@@ -295,6 +332,8 @@ function summarize(allResults) {
     topRowUnknownBuckets: topRowCommitBuckets(allRecentEvents, (event) => !Array.isArray(event.changedKeys) || event.changedKeys.length === 0),
     topAssistantMetaMessages: topEntriesByCount(allRecentEvents, "assistant-message-meta-commit"),
     topAssistantMetaBuckets: topAssistantMetaBuckets(allRecentEvents),
+    topUserContentMessages: topEntriesByCount(allRecentEvents, "user-message-content-commit"),
+    topUserContentBuckets: topUserContentBuckets(allRecentEvents),
     topTokenMessages: topEntriesByCount(allRecentEvents, "markdown-token-rendered"),
     byCid,
   };
