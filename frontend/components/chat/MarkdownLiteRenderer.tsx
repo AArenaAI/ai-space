@@ -45,7 +45,7 @@ function rememberLiteParse(content: string, value: Omit<LiteParseResult, "parseM
   if (oldest) liteParseCache.delete(oldest);
 }
 
-function getLiteRichContent(content: string, compactPreview: boolean) {
+function getLiteRichContent(content: string, compactPreview: boolean, disablePreview = false) {
   let codeFenceCount = 0;
   let tableLines = 0;
   const previewLines: string[] = [];
@@ -74,10 +74,11 @@ function getLiteRichContent(content: string, compactPreview: boolean) {
   const lengthThreshold = compactPreview ? COMPACT_PREVIEW_LITE_LENGTH_THRESHOLD : STABLE_PREVIEW_LITE_LENGTH_THRESHOLD;
   const codeBlockThreshold = compactPreview ? COMPACT_PREVIEW_LITE_CODE_BLOCK_THRESHOLD : STABLE_PREVIEW_LITE_CODE_BLOCK_THRESHOLD;
   const tableLineThreshold = compactPreview ? COMPACT_PREVIEW_LITE_TABLE_LINE_THRESHOLD : STABLE_PREVIEW_LITE_TABLE_LINE_THRESHOLD;
-  const shouldPreview =
+  const shouldPreview = !disablePreview && (
     content.length > lengthThreshold ||
     codeBlocks >= codeBlockThreshold ||
-    tableLines >= tableLineThreshold;
+    tableLines >= tableLineThreshold
+  );
   if (!shouldPreview) return { codeBlocks, isPreview: false, tableLines, text: content };
 
   return { codeBlocks, isPreview: true, tableLines, text: previewLines.join("\n").slice(0, maxChars).trimEnd() };
@@ -211,9 +212,9 @@ function parseLiteBlocks(markdown: string): LiteBlock[] {
   return blocks;
 }
 
-function getCachedLiteParse(content: string, compactPreview: boolean): LiteParseResult {
+function getCachedLiteParse(content: string, compactPreview: boolean, disablePreview = false): LiteParseResult {
   const start = typeof performance !== "undefined" ? performance.now() : Date.now();
-  const cacheKey = `${compactPreview ? "compact" : "stable"}:${content}`;
+  const cacheKey = `${compactPreview ? "compact" : "stable"}:${disablePreview ? "full" : "preview"}:${content}`;
   const cached = liteParseCache.get(cacheKey);
   if (cached) {
     liteParseCache.delete(cacheKey);
@@ -221,7 +222,7 @@ function getCachedLiteParse(content: string, compactPreview: boolean): LiteParse
     return { ...cached, parseMs: 0, wasCacheHit: true };
   }
 
-  const liteContent = getLiteRichContent(content, compactPreview);
+  const liteContent = getLiteRichContent(content, compactPreview, disablePreview);
   const blocks = parseLiteBlocks(liteContent.text);
   const value = { ...liteContent, blocks };
   rememberLiteParse(cacheKey, value);
@@ -266,8 +267,8 @@ function InlineText({ text, lightweightInline = false }: { text: string; lightwe
   );
 }
 
-const MarkdownLiteRenderer = memo(function MarkdownLiteRenderer({ content, compactPreview = true, messageId }: { content: string; isStreaming?: boolean; compactPreview?: boolean; messageId?: string | number }) {
-  const liteContent = useMemo(() => getCachedLiteParse(content, compactPreview), [compactPreview, content]);
+const MarkdownLiteRenderer = memo(function MarkdownLiteRenderer({ content, compactPreview = true, disablePreview = false, messageId }: { content: string; isStreaming?: boolean; compactPreview?: boolean; disablePreview?: boolean; messageId?: string | number }) {
+  const liteContent = useMemo(() => getCachedLiteParse(content, compactPreview, disablePreview), [compactPreview, content, disablePreview]);
   const blocks = liteContent.blocks;
   const lightweightInline = false;
   const profileBlockSummary = useMemo(() => {
@@ -302,9 +303,10 @@ const MarkdownLiteRenderer = memo(function MarkdownLiteRenderer({ content, compa
       messageId,
       parseMs: Number(liteContent.parseMs.toFixed(2)),
       compactPreview,
+      disablePreview,
       tableLines: liteContent.tableLines,
     });
-  }, [blocks.length, compactPreview, content.length, liteContent.codeBlocks, liteContent.isPreview, liteContent.parseMs, liteContent.tableLines, liteContent.wasCacheHit, messageId, profileBlockSummary]);
+  }, [blocks.length, compactPreview, content.length, disablePreview, liteContent.codeBlocks, liteContent.isPreview, liteContent.parseMs, liteContent.tableLines, liteContent.wasCacheHit, messageId, profileBlockSummary]);
 
   return (
     <div data-markdown-lite-renderer={liteContent.isPreview ? "stable-preview" : "full"}>

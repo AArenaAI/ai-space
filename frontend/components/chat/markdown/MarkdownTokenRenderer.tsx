@@ -73,7 +73,10 @@ export default function MarkdownTokenRenderer({
         }, TOKEN_UPGRADE_HEIGHT_GUARD_MS);
       }
     }
-    setRenderedBlockCount(Math.min(INITIAL_TOKEN_BLOCK_BUDGET, Math.max(next?.tokens.length || INITIAL_TOKEN_BLOCK_BUDGET, 1)));
+    const initialBlockCount = priorityHydrateRichText && !isStreaming
+      ? Math.max(next?.tokens.length || INITIAL_TOKEN_BLOCK_BUDGET, 1)
+      : Math.min(INITIAL_TOKEN_BLOCK_BUDGET, Math.max(next?.tokens.length || INITIAL_TOKEN_BLOCK_BUDGET, 1));
+    setRenderedBlockCount(initialBlockCount);
     setDoc(next);
   };
 

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType } from "react";
 import MarkdownPlainFallback from "./markdown/MarkdownPlainFallback";
 import MarkdownTokenRenderer from "./markdown/MarkdownTokenRenderer";
+import MarkdownLiteRenderer from "./MarkdownLiteRenderer";
 import { emitChatRenderProfileEvent } from "@/lib/chatRenderProfile";
 
 type MarkdownRendererProps = { content: string; isStreaming?: boolean; priorityHydrateRichText?: boolean; messageId?: string | number };
@@ -143,6 +144,16 @@ export function DeferredMarkdownRenderer({
       return;
     }
 
+    if (priorityHydrateRichText && !isStreaming && !complexity.isExtreme) {
+      if (!hasRenderedMarkdownRef.current) setShouldRenderMarkdown(false);
+      emitChatRenderProfileEvent("markdown-hydrate-stable-priority-lite", {
+        contentLength: content.length,
+        codeBlocks: complexity.codeBlocks,
+        tableLines: complexity.tableLines,
+      });
+      return;
+    }
+
     if (allowRichLiteFallback && complexity.isHeavy && !isStreaming) {
       if (!hasRenderedMarkdownRef.current) setShouldRenderMarkdown(false);
       emitChatRenderProfileEvent("markdown-hydrate-stable-rich-lite", {
@@ -257,6 +268,8 @@ export function DeferredMarkdownRenderer({
     <div ref={hostRef}>
       {shouldRenderMarkdown && Renderer ? (
         <Renderer content={content} isStreaming={isStreaming} priorityHydrateRichText={priorityHydrateRichText} messageId={messageId} />
+      ) : priorityHydrateRichText && !isStreaming && !complexity.isExtreme ? (
+        <MarkdownLiteRenderer content={content} compactPreview={false} disablePreview messageId={messageId} />
       ) : priorityHydrateRichText || allowRichLiteFallback || shouldUseRichLiteFallback(content, complexity) ? (
         <MarkdownTokenRenderer content={content} isStreaming={isStreaming} compactPreview={priorityHydrateRichText ? false : compactRichLitePreview} messageId={messageId} priorityHydrateRichText={priorityHydrateRichText} />
       ) : (
