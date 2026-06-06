@@ -9,6 +9,7 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -127,6 +128,12 @@ func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, 
 		}
 		return fallback, nil
 	}
+	if resp.Background {
+		body, err = waitForNotebookBackgroundAIResponse(ctx, aiService, body, generationType)
+		if err != nil {
+			return generatedNotebookArtifactDraft{}, err
+		}
+	}
 	draft, err := parseAINotebookArtifactResponse(body, fallback)
 	if err != nil {
 		if generationType == "mindmap" {
@@ -192,6 +199,79 @@ func buildNotebookMindmapAIMessages(notebookTitle string, sources []notebookGene
 	return []services.Message{
 		{Role: "system", Content: "You are an expert analyst creating dense NotebookLM-style mind maps from complete PDF text. Return valid JSON only; no markdown fences."},
 		{Role: "user", Content: b.String()},
+	}
+}
+
+func waitForNotebookBackgroundAIResponse(ctx context.Context, aiService chatAIService, body []byte, generationType string) ([]byte, error) {
+	responseID := extractNotebookAIResponseID(body)
+	if responseID == "" {
+		return nil, fmt.Errorf("模型后台任务缺少 response id，请重新生成")
+	}
+	deadline := time.Now().Add(notebookBackgroundWaitTimeout(generationType))
+	for attempt := 0; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		raw, err := aiService.RetrieveOpenAIResponse(ctx, responseID)
+		if err != nil {
+			return nil, fmt.Errorf("查询模型后台任务失败: %w", err)
+		}
+		status, _ := raw["status"].(string)
+		status = strings.TrimSpace(status)
+		if status == "completed" {
+			text := services.ExtractOpenAIResponseText(raw)
+			if strings.TrimSpace(text) == "" {
+				return nil, fmt.Errorf("模型后台任务已完成但未返回内容，请重新生成")
+			}
+			return []byte(text), nil
+		}
+		if status == "failed" || status == "cancelled" || status == "incomplete" {
+			return nil, fmt.Errorf("模型后台任务%s，请重新生成", notebookBackgroundStatusText(status))
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("思维导图仍在模型分析中，请稍后重新生成")
+		}
+		delay := time.Duration(2+attempt) * time.Second
+		if delay > 8*time.Second {
+			delay = 8 * time.Second
+		}
+		generationRetrySleep(delay)
+	}
+}
+
+func extractNotebookAIResponseID(body []byte) string {
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return ""
+	}
+	if id, ok := raw["id"].(string); ok {
+		return strings.TrimSpace(id)
+	}
+	if response, ok := raw["response"].(map[string]any); ok {
+		if id, ok := response["id"].(string); ok {
+			return strings.TrimSpace(id)
+		}
+	}
+	return ""
+}
+
+func notebookBackgroundWaitTimeout(generationType string) time.Duration {
+	if generationType == "mindmap" {
+		return 90 * time.Second
+	}
+	return 45 * time.Second
+}
+
+func notebookBackgroundStatusText(status string) string {
+	switch status {
+	case "failed":
+		return "失败"
+	case "cancelled":
+		return "已取消"
+	case "incomplete":
+		return "未完成"
+	default:
+		return status
 	}
 }
 

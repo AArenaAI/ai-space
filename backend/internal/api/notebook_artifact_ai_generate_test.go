@@ -7,14 +7,18 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeNotebookAIService struct {
-	response string
-	err      error
-	calls    int
-	model    string
-	messages []services.Message
+	response          string
+	err               error
+	background        bool
+	retrieveResponses []map[string]any
+	retrieveCalls     int
+	calls             int
+	model             string
+	messages          []services.Message
 }
 
 func (f *fakeNotebookAIService) ChatCompletion(ctx context.Context, model string, messages []services.Message, stream bool, reasoning bool, reasoningEffort services.ReasoningEffort, search bool, textFormat map[string]any) (*services.AICompletionResponse, error) {
@@ -25,15 +29,24 @@ func (f *fakeNotebookAIService) ChatCompletion(ctx context.Context, model string
 		return nil, f.err
 	}
 	return &services.AICompletionResponse{
-		Body:      io.NopCloser(strings.NewReader(f.response)),
-		ModelType: "test",
-		Provider:  "test",
-		Model:     model,
+		Body:       io.NopCloser(strings.NewReader(f.response)),
+		ModelType:  "test",
+		Provider:   "test",
+		Model:      model,
+		Background: f.background,
 	}, nil
 }
 
 func (f *fakeNotebookAIService) RetrieveOpenAIResponse(ctx context.Context, responseID string) (map[string]any, error) {
-	return nil, nil
+	f.retrieveCalls++
+	if len(f.retrieveResponses) == 0 {
+		return map[string]any{"status": "completed", "output_text": ""}, nil
+	}
+	idx := f.retrieveCalls - 1
+	if idx >= len(f.retrieveResponses) {
+		idx = len(f.retrieveResponses) - 1
+	}
+	return f.retrieveResponses[idx], nil
 }
 
 func TestBuildAINotebookArtifactDraftUsesAIJSON(t *testing.T) {
@@ -101,4 +114,37 @@ func TestBuildAINotebookMindmapRejectsInvalidAIInsteadOfFallback(t *testing.T) {
 	if err == nil {
 		t.Fatalf("mindmap should reject invalid AI output instead of saving fallback pseudo-map")
 	}
+}
+
+func TestBuildAINotebookMindmapWaitsForBackgroundResponse(t *testing.T) {
+	oldSleep := generationRetrySleep
+	generationRetrySleep = func(d time.Duration) {}
+	defer func() { generationRetrySleep = oldSleep }()
+
+	files := []models.File{
+		{ID: 1, Filename: "AI Space.pdf", ParseStatus: "done", EmbeddingStatus: "done", Summary: "产品定位", Content: "AI Space 是企业级多模型 AI 聚合平台。"},
+	}
+	ai := &fakeNotebookAIService{
+		response:   `{"id":"resp_test","status":"queued"}`,
+		background: true,
+		retrieveResponses: []map[string]any{
+			{"status": "queued"},
+			{"status": "completed", "output_text": validNotebookMindmapAIJSON()},
+		},
+	}
+
+	draft, err := buildAINotebookArtifactDraft(context.Background(), ai, "mindmap", "测试1", files, []uint{1}, "zh-CN")
+	if err != nil {
+		t.Fatalf("background mindmap should wait for completed output: %v", err)
+	}
+	if ai.retrieveCalls < 2 {
+		t.Fatalf("expected polling retrieve calls, got %d", ai.retrieveCalls)
+	}
+	if !strings.Contains(string(draft.Content), "Workspace进化路径") {
+		t.Fatalf("draft should use completed background output, got %s", string(draft.Content))
+	}
+}
+
+func validNotebookMindmapAIJSON() string {
+	return `{"title":"AI Space 思维导图","subtitle":"完整模型分析","content":{"nodes":[{"id":"root","label":"AI Space平台"},{"id":"branch-1","label":"产品定位"},{"id":"branch-1-1","label":"多模型聚合"},{"id":"branch-1-2","label":"知识工作台"},{"id":"branch-2","label":"已落地功能"},{"id":"branch-2-1","label":"图片生成编辑"},{"id":"branch-2-2","label":"技能系统"},{"id":"branch-2-3","label":"文件RAG解析"},{"id":"branch-3","label":"核心优势"},{"id":"branch-3-1","label":"品牌白标能力"},{"id":"branch-3-2","label":"稳定技术底座"},{"id":"branch-4","label":"技术架构特色"},{"id":"branch-4-1","label":"Go单二进制"},{"id":"branch-4-2","label":"Next前端"},{"id":"branch-5","label":"Workspace进化路径"},{"id":"branch-5-1","label":"结构化项目"}],"edges":[{"from":"root","to":"branch-1"},{"from":"branch-1","to":"branch-1-1"},{"from":"branch-1","to":"branch-1-2"},{"from":"root","to":"branch-2"},{"from":"branch-2","to":"branch-2-1"},{"from":"branch-2","to":"branch-2-2"},{"from":"branch-2","to":"branch-2-3"},{"from":"root","to":"branch-3"},{"from":"branch-3","to":"branch-3-1"},{"from":"branch-3","to":"branch-3-2"},{"from":"root","to":"branch-4"},{"from":"branch-4","to":"branch-4-1"},{"from":"branch-4","to":"branch-4-2"},{"from":"root","to":"branch-5"},{"from":"branch-5","to":"branch-5-1"}]}}`
 }
