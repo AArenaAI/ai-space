@@ -69,7 +69,7 @@ func buildGeneratedNotebookArtifactDraft(generationType string, notebookTitle st
 	if !ok {
 		return generatedNotebookArtifactDraft{}, fmt.Errorf("暂不支持这个生成类型")
 	}
-	sources := selectNotebookGenerationSources(files, selectedFileIDs)
+	sources := selectNotebookGenerationSources(files, selectedFileIDs, generationType)
 	if len(sources) == 0 {
 		return generatedNotebookArtifactDraft{}, fmt.Errorf("没有可用于生成的就绪资料")
 	}
@@ -110,7 +110,7 @@ func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, 
 	if aiService == nil {
 		return fallback, nil
 	}
-	sources := selectNotebookGenerationSources(files, selectedFileIDs)
+	sources := selectNotebookGenerationSources(files, selectedFileIDs, generationType)
 	messages := buildNotebookArtifactAIMessages(generationType, notebookTitle, sources, language)
 	resp, err := aiService.ChatCompletion(ctx, notebookArtifactAIModel(generationType), messages, false, false, "", false, nil)
 	if err != nil || resp == nil || resp.Body == nil {
@@ -149,7 +149,7 @@ func buildNotebookArtifactAIMessages(generationType string, notebookTitle string
 	if generationType == "table" {
 		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For table content must be {\"rows\":[{\"module\":string,\"capability\":string,\"status\":string,\"implementation\":string,\"value\":string,\"source\":string}]}. You MUST read the uploaded source text and extract a functional/specification table: each row is one product feature, capability, module, workflow, scenario, or business item described in the documents. Use columns as: module=模块名称, capability=核心功能, status=当前状态/成熟度, implementation=差异化竞争优势, value=对标产品/参照对象/适用场景, source=bracket citations like [1]. Do NOT create a file list, parse/index status checklist, or one row per file. If one document describes multiple functions, output multiple rows from that same document. Prefer 6-12 high-signal rows when enough content exists. Keep all cells grounded in the source text.\n")
 	} else if generationType == "mindmap" {
-		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For mindmap content must be {\"nodes\":[{\"id\":string,\"label\":string,\"summary\":string,\"source\":string}],\"edges\":[{\"from\":string,\"to\":string,\"label\":string}]}. You MUST deeply read and synthesize the uploaded source text, then draw a NotebookLM-style product/knowledge mind map, not a sentence list. Required structure: exactly one root node with id=root; 5-8 first-level branches that are clear sections/modules; each important branch has 2-5 second-level child nodes; add third-level nodes only when the source has concrete details. Good first-level branch examples for product documents: 产品定位, 已落地功能, 核心优势, 技术架构, 业务场景, 规划路线, 竞争壁垒, 风险与缺口. Node labels must be clean Chinese phrases of 2-18 characters when possible; never use broken OCR fragments, truncated words, ellipses, file names, raw sentences, parse/index status, or meaningless snippets. Summaries may contain one concise sentence. Use stable ids like root, branch-1, branch-1-1. Cite sources using bracket numbers such as [1]. If the source contains an existing feature table or product architecture, preserve that sectional structure.\n")
+		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For mindmap content must be {\"nodes\":[{\"id\":string,\"label\":string,\"summary\":string,\"source\":string}],\"edges\":[{\"from\":string,\"to\":string,\"label\":string}]}. You MUST first read the whole provided source text for each file (it may be a long PDF extract), reconstruct the document outline, then draw a NotebookLM-style product/knowledge mind map, not a sentence list. Required structure: exactly one root node with id=root; 5-8 first-level branches that are clear sections/modules; each important branch has 2-5 second-level child nodes; add third-level nodes only when the source has concrete details. Good first-level branch examples for product documents: 产品定位, 已落地功能, 核心优势, 技术架构, 业务场景, 规划路线, 竞争壁垒, 风险与缺口. Node labels must be clean Chinese phrases of 2-18 characters when possible; never use broken OCR fragments, truncated words, ellipses, file names, raw sentences, parse/index status, or meaningless snippets. Summaries may contain one concise sentence. Use stable ids like root, branch-1, branch-1-1. Cite sources using bracket numbers such as [1]. If the source contains an existing feature table or product architecture, preserve that sectional structure.\n")
 	} else {
 		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For summary/faq/briefing content must be {\"sections\":[{\"heading\":string,\"body\":string,\"bullets\":[string]}]}. For mindmap content must be {\"nodes\":[{\"id\":string,\"label\":string,\"summary\":string,\"source\":string}],\"edges\":[{\"from\":string,\"to\":string,\"label\":string}]}. Cite sources using bracket numbers such as [1].")
 	}
@@ -218,7 +218,7 @@ func notebookMindmapDraftLooksUseful(content json.RawMessage) bool {
 	if err := json.Unmarshal(content, &payload); err != nil {
 		return false
 	}
-	if len(payload.Nodes) < 10 || len(payload.Edges) < 9 {
+	if len(payload.Nodes) < 14 || len(payload.Edges) < 13 {
 		return false
 	}
 	childrenByParent := map[string]int{}
@@ -237,7 +237,13 @@ func notebookMindmapDraftLooksUseful(content json.RawMessage) bool {
 			childrenByParent[edge.From]++
 		}
 	}
-	return childrenByParent["root"] >= 4 && cleanLabels >= len(payload.Nodes)*3/4
+	nestedBranches := 0
+	for parent, count := range childrenByParent {
+		if parent != "root" && count > 0 {
+			nestedBranches++
+		}
+	}
+	return childrenByParent["root"] >= 5 && nestedBranches >= 3 && cleanLabels >= len(payload.Nodes)*3/4
 }
 
 func looksLikeCleanNotebookMindmapLabel(label string) bool {
@@ -273,7 +279,7 @@ func notebookArtifactTypeForGeneration(generationType string) (string, bool) {
 	}
 }
 
-func selectNotebookGenerationSources(files []models.File, selectedFileIDs []uint) []notebookGenerationSource {
+func selectNotebookGenerationSources(files []models.File, selectedFileIDs []uint, generationType string) []notebookGenerationSource {
 	selected := map[uint]bool{}
 	for _, id := range selectedFileIDs {
 		if id > 0 {
@@ -294,7 +300,7 @@ func selectNotebookGenerationSources(files []models.File, selectedFileIDs []uint
 		if excerpt == "" {
 			excerpt = summary
 		}
-		excerpt = truncateNotebookRunes(excerpt, 8000, "")
+		excerpt = truncateNotebookRunes(excerpt, notebookGenerationExcerptLimit(generationType), "")
 		if summary == "" {
 			summary = excerpt
 			summary = truncateNotebookRunes(summary, 220, "")
@@ -309,6 +315,17 @@ func selectNotebookGenerationSources(files []models.File, selectedFileIDs []uint
 		})
 	}
 	return sources
+}
+
+func notebookGenerationExcerptLimit(generationType string) int {
+	switch generationType {
+	case "mindmap":
+		return 60000
+	case "table":
+		return 16000
+	default:
+		return 10000
+	}
 }
 
 func isNotebookGenerationFileReady(file models.File) bool {

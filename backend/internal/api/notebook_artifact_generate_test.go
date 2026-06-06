@@ -144,6 +144,19 @@ func TestNotebookMindmapLabelCleaningIsRuneSafe(t *testing.T) {
 	}
 }
 
+func TestNotebookMindmapUsesLongPdfContext(t *testing.T) {
+	longPrefix := strings.Repeat("前半段内容。", 1200)
+	lateSection := "## 规划中稀缺能力\nWorkspace 进化路径、专业化 Agent、模型蒸馏、OpenAI API 兼容网关。"
+	files := []models.File{{ID: 1, Filename: "AI Space.pdf", ParseStatus: "done", EmbeddingStatus: "done", Content: longPrefix + lateSection}}
+	sources := selectNotebookGenerationSources(files, nil, "mindmap")
+	if len(sources) != 1 {
+		t.Fatalf("expected one source, got %d", len(sources))
+	}
+	if !strings.Contains(sources[0].Excerpt, lateSection) {
+		t.Fatalf("mindmap excerpt should include late PDF sections beyond the old 8000-char window")
+	}
+}
+
 func containsAll(text string, parts []string) bool {
 	for _, part := range parts {
 		if !stringsContains(text, part) {
