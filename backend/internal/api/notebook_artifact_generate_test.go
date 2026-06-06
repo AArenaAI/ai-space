@@ -106,10 +106,11 @@ func TestBuildGeneratedNotebookArtifactDraftSupportsMindmapAndRejectsSlides(t *t
 		t.Fatalf("mindmap content should be valid JSON: %v", err)
 	}
 	if len(content.Nodes) < 3 || len(content.Edges) < 2 {
-		t.Fatalf("mindmap should include root/source nodes and edges, got nodes=%d edges=%d content=%s", len(content.Nodes), len(content.Edges), string(draft.Content))
+		t.Fatalf("mindmap should include root, topic nodes and edges, got nodes=%d edges=%d content=%s", len(content.Nodes), len(content.Edges), string(draft.Content))
 	}
-	if !strings.Contains(string(draft.Content), "产品方案.md") || !strings.Contains(string(draft.Content), "技术架构.md") {
-		t.Fatalf("mindmap content should include source names, got %s", string(draft.Content))
+	encoded := string(draft.Content)
+	if !strings.Contains(encoded, `"from":"root"`) || !strings.Contains(encoded, `"label":"主题"`) || !strings.Contains(encoded, `[1]`) {
+		t.Fatalf("mindmap should organize source content into cited topic branches, got %s", encoded)
 	}
 	if _, err := buildGeneratedNotebookArtifactDraft("slides", "知识库", readyFiles, nil, "zh-CN"); err == nil {
 		t.Fatalf("slides generation should remain unsupported")

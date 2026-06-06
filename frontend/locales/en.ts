@@ -217,6 +217,7 @@ const translations: Record<string, string> = {
   "notebook.studio.downloadSuccess": "Output file download started",
   "notebook.studio.basedOnSources": "Based on {count} sources",
   "notebook.studio.generatingTable": "Generating data table...",
+  "notebook.studio.generatingMindmap": "Generating mind map...",
   "notebook.studio.backToOutputs": "Back to outputs",
   "notebook.studio.viewSources": "View {count} sources",
   "notebook.studio.moreActions": "More actions",

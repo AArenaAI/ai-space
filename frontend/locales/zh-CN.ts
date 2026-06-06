@@ -217,6 +217,7 @@ const translations: Record<string, string> = {
   "notebook.studio.downloadSuccess": "输出文件已开始下载",
   "notebook.studio.basedOnSources": "基于 {count} 个来源",
   "notebook.studio.generatingTable": "生成数据表格...",
+  "notebook.studio.generatingMindmap": "生成思维导图...",
   "notebook.studio.backToOutputs": "返回输出文件",
   "notebook.studio.viewSources": "查看 {count} 个来源",
   "notebook.studio.moreActions": "更多操作",

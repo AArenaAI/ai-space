@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { BarChart3, ChevronLeft, ChevronRight, Copy, Download, ExternalLink, FileQuestion, FileText, Layers3, Loader2, Map, MoreHorizontal, Pencil, Presentation, RefreshCw, Sparkles, Table2, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import { BarChart3, ChevronLeft, ChevronRight, Copy, Download, ExternalLink, FileQuestion, FileText, Layers3, Loader2, Map as MapIcon, Minus, MoreHorizontal, Pencil, Plus, Presentation, RefreshCw, Sparkles, Table2, Trash2 } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -85,7 +85,7 @@ const actionIconMap: Record<NotebookStudioActionId, typeof Table2> = {
   summary: FileText,
   faq: FileQuestion,
   briefing: BarChart3,
-  mindmap: Map,
+  mindmap: MapIcon,
   slides: Presentation,
 };
 
@@ -94,7 +94,7 @@ const artifactIconMap: Record<NotebookStudioArtifact["type"], typeof Table2> = {
   summary: FileText,
   faq: FileQuestion,
   briefing: BarChart3,
-  mindmap: Map,
+  mindmap: MapIcon,
 };
 
 function formatTime(value: string) {
@@ -157,37 +157,69 @@ function renderTableArtifact(artifact: Extract<NotebookStudioArtifact, { type: "
   );
 }
 
-function renderMindmapArtifact(artifact: Extract<NotebookStudioArtifact, { type: "mindmap" }>) {
-  const root = artifact.nodes.find((node) => node.id === "root") || artifact.nodes[0];
-  const childNodes = artifact.nodes.filter((node) => node.id !== root?.id);
+type MindmapBranch = NotebookStudioMindmapNode & { children: MindmapBranch[] };
+
+function buildMindmapTree(artifact: Extract<NotebookStudioArtifact, { type: "mindmap" }>) {
+  const nodes = new Map(artifact.nodes.map((node) => [node.id, { ...node, children: [] as MindmapBranch[] }]));
+  const root = nodes.get("root") || nodes.values().next().value;
+  artifact.edges.forEach((edge) => {
+    const parent = nodes.get(edge.from);
+    const child = nodes.get(edge.to);
+    if (parent && child && parent.id !== child.id) parent.children.push(child);
+  });
+  return root as MindmapBranch | undefined;
+}
+
+function MindmapArtifactView({ artifact }: { artifact: Extract<NotebookStudioArtifact, { type: "mindmap" }> }) {
+  const root = useMemo(() => buildMindmapTree(artifact), [artifact]);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set([root?.id || "root"]));
+  const toggle = (id: string) => setExpandedIds((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  if (!root) return null;
   return (
-    <div className="space-y-3 p-4">
-      {root && (
-        <div className="rounded-3xl border border-brand-border bg-brand-muted/30 p-4 text-center">
-          <div className="text-sm font-semibold text-text-primary">{root.label}</div>
-          {root.summary && <p className="mt-2 text-xs leading-5 text-text-secondary">{root.summary}</p>}
+    <div className="relative min-h-0 flex-1 overflow-auto rounded-xl border border-surface-border bg-white p-4 dark:bg-surface-card">
+      <div className="absolute left-3 top-3 z-10 flex flex-col overflow-hidden rounded-xl border border-surface-border bg-surface-card/95 shadow-sm">
+        <button className="p-2 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" type="button"><Plus className="h-3.5 w-3.5" /></button>
+        <button className="border-t border-surface-border p-2 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" type="button"><Minus className="h-3.5 w-3.5" /></button>
+        <button className="border-t border-surface-border p-2 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" type="button"><Download className="h-3.5 w-3.5" /></button>
+      </div>
+      <div className="flex min-w-[920px] items-center justify-center px-12 py-10">
+        <MindmapNode node={root} depth={0} expandedIds={expandedIds} onToggle={toggle} />
+      </div>
+    </div>
+  );
+}
+
+function MindmapNode({ node, depth, expandedIds, onToggle }: { node: MindmapBranch; depth: number; expandedIds: Set<string>; onToggle: (id: string) => void }) {
+  const hasChildren = node.children.length > 0;
+  const expanded = expandedIds.has(node.id);
+  const palette = depth === 0 ? "bg-violet-100 text-violet-950 border-violet-200" : depth === 1 ? "bg-sky-100 text-sky-950 border-sky-200" : "bg-emerald-100 text-emerald-950 border-emerald-200";
+  return (
+    <div className="flex items-center">
+      <div className="relative flex items-center">
+        <div className={cn("min-w-[180px] max-w-[240px] rounded-2xl border px-4 py-3 text-center shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md", palette)}>
+          <div className="text-sm font-semibold leading-5">{node.label}</div>
+          {depth > 0 && node.source && <div className="mt-1 text-[11px] opacity-70">{node.source}</div>}
+        </div>
+        {hasChildren && (
+          <button type="button" onClick={() => onToggle(node.id)} className="absolute -right-3 top-1/2 z-10 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border border-surface-border bg-surface-card text-text-secondary shadow-sm transition hover:scale-110 hover:text-brand" aria-expanded={expanded}>
+            <ChevronRight className={cn("h-3.5 w-3.5 transition-transform duration-300", expanded && "rotate-180")} />
+          </button>
+        )}
+      </div>
+      {hasChildren && (
+        <div className={cn("grid transition-all duration-300 ease-out", expanded ? "grid-cols-[42px_auto] opacity-100" : "grid-cols-[0px_auto] opacity-0")}>
+          <div className="relative h-full min-h-20 overflow-hidden">
+            <div className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-violet-200" />
+          </div>
+          <div className={cn("space-y-4 overflow-hidden transition-all duration-300", expanded ? "translate-x-0" : "-translate-x-4 pointer-events-none")}>
+            {node.children.map((child) => <MindmapNode key={child.id} node={child} depth={depth + 1} expandedIds={expandedIds} onToggle={onToggle} />)}
+          </div>
         </div>
       )}
-      <div className="space-y-2.5">
-        {childNodes.map((node) => {
-          const incoming = artifact.edges.find((edge) => edge.to === node.id);
-          return (
-            <div key={node.id} className="rounded-2xl border border-surface-border bg-surface-elevated/60 p-3">
-              <div className="flex items-start gap-2">
-                <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-violet-500" />
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-semibold text-text-primary">{node.label}</div>
-                  {node.summary && <p className="mt-1.5 text-xs leading-5 text-text-secondary">{node.summary}</p>}
-                  <div className="mt-2 flex items-center gap-2 text-[11px] text-text-tertiary">
-                    {incoming?.label && <span>{incoming.label}</span>}
-                    {node.source && <span className="text-brand">{node.source}</span>}
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }
@@ -197,21 +229,23 @@ function renderActiveArtifact(artifact: NotebookStudioArtifact, t: (key: string,
     case "table":
       return renderTableArtifact(artifact, t, expanded);
     case "mindmap":
-      return renderMindmapArtifact(artifact);
+      return <MindmapArtifactView artifact={artifact} />;
     default:
       return renderTextArtifact(artifact);
   }
 }
 
-function GeneratingTableCard({ sourceCount, t }: { sourceCount: number; t: (key: string, params?: Record<string, string>) => string }) {
+function GeneratingStudioCard({ type, sourceCount, t }: { type: NotebookStudioActionId; sourceCount: number; t: (key: string, params?: Record<string, string>) => string }) {
+  const titleKey = type === "mindmap" ? "notebook.studio.generatingMindmap" : "notebook.studio.generatingTable";
   return (
     <div className="mb-3 rounded-2xl border border-surface-border bg-surface-card px-3 py-3 shadow-sm">
       <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-surface-elevated text-brand">
-          <RefreshCw className="h-5 w-5 animate-spin" />
+        <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-surface-elevated text-brand">
+          <RefreshCw className="absolute h-5 w-5 animate-spin" />
+          <RefreshCw className="h-3.5 w-3.5 animate-[spin_1.2s_linear_infinite_reverse] opacity-70" />
         </div>
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-text-primary">{t("notebook.studio.generatingTable")}</div>
+          <div className="text-sm font-semibold text-text-primary">{t(titleKey)}</div>
           <div className="mt-1 text-xs text-text-tertiary">{t("notebook.studio.basedOnSources", { count: String(sourceCount) })}</div>
         </div>
       </div>
@@ -366,7 +400,7 @@ export function NotebookStudioPanel({
           </div>
           <MoreHorizontal className="h-4 w-4 text-text-tertiary" />
         </div>
-        {generatingType === "table" && <div className="p-4 pb-0"><GeneratingTableCard sourceCount={selectedSourceCount} t={t} /></div>}
+        {(generatingType === "table" || generatingType === "mindmap") && <div className="p-4 pb-0"><GeneratingStudioCard type={generatingType} sourceCount={selectedSourceCount} t={t} /></div>}
         {artifacts.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-card text-text-tertiary"><Layers3 className="h-5 w-5" /></div>

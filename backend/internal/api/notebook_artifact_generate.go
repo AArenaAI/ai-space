@@ -144,6 +144,8 @@ func buildNotebookArtifactAIMessages(generationType string, notebookTitle string
 	}
 	if generationType == "table" {
 		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For table content must be {\"rows\":[{\"module\":string,\"capability\":string,\"status\":string,\"implementation\":string,\"value\":string,\"source\":string}]}. You MUST read the uploaded source text and extract a functional/specification table: each row is one product feature, capability, module, workflow, scenario, or business item described in the documents. Use columns as: module=模块名称, capability=核心功能, status=当前状态/成熟度, implementation=差异化竞争优势, value=对标产品/参照对象/适用场景, source=bracket citations like [1]. Do NOT create a file list, parse/index status checklist, or one row per file. If one document describes multiple functions, output multiple rows from that same document. Prefer 6-12 high-signal rows when enough content exists. Keep all cells grounded in the source text.\n")
+	} else if generationType == "mindmap" {
+		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For mindmap content must be {\"nodes\":[{\"id\":string,\"label\":string,\"summary\":string,\"source\":string}],\"edges\":[{\"from\":string,\"to\":string,\"label\":string}]}. Create a NotebookLM-style mind map: one root node for the notebook topic, 4-7 first-level branches for main themes/concepts, and 1-4 second-level child nodes under important branches. Each node label should be concise, source-grounded, and useful for exploration. Use stable simple ids such as root, topic-1, topic-1-1. Cite sources using bracket numbers such as [1]. Do NOT create a flat file list.\n")
 	} else {
 		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For summary/faq/briefing content must be {\"sections\":[{\"heading\":string,\"body\":string,\"bullets\":[string]}]}. For mindmap content must be {\"nodes\":[{\"id\":string,\"label\":string,\"summary\":string,\"source\":string}],\"edges\":[{\"from\":string,\"to\":string,\"label\":string}]}. Cite sources using bracket numbers such as [1].")
 	}
@@ -642,17 +644,41 @@ func truncateNotebookTableCell(value string, limit int) string {
 }
 
 func buildNotebookGeneratedMindmap(notebookTitle string, sources []notebookGenerationSource) map[string]any {
-	nodes := []notebookStudioMindmapNode{{ID: "root", Label: notebookTitle, Summary: fmt.Sprintf("基于 %d 个资料源生成的知识结构", len(sources))}}
-	edges := make([]notebookStudioMindmapEdge, 0, len(sources)*2)
+	nodes := []notebookStudioMindmapNode{{ID: "root", Label: truncateNotebookMindmapLabel(notebookTitle), Summary: fmt.Sprintf("基于 %d 个资料源生成的主题结构", len(sources))}}
+	edges := make([]notebookStudioMindmapEdge, 0, len(sources)*4)
+	seenTopics := map[string]bool{}
 	for _, source := range sources {
-		sourceID := fmt.Sprintf("source-%d", source.Index)
-		summary := fallbackText(source.Summary, source.Excerpt)
-		nodes = append(nodes, notebookStudioMindmapNode{ID: sourceID, Label: source.File.Filename, Summary: summary, Source: fmt.Sprintf("[%d]", source.Index)})
-		edges = append(edges, notebookStudioMindmapEdge{From: "root", To: sourceID, Label: "资料源"})
-		if strings.TrimSpace(summary) != "" {
-			ideaID := fmt.Sprintf("idea-%d", source.Index)
-			nodes = append(nodes, notebookStudioMindmapNode{ID: ideaID, Label: truncateNotebookMindmapLabel(summary), Summary: source.Excerpt, Source: fmt.Sprintf("[%d]", source.Index)})
-			edges = append(edges, notebookStudioMindmapEdge{From: sourceID, To: ideaID, Label: "关键要点"})
+		blocks := splitNotebookFeatureBlocks(fallbackText(source.Excerpt, source.Summary))
+		if len(blocks) == 0 {
+			blocks = []notebookFeatureBlock{{title: notebookTableTopic(source), body: fallbackText(source.Summary, source.Excerpt)}}
+		}
+		branchCount := 0
+		for _, block := range blocks {
+			if branchCount >= 6 {
+				break
+			}
+			topic := truncateNotebookMindmapLabel(fallbackText(block.title, notebookTableTopic(source)))
+			if topic == "" || seenTopics[topic] {
+				continue
+			}
+			seenTopics[topic] = true
+			branchCount++
+			topicID := fmt.Sprintf("topic-%d-%d", source.Index, branchCount)
+			nodes = append(nodes, notebookStudioMindmapNode{ID: topicID, Label: topic, Summary: truncateNotebookMindmapSummary(fallbackText(block.body, source.Summary)), Source: fmt.Sprintf("[%d]", source.Index)})
+			edges = append(edges, notebookStudioMindmapEdge{From: "root", To: topicID, Label: "主题"})
+			childCount := 0
+			for _, sentence := range splitNotebookSentences(block.body) {
+				if childCount >= 3 {
+					break
+				}
+				if len([]rune(sentence)) < 8 {
+					continue
+				}
+				childCount++
+				childID := fmt.Sprintf("%s-%d", topicID, childCount)
+				nodes = append(nodes, notebookStudioMindmapNode{ID: childID, Label: truncateNotebookMindmapLabel(inferNotebookFeatureTitle(sentence)), Summary: truncateNotebookMindmapSummary(sentence), Source: fmt.Sprintf("[%d]", source.Index)})
+				edges = append(edges, notebookStudioMindmapEdge{From: topicID, To: childID, Label: "要点"})
+			}
 		}
 	}
 	return map[string]any{"nodes": nodes, "edges": edges}
@@ -664,6 +690,14 @@ func truncateNotebookMindmapLabel(value string) string {
 		return value
 	}
 	return value[:36] + "…"
+}
+
+func truncateNotebookMindmapSummary(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= 120 {
+		return value
+	}
+	return value[:120] + "…"
 }
 
 func buildNotebookGeneratedTextSections(generationType string, notebookTitle string, sources []notebookGenerationSource, language string) []notebookStudioTextSection {
