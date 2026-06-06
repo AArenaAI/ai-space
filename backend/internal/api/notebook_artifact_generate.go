@@ -9,6 +9,7 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 type generatedNotebookArtifactDraft struct {
@@ -127,6 +128,9 @@ func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, 
 	if generationType == "table" && !notebookTableDraftLooksUseful(draft.Content) {
 		return fallback, nil
 	}
+	if generationType == "mindmap" && !notebookMindmapDraftLooksUseful(draft.Content) {
+		return fallback, nil
+	}
 	return draft, nil
 }
 
@@ -145,7 +149,7 @@ func buildNotebookArtifactAIMessages(generationType string, notebookTitle string
 	if generationType == "table" {
 		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For table content must be {\"rows\":[{\"module\":string,\"capability\":string,\"status\":string,\"implementation\":string,\"value\":string,\"source\":string}]}. You MUST read the uploaded source text and extract a functional/specification table: each row is one product feature, capability, module, workflow, scenario, or business item described in the documents. Use columns as: module=模块名称, capability=核心功能, status=当前状态/成熟度, implementation=差异化竞争优势, value=对标产品/参照对象/适用场景, source=bracket citations like [1]. Do NOT create a file list, parse/index status checklist, or one row per file. If one document describes multiple functions, output multiple rows from that same document. Prefer 6-12 high-signal rows when enough content exists. Keep all cells grounded in the source text.\n")
 	} else if generationType == "mindmap" {
-		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For mindmap content must be {\"nodes\":[{\"id\":string,\"label\":string,\"summary\":string,\"source\":string}],\"edges\":[{\"from\":string,\"to\":string,\"label\":string}]}. Create a NotebookLM-style mind map: one root node for the notebook topic, 4-7 first-level branches for main themes/concepts, and 1-4 second-level child nodes under important branches. Each node label should be concise, source-grounded, and useful for exploration. Use stable simple ids such as root, topic-1, topic-1-1. Cite sources using bracket numbers such as [1]. Do NOT create a flat file list.\n")
+		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For mindmap content must be {\"nodes\":[{\"id\":string,\"label\":string,\"summary\":string,\"source\":string}],\"edges\":[{\"from\":string,\"to\":string,\"label\":string}]}. You MUST deeply read and synthesize the uploaded source text, then draw a NotebookLM-style product/knowledge mind map, not a sentence list. Required structure: exactly one root node with id=root; 5-8 first-level branches that are clear sections/modules; each important branch has 2-5 second-level child nodes; add third-level nodes only when the source has concrete details. Good first-level branch examples for product documents: 产品定位, 已落地功能, 核心优势, 技术架构, 业务场景, 规划路线, 竞争壁垒, 风险与缺口. Node labels must be clean Chinese phrases of 2-18 characters when possible; never use broken OCR fragments, truncated words, ellipses, file names, raw sentences, parse/index status, or meaningless snippets. Summaries may contain one concise sentence. Use stable ids like root, branch-1, branch-1-1. Cite sources using bracket numbers such as [1]. If the source contains an existing feature table or product architecture, preserve that sectional structure.\n")
 	} else {
 		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For summary/faq/briefing content must be {\"sections\":[{\"heading\":string,\"body\":string,\"bullets\":[string]}]}. For mindmap content must be {\"nodes\":[{\"id\":string,\"label\":string,\"summary\":string,\"source\":string}],\"edges\":[{\"from\":string,\"to\":string,\"label\":string}]}. Cite sources using bracket numbers such as [1].")
 	}
@@ -175,7 +179,7 @@ func parseAINotebookArtifactResponse(body []byte, fallback generatedNotebookArti
 }
 
 func notebookArtifactAIModel(generationType string) string {
-	if generationType == "table" {
+	if generationType == "table" || generationType == "mindmap" {
 		return "gpt-5.5"
 	}
 	return "gpt-5.4-mini"
@@ -204,6 +208,58 @@ func notebookTableDraftLooksUseful(content json.RawMessage) bool {
 		}
 	}
 	return contentRows >= len(payload.Rows)/2+1
+}
+
+func notebookMindmapDraftLooksUseful(content json.RawMessage) bool {
+	var payload struct {
+		Nodes []notebookStudioMindmapNode `json:"nodes"`
+		Edges []notebookStudioMindmapEdge `json:"edges"`
+	}
+	if err := json.Unmarshal(content, &payload); err != nil {
+		return false
+	}
+	if len(payload.Nodes) < 10 || len(payload.Edges) < 9 {
+		return false
+	}
+	childrenByParent := map[string]int{}
+	validNodeIDs := map[string]bool{}
+	cleanLabels := 0
+	for _, node := range payload.Nodes {
+		id := strings.TrimSpace(node.ID)
+		label := strings.TrimSpace(node.Label)
+		validNodeIDs[id] = true
+		if id != "" && looksLikeCleanNotebookMindmapLabel(label) {
+			cleanLabels++
+		}
+	}
+	for _, edge := range payload.Edges {
+		if validNodeIDs[edge.From] && validNodeIDs[edge.To] {
+			childrenByParent[edge.From]++
+		}
+	}
+	return childrenByParent["root"] >= 4 && cleanLabels >= len(payload.Nodes)*3/4
+}
+
+func looksLikeCleanNotebookMindmapLabel(label string) bool {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return false
+	}
+	runes := []rune(label)
+	if len(runes) > 32 {
+		return false
+	}
+	badSignals := []string{"�", "...", "…", "parse_status", "embedding_status", ".pdf", ".doc", "文件状态", "资料源", "暂无摘要"}
+	if containsAnyNotebookText(label, badSignals) {
+		return false
+	}
+	letters := 0
+	for _, r := range runes {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			letters++
+		}
+	}
+	return letters >= 2
 }
 
 func notebookArtifactTypeForGeneration(generationType string) (string, bool) {
@@ -238,14 +294,10 @@ func selectNotebookGenerationSources(files []models.File, selectedFileIDs []uint
 		if excerpt == "" {
 			excerpt = summary
 		}
-		if len(excerpt) > 8000 {
-			excerpt = excerpt[:8000]
-		}
+		excerpt = truncateNotebookRunes(excerpt, 8000, "")
 		if summary == "" {
 			summary = excerpt
-			if len(summary) > 220 {
-				summary = summary[:220]
-			}
+			summary = truncateNotebookRunes(summary, 220, "")
 		}
 		sources = append(sources, notebookGenerationSource{
 			Index:    len(sources) + 1,
@@ -657,7 +709,7 @@ func buildNotebookGeneratedMindmap(notebookTitle string, sources []notebookGener
 			if branchCount >= 6 {
 				break
 			}
-			topic := truncateNotebookMindmapLabel(fallbackText(block.title, notebookTableTopic(source)))
+			topic := cleanNotebookMindmapLabel(fallbackText(block.title, notebookTableTopic(source)))
 			if topic == "" || seenTopics[topic] {
 				continue
 			}
@@ -676,7 +728,11 @@ func buildNotebookGeneratedMindmap(notebookTitle string, sources []notebookGener
 				}
 				childCount++
 				childID := fmt.Sprintf("%s-%d", topicID, childCount)
-				nodes = append(nodes, notebookStudioMindmapNode{ID: childID, Label: truncateNotebookMindmapLabel(inferNotebookFeatureTitle(sentence)), Summary: truncateNotebookMindmapSummary(sentence), Source: fmt.Sprintf("[%d]", source.Index)})
+				childLabel := cleanNotebookMindmapLabel(inferNotebookFeatureTitle(sentence))
+				if childLabel == "" {
+					continue
+				}
+				nodes = append(nodes, notebookStudioMindmapNode{ID: childID, Label: childLabel, Summary: truncateNotebookMindmapSummary(sentence), Source: fmt.Sprintf("[%d]", source.Index)})
 				edges = append(edges, notebookStudioMindmapEdge{From: topicID, To: childID, Label: "要点"})
 			}
 		}
@@ -684,20 +740,30 @@ func buildNotebookGeneratedMindmap(notebookTitle string, sources []notebookGener
 	return map[string]any{"nodes": nodes, "edges": edges}
 }
 
-func truncateNotebookMindmapLabel(value string) string {
+func truncateNotebookRunes(value string, limit int, suffix string) string {
 	value = strings.TrimSpace(value)
-	if len(value) <= 36 {
+	runes := []rune(value)
+	if limit <= 0 || len(runes) <= limit {
 		return value
 	}
-	return value[:36] + "…"
+	return string(runes[:limit]) + suffix
+}
+
+func truncateNotebookMindmapLabel(value string) string {
+	return truncateNotebookRunes(value, 36, "")
+}
+
+func cleanNotebookMindmapLabel(value string) string {
+	value = truncateNotebookMindmapLabel(value)
+	value = strings.Trim(value, " 	\r\n-—：:，,。；;·|[]（）()")
+	if !looksLikeCleanNotebookMindmapLabel(value) {
+		return ""
+	}
+	return value
 }
 
 func truncateNotebookMindmapSummary(value string) string {
-	value = strings.TrimSpace(value)
-	if len(value) <= 120 {
-		return value
-	}
-	return value[:120] + "…"
+	return truncateNotebookRunes(value, 120, "…")
 }
 
 func buildNotebookGeneratedTextSections(generationType string, notebookTitle string, sources []notebookGenerationSource, language string) []notebookStudioTextSection {

@@ -82,8 +82,8 @@ func TestBuildGeneratedNotebookArtifactDraftBuildsDataTableFromSourceContent(t *
 
 func TestBuildGeneratedNotebookArtifactDraftSupportsMindmapAndRejectsSlides(t *testing.T) {
 	readyFiles := []models.File{
-		{ID: 1, Filename: "产品方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "产品定位", Content: "AI Space 是知识工作台。"},
-		{ID: 2, Filename: "技术架构.md", ParseStatus: "done", EmbeddingStatus: "skipped", Summary: "技术架构", Content: "Notebook 通过资料、问答和 Studio 输出组织知识。"},
+		{ID: 1, Filename: "产品方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "产品定位", Content: "## 产品定位\nAI Space 是企业级多模型 AI 聚合平台，支持品牌白标和统一模型调用。\n## 已落地功能\n多模型聊天、图片生成、图片编辑、PPT 生成、文件 RAG 解析、积分计费。\n## 核心优势\n统一接入 OpenAI、Claude、Gemini、DeepSeek，支持企业定制。"},
+		{ID: 2, Filename: "技术架构.md", ParseStatus: "done", EmbeddingStatus: "skipped", Summary: "技术架构", Content: "## 技术架构\n前端使用 Next.js，后端使用 Go 单二进制，持久层兼容 SQLite 和 PostgreSQL。\n## 规划路线\nWorkspace 容器、上下文感知 Agent、专业化 Agent、模型蒸馏。\n## 竞争壁垒\n白标平台、能力增强、RAG、图片工具和低成本部署。"},
 	}
 	draft, err := buildGeneratedNotebookArtifactDraft("mindmap", "知识库", readyFiles, nil, "zh-CN")
 	if err != nil {
@@ -121,6 +121,26 @@ func TestBuildGeneratedNotebookArtifactDraftRejectsEmptySources(t *testing.T) {
 	failedFiles := []models.File{{ID: 2, Filename: "失败.pdf", ParseStatus: "error", EmbeddingStatus: "pending", Content: "失败"}}
 	if _, err := buildGeneratedNotebookArtifactDraft("summary", "知识库", failedFiles, nil, "zh-CN"); err == nil {
 		t.Fatalf("generation without ready sources should fail")
+	}
+}
+
+func TestNotebookMindmapUsesStrongModelAndRejectsWeakOutputs(t *testing.T) {
+	if got := notebookArtifactAIModel("mindmap"); got != "gpt-5.5" {
+		t.Fatalf("mindmap should use strong model, got %s", got)
+	}
+	weak := json.RawMessage(`{"nodes":[{"id":"root","label":"知识库"},{"id":"a","label":"乱码�..."}],"edges":[{"from":"root","to":"a"}]}`)
+	if notebookMindmapDraftLooksUseful(weak) {
+		t.Fatalf("mindmap quality gate should reject short or garbled outputs")
+	}
+}
+
+func TestNotebookMindmapLabelCleaningIsRuneSafe(t *testing.T) {
+	label := truncateNotebookMindmapLabel("企业级多模型聚合平台知识工作台能力结构")
+	if strings.Contains(label, "�") || !strings.Contains(label, "企业级") {
+		t.Fatalf("label truncation should be UTF-8/rune safe, got %q", label)
+	}
+	if cleaned := cleanNotebookMindmapLabel("乱码�..."); cleaned != "" {
+		t.Fatalf("garbled labels should be removed, got %q", cleaned)
 	}
 }
 
