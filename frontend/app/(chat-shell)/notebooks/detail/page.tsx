@@ -185,7 +185,7 @@ function NotebookDetailContent() {
       const persisted = await fetchNotebookArtifacts(notebookId);
       const next = persisted.map(toStudioArtifact).filter((item): item is NotebookStudioArtifact => Boolean(item));
       setStudioArtifacts(next);
-      setActiveStudioArtifactId((prev) => (prev && next.some((item) => item.id === prev) ? prev : next[0]?.id || null));
+      setActiveStudioArtifactId((prev) => (prev && next.some((item) => item.id === prev) ? prev : null));
     } catch (error) {
       showNotebookError(error, t("notebook.studio.loadFailed"));
     }
