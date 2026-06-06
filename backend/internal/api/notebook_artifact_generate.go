@@ -207,6 +207,7 @@ func waitForNotebookBackgroundAIResponse(ctx context.Context, aiService chatAISe
 	if responseID == "" {
 		return nil, fmt.Errorf("模型后台任务缺少 response id，请重新生成")
 	}
+	fmt.Printf("[Notebook Artifact] waiting background response type=%s response_id=%s timeout=%s\n", generationType, responseID, notebookBackgroundWaitTimeout(generationType))
 	deadline := time.Now().Add(notebookBackgroundWaitTimeout(generationType))
 	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -218,6 +219,7 @@ func waitForNotebookBackgroundAIResponse(ctx context.Context, aiService chatAISe
 		}
 		status, _ := raw["status"].(string)
 		status = strings.TrimSpace(status)
+		fmt.Printf("[Notebook Artifact] background response status type=%s response_id=%s attempt=%d status=%s\n", generationType, responseID, attempt+1, fallbackText(status, "unknown"))
 		if status == "completed" {
 			text := services.ExtractOpenAIResponseText(raw)
 			if strings.TrimSpace(text) == "" {
@@ -257,7 +259,7 @@ func extractNotebookAIResponseID(body []byte) string {
 
 func notebookBackgroundWaitTimeout(generationType string) time.Duration {
 	if generationType == "mindmap" {
-		return 90 * time.Second
+		return 240 * time.Second
 	}
 	return 45 * time.Second
 }

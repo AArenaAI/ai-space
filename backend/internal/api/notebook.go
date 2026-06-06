@@ -461,6 +461,7 @@ func (h *NotebookHandler) GenerateArtifact(c *gin.Context) {
 	files := h.loadNotebookGenerationFiles(nb.ID, getUserID(c))
 	draft, err := buildAINotebookArtifactDraft(c.Request.Context(), h.aiService, req.Type, nb.Title, files, req.FileIDs, req.Language)
 	if err != nil {
+		fmt.Printf("[Notebook Artifact] generate failed notebook_id=%d type=%s file_count=%d selected_files=%d error=%v\n", nb.ID, req.Type, len(files), len(req.FileIDs), err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
