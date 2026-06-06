@@ -221,6 +221,7 @@ const translations: Record<string, string> = {
   "notebook.studio.backToOutputs": "Back to outputs",
   "notebook.studio.viewSources": "View {count} sources",
   "notebook.studio.moreActions": "More actions",
+  "notebook.studio.expandViewer": "Expand viewer",
   "notebook.studio.downloadCsv": "Download CSV",
   "notebook.studio.exportGoogleSheets": "Export to Google Sheets",
   "notebook.studio.googleSheetsExportHint": "CSV exported. Import it into Google Sheets; direct Google Sheets export is coming later.",

@@ -221,6 +221,7 @@ const translations: Record<string, string> = {
   "notebook.studio.backToOutputs": "返回输出文件",
   "notebook.studio.viewSources": "查看 {count} 个来源",
   "notebook.studio.moreActions": "更多操作",
+  "notebook.studio.expandViewer": "展开查看器",
   "notebook.studio.downloadCsv": "下载 CSV",
   "notebook.studio.exportGoogleSheets": "导出到 Google 表格",
   "notebook.studio.googleSheetsExportHint": "已导出 CSV，可在 Google 表格中导入；直连 Google 表格稍后接入。",

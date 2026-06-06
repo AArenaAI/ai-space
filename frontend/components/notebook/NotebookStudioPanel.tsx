@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BarChart3, ChevronLeft, ChevronRight, Copy, Download, ExternalLink, FileQuestion, FileText, Layers3, Loader2, Map as MapIcon, Minus, MoreHorizontal, Pencil, Plus, Presentation, RefreshCw, Sparkles, Table2, Trash2 } from "lucide-react";
+import { BarChart3, ChevronLeft, ChevronRight, Copy, Download, ExternalLink, FileQuestion, FileText, Layers3, Loader2, Map as MapIcon, Maximize2, Minus, MoreHorizontal, Pencil, Plus, Presentation, RefreshCw, Sparkles, Table2, Trash2, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -312,7 +312,9 @@ export function NotebookStudioPanel({
 }: NotebookStudioPanelProps) {
   const { t } = useI18n();
   const [openMenuArtifactId, setOpenMenuArtifactId] = useState<string | null>(null);
+  const [viewerArtifactId, setViewerArtifactId] = useState<string | null>(null);
   const activeArtifact = artifacts.find((artifact) => artifact.id === activeArtifactId) || null;
+  const viewerArtifact = artifacts.find((artifact) => artifact.id === viewerArtifactId) || null;
   const actions: Array<{ id: NotebookStudioActionId; title: string; desc: string; accent: string }> = [
     { id: "table", title: t("notebook.studio.table"), desc: t("notebook.studio.tableDesc"), accent: "from-emerald-500/15 to-cyan-500/10 text-emerald-500" },
     { id: "summary", title: t("notebook.studio.summary"), desc: t("notebook.studio.summaryDesc"), accent: "from-brand/15 to-purple-500/10 text-brand" },
@@ -323,6 +325,7 @@ export function NotebookStudioPanel({
   ];
 
   return (
+    <>
     <aside className="flex h-full shrink-0 flex-col bg-surface-elevated/70" style={{ width }}>
       {activeArtifact ? (
         <div className="flex min-h-0 flex-1 flex-col bg-surface-card">
@@ -337,6 +340,9 @@ export function NotebookStudioPanel({
                 {t("notebook.studio.viewSources", { count: String(activeArtifact.sourceCount) })}
               </button>
             </div>
+            <button type="button" onClick={() => setViewerArtifactId(activeArtifact.id)} className="mt-1 rounded-full p-2 text-text-tertiary transition hover:bg-surface-hover hover:text-text-primary" title={t("notebook.studio.expandViewer")}>
+              <Maximize2 className="h-4 w-4" />
+            </button>
             <ArtifactMenu
               artifact={activeArtifact}
               open={openMenuArtifactId === activeArtifact.id}
@@ -413,8 +419,11 @@ export function NotebookStudioPanel({
               {artifacts.map((artifact) => {
                 const Icon = artifactIconMap[artifact.type];
                 return (
-                  <div key={artifact.id} className="rounded-2xl border border-surface-border bg-surface-card transition">
-                    <button type="button" onClick={() => onOpenArtifact(artifact.id)} className="flex w-full items-center gap-3 p-3 text-left">
+                  <div key={artifact.id} className="group relative rounded-2xl border border-surface-border bg-surface-card transition">
+                    <button type="button" onClick={() => setViewerArtifactId(artifact.id)} className="absolute right-10 top-2 z-10 rounded-full bg-surface-elevated p-1.5 text-text-tertiary opacity-0 shadow-sm transition hover:bg-surface-hover hover:text-text-primary group-hover:opacity-100" title={t("notebook.studio.expandViewer")}>
+                      <Maximize2 className="h-3.5 w-3.5" />
+                    </button>
+                    <button type="button" onClick={() => onOpenArtifact(artifact.id)} className="flex w-full items-center gap-3 p-3 pr-16 text-left">
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500"><Icon className="h-4 w-4" /></div>
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-semibold text-text-primary">{artifact.title}</div>
@@ -438,5 +447,25 @@ export function NotebookStudioPanel({
       </>
       )}
     </aside>
+    {viewerArtifact && (
+      <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/45 p-6 backdrop-blur-sm" role="dialog" aria-modal="true">
+        <div className="flex h-[86vh] w-[min(1180px,92vw)] flex-col overflow-hidden rounded-3xl border border-surface-border bg-surface-card shadow-2xl">
+          <div className="flex items-start gap-3 border-b border-surface-border px-6 py-4">
+            <div className="min-w-0 flex-1">
+              <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-text-tertiary">Studio Viewer</div>
+              <h3 className="mt-1 line-clamp-2 text-xl font-bold tracking-[-0.01em] text-text-primary">{viewerArtifact.title}</h3>
+              <div className="mt-2 text-xs text-text-tertiary">{viewerArtifact.subtitle} · {t("notebook.studio.viewSources", { count: String(viewerArtifact.sourceCount) })}</div>
+            </div>
+            <button type="button" onClick={() => setViewerArtifactId(null)} className="rounded-full p-2 text-text-tertiary transition hover:bg-surface-hover hover:text-text-primary" title={t("common.close")}>
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-surface-card p-5">
+            {renderActiveArtifact(viewerArtifact, t, true)}
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
