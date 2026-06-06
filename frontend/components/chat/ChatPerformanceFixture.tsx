@@ -66,6 +66,7 @@ function buildStreamingMessages(historyCount: number): Message[] {
       model: "perf-model",
       createdAt: now + 1000,
       serverMessageId: evenHistoryCount + 2,
+      activityStatus: { kind: "generating", status: "running", label: "Generating" },
     },
   ];
 }
