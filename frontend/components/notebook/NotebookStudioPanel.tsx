@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { CSSProperties, useMemo, useState } from "react";
 import { BarChart3, ChevronLeft, ChevronRight, Copy, Download, ExternalLink, FileQuestion, FileText, Layers3, Loader2, Map as MapIcon, Maximize2, Minus, MoreHorizontal, Pencil, Plus, Presentation, RefreshCw, Sparkles, Table2, Trash2, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -158,6 +158,13 @@ function renderTableArtifact(artifact: Extract<NotebookStudioArtifact, { type: "
 }
 
 type MindmapBranch = NotebookStudioMindmapNode & { children: MindmapBranch[] };
+type MindmapLayoutNode = MindmapBranch & { depth: number; x: number; y: number; width: number; height: number };
+type MindmapConnector = { from: MindmapLayoutNode; to: MindmapLayoutNode };
+
+const MINDMAP_NODE_WIDTH = 236;
+const MINDMAP_NODE_HEIGHT = 48;
+const MINDMAP_COLUMN_GAP = 170;
+const MINDMAP_ROW_GAP = 24;
 
 function buildMindmapTree(artifact: Extract<NotebookStudioArtifact, { type: "mindmap" }>) {
   const nodes = new Map(artifact.nodes.map((node) => [node.id, { ...node, children: [] as MindmapBranch[] }]));
@@ -170,56 +177,98 @@ function buildMindmapTree(artifact: Extract<NotebookStudioArtifact, { type: "min
   return root as MindmapBranch | undefined;
 }
 
+function countMindmapLeaves(node: MindmapBranch): number {
+  if (!node.children.length) return 1;
+  return node.children.reduce((total, child) => total + countMindmapLeaves(child), 0);
+}
+
+function layoutMindmap(root: MindmapBranch) {
+  const nodes: MindmapLayoutNode[] = [];
+  const connectors: MindmapConnector[] = [];
+  const leafCursor = { value: 0 };
+
+  const walk = (node: MindmapBranch, depth: number): MindmapLayoutNode => {
+    const leafCount = countMindmapLeaves(node);
+    const layoutNode: MindmapLayoutNode = {
+      ...node,
+      depth,
+      x: depth * (MINDMAP_NODE_WIDTH + MINDMAP_COLUMN_GAP),
+      y: 0,
+      width: MINDMAP_NODE_WIDTH,
+      height: MINDMAP_NODE_HEIGHT,
+    };
+    if (!node.children.length) {
+      layoutNode.y = leafCursor.value * (MINDMAP_NODE_HEIGHT + MINDMAP_ROW_GAP);
+      leafCursor.value += 1;
+    } else {
+      const childLayouts = node.children.map((child) => walk(child, depth + 1));
+      childLayouts.forEach((childLayout) => connectors.push({ from: layoutNode, to: childLayout }));
+      const firstChild = childLayouts[0];
+      const lastChild = childLayouts[childLayouts.length - 1];
+      layoutNode.y = firstChild && lastChild ? (firstChild.y + lastChild.y) / 2 : leafCursor.value * (MINDMAP_NODE_HEIGHT + MINDMAP_ROW_GAP);
+    }
+    // Keep parents visually centered while preserving source order.
+    void leafCount;
+    nodes.push(layoutNode);
+    return layoutNode;
+  };
+
+  walk(root, 0);
+  const maxX = Math.max(...nodes.map((node) => node.x + node.width), MINDMAP_NODE_WIDTH);
+  const maxY = Math.max(...nodes.map((node) => node.y + node.height), MINDMAP_NODE_HEIGHT);
+  const padding = { left: 80, top: 72, right: 160, bottom: 80 };
+  return {
+    nodes,
+    connectors,
+    width: maxX + padding.left + padding.right,
+    height: maxY + padding.top + padding.bottom,
+    padding,
+  };
+}
+
 function MindmapArtifactView({ artifact }: { artifact: Extract<NotebookStudioArtifact, { type: "mindmap" }> }) {
   const root = useMemo(() => buildMindmapTree(artifact), [artifact]);
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set([root?.id || "root"]));
-  const toggle = (id: string) => setExpandedIds((prev) => {
-    const next = new Set(prev);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    return next;
-  });
-  if (!root) return null;
+  const layout = useMemo(() => (root ? layoutMindmap(root) : null), [root]);
+  if (!root || !layout) return null;
   return (
-    <div className="relative min-h-0 flex-1 overflow-auto rounded-xl border border-surface-border bg-white p-4 dark:bg-surface-card">
-      <div className="absolute left-3 top-3 z-10 flex flex-col overflow-hidden rounded-xl border border-surface-border bg-surface-card/95 shadow-sm">
+    <div className="relative min-h-0 flex-1 overflow-auto rounded-xl border border-surface-border bg-[#f8fafc] p-0 dark:bg-surface-card">
+      <div className="absolute left-3 top-3 z-10 flex flex-col overflow-hidden rounded-xl border border-surface-border bg-white/95 shadow-sm dark:bg-surface-card/95">
         <button className="p-2 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" type="button"><Plus className="h-3.5 w-3.5" /></button>
         <button className="border-t border-surface-border p-2 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" type="button"><Minus className="h-3.5 w-3.5" /></button>
         <button className="border-t border-surface-border p-2 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" type="button"><Download className="h-3.5 w-3.5" /></button>
       </div>
-      <div className="flex min-w-[920px] items-center justify-center px-12 py-10">
-        <MindmapNode node={root} depth={0} expandedIds={expandedIds} onToggle={toggle} />
+      <div className="relative" style={{ width: layout.width, height: layout.height }}>
+        <svg className="pointer-events-none absolute inset-0" width={layout.width} height={layout.height} aria-hidden="true">
+          {layout.connectors.map(({ from, to }) => {
+            const startX = layout.padding.left + from.x + from.width;
+            const startY = layout.padding.top + from.y + from.height / 2;
+            const endX = layout.padding.left + to.x;
+            const endY = layout.padding.top + to.y + to.height / 2;
+            const mid = Math.max(70, (endX - startX) * 0.48);
+            return <path key={`${from.id}-${to.id}`} d={`M ${startX} ${startY} C ${startX + mid} ${startY}, ${endX - mid} ${endY}, ${endX} ${endY}`} fill="none" stroke="rgba(99, 102, 241, 0.28)" strokeWidth="2" />;
+          })}
+        </svg>
+        {layout.nodes.map((node) => <MindmapCanvasNode key={node.id} node={node} offset={layout.padding} />)}
       </div>
     </div>
   );
 }
 
-function MindmapNode({ node, depth, expandedIds, onToggle }: { node: MindmapBranch; depth: number; expandedIds: Set<string>; onToggle: (id: string) => void }) {
-  const hasChildren = node.children.length > 0;
-  const expanded = expandedIds.has(node.id);
-  const palette = depth === 0 ? "bg-violet-100 text-violet-950 border-violet-200" : depth === 1 ? "bg-sky-100 text-sky-950 border-sky-200" : "bg-emerald-100 text-emerald-950 border-emerald-200";
+function MindmapCanvasNode({ node, offset }: { node: MindmapLayoutNode; offset: { left: number; top: number } }) {
+  const palette = node.depth === 0
+    ? "border-indigo-200 bg-indigo-100 text-indigo-950"
+    : node.depth === 1
+      ? "border-sky-200 bg-sky-100 text-sky-950"
+      : "border-emerald-200 bg-emerald-100 text-emerald-950";
+  const style: CSSProperties = {
+    left: offset.left + node.x,
+    top: offset.top + node.y,
+    width: node.width,
+    minHeight: node.height,
+  };
   return (
-    <div className="flex items-center">
-      <div className="relative flex items-center">
-        <div className={cn("min-w-[180px] max-w-[240px] rounded-2xl border px-4 py-3 text-center shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md", palette)}>
-          <div className="text-sm font-semibold leading-5">{node.label}</div>
-          {depth > 0 && node.source && <div className="mt-1 text-[11px] opacity-70">{node.source}</div>}
-        </div>
-        {hasChildren && (
-          <button type="button" onClick={() => onToggle(node.id)} className="absolute -right-3 top-1/2 z-10 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border border-surface-border bg-surface-card text-text-secondary shadow-sm transition hover:scale-110 hover:text-brand" aria-expanded={expanded}>
-            <ChevronRight className={cn("h-3.5 w-3.5 transition-transform duration-300", expanded && "rotate-180")} />
-          </button>
-        )}
-      </div>
-      {hasChildren && (
-        <div className={cn("grid transition-all duration-300 ease-out", expanded ? "grid-cols-[42px_auto] opacity-100" : "grid-cols-[0px_auto] opacity-0")}>
-          <div className="relative h-full min-h-20 overflow-hidden">
-            <div className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-violet-200" />
-          </div>
-          <div className={cn("space-y-4 overflow-hidden transition-all duration-300", expanded ? "translate-x-0" : "-translate-x-4 pointer-events-none")}>
-            {node.children.map((child) => <MindmapNode key={child.id} node={child} depth={depth + 1} expandedIds={expandedIds} onToggle={onToggle} />)}
-          </div>
-        </div>
-      )}
+    <div className={cn("absolute flex items-center justify-center rounded-2xl border px-4 py-2.5 text-center shadow-sm", palette)} style={style}>
+      <div className={cn("font-semibold leading-5", node.depth === 0 ? "text-[15px]" : "text-[13px]")}>{node.label}</div>
     </div>
   );
 }
