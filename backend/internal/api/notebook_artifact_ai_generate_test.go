@@ -90,3 +90,15 @@ func TestBuildAINotebookArtifactDraftFallsBackWhenAIInvalid(t *testing.T) {
 		t.Fatalf("fallback content should include source names, got %s", string(draft.Content))
 	}
 }
+
+func TestBuildAINotebookMindmapRejectsInvalidAIInsteadOfFallback(t *testing.T) {
+	files := []models.File{
+		{ID: 1, Filename: "产品方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "产品定位", Content: "AI Space 是企业级多模型 AI 聚合平台。"},
+	}
+	ai := &fakeNotebookAIService{response: `not json`}
+
+	_, err := buildAINotebookArtifactDraft(context.Background(), ai, "mindmap", "测试1", files, []uint{1}, "zh-CN")
+	if err == nil {
+		t.Fatalf("mindmap should reject invalid AI output instead of saving fallback pseudo-map")
+	}
+}

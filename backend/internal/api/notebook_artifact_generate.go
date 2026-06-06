@@ -114,22 +114,31 @@ func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, 
 	messages := buildNotebookArtifactAIMessages(generationType, notebookTitle, sources, language)
 	resp, err := aiService.ChatCompletion(ctx, notebookArtifactAIModel(generationType), messages, false, false, "", false, nil)
 	if err != nil || resp == nil || resp.Body == nil {
+		if generationType == "mindmap" {
+			return generatedNotebookArtifactDraft{}, fmt.Errorf("思维导图需要完整模型分析，当前模型服务不可用，请稍后重试")
+		}
 		return fallback, nil
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
 	if err != nil {
+		if generationType == "mindmap" {
+			return generatedNotebookArtifactDraft{}, fmt.Errorf("思维导图模型响应读取失败，请稍后重试")
+		}
 		return fallback, nil
 	}
 	draft, err := parseAINotebookArtifactResponse(body, fallback)
 	if err != nil {
+		if generationType == "mindmap" {
+			return generatedNotebookArtifactDraft{}, fmt.Errorf("思维导图模型返回格式无效，请重新生成")
+		}
 		return fallback, nil
 	}
 	if generationType == "table" && !notebookTableDraftLooksUseful(draft.Content) {
 		return fallback, nil
 	}
 	if generationType == "mindmap" && !notebookMindmapDraftLooksUseful(draft.Content) {
-		return fallback, nil
+		return generatedNotebookArtifactDraft{}, fmt.Errorf("思维导图分析结果不完整，请重新生成")
 	}
 	return draft, nil
 }
@@ -137,6 +146,9 @@ func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, 
 func buildNotebookArtifactAIMessages(generationType string, notebookTitle string, sources []notebookGenerationSource, language string) []services.Message {
 	if strings.TrimSpace(language) == "" {
 		language = "zh-CN"
+	}
+	if generationType == "mindmap" {
+		return buildNotebookMindmapAIMessages(notebookTitle, sources, language)
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "Notebook: %s\n", fallbackText(notebookTitle, "未命名笔记本"))
@@ -155,6 +167,30 @@ func buildNotebookArtifactAIMessages(generationType string, notebookTitle string
 	}
 	return []services.Message{
 		{Role: "system", Content: "You generate structured Notebook Studio artifacts. Return valid JSON only; no markdown fences."},
+		{Role: "user", Content: b.String()},
+	}
+}
+
+func buildNotebookMindmapAIMessages(notebookTitle string, sources []notebookGenerationSource, language string) []services.Message {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Notebook: %s\n", fallbackText(notebookTitle, "未命名笔记本"))
+	fmt.Fprintf(&b, "Artifact type: mindmap\nLanguage: %s\n\n", language)
+	b.WriteString("Task:\n")
+	b.WriteString("Read the COMPLETE provided PDF text below, infer the real document outline, and build a NotebookLM-style mind map. The output must look like a high-quality product/knowledge map, not an outline fragment, not numbered raw headings, and not a few quoted sentences.\n\n")
+	b.WriteString("Quality target:\n")
+	b.WriteString("- Root label should be the document/product theme, not the notebook test name when the source has a better title.\n")
+	b.WriteString("- Create 5-7 first-level sections covering the whole document. For an AI/product whitepaper, prefer sections like 产品简介与定位, 核心优势, 技术架构特色, Workspace进化路径, 规划中稀缺能力, 已落地功能, 商业/部署能力 when supported by the source.\n")
+	b.WriteString("- Under each important section create 2-5 concrete child nodes; create third-level nodes for feature lists, architecture details, roadmap stages, or plugin capabilities.\n")
+	b.WriteString("- Use semantic labels, not source heading numbers: remove prefixes like '1 ', '2 ', '3 ', '一、', '1.1'.\n")
+	b.WriteString("- Preserve concrete details from the full PDF, such as model names, tech stack, memory/code-size numbers, integrations, roadmap stages, and planned capabilities.\n")
+	b.WriteString("- Do not output broken OCR fragments, unfinished sentences, file names, parse/index status, ellipses, or generic filler.\n\n")
+	b.WriteString("Return strict JSON only with keys: title, subtitle, content. content must be {\"nodes\":[{\"id\":string,\"label\":string,\"summary\":string,\"source\":string}],\"edges\":[{\"from\":string,\"to\":string,\"label\":string}]}. Use exactly one root node id=root. Use stable ids like root, branch-1, branch-1-1, branch-1-1-1. Cite sources using bracket numbers such as [1].\n\n")
+	b.WriteString("Sources with full available text:\n")
+	for _, source := range sources {
+		fmt.Fprintf(&b, "\n--- SOURCE [%d]: %s ---\nSummary: %s\nFullText:\n%s\n--- END SOURCE [%d] ---\n", source.Index, source.File.Filename, fallbackText(source.Summary, "无摘要"), fallbackText(source.Excerpt, "无正文"), source.Index)
+	}
+	return []services.Message{
+		{Role: "system", Content: "You are an expert analyst creating dense NotebookLM-style mind maps from complete PDF text. Return valid JSON only; no markdown fences."},
 		{Role: "user", Content: b.String()},
 	}
 }
@@ -223,10 +259,14 @@ func notebookMindmapDraftLooksUseful(content json.RawMessage) bool {
 	}
 	childrenByParent := map[string]int{}
 	validNodeIDs := map[string]bool{}
+	rootLabel := ""
 	cleanLabels := 0
 	for _, node := range payload.Nodes {
 		id := strings.TrimSpace(node.ID)
 		label := strings.TrimSpace(node.Label)
+		if id == "root" {
+			rootLabel = label
+		}
 		validNodeIDs[id] = true
 		if id != "" && looksLikeCleanNotebookMindmapLabel(label) {
 			cleanLabels++
@@ -243,7 +283,19 @@ func notebookMindmapDraftLooksUseful(content json.RawMessage) bool {
 			nestedBranches++
 		}
 	}
+	if !looksLikeCleanNotebookMindmapRootLabel(rootLabel) {
+		return false
+	}
 	return childrenByParent["root"] >= 5 && nestedBranches >= 3 && cleanLabels >= len(payload.Nodes)*3/4
+}
+
+func looksLikeCleanNotebookMindmapRootLabel(label string) bool {
+	label = strings.TrimSpace(label)
+	if !looksLikeCleanNotebookMindmapLabel(label) {
+		return false
+	}
+	badRootSignals := []string{"测试", "未命名", "知识库", "笔记本"}
+	return !containsAnyNotebookText(label, badRootSignals)
 }
 
 func looksLikeCleanNotebookMindmapLabel(label string) bool {
@@ -259,6 +311,9 @@ func looksLikeCleanNotebookMindmapLabel(label string) bool {
 	if containsAnyNotebookText(label, badSignals) {
 		return false
 	}
+	if hasNotebookMindmapHeadingNumberPrefix(label) {
+		return false
+	}
 	letters := 0
 	for _, r := range runes {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
@@ -266,6 +321,22 @@ func looksLikeCleanNotebookMindmapLabel(label string) bool {
 		}
 	}
 	return letters >= 2
+}
+
+func hasNotebookMindmapHeadingNumberPrefix(label string) bool {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return false
+	}
+	runes := []rune(label)
+	if len(runes) >= 2 && unicode.IsDigit(runes[0]) && unicode.IsSpace(runes[1]) {
+		return true
+	}
+	if len(runes) >= 3 && unicode.IsDigit(runes[0]) && (runes[1] == '.' || runes[1] == '、') && unicode.IsSpace(runes[2]) {
+		return true
+	}
+	chinesePrefixes := []string{"一、", "二、", "三、", "四、", "五、", "六、", "七、", "八、", "九、", "十、"}
+	return containsAnyNotebookPrefix(label, chinesePrefixes)
 }
 
 func notebookArtifactTypeForGeneration(generationType string) (string, bool) {
@@ -695,6 +766,15 @@ func splitNotebookSentences(text string) []string {
 func containsAnyNotebookText(text string, needles []string) bool {
 	for _, needle := range needles {
 		if strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsAnyNotebookPrefix(text string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(text, prefix) {
 			return true
 		}
 	}
