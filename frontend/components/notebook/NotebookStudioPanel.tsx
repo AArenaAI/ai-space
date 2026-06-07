@@ -229,15 +229,31 @@ function FlashcardsArtifactView({ artifact, t, onExplain }: { artifact: Extract<
   const [answerVisible, setAnswerVisible] = useState(false);
   const [known, setKnown] = useState<Record<number, boolean | null>>({});
   const [slideDirection, setSlideDirection] = useState<"left" | "right" | null>(null);
+  const [reviewFeedback, setReviewFeedback] = useState<"wrong" | "right" | null>(null);
   const total = artifact.cards.length;
   const rawCard = artifact.cards[Math.min(index, Math.max(total - 1, 0))];
   const card = rawCard ? { ...rawCard, front: cleanFlashcardDisplayText(rawCard.front), back: cleanFlashcardDisplayText(rawCard.back), source: "" } : undefined;
-  const go = (next: number) => {
+  const wrongCount = Object.values(known).filter((value) => value === false).length;
+  const rightCount = Object.values(known).filter((value) => value === true).length;
+  const go = (next: number, direction: "left" | "right" = next > index ? "left" : "right") => {
     if (!total) return;
-    setSlideDirection(next > index ? "left" : "right");
+    setReviewFeedback(null);
+    setSlideDirection(direction);
     setIndex((next + total) % total);
     setAnswerVisible(false);
     window.setTimeout(() => setSlideDirection(null), 260);
+  };
+  const review = (value: boolean) => {
+    if (!total || reviewFeedback) return;
+    setKnown((prev) => ({ ...prev, [index]: value }));
+    setReviewFeedback(value ? "right" : "wrong");
+    setAnswerVisible(false);
+    setSlideDirection(value ? "left" : "right");
+    window.setTimeout(() => {
+      setIndex((index + 1) % total);
+      setReviewFeedback(null);
+      setSlideDirection(null);
+    }, 520);
   };
   if (!card) return <div className="rounded-2xl border border-surface-border bg-surface-elevated p-4 text-sm text-text-tertiary">{t("notebook.studio.flashcardsEmpty")}</div>;
   return (
@@ -245,6 +261,8 @@ function FlashcardsArtifactView({ artifact, t, onExplain }: { artifact: Extract<
       <style>{`
         @keyframes notebookFlashcardSlideLeft { from { opacity: 0; transform: translateX(28px) scale(.985); } to { opacity: 1; transform: translateX(0) scale(1); } }
         @keyframes notebookFlashcardSlideRight { from { opacity: 0; transform: translateX(-28px) scale(.985); } to { opacity: 1; transform: translateX(0) scale(1); } }
+        @keyframes notebookFlashcardReviewWrong { 0% { opacity: 0; transform: translateX(-22px) rotate(-2deg) scale(.985); } 45% { opacity: 1; transform: translateX(0) rotate(4deg) scale(1); } 100% { opacity: 0; transform: translateX(72px) rotate(9deg) scale(.96); } }
+        @keyframes notebookFlashcardReviewRight { 0% { opacity: 0; transform: translateX(22px) rotate(2deg) scale(.985); } 45% { opacity: 1; transform: translateX(0) rotate(-4deg) scale(1); } 100% { opacity: 0; transform: translateX(-72px) rotate(-9deg) scale(.96); } }
         .notebook-flashcard-perspective { perspective: 1200px; }
         .notebook-flashcard-inner { transform-style: preserve-3d; }
         .notebook-flashcard-face { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
@@ -255,11 +273,23 @@ function FlashcardsArtifactView({ artifact, t, onExplain }: { artifact: Extract<
           key={index}
           className={cn(
             "notebook-flashcard-perspective relative aspect-[1.18/1] min-h-[330px] w-full",
-            slideDirection === "left" && "animate-[notebookFlashcardSlideLeft_260ms_cubic-bezier(.22,1,.36,1)_both]",
-            slideDirection === "right" && "animate-[notebookFlashcardSlideRight_260ms_cubic-bezier(.22,1,.36,1)_both]"
+            reviewFeedback === "wrong" && "animate-[notebookFlashcardReviewWrong_520ms_cubic-bezier(.22,1,.36,1)_both]",
+            reviewFeedback === "right" && "animate-[notebookFlashcardReviewRight_520ms_cubic-bezier(.22,1,.36,1)_both]",
+            !reviewFeedback && slideDirection === "left" && "animate-[notebookFlashcardSlideLeft_260ms_cubic-bezier(.22,1,.36,1)_both]",
+            !reviewFeedback && slideDirection === "right" && "animate-[notebookFlashcardSlideRight_260ms_cubic-bezier(.22,1,.36,1)_both]"
           )}
         >
-          <div className={cn("notebook-flashcard-inner absolute inset-0 rounded-[30px] transition-transform duration-500 ease-[cubic-bezier(.22,1,.36,1)]", answerVisible && "[transform:rotateY(180deg)]")}>
+          {reviewFeedback && (
+            <div
+              className={cn(
+                "absolute inset-0 z-10 flex items-center justify-center rounded-[30px] border p-6 text-center shadow-[0_18px_45px_rgba(15,23,42,0.12)]",
+                reviewFeedback === "wrong" ? "border-red-500/20 bg-red-500/10 text-red-500" : "border-emerald-500/20 bg-emerald-500/10 text-emerald-500"
+              )}
+            >
+              <div className="text-3xl font-bold tracking-[-0.03em]">{reviewFeedback === "wrong" ? "再接再厉" : "知道了"}</div>
+            </div>
+          )}
+          <div className={cn("notebook-flashcard-inner absolute inset-0 rounded-[30px] transition-all duration-300 ease-[cubic-bezier(.22,1,.36,1)]", answerVisible && "[transform:rotateY(180deg)]", reviewFeedback && "opacity-0")}>
             <div className="notebook-flashcard-face absolute inset-0 flex flex-col rounded-[30px] border border-surface-border bg-surface-card p-6 shadow-[0_18px_45px_rgba(15,23,42,0.10)] dark:shadow-[0_18px_45px_rgba(0,0,0,0.35)]">
               <div className="flex items-center justify-between text-sm font-semibold text-text-tertiary">
                 <span>{index + 1}/{total}</span>
@@ -297,10 +327,16 @@ function FlashcardsArtifactView({ artifact, t, onExplain }: { artifact: Extract<
         </div>
       </div>
       <div className="flex items-center gap-3 rounded-full border border-surface-border bg-surface-card/95 p-2 shadow-sm">
-        <button type="button" onClick={() => go(index - 1)} className="flex h-11 w-11 items-center justify-center rounded-full text-text-secondary transition hover:bg-surface-hover hover:text-text-primary"><ChevronLeft className="h-5 w-5" /></button>
-        <button type="button" onClick={() => { setKnown((prev) => ({ ...prev, [index]: false })); go(index + 1); }} className="flex h-11 w-11 items-center justify-center rounded-full border border-red-500/20 bg-red-500/10 text-red-500 transition hover:bg-red-500/15"><XCircle className="h-5 w-5" /></button>
-        <button type="button" onClick={() => { setKnown((prev) => ({ ...prev, [index]: true })); go(index + 1); }} className="flex h-11 w-11 items-center justify-center rounded-full border border-emerald-500/20 bg-emerald-500/10 text-emerald-500 transition hover:bg-emerald-500/15"><CheckCircle2 className="h-5 w-5" /></button>
-        <button type="button" onClick={() => go(index + 1)} className="flex h-11 w-11 items-center justify-center rounded-full text-text-secondary transition hover:bg-surface-hover hover:text-text-primary"><ChevronRight className="h-5 w-5" /></button>
+        <button type="button" onClick={() => go(index - 1)} disabled={Boolean(reviewFeedback)} className="flex h-11 w-11 items-center justify-center rounded-full text-text-secondary transition hover:bg-surface-elevated hover:text-text-primary disabled:opacity-50"><ChevronLeft className="h-5 w-5" /></button>
+        <button type="button" onClick={() => review(false)} disabled={Boolean(reviewFeedback)} className="flex h-11 min-w-16 items-center justify-center gap-1.5 rounded-full border border-red-500/20 bg-red-500/10 px-4 text-sm font-bold text-red-500 transition hover:bg-red-500/15 disabled:opacity-60">
+          <XCircle className="h-5 w-5" />
+          <span>{wrongCount}</span>
+        </button>
+        <button type="button" onClick={() => review(true)} disabled={Boolean(reviewFeedback)} className="flex h-11 min-w-16 items-center justify-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-4 text-sm font-bold text-emerald-500 transition hover:bg-emerald-500/15 disabled:opacity-60">
+          <span>{rightCount}</span>
+          <CheckCircle2 className="h-5 w-5" />
+        </button>
+        <button type="button" onClick={() => go(index + 1)} disabled={Boolean(reviewFeedback)} className="flex h-11 w-11 items-center justify-center rounded-full text-text-secondary transition hover:bg-surface-elevated hover:text-text-primary disabled:opacity-50"><ChevronRight className="h-5 w-5" /></button>
       </div>
     </div>
   );
