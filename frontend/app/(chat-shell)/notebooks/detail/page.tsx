@@ -27,11 +27,24 @@ function formatSize(bytes?: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function notebookSelectionStorageKey(notebookId: number) {
+  return `notebook:${notebookId}:selected-file-ids`;
+}
+
+function readStoredSelectedFileIds(notebookId: number) {
+  try {
+    const raw = localStorage.getItem(notebookSelectionStorageKey(notebookId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((id): id is number => typeof id === "number") : null;
+  } catch {
+    return null;
+  }
+}
+
 function reconcileSelectedFileIds(previous: number[], files: NotebookFile[]) {
   const available = new Set(files.map((file) => file.file_id));
-  if (previous.length === 0) return files.map((file) => file.file_id);
-  const next = previous.filter((id) => available.has(id));
-  return next.length === 0 && files.length > 0 ? files.map((file) => file.file_id) : next;
+  return previous.filter((id) => available.has(id));
 }
 
 type Translate = (key: string, params?: Record<string, string>) => string;
@@ -179,6 +192,7 @@ function NotebookDetailContent() {
   const [generatingStudioType, setGeneratingStudioType] = useState<NotebookStudioActionId | null>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const selectionInitializedRef = useRef(false);
   const loadStudioArtifacts = async () => {
     if (!notebookId) return;
     try {
@@ -199,7 +213,11 @@ function NotebookDetailContent() {
       setNotebook(data.notebook);
       const nextFiles = data.files || [];
       setFiles(nextFiles);
-      setSelectedFileIds((prev) => reconcileSelectedFileIds(prev, nextFiles));
+      setSelectedFileIds((prev) => {
+        const baseline = selectionInitializedRef.current ? prev : (readStoredSelectedFileIds(notebookId) || []);
+        selectionInitializedRef.current = true;
+        return reconcileSelectedFileIds(baseline, nextFiles);
+      });
       setPageError(null);
     } catch (error) {
       const normalized = showNotebookError(error, t("notebook.loadFailed"));
@@ -209,7 +227,17 @@ function NotebookDetailContent() {
     }
   };
 
-  useEffect(() => { load(); loadStudioArtifacts(); }, [notebookId]);
+  useEffect(() => {
+    selectionInitializedRef.current = false;
+    setSelectedFileIds([]);
+    load();
+    loadStudioArtifacts();
+  }, [notebookId]);
+
+  useEffect(() => {
+    if (!notebookId || !selectionInitializedRef.current) return;
+    localStorage.setItem(notebookSelectionStorageKey(notebookId), JSON.stringify(selectedFileIds));
+  }, [notebookId, selectedFileIds]);
 
   const readyCount = useMemo(() => files.filter(isNotebookFileReady).length, [files]);
 
@@ -514,6 +542,10 @@ function NotebookDetailContent() {
       return;
     }
     if (!notebookId) return;
+    if (selectedFileIds.length === 0) {
+      toast.info(t("notebook.studio.selectSourcesFirst"));
+      return;
+    }
     setGeneratingStudioType(type);
     try {
       const saved = await generateNotebookArtifact({
@@ -771,7 +803,7 @@ function NotebookDetailContent() {
         artifacts={studioArtifacts}
         activeArtifactId={activeStudioArtifactId}
         generatingType={generatingStudioType}
-        selectedSourceCount={selectedFileIds.length || readyCount}
+        selectedSourceCount={selectedFileIds.length}
         onGenerate={handleStudioGenerate}
         onOpenArtifact={setActiveStudioArtifactId}
         onRenameArtifact={handleRenameArtifact}

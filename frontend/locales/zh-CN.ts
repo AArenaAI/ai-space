@@ -202,6 +202,7 @@ const translations: Record<string, string> = {
   "notebook.studio.briefingActionExport": "将成熟内容整理为报告、表格或演示稿。",
   "notebook.studio.loadFailed": "加载 Studio 输出文件失败",
   "notebook.studio.saveFailed": "保存 Studio 输出文件失败",
+  "notebook.studio.selectSourcesFirst": "请先在左侧选择至少一个资料",
   "notebook.studio.renameOutput": "重命名输出文件",
   "notebook.studio.copyOutput": "复制为 Markdown",
   "notebook.studio.downloadOutput": "下载输出文件",

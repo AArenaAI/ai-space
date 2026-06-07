@@ -1,6 +1,6 @@
 "use client";
 
-import { CSSProperties, useMemo, useState } from "react";
+import { CSSProperties, useEffect, useMemo, useState } from "react";
 import { BarChart3, ChevronLeft, ChevronRight, Copy, Download, ExternalLink, FileQuestion, FileText, Layers3, Loader2, Map as MapIcon, Maximize2, Minus, MoreHorizontal, Pencil, Plus, Presentation, RefreshCw, Sparkles, Table2, Trash2, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -177,9 +177,16 @@ function buildMindmapTree(artifact: Extract<NotebookStudioArtifact, { type: "min
   return root as MindmapBranch | undefined;
 }
 
-function countMindmapLeaves(node: MindmapBranch): number {
-  if (!node.children.length) return 1;
-  return node.children.reduce((total, child) => total + countMindmapLeaves(child), 0);
+function getDefaultExpandedMindmapIds(root: MindmapBranch) {
+  return new Set([root.id]);
+}
+
+function getVisibleMindmapTree(node: MindmapBranch, expandedIds: Set<string>): MindmapBranch {
+  const showChildren = expandedIds.has(node.id);
+  return {
+    ...node,
+    children: showChildren ? node.children.map((child) => getVisibleMindmapTree(child, expandedIds)) : [],
+  };
 }
 
 function layoutMindmap(root: MindmapBranch) {
@@ -188,7 +195,6 @@ function layoutMindmap(root: MindmapBranch) {
   const leafCursor = { value: 0 };
 
   const walk = (node: MindmapBranch, depth: number): MindmapLayoutNode => {
-    const leafCount = countMindmapLeaves(node);
     const layoutNode: MindmapLayoutNode = {
       ...node,
       depth,
@@ -207,8 +213,6 @@ function layoutMindmap(root: MindmapBranch) {
       const lastChild = childLayouts[childLayouts.length - 1];
       layoutNode.y = firstChild && lastChild ? (firstChild.y + lastChild.y) / 2 : leafCursor.value * (MINDMAP_NODE_HEIGHT + MINDMAP_ROW_GAP);
     }
-    // Keep parents visually centered while preserving source order.
-    void leafCount;
     nodes.push(layoutNode);
     return layoutNode;
   };
@@ -228,16 +232,53 @@ function layoutMindmap(root: MindmapBranch) {
 
 function MindmapArtifactView({ artifact }: { artifact: Extract<NotebookStudioArtifact, { type: "mindmap" }> }) {
   const root = useMemo(() => buildMindmapTree(artifact), [artifact]);
-  const layout = useMemo(() => (root ? layoutMindmap(root) : null), [root]);
-  if (!root || !layout) return null;
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!root) return;
+    setExpandedIds(getDefaultExpandedMindmapIds(root));
+  }, [root?.id]);
+
+  const visibleRoot = useMemo(() => (root ? getVisibleMindmapTree(root, expandedIds) : null), [root, expandedIds]);
+  const layout = useMemo(() => (visibleRoot ? layoutMindmap(visibleRoot) : null), [visibleRoot]);
+  if (!root || !visibleRoot || !layout) return null;
+
+  const toggleNode = (nodeId: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(nodeId)) next.delete(nodeId);
+      else next.add(nodeId);
+      return next;
+    });
+  };
+
+  const fullNodeById = new Map<string, MindmapBranch>();
+  const collect = (node: MindmapBranch) => {
+    fullNodeById.set(node.id, node);
+    node.children.forEach(collect);
+  };
+  collect(root);
+
   return (
     <div className="relative min-h-0 flex-1 overflow-auto rounded-xl border border-surface-border bg-[#f8fafc] p-0 dark:bg-surface-card">
+      <style>{`
+        @keyframes notebookMindmapNodeEnter {
+          from { opacity: 0; transform: translateX(-12px) scale(0.94); }
+          to { opacity: 1; transform: translateX(0) scale(1); }
+        }
+        @keyframes notebookMindmapConnectorEnter {
+          from { opacity: 0; stroke-dasharray: 10 10; stroke-dashoffset: 18; }
+          to { opacity: 1; stroke-dasharray: 0 0; stroke-dashoffset: 0; }
+        }
+        .notebook-mindmap-node-enter { animation: notebookMindmapNodeEnter 260ms ease-out both; }
+        .notebook-mindmap-connector-enter { animation: notebookMindmapConnectorEnter 300ms ease-out both; }
+      `}</style>
       <div className="absolute left-3 top-3 z-10 flex flex-col overflow-hidden rounded-xl border border-surface-border bg-white/95 shadow-sm dark:bg-surface-card/95">
         <button className="p-2 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" type="button"><Plus className="h-3.5 w-3.5" /></button>
         <button className="border-t border-surface-border p-2 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" type="button"><Minus className="h-3.5 w-3.5" /></button>
         <button className="border-t border-surface-border p-2 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" type="button"><Download className="h-3.5 w-3.5" /></button>
       </div>
-      <div className="relative" style={{ width: layout.width, height: layout.height }}>
+      <div className="relative transition-[width,height] duration-300 ease-out" style={{ width: layout.width, height: layout.height }}>
         <svg className="pointer-events-none absolute inset-0" width={layout.width} height={layout.height} aria-hidden="true">
           {layout.connectors.map(({ from, to }) => {
             const startX = layout.padding.left + from.x + from.width;
@@ -245,16 +286,20 @@ function MindmapArtifactView({ artifact }: { artifact: Extract<NotebookStudioArt
             const endX = layout.padding.left + to.x;
             const endY = layout.padding.top + to.y + to.height / 2;
             const mid = Math.max(70, (endX - startX) * 0.48);
-            return <path key={`${from.id}-${to.id}`} d={`M ${startX} ${startY} C ${startX + mid} ${startY}, ${endX - mid} ${endY}, ${endX} ${endY}`} fill="none" stroke="rgba(99, 102, 241, 0.28)" strokeWidth="2" />;
+            return <path key={`${from.id}-${to.id}`} className="notebook-mindmap-connector-enter transition-all duration-300 ease-out" d={`M ${startX} ${startY} C ${startX + mid} ${startY}, ${endX - mid} ${endY}, ${endX} ${endY}`} fill="none" stroke="rgba(99, 102, 241, 0.28)" strokeWidth="2" />;
           })}
         </svg>
-        {layout.nodes.map((node) => <MindmapCanvasNode key={node.id} node={node} offset={layout.padding} />)}
+        {layout.nodes.map((node) => {
+          const fullNode = fullNodeById.get(node.id);
+          return <MindmapCanvasNode key={node.id} node={node} fullNode={fullNode || node} offset={layout.padding} expanded={expandedIds.has(node.id)} onToggle={toggleNode} />;
+        })}
       </div>
     </div>
   );
 }
 
-function MindmapCanvasNode({ node, offset }: { node: MindmapLayoutNode; offset: { left: number; top: number } }) {
+function MindmapCanvasNode({ node, fullNode, offset, expanded, onToggle }: { node: MindmapLayoutNode; fullNode: MindmapBranch; offset: { left: number; top: number }; expanded: boolean; onToggle: (nodeId: string) => void }) {
+  const hasChildren = fullNode.children.length > 0;
   const palette = node.depth === 0
     ? "border-indigo-200 bg-indigo-100 text-indigo-950"
     : node.depth === 1
@@ -267,8 +312,18 @@ function MindmapCanvasNode({ node, offset }: { node: MindmapLayoutNode; offset: 
     minHeight: node.height,
   };
   return (
-    <div className={cn("absolute flex items-center justify-center rounded-2xl border px-4 py-2.5 text-center shadow-sm", palette)} style={style}>
+    <div className={cn("notebook-mindmap-node-enter absolute flex items-center justify-center rounded-2xl border px-4 py-2.5 text-center shadow-sm transition-all duration-300 ease-out", palette)} style={style}>
       <div className={cn("font-semibold leading-5", node.depth === 0 ? "text-[15px]" : "text-[13px]")}>{node.label}</div>
+      {hasChildren && (
+        <button
+          type="button"
+          onClick={(event) => { event.stopPropagation(); onToggle(node.id); }}
+          className="absolute -right-3 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border border-white/80 bg-white text-indigo-500 shadow-sm transition hover:scale-105 hover:text-indigo-700 dark:border-surface-border dark:bg-surface-elevated"
+          aria-label={expanded ? "Collapse mind map branch" : "Expand mind map branch"}
+        >
+          <ChevronRight className={cn("h-3.5 w-3.5 transition-transform duration-300", expanded && "rotate-90")} />
+        </button>
+      )}
     </div>
   );
 }

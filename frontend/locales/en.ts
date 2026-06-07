@@ -202,6 +202,7 @@ const translations: Record<string, string> = {
   "notebook.studio.briefingActionExport": "Promote mature content into a report, table, or presentation.",
   "notebook.studio.loadFailed": "Failed to load Studio output files",
   "notebook.studio.saveFailed": "Failed to save Studio output file",
+  "notebook.studio.selectSourcesFirst": "Select at least one source on the left first",
   "notebook.studio.renameOutput": "Rename output file",
   "notebook.studio.copyOutput": "Copy as Markdown",
   "notebook.studio.downloadOutput": "Download output file",
