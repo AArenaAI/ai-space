@@ -81,11 +81,17 @@ function statusDetail(file: NotebookFile, t: Translate) {
   return null;
 }
 
+function normalizeFlashcardArtifactTitle(title: string) {
+  const trimmed = title.trim();
+  if (trimmed === "摘要") return "闪卡";
+  return trimmed.replace(/([·•]\s*)摘要$/, "$1闪卡");
+}
+
 function toStudioArtifact(artifact: PersistedNotebookArtifact): NotebookStudioArtifact | null {
   const content = artifact.content as { rows?: NotebookStudioTableRow[]; sections?: NotebookStudioTextSection[]; nodes?: NotebookStudioMindmapNode[]; edges?: NotebookStudioMindmapEdge[]; cards?: NotebookStudioFlashcard[] } | null;
   const base = {
     id: String(artifact.id),
-    title: artifact.title,
+    title: artifact.type === "flashcards" ? normalizeFlashcardArtifactTitle(artifact.title) : artifact.title,
     subtitle: artifact.subtitle || "",
     createdAt: artifact.created_at,
     sourceCount: artifact.source_count || 0,
@@ -647,7 +653,6 @@ function NotebookDetailContent() {
   const handleExplainFlashcard = (card: NotebookStudioFlashcard) => {
     const content = t("notebook.studio.flashcardExplainPrompt", { front: card.front, back: card.back });
     setExternalChatSendRequest({ id: Date.now(), content });
-    toast.success(t("notebook.studio.flashcardExplainSent"));
   };
 
   const handleRename = async () => {

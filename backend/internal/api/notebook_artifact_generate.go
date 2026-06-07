@@ -300,7 +300,9 @@ func parseAINotebookArtifactResponse(body []byte, fallback generatedNotebookArti
 	if len(ai.Content) == 0 || !json.Valid(ai.Content) {
 		return generatedNotebookArtifactDraft{}, fmt.Errorf("AI artifact content is not valid JSON")
 	}
-	fallback.Title = fallbackText(ai.Title, fallback.Title)
+	if fallback.Type != "flashcards" {
+		fallback.Title = fallbackText(ai.Title, fallback.Title)
+	}
 	fallback.Subtitle = fallbackText(ai.Subtitle, fallback.Subtitle)
 	fallback.Content = sanitizeNotebookArtifactContent(fallback.Type, ai.Content)
 	return fallback, nil
@@ -1228,6 +1230,8 @@ func notebookGeneratedArtifactTitle(generationType string, notebookTitle string)
 		return fmt.Sprintf("%s · 简报", notebookTitle)
 	case "mindmap":
 		return fmt.Sprintf("%s · 思维导图", notebookTitle)
+	case "flashcards":
+		return fmt.Sprintf("%s · 闪卡", notebookTitle)
 	default:
 		return fmt.Sprintf("%s · 摘要", notebookTitle)
 	}

@@ -138,6 +138,24 @@ func TestBuildAINotebookArtifactDraftCleansAIReturnedFlashcards(t *testing.T) {
 	}
 }
 
+func TestBuildAINotebookArtifactDraftKeepsFlashcardTitleWhenAIReturnsSummaryTitle(t *testing.T) {
+	files := []models.File{
+		{ID: 1, Filename: "产品方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "产品定位", Content: "AI Space 技能系统预设了 9 种角色。"},
+	}
+	ai := &fakeNotebookAIService{response: `{"title":"摘要","subtitle":"AI 副标题","content":{"cards":[{"front":"技能系统预设了多少种角色？","back":"技能系统预设了 9 种角色。","source":""}]}}`}
+
+	draft, err := buildAINotebookArtifactDraft(context.Background(), ai, "flashcards", "测试 1", files, []uint{1}, "zh-CN")
+	if err != nil {
+		t.Fatalf("flashcard AI draft should succeed: %v", err)
+	}
+	if draft.Title == "摘要" || strings.Contains(draft.Title, "摘要") {
+		t.Fatalf("flashcards should not use a generic AI summary title, got %q", draft.Title)
+	}
+	if !strings.Contains(draft.Title, "闪卡") {
+		t.Fatalf("flashcards should keep a flashcard-specific title, got %q", draft.Title)
+	}
+}
+
 func TestBuildAINotebookMindmapRejectsInvalidAIInsteadOfFallback(t *testing.T) {
 	files := []models.File{
 		{ID: 1, Filename: "产品方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "产品定位", Content: "AI Space 是企业级多模型 AI 聚合平台。"},
