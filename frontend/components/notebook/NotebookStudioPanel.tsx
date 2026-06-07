@@ -385,7 +385,7 @@ function MindmapArtifactView({ artifact, onDownload }: { artifact: Extract<Noteb
         .notebook-mindmap-node-enter { animation: notebookMindmapNodeEnter 260ms ease-out both; }
         .notebook-mindmap-connector-enter { animation: notebookMindmapConnectorEnter 300ms ease-out both; }
       `}</style>
-      <div className="absolute left-3 top-3 z-10 flex flex-col overflow-hidden rounded-xl border border-surface-border bg-white/95 shadow-sm dark:bg-surface-card/95">
+      <div className="absolute left-3 top-3 z-10 flex flex-col overflow-hidden rounded-xl border border-surface-border bg-surface-card/95 shadow-sm ">
         <button className="p-2 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" type="button" onClick={expandAll} title="Expand all"><ChevronsRight className="h-3.5 w-3.5" /></button>
         <button className="border-t border-surface-border p-2 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" type="button" onClick={() => zoomAtCenter(scale + 0.15)} title="Zoom in"><ZoomIn className="h-3.5 w-3.5" /></button>
         <button className="border-t border-surface-border p-2 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" type="button" onClick={() => zoomAtCenter(scale - 0.15)} title="Zoom out"><ZoomOut className="h-3.5 w-3.5" /></button>
@@ -434,7 +434,7 @@ function MindmapCanvasNode({ node, fullNode, offset, expanded, onToggle }: { nod
         <button
           type="button"
           onClick={(event) => { event.stopPropagation(); onToggle(node.id); }}
-          className="absolute -right-3 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border border-white/80 bg-white text-indigo-500 shadow-sm transition hover:scale-105 hover:text-indigo-700 dark:border-surface-border dark:bg-surface-elevated"
+          className="absolute -right-3 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border border-surface-border bg-surface-card text-indigo-500 shadow-sm transition hover:scale-105 hover:text-indigo-700 "
           aria-label={expanded ? "Collapse mind map branch" : "Expand mind map branch"}
         >
           <ChevronRight className={cn("h-3.5 w-3.5 transition-transform duration-300", expanded && "rotate-90")} />
@@ -502,7 +502,7 @@ function ArtifactMenu({
   };
   return (
     <div className={cn("relative", floating ? "absolute right-2 top-1/2 z-20 -translate-y-1/2" : "ml-auto")}>
-      <button type="button" onClick={onToggle} className="rounded-lg p-1.5 text-text-tertiary hover:bg-black/[0.06] hover:text-text-primary" title={t("notebook.studio.moreActions")}>
+      <button type="button" onClick={onToggle} className="rounded-lg p-1.5 text-text-tertiary hover:bg-surface-elevated hover:text-text-primary" title={t("notebook.studio.moreActions")}>
         <MoreHorizontal className="h-4 w-4" />
       </button>
       {open && (
@@ -551,7 +551,7 @@ export function NotebookStudioPanel({
 
   return (
     <>
-    <aside className="flex h-full shrink-0 flex-col overflow-hidden rounded-[28px] border border-black/[0.06] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]" style={{ width }}>
+    <aside className="flex h-full shrink-0 flex-col overflow-hidden rounded-[28px] border border-surface-border bg-surface-card shadow-sm" style={{ width }}>
       {activeArtifact ? (
         <div className="flex min-h-0 flex-1 flex-col bg-surface-card">
           <div className="flex items-start gap-3 border-b border-surface-border bg-surface-card px-4 py-4">
@@ -597,25 +597,25 @@ export function NotebookStudioPanel({
         </div>
       ) : (
       <>
-      <div className="flex items-center justify-between border-b border-black/[0.06] px-5 py-4">
-        <h2 className="text-[22px] font-semibold tracking-[-0.02em] text-[#202124]">Studio</h2>
-        <button type="button" className="rounded-full p-2 text-text-tertiary transition hover:bg-black/[0.05] hover:text-text-primary" title="Studio">
+      <div className="flex items-center justify-between border-b border-surface-border px-5 py-4">
+        <h2 className="text-[22px] font-semibold tracking-[-0.02em] text-text-primary">Studio</h2>
+        <button type="button" className="rounded-full p-2 text-text-tertiary transition hover:bg-surface-elevated hover:text-text-primary" title="Studio">
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>
 
-      <div className="border-b border-black/[0.06] px-4 py-4">
+      <div className="border-b border-surface-border px-4 py-4">
         <div className="grid grid-cols-2 gap-2.5">
           {actions.map((action) => {
             const Icon = actionIconMap[action.id];
             const isGenerating = generatingType === action.id;
             return (
-              <button key={action.id} type="button" onClick={() => onGenerate(action.id)} disabled={Boolean(generatingType)} className="group flex min-h-[72px] items-center gap-3 rounded-2xl border border-black/[0.06] bg-[#f8f7f4] px-3 py-3 text-left transition hover:border-black/15 hover:bg-white hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-70">
+              <button key={action.id} type="button" onClick={() => onGenerate(action.id)} disabled={Boolean(generatingType)} className="group flex min-h-[72px] items-center gap-3 rounded-2xl border border-surface-border bg-surface-elevated px-3 py-3 text-left transition hover:border-surface-border hover:bg-surface-card hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-70">
                 <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br", action.accent)}>
                   {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-semibold text-[#202124]">{action.title}</div>
+                  <div className="truncate text-sm font-semibold text-text-primary">{action.title}</div>
                   <div className="mt-0.5 flex items-center gap-1 text-[11px] text-text-tertiary">
                     <span className="truncate">{action.id === "slides" || action.id === "briefing" ? t("notebook.studio.beta") : t("notebook.studio.basedOnSources", { count: String(selectedSourceCount) })}</span>
                   </div>
@@ -629,13 +629,13 @@ export function NotebookStudioPanel({
 
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex items-center justify-between px-5 py-3">
-          <h3 className="text-sm font-semibold text-[#202124]">{t("notebook.studio.outputs")}</h3>
+          <h3 className="text-sm font-semibold text-text-primary">{t("notebook.studio.outputs")}</h3>
           <MoreHorizontal className="h-4 w-4 text-text-tertiary" />
         </div>
         {(generatingType === "table" || generatingType === "mindmap") && <div className="px-4 pb-2"><GeneratingStudioCard type={generatingType} sourceCount={selectedSourceCount} t={t} /></div>}
         {artifacts.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
-            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#f8f7f4] text-text-tertiary"><Layers3 className="h-5 w-5" /></div>
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-elevated text-text-tertiary"><Layers3 className="h-5 w-5" /></div>
             <p className="text-sm font-medium text-text-primary">{t("notebook.studio.emptyTitle")}</p>
             <p className="mt-2 text-xs leading-5 text-text-tertiary">{t("notebook.studio.emptyDesc")}</p>
           </div>
@@ -645,15 +645,15 @@ export function NotebookStudioPanel({
               {artifacts.map((artifact) => {
                 const Icon = artifactIconMap[artifact.type];
                 return (
-                  <div key={artifact.id} className="group relative rounded-2xl transition hover:bg-[#f8f7f4]">
+                  <div key={artifact.id} className="group relative rounded-2xl transition hover:bg-surface-elevated">
                     <button type="button" onClick={() => onOpenArtifact(artifact.id)} className="flex w-full items-center gap-3 px-3 py-2.5 pr-14 text-left">
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600"><Icon className="h-4 w-4" /></div>
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium text-[#202124]">{artifact.title}</div>
+                        <div className="truncate text-sm font-medium text-text-primary">{artifact.title}</div>
                         <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-text-tertiary"><span className="truncate">{artifact.subtitle}</span><span>·</span><span className="shrink-0">{formatTime(artifact.createdAt)}</span></div>
                       </div>
                     </button>
-                    <button type="button" onClick={() => setViewerArtifactId(artifact.id)} className="absolute right-9 top-1/2 z-10 -translate-y-1/2 rounded-full p-1.5 text-text-tertiary opacity-0 transition hover:bg-white hover:text-text-primary group-hover:opacity-100" title={t("notebook.studio.expandViewer")}>
+                    <button type="button" onClick={() => setViewerArtifactId(artifact.id)} className="absolute right-9 top-1/2 z-10 -translate-y-1/2 rounded-full p-1.5 text-text-tertiary opacity-0 transition hover:bg-surface-card hover:text-text-primary group-hover:opacity-100" title={t("notebook.studio.expandViewer")}>
                       <Maximize2 className="h-3.5 w-3.5" />
                     </button>
                     <ArtifactMenu
@@ -674,8 +674,8 @@ export function NotebookStudioPanel({
             </div>
           </div>
         )}
-        <div className="border-t border-black/[0.06] px-4 py-3">
-          <button type="button" className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-full bg-black px-4 text-sm font-medium text-white transition hover:bg-black/80">
+        <div className="border-t border-surface-border px-4 py-3">
+          <button type="button" className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-full bg-brand px-4 text-sm font-medium text-white transition hover:bg-brand-hover">
             <Pencil className="h-4 w-4" />
             {t("notebook.studio.summary")}
           </button>
