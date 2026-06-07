@@ -1,7 +1,7 @@
 "use client";
 
-import { CSSProperties, useEffect, useMemo, useState } from "react";
-import { BarChart3, ChevronLeft, ChevronRight, Copy, Download, ExternalLink, FileQuestion, FileText, Layers3, Loader2, Map as MapIcon, Maximize2, Minus, MoreHorizontal, Pencil, Plus, Presentation, RefreshCw, Sparkles, Table2, Trash2, X } from "lucide-react";
+import { CSSProperties, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { BarChart3, ChevronLeft, ChevronRight, ChevronsRight, Copy, Download, ExternalLink, FileQuestion, FileText, Layers3, Loader2, Map as MapIcon, Maximize2, MoreHorizontal, Pencil, Presentation, RefreshCw, Sparkles, Table2, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -230,18 +230,34 @@ function layoutMindmap(root: MindmapBranch) {
   };
 }
 
-function MindmapArtifactView({ artifact }: { artifact: Extract<NotebookStudioArtifact, { type: "mindmap" }> }) {
+function MindmapArtifactView({ artifact, onDownload }: { artifact: Extract<NotebookStudioArtifact, { type: "mindmap" }>; onDownload?: (artifact: NotebookStudioArtifact) => void }) {
   const root = useMemo(() => buildMindmapTree(artifact), [artifact]);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; startPanX: number; startPanY: number } | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [scale, setScale] = useState(1);
+  const [dragging, setDragging] = useState(false);
 
   useEffect(() => {
     if (!root) return;
     setExpandedIds(getDefaultExpandedMindmapIds(root));
+    setScale(1);
+    setPan({ x: 0, y: 0 });
   }, [root?.id]);
 
   const visibleRoot = useMemo(() => (root ? getVisibleMindmapTree(root, expandedIds) : null), [root, expandedIds]);
   const layout = useMemo(() => (visibleRoot ? layoutMindmap(visibleRoot) : null), [visibleRoot]);
   if (!root || !visibleRoot || !layout) return null;
+
+  const fullNodeById = new Map<string, MindmapBranch>();
+  const allExpandableIds: string[] = [];
+  const collect = (node: MindmapBranch) => {
+    fullNodeById.set(node.id, node);
+    if (node.children.length) allExpandableIds.push(node.id);
+    node.children.forEach(collect);
+  };
+  collect(root);
 
   const toggleNode = (nodeId: string) => {
     setExpandedIds((prev) => {
@@ -252,15 +268,60 @@ function MindmapArtifactView({ artifact }: { artifact: Extract<NotebookStudioArt
     });
   };
 
-  const fullNodeById = new Map<string, MindmapBranch>();
-  const collect = (node: MindmapBranch) => {
-    fullNodeById.set(node.id, node);
-    node.children.forEach(collect);
+  const expandAll = () => setExpandedIds(new Set(allExpandableIds));
+
+  const zoomAtCenter = (nextScale: number) => {
+    const viewport = viewportRef.current;
+    const clampedScale = Math.min(1.8, Math.max(0.5, nextScale));
+    if (!viewport) {
+      setScale(clampedScale);
+      return;
+    }
+    const rect = viewport.getBoundingClientRect();
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+    setPan((currentPan) => {
+      const canvasCenterX = (centerX - currentPan.x) / scale;
+      const canvasCenterY = (centerY - currentPan.y) / scale;
+      return {
+        x: centerX - canvasCenterX * clampedScale,
+        y: centerY - canvasCenterY * clampedScale,
+      };
+    });
+    setScale(clampedScale);
   };
-  collect(root);
+
+  const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest("button")) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, startPanX: pan.x, startPanY: pan.y };
+    setDragging(true);
+  };
+
+  const moveDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    setPan({ x: drag.startPanX + event.clientX - drag.startX, y: drag.startPanY + event.clientY - drag.startY });
+  };
+
+  const stopDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId === event.pointerId) {
+      dragRef.current = null;
+      setDragging(false);
+    }
+  };
 
   return (
-    <div className="relative min-h-0 flex-1 overflow-auto rounded-xl border border-surface-border bg-[#f8fafc] p-0 dark:bg-surface-card">
+    <div
+      ref={viewportRef}
+      className={cn("relative min-h-0 flex-1 overflow-hidden rounded-xl border border-surface-border bg-[#f8fafc] p-0 touch-none select-none dark:bg-surface-card", dragging ? "cursor-grabbing" : "cursor-grab")}
+      onPointerDown={startDrag}
+      onPointerMove={moveDrag}
+      onPointerUp={stopDrag}
+      onPointerCancel={stopDrag}
+    >
       <style>{`
         @keyframes notebookMindmapNodeEnter {
           from { opacity: 0; transform: translateX(-12px) scale(0.94); }
@@ -274,11 +335,15 @@ function MindmapArtifactView({ artifact }: { artifact: Extract<NotebookStudioArt
         .notebook-mindmap-connector-enter { animation: notebookMindmapConnectorEnter 300ms ease-out both; }
       `}</style>
       <div className="absolute left-3 top-3 z-10 flex flex-col overflow-hidden rounded-xl border border-surface-border bg-white/95 shadow-sm dark:bg-surface-card/95">
-        <button className="p-2 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" type="button"><Plus className="h-3.5 w-3.5" /></button>
-        <button className="border-t border-surface-border p-2 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" type="button"><Minus className="h-3.5 w-3.5" /></button>
-        <button className="border-t border-surface-border p-2 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" type="button"><Download className="h-3.5 w-3.5" /></button>
+        <button className="p-2 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" type="button" onClick={expandAll} title="Expand all"><ChevronsRight className="h-3.5 w-3.5" /></button>
+        <button className="border-t border-surface-border p-2 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" type="button" onClick={() => zoomAtCenter(scale + 0.15)} title="Zoom in"><ZoomIn className="h-3.5 w-3.5" /></button>
+        <button className="border-t border-surface-border p-2 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" type="button" onClick={() => zoomAtCenter(scale - 0.15)} title="Zoom out"><ZoomOut className="h-3.5 w-3.5" /></button>
+        <button className="border-t border-surface-border p-2 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" type="button" onClick={() => onDownload?.(artifact)} title="Download"><Download className="h-3.5 w-3.5" /></button>
       </div>
-      <div className="relative transition-[width,height] duration-300 ease-out" style={{ width: layout.width, height: layout.height }}>
+      <div
+        className="absolute left-0 top-0 transition-[width,height] duration-300 ease-out"
+        style={{ width: layout.width, height: layout.height, transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`, transformOrigin: "0 0" }}
+      >
         <svg className="pointer-events-none absolute inset-0" width={layout.width} height={layout.height} aria-hidden="true">
           {layout.connectors.map(({ from, to }) => {
             const startX = layout.padding.left + from.x + from.width;
@@ -328,12 +393,12 @@ function MindmapCanvasNode({ node, fullNode, offset, expanded, onToggle }: { nod
   );
 }
 
-function renderActiveArtifact(artifact: NotebookStudioArtifact, t: (key: string, params?: Record<string, string>) => string, expanded = false) {
+function renderActiveArtifact(artifact: NotebookStudioArtifact, t: (key: string, params?: Record<string, string>) => string, expanded = false, onDownloadArtifact?: (artifact: NotebookStudioArtifact) => void) {
   switch (artifact.type) {
     case "table":
       return renderTableArtifact(artifact, t, expanded);
     case "mindmap":
-      return <MindmapArtifactView artifact={artifact} />;
+      return <MindmapArtifactView artifact={artifact} onDownload={onDownloadArtifact} />;
     default:
       return renderTextArtifact(artifact);
   }
@@ -460,7 +525,7 @@ export function NotebookStudioPanel({
             />
           </div>
           <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-surface-card p-4">
-            {renderActiveArtifact(activeArtifact, t, true)}
+            {renderActiveArtifact(activeArtifact, t, true, onDownloadArtifact)}
             <div className="mt-3 flex items-center gap-2 border-t border-surface-border pt-3">
               <button type="button" className="rounded-full border border-surface-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-emerald-500/40 hover:text-emerald-500">{t("notebook.studio.good")}</button>
               <button type="button" className="rounded-full border border-surface-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-red-500/40 hover:text-red-500">{t("notebook.studio.bad")}</button>
@@ -565,7 +630,7 @@ export function NotebookStudioPanel({
             </button>
           </div>
           <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-surface-card p-5">
-            {renderActiveArtifact(viewerArtifact, t, true)}
+            {renderActiveArtifact(viewerArtifact, t, true, onDownloadArtifact)}
           </div>
         </div>
       </div>
