@@ -1,6 +1,6 @@
 "use client";
 
-import { CSSProperties, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { CSSProperties, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
 import { BarChart3, ChevronLeft, ChevronRight, ChevronsRight, Copy, Download, ExternalLink, FileQuestion, FileText, Layers3, Loader2, Map as MapIcon, Maximize2, MoreHorizontal, Pencil, Presentation, RefreshCw, Sparkles, Table2, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -270,25 +270,37 @@ function MindmapArtifactView({ artifact, onDownload }: { artifact: Extract<Noteb
 
   const expandAll = () => setExpandedIds(new Set(allExpandableIds));
 
-  const zoomAtCenter = (nextScale: number) => {
-    const viewport = viewportRef.current;
+  const zoomAtViewportPoint = (nextScale: number, anchorX: number, anchorY: number) => {
     const clampedScale = Math.min(1.8, Math.max(0.5, nextScale));
-    if (!viewport) {
-      setScale(clampedScale);
-      return;
-    }
-    const rect = viewport.getBoundingClientRect();
-    const centerX = rect.width / 2;
-    const centerY = rect.height / 2;
     setPan((currentPan) => {
-      const canvasCenterX = (centerX - currentPan.x) / scale;
-      const canvasCenterY = (centerY - currentPan.y) / scale;
+      const canvasAnchorX = (anchorX - currentPan.x) / scale;
+      const canvasAnchorY = (anchorY - currentPan.y) / scale;
       return {
-        x: centerX - canvasCenterX * clampedScale,
-        y: centerY - canvasCenterY * clampedScale,
+        x: anchorX - canvasAnchorX * clampedScale,
+        y: anchorY - canvasAnchorY * clampedScale,
       };
     });
     setScale(clampedScale);
+  };
+
+  const zoomAtCenter = (nextScale: number) => {
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      setScale(Math.min(1.8, Math.max(0.5, nextScale)));
+      return;
+    }
+    const rect = viewport.getBoundingClientRect();
+    zoomAtViewportPoint(nextScale, rect.width / 2, rect.height / 2);
+  };
+
+  const handleWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const anchorX = event.clientX - rect.left;
+    const anchorY = event.clientY - rect.top;
+    const zoomStep = Math.max(-0.25, Math.min(0.25, -event.deltaY / 900));
+    zoomAtViewportPoint(scale + zoomStep, anchorX, anchorY);
   };
 
   const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -321,6 +333,7 @@ function MindmapArtifactView({ artifact, onDownload }: { artifact: Extract<Noteb
       onPointerMove={moveDrag}
       onPointerUp={stopDrag}
       onPointerCancel={stopDrag}
+      onWheel={handleWheel}
     >
       <style>{`
         @keyframes notebookMindmapNodeEnter {
