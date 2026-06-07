@@ -269,6 +269,8 @@ const translations: Record<string, string> = {
   "notebook.selectAllSources": "全选",
   "notebook.selectedSources": "已选择 {selected}/{total} 个资料参与回答",
   "notebook.sources": "资料源",
+  "notebook.sourcesTitle": "来源",
+  "notebook.sourcesEmpty": "暂无来源文件信息",
   "notebook.sourcesHint": "解析完成后会进入问答上下文",
   "notebook.statusDone": "已完成",
   "notebook.statusError": "失败",

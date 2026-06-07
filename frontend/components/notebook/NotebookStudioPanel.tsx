@@ -35,6 +35,12 @@ export type NotebookStudioMindmapEdge = {
   label?: string;
 };
 
+export type NotebookStudioSource = {
+  id: number;
+  filename: string;
+  mimeType?: string;
+};
+
 export type NotebookStudioArtifact =
   | {
       id: string;
@@ -71,6 +77,7 @@ type NotebookStudioPanelProps = {
   activeArtifactId: string | null;
   generatingType?: NotebookStudioActionId | null;
   selectedSourceCount?: number;
+  sourceFiles?: NotebookStudioSource[];
   onGenerate: (type: NotebookStudioActionId) => void;
   onOpenArtifact: (artifactId: string | null) => void;
   onRenameArtifact?: (artifact: NotebookStudioArtifact) => void;
@@ -101,6 +108,37 @@ function formatTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function sourceAccent(source: NotebookStudioSource) {
+  const name = source.filename.toLowerCase();
+  const mime = (source.mimeType || "").toLowerCase();
+  if (mime.includes("pdf") || name.endsWith(".pdf")) return "bg-red-500/10 text-red-500";
+  if (mime.startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(name)) return "bg-rose-500/10 text-rose-500";
+  return "bg-blue-500/10 text-blue-500";
+}
+
+function SourcePopover({ sources, title, emptyLabel }: { sources: NotebookStudioSource[]; title: string; emptyLabel: string }) {
+  return (
+    <div className="absolute left-0 top-full z-30 mt-2 w-72 rounded-2xl border border-surface-border bg-surface-card p-3 text-left shadow-2xl">
+      <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-text-primary">
+        <FileText className="h-4 w-4 text-text-tertiary" />
+        <span>{title}</span>
+      </div>
+      {sources.length ? (
+        <div className="space-y-1.5">
+          {sources.map((source) => (
+            <div key={source.id} className="flex items-center gap-2 rounded-xl px-2 py-2 text-xs text-text-secondary hover:bg-surface-hover">
+              <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-lg", sourceAccent(source))}><FileText className="h-3.5 w-3.5" /></span>
+              <span className="min-w-0 flex-1 truncate font-medium text-text-primary">{source.filename}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-xl bg-surface-elevated px-3 py-2 text-xs text-text-tertiary">{emptyLabel}</div>
+      )}
+    </div>
+  );
 }
 
 function renderTextArtifact(artifact: Extract<NotebookStudioArtifact, { type: "summary" | "faq" | "briefing" }>) {
@@ -484,6 +522,7 @@ export function NotebookStudioPanel({
   activeArtifactId,
   generatingType,
   selectedSourceCount = 0,
+  sourceFiles = [],
   onGenerate,
   onOpenArtifact,
   onRenameArtifact,
@@ -495,8 +534,10 @@ export function NotebookStudioPanel({
   const { t } = useI18n();
   const [openMenuArtifactId, setOpenMenuArtifactId] = useState<string | null>(null);
   const [viewerArtifactId, setViewerArtifactId] = useState<string | null>(null);
+  const [sourcePopoverKey, setSourcePopoverKey] = useState<string | null>(null);
   const activeArtifact = artifacts.find((artifact) => artifact.id === activeArtifactId) || null;
   const viewerArtifact = artifacts.find((artifact) => artifact.id === viewerArtifactId) || null;
+  const sourcesForArtifact = (artifact: NotebookStudioArtifact) => sourceFiles.slice(0, Math.max(0, artifact.sourceCount || 0));
   const actions: Array<{ id: NotebookStudioActionId; title: string; desc: string; accent: string }> = [
     { id: "table", title: t("notebook.studio.table"), desc: t("notebook.studio.tableDesc"), accent: "from-emerald-500/15 to-cyan-500/10 text-emerald-500" },
     { id: "summary", title: t("notebook.studio.summary"), desc: t("notebook.studio.summaryDesc"), accent: "from-brand/15 to-purple-500/10 text-brand" },
@@ -518,9 +559,16 @@ export function NotebookStudioPanel({
             <div className="min-w-0 flex-1">
               <div className="text-[11px] font-medium leading-4 text-text-tertiary">Studio &gt; {activeArtifact.type === "table" ? t("notebook.studio.table") : activeArtifact.type}</div>
               <h3 className="mt-1 line-clamp-2 text-lg font-bold leading-6 tracking-[-0.01em] text-text-primary">{activeArtifact.title}</h3>
-              <button type="button" className="mt-2.5 rounded-full border border-surface-border bg-surface-elevated px-3 py-1 text-[11px] font-medium text-text-secondary hover:border-brand-border hover:text-brand">
-                {t("notebook.studio.viewSources", { count: String(activeArtifact.sourceCount) })}
-              </button>
+              <div className="relative mt-2.5 inline-block">
+                <button
+                  type="button"
+                  onClick={() => setSourcePopoverKey((current) => current === `active-${activeArtifact.id}` ? null : `active-${activeArtifact.id}`)}
+                  className="rounded-full border border-surface-border bg-surface-elevated px-3 py-1 text-[11px] font-medium text-text-secondary hover:border-brand-border hover:text-brand"
+                >
+                  {t("notebook.studio.viewSources", { count: String(activeArtifact.sourceCount) })}
+                </button>
+                {sourcePopoverKey === `active-${activeArtifact.id}` && <SourcePopover sources={sourcesForArtifact(activeArtifact)} title={t("notebook.sourcesTitle")} emptyLabel={t("notebook.sourcesEmpty")} />}
+              </div>
             </div>
             <button type="button" onClick={() => setViewerArtifactId(activeArtifact.id)} className="mt-1 rounded-full p-2 text-text-tertiary transition hover:bg-surface-hover hover:text-text-primary" title={t("notebook.studio.expandViewer")}>
               <Maximize2 className="h-4 w-4" />
@@ -636,7 +684,20 @@ export function NotebookStudioPanel({
             <div className="min-w-0 flex-1">
               <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-text-tertiary">Studio Viewer</div>
               <h3 className="mt-1 line-clamp-2 text-xl font-bold tracking-[-0.01em] text-text-primary">{viewerArtifact.title}</h3>
-              <div className="mt-2 text-xs text-text-tertiary">{viewerArtifact.subtitle} · {t("notebook.studio.viewSources", { count: String(viewerArtifact.sourceCount) })}</div>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-tertiary">
+                <span>{viewerArtifact.subtitle}</span>
+                <span>·</span>
+                <span className="relative inline-block">
+                  <button
+                    type="button"
+                    onClick={() => setSourcePopoverKey((current) => current === `viewer-${viewerArtifact.id}` ? null : `viewer-${viewerArtifact.id}`)}
+                    className="rounded-full border border-surface-border bg-surface-elevated px-2.5 py-1 text-[11px] font-medium text-text-secondary hover:border-brand-border hover:text-brand"
+                  >
+                    {t("notebook.studio.viewSources", { count: String(viewerArtifact.sourceCount) })}
+                  </button>
+                  {sourcePopoverKey === `viewer-${viewerArtifact.id}` && <SourcePopover sources={sourcesForArtifact(viewerArtifact)} title={t("notebook.sourcesTitle")} emptyLabel={t("notebook.sourcesEmpty")} />}
+                </span>
+              </div>
             </div>
             <button type="button" onClick={() => setViewerArtifactId(null)} className="rounded-full p-2 text-text-tertiary transition hover:bg-surface-hover hover:text-text-primary" title={t("common.close")}>
               <X className="h-5 w-5" />

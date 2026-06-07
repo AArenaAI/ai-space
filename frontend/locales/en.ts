@@ -269,6 +269,8 @@ const translations: Record<string, string> = {
   "notebook.selectAllSources": "Select all",
   "notebook.selectedSources": "{selected}/{total} sources selected for answers",
   "notebook.sources": "Sources",
+  "notebook.sourcesTitle": "Sources",
+  "notebook.sourcesEmpty": "No source file details available",
   "notebook.sourcesHint": "Parsed sources enter the chat context",
   "notebook.statusDone": "Done",
   "notebook.statusError": "Error",

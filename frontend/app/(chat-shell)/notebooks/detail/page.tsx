@@ -7,7 +7,7 @@ import { ArrowLeft, BookOpen, FileText, Globe, Loader2, Plus, Trash2, UploadClou
 import { toast } from "sonner";
 import ChatInterface from "@/components/chat/ChatInterface";
 import { NotebookSourcePreviewDrawer } from "@/components/notebook/NotebookSourcePreviewDrawer";
-import { NotebookStudioPanel, type NotebookStudioActionId, type NotebookStudioArtifact, type NotebookStudioMindmapEdge, type NotebookStudioMindmapNode, type NotebookStudioTableRow, type NotebookStudioTextSection } from "@/components/notebook/NotebookStudioPanel";
+import { NotebookStudioPanel, type NotebookStudioActionId, type NotebookStudioArtifact, type NotebookStudioMindmapEdge, type NotebookStudioMindmapNode, type NotebookStudioSource, type NotebookStudioTableRow, type NotebookStudioTextSection } from "@/components/notebook/NotebookStudioPanel";
 import { NotebookUrlSourceDialog } from "@/components/notebook/NotebookUrlSourceDialog";
 import { MODELS } from "@/hooks/useChat";
 import { addNotebookFile, addNotebookUrlSource, deleteNotebookArtifact, fetchNotebook, fetchNotebookArtifacts, fetchNotebookFileContent, generateNotebookArtifact, removeNotebookFile, updateNotebook, updateNotebookArtifact } from "@/lib/notebookApi";
@@ -240,6 +240,12 @@ function NotebookDetailContent() {
   }, [notebookId, selectedFileIds]);
 
   const readyCount = useMemo(() => files.filter(isNotebookFileReady).length, [files]);
+
+  const studioSourceFiles = useMemo<NotebookStudioSource[]>(() => files.map((file) => ({
+    id: file.file_id,
+    filename: file.file.filename,
+    mimeType: file.file.mime_type,
+  })), [files]);
 
   const hasProcessingFiles = useMemo(() => files.some(isNotebookFileProcessing), [files]);
 
@@ -804,6 +810,7 @@ function NotebookDetailContent() {
         activeArtifactId={activeStudioArtifactId}
         generatingType={generatingStudioType}
         selectedSourceCount={selectedFileIds.length}
+        sourceFiles={studioSourceFiles}
         onGenerate={handleStudioGenerate}
         onOpenArtifact={setActiveStudioArtifactId}
         onRenameArtifact={handleRenameArtifact}
