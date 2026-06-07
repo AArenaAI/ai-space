@@ -29,16 +29,29 @@ func (h *VideoChatHandler) AutoMigrate() {
 }
 
 type videoChatRequest struct {
-	Prompt          string   `json:"prompt" binding:"required"`
-	Model           string   `json:"model"`
-	Ratio           string   `json:"ratio"`
-	AspectRatio     string   `json:"aspect_ratio"`
-	Resolution      string   `json:"resolution"`
-	Duration        int64    `json:"duration"`
-	GenerateAudio   bool     `json:"generate_audio"`
-	Watermark       bool     `json:"watermark"`
-	ReferenceImages []string `json:"reference_image_urls"`
-	ReferenceVideos []string `json:"reference_video_urls"`
+	Prompt                 string   `json:"prompt" binding:"required"`
+	Model                  string   `json:"model"`
+	Ratio                  string   `json:"ratio"`
+	AspectRatio            string   `json:"aspect_ratio"`
+	Resolution             string   `json:"resolution"`
+	Duration               int64    `json:"duration"`
+	GenerateAudio          bool     `json:"generate_audio"`
+	Watermark              bool     `json:"watermark"`
+	ReferenceImages        []string `json:"reference_image_urls"`
+	ReferenceImageRoles    []string `json:"reference_image_roles"`
+	ReferenceVideos        []string `json:"reference_video_urls"`
+	ReferenceImageRoleMode string   `json:"reference_image_role_mode"`
+}
+
+func videoChatTitleFromPrompt(prompt string) string {
+	if prompt == "" {
+		return "新视频会话"
+	}
+	runes := []rune(prompt)
+	if len(runes) > 30 {
+		return string(runes[:30]) + "..."
+	}
+	return prompt
 }
 
 // ListVideoChats 获取用户的视频会话列表
@@ -122,13 +135,7 @@ func (h *VideoChatHandler) CreateVideoChat(c *gin.Context) {
 		return
 	}
 
-	title := req.Prompt
-	if title == "" {
-		title = "新视频会话"
-	}
-	if len(title) > 30 {
-		title = title[:30] + "..."
-	}
+	title := videoChatTitleFromPrompt(req.Prompt)
 	chat := models.VideoChat{UserID: userID, Title: title}
 	if err := h.db.Create(&chat).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建视频会话失败"})
@@ -309,13 +316,15 @@ func (h *VideoChatHandler) createVideoChatMessagesAndTask(userID uint, chatID ui
 	}
 
 	createReq := services.CreateVideoTaskRequest{
-		Model:         modelID,
-		Prompt:        req.Prompt,
-		Ratio:         ratio,
-		Resolution:    resolution,
-		Duration:      duration,
-		GenerateAudio: req.GenerateAudio,
-		Watermark:     req.Watermark,
+		Model:                  modelID,
+		Prompt:                 req.Prompt,
+		Ratio:                  ratio,
+		Resolution:             resolution,
+		Duration:               duration,
+		GenerateAudio:          req.GenerateAudio,
+		Watermark:              req.Watermark,
+		ReferenceImageRoleMode: req.ReferenceImageRoleMode,
+		ReturnLastFrame:        true,
 	}
 	createReq.ReferenceImages, err = resolveVideoReferenceURLs(h.db, h.cfg, userID, req.ReferenceImages, "image")
 	if err != nil {
@@ -325,6 +334,7 @@ func (h *VideoChatHandler) createVideoChatMessagesAndTask(userID uint, chatID ui
 		assistantMsg.ErrorMessage = errMsg
 		return &assistantMsg, err
 	}
+	createReq.ReferenceImageRoles = normalizedReferenceImageRoles(req.ReferenceImageRoles, len(createReq.ReferenceImages))
 	createReq.ReferenceVideos, err = resolveVideoReferenceURLs(h.db, h.cfg, userID, req.ReferenceVideos, "video")
 	if err != nil {
 		errMsg := cleanVideoGenerationErrorMessage(err)
@@ -392,18 +402,24 @@ func (h *VideoChatHandler) refreshPendingVideoChatMessages(chatID uint) {
 		}
 		updates := map[string]interface{}{"status": resp.Status, "updated_at": time.Now()}
 		videoUpdates := map[string]interface{}{"status": resp.Status, "updated_at": time.Now()}
+		if resp.LastFrameURL != "" {
+			updates["last_frame_url"] = resp.LastFrameURL
+			videoUpdates["last_frame_url"] = resp.LastFrameURL
+		}
 		if resp.Status == "succeeded" || resp.Status == "completed" {
-			localVideoURL, persistErr := persistRemoteVideoAsset(resp.VideoURL)
-			if persistErr != nil {
-				log.Printf("[VideoChat] persist video failed task=%s err=%v", msg.TaskID, persistErr)
-				cleanMsg := "视频生成成功了，但保存视频文件时失败，请稍后重试。"
-				updates["status"] = "failed"
-				updates["error_message"] = cleanMsg
-				videoUpdates["status"] = "failed"
-				videoUpdates["error_message"] = cleanMsg
-			} else {
-				updates["video_url"] = localVideoURL
-				videoUpdates["video_url"] = localVideoURL
+			if msg.VideoURL == "" {
+				localVideoURL, persistErr := persistRemoteVideoAsset(resp.VideoURL)
+				if persistErr != nil {
+					log.Printf("[VideoChat] persist video failed task=%s err=%v", msg.TaskID, persistErr)
+					cleanMsg := "视频生成成功了，但保存视频文件时失败，请稍后重试。"
+					updates["status"] = "failed"
+					updates["error_message"] = cleanMsg
+					videoUpdates["status"] = "failed"
+					videoUpdates["error_message"] = cleanMsg
+				} else {
+					updates["video_url"] = localVideoURL
+					videoUpdates["video_url"] = localVideoURL
+				}
 			}
 		}
 		if resp.Status == "failed" && resp.ErrorMessage != "" {

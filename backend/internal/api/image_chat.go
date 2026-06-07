@@ -23,6 +23,17 @@ type ImageChatHandler struct {
 	usageService *services.UsageService
 }
 
+func imageChatTitleFromPrompt(prompt string) string {
+	if prompt == "" {
+		return "新会话"
+	}
+	runes := []rune(prompt)
+	if len(runes) > 30 {
+		return string(runes[:30]) + "..."
+	}
+	return prompt
+}
+
 func NewImageChatHandler(db *gorm.DB, imageService *services.ImageService, videoService *services.VideoService, cfg *config.Config, usageService *services.UsageService) *ImageChatHandler {
 	return &ImageChatHandler{
 		db:           db,
@@ -135,13 +146,7 @@ func (h *ImageChatHandler) CreateImageChat(c *gin.Context) {
 	}
 
 	// 创建会话
-	title := req.Prompt
-	if title == "" {
-		title = "新会话"
-	}
-	if len(title) > 30 {
-		title = title[:30] + "..."
-	}
+	title := imageChatTitleFromPrompt(req.Prompt)
 	chat := models.ImageChat{
 		UserID: userID,
 		Title:  title,

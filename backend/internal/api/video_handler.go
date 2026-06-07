@@ -50,15 +50,17 @@ func (h *VideoHandler) ListVideos(c *gin.Context) {
 func (h *VideoHandler) CreateVideo(c *gin.Context) {
 	userID := getUserID(c)
 	var req struct {
-		Prompt          string   `json:"prompt" binding:"required"`
-		Model           string   `json:"model"`
-		Ratio           string   `json:"ratio"`
-		Resolution      string   `json:"resolution"`
-		Duration        int64    `json:"duration"`
-		GenerateAudio   bool     `json:"generate_audio"`
-		Watermark       bool     `json:"watermark"`
-		ReferenceImages []string `json:"reference_image_urls"`
-		ReferenceVideos []string `json:"reference_video_urls"`
+		Prompt                 string   `json:"prompt" binding:"required"`
+		Model                  string   `json:"model"`
+		Ratio                  string   `json:"ratio"`
+		Resolution             string   `json:"resolution"`
+		Duration               int64    `json:"duration"`
+		GenerateAudio          bool     `json:"generate_audio"`
+		Watermark              bool     `json:"watermark"`
+		ReferenceImages        []string `json:"reference_image_urls"`
+		ReferenceImageRoles    []string `json:"reference_image_roles"`
+		ReferenceVideos        []string `json:"reference_video_urls"`
+		ReferenceImageRoleMode string   `json:"reference_image_role_mode"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -76,19 +78,22 @@ func (h *VideoHandler) CreateVideo(c *gin.Context) {
 	}
 
 	createReq := services.CreateVideoTaskRequest{
-		Model:         modelID,
-		Prompt:        req.Prompt,
-		Ratio:         ratio,
-		Resolution:    resolution,
-		Duration:      duration,
-		GenerateAudio: req.GenerateAudio,
-		Watermark:     req.Watermark,
+		Model:                  modelID,
+		Prompt:                 req.Prompt,
+		Ratio:                  ratio,
+		Resolution:             resolution,
+		Duration:               duration,
+		GenerateAudio:          req.GenerateAudio,
+		Watermark:              req.Watermark,
+		ReferenceImageRoleMode: req.ReferenceImageRoleMode,
+		ReturnLastFrame:        true,
 	}
 	createReq.ReferenceImages, err = resolveVideoReferenceURLs(h.db, h.cfg, userID, req.ReferenceImages, "image")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": cleanVideoGenerationErrorMessage(err)})
 		return
 	}
+	createReq.ReferenceImageRoles = normalizedReferenceImageRoles(req.ReferenceImageRoles, len(createReq.ReferenceImages))
 	createReq.ReferenceVideos, err = resolveVideoReferenceURLs(h.db, h.cfg, userID, req.ReferenceVideos, "video")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": cleanVideoGenerationErrorMessage(err)})
@@ -155,13 +160,18 @@ func (h *VideoHandler) GetVideo(c *gin.Context) {
 		if err == nil && resp != nil {
 			video.Status = resp.Status
 			if resp.Status == "succeeded" || resp.Status == "completed" {
-				localVideoURL, persistErr := persistRemoteVideoAsset(resp.VideoURL)
-				if persistErr != nil {
-					log.Printf("[Video] persist video failed task=%s err=%v", video.TaskID, persistErr)
-					video.Status = "failed"
-					video.ErrorMessage = "视频生成成功了，但保存视频文件时失败，请稍后重试。"
-				} else {
-					video.VideoURL = localVideoURL
+				if resp.LastFrameURL != "" {
+					video.LastFrameURL = resp.LastFrameURL
+				}
+				if video.VideoURL == "" {
+					localVideoURL, persistErr := persistRemoteVideoAsset(resp.VideoURL)
+					if persistErr != nil {
+						log.Printf("[Video] persist video failed task=%s err=%v", video.TaskID, persistErr)
+						video.Status = "failed"
+						video.ErrorMessage = "视频生成成功了，但保存视频文件时失败，请稍后重试。"
+					} else {
+						video.VideoURL = localVideoURL
+					}
 				}
 			}
 			if resp.Status == "failed" && resp.ErrorMessage != "" {
@@ -213,13 +223,18 @@ func (h *VideoHandler) RefreshVideoStatus(c *gin.Context) {
 
 	video.Status = resp.Status
 	if resp.Status == "succeeded" || resp.Status == "completed" {
-		localVideoURL, persistErr := persistRemoteVideoAsset(resp.VideoURL)
-		if persistErr != nil {
-			log.Printf("[Video] persist video failed task=%s err=%v", video.TaskID, persistErr)
-			video.Status = "failed"
-			video.ErrorMessage = "视频生成成功了，但保存视频文件时失败，请稍后重试。"
-		} else {
-			video.VideoURL = localVideoURL
+		if resp.LastFrameURL != "" {
+			video.LastFrameURL = resp.LastFrameURL
+		}
+		if video.VideoURL == "" {
+			localVideoURL, persistErr := persistRemoteVideoAsset(resp.VideoURL)
+			if persistErr != nil {
+				log.Printf("[Video] persist video failed task=%s err=%v", video.TaskID, persistErr)
+				video.Status = "failed"
+				video.ErrorMessage = "视频生成成功了，但保存视频文件时失败，请稍后重试。"
+			} else {
+				video.VideoURL = localVideoURL
+			}
 		}
 	}
 	if resp.Status == "failed" && resp.ErrorMessage != "" {

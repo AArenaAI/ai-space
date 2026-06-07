@@ -84,3 +84,4 @@ frontend/playwright-report/
 *.pem
 .vercel
 translation-test-samples/
+.worktrees/

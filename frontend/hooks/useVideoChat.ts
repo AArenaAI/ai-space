@@ -19,6 +19,7 @@ export interface VideoChatMessage {
   status?: string;
   error_message?: string;
   video_url?: string;
+  last_frame_url?: string;
   model?: string;
   ratio?: string;
   duration?: number;
@@ -40,7 +41,9 @@ export interface VideoChatPayload {
   generate_audio?: boolean;
   watermark?: boolean;
   reference_image_urls?: string[];
+  reference_image_roles?: Array<"reference_image" | "first_frame" | "last_frame">;
   reference_video_urls?: string[];
+  reference_image_role_mode?: "auto" | "reference" | "first_frame" | "first_last_frame";
 }
 
 const API_BASE_URL = "";

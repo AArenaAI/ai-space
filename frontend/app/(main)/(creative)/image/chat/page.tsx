@@ -63,6 +63,8 @@ const QUALITIES = [
   { value: "auto", label: "Auto" },
 ];
 
+const IMAGE_CHAT_DRAFT_PROMPT_KEY = "ai-space.imageChatDraftPrompt.v1";
+
 function cleanImageErrorMessage(raw: string | null | undefined, t: (key: string) => string): string {
   return normalizeError(raw || "", {
     module: "image",
@@ -167,10 +169,12 @@ function ReferenceImageStack({
           type="button"
           onClick={onAdd}
           disabled={uploading}
-          className="absolute -bottom-1.5 -right-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full border border-surface-border bg-surface-elevated shadow-sm transition-all hover:border-brand/50 hover:text-brand"
+          className="group/add absolute bottom-0 right-0 z-10 flex h-20 w-11 items-end justify-end rounded-xl"
           title={t("image.addReference")}
         >
-          {uploading ? <Loader2 className="h-2.5 w-2.5 animate-spin text-text-tertiary" /> : <Plus className="h-3 w-3 text-text-tertiary" />}
+          <span className="flex h-5 w-5 items-center justify-center rounded-full border border-surface-border bg-surface-elevated text-text-tertiary shadow-sm transition-all duration-200 group-hover/add:h-20 group-hover/add:w-11 group-hover/add:rounded-xl group-hover/add:border-brand/50 group-hover/add:text-brand group-hover/add:bg-surface-elevated/95">
+            {uploading ? <Loader2 className="h-2.5 w-2.5 animate-spin transition-all group-hover/add:h-4 group-hover/add:w-4" /> : <Plus className="h-3 w-3 transition-all group-hover/add:h-4 group-hover/add:w-4" />}
+          </span>
         </button>
       </div>
     );
@@ -218,10 +222,12 @@ function ReferenceImageStack({
           type="button"
           onClick={onAdd}
           disabled={uploading}
-          className="absolute -right-6 top-1/2 z-10 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border border-surface-border bg-surface-elevated shadow-sm transition-all hover:border-brand/50 hover:text-brand"
+          className="group/add absolute -right-11 top-1/2 z-10 flex h-20 w-11 -translate-y-1/2 items-center justify-center rounded-xl"
           title={t("image.addReference")}
         >
-          {uploading ? <Loader2 className="h-3 w-3 animate-spin text-text-tertiary" /> : <Plus className="h-3.5 w-3.5 text-text-tertiary" />}
+          <span className="flex h-6 w-6 items-center justify-center rounded-full border border-surface-border bg-surface-elevated text-text-tertiary shadow-sm transition-all duration-200 group-hover/add:h-20 group-hover/add:w-11 group-hover/add:rounded-xl group-hover/add:border-brand/50 group-hover/add:text-brand group-hover/add:bg-surface-elevated/95">
+            {uploading ? <Loader2 className="h-3 w-3 animate-spin transition-all group-hover/add:h-4 group-hover/add:w-4" /> : <Plus className="h-3.5 w-3.5 transition-all group-hover/add:h-4 group-hover/add:w-4" />}
+          </span>
         </button>
       )}
     </div>
@@ -269,7 +275,7 @@ function ImageChatPageInner() {
 
   const { t } = useI18n();
   const { chats, fetchChats, createChat, deleteChat, updateChatTitle } = useImageChats();
-  const { messages: apiMessages, fetchMessages, sendMessage } = useImageChatMessages();
+  const { messages: apiMessages, setMessages: setApiMessages, fetchMessages, sendMessage } = useImageChatMessages();
   const { models: imageModels } = useImageModels();
 
   const [displayMessages, setDisplayMessages] = useState<DisplayMessage[]>([]);
@@ -293,12 +299,13 @@ function ImageChatPageInner() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const autoSubmittedRef = useRef(false);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const shouldAutoScrollRef = useRef(true);
   const selectedModelInfo = imageModels.find((m) => m.id === selectedModel) || imageModels[0];
   const selectedAspect = ASPECT_RATIOS.find((item) => item.value === selectedAspectRatio) || ASPECT_RATIOS[0];
 
-  const initialPrompt = searchParams.get("prompt") || "";
+  const initialPromptFromUrl = searchParams.get("prompt") || "";
   const initialAspect = searchParams.get("aspect") || "auto";
   const initialResolution = searchParams.get("resolution") || "1K";
   const initialQuality = searchParams.get("quality") || "medium";
@@ -392,11 +399,16 @@ function ImageChatPageInner() {
 
   // 页面加载时如果有初始 prompt 且没有 chatId，自动发起生成
   useEffect(() => {
-    if (initialPrompt && !urlChatId && displayMessages.length === 0) {
-      handleSend(initialPrompt, initialAspect, initialResolution, initialQuality, initialRefImages);
+    let initialPrompt = initialPromptFromUrl;
+    if (!initialPrompt && searchParams.get("draft") === "1") {
+      initialPrompt = sessionStorage.getItem(IMAGE_CHAT_DRAFT_PROMPT_KEY) || "";
     }
+    if (!initialPrompt || urlChatId || displayMessages.length > 0 || autoSubmittedRef.current) return;
+    autoSubmittedRef.current = true;
+    sessionStorage.removeItem(IMAGE_CHAT_DRAFT_PROMPT_KEY);
+    handleSend(initialPrompt, initialAspect, initialResolution, initialQuality, initialRefImages);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialPrompt, urlChatId]);
+  }, [initialPromptFromUrl, urlChatId, searchParams]);
 
   const fetchImageChatMessagesDirect = useCallback(async (id: number): Promise<ImageChatMessage[]> => {
     const token = localStorage.getItem("token");
@@ -404,7 +416,11 @@ function ImageChatPageInner() {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       cache: "no-store",
     });
-    if (!res.ok) throw new Error(t("image.error.loadMessages"));
+    if (!res.ok) {
+      const err = new Error(t("image.error.loadMessages"));
+      (err as Error & { status?: number }).status = res.status;
+      throw err;
+    }
     const data = await res.json().catch(() => ({}));
     return Array.isArray(data.messages) ? data.messages : [];
   }, []);
@@ -414,20 +430,28 @@ function ImageChatPageInner() {
     if (!pollingChatId) return;
     let cancelled = false;
 
+    let retryDelayMs = 1000;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleNext = (delayMs = retryDelayMs) => {
+      if (cancelled) return;
+      timer = setTimeout(syncMessages, delayMs);
+    };
+
     const syncMessages = async () => {
       try {
         const msgs = await fetchImageChatMessagesDirect(pollingChatId);
         if (cancelled) return;
+        retryDelayMs = 1000;
         if (msgs.length > 0) {
           // 轮询结果直接强制同步到当前页面，避免本地 optimistic pending 卡住，必须刷新/切页后才看到图片。
+          setApiMessages(msgs);
           setDisplayMessages(msgs.map(msgToDisplay));
         }
         const pending = msgs.find((m) => m.role === "assistant" && m.status === "pending");
         if (!pending) {
-          if (pollTimer.current) {
-            clearInterval(pollTimer.current);
-            pollTimer.current = null;
-          }
+          if (timer) clearTimeout(timer);
+          if (pollTimer.current === timer) pollTimer.current = null;
           setPollingChatId(null);
           setIsGenerating(false);
           fetchChats();
@@ -446,22 +470,28 @@ function ImageChatPageInner() {
           if (failedMsg?.error_message) {
             toast.error(cleanImageErrorMessage(failedMsg.error_message, t));
           }
+          return;
         }
-      } catch {
-        // ignore
+        scheduleNext();
+      } catch (err) {
+        if (cancelled) return;
+        if ((err as Error & { status?: number }).status === 429) {
+          retryDelayMs = Math.min(retryDelayMs * 2, 10000);
+          scheduleNext(retryDelayMs);
+          return;
+        }
+        scheduleNext();
       }
     };
 
     syncMessages();
-    const timer = setInterval(syncMessages, 1000);
-
     pollTimer.current = timer;
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      if (timer) clearTimeout(timer);
       if (pollTimer.current === timer) pollTimer.current = null;
     };
-  }, [fetchChats, fetchImageChatMessagesDirect, pollingChatId, t]);
+  }, [fetchChats, fetchImageChatMessagesDirect, pollingChatId, setApiMessages, t]);
 
   const handleSend = async (
     text: string,
@@ -711,7 +741,7 @@ function ImageChatPageInner() {
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 md:px-6"
       >
         <div className="max-w-3xl mx-auto space-y-6">
-          {displayMessages.length === 0 && !initialPrompt && (
+          {displayMessages.length === 0 && !initialPromptFromUrl && searchParams.get("draft") !== "1" && (
             <div className="flex flex-col items-center justify-center h-full text-text-tertiary py-20">
               <div className="w-16 h-16 rounded-2xl bg-surface-card border border-surface-border flex items-center justify-center mb-4">
                 <ImageIcon className="w-8 h-8 text-text-tertiary/50" />

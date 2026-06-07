@@ -40,6 +40,25 @@ const (
 	maxReferenceVideoFPS         = 60.0
 )
 
+func normalizedReferenceImageRoles(roles []string, count int) []string {
+	if count <= 0 || len(roles) == 0 {
+		return nil
+	}
+	result := make([]string, 0, count)
+	for i := 0; i < count && i < len(roles); i++ {
+		role := strings.TrimSpace(roles[i])
+		switch role {
+		case "first_frame", "last_frame", "reference_image":
+			result = append(result, role)
+		case "reference":
+			result = append(result, "reference_image")
+		default:
+			result = append(result, "reference_image")
+		}
+	}
+	return result
+}
+
 // resolveVideoReferenceURLs converts frontend file public IDs into provider-readable URLs.
 // External http(s) URLs are kept as-is. Internal file_xxx IDs are resolved to either:
 // 1) an absolute public /api/files/:id/view URL when BASE_URL/FRONTEND_URL is configured; or

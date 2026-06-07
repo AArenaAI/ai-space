@@ -47,9 +47,24 @@ const RESOLUTIONS = ["480p", "720p", "1080p"];
 const MAX_REFERENCE_IMAGES = 9;
 const MAX_REFERENCE_VIDEOS = 3;
 const MAX_REFERENCE_VIDEO_SIZE = 200 * 1024 * 1024;
+const VIDEO_CHAT_DRAFT_PROMPT_KEY = "ai-space.videoChatDraftPrompt.v1";
 const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"];
 const VIDEO_EXTENSIONS = [".mp4", ".mov"];
 const VIDEO_MIME_TYPES = ["video/mp4", "video/quicktime"];
+type ReferenceImageRole = "reference_image" | "first_frame" | "last_frame";
+type ReferenceImageRolePreset = "reference" | "first_frame" | "first_last_frame";
+
+const REFERENCE_IMAGE_ROLE_PRESETS: Array<{ value: ReferenceImageRolePreset; labelKey: string; hintKey: string }> = [
+  { value: "reference", labelKey: "video.referenceMode.reference", hintKey: "video.referenceMode.referenceHint" },
+  { value: "first_frame", labelKey: "video.referenceMode.firstFrame", hintKey: "video.referenceMode.firstFrameHint" },
+  { value: "first_last_frame", labelKey: "video.referenceMode.firstLastFrame", hintKey: "video.referenceMode.firstLastFrameHint" },
+];
+
+const REFERENCE_IMAGE_ROLES: Array<{ value: ReferenceImageRole; labelKey: string; shortKey: string }> = [
+  { value: "reference_image", labelKey: "video.referenceRole.reference", shortKey: "video.referenceRole.referenceShort" },
+  { value: "first_frame", labelKey: "video.referenceRole.firstFrame", shortKey: "video.referenceRole.firstFrameShort" },
+  { value: "last_frame", labelKey: "video.referenceRole.lastFrame", shortKey: "video.referenceRole.lastFrameShort" },
+];
 
 function fileExtension(file: File) {
   const dot = file.name.lastIndexOf(".");
@@ -70,6 +85,7 @@ interface DisplayMessage {
   content: string;
   status?: string;
   videoUrl?: string;
+  lastFrameUrl?: string;
   errorMessage?: string;
   createdAt: Date;
   generationId?: number;
@@ -206,6 +222,7 @@ function messageToDisplayMessage(message: VideoChatMessage, errorMessages: Video
     content: message.content,
     status: message.status,
     videoUrl: message.video_url,
+    lastFrameUrl: message.last_frame_url,
     errorMessage,
     createdAt: new Date(message.created_at || Date.now()),
     generationId: message.generation_id,
@@ -248,6 +265,7 @@ function VideoChatPageInner() {
     const refs = searchParams.get("videoRefs");
     return refs ? refs.split(",").filter(Boolean) : [];
   });
+  const [referenceImageRoles, setReferenceImageRoles] = useState<ReferenceImageRole[]>(() => referenceImages.map(() => "reference_image"));
   const [uploadingRef, setUploadingRef] = useState(false);
   const [selectedAspectRatio, setSelectedAspectRatio] = useState(searchParams.get("aspect") || "adaptive");
   const [selectedDuration, setSelectedDuration] = useState(searchParams.get("duration") || "5s");
@@ -258,6 +276,7 @@ function VideoChatPageInner() {
   const [durationMenuOpen, setDurationMenuOpen] = useState(false);
   const [selectedResolution, setSelectedResolution] = useState(searchParams.get("resolution") || "720p");
   const [resolutionMenuOpen, setResolutionMenuOpen] = useState(false);
+  const [referenceModeMenuOpen, setReferenceModeMenuOpen] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [deleteSuccessOpen, setDeleteSuccessOpen] = useState(false);
@@ -274,6 +293,7 @@ function VideoChatPageInner() {
   const availableResolutions = isFastModel ? RESOLUTIONS.filter((item) => item !== "1080p") : RESOLUTIONS;
   const hasContent = prompt.trim().length > 0;
   const hasReferenceMedia = referenceImages.length > 0 || referenceVideos.length > 0;
+  const selectedReferenceMode = REFERENCE_IMAGE_ROLE_PRESETS[0];
   useEffect(() => {
     if (!selectedModel && videoModels.length > 0) {
       setSelectedModel(videoModels[0].id);
@@ -288,10 +308,64 @@ function VideoChatPageInner() {
 
   useEffect(() => {
     const refs = searchParams.get("refs");
-    if (refs) setReferenceImages(refs.split(",").filter(Boolean));
+    if (refs) {
+      const nextRefs = refs.split(",").filter(Boolean);
+      const roleParams = (searchParams.get("refRoles") || "").split(",").filter(Boolean) as ReferenceImageRole[];
+      setReferenceImages(nextRefs);
+      setReferenceImageRoles(nextRefs.map((_, index) => {
+        const role = roleParams[index];
+        return role === "first_frame" || role === "last_frame" || role === "reference_image" ? role : "reference_image";
+      }));
+    }
     const videoRefs = searchParams.get("videoRefs");
     if (videoRefs) setReferenceVideos(videoRefs.split(",").filter(Boolean));
   }, [searchParams]);
+
+  const setReferenceImagesWithRoles = useCallback((updater: string[] | ((prev: string[]) => string[]), nextRoles?: ReferenceImageRole[]) => {
+    setReferenceImages((prev) => {
+      const images = typeof updater === "function" ? updater(prev) : updater;
+      setReferenceImageRoles((prevRoles) => {
+        if (nextRoles) return images.map((_, index) => nextRoles[index] || "reference_image");
+        return images.map((_, index) => prevRoles[index] || "reference_image");
+      });
+      return images;
+    });
+  }, []);
+
+  const setReferenceImageRoleAt = useCallback((index: number, role: ReferenceImageRole) => {
+    setReferenceImageRoles((prev) => {
+      const next = referenceImages.map((_, i) => prev[i] || "reference_image");
+      if (role === "first_frame") {
+        for (let i = 0; i < next.length; i++) if (next[i] === "first_frame") next[i] = "reference_image";
+      }
+      if (role === "last_frame") {
+        for (let i = 0; i < next.length; i++) if (next[i] === "last_frame") next[i] = "reference_image";
+      }
+      next[index] = role;
+      return next;
+    });
+  }, [referenceImages]);
+
+  const cycleReferenceImageRole = useCallback((index: number) => {
+    const current = referenceImageRoles[index] || "reference_image";
+    const nextRole: ReferenceImageRole = current === "reference_image" ? "first_frame" : current === "first_frame" ? "last_frame" : "reference_image";
+    setReferenceImageRoleAt(index, nextRole);
+  }, [referenceImageRoles, setReferenceImageRoleAt]);
+
+  const applyReferenceRolePreset = useCallback((preset: ReferenceImageRolePreset) => {
+    if (preset === "first_last_frame" && referenceImages.length < 2) {
+      toast.error(t("video.referenceMode.needTwoImages"));
+      return;
+    }
+    const roles = referenceImages.map<ReferenceImageRole>((_, index) => {
+      if (preset === "first_frame" && index === 0) return "first_frame";
+      if (preset === "first_last_frame" && index === 0) return "first_frame";
+      if (preset === "first_last_frame" && index === 1) return "last_frame";
+      return "reference_image";
+    });
+    setReferenceImageRoles(roles);
+    setReferenceModeMenuOpen(false);
+  }, [referenceImages, t]);
 
   const updateAutoScrollIntent = useCallback(() => {
     const el = messagesScrollRef.current;
@@ -393,6 +467,7 @@ function VideoChatPageInner() {
         generate_audio: musicEnabled,
         watermark: false,
         reference_image_urls: referenceImages.length > 0 ? referenceImages : undefined,
+        reference_image_roles: referenceImages.length > 0 ? referenceImages.map((_, index) => referenceImageRoles[index] || "reference_image") : undefined,
         reference_video_urls: referenceVideos.length > 0 ? referenceVideos : undefined,
       };
 
@@ -424,8 +499,9 @@ function VideoChatPageInner() {
       }
 
       setPrompt("");
-      setReferenceImages([]);
+      setReferenceImagesWithRoles([]);
       setReferenceVideos([]);
+      setReferenceModeMenuOpen(false);
       await fetchMessages(chatId);
       fetchChats();
     } catch (err: any) {
@@ -443,13 +519,17 @@ function VideoChatPageInner() {
     } finally {
       setGenerating(false);
     }
-  }, [createChat, currentChatId, fetchChats, fetchMessages, musicEnabled, referenceImages, referenceVideos, router, selectedAspectRatio, selectedDuration, selectedModel, selectedModelInfo, selectedResolution, sendMessage, t, videoErrorMessages]);
+  }, [createChat, currentChatId, fetchChats, fetchMessages, musicEnabled, referenceImageRoles, referenceImages, referenceVideos, router, selectedAspectRatio, selectedDuration, selectedModel, selectedModelInfo, selectedResolution, sendMessage, t, videoErrorMessages]);
 
   useEffect(() => {
-    const initialPrompt = searchParams.get("prompt") || "";
+    let initialPrompt = searchParams.get("prompt") || "";
+    if (!initialPrompt && searchParams.get("draft") === "1") {
+      initialPrompt = sessionStorage.getItem(VIDEO_CHAT_DRAFT_PROMPT_KEY) || "";
+    }
     if (!initialPrompt || autoSubmittedRef.current) return;
     if (!selectedModelInfo && videoModels.length === 0) return;
     autoSubmittedRef.current = true;
+    sessionStorage.removeItem(VIDEO_CHAT_DRAFT_PROMPT_KEY);
     handleSend(initialPrompt);
   }, [handleSend, searchParams, selectedModelInfo, videoModels.length]);
 
@@ -497,7 +577,7 @@ function VideoChatPageInner() {
       if (isVideo) {
         setReferenceVideos((prev) => [...prev, url].slice(0, MAX_REFERENCE_VIDEOS));
       } else {
-        setReferenceImages((prev) => [...prev, url].slice(0, MAX_REFERENCE_IMAGES));
+        setReferenceImagesWithRoles((prev) => [...prev, url].slice(0, MAX_REFERENCE_IMAGES));
       }
     } catch (err) {
       showUserError(err, {
@@ -524,6 +604,26 @@ function VideoChatPageInner() {
     if (files.length === 0) return;
     e.preventDefault();
     files.forEach((file) => uploadReferenceMedia(file));
+  };
+
+  const handleUseLastFrame = (lastFrameUrl?: string) => {
+    if (!lastFrameUrl || generating) return;
+    setReferenceImagesWithRoles([lastFrameUrl], ["first_frame"]);
+    setReferenceVideos([]);
+    setReferenceModeMenuOpen(false);
+    setPrompt("");
+    toast.success(t("video.lastFrameApplied"));
+    scrollToBottom("smooth", true);
+  };
+
+  const handleEditVideo = (videoUrl?: string, sourcePrompt?: string) => {
+    if (!videoUrl || generating) return;
+    setReferenceVideos([videoUrl]);
+    setReferenceImagesWithRoles([]);
+    setReferenceModeMenuOpen(false);
+    setPrompt(sourcePrompt ? t("video.editVideoPromptWithSource", { prompt: sourcePrompt }) : t("video.editVideoPrompt"));
+    toast.success(t("video.editVideoApplied"));
+    scrollToBottom("smooth", true);
   };
 
   const handleDownload = async (url: string, id: number | string) => {
@@ -561,7 +661,9 @@ function VideoChatPageInner() {
   const handleNewChat = () => {
     setDisplayMessages([]);
     setPrompt("");
-    setReferenceImages([]);
+    setReferenceImagesWithRoles([]);
+    setReferenceVideos([]);
+    setReferenceModeMenuOpen(false);
     setDeleteTargetId(null);
     setCurrentChatId(null);
     router.replace("/image");
@@ -573,7 +675,9 @@ function VideoChatPageInner() {
     if (!chat) return;
     setCurrentChatId(id);
     setPrompt("");
-    setReferenceImages([]);
+    setReferenceImagesWithRoles([]);
+    setReferenceVideos([]);
+    setReferenceModeMenuOpen(false);
     fetchMessages(id);
     router.replace(`/video/chat?chatId=${id}`);
     setShowHistory(false);
@@ -608,7 +712,7 @@ function VideoChatPageInner() {
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 md:px-6"
       >
         <div className="max-w-3xl mx-auto space-y-6">
-          {displayMessages.length === 0 && !searchParams.get("prompt") && (
+          {displayMessages.length === 0 && !searchParams.get("prompt") && searchParams.get("draft") !== "1" && (
             <div className="flex flex-col items-center justify-center h-full text-text-tertiary py-20">
               <div className="w-16 h-16 rounded-2xl bg-surface-card border border-surface-border flex items-center justify-center mb-4">
                 <Video className="w-8 h-8 text-text-tertiary/50" />
@@ -692,6 +796,30 @@ function VideoChatPageInner() {
                           <RefreshCw className="w-4 h-4" />
                         </button>
                         <button
+                          onClick={() => handleEditVideo(videoUrl, msg.content)}
+                          disabled={generating}
+                          className={cn(
+                            "p-1.5 rounded-md hover:bg-surface-elevated text-text-tertiary hover:text-text-primary transition-colors",
+                            generating && "cursor-not-allowed opacity-50"
+                          )}
+                          title={t("video.editVideo")}
+                        >
+                          <Video className="w-4 h-4" />
+                        </button>
+                        {msg.lastFrameUrl && (
+                          <button
+                            onClick={() => handleUseLastFrame(msg.lastFrameUrl)}
+                            disabled={generating}
+                            className={cn(
+                              "p-1.5 rounded-md hover:bg-surface-elevated text-text-tertiary hover:text-text-primary transition-colors",
+                              generating && "cursor-not-allowed opacity-50"
+                            )}
+                            title={t("video.useLastFrame")}
+                          >
+                            <Layers className="w-4 h-4" />
+                          </button>
+                        )}
+                        <button
                           onClick={() => handleDownload(videoUrl, msg.generationId || msg.id || "preview")}
                           className="p-1.5 rounded-md hover:bg-surface-elevated text-text-tertiary hover:text-text-primary transition-colors"
                           title={t("common.download")}
@@ -737,7 +865,7 @@ function VideoChatPageInner() {
             </div>
 
             <div className="flex items-start gap-3 px-4 pt-3 pb-2">
-              <div className="mt-1 flex max-w-[140px] flex-wrap gap-2">
+              <div className="mt-1 flex max-w-[220px] flex-wrap gap-2">
                 {!hasReferenceMedia ? (
                   <button
                     type="button"
@@ -753,21 +881,45 @@ function VideoChatPageInner() {
                   </button>
                 ) : (
                   <>
-                    {referenceImages.slice(0, 2).map((url, index) => (
-                      <div key={`image-${url}-${index}`} className="relative shrink-0">
-                        <div className="w-11 h-20 rounded-xl overflow-hidden border border-surface-border">
-                          <img src={resolveMediaUrl(url)} alt={t("image.referenceAlt")} className="w-full h-full object-cover" />
+                    {referenceImages.map((url, index) => {
+                      const role = referenceImageRoles[index] || "reference_image";
+                      const roleMeta = REFERENCE_IMAGE_ROLES.find((item) => item.value === role) || REFERENCE_IMAGE_ROLES[0];
+                      return (
+                        <div key={`image-${url}-${index}`} className="relative shrink-0">
+                          <div className={cn(
+                            "relative w-11 h-[72px] rounded-xl overflow-hidden border bg-surface-card",
+                            role === "first_frame" ? "border-emerald-400/70" : role === "last_frame" ? "border-orange-400/70" : "border-surface-border"
+                          )}>
+                            <img src={resolveMediaUrl(url)} alt={t("image.referenceAlt")} className="w-full h-full object-cover" />
+                          </div>
+                          <button
+                            type="button"
+                            disabled={generating}
+                            onClick={() => cycleReferenceImageRole(index)}
+                            className={cn(
+                              "mt-1 flex h-5 w-11 items-center justify-center rounded-full border px-1 text-[10px] font-semibold transition-colors",
+                              role === "first_frame" && "border-emerald-400/60 bg-emerald-500/15 text-emerald-500",
+                              role === "last_frame" && "border-orange-400/60 bg-orange-500/15 text-orange-500",
+                              role === "reference_image" && "border-surface-border bg-surface-card text-text-secondary hover:text-text-primary",
+                              generating && "cursor-not-allowed opacity-60"
+                            )}
+                            title={`${t("video.referenceRole.title")}: ${t(roleMeta.labelKey)}`}
+                          >
+                            {t(roleMeta.shortKey)}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReferenceImagesWithRoles((prev) => prev.filter((_, i) => i !== index), referenceImageRoles.filter((_, i) => i !== index));
+                            }}
+                            disabled={generating}
+                            className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-surface-elevated border border-surface-border shadow-md text-text-secondary hover:text-red-500 flex items-center justify-center z-20"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setReferenceImages((prev) => prev.filter((_, i) => i !== index))}
-                          disabled={generating}
-                          className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-surface-elevated border border-surface-border shadow-md text-text-secondary hover:text-red-500 flex items-center justify-center z-20"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-                    ))}
+                      );
+                    })}
                     {referenceVideos.slice(0, 2).map((url, index) => (
                       <div key={`video-${url}-${index}`} className="relative shrink-0">
                         <div className="relative w-11 h-20 rounded-xl overflow-hidden border border-surface-border bg-surface-elevated">
@@ -959,6 +1111,57 @@ function VideoChatPageInner() {
                     </div>
                   )}
                 </div>
+
+                {referenceImages.length > 0 && (
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setReferenceModeMenuOpen((open) => !open)}
+                      disabled={generating}
+                      className={cn(
+                        "flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] text-text-secondary border-surface-border hover:border-brand/30 hover:text-text-primary transition-colors",
+                        generating && "cursor-not-allowed opacity-60"
+                      )}
+                      title={t("video.referenceRole.quickApplyHint")}
+                    >
+                      <Layers className="w-3 h-3" />
+                      <span>{t("video.referenceRole.quickApply")}</span>
+                      <ChevronDown className={cn("w-3 h-3 transition-transform", referenceModeMenuOpen && "rotate-180")} />
+                    </button>
+                    {referenceModeMenuOpen && (
+                      <div className="absolute left-0 bottom-full mb-2 w-72 rounded-xl border border-surface-border bg-surface-elevated p-1.5 shadow-xl z-30">
+                        <div className="px-2 py-1 text-[11px] font-medium text-text-primary">{t("video.referenceRole.quickApply")}</div>
+                        {REFERENCE_IMAGE_ROLE_PRESETS.map((mode) => {
+                          const disabled = mode.value === "first_last_frame" && referenceImages.length < 2;
+                          return (
+                            <button
+                              key={mode.value}
+                              type="button"
+                              onClick={() => {
+                                if (disabled) {
+                                  toast.error(t("video.referenceMode.needTwoImages"));
+                                  return;
+                                }
+                                applyReferenceRolePreset(mode.value);
+                              }}
+                              className={cn(
+                                "w-full rounded-lg px-2.5 py-2 text-left text-xs transition-colors",
+                                "text-text-secondary hover:bg-surface-card hover:text-text-primary",
+                                disabled && "cursor-not-allowed opacity-50 hover:bg-transparent hover:text-text-secondary"
+                              )}
+                            >
+                              <div>{t(mode.labelKey)}</div>
+                              <div className="mt-0.5 text-[10px] leading-snug text-text-tertiary">{t(mode.hintKey)}</div>
+                            </button>
+                          );
+                        })}
+                        {referenceVideos.length > 0 && (
+                          <div className="px-2 py-1.5 text-[10px] leading-snug text-amber-500/90">{t("video.referenceMode.videoFallback")}</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <button
                   type="button"
