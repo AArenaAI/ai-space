@@ -654,9 +654,9 @@ function NotebookDetailContent() {
 
   return (
     <>
-    <div ref={layoutRef} className="flex h-full min-h-0 overflow-x-auto bg-surface text-text-primary">
-      <aside className="flex h-full shrink-0 flex-col bg-surface-elevated/80" style={{ width: sourcesWidth }}>
-        <div className="border-b border-surface-border p-5">
+    <div ref={layoutRef} className="flex h-full min-h-0 gap-3 overflow-hidden bg-[#f6f5f2] p-3 text-text-primary">
+      <aside className="flex h-full shrink-0 flex-col overflow-hidden rounded-[28px] border border-black/[0.06] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]" style={{ width: sourcesWidth }}>
+        <div className="border-b border-black/[0.06] px-5 py-4">
           <Link href="/notebooks" className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-text-tertiary transition hover:text-text-primary">
             <ArrowLeft className="h-3.5 w-3.5" />{t("notebook.back")}
           </Link>
@@ -676,15 +676,15 @@ function NotebookDetailContent() {
               <p className="mt-1 text-xs text-text-tertiary">{t("notebook.sourcesHint")}</p>
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={() => setUrlDialogOpen(true)} disabled={addingUrl} className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-surface-border bg-surface-card px-3 text-xs font-medium text-text-secondary transition hover:border-brand-border hover:text-brand disabled:opacity-60">
+              <button onClick={() => setUrlDialogOpen(true)} disabled={addingUrl} className="inline-flex h-9 items-center gap-1.5 rounded-full border border-black/[0.08] bg-white px-3 text-xs font-medium text-text-secondary transition hover:border-black/15 hover:bg-black/[0.03] hover:text-text-primary disabled:opacity-60">
                 {addingUrl ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Globe className="h-3.5 w-3.5" />}{t("notebook.addUrl")}
               </button>
-              <button onClick={() => inputRef.current?.click()} disabled={uploading} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-brand px-3 text-xs font-medium text-white transition hover:bg-brand-hover disabled:opacity-60">
+              <button onClick={() => inputRef.current?.click()} disabled={uploading} className="inline-flex h-9 items-center gap-1.5 rounded-full bg-black px-3 text-xs font-medium text-white transition hover:bg-black/80 disabled:opacity-60">
                 {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}{t("notebook.addSource")}
               </button>
             </div>
           </div>
-          <button type="button" onClick={() => setUrlDialogOpen(true)} className="mb-3 flex w-full items-center gap-2 rounded-2xl border border-surface-border bg-surface-card px-3 py-2.5 text-left text-xs text-text-tertiary transition hover:border-brand-border hover:bg-brand-muted/30 hover:text-brand">
+          <button type="button" onClick={() => setUrlDialogOpen(true)} className="mb-3 flex w-full items-center gap-2 rounded-2xl border border-black/[0.07] bg-[#f8f7f4] px-3 py-2.5 text-left text-xs text-text-tertiary transition hover:border-black/15 hover:bg-white hover:text-text-primary">
             <Globe className="h-4 w-4" />
             <span>{t("notebook.searchNewSources")}</span>
           </button>
@@ -698,9 +698,9 @@ function NotebookDetailContent() {
           )}
 
           {files.length > 0 && (
-            <div className="mb-3 flex items-center justify-between rounded-2xl border border-surface-border bg-surface-card px-3 py-2">
+            <div className="mb-3 flex items-center justify-between rounded-2xl border border-black/[0.06] bg-[#f8f7f4] px-3 py-2">
               <span className="text-xs text-text-tertiary">{selectedSourceText}</span>
-              <button type="button" onClick={selectAllSources} className="rounded-lg px-2.5 py-1 text-sm font-semibold text-brand transition hover:bg-brand-muted hover:text-brand-hover">
+              <button type="button" onClick={selectAllSources} className="rounded-lg px-2.5 py-1 text-sm font-semibold text-text-primary transition hover:bg-black/[0.06]">
                 {t("notebook.selectAllSources")}
               </button>
             </div>
@@ -713,8 +713,8 @@ function NotebookDetailContent() {
               onDragLeave={() => setDragActive(false)}
               onDrop={(e) => { e.preventDefault(); handleUpload(Array.from(e.dataTransfer.files)); }}
               className={cn(
-                "flex min-h-[220px] w-full flex-col items-center justify-center rounded-3xl border border-dashed border-surface-border bg-surface-card px-5 text-center transition hover:border-brand-border hover:bg-brand-muted/40",
-                dragActive && "border-brand-border bg-brand-muted/50"
+                "flex min-h-[220px] w-full flex-col items-center justify-center rounded-[24px] border border-dashed border-black/[0.10] bg-[#f8f7f4] px-5 text-center transition hover:border-black/20 hover:bg-white",
+                dragActive && "border-black/25 bg-white"
               )}
             >
               <UploadCloud className="mb-4 h-8 w-8 text-brand" />
@@ -723,29 +723,29 @@ function NotebookDetailContent() {
             </button>
           ) : (
             <div
-              className={cn("space-y-2.5 rounded-3xl border border-transparent p-0 transition", dragActive && "border-dashed border-brand-border bg-brand-muted/20 p-2")}
+              className={cn("space-y-1.5 rounded-[24px] border border-transparent p-0 transition", dragActive && "border-dashed border-black/15 bg-black/[0.02] p-2")}
               onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
               onDragLeave={() => setDragActive(false)}
               onDrop={(e) => { e.preventDefault(); handleUpload(Array.from(e.dataTransfer.files)); }}
             >
-              {dragActive && <div className="rounded-2xl border border-dashed border-brand-border py-3 text-center text-xs font-medium text-brand">{t("notebook.dropTitle")}</div>}
+              {dragActive && <div className="rounded-2xl border border-dashed border-black/15 py-3 text-center text-xs font-medium text-text-primary">{t("notebook.dropTitle")}</div>}
               {files.map((file) => {
                 const meta = statusMeta(file, t);
                 const Icon = meta.icon;
                 const detail = statusDetail(file, t);
                 const selected = selectedFileIds.includes(file.file_id);
                 return (
-                  <div key={file.id} role="button" tabIndex={0} onClick={() => openPreview(file)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") openPreview(file); }} className={cn("group w-full cursor-pointer rounded-2xl border bg-surface-card p-3 text-left transition hover:border-brand-border", selected ? "border-brand-border" : "border-surface-border opacity-70")}>
+                  <div key={file.id} role="button" tabIndex={0} onClick={() => openPreview(file)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") openPreview(file); }} className={cn("group w-full cursor-pointer rounded-2xl border bg-white p-3 text-left transition hover:border-black/15 hover:bg-[#fbfaf7]", selected ? "border-black/15" : "border-transparent opacity-75")}>
                     <div className="flex items-start gap-3">
                       <button
                         type="button"
                         onClick={(event) => { event.stopPropagation(); toggleSource(file.file_id); }}
-                        className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition", selected ? "border-brand bg-brand text-white" : "border-surface-border text-transparent hover:border-brand-border")}
+                        className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition", selected ? "border-black bg-black text-white" : "border-black/15 text-transparent hover:border-black/35")}
                         aria-label={selected ? "selected" : "unselected"}
                       >
                         <Check className="h-3.5 w-3.5" />
                       </button>
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-muted text-brand"><FileText className="h-4 w-4" /></div>
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-50 text-red-500"><FileText className="h-4 w-4" /></div>
                       <div className="min-w-0 flex-1 overflow-hidden">
                         <div className="truncate text-sm font-medium text-text-primary">{file.file.filename}</div>
                         <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] text-text-tertiary">
@@ -772,12 +772,12 @@ function NotebookDetailContent() {
         aria-label={t("notebook.resizeSources")}
         title={t("notebook.resizeSources")}
         onPointerDown={(event) => startPaneResize("sources", event)}
-        className="group relative z-10 h-full w-2 shrink-0 cursor-col-resize touch-none bg-transparent"
+        className="group relative z-10 h-full w-1 shrink-0 cursor-col-resize touch-none bg-transparent"
       >
-        <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-surface-border transition group-hover:w-1 group-hover:bg-brand" />
+        <div className="absolute left-1/2 top-4 h-[calc(100%-2rem)] w-px -translate-x-1/2 bg-transparent transition group-hover:bg-black/10" />
       </div>
 
-      <section className="min-w-[420px] flex-1">
+      <section className="min-w-[420px] flex-1 overflow-hidden rounded-[28px] border border-black/[0.06] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
         <ChatInterface
           conversationId={conversationId}
           notebookId={notebookId}
@@ -800,9 +800,9 @@ function NotebookDetailContent() {
         aria-label={t("notebook.resizeStudio")}
         title={t("notebook.resizeStudio")}
         onPointerDown={(event) => startPaneResize("studio", event)}
-        className="group relative z-10 h-full w-2 shrink-0 cursor-col-resize touch-none bg-transparent"
+        className="group relative z-10 h-full w-1 shrink-0 cursor-col-resize touch-none bg-transparent"
       >
-        <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-surface-border transition group-hover:w-1 group-hover:bg-brand" />
+        <div className="absolute left-1/2 top-4 h-[calc(100%-2rem)] w-px -translate-x-1/2 bg-transparent transition group-hover:bg-black/10" />
       </div>
       <NotebookStudioPanel
         width={studioWidth}

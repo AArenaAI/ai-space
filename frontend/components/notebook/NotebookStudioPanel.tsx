@@ -483,6 +483,7 @@ function ArtifactMenu({
   onExportTableToGoogleSheets,
   onDeleteArtifact,
   t,
+  floating = false,
 }: {
   artifact: NotebookStudioArtifact;
   open: boolean;
@@ -493,14 +494,15 @@ function ArtifactMenu({
   onExportTableToGoogleSheets?: (artifact: Extract<NotebookStudioArtifact, { type: "table" }>) => void;
   onDeleteArtifact?: (artifact: NotebookStudioArtifact) => void;
   t: (key: string, params?: Record<string, string>) => string;
+  floating?: boolean;
 }) {
   const closeAndRun = (callback?: () => void) => {
     onToggle();
     callback?.();
   };
   return (
-    <div className="relative ml-auto">
-      <button type="button" onClick={onToggle} className="rounded-lg p-1.5 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" title={t("notebook.studio.moreActions")}>
+    <div className={cn("relative", floating ? "absolute right-2 top-1/2 z-20 -translate-y-1/2" : "ml-auto")}>
+      <button type="button" onClick={onToggle} className="rounded-lg p-1.5 text-text-tertiary hover:bg-black/[0.06] hover:text-text-primary" title={t("notebook.studio.moreActions")}>
         <MoreHorizontal className="h-4 w-4" />
       </button>
       {open && (
@@ -549,7 +551,7 @@ export function NotebookStudioPanel({
 
   return (
     <>
-    <aside className="flex h-full shrink-0 flex-col bg-surface-elevated/70" style={{ width }}>
+    <aside className="flex h-full shrink-0 flex-col overflow-hidden rounded-[28px] border border-black/[0.06] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]" style={{ width }}>
       {activeArtifact ? (
         <div className="flex min-h-0 flex-1 flex-col bg-surface-card">
           <div className="flex items-start gap-3 border-b border-surface-border bg-surface-card px-4 py-4">
@@ -595,33 +597,30 @@ export function NotebookStudioPanel({
         </div>
       ) : (
       <>
-      <div className="border-b border-surface-border p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-text-tertiary">Studio</p>
-            <h2 className="mt-1 text-lg font-semibold text-text-primary">{t("notebook.studio.title")}</h2>
-          </div>
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand-muted text-brand"><Sparkles className="h-5 w-5" /></div>
-        </div>
-        <p className="text-xs leading-5 text-text-tertiary">{t("notebook.studio.subtitle")}</p>
+      <div className="flex items-center justify-between border-b border-black/[0.06] px-5 py-4">
+        <h2 className="text-[22px] font-semibold tracking-[-0.02em] text-[#202124]">Studio</h2>
+        <button type="button" className="rounded-full p-2 text-text-tertiary transition hover:bg-black/[0.05] hover:text-text-primary" title="Studio">
+          <ChevronRight className="h-4 w-4" />
+        </button>
       </div>
 
-      <div className="border-b border-surface-border p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-text-primary">{t("notebook.studio.actions")}</h3>
-          <span className="rounded-full bg-surface-card px-2 py-1 text-[11px] text-text-tertiary">{t("notebook.studio.beta")}</span>
-        </div>
+      <div className="border-b border-black/[0.06] px-4 py-4">
         <div className="grid grid-cols-2 gap-2.5">
           {actions.map((action) => {
             const Icon = actionIconMap[action.id];
             const isGenerating = generatingType === action.id;
             return (
-              <button key={action.id} type="button" onClick={() => onGenerate(action.id)} disabled={Boolean(generatingType)} className="group min-h-[112px] rounded-2xl border border-surface-border bg-surface-card p-3 text-left transition hover:border-brand-border hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-70">
-                <div className={cn("mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br", action.accent)}>
+              <button key={action.id} type="button" onClick={() => onGenerate(action.id)} disabled={Boolean(generatingType)} className="group flex min-h-[72px] items-center gap-3 rounded-2xl border border-black/[0.06] bg-[#f8f7f4] px-3 py-3 text-left transition hover:border-black/15 hover:bg-white hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-70">
+                <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br", action.accent)}>
                   {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
                 </div>
-                <div className="text-sm font-semibold text-text-primary">{action.title}</div>
-                <p className="mt-1 line-clamp-2 text-xs leading-4 text-text-tertiary">{action.desc}</p>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold text-[#202124]">{action.title}</div>
+                  <div className="mt-0.5 flex items-center gap-1 text-[11px] text-text-tertiary">
+                    <span className="truncate">{action.id === "slides" || action.id === "briefing" ? t("notebook.studio.beta") : t("notebook.studio.basedOnSources", { count: String(selectedSourceCount) })}</span>
+                  </div>
+                </div>
+                <ChevronRight className="h-4 w-4 shrink-0 text-text-tertiary transition group-hover:translate-x-0.5" />
               </button>
             );
           })}
@@ -629,50 +628,58 @@ export function NotebookStudioPanel({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex items-center justify-between border-b border-surface-border px-4 py-3">
-          <div>
-            <h3 className="text-sm font-semibold text-text-primary">{t("notebook.studio.outputs")}</h3>
-            <p className="mt-0.5 text-xs text-text-tertiary">{t("notebook.studio.outputsDesc")}</p>
-          </div>
+        <div className="flex items-center justify-between px-5 py-3">
+          <h3 className="text-sm font-semibold text-[#202124]">{t("notebook.studio.outputs")}</h3>
           <MoreHorizontal className="h-4 w-4 text-text-tertiary" />
         </div>
-        {(generatingType === "table" || generatingType === "mindmap") && <div className="p-4 pb-0"><GeneratingStudioCard type={generatingType} sourceCount={selectedSourceCount} t={t} /></div>}
+        {(generatingType === "table" || generatingType === "mindmap") && <div className="px-4 pb-2"><GeneratingStudioCard type={generatingType} sourceCount={selectedSourceCount} t={t} /></div>}
         {artifacts.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
-            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-card text-text-tertiary"><Layers3 className="h-5 w-5" /></div>
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#f8f7f4] text-text-tertiary"><Layers3 className="h-5 w-5" /></div>
             <p className="text-sm font-medium text-text-primary">{t("notebook.studio.emptyTitle")}</p>
             <p className="mt-2 text-xs leading-5 text-text-tertiary">{t("notebook.studio.emptyDesc")}</p>
           </div>
         ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">
-            <div className="space-y-2.5">
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
+            <div className="space-y-1">
               {artifacts.map((artifact) => {
                 const Icon = artifactIconMap[artifact.type];
                 return (
-                  <div key={artifact.id} className="group relative rounded-2xl border border-surface-border bg-surface-card transition">
-                    <button type="button" onClick={() => setViewerArtifactId(artifact.id)} className="absolute right-10 top-2 z-10 rounded-full bg-surface-elevated p-1.5 text-text-tertiary opacity-0 shadow-sm transition hover:bg-surface-hover hover:text-text-primary group-hover:opacity-100" title={t("notebook.studio.expandViewer")}>
+                  <div key={artifact.id} className="group relative rounded-2xl transition hover:bg-[#f8f7f4]">
+                    <button type="button" onClick={() => onOpenArtifact(artifact.id)} className="flex w-full items-center gap-3 px-3 py-2.5 pr-14 text-left">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600"><Icon className="h-4 w-4" /></div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium text-[#202124]">{artifact.title}</div>
+                        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-text-tertiary"><span className="truncate">{artifact.subtitle}</span><span>·</span><span className="shrink-0">{formatTime(artifact.createdAt)}</span></div>
+                      </div>
+                    </button>
+                    <button type="button" onClick={() => setViewerArtifactId(artifact.id)} className="absolute right-9 top-1/2 z-10 -translate-y-1/2 rounded-full p-1.5 text-text-tertiary opacity-0 transition hover:bg-white hover:text-text-primary group-hover:opacity-100" title={t("notebook.studio.expandViewer")}>
                       <Maximize2 className="h-3.5 w-3.5" />
                     </button>
-                    <button type="button" onClick={() => onOpenArtifact(artifact.id)} className="flex w-full items-center gap-3 p-3 pr-16 text-left">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500"><Icon className="h-4 w-4" /></div>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-semibold text-text-primary">{artifact.title}</div>
-                        <div className="mt-1 flex items-center gap-1.5 text-[11px] text-text-tertiary"><span>{artifact.subtitle}</span><span>·</span><span>{formatTime(artifact.createdAt)}</span></div>
-                      </div>
-                      <ChevronRight className="h-4 w-4 shrink-0 text-text-tertiary transition" />
-                    </button>
-                    <div className="flex items-center gap-1 border-t border-surface-border/70 px-3 py-2">
-                      {onRenameArtifact && <button type="button" onClick={() => onRenameArtifact(artifact)} className="rounded-lg p-1.5 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" title={t("notebook.studio.renameOutput")}><Pencil className="h-3.5 w-3.5" /></button>}
-                      {onCopyArtifact && <button type="button" onClick={() => onCopyArtifact(artifact)} className="rounded-lg p-1.5 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" title={t("notebook.studio.copyOutput")}><Copy className="h-3.5 w-3.5" /></button>}
-                      {onDownloadArtifact && <button type="button" onClick={() => onDownloadArtifact(artifact)} className="rounded-lg p-1.5 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" title={t("notebook.studio.downloadOutput")}><Download className="h-3.5 w-3.5" /></button>}
-                      {onDeleteArtifact && <button type="button" onClick={() => onDeleteArtifact(artifact)} className="ml-auto rounded-lg p-1.5 text-text-tertiary hover:bg-red-500/10 hover:text-red-500" title={t("notebook.studio.deleteOutput")}><Trash2 className="h-3.5 w-3.5" /></button>}
-                    </div>
+                    <ArtifactMenu
+                      artifact={artifact}
+                      open={openMenuArtifactId === artifact.id}
+                      onToggle={() => setOpenMenuArtifactId((current) => current === artifact.id ? null : artifact.id)}
+                      onRenameArtifact={onRenameArtifact}
+                      onCopyArtifact={onCopyArtifact}
+                      onDownloadArtifact={onDownloadArtifact}
+                      onExportTableToGoogleSheets={onExportTableToGoogleSheets}
+                      onDeleteArtifact={onDeleteArtifact}
+                      t={t}
+                      floating
+                    />
                   </div>
                 );
               })}
             </div>
           </div>
         )}
+        <div className="border-t border-black/[0.06] px-4 py-3">
+          <button type="button" className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-full bg-black px-4 text-sm font-medium text-white transition hover:bg-black/80">
+            <Pencil className="h-4 w-4" />
+            {t("notebook.studio.summary")}
+          </button>
+        </div>
       </div>
       </>
       )}
