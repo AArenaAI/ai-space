@@ -142,6 +142,37 @@ func TestBuildGeneratedNotebookArtifactDraftSupportsMindmapAndRejectsSlides(t *t
 	}
 }
 
+func TestBuildGeneratedNotebookArtifactDraftBuildsFlashcards(t *testing.T) {
+	files := []models.File{
+		{ID: 1, Filename: "AI Space 产品方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "AI Space 功能", Content: "## 技能系统\nAI Space 技能系统预设了 9 种角色，包括 CEO 策略师、代码审查和翻译。插件架构支持运行时热加载。\n## 白标能力\nLogo 替换约 10 分钟，域名配置约 30 分钟。"},
+	}
+
+	draft, err := buildGeneratedNotebookArtifactDraft("flashcards", "AI Space", files, nil, "zh-CN")
+	if err != nil {
+		t.Fatalf("flashcard generation should succeed: %v", err)
+	}
+	if draft.Type != "flashcards" {
+		t.Fatalf("draft.Type = %q, want flashcards", draft.Type)
+	}
+	var content struct {
+		Cards []struct {
+			Front  string `json:"front"`
+			Back   string `json:"back"`
+			Source string `json:"source"`
+		} `json:"cards"`
+	}
+	if err := json.Unmarshal(draft.Content, &content); err != nil {
+		t.Fatalf("flashcards content should be valid JSON: %v", err)
+	}
+	if len(content.Cards) < 2 {
+		t.Fatalf("expected multiple flashcards, got %d content=%s", len(content.Cards), string(draft.Content))
+	}
+	encoded := string(draft.Content)
+	if !containsAll(encoded, []string{"技能系统", "9 种角色", "白标", "[1]"}) {
+		t.Fatalf("flashcards should turn source facts into cited question/answer cards, got %s", encoded)
+	}
+}
+
 func TestBuildGeneratedNotebookArtifactDraftRejectsEmptySources(t *testing.T) {
 	failedFiles := []models.File{{ID: 2, Filename: "失败.pdf", ParseStatus: "error", EmbeddingStatus: "pending", Content: "失败"}}
 	if _, err := buildGeneratedNotebookArtifactDraft("summary", "知识库", failedFiles, nil, "zh-CN"); err == nil {

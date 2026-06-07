@@ -40,9 +40,10 @@ interface ChatInterfaceProps {
   welcomeSubtitle?: string;
   welcomeExamples?: { title: string; desc: string; prompt: string }[];
   targetMessageId?: number;
+  externalSendRequest?: { id: number; content: string } | null;
 }
 
-export default function ChatInterface({ conversationId, notebookId, notebookTitle, notebookFileCount, notebookFileIds, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId }: ChatInterfaceProps) {
+export default function ChatInterface({ conversationId, notebookId, notebookTitle, notebookFileCount, notebookFileIds, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId, externalSendRequest }: ChatInterfaceProps) {
   const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
   const { t } = useI18n();
   const [compareMode, setCompareMode] = useState(false);
@@ -56,6 +57,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   const [forkTargetMessageId, setForkTargetMessageId] = useState<number | null>(null);
   const [messageSelectMode, setMessageSelectMode] = useState(false);
   const [quoteDraft, setQuoteDraft] = useState<QuoteDraft | null>(null);
+  const handledExternalSendIdRef = useRef<number | null>(null);
   const [modelRecommendationContext, setModelRecommendationContext] = useState<ModelRecommendationContext>();
   const [userName, setUserName] = useState<string>("");
   useEffect(() => {
@@ -267,7 +269,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     return ["extended", "heavy", "high", "max"].includes(reasoning.effort);
   };
 
-  const handleSend = async (content: string, reasoning: ReasoningConfig, search: boolean, attachments?: { filename: string; content: string; type: string; public_id?: string }[], file_ids?: string[]) => {
+  const handleSend = async (content: string, reasoning: ReasoningConfig | undefined, search: boolean, attachments?: { filename: string; content: string; type: string; public_id?: string }[], file_ids?: string[]) => {
     // 【积分限制已临时取消】保畔代码但不执行
     /* Credit checks are temporarily disabled.
      * If re-enabled, route insufficient-credit messages through i18n keys instead of hardcoded copy.
@@ -295,6 +297,12 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
       sendMessage(content, reasoning, false, search, templateId, false, attachments, file_ids, templatePrefix);
     }
   };
+
+  useEffect(() => {
+    if (!externalSendRequest || handledExternalSendIdRef.current === externalSendRequest.id) return;
+    handledExternalSendIdRef.current = externalSendRequest.id;
+    handleSend(externalSendRequest.content, undefined, false);
+  }, [externalSendRequest]);
 
   const handleStop = () => {
       stopGeneration();

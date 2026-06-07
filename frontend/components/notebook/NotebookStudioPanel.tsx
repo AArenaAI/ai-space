@@ -1,11 +1,11 @@
 "use client";
 
 import { CSSProperties, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
-import { BarChart3, ChevronLeft, ChevronRight, ChevronsRight, Copy, Download, ExternalLink, FileQuestion, FileText, Layers3, Loader2, Map as MapIcon, Maximize2, MoreHorizontal, Pencil, Presentation, RefreshCw, Sparkles, Table2, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
+import { BarChart3, Brain, CheckCircle2, ChevronLeft, ChevronRight, ChevronsRight, Copy, Download, ExternalLink, FileQuestion, FileText, Layers3, Loader2, Map as MapIcon, Maximize2, MoreHorizontal, Pencil, Presentation, RefreshCw, Sparkles, Table2, Trash2, X, XCircle, ZoomIn, ZoomOut } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
-export type NotebookStudioActionId = "table" | "summary" | "faq" | "briefing" | "mindmap" | "slides";
+export type NotebookStudioActionId = "table" | "summary" | "faq" | "briefing" | "mindmap" | "flashcards" | "slides";
 
 export type NotebookStudioTableRow = {
   module: string;
@@ -41,6 +41,12 @@ export type NotebookStudioSource = {
   mimeType?: string;
 };
 
+export type NotebookStudioFlashcard = {
+  front: string;
+  back: string;
+  source?: string;
+};
+
 export type NotebookStudioArtifact =
   | {
       id: string;
@@ -69,6 +75,15 @@ export type NotebookStudioArtifact =
       sourceCount: number;
       nodes: NotebookStudioMindmapNode[];
       edges: NotebookStudioMindmapEdge[];
+    }
+  | {
+      id: string;
+      type: "flashcards";
+      title: string;
+      subtitle: string;
+      createdAt: string;
+      sourceCount: number;
+      cards: NotebookStudioFlashcard[];
     };
 
 type NotebookStudioPanelProps = {
@@ -85,6 +100,7 @@ type NotebookStudioPanelProps = {
   onCopyArtifact?: (artifact: NotebookStudioArtifact) => void;
   onDownloadArtifact?: (artifact: NotebookStudioArtifact) => void;
   onExportTableToGoogleSheets?: (artifact: Extract<NotebookStudioArtifact, { type: "table" }>) => void;
+  onExplainFlashcard?: (card: NotebookStudioFlashcard) => void;
 };
 
 const actionIconMap: Record<NotebookStudioActionId, typeof Table2> = {
@@ -93,6 +109,7 @@ const actionIconMap: Record<NotebookStudioActionId, typeof Table2> = {
   faq: FileQuestion,
   briefing: BarChart3,
   mindmap: MapIcon,
+  flashcards: Brain,
   slides: Presentation,
 };
 
@@ -102,6 +119,7 @@ const artifactIconMap: Record<NotebookStudioArtifact["type"], typeof Table2> = {
   faq: FileQuestion,
   briefing: BarChart3,
   mindmap: MapIcon,
+  flashcards: Brain,
 };
 
 function formatTime(value: string) {
@@ -191,6 +209,42 @@ function renderTableArtifact(artifact: Extract<NotebookStudioArtifact, { type: "
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function FlashcardsArtifactView({ artifact, t, onExplain }: { artifact: Extract<NotebookStudioArtifact, { type: "flashcards" }>; t: (key: string, params?: Record<string, string>) => string; onExplain?: (card: NotebookStudioFlashcard) => void }) {
+  const [index, setIndex] = useState(0);
+  const [answerVisible, setAnswerVisible] = useState(false);
+  const [known, setKnown] = useState<Record<number, boolean | null>>({});
+  const total = artifact.cards.length;
+  const card = artifact.cards[Math.min(index, Math.max(total - 1, 0))];
+  const go = (next: number) => {
+    if (!total) return;
+    setIndex((next + total) % total);
+    setAnswerVisible(false);
+  };
+  if (!card) return <div className="rounded-2xl border border-surface-border bg-surface-elevated p-4 text-sm text-text-tertiary">{t("notebook.studio.flashcardsEmpty")}</div>;
+  return (
+    <div className="flex min-h-[520px] flex-1 flex-col items-center justify-center gap-5 py-5">
+      <div className="w-full max-w-[430px] rounded-[32px] border border-surface-border bg-surface-elevated p-4 shadow-sm">
+        <div className="aspect-square rounded-[28px] border border-surface-border bg-surface-card p-6 shadow-sm">
+          <div className="text-sm font-semibold text-text-tertiary">{index + 1}/{total}</div>
+          <div className="flex h-[calc(100%-36px)] flex-col items-center justify-center text-center">
+            <p className="text-xl font-semibold leading-8 tracking-[-0.01em] text-text-primary">{answerVisible ? card.back : card.front}</p>
+            {card.source && <span className="mt-4 rounded-full bg-brand-muted px-2.5 py-1 text-xs font-medium text-brand">{card.source}</span>}
+            <button type="button" onClick={() => answerVisible ? onExplain?.(card) : setAnswerVisible(true)} className="mt-7 rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-hover">
+              {answerVisible ? t("notebook.studio.explainFlashcard") : t("notebook.studio.showAnswer")}
+            </button>
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center gap-4">
+        <button type="button" onClick={() => go(index - 1)} className="flex h-11 w-11 items-center justify-center rounded-full border border-surface-border bg-surface-card text-text-secondary hover:bg-surface-hover"><ChevronLeft className="h-5 w-5" /></button>
+        <button type="button" onClick={() => { setKnown((prev) => ({ ...prev, [index]: false })); go(index + 1); }} className="flex h-11 w-11 items-center justify-center rounded-full border border-red-500/20 bg-red-500/10 text-red-500 hover:bg-red-500/15"><XCircle className="h-5 w-5" /></button>
+        <button type="button" onClick={() => { setKnown((prev) => ({ ...prev, [index]: true })); go(index + 1); }} className="flex h-11 w-11 items-center justify-center rounded-full border border-emerald-500/20 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/15"><CheckCircle2 className="h-5 w-5" /></button>
+        <button type="button" onClick={() => go(index + 1)} className="flex h-11 w-11 items-center justify-center rounded-full border border-surface-border bg-surface-card text-text-secondary hover:bg-surface-hover"><ChevronRight className="h-5 w-5" /></button>
+      </div>
     </div>
   );
 }
@@ -444,19 +498,23 @@ function MindmapCanvasNode({ node, fullNode, offset, expanded, onToggle }: { nod
   );
 }
 
-function renderActiveArtifact(artifact: NotebookStudioArtifact, t: (key: string, params?: Record<string, string>) => string, expanded = false, onDownloadArtifact?: (artifact: NotebookStudioArtifact) => void) {
+function renderActiveArtifact(artifact: NotebookStudioArtifact, t: (key: string, params?: Record<string, string>) => string, expanded = false, onDownloadArtifact?: (artifact: NotebookStudioArtifact) => void, onExplainFlashcard?: (card: NotebookStudioFlashcard) => void) {
   switch (artifact.type) {
     case "table":
       return renderTableArtifact(artifact, t, expanded);
     case "mindmap":
       return <MindmapArtifactView artifact={artifact} onDownload={onDownloadArtifact} />;
-    default:
+    case "flashcards":
+      return <FlashcardsArtifactView artifact={artifact} t={t} onExplain={onExplainFlashcard} />;
+    case "summary":
+    case "faq":
+    case "briefing":
       return renderTextArtifact(artifact);
   }
 }
 
 function GeneratingStudioCard({ type, sourceCount, t }: { type: NotebookStudioActionId; sourceCount: number; t: (key: string, params?: Record<string, string>) => string }) {
-  const titleKey = type === "mindmap" ? "notebook.studio.generatingMindmap" : "notebook.studio.generatingTable";
+  const titleKey = type === "mindmap" ? "notebook.studio.generatingMindmap" : type === "flashcards" ? "notebook.studio.generatingFlashcards" : "notebook.studio.generatingTable";
   return (
     <div className="mb-3 rounded-2xl border border-surface-border bg-surface-card px-3 py-3 shadow-sm">
       <div className="flex items-center gap-3">
@@ -532,6 +590,7 @@ export function NotebookStudioPanel({
   onCopyArtifact,
   onDownloadArtifact,
   onExportTableToGoogleSheets,
+  onExplainFlashcard,
 }: NotebookStudioPanelProps) {
   const { t } = useI18n();
   const [openMenuArtifactId, setOpenMenuArtifactId] = useState<string | null>(null);
@@ -546,6 +605,7 @@ export function NotebookStudioPanel({
     { id: "faq", title: t("notebook.studio.faq"), desc: t("notebook.studio.faqDesc"), accent: "from-amber-500/15 to-orange-500/10 text-amber-500" },
     { id: "briefing", title: t("notebook.studio.briefing"), desc: t("notebook.studio.briefingDesc"), accent: "from-blue-500/15 to-sky-500/10 text-blue-500" },
     { id: "mindmap", title: t("notebook.studio.mindmap"), desc: t("notebook.studio.mindmapDesc"), accent: "from-violet-500/15 to-fuchsia-500/10 text-violet-500" },
+    { id: "flashcards", title: t("notebook.studio.flashcards"), desc: t("notebook.studio.flashcardsDesc"), accent: "from-pink-500/15 to-rose-500/10 text-pink-500" },
     { id: "slides", title: t("notebook.studio.slides"), desc: t("notebook.studio.slidesDesc"), accent: "from-rose-500/15 to-pink-500/10 text-rose-500" },
   ];
 
@@ -588,7 +648,7 @@ export function NotebookStudioPanel({
             />
           </div>
           <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-surface-card p-4">
-            {renderActiveArtifact(activeArtifact, t, true, onDownloadArtifact)}
+            {renderActiveArtifact(activeArtifact, t, true, onDownloadArtifact, onExplainFlashcard)}
             <div className="mt-3 flex items-center gap-2 border-t border-surface-border pt-3">
               <button type="button" className="rounded-full border border-surface-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-emerald-500/40 hover:text-emerald-500">{t("notebook.studio.good")}</button>
               <button type="button" className="rounded-full border border-surface-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-red-500/40 hover:text-red-500">{t("notebook.studio.bad")}</button>
@@ -632,7 +692,7 @@ export function NotebookStudioPanel({
           <h3 className="text-sm font-semibold text-text-primary">{t("notebook.studio.outputs")}</h3>
           <MoreHorizontal className="h-4 w-4 text-text-tertiary" />
         </div>
-        {(generatingType === "table" || generatingType === "mindmap") && <div className="px-4 pb-2"><GeneratingStudioCard type={generatingType} sourceCount={selectedSourceCount} t={t} /></div>}
+        {(generatingType === "table" || generatingType === "mindmap" || generatingType === "flashcards") && <div className="px-4 pb-2"><GeneratingStudioCard type={generatingType} sourceCount={selectedSourceCount} t={t} /></div>}
         {artifacts.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-elevated text-text-tertiary"><Layers3 className="h-5 w-5" /></div>
@@ -711,7 +771,7 @@ export function NotebookStudioPanel({
             </button>
           </div>
           <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-surface-card p-5">
-            {renderActiveArtifact(viewerArtifact, t, true, onDownloadArtifact)}
+            {renderActiveArtifact(viewerArtifact, t, true, onDownloadArtifact, onExplainFlashcard)}
           </div>
         </div>
       </div>

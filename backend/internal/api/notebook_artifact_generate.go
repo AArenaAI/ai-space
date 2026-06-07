@@ -64,6 +64,12 @@ type notebookStudioMindmapEdge struct {
 	Label string `json:"label,omitempty"`
 }
 
+type notebookStudioFlashcard struct {
+	Front  string `json:"front"`
+	Back   string `json:"back"`
+	Source string `json:"source"`
+}
+
 func buildGeneratedNotebookArtifactDraft(generationType string, notebookTitle string, files []models.File, selectedFileIDs []uint, language string) (generatedNotebookArtifactDraft, error) {
 	generationType = strings.TrimSpace(generationType)
 	artifactType, ok := notebookArtifactTypeForGeneration(generationType)
@@ -87,6 +93,8 @@ func buildGeneratedNotebookArtifactDraft(generationType string, notebookTitle st
 		payload = map[string]any{"rows": buildNotebookGeneratedTableRows(sources)}
 	case "mindmap":
 		payload = buildNotebookGeneratedMindmap(notebookTitle, sources)
+	case "flashcards":
+		payload = map[string]any{"cards": buildNotebookGeneratedFlashcards(sources, language)}
 	case "summary", "faq", "briefing":
 		payload = map[string]any{"sections": buildNotebookGeneratedTextSections(generationType, notebookTitle, sources, language)}
 	}
@@ -169,6 +177,8 @@ func buildNotebookArtifactAIMessages(generationType string, notebookTitle string
 		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For table content must be {\"rows\":[{\"module\":string,\"capability\":string,\"status\":string,\"implementation\":string,\"value\":string,\"source\":string}]}. You MUST read the uploaded source text and extract a functional/specification table: each row is one product feature, capability, module, workflow, scenario, or business item described in the documents. Use columns as: module=模块名称, capability=核心功能, status=当前状态/成熟度, implementation=差异化竞争优势, value=对标产品/参照对象/适用场景, source=bracket citations like [1]. Do NOT create a file list, parse/index status checklist, or one row per file. If one document describes multiple functions, output multiple rows from that same document. Prefer 6-12 high-signal rows when enough content exists. Keep all cells grounded in the source text.\n")
 	} else if generationType == "mindmap" {
 		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For mindmap content must be {\"nodes\":[{\"id\":string,\"label\":string,\"summary\":string,\"source\":string}],\"edges\":[{\"from\":string,\"to\":string,\"label\":string}]}. You MUST first read the whole provided source text for each file (it may be a long PDF extract), reconstruct the document outline, then draw a NotebookLM-style product/knowledge mind map, not a sentence list. Required structure: exactly one root node with id=root; 5-8 first-level branches that are clear sections/modules; each important branch has 2-5 second-level child nodes; add third-level nodes only when the source has concrete details. Good first-level branch examples for product documents: 产品定位, 已落地功能, 核心优势, 技术架构, 业务场景, 规划路线, 竞争壁垒, 风险与缺口. Node labels must be clean Chinese phrases of 2-18 characters when possible; never use broken OCR fragments, truncated words, ellipses, file names, raw sentences, parse/index status, or meaningless snippets. Summaries may contain one concise sentence. Use stable ids like root, branch-1, branch-1-1. Cite sources using bracket numbers such as [1]. If the source contains an existing feature table or product architecture, preserve that sectional structure.\n")
+	} else if generationType == "flashcards" {
+		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For flashcards content must be {\"cards\":[{\"front\":string,\"back\":string,\"source\":string}]}. Create compact study flashcards from the source material. Each card front is a self-test question about one concrete concept, number, capability, process, comparison, role, architecture point, pricing/detail, or named fact. Each back is the concise answer grounded in the source. Prefer 12-30 cards when enough source content exists. Avoid generic questions, duplicate cards, file names, parse status, and unsupported facts. Cite sources using bracket numbers such as [1].\n")
 	} else {
 		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For summary/faq/briefing content must be {\"sections\":[{\"heading\":string,\"body\":string,\"bullets\":[string]}]}. For mindmap content must be {\"nodes\":[{\"id\":string,\"label\":string,\"summary\":string,\"source\":string}],\"edges\":[{\"from\":string,\"to\":string,\"label\":string}]}. Cite sources using bracket numbers such as [1].")
 	}
@@ -425,7 +435,7 @@ func notebookArtifactTypeForGeneration(generationType string) (string, bool) {
 	switch generationType {
 	case "table":
 		return "data-table", true
-	case "summary", "faq", "briefing", "mindmap":
+	case "summary", "faq", "briefing", "mindmap", "flashcards":
 		return generationType, true
 	default:
 		return "", false
@@ -474,7 +484,7 @@ func notebookGenerationExcerptLimit(generationType string) int {
 	switch generationType {
 	case "mindmap":
 		return 60000
-	case "table":
+	case "table", "flashcards":
 		return 16000
 	default:
 		return 10000
@@ -499,22 +509,142 @@ func buildNotebookGeneratedTableRows(sources []notebookGenerationSource) []noteb
 	return dedupeNotebookTableRows(rows)
 }
 
+func buildNotebookGeneratedFlashcards(sources []notebookGenerationSource, language string) []notebookStudioFlashcard {
+	cards := make([]notebookStudioFlashcard, 0, len(sources)*6)
+	for _, source := range sources {
+		blocks := splitNotebookFlashcardBlocks(source.Excerpt)
+		if len(blocks) == 0 {
+			blocks = []notebookFeatureBlock{{title: notebookTableTopic(source), body: fallbackText(source.Excerpt, source.Summary)}}
+		}
+		for _, block := range blocks {
+			blockCards := buildNotebookFlashcardsFromBlock(block.title, block.body, source.Index, language)
+			cards = append(cards, blockCards...)
+			if len(cards) >= 50 {
+				return dedupeNotebookFlashcards(cards)
+			}
+		}
+		for _, sentence := range splitNotebookSentences(source.Excerpt) {
+			if !looksLikeNotebookFeatureSentence(sentence) && !regexp.MustCompile(`\d`).MatchString(sentence) {
+				continue
+			}
+			cards = append(cards, notebookFlashcardFromFact(truncateNotebookRunes(sentence, 18, ""), sentence, source.Index))
+			if len(cards) >= 50 {
+				return dedupeNotebookFlashcards(cards)
+			}
+		}
+	}
+	return dedupeNotebookFlashcards(cards)
+}
+
+func splitNotebookFlashcardBlocks(text string) []notebookFeatureBlock {
+	text = strings.ReplaceAll(strings.TrimSpace(text), "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	if text == "" {
+		return nil
+	}
+	headingRe := regexp.MustCompile(`(?m)^\s*#{1,4}\s*([^\n]{2,80})\s*$`)
+	matches := headingRe.FindAllStringSubmatchIndex(text, -1)
+	blocks := make([]notebookFeatureBlock, 0, len(matches))
+	for i, match := range matches {
+		title := strings.TrimSpace(text[match[2]:match[3]])
+		bodyStart := match[1]
+		bodyEnd := len(text)
+		if i+1 < len(matches) {
+			bodyEnd = matches[i+1][0]
+		}
+		body := strings.TrimSpace(text[bodyStart:bodyEnd])
+		if title != "" && body != "" {
+			blocks = append(blocks, notebookFeatureBlock{title: title, body: body})
+		}
+	}
+	if len(blocks) > 0 {
+		return blocks
+	}
+	return nil
+}
+
+func buildNotebookFlashcardsFromBlock(heading string, body string, sourceIndex int, language string) []notebookStudioFlashcard {
+	heading = cleanNotebookModuleName(heading)
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return nil
+	}
+	if heading == "" || heading == "核心知识点" {
+		heading = truncateNotebookRunes(body, 18, "")
+	}
+	cards := []notebookStudioFlashcard{notebookFlashcardFromFact(heading, body, sourceIndex)}
+	for _, sentence := range splitNotebookSentences(body) {
+		if strings.TrimSpace(sentence) == "" {
+			continue
+		}
+		cards = append(cards, notebookFlashcardFromFact(heading, sentence, sourceIndex))
+		if len(cards) >= 4 {
+			break
+		}
+	}
+	return cards
+}
+
+func notebookFlashcardFromFact(heading string, fact string, sourceIndex int) notebookStudioFlashcard {
+	fact = strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(fact, " "))
+	if fact == "" {
+		return notebookStudioFlashcard{}
+	}
+	front := fmt.Sprintf("%s 的核心内容是什么？", heading)
+	if containsAnyNotebookText(fact, []string{"多少", "几", "种", "个", "分钟", "小时", "天", "年"}) || regexp.MustCompile(`\d`).MatchString(fact) {
+		front = fmt.Sprintf("关于 %s，资料中提到了哪些关键数字或规格？", heading)
+	}
+	return notebookStudioFlashcard{Front: front, Back: truncateNotebookRunes(fact, 220, ""), Source: fmt.Sprintf("[%d]", sourceIndex)}
+}
+
+func dedupeNotebookFlashcards(cards []notebookStudioFlashcard) []notebookStudioFlashcard {
+	seen := map[string]bool{}
+	unique := make([]notebookStudioFlashcard, 0, len(cards))
+	for _, card := range cards {
+		card.Front = strings.TrimSpace(card.Front)
+		card.Back = strings.TrimSpace(card.Back)
+		card.Source = strings.TrimSpace(card.Source)
+		key := normalizeNotebookTableDedupeText(card.Front + "|" + card.Back)
+		if card.Front == "" || card.Back == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		unique = append(unique, card)
+	}
+	return unique
+}
+
 func sanitizeNotebookArtifactContent(artifactType string, content json.RawMessage) json.RawMessage {
-	if artifactType != "data-table" {
+	switch artifactType {
+	case "data-table":
+		var payload struct {
+			Rows []notebookStudioTableRow `json:"rows"`
+		}
+		if err := json.Unmarshal(content, &payload); err != nil {
+			return content
+		}
+		payload.Rows = dedupeNotebookTableRows(payload.Rows)
+		cleaned, err := json.Marshal(payload)
+		if err != nil {
+			return content
+		}
+		return cleaned
+	case "flashcards":
+		var payload struct {
+			Cards []notebookStudioFlashcard `json:"cards"`
+		}
+		if err := json.Unmarshal(content, &payload); err != nil {
+			return content
+		}
+		payload.Cards = dedupeNotebookFlashcards(payload.Cards)
+		cleaned, err := json.Marshal(payload)
+		if err != nil {
+			return content
+		}
+		return cleaned
+	default:
 		return content
 	}
-	var payload struct {
-		Rows []notebookStudioTableRow `json:"rows"`
-	}
-	if err := json.Unmarshal(content, &payload); err != nil {
-		return content
-	}
-	payload.Rows = dedupeNotebookTableRows(payload.Rows)
-	cleaned, err := json.Marshal(payload)
-	if err != nil {
-		return content
-	}
-	return cleaned
 }
 
 func dedupeNotebookTableRows(rows []notebookStudioTableRow) []notebookStudioTableRow {

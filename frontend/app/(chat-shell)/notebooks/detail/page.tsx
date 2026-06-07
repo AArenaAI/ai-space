@@ -7,7 +7,7 @@ import { ArrowLeft, BookOpen, FileText, Globe, Loader2, Plus, Trash2, UploadClou
 import { toast } from "sonner";
 import ChatInterface from "@/components/chat/ChatInterface";
 import { NotebookSourcePreviewDrawer } from "@/components/notebook/NotebookSourcePreviewDrawer";
-import { NotebookStudioPanel, type NotebookStudioActionId, type NotebookStudioArtifact, type NotebookStudioMindmapEdge, type NotebookStudioMindmapNode, type NotebookStudioSource, type NotebookStudioTableRow, type NotebookStudioTextSection } from "@/components/notebook/NotebookStudioPanel";
+import { NotebookStudioPanel, type NotebookStudioActionId, type NotebookStudioArtifact, type NotebookStudioFlashcard, type NotebookStudioMindmapEdge, type NotebookStudioMindmapNode, type NotebookStudioSource, type NotebookStudioTableRow, type NotebookStudioTextSection } from "@/components/notebook/NotebookStudioPanel";
 import { NotebookUrlSourceDialog } from "@/components/notebook/NotebookUrlSourceDialog";
 import { MODELS } from "@/hooks/useChat";
 import { addNotebookFile, addNotebookUrlSource, deleteNotebookArtifact, fetchNotebook, fetchNotebookArtifacts, fetchNotebookFileContent, generateNotebookArtifact, removeNotebookFile, updateNotebook, updateNotebookArtifact } from "@/lib/notebookApi";
@@ -82,7 +82,7 @@ function statusDetail(file: NotebookFile, t: Translate) {
 }
 
 function toStudioArtifact(artifact: PersistedNotebookArtifact): NotebookStudioArtifact | null {
-  const content = artifact.content as { rows?: NotebookStudioTableRow[]; sections?: NotebookStudioTextSection[]; nodes?: NotebookStudioMindmapNode[]; edges?: NotebookStudioMindmapEdge[] } | null;
+  const content = artifact.content as { rows?: NotebookStudioTableRow[]; sections?: NotebookStudioTextSection[]; nodes?: NotebookStudioMindmapNode[]; edges?: NotebookStudioMindmapEdge[]; cards?: NotebookStudioFlashcard[] } | null;
   const base = {
     id: String(artifact.id),
     title: artifact.title,
@@ -103,6 +103,9 @@ function toStudioArtifact(artifact: PersistedNotebookArtifact): NotebookStudioAr
       nodes: Array.isArray(content?.nodes) ? content.nodes : [],
       edges: Array.isArray(content?.edges) ? content.edges : [],
     };
+  }
+  if (artifact.type === "flashcards") {
+    return { ...base, type: "flashcards", cards: Array.isArray(content?.cards) ? content.cards : [] };
   }
   return null;
 }
@@ -131,7 +134,16 @@ function artifactToMarkdown(artifact: NotebookStudioArtifact) {
         artifact.edges.forEach((edge) => lines.push(`- ${edge.from} → ${edge.to}${edge.label ? `：${edge.label}` : ""}`));
       }
       break;
-    default:
+    case "flashcards":
+      artifact.cards.forEach((card, index) => {
+        lines.push(`## ${index + 1}. ${card.front}`, "", card.back);
+        if (card.source) lines.push("", card.source);
+        lines.push("");
+      });
+      break;
+    case "summary":
+    case "faq":
+    case "briefing":
       artifact.sections.forEach((section) => {
         lines.push(`## ${section.heading}`);
         if (section.body) lines.push("", section.body);
@@ -190,6 +202,7 @@ function NotebookDetailContent() {
   const [studioArtifacts, setStudioArtifacts] = useState<NotebookStudioArtifact[]>([]);
   const [activeStudioArtifactId, setActiveStudioArtifactId] = useState<string | null>(null);
   const [generatingStudioType, setGeneratingStudioType] = useState<NotebookStudioActionId | null>(null);
+  const [externalChatSendRequest, setExternalChatSendRequest] = useState<{ id: number; content: string } | null>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const selectionInitializedRef = useRef(false);
@@ -631,6 +644,12 @@ function NotebookDetailContent() {
     toast.success(t("notebook.studio.googleSheetsExportHint"));
   };
 
+  const handleExplainFlashcard = (card: NotebookStudioFlashcard) => {
+    const content = t("notebook.studio.flashcardExplainPrompt", { front: card.front, back: card.back });
+    setExternalChatSendRequest({ id: Date.now(), content });
+    toast.success(t("notebook.studio.flashcardExplainSent"));
+  };
+
   const handleRename = async () => {
     if (!notebook) return;
     const title = window.prompt(t("notebook.renamePrompt"), notebook.title)?.trim();
@@ -792,6 +811,7 @@ function NotebookDetailContent() {
             { title: t("notebook.exampleFaq"), desc: t("notebook.exampleFaqDesc"), prompt: t("notebook.exampleFaqPrompt") },
             { title: t("notebook.exampleCompare"), desc: t("notebook.exampleCompareDesc"), prompt: t("notebook.exampleComparePrompt") },
           ]}
+          externalSendRequest={externalChatSendRequest}
         />
       </section>
       <div
@@ -818,6 +838,7 @@ function NotebookDetailContent() {
         onCopyArtifact={handleCopyArtifact}
         onDownloadArtifact={handleDownloadArtifact}
         onExportTableToGoogleSheets={handleExportTableToGoogleSheets}
+        onExplainFlashcard={handleExplainFlashcard}
       />
     </div>
     <NotebookUrlSourceDialog
