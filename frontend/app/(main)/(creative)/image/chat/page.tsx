@@ -128,7 +128,7 @@ function ReferenceImageStack({
     return (
       <div
         className={cn(
-          "relative flex h-16 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-surface-border bg-surface-card transition-all hover:border-brand/40",
+          "relative flex h-20 w-11 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-surface-border bg-surface-card transition-all hover:border-brand/40",
           uploading && "cursor-not-allowed opacity-60"
         )}
         onClick={onAdd}
@@ -152,7 +152,7 @@ function ReferenceImageStack({
   if (images.length === 1) {
     return (
       <div className="group/single relative shrink-0">
-        <div className="h-16 w-9 overflow-hidden rounded-xl border border-surface-border">
+        <div className="h-20 w-11 overflow-hidden rounded-xl border border-surface-border">
           <img src={resolveImageUrl(images[0])} alt={t("image.referenceAlt")} className="h-full w-full object-cover" />
         </div>
         <button
@@ -191,7 +191,7 @@ function ReferenceImageStack({
                 "group/item relative overflow-hidden rounded-xl border border-surface-border shadow-sm transition-all duration-300 ease-out",
                 isHovered ? "hover:z-50 hover:scale-110 hover:shadow-lg" : ""
               )}
-              style={{ width: 36, height: 64, marginLeft: idx === 0 ? 0 : stackOffset, transform: `rotate(${stackRotate}deg)`, zIndex }}
+              style={{ width: 44, height: 80, marginLeft: idx === 0 ? 0 : stackOffset, transform: `rotate(${stackRotate}deg)`, zIndex }}
             >
               <img src={resolveImageUrl(url)} alt={`${t("image.referenceAlt")} ${idx + 1}`} className="h-full w-full object-cover" />
               <button

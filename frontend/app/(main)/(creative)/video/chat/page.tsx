@@ -744,7 +744,7 @@ function VideoChatPageInner() {
                     onClick={() => fileInputRef.current?.click()}
                     disabled={uploadingRef || generating}
                     className={cn(
-                      "relative shrink-0 w-9 h-16 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center transition-all hover:border-brand/40",
+                      "relative shrink-0 w-11 h-20 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center transition-all hover:border-brand/40",
                       (uploadingRef || generating) && "cursor-not-allowed opacity-60"
                     )}
                     title={t("video.uploadReferenceMedia")}
@@ -755,7 +755,7 @@ function VideoChatPageInner() {
                   <>
                     {referenceImages.slice(0, 2).map((url, index) => (
                       <div key={`image-${url}-${index}`} className="relative shrink-0">
-                        <div className="w-9 h-16 rounded-xl overflow-hidden border border-surface-border">
+                        <div className="w-11 h-20 rounded-xl overflow-hidden border border-surface-border">
                           <img src={resolveMediaUrl(url)} alt={t("image.referenceAlt")} className="w-full h-full object-cover" />
                         </div>
                         <button
@@ -770,7 +770,7 @@ function VideoChatPageInner() {
                     ))}
                     {referenceVideos.slice(0, 2).map((url, index) => (
                       <div key={`video-${url}-${index}`} className="relative shrink-0">
-                        <div className="relative w-9 h-16 rounded-xl overflow-hidden border border-surface-border bg-surface-elevated">
+                        <div className="relative w-11 h-20 rounded-xl overflow-hidden border border-surface-border bg-surface-elevated">
                           <video src={resolveMediaUrl(url)} className="h-full w-full object-cover" muted playsInline />
                           <div className="absolute inset-0 flex items-center justify-center bg-black/20">
                             <Video className="h-4 w-4 text-white" />
@@ -792,7 +792,7 @@ function VideoChatPageInner() {
                         onClick={() => fileInputRef.current?.click()}
                         disabled={uploadingRef || generating}
                         className={cn(
-                          "relative shrink-0 w-9 h-16 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center transition-all hover:border-brand/40",
+                          "relative shrink-0 w-11 h-20 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center transition-all hover:border-brand/40",
                           (uploadingRef || generating) && "cursor-not-allowed opacity-60"
                         )}
                         title={t("video.uploadMoreReference")}

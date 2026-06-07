@@ -168,7 +168,7 @@ function ReferenceImageStack({
     return (
       <div
         className={cn(
-          "relative shrink-0 w-9 h-16 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center transition-all cursor-pointer hover:border-brand/40",
+          "relative shrink-0 w-11 h-20 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center transition-all cursor-pointer hover:border-brand/40",
           uploading && "cursor-not-allowed opacity-60"
         )}
         onClick={onAdd}
@@ -212,7 +212,7 @@ function ReferenceImageStack({
   if (images.length === 1) {
     return (
       <div className="relative shrink-0 group/single">
-        <div className="w-9 h-16 rounded-xl overflow-hidden border border-surface-border">
+        <div className="w-11 h-20 rounded-xl overflow-hidden border border-surface-border">
           <img src={resolveImageUrl(images[0])} alt={t("image.referenceAlt")} className="w-full h-full object-cover" />
         </div>
         {/* 删除按钮 - 悬浮时显示 */}
@@ -269,8 +269,8 @@ function ReferenceImageStack({
                 isHovered ? "hover:scale-110 hover:z-50" : ""
               )}
               style={{
-                width: 36,
-                height: 64,
+                width: 44,
+                height: 80,
                 marginLeft: idx === 0 ? 0 : stackOffset,
                 transform: `rotate(${stackRotate}deg)`,
                 zIndex,
@@ -760,7 +760,7 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
                 />
                 {mode === "video" && referenceVideos.map((url, idx) => (
                   <div key={`${url}-${idx}`} className="relative shrink-0 group/single">
-                    <div className="w-9 h-16 rounded-xl overflow-hidden border border-surface-border bg-surface-elevated relative">
+                    <div className="w-11 h-20 rounded-xl overflow-hidden border border-surface-border bg-surface-elevated relative">
                       <video
                         src={url.startsWith("file_") ? `/api/files/${url}/view` : url}
                         className="w-full h-full object-cover"
