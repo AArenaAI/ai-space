@@ -119,6 +119,25 @@ func TestBuildAINotebookArtifactDraftDeduplicatesAIReturnedTableRows(t *testing.
 	}
 }
 
+func TestBuildAINotebookArtifactDraftCleansAIReturnedFlashcards(t *testing.T) {
+	files := []models.File{
+		{ID: 1, Filename: "产品方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "产品定位", Content: "AI Space 技能系统预设了 9 种角色。"},
+	}
+	ai := &fakeNotebookAIService{response: `{"title":"AI 闪卡","subtitle":"AI 副标题","content":{"cards":[{"front":"【1】1.3 技能系统的核心内容是什么？","back":"[1] AI Space 技能系统预设了 9 种角色，包括 CEO 策略师、代码审查和翻译。插件架构支持运行时热加载。后续还会继续补充更多角色，用于不同工作场景。","source":"[1]"}]}}`}
+
+	draft, err := buildAINotebookArtifactDraft(context.Background(), ai, "flashcards", "知识库", files, []uint{1}, "zh-CN")
+	if err != nil {
+		t.Fatalf("flashcard AI draft should succeed: %v", err)
+	}
+	encoded := string(draft.Content)
+	if strings.Contains(encoded, "[1]") || strings.Contains(encoded, "【1】") || strings.Contains(encoded, "1.3") {
+		t.Fatalf("AI flashcards should be cleaned before saving, got %s", encoded)
+	}
+	if !strings.Contains(encoded, "9 种角色") || !strings.Contains(encoded, "技能系统") {
+		t.Fatalf("AI flashcards should preserve concise facts, got %s", encoded)
+	}
+}
+
 func TestBuildAINotebookMindmapRejectsInvalidAIInsteadOfFallback(t *testing.T) {
 	files := []models.File{
 		{ID: 1, Filename: "产品方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "产品定位", Content: "AI Space 是企业级多模型 AI 聚合平台。"},

@@ -213,37 +213,94 @@ function renderTableArtifact(artifact: Extract<NotebookStudioArtifact, { type: "
   );
 }
 
+function cleanFlashcardDisplayText(value: string) {
+  return value
+    .replace(/\s+/g, " ")
+    .replace(/^#{1,6}\s*/, "")
+    .replace(/^[\[【]\d+[\]】]\s*/, "")
+    .replace(/\s*[\[【]\d+[\]】]\s*/g, " ")
+    .replace(/^(?:\d+(?:\.\d+)*|[一二三四五六七八九十]+)[、.)．]?\s*/, "")
+    .trim()
+    .replace(/^[\-—：:，,。；;·|\[\]【】（）()\s]+|[\-—：:，,。；;·|\[\]【】（）()\s]+$/g, "");
+}
+
 function FlashcardsArtifactView({ artifact, t, onExplain }: { artifact: Extract<NotebookStudioArtifact, { type: "flashcards" }>; t: (key: string, params?: Record<string, string>) => string; onExplain?: (card: NotebookStudioFlashcard) => void }) {
   const [index, setIndex] = useState(0);
   const [answerVisible, setAnswerVisible] = useState(false);
   const [known, setKnown] = useState<Record<number, boolean | null>>({});
+  const [slideDirection, setSlideDirection] = useState<"left" | "right" | null>(null);
   const total = artifact.cards.length;
-  const card = artifact.cards[Math.min(index, Math.max(total - 1, 0))];
+  const rawCard = artifact.cards[Math.min(index, Math.max(total - 1, 0))];
+  const card = rawCard ? { ...rawCard, front: cleanFlashcardDisplayText(rawCard.front), back: cleanFlashcardDisplayText(rawCard.back), source: "" } : undefined;
   const go = (next: number) => {
     if (!total) return;
+    setSlideDirection(next > index ? "left" : "right");
     setIndex((next + total) % total);
     setAnswerVisible(false);
+    window.setTimeout(() => setSlideDirection(null), 260);
   };
   if (!card) return <div className="rounded-2xl border border-surface-border bg-surface-elevated p-4 text-sm text-text-tertiary">{t("notebook.studio.flashcardsEmpty")}</div>;
   return (
-    <div className="flex min-h-[520px] flex-1 flex-col items-center justify-center gap-5 py-5">
-      <div className="w-full max-w-[430px] rounded-[32px] border border-surface-border bg-surface-elevated p-4 shadow-sm">
-        <div className="aspect-square rounded-[28px] border border-surface-border bg-surface-card p-6 shadow-sm">
-          <div className="text-sm font-semibold text-text-tertiary">{index + 1}/{total}</div>
-          <div className="flex h-[calc(100%-36px)] flex-col items-center justify-center text-center">
-            <p className="text-xl font-semibold leading-8 tracking-[-0.01em] text-text-primary">{answerVisible ? card.back : card.front}</p>
-            {card.source && <span className="mt-4 rounded-full bg-brand-muted px-2.5 py-1 text-xs font-medium text-brand">{card.source}</span>}
-            <button type="button" onClick={() => answerVisible ? onExplain?.(card) : setAnswerVisible(true)} className="mt-7 rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-hover">
-              {answerVisible ? t("notebook.studio.explainFlashcard") : t("notebook.studio.showAnswer")}
-            </button>
+    <div className="flex min-h-[540px] flex-1 flex-col items-center justify-center gap-5 px-3 py-5">
+      <style>{`
+        @keyframes notebookFlashcardSlideLeft { from { opacity: 0; transform: translateX(28px) scale(.985); } to { opacity: 1; transform: translateX(0) scale(1); } }
+        @keyframes notebookFlashcardSlideRight { from { opacity: 0; transform: translateX(-28px) scale(.985); } to { opacity: 1; transform: translateX(0) scale(1); } }
+        .notebook-flashcard-perspective { perspective: 1200px; }
+        .notebook-flashcard-inner { transform-style: preserve-3d; }
+        .notebook-flashcard-face { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+        .notebook-flashcard-back { transform: rotateY(180deg); }
+      `}</style>
+      <div className="w-full max-w-[480px] rounded-[34px] border border-surface-border bg-surface-elevated/80 p-3 shadow-sm">
+        <div
+          key={index}
+          className={cn(
+            "notebook-flashcard-perspective relative aspect-[1.18/1] min-h-[330px] w-full",
+            slideDirection === "left" && "animate-[notebookFlashcardSlideLeft_260ms_cubic-bezier(.22,1,.36,1)_both]",
+            slideDirection === "right" && "animate-[notebookFlashcardSlideRight_260ms_cubic-bezier(.22,1,.36,1)_both]"
+          )}
+        >
+          <div className={cn("notebook-flashcard-inner absolute inset-0 rounded-[30px] transition-transform duration-500 ease-[cubic-bezier(.22,1,.36,1)]", answerVisible && "[transform:rotateY(180deg)]")}>
+            <div className="notebook-flashcard-face absolute inset-0 flex flex-col rounded-[30px] border border-surface-border bg-surface-card p-6 shadow-[0_18px_45px_rgba(15,23,42,0.10)] dark:shadow-[0_18px_45px_rgba(0,0,0,0.35)]">
+              <div className="flex items-center justify-between text-sm font-semibold text-text-tertiary">
+                <span>{index + 1}/{total}</span>
+                {known[index] != null && <span className={cn("rounded-full px-2 py-0.5 text-[11px]", known[index] ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500")}>{known[index] ? t("notebook.studio.known") : t("notebook.studio.unknown")}</span>}
+              </div>
+              <div className="flex min-h-0 flex-1 flex-col items-center justify-center py-6 text-center">
+                <div className="max-h-full overflow-y-auto px-1 text-balance text-[22px] font-semibold leading-8 tracking-[-0.02em] text-text-primary [scrollbar-width:thin]">
+                  {card.front}
+                </div>
+              </div>
+              <button type="button" onClick={() => setAnswerVisible(true)} className="mx-auto rounded-full bg-brand px-7 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-hover">
+                {t("notebook.studio.showAnswer")}
+              </button>
+            </div>
+            <div className="notebook-flashcard-face notebook-flashcard-back absolute inset-0 flex flex-col rounded-[30px] border border-brand/25 bg-brand-muted/25 p-6 shadow-[0_18px_45px_rgba(15,23,42,0.10)] dark:bg-surface-card dark:shadow-[0_18px_45px_rgba(0,0,0,0.35)]">
+              <div className="flex items-center justify-between text-sm font-semibold text-text-tertiary">
+                <span>{index + 1}/{total}</span>
+                <span className="rounded-full bg-brand-muted px-2.5 py-1 text-[11px] font-semibold text-brand">Answer</span>
+              </div>
+              <div className="flex min-h-0 flex-1 flex-col items-center justify-center py-6 text-center">
+                <div className="max-h-full overflow-y-auto px-1 text-balance text-xl font-semibold leading-8 tracking-[-0.01em] text-text-primary [scrollbar-width:thin]">
+                  {card.back}
+                </div>
+              </div>
+              <div className="flex justify-center gap-2">
+                <button type="button" onClick={() => setAnswerVisible(false)} className="rounded-full border border-surface-border bg-surface-card px-4 py-2.5 text-sm font-semibold text-text-secondary transition hover:bg-surface-hover">
+                  {t("notebook.studio.hideAnswer")}
+                </button>
+                <button type="button" onClick={() => onExplain?.(card)} className="rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-hover">
+                  {t("notebook.studio.explainFlashcard")}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
-      <div className="flex items-center gap-4">
-        <button type="button" onClick={() => go(index - 1)} className="flex h-11 w-11 items-center justify-center rounded-full border border-surface-border bg-surface-card text-text-secondary hover:bg-surface-hover"><ChevronLeft className="h-5 w-5" /></button>
-        <button type="button" onClick={() => { setKnown((prev) => ({ ...prev, [index]: false })); go(index + 1); }} className="flex h-11 w-11 items-center justify-center rounded-full border border-red-500/20 bg-red-500/10 text-red-500 hover:bg-red-500/15"><XCircle className="h-5 w-5" /></button>
-        <button type="button" onClick={() => { setKnown((prev) => ({ ...prev, [index]: true })); go(index + 1); }} className="flex h-11 w-11 items-center justify-center rounded-full border border-emerald-500/20 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/15"><CheckCircle2 className="h-5 w-5" /></button>
-        <button type="button" onClick={() => go(index + 1)} className="flex h-11 w-11 items-center justify-center rounded-full border border-surface-border bg-surface-card text-text-secondary hover:bg-surface-hover"><ChevronRight className="h-5 w-5" /></button>
+      <div className="flex items-center gap-3 rounded-full border border-surface-border bg-surface-card/95 p-2 shadow-sm">
+        <button type="button" onClick={() => go(index - 1)} className="flex h-11 w-11 items-center justify-center rounded-full text-text-secondary transition hover:bg-surface-hover hover:text-text-primary"><ChevronLeft className="h-5 w-5" /></button>
+        <button type="button" onClick={() => { setKnown((prev) => ({ ...prev, [index]: false })); go(index + 1); }} className="flex h-11 w-11 items-center justify-center rounded-full border border-red-500/20 bg-red-500/10 text-red-500 transition hover:bg-red-500/15"><XCircle className="h-5 w-5" /></button>
+        <button type="button" onClick={() => { setKnown((prev) => ({ ...prev, [index]: true })); go(index + 1); }} className="flex h-11 w-11 items-center justify-center rounded-full border border-emerald-500/20 bg-emerald-500/10 text-emerald-500 transition hover:bg-emerald-500/15"><CheckCircle2 className="h-5 w-5" /></button>
+        <button type="button" onClick={() => go(index + 1)} className="flex h-11 w-11 items-center justify-center rounded-full text-text-secondary transition hover:bg-surface-hover hover:text-text-primary"><ChevronRight className="h-5 w-5" /></button>
       </div>
     </div>
   );

@@ -178,7 +178,7 @@ func buildNotebookArtifactAIMessages(generationType string, notebookTitle string
 	} else if generationType == "mindmap" {
 		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For mindmap content must be {\"nodes\":[{\"id\":string,\"label\":string,\"summary\":string,\"source\":string}],\"edges\":[{\"from\":string,\"to\":string,\"label\":string}]}. You MUST first read the whole provided source text for each file (it may be a long PDF extract), reconstruct the document outline, then draw a NotebookLM-style product/knowledge mind map, not a sentence list. Required structure: exactly one root node with id=root; 5-8 first-level branches that are clear sections/modules; each important branch has 2-5 second-level child nodes; add third-level nodes only when the source has concrete details. Good first-level branch examples for product documents: 产品定位, 已落地功能, 核心优势, 技术架构, 业务场景, 规划路线, 竞争壁垒, 风险与缺口. Node labels must be clean Chinese phrases of 2-18 characters when possible; never use broken OCR fragments, truncated words, ellipses, file names, raw sentences, parse/index status, or meaningless snippets. Summaries may contain one concise sentence. Use stable ids like root, branch-1, branch-1-1. Cite sources using bracket numbers such as [1]. If the source contains an existing feature table or product architecture, preserve that sectional structure.\n")
 	} else if generationType == "flashcards" {
-		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For flashcards content must be {\"cards\":[{\"front\":string,\"back\":string,\"source\":string}]}. Create compact study flashcards from the source material. Each card front is a self-test question about one concrete concept, number, capability, process, comparison, role, architecture point, pricing/detail, or named fact. Each back is the concise answer grounded in the source. Prefer 12-30 cards when enough source content exists. Avoid generic questions, duplicate cards, file names, parse status, and unsupported facts. Cite sources using bracket numbers such as [1].\n")
+		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For flashcards content must be {\"cards\":[{\"front\":string,\"back\":string,\"source\":string}]}. Create compact study flashcards from the source material. Each card front is a clean self-test question about one concrete concept, number, capability, process, comparison, role, architecture point, pricing/detail, or named fact. Each back is a concise answer in 1 short sentence, preferably under 80 Chinese characters, grounded in the source but NOT copied as a long quote. Prefer 12-30 cards when enough source content exists. Avoid generic questions, duplicate cards, file names, parse status, unsupported facts, source citation labels, and heading numbers like 1, 1.3, 一、. Leave source empty; do not put [1] or 【1】 in any card field.\n")
 	} else {
 		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For summary/faq/briefing content must be {\"sections\":[{\"heading\":string,\"body\":string,\"bullets\":[string]}]}. For mindmap content must be {\"nodes\":[{\"id\":string,\"label\":string,\"summary\":string,\"source\":string}],\"edges\":[{\"from\":string,\"to\":string,\"label\":string}]}. Cite sources using bracket numbers such as [1].")
 	}
@@ -524,10 +524,13 @@ func buildNotebookGeneratedFlashcards(sources []notebookGenerationSource, langua
 			}
 		}
 		for _, sentence := range splitNotebookSentences(source.Excerpt) {
+			if looksLikeNotebookMarkdownHeading(sentence) {
+				continue
+			}
 			if !looksLikeNotebookFeatureSentence(sentence) && !regexp.MustCompile(`\d`).MatchString(sentence) {
 				continue
 			}
-			cards = append(cards, notebookFlashcardFromFact(truncateNotebookRunes(sentence, 18, ""), sentence, source.Index))
+			cards = append(cards, notebookFlashcardFromFact(truncateNotebookRunes(cleanNotebookFlashcardText(sentence), 18, ""), sentence, source.Index))
 			if len(cards) >= 50 {
 				return dedupeNotebookFlashcards(cards)
 			}
@@ -564,17 +567,21 @@ func splitNotebookFlashcardBlocks(text string) []notebookFeatureBlock {
 }
 
 func buildNotebookFlashcardsFromBlock(heading string, body string, sourceIndex int, language string) []notebookStudioFlashcard {
-	heading = cleanNotebookModuleName(heading)
+	heading = cleanNotebookFlashcardText(heading)
 	body = strings.TrimSpace(body)
 	if body == "" {
 		return nil
 	}
 	if heading == "" || heading == "核心知识点" {
-		heading = truncateNotebookRunes(body, 18, "")
+		heading = truncateNotebookRunes(cleanNotebookFlashcardText(body), 18, "")
 	}
-	cards := []notebookStudioFlashcard{notebookFlashcardFromFact(heading, body, sourceIndex)}
+	cards := []notebookStudioFlashcard{}
 	for _, sentence := range splitNotebookSentences(body) {
-		if strings.TrimSpace(sentence) == "" {
+		if looksLikeNotebookMarkdownHeading(sentence) {
+			continue
+		}
+		sentence = cleanNotebookFlashcardText(sentence)
+		if sentence == "" {
 			continue
 		}
 		cards = append(cards, notebookFlashcardFromFact(heading, sentence, sourceIndex))
@@ -586,24 +593,25 @@ func buildNotebookFlashcardsFromBlock(heading string, body string, sourceIndex i
 }
 
 func notebookFlashcardFromFact(heading string, fact string, sourceIndex int) notebookStudioFlashcard {
-	fact = strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(fact, " "))
-	if fact == "" {
+	heading = cleanNotebookFlashcardText(heading)
+	fact = summarizeNotebookFlashcardAnswer(cleanNotebookFlashcardText(fact))
+	if heading == "" || fact == "" {
 		return notebookStudioFlashcard{}
 	}
 	front := fmt.Sprintf("%s 的核心内容是什么？", heading)
 	if containsAnyNotebookText(fact, []string{"多少", "几", "种", "个", "分钟", "小时", "天", "年"}) || regexp.MustCompile(`\d`).MatchString(fact) {
-		front = fmt.Sprintf("关于 %s，资料中提到了哪些关键数字或规格？", heading)
+		front = fmt.Sprintf("%s 涉及哪些关键数字或规格？", heading)
 	}
-	return notebookStudioFlashcard{Front: front, Back: truncateNotebookRunes(fact, 220, ""), Source: fmt.Sprintf("[%d]", sourceIndex)}
+	return notebookStudioFlashcard{Front: cleanNotebookFlashcardText(front), Back: fact, Source: ""}
 }
 
 func dedupeNotebookFlashcards(cards []notebookStudioFlashcard) []notebookStudioFlashcard {
 	seen := map[string]bool{}
 	unique := make([]notebookStudioFlashcard, 0, len(cards))
 	for _, card := range cards {
-		card.Front = strings.TrimSpace(card.Front)
-		card.Back = strings.TrimSpace(card.Back)
-		card.Source = strings.TrimSpace(card.Source)
+		card.Front = cleanNotebookFlashcardText(card.Front)
+		card.Back = summarizeNotebookFlashcardAnswer(cleanNotebookFlashcardText(card.Back))
+		card.Source = ""
 		key := normalizeNotebookTableDedupeText(card.Front + "|" + card.Back)
 		if card.Front == "" || card.Back == "" || seen[key] {
 			continue
@@ -612,6 +620,36 @@ func dedupeNotebookFlashcards(cards []notebookStudioFlashcard) []notebookStudioF
 		unique = append(unique, card)
 	}
 	return unique
+}
+
+func cleanNotebookFlashcardText(value string) string {
+	value = strings.TrimSpace(value)
+	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, " ")
+	value = regexp.MustCompile(`^#{1,6}\s*`).ReplaceAllString(value, "")
+	value = regexp.MustCompile(`^[\[【]\d+[\]】]\s*`).ReplaceAllString(value, "")
+	value = regexp.MustCompile(`\s*[\[【]\d+[\]】]\s*`).ReplaceAllString(value, " ")
+	value = regexp.MustCompile(`^(?:\d+(?:\.\d+)*|[一二三四五六七八九十]+)[、.)．]?\s*`).ReplaceAllString(value, "")
+	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, " ")
+	return strings.Trim(value, " 	\r\n-—：:，,。；;·|[]【】（）()")
+}
+
+func looksLikeNotebookMarkdownHeading(value string) bool {
+	value = strings.TrimSpace(value)
+	return value == "" || regexp.MustCompile(`^#{1,6}\s*`).MatchString(value)
+}
+
+func summarizeNotebookFlashcardAnswer(value string) string {
+	value = cleanNotebookFlashcardText(value)
+	if value == "" {
+		return ""
+	}
+	if strings.Contains(value, "。") || strings.Contains(value, "；") || strings.Contains(value, ";") {
+		sentences := splitNotebookSentences(value)
+		if len(sentences) > 0 {
+			value = sentences[0]
+		}
+	}
+	return truncateNotebookRunes(value, 100, "…")
 }
 
 func sanitizeNotebookArtifactContent(artifactType string, content json.RawMessage) json.RawMessage {

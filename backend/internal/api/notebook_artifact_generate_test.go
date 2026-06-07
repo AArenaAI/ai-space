@@ -144,7 +144,7 @@ func TestBuildGeneratedNotebookArtifactDraftSupportsMindmapAndRejectsSlides(t *t
 
 func TestBuildGeneratedNotebookArtifactDraftBuildsFlashcards(t *testing.T) {
 	files := []models.File{
-		{ID: 1, Filename: "AI Space 产品方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "AI Space 功能", Content: "## 技能系统\nAI Space 技能系统预设了 9 种角色，包括 CEO 策略师、代码审查和翻译。插件架构支持运行时热加载。\n## 白标能力\nLogo 替换约 10 分钟，域名配置约 30 分钟。"},
+		{ID: 1, Filename: "AI Space 产品方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "AI Space 功能", Content: "## 1.3 技能系统\nAI Space 技能系统预设了 9 种角色，包括 CEO 策略师、代码审查和翻译。插件架构支持运行时热加载。\n## 2.1 白标能力\nLogo 替换约 10 分钟，域名配置约 30 分钟。"},
 	}
 
 	draft, err := buildGeneratedNotebookArtifactDraft("flashcards", "AI Space", files, nil, "zh-CN")
@@ -168,8 +168,19 @@ func TestBuildGeneratedNotebookArtifactDraftBuildsFlashcards(t *testing.T) {
 		t.Fatalf("expected multiple flashcards, got %d content=%s", len(content.Cards), string(draft.Content))
 	}
 	encoded := string(draft.Content)
-	if !containsAll(encoded, []string{"技能系统", "9 种角色", "白标", "[1]"}) {
-		t.Fatalf("flashcards should turn source facts into cited question/answer cards, got %s", encoded)
+	if !containsAll(encoded, []string{"技能系统", "9 种角色", "白标"}) {
+		t.Fatalf("flashcards should turn source facts into question/answer cards, got %s", encoded)
+	}
+	if strings.Contains(encoded, "[1]") || strings.Contains(encoded, "【1】") || strings.Contains(encoded, "1.3") || strings.Contains(encoded, "2.1") {
+		t.Fatalf("flashcards should hide source citations and heading numbers from card text, got %s", encoded)
+	}
+	for _, card := range content.Cards {
+		if len([]rune(card.Back)) > 120 {
+			t.Fatalf("flashcard answer should be concise, got %d runes: %q", len([]rune(card.Back)), card.Back)
+		}
+		if strings.TrimSpace(card.Source) != "" {
+			t.Fatalf("flashcard source badge should not be displayed, got source=%q", card.Source)
+		}
 	}
 }
 
