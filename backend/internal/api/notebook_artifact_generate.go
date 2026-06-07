@@ -292,7 +292,7 @@ func parseAINotebookArtifactResponse(body []byte, fallback generatedNotebookArti
 	}
 	fallback.Title = fallbackText(ai.Title, fallback.Title)
 	fallback.Subtitle = fallbackText(ai.Subtitle, fallback.Subtitle)
-	fallback.Content = ai.Content
+	fallback.Content = sanitizeNotebookArtifactContent(fallback.Type, ai.Content)
 	return fallback, nil
 }
 
@@ -496,7 +496,85 @@ func buildNotebookGeneratedTableRows(sources []notebookGenerationSource) []noteb
 	for _, source := range sources {
 		rows = append(rows, extractNotebookTableRowsFromSource(source)...)
 	}
-	return rows
+	return dedupeNotebookTableRows(rows)
+}
+
+func sanitizeNotebookArtifactContent(artifactType string, content json.RawMessage) json.RawMessage {
+	if artifactType != "data-table" {
+		return content
+	}
+	var payload struct {
+		Rows []notebookStudioTableRow `json:"rows"`
+	}
+	if err := json.Unmarshal(content, &payload); err != nil {
+		return content
+	}
+	payload.Rows = dedupeNotebookTableRows(payload.Rows)
+	cleaned, err := json.Marshal(payload)
+	if err != nil {
+		return content
+	}
+	return cleaned
+}
+
+func dedupeNotebookTableRows(rows []notebookStudioTableRow) []notebookStudioTableRow {
+	seen := map[string]int{}
+	unique := make([]notebookStudioTableRow, 0, len(rows))
+	for _, row := range rows {
+		key := notebookTableRowDedupeKey(row)
+		if key == "|" {
+			unique = append(unique, row)
+			continue
+		}
+		if index, ok := seen[key]; ok {
+			unique[index] = mergeNotebookTableRows(unique[index], row)
+			continue
+		}
+		seen[key] = len(unique)
+		unique = append(unique, row)
+	}
+	return unique
+}
+
+func notebookTableRowDedupeKey(row notebookStudioTableRow) string {
+	return normalizeNotebookTableDedupeText(row.Module) + "|" + normalizeNotebookTableDedupeText(row.Capability)
+}
+
+func normalizeNotebookTableDedupeText(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = regexp.MustCompile(`[\s\p{P}\p{S}]+`).ReplaceAllString(value, "")
+	return value
+}
+
+func mergeNotebookTableRows(primary notebookStudioTableRow, duplicate notebookStudioTableRow) notebookStudioTableRow {
+	primary.Source = mergeNotebookSourceCitations(primary.Source, duplicate.Source)
+	if strings.TrimSpace(primary.Status) == "" {
+		primary.Status = duplicate.Status
+	}
+	if strings.TrimSpace(primary.Implementation) == "" || primary.Implementation == "从资料正文抽取的功能能力，可用于后续对比和复核" {
+		primary.Implementation = duplicate.Implementation
+	}
+	if strings.TrimSpace(primary.Value) == "" || primary.Value == "按资料场景复核" {
+		primary.Value = duplicate.Value
+	}
+	return primary
+}
+
+func mergeNotebookSourceCitations(values ...string) string {
+	seen := map[string]bool{}
+	citations := make([]string, 0)
+	for _, value := range values {
+		for _, match := range regexp.MustCompile(`\[[^\]]+\]`).FindAllString(value, -1) {
+			if !seen[match] {
+				seen[match] = true
+				citations = append(citations, match)
+			}
+		}
+	}
+	if len(citations) == 0 {
+		return strings.TrimSpace(values[0])
+	}
+	return strings.Join(citations, " ")
 }
 
 func extractNotebookTableRowsFromSource(source notebookGenerationSource) []notebookStudioTableRow {

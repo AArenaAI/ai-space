@@ -80,6 +80,31 @@ func TestBuildGeneratedNotebookArtifactDraftBuildsDataTableFromSourceContent(t *
 	}
 }
 
+func TestBuildGeneratedNotebookArtifactDraftDeduplicatesDataTableRows(t *testing.T) {
+	files := []models.File{
+		{ID: 1, Filename: "产品方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "AI Space 功能", Content: "## 多模型聊天\n核心功能：统一接入多个模型并支持对话。当前状态：成熟。差异化竞争优势：模型统一管理。对标产品：ChatGPT、Poe。\n## 多模型聊天\n核心功能：统一接入多个模型并支持对话。当前状态：成熟。差异化竞争优势：模型统一管理。对标产品：ChatGPT、Poe。\n## Notebook 资料问答\n核心功能：资料解析、问答和引用核查。当前状态：成熟。差异化竞争优势：RAG 流水线。对标产品：NotebookLM。"},
+		{ID: 2, Filename: "补充方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "补充能力", Content: "## 多模型聊天\n核心功能：统一接入多个模型并支持对话。当前状态：成熟。差异化竞争优势：模型统一管理。对标产品：ChatGPT、Poe。"},
+	}
+
+	draft, err := buildGeneratedNotebookArtifactDraft("table", "AI Space 调研", files, nil, "zh-CN")
+	if err != nil {
+		t.Fatalf("table generation should succeed: %v", err)
+	}
+	var content struct {
+		Rows []notebookStudioTableRow `json:"rows"`
+	}
+	if err := json.Unmarshal(draft.Content, &content); err != nil {
+		t.Fatalf("table content should be valid JSON: %v", err)
+	}
+	moduleCounts := map[string]int{}
+	for _, row := range content.Rows {
+		moduleCounts[row.Module]++
+	}
+	if moduleCounts["多模型聊天"] != 1 {
+		t.Fatalf("duplicate table rows should be merged, got %d rows for 多模型聊天: %+v", moduleCounts["多模型聊天"], content.Rows)
+	}
+}
+
 func TestBuildGeneratedNotebookArtifactDraftSupportsMindmapAndRejectsSlides(t *testing.T) {
 	readyFiles := []models.File{
 		{ID: 1, Filename: "产品方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "产品定位", Content: "## 产品定位\nAI Space 是企业级多模型 AI 聚合平台，支持品牌白标和统一模型调用。\n## 已落地功能\n多模型聊天、图片生成、图片编辑、PPT 生成、文件 RAG 解析、积分计费。\n## 核心优势\n统一接入 OpenAI、Claude、Gemini、DeepSeek，支持企业定制。"},

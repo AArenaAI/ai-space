@@ -104,6 +104,21 @@ func TestBuildAINotebookArtifactDraftFallsBackWhenAIInvalid(t *testing.T) {
 	}
 }
 
+func TestBuildAINotebookArtifactDraftDeduplicatesAIReturnedTableRows(t *testing.T) {
+	files := []models.File{
+		{ID: 1, Filename: "产品方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "产品定位", Content: "AI Space 是知识工作台。"},
+	}
+	ai := &fakeNotebookAIService{response: `{"title":"AI 表格","subtitle":"AI 副标题","content":{"rows":[{"module":"多模型聊天","capability":"统一接入多个模型并支持对话","status":"成熟","implementation":"统一管理模型","value":"ChatGPT、Poe","source":"[1]"},{"module":"多模型聊天","capability":"统一接入多个模型并支持对话","status":"成熟","implementation":"统一管理模型","value":"ChatGPT、Poe","source":"[1]"},{"module":"Notebook资料问答","capability":"资料解析、问答和引用核查","status":"成熟","implementation":"RAG 流水线","value":"NotebookLM","source":"[1]"}]}}`}
+
+	draft, err := buildAINotebookArtifactDraft(context.Background(), ai, "table", "知识库", files, []uint{1}, "zh-CN")
+	if err != nil {
+		t.Fatalf("table AI draft should succeed: %v", err)
+	}
+	if strings.Count(string(draft.Content), "多模型聊天") != 1 {
+		t.Fatalf("AI table rows should be deduplicated before saving, got %s", string(draft.Content))
+	}
+}
+
 func TestBuildAINotebookMindmapRejectsInvalidAIInsteadOfFallback(t *testing.T) {
 	files := []models.File{
 		{ID: 1, Filename: "产品方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "产品定位", Content: "AI Space 是企业级多模型 AI 聚合平台。"},
