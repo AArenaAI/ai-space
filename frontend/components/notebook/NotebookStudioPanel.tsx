@@ -200,6 +200,12 @@ const artifactIconTone: Record<NotebookStudioArtifact["type"], string> = {
   report: "text-[#8a7a35] dark:text-yellow-300",
 };
 
+const primaryStudioActionIconTone: Partial<Record<NotebookStudioActionId, string>> = {
+  table: artifactIconTone.table,
+  flashcards: artifactIconTone.flashcards,
+  report: artifactIconTone.report,
+};
+
 function formatTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
@@ -910,10 +916,11 @@ export function NotebookStudioPanel({
           {actions.map((action) => {
             const Icon = actionIconMap[action.id];
             const isGenerating = generatingType === action.id;
+            const primaryIconTone = primaryStudioActionIconTone[action.id];
             return (
               <button key={action.id} type="button" onClick={() => onGenerate(action.id)} disabled={Boolean(generatingType)} className="group flex min-h-[72px] items-center gap-3 rounded-2xl border border-surface-border bg-surface-elevated px-3 py-3 text-left transition hover:border-surface-border hover:bg-surface-card hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-70">
-                <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br", action.accent)}>
-                  {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
+                <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center", primaryIconTone ? primaryIconTone : cn("rounded-2xl bg-gradient-to-br", action.accent))}>
+                  {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className={primaryIconTone ? "h-[23px] w-[23px]" : "h-4 w-4"} />}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-semibold text-text-primary">{action.title}</div>
