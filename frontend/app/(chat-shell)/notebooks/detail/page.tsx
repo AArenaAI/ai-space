@@ -7,7 +7,7 @@ import { ArrowLeft, BookOpen, FileText, Globe, Loader2, Plus, Trash2, UploadClou
 import { toast } from "sonner";
 import ChatInterface from "@/components/chat/ChatInterface";
 import { NotebookSourcePreviewDrawer } from "@/components/notebook/NotebookSourcePreviewDrawer";
-import { NotebookStudioPanel, type NotebookStudioActionId, type NotebookStudioArtifact, type NotebookStudioFlashcard, type NotebookStudioMindmapEdge, type NotebookStudioMindmapNode, type NotebookStudioReportSection, type NotebookStudioReportTable, type NotebookStudioSource, type NotebookStudioTableRow, type NotebookStudioTextSection } from "@/components/notebook/NotebookStudioPanel";
+import { NotebookStudioPanel, type NotebookStudioActionId, type NotebookStudioArtifact, type NotebookStudioFlashcard, type NotebookStudioQuizQuestion, type NotebookStudioMindmapEdge, type NotebookStudioMindmapNode, type NotebookStudioReportSection, type NotebookStudioReportTable, type NotebookStudioSource, type NotebookStudioTableRow, type NotebookStudioTextSection } from "@/components/notebook/NotebookStudioPanel";
 import { NotebookUrlSourceDialog } from "@/components/notebook/NotebookUrlSourceDialog";
 import { MODELS } from "@/hooks/useChat";
 import { addNotebookFile, addNotebookUrlSource, deleteNotebookArtifact, fetchNotebook, fetchNotebookArtifacts, fetchNotebookFileContent, generateNotebookArtifact, removeNotebookFile, suggestNotebookReportFormats, updateNotebook, updateNotebookArtifact, type NotebookReportFormatSuggestion } from "@/lib/notebookApi";
@@ -88,7 +88,7 @@ function normalizeFlashcardArtifactTitle(title: string) {
 }
 
 function toStudioArtifact(artifact: PersistedNotebookArtifact): NotebookStudioArtifact | null {
-  const content = artifact.content as { rows?: NotebookStudioTableRow[]; sections?: NotebookStudioTextSection[] | NotebookStudioReportSection[]; nodes?: NotebookStudioMindmapNode[]; edges?: NotebookStudioMindmapEdge[]; cards?: NotebookStudioFlashcard[]; format_id?: string; format_title?: string; executive_summary?: string; tables?: NotebookStudioReportTable[] } | null;
+  const content = artifact.content as { rows?: NotebookStudioTableRow[]; sections?: NotebookStudioTextSection[] | NotebookStudioReportSection[]; nodes?: NotebookStudioMindmapNode[]; edges?: NotebookStudioMindmapEdge[]; cards?: NotebookStudioFlashcard[]; questions?: NotebookStudioQuizQuestion[]; format_id?: string; format_title?: string; executive_summary?: string; tables?: NotebookStudioReportTable[] } | null;
   const base = {
     id: String(artifact.id),
     title: artifact.type === "flashcards" ? normalizeFlashcardArtifactTitle(artifact.title) : artifact.title,
@@ -112,6 +112,9 @@ function toStudioArtifact(artifact: PersistedNotebookArtifact): NotebookStudioAr
   }
   if (artifact.type === "flashcards") {
     return { ...base, type: "flashcards", cards: Array.isArray(content?.cards) ? content.cards : [] };
+  }
+  if (artifact.type === "quiz") {
+    return { ...base, type: "quiz", questions: Array.isArray(content?.questions) ? content.questions : [] };
   }
   if (artifact.type === "report") {
     return {
@@ -156,6 +159,13 @@ function artifactToMarkdown(artifact: NotebookStudioArtifact) {
         lines.push(`## ${index + 1}. ${card.front}`, "", card.back);
         if (card.source) lines.push("", card.source);
         lines.push("");
+      });
+      break;
+    case "quiz":
+      artifact.questions.forEach((question, index) => {
+        lines.push(`## ${index + 1}. ${question.question}`, "");
+        question.options.forEach((option) => lines.push(`- ${option.id}. ${option.text}`));
+        lines.push("", `正确答案：${question.correct_option_id}`, question.explanation, "");
       });
       break;
     case "report":
@@ -751,7 +761,7 @@ function NotebookDetailContent() {
         setStudioArtifacts((prev) => [artifact, ...prev.filter((item) => item.id !== artifact.id)]);
         setActiveStudioArtifactId(artifact.id);
       }
-      toast.success(visualType === "table" ? t("notebook.studio.tableGenerated") : visualType === "report" ? t("notebook.studio.reportGenerated") : t("notebook.studio.textGenerated"));
+      toast.success(visualType === "table" ? t("notebook.studio.tableGenerated") : visualType === "quiz" ? t("notebook.studio.quizGenerated") : visualType === "report" ? t("notebook.studio.reportGenerated") : t("notebook.studio.textGenerated"));
     } catch (error) {
       showNotebookError(error, t("notebook.studio.saveFailed"));
     } finally {
@@ -842,6 +852,18 @@ function NotebookDetailContent() {
 
   const handleExplainFlashcard = (card: NotebookStudioFlashcard) => {
     const content = t("notebook.studio.flashcardExplainPrompt", { front: card.front, back: card.back });
+    setExternalChatSendRequest({ id: Date.now(), content });
+  };
+
+  const handleExplainQuiz = (question: NotebookStudioQuizQuestion, selectedOptionId: string | null) => {
+    const selectedOption = question.options.find((option) => option.id === selectedOptionId);
+    const correctOption = question.options.find((option) => option.id === question.correct_option_id);
+    const content = t("notebook.studio.quizExplainPrompt", {
+      question: question.question,
+      selected: selectedOption ? `${selectedOption.id}. ${selectedOption.text}` : t("notebook.studio.notAnswered"),
+      correct: correctOption ? `${correctOption.id}. ${correctOption.text}` : question.correct_option_id,
+      explanation: question.explanation,
+    });
     setExternalChatSendRequest({ id: Date.now(), content });
   };
 
@@ -1034,6 +1056,7 @@ function NotebookDetailContent() {
         onDownloadArtifact={handleDownloadArtifact}
         onExportTableToGoogleSheets={handleExportTableToGoogleSheets}
         onExplainFlashcard={handleExplainFlashcard}
+        onExplainQuiz={handleExplainQuiz}
       />
     </div>
     <NotebookUrlSourceDialog

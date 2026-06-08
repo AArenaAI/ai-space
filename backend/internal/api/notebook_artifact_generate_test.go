@@ -208,6 +208,51 @@ func TestBuildGeneratedNotebookArtifactDraftSupportsMindmapAndRejectsSlides(t *t
 	}
 }
 
+func TestBuildGeneratedNotebookArtifactDraftBuildsQuiz(t *testing.T) {
+	files := []models.File{
+		{ID: 1, Filename: "AI Space 技术说明.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "AI Space 技术架构与功能", Content: "## 技术架构\nAI Space 后端使用 Go/Gin 和 GORM，前端使用 Next.js 与 TailwindCSS。Notebook 支持 PDF/Office/网页资料解析、Embedding、向量检索和引用核查。Studio 可以生成数据表格、闪卡、思维导图和报告。白标部署支持 Logo 替换和域名配置。积分计费区分 basic、advanced、elite 三档模型。"},
+	}
+
+	draft, err := buildGeneratedNotebookArtifactDraft("quiz", "AI Space", files, nil, "zh-CN")
+	if err != nil {
+		t.Fatalf("quiz generation should succeed: %v", err)
+	}
+	if draft.Type != "quiz" {
+		t.Fatalf("draft.Type = %q, want quiz", draft.Type)
+	}
+	var content struct {
+		Questions []struct {
+			Question string `json:"question"`
+			Options  []struct {
+				ID   string `json:"id"`
+				Text string `json:"text"`
+			} `json:"options"`
+			CorrectOptionID string `json:"correct_option_id"`
+			Hint            string `json:"hint"`
+			Explanation     string `json:"explanation"`
+			WrongReason     string `json:"wrong_reason"`
+		} `json:"questions"`
+	}
+	if err := json.Unmarshal(draft.Content, &content); err != nil {
+		t.Fatalf("quiz content should be valid JSON: %v", err)
+	}
+	if len(content.Questions) != 10 {
+		t.Fatalf("quiz should include exactly 10 questions, got %d content=%s", len(content.Questions), string(draft.Content))
+	}
+	encoded := string(draft.Content)
+	if !containsAll(encoded, []string{"Go/Gin", "Next.js", "Embedding", "Studio", "白标"}) {
+		t.Fatalf("quiz should derive questions from source facts, got %s", encoded)
+	}
+	for _, question := range content.Questions {
+		if strings.TrimSpace(question.Question) == "" || len(question.Options) != 4 || strings.TrimSpace(question.CorrectOptionID) == "" || strings.TrimSpace(question.Hint) == "" || strings.TrimSpace(question.Explanation) == "" {
+			t.Fatalf("quiz question should have question, 4 options, answer, hint and explanation: %+v", question)
+		}
+		if question.CorrectOptionID != "A" && question.CorrectOptionID != "B" && question.CorrectOptionID != "C" && question.CorrectOptionID != "D" {
+			t.Fatalf("correct option id should be A-D, got %+v", question)
+		}
+	}
+}
+
 func TestBuildGeneratedNotebookArtifactDraftBuildsFlashcards(t *testing.T) {
 	files := []models.File{
 		{ID: 1, Filename: "AI Space 产品方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "AI Space 功能", Content: "## 1.3 技能系统\nAI Space 技能系统预设了 9 种角色，包括 CEO 策略师、代码审查和翻译。插件架构支持运行时热加载。\n## 2.1 白标能力\nLogo 替换约 10 分钟，域名配置约 30 分钟。"},

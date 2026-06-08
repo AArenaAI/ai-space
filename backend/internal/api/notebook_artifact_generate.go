@@ -70,6 +70,20 @@ type notebookStudioFlashcard struct {
 	Source string `json:"source"`
 }
 
+type notebookStudioQuizOption struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
+}
+
+type notebookStudioQuizQuestion struct {
+	Question        string                     `json:"question"`
+	Options         []notebookStudioQuizOption `json:"options"`
+	CorrectOptionID string                     `json:"correct_option_id"`
+	Hint            string                     `json:"hint"`
+	Explanation     string                     `json:"explanation"`
+	WrongReason     string                     `json:"wrong_reason"`
+}
+
 type notebookReportFormatSuggestion struct {
 	ID          string `json:"id"`
 	Title       string `json:"title"`
@@ -123,6 +137,8 @@ func buildGeneratedNotebookArtifactDraft(generationType string, notebookTitle st
 		payload = buildNotebookGeneratedMindmap(notebookTitle, sources)
 	case "flashcards":
 		payload = map[string]any{"cards": buildNotebookGeneratedFlashcards(sources, language)}
+	case "quiz":
+		payload = map[string]any{"questions": buildNotebookGeneratedQuizQuestions(sources, language)}
 	case "report":
 		payload = buildNotebookGeneratedReport(reportGenerationFormatID(generationType), notebookTitle, sources, language)
 	case "summary", "faq", "briefing":
@@ -212,6 +228,8 @@ func buildNotebookArtifactAIMessages(generationType string, notebookTitle string
 		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For mindmap content must be {\"nodes\":[{\"id\":string,\"label\":string,\"summary\":string,\"source\":string}],\"edges\":[{\"from\":string,\"to\":string,\"label\":string}]}. You MUST first read the whole provided source text for each file (it may be a long PDF extract), reconstruct the document outline, then draw a NotebookLM-style product/knowledge mind map, not a sentence list. Required structure: exactly one root node with id=root; 5-8 first-level branches that are clear sections/modules; each important branch has 2-5 second-level child nodes; add third-level nodes only when the source has concrete details. Good first-level branch examples for product documents: 产品定位, 已落地功能, 核心优势, 技术架构, 业务场景, 规划路线, 竞争壁垒, 风险与缺口. Node labels must be clean Chinese phrases of 2-18 characters when possible; never use broken OCR fragments, truncated words, ellipses, file names, raw sentences, parse/index status, or meaningless snippets. Summaries may contain one concise sentence. Use stable ids like root, branch-1, branch-1-1. Cite sources using bracket numbers such as [1]. If the source contains an existing feature table or product architecture, preserve that sectional structure.\n")
 	} else if generationType == "flashcards" {
 		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For flashcards content must be {\"cards\":[{\"front\":string,\"back\":string,\"source\":string}]}. Create compact study flashcards from the source material. Each card front is a clean self-test question about one concrete concept, number, capability, process, comparison, role, architecture point, pricing/detail, or named fact. Each back is a concise answer in 1 short sentence, preferably under 80 Chinese characters, grounded in the source but NOT copied as a long quote. Prefer 12-30 cards when enough source content exists. Avoid generic questions, duplicate cards, file names, parse status, unsupported facts, source citation labels, and heading numbers like 1, 1.3, 一、. Leave source empty; do not put [1] or 【1】 in any card field.\n")
+	} else if generationType == "quiz" {
+		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For quiz content must be {\"questions\":[{\"question\":string,\"options\":[{\"id\":\"A\",\"text\":string},{\"id\":\"B\",\"text\":string},{\"id\":\"C\",\"text\":string},{\"id\":\"D\",\"text\":string}],\"correct_option_id\":\"A|B|C|D\",\"hint\":string,\"explanation\":string,\"wrong_reason\":string}]}. Create exactly 10 multiple-choice questions from the source material. Questions should test concrete facts, mechanisms, comparisons, capabilities, numeric details, or implications in the documents. Each question has exactly 4 plausible options, exactly one correct answer, a short hint for before answering, and an explanation grounded in the source for after answering. wrong_reason should explain why common incorrect choices are wrong. Avoid generic questions, file names, parse/index status, citation labels, and unsupported facts.\n")
 	} else if strings.HasPrefix(generationType, "report") {
 		formatID := reportGenerationFormatID(generationType)
 		fmt.Fprintf(&b, "Report format id: %s\n", formatID)
@@ -491,7 +509,7 @@ func notebookArtifactTypeForGeneration(generationType string) (string, bool) {
 	switch generationType {
 	case "table":
 		return "data-table", true
-	case "summary", "faq", "briefing", "mindmap", "flashcards":
+	case "summary", "faq", "briefing", "mindmap", "flashcards", "quiz":
 		return generationType, true
 	default:
 		return "", false
@@ -550,7 +568,7 @@ func notebookGenerationExcerptLimit(generationType string) int {
 	switch generationType {
 	case "mindmap":
 		return 60000
-	case "table", "flashcards":
+	case "table", "flashcards", "quiz":
 		return 16000
 	default:
 		return 10000
@@ -850,6 +868,113 @@ func buildNotebookGeneratedFlashcards(sources []notebookGenerationSource, langua
 	return dedupeNotebookFlashcards(cards)
 }
 
+func buildNotebookGeneratedQuizQuestions(sources []notebookGenerationSource, language string) []notebookStudioQuizQuestion {
+	cards := buildNotebookGeneratedFlashcards(sources, language)
+	if len(cards) == 0 {
+		for _, source := range sources {
+			fact := summarizeNotebookFlashcardAnswer(fallbackText(source.Summary, source.Excerpt))
+			if fact != "" {
+				cards = append(cards, notebookStudioFlashcard{Front: fmt.Sprintf("%s 的关键结论是什么？", notebookTableTopic(source)), Back: fact})
+			}
+		}
+	}
+	questions := make([]notebookStudioQuizQuestion, 0, 10)
+	for i, card := range cards {
+		fact := summarizeNotebookFlashcardAnswer(card.Back)
+		topic := cleanNotebookFlashcardText(card.Front)
+		topic = strings.TrimSuffix(strings.TrimSuffix(topic, "？"), "?")
+		if topic == "" {
+			topic = fmt.Sprintf("资料要点 %d", i+1)
+		}
+		if fact == "" {
+			continue
+		}
+		correctID := []string{"A", "B", "C", "D"}[i%4]
+		options := buildNotebookQuizOptions(fact, i, correctID)
+		questions = append(questions, notebookStudioQuizQuestion{
+			Question:        fmt.Sprintf("根据资料，%s？", topic),
+			Options:         options,
+			CorrectOptionID: correctID,
+			Hint:            fmt.Sprintf("提示：关注资料中关于“%s”的具体描述。", truncateNotebookRunes(topic, 18, "")),
+			Explanation:     fmt.Sprintf("正确。资料中的关键表述是：%s", fact),
+			WrongReason:     fmt.Sprintf("这道题需要回到资料原文中的具体事实；正确选项体现的是：%s", fact),
+		})
+		if len(questions) >= 10 {
+			break
+		}
+	}
+	for len(questions) < 10 {
+		index := len(questions)
+		fact := "资料强调需要结合原文事实进行判断"
+		if len(cards) > 0 {
+			fact = summarizeNotebookFlashcardAnswer(cards[index%len(cards)].Back)
+		}
+		correctID := []string{"A", "B", "C", "D"}[index%4]
+		questions = append(questions, notebookStudioQuizQuestion{
+			Question:        fmt.Sprintf("根据已上传资料，下列哪项最符合第 %d 个知识点？", index+1),
+			Options:         buildNotebookQuizOptions(fact, index, correctID),
+			CorrectOptionID: correctID,
+			Hint:            "提示：先定位题目中的关键词，再回看资料里的具体表述。",
+			Explanation:     fmt.Sprintf("正确。该题考查资料中的事实：%s", fact),
+			WrongReason:     fmt.Sprintf("错误选项通常混入了未在资料中出现或过度泛化的说法；正确依据是：%s", fact),
+		})
+	}
+	return sanitizeNotebookQuizQuestions(questions)
+}
+
+func buildNotebookQuizOptions(correct string, seed int, correctID string) []notebookStudioQuizOption {
+	distractors := []string{
+		"资料只列出了文件处理状态，没有给出该事实",
+		"该说法把资料中的能力描述泛化为无条件结论",
+		"该选项与资料重点不一致，缺少原文依据",
+	}
+	ids := []string{"A", "B", "C", "D"}
+	options := make([]notebookStudioQuizOption, 0, 4)
+	distractorIndex := 0
+	for _, id := range ids {
+		text := correct
+		if id != correctID {
+			text = distractors[(seed+distractorIndex)%len(distractors)]
+			distractorIndex++
+		}
+		options = append(options, notebookStudioQuizOption{ID: id, Text: truncateNotebookRunes(cleanNotebookFlashcardText(text), 120, "…")})
+	}
+	return options
+}
+
+func sanitizeNotebookQuizQuestions(questions []notebookStudioQuizQuestion) []notebookStudioQuizQuestion {
+	cleaned := make([]notebookStudioQuizQuestion, 0, 10)
+	for _, question := range questions {
+		question.Question = cleanNotebookFlashcardText(question.Question)
+		question.Hint = truncateNotebookRunes(cleanNotebookFlashcardText(question.Hint), 120, "…")
+		question.Explanation = truncateNotebookRunes(cleanNotebookFlashcardText(question.Explanation), 220, "…")
+		question.WrongReason = truncateNotebookRunes(cleanNotebookFlashcardText(question.WrongReason), 220, "…")
+		if question.CorrectOptionID != "A" && question.CorrectOptionID != "B" && question.CorrectOptionID != "C" && question.CorrectOptionID != "D" {
+			question.CorrectOptionID = "A"
+		}
+		optionByID := map[string]notebookStudioQuizOption{}
+		for _, option := range question.Options {
+			option.ID = strings.ToUpper(strings.TrimSpace(option.ID))
+			if option.ID != "A" && option.ID != "B" && option.ID != "C" && option.ID != "D" {
+				continue
+			}
+			option.Text = truncateNotebookRunes(cleanNotebookFlashcardText(option.Text), 140, "…")
+			if option.Text != "" {
+				optionByID[option.ID] = option
+			}
+		}
+		if question.Question == "" || question.Hint == "" || question.Explanation == "" || len(optionByID) != 4 {
+			continue
+		}
+		question.Options = []notebookStudioQuizOption{optionByID["A"], optionByID["B"], optionByID["C"], optionByID["D"]}
+		cleaned = append(cleaned, question)
+		if len(cleaned) >= 10 {
+			break
+		}
+	}
+	return cleaned
+}
+
 func splitNotebookFlashcardBlocks(text string) []notebookFeatureBlock {
 	text = strings.ReplaceAll(strings.TrimSpace(text), "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
@@ -986,6 +1111,19 @@ func sanitizeNotebookArtifactContent(artifactType string, content json.RawMessag
 			return content
 		}
 		payload.Cards = dedupeNotebookFlashcards(payload.Cards)
+		cleaned, err := json.Marshal(payload)
+		if err != nil {
+			return content
+		}
+		return cleaned
+	case "quiz":
+		var payload struct {
+			Questions []notebookStudioQuizQuestion `json:"questions"`
+		}
+		if err := json.Unmarshal(content, &payload); err != nil {
+			return content
+		}
+		payload.Questions = sanitizeNotebookQuizQuestions(payload.Questions)
 		cleaned, err := json.Marshal(payload)
 		if err != nil {
 			return content
@@ -1541,6 +1679,8 @@ func notebookGeneratedArtifactTitle(generationType string, notebookTitle string)
 		return fmt.Sprintf("%s · 思维导图", notebookTitle)
 	case "flashcards":
 		return fmt.Sprintf("%s · 闪卡", notebookTitle)
+	case "quiz":
+		return fmt.Sprintf("%s · 测验", notebookTitle)
 	case "report", "report:briefing-document", "report:custom", "report:study-guide", "report:blog-post":
 		return fmt.Sprintf("%s · Report", notebookTitle)
 	default:

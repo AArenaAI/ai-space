@@ -1,11 +1,11 @@
 "use client";
 
 import { CSSProperties, useEffect, useMemo, useRef, useState, type ComponentType, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
-import { BarChart3, CheckCircle2, ChevronLeft, ChevronRight, ChevronsRight, Copy, Download, ExternalLink, FileQuestion, FileText, Layers3, Loader2, Map as MapIcon, Maximize2, MoreHorizontal, Pencil, Presentation, RefreshCw, Sparkles, Trash2, X, XCircle, ZoomIn, ZoomOut } from "lucide-react";
+import { BarChart3, CheckCircle2, ChevronLeft, ChevronRight, ChevronsRight, Copy, Download, ExternalLink, FileQuestion, FileText, HelpCircle, Layers3, Lightbulb, Loader2, Map as MapIcon, Maximize2, MessageCircle, MoreHorizontal, Pencil, Presentation, RefreshCw, Sparkles, Trash2, X, XCircle, ZoomIn, ZoomOut } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
-export type NotebookStudioActionId = "table" | "summary" | "faq" | "briefing" | "mindmap" | "flashcards" | "report" | "slides";
+export type NotebookStudioActionId = "table" | "summary" | "faq" | "briefing" | "mindmap" | "flashcards" | "quiz" | "report" | "slides";
 
 export type NotebookStudioTableRow = {
   module: string;
@@ -45,6 +45,20 @@ export type NotebookStudioFlashcard = {
   front: string;
   back: string;
   source?: string;
+};
+
+export type NotebookStudioQuizOption = {
+  id: "A" | "B" | "C" | "D" | string;
+  text: string;
+};
+
+export type NotebookStudioQuizQuestion = {
+  question: string;
+  options: NotebookStudioQuizOption[];
+  correct_option_id: string;
+  hint: string;
+  explanation: string;
+  wrong_reason?: string;
 };
 
 export type NotebookStudioReportSection = {
@@ -101,6 +115,15 @@ export type NotebookStudioArtifact =
     }
   | {
       id: string;
+      type: "quiz";
+      title: string;
+      subtitle: string;
+      createdAt: string;
+      sourceCount: number;
+      questions: NotebookStudioQuizQuestion[];
+    }
+  | {
+      id: string;
       type: "report";
       title: string;
       subtitle: string;
@@ -128,6 +151,7 @@ type NotebookStudioPanelProps = {
   onDownloadArtifact?: (artifact: NotebookStudioArtifact) => void;
   onExportTableToGoogleSheets?: (artifact: Extract<NotebookStudioArtifact, { type: "table" }>) => void;
   onExplainFlashcard?: (card: NotebookStudioFlashcard) => void;
+  onExplainQuiz?: (question: NotebookStudioQuizQuestion, selectedOptionId: string | null) => void;
 };
 
 type StudioIconProps = { className?: string };
@@ -169,6 +193,19 @@ function StudioTableIcon({ className }: StudioIconProps) {
   );
 }
 
+function StudioQuizIcon({ className }: StudioIconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M6.2 4.8h11.6A2.2 2.2 0 0 1 20 7v10a2.2 2.2 0 0 1-2.2 2.2H6.2A2.2 2.2 0 0 1 4 17V7a2.2 2.2 0 0 1 2.2-2.2z" />
+      <path d="M8 8.4h8" />
+      <path d="M8 12h3.2" />
+      <path d="M14.2 11.1a1.8 1.8 0 1 1 1.5 2.8" />
+      <path d="M15.7 16h.01" />
+      <path d="M8 15.8h3" />
+    </svg>
+  );
+}
+
 const actionIconMap: Record<NotebookStudioActionId, StudioIcon> = {
   table: StudioTableIcon,
   summary: FileText,
@@ -176,6 +213,7 @@ const actionIconMap: Record<NotebookStudioActionId, StudioIcon> = {
   briefing: BarChart3,
   mindmap: MapIcon,
   flashcards: StudioFlashcardIcon,
+  quiz: StudioQuizIcon,
   report: StudioReportIcon,
   slides: Presentation,
 };
@@ -187,6 +225,7 @@ const artifactIconMap: Record<NotebookStudioArtifact["type"], StudioIcon> = {
   briefing: BarChart3,
   mindmap: MapIcon,
   flashcards: StudioFlashcardIcon,
+  quiz: StudioQuizIcon,
   report: StudioReportIcon,
 };
 
@@ -197,12 +236,14 @@ const artifactIconTone: Record<NotebookStudioArtifact["type"], string> = {
   briefing: "text-amber-700 dark:text-amber-300",
   mindmap: "text-emerald-700 dark:text-emerald-300",
   flashcards: "text-red-900 dark:text-rose-300",
+  quiz: "text-purple-800 dark:text-purple-300",
   report: "text-[#8a7a35] dark:text-yellow-300",
 };
 
 const primaryStudioActionIconTone: Partial<Record<NotebookStudioActionId, string>> = {
   table: artifactIconTone.table,
   flashcards: artifactIconTone.flashcards,
+  quiz: artifactIconTone.quiz,
   report: artifactIconTone.report,
 };
 
@@ -742,7 +783,76 @@ function MindmapCanvasNode({ node, fullNode, offset, expanded, onToggle }: { nod
   );
 }
 
-function renderActiveArtifact(artifact: NotebookStudioArtifact, t: (key: string, params?: Record<string, string>) => string, expanded = false, onDownloadArtifact?: (artifact: NotebookStudioArtifact) => void, onExplainFlashcard?: (card: NotebookStudioFlashcard) => void) {
+function QuizArtifactView({ artifact, t, onExplain }: { artifact: Extract<NotebookStudioArtifact, { type: "quiz" }>; t: (key: string, params?: Record<string, string>) => string; onExplain?: (question: NotebookStudioQuizQuestion, selectedOptionId: string | null) => void }) {
+  const [index, setIndex] = useState(0);
+  const [answers, setAnswers] = useState<Record<number, string>>({});
+  const [hintOpen, setHintOpen] = useState(false);
+  const total = artifact.questions.length;
+  const question = artifact.questions[Math.min(index, Math.max(total - 1, 0))];
+  const selected = answers[index] || null;
+  const correctId = question?.correct_option_id;
+  const selectedOption = question?.options.find((option) => option.id === selected);
+  const correctOption = question?.options.find((option) => option.id === correctId);
+  const answered = Boolean(selected);
+  const isCorrect = selected === correctId;
+  const goTo = (next: number) => {
+    if (!total) return;
+    setIndex((next + total) % total);
+    setHintOpen(false);
+  };
+  if (!question) return <div className="rounded-2xl border border-surface-border bg-surface-elevated p-4 text-sm text-text-tertiary">{t("notebook.studio.quizEmpty")}</div>;
+  return (
+    <div className="flex min-h-[520px] flex-1 flex-col rounded-[28px] bg-surface-card px-3 py-4">
+      <div className="mx-auto flex w-full max-w-[560px] flex-1 flex-col">
+        <div className="mb-4 flex items-center justify-between text-xs font-semibold text-text-tertiary">
+          <span>{index + 1}/{total}</span>
+          <span>{t("notebook.studio.quiz")}</span>
+        </div>
+        <div className="rounded-[28px] border border-surface-border bg-surface-card p-5 shadow-[0_18px_45px_rgba(15,23,42,0.08)]">
+          <h3 className="text-[19px] font-semibold leading-7 tracking-[-0.02em] text-text-primary">{question.question}</h3>
+          <div className="mt-5 space-y-2.5">
+            {question.options.map((option) => {
+              const optionSelected = selected === option.id;
+              const optionCorrect = option.id === correctId;
+              return (
+                <button key={option.id} type="button" disabled={answered} onClick={() => { setAnswers((prev) => ({ ...prev, [index]: option.id })); setHintOpen(false); }} className={cn("flex w-full items-start gap-3 rounded-2xl border px-4 py-3 text-left transition", !answered && "border-surface-border bg-surface-elevated hover:border-brand-border hover:bg-surface-hover", answered && optionCorrect && "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300", answered && optionSelected && !optionCorrect && "border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-300", answered && !optionSelected && !optionCorrect && "border-surface-border bg-surface-elevated/60 text-text-tertiary")}>
+                  <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-bold", answered && optionCorrect ? "border-emerald-500 bg-emerald-500 text-white" : answered && optionSelected ? "border-red-500 bg-red-500 text-white" : "border-surface-border bg-surface-card text-text-secondary")}>{option.id}</span>
+                  <span className="text-sm leading-6">{option.text}</span>
+                </button>
+              );
+            })}
+          </div>
+          {answered && (
+            <div className={cn("mt-5 rounded-2xl border p-4 text-sm leading-6", isCorrect ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "border-red-500/20 bg-red-500/10 text-red-600 dark:text-red-300")}>
+              <div className="mb-1 flex items-center gap-2 font-semibold">{isCorrect ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}{isCorrect ? t("notebook.studio.quizCorrect") : t("notebook.studio.quizWrong")}</div>
+              {!isCorrect && <p>{t("notebook.studio.quizYourAnswer", { answer: `${selectedOption?.id || ""}. ${selectedOption?.text || ""}` })}</p>}
+              {!isCorrect && <p>{t("notebook.studio.quizCorrectAnswer", { answer: `${correctOption?.id || correctId}. ${correctOption?.text || ""}` })}</p>}
+              <p className="mt-1">{isCorrect ? question.explanation : question.wrong_reason || question.explanation}</p>
+            </div>
+          )}
+          {hintOpen && !answered && (
+            <div className="mt-5 flex gap-3 rounded-2xl border border-indigo-500/15 bg-indigo-500/10 p-4 text-sm leading-6 text-indigo-700 dark:text-indigo-300">
+              <Lightbulb className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{question.hint}</span>
+            </div>
+          )}
+        </div>
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <button type="button" onClick={() => answered ? onExplain?.(question, selected) : setHintOpen((open) => !open)} className="inline-flex items-center gap-2 rounded-full border border-surface-border bg-surface-card px-4 py-2 text-sm font-semibold text-text-secondary transition hover:bg-surface-elevated hover:text-text-primary">
+            {answered ? <MessageCircle className="h-4 w-4" /> : <HelpCircle className="h-4 w-4" />}
+            {answered ? t("notebook.studio.quizExplain") : t("notebook.studio.quizHint")}
+          </button>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => goTo(index - 1)} className="rounded-full border border-surface-border px-4 py-2 text-sm font-semibold text-text-secondary hover:bg-surface-elevated">{t("notebook.studio.previous")}</button>
+            <button type="button" onClick={() => goTo(index + 1)} className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-hover">{t("notebook.studio.next")}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function renderActiveArtifact(artifact: NotebookStudioArtifact, t: (key: string, params?: Record<string, string>) => string, expanded = false, onDownloadArtifact?: (artifact: NotebookStudioArtifact) => void, onExplainFlashcard?: (card: NotebookStudioFlashcard) => void, onExplainQuiz?: (question: NotebookStudioQuizQuestion, selectedOptionId: string | null) => void) {
   switch (artifact.type) {
     case "table":
       return renderTableArtifact(artifact, t, expanded);
@@ -750,6 +860,8 @@ function renderActiveArtifact(artifact: NotebookStudioArtifact, t: (key: string,
       return <MindmapArtifactView artifact={artifact} onDownload={onDownloadArtifact} />;
     case "flashcards":
       return <FlashcardsArtifactView artifact={artifact} t={t} onExplain={onExplainFlashcard} />;
+    case "quiz":
+      return <QuizArtifactView artifact={artifact} t={t} onExplain={onExplainQuiz} />;
     case "report":
       return renderReportArtifact(artifact, expanded);
     case "summary":
@@ -760,7 +872,7 @@ function renderActiveArtifact(artifact: NotebookStudioArtifact, t: (key: string,
 }
 
 function GeneratingStudioCard({ type, sourceCount, t }: { type: NotebookStudioActionId; sourceCount: number; t: (key: string, params?: Record<string, string>) => string }) {
-  const titleKey = type === "mindmap" ? "notebook.studio.generatingMindmap" : type === "flashcards" ? "notebook.studio.generatingFlashcards" : type === "report" ? "notebook.studio.generatingReport" : "notebook.studio.generatingTable";
+  const titleKey = type === "mindmap" ? "notebook.studio.generatingMindmap" : type === "flashcards" ? "notebook.studio.generatingFlashcards" : type === "quiz" ? "notebook.studio.generatingQuiz" : type === "report" ? "notebook.studio.generatingReport" : "notebook.studio.generatingTable";
   return (
     <div className="mb-3 rounded-2xl border border-surface-border bg-surface-card px-3 py-3 shadow-sm">
       <div className="flex items-center gap-3">
@@ -837,6 +949,7 @@ export function NotebookStudioPanel({
   onDownloadArtifact,
   onExportTableToGoogleSheets,
   onExplainFlashcard,
+  onExplainQuiz,
 }: NotebookStudioPanelProps) {
   const { t } = useI18n();
   const [openMenuArtifactId, setOpenMenuArtifactId] = useState<string | null>(null);
@@ -853,6 +966,7 @@ export function NotebookStudioPanel({
     { id: "briefing", title: t("notebook.studio.briefing"), desc: t("notebook.studio.briefingDesc"), accent: "from-blue-500/15 to-sky-500/10 text-blue-500" },
     { id: "mindmap", title: t("notebook.studio.mindmap"), desc: t("notebook.studio.mindmapDesc"), accent: "from-violet-500/15 to-fuchsia-500/10 text-violet-500" },
     { id: "flashcards", title: t("notebook.studio.flashcards"), desc: t("notebook.studio.flashcardsDesc"), accent: "from-pink-500/15 to-rose-500/10 text-pink-500" },
+    { id: "quiz", title: t("notebook.studio.quiz"), desc: t("notebook.studio.quizDesc"), accent: "from-purple-500/15 to-violet-500/10 text-purple-500" },
     { id: "report", title: t("notebook.studio.report"), desc: t("notebook.studio.reportDesc"), accent: "from-slate-500/15 to-blue-500/10 text-slate-600 dark:text-slate-300" },
     { id: "slides", title: t("notebook.studio.slides"), desc: t("notebook.studio.slidesDesc"), accent: "from-rose-500/15 to-pink-500/10 text-rose-500" },
   ];
@@ -881,7 +995,7 @@ export function NotebookStudioPanel({
             })}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
-            {(generatingType === "table" || generatingType === "mindmap" || generatingType === "flashcards" || generatingType === "report") && (
+            {(generatingType === "table" || generatingType === "mindmap" || generatingType === "flashcards" || generatingType === "quiz" || generatingType === "report") && (
               <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-2xl bg-surface-elevated text-brand" title={t("notebook.studio.outputs")}>
                 <RefreshCw className="h-4 w-4 animate-spin" />
               </div>
@@ -911,7 +1025,7 @@ export function NotebookStudioPanel({
                 </button>
               </div>
               <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-surface-card p-5">
-                {renderActiveArtifact(viewerArtifact, t, true, onDownloadArtifact, onExplainFlashcard)}
+                {renderActiveArtifact(viewerArtifact, t, true, onDownloadArtifact, onExplainFlashcard, onExplainQuiz)}
               </div>
             </div>
           </div>
@@ -962,7 +1076,7 @@ export function NotebookStudioPanel({
             />
           </div>
           <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-surface-card p-4">
-            {renderActiveArtifact(activeArtifact, t, true, onDownloadArtifact, onExplainFlashcard)}
+            {renderActiveArtifact(activeArtifact, t, true, onDownloadArtifact, onExplainFlashcard, onExplainQuiz)}
             <div className="mt-3 flex items-center gap-2 border-t border-surface-border pt-3">
               <button type="button" className="rounded-full border border-surface-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-emerald-500/40 hover:text-emerald-500">{t("notebook.studio.good")}</button>
               <button type="button" className="rounded-full border border-surface-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-red-500/40 hover:text-red-500">{t("notebook.studio.bad")}</button>
@@ -1007,7 +1121,7 @@ export function NotebookStudioPanel({
           <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-text-primary">{t("notebook.studio.outputs")}</h3>
           <MoreHorizontal className="h-4 w-4 text-text-tertiary" />
         </div>
-        {(generatingType === "table" || generatingType === "mindmap" || generatingType === "flashcards" || generatingType === "report") && <div className="px-4 pb-3"><GeneratingStudioCard type={generatingType} sourceCount={selectedSourceCount} t={t} /></div>}
+        {(generatingType === "table" || generatingType === "mindmap" || generatingType === "flashcards" || generatingType === "quiz" || generatingType === "report") && <div className="px-4 pb-3"><GeneratingStudioCard type={generatingType} sourceCount={selectedSourceCount} t={t} /></div>}
         {artifacts.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-elevated text-text-tertiary"><Layers3 className="h-5 w-5" /></div>
@@ -1092,7 +1206,7 @@ export function NotebookStudioPanel({
             </button>
           </div>
           <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-surface-card p-5">
-            {renderActiveArtifact(viewerArtifact, t, true, onDownloadArtifact, onExplainFlashcard)}
+            {renderActiveArtifact(viewerArtifact, t, true, onDownloadArtifact, onExplainFlashcard, onExplainQuiz)}
           </div>
         </div>
       </div>
