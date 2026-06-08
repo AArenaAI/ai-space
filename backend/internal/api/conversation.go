@@ -50,7 +50,8 @@ func (h *ConversationHandler) List(c *gin.Context) {
 	workspaceIDStr := c.Query("workspace_id")
 
 	var total int64
-	countQuery := h.db.Model(&models.Conversation{}).Where("user_id = ? AND deleted_at IS NULL", userID)
+	countQuery := h.db.Model(&models.Conversation{}).Where("user_id = ? AND deleted_at IS NULL", userID).
+		Where("NOT EXISTS (SELECT 1 FROM notebook_conversations WHERE notebook_conversations.conversation_id = conversations.id)")
 	if workspaceIDStr != "" {
 		if wid, err := strconv.ParseUint(workspaceIDStr, 10, 32); err == nil {
 			countQuery = countQuery.Where("workspace_id = ?", uint(wid))
@@ -70,7 +71,8 @@ func (h *ConversationHandler) List(c *gin.Context) {
 	query := h.db.Table("conversations").
 		Select("conversations.*, (SELECT model FROM messages WHERE messages.conversation_id = conversations.id AND messages.role = 'assistant' AND messages.model <> '' ORDER BY messages.created_at DESC, messages.id DESC LIMIT 1) as latest_model").
 		Where("conversations.user_id = ?", userID).
-		Where("conversations.deleted_at IS NULL")
+		Where("conversations.deleted_at IS NULL").
+		Where("NOT EXISTS (SELECT 1 FROM notebook_conversations WHERE notebook_conversations.conversation_id = conversations.id)")
 
 	if workspaceIDStr != "" {
 		if wid, err := strconv.ParseUint(workspaceIDStr, 10, 32); err == nil {
@@ -121,6 +123,7 @@ func (h *ConversationHandler) Search(c *gin.Context) {
 		Select("conversations.id, conversations.title, conversations.model, conversations.skill_key, conversations.pinned, conversations.created_at, conversations.updated_at, "+titleMatchSQL+", "+matchedContentSQL+", "+matchedRoleSQL+", "+matchedMessageIDSQL, like, like, like, like).
 		Where("conversations.user_id = ?", userID).
 		Where("conversations.deleted_at IS NULL").
+		Where("NOT EXISTS (SELECT 1 FROM notebook_conversations WHERE notebook_conversations.conversation_id = conversations.id)").
 		Where("conversations.title LIKE ? OR EXISTS (SELECT 1 FROM messages WHERE messages.conversation_id = conversations.id AND messages.deleted_at IS NULL AND messages.content LIKE ?)", like, like)
 
 	if workspaceIDStr := c.Query("workspace_id"); workspaceIDStr != "" {
