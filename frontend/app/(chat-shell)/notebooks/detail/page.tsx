@@ -254,46 +254,67 @@ function ReportFormatDialog({
         type="button"
         onClick={() => onSelect(format.id)}
         className={cn(
-          "group flex w-full items-start gap-3 rounded-2xl border px-4 py-3 text-left transition",
-          selected ? "border-brand bg-brand-muted/40 shadow-sm" : "border-surface-border bg-surface-card hover:border-brand-border hover:bg-surface-elevated"
+          "group flex min-h-[116px] w-full flex-col justify-between rounded-xl border px-4 py-4 text-left transition duration-150",
+          selected
+            ? "border-brand bg-brand-muted/40 shadow-sm ring-1 ring-brand/20"
+            : "border-transparent bg-surface-elevated hover:border-surface-border hover:bg-surface-hover"
         )}
       >
-        <span className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border", selected ? "border-brand bg-brand text-white" : "border-surface-border text-transparent group-hover:border-brand")}>{selected && <Check className="h-3.5 w-3.5" />}</span>
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-2 text-sm font-semibold text-text-primary">
-            {format.title}
-            {recommended && <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-600">{t("notebook.studio.reportSuggestedBadge")}</span>}
+        <span className="block">
+          <span className="flex items-start justify-between gap-3">
+            <span className="text-sm font-semibold leading-5 text-text-primary">{format.title}</span>
+            <span className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition", selected ? "border-brand bg-brand text-white" : "border-surface-border bg-surface-card text-transparent group-hover:border-brand")}>{selected && <Check className="h-3.5 w-3.5" />}</span>
           </span>
-          <span className="mt-1 block text-xs leading-5 text-text-tertiary">{format.description}</span>
+          <span className="mt-2 block text-xs leading-5 text-text-tertiary">{format.description}</span>
         </span>
+        {recommended && <span className="mt-3 inline-flex w-fit rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-300">{t("notebook.studio.reportSuggestedBadge")}</span>}
       </button>
+    );
+  };
+  const renderSuggestionBody = () => {
+    if (loadingSuggestions) {
+      return Array.from({ length: 4 }).map((_, index) => (
+        <div key={`suggestion-loading-${index}`} className="min-h-[116px] rounded-xl bg-surface-elevated px-4 py-4">
+          <div className="h-4 w-24 animate-pulse rounded bg-surface-hover" />
+          <div className="mt-4 space-y-2">
+            <div className="h-3 w-full animate-pulse rounded bg-surface-hover" />
+            <div className="h-3 w-4/5 animate-pulse rounded bg-surface-hover" />
+          </div>
+        </div>
+      ));
+    }
+    if (suggestions.length > 0) {
+      return suggestions.slice(0, 4).map((format) => renderOption(format, true));
+    }
+    return (
+      <div className="col-span-full rounded-xl border border-dashed border-surface-border bg-surface-elevated px-4 py-5 text-sm text-text-tertiary">
+        {t("notebook.studio.reportSuggestionEmpty")}
+      </div>
     );
   };
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/45 p-5 backdrop-blur-sm" role="dialog" aria-modal="true">
-      <div className="flex max-h-[88vh] w-[min(980px,94vw)] flex-col overflow-hidden rounded-[32px] border border-surface-border bg-surface-card shadow-2xl">
-        <div className="flex items-start justify-between border-b border-surface-border px-6 py-5">
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brand">{t("notebook.studio.reportDialogEyebrow")}</div>
-            <h3 className="mt-1 text-2xl font-bold tracking-[-0.03em] text-text-primary">{t("notebook.studio.reportDialogTitle")}</h3>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-text-secondary">{t("notebook.studio.reportDialogDesc")}</p>
+      <div className="flex max-h-[88vh] w-[min(1040px,94vw)] flex-col overflow-hidden rounded-[22px] border border-surface-border bg-surface-card shadow-2xl">
+        <div className="flex items-center justify-between border-b border-surface-border px-6 py-4">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-elevated text-text-secondary">
+              <FileText className="h-5 w-5" />
+            </span>
+            <h3 className="text-xl font-semibold tracking-[-0.02em] text-text-primary">{t("notebook.studio.reportDialogTitle")}</h3>
           </div>
-          <button type="button" onClick={onClose} className="rounded-full p-2 text-text-tertiary transition hover:bg-surface-hover hover:text-text-primary">×</button>
+          <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-elevated text-lg leading-none text-text-tertiary transition hover:bg-surface-hover hover:text-text-primary" aria-label="Close">×</button>
         </div>
-        <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto p-6 lg:grid-cols-[0.95fr_1.05fr]">
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
           <section>
             <h4 className="mb-3 text-sm font-semibold text-text-primary">{t("notebook.studio.reportFixedFormats")}</h4>
-            <div className="space-y-2.5">{FIXED_REPORT_FORMATS.map((format) => renderOption(format))}</div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{FIXED_REPORT_FORMATS.map((format) => renderOption(format))}</div>
           </section>
-          <section>
+          <section className="mt-7">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <h4 className="text-sm font-semibold text-text-primary">{t("notebook.studio.reportSuggestedFormats")}</h4>
+              <h4 className="text-sm font-semibold text-text-primary">✨ {t("notebook.studio.reportSuggestedFormats")}</h4>
               {loadingSuggestions && <span className="inline-flex items-center gap-1.5 text-xs text-text-tertiary"><Loader2 className="h-3.5 w-3.5 animate-spin" />{t("notebook.studio.reportAnalyzing")}</span>}
             </div>
-            <div className="space-y-2.5">
-              {(suggestions.length ? suggestions : []).map((format) => renderOption(format, true))}
-              {!loadingSuggestions && suggestions.length === 0 && <div className="rounded-2xl border border-dashed border-surface-border bg-surface-elevated p-4 text-sm text-text-tertiary">{t("notebook.studio.reportSuggestionEmpty")}</div>}
-            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{renderSuggestionBody()}</div>
           </section>
         </div>
         <div className="flex items-center justify-between border-t border-surface-border px-6 py-4">

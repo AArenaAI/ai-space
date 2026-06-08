@@ -118,8 +118,11 @@ func TestSuggestNotebookReportFormatsUsesSourceContent(t *testing.T) {
 	for _, suggestion := range suggestions {
 		joined += suggestion.Title + " " + suggestion.Description + "\n"
 	}
-	if !containsAll(joined, []string{"技术", "方案", "路线", "白标"}) {
-		t.Fatalf("suggested formats should be derived from document themes, got %s", joined)
+	if !containsAll(joined, []string{"技术", "路线", "白标"}) {
+		t.Fatalf("fallback suggested formats should be derived from document themes, got %s", joined)
+	}
+	if strings.Contains(joined, "自制格式") || strings.Contains(joined, "简报文档") || strings.Contains(joined, "学习指南") || strings.Contains(joined, "博文") {
+		t.Fatalf("suggested formats should not mirror the fixed format list, got %s", joined)
 	}
 }
 

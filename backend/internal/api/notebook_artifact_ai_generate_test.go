@@ -49,6 +49,57 @@ func (f *fakeNotebookAIService) RetrieveOpenAIResponse(ctx context.Context, resp
 	return f.retrieveResponses[idx], nil
 }
 
+func TestSuggestAINotebookReportFormatsUsesAIJSON(t *testing.T) {
+	files := []models.File{
+		{ID: 1, Filename: "医疗质控方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "医疗质控、病历审核、风险预警", Content: "资料讨论医院病历质控、医保合规、医生工作流、风险预警和管理驾驶舱。"},
+	}
+	ai := &fakeNotebookAIService{response: `{"formats":[{"id":"clinical-quality-dashboard","title":"临床质控驾驶舱报告","description":"围绕病历审核、风险预警和管理看板分析资料中的医院质控方案。"},{"id":"insurance-compliance-brief","title":"医保合规风险简报","description":"提炼资料中的医保规则、违规风险和审核流程，形成管理层简报。"},{"id":"doctor-workflow-playbook","title":"医生工作流优化手册","description":"分析资料中医生录入、审核反馈和流程减负的落地路径。"},{"id":"hospital-rollout-plan","title":"医院落地推广计划","description":"结合资料中的角色、系统接入和阶段目标生成推广计划。"}]}`}
+
+	suggestions := suggestAINotebookReportFormats(context.Background(), ai, files, []uint{1}, "zh-CN")
+	if ai.calls != 1 {
+		t.Fatalf("AI service calls = %d, want 1", ai.calls)
+	}
+	if len(suggestions) != 4 {
+		t.Fatalf("expected four AI suggestions, got %d: %+v", len(suggestions), suggestions)
+	}
+	joined := ""
+	for _, suggestion := range suggestions {
+		joined += suggestion.ID + " " + suggestion.Title + " " + suggestion.Description + "\n"
+	}
+	if !containsAll(joined, []string{"临床质控", "医保合规", "医生工作流", "医院落地"}) {
+		t.Fatalf("AI suggestions should come from source-specific JSON, got %s", joined)
+	}
+	prompt := ""
+	for _, msg := range ai.messages {
+		prompt += msg.Content + "\n"
+	}
+	if !strings.Contains(prompt, "医疗质控方案.md") || !strings.Contains(prompt, "风险预警") {
+		t.Fatalf("suggestion prompt should include selected source content, got %s", prompt)
+	}
+}
+
+func TestSuggestAINotebookReportFormatsFallsBackWhenAIInvalid(t *testing.T) {
+	files := []models.File{
+		{ID: 1, Filename: "AI Space 白皮书.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "白标部署、RAG、Agent 路线图", Content: "包含白标部署、Go/Gin 后端、RAG 流水线、Workspace Agent 和模型蒸馏路线图。"},
+	}
+	ai := &fakeNotebookAIService{response: `not json`}
+
+	suggestions := suggestAINotebookReportFormats(context.Background(), ai, files, []uint{1}, "zh-CN")
+	if ai.calls != 1 {
+		t.Fatalf("AI service calls = %d, want 1", ai.calls)
+	}
+	if len(suggestions) != 4 {
+		t.Fatalf("fallback should still return four suggestions, got %d: %+v", len(suggestions), suggestions)
+	}
+	joined := ""
+	for _, suggestion := range suggestions {
+		joined += suggestion.Title + " " + suggestion.Description + "\n"
+	}
+	if !containsAll(joined, []string{"白标", "RAG", "路线"}) {
+		t.Fatalf("fallback suggestions should stay source-aware, got %s", joined)
+	}
+}
+
 func TestBuildAINotebookArtifactDraftUsesAIJSON(t *testing.T) {
 	files := []models.File{
 		{ID: 1, Filename: "产品方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "产品定位", Content: "AI Space 是知识工作台。"},

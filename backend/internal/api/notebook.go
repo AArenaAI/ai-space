@@ -458,7 +458,8 @@ func (h *NotebookHandler) SuggestReportFormats(c *gin.Context) {
 		return
 	}
 	files := h.loadNotebookGenerationFiles(nb.ID, getUserID(c))
-	c.JSON(http.StatusOK, gin.H{"formats": suggestNotebookReportFormats(files, req.FileIDs, req.Language)})
+	formats := suggestAINotebookReportFormats(c.Request.Context(), h.aiService, files, req.FileIDs, req.Language)
+	c.JSON(http.StatusOK, gin.H{"formats": formats})
 }
 
 func (h *NotebookHandler) GenerateArtifact(c *gin.Context) {

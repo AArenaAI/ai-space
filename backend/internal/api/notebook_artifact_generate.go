@@ -550,38 +550,182 @@ func isNotebookGenerationFileReady(file models.File) bool {
 	return strings.TrimSpace(file.Content) != "" || strings.TrimSpace(file.Summary) != ""
 }
 
+func suggestAINotebookReportFormats(ctx context.Context, aiService chatAIService, files []models.File, selectedFileIDs []uint, language string) []notebookReportFormatSuggestion {
+	fallback := suggestNotebookReportFormats(files, selectedFileIDs, language)
+	if aiService == nil {
+		return fallback
+	}
+	sources := selectNotebookGenerationSources(files, selectedFileIDs, "report")
+	if len(sources) == 0 {
+		return fallback
+	}
+	messages := buildNotebookReportFormatSuggestionAIMessages(sources, language)
+	resp, err := aiService.ChatCompletion(ctx, notebookArtifactAIModel("report"), messages, false, false, "", false, nil)
+	if err != nil || resp == nil || resp.Body == nil {
+		return fallback
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+	if err != nil {
+		return fallback
+	}
+	formats, err := parseNotebookReportFormatSuggestions(body, language)
+	if err != nil || len(formats) != 4 {
+		return fallback
+	}
+	return formats
+}
+
+func buildNotebookReportFormatSuggestionAIMessages(sources []notebookGenerationSource, language string) []services.Message {
+	if strings.TrimSpace(language) == "" {
+		language = "zh-CN"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Language: %s\n\n", language)
+	b.WriteString("Read the selected notebook source material and propose exactly 4 report directions that are specifically useful for these documents.\n")
+	b.WriteString("These are NOT fixed templates. Each suggestion must be tailored to the actual document themes, facts, audience, and use cases. Avoid generic titles like 技术白皮书/路线图 unless the source truly supports them, and make each direction distinct.\n")
+	b.WriteString("Return strict JSON only: {\"formats\":[{\"id\":string,\"title\":string,\"description\":string}]}.\n")
+	b.WriteString("Requirements: exactly 4 items; id uses lowercase ASCII slug with hyphens; title is concise; description is one practical sentence explaining what the report will analyze from the sources.\n\n")
+	b.WriteString("Sources:\n")
+	for _, source := range sources {
+		fmt.Fprintf(&b, "\n--- SOURCE [%d]: %s ---\nSummary: %s\nText:\n%s\n--- END SOURCE [%d] ---\n", source.Index, source.File.Filename, fallbackText(source.Summary, "无摘要"), fallbackText(source.Excerpt, "无正文摘录"), source.Index)
+	}
+	return []services.Message{
+		{Role: "system", Content: "You are a document analyst recommending report formats for a NotebookLM-style workspace. Return valid JSON only; no markdown fences."},
+		{Role: "user", Content: b.String()},
+	}
+}
+
+func parseNotebookReportFormatSuggestions(body []byte, language string) ([]notebookReportFormatSuggestion, error) {
+	var envelope struct {
+		Formats []notebookReportFormatSuggestion `json:"formats"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	formats := make([]notebookReportFormatSuggestion, 0, 4)
+	for _, format := range envelope.Formats {
+		format.ID = normalizeNotebookReportFormatID(format.ID, format.Title)
+		format.Title = strings.TrimSpace(format.Title)
+		format.Description = strings.TrimSpace(format.Description)
+		if format.ID == "" || format.Title == "" || format.Description == "" || seen[format.ID] {
+			continue
+		}
+		seen[format.ID] = true
+		formats = append(formats, format)
+		if len(formats) == 4 {
+			break
+		}
+	}
+	if len(formats) != 4 {
+		return nil, fmt.Errorf("expected exactly four report format suggestions")
+	}
+	return formats, nil
+}
+
+func normalizeNotebookReportFormatID(id string, title string) string {
+	id = strings.ToLower(strings.TrimSpace(id))
+	title = strings.TrimSpace(title)
+	if id == "" && title == "" {
+		return ""
+	}
+	var b strings.Builder
+	lastDash := false
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastDash = false
+		} else if r == '-' || r == '_' || unicode.IsSpace(r) {
+			if !lastDash && b.Len() > 0 {
+				b.WriteRune('-')
+				lastDash = true
+			}
+		}
+	}
+	cleaned := strings.Trim(b.String(), "-")
+	if cleaned != "" {
+		return cleaned
+	}
+	base := strings.ToLower(strings.TrimSpace(title))
+	b.Reset()
+	for _, r := range base {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastDash = false
+		} else if unicode.IsSpace(r) || r == '-' || r == '_' {
+			if !lastDash && b.Len() > 0 {
+				b.WriteRune('-')
+				lastDash = true
+			}
+		}
+	}
+	cleaned = strings.Trim(b.String(), "-")
+	if cleaned != "" {
+		return cleaned
+	}
+	return fmt.Sprintf("suggested-%x", []byte(title))[:16]
+}
+
 func suggestNotebookReportFormats(files []models.File, selectedFileIDs []uint, language string) []notebookReportFormatSuggestion {
 	sources := selectNotebookGenerationSources(files, selectedFileIDs, "report")
+	isEN := strings.HasPrefix(strings.ToLower(strings.TrimSpace(language)), "en")
+	if len(sources) == 0 {
+		return defaultNotebookReportFormatSuggestions(isEN)
+	}
+	ideas := make([]notebookReportFormatSuggestion, 0, 4)
 	combined := ""
 	for _, source := range sources {
 		combined += " " + source.File.Filename + " " + source.Summary + " " + source.Excerpt
 	}
 	combinedLower := strings.ToLower(combined)
-	isEN := strings.HasPrefix(strings.ToLower(strings.TrimSpace(language)), "en")
-	suggestions := []notebookReportFormatSuggestion{
-		{ID: "proposal", Title: "白标建设方案", Description: "面向企业客户的私有化部署、白标定制和落地推进方案。"},
-		{ID: "technical-whitepaper", Title: "技术白皮书", Description: "深入解析系统架构、RAG 流水线、模型接入和工程实现。"},
-		{ID: "concept-manual", Title: "概念解析手册", Description: "把关键术语、模块能力和适用场景解释给初学者。"},
-		{ID: "roadmap", Title: "功能演进路线图", Description: "梳理从当前功能到 Agent 生态与模型蒸馏的阶段演进。"},
-	}
-	if isEN {
-		suggestions = []notebookReportFormatSuggestion{
-			{ID: "proposal", Title: "Implementation Proposal", Description: "Enterprise deployment, white-label customization, and rollout plan."},
-			{ID: "technical-whitepaper", Title: "Technical Whitepaper", Description: "Architecture, RAG pipeline, model abstraction, and backend implementation details."},
-			{ID: "concept-manual", Title: "Concept Explainer", Description: "Plain-language glossary and explanations for key AI platform concepts."},
-			{ID: "roadmap", Title: "Capability Roadmap", Description: "Evolution from current features to workspace agents and model distillation."},
+	add := func(id, zhTitle, zhDesc, enTitle, enDesc string) {
+		if len(ideas) >= 4 {
+			return
+		}
+		if isEN {
+			ideas = append(ideas, notebookReportFormatSuggestion{ID: id, Title: enTitle, Description: enDesc})
+		} else {
+			ideas = append(ideas, notebookReportFormatSuggestion{ID: id, Title: zhTitle, Description: zhDesc})
 		}
 	}
-	if strings.Contains(combinedLower, "white-label") || strings.Contains(combined, "白标") || strings.Contains(combined, "私有化") {
-		suggestions[0].Description = fallbackText(ifEnglish(isEN, "A client-facing proposal for private deployment and brand customization.", "面向企业客户的 AI 平台私有化部署及品牌定制化商业提案。"), suggestions[0].Description)
+	if strings.Contains(combined, "白标") || strings.Contains(combined, "私有化") || strings.Contains(combinedLower, "white-label") || strings.Contains(combinedLower, "enterprise") {
+		add("enterprise-rollout", "企业落地与白标方案", "围绕私有化部署、品牌定制、客户交付和商业价值形成落地报告。", "Enterprise Rollout & White-label Plan", "Analyze deployment, brand customization, client delivery, and business value from the sources.")
 	}
-	if strings.Contains(combinedLower, "go") || strings.Contains(combinedLower, "rag") || strings.Contains(combined, "架构") {
-		suggestions[1].Description = fallbackText(ifEnglish(isEN, "Deep dive into Go backend, RAG pipeline, provider abstraction, and deployment architecture.", "深入解析 Go 后端、RAG 流水线、模型抽象和部署架构的技术实现。"), suggestions[1].Description)
+	if strings.Contains(combinedLower, "rag") || strings.Contains(combinedLower, "go") || strings.Contains(combinedLower, "next.js") || strings.Contains(combined, "架构") || strings.Contains(combined, "模型") {
+		add("technical-architecture", "技术架构深度解析", "拆解资料中的系统架构、模型接入、RAG 流水线和工程实现要点。", "Technical Architecture Deep Dive", "Break down architecture, model integration, RAG pipeline, and implementation details found in the sources.")
 	}
-	if strings.Contains(combinedLower, "agent") || strings.Contains(combined, "路线") || strings.Contains(combined, "蒸馏") {
-		suggestions[3].Description = fallbackText(ifEnglish(isEN, "A staged roadmap from conversation tools to workspace agents and specialized distillation.", "梳理从对话工具到 Workspace Agent、专业化智能体和模型蒸馏的阶段演进。"), suggestions[3].Description)
+	if strings.Contains(combined, "路线") || strings.Contains(combined, "规划") || strings.Contains(combined, "Agent") || strings.Contains(combinedLower, "roadmap") || strings.Contains(combinedLower, "agent") {
+		add("capability-roadmap", "能力演进路线分析", "梳理当前能力、规划阶段、关键里程碑和后续产品演进路径。", "Capability Roadmap Analysis", "Organize current capabilities, planned stages, milestones, and product evolution paths.")
 	}
-	return suggestions
+	if strings.Contains(combined, "市场") || strings.Contains(combined, "竞品") || strings.Contains(combined, "对标") || strings.Contains(combinedLower, "market") || strings.Contains(combinedLower, "competitor") {
+		add("market-comparison", "市场与竞品对比报告", "结合资料中的场景、对标对象和差异化优势，形成市场分析报告。", "Market & Competitor Comparison", "Compare scenarios, benchmarks, and differentiation mentioned in the source material.")
+	}
+	if strings.Contains(combined, "学习") || strings.Contains(combined, "概念") || strings.Contains(combined, "术语") || strings.Contains(combinedLower, "guide") {
+		add("learning-playbook", "概念学习与应用手册", "把资料中的关键术语、流程和应用场景整理为可学习、可复用的手册。", "Learning & Application Playbook", "Turn concepts, workflows, and scenarios in the sources into a reusable learning guide.")
+	}
+	defaults := defaultNotebookReportFormatSuggestions(isEN)
+	for _, item := range defaults {
+		add(item.ID, item.Title, item.Description, item.Title, item.Description)
+	}
+	return ideas[:4]
+}
+
+func defaultNotebookReportFormatSuggestions(isEN bool) []notebookReportFormatSuggestion {
+	if isEN {
+		return []notebookReportFormatSuggestion{
+			{ID: "source-insight-report", Title: "Source Insight Report", Description: "Synthesize the selected documents into a focused insight report with evidence and implications."},
+			{ID: "decision-brief", Title: "Decision Brief", Description: "Highlight the facts, trade-offs, risks, and recommended next steps from the material."},
+			{ID: "implementation-playbook", Title: "Implementation Playbook", Description: "Convert the source material into practical steps, owners, milestones, and checks."},
+			{ID: "audience-ready-summary", Title: "Audience-ready Summary", Description: "Rewrite the material for a specific reader group with clear takeaways and narrative flow."},
+		}
+	}
+	return []notebookReportFormatSuggestion{
+		{ID: "source-insight-report", Title: "资料洞察报告", Description: "把选中文档整理成有证据、有结论、有影响判断的专题报告。"},
+		{ID: "decision-brief", Title: "决策简报", Description: "提炼资料里的关键事实、取舍、风险和下一步建议，便于快速决策。"},
+		{ID: "implementation-playbook", Title: "落地执行手册", Description: "将资料转化为行动步骤、负责人视角、里程碑和检查项。"},
+		{ID: "audience-ready-summary", Title: "面向读者的解读稿", Description: "按目标读者重写资料内容，突出核心观点、背景和可传播叙事。"},
+	}
 }
 
 func ifEnglish(isEN bool, en string, zh string) string {
