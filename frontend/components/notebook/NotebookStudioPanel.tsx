@@ -816,7 +816,7 @@ function QuizArtifactView({ artifact, t, onExplain }: { artifact: Extract<Notebo
               const optionSelected = selected === option.id;
               const optionCorrect = option.id === correctId;
               return (
-                <button key={option.id} type="button" disabled={answered} onClick={() => { if (!answered) { setAnswers((prev) => ({ ...prev, [index]: option.id })); setHintOpen(false); } }} className={cn("flex w-full flex-col rounded-2xl border px-4 py-3 text-left transition", !answered && "border-surface-border bg-surface-elevated hover:border-brand-border hover:bg-surface-hover", answered && optionCorrect && "border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30", answered && optionSelected && !optionCorrect && "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/30", answered && !optionSelected && !optionCorrect && "border-surface-border bg-surface-elevated/60 text-text-tertiary")}>
+                <button key={option.id} type="button" disabled={answered} onClick={() => { if (!answered) { setAnswers((prev) => ({ ...prev, [index]: option.id })); setHintOpen(false); } }} className={cn("flex w-full flex-col rounded-2xl border px-4 py-3 text-left transition", !answered && "border-surface-border bg-surface-elevated hover:border-brand-border hover:bg-surface-hover", answered && optionCorrect && "border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30", answered && !optionCorrect && "border-surface-border bg-surface-elevated/60 text-text-tertiary")}>
                   <div className="flex items-start gap-3">
                     <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-bold", answered && optionCorrect ? "border-emerald-500 bg-emerald-500 text-white" : answered && optionSelected && !optionCorrect ? "border-red-500 bg-red-500 text-white" : "border-surface-border bg-surface-card text-text-secondary")}>{option.id}</span>
                     <span className={cn("text-sm leading-6", answered && optionCorrect ? "text-emerald-800 dark:text-emerald-200" : answered && optionSelected && !optionCorrect ? "text-red-800 dark:text-red-200" : "text-text-primary")}>{option.text}</span>
@@ -826,7 +826,7 @@ function QuizArtifactView({ artifact, t, onExplain }: { artifact: Extract<Notebo
                       <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                       <div>
                         <span className="font-semibold text-emerald-700 dark:text-emerald-300">{t("notebook.studio.quizCorrect")}</span>
-                        <p className="mt-0.5 leading-5 text-emerald-700/90 dark:text-emerald-300/90">{question.explanation}</p>
+                        <p className="mt-0.5 leading-5 text-emerald-700/90 dark:text-emerald-300/90">{truncateText(question.explanation)}</p>
                       </div>
                     </div>
                   )}
@@ -835,7 +835,7 @@ function QuizArtifactView({ artifact, t, onExplain }: { artifact: Extract<Notebo
                       <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
                       <div>
                         <span className="font-semibold text-red-700 dark:text-red-300">{t("notebook.studio.quizWrong")}</span>
-                        <p className="mt-0.5 leading-5 text-red-700/90 dark:text-red-300/90">{question.wrong_reason || question.explanation}</p>
+                        <p className="mt-0.5 leading-5 text-red-700/90 dark:text-red-300/90">{truncateText(question.wrong_reason || question.explanation)}</p>
                       </div>
                     </div>
                   )}
