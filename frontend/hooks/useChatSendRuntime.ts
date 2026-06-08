@@ -88,6 +88,7 @@ export function useChatSendRuntime({
   const { createConversation } = useChatConversationCreateRuntime({
     apiBaseUrl,
     setCreatedConversation,
+    notebookId,
     getToken,
     getWorkspaceId,
     getCurrentHref,

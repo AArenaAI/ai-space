@@ -10,6 +10,7 @@ import {
 export type UseChatConversationCreateRuntimeOptions = {
   apiBaseUrl: string;
   setCreatedConversation: (conversationId: number, title: string) => void;
+  notebookId?: number;
   getToken?: () => string | null;
   getWorkspaceId?: () => string | null;
   getCurrentHref?: () => string;
@@ -26,6 +27,7 @@ export type CreateConversationAction = (
 export function useChatConversationCreateRuntime({
   apiBaseUrl,
   setCreatedConversation,
+  notebookId,
   getToken = () => localStorage.getItem("token"),
   getWorkspaceId = () => localStorage.getItem("current-workspace"),
   getCurrentHref = () => window.location.href,
@@ -57,14 +59,16 @@ export function useChatConversationCreateRuntime({
           conversationId: data.id,
           skillKey: sk,
         }));
-        dispatchWindowEvent(new CustomEvent("conversation-created", { detail: data }));
+        if (!notebookId) {
+          dispatchWindowEvent(new CustomEvent("conversation-created", { detail: data }));
+        }
         return data.id;
       } catch (err) {
         console.error("createConversation error:", err);
         return undefined;
       }
     },
-    [apiBaseUrl, getCurrentHref, getToken, getWorkspaceId, replaceHistory, dispatchWindowEvent, setCreatedConversation]
+    [apiBaseUrl, getCurrentHref, getToken, getWorkspaceId, replaceHistory, dispatchWindowEvent, setCreatedConversation, notebookId]
   );
 
   return { createConversation };

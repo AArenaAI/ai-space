@@ -183,7 +183,7 @@ export function useChatSingleSendRuntime({
         if (decision.shouldUpdateLoading) setIsLoading(Boolean(decision.isLoading));
         if (decision.shouldClearMainController) abortControllerRef.current = null;
         if (decision.shouldClearAbortReason) abortReasonRef.current = null;
-        if (decision.shouldDispatchConversationUpdated && decision.conversationId) {
+        if (decision.shouldDispatchConversationUpdated && decision.conversationId && !notebookId) {
           dispatchWindowEvent(new CustomEvent("conversation-updated", {
             detail: buildConversationUpdatedEventDetail(decision.conversationId, new Date(now()).toISOString()),
           }));
