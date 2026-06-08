@@ -842,6 +842,7 @@ export function NotebookStudioPanel({
   const [openMenuArtifactId, setOpenMenuArtifactId] = useState<string | null>(null);
   const [viewerArtifactId, setViewerArtifactId] = useState<string | null>(null);
   const [sourcePopoverKey, setSourcePopoverKey] = useState<string | null>(null);
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const activeArtifact = artifacts.find((artifact) => artifact.id === activeArtifactId) || null;
   const viewerArtifact = artifacts.find((artifact) => artifact.id === viewerArtifactId) || null;
   const sourcesForArtifact = (artifact: NotebookStudioArtifact) => sourceFiles.slice(0, Math.max(0, artifact.sourceCount || 0));
@@ -855,6 +856,69 @@ export function NotebookStudioPanel({
     { id: "report", title: t("notebook.studio.report"), desc: t("notebook.studio.reportDesc"), accent: "from-slate-500/15 to-blue-500/10 text-slate-600 dark:text-slate-300" },
     { id: "slides", title: t("notebook.studio.slides"), desc: t("notebook.studio.slidesDesc"), accent: "from-rose-500/15 to-pink-500/10 text-rose-500" },
   ];
+
+  if (isCollapsed) {
+    return (
+      <>
+        <aside className="flex h-full w-[72px] shrink-0 flex-col overflow-hidden rounded-[28px] border border-surface-border bg-surface-card shadow-sm">
+          <div className="flex h-[62px] shrink-0 items-center justify-center border-b border-surface-border">
+            <button type="button" onClick={() => setIsCollapsed(false)} className="flex h-10 w-10 items-center justify-center rounded-2xl text-text-tertiary transition hover:bg-surface-elevated hover:text-text-primary" title="Studio">
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="flex shrink-0 flex-col items-center gap-2.5 border-b border-surface-border px-2 py-3">
+            {actions.map((action) => {
+              const Icon = actionIconMap[action.id];
+              const isGenerating = generatingType === action.id;
+              const primaryIconTone = primaryStudioActionIconTone[action.id];
+              return (
+                <button key={action.id} type="button" onClick={() => onGenerate(action.id)} disabled={Boolean(generatingType)} title={action.title} className="group flex h-11 w-11 items-center justify-center rounded-2xl transition hover:bg-surface-elevated disabled:cursor-not-allowed disabled:opacity-60">
+                  <span className={cn("flex h-9 w-9 items-center justify-center rounded-2xl", primaryIconTone ? primaryIconTone : cn("bg-gradient-to-br", action.accent))}>
+                    {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className={primaryIconTone ? "h-[22px] w-[22px]" : "h-4 w-4"} />}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
+            {(generatingType === "table" || generatingType === "mindmap" || generatingType === "flashcards" || generatingType === "report") && (
+              <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-2xl bg-surface-elevated text-brand" title={t("notebook.studio.outputs")}>
+                <RefreshCw className="h-4 w-4 animate-spin" />
+              </div>
+            )}
+            <div className="flex flex-col items-center gap-2">
+              {artifacts.map((artifact) => {
+                const Icon = artifactIconMap[artifact.type];
+                return (
+                  <button key={artifact.id} type="button" onClick={() => { setIsCollapsed(false); onOpenArtifact(artifact.id); }} title={artifact.title} className={cn("flex h-11 w-11 items-center justify-center rounded-2xl transition hover:bg-surface-elevated", activeArtifactId === artifact.id && "bg-surface-elevated ring-1 ring-brand-border")}>
+                    <Icon className={cn("h-[23px] w-[23px]", artifactIconTone[artifact.type])} />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </aside>
+        {viewerArtifact && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/45 p-6 backdrop-blur-sm" role="dialog" aria-modal="true">
+            <div className="flex h-[86vh] w-[min(1180px,92vw)] flex-col overflow-hidden rounded-3xl border border-surface-border bg-surface-card shadow-2xl">
+              <div className="flex items-start gap-3 border-b border-surface-border px-6 py-4">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-text-tertiary">Studio Viewer</div>
+                  <h3 className="mt-1 line-clamp-2 text-xl font-bold tracking-[-0.01em] text-text-primary">{viewerArtifact.title}</h3>
+                </div>
+                <button type="button" onClick={() => setViewerArtifactId(null)} className="rounded-full p-2 text-text-tertiary transition hover:bg-surface-hover hover:text-text-primary" title={t("common.close")}>
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-surface-card p-5">
+                {renderActiveArtifact(viewerArtifact, t, true, onDownloadArtifact, onExplainFlashcard)}
+              </div>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
 
   return (
     <>
@@ -879,6 +943,9 @@ export function NotebookStudioPanel({
                 {sourcePopoverKey === `active-${activeArtifact.id}` && <SourcePopover sources={sourcesForArtifact(activeArtifact)} title={t("notebook.sourcesTitle")} emptyLabel={t("notebook.sourcesEmpty")} />}
               </div>
             </div>
+            <button type="button" onClick={() => setIsCollapsed(true)} className="mt-1 rounded-full p-2 text-text-tertiary transition hover:bg-surface-hover hover:text-text-primary" title="Studio">
+              <ChevronRight className="h-4 w-4" />
+            </button>
             <button type="button" onClick={() => setViewerArtifactId(activeArtifact.id)} className="mt-1 rounded-full p-2 text-text-tertiary transition hover:bg-surface-hover hover:text-text-primary" title={t("notebook.studio.expandViewer")}>
               <Maximize2 className="h-4 w-4" />
             </button>
@@ -906,7 +973,7 @@ export function NotebookStudioPanel({
       <>
       <div className="flex items-center justify-between border-b border-surface-border px-5 py-4">
         <h2 className="text-[22px] font-semibold tracking-[-0.02em] text-text-primary">Studio</h2>
-        <button type="button" className="rounded-full p-2 text-text-tertiary transition hover:bg-surface-elevated hover:text-text-primary" title="Studio">
+        <button type="button" onClick={() => setIsCollapsed(true)} className="rounded-full p-2 text-text-tertiary transition hover:bg-surface-elevated hover:text-text-primary" title="Studio">
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>
