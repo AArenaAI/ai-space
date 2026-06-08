@@ -1,7 +1,7 @@
 "use client";
 
-import { CSSProperties, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
-import { BarChart3, Brain, CheckCircle2, ChevronLeft, ChevronRight, ChevronsRight, Copy, Download, ExternalLink, FileQuestion, FileText, Layers3, Loader2, Map as MapIcon, Maximize2, MoreHorizontal, Pencil, Presentation, RefreshCw, Sparkles, Table2, Trash2, X, XCircle, ZoomIn, ZoomOut } from "lucide-react";
+import { CSSProperties, useEffect, useMemo, useRef, useState, type ComponentType, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
+import { BarChart3, CheckCircle2, ChevronLeft, ChevronRight, ChevronsRight, Copy, Download, ExternalLink, FileQuestion, FileText, Layers3, Loader2, Map as MapIcon, Maximize2, MoreHorizontal, Pencil, Presentation, RefreshCw, Sparkles, Trash2, X, XCircle, ZoomIn, ZoomOut } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -130,25 +130,74 @@ type NotebookStudioPanelProps = {
   onExplainFlashcard?: (card: NotebookStudioFlashcard) => void;
 };
 
-const actionIconMap: Record<NotebookStudioActionId, typeof Table2> = {
-  table: Table2,
+type StudioIconProps = { className?: string };
+
+type StudioIcon = ComponentType<StudioIconProps>;
+
+function StudioReportIcon({ className }: StudioIconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M6.5 4.5h8.2L18 7.8v11.7H6.5z" />
+      <path d="M14.5 4.7v3.5h3.4" />
+      <path d="M9 11h5.5" />
+      <path d="M9 14h6" />
+      <path d="M9 17h3.5" />
+      <path d="M19.7 3.3l.55 1.25 1.25.55-1.25.55-.55 1.25-.55-1.25-1.25-.55 1.25-.55z" />
+    </svg>
+  );
+}
+
+function StudioFlashcardIcon({ className }: StudioIconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M6.5 5.5h11A2.5 2.5 0 0 1 20 8v8a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16V8a2.5 2.5 0 0 1 2.5-2.5z" />
+      <path d="M7.3 5.7v12.6" />
+      <path d="m12 9.2.9 1.8 2 .3-1.45 1.4.35 2-1.8-.95-1.8.95.35-2L9.1 11.3l2-.3z" />
+    </svg>
+  );
+}
+
+function StudioTableIcon({ className }: StudioIconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <rect x="4" y="5" width="16" height="14" rx="2" />
+      <path d="M4 10h16" />
+      <path d="M4 14.5h16" />
+      <path d="M9 5v14" />
+      <path d="M15 10v9" />
+    </svg>
+  );
+}
+
+const actionIconMap: Record<NotebookStudioActionId, StudioIcon> = {
+  table: StudioTableIcon,
   summary: FileText,
   faq: FileQuestion,
   briefing: BarChart3,
   mindmap: MapIcon,
-  flashcards: Brain,
-  report: FileText,
+  flashcards: StudioFlashcardIcon,
+  report: StudioReportIcon,
   slides: Presentation,
 };
 
-const artifactIconMap: Record<NotebookStudioArtifact["type"], typeof Table2> = {
-  table: Table2,
+const artifactIconMap: Record<NotebookStudioArtifact["type"], StudioIcon> = {
+  table: StudioTableIcon,
   summary: FileText,
   faq: FileQuestion,
   briefing: BarChart3,
   mindmap: MapIcon,
-  flashcards: Brain,
-  report: FileText,
+  flashcards: StudioFlashcardIcon,
+  report: StudioReportIcon,
+};
+
+const artifactIconTone: Record<NotebookStudioArtifact["type"], string> = {
+  table: "text-blue-900 dark:text-blue-300",
+  summary: "text-slate-700 dark:text-slate-300",
+  faq: "text-indigo-700 dark:text-indigo-300",
+  briefing: "text-amber-700 dark:text-amber-300",
+  mindmap: "text-emerald-700 dark:text-emerald-300",
+  flashcards: "text-red-900 dark:text-rose-300",
+  report: "text-[#8a7a35] dark:text-yellow-300",
 };
 
 function formatTime(value: string) {
@@ -880,11 +929,11 @@ export function NotebookStudioPanel({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex items-center justify-between px-5 py-3">
-          <h3 className="text-sm font-semibold text-text-primary">{t("notebook.studio.outputs")}</h3>
+        <div className="flex items-center justify-between px-5 pb-2.5 pt-4">
+          <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-text-primary">{t("notebook.studio.outputs")}</h3>
           <MoreHorizontal className="h-4 w-4 text-text-tertiary" />
         </div>
-        {(generatingType === "table" || generatingType === "mindmap" || generatingType === "flashcards" || generatingType === "report") && <div className="px-4 pb-2"><GeneratingStudioCard type={generatingType} sourceCount={selectedSourceCount} t={t} /></div>}
+        {(generatingType === "table" || generatingType === "mindmap" || generatingType === "flashcards" || generatingType === "report") && <div className="px-4 pb-3"><GeneratingStudioCard type={generatingType} sourceCount={selectedSourceCount} t={t} /></div>}
         {artifacts.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-elevated text-text-tertiary"><Layers3 className="h-5 w-5" /></div>
@@ -892,17 +941,23 @@ export function NotebookStudioPanel({
             <p className="mt-2 text-xs leading-5 text-text-tertiary">{t("notebook.studio.emptyDesc")}</p>
           </div>
         ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
-            <div className="space-y-1">
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5">
+            <div className="space-y-1.5">
               {artifacts.map((artifact) => {
                 const Icon = artifactIconMap[artifact.type];
                 return (
-                  <div key={artifact.id} className="group relative rounded-2xl transition hover:bg-surface-elevated">
-                    <button type="button" onClick={() => onOpenArtifact(artifact.id)} className="flex w-full items-center gap-3 px-3 py-2.5 pr-14 text-left">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600"><Icon className="h-4 w-4" /></div>
+                  <div key={artifact.id} className="group relative rounded-[18px] transition hover:bg-surface-elevated/70">
+                    <button type="button" onClick={() => onOpenArtifact(artifact.id)} className="flex w-full items-center gap-3.5 px-2.5 py-3 pr-16 text-left">
+                      <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", artifactIconTone[artifact.type])}>
+                        <Icon className="h-[23px] w-[23px]" />
+                      </div>
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium text-text-primary">{artifact.title}</div>
-                        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-text-tertiary"><span className="truncate">{artifact.subtitle}</span><span>·</span><span className="shrink-0">{formatTime(artifact.createdAt)}</span></div>
+                        <div className="truncate text-[14px] font-semibold leading-5 tracking-[-0.01em] text-text-primary">{artifact.title}</div>
+                        <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px] leading-4 text-text-tertiary">
+                          <span className="truncate">{artifact.subtitle}</span>
+                          <span className="text-text-tertiary/70">·</span>
+                          <span className="shrink-0">{formatTime(artifact.createdAt)}</span>
+                        </div>
                       </div>
                     </button>
                     <button type="button" onClick={() => setViewerArtifactId(artifact.id)} className="absolute right-9 top-1/2 z-10 -translate-y-1/2 rounded-full p-1.5 text-text-tertiary opacity-0 transition hover:bg-surface-card hover:text-text-primary group-hover:opacity-100" title={t("notebook.studio.expandViewer")}>
