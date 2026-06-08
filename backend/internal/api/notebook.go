@@ -444,6 +444,23 @@ func (h *NotebookHandler) CreateArtifact(c *gin.Context) {
 	c.JSON(http.StatusOK, notebookArtifactResponse(artifact))
 }
 
+func (h *NotebookHandler) SuggestReportFormats(c *gin.Context) {
+	nb, ok := h.loadNotebook(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		FileIDs  []uint `json:"file_ids"`
+		Language string `json:"language"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil && err != io.EOF {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	files := h.loadNotebookGenerationFiles(nb.ID, getUserID(c))
+	c.JSON(http.StatusOK, gin.H{"formats": suggestNotebookReportFormats(files, req.FileIDs, req.Language)})
+}
+
 func (h *NotebookHandler) GenerateArtifact(c *gin.Context) {
 	nb, ok := h.loadNotebook(c)
 	if !ok {

@@ -105,6 +105,69 @@ func TestBuildGeneratedNotebookArtifactDraftDeduplicatesDataTableRows(t *testing
 	}
 }
 
+func TestSuggestNotebookReportFormatsUsesSourceContent(t *testing.T) {
+	files := []models.File{
+		{ID: 1, Filename: "AI Space 白皮书.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "企业级多模型平台、Go 后端、RAG、白标部署、Agent 路线图", Content: "AI Space 是企业级多模型 AI 聚合平台。包含白标部署、Go/Gin 后端、Next.js 前端、RAG 流水线、积分计费、Workspace Agent、专业化 Agent、模型蒸馏路线图。"},
+	}
+
+	suggestions := suggestNotebookReportFormats(files, nil, "zh-CN")
+	if len(suggestions) != 4 {
+		t.Fatalf("expected four suggested formats, got %d: %+v", len(suggestions), suggestions)
+	}
+	joined := ""
+	for _, suggestion := range suggestions {
+		joined += suggestion.Title + " " + suggestion.Description + "\n"
+	}
+	if !containsAll(joined, []string{"技术", "方案", "路线", "白标"}) {
+		t.Fatalf("suggested formats should be derived from document themes, got %s", joined)
+	}
+}
+
+func TestBuildGeneratedNotebookArtifactDraftBuildsBriefingReport(t *testing.T) {
+	files := []models.File{
+		{ID: 1, Filename: "AI Space 报告.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "企业级多模型 AI 聚合平台", Content: "## Product Core Positioning\nAI Space 是企业级多模型 AI 聚合平台，支持 OpenAI、Anthropic、Google、DeepSeek 和 Moonshot。\n## Mature Feature Set\nMulti-Model Chat 支持流式对话、模型切换和历史管理。Document RAG 支持 PDF/Office 上传、解析、Embedding 和向量检索。\n## Technical Architecture\nFrontend 使用 Next.js 14、TailwindCSS 和 shadcn。Backend 使用 Go/Gin、GORM，支持 SQLite 和 PostgreSQL。\n## Strategic Roadmap\n路线图包括 Workspaces、Workspace Agents、Professional Agents 和 Model Distillation。"},
+	}
+
+	draft, err := buildGeneratedNotebookArtifactDraft("report:briefing-document", "AI Space", files, nil, "en")
+	if err != nil {
+		t.Fatalf("briefing report generation should succeed: %v", err)
+	}
+	if draft.Type != "report" {
+		t.Fatalf("draft.Type = %q, want report", draft.Type)
+	}
+	if !strings.Contains(draft.Title, "Report") && !strings.Contains(draft.Title, "报告") {
+		t.Fatalf("report title should be report-specific, got %q", draft.Title)
+	}
+	var content struct {
+		FormatID         string `json:"format_id"`
+		FormatTitle      string `json:"format_title"`
+		ExecutiveSummary string `json:"executive_summary"`
+		Sections         []struct {
+			Number  string `json:"number"`
+			Heading string `json:"heading"`
+			Body    string `json:"body"`
+		} `json:"sections"`
+		Tables []struct {
+			Title   string     `json:"title"`
+			Headers []string   `json:"headers"`
+			Rows    [][]string `json:"rows"`
+		} `json:"tables"`
+	}
+	if err := json.Unmarshal(draft.Content, &content); err != nil {
+		t.Fatalf("report content should be valid JSON: %v", err)
+	}
+	if content.FormatID != "briefing-document" {
+		t.Fatalf("format_id = %q, want briefing-document", content.FormatID)
+	}
+	if strings.TrimSpace(content.ExecutiveSummary) == "" || len(content.Sections) < 3 || len(content.Tables) == 0 {
+		t.Fatalf("report should include executive summary, multiple sections and table, got %+v", content)
+	}
+	encoded := string(draft.Content)
+	if !containsAll(encoded, []string{"Executive", "Multi-Model", "RAG", "Next.js", "Go", "Model Distillation"}) {
+		t.Fatalf("report should preserve source facts in document structure, got %s", encoded)
+	}
+}
+
 func TestBuildGeneratedNotebookArtifactDraftSupportsMindmapAndRejectsSlides(t *testing.T) {
 	readyFiles := []models.File{
 		{ID: 1, Filename: "产品方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "产品定位", Content: "## 产品定位\nAI Space 是企业级多模型 AI 聚合平台，支持品牌白标和统一模型调用。\n## 已落地功能\n多模型聊天、图片生成、图片编辑、PPT 生成、文件 RAG 解析、积分计费。\n## 核心优势\n统一接入 OpenAI、Claude、Gemini、DeepSeek，支持企业定制。"},

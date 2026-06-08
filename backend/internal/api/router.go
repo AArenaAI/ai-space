@@ -215,6 +215,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		authorized.GET("/notebooks/:id/artifacts", notebookHandler.ListArtifacts)
 		authorized.POST("/notebooks/:id/artifacts", notebookHandler.CreateArtifact)
 		authorized.POST("/notebooks/:id/artifacts/generate", notebookHandler.GenerateArtifact)
+		authorized.POST("/notebooks/:id/report-formats", notebookHandler.SuggestReportFormats)
 		authorized.PUT("/notebooks/:id/artifacts/:artifact_id", notebookHandler.UpdateArtifact)
 		authorized.DELETE("/notebooks/:id/artifacts/:artifact_id", notebookHandler.DeleteArtifact)
 

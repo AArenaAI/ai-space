@@ -70,6 +70,34 @@ type notebookStudioFlashcard struct {
 	Source string `json:"source"`
 }
 
+type notebookReportFormatSuggestion struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
+type notebookStudioReportSection struct {
+	Number      string                        `json:"number"`
+	Heading     string                        `json:"heading"`
+	Body        string                        `json:"body,omitempty"`
+	Subsections []notebookStudioReportSection `json:"subsections,omitempty"`
+	Bullets     []string                      `json:"bullets,omitempty"`
+}
+
+type notebookStudioReportTable struct {
+	Title   string     `json:"title"`
+	Headers []string   `json:"headers"`
+	Rows    [][]string `json:"rows"`
+}
+
+type notebookStudioReportContent struct {
+	FormatID         string                        `json:"format_id"`
+	FormatTitle      string                        `json:"format_title"`
+	ExecutiveSummary string                        `json:"executive_summary"`
+	Sections         []notebookStudioReportSection `json:"sections"`
+	Tables           []notebookStudioReportTable   `json:"tables,omitempty"`
+}
+
 func buildGeneratedNotebookArtifactDraft(generationType string, notebookTitle string, files []models.File, selectedFileIDs []uint, language string) (generatedNotebookArtifactDraft, error) {
 	generationType = strings.TrimSpace(generationType)
 	artifactType, ok := notebookArtifactTypeForGeneration(generationType)
@@ -88,13 +116,15 @@ func buildGeneratedNotebookArtifactDraft(generationType string, notebookTitle st
 	}
 
 	var payload any
-	switch generationType {
-	case "table":
+	switch artifactType {
+	case "data-table":
 		payload = map[string]any{"rows": buildNotebookGeneratedTableRows(sources)}
 	case "mindmap":
 		payload = buildNotebookGeneratedMindmap(notebookTitle, sources)
 	case "flashcards":
 		payload = map[string]any{"cards": buildNotebookGeneratedFlashcards(sources, language)}
+	case "report":
+		payload = buildNotebookGeneratedReport(reportGenerationFormatID(generationType), notebookTitle, sources, language)
 	case "summary", "faq", "briefing":
 		payload = map[string]any{"sections": buildNotebookGeneratedTextSections(generationType, notebookTitle, sources, language)}
 	}
@@ -179,6 +209,10 @@ func buildNotebookArtifactAIMessages(generationType string, notebookTitle string
 		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For mindmap content must be {\"nodes\":[{\"id\":string,\"label\":string,\"summary\":string,\"source\":string}],\"edges\":[{\"from\":string,\"to\":string,\"label\":string}]}. You MUST first read the whole provided source text for each file (it may be a long PDF extract), reconstruct the document outline, then draw a NotebookLM-style product/knowledge mind map, not a sentence list. Required structure: exactly one root node with id=root; 5-8 first-level branches that are clear sections/modules; each important branch has 2-5 second-level child nodes; add third-level nodes only when the source has concrete details. Good first-level branch examples for product documents: 产品定位, 已落地功能, 核心优势, 技术架构, 业务场景, 规划路线, 竞争壁垒, 风险与缺口. Node labels must be clean Chinese phrases of 2-18 characters when possible; never use broken OCR fragments, truncated words, ellipses, file names, raw sentences, parse/index status, or meaningless snippets. Summaries may contain one concise sentence. Use stable ids like root, branch-1, branch-1-1. Cite sources using bracket numbers such as [1]. If the source contains an existing feature table or product architecture, preserve that sectional structure.\n")
 	} else if generationType == "flashcards" {
 		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For flashcards content must be {\"cards\":[{\"front\":string,\"back\":string,\"source\":string}]}. Create compact study flashcards from the source material. Each card front is a clean self-test question about one concrete concept, number, capability, process, comparison, role, architecture point, pricing/detail, or named fact. Each back is a concise answer in 1 short sentence, preferably under 80 Chinese characters, grounded in the source but NOT copied as a long quote. Prefer 12-30 cards when enough source content exists. Avoid generic questions, duplicate cards, file names, parse status, unsupported facts, source citation labels, and heading numbers like 1, 1.3, 一、. Leave source empty; do not put [1] or 【1】 in any card field.\n")
+	} else if strings.HasPrefix(generationType, "report") {
+		formatID := reportGenerationFormatID(generationType)
+		fmt.Fprintf(&b, "Report format id: %s\n", formatID)
+		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For report content must be {\"format_id\":string,\"format_title\":string,\"executive_summary\":string,\"sections\":[{\"number\":string,\"heading\":string,\"body\":string,\"bullets\":[string],\"subsections\":[...]}],\"tables\":[{\"title\":string,\"headers\":[string],\"rows\":[[string]]}]}. Create a polished document-style report from the uploaded sources. If format id is briefing-document, follow executive-brief style: strong title, Executive Summary, dashed/horizontal section divider, numbered sections (1, 1.1, 2...), concise paragraphs, at least one minimalist table, and bullet lists when useful. Preserve concrete facts, model names, architecture details, roadmap stages, comparisons, and citations like [1]. Do not output a generic summary or file-status report.\n")
 	} else {
 		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For summary/faq/briefing content must be {\"sections\":[{\"heading\":string,\"body\":string,\"bullets\":[string]}]}. For mindmap content must be {\"nodes\":[{\"id\":string,\"label\":string,\"summary\":string,\"source\":string}],\"edges\":[{\"from\":string,\"to\":string,\"label\":string}]}. Cite sources using bracket numbers such as [1].")
 	}
@@ -309,7 +343,7 @@ func parseAINotebookArtifactResponse(body []byte, fallback generatedNotebookArti
 }
 
 func notebookArtifactAIModel(generationType string) string {
-	if generationType == "table" || generationType == "mindmap" {
+	if generationType == "table" || generationType == "mindmap" || strings.HasPrefix(generationType, "report") {
 		return "gpt-5.5"
 	}
 	return "gpt-5.4-mini"
@@ -434,6 +468,9 @@ func hasNotebookMindmapHeadingNumberPrefix(label string) bool {
 }
 
 func notebookArtifactTypeForGeneration(generationType string) (string, bool) {
+	if strings.HasPrefix(generationType, "report") {
+		return "report", true
+	}
 	switch generationType {
 	case "table":
 		return "data-table", true
@@ -442,6 +479,16 @@ func notebookArtifactTypeForGeneration(generationType string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func reportGenerationFormatID(generationType string) string {
+	if strings.HasPrefix(generationType, "report:") {
+		formatID := strings.TrimSpace(strings.TrimPrefix(generationType, "report:"))
+		if formatID != "" {
+			return formatID
+		}
+	}
+	return "briefing-document"
 }
 
 func selectNotebookGenerationSources(files []models.File, selectedFileIDs []uint, generationType string) []notebookGenerationSource {
@@ -501,6 +548,107 @@ func isNotebookGenerationFileReady(file models.File) bool {
 		return false
 	}
 	return strings.TrimSpace(file.Content) != "" || strings.TrimSpace(file.Summary) != ""
+}
+
+func suggestNotebookReportFormats(files []models.File, selectedFileIDs []uint, language string) []notebookReportFormatSuggestion {
+	sources := selectNotebookGenerationSources(files, selectedFileIDs, "report")
+	combined := ""
+	for _, source := range sources {
+		combined += " " + source.File.Filename + " " + source.Summary + " " + source.Excerpt
+	}
+	combinedLower := strings.ToLower(combined)
+	isEN := strings.HasPrefix(strings.ToLower(strings.TrimSpace(language)), "en")
+	suggestions := []notebookReportFormatSuggestion{
+		{ID: "proposal", Title: "白标建设方案", Description: "面向企业客户的私有化部署、白标定制和落地推进方案。"},
+		{ID: "technical-whitepaper", Title: "技术白皮书", Description: "深入解析系统架构、RAG 流水线、模型接入和工程实现。"},
+		{ID: "concept-manual", Title: "概念解析手册", Description: "把关键术语、模块能力和适用场景解释给初学者。"},
+		{ID: "roadmap", Title: "功能演进路线图", Description: "梳理从当前功能到 Agent 生态与模型蒸馏的阶段演进。"},
+	}
+	if isEN {
+		suggestions = []notebookReportFormatSuggestion{
+			{ID: "proposal", Title: "Implementation Proposal", Description: "Enterprise deployment, white-label customization, and rollout plan."},
+			{ID: "technical-whitepaper", Title: "Technical Whitepaper", Description: "Architecture, RAG pipeline, model abstraction, and backend implementation details."},
+			{ID: "concept-manual", Title: "Concept Explainer", Description: "Plain-language glossary and explanations for key AI platform concepts."},
+			{ID: "roadmap", Title: "Capability Roadmap", Description: "Evolution from current features to workspace agents and model distillation."},
+		}
+	}
+	if strings.Contains(combinedLower, "white-label") || strings.Contains(combined, "白标") || strings.Contains(combined, "私有化") {
+		suggestions[0].Description = fallbackText(ifEnglish(isEN, "A client-facing proposal for private deployment and brand customization.", "面向企业客户的 AI 平台私有化部署及品牌定制化商业提案。"), suggestions[0].Description)
+	}
+	if strings.Contains(combinedLower, "go") || strings.Contains(combinedLower, "rag") || strings.Contains(combined, "架构") {
+		suggestions[1].Description = fallbackText(ifEnglish(isEN, "Deep dive into Go backend, RAG pipeline, provider abstraction, and deployment architecture.", "深入解析 Go 后端、RAG 流水线、模型抽象和部署架构的技术实现。"), suggestions[1].Description)
+	}
+	if strings.Contains(combinedLower, "agent") || strings.Contains(combined, "路线") || strings.Contains(combined, "蒸馏") {
+		suggestions[3].Description = fallbackText(ifEnglish(isEN, "A staged roadmap from conversation tools to workspace agents and specialized distillation.", "梳理从对话工具到 Workspace Agent、专业化智能体和模型蒸馏的阶段演进。"), suggestions[3].Description)
+	}
+	return suggestions
+}
+
+func ifEnglish(isEN bool, en string, zh string) string {
+	if isEN {
+		return en
+	}
+	return zh
+}
+
+func buildNotebookGeneratedReport(formatID string, notebookTitle string, sources []notebookGenerationSource, language string) notebookStudioReportContent {
+	isEN := strings.HasPrefix(strings.ToLower(strings.TrimSpace(language)), "en")
+	formatTitle := map[string]string{
+		"custom":               ifEnglish(isEN, "Custom Format", "自制格式"),
+		"briefing-document":    ifEnglish(isEN, "Briefing Document", "简报文档"),
+		"study-guide":          ifEnglish(isEN, "Study Guide", "学习指南"),
+		"blog-post":            ifEnglish(isEN, "Blog Post", "博文"),
+		"proposal":             ifEnglish(isEN, "Implementation Proposal", "建设方案"),
+		"technical-whitepaper": ifEnglish(isEN, "Technical Whitepaper", "技术白皮书"),
+		"concept-manual":       ifEnglish(isEN, "Concept Explainer", "概念解析手册"),
+		"roadmap":              ifEnglish(isEN, "Capability Roadmap", "功能演进路线图"),
+	}[formatID]
+	if formatTitle == "" {
+		formatTitle = ifEnglish(isEN, "Briefing Document", "简报文档")
+		formatID = "briefing-document"
+	}
+	executive := ifEnglish(isEN,
+		fmt.Sprintf("Executive Summary: %s consolidates the uploaded source material into an executive briefing, highlighting the core positioning, implemented capabilities, technical architecture, strategic roadmap, and business value.", fallbackText(notebookTitle, "This notebook")),
+		fmt.Sprintf("执行摘要：%s 基于上传资料整理为一份执行简报，概述核心定位、已落地能力、技术架构、战略路线和业务价值。", fallbackText(notebookTitle, "该笔记本")),
+	)
+	sections := []notebookStudioReportSection{
+		{Number: "1", Heading: ifEnglish(isEN, "Product Core Positioning and Key Features", "产品核心定位与关键功能"), Body: reportSourceBody(sources, 0, isEN)},
+		{Number: "1.1", Heading: ifEnglish(isEN, "Mature Feature Set", "成熟功能集"), Body: reportSourceBody(sources, 1, isEN)},
+		{Number: "2", Heading: ifEnglish(isEN, "Technical Architecture and Differentiation", "技术架构与差异化优势"), Body: reportSourceBody(sources, 2, isEN)},
+		{Number: "3", Heading: ifEnglish(isEN, "Strategic Roadmap and Market Positioning", "战略路线与市场定位"), Body: reportSourceBody(sources, 3, isEN)},
+	}
+	rows := make([][]string, 0, len(sources)+3)
+	for _, source := range sources {
+		rows = append(rows, []string{notebookTableTopic(source), truncateNotebookRunes(fallbackText(source.Summary, source.Excerpt), 180, ""), fmt.Sprintf("[%d]", source.Index)})
+	}
+	if len(rows) == 0 {
+		rows = append(rows, []string{fallbackText(notebookTitle, "Notebook"), executive, ""})
+	}
+	return notebookStudioReportContent{
+		FormatID:         formatID,
+		FormatTitle:      formatTitle,
+		ExecutiveSummary: executive,
+		Sections:         sections,
+		Tables: []notebookStudioReportTable{{
+			Title:   ifEnglish(isEN, "Key Modules and Capabilities", "关键模块与能力"),
+			Headers: []string{ifEnglish(isEN, "Module", "模块"), ifEnglish(isEN, "Capabilities", "能力"), ifEnglish(isEN, "Source", "来源")},
+			Rows:    rows,
+		}},
+	}
+}
+
+func reportSourceBody(sources []notebookGenerationSource, offset int, isEN bool) string {
+	if len(sources) == 0 {
+		return ""
+	}
+	source := sources[offset%len(sources)]
+	text := fallbackText(source.Excerpt, source.Summary)
+	text = strings.ReplaceAll(text, "\n", " ")
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	return truncateNotebookRunes(text, 520, "") + fmt.Sprintf(" [%d]", source.Index)
 }
 
 func buildNotebookGeneratedTableRows(sources []notebookGenerationSource) []notebookStudioTableRow {
@@ -1232,7 +1380,12 @@ func notebookGeneratedArtifactTitle(generationType string, notebookTitle string)
 		return fmt.Sprintf("%s · 思维导图", notebookTitle)
 	case "flashcards":
 		return fmt.Sprintf("%s · 闪卡", notebookTitle)
+	case "report", "report:briefing-document", "report:custom", "report:study-guide", "report:blog-post":
+		return fmt.Sprintf("%s · Report", notebookTitle)
 	default:
+		if strings.HasPrefix(generationType, "report:") {
+			return fmt.Sprintf("%s · Report", notebookTitle)
+		}
 		return fmt.Sprintf("%s · 摘要", notebookTitle)
 	}
 }

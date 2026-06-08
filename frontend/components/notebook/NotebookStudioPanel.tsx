@@ -5,7 +5,7 @@ import { BarChart3, Brain, CheckCircle2, ChevronLeft, ChevronRight, ChevronsRigh
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
-export type NotebookStudioActionId = "table" | "summary" | "faq" | "briefing" | "mindmap" | "flashcards" | "slides";
+export type NotebookStudioActionId = "table" | "summary" | "faq" | "briefing" | "mindmap" | "flashcards" | "report" | "slides";
 
 export type NotebookStudioTableRow = {
   module: string;
@@ -47,6 +47,20 @@ export type NotebookStudioFlashcard = {
   source?: string;
 };
 
+export type NotebookStudioReportSection = {
+  number: string;
+  heading: string;
+  body?: string;
+  bullets?: string[];
+  subsections?: NotebookStudioReportSection[];
+};
+
+export type NotebookStudioReportTable = {
+  title: string;
+  headers: string[];
+  rows: string[][];
+};
+
 export type NotebookStudioArtifact =
   | {
       id: string;
@@ -84,6 +98,19 @@ export type NotebookStudioArtifact =
       createdAt: string;
       sourceCount: number;
       cards: NotebookStudioFlashcard[];
+    }
+  | {
+      id: string;
+      type: "report";
+      title: string;
+      subtitle: string;
+      createdAt: string;
+      sourceCount: number;
+      formatId: string;
+      formatTitle: string;
+      executiveSummary: string;
+      sections: NotebookStudioReportSection[];
+      tables: NotebookStudioReportTable[];
     };
 
 type NotebookStudioPanelProps = {
@@ -110,6 +137,7 @@ const actionIconMap: Record<NotebookStudioActionId, typeof Table2> = {
   briefing: BarChart3,
   mindmap: MapIcon,
   flashcards: Brain,
+  report: FileText,
   slides: Presentation,
 };
 
@@ -120,6 +148,7 @@ const artifactIconMap: Record<NotebookStudioArtifact["type"], typeof Table2> = {
   briefing: BarChart3,
   mindmap: MapIcon,
   flashcards: Brain,
+  report: FileText,
 };
 
 function formatTime(value: string) {
@@ -209,6 +238,73 @@ function renderTableArtifact(artifact: Extract<NotebookStudioArtifact, { type: "
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function renderReportArtifact(artifact: Extract<NotebookStudioArtifact, { type: "report" }>, expanded = false) {
+  return (
+    <div className={cn("mx-auto w-full", expanded ? "max-w-[920px] py-6" : "max-w-[760px] p-4")}>
+      <article className="rounded-[28px] border border-slate-200 bg-white px-8 py-9 text-slate-900 shadow-[0_24px_70px_rgba(15,23,42,0.10)] dark:border-surface-border dark:bg-surface-card dark:text-text-primary">
+        <div className="mb-8 text-center">
+          <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400 dark:text-text-tertiary">{artifact.formatTitle || "Report"}</div>
+          <h1 className="text-balance text-3xl font-bold tracking-[-0.035em] text-slate-950 dark:text-text-primary">{artifact.title}</h1>
+          {artifact.subtitle && <p className="mt-3 text-sm text-slate-500 dark:text-text-secondary">{artifact.subtitle}</p>}
+        </div>
+        <section className="mb-7">
+          <h2 className="mb-3 text-[15px] font-bold text-slate-950 dark:text-text-primary">Executive Summary</h2>
+          <p className="text-[14px] leading-7 text-slate-700 dark:text-text-secondary">{artifact.executiveSummary}</p>
+        </section>
+        <div className="my-7 border-t border-dashed border-slate-300 dark:border-surface-border" />
+        <div className="space-y-7">
+          {artifact.sections.map((section, index) => (
+            <section key={`${section.number}-${section.heading}-${index}`}>
+              <h2 className="mb-2 text-[18px] font-bold tracking-[-0.015em] text-slate-950 dark:text-text-primary">
+                {section.number ? `${section.number}. ` : ""}{section.heading}
+              </h2>
+              {section.body && <p className="text-[14px] leading-7 text-slate-700 dark:text-text-secondary">{section.body}</p>}
+              {section.bullets?.length ? (
+                <ul className="mt-3 list-disc space-y-1.5 pl-5 text-[14px] leading-7 text-slate-700 dark:text-text-secondary">
+                  {section.bullets.map((bullet, bulletIndex) => <li key={bulletIndex}>{bullet}</li>)}
+                </ul>
+              ) : null}
+              {section.subsections?.length ? (
+                <div className="mt-4 space-y-4">
+                  {section.subsections.map((subsection, subIndex) => (
+                    <div key={`${subsection.number}-${subsection.heading}-${subIndex}`}>
+                      <h3 className="mb-1.5 text-[15px] font-bold text-slate-900 dark:text-text-primary">{subsection.number ? `${subsection.number}. ` : ""}{subsection.heading}</h3>
+                      {subsection.body && <p className="text-[14px] leading-7 text-slate-700 dark:text-text-secondary">{subsection.body}</p>}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </section>
+          ))}
+        </div>
+        {artifact.tables.length ? (
+          <div className="mt-8 space-y-6">
+            {artifact.tables.map((table, tableIndex) => (
+              <section key={`${table.title}-${tableIndex}`}>
+                <h2 className="mb-3 text-[17px] font-bold tracking-[-0.015em] text-slate-950 dark:text-text-primary">{table.title}</h2>
+                <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-surface-border">
+                  <table className="min-w-full border-collapse text-left text-[13px]">
+                    <thead className="bg-slate-50 text-slate-900 dark:bg-surface-elevated dark:text-text-primary">
+                      <tr>{table.headers.map((header) => <th key={header} className="border-b border-slate-200 px-4 py-3 font-semibold dark:border-surface-border">{header}</th>)}</tr>
+                    </thead>
+                    <tbody>
+                      {table.rows.map((row, rowIndex) => (
+                        <tr key={rowIndex} className="align-top">
+                          {row.map((cell, cellIndex) => <td key={cellIndex} className="border-b border-slate-100 px-4 py-3 leading-6 text-slate-700 last:border-b-0 dark:border-surface-border dark:text-text-secondary">{cell}</td>)}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            ))}
+          </div>
+        ) : null}
+      </article>
     </div>
   );
 }
@@ -599,6 +695,8 @@ function renderActiveArtifact(artifact: NotebookStudioArtifact, t: (key: string,
       return <MindmapArtifactView artifact={artifact} onDownload={onDownloadArtifact} />;
     case "flashcards":
       return <FlashcardsArtifactView artifact={artifact} t={t} onExplain={onExplainFlashcard} />;
+    case "report":
+      return renderReportArtifact(artifact, expanded);
     case "summary":
     case "faq":
     case "briefing":
@@ -607,7 +705,7 @@ function renderActiveArtifact(artifact: NotebookStudioArtifact, t: (key: string,
 }
 
 function GeneratingStudioCard({ type, sourceCount, t }: { type: NotebookStudioActionId; sourceCount: number; t: (key: string, params?: Record<string, string>) => string }) {
-  const titleKey = type === "mindmap" ? "notebook.studio.generatingMindmap" : type === "flashcards" ? "notebook.studio.generatingFlashcards" : "notebook.studio.generatingTable";
+  const titleKey = type === "mindmap" ? "notebook.studio.generatingMindmap" : type === "flashcards" ? "notebook.studio.generatingFlashcards" : type === "report" ? "notebook.studio.generatingReport" : "notebook.studio.generatingTable";
   return (
     <div className="mb-3 rounded-2xl border border-surface-border bg-surface-card px-3 py-3 shadow-sm">
       <div className="flex items-center gap-3">
@@ -699,6 +797,7 @@ export function NotebookStudioPanel({
     { id: "briefing", title: t("notebook.studio.briefing"), desc: t("notebook.studio.briefingDesc"), accent: "from-blue-500/15 to-sky-500/10 text-blue-500" },
     { id: "mindmap", title: t("notebook.studio.mindmap"), desc: t("notebook.studio.mindmapDesc"), accent: "from-violet-500/15 to-fuchsia-500/10 text-violet-500" },
     { id: "flashcards", title: t("notebook.studio.flashcards"), desc: t("notebook.studio.flashcardsDesc"), accent: "from-pink-500/15 to-rose-500/10 text-pink-500" },
+    { id: "report", title: t("notebook.studio.report"), desc: t("notebook.studio.reportDesc"), accent: "from-slate-500/15 to-blue-500/10 text-slate-600 dark:text-slate-300" },
     { id: "slides", title: t("notebook.studio.slides"), desc: t("notebook.studio.slidesDesc"), accent: "from-rose-500/15 to-pink-500/10 text-rose-500" },
   ];
 
@@ -785,7 +884,7 @@ export function NotebookStudioPanel({
           <h3 className="text-sm font-semibold text-text-primary">{t("notebook.studio.outputs")}</h3>
           <MoreHorizontal className="h-4 w-4 text-text-tertiary" />
         </div>
-        {(generatingType === "table" || generatingType === "mindmap" || generatingType === "flashcards") && <div className="px-4 pb-2"><GeneratingStudioCard type={generatingType} sourceCount={selectedSourceCount} t={t} /></div>}
+        {(generatingType === "table" || generatingType === "mindmap" || generatingType === "flashcards" || generatingType === "report") && <div className="px-4 pb-2"><GeneratingStudioCard type={generatingType} sourceCount={selectedSourceCount} t={t} /></div>}
         {artifacts.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-elevated text-text-tertiary"><Layers3 className="h-5 w-5" /></div>

@@ -110,6 +110,30 @@ export async function createNotebookArtifact(input: {
   return parseNotebookResponse<NotebookArtifact>(response, "保存 Studio 输出失败");
 }
 
+export type NotebookReportFormatSuggestion = {
+  id: string;
+  title: string;
+  description: string;
+};
+
+export async function suggestNotebookReportFormats(input: {
+  notebookId: number;
+  file_ids?: number[];
+  language?: string;
+}): Promise<NotebookReportFormatSuggestion[]> {
+  const response = await fetch(`/api/notebooks/${input.notebookId}/report-formats`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      file_ids: input.file_ids || [],
+      language: input.language,
+    }),
+  });
+  const data = await parseNotebookResponse<{ formats?: NotebookReportFormatSuggestion[] } | NotebookReportFormatSuggestion[]>(response, "生成报告格式建议失败");
+  if (Array.isArray(data)) return data;
+  return data.formats || [];
+}
+
 export async function generateNotebookArtifact(input: {
   notebookId: number;
   type: string;

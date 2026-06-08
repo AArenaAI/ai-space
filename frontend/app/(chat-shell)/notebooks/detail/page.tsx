@@ -7,10 +7,10 @@ import { ArrowLeft, BookOpen, FileText, Globe, Loader2, Plus, Trash2, UploadClou
 import { toast } from "sonner";
 import ChatInterface from "@/components/chat/ChatInterface";
 import { NotebookSourcePreviewDrawer } from "@/components/notebook/NotebookSourcePreviewDrawer";
-import { NotebookStudioPanel, type NotebookStudioActionId, type NotebookStudioArtifact, type NotebookStudioFlashcard, type NotebookStudioMindmapEdge, type NotebookStudioMindmapNode, type NotebookStudioSource, type NotebookStudioTableRow, type NotebookStudioTextSection } from "@/components/notebook/NotebookStudioPanel";
+import { NotebookStudioPanel, type NotebookStudioActionId, type NotebookStudioArtifact, type NotebookStudioFlashcard, type NotebookStudioMindmapEdge, type NotebookStudioMindmapNode, type NotebookStudioReportSection, type NotebookStudioReportTable, type NotebookStudioSource, type NotebookStudioTableRow, type NotebookStudioTextSection } from "@/components/notebook/NotebookStudioPanel";
 import { NotebookUrlSourceDialog } from "@/components/notebook/NotebookUrlSourceDialog";
 import { MODELS } from "@/hooks/useChat";
-import { addNotebookFile, addNotebookUrlSource, deleteNotebookArtifact, fetchNotebook, fetchNotebookArtifacts, fetchNotebookFileContent, generateNotebookArtifact, removeNotebookFile, updateNotebook, updateNotebookArtifact } from "@/lib/notebookApi";
+import { addNotebookFile, addNotebookUrlSource, deleteNotebookArtifact, fetchNotebook, fetchNotebookArtifacts, fetchNotebookFileContent, generateNotebookArtifact, removeNotebookFile, suggestNotebookReportFormats, updateNotebook, updateNotebookArtifact, type NotebookReportFormatSuggestion } from "@/lib/notebookApi";
 import { normalizeNotebookError, showNotebookError, uploadNotebookSourceFile } from "@/lib/notebookErrors";
 import type { Notebook, NotebookArtifact as PersistedNotebookArtifact, NotebookFile, NotebookFileContent } from "@/lib/notebookTypes";
 import { useI18n, type LanguageCode } from "@/lib/i18n";
@@ -88,7 +88,7 @@ function normalizeFlashcardArtifactTitle(title: string) {
 }
 
 function toStudioArtifact(artifact: PersistedNotebookArtifact): NotebookStudioArtifact | null {
-  const content = artifact.content as { rows?: NotebookStudioTableRow[]; sections?: NotebookStudioTextSection[]; nodes?: NotebookStudioMindmapNode[]; edges?: NotebookStudioMindmapEdge[]; cards?: NotebookStudioFlashcard[] } | null;
+  const content = artifact.content as { rows?: NotebookStudioTableRow[]; sections?: NotebookStudioTextSection[] | NotebookStudioReportSection[]; nodes?: NotebookStudioMindmapNode[]; edges?: NotebookStudioMindmapEdge[]; cards?: NotebookStudioFlashcard[]; format_id?: string; format_title?: string; executive_summary?: string; tables?: NotebookStudioReportTable[] } | null;
   const base = {
     id: String(artifact.id),
     title: artifact.type === "flashcards" ? normalizeFlashcardArtifactTitle(artifact.title) : artifact.title,
@@ -112,6 +112,17 @@ function toStudioArtifact(artifact: PersistedNotebookArtifact): NotebookStudioAr
   }
   if (artifact.type === "flashcards") {
     return { ...base, type: "flashcards", cards: Array.isArray(content?.cards) ? content.cards : [] };
+  }
+  if (artifact.type === "report") {
+    return {
+      ...base,
+      type: "report",
+      formatId: typeof content?.format_id === "string" ? content.format_id : "briefing-document",
+      formatTitle: typeof content?.format_title === "string" ? content.format_title : "Report",
+      executiveSummary: typeof content?.executive_summary === "string" ? content.executive_summary : "",
+      sections: Array.isArray(content?.sections) ? content.sections as NotebookStudioReportSection[] : [],
+      tables: Array.isArray(content?.tables) ? content.tables : [],
+    };
   }
   return null;
 }
@@ -145,6 +156,27 @@ function artifactToMarkdown(artifact: NotebookStudioArtifact) {
         lines.push(`## ${index + 1}. ${card.front}`, "", card.back);
         if (card.source) lines.push("", card.source);
         lines.push("");
+      });
+      break;
+    case "report":
+      lines.push(`_Format: ${artifact.formatTitle}_`, "", "## Executive Summary", "", artifact.executiveSummary, "");
+      artifact.sections.forEach((section) => {
+        lines.push(`## ${section.number ? `${section.number}. ` : ""}${section.heading}`);
+        if (section.body) lines.push("", section.body);
+        if (section.bullets?.length) {
+          lines.push("");
+          section.bullets.forEach((bullet) => lines.push(`- ${bullet}`));
+        }
+        lines.push("");
+      });
+      artifact.tables.forEach((table) => {
+        lines.push(`## ${table.title}`, "");
+        if (table.headers.length) {
+          lines.push(`| ${table.headers.join(" | ")} |`);
+          lines.push(`| ${table.headers.map(() => "---").join(" | ")} |`);
+          table.rows.forEach((row) => lines.push(`| ${row.join(" | ")} |`));
+          lines.push("");
+        }
       });
       break;
     case "summary":
@@ -185,6 +217,100 @@ function downloadTextFile(filename: string, content: string, type: string) {
   URL.revokeObjectURL(url);
 }
 
+const FIXED_REPORT_FORMATS: NotebookReportFormatSuggestion[] = [
+  { id: "custom", title: "自制格式", description: "从空白结构开始，适合自由定义报告章节和语气。" },
+  { id: "briefing-document", title: "简报文档", description: "执行摘要、章节编号、表格和要点，适合正式汇报。" },
+  { id: "study-guide", title: "学习指南", description: "把资料转成便于复习的概念、问题和知识点结构。" },
+  { id: "blog-post", title: "博文", description: "改写成面向读者的文章、观点和传播型内容。" },
+];
+
+function ReportFormatDialog({
+  open,
+  selectedId,
+  suggestions,
+  loadingSuggestions,
+  generating,
+  onSelect,
+  onClose,
+  onGenerate,
+  t,
+}: {
+  open: boolean;
+  selectedId: string;
+  suggestions: NotebookReportFormatSuggestion[];
+  loadingSuggestions: boolean;
+  generating: boolean;
+  onSelect: (id: string) => void;
+  onClose: () => void;
+  onGenerate: () => void;
+  t: Translate;
+}) {
+  if (!open) return null;
+  const renderOption = (format: NotebookReportFormatSuggestion, recommended = false) => {
+    const selected = selectedId === format.id;
+    return (
+      <button
+        key={format.id}
+        type="button"
+        onClick={() => onSelect(format.id)}
+        className={cn(
+          "group flex w-full items-start gap-3 rounded-2xl border px-4 py-3 text-left transition",
+          selected ? "border-brand bg-brand-muted/40 shadow-sm" : "border-surface-border bg-surface-card hover:border-brand-border hover:bg-surface-elevated"
+        )}
+      >
+        <span className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border", selected ? "border-brand bg-brand text-white" : "border-surface-border text-transparent group-hover:border-brand")}>{selected && <Check className="h-3.5 w-3.5" />}</span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-2 text-sm font-semibold text-text-primary">
+            {format.title}
+            {recommended && <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-600">{t("notebook.studio.reportSuggestedBadge")}</span>}
+          </span>
+          <span className="mt-1 block text-xs leading-5 text-text-tertiary">{format.description}</span>
+        </span>
+      </button>
+    );
+  };
+  return (
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/45 p-5 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="flex max-h-[88vh] w-[min(980px,94vw)] flex-col overflow-hidden rounded-[32px] border border-surface-border bg-surface-card shadow-2xl">
+        <div className="flex items-start justify-between border-b border-surface-border px-6 py-5">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brand">{t("notebook.studio.reportDialogEyebrow")}</div>
+            <h3 className="mt-1 text-2xl font-bold tracking-[-0.03em] text-text-primary">{t("notebook.studio.reportDialogTitle")}</h3>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-text-secondary">{t("notebook.studio.reportDialogDesc")}</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-full p-2 text-text-tertiary transition hover:bg-surface-hover hover:text-text-primary">×</button>
+        </div>
+        <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto p-6 lg:grid-cols-[0.95fr_1.05fr]">
+          <section>
+            <h4 className="mb-3 text-sm font-semibold text-text-primary">{t("notebook.studio.reportFixedFormats")}</h4>
+            <div className="space-y-2.5">{FIXED_REPORT_FORMATS.map((format) => renderOption(format))}</div>
+          </section>
+          <section>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h4 className="text-sm font-semibold text-text-primary">{t("notebook.studio.reportSuggestedFormats")}</h4>
+              {loadingSuggestions && <span className="inline-flex items-center gap-1.5 text-xs text-text-tertiary"><Loader2 className="h-3.5 w-3.5 animate-spin" />{t("notebook.studio.reportAnalyzing")}</span>}
+            </div>
+            <div className="space-y-2.5">
+              {(suggestions.length ? suggestions : []).map((format) => renderOption(format, true))}
+              {!loadingSuggestions && suggestions.length === 0 && <div className="rounded-2xl border border-dashed border-surface-border bg-surface-elevated p-4 text-sm text-text-tertiary">{t("notebook.studio.reportSuggestionEmpty")}</div>}
+            </div>
+          </section>
+        </div>
+        <div className="flex items-center justify-between border-t border-surface-border px-6 py-4">
+          <div className="text-xs text-text-tertiary">{t("notebook.studio.reportSelectedHint")}</div>
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} className="rounded-full border border-surface-border px-4 py-2 text-sm font-semibold text-text-secondary transition hover:bg-surface-hover">{t("common.cancel")}</button>
+            <button type="button" onClick={onGenerate} disabled={generating} className="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white transition hover:bg-brand-hover disabled:opacity-70">
+              {generating && <Loader2 className="h-4 w-4 animate-spin" />}
+              {t("notebook.studio.createReport")}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NotebookDetailContent() {
   const { t, language } = useI18n();
   const searchParams = useSearchParams();
@@ -208,6 +334,10 @@ function NotebookDetailContent() {
   const [studioArtifacts, setStudioArtifacts] = useState<NotebookStudioArtifact[]>([]);
   const [activeStudioArtifactId, setActiveStudioArtifactId] = useState<string | null>(null);
   const [generatingStudioType, setGeneratingStudioType] = useState<NotebookStudioActionId | null>(null);
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const [selectedReportFormatId, setSelectedReportFormatId] = useState("briefing-document");
+  const [reportFormatSuggestions, setReportFormatSuggestions] = useState<NotebookReportFormatSuggestion[]>([]);
+  const [loadingReportSuggestions, setLoadingReportSuggestions] = useState(false);
   const [externalChatSendRequest, setExternalChatSendRequest] = useState<{ id: number; content: string } | null>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -561,17 +691,33 @@ function NotebookDetailContent() {
     ];
   };
 
-  const handleStudioGenerate = async (type: NotebookStudioActionId) => {
-    if (type === "slides") {
-      toast.info(t("notebook.studio.comingSoon"));
-      return;
-    }
+  const openReportDialog = async () => {
     if (!notebookId) return;
     if (selectedFileIds.length === 0) {
       toast.info(t("notebook.studio.selectSourcesFirst"));
       return;
     }
-    setGeneratingStudioType(type);
+    setReportDialogOpen(true);
+    setSelectedReportFormatId("briefing-document");
+    setLoadingReportSuggestions(true);
+    try {
+      const suggestions = await suggestNotebookReportFormats({
+        notebookId,
+        file_ids: selectedFileIds,
+        language: language as LanguageCode,
+      });
+      setReportFormatSuggestions(suggestions.slice(0, 4));
+    } catch (error) {
+      setReportFormatSuggestions([]);
+      showNotebookError(error, t("notebook.studio.reportSuggestionFailed"));
+    } finally {
+      setLoadingReportSuggestions(false);
+    }
+  };
+
+  const generateStudioArtifactByType = async (type: string, visualType: NotebookStudioActionId) => {
+    if (!notebookId) return;
+    setGeneratingStudioType(visualType);
     try {
       const saved = await generateNotebookArtifact({
         notebookId,
@@ -584,12 +730,34 @@ function NotebookDetailContent() {
         setStudioArtifacts((prev) => [artifact, ...prev.filter((item) => item.id !== artifact.id)]);
         setActiveStudioArtifactId(artifact.id);
       }
-      toast.success(type === "table" ? t("notebook.studio.tableGenerated") : t("notebook.studio.textGenerated"));
+      toast.success(visualType === "table" ? t("notebook.studio.tableGenerated") : visualType === "report" ? t("notebook.studio.reportGenerated") : t("notebook.studio.textGenerated"));
     } catch (error) {
       showNotebookError(error, t("notebook.studio.saveFailed"));
     } finally {
       setGeneratingStudioType(null);
     }
+  };
+
+  const handleCreateReport = async () => {
+    await generateStudioArtifactByType(`report:${selectedReportFormatId}`, "report");
+    setReportDialogOpen(false);
+  };
+
+  const handleStudioGenerate = async (type: NotebookStudioActionId) => {
+    if (type === "slides") {
+      toast.info(t("notebook.studio.comingSoon"));
+      return;
+    }
+    if (type === "report") {
+      await openReportDialog();
+      return;
+    }
+    if (!notebookId) return;
+    if (selectedFileIds.length === 0) {
+      toast.info(t("notebook.studio.selectSourcesFirst"));
+      return;
+    }
+    await generateStudioArtifactByType(type, type);
   };
 
   const handleRenameArtifact = async (artifact: NotebookStudioArtifact) => {
@@ -859,6 +1027,17 @@ function NotebookDetailContent() {
       loading={previewLoading}
       error={previewError}
       onClose={closePreview}
+    />
+    <ReportFormatDialog
+      open={reportDialogOpen}
+      selectedId={selectedReportFormatId}
+      suggestions={reportFormatSuggestions}
+      loadingSuggestions={loadingReportSuggestions}
+      generating={generatingStudioType === "report"}
+      onSelect={setSelectedReportFormatId}
+      onClose={() => setReportDialogOpen(false)}
+      onGenerate={handleCreateReport}
+      t={t}
     />
     </>
   );
