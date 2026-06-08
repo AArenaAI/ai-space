@@ -50,6 +50,7 @@ export type NotebookStudioFlashcard = {
 export type NotebookStudioQuizOption = {
   id: "A" | "B" | "C" | "D" | string;
   text: string;
+  reason?: string;
 };
 
 export type NotebookStudioQuizQuestion = {
@@ -826,7 +827,7 @@ function QuizArtifactView({ artifact, t, onExplain }: { artifact: Extract<Notebo
                       <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                       <div>
                         <span className="font-semibold text-emerald-700 dark:text-emerald-300">{t("notebook.studio.quizCorrect")}</span>
-                        <p className="mt-0.5 leading-5 text-emerald-700/90 dark:text-emerald-300/90">{truncateText(question.explanation)}</p>
+                        <p className="mt-0.5 leading-5 text-emerald-700/90 dark:text-emerald-300/90">{truncateText(option.reason || question.explanation)}</p>
                       </div>
                     </div>
                   )}
@@ -835,8 +836,13 @@ function QuizArtifactView({ artifact, t, onExplain }: { artifact: Extract<Notebo
                       <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
                       <div>
                         <span className="font-semibold text-red-700 dark:text-red-300">{t("notebook.studio.quizWrong")}</span>
-                        <p className="mt-0.5 leading-5 text-red-700/90 dark:text-red-300/90">{truncateText(question.wrong_reason || question.explanation)}</p>
+                        <p className="mt-0.5 leading-5 text-red-700/90 dark:text-red-300/90">{truncateText(option.reason || question.wrong_reason || question.explanation)}</p>
                       </div>
+                    </div>
+                  )}
+                  {answered && !optionSelected && !optionCorrect && option.reason && (
+                    <div className="mt-2.5 pl-9 text-sm leading-5 text-text-tertiary">
+                      {truncateText(option.reason)}
                     </div>
                   )}
                 </button>

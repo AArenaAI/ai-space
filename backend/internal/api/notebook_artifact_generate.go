@@ -71,8 +71,9 @@ type notebookStudioFlashcard struct {
 }
 
 type notebookStudioQuizOption struct {
-	ID   string `json:"id"`
-	Text string `json:"text"`
+	ID     string `json:"id"`
+	Text   string `json:"text"`
+	Reason string `json:"reason"`
 }
 
 type notebookStudioQuizQuestion struct {
@@ -229,7 +230,7 @@ func buildNotebookArtifactAIMessages(generationType string, notebookTitle string
 	} else if generationType == "flashcards" {
 		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For flashcards content must be {\"cards\":[{\"front\":string,\"back\":string,\"source\":string}]}. Create compact study flashcards from the source material. Each card front is a clean self-test question about one concrete concept, number, capability, process, comparison, role, architecture point, pricing/detail, or named fact. Each back is a concise answer in 1 short sentence, preferably under 80 Chinese characters, grounded in the source but NOT copied as a long quote. Prefer 12-30 cards when enough source content exists. Avoid generic questions, duplicate cards, file names, parse status, unsupported facts, source citation labels, and heading numbers like 1, 1.3, 一、. Leave source empty; do not put [1] or 【1】 in any card field.\n")
 	} else if generationType == "quiz" {
-		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For quiz content must be {\"questions\":[{\"question\":string,\"options\":[{\"id\":\"A\",\"text\":string},{\"id\":\"B\",\"text\":string},{\"id\":\"C\",\"text\":string},{\"id\":\"D\",\"text\":string}],\"correct_option_id\":\"A|B|C|D\",\"hint\":string,\"explanation\":string,\"wrong_reason\":string}]}. Create exactly 10 multiple-choice questions from the source material. Questions should test concrete facts, mechanisms, comparisons, capabilities, numeric details, or implications in the documents. Each question has exactly 4 plausible options, exactly one correct answer, a short hint for before answering, and an explanation grounded in the source for after answering. wrong_reason should explain why common incorrect choices are wrong. Avoid generic questions, file names, parse/index status, citation labels, and unsupported facts.\n")
+		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For quiz content must be {\"questions\":[{\"question\":string,\"options\":[{\"id\":\"A\",\"text\":string,\"reason\":string},{\"id\":\"B\",\"text\":string,\"reason\":string},{\"id\":\"C\",\"text\":string,\"reason\":string},{\"id\":\"D\",\"text\":string,\"reason\":string}],\"correct_option_id\":\"A|B|C|D\",\"hint\":string,\"explanation\":string}]}. Create exactly 10 multiple-choice questions from the source material. Questions should test concrete facts, mechanisms, comparisons, capabilities, numeric details, or implications in the documents. Each question has exactly 4 plausible options, exactly one correct answer, a short hint for before answering, and an explanation grounded in the source for after answering. Every option MUST include a short reason field: for the correct option, reason explains why it is correct; for each incorrect option, reason explains why it is wrong in one concise sentence. Avoid generic questions, file names, parse/index status, citation labels, and unsupported facts.\n")
 	} else if strings.HasPrefix(generationType, "report") {
 		formatID := reportGenerationFormatID(generationType)
 		fmt.Fprintf(&b, "Report format id: %s\n", formatID)
@@ -923,7 +924,7 @@ func buildNotebookGeneratedQuizQuestions(sources []notebookGenerationSource, lan
 }
 
 func buildNotebookQuizOptions(correct string, seed int, correctID string) []notebookStudioQuizOption {
-	distractors := []string{
+	distractorReasons := []string{
 		"资料只列出了文件处理状态，没有给出该事实",
 		"该说法把资料中的能力描述泛化为无条件结论",
 		"该选项与资料重点不一致，缺少原文依据",
@@ -933,11 +934,17 @@ func buildNotebookQuizOptions(correct string, seed int, correctID string) []note
 	distractorIndex := 0
 	for _, id := range ids {
 		text := correct
+		reason := fmt.Sprintf("正确。资料中的关键表述是：%s", truncateNotebookRunes(cleanNotebookFlashcardText(correct), 80, "…"))
 		if id != correctID {
-			text = distractors[(seed+distractorIndex)%len(distractors)]
+			text = distractorReasons[(seed+distractorIndex)%len(distractorReasons)]
+			reason = fmt.Sprintf("错误。%s", text)
 			distractorIndex++
 		}
-		options = append(options, notebookStudioQuizOption{ID: id, Text: truncateNotebookRunes(cleanNotebookFlashcardText(text), 120, "…")})
+		options = append(options, notebookStudioQuizOption{
+			ID:     id,
+			Text:   truncateNotebookRunes(cleanNotebookFlashcardText(text), 120, "…"),
+			Reason: truncateNotebookRunes(cleanNotebookFlashcardText(reason), 140, "…"),
+		})
 	}
 	return options
 }
@@ -959,6 +966,7 @@ func sanitizeNotebookQuizQuestions(questions []notebookStudioQuizQuestion) []not
 				continue
 			}
 			option.Text = truncateNotebookRunes(cleanNotebookFlashcardText(option.Text), 140, "…")
+			option.Reason = truncateNotebookRunes(cleanNotebookFlashcardText(option.Reason), 160, "…")
 			if option.Text != "" {
 				optionByID[option.ID] = option
 			}
