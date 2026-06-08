@@ -17,7 +17,7 @@ var DefaultAIHTTPClient = &http.Client{
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 10,
 		IdleConnTimeout:     120 * time.Second,
-		ResponseHeaderTimeout: 60 * time.Second,
+		ResponseHeaderTimeout: 120 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 	},
 	// 整体请求超时由调用方通过 context.WithTimeout 控制，

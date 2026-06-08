@@ -344,11 +344,11 @@ func (h *VideoChatHandler) createVideoChatMessagesAndTask(userID uint, chatID ui
 		return &assistantMsg, err
 	}
 	log.Printf("[VideoChat] create task refs images=%d videos=%d model=%s", len(createReq.ReferenceImages), len(createReq.ReferenceVideos), modelID)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	resp, err := h.videoService.CreateVideoTask(ctx, createReq)
 	if err != nil {
-		errMsg := cleanVideoGenerationErrorMessage(err)
+		errMsg := cleanVideoTaskSubmissionErrorMessage(err)
 		h.db.Model(&assistantMsg).Updates(map[string]interface{}{"status": "failed", "error_message": errMsg})
 		assistantMsg.Status = "failed"
 		assistantMsg.ErrorMessage = errMsg
@@ -389,6 +389,15 @@ func (h *VideoChatHandler) createVideoChatMessagesAndTask(userID uint, chatID ui
 }
 
 func (h *VideoChatHandler) refreshPendingVideoChatMessages(chatID uint) {
+	staleCutoff := time.Now().Add(-2 * time.Minute)
+	h.db.Model(&models.VideoChatMessage{}).
+		Where("chat_id = ? AND role = ? AND status = ? AND task_id = '' AND generation_id = 0 AND updated_at < ?", chatID, "assistant", "pending", staleCutoff).
+		Updates(map[string]interface{}{
+			"status":        "failed",
+			"error_message": "视频任务提交被中断，请重新提交。",
+			"updated_at":    time.Now(),
+		})
+
 	var messages []models.VideoChatMessage
 	if err := h.db.Where("chat_id = ? AND role = ? AND task_id != '' AND status NOT IN ?", chatID, "assistant", []string{"succeeded", "completed", "failed"}).Find(&messages).Error; err != nil {
 		return

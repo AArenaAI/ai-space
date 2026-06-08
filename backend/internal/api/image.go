@@ -54,6 +54,7 @@ type GenerateImageRequest struct {
 	AspectRatio        string   `json:"aspect_ratio"`         // 纵横比：auto, 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9
 	Resolution         string   `json:"resolution"`           // 分辨率：1K, 2K
 	Quality            string   `json:"quality"`              // 质量：low, medium, high, auto（默认 medium）
+	Provider           string   `json:"provider"`             // 可选 provider；seedream 仅供 Beta 测试入口显式分流
 	ReferenceImageURL  string   `json:"reference_image_url"`  // 兼容旧前端：单张参考图
 	ReferenceImageURLs []string `json:"reference_image_urls"` // 新前端：多张参考图
 }
@@ -939,7 +940,7 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 			h.processQualityEnhancementJob(gen.ID, imageFilePath, baseURL)
 			return
 		}
-		h.processImageEditJob(gen.ID, editPrompt, size, "medium", []string{providerImagePath}, maskFilePath, baseURL, targetSize, canvasTransform, background)
+		h.processImageEditJob(gen.ID, editPrompt, size, "medium", "", []string{providerImagePath}, maskFilePath, baseURL, targetSize, canvasTransform, background)
 	}()
 
 	c.JSON(http.StatusOK, gin.H{
@@ -1031,11 +1032,13 @@ func (h *ImageHandler) GenerateImage(c *gin.Context) {
 	}
 
 	// 创建记录
+	provider := strings.ToLower(strings.TrimSpace(req.Provider))
 	gen := &services.ImageGeneration{
 		UserID:            userID,
 		Prompt:            req.Prompt,
 		Size:              size,
 		Quality:           quality,
+		Provider:          provider,
 		ReferenceImageURL: refImageURL,
 		Status:            "pending",
 	}
@@ -1048,13 +1051,14 @@ func (h *ImageHandler) GenerateImage(c *gin.Context) {
 	baseURL := resolveBaseURL(c, h.cfg)
 
 	// 启动后台 goroutine 异步生成图片
-	go h.processImageJob(gen.ID, req.Prompt, size, quality, refImagePaths, baseURL)
+	go h.processImageJob(gen.ID, req.Prompt, size, quality, provider, refImagePaths, baseURL)
 
 	// 立即返回，不等待实际生成
 	c.JSON(http.StatusOK, gin.H{
 		"id":         gen.ID,
 		"prompt":     gen.Prompt,
 		"size":       size,
+		"provider":   provider,
 		"status":     "pending",
 		"created_at": gen.CreatedAt,
 	})
@@ -1063,11 +1067,17 @@ func (h *ImageHandler) GenerateImage(c *gin.Context) {
 // ListImages 获取图片列表
 func (h *ImageHandler) ListImages(c *gin.Context) {
 	userID := getUserID(c)
+	provider := strings.ToLower(strings.TrimSpace(c.Query("provider")))
 
 	var images []services.ImageGeneration
-	h.db.Where("user_id = ?", userID).
-		Order("created_at DESC").
-		Find(&images)
+	query := h.db.Where("user_id = ?", userID)
+	if provider != "" {
+		query = query.Where("provider = ?", provider)
+	} else {
+		// 默认图片入口不展示 Seedream Beta 的独立测试历史，避免和正式图片功能混合。
+		query = query.Where("provider = '' OR provider IS NULL")
+	}
+	query.Order("created_at DESC").Find(&images)
 
 	c.JSON(http.StatusOK, gin.H{"images": images})
 }
@@ -1129,8 +1139,8 @@ func (h *ImageHandler) AutoMigrate() error {
 }
 
 // processImageJob 后台处理单个图片生成任务（用于异步 goroutine 和启动恢复）
-func (h *ImageHandler) processImageJob(recordID uint, prompt, size, quality string, referenceImagePaths []string, baseURL string) {
-	h.processImageEditJob(recordID, prompt, size, quality, referenceImagePaths, "", baseURL, image.Point{}, editCanvasTransform{}, "")
+func (h *ImageHandler) processImageJob(recordID uint, prompt, size, quality, provider string, referenceImagePaths []string, baseURL string) {
+	h.processImageEditJob(recordID, prompt, size, quality, provider, referenceImagePaths, "", baseURL, image.Point{}, editCanvasTransform{}, "")
 }
 
 func imageOperationForJob(referenceImagePaths []string, maskPath string, background string) string {
@@ -1272,7 +1282,7 @@ func (h *ImageHandler) recordLocalImageUtility(recordID uint, operation string) 
 	})
 }
 
-func (h *ImageHandler) processImageEditJob(recordID uint, prompt, size, quality string, referenceImagePaths []string, maskPath string, baseURL string, targetSize image.Point, transform editCanvasTransform, background string) {
+func (h *ImageHandler) processImageEditJob(recordID uint, prompt, size, quality, provider string, referenceImagePaths []string, maskPath string, baseURL string, targetSize image.Point, transform editCanvasTransform, background string) {
 	ctx := context.Background()
 	operation := imageOperationForJob(referenceImagePaths, maskPath, background)
 
@@ -1282,6 +1292,9 @@ func (h *ImageHandler) processImageEditJob(recordID uint, prompt, size, quality 
 	if len(referenceImagePaths) > 0 {
 		// image-to-image / mask 编辑模式：基于参考图编辑
 		imageURL, b64Data, err = h.imageService.EditImageStream(ctx, prompt, size, quality, referenceImagePaths, maskPath, background, nil)
+	} else if strings.EqualFold(strings.TrimSpace(provider), "seedream") {
+		// Seedream Beta 文生图模式：仅在请求显式指定 provider=seedream 时分流
+		imageURL, b64Data, err = h.imageService.GenerateSeedreamImage(ctx, prompt, size)
 	} else {
 		// 普通文生图模式
 		imageURL, b64Data, err = h.imageService.GenerateImage(ctx, prompt, size, quality)
@@ -1743,6 +1756,6 @@ func (h *ImageHandler) RecoverPendingJobs() {
 				}
 			}
 		}
-		go h.processImageJob(job.ID, job.Prompt, job.Size, job.Quality, referenceImagePaths, baseURL)
+		go h.processImageJob(job.ID, job.Prompt, job.Size, job.Quality, job.Provider, referenceImagePaths, baseURL)
 	}
 }

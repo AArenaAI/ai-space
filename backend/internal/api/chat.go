@@ -2004,7 +2004,10 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 			if event.Type == services.EventError {
 				message := event.Message
 				if event.Provider == "gemini" || strings.Contains(strings.ToLower(event.Model), "gemini") {
-					message = "Gemini服务商故障，本次生成中断，请稍后重试或切换模型。"
+					// 保留原始错误信息以便诊断，仅在原始信息为空时兜底
+					if message == "" {
+						message = "Gemini服务商故障，本次生成中断，请稍后重试或切换模型。"
+					}
 				} else if message == "" {
 					message = "上游模型暂时不可用，请稍后重试。"
 				}

@@ -22,7 +22,7 @@ func (s *AIService) geminiClient(ctx context.Context) (*genai.Client, error) {
 		Backend:    genai.BackendGeminiAPI,
 		HTTPClient: DefaultAIHTTPClient,
 		HTTPOptions: genai.HTTPOptions{
-			APIVersion: "v1alpha",
+			APIVersion: "v1beta",
 		},
 	}
 	if strings.TrimSpace(s.cfg.GeminiBaseURL) != "" {

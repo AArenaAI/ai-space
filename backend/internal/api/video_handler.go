@@ -101,13 +101,13 @@ func (h *VideoHandler) CreateVideo(c *gin.Context) {
 	}
 	log.Printf("[Video] create task refs images=%d videos=%d model=%s", len(createReq.ReferenceImages), len(createReq.ReferenceVideos), modelID)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
 	resp, err := h.videoService.CreateVideoTask(ctx, createReq)
 	if err != nil {
 		log.Printf("[Video] create task failed model=%s ratio=%s resolution=%s duration=%d audio=%v err=%v", modelID, ratio, resolution, duration, req.GenerateAudio, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": cleanVideoGenerationErrorMessage(err)})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": cleanVideoTaskSubmissionErrorMessage(err)})
 		return
 	}
 

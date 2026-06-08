@@ -1,6 +1,6 @@
 "use client";
 
-import { Image, Eraser, Type, ZoomIn, ImageIcon, Video } from "lucide-react";
+import { Image, Eraser, Type, ZoomIn, ImageIcon, Video, Sparkles } from "lucide-react";
 import ModuleSidebar, { type ModuleSidebarGroup } from "./ModuleSidebar";
 
 export const MORE_NAV_GROUPS: ModuleSidebarGroup[] = [
@@ -18,6 +18,12 @@ export const MORE_NAV_GROUPS: ModuleSidebarGroup[] = [
         labelKey: "video.generateVideo",
         href: "/video",
         matchPath: "/video",
+      },
+      {
+        icon: Sparkles,
+        labelKey: "seedreamBeta.navLabel",
+        href: "/seedream-beta",
+        matchPath: "/seedream-beta",
       },
     ],
   },
@@ -52,7 +58,7 @@ export const MORE_NAV_GROUPS: ModuleSidebarGroup[] = [
   },
 ];
 
-export const CREATIVE_PAGE_PATHS = ["/image", "/video", "/create", "/templates"];
+export const CREATIVE_PAGE_PATHS = ["/image", "/video", "/seedream-beta", "/create", "/templates"];
 export const CREATIVE_PAGE_HREFS = MORE_NAV_GROUPS.flatMap((group) => group.items.map((item) => item.href));
 
 export default function ToolsSidebar() {

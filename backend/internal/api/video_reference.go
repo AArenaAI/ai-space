@@ -88,6 +88,11 @@ func resolveVideoReferenceURL(db *gorm.DB, cfg *config.Config, userID uint, ref 
 	if ref == "" {
 		return "", 0, nil
 	}
+	if mediaKind == "video" {
+		if resolved, ok, err := resolveGeneratedVideoAssetReferenceURL(cfg, ref); ok || err != nil {
+			return resolved, 0, err
+		}
+	}
 	if strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") || strings.HasPrefix(ref, "data:") {
 		if mediaKind == "video" && !isSupportedVideoURL(ref) {
 			return "", 0, fmt.Errorf("参考视频仅支持 mp4、mov 格式")
@@ -234,6 +239,29 @@ func isSupportedVideoURL(ref string) bool {
 	}
 	ext := strings.ToLower(filepath.Ext(parsed.Path))
 	return ext == ".mp4" || ext == ".mov"
+}
+
+func resolveGeneratedVideoAssetReferenceURL(cfg *config.Config, ref string) (string, bool, error) {
+	filename, ok := localAssetFilenameFromURL(ref, localVideoURLPrefix)
+	if !ok {
+		return "", false, nil
+	}
+	if !isSupportedVideoURL(localVideoURLPrefix + filename) {
+		return "", true, fmt.Errorf("参考视频仅支持 mp4、mov 格式")
+	}
+	path := filepath.Join(videoAssetsDir(), filename)
+	if _, err := os.Stat(path); err != nil {
+		return "", true, fmt.Errorf("参考素材不存在: %s", filename)
+	}
+	base := publicBaseURL(cfg)
+	if base == "" {
+		return "", true, fmt.Errorf("参考视频必须使用公网可访问 URL；当前缺少可访问的 BASE_URL/FRONTEND_URL，无法把本地文件传给火山")
+	}
+	publicURL := strings.TrimRight(base, "/") + localVideoURLPrefix + url.PathEscape(filename)
+	if !isPublicReferenceURLReachable(publicURL) {
+		return "", true, fmt.Errorf("参考视频需要公网可访问 URL；当前 BASE_URL/FRONTEND_URL 对外不可访问，火山无法下载素材")
+	}
+	return publicURL, true, nil
 }
 
 func validateLocalReferenceVideo(file models.File) (referenceVideoMetadata, error) {

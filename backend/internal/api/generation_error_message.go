@@ -20,6 +20,19 @@ func cleanVideoGenerationErrorString(raw string) string {
 	return cleanGenerationErrorString(raw, "video")
 }
 
+func cleanVideoTaskSubmissionErrorMessage(err error) string {
+	if err == nil {
+		return defaultVideoGenerationErrorMessage
+	}
+	message := strings.TrimSpace(err.Error())
+	lower := strings.ToLower(message)
+	if containsAny(lower, "timeout", "deadline exceeded", "context deadline", "timed out") ||
+		containsAny(message, "超时") {
+		return "视频任务提交超时，请稍后重新提交。"
+	}
+	return cleanVideoGenerationErrorMessage(err)
+}
+
 func cleanImageGenerationErrorMessage(err error) string {
 	if err == nil {
 		return defaultImageGenerationErrorMessage

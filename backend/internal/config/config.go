@@ -91,6 +91,10 @@ type Config struct {
 	ImageGenInputPrice  float64 // ¥/千tokens（如果按 token 计费）
 	ImageGenOutputPrice float64 // ¥/千tokens
 	ImageGenUnitPrice   float64 // ¥/张（如果按图片张数计费）
+	SeedreamAPIKey      string  // Seedream / 火山引擎 Ark 图片生成 API Key
+	SeedreamBaseURL     string  // Seedream / 火山引擎 Ark Base URL
+	SeedreamModel       string  // Seedream 图片生成模型
+	SeedreamUnitPrice   float64 // ¥/张（如果按图片张数计费）
 
 	// 文件存储
 	FileStorageDir string // 用户上传文件的本地存储路径
@@ -248,6 +252,10 @@ func Load() *Config {
 		ImageGenInputPrice:  getEnvFloat64("IMAGE_GEN_INPUT_PRICE", 0),
 		ImageGenOutputPrice: getEnvFloat64("IMAGE_GEN_OUTPUT_PRICE", 0),
 		ImageGenUnitPrice:   getEnvFloat64("IMAGE_GEN_UNIT_PRICE", 0),
+		SeedreamAPIKey:      getEnv("SEEDREAM_API_KEY", ""),
+		SeedreamBaseURL:     getEnv("SEEDREAM_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3"),
+		SeedreamModel:       getEnv("SEEDREAM_MODEL", "doubao-seedream-5-0-260128"),
+		SeedreamUnitPrice:   getEnvFloat64("SEEDREAM_UNIT_PRICE", 0),
 
 		DocGenAPIKey:      getEnv("DOC_GEN_API_KEY", ""),
 		DocGenBaseURL:     getEnv("DOC_GEN_BASE_URL", ""),
