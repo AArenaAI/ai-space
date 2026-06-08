@@ -795,6 +795,7 @@ function QuizArtifactView({ artifact, t, onExplain }: { artifact: Extract<Notebo
   const correctOption = question?.options.find((option) => option.id === correctId);
   const answered = Boolean(selected);
   const isCorrect = selected === correctId;
+  const truncateText = (value: string) => (value.length > 95 ? `${value.slice(0, 92)}…` : value);
   const goTo = (next: number) => {
     if (!total) return;
     setIndex((next + total) % total);
