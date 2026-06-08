@@ -169,6 +169,9 @@ func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, 
 	if resp.Background {
 		body, err = waitForNotebookBackgroundAIResponse(ctx, aiService, body, generationType)
 		if err != nil {
+			if isNotebookReportGeneration(generationType) {
+				return fallback, nil
+			}
 			return generatedNotebookArtifactDraft{}, err
 		}
 	}
@@ -275,7 +278,7 @@ func waitForNotebookBackgroundAIResponse(ctx context.Context, aiService chatAISe
 			return nil, fmt.Errorf("模型后台任务%s，请重新生成", notebookBackgroundStatusText(status))
 		}
 		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("思维导图仍在模型分析中，请稍后重新生成")
+			return nil, notebookBackgroundStillRunningError(generationType)
 		}
 		delay := time.Duration(2+attempt) * time.Second
 		if delay > 8*time.Second {
@@ -302,10 +305,24 @@ func extractNotebookAIResponseID(body []byte) string {
 }
 
 func notebookBackgroundWaitTimeout(generationType string) time.Duration {
-	if generationType == "mindmap" {
+	if generationType == "mindmap" || isNotebookReportGeneration(generationType) {
 		return 240 * time.Second
 	}
 	return 45 * time.Second
+}
+
+func notebookBackgroundStillRunningError(generationType string) error {
+	if isNotebookReportGeneration(generationType) {
+		return fmt.Errorf("报告仍在模型分析中，已先生成可用草稿；如需更完整版本请稍后重新生成")
+	}
+	if generationType == "mindmap" {
+		return fmt.Errorf("思维导图仍在模型分析中，请稍后重新生成")
+	}
+	return fmt.Errorf("模型仍在分析中，请稍后重新生成")
+}
+
+func isNotebookReportGeneration(generationType string) bool {
+	return strings.HasPrefix(generationType, "report")
 }
 
 func notebookBackgroundStatusText(status string) string {

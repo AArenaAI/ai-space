@@ -207,6 +207,44 @@ func TestBuildAINotebookArtifactDraftKeepsFlashcardTitleWhenAIReturnsSummaryTitl
 	}
 }
 
+func TestBuildAINotebookReportFallsBackWhenBackgroundResponseIsNotReady(t *testing.T) {
+	files := []models.File{
+		{ID: 1, Filename: "AI Space 报告.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "企业级多模型平台", Content: "AI Space 是企业级多模型 AI 聚合平台，包含白标部署、RAG、Workspace Agent 和模型蒸馏路线图。"},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	ai := &fakeNotebookAIService{
+		response:   `{"id":"resp_report","status":"queued"}`,
+		background: true,
+		retrieveResponses: []map[string]any{
+			{"status": "in_progress"},
+		},
+	}
+
+	draft, err := buildAINotebookArtifactDraft(ctx, ai, "report:briefing-document", "AI Space", files, []uint{1}, "zh-CN")
+	if err != nil {
+		t.Fatalf("report should fall back instead of surfacing background wait errors: %v", err)
+	}
+	if draft.Type != "report" {
+		t.Fatalf("draft.Type = %q, want report", draft.Type)
+	}
+	if !strings.Contains(string(draft.Content), "briefing-document") || !strings.Contains(string(draft.Content), "AI Space") {
+		t.Fatalf("fallback report should still be saved as a report, got %s", string(draft.Content))
+	}
+}
+
+func TestNotebookBackgroundTimeoutUsesArtifactSpecificMessage(t *testing.T) {
+	if got := notebookBackgroundStillRunningError("report:briefing-document").Error(); strings.Contains(got, "思维导图") || !strings.Contains(got, "报告") {
+		t.Fatalf("report background timeout should mention report, got %q", got)
+	}
+	if got := notebookBackgroundStillRunningError("mindmap").Error(); !strings.Contains(got, "思维导图") {
+		t.Fatalf("mindmap timeout should keep mindmap-specific copy, got %q", got)
+	}
+	if timeout := notebookBackgroundWaitTimeout("report:briefing-document"); timeout < 180*time.Second {
+		t.Fatalf("report background timeout should allow long document analysis, got %s", timeout)
+	}
+}
+
 func TestBuildAINotebookMindmapRejectsInvalidAIInsteadOfFallback(t *testing.T) {
 	files := []models.File{
 		{ID: 1, Filename: "产品方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "产品定位", Content: "AI Space 是企业级多模型 AI 聚合平台。"},
