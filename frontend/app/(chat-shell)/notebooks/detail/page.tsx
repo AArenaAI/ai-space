@@ -759,9 +759,10 @@ function NotebookDetailContent() {
     }
   };
 
-  const handleCreateReport = async () => {
-    await generateStudioArtifactByType(`report:${selectedReportFormatId}`, "report");
+  const handleCreateReport = () => {
+    const reportType = `report:${selectedReportFormatId}`;
     setReportDialogOpen(false);
+    void generateStudioArtifactByType(reportType, "report");
   };
 
   const handleStudioGenerate = async (type: NotebookStudioActionId) => {
