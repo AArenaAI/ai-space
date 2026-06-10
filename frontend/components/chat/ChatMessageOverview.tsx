@@ -156,7 +156,7 @@ const ChatMessageOverview = memo(function ChatMessageOverview({
           data-testid="chat-message-overview-panel"
         >
           <div className="flex min-w-0 flex-1 flex-col gap-1.5 pr-2">
-            {items.map((item, idx) => {
+            {windowItems.map((item, idx) => {
               const wheelTextStyle = isWheel ? getWheelTextStyle(idx) : undefined;
               return (
                 <button
