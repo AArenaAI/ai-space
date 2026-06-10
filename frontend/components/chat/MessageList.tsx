@@ -518,7 +518,7 @@ function MessageList({
     if (!isProgrammaticScroll && isScrollingUp && distanceToBottom > 1) {
       stopBottomLockForUserBrowse(isProgrammaticScroll ? 1200 : 2500);
     }
-    if (distanceToBottom <= 24) {
+    if (!isScrollingUp && distanceToBottom <= AT_BOTTOM_THRESHOLD) {
       stickToBottomRef.current = true;
       userScrollOverrideUntilRef.current = 0;
     }
