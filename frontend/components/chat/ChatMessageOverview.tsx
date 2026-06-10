@@ -5,9 +5,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
-  type PointerEvent,
   type WheelEvent,
 } from "react";
 import { cn } from "@/lib/utils";
@@ -32,9 +30,12 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
-function getCenteredStart(items: ChatMessageOverviewItem[]) {
+function getCenteredStart(items: ChatMessageOverviewItem[], activeId?: string) {
   if (items.length <= MAX_VISIBLE) return 0;
-  const activeIdx = items.findIndex((i) => i.active);
+  const activeIdx =
+    items.findIndex((i) => i.id === activeId) >= 0
+      ? items.findIndex((i) => i.id === activeId)
+      : items.findIndex((i) => i.active);
   const safeIdx = activeIdx >= 0 ? activeIdx : items.length - 1;
   return clamp(safeIdx - CENTER, 0, items.length - MAX_VISIBLE);
 }
@@ -67,12 +68,11 @@ const ChatMessageOverview = memo(function ChatMessageOverview({
 }: ChatMessageOverviewProps) {
   const { t } = useI18n();
   const [windowStart, setWindowStart] = useState(0);
-  const panelRef = useRef<HTMLDivElement | null>(null);
-  const isDraggingRef = useRef(false);
 
   const isWheel = items.length > MAX_VISIBLE;
   const activeId = items.find((item) => item.active)?.id;
   const maxStart = Math.max(0, items.length - MAX_VISIBLE);
+  const effectiveActiveId = activeId ?? items[items.length - 1]?.id;
 
   // 主聊天区域滚动导致 active 改变时，重新把 active 放回中间窗口；
   // 但用户在悬浮框内滚轮/触摸板滑动时，会用 windowStart 临时浏览更早/更晚数据。
@@ -81,31 +81,14 @@ const ChatMessageOverview = memo(function ChatMessageOverview({
       setWindowStart(0);
       return;
     }
-    setWindowStart(getCenteredStart(items));
-  }, [activeId, isWheel, items]);
+    setWindowStart(getCenteredStart(items, effectiveActiveId));
+  }, [effectiveActiveId, isWheel, items]);
 
   const windowItems = useMemo(() => {
     if (!isWheel) return items;
     const start = clamp(windowStart, 0, maxStart);
     return items.slice(start, start + MAX_VISIBLE);
   }, [isWheel, items, maxStart, windowStart]);
-
-  const thumbHeightPercent = isWheel ? clamp((MAX_VISIBLE / items.length) * 100, 18, 72) : 100;
-  const thumbTopPercent = isWheel && maxStart > 0
-    ? (windowStart / maxStart) * (100 - thumbHeightPercent)
-    : 0;
-
-  const updateWindowStartFromPointer = useCallback((clientY: number) => {
-    if (!isWheel || maxStart <= 0) return;
-    const panel = panelRef.current;
-    if (!panel) return;
-
-    const rect = panel.getBoundingClientRect();
-    const usableHeight = Math.max(1, rect.height * (1 - thumbHeightPercent / 100));
-    const offsetY = clamp(clientY - rect.top - (rect.height * thumbHeightPercent) / 200, 0, usableHeight);
-    const nextStart = Math.round((offsetY / usableHeight) * maxStart);
-    setWindowStart(clamp(nextStart, 0, maxStart));
-  }, [isWheel, maxStart, thumbHeightPercent]);
 
   const handleOverviewWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
     if (!isWheel) return;
@@ -115,32 +98,6 @@ const ChatMessageOverview = memo(function ChatMessageOverview({
     const step = clamp(Math.ceil(Math.abs(event.deltaY) / 80), 1, 4);
     setWindowStart((current) => clamp(current + direction * step, 0, maxStart));
   }, [isWheel, maxStart]);
-
-  const handleScrollbarPointerDown = useCallback((event: PointerEvent<HTMLDivElement>) => {
-    if (!isWheel) return;
-    event.preventDefault();
-    event.stopPropagation();
-    isDraggingRef.current = true;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    updateWindowStartFromPointer(event.clientY);
-  }, [isWheel, updateWindowStartFromPointer]);
-
-  const handleScrollbarPointerMove = useCallback((event: PointerEvent<HTMLDivElement>) => {
-    if (!isDraggingRef.current) return;
-    event.preventDefault();
-    event.stopPropagation();
-    updateWindowStartFromPointer(event.clientY);
-  }, [updateWindowStartFromPointer]);
-
-  const handleScrollbarPointerEnd = useCallback((event: PointerEvent<HTMLDivElement>) => {
-    if (!isDraggingRef.current) return;
-    event.preventDefault();
-    event.stopPropagation();
-    isDraggingRef.current = false;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  }, []);
 
   // 只有 1 条时不展示（< 2 已包含 0 条情况）
   if (!visible || items.length < 2) return null;
@@ -192,15 +149,14 @@ const ChatMessageOverview = memo(function ChatMessageOverview({
 
         {/* Panel 展开面板 */}
         <div
-          ref={panelRef}
           className={cn(
-            "invisible absolute right-8 top-1/2 z-[150] flex w-[320px] -translate-y-1/2 overflow-hidden rounded-2xl border border-surface-border bg-surface-elevated px-2 py-2 opacity-0 shadow-2xl shadow-black/25 group-hover:visible group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:visible group-focus-within:pointer-events-auto group-focus-within:opacity-100 dark:border-[#2b2b2b] dark:bg-[#171717]",
-            isWheel && "h-[378px] overflow-y-auto"
+            "invisible absolute right-8 top-1/2 z-[150] flex w-[320px] -translate-y-1/2 overflow-hidden rounded-2xl border border-surface-border bg-surface-elevated px-2 py-2 opacity-0 shadow-2xl shadow-black/25 group-hover:visible group-hover:pointer-events-auto group-hover:opacity-100 dark:border-[#2b2b2b] dark:bg-[#171717]",
+            isWheel && "h-[378px]"
           )}
           data-testid="chat-message-overview-panel"
         >
           <div className="flex min-w-0 flex-1 flex-col gap-1.5 pr-2">
-            {items.map((item, idx) => {
+            {windowItems.map((item, idx) => {
               const wheelTextStyle = isWheel ? getWheelTextStyle(idx) : undefined;
               return (
                 <button
@@ -237,34 +193,7 @@ const ChatMessageOverview = memo(function ChatMessageOverview({
             })}
           </div>
 
-          {isWheel && (
-            <div
-              className="relative my-1 w-3 shrink-0 cursor-grab rounded-full active:cursor-grabbing"
-              role="scrollbar"
-              aria-orientation="vertical"
-              aria-valuemin={0}
-              aria-valuemax={maxStart}
-              aria-valuenow={windowStart}
-              aria-label={t("chat.overview.scrollbar", {
-                current: String(windowStart + 1),
-                total: String(maxStart + 1),
-              })}
-              onPointerDown={handleScrollbarPointerDown}
-              onPointerMove={handleScrollbarPointerMove}
-              onPointerUp={handleScrollbarPointerEnd}
-              onPointerCancel={handleScrollbarPointerEnd}
-              data-testid="chat-message-overview-scrollbar"
-            >
-              <div className="absolute inset-x-[5px] inset-y-0 rounded-full bg-slate-500/15 dark:bg-white/10" />
-              <div
-                className="absolute inset-x-[3px] rounded-full bg-slate-400/70 shadow-sm transition-[top,height,background-color] duration-150 hover:bg-brand/80 dark:bg-slate-300/55"
-                style={{
-                  top: `${thumbTopPercent}%`,
-                  height: `${thumbHeightPercent}%`,
-                }}
-              />
-            </div>
-          )}
+          
         </div>
       </div>
     </div>
