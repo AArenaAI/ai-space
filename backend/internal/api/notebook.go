@@ -20,17 +20,14 @@ import (
 )
 
 type NotebookHandler struct {
-	db          *gorm.DB
-	fileService *services.FileService
-	aiService   chatAIService
+	db           *gorm.DB
+	fileService  *services.FileService
+	aiService    chatAIService
+	imageService *services.ImageService
 }
 
-func NewNotebookHandler(db *gorm.DB, fileService *services.FileService, aiService ...chatAIService) *NotebookHandler {
-	h := &NotebookHandler{db: db, fileService: fileService}
-	if len(aiService) > 0 {
-		h.aiService = aiService[0]
-	}
-	return h
+func NewNotebookHandler(db *gorm.DB, fileService *services.FileService, aiService chatAIService, imageService *services.ImageService) *NotebookHandler {
+	return &NotebookHandler{db: db, fileService: fileService, aiService: aiService, imageService: imageService}
 }
 
 type NotebookListItem struct {
@@ -487,7 +484,7 @@ func (h *NotebookHandler) GenerateArtifact(c *gin.Context) {
 		DetailLevel: strings.TrimSpace(req.DetailLevel),
 		Prompt:      strings.TrimSpace(req.Prompt),
 	}
-	draft, err := buildAINotebookArtifactDraft(c.Request.Context(), h.aiService, req.Type, nb.Title, files, req.FileIDs, req.Language, opts)
+	draft, err := buildAINotebookArtifactDraft(c.Request.Context(), h.aiService, h.imageService, req.Type, nb.Title, files, req.FileIDs, req.Language, opts)
 	if err != nil {
 		fmt.Printf("[Notebook Artifact] generate failed notebook_id=%d type=%s file_count=%d selected_files=%d error=%v\n", nb.ID, req.Type, len(files), len(req.FileIDs), err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

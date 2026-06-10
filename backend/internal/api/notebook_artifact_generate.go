@@ -89,7 +89,8 @@ type notebookStudioInfographic struct {
 	Style       string            `json:"style"`
 	DetailLevel string            `json:"detail_level"`
 	Prompt      string            `json:"prompt"`
-	Html        string            `json:"html"`
+	ImagePrompt string            `json:"image_prompt"`
+	ImageURL    string            `json:"image_url"`
 	ColorScheme map[string]string `json:"color_scheme,omitempty"`
 }
 
@@ -181,7 +182,7 @@ func buildGeneratedNotebookArtifactDraft(generationType string, notebookTitle st
 	}, nil
 }
 
-func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, generationType string, notebookTitle string, files []models.File, selectedFileIDs []uint, language string, opts ...notebookArtifactGenerationOptions) (generatedNotebookArtifactDraft, error) {
+func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, imageService *services.ImageService, generationType string, notebookTitle string, files []models.File, selectedFileIDs []uint, language string, opts ...notebookArtifactGenerationOptions) (generatedNotebookArtifactDraft, error) {
 	fallback, err := buildGeneratedNotebookArtifactDraft(generationType, notebookTitle, files, selectedFileIDs, language, opts...)
 	if err != nil {
 		return generatedNotebookArtifactDraft{}, err
@@ -232,6 +233,29 @@ func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, 
 	if generationType == "mindmap" && !notebookMindmapDraftLooksUseful(draft.Content) {
 		return generatedNotebookArtifactDraft{}, fmt.Errorf("思维导图分析结果不完整，请重新生成")
 	}
+	if generationType == "infographic" && imageService != nil {
+		var content notebookStudioInfographic
+		if err := json.Unmarshal(draft.Content, &content); err == nil && strings.TrimSpace(content.ImagePrompt) != "" {
+			size := "1024x1024"
+			switch content.Orientation {
+			case "landscape":
+				size = "1024x576"
+			case "portrait":
+				size = "576x1024"
+			case "square":
+				size = "1024x1024"
+			}
+			imageURL, _, err := imageService.GenerateImage(ctx, content.ImagePrompt, size, "medium")
+			if err == nil && imageURL != "" {
+				if !strings.HasPrefix(imageURL, "http") && !strings.HasPrefix(imageURL, "/") {
+					imageURL = "/api/images/file/" + imageURL
+				}
+				content.ImageURL = imageURL
+				updated, _ := json.Marshal(content)
+				draft.Content = updated
+			}
+		}
+	}
 	return draft, nil
 }
 
@@ -263,7 +287,7 @@ func buildNotebookArtifactAIMessages(generationType string, notebookTitle string
 	} else if generationType == "quiz" {
 		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For quiz content must be {\"questions\":[{\"question\":string,\"options\":[{\"id\":\"A\",\"text\":string,\"reason\":string},{\"id\":\"B\",\"text\":string,\"reason\":string},{\"id\":\"C\",\"text\":string,\"reason\":string},{\"id\":\"D\",\"text\":string,\"reason\":string}],\"correct_option_id\":\"A|B|C|D\",\"hint\":string,\"explanation\":string}]}. Create exactly 10 multiple-choice questions from the source material. Questions should test concrete facts, mechanisms, comparisons, capabilities, numeric details, or implications in the documents. Each question has exactly 4 plausible options, exactly one correct answer, a short hint for before answering, and an explanation grounded in the source for after answering. Every option MUST include a short reason field: for the correct option, reason explains why it is correct; for each incorrect option, reason explains why it is wrong in one concise sentence. Avoid generic questions, file names, parse/index status, citation labels, and unsupported facts.\n")
 	} else if generationType == "infographic" {
-		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For infographic content must be {\"orientation\":string,\"style\":string,\"detail_level\":string,\"prompt\":string,\"html\":string,\"color_scheme\":{\"primary\":string,\"secondary\":string,\"accent\":string,\"background\":string,\"text\":string}}. Create a self-contained HTML infographic that visualizes the source material.\n")
+		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For infographic content must be {\"orientation\":string,\"style\":string,\"detail_level\":string,\"prompt\":string,\"image_prompt\":string,\"color_scheme\":{\"primary\":string,\"secondary\":string,\"accent\":string,\"background\":string,\"text\":string}}. You are the prompt engineer for an image generation model.\n")
 		b.WriteString(fmt.Sprintf("Orientation: %s\n", fallbackText(opt.Orientation, "landscape")))
 		b.WriteString(fmt.Sprintf("Style: %s\n", fallbackText(opt.Style, "auto")))
 		b.WriteString(fmt.Sprintf("Detail level: %s\n", fallbackText(opt.DetailLevel, "standard")))
@@ -271,13 +295,13 @@ func buildNotebookArtifactAIMessages(generationType string, notebookTitle string
 			b.WriteString(fmt.Sprintf("User prompt: %s\n", opt.Prompt))
 		}
 		b.WriteString("Requirements:\n")
-		b.WriteString("- The html field must be a complete, self-contained HTML document (or a single root div with inline styles) that renders an attractive infographic.\n")
-		b.WriteString("- Use CSS flex/grid layouts. Keep widths around 1200px for landscape, 800px for portrait, 1000x1000px for square.\n")
-		b.WriteString("- Output language must match the requested language.\n")
-		b.WriteString("- Include a title, subtitle, 3-6 visual sections (stats, bars, diagrams, comparison blocks), and a short footer.\n")
-		b.WriteString("- Adapt visual feel to the requested style: cute=rounded pastels/emojis; clay=soft 3D shadows; sketch=hand-drawn lines/paper texture; anime=bold gradients/speed lines; professional=clean corporate palette.\n")
+		b.WriteString("- Analyze the uploaded sources and design a compelling infographic concept.\n")
+		b.WriteString("- The image_prompt field must be a single detailed English text-to-image prompt (300-900 characters) optimized for DALL-E / GPT-image / Seedream. Describe layout, visual hierarchy, color palette, typography style, key statistics or comparisons, icons/charts, and overall mood.\n")
+		b.WriteString("- The prompt field should be a short human-readable description in the requested language (used as caption).\n")
+		b.WriteString("- Choose color_scheme to match the visual style: cute=rounded pastels/emojis; clay=soft 3D shadows/pastels; sketch=hand-drawn lines/paper texture; anime=bold gradients/speed lines; professional=clean corporate palette with navy, slate, white; auto=harmonious modern palette.\n")
 		b.WriteString("- Ground all facts in the provided sources. Do not invent unsupported numbers.\n")
-		b.WriteString("- Keep the HTML compact (under 40KB) and avoid external assets.\n")
+		b.WriteString("- Avoid prompts that request text, labels, or small legible characters unless essential, because image models often render text poorly. Instead describe visual hierarchy, relative sizes, icons, charts, and color blocks that communicate the idea.\n")
+		b.WriteString("- Keep the output strictly JSON with no markdown fences.\n")
 	} else if strings.HasPrefix(generationType, "report") {
 		formatID := reportGenerationFormatID(generationType)
 		fmt.Fprintf(&b, "Report format id: %s\n", formatID)
@@ -1031,7 +1055,6 @@ func sanitizeNotebookQuizQuestions(questions []notebookStudioQuizQuestion) []not
 }
 
 func buildNotebookGeneratedInfographic(notebookTitle string, sources []notebookGenerationSource, language string, opts notebookArtifactGenerationOptions) map[string]any {
-	orientation := fallbackText(strings.TrimSpace(opts.Orientation), "landscape")
 	style := fallbackText(strings.TrimSpace(opts.Style), "auto")
 	detailLevel := fallbackText(strings.TrimSpace(opts.DetailLevel), "standard")
 	prompt := strings.TrimSpace(opts.Prompt)
@@ -1051,33 +1074,27 @@ func buildNotebookGeneratedInfographic(notebookTitle string, sources []notebookG
 	accent := "#f59e0b"
 	background := "#ffffff"
 	textColor := "#1f2937"
-	styleCSS := ""
 	switch style {
 	case "cute":
 		primary = "#f472b6"
 		secondary = "#a78bfa"
 		accent = "#fcd34d"
-		styleCSS = "*{border-radius:18px!important}"
 	case "clay":
 		primary = "#818cf8"
 		secondary = "#34d399"
 		accent = "#fbbf24"
-		styleCSS = "*{box-shadow:0 8px 0 rgba(0,0,0,0.12)!important;border-radius:16px!important}"
 	case "sketch":
 		primary = "#374151"
 		secondary = "#6b7280"
 		accent = "#ef4444"
-		styleCSS = "*{border:2px solid #1f2937;border-radius:2px!important;font-family:'Comic Sans MS',cursive,sans-serif}"
 	case "anime":
 		primary = "#6366f1"
 		secondary = "#ec4899"
 		accent = "#22d3ee"
-		styleCSS = "*{background:linear-gradient(135deg,#1e1b4b 0%,#312e81 100%)!important;color:#fff!important;border-radius:12px!important}"
 	case "professional":
 		primary = "#1e3a8a"
 		secondary = "#64748b"
 		accent = "#d97706"
-		styleCSS = "*{border-radius:4px!important;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}"
 	}
 
 	title := notebookTitle
@@ -1099,27 +1116,34 @@ func buildNotebookGeneratedInfographic(notebookTitle string, sources []notebookG
 		points = []string{"基于上传资料生成的视觉摘要"}
 	}
 
-	sectionsHTML := ""
-	for i, point := range points {
-		num := i + 1
-		sectionsHTML += fmt.Sprintf("<div style='flex:1;min-width:220px;background:%s;padding:18px;color:%s'><div style='font-size:28px;font-weight:700;margin-bottom:8px'>%d</div><div style='font-size:14px;line-height:1.5'>%s</div></div>", primary, "#ffffff", num, htmlEscape(point))
+	imagePrompt := fmt.Sprintf("A polished flat-design infographic, %dx%d pixels, with a clean white background, modern corporate typography, and a structured layout. Title: %s. Visual sections include numbered cards in a%s grid showing key insights: ", width, height, title, orientation)
+	if orientation == "portrait" {
+		imagePrompt = fmt.Sprintf("A polished flat-design vertical infographic, %dx%d pixels, clean white background, modern corporate typography, single-column structured layout. Title: %s. Visual sections include numbered stacked cards showing key insights: ", width, height, title)
+	} else if orientation == "square" {
+		imagePrompt = fmt.Sprintf("A polished flat-design square infographic, %dx%d pixels, clean white background, modern corporate typography, balanced two-column layout. Title: %s. Visual sections include numbered tiles showing key insights: ", width, height, title)
 	}
-
-	html := fmt.Sprintf(`<div style="width:%dpx;height:%dpx;background:%s;color:%s;padding:40px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;box-sizing:border-box;display:flex;flex-direction:column;gap:24px;%s">
-  <div>
-    <div style="font-size:32px;font-weight:800;color:%s;line-height:1.2">%s</div>
-    <div style="font-size:16px;color:%s;margin-top:8px">%s</div>
-  </div>
-  <div style="display:flex;flex-wrap:wrap;gap:16px">%s</div>
-  <div style="margin-top:auto;font-size:12px;color:%s">由 AI 根据 %d 个资料源生成</div>
-</div>`, width, height, background, textColor, styleCSS, primary, htmlEscape(title), secondary, htmlEscape(truncateNotebookRunes(prompt, 80, "…")), sectionsHTML, secondary, len(sources))
-
-	switch detailLevel {
-	case "short":
-		// keep compact
-	case "detailed":
-		html = strings.Replace(html, "font-size:14px", "font-size:15px", -1)
-		html = strings.Replace(html, "min-width:220px", "min-width:260px", -1)
+	for i, p := range points {
+		if i > 0 {
+			imagePrompt += "; "
+		}
+		imagePrompt += fmt.Sprintf("%d) %s", i+1, truncateNotebookRunes(p, 120, "…"))
+	}
+	switch style {
+	case "cute":
+		imagePrompt += ". Style: cute kawaii illustration, rounded shapes, soft pastel pink/purple/yellow palette, friendly icons, no small text."
+	case "clay":
+		imagePrompt += ". Style: 3D clay render, soft shadows, rounded forms, pastel colors, tactile material feel, no small text."
+	case "sketch":
+		imagePrompt += ". Style: hand-drawn sketch on paper texture, ink outlines, monochrome with warm accent, doodle icons, no small text."
+	case "anime":
+		imagePrompt += ". Style: anime key-visual, bold saturated gradients, speed lines, futuristic UI frames, no small text."
+	case "professional":
+		imagePrompt += ". Style: minimalist corporate infographic, navy and slate palette, crisp data visualizations, no small text."
+	default:
+		imagePrompt += ". Style: modern flat infographic, harmonious indigo/emerald/amber accents, simple iconography, no small text."
+	}
+	if prompt != "" {
+		imagePrompt += " Additional direction: " + prompt + "."
 	}
 
 	return map[string]any{
@@ -1127,7 +1151,8 @@ func buildNotebookGeneratedInfographic(notebookTitle string, sources []notebookG
 		"style":        style,
 		"detail_level": detailLevel,
 		"prompt":       prompt,
-		"html":         html,
+		"image_prompt": imagePrompt,
+		"image_url":    "",
 		"color_scheme": map[string]string{
 			"primary":    primary,
 			"secondary":  secondary,

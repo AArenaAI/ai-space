@@ -106,7 +106,7 @@ func TestBuildAINotebookArtifactDraftUsesAIJSON(t *testing.T) {
 	}
 	ai := &fakeNotebookAIService{response: `{"title":"AI 摘要标题","subtitle":"AI 副标题","content":{"sections":[{"heading":"AI 结论","body":"来自模型的结构化摘要"}]}}`}
 
-	draft, err := buildAINotebookArtifactDraft(context.Background(), ai, "summary", "知识库", files, []uint{1}, "zh-CN")
+	draft, err := buildAINotebookArtifactDraft(context.Background(), ai, nil, "summary", "知识库", files, []uint{1}, "zh-CN")
 	if err != nil {
 		t.Fatalf("buildAINotebookArtifactDraft returned error: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestBuildAINotebookArtifactDraftFallsBackWhenAIInvalid(t *testing.T) {
 	}
 	ai := &fakeNotebookAIService{response: `not json`}
 
-	draft, err := buildAINotebookArtifactDraft(context.Background(), ai, "summary", "知识库", files, []uint{1}, "zh-CN")
+	draft, err := buildAINotebookArtifactDraft(context.Background(), ai, nil, "summary", "知识库", files, []uint{1}, "zh-CN")
 	if err != nil {
 		t.Fatalf("buildAINotebookArtifactDraft should fall back instead of failing: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestBuildAINotebookArtifactDraftDeduplicatesAIReturnedTableRows(t *testing.
 	}
 	ai := &fakeNotebookAIService{response: `{"title":"AI 表格","subtitle":"AI 副标题","content":{"rows":[{"module":"多模型聊天","capability":"统一接入多个模型并支持对话","status":"成熟","implementation":"统一管理模型","value":"ChatGPT、Poe","source":"[1]"},{"module":"多模型聊天","capability":"统一接入多个模型并支持对话","status":"成熟","implementation":"统一管理模型","value":"ChatGPT、Poe","source":"[1]"},{"module":"Notebook资料问答","capability":"资料解析、问答和引用核查","status":"成熟","implementation":"RAG 流水线","value":"NotebookLM","source":"[1]"}]}}`}
 
-	draft, err := buildAINotebookArtifactDraft(context.Background(), ai, "table", "知识库", files, []uint{1}, "zh-CN")
+	draft, err := buildAINotebookArtifactDraft(context.Background(), ai, nil, "table", "知识库", files, []uint{1}, "zh-CN")
 	if err != nil {
 		t.Fatalf("table AI draft should succeed: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestBuildAINotebookArtifactDraftCleansAIReturnedFlashcards(t *testing.T) {
 	}
 	ai := &fakeNotebookAIService{response: `{"title":"AI 闪卡","subtitle":"AI 副标题","content":{"cards":[{"front":"【1】1.3 技能系统的核心内容是什么？","back":"[1] AI Space 技能系统预设了 9 种角色，包括 CEO 策略师、代码审查和翻译。插件架构支持运行时热加载。后续还会继续补充更多角色，用于不同工作场景。","source":"[1]"}]}}`}
 
-	draft, err := buildAINotebookArtifactDraft(context.Background(), ai, "flashcards", "知识库", files, []uint{1}, "zh-CN")
+	draft, err := buildAINotebookArtifactDraft(context.Background(), ai, nil, "flashcards", "知识库", files, []uint{1}, "zh-CN")
 	if err != nil {
 		t.Fatalf("flashcard AI draft should succeed: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestBuildAINotebookArtifactDraftKeepsFlashcardTitleWhenAIReturnsSummaryTitl
 	}
 	ai := &fakeNotebookAIService{response: `{"title":"摘要","subtitle":"AI 副标题","content":{"cards":[{"front":"技能系统预设了多少种角色？","back":"技能系统预设了 9 种角色。","source":""}]}}`}
 
-	draft, err := buildAINotebookArtifactDraft(context.Background(), ai, "flashcards", "测试 1", files, []uint{1}, "zh-CN")
+	draft, err := buildAINotebookArtifactDraft(context.Background(), ai, nil, "flashcards", "测试 1", files, []uint{1}, "zh-CN")
 	if err != nil {
 		t.Fatalf("flashcard AI draft should succeed: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestBuildAINotebookReportFallsBackWhenBackgroundResponseIsNotReady(t *testi
 		},
 	}
 
-	draft, err := buildAINotebookArtifactDraft(ctx, ai, "report:briefing-document", "AI Space", files, []uint{1}, "zh-CN")
+	draft, err := buildAINotebookArtifactDraft(ctx, ai, nil, "report:briefing-document", "AI Space", files, []uint{1}, "zh-CN")
 	if err != nil {
 		t.Fatalf("report should fall back instead of surfacing background wait errors: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestBuildAINotebookMindmapRejectsInvalidAIInsteadOfFallback(t *testing.T) {
 	}
 	ai := &fakeNotebookAIService{response: `not json`}
 
-	_, err := buildAINotebookArtifactDraft(context.Background(), ai, "mindmap", "测试1", files, []uint{1}, "zh-CN")
+	_, err := buildAINotebookArtifactDraft(context.Background(), ai, nil, "mindmap", "测试1", files, []uint{1}, "zh-CN")
 	if err == nil {
 		t.Fatalf("mindmap should reject invalid AI output instead of saving fallback pseudo-map")
 	}
@@ -274,7 +274,7 @@ func TestBuildAINotebookMindmapWaitsForBackgroundResponse(t *testing.T) {
 		},
 	}
 
-	draft, err := buildAINotebookArtifactDraft(context.Background(), ai, "mindmap", "测试1", files, []uint{1}, "zh-CN")
+	draft, err := buildAINotebookArtifactDraft(context.Background(), ai, nil, "mindmap", "测试1", files, []uint{1}, "zh-CN")
 	if err != nil {
 		t.Fatalf("background mindmap should wait for completed output: %v", err)
 	}

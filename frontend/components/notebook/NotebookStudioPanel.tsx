@@ -4,7 +4,6 @@ import { CSSProperties, useEffect, useMemo, useRef, useState, type ComponentType
 import { BarChart3, CheckCircle2, ChevronLeft, ChevronRight, ChevronsRight, Copy, Download, ExternalLink, FileQuestion, FileText, HelpCircle, Layers3, Lightbulb, Loader2, Map as MapIcon, Maximize2, MessageCircle, MoreHorizontal, Pencil, Presentation, RefreshCw, Sparkles, Trash2, X, XCircle, ZoomIn, ZoomOut } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { toPng } from "html-to-image";
 
 export type NotebookStudioActionId = "table" | "summary" | "faq" | "briefing" | "mindmap" | "flashcards" | "quiz" | "report" | "slides" | "infographic";
 
@@ -13,7 +12,7 @@ export type NotebookStudioInfographic = {
   style: string;
   detail_level: string;
   prompt: string;
-  html: string;
+  image_url: string;
   color_scheme?: Record<string, string>;
 };
 
@@ -157,7 +156,7 @@ export type NotebookStudioArtifact =
       style: string;
       detail_level: string;
       prompt: string;
-      html: string;
+      image_url: string;
       color_scheme?: Record<string, string>;
     };
 
@@ -921,35 +920,52 @@ function InfographicArtifactView({
   const { t } = useI18n();
   const [scale, setScale] = useState(1);
   const [downloading, setDownloading] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const html = artifact.html || "";
+  const imageUrl = artifact.image_url || "";
 
-  const handleZoomIn = () => setScale((s) => Math.min(s + 0.15, 3));
-  const handleZoomOut = () => setScale((s) => Math.max(s - 0.15, 0.3));
+  const handleZoomIn = () => setScale((s) => Math.min(s + 0.25, 4));
+  const handleZoomOut = () => setScale((s) => Math.max(s - 0.25, 0.5));
+  const handleReset = () => setScale(1);
 
-  const handleDownloadPng = async () => {
-    const node = contentRef.current;
-    if (!node) return;
+  const handleDownloadImage = async () => {
+    if (!imageUrl) {
+      onDownload?.(artifact);
+      return;
+    }
     setDownloading(true);
     try {
-      const dataUrl = await toPng(node, { pixelRatio: 2, backgroundColor: "#ffffff" });
+      const url = imageUrl.startsWith("http") || imageUrl.startsWith("/") ? imageUrl : `/${imageUrl}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("fetch failed");
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
-      link.download = `${artifact.title.replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, "_") || "infographic"}.png`;
-      link.href = dataUrl;
+      const ext = blob.type?.includes("png") ? "png" : blob.type?.includes("jpeg") || blob.type?.includes("jpg") ? "jpg" : "png";
+      link.download = `${artifact.title.replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, "_") || "infographic"}.${ext}`;
+      link.href = objectUrl;
       link.click();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 5000);
     } catch {
-      // Fallback to parent's handler if PNG generation fails
       onDownload?.(artifact);
     } finally {
       setDownloading(false);
     }
   };
 
+  if (!imageUrl) {
+    return (
+      <div className={cn("flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-surface-border bg-surface-elevated/40 p-8 text-center", expanded ? "h-full" : "max-h-[560px]")}>
+        <div className="rounded-full bg-surface-elevated p-3">
+          <BarChart3 className="h-6 w-6 text-text-tertiary" />
+        </div>
+        <div className="text-sm font-medium text-text-secondary">{t("notebook.studio.infographicEmpty")}</div>
+        <div className="text-xs text-text-tertiary">{t("notebook.studio.infographicEmptyHint")}</div>
+      </div>
+    );
+  }
+
   return (
     <div className={cn("flex flex-col", expanded ? "h-full" : "max-h-[560px]")}>
       <div
-        ref={containerRef}
         className={cn(
           "relative flex-1 overflow-auto rounded-2xl border border-surface-border bg-surface-elevated/40",
           expanded ? "min-h-0" : "max-h-[480px]"
@@ -959,27 +975,30 @@ function InfographicArtifactView({
           className="flex min-h-full min-w-full items-center justify-center p-6"
           style={{ transform: `scale(${scale})`, transformOrigin: "center top" }}
         >
-          <div
-            ref={contentRef}
-            className="rounded-xl shadow-xl"
-            // eslint-disable-next-line react/no-danger
-            dangerouslySetInnerHTML={{ __html: html }}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={imageUrl}
+            alt={artifact.title}
+            className="max-w-none rounded-xl shadow-xl"
+            style={{ maxHeight: expanded ? "none" : "420px" }}
           />
         </div>
       </div>
       <div className="mt-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <button type="button" onClick={handleZoomOut} className="rounded-full border border-surface-border p-2 text-text-secondary hover:bg-surface-elevated" title="缩小">
+          <button type="button" onClick={handleZoomOut} className="rounded-full border border-surface-border p-2 text-text-secondary hover:bg-surface-elevated" title={t("notebook.studio.zoomOut")}>
             <ZoomOut className="h-4 w-4" />
           </button>
-          <span className="min-w-[3rem] text-center text-xs font-medium text-text-secondary">{Math.round(scale * 100)}%</span>
-          <button type="button" onClick={handleZoomIn} className="rounded-full border border-surface-border p-2 text-text-secondary hover:bg-surface-elevated" title="放大">
+          <button type="button" onClick={handleReset} className="min-w-[3rem] text-center text-xs font-medium text-text-secondary hover:text-text-primary">
+            {Math.round(scale * 100)}%
+          </button>
+          <button type="button" onClick={handleZoomIn} className="rounded-full border border-surface-border p-2 text-text-secondary hover:bg-surface-elevated" title={t("notebook.studio.zoomIn")}>
             <ZoomIn className="h-4 w-4" />
           </button>
         </div>
         <button
           type="button"
-          onClick={handleDownloadPng}
+          onClick={handleDownloadImage}
           disabled={downloading}
           className="inline-flex items-center gap-1.5 rounded-full border border-surface-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-surface-elevated disabled:opacity-60"
         >

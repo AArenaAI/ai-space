@@ -88,7 +88,7 @@ function normalizeFlashcardArtifactTitle(title: string) {
 }
 
 function toStudioArtifact(artifact: PersistedNotebookArtifact): NotebookStudioArtifact | null {
-  const content = artifact.content as { rows?: NotebookStudioTableRow[]; sections?: NotebookStudioTextSection[] | NotebookStudioReportSection[]; nodes?: NotebookStudioMindmapNode[]; edges?: NotebookStudioMindmapEdge[]; cards?: NotebookStudioFlashcard[]; questions?: NotebookStudioQuizQuestion[]; format_id?: string; format_title?: string; executive_summary?: string; tables?: NotebookStudioReportTable[]; orientation?: string; style?: string; detail_level?: string; prompt?: string; html?: string; color_scheme?: Record<string, string> } | null;
+  const content = artifact.content as { rows?: NotebookStudioTableRow[]; sections?: NotebookStudioTextSection[] | NotebookStudioReportSection[]; nodes?: NotebookStudioMindmapNode[]; edges?: NotebookStudioMindmapEdge[]; cards?: NotebookStudioFlashcard[]; questions?: NotebookStudioQuizQuestion[]; format_id?: string; format_title?: string; executive_summary?: string; tables?: NotebookStudioReportTable[]; orientation?: string; style?: string; detail_level?: string; prompt?: string; image_url?: string; color_scheme?: Record<string, string> } | null;
   const base = {
     id: String(artifact.id),
     title: artifact.type === "flashcards" ? normalizeFlashcardArtifactTitle(artifact.title) : artifact.title,
@@ -135,7 +135,7 @@ function toStudioArtifact(artifact: PersistedNotebookArtifact): NotebookStudioAr
       style: typeof content?.style === "string" ? content.style : "auto",
       detail_level: typeof content?.detail_level === "string" ? content.detail_level : "standard",
       prompt: typeof content?.prompt === "string" ? content.prompt : "",
-      html: typeof content?.html === "string" ? content.html : "",
+      image_url: typeof content?.image_url === "string" ? content.image_url : "",
       color_scheme: typeof content?.color_scheme === "object" && content?.color_scheme ? content.color_scheme : undefined,
     };
   }
@@ -217,7 +217,7 @@ function artifactToMarkdown(artifact: NotebookStudioArtifact) {
     case "infographic":
       lines.push("## Infographic", "", `- Orientation: ${artifact.orientation}`, `- Style: ${artifact.style}`, `- Detail level: ${artifact.detail_level}`, "");
       if (artifact.prompt) lines.push("## Custom prompt", "", artifact.prompt, "");
-      if (artifact.html) lines.push("## HTML content", "", "```html", artifact.html, "```", "");
+      if (artifact.image_url) lines.push("## Image", "", artifact.image_url, "");
       break;
   }
   return lines.join("\n").trim() + "\n";
