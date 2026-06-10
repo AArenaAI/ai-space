@@ -151,7 +151,7 @@ const ChatMessageOverview = memo(function ChatMessageOverview({
         <div
           className={cn(
             "invisible absolute right-8 top-1/2 z-[150] flex w-[320px] -translate-y-1/2 overflow-hidden rounded-2xl border border-surface-border bg-surface-elevated px-2 py-2 opacity-0 shadow-2xl shadow-black/25 group-hover:visible group-hover:pointer-events-auto group-hover:opacity-100 dark:border-[#2b2b2b] dark:bg-[#171717]",
-            isWheel && "h-[378px]"
+            isWheel && "h-[378px] overflow-y-auto"
           )}
           data-testid="chat-message-overview-panel"
         >
