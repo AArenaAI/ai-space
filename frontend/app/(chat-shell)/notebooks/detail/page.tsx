@@ -88,7 +88,7 @@ function normalizeFlashcardArtifactTitle(title: string) {
 }
 
 function toStudioArtifact(artifact: PersistedNotebookArtifact): NotebookStudioArtifact | null {
-  const content = artifact.content as { rows?: NotebookStudioTableRow[]; sections?: NotebookStudioTextSection[] | NotebookStudioReportSection[]; nodes?: NotebookStudioMindmapNode[]; edges?: NotebookStudioMindmapEdge[]; cards?: NotebookStudioFlashcard[]; questions?: NotebookStudioQuizQuestion[]; format_id?: string; format_title?: string; executive_summary?: string; tables?: NotebookStudioReportTable[] } | null;
+  const content = artifact.content as { rows?: NotebookStudioTableRow[]; sections?: NotebookStudioTextSection[] | NotebookStudioReportSection[]; nodes?: NotebookStudioMindmapNode[]; edges?: NotebookStudioMindmapEdge[]; cards?: NotebookStudioFlashcard[]; questions?: NotebookStudioQuizQuestion[]; format_id?: string; format_title?: string; executive_summary?: string; tables?: NotebookStudioReportTable[]; orientation?: string; style?: string; detail_level?: string; prompt?: string; html?: string; color_scheme?: Record<string, string> } | null;
   const base = {
     id: String(artifact.id),
     title: artifact.type === "flashcards" ? normalizeFlashcardArtifactTitle(artifact.title) : artifact.title,
@@ -125,6 +125,18 @@ function toStudioArtifact(artifact: PersistedNotebookArtifact): NotebookStudioAr
       executiveSummary: typeof content?.executive_summary === "string" ? content.executive_summary : "",
       sections: Array.isArray(content?.sections) ? content.sections as NotebookStudioReportSection[] : [],
       tables: Array.isArray(content?.tables) ? content.tables : [],
+    };
+  }
+  if (artifact.type === "infographic") {
+    return {
+      ...base,
+      type: "infographic",
+      orientation: typeof content?.orientation === "string" ? content.orientation : "landscape",
+      style: typeof content?.style === "string" ? content.style : "auto",
+      detail_level: typeof content?.detail_level === "string" ? content.detail_level : "standard",
+      prompt: typeof content?.prompt === "string" ? content.prompt : "",
+      html: typeof content?.html === "string" ? content.html : "",
+      color_scheme: typeof content?.color_scheme === "object" && content?.color_scheme ? content.color_scheme : undefined,
     };
   }
   return null;
@@ -201,6 +213,12 @@ function artifactToMarkdown(artifact: NotebookStudioArtifact) {
         }
         lines.push("");
       });
+      break;
+    case "infographic":
+      lines.push("## Infographic", "", `- Orientation: ${artifact.orientation}`, `- Style: ${artifact.style}`, `- Detail level: ${artifact.detail_level}`, "");
+      if (artifact.prompt) lines.push("## Custom prompt", "", artifact.prompt, "");
+      if (artifact.html) lines.push("## HTML content", "", "```html", artifact.html, "```", "");
+      break;
   }
   return lines.join("\n").trim() + "\n";
 }
@@ -746,7 +764,7 @@ function NotebookDetailContent() {
     }
   };
 
-  const generateStudioArtifactByType = async (type: string, visualType: NotebookStudioActionId) => {
+  const generateStudioArtifactByType = async (type: string, visualType: NotebookStudioActionId, options?: { orientation?: string; style?: string; detail_level?: string; prompt?: string }) => {
     if (!notebookId) return;
     setGeneratingStudioType(visualType);
     try {
@@ -755,13 +773,21 @@ function NotebookDetailContent() {
         type,
         file_ids: selectedFileIds,
         language: language as LanguageCode,
+        orientation: options?.orientation,
+        style: options?.style,
+        detail_level: options?.detail_level,
+        prompt: options?.prompt,
       });
       const artifact = toStudioArtifact(saved);
       if (artifact) {
         setStudioArtifacts((prev) => [artifact, ...prev.filter((item) => item.id !== artifact.id)]);
-        setActiveStudioArtifactId(artifact.id);
+        if (artifact.type === "infographic") {
+          setActiveStudioArtifactId(null);
+        } else {
+          setActiveStudioArtifactId(artifact.id);
+        }
       }
-      toast.success(visualType === "table" ? t("notebook.studio.tableGenerated") : visualType === "quiz" ? t("notebook.studio.quizGenerated") : visualType === "report" ? t("notebook.studio.reportGenerated") : t("notebook.studio.textGenerated"));
+      toast.success(visualType === "table" ? t("notebook.studio.tableGenerated") : visualType === "quiz" ? t("notebook.studio.quizGenerated") : visualType === "report" ? t("notebook.studio.reportGenerated") : visualType === "infographic" ? t("notebook.studio.infographicGenerated") : t("notebook.studio.textGenerated"));
     } catch (error) {
       showNotebookError(error, t("notebook.studio.saveFailed"));
     } finally {
@@ -775,13 +801,22 @@ function NotebookDetailContent() {
     void generateStudioArtifactByType(reportType, "report");
   };
 
-  const handleStudioGenerate = async (type: NotebookStudioActionId) => {
+  const handleStudioGenerate = async (type: NotebookStudioActionId, options?: { orientation?: string; style?: string; detail_level?: string; prompt?: string }) => {
     if (type === "slides") {
       toast.info(t("notebook.studio.comingSoon"));
       return;
     }
     if (type === "report") {
       await openReportDialog();
+      return;
+    }
+    if (type === "infographic") {
+      if (!notebookId) return;
+      if (selectedFileIds.length === 0) {
+        toast.info(t("notebook.studio.selectSourcesFirst"));
+        return;
+      }
+      await generateStudioArtifactByType("infographic", "infographic", options);
       return;
     }
     if (!notebookId) return;

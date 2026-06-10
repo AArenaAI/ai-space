@@ -139,6 +139,10 @@ export async function generateNotebookArtifact(input: {
   type: string;
   file_ids?: number[];
   language?: string;
+  orientation?: string;
+  style?: string;
+  detail_level?: string;
+  prompt?: string;
 }): Promise<NotebookArtifact> {
   const response = await fetch(`/api/notebooks/${input.notebookId}/artifacts/generate`, {
     method: "POST",
@@ -147,6 +151,10 @@ export async function generateNotebookArtifact(input: {
       type: input.type,
       file_ids: input.file_ids || [],
       language: input.language,
+      orientation: input.orientation,
+      style: input.style,
+      detail_level: input.detail_level,
+      prompt: input.prompt,
     }),
   });
   return parseNotebookResponse<NotebookArtifact>(response, "生成 Studio 输出失败");

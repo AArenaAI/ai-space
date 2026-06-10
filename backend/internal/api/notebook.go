@@ -468,16 +468,26 @@ func (h *NotebookHandler) GenerateArtifact(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Type     string `json:"type"`
-		FileIDs  []uint `json:"file_ids"`
-		Language string `json:"language"`
+		Type        string `json:"type"`
+		FileIDs     []uint `json:"file_ids"`
+		Language    string `json:"language"`
+		Orientation string `json:"orientation"`
+		Style       string `json:"style"`
+		DetailLevel string `json:"detail_level"`
+		Prompt      string `json:"prompt"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	files := h.loadNotebookGenerationFiles(nb.ID, getUserID(c))
-	draft, err := buildAINotebookArtifactDraft(c.Request.Context(), h.aiService, req.Type, nb.Title, files, req.FileIDs, req.Language)
+	opts := notebookArtifactGenerationOptions{
+		Orientation: strings.TrimSpace(req.Orientation),
+		Style:       strings.TrimSpace(req.Style),
+		DetailLevel: strings.TrimSpace(req.DetailLevel),
+		Prompt:      strings.TrimSpace(req.Prompt),
+	}
+	draft, err := buildAINotebookArtifactDraft(c.Request.Context(), h.aiService, req.Type, nb.Title, files, req.FileIDs, req.Language, opts)
 	if err != nil {
 		fmt.Printf("[Notebook Artifact] generate failed notebook_id=%d type=%s file_count=%d selected_files=%d error=%v\n", nb.ID, req.Type, len(files), len(req.FileIDs), err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

@@ -4,8 +4,18 @@ import { CSSProperties, useEffect, useMemo, useRef, useState, type ComponentType
 import { BarChart3, CheckCircle2, ChevronLeft, ChevronRight, ChevronsRight, Copy, Download, ExternalLink, FileQuestion, FileText, HelpCircle, Layers3, Lightbulb, Loader2, Map as MapIcon, Maximize2, MessageCircle, MoreHorizontal, Pencil, Presentation, RefreshCw, Sparkles, Trash2, X, XCircle, ZoomIn, ZoomOut } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { toPng } from "html-to-image";
 
-export type NotebookStudioActionId = "table" | "summary" | "faq" | "briefing" | "mindmap" | "flashcards" | "quiz" | "report" | "slides";
+export type NotebookStudioActionId = "table" | "summary" | "faq" | "briefing" | "mindmap" | "flashcards" | "quiz" | "report" | "slides" | "infographic";
+
+export type NotebookStudioInfographic = {
+  orientation: string;
+  style: string;
+  detail_level: string;
+  prompt: string;
+  html: string;
+  color_scheme?: Record<string, string>;
+};
 
 export type NotebookStudioTableRow = {
   module: string;
@@ -135,6 +145,20 @@ export type NotebookStudioArtifact =
       executiveSummary: string;
       sections: NotebookStudioReportSection[];
       tables: NotebookStudioReportTable[];
+    }
+  | {
+      id: string;
+      type: "infographic";
+      title: string;
+      subtitle: string;
+      createdAt: string;
+      sourceCount: number;
+      orientation: string;
+      style: string;
+      detail_level: string;
+      prompt: string;
+      html: string;
+      color_scheme?: Record<string, string>;
     };
 
 type NotebookStudioPanelProps = {
@@ -144,7 +168,7 @@ type NotebookStudioPanelProps = {
   generatingType?: NotebookStudioActionId | null;
   selectedSourceCount?: number;
   sourceFiles?: NotebookStudioSource[];
-  onGenerate: (type: NotebookStudioActionId) => void;
+  onGenerate: (type: NotebookStudioActionId, options?: { orientation?: string; style?: string; detail_level?: string; prompt?: string }) => void;
   onOpenArtifact: (artifactId: string | null) => void;
   onRenameArtifact?: (artifact: NotebookStudioArtifact) => void;
   onDeleteArtifact?: (artifact: NotebookStudioArtifact) => void;
@@ -207,6 +231,16 @@ function StudioQuizIcon({ className }: StudioIconProps) {
   );
 }
 
+function StudioInfographicIcon({ className }: StudioIconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <rect x="4" y="14" width="4" height="6" rx="1" />
+      <rect x="10" y="8" width="4" height="12" rx="1" />
+      <rect x="16" y="4" width="4" height="16" rx="1" />
+    </svg>
+  );
+}
+
 const actionIconMap: Record<NotebookStudioActionId, StudioIcon> = {
   table: StudioTableIcon,
   summary: FileText,
@@ -217,6 +251,7 @@ const actionIconMap: Record<NotebookStudioActionId, StudioIcon> = {
   quiz: StudioQuizIcon,
   report: StudioReportIcon,
   slides: Presentation,
+  infographic: StudioInfographicIcon,
 };
 
 const artifactIconMap: Record<NotebookStudioArtifact["type"], StudioIcon> = {
@@ -228,6 +263,7 @@ const artifactIconMap: Record<NotebookStudioArtifact["type"], StudioIcon> = {
   flashcards: StudioFlashcardIcon,
   quiz: StudioQuizIcon,
   report: StudioReportIcon,
+  infographic: StudioInfographicIcon,
 };
 
 const artifactIconTone: Record<NotebookStudioArtifact["type"], string> = {
@@ -239,6 +275,7 @@ const artifactIconTone: Record<NotebookStudioArtifact["type"], string> = {
   flashcards: "text-red-900 dark:text-rose-300",
   quiz: "text-purple-800 dark:text-purple-300",
   report: "text-[#8a7a35] dark:text-yellow-300",
+  infographic: "text-violet-600 dark:text-violet-300",
 };
 
 const primaryStudioActionIconTone: Partial<Record<NotebookStudioActionId, string>> = {
@@ -246,6 +283,7 @@ const primaryStudioActionIconTone: Partial<Record<NotebookStudioActionId, string
   flashcards: artifactIconTone.flashcards,
   quiz: artifactIconTone.quiz,
   report: artifactIconTone.report,
+  infographic: artifactIconTone.infographic,
 };
 
 function formatTime(value: string) {
@@ -871,6 +909,88 @@ function QuizArtifactView({ artifact, t, onExplain }: { artifact: Extract<Notebo
   );
 }
 
+function InfographicArtifactView({
+  artifact,
+  expanded = false,
+  onDownload,
+}: {
+  artifact: Extract<NotebookStudioArtifact, { type: "infographic" }>;
+  expanded?: boolean;
+  onDownload?: (artifact: NotebookStudioArtifact) => void;
+}) {
+  const { t } = useI18n();
+  const [scale, setScale] = useState(1);
+  const [downloading, setDownloading] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const html = artifact.html || "";
+
+  const handleZoomIn = () => setScale((s) => Math.min(s + 0.15, 3));
+  const handleZoomOut = () => setScale((s) => Math.max(s - 0.15, 0.3));
+
+  const handleDownloadPng = async () => {
+    const node = contentRef.current;
+    if (!node) return;
+    setDownloading(true);
+    try {
+      const dataUrl = await toPng(node, { pixelRatio: 2, backgroundColor: "#ffffff" });
+      const link = document.createElement("a");
+      link.download = `${artifact.title.replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, "_") || "infographic"}.png`;
+      link.href = dataUrl;
+      link.click();
+    } catch {
+      // Fallback to parent's handler if PNG generation fails
+      onDownload?.(artifact);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  return (
+    <div className={cn("flex flex-col", expanded ? "h-full" : "max-h-[560px]")}>
+      <div
+        ref={containerRef}
+        className={cn(
+          "relative flex-1 overflow-auto rounded-2xl border border-surface-border bg-surface-elevated/40",
+          expanded ? "min-h-0" : "max-h-[480px]"
+        )}
+      >
+        <div
+          className="flex min-h-full min-w-full items-center justify-center p-6"
+          style={{ transform: `scale(${scale})`, transformOrigin: "center top" }}
+        >
+          <div
+            ref={contentRef}
+            className="rounded-xl shadow-xl"
+            // eslint-disable-next-line react/no-danger
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
+        </div>
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={handleZoomOut} className="rounded-full border border-surface-border p-2 text-text-secondary hover:bg-surface-elevated" title="缩小">
+            <ZoomOut className="h-4 w-4" />
+          </button>
+          <span className="min-w-[3rem] text-center text-xs font-medium text-text-secondary">{Math.round(scale * 100)}%</span>
+          <button type="button" onClick={handleZoomIn} className="rounded-full border border-surface-border p-2 text-text-secondary hover:bg-surface-elevated" title="放大">
+            <ZoomIn className="h-4 w-4" />
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={handleDownloadPng}
+          disabled={downloading}
+          className="inline-flex items-center gap-1.5 rounded-full border border-surface-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-surface-elevated disabled:opacity-60"
+        >
+          {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+          {t("notebook.studio.infographicDownloadPng")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function renderActiveArtifact(artifact: NotebookStudioArtifact, t: (key: string, params?: Record<string, string>) => string, expanded = false, onDownloadArtifact?: (artifact: NotebookStudioArtifact) => void, onExplainFlashcard?: (card: NotebookStudioFlashcard) => void, onExplainQuiz?: (question: NotebookStudioQuizQuestion, selectedOptionId: string | null) => void) {
   switch (artifact.type) {
     case "table":
@@ -883,6 +1003,8 @@ function renderActiveArtifact(artifact: NotebookStudioArtifact, t: (key: string,
       return <QuizArtifactView artifact={artifact} t={t} onExplain={onExplainQuiz} />;
     case "report":
       return renderReportArtifact(artifact, expanded);
+    case "infographic":
+      return <InfographicArtifactView artifact={artifact} expanded={expanded} onDownload={onDownloadArtifact} />;
     case "summary":
     case "faq":
     case "briefing":
@@ -890,8 +1012,148 @@ function renderActiveArtifact(artifact: NotebookStudioArtifact, t: (key: string,
   }
 }
 
+function InfographicConfigDialog({
+  open,
+  generating,
+  onClose,
+  onGenerate,
+  t,
+}: {
+  open: boolean;
+  generating: boolean;
+  onClose: () => void;
+  onGenerate: (options: { orientation: string; style: string; detail_level: string; prompt: string }) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const [orientation, setOrientation] = useState<"landscape" | "portrait" | "square">("landscape");
+  const [detailLevel, setDetailLevel] = useState<"short" | "standard" | "detailed">("standard");
+  const [style, setStyle] = useState<string>("auto");
+  const [prompt, setPrompt] = useState("");
+
+  const styles = [
+    { id: "auto", label: t("notebook.studio.infographicStyleAuto"), icon: Sparkles },
+    { id: "cute", label: t("notebook.studio.infographicStyleCute"), icon: null },
+    { id: "clay", label: t("notebook.studio.infographicStyleClay"), icon: null },
+    { id: "sketch", label: t("notebook.studio.infographicStyleSketch"), icon: null },
+    { id: "anime", label: t("notebook.studio.infographicStyleAnime"), icon: null },
+    { id: "professional", label: t("notebook.studio.infographicStyleProfessional"), icon: null },
+  ];
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/45 p-5 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="flex max-h-[88vh] w-[min(640px,94vw)] flex-col overflow-hidden rounded-[22px] border border-surface-border bg-surface-card shadow-2xl">
+        <div className="flex items-center justify-between border-b border-surface-border px-6 py-4">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-500/10 text-violet-600">
+              <StudioInfographicIcon className="h-5 w-5" />
+            </span>
+            <div>
+              <h3 className="text-lg font-semibold tracking-[-0.02em] text-text-primary">{t("notebook.studio.infographicDialogTitle")}</h3>
+              <p className="text-xs text-text-tertiary">{t("notebook.studio.infographicDialogSubtitle")}</p>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} disabled={generating} className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-elevated text-lg leading-none text-text-tertiary transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-50" aria-label="Close">×</button>
+        </div>
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
+          <div className="space-y-2">
+            <label className="text-sm font-semibold text-text-primary">{t("notebook.studio.infographicOrientation")}</label>
+            <div className="inline-flex rounded-xl border border-surface-border bg-surface-elevated p-1">
+              {(["landscape", "portrait", "square"] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setOrientation(value)}
+                  className={cn(
+                    "rounded-lg px-4 py-2 text-sm font-medium transition",
+                    orientation === value ? "bg-surface-card text-text-primary shadow-sm" : "text-text-tertiary hover:text-text-secondary"
+                  )}
+                >
+                  {t(`notebook.studio.infographicOrientation.${value}`)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-semibold text-text-primary">{t("notebook.studio.infographicDetailLevel")}</label>
+            <div className="inline-flex rounded-xl border border-surface-border bg-surface-elevated p-1">
+              {(["short", "standard", "detailed"] as const).map((value, index) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setDetailLevel(value)}
+                  className={cn(
+                    "rounded-lg px-4 py-2 text-sm font-medium transition",
+                    detailLevel === value ? "bg-surface-card text-text-primary shadow-sm" : "text-text-tertiary hover:text-text-secondary"
+                  )}
+                >
+                  {t(`notebook.studio.infographicDetailLevel.${value}`)}
+                  {index === 2 ? <span className="ml-1.5 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-300">Beta</span> : null}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-semibold text-text-primary">{t("notebook.studio.infographicVisualStyle")}</label>
+            <div className="flex gap-3 overflow-x-auto pb-2">
+              {styles.map((item) => {
+                const Icon = item.icon;
+                const selected = style === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setStyle(item.id)}
+                    className={cn(
+                      "flex min-w-[88px] flex-col items-center gap-2 rounded-xl border px-3 py-3 transition",
+                      selected ? "border-brand bg-brand-muted/30 ring-1 ring-brand/20" : "border-surface-border bg-surface-elevated hover:border-surface-border hover:bg-surface-hover"
+                    )}
+                  >
+                    <span className={cn("flex h-10 w-10 items-center justify-center rounded-full", selected ? "bg-brand text-white" : "bg-surface-card text-text-secondary")}>
+                      {Icon ? <Icon className="h-5 w-5" /> : <span className="text-sm font-semibold">{item.label.slice(0, 1)}</span>}
+                    </span>
+                    <span className="text-xs font-medium text-text-secondary">{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-semibold text-text-primary">{t("notebook.studio.infographicPromptLabel")}</label>
+            <textarea
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              placeholder={t("notebook.studio.infographicPromptPlaceholder")}
+              rows={3}
+              className="w-full resize-none rounded-xl border border-surface-border bg-surface-elevated px-4 py-3 text-sm text-text-primary placeholder:text-text-tertiary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/10"
+            />
+          </div>
+        </div>
+        <div className="flex items-center justify-between border-t border-surface-border px-6 py-4">
+          <div className="text-xs text-text-tertiary">{t("notebook.studio.infographicGenerationHint")}</div>
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} disabled={generating} className="rounded-full border border-surface-border px-4 py-2 text-sm font-semibold text-text-secondary transition hover:bg-surface-hover disabled:opacity-50">{t("common.cancel")}</button>
+            <button
+              type="button"
+              onClick={() => onGenerate({ orientation, style, detail_level: detailLevel, prompt })}
+              disabled={generating}
+              className="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white transition hover:bg-brand-hover disabled:opacity-70"
+            >
+              {generating && <Loader2 className="h-4 w-4 animate-spin" />}
+              {t("notebook.studio.generateInfographic")}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function GeneratingStudioCard({ type, sourceCount, t }: { type: NotebookStudioActionId; sourceCount: number; t: (key: string, params?: Record<string, string>) => string }) {
-  const titleKey = type === "mindmap" ? "notebook.studio.generatingMindmap" : type === "flashcards" ? "notebook.studio.generatingFlashcards" : type === "quiz" ? "notebook.studio.generatingQuiz" : type === "report" ? "notebook.studio.generatingReport" : "notebook.studio.generatingTable";
+  const titleKey = type === "mindmap" ? "notebook.studio.generatingMindmap" : type === "flashcards" ? "notebook.studio.generatingFlashcards" : type === "quiz" ? "notebook.studio.generatingQuiz" : type === "report" ? "notebook.studio.generatingReport" : type === "infographic" ? "notebook.studio.generatingInfographic" : "notebook.studio.generatingTable";
   return (
     <div className="mb-3 rounded-2xl border border-surface-border bg-surface-card px-3 py-3 shadow-sm">
       <div className="flex items-center gap-3">
@@ -975,6 +1237,7 @@ export function NotebookStudioPanel({
   const [viewerArtifactId, setViewerArtifactId] = useState<string | null>(null);
   const [sourcePopoverKey, setSourcePopoverKey] = useState<string | null>(null);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [infographicDialogOpen, setInfographicDialogOpen] = useState(false);
   const activeArtifact = artifacts.find((artifact) => artifact.id === activeArtifactId) || null;
   const viewerArtifact = artifacts.find((artifact) => artifact.id === viewerArtifactId) || null;
   const sourcesForArtifact = (artifact: NotebookStudioArtifact) => sourceFiles.slice(0, Math.max(0, artifact.sourceCount || 0));
@@ -987,8 +1250,30 @@ export function NotebookStudioPanel({
     { id: "flashcards", title: t("notebook.studio.flashcards"), desc: t("notebook.studio.flashcardsDesc"), accent: "from-pink-500/15 to-rose-500/10 text-pink-500" },
     { id: "quiz", title: t("notebook.studio.quiz"), desc: t("notebook.studio.quizDesc"), accent: "from-purple-500/15 to-violet-500/10 text-purple-500" },
     { id: "report", title: t("notebook.studio.report"), desc: t("notebook.studio.reportDesc"), accent: "from-slate-500/15 to-blue-500/10 text-slate-600 dark:text-slate-300" },
+    { id: "infographic", title: t("notebook.studio.infographic"), desc: t("notebook.studio.infographicDesc"), accent: "from-violet-500/15 to-purple-500/10 text-violet-500" },
     { id: "slides", title: t("notebook.studio.slides"), desc: t("notebook.studio.slidesDesc"), accent: "from-rose-500/15 to-pink-500/10 text-rose-500" },
   ];
+
+  const handleActionClick = (actionId: NotebookStudioActionId) => {
+    if (actionId === "infographic") {
+      setInfographicDialogOpen(true);
+      return;
+    }
+    onGenerate(actionId);
+  };
+
+  const handleArtifactClick = (artifact: NotebookStudioArtifact) => {
+    if (artifact.type === "infographic") {
+      setViewerArtifactId(artifact.id);
+      return;
+    }
+    onOpenArtifact(artifact.id);
+  };
+
+  const handleInfographicGenerate = (options: { orientation: string; style: string; detail_level: string; prompt: string }) => {
+    setInfographicDialogOpen(false);
+    onGenerate("infographic", options);
+  };
 
   if (isCollapsed) {
     return (
@@ -1005,7 +1290,7 @@ export function NotebookStudioPanel({
               const isGenerating = generatingType === action.id;
               const primaryIconTone = primaryStudioActionIconTone[action.id];
               return (
-                <button key={action.id} type="button" onClick={() => onGenerate(action.id)} disabled={Boolean(generatingType)} title={action.title} className="group flex h-11 w-11 items-center justify-center rounded-2xl transition hover:bg-surface-elevated disabled:cursor-not-allowed disabled:opacity-60">
+                <button key={action.id} type="button" onClick={() => handleActionClick(action.id)} disabled={Boolean(generatingType)} title={action.title} className="group flex h-11 w-11 items-center justify-center rounded-2xl transition hover:bg-surface-elevated disabled:cursor-not-allowed disabled:opacity-60">
                   <span className={cn("flex h-9 w-9 items-center justify-center rounded-2xl", primaryIconTone ? primaryIconTone : cn("bg-gradient-to-br", action.accent))}>
                     {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className={primaryIconTone ? "h-[22px] w-[22px]" : "h-4 w-4"} />}
                   </span>
@@ -1014,7 +1299,7 @@ export function NotebookStudioPanel({
             })}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
-            {(generatingType === "table" || generatingType === "mindmap" || generatingType === "flashcards" || generatingType === "quiz" || generatingType === "report") && (
+            {(generatingType === "table" || generatingType === "mindmap" || generatingType === "flashcards" || generatingType === "quiz" || generatingType === "report" || generatingType === "infographic") && (
               <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-2xl bg-surface-elevated text-brand" title={t("notebook.studio.outputs")}>
                 <RefreshCw className="h-4 w-4 animate-spin" />
               </div>
@@ -1023,7 +1308,7 @@ export function NotebookStudioPanel({
               {artifacts.map((artifact) => {
                 const Icon = artifactIconMap[artifact.type];
                 return (
-                  <button key={artifact.id} type="button" onClick={() => { setIsCollapsed(false); onOpenArtifact(artifact.id); }} title={artifact.title} className={cn("flex h-11 w-11 items-center justify-center rounded-2xl transition hover:bg-surface-elevated", activeArtifactId === artifact.id && "bg-surface-elevated ring-1 ring-brand-border")}>
+                  <button key={artifact.id} type="button" onClick={() => { setIsCollapsed(false); handleArtifactClick(artifact); }} title={artifact.title} className={cn("flex h-11 w-11 items-center justify-center rounded-2xl transition hover:bg-surface-elevated", activeArtifactId === artifact.id && "bg-surface-elevated ring-1 ring-brand-border")}>
                     <Icon className={cn("h-[23px] w-[23px]", artifactIconTone[artifact.type])} />
                   </button>
                 );
@@ -1118,7 +1403,7 @@ export function NotebookStudioPanel({
             const isGenerating = generatingType === action.id;
             const primaryIconTone = primaryStudioActionIconTone[action.id];
             return (
-              <button key={action.id} type="button" onClick={() => onGenerate(action.id)} disabled={Boolean(generatingType)} className="group flex min-h-[72px] items-center gap-3 rounded-2xl border border-surface-border bg-surface-elevated px-3 py-3 text-left transition hover:border-surface-border hover:bg-surface-card hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-70">
+              <button key={action.id} type="button" onClick={() => handleActionClick(action.id)} disabled={Boolean(generatingType)} className="group flex min-h-[72px] items-center gap-3 rounded-2xl border border-surface-border bg-surface-elevated px-3 py-3 text-left transition hover:border-surface-border hover:bg-surface-card hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-70">
                 <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center", primaryIconTone ? primaryIconTone : cn("rounded-2xl bg-gradient-to-br", action.accent))}>
                   {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className={primaryIconTone ? "h-[23px] w-[23px]" : "h-4 w-4"} />}
                 </div>
@@ -1140,7 +1425,7 @@ export function NotebookStudioPanel({
           <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-text-primary">{t("notebook.studio.outputs")}</h3>
           <MoreHorizontal className="h-4 w-4 text-text-tertiary" />
         </div>
-        {(generatingType === "table" || generatingType === "mindmap" || generatingType === "flashcards" || generatingType === "quiz" || generatingType === "report") && <div className="px-4 pb-3"><GeneratingStudioCard type={generatingType} sourceCount={selectedSourceCount} t={t} /></div>}
+        {(generatingType === "table" || generatingType === "mindmap" || generatingType === "flashcards" || generatingType === "quiz" || generatingType === "report" || generatingType === "infographic") && <div className="px-4 pb-3"><GeneratingStudioCard type={generatingType} sourceCount={selectedSourceCount} t={t} /></div>}
         {artifacts.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-elevated text-text-tertiary"><Layers3 className="h-5 w-5" /></div>
@@ -1154,7 +1439,7 @@ export function NotebookStudioPanel({
                 const Icon = artifactIconMap[artifact.type];
                 return (
                   <div key={artifact.id} className="group relative rounded-[18px] transition hover:bg-surface-elevated/70">
-                    <button type="button" onClick={() => onOpenArtifact(artifact.id)} className="flex w-full items-center gap-3.5 px-2.5 py-3 pr-16 text-left">
+                    <button type="button" onClick={() => handleArtifactClick(artifact)} className="flex w-full items-center gap-3.5 px-2.5 py-3 pr-16 text-left">
                       <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", artifactIconTone[artifact.type])}>
                         <Icon className="h-[23px] w-[23px]" />
                       </div>
@@ -1230,6 +1515,13 @@ export function NotebookStudioPanel({
         </div>
       </div>
     )}
+    <InfographicConfigDialog
+      open={infographicDialogOpen}
+      generating={generatingType === "infographic"}
+      onClose={() => setInfographicDialogOpen(false)}
+      onGenerate={handleInfographicGenerate}
+      t={t}
+    />
     </>
   );
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"regexp"
 	"strings"
@@ -19,6 +20,13 @@ type generatedNotebookArtifactDraft struct {
 	Subtitle    string
 	Content     json.RawMessage
 	SourceCount int
+}
+
+type notebookArtifactGenerationOptions struct {
+	Orientation string `json:"orientation,omitempty"`
+	Style       string `json:"style,omitempty"`
+	DetailLevel string `json:"detail_level,omitempty"`
+	Prompt      string `json:"prompt,omitempty"`
 }
 
 type notebookGeneratedAIResponse struct {
@@ -76,6 +84,15 @@ type notebookStudioQuizOption struct {
 	Reason string `json:"reason"`
 }
 
+type notebookStudioInfographic struct {
+	Orientation string            `json:"orientation"`
+	Style       string            `json:"style"`
+	DetailLevel string            `json:"detail_level"`
+	Prompt      string            `json:"prompt"`
+	Html        string            `json:"html"`
+	ColorScheme map[string]string `json:"color_scheme,omitempty"`
+}
+
 type notebookStudioQuizQuestion struct {
 	Question        string                     `json:"question"`
 	Options         []notebookStudioQuizOption `json:"options"`
@@ -113,7 +130,7 @@ type notebookStudioReportContent struct {
 	Tables           []notebookStudioReportTable   `json:"tables,omitempty"`
 }
 
-func buildGeneratedNotebookArtifactDraft(generationType string, notebookTitle string, files []models.File, selectedFileIDs []uint, language string) (generatedNotebookArtifactDraft, error) {
+func buildGeneratedNotebookArtifactDraft(generationType string, notebookTitle string, files []models.File, selectedFileIDs []uint, language string, opts ...notebookArtifactGenerationOptions) (generatedNotebookArtifactDraft, error) {
 	generationType = strings.TrimSpace(generationType)
 	artifactType, ok := notebookArtifactTypeForGeneration(generationType)
 	if !ok {
@@ -129,6 +146,10 @@ func buildGeneratedNotebookArtifactDraft(generationType string, notebookTitle st
 	if strings.TrimSpace(language) == "" {
 		language = "zh-CN"
 	}
+	var opt notebookArtifactGenerationOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
 
 	var payload any
 	switch artifactType {
@@ -140,6 +161,8 @@ func buildGeneratedNotebookArtifactDraft(generationType string, notebookTitle st
 		payload = map[string]any{"cards": buildNotebookGeneratedFlashcards(sources, language)}
 	case "quiz":
 		payload = map[string]any{"questions": buildNotebookGeneratedQuizQuestions(sources, language)}
+	case "infographic":
+		payload = buildNotebookGeneratedInfographic(notebookTitle, sources, language, opt)
 	case "report":
 		payload = buildNotebookGeneratedReport(reportGenerationFormatID(generationType), notebookTitle, sources, language)
 	case "summary", "faq", "briefing":
@@ -158,8 +181,8 @@ func buildGeneratedNotebookArtifactDraft(generationType string, notebookTitle st
 	}, nil
 }
 
-func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, generationType string, notebookTitle string, files []models.File, selectedFileIDs []uint, language string) (generatedNotebookArtifactDraft, error) {
-	fallback, err := buildGeneratedNotebookArtifactDraft(generationType, notebookTitle, files, selectedFileIDs, language)
+func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, generationType string, notebookTitle string, files []models.File, selectedFileIDs []uint, language string, opts ...notebookArtifactGenerationOptions) (generatedNotebookArtifactDraft, error) {
+	fallback, err := buildGeneratedNotebookArtifactDraft(generationType, notebookTitle, files, selectedFileIDs, language, opts...)
 	if err != nil {
 		return generatedNotebookArtifactDraft{}, err
 	}
@@ -167,7 +190,11 @@ func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, 
 		return fallback, nil
 	}
 	sources := selectNotebookGenerationSources(files, selectedFileIDs, generationType)
-	messages := buildNotebookArtifactAIMessages(generationType, notebookTitle, sources, language)
+	var opt notebookArtifactGenerationOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	messages := buildNotebookArtifactAIMessages(generationType, notebookTitle, sources, language, opt)
 	resp, err := aiService.ChatCompletion(ctx, notebookArtifactAIModel(generationType), messages, false, false, "", false, nil)
 	if err != nil || resp == nil || resp.Body == nil {
 		if generationType == "mindmap" {
@@ -208,9 +235,13 @@ func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, 
 	return draft, nil
 }
 
-func buildNotebookArtifactAIMessages(generationType string, notebookTitle string, sources []notebookGenerationSource, language string) []services.Message {
+func buildNotebookArtifactAIMessages(generationType string, notebookTitle string, sources []notebookGenerationSource, language string, opts ...notebookArtifactGenerationOptions) []services.Message {
 	if strings.TrimSpace(language) == "" {
 		language = "zh-CN"
+	}
+	var opt notebookArtifactGenerationOptions
+	if len(opts) > 0 {
+		opt = opts[0]
 	}
 	if generationType == "mindmap" {
 		return buildNotebookMindmapAIMessages(notebookTitle, sources, language)
@@ -231,6 +262,22 @@ func buildNotebookArtifactAIMessages(generationType string, notebookTitle string
 		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For flashcards content must be {\"cards\":[{\"front\":string,\"back\":string,\"source\":string}]}. Create compact study flashcards from the source material. Each card front is a clean self-test question about one concrete concept, number, capability, process, comparison, role, architecture point, pricing/detail, or named fact. Each back is a concise answer in 1 short sentence, preferably under 80 Chinese characters, grounded in the source but NOT copied as a long quote. Prefer 12-30 cards when enough source content exists. Avoid generic questions, duplicate cards, file names, parse status, unsupported facts, source citation labels, and heading numbers like 1, 1.3, 一、. Leave source empty; do not put [1] or 【1】 in any card field.\n")
 	} else if generationType == "quiz" {
 		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For quiz content must be {\"questions\":[{\"question\":string,\"options\":[{\"id\":\"A\",\"text\":string,\"reason\":string},{\"id\":\"B\",\"text\":string,\"reason\":string},{\"id\":\"C\",\"text\":string,\"reason\":string},{\"id\":\"D\",\"text\":string,\"reason\":string}],\"correct_option_id\":\"A|B|C|D\",\"hint\":string,\"explanation\":string}]}. Create exactly 10 multiple-choice questions from the source material. Questions should test concrete facts, mechanisms, comparisons, capabilities, numeric details, or implications in the documents. Each question has exactly 4 plausible options, exactly one correct answer, a short hint for before answering, and an explanation grounded in the source for after answering. Every option MUST include a short reason field: for the correct option, reason explains why it is correct; for each incorrect option, reason explains why it is wrong in one concise sentence. Avoid generic questions, file names, parse/index status, citation labels, and unsupported facts.\n")
+	} else if generationType == "infographic" {
+		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For infographic content must be {\"orientation\":string,\"style\":string,\"detail_level\":string,\"prompt\":string,\"html\":string,\"color_scheme\":{\"primary\":string,\"secondary\":string,\"accent\":string,\"background\":string,\"text\":string}}. Create a self-contained HTML infographic that visualizes the source material.\n")
+		b.WriteString(fmt.Sprintf("Orientation: %s\n", fallbackText(opt.Orientation, "landscape")))
+		b.WriteString(fmt.Sprintf("Style: %s\n", fallbackText(opt.Style, "auto")))
+		b.WriteString(fmt.Sprintf("Detail level: %s\n", fallbackText(opt.DetailLevel, "standard")))
+		if strings.TrimSpace(opt.Prompt) != "" {
+			b.WriteString(fmt.Sprintf("User prompt: %s\n", opt.Prompt))
+		}
+		b.WriteString("Requirements:\n")
+		b.WriteString("- The html field must be a complete, self-contained HTML document (or a single root div with inline styles) that renders an attractive infographic.\n")
+		b.WriteString("- Use CSS flex/grid layouts. Keep widths around 1200px for landscape, 800px for portrait, 1000x1000px for square.\n")
+		b.WriteString("- Output language must match the requested language.\n")
+		b.WriteString("- Include a title, subtitle, 3-6 visual sections (stats, bars, diagrams, comparison blocks), and a short footer.\n")
+		b.WriteString("- Adapt visual feel to the requested style: cute=rounded pastels/emojis; clay=soft 3D shadows; sketch=hand-drawn lines/paper texture; anime=bold gradients/speed lines; professional=clean corporate palette.\n")
+		b.WriteString("- Ground all facts in the provided sources. Do not invent unsupported numbers.\n")
+		b.WriteString("- Keep the HTML compact (under 40KB) and avoid external assets.\n")
 	} else if strings.HasPrefix(generationType, "report") {
 		formatID := reportGenerationFormatID(generationType)
 		fmt.Fprintf(&b, "Report format id: %s\n", formatID)
@@ -510,7 +557,7 @@ func notebookArtifactTypeForGeneration(generationType string) (string, bool) {
 	switch generationType {
 	case "table":
 		return "data-table", true
-	case "summary", "faq", "briefing", "mindmap", "flashcards", "quiz":
+	case "summary", "faq", "briefing", "mindmap", "flashcards", "quiz", "infographic":
 		return generationType, true
 	default:
 		return "", false
@@ -983,6 +1030,114 @@ func sanitizeNotebookQuizQuestions(questions []notebookStudioQuizQuestion) []not
 	return cleaned
 }
 
+func buildNotebookGeneratedInfographic(notebookTitle string, sources []notebookGenerationSource, language string, opts notebookArtifactGenerationOptions) map[string]any {
+	orientation := fallbackText(strings.TrimSpace(opts.Orientation), "landscape")
+	style := fallbackText(strings.TrimSpace(opts.Style), "auto")
+	detailLevel := fallbackText(strings.TrimSpace(opts.DetailLevel), "standard")
+	prompt := strings.TrimSpace(opts.Prompt)
+
+	var width, height int
+	switch orientation {
+	case "portrait":
+		width, height = 800, 1200
+	case "square":
+		width, height = 1000, 1000
+	default:
+		width, height = 1200, 800
+	}
+
+	primary := "#4f46e5"
+	secondary := "#10b981"
+	accent := "#f59e0b"
+	background := "#ffffff"
+	textColor := "#1f2937"
+	styleCSS := ""
+	switch style {
+	case "cute":
+		primary = "#f472b6"
+		secondary = "#a78bfa"
+		accent = "#fcd34d"
+		styleCSS = "*{border-radius:18px!important}"
+	case "clay":
+		primary = "#818cf8"
+		secondary = "#34d399"
+		accent = "#fbbf24"
+		styleCSS = "*{box-shadow:0 8px 0 rgba(0,0,0,0.12)!important;border-radius:16px!important}"
+	case "sketch":
+		primary = "#374151"
+		secondary = "#6b7280"
+		accent = "#ef4444"
+		styleCSS = "*{border:2px solid #1f2937;border-radius:2px!important;font-family:'Comic Sans MS',cursive,sans-serif}"
+	case "anime":
+		primary = "#6366f1"
+		secondary = "#ec4899"
+		accent = "#22d3ee"
+		styleCSS = "*{background:linear-gradient(135deg,#1e1b4b 0%,#312e81 100%)!important;color:#fff!important;border-radius:12px!important}"
+	case "professional":
+		primary = "#1e3a8a"
+		secondary = "#64748b"
+		accent = "#d97706"
+		styleCSS = "*{border-radius:4px!important;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}"
+	}
+
+	title := notebookTitle
+	if title == "" {
+		title = "未命名笔记本"
+	}
+	var points []string
+	for _, source := range sources {
+		if source.Summary != "" {
+			points = append(points, source.Summary)
+		} else if source.Excerpt != "" {
+			points = append(points, truncateNotebookRunes(source.Excerpt, 120, "…"))
+		}
+		if len(points) >= 6 {
+			break
+		}
+	}
+	if len(points) == 0 {
+		points = []string{"基于上传资料生成的视觉摘要"}
+	}
+
+	sectionsHTML := ""
+	for i, point := range points {
+		num := i + 1
+		sectionsHTML += fmt.Sprintf("<div style='flex:1;min-width:220px;background:%s;padding:18px;color:%s'><div style='font-size:28px;font-weight:700;margin-bottom:8px'>%d</div><div style='font-size:14px;line-height:1.5'>%s</div></div>", primary, "#ffffff", num, htmlEscape(point))
+	}
+
+	html := fmt.Sprintf(`<div style="width:%dpx;height:%dpx;background:%s;color:%s;padding:40px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;box-sizing:border-box;display:flex;flex-direction:column;gap:24px;%s">
+  <div>
+    <div style="font-size:32px;font-weight:800;color:%s;line-height:1.2">%s</div>
+    <div style="font-size:16px;color:%s;margin-top:8px">%s</div>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:16px">%s</div>
+  <div style="margin-top:auto;font-size:12px;color:%s">由 AI 根据 %d 个资料源生成</div>
+</div>`, width, height, background, textColor, styleCSS, primary, htmlEscape(title), secondary, htmlEscape(truncateNotebookRunes(prompt, 80, "…")), sectionsHTML, secondary, len(sources))
+
+	switch detailLevel {
+	case "short":
+		// keep compact
+	case "detailed":
+		html = strings.Replace(html, "font-size:14px", "font-size:15px", -1)
+		html = strings.Replace(html, "min-width:220px", "min-width:260px", -1)
+	}
+
+	return map[string]any{
+		"orientation":  orientation,
+		"style":        style,
+		"detail_level": detailLevel,
+		"prompt":       prompt,
+		"html":         html,
+		"color_scheme": map[string]string{
+			"primary":    primary,
+			"secondary":  secondary,
+			"accent":     accent,
+			"background": background,
+			"text":       textColor,
+		},
+	}
+}
+
 func splitNotebookFlashcardBlocks(text string) []notebookFeatureBlock {
 	text = strings.ReplaceAll(strings.TrimSpace(text), "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
@@ -1075,6 +1230,10 @@ func cleanNotebookFlashcardText(value string) string {
 	value = regexp.MustCompile(`^(?:\d+(?:\.\d+)*|[一二三四五六七八九十]+)[、.)．]?\s*`).ReplaceAllString(value, "")
 	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, " ")
 	return strings.Trim(value, " 	\r\n-—：:，,。；;·|[]【】（）()")
+}
+
+func htmlEscape(value string) string {
+	return html.EscapeString(value)
 }
 
 func looksLikeNotebookMarkdownHeading(value string) bool {
