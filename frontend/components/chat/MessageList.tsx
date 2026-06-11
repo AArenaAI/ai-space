@@ -700,9 +700,14 @@ function MessageList({
     userScrollOverrideUntilRef.current = 0;
     setReturnToBottomPreload(true);
     programmaticScrollUntilRef.current = Date.now() + 3200;
-    smoothScrollScrollerToBottom();
+    if (bottomSmoothRafRef.current) {
+      cancelAnimationFrame(bottomSmoothRafRef.current);
+      bottomSmoothRafRef.current = 0;
+    }
+    stickToBottomRef.current = true;
+    scrollToBottom("auto");
     lockBottomAfterSmoothScroll();
-  }, [lockBottomAfterSmoothScroll, smoothScrollScrollerToBottom]);
+  }, [lockBottomAfterSmoothScroll, scrollToBottom]);
 
   const createVirtuosoComponents = useCallback(<T,>(): Components<T, unknown> => ({
     Footer: () => <div style={{ height: CHAT_BOTTOM_SPACER + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0) }} aria-hidden="true" />,

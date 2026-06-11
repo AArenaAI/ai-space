@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, Lightbulb } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
@@ -17,6 +17,7 @@ export function ThinkBlock({
   allowRichLiteFallback = false,
   compactRichLitePreview = true,
   messageId,
+  stabilizeCompletionHeight = false,
 }: {
   content: string;
   isThinking: boolean;
@@ -27,10 +28,16 @@ export function ThinkBlock({
   allowRichLiteFallback?: boolean;
   compactRichLitePreview?: boolean;
   messageId?: string | number;
+  stabilizeCompletionHeight?: boolean;
 }) {
   const { t } = useI18n();
   const shouldCollapseByDefault = !defaultExpanded && !isThinking && content.length >= collapseThreshold;
   const [expanded, setExpanded] = useState(() => !shouldCollapseByDefault);
+
+  useEffect(() => {
+    if (defaultExpanded) setExpanded(true);
+  }, [defaultExpanded]);
+
   const collapsedLabel = shouldCollapseByDefault && !expanded ? ` · ${t("chat.reasoning.collapsed")}` : "";
 
   return (
@@ -64,7 +71,7 @@ export function ThinkBlock({
         <div className="min-h-0 overflow-hidden">
           <div
             data-i18n-skip="true"
-            className={`reasoning-markdown px-3 py-2.5 bg-slate-50 dark:bg-[#0F0F1A] transition-[transform,filter] duration-300 ease-out ${expanded ? "translate-y-0 blur-0" : "-translate-y-1 blur-[1px]"}`}
+            className={`reasoning-markdown px-3 py-2.5 bg-slate-50 dark:bg-[#0F0F1A] transition-[transform,filter] duration-300 ease-out ${stabilizeCompletionHeight ? "min-h-[64px]" : ""} ${expanded ? "translate-y-0 blur-0" : "-translate-y-1 blur-[1px]"}`}
           >
             <DeferredMarkdownRenderer
               content={content}

@@ -16,21 +16,6 @@ type MarkdownRendererComponent = ComponentType<{ content: string; shouldHydrateR
 
 const JUST_COMPLETED_REASONING_EXPAND_MS = 5 * 60 * 1000;
 const JUST_COMPLETED_STREAMING_HOLD_MS = 800;
-const justCompletedReasoningMessageIds = new Map<string, number>();
-
-function markJustCompletedReasoningMessage(messageId: string) {
-  justCompletedReasoningMessageIds.set(messageId, Date.now() + JUST_COMPLETED_REASONING_EXPAND_MS);
-}
-
-function shouldKeepJustCompletedReasoningExpanded(messageId: string) {
-  const expiresAt = justCompletedReasoningMessageIds.get(messageId);
-  if (!expiresAt) return false;
-  if (expiresAt < Date.now()) {
-    justCompletedReasoningMessageIds.delete(messageId);
-    return false;
-  }
-  return true;
-}
 
 function mayStillRecoverMessage(msg: Message) {
   return !msg.completedAt && !msg.stopped && !!(
@@ -77,6 +62,7 @@ export function AssistantMessageContent({
   const completedAt = realtime?.completedAt;
   const wasStreamingRef = useRef(false);
   const [keepCompletedStreaming, setKeepCompletedStreaming] = useState(false);
+  const [keepReasoningExpanded, setKeepReasoningExpanded] = useState(false);
   const justStoppedStreaming = wasStreamingRef.current && !generating;
   const finalizingRealtime = !generating && (justStoppedStreaming || keepCompletedStreaming) && realtimeHasVisiblePayload;
   const shouldRenderStreamingText = generating || finalizingRealtime || (!message.content && recoverEmptyContent && mayStillRecoverMessage(message));
@@ -95,13 +81,16 @@ export function AssistantMessageContent({
       timer = window.setTimeout(() => setKeepCompletedStreaming(false), JUST_COMPLETED_STREAMING_HOLD_MS);
     }
     wasStreamingRef.current = generating;
-
-    if ((generating || finalizingRealtime) && (realtime?.reasoningContent?.trim() || message.reasoningContent?.trim())) {
-      markJustCompletedReasoningMessage(message.id);
-    }
     return () => {
       if (timer) window.clearTimeout(timer);
     };
+  }, [generating, message.id]);
+
+  useEffect(() => {
+    if (!(generating || finalizingRealtime) || !(realtime?.reasoningContent?.trim() || message.reasoningContent?.trim())) return;
+    setKeepReasoningExpanded(true);
+    const timer = window.setTimeout(() => setKeepReasoningExpanded(false), JUST_COMPLETED_REASONING_EXPAND_MS);
+    return () => window.clearTimeout(timer);
   }, [finalizingRealtime, generating, message.id, message.reasoningContent, realtime?.reasoningContent]);
 
   if (shouldRenderStreamingText) {
@@ -145,7 +134,6 @@ export function AssistantMessageContent({
     : message.content;
   const { reasoning, answer, isThinking } = parseThinkContent(finalContent);
   const cleanAnswer = sanitizeContent(answer);
-  const keepReasoningExpanded = shouldKeepJustCompletedReasoningExpanded(message.id);
 
   return (
     <div className={cn("prose prose-sm max-w-none", className)}>
@@ -154,6 +142,7 @@ export function AssistantMessageContent({
           content={reasoning}
           isThinking={isThinking}
           defaultExpanded={keepReasoningExpanded}
+          stabilizeCompletionHeight={keepReasoningExpanded}
           shouldHydrateRichText={shouldHydrateRichText}
           priorityHydrateRichText={priorityHydrateRichText}
           allowRichLiteFallback={allowRichLiteFallback}

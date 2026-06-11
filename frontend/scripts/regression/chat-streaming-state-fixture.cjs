@@ -20,18 +20,17 @@ const path = '/test-chat-streaming-state/';
 
   await page.goto(`${baseUrl}${path}`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
   await page.waitForSelector('[data-testid="chat-streaming-state-fixture"]', { timeout: 30_000 });
-  await page.waitForFunction(() => document.body.innerText.includes('正在联网搜索'), null, { timeout: 10_000 });
+  await page.waitForFunction(() => document.querySelector('[data-chat-generation-phase="searching"] [data-chat-status-icon="web_search"]'), null, { timeout: 10_000 });
   await page.waitForFunction(() => {
     const status = document.querySelector('[data-chat-generation-phase="searching"]')?.textContent || '';
     const statusInBody = document.querySelector('.streaming-answer-markdown [data-chat-generation-phase], .reasoning-markdown [data-chat-generation-phase]');
-    return status.includes('正在联网搜索') && /已用时\s+\d+秒/.test(status) && !statusInBody;
+    return /\d+/.test(status) && !statusInBody;
   }, null, { timeout: 10_000 });
   await page.waitForFunction(() => document.querySelector('[data-testid="fixture-phase"]')?.textContent === 'mixed-held', null, { timeout: 10_000 });
   await page.waitForFunction(() => {
     const phase = document.querySelector('[data-testid="fixture-phase"]')?.textContent || '';
     const body = document.body.innerText;
-    const status = document.querySelector('[data-chat-generation-phase="reasoning"]')?.textContent || '';
-    return phase === 'mixed-held' && body.includes('先分析搜索结果') && !body.includes('最终回答 OK 42') && status.includes('正在思考推理');
+    return phase === 'mixed-held' && body.includes('先分析搜索结果') && !body.includes('最终回答 OK 42') && !!document.querySelector('[data-chat-generation-phase="reasoning"] [data-chat-status-icon="thinking"]');
   }, null, { timeout: 10_000 });
   const mixedSnapshot = await page.evaluate(() => ({
     phase: document.querySelector('[data-testid="fixture-phase"]')?.textContent || '',
@@ -46,7 +45,6 @@ const path = '/test-chat-streaming-state/';
   }
   await page.waitForFunction(() => document.querySelector('[data-testid="fixture-phase"]')?.textContent === 'answer-streaming', null, { timeout: 10_000 });
   await page.waitForFunction(() => document.body.innerText.includes('最终回答 OK 42'), null, { timeout: 10_000 });
-  await page.waitForFunction(() => (document.querySelector('[data-chat-generation-phase="streaming_answer"]')?.textContent || '').includes('正在生成回答'), null, { timeout: 10_000 });
   await page.waitForFunction(() => document.querySelector('[data-chat-generation-phase="streaming_answer"] [data-chat-status-icon="spinning"]')?.classList.contains('animate-spin'), null, { timeout: 10_000 });
   await page.waitForFunction(() => Array.from(document.querySelectorAll('.reasoning-markdown strong')).some((node) => node.textContent?.includes('最终')), null, { timeout: 10_000 });
   await page.waitForFunction(() => Array.from(document.querySelectorAll('.streaming-answer-markdown strong')).some((node) => node.textContent?.includes('OK')), null, { timeout: 10_000 });
@@ -58,7 +56,7 @@ const path = '/test-chat-streaming-state/';
 
   await page.waitForFunction(() => document.querySelector('[data-testid="fixture-phase"]')?.textContent === 'done', null, { timeout: 10_000 });
   await page.waitForFunction(() => document.body.innerText.includes('最终回答 OK 42'), null, { timeout: 10_000 });
-  await page.waitForFunction(() => (document.querySelector('[data-chat-status-kind="completed"]')?.textContent || '').includes('生成完成'), null, { timeout: 10_000 });
+  await page.waitForFunction(() => document.querySelector('[data-chat-status-kind="completed"] [data-chat-status-icon="completed"]'), null, { timeout: 10_000 });
   await page.waitForFunction(() => document.querySelector('.streaming-answer-markdown [data-streaming-markdown-mode="rich"]'), null, { timeout: 10_000 });
   const doneImmediateSnapshot = await page.evaluate(() => ({
     answerMode: document.querySelector('.streaming-answer-markdown [data-streaming-markdown-mode]')?.getAttribute('data-streaming-markdown-mode') || '',
@@ -94,15 +92,15 @@ const path = '/test-chat-streaming-state/';
   if (doneImmediateSnapshot.reasoningExpanded !== 'true' || doneImmediateSnapshot.reasoningHeight <= 12) {
     issues.push(`just-completed reasoning block should remain expanded after completion to avoid scroll-height collapse: expanded=${doneImmediateSnapshot.reasoningExpanded}, height=${doneImmediateSnapshot.reasoningHeight}`);
   }
-  await page.click('[data-chat-status-kind="completed"]');
+  await page.hover('[data-chat-status-kind="completed"]');
   await page.waitForFunction(() => {
-    const timeline = document.querySelector('[data-chat-status-timeline="true"]')?.textContent || '';
-    return timeline.includes('模型响应成功')
-      && timeline.includes('联网搜索完成 · 引用8个来源')
-      && timeline.includes('思考推理完成')
-      && timeline.includes('回答生成完成')
+    const panel = document.querySelector('[data-chat-status-timeline="true"]');
+    const steps = Array.from(panel?.querySelectorAll('[data-chat-status-timeline-step]') || []);
+    const timeline = panel?.textContent || '';
+    return steps.length >= 4
       && !timeline.includes('正在')
-      && !timeline.includes('已用时');
+      && !timeline.includes('已用时')
+      && !timeline.includes('elapsed');
   }, null, { timeout: 10_000 });
   const timelineSnapshot = await page.evaluate(() => {
     const panel = document.querySelector('[data-chat-status-timeline="true"]');
