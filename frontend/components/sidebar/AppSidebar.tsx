@@ -10,6 +10,10 @@ function cleanPathname(p: string | null): string {
   if (cleaned !== "/") cleaned = cleaned.replace(/\/$/, "");
   return cleaned;
 }
+
+function isNotebookDetailPath(pathname: string) {
+  return pathname === "/notebooks/detail";
+}
 import { createPortal } from "react-dom";
 import {
   MessageSquare, Palette, Presentation, LogIn, LogOut,
@@ -342,7 +346,10 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   const { t } = useI18n();
   const themeCtx = useTheme();
   const theme = themeCtx?.theme || "light";
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return isNotebookDetailPath(cleanPathname(window.location.pathname));
+  });
   const defaultExpandedLabels = () => new Set([
     t("sidebar.time.today"),
     t("sidebar.time.yesterday"),
@@ -403,6 +410,13 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   const router = useRouter();
   const isWorkRoute = isPathInGroup(pathname, WORK_PAGE_PATHS);
   const isCreativeRoute = isPathInGroup(pathname, CREATIVE_PAGE_PATHS);
+
+  useEffect(() => {
+    if (isNotebookDetailPath(pathname)) {
+      setCollapsed(true);
+    }
+  }, [pathname]);
+
   const { templates, updateTemplate } = useTemplates();
   const { isMac, mod } = usePlatform();
 
@@ -1266,7 +1280,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
             {/* ▼ 功能分组 */}
             <div className="px-3 py-2">
               <div className="mb-2 px-1">
-                <span className="text-xs font-medium text-slate-400 tracking-wide dark:text-text-tertiary/80">Agents</span>
+                <span className="text-sm font-medium text-slate-950 tracking-wide dark:text-text-primary">Agents</span>
               </div>
               <div className="space-y-0.5">
                 {/* AI工作 - hover 展开 */}
@@ -1328,8 +1342,8 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                     type="button"
                     onClick={() => router.push("/notebooks")}
                     className={cn(
-                      "min-w-0 truncate rounded-md px-1 text-left text-xs font-medium tracking-wide transition hover:text-slate-700 dark:hover:text-text-secondary",
-                      isPathInGroup(pathname, ["/notebooks"]) ? "text-brand" : "text-slate-400 dark:text-text-tertiary/80"
+                      "min-w-0 truncate rounded-md px-1 text-left text-sm font-medium tracking-wide transition hover:text-slate-700 dark:hover:text-text-primary",
+                      isPathInGroup(pathname, ["/notebooks"]) ? "text-slate-950 dark:text-text-primary" : "text-slate-950 dark:text-text-primary"
                     )}
                   >
                     {t("sidebar.nav.notebook")}
@@ -1404,7 +1418,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
             {/* ▼ 历史分组 */}
             <div className="px-3 py-2">
               <div className="flex items-center justify-between mb-2 px-1">
-                <span className="text-xs font-medium text-slate-400 tracking-wide dark:text-text-tertiary/80">{t("sidebar.nav.history")}</span>
+                <span className="text-sm font-medium text-slate-950 tracking-wide dark:text-text-primary">{t("sidebar.nav.history")}</span>
               </div>
               {renderConversationList()}
             </div>

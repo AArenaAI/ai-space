@@ -1255,7 +1255,7 @@ export function NotebookStudioPanel({
   const [openMenuArtifactId, setOpenMenuArtifactId] = useState<string | null>(null);
   const [viewerArtifactId, setViewerArtifactId] = useState<string | null>(null);
   const [sourcePopoverKey, setSourcePopoverKey] = useState<string | null>(null);
-  const [isCollapsed, setIsCollapsed] = useState(true);
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const [infographicDialogOpen, setInfographicDialogOpen] = useState(false);
   const activeArtifact = artifacts.find((artifact) => artifact.id === activeArtifactId) || null;
   const viewerArtifact = artifacts.find((artifact) => artifact.id === viewerArtifactId) || null;
