@@ -64,6 +64,11 @@ func cleanGenerationErrorString(raw string, mediaType string) string {
 		return "您的请求无法处理，因为参考素材可能包含真实人物或隐私信息。请更换素材后重试。"
 	}
 
+	if containsAny(lower, "copyright", "copyright restrictions", "policyviolation") ||
+		containsAny(message, "版权") {
+		return "生成结果触发了版权限制审核。请移除具体影视作品、演员或受版权保护风格的描述后重试。"
+	}
+
 	if containsAny(lower, "quota", "insufficient", "balance", "billing", "credit", "credits") ||
 		containsAny(message, "额度", "余额", "欠费", "扣费", "积分") {
 		return "当前生成服务额度不足，暂时无法完成生成。请稍后再试，"

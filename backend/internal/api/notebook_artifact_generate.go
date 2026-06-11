@@ -1060,7 +1060,7 @@ func buildNotebookGeneratedInfographic(notebookTitle string, sources []notebookG
 	prompt := strings.TrimSpace(opts.Prompt)
 
 	var width, height int
-	switch orientation {
+	switch opts.Orientation {
 	case "portrait":
 		width, height = 800, 1200
 	case "square":
@@ -1116,10 +1116,10 @@ func buildNotebookGeneratedInfographic(notebookTitle string, sources []notebookG
 		points = []string{"基于上传资料生成的视觉摘要"}
 	}
 
-	imagePrompt := fmt.Sprintf("A polished flat-design infographic, %dx%d pixels, with a clean white background, modern corporate typography, and a structured layout. Title: %s. Visual sections include numbered cards in a%s grid showing key insights: ", width, height, title, orientation)
-	if orientation == "portrait" {
+	imagePrompt := fmt.Sprintf("A polished flat-design infographic, %dx%d pixels, with a clean white background, modern corporate typography, and a structured layout. Title: %s. Visual sections include numbered cards in a%s grid showing key insights: ", width, height, title, opts.Orientation)
+	if opts.Orientation == "portrait" {
 		imagePrompt = fmt.Sprintf("A polished flat-design vertical infographic, %dx%d pixels, clean white background, modern corporate typography, single-column structured layout. Title: %s. Visual sections include numbered stacked cards showing key insights: ", width, height, title)
-	} else if orientation == "square" {
+	} else if opts.Orientation == "square" {
 		imagePrompt = fmt.Sprintf("A polished flat-design square infographic, %dx%d pixels, clean white background, modern corporate typography, balanced two-column layout. Title: %s. Visual sections include numbered tiles showing key insights: ", width, height, title)
 	}
 	for i, p := range points {
@@ -1147,7 +1147,7 @@ func buildNotebookGeneratedInfographic(notebookTitle string, sources []notebookG
 	}
 
 	return map[string]any{
-		"orientation":  orientation,
+		"orientation":  opts.Orientation,
 		"style":        style,
 		"detail_level": detailLevel,
 		"prompt":       prompt,

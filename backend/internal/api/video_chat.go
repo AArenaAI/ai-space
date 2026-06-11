@@ -446,6 +446,7 @@ func (h *VideoChatHandler) refreshPendingVideoChatMessages(chatID uint) {
 			}
 		}
 		if resp.Status == "failed" && resp.ErrorMessage != "" {
+			log.Printf("[VideoChat] task failed task=%s raw_error=%s", msg.TaskID, resp.ErrorMessage)
 			cleanMsg := cleanVideoGenerationErrorString(resp.ErrorMessage)
 			updates["error_message"] = cleanMsg
 			videoUpdates["error_message"] = cleanMsg
