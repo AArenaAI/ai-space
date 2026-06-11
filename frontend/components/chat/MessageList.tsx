@@ -7,7 +7,7 @@ import { useFavorites } from "@/hooks/useFavorites";
 import { toast } from "sonner";
 import dynamic from "next/dynamic";
 const ShareDialog = dynamic(() => import("@/components/ui/ShareDialog"), { ssr: false });
-import { Virtuoso, VirtuosoHandle, type Components } from "react-virtuoso";
+import { Virtuoso, VirtuosoHandle, type Components, type ListItem } from "react-virtuoso";
 import { useMessageStream } from "@/hooks/useMessageStream";
 import { inferGroups, InferredGroup } from "@/lib/groups";
 import { useI18n } from "@/lib/i18n";
@@ -77,6 +77,7 @@ const HISTORY_PRELOAD_BOTTOM_PX = CHAT_BOTTOM_SPACER;
 const FAST_SCROLL_PRELOAD_PX = 6000;
 const RETURN_TO_BOTTOM_PRELOAD_BOTTOM_PX = 6000;
 const HISTORY_OVERSCAN_REVERSE = 8;
+const CHAT_VIRTUOSO_DEFAULT_ITEM_HEIGHT = 260;
 const INITIAL_RENDERED_MESSAGE_WINDOW = 16;
 const CONTENT_HEAVY_INITIAL_RENDERED_MESSAGE_WINDOW = 32;
 const MAX_STABLE_RICH_LITE_ASSISTANTS_IN_RENDER_WINDOW = 16;
@@ -247,6 +248,7 @@ function MessageList({
   const [atBottom, setAtBottom] = useState(true);
   const atBottomRef = useRef(true);
   const [userBrowsing, setUserBrowsing] = useState(false);
+  const [hasRenderedInitialRange, setHasRenderedInitialRange] = useState(false);
   const userBrowsingTimerRef = useRef<number>(0);
   const [scrollProgress, setScrollProgress] = useState({ ratio: 1, canScroll: false });
   const [, setScrollProgressDragging] = useState(false);
@@ -460,6 +462,11 @@ function MessageList({
     if (Date.now() < userScrollOverrideUntilRef.current || !stickToBottomRef.current) return;
     scrollToBottom();
   }, [scrollToBottom, targetMessageId]);
+
+  const handleItemsRendered = useCallback((items: ListItem<Message>[]) => {
+    if (items.length > 0) setHasRenderedInitialRange(true);
+    lockBottomOnRenderedRange();
+  }, [lockBottomOnRenderedRange]);
 
   const centerMessageRowInScroller = useCallback((messageId: string) => {
     const el = scrollRef.current;
@@ -961,6 +968,7 @@ function MessageList({
 
   useEffect(() => {
     setRenderedMessageWindow(INITIAL_RENDERED_MESSAGE_WINDOW);
+    setHasRenderedInitialRange(false);
   }, [conversationId, targetMessageId]);
 
   const userOverviewMessages = useMemo(() => {
@@ -1719,6 +1727,11 @@ function MessageList({
       data-all-visible-message-count={allVisibleMessages.length}
       data-hidden-local-message-count={hiddenLocalMessageCount}
     >
+      {!hasRenderedInitialRange && (
+        <div className="pointer-events-none absolute inset-0 z-10 bg-surface/80 backdrop-blur-[1px]">
+          <ChatHistoryLoadingState />
+        </div>
+      )}
       <Virtuoso
         style={{ height: "100%", overflowAnchor: userBrowsing ? "none" : "auto" }}
         data={visibleMessages}
@@ -1726,6 +1739,7 @@ function MessageList({
         ref={virtuosoRef}
         scrollerRef={handleVirtuosoScrollerRef}
         followOutput={false}
+        defaultItemHeight={CHAT_VIRTUOSO_DEFAULT_ITEM_HEIGHT}
         atBottomThreshold={AT_BOTTOM_THRESHOLD}
         atBottomStateChange={(atBottom) => {
           atBottomRef.current = atBottom;
@@ -1740,7 +1754,7 @@ function MessageList({
           setAtBottom(atBottom);
         }}
         computeItemKey={(_, msg) => msg.id}
-        itemsRendered={lockBottomOnRenderedRange}
+        itemsRendered={handleItemsRendered}
         onScroll={handleVirtuosoScroll}
         onWheel={(event) => handleUserScrollIntent(event.deltaY)}
         onTouchMove={() => stopBottomLockForUserBrowse(2500)}
