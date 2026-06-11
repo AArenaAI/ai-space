@@ -3,18 +3,21 @@ package api
 import (
 	"net/http"
 	"strings"
+	"time"
 
+	"aipool-backend/internal/middleware"
 	"aipool-backend/internal/services"
 
 	"github.com/gin-gonic/gin"
 )
 
 type TranslateHandler struct {
-	service *services.TranslateService
+	service      *services.TranslateService
+	usageService *services.UsageService
 }
 
-func NewTranslateHandler(service *services.TranslateService) *TranslateHandler {
-	return &TranslateHandler{service: service}
+func NewTranslateHandler(service *services.TranslateService, usageService *services.UsageService) *TranslateHandler {
+	return &TranslateHandler{service: service, usageService: usageService}
 }
 
 type translateAPIRequest struct {
@@ -31,6 +34,7 @@ func (h *TranslateHandler) Translate(c *gin.Context) {
 		return
 	}
 
+	startedAt := time.Now()
 	result, err := h.service.Translate(c.Request.Context(), services.TranslateRequest{
 		Text:       req.Text,
 		SourceLang: strings.TrimSpace(req.SourceLanguage),
@@ -40,6 +44,34 @@ func (h *TranslateHandler) Translate(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
+	}
+
+	if h.usageService != nil {
+		userID := uint(0)
+		if v, ok := c.Get("userID"); ok {
+			if id, ok := v.(uint); ok {
+				userID = id
+			}
+		}
+		guestID := middleware.GetGuestID(c)
+		if userID > 0 {
+			guestID = ""
+		}
+		_ = h.usageService.RecordTranslationUsage(services.TranslationUsageInput{
+			UserID:             userID,
+			GuestID:            guestID,
+			Provider:           result.Provider,
+			Model:              result.Model,
+			SourceLanguage:     strings.TrimSpace(req.SourceLanguage),
+			TargetLanguage:     result.TargetLang,
+			InputCharacters:    len([]rune(req.Text)),
+			OutputCharacters:   len([]rune(result.TranslatedText)),
+			DetectedSourceLang: result.DetectedSourceLang,
+			LatencyMs:          int(time.Since(startedAt).Milliseconds()),
+			Raw: map[string]any{
+				"mime_type": strings.TrimSpace(req.MimeType),
+			},
+		})
 	}
 
 	c.JSON(http.StatusOK, result)

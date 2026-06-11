@@ -20,6 +20,19 @@ func cleanVideoGenerationErrorString(raw string) string {
 	return cleanGenerationErrorString(raw, "video")
 }
 
+func cleanVideoTaskSubmissionErrorMessage(err error) string {
+	if err == nil {
+		return defaultVideoGenerationErrorMessage
+	}
+	message := strings.TrimSpace(err.Error())
+	lower := strings.ToLower(message)
+	if containsAny(lower, "timeout", "deadline exceeded", "context deadline", "timed out") ||
+		containsAny(message, "超时") {
+		return "视频任务提交超时，请稍后重新提交。"
+	}
+	return cleanVideoGenerationErrorMessage(err)
+}
+
 func cleanImageGenerationErrorMessage(err error) string {
 	if err == nil {
 		return defaultImageGenerationErrorMessage
@@ -49,6 +62,11 @@ func cleanGenerationErrorString(raw string, mediaType string) string {
 	if containsAny(lower, "privacyinformation", "privacy", "real person", "face", "portrait") ||
 		containsAny(message, "真实人物", "真人", "人脸", "人体", "隐私", "肖像") {
 		return "您的请求无法处理，因为参考素材可能包含真实人物或隐私信息。请更换素材后重试。"
+	}
+
+	if containsAny(lower, "copyright", "copyright restrictions", "policyviolation") ||
+		containsAny(message, "版权") {
+		return "生成结果触发了版权限制审核。请移除具体影视作品、演员或受版权保护风格的描述后重试。"
 	}
 
 	if containsAny(lower, "quota", "insufficient", "balance", "billing", "credit", "credits") ||

@@ -22,6 +22,8 @@ export type LoadMoreResponse = {
   total?: number;
 };
 
+export const DEFAULT_CHAT_LOAD_MORE_PAGE_SIZE = 8;
+
 export function shouldStartLoadMore({
   currentConversation,
   isLoadingMore,
@@ -39,7 +41,7 @@ export function shouldStartLoadMore({
 export function buildLoadMorePage({
   totalMessages,
   loadedPersistedMessages,
-  defaultLimit = 50,
+  defaultLimit = DEFAULT_CHAT_LOAD_MORE_PAGE_SIZE,
 }: LoadMorePaginationInput): LoadMorePage {
   const limit = defaultLimit;
   const offset = Math.max(0, totalMessages - loadedPersistedMessages - limit);

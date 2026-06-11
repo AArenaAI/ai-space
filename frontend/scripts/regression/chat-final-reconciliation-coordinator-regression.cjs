@@ -112,9 +112,22 @@ test("recover action does not start background polling without server id or back
   assert.equal(noServer.shouldStartBackgroundPolling, false);
 });
 
-test("reconcile_after_done action starts DB polling after DONE with server id", () => {
+test("normal DONE with server id completes without DB replay polling", () => {
   const action = decideFinalStreamReconciliation({
-    state: { ...baseState, sawDone: true },
+    state: { ...baseState, sawDone: true, useBackground: false },
+    abortReason: null,
+    streamContent: "done text",
+    hasRealtimeData: false,
+  });
+  assert.equal(action.type, "complete_or_cleanup");
+  assert.equal(action.shouldMarkCompleted, true);
+  assert.equal(action.result.sawDone, true);
+  assert.equal(action.result.content, "done text");
+});
+
+test("background DONE with server id still starts DB polling", () => {
+  const action = decideFinalStreamReconciliation({
+    state: { ...baseState, sawDone: true, useBackground: true },
     abortReason: null,
     streamContent: "done text",
     hasRealtimeData: false,

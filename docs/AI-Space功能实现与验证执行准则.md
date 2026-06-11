@@ -281,6 +281,61 @@ npm run test:chat-real-live-send-e2e
 | 推理 | reasoning 与 answer 顺序正确，思考不泄漏到正文 |
 | 持久化 | 刷新/历史恢复后内容、reasoning、引用仍正确 |
 
+### 4.2.1 会话切换 / 对话渲染性能专项验证
+
+适用于：聊天页路由切换慢、对话切换后首屏跳动、最新消息 Markdown/文章渲染形态变化、Virtuoso 贴底/慢滑稳定性、历史消息延迟 hydrate/token upgrade 等问题。
+
+除通用 chat 回归外，必须显式覆盖以下问题，不得只看 build 通过或 profile `ok=true`：
+
+| 问题类型 | 必须检测的不变量 | 典型对话/样本 |
+|---|---|---|
+| 最新消息 2s 后从 lite/plain 升级 | 进入后早期快照与 2.5s 后快照不能出现明显 `textLen` 增长；不能出现 `markdown-hydrate-delayed-first-chunk` 影响最新可见 assistant | 607、62 |
+| 文章型最新消息可感知 morph | 非 streaming latest assistant 的 `data-markdown-lite-renderer` / `data-markdown-token-renderer` 不应在用户可见后从 lite 变 token/rich；即使 `textDelta=0`，`rendererChanged=true` 也要视为潜在问题 | 607、608、264 |
+| extreme 最新消息分段增长 | 超长/大量 code/table 的 latest assistant 不能在首屏后以 `32→64→96...` block append 方式增长；如使用 token renderer，应一次性进入稳定 block 数，或使用明确的稳定 fallback | 62 |
+| fresh/direct entry 与 switch profile 不一致 | 不能只跑 conversation switch profile；还要直接打开 `/chat/?id=<cid>`，比较早期与晚期 renderer/text/贴底。direct entry 中出现 `deferred-lite`/`stable-preview` 残留也算问题 | 62 |
+| 历史行延迟 upgrade 干扰首屏 | 历史消息的 delayed hydrate/token upgrade 不应改变最新可见消息高度、触发 bottom lock 抖动，或造成用户当前看到的文章形态变化 | 606、608、264 |
+| 贴底稳定 | 所有固定样本必须 `distanceToBottom=0`；62 是核心回归指标，606 慢滑 `flags=[]`，213 静置/慢滑不能因 delayed hydrate/token upgrade 跳动 | 62、606、213 |
+| 路由/切换性能 | 记录 click → URL change → first rows → rows changed → bottom0；同时记录 fetch、long task、row/list/lite/token/code commit 计数，避免误把 fetch/parser 当成 DOM mount 问题 | 12、62、606、607 |
+| 全会话扫描边界 | 侧边栏 DOM 枚举只能称为“已加载/可见会话扫描”，不能误报为全库全部历史；如要称“全部”，必须通过分页/API 拿到完整会话列表 | 当前真实账号会话列表 |
+
+建议固定执行：
+
+```bash
+npm run test:chat-markdown-token-fixture
+npm run test:chat-scroll-intent-fixture
+npm run test:chat-conversation-switch-cache-fixture
+npm run test:chat-row-memo-fixture
+npm run test:chat-load-more-history-fixture
+npm run test:chat-history-loading-fixture
+```
+
+真实 profile 至少包含：
+
+```bash
+FRONTEND_BASE_URL=http://127.0.0.1:3012 \
+AI_SPACE_E2E_PROFILE_RUNS=3 \
+node scripts/regression/chat-switch-profile-summary.cjs
+```
+
+报告中必须列出：
+
+- `distanceToBottomNonZero`。
+- `urlMs` / `firstRowsMs` / `rowsChangedMs` / `bottom0Ms` 的 p50/p90/max。
+- `longTaskBeforeBottom0Total` / `longTaskBeforeBottom0Max`。
+- `rowCommitBeforeBottom0` / `liteBeforeBottom0` / `tokenBeforeBottom0`。
+- 62、607、606、213 的单独结果。
+- 是否检测到 `textDelta`、`rendererChanged`、`markdown-hydrate-delayed-first-chunk`、`markdown-token-rendered` 多次分批、`markdown-token-upgrade-skipped-browse`。
+
+如果用户反馈“能看到跳动/文章变形”，测试脚本要按用户可见不变量判断，而不是只用性能 profile 通过作为结论。尤其要同时采集早期快照（约 150–200ms）与晚期快照（约 2.5s），比较最新 assistant 的：
+
+- `textContent.length`。
+- `data-markdown-lite-renderer`。
+- `data-markdown-token-renderer`。
+- `distanceToBottom`。
+- 与该 messageId 相关的 render profile events。
+
+架构判断标准：如果同类问题反复出现，不要继续在 `MessageRow`、`DeferredMarkdownRenderer`、`MarkdownTokenRenderer`、`MarkdownLiteRenderer` 里叠局部条件；应收敛到统一的 `deriveMarkdownRenderMode(...)` 决策点，显式输出 `stable-lite`、`stable-token`、`deferred-lite`、`deferred-token`、`streaming` 等模式，以及 `allowUpgrade`、`allowBatchAppend`、`allowPreview` 等布尔值。
+
 ---
 
 ## 4.3 Notebook / Wisebase / source-grounded Q&A

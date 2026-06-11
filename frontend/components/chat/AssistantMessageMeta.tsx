@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle, CircleStop, FileText, Lightbulb, LoaderCircle, Search, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChatModel, Message } from "@/lib/chatTypes";
@@ -8,6 +8,7 @@ import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 import { deriveMessageStatuses, type MessageDisplayStatus } from "@/lib/messageStatus";
 import { getOrderedTimelineSteps, getTimelineStepLabel, type ChatStatusTimelineStep } from "@/lib/chatStatusTimeline";
 import { useI18n } from "@/lib/i18n";
+import { emitChatRenderProfileEvent, isChatRenderProfileEnabled } from "@/lib/chatRenderProfile";
 
 function StatusIcon({ status }: { status: MessageDisplayStatus }) {
   const className = "h-3 w-3";
@@ -90,11 +91,40 @@ function StatusTimelinePanel({ status }: { status: MessageDisplayStatus }) {
 }
 
 export function AssistantMessageMeta({ msg, isStreaming, model }: { msg: Message; isStreaming: boolean; model?: ChatModel }) {
+  const profileEnabled = isChatRenderProfileEnabled();
+  const renderStartedAt = profileEnabled ? (typeof performance !== "undefined" ? performance.now() : Date.now()) : 0;
   const { t } = useI18n();
   const [, setTick] = useState(0);
-  const realtime = useMessageRealtime(msg.id);
-  const statuses = deriveMessageStatuses({ message: msg, realtime, isStreaming, t });
-  const hasActiveGenerationPhase = statuses.some((status) => status.active && status.generationPhase);
+  const realtimeSubscriptionEnabled = isStreaming || !(msg.completedAt || msg.errorCode || msg.stopped);
+  const realtime = useMessageRealtime(msg.id, realtimeSubscriptionEnabled);
+  const statuses = useMemo(
+    () => deriveMessageStatuses({ message: msg, realtime, isStreaming, t }),
+    [isStreaming, msg, realtime, t]
+  );
+  const hasActiveGenerationPhase = useMemo(
+    () => statuses.some((status) => status.active && status.generationPhase),
+    [statuses]
+  );
+  const hasTimeline = useMemo(
+    () => statuses.some((status) => Boolean(status.statusTimeline?.length)),
+    [statuses]
+  );
+
+  useEffect(() => {
+    if (!profileEnabled) return;
+    const commitAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    emitChatRenderProfileEvent("assistant-message-meta-commit", {
+      messageId: msg.id,
+      contentLength: msg.content?.length || 0,
+      statusCount: statuses.length,
+      hasActiveGenerationPhase,
+      hasTimeline,
+      isStreaming,
+      realtimeSubscriptionEnabled,
+      modelId: model?.id || msg.model || "",
+      durationMs: commitAt - renderStartedAt,
+    });
+  });
 
   useEffect(() => {
     if (!hasActiveGenerationPhase) return;

@@ -1,9 +1,11 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { useModels } from "@/hooks/useModels";
 import ChatInterface from "./ChatInterface";
 import { useI18n } from "@/lib/i18n";
+import { emitChatRenderProfileEvent } from "@/lib/chatRenderProfile";
 
 function ChatSkeleton() {
   const { t } = useI18n();
@@ -24,6 +26,18 @@ export default function ChatContent() {
     ? Number(searchParams.get("message"))
     : undefined;
   const { models, loading } = useModels();
+  const previousConversationIdRef = useRef<number | undefined>(conversationId);
+
+  useEffect(() => {
+    const previousConversationId = previousConversationIdRef.current;
+    previousConversationIdRef.current = conversationId;
+    emitChatRenderProfileEvent("route-conversation-change", {
+      previousConversationId,
+      conversationId,
+      hasTargetMessage: Number.isFinite(targetMessageId),
+      loadingModels: loading,
+    });
+  }, [conversationId, targetMessageId, loading]);
 
   if (loading || models.length === 0) return <ChatSkeleton />;
 

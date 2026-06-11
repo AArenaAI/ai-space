@@ -48,6 +48,25 @@ async function readFirstVisibleMarkerId(page) {
   });
 }
 
+async function readWindowState(page) {
+  return page.evaluate(() => {
+    const list = document.querySelector('[data-testid="chat-message-list"]');
+    const fixture = document.querySelector('[data-testid="chat-load-more-history-fixture"]');
+    const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+    return {
+      visibleMessageCount: Number(list?.getAttribute("data-visible-message-count") || "0"),
+      allVisibleMessageCount: Number(list?.getAttribute("data-all-visible-message-count") || "0"),
+      hiddenLocalMessageCount: Number(list?.getAttribute("data-hidden-local-message-count") || "0"),
+      loadedPages: Number(fixture?.getAttribute("data-loaded-pages") || "0"),
+      loadingMore: fixture?.getAttribute("data-loading-more") === "true",
+      rowCount: document.querySelectorAll('[data-chat-message-row="true"]').length,
+      scrollTop: scroller?.scrollTop ?? 0,
+      scrollHeight: scroller?.scrollHeight ?? 0,
+      clientHeight: scroller?.clientHeight ?? 0,
+    };
+  });
+}
+
 (async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -70,6 +89,10 @@ async function readFirstVisibleMarkerId(page) {
       return rect && rect.width > 0 && rect.height > 0;
     }, null, { timeout: 20_000 });
     await page.waitForFunction(() => document.querySelectorAll('[data-chat-message-row="true"]').length > 0, null, { timeout: 20_000 });
+
+    const initialWindow = await readWindowState(page);
+    assert.ok(initialWindow.visibleMessageCount > 0, `initial window should render messages: ${JSON.stringify(initialWindow)}`);
+    assert.ok(initialWindow.hiddenLocalMessageCount > 0, `fixture should start with hidden local messages: ${JSON.stringify(initialWindow)}`);
 
     await page.evaluate(() => {
       const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
@@ -109,13 +132,20 @@ async function readFirstVisibleMarkerId(page) {
       samples.push(await readMarker(page, markerId));
       await page.waitForTimeout(40);
     }
-    await page.waitForFunction(() => Number(document.querySelector('[data-testid="chat-load-more-history-fixture"]')?.getAttribute("data-loaded-pages") || "0") >= 1, null, { timeout: 5_000 });
+    await page.waitForFunction((previousVisibleCount) => {
+      const list = document.querySelector('[data-testid="chat-message-list"]');
+      return Number(list?.getAttribute("data-visible-message-count") || "0") > previousVisibleCount;
+    }, initialWindow.visibleMessageCount, { timeout: 5_000 });
     await page.waitForTimeout(260);
     const after = await readMarker(page, markerId);
+    const afterWindow = await readWindowState(page);
 
-    assert.ok(after.found, "marker should still be rendered after prepending older history");
-    assert.equal(after.loadedPages, 1, "fixture should load one older page without rendering load-more status rows");
-    assert.ok(after.scrollHeight > before.scrollHeight, `older history should increase scroll height: before ${before.scrollHeight}, after ${after.scrollHeight}`);
+    assert.ok(after.found, "marker should still be rendered after releasing local hidden history");
+    assert.equal(afterWindow.loadedPages, 0, "first top reach should release local hidden messages before requesting remote older pages");
+    assert.ok(afterWindow.visibleMessageCount > initialWindow.visibleMessageCount, `local window should expand after top reach: before ${JSON.stringify(initialWindow)}, after ${JSON.stringify(afterWindow)}`);
+    assert.ok(afterWindow.visibleMessageCount <= initialWindow.visibleMessageCount + 8, `local window should expand by at most 8 messages, before ${initialWindow.visibleMessageCount}, after ${afterWindow.visibleMessageCount}`);
+    assert.ok(afterWindow.hiddenLocalMessageCount < initialWindow.hiddenLocalMessageCount, `hidden local messages should shrink after local release: before ${JSON.stringify(initialWindow)}, after ${JSON.stringify(afterWindow)}`);
+    assert.ok(after.scrollHeight > before.scrollHeight, `released local history should increase scroll height: before ${before.scrollHeight}, after ${after.scrollHeight}`);
     const topDelta = Math.abs(after.visibleTop - before.visibleTop);
     assert.ok(topDelta < 32, `marker should remain visually anchored after load more, moved ${topDelta}px (before ${before.visibleTop}, after ${after.visibleTop})`);
     const blankSamples = samples.filter((sample) => sample.rows === 0 || (typeof sample.bodyText === "string" && sample.bodyText.length < 100));
@@ -126,7 +156,7 @@ async function readFirstVisibleMarkerId(page) {
     assert.equal(jumpSamples.length, 0, `load-more should not visibly jump/stick marker samples: ${JSON.stringify(jumpSamples.slice(0, 6))}`);
 
     if (failures.length > 0) throw new Error(failures.join("\n"));
-    console.log(JSON.stringify({ ok: true, beforeTop: before.visibleTop, afterTop: after.visibleTop, topDelta, beforeRows: before.rows, afterRows: after.rows, loadedPages: after.loadedPages }));
+    console.log(JSON.stringify({ ok: true, beforeTop: before.visibleTop, afterTop: after.visibleTop, topDelta, beforeRows: before.rows, afterRows: after.rows, initialWindow, afterWindow }));
   } finally {
     await browser.close();
   }

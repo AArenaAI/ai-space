@@ -25,6 +25,7 @@ function loadModule() {
 }
 
 const {
+  DEFAULT_CONVERSATION_RESTORE_TAIL,
   buildConversationRestoreUrl,
   buildConversationMessageStatusUrl,
   buildConversationMessageCountUrl,
@@ -56,7 +57,8 @@ const response = (ok, data, status = ok ? 200 : 500) => ({ ok, status, json: asy
 
 (async () => {
   await test("build restore/status/count URLs", () => {
-    assert.equal(buildConversationRestoreUrl({ apiBaseUrl: "http://api", conversationId: 7 }), "http://api/api/conversations/7?message_tail=50");
+    assert.equal(DEFAULT_CONVERSATION_RESTORE_TAIL, 32);
+    assert.equal(buildConversationRestoreUrl({ apiBaseUrl: "http://api", conversationId: 7 }), "http://api/api/conversations/7?message_tail=32");
     assert.equal(buildConversationRestoreUrl({ conversationId: 7, tail: 10 }), "/api/conversations/7?message_tail=10");
     assert.equal(buildConversationMessageStatusUrl({ apiBaseUrl: "http://api", conversationId: 7, serverMessageId: 9 }), "http://api/api/conversations/7/messages/9");
     assert.equal(buildConversationMessageCountUrl({ apiBaseUrl: "http://api", conversationId: 7 }), "http://api/api/conversations/7/messages?limit=1");
@@ -73,7 +75,7 @@ const response = (ok, data, status = ok ? 200 : 500) => ({ ok, status, json: asy
         return response(true, { title: "T", messages: [] });
       },
     });
-    assert.deepEqual(calls, [["http://api/api/conversations/3?message_tail=50", "Bearer tok"]]);
+    assert.deepEqual(calls, [["http://api/api/conversations/3?message_tail=32", "Bearer tok"]]);
     assert.equal(data.title, "T");
     await assert.rejects(fetchConversationRestore({ conversationId: 3, token: "tok", fetchImpl: async () => response(false, {}, 503) }), /load conversation failed: 503/);
   });

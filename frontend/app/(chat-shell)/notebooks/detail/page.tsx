@@ -1,16 +1,19 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, BookOpen, FileText, Loader2, Plus, Trash2, UploadCloud, AlertCircle, CheckCircle2, Clock3, Check } from "lucide-react";
+import { ArrowLeft, BookOpen, FileText, Globe, Loader2, Plus, Trash2, UploadCloud, AlertCircle, CheckCircle2, Clock3, Check } from "lucide-react";
 import { toast } from "sonner";
 import ChatInterface from "@/components/chat/ChatInterface";
+import { NotebookSourcePreviewDrawer } from "@/components/notebook/NotebookSourcePreviewDrawer";
+import { NotebookStudioPanel, type NotebookStudioActionId, type NotebookStudioArtifact, type NotebookStudioFlashcard, type NotebookStudioQuizQuestion, type NotebookStudioMindmapEdge, type NotebookStudioMindmapNode, type NotebookStudioReportSection, type NotebookStudioReportTable, type NotebookStudioSource, type NotebookStudioTableRow, type NotebookStudioTextSection } from "@/components/notebook/NotebookStudioPanel";
+import { NotebookUrlSourceDialog } from "@/components/notebook/NotebookUrlSourceDialog";
 import { MODELS } from "@/hooks/useChat";
-import { addNotebookFile, fetchNotebook, removeNotebookFile, updateNotebook } from "@/lib/notebookApi";
+import { addNotebookFile, addNotebookUrlSource, deleteNotebookArtifact, fetchNotebook, fetchNotebookArtifacts, fetchNotebookFileContent, generateNotebookArtifact, removeNotebookFile, suggestNotebookReportFormats, updateNotebook, updateNotebookArtifact, type NotebookReportFormatSuggestion } from "@/lib/notebookApi";
 import { normalizeNotebookError, showNotebookError, uploadNotebookSourceFile } from "@/lib/notebookErrors";
-import type { Notebook, NotebookFile } from "@/lib/notebookTypes";
-import { useI18n } from "@/lib/i18n";
+import type { Notebook, NotebookArtifact as PersistedNotebookArtifact, NotebookFile, NotebookFileContent } from "@/lib/notebookTypes";
+import { useI18n, type LanguageCode } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 function currentWorkspaceId(): string | null {
@@ -24,23 +27,341 @@ function formatSize(bytes?: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function reconcileSelectedFileIds(previous: number[], files: NotebookFile[]) {
-  const available = new Set(files.map((file) => file.file_id));
-  if (previous.length === 0) return files.map((file) => file.file_id);
-  const next = previous.filter((id) => available.has(id));
-  return next.length === 0 && files.length > 0 ? files.map((file) => file.file_id) : next;
+function notebookSelectionStorageKey(notebookId: number) {
+  return `notebook:${notebookId}:selected-file-ids`;
 }
 
-function statusMeta(file: NotebookFile, t: (key: string) => string) {
+function readStoredSelectedFileIds(notebookId: number) {
+  try {
+    const raw = localStorage.getItem(notebookSelectionStorageKey(notebookId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((id): id is number => typeof id === "number") : null;
+  } catch {
+    return null;
+  }
+}
+
+function reconcileSelectedFileIds(previous: number[], files: NotebookFile[]) {
+  const available = new Set(files.map((file) => file.file_id));
+  return previous.filter((id) => available.has(id));
+}
+
+type Translate = (key: string, params?: Record<string, string>) => string;
+
+function isNotebookFileReady(file: NotebookFile) {
   const parse = file.file.parse_status;
   const embed = file.file.embedding_status;
-  if (parse === "error" || embed === "error") return { label: t("notebook.statusFailed"), icon: AlertCircle, className: "text-red-500 bg-red-500/10 border-red-500/20" };
-  if (parse === "done" && (embed === "done" || embed === "skipped")) return { label: t("notebook.statusReady"), icon: CheckCircle2, className: "text-emerald-500 bg-emerald-500/10 border-emerald-500/20" };
+  return parse === "done" && (embed === "done" || embed === "skipped");
+}
+
+function isNotebookFileProcessing(file: NotebookFile) {
+  const parse = file.file.parse_status;
+  const embed = file.file.embedding_status;
+  if (parse === "error" || parse === "unsupported" || embed === "error") return false;
+  return !isNotebookFileReady(file);
+}
+
+function statusMeta(file: NotebookFile, t: Translate) {
+  const parse = file.file.parse_status;
+  const embed = file.file.embedding_status;
+  if (parse === "error") return { label: t("notebook.statusParseFailed"), icon: AlertCircle, className: "text-red-500 bg-red-500/10 border-red-500/20" };
+  if (parse === "unsupported") return { label: t("notebook.statusUnsupported"), icon: AlertCircle, className: "text-text-tertiary bg-surface-hover border-surface-border" };
+  if (parse === "done" && embed === "error") return { label: t("notebook.statusIndexFailed"), icon: AlertCircle, className: "text-amber-600 bg-amber-500/10 border-amber-500/20 dark:text-amber-300" };
+  if (isNotebookFileReady(file)) return { label: t("notebook.statusReady"), icon: CheckCircle2, className: "text-emerald-500 bg-emerald-500/10 border-emerald-500/20" };
+  if (parse === "done") return { label: t("notebook.statusIndexing"), icon: Clock3, className: "text-amber-500 bg-amber-500/10 border-amber-500/20" };
   return { label: t("notebook.statusProcessing"), icon: Clock3, className: "text-amber-500 bg-amber-500/10 border-amber-500/20" };
 }
 
+function statusDetail(file: NotebookFile, t: Translate) {
+  const parse = file.file.parse_status;
+  const embed = file.file.embedding_status;
+  if (parse === "error") return file.file.error_message || t("notebook.parseFailureHint");
+  if (parse === "done" && embed === "error") return t("notebook.indexFailureHint");
+  return null;
+}
+
+function normalizeFlashcardArtifactTitle(title: string) {
+  const trimmed = title.trim();
+  if (trimmed === "摘要") return "闪卡";
+  return trimmed.replace(/([·•]\s*)摘要$/, "$1闪卡");
+}
+
+function toStudioArtifact(artifact: PersistedNotebookArtifact): NotebookStudioArtifact | null {
+  const content = artifact.content as { rows?: NotebookStudioTableRow[]; sections?: NotebookStudioTextSection[] | NotebookStudioReportSection[]; nodes?: NotebookStudioMindmapNode[]; edges?: NotebookStudioMindmapEdge[]; cards?: NotebookStudioFlashcard[]; questions?: NotebookStudioQuizQuestion[]; format_id?: string; format_title?: string; executive_summary?: string; tables?: NotebookStudioReportTable[]; orientation?: string; style?: string; detail_level?: string; prompt?: string; image_url?: string; color_scheme?: Record<string, string> } | null;
+  const base = {
+    id: String(artifact.id),
+    title: artifact.type === "flashcards" ? normalizeFlashcardArtifactTitle(artifact.title) : artifact.title,
+    subtitle: artifact.subtitle || "",
+    createdAt: artifact.created_at,
+    sourceCount: artifact.source_count || 0,
+  };
+  if (artifact.type === "data-table") {
+    return { ...base, type: "table", rows: Array.isArray(content?.rows) ? content.rows : [] };
+  }
+  if (artifact.type === "summary" || artifact.type === "faq" || artifact.type === "briefing") {
+    return { ...base, type: artifact.type, sections: Array.isArray(content?.sections) ? content.sections : [] };
+  }
+  if (artifact.type === "mindmap") {
+    return {
+      ...base,
+      type: "mindmap",
+      nodes: Array.isArray(content?.nodes) ? content.nodes : [],
+      edges: Array.isArray(content?.edges) ? content.edges : [],
+    };
+  }
+  if (artifact.type === "flashcards") {
+    return { ...base, type: "flashcards", cards: Array.isArray(content?.cards) ? content.cards : [] };
+  }
+  if (artifact.type === "quiz") {
+    return { ...base, type: "quiz", questions: Array.isArray(content?.questions) ? content.questions : [] };
+  }
+  if (artifact.type === "report") {
+    return {
+      ...base,
+      type: "report",
+      formatId: typeof content?.format_id === "string" ? content.format_id : "briefing-document",
+      formatTitle: typeof content?.format_title === "string" ? content.format_title : "Report",
+      executiveSummary: typeof content?.executive_summary === "string" ? content.executive_summary : "",
+      sections: Array.isArray(content?.sections) ? content.sections as NotebookStudioReportSection[] : [],
+      tables: Array.isArray(content?.tables) ? content.tables : [],
+    };
+  }
+  if (artifact.type === "infographic") {
+    return {
+      ...base,
+      type: "infographic",
+      orientation: typeof content?.orientation === "string" ? content.orientation : "landscape",
+      style: typeof content?.style === "string" ? content.style : "auto",
+      detail_level: typeof content?.detail_level === "string" ? content.detail_level : "standard",
+      prompt: typeof content?.prompt === "string" ? content.prompt : "",
+      image_url: typeof content?.image_url === "string" ? content.image_url : "",
+      color_scheme: typeof content?.color_scheme === "object" && content?.color_scheme ? content.color_scheme : undefined,
+    };
+  }
+  return null;
+}
+
+function safeFilename(value: string) {
+  return (value || "notebook-output").replace(/[\\/:*?\"<>|]+/g, "-").replace(/\s+/g, " ").trim().slice(0, 80) || "notebook-output";
+}
+
+function artifactToMarkdown(artifact: NotebookStudioArtifact) {
+  const lines = [`# ${artifact.title}`, "", artifact.subtitle, ""].filter((line) => line !== undefined);
+  switch (artifact.type) {
+    case "table":
+      lines.push("| 功能模块 / 来源 | 具体能力 / 内容摘要 | 状态 | 核心技术 / 处理方式 | 业务价值 | 来源 |");
+      lines.push("| --- | --- | --- | --- | --- | --- |");
+      artifact.rows.forEach((row) => {
+        lines.push(`| ${row.module} | ${row.capability} | ${row.status} | ${row.implementation} | ${row.value} | ${row.source} |`);
+      });
+      break;
+    case "mindmap":
+      lines.push("## 节点", "");
+      artifact.nodes.forEach((node) => {
+        lines.push(`- ${node.label}${node.source ? ` ${node.source}` : ""}${node.summary ? `：${node.summary}` : ""}`);
+      });
+      if (artifact.edges.length) {
+        lines.push("", "## 关系", "");
+        artifact.edges.forEach((edge) => lines.push(`- ${edge.from} → ${edge.to}${edge.label ? `：${edge.label}` : ""}`));
+      }
+      break;
+    case "flashcards":
+      artifact.cards.forEach((card, index) => {
+        lines.push(`## ${index + 1}. ${card.front}`, "", card.back);
+        if (card.source) lines.push("", card.source);
+        lines.push("");
+      });
+      break;
+    case "quiz":
+      artifact.questions.forEach((question, index) => {
+        lines.push(`## ${index + 1}. ${question.question}`, "");
+        question.options.forEach((option) => lines.push(`- ${option.id}. ${option.text}`));
+        lines.push("", `正确答案：${question.correct_option_id}`, question.explanation, "");
+      });
+      break;
+    case "report":
+      lines.push(`_Format: ${artifact.formatTitle}_`, "", "## Executive Summary", "", artifact.executiveSummary, "");
+      artifact.sections.forEach((section) => {
+        lines.push(`## ${section.number ? `${section.number}. ` : ""}${section.heading}`);
+        if (section.body) lines.push("", section.body);
+        if (section.bullets?.length) {
+          lines.push("");
+          section.bullets.forEach((bullet) => lines.push(`- ${bullet}`));
+        }
+        lines.push("");
+      });
+      artifact.tables.forEach((table) => {
+        lines.push(`## ${table.title}`, "");
+        if (table.headers.length) {
+          lines.push(`| ${table.headers.join(" | ")} |`);
+          lines.push(`| ${table.headers.map(() => "---").join(" | ")} |`);
+          table.rows.forEach((row) => lines.push(`| ${row.join(" | ")} |`));
+          lines.push("");
+        }
+      });
+      break;
+    case "summary":
+    case "faq":
+    case "briefing":
+      artifact.sections.forEach((section) => {
+        lines.push(`## ${section.heading}`);
+        if (section.body) lines.push("", section.body);
+        if (section.bullets?.length) {
+          lines.push("");
+          section.bullets.forEach((bullet) => lines.push(`- ${bullet}`));
+        }
+        lines.push("");
+      });
+      break;
+    case "infographic":
+      lines.push("## Infographic", "", `- Orientation: ${artifact.orientation}`, `- Style: ${artifact.style}`, `- Detail level: ${artifact.detail_level}`, "");
+      if (artifact.prompt) lines.push("## Custom prompt", "", artifact.prompt, "");
+      if (artifact.image_url) lines.push("## Image", "", artifact.image_url, "");
+      break;
+  }
+  return lines.join("\n").trim() + "\n";
+}
+
+function artifactToCsv(artifact: NotebookStudioArtifact) {
+  if (artifact.type !== "table") return artifactToMarkdown(artifact);
+  const escape = (value: string) => `"${String(value || "").replace(/"/g, '""')}"`;
+  const rows = [
+    ["功能模块 / 来源", "具体能力 / 内容摘要", "状态", "核心技术 / 处理方式", "业务价值", "来源"],
+    ...artifact.rows.map((row) => [row.module, row.capability, row.status, row.implementation, row.value, row.source]),
+  ];
+  return rows.map((row) => row.map(escape).join(",")).join("\n") + "\n";
+}
+
+function downloadTextFile(filename: string, content: string, type: string) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+const FIXED_REPORT_FORMATS: NotebookReportFormatSuggestion[] = [
+  { id: "custom", title: "自制格式", description: "从空白结构开始，适合自由定义报告章节和语气。" },
+  { id: "briefing-document", title: "简报文档", description: "执行摘要、章节编号、表格和要点，适合正式汇报。" },
+  { id: "study-guide", title: "学习指南", description: "把资料转成便于复习的概念、问题和知识点结构。" },
+  { id: "blog-post", title: "博文", description: "改写成面向读者的文章、观点和传播型内容。" },
+];
+
+function ReportFormatDialog({
+  open,
+  selectedId,
+  suggestions,
+  loadingSuggestions,
+  generating,
+  onSelect,
+  onClose,
+  onGenerate,
+  t,
+}: {
+  open: boolean;
+  selectedId: string;
+  suggestions: NotebookReportFormatSuggestion[];
+  loadingSuggestions: boolean;
+  generating: boolean;
+  onSelect: (id: string) => void;
+  onClose: () => void;
+  onGenerate: () => void;
+  t: Translate;
+}) {
+  if (!open) return null;
+  const renderOption = (format: NotebookReportFormatSuggestion, recommended = false) => {
+    const selected = selectedId === format.id;
+    return (
+      <button
+        key={format.id}
+        type="button"
+        onClick={() => onSelect(format.id)}
+        className={cn(
+          "group flex min-h-[116px] w-full flex-col justify-between rounded-xl border px-4 py-4 text-left transition duration-150",
+          selected
+            ? "border-brand bg-brand-muted/40 shadow-sm ring-1 ring-brand/20"
+            : "border-transparent bg-surface-elevated hover:border-surface-border hover:bg-surface-hover"
+        )}
+      >
+        <span className="block">
+          <span className="flex items-start justify-between gap-3">
+            <span className="text-sm font-semibold leading-5 text-text-primary">{format.title}</span>
+            <span className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition", selected ? "border-brand bg-brand text-white" : "border-surface-border bg-surface-card text-transparent group-hover:border-brand")}>{selected && <Check className="h-3.5 w-3.5" />}</span>
+          </span>
+          <span className="mt-2 block text-xs leading-5 text-text-tertiary">{format.description}</span>
+        </span>
+        {recommended && <span className="mt-3 inline-flex w-fit rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-300">{t("notebook.studio.reportSuggestedBadge")}</span>}
+      </button>
+    );
+  };
+  const renderSuggestionBody = () => {
+    if (loadingSuggestions) {
+      return Array.from({ length: 4 }).map((_, index) => (
+        <div key={`suggestion-loading-${index}`} className="min-h-[116px] rounded-xl bg-surface-elevated px-4 py-4">
+          <div className="h-4 w-24 animate-pulse rounded bg-surface-hover" />
+          <div className="mt-4 space-y-2">
+            <div className="h-3 w-full animate-pulse rounded bg-surface-hover" />
+            <div className="h-3 w-4/5 animate-pulse rounded bg-surface-hover" />
+          </div>
+        </div>
+      ));
+    }
+    if (suggestions.length > 0) {
+      return suggestions.slice(0, 4).map((format) => renderOption(format, true));
+    }
+    return (
+      <div className="col-span-full rounded-xl border border-dashed border-surface-border bg-surface-elevated px-4 py-5 text-sm text-text-tertiary">
+        {t("notebook.studio.reportSuggestionEmpty")}
+      </div>
+    );
+  };
+  return (
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/45 p-5 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="flex max-h-[88vh] w-[min(1040px,94vw)] flex-col overflow-hidden rounded-[22px] border border-surface-border bg-surface-card shadow-2xl">
+        <div className="flex items-center justify-between border-b border-surface-border px-6 py-4">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-elevated text-text-secondary">
+              <FileText className="h-5 w-5" />
+            </span>
+            <h3 className="text-xl font-semibold tracking-[-0.02em] text-text-primary">{t("notebook.studio.reportDialogTitle")}</h3>
+          </div>
+          <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-elevated text-lg leading-none text-text-tertiary transition hover:bg-surface-hover hover:text-text-primary" aria-label="Close">×</button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+          <section>
+            <h4 className="mb-3 text-sm font-semibold text-text-primary">{t("notebook.studio.reportFixedFormats")}</h4>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{FIXED_REPORT_FORMATS.map((format) => renderOption(format))}</div>
+          </section>
+          <section className="mt-7">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h4 className="text-sm font-semibold text-text-primary">✨ {t("notebook.studio.reportSuggestedFormats")}</h4>
+              {loadingSuggestions && <span className="inline-flex items-center gap-1.5 text-xs text-text-tertiary"><Loader2 className="h-3.5 w-3.5 animate-spin" />{t("notebook.studio.reportAnalyzing")}</span>}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{renderSuggestionBody()}</div>
+          </section>
+        </div>
+        <div className="flex items-center justify-between border-t border-surface-border px-6 py-4">
+          <div className="text-xs text-text-tertiary">{t("notebook.studio.reportSelectedHint")}</div>
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} className="rounded-full border border-surface-border px-4 py-2 text-sm font-semibold text-text-secondary transition hover:bg-surface-hover">{t("common.cancel")}</button>
+            <button type="button" onClick={onGenerate} disabled={generating} className="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white transition hover:bg-brand-hover disabled:opacity-70">
+              {generating && <Loader2 className="h-4 w-4 animate-spin" />}
+              {t("notebook.studio.createReport")}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NotebookDetailContent() {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const searchParams = useSearchParams();
   const notebookId = Number(searchParams.get("notebook_id") || searchParams.get("id"));
   const conversationId = searchParams.get("conversation_id") ? Number(searchParams.get("conversation_id")) : undefined;
@@ -48,10 +369,39 @@ function NotebookDetailContent() {
   const [files, setFiles] = useState<NotebookFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [addingUrl, setAddingUrl] = useState(false);
+  const [urlDialogOpen, setUrlDialogOpen] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
   const [selectedFileIds, setSelectedFileIds] = useState<number[]>([]);
+  const [sourcesWidth, setSourcesWidth] = useState(340);
+  const [studioWidth, setStudioWidth] = useState(390);
+  const [previewSource, setPreviewSource] = useState<NotebookFile | null>(null);
+  const [previewData, setPreviewData] = useState<NotebookFileContent | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [studioArtifacts, setStudioArtifacts] = useState<NotebookStudioArtifact[]>([]);
+  const [activeStudioArtifactId, setActiveStudioArtifactId] = useState<string | null>(null);
+  const [generatingStudioType, setGeneratingStudioType] = useState<NotebookStudioActionId | null>(null);
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const [selectedReportFormatId, setSelectedReportFormatId] = useState("briefing-document");
+  const [reportFormatSuggestions, setReportFormatSuggestions] = useState<NotebookReportFormatSuggestion[]>([]);
+  const [loadingReportSuggestions, setLoadingReportSuggestions] = useState(false);
+  const [externalChatSendRequest, setExternalChatSendRequest] = useState<{ id: number; content: string } | null>(null);
+  const layoutRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const selectionInitializedRef = useRef(false);
+  const loadStudioArtifacts = async () => {
+    if (!notebookId) return;
+    try {
+      const persisted = await fetchNotebookArtifacts(notebookId);
+      const next = persisted.map(toStudioArtifact).filter((item): item is NotebookStudioArtifact => Boolean(item));
+      setStudioArtifacts(next);
+      setActiveStudioArtifactId((prev) => (prev && next.some((item) => item.id === prev) ? prev : null));
+    } catch (error) {
+      showNotebookError(error, t("notebook.studio.loadFailed"));
+    }
+  };
 
   const load = async () => {
     if (!notebookId) { setLoading(false); return; }
@@ -61,7 +411,11 @@ function NotebookDetailContent() {
       setNotebook(data.notebook);
       const nextFiles = data.files || [];
       setFiles(nextFiles);
-      setSelectedFileIds((prev) => reconcileSelectedFileIds(prev, nextFiles));
+      setSelectedFileIds((prev) => {
+        const baseline = selectionInitializedRef.current ? prev : (readStoredSelectedFileIds(notebookId) || []);
+        selectionInitializedRef.current = true;
+        return reconcileSelectedFileIds(baseline, nextFiles);
+      });
       setPageError(null);
     } catch (error) {
       const normalized = showNotebookError(error, t("notebook.loadFailed"));
@@ -71,24 +425,80 @@ function NotebookDetailContent() {
     }
   };
 
-  useEffect(() => { load(); }, [notebookId]);
+  useEffect(() => {
+    selectionInitializedRef.current = false;
+    setSelectedFileIds([]);
+    load();
+    loadStudioArtifacts();
+  }, [notebookId]);
 
-  const readyCount = useMemo(() => files.filter((file) => {
-    const meta = statusMeta(file, t);
-    return meta.label === t("notebook.statusReady");
-  }).length, [files, t]);
+  useEffect(() => {
+    if (!notebookId || !selectionInitializedRef.current) return;
+    localStorage.setItem(notebookSelectionStorageKey(notebookId), JSON.stringify(selectedFileIds));
+  }, [notebookId, selectedFileIds]);
 
-  const hasProcessingFiles = useMemo(() => files.some((file) => {
-    const parse = file.file.parse_status;
-    const embed = file.file.embedding_status;
-    return parse !== "error" && embed !== "error" && !(parse === "done" && (embed === "done" || embed === "skipped"));
-  }), [files]);
+  const readyCount = useMemo(() => files.filter(isNotebookFileReady).length, [files]);
+
+  const studioSourceFiles = useMemo<NotebookStudioSource[]>(() => files.map((file) => ({
+    id: file.file_id,
+    filename: file.file.filename,
+    mimeType: file.file.mime_type,
+  })), [files]);
+
+  const hasProcessingFiles = useMemo(() => files.some(isNotebookFileProcessing), [files]);
 
   const selectedSourceText = useMemo(() => (
     t("notebook.selectedSources")
       .replace("{selected}", String(selectedFileIds.length))
       .replace("{total}", String(files.length))
   ), [files.length, selectedFileIds.length, t]);
+
+  const allSourcesSelected = useMemo(() => (
+    files.length > 0 && files.every((file) => selectedFileIds.includes(file.file_id))
+  ), [files, selectedFileIds]);
+
+  const startPaneResize = (pane: "sources" | "studio", event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startSourcesWidth = sourcesWidth;
+    const startStudioWidth = studioWidth;
+    const containerWidth = layoutRef.current?.clientWidth || window.innerWidth;
+    const minSourcesWidth = 260;
+    const maxSourcesWidth = 560;
+    const minStudioWidth = 300;
+    const maxStudioWidth = 760;
+    const minCenterWidth = 420;
+    const handleSpace = 16;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      if (pane === "sources") {
+        const maxByCenter = containerWidth - startStudioWidth - minCenterWidth - handleSpace;
+        setSourcesWidth(clamp(startSourcesWidth + deltaX, minSourcesWidth, Math.min(maxSourcesWidth, maxByCenter)));
+        return;
+      }
+      const maxByCenter = containerWidth - startSourcesWidth - minCenterWidth - handleSpace;
+      setStudioWidth(clamp(startStudioWidth - deltaX, minStudioWidth, Math.min(maxStudioWidth, maxByCenter)));
+    };
+
+    const stopResize = () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", stopResize);
+    window.addEventListener("pointercancel", stopResize);
+  };
 
   const toggleSource = (fileId: number) => {
     setSelectedFileIds((prev) => {
@@ -97,7 +507,13 @@ function NotebookDetailContent() {
     });
   };
 
-  const selectAllSources = () => setSelectedFileIds(files.map((file) => file.file_id));
+  const selectAllSources = () => {
+    if (allSourcesSelected) {
+      setSelectedFileIds([]);
+      return;
+    }
+    setSelectedFileIds(files.map((file) => file.file_id));
+  };
 
   useEffect(() => {
     if (!hasProcessingFiles || !notebookId) return;
@@ -155,15 +571,335 @@ function NotebookDetailContent() {
     }
   };
 
+  const handleAddUrlSource = async (url: string) => {
+    if (!notebookId) return;
+    setAddingUrl(true);
+    setPageError(null);
+    try {
+      const next = await addNotebookUrlSource(notebookId, url);
+      const nextFiles = [next, ...files.filter((old) => old.file_id !== next.file_id)];
+      setFiles(nextFiles);
+      setSelectedFileIds((prev) => reconcileSelectedFileIds(prev, nextFiles));
+      setUrlDialogOpen(false);
+      toast.success(t("notebook.addUrlSuccess"));
+      window.setTimeout(load, 1200);
+    } catch (error) {
+      const normalized = showNotebookError(error, t("notebook.addUrlFailed"));
+      setPageError(normalized.message);
+    } finally {
+      setAddingUrl(false);
+    }
+  };
+
+  const openPreview = async (file: NotebookFile) => {
+    if (!notebookId) return;
+    setPreviewSource(file);
+    setPreviewData(null);
+    setPreviewError(null);
+    setPreviewLoading(true);
+    try {
+      const data = await fetchNotebookFileContent(notebookId, file.file_id);
+      setPreviewData(data);
+      if (data.file) {
+        setPreviewSource((current) => current && current.file_id === file.file_id ? { ...current, file: data.file } : current);
+        setFiles((prev) => prev.map((item) => item.file_id === file.file_id ? { ...item, file: data.file } : item));
+      }
+    } catch (error) {
+      const normalized = normalizeNotebookError(error, t("notebook.previewLoadFailed"));
+      setPreviewError(normalized.message);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const closePreview = () => {
+    setPreviewSource(null);
+    setPreviewData(null);
+    setPreviewError(null);
+    setPreviewLoading(false);
+  };
+
   const handleRemove = async (file: NotebookFile) => {
     try {
       await removeNotebookFile(notebookId, file.file_id);
       setFiles((prev) => prev.filter((item) => item.id !== file.id));
       setSelectedFileIds((prev) => prev.filter((id) => id !== file.file_id));
+      if (previewSource?.id === file.id) closePreview();
       toast.success(t("notebook.removeSuccess"));
     } catch (error) {
       showNotebookError(error, t("notebook.removeFailed"));
     }
+  };
+
+  const buildStudioTableRows = (): NotebookStudioTableRow[] => {
+    const selected = files.filter((file) => selectedFileIds.includes(file.file_id));
+    const scopedFiles = selected.length > 0 ? selected : files;
+    if (scopedFiles.length === 0) {
+      return [{
+        module: t("notebook.studio.tableEmptyModule"),
+        capability: t("notebook.studio.tableEmptyCapability"),
+        status: t("notebook.studio.tableEmptyStatus"),
+        implementation: t("notebook.studio.tableEmptyImplementation"),
+        value: t("notebook.studio.tableEmptyValue"),
+        source: "—",
+      }];
+    }
+
+    return scopedFiles.map((file, index) => {
+      const ready = isNotebookFileReady(file);
+      const parseStatus = file.file.parse_status || "—";
+      const embeddingStatus = file.file.embedding_status || "—";
+      const details = [
+        file.file.mime_type || "file",
+        formatSize(file.file.size),
+        file.file.page_count ? t("notebook.studio.tablePages", { count: String(file.file.page_count) }) : null,
+        file.file.token_count ? t("notebook.studio.tableTokens", { count: String(file.file.token_count) }) : null,
+      ].filter(Boolean).join(" · ");
+      return {
+        module: file.file.filename,
+        capability: file.file.summary || details || t("notebook.studio.tableCapabilityFallback"),
+        status: ready ? t("notebook.statusReady") : `${parseStatus} / ${embeddingStatus}`,
+        implementation: t("notebook.studio.tableImplementation", { parse: parseStatus, embedding: embeddingStatus }),
+        value: ready ? t("notebook.studio.tableReadyValue") : t("notebook.studio.tablePendingValue"),
+        source: `[${index + 1}]`,
+      };
+    });
+  };
+
+  const scopedStudioFiles = () => {
+    const selected = files.filter((file) => selectedFileIds.includes(file.file_id));
+    return selected.length > 0 ? selected : files;
+  };
+
+  const sourceRef = (index: number) => `[${index + 1}]`;
+
+  const buildStudioTextSections = (type: "summary" | "faq" | "briefing"): NotebookStudioTextSection[] => {
+    const scopedFiles = scopedStudioFiles();
+    if (scopedFiles.length === 0) {
+      return [{ heading: t("notebook.studio.noSourcesHeading"), body: t("notebook.studio.noSourcesBody") }];
+    }
+    const readyFiles = scopedFiles.filter(isNotebookFileReady);
+    const sourceBullets = scopedFiles.map((file, index) => {
+      const summary = file.file.summary || [file.file.mime_type || "file", formatSize(file.file.size)].filter(Boolean).join(" · ");
+      return `${sourceRef(index)} ${file.file.filename}: ${summary || t("notebook.studio.sourceNoSummary")}`;
+    });
+    if (type === "summary") {
+      return [
+        {
+          heading: t("notebook.studio.summarySectionOverview"),
+          body: t("notebook.studio.summaryOverviewBody", { count: String(scopedFiles.length), ready: String(readyFiles.length) }),
+        },
+        { heading: t("notebook.studio.summarySectionSources"), bullets: sourceBullets },
+        {
+          heading: t("notebook.studio.summarySectionNext"),
+          bullets: [
+            t("notebook.studio.summaryNextVerify"),
+            t("notebook.studio.summaryNextAsk"),
+            t("notebook.studio.summaryNextTable"),
+          ],
+        },
+      ];
+    }
+    if (type === "faq") {
+      return [
+        {
+          heading: t("notebook.studio.faqQuestionScope"),
+          body: t("notebook.studio.faqAnswerScope", { count: String(scopedFiles.length), ready: String(readyFiles.length) }),
+        },
+        {
+          heading: t("notebook.studio.faqQuestionSources"),
+          bullets: sourceBullets,
+        },
+        {
+          heading: t("notebook.studio.faqQuestionFollowup"),
+          bullets: [
+            t("notebook.studio.faqFollowupCompare"),
+            t("notebook.studio.faqFollowupRisks"),
+            t("notebook.studio.faqFollowupTimeline"),
+          ],
+        },
+      ];
+    }
+    return [
+      {
+        heading: t("notebook.studio.briefingSectionSituation"),
+        body: t("notebook.studio.briefingSituationBody", { title: notebook?.title || t("notebook.untitled"), count: String(scopedFiles.length) }),
+      },
+      {
+        heading: t("notebook.studio.briefingSectionSignals"),
+        bullets: sourceBullets.slice(0, 6),
+      },
+      {
+        heading: t("notebook.studio.briefingSectionActions"),
+        bullets: [
+          t("notebook.studio.briefingActionValidate"),
+          t("notebook.studio.briefingActionDeepDive"),
+          t("notebook.studio.briefingActionExport"),
+        ],
+      },
+    ];
+  };
+
+  const openReportDialog = async () => {
+    if (!notebookId) return;
+    if (selectedFileIds.length === 0) {
+      toast.info(t("notebook.studio.selectSourcesFirst"));
+      return;
+    }
+    setReportDialogOpen(true);
+    setSelectedReportFormatId("briefing-document");
+    setLoadingReportSuggestions(true);
+    try {
+      const suggestions = await suggestNotebookReportFormats({
+        notebookId,
+        file_ids: selectedFileIds,
+        language: language as LanguageCode,
+      });
+      setReportFormatSuggestions(suggestions.slice(0, 4));
+    } catch (error) {
+      setReportFormatSuggestions([]);
+      showNotebookError(error, t("notebook.studio.reportSuggestionFailed"));
+    } finally {
+      setLoadingReportSuggestions(false);
+    }
+  };
+
+  const generateStudioArtifactByType = async (type: string, visualType: NotebookStudioActionId, options?: { orientation?: string; style?: string; detail_level?: string; prompt?: string }) => {
+    if (!notebookId) return;
+    setGeneratingStudioType(visualType);
+    try {
+      const saved = await generateNotebookArtifact({
+        notebookId,
+        type,
+        file_ids: selectedFileIds,
+        language: language as LanguageCode,
+        orientation: options?.orientation,
+        style: options?.style,
+        detail_level: options?.detail_level,
+        prompt: options?.prompt,
+      });
+      const artifact = toStudioArtifact(saved);
+      if (artifact) {
+        setStudioArtifacts((prev) => [artifact, ...prev.filter((item) => item.id !== artifact.id)]);
+        if (artifact.type === "infographic") {
+          setActiveStudioArtifactId(null);
+        } else {
+          setActiveStudioArtifactId(artifact.id);
+        }
+      }
+      toast.success(visualType === "table" ? t("notebook.studio.tableGenerated") : visualType === "quiz" ? t("notebook.studio.quizGenerated") : visualType === "report" ? t("notebook.studio.reportGenerated") : visualType === "infographic" ? t("notebook.studio.infographicGenerated") : t("notebook.studio.textGenerated"));
+    } catch (error) {
+      showNotebookError(error, t("notebook.studio.saveFailed"));
+    } finally {
+      setGeneratingStudioType(null);
+    }
+  };
+
+  const handleCreateReport = () => {
+    const reportType = `report:${selectedReportFormatId}`;
+    setReportDialogOpen(false);
+    void generateStudioArtifactByType(reportType, "report");
+  };
+
+  const handleStudioGenerate = async (type: NotebookStudioActionId, options?: { orientation?: string; style?: string; detail_level?: string; prompt?: string }) => {
+    if (type === "slides") {
+      toast.info(t("notebook.studio.comingSoon"));
+      return;
+    }
+    if (type === "report") {
+      await openReportDialog();
+      return;
+    }
+    if (type === "infographic") {
+      if (!notebookId) return;
+      if (selectedFileIds.length === 0) {
+        toast.info(t("notebook.studio.selectSourcesFirst"));
+        return;
+      }
+      await generateStudioArtifactByType("infographic", "infographic", options);
+      return;
+    }
+    if (!notebookId) return;
+    if (selectedFileIds.length === 0) {
+      toast.info(t("notebook.studio.selectSourcesFirst"));
+      return;
+    }
+    await generateStudioArtifactByType(type, type);
+  };
+
+  const handleRenameArtifact = async (artifact: NotebookStudioArtifact) => {
+    if (!notebookId) return;
+    const title = window.prompt(t("notebook.studio.renamePrompt"), artifact.title)?.trim();
+    if (!title || title === artifact.title) return;
+    try {
+      const updated = await updateNotebookArtifact(notebookId, Number(artifact.id), { title, subtitle: artifact.subtitle });
+      const next = toStudioArtifact(updated);
+      if (next) {
+        setStudioArtifacts((prev) => prev.map((item) => item.id === next.id ? next : item));
+        setActiveStudioArtifactId(next.id);
+      }
+      toast.success(t("notebook.studio.renameSuccess"));
+    } catch (error) {
+      showNotebookError(error, t("notebook.studio.renameFailed"));
+    }
+  };
+
+  const handleDeleteArtifact = async (artifact: NotebookStudioArtifact) => {
+    if (!notebookId) return;
+    if (!window.confirm(t("notebook.studio.deleteConfirm", { title: artifact.title }))) return;
+    try {
+      await deleteNotebookArtifact(notebookId, Number(artifact.id));
+      setStudioArtifacts((prev) => {
+        const next = prev.filter((item) => item.id !== artifact.id);
+        setActiveStudioArtifactId((current) => current === artifact.id ? next[0]?.id || null : current);
+        return next;
+      });
+      toast.success(t("notebook.studio.deleteSuccess"));
+    } catch (error) {
+      showNotebookError(error, t("notebook.studio.deleteFailed"));
+    }
+  };
+
+  const handleCopyArtifact = async (artifact: NotebookStudioArtifact) => {
+    try {
+      await navigator.clipboard.writeText(artifactToMarkdown(artifact));
+      toast.success(t("notebook.studio.copySuccess"));
+    } catch {
+      toast.error(t("notebook.studio.copyFailed"));
+    }
+  };
+
+  const handleDownloadArtifact = (artifact: NotebookStudioArtifact) => {
+    const base = safeFilename(artifact.title);
+    if (artifact.type === "table") {
+      downloadTextFile(`${base}.csv`, artifactToCsv(artifact), "text/csv;charset=utf-8");
+    } else {
+      downloadTextFile(`${base}.md`, artifactToMarkdown(artifact), "text/markdown;charset=utf-8");
+    }
+    toast.success(t("notebook.studio.downloadSuccess"));
+  };
+
+  const handleExportTableToGoogleSheets = (artifact: Extract<NotebookStudioArtifact, { type: "table" }>) => {
+    const base = safeFilename(artifact.title);
+    downloadTextFile(`${base}.csv`, artifactToCsv(artifact), "text/csv;charset=utf-8");
+    toast.success(t("notebook.studio.googleSheetsExportHint"));
+  };
+
+  const handleExplainFlashcard = (card: NotebookStudioFlashcard) => {
+    const content = t("notebook.studio.flashcardExplainPrompt", { front: card.front, back: card.back });
+    setExternalChatSendRequest({ id: Date.now(), content });
+  };
+
+  const handleExplainQuiz = (question: NotebookStudioQuizQuestion, selectedOptionId: string | null) => {
+    const selectedOption = question.options.find((option) => option.id === selectedOptionId);
+    const correctOption = question.options.find((option) => option.id === question.correct_option_id);
+    const content = t("notebook.studio.quizExplainPrompt", {
+      question: question.question,
+      selected: selectedOption ? `${selectedOption.id}. ${selectedOption.text}` : t("notebook.studio.notAnswered"),
+      correct: correctOption ? `${correctOption.id}. ${correctOption.text}` : question.correct_option_id,
+      explanation: question.explanation,
+    });
+    setExternalChatSendRequest({ id: Date.now(), content });
   };
 
   const handleRename = async () => {
@@ -188,9 +924,10 @@ function NotebookDetailContent() {
   }
 
   return (
-    <div className="flex h-full min-h-0 bg-surface text-text-primary">
-      <aside className="hidden h-full w-[340px] shrink-0 flex-col border-r border-surface-border bg-surface-elevated/80 lg:flex">
-        <div className="border-b border-surface-border p-5">
+    <>
+    <div ref={layoutRef} className="flex h-full min-h-0 gap-3 overflow-hidden bg-surface-elevated p-3 text-text-primary">
+      <aside className="flex h-full shrink-0 flex-col overflow-hidden rounded-[28px] border border-surface-border bg-surface-card shadow-sm" style={{ width: sourcesWidth }}>
+        <div className="border-b border-surface-border px-5 py-4">
           <Link href="/notebooks" className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-text-tertiary transition hover:text-text-primary">
             <ArrowLeft className="h-3.5 w-3.5" />{t("notebook.back")}
           </Link>
@@ -209,10 +946,19 @@ function NotebookDetailContent() {
               <h2 className="text-sm font-semibold text-text-primary">{t("notebook.sources")}</h2>
               <p className="mt-1 text-xs text-text-tertiary">{t("notebook.sourcesHint")}</p>
             </div>
-            <button onClick={() => inputRef.current?.click()} disabled={uploading} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-brand px-3 text-xs font-medium text-white transition hover:bg-brand-hover disabled:opacity-60">
-              {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}{t("notebook.addSource")}
-            </button>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setUrlDialogOpen(true)} disabled={addingUrl} className="inline-flex h-9 items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-3 text-xs font-medium text-text-secondary transition hover:border-surface-border hover:bg-surface-elevated hover:text-text-primary disabled:opacity-60">
+                {addingUrl ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Globe className="h-3.5 w-3.5" />}{t("notebook.addUrl")}
+              </button>
+              <button onClick={() => inputRef.current?.click()} disabled={uploading} className="inline-flex h-9 items-center gap-1.5 rounded-full bg-brand px-3 text-xs font-medium text-white transition hover:bg-brand-hover disabled:opacity-60">
+                {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}{t("notebook.addSource")}
+              </button>
+            </div>
           </div>
+          <button type="button" onClick={() => setUrlDialogOpen(true)} className="mb-3 flex w-full items-center gap-2 rounded-2xl border border-surface-border bg-surface-elevated px-3 py-2.5 text-left text-xs text-text-tertiary transition hover:border-surface-border hover:bg-surface-card hover:text-text-primary">
+            <Globe className="h-4 w-4" />
+            <span>{t("notebook.searchNewSources")}</span>
+          </button>
           <input ref={inputRef} type="file" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
 
           {pageError && (
@@ -223,9 +969,9 @@ function NotebookDetailContent() {
           )}
 
           {files.length > 0 && (
-            <div className="mb-3 flex items-center justify-between rounded-2xl border border-surface-border bg-surface-card px-3 py-2">
+            <div className="mb-3 flex items-center justify-between rounded-2xl border border-surface-border bg-surface-elevated px-3 py-2">
               <span className="text-xs text-text-tertiary">{selectedSourceText}</span>
-              <button type="button" onClick={selectAllSources} className="text-xs font-medium text-brand transition hover:text-brand-hover">
+              <button type="button" onClick={selectAllSources} className="rounded-lg px-2.5 py-1 text-sm font-semibold text-text-primary transition hover:bg-surface-elevated">
                 {t("notebook.selectAllSources")}
               </button>
             </div>
@@ -238,8 +984,8 @@ function NotebookDetailContent() {
               onDragLeave={() => setDragActive(false)}
               onDrop={(e) => { e.preventDefault(); handleUpload(Array.from(e.dataTransfer.files)); }}
               className={cn(
-                "flex min-h-[220px] w-full flex-col items-center justify-center rounded-3xl border border-dashed border-surface-border bg-surface-card px-5 text-center transition hover:border-brand-border hover:bg-brand-muted/40",
-                dragActive && "border-brand-border bg-brand-muted/50"
+                "flex min-h-[220px] w-full flex-col items-center justify-center rounded-[24px] border border-dashed border-surface-border bg-surface-elevated px-5 text-center transition hover:border-brand hover:bg-surface-card",
+                dragActive && "border-brand bg-surface-card"
               )}
             >
               <UploadCloud className="mb-4 h-8 w-8 text-brand" />
@@ -248,36 +994,41 @@ function NotebookDetailContent() {
             </button>
           ) : (
             <div
-              className={cn("space-y-2.5 rounded-3xl border border-transparent p-0 transition", dragActive && "border-dashed border-brand-border bg-brand-muted/20 p-2")}
+              className={cn("space-y-1.5 rounded-[24px] border border-transparent p-0 transition", dragActive && "border-dashed border-surface-border bg-surface-elevated p-2")}
               onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
               onDragLeave={() => setDragActive(false)}
               onDrop={(e) => { e.preventDefault(); handleUpload(Array.from(e.dataTransfer.files)); }}
             >
-              {dragActive && <div className="rounded-2xl border border-dashed border-brand-border py-3 text-center text-xs font-medium text-brand">{t("notebook.dropTitle")}</div>}
+              {dragActive && <div className="rounded-2xl border border-dashed border-surface-border py-3 text-center text-xs font-medium text-text-primary">{t("notebook.dropTitle")}</div>}
               {files.map((file) => {
                 const meta = statusMeta(file, t);
                 const Icon = meta.icon;
+                const detail = statusDetail(file, t);
                 const selected = selectedFileIds.includes(file.file_id);
                 return (
-                  <div key={file.id} className={cn("group rounded-2xl border bg-surface-card p-3 transition hover:border-brand-border", selected ? "border-brand-border" : "border-surface-border opacity-70")}>
+                  <div key={file.id} role="button" tabIndex={0} onClick={() => openPreview(file)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") openPreview(file); }} className={cn("group w-full cursor-pointer rounded-2xl border bg-surface-card p-3 text-left transition hover:border-surface-border hover:bg-surface-elevated", selected ? "border-surface-border" : "border-transparent opacity-75")}>
                     <div className="flex items-start gap-3">
                       <button
                         type="button"
-                        onClick={() => toggleSource(file.file_id)}
-                        className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition", selected ? "border-brand bg-brand text-white" : "border-surface-border text-transparent hover:border-brand-border")}
+                        onClick={(event) => { event.stopPropagation(); toggleSource(file.file_id); }}
+                        className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition", selected ? "border-brand bg-brand text-white" : "border-surface-border text-transparent hover:border-brand")}
                         aria-label={selected ? "selected" : "unselected"}
                       >
                         <Check className="h-3.5 w-3.5" />
                       </button>
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-muted text-brand"><FileText className="h-4 w-4" /></div>
-                      <div className="min-w-0 flex-1">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-500/10 text-red-500"><FileText className="h-4 w-4" /></div>
+                      <div className="min-w-0 flex-1 overflow-hidden">
                         <div className="truncate text-sm font-medium text-text-primary">{file.file.filename}</div>
-                        <div className="mt-1 flex items-center gap-2 text-[11px] text-text-tertiary"><span>{formatSize(file.file.size)}</span><span>·</span><span>{file.file.mime_type || "file"}</span></div>
+                        <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] text-text-tertiary">
+                          <span className="shrink-0">{formatSize(file.file.size)}</span>
+                          <span className="shrink-0">·</span>
+                          <span className="min-w-0 truncate" title={file.file.mime_type || "file"}>{file.file.mime_type || "file"}</span>
+                        </div>
                       </div>
-                      <button onClick={() => handleRemove(file)} className="rounded-lg p-1.5 text-text-tertiary opacity-0 transition hover:bg-red-500/10 hover:text-red-500 group-hover:opacity-100"><Trash2 className="h-3.5 w-3.5" /></button>
+                      <button onClick={(event) => { event.stopPropagation(); handleRemove(file); }} className="shrink-0 rounded-lg p-1.5 text-text-tertiary opacity-0 transition hover:bg-red-500/10 hover:text-red-500 group-hover:opacity-100"><Trash2 className="h-3.5 w-3.5" /></button>
                     </div>
                     <div className={cn("mt-3 inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-medium", meta.className)}><Icon className="h-3 w-3" />{meta.label}</div>
-                    {file.file.error_message && <p className="mt-2 line-clamp-2 text-xs text-red-500">{file.file.error_message}</p>}
+                    {detail && <p className="mt-2 line-clamp-2 text-xs text-amber-600 dark:text-amber-300">{detail}</p>}
                   </div>
                 );
               })}
@@ -286,7 +1037,18 @@ function NotebookDetailContent() {
         </div>
       </aside>
 
-      <section className="min-w-0 flex-1">
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={t("notebook.resizeSources")}
+        title={t("notebook.resizeSources")}
+        onPointerDown={(event) => startPaneResize("sources", event)}
+        className="group relative z-10 h-full w-1 shrink-0 cursor-col-resize touch-none bg-transparent"
+      >
+        <div className="absolute left-1/2 top-4 h-[calc(100%-2rem)] w-px -translate-x-1/2 bg-transparent transition group-hover:bg-surface-border" />
+      </div>
+
+      <section className="min-w-[420px] flex-1 overflow-hidden rounded-[28px] border border-surface-border bg-surface-card shadow-sm">
         <ChatInterface
           conversationId={conversationId}
           notebookId={notebookId}
@@ -301,9 +1063,63 @@ function NotebookDetailContent() {
             { title: t("notebook.exampleFaq"), desc: t("notebook.exampleFaqDesc"), prompt: t("notebook.exampleFaqPrompt") },
             { title: t("notebook.exampleCompare"), desc: t("notebook.exampleCompareDesc"), prompt: t("notebook.exampleComparePrompt") },
           ]}
+          externalSendRequest={externalChatSendRequest}
         />
       </section>
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={t("notebook.resizeStudio")}
+        title={t("notebook.resizeStudio")}
+        onPointerDown={(event) => startPaneResize("studio", event)}
+        className="group relative z-10 h-full w-1 shrink-0 cursor-col-resize touch-none bg-transparent"
+      >
+        <div className="absolute left-1/2 top-4 h-[calc(100%-2rem)] w-px -translate-x-1/2 bg-transparent transition group-hover:bg-surface-border" />
+      </div>
+      <NotebookStudioPanel
+        width={studioWidth}
+        artifacts={studioArtifacts}
+        activeArtifactId={activeStudioArtifactId}
+        generatingType={generatingStudioType}
+        selectedSourceCount={selectedFileIds.length}
+        sourceFiles={studioSourceFiles}
+        onGenerate={handleStudioGenerate}
+        onOpenArtifact={setActiveStudioArtifactId}
+        onRenameArtifact={handleRenameArtifact}
+        onDeleteArtifact={handleDeleteArtifact}
+        onCopyArtifact={handleCopyArtifact}
+        onDownloadArtifact={handleDownloadArtifact}
+        onExportTableToGoogleSheets={handleExportTableToGoogleSheets}
+        onExplainFlashcard={handleExplainFlashcard}
+        onExplainQuiz={handleExplainQuiz}
+      />
     </div>
+    <NotebookUrlSourceDialog
+      open={urlDialogOpen}
+      loading={addingUrl}
+      onClose={() => setUrlDialogOpen(false)}
+      onSubmit={handleAddUrlSource}
+    />
+    <NotebookSourcePreviewDrawer
+      open={Boolean(previewSource)}
+      source={previewSource}
+      data={previewData}
+      loading={previewLoading}
+      error={previewError}
+      onClose={closePreview}
+    />
+    <ReportFormatDialog
+      open={reportDialogOpen}
+      selectedId={selectedReportFormatId}
+      suggestions={reportFormatSuggestions}
+      loadingSuggestions={loadingReportSuggestions}
+      generating={generatingStudioType === "report"}
+      onSelect={setSelectedReportFormatId}
+      onClose={() => setReportDialogOpen(false)}
+      onGenerate={handleCreateReport}
+      t={t}
+    />
+    </>
   );
 }
 

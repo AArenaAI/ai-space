@@ -19,6 +19,12 @@ function textIncludes(text, needle) {
 
   try {
     await page.addInitScript(() => localStorage.setItem("theme", "green"));
+    await page.addInitScript(() => {
+      window.__conversationSwitchEvents = [];
+      window.addEventListener("chat-conversation-switch-performance", (event) => {
+        window.__conversationSwitchEvents.push(event.detail);
+      });
+    });
     const response = await page.goto(`${baseUrl}/test-chat-conversation-switch-cache/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
     assert.ok(response && response.status() < 400, `unexpected status ${response?.status()}`);
     const fixture = page.locator('[data-testid="chat-conversation-switch-cache-fixture"]');
@@ -71,8 +77,29 @@ function textIncludes(text, needle) {
     assert.equal(refreshed.total, "3", "background refresh should reconcile the restored conversation total count");
     assert.equal(refreshed.model, "fixture-model-2", "background restore should apply server-selected model metadata");
 
+    const switchEvents = await page.evaluate(() => window.__conversationSwitchEvents || []);
+    const missEvents = switchEvents.filter((event) => Number(event.conversationId) === 101);
+    const hitEvents = switchEvents.filter((event) => Number(event.conversationId) === 100);
+    const missShellEvent = missEvents.find((event) => event.phase === "shell-displayed");
+    if (missShellEvent) {
+      assert.equal(missShellEvent.stage, "shell", `cache miss shell event should report shell stage: ${JSON.stringify(missShellEvent)}`);
+      assert.equal(missShellEvent.displayMode, "shell", `cache miss shell event should report shell display mode: ${JSON.stringify(missShellEvent)}`);
+    }
+    assert.ok(
+      missEvents.some((event) => event.phase === "first-snapshot" && event.source === "backend" && event.displayMode === "backend"),
+      `cache miss should report backend first snapshot: ${JSON.stringify(missEvents)}`
+    );
+    assert.ok(
+      hitEvents.some((event) => event.phase === "first-snapshot" && event.source === "memory" && event.stage === "cache" && event.displayMode === "cached"),
+      `cache hit should report cached first snapshot: ${JSON.stringify(hitEvents)}`
+    );
+    assert.ok(
+      hitEvents.some((event) => event.phase === "revalidate-start" && event.stage === "revalidate" && event.displayMode === "background"),
+      `cache hit should report background revalidate: ${JSON.stringify(hitEvents)}`
+    );
+
     if (failures.length > 0) throw new Error(failures.join("\n"));
-    console.log(JSON.stringify({ ok: true, missLoadingRows: missLoading.rows, hitImmediateRows: hitImmediate.rows, refreshedRows: refreshed.rows }));
+    console.log(JSON.stringify({ ok: true, missLoadingRows: missLoading.rows, hitImmediateRows: hitImmediate.rows, refreshedRows: refreshed.rows, switchEventCount: switchEvents.length }));
   } finally {
     await browser.close();
   }

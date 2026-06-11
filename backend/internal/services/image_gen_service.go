@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -37,6 +38,16 @@ type imageGenResponse struct {
 		URL     string `json:"url"`
 		B64JSON string `json:"b64_json"`
 	} `json:"data"`
+}
+
+type seedreamImageRequest struct {
+	Model          string `json:"model"`
+	Prompt         string `json:"prompt"`
+	Size           string `json:"size,omitempty"`
+	ResponseFormat string `json:"response_format,omitempty"`
+	OutputFormat   string `json:"output_format,omitempty"`
+	Watermark      bool   `json:"watermark"`
+	N              int    `json:"n,omitempty"`
 }
 
 type ImageStreamEvent struct {
@@ -99,6 +110,9 @@ func (s *ImageGenService) Generate(ctx context.Context, baseURL, apiKey, model, 
 	// 判断是否为 DashScope Qwen Image
 	if strings.Contains(baseURL, "dashscope") || strings.HasPrefix(model, "qwen-image") {
 		return s.generateDashScopeImage(ctx, baseURL, apiKey, model, prompt, size)
+	}
+	if isSeedreamImageProvider(baseURL, model) {
+		return s.generateSeedreamImage(ctx, baseURL, apiKey, model, prompt, size)
 	}
 	return s.generateOpenAICompatibleImage(ctx, baseURL, apiKey, model, prompt, size, quality)
 }
@@ -305,6 +319,119 @@ func (s *ImageGenService) GenerateOpenAICompatibleImageStream(ctx context.Contex
 	return "", fmt.Errorf("图片生成未完成，可能是提示词包含敏感或不合规内容，请修改后重试")
 }
 
+// --- Seedream / Volcengine Ark 实现 ---
+
+func isSeedreamImageProvider(baseURL, model string) bool {
+	base := strings.ToLower(strings.TrimSpace(baseURL))
+	m := strings.ToLower(strings.TrimSpace(model))
+	return strings.Contains(base, "volces.com") || strings.Contains(m, "seedream")
+}
+
+func normalizeSeedreamBaseURL(baseURL string) string {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		return "https://ark.cn-beijing.volces.com/api/v3"
+	}
+	if strings.HasSuffix(baseURL, "/images/generations") {
+		return strings.TrimSuffix(baseURL, "/images/generations")
+	}
+	return baseURL
+}
+
+func normalizeSeedreamSize(size string) string {
+	if size == "" || size == "auto" {
+		return "2048x2048"
+	}
+	var width, height int
+	if _, err := fmt.Sscanf(strings.TrimSpace(size), "%dx%d", &width, &height); err != nil || width <= 0 || height <= 0 {
+		return "2048x2048"
+	}
+	const minPixels = 3686400
+	if width*height >= minPixels {
+		return fmt.Sprintf("%dx%d", width, height)
+	}
+	scale := math.Sqrt(float64(minPixels) / float64(width*height))
+	width = roundUpToMultiple(int(math.Ceil(float64(width)*scale)), 64)
+	height = roundUpToMultiple(int(math.Ceil(float64(height)*scale)), 64)
+	return fmt.Sprintf("%dx%d", width, height)
+}
+
+func roundUpToMultiple(value, multiple int) int {
+	if multiple <= 0 {
+		return value
+	}
+	return ((value + multiple - 1) / multiple) * multiple
+
+}
+
+func (s *ImageGenService) generateSeedreamImage(ctx context.Context, baseURL, apiKey, model, prompt, size string) (string, error) {
+	baseURL = normalizeSeedreamBaseURL(baseURL)
+	if model == "" {
+		model = "doubao-seedream-5-0-260128"
+	}
+	requestSize := normalizeSeedreamSize(size)
+
+	reqBody := seedreamImageRequest{
+		Model:          model,
+		Prompt:         prompt,
+		Size:           requestSize,
+		ResponseFormat: "url",
+		OutputFormat:   "png",
+		Watermark:      false,
+		N:              1,
+	}
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("序列化 Seedream 请求失败: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/images/generations", bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return "", fmt.Errorf("创建 Seedream 请求失败: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 300 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("请求 Seedream 图片生成失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取 Seedream 响应失败: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Seedream 图片生成错误 (HTTP %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result imageGenResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("解析 Seedream 响应失败: %w", err)
+	}
+	if len(result.Data) == 0 {
+		return "", fmt.Errorf("Seedream 未生成图片 (返回空 data)")
+	}
+
+	if result.Data[0].URL != "" {
+		localURL, err := s.saveImageFromURL(ctx, result.Data[0].URL)
+		if err != nil {
+			return "", fmt.Errorf("保存 Seedream 图片失败: %w", err)
+		}
+		return localURL, nil
+	}
+	if result.Data[0].B64JSON != "" {
+		url, err := s.saveBase64Image(result.Data[0].B64JSON)
+		if err != nil {
+			return "", fmt.Errorf("保存 Seedream base64 图片失败: %w", err)
+		}
+		return url, nil
+	}
+	return "", fmt.Errorf("Seedream 图片生成失败: API 未返回 url 或 b64_json")
+}
+
 // --- DashScope 原生实现 ---
 
 func (s *ImageGenService) generateDashScopeImage(ctx context.Context, baseURL, apiKey, model, prompt, size string) (string, error) {
@@ -442,7 +569,7 @@ func (s *ImageGenService) saveImageFromURL(ctx context.Context, imageURL string)
 		return "", fmt.Errorf("创建下载请求失败: %w", err)
 	}
 
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := &http.Client{Timeout: 300 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("下载图片失败: %w", err)

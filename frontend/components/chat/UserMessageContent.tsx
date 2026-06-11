@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, FileText, Quote } from "lucide-react";
 import type { Message } from "@/lib/chatTypes";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
+import { emitChatRenderProfileEvent, isChatRenderProfileEnabled } from "@/lib/chatRenderProfile";
 
 type UserMessageContentProps = {
   message: Message;
@@ -71,6 +72,8 @@ function getCollapsedContent(content: string, t: (key: string, params?: Record<s
 }
 
 function UserMessageContent({ message, imageLoadFailedLabel }: UserMessageContentProps) {
+  const profileEnabled = isChatRenderProfileEnabled();
+  const renderStartedAt = profileEnabled ? (typeof performance !== "undefined" ? performance.now() : Date.now()) : 0;
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const imageFiles = message.files?.filter((file) => file.type === "image") || [];
@@ -78,6 +81,22 @@ function UserMessageContent({ message, imageLoadFailedLabel }: UserMessageConten
   const { quote, body } = useMemo(() => splitLeadingQuote(message.content || ""), [message.content]);
   const { isLong, preview, sizeLabel } = useMemo(() => getCollapsedContent(body, t), [body, t]);
   const visibleBody = isLong && !expanded ? preview : body;
+
+  useEffect(() => {
+    if (!profileEnabled) return;
+    const commitAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    emitChatRenderProfileEvent("user-message-content-commit", {
+      messageId: message.id,
+      contentLength: message.content?.length || 0,
+      bodyLength: body.length,
+      hasQuote: Boolean(quote),
+      imageFileCount: imageFiles.length,
+      otherFileCount: otherFiles.length,
+      isLong,
+      expanded,
+      durationMs: commitAt - renderStartedAt,
+    });
+  });
 
   return (
     <div className="flex flex-col gap-2" data-testid="user-message-content">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 import MessageList from "./MessageList";
 import type { ChatModel, Message } from "@/lib/chatTypes";
 import { useChatConversationLifecycle } from "@/hooks/useChatConversationLifecycle";
@@ -10,6 +10,7 @@ import {
   clearConversationSnapshotCache,
   setConversationSnapshot,
 } from "@/lib/chatConversationCache";
+import { clearPersistentConversationSnapshotCache } from "@/lib/chatConversationPersistentCache";
 import type { ConversationRestoreResponse } from "@/lib/chatConversationRestoreCoordinator";
 
 const models: ChatModel[] = [
@@ -127,6 +128,11 @@ export default function ChatConversationSwitchCacheFixture() {
   const [groupViews, setGroupViews] = useState<Map<number, number>>(new Map());
   const restoreCallsRef = useRef(0);
   const previousLoadingRef = useRef(false);
+  const conversationIdRef = useRef<number | undefined>(conversationId);
+
+  useEffect(() => {
+    conversationIdRef.current = conversationId;
+  }, [conversationId]);
 
   const lifecycle = useChatConversationLifecycle(conversationId);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -138,12 +144,12 @@ export default function ChatConversationSwitchCacheFixture() {
     setIsLoadingHistory((previous) => {
       const resolved = typeof next === "function" ? (next as (value: boolean) => boolean)(previous) : next;
       previousLoadingRef.current = resolved;
-      if (resolved && conversationId === 101) {
+      if (resolved && conversationIdRef.current === 101) {
         setPhase("cache-miss-loading");
       }
       return resolved;
     });
-  }, [conversationId]);
+  }, []);
 
   const setMessagesTracked = useCallback((next: SetStateAction<Message[]>) => {
     setMessages((previous) => {
@@ -206,8 +212,9 @@ export default function ChatConversationSwitchCacheFixture() {
     fetchMessageCount: async ({ conversationId: countConversationId }) => countConversationId === 100 ? conversation100FreshMessages.length : conversation101Messages.length,
   });
 
-  const prepare = () => {
+  const prepare = async () => {
     clearConversationSnapshotCache();
+    await clearPersistentConversationSnapshotCache();
     setConversationSnapshot({
       conversationId: 100,
       title: "Conversation 100 cached",

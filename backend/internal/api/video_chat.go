@@ -29,16 +29,29 @@ func (h *VideoChatHandler) AutoMigrate() {
 }
 
 type videoChatRequest struct {
-	Prompt          string   `json:"prompt" binding:"required"`
-	Model           string   `json:"model"`
-	Ratio           string   `json:"ratio"`
-	AspectRatio     string   `json:"aspect_ratio"`
-	Resolution      string   `json:"resolution"`
-	Duration        int64    `json:"duration"`
-	GenerateAudio   bool     `json:"generate_audio"`
-	Watermark       bool     `json:"watermark"`
-	ReferenceImages []string `json:"reference_image_urls"`
-	ReferenceVideos []string `json:"reference_video_urls"`
+	Prompt                 string   `json:"prompt" binding:"required"`
+	Model                  string   `json:"model"`
+	Ratio                  string   `json:"ratio"`
+	AspectRatio            string   `json:"aspect_ratio"`
+	Resolution             string   `json:"resolution"`
+	Duration               int64    `json:"duration"`
+	GenerateAudio          bool     `json:"generate_audio"`
+	Watermark              bool     `json:"watermark"`
+	ReferenceImages        []string `json:"reference_image_urls"`
+	ReferenceImageRoles    []string `json:"reference_image_roles"`
+	ReferenceVideos        []string `json:"reference_video_urls"`
+	ReferenceImageRoleMode string   `json:"reference_image_role_mode"`
+}
+
+func videoChatTitleFromPrompt(prompt string) string {
+	if prompt == "" {
+		return "新视频会话"
+	}
+	runes := []rune(prompt)
+	if len(runes) > 30 {
+		return string(runes[:30]) + "..."
+	}
+	return prompt
 }
 
 // ListVideoChats 获取用户的视频会话列表
@@ -122,13 +135,7 @@ func (h *VideoChatHandler) CreateVideoChat(c *gin.Context) {
 		return
 	}
 
-	title := req.Prompt
-	if title == "" {
-		title = "新视频会话"
-	}
-	if len(title) > 30 {
-		title = title[:30] + "..."
-	}
+	title := videoChatTitleFromPrompt(req.Prompt)
 	chat := models.VideoChat{UserID: userID, Title: title}
 	if err := h.db.Create(&chat).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建视频会话失败"})
@@ -291,28 +298,33 @@ func (h *VideoChatHandler) createVideoChatMessagesAndTask(userID uint, chatID ui
 	}
 
 	assistantMsg := models.VideoChatMessage{
-		ChatID:        chatID,
-		Role:          "assistant",
-		Content:       req.Prompt,
-		Status:        "pending",
-		Model:         modelID,
-		Ratio:         ratio,
-		Duration:      duration,
-		GenerateAudio: req.GenerateAudio,
-		Watermark:     req.Watermark,
+		ChatID:              chatID,
+		Role:                "assistant",
+		Content:             req.Prompt,
+		Status:              "pending",
+		Model:               modelID,
+		Ratio:               ratio,
+		Resolution:          resolution,
+		Duration:            duration,
+		GenerateAudio:       req.GenerateAudio,
+		Watermark:           req.Watermark,
+		ReferenceImageCount: len(req.ReferenceImages),
+		ReferenceVideoCount: len(req.ReferenceVideos),
 	}
 	if err := h.db.Create(&assistantMsg).Error; err != nil {
 		return nil, err
 	}
 
 	createReq := services.CreateVideoTaskRequest{
-		Model:         modelID,
-		Prompt:        req.Prompt,
-		Ratio:         ratio,
-		Resolution:    resolution,
-		Duration:      duration,
-		GenerateAudio: req.GenerateAudio,
-		Watermark:     req.Watermark,
+		Model:                  modelID,
+		Prompt:                 req.Prompt,
+		Ratio:                  ratio,
+		Resolution:             resolution,
+		Duration:               duration,
+		GenerateAudio:          req.GenerateAudio,
+		Watermark:              req.Watermark,
+		ReferenceImageRoleMode: req.ReferenceImageRoleMode,
+		ReturnLastFrame:        true,
 	}
 	createReq.ReferenceImages, err = resolveVideoReferenceURLs(h.db, h.cfg, userID, req.ReferenceImages, "image")
 	if err != nil {
@@ -322,6 +334,7 @@ func (h *VideoChatHandler) createVideoChatMessagesAndTask(userID uint, chatID ui
 		assistantMsg.ErrorMessage = errMsg
 		return &assistantMsg, err
 	}
+	createReq.ReferenceImageRoles = normalizedReferenceImageRoles(req.ReferenceImageRoles, len(createReq.ReferenceImages))
 	createReq.ReferenceVideos, err = resolveVideoReferenceURLs(h.db, h.cfg, userID, req.ReferenceVideos, "video")
 	if err != nil {
 		errMsg := cleanVideoGenerationErrorMessage(err)
@@ -330,47 +343,75 @@ func (h *VideoChatHandler) createVideoChatMessagesAndTask(userID uint, chatID ui
 		assistantMsg.ErrorMessage = errMsg
 		return &assistantMsg, err
 	}
-	log.Printf("[VideoChat] create task refs images=%d videos=%d model=%s", len(createReq.ReferenceImages), len(createReq.ReferenceVideos), modelID)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	resp, err := h.videoService.CreateVideoTask(ctx, createReq)
-	if err != nil {
-		errMsg := cleanVideoGenerationErrorMessage(err)
-		h.db.Model(&assistantMsg).Updates(map[string]interface{}{"status": "failed", "error_message": errMsg})
-		assistantMsg.Status = "failed"
-		assistantMsg.ErrorMessage = errMsg
-		return &assistantMsg, err
-	}
 
-	video := models.VideoGeneration{
-		UserID:        userID,
-		Prompt:        req.Prompt,
-		Model:         modelID,
-		Ratio:         ratio,
-		Duration:      duration,
-		GenerateAudio: req.GenerateAudio,
-		Watermark:     req.Watermark,
-		TaskID:        resp.TaskID,
-		ChatID:        chatID,
-		MessageID:     assistantMsg.ID,
-		Status:        resp.Status,
-	}
-	if err := h.db.Create(&video).Error; err != nil {
-		return nil, err
-	}
+	// Launch async goroutine to create video task with Volcengine
+	go h.submitVideoTaskAsync(userID, chatID, assistantMsg.ID, createReq)
 
-	h.db.Model(&assistantMsg).Updates(map[string]interface{}{
-		"task_id":       resp.TaskID,
-		"generation_id": video.ID,
-		"status":        resp.Status,
-	})
-	assistantMsg.TaskID = resp.TaskID
-	assistantMsg.GenerationID = video.ID
-	assistantMsg.Status = resp.Status
 	return &assistantMsg, nil
 }
 
+// submitVideoTaskAsync creates the video task in background.
+// It updates the message with task_id when successful, or marks failed on error.
+func (h *VideoChatHandler) submitVideoTaskAsync(userID uint, chatID uint, assistantMsgID uint, createReq services.CreateVideoTaskRequest) {
+	log.Printf("[VideoChat] async create task refs images=%d videos=%d model=%s msg_id=%d", len(createReq.ReferenceImages), len(createReq.ReferenceVideos), createReq.Model, assistantMsgID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	resp, err := h.videoService.CreateVideoTask(ctx, createReq)
+	if err != nil {
+		errMsg := cleanVideoTaskSubmissionErrorMessage(err)
+		log.Printf("[VideoChat] async create task failed msg_id=%d err=%v", assistantMsgID, err)
+		h.db.Model(&models.VideoChatMessage{}).Where("id = ?", assistantMsgID).Updates(map[string]interface{}{
+			"status":        "failed",
+			"error_message": errMsg,
+			"updated_at":    time.Now(),
+		})
+		return
+	}
+
+	video := models.VideoGeneration{
+		UserID:              userID,
+		Prompt:              createReq.Prompt,
+		Model:               createReq.Model,
+		Ratio:               createReq.Ratio,
+		Resolution:          createReq.Resolution,
+		Duration:            createReq.Duration,
+		GenerateAudio:       createReq.GenerateAudio,
+		Watermark:           createReq.Watermark,
+		ReferenceImageCount: len(createReq.ReferenceImages),
+		ReferenceVideoCount: len(createReq.ReferenceVideos),
+		TaskID:              resp.TaskID,
+		ChatID:              chatID,
+		MessageID:           assistantMsgID,
+		Status:              resp.Status,
+	}
+	if err := h.db.Create(&video).Error; err != nil {
+		log.Printf("[VideoChat] async save video generation failed msg_id=%d err=%v", assistantMsgID, err)
+		return
+	}
+
+	h.db.Model(&models.VideoChatMessage{}).Where("id = ?", assistantMsgID).Updates(map[string]interface{}{
+		"task_id":               resp.TaskID,
+		"generation_id":         video.ID,
+		"status":                resp.Status,
+		"reference_image_count": len(createReq.ReferenceImages),
+		"reference_video_count": len(createReq.ReferenceVideos),
+		"updated_at":            time.Now(),
+	})
+	log.Printf("[VideoChat] async create task success msg_id=%d task=%s gen_id=%d", assistantMsgID, resp.TaskID, video.ID)
+}
+
 func (h *VideoChatHandler) refreshPendingVideoChatMessages(chatID uint) {
+	// Mark stale async submissions (pending with no task_id for too long)
+	staleCutoff := time.Now().Add(-10 * time.Minute)
+	h.db.Model(&models.VideoChatMessage{}).
+		Where("chat_id = ? AND role = ? AND status = ? AND task_id = '' AND generation_id = 0 AND updated_at < ?", chatID, "assistant", "pending", staleCutoff).
+		Updates(map[string]interface{}{
+			"status":        "failed",
+			"error_message": "视频任务提交超时，请稍后重新提交。",
+			"updated_at":    time.Now(),
+		})
+
 	var messages []models.VideoChatMessage
 	if err := h.db.Where("chat_id = ? AND role = ? AND task_id != '' AND status NOT IN ?", chatID, "assistant", []string{"succeeded", "completed", "failed"}).Find(&messages).Error; err != nil {
 		return
@@ -384,30 +425,81 @@ func (h *VideoChatHandler) refreshPendingVideoChatMessages(chatID uint) {
 		}
 		updates := map[string]interface{}{"status": resp.Status, "updated_at": time.Now()}
 		videoUpdates := map[string]interface{}{"status": resp.Status, "updated_at": time.Now()}
+		if resp.LastFrameURL != "" {
+			updates["last_frame_url"] = resp.LastFrameURL
+			videoUpdates["last_frame_url"] = resp.LastFrameURL
+		}
 		if resp.Status == "succeeded" || resp.Status == "completed" {
-			localVideoURL, persistErr := persistRemoteVideoAsset(resp.VideoURL)
-			if persistErr != nil {
-				log.Printf("[VideoChat] persist video failed task=%s err=%v", msg.TaskID, persistErr)
-				cleanMsg := "视频生成成功了，但保存视频文件时失败，请稍后重试。"
-				updates["status"] = "failed"
-				updates["error_message"] = cleanMsg
-				videoUpdates["status"] = "failed"
-				videoUpdates["error_message"] = cleanMsg
-			} else {
-				updates["video_url"] = localVideoURL
-				videoUpdates["video_url"] = localVideoURL
+			if msg.VideoURL == "" {
+				localVideoURL, persistErr := persistRemoteVideoAsset(resp.VideoURL)
+				if persistErr != nil {
+					log.Printf("[VideoChat] persist video failed task=%s err=%v", msg.TaskID, persistErr)
+					cleanMsg := "视频生成成功了，但保存视频文件时失败，请稍后重试。"
+					updates["status"] = "failed"
+					updates["error_message"] = cleanMsg
+					videoUpdates["status"] = "failed"
+					videoUpdates["error_message"] = cleanMsg
+				} else {
+					updates["video_url"] = localVideoURL
+					videoUpdates["video_url"] = localVideoURL
+				}
 			}
 		}
 		if resp.Status == "failed" && resp.ErrorMessage != "" {
+			log.Printf("[VideoChat] task failed task=%s raw_error=%s", msg.TaskID, resp.ErrorMessage)
 			cleanMsg := cleanVideoGenerationErrorString(resp.ErrorMessage)
 			updates["error_message"] = cleanMsg
 			videoUpdates["error_message"] = cleanMsg
 		}
 		h.db.Model(&models.VideoChatMessage{}).Where("id = ?", msg.ID).Updates(updates)
+		var video models.VideoGeneration
 		if msg.GenerationID > 0 {
 			h.db.Model(&models.VideoGeneration{}).Where("id = ?", msg.GenerationID).Updates(videoUpdates)
+			h.db.Where("id = ?", msg.GenerationID).First(&video)
 		} else {
 			h.db.Model(&models.VideoGeneration{}).Where("task_id = ?", msg.TaskID).Updates(videoUpdates)
+			h.db.Where("task_id = ?", msg.TaskID).First(&video)
+		}
+		if (video.Status == "succeeded" || video.Status == "completed") && video.ID > 0 {
+			h.recordVideoUsageIfNeeded(&video, resp)
 		}
 	}
+}
+
+func (h *VideoChatHandler) recordVideoUsageIfNeeded(video *models.VideoGeneration, resp *services.VideoTaskResult) {
+	if video == nil || resp == nil || video.UsageRecorded {
+		return
+	}
+	if resp.CompletionTokens <= 0 {
+		log.Printf("[VideoChat] skip usage log without completion tokens task=%s generation=%d", video.TaskID, video.ID)
+		return
+	}
+	resolution := video.Resolution
+	if resolution == "" {
+		resolution = "720p"
+	}
+	usageSvc := services.NewUsageService(h.cfg)
+	err := usageSvc.RecordVideoUsage(services.VideoUsageInput{
+		UserID:              video.UserID,
+		Model:               video.Model,
+		ResourceID:          video.ID,
+		ChatID:              video.ChatID,
+		MessageID:           video.MessageID,
+		TaskID:              video.TaskID,
+		DurationSeconds:     int(video.Duration),
+		Resolution:          resolution,
+		ReferenceVideoCount: video.ReferenceVideoCount,
+		CompletionTokens:    resp.CompletionTokens,
+		Raw: map[string]any{
+			"completion_tokens": resp.CompletionTokens,
+			"task_id":           resp.TaskID,
+			"source":            "volcengine_get_task",
+		},
+	})
+	if err != nil {
+		log.Printf("[VideoChat] record usage failed task=%s generation=%d err=%v", video.TaskID, video.ID, err)
+		return
+	}
+	h.db.Model(video).Update("usage_recorded", true)
+	video.UsageRecorded = true
 }

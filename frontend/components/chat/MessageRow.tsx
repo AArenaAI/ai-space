@@ -1,28 +1,62 @@
 "use client";
 
-import { memo } from "react";
-import { User, Bot, Check, Play, SquareCheck } from "lucide-react";
+import { memo, useEffect, useRef, useState, type CSSProperties } from "react";
+import { User, Check, Play, SquareCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 import type { ChatModel, Message } from "@/lib/chatTypes";
+import { getModelAvatarMeta } from "@/lib/models/modelAvatars";
 import type { InferredGroup } from "@/lib/groups";
 import { isMessageGenerating } from "@/lib/chatContent";
 import { AssistantMessageMeta } from "./AssistantMessageMeta";
 import MessageActions from "./MessageActions";
 import UserMessageContent from "./UserMessageContent";
 import { AssistantMessageContent } from "./AssistantMessageContent";
+import { ModelAvatar } from "./ModelAvatar";
+import { emitChatRenderProfileEvent } from "@/lib/chatRenderProfile";
 
 type MarkdownRendererComponent = Parameters<typeof AssistantMessageContent>[0]["MarkdownRenderer"];
+
+const MESSAGE_ROW_CONTENT_VISIBILITY_STYLE: CSSProperties = {
+  contentVisibility: "auto",
+  containIntrinsicSize: "auto 180px",
+};
+const MARKDOWN_HYDRATE_ROOT_MARGIN = "1800px 0px";
+const SIMPLE_ASSISTANT_VIEWPORT_OBSERVER_SKIP_LENGTH = 500;
+
+function getMarkdownWeight(content?: string) {
+  const text = content || "";
+  const codeFenceCount = (text.match(/```/g) || []).length;
+  const tableLineCount = text.split("\n").filter((line) => /^\s*\|.+\|\s*$/.test(line)).length;
+  return {
+    codeFenceCount,
+    tableLineCount,
+    hasCodeFence: codeFenceCount > 0,
+    hasTableLine: tableLineCount > 0,
+  };
+}
+
+function shouldSkipViewportObserversForAssistant(content?: string) {
+  if (!content || content.length > SIMPLE_ASSISTANT_VIEWPORT_OBSERVER_SKIP_LENGTH) return false;
+  const weight = getMarkdownWeight(content);
+  return !weight.hasCodeFence && !weight.hasTableLine;
+}
 
 export type MessageRowProps = {
   message: Message;
   group?: InferredGroup;
   model?: ChatModel;
   isLast: boolean;
+  isLatestAssistant: boolean;
+  isInitialReadingAssistant: boolean;
+  isViewedAssistant: boolean;
   isLoading: boolean;
   selectMode: boolean;
   isSelected: boolean;
   isHighlighted: boolean;
+  historyPrependSettling: boolean;
+  deferRichTextHydration: boolean;
+  allowRichLiteFallback: boolean;
   conversationId?: number;
   groupViews?: Map<number, number>;
   modelById: Map<string, ChatModel>;
@@ -39,6 +73,7 @@ export type MessageRowProps = {
   onForkCompare?: (messageId: number) => void;
   imageLoadFailedLabel: string;
   MarkdownRenderer: MarkdownRendererComponent;
+  onAssistantViewed?: (messageId: string) => void;
 };
 
 function MessageRow({
@@ -46,10 +81,16 @@ function MessageRow({
   group,
   model,
   isLast,
+  isLatestAssistant,
+  isInitialReadingAssistant,
+  isViewedAssistant,
   isLoading,
   selectMode,
   isSelected,
   isHighlighted,
+  historyPrependSettling,
+  deferRichTextHydration,
+  allowRichLiteFallback,
   conversationId,
   groupViews,
   modelById,
@@ -66,16 +107,165 @@ function MessageRow({
   onForkCompare,
   imageLoadFailedLabel,
   MarkdownRenderer,
+  onAssistantViewed,
 }: MessageRowProps) {
   const { t } = useI18n();
+  const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  const profileSnapshotRef = useRef<Record<string, unknown> | null>(null);
   const isUser = msg.role === "user";
-  const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && isLast;
+  const forceHydrateRichText = isLatestAssistant || isHighlighted;
+  const skipViewportObservers = !isUser && shouldSkipViewportObserversForAssistant(msg.content);
+  const initialViewportState = forceHydrateRichText || skipViewportObservers;
+  const [isNearViewport, setIsNearViewport] = useState(initialViewportState);
+  const [isInViewport, setIsInViewport] = useState(initialViewportState);
+  const forceStableRichLiteFallback = isViewedAssistant || isInitialReadingAssistant || isInViewport || forceHydrateRichText;
+  const hasAssistantGenerationTask = Boolean(msg.generationTaskId || msg.backgroundTaskId || msg.activityStatus);
+  const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && !msg.errorCode && !msg.stopped && isLatestAssistant && hasAssistantGenerationTask;
+  const canBypassBrowsingHydrationDefer = forceHydrateRichText && !isStreaming;
+  const blockRichTextHydration = historyPrependSettling || (deferRichTextHydration && !canBypassBrowsingHydrationDefer);
   const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
   const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
+  const suppressAppearAnimation = historyPrependSettling || deferRichTextHydration;
+  const assistantAvatarMeta = getModelAvatarMeta(model || msg.model || "AI");
+  const rowProfileDetailEnabled = typeof window !== "undefined" && Boolean((window as Window & { __AI_SPACE_CHAT_ROW_PROFILE_DETAIL?: boolean }).__AI_SPACE_CHAT_ROW_PROFILE_DETAIL);
+  const markdownWeight = rowProfileDetailEnabled ? getMarkdownWeight(msg.content) : null;
+  const groupActiveIndex = group ? groupViews?.get(group.id) ?? 0 : undefined;
+  const groupActiveMessageId = group && groupActiveIndex !== undefined ? group.assistantMessages[groupActiveIndex]?.id : undefined;
+  const isGroupedAssistantMessage = !isUser && Boolean(group && group.assistantMessages.length > 1);
+  const profileSnapshot = rowProfileDetailEnabled ? {
+    allowRichLiteFallback,
+    blockRichTextHydration,
+    canBypassBrowsingHydrationDefer,
+    canRegenerate,
+    codeFenceCount: markdownWeight?.codeFenceCount || 0,
+    contentLength: msg.content?.length || 0,
+    deferRichTextHydration,
+    forceHydrateRichText,
+    forceStableRichLiteFallback,
+    groupActiveIndex: groupActiveIndex ?? null,
+    groupId: group?.id ?? null,
+    groupSize: group?.assistantMessages.length || 0,
+    hasCodeFence: markdownWeight?.hasCodeFence || false,
+    hasTableLine: markdownWeight?.hasTableLine || false,
+    historyPrependSettling,
+    groupActiveState: isGroupedAssistantMessage ? (String(groupActiveMessageId) === String(msg.id) ? "active" : "inactive") : "na",
+    isActiveGroupMessage: isGroupedAssistantMessage ? String(groupActiveMessageId) === String(msg.id) : true,
+    isGenerating,
+    isHighlighted,
+    isInViewport,
+    isInitialReadingAssistant,
+    isLast,
+    isLatestAssistant,
+    isLoading,
+    isNearViewport,
+    isSelected,
+    isStreaming,
+    isViewedAssistant,
+    openAvatarDropdown: openAvatarDropdownGroupId === group?.id,
+    selectMode,
+    skipViewportObservers,
+    tableLineCount: markdownWeight?.tableLineCount || 0,
+  } : null;
+  const previousProfileSnapshot = profileSnapshotRef.current;
+  const changedProfileKeys = profileSnapshot
+    ? previousProfileSnapshot
+      ? Object.entries(profileSnapshot)
+        .filter(([key, value]) => previousProfileSnapshot[key] !== value)
+        .map(([key]) => key)
+      : ["mount"]
+    : undefined;
+  if (profileSnapshot) profileSnapshotRef.current = profileSnapshot;
+  useEffect(() => {
+    const commitAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    emitChatRenderProfileEvent("message-row-commit", {
+      conversationId,
+      messageId: msg.id,
+      role: msg.role,
+      ...(changedProfileKeys ? { changedKeys: changedProfileKeys } : {}),
+      contentLength: msg.content?.length || 0,
+      durationMs: commitAt - renderStartedAt,
+      ...(profileSnapshot || {}),
+    });
+  });
+
+  useEffect(() => {
+    if (isUser) return;
+    if (skipViewportObservers) {
+      setIsNearViewport(true);
+      return;
+    }
+    if (forceHydrateRichText) {
+      setIsNearViewport(true);
+      return;
+    }
+    if (isNearViewport) return;
+    const row = rowRef.current;
+    if (!row || !("IntersectionObserver" in window)) {
+      setIsNearViewport(true);
+      return;
+    }
+    const root = row.closest('[data-testid="virtuoso-scroller"]') as Element | null;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setIsNearViewport(true);
+        emitChatRenderProfileEvent("message-row-markdown-near-viewport", {
+          conversationId,
+          messageId: msg.id,
+          contentLength: msg.content?.length || 0,
+        });
+        observer.disconnect();
+      }
+    }, { root, rootMargin: MARKDOWN_HYDRATE_ROOT_MARGIN });
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [conversationId, forceHydrateRichText, isNearViewport, isUser, msg.content, msg.id, skipViewportObservers]);
+
+  useEffect(() => {
+    if (isUser) return;
+    if (skipViewportObservers) {
+      setIsInViewport(true);
+      return;
+    }
+    if (forceHydrateRichText) {
+      setIsInViewport(true);
+      return;
+    }
+    const row = rowRef.current;
+    if (!row || !("IntersectionObserver" in window)) {
+      setIsInViewport(true);
+      return;
+    }
+    const root = row.closest('[data-testid="virtuoso-scroller"]') as Element | null;
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries.some((entry) => entry.isIntersecting);
+      setIsInViewport(visible);
+      if (visible) {
+        onAssistantViewed?.(String(msg.id));
+        emitChatRenderProfileEvent("message-row-markdown-in-viewport", {
+          conversationId,
+          messageId: msg.id,
+          forceStableRichLiteFallback,
+          isInitialReadingAssistant,
+          isViewedAssistant,
+          contentLength: msg.content?.length || 0,
+        });
+      }
+    }, { root, rootMargin: "0px" });
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [conversationId, forceHydrateRichText, forceStableRichLiteFallback, isInitialReadingAssistant, isUser, isViewedAssistant, msg.content, msg.id, onAssistantViewed, skipViewportObservers]);
 
   return (
-    <div data-chat-message-row="true" data-message-id={msg.id} data-message-role={msg.role} className={cn("max-w-[800px] mx-auto px-4 py-4 rounded-2xl transition-colors duration-500", isHighlighted && "bg-brand/10")}>
-      <div key={msg.id} className={cn("flex gap-3 animate-message-appear group", isUser ? "justify-end" : "justify-start")}>
+    <div
+      ref={rowRef}
+      data-chat-message-row="true"
+      data-message-id={msg.id}
+      data-message-role={msg.role}
+      style={isUser ? MESSAGE_ROW_CONTENT_VISIBILITY_STYLE : undefined}
+      className={cn("max-w-[800px] mx-auto px-4 py-4 rounded-2xl transition-colors duration-500", isHighlighted && "bg-brand/10")}
+    >
+      <div key={msg.id} className={cn("flex gap-3 group", !suppressAppearAnimation && "animate-message-appear", isUser ? "justify-end" : "justify-start")}>
         <div className={cn("mt-1 shrink-0", isUser && !selectMode ? "hidden" : "w-7")}>
           {!isUser && !selectMode && (
             <div className="relative">
@@ -92,7 +282,7 @@ function MessageRow({
                   group && group.assistantMessages.length > 1 && "cursor-pointer hover:bg-surface-elevated"
                 )}
               >
-                <Bot className="w-4 h-4 text-text-secondary" />
+                <ModelAvatar meta={assistantAvatarMeta} size="lg" className="h-full w-full rounded-lg" />
                 {group && group.assistantMessages.length > 1 && (
                   <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-brand text-[8px] font-bold text-white flex items-center justify-center border border-white dark:border-[#1F1F1F]">
                     {group.assistantMessages.length}
@@ -103,6 +293,7 @@ function MessageRow({
                 <div className="avatar-dropdown absolute top-full left-0 mt-1.5 z-50 w-44 rounded-xl border border-surface-border bg-surface-elevated shadow-xl py-1.5 px-1.5 flex flex-col gap-0.5">
                   {group.assistantMessages.map((a, idx) => {
                     const avatarModel = a.model ? modelById.get(a.model) : undefined;
+                    const avatarMeta = getModelAvatarMeta(avatarModel || a.model || "AI");
                     const isActive = (groupViews?.get(group.id) ?? 0) === idx;
                     return (
                       <button
@@ -116,9 +307,7 @@ function MessageRow({
                           isActive ? "bg-surface-card text-text-primary font-medium shadow-sm" : "text-text-secondary hover:bg-surface-card hover:text-text-primary"
                         )}
                       >
-                        <div className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold text-white shrink-0" style={{ backgroundColor: avatarModel?.color }}>
-                          {(avatarModel?.name || a.model || t("chat.model.fallback", { index: String(idx + 1) })).slice(0, 1).toUpperCase()}
-                        </div>
+                        <ModelAvatar meta={avatarMeta} size="xs" />
                         <span className="text-xs truncate">{avatarModel?.name || a.model || t("chat.model.fallback", { index: String(idx + 1) })}</span>
                         {isActive && <Check className="w-3 h-3 text-text-primary shrink-0 ml-auto" />}
                       </button>
@@ -157,7 +346,7 @@ function MessageRow({
                 <UserMessageContent message={msg} imageLoadFailedLabel={imageLoadFailedLabel} />
               ) : (
                 <>
-                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} recoverEmptyContent onRegenerate={onRegenerate} />
+                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={!blockRichTextHydration && (isNearViewport || forceHydrateRichText)} priorityHydrateRichText={!blockRichTextHydration && forceHydrateRichText} allowRichLiteFallback={allowRichLiteFallback || forceStableRichLiteFallback} compactRichLitePreview={!historyPrependSettling && !forceStableRichLiteFallback} recoverEmptyContent={isLast} onRegenerate={onRegenerate} />
                   {msg.stopped && onContinueGenerate && (
                     <button
                       onClick={onContinueGenerate}
@@ -183,7 +372,7 @@ function MessageRow({
                 visible={isLast}
                 createdAt={msg.createdAt}
                 completedAt={msg.completedAt}
-                onForkCompare={undefined}
+                onForkCompare={!isUser && msg.serverMessageId && conversationId ? () => onForkCompare?.(msg.serverMessageId!) : undefined}
               />
             )}
           </div>

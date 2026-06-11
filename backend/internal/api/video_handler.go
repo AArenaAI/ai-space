@@ -50,15 +50,17 @@ func (h *VideoHandler) ListVideos(c *gin.Context) {
 func (h *VideoHandler) CreateVideo(c *gin.Context) {
 	userID := getUserID(c)
 	var req struct {
-		Prompt          string   `json:"prompt" binding:"required"`
-		Model           string   `json:"model"`
-		Ratio           string   `json:"ratio"`
-		Resolution      string   `json:"resolution"`
-		Duration        int64    `json:"duration"`
-		GenerateAudio   bool     `json:"generate_audio"`
-		Watermark       bool     `json:"watermark"`
-		ReferenceImages []string `json:"reference_image_urls"`
-		ReferenceVideos []string `json:"reference_video_urls"`
+		Prompt                 string   `json:"prompt" binding:"required"`
+		Model                  string   `json:"model"`
+		Ratio                  string   `json:"ratio"`
+		Resolution             string   `json:"resolution"`
+		Duration               int64    `json:"duration"`
+		GenerateAudio          bool     `json:"generate_audio"`
+		Watermark              bool     `json:"watermark"`
+		ReferenceImages        []string `json:"reference_image_urls"`
+		ReferenceImageRoles    []string `json:"reference_image_roles"`
+		ReferenceVideos        []string `json:"reference_video_urls"`
+		ReferenceImageRoleMode string   `json:"reference_image_role_mode"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -76,19 +78,22 @@ func (h *VideoHandler) CreateVideo(c *gin.Context) {
 	}
 
 	createReq := services.CreateVideoTaskRequest{
-		Model:         modelID,
-		Prompt:        req.Prompt,
-		Ratio:         ratio,
-		Resolution:    resolution,
-		Duration:      duration,
-		GenerateAudio: req.GenerateAudio,
-		Watermark:     req.Watermark,
+		Model:                  modelID,
+		Prompt:                 req.Prompt,
+		Ratio:                  ratio,
+		Resolution:             resolution,
+		Duration:               duration,
+		GenerateAudio:          req.GenerateAudio,
+		Watermark:              req.Watermark,
+		ReferenceImageRoleMode: req.ReferenceImageRoleMode,
+		ReturnLastFrame:        true,
 	}
 	createReq.ReferenceImages, err = resolveVideoReferenceURLs(h.db, h.cfg, userID, req.ReferenceImages, "image")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": cleanVideoGenerationErrorMessage(err)})
 		return
 	}
+	createReq.ReferenceImageRoles = normalizedReferenceImageRoles(req.ReferenceImageRoles, len(createReq.ReferenceImages))
 	createReq.ReferenceVideos, err = resolveVideoReferenceURLs(h.db, h.cfg, userID, req.ReferenceVideos, "video")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": cleanVideoGenerationErrorMessage(err)})
@@ -96,40 +101,37 @@ func (h *VideoHandler) CreateVideo(c *gin.Context) {
 	}
 	log.Printf("[Video] create task refs images=%d videos=%d model=%s", len(createReq.ReferenceImages), len(createReq.ReferenceVideos), modelID)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	resp, err := h.videoService.CreateVideoTask(ctx, createReq)
-	if err != nil {
-		log.Printf("[Video] create task failed model=%s ratio=%s resolution=%s duration=%d audio=%v err=%v", modelID, ratio, resolution, duration, req.GenerateAudio, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": cleanVideoGenerationErrorMessage(err)})
-		return
-	}
-
+	// Create DB record first, then submit async
 	video := models.VideoGeneration{
-		UserID:        userID,
-		Prompt:        req.Prompt,
-		Model:         modelID,
-		Ratio:         ratio,
-		Duration:      duration,
-		GenerateAudio: req.GenerateAudio,
-		Watermark:     req.Watermark,
-		TaskID:        resp.TaskID,
-		Status:        resp.Status,
+		UserID:              userID,
+		Prompt:              req.Prompt,
+		Model:               modelID,
+		Ratio:               ratio,
+		Resolution:          resolution,
+		Duration:            duration,
+		GenerateAudio:       req.GenerateAudio,
+		Watermark:           req.Watermark,
+		ReferenceImageCount: len(createReq.ReferenceImages),
+		ReferenceVideoCount: len(createReq.ReferenceVideos),
+		Status:              "pending",
 	}
 	if err := h.db.Create(&video).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save task"})
 		return
 	}
 
+	// Launch async goroutine to create video task with Volcengine
+	go h.submitVideoTaskAsync(userID, video.ID, createReq)
+
 	c.JSON(http.StatusOK, gin.H{
-		"id":       video.ID,
-		"task_id":  video.TaskID,
-		"status":   video.Status,
-		"prompt":   video.Prompt,
-		"model":    video.Model,
-		"ratio":    video.Ratio,
-		"duration": video.Duration,
+		"id":         video.ID,
+		"task_id":    "",
+		"status":     "pending",
+		"prompt":     video.Prompt,
+		"model":      video.Model,
+		"ratio":      video.Ratio,
+		"resolution": video.Resolution,
+		"duration":   video.Duration,
 	})
 }
 
@@ -151,19 +153,27 @@ func (h *VideoHandler) GetVideo(c *gin.Context) {
 		if err == nil && resp != nil {
 			video.Status = resp.Status
 			if resp.Status == "succeeded" || resp.Status == "completed" {
-				localVideoURL, persistErr := persistRemoteVideoAsset(resp.VideoURL)
-				if persistErr != nil {
-					log.Printf("[Video] persist video failed task=%s err=%v", video.TaskID, persistErr)
-					video.Status = "failed"
-					video.ErrorMessage = "视频生成成功了，但保存视频文件时失败，请稍后重试。"
-				} else {
-					video.VideoURL = localVideoURL
+				if resp.LastFrameURL != "" {
+					video.LastFrameURL = resp.LastFrameURL
+				}
+				if video.VideoURL == "" {
+					localVideoURL, persistErr := persistRemoteVideoAsset(resp.VideoURL)
+					if persistErr != nil {
+						log.Printf("[Video] persist video failed task=%s err=%v", video.TaskID, persistErr)
+						video.Status = "failed"
+						video.ErrorMessage = "视频生成成功了，但保存视频文件时失败，请稍后重试。"
+					} else {
+						video.VideoURL = localVideoURL
+					}
 				}
 			}
 			if resp.Status == "failed" && resp.ErrorMessage != "" {
 				video.ErrorMessage = cleanVideoGenerationErrorString(resp.ErrorMessage)
 			}
 			h.db.Save(&video)
+			if video.Status == "succeeded" || video.Status == "completed" {
+				h.recordVideoUsageIfNeeded(&video, resp)
+			}
 		}
 	}
 
@@ -206,13 +216,18 @@ func (h *VideoHandler) RefreshVideoStatus(c *gin.Context) {
 
 	video.Status = resp.Status
 	if resp.Status == "succeeded" || resp.Status == "completed" {
-		localVideoURL, persistErr := persistRemoteVideoAsset(resp.VideoURL)
-		if persistErr != nil {
-			log.Printf("[Video] persist video failed task=%s err=%v", video.TaskID, persistErr)
-			video.Status = "failed"
-			video.ErrorMessage = "视频生成成功了，但保存视频文件时失败，请稍后重试。"
-		} else {
-			video.VideoURL = localVideoURL
+		if resp.LastFrameURL != "" {
+			video.LastFrameURL = resp.LastFrameURL
+		}
+		if video.VideoURL == "" {
+			localVideoURL, persistErr := persistRemoteVideoAsset(resp.VideoURL)
+			if persistErr != nil {
+				log.Printf("[Video] persist video failed task=%s err=%v", video.TaskID, persistErr)
+				video.Status = "failed"
+				video.ErrorMessage = "视频生成成功了，但保存视频文件时失败，请稍后重试。"
+			} else {
+				video.VideoURL = localVideoURL
+			}
 		}
 	}
 	if resp.Status == "failed" && resp.ErrorMessage != "" {
@@ -220,8 +235,75 @@ func (h *VideoHandler) RefreshVideoStatus(c *gin.Context) {
 	}
 	video.UpdatedAt = time.Now()
 	h.db.Save(&video)
+	if video.Status == "succeeded" || video.Status == "completed" {
+		h.recordVideoUsageIfNeeded(&video, resp)
+	}
 
 	c.JSON(http.StatusOK, video)
+}
+
+func (h *VideoHandler) recordVideoUsageIfNeeded(video *models.VideoGeneration, resp *services.VideoTaskResult) {
+	if video == nil || resp == nil || video.UsageRecorded {
+		return
+	}
+	if resp.CompletionTokens <= 0 {
+		log.Printf("[Video] skip usage log without completion tokens task=%s generation=%d", video.TaskID, video.ID)
+		return
+	}
+	resolution := video.Resolution
+	if resolution == "" {
+		resolution = "720p"
+	}
+	usageSvc := services.NewUsageService(h.cfg)
+	err := usageSvc.RecordVideoUsage(services.VideoUsageInput{
+		UserID:              video.UserID,
+		Model:               video.Model,
+		ResourceID:          video.ID,
+		ChatID:              video.ChatID,
+		MessageID:           video.MessageID,
+		TaskID:              video.TaskID,
+		DurationSeconds:     int(video.Duration),
+		Resolution:          resolution,
+		ReferenceVideoCount: video.ReferenceVideoCount,
+		CompletionTokens:    resp.CompletionTokens,
+		Raw: map[string]any{
+			"completion_tokens": resp.CompletionTokens,
+			"task_id":           resp.TaskID,
+			"source":            "volcengine_get_task",
+		},
+	})
+	if err != nil {
+		log.Printf("[Video] record usage failed task=%s generation=%d err=%v", video.TaskID, video.ID, err)
+		return
+	}
+	h.db.Model(video).Update("usage_recorded", true)
+	video.UsageRecorded = true
+}
+
+// submitVideoTaskAsync creates the video task in background for standalone video generation.
+func (h *VideoHandler) submitVideoTaskAsync(userID uint, videoID uint, createReq services.CreateVideoTaskRequest) {
+	log.Printf("[Video] async create task refs images=%d videos=%d model=%s video_id=%d", len(createReq.ReferenceImages), len(createReq.ReferenceVideos), createReq.Model, videoID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	resp, err := h.videoService.CreateVideoTask(ctx, createReq)
+	if err != nil {
+		errMsg := cleanVideoTaskSubmissionErrorMessage(err)
+		log.Printf("[Video] async create task failed video_id=%d err=%v", videoID, err)
+		h.db.Model(&models.VideoGeneration{}).Where("id = ?", videoID).Updates(map[string]interface{}{
+			"status":        "failed",
+			"error_message": errMsg,
+			"updated_at":    time.Now(),
+		})
+		return
+	}
+
+	h.db.Model(&models.VideoGeneration{}).Where("id = ?", videoID).Updates(map[string]interface{}{
+		"task_id":    resp.TaskID,
+		"status":     resp.Status,
+		"updated_at": time.Now(),
+	})
+	log.Printf("[Video] async create task success video_id=%d task=%s", videoID, resp.TaskID)
 }
 
 // filterAndResolveURLs filters empty URLs and resolves local references

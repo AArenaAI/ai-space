@@ -311,6 +311,14 @@
   color: var(--text-primary);
 }
 
+/* 让 .prose 内部使用 .not-prose 的代码块 pre 不被 .prose pre 全局样式覆盖 */
+.prose .not-prose pre,
+.green .prose .not-prose pre {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+}
+
 .green .prose code {
   background: rgba(59, 130, 246, 0.15);
   color: #2563EB;

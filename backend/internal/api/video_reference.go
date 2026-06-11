@@ -40,6 +40,25 @@ const (
 	maxReferenceVideoFPS         = 60.0
 )
 
+func normalizedReferenceImageRoles(roles []string, count int) []string {
+	if count <= 0 || len(roles) == 0 {
+		return nil
+	}
+	result := make([]string, 0, count)
+	for i := 0; i < count && i < len(roles); i++ {
+		role := strings.TrimSpace(roles[i])
+		switch role {
+		case "first_frame", "last_frame", "reference_image":
+			result = append(result, role)
+		case "reference":
+			result = append(result, "reference_image")
+		default:
+			result = append(result, "reference_image")
+		}
+	}
+	return result
+}
+
 // resolveVideoReferenceURLs converts frontend file public IDs into provider-readable URLs.
 // External http(s) URLs are kept as-is. Internal file_xxx IDs are resolved to either:
 // 1) an absolute public /api/files/:id/view URL when BASE_URL/FRONTEND_URL is configured; or
@@ -47,8 +66,8 @@ const (
 func resolveVideoReferenceURLs(db *gorm.DB, cfg *config.Config, userID uint, refs []string, mediaKind string) ([]string, error) {
 	result := make([]string, 0, len(refs))
 	var totalVideoDuration float64
-	for _, ref := range refs {
-		resolved, duration, err := resolveVideoReferenceURL(db, cfg, userID, strings.TrimSpace(ref), mediaKind)
+	for i, ref := range refs {
+		resolved, duration, err := resolveVideoReferenceURL(db, cfg, userID, strings.TrimSpace(ref), mediaKind, i)
 		if err != nil {
 			return nil, err
 		}
@@ -58,20 +77,25 @@ func resolveVideoReferenceURLs(db *gorm.DB, cfg *config.Config, userID uint, ref
 		if mediaKind == "video" && duration > 0 {
 			totalVideoDuration += duration
 			if totalVideoDuration > maxReferenceVideoTotalSec+0.001 {
-				return nil, fmt.Errorf("参考视频总时长不能超过 15 秒，当前已上传 %.1f 秒", totalVideoDuration)
+				return nil, fmt.Errorf("参考素材 #%d 导致总时长超过限制：参考视频总时长不能超过 15 秒，当前已上传 %.1f 秒", i+1, totalVideoDuration)
 			}
 		}
 	}
 	return result, nil
 }
 
-func resolveVideoReferenceURL(db *gorm.DB, cfg *config.Config, userID uint, ref string, mediaKind string) (string, float64, error) {
+func resolveVideoReferenceURL(db *gorm.DB, cfg *config.Config, userID uint, ref string, mediaKind string, index int) (string, float64, error) {
 	if ref == "" {
 		return "", 0, nil
 	}
+	if mediaKind == "video" {
+		if resolved, ok, err := resolveGeneratedVideoAssetReferenceURL(cfg, ref); ok || err != nil {
+			return resolved, 0, err
+		}
+	}
 	if strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") || strings.HasPrefix(ref, "data:") {
 		if mediaKind == "video" && !isSupportedVideoURL(ref) {
-			return "", 0, fmt.Errorf("参考视频仅支持 mp4、mov 格式")
+			return "", 0, fmt.Errorf("参考素材 #%d 不符合要求：参考视频仅支持 mp4、mov 格式", index+1)
 		}
 		return ref, 0, nil
 	}
@@ -85,15 +109,15 @@ func resolveVideoReferenceURL(db *gorm.DB, cfg *config.Config, userID uint, ref 
 
 	var file models.File
 	if err := db.Where("public_id = ?", publicID).First(&file).Error; err != nil {
-		return "", 0, fmt.Errorf("参考素材不存在: %s", publicID)
+		return "", 0, fmt.Errorf("参考素材 #%d 不符合要求：参考素材不存在 (%s)", index+1, publicID)
 	}
 	if file.UserID > 0 && file.UserID != userID {
-		return "", 0, fmt.Errorf("无权访问参考素材: %s", publicID)
+		return "", 0, fmt.Errorf("参考素材 #%d 不符合要求：无权访问该参考素材 (%s)", index+1, publicID)
 	}
 
 	var videoDuration float64
 	if mediaKind == "video" {
-		meta, err := validateLocalReferenceVideo(file)
+		meta, err := validateLocalReferenceVideo(file, index)
 		if err != nil {
 			return "", 0, err
 		}
@@ -106,25 +130,25 @@ func resolveVideoReferenceURL(db *gorm.DB, cfg *config.Config, userID uint, ref 
 			return publicURL, videoDuration, nil
 		}
 		if mediaKind != "image" {
-			return "", 0, fmt.Errorf("参考视频需要公网可访问 URL；当前 BASE_URL/FRONTEND_URL 对外不可访问，火山无法下载素材")
+			return "", 0, fmt.Errorf("参考素材 #%d 不符合要求：参考视频需要公网可访问 URL；当前 BASE_URL/FRONTEND_URL 对外不可访问，火山无法下载素材", index+1)
 		}
 	}
 
 	if mediaKind == "image" {
-		inline, err := inlineReferenceImage(file)
+		inline, err := inlineReferenceImage(file, index)
 		return inline, 0, err
 	}
 
-	return "", 0, fmt.Errorf("参考视频必须使用公网可访问 URL；当前缺少可访问的 BASE_URL/FRONTEND_URL，无法把本地文件传给火山")
+	return "", 0, fmt.Errorf("参考素材 #%d 不符合要求：参考视频必须使用公网可访问 URL；当前缺少可访问的 BASE_URL/FRONTEND_URL，无法把本地文件传给火山", index+1)
 }
 
-func inlineReferenceImage(file models.File) (string, error) {
+func inlineReferenceImage(file models.File, index int) (string, error) {
 	data, err := os.ReadFile(file.StoragePath)
 	if err != nil {
-		return "", fmt.Errorf("读取参考图失败: %w", err)
+		return "", fmt.Errorf("参考素材 #%d 不符合要求：读取参考图失败: %w", index+1, err)
 	}
 	if len(data) > maxInlineReferenceImageBytes {
-		return "", fmt.Errorf("参考图过大，请配置可公网访问的 BASE_URL 后再生成视频")
+		return "", fmt.Errorf("参考素材 #%d 不符合要求：参考图过大，请配置可公网访问的 BASE_URL 后再生成视频", index+1)
 	}
 	mimeType := file.MimeType
 	if mimeType == "" {
@@ -217,28 +241,51 @@ func isSupportedVideoURL(ref string) bool {
 	return ext == ".mp4" || ext == ".mov"
 }
 
-func validateLocalReferenceVideo(file models.File) (referenceVideoMetadata, error) {
+func resolveGeneratedVideoAssetReferenceURL(cfg *config.Config, ref string) (string, bool, error) {
+	filename, ok := localAssetFilenameFromURL(ref, localVideoURLPrefix)
+	if !ok {
+		return "", false, nil
+	}
+	if !isSupportedVideoURL(localVideoURLPrefix + filename) {
+		return "", true, fmt.Errorf("参考视频仅支持 mp4、mov 格式")
+	}
+	path := filepath.Join(videoAssetsDir(), filename)
+	if _, err := os.Stat(path); err != nil {
+		return "", true, fmt.Errorf("参考素材不存在: %s", filename)
+	}
+	base := publicBaseURL(cfg)
+	if base == "" {
+		return "", true, fmt.Errorf("参考视频必须使用公网可访问 URL；当前缺少可访问的 BASE_URL/FRONTEND_URL，无法把本地文件传给火山")
+	}
+	publicURL := strings.TrimRight(base, "/") + localVideoURLPrefix + url.PathEscape(filename)
+	if !isPublicReferenceURLReachable(publicURL) {
+		return "", true, fmt.Errorf("参考视频需要公网可访问 URL；当前 BASE_URL/FRONTEND_URL 对外不可访问，火山无法下载素材")
+	}
+	return publicURL, true, nil
+}
+
+func validateLocalReferenceVideo(file models.File, index int) (referenceVideoMetadata, error) {
 	var meta referenceVideoMetadata
 	if file.Size > maxReferenceVideoBytes {
-		return meta, fmt.Errorf("参考视频不能超过 200 MB，当前文件 %.1f MB", float64(file.Size)/(1024*1024))
+		return meta, fmt.Errorf("参考素材 #%d (%s) 不符合要求：参考视频不能超过 200 MB，当前文件 %.1f MB", index+1, file.Filename, float64(file.Size)/(1024*1024))
 	}
 	mimeType := strings.ToLower(strings.TrimSpace(file.MimeType))
 	ext := strings.ToLower(filepath.Ext(file.Filename))
 	if !((ext == ".mp4" || mimeType == "video/mp4") || (ext == ".mov" || mimeType == "video/quicktime")) {
-		return meta, fmt.Errorf("参考视频仅支持 mp4、mov 格式")
+		return meta, fmt.Errorf("参考素材 #%d (%s) 不符合要求：参考视频仅支持 mp4、mov 格式", index+1, file.Filename)
 	}
 	if _, err := os.Stat(file.StoragePath); err != nil {
-		return meta, fmt.Errorf("读取参考视频失败: %w", err)
+		return meta, fmt.Errorf("参考素材 #%d (%s) 不符合要求：读取参考视频失败: %w", index+1, file.Filename, err)
 	}
 
 	cmd := exec.Command("ffprobe", "-v", "error", "-print_format", "json", "-show_streams", "-show_format", file.StoragePath)
 	out, err := cmd.Output()
 	if err != nil {
-		return meta, fmt.Errorf("解析参考视频失败，请确认视频文件可正常播放")
+		return meta, fmt.Errorf("参考素材 #%d (%s) 不符合要求：解析参考视频失败，请确认视频文件可正常播放", index+1, file.Filename)
 	}
 	var probe ffprobeOutput
 	if err := json.Unmarshal(out, &probe); err != nil {
-		return meta, fmt.Errorf("解析参考视频元数据失败")
+		return meta, fmt.Errorf("参考素材 #%d (%s) 不符合要求：解析参考视频元数据失败", index+1, file.Filename)
 	}
 	meta.Duration, _ = strconv.ParseFloat(probe.Format.Duration, 64)
 	for _, stream := range probe.Streams {
@@ -256,29 +303,29 @@ func validateLocalReferenceVideo(file models.File) (referenceVideoMetadata, erro
 	}
 
 	if meta.Duration < minReferenceVideoDurationSec || meta.Duration > maxReferenceVideoDurationSec+0.001 {
-		return meta, fmt.Errorf("参考视频单个时长必须在 2-15 秒之间，当前 %.1f 秒", meta.Duration)
+		return meta, fmt.Errorf("参考素材 #%d (%s) 不符合要求：参考视频单个时长必须在 2-15 秒之间，当前 %.1f 秒", index+1, file.Filename, meta.Duration)
 	}
 	if meta.VideoCodec != "h264" && meta.VideoCodec != "hevc" && meta.VideoCodec != "h265" {
-		return meta, fmt.Errorf("参考视频编码仅支持 H.264/AVC、H.265/HEVC，当前为 %s", meta.VideoCodec)
+		return meta, fmt.Errorf("参考素材 #%d (%s) 不符合要求：参考视频编码仅支持 H.264/AVC、H.265/HEVC，当前为 %s", index+1, file.Filename, meta.VideoCodec)
 	}
 	for _, codec := range meta.AudioCodecs {
 		if codec != "aac" && codec != "mp3" {
-			return meta, fmt.Errorf("参考视频音频编码仅支持 AAC、MP3，当前为 %s", codec)
+			return meta, fmt.Errorf("参考素材 #%d (%s) 不符合要求：参考视频音频编码仅支持 AAC、MP3，当前为 %s", index+1, file.Filename, codec)
 		}
 	}
 	if meta.Width < minReferenceVideoSidePx || meta.Width > maxReferenceVideoSidePx || meta.Height < minReferenceVideoSidePx || meta.Height > maxReferenceVideoSidePx {
-		return meta, fmt.Errorf("参考视频宽高必须在 300-6000 px 之间，当前 %dx%d", meta.Width, meta.Height)
+		return meta, fmt.Errorf("参考素材 #%d (%s) 不符合要求：参考视频宽高必须在 300-6000 px 之间，当前 %dx%d", index+1, file.Filename, meta.Width, meta.Height)
 	}
 	aspect := float64(meta.Width) / float64(meta.Height)
 	if aspect < minReferenceVideoAspectRatio || aspect > maxReferenceVideoAspectRatio {
-		return meta, fmt.Errorf("参考视频宽高比必须在 0.4-2.5 之间，当前 %.2f", aspect)
+		return meta, fmt.Errorf("参考素材 #%d (%s) 不符合要求：参考视频宽高比必须在 0.4-2.5 之间，当前 %.2f", index+1, file.Filename, aspect)
 	}
 	pixels := meta.Width * meta.Height
 	if pixels < minReferenceVideoPixels || pixels > maxReferenceVideoPixels {
-		return meta, fmt.Errorf("参考视频总像素数必须在 409600-2086876 之间，当前 %d", pixels)
+		return meta, fmt.Errorf("参考素材 #%d (%s) 不符合要求：参考视频总像素数必须在 409600-2086876 之间，当前 %d", index+1, file.Filename, pixels)
 	}
 	if meta.FPS < minReferenceVideoFPS || meta.FPS > maxReferenceVideoFPS {
-		return meta, fmt.Errorf("参考视频帧率必须在 24-60 FPS 之间，当前 %.2f", meta.FPS)
+		return meta, fmt.Errorf("参考素材 #%d (%s) 不符合要求：参考视频帧率必须在 24-60 FPS 之间，当前 %.2f", index+1, file.Filename, meta.FPS)
 	}
 	return meta, nil
 }

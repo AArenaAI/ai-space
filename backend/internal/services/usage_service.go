@@ -29,10 +29,44 @@ type UsageContext struct {
 	NotebookID     uint
 	RequestID      string
 	LatencyMs      int
+	Module         string
+	Feature        string
+	Operation      string
 }
 
 func NewUsageService(cfg *config.Config) *UsageService {
 	return &UsageService{cfg: cfg}
+}
+
+func applyProductContext(log *models.APIUsageLog, ctx UsageContext, fallbackModule, fallbackFeature, fallbackOperation string) {
+	if log == nil {
+		return
+	}
+	log.Module = strings.TrimSpace(ctx.Module)
+	if log.Module == "" {
+		log.Module = fallbackModule
+	}
+	log.Feature = strings.TrimSpace(ctx.Feature)
+	if log.Feature == "" {
+		log.Feature = fallbackFeature
+	}
+	log.Operation = strings.TrimSpace(ctx.Operation)
+	if log.Operation == "" {
+		log.Operation = fallbackOperation
+	}
+}
+
+func defaultChatProductContext(ctx UsageContext) (string, string, string) {
+	if ctx.Module != "" || ctx.Feature != "" || ctx.Operation != "" {
+		return "chat", "chat", "chat_completion"
+	}
+	if ctx.WorkspaceID > 0 {
+		return "workspace", "chat", "workspace_chat_completion"
+	}
+	if ctx.NotebookID > 0 {
+		return "work", "notebook", "notebook_chat_completion"
+	}
+	return "chat", "chat", "chat_completion"
 }
 
 // RecordUsage 通用记录 usage 方法
@@ -69,6 +103,9 @@ func (s *UsageService) RecordChatUsage(userID uint, provider, model, modelType s
 	log := &models.APIUsageLog{
 		UserID:             userID,
 		Service:            "chat",
+		Module:             "chat",
+		Feature:            "chat",
+		Operation:          "chat_completion",
 		Provider:           provider,
 		Model:              model,
 		ModelType:          modelType,
@@ -163,6 +200,8 @@ func (s *UsageService) RecordChatUsageWithContext(userID uint, provider, model, 
 		RequestID:          ctx.RequestID,
 		CreatedAt:          time.Now(),
 	}
+	module, feature, operation := defaultChatProductContext(ctx)
+	applyProductContext(log, ctx, module, feature, operation)
 	applyPriceSnapshot(log, price)
 	return s.RecordUsage(log)
 }
@@ -196,12 +235,170 @@ func (s *UsageService) GetGuestDailyChatCount(guestID string) (int64, error) {
 	return count, err
 }
 
+type ImageBillingUsage struct {
+	TextInputTokens        int            `json:"text_input_tokens"`
+	CachedTextInputTokens  int            `json:"cached_text_input_tokens"`
+	ImageInputTokens       int            `json:"image_input_tokens"`
+	CachedImageInputTokens int            `json:"cached_image_input_tokens"`
+	ImageOutputTokens      int            `json:"image_output_tokens"`
+	Estimated              bool           `json:"estimated"`
+	EstimatedReason        string         `json:"estimated_reason,omitempty"`
+	Raw                    map[string]any `json:"raw,omitempty"`
+}
+
+func imageBillingUsageFromTokenUsage(usage *TokenUsage) *ImageBillingUsage {
+	if usage == nil || usage.Raw == nil {
+		return nil
+	}
+	if raw, ok := usage.Raw["image_billing_usage"].(map[string]any); ok {
+		return parseImageBillingUsageMap(raw)
+	}
+	if raw, ok := usage.Raw["usage"].(map[string]any); ok {
+		return parseImageBillingUsageMap(raw)
+	}
+	return parseImageBillingUsageMap(usage.Raw)
+}
+
+func parseImageBillingUsageMap(raw map[string]any) *ImageBillingUsage {
+	if raw == nil {
+		return nil
+	}
+	usage := &ImageBillingUsage{Raw: raw}
+	usage.TextInputTokens = intFromAny(firstAny(raw, "text_input_tokens", "input_text_tokens", "text_tokens"))
+	usage.CachedTextInputTokens = intFromAny(firstAny(raw, "cached_text_input_tokens", "cached_input_text_tokens", "cached_text_tokens"))
+	usage.ImageInputTokens = intFromAny(firstAny(raw, "image_input_tokens", "input_image_tokens", "image_tokens"))
+	usage.CachedImageInputTokens = intFromAny(firstAny(raw, "cached_image_input_tokens", "cached_input_image_tokens", "cached_image_tokens"))
+	usage.ImageOutputTokens = intFromAny(firstAny(raw, "image_output_tokens", "output_image_tokens", "output_tokens", "completion_tokens"))
+	if v, ok := firstAny(raw, "estimated").(bool); ok {
+		usage.Estimated = v
+	}
+	if v, ok := firstAny(raw, "estimated_reason").(string); ok {
+		usage.EstimatedReason = v
+	}
+	if details, ok := firstAny(raw, "input_tokens_details", "prompt_tokens_details").(map[string]any); ok {
+		if usage.TextInputTokens == 0 {
+			usage.TextInputTokens = intFromAny(firstAny(details, "text_tokens", "text"))
+		}
+		if usage.ImageInputTokens == 0 {
+			usage.ImageInputTokens = intFromAny(firstAny(details, "image_tokens", "image"))
+		}
+		if usage.CachedTextInputTokens == 0 {
+			usage.CachedTextInputTokens = intFromAny(firstAny(details, "cached_text_tokens", "cached_text"))
+		}
+		if usage.CachedImageInputTokens == 0 {
+			usage.CachedImageInputTokens = intFromAny(firstAny(details, "cached_image_tokens", "cached_image"))
+		}
+	}
+	if details, ok := firstAny(raw, "output_tokens_details", "completion_tokens_details").(map[string]any); ok {
+		if usage.ImageOutputTokens == 0 {
+			usage.ImageOutputTokens = intFromAny(firstAny(details, "image_tokens", "image", "image_output_tokens"))
+		}
+	}
+	if usage.TextInputTokens == 0 && usage.CachedTextInputTokens == 0 && usage.ImageInputTokens == 0 && usage.CachedImageInputTokens == 0 && usage.ImageOutputTokens == 0 {
+		return nil
+	}
+	return usage
+}
+
+func firstAny(raw map[string]any, keys ...string) any {
+	for _, key := range keys {
+		if v, ok := raw[key]; ok {
+			return v
+		}
+	}
+	return nil
+}
+
+func intFromAny(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case float32:
+		return int(n)
+	case json.Number:
+		if i, err := n.Int64(); err == nil {
+			return int(i)
+		}
+		if f, err := n.Float64(); err == nil {
+			return int(f)
+		}
+	case string:
+		if i, err := strconv.Atoi(strings.TrimSpace(n)); err == nil {
+			return i
+		}
+	}
+	return 0
+}
+
+func imageBillingCostRMB(price config.ModelPrice, usage *ImageBillingUsage) (inputCost, outputCost, totalCost float64) {
+	if usage == nil {
+		return 0, 0, 0
+	}
+	rate := price.ExchangeRateToRMB
+	if rate <= 0 {
+		rate = exchangeRateToRMB(price.SourceCurrency)
+	}
+	if rate <= 0 {
+		rate = 1
+	}
+	textInputPerK := convertSourceUnitToRMB(price.SourceUnit, price.SourceInputPrice, rate)
+	cachedTextPerK := convertSourceUnitToRMB(price.SourceUnit, price.SourceInputCacheHitPrice, rate)
+	imageInputPerK := convertSourceUnitToRMB(price.SourceUnit, price.SourceImageInputPrice, rate)
+	cachedImagePerK := convertSourceUnitToRMB(price.SourceUnit, price.SourceImageInputCacheHitPrice, rate)
+	outputPerK := convertSourceUnitToRMB(price.SourceUnit, price.SourceOutputPrice, rate)
+	inputCost = float64(usage.TextInputTokens)*textInputPerK/1000.0 + float64(usage.CachedTextInputTokens)*cachedTextPerK/1000.0 + float64(usage.ImageInputTokens)*imageInputPerK/1000.0 + float64(usage.CachedImageInputTokens)*cachedImagePerK/1000.0
+	outputCost = float64(usage.ImageOutputTokens) * outputPerK / 1000.0
+	return inputCost, outputCost, inputCost + outputCost
+}
+
+func imageBillingRawJSON(existing map[string]any, billing *ImageBillingUsage, price config.ModelPrice, size, quality, operation string) string {
+	payload := map[string]any{}
+	if existing != nil {
+		payload["provider_usage"] = existing
+	}
+	if billing != nil {
+		payload["image_billing_usage"] = billing
+	}
+	payload["image_billing_price"] = map[string]any{
+		"source_currency":                 price.SourceCurrency,
+		"source_unit":                     price.SourceUnit,
+		"source_text_input_price":         price.SourceInputPrice,
+		"source_text_cached_input_price":  price.SourceInputCacheHitPrice,
+		"source_image_input_price":        price.SourceImageInputPrice,
+		"source_image_cached_input_price": price.SourceImageInputCacheHitPrice,
+		"source_image_output_price":       price.SourceOutputPrice,
+		"exchange_rate_to_rmb":            price.ExchangeRateToRMB,
+	}
+	if size != "" {
+		payload["size"] = size
+	}
+	if quality != "" {
+		payload["quality"] = quality
+	}
+	if operation != "" {
+		payload["operation"] = operation
+	}
+	b, _ := json.Marshal(payload)
+	return string(b)
+}
+
 // RecordImageUsage 记录图片生成用量
 func (s *UsageService) RecordImageUsage(userID uint, model string, imageCount int, usage *TokenUsage) error {
+	return s.RecordImageUsageWithContext(userID, model, imageCount, UsageContext{}, usage)
+}
+
+// RecordImageUsageWithContext 记录图片生成/编辑用量（带产品与业务上下文）。
+func (s *UsageService) RecordImageUsageWithContext(userID uint, model string, imageCount int, ctx UsageContext, usage *TokenUsage) error {
 	var promptTokens, completionTokens int
+	var billingUsage *ImageBillingUsage
 	if usage != nil {
 		promptTokens = usage.PromptTokens
 		completionTokens = usage.CompletionTokens
+		billingUsage = imageBillingUsageFromTokenUsage(usage)
 	}
 
 	// 图片生成可能按图片张数计费或按 token 计费。模型级价格优先，provider 配置兜底。
@@ -213,7 +410,11 @@ func (s *UsageService) RecordImageUsage(userID uint, model string, imageCount in
 	var totalCost float64
 	var inputCost, outputCost float64
 
-	if unitPrice > 0 {
+	if billingUsage != nil {
+		inputCost, outputCost, totalCost = imageBillingCostRMB(price, billingUsage)
+		promptTokens = billingUsage.TextInputTokens + billingUsage.CachedTextInputTokens + billingUsage.ImageInputTokens + billingUsage.CachedImageInputTokens
+		completionTokens = billingUsage.ImageOutputTokens
+	} else if unitPrice > 0 {
 		// 按张计费
 		totalCost = models.CalculateImageCost(imageCount, unitPrice)
 		// 同时也计算 token 费用，如果有
@@ -249,8 +450,9 @@ func (s *UsageService) RecordImageUsage(userID uint, model string, imageCount in
 
 	rawJSON := ""
 	if usage != nil && usage.Raw != nil {
-		b, _ := json.Marshal(usage.Raw)
-		rawJSON = string(b)
+		rawJSON = imageBillingRawJSON(usage.Raw, billingUsage, price, "", "", ctx.Operation)
+	} else if billingUsage != nil {
+		rawJSON = imageBillingRawJSON(nil, billingUsage, price, "", "", ctx.Operation)
 	}
 
 	unitCount := float64(imageCount)
@@ -260,11 +462,18 @@ func (s *UsageService) RecordImageUsage(userID uint, model string, imageCount in
 
 	log := &models.APIUsageLog{
 		UserID:             userID,
+		GuestID:            ctx.GuestID,
 		Service:            "image_generation",
 		Provider:           "openai",
 		Model:              model,
 		ModelType:          "gpt",
 		ResourceType:       "image_generation",
+		ResourceID:         ctx.ResourceID,
+		ConversationID:     ctx.ConversationID,
+		MessageID:          ctx.MessageID,
+		TaskID:             ctx.TaskID,
+		WorkspaceID:        ctx.WorkspaceID,
+		NotebookID:         ctx.NotebookID,
 		PromptTokens:       promptTokens,
 		CompletionTokens:   completionTokens,
 		TotalTokens:        promptTokens + completionTokens,
@@ -282,14 +491,34 @@ func (s *UsageService) RecordImageUsage(userID uint, model string, imageCount in
 		OutputUnitPriceRMB: outputPrice,
 		Estimated:          estimated,
 		RawUsageJSON:       rawJSON,
+		LatencyMs:          ctx.LatencyMs,
+		RequestID:          ctx.RequestID,
 		CreatedAt:          time.Now(),
 	}
+	if ctx.ResourceType != "" {
+		log.ResourceType = ctx.ResourceType
+	}
+	service := strings.TrimSpace(log.Service)
+	operation := strings.TrimSpace(ctx.Operation)
+	if operation == "" {
+		operation = "text_to_image"
+	}
+	if operation == "image_edit" || operation == "inpaint" || operation == "region_brush" || operation == "replace_bg" {
+		service = "image_edit"
+	}
+	log.Service = service
+	applyProductContext(log, ctx, "creative", "image", operation)
 	applyPriceSnapshot(log, price)
 	return s.RecordUsage(log)
 }
 
 // RecordPPTUsage 记录文档生成（PPT）用量
 func (s *UsageService) RecordPPTUsage(userID uint, model string, resourceID uint, usage *TokenUsage) error {
+	return s.RecordPPTUsageWithContext(userID, model, resourceID, UsageContext{}, usage)
+}
+
+// RecordPPTUsageWithContext 记录文档生成（PPT）用量（带产品与业务上下文）。
+func (s *UsageService) RecordPPTUsageWithContext(userID uint, model string, resourceID uint, ctx UsageContext, usage *TokenUsage) error {
 	if usage == nil {
 		return nil
 	}
@@ -310,12 +539,18 @@ func (s *UsageService) RecordPPTUsage(userID uint, model string, resourceID uint
 
 	log := &models.APIUsageLog{
 		UserID:             userID,
+		GuestID:            ctx.GuestID,
 		Service:            "document_generation",
 		Provider:           "openai",
 		Model:              model,
 		ModelType:          "gpt",
 		ResourceType:       "ppt_generation",
 		ResourceID:         resourceID,
+		ConversationID:     ctx.ConversationID,
+		MessageID:          ctx.MessageID,
+		TaskID:             ctx.TaskID,
+		WorkspaceID:        ctx.WorkspaceID,
+		NotebookID:         ctx.NotebookID,
 		PromptTokens:       usage.PromptTokens,
 		CompletionTokens:   usage.CompletionTokens,
 		TotalTokens:        usage.TotalTokens,
@@ -330,14 +565,28 @@ func (s *UsageService) RecordPPTUsage(userID uint, model string, resourceID uint
 		OutputUnitPriceRMB: price.OutputPriceRMB,
 		Estimated:          usage.Estimated,
 		RawUsageJSON:       rawJSON,
+		LatencyMs:          ctx.LatencyMs,
+		RequestID:          ctx.RequestID,
 		CreatedAt:          time.Now(),
 	}
+	if ctx.ResourceType != "" {
+		log.ResourceType = ctx.ResourceType
+	}
+	if ctx.ResourceID > 0 {
+		log.ResourceID = ctx.ResourceID
+	}
+	applyProductContext(log, ctx, "work", "ppt", "ppt_generation")
 	applyPriceSnapshot(log, price)
 	return s.RecordUsage(log)
 }
 
 // RecordVisionUsage 记录 Vision（图片解析）用量
 func (s *UsageService) RecordVisionUsage(userID uint, guestID, model string, resourceID uint, usage *TokenUsage) error {
+	return s.RecordVisionUsageWithContext(userID, model, resourceID, UsageContext{GuestID: guestID}, usage)
+}
+
+// RecordVisionUsageWithContext 记录 Vision 用量（带产品与业务上下文）。
+func (s *UsageService) RecordVisionUsageWithContext(userID uint, model string, resourceID uint, ctx UsageContext, usage *TokenUsage) error {
 	if usage == nil {
 		return nil
 	}
@@ -358,13 +607,18 @@ func (s *UsageService) RecordVisionUsage(userID uint, guestID, model string, res
 
 	log := &models.APIUsageLog{
 		UserID:             userID,
-		GuestID:            guestID,
+		GuestID:            ctx.GuestID,
 		Service:            "vision",
 		Provider:           "openai",
 		Model:              model,
 		ModelType:          "gpt",
 		ResourceType:       "file",
 		ResourceID:         resourceID,
+		ConversationID:     ctx.ConversationID,
+		MessageID:          ctx.MessageID,
+		TaskID:             ctx.TaskID,
+		WorkspaceID:        ctx.WorkspaceID,
+		NotebookID:         ctx.NotebookID,
 		PromptTokens:       usage.PromptTokens,
 		CompletionTokens:   usage.CompletionTokens,
 		TotalTokens:        usage.TotalTokens,
@@ -379,26 +633,46 @@ func (s *UsageService) RecordVisionUsage(userID uint, guestID, model string, res
 		OutputUnitPriceRMB: price.OutputPriceRMB,
 		Estimated:          usage.Estimated,
 		RawUsageJSON:       rawJSON,
+		LatencyMs:          ctx.LatencyMs,
+		RequestID:          ctx.RequestID,
 		CreatedAt:          time.Now(),
 	}
+	if ctx.ResourceType != "" {
+		log.ResourceType = ctx.ResourceType
+	}
+	if ctx.ResourceID > 0 {
+		log.ResourceID = ctx.ResourceID
+	}
+	applyProductContext(log, ctx, "work", "document_reader", "file_vision_parse")
 	applyPriceSnapshot(log, price)
 	return s.RecordUsage(log)
 }
 
 // RecordEmbeddingUsage 记录 Embedding 用量
 func (s *UsageService) RecordEmbeddingUsage(userID uint, model string, resourceID uint, inputTokens int) error {
+	return s.RecordEmbeddingUsageWithContext(userID, model, resourceID, inputTokens, UsageContext{})
+}
+
+// RecordEmbeddingUsageWithContext 记录 Embedding 用量（带产品与业务上下文）。
+func (s *UsageService) RecordEmbeddingUsageWithContext(userID uint, model string, resourceID uint, inputTokens int, ctx UsageContext) error {
 	price := s.getTokenPriceWithFallback("openai", model, s.cfg.EmbeddingInputPrice, 0)
 	cost := models.CalculateEmbeddingCost(inputTokens, price.InputPriceRMB)
 
 	totalTokens := inputTokens
 	log := &models.APIUsageLog{
 		UserID:            userID,
+		GuestID:           ctx.GuestID,
 		Service:           "embedding",
 		Provider:          "openai",
 		Model:             model,
 		ModelType:         "embedding",
 		ResourceType:      "embedding_job",
 		ResourceID:        resourceID,
+		ConversationID:    ctx.ConversationID,
+		MessageID:         ctx.MessageID,
+		TaskID:            ctx.TaskID,
+		WorkspaceID:       ctx.WorkspaceID,
+		NotebookID:        ctx.NotebookID,
 		PromptTokens:      inputTokens,
 		CompletionTokens:  0,
 		TotalTokens:       totalTokens,
@@ -410,7 +684,194 @@ func (s *UsageService) RecordEmbeddingUsage(userID uint, model string, resourceI
 		PricingUnit:       price.PricingUnit,
 		UnitCount:         float64(totalTokens) / 1000.0,
 		InputUnitPriceRMB: price.InputPriceRMB,
+		LatencyMs:         ctx.LatencyMs,
+		RequestID:         ctx.RequestID,
 		CreatedAt:         time.Now(),
+	}
+	if ctx.ResourceType != "" {
+		log.ResourceType = ctx.ResourceType
+	}
+	if ctx.ResourceID > 0 {
+		log.ResourceID = ctx.ResourceID
+	}
+	applyProductContext(log, ctx, "work", "document_reader", "file_embedding")
+	applyPriceSnapshot(log, price)
+	return s.RecordUsage(log)
+}
+
+// TranslationUsageInput contains character-based usage for dedicated translation APIs.
+type TranslationUsageInput struct {
+	UserID             uint
+	GuestID            string
+	Provider           string
+	Model              string
+	SourceLanguage     string
+	TargetLanguage     string
+	InputCharacters    int
+	OutputCharacters   int
+	DetectedSourceLang string
+	LatencyMs          int
+	RequestID          string
+	Raw                map[string]any
+}
+
+// RecordTranslationUsage records Google Cloud Translation usage. Google Translate is billed by
+// characters, not tokens: NMT charges source text characters; Translation LLM charges input and output characters.
+func (s *UsageService) RecordTranslationUsage(input TranslationUsageInput) error {
+	provider := strings.TrimSpace(input.Provider)
+	if provider == "" {
+		provider = "google-cloud-translate-v3"
+	}
+	model := normalizeTranslationUsageModel(input.Model)
+	if model == "" {
+		model = "general/nmt"
+	}
+	price := s.getCharacterPrice(provider, model)
+	inputChars := maxInt(input.InputCharacters, 0)
+	outputChars := maxInt(input.OutputCharacters, 0)
+	inputCost := float64(inputChars) * price.InputPriceRMB / 1_000_000.0
+	outputCost := 0.0
+	if price.OutputPriceRMB > 0 {
+		outputCost = float64(outputChars) * price.OutputPriceRMB / 1_000_000.0
+	}
+
+	raw := map[string]any{
+		"source_language":          input.SourceLanguage,
+		"target_language":          input.TargetLanguage,
+		"detected_source_language": input.DetectedSourceLang,
+		"input_characters":         inputChars,
+		"output_characters":        outputChars,
+	}
+	for k, v := range input.Raw {
+		raw[k] = v
+	}
+	rawJSON := ""
+	if b, err := json.Marshal(raw); err == nil {
+		rawJSON = string(b)
+	}
+
+	log := &models.APIUsageLog{
+		UserID:             input.UserID,
+		GuestID:            input.GuestID,
+		Service:            "translation",
+		Provider:           strings.ToLower(provider),
+		Model:              strings.ToLower(model),
+		ModelType:          "translation",
+		Module:             "work",
+		Feature:            "translator",
+		Operation:          "translate_text",
+		CharacterCount:     inputChars,
+		InputCostRMB:       inputCost,
+		OutputCostRMB:      outputCost,
+		TotalCostRMB:       inputCost + outputCost,
+		Currency:           "RMB",
+		Status:             "success",
+		PricingUnit:        price.PricingUnit,
+		UnitCount:          float64(inputChars) / 1_000_000.0,
+		InputUnitPriceRMB:  price.InputPriceRMB,
+		OutputUnitPriceRMB: price.OutputPriceRMB,
+		LatencyMs:          input.LatencyMs,
+		RequestID:          input.RequestID,
+		RawUsageJSON:       rawJSON,
+		CreatedAt:          time.Now(),
+	}
+	applyPriceSnapshot(log, price)
+	return s.RecordUsage(log)
+}
+
+// VideoUsageInput contains the dimensions needed to price a completed video generation task.
+type VideoUsageInput struct {
+	UserID              uint
+	GuestID             string
+	Model               string
+	ResourceID          uint
+	ChatID              uint
+	MessageID           uint
+	TaskID              string
+	DurationSeconds     int
+	Resolution          string
+	ReferenceVideoCount int
+	CompletionTokens    int
+	Estimated           bool
+	Raw                 map[string]any
+}
+
+// RecordVideoUsage records Volcengine Seedance video usage. Seedance 2.0/2.0 Fast are billed by
+// usage.completion_tokens and official per-1M-token prices, not by request count or fixed seconds.
+func (s *UsageService) RecordVideoUsage(input VideoUsageInput) error {
+	if input.Model == "" {
+		return nil
+	}
+	if models.DB != nil {
+		query := models.DB.Model(&models.APIUsageLog{}).Where("service = ?", "video_generation")
+		if input.ResourceID > 0 {
+			query = query.Where("resource_type = ? AND resource_id = ?", "video_generation", input.ResourceID)
+		} else if input.TaskID != "" {
+			query = query.Where("request_id = ?", input.TaskID)
+		}
+		var existing int64
+		if err := query.Count(&existing).Error; err == nil && existing > 0 {
+			return nil
+		}
+	}
+
+	price := s.getVideoPrice("volcengine", input.Model, input.Resolution, input.ReferenceVideoCount > 0)
+	completionTokens := input.CompletionTokens
+	totalTokens := completionTokens
+	outputCost := float64(completionTokens) * price.OutputPriceRMB / 1000.0
+	status := "success"
+	if completionTokens <= 0 {
+		status = "missing_usage"
+		input.Estimated = true
+		outputCost = 0
+	}
+
+	raw := map[string]any{}
+	for k, v := range input.Raw {
+		raw[k] = v
+	}
+	if len(raw) == 0 {
+		raw["completion_tokens"] = completionTokens
+	}
+	raw["resolution"] = input.Resolution
+	raw["reference_video_count"] = input.ReferenceVideoCount
+	raw["duration_seconds"] = input.DurationSeconds
+	rawJSON := ""
+	if b, err := json.Marshal(raw); err == nil {
+		rawJSON = string(b)
+	}
+
+	log := &models.APIUsageLog{
+		UserID:             input.UserID,
+		GuestID:            input.GuestID,
+		Service:            "video_generation",
+		Module:             "creative",
+		Feature:            "video",
+		Operation:          "video_generation",
+		Provider:           "volcengine",
+		Model:              input.Model,
+		ModelType:          "video",
+		ResourceType:       "video_generation",
+		ResourceID:         input.ResourceID,
+		ConversationID:     input.ChatID,
+		MessageID:          input.MessageID,
+		PromptTokens:       0,
+		CompletionTokens:   completionTokens,
+		TotalTokens:        totalTokens,
+		VideoSeconds:       input.DurationSeconds,
+		InputCostRMB:       0,
+		OutputCostRMB:      outputCost,
+		TotalCostRMB:       outputCost,
+		Currency:           "RMB",
+		Status:             status,
+		PricingUnit:        price.PricingUnit,
+		UnitCount:          float64(totalTokens) / 1000.0,
+		InputUnitPriceRMB:  0,
+		OutputUnitPriceRMB: price.OutputPriceRMB,
+		Estimated:          input.Estimated,
+		RawUsageJSON:       rawJSON,
+		RequestID:          input.TaskID,
+		CreatedAt:          time.Now(),
 	}
 	applyPriceSnapshot(log, price)
 	return s.RecordUsage(log)
@@ -450,6 +911,59 @@ func (s *UsageService) getImagePrice(provider, model string) config.ModelPrice {
 	return config.ModelPrice{Provider: strings.ToLower(provider), Model: strings.ToLower(model), PricingUnit: unit, InputPriceRMB: s.cfg.ImageGenInputPrice, OutputPriceRMB: s.cfg.ImageGenOutputPrice, ImageUnitPrice: s.cfg.ImageGenUnitPrice, SourceCurrency: "CNY", SourceUnit: "per_1k_tokens", SourceInputPrice: s.cfg.ImageGenInputPrice, SourceOutputPrice: s.cfg.ImageGenOutputPrice, SourceImagePrice: s.cfg.ImageGenUnitPrice, ExchangeRateToRMB: 1}
 }
 
+func (s *UsageService) getVideoPrice(provider, model, resolution string, inputContainsVideo bool) config.ModelPrice {
+	if price, ok := s.getModelPrice(provider, model); ok {
+		if selected, matched := selectVideoPricingRule(price, resolution, inputContainsVideo); matched {
+			price.SourceOutputPrice = selected.SourceOutputPrice
+			if selected.PricingBasis != "" {
+				price.PricingBasis = selected.PricingBasis
+			}
+		}
+		if price.PricingUnit == "" {
+			price.PricingUnit = "token_1k"
+		}
+		return resolveModelPrice(price)
+	}
+	return config.ModelPrice{Provider: strings.ToLower(provider), Model: strings.ToLower(model), PricingUnit: "request", RequestUnitPrice: s.cfg.VideoGenUnitPrice, SourceCurrency: "CNY", SourceUnit: "per_request", SourceRequestPrice: s.cfg.VideoGenUnitPrice, ExchangeRateToRMB: 1}
+}
+
+func (s *UsageService) getCharacterPrice(provider, model string) config.ModelPrice {
+	if price, ok := s.getModelPrice(provider, model); ok && hasCharacterPrice(price) {
+		if price.PricingUnit == "" {
+			price.PricingUnit = "character_1m"
+		}
+		return resolveModelPrice(price)
+	}
+	return config.ModelPrice{Provider: strings.ToLower(provider), Model: strings.ToLower(model), PricingUnit: "character_1m", SourceCurrency: "CNY", SourceUnit: "per_1m_characters", ExchangeRateToRMB: 1}
+}
+
+func selectVideoPricingRule(price config.ModelPrice, resolution string, inputContainsVideo bool) (config.VideoPricingRule, bool) {
+	resolution = strings.ToLower(strings.TrimSpace(resolution))
+	if resolution == "" || resolution == "adaptive" {
+		resolution = "720p"
+	}
+	var fallback config.VideoPricingRule
+	fallbackSet := false
+	for _, rule := range price.VideoPricingRules {
+		ruleResolution := strings.ToLower(strings.TrimSpace(rule.Resolution))
+		resolutionMatches := ruleResolution == "" || ruleResolution == resolution
+		if !resolutionMatches {
+			continue
+		}
+		if rule.InputContainsVideo != nil && *rule.InputContainsVideo != inputContainsVideo {
+			continue
+		}
+		if rule.InputContainsVideo != nil {
+			return rule, true
+		}
+		if !fallbackSet {
+			fallback = rule
+			fallbackSet = true
+		}
+	}
+	return fallback, fallbackSet
+}
+
 func applyPriceSnapshot(log *models.APIUsageLog, price config.ModelPrice) {
 	if log == nil {
 		return
@@ -471,6 +985,10 @@ func hasTokenPrice(price config.ModelPrice) bool {
 
 func hasImagePrice(price config.ModelPrice) bool {
 	return hasTokenPrice(price) || price.ImageUnitPrice > 0 || price.SourceImagePrice > 0
+}
+
+func hasCharacterPrice(price config.ModelPrice) bool {
+	return price.PricingUnit == "character_1m" || strings.Contains(strings.ToLower(price.SourceUnit), "character")
 }
 
 func resolveModelPrice(price config.ModelPrice) config.ModelPrice {
@@ -505,11 +1023,31 @@ func convertSourceUnitToRMB(sourceUnit string, price, rate float64) float64 {
 	switch strings.ToLower(strings.TrimSpace(sourceUnit)) {
 	case "per_1m_tokens":
 		return price * rate / 1000.0
+	case "per_1m_characters_source", "per_1m_characters_input_output", "per_1m_characters", "per_1m_chars":
+		return price * rate
 	case "per_1k_tokens", "per_image", "per_request", "per_video_second":
 		return price * rate
 	default:
 		return price * rate
 	}
+}
+
+func normalizeTranslationUsageModel(model string) string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return ""
+	}
+	if idx := strings.LastIndex(model, "/models/"); idx >= 0 {
+		return model[idx+len("/models/"):]
+	}
+	return model
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func exchangeRateToRMB(currency string) float64 {

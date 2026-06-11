@@ -6,6 +6,7 @@ import type {
   AdminUsageConversationsResponse,
   AdminUsageLogsResponse,
   AdminUsageModelsResponse,
+  AdminUsageModulesResponse,
   AdminUsageSummary,
   AdminUsageUserDetail,
   AdminUsageUsersResponse,
@@ -79,6 +80,27 @@ export async function adminFetch<T>(path: string, options: RequestInit = {}): Pr
   }
 }
 
+const adminGetCache = new Map<string, { expiresAt: number; value?: unknown; promise?: Promise<unknown> }>();
+const ADMIN_USAGE_CACHE_TTL_MS = 2500;
+
+function cachedAdminFetch<T>(path: string, ttlMs = ADMIN_USAGE_CACHE_TTL_MS): Promise<T> {
+  const now = Date.now();
+  const cached = adminGetCache.get(path);
+  if (cached && cached.expiresAt > now) {
+    if (cached.value !== undefined) return Promise.resolve(cached.value as T);
+    if (cached.promise) return cached.promise as Promise<T>;
+  }
+  const promise = adminFetch<T>(path).then((value) => {
+    adminGetCache.set(path, { expiresAt: Date.now() + ttlMs, value });
+    return value;
+  }).catch((error) => {
+    adminGetCache.delete(path);
+    throw error;
+  });
+  adminGetCache.set(path, { expiresAt: now + ttlMs, promise });
+  return promise;
+}
+
 function qs(params: Record<string, string | number | undefined>) {
   const search = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -105,31 +127,95 @@ export function updateAdminUser(id: number, patch: Partial<Pick<AdminUser, "role
 }
 
 export function getAdminUsageSummary(range = "7d") {
-  return adminFetch<AdminUsageSummary>(`/usage/summary${qs({ range })}`);
+  return cachedAdminFetch<AdminUsageSummary>(`/usage/summary${qs({ range })}`);
 }
 
-export function getAdminUsageLogs(params: { page?: number; pageSize?: number; range?: string; status?: string; provider?: string; service?: string; model?: string; userId?: number; conversationId?: number } = {}) {
-  return adminFetch<AdminUsageLogsResponse>(`/usage/logs${qs({ page: params.page, page_size: params.pageSize, range: params.range, status: params.status, provider: params.provider, service: params.service, model: params.model, user_id: params.userId, conversation_id: params.conversationId })}`);
+export interface AdminUsageLogParams {
+  page?: number;
+  pageSize?: number;
+  range?: string;
+  startDate?: string;
+  endDate?: string;
+  module?: string;
+  feature?: string;
+  operation?: string;
+  status?: string;
+  provider?: string;
+  service?: string;
+  model?: string;
+  userId?: number;
+  guestId?: string;
+  conversationId?: number;
+  messageId?: number;
+  taskId?: number;
+  workspaceId?: number;
+  notebookId?: number;
+  resourceType?: string;
+  resourceId?: number;
+  requestId?: string;
+  estimated?: string;
+  minCost?: number;
+  maxCost?: number;
+  q?: string;
+  sort?: string;
+  order?: "asc" | "desc";
+}
+
+export function getAdminUsageLogs(params: AdminUsageLogParams = {}) {
+  return cachedAdminFetch<AdminUsageLogsResponse>(`/usage/logs${qs({
+    page: params.page,
+    page_size: params.pageSize,
+    range: params.range,
+    start_date: params.startDate,
+    end_date: params.endDate,
+    module: params.module,
+    feature: params.feature,
+    operation: params.operation,
+    status: params.status,
+    provider: params.provider,
+    service: params.service,
+    model: params.model,
+    user_id: params.userId,
+    guest_id: params.guestId,
+    conversation_id: params.conversationId,
+    message_id: params.messageId,
+    task_id: params.taskId,
+    workspace_id: params.workspaceId,
+    notebook_id: params.notebookId,
+    resource_type: params.resourceType,
+    resource_id: params.resourceId,
+    request_id: params.requestId,
+    estimated: params.estimated,
+    min_cost: params.minCost,
+    max_cost: params.maxCost,
+    q: params.q,
+    sort: params.sort,
+    order: params.order,
+  })}`);
 }
 
 export function getAdminUsageUsers(params: { page?: number; pageSize?: number; range?: string; service?: string; provider?: string; model?: string } = {}) {
-  return adminFetch<AdminUsageUsersResponse>(`/usage/users${qs({ page: params.page, page_size: params.pageSize, range: params.range, service: params.service, provider: params.provider, model: params.model })}`);
+  return cachedAdminFetch<AdminUsageUsersResponse>(`/usage/users${qs({ page: params.page, page_size: params.pageSize, range: params.range, service: params.service, provider: params.provider, model: params.model })}`);
 }
 
 export function getAdminUsageUserDetail(id: number, params: { range?: string } = {}) {
-  return adminFetch<AdminUsageUserDetail>(`/usage/users/${id}${qs({ range: params.range })}`);
+  return cachedAdminFetch<AdminUsageUserDetail>(`/usage/users/${id}${qs({ range: params.range })}`);
 }
 
 export function getAdminUsageModels(params: { range?: string; service?: string; provider?: string; userId?: number; conversationId?: number; limit?: number } = {}) {
-  return adminFetch<AdminUsageModelsResponse>(`/usage/models${qs({ range: params.range, service: params.service, provider: params.provider, user_id: params.userId, conversation_id: params.conversationId, limit: params.limit })}`);
+  return cachedAdminFetch<AdminUsageModelsResponse>(`/usage/models${qs({ range: params.range, service: params.service, provider: params.provider, user_id: params.userId, conversation_id: params.conversationId, limit: params.limit })}`);
+}
+
+export function getAdminUsageModules(params: { range?: string; module?: string; feature?: string; operation?: string; service?: string; provider?: string; model?: string; limit?: number } = {}) {
+  return cachedAdminFetch<AdminUsageModulesResponse>(`/usage/modules${qs({ range: params.range, module: params.module, feature: params.feature, operation: params.operation, service: params.service, provider: params.provider, model: params.model, limit: params.limit })}`);
 }
 
 export function getAdminUsageConversations(params: { page?: number; pageSize?: number; range?: string; userId?: number; service?: string; provider?: string; model?: string } = {}) {
-  return adminFetch<AdminUsageConversationsResponse>(`/usage/conversations${qs({ page: params.page, page_size: params.pageSize, range: params.range, user_id: params.userId, service: params.service, provider: params.provider, model: params.model })}`);
+  return cachedAdminFetch<AdminUsageConversationsResponse>(`/usage/conversations${qs({ page: params.page, page_size: params.pageSize, range: params.range, user_id: params.userId, service: params.service, provider: params.provider, model: params.model })}`);
 }
 
 export function getAdminUsageConversationDetail(id: number, params: { range?: string } = {}) {
-  return adminFetch<AdminUsageConversationDetail>(`/usage/conversations/${id}${qs({ range: params.range })}`);
+  return cachedAdminFetch<AdminUsageConversationDetail>(`/usage/conversations/${id}${qs({ range: params.range })}`);
 }
 
 export function getAdminModels() {

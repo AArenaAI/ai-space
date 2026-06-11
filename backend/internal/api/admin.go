@@ -23,17 +23,29 @@ func NewAdminHandler(db *gorm.DB) *AdminHandler {
 	return &AdminHandler{db: db}
 }
 
+type adminUserUsageSummary struct {
+	Requests       int64      `json:"requests"`
+	Failures       int64      `json:"failures"`
+	CostRMB        float64    `json:"cost_rmb"`
+	TotalTokens    int64      `json:"total_tokens"`
+	ImageCount     int64      `json:"image_count"`
+	CharacterCount int64      `json:"character_count"`
+	VideoSeconds   int64      `json:"video_seconds"`
+	LastUsedAt     *time.Time `json:"last_used_at,omitempty"`
+}
+
 type adminUserResponse struct {
-	ID              uint      `json:"id"`
-	Email           string    `json:"email"`
-	Name            string    `json:"name"`
-	Role            string    `json:"role"`
-	PlanTier        string    `json:"plan_tier"`
-	BasicCredits    int       `json:"basic_credits"`
-	AdvancedCredits int       `json:"advanced_credits"`
-	EliteCredits    int       `json:"elite_credits"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID              uint                  `json:"id"`
+	Email           string                `json:"email"`
+	Name            string                `json:"name"`
+	Role            string                `json:"role"`
+	PlanTier        string                `json:"plan_tier"`
+	BasicCredits    int                   `json:"basic_credits"`
+	AdvancedCredits int                   `json:"advanced_credits"`
+	EliteCredits    int                   `json:"elite_credits"`
+	CreatedAt       time.Time             `json:"created_at"`
+	UpdatedAt       time.Time             `json:"updated_at"`
+	Usage30D        adminUserUsageSummary `json:"usage_30d"`
 }
 
 type adminUsageSummaryResponse struct {
@@ -71,20 +83,36 @@ type adminModelResponse struct {
 	Capabilities []string `json:"capabilities"`
 }
 
+type adminTaskUsageSummary struct {
+	Requests         int64      `json:"requests"`
+	Failures         int64      `json:"failures"`
+	CostRMB          float64    `json:"cost_rmb"`
+	PromptTokens     int64      `json:"prompt_tokens"`
+	CompletionTokens int64      `json:"completion_tokens"`
+	TotalTokens      int64      `json:"total_tokens"`
+	ImageCount       int64      `json:"image_count"`
+	CharacterCount   int64      `json:"character_count"`
+	VideoSeconds     int64      `json:"video_seconds"`
+	AudioSeconds     int64      `json:"audio_seconds"`
+	LastUsageAt      *time.Time `json:"last_usage_at,omitempty"`
+}
+
 type adminTaskResponse struct {
-	ID                 uint       `json:"id"`
-	ResponseID         string     `json:"response_id"`
-	UserID             uint       `json:"user_id"`
-	GuestID            string     `json:"guest_id"`
-	ConversationID     uint       `json:"conversation_id"`
-	AssistantMessageID uint       `json:"assistant_message_id"`
-	Model              string     `json:"model"`
-	Provider           string     `json:"provider"`
-	Status             string     `json:"status"`
-	ErrorMessage       string     `json:"error_message,omitempty"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
-	CompletedAt        *time.Time `json:"completed_at,omitempty"`
+	ID                 uint                  `json:"id"`
+	ResponseID         string                `json:"response_id"`
+	UserID             uint                  `json:"user_id"`
+	GuestID            string                `json:"guest_id"`
+	ConversationID     uint                  `json:"conversation_id"`
+	AssistantMessageID uint                  `json:"assistant_message_id"`
+	Model              string                `json:"model"`
+	Provider           string                `json:"provider"`
+	Status             string                `json:"status"`
+	ErrorMessage       string                `json:"error_message,omitempty"`
+	Usage              adminTaskUsageSummary `json:"usage"`
+	RecentUsageLogs    []models.APIUsageLog  `json:"recent_usage_logs,omitempty"`
+	CreatedAt          time.Time             `json:"created_at"`
+	UpdatedAt          time.Time             `json:"updated_at"`
+	CompletedAt        *time.Time            `json:"completed_at,omitempty"`
 }
 
 func toAdminUserResponse(user models.User) adminUserResponse {
@@ -104,6 +132,24 @@ func toAdminUserResponse(user models.User) adminUserResponse {
 		CreatedAt:       user.CreatedAt,
 		UpdatedAt:       user.UpdatedAt,
 	}
+}
+
+func (h *AdminHandler) userUsageSummary(userID uint, start time.Time) adminUserUsageSummary {
+	var out adminUserUsageSummary
+	var lastUsed time.Time
+	if err := h.db.Model(&models.APIUsageLog{}).Where("user_id = ? AND created_at >= ?", userID, start).Select("COUNT(*) AS requests, COALESCE(SUM(CASE WHEN status <> 'success' THEN 1 ELSE 0 END), 0) AS failures, COALESCE(SUM(total_cost_rmb), 0) AS cost_rmb, COALESCE(SUM(total_tokens), 0) AS total_tokens, COALESCE(SUM(image_count), 0) AS image_count, COALESCE(SUM(character_count), 0) AS character_count, COALESCE(SUM(video_seconds), 0) AS video_seconds, MAX(created_at) AS last_used_at").Scan(&struct {
+		Requests       *int64
+		Failures       *int64
+		CostRMB        *float64
+		TotalTokens    *int64
+		ImageCount     *int64
+		CharacterCount *int64
+		VideoSeconds   *int64
+		LastUsedAt     *time.Time
+	}{Requests: &out.Requests, Failures: &out.Failures, CostRMB: &out.CostRMB, TotalTokens: &out.TotalTokens, ImageCount: &out.ImageCount, CharacterCount: &out.CharacterCount, VideoSeconds: &out.VideoSeconds, LastUsedAt: &lastUsed}).Error; err == nil && !lastUsed.IsZero() {
+		out.LastUsedAt = &lastUsed
+	}
+	return out
 }
 
 func (h *AdminHandler) Me(c *gin.Context) {
@@ -183,8 +229,11 @@ func (h *AdminHandler) ListUsers(c *gin.Context) {
 	}
 
 	items := make([]adminUserResponse, 0, len(users))
+	usageStart := time.Now().AddDate(0, 0, -30)
 	for _, user := range users {
-		items = append(items, toAdminUserResponse(user))
+		item := toAdminUserResponse(user)
+		item.Usage30D = h.userUsageSummary(user.ID, usageStart)
+		items = append(items, item)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"users": items, "total": total, "page": page, "page_size": pageSize})
@@ -369,19 +418,27 @@ func (h *AdminHandler) UsageSummary(c *gin.Context) {
 
 func (h *AdminHandler) UsageLogs(c *gin.Context) {
 	page := parsePositiveInt(c.Query("page"), 1)
-	pageSize := parsePositiveInt(c.Query("page_size"), 20)
-	if pageSize > 100 {
-		pageSize = 100
+	pageSize := parsePositiveInt(c.Query("page_size"), 50)
+	if pageSize > 200 {
+		pageSize = 200
 	}
-	query := h.usageQuery(c)
 	var total int64
-	query.Count(&total)
+	if err := h.usageQuery(c).Count(&total).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "统计用量日志失败"})
+		return
+	}
+	summary := h.usageAggregate(h.usageQuery(c))
 	var logs []models.APIUsageLog
-	if err := query.Order("created_at DESC").Limit(pageSize).Offset((page - 1) * pageSize).Find(&logs).Error; err != nil {
+	sortColumn := usageSortColumn(c.Query("sort"))
+	order := "DESC"
+	if strings.EqualFold(strings.TrimSpace(c.Query("order")), "asc") {
+		order = "ASC"
+	}
+	if err := h.usageQuery(c).Order(sortColumn + " " + order).Limit(pageSize).Offset((page - 1) * pageSize).Find(&logs).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询用量日志失败"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"logs": logs, "total": total, "page": page, "page_size": pageSize})
+	c.JSON(http.StatusOK, gin.H{"logs": logs, "total": total, "page": page, "page_size": pageSize, "summary": summary})
 }
 
 func (h *AdminHandler) UsageUsers(c *gin.Context) {
@@ -444,6 +501,35 @@ func (h *AdminHandler) UsageModels(c *gin.Context) {
 		limit = 300
 	}
 	c.JSON(http.StatusOK, gin.H{"models": h.usageModelRows(c, limit)})
+}
+
+func (h *AdminHandler) UsageModules(c *gin.Context) {
+	limit := parsePositiveInt(c.Query("limit"), 120)
+	if limit > 300 {
+		limit = 300
+	}
+	items := []gin.H{}
+	rows, err := h.usageQuery(c).
+		Select("COALESCE(module, '') AS module, COALESCE(feature, '') AS feature, COALESCE(operation, '') AS operation, COALESCE(service, '') AS service, COUNT(*) AS requests, COALESCE(SUM(CASE WHEN status <> 'success' THEN 1 ELSE 0 END), 0) AS failures, COALESCE(SUM(total_cost_rmb), 0) AS cost_rmb, COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens, COALESCE(SUM(completion_tokens), 0) AS completion_tokens, COALESCE(SUM(total_tokens), 0) AS total_tokens, COALESCE(SUM(image_count), 0) AS image_count, COALESCE(SUM(character_count), 0) AS character_count, COALESCE(SUM(video_seconds), 0) AS video_seconds, MAX(created_at) AS last_used_at").
+		Group("module, feature, operation, service").
+		Order("cost_rmb DESC").
+		Limit(limit).
+		Rows()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询产品模块用量失败"})
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var module, feature, operation, service string
+		var requests, failures, prompt, completion, tokens, images, characters, videoSeconds int64
+		var cost float64
+		var lastUsed time.Time
+		if err := rows.Scan(&module, &feature, &operation, &service, &requests, &failures, &cost, &prompt, &completion, &tokens, &images, &characters, &videoSeconds, &lastUsed); err == nil {
+			items = append(items, gin.H{"module": module, "feature": feature, "operation": operation, "service": service, "requests": requests, "failures": failures, "cost_rmb": cost, "prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": tokens, "image_count": images, "character_count": characters, "video_seconds": videoSeconds, "last_used_at": lastUsed})
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"modules": items})
 }
 
 func (h *AdminHandler) UsageConversations(c *gin.Context) {
@@ -521,7 +607,7 @@ func (h *AdminHandler) Tasks(c *gin.Context) {
 		pageSize = 100
 	}
 	query := h.db.Model(&models.AIBackgroundTask{})
-	if status := strings.TrimSpace(c.Query("status")); status != "" {
+	if status := strings.TrimSpace(c.Query("status")); status != "" && !strings.EqualFold(status, "all") {
 		query = query.Where("status = ?", status)
 	}
 	if provider := strings.TrimSpace(c.Query("provider")); provider != "" {
@@ -533,6 +619,9 @@ func (h *AdminHandler) Tasks(c *gin.Context) {
 	if uid := parsePositiveInt(c.Query("user_id"), 0); uid > 0 {
 		query = query.Where("user_id = ?", uid)
 	}
+	if requestID := strings.TrimSpace(c.Query("request_id")); requestID != "" {
+		query = query.Where("response_id = ?", requestID)
+	}
 	var total int64
 	query.Count(&total)
 	var tasks []models.AIBackgroundTask
@@ -540,6 +629,7 @@ func (h *AdminHandler) Tasks(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询任务失败"})
 		return
 	}
+	usageByTask, recentLogsByTask := h.taskUsageBatch(tasks)
 	items := make([]adminTaskResponse, 0, len(tasks))
 	for _, task := range tasks {
 		items = append(items, adminTaskResponse{
@@ -553,6 +643,8 @@ func (h *AdminHandler) Tasks(c *gin.Context) {
 			Provider:           task.Provider,
 			Status:             task.Status,
 			ErrorMessage:       task.ErrorMessage,
+			Usage:              usageByTask[task.ID],
+			RecentUsageLogs:    recentLogsByTask[task.ID],
 			CreatedAt:          task.CreatedAt,
 			UpdatedAt:          task.UpdatedAt,
 			CompletedAt:        task.CompletedAt,
@@ -565,6 +657,92 @@ func (h *AdminHandler) Tasks(c *gin.Context) {
 		"page_size": pageSize,
 		"summary":   h.taskSummary(),
 	})
+}
+
+func (h *AdminHandler) taskUsageBatch(tasks []models.AIBackgroundTask) (map[uint]adminTaskUsageSummary, map[uint][]models.APIUsageLog) {
+	usageByTask := make(map[uint]adminTaskUsageSummary, len(tasks))
+	recentLogsByTask := make(map[uint][]models.APIUsageLog, len(tasks))
+	if len(tasks) == 0 {
+		return usageByTask, recentLogsByTask
+	}
+
+	taskIDs := make([]uint, 0, len(tasks))
+	responseIDs := make([]string, 0, len(tasks))
+	messageIDs := make([]uint, 0, len(tasks))
+	byResponseID := map[string][]uint{}
+	byMessageID := map[uint][]uint{}
+	for _, task := range tasks {
+		taskIDs = append(taskIDs, task.ID)
+		if task.ResponseID != "" {
+			responseIDs = append(responseIDs, task.ResponseID)
+			byResponseID[task.ResponseID] = append(byResponseID[task.ResponseID], task.ID)
+		}
+		if task.AssistantMessageID > 0 {
+			messageIDs = append(messageIDs, task.AssistantMessageID)
+			byMessageID[task.AssistantMessageID] = append(byMessageID[task.AssistantMessageID], task.ID)
+		}
+	}
+
+	query := h.db.Model(&models.APIUsageLog{})
+	clauses := []string{"task_id IN ?"}
+	args := []any{taskIDs}
+	if len(responseIDs) > 0 {
+		clauses = append(clauses, "request_id IN ?")
+		args = append(args, responseIDs)
+	}
+	if len(messageIDs) > 0 {
+		clauses = append(clauses, "message_id IN ?")
+		args = append(args, messageIDs)
+	}
+	var logs []models.APIUsageLog
+	if err := query.Where("("+strings.Join(clauses, " OR ")+")", args...).Order("created_at DESC").Find(&logs).Error; err != nil {
+		return usageByTask, recentLogsByTask
+	}
+
+	seenByTask := make(map[uint]map[uint]bool, len(tasks))
+	for _, log := range logs {
+		matchedTaskIDs := make([]uint, 0, 3)
+		if log.TaskID > 0 {
+			matchedTaskIDs = append(matchedTaskIDs, log.TaskID)
+		}
+		if log.RequestID != "" {
+			matchedTaskIDs = append(matchedTaskIDs, byResponseID[log.RequestID]...)
+		}
+		if log.MessageID > 0 {
+			matchedTaskIDs = append(matchedTaskIDs, byMessageID[log.MessageID]...)
+		}
+		for _, taskID := range matchedTaskIDs {
+			if seenByTask[taskID] == nil {
+				seenByTask[taskID] = map[uint]bool{}
+			}
+			if seenByTask[taskID][log.ID] {
+				continue
+			}
+			seenByTask[taskID][log.ID] = true
+			summary := usageByTask[taskID]
+			summary.Requests++
+			if log.Status != "success" {
+				summary.Failures++
+			}
+			summary.CostRMB += log.TotalCostRMB
+			summary.PromptTokens += int64(log.PromptTokens)
+			summary.CompletionTokens += int64(log.CompletionTokens)
+			summary.TotalTokens += int64(log.TotalTokens)
+			summary.ImageCount += int64(log.ImageCount)
+			summary.CharacterCount += int64(log.CharacterCount)
+			summary.VideoSeconds += int64(log.VideoSeconds)
+			summary.AudioSeconds += int64(log.AudioSeconds)
+			createdAt := log.CreatedAt
+			if summary.LastUsageAt == nil || createdAt.After(*summary.LastUsageAt) {
+				summary.LastUsageAt = &createdAt
+			}
+			usageByTask[taskID] = summary
+			if len(recentLogsByTask[taskID]) < 5 {
+				recentLogsByTask[taskID] = append(recentLogsByTask[taskID], log)
+			}
+		}
+	}
+	return usageByTask, recentLogsByTask
 }
 
 func (h *AdminHandler) findUserByParam(c *gin.Context) (models.User, bool) {
@@ -620,8 +798,27 @@ func mustAdminJSON(value any) string {
 
 func (h *AdminHandler) usageQuery(c *gin.Context) *gorm.DB {
 	query := h.db.Model(&models.APIUsageLog{})
-	if rangeRaw := strings.TrimSpace(c.Query("range")); rangeRaw != "" {
+	if rangeRaw := strings.TrimSpace(c.Query("range")); rangeRaw != "" && !strings.EqualFold(rangeRaw, "all") {
 		query = query.Where("api_usage_logs.created_at >= ?", parseRangeStart(rangeRaw))
+	}
+	if startRaw := strings.TrimSpace(c.Query("start_date")); startRaw != "" {
+		if t, err := time.Parse("2006-01-02", startRaw); err == nil {
+			query = query.Where("api_usage_logs.created_at >= ?", t)
+		}
+	}
+	if endRaw := strings.TrimSpace(c.Query("end_date")); endRaw != "" {
+		if t, err := time.Parse("2006-01-02", endRaw); err == nil {
+			query = query.Where("api_usage_logs.created_at < ?", t.Add(24*time.Hour))
+		}
+	}
+	if module := strings.TrimSpace(c.Query("module")); module != "" {
+		query = query.Where("api_usage_logs.module = ?", module)
+	}
+	if feature := strings.TrimSpace(c.Query("feature")); feature != "" {
+		query = query.Where("api_usage_logs.feature = ?", feature)
+	}
+	if operation := strings.TrimSpace(c.Query("operation")); operation != "" {
+		query = query.Where("api_usage_logs.operation = ?", operation)
 	}
 	if service := strings.TrimSpace(c.Query("service")); service != "" {
 		query = query.Where("api_usage_logs.service = ?", service)
@@ -638,24 +835,64 @@ func (h *AdminHandler) usageQuery(c *gin.Context) *gorm.DB {
 	if uid := parsePositiveInt(c.Query("user_id"), 0); uid > 0 {
 		query = query.Where("api_usage_logs.user_id = ?", uid)
 	}
+	if guestID := strings.TrimSpace(c.Query("guest_id")); guestID != "" {
+		query = query.Where("api_usage_logs.guest_id = ?", guestID)
+	}
 	if conversationID := parsePositiveInt(c.Query("conversation_id"), 0); conversationID > 0 {
 		query = query.Where("api_usage_logs.conversation_id = ?", conversationID)
+	}
+	if messageID := parsePositiveInt(c.Query("message_id"), 0); messageID > 0 {
+		query = query.Where("api_usage_logs.message_id = ?", messageID)
+	}
+	if taskID := parsePositiveInt(c.Query("task_id"), 0); taskID > 0 {
+		query = query.Where("api_usage_logs.task_id = ?", taskID)
+	}
+	if workspaceID := parsePositiveInt(c.Query("workspace_id"), 0); workspaceID > 0 {
+		query = query.Where("api_usage_logs.workspace_id = ?", workspaceID)
+	}
+	if notebookID := parsePositiveInt(c.Query("notebook_id"), 0); notebookID > 0 {
+		query = query.Where("api_usage_logs.notebook_id = ?", notebookID)
+	}
+	if resourceType := strings.TrimSpace(c.Query("resource_type")); resourceType != "" {
+		query = query.Where("api_usage_logs.resource_type = ?", resourceType)
+	}
+	if resourceID := parsePositiveInt(c.Query("resource_id"), 0); resourceID > 0 {
+		query = query.Where("api_usage_logs.resource_id = ?", resourceID)
+	}
+	if requestID := strings.TrimSpace(c.Query("request_id")); requestID != "" {
+		query = query.Where("api_usage_logs.request_id = ?", requestID)
+	}
+	if estimated := strings.TrimSpace(c.Query("estimated")); estimated != "" {
+		query = query.Where("api_usage_logs.estimated = ?", strings.EqualFold(estimated, "true") || estimated == "1")
+	}
+	if minCost := parseFloatQuery(c.Query("min_cost")); minCost != nil {
+		query = query.Where("api_usage_logs.total_cost_rmb >= ?", *minCost)
+	}
+	if maxCost := parseFloatQuery(c.Query("max_cost")); maxCost != nil {
+		query = query.Where("api_usage_logs.total_cost_rmb <= ?", *maxCost)
+	}
+	if q := strings.TrimSpace(c.Query("q")); q != "" {
+		like := "%" + q + "%"
+		query = query.Where("api_usage_logs.model LIKE ? OR api_usage_logs.request_id LIKE ? OR api_usage_logs.raw_usage_json LIKE ? OR api_usage_logs.error_message LIKE ?", like, like, like, like)
 	}
 	return query
 }
 
 func (h *AdminHandler) usageAggregate(query *gorm.DB) gin.H {
 	var out struct {
-		Requests     int64
-		Failures     int64
-		CostRMB      float64
-		TotalTokens  int64
-		PromptTokens int64
-		OutputTokens int64
-		ImageCount   int64
+		Requests       int64
+		Failures       int64
+		CostRMB        float64
+		TotalTokens    int64
+		PromptTokens   int64
+		OutputTokens   int64
+		ImageCount     int64
+		CharacterCount int64
+		VideoSeconds   int64
+		AudioSeconds   int64
 	}
-	query.Select("COUNT(*) AS requests, COALESCE(SUM(CASE WHEN status <> 'success' THEN 1 ELSE 0 END), 0) AS failures, COALESCE(SUM(total_cost_rmb), 0) AS cost_rmb, COALESCE(SUM(total_tokens), 0) AS total_tokens, COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens, COALESCE(SUM(completion_tokens), 0) AS output_tokens, COALESCE(SUM(image_count), 0) AS image_count").Scan(&out)
-	return gin.H{"requests": out.Requests, "failures": out.Failures, "cost_rmb": out.CostRMB, "total_tokens": out.TotalTokens, "prompt_tokens": out.PromptTokens, "completion_tokens": out.OutputTokens, "image_count": out.ImageCount}
+	query.Select("COUNT(*) AS requests, COALESCE(SUM(CASE WHEN status <> 'success' THEN 1 ELSE 0 END), 0) AS failures, COALESCE(SUM(total_cost_rmb), 0) AS cost_rmb, COALESCE(SUM(total_tokens), 0) AS total_tokens, COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens, COALESCE(SUM(completion_tokens), 0) AS output_tokens, COALESCE(SUM(image_count), 0) AS image_count, COALESCE(SUM(character_count), 0) AS character_count, COALESCE(SUM(video_seconds), 0) AS video_seconds, COALESCE(SUM(audio_seconds), 0) AS audio_seconds").Scan(&out)
+	return gin.H{"requests": out.Requests, "failures": out.Failures, "cost_rmb": out.CostRMB, "total_tokens": out.TotalTokens, "prompt_tokens": out.PromptTokens, "completion_tokens": out.OutputTokens, "image_count": out.ImageCount, "character_count": out.CharacterCount, "video_seconds": out.VideoSeconds, "audio_seconds": out.AudioSeconds}
 }
 
 func (h *AdminHandler) usageGrouped(c *gin.Context, column string, limit int, extraWhere string, args ...any) []gin.H {
@@ -865,6 +1102,35 @@ func parsePositiveInt(raw string, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+func parseFloatQuery(raw string) *float64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return nil
+	}
+	return &value
+}
+
+func usageSortColumn(raw string) string {
+	switch strings.TrimSpace(raw) {
+	case "cost":
+		return "total_cost_rmb"
+	case "tokens":
+		return "total_tokens"
+	case "characters":
+		return "character_count"
+	case "images":
+		return "image_count"
+	case "created_at", "":
+		return "created_at"
+	default:
+		return "created_at"
+	}
 }
 
 func parseRangeStart(raw string) time.Time {

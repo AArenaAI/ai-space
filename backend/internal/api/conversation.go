@@ -2,6 +2,7 @@ package api
 
 import (
 	"aipool-backend/internal/models"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -49,7 +50,8 @@ func (h *ConversationHandler) List(c *gin.Context) {
 	workspaceIDStr := c.Query("workspace_id")
 
 	var total int64
-	countQuery := h.db.Model(&models.Conversation{}).Where("user_id = ? AND deleted_at IS NULL", userID)
+	countQuery := h.db.Model(&models.Conversation{}).Where("user_id = ? AND deleted_at IS NULL", userID).
+		Where("NOT EXISTS (SELECT 1 FROM notebook_conversations WHERE notebook_conversations.conversation_id = conversations.id)")
 	if workspaceIDStr != "" {
 		if wid, err := strconv.ParseUint(workspaceIDStr, 10, 32); err == nil {
 			countQuery = countQuery.Where("workspace_id = ?", uint(wid))
@@ -69,7 +71,8 @@ func (h *ConversationHandler) List(c *gin.Context) {
 	query := h.db.Table("conversations").
 		Select("conversations.*, (SELECT model FROM messages WHERE messages.conversation_id = conversations.id AND messages.role = 'assistant' AND messages.model <> '' ORDER BY messages.created_at DESC, messages.id DESC LIMIT 1) as latest_model").
 		Where("conversations.user_id = ?", userID).
-		Where("conversations.deleted_at IS NULL")
+		Where("conversations.deleted_at IS NULL").
+		Where("NOT EXISTS (SELECT 1 FROM notebook_conversations WHERE notebook_conversations.conversation_id = conversations.id)")
 
 	if workspaceIDStr != "" {
 		if wid, err := strconv.ParseUint(workspaceIDStr, 10, 32); err == nil {
@@ -120,6 +123,7 @@ func (h *ConversationHandler) Search(c *gin.Context) {
 		Select("conversations.id, conversations.title, conversations.model, conversations.skill_key, conversations.pinned, conversations.created_at, conversations.updated_at, "+titleMatchSQL+", "+matchedContentSQL+", "+matchedRoleSQL+", "+matchedMessageIDSQL, like, like, like, like).
 		Where("conversations.user_id = ?", userID).
 		Where("conversations.deleted_at IS NULL").
+		Where("NOT EXISTS (SELECT 1 FROM notebook_conversations WHERE notebook_conversations.conversation_id = conversations.id)").
 		Where("conversations.title LIKE ? OR EXISTS (SELECT 1 FROM messages WHERE messages.conversation_id = conversations.id AND messages.deleted_at IS NULL AND messages.content LIKE ?)", like, like)
 
 	if workspaceIDStr := c.Query("workspace_id"); workspaceIDStr != "" {
@@ -254,10 +258,17 @@ func (h *ConversationHandler) Get(c *gin.Context) {
 		msgTail = t
 	}
 
+	var total int64
+	h.db.Model(&models.Message{}).Where("conversation_id = ?", conv.ID).Count(&total)
+	snapshotVersion := fmt.Sprintf("%d:%d:%d", conv.ID, total, conv.UpdatedAt.UnixNano())
+	c.Header("ETag", snapshotVersion)
+	if c.GetHeader("If-None-Match") == snapshotVersion {
+		c.Status(http.StatusNotModified)
+		return
+	}
+
 	msgQuery := h.db.Where("conversation_id = ?", conv.ID).Order("created_at asc, id asc").Preload("MessageFiles")
 	if msgTail > 0 {
-		var total int64
-		h.db.Model(&models.Message{}).Where("conversation_id = ?", conv.ID).Count(&total)
 		offset := int(total) - msgTail
 		if offset < 0 {
 			offset = 0
@@ -280,7 +291,28 @@ func (h *ConversationHandler) Get(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, conv)
+	response := gin.H{
+		"id":               conv.ID,
+		"user_id":          conv.UserID,
+		"workspace_id":     conv.WorkspaceID,
+		"title":            conv.Title,
+		"model":            conv.Model,
+		"compare":          conv.Compare,
+		"compare_models":   conv.CompareModels,
+		"skill_key":        conv.SkillKey,
+		"pinned":           conv.Pinned,
+		"created_at":       conv.CreatedAt,
+		"updated_at":       conv.UpdatedAt,
+		"messages":         conv.Messages,
+		"total":            total,
+		"has_more":         len(conv.Messages) < int(total),
+		"snapshot_version": snapshotVersion,
+	}
+	if status := h.buildLastAssistantStatusPayload(conv.Messages); status != nil {
+		response["last_assistant_status"] = status
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 func (h *ConversationHandler) Delete(c *gin.Context) {
@@ -300,8 +332,10 @@ func (h *ConversationHandler) Update(c *gin.Context) {
 	id := c.Param("id")
 
 	var req struct {
-		Title  string `json:"title"`
-		Pinned *bool  `json:"pinned,omitempty"`
+		Title         string  `json:"title"`
+		Pinned        *bool   `json:"pinned,omitempty"`
+		Compare       *bool   `json:"compare,omitempty"`
+		CompareModels *string `json:"compare_models,omitempty"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -321,6 +355,12 @@ func (h *ConversationHandler) Update(c *gin.Context) {
 	}
 	if req.Pinned != nil {
 		updates["pinned"] = *req.Pinned
+	}
+	if req.Compare != nil {
+		updates["compare"] = *req.Compare
+	}
+	if req.CompareModels != nil {
+		updates["compare_models"] = *req.CompareModels
 	}
 
 	if len(updates) > 0 {
@@ -410,6 +450,56 @@ func (h *ConversationHandler) GetMessages(c *gin.Context) {
 		"limit":    limit,
 		"offset":   offset,
 	})
+}
+
+func (h *ConversationHandler) buildLastAssistantStatusPayload(messages []models.Message) gin.H {
+	var lastAssistant *models.Message
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "assistant" {
+			lastAssistant = &messages[i]
+			break
+		}
+	}
+	if lastAssistant == nil {
+		return nil
+	}
+
+	var task models.AIBackgroundTask
+	status := ""
+	var taskPayload gin.H
+	if err := h.db.Where("assistant_message_id = ?", lastAssistant.ID).Order("updated_at DESC, id DESC").First(&task).Error; err == nil {
+		status = task.Status
+		lastSequence := task.LastSequenceNumber
+		if lastSequence == 0 {
+			var lastEvent models.AIBackgroundTaskEvent
+			if err := h.db.Where("task_id = ?", task.ID).Order("sequence_number DESC").First(&lastEvent).Error; err == nil {
+				lastSequence = lastEvent.SequenceNumber
+			}
+		}
+		taskPayload = gin.H{
+			"id":                   task.ID,
+			"task_id":              task.ID,
+			"status":               status,
+			"conversation_id":      task.ConversationID,
+			"assistant_message_id": task.AssistantMessageID,
+			"last_sequence_number": lastSequence,
+			"completed_at":         task.CompletedAt,
+			"error_message":        task.ErrorMessage,
+		}
+	}
+	if status == "" {
+		if strings.TrimSpace(lastAssistant.Content) != "" {
+			status = "completed"
+		} else {
+			status = "generating"
+		}
+		taskPayload = gin.H{"status": status}
+	}
+
+	return gin.H{
+		"message":         lastAssistant,
+		"background_task": taskPayload,
+	}
 }
 
 func (h *ConversationHandler) GetMessage(c *gin.Context) {

@@ -34,3 +34,33 @@ export type Notebook = {
   file_count?: number;
   files?: NotebookFile[];
 };
+
+export type NotebookFileContentChunk = {
+  index: number;
+  page?: number;
+  slide?: number;
+  sheet_name?: string;
+  block_type?: string;
+  content: string;
+};
+
+export interface NotebookFileContent {
+  file: NotebookFile["file"];
+  content: string;
+  chunks: NotebookFileContentChunk[];
+  has_more?: boolean;
+}
+
+export type NotebookArtifactType = "data-table" | "summary" | "faq" | "briefing" | "mindmap" | "slides" | string;
+
+export interface NotebookArtifact {
+  id: number;
+  notebook_id: number;
+  type: NotebookArtifactType;
+  title: string;
+  subtitle?: string;
+  content: unknown;
+  source_count: number;
+  created_at: string;
+  updated_at: string;
+}

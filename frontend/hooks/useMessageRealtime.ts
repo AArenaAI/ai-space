@@ -6,19 +6,19 @@ import { realtimeGet, realtimeSubscribe, type RealtimeData } from "@/lib/streami
  * 流式阶段只写外部 store，消息组件通过此 hook 订阅自己的数据变化，
  * 避免整个 MessageList 因 setMessages 而重渲染。
  */
-export function useMessageRealtime(messageId: string): RealtimeData | undefined {
+export function useMessageRealtime(messageId: string, enabled = true): RealtimeData | undefined {
   const subscribe = useCallback(
     (listener: () => void) => {
-      if (!messageId) return () => {};
+      if (!enabled || !messageId) return () => {};
       return realtimeSubscribe(messageId, listener);
     },
-    [messageId]
+    [enabled, messageId]
   );
 
   const getSnapshot = useCallback(() => {
-    if (!messageId) return undefined;
+    if (!enabled || !messageId) return undefined;
     return realtimeGet(messageId);
-  }, [messageId]);
+  }, [enabled, messageId]);
 
   return useSyncExternalStore(subscribe, getSnapshot, () => undefined);
 }

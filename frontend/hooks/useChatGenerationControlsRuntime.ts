@@ -13,7 +13,12 @@ import {
   resolveForkedModels,
   runForkChatRequest as defaultRunForkChatRequest,
 } from "@/lib/chatForkCoordinator";
-import { buildChatRequestHeaders } from "@/lib/chatRequestBuilder";
+import { buildChatRequestHeaders, buildCompareChatRequestBody } from "@/lib/chatRequestBuilder";
+import { createBusyGeneratingStatus, createGeneratingStatus } from "@/lib/chatActivityStatus";
+import { initializeAssistantRealtimeBatch } from "@/lib/chatInitialRealtime";
+import { toModelMessages } from "@/lib/chatHistoryTransform";
+import { patchMessageById } from "@/lib/chatMessageStatePatch";
+import type { ChatStreamRunResult } from "@/lib/chatStreamRunResult";
 import type { Message } from "@/lib/chatTypes";
 
 type AbortReason = "user" | "navigation" | null;
@@ -86,15 +91,35 @@ export function createStopGenerationAction({
 
 type ForkChatDeps = {
   apiBaseUrl: string;
+  messages: Message[];
   currentConversation: number | undefined;
   setIsCompare: Dispatch<SetStateAction<boolean>>;
   setCompareModels: Dispatch<SetStateAction<string[]>>;
   setMessages: Dispatch<SetStateAction<Message[]>>;
   setLoadedPersistedMessages: Dispatch<SetStateAction<number>>;
   setGroupViews: Dispatch<SetStateAction<Map<number, number>>>;
+  streamResponse?: (
+    response: Response,
+    assistant: Message,
+    controller: AbortController,
+    conversationId: number | undefined,
+    onGroupContext?: (context?: { groupId?: number; userMessageId?: number; groupModels?: string[] }) => void
+  ) => Promise<ChatStreamRunResult | undefined>;
+  compareAbortControllersRef?: MutableRefObject<AbortController[]>;
+  abortReasonRef?: MutableRefObject<AbortReason>;
+  startBackgroundPolling?: (conversationId: number | undefined, assistantMessageId: string, serverMessageId: number) => void;
+  reasoning?: { enabled: boolean; effort?: string };
+  search?: boolean;
+  templateId?: number;
+  templatePrefix?: string;
+  skillKey?: string;
+  notebookId?: number;
+  notebookFileIds?: number[];
   getToken?: () => string | null;
   getGuestId?: () => string;
   fallbackId?: () => string;
+  now?: () => number;
+  translate?: (key: string) => string;
   runForkChatRequest?: typeof defaultRunForkChatRequest;
   fetchForkConversationRefresh?: typeof defaultFetchForkConversationRefresh;
   logError?: (...args: unknown[]) => void;
@@ -102,15 +127,29 @@ type ForkChatDeps = {
 
 export function createForkChatAction({
   apiBaseUrl,
+  messages = [],
   currentConversation,
   setIsCompare,
   setCompareModels,
   setMessages,
   setLoadedPersistedMessages,
   setGroupViews,
+  streamResponse,
+  compareAbortControllersRef,
+  abortReasonRef,
+  startBackgroundPolling,
+  reasoning = { enabled: false, effort: "high" },
+  search = false,
+  templateId = 0,
+  templatePrefix,
+  skillKey,
+  notebookId,
+  notebookFileIds,
   getToken = () => (typeof localStorage === "undefined" ? null : localStorage.getItem("token")),
   getGuestId = defaultGetGuestId,
   fallbackId = uuidv4,
+  now = Date.now,
+  translate = (key) => key,
   runForkChatRequest = defaultRunForkChatRequest,
   fetchForkConversationRefresh = defaultFetchForkConversationRefresh,
   logError = console.error,
@@ -118,38 +157,173 @@ export function createForkChatAction({
   return async (messageId: number, modelIds: string[]) => {
     const token = getToken();
     const headers = buildChatRequestHeaders({ token, guestId: getGuestId() });
-    const data = await runForkChatRequest({
-      apiBaseUrl,
-      messageId,
-      modelIds,
-      headers,
-    });
+    const sourceMessage = messages.find((message) => message.serverMessageId === messageId);
+    const sourceIndex = sourceMessage?.model ? modelIds.indexOf(sourceMessage.model) : -1;
+    const forkPlaceholderGroupId = -Math.max(1, messageId);
+    const placeholderCreatedAt = sourceMessage?.createdAt || now();
+    const placeholderIds = modelIds.map((modelId, index) => index === sourceIndex ? undefined : `fork-${messageId}-${index}-${fallbackId()}`);
+    const placeholderMessages = modelIds
+      .map((modelId, index) => ({ modelId, index, id: placeholderIds[index] }))
+      .filter((item): item is { modelId: string; index: number; id: string } => !!item.id)
+      .map(({ modelId, index, id }) => ({
+        id,
+        role: "assistant" as const,
+        content: "",
+        model: modelId,
+        createdAt: placeholderCreatedAt + index + 1,
+        generationStartedAt: now(),
+        groupId: forkPlaceholderGroupId,
+        groupIndex: index,
+        groupModels: modelIds,
+        activityStatus: createGeneratingStatus(translate),
+      }));
 
-    setIsCompare(true);
-    setCompareModels(resolveForkedModels(data, modelIds));
-
-    const convId = resolveForkConversationId(data, currentConversation);
-    if (convId && token) {
-      try {
-        const refreshData = await fetchForkConversationRefresh({
-          apiBaseUrl,
-          conversationId: convId,
-          token,
-        });
-        const refreshState = buildForkRefreshState(refreshData, {
-          fallbackId,
-        });
-        if (refreshState) {
-          setMessages(refreshState.messages as Message[]);
-          setLoadedPersistedMessages(refreshState.messages.length);
-          setGroupViews(refreshState.groupViews);
-        }
-      } catch (e) {
-        logError("fork refresh failed:", e);
-      }
+    if (sourceMessage && placeholderMessages.length > 0) {
+      initializeAssistantRealtimeBatch(placeholderMessages, now());
+      setMessages((prev) => {
+        const sourcePosition = prev.findIndex((message) => message.serverMessageId === messageId);
+        if (sourcePosition < 0) return prev;
+        const existingPlaceholderIds = new Set(placeholderMessages.map((message) => message.id));
+        const withoutOldPlaceholders = prev.filter((message) => !existingPlaceholderIds.has(message.id));
+        const currentSourcePosition = withoutOldPlaceholders.findIndex((message) => message.serverMessageId === messageId);
+        const next = [...withoutOldPlaceholders];
+        next[currentSourcePosition] = {
+          ...next[currentSourcePosition],
+          groupId: forkPlaceholderGroupId,
+          groupIndex: sourceIndex >= 0 ? sourceIndex : 0,
+          groupModels: modelIds,
+        };
+        next.splice(currentSourcePosition + 1, 0, ...placeholderMessages);
+        return next;
+      });
     }
 
-    return data;
+    try {
+      const useStreamingFork = !!streamResponse && placeholderMessages.length > 0;
+      const data = await runForkChatRequest({
+        apiBaseUrl,
+        messageId,
+        modelIds,
+        headers,
+        initOnly: useStreamingFork,
+      });
+
+      setIsCompare(true);
+      const resolvedModels = resolveForkedModels(data, modelIds);
+      setCompareModels(resolvedModels);
+
+      const convId = resolveForkConversationId(data, currentConversation);
+      const groupId = typeof data.group_id === "number" ? data.group_id : undefined;
+      const userMessageId = typeof data.user_message_id === "number" ? data.user_message_id : undefined;
+
+      if (useStreamingFork && convId && groupId && userMessageId && streamResponse) {
+        const sourcePosition = messages.findIndex((message) => message.serverMessageId === messageId);
+        const contextMessages = sourcePosition >= 0 ? messages.slice(0, sourcePosition) : messages;
+        const controllers: AbortController[] = placeholderMessages.map(() => new AbortController());
+        if (compareAbortControllersRef) compareAbortControllersRef.current = controllers;
+
+        setMessages((prev) => prev.map((message) => {
+          if (message.serverMessageId === messageId) {
+            return {
+              ...message,
+              groupId,
+              groupIndex: sourceIndex >= 0 ? sourceIndex : 0,
+              groupModels: resolvedModels,
+            };
+          }
+          const placeholder = placeholderMessages.find((item) => item.id === message.id);
+          if (!placeholder) return message;
+          return {
+            ...message,
+            groupId,
+            groupModels: resolvedModels,
+          };
+        }));
+
+        await Promise.all(placeholderMessages.map(async (assistantMsg, idx) => {
+          const controller = controllers[idx];
+          const response = await fetch(`${apiBaseUrl}/api/chat`, {
+            method: "POST",
+            headers,
+            signal: controller.signal,
+            body: JSON.stringify(buildCompareChatRequestBody({
+              model: assistantMsg.model || "",
+              messages: toModelMessages(contextMessages),
+              conversationId: convId,
+              notebookId,
+              notebookFileIds,
+              reasoningEnabled: reasoning.enabled,
+              reasoningEffort: reasoning.effort,
+              search,
+              templateId,
+              templatePrefix,
+              skipSaveUserMessage: true,
+              groupId,
+              userMessageId,
+              groupIndex: assistantMsg.groupIndex ?? idx,
+              groupModels: resolvedModels,
+              fallbackGroupModels: resolvedModels,
+              skillKey,
+            })),
+          });
+          if (!response.ok) throw new Error("Fork stream request failed");
+          const result = await streamResponse(response, assistantMsg, controller, convId);
+          if (result?.recoverable) {
+            setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) => ({
+              ...m,
+              serverMessageId: result.serverMessageId || m.serverMessageId,
+              generationTaskId: result.generationTaskId || m.generationTaskId,
+              activityStatus: createBusyGeneratingStatus(translate),
+            })));
+            if (result.serverMessageId && startBackgroundPolling) {
+              startBackgroundPolling(convId, assistantMsg.id, result.serverMessageId);
+            }
+          }
+        }));
+
+        if (compareAbortControllersRef) compareAbortControllersRef.current = [];
+        if (abortReasonRef) abortReasonRef.current = null;
+        return data;
+      }
+
+      if (convId && token) {
+        try {
+          const refreshData = await fetchForkConversationRefresh({
+            apiBaseUrl,
+            conversationId: convId,
+            token,
+          });
+          const refreshState = buildForkRefreshState(refreshData, {
+            fallbackId,
+          });
+          if (refreshState) {
+            setMessages(refreshState.messages as Message[]);
+            setLoadedPersistedMessages(refreshState.messages.length);
+            setGroupViews(refreshState.groupViews);
+          }
+        } catch (e) {
+          logError("fork refresh failed:", e);
+        }
+      }
+
+      return data;
+    } catch (error) {
+      if (placeholderMessages.length > 0) {
+        setMessages((prev) => prev.map((message) => {
+          if (!placeholderIds.includes(message.id)) return message;
+          return {
+            ...message,
+            completedAt: now(),
+            activityStatus: {
+              kind: "generating" as const,
+              status: "failed" as const,
+              label: translate("chat.status.failed"),
+            },
+          };
+        }));
+      }
+      throw error;
+    }
   };
 }
 
@@ -176,15 +350,29 @@ export function useChatGenerationControlsRuntime(options: UseChatGenerationContr
     createForkChatAction(options),
     [
       options.apiBaseUrl,
+      options.messages,
       options.currentConversation,
       options.setIsCompare,
       options.setCompareModels,
       options.setMessages,
       options.setLoadedPersistedMessages,
       options.setGroupViews,
+      options.streamResponse,
+      options.compareAbortControllersRef,
+      options.abortReasonRef,
+      options.startBackgroundPolling,
+      options.reasoning,
+      options.search,
+      options.templateId,
+      options.templatePrefix,
+      options.skillKey,
+      options.notebookId,
+      options.notebookFileIds,
       options.getToken,
       options.getGuestId,
       options.fallbackId,
+      options.now,
+      options.translate,
       options.runForkChatRequest,
       options.fetchForkConversationRefresh,
       options.logError,

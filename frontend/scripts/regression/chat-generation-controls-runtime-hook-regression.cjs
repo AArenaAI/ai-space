@@ -34,6 +34,12 @@ function loadModule(file) {
         },
       };
     }
+    if (specifier === "@/lib/chatActivityStatus") {
+      return { createGeneratingStatus: (t) => ({ kind: "generating", status: "running", label: t("chat.status.generating") }) };
+    }
+    if (specifier === "@/lib/chatInitialRealtime") {
+      return { initializeAssistantRealtimeBatch: () => undefined };
+    }
     if (specifier === "@/lib/chatStopGenerationCoordinator") {
       return {
         runStopGeneration: () => undefined,
@@ -67,13 +73,18 @@ function makeController(name, calls) {
   return { name, aborted: false, abort() { this.aborted = true; calls.push(["abort", name]); } };
 }
 
-function makeSetters() {
+function makeSetters(initialMessages = []) {
   const calls = [];
+  let messages = initialMessages;
   return {
     calls,
+    get messages() { return messages; },
     setIsCompare: (value) => calls.push(["isCompare", value]),
     setCompareModels: (value) => calls.push(["compareModels", value]),
-    setMessages: (value) => calls.push(["messages", typeof value === "function" ? value([]) : value]),
+    setMessages: (value) => {
+      messages = typeof value === "function" ? value(messages) : value;
+      calls.push(["messages", messages]);
+    },
     setLoadedPersistedMessages: (value) => calls.push(["loaded", value]),
     setGroupViews: (value) => calls.push(["groups", value]),
   };
@@ -169,6 +180,73 @@ async function testForkChatRequestsAndRefreshes() {
   assert.ok(setters.calls.find((c) => c[0] === "groups")[1] instanceof Map);
 }
 
+async function testForkChatAddsGeneratingPlaceholderForForkedModel() {
+  const initialMessages = [
+    { id: "u1", role: "user", content: "hi", createdAt: 1000, serverMessageId: 10 },
+    { id: "a1", role: "assistant", content: "old", createdAt: 1001, serverMessageId: 11, model: "m1" },
+  ];
+  const setters = makeSetters(initialMessages);
+  let requestStarted = false;
+  let releaseRequest;
+  const requestGate = new Promise((resolve) => { releaseRequest = resolve; });
+  const fork = createForkChatAction({
+    apiBaseUrl: "",
+    messages: initialMessages,
+    currentConversation: 5,
+    ...setters,
+    getToken: () => "tok",
+    getGuestId: () => "guest",
+    fallbackId: () => "placeholder-id",
+    now: () => 2000,
+    translate: (key) => ({ "chat.status.generating": "生成中", "chat.status.failed": "生成失败" }[key] || key),
+    runForkChatRequest: async () => {
+      requestStarted = true;
+      await requestGate;
+      return { conversation_id: 5, models: ["m1", "m2"] };
+    },
+    fetchForkConversationRefresh: async () => ({ messages: [{ id: "fresh", role: "assistant", content: "new", serverMessageId: 22 }] }),
+  });
+
+  const promise = fork(11, ["m1", "m2"]);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(requestStarted, true);
+  const optimistic = setters.calls.find((call) => call[0] === "messages")[1];
+  assert.equal(optimistic.length, 3);
+  assert.equal(optimistic[1].groupId, -11);
+  assert.equal(optimistic[1].groupIndex, 0);
+  assert.equal(optimistic[2].model, "m2");
+  assert.equal(optimistic[2].activityStatus.label, "生成中");
+  assert.equal(optimistic[2].groupId, -11);
+  assert.equal(optimistic[2].groupIndex, 1);
+  releaseRequest();
+  await promise;
+}
+
+async function testForkChatMarksPlaceholderFailedOnRequestError() {
+  const initialMessages = [
+    { id: "u1", role: "user", content: "hi", createdAt: 1000, serverMessageId: 10 },
+    { id: "a1", role: "assistant", content: "old", createdAt: 1001, serverMessageId: 11, model: "m1" },
+  ];
+  const setters = makeSetters(initialMessages);
+  const fork = createForkChatAction({
+    apiBaseUrl: "",
+    messages: initialMessages,
+    currentConversation: 5,
+    ...setters,
+    getToken: () => "tok",
+    getGuestId: () => "guest",
+    fallbackId: () => "placeholder-id",
+    now: () => 2000,
+    translate: (key) => ({ "chat.status.generating": "生成中", "chat.status.failed": "生成失败" }[key] || key),
+    runForkChatRequest: async () => { throw new Error("boom"); },
+  });
+
+  await assert.rejects(() => fork(11, ["m1", "m2"]), /boom/);
+  const latestMessages = setters.calls.filter((call) => call[0] === "messages").at(-1)[1];
+  assert.equal(latestMessages[2].activityStatus.status, "failed");
+  assert.equal(latestMessages[2].activityStatus.label, "生成失败");
+}
+
 async function testForkChatSkipsRefreshWithoutTokenAndUsesFallbackConversation() {
   const setters = makeSetters();
   let refreshed = false;
@@ -207,6 +285,8 @@ async function testForkChatLogsRefreshErrors() {
   testStopGenerationUsesBearerAndClearsRefs();
   testStopGenerationUsesGuestFallback();
   await testForkChatRequestsAndRefreshes();
+  await testForkChatAddsGeneratingPlaceholderForForkedModel();
+  await testForkChatMarksPlaceholderFailedOnRequestError();
   await testForkChatSkipsRefreshWithoutTokenAndUsesFallbackConversation();
   await testForkChatLogsRefreshErrors();
   console.log("chat generation controls runtime hook regression passed");

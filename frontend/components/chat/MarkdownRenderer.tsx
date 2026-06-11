@@ -11,7 +11,7 @@ import {
   type MarkdownPlugins,
 } from "./markdown/markdownPlugins";
 
-const MarkdownRenderer = memo(function MarkdownRenderer({ content, isStreaming = false }: { content: string; isStreaming?: boolean }) {
+const MarkdownRenderer = memo(function MarkdownRenderer({ content, isStreaming = false, priorityHydrateRichText = false, messageId }: { content: string; isStreaming?: boolean; priorityHydrateRichText?: boolean; messageId?: string | number }) {
   const withMath = useMemo(() => contentMayContainMath(content), [content]);
   const [plugins, setPlugins] = useState<MarkdownPlugins | null>(() => getCachedMarkdownPlugins(withMath));
 
@@ -26,10 +26,17 @@ const MarkdownRenderer = memo(function MarkdownRenderer({ content, isStreaming =
     };
   }, [withMath]);
 
-  const markdownComponents = useMemo(() => createMarkdownComponents({ isStreaming }), [isStreaming]);
+  const markdownComponents = useMemo(() => createMarkdownComponents({ isStreaming, lightweight: !plugins && priorityHydrateRichText }), [isStreaming, plugins, priorityHydrateRichText]);
 
   if (!plugins) {
-    return <MarkdownPlainFallback content={content} />;
+    if (priorityHydrateRichText) {
+      return (
+        <ReactMarkdown components={markdownComponents}>
+          {content}
+        </ReactMarkdown>
+      );
+    }
+    return <MarkdownPlainFallback content={content} messageId={messageId} />;
   }
 
   return (

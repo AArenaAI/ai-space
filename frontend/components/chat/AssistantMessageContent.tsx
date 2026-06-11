@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ComponentType } from "react";
 import { AlertCircle, RotateCcw } from "lucide-react";
 import { Message } from "@/lib/chatTypes";
@@ -12,24 +12,10 @@ import { StreamingText } from "./StreamingText";
 import { ThinkBlock } from "./ThinkBlock";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 
-type MarkdownRendererComponent = ComponentType<{ content: string }>;
+type MarkdownRendererComponent = ComponentType<{ content: string; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean; allowRichLiteFallback?: boolean; compactRichLitePreview?: boolean; messageId?: string | number }>;
 
 const JUST_COMPLETED_REASONING_EXPAND_MS = 5 * 60 * 1000;
-const justCompletedReasoningMessageIds = new Map<string, number>();
-
-function markJustCompletedReasoningMessage(messageId: string) {
-  justCompletedReasoningMessageIds.set(messageId, Date.now() + JUST_COMPLETED_REASONING_EXPAND_MS);
-}
-
-function shouldKeepJustCompletedReasoningExpanded(messageId: string) {
-  const expiresAt = justCompletedReasoningMessageIds.get(messageId);
-  if (!expiresAt) return false;
-  if (expiresAt < Date.now()) {
-    justCompletedReasoningMessageIds.delete(messageId);
-    return false;
-  }
-  return true;
-}
+const JUST_COMPLETED_STREAMING_HOLD_MS = 800;
 
 function mayStillRecoverMessage(msg: Message) {
   return !msg.completedAt && !msg.stopped && !!(
@@ -47,6 +33,10 @@ export function AssistantMessageContent({
   isStreaming,
   className,
   MarkdownRenderer = DeferredMarkdownRenderer,
+  shouldHydrateRichText = true,
+  priorityHydrateRichText = false,
+  allowRichLiteFallback = false,
+  compactRichLitePreview = true,
   recoverEmptyContent = false,
   onRegenerate,
 }: {
@@ -54,6 +44,10 @@ export function AssistantMessageContent({
   isStreaming: boolean;
   className?: string;
   MarkdownRenderer?: MarkdownRendererComponent;
+  shouldHydrateRichText?: boolean;
+  priorityHydrateRichText?: boolean;
+  allowRichLiteFallback?: boolean;
+  compactRichLitePreview?: boolean;
   recoverEmptyContent?: boolean;
   onRegenerate?: () => void;
 }) {
@@ -65,15 +59,41 @@ export function AssistantMessageContent({
     realtime?.answerContent?.trim() ||
     realtime?.reasoningContent?.trim()
   );
-  const finalizingRealtime = !generating && !!realtime?.completedAt && realtimeHasVisiblePayload;
+  const completedAt = realtime?.completedAt;
+  const wasStreamingRef = useRef(false);
+  const [keepCompletedStreaming, setKeepCompletedStreaming] = useState(false);
+  const [keepReasoningExpanded, setKeepReasoningExpanded] = useState(false);
+  const justStoppedStreaming = wasStreamingRef.current && !generating;
+  const finalizingRealtime = !generating && (justStoppedStreaming || keepCompletedStreaming) && realtimeHasVisiblePayload;
+  const shouldRenderStreamingText = generating || finalizingRealtime || (!message.content && recoverEmptyContent && mayStillRecoverMessage(message));
 
   useEffect(() => {
-    if ((generating || finalizingRealtime) && (realtime?.reasoningContent?.trim() || message.reasoningContent?.trim())) {
-      markJustCompletedReasoningMessage(message.id);
+    if (!completedAt || !realtimeHasVisiblePayload) return;
+    setKeepCompletedStreaming(true);
+    const timer = window.setTimeout(() => setKeepCompletedStreaming(false), JUST_COMPLETED_STREAMING_HOLD_MS);
+    return () => window.clearTimeout(timer);
+  }, [completedAt, realtimeHasVisiblePayload]);
+
+  useEffect(() => {
+    let timer: number | undefined;
+    if (wasStreamingRef.current && !generating) {
+      setKeepCompletedStreaming(true);
+      timer = window.setTimeout(() => setKeepCompletedStreaming(false), JUST_COMPLETED_STREAMING_HOLD_MS);
     }
+    wasStreamingRef.current = generating;
+    return () => {
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [generating, message.id]);
+
+  useEffect(() => {
+    if (!(generating || finalizingRealtime) || !(realtime?.reasoningContent?.trim() || message.reasoningContent?.trim())) return;
+    setKeepReasoningExpanded(true);
+    const timer = window.setTimeout(() => setKeepReasoningExpanded(false), JUST_COMPLETED_REASONING_EXPAND_MS);
+    return () => window.clearTimeout(timer);
   }, [finalizingRealtime, generating, message.id, message.reasoningContent, realtime?.reasoningContent]);
 
-  if (generating || finalizingRealtime || (!message.content && recoverEmptyContent && mayStillRecoverMessage(message))) {
+  if (shouldRenderStreamingText) {
     return (
       <StreamingText
         messageId={message.id}
@@ -114,12 +134,23 @@ export function AssistantMessageContent({
     : message.content;
   const { reasoning, answer, isThinking } = parseThinkContent(finalContent);
   const cleanAnswer = sanitizeContent(answer);
-  const keepReasoningExpanded = shouldKeepJustCompletedReasoningExpanded(message.id);
 
   return (
     <div className={cn("prose prose-sm max-w-none", className)}>
-      {reasoning && <ThinkBlock content={reasoning} isThinking={isThinking} defaultExpanded={keepReasoningExpanded} />}
-      <MarkdownRenderer content={cleanAnswer} />
+      {reasoning && (
+        <ThinkBlock
+          content={reasoning}
+          isThinking={isThinking}
+          defaultExpanded={keepReasoningExpanded}
+          stabilizeCompletionHeight={keepReasoningExpanded}
+          shouldHydrateRichText={shouldHydrateRichText}
+          priorityHydrateRichText={priorityHydrateRichText}
+          allowRichLiteFallback={allowRichLiteFallback}
+          compactRichLitePreview={compactRichLitePreview}
+          messageId={message.id}
+        />
+      )}
+      <MarkdownRenderer content={cleanAnswer} shouldHydrateRichText={shouldHydrateRichText} priorityHydrateRichText={priorityHydrateRichText} allowRichLiteFallback={allowRichLiteFallback} compactRichLitePreview={compactRichLitePreview} messageId={message.id} />
     </div>
   );
 }

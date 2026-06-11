@@ -217,6 +217,15 @@ function MessageActions({
           <RotateCcw className="w-3.5 h-3.5" />
         </button>
       )}
+      {onForkCompare && (
+        <button
+          onClick={onForkCompare}
+          className="p-1 rounded-md text-text-tertiary hover:text-amber-500 hover:bg-amber-500/10 transition-colors"
+          title={t("chat.action.compare")}
+        >
+          <Columns2 className="w-3.5 h-3.5" />
+        </button>
+      )}
       <button
         onClick={onSelectMode}
         className="p-1 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface-card transition-colors"
@@ -507,7 +516,7 @@ function ChatMessageItemRaw({
               visible={isLast}
               createdAt={msg.createdAt}
               completedAt={msg.completedAt}
-              onForkCompare={undefined}
+              onForkCompare={!isUser && msg.serverMessageId && conversationId ? handleForkCompare : undefined}
             />
           )}
         </div>

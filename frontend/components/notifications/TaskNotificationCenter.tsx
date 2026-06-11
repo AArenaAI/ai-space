@@ -182,9 +182,11 @@ export default function TaskNotificationCenter() {
         for (const task of tasks) {
           if (stopped) break;
           try {
+            const currentHref = `${window.location.pathname}${window.location.search}`;
+            if (isSameTaskPage(task, currentHref)) continue;
             const result = await checkTask(task);
             if (result?.done) {
-              if (isSameTaskPage(task, `${window.location.pathname}${window.location.search}`)) {
+              if (isSameTaskPage(task, currentHref)) {
                 completeBackgroundTaskSilently(task.key);
               } else {
                 emitTaskFinished(buildTaskCompletionCopy(task, result.ok));

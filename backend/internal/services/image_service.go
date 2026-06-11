@@ -37,8 +37,9 @@ type ImageGeneration struct {
 	ID                uint      `json:"id" gorm:"primaryKey"`
 	UserID            uint      `json:"user_id"`
 	Prompt            string    `json:"prompt"`
-	Size              string    `json:"size"`    // 1024x1024, 1024x1792, 1792x1024
-	Quality           string    `json:"quality"` // low, medium, high, auto
+	Size              string    `json:"size"`                  // 1024x1024, 1024x1792, 1792x1024
+	Quality           string    `json:"quality"`               // low, medium, high, auto
+	Provider          string    `json:"provider" gorm:"index"` // seedream 等 Beta provider；空值表示普通图片入口
 	ImageURL          string    `json:"image_url"`
 	ReferenceImageURL string    `json:"reference_image_url"`            // 参考图 URL（用于 image-to-image）
 	Status            string    `json:"status"`                         // pending, completed, failed
@@ -223,6 +224,32 @@ func (s *ImageService) GenerateImage(ctx context.Context, prompt string, size st
 		model = "gpt-image-2"
 	}
 	url, err := s.imageGenSvc.Generate(ctx, "https://api.openai.com", apiKey, model, prompt, size, quality)
+	if err != nil {
+		return "", "", err
+	}
+	return url, "", nil
+}
+
+// GenerateSeedreamImage 生成 Seedream 图片，仅供显式 Seedream/Beta 流程调用。
+// 普通 /image 不会自动切到 Seedream，避免影响现有图片创作主流程。
+func (s *ImageService) GenerateSeedreamImage(ctx context.Context, prompt string, size string) (imageURL string, b64Data string, err error) {
+	apiKey := s.cfg.SeedreamAPIKey
+	if apiKey == "" {
+		apiKey = s.cfg.VolcengineAPIKey
+	}
+	if apiKey == "" {
+		return "", "", fmt.Errorf("未配置 Seedream API Key")
+	}
+
+	baseURL := s.cfg.SeedreamBaseURL
+	if baseURL == "" {
+		baseURL = "https://ark.cn-beijing.volces.com/api/v3"
+	}
+	model := s.cfg.SeedreamModel
+	if model == "" {
+		model = "doubao-seedream-5-0-260128"
+	}
+	url, err := s.imageGenSvc.Generate(ctx, baseURL, apiKey, model, prompt, size, "")
 	if err != nil {
 		return "", "", err
 	}

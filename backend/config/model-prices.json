@@ -51,8 +51,11 @@
     "source_unit": "per_1m_tokens",
     "source_input_price": 5.0,
     "source_output_price": 30.0,
-    "pricing_basis": "standard_non_batch_text_input_image_output_tokens; official page says use image-generation calculator for per-image estimates",
-    "source_url": "https://developers.openai.com/api/docs/pricing?latest-pricing=standard"
+    "pricing_basis": "standard_non_batch_multimodal_image_generation_tokens; text input $5/$1.25 cached, image input $8/$2 cached, image output $30 per 1M tokens; estimates used when API usage is unavailable",
+    "source_url": "https://developers.openai.com/api/docs/pricing?latest-pricing=standard",
+    "source_input_cache_hit_price": 1.25,
+    "source_image_input_price": 8.0,
+    "source_image_input_cache_hit_price": 2.0
   },
   {
     "provider": "gemini",
@@ -151,15 +154,105 @@
   {
     "provider": "volcengine",
     "model": "doubao-seedance-2-0-fast-260128",
-    "pricing_unit": "request",
-    "request_unit_price_rmb": 0,
-    "pricing_basis": "not_updated; no source URL provided in this task"
+    "pricing_unit": "token_1k",
+    "source_currency": "CNY",
+    "source_unit": "per_1m_tokens",
+    "video_pricing_rules": [
+      {
+        "resolution": "480p",
+        "input_contains_video": false,
+        "source_output_price": 37.0,
+        "pricing_basis": "seedance_2_fast_480p_720p_no_input_video"
+      },
+      {
+        "resolution": "720p",
+        "input_contains_video": false,
+        "source_output_price": 37.0,
+        "pricing_basis": "seedance_2_fast_480p_720p_no_input_video"
+      },
+      {
+        "resolution": "480p",
+        "input_contains_video": true,
+        "source_output_price": 22.0,
+        "pricing_basis": "seedance_2_fast_480p_720p_with_input_video"
+      },
+      {
+        "resolution": "720p",
+        "input_contains_video": true,
+        "source_output_price": 22.0,
+        "pricing_basis": "seedance_2_fast_480p_720p_with_input_video"
+      }
+    ],
+    "pricing_basis": "official_completion_tokens_x_token_unit_price_success_only; 1080p_not_supported_for_fast",
+    "source_url": "https://www.volcengine.com/docs/82379/1544106?lang=zh#02affcb8"
   },
   {
     "provider": "volcengine",
     "model": "doubao-seedance-2-0-260128",
-    "pricing_unit": "request",
-    "request_unit_price_rmb": 0,
-    "pricing_basis": "not_updated; no source URL provided in this task"
+    "pricing_unit": "token_1k",
+    "source_currency": "CNY",
+    "source_unit": "per_1m_tokens",
+    "video_pricing_rules": [
+      {
+        "resolution": "480p",
+        "input_contains_video": false,
+        "source_output_price": 46.0,
+        "pricing_basis": "seedance_2_480p_720p_no_input_video"
+      },
+      {
+        "resolution": "720p",
+        "input_contains_video": false,
+        "source_output_price": 46.0,
+        "pricing_basis": "seedance_2_480p_720p_no_input_video"
+      },
+      {
+        "resolution": "1080p",
+        "input_contains_video": false,
+        "source_output_price": 51.0,
+        "pricing_basis": "seedance_2_1080p_no_input_video"
+      },
+      {
+        "resolution": "480p",
+        "input_contains_video": true,
+        "source_output_price": 28.0,
+        "pricing_basis": "seedance_2_480p_720p_with_input_video"
+      },
+      {
+        "resolution": "720p",
+        "input_contains_video": true,
+        "source_output_price": 28.0,
+        "pricing_basis": "seedance_2_480p_720p_with_input_video"
+      },
+      {
+        "resolution": "1080p",
+        "input_contains_video": true,
+        "source_output_price": 31.0,
+        "pricing_basis": "seedance_2_1080p_with_input_video"
+      }
+    ],
+    "pricing_basis": "official_completion_tokens_x_token_unit_price_success_only",
+    "source_url": "https://www.volcengine.com/docs/82379/1544106?lang=zh#02affcb8"
+  },
+  {
+    "provider": "google-cloud-translate-v3",
+    "model": "general/nmt",
+    "pricing_unit": "character_1m",
+    "source_currency": "USD",
+    "source_unit": "per_1m_characters_source",
+    "source_input_price": 20.0,
+    "source_output_price": 0.0,
+    "pricing_basis": "google_cloud_translation_advanced_nmt_source_text_characters; charged on source characters only",
+    "source_url": "user_provided_google_cloud_translation_pricing"
+  },
+  {
+    "provider": "google-cloud-translate-v3",
+    "model": "general/translation-llm",
+    "pricing_unit": "character_1m",
+    "source_currency": "USD",
+    "source_unit": "per_1m_characters_input_output",
+    "source_input_price": 10.0,
+    "source_output_price": 10.0,
+    "pricing_basis": "google_cloud_translation_llm_input_and_output_characters; approximately $20 per 1M source characters when output length is similar",
+    "source_url": "user_provided_google_cloud_translation_pricing"
   }
 ]

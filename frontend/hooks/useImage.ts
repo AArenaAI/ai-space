@@ -6,21 +6,23 @@ import { getErrorMessage, normalizeError, readApiError } from "@/lib/errors";
 
 const API_BASE_URL = "";
 
-// 模块级缓存：避免组件重新挂载时图片列表消失
-let cachedImages: GeneratedImage[] | null = null;
+// 模块级缓存：避免组件重新挂载时图片列表消失；按 provider 隔离，避免 Seedream Beta 历史混入普通图片入口。
+const cachedImagesByProvider: Record<string, GeneratedImage[] | null> = {};
 
 export interface GeneratedImage {
   id: number;
   prompt: string;
   size: string;
+  provider?: string;
   image_url: string;
   status: string;
   error_message?: string;
   created_at: string;
 }
 
-export function useImage() {
-  const [images, setImages] = useState<GeneratedImage[]>(cachedImages || []);
+export function useImage(provider?: string) {
+  const providerKey = (provider || "").trim().toLowerCase();
+  const [images, setImages] = useState<GeneratedImage[]>(cachedImagesByProvider[providerKey] || []);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -43,35 +45,37 @@ export function useImage() {
       const token = localStorage.getItem("token");
       if (!token) {
         setImages([]);
-        cachedImages = [];
+        cachedImagesByProvider[providerKey] = [];
         return;
       }
       const headers: Record<string, string> = {};
       if (token) headers.Authorization = `Bearer ${token}`;
-      const response = await fetch(`${API_BASE_URL}/api/images`, { headers });
+      const query = providerKey ? `?provider=${encodeURIComponent(providerKey)}` : "";
+      const response = await fetch(`${API_BASE_URL}/api/images${query}`, { headers });
       if (!response.ok) {
         throw await readApiError(response);
       }
       const data = await safeJSON(response);
       const nextImages = data.images || [];
       setImages(nextImages);
-      cachedImages = nextImages;
+      cachedImagesByProvider[providerKey] = nextImages;
       nextImages.forEach((image: GeneratedImage) => {
-        if (image.status === "succeeded" || image.status === "failed") {
+        if (image.status === "succeeded" || image.status === "completed" || image.status === "failed") {
+          const isSeedream = (image.provider || providerKey) === "seedream";
           emitTaskFinished({
             key: `image:${image.id}`,
             type: "image",
-            title: image.status === "succeeded" ? "图片任务已完成" : "图片任务未完成",
-            description: image.status === "succeeded" ? image.prompt : getErrorMessage(image.error_message || image.prompt, { module: "image", fallbackMessage: "图片生成失败，请稍后重试或调整描述。" }),
-            href: "/image",
-            ok: image.status === "succeeded",
+            title: image.status === "succeeded" || image.status === "completed" ? "图片任务已完成" : "图片任务未完成",
+            description: image.status === "succeeded" || image.status === "completed" ? image.prompt : getErrorMessage(image.error_message || image.prompt, { module: "image", fallbackMessage: "图片生成失败，请稍后重试或调整描述。" }),
+            href: isSeedream ? "/seedream-beta" : "/image",
+            ok: image.status === "succeeded" || image.status === "completed",
           });
         }
       });
     } catch (err) {
       setError(getErrorMessage(err, { module: "image", fallbackMessage: "获取图片记录失败，请刷新重试。" }));
     }
-  }, []);
+  }, [providerKey]);
 
   const stopPolling = useCallback(() => {
     if (pollTimer.current) {
@@ -112,7 +116,14 @@ export function useImage() {
   }, [images, stopPolling]);
 
   const generateImage = useCallback(
-    async (prompt: string, aspectRatio: string, resolution: string, quality: string = "medium", referenceImageUrls?: string[]) => {
+    async (
+      prompt: string,
+      aspectRatio: string,
+      resolution: string,
+      quality: string = "medium",
+      referenceImageUrls?: string[],
+      provider?: string
+    ) => {
       setIsGenerating(true);
       setError(null);
 
@@ -121,6 +132,10 @@ export function useImage() {
         const body: Record<string, any> = { prompt, aspect_ratio: aspectRatio, resolution, quality };
         if (referenceImageUrls && referenceImageUrls.length > 0) {
           body.reference_image_urls = referenceImageUrls;
+        }
+        const requestProvider = (provider || providerKey).trim().toLowerCase();
+        if (requestProvider) {
+          body.provider = requestProvider;
         }
         const headers: Record<string, string> = { "Content-Type": "application/json" };
         if (token) headers.Authorization = `Bearer ${token}`;
@@ -140,12 +155,12 @@ export function useImage() {
           id: data.id,
           title: "图片生成中",
           description: prompt,
-          href: "/image",
+          href: requestProvider === "seedream" ? "/seedream-beta" : "/image",
         });
         // 立即将 pending 记录加入列表并更新缓存
         const next = [data, ...images];
         setImages(next);
-        cachedImages = next;
+        cachedImagesByProvider[providerKey] = next;
         // 启动轮询
         startPolling();
         return data;
@@ -157,7 +172,7 @@ export function useImage() {
         setIsGenerating(false);
       }
     },
-    [startPolling, images]
+    [startPolling, images, providerKey]
   );
 
   const upsertImage = useCallback((image: GeneratedImage) => {
@@ -166,10 +181,10 @@ export function useImage() {
       const next = exists
         ? prev.map((item) => (item.id === image.id ? { ...item, ...image } : item))
         : [image, ...prev];
-      cachedImages = next;
+      cachedImagesByProvider[providerKey] = next;
       return next;
     });
-  }, []);
+  }, [providerKey]);
 
   const deleteImage = useCallback(async (id: number) => {
     try {
@@ -185,11 +200,11 @@ export function useImage() {
       }
       const next = images.filter((img) => img.id !== id);
       setImages(next);
-      cachedImages = next;
+      cachedImagesByProvider[providerKey] = next;
     } catch (err) {
       setError(getErrorMessage(err, { module: "image", fallbackMessage: "删除失败，请稍后重试。" }));
     }
-  }, [images]);
+  }, [images, providerKey]);
 
   return {
     images,

@@ -25,16 +25,23 @@ func NewVideoService(apiKey string, baseURL string) *VideoService {
 
 // CreateVideoTaskRequest 创建视频任务请求参数
 type CreateVideoTaskRequest struct {
-	Model           string
-	Prompt          string
-	Ratio           string
-	Resolution      string
-	Duration        int64
-	GenerateAudio   bool
-	Watermark       bool
-	ReferenceImages []string // 可选的参考图 URL
-	ReferenceVideos []string // 可选的参考视频 URL
-	ReferenceAudios []string // 可选的参考音频 URL（当前暂不下发，仅保留 API 兼容）
+	Model               string
+	Prompt              string
+	Ratio               string
+	Resolution          string
+	Duration            int64
+	GenerateAudio       bool
+	Watermark           bool
+	ReferenceImages     []string // 可选的参考图 URL
+	ReferenceImageRoles []string // 与 ReferenceImages 一一对应的角色：reference_image | first_frame | last_frame
+	ReferenceVideos     []string // 可选的参考视频 URL
+	ReferenceAudios     []string // 可选的参考音频 URL（当前暂不下发，仅保留 API 兼容）
+	// ReferenceImageRoleMode controls how image references are sent to Seedance:
+	// auto/default/reference: all images as weak reference_image for Seedance 2.0 multimodal reference.
+	// first_frame: first image as first_frame, remaining images as reference_image.
+	// first_last_frame: first image as first_frame and second image as last_frame.
+	ReferenceImageRoleMode string
+	ReturnLastFrame        bool // 是否要求方舟返回 content.last_frame_url，供连续视频衔接使用
 }
 
 // CreateVideoTaskResult 创建视频任务返回结果
@@ -53,23 +60,42 @@ func (s *VideoService) CreateVideoTask(ctx context.Context, req CreateVideoTaskR
 	}
 
 	// 添加参考图。
-	// 1 张图：强约束为首帧；2 张图：强约束为首尾帧；3 张及以上：按官方多模态参考图处理。
+	// 默认按 Seedance 2.0 多模态参考图处理；只有调用方显式指定 first_frame / first_last_frame 时，才强约束首/尾帧。
 	imageRole := func(index, total int) string {
 		// 火山 Seedance 不允许 first_frame/last_frame 与 reference_video 同时下发。
 		// 同时有参考视频时，图片统一作为弱参考图；只有纯图片参考时才强约束首/尾帧。
 		if len(req.ReferenceVideos) > 0 {
 			return "reference_image"
 		}
-		if total == 1 {
-			return "first_frame"
+		if index < len(req.ReferenceImageRoles) {
+			switch req.ReferenceImageRoles[index] {
+			case "first_frame", "last_frame", "reference_image":
+				return req.ReferenceImageRoles[index]
+			case "reference":
+				return "reference_image"
+			}
 		}
-		if total == 2 {
+		switch req.ReferenceImageRoleMode {
+		case "reference":
+			return "reference_image"
+		case "first_frame":
 			if index == 0 {
 				return "first_frame"
 			}
-			return "last_frame"
+			return "reference_image"
+		case "first_last_frame":
+			if total >= 2 {
+				if index == 0 {
+					return "first_frame"
+				}
+				if index == 1 {
+					return "last_frame"
+				}
+			}
+			return "reference_image"
+		default:
+			return "reference_image"
 		}
-		return "reference_image"
 	}
 	for index, url := range req.ReferenceImages {
 		content = append(content, &model.CreateContentGenerationContentItem{
@@ -105,6 +131,9 @@ func (s *VideoService) CreateVideoTask(ctx context.Context, req CreateVideoTaskR
 	if req.Ratio != "" {
 		createReq.Ratio = volcengine.String(req.Ratio)
 	}
+	if req.ReturnLastFrame {
+		createReq.ReturnLastFrame = volcengine.Bool(true)
+	}
 
 	resp, err := s.client.CreateContentGenerationTask(ctx, createReq)
 	if err != nil {
@@ -122,6 +151,7 @@ type VideoTaskResult struct {
 	TaskID           string
 	Status           string // pending | running | succeeded | failed
 	VideoURL         string
+	LastFrameURL     string
 	CompletionTokens int
 	CreatedAt        int64
 	UpdatedAt        int64
@@ -146,6 +176,7 @@ func (s *VideoService) GetVideoTask(ctx context.Context, taskID string) (*VideoT
 	}
 
 	result.VideoURL = resp.Content.VideoURL
+	result.LastFrameURL = resp.Content.LastFrameURL
 
 	if resp.Error != nil {
 		result.ErrorCode = resp.Error.Code

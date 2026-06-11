@@ -2,6 +2,8 @@ package models
 
 import (
 	"fmt"
+	"os"
+	"strings"
 
 	"aipool-backend/pkg/publicid"
 	"gorm.io/driver/postgres"
@@ -35,7 +37,7 @@ func InitDB(databaseURL string) (*gorm.DB, error) {
 		&CompareRecord{}, &UserSkill{},
 		&Workspace{},
 		&File{}, &FileChunk{}, &FileEmbedding{}, &FileEmbeddingJob{}, &ConversationFile{}, &MessageFile{},
-		&Notebook{}, &NotebookFile{}, &NotebookConversation{},
+		&Notebook{}, &NotebookFile{}, &NotebookConversation{}, &NotebookArtifact{},
 		&APIUsageLog{}, &AIBackgroundTask{}, &AIBackgroundTaskEvent{},
 		&AdminAuditLog{}, &BillingPlan{}, &BillingOrder{}, &BillingSubscription{}, &PaymentEvent{}, &CreditTransaction{},
 		&PPTTemplate{}, &PPTGeneration{}, &PPTSlide{}, &PPTRevision{},
@@ -74,8 +76,47 @@ func InitDB(databaseURL string) (*gorm.DB, error) {
 	if err := migrateFilePublicIDs(db); err != nil {
 		return nil, fmt.Errorf("迁移文件 PublicID 失败: %w", err)
 	}
+	if err := migrateUnconfiguredEmbeddingFailures(db); err != nil {
+		return nil, fmt.Errorf("迁移未配置 embedding 的文件状态失败: %w", err)
+	}
 
 	return db, nil
+}
+
+func migrateUnconfiguredEmbeddingFailures(db *gorm.DB) error {
+	// Only mark parsed files as embedding-skipped when no configured embedding provider has a usable key.
+	// Provider-specific fallback keys (for example GEMINI_API_KEY when TEXT_EMBEDDING_PROVIDER=gemini)
+	// must be treated as configured, otherwise a restart would incorrectly skip indexable files.
+	if textEmbeddingProviderConfigured() {
+		return nil
+	}
+
+	if err := db.Model(&File{}).
+		Where("parse_status = ? AND embedding_status IN ?", "done", []string{"pending", "indexing", "error"}).
+		Update("embedding_status", "skipped").Error; err != nil {
+		return err
+	}
+
+	return db.Model(&FileEmbeddingJob{}).
+		Where("status IN ?", []string{"pending", "running", "error"}).
+		Updates(map[string]interface{}{
+			"status":        "done",
+			"error_message": "skipped: text embedding api key is not configured",
+		}).Error
+}
+
+func textEmbeddingProviderConfigured() bool {
+	if strings.TrimSpace(os.Getenv("TEXT_EMBEDDING_API_KEY")) != "" {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("TEXT_EMBEDDING_PROVIDER"))) {
+	case "gemini":
+		return strings.TrimSpace(os.Getenv("GEMINI_API_KEY")) != ""
+	case "openai", "":
+		return strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != ""
+	default:
+		return false
+	}
 }
 
 func migrateFilePublicIDs(db *gorm.DB) error {

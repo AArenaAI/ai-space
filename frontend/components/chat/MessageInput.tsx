@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Brain, Square, Search, Paperclip, X, FileText, Wrench, SlidersHorizontal, MessageSquarePlus, Check, Zap, Crown, ChevronDown, Quote } from "lucide-react";
+import { Send, Brain, Square, Search, Paperclip, X, FileText, Wrench, SlidersHorizontal, MessageSquarePlus, Check, Zap, Crown, ChevronDown, Quote, Columns3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ChatModel } from "@/lib/chatTypes";
 import { Template } from "@/hooks/useTemplates";
@@ -117,6 +117,7 @@ interface MessageInputProps {
   compareMode: boolean;
   onToggleCompare: () => void;
   currentModel?: ChatModel;
+  compareModels?: ChatModel[];
   templates: Template[];
   selectedTemplateId: number;
   onSelectTemplate: (templateId: number) => void;
@@ -160,7 +161,7 @@ function normalizeReasoningMode(value: string | null): ReasoningMode {
   return value === "think" || value === "expert" || value === "fast" ? value : "fast";
 }
 
-export default function MessageInput({ onSend, onStop, isLoading, compareMode, onToggleCompare, currentModel, templates, selectedTemplateId, onSelectTemplate, onNewChat, onRecommendationContextChange, quoteDraft, initialAttachedFiles }: MessageInputProps) {
+export default function MessageInput({ onSend, onStop, isLoading, compareMode, onToggleCompare, currentModel, compareModels = [], templates, selectedTemplateId, onSelectTemplate, onNewChat, onRecommendationContextChange, quoteDraft, initialAttachedFiles }: MessageInputProps) {
   const { t } = useI18n();
   const { isOffline, justRestored } = useNetworkStatus();
   const [content, setContent] = useState("");
@@ -416,11 +417,13 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
       return;
     }
 
-    if (!modelSupportsUploadFile(file, currentModel)) {
+    const modelsToValidate = compareMode && compareModels.length > 0 ? compareModels : [currentModel];
+    const unsupportedModels = modelsToValidate.filter((model) => !modelSupportsUploadFile(file, model));
+    if (unsupportedModels.length > 0) {
       const ext = getUploadFileExtension(file).toUpperCase().replace(/^\./, "") || file.type || file.name;
       toast.error(
         t("chat.fileUploadUnsupportedModel")
-          .replace("{model}", getModelDisplayName(currentModel))
+          .replace("{model}", unsupportedModels.map(getModelDisplayName).join(", "))
           .replace("{type}", ext)
       );
       return;
@@ -462,10 +465,19 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
   };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const maxSize = 20 * 1024 * 1024;
+    const remainingSlots = 20 - attachedFiles.length;
+    const toUpload = Array.from(files).slice(0, remainingSlots);
     e.target.value = "";
-    await uploadSingleFile(file);
+    for (const file of toUpload) {
+      if (file.size > maxSize) {
+        toast.warning(t("chat.fileTooLarge").replace("{name}", file.name));
+        continue;
+      }
+      await uploadSingleFile(file);
+    }
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -579,6 +591,24 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
         { /* 上方面板：左侧对比/附件 + 右侧模板/新建 */ }
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onToggleCompare}
+              disabled={isLoading}
+              aria-pressed={compareMode}
+              aria-label={t("chat.compareMode")}
+              title={t("chat.compareMode")}
+              className={cn(
+                "flex h-7 w-7 items-center justify-center rounded-lg transition-colors duration-200",
+                compareMode
+                  ? "bg-amber-500/10 text-amber-500 hover:bg-amber-500/15"
+                  : "text-text-tertiary hover:bg-surface-card hover:text-text-secondary",
+                isLoading && "opacity-50 cursor-not-allowed"
+              )}
+            >
+              <Columns3 className="h-3.5 w-3.5" />
+            </button>
+
             {/* 文件上传按钮 */}
             <div className="relative">
               <button
@@ -1012,6 +1042,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
           ref={fileInputRef}
           type="file"
           accept={currentModel?.file_accept || SUPPORTED_FILE_ACCEPT}
+          multiple
           onChange={handleFileSelect}
           className="hidden"
         />

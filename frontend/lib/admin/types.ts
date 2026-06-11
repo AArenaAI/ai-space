@@ -1,5 +1,16 @@
 export type AdminRole = "user" | "admin";
 
+export interface AdminUserUsageSummary {
+  requests: number;
+  failures: number;
+  cost_rmb: number;
+  total_tokens: number;
+  image_count: number;
+  character_count: number;
+  video_seconds: number;
+  last_used_at?: string;
+}
+
 export interface AdminUser {
   id: number;
   email: string;
@@ -11,6 +22,7 @@ export interface AdminUser {
   elite_credits: number;
   created_at: string;
   updated_at: string;
+  usage_30d?: AdminUserUsageSummary;
 }
 
 export interface AdminOverview {
@@ -32,6 +44,9 @@ export interface AdminUsageLog {
   user_id: number;
   guest_id: string;
   service: string;
+  module?: string;
+  feature?: string;
+  operation?: string;
   provider: string;
   model: string;
   model_type: string;
@@ -48,6 +63,9 @@ export interface AdminUsageLog {
   total_cost_rmb: number;
   status: string;
   image_count: number;
+  character_count?: number;
+  video_seconds?: number;
+  audio_seconds?: number;
   estimated: boolean;
   pricing_unit?: string;
   unit_count?: number;
@@ -77,6 +95,9 @@ export interface AdminUsageMetric {
   prompt_tokens?: number;
   completion_tokens?: number;
   image_count?: number;
+  character_count?: number;
+  video_seconds?: number;
+  audio_seconds?: number;
 }
 
 export interface AdminUsageSummary extends AdminUsageMetric {
@@ -93,12 +114,32 @@ export interface AdminUsageLogsResponse {
   total: number;
   page: number;
   page_size: number;
+  summary?: AdminUsageMetric;
 }
 
 export interface AdminUsageServiceRow extends AdminUsageMetric {
   name: string;
   tokens: number;
   image_count: number;
+}
+
+
+export interface AdminUsageModuleRow extends AdminUsageMetric {
+  module: string;
+  feature: string;
+  operation: string;
+  service: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  image_count: number;
+  character_count: number;
+  video_seconds: number;
+  last_used_at: string;
+}
+
+export interface AdminUsageModulesResponse {
+  modules: AdminUsageModuleRow[];
 }
 
 export interface AdminUsageModelRow extends AdminUsageMetric {
@@ -179,6 +220,20 @@ export interface AdminModelsResponse {
   total: number;
 }
 
+export interface AdminTaskUsageSummary {
+  requests: number;
+  failures: number;
+  cost_rmb: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  image_count: number;
+  character_count: number;
+  video_seconds: number;
+  audio_seconds: number;
+  last_usage_at?: string;
+}
+
 export interface AdminTask {
   id: number;
   response_id: string;
@@ -190,6 +245,8 @@ export interface AdminTask {
   provider: string;
   status: string;
   error_message?: string;
+  usage?: AdminTaskUsageSummary;
+  recent_usage_logs?: AdminUsageLog[];
   created_at: string;
   updated_at: string;
   completed_at?: string;

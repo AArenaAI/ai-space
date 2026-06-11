@@ -19,6 +19,7 @@ let restoreImpl = async () => ({ title: "Restored", messages: [], model: "m1" })
 let statusImpl = async () => undefined;
 let countImpl = async () => undefined;
 const snapshotCache = new Map();
+const persistentSnapshotCache = new Map();
 
 function makeController() {
   return { aborted: false, abort() { this.aborted = true; }, signal: { aborted: false } };
@@ -79,6 +80,13 @@ function loadModule(file) {
         invalidateConversationSnapshot: (id) => snapshotCache.delete(id),
         areConversationMessagesEquivalent: (left, right) =>
           left.length === right.length && left.every((message, index) => message.id === right[index].id && message.content === right[index].content),
+      };
+    }
+    if (specifier === "@/lib/chatConversationPersistentCache") {
+      return {
+        getPersistentConversationSnapshot: async (id) => persistentSnapshotCache.get(id),
+        setPersistentConversationSnapshot: async (snapshot) => persistentSnapshotCache.set(snapshot.conversationId, snapshot),
+        deletePersistentConversationSnapshot: async (id) => persistentSnapshotCache.delete(id),
       };
     }
     if (specifier === "@/lib/chatActivityStatus") return { createBusyGeneratingStatus: () => ({ kind: "generating", label: "busy" }), createGeneratingStatus: () => ({ kind: "generating", label: "generating" }) };
@@ -188,12 +196,14 @@ async function testCacheMissClearsStaleMessagesBeforeRestore() {
   countImpl = async () => undefined;
   const { state } = runRuntime({ conversationId: 9, token: "tok" });
   assert.deepEqual(state.calls.find((c) => c[0] === "messages")?.[1], []);
+  await flush();
   restoreResolved({ title: "Fresh", messages: [{ id: "fresh", role: "assistant", content: "fresh" }] });
   await flush(); await flush();
   assert.equal(state.messages[0].content, "fresh");
 }
 async function testCacheHitShowsSnapshotImmediatelyAndRefreshes() {
   snapshotCache.clear();
+  persistentSnapshotCache.clear();
   snapshotCache.set(9, {
     conversationId: 9,
     title: "Cached",
@@ -216,6 +226,96 @@ async function testCacheHitShowsSnapshotImmediatelyAndRefreshes() {
   await flush(); await flush();
   assert.equal(state.messages[0].content, "fresh");
   assert.equal(snapshotCache.get(9).messages[0].content, "fresh");
+  assert.equal(persistentSnapshotCache.get(9).messages[0].content, "fresh");
+}
+async function testPersistentCacheHitShowsSnapshotBeforeRefresh() {
+  snapshotCache.clear();
+  persistentSnapshotCache.clear();
+  persistentSnapshotCache.set(9, {
+    conversationId: 9,
+    title: "Persistent",
+    messages: [{ id: "persistent", role: "assistant", content: "persistent" }],
+    loadedPersistedMessages: 1,
+    totalMessages: 1,
+    groupViews: new Map([[1, 0]]),
+    isLoading: false,
+    isCompare: false,
+    compareModels: [],
+    model: "m1",
+    skillKey: "persistent-skill",
+  });
+  let restoreResolved;
+  restoreImpl = async () => new Promise((resolve) => { restoreResolved = resolve; });
+  statusImpl = async () => undefined;
+  countImpl = async () => 2;
+  const { state } = runRuntime({ conversationId: 9, token: "tok" });
+  assert.deepEqual(state.calls.find((c) => c[0] === "messages")?.[1], []);
+  await flush();
+  assert.equal(state.messages[0].content, "persistent");
+  assert.equal(state.calls.find((c) => c[0] === "skill" && c[1] === "persistent-skill")?.[1], "persistent-skill");
+  restoreResolved({ title: "Fresh", model: "m2", messages: [{ id: "fresh", role: "assistant", content: "fresh" }] });
+  await flush(); await flush();
+  assert.equal(state.messages[0].content, "fresh");
+  assert.equal(snapshotCache.get(9).messages[0].content, "fresh");
+  assert.equal(persistentSnapshotCache.get(9).messages[0].content, "fresh");
+}
+async function testSnapshotVersionSkipsUnchangedRestoreReconcile() {
+  snapshotCache.clear();
+  persistentSnapshotCache.clear();
+  let restoreArgs;
+  snapshotCache.set(9, {
+    conversationId: 9,
+    title: "Cached",
+    messages: [{ id: "cached", role: "assistant", content: "cached" }],
+    loadedPersistedMessages: 1,
+    totalMessages: 1,
+    groupViews: new Map([[1, 0]]),
+    isLoading: false,
+    isCompare: false,
+    compareModels: [],
+    model: "m1",
+    skillKey: "cached-skill",
+    snapshotVersion: "9:1:stable",
+  });
+  restoreImpl = async (args) => {
+    restoreArgs = args;
+    return { notModified: true, snapshot_version: "9:1:stable" };
+  };
+  statusImpl = async () => { throw new Error("status should not fetch when snapshot is unchanged"); };
+  countImpl = async () => { throw new Error("count should not fetch when snapshot is unchanged"); };
+  const { state } = runRuntime({ conversationId: 9, token: "tok" });
+  assert.equal(state.messages[0].content, "cached");
+  await flush(); await flush();
+  assert.equal(restoreArgs.snapshotVersion, "9:1:stable");
+  assert.equal(state.messages[0].content, "cached");
+  assert.equal(persistentSnapshotCache.has(9), false);
+}
+
+async function testRestoreMetaSkipsCountAndStatusFetches() {
+  snapshotCache.clear();
+  persistentSnapshotCache.clear();
+  let countCalls = 0;
+  let statusCalls = 0;
+  restoreImpl = async () => ({
+    title: "Meta",
+    model: "m1",
+    total: 123,
+    has_more: true,
+    snapshot_version: "9:123:12",
+    messages: [{ id: "a", role: "assistant", content: "done", serverMessageId: 12 }],
+    last_assistant_status: {
+      message: { content: "done" },
+      background_task: { status: "completed", completed_at: "2026-01-01T00:00:00Z" },
+    },
+  });
+  countImpl = async () => { countCalls += 1; return 999; };
+  statusImpl = async () => { statusCalls += 1; return { content: "should-not-fetch" }; };
+  const { state } = runRuntime({ conversationId: 9, token: "tok" });
+  await flush(); await flush();
+  assert.equal(countCalls, 0);
+  assert.equal(statusCalls, 0);
+  assert.equal(state.calls.find((c) => c[0] === "total")?.[1], 123);
+  assert.equal(snapshotCache.get(9).totalMessages, 123);
 }
 async function testStatusResumeStartsTaskStream() {
   snapshotCache.clear();
@@ -242,6 +342,9 @@ async function testNavigationAbortsControllers() {
   await testLoadExistingRestoresStateAndCounts();
   await testCacheMissClearsStaleMessagesBeforeRestore();
   await testCacheHitShowsSnapshotImmediatelyAndRefreshes();
+  await testPersistentCacheHitShowsSnapshotBeforeRefresh();
+  await testSnapshotVersionSkipsUnchangedRestoreReconcile();
+  await testRestoreMetaSkipsCountAndStatusFetches();
   await testStatusResumeStartsTaskStream();
   await testNavigationAbortsControllers();
   console.log("chat conversation restore runtime hook regression passed");

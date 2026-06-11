@@ -57,7 +57,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	// Embedding provider（可用但非必需）
 	var embedder embedding.Provider
-	if cfg.EnableTextEmbedding && cfg.TextEmbeddingAPIKey != "" {
+	if cfg.EnableTextEmbedding && embedding.HasConfiguredProviderKey(cfg) {
 		var err error
 		embedder, err = embedding.NewProvider(cfg)
 		if err != nil {
@@ -112,7 +112,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		publicWithAuth.POST("/chat", chatHandler.Chat)
 
 		// 专用翻译路由
-		translateHandler := NewTranslateHandler(translateService)
+		translateHandler := NewTranslateHandler(translateService, usageService)
 		publicWithAuth.POST("/translate", translateHandler.Translate)
 		publicWithAuth.GET("/translate/languages", translateHandler.SupportedLanguages)
 		publicWithAuth.GET("/chat/tasks/:message_id", chatHandler.GetTask)
@@ -180,6 +180,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			admin.GET("/usage/users", adminHandler.UsageUsers)
 			admin.GET("/usage/users/:id", adminHandler.UsageUserDetail)
 			admin.GET("/usage/models", adminHandler.UsageModels)
+			admin.GET("/usage/modules", adminHandler.UsageModules)
 			admin.GET("/usage/conversations", adminHandler.UsageConversations)
 			admin.GET("/usage/conversations/:id", adminHandler.UsageConversationDetail)
 			admin.GET("/models", adminHandler.Models)
@@ -187,7 +188,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		}
 
 		convHandler := NewConversationHandler(db)
-		notebookHandler := NewNotebookHandler(db)
+		notebookHandler := NewNotebookHandler(db, fileService, aiService, imageService)
 		documentArtifactHandler := NewDocumentArtifactHandler(db)
 		documentArtifactHandler.AutoMigrate()
 		authorized.GET("/conversations", convHandler.List)
@@ -208,7 +209,15 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		authorized.DELETE("/notebooks/:id", notebookHandler.Delete)
 		authorized.GET("/notebooks/:id/files", notebookHandler.ListFiles)
 		authorized.POST("/notebooks/:id/files", notebookHandler.AddFile)
+		authorized.POST("/notebooks/:id/sources/url", notebookHandler.AddURLSource)
+		authorized.GET("/notebooks/:id/files/:file_id/content", notebookHandler.GetFileContent)
 		authorized.DELETE("/notebooks/:id/files/:file_id", notebookHandler.RemoveFile)
+		authorized.GET("/notebooks/:id/artifacts", notebookHandler.ListArtifacts)
+		authorized.POST("/notebooks/:id/artifacts", notebookHandler.CreateArtifact)
+		authorized.POST("/notebooks/:id/artifacts/generate", notebookHandler.GenerateArtifact)
+		authorized.POST("/notebooks/:id/report-formats", notebookHandler.SuggestReportFormats)
+		authorized.PUT("/notebooks/:id/artifacts/:artifact_id", notebookHandler.UpdateArtifact)
+		authorized.DELETE("/notebooks/:id/artifacts/:artifact_id", notebookHandler.DeleteArtifact)
 
 		// 文档研读生成文件路由
 		authorized.GET("/document-artifacts", documentArtifactHandler.List)

@@ -137,18 +137,20 @@ export async function runForkChatRequest({
   messageId,
   modelIds,
   headers,
+  initOnly = false,
   fetchImpl = fetch,
 }: {
   apiBaseUrl?: string;
   messageId: number;
   modelIds: string[];
   headers: Record<string, string>;
+  initOnly?: boolean;
   fetchImpl?: typeof fetch;
 }): Promise<ForkChatResponse> {
   const res = await fetchImpl(`${apiBaseUrl}/api/chat/${messageId}/fork`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ models: modelIds }),
+    body: JSON.stringify({ models: modelIds, init_only: initOnly }),
   });
   if (!res.ok) {
     throw normalizeError(await readApiError(res), { module: "chat", fallbackMessage: "Fork 对比失败，请稍后重试。" });

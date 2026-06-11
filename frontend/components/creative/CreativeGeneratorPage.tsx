@@ -73,11 +73,23 @@ const VIDEO_ASPECT_RATIOS = [
 const VIDEO_RESOLUTIONS = ["480p", "720p", "1080p"];
 const VIDEO_DURATIONS = ["4s", "5s", "6s", "7s", "9s", "10s", "11s", "13s", "14s", "15s"];
 const MAX_REFERENCE_VIDEO_SIZE = 200 * 1024 * 1024;
+const VIDEO_CHAT_DRAFT_PROMPT_KEY = "ai-space.videoChatDraftPrompt.v1";
+const VIDEO_CHAT_DRAFT_MEDIA_KEY = "ai-space.videoChatDraftMedia.v1";
+const VIDEO_CHAT_DRAFT_MEDIA_TIMEOUT_MS = 180 * 1000;
+const IMAGE_CHAT_DRAFT_PROMPT_KEY = "ai-space.imageChatDraftPrompt.v1";
 
 
 const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"];
 const VIDEO_EXTENSIONS = [".mp4", ".mov"];
 const VIDEO_MIME_TYPES = ["video/mp4", "video/quicktime"];
+
+type ReferenceImageRole = "reference_image" | "first_frame" | "last_frame";
+
+const REFERENCE_IMAGE_ROLES: Array<{ value: ReferenceImageRole; labelKey: string; shortKey: string }> = [
+  { value: "reference_image", labelKey: "video.referenceRole.reference", shortKey: "video.referenceRole.referenceShort" },
+  { value: "first_frame", labelKey: "video.referenceRole.firstFrame", shortKey: "video.referenceRole.firstFrameShort" },
+  { value: "last_frame", labelKey: "video.referenceRole.lastFrame", shortKey: "video.referenceRole.lastFrameShort" },
+];
 
 function fileExtension(file: File) {
   const dot = file.name.lastIndexOf(".");
@@ -136,20 +148,26 @@ function AspectIcon({ w, h, active }: { w: number; h: number; active: boolean })
 // 参考图堆叠组件
 function ReferenceImageStack({
   images,
+  imageRoles,
   onAdd,
   onRemove,
+  onCycleImageRole,
   uploading,
   onDropFile,
   model,
   uploadTip,
+  showImageRoles,
 }: {
   images: string[];
+  imageRoles?: ReferenceImageRole[];
   onAdd: () => void;
   onRemove: (index: number) => void;
+  onCycleImageRole?: (index: number) => void;
   uploading: boolean;
   onDropFile?: (file: File) => void;
   model?: ChatModel;
   uploadTip?: string;
+  showImageRoles?: boolean;
 }) {
   const { t } = useI18n();
   const [isHovered, setIsHovered] = useState(false);
@@ -163,12 +181,39 @@ function ReferenceImageStack({
     return url;
   };
 
+  const renderRoleChip = (index: number, compact = false) => {
+    if (!showImageRoles) return null;
+    const role = imageRoles?.[index] || "reference_image";
+    const roleMeta = REFERENCE_IMAGE_ROLES.find((item) => item.value === role) || REFERENCE_IMAGE_ROLES[0];
+    return (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onCycleImageRole?.(index);
+        }}
+        disabled={uploading || !onCycleImageRole}
+        className={cn(
+          "absolute inset-x-1 bottom-1 z-20 flex h-5 items-center justify-center rounded-full border px-1 text-[10px] font-semibold shadow-sm backdrop-blur-sm transition-colors",
+          role === "first_frame" && "border-emerald-400/70 bg-emerald-500/85 text-white",
+          role === "last_frame" && "border-orange-400/70 bg-orange-500/85 text-white",
+          role === "reference_image" && "border-white/25 bg-black/65 text-white hover:bg-black/75",
+          compact && "text-[9px]",
+          (uploading || !onCycleImageRole) && "cursor-not-allowed opacity-70"
+        )}
+        title={`${t("video.referenceRole.title")}: ${t(roleMeta.labelKey)}`}
+      >
+        {t(roleMeta.shortKey)}
+      </button>
+    );
+  };
+
   // 无图：显示方形上传按钮
   if (images.length === 0) {
     return (
       <div
         className={cn(
-          "relative shrink-0 w-9 h-16 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center transition-all cursor-pointer hover:border-brand/40",
+          "relative shrink-0 w-11 h-20 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center transition-all cursor-pointer hover:border-brand/40",
           uploading && "cursor-not-allowed opacity-60"
         )}
         onClick={onAdd}
@@ -212,8 +257,13 @@ function ReferenceImageStack({
   if (images.length === 1) {
     return (
       <div className="relative shrink-0 group/single">
-        <div className="w-9 h-16 rounded-xl overflow-hidden border border-surface-border">
+        <div className={cn(
+          "relative w-11 h-20 rounded-xl overflow-hidden border border-surface-border",
+          imageRoles?.[0] === "first_frame" && "border-emerald-400/70",
+          imageRoles?.[0] === "last_frame" && "border-orange-400/70"
+        )}>
           <img src={resolveImageUrl(images[0])} alt={t("image.referenceAlt")} className="w-full h-full object-cover" />
+          {renderRoleChip(0)}
         </div>
         {/* 删除按钮 - 悬浮时显示 */}
         <button
@@ -224,18 +274,20 @@ function ReferenceImageStack({
         >
           <X className="w-3 h-3" />
         </button>
-        {/* 加号按钮 */}
+        {/* 加号按钮：默认保持小圆点，悬浮/点击热区扩展到图片框尺寸 */}
         <button
           type="button"
           onClick={onAdd}
           disabled={uploading}
-          className="absolute -bottom-1.5 -right-1.5 w-5 h-5 rounded-full bg-surface-elevated border border-surface-border shadow-sm flex items-center justify-center hover:border-brand/50 hover:text-brand transition-all z-10"
+          className="group/add absolute bottom-0 right-0 z-10 flex h-20 w-11 items-end justify-end rounded-xl"
         >
-          {uploading ? (
-            <Loader2 className="w-2.5 h-2.5 text-text-tertiary animate-spin" />
-          ) : (
-            <Plus className="w-3 h-3 text-text-tertiary" />
-          )}
+          <span className="flex h-5 w-5 items-center justify-center rounded-full border border-surface-border bg-surface-elevated text-text-tertiary shadow-sm transition-all duration-200 group-hover/add:h-20 group-hover/add:w-11 group-hover/add:rounded-xl group-hover/add:border-brand/50 group-hover/add:text-brand group-hover/add:bg-surface-elevated/95">
+            {uploading ? (
+              <Loader2 className="h-2.5 w-2.5 animate-spin transition-all group-hover/add:h-4 group-hover/add:w-4" />
+            ) : (
+              <Plus className="h-3 w-3 transition-all group-hover/add:h-4 group-hover/add:w-4" />
+            )}
+          </span>
         </button>
       </div>
     );
@@ -269,15 +321,20 @@ function ReferenceImageStack({
                 isHovered ? "hover:scale-110 hover:z-50" : ""
               )}
               style={{
-                width: 36,
-                height: 64,
+                width: 44,
+                height: 80,
                 marginLeft: idx === 0 ? 0 : stackOffset,
                 transform: `rotate(${stackRotate}deg)`,
                 zIndex,
               }}
             >
-              <div className="h-full w-full overflow-hidden rounded-xl border border-surface-border shadow-sm transition-shadow group-hover/item:shadow-lg">
+              <div className={cn(
+                "relative h-full w-full overflow-hidden rounded-xl border border-surface-border shadow-sm transition-shadow group-hover/item:shadow-lg",
+                imageRoles?.[idx] === "first_frame" && "border-emerald-400/70",
+                imageRoles?.[idx] === "last_frame" && "border-orange-400/70"
+              )}>
                 <img src={resolveImageUrl(url)} alt={`${t("image.referenceAlt")} ${idx + 1}`} className="w-full h-full object-cover" />
+                {renderRoleChip(idx, true)}
               </div>
               {/* 删除按钮 - 悬浮时显示 */}
               <button
@@ -305,14 +362,16 @@ function ReferenceImageStack({
           type="button"
           onClick={onAdd}
           disabled={uploading}
-          className="absolute -right-6 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-surface-elevated border border-surface-border shadow-sm flex items-center justify-center hover:border-brand/50 hover:text-brand transition-all z-10"
+          className="group/add absolute -right-11 top-1/2 z-10 flex h-20 w-11 -translate-y-1/2 items-center justify-center rounded-xl"
           style={{ marginLeft: 8 }}
         >
-          {uploading ? (
-            <Loader2 className="w-3 h-3 text-text-tertiary animate-spin" />
-          ) : (
-            <Plus className="w-3.5 h-3.5 text-text-tertiary" />
-          )}
+          <span className="flex h-6 w-6 items-center justify-center rounded-full border border-surface-border bg-surface-elevated text-text-tertiary shadow-sm transition-all duration-200 group-hover/add:h-20 group-hover/add:w-11 group-hover/add:rounded-xl group-hover/add:border-brand/50 group-hover/add:text-brand group-hover/add:bg-surface-elevated/95">
+            {uploading ? (
+              <Loader2 className="h-3 w-3 animate-spin transition-all group-hover/add:h-4 group-hover/add:w-4" />
+            ) : (
+              <Plus className="h-3.5 w-3.5 transition-all group-hover/add:h-4 group-hover/add:w-4" />
+            )}
+          </span>
         </button>
       )}
     </div>
@@ -346,6 +405,7 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [deletingIds, setDeletingIds] = useState<number[]>([]);
   const [referenceImages, setReferenceImages] = useState<string[]>([]);
+  const [referenceImageRoles, setReferenceImageRoles] = useState<ReferenceImageRole[]>([]);
   const [referenceVideos, setReferenceVideos] = useState<string[]>([]);
   const [uploadingRef, setUploadingRef] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
@@ -481,6 +541,7 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
 
       if (uploadedImages.length > 0) {
         setReferenceImages((prev) => [...prev, ...uploadedImages]);
+        setReferenceImageRoles((prev) => [...prev, ...uploadedImages.map(() => "reference_image" as ReferenceImageRole)]);
       }
       if (uploadedVideos.length > 0) {
         setReferenceVideos((prev) => [...prev, ...uploadedVideos]);
@@ -531,6 +592,16 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
 
   const handleRemoveImage = (index: number) => {
     setReferenceImages((prev) => prev.filter((_, i) => i !== index));
+    setReferenceImageRoles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleCycleReferenceImageRole = (index: number) => {
+    setReferenceImageRoles((prev) => {
+      const next = referenceImages.map((_, i) => prev[i] || "reference_image");
+      const current = next[index] || "reference_image";
+      next[index] = current === "reference_image" ? "first_frame" : current === "first_frame" ? "last_frame" : "reference_image";
+      return next;
+    });
   };
 
   const handleRemoveVideo = (index: number) => {
@@ -543,24 +614,37 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
       return;
     }
     const params = new URLSearchParams();
-    params.set("prompt", prompt.trim());
-    if (referenceImages.length > 0) {
-      params.set("refs", referenceImages.join(","));
-    }
 
     if (mode === "video") {
+      const draftPayload: {
+        refs: string[];
+        refRoles: string[];
+        videoRefs: string[];
+        expiresAt: number;
+      } = {
+        refs: referenceImages,
+        refRoles: referenceImages.map((_, index) => referenceImageRoles[index] || "reference_image"),
+        videoRefs: referenceVideos,
+        expiresAt: Date.now() + VIDEO_CHAT_DRAFT_MEDIA_TIMEOUT_MS,
+      };
+      sessionStorage.setItem(VIDEO_CHAT_DRAFT_MEDIA_KEY, JSON.stringify(draftPayload));
+      sessionStorage.setItem(VIDEO_CHAT_DRAFT_PROMPT_KEY, prompt.trim());
+      params.set("draft", "1");
       if (currentVideoModel?.id) params.set("model", currentVideoModel.id);
       params.set("aspect", selectedVideoAspectRatio);
       params.set("resolution", selectedVideoResolution);
       params.set("duration", selectedDuration);
       if (musicEnabled) params.set("audio", "1");
-      if (referenceVideos.length > 0) {
-        params.set("videoRefs", referenceVideos.join(","));
-      }
       router.push(`/video/chat?${params.toString()}`);
       return;
     }
 
+    if (referenceImages.length > 0) {
+      params.set("refs", referenceImages.join(","));
+    }
+
+    sessionStorage.setItem(IMAGE_CHAT_DRAFT_PROMPT_KEY, prompt.trim());
+    params.set("draft", "1");
     params.set("aspect", selectedAspectRatio);
     params.set("resolution", selectedResolution);
     params.set("quality", selectedQuality);
@@ -751,16 +835,19 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
               <div className="mt-1 flex gap-2">
                 <ReferenceImageStack
                   images={referenceImages}
+                  imageRoles={referenceImageRoles}
                   onAdd={handleAddImage}
                   onRemove={handleRemoveImage}
+                  onCycleImageRole={handleCycleReferenceImageRole}
                   uploading={uploadingRef}
                   onDropFile={uploadReferenceMedia}
                   model={currentModel}
                   uploadTip={uploadLimitTip}
+                  showImageRoles={mode === "video"}
                 />
                 {mode === "video" && referenceVideos.map((url, idx) => (
                   <div key={`${url}-${idx}`} className="relative shrink-0 group/single">
-                    <div className="w-9 h-16 rounded-xl overflow-hidden border border-surface-border bg-surface-elevated relative">
+                    <div className="w-11 h-20 rounded-xl overflow-hidden border border-surface-border bg-surface-elevated relative">
                       <video
                         src={url.startsWith("file_") ? `/api/files/${url}/view` : url}
                         className="w-full h-full object-cover"

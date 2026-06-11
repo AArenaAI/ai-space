@@ -131,17 +131,8 @@ interface I18nContextType {
 const I18nContext = createContext<I18nContextType | undefined>(undefined);
 
 function getInitialLanguage(): LanguageCode {
-  if (typeof window === "undefined") return "zh-CN";
-
-  const currentLang = document.documentElement.lang as LanguageCode;
-  if (isSupportedLanguage(currentLang)) return currentLang;
-
-  const saved = localStorage.getItem("language") as LanguageCode | null;
-  if (isSupportedLanguage(saved)) return saved;
-
-  const browserLanguage = detectBrowserLanguage();
-  if (browserLanguage) return browserLanguage;
-
+  // Keep the initial render deterministic across SSR and the client's first
+  // hydration pass. Browser/localStorage language is applied after mount below.
   return "zh-CN";
 }
 
@@ -157,7 +148,13 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (localStorage.getItem("languageSource") === "user") return;
+
+    const saved = localStorage.getItem("language") as LanguageCode | null;
+    if (localStorage.getItem("languageSource") === "user" && isSupportedLanguage(saved)) {
+      setLanguageState(saved);
+      document.documentElement.lang = saved;
+      return;
+    }
 
     const browserLanguage = detectBrowserLanguage();
     if (browserLanguage) {

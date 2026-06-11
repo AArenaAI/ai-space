@@ -140,7 +140,7 @@ func (s *FileService) UploadAndParse(ctx context.Context, userID uint, guestID, 
 					CompletionTokens: result.VisionUsage.CompletionTokens,
 					TotalTokens:      result.VisionUsage.TotalTokens,
 				}
-				_ = s.usageService.RecordVisionUsage(file.UserID, guestID, s.cfg.VisionModel, file.ID, tu)
+				_ = s.usageService.RecordVisionUsageWithContext(file.UserID, s.cfg.VisionModel, file.ID, UsageContext{GuestID: guestID, ResourceType: "file", ResourceID: file.ID, Module: "work", Feature: "document_reader", Operation: "file_vision_parse"}, tu)
 			}
 		}
 		s.db.Model(file).Updates(updates)
@@ -697,7 +697,7 @@ func (s *FileService) ProcessEmbeddingJob(job models.FileEmbeddingJob) error {
 		// 通过 FileID 获取 UserID
 		var file models.File
 		if err := s.db.First(&file, job.FileID).Error; err == nil {
-			_ = s.usageService.RecordEmbeddingUsage(file.UserID, modelInfo.Model, job.FileID, embedUsage.TotalTokens)
+			_ = s.usageService.RecordEmbeddingUsageWithContext(file.UserID, modelInfo.Model, job.FileID, embedUsage.TotalTokens, UsageContext{ResourceType: "file", ResourceID: file.ID, Module: "work", Feature: "document_reader", Operation: "file_embedding"})
 		}
 	}
 
