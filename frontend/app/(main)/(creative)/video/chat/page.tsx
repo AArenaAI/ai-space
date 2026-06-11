@@ -151,8 +151,13 @@ function cleanVideoErrorMessage(raw: string | undefined, messages: VideoErrorMes
   if (!text) return messages.default;
   const lower = text.toLowerCase();
 
-  // 参考素材校验错误直接透传，不归类到通用流量桶
-  if (text.includes("参考素材") && text.includes("不符合要求")) {
+  // 后端已清洗过的中文业务文案直接透传，不再被“审核”等宽泛关键词二次归类。
+  if (
+    (text.includes("参考素材") && text.includes("不符合要求")) ||
+    text.includes("版权限制审核") ||
+    text.includes("请移除具体影视作品") ||
+    text.includes("受版权保护风格")
+  ) {
     return text;
   }
 
