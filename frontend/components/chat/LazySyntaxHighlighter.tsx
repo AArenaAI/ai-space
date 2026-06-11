@@ -7,6 +7,7 @@ type PrismHighlighter = React.ComponentType<{
   language: string;
   style: Record<string, unknown>;
   customStyle: CSSProperties;
+  codeTagProps?: { style?: CSSProperties };
   children: string;
 }>;
 
@@ -36,8 +37,8 @@ function loadSyntaxHighlighter() {
 
 function CodeFallback({ language, value }: { language: string; value: string }) {
   return (
-    <pre className="my-4 overflow-x-auto rounded-lg border border-surface-border bg-[#F6F8FA] p-4 text-[13px] leading-6 text-[#333333] dark:bg-[#0D0D0D] dark:text-[#E0E0E0]">
-      <code data-language={language || "text"}>{value}</code>
+    <pre className="overflow-x-auto bg-transparent p-5 text-[13px] leading-6 text-[#24292F] dark:text-[#D1D5DB]">
+      <code data-language={language || "text"} className="bg-transparent">{value}</code>
     </pre>
   );
 }
@@ -62,16 +63,30 @@ export default function LazySyntaxHighlighter({ language, value }: { language: s
   }
 
   const { SyntaxHighlighter, vscDarkPlus, oneLight } = loaded;
+  const syntaxStyle = isDark ? vscDarkPlus : oneLight;
+  const transparentSyntaxStyle = {
+    ...syntaxStyle,
+    'pre[class*="language-"]': {
+      ...(syntaxStyle['pre[class*="language-"]'] as Record<string, unknown> | undefined),
+      background: "transparent",
+    },
+    'code[class*="language-"]': {
+      ...(syntaxStyle['code[class*="language-"]'] as Record<string, unknown> | undefined),
+      background: "transparent",
+    },
+  };
+
   return (
     <SyntaxHighlighter
       language={language || "text"}
-      style={isDark ? vscDarkPlus : oneLight}
+      style={transparentSyntaxStyle}
+      codeTagProps={{ style: { background: "transparent" } }}
       customStyle={{
         margin: 0,
-        padding: "1rem",
+        padding: "1.25rem",
         fontSize: "13px",
         lineHeight: "1.5",
-        background: isDark ? "#0D0D0D" : "#F6F8FA",
+        background: "transparent",
         overflowX: "auto",
       }}
     >

@@ -27,7 +27,7 @@ export function createMarkdownComponents({ isStreaming = false, lightweight = fa
       return !inline && match ? (
         <CodeBlock language={lang} value={value} lightweight={lightweight} />
       ) : (
-        <code className="bg-[#E8E8E8] dark:bg-[#2A2A3A] text-[#333333] dark:text-[#E0E0E0] px-1 py-0.5 rounded text-[13px] font-mono" {...props}>
+        <code className="rounded-md bg-black/[0.06] px-1.5 py-0.5 font-mono text-[13px] text-[#1F2937] dark:bg-white/10 dark:text-[#E5E7EB]" {...props}>
           {children}
         </code>
       );

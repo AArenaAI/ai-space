@@ -266,26 +266,45 @@ async function getActiveOverviewId(page) {
     await waitForRows(page);
     await page.waitForSelector('[data-testid="chat-message-overview"]', { timeout: 20_000 });
     const manyCompact = await readCompact(page);
-    assert.equal(manyCompact.itemCount, 40, `many-message overview should keep all markers, got ${manyCompact.itemCount}`);
+    assert.equal(manyCompact.itemCount, 9, `many-message overview should render the visible 9-item window, got ${manyCompact.itemCount}`);
     assert.ok(manyCompact.height <= 520, `many-message compact overview should be height-capped, got ${manyCompact.height}`);
     await page.hover('[data-testid="chat-message-overview-rail"]');
     await page.waitForTimeout(260);
     const manyExpanded = await page.evaluate(() => {
       const panel = document.querySelector('[data-testid="chat-message-overview-panel"]');
       if (!panel) return null;
-      panel.scrollTop = panel.scrollHeight;
-      panel.dispatchEvent(new Event("scroll", { bubbles: true }));
       const rect = panel.getBoundingClientRect();
+      const ids = [...document.querySelectorAll('[data-testid="chat-message-overview-item"]')].map((item) => item.getAttribute("data-message-id"));
       return {
-        clientHeight: panel.clientHeight,
-        scrollHeight: panel.scrollHeight,
+        renderedCount: ids.length,
+        firstId: ids[0] || "",
+        lastId: ids[ids.length - 1] || "",
         overflowY: getComputedStyle(panel).overflowY,
         width: rect.width,
       };
     });
-    assert.ok(manyExpanded && manyExpanded.scrollHeight > manyExpanded.clientHeight, `many-message expanded panel should be internally scrollable: ${JSON.stringify(manyExpanded)}`);
-    assert.equal(manyExpanded.overflowY, "auto", "many-message expanded panel should use overflow-y auto");
+    assert.ok(manyExpanded, "many-message expanded panel should exist");
+    assert.equal(manyExpanded.renderedCount, 9, `many-message expanded panel should render the same 9-item window, got ${JSON.stringify(manyExpanded)}`);
+    assert.equal(manyExpanded.lastId, "overview-user-40", `many-message expanded panel should initially include the active/latest item: ${JSON.stringify(manyExpanded)}`);
     assert.ok(manyExpanded.width >= 300, `many-message expanded panel should still show full panel, got ${manyExpanded.width}`);
+
+    const beforePanelWheelScroll = await page.locator('[data-testid="virtuoso-scroller"]').evaluate((el) => el.scrollTop);
+    await page.hover('[data-testid="chat-message-overview-panel"]');
+    await page.mouse.wheel(0, -720);
+    await page.waitForTimeout(120);
+    const afterPanelWheel = await page.evaluate(() => {
+      const ids = [...document.querySelectorAll('[data-testid="chat-message-overview-item"]')].map((item) => item.getAttribute("data-message-id"));
+      return {
+        firstId: ids[0] || "",
+        lastId: ids[ids.length - 1] || "",
+      };
+    });
+    const afterPanelWheelScroll = await page.locator('[data-testid="virtuoso-scroller"]').evaluate((el) => el.scrollTop);
+    assert.notEqual(afterPanelWheel.firstId, manyExpanded.firstId, `wheel over expanded overview panel should browse the overview window: before=${JSON.stringify(manyExpanded)} after=${JSON.stringify(afterPanelWheel)}`);
+    assert.ok(Math.abs(afterPanelWheelScroll - beforePanelWheelScroll) <= 2, `wheel over expanded overview panel should not scroll the main chat: before=${beforePanelWheelScroll} after=${afterPanelWheelScroll}`);
+
+    await page.mouse.wheel(0, 720);
+    await page.waitForTimeout(120);
     const manyTargetId = "overview-user-40";
     await page.click(`[data-testid="chat-message-overview-item"][data-message-id="${manyTargetId}"]`);
     await page.waitForTimeout(650);

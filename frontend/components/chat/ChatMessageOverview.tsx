@@ -5,8 +5,8 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
-  type WheelEvent,
 } from "react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
@@ -68,11 +68,14 @@ const ChatMessageOverview = memo(function ChatMessageOverview({
 }: ChatMessageOverviewProps) {
   const { t } = useI18n();
   const [windowStart, setWindowStart] = useState(0);
+  const railRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
   const isWheel = items.length > MAX_VISIBLE;
   const activeId = items.find((item) => item.active)?.id;
   const maxStart = Math.max(0, items.length - MAX_VISIBLE);
   const effectiveActiveId = activeId ?? items[items.length - 1]?.id;
+  const itemCount = items.length;
 
   // 主聊天区域滚动导致 active 改变时，重新把 active 放回中间窗口；
   // 但用户在悬浮框内滚轮/触摸板滑动时，会用 windowStart 临时浏览更早/更晚数据。
@@ -82,7 +85,7 @@ const ChatMessageOverview = memo(function ChatMessageOverview({
       return;
     }
     setWindowStart(getCenteredStart(items, effectiveActiveId));
-  }, [effectiveActiveId, isWheel, items]);
+  }, [effectiveActiveId, isWheel, itemCount]);
 
   const windowItems = useMemo(() => {
     if (!isWheel) return items;
@@ -90,14 +93,29 @@ const ChatMessageOverview = memo(function ChatMessageOverview({
     return items.slice(start, start + MAX_VISIBLE);
   }, [isWheel, items, maxStart, windowStart]);
 
-  const handleOverviewWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
+  const handleOverviewWheelDelta = useCallback((deltaY: number) => {
     if (!isWheel) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const direction = event.deltaY > 0 ? 1 : -1;
-    const step = clamp(Math.ceil(Math.abs(event.deltaY) / 80), 1, 4);
+    const direction = deltaY > 0 ? 1 : -1;
+    const step = clamp(Math.ceil(Math.abs(deltaY) / 80), 1, 4);
     setWindowStart((current) => clamp(current + direction * step, 0, maxStart));
   }, [isWheel, maxStart]);
+
+  useEffect(() => {
+    if (!isWheel) return;
+    const handleWheel = (event: globalThis.WheelEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      handleOverviewWheelDelta(event.deltaY);
+    };
+    const rail = railRef.current;
+    const panel = panelRef.current;
+    rail?.addEventListener("wheel", handleWheel, { passive: false });
+    panel?.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      rail?.removeEventListener("wheel", handleWheel);
+      panel?.removeEventListener("wheel", handleWheel);
+    };
+  }, [handleOverviewWheelDelta, isWheel]);
 
   // 只有 1 条时不展示（< 2 已包含 0 条情况）
   if (!visible || items.length < 2) return null;
@@ -117,6 +135,7 @@ const ChatMessageOverview = memo(function ChatMessageOverview({
 
         {/* Rail 小横线 */}
         <div
+          ref={railRef}
           className={cn(
             "flex w-8 flex-col items-end gap-2 py-2 pr-1",
             isWheel
@@ -128,7 +147,6 @@ const ChatMessageOverview = memo(function ChatMessageOverview({
               ? undefined
               : { scrollbarWidth: "none", msOverflowStyle: "none" }
           }
-          onWheel={handleOverviewWheel}
           data-testid="chat-message-overview-rail"
           aria-hidden="true"
         >
@@ -149,9 +167,10 @@ const ChatMessageOverview = memo(function ChatMessageOverview({
 
         {/* Panel 展开面板 */}
         <div
+          ref={panelRef}
           className={cn(
             "invisible absolute right-8 top-1/2 z-[150] flex w-[320px] -translate-y-1/2 overflow-hidden rounded-2xl border border-surface-border bg-surface-elevated px-2 py-2 opacity-0 shadow-2xl shadow-black/25 group-hover:visible group-hover:pointer-events-auto group-hover:opacity-100 dark:border-[#2b2b2b] dark:bg-[#171717]",
-            isWheel && "h-[378px] overflow-y-auto"
+            isWheel && "h-[378px]"
           )}
           data-testid="chat-message-overview-panel"
         >
