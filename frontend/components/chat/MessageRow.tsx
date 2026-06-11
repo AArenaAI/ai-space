@@ -126,6 +126,7 @@ function MessageRow({
   const blockRichTextHydration = historyPrependSettling || (deferRichTextHydration && !canBypassBrowsingHydrationDefer);
   const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
   const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
+  const suppressAppearAnimation = historyPrependSettling || deferRichTextHydration;
   const assistantAvatarMeta = getModelAvatarMeta(model || msg.model || "AI");
   const rowProfileDetailEnabled = typeof window !== "undefined" && Boolean((window as Window & { __AI_SPACE_CHAT_ROW_PROFILE_DETAIL?: boolean }).__AI_SPACE_CHAT_ROW_PROFILE_DETAIL);
   const markdownWeight = rowProfileDetailEnabled ? getMarkdownWeight(msg.content) : null;
@@ -264,7 +265,7 @@ function MessageRow({
       style={isUser ? MESSAGE_ROW_CONTENT_VISIBILITY_STYLE : undefined}
       className={cn("max-w-[800px] mx-auto px-4 py-4 rounded-2xl transition-colors duration-500", isHighlighted && "bg-brand/10")}
     >
-      <div key={msg.id} className={cn("flex gap-3 animate-message-appear group", isUser ? "justify-end" : "justify-start")}>
+      <div key={msg.id} className={cn("flex gap-3 group", !suppressAppearAnimation && "animate-message-appear", isUser ? "justify-end" : "justify-start")}>
         <div className={cn("mt-1 shrink-0", isUser && !selectMode ? "hidden" : "w-7")}>
           {!isUser && !selectMode && (
             <div className="relative">
@@ -371,7 +372,7 @@ function MessageRow({
                 visible={isLast}
                 createdAt={msg.createdAt}
                 completedAt={msg.completedAt}
-                onForkCompare={undefined}
+                onForkCompare={!isUser && msg.serverMessageId && conversationId ? () => onForkCompare?.(msg.serverMessageId!) : undefined}
               />
             )}
           </div>

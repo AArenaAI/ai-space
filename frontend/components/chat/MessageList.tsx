@@ -761,8 +761,19 @@ function MessageList({
     });
   }, [messages, groupByMessageId, groupViews]);
 
-  const targetMessageLocalIndex = targetMessageId
-    ? allVisibleMessages.findIndex((message) => String(message.id) === String(targetMessageId))
+  const targetGroup = targetMessageId
+    ? groups.find((group) =>
+      group.userMessage.serverMessageId === targetMessageId
+      || String(group.userMessage.id) === String(targetMessageId)
+      || group.assistantMessages.some((message) => message.serverMessageId === targetMessageId || String(message.id) === String(targetMessageId))
+    )
+    : undefined;
+  const targetAnchorMessage = targetGroup?.userMessage
+    ?? (targetMessageId
+      ? allVisibleMessages.find((message) => message.serverMessageId === targetMessageId || String(message.id) === String(targetMessageId))
+      : undefined);
+  const targetMessageLocalIndex = targetAnchorMessage
+    ? allVisibleMessages.findIndex((message) => message.id === targetAnchorMessage.id)
     : -1;
   const targetMessageWindow = targetMessageLocalIndex >= 0
     ? allVisibleMessages.length - targetMessageLocalIndex
@@ -1084,9 +1095,22 @@ function MessageList({
     const targetKey = `${conversationId || "new"}:${targetMessageId}`;
     if (locatedTargetKeyRef.current === targetKey || isLoadingHistory) return;
 
-    const index = visibleMessages.findIndex((msg) => msg.serverMessageId === targetMessageId);
+    const anchorMessage = targetAnchorMessage;
+    if (!anchorMessage) {
+      if (hasMoreMessages && onLoadMore && !isLoadingMore && loadingTargetKeyRef.current !== targetKey) {
+        loadingTargetKeyRef.current = targetKey;
+        Promise.resolve(onLoadMore()).finally(() => {
+          if (loadingTargetKeyRef.current === targetKey) {
+            loadingTargetKeyRef.current = "";
+          }
+        });
+      }
+      return;
+    }
+
+    const index = visibleMessages.findIndex((msg) => msg.id === anchorMessage.id);
     if (index < 0) {
-      const allIndex = allVisibleMessages.findIndex((msg) => msg.serverMessageId === targetMessageId);
+      const allIndex = allVisibleMessages.findIndex((msg) => msg.id === anchorMessage.id);
       if (allIndex >= 0) {
         const neededWindow = allVisibleMessages.length - allIndex;
         setRenderedMessageWindow((current) => Math.max(current, neededWindow));
@@ -1104,15 +1128,19 @@ function MessageList({
       return;
     }
 
-    const msg = visibleMessages[index];
+    const scrollIndex = isCompare
+      ? Math.max(0, groups.findIndex((group) => group.userMessage.id === anchorMessage.id))
+      : index;
     locatedTargetKeyRef.current = targetKey;
     loadingTargetKeyRef.current = "";
     stickToBottomRef.current = false;
     programmaticScrollUntilRef.current = Date.now() + 700;
-    highlightMessage(msg.id, 2600);
+    setActiveOverviewMessageId(anchorMessage.id);
+    highlightMessage(anchorMessage.id, 2600);
 
     const scrollToTarget = () => {
-      virtuosoRef.current?.scrollToIndex({ index, align: "center", behavior: "auto" });
+      virtuosoRef.current?.scrollToIndex({ index: scrollIndex, align: "center", behavior: "auto" });
+      window.requestAnimationFrame(() => centerMessageRowInScroller(anchorMessage.id));
     };
 
     const raf = window.requestAnimationFrame(() => {
@@ -1124,7 +1152,7 @@ function MessageList({
       window.cancelAnimationFrame(raf);
       window.clearTimeout(settleTimer);
     };
-  }, [allVisibleMessages, conversationId, targetMessageId, visibleMessages, isLoadingHistory, isLoadingMore, hasMoreMessages, onLoadMore, highlightMessage]);
+  }, [allVisibleMessages, centerMessageRowInScroller, conversationId, targetMessageId, targetAnchorMessage, visibleMessages, isLoadingHistory, isLoadingMore, hasMoreMessages, onLoadMore, highlightMessage, groups, isCompare]);
 
   useEffect(() => {
     if (!targetMessageId) {

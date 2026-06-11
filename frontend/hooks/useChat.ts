@@ -254,6 +254,14 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     setMessages,
     setLoadedPersistedMessages,
     setGroupViews,
+    streamResponse,
+    startBackgroundPolling,
+    reasoning: lastReasoningRef.current,
+    search: lastSearchRef.current,
+    skillKey: effectiveSkillKey,
+    notebookId,
+    notebookFileIds,
+    translate: t,
   });
 
   const {

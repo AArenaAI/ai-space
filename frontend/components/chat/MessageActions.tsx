@@ -2,7 +2,7 @@
 
 import { memo, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, Copy, MoreHorizontal, RotateCcw, Share2, Star, Trash2 } from "lucide-react";
+import { Check, Columns3, Copy, MoreHorizontal, RotateCcw, Share2, Star, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 import { emitChatRenderProfileEvent, isChatRenderProfileEnabled } from "@/lib/chatRenderProfile";
@@ -168,6 +168,15 @@ function MessageActions({
           title={t("chat.action.regenerate")}
         >
           <RotateCcw className="w-3.5 h-3.5" />
+        </button>
+      )}
+      {onForkCompare && (
+        <button
+          onClick={onForkCompare}
+          className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-amber-500 hover:bg-amber-500/10 transition-colors"
+          title={t("chat.action.compare")}
+        >
+          <Columns3 className="w-3.5 h-3.5" />
         </button>
       )}
       <button

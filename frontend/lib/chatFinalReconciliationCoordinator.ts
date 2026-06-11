@@ -127,6 +127,7 @@ export function decideFinalStreamReconciliation({
     abortReason,
     serverMessageId: state.serverMessageId,
     generationTaskId: state.generationTaskId,
+    useBackground: state.useBackground,
   })) {
     return {
       type: "reconcile_after_done",
@@ -143,7 +144,7 @@ export function decideFinalStreamReconciliation({
     type: "complete_or_cleanup",
     shouldSyncFinalData,
     finalContent,
-    result: buildFinalStreamRunResult({ state }),
+    result: buildFinalStreamRunResult({ state, finalContent }),
     shouldClearStores: true,
     shouldMarkCompleted: shouldMarkCompleted({ sawDone: state.sawDone, hasFinalContent, abortReason }),
   };

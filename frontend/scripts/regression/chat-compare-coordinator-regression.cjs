@@ -37,11 +37,11 @@ function test(name, fn) {
   }
 }
 
-test("selectCompareModelIds keeps available models and caps at four", () => {
+test("selectCompareModelIds keeps available models and caps at two", () => {
   assert.deepEqual(mod.selectCompareModelIds(
     ["m1", "missing", "m2", "m3", "m4", "m5"],
     [{ id: "m1" }, { id: "m2" }, { id: "m3" }, { id: "m4" }, { id: "m5" }]
-  ), ["m1", "m2", "m3", "m4"]);
+  ), ["m1", "m2"]);
 });
 
 test("shouldStartCompare requires at least two models", () => {

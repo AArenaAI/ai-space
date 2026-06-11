@@ -26,6 +26,14 @@ const ForkCompareDialog = dynamic(() => import("./ForkCompareDialog"), {
 
 const COMPARE_KEY = "compare-mode";
 const COMPARE_MODELS_KEY = "compare-models";
+const COMPARE_MODEL_LIMIT = 2;
+
+function normalizeCompareModelIds(modelIds: string[], models: ChatModel[]): string[] {
+  const available = new Set(models.map((model) => model.id));
+  const filtered = modelIds.filter((id) => available.has(id));
+  const fallback = models.map((model) => model.id);
+  return Array.from(new Set([...filtered, ...fallback])).slice(0, COMPARE_MODEL_LIMIT);
+}
 
 interface ChatInterfaceProps {
   conversationId?: number;
@@ -55,6 +63,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   const [renameOpen, setRenameOpen] = useState(false);
   const [forkDialogOpen, setForkDialogOpen] = useState(false);
   const [forkTargetMessageId, setForkTargetMessageId] = useState<number | null>(null);
+  const [compareTargetMessageId, setCompareTargetMessageId] = useState<number | undefined>(undefined);
   const [messageSelectMode, setMessageSelectMode] = useState(false);
   const [quoteDraft, setQuoteDraft] = useState<QuoteDraft | null>(null);
   const handledExternalSendIdRef = useRef<number | null>(null);
@@ -126,6 +135,18 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   const getSelectedTemplatePayload = useCallback(() => {
     return { templateId: selectedTemplateId, templatePrefix: undefined };
   }, [selectedTemplateId]);
+
+  const applyCompareModels = useCallback((modelIds: string[]) => {
+    const normalized = normalizeCompareModelIds(modelIds, models);
+    setSelectedModels(normalized);
+    selectedModelsRef.current = normalized;
+    if (normalized.length > 0) {
+      localStorage.setItem(COMPARE_MODELS_KEY, JSON.stringify(normalized));
+    } else {
+      localStorage.removeItem(COMPARE_MODELS_KEY);
+    }
+    return normalized;
+  }, [models]);
 
   const handleModelSelect = useCallback((model: ChatModel) => {
     // 如果当前是 Skill 技能对话且有推荐模型，保存用户覆盖标记
@@ -219,20 +240,16 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
         if (savedModels) {
           try {
             const parsed = JSON.parse(savedModels);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              setSelectedModels(parsed);
-            } else {
-              setSelectedModels(models.slice(0, 2).map((m) => m.id));
-            }
+            applyCompareModels(Array.isArray(parsed) ? parsed : []);
           } catch {
-            setSelectedModels(models.slice(0, 2).map((m) => m.id));
+            applyCompareModels([]);
           }
         } else {
-          setSelectedModels(models.slice(0, 2).map((m) => m.id));
+          applyCompareModels([]);
         }
       }
     }
-  }, []); // 只在挂载时执行
+  }, [applyCompareModels, isCompare]);
 
   // 从 localStorage 恢复模板选择，并监听侧边栏模板变化事件
   useEffect(() => {
@@ -254,11 +271,11 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   useEffect(() => {
     if (isCompare && compareModels.length > 0) {
       setCompareMode(true);
-      setSelectedModels(compareModels);
+      applyCompareModels(compareModels);
     } else if (!isCompare && !conversationId) {
       // 新建对话且不是对比对话时，不从 localStorage 恢复（已经通过初始化恢复了）
     }
-  }, [isCompare, compareModels, conversationId]);
+  }, [isCompare, compareModels, conversationId, applyCompareModels]);
 
   const isComplexReasoningTask = (reasoning?: ReasoningConfig | null, modelIds?: string[]) => {
     const ids = modelIds && modelIds.length > 0 ? modelIds : [selectedModel.id];
@@ -275,15 +292,17 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
      * If re-enabled, route insufficient-credit messages through i18n keys instead of hardcoded copy.
      */
 
-    if (compareMode) {
+    const activeCompareMode = compareMode || isCompare;
+    if (activeCompareMode) {
       // 对比模式 - 依次流式发送给多个模型
-      const currentSelectedModels = selectedModelsRef.current.length ? selectedModelsRef.current : selectedModels;
+      setCompareTargetMessageId(undefined);
+      const currentSelectedModels = normalizeCompareModelIds(
+        selectedModelsRef.current.length ? selectedModelsRef.current : (selectedModels.length ? selectedModels : compareModels),
+        models
+      );
+      selectedModelsRef.current = currentSelectedModels;
       if (currentSelectedModels.length < 2) {
         toast.error(t("chat.compareMinModels"));
-        return;
-      }
-      if (!selectedTemplateId) {
-        toast.error(t("chat.compareNeedTemplate"));
         return;
       }
       // 前端目前没有后端返回的任务复杂度字段，先用用户发送时选择的推理档位判断复杂任务
@@ -323,16 +342,18 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   };
 
   const handleCompareModelChange = (index: number, modelId: string) => {
+    if (index < 0 || index >= COMPARE_MODEL_LIMIT) return;
     setSelectedModels((prev) => {
-      const fallback = prev.length ? prev : models.slice(0, Math.max(index + 1, 2)).map((m) => m.id);
-      const next = [...fallback];
-      while (next.length <= index) {
+      const fallback = prev.length ? prev : models.slice(0, COMPARE_MODEL_LIMIT).map((m) => m.id);
+      const next = [...fallback].slice(0, COMPARE_MODEL_LIMIT);
+      while (next.length <= index && next.length < COMPARE_MODEL_LIMIT) {
         next.push(models[next.length]?.id || modelId);
       }
       next[index] = modelId;
-      selectedModelsRef.current = next;
-      localStorage.setItem(COMPARE_MODELS_KEY, JSON.stringify(next));
-      return next;
+      const normalized = normalizeCompareModelIds(next, models);
+      selectedModelsRef.current = normalized;
+      localStorage.setItem(COMPARE_MODELS_KEY, JSON.stringify(normalized));
+      return normalized;
     });
   };
 
@@ -345,20 +366,12 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
       if (savedModels) {
         try {
           const parsed = JSON.parse(savedModels);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setSelectedModels(parsed);
-          } else {
-            setSelectedModels(models.slice(0, 2).map((m) => m.id));
-          }
+          applyCompareModels(Array.isArray(parsed) ? parsed : []);
         } catch {
-          setSelectedModels(models.slice(0, 2).map((m) => m.id));
+          applyCompareModels([]);
         }
       } else {
-        setSelectedModels(models.slice(0, 2).map((m) => m.id));
-      }
-      // 对比模式需要先选择一个回答模板
-      if (!selectedTemplateId) {
-        toast.warning(t("chat.compareNeedTemplateSidebar"));
+        applyCompareModels([]);
       }
       localStorage.setItem(COMPARE_KEY, "true");
     } else {
@@ -373,18 +386,48 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
 
   const handleExitCompare = useCallback(() => {
     setCompareMode(false);
+    setCompareTargetMessageId(undefined);
     localStorage.removeItem(COMPARE_KEY);
     localStorage.removeItem(COMPARE_MODELS_KEY);
+    setSelectedModels([]);
+    selectedModelsRef.current = [];
     setIsCompare(false);
     setCompareModels([]);
-  }, [setCompareMode, setIsCompare, setCompareModels]);
 
+    if (conversationId) {
+      const token = localStorage.getItem("token");
+      if (token) {
+        void fetch(`/api/conversations/${conversationId}`, {
+          method: "PUT",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ compare: false, compare_models: "[]" }),
+        }).then((response) => {
+          if (response.ok) {
+            window.dispatchEvent(new CustomEvent("conversation-updated", { detail: { conversationId } }));
+          }
+        }).catch(() => {
+          // Local exit should still work; backend state will be retried on a future explicit exit.
+        });
+      }
+    }
+  }, [conversationId, setCompareMode, setIsCompare, setCompareModels]);
+  const activeSelectedModelIds = selectedModels.length > 0 ? selectedModels : compareModels;
+  const inputCompareModels = useMemo(
+    () => activeSelectedModelIds
+      .map((modelId) => models.find((model) => model.id === modelId))
+      .filter((model): model is ChatModel => Boolean(model)),
+    [activeSelectedModelIds, models]
+  );
+
+  const activeCompareMode = compareMode || isCompare;
+  const activeCompareModelIds = compareMode ? selectedModels : (compareModels.length > 0 ? compareModels : selectedModels);
+  const activeTargetMessageId = compareTargetMessageId ?? (currentConversation === conversationId ? targetMessageId : undefined);
   const isNewEmptyChat = messages.length === 0 && !conversationId;
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
       {/* 顶部栏 - 对比模式下隐藏，释放垂直空间 */}
-      {!(compareMode || isCompare) && (
+      {!activeCompareMode && (
         <header className="relative z-20 shrink-0 h-12 flex items-center justify-between px-4 transition-all duration-300">
           <div className="flex items-center">
             <ModelSelector
@@ -455,8 +498,8 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
           onDeleteMessage={deleteMessage}
           onRegenerate={regenerateMessage}
           onContinueGenerate={regenerateMessage}
-          isCompare={compareMode || isCompare}
-          compareModels={(compareMode ? selectedModels : compareModels)}
+          isCompare={activeCompareMode}
+          compareModels={activeCompareModelIds}
           onCompareModelChange={handleCompareModelChange}
           welcomeTitle={welcomeTitle}
           welcomeSubtitle={welcomeSubtitle}
@@ -475,7 +518,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
           isLoadingMore={isLoadingMore}
           hasMoreMessages={hasMoreMessages}
           onLoadMore={loadMoreMessages}
-          targetMessageId={currentConversation === conversationId ? targetMessageId : undefined}
+          targetMessageId={activeTargetMessageId}
           onSelectModeChange={setMessageSelectMode}
           onExitCompare={handleExitCompare}
           onQuoteSelection={handleQuoteSelection}
@@ -515,9 +558,10 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
               onSend={handleSend}
               onStop={handleStop}
               isLoading={isLoading}
-              compareMode={compareMode}
+              compareMode={activeCompareMode}
               onToggleCompare={toggleCompareMode}
               currentModel={selectedModel}
+              compareModels={inputCompareModels}
               templates={templates}
               selectedTemplateId={selectedTemplateId}
               onSelectTemplate={handleTemplateSelect}
@@ -547,16 +591,21 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
           open={forkDialogOpen}
           onClose={() => { setForkDialogOpen(false); setForkTargetMessageId(null); }}
           models={models}
-          currentModelId={selectedModel.id}
-          onConfirm={async (modelIds) => {
+          currentModelId={messages.find((message) => message.serverMessageId === forkTargetMessageId)?.model || selectedModel.id}
+          onConfirm={(modelIds) => {
             if (!forkTargetMessageId) return;
-            const allModelIds = [selectedModel.id, ...modelIds];
-            try {
-              await forkChat(forkTargetMessageId, allModelIds);
-              toast.success(t("chat.compareStarted"));
-            } catch (err) {
+            const sourceModelId = messages.find((message) => message.serverMessageId === forkTargetMessageId)?.model || selectedModel.id;
+            const allModelIds = [sourceModelId, ...modelIds];
+            const normalizedModelIds = normalizeCompareModelIds(allModelIds, models);
+            setCompareTargetMessageId(forkTargetMessageId);
+            setIsCompare(true);
+            setCompareModels(normalizedModelIds);
+            setSelectedModels(normalizedModelIds);
+            selectedModelsRef.current = normalizedModelIds;
+            toast.success(t("chat.compareStarted"));
+            void forkChat(forkTargetMessageId, normalizedModelIds).catch((err) => {
               showUserError(err, { module: "chat", fallbackTitle: t("chat.forkCompareFailed"), fallbackMessage: t("chat.forkCompareFailed") });
-            }
+            });
           }}
         />
       )}
@@ -575,9 +624,10 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
                 onSend={handleSend}
                 onStop={handleStop}
                 isLoading={isLoading}
-                compareMode={compareMode}
+                compareMode={activeCompareMode}
                 onToggleCompare={toggleCompareMode}
                 currentModel={selectedModel}
+                compareModels={inputCompareModels}
                 templates={templates}
                 selectedTemplateId={selectedTemplateId}
                 onSelectTemplate={handleTemplateSelect}

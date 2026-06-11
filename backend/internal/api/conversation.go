@@ -332,8 +332,10 @@ func (h *ConversationHandler) Update(c *gin.Context) {
 	id := c.Param("id")
 
 	var req struct {
-		Title  string `json:"title"`
-		Pinned *bool  `json:"pinned,omitempty"`
+		Title         string  `json:"title"`
+		Pinned        *bool   `json:"pinned,omitempty"`
+		Compare       *bool   `json:"compare,omitempty"`
+		CompareModels *string `json:"compare_models,omitempty"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -353,6 +355,12 @@ func (h *ConversationHandler) Update(c *gin.Context) {
 	}
 	if req.Pinned != nil {
 		updates["pinned"] = *req.Pinned
+	}
+	if req.Compare != nil {
+		updates["compare"] = *req.Compare
+	}
+	if req.CompareModels != nil {
+		updates["compare_models"] = *req.CompareModels
 	}
 
 	if len(updates) > 0 {

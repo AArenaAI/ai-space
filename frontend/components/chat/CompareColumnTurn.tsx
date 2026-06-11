@@ -67,7 +67,7 @@ function CompareColumnTurn({
   const canRegenerate = !!msg && isLastGroup && !isStreaming && !isGenerating;
 
   return (
-    <div data-chat-message-row="true" className="flex h-full flex-col gap-3">
+    <div data-chat-message-row="true" data-message-id={userMessage.id} data-message-role="user" className="flex h-full flex-col gap-3">
       <CompareUserMessageBubble message={userMessage} imageLoadFailedLabel={imageLoadFailedLabel} />
       <div className="flex flex-1 flex-col">
         {msg ? (
@@ -96,7 +96,7 @@ function CompareColumnTurn({
                     visible={isLastGroup}
                     createdAt={msg.createdAt}
                     completedAt={msg.completedAt}
-                    onForkCompare={msg.serverMessageId ? () => onForkCompare?.(msg.serverMessageId!) : undefined}
+                    onForkCompare={undefined}
                   />
                 </div>
               )}

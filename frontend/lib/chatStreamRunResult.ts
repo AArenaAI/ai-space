@@ -57,12 +57,16 @@ export type ShouldRecoverStreamOptions = {
   generationTaskId?: number;
 };
 
+export type ShouldReconcileAfterDoneOptions = ShouldRecoverStreamOptions & {
+  useBackground?: boolean;
+};
+
 export function shouldRecoverStream({ sawDone, abortReason, serverMessageId, generationTaskId }: ShouldRecoverStreamOptions): boolean {
   return !sawDone && abortReason !== "user" && (!!serverMessageId || !!generationTaskId);
 }
 
-export function shouldReconcileAfterDone({ sawDone, abortReason, serverMessageId, generationTaskId }: ShouldRecoverStreamOptions): boolean {
-  return sawDone && abortReason !== "navigation" && abortReason !== "user" && (!!serverMessageId || !!generationTaskId);
+export function shouldReconcileAfterDone({ sawDone, abortReason, serverMessageId, generationTaskId, useBackground }: ShouldReconcileAfterDoneOptions): boolean {
+  return Boolean(useBackground && sawDone && abortReason !== "navigation" && abortReason !== "user" && (!!serverMessageId || !!generationTaskId));
 }
 
 export type ShouldMarkCompletedOptions = {

@@ -146,6 +146,7 @@ type ForkChatRequest struct {
 	Reasoning       bool     `json:"reasoning"`
 	ReasoningEffort string   `json:"reasoning_effort"`
 	Search          bool     `json:"search"`
+	InitOnly        bool     `json:"init_only"`
 }
 
 type CompareResult struct {
@@ -2707,6 +2708,28 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 	})
 }
 
+func findForkUserMessage(source models.Message, messages []models.Message) (models.Message, bool) {
+	if source.Role == "user" {
+		return source, true
+	}
+	var found models.Message
+	ok := false
+	for _, msg := range messages {
+		if msg.ConversationID != source.ConversationID || msg.Role != "user" {
+			continue
+		}
+		isBeforeSource := msg.CreatedAt.Before(source.CreatedAt) || (msg.CreatedAt.Equal(source.CreatedAt) && msg.ID < source.ID)
+		if !isBeforeSource {
+			continue
+		}
+		if !ok || msg.CreatedAt.After(found.CreatedAt) || (msg.CreatedAt.Equal(found.CreatedAt) && msg.ID > found.ID) {
+			found = msg
+			ok = true
+		}
+	}
+	return found, ok
+}
+
 func (h *ChatHandler) ForkChat(c *gin.Context) {
 	messageID64, err := strconv.ParseUint(c.Param("message_id"), 10, 64)
 	if err != nil || messageID64 == 0 {
@@ -2743,56 +2766,82 @@ func (h *ChatHandler) ForkChat(c *gin.Context) {
 		return
 	}
 
+	var group models.MessageGroup
+	if source.GroupID > 0 {
+		h.db.First(&group, source.GroupID)
+	}
+
 	userMsg := source
 	if source.Role != "user" {
-		if err := h.db.Where("conversation_id = ? AND role = ? AND created_at < ?", source.ConversationID, "user", source.CreatedAt).
-			Order("created_at DESC, id DESC").First(&userMsg).Error; err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "未找到可对比的用户消息"})
-			return
+		userMsg = models.Message{}
+		foundUser := false
+		if group.UserMessageID > 0 {
+			if err := h.db.Where("conversation_id = ? AND id = ? AND role = ?", source.ConversationID, group.UserMessageID, "user").First(&userMsg).Error; err == nil {
+				foundUser = true
+			}
+		}
+		if !foundUser {
+			userMsg = models.Message{}
+			if err := h.db.Where("conversation_id = ? AND role = ? AND id < ?", source.ConversationID, "user", source.ID).
+				Order("id DESC").First(&userMsg).Error; err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "未找到可对比的用户消息"})
+				return
+			}
+			if group.ID > 0 && group.UserMessageID != userMsg.ID {
+				h.db.Model(&models.MessageGroup{}).Where("id = ?", group.ID).Update("user_message_id", userMsg.ID)
+				group.UserMessageID = userMsg.ID
+			}
 		}
 	}
 	if userMsg.Role != "user" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "只能从用户消息或其回答发起对比"})
 		return
 	}
-
-	var group models.MessageGroup
-	if source.GroupID > 0 {
-		h.db.First(&group, source.GroupID)
+	createdGroup, err := h.createMessageGroup(source.ConversationID, userMsg.ID, req.ModelIDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建消息组失败"})
+		return
 	}
-	if group.ID == 0 {
-		if err := h.db.Where("conversation_id = ? AND user_message_id = ?", source.ConversationID, userMsg.ID).First(&group).Error; err != nil {
-			existingModels := req.ModelIDs
-			var existing []models.Message
-			h.db.Where("conversation_id = ? AND role = ? AND created_at > ?", source.ConversationID, "assistant", userMsg.CreatedAt).
-				Order("created_at ASC, id ASC").Find(&existing)
-			for _, msg := range existing {
-				if msg.Model != "" {
-					existingModels = appendMissingStrings(existingModels, msg.Model)
-				}
-			}
-			created, err := h.createMessageGroup(source.ConversationID, userMsg.ID, existingModels)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "创建消息组失败"})
-				return
-			}
-			group = *created
-			for idx, msg := range existing {
-				if msg.GroupID == 0 {
-					h.db.Model(&models.Message{}).Where("id = ?", msg.ID).Updates(map[string]interface{}{"group_id": group.ID, "group_index": idx})
-				}
+	group = *createdGroup
+
+	reuseSourceIndex := -1
+	if source.Role == "assistant" && source.Model != "" {
+		for idx, modelID := range req.ModelIDs {
+			if modelID == source.Model {
+				reuseSourceIndex = idx
+				break
 			}
 		}
 	}
-	if group.ID == 0 {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "消息组不可用"})
-		return
+	if reuseSourceIndex >= 0 {
+		if err := h.db.Model(&models.Message{}).Where("id = ?", source.ID).Updates(map[string]interface{}{
+			"group_id":    group.ID,
+			"group_index": reuseSourceIndex,
+		}).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "更新源消息失败"})
+			return
+		}
 	}
-
-	groupModels := appendMissingStrings(group.GetModels(), req.ModelIDs...)
-	group.SetModels(groupModels)
-	if err := h.db.Save(&group).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新消息组失败"})
+	if req.InitOnly {
+		results := make([]CompareResult, len(req.ModelIDs))
+		if reuseSourceIndex >= 0 {
+			results[reuseSourceIndex] = CompareResult{
+				ModelID:   source.Model,
+				ModelName: findModelName(source.Model),
+				Content:   source.Content,
+				MessageID: source.ID,
+				GroupID:   group.ID,
+			}
+		}
+		h.touchConversation(source.ConversationID)
+		c.JSON(http.StatusOK, gin.H{
+			"results":            results,
+			"conversation_id":    source.ConversationID,
+			"group_id":           group.ID,
+			"user_message_id":    userMsg.ID,
+			"reuse_source_index": reuseSourceIndex,
+			"models":             group.GetModels(),
+		})
 		return
 	}
 
@@ -2816,10 +2865,27 @@ func (h *ChatHandler) ForkChat(c *gin.Context) {
 		index int
 		res   CompareResult
 	}
-	results := make(chan forkResult, len(req.ModelIDs))
+	ordered := make([]CompareResult, len(req.ModelIDs))
+	pendingRequests := len(req.ModelIDs)
+	if reuseSourceIndex >= 0 {
+		pendingRequests--
+		ordered[reuseSourceIndex] = CompareResult{
+			ModelID:    source.Model,
+			ModelName:  findModelName(source.Model),
+			Content:    source.Content,
+			MessageID:  source.ID,
+			GroupID:    group.ID,
+			ElapsedMs:  0,
+		}
+	}
+
+	results := make(chan forkResult, pendingRequests)
 	ctx := c.Request.Context()
 	searchMessages, _, useSearch := h.preprocessSearch(messages, req.ModelIDs[0], req.Search, c.ClientIP())
 	for i, modelID := range req.ModelIDs {
+		if i == reuseSourceIndex {
+			continue
+		}
 		go func(idx int, modelID string) {
 			start := time.Now()
 			modelMessages := searchMessages
@@ -2838,27 +2904,26 @@ func (h *ChatHandler) ForkChat(c *gin.Context) {
 		}(i, modelID)
 	}
 
-	ordered := make([]CompareResult, len(req.ModelIDs))
-	for range req.ModelIDs {
+	for i := 0; i < pendingRequests; i++ {
 		r := <-results
 		ordered[r.index] = r.res
 	}
 
-	startIndex := len(group.GetModels()) - len(req.ModelIDs)
-	if startIndex < 0 {
-		startIndex = 0
-	}
 	for idx, res := range ordered {
-		now := time.Now()
+		if idx == reuseSourceIndex {
+			continue
+		}
+		createdAt := source.CreatedAt.Add(time.Duration(idx+1) * time.Millisecond)
+		completedAt := time.Now()
 		msg := models.Message{
 			ConversationID: source.ConversationID,
 			Role:           "assistant",
 			Content:        res.Content,
 			Model:          res.ModelID,
 			GroupID:        group.ID,
-			GroupIndex:     startIndex + idx,
-			CompletedAt:    &now,
-			CreatedAt:      now,
+			GroupIndex:     idx,
+			CompletedAt:    &completedAt,
+			CreatedAt:      createdAt,
 		}
 		if err := h.db.Create(&msg).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存 fork 消息失败"})
@@ -2868,7 +2933,9 @@ func (h *ChatHandler) ForkChat(c *gin.Context) {
 		ordered[idx].GroupID = group.ID
 	}
 
-	h.db.Model(&models.Conversation{}).Where("id = ?", source.ConversationID).Updates(map[string]interface{}{"compare": true, "compare_models": mustJSON(group.GetModels())})
+	// Fork compare is a message-level comparison. Do not persist the whole conversation
+	// as compare mode; otherwise reopening a normal chat after a one-off fork would
+	// incorrectly restore the entire conversation as Compare Chat.
 	h.touchConversation(source.ConversationID)
 
 	c.JSON(http.StatusOK, gin.H{

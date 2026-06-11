@@ -11,7 +11,7 @@ export type AvailableModelLike = {
 export function selectCompareModelIds(
   requestedModelIds: string[],
   availableModels: AvailableModelLike[],
-  maxModels: number = 4
+  maxModels: number = 2
 ): string[] {
   const available = new Set(availableModels.map((model) => model.id));
   return requestedModelIds.filter((id) => available.has(id)).slice(0, maxModels);

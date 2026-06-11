@@ -17,40 +17,49 @@ interface ForkCompareDialogProps {
   onClose: () => void;
   models: ChatModel[];
   currentModelId?: string;
-  onConfirm: (modelIds: string[]) => void;
+  onConfirm: (modelIds: string[]) => void | Promise<void>;
 }
 
 export default function ForkCompareDialog({ open, onClose, models, currentModelId, onConfirm }: ForkCompareDialogProps) {
   const { t } = useI18n();
   const [selected, setSelected] = useState<string[]>([]);
+  const [submitting, setSubmitting] = useState(false);
 
   if (!open) return null;
 
   const toggleModel = (id: string) => {
+    if (submitting) return;
     setSelected((prev) => {
       if (prev.includes(id)) {
         return prev.filter((m) => m !== id);
       }
-      if (prev.length >= 3) {
+      if (prev.length >= 1) {
         toast.warning(t("chat.compareMaxModels"));
         return prev;
       }
-      return [...prev, id];
+      return [id];
     });
   };
 
-  const handleConfirm = () => {
-    if (selected.length === 0) {
+  const handleConfirm = async () => {
+    if (submitting) return;
+    const nextSelected = [...selected];
+    if (nextSelected.length === 0) {
       toast.error(t("chat.compareSelectOne"));
       return;
     }
-    onConfirm(selected);
-    setSelected([]);
-    onClose();
+    setSubmitting(true);
+    try {
+      await onConfirm(nextSelected);
+      setSelected([]);
+      onClose();
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={submitting ? undefined : onClose}>
       <div
         className="bg-surface-elevated border border-surface-border rounded-2xl shadow-xl w-full max-w-md mx-4 p-6"
         onClick={(e) => e.stopPropagation()}
@@ -60,7 +69,7 @@ export default function ForkCompareDialog({ open, onClose, models, currentModelI
             <Columns2 className="w-5 h-5 text-brand" />
             <h3 className="text-base font-semibold text-text-primary">{t("chat.selectCompareModels")}</h3>
           </div>
-          <button onClick={onClose} className="p-1 rounded-md hover:bg-surface-card text-text-tertiary">
+          <button onClick={onClose} disabled={submitting} className="p-1 rounded-md hover:bg-surface-card text-text-tertiary disabled:opacity-50 disabled:cursor-not-allowed">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -77,7 +86,7 @@ export default function ForkCompareDialog({ open, onClose, models, currentModelI
               <button
                 key={model.id}
                 onClick={() => !isCurrent && toggleModel(model.id)}
-                disabled={isCurrent}
+                disabled={isCurrent || submitting}
                 className={cn(
                   "w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-all text-left",
                   isCurrent
@@ -110,21 +119,22 @@ export default function ForkCompareDialog({ open, onClose, models, currentModelI
         <div className="flex gap-3 mt-6">
           <button
             onClick={onClose}
-            className="flex-1 px-4 py-2.5 rounded-xl border border-surface-border text-sm text-text-secondary hover:bg-surface-card transition-colors"
+            disabled={submitting}
+            className="flex-1 px-4 py-2.5 rounded-xl border border-surface-border text-sm text-text-secondary hover:bg-surface-card transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {t("common.cancel")}
           </button>
           <button
             onClick={handleConfirm}
-            disabled={selected.length === 0}
+            disabled={selected.length === 0 || submitting}
             className={cn(
               "flex-1 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors",
-              selected.length > 0
+              selected.length > 0 && !submitting
                 ? "bg-brand text-white hover:bg-brand/90"
                 : "bg-surface-card text-text-tertiary cursor-not-allowed"
             )}
           >
-            {t("chat.startCompare")}
+            {submitting ? t("chat.comparing") : t("chat.startCompare")}
           </button>
         </div>
       </div>
