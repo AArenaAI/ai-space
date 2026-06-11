@@ -29,7 +29,7 @@ const ICON_BASE = "/model-icons";
 
 const PROVIDER_AVATARS: Record<string, ProviderAvatarConfig> = {
   deepseek: {
-    label: "深度求索",
+    label: "DeepSeek",
     labelEn: "DeepSeek",
     color: "#4D6BFA",
     background: "rgba(77, 107, 250, 0.12)",
@@ -74,8 +74,8 @@ const PROVIDER_AVATARS: Record<string, ProviderAvatarConfig> = {
     iconSrc: `${ICON_BASE}/googlegemini.svg`,
   },
   moonshot: {
-    label: "月之暗面",
-    labelEn: "Moonshot AI",
+    label: "Moonshot",
+    labelEn: "Moonshot",
     color: "#111827",
     background: "rgba(17, 24, 39, 0.10)",
     fallback: "月",

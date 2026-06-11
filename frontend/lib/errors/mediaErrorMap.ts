@@ -72,6 +72,10 @@ export function mapMediaError(raw: string, module?: ErrorModule): Partial<UserFa
   }
 
   if (/参考素材|reference|参考图|参考视频/i.test(message)) {
+    // 透传后端已格式化的详细错误（含索引号和文件名）
+    if (/参考素材\s*#\d+.*\(.*\).*不符合要求/.test(message)) {
+      return null;
+    }
     return {
       code: isVideo ? "video_reference_invalid" : "image_reference_invalid",
       category: isVideo ? "video_generation" : "image_generation",

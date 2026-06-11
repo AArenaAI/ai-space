@@ -74,6 +74,8 @@ const VIDEO_RESOLUTIONS = ["480p", "720p", "1080p"];
 const VIDEO_DURATIONS = ["4s", "5s", "6s", "7s", "9s", "10s", "11s", "13s", "14s", "15s"];
 const MAX_REFERENCE_VIDEO_SIZE = 200 * 1024 * 1024;
 const VIDEO_CHAT_DRAFT_PROMPT_KEY = "ai-space.videoChatDraftPrompt.v1";
+const VIDEO_CHAT_DRAFT_MEDIA_KEY = "ai-space.videoChatDraftMedia.v1";
+const VIDEO_CHAT_DRAFT_MEDIA_TIMEOUT_MS = 180 * 1000;
 const IMAGE_CHAT_DRAFT_PROMPT_KEY = "ai-space.imageChatDraftPrompt.v1";
 
 
@@ -612,14 +614,20 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
       return;
     }
     const params = new URLSearchParams();
-    if (referenceImages.length > 0) {
-      params.set("refs", referenceImages.join(","));
-      if (mode === "video") {
-        params.set("refRoles", referenceImages.map((_, index) => referenceImageRoles[index] || "reference_image").join(","));
-      }
-    }
 
     if (mode === "video") {
+      const draftPayload: {
+        refs: string[];
+        refRoles: string[];
+        videoRefs: string[];
+        expiresAt: number;
+      } = {
+        refs: referenceImages,
+        refRoles: referenceImages.map((_, index) => referenceImageRoles[index] || "reference_image"),
+        videoRefs: referenceVideos,
+        expiresAt: Date.now() + VIDEO_CHAT_DRAFT_MEDIA_TIMEOUT_MS,
+      };
+      sessionStorage.setItem(VIDEO_CHAT_DRAFT_MEDIA_KEY, JSON.stringify(draftPayload));
       sessionStorage.setItem(VIDEO_CHAT_DRAFT_PROMPT_KEY, prompt.trim());
       params.set("draft", "1");
       if (currentVideoModel?.id) params.set("model", currentVideoModel.id);
@@ -627,11 +635,12 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
       params.set("resolution", selectedVideoResolution);
       params.set("duration", selectedDuration);
       if (musicEnabled) params.set("audio", "1");
-      if (referenceVideos.length > 0) {
-        params.set("videoRefs", referenceVideos.join(","));
-      }
       router.push(`/video/chat?${params.toString()}`);
       return;
+    }
+
+    if (referenceImages.length > 0) {
+      params.set("refs", referenceImages.join(","));
     }
 
     sessionStorage.setItem(IMAGE_CHAT_DRAFT_PROMPT_KEY, prompt.trim());

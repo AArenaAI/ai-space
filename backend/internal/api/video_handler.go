@@ -101,16 +101,7 @@ func (h *VideoHandler) CreateVideo(c *gin.Context) {
 	}
 	log.Printf("[Video] create task refs images=%d videos=%d model=%s", len(createReq.ReferenceImages), len(createReq.ReferenceVideos), modelID)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
-
-	resp, err := h.videoService.CreateVideoTask(ctx, createReq)
-	if err != nil {
-		log.Printf("[Video] create task failed model=%s ratio=%s resolution=%s duration=%d audio=%v err=%v", modelID, ratio, resolution, duration, req.GenerateAudio, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": cleanVideoTaskSubmissionErrorMessage(err)})
-		return
-	}
-
+	// Create DB record first, then submit async
 	video := models.VideoGeneration{
 		UserID:              userID,
 		Prompt:              req.Prompt,
@@ -122,18 +113,20 @@ func (h *VideoHandler) CreateVideo(c *gin.Context) {
 		Watermark:           req.Watermark,
 		ReferenceImageCount: len(createReq.ReferenceImages),
 		ReferenceVideoCount: len(createReq.ReferenceVideos),
-		TaskID:              resp.TaskID,
-		Status:              resp.Status,
+		Status:              "pending",
 	}
 	if err := h.db.Create(&video).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save task"})
 		return
 	}
 
+	// Launch async goroutine to create video task with Volcengine
+	go h.submitVideoTaskAsync(userID, video.ID, createReq)
+
 	c.JSON(http.StatusOK, gin.H{
 		"id":         video.ID,
-		"task_id":    video.TaskID,
-		"status":     video.Status,
+		"task_id":    "",
+		"status":     "pending",
 		"prompt":     video.Prompt,
 		"model":      video.Model,
 		"ratio":      video.Ratio,
@@ -285,6 +278,32 @@ func (h *VideoHandler) recordVideoUsageIfNeeded(video *models.VideoGeneration, r
 	}
 	h.db.Model(video).Update("usage_recorded", true)
 	video.UsageRecorded = true
+}
+
+// submitVideoTaskAsync creates the video task in background for standalone video generation.
+func (h *VideoHandler) submitVideoTaskAsync(userID uint, videoID uint, createReq services.CreateVideoTaskRequest) {
+	log.Printf("[Video] async create task refs images=%d videos=%d model=%s video_id=%d", len(createReq.ReferenceImages), len(createReq.ReferenceVideos), createReq.Model, videoID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	resp, err := h.videoService.CreateVideoTask(ctx, createReq)
+	if err != nil {
+		errMsg := cleanVideoTaskSubmissionErrorMessage(err)
+		log.Printf("[Video] async create task failed video_id=%d err=%v", videoID, err)
+		h.db.Model(&models.VideoGeneration{}).Where("id = ?", videoID).Updates(map[string]interface{}{
+			"status":        "failed",
+			"error_message": errMsg,
+			"updated_at":    time.Now(),
+		})
+		return
+	}
+
+	h.db.Model(&models.VideoGeneration{}).Where("id = ?", videoID).Updates(map[string]interface{}{
+		"task_id":    resp.TaskID,
+		"status":     resp.Status,
+		"updated_at": time.Now(),
+	})
+	log.Printf("[Video] async create task success video_id=%d task=%s", videoID, resp.TaskID)
 }
 
 // filterAndResolveURLs filters empty URLs and resolves local references

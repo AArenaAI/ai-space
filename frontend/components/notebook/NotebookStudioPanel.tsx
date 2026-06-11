@@ -1255,22 +1255,18 @@ export function NotebookStudioPanel({
   const [openMenuArtifactId, setOpenMenuArtifactId] = useState<string | null>(null);
   const [viewerArtifactId, setViewerArtifactId] = useState<string | null>(null);
   const [sourcePopoverKey, setSourcePopoverKey] = useState<string | null>(null);
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(true);
   const [infographicDialogOpen, setInfographicDialogOpen] = useState(false);
   const activeArtifact = artifacts.find((artifact) => artifact.id === activeArtifactId) || null;
   const viewerArtifact = artifacts.find((artifact) => artifact.id === viewerArtifactId) || null;
   const sourcesForArtifact = (artifact: NotebookStudioArtifact) => sourceFiles.slice(0, Math.max(0, artifact.sourceCount || 0));
-  const actions: Array<{ id: NotebookStudioActionId; title: string; desc: string; accent: string }> = [
-    { id: "table", title: t("notebook.studio.table"), desc: t("notebook.studio.tableDesc"), accent: "from-emerald-500/15 to-cyan-500/10 text-emerald-500" },
-    { id: "summary", title: t("notebook.studio.summary"), desc: t("notebook.studio.summaryDesc"), accent: "from-brand/15 to-purple-500/10 text-brand" },
-    { id: "faq", title: t("notebook.studio.faq"), desc: t("notebook.studio.faqDesc"), accent: "from-amber-500/15 to-orange-500/10 text-amber-500" },
-    { id: "briefing", title: t("notebook.studio.briefing"), desc: t("notebook.studio.briefingDesc"), accent: "from-blue-500/15 to-sky-500/10 text-blue-500" },
-    { id: "mindmap", title: t("notebook.studio.mindmap"), desc: t("notebook.studio.mindmapDesc"), accent: "from-violet-500/15 to-fuchsia-500/10 text-violet-500" },
-    { id: "flashcards", title: t("notebook.studio.flashcards"), desc: t("notebook.studio.flashcardsDesc"), accent: "from-pink-500/15 to-rose-500/10 text-pink-500" },
-    { id: "quiz", title: t("notebook.studio.quiz"), desc: t("notebook.studio.quizDesc"), accent: "from-purple-500/15 to-violet-500/10 text-purple-500" },
-    { id: "report", title: t("notebook.studio.report"), desc: t("notebook.studio.reportDesc"), accent: "from-slate-500/15 to-blue-500/10 text-slate-600 dark:text-slate-300" },
-    { id: "infographic", title: t("notebook.studio.infographic"), desc: t("notebook.studio.infographicDesc"), accent: "from-violet-500/15 to-purple-500/10 text-violet-500" },
-    { id: "slides", title: t("notebook.studio.slides"), desc: t("notebook.studio.slidesDesc"), accent: "from-rose-500/15 to-pink-500/10 text-rose-500" },
+  const actions: Array<{ id: NotebookStudioActionId; title: string; desc: string; accent: string; bgClass: string }> = [
+    { id: "table", title: t("notebook.studio.table"), desc: t("notebook.studio.tableDesc"), accent: "from-emerald-500/15 to-cyan-500/10 text-emerald-500", bgClass: "bg-indigo-50 dark:bg-indigo-950/30" },
+    { id: "mindmap", title: t("notebook.studio.mindmap"), desc: t("notebook.studio.mindmapDesc"), accent: "from-violet-500/15 to-fuchsia-500/10 text-violet-500", bgClass: "bg-purple-50 dark:bg-purple-950/30" },
+    { id: "flashcards", title: t("notebook.studio.flashcards"), desc: t("notebook.studio.flashcardsDesc"), accent: "from-pink-500/15 to-rose-500/10 text-pink-500", bgClass: "bg-rose-50 dark:bg-rose-950/30" },
+    { id: "quiz", title: t("notebook.studio.quiz"), desc: t("notebook.studio.quizDesc"), accent: "from-purple-500/15 to-violet-500/10 text-purple-500", bgClass: "bg-sky-50 dark:bg-sky-950/30" },
+    { id: "report", title: t("notebook.studio.report"), desc: t("notebook.studio.reportDesc"), accent: "from-slate-500/15 to-blue-500/10 text-slate-600 dark:text-slate-300", bgClass: "bg-yellow-50 dark:bg-yellow-950/30" },
+    { id: "infographic", title: t("notebook.studio.infographic"), desc: t("notebook.studio.infographicDesc"), accent: "from-violet-500/15 to-purple-500/10 text-violet-500", bgClass: "bg-fuchsia-50 dark:bg-fuchsia-950/30" },
   ];
 
   const handleActionClick = (actionId: NotebookStudioActionId) => {
@@ -1420,20 +1416,22 @@ export function NotebookStudioPanel({
           {actions.map((action) => {
             const Icon = actionIconMap[action.id];
             const isGenerating = generatingType === action.id;
-            const primaryIconTone = primaryStudioActionIconTone[action.id];
             return (
-              <button key={action.id} type="button" onClick={() => handleActionClick(action.id)} disabled={Boolean(generatingType)} className="group flex min-h-[72px] items-center gap-3 rounded-2xl border border-surface-border bg-surface-elevated px-3 py-3 text-left transition hover:border-surface-border hover:bg-surface-card hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-70">
-                <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center", primaryIconTone ? primaryIconTone : cn("rounded-2xl bg-gradient-to-br", action.accent))}>
-                  {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className={primaryIconTone ? "h-[23px] w-[23px]" : "h-4 w-4"} />}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-semibold text-text-primary">{action.title}</div>
-                  <div className="mt-0.5 flex items-center gap-1 text-[11px] text-text-tertiary">
-                    <span className="truncate">{action.id === "slides" || action.id === "briefing" ? t("notebook.studio.beta") : t("notebook.studio.basedOnSources", { count: String(selectedSourceCount) })}</span>
+              <div key={action.id} className={cn("group relative flex min-h-[88px] flex-col justify-between overflow-hidden rounded-2xl px-3.5 py-3 transition hover:shadow-sm", action.bgClass)}>
+                <button type="button" onClick={() => handleActionClick(action.id)} disabled={Boolean(generatingType)} className="flex h-full flex-col justify-between text-left">
+                  <div className="flex items-start justify-between">
+                    {isGenerating ? (
+                      <Loader2 className="h-5 w-5 animate-spin text-text-secondary" />
+                    ) : (
+                      <Icon className="h-5 w-5 text-text-secondary" />
+                    )}
                   </div>
-                </div>
-                <ChevronRight className="h-4 w-4 shrink-0 text-text-tertiary transition group-hover:translate-x-0.5" />
-              </button>
+                  <div className="text-sm font-semibold text-text-primary">{action.title}</div>
+                </button>
+                <button type="button" onClick={() => handleActionClick(action.id)} disabled={Boolean(generatingType)} className="absolute right-3 top-1/2 z-10 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-white/70 text-text-secondary shadow-sm ring-1 ring-black/5 transition hover:scale-105 hover:bg-brand hover:text-white hover:shadow-md disabled:cursor-not-allowed disabled:opacity-70">
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
             );
           })}
         </div>
@@ -1470,9 +1468,6 @@ export function NotebookStudioPanel({
                           <span className="shrink-0">{formatTime(artifact.createdAt)}</span>
                         </div>
                       </div>
-                    </button>
-                    <button type="button" onClick={() => setViewerArtifactId(artifact.id)} className="absolute right-9 top-1/2 z-10 -translate-y-1/2 rounded-full p-1.5 text-text-tertiary opacity-0 transition hover:bg-surface-card hover:text-text-primary group-hover:opacity-100" title={t("notebook.studio.expandViewer")}>
-                      <Maximize2 className="h-3.5 w-3.5" />
                     </button>
                     <ArtifactMenu
                       artifact={artifact}

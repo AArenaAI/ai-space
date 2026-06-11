@@ -73,7 +73,7 @@ func RateLimitMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		path := c.Request.URL.Path
 		method := c.Request.Method
-		if strings.HasPrefix(path, "/api/images/file/") || isHighFrequencyReadEndpoint(method, path) {
+		if strings.HasPrefix(path, "/api/images/file/") || strings.HasPrefix(path, "/api/videos/file/") || isHighFrequencyReadEndpoint(method, path) {
 			c.Next()
 			return
 		}

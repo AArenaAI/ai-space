@@ -412,7 +412,7 @@ function mapGeneric(raw: string, httpStatus?: number): Partial<UserFacingError> 
 }
 
 function shouldPassThrough(message: string) {
-  return /^(请先|请输入|请描述|请选择|读取图片失败|上传图片失败|原图上传失败|无可用的视频模型|仅支持上传|参考图不能超过|参考视频不能超过|参考视频仅支持|历史记录只能保存)/.test(message);
+  return /^(请先|请输入|请描述|请选择|读取图片失败|上传图片失败|原图上传失败|无可用的视频模型|仅支持上传|参考图不能超过|参考视频不能超过|参考视频仅支持|历史记录只能保存|参考素材)/.test(message);
 }
 
 function looksTechnical(message: string) {

@@ -462,10 +462,19 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
   };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const maxSize = 20 * 1024 * 1024;
+    const remainingSlots = 20 - attachedFiles.length;
+    const toUpload = Array.from(files).slice(0, remainingSlots);
     e.target.value = "";
-    await uploadSingleFile(file);
+    for (const file of toUpload) {
+      if (file.size > maxSize) {
+        toast.warning(t("chat.fileTooLarge").replace("{name}", file.name));
+        continue;
+      }
+      await uploadSingleFile(file);
+    }
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -1012,6 +1021,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
           ref={fileInputRef}
           type="file"
           accept={currentModel?.file_accept || SUPPORTED_FILE_ACCEPT}
+          multiple
           onChange={handleFileSelect}
           className="hidden"
         />

@@ -48,11 +48,15 @@ const MAX_REFERENCE_IMAGES = 9;
 const MAX_REFERENCE_VIDEOS = 3;
 const MAX_REFERENCE_VIDEO_SIZE = 200 * 1024 * 1024;
 const VIDEO_CHAT_DRAFT_PROMPT_KEY = "ai-space.videoChatDraftPrompt.v1";
+const VIDEO_CHAT_DRAFT_MEDIA_KEY = "ai-space.videoChatDraftMedia.v1";
 const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"];
 const VIDEO_EXTENSIONS = [".mp4", ".mov"];
 const VIDEO_MIME_TYPES = ["video/mp4", "video/quicktime"];
+
 type ReferenceImageRole = "reference_image" | "first_frame" | "last_frame";
 type ReferenceImageRolePreset = "reference" | "first_frame" | "first_last_frame";
+
+const VIDEO_CHAT_DRAFT_MEDIA_TIMEOUT_MS = 180 * 1000;
 
 const REFERENCE_IMAGE_ROLE_PRESETS: Array<{ value: ReferenceImageRolePreset; labelKey: string; hintKey: string }> = [
   { value: "reference", labelKey: "video.referenceMode.reference", hintKey: "video.referenceMode.referenceHint" },
@@ -146,6 +150,11 @@ function cleanVideoErrorMessage(raw: string | undefined, messages: VideoErrorMes
   const text = (raw || "").trim();
   if (!text) return messages.default;
   const lower = text.toLowerCase();
+
+  // 参考素材校验错误直接透传，不归类到通用流量桶
+  if (text.includes("参考素材") && text.includes("不符合要求")) {
+    return text;
+  }
 
   if (
     lower.includes("inputimagesensitivecontentdetected") ||
@@ -265,6 +274,9 @@ function VideoChatPageInner() {
     const refs = searchParams.get("videoRefs");
     return refs ? refs.split(",").filter(Boolean) : [];
   });
+
+  const draftPrompt = searchParams.get("draft");
+
   const [referenceImageRoles, setReferenceImageRoles] = useState<ReferenceImageRole[]>(() => referenceImages.map(() => "reference_image"));
   const [uploadingRef, setUploadingRef] = useState(false);
   const [selectedAspectRatio, setSelectedAspectRatio] = useState(searchParams.get("aspect") || "adaptive");
@@ -295,31 +307,82 @@ function VideoChatPageInner() {
   const hasReferenceMedia = referenceImages.length > 0 || referenceVideos.length > 0;
   const selectedReferenceMode = REFERENCE_IMAGE_ROLE_PRESETS[0];
   useEffect(() => {
+    const refsFromQuery = searchParams.get("refs");
+    const videoRefsFromQuery = searchParams.get("videoRefs");
+
+    if (refsFromQuery) {
+      const nextRefs = refsFromQuery.split(",").filter(Boolean);
+      const roleParams = (searchParams.get("refRoles") || "").split(",").filter(Boolean) as ReferenceImageRole[];
+      setReferenceImages(nextRefs);
+      setReferenceImageRoles(
+        nextRefs.map((_, index) => {
+          const role = roleParams[index];
+          return role === "first_frame" || role === "last_frame" || role === "reference_image" ? role : "reference_image";
+        })
+      );
+    }
+
+    if (videoRefsFromQuery) {
+      setReferenceVideos(videoRefsFromQuery.split(",").filter(Boolean));
+    }
+
+    if (draftPrompt !== "1") return;
+
+    const stored = sessionStorage.getItem(VIDEO_CHAT_DRAFT_MEDIA_KEY);
+    if (!stored) return;
+
+    try {
+      const payload = JSON.parse(stored) as {
+        refs?: string[];
+        refRoles?: string[];
+        videoRefs?: string[];
+        expiresAt?: number;
+      };
+      const now = Date.now();
+      if (payload.expiresAt && payload.expiresAt < now) {
+        sessionStorage.removeItem(VIDEO_CHAT_DRAFT_MEDIA_KEY);
+        return;
+      }
+
+      const refsFromStorage = Array.isArray(payload?.refs)
+        ? payload.refs.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+        : [];
+      const refRoles = Array.isArray(payload?.refRoles)
+        ? payload.refRoles
+            .map((item): ReferenceImageRole | null => {
+              if (item === "first_frame" || item === "last_frame" || item === "reference_image") return item;
+              return null;
+            })
+            .filter((item): item is ReferenceImageRole => item !== null)
+        : [];
+      const videoRefs = Array.isArray(payload?.videoRefs)
+        ? payload.videoRefs.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+        : [];
+
+      if (refsFromStorage.length > 0 && !refsFromQuery) {
+        setReferenceImages(refsFromStorage);
+        setReferenceImageRoles(
+          refsFromStorage.map((_, index) => {
+            const role = refRoles[index];
+            return role === "first_frame" || role === "last_frame" || role === "reference_image" ? role : "reference_image";
+          })
+        );
+      }
+
+      if (videoRefs.length > 0 && !videoRefsFromQuery) {
+        setReferenceVideos(videoRefs);
+      }
+    } catch {
+      sessionStorage.removeItem(VIDEO_CHAT_DRAFT_MEDIA_KEY);
+    }
+
+    sessionStorage.removeItem(VIDEO_CHAT_DRAFT_MEDIA_KEY);
+  }, [draftPrompt, searchParams]);
+  useEffect(() => {
     if (!selectedModel && videoModels.length > 0) {
       setSelectedModel(videoModels[0].id);
     }
-  }, [videoModels, selectedModel]);
-
-  useEffect(() => {
-    if (isFastModel && selectedResolution === "1080p") {
-      setSelectedResolution("720p");
-    }
-  }, [isFastModel, selectedResolution]);
-
-  useEffect(() => {
-    const refs = searchParams.get("refs");
-    if (refs) {
-      const nextRefs = refs.split(",").filter(Boolean);
-      const roleParams = (searchParams.get("refRoles") || "").split(",").filter(Boolean) as ReferenceImageRole[];
-      setReferenceImages(nextRefs);
-      setReferenceImageRoles(nextRefs.map((_, index) => {
-        const role = roleParams[index];
-        return role === "first_frame" || role === "last_frame" || role === "reference_image" ? role : "reference_image";
-      }));
-    }
-    const videoRefs = searchParams.get("videoRefs");
-    if (videoRefs) setReferenceVideos(videoRefs.split(",").filter(Boolean));
-  }, [searchParams]);
+  }, [selectedModel, videoModels]);
 
   const setReferenceImagesWithRoles = useCallback((updater: string[] | ((prev: string[]) => string[]), nextRoles?: ReferenceImageRole[]) => {
     setReferenceImages((prev) => {
@@ -762,8 +825,10 @@ function VideoChatPageInner() {
 
                   {msg.status === "failed" && (
                     <div className="rounded-2xl rounded-tl-sm bg-red-500/5 border border-red-500/20 p-4">
-                      <p className="text-sm text-red-400">{t("video.generationFailedRetry")}</p>
-                      <p className="text-[11px] text-text-tertiary mt-1">{msg.errorMessage || msg.content}</p>
+                      <p className="text-sm text-red-400">{msg.errorMessage || t("video.generationFailedRetry")}</p>
+                      {msg.errorMessage && (
+                        <p className="text-[11px] text-text-tertiary mt-1">{t("video.generationFailedRetry")}</p>
+                      )}
                     </div>
                   )}
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ComponentType } from "react";
 import { AlertCircle, RotateCcw } from "lucide-react";
 import { Message } from "@/lib/chatTypes";
@@ -15,6 +15,7 @@ import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 type MarkdownRendererComponent = ComponentType<{ content: string; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean; allowRichLiteFallback?: boolean; compactRichLitePreview?: boolean; messageId?: string | number }>;
 
 const JUST_COMPLETED_REASONING_EXPAND_MS = 5 * 60 * 1000;
+const JUST_COMPLETED_STREAMING_HOLD_MS = 800;
 const justCompletedReasoningMessageIds = new Map<string, number>();
 
 function markJustCompletedReasoningMessage(messageId: string) {
@@ -73,15 +74,37 @@ export function AssistantMessageContent({
     realtime?.answerContent?.trim() ||
     realtime?.reasoningContent?.trim()
   );
-  const finalizingRealtime = !generating && !!realtime?.completedAt && realtimeHasVisiblePayload;
+  const completedAt = realtime?.completedAt;
+  const wasStreamingRef = useRef(false);
+  const [keepCompletedStreaming, setKeepCompletedStreaming] = useState(false);
+  const justStoppedStreaming = wasStreamingRef.current && !generating;
+  const finalizingRealtime = !generating && (justStoppedStreaming || keepCompletedStreaming) && realtimeHasVisiblePayload;
+  const shouldRenderStreamingText = generating || finalizingRealtime || (!message.content && recoverEmptyContent && mayStillRecoverMessage(message));
 
   useEffect(() => {
+    if (!completedAt || !realtimeHasVisiblePayload) return;
+    setKeepCompletedStreaming(true);
+    const timer = window.setTimeout(() => setKeepCompletedStreaming(false), JUST_COMPLETED_STREAMING_HOLD_MS);
+    return () => window.clearTimeout(timer);
+  }, [completedAt, realtimeHasVisiblePayload]);
+
+  useEffect(() => {
+    let timer: number | undefined;
+    if (wasStreamingRef.current && !generating) {
+      setKeepCompletedStreaming(true);
+      timer = window.setTimeout(() => setKeepCompletedStreaming(false), JUST_COMPLETED_STREAMING_HOLD_MS);
+    }
+    wasStreamingRef.current = generating;
+
     if ((generating || finalizingRealtime) && (realtime?.reasoningContent?.trim() || message.reasoningContent?.trim())) {
       markJustCompletedReasoningMessage(message.id);
     }
+    return () => {
+      if (timer) window.clearTimeout(timer);
+    };
   }, [finalizingRealtime, generating, message.id, message.reasoningContent, realtime?.reasoningContent]);
 
-  if (generating || finalizingRealtime || (!message.content && recoverEmptyContent && mayStillRecoverMessage(message))) {
+  if (shouldRenderStreamingText) {
     return (
       <StreamingText
         messageId={message.id}

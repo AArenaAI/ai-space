@@ -343,58 +343,72 @@ func (h *VideoChatHandler) createVideoChatMessagesAndTask(userID uint, chatID ui
 		assistantMsg.ErrorMessage = errMsg
 		return &assistantMsg, err
 	}
-	log.Printf("[VideoChat] create task refs images=%d videos=%d model=%s", len(createReq.ReferenceImages), len(createReq.ReferenceVideos), modelID)
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+
+	// Launch async goroutine to create video task with Volcengine
+	go h.submitVideoTaskAsync(userID, chatID, assistantMsg.ID, createReq)
+
+	return &assistantMsg, nil
+}
+
+// submitVideoTaskAsync creates the video task in background.
+// It updates the message with task_id when successful, or marks failed on error.
+func (h *VideoChatHandler) submitVideoTaskAsync(userID uint, chatID uint, assistantMsgID uint, createReq services.CreateVideoTaskRequest) {
+	log.Printf("[VideoChat] async create task refs images=%d videos=%d model=%s msg_id=%d", len(createReq.ReferenceImages), len(createReq.ReferenceVideos), createReq.Model, assistantMsgID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	resp, err := h.videoService.CreateVideoTask(ctx, createReq)
 	if err != nil {
 		errMsg := cleanVideoTaskSubmissionErrorMessage(err)
-		h.db.Model(&assistantMsg).Updates(map[string]interface{}{"status": "failed", "error_message": errMsg})
-		assistantMsg.Status = "failed"
-		assistantMsg.ErrorMessage = errMsg
-		return &assistantMsg, err
+		log.Printf("[VideoChat] async create task failed msg_id=%d err=%v", assistantMsgID, err)
+		h.db.Model(&models.VideoChatMessage{}).Where("id = ?", assistantMsgID).Updates(map[string]interface{}{
+			"status":        "failed",
+			"error_message": errMsg,
+			"updated_at":    time.Now(),
+		})
+		return
 	}
 
 	video := models.VideoGeneration{
 		UserID:              userID,
-		Prompt:              req.Prompt,
-		Model:               modelID,
-		Ratio:               ratio,
-		Resolution:          resolution,
-		Duration:            duration,
-		GenerateAudio:       req.GenerateAudio,
-		Watermark:           req.Watermark,
+		Prompt:              createReq.Prompt,
+		Model:               createReq.Model,
+		Ratio:               createReq.Ratio,
+		Resolution:          createReq.Resolution,
+		Duration:            createReq.Duration,
+		GenerateAudio:       createReq.GenerateAudio,
+		Watermark:           createReq.Watermark,
 		ReferenceImageCount: len(createReq.ReferenceImages),
 		ReferenceVideoCount: len(createReq.ReferenceVideos),
 		TaskID:              resp.TaskID,
 		ChatID:              chatID,
-		MessageID:           assistantMsg.ID,
+		MessageID:           assistantMsgID,
 		Status:              resp.Status,
 	}
 	if err := h.db.Create(&video).Error; err != nil {
-		return nil, err
+		log.Printf("[VideoChat] async save video generation failed msg_id=%d err=%v", assistantMsgID, err)
+		return
 	}
 
-	h.db.Model(&assistantMsg).Updates(map[string]interface{}{
+	h.db.Model(&models.VideoChatMessage{}).Where("id = ?", assistantMsgID).Updates(map[string]interface{}{
 		"task_id":               resp.TaskID,
 		"generation_id":         video.ID,
 		"status":                resp.Status,
 		"reference_image_count": len(createReq.ReferenceImages),
 		"reference_video_count": len(createReq.ReferenceVideos),
+		"updated_at":            time.Now(),
 	})
-	assistantMsg.TaskID = resp.TaskID
-	assistantMsg.GenerationID = video.ID
-	assistantMsg.Status = resp.Status
-	return &assistantMsg, nil
+	log.Printf("[VideoChat] async create task success msg_id=%d task=%s gen_id=%d", assistantMsgID, resp.TaskID, video.ID)
 }
 
 func (h *VideoChatHandler) refreshPendingVideoChatMessages(chatID uint) {
-	staleCutoff := time.Now().Add(-2 * time.Minute)
+	// Mark stale async submissions (pending with no task_id for too long)
+	staleCutoff := time.Now().Add(-10 * time.Minute)
 	h.db.Model(&models.VideoChatMessage{}).
 		Where("chat_id = ? AND role = ? AND status = ? AND task_id = '' AND generation_id = 0 AND updated_at < ?", chatID, "assistant", "pending", staleCutoff).
 		Updates(map[string]interface{}{
 			"status":        "failed",
-			"error_message": "视频任务提交被中断，请重新提交。",
+			"error_message": "视频任务提交超时，请稍后重新提交。",
 			"updated_at":    time.Now(),
 		})
 

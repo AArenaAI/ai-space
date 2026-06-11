@@ -29,9 +29,9 @@ const SHORTCUT_LIMIT = 3;
 const CHINESE_LANGUAGES: LanguageCode[] = ["zh-CN", "zh-TW"];
 
 const PROVIDER_LABEL_OVERRIDES: Record<string, { zh: string; en: string }> = {
-  deepseek: { zh: "深度求索", en: "DeepSeek" },
-  moonshot: { zh: "月之暗面", en: "Moonshot" },
-  kimi: { zh: "月之暗面", en: "Moonshot" },
+  deepseek: { zh: "DeepSeek", en: "DeepSeek" },
+  moonshot: { zh: "Moonshot", en: "Moonshot" },
+  kimi: { zh: "Moonshot", en: "Moonshot" },
   qwen: { zh: "通义千问", en: "Qwen" },
   alibaba: { zh: "通义千问", en: "Qwen" },
 };

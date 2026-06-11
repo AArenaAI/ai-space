@@ -838,7 +838,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
         setSearchQuery("");
         setSearchResults([]);
       }
-      if (e.key === " " && !searchOpen) {
+      if ((e.key === "i" || e.key === "I") && !searchOpen) {
         e.preventDefault();
         handleNewChat();
       }
@@ -1139,7 +1139,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
               <button
                 type="button"
                 onClick={handleNewChat}
-                onMouseEnter={showSidebarTooltip(`${t("sidebar.tooltip.chat")} ${mod}Space`)}
+                onMouseEnter={showSidebarTooltip(`${t("sidebar.tooltip.chat")} ${mod}I`)}
                 onMouseLeave={hideSidebarTooltip}
                 className={cn(
                   "p-2.5 rounded-xl transition-colors block",
@@ -1255,7 +1255,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                 <MessageSquare className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/chat" ? "text-slate-900 dark:text-text-primary" : "text-text-tertiary")} />
                 <span className="flex-1 text-left">{t("sidebar.nav.chat")}</span>
                 <kbd className="hidden lg:inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono text-text-secondary leading-none opacity-0 group-hover:opacity-100 transition-opacity">
-                  {mod}Space
+                  {mod}I
                 </kbd>
               </button>
             </div>
