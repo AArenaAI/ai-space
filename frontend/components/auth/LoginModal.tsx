@@ -82,6 +82,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
 
       const res = await fetch(endpoint, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
@@ -97,6 +98,8 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
       if (data.user?.default_workspace_id) {
         localStorage.setItem("current-workspace", String(data.user.default_workspace_id));
       }
+
+      import("@/lib/guestId").then(({ clearGuestId }) => clearGuestId());
 
       // 触发全局登录状态更新
       window.dispatchEvent(new Event("auth-changed"));

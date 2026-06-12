@@ -2,10 +2,10 @@ package api
 
 import (
 	"aipool-backend/internal/config"
-	"aipool-backend/internal/middleware"
 	"aipool-backend/internal/models"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -92,25 +92,19 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	// 生成 token
-	token, err := middleware.GenerateToken(user.ID, user.Email, h.cfg.JWTSecret)
+	// 生成短期 access token，并签发长期 refresh cookie
+	token, err := generateAccessToken(user.ID, user.Email, h.cfg.JWTSecret)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成 token 失败"})
 		return
 	}
+	if err := h.issueRefreshToken(c, h.db, user.ID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建登录会话失败"})
+		return
+	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"user": gin.H{
-			"id":                   user.ID,
-			"email":                user.Email,
-			"name":                 user.Name,
-			"role":                 user.Role,
-			"basic_credits":        user.BasicCredits,
-			"advanced_credits":     user.AdvancedCredits,
-			"elite_credits":        user.EliteCredits,
-			"plan_tier":            user.PlanTier,
-			"default_workspace_id": defaultWorkspace.ID,
-		},
+		"user":  authUserPayload(user, defaultWorkspace.ID),
 		"token": token,
 	})
 }
@@ -136,10 +130,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// 生成 token
-	token, err := middleware.GenerateToken(user.ID, user.Email, h.cfg.JWTSecret)
+	// 生成短期 access token，并签发长期 refresh cookie
+	token, err := generateAccessToken(user.ID, user.Email, h.cfg.JWTSecret)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成 token 失败"})
+		return
+	}
+	if err := h.issueRefreshToken(c, h.db, user.ID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建登录会话失败"})
 		return
 	}
 
@@ -148,19 +146,68 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	h.db.Where("user_id = ? AND is_default = ?", user.ID, true).First(&defaultWS)
 
 	c.JSON(http.StatusOK, gin.H{
-		"user": gin.H{
-			"id":                   user.ID,
-			"email":                user.Email,
-			"name":                 user.Name,
-			"role":                 user.Role,
-			"basic_credits":        user.BasicCredits,
-			"advanced_credits":     user.AdvancedCredits,
-			"elite_credits":        user.EliteCredits,
-			"plan_tier":            user.PlanTier,
-			"default_workspace_id": defaultWS.ID,
-		},
+		"user":  authUserPayload(user, defaultWS.ID),
 		"token": token,
 	})
+}
+
+func (h *AuthHandler) Refresh(c *gin.Context) {
+	cookie, err := c.Request.Cookie(refreshTokenCookieName)
+	if err != nil || strings.TrimSpace(cookie.Value) == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "refresh_token_required"})
+		return
+	}
+
+	now := time.Now()
+	var stored models.RefreshToken
+	if err := h.db.Where("token_hash = ?", hashRefreshToken(cookie.Value)).First(&stored).Error; err != nil {
+		h.clearRefreshTokenCookie(c)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "refresh_token_invalid"})
+		return
+	}
+	if !isRefreshTokenUsable(stored, now) {
+		h.clearRefreshTokenCookie(c)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "refresh_token_expired"})
+		return
+	}
+
+	var user models.User
+	if err := h.db.First(&user, stored.UserID).Error; err != nil {
+		h.clearRefreshTokenCookie(c)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user_not_found"})
+		return
+	}
+
+	var token string
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.RefreshToken{}).Where("id = ? AND revoked_at IS NULL", stored.ID).Update("revoked_at", now).Error; err != nil {
+			return err
+		}
+		var err error
+		token, err = generateAccessToken(user.ID, user.Email, h.cfg.JWTSecret)
+		if err != nil {
+			return err
+		}
+		return h.issueRefreshToken(c, tx, user.ID)
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "刷新登录状态失败"})
+		return
+	}
+
+	var defaultWS models.Workspace
+	h.db.Where("user_id = ? AND is_default = ?", user.ID, true).First(&defaultWS)
+	c.JSON(http.StatusOK, gin.H{"token": token, "user": authUserPayload(user, defaultWS.ID)})
+}
+
+func (h *AuthHandler) Logout(c *gin.Context) {
+	if cookie, err := c.Request.Cookie(refreshTokenCookieName); err == nil && strings.TrimSpace(cookie.Value) != "" {
+		now := time.Now()
+		h.db.Model(&models.RefreshToken{}).
+			Where("token_hash = ? AND revoked_at IS NULL", hashRefreshToken(cookie.Value)).
+			Update("revoked_at", now)
+	}
+	h.clearRefreshTokenCookie(c)
+	c.JSON(http.StatusOK, gin.H{"message": "已退出登录"})
 }
 
 func (h *AuthHandler) UpdateProfile(c *gin.Context) {

@@ -97,6 +97,8 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	authHandler := NewAuthHandler(db, cfg)
 	router.POST("/api/auth/register", authHandler.Register)
 	router.POST("/api/auth/login", authHandler.Login)
+	router.POST("/api/auth/refresh", authHandler.Refresh)
+	router.POST("/api/auth/logout", authHandler.Logout)
 
 	// 技能公开路由
 	skillHandler := NewSkillHandler(db, skills.GetLoader())
