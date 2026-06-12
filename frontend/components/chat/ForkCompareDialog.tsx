@@ -59,9 +59,9 @@ export default function ForkCompareDialog({ open, onClose, models, currentModelI
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={submitting ? undefined : onClose}>
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/45 backdrop-blur-[2px]" onClick={submitting ? undefined : onClose}>
       <div
-        className="bg-surface-elevated border border-surface-border rounded-2xl shadow-xl w-full max-w-md mx-4 p-6"
+        className="bg-surface-elevated border border-surface-border rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">

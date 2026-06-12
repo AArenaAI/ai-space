@@ -74,6 +74,9 @@ export type MessageRowProps = {
   imageLoadFailedLabel: string;
   MarkdownRenderer: MarkdownRendererComponent;
   onAssistantViewed?: (messageId: string) => void;
+  useContentVisibility?: boolean;
+  deferOffscreenRichTextHydration?: boolean;
+  stabilizeInitialRichText?: boolean;
 };
 
 function MessageRow({
@@ -108,6 +111,9 @@ function MessageRow({
   imageLoadFailedLabel,
   MarkdownRenderer,
   onAssistantViewed,
+  useContentVisibility = true,
+  deferOffscreenRichTextHydration = false,
+  stabilizeInitialRichText = false,
 }: MessageRowProps) {
   const { t } = useI18n();
   const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -115,15 +121,15 @@ function MessageRow({
   const profileSnapshotRef = useRef<Record<string, unknown> | null>(null);
   const isUser = msg.role === "user";
   const forceHydrateRichText = isLatestAssistant || isHighlighted;
-  const skipViewportObservers = !isUser && shouldSkipViewportObserversForAssistant(msg.content);
+  const skipViewportObservers = !deferOffscreenRichTextHydration && !isUser && shouldSkipViewportObserversForAssistant(msg.content);
   const initialViewportState = forceHydrateRichText || skipViewportObservers;
   const [isNearViewport, setIsNearViewport] = useState(initialViewportState);
   const [isInViewport, setIsInViewport] = useState(initialViewportState);
-  const forceStableRichLiteFallback = isViewedAssistant || isInitialReadingAssistant || isInViewport || forceHydrateRichText;
   const hasAssistantGenerationTask = Boolean(msg.generationTaskId || msg.backgroundTaskId || msg.activityStatus);
   const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && !msg.errorCode && !msg.stopped && isLatestAssistant && hasAssistantGenerationTask;
   const canBypassBrowsingHydrationDefer = forceHydrateRichText && !isStreaming;
   const blockRichTextHydration = historyPrependSettling || (deferRichTextHydration && !canBypassBrowsingHydrationDefer);
+  const forceStableRichLiteFallback = blockRichTextHydration || stabilizeInitialRichText || (forceHydrateRichText && !isInViewport);
   const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
   const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
   const suppressAppearAnimation = historyPrependSettling || deferRichTextHydration;
@@ -216,10 +222,10 @@ function MessageRow({
         });
         observer.disconnect();
       }
-    }, { root, rootMargin: MARKDOWN_HYDRATE_ROOT_MARGIN });
+    }, { root, rootMargin: deferOffscreenRichTextHydration ? "0px" : MARKDOWN_HYDRATE_ROOT_MARGIN });
     observer.observe(row);
     return () => observer.disconnect();
-  }, [conversationId, forceHydrateRichText, isNearViewport, isUser, msg.content, msg.id, skipViewportObservers]);
+  }, [conversationId, deferOffscreenRichTextHydration, forceHydrateRichText, isNearViewport, isUser, msg.content, msg.id, skipViewportObservers]);
 
   useEffect(() => {
     if (isUser) return;
@@ -262,7 +268,7 @@ function MessageRow({
       data-chat-message-row="true"
       data-message-id={msg.id}
       data-message-role={msg.role}
-      style={isUser ? MESSAGE_ROW_CONTENT_VISIBILITY_STYLE : undefined}
+      style={isUser && useContentVisibility ? MESSAGE_ROW_CONTENT_VISIBILITY_STYLE : undefined}
       className={cn("max-w-[800px] mx-auto px-4 py-4 rounded-2xl transition-colors duration-500", isHighlighted && "bg-brand/10")}
     >
       <div key={msg.id} className={cn("flex gap-3 group", !suppressAppearAnimation && "animate-message-appear", isUser ? "justify-end" : "justify-start")}>
@@ -346,7 +352,7 @@ function MessageRow({
                 <UserMessageContent message={msg} imageLoadFailedLabel={imageLoadFailedLabel} />
               ) : (
                 <>
-                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={!blockRichTextHydration && (isNearViewport || forceHydrateRichText)} priorityHydrateRichText={!blockRichTextHydration && forceHydrateRichText} allowRichLiteFallback={allowRichLiteFallback || forceStableRichLiteFallback} compactRichLitePreview={!historyPrependSettling && !forceStableRichLiteFallback} recoverEmptyContent={isLast} onRegenerate={onRegenerate} />
+                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={!blockRichTextHydration && (isNearViewport || forceHydrateRichText)} priorityHydrateRichText={!blockRichTextHydration && (forceHydrateRichText || stabilizeInitialRichText || deferOffscreenRichTextHydration)} allowRichLiteFallback={allowRichLiteFallback || forceStableRichLiteFallback} compactRichLitePreview={!historyPrependSettling && !forceStableRichLiteFallback && !isInitialReadingAssistant && !isViewedAssistant} recoverEmptyContent={isLast} onRegenerate={onRegenerate} />
                   {msg.stopped && onContinueGenerate && (
                     <button
                       onClick={onContinueGenerate}

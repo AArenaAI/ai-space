@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"aipool-backend/internal/config"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -16,18 +17,34 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
+const AccessTokenTTL = time.Hour
+
 func GenerateToken(userID uint, email string, secret string) (string, error) {
 	claims := Claims{
 		UserID: userID,
 		Email:  email,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(7 * 24 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(AccessTokenTTL)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(secret))
+}
+
+func ParseToken(tokenString string, secret string) (*Claims, error) {
+	claims := &Claims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		return []byte(secret), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if token == nil || !token.Valid {
+		return nil, errors.New("invalid token")
+	}
+	return claims, nil
 }
 
 func AuthMiddleware(cfg *config.Config) gin.HandlerFunc {

@@ -3,6 +3,7 @@ package api
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -146,4 +148,52 @@ func persistRemoteVideoAsset(rawURL string) (string, error) {
 		return "", fmt.Errorf("视频文件过大")
 	}
 	return localVideoURLPrefix + filename, nil
+}
+
+func videoAssetPersistenceErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	msg := err.Error()
+	lower := strings.ToLower(msg)
+
+	switch {
+	case strings.Contains(msg, "视频地址为空"):
+		return "视频生成成功了，但服务商没有返回可下载的视频地址。请稍后重试；如果反复出现，请联系管理员检查服务商返回结果。"
+	case strings.Contains(lower, "http 403") || strings.Contains(lower, "http 401"):
+		return "视频生成成功了，但服务商的视频下载链接已失效或无权访问。请尽快重试；如果仍失败，需要重新生成视频。"
+	case strings.Contains(lower, "http 404"):
+		return "视频生成成功了，但服务商返回的视频文件不存在或已过期。请重新生成视频。"
+	case strings.Contains(lower, "http 429"):
+		return "视频生成成功了，但下载视频时触发服务商限流。请稍后刷新或重试保存。"
+	case strings.Contains(lower, "http 5"):
+		return "视频生成成功了，但服务商视频下载服务暂时异常。请稍后刷新或重试保存。"
+	case strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline exceeded") || strings.Contains(lower, "context deadline exceeded"):
+		return "视频生成成功了，但下载视频超时。请稍后刷新重试，系统会重新尝试保存生成结果。"
+	case strings.Contains(lower, "connection reset") || strings.Contains(lower, "connection refused") || strings.Contains(lower, "network") || strings.Contains(lower, "temporary failure"):
+		return "视频生成成功了，但下载视频时网络连接不稳定。请稍后刷新重试，系统会重新尝试保存生成结果。"
+	case strings.Contains(msg, "创建视频目录失败"):
+		return "视频生成成功了，但服务器无法创建视频保存目录。请联系管理员检查存储目录权限。"
+	case strings.Contains(msg, "创建视频文件失败"):
+		if errors.Is(err, syscall.ENOSPC) || strings.Contains(lower, "no space left") {
+			return "视频生成成功了，但服务器存储空间不足，无法保存视频文件。请清理空间后重试保存或重新生成。"
+		}
+		if errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EPERM) || strings.Contains(lower, "permission denied") {
+			return "视频生成成功了，但服务器没有权限写入视频文件。请联系管理员检查保存目录权限。"
+		}
+		return "视频生成成功了，但服务器创建本地视频文件失败。请稍后重试；如果反复出现，请联系管理员。"
+	case strings.Contains(msg, "保存视频失败"):
+		if errors.Is(err, syscall.ENOSPC) || strings.Contains(lower, "no space left") {
+			return "视频生成成功了，但服务器存储空间不足，无法完整保存视频文件。请清理空间后重试保存或重新生成。"
+		}
+		if errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EPERM) || strings.Contains(lower, "permission denied") {
+			return "视频生成成功了，但服务器没有权限写入视频文件。请联系管理员检查保存目录权限。"
+		}
+		return "视频生成成功了，但写入本地视频文件时中断。请稍后刷新重试，系统会重新尝试保存生成结果。"
+	case strings.Contains(msg, "视频文件过大"):
+		return "视频生成成功了，但返回的视频文件超过服务器保存上限。请降低分辨率或时长后重新生成。"
+	default:
+		return "视频生成成功了，但保存视频文件时失败。请稍后刷新重试；如果反复出现，请联系管理员查看保存日志。"
+	}
 }

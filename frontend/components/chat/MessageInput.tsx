@@ -591,24 +591,6 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
         { /* 上方面板：左侧对比/附件 + 右侧模板/新建 */ }
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onToggleCompare}
-              disabled={isLoading}
-              aria-pressed={compareMode}
-              aria-label={t("chat.compareMode")}
-              title={t("chat.compareMode")}
-              className={cn(
-                "flex h-7 w-7 items-center justify-center rounded-lg transition-colors duration-200",
-                compareMode
-                  ? "bg-amber-500/10 text-amber-500 hover:bg-amber-500/15"
-                  : "text-text-tertiary hover:bg-surface-card hover:text-text-secondary",
-                isLoading && "opacity-50 cursor-not-allowed"
-              )}
-            >
-              <Columns3 className="h-3.5 w-3.5" />
-            </button>
-
             {/* 文件上传按钮 */}
             <div className="relative">
               <button
@@ -648,6 +630,24 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                 <div className="absolute left-1/2 -translate-x-1/2 -bottom-1 w-2 h-2 rotate-45 border-r border-b border-surface-border bg-surface-card" />
               </div>
             </div>
+
+            <button
+              type="button"
+              onClick={onToggleCompare}
+              disabled={isLoading}
+              aria-pressed={compareMode}
+              aria-label={t("chat.compareMode")}
+              title={t("chat.compareMode")}
+              className={cn(
+                "flex h-7 w-7 items-center justify-center rounded-lg transition-colors duration-200",
+                compareMode
+                  ? "bg-amber-500/10 text-amber-500 hover:bg-amber-500/15"
+                  : "text-text-tertiary hover:bg-surface-card hover:text-text-secondary",
+                isLoading && "opacity-50 cursor-not-allowed"
+              )}
+            >
+              <Columns3 className="h-3.5 w-3.5" />
+            </button>
           </div>
 
           <div className="flex items-center gap-2">

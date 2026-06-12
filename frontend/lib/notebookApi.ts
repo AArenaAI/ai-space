@@ -71,6 +71,15 @@ export async function fetchNotebookFileContent(notebookId: number, fileId: numbe
   return parseNotebookResponse<NotebookFileContent>(response, "加载资料内容失败");
 }
 
+export async function updateNotebookFile(notebookId: number, fileId: number, input: { filename: string }): Promise<NotebookFile> {
+  const response = await fetch(`/api/notebooks/${notebookId}/files/${fileId}`, {
+    method: "PUT",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return parseNotebookResponse<NotebookFile>(response, "重命名资料失败");
+}
+
 export async function removeNotebookFile(notebookId: number, fileId: number): Promise<void> {
   const response = await fetch(`/api/notebooks/${notebookId}/files/${fileId}`, {
     method: "DELETE",

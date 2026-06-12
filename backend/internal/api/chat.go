@@ -119,6 +119,9 @@ type ChatRequest struct {
 	FileIDs []string `json:"file_ids,omitempty"`
 	// TextFormat 用于 OpenAI Responses API 的 text.format 结构化输出，仅当非空时生效。
 	TextFormat map[string]any `json:"text_format,omitempty"`
+	// ClientTimezone is the browser-reported IANA timezone (e.g. Asia/Shanghai),
+	// preferred over IP geolocation because backend may sit behind proxies.
+	ClientTimezone string `json:"client_timezone,omitempty"`
 	// Transient runs the request without creating/saving conversation messages.
 	// Used by document-reader structured artifact generation where the output is
 	// persisted separately and must not appear in the study chat/history.
@@ -139,6 +142,7 @@ type CompareRequest struct {
 	ContextFileIDs []string          `json:"context_file_ids,omitempty"`
 	ContextPolicy  FileContextPolicy `json:"context_policy,omitempty"`
 	FileIDs        []string          `json:"file_ids,omitempty"`
+	ClientTimezone string            `json:"client_timezone,omitempty"`
 }
 
 type ForkChatRequest struct {
@@ -147,6 +151,7 @@ type ForkChatRequest struct {
 	ReasoningEffort string   `json:"reasoning_effort"`
 	Search          bool     `json:"search"`
 	InitOnly        bool     `json:"init_only"`
+	ClientTimezone  string   `json:"client_timezone,omitempty"`
 }
 
 type CompareResult struct {
@@ -717,6 +722,29 @@ func (h *ChatHandler) buildFileContext(files []models.File, fileNames map[uint]s
 	return fileContext
 }
 
+func resolveUserTimezone(clientIP string, clientTimezone string) string {
+	clientTimezone = strings.TrimSpace(clientTimezone)
+	if clientTimezone != "" && services.CurrentTimeInTimezone(clientTimezone) != "" {
+		return clientTimezone
+	}
+	if timezone := services.GetUserTimezoneByIP(clientIP); timezone != "" {
+		return timezone
+	}
+	// 时间上下文不能依赖联网搜索或外部 IP 地理服务是否可用。
+	// 当公网 IP 反查失败时仍注入一个稳定默认时区，避免模型在“今天/现在”类问题上声称无法知道日期。
+	return "Asia/Shanghai"
+}
+
+func injectCurrentUserTimeContext(messages []services.Message, clientIP string, clientTimezone string) []services.Message {
+	timezone := resolveUserTimezone(clientIP, clientTimezone)
+	localTime := services.CurrentTimeInTimezone(timezone)
+	if localTime == "" {
+		return messages
+	}
+	ctx := fmt.Sprintf("用户当前上下文：\n- 时区: %s\n- 当前本地时间: %s\n\n如果用户的问题涉及今天、现在、日期、星期、时间、时区或相对时间，请直接依据以上本地时间回答，不要声称无法知道当前日期，也不要要求用户重新提供地点。", timezone, localTime)
+	return append([]services.Message{{Role: "system", Content: ctx}}, messages...)
+}
+
 func (h *ChatHandler) preprocessSearch(messages []services.Message, modelID string, searchEnabled bool, clientIP string) ([]services.Message, []services.SearchResult, bool) {
 	if !searchEnabled {
 		return messages, nil, false
@@ -818,6 +846,10 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		req.Messages = append([]services.Message{chartMsg}, req.Messages...)
 	}
 	// ========== 图表渲染指令结束 ==========
+
+	// 统一注入当前时间/时区上下文，避免普通聊天与 Compare/Fork 在日期类问题上表现不一致。
+	// 只作为 system 消息参与模型上下文，不保存为用户消息。
+	req.Messages = injectCurrentUserTimeContext(req.Messages, c.ClientIP(), req.ClientTimezone)
 
 	// ========== 保存消息与会话 ==========
 	// 如果没有 conversation_id，创建新会话（匿名用户也需要保存以便统计额度和历史文件复用）
@@ -1823,7 +1855,6 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 	heartbeat := time.NewTicker(heartbeatInterval)
 	defer heartbeat.Stop()
 
-
 	var fullContent strings.Builder
 	var reasoningContent strings.Builder
 	var reasoningPersistOpen bool
@@ -2490,6 +2521,8 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 		}
 	}
 
+	messages = injectCurrentUserTimeContext(messages, c.ClientIP(), req.ClientTimezone)
+
 	// ========== 文件上下文注入（与主 Chat 保持一致，使用 buildFileContext 分离图片与文档路径） ==========
 	filePlan := ChatFilePlan{}
 	if h.fileService != nil {
@@ -2860,6 +2893,7 @@ func (h *ChatHandler) ForkChat(c *gin.Context) {
 	if len(messages) == 0 {
 		messages = []services.Message{{Role: "user", Content: userMsg.Content}}
 	}
+	messages = injectCurrentUserTimeContext(messages, c.ClientIP(), req.ClientTimezone)
 
 	type forkResult struct {
 		index int
@@ -2870,12 +2904,12 @@ func (h *ChatHandler) ForkChat(c *gin.Context) {
 	if reuseSourceIndex >= 0 {
 		pendingRequests--
 		ordered[reuseSourceIndex] = CompareResult{
-			ModelID:    source.Model,
-			ModelName:  findModelName(source.Model),
-			Content:    source.Content,
-			MessageID:  source.ID,
-			GroupID:    group.ID,
-			ElapsedMs:  0,
+			ModelID:   source.Model,
+			ModelName: findModelName(source.Model),
+			Content:   source.Content,
+			MessageID: source.ID,
+			GroupID:   group.ID,
+			ElapsedMs: 0,
 		}
 	}
 

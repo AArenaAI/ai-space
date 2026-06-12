@@ -5,7 +5,7 @@ import {
   type ChatAttachmentInput,
   type FactoryChatMessage,
 } from "./chatMessageFactory";
-import { buildSingleChatRequestBody, type ModelMessage } from "./chatRequestBuilder";
+import { buildSingleChatRequestBody, getClientTimezone, type ModelMessage } from "./chatRequestBuilder";
 import type { ChatStreamRunResult } from "./chatStreamRunResult";
 
 export type SingleSendMessageLike = {
@@ -217,6 +217,7 @@ export async function runSingleChatRequest<TAssistant extends SingleSendMessageL
       skillKey,
       messageFileIds,
       notebookFileIds,
+      clientTimezone: getClientTimezone(),
     })),
   });
 

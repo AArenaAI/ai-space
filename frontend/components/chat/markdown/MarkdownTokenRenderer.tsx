@@ -15,18 +15,18 @@ import { emitChatRenderProfileEvent } from "@/lib/chatRenderProfile";
 const INITIAL_TOKEN_BLOCK_BUDGET = 32;
 const TOKEN_BLOCK_BATCH_SIZE = 32;
 const TOKEN_UPGRADE_HEIGHT_GUARD_MS = 1200;
-const TOKEN_UPGRADE_BOTTOM_DISTANCE_THRESHOLD = 48;
+const TOKEN_UPGRADE_RETRY_AFTER_BROWSE_MS = 120;
 
-function shouldSkipTokenUpgradeForUserBrowse() {
+function getUserBrowseUntil() {
   if (typeof window !== "undefined") {
     const browseUntil = (window as Window & { __AI_SPACE_CHAT_USER_BROWSE_UNTIL?: number }).__AI_SPACE_CHAT_USER_BROWSE_UNTIL || 0;
-    if (Date.now() < browseUntil) return true;
+    return browseUntil;
   }
-  if (typeof document === "undefined") return false;
-  const scroller = document.querySelector<HTMLElement>('[data-testid="virtuoso-scroller"]');
-  if (!scroller) return false;
-  const distanceToBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
-  return distanceToBottom > TOKEN_UPGRADE_BOTTOM_DISTANCE_THRESHOLD;
+  return 0;
+}
+
+function shouldSkipTokenUpgradeForUserBrowse() {
+  return Date.now() < getUserBrowseUntil();
 }
 
 export default function MarkdownTokenRenderer({
@@ -45,6 +45,7 @@ export default function MarkdownTokenRenderer({
   const cacheKey = useMemo(() => getMarkdownTokenCacheKey({ content, compactPreview }), [compactPreview, content]);
   const rootRef = useRef<HTMLDivElement>(null);
   const heightGuardTimerRef = useRef<number | null>(null);
+  const browseRetryTimerRef = useRef<number | null>(null);
   const [doc, setDoc] = useState<MarkdownTokenDocument | null>(() => {
     const cached = peekCachedMarkdownTokens(cacheKey);
     if (cached && !isStreaming && !priorityHydrateRichText && shouldSkipTokenUpgradeForUserBrowse()) return null;
@@ -65,7 +66,17 @@ export default function MarkdownTokenRenderer({
         priority: priorityHydrateRichText,
       });
       setDoc(null);
+      if (browseRetryTimerRef.current !== null) window.clearTimeout(browseRetryTimerRef.current);
+      const retryDelay = Math.max(0, getUserBrowseUntil() - Date.now()) + TOKEN_UPGRADE_RETRY_AFTER_BROWSE_MS;
+      browseRetryTimerRef.current = window.setTimeout(() => {
+        browseRetryTimerRef.current = null;
+        applyTokenDocument(next, guardHeight);
+      }, retryDelay);
       return;
+    }
+    if (browseRetryTimerRef.current !== null) {
+      window.clearTimeout(browseRetryTimerRef.current);
+      browseRetryTimerRef.current = null;
     }
     if (guardHeight) {
       const currentHeight = rootRef.current?.getBoundingClientRect().height || 0;
@@ -88,6 +99,7 @@ export default function MarkdownTokenRenderer({
   useEffect(() => {
     return () => {
       if (heightGuardTimerRef.current !== null) window.clearTimeout(heightGuardTimerRef.current);
+      if (browseRetryTimerRef.current !== null) window.clearTimeout(browseRetryTimerRef.current);
     };
   }, []);
 

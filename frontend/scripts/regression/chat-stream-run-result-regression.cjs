@@ -75,12 +75,13 @@ test("shouldRecoverStream recovers navigation disconnects with ids but not user 
   assert.equal(mod.shouldRecoverStream({ sawDone: false, abortReason: "user", serverMessageId: 1 }), false);
 });
 
-test("shouldReconcileAfterDone only runs after DONE with ids", () => {
-  assert.equal(mod.shouldReconcileAfterDone({ sawDone: true, serverMessageId: 1 }), true);
-  assert.equal(mod.shouldReconcileAfterDone({ sawDone: true, generationTaskId: 2 }), true);
-  assert.equal(mod.shouldReconcileAfterDone({ sawDone: true }), false);
-  assert.equal(mod.shouldReconcileAfterDone({ sawDone: false, serverMessageId: 1 }), false);
-  assert.equal(mod.shouldReconcileAfterDone({ sawDone: true, abortReason: "navigation", serverMessageId: 1 }), false);
+test("shouldReconcileAfterDone only runs for background tasks after DONE with ids", () => {
+  assert.equal(mod.shouldReconcileAfterDone({ sawDone: true, serverMessageId: 1 }), false);
+  assert.equal(mod.shouldReconcileAfterDone({ sawDone: true, serverMessageId: 1, useBackground: true }), true);
+  assert.equal(mod.shouldReconcileAfterDone({ sawDone: true, generationTaskId: 2, useBackground: true }), true);
+  assert.equal(mod.shouldReconcileAfterDone({ sawDone: true, useBackground: true }), false);
+  assert.equal(mod.shouldReconcileAfterDone({ sawDone: false, serverMessageId: 1, useBackground: true }), false);
+  assert.equal(mod.shouldReconcileAfterDone({ sawDone: true, abortReason: "navigation", serverMessageId: 1, useBackground: true }), false);
 });
 
 test("shouldMarkCompleted requires DONE, content and non-abort reason", () => {

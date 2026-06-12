@@ -33,7 +33,7 @@ func InitDB(databaseURL string) (*gorm.DB, error) {
 
 	// 自动迁移
 	if err := db.AutoMigrate(
-		&User{}, &Conversation{}, &Message{}, &ConversationShare{},
+		&User{}, &RefreshToken{}, &Conversation{}, &Message{}, &ConversationShare{},
 		&CompareRecord{}, &UserSkill{},
 		&Workspace{},
 		&File{}, &FileChunk{}, &FileEmbedding{}, &FileEmbeddingJob{}, &ConversationFile{}, &MessageFile{},

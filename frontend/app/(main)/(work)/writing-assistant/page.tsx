@@ -23,6 +23,7 @@ import {
 import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
 import { consumeChatStream } from "@/lib/chatStream";
 import { getErrorMessage, normalizeError, readApiError, showUserError } from "@/lib/errors";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
@@ -742,16 +743,33 @@ export default function WritingAssistantPage() {
     }
   };
 
-  const exportDocx = () => {
+  const exportDocx = async () => {
     if (!activeDoc) return;
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${activeDoc.title}</title></head><body><h1>${activeDoc.title}</h1>${activeDoc.content.split("\n").map((p) => `<p>${p || "&nbsp;"}</p>`).join("")}</body></html>`;
-    const blob = new Blob([html], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${activeDoc.title || t("writer.defaultDocTitle")}.docx`;
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      const paragraphs = activeDoc.content.split("\n").map((p) =>
+        p.trim() ? new Paragraph({ children: [new TextRun(p)] }) : new Paragraph({ text: "" })
+      );
+      const doc = new Document({
+        sections: [{
+          children: [
+            new Paragraph({
+              text: activeDoc.title || t("writer.defaultDocTitle"),
+              heading: HeadingLevel.HEADING_1,
+            }),
+            ...paragraphs,
+          ],
+        }],
+      });
+      const blob = await Packer.toBlob(doc);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${activeDoc.title || t("writer.defaultDocTitle")}.docx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error(t("writer.error.request"));
+    }
   };
 
   if (!activeDoc) {

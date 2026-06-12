@@ -18,6 +18,8 @@ interface ModelSelectorProps {
   selected: ChatModel;
   onSelect: (model: ChatModel) => void;
   recommendationContext?: ModelRecommendationContext;
+  className?: string;
+  triggerClassName?: string;
 }
 
 // 分组顺序（DeepSeek 排第一，因为面向国内用户）
@@ -115,6 +117,8 @@ export default function ModelSelector({
   selected,
   onSelect,
   recommendationContext,
+  className,
+  triggerClassName,
 }: ModelSelectorProps) {
   const { t, language } = useI18n();
   const [open, setOpen] = useState(false);
@@ -370,13 +374,14 @@ export default function ModelSelector({
   };
 
   return (
-    <div className="relative max-w-[240px] sm:max-w-none" ref={dropdownRef}>
+    <div className={cn("relative max-w-[240px] sm:max-w-none", className)} ref={dropdownRef}>
       {/* 触发按钮 */}
       <button
         onClick={() => setOpen((v) => !v)}
         className={cn(
           "flex items-center gap-2.5 px-2.5 py-1.5 text-[15px] font-medium transition-all duration-200 w-full",
           "rounded-lg",
+          triggerClassName,
           !selectedAvailable && "text-rose-500",
           open
             ? "bg-surface-card text-text-primary"

@@ -28,13 +28,42 @@ function uniqueModels(messages: Message[], fallback?: string[]): string[] {
   return models;
 }
 
+export function messageRecency(message: Message): number {
+  return message.completedAt || message.createdAt || Number(message.serverMessageId || 0);
+}
+
+export function dedupeAssistantsByModel(messages: Message[]): Message[] {
+  const byModel = new Map<string, Message>();
+  const passthrough: Message[] = [];
+
+  for (const message of messages) {
+    const key = message.model || (typeof message.groupIndex === "number" ? `slot:${message.groupIndex}` : "");
+    if (!key) {
+      passthrough.push(message);
+      continue;
+    }
+    const current = byModel.get(key);
+    if (!current || messageRecency(message) >= messageRecency(current)) {
+      byModel.set(key, message);
+    }
+  }
+
+  return [...Array.from(byModel.values()), ...passthrough].sort((a, b) => {
+    const ai = typeof a.groupIndex === "number" ? a.groupIndex : Number.MAX_SAFE_INTEGER;
+    const bi = typeof b.groupIndex === "number" ? b.groupIndex : Number.MAX_SAFE_INTEGER;
+    if (ai !== bi) return ai - bi;
+    return messageRecency(a) - messageRecency(b);
+  });
+}
+
 function pushLegacyGroup(groups: InferredGroup[], userMessage: Message | null, assistants: Message[], nextId: () => number) {
   if (!userMessage) return;
+  const assistantMessages = dedupeAssistantsByModel(assistants);
   groups.push({
     id: nextId(),
     userMessage,
-    assistantMessages: [...assistants],
-    models: uniqueModels(assistants),
+    assistantMessages,
+    models: uniqueModels(assistantMessages),
   });
 }
 
@@ -66,7 +95,7 @@ export function inferGroups(messages: Message[]): InferredGroup[] {
       for (const [id, assistants] of Array.from(byGroupId.entries())) {
         if (pushedGroupIds.has(id)) continue;
         pushedGroupIds.add(id);
-        const sortedAssistants = [...assistants].sort((a, b) => (a.groupIndex ?? 0) - (b.groupIndex ?? 0));
+        const sortedAssistants = dedupeAssistantsByModel(assistants);
         groups.push({
           id,
           userMessage: currentUser,

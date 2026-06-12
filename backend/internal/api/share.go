@@ -116,9 +116,9 @@ func (h *ShareHandler) GetBySlug(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"title":    share.Title,
-		"model":    share.Model,
-		"messages": messages,
+		"title":      share.Title,
+		"model":      share.Model,
+		"messages":   messages,
 		"created_at": share.CreatedAt,
 	})
 }

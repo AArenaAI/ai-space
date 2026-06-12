@@ -6,7 +6,7 @@ import {
   shouldSkipSaveUserMessage,
   type CompareGroupContext,
 } from "./chatCompareCoordinator";
-import { buildCompareChatRequestBody, type ModelMessage } from "./chatRequestBuilder";
+import { buildCompareChatRequestBody, getClientTimezone, type ModelMessage } from "./chatRequestBuilder";
 import type { ChatStreamRunResult } from "./chatStreamRunResult";
 
 export type CompareAssistantLike = {
@@ -120,6 +120,7 @@ export function buildCompareRunRequestBody({
   templatePrefix,
   skillKey,
   messageFileIds,
+  clientTimezone,
 }: {
   assistant: CompareAssistantLike;
   index: number;
@@ -135,6 +136,7 @@ export function buildCompareRunRequestBody({
   templatePrefix?: string;
   skillKey?: string;
   messageFileIds?: string[];
+  clientTimezone?: string;
 }): Record<string, any> {
   return buildCompareChatRequestBody({
     model: assistant.model || "",
@@ -158,6 +160,7 @@ export function buildCompareRunRequestBody({
     skillKey,
     messageFileIds,
     notebookFileIds,
+    clientTimezone,
   });
 }
 
@@ -200,6 +203,7 @@ export async function runCompareModel<TAssistant extends CompareAssistantLike>({
         templatePrefix: options.templatePrefix,
         skillKey: options.skillKey,
         messageFileIds: options.messageFileIds,
+        clientTimezone: getClientTimezone(),
       })),
     });
     if (!response.ok) {

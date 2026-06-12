@@ -158,9 +158,22 @@ export function createForkChatAction({
     const token = getToken();
     const headers = buildChatRequestHeaders({ token, guestId: getGuestId() });
     const sourceMessage = messages.find((message) => message.serverMessageId === messageId);
+    const sourcePosition = messages.findIndex((message) => message.serverMessageId === messageId);
+    const sourceUserMessage = sourcePosition >= 0
+      ? sourceMessage?.role === "user"
+        ? sourceMessage
+        : [...messages.slice(0, sourcePosition)].reverse().find((message) => message.role === "user")
+      : undefined;
+    const sourceMessageFileIds = (sourceUserMessage?.files || [])
+      .map((file) => {
+        const maybeFile = file as typeof file & { publicId?: string; public_id?: string; id?: string };
+        return maybeFile.publicId || maybeFile.public_id || maybeFile.id;
+      })
+      .filter((id): id is string => typeof id === "string" && id.length > 0);
     const sourceIndex = sourceMessage?.model ? modelIds.indexOf(sourceMessage.model) : -1;
+
     const forkPlaceholderGroupId = -Math.max(1, messageId);
-    const placeholderCreatedAt = sourceMessage?.createdAt || now();
+    const placeholderCreatedAt = now();
     const placeholderIds = modelIds.map((modelId, index) => index === sourceIndex ? undefined : `fork-${messageId}-${index}-${fallbackId()}`);
     const placeholderMessages = modelIds
       .map((modelId, index) => ({ modelId, index, id: placeholderIds[index] }))
@@ -217,8 +230,8 @@ export function createForkChatAction({
       const userMessageId = typeof data.user_message_id === "number" ? data.user_message_id : undefined;
 
       if (useStreamingFork && convId && groupId && userMessageId && streamResponse) {
-        const sourcePosition = messages.findIndex((message) => message.serverMessageId === messageId);
-        const contextMessages = sourcePosition >= 0 ? messages.slice(0, sourcePosition) : messages;
+        const contextEnd = sourceMessage?.role === "user" ? sourcePosition + 1 : sourcePosition;
+        const contextMessages = contextEnd >= 0 ? messages.slice(0, contextEnd) : messages;
         const controllers: AbortController[] = placeholderMessages.map(() => new AbortController());
         if (compareAbortControllersRef) compareAbortControllersRef.current = controllers;
 
@@ -252,6 +265,7 @@ export function createForkChatAction({
               conversationId: convId,
               notebookId,
               notebookFileIds,
+              messageFileIds: sourceMessageFileIds,
               reasoningEnabled: reasoning.enabled,
               reasoningEffort: reasoning.effort,
               search,

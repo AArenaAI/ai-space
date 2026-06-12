@@ -1,5 +1,14 @@
 import { normalizeError, readApiError } from "@/lib/errors";
 
+function getClientTimezone(): string | undefined {
+  if (typeof Intl === "undefined") return undefined;
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export type ForkChatPersistedMessage = {
   id?: number | string;
   role: "user" | "assistant" | "system";
@@ -150,7 +159,7 @@ export async function runForkChatRequest({
   const res = await fetchImpl(`${apiBaseUrl}/api/chat/${messageId}/fork`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ models: modelIds, init_only: initOnly }),
+    body: JSON.stringify({ models: modelIds, init_only: initOnly, client_timezone: getClientTimezone() }),
   });
   if (!res.ok) {
     throw normalizeError(await readApiError(res), { module: "chat", fallbackMessage: "Fork 对比失败，请稍后重试。" });

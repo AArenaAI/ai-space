@@ -376,6 +376,51 @@ func (h *NotebookHandler) GetFileContent(c *gin.Context) {
 	})
 }
 
+func (h *NotebookHandler) UpdateFile(c *gin.Context) {
+	nb, ok := h.loadNotebook(c)
+	if !ok {
+		return
+	}
+	fileIDParam := c.Param("file_id")
+	fid64, err := strconv.ParseUint(fileIDParam, 10, 32)
+	if err != nil || fid64 == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的文件 ID"})
+		return
+	}
+	var req struct {
+		Filename string `json:"filename"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	filename := strings.TrimSpace(req.Filename)
+	if filename == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请输入来源名称"})
+		return
+	}
+	if len([]rune(filename)) > 240 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "来源名称过长"})
+		return
+	}
+	var link models.NotebookFile
+	if err := h.db.Preload("File").Where("notebook_id = ? AND file_id = ?", nb.ID, uint(fid64)).First(&link).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "资料不存在或无权访问"})
+		return
+	}
+	if link.File.UserID != nb.UserID {
+		c.JSON(http.StatusNotFound, gin.H{"error": "资料不存在或无权访问"})
+		return
+	}
+	if err := h.db.Model(&models.File{}).Where("id = ? AND user_id = ?", link.File.ID, nb.UserID).Update("filename", filename).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "重命名资料失败"})
+		return
+	}
+	h.db.Model(&models.Notebook{}).Where("id = ?", nb.ID).Update("updated_at", time.Now())
+	link.File.Filename = filename
+	c.JSON(http.StatusOK, link)
+}
+
 func (h *NotebookHandler) RemoveFile(c *gin.Context) {
 	nb, ok := h.loadNotebook(c)
 	if !ok {

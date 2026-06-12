@@ -27,6 +27,7 @@ const ForkCompareDialog = dynamic(() => import("./ForkCompareDialog"), {
 const COMPARE_KEY = "compare-mode";
 const COMPARE_MODELS_KEY = "compare-models";
 const COMPARE_MODEL_LIMIT = 2;
+const EMPTY_COMPARE_LAYOUT_DELAY_MS = 520;
 
 function normalizeCompareModelIds(modelIds: string[], models: ChatModel[]): string[] {
   const available = new Set(models.map((model) => model.id));
@@ -41,6 +42,14 @@ interface ChatInterfaceProps {
   notebookTitle?: string;
   notebookFileCount?: number;
   notebookFileIds?: number[];
+  notebookHero?: {
+    title: string;
+    meta?: string;
+    coverClassName?: string;
+    icon?: string;
+    imageUrl?: string;
+    onCustomize?: () => void;
+  };
   models: ChatModel[];
   skillKey?: string;
   recommendedModel?: ChatModel;
@@ -48,13 +57,20 @@ interface ChatInterfaceProps {
   welcomeSubtitle?: string;
   welcomeExamples?: { title: string; desc: string; prompt: string }[];
   targetMessageId?: number;
-  externalSendRequest?: { id: number; content: string } | null;
+  externalSendRequest?: { id: number; content: string; hidden?: boolean } | null;
 }
 
-export default function ChatInterface({ conversationId, notebookId, notebookTitle, notebookFileCount, notebookFileIds, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId, externalSendRequest }: ChatInterfaceProps) {
+const HIDDEN_USER_MESSAGE_PREFIX = "<!-- ai-space:hidden-user-message -->";
+
+export function buildHiddenUserMessageContent(content: string) {
+  return `${HIDDEN_USER_MESSAGE_PREFIX}\n${content}`;
+}
+
+export default function ChatInterface({ conversationId, notebookId, notebookTitle, notebookFileCount, notebookFileIds, notebookHero, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId, externalSendRequest }: ChatInterfaceProps) {
   const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
   const { t } = useI18n();
   const [compareMode, setCompareMode] = useState(false);
+  const [emptyCompareLayoutReady, setEmptyCompareLayoutReady] = useState(false);
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const selectedModelsRef = useRef<string[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<number>(0);
@@ -286,7 +302,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     return ["extended", "heavy", "high", "max"].includes(reasoning.effort);
   };
 
-  const handleSend = async (content: string, reasoning: ReasoningConfig | undefined, search: boolean, attachments?: { filename: string; content: string; type: string; public_id?: string }[], file_ids?: string[]) => {
+  const handleSend = async (content: string, reasoning: ReasoningConfig | undefined, search: boolean, attachments?: { filename: string; content: string; type: string; public_id?: string }[], file_ids?: string[], skipUserMessage = false) => {
     // 【积分限制已临时取消】保畔代码但不执行
     /* Credit checks are temporarily disabled.
      * If re-enabled, route insufficient-credit messages through i18n keys instead of hardcoded copy.
@@ -313,14 +329,21 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
       // 前端目前没有后端返回的任务复杂度字段，先用用户发送时选择的推理档位判断复杂任务
       setIsComplexTask(isComplexReasoningTask(reasoning));
       const { templateId, templatePrefix } = getSelectedTemplatePayload();
-      sendMessage(content, reasoning, false, search, templateId, false, attachments, file_ids, templatePrefix);
+      sendMessage(content, reasoning, false, search, templateId, skipUserMessage, attachments, file_ids, templatePrefix);
     }
   };
 
   useEffect(() => {
     if (!externalSendRequest || handledExternalSendIdRef.current === externalSendRequest.id) return;
     handledExternalSendIdRef.current = externalSendRequest.id;
-    handleSend(externalSendRequest.content, undefined, false);
+    handleSend(
+      externalSendRequest.hidden ? buildHiddenUserMessageContent(externalSendRequest.content) : externalSendRequest.content,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      false
+    );
   }, [externalSendRequest]);
 
   const handleStop = () => {
@@ -422,7 +445,19 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   const activeCompareMode = compareMode || isCompare;
   const activeCompareModelIds = compareMode ? selectedModels : (compareModels.length > 0 ? compareModels : selectedModels);
   const activeTargetMessageId = compareTargetMessageId ?? (currentConversation === conversationId ? targetMessageId : undefined);
-  const isNewEmptyChat = messages.length === 0 && !conversationId;
+  const isEmptyNewCompareMode = messages.length === 0 && !conversationId && activeCompareMode;
+  const shouldDelayEmptyCompareLayout = isEmptyNewCompareMode && !emptyCompareLayoutReady;
+  const isNewEmptyChat = messages.length === 0 && !conversationId && !activeCompareMode;
+
+  useEffect(() => {
+    if (!isEmptyNewCompareMode) {
+      setEmptyCompareLayoutReady(false);
+      return;
+    }
+    setEmptyCompareLayoutReady(false);
+    const timer = window.setTimeout(() => setEmptyCompareLayoutReady(true), EMPTY_COMPARE_LAYOUT_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [isEmptyNewCompareMode]);
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
@@ -486,6 +521,38 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
         </div>
       )}
 
+      {notebookHero && !activeCompareMode && (
+        <div className="relative z-30 shrink-0 px-4 pb-3">
+          <div className={cn("group relative overflow-hidden rounded-[26px] px-6 py-5 shadow-sm", notebookHero.imageUrl ? "bg-slate-900 text-white" : (notebookHero.coverClassName || "bg-gradient-to-br from-violet-100 via-indigo-50 to-slate-100 text-slate-950"))}>
+            {notebookHero.imageUrl ? (
+              <img src={notebookHero.imageUrl} alt="笔记本底图" className="absolute inset-0 h-full w-full object-cover" />
+            ) : (
+              <div className="pointer-events-none absolute -right-8 -bottom-12 text-[150px] font-black leading-none text-white/35 opacity-80">M</div>
+            )}
+            <div className={cn("absolute inset-0", notebookHero.imageUrl ? "bg-gradient-to-r from-black/55 via-black/20 to-transparent" : "bg-transparent")} />
+            <div className="relative z-10 flex items-start justify-between gap-4">
+              <div className="min-w-0 flex-1">
+                <div className="mb-4 text-[30px] leading-none">{notebookHero.icon || "🚀"}</div>
+                <h1 className={cn("max-w-2xl text-[24px] font-bold leading-[1.12] tracking-[-0.035em]", notebookHero.imageUrl ? "text-white drop-shadow-sm" : "text-slate-950")}>
+                  {notebookHero.title}
+                </h1>
+                {notebookHero.meta && <p className={cn("mt-3 text-sm font-medium", notebookHero.imageUrl ? "text-white/80" : "text-slate-700/75")}>{notebookHero.meta}</p>}
+              </div>
+              {notebookHero.onCustomize && (
+                <button
+                  type="button"
+                  onClick={notebookHero.onCustomize}
+                  className="relative z-20 inline-flex h-11 shrink-0 items-center gap-2 rounded-full bg-white/90 px-4 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-black/5 transition hover:bg-white hover:text-slate-950 group-hover:shadow-md"
+                >
+                  <Pencil className="h-4 w-4" />
+                  自定义
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 消息列表 - 有消息时渲染 */}
       {!isNewEmptyChat && (
         <MessageList
@@ -532,11 +599,11 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
           ? "opacity-100 translate-y-0 scale-100 pointer-events-auto"
           : "opacity-0 -translate-y-12 scale-95 pointer-events-none"
       )}>
-        <div className="text-center max-w-md mb-6">
+        <div className="mb-6 w-fit max-w-md text-left">
           {welcomeTitle ? (
             <>
-              <div className="w-12 h-12 rounded-xl bg-surface-card border border-surface-border flex items-center justify-center mx-auto mb-6">
-                <Bot className="w-5 h-5 text-text-secondary" />
+              <div className="mb-6 flex h-12 w-12 items-center justify-center text-[34px] leading-none">
+                👋
               </div>
               <h2 className="text-xl font-semibold tracking-tight mb-2 text-text-primary">{welcomeTitle}</h2>
               {welcomeSubtitle && (

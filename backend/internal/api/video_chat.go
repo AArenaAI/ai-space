@@ -434,7 +434,7 @@ func (h *VideoChatHandler) refreshPendingVideoChatMessages(chatID uint) {
 				localVideoURL, persistErr := persistRemoteVideoAsset(resp.VideoURL)
 				if persistErr != nil {
 					log.Printf("[VideoChat] persist video failed task=%s err=%v", msg.TaskID, persistErr)
-					cleanMsg := "视频生成成功了，但保存视频文件时失败，请稍后重试。"
+					cleanMsg := videoAssetPersistenceErrorMessage(persistErr)
 					updates["status"] = "failed"
 					updates["error_message"] = cleanMsg
 					videoUpdates["status"] = "failed"

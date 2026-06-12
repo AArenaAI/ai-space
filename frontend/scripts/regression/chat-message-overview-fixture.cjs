@@ -303,6 +303,44 @@ async function getActiveOverviewId(page) {
     assert.notEqual(afterPanelWheel.firstId, manyExpanded.firstId, `wheel over expanded overview panel should browse the overview window: before=${JSON.stringify(manyExpanded)} after=${JSON.stringify(afterPanelWheel)}`);
     assert.ok(Math.abs(afterPanelWheelScroll - beforePanelWheelScroll) <= 2, `wheel over expanded overview panel should not scroll the main chat: before=${beforePanelWheelScroll} after=${afterPanelWheelScroll}`);
 
+    const scrollbarDragStart = await page.evaluate(() => {
+      const thumb = document.querySelector('[data-testid="chat-message-overview-scrollbar-thumb"]');
+      const track = document.querySelector('[data-testid="chat-message-overview-scrollbar"]');
+      const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+      const ids = [...document.querySelectorAll('[data-testid="chat-message-overview-item"]')].map((item) => item.getAttribute("data-message-id"));
+      const thumbRect = thumb?.getBoundingClientRect();
+      const trackRect = track?.getBoundingClientRect();
+      return {
+        ok: Boolean(thumbRect && trackRect && scroller),
+        beforeFirstId: ids[0] || "",
+        beforeScrollTop: scroller?.scrollTop ?? -1,
+        x: thumbRect ? thumbRect.left + thumbRect.width / 2 : 0,
+        startY: thumbRect ? thumbRect.top + thumbRect.height / 2 : 0,
+        endY: trackRect ? trackRect.bottom - 6 : 0,
+        trackHeight: trackRect?.height ?? 0,
+        thumbHeight: thumbRect?.height ?? 0,
+      };
+    });
+    assert.ok(scrollbarDragStart.ok, `scrollbar drag setup failed: ${JSON.stringify(scrollbarDragStart)}`);
+    await page.mouse.move(scrollbarDragStart.x, scrollbarDragStart.startY);
+    await page.mouse.down();
+    await page.mouse.move(scrollbarDragStart.x, scrollbarDragStart.endY, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(120);
+    const scrollbarDrag = await page.evaluate((start) => {
+      const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+      const ids = [...document.querySelectorAll('[data-testid="chat-message-overview-item"]')].map((item) => item.getAttribute("data-message-id"));
+      return {
+        ...start,
+        afterFirstId: ids[0] || "",
+        afterLastId: ids[ids.length - 1] || "",
+        afterScrollTop: scroller?.scrollTop ?? -1,
+      };
+    }, scrollbarDragStart);
+    assert.notEqual(scrollbarDrag.afterFirstId, scrollbarDrag.beforeFirstId, `dragging overview scrollbar should browse the overview window: ${JSON.stringify(scrollbarDrag)}`);
+    assert.equal(scrollbarDrag.afterLastId, "overview-user-40", `dragging overview scrollbar down should reach the latest items: ${JSON.stringify(scrollbarDrag)}`);
+    assert.ok(Math.abs(scrollbarDrag.afterScrollTop - scrollbarDrag.beforeScrollTop) <= 2, `dragging overview scrollbar should not scroll the main chat: ${JSON.stringify(scrollbarDrag)}`);
+
     await page.mouse.wheel(0, 720);
     await page.waitForTimeout(120);
     const manyTargetId = "overview-user-40";

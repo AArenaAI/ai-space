@@ -1,7 +1,7 @@
 "use client";
 
 import { CSSProperties, useEffect, useMemo, useRef, useState, type ComponentType, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
-import { BarChart3, CheckCircle2, ChevronLeft, ChevronRight, ChevronsRight, Copy, Download, ExternalLink, FileQuestion, FileText, HelpCircle, Layers3, Lightbulb, Loader2, Map as MapIcon, Maximize2, MessageCircle, MoreHorizontal, Pencil, Presentation, RefreshCw, Sparkles, Trash2, X, XCircle, ZoomIn, ZoomOut } from "lucide-react";
+import { BarChart3, CheckCircle2, ChevronLeft, ChevronRight, ChevronsRight, Copy, Download, ExternalLink, FileQuestion, FileText, HelpCircle, Lightbulb, Loader2, Map as MapIcon, Maximize2, MessageCircle, MoreHorizontal, Pencil, Presentation, RefreshCw, Sparkles, Trash2, X, XCircle, ZoomIn, ZoomOut } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -1396,10 +1396,6 @@ export function NotebookStudioPanel({
           </div>
           <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-surface-card p-4">
             {renderActiveArtifact(activeArtifact, t, true, onDownloadArtifact, onExplainFlashcard, onExplainQuiz)}
-            <div className="mt-3 flex items-center gap-2 border-t border-surface-border pt-3">
-              <button type="button" className="rounded-full border border-surface-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-emerald-500/40 hover:text-emerald-500">{t("notebook.studio.good")}</button>
-              <button type="button" className="rounded-full border border-surface-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-red-500/40 hover:text-red-500">{t("notebook.studio.bad")}</button>
-            </div>
           </div>
         </div>
       ) : (
@@ -1445,9 +1441,12 @@ export function NotebookStudioPanel({
         {(generatingType === "table" || generatingType === "mindmap" || generatingType === "flashcards" || generatingType === "quiz" || generatingType === "report" || generatingType === "infographic") && <div className="px-4 pb-3"><GeneratingStudioCard type={generatingType} sourceCount={selectedSourceCount} t={t} /></div>}
         {artifacts.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
-            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-elevated text-text-tertiary"><Layers3 className="h-5 w-5" /></div>
-            <p className="text-sm font-medium text-text-primary">{t("notebook.studio.emptyTitle")}</p>
-            <p className="mt-2 text-xs leading-5 text-text-tertiary">{t("notebook.studio.emptyDesc")}</p>
+            <div className="mb-4 text-text-tertiary">
+              <Sparkles className="absolute ml-6 mt-0 h-3.5 w-3.5" />
+              <Pencil className="h-8 w-8" />
+            </div>
+            <p className="text-sm font-medium text-text-primary">Studio 输出将保存在此处。</p>
+            <p className="mt-2 max-w-[260px] text-xs leading-5 text-text-tertiary">添加来源后，点击即可添加数据表格、思维导图、闪卡、测验、报告或信息图。</p>
           </div>
         ) : (
           <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5">
