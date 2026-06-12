@@ -32,9 +32,9 @@ func (h *CompareRecordHandler) Save(c *gin.Context) {
 	userID := getUserID(c)
 
 	var req struct {
-		Query  string   `json:"query" binding:"required"`
-		Models []string `json:"models" binding:"required"`
-		Results string  `json:"results" binding:"required"` // JSON string of results array
+		Query   string   `json:"query" binding:"required"`
+		Models  []string `json:"models" binding:"required"`
+		Results string   `json:"results" binding:"required"` // JSON string of results array
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

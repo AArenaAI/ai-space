@@ -3,7 +3,7 @@ package models
 import "time"
 
 // PPTTemplate PPT模板
- type PPTTemplate struct {
+type PPTTemplate struct {
 	ID          uint      `json:"id" gorm:"primaryKey"`
 	Name        string    `json:"name"`
 	Category    string    `json:"category"`
@@ -16,7 +16,7 @@ import "time"
 }
 
 // PPTGeneration PPT生成记录
- type PPTGeneration struct {
+type PPTGeneration struct {
 	ID           uint      `json:"id" gorm:"primaryKey"`
 	UserID       uint      `json:"user_id"`
 	GuestID      string    `json:"guest_id" gorm:"size:64"`
@@ -60,7 +60,7 @@ const (
 )
 
 // PPTSlide 单页幻灯片记录
- type PPTSlide struct {
+type PPTSlide struct {
 	ID           uint      `json:"id" gorm:"primaryKey"`
 	PPTID        uint      `json:"ppt_id" gorm:"index"`
 	Page         int       `json:"page"`
@@ -78,7 +78,7 @@ const (
 }
 
 // PPTRevision PPT 修订记录
- type PPTRevision struct {
+type PPTRevision struct {
 	ID          uint      `json:"id" gorm:"primaryKey"`
 	PPTID       uint      `json:"ppt_id"`
 	UserID      uint      `json:"user_id"`
@@ -91,7 +91,7 @@ const (
 }
 
 // PPTImageJob PPT 图片生成任务（替换裸 goroutine，支持重试与恢复）
- type PPTImageJob struct {
+type PPTImageJob struct {
 	ID        uint      `json:"id" gorm:"primaryKey"`
 	PPTID     uint      `json:"ppt_id" gorm:"index:idx_ppt_image_job_pptid"`
 	Page      int       `json:"page"`
@@ -105,7 +105,7 @@ const (
 }
 
 // Slide 简化幻灯片（兼容旧结构）
- type Slide struct {
+type Slide struct {
 	Title    string   `json:"title"`
 	Content  []string `json:"content"`
 	Subtitle string   `json:"subtitle,omitempty"`

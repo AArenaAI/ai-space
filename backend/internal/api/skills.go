@@ -257,11 +257,11 @@ func (h *SkillHandler) DetectSkill(c *gin.Context) {
 
 	if result.Matched {
 		c.JSON(http.StatusOK, gin.H{
-			"matched":  true,
-			"skill":    result.Skill,
-			"keyword":  result.Keyword,
-			"suggest":  true,
-			"message":  "检测到关联技能: " + result.Skill.DisplayName,
+			"matched": true,
+			"skill":   result.Skill,
+			"keyword": result.Keyword,
+			"suggest": true,
+			"message": "检测到关联技能: " + result.Skill.DisplayName,
 		})
 	} else {
 		c.JSON(http.StatusOK, gin.H{

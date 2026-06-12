@@ -5,9 +5,9 @@ import "time"
 // File 用户上传的文件元数据
 type File struct {
 	ID                     uint      `gorm:"primaryKey" json:"id"`
-	PublicID               string    `gorm:"size:64;uniqueIndex" json:"public_id"` // 对外暴露的文件 ID，不可枚举
-	UserID                 uint      `gorm:"not null;index" json:"user_id"`        // 0 = 未登录用户
-	WorkspaceID            uint      `gorm:"default:0;index" json:"workspace_id"`  // 所属工作区，0=未关联
+	PublicID               string    `gorm:"size:64;uniqueIndex" json:"public_id"`    // 对外暴露的文件 ID，不可枚举
+	UserID                 uint      `gorm:"not null;index" json:"user_id"`           // 0 = 未登录用户
+	WorkspaceID            uint      `gorm:"default:0;index" json:"workspace_id"`     // 所属工作区，0=未关联
 	GuestID                string    `gorm:"size:64;index" json:"guest_id,omitempty"` // 匿名用户浏览器标识
 	Filename               string    `gorm:"not null" json:"filename"`
 	MimeType               string    `json:"mime_type"`

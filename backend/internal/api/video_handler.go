@@ -161,7 +161,7 @@ func (h *VideoHandler) GetVideo(c *gin.Context) {
 					if persistErr != nil {
 						log.Printf("[Video] persist video failed task=%s err=%v", video.TaskID, persistErr)
 						video.Status = "failed"
-						video.ErrorMessage = "视频生成成功了，但保存视频文件时失败，请稍后重试。"
+						video.ErrorMessage = videoAssetPersistenceErrorMessage(persistErr)
 					} else {
 						video.VideoURL = localVideoURL
 					}
@@ -224,7 +224,7 @@ func (h *VideoHandler) RefreshVideoStatus(c *gin.Context) {
 			if persistErr != nil {
 				log.Printf("[Video] persist video failed task=%s err=%v", video.TaskID, persistErr)
 				video.Status = "failed"
-				video.ErrorMessage = "视频生成成功了，但保存视频文件时失败，请稍后重试。"
+				video.ErrorMessage = videoAssetPersistenceErrorMessage(persistErr)
 			} else {
 				video.VideoURL = localVideoURL
 			}

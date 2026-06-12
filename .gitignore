@@ -85,3 +85,7 @@ frontend/playwright-report/
 .vercel
 translation-test-samples/
 .worktrees/
+
+# Local video/script generation artifacts
+video/
+神秘复苏.txt
