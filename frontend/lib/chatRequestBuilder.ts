@@ -1,3 +1,12 @@
+export function getClientTimezone(): string | undefined {
+  if (typeof Intl === "undefined") return undefined;
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export type ChatRequestHeadersOptions = {
   token?: string | null;
   guestId: string;
@@ -32,6 +41,7 @@ export type CommonChatRequestOptions = {
   skillKey?: string;
   messageFileIds?: string[];
   notebookFileIds?: number[];
+  clientTimezone?: string;
 };
 
 export type SingleChatRequestOptions = CommonChatRequestOptions & {
@@ -51,6 +61,7 @@ export function buildSingleChatRequestBody({
   skillKey,
   messageFileIds,
   notebookFileIds,
+  clientTimezone,
 }: SingleChatRequestOptions): Record<string, any> {
   return {
     model,
@@ -66,6 +77,7 @@ export function buildSingleChatRequestBody({
     skill_key: skillKey || undefined,
     message_file_ids: messageFileIds || undefined,
     notebook_file_ids: notebookFileIds || undefined,
+    client_timezone: clientTimezone || undefined,
   };
 }
 
@@ -98,6 +110,7 @@ export function buildCompareChatRequestBody({
   skillKey,
   messageFileIds,
   notebookFileIds,
+  clientTimezone,
 }: CompareChatRequestOptions): Record<string, any> {
   return {
     model,
@@ -118,5 +131,6 @@ export function buildCompareChatRequestBody({
     skill_key: skillKey || undefined,
     message_file_ids: messageFileIds || undefined,
     notebook_file_ids: notebookFileIds || undefined,
+    client_timezone: clientTimezone || undefined,
   };
 }
