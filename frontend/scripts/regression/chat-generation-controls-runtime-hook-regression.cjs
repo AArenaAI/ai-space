@@ -32,6 +32,7 @@ function loadModule(file) {
           else headers["X-Guest-ID"] = guestId;
           return headers;
         },
+        buildCompareChatRequestBody: (body) => body,
       };
     }
     if (specifier === "@/lib/chatActivityStatus") {
@@ -60,6 +61,8 @@ function loadModule(file) {
         },
       };
     }
+    if (specifier === "@/lib/chatModelMessageTransform") return { toModelMessages: (messages) => messages };
+    if (specifier === "@/lib/chatHistoryTransform") return { toModelMessages: (messages) => messages };
     if (specifier.startsWith("@/")) return {};
     return require(specifier);
   };
@@ -247,6 +250,44 @@ async function testForkChatMarksPlaceholderFailedOnRequestError() {
   assert.equal(latestMessages[2].activityStatus.label, "生成失败");
 }
 
+async function testStreamingForkPassesSourceUserAttachments() {
+  const initialMessages = [
+    { id: "u1", role: "user", content: "分析一下", createdAt: 1000, serverMessageId: 10, files: [{ public_id: "file-public-1" }] },
+    { id: "a1", role: "assistant", content: "old", createdAt: 1001, serverMessageId: 11, model: "m1" },
+  ];
+  const setters = makeSetters(initialMessages);
+  const requests = [];
+  const fork = createForkChatAction({
+    apiBaseUrl: "",
+    messages: initialMessages,
+    currentConversation: 5,
+    ...setters,
+    getToken: () => "tok",
+    getGuestId: () => "guest",
+    fallbackId: () => "placeholder-id",
+    now: () => 2000,
+    translate: (key) => ({ "chat.status.generating": "生成中", "chat.status.failed": "生成失败" }[key] || key),
+    streamResponse: async () => ({}),
+    runForkChatRequest: async () => ({ conversation_id: 5, group_id: 77, user_message_id: 10, models: ["m1", "m2"] }),
+  });
+  const originalFetch = global.fetch;
+  global.fetch = async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return { ok: true };
+  };
+  try {
+    await fork(11, ["m1", "m2"]);
+  } finally {
+    global.fetch = originalFetch;
+  }
+  assert.equal(requests.length, 1);
+  assert.deepEqual(requests[0].message_file_ids || requests[0].messageFileIds, ["file-public-1"]);
+  assert.equal(requests[0].messages.length, 1);
+  const optimistic = setters.calls.find((call) => call[0] === "messages")[1];
+  assert.notEqual(optimistic[2].createdAt, initialMessages[1].createdAt);
+  assert.equal(optimistic[2].generationStartedAt, 2000);
+}
+
 async function testForkChatSkipsRefreshWithoutTokenAndUsesFallbackConversation() {
   const setters = makeSetters();
   let refreshed = false;
@@ -287,6 +328,7 @@ async function testForkChatLogsRefreshErrors() {
   await testForkChatRequestsAndRefreshes();
   await testForkChatAddsGeneratingPlaceholderForForkedModel();
   await testForkChatMarksPlaceholderFailedOnRequestError();
+  await testStreamingForkPassesSourceUserAttachments();
   await testForkChatSkipsRefreshWithoutTokenAndUsesFallbackConversation();
   await testForkChatLogsRefreshErrors();
   console.log("chat generation controls runtime hook regression passed");

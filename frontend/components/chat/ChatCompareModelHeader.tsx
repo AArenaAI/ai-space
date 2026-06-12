@@ -27,26 +27,30 @@ function ChatCompareModelHeader({
 }: ChatCompareModelHeaderProps) {
   const { t } = useI18n();
   return (
-    <div className="flex items-center justify-between gap-2 px-3 py-1.5">
-      <div className="flex-1 min-w-0">
+    <div className="flex items-center gap-2 px-3 py-1.5">
+      <div className="min-w-0 flex-1">
         {selectedModel ? (
           <ModelSelector
             models={models}
             selected={selectedModel}
             onSelect={(nextModel) => onModelChange?.(index, nextModel.id)}
+            className="inline-block max-w-[220px] align-top sm:max-w-[240px]"
+            triggerClassName="w-auto max-w-full"
           />
         ) : (
-          <div className="rounded-lg px-2 py-1 text-sm font-medium text-text-secondary">{modelId || t("model.comparePlaceholder").replace("{index}", String(index + 1))}</div>
+          <div className="inline-flex rounded-lg px-2 py-1 text-sm font-medium text-text-secondary">{modelId || t("model.comparePlaceholder").replace("{index}", String(index + 1))}</div>
         )}
       </div>
-      <button
-        type="button"
-        onClick={() => onExitCompare?.()}
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-tertiary transition-colors hover:bg-surface-card hover:text-text-primary"
-        aria-label={closeLabel}
-      >
-        <X className="h-4 w-4" />
-      </button>
+      {index === 0 && (
+        <button
+          type="button"
+          onClick={() => onExitCompare?.()}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-tertiary transition-colors hover:bg-surface-card hover:text-text-primary"
+          aria-label={closeLabel}
+        >
+          <X className="h-4 w-4" />
+        </button>
+      )}
     </div>
   );
 }
