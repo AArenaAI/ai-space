@@ -731,6 +731,36 @@ function MessageList({
     return map;
   }, [groups]);
 
+  const aggregateGroupByUserId = useMemo(() => {
+    const map = new Map<string, InferredGroup>();
+    groups.forEach((group) => {
+      const existing = map.get(group.userMessage.id);
+      if (!existing) {
+        map.set(group.userMessage.id, { ...group, assistantMessages: [...group.assistantMessages], models: [...group.models] });
+        return;
+      }
+      const seenAssistantIds = new Set(existing.assistantMessages.map((assistant) => assistant.id));
+      const assistantMessages = [
+        ...existing.assistantMessages,
+        ...group.assistantMessages.filter((assistant) => !seenAssistantIds.has(assistant.id)),
+      ].sort((a, b) => {
+        const aIndex = typeof a.groupIndex === "number" ? a.groupIndex : Number.MAX_SAFE_INTEGER;
+        const bIndex = typeof b.groupIndex === "number" ? b.groupIndex : Number.MAX_SAFE_INTEGER;
+        if (aIndex !== bIndex) return aIndex - bIndex;
+        return (a.createdAt || 0) - (b.createdAt || 0);
+      });
+      const models = [...existing.models];
+      group.models.forEach((modelId) => {
+        if (modelId && !models.includes(modelId)) models.push(modelId);
+      });
+      assistantMessages.forEach((assistant) => {
+        if (assistant.model && !models.includes(assistant.model)) models.push(assistant.model);
+      });
+      map.set(group.userMessage.id, { ...existing, assistantMessages, models });
+    });
+    return map;
+  }, [groups]);
+
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const locatedTargetKeyRef = useRef<string>("");
   const loadingTargetKeyRef = useRef<string>("");
@@ -759,14 +789,17 @@ function MessageList({
   const allVisibleMessages = useMemo(() => {
     return messages.filter((msg) => {
       const group = groupByMessageId.get(msg.id);
-      if (msg.role !== "user" && group && group.assistantMessages.length > 1) {
-        const activeIndex = groupViews?.get(group.id) ?? 0;
-        const activeMsg = group.assistantMessages[activeIndex] ?? group.assistantMessages[0];
-        return msg.id === activeMsg?.id;
+      if (msg.role !== "user" && group) {
+        const aggregateGroup = aggregateGroupByUserId.get(group.userMessage.id) || group;
+        if (aggregateGroup.assistantMessages.length > 1) {
+          const activeIndex = groupViews?.get(aggregateGroup.id) ?? 0;
+          const activeMsg = aggregateGroup.assistantMessages[activeIndex] ?? aggregateGroup.assistantMessages[0];
+          return msg.id === activeMsg?.id;
+        }
       }
       return true;
     });
-  }, [messages, groupByMessageId, groupViews]);
+  }, [messages, groupByMessageId, aggregateGroupByUserId, groupViews]);
 
   const targetGroup = targetMessageId
     ? groups.find((group) =>
@@ -865,6 +898,8 @@ function MessageList({
   }, [conversationId]);
   const hiddenLocalMessageCount = allVisibleMessages.length - visibleMessages.length;
   const hasHiddenLocalMessages = hiddenLocalMessageCount > 0;
+  const useWindowedRowMeasurementHints = allVisibleMessages.length > INITIAL_RENDERED_MESSAGE_WINDOW;
+  const useRowContentVisibility = useWindowedRowMeasurementHints;
   localWindowReleaseStateRef.current = {
     hasHiddenLocalMessages,
     visibleMessageCount: visibleMessages.length,
@@ -1739,7 +1774,7 @@ function MessageList({
         ref={virtuosoRef}
         scrollerRef={handleVirtuosoScrollerRef}
         followOutput={false}
-        defaultItemHeight={CHAT_VIRTUOSO_DEFAULT_ITEM_HEIGHT}
+        defaultItemHeight={useWindowedRowMeasurementHints ? CHAT_VIRTUOSO_DEFAULT_ITEM_HEIGHT : undefined}
         atBottomThreshold={AT_BOTTOM_THRESHOLD}
         atBottomStateChange={(atBottom) => {
           atBottomRef.current = atBottom;
@@ -1798,6 +1833,9 @@ function MessageList({
         components={virtuosoComponents}
         itemContent={(index, msg) => {
           const group = groupByMessageId.get(msg.id);
+          const displayGroup = msg.role !== "user" && group
+            ? aggregateGroupByUserId.get(group.userMessage.id) || group
+            : group;
           const model = msg.model ? modelById.get(msg.model) : undefined;
           const isSelected = selectedIds.has(msg.id);
           const isHighlighted = highlightedMessageId === msg.id;
@@ -1810,7 +1848,7 @@ function MessageList({
               latestAssistantMessageId={latestAssistantMessageId}
               initialReadingAssistantIds={renderedWindowStableAssistantIds}
               viewedAssistantIds={viewedAssistantIds}
-              group={group}
+              group={displayGroup}
               model={model}
               isLoading={isLoading}
               selectMode={selectMode}
@@ -1836,6 +1874,7 @@ function MessageList({
               onAssistantViewed={handleAssistantViewed}
               imageLoadFailedLabel={t("chat.imageLoadFailed")}
               MarkdownRenderer={LazyMarkdownRenderer}
+              useContentVisibility={useRowContentVisibility}
             />
           );
         }}

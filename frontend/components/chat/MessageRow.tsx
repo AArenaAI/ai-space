@@ -74,6 +74,7 @@ export type MessageRowProps = {
   imageLoadFailedLabel: string;
   MarkdownRenderer: MarkdownRendererComponent;
   onAssistantViewed?: (messageId: string) => void;
+  useContentVisibility?: boolean;
 };
 
 function MessageRow({
@@ -108,6 +109,7 @@ function MessageRow({
   imageLoadFailedLabel,
   MarkdownRenderer,
   onAssistantViewed,
+  useContentVisibility = true,
 }: MessageRowProps) {
   const { t } = useI18n();
   const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -262,7 +264,7 @@ function MessageRow({
       data-chat-message-row="true"
       data-message-id={msg.id}
       data-message-role={msg.role}
-      style={isUser ? MESSAGE_ROW_CONTENT_VISIBILITY_STYLE : undefined}
+      style={isUser && useContentVisibility ? MESSAGE_ROW_CONTENT_VISIBILITY_STYLE : undefined}
       className={cn("max-w-[800px] mx-auto px-4 py-4 rounded-2xl transition-colors duration-500", isHighlighted && "bg-brand/10")}
     >
       <div key={msg.id} className={cn("flex gap-3 group", !suppressAppearAnimation && "animate-message-appear", isUser ? "justify-end" : "justify-start")}>
