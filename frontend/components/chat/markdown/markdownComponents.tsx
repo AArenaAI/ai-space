@@ -33,7 +33,7 @@ export function createMarkdownComponents({ isStreaming = false, lightweight = fa
       );
     },
     p({ children }: any) {
-      return <p className="text-[15px] leading-relaxed text-text-primary mb-4 last:mb-0 [li>&]:inline [li>&]:mb-0 [.reasoning-markdown_&]:text-[13px] [.reasoning-markdown_&]:text-text-secondary [.streaming-answer-markdown_&]:mb-0">{children}</p>;
+      return <p className="text-[15px] leading-relaxed text-text-primary !mt-0 !mb-4 last:!mb-0 [li>&]:inline [li>&]:!mb-0 [.reasoning-markdown_&]:text-[13px] [.reasoning-markdown_&]:text-text-secondary [.streaming-answer-markdown_&]:!mb-0">{children}</p>;
     },
     ul({ children }: any) {
       return <ul className="list-disc ml-5 mb-4 space-y-1 text-text-primary">{children}</ul>;

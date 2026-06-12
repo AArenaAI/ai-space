@@ -40,6 +40,8 @@ export type ChatMessageListItemProps = {
   imageLoadFailedLabel: string;
   MarkdownRenderer: MessageRowProps["MarkdownRenderer"];
   useContentVisibility?: boolean;
+  deferOffscreenRichTextHydration?: boolean;
+  stabilizeInitialRichText?: boolean;
 };
 
 function ChatMessageListItem({
@@ -76,6 +78,8 @@ function ChatMessageListItem({
   imageLoadFailedLabel,
   MarkdownRenderer,
   useContentVisibility,
+  deferOffscreenRichTextHydration,
+  stabilizeInitialRichText,
 }: ChatMessageListItemProps) {
   return (
     <MessageRow
@@ -111,6 +115,8 @@ function ChatMessageListItem({
       imageLoadFailedLabel={imageLoadFailedLabel}
       MarkdownRenderer={MarkdownRenderer}
       useContentVisibility={useContentVisibility}
+      deferOffscreenRichTextHydration={deferOffscreenRichTextHydration}
+      stabilizeInitialRichText={stabilizeInitialRichText}
     />
   );
 }
@@ -178,6 +184,8 @@ function areChatMessageListItemPropsEqual(previous: ChatMessageListItemProps, ne
   if (previous.imageLoadFailedLabel !== next.imageLoadFailedLabel) return false;
   if (previous.MarkdownRenderer !== next.MarkdownRenderer) return false;
   if (previous.useContentVisibility !== next.useContentVisibility) return false;
+  if (previous.deferOffscreenRichTextHydration !== next.deferOffscreenRichTextHydration) return false;
+  if (previous.stabilizeInitialRichText !== next.stabilizeInitialRichText) return false;
   if (getGroupRenderKey(previous.group) !== getGroupRenderKey(next.group)) return false;
   if (getGroupModelRenderKey(previous.group, previous.modelById) !== getGroupModelRenderKey(next.group, next.modelById)) return false;
   if (previous.model?.id !== next.model?.id || previous.model?.name !== next.model?.name || previous.model?.provider !== next.model?.provider || previous.model?.color !== next.model?.color) return false;

@@ -9,7 +9,7 @@ import dynamic from "next/dynamic";
 const ShareDialog = dynamic(() => import("@/components/ui/ShareDialog"), { ssr: false });
 import { Virtuoso, VirtuosoHandle, type Components, type ListItem } from "react-virtuoso";
 import { useMessageStream } from "@/hooks/useMessageStream";
-import { inferGroups, InferredGroup } from "@/lib/groups";
+import { dedupeAssistantsByModel, inferGroups, InferredGroup } from "@/lib/groups";
 import { useI18n } from "@/lib/i18n";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
 import MarkdownPlainFallback from "./markdown/MarkdownPlainFallback";
@@ -46,6 +46,9 @@ function LoadableMarkdownRenderer(props: MarkdownRendererProps) {
   }, [Renderer]);
 
   if (!Renderer) {
+    if (props.priorityHydrateRichText) {
+      return <DeferredMarkdownRenderer {...props} />;
+    }
     return <MarkdownPlainFallback content={content} messageId={props.messageId} />;
   }
 
@@ -73,6 +76,7 @@ const AT_BOTTOM_THRESHOLD = 24;
 const SELECT_MODE_EXTRA_SPACER = 80;
 const LONG_MARKDOWN_LAZY_THRESHOLD = 0;
 const HISTORY_PRELOAD_TOP_PX = 1200;
+const HEAVY_HISTORY_PRELOAD_TOP_PX = 1800;
 const HISTORY_PRELOAD_BOTTOM_PX = CHAT_BOTTOM_SPACER;
 const FAST_SCROLL_PRELOAD_PX = 6000;
 const RETURN_TO_BOTTOM_PRELOAD_BOTTOM_PX = 6000;
@@ -245,6 +249,7 @@ function MessageList({
   const bottomLockRafRef = useRef<number>(0);
   const bottomLockTimersRef = useRef<number[]>([]);
   const bottomSmoothRafRef = useRef<number>(0);
+  const initialRangeRevealRafRef = useRef<number>(0);
   const [atBottom, setAtBottom] = useState(true);
   const atBottomRef = useRef(true);
   const [userBrowsing, setUserBrowsing] = useState(false);
@@ -398,7 +403,7 @@ function MessageList({
     const ratio = maxScrollTop > 0 ? Math.min(1, Math.max(0, el.scrollTop / maxScrollTop)) : 1;
     setScrollProgress((prev) => {
       const canScroll = maxScrollTop > 4;
-      if (prev.canScroll === canScroll && Math.abs(prev.ratio - ratio) < 0.004) return prev;
+      if (prev.canScroll === canScroll && Math.abs(prev.ratio - ratio) < 0.008) return prev;
       return { ratio, canScroll };
     });
   }, []);
@@ -464,9 +469,45 @@ function MessageList({
   }, [scrollToBottom, targetMessageId]);
 
   const handleItemsRendered = useCallback((items: ListItem<Message>[]) => {
-    if (items.length > 0) setHasRenderedInitialRange(true);
+    if (items.length <= 0) return;
     lockBottomOnRenderedRange();
-  }, [lockBottomOnRenderedRange]);
+    if (hasRenderedInitialRange) return;
+    if (initialRangeRevealRafRef.current) window.cancelAnimationFrame(initialRangeRevealRafRef.current);
+
+    let attempts = 0;
+    let stableHeightFrames = 0;
+    let lastScrollHeight = -1;
+    const waitForInitialBottomStability = () => {
+      initialRangeRevealRafRef.current = 0;
+      const el = scrollRef.current;
+      if (!el || targetMessageId || !stickToBottomRef.current) {
+        setHasRenderedInitialRange(true);
+        return;
+      }
+
+      const distanceToBottom = el.scrollHeight - el.clientHeight - el.scrollTop;
+      const heightStable = Math.abs(el.scrollHeight - lastScrollHeight) <= 1;
+      stableHeightFrames = heightStable ? stableHeightFrames + 1 : 0;
+      lastScrollHeight = el.scrollHeight;
+      attempts += 1;
+
+      if (distanceToBottom > AT_BOTTOM_THRESHOLD) {
+        scrollToBottom();
+        stableHeightFrames = 0;
+      }
+
+      const atBottomAfterLock = el.scrollHeight - el.clientHeight - el.scrollTop <= AT_BOTTOM_THRESHOLD;
+      if ((atBottomAfterLock && stableHeightFrames >= 2) || attempts >= 12) {
+        if (!atBottomAfterLock && Date.now() < bottomLockIntentUntilRef.current) scrollToBottom();
+        setHasRenderedInitialRange(true);
+        return;
+      }
+
+      initialRangeRevealRafRef.current = window.requestAnimationFrame(waitForInitialBottomStability);
+    };
+
+    initialRangeRevealRafRef.current = window.requestAnimationFrame(waitForInitialBottomStability);
+  }, [hasRenderedInitialRange, lockBottomOnRenderedRange, scrollToBottom, targetMessageId]);
 
   const centerMessageRowInScroller = useCallback((messageId: string) => {
     const el = scrollRef.current;
@@ -740,15 +781,10 @@ function MessageList({
         return;
       }
       const seenAssistantIds = new Set(existing.assistantMessages.map((assistant) => assistant.id));
-      const assistantMessages = [
+      const assistantMessages = dedupeAssistantsByModel([
         ...existing.assistantMessages,
         ...group.assistantMessages.filter((assistant) => !seenAssistantIds.has(assistant.id)),
-      ].sort((a, b) => {
-        const aIndex = typeof a.groupIndex === "number" ? a.groupIndex : Number.MAX_SAFE_INTEGER;
-        const bIndex = typeof b.groupIndex === "number" ? b.groupIndex : Number.MAX_SAFE_INTEGER;
-        if (aIndex !== bIndex) return aIndex - bIndex;
-        return (a.createdAt || 0) - (b.createdAt || 0);
-      });
+      ]);
       const models = [...existing.models];
       group.models.forEach((modelId) => {
         if (modelId && !models.includes(modelId)) models.push(modelId);
@@ -788,6 +824,9 @@ function MessageList({
 
   const allVisibleMessages = useMemo(() => {
     return messages.filter((msg) => {
+      if (msg.role === "user" && msg.content.startsWith("<!-- ai-space:hidden-user-message -->")) {
+        return false;
+      }
       const group = groupByMessageId.get(msg.id);
       if (msg.role !== "user" && group) {
         const aggregateGroup = aggregateGroupByUserId.get(group.userMessage.id) || group;
@@ -900,6 +939,7 @@ function MessageList({
   const hasHiddenLocalMessages = hiddenLocalMessageCount > 0;
   const useWindowedRowMeasurementHints = allVisibleMessages.length > INITIAL_RENDERED_MESSAGE_WINDOW;
   const useRowContentVisibility = useWindowedRowMeasurementHints;
+  const deferOffscreenRichTextHydration = !useWindowedRowMeasurementHints && !targetMessageId && !userBrowsing;
   localWindowReleaseStateRef.current = {
     hasHiddenLocalMessages,
     visibleMessageCount: visibleMessages.length,
@@ -1610,13 +1650,9 @@ function MessageList({
   if (isCompare) {
     const compareGroups = groups;
     const resolveCompareAssistant = (group: InferredGroup, colIndex: number, modelId: string) => {
-      const hasSlotSnapshot = group.assistantMessages.some((m) => typeof m.groupIndex === "number");
-      if (hasSlotSnapshot) {
-        return group.assistantMessages.find((m) => m.groupIndex === colIndex);
-      }
-
-      return group.assistantMessages.find((m) => group.models[m.groupIndex ?? -1] === modelId)
-        || group.assistantMessages.find((m) => m.model === modelId)
+      return group.assistantMessages.find((m) => m.model === modelId)
+        || group.assistantMessages.find((m) => group.models[m.groupIndex ?? -1] === modelId)
+        || group.assistantMessages.find((m) => m.groupIndex === colIndex)
         || group.assistantMessages[colIndex];
     };
 
@@ -1669,7 +1705,7 @@ function MessageList({
             onWheel={(event) => handleUserScrollIntent(event.deltaY)}
             onTouchMove={() => stopBottomLockForUserBrowse(2500)}
             increaseViewportBy={{
-          top: fastScrollPreload ? FAST_SCROLL_PRELOAD_PX : HISTORY_PRELOAD_TOP_PX,
+          top: fastScrollPreload ? FAST_SCROLL_PRELOAD_PX : (isContentHeavyConversation ? HEAVY_HISTORY_PRELOAD_TOP_PX : HISTORY_PRELOAD_TOP_PX),
           bottom: (returnToBottomPreload || fastScrollPreload) ? RETURN_TO_BOTTOM_PRELOAD_BOTTOM_PX : HISTORY_PRELOAD_BOTTOM_PX,
         }}
             overscan={{ main: 2, reverse: HISTORY_OVERSCAN_REVERSE }}
@@ -1826,7 +1862,7 @@ function MessageList({
           onLoadMore?.();
         }}
         increaseViewportBy={{
-          top: fastScrollPreload ? FAST_SCROLL_PRELOAD_PX : HISTORY_PRELOAD_TOP_PX,
+          top: fastScrollPreload ? FAST_SCROLL_PRELOAD_PX : (isContentHeavyConversation ? HEAVY_HISTORY_PRELOAD_TOP_PX : HISTORY_PRELOAD_TOP_PX),
           bottom: (returnToBottomPreload || fastScrollPreload) ? RETURN_TO_BOTTOM_PRELOAD_BOTTOM_PX : HISTORY_PRELOAD_BOTTOM_PX,
         }}
         overscan={{ main: 2, reverse: HISTORY_OVERSCAN_REVERSE }}
@@ -1875,6 +1911,8 @@ function MessageList({
               imageLoadFailedLabel={t("chat.imageLoadFailed")}
               MarkdownRenderer={LazyMarkdownRenderer}
               useContentVisibility={useRowContentVisibility}
+              deferOffscreenRichTextHydration={deferOffscreenRichTextHydration}
+              stabilizeInitialRichText={!hasRenderedInitialRange}
             />
           );
         }}

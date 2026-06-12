@@ -26,7 +26,7 @@ const DEFAULT_ROOT_MARGIN = "180px 0px";
 const DEFAULT_IDLE_TIMEOUT = 900;
 const FIRST_MARKDOWN_CHUNK_HYDRATION_DELAY_MS = 1_800;
 const PRIORITY_MARKDOWN_HYDRATION_DELAY_MS = 0;
-const HEAVY_MARKDOWN_HYDRATION_DELAY_MS = 8_000;
+const HEAVY_MARKDOWN_HYDRATION_DELAY_MS = 2_500;
 const EXTREME_MARKDOWN_HYDRATION_DELAY_MS = 15_000;
 const HEAVY_MARKDOWN_LENGTH_THRESHOLD = 1_000;
 const HEAVY_MARKDOWN_CODE_BLOCK_THRESHOLD = 3;
@@ -100,6 +100,7 @@ export function DeferredMarkdownRenderer({
   const hostRef = useRef<HTMLDivElement | null>(null);
   const complexity = useMemo(() => getMarkdownComplexity(content), [content]);
   const [shouldRenderMarkdown, setShouldRenderMarkdown] = useState(false);
+  const [guardMinHeight, setGuardMinHeight] = useState<number | null>(null);
   const [Renderer, setRenderer] = useState(() => MarkdownRendererModule);
   const hasRenderedMarkdownRef = useRef(false);
 
@@ -192,7 +193,13 @@ export function DeferredMarkdownRenderer({
           tableLines: complexity.tableLines,
         });
         staggerTimer = window.setTimeout(() => {
-          if (!cancelled) setShouldRenderMarkdown(true);
+          if (!cancelled) {
+            const currentHeight = hostRef.current?.getBoundingClientRect().height || 0;
+            if (!priorityHydrateRichText && currentHeight > 0) {
+              setGuardMinHeight(currentHeight);
+            }
+            setShouldRenderMarkdown(true);
+          }
         }, staggerMs);
       };
 
@@ -265,7 +272,7 @@ export function DeferredMarkdownRenderer({
   }, [allowRichLiteFallback, complexity.codeBlocks, complexity.isExtreme, complexity.isHeavy, complexity.tableLines, content, idleTimeout, isStreaming, keepRenderedOnContentChange, priorityHydrateRichText, rootMargin, shouldHydrateRichText]);
 
   return (
-    <div ref={hostRef}>
+    <div ref={hostRef} style={guardMinHeight !== null ? { minHeight: guardMinHeight } : undefined}>
       {shouldRenderMarkdown && Renderer ? (
         <Renderer content={content} isStreaming={isStreaming} priorityHydrateRichText={priorityHydrateRichText} messageId={messageId} />
       ) : priorityHydrateRichText && !isStreaming && !complexity.isExtreme ? (
