@@ -3,14 +3,14 @@
 import { Suspense, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, BookOpen, FileText, Globe, Loader2, Plus, Trash2, UploadCloud, AlertCircle, CheckCircle2, Clock3, Check } from "lucide-react";
+import { ArrowLeft, BookOpen, FileText, Globe, Loader2, MoreVertical, Plus, Search, Zap, AlertCircle, CheckCircle2, Clock3, Check, ImageIcon, Upload, Trash2, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import ChatInterface from "@/components/chat/ChatInterface";
 import { NotebookSourcePreviewDrawer } from "@/components/notebook/NotebookSourcePreviewDrawer";
 import { NotebookStudioPanel, type NotebookStudioActionId, type NotebookStudioArtifact, type NotebookStudioFlashcard, type NotebookStudioQuizQuestion, type NotebookStudioMindmapEdge, type NotebookStudioMindmapNode, type NotebookStudioReportSection, type NotebookStudioReportTable, type NotebookStudioSource, type NotebookStudioTableRow, type NotebookStudioTextSection } from "@/components/notebook/NotebookStudioPanel";
 import { NotebookUrlSourceDialog } from "@/components/notebook/NotebookUrlSourceDialog";
 import { MODELS } from "@/hooks/useChat";
-import { addNotebookFile, addNotebookUrlSource, deleteNotebookArtifact, fetchNotebook, fetchNotebookArtifacts, fetchNotebookFileContent, generateNotebookArtifact, removeNotebookFile, suggestNotebookReportFormats, updateNotebook, updateNotebookArtifact, type NotebookReportFormatSuggestion } from "@/lib/notebookApi";
+import { addNotebookFile, addNotebookUrlSource, deleteNotebookArtifact, fetchNotebook, fetchNotebookArtifacts, fetchNotebookFileContent, generateNotebookArtifact, removeNotebookFile, suggestNotebookReportFormats, updateNotebook, updateNotebookArtifact, updateNotebookFile, type NotebookReportFormatSuggestion } from "@/lib/notebookApi";
 import { normalizeNotebookError, showNotebookError, uploadNotebookSourceFile } from "@/lib/notebookErrors";
 import type { Notebook, NotebookArtifact as PersistedNotebookArtifact, NotebookFile, NotebookFileContent } from "@/lib/notebookTypes";
 import { useI18n, type LanguageCode } from "@/lib/i18n";
@@ -31,6 +31,42 @@ function notebookSelectionStorageKey(notebookId: number) {
   return `notebook:${notebookId}:selected-file-ids`;
 }
 
+function notebookAutoSummaryStorageKey(notebookId: number, fileId: number) {
+  return `notebook:${notebookId}:auto-summary-file:${fileId}`;
+}
+
+const NOTEBOOK_COVER_PRESETS = [
+  { id: "book-open", icon: "🚀", className: "bg-gradient-to-br from-violet-100 via-indigo-50 to-slate-100 text-slate-950" },
+  { id: "aurora", icon: "✨", className: "bg-gradient-to-br from-cyan-100 via-sky-100 to-indigo-100 text-slate-950" },
+  { id: "sunset", icon: "🌅", className: "bg-gradient-to-br from-amber-100 via-orange-100 to-rose-100 text-slate-950" },
+  { id: "forest", icon: "🌿", className: "bg-gradient-to-br from-emerald-100 via-teal-100 to-lime-100 text-slate-950" },
+  { id: "ink", icon: "📘", className: "bg-gradient-to-br from-slate-800 via-indigo-900 to-violet-900 text-white" },
+];
+
+function notebookCoverPreset(coverIcon?: string) {
+  return NOTEBOOK_COVER_PRESETS.find((preset) => preset.id === coverIcon) || NOTEBOOK_COVER_PRESETS[0];
+}
+
+function stripFileExtension(filename: string) {
+  return filename.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
+}
+
+function buildAutoNotebookTitle(file?: NotebookFile) {
+  if (!file?.file?.filename) return "未命名笔记本";
+  return stripFileExtension(file.file.filename).slice(0, 90) || file.file.filename;
+}
+
+function buildNotebookAutoSummaryPrompt(file: NotebookFile, title: string) {
+  return [
+    `请根据我刚导入的第一个资料《${file.file.filename}》自动生成一份笔记本分析摘要。`,
+    "要求：",
+    `1. 用“${title}”作为摘要的大标题，不要说你正在生成摘要。`,
+    "2. 先用一段 120-180 字概括资料核心内容、对象、用途和关键结论。",
+    "3. 再给出 3 个可继续追问的问题，问题要具体、贴合资料内容。",
+    "4. 如果资料解析尚未完成，就基于当前可用信息先给出简短摘要，并提示稍后可继续追问。",
+  ].join("\n");
+}
+
 function readStoredSelectedFileIds(notebookId: number) {
   try {
     const raw = localStorage.getItem(notebookSelectionStorageKey(notebookId));
@@ -45,6 +81,33 @@ function readStoredSelectedFileIds(notebookId: number) {
 function reconcileSelectedFileIds(previous: number[], files: NotebookFile[]) {
   const available = new Set(files.map((file) => file.file_id));
   return previous.filter((id) => available.has(id));
+}
+
+function saveNotebookUploadedCover(dataUrl: string) {
+  const key = `uploaded:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    localStorage.setItem(`notebook-cover:${key}`, dataUrl);
+  } catch {
+    toast.error("底图过大，无法保存到本地浏览器");
+  }
+  return key;
+}
+
+function readNotebookUploadedCover(key: string) {
+  if (!key.startsWith("uploaded:")) return "";
+  try {
+    return localStorage.getItem(`notebook-cover:${key}`) || "";
+  } catch {
+    return "";
+  }
+}
+
+function SourcePdfIcon() {
+  return (
+    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] bg-red-500 text-[8px] font-bold leading-none tracking-[-0.02em] text-white shadow-sm">
+      PDF
+    </span>
+  );
 }
 
 type Translate = (key: string, params?: Record<string, string>) => string;
@@ -360,6 +423,190 @@ function ReportFormatDialog({
   );
 }
 
+function ConfirmRemoveSourceDialog({
+  open,
+  source,
+  removing,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  source: NotebookFile | null;
+  removing: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  if (!open || !source) return null;
+  return (
+    <div className="fixed inset-0 z-[140] flex items-center justify-center bg-black/45 p-5 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="w-[min(420px,94vw)] rounded-[24px] border border-surface-border bg-surface-card p-6 shadow-2xl">
+        <div className="mb-4 flex items-start gap-3">
+          <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-500/10 text-red-500">
+            <Trash2 className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <h3 className="text-base font-semibold text-text-primary">移除来源？</h3>
+            <p className="mt-1 text-sm leading-6 text-text-secondary">确定要移除“{source.file.filename}”吗？移除后它将不再参与这个笔记本的回答。</p>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} disabled={removing} className="rounded-full border border-surface-border px-4 py-2 text-sm font-semibold text-text-secondary transition hover:bg-surface-hover disabled:opacity-60">取消</button>
+          <button type="button" onClick={onConfirm} disabled={removing} className="inline-flex items-center gap-2 rounded-full bg-red-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-red-600 disabled:opacity-60">
+            {removing && <Loader2 className="h-4 w-4 animate-spin" />}
+            移除来源
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RenameSourceDialog({
+  open,
+  source,
+  value,
+  saving,
+  onChange,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  source: NotebookFile | null;
+  value: string;
+  saving: boolean;
+  onChange: (value: string) => void;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  if (!open || !source) return null;
+  return (
+    <div className="fixed inset-0 z-[140] flex items-center justify-center bg-black/45 p-5 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="w-[min(460px,94vw)] rounded-[24px] border border-surface-border bg-surface-card p-6 shadow-2xl">
+        <div className="mb-5 flex items-start gap-3">
+          <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand/10 text-brand">
+            <Pencil className="h-5 w-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h3 className="text-base font-semibold text-text-primary">重命名来源</h3>
+            <p className="mt-1 text-sm leading-6 text-text-secondary">修改这个来源在笔记本中的显示名称。</p>
+          </div>
+        </div>
+        <label className="mb-2 block text-sm font-semibold text-text-primary">来源名称</label>
+        <input
+          autoFocus
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => { if (event.key === "Enter" && value.trim()) onConfirm(); }}
+          className="mb-5 h-11 w-full rounded-xl border border-surface-border bg-surface-elevated px-3 text-sm text-text-primary outline-none transition focus:border-brand focus:bg-surface-card"
+          placeholder="输入来源名称"
+        />
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} disabled={saving} className="rounded-full border border-surface-border px-4 py-2 text-sm font-semibold text-text-secondary transition hover:bg-surface-hover disabled:opacity-60">取消</button>
+          <button type="button" onClick={onConfirm} disabled={saving || !value.trim()} className="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white transition hover:bg-brand-hover disabled:opacity-60">
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            确认修改
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NotebookCustomizeDialog({
+  open,
+  notebook,
+  coverIcon,
+  saving,
+  onCoverChange,
+  onClose,
+  onSave,
+}: {
+  open: boolean;
+  notebook: Notebook | null;
+  coverIcon: string;
+  saving: boolean;
+  onCoverChange: (coverIcon: string) => void;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  if (!open || !notebook) return null;
+  const activePreset = notebookCoverPreset(coverIcon);
+  const uploadedImage = coverIcon.startsWith("uploaded:") ? readNotebookUploadedCover(coverIcon) : "";
+  const handleUpload = (file?: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("请选择图片文件");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === "string" ? reader.result : "";
+      if (!dataUrl) return;
+      const key = saveNotebookUploadedCover(dataUrl);
+      onCoverChange(key);
+    };
+    reader.onerror = () => toast.error("底图读取失败");
+    reader.readAsDataURL(file);
+  };
+  return (
+    <div className="fixed inset-0 z-[135] flex items-center justify-center bg-black/45 p-5 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="flex max-h-[88vh] w-[min(640px,94vw)] flex-col overflow-hidden rounded-[26px] border border-surface-border bg-surface-card shadow-2xl">
+        <div className="flex items-start justify-between gap-4 px-6 py-5">
+          <h3 className="text-lg font-semibold leading-7 tracking-[-0.02em] text-text-primary">更换笔记本底图</h3>
+          <button type="button" onClick={onClose} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-elevated text-lg leading-none text-text-tertiary transition hover:bg-surface-hover hover:text-text-primary" aria-label="Close">×</button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-5">
+          <div className={cn("relative mb-5 flex h-40 items-center justify-center overflow-hidden rounded-[22px]", uploadedImage ? "bg-slate-900" : activePreset.className)}>
+            {uploadedImage ? (
+              <img src={uploadedImage} alt="笔记本底图预览" className="absolute inset-0 h-full w-full object-cover" />
+            ) : (
+              <>
+                <div className="pointer-events-none absolute -right-8 -bottom-16 text-[150px] font-black leading-none text-white/35 opacity-80">M</div>
+                <div className="relative z-10 text-[46px] leading-none">{activePreset.icon}</div>
+              </>
+            )}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent" />
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(event) => handleUpload(event.target.files?.[0])}
+            />
+            <button type="button" onClick={() => fileInputRef.current?.click()} className="absolute right-4 top-4 inline-flex h-8 items-center gap-1.5 rounded-full bg-white/90 px-3 text-xs font-semibold text-slate-700 shadow-sm ring-1 ring-black/5 transition hover:bg-white">
+              <Upload className="h-3.5 w-3.5" />上传
+            </button>
+          </div>
+          <div>
+            <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-text-primary"><ImageIcon className="h-4 w-4 text-text-tertiary" />更换底图</div>
+            <div className="grid grid-cols-5 gap-2">
+              {NOTEBOOK_COVER_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => onCoverChange(preset.id)}
+                  className={cn("flex h-16 items-center justify-center rounded-2xl border text-2xl transition", preset.className, coverIcon === preset.id ? "border-brand ring-2 ring-brand/25" : "border-surface-border hover:border-brand/50")}
+                  aria-label={preset.id}
+                >
+                  {preset.icon}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-surface-border px-6 py-4">
+          <button type="button" onClick={onClose} className="rounded-full border border-surface-border px-4 py-2 text-sm font-semibold text-text-secondary transition hover:bg-surface-hover">取消</button>
+          <button type="button" onClick={onSave} disabled={saving} className="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white transition hover:bg-brand-hover disabled:opacity-60">
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            保存
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NotebookDetailContent() {
   const { t, language } = useI18n();
   const searchParams = useSearchParams();
@@ -371,7 +618,6 @@ function NotebookDetailContent() {
   const [uploading, setUploading] = useState(false);
   const [addingUrl, setAddingUrl] = useState(false);
   const [urlDialogOpen, setUrlDialogOpen] = useState(false);
-  const [dragActive, setDragActive] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
   const [selectedFileIds, setSelectedFileIds] = useState<number[]>([]);
   const [sourcesWidth, setSourcesWidth] = useState(340);
@@ -387,7 +633,16 @@ function NotebookDetailContent() {
   const [selectedReportFormatId, setSelectedReportFormatId] = useState("briefing-document");
   const [reportFormatSuggestions, setReportFormatSuggestions] = useState<NotebookReportFormatSuggestion[]>([]);
   const [loadingReportSuggestions, setLoadingReportSuggestions] = useState(false);
-  const [externalChatSendRequest, setExternalChatSendRequest] = useState<{ id: number; content: string } | null>(null);
+  const [externalChatSendRequest, setExternalChatSendRequest] = useState<{ id: number; content: string; hidden?: boolean } | null>(null);
+  const [customizeDialogOpen, setCustomizeDialogOpen] = useState(false);
+  const [customCoverIcon, setCustomCoverIcon] = useState("book-open");
+  const [savingNotebookCustom, setSavingNotebookCustom] = useState(false);
+  const [sourceMenuFileId, setSourceMenuFileId] = useState<number | null>(null);
+  const [sourceToRemove, setSourceToRemove] = useState<NotebookFile | null>(null);
+  const [removingSource, setRemovingSource] = useState(false);
+  const [sourceToRename, setSourceToRename] = useState<NotebookFile | null>(null);
+  const [sourceRenameValue, setSourceRenameValue] = useState("");
+  const [renamingSource, setRenamingSource] = useState(false);
   const layoutRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const selectionInitializedRef = useRef(false);
@@ -437,7 +692,41 @@ function NotebookDetailContent() {
     localStorage.setItem(notebookSelectionStorageKey(notebookId), JSON.stringify(selectedFileIds));
   }, [notebookId, selectedFileIds]);
 
+  useEffect(() => {
+    if (!notebook) return;
+    setCustomCoverIcon(notebook.cover_icon || "book-open");
+  }, [notebook?.id, notebook?.cover_icon]);
+
+  useEffect(() => {
+    if (!notebookId || !notebook || files.length !== 1) return;
+    const firstFile = files[0];
+    if (!firstFile || !isNotebookFileReady(firstFile)) return;
+    const storageKey = notebookAutoSummaryStorageKey(notebookId, firstFile.file_id);
+    if (localStorage.getItem(storageKey) === "done") return;
+    localStorage.setItem(storageKey, "done");
+    const autoTitle = buildAutoNotebookTitle(firstFile);
+    if (!notebook.title || notebook.title === "未命名笔记本") {
+      updateNotebook(notebookId, { title: autoTitle }).then((updated) => {
+        setNotebook(updated);
+      }).catch((error) => {
+        showNotebookError(error, "自动更新笔记本标题失败");
+      });
+    }
+    setSelectedFileIds([firstFile.file_id]);
+    setExternalChatSendRequest({
+      id: Date.now(),
+      content: buildNotebookAutoSummaryPrompt(firstFile, autoTitle),
+      hidden: true,
+    });
+  }, [notebookId, notebook, files]);
+
   const readyCount = useMemo(() => files.filter(isNotebookFileReady).length, [files]);
+
+  const firstFile = files[0];
+  const heroTitle = notebook?.title && notebook.title !== "未命名笔记本" ? notebook.title : buildAutoNotebookTitle(firstFile);
+  const heroCoverIcon = notebook?.cover_icon || "book-open";
+  const heroCover = notebookCoverPreset(heroCoverIcon);
+  const heroCoverImageUrl = heroCoverIcon.startsWith("uploaded:") ? readNotebookUploadedCover(heroCoverIcon) : "";
 
   const studioSourceFiles = useMemo<NotebookStudioSource[]>(() => files.map((file) => ({
     id: file.file_id,
@@ -446,12 +735,6 @@ function NotebookDetailContent() {
   })), [files]);
 
   const hasProcessingFiles = useMemo(() => files.some(isNotebookFileProcessing), [files]);
-
-  const selectedSourceText = useMemo(() => (
-    t("notebook.selectedSources")
-      .replace("{selected}", String(selectedFileIds.length))
-      .replace("{total}", String(files.length))
-  ), [files.length, selectedFileIds.length, t]);
 
   const allSourcesSelected = useMemo(() => (
     files.length > 0 && files.every((file) => selectedFileIds.includes(file.file_id))
@@ -515,6 +798,28 @@ function NotebookDetailContent() {
     setSelectedFileIds(files.map((file) => file.file_id));
   };
 
+  const openCustomizeDialog = () => {
+    setCustomCoverIcon(notebook?.cover_icon || "book-open");
+    setCustomizeDialogOpen(true);
+  };
+
+  const saveNotebookCustom = async () => {
+    if (!notebookId) return;
+    setSavingNotebookCustom(true);
+    try {
+      const updated = await updateNotebook(notebookId, {
+        cover_icon: customCoverIcon,
+      });
+      setNotebook(updated);
+      setCustomizeDialogOpen(false);
+      toast.success("笔记本外观已更新");
+    } catch (error) {
+      showNotebookError(error, "更新笔记本外观失败");
+    } finally {
+      setSavingNotebookCustom(false);
+    }
+  };
+
   useEffect(() => {
     if (!hasProcessingFiles || !notebookId) return;
     const timer = window.setInterval(() => {
@@ -566,7 +871,6 @@ function NotebookDetailContent() {
       }
     } finally {
       setUploading(false);
-      setDragActive(false);
       if (inputRef.current) inputRef.current.value = "";
     }
   };
@@ -619,15 +923,50 @@ function NotebookDetailContent() {
     setPreviewLoading(false);
   };
 
-  const handleRemove = async (file: NotebookFile) => {
+  const openRemoveSourceDialog = (file: NotebookFile) => {
+    setSourceMenuFileId(null);
+    setSourceToRemove(file);
+  };
+
+  const openRenameSourceDialog = (file: NotebookFile) => {
+    setSourceMenuFileId(null);
+    setSourceToRename(file);
+    setSourceRenameValue(file.file.filename || "");
+  };
+
+  const confirmRemoveSource = async () => {
+    if (!notebookId || !sourceToRemove) return;
+    const file = sourceToRemove;
+    setRemovingSource(true);
     try {
       await removeNotebookFile(notebookId, file.file_id);
       setFiles((prev) => prev.filter((item) => item.id !== file.id));
       setSelectedFileIds((prev) => prev.filter((id) => id !== file.file_id));
       if (previewSource?.id === file.id) closePreview();
+      setSourceToRemove(null);
       toast.success(t("notebook.removeSuccess"));
     } catch (error) {
       showNotebookError(error, t("notebook.removeFailed"));
+    } finally {
+      setRemovingSource(false);
+    }
+  };
+
+  const confirmRenameSource = async () => {
+    if (!notebookId || !sourceToRename) return;
+    const filename = sourceRenameValue.trim();
+    if (!filename) return;
+    setRenamingSource(true);
+    try {
+      const updated = await updateNotebookFile(notebookId, sourceToRename.file_id, { filename });
+      setFiles((prev) => prev.map((item) => item.file_id === updated.file_id ? updated : item));
+      setPreviewSource((current) => current?.file_id === updated.file_id ? updated : current);
+      setSourceToRename(null);
+      toast.success("来源已重命名");
+    } catch (error) {
+      showNotebookError(error, "重命名来源失败");
+    } finally {
+      setRenamingSource(false);
     }
   };
 
@@ -925,7 +1264,7 @@ function NotebookDetailContent() {
 
   return (
     <>
-    <div ref={layoutRef} className="flex h-full min-h-0 gap-3 overflow-hidden bg-surface-elevated p-3 text-text-primary">
+    <div ref={layoutRef} className="flex h-full min-h-0 gap-2 overflow-hidden bg-surface-elevated p-3 text-text-primary">
       <aside className="flex h-full shrink-0 flex-col overflow-hidden rounded-[28px] border border-surface-border bg-surface-card shadow-sm" style={{ width: sourcesWidth }}>
         <div className="border-b border-surface-border px-5 py-4">
           <Link href="/notebooks" className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-text-tertiary transition hover:text-text-primary">
@@ -941,24 +1280,35 @@ function NotebookDetailContent() {
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-semibold text-text-primary">{t("notebook.sources")}</h2>
-              <p className="mt-1 text-xs text-text-tertiary">{t("notebook.sourcesHint")}</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={() => setUrlDialogOpen(true)} disabled={addingUrl} className="inline-flex h-9 items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-3 text-xs font-medium text-text-secondary transition hover:border-surface-border hover:bg-surface-elevated hover:text-text-primary disabled:opacity-60">
-                {addingUrl ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Globe className="h-3.5 w-3.5" />}{t("notebook.addUrl")}
+          <div className="mb-4">
+            <h2 className="text-sm font-semibold text-text-primary">{t("notebook.sources")}</h2>
+            <p className="mt-1 text-xs text-text-tertiary">{t("notebook.sourcesHint")}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setUrlDialogOpen(true)}
+            disabled={addingUrl}
+            className="mb-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-brand-muted text-sm font-semibold text-text-primary transition hover:bg-brand-muted/80 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {addingUrl ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            {t("notebook.addSource")}
+          </button>
+          <div className="mb-3 rounded-[22px] border border-surface-border bg-surface-elevated p-3">
+            <button type="button" onClick={() => setUrlDialogOpen(true)} className="block w-full rounded-2xl px-2 py-1.5 text-left text-sm font-medium text-text-secondary transition hover:text-text-primary">
+              {t("notebook.searchNewSources")}
+            </button>
+            <div className="mt-2 flex items-center gap-2">
+              <button type="button" onClick={() => setUrlDialogOpen(true)} className="inline-flex h-8 items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-2.5 text-xs font-medium text-text-secondary transition hover:text-text-primary">
+                <Globe className="h-3.5 w-3.5" />Web
               </button>
-              <button onClick={() => inputRef.current?.click()} disabled={uploading} className="inline-flex h-9 items-center gap-1.5 rounded-full bg-brand px-3 text-xs font-medium text-white transition hover:bg-brand-hover disabled:opacity-60">
-                {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}{t("notebook.addSource")}
+              <button type="button" onClick={() => setUrlDialogOpen(true)} className="inline-flex h-8 items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-2.5 text-xs font-medium text-text-secondary transition hover:text-text-primary">
+                <Zap className="h-3.5 w-3.5 text-brand" />Fast Research
+              </button>
+              <button type="button" onClick={() => setUrlDialogOpen(true)} className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-full bg-surface-card text-text-secondary transition hover:bg-brand hover:text-white">
+                <Search className="h-3.5 w-3.5" />
               </button>
             </div>
           </div>
-          <button type="button" onClick={() => setUrlDialogOpen(true)} className="mb-3 flex w-full items-center gap-2 rounded-2xl border border-surface-border bg-surface-elevated px-3 py-2.5 text-left text-xs text-text-tertiary transition hover:border-surface-border hover:bg-surface-card hover:text-text-primary">
-            <Globe className="h-4 w-4" />
-            <span>{t("notebook.searchNewSources")}</span>
-          </button>
           <input ref={inputRef} type="file" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
 
           {pageError && (
@@ -969,66 +1319,81 @@ function NotebookDetailContent() {
           )}
 
           {files.length > 0 && (
-            <div className="mb-3 flex items-center justify-between rounded-2xl border border-surface-border bg-surface-elevated px-3 py-2">
-              <span className="text-xs text-text-tertiary">{selectedSourceText}</span>
-              <button type="button" onClick={selectAllSources} className="rounded-lg px-2.5 py-1 text-sm font-semibold text-text-primary transition hover:bg-surface-elevated">
+            <div className="mb-2 flex justify-end">
+              <button type="button" onClick={selectAllSources} className="inline-flex items-center gap-2 rounded-full px-1.5 py-1 text-sm font-semibold text-text-primary transition hover:text-brand">
                 {t("notebook.selectAllSources")}
+                <span className={cn("flex h-4 w-4 items-center justify-center rounded border transition", allSourcesSelected ? "border-brand bg-brand text-white" : "border-surface-border text-transparent")}>
+                  <Check className="h-3 w-3" />
+                </span>
               </button>
             </div>
           )}
 
           {files.length === 0 ? (
-            <button
-              onClick={() => inputRef.current?.click()}
-              onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
-              onDragLeave={() => setDragActive(false)}
-              onDrop={(e) => { e.preventDefault(); handleUpload(Array.from(e.dataTransfer.files)); }}
-              className={cn(
-                "flex min-h-[220px] w-full flex-col items-center justify-center rounded-[24px] border border-dashed border-surface-border bg-surface-elevated px-5 text-center transition hover:border-brand hover:bg-surface-card",
-                dragActive && "border-brand bg-surface-card"
-              )}
-            >
-              <UploadCloud className="mb-4 h-8 w-8 text-brand" />
-              <span className="text-sm font-medium text-text-primary">{t("notebook.dropTitle")}</span>
-              <span className="mt-2 text-xs leading-5 text-text-tertiary">{t("notebook.dropDesc")}</span>
-            </button>
+            <div className="flex min-h-[260px] w-full flex-col items-center justify-center px-5 text-center">
+              <FileText className="mb-4 h-8 w-8 text-text-tertiary" />
+              <div className="text-sm font-medium text-text-primary">已保存的来源将显示在此处</div>
+              <p className="mt-3 max-w-[240px] text-xs leading-5 text-text-tertiary">
+                点击上方的“添加来源”即可上传文件、添加网页链接，或粘贴文本作为笔记本资料源。
+              </p>
+            </div>
           ) : (
-            <div
-              className={cn("space-y-1.5 rounded-[24px] border border-transparent p-0 transition", dragActive && "border-dashed border-surface-border bg-surface-elevated p-2")}
-              onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
-              onDragLeave={() => setDragActive(false)}
-              onDrop={(e) => { e.preventDefault(); handleUpload(Array.from(e.dataTransfer.files)); }}
-            >
-              {dragActive && <div className="rounded-2xl border border-dashed border-surface-border py-3 text-center text-xs font-medium text-text-primary">{t("notebook.dropTitle")}</div>}
+            <div className="space-y-1 rounded-[24px] border border-transparent p-0 transition">
               {files.map((file) => {
-                const meta = statusMeta(file, t);
-                const Icon = meta.icon;
-                const detail = statusDetail(file, t);
                 const selected = selectedFileIds.includes(file.file_id);
                 return (
-                  <div key={file.id} role="button" tabIndex={0} onClick={() => openPreview(file)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") openPreview(file); }} className={cn("group w-full cursor-pointer rounded-2xl border bg-surface-card p-3 text-left transition hover:border-surface-border hover:bg-surface-elevated", selected ? "border-surface-border" : "border-transparent opacity-75")}>
-                    <div className="flex items-start gap-3">
+                  <div key={file.id} role="button" tabIndex={0} onClick={() => openPreview(file)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") openPreview(file); }} className={cn("group w-full cursor-pointer rounded-md px-2 py-2 text-left transition hover:bg-slate-100 dark:hover:bg-slate-800/60", !selected && "opacity-75")}>
+                    <div className="flex items-center gap-3">
+                      <SourcePdfIcon />
+                      <div className="min-w-0 flex-1 overflow-hidden">
+                        <div className="truncate text-sm font-medium text-text-primary">{file.file.filename}</div>
+                      </div>
+                      <div className="relative shrink-0">
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setSourceMenuFileId((current) => current === file.file_id ? null : file.file_id);
+                          }}
+                          className={cn("flex h-6 w-6 items-center justify-center text-text-primary opacity-0 transition group-hover:opacity-100", sourceMenuFileId === file.file_id && "opacity-100")}
+                          aria-label={t("common.more") || "More"}
+                          aria-expanded={sourceMenuFileId === file.file_id}
+                        >
+                          <MoreVertical className="h-4 w-4" />
+                        </button>
+                        {sourceMenuFileId === file.file_id && (
+                          <div
+                            className="absolute right-0 top-7 z-30 w-40 overflow-hidden rounded-xl border border-surface-border bg-surface-card py-1 shadow-xl"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => openRemoveSourceDialog(file)}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-text-primary transition hover:bg-surface-hover"
+                            >
+                              <Trash2 className="h-4 w-4 text-text-secondary" />
+                              移除来源
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openRenameSourceDialog(file)}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-text-primary transition hover:bg-surface-hover"
+                            >
+                              <Pencil className="h-4 w-4 text-text-secondary" />
+                              重命名来源
+                            </button>
+                          </div>
+                        )}
+                      </div>
                       <button
                         type="button"
                         onClick={(event) => { event.stopPropagation(); toggleSource(file.file_id); }}
-                        className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition", selected ? "border-brand bg-brand text-white" : "border-surface-border text-transparent hover:border-brand")}
+                        className={cn("flex h-4 w-4 shrink-0 items-center justify-center rounded border transition", selected ? "border-brand bg-brand text-white" : "border-surface-border text-transparent group-hover:border-text-tertiary group-hover:text-text-tertiary")}
                         aria-label={selected ? "selected" : "unselected"}
                       >
-                        <Check className="h-3.5 w-3.5" />
+                        <Check className="h-3 w-3" />
                       </button>
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-500/10 text-red-500"><FileText className="h-4 w-4" /></div>
-                      <div className="min-w-0 flex-1 overflow-hidden">
-                        <div className="truncate text-sm font-medium text-text-primary">{file.file.filename}</div>
-                        <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] text-text-tertiary">
-                          <span className="shrink-0">{formatSize(file.file.size)}</span>
-                          <span className="shrink-0">·</span>
-                          <span className="min-w-0 truncate" title={file.file.mime_type || "file"}>{file.file.mime_type || "file"}</span>
-                        </div>
-                      </div>
-                      <button onClick={(event) => { event.stopPropagation(); handleRemove(file); }} className="shrink-0 rounded-lg p-1.5 text-text-tertiary opacity-0 transition hover:bg-red-500/10 hover:text-red-500 group-hover:opacity-100"><Trash2 className="h-3.5 w-3.5" /></button>
                     </div>
-                    <div className={cn("mt-3 inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-medium", meta.className)}><Icon className="h-3 w-3" />{meta.label}</div>
-                    {detail && <p className="mt-2 line-clamp-2 text-xs text-amber-600 dark:text-amber-300">{detail}</p>}
                   </div>
                 );
               })}
@@ -1055,9 +1420,17 @@ function NotebookDetailContent() {
           notebookTitle={notebook?.title}
           notebookFileCount={files.length}
           notebookFileIds={selectedFileIds}
+          notebookHero={files.length > 0 ? {
+            title: heroTitle,
+            meta: `${files.length} 个来源`,
+            coverClassName: heroCover.className,
+            icon: heroCover.icon,
+            imageUrl: heroCoverImageUrl,
+            onCustomize: openCustomizeDialog,
+          } : undefined}
           models={MODELS}
-          welcomeTitle={notebook?.title || t("notebook.chatWelcomeTitle")}
-          welcomeSubtitle={t("notebook.chatWelcomeSubtitle")}
+          welcomeTitle="让我们开始制作笔记本..."
+          welcomeSubtitle="这是一张专属于您的空白画布，任您尽情探索、挥洒创意，或开启全新篇章。我可以引导您开始，或者您也可以直接添加自己的来源。"
           welcomeExamples={[
             { title: t("notebook.exampleSummary"), desc: t("notebook.exampleSummaryDesc"), prompt: t("notebook.exampleSummaryPrompt") },
             { title: t("notebook.exampleFaq"), desc: t("notebook.exampleFaqDesc"), prompt: t("notebook.exampleFaqPrompt") },
@@ -1097,8 +1470,12 @@ function NotebookDetailContent() {
     <NotebookUrlSourceDialog
       open={urlDialogOpen}
       loading={addingUrl}
+      uploading={uploading}
+      sourceCount={files.length}
+      sourceLimit={50}
       onClose={() => setUrlDialogOpen(false)}
       onSubmit={handleAddUrlSource}
+      onUploadFiles={handleUpload}
     />
     <NotebookSourcePreviewDrawer
       open={Boolean(previewSource)}
@@ -1118,6 +1495,31 @@ function NotebookDetailContent() {
       onClose={() => setReportDialogOpen(false)}
       onGenerate={handleCreateReport}
       t={t}
+    />
+    <NotebookCustomizeDialog
+      open={customizeDialogOpen}
+      notebook={notebook}
+      coverIcon={customCoverIcon}
+      saving={savingNotebookCustom}
+      onCoverChange={setCustomCoverIcon}
+      onClose={() => setCustomizeDialogOpen(false)}
+      onSave={saveNotebookCustom}
+    />
+    <ConfirmRemoveSourceDialog
+      open={Boolean(sourceToRemove)}
+      source={sourceToRemove}
+      removing={removingSource}
+      onClose={() => setSourceToRemove(null)}
+      onConfirm={confirmRemoveSource}
+    />
+    <RenameSourceDialog
+      open={Boolean(sourceToRename)}
+      source={sourceToRename}
+      value={sourceRenameValue}
+      saving={renamingSource}
+      onChange={setSourceRenameValue}
+      onClose={() => setSourceToRename(null)}
+      onConfirm={confirmRenameSource}
     />
     </>
   );

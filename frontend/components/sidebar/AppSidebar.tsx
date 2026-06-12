@@ -1219,7 +1219,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                 onMouseLeave={hideSidebarTooltip}
                 className={cn(
                   "p-2.5 rounded-xl transition-colors",
-                  isPathInGroup(pathname, ["/favorites"]) ? "bg-brand-muted text-brand" : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
+                  isPathInGroup(pathname, ["/favorites"]) ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]" : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
                 )}
               >
                 <Star className={cn("w-5 h-5", isPathInGroup(pathname, ["/favorites"]) ? "text-brand" : "text-text-tertiary")} />
@@ -1230,7 +1230,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                 onMouseLeave={hideSidebarTooltip}
                 className={cn(
                   "p-2.5 rounded-xl transition-colors",
-                  isPathInGroup(pathname, ["/notebooks"]) ? "bg-brand-muted text-brand" : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
+                  isPathInGroup(pathname, ["/notebooks"]) ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]" : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
                 )}
               >
                 <BookOpen className={cn("w-5 h-5", isPathInGroup(pathname, ["/notebooks"]) ? "text-brand" : "text-text-tertiary")} />
@@ -1337,22 +1337,29 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
             {/* ▼ 笔记本 / 收藏分组 */}
             <div className="px-3 py-2">
               <div className="space-y-0.5">
-                <div className="flex items-center justify-between px-1 mb-1">
-                  <button
-                    type="button"
-                    onClick={() => router.push("/notebooks")}
-                    className={cn(
-                      "min-w-0 truncate rounded-md px-1 text-left text-sm font-medium tracking-wide transition hover:text-slate-700 dark:hover:text-text-primary",
-                      isPathInGroup(pathname, ["/notebooks"]) ? "text-slate-950 dark:text-text-primary" : "text-slate-950 dark:text-text-primary"
-                    )}
-                  >
-                    {t("sidebar.nav.notebook")}
-                  </button>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => router.push("/notebooks")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      router.push("/notebooks");
+                    }
+                  }}
+                  className={cn(
+                    "mb-1 flex w-full cursor-pointer items-center justify-between rounded-xl px-3 py-2 text-left transition-all duration-150",
+                    isPathInGroup(pathname, ["/notebooks"])
+                      ? "bg-surface-card text-slate-950 shadow-sm shadow-black/[0.02] dark:text-text-primary"
+                      : "text-slate-950 hover:bg-surface-card hover:text-slate-900 dark:text-text-primary dark:hover:text-text-primary"
+                  )}
+                >
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium tracking-wide">{t("sidebar.nav.notebook")}</span>
                   <button
                     type="button"
                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); setNotebookCreateOpen(true); }}
                     title={t("notebook.new")}
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-text-tertiary transition hover:bg-surface-card hover:text-brand"
+                    className="ml-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-text-tertiary transition hover:bg-surface-card hover:text-brand"
                   >
                     <Plus className="h-3.5 w-3.5" />
                   </button>

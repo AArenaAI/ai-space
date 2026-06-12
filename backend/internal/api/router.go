@@ -213,6 +213,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		authorized.POST("/notebooks/:id/files", notebookHandler.AddFile)
 		authorized.POST("/notebooks/:id/sources/url", notebookHandler.AddURLSource)
 		authorized.GET("/notebooks/:id/files/:file_id/content", notebookHandler.GetFileContent)
+		authorized.PUT("/notebooks/:id/files/:file_id", notebookHandler.UpdateFile)
 		authorized.DELETE("/notebooks/:id/files/:file_id", notebookHandler.RemoveFile)
 		authorized.GET("/notebooks/:id/artifacts", notebookHandler.ListArtifacts)
 		authorized.POST("/notebooks/:id/artifacts", notebookHandler.CreateArtifact)
