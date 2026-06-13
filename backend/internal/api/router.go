@@ -71,6 +71,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	// 专用翻译服务（Google Cloud Translation）
 	translateService := services.NewTranslateService(cfg)
+	liveTranslateHandler := NewLiveTranslateHandler(cfg)
 
 	// 文件服务
 	fileParser := services.NewFileParser(cfg, aiService)
@@ -117,6 +118,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		translateHandler := NewTranslateHandler(translateService, usageService)
 		publicWithAuth.POST("/translate", translateHandler.Translate)
 		publicWithAuth.GET("/translate/languages", translateHandler.SupportedLanguages)
+		publicWithAuth.GET("/translate/live/ws", liveTranslateHandler.WebSocket)
 		publicWithAuth.GET("/chat/tasks/:message_id", chatHandler.GetTask)
 		publicWithAuth.GET("/chat/tasks/:message_id/events", chatHandler.StreamTaskEvents)
 		publicWithAuth.GET("/tasks/:task_id", chatHandler.GetGenerationTask)
@@ -193,6 +195,8 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		notebookHandler := NewNotebookHandler(db, fileService, aiService, imageService)
 		documentArtifactHandler := NewDocumentArtifactHandler(db)
 		documentArtifactHandler.AutoMigrate()
+		authorized.POST("/translate/live/ticket", liveTranslateHandler.CreateTicket)
+
 		authorized.GET("/conversations", convHandler.List)
 		authorized.GET("/conversations/search", convHandler.Search)
 		authorized.POST("/conversations", convHandler.Create)
