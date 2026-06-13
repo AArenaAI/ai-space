@@ -45,6 +45,10 @@ function LoadableMarkdownRenderer(props: MarkdownRendererProps) {
     };
   }, [Renderer]);
 
+  if (props.allowRichLiteFallback) {
+    return <DeferredMarkdownRenderer {...props} />;
+  }
+
   if (!Renderer) {
     if (props.priorityHydrateRichText) {
       return <DeferredMarkdownRenderer {...props} />;
@@ -1799,8 +1803,8 @@ function MessageList({
       data-hidden-local-message-count={hiddenLocalMessageCount}
     >
       {!hasRenderedInitialRange && (
-        <div className="pointer-events-none absolute inset-0 z-10 bg-surface/80 backdrop-blur-[1px]">
-          <ChatHistoryLoadingState />
+        <div data-testid="chat-initial-range-stability-overlay" className="pointer-events-none absolute inset-0 z-10 bg-surface/80 backdrop-blur-[1px]">
+          {(isLoadingHistory || visibleMessages.length === 0) && <ChatHistoryLoadingState />}
         </div>
       )}
       <Virtuoso

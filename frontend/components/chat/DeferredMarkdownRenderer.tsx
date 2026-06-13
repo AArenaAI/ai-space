@@ -101,8 +101,23 @@ export function DeferredMarkdownRenderer({
   const complexity = useMemo(() => getMarkdownComplexity(content), [content]);
   const [shouldRenderMarkdown, setShouldRenderMarkdown] = useState(false);
   const [guardMinHeight, setGuardMinHeight] = useState<number | null>(null);
+  const [hasRenderedRichFallback, setHasRenderedRichFallback] = useState(false);
   const [Renderer, setRenderer] = useState(() => MarkdownRendererModule);
   const hasRenderedMarkdownRef = useRef(false);
+  const lastContentRef = useRef(content);
+  const richFallbackEligible = priorityHydrateRichText || allowRichLiteFallback || shouldUseRichLiteFallback(content, complexity);
+
+  useEffect(() => {
+    if (lastContentRef.current !== content) {
+      lastContentRef.current = content;
+      setHasRenderedRichFallback(false);
+      setGuardMinHeight(null);
+    }
+  }, [content]);
+
+  useEffect(() => {
+    if (richFallbackEligible) setHasRenderedRichFallback(true);
+  }, [richFallbackEligible]);
 
   useEffect(() => {
     if (!shouldRenderMarkdown || Renderer) return;
@@ -277,7 +292,9 @@ export function DeferredMarkdownRenderer({
         <Renderer content={content} isStreaming={isStreaming} priorityHydrateRichText={priorityHydrateRichText} messageId={messageId} />
       ) : priorityHydrateRichText && !isStreaming && !complexity.isExtreme ? (
         <MarkdownLiteRenderer content={content} compactPreview={false} disablePreview messageId={messageId} />
-      ) : priorityHydrateRichText || allowRichLiteFallback || shouldUseRichLiteFallback(content, complexity) ? (
+      ) : allowRichLiteFallback && !isStreaming ? (
+        <MarkdownLiteRenderer content={content} compactPreview={false} disablePreview messageId={messageId} />
+      ) : richFallbackEligible || hasRenderedRichFallback ? (
         <MarkdownTokenRenderer content={content} isStreaming={isStreaming} compactPreview={priorityHydrateRichText ? false : compactRichLitePreview} messageId={messageId} priorityHydrateRichText={priorityHydrateRichText} />
       ) : (
         <MarkdownFallback content={content} compactPreview={compactRichLitePreview} messageId={messageId} />
