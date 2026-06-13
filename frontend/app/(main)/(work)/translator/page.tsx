@@ -642,7 +642,11 @@ export default function TranslatorPage() {
                   </div>
                   <div className="min-h-0 flex-1 overflow-auto p-5">
                     {displayed ? (
-                      <div data-i18n-skip="true" className="whitespace-pre-wrap rounded-xl bg-surface-elevated p-4 text-base leading-7 text-text-primary">{displayed}</div>
+                      <div className="space-y-4">
+                        {displayed ? (
+                          <div data-i18n-skip="true" className="whitespace-pre-wrap rounded-xl bg-surface-elevated p-4 text-base leading-7 text-text-primary">{displayed}</div>
+                        ) : null}
+                      </div>
                     ) : (
                       <div className="flex h-full flex-col items-center justify-center rounded-xl bg-surface text-center text-text-secondary">
                         <Languages className="mb-3 h-10 w-10 text-text-tertiary" />
