@@ -15,11 +15,12 @@ import (
 )
 
 type generatedNotebookArtifactDraft struct {
-	Type        string
-	Title       string
-	Subtitle    string
-	Content     json.RawMessage
-	SourceCount int
+	Type          string
+	Title         string
+	Subtitle      string
+	Content       json.RawMessage
+	SourceCount   int
+	SourceFileIDs []uint
 }
 
 type notebookArtifactGenerationOptions struct {
@@ -45,9 +46,18 @@ type notebookGenerationSource struct {
 }
 
 type notebookStudioTextSection struct {
-	Heading string   `json:"heading"`
-	Body    string   `json:"body,omitempty"`
-	Bullets []string `json:"bullets,omitempty"`
+	Heading   string                     `json:"heading"`
+	Body      string                     `json:"body,omitempty"`
+	Bullets   []string                   `json:"bullets,omitempty"`
+	Citations []notebookArtifactCitation `json:"citations,omitempty"`
+}
+
+type notebookArtifactCitation struct {
+	FileID      uint   `json:"file_id"`
+	SourceIndex int    `json:"source_index"`
+	Quote       string `json:"quote"`
+	Page        int    `json:"page,omitempty"`
+	ChunkIndex  int    `json:"chunk_index,omitempty"`
 }
 
 type notebookStudioTableRow struct {
@@ -174,12 +184,23 @@ func buildGeneratedNotebookArtifactDraft(generationType string, notebookTitle st
 		return generatedNotebookArtifactDraft{}, err
 	}
 	return generatedNotebookArtifactDraft{
-		Type:        artifactType,
-		Title:       notebookGeneratedArtifactTitle(generationType, notebookTitle),
-		Subtitle:    fmt.Sprintf("基于 %d 个资料源生成", len(sources)),
-		Content:     content,
-		SourceCount: len(sources),
+		Type:          artifactType,
+		Title:         notebookGeneratedArtifactTitle(generationType, notebookTitle),
+		Subtitle:      fmt.Sprintf("基于 %d 个资料源生成", len(sources)),
+		Content:       content,
+		SourceCount:   len(sources),
+		SourceFileIDs: notebookGenerationSourceFileIDs(sources),
 	}, nil
+}
+
+func notebookGenerationSourceFileIDs(sources []notebookGenerationSource) []uint {
+	ids := make([]uint, 0, len(sources))
+	for _, source := range sources {
+		if source.File.ID > 0 {
+			ids = append(ids, source.File.ID)
+		}
+	}
+	return ids
 }
 
 func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, imageService *services.ImageService, generationType string, notebookTitle string, files []models.File, selectedFileIDs []uint, language string, opts ...notebookArtifactGenerationOptions) (generatedNotebookArtifactDraft, error) {
@@ -599,18 +620,31 @@ func reportGenerationFormatID(generationType string) string {
 }
 
 func selectNotebookGenerationSources(files []models.File, selectedFileIDs []uint, generationType string) []notebookGenerationSource {
-	selected := map[uint]bool{}
+	fileByID := map[uint]models.File{}
+	for _, file := range files {
+		fileByID[file.ID] = file
+	}
+	selected := make([]uint, 0, len(selectedFileIDs))
+	seen := map[uint]bool{}
 	for _, id := range selectedFileIDs {
-		if id > 0 {
-			selected[id] = true
+		if id > 0 && !seen[id] {
+			selected = append(selected, id)
+			seen[id] = true
 		}
 	}
 	useSelection := len(selected) > 0
-	sources := make([]notebookGenerationSource, 0, len(files))
-	for _, file := range files {
-		if useSelection && !selected[file.ID] {
-			continue
+	orderedFiles := make([]models.File, 0, len(files))
+	if useSelection {
+		for _, id := range selected {
+			if file, ok := fileByID[id]; ok {
+				orderedFiles = append(orderedFiles, file)
+			}
 		}
+	} else {
+		orderedFiles = files
+	}
+	sources := make([]notebookGenerationSource, 0, len(orderedFiles))
+	for _, file := range orderedFiles {
 		if !isNotebookGenerationFileReady(file) {
 			continue
 		}
@@ -1837,26 +1871,39 @@ func buildNotebookGeneratedTextSections(generationType string, notebookTitle str
 	for _, source := range sources {
 		bullets = append(bullets, fmt.Sprintf("[%d] %s：%s", source.Index, source.File.Filename, fallbackText(source.Summary, source.Excerpt)))
 	}
+	citations := notebookCitationsFromSources(sources)
 	switch generationType {
 	case "faq":
 		return []notebookStudioTextSection{
-			{Heading: "这个笔记本覆盖哪些资料？", Body: fmt.Sprintf("当前 FAQ 基于《%s》中的 %d 个就绪资料源生成。", notebookTitle, len(sources))},
-			{Heading: "可以从哪些资料继续追问？", Bullets: bullets},
+			{Heading: "这个笔记本覆盖哪些资料？", Body: fmt.Sprintf("当前 FAQ 基于《%s》中的 %d 个就绪资料源生成。", notebookTitle, len(sources)), Citations: citations},
+			{Heading: "可以从哪些资料继续追问？", Bullets: bullets, Citations: citations},
 			{Heading: "建议追问", Bullets: []string{"请对比不同资料中的共同结论", "请列出目前资料中的风险和缺口", "请把资料整理成执行清单"}},
 		}
 	case "briefing":
 		return []notebookStudioTextSection{
-			{Heading: "态势概览", Body: fmt.Sprintf("《%s》目前有 %d 个就绪资料源，可用于形成简报。", notebookTitle, len(sources))},
-			{Heading: "关键信号", Bullets: bullets},
+			{Heading: "态势概览", Body: fmt.Sprintf("《%s》目前有 %d 个就绪资料源，可用于形成简报。", notebookTitle, len(sources)), Citations: citations},
+			{Heading: "关键信号", Bullets: bullets, Citations: citations},
 			{Heading: "建议动作", Bullets: []string{"核对关键来源原文", "围绕高价值主题继续追问", "导出简报并补充业务判断"}},
 		}
 	default:
 		return []notebookStudioTextSection{
-			{Heading: "整体摘要", Body: fmt.Sprintf("《%s》当前选中的 %d 个就绪资料源已整理为摘要草稿。", notebookTitle, len(sources))},
-			{Heading: "资料要点", Bullets: bullets},
+			{Heading: "整体摘要", Body: fmt.Sprintf("《%s》当前选中的 %d 个就绪资料源已整理为摘要草稿。", notebookTitle, len(sources)), Citations: citations},
+			{Heading: "资料要点", Bullets: bullets, Citations: citations},
 			{Heading: "下一步", Bullets: []string{"继续向 Notebook Chat 追问细节", "生成数据表格做结构化对比", "补充更多资料后重新生成"}},
 		}
 	}
+}
+
+func notebookCitationsFromSources(sources []notebookGenerationSource) []notebookArtifactCitation {
+	citations := make([]notebookArtifactCitation, 0, len(sources))
+	for _, source := range sources {
+		quote := truncateNotebookRunes(fallbackText(source.Summary, source.Excerpt), 180, "…")
+		if strings.TrimSpace(quote) == "" || source.File.ID == 0 {
+			continue
+		}
+		citations = append(citations, notebookArtifactCitation{FileID: source.File.ID, SourceIndex: source.Index, Quote: quote})
+	}
+	return citations
 }
 
 func notebookGeneratedArtifactTitle(generationType string, notebookTitle string) string {

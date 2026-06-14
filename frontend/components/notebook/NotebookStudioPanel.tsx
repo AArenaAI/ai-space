@@ -29,6 +29,21 @@ export type NotebookStudioTextSection = {
   heading: string;
   body?: string;
   bullets?: string[];
+  citations?: NotebookStudioCitation[];
+};
+
+export type NotebookStudioCitation = {
+  file_id: number;
+  source_index: number;
+  quote: string;
+  page?: number;
+  chunk_index?: number;
+};
+
+export type NotebookSourceOpenTarget = {
+  quote?: string;
+  page?: number;
+  chunkIndex?: number;
 };
 
 export type NotebookStudioMindmapNode = {
@@ -85,80 +100,54 @@ export type NotebookStudioReportTable = {
   rows: string[][];
 };
 
+type NotebookStudioArtifactBase = {
+  id: string;
+  title: string;
+  subtitle: string;
+  createdAt: string;
+  sourceCount: number;
+  sourceFileIds?: number[];
+};
+
 export type NotebookStudioArtifact =
   | {
-      id: string;
       type: "table";
-      title: string;
-      subtitle: string;
-      createdAt: string;
-      sourceCount: number;
       rows: NotebookStudioTableRow[];
-    }
+    } & NotebookStudioArtifactBase
   | {
-      id: string;
       type: "summary" | "faq" | "briefing";
-      title: string;
-      subtitle: string;
-      createdAt: string;
-      sourceCount: number;
       sections: NotebookStudioTextSection[];
-    }
+    } & NotebookStudioArtifactBase
   | {
-      id: string;
       type: "mindmap";
-      title: string;
-      subtitle: string;
-      createdAt: string;
-      sourceCount: number;
       nodes: NotebookStudioMindmapNode[];
       edges: NotebookStudioMindmapEdge[];
-    }
+    } & NotebookStudioArtifactBase
   | {
-      id: string;
       type: "flashcards";
-      title: string;
-      subtitle: string;
-      createdAt: string;
-      sourceCount: number;
       cards: NotebookStudioFlashcard[];
-    }
+    } & NotebookStudioArtifactBase
   | {
-      id: string;
       type: "quiz";
-      title: string;
-      subtitle: string;
-      createdAt: string;
-      sourceCount: number;
       questions: NotebookStudioQuizQuestion[];
-    }
+    } & NotebookStudioArtifactBase
   | {
-      id: string;
       type: "report";
-      title: string;
-      subtitle: string;
-      createdAt: string;
-      sourceCount: number;
       formatId: string;
       formatTitle: string;
       executiveSummary: string;
       sections: NotebookStudioReportSection[];
       tables: NotebookStudioReportTable[];
-    }
+    } & NotebookStudioArtifactBase
   | {
-      id: string;
       type: "infographic";
-      title: string;
-      subtitle: string;
-      createdAt: string;
-      sourceCount: number;
       orientation: string;
       style: string;
       detail_level: string;
       prompt: string;
       image_url: string;
       color_scheme?: Record<string, string>;
-    };
+    } & NotebookStudioArtifactBase;
 
 type NotebookStudioPanelProps = {
   width?: number;
@@ -176,6 +165,7 @@ type NotebookStudioPanelProps = {
   onExportTableToGoogleSheets?: (artifact: Extract<NotebookStudioArtifact, { type: "table" }>) => void;
   onExplainFlashcard?: (card: NotebookStudioFlashcard) => void;
   onExplainQuiz?: (question: NotebookStudioQuizQuestion, selectedOptionId: string | null) => void;
+  onOpenSource?: (sourceId: number, target?: NotebookSourceOpenTarget) => void;
 };
 
 type StudioIconProps = { className?: string };
@@ -299,7 +289,7 @@ function sourceAccent(source: NotebookStudioSource) {
   return "bg-blue-500/10 text-blue-500";
 }
 
-function SourcePopover({ sources, title, emptyLabel }: { sources: NotebookStudioSource[]; title: string; emptyLabel: string }) {
+function SourcePopover({ sources, title, emptyLabel, onOpenSource }: { sources: NotebookStudioSource[]; title: string; emptyLabel: string; onOpenSource?: (sourceId: number, target?: NotebookSourceOpenTarget) => void }) {
   return (
     <div className="absolute left-0 top-full z-30 mt-2 w-72 rounded-2xl border border-surface-border bg-surface-card p-3 text-left shadow-2xl">
       <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-text-primary">
@@ -309,10 +299,10 @@ function SourcePopover({ sources, title, emptyLabel }: { sources: NotebookStudio
       {sources.length ? (
         <div className="space-y-1.5">
           {sources.map((source) => (
-            <div key={source.id} className="flex items-center gap-2 rounded-xl px-2 py-2 text-xs text-text-secondary hover:bg-surface-hover">
+            <button key={source.id} type="button" onClick={() => onOpenSource?.(source.id)} className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-xs text-text-secondary hover:bg-surface-hover">
               <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-lg", sourceAccent(source))}><FileText className="h-3.5 w-3.5" /></span>
               <span className="min-w-0 flex-1 truncate font-medium text-text-primary">{source.filename}</span>
-            </div>
+            </button>
           ))}
         </div>
       ) : (
@@ -322,12 +312,32 @@ function SourcePopover({ sources, title, emptyLabel }: { sources: NotebookStudio
   );
 }
 
-function renderTextArtifact(artifact: Extract<NotebookStudioArtifact, { type: "summary" | "faq" | "briefing" }>) {
+function CitationMarkers({ citations, onOpenSource }: { citations?: NotebookStudioCitation[]; onOpenSource?: (sourceId: number, target?: NotebookSourceOpenTarget) => void }) {
+  const clean = (citations || []).filter((citation) => Number.isFinite(citation.file_id) && citation.file_id > 0);
+  if (!clean.length) return null;
+  return (
+    <span className="ml-2 inline-flex flex-wrap items-center gap-1 align-middle">
+      {clean.map((citation, index) => (
+        <button
+          key={`${citation.file_id}-${citation.source_index}-${index}`}
+          type="button"
+          onClick={() => onOpenSource?.(citation.file_id, { quote: citation.quote, page: citation.page, chunkIndex: citation.chunk_index })}
+          title={citation.quote}
+          className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-brand/20 bg-brand/10 px-1.5 text-[10px] font-semibold leading-none text-brand transition hover:border-brand/40 hover:bg-brand/15"
+        >
+          [{citation.source_index || index + 1}]
+        </button>
+      ))}
+    </span>
+  );
+}
+
+function renderTextArtifact(artifact: Extract<NotebookStudioArtifact, { type: "summary" | "faq" | "briefing" }>, onOpenSource?: (sourceId: number, target?: NotebookSourceOpenTarget) => void) {
   return (
     <div className="space-y-3 p-4">
       {artifact.sections.map((section, index) => (
         <section key={`${section.heading}-${index}`} className="rounded-2xl border border-surface-border bg-surface-elevated/60 p-3">
-          <h4 className="text-sm font-semibold text-text-primary">{section.heading}</h4>
+          <h4 className="text-sm font-semibold text-text-primary">{section.heading}<CitationMarkers citations={section.citations} onOpenSource={onOpenSource} /></h4>
           {section.body && <p className="mt-2 text-xs leading-5 text-text-secondary">{section.body}</p>}
           {section.bullets?.length ? (
             <ul className="mt-2 space-y-1.5 text-xs leading-5 text-text-secondary">
@@ -1010,7 +1020,7 @@ function InfographicArtifactView({
   );
 }
 
-function renderActiveArtifact(artifact: NotebookStudioArtifact, t: (key: string, params?: Record<string, string>) => string, expanded = false, onDownloadArtifact?: (artifact: NotebookStudioArtifact) => void, onExplainFlashcard?: (card: NotebookStudioFlashcard) => void, onExplainQuiz?: (question: NotebookStudioQuizQuestion, selectedOptionId: string | null) => void) {
+function renderActiveArtifact(artifact: NotebookStudioArtifact, t: (key: string, params?: Record<string, string>) => string, expanded = false, onDownloadArtifact?: (artifact: NotebookStudioArtifact) => void, onExplainFlashcard?: (card: NotebookStudioFlashcard) => void, onExplainQuiz?: (question: NotebookStudioQuizQuestion, selectedOptionId: string | null) => void, onOpenSource?: (sourceId: number, target?: NotebookSourceOpenTarget) => void) {
   switch (artifact.type) {
     case "table":
       return renderTableArtifact(artifact, t, expanded);
@@ -1027,7 +1037,7 @@ function renderActiveArtifact(artifact: NotebookStudioArtifact, t: (key: string,
     case "summary":
     case "faq":
     case "briefing":
-      return renderTextArtifact(artifact);
+      return renderTextArtifact(artifact, onOpenSource);
   }
 }
 
@@ -1250,6 +1260,7 @@ export function NotebookStudioPanel({
   onExportTableToGoogleSheets,
   onExplainFlashcard,
   onExplainQuiz,
+  onOpenSource,
 }: NotebookStudioPanelProps) {
   const { t } = useI18n();
   const [openMenuArtifactId, setOpenMenuArtifactId] = useState<string | null>(null);
@@ -1259,7 +1270,14 @@ export function NotebookStudioPanel({
   const [infographicDialogOpen, setInfographicDialogOpen] = useState(false);
   const activeArtifact = artifacts.find((artifact) => artifact.id === activeArtifactId) || null;
   const viewerArtifact = artifacts.find((artifact) => artifact.id === viewerArtifactId) || null;
-  const sourcesForArtifact = (artifact: NotebookStudioArtifact) => sourceFiles.slice(0, Math.max(0, artifact.sourceCount || 0));
+  const sourcesForArtifact = (artifact: NotebookStudioArtifact) => {
+    const ids = Array.isArray(artifact.sourceFileIds) ? artifact.sourceFileIds.filter((id) => Number.isFinite(id) && id > 0) : [];
+    if (ids.length > 0) {
+      const byId = new Map(sourceFiles.map((source) => [source.id, source]));
+      return ids.map((id) => byId.get(id)).filter((source): source is NotebookStudioSource => Boolean(source));
+    }
+    return sourceFiles.slice(0, Math.max(0, artifact.sourceCount || 0));
+  };
   const actions: Array<{ id: NotebookStudioActionId; title: string; desc: string; accent: string; bgClass: string }> = [
     { id: "table", title: t("notebook.studio.table"), desc: t("notebook.studio.tableDesc"), accent: "from-emerald-500/15 to-cyan-500/10 text-emerald-500", bgClass: "bg-indigo-50 dark:bg-indigo-950/30" },
     { id: "mindmap", title: t("notebook.studio.mindmap"), desc: t("notebook.studio.mindmapDesc"), accent: "from-violet-500/15 to-fuchsia-500/10 text-violet-500", bgClass: "bg-purple-50 dark:bg-purple-950/30" },
@@ -1344,7 +1362,7 @@ export function NotebookStudioPanel({
                 </button>
               </div>
               <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-surface-card p-5">
-                {renderActiveArtifact(viewerArtifact, t, true, onDownloadArtifact, onExplainFlashcard, onExplainQuiz)}
+                {renderActiveArtifact(viewerArtifact, t, true, onDownloadArtifact, onExplainFlashcard, onExplainQuiz, onOpenSource)}
               </div>
             </div>
           </div>
@@ -1373,7 +1391,7 @@ export function NotebookStudioPanel({
                 >
                   {t("notebook.studio.viewSources", { count: String(activeArtifact.sourceCount) })}
                 </button>
-                {sourcePopoverKey === `active-${activeArtifact.id}` && <SourcePopover sources={sourcesForArtifact(activeArtifact)} title={t("notebook.sourcesTitle")} emptyLabel={t("notebook.sourcesEmpty")} />}
+                {sourcePopoverKey === `active-${activeArtifact.id}` && <SourcePopover sources={sourcesForArtifact(activeArtifact)} title={t("notebook.sourcesTitle")} emptyLabel={t("notebook.sourcesEmpty")} onOpenSource={onOpenSource} />}
               </div>
             </div>
             <button type="button" onClick={() => setIsCollapsed(true)} className="mt-1 rounded-full p-2 text-text-tertiary transition hover:bg-surface-hover hover:text-text-primary" title="Studio">
@@ -1395,7 +1413,7 @@ export function NotebookStudioPanel({
             />
           </div>
           <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-surface-card p-4">
-            {renderActiveArtifact(activeArtifact, t, true, onDownloadArtifact, onExplainFlashcard, onExplainQuiz)}
+            {renderActiveArtifact(activeArtifact, t, true, onDownloadArtifact, onExplainFlashcard, onExplainQuiz, onOpenSource)}
           </div>
         </div>
       ) : (
@@ -1455,18 +1473,41 @@ export function NotebookStudioPanel({
                 const Icon = artifactIconMap[artifact.type];
                 return (
                   <div key={artifact.id} className="group relative rounded-[18px] transition hover:bg-surface-elevated/70">
-                    <button type="button" onClick={() => handleArtifactClick(artifact)} className="flex w-full items-center gap-3.5 px-2.5 py-3 pr-16 text-left">
+                    <div className="flex w-full items-center gap-3.5 px-2.5 py-3 pr-20 text-left">
                       <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", artifactIconTone[artifact.type])}>
                         <Icon className="h-[23px] w-[23px]" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-[14px] font-semibold leading-5 tracking-[-0.01em] text-text-primary">{artifact.title}</div>
-                        <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px] leading-4 text-text-tertiary">
-                          <span className="truncate">{artifact.subtitle}</span>
-                          <span className="text-text-tertiary/70">·</span>
-                          <span className="shrink-0">{formatTime(artifact.createdAt)}</span>
+                        <button type="button" onClick={() => handleArtifactClick(artifact)} className="block w-full text-left">
+                          <div className="truncate text-[14px] font-semibold leading-5 tracking-[-0.01em] text-text-primary">{artifact.title}</div>
+                          <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px] leading-4 text-text-tertiary">
+                            <span className="truncate">{artifact.subtitle}</span>
+                            <span className="text-text-tertiary/70">·</span>
+                            <span className="shrink-0">{formatTime(artifact.createdAt)}</span>
+                          </div>
+                        </button>
+                        <div className="relative mt-2 inline-block">
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setSourcePopoverKey((current) => current === `list-${artifact.id}` ? null : `list-${artifact.id}`);
+                            }}
+                            className="rounded-full border border-surface-border bg-surface-elevated px-2.5 py-1 text-[11px] font-medium text-text-secondary transition hover:border-brand-border hover:text-brand"
+                          >
+                            {t("notebook.studio.viewSources", { count: String(artifact.sourceCount) })}
+                          </button>
+                          {sourcePopoverKey === `list-${artifact.id}` && <SourcePopover sources={sourcesForArtifact(artifact)} title={t("notebook.sourcesTitle")} emptyLabel={t("notebook.sourcesEmpty")} onOpenSource={onOpenSource} />}
                         </div>
                       </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setViewerArtifactId(artifact.id)}
+                      className="absolute right-9 top-1/2 z-20 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-text-tertiary opacity-0 transition hover:bg-surface-hover hover:text-text-primary group-hover:opacity-100"
+                      title={t("notebook.studio.expandViewer")}
+                    >
+                      <Maximize2 className="h-3.5 w-3.5" />
                     </button>
                     <ArtifactMenu
                       artifact={artifact}
@@ -1514,7 +1555,7 @@ export function NotebookStudioPanel({
                   >
                     {t("notebook.studio.viewSources", { count: String(viewerArtifact.sourceCount) })}
                   </button>
-                  {sourcePopoverKey === `viewer-${viewerArtifact.id}` && <SourcePopover sources={sourcesForArtifact(viewerArtifact)} title={t("notebook.sourcesTitle")} emptyLabel={t("notebook.sourcesEmpty")} />}
+                  {sourcePopoverKey === `viewer-${viewerArtifact.id}` && <SourcePopover sources={sourcesForArtifact(viewerArtifact)} title={t("notebook.sourcesTitle")} emptyLabel={t("notebook.sourcesEmpty")} onOpenSource={onOpenSource} />}
                 </span>
               </div>
             </div>
@@ -1523,7 +1564,7 @@ export function NotebookStudioPanel({
             </button>
           </div>
           <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-surface-card p-5">
-            {renderActiveArtifact(viewerArtifact, t, true, onDownloadArtifact, onExplainFlashcard, onExplainQuiz)}
+            {renderActiveArtifact(viewerArtifact, t, true, onDownloadArtifact, onExplainFlashcard, onExplainQuiz, onOpenSource)}
           </div>
         </div>
       </div>

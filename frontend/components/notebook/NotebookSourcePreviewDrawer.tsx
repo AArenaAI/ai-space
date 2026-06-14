@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle2, FileText, Loader2, Search, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import type { NotebookFile, NotebookFileContent } from "@/lib/notebookTypes";
+import type { NotebookSourceOpenTarget } from "@/components/notebook/NotebookStudioPanel";
 import { cn } from "@/lib/utils";
 
 interface NotebookSourcePreviewDrawerProps {
@@ -12,6 +13,7 @@ interface NotebookSourcePreviewDrawerProps {
   data: NotebookFileContent | null;
   loading: boolean;
   error: string | null;
+  target?: NotebookSourceOpenTarget | null;
   onClose: () => void;
 }
 
@@ -46,11 +48,33 @@ function highlightText(text: string, query: string) {
   );
 }
 
-export function NotebookSourcePreviewDrawer({ open, source, data, loading, error, onClose }: NotebookSourcePreviewDrawerProps) {
+export function NotebookSourcePreviewDrawer({ open, source, data, loading, error, target, onClose }: NotebookSourcePreviewDrawerProps) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
   const file = data?.file || source?.file || null;
   const content = data?.content || "";
+
+  useEffect(() => {
+    if (!open) return;
+    const quote = target?.quote?.trim();
+    if (quote) setQuery(quote);
+  }, [open, target?.quote, target?.page, target?.chunkIndex]);
+
+  const targetChunk = useMemo(() => {
+    if (!data?.chunks?.length || !target) return null;
+    if (Number.isFinite(target.chunkIndex)) {
+      const byIndex = data.chunks.find((chunk) => chunk.index === target.chunkIndex);
+      if (byIndex) return byIndex;
+    }
+    const quote = target.quote?.trim().toLowerCase();
+    if (quote) {
+      return data.chunks.find((chunk) => chunk.content.toLowerCase().includes(quote)) || null;
+    }
+    if (Number.isFinite(target.page)) {
+      return data.chunks.find((chunk) => chunk.page === target.page) || null;
+    }
+    return null;
+  }, [data?.chunks, target]);
 
   const contentMatches = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -111,6 +135,17 @@ export function NotebookSourcePreviewDrawer({ open, source, data, loading, error
             </div>
           ) : null}
           {data?.has_more ? <p className="mt-3 text-xs text-text-tertiary">{t("notebook.previewTruncated")}</p> : null}
+          {target ? (
+            <div className="mt-3 rounded-2xl border border-brand/20 bg-brand/5 p-3 text-xs text-text-secondary">
+              <div className="mb-1 font-semibold text-text-primary">{t("notebook.previewCitationTarget")}</div>
+              <div className="flex flex-wrap gap-2">
+                {Number.isFinite(target.page) && target.page ? <span className="rounded-full bg-surface px-2 py-1">{t("notebook.previewPage", { page: String(target.page) })}</span> : null}
+                {Number.isFinite(target.chunkIndex) ? <span className="rounded-full bg-surface px-2 py-1">{t("notebook.previewChunk", { index: String(target.chunkIndex) })}</span> : null}
+                {targetChunk ? <span className="rounded-full bg-surface px-2 py-1">{t("notebook.previewMatchedChunk", { index: String(targetChunk.index), page: targetChunk.page ? String(targetChunk.page) : "—" })}</span> : null}
+              </div>
+              {target.quote ? <p className="mt-2 line-clamp-2 text-text-tertiary">“{target.quote}”</p> : null}
+            </div>
+          ) : null}
         </div>
 
         <div className="border-b border-border px-6 py-4">

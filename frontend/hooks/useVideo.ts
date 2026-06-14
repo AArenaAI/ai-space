@@ -92,6 +92,7 @@ export function useVideo(): UseVideoReturn {
       generate_audio?: boolean;
       watermark?: boolean;
       reference_image_urls?: string[];
+      reference_image_roles?: Array<"reference_image" | "first_frame" | "last_frame">;
       reference_video_urls?: string[];
       reference_audio_urls?: string[];
     }): Promise<VideoGeneration> => {

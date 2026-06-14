@@ -7,7 +7,7 @@ import { ArrowLeft, BookOpen, FileText, Globe, Loader2, MoreVertical, Plus, Sear
 import { toast } from "sonner";
 import ChatInterface from "@/components/chat/ChatInterface";
 import { NotebookSourcePreviewDrawer } from "@/components/notebook/NotebookSourcePreviewDrawer";
-import { NotebookStudioPanel, type NotebookStudioActionId, type NotebookStudioArtifact, type NotebookStudioFlashcard, type NotebookStudioQuizQuestion, type NotebookStudioMindmapEdge, type NotebookStudioMindmapNode, type NotebookStudioReportSection, type NotebookStudioReportTable, type NotebookStudioSource, type NotebookStudioTableRow, type NotebookStudioTextSection } from "@/components/notebook/NotebookStudioPanel";
+import { NotebookStudioPanel, type NotebookSourceOpenTarget, type NotebookStudioActionId, type NotebookStudioArtifact, type NotebookStudioFlashcard, type NotebookStudioQuizQuestion, type NotebookStudioMindmapEdge, type NotebookStudioMindmapNode, type NotebookStudioReportSection, type NotebookStudioReportTable, type NotebookStudioSource, type NotebookStudioTableRow, type NotebookStudioTextSection } from "@/components/notebook/NotebookStudioPanel";
 import { NotebookUrlSourceDialog } from "@/components/notebook/NotebookUrlSourceDialog";
 import { MODELS } from "@/hooks/useChat";
 import { addNotebookFile, addNotebookUrlSource, deleteNotebookArtifact, fetchNotebook, fetchNotebookArtifacts, fetchNotebookFileContent, generateNotebookArtifact, removeNotebookFile, suggestNotebookReportFormats, updateNotebook, updateNotebookArtifact, updateNotebookFile, type NotebookReportFormatSuggestion } from "@/lib/notebookApi";
@@ -35,16 +35,29 @@ function notebookAutoSummaryStorageKey(notebookId: number, fileId: number) {
   return `notebook:${notebookId}:auto-summary-file:${fileId}`;
 }
 
+const NOTEBOOK_DEFAULT_COVER_LOGO = "/brand-dark-logo.png";
+
 const NOTEBOOK_COVER_PRESETS = [
-  { id: "book-open", icon: "🚀", className: "bg-gradient-to-br from-violet-100 via-indigo-50 to-slate-100 text-slate-950" },
-  { id: "aurora", icon: "✨", className: "bg-gradient-to-br from-cyan-100 via-sky-100 to-indigo-100 text-slate-950" },
-  { id: "sunset", icon: "🌅", className: "bg-gradient-to-br from-amber-100 via-orange-100 to-rose-100 text-slate-950" },
-  { id: "forest", icon: "🌿", className: "bg-gradient-to-br from-emerald-100 via-teal-100 to-lime-100 text-slate-950" },
-  { id: "ink", icon: "📘", className: "bg-gradient-to-br from-slate-800 via-indigo-900 to-violet-900 text-white" },
+  { id: "aispace-logo", icon: NOTEBOOK_DEFAULT_COVER_LOGO, className: "bg-gradient-to-br from-[#edf4ff] via-[#eef0ff] to-[#f6efff] text-slate-950" },
 ];
 
 function notebookCoverPreset(coverIcon?: string) {
   return NOTEBOOK_COVER_PRESETS.find((preset) => preset.id === coverIcon) || NOTEBOOK_COVER_PRESETS[0];
+}
+
+function notebookSourceIcon(file?: NotebookFile) {
+  if (!file) return "📕";
+  const mime = (file.file.mime_type || "").toLowerCase();
+  const filename = (file.file.filename || "").toLowerCase();
+  if (mime.includes("pdf") || filename.endsWith(".pdf")) return "PDF";
+  if (mime.includes("word") || filename.endsWith(".doc") || filename.endsWith(".docx")) return "DOC";
+  if (mime.includes("spreadsheet") || mime.includes("excel") || filename.endsWith(".xls") || filename.endsWith(".xlsx") || filename.endsWith(".csv")) return "XLS";
+  if (mime.includes("presentation") || filename.endsWith(".ppt") || filename.endsWith(".pptx")) return "PPT";
+  if (mime.includes("image/")) return "IMG";
+  if (mime.includes("html") || filename.startsWith("http") || filename.endsWith(".url")) return "WEB";
+  if (mime.includes("markdown") || filename.endsWith(".md")) return "MD";
+  if (mime.includes("text") || filename.endsWith(".txt")) return "TXT";
+  return "📄";
 }
 
 function stripFileExtension(filename: string) {
@@ -158,6 +171,7 @@ function toStudioArtifact(artifact: PersistedNotebookArtifact): NotebookStudioAr
     subtitle: artifact.subtitle || "",
     createdAt: artifact.created_at,
     sourceCount: artifact.source_count || 0,
+    sourceFileIds: Array.isArray(artifact.source_file_ids) ? artifact.source_file_ids.filter((id) => Number.isFinite(id) && id > 0) : [],
   };
   if (artifact.type === "data-table") {
     return { ...base, type: "table", rows: Array.isArray(content?.rows) ? content.rows : [] };
@@ -559,14 +573,17 @@ function NotebookCustomizeDialog({
         <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-5">
           <div className={cn("relative mb-5 flex h-40 items-center justify-center overflow-hidden rounded-[22px]", uploadedImage ? "bg-slate-900" : activePreset.className)}>
             {uploadedImage ? (
-              <img src={uploadedImage} alt="笔记本底图预览" className="absolute inset-0 h-full w-full object-cover" />
+              <>
+                <img src={uploadedImage} alt="笔记本底图预览" className="absolute inset-0 h-full w-full object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-black/15 to-transparent" />
+              </>
             ) : (
               <>
-                <div className="pointer-events-none absolute -right-8 -bottom-16 text-[150px] font-black leading-none text-white/35 opacity-80">M</div>
-                <div className="relative z-10 text-[46px] leading-none">{activePreset.icon}</div>
+                <div className="pointer-events-none absolute -right-10 -bottom-14 h-36 w-36 rotate-12 rounded-[34px] bg-fuchsia-400/10" />
+                <div className="pointer-events-none absolute right-10 bottom-4 h-20 w-28 -rotate-6 rounded-[28px] bg-indigo-300/10" />
+                <img src={NOTEBOOK_DEFAULT_COVER_LOGO} alt="AI Space" className="relative z-10 h-14 w-14 object-contain drop-shadow-sm" />
               </>
             )}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent" />
             <input
               ref={fileInputRef}
               type="file"
@@ -589,7 +606,7 @@ function NotebookCustomizeDialog({
                   className={cn("flex h-16 items-center justify-center rounded-2xl border text-2xl transition", preset.className, coverIcon === preset.id ? "border-brand ring-2 ring-brand/25" : "border-surface-border hover:border-brand/50")}
                   aria-label={preset.id}
                 >
-                  {preset.icon}
+                  <img src={preset.icon} alt="AI Space" className="h-8 w-8 object-contain drop-shadow-sm" />
                 </button>
               ))}
             </div>
@@ -626,6 +643,7 @@ function NotebookDetailContent() {
   const [previewData, setPreviewData] = useState<NotebookFileContent | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<NotebookSourceOpenTarget | null>(null);
   const [studioArtifacts, setStudioArtifacts] = useState<NotebookStudioArtifact[]>([]);
   const [activeStudioArtifactId, setActiveStudioArtifactId] = useState<string | null>(null);
   const [generatingStudioType, setGeneratingStudioType] = useState<NotebookStudioActionId | null>(null);
@@ -635,7 +653,7 @@ function NotebookDetailContent() {
   const [loadingReportSuggestions, setLoadingReportSuggestions] = useState(false);
   const [externalChatSendRequest, setExternalChatSendRequest] = useState<{ id: number; content: string; hidden?: boolean } | null>(null);
   const [customizeDialogOpen, setCustomizeDialogOpen] = useState(false);
-  const [customCoverIcon, setCustomCoverIcon] = useState("book-open");
+  const [customCoverIcon, setCustomCoverIcon] = useState("aispace-logo");
   const [savingNotebookCustom, setSavingNotebookCustom] = useState(false);
   const [sourceMenuFileId, setSourceMenuFileId] = useState<number | null>(null);
   const [sourceToRemove, setSourceToRemove] = useState<NotebookFile | null>(null);
@@ -694,7 +712,7 @@ function NotebookDetailContent() {
 
   useEffect(() => {
     if (!notebook) return;
-    setCustomCoverIcon(notebook.cover_icon || "book-open");
+    setCustomCoverIcon(notebook.cover_icon || "aispace-logo");
   }, [notebook?.id, notebook?.cover_icon]);
 
   useEffect(() => {
@@ -724,9 +742,10 @@ function NotebookDetailContent() {
 
   const firstFile = files[0];
   const heroTitle = notebook?.title && notebook.title !== "未命名笔记本" ? notebook.title : buildAutoNotebookTitle(firstFile);
-  const heroCoverIcon = notebook?.cover_icon || "book-open";
+  const heroCoverIcon = notebook?.cover_icon || "aispace-logo";
   const heroCover = notebookCoverPreset(heroCoverIcon);
   const heroCoverImageUrl = heroCoverIcon.startsWith("uploaded:") ? readNotebookUploadedCover(heroCoverIcon) : "";
+  const heroIcon = undefined;
 
   const studioSourceFiles = useMemo<NotebookStudioSource[]>(() => files.map((file) => ({
     id: file.file_id,
@@ -799,7 +818,7 @@ function NotebookDetailContent() {
   };
 
   const openCustomizeDialog = () => {
-    setCustomCoverIcon(notebook?.cover_icon || "book-open");
+    setCustomCoverIcon(notebook?.cover_icon || "aispace-logo");
     setCustomizeDialogOpen(true);
   };
 
@@ -895,9 +914,10 @@ function NotebookDetailContent() {
     }
   };
 
-  const openPreview = async (file: NotebookFile) => {
+  const openPreview = async (file: NotebookFile, target?: NotebookSourceOpenTarget) => {
     if (!notebookId) return;
     setPreviewSource(file);
+    setPreviewTarget(target || null);
     setPreviewData(null);
     setPreviewError(null);
     setPreviewLoading(true);
@@ -920,6 +940,7 @@ function NotebookDetailContent() {
     setPreviewSource(null);
     setPreviewData(null);
     setPreviewError(null);
+    setPreviewTarget(null);
     setPreviewLoading(false);
   };
 
@@ -1341,12 +1362,22 @@ function NotebookDetailContent() {
             <div className="space-y-1 rounded-[24px] border border-transparent p-0 transition">
               {files.map((file) => {
                 const selected = selectedFileIds.includes(file.file_id);
+                const meta = statusMeta(file, t);
+                const StatusIcon = meta.icon;
+                const detail = statusDetail(file, t);
                 return (
                   <div key={file.id} role="button" tabIndex={0} onClick={() => openPreview(file)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") openPreview(file); }} className={cn("group w-full cursor-pointer rounded-md px-2 py-2 text-left transition hover:bg-slate-100 dark:hover:bg-slate-800/60", !selected && "opacity-75")}>
                     <div className="flex items-center gap-3">
                       <SourcePdfIcon />
                       <div className="min-w-0 flex-1 overflow-hidden">
                         <div className="truncate text-sm font-medium text-text-primary">{file.file.filename}</div>
+                        <div className="mt-1.5 flex min-w-0 items-center gap-2">
+                          <span className={cn("inline-flex h-5 shrink-0 items-center gap-1 rounded-full border px-2 text-[11px] font-medium", meta.className)} title={detail || meta.label}>
+                            <StatusIcon className={cn("h-3 w-3", isNotebookFileProcessing(file) && "animate-spin")} />
+                            {meta.label}
+                          </span>
+                          {detail && <span className="truncate text-[11px] leading-4 text-text-tertiary" title={detail}>{detail}</span>}
+                        </div>
                       </div>
                       <div className="relative shrink-0">
                         <button
@@ -1420,11 +1451,11 @@ function NotebookDetailContent() {
           notebookTitle={notebook?.title}
           notebookFileCount={files.length}
           notebookFileIds={selectedFileIds}
-          notebookHero={files.length > 0 ? {
+          notebookHero={notebook ? {
             title: heroTitle,
             meta: `${files.length} 个来源`,
             coverClassName: heroCover.className,
-            icon: heroCover.icon,
+            icon: heroIcon,
             imageUrl: heroCoverImageUrl,
             onCustomize: openCustomizeDialog,
           } : undefined}
@@ -1437,6 +1468,7 @@ function NotebookDetailContent() {
             { title: t("notebook.exampleCompare"), desc: t("notebook.exampleCompareDesc"), prompt: t("notebook.exampleComparePrompt") },
           ]}
           externalSendRequest={externalChatSendRequest}
+          modelSelectionOptions={{ storageKey: "notebook-selected-model", defaultModelId: "gpt-5.5" }}
         />
       </section>
       <div
@@ -1465,6 +1497,10 @@ function NotebookDetailContent() {
         onExportTableToGoogleSheets={handleExportTableToGoogleSheets}
         onExplainFlashcard={handleExplainFlashcard}
         onExplainQuiz={handleExplainQuiz}
+        onOpenSource={(sourceId, target) => {
+          const source = files.find((file) => file.file_id === sourceId);
+          if (source) openPreview(source, target);
+        }}
       />
     </div>
     <NotebookUrlSourceDialog
@@ -1483,6 +1519,7 @@ function NotebookDetailContent() {
       data={previewData}
       loading={previewLoading}
       error={previewError}
+      target={previewTarget}
       onClose={closePreview}
     />
     <ReportFormatDialog

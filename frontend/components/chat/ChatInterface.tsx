@@ -58,6 +58,7 @@ interface ChatInterfaceProps {
   welcomeExamples?: { title: string; desc: string; prompt: string }[];
   targetMessageId?: number;
   externalSendRequest?: { id: number; content: string; hidden?: boolean } | null;
+  modelSelectionOptions?: { storageKey?: string; defaultModelId?: string };
 }
 
 const HIDDEN_USER_MESSAGE_PREFIX = "<!-- ai-space:hidden-user-message -->";
@@ -66,7 +67,7 @@ export function buildHiddenUserMessageContent(content: string) {
   return `${HIDDEN_USER_MESSAGE_PREFIX}\n${content}`;
 }
 
-export default function ChatInterface({ conversationId, notebookId, notebookTitle, notebookFileCount, notebookFileIds, notebookHero, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId, externalSendRequest }: ChatInterfaceProps) {
+export default function ChatInterface({ conversationId, notebookId, notebookTitle, notebookFileCount, notebookFileIds, notebookHero, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId, externalSendRequest, modelSelectionOptions }: ChatInterfaceProps) {
   const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
   const { t } = useI18n();
   const [compareMode, setCompareMode] = useState(false);
@@ -125,7 +126,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     isLoadingMore,
     hasMoreMessages,
     loadMoreMessages,
-  } = useChat(conversationId, models, skillKey, notebookId, notebookFileIds);
+  } = useChat(conversationId, models, skillKey, notebookId, notebookFileIds, modelSelectionOptions);
 
   const { templates } = useTemplates();
 
@@ -459,6 +460,9 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     return () => window.clearTimeout(timer);
   }, [isEmptyNewCompareMode]);
 
+  const hasNotebookHeroImage = Boolean(notebookHero?.imageUrl);
+  const notebookHeroUsesDarkText = Boolean(notebookHero && !hasNotebookHeroImage && !notebookHero.coverClassName?.includes("text-white"));
+
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
       {/* 顶部栏 - 对比模式下隐藏，释放垂直空间 */}
@@ -523,31 +527,48 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
 
       {notebookHero && !activeCompareMode && (
         <div className="relative z-30 shrink-0 px-4 pb-3">
-          <div className={cn("group relative overflow-hidden rounded-[26px] px-6 py-5 shadow-sm", notebookHero.imageUrl ? "bg-slate-900 text-white" : (notebookHero.coverClassName || "bg-gradient-to-br from-violet-100 via-indigo-50 to-slate-100 text-slate-950"))}>
-            {notebookHero.imageUrl ? (
-              <img src={notebookHero.imageUrl} alt="笔记本底图" className="absolute inset-0 h-full w-full object-cover" />
+          <div className={cn("group relative min-h-[176px] overflow-hidden rounded-[28px] px-6 py-5 shadow-sm ring-1 ring-black/5", hasNotebookHeroImage ? "bg-slate-900 text-white" : notebookHero.coverClassName || "bg-gradient-to-br from-[#edf4ff] via-[#eef0ff] to-[#f6efff] text-slate-950")}>
+            {hasNotebookHeroImage ? (
+              <>
+                <img src={notebookHero.imageUrl} alt="笔记本底图" className="absolute inset-0 h-full w-full object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/35 to-black/10" />
+                <div className="absolute inset-0 bg-gradient-to-r from-black/45 via-transparent to-transparent" />
+              </>
             ) : (
-              <div className="pointer-events-none absolute -right-8 -bottom-12 text-[150px] font-black leading-none text-white/35 opacity-80">M</div>
+              <>
+                <div className="pointer-events-none absolute -right-10 -bottom-14 h-36 w-36 rotate-12 rounded-[34px] bg-fuchsia-400/10 transition duration-500 group-hover:scale-[1.03]" />
+                <div className="pointer-events-none absolute right-10 bottom-4 h-20 w-28 -rotate-6 rounded-[28px] bg-indigo-300/10 transition duration-500 group-hover:scale-[1.03]" />
+                <img src="/brand-dark-logo.png" alt="AI Space" className="pointer-events-none absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 object-contain opacity-90" />
+              </>
             )}
-            <div className={cn("absolute inset-0", notebookHero.imageUrl ? "bg-gradient-to-r from-black/55 via-black/20 to-transparent" : "bg-transparent")} />
-            <div className="relative z-10 flex items-start justify-between gap-4">
-              <div className="min-w-0 flex-1">
-                <div className="mb-4 text-[30px] leading-none">{notebookHero.icon || "🚀"}</div>
-                <h1 className={cn("max-w-2xl text-[24px] font-bold leading-[1.12] tracking-[-0.035em]", notebookHero.imageUrl ? "text-white drop-shadow-sm" : "text-slate-950")}>
+
+            <div className="relative z-10 flex h-full min-h-[136px] flex-col justify-between gap-5">
+              <div className="flex items-start justify-between gap-4">
+                {notebookHero.icon && (
+                  <div className={cn("inline-flex h-10 min-w-10 items-center justify-center rounded-full px-2.5 text-sm font-black leading-none shadow-sm ring-1 ring-black/10", notebookHeroUsesDarkText ? "bg-white/70 text-slate-900" : "bg-white/92 text-slate-900")}>
+                    {notebookHero.icon}
+                  </div>
+                )}
+                <div className="ml-auto">
+                  {notebookHero.onCustomize && (
+                    <button
+                      type="button"
+                      onClick={notebookHero.onCustomize}
+                      className={cn("relative z-20 inline-flex h-10 shrink-0 items-center gap-2 rounded-full px-4 text-sm font-semibold shadow-sm ring-1 ring-black/5 transition group-hover:shadow-md", notebookHeroUsesDarkText ? "bg-white/70 text-slate-700 hover:bg-white/90 hover:text-slate-950" : "bg-white/92 text-slate-700 hover:bg-white hover:text-slate-950")}
+                    >
+                      <Pencil className="h-4 w-4" />
+                      自定义
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="max-w-2xl">
+                <h1 className={cn("text-[28px] font-bold leading-[1.08] tracking-[-0.04em]", notebookHeroUsesDarkText ? "text-slate-950" : "text-white drop-shadow-sm")}>
                   {notebookHero.title}
                 </h1>
-                {notebookHero.meta && <p className={cn("mt-3 text-sm font-medium", notebookHero.imageUrl ? "text-white/80" : "text-slate-700/75")}>{notebookHero.meta}</p>}
+                {notebookHero.meta && <p className={cn("mt-3 text-sm font-medium", notebookHeroUsesDarkText ? "text-slate-600" : "text-white/82")}>{notebookHero.meta}</p>}
               </div>
-              {notebookHero.onCustomize && (
-                <button
-                  type="button"
-                  onClick={notebookHero.onCustomize}
-                  className="relative z-20 inline-flex h-11 shrink-0 items-center gap-2 rounded-full bg-white/90 px-4 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-black/5 transition hover:bg-white hover:text-slate-950 group-hover:shadow-md"
-                >
-                  <Pencil className="h-4 w-4" />
-                  自定义
-                </button>
-              )}
             </div>
           </div>
         </div>

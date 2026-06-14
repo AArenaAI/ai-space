@@ -24,14 +24,18 @@ func TestBuildGeneratedNotebookArtifactDraftUsesSelectedReadySources(t *testing.
 	if draft.SourceCount != 2 {
 		t.Fatalf("draft.SourceCount = %d, want 2", draft.SourceCount)
 	}
+	if got, want := draft.SourceFileIDs, []uint{3, 1}; !uintSlicesEqual(got, want) {
+		t.Fatalf("draft.SourceFileIDs = %v, want %v", got, want)
+	}
 	if draft.Title == "" || draft.Subtitle == "" {
 		t.Fatalf("title/subtitle should be populated, got title=%q subtitle=%q", draft.Title, draft.Subtitle)
 	}
 	var content struct {
 		Sections []struct {
-			Heading string   `json:"heading"`
-			Body    string   `json:"body"`
-			Bullets []string `json:"bullets"`
+			Heading   string                     `json:"heading"`
+			Body      string                     `json:"body"`
+			Bullets   []string                   `json:"bullets"`
+			Citations []notebookArtifactCitation `json:"citations"`
 		} `json:"sections"`
 	}
 	if err := json.Unmarshal(draft.Content, &content); err != nil {
@@ -39,6 +43,13 @@ func TestBuildGeneratedNotebookArtifactDraftUsesSelectedReadySources(t *testing.
 	}
 	if len(content.Sections) < 2 {
 		t.Fatalf("expected multiple summary sections, got %d", len(content.Sections))
+	}
+	if len(content.Sections[0].Citations) == 0 {
+		t.Fatalf("summary sections should include citation metadata, got %+v", content.Sections[0])
+	}
+	firstCitation := content.Sections[0].Citations[0]
+	if firstCitation.FileID == 0 || strings.TrimSpace(firstCitation.Quote) == "" {
+		t.Fatalf("citation should include file_id and quote, got %+v", firstCitation)
 	}
 	encoded := string(draft.Content)
 	if !containsAll(encoded, []string{"技术说明.md", "产品方案.md"}) {
@@ -346,4 +357,16 @@ func containsAll(text string, parts []string) bool {
 
 func stringsContains(text string, part string) bool {
 	return strings.Contains(text, part)
+}
+
+func uintSlicesEqual(a []uint, b []uint) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

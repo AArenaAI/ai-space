@@ -79,15 +79,16 @@ type NotebookFileContentChunk struct {
 }
 
 type NotebookArtifactResponse struct {
-	ID          uint            `json:"id"`
-	NotebookID  uint            `json:"notebook_id"`
-	Type        string          `json:"type"`
-	Title       string          `json:"title"`
-	Subtitle    string          `json:"subtitle"`
-	Content     json.RawMessage `json:"content"`
-	SourceCount int             `json:"source_count"`
-	CreatedAt   time.Time       `json:"created_at"`
-	UpdatedAt   time.Time       `json:"updated_at"`
+	ID            uint            `json:"id"`
+	NotebookID    uint            `json:"notebook_id"`
+	Type          string          `json:"type"`
+	Title         string          `json:"title"`
+	Subtitle      string          `json:"subtitle"`
+	Content       json.RawMessage `json:"content"`
+	SourceCount   int             `json:"source_count"`
+	SourceFileIDs []uint          `json:"source_file_ids"`
+	CreatedAt     time.Time       `json:"created_at"`
+	UpdatedAt     time.Time       `json:"updated_at"`
 }
 
 func (h *NotebookHandler) List(c *gin.Context) {
@@ -479,7 +480,7 @@ func (h *NotebookHandler) CreateArtifact(c *gin.Context) {
 	}
 	artifactType := strings.TrimSpace(req.Type)
 	title := strings.TrimSpace(req.Title)
-	artifact, ok := h.saveNotebookArtifact(c, nb, artifactType, title, strings.TrimSpace(req.Subtitle), req.Content, req.SourceCount)
+	artifact, ok := h.saveNotebookArtifact(c, nb, artifactType, title, strings.TrimSpace(req.Subtitle), req.Content, req.SourceCount, nil)
 	if !ok {
 		return
 	}
@@ -535,7 +536,7 @@ func (h *NotebookHandler) GenerateArtifact(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	artifact, ok := h.saveNotebookArtifact(c, nb, draft.Type, draft.Title, draft.Subtitle, draft.Content, draft.SourceCount)
+	artifact, ok := h.saveNotebookArtifact(c, nb, draft.Type, draft.Title, draft.Subtitle, draft.Content, draft.SourceCount, draft.SourceFileIDs)
 	if !ok {
 		return
 	}
@@ -606,7 +607,7 @@ func (h *NotebookHandler) DeleteArtifact(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-func (h *NotebookHandler) saveNotebookArtifact(c *gin.Context, nb models.Notebook, artifactType string, title string, subtitle string, rawContent json.RawMessage, sourceCount int) (models.NotebookArtifact, bool) {
+func (h *NotebookHandler) saveNotebookArtifact(c *gin.Context, nb models.Notebook, artifactType string, title string, subtitle string, rawContent json.RawMessage, sourceCount int, sourceFileIDs []uint) (models.NotebookArtifact, bool) {
 	artifactType = strings.TrimSpace(artifactType)
 	title = strings.TrimSpace(title)
 	if artifactType == "" || len(artifactType) > 64 {
@@ -630,14 +631,16 @@ func (h *NotebookHandler) saveNotebookArtifact(c *gin.Context, nb models.Noteboo
 		c.JSON(http.StatusBadRequest, gin.H{"error": "输出文件内容不是有效 JSON"})
 		return models.NotebookArtifact{}, false
 	}
+	sourceFileIDBytes, _ := json.Marshal(cleanNotebookSourceFileIDs(sourceFileIDs))
 	artifact := models.NotebookArtifact{
-		NotebookID:  nb.ID,
-		UserID:      getUserID(c),
-		Type:        artifactType,
-		Title:       title,
-		Subtitle:    strings.TrimSpace(subtitle),
-		Content:     string(content),
-		SourceCount: sourceCount,
+		NotebookID:    nb.ID,
+		UserID:        getUserID(c),
+		Type:          artifactType,
+		Title:         title,
+		Subtitle:      strings.TrimSpace(subtitle),
+		Content:       string(content),
+		SourceCount:   sourceCount,
+		SourceFileIDs: string(sourceFileIDBytes),
 	}
 	if artifact.SourceCount < 0 {
 		artifact.SourceCount = 0
@@ -669,8 +672,28 @@ func notebookArtifactResponse(artifact models.NotebookArtifact) NotebookArtifact
 	return NotebookArtifactResponse{
 		ID: artifact.ID, NotebookID: artifact.NotebookID, Type: artifact.Type,
 		Title: artifact.Title, Subtitle: artifact.Subtitle, Content: content,
-		SourceCount: artifact.SourceCount, CreatedAt: artifact.CreatedAt, UpdatedAt: artifact.UpdatedAt,
+		SourceCount: artifact.SourceCount, SourceFileIDs: parseNotebookSourceFileIDs(artifact.SourceFileIDs), CreatedAt: artifact.CreatedAt, UpdatedAt: artifact.UpdatedAt,
 	}
+}
+
+func cleanNotebookSourceFileIDs(ids []uint) []uint {
+	cleaned := make([]uint, 0, len(ids))
+	seen := map[uint]bool{}
+	for _, id := range ids {
+		if id > 0 && !seen[id] {
+			cleaned = append(cleaned, id)
+			seen[id] = true
+		}
+	}
+	return cleaned
+}
+
+func parseNotebookSourceFileIDs(raw string) []uint {
+	var ids []uint
+	if strings.TrimSpace(raw) == "" || json.Unmarshal([]byte(raw), &ids) != nil {
+		return nil
+	}
+	return cleanNotebookSourceFileIDs(ids)
 }
 
 func (h *NotebookHandler) listNotebookFiles(notebookID uint) []NotebookFileItem {

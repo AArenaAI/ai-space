@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Copy, Download, FileText, ImageIcon, Loader2, Maximize2, Play, Sparkles, Video, Wand2, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Copy, Download, FileText, ImageIcon, Loader2, Maximize2, Paperclip, Play, Sparkles, Trash2, UploadCloud, Video, Wand2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useImage, type GeneratedImage } from "@/hooks/useImage";
 import { useVideo, type VideoGeneration } from "@/hooks/useVideo";
@@ -22,6 +22,20 @@ const WORKFLOW_MODEL = "gpt-5.5";
 
 type Tab = "workflow" | "image" | "video";
 type WorkflowMode = "novel" | "script" | "assets" | "storyboardVideo" | "storyboardImage";
+type AssetKind = "image" | "video" | "file";
+
+type StoredAsset = {
+  id: string;
+  publicId: string;
+  name: string;
+  type: AssetKind;
+  mimeType?: string;
+  size?: number;
+  url: string;
+  createdAt: string;
+};
+
+const ASSET_STORAGE_KEY = "seedream-beta-assets-v1";
 
 const WORKFLOW_STEPS: Array<{ id: WorkflowMode; titleKey: string; descKey: string; buttonKey: string; placeholderKey: string }> = [
   { id: "novel", titleKey: "seedreamBeta.workflow.novelTitle", descKey: "seedreamBeta.workflow.novelDesc", buttonKey: "seedreamBeta.workflow.generateNovel", placeholderKey: "seedreamBeta.workflow.novelPlaceholder" },
@@ -78,6 +92,27 @@ function stripWorkflowText(text: string) {
     .trim();
 }
 
+
+function getAssetKind(mimeType?: string, filename?: string): AssetKind {
+  const lowerName = (filename || "").toLowerCase();
+  if (mimeType?.startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(lowerName)) return "image";
+  if (mimeType?.startsWith("video/") || /\.(mp4|mov|webm|m4v)$/i.test(lowerName)) return "video";
+  return "file";
+}
+
+function assetViewUrl(publicIdOrUrl: string) {
+  if (!publicIdOrUrl) return "";
+  if (/^https?:\/\//i.test(publicIdOrUrl) || publicIdOrUrl.startsWith("/")) return publicIdOrUrl;
+  if (publicIdOrUrl.startsWith("file_")) return `/api/files/${publicIdOrUrl}/view`;
+  return publicIdOrUrl;
+}
+
+function formatAssetSize(size?: number) {
+  if (!size) return "";
+  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
 function workflowSystemPrompt(mode: WorkflowMode) {
   const common = "你是 AI Space 的影视/小说创作前期助手。不要联网搜索。输出要直接可编辑、可复制，不要解释思考过程，不要使用 Markdown 代码块。";
   if (mode === "novel") return `${common}\n任务：根据用户创意写完整小说，有明确开端、发展、高潮和结尾；人物动机清楚；画面感强。输出格式：<TITLE>标题</TITLE><CONTENT>完整小说正文</CONTENT>`;
@@ -115,6 +150,17 @@ export default function SeedreamBetaPage() {
   const [workflowStoryboardVideo, setWorkflowStoryboardVideo] = useState("");
   const [workflowStoryboardImage, setWorkflowStoryboardImage] = useState("");
   const [workflowGenerating, setWorkflowGenerating] = useState<WorkflowMode | null>(null);
+  const [assets, setAssets] = useState<StoredAsset[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = window.localStorage.getItem(ASSET_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
+  const [uploadingAsset, setUploadingAsset] = useState(false);
 
   const lastImage: GeneratedImage | undefined = useMemo(() => {
     if (!lastImageId) return images[0];
@@ -127,6 +173,14 @@ export default function SeedreamBetaPage() {
   }, [videos, lastVideoId]);
 
   const workflowStep = WORKFLOW_STEPS.find((item) => item.id === workflowMode) || WORKFLOW_STEPS[0];
+
+  useEffect(() => {
+    window.localStorage.setItem(ASSET_STORAGE_KEY, JSON.stringify(assets));
+  }, [assets]);
+
+  const selectedAssets = useMemo(() => assets.filter((item) => selectedAssetIds.includes(item.id)), [assets, selectedAssetIds]);
+  const selectedImageRefs = useMemo(() => selectedAssets.filter((item) => item.type === "image").map((item) => item.publicId || item.url), [selectedAssets]);
+  const selectedVideoRefs = useMemo(() => selectedAssets.filter((item) => item.type === "video").map((item) => item.publicId || item.url), [selectedAssets]);
 
   const workflowOutput = useMemo(() => {
     if (workflowMode === "novel") return workflowNovel;
@@ -155,7 +209,7 @@ export default function SeedreamBetaPage() {
   const generateWorkflow = async (mode: WorkflowMode) => {
     const input = buildWorkflowInput(mode);
     if (!input.trim()) {
-      toast.error("请先输入创意需求或上一步内容");
+      toast.error(t("seedreamBeta.workflow.inputRequired"));
       return;
     }
     setWorkflowGenerating(mode);
@@ -180,9 +234,9 @@ export default function SeedreamBetaPage() {
         ? await consumeChatStream(response)
         : extractTextFromChatResponse(await response.json());
       setWorkflowOutput(mode, stripWorkflowText(raw));
-      toast.success("已生成");
+      toast.success(t("seedreamBeta.workflow.generated"));
     } catch (err) {
-      toast.error(getErrorMessage(err, { module: "chat", fallbackMessage: "生成失败，请稍后重试。" }));
+      toast.error(getErrorMessage(err, { module: "chat", fallbackMessage: t("seedreamBeta.workflow.failed") }));
     } finally {
       setWorkflowGenerating(null);
     }
@@ -191,21 +245,101 @@ export default function SeedreamBetaPage() {
   const copyWorkflowOutput = async () => {
     if (!workflowOutput.trim()) return;
     await navigator.clipboard.writeText(workflowOutput);
-    toast.success("已复制");
+    toast.success(t("seedreamBeta.workflow.copied"));
   };
 
   const sendWorkflowToImage = () => {
     if (!workflowOutput.trim()) return;
     setImagePrompt(workflowOutput.trim());
     setTab("image");
-    toast.success("已填入图片提示词");
+    toast.success(t("seedreamBeta.workflow.sentToImage"));
   };
 
   const sendWorkflowToVideo = () => {
     if (!workflowOutput.trim()) return;
     setVideoPrompt(workflowOutput.trim());
     setTab("video");
-    toast.success("已填入视频提示词");
+    toast.success(t("seedreamBeta.workflow.sentToVideo"));
+  };
+
+  const handleAssetUpload = async (file: File) => {
+    setUploadingAsset(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const token = localStorage.getItem("token");
+      const response = await fetch("/api/files/upload", {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+      });
+      if (!response.ok) throw await readApiError(response);
+      const data = await response.json();
+      const publicId = data.public_id || data.url || data.image_url;
+      const kind = getAssetKind(data.mime_type || file.type, data.filename || file.name);
+      const nextAsset: StoredAsset = {
+        id: `${publicId}-${Date.now()}`,
+        publicId,
+        name: data.filename || file.name,
+        type: kind,
+        mimeType: data.mime_type || file.type,
+        size: data.size || file.size,
+        url: assetViewUrl(publicId),
+        createdAt: new Date().toISOString(),
+      };
+      setAssets((prev) => [nextAsset, ...prev]);
+      setSelectedAssetIds((prev) => Array.from(new Set([nextAsset.id, ...prev])));
+      toast.success(t("seedreamBeta.assets.uploaded"));
+    } catch (err) {
+      toast.error(getErrorMessage(err, { module: "file", fallbackMessage: t("seedreamBeta.assets.uploadFailed") }));
+    } finally {
+      setUploadingAsset(false);
+    }
+  };
+
+  const handleAssetFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    files.forEach((file) => handleAssetUpload(file));
+  };
+
+  const toggleAssetSelection = (id: string) => {
+    setSelectedAssetIds((prev) => prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]);
+  };
+
+  const removeAsset = (id: string) => {
+    setAssets((prev) => prev.filter((item) => item.id !== id));
+    setSelectedAssetIds((prev) => prev.filter((item) => item !== id));
+  };
+
+  const addLatestImageToAssets = () => {
+    if (!lastImage?.image_url) return;
+    const nextAsset: StoredAsset = {
+      id: `image-${lastImage.id}-${Date.now()}`,
+      publicId: lastImage.image_url,
+      name: `Seedream #${lastImage.id}`,
+      type: "image",
+      url: assetViewUrl(lastImage.image_url),
+      createdAt: new Date().toISOString(),
+    };
+    setAssets((prev) => [nextAsset, ...prev]);
+    setSelectedAssetIds((prev) => Array.from(new Set([nextAsset.id, ...prev])));
+    toast.success(t("seedreamBeta.assets.saved"));
+  };
+
+  const addLatestVideoToAssets = () => {
+    if (!lastVideo?.video_url) return;
+    const nextAsset: StoredAsset = {
+      id: `video-${lastVideo.id}-${Date.now()}`,
+      publicId: lastVideo.video_url,
+      name: `Seedance #${lastVideo.id}`,
+      type: "video",
+      url: assetViewUrl(lastVideo.video_url),
+      createdAt: new Date().toISOString(),
+    };
+    setAssets((prev) => [nextAsset, ...prev]);
+    setSelectedAssetIds((prev) => Array.from(new Set([nextAsset.id, ...prev])));
+    toast.success(t("seedreamBeta.assets.saved"));
   };
 
   const submitImage = async () => {
@@ -215,7 +349,7 @@ export default function SeedreamBetaPage() {
       return;
     }
     try {
-      const data = await generateImage(prompt, imageAspect, imageResolution, SEEDREAM_IMAGE_QUALITY, undefined, "seedream");
+      const data = await generateImage(prompt, imageAspect, imageResolution, SEEDREAM_IMAGE_QUALITY, selectedImageRefs, "seedream");
       setLastImageId(data.id);
       toast.success(t("seedreamBeta.imageSubmitted"));
     } catch (err) {
@@ -237,6 +371,9 @@ export default function SeedreamBetaPage() {
         duration: videoDuration,
         generate_audio: videoAudio,
         watermark: false,
+        reference_image_urls: selectedImageRefs,
+        reference_image_roles: selectedImageRefs.map(() => "reference_image" as const),
+        reference_video_urls: selectedVideoRefs,
       });
       setLastVideoId(data.id);
       toast.success(t("seedreamBeta.videoSubmitted"));
@@ -298,7 +435,7 @@ export default function SeedreamBetaPage() {
                 )}
               >
                 <FileText className="h-4 w-4" />
-                创作流程
+                {t("seedreamBeta.workflowTab")}
               </button>
               <button
                 type="button"
@@ -324,20 +461,69 @@ export default function SeedreamBetaPage() {
               </button>
             </div>
 
+            <div className="mb-5 rounded-2xl border border-surface-border bg-surface-card p-4">
+              <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold">{t("seedreamBeta.assets.title")}</h2>
+                  <p className="mt-1 text-xs text-text-tertiary">{t("seedreamBeta.assets.hint")}</p>
+                </div>
+                <label className={cn("inline-flex cursor-pointer items-center gap-2 rounded-2xl bg-brand px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-brand-hover", uploadingAsset && "pointer-events-none opacity-60")}>
+                  {uploadingAsset ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+                  {uploadingAsset ? t("seedreamBeta.assets.uploading") : t("seedreamBeta.assets.upload")}
+                  <input type="file" accept="image/*,video/mp4,video/quicktime,video/webm" multiple className="hidden" onChange={handleAssetFileSelect} />
+                </label>
+              </div>
+              {assets.length > 0 ? (
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {assets.map((asset) => {
+                    const selected = selectedAssetIds.includes(asset.id);
+                    return (
+                      <article key={asset.id} className={cn("rounded-2xl border bg-surface-elevated p-2 transition-colors", selected ? "border-brand/60 ring-2 ring-brand/10" : "border-surface-border")}>
+                        <button type="button" onClick={() => toggleAssetSelection(asset.id)} className="block w-full text-left">
+                          <div className="relative aspect-video overflow-hidden rounded-xl bg-black/5">
+                            {asset.type === "image" ? (
+                              <img src={asset.url} alt={asset.name} className="h-full w-full object-cover" />
+                            ) : asset.type === "video" ? (
+                              <video src={asset.url} className="h-full w-full object-cover" muted />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center text-text-tertiary"><Paperclip className="h-6 w-6" /></div>
+                            )}
+                            <span className={cn("absolute left-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-medium", selected ? "bg-brand text-white" : "bg-black/55 text-white")}>{selected ? t("seedreamBeta.assets.selected") : asset.type}</span>
+                          </div>
+                          <div className="mt-2 min-w-0">
+                            <div className="truncate text-sm font-medium text-text-primary">{asset.name}</div>
+                            <div className="mt-0.5 text-[11px] text-text-tertiary">{formatAssetSize(asset.size) || asset.type}</div>
+                          </div>
+                        </button>
+                        <div className="mt-2 flex items-center justify-between gap-2">
+                          <span className="text-[11px] text-text-tertiary">{selected ? t("seedreamBeta.assets.willReference") : t("seedreamBeta.assets.clickToUse")}</span>
+                          <button type="button" onClick={() => removeAsset(asset.id)} className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-surface-border text-text-tertiary transition-colors hover:border-red-300 hover:text-red-500" aria-label={t("common.delete")}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-surface-border p-5 text-center text-sm text-text-tertiary">{t("seedreamBeta.assets.empty")}</div>
+              )}
+            </div>
+
             {tab === "workflow" ? (
               <div className="space-y-5">
                 <div className="rounded-2xl border border-surface-border bg-surface-card p-4">
-                  <FieldLabel>创意需求</FieldLabel>
+                  <FieldLabel>{t("seedreamBeta.workflow.ideaLabel")}</FieldLabel>
                   <textarea
                     value={workflowIdea}
                     onChange={(event) => setWorkflowIdea(event.target.value)}
-                    placeholder="输入题材、人物、风格、字数、故事设定。例如：写一个近未来科幻短篇，主角是空间站维修员..."
+                    placeholder={t("seedreamBeta.workflow.ideaPlaceholder")}
                     className="min-h-28 w-full resize-none rounded-2xl border border-surface-border bg-surface-elevated px-4 py-3 text-sm outline-none transition-colors placeholder:text-text-tertiary focus:border-brand/60 focus:ring-2 focus:ring-brand/10"
                   />
                 </div>
 
                 <div>
-                  <FieldLabel>流程步骤</FieldLabel>
+                  <FieldLabel>{t("seedreamBeta.workflow.steps")}</FieldLabel>
                   <div className="grid gap-2 md:grid-cols-5">
                     {WORKFLOW_STEPS.map((step, index) => (
                       <button
@@ -395,7 +581,7 @@ export default function SeedreamBetaPage() {
                       className="inline-flex items-center justify-center gap-2 rounded-2xl bg-brand px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {workflowGenerating === workflowMode ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-                      {workflowGenerating === workflowMode ? "生成中..." : t(workflowStep.buttonKey)}
+                      {workflowGenerating === workflowMode ? t("seedreamBeta.workflow.generating") : t(workflowStep.buttonKey)}
                     </button>
                   </div>
                   <textarea
@@ -405,9 +591,9 @@ export default function SeedreamBetaPage() {
                     className="min-h-[360px] w-full resize-y rounded-2xl border border-surface-border bg-surface-elevated px-4 py-3 font-mono text-sm leading-6 outline-none transition-colors placeholder:text-text-tertiary focus:border-brand/60 focus:ring-2 focus:ring-brand/10"
                   />
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <button type="button" onClick={copyWorkflowOutput} disabled={!workflowOutput.trim()} className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-elevated px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-brand/40 hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"><Copy className="h-3.5 w-3.5" />复制</button>
-                    <button type="button" onClick={sendWorkflowToImage} disabled={!workflowOutput.trim()} className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-elevated px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-brand/40 hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"><ImageIcon className="h-3.5 w-3.5" />填入图片生成</button>
-                    <button type="button" onClick={sendWorkflowToVideo} disabled={!workflowOutput.trim()} className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-elevated px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-brand/40 hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"><Video className="h-3.5 w-3.5" />填入视频生成</button>
+                    <button type="button" onClick={copyWorkflowOutput} disabled={!workflowOutput.trim()} className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-elevated px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-brand/40 hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"><Copy className="h-3.5 w-3.5" />{t("seedreamBeta.workflow.copy")}</button>
+                    <button type="button" onClick={sendWorkflowToImage} disabled={!workflowOutput.trim()} className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-elevated px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-brand/40 hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"><ImageIcon className="h-3.5 w-3.5" />{t("seedreamBeta.workflow.sendToImage")}</button>
+                    <button type="button" onClick={sendWorkflowToVideo} disabled={!workflowOutput.trim()} className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-elevated px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-brand/40 hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"><Video className="h-3.5 w-3.5" />{t("seedreamBeta.workflow.sendToVideo")}</button>
                   </div>
                 </div>
               </div>
@@ -441,6 +627,12 @@ export default function SeedreamBetaPage() {
                   </div>
                   <p className="mt-2 text-xs text-text-tertiary">{t("seedreamBeta.seedreamImageSettingsHint")}</p>
                 </div>
+
+                {selectedImageRefs.length > 0 && (
+                  <div className="rounded-2xl border border-brand/20 bg-brand/5 px-4 py-3 text-xs text-text-secondary">
+                    {t("seedreamBeta.assets.imageRefs", { count: String(selectedImageRefs.length) })}
+                  </div>
+                )}
 
                 <button
                   type="button"
@@ -509,6 +701,12 @@ export default function SeedreamBetaPage() {
                   </div>
                 </div>
 
+                {(selectedImageRefs.length > 0 || selectedVideoRefs.length > 0) && (
+                  <div className="rounded-2xl border border-brand/20 bg-brand/5 px-4 py-3 text-xs text-text-secondary">
+                    {t("seedreamBeta.assets.videoRefs", { imageCount: String(selectedImageRefs.length), videoCount: String(selectedVideoRefs.length) })}
+                  </div>
+                )}
+
                 <button
                   type="button"
                   onClick={submitVideo}
@@ -531,8 +729,8 @@ export default function SeedreamBetaPage() {
             {tab === "workflow" ? (
               <div className="flex h-full min-h-[520px] flex-col gap-4">
                 <div>
-                  <h2 className="text-base font-semibold">创作流程概览</h2>
-                  <p className="mt-1 text-xs text-text-tertiary">前期仅做半自动流水线：每步生成后可手动编辑，再填入图片/视频生成。</p>
+                  <h2 className="text-base font-semibold">{t("seedreamBeta.workflow.overviewTitle")}</h2>
+                  <p className="mt-1 text-xs text-text-tertiary">{t("seedreamBeta.workflow.overviewHint")}</p>
                 </div>
                 <div className="space-y-2">
                   {WORKFLOW_STEPS.map((step) => {
@@ -541,7 +739,7 @@ export default function SeedreamBetaPage() {
                       <button key={step.id} type="button" onClick={() => setWorkflowMode(step.id)} className={cn("w-full rounded-2xl border p-3 text-left transition-colors", workflowMode === step.id ? "border-brand/50 bg-brand/10" : "border-surface-border bg-surface-card hover:border-brand/40")}>
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-sm font-medium text-text-primary">{t(step.titleKey)}</span>
-                          <span className={cn("rounded-full px-2 py-0.5 text-[10px]", value.trim() ? "bg-emerald-500/10 text-emerald-600" : "bg-surface-elevated text-text-tertiary")}>{value.trim() ? "已生成" : "待生成"}</span>
+                          <span className={cn("rounded-full px-2 py-0.5 text-[10px]", value.trim() ? "bg-emerald-500/10 text-emerald-600" : "bg-surface-elevated text-text-tertiary")}>{value.trim() ? t("seedreamBeta.workflow.ready") : t("seedreamBeta.workflow.empty")}</span>
                         </div>
                         {value.trim() && <p className="mt-2 line-clamp-2 text-xs text-text-tertiary">{value}</p>}
                       </button>
@@ -605,6 +803,16 @@ export default function SeedreamBetaPage() {
                                   <Download className="h-3.5 w-3.5" />
                                   {t("seedreamBeta.saveImage")}
                                 </button>
+                                {lastImage?.id === image.id && (
+                                  <button
+                                    type="button"
+                                    onClick={addLatestImageToAssets}
+                                    className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-elevated px-2.5 py-1 text-xs font-medium text-text-secondary transition-colors hover:border-brand/40 hover:text-text-primary"
+                                  >
+                                    <Paperclip className="h-3.5 w-3.5" />
+                                    {t("seedreamBeta.assets.saveToLibrary")}
+                                  </button>
+                                )}
                               </div>
                             )}
                           </div>
@@ -629,6 +837,12 @@ export default function SeedreamBetaPage() {
                 <div className="text-xs text-text-tertiary">#{lastVideo.id} · {lastVideo.status}</div>
                 {lastVideo.error_message && <div className="text-sm text-red-500">{lastVideo.error_message}</div>}
                 <p className="line-clamp-4 text-sm text-text-secondary">{lastVideo.prompt}</p>
+                {lastVideo.video_url && (
+                  <button type="button" onClick={addLatestVideoToAssets} className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-brand/40 hover:text-text-primary">
+                    <Paperclip className="h-3.5 w-3.5" />
+                    {t("seedreamBeta.assets.saveToLibrary")}
+                  </button>
+                )}
               </div>
             ) : (
               <div>
