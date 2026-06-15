@@ -64,6 +64,7 @@ export default function NotebooksPage() {
   const [searchOpen, setSearchOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [viewMode, setViewMode] = useState<NotebookViewMode>("grid");
+  const isGridView = viewMode === "grid";
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
 
@@ -182,11 +183,11 @@ export default function NotebooksPage() {
                   aria-pressed={viewMode === "grid"}
                   onClick={() => setViewMode("grid")}
                   className={cn(
-                    "inline-flex h-7 items-center justify-center rounded-[7px] text-[#4b5563] transition-all duration-200 ease-out",
-                    viewMode === "grid" ? "w-[52px] gap-1 bg-[#e8edf5] px-2 text-[#111827] shadow-[inset_0_0_0_1px_rgba(148,163,184,0.16)]" : "w-8 hover:bg-[#f6f7f9] hover:text-[#111827]"
+                    "inline-flex h-7 w-[52px] items-center justify-center gap-1 rounded-[7px] px-2 text-[#4b5563] transition-colors duration-150 ease-out",
+                    isGridView ? "bg-[#e8edf5] text-[#111827] shadow-[inset_0_0_0_1px_rgba(148,163,184,0.16)]" : "hover:bg-[#f6f7f9] hover:text-[#111827]"
                   )}
                 >
-                  {viewMode === "grid" && <Check className="h-3.5 w-3.5 stroke-[2.4]" />}
+                  <Check className={cn("h-3.5 w-3.5 stroke-[2.4] transition-opacity duration-150", isGridView ? "opacity-100" : "opacity-0")} />
                   <Grid3X3 className="h-4 w-4" />
                 </button>
                 <button
@@ -194,11 +195,11 @@ export default function NotebooksPage() {
                   aria-pressed={viewMode === "list"}
                   onClick={() => setViewMode("list")}
                   className={cn(
-                    "inline-flex h-7 items-center justify-center rounded-[7px] text-[#4b5563] transition-all duration-200 ease-out",
-                    viewMode === "list" ? "w-[52px] gap-1 bg-[#e8edf5] px-2 text-[#111827] shadow-[inset_0_0_0_1px_rgba(148,163,184,0.16)]" : "w-8 hover:bg-[#f6f7f9] hover:text-[#111827]"
+                    "inline-flex h-7 w-[52px] items-center justify-center gap-1 rounded-[7px] px-2 text-[#4b5563] transition-colors duration-150 ease-out",
+                    !isGridView ? "bg-[#e8edf5] text-[#111827] shadow-[inset_0_0_0_1px_rgba(148,163,184,0.16)]" : "hover:bg-[#f6f7f9] hover:text-[#111827]"
                   )}
                 >
-                  {viewMode === "list" && <Check className="h-3.5 w-3.5 stroke-[2.4]" />}
+                  <Check className={cn("h-3.5 w-3.5 stroke-[2.4] transition-opacity duration-150", !isGridView ? "opacity-100" : "opacity-0")} />
                   <List className="h-4 w-4" />
                 </button>
               </div>
@@ -245,8 +246,8 @@ export default function NotebooksPage() {
             )}
           </div>
         ) : (
-          <div>
-            <section>
+          <div className="min-h-[420px] bg-white">
+            <section className="bg-white">
               <div className="mb-5">
                 {trimmedQuery && (
                   <div className="mb-1.5 text-[13px] font-normal text-[#5f6368]">搜索结果（{filtered.length}条）</div>
