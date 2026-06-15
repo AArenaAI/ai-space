@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BookOpen, Check, ChevronDown, Clock, Grid3X3, List, Loader2, MoreHorizontal, Plus, Search } from "lucide-react";
+import { BookOpen, Check, ChevronDown, Clock, Grid3X3, List, Loader2, MoreHorizontal, Plus, Search, X } from "lucide-react";
 import { toast } from "sonner";
 import InputDialog from "@/components/ui/InputDialog";
 import { useI18n } from "@/lib/i18n";
@@ -61,6 +61,8 @@ export default function NotebooksPage() {
   const [notebooks, setNotebooks] = useState<Notebook[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [viewMode, setViewMode] = useState<NotebookViewMode>("grid");
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -91,6 +93,20 @@ export default function NotebooksPage() {
     return notebooksWithDemo.filter((item) => `${item.title} ${item.description}`.toLowerCase().includes(q));
   }, [notebooksWithDemo, query]);
 
+  const trimmedQuery = query.trim();
+  const isSearching = searchOpen || Boolean(trimmedQuery);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    const id = window.setTimeout(() => searchInputRef.current?.focus(), 40);
+    return () => window.clearTimeout(id);
+  }, [searchOpen]);
+
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setQuery("");
+  };
+
   const handleCreate = async (title: string) => {
     const trimmed = title.trim();
     if (!trimmed) return;
@@ -112,15 +128,54 @@ export default function NotebooksPage() {
     <div className="min-h-full bg-white text-slate-950">
       <main className="mx-auto flex w-full max-w-[1180px] flex-col px-8 pb-12 pt-7">
         <header className="mb-8 flex flex-col gap-0">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-center gap-2 text-[14px] font-medium text-slate-600">
-              <button type="button" className="inline-flex h-8 items-center rounded-[8px] border border-[#d9dde5] bg-[#f6f7f9] px-3 text-[#111827] shadow-[0_1px_1px_rgba(15,23,42,0.04)]">全部</button>
-            </div>
+          <div className={cn("flex flex-col gap-4 lg:flex-row lg:items-center", isSearching ? "lg:justify-end" : "lg:justify-between")}>
+            {!isSearching && (
+              <div className="flex items-center gap-2 text-[14px] font-medium text-slate-600">
+                <button type="button" className="inline-flex h-8 items-center rounded-[8px] border border-[#d9dde5] bg-[#f6f7f9] px-3 text-[#111827] shadow-[0_1px_1px_rgba(15,23,42,0.04)]">全部</button>
+              </div>
+            )}
 
-            <div className="flex flex-wrap items-center gap-2">
-              <button type="button" className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-transparent text-[#4b5563] transition hover:border-[#d9dde5] hover:bg-[#f6f7f9] hover:text-[#111827]" aria-label={t("notebook.searchPlaceholder")}>
-                <Search className="h-4 w-4" />
-              </button>
+            <div className={cn("flex flex-wrap items-center gap-2", isSearching && "w-full")}>
+              {isSearching ? (
+                <div className="relative h-10 min-w-0 flex-1 transition-all duration-200 ease-out">
+                  <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#5f6368]" />
+                  <input
+                    ref={searchInputRef}
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="按笔记本标题搜索"
+                    className="h-10 w-full rounded-full border-2 border-[#1a73e8] bg-white pl-11 pr-10 text-[14px] font-normal text-[#202124] outline-none placeholder:text-[#5f6368]"
+                  />
+                  {query && (
+                    <button
+                      type="button"
+                      onClick={() => setQuery("")}
+                      className="absolute right-3 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-[#5f6368] transition hover:bg-[#f1f3f4] hover:text-[#202124]"
+                      aria-label="清空搜索"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setSearchOpen(true)}
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-transparent bg-[#f1f3f4] text-[#3c4043] transition hover:bg-[#e8eaed]"
+                  aria-label={t("notebook.searchPlaceholder")}
+                >
+                  <Search className="h-4 w-4" />
+                </button>
+              )}
+              {isSearching && (
+                <button
+                  type="button"
+                  onClick={closeSearch}
+                  className="h-8 shrink-0 px-2 text-[14px] font-medium text-[#1a73e8] transition hover:text-[#1558b0]"
+                >
+                  取消
+                </button>
+              )}
               <div className="flex h-8 items-center rounded-[9px] border border-[#d9dde5] bg-white p-[2px] shadow-[0_1px_1px_rgba(15,23,42,0.04)]">
                 <button
                   type="button"
@@ -147,18 +202,22 @@ export default function NotebooksPage() {
                   <List className="h-4 w-4" />
                 </button>
               </div>
-              <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-[#d9dde5] bg-white px-3 text-[13px] font-medium text-[#374151] shadow-[0_1px_1px_rgba(15,23,42,0.04)] transition hover:bg-[#f6f7f9]">
-                最近
-                <ChevronDown className="h-3.5 w-3.5 text-[#6b7280]" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setCreateOpen(true)}
-                className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[8px] bg-[#111827] px-3.5 text-[13px] font-medium text-white shadow-[0_1px_2px_rgba(15,23,42,0.12)] transition hover:bg-[#1f2937]"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                {t("notebook.new")}
-              </button>
+              {!isSearching && (
+                <>
+                  <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-[#d9dde5] bg-white px-3 text-[13px] font-medium text-[#374151] shadow-[0_1px_1px_rgba(15,23,42,0.04)] transition hover:bg-[#f6f7f9]">
+                    最近
+                    <ChevronDown className="h-3.5 w-3.5 text-[#6b7280]" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCreateOpen(true)}
+                    className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[8px] bg-[#111827] px-3.5 text-[13px] font-medium text-white shadow-[0_1px_2px_rgba(15,23,42,0.12)] transition hover:bg-[#1f2937]"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    {t("notebook.new")}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </header>
@@ -167,7 +226,7 @@ export default function NotebooksPage() {
           <div className="flex min-h-[360px] items-center justify-center rounded-2xl border border-slate-200 bg-white">
             <Loader2 className="h-5 w-5 animate-spin text-slate-500" />
           </div>
-        ) : filtered.length === 0 ? (
+        ) : filtered.length === 0 && !isSearching ? (
           <div className="flex min-h-[360px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-white px-6 text-center">
             <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-3xl bg-slate-100 text-slate-600">
               <BookOpen className="h-8 w-8" />
@@ -188,24 +247,37 @@ export default function NotebooksPage() {
         ) : (
           <div>
             <section>
-              <div className="mb-5 flex items-center justify-between">
-                <h2 className="text-[24px] font-medium tracking-[-0.025em] text-slate-950">全部</h2>
-                <div className="text-sm text-slate-500">{t("notebook.count").replace("{count}", String(filtered.length))}</div>
+              <div className="mb-5">
+                {trimmedQuery && (
+                  <div className="mb-1.5 text-[13px] font-normal text-[#5f6368]">搜索结果（{filtered.length}条）</div>
+                )}
+                <div className="flex items-center justify-between">
+                  <h2 className="text-[24px] font-medium tracking-[-0.025em] text-slate-950">全部</h2>
+                  {!trimmedQuery && <div className="text-sm text-slate-500">{t("notebook.count").replace("{count}", String(filtered.length))}</div>}
+                </div>
               </div>
               {viewMode === "grid" ? (
                 <div className="grid gap-6 lg:grid-cols-3">
-                  <button
-                    type="button"
-                    onClick={() => setCreateOpen(true)}
-                    className="flex aspect-[1.62] flex-col items-center justify-center rounded-[20px] border border-slate-200 bg-white text-center shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 hover:shadow-md"
-                  >
-                    <span className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600">
-                      <Plus className="h-6 w-6" />
-                    </span>
-                    <span className="text-sm font-medium text-slate-700">{t("notebook.new")}</span>
-                  </button>
+                  {!trimmedQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setCreateOpen(true)}
+                      className="flex aspect-[1.62] flex-col items-center justify-center rounded-[20px] border border-slate-200 bg-white text-center shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 hover:shadow-md"
+                    >
+                      <span className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+                        <Plus className="h-6 w-6" />
+                      </span>
+                      <span className="text-sm font-medium text-slate-700">{t("notebook.new")}</span>
+                    </button>
+                  )}
 
-                  {filtered.map((notebook) => {
+                  {filtered.length === 0 && trimmedQuery ? (
+                    <div className="col-span-full flex min-h-[220px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-white px-6 text-center">
+                      <BookOpen className="mb-4 h-8 w-8 text-slate-400" />
+                      <h3 className="text-base font-medium text-slate-950">{t("notebook.emptySearchTitle")}</h3>
+                      <p className="mt-2 text-sm text-slate-500">{t("notebook.emptySearchDesc")}</p>
+                    </div>
+                  ) : filtered.map((notebook) => {
                     const uploadedCover = readNotebookUploadedCover(notebook.cover_icon);
                     const coverPreset = notebookCoverPreset(notebook.cover_icon);
                     const hasImage = Boolean(uploadedCover);
@@ -254,7 +326,13 @@ export default function NotebooksPage() {
                     <span>角色</span>
                     <span />
                   </div>
-                  {filtered.map((notebook) => (
+                  {filtered.length === 0 && trimmedQuery ? (
+                    <div className="flex min-h-[180px] flex-col items-center justify-center border-b border-[#e5e7eb] px-6 text-center">
+                      <BookOpen className="mb-4 h-8 w-8 text-slate-400" />
+                      <h3 className="text-base font-medium text-slate-950">{t("notebook.emptySearchTitle")}</h3>
+                      <p className="mt-2 text-sm text-slate-500">{t("notebook.emptySearchDesc")}</p>
+                    </div>
+                  ) : filtered.map((notebook) => (
                     <Link
                       key={notebook.id}
                       href={`/notebooks/detail?notebook_id=${notebook.id}`}
