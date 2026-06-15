@@ -932,7 +932,38 @@ function QuizArtifactView({ artifact, t, onExplain }: { artifact: Extract<Notebo
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [hintOpen, setHintOpen] = useState(false);
+  const [retryQueue, setRetryQueue] = useState<number[]>([]);
   const total = artifact.questions.length;
+  const progressStorageKey = `notebook-quiz-progress:${artifact.id}:${total}`;
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const saved = window.localStorage.getItem(progressStorageKey);
+      if (!saved) return;
+      const parsed = JSON.parse(saved) as Record<string, string>;
+      const next: Record<number, string> = {};
+      Object.entries(parsed).forEach(([key, value]) => {
+        const questionIndex = Number(key);
+        const optionIds = artifact.questions[questionIndex]?.options.map((option) => option.id) || [];
+        if (Number.isInteger(questionIndex) && questionIndex >= 0 && questionIndex < total && optionIds.includes(value)) {
+          next[questionIndex] = value;
+        }
+      });
+      setAnswers(next);
+    } catch {
+      setAnswers({});
+    }
+  }, [artifact.questions, progressStorageKey, total]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (Object.keys(answers).length === 0) {
+        window.localStorage.removeItem(progressStorageKey);
+      } else {
+        window.localStorage.setItem(progressStorageKey, JSON.stringify(answers));
+      }
+    } catch {}
+  }, [answers, progressStorageKey]);
   const question = artifact.questions[Math.min(index, Math.max(total - 1, 0))];
   const selected = answers[index] || null;
   const correctId = question?.correct_option_id;
@@ -940,19 +971,83 @@ function QuizArtifactView({ artifact, t, onExplain }: { artifact: Extract<Notebo
   const correctOption = question?.options.find((option) => option.id === correctId);
   const answered = Boolean(selected);
   const isCorrect = selected === correctId;
+  const answeredCount = Object.keys(answers).length;
+  const correctCount = Object.entries(answers).filter(([key, value]) => artifact.questions[Number(key)]?.correct_option_id === value).length;
+  const wrongIndexes = useMemo(() => Object.entries(answers).flatMap(([key, value]) => {
+    const questionIndex = Number(key);
+    return artifact.questions[questionIndex]?.correct_option_id && artifact.questions[questionIndex].correct_option_id !== value ? [questionIndex] : [];
+  }), [answers, artifact.questions]);
+  const wrongCount = wrongIndexes.length;
+  const retryMode = retryQueue.length > 0;
+  useEffect(() => {
+    if (!retryMode) return;
+    if (!retryQueue.includes(index)) {
+      setIndex(retryQueue[0]);
+      setHintOpen(false);
+    }
+  }, [index, retryMode, retryQueue]);
   const truncateText = (value: string) => (value.length > 95 ? `${value.slice(0, 92)}…` : value);
+  const getRetryTarget = (direction: "next" | "previous") => {
+    if (!retryQueue.length) return index;
+    const queuePosition = retryQueue.indexOf(index);
+    if (queuePosition === -1) return retryQueue[0];
+    const nextPosition = direction === "next" ? queuePosition + 1 : queuePosition - 1;
+    return retryQueue[(nextPosition + retryQueue.length) % retryQueue.length];
+  };
   const goTo = (next: number) => {
     if (!total) return;
-    setIndex((next + total) % total);
+    const direction = next > index ? "next" : "previous";
+    setIndex(retryMode ? getRetryTarget(direction) : (next + total) % total);
     setHintOpen(false);
+  };
+  const chooseOption = (optionId: string) => {
+    if (answered) return;
+    const nextAnswers = { ...answers, [index]: optionId };
+    setAnswers(nextAnswers);
+    if (retryMode && optionId === correctId) {
+      setRetryQueue((queue) => queue.filter((questionIndex) => questionIndex !== index));
+    }
+    setHintOpen(false);
+  };
+  const startRetryWrong = () => {
+    if (!wrongIndexes.length) return;
+    setAnswers((prev) => {
+      const next = { ...prev };
+      wrongIndexes.forEach((questionIndex) => delete next[questionIndex]);
+      return next;
+    });
+    setRetryQueue(wrongIndexes);
+    setIndex(wrongIndexes[0]);
+    setHintOpen(false);
+  };
+  const showAllQuestions = () => {
+    setRetryQueue([]);
+    setHintOpen(false);
+  };
+  const resetQuizProgress = () => {
+    setAnswers({});
+    setRetryQueue([]);
+    setHintOpen(false);
+    setIndex(0);
   };
   if (!question) return <div className="rounded-2xl border border-surface-border bg-surface-elevated p-4 text-sm text-text-tertiary">{t("notebook.studio.quizEmpty")}</div>;
   return (
     <div className="flex min-h-[520px] flex-1 flex-col rounded-[28px] bg-surface-card px-3 py-4">
       <div className="mx-auto flex w-full max-w-[560px] flex-1 flex-col">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-surface-border bg-surface-elevated/70 px-4 py-3 text-xs font-semibold text-text-tertiary">
+          <div className="flex flex-wrap items-center gap-2">
+            <span>{retryMode ? t("notebook.studio.quizRetryMode") : t("notebook.studio.quiz")}</span>
+            <span className="text-text-quaternary">·</span>
+            <span>{t("notebook.studio.quizProgress", { answered: String(answeredCount), total: String(total), correct: String(correctCount), wrong: String(wrongCount) })}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={retryMode ? showAllQuestions : startRetryWrong} disabled={!retryMode && !wrongCount} className={cn("rounded-full border px-3 py-1.5 font-semibold transition disabled:cursor-not-allowed disabled:opacity-50", retryMode ? "border-red-500/30 bg-red-500/10 text-red-500" : "border-surface-border text-text-secondary hover:bg-surface-card")}>{retryMode ? t("notebook.studio.quizAllQuestions") : t("notebook.studio.quizRetryWrong")}</button>
+            <button type="button" onClick={resetQuizProgress} disabled={!answeredCount && !retryMode} className="rounded-full border border-surface-border px-3 py-1.5 font-semibold text-text-secondary transition hover:bg-surface-card disabled:cursor-not-allowed disabled:opacity-50">{t("notebook.studio.quizReset")}</button>
+          </div>
+        </div>
         <div className="mb-4 flex items-center justify-between text-xs font-semibold text-text-tertiary">
           <span>{index + 1}/{total}</span>
-          <span>{t("notebook.studio.quiz")}</span>
+          <span>{retryMode ? t("notebook.studio.quizRetryRemaining", { count: String(retryQueue.length) }) : t("notebook.studio.quiz")}</span>
         </div>
         <div className="rounded-[28px] border border-surface-border bg-surface-card p-5 shadow-[0_18px_45px_rgba(15,23,42,0.08)]">
           <h3 className="text-[19px] font-semibold leading-7 tracking-[-0.02em] text-text-primary">{question.question}</h3>
@@ -961,7 +1056,7 @@ function QuizArtifactView({ artifact, t, onExplain }: { artifact: Extract<Notebo
               const optionSelected = selected === option.id;
               const optionCorrect = option.id === correctId;
               return (
-                <button key={option.id} type="button" disabled={answered} onClick={() => { if (!answered) { setAnswers((prev) => ({ ...prev, [index]: option.id })); setHintOpen(false); } }} className={cn("flex w-full flex-col rounded-2xl border px-4 py-3 text-left transition", !answered && "border-surface-border bg-surface-elevated hover:border-brand-border hover:bg-surface-hover", answered && optionCorrect && "border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30", answered && !optionCorrect && "border-surface-border bg-surface-elevated/60 text-text-tertiary")}>
+                <button key={option.id} type="button" disabled={answered} onClick={() => chooseOption(option.id)} className={cn("flex w-full flex-col rounded-2xl border px-4 py-3 text-left transition", !answered && "border-surface-border bg-surface-elevated hover:border-brand-border hover:bg-surface-hover", answered && optionCorrect && "border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30", answered && !optionCorrect && "border-surface-border bg-surface-elevated/60 text-text-tertiary")}>
                   <div className="flex items-start gap-3">
                     <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-bold", answered && optionCorrect ? "border-emerald-500 bg-emerald-500 text-white" : answered && optionSelected && !optionCorrect ? "border-red-500 bg-red-500 text-white" : "border-surface-border bg-surface-card text-text-secondary")}>{option.id}</span>
                     <span className={cn("text-sm leading-6", answered && optionCorrect ? "text-emerald-800 dark:text-emerald-200" : answered && optionSelected && !optionCorrect ? "text-red-800 dark:text-red-200" : "text-text-primary")}>{option.text}</span>
