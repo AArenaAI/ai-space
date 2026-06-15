@@ -9,7 +9,7 @@ import InputDialog from "@/components/ui/InputDialog";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { createNotebook, fetchNotebooks } from "@/lib/notebookApi";
-import { NOTEBOOK_DEMOS } from "@/lib/notebookDemos";
+import { FEATURED_NOTEBOOKS, NOTEBOOK_DEMOS, type FeaturedNotebook } from "@/lib/notebookDemos";
 import { showNotebookError } from "@/lib/notebookErrors";
 import type { Notebook } from "@/lib/notebookTypes";
 
@@ -45,6 +45,78 @@ function readNotebookUploadedCover(coverIcon?: string) {
     }
   }
   return "";
+}
+
+function FeaturedNotebookArt({ type }: { type: FeaturedNotebook["illustration"] }) {
+  if (type === "map") {
+    return (
+      <>
+        <div className="absolute left-8 top-10 h-24 w-32 rotate-[-10deg] rounded-2xl border border-amber-200/35 bg-amber-100/10" />
+        <div className="absolute right-8 top-8 h-20 w-20 rounded-full border border-amber-100/50" />
+        <div className="absolute bottom-8 left-10 h-px w-44 rotate-[-18deg] bg-amber-100/35" />
+        <div className="absolute bottom-12 right-14 h-16 w-16 rounded-full border-4 border-amber-50/20" />
+      </>
+    );
+  }
+  if (type === "meeting") {
+    return (
+      <>
+        <div className="absolute left-8 top-9 h-24 w-36 rounded-3xl border border-sky-100/25 bg-sky-100/10" />
+        <div className="absolute bottom-9 left-12 flex gap-3">
+          <span className="h-10 w-10 rounded-full bg-sky-200/25" />
+          <span className="h-10 w-10 rounded-full bg-indigo-200/25" />
+          <span className="h-10 w-10 rounded-full bg-white/18" />
+        </div>
+        <div className="absolute right-10 top-12 h-28 w-1 rounded-full bg-white/25" />
+      </>
+    );
+  }
+  if (type === "game") {
+    return (
+      <>
+        <div className="absolute right-8 top-8 h-24 w-32 rounded-[28px] border border-fuchsia-200/25 bg-fuchsia-200/10" />
+        <div className="absolute right-14 top-16 grid grid-cols-2 gap-2">
+          <span className="h-4 w-4 rounded-full bg-white/30" />
+          <span className="h-4 w-4 rounded-full bg-violet-200/35" />
+          <span className="h-4 w-4 rounded-full bg-pink-200/35" />
+          <span className="h-4 w-4 rounded-full bg-white/20" />
+        </div>
+        <div className="absolute bottom-10 left-10 h-16 w-16 rotate-45 rounded-2xl border border-white/20" />
+      </>
+    );
+  }
+  if (type === "brand") {
+    return (
+      <>
+        <div className="absolute right-8 top-7 h-28 w-24 rounded-t-full border border-white/20 bg-white/10" />
+        <div className="absolute bottom-10 left-8 h-16 w-40 rounded-2xl border border-rose-100/20 bg-rose-100/10" />
+        <div className="absolute left-14 top-12 text-5xl font-serif text-white/15">D</div>
+        <div className="absolute right-16 bottom-10 text-4xl font-serif text-white/15">P</div>
+      </>
+    );
+  }
+  if (type === "kpop") {
+    return (
+      <>
+        <div className="absolute left-9 top-8 h-24 w-24 rounded-full bg-pink-200/18 blur-sm" />
+        <div className="absolute right-10 top-12 h-20 w-20 rounded-full bg-indigo-200/20 blur-sm" />
+        <div className="absolute bottom-9 left-12 flex h-16 items-end gap-2">
+          <span className="h-7 w-3 rounded-full bg-white/35" />
+          <span className="h-12 w-3 rounded-full bg-pink-200/45" />
+          <span className="h-9 w-3 rounded-full bg-purple-200/45" />
+          <span className="h-14 w-3 rounded-full bg-white/25" />
+        </div>
+      </>
+    );
+  }
+  return (
+    <>
+      <div className="absolute left-8 top-9 h-20 w-20 rounded-[28px] border border-emerald-100/25 bg-emerald-100/10" />
+      <div className="absolute right-10 top-10 h-24 w-24 rounded-full border border-white/20" />
+      <div className="absolute bottom-8 right-12 h-10 w-28 rounded-full bg-teal-100/18" />
+      <div className="absolute bottom-14 left-12 h-1 w-32 rounded-full bg-white/30" />
+    </>
+  );
 }
 
 export default function NotebooksPage() {
@@ -170,42 +242,31 @@ export default function NotebooksPage() {
                 </button>
               </div>
               <div className="grid gap-6 lg:grid-cols-3">
-                {filtered.slice(0, 3).map((notebook) => {
-                  const uploadedCover = readNotebookUploadedCover(notebook.cover_icon);
-                  const coverPreset = notebookCoverPreset(notebook.cover_icon);
-                  return (
-                    <Link
-                      key={`featured-${notebook.id}`}
-                      href={`/notebooks/detail?notebook_id=${notebook.id}`}
-                      className="group relative flex aspect-[1.62] overflow-hidden rounded-[20px] bg-slate-100 p-5 text-slate-950 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-                    >
-                      {uploadedCover ? (
-                        <img src={uploadedCover} alt="" className="absolute inset-0 h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
-                      ) : (
-                        <>
-                          <div className={cn("absolute inset-0", coverPreset.className)} />
-                          <div className="pointer-events-none absolute -right-10 -bottom-16 h-40 w-40 rotate-12 rounded-[36px] bg-fuchsia-400/10" />
-                          <div className="pointer-events-none absolute right-12 bottom-7 h-24 w-32 -rotate-6 rounded-[30px] bg-indigo-300/10" />
-                          <img src={NOTEBOOK_DEFAULT_COVER_LOGO} alt="AI Space" className="pointer-events-none absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 object-contain drop-shadow-sm" />
-                        </>
-                      )}
-                      {uploadedCover && <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/18 to-black/5" />}
-                      <div className="relative z-10 flex min-h-full w-full flex-col">
-                        <div className={cn("flex items-center gap-2 text-[13px] font-medium", uploadedCover ? "text-white/90" : "text-slate-600")}>
-                          <span className={cn("flex h-6 w-6 items-center justify-center rounded-full", uploadedCover ? "bg-white/90 text-slate-900" : "bg-white/80 text-slate-700")}><BookOpen className="h-3.5 w-3.5" /></span>
-                          AI Space
-                        </div>
-                        <div className="mt-auto">
-                          <h3 className={cn("line-clamp-2 text-[20px] font-semibold leading-6 tracking-[-0.02em]", uploadedCover ? "text-white" : "text-slate-950")}>{notebook.title || t("notebook.untitled")}</h3>
-                          <div className={cn("mt-3 flex items-center justify-between text-xs font-medium", uploadedCover ? "text-white/75" : "text-slate-500")}>
-                            <span>{formatDate(notebook.updated_at)}</span>
-                            <span className="inline-flex items-center gap-1.5"><FileText className="h-3.5 w-3.5" />{t("notebook.fileCount").replace("{count}", String(notebook.file_count || 0))}</span>
-                          </div>
+                {FEATURED_NOTEBOOKS.slice(0, 3).map((notebook) => (
+                  <Link
+                    key={`featured-${notebook.id}`}
+                    href={`/notebooks/detail?notebook_id=${notebook.id}`}
+                    className={cn("group relative flex aspect-[1.62] overflow-hidden rounded-[20px] bg-gradient-to-br p-5 text-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md", notebook.palette)}
+                  >
+                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.18),transparent_28%),radial-gradient(circle_at_80%_10%,rgba(255,255,255,0.14),transparent_24%)]" />
+                    <FeaturedNotebookArt type={notebook.illustration} />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/18 to-transparent" />
+                    <div className="relative z-10 flex min-h-full w-full flex-col">
+                      <div className="flex items-center gap-2 text-[13px] font-medium text-white/88">
+                        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/90 text-slate-950"><BookOpen className="h-3.5 w-3.5" /></span>
+                        <span className="truncate">{notebook.publisher}</span>
+                      </div>
+                      <div className="mt-auto">
+                        <div className="mb-2 inline-flex rounded-full bg-white/14 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/85">{notebook.topic}</div>
+                        <h3 className="line-clamp-2 text-[20px] font-semibold leading-6 tracking-[-0.02em] text-white">{notebook.title}</h3>
+                        <div className="mt-3 flex items-center justify-between text-xs font-medium text-white/75">
+                          <span>{formatDate(notebook.updated_at)}</span>
+                          <span className="inline-flex items-center gap-1.5"><FileText className="h-3.5 w-3.5" />{t("notebook.fileCount").replace("{count}", String(notebook.file_count || 0))}</span>
                         </div>
                       </div>
-                    </Link>
-                  );
-                })}
+                    </div>
+                  </Link>
+                ))}
               </div>
             </section>
 

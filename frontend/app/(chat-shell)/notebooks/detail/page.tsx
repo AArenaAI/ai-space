@@ -11,7 +11,7 @@ import { NotebookStudioPanel, type NotebookSourceOpenTarget, type NotebookStudio
 import { NotebookUrlSourceDialog } from "@/components/notebook/NotebookUrlSourceDialog";
 import { MODELS } from "@/hooks/useChat";
 import { addNotebookFile, addNotebookUrlSource, deleteNotebookArtifact, fetchNotebook, fetchNotebookArtifacts, fetchNotebookFileContent, generateNotebookArtifact, reindexNotebookFile, removeNotebookFile, suggestNotebookReportFormats, updateNotebook, updateNotebookArtifact, updateNotebookFile, type NotebookReportFormatSuggestion } from "@/lib/notebookApi";
-import { NOTEBOOK_DEMOS } from "@/lib/notebookDemos";
+import { READONLY_NOTEBOOKS } from "@/lib/notebookDemos";
 import { normalizeNotebookError, showNotebookError, uploadNotebookSourceFile } from "@/lib/notebookErrors";
 import type { Notebook, NotebookArtifact as PersistedNotebookArtifact, NotebookFile, NotebookFileContent } from "@/lib/notebookTypes";
 import { useI18n, type LanguageCode } from "@/lib/i18n";
@@ -756,9 +756,9 @@ function NotebookDetailContent() {
   const { t, language } = useI18n();
   const searchParams = useSearchParams();
   const notebookId = Number(searchParams.get("notebook_id") || searchParams.get("id"));
-  const isDemoNotebook = notebookId < 0;
-  const demoNotebook = NOTEBOOK_DEMOS.find((item) => item.id === notebookId) || null;
-  const writableNotebookId = isDemoNotebook ? 0 : notebookId;
+  const isReadonlyNotebook = notebookId < 0;
+  const readonlyNotebook = READONLY_NOTEBOOKS.find((item) => item.id === notebookId) || null;
+  const writableNotebookId = isReadonlyNotebook ? 0 : notebookId;
   const conversationId = searchParams.get("conversation_id") ? Number(searchParams.get("conversation_id")) : undefined;
   const [notebook, setNotebook] = useState<Notebook | null>(null);
   const [files, setFiles] = useState<NotebookFile[]>([]);
@@ -810,10 +810,10 @@ function NotebookDetailContent() {
 
   const load = async () => {
     if (!notebookId) { setLoading(false); return; }
-    if (isDemoNotebook) {
+    if (isReadonlyNotebook) {
       setLoading(true);
-      if (demoNotebook) {
-        setNotebook(demoNotebook);
+      if (readonlyNotebook) {
+        setNotebook(readonlyNotebook);
         setFiles([]);
         setSelectedFileIds([]);
         setStudioArtifacts([]);
@@ -1570,9 +1570,9 @@ function NotebookDetailContent() {
               <span>{pageError}</span>
             </div>
           )}
-          {isDemoNotebook && (
+          {isReadonlyNotebook && (
             <div className="mb-3 rounded-2xl border border-brand/20 bg-brand-muted/60 px-3 py-2.5 text-xs leading-5 text-text-secondary">
-              Demo 笔记本为只读示例。要上传来源或生成 Studio 内容，请新建自己的笔记本。
+              精选/Demo 笔记本为只读示例。要上传来源或生成 Studio 内容，请新建自己的笔记本。
             </div>
           )}
 
