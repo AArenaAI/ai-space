@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, BookOpen, FileText, Globe, Loader2, MoreVertical, Plus, Search, Zap, AlertCircle, CheckCircle2, Clock3, Check, ImageIcon, Upload, Trash2, Pencil, RotateCcw } from "lucide-react";
+import { ArrowLeft, FileText, Globe, Loader2, MoreVertical, Plus, Search, Zap, AlertCircle, CheckCircle2, Clock3, Check, ImageIcon, Upload, Trash2, Pencil, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import ChatInterface from "@/components/chat/ChatInterface";
 import { NotebookSourcePreviewDrawer } from "@/components/notebook/NotebookSourcePreviewDrawer";
@@ -1532,10 +1532,13 @@ function NotebookDetailContent() {
           <Link href="/notebooks" className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-text-tertiary transition hover:text-text-primary">
             <ArrowLeft className="h-3.5 w-3.5" />{t("notebook.back")}
           </Link>
-          <div className="flex items-start gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-brand-muted text-brand"><BookOpen className="h-5 w-5" /></div>
-            <div className="min-w-0 flex-1">
-              <button onClick={handleRename} disabled={!writableNotebookId} className="block max-w-full truncate text-left text-lg font-semibold text-text-primary hover:text-brand disabled:cursor-default disabled:hover:text-text-primary">{notebook?.title || t("notebook.untitled")}</button>
+          <div className="space-y-3">
+            <div className="flex items-center gap-2.5">
+              <img src={NOTEBOOK_DEFAULT_COVER_LOGO} alt="AI Space" className="h-[26px] w-[26px] shrink-0 object-contain" />
+              <span className="text-[22px] font-semibold leading-none tracking-[-0.03em] text-[#111827] dark:text-text-primary">Notebook</span>
+            </div>
+            <div className="min-w-0">
+              <button onClick={handleRename} disabled={!writableNotebookId} className="block max-w-full truncate text-left text-[15px] font-medium leading-5 text-text-primary hover:text-brand disabled:cursor-default disabled:hover:text-text-primary">{notebook?.title || t("notebook.untitled")}</button>
               <p className="mt-1 text-xs text-text-tertiary">{t("notebook.readyCount").replace("{ready}", String(readyCount)).replace("{total}", String(files.length))}</p>
             </div>
           </div>

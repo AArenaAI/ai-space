@@ -405,6 +405,10 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   const router = useRouter();
   const isWorkRoute = isPathInGroup(pathname, WORK_PAGE_PATHS);
   const isCreativeRoute = isPathInGroup(pathname, CREATIVE_PAGE_PATHS);
+  const navigateToNotebooks = useCallback(() => {
+    setCollapsed(true);
+    router.push("/notebooks");
+  }, [router]);
 
   useEffect(() => {
     if (isNotebookDetailPath(pathname)) {
@@ -1223,6 +1227,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
               </Link>
               <Link
                 href="/notebooks"
+                onClick={() => setCollapsed(true)}
                 onMouseEnter={showSidebarTooltip(t("sidebar.nav.notebook"))}
                 onMouseLeave={hideSidebarTooltip}
                 className={cn(
@@ -1337,11 +1342,11 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                 <div
                   role="button"
                   tabIndex={0}
-                  onClick={() => router.push("/notebooks")}
+                  onClick={navigateToNotebooks}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      router.push("/notebooks");
+                      navigateToNotebooks();
                     }
                   }}
                   className={cn(
