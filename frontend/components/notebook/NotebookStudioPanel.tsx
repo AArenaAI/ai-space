@@ -482,10 +482,47 @@ function FlashcardsArtifactView({ artifact, t, onExplain }: { artifact: Extract<
   const [slideDirection, setSlideDirection] = useState<"left" | "right" | null>(null);
   const [reviewFeedback, setReviewFeedback] = useState<"wrong" | "right" | null>(null);
   const total = artifact.cards.length;
+  const progressStorageKey = `notebook-flashcard-progress:${artifact.id}:${total}`;
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const saved = window.localStorage.getItem(progressStorageKey);
+      if (!saved) return;
+      const parsed = JSON.parse(saved) as Record<string, boolean | null>;
+      const next: Record<number, boolean | null> = {};
+      Object.entries(parsed).forEach(([key, value]) => {
+        const cardIndex = Number(key);
+        if (Number.isInteger(cardIndex) && cardIndex >= 0 && cardIndex < total && (value === true || value === false)) {
+          next[cardIndex] = value;
+        }
+      });
+      setKnown(next);
+    } catch {
+      setKnown({});
+    }
+  }, [progressStorageKey, total]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (Object.keys(known).length === 0) {
+        window.localStorage.removeItem(progressStorageKey);
+      } else {
+        window.localStorage.setItem(progressStorageKey, JSON.stringify(known));
+      }
+    } catch {}
+  }, [known, progressStorageKey]);
   const rawCard = artifact.cards[Math.min(index, Math.max(total - 1, 0))];
   const card = rawCard ? { ...rawCard, front: cleanFlashcardDisplayText(rawCard.front), back: cleanFlashcardDisplayText(rawCard.back), source: "" } : undefined;
   const wrongCount = Object.values(known).filter((value) => value === false).length;
   const rightCount = Object.values(known).filter((value) => value === true).length;
+  const reviewedCount = wrongCount + rightCount;
+  const resetProgress = () => {
+    setKnown({});
+    setAnswerVisible(false);
+    setReviewFeedback(null);
+    setSlideDirection(null);
+    setIndex(0);
+  };
   const go = (next: number, direction: "left" | "right" = next > index ? "left" : "right") => {
     if (!total) return;
     setReviewFeedback(null);
@@ -519,6 +556,12 @@ function FlashcardsArtifactView({ artifact, t, onExplain }: { artifact: Extract<
         .notebook-flashcard-face { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
         .notebook-flashcard-back { transform: rotateY(180deg); }
       `}</style>
+      <div className="flex w-full max-w-[480px] items-center justify-between gap-3 rounded-2xl border border-surface-border bg-surface-card/90 px-4 py-3 text-xs text-text-secondary shadow-sm">
+        <span>{t("notebook.studio.flashcardProgress", { reviewed: String(reviewedCount), total: String(total), known: String(rightCount), review: String(wrongCount) })}</span>
+        <button type="button" onClick={resetProgress} disabled={!reviewedCount || Boolean(reviewFeedback)} className="rounded-full border border-surface-border px-3 py-1.5 font-semibold text-text-secondary transition hover:bg-surface-elevated disabled:cursor-not-allowed disabled:opacity-50">
+          {t("notebook.studio.resetFlashcards")}
+        </button>
+      </div>
       <div className="w-full max-w-[480px] rounded-[34px] border border-surface-border bg-surface-elevated/80 p-3 shadow-sm">
         <div
           key={index}

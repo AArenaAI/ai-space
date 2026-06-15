@@ -305,6 +305,8 @@ const translations: Record<string, string> = {
   "notebook.studio.hideAnswer": "收起答案",
   "notebook.studio.known": "懂了",
   "notebook.studio.unknown": "再练",
+  "notebook.studio.flashcardProgress": "已复习 {reviewed}/{total} · 懂了 {known} · 再练 {review}",
+  "notebook.studio.resetFlashcards": "重置",
   "notebook.studio.explainFlashcard": "解释",
   "notebook.studio.flashcardsEmpty": "暂无可复习的闪卡",
   "notebook.studio.flashcardExplainSent": "已发送到中间聊天",
