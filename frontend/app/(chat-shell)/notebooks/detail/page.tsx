@@ -11,7 +11,7 @@ import { NotebookStudioPanel, type NotebookSourceOpenTarget, type NotebookStudio
 import { NotebookUrlSourceDialog } from "@/components/notebook/NotebookUrlSourceDialog";
 import { MODELS } from "@/hooks/useChat";
 import { addNotebookFile, addNotebookUrlSource, deleteNotebookArtifact, fetchNotebook, fetchNotebookArtifacts, fetchNotebookFileContent, generateNotebookArtifact, reindexNotebookFile, removeNotebookFile, suggestNotebookReportFormats, updateNotebook, updateNotebookArtifact, updateNotebookFile, type NotebookReportFormatSuggestion } from "@/lib/notebookApi";
-import { READONLY_NOTEBOOKS } from "@/lib/notebookDemos";
+import { READONLY_NOTEBOOKS, readonlyNotebookFileContent, readonlyNotebookFiles } from "@/lib/notebookDemos";
 import { normalizeNotebookError, showNotebookError, uploadNotebookSourceFile } from "@/lib/notebookErrors";
 import type { Notebook, NotebookArtifact as PersistedNotebookArtifact, NotebookFile, NotebookFileContent } from "@/lib/notebookTypes";
 import { useI18n, type LanguageCode } from "@/lib/i18n";
@@ -813,9 +813,10 @@ function NotebookDetailContent() {
     if (isReadonlyNotebook) {
       setLoading(true);
       if (readonlyNotebook) {
+        const readonlyFiles = readonlyNotebookFiles(readonlyNotebook);
         setNotebook(readonlyNotebook);
-        setFiles([]);
-        setSelectedFileIds([]);
+        setFiles(readonlyFiles);
+        setSelectedFileIds(readonlyFiles.map((file) => file.file_id));
         setStudioArtifacts([]);
         setActiveStudioArtifactId(null);
         setPageError(null);
@@ -1065,6 +1066,14 @@ function NotebookDetailContent() {
   };
 
   const openPreview = async (file: NotebookFile, target?: NotebookSourceOpenTarget) => {
+    if (isReadonlyNotebook && readonlyNotebook) {
+      setPreviewSource(file);
+      setPreviewTarget(target || null);
+      setPreviewData(readonlyNotebookFileContent(readonlyNotebook, file.file_id));
+      setPreviewError(null);
+      setPreviewLoading(false);
+      return;
+    }
     if (!writableNotebookId) return;
     setPreviewSource(file);
     setPreviewTarget(target || null);

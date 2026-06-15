@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, CheckCircle2, FileText, Loader2, Search, X } from "lucide-react";
+import { AlertCircle, CheckCircle2, ExternalLink, FileText, Loader2, Search, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import type { NotebookFile, NotebookFileContent } from "@/lib/notebookTypes";
 import type { NotebookSourceOpenTarget } from "@/components/notebook/NotebookStudioPanel";
@@ -58,6 +58,7 @@ export function NotebookSourcePreviewDrawer({ open, source, data, loading, error
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const file = data?.file || source?.file || null;
   const content = data?.content || "";
+  const sourceUrl = content.match(/https?:\/\/[^\s]+/)?.[0] || "";
 
   useEffect(() => {
     if (!open) return;
@@ -118,6 +119,12 @@ export function NotebookSourcePreviewDrawer({ open, source, data, loading, error
               {file?.page_count ? <><span>·</span><span>{t("notebook.previewPages", { count: String(file.page_count) })}</span></> : null}
               {file?.token_count ? <><span>·</span><span>{t("notebook.previewTokens", { count: String(file.token_count) })}</span></> : null}
             </div>
+            {sourceUrl ? (
+              <a href={sourceUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex max-w-full items-center gap-1.5 truncate rounded-full border border-border bg-surface-muted px-3 py-1.5 text-xs font-medium text-brand transition hover:bg-surface-hover">
+                <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">Open original source</span>
+              </a>
+            ) : null}
           </div>
           <button onClick={onClose} className="rounded-full p-2 text-text-secondary transition hover:bg-surface-muted hover:text-text-primary" aria-label={t("common.close") || "Close"}>
             <X className="h-5 w-5" />
