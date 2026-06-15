@@ -246,47 +246,26 @@ export default function NotebooksPage() {
                   })}
                 </div>
               ) : (
-                <div className="overflow-hidden rounded-[10px] border border-[#e2e5ea] bg-white shadow-[0_1px_1px_rgba(15,23,42,0.03)]">
-                  <div className="grid grid-cols-[minmax(360px,1fr)_120px_168px_96px_36px] border-b border-[#e6e8ee] bg-[#fbfbfc] px-4 py-2.5 text-[12px] font-medium leading-5 text-[#6b7280]">
+                <div className="bg-white">
+                  <div className="grid grid-cols-[minmax(520px,1fr)_140px_190px_110px_40px] border-b border-[#e5e7eb] px-0 pb-3 text-[14px] font-medium leading-5 text-[#6b7280]">
                     <span>标题</span>
                     <span>来源</span>
                     <span>创建日期</span>
                     <span>角色</span>
                     <span />
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setCreateOpen(true)}
-                    className="grid min-h-[48px] w-full grid-cols-[minmax(360px,1fr)_120px_168px_96px_36px] items-center border-b border-[#eef0f3] px-4 py-2.5 text-left transition hover:bg-[#f7f8fa]"
-                  >
-                    <span className="flex min-w-0 items-center gap-2.5">
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] bg-[#eef2ff] text-[#4f46e5]">
-                        <Plus className="h-4 w-4" />
-                      </span>
-                      <span className="text-[13px] font-medium leading-5 text-[#111827]">{t("notebook.new")}</span>
-                    </span>
-                    <span className="text-[13px] leading-5 text-[#6b7280]">—</span>
-                    <span className="text-[13px] leading-5 text-[#6b7280]">—</span>
-                    <span className="text-[13px] leading-5 text-[#4b5563]">Owner</span>
-                    <span />
-                  </button>
                   {filtered.map((notebook) => (
                     <Link
                       key={notebook.id}
                       href={`/notebooks/detail?notebook_id=${notebook.id}`}
-                      className="grid min-h-[48px] grid-cols-[minmax(360px,1fr)_120px_168px_96px_36px] items-center border-b border-[#eef0f3] px-4 py-2.5 last:border-b-0 transition hover:bg-[#f7f8fa]"
+                      className="grid min-h-[58px] grid-cols-[minmax(520px,1fr)_140px_190px_110px_40px] items-center border-b border-[#e5e7eb] px-0 py-3.5 transition hover:bg-[#f9fafb]"
                     >
-                      <span className="flex min-w-0 items-center gap-2.5">
-                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] bg-[#fff4e6] text-[#d97706]">
-                          <BookOpen className="h-4 w-4" />
-                        </span>
-                        <span className="min-w-0 text-[13px] font-medium leading-5 text-[#111827]">{notebook.title || t("notebook.untitled")}</span>
-                      </span>
-                      <span className="text-[13px] leading-5 text-[#4b5563]">{t("notebook.fileCount").replace("{count}", String(notebook.file_count || 0))}</span>
-                      <span className="text-[13px] leading-5 text-[#4b5563]">{formatFullDate(notebook.created_at || notebook.updated_at)}</span>
-                      <span className="text-[13px] leading-5 text-[#4b5563]">Owner</span>
-                      <span className="flex justify-end text-[#9ca3af]">
-                        <MoreHorizontal className="h-4 w-4" />
+                      <span className="min-w-0 pr-8 text-[14px] font-normal leading-6 text-[#111827]">{notebook.title || t("notebook.untitled")}</span>
+                      <span className="text-[14px] font-normal leading-6 text-[#4b5563]">{t("notebook.fileCount").replace("{count}", String(notebook.file_count || 0))}</span>
+                      <span className="text-[14px] font-normal leading-6 text-[#4b5563]">{formatFullDate(notebook.created_at || notebook.updated_at)}</span>
+                      <span className="text-[14px] font-normal leading-6 text-[#4b5563]">Owner</span>
+                      <span className="flex justify-end text-[#6b7280]">
+                        <MoreHorizontal className="h-5 w-5" />
                       </span>
                     </Link>
                   ))}
