@@ -3,14 +3,14 @@
 import { Suspense, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, BookOpen, FileText, Globe, Loader2, MoreVertical, Plus, Search, Zap, AlertCircle, CheckCircle2, Clock3, Check, ImageIcon, Upload, Trash2, Pencil } from "lucide-react";
+import { ArrowLeft, BookOpen, FileText, Globe, Loader2, MoreVertical, Plus, Search, Zap, AlertCircle, CheckCircle2, Clock3, Check, ImageIcon, Upload, Trash2, Pencil, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import ChatInterface from "@/components/chat/ChatInterface";
 import { NotebookSourcePreviewDrawer } from "@/components/notebook/NotebookSourcePreviewDrawer";
-import { NotebookStudioPanel, type NotebookSourceOpenTarget, type NotebookStudioActionId, type NotebookStudioArtifact, type NotebookStudioFlashcard, type NotebookStudioQuizQuestion, type NotebookStudioMindmapEdge, type NotebookStudioMindmapNode, type NotebookStudioReportSection, type NotebookStudioReportTable, type NotebookStudioSource, type NotebookStudioTableRow, type NotebookStudioTextSection } from "@/components/notebook/NotebookStudioPanel";
+import { NotebookStudioPanel, type NotebookSourceOpenTarget, type NotebookStudioActionId, type NotebookStudioArtifact, type NotebookStudioCitation, type NotebookStudioFlashcard, type NotebookStudioQuizQuestion, type NotebookStudioMindmapEdge, type NotebookStudioMindmapNode, type NotebookStudioReportSection, type NotebookStudioReportTable, type NotebookStudioSource, type NotebookStudioTableRow, type NotebookStudioTextSection } from "@/components/notebook/NotebookStudioPanel";
 import { NotebookUrlSourceDialog } from "@/components/notebook/NotebookUrlSourceDialog";
 import { MODELS } from "@/hooks/useChat";
-import { addNotebookFile, addNotebookUrlSource, deleteNotebookArtifact, fetchNotebook, fetchNotebookArtifacts, fetchNotebookFileContent, generateNotebookArtifact, removeNotebookFile, suggestNotebookReportFormats, updateNotebook, updateNotebookArtifact, updateNotebookFile, type NotebookReportFormatSuggestion } from "@/lib/notebookApi";
+import { addNotebookFile, addNotebookUrlSource, deleteNotebookArtifact, fetchNotebook, fetchNotebookArtifacts, fetchNotebookFileContent, generateNotebookArtifact, reindexNotebookFile, removeNotebookFile, suggestNotebookReportFormats, updateNotebook, updateNotebookArtifact, updateNotebookFile, type NotebookReportFormatSuggestion } from "@/lib/notebookApi";
 import { normalizeNotebookError, showNotebookError, uploadNotebookSourceFile } from "@/lib/notebookErrors";
 import type { Notebook, NotebookArtifact as PersistedNotebookArtifact, NotebookFile, NotebookFileContent } from "@/lib/notebookTypes";
 import { useI18n, type LanguageCode } from "@/lib/i18n";
@@ -157,6 +157,16 @@ function statusDetail(file: NotebookFile, t: Translate) {
   return null;
 }
 
+function canRetryNotebookIndex(file: NotebookFile) {
+  const parse = file.file.parse_status;
+  const embed = file.file.embedding_status;
+  return parse === "done" && (embed === "error" || embed === "skipped");
+}
+
+function retryNotebookIndexLabel(file: NotebookFile, t: Translate) {
+  return file.file.embedding_status === "skipped" ? t("notebook.startIndexing") : t("notebook.retryIndexing");
+}
+
 function normalizeFlashcardArtifactTitle(title: string) {
   const trimmed = title.trim();
   if (trimmed === "摘要") return "闪卡";
@@ -223,16 +233,50 @@ function safeFilename(value: string) {
   return (value || "notebook-output").replace(/[\\/:*?\"<>|]+/g, "-").replace(/\s+/g, " ").trim().slice(0, 80) || "notebook-output";
 }
 
+function escapeMarkdownTableCell(value: string) {
+  return String(value || "").replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+}
+
+function citationMarker(citation: NotebookStudioCitation) {
+  return `[${citation.source_index || 1}]`;
+}
+
+function citationToExportText(citation: NotebookStudioCitation) {
+  const parts = [citationMarker(citation), `file:${citation.file_id}`];
+  if (citation.page) parts.push(`page:${citation.page}`);
+  if (citation.chunk_index !== undefined && citation.chunk_index !== null) parts.push(`chunk:${citation.chunk_index}`);
+  if (citation.quote) parts.push(`quote:${citation.quote}`);
+  return parts.join(" ");
+}
+
+function citationsToExportText(citations?: NotebookStudioCitation[]) {
+  if (!citations?.length) return "";
+  return citations.map(citationToExportText).join("; ");
+}
+
+function appendCitationBlock(lines: string[], citations?: NotebookStudioCitation[]) {
+  if (!citations?.length) return;
+  lines.push("", "**引用来源**");
+  citations.forEach((citation) => {
+    const meta = [`file:${citation.file_id}`];
+    if (citation.page) meta.push(`page:${citation.page}`);
+    if (citation.chunk_index !== undefined && citation.chunk_index !== null) meta.push(`chunk:${citation.chunk_index}`);
+    lines.push(`- ${citationMarker(citation)} ${meta.join(" · ")}${citation.quote ? ` — ${citation.quote}` : ""}`);
+  });
+}
+
+function tableArtifactToMarkdown(artifact: Extract<NotebookStudioArtifact, { type: "table" }>) {
+  const lines = [`# ${artifact.title}`, "", artifact.subtitle, "", "| 功能模块 / 来源 | 具体能力 / 内容摘要 | 状态 | 核心技术 / 处理方式 | 业务价值 | 来源 | 结构化引用 |", "| --- | --- | --- | --- | --- | --- | --- |"];
+  artifact.rows.forEach((row) => {
+    lines.push(`| ${escapeMarkdownTableCell(row.module)} | ${escapeMarkdownTableCell(row.capability)} | ${escapeMarkdownTableCell(row.status)} | ${escapeMarkdownTableCell(row.implementation)} | ${escapeMarkdownTableCell(row.value)} | ${escapeMarkdownTableCell(row.source)} | ${escapeMarkdownTableCell(citationsToExportText(row.citations))} |`);
+  });
+  return lines.join("\n").trim() + "\n";
+}
+
 function artifactToMarkdown(artifact: NotebookStudioArtifact) {
+  if (artifact.type === "table") return tableArtifactToMarkdown(artifact);
   const lines = [`# ${artifact.title}`, "", artifact.subtitle, ""].filter((line) => line !== undefined);
   switch (artifact.type) {
-    case "table":
-      lines.push("| 功能模块 / 来源 | 具体能力 / 内容摘要 | 状态 | 核心技术 / 处理方式 | 业务价值 | 来源 |");
-      lines.push("| --- | --- | --- | --- | --- | --- |");
-      artifact.rows.forEach((row) => {
-        lines.push(`| ${row.module} | ${row.capability} | ${row.status} | ${row.implementation} | ${row.value} | ${row.source} |`);
-      });
-      break;
     case "mindmap":
       lines.push("## 节点", "");
       artifact.nodes.forEach((node) => {
@@ -257,17 +301,21 @@ function artifactToMarkdown(artifact: NotebookStudioArtifact) {
         lines.push("", `正确答案：${question.correct_option_id}`, question.explanation, "");
       });
       break;
-    case "report":
-      lines.push(`_Format: ${artifact.formatTitle}_`, "", "## Executive Summary", "", artifact.executiveSummary, "");
-      artifact.sections.forEach((section) => {
-        lines.push(`## ${section.number ? `${section.number}. ` : ""}${section.heading}`);
+    case "report": {
+      const appendReportSection = (section: NotebookStudioReportSection, depth = 2) => {
+        const prefix = "#".repeat(Math.min(Math.max(depth, 2), 4));
+        lines.push(`${prefix} ${section.number ? `${section.number}. ` : ""}${section.heading}`);
         if (section.body) lines.push("", section.body);
         if (section.bullets?.length) {
           lines.push("");
           section.bullets.forEach((bullet) => lines.push(`- ${bullet}`));
         }
+        appendCitationBlock(lines, section.citations);
         lines.push("");
-      });
+        section.subsections?.forEach((subsection) => appendReportSection(subsection, depth + 1));
+      };
+      lines.push(`_Format: ${artifact.formatTitle}_`, "", "## Executive Summary", "", artifact.executiveSummary, "");
+      artifact.sections.forEach((section) => appendReportSection(section));
       artifact.tables.forEach((table) => {
         lines.push(`## ${table.title}`, "");
         if (table.headers.length) {
@@ -278,6 +326,7 @@ function artifactToMarkdown(artifact: NotebookStudioArtifact) {
         }
       });
       break;
+    }
     case "summary":
     case "faq":
     case "briefing":
@@ -300,12 +349,40 @@ function artifactToMarkdown(artifact: NotebookStudioArtifact) {
   return lines.join("\n").trim() + "\n";
 }
 
+function regenerationRequestForArtifact(artifact: NotebookStudioArtifact): { type: string; visualType: NotebookStudioActionId; options?: { orientation?: string; style?: string; detail_level?: string; prompt?: string } } | null {
+  switch (artifact.type) {
+    case "table":
+      return { type: "table", visualType: "table" };
+    case "mindmap":
+      return { type: "mindmap", visualType: "mindmap" };
+    case "flashcards":
+      return { type: "flashcards", visualType: "flashcards" };
+    case "quiz":
+      return { type: "quiz", visualType: "quiz" };
+    case "report":
+      return { type: `report:${artifact.formatId || "briefing-document"}`, visualType: "report" };
+    case "infographic":
+      return { type: "infographic", visualType: "infographic", options: { orientation: artifact.orientation, style: artifact.style, detail_level: artifact.detail_level, prompt: artifact.prompt } };
+    case "summary":
+    case "faq":
+    case "briefing":
+      return { type: artifact.type, visualType: "summary" };
+    default:
+      return null;
+  }
+}
+
+function artifactSourceIdsForRegeneration(artifact: NotebookStudioArtifact, files: NotebookFile[]) {
+  if (Array.isArray(artifact.sourceFileIds) && artifact.sourceFileIds.length > 0) return artifact.sourceFileIds;
+  return files.slice(0, Math.max(0, artifact.sourceCount || 0)).map((file) => file.file_id);
+}
+
 function artifactToCsv(artifact: NotebookStudioArtifact) {
   if (artifact.type !== "table") return artifactToMarkdown(artifact);
   const escape = (value: string) => `"${String(value || "").replace(/"/g, '""')}"`;
   const rows = [
-    ["功能模块 / 来源", "具体能力 / 内容摘要", "状态", "核心技术 / 处理方式", "业务价值", "来源"],
-    ...artifact.rows.map((row) => [row.module, row.capability, row.status, row.implementation, row.value, row.source]),
+    ["功能模块 / 来源", "具体能力 / 内容摘要", "状态", "核心技术 / 处理方式", "业务价值", "来源", "结构化引用"],
+    ...artifact.rows.map((row) => [row.module, row.capability, row.status, row.implementation, row.value, row.source, citationsToExportText(row.citations)]),
   ];
   return rows.map((row) => row.map(escape).join(",")).join("\n") + "\n";
 }
@@ -320,6 +397,56 @@ function downloadTextFile(filename: string, content: string, type: string) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+function escapeHtml(value: string) {
+  return String(value || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function reportArtifactToPrintHtml(artifact: Extract<NotebookStudioArtifact, { type: "report" }>) {
+  const sections = artifact.sections.map((section) => `
+    <section>
+      <h2>${escapeHtml(section.number ? `${section.number}. ${section.heading}` : section.heading)}</h2>
+      ${section.body ? `<p>${escapeHtml(section.body).replace(/\n/g, "<br>")}</p>` : ""}
+      ${section.bullets?.length ? `<ul>${section.bullets.map((bullet) => `<li>${escapeHtml(bullet)}</li>`).join("")}</ul>` : ""}
+    </section>
+  `).join("");
+  const tables = artifact.tables.map((table) => `
+    <section>
+      <h2>${escapeHtml(table.title)}</h2>
+      <table>
+        <thead><tr>${table.headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
+        <tbody>${table.rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody>
+      </table>
+    </section>
+  `).join("");
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(artifact.title)}</title>
+  <style>
+    @page { margin: 18mm; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #111827; line-height: 1.65; }
+    h1 { font-size: 28px; margin: 0 0 8px; }
+    .subtitle { color: #6b7280; margin-bottom: 24px; }
+    .summary { border-left: 4px solid #6366f1; padding: 12px 16px; background: #f5f7ff; margin: 20px 0 28px; }
+    h2 { font-size: 18px; margin: 26px 0 10px; page-break-after: avoid; }
+    p { margin: 0 0 12px; }
+    ul { margin: 8px 0 14px 22px; padding: 0; }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0 24px; font-size: 12px; }
+    th, td { border: 1px solid #d1d5db; padding: 8px 10px; vertical-align: top; }
+    th { background: #f3f4f6; text-align: left; }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(artifact.title)}</h1>
+  <div class="subtitle">${escapeHtml(artifact.subtitle)} · ${escapeHtml(artifact.formatTitle || "Report")}</div>
+  <div class="summary"><strong>Executive Summary</strong><br>${escapeHtml(artifact.executiveSummary).replace(/\n/g, "<br>")}</div>
+  ${sections}
+  ${tables}
+</body>
+</html>`;
 }
 
 const FIXED_REPORT_FORMATS: NotebookReportFormatSuggestion[] = [
@@ -661,6 +788,7 @@ function NotebookDetailContent() {
   const [sourceToRename, setSourceToRename] = useState<NotebookFile | null>(null);
   const [sourceRenameValue, setSourceRenameValue] = useState("");
   const [renamingSource, setRenamingSource] = useState(false);
+  const [reindexingSourceFileId, setReindexingSourceFileId] = useState<number | null>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const selectionInitializedRef = useRef(false);
@@ -991,6 +1119,21 @@ function NotebookDetailContent() {
     }
   };
 
+  const retrySourceIndexing = async (file: NotebookFile) => {
+    if (!notebookId || !canRetryNotebookIndex(file)) return;
+    setReindexingSourceFileId(file.file_id);
+    try {
+      const updated = await reindexNotebookFile(notebookId, file.file_id);
+      setFiles((prev) => prev.map((item) => item.file_id === updated.file_id ? updated : item));
+      setPreviewSource((current) => current?.file_id === updated.file_id ? updated : current);
+      toast.success(t("notebook.reindexQueued"));
+    } catch (error) {
+      showNotebookError(error, t("notebook.reindexFailed"));
+    } finally {
+      setReindexingSourceFileId(null);
+    }
+  };
+
   const buildStudioTableRows = (): NotebookStudioTableRow[] => {
     const selected = files.filter((file) => selectedFileIds.includes(file.file_id));
     const scopedFiles = selected.length > 0 ? selected : files;
@@ -1124,14 +1267,14 @@ function NotebookDetailContent() {
     }
   };
 
-  const generateStudioArtifactByType = async (type: string, visualType: NotebookStudioActionId, options?: { orientation?: string; style?: string; detail_level?: string; prompt?: string }) => {
+  const generateStudioArtifactByType = async (type: string, visualType: NotebookStudioActionId, options?: { orientation?: string; style?: string; detail_level?: string; prompt?: string; file_ids?: number[]; successMessage?: string }) => {
     if (!notebookId) return;
     setGeneratingStudioType(visualType);
     try {
       const saved = await generateNotebookArtifact({
         notebookId,
         type,
-        file_ids: selectedFileIds,
+        file_ids: options?.file_ids || selectedFileIds,
         language: language as LanguageCode,
         orientation: options?.orientation,
         style: options?.style,
@@ -1147,7 +1290,7 @@ function NotebookDetailContent() {
           setActiveStudioArtifactId(artifact.id);
         }
       }
-      toast.success(visualType === "table" ? t("notebook.studio.tableGenerated") : visualType === "quiz" ? t("notebook.studio.quizGenerated") : visualType === "report" ? t("notebook.studio.reportGenerated") : visualType === "infographic" ? t("notebook.studio.infographicGenerated") : t("notebook.studio.textGenerated"));
+      toast.success(options?.successMessage || (visualType === "table" ? t("notebook.studio.tableGenerated") : visualType === "quiz" ? t("notebook.studio.quizGenerated") : visualType === "report" ? t("notebook.studio.reportGenerated") : visualType === "infographic" ? t("notebook.studio.infographicGenerated") : t("notebook.studio.textGenerated")));
     } catch (error) {
       showNotebookError(error, t("notebook.studio.saveFailed"));
     } finally {
@@ -1185,6 +1328,25 @@ function NotebookDetailContent() {
       return;
     }
     await generateStudioArtifactByType(type, type);
+  };
+
+  const handleRegenerateArtifact = async (artifact: NotebookStudioArtifact) => {
+    if (!notebookId) return;
+    const request = regenerationRequestForArtifact(artifact);
+    if (!request) {
+      toast.error(t("notebook.studio.regenerateFailed"));
+      return;
+    }
+    const fileIds = artifactSourceIdsForRegeneration(artifact, files);
+    if (fileIds.length === 0) {
+      toast.info(t("notebook.studio.selectSourcesFirst"));
+      return;
+    }
+    await generateStudioArtifactByType(request.type, request.visualType, {
+      ...request.options,
+      file_ids: fileIds,
+      successMessage: t("notebook.studio.regenerateSuccess"),
+    });
   };
 
   const handleRenameArtifact = async (artifact: NotebookStudioArtifact) => {
@@ -1237,6 +1399,30 @@ function NotebookDetailContent() {
       downloadTextFile(`${base}.md`, artifactToMarkdown(artifact), "text/markdown;charset=utf-8");
     }
     toast.success(t("notebook.studio.downloadSuccess"));
+  };
+
+  const handleCopyTableMarkdown = async (artifact: Extract<NotebookStudioArtifact, { type: "table" }>) => {
+    try {
+      await navigator.clipboard.writeText(tableArtifactToMarkdown(artifact));
+      toast.success(t("notebook.studio.copyMarkdownTableSuccess"));
+    } catch {
+      toast.error(t("notebook.studio.copyFailed"));
+    }
+  };
+
+  const handlePrintArtifact = (artifact: NotebookStudioArtifact) => {
+    if (artifact.type !== "report") return;
+    const printWindow = window.open("", "_blank", "noopener,noreferrer,width=960,height=720");
+    if (!printWindow) {
+      toast.error(t("notebook.studio.printBlocked"));
+      return;
+    }
+    printWindow.document.open();
+    printWindow.document.write(reportArtifactToPrintHtml(artifact));
+    printWindow.document.close();
+    printWindow.focus();
+    window.setTimeout(() => printWindow.print(), 250);
+    toast.success(t("notebook.studio.printReady"));
   };
 
   const handleExportTableToGoogleSheets = (artifact: Extract<NotebookStudioArtifact, { type: "table" }>) => {
@@ -1365,6 +1551,8 @@ function NotebookDetailContent() {
                 const meta = statusMeta(file, t);
                 const StatusIcon = meta.icon;
                 const detail = statusDetail(file, t);
+                const canRetryIndex = canRetryNotebookIndex(file);
+                const retryingIndex = reindexingSourceFileId === file.file_id;
                 return (
                   <div key={file.id} role="button" tabIndex={0} onClick={() => openPreview(file)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") openPreview(file); }} className={cn("group w-full cursor-pointer rounded-md px-2 py-2 text-left transition hover:bg-slate-100 dark:hover:bg-slate-800/60", !selected && "opacity-75")}>
                     <div className="flex items-center gap-3">
@@ -1377,6 +1565,21 @@ function NotebookDetailContent() {
                             {meta.label}
                           </span>
                           {detail && <span className="truncate text-[11px] leading-4 text-text-tertiary" title={detail}>{detail}</span>}
+                          {canRetryIndex && (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                retrySourceIndexing(file);
+                              }}
+                              disabled={retryingIndex}
+                              className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full border border-surface-border bg-surface-elevated px-2 text-[11px] font-medium text-text-secondary transition hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-60"
+                              title={retryNotebookIndexLabel(file, t)}
+                            >
+                              {retryingIndex ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+                              {retryNotebookIndexLabel(file, t)}
+                            </button>
+                          )}
                         </div>
                       </div>
                       <div className="relative shrink-0">
@@ -1491,9 +1694,12 @@ function NotebookDetailContent() {
         onGenerate={handleStudioGenerate}
         onOpenArtifact={setActiveStudioArtifactId}
         onRenameArtifact={handleRenameArtifact}
+        onRegenerateArtifact={handleRegenerateArtifact}
         onDeleteArtifact={handleDeleteArtifact}
         onCopyArtifact={handleCopyArtifact}
         onDownloadArtifact={handleDownloadArtifact}
+        onCopyTableMarkdown={handleCopyTableMarkdown}
+        onPrintArtifact={handlePrintArtifact}
         onExportTableToGoogleSheets={handleExportTableToGoogleSheets}
         onExplainFlashcard={handleExplainFlashcard}
         onExplainQuiz={handleExplainQuiz}

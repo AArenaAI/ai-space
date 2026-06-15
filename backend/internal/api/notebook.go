@@ -377,6 +377,46 @@ func (h *NotebookHandler) GetFileContent(c *gin.Context) {
 	})
 }
 
+func (h *NotebookHandler) ReindexFile(c *gin.Context) {
+	nb, ok := h.loadNotebook(c)
+	if !ok {
+		return
+	}
+	if h.fileService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "资料处理服务暂不可用"})
+		return
+	}
+	fid64, err := strconv.ParseUint(c.Param("file_id"), 10, 32)
+	if err != nil || fid64 == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的文件 ID"})
+		return
+	}
+
+	var link models.NotebookFile
+	if err := h.db.Preload("File").Where("notebook_id = ? AND file_id = ?", nb.ID, uint(fid64)).First(&link).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "资料不存在或无权访问"})
+		return
+	}
+	userID := getUserID(c)
+	if link.File.UserID != userID {
+		c.JSON(http.StatusNotFound, gin.H{"error": "资料不存在或无权访问"})
+		return
+	}
+
+	file, err := h.fileService.RequeueEmbedding(link.File.ID, userID)
+	if err != nil {
+		if strings.Contains(err.Error(), "尚未解析完成") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "重新索引资料失败"})
+		return
+	}
+	h.db.Model(&models.Notebook{}).Where("id = ?", nb.ID).Update("updated_at", time.Now())
+	link.File = *file
+	c.JSON(http.StatusOK, link)
+}
+
 func (h *NotebookHandler) UpdateFile(c *gin.Context) {
 	nb, ok := h.loadNotebook(c)
 	if !ok {
@@ -525,10 +565,11 @@ func (h *NotebookHandler) GenerateArtifact(c *gin.Context) {
 	}
 	files := h.loadNotebookGenerationFiles(nb.ID, getUserID(c))
 	opts := notebookArtifactGenerationOptions{
-		Orientation: strings.TrimSpace(req.Orientation),
-		Style:       strings.TrimSpace(req.Style),
-		DetailLevel: strings.TrimSpace(req.DetailLevel),
-		Prompt:      strings.TrimSpace(req.Prompt),
+		Orientation:  strings.TrimSpace(req.Orientation),
+		Style:        strings.TrimSpace(req.Style),
+		DetailLevel:  strings.TrimSpace(req.DetailLevel),
+		Prompt:       strings.TrimSpace(req.Prompt),
+		SourceChunks: h.loadNotebookGenerationFileChunks(files),
 	}
 	draft, err := buildAINotebookArtifactDraft(c.Request.Context(), h.aiService, h.imageService, req.Type, nb.Title, files, req.FileIDs, req.Language, opts)
 	if err != nil {
@@ -662,6 +703,27 @@ func (h *NotebookHandler) loadNotebookGenerationFiles(notebookID uint, userID ui
 		Order("notebook_files.sort_order ASC, notebook_files.id DESC").
 		Scan(&files)
 	return files
+}
+
+func (h *NotebookHandler) loadNotebookGenerationFileChunks(files []models.File) map[uint][]models.FileChunk {
+	ids := make([]uint, 0, len(files))
+	for _, file := range files {
+		if file.ID > 0 {
+			ids = append(ids, file.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	var chunks []models.FileChunk
+	if err := h.db.Where("file_id IN ?", ids).Order("file_id ASC, chunk_index ASC, id ASC").Find(&chunks).Error; err != nil {
+		return nil
+	}
+	byFileID := make(map[uint][]models.FileChunk, len(ids))
+	for _, chunk := range chunks {
+		byFileID[chunk.FileID] = append(byFileID[chunk.FileID], chunk)
+	}
+	return byFileID
 }
 
 func notebookArtifactResponse(artifact models.NotebookArtifact) NotebookArtifactResponse {

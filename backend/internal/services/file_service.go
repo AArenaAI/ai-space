@@ -216,6 +216,61 @@ func (s *FileService) GetFileChunks(fileID uint) ([]models.FileChunk, error) {
 	return chunks, nil
 }
 
+func canRequeueEmbedding(file models.File) bool {
+	return strings.TrimSpace(file.ParseStatus) == "done"
+}
+
+// RequeueEmbedding resets an already parsed file's embedding state and creates a fresh embedding job.
+func (s *FileService) RequeueEmbedding(fileID uint, userID uint) (*models.File, error) {
+	var file models.File
+	if err := s.db.Where("id = ? AND user_id = ?", fileID, userID).First(&file).Error; err != nil {
+		return nil, err
+	}
+	if !canRequeueEmbedding(file) {
+		return nil, fmt.Errorf("文件尚未解析完成，无法重新索引")
+	}
+
+	var embeddableChunkCount int64
+	if err := s.db.Model(&models.FileChunk{}).
+		Where("file_id = ? AND COALESCE(NULLIF(content, ''), NULLIF(markdown, '')) IS NOT NULL", file.ID).
+		Count(&embeddableChunkCount).Error; err != nil {
+		return nil, err
+	}
+
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("file_id = ?", file.ID).Delete(&models.FileEmbedding{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("file_id = ?", file.ID).Delete(&models.FileEmbeddingJob{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.FileChunk{}).Where("file_id = ?", file.ID).Update("embedding_status", "pending").Error; err != nil {
+			return err
+		}
+
+		status := "skipped"
+		if s.embedder != nil && embeddableChunkCount > 0 {
+			status = "pending"
+			modelInfo := s.embedder.ModelInfo()
+			if err := tx.Create(&models.FileEmbeddingJob{FileID: file.ID, Provider: modelInfo.Provider, Model: modelInfo.Model, Dimension: modelInfo.Dimension, Status: "pending"}).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Model(&models.File{}).Where("id = ?", file.ID).Updates(map[string]interface{}{
+			"embedding_status": status,
+			"error_message":    "",
+			"updated_at":       time.Now(),
+		}).Error
+	}); err != nil {
+		return nil, err
+	}
+
+	if err := s.db.First(&file, file.ID).Error; err != nil {
+		return nil, err
+	}
+	return &file, nil
+}
+
 // GetFileContext 获取文件上下文（MVP：返回最近的 N 个 chunk）
 func (s *FileService) GetFileContext(fileIDs []uint, maxChunksPerFile int) (string, error) {
 	var context strings.Builder

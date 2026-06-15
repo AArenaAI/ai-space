@@ -80,6 +80,14 @@ export async function updateNotebookFile(notebookId: number, fileId: number, inp
   return parseNotebookResponse<NotebookFile>(response, "重命名资料失败");
 }
 
+export async function reindexNotebookFile(notebookId: number, fileId: number): Promise<NotebookFile> {
+  const response = await fetch(`/api/notebooks/${notebookId}/files/${fileId}/reindex`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  return parseNotebookResponse<NotebookFile>(response, "重新索引资料失败");
+}
+
 export async function removeNotebookFile(notebookId: number, fileId: number): Promise<void> {
   const response = await fetch(`/api/notebooks/${notebookId}/files/${fileId}`, {
     method: "DELETE",

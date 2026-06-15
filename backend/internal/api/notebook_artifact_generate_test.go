@@ -60,6 +60,32 @@ func TestBuildGeneratedNotebookArtifactDraftUsesSelectedReadySources(t *testing.
 	}
 }
 
+func TestNotebookCitationsFromSourcesPreferChunkPageMetadata(t *testing.T) {
+	sources := []notebookGenerationSource{
+		{
+			Index:   1,
+			Summary: "文件摘要不应该优先于具体 chunk",
+			File:    models.File{ID: 42, Filename: "研究报告.pdf"},
+			Chunks: []models.FileChunk{
+				{FileID: 42, ChunkIndex: 0, Page: 1, Content: "封面和目录"},
+				{FileID: 42, ChunkIndex: 7, Page: 5, Content: "核心结论：Notebook 需要精确引用到 PDF 页码和分段。"},
+			},
+		},
+	}
+
+	citations := notebookCitationsFromSources(sources)
+	if len(citations) != 1 {
+		t.Fatalf("len(citations) = %d, want 1", len(citations))
+	}
+	got := citations[0]
+	if got.FileID != 42 || got.ChunkIndex != 7 || got.Page != 5 {
+		t.Fatalf("citation location = file %d chunk %d page %d, want file 42 chunk 7 page 5", got.FileID, got.ChunkIndex, got.Page)
+	}
+	if !strings.Contains(got.Quote, "精确引用到 PDF 页码") {
+		t.Fatalf("citation quote should come from selected chunk, got %q", got.Quote)
+	}
+}
+
 func TestBuildGeneratedNotebookArtifactDraftBuildsDataTableFromSourceContent(t *testing.T) {
 	files := []models.File{
 		{ID: 1, Filename: "AI Space 产品方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "AI Space 功能与优势", Content: "## 多模型聊天\n核心功能：流式对话、多模型切换、历史管理。当前状态：成熟。差异化竞争优势：统一接入 OpenAI、Claude、Gemini、DeepSeek 等模型，适合不同任务选型。对标产品：ChatGPT、Poe。\n## Notebook 资料问答\n核心功能：PDF/Office/网页资料解析、Embedding、向量检索、引用核查。当前状态：成熟。差异化竞争优势：全自研 RAG 流水线，资料可跨对话复用。对标产品：NotebookLM、Claude Projects。\n## Studio 数据表格\n核心功能：阅读选中资料后按功能模块整理为结构化表格。当前状态：建设中。差异化竞争优势：把文档内容直接转成可导出、可复核的表格。对标产品：Notion AI、NotebookLM。"},
@@ -81,6 +107,9 @@ func TestBuildGeneratedNotebookArtifactDraftBuildsDataTableFromSourceContent(t *
 	}
 	if len(content.Rows) < 4 {
 		t.Fatalf("expected multiple function rows extracted from source content, got %d content=%s", len(content.Rows), string(draft.Content))
+	}
+	if len(content.Rows[0].Citations) == 0 || content.Rows[0].Citations[0].FileID == 0 {
+		t.Fatalf("table rows should include structured citation metadata, got %+v", content.Rows[0])
 	}
 	encoded := string(draft.Content)
 	if !containsAll(encoded, []string{"多模型聊天", "Notebook 资料问答", "Studio 数据表格", "统一接入", "ChatGPT", "NotebookLM", "[1]", "[2]"}) {
@@ -157,9 +186,10 @@ func TestBuildGeneratedNotebookArtifactDraftBuildsBriefingReport(t *testing.T) {
 		FormatTitle      string `json:"format_title"`
 		ExecutiveSummary string `json:"executive_summary"`
 		Sections         []struct {
-			Number  string `json:"number"`
-			Heading string `json:"heading"`
-			Body    string `json:"body"`
+			Number    string                     `json:"number"`
+			Heading   string                     `json:"heading"`
+			Body      string                     `json:"body"`
+			Citations []notebookArtifactCitation `json:"citations"`
 		} `json:"sections"`
 		Tables []struct {
 			Title   string     `json:"title"`
@@ -175,6 +205,9 @@ func TestBuildGeneratedNotebookArtifactDraftBuildsBriefingReport(t *testing.T) {
 	}
 	if strings.TrimSpace(content.ExecutiveSummary) == "" || len(content.Sections) < 3 || len(content.Tables) == 0 {
 		t.Fatalf("report should include executive summary, multiple sections and table, got %+v", content)
+	}
+	if len(content.Sections[0].Citations) == 0 || content.Sections[0].Citations[0].FileID == 0 {
+		t.Fatalf("report sections should include structured citation metadata, got %+v", content.Sections[0])
 	}
 	encoded := string(draft.Content)
 	if !containsAll(encoded, []string{"Executive", "Multi-Model", "RAG", "Next.js", "Go", "Model Distillation"}) {

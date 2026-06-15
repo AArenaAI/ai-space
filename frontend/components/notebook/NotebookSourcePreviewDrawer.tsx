@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, FileText, Loader2, Search, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import type { NotebookFile, NotebookFileContent } from "@/lib/notebookTypes";
@@ -48,9 +48,14 @@ function highlightText(text: string, query: string) {
   );
 }
 
+function chunkAnchorId(index: number) {
+  return `notebook-source-chunk-${index}`;
+}
+
 export function NotebookSourcePreviewDrawer({ open, source, data, loading, error, target, onClose }: NotebookSourcePreviewDrawerProps) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const file = data?.file || source?.file || null;
   const content = data?.content || "";
 
@@ -75,6 +80,14 @@ export function NotebookSourcePreviewDrawer({ open, source, data, loading, error
     }
     return null;
   }, [data?.chunks, target]);
+
+  useEffect(() => {
+    if (!open || !targetChunk || loading) return;
+    const timer = window.setTimeout(() => {
+      document.getElementById(chunkAnchorId(targetChunk.index))?.scrollIntoView({ block: "center", behavior: "smooth" });
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [open, targetChunk, loading]);
 
   const contentMatches = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -160,7 +173,7 @@ export function NotebookSourcePreviewDrawer({ open, source, data, loading, error
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+        <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
           {loading ? (
             <div className="flex h-full items-center justify-center text-sm text-text-secondary">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -181,16 +194,48 @@ export function NotebookSourcePreviewDrawer({ open, source, data, loading, error
                 </section>
               ) : null}
 
-              <section>
-                <div className="mb-3 flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-text-primary">{t("notebook.previewContent")}</h3>
-                </div>
-                {content ? (
-                  <pre className="whitespace-pre-wrap rounded-2xl border border-border bg-surface-muted p-4 text-sm leading-7 text-text-secondary">{highlightText(content, query)}</pre>
-                ) : (
-                  <div className="rounded-2xl border border-border bg-surface-muted p-4 text-sm text-text-secondary">{t("notebook.previewNoContent")}</div>
-                )}
-              </section>
+              {data.chunks?.length ? (
+                <section>
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-text-primary">{t("notebook.previewChunks")}</h3>
+                  </div>
+                  <div className="space-y-3">
+                    {data.chunks.map((chunk) => {
+                      const isTarget = targetChunk?.index === chunk.index;
+                      return (
+                        <article
+                          key={`${chunk.index}-${chunk.page || 0}-${chunk.slide || 0}`}
+                          id={chunkAnchorId(chunk.index)}
+                          className={cn(
+                            "rounded-2xl border p-4 text-sm leading-7 transition-colors",
+                            isTarget ? "border-brand/50 bg-brand/10 shadow-sm ring-2 ring-brand/15" : "border-border bg-surface-muted text-text-secondary"
+                          )}
+                        >
+                          <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-text-tertiary">
+                            <span className="rounded-full bg-surface px-2 py-1 font-medium text-text-secondary">{t("notebook.previewChunk", { index: String(chunk.index) })}</span>
+                            {chunk.page ? <span className="rounded-full bg-surface px-2 py-1">{t("notebook.previewPage", { page: String(chunk.page) })}</span> : null}
+                            {chunk.slide ? <span className="rounded-full bg-surface px-2 py-1">{t("notebook.previewSlide", { slide: String(chunk.slide) })}</span> : null}
+                            {chunk.sheet_name ? <span className="rounded-full bg-surface px-2 py-1">{chunk.sheet_name}</span> : null}
+                            {isTarget ? <span className="rounded-full bg-brand px-2 py-1 text-white">{t("notebook.previewCitationTarget")}</span> : null}
+                          </div>
+                          <div className={cn("whitespace-pre-wrap", isTarget ? "text-text-primary" : "text-text-secondary")}>{highlightText(chunk.content, query)}</div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </section>
+              ) : (
+                <section>
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-text-primary">{t("notebook.previewContent")}</h3>
+                  </div>
+                  {content ? (
+                    <pre className="whitespace-pre-wrap rounded-2xl border border-border bg-surface-muted p-4 text-sm leading-7 text-text-secondary">{highlightText(content, query)}</pre>
+                  ) : (
+                    <div className="rounded-2xl border border-border bg-surface-muted p-4 text-sm text-text-secondary">{t("notebook.previewNoContent")}</div>
+                  )}
+                </section>
+              )}
             </div>
           )}
         </div>

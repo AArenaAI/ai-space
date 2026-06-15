@@ -24,10 +24,11 @@ type generatedNotebookArtifactDraft struct {
 }
 
 type notebookArtifactGenerationOptions struct {
-	Orientation string `json:"orientation,omitempty"`
-	Style       string `json:"style,omitempty"`
-	DetailLevel string `json:"detail_level,omitempty"`
-	Prompt      string `json:"prompt,omitempty"`
+	Orientation  string                      `json:"orientation,omitempty"`
+	Style        string                      `json:"style,omitempty"`
+	DetailLevel  string                      `json:"detail_level,omitempty"`
+	Prompt       string                      `json:"prompt,omitempty"`
+	SourceChunks map[uint][]models.FileChunk `json:"-"`
 }
 
 type notebookGeneratedAIResponse struct {
@@ -41,6 +42,7 @@ type notebookGenerationSource struct {
 	File     models.File
 	Summary  string
 	Excerpt  string
+	Chunks   []models.FileChunk
 	IsReady  bool
 	Selected bool
 }
@@ -61,12 +63,13 @@ type notebookArtifactCitation struct {
 }
 
 type notebookStudioTableRow struct {
-	Module         string `json:"module"`
-	Capability     string `json:"capability"`
-	Status         string `json:"status"`
-	Implementation string `json:"implementation"`
-	Value          string `json:"value"`
-	Source         string `json:"source"`
+	Module         string                     `json:"module"`
+	Capability     string                     `json:"capability"`
+	Status         string                     `json:"status"`
+	Implementation string                     `json:"implementation"`
+	Value          string                     `json:"value"`
+	Source         string                     `json:"source"`
+	Citations      []notebookArtifactCitation `json:"citations,omitempty"`
 }
 
 type notebookStudioMindmapNode struct {
@@ -125,6 +128,7 @@ type notebookStudioReportSection struct {
 	Body        string                        `json:"body,omitempty"`
 	Subsections []notebookStudioReportSection `json:"subsections,omitempty"`
 	Bullets     []string                      `json:"bullets,omitempty"`
+	Citations   []notebookArtifactCitation    `json:"citations,omitempty"`
 }
 
 type notebookStudioReportTable struct {
@@ -161,6 +165,7 @@ func buildGeneratedNotebookArtifactDraft(generationType string, notebookTitle st
 	if len(opts) > 0 {
 		opt = opts[0]
 	}
+	attachNotebookGenerationSourceChunks(sources, opt.SourceChunks)
 
 	var payload any
 	switch artifactType {
@@ -203,6 +208,17 @@ func notebookGenerationSourceFileIDs(sources []notebookGenerationSource) []uint 
 	return ids
 }
 
+func attachNotebookGenerationSourceChunks(sources []notebookGenerationSource, chunksByFileID map[uint][]models.FileChunk) {
+	if len(chunksByFileID) == 0 {
+		return
+	}
+	for i := range sources {
+		if chunks := chunksByFileID[sources[i].File.ID]; len(chunks) > 0 {
+			sources[i].Chunks = chunks
+		}
+	}
+}
+
 func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, imageService *services.ImageService, generationType string, notebookTitle string, files []models.File, selectedFileIDs []uint, language string, opts ...notebookArtifactGenerationOptions) (generatedNotebookArtifactDraft, error) {
 	fallback, err := buildGeneratedNotebookArtifactDraft(generationType, notebookTitle, files, selectedFileIDs, language, opts...)
 	if err != nil {
@@ -211,11 +227,12 @@ func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, 
 	if aiService == nil {
 		return fallback, nil
 	}
-	sources := selectNotebookGenerationSources(files, selectedFileIDs, generationType)
 	var opt notebookArtifactGenerationOptions
 	if len(opts) > 0 {
 		opt = opts[0]
 	}
+	sources := selectNotebookGenerationSources(files, selectedFileIDs, generationType)
+	attachNotebookGenerationSourceChunks(sources, opt.SourceChunks)
 	messages := buildNotebookArtifactAIMessages(generationType, notebookTitle, sources, language, opt)
 	resp, err := aiService.ChatCompletion(ctx, notebookArtifactAIModel(generationType), messages, false, false, "", false, nil)
 	if err != nil || resp == nil || resp.Body == nil {
@@ -250,6 +267,16 @@ func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, 
 	}
 	if generationType == "table" && !notebookTableDraftLooksUseful(draft.Content) {
 		return fallback, nil
+	}
+	if artifactType, ok := notebookArtifactTypeForGeneration(generationType); ok {
+		switch artifactType {
+		case "summary", "faq", "briefing":
+			draft.Content = notebookEnsureTextSectionCitations(draft.Content, sources)
+		case "data-table":
+			draft.Content = notebookEnsureTableRowCitations(draft.Content, sources)
+		case "report":
+			draft.Content = notebookEnsureReportSectionCitations(draft.Content, sources)
+		}
 	}
 	if generationType == "mindmap" && !notebookMindmapDraftLooksUseful(draft.Content) {
 		return generatedNotebookArtifactDraft{}, fmt.Errorf("思维导图分析结果不完整，请重新生成")
@@ -897,10 +924,10 @@ func buildNotebookGeneratedReport(formatID string, notebookTitle string, sources
 		fmt.Sprintf("执行摘要：%s 基于上传资料整理为一份执行简报，概述核心定位、已落地能力、技术架构、战略路线和业务价值。", fallbackText(notebookTitle, "该笔记本")),
 	)
 	sections := []notebookStudioReportSection{
-		{Number: "1", Heading: ifEnglish(isEN, "Product Core Positioning and Key Features", "产品核心定位与关键功能"), Body: reportSourceBody(sources, 0, isEN)},
-		{Number: "1.1", Heading: ifEnglish(isEN, "Mature Feature Set", "成熟功能集"), Body: reportSourceBody(sources, 1, isEN)},
-		{Number: "2", Heading: ifEnglish(isEN, "Technical Architecture and Differentiation", "技术架构与差异化优势"), Body: reportSourceBody(sources, 2, isEN)},
-		{Number: "3", Heading: ifEnglish(isEN, "Strategic Roadmap and Market Positioning", "战略路线与市场定位"), Body: reportSourceBody(sources, 3, isEN)},
+		{Number: "1", Heading: ifEnglish(isEN, "Product Core Positioning and Key Features", "产品核心定位与关键功能"), Body: reportSourceBody(sources, 0, isEN), Citations: notebookCitationForSourceAt(sources, 0)},
+		{Number: "1.1", Heading: ifEnglish(isEN, "Mature Feature Set", "成熟功能集"), Body: reportSourceBody(sources, 1, isEN), Citations: notebookCitationForSourceAt(sources, 1)},
+		{Number: "2", Heading: ifEnglish(isEN, "Technical Architecture and Differentiation", "技术架构与差异化优势"), Body: reportSourceBody(sources, 2, isEN), Citations: notebookCitationForSourceAt(sources, 2)},
+		{Number: "3", Heading: ifEnglish(isEN, "Strategic Roadmap and Market Positioning", "战略路线与市场定位"), Body: reportSourceBody(sources, 3, isEN), Citations: notebookCitationForSourceAt(sources, 3)},
 	}
 	rows := make([][]string, 0, len(sources)+3)
 	for _, source := range sources {
@@ -1391,6 +1418,7 @@ func normalizeNotebookTableDedupeText(value string) string {
 
 func mergeNotebookTableRows(primary notebookStudioTableRow, duplicate notebookStudioTableRow) notebookStudioTableRow {
 	primary.Source = mergeNotebookSourceCitations(primary.Source, duplicate.Source)
+	primary.Citations = mergeNotebookArtifactCitations(primary.Citations, duplicate.Citations)
 	if strings.TrimSpace(primary.Status) == "" {
 		primary.Status = duplicate.Status
 	}
@@ -1468,6 +1496,7 @@ func extractNotebookExistingTableRows(source notebookGenerationSource, text stri
 				Implementation: notebookTableAdvantageForModule(module, text),
 				Value:          notebookTableBenchmarkForModule(module),
 				Source:         fmt.Sprintf("[%d]", source.Index),
+				Citations:      notebookCitationsFromSources([]notebookGenerationSource{source}),
 			}
 			continue
 		}
@@ -1671,6 +1700,7 @@ func notebookTableRowFromBlock(source notebookGenerationSource, title string, bo
 		Implementation: truncateNotebookTableCell(extractNotebookLabeledValue(body, []string{"差异化竞争优势", "差异化优势", "竞争优势", "优势", "价值"}, notebookTableMethod(body)), 180),
 		Value:          truncateNotebookTableCell(extractNotebookLabeledValue(body, []string{"对标产品", "参照对象", "对标", "适用场景", "场景"}, notebookTableValue(body)), 160),
 		Source:         fmt.Sprintf("[%d]", source.Index),
+		Citations:      notebookCitationsFromSources([]notebookGenerationSource{source}),
 	}
 }
 
@@ -1894,16 +1924,169 @@ func buildNotebookGeneratedTextSections(generationType string, notebookTitle str
 	}
 }
 
+func notebookEnsureTextSectionCitations(content json.RawMessage, sources []notebookGenerationSource) json.RawMessage {
+	var payload struct {
+		Sections []notebookStudioTextSection `json:"sections"`
+	}
+	if err := json.Unmarshal(content, &payload); err != nil || len(payload.Sections) == 0 {
+		return content
+	}
+	citations := notebookCitationsFromSources(sources)
+	if len(citations) == 0 {
+		return content
+	}
+	changed := false
+	for i := range payload.Sections {
+		if len(payload.Sections[i].Citations) == 0 {
+			payload.Sections[i].Citations = citations
+			changed = true
+		}
+	}
+	if !changed {
+		return content
+	}
+	updated, err := json.Marshal(payload)
+	if err != nil {
+		return content
+	}
+	return updated
+}
+
+func notebookEnsureTableRowCitations(content json.RawMessage, sources []notebookGenerationSource) json.RawMessage {
+	var payload struct {
+		Rows []notebookStudioTableRow `json:"rows"`
+	}
+	if err := json.Unmarshal(content, &payload); err != nil || len(payload.Rows) == 0 {
+		return content
+	}
+	all := notebookCitationsFromSources(sources)
+	if len(all) == 0 {
+		return content
+	}
+	changed := false
+	for i := range payload.Rows {
+		if len(payload.Rows[i].Citations) == 0 {
+			payload.Rows[i].Citations = all
+			changed = true
+		}
+	}
+	if !changed {
+		return content
+	}
+	updated, err := json.Marshal(payload)
+	if err != nil {
+		return content
+	}
+	return updated
+}
+
+func notebookEnsureReportSectionCitations(content json.RawMessage, sources []notebookGenerationSource) json.RawMessage {
+	var payload notebookStudioReportContent
+	if err := json.Unmarshal(content, &payload); err != nil || len(payload.Sections) == 0 {
+		return content
+	}
+	all := notebookCitationsFromSources(sources)
+	if len(all) == 0 {
+		return content
+	}
+	changed := false
+	for i := range payload.Sections {
+		if len(payload.Sections[i].Citations) == 0 {
+			payload.Sections[i].Citations = all
+			changed = true
+		}
+		for j := range payload.Sections[i].Subsections {
+			if len(payload.Sections[i].Subsections[j].Citations) == 0 {
+				payload.Sections[i].Subsections[j].Citations = payload.Sections[i].Citations
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		return content
+	}
+	updated, err := json.Marshal(payload)
+	if err != nil {
+		return content
+	}
+	return updated
+}
+
 func notebookCitationsFromSources(sources []notebookGenerationSource) []notebookArtifactCitation {
 	citations := make([]notebookArtifactCitation, 0, len(sources))
 	for _, source := range sources {
 		quote := truncateNotebookRunes(fallbackText(source.Summary, source.Excerpt), 180, "…")
+		page := 0
+		chunkIndex := 0
+		if chunk, ok := notebookCitationChunk(source); ok {
+			quote = truncateNotebookRunes(strings.TrimSpace(fallbackText(chunk.Content, chunk.Markdown)), 180, "…")
+			page = chunk.Page
+			chunkIndex = chunk.ChunkIndex
+		}
 		if strings.TrimSpace(quote) == "" || source.File.ID == 0 {
 			continue
 		}
-		citations = append(citations, notebookArtifactCitation{FileID: source.File.ID, SourceIndex: source.Index, Quote: quote})
+		citations = append(citations, notebookArtifactCitation{FileID: source.File.ID, SourceIndex: source.Index, Quote: quote, Page: page, ChunkIndex: chunkIndex})
 	}
 	return citations
+}
+
+func notebookCitationForSourceAt(sources []notebookGenerationSource, offset int) []notebookArtifactCitation {
+	if len(sources) == 0 {
+		return nil
+	}
+	return notebookCitationsFromSources([]notebookGenerationSource{sources[offset%len(sources)]})
+}
+
+func mergeNotebookArtifactCitations(groups ...[]notebookArtifactCitation) []notebookArtifactCitation {
+	seen := map[uint]bool{}
+	merged := make([]notebookArtifactCitation, 0)
+	for _, group := range groups {
+		for _, citation := range group {
+			if citation.FileID == 0 || seen[citation.FileID] {
+				continue
+			}
+			seen[citation.FileID] = true
+			merged = append(merged, citation)
+		}
+	}
+	return merged
+}
+
+func notebookCitationChunk(source notebookGenerationSource) (models.FileChunk, bool) {
+	if len(source.Chunks) == 0 {
+		return models.FileChunk{}, false
+	}
+	needle := strings.TrimSpace(fallbackText(source.Summary, source.Excerpt))
+	if needle != "" {
+		needleLower := strings.ToLower(needle)
+		for _, chunk := range source.Chunks {
+			text := strings.TrimSpace(fallbackText(chunk.Content, chunk.Markdown))
+			if text == "" {
+				continue
+			}
+			lower := strings.ToLower(text)
+			if strings.Contains(lower, needleLower) || strings.Contains(needleLower, lower) {
+				return chunk, true
+			}
+		}
+	}
+	var best models.FileChunk
+	bestLen := 0
+	for _, chunk := range source.Chunks {
+		text := strings.TrimSpace(fallbackText(chunk.Content, chunk.Markdown))
+		if text == "" {
+			continue
+		}
+		if l := len([]rune(text)); l > bestLen {
+			best = chunk
+			bestLen = l
+		}
+	}
+	if bestLen > 0 {
+		return best, true
+	}
+	return models.FileChunk{}, false
 }
 
 func notebookGeneratedArtifactTitle(generationType string, notebookTitle string) string {
