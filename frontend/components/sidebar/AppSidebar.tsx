@@ -23,7 +23,7 @@ import {
   Type, ZoomIn,
   Briefcase, FileCode, PenTool, BarChart3, Mail, ClipboardList, Terminal, GraduationCap, Languages,
   Zap, Shield, BookOpen, Wrench, Globe, Code2,
-  Star,
+  Star, Mic,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
@@ -39,6 +39,7 @@ import { invalidateConversationSnapshot } from "@/lib/chatConversationCache";
 import { prefetchConversationSnapshot } from "@/lib/chatConversationPrefetch";
 import { deletePersistentConversationSnapshot } from "@/lib/chatConversationPersistentCache";
 import { createNotebook, fetchNotebooks } from "@/lib/notebookApi";
+import { NOTEBOOK_DEMOS } from "@/lib/notebookDemos";
 import type { Notebook } from "@/lib/notebookTypes";
 
 
@@ -74,12 +75,6 @@ interface ConversationSearchResult extends Conversation {
   matched_role?: string;
   matched_message_id?: number;
 }
-
-const NOTEBOOK_DEMOS: Array<Pick<Notebook, "id" | "title" | "description" | "file_count" | "updated_at"> & { demo?: boolean; color: string }> = [
-  { id: -1, title: "Demo: Introduction to Wisebase", description: "Learn how notebooks organize sources", file_count: 3, updated_at: new Date().toISOString(), demo: true, color: "text-violet-500 bg-violet-500/10" },
-  { id: -2, title: "Demo: Research on LLMs", description: "Research notes and source Q&A", file_count: 5, updated_at: new Date().toISOString(), demo: true, color: "text-orange-500 bg-orange-500/10" },
-  { id: -3, title: "Demo: NVIDIA Business Outlook", description: "Business analysis knowledge base", file_count: 4, updated_at: new Date().toISOString(), demo: true, color: "text-emerald-500 bg-emerald-500/10" },
-];
 
 type SidebarNotebookItem = Pick<Notebook, "id" | "title" | "description" | "file_count" | "updated_at"> & {
   color: string;
@@ -749,11 +744,13 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
 
   const sidebarNotebookItems = useMemo<SidebarNotebookItem[]>(() => {
     const colors = ["text-violet-500 bg-violet-500/10", "text-orange-500 bg-orange-500/10", "text-emerald-500 bg-emerald-500/10"];
-    const realItems = notebooks.map((item, index) => ({
-      ...item,
-      itemKey: `notebook:${item.id}`,
-      color: colors[index % colors.length],
-    }));
+    const realItems = [...notebooks]
+      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+      .map((item, index) => ({
+        ...item,
+        itemKey: `notebook:${item.id}`,
+        color: colors[index % colors.length],
+      }));
     const demoItems = NOTEBOOK_DEMOS.map((item) => ({
       ...item,
       itemKey: `demo:${Math.abs(item.id)}`,
@@ -763,7 +760,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     const ordered = notebookOrder.map((key) => byKey.get(key)).filter(Boolean) as SidebarNotebookItem[];
     const missingReal = realItems.filter((item) => !notebookOrder.includes(item.itemKey));
     const missingDemo = demoItems.filter((item) => !notebookOrder.includes(item.itemKey));
-    return [...missingReal, ...ordered, ...missingDemo];
+    return [...missingReal, ...ordered, ...missingDemo].slice(0, 3);
   }, [notebooks, notebookOrder]);
 
   const moveNotebookItem = useCallback((fromKey: string, toKey: string) => {
@@ -1491,6 +1488,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
             items: [
               { icon: PenTool, label: t("work.writingAssistant"), href: "/writing-assistant", color: "text-pink-500", bg: "bg-pink-500/10" },
               { icon: Languages, label: t("work.translator"), href: "/translator", color: "text-fuchsia-500", bg: "bg-fuchsia-500/10" },
+              { icon: Mic, label: t("work.liveTranslate"), href: "/live-translate", color: "text-emerald-500", bg: "bg-emerald-500/10" },
               { icon: FileText, label: t("work.documentReader"), href: "/document-reader", color: "text-orange-500", bg: "bg-orange-500/10" },
             ],
           },
