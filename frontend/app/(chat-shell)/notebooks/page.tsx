@@ -111,33 +111,27 @@ export default function NotebooksPage() {
   return (
     <div className="min-h-full bg-white text-slate-950">
       <main className="mx-auto flex w-full max-w-[1180px] flex-col px-8 pb-12 pt-7">
-        <header className="mb-9 flex flex-col gap-0">
+        <header className="mb-8 flex flex-col gap-0">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-center gap-2 text-[15px] font-medium text-slate-600">
-              <button type="button" className="rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-slate-950 shadow-sm">全部</button>
+            <div className="flex items-center gap-2 text-[14px] font-medium text-slate-600">
+              <button type="button" className="inline-flex h-8 items-center rounded-[8px] border border-[#d9dde5] bg-[#f6f7f9] px-3 text-[#111827] shadow-[0_1px_1px_rgba(15,23,42,0.04)]">全部</button>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <button type="button" className="flex h-10 w-10 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label={t("notebook.searchPlaceholder")}>
-                <Search className="h-5 w-5" />
+              <button type="button" className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-transparent text-[#4b5563] transition hover:border-[#d9dde5] hover:bg-[#f6f7f9] hover:text-[#111827]" aria-label={t("notebook.searchPlaceholder")}>
+                <Search className="h-4 w-4" />
               </button>
-              <div className="relative flex h-10 w-[92px] items-center rounded-full border border-slate-200 bg-white p-1 shadow-sm">
-                <span
-                  className={cn(
-                    "absolute left-1 top-1 h-8 w-10 rounded-full bg-[#eef4ff] shadow-sm ring-1 ring-blue-100 transition-transform duration-300 ease-[cubic-bezier(.22,1,.36,1)]",
-                    viewMode === "list" && "translate-x-10"
-                  )}
-                />
+              <div className="flex h-8 items-center rounded-[9px] border border-[#d9dde5] bg-white p-[2px] shadow-[0_1px_1px_rgba(15,23,42,0.04)]">
                 <button
                   type="button"
                   aria-pressed={viewMode === "grid"}
                   onClick={() => setViewMode("grid")}
                   className={cn(
-                    "relative z-10 inline-flex h-8 w-10 items-center justify-center gap-1 rounded-full text-slate-500 transition-colors duration-200",
-                    viewMode === "grid" ? "text-blue-600" : "hover:text-slate-900"
+                    "inline-flex h-7 items-center justify-center rounded-[7px] text-[#4b5563] transition-all duration-200 ease-out",
+                    viewMode === "grid" ? "w-[52px] gap-1 bg-[#e8edf5] px-2 text-[#111827] shadow-[inset_0_0_0_1px_rgba(148,163,184,0.16)]" : "w-8 hover:bg-[#f6f7f9] hover:text-[#111827]"
                   )}
                 >
-                  {viewMode === "grid" && <Check className="h-3.5 w-3.5" />}
+                  {viewMode === "grid" && <Check className="h-3.5 w-3.5 stroke-[2.4]" />}
                   <Grid3X3 className="h-4 w-4" />
                 </button>
                 <button
@@ -145,24 +139,24 @@ export default function NotebooksPage() {
                   aria-pressed={viewMode === "list"}
                   onClick={() => setViewMode("list")}
                   className={cn(
-                    "relative z-10 inline-flex h-8 w-10 items-center justify-center gap-1 rounded-full text-slate-500 transition-colors duration-200",
-                    viewMode === "list" ? "text-blue-600" : "hover:text-slate-900"
+                    "inline-flex h-7 items-center justify-center rounded-[7px] text-[#4b5563] transition-all duration-200 ease-out",
+                    viewMode === "list" ? "w-[52px] gap-1 bg-[#e8edf5] px-2 text-[#111827] shadow-[inset_0_0_0_1px_rgba(148,163,184,0.16)]" : "w-8 hover:bg-[#f6f7f9] hover:text-[#111827]"
                   )}
                 >
-                  {viewMode === "list" && <Check className="h-3.5 w-3.5" />}
+                  {viewMode === "list" && <Check className="h-3.5 w-3.5 stroke-[2.4]" />}
                   <List className="h-4 w-4" />
                 </button>
               </div>
-              <button type="button" className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
+              <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-[#d9dde5] bg-white px-3 text-[13px] font-medium text-[#374151] shadow-[0_1px_1px_rgba(15,23,42,0.04)] transition hover:bg-[#f6f7f9]">
                 最近
-                <ChevronDown className="h-4 w-4 text-slate-400" />
+                <ChevronDown className="h-3.5 w-3.5 text-[#6b7280]" />
               </button>
               <button
                 type="button"
                 onClick={() => setCreateOpen(true)}
-                className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-full bg-slate-950 px-5 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800"
+                className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[8px] bg-[#111827] px-3.5 text-[13px] font-medium text-white shadow-[0_1px_2px_rgba(15,23,42,0.12)] transition hover:bg-[#1f2937]"
               >
-                <Plus className="h-4 w-4" />
+                <Plus className="h-3.5 w-3.5" />
                 {t("notebook.new")}
               </button>
             </div>
@@ -252,8 +246,8 @@ export default function NotebooksPage() {
                   })}
                 </div>
               ) : (
-                <div className="overflow-hidden rounded-[20px] border border-slate-200 bg-white">
-                  <div className="grid grid-cols-[minmax(320px,1fr)_130px_180px_110px_44px] border-b border-slate-200 px-5 py-3 text-xs font-medium text-slate-400">
+                <div className="overflow-hidden rounded-[10px] border border-[#e2e5ea] bg-white shadow-[0_1px_1px_rgba(15,23,42,0.03)]">
+                  <div className="grid grid-cols-[minmax(360px,1fr)_120px_168px_96px_36px] border-b border-[#e6e8ee] bg-[#fbfbfc] px-4 py-2.5 text-[12px] font-medium leading-5 text-[#6b7280]">
                     <span>标题</span>
                     <span>来源</span>
                     <span>创建日期</span>
@@ -263,35 +257,35 @@ export default function NotebooksPage() {
                   <button
                     type="button"
                     onClick={() => setCreateOpen(true)}
-                    className="grid w-full grid-cols-[minmax(320px,1fr)_130px_180px_110px_44px] items-center border-b border-slate-100 px-5 py-4 text-left transition hover:bg-slate-50"
+                    className="grid min-h-[48px] w-full grid-cols-[minmax(360px,1fr)_120px_168px_96px_36px] items-center border-b border-[#eef0f3] px-4 py-2.5 text-left transition hover:bg-[#f7f8fa]"
                   >
-                    <span className="flex min-w-0 items-center gap-3">
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-                        <Plus className="h-5 w-5" />
+                    <span className="flex min-w-0 items-center gap-2.5">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] bg-[#eef2ff] text-[#4f46e5]">
+                        <Plus className="h-4 w-4" />
                       </span>
-                      <span className="text-sm font-medium text-slate-950">{t("notebook.new")}</span>
+                      <span className="text-[13px] font-medium leading-5 text-[#111827]">{t("notebook.new")}</span>
                     </span>
-                    <span className="text-sm text-slate-500">—</span>
-                    <span className="text-sm text-slate-500">—</span>
-                    <span className="text-sm text-slate-500">Owner</span>
+                    <span className="text-[13px] leading-5 text-[#6b7280]">—</span>
+                    <span className="text-[13px] leading-5 text-[#6b7280]">—</span>
+                    <span className="text-[13px] leading-5 text-[#4b5563]">Owner</span>
                     <span />
                   </button>
                   {filtered.map((notebook) => (
                     <Link
                       key={notebook.id}
                       href={`/notebooks/detail?notebook_id=${notebook.id}`}
-                      className="grid grid-cols-[minmax(320px,1fr)_130px_180px_110px_44px] items-center border-b border-slate-100 px-5 py-4 last:border-b-0 transition hover:bg-slate-50"
+                      className="grid min-h-[48px] grid-cols-[minmax(360px,1fr)_120px_168px_96px_36px] items-center border-b border-[#eef0f3] px-4 py-2.5 last:border-b-0 transition hover:bg-[#f7f8fa]"
                     >
-                      <span className="flex min-w-0 items-center gap-3">
-                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-orange-50 text-orange-500">
-                          <BookOpen className="h-5 w-5" />
+                      <span className="flex min-w-0 items-center gap-2.5">
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] bg-[#fff4e6] text-[#d97706]">
+                          <BookOpen className="h-4 w-4" />
                         </span>
-                        <span className="min-w-0 text-sm font-medium leading-6 text-slate-950">{notebook.title || t("notebook.untitled")}</span>
+                        <span className="min-w-0 text-[13px] font-medium leading-5 text-[#111827]">{notebook.title || t("notebook.untitled")}</span>
                       </span>
-                      <span className="text-sm text-slate-600">{t("notebook.fileCount").replace("{count}", String(notebook.file_count || 0))}</span>
-                      <span className="text-sm text-slate-600">{formatFullDate(notebook.created_at || notebook.updated_at)}</span>
-                      <span className="text-sm text-slate-600">Owner</span>
-                      <span className="flex justify-end text-slate-400">
+                      <span className="text-[13px] leading-5 text-[#4b5563]">{t("notebook.fileCount").replace("{count}", String(notebook.file_count || 0))}</span>
+                      <span className="text-[13px] leading-5 text-[#4b5563]">{formatFullDate(notebook.created_at || notebook.updated_at)}</span>
+                      <span className="text-[13px] leading-5 text-[#4b5563]">Owner</span>
+                      <span className="flex justify-end text-[#9ca3af]">
                         <MoreHorizontal className="h-4 w-4" />
                       </span>
                     </Link>
