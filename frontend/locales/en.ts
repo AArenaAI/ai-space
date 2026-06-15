@@ -265,6 +265,7 @@ const translations: Record<string, string> = {
   "notebook.studio.copySuccess": "Copied to clipboard",
   "notebook.studio.copyFailed": "Copy failed. Please try again later",
   "notebook.studio.downloadSuccess": "Output file download started",
+  "notebook.studio.infographicDownloadImageFailed": "Image download failed; downloaded metadata instead.",
   "notebook.studio.basedOnSources": "Based on {count} sources",
   "notebook.studio.generatingTable": "Generating data table...",
   "notebook.studio.generatingMindmap": "Generating mind map...",

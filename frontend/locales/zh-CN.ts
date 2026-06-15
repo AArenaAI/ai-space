@@ -265,6 +265,7 @@ const translations: Record<string, string> = {
   "notebook.studio.copySuccess": "已复制到剪贴板",
   "notebook.studio.copyFailed": "复制失败，请稍后重试",
   "notebook.studio.downloadSuccess": "输出文件已开始下载",
+  "notebook.studio.infographicDownloadImageFailed": "图片下载失败，已改为下载元数据。",
   "notebook.studio.basedOnSources": "基于 {count} 个来源",
   "notebook.studio.generatingTable": "生成数据表格...",
   "notebook.studio.generatingMindmap": "生成思维导图...",

@@ -1391,13 +1391,37 @@ function NotebookDetailContent() {
     }
   };
 
-  const handleDownloadArtifact = (artifact: NotebookStudioArtifact) => {
+  const handleDownloadArtifact = async (artifact: NotebookStudioArtifact) => {
     const base = safeFilename(artifact.title);
     if (artifact.type === "table") {
       downloadTextFile(`${base}.csv`, artifactToCsv(artifact), "text/csv;charset=utf-8");
-    } else {
-      downloadTextFile(`${base}.md`, artifactToMarkdown(artifact), "text/markdown;charset=utf-8");
+      toast.success(t("notebook.studio.downloadSuccess"));
+      return;
     }
+    if (artifact.type === "infographic" && artifact.image_url) {
+      try {
+        const imageUrl = artifact.image_url.startsWith("http") || artifact.image_url.startsWith("/") ? artifact.image_url : `/${artifact.image_url}`;
+        const response = await fetch(imageUrl);
+        if (!response.ok) throw new Error("image download failed");
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        const ext = blob.type?.includes("jpeg") || blob.type?.includes("jpg") ? "jpg" : "png";
+        link.href = objectUrl;
+        link.download = `${base}.${ext}`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 5000);
+        toast.success(t("notebook.studio.downloadSuccess"));
+        return;
+      } catch {
+        downloadTextFile(`${base}.md`, artifactToMarkdown(artifact), "text/markdown;charset=utf-8");
+        toast.error(t("notebook.studio.infographicDownloadImageFailed"));
+        return;
+      }
+    }
+    downloadTextFile(`${base}.md`, artifactToMarkdown(artifact), "text/markdown;charset=utf-8");
     toast.success(t("notebook.studio.downloadSuccess"));
   };
 
