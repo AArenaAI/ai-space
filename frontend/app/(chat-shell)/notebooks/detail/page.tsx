@@ -11,6 +11,7 @@ import { NotebookStudioPanel, type NotebookSourceOpenTarget, type NotebookStudio
 import { NotebookUrlSourceDialog } from "@/components/notebook/NotebookUrlSourceDialog";
 import { MODELS } from "@/hooks/useChat";
 import { addNotebookFile, addNotebookUrlSource, deleteNotebookArtifact, fetchNotebook, fetchNotebookArtifacts, fetchNotebookFileContent, generateNotebookArtifact, reindexNotebookFile, removeNotebookFile, suggestNotebookReportFormats, updateNotebook, updateNotebookArtifact, updateNotebookFile, type NotebookReportFormatSuggestion } from "@/lib/notebookApi";
+import { NOTEBOOK_DEMOS } from "@/lib/notebookDemos";
 import { normalizeNotebookError, showNotebookError, uploadNotebookSourceFile } from "@/lib/notebookErrors";
 import type { Notebook, NotebookArtifact as PersistedNotebookArtifact, NotebookFile, NotebookFileContent } from "@/lib/notebookTypes";
 import { useI18n, type LanguageCode } from "@/lib/i18n";
@@ -755,6 +756,9 @@ function NotebookDetailContent() {
   const { t, language } = useI18n();
   const searchParams = useSearchParams();
   const notebookId = Number(searchParams.get("notebook_id") || searchParams.get("id"));
+  const isDemoNotebook = notebookId < 0;
+  const demoNotebook = NOTEBOOK_DEMOS.find((item) => item.id === notebookId) || null;
+  const writableNotebookId = isDemoNotebook ? 0 : notebookId;
   const conversationId = searchParams.get("conversation_id") ? Number(searchParams.get("conversation_id")) : undefined;
   const [notebook, setNotebook] = useState<Notebook | null>(null);
   const [files, setFiles] = useState<NotebookFile[]>([]);
@@ -793,9 +797,9 @@ function NotebookDetailContent() {
   const inputRef = useRef<HTMLInputElement>(null);
   const selectionInitializedRef = useRef(false);
   const loadStudioArtifacts = async () => {
-    if (!notebookId) return;
+    if (!writableNotebookId) return;
     try {
-      const persisted = await fetchNotebookArtifacts(notebookId);
+      const persisted = await fetchNotebookArtifacts(writableNotebookId);
       const next = persisted.map(toStudioArtifact).filter((item): item is NotebookStudioArtifact => Boolean(item));
       setStudioArtifacts(next);
       setActiveStudioArtifactId((prev) => (prev && next.some((item) => item.id === prev) ? prev : null));
@@ -806,14 +810,32 @@ function NotebookDetailContent() {
 
   const load = async () => {
     if (!notebookId) { setLoading(false); return; }
+    if (isDemoNotebook) {
+      setLoading(true);
+      if (demoNotebook) {
+        setNotebook(demoNotebook);
+        setFiles([]);
+        setSelectedFileIds([]);
+        setStudioArtifacts([]);
+        setActiveStudioArtifactId(null);
+        setPageError(null);
+        selectionInitializedRef.current = true;
+      } else {
+        setNotebook(null);
+        setFiles([]);
+        setPageError(t("notebook.loadFailed"));
+      }
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const data = await fetchNotebook(notebookId);
+      const data = await fetchNotebook(writableNotebookId);
       setNotebook(data.notebook);
       const nextFiles = data.files || [];
       setFiles(nextFiles);
       setSelectedFileIds((prev) => {
-        const baseline = selectionInitializedRef.current ? prev : (readStoredSelectedFileIds(notebookId) || []);
+        const baseline = selectionInitializedRef.current ? prev : (readStoredSelectedFileIds(writableNotebookId) || []);
         selectionInitializedRef.current = true;
         return reconcileSelectedFileIds(baseline, nextFiles);
       });
@@ -834,9 +856,9 @@ function NotebookDetailContent() {
   }, [notebookId]);
 
   useEffect(() => {
-    if (!notebookId || !selectionInitializedRef.current) return;
-    localStorage.setItem(notebookSelectionStorageKey(notebookId), JSON.stringify(selectedFileIds));
-  }, [notebookId, selectedFileIds]);
+    if (!writableNotebookId || !selectionInitializedRef.current) return;
+    localStorage.setItem(notebookSelectionStorageKey(writableNotebookId), JSON.stringify(selectedFileIds));
+  }, [writableNotebookId, selectedFileIds]);
 
   useEffect(() => {
     if (!notebook) return;
@@ -844,15 +866,15 @@ function NotebookDetailContent() {
   }, [notebook?.id, notebook?.cover_icon]);
 
   useEffect(() => {
-    if (!notebookId || !notebook || files.length !== 1) return;
+    if (!writableNotebookId || !notebook || files.length !== 1) return;
     const firstFile = files[0];
     if (!firstFile || !isNotebookFileReady(firstFile)) return;
-    const storageKey = notebookAutoSummaryStorageKey(notebookId, firstFile.file_id);
+    const storageKey = notebookAutoSummaryStorageKey(writableNotebookId, firstFile.file_id);
     if (localStorage.getItem(storageKey) === "done") return;
     localStorage.setItem(storageKey, "done");
     const autoTitle = buildAutoNotebookTitle(firstFile);
     if (!notebook.title || notebook.title === "未命名笔记本") {
-      updateNotebook(notebookId, { title: autoTitle }).then((updated) => {
+      updateNotebook(writableNotebookId, { title: autoTitle }).then((updated) => {
         setNotebook(updated);
       }).catch((error) => {
         showNotebookError(error, "自动更新笔记本标题失败");
@@ -864,7 +886,7 @@ function NotebookDetailContent() {
       content: buildNotebookAutoSummaryPrompt(firstFile, autoTitle),
       hidden: true,
     });
-  }, [notebookId, notebook, files]);
+  }, [writableNotebookId, notebook, files]);
 
   const readyCount = useMemo(() => files.filter(isNotebookFileReady).length, [files]);
 
@@ -951,10 +973,10 @@ function NotebookDetailContent() {
   };
 
   const saveNotebookCustom = async () => {
-    if (!notebookId) return;
+    if (!writableNotebookId) return;
     setSavingNotebookCustom(true);
     try {
-      const updated = await updateNotebook(notebookId, {
+      const updated = await updateNotebook(writableNotebookId, {
         cover_icon: customCoverIcon,
       });
       setNotebook(updated);
@@ -968,9 +990,9 @@ function NotebookDetailContent() {
   };
 
   useEffect(() => {
-    if (!hasProcessingFiles || !notebookId) return;
+    if (!hasProcessingFiles || !writableNotebookId) return;
     const timer = window.setInterval(() => {
-      fetchNotebook(notebookId)
+      fetchNotebook(writableNotebookId)
         .then((data) => {
           setNotebook(data.notebook);
           const nextFiles = data.files || [];
@@ -983,11 +1005,11 @@ function NotebookDetailContent() {
         });
     }, 3500);
     return () => window.clearInterval(timer);
-  }, [hasProcessingFiles, notebookId, t]);
+  }, [hasProcessingFiles, writableNotebookId, t]);
 
   const handleUpload = async (selected: FileList | File[] | null) => {
     const selectedFiles = Array.from(selected || []);
-    if (!selectedFiles.length || !notebookId) return;
+    if (!selectedFiles.length || !writableNotebookId) return;
     setUploading(true);
     setPageError(null);
     try {
@@ -996,7 +1018,7 @@ function NotebookDetailContent() {
       for (const file of selectedFiles) {
         try {
           const publicId = await uploadNotebookSourceFile(file, currentWorkspaceId());
-          next.push(await addNotebookFile(notebookId, publicId));
+          next.push(await addNotebookFile(writableNotebookId, publicId));
         } catch (error) {
           const normalized = normalizeNotebookError(error, `${file.name} ${t("notebook.uploadFailed")}`);
           failures.push(`${file.name}: ${normalized.message}`);
@@ -1023,11 +1045,11 @@ function NotebookDetailContent() {
   };
 
   const handleAddUrlSource = async (url: string) => {
-    if (!notebookId) return;
+    if (!writableNotebookId) return;
     setAddingUrl(true);
     setPageError(null);
     try {
-      const next = await addNotebookUrlSource(notebookId, url);
+      const next = await addNotebookUrlSource(writableNotebookId, url);
       const nextFiles = [next, ...files.filter((old) => old.file_id !== next.file_id)];
       setFiles(nextFiles);
       setSelectedFileIds((prev) => reconcileSelectedFileIds(prev, nextFiles));
@@ -1043,14 +1065,14 @@ function NotebookDetailContent() {
   };
 
   const openPreview = async (file: NotebookFile, target?: NotebookSourceOpenTarget) => {
-    if (!notebookId) return;
+    if (!writableNotebookId) return;
     setPreviewSource(file);
     setPreviewTarget(target || null);
     setPreviewData(null);
     setPreviewError(null);
     setPreviewLoading(true);
     try {
-      const data = await fetchNotebookFileContent(notebookId, file.file_id);
+      const data = await fetchNotebookFileContent(writableNotebookId, file.file_id);
       setPreviewData(data);
       if (data.file) {
         setPreviewSource((current) => current && current.file_id === file.file_id ? { ...current, file: data.file } : current);
@@ -1084,11 +1106,11 @@ function NotebookDetailContent() {
   };
 
   const confirmRemoveSource = async () => {
-    if (!notebookId || !sourceToRemove) return;
+    if (!writableNotebookId || !sourceToRemove) return;
     const file = sourceToRemove;
     setRemovingSource(true);
     try {
-      await removeNotebookFile(notebookId, file.file_id);
+      await removeNotebookFile(writableNotebookId, file.file_id);
       setFiles((prev) => prev.filter((item) => item.id !== file.id));
       setSelectedFileIds((prev) => prev.filter((id) => id !== file.file_id));
       if (previewSource?.id === file.id) closePreview();
@@ -1102,12 +1124,12 @@ function NotebookDetailContent() {
   };
 
   const confirmRenameSource = async () => {
-    if (!notebookId || !sourceToRename) return;
+    if (!writableNotebookId || !sourceToRename) return;
     const filename = sourceRenameValue.trim();
     if (!filename) return;
     setRenamingSource(true);
     try {
-      const updated = await updateNotebookFile(notebookId, sourceToRename.file_id, { filename });
+      const updated = await updateNotebookFile(writableNotebookId, sourceToRename.file_id, { filename });
       setFiles((prev) => prev.map((item) => item.file_id === updated.file_id ? updated : item));
       setPreviewSource((current) => current?.file_id === updated.file_id ? updated : current);
       setSourceToRename(null);
@@ -1120,10 +1142,10 @@ function NotebookDetailContent() {
   };
 
   const retrySourceIndexing = async (file: NotebookFile) => {
-    if (!notebookId || !canRetryNotebookIndex(file)) return;
+    if (!writableNotebookId || !canRetryNotebookIndex(file)) return;
     setReindexingSourceFileId(file.file_id);
     try {
-      const updated = await reindexNotebookFile(notebookId, file.file_id);
+      const updated = await reindexNotebookFile(writableNotebookId, file.file_id);
       setFiles((prev) => prev.map((item) => item.file_id === updated.file_id ? updated : item));
       setPreviewSource((current) => current?.file_id === updated.file_id ? updated : current);
       toast.success(t("notebook.reindexQueued"));
@@ -1244,7 +1266,7 @@ function NotebookDetailContent() {
   };
 
   const openReportDialog = async () => {
-    if (!notebookId) return;
+    if (!writableNotebookId) return;
     if (selectedFileIds.length === 0) {
       toast.info(t("notebook.studio.selectSourcesFirst"));
       return;
@@ -1254,7 +1276,7 @@ function NotebookDetailContent() {
     setLoadingReportSuggestions(true);
     try {
       const suggestions = await suggestNotebookReportFormats({
-        notebookId,
+        notebookId: writableNotebookId,
         file_ids: selectedFileIds,
         language: language as LanguageCode,
       });
@@ -1268,11 +1290,11 @@ function NotebookDetailContent() {
   };
 
   const generateStudioArtifactByType = async (type: string, visualType: NotebookStudioActionId, options?: { orientation?: string; style?: string; detail_level?: string; prompt?: string; file_ids?: number[]; successMessage?: string }) => {
-    if (!notebookId) return;
+    if (!writableNotebookId) return;
     setGeneratingStudioType(visualType);
     try {
       const saved = await generateNotebookArtifact({
-        notebookId,
+        notebookId: writableNotebookId,
         type,
         file_ids: options?.file_ids || selectedFileIds,
         language: language as LanguageCode,
@@ -1314,7 +1336,7 @@ function NotebookDetailContent() {
       return;
     }
     if (type === "infographic") {
-      if (!notebookId) return;
+      if (!writableNotebookId) return;
       if (selectedFileIds.length === 0) {
         toast.info(t("notebook.studio.selectSourcesFirst"));
         return;
@@ -1322,7 +1344,7 @@ function NotebookDetailContent() {
       await generateStudioArtifactByType("infographic", "infographic", options);
       return;
     }
-    if (!notebookId) return;
+    if (!writableNotebookId) return;
     if (selectedFileIds.length === 0) {
       toast.info(t("notebook.studio.selectSourcesFirst"));
       return;
@@ -1331,7 +1353,7 @@ function NotebookDetailContent() {
   };
 
   const handleRegenerateArtifact = async (artifact: NotebookStudioArtifact) => {
-    if (!notebookId) return;
+    if (!writableNotebookId) return;
     const request = regenerationRequestForArtifact(artifact);
     if (!request) {
       toast.error(t("notebook.studio.regenerateFailed"));
@@ -1350,11 +1372,11 @@ function NotebookDetailContent() {
   };
 
   const handleRenameArtifact = async (artifact: NotebookStudioArtifact) => {
-    if (!notebookId) return;
+    if (!writableNotebookId) return;
     const title = window.prompt(t("notebook.studio.renamePrompt"), artifact.title)?.trim();
     if (!title || title === artifact.title) return;
     try {
-      const updated = await updateNotebookArtifact(notebookId, Number(artifact.id), { title, subtitle: artifact.subtitle });
+      const updated = await updateNotebookArtifact(writableNotebookId, Number(artifact.id), { title, subtitle: artifact.subtitle });
       const next = toStudioArtifact(updated);
       if (next) {
         setStudioArtifacts((prev) => prev.map((item) => item.id === next.id ? next : item));
@@ -1367,10 +1389,10 @@ function NotebookDetailContent() {
   };
 
   const handleDeleteArtifact = async (artifact: NotebookStudioArtifact) => {
-    if (!notebookId) return;
+    if (!writableNotebookId) return;
     if (!window.confirm(t("notebook.studio.deleteConfirm", { title: artifact.title }))) return;
     try {
-      await deleteNotebookArtifact(notebookId, Number(artifact.id));
+      await deleteNotebookArtifact(writableNotebookId, Number(artifact.id));
       setStudioArtifacts((prev) => {
         const next = prev.filter((item) => item.id !== artifact.id);
         setActiveStudioArtifactId((current) => current === artifact.id ? next[0]?.id || null : current);
@@ -1473,11 +1495,11 @@ function NotebookDetailContent() {
   };
 
   const handleRename = async () => {
-    if (!notebook) return;
+    if (!notebook || !writableNotebookId) return;
     const title = window.prompt(t("notebook.renamePrompt"), notebook.title)?.trim();
     if (!title || title === notebook.title) return;
     try {
-      const updated = await updateNotebook(notebook.id, { title });
+      const updated = await updateNotebook(writableNotebookId, { title });
       setNotebook(updated);
       toast.success(t("notebook.renameSuccess"));
     } catch (error) {
@@ -1504,7 +1526,7 @@ function NotebookDetailContent() {
           <div className="flex items-start gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-brand-muted text-brand"><BookOpen className="h-5 w-5" /></div>
             <div className="min-w-0 flex-1">
-              <button onClick={handleRename} className="block max-w-full truncate text-left text-lg font-semibold text-text-primary hover:text-brand">{notebook?.title || t("notebook.untitled")}</button>
+              <button onClick={handleRename} disabled={!writableNotebookId} className="block max-w-full truncate text-left text-lg font-semibold text-text-primary hover:text-brand disabled:cursor-default disabled:hover:text-text-primary">{notebook?.title || t("notebook.untitled")}</button>
               <p className="mt-1 text-xs text-text-tertiary">{t("notebook.readyCount").replace("{ready}", String(readyCount)).replace("{total}", String(files.length))}</p>
             </div>
           </div>
@@ -1517,35 +1539,40 @@ function NotebookDetailContent() {
           </div>
           <button
             type="button"
-            onClick={() => setUrlDialogOpen(true)}
-            disabled={addingUrl}
+            onClick={() => writableNotebookId && setUrlDialogOpen(true)}
+            disabled={addingUrl || !writableNotebookId}
             className="mb-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-brand-muted text-sm font-semibold text-text-primary transition hover:bg-brand-muted/80 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {addingUrl ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             {t("notebook.addSource")}
           </button>
           <div className="mb-3 rounded-[22px] border border-surface-border bg-surface-elevated p-3">
-            <button type="button" onClick={() => setUrlDialogOpen(true)} className="block w-full rounded-2xl px-2 py-1.5 text-left text-sm font-medium text-text-secondary transition hover:text-text-primary">
+            <button type="button" onClick={() => writableNotebookId && setUrlDialogOpen(true)} className="block w-full rounded-2xl px-2 py-1.5 text-left text-sm font-medium text-text-secondary transition hover:text-text-primary">
               {t("notebook.searchNewSources")}
             </button>
             <div className="mt-2 flex items-center gap-2">
-              <button type="button" onClick={() => setUrlDialogOpen(true)} className="inline-flex h-8 items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-2.5 text-xs font-medium text-text-secondary transition hover:text-text-primary">
+              <button type="button" onClick={() => writableNotebookId && setUrlDialogOpen(true)} className="inline-flex h-8 items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-2.5 text-xs font-medium text-text-secondary transition hover:text-text-primary">
                 <Globe className="h-3.5 w-3.5" />Web
               </button>
-              <button type="button" onClick={() => setUrlDialogOpen(true)} className="inline-flex h-8 items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-2.5 text-xs font-medium text-text-secondary transition hover:text-text-primary">
+              <button type="button" onClick={() => writableNotebookId && setUrlDialogOpen(true)} className="inline-flex h-8 items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-2.5 text-xs font-medium text-text-secondary transition hover:text-text-primary">
                 <Zap className="h-3.5 w-3.5 text-brand" />Fast Research
               </button>
-              <button type="button" onClick={() => setUrlDialogOpen(true)} className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-full bg-surface-card text-text-secondary transition hover:bg-brand hover:text-white">
+              <button type="button" onClick={() => writableNotebookId && setUrlDialogOpen(true)} className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-full bg-surface-card text-text-secondary transition hover:bg-brand hover:text-white">
                 <Search className="h-3.5 w-3.5" />
               </button>
             </div>
           </div>
-          <input ref={inputRef} type="file" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
+          <input ref={inputRef} type="file" multiple disabled={!writableNotebookId} className="hidden" onChange={(e) => handleUpload(e.target.files)} />
 
           {pageError && (
             <div className="mb-3 flex items-start gap-2 rounded-2xl border border-red-500/20 bg-red-500/10 px-3 py-2.5 text-xs leading-5 text-red-600 dark:text-red-300">
               <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <span>{pageError}</span>
+            </div>
+          )}
+          {isDemoNotebook && (
+            <div className="mb-3 rounded-2xl border border-brand/20 bg-brand-muted/60 px-3 py-2.5 text-xs leading-5 text-text-secondary">
+              Demo 笔记本为只读示例。要上传来源或生成 Studio 内容，请新建自己的笔记本。
             </div>
           )}
 
@@ -1674,7 +1701,7 @@ function NotebookDetailContent() {
       <section className="min-w-[420px] flex-1 overflow-hidden rounded-[28px] border border-surface-border bg-surface-card shadow-sm">
         <ChatInterface
           conversationId={conversationId}
-          notebookId={notebookId}
+          notebookId={writableNotebookId || undefined}
           notebookTitle={notebook?.title}
           notebookFileCount={files.length}
           notebookFileIds={selectedFileIds}
@@ -1684,7 +1711,7 @@ function NotebookDetailContent() {
             coverClassName: heroCover.className,
             icon: heroIcon,
             imageUrl: heroCoverImageUrl,
-            onCustomize: openCustomizeDialog,
+            onCustomize: writableNotebookId ? openCustomizeDialog : undefined,
           } : undefined}
           models={MODELS}
           welcomeTitle="让我们开始制作笔记本..."

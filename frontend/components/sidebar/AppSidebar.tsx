@@ -1379,7 +1379,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                   </div>
                 ) : sidebarNotebookItems.map((notebook) => {
                   const isDemo = "demo" in notebook && notebook.demo;
-                  const href = isDemo ? "/notebooks" : `/notebooks/detail?notebook_id=${notebook.id}`;
+                  const href = `/notebooks/detail?notebook_id=${notebook.id}`;
                   return (
                     <button
                       key={notebook.itemKey}

@@ -173,11 +173,10 @@ export default function NotebooksPage() {
                 {filtered.slice(0, 3).map((notebook) => {
                   const uploadedCover = readNotebookUploadedCover(notebook.cover_icon);
                   const coverPreset = notebookCoverPreset(notebook.cover_icon);
-                  const isDemo = "demo" in notebook && notebook.demo;
                   return (
                     <Link
                       key={`featured-${notebook.id}`}
-                      href={isDemo ? "/notebooks" : `/notebooks/detail?notebook_id=${notebook.id}`}
+                      href={`/notebooks/detail?notebook_id=${notebook.id}`}
                       className="group relative flex aspect-[1.62] overflow-hidden rounded-[20px] bg-slate-100 p-5 text-slate-950 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
                     >
                       {uploadedCover ? (
@@ -231,11 +230,10 @@ export default function NotebooksPage() {
                   const uploadedCover = readNotebookUploadedCover(notebook.cover_icon);
                   const coverPreset = notebookCoverPreset(notebook.cover_icon);
                   const hasImage = Boolean(uploadedCover);
-                  const isDemo = "demo" in notebook && notebook.demo;
                   return (
                     <Link
                       key={notebook.id}
-                      href={isDemo ? "/notebooks" : `/notebooks/detail?notebook_id=${notebook.id}`}
+                      href={`/notebooks/detail?notebook_id=${notebook.id}`}
                       className={cn(
                         "group relative flex aspect-[1.62] flex-col overflow-hidden rounded-[20px] p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md",
                         hasImage ? "bg-slate-900 text-white" : "bg-[#eef4ff] text-slate-950"
