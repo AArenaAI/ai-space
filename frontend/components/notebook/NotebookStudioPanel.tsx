@@ -479,6 +479,7 @@ function FlashcardsArtifactView({ artifact, t, onExplain }: { artifact: Extract<
   const [index, setIndex] = useState(0);
   const [answerVisible, setAnswerVisible] = useState(false);
   const [known, setKnown] = useState<Record<number, boolean | null>>({});
+  const [reviewOnlyWrong, setReviewOnlyWrong] = useState(false);
   const [slideDirection, setSlideDirection] = useState<"left" | "right" | null>(null);
   const [reviewFeedback, setReviewFeedback] = useState<"wrong" | "right" | null>(null);
   const total = artifact.cards.length;
@@ -516,29 +517,66 @@ function FlashcardsArtifactView({ artifact, t, onExplain }: { artifact: Extract<
   const wrongCount = Object.values(known).filter((value) => value === false).length;
   const rightCount = Object.values(known).filter((value) => value === true).length;
   const reviewedCount = wrongCount + rightCount;
+  const reviewQueue = useMemo(() => Array.from({ length: total }, (_, cardIndex) => cardIndex).filter((cardIndex) => known[cardIndex] === false), [known, total]);
+  useEffect(() => {
+    if (!reviewOnlyWrong) return;
+    if (!reviewQueue.length) {
+      setReviewOnlyWrong(false);
+      return;
+    }
+    if (!reviewQueue.includes(index)) {
+      setIndex(reviewQueue[0]);
+      setAnswerVisible(false);
+    }
+  }, [index, reviewOnlyWrong, reviewQueue]);
   const resetProgress = () => {
     setKnown({});
+    setReviewOnlyWrong(false);
     setAnswerVisible(false);
     setReviewFeedback(null);
     setSlideDirection(null);
     setIndex(0);
   };
+  const getQueuedIndex = (direction: "left" | "right", candidateQueue = reviewQueue) => {
+    if (!candidateQueue.length) return index;
+    const queuePosition = candidateQueue.indexOf(index);
+    if (queuePosition === -1) return candidateQueue[0];
+    const nextPosition = direction === "left" ? queuePosition + 1 : queuePosition - 1;
+    return candidateQueue[(nextPosition + candidateQueue.length) % candidateQueue.length];
+  };
   const go = (next: number, direction: "left" | "right" = next > index ? "left" : "right") => {
     if (!total) return;
+    const targetIndex = reviewOnlyWrong ? getQueuedIndex(direction) : (next + total) % total;
     setReviewFeedback(null);
     setSlideDirection(direction);
-    setIndex((next + total) % total);
+    setIndex(targetIndex);
     setAnswerVisible(false);
     window.setTimeout(() => setSlideDirection(null), 260);
   };
+  const toggleReviewOnlyWrong = () => {
+    if (reviewOnlyWrong) {
+      setReviewOnlyWrong(false);
+      return;
+    }
+    if (!reviewQueue.length) return;
+    setReviewOnlyWrong(true);
+    setIndex(reviewQueue[0]);
+    setAnswerVisible(false);
+  };
   const review = (value: boolean) => {
     if (!total || reviewFeedback) return;
-    setKnown((prev) => ({ ...prev, [index]: value }));
+    const nextKnown = { ...known, [index]: value };
+    const nextQueue = Array.from({ length: total }, (_, cardIndex) => cardIndex).filter((cardIndex) => nextKnown[cardIndex] === false);
+    const targetIndex = reviewOnlyWrong
+      ? (nextQueue.length ? getQueuedIndex("left", nextQueue) : 0)
+      : (index + 1) % total;
+    setKnown(nextKnown);
     setReviewFeedback(value ? "right" : "wrong");
     setAnswerVisible(false);
     setSlideDirection(value ? "left" : "right");
     window.setTimeout(() => {
-      setIndex((index + 1) % total);
+      if (reviewOnlyWrong && !nextQueue.length) setReviewOnlyWrong(false);
+      setIndex(targetIndex);
       setReviewFeedback(null);
       setSlideDirection(null);
     }, 520);
@@ -556,11 +594,16 @@ function FlashcardsArtifactView({ artifact, t, onExplain }: { artifact: Extract<
         .notebook-flashcard-face { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
         .notebook-flashcard-back { transform: rotateY(180deg); }
       `}</style>
-      <div className="flex w-full max-w-[480px] items-center justify-between gap-3 rounded-2xl border border-surface-border bg-surface-card/90 px-4 py-3 text-xs text-text-secondary shadow-sm">
+      <div className="flex w-full max-w-[480px] flex-wrap items-center justify-between gap-3 rounded-2xl border border-surface-border bg-surface-card/90 px-4 py-3 text-xs text-text-secondary shadow-sm">
         <span>{t("notebook.studio.flashcardProgress", { reviewed: String(reviewedCount), total: String(total), known: String(rightCount), review: String(wrongCount) })}</span>
-        <button type="button" onClick={resetProgress} disabled={!reviewedCount || Boolean(reviewFeedback)} className="rounded-full border border-surface-border px-3 py-1.5 font-semibold text-text-secondary transition hover:bg-surface-elevated disabled:cursor-not-allowed disabled:opacity-50">
-          {t("notebook.studio.resetFlashcards")}
-        </button>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={toggleReviewOnlyWrong} disabled={!wrongCount || Boolean(reviewFeedback)} className={cn("rounded-full border px-3 py-1.5 font-semibold transition disabled:cursor-not-allowed disabled:opacity-50", reviewOnlyWrong ? "border-red-500/30 bg-red-500/10 text-red-500" : "border-surface-border text-text-secondary hover:bg-surface-elevated")}>
+            {reviewOnlyWrong ? t("notebook.studio.reviewAllFlashcards") : t("notebook.studio.reviewWrongFlashcards")}
+          </button>
+          <button type="button" onClick={resetProgress} disabled={!reviewedCount || Boolean(reviewFeedback)} className="rounded-full border border-surface-border px-3 py-1.5 font-semibold text-text-secondary transition hover:bg-surface-elevated disabled:cursor-not-allowed disabled:opacity-50">
+            {t("notebook.studio.resetFlashcards")}
+          </button>
+        </div>
       </div>
       <div className="w-full max-w-[480px] rounded-[34px] border border-surface-border bg-surface-elevated/80 p-3 shadow-sm">
         <div

@@ -306,6 +306,8 @@ const translations: Record<string, string> = {
   "notebook.studio.known": "懂了",
   "notebook.studio.unknown": "再练",
   "notebook.studio.flashcardProgress": "已复习 {reviewed}/{total} · 懂了 {known} · 再练 {review}",
+  "notebook.studio.reviewWrongFlashcards": "只练再练",
+  "notebook.studio.reviewAllFlashcards": "全部卡片",
   "notebook.studio.resetFlashcards": "重置",
   "notebook.studio.explainFlashcard": "解释",
   "notebook.studio.flashcardsEmpty": "暂无可复习的闪卡",

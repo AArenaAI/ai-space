@@ -306,6 +306,8 @@ const translations: Record<string, string> = {
   "notebook.studio.known": "Got it",
   "notebook.studio.unknown": "Review",
   "notebook.studio.flashcardProgress": "Reviewed {reviewed}/{total} · Got it {known} · Review {review}",
+  "notebook.studio.reviewWrongFlashcards": "Review only",
+  "notebook.studio.reviewAllFlashcards": "All cards",
   "notebook.studio.resetFlashcards": "Reset",
   "notebook.studio.explainFlashcard": "Explain",
   "notebook.studio.flashcardsEmpty": "No flashcards to review yet",
