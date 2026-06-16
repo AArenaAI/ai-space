@@ -1438,11 +1438,7 @@ function NotebookDetailContent() {
       const artifact = toStudioArtifact(saved);
       if (artifact) {
         setStudioArtifacts((prev) => [artifact, ...prev.filter((item) => item.id !== artifact.id)]);
-        if (artifact.type === "infographic") {
-          setActiveStudioArtifactId(null);
-        } else {
-          setActiveStudioArtifactId(artifact.id);
-        }
+        setActiveStudioArtifactId(null);
       }
       toast.success(options?.successMessage || (visualType === "table" ? t("notebook.studio.tableGenerated") : visualType === "quiz" ? t("notebook.studio.quizGenerated") : visualType === "report" ? t("notebook.studio.reportGenerated") : visualType === "infographic" ? t("notebook.studio.infographicGenerated") : t("notebook.studio.textGenerated")));
     } catch (error) {
