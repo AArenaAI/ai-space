@@ -320,8 +320,9 @@ export default function NotebooksPage() {
                   })}
                 </div>
               ) : (
-                <div className="bg-white">
-                  <div className="grid grid-cols-[minmax(520px,1fr)_140px_190px_110px_40px] border-b border-[#e5e7eb] px-0 pb-3 text-[14px] font-medium leading-5 text-[#6b7280]">
+                <div className="relative isolate bg-white">
+                  <div className="absolute inset-0 -z-10 bg-white" aria-hidden="true" />
+                  <div className="grid grid-cols-[minmax(520px,1fr)_140px_190px_110px_40px] border-b border-[#e5e7eb] bg-white px-0 pb-3 text-[14px] font-medium leading-5 text-[#6b7280]">
                     <span>标题</span>
                     <span>来源</span>
                     <span>创建日期</span>
@@ -338,7 +339,7 @@ export default function NotebooksPage() {
                     <Link
                       key={notebook.id}
                       href={`/notebooks/detail?notebook_id=${notebook.id}`}
-                      className="grid min-h-[58px] grid-cols-[minmax(520px,1fr)_140px_190px_110px_40px] items-center border-b border-[#e5e7eb] px-0 py-3.5 transition hover:bg-[#f9fafb]"
+                      className="grid min-h-[58px] grid-cols-[minmax(520px,1fr)_140px_190px_110px_40px] items-center border-b border-[#e5e7eb] bg-white px-0 py-3.5 transition-colors duration-100 hover:bg-[#f9fafb]"
                     >
                       <span className="min-w-0 pr-8 text-[14px] font-normal leading-6 text-[#111827]">{notebook.title || t("notebook.untitled")}</span>
                       <span className="text-[14px] font-normal leading-6 text-[#4b5563]">{t("notebook.fileCount").replace("{count}", String(notebook.file_count || 0))}</span>
