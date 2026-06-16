@@ -705,6 +705,57 @@ function RenameArtifactDialog({
   );
 }
 
+function RenameNotebookDialog({
+  open,
+  notebook,
+  value,
+  saving,
+  onChange,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  notebook: Notebook | null;
+  value: string;
+  saving: boolean;
+  onChange: (value: string) => void;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  if (!open || !notebook) return null;
+  return (
+    <div className="fixed inset-0 z-[160] flex items-center justify-center bg-black/45 p-5 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="w-[min(460px,94vw)] rounded-[24px] border border-surface-border bg-surface-card p-6 shadow-2xl">
+        <div className="mb-5 flex items-start gap-3">
+          <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#111827]/10 text-[#111827] dark:bg-white/10 dark:text-white">
+            <Pencil className="h-5 w-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h3 className="text-base font-semibold text-text-primary">重命名 Notebook</h3>
+            <p className="mt-1 text-sm leading-6 text-text-secondary">修改这个 Notebook 的标题。</p>
+          </div>
+        </div>
+        <label className="mb-2 block text-sm font-semibold text-text-primary">Notebook 名称</label>
+        <input
+          autoFocus
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => { if (event.key === "Enter" && value.trim() && !saving) onConfirm(); }}
+          className="mb-5 h-11 w-full rounded-xl border border-surface-border bg-surface-elevated px-3 text-sm text-text-primary outline-none transition focus:border-[#111827] focus:bg-surface-card dark:focus:border-white/70"
+          placeholder="输入 Notebook 名称"
+        />
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} disabled={saving} className="rounded-full border border-surface-border px-4 py-2 text-sm font-semibold text-text-secondary transition hover:bg-surface-hover disabled:opacity-60">取消</button>
+          <button type="button" onClick={onConfirm} disabled={saving || !value.trim()} className="inline-flex items-center gap-2 rounded-full bg-[#111827] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#1f2937] disabled:opacity-60">
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            确认修改
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NotebookCustomizeDialog({
   open,
   notebook,
@@ -837,6 +888,9 @@ function NotebookDetailContent() {
   const [customizeDialogOpen, setCustomizeDialogOpen] = useState(false);
   const [customCoverIcon, setCustomCoverIcon] = useState("aispace-logo");
   const [savingNotebookCustom, setSavingNotebookCustom] = useState(false);
+  const [renameNotebookDialogOpen, setRenameNotebookDialogOpen] = useState(false);
+  const [notebookRenameValue, setNotebookRenameValue] = useState("");
+  const [renamingNotebook, setRenamingNotebook] = useState(false);
   const [sourceMenuFileId, setSourceMenuFileId] = useState<number | null>(null);
   const [sourceToRemove, setSourceToRemove] = useState<NotebookFile | null>(null);
   const [removingSource, setRemovingSource] = useState(false);
@@ -1577,16 +1631,37 @@ function NotebookDetailContent() {
     setExternalChatSendRequest({ id: Date.now(), content });
   };
 
-  const handleRename = async () => {
+  const handleRename = () => {
     if (!notebook || !writableNotebookId) return;
-    const title = window.prompt(t("notebook.renamePrompt"), notebook.title)?.trim();
-    if (!title || title === notebook.title) return;
+    setNotebookRenameValue(notebook.title);
+    setRenameNotebookDialogOpen(true);
+  };
+
+  const closeRenameNotebookDialog = () => {
+    if (renamingNotebook) return;
+    setRenameNotebookDialogOpen(false);
+    setNotebookRenameValue("");
+  };
+
+  const confirmRenameNotebook = async () => {
+    if (!notebook || !writableNotebookId) return;
+    const title = notebookRenameValue.trim();
+    if (!title) return;
+    if (title === notebook.title) {
+      closeRenameNotebookDialog();
+      return;
+    }
+    setRenamingNotebook(true);
     try {
       const updated = await updateNotebook(writableNotebookId, { title });
       setNotebook(updated);
+      setRenameNotebookDialogOpen(false);
+      setNotebookRenameValue("");
       toast.success(t("notebook.renameSuccess"));
     } catch (error) {
       showNotebookError(error, t("notebook.renameFailed"));
+    } finally {
+      setRenamingNotebook(false);
     }
   };
 
@@ -1903,6 +1978,15 @@ function NotebookDetailContent() {
       onChange={setArtifactRenameValue}
       onClose={closeRenameArtifactDialog}
       onConfirm={confirmRenameArtifact}
+    />
+    <RenameNotebookDialog
+      open={renameNotebookDialogOpen}
+      notebook={notebook}
+      value={notebookRenameValue}
+      saving={renamingNotebook}
+      onChange={setNotebookRenameValue}
+      onClose={closeRenameNotebookDialog}
+      onConfirm={confirmRenameNotebook}
     />
     </>
   );
