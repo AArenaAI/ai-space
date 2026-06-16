@@ -1499,17 +1499,11 @@ export function NotebookStudioPanel({
     return sourceFiles.slice(0, Math.max(0, artifact.sourceCount || 0));
   };
   const sortedArtifacts = useMemo(() => {
-    const typeCounts = new Map<NotebookStudioArtifact["type"], number>();
     return [...artifacts]
       .sort((a, b) => {
         const aTime = new Date(a.createdAt).getTime();
         const bTime = new Date(b.createdAt).getTime();
         return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
-      })
-      .map((artifact) => {
-        const nextVersion = (typeCounts.get(artifact.type) || 0) + 1;
-        typeCounts.set(artifact.type, nextVersion);
-        return { artifact, version: nextVersion };
       });
   }, [artifacts]);
   const actions: Array<{ id: NotebookStudioActionId; title: string; desc: string; accent: string; bgClass: string }> = [
@@ -1572,7 +1566,7 @@ export function NotebookStudioPanel({
               </div>
             )}
             <div className="flex flex-col items-center gap-2">
-              {sortedArtifacts.map(({ artifact }) => {
+              {sortedArtifacts.map((artifact) => {
                 const Icon = artifactIconMap[artifact.type];
                 return (
                   <button key={artifact.id} type="button" onClick={() => { setIsCollapsed(false); handleArtifactClick(artifact); }} title={artifact.title} className={cn("flex h-11 w-11 items-center justify-center rounded-2xl transition hover:bg-surface-elevated", activeArtifactId === artifact.id && "bg-surface-elevated ring-1 ring-brand-border")}>
@@ -1706,7 +1700,7 @@ export function NotebookStudioPanel({
         ) : (
           <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5">
             <div className="space-y-1.5">
-              {sortedArtifacts.map(({ artifact, version }) => {
+              {sortedArtifacts.map((artifact) => {
                 const Icon = artifactIconMap[artifact.type];
                 return (
                       <div key={artifact.id} className="group relative rounded-[18px] transition hover:bg-surface-elevated/70">
@@ -1718,7 +1712,6 @@ export function NotebookStudioPanel({
                             <button type="button" onClick={() => handleArtifactClick(artifact)} className="block w-full text-left">
                               <div className="flex min-w-0 items-center gap-2">
                                 <span className="truncate text-[14px] font-semibold leading-5 tracking-[-0.01em] text-text-primary">{artifact.title}</span>
-                                <span className="shrink-0 rounded-full border border-surface-border bg-surface-elevated px-1.5 py-0.5 text-[10px] font-semibold text-text-tertiary">{t("notebook.studio.outputVersion", { version: String(version) })}</span>
                               </div>
                               <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px] leading-4 text-text-tertiary">
                                 <span className="truncate">{artifact.subtitle}</span>
