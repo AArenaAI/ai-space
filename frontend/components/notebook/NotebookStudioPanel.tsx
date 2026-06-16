@@ -375,27 +375,27 @@ function renderTextArtifact(artifact: Extract<NotebookStudioArtifact, { type: "s
 
 function renderTableArtifact(artifact: Extract<NotebookStudioArtifact, { type: "table" }>, t: (key: string, params?: Record<string, string>) => string, expanded = false, onOpenSource?: (sourceId: number, target?: NotebookSourceOpenTarget) => void) {
   return (
-    <div className={cn("overflow-auto border border-surface-border bg-surface-card", expanded ? "min-h-0 flex-1 rounded-lg shadow-none" : "max-h-[460px] rounded-2xl shadow-sm")}>
-      <table className={cn("border-collapse text-left", expanded ? "min-w-[960px] text-[13px]" : "min-w-[780px] text-xs")}>
-        <thead className="sticky top-0 z-10 bg-surface-elevated/95 text-text-primary">
+    <div className={cn("relative overflow-auto border border-surface-border bg-surface-card", expanded ? "min-h-0 flex-1 rounded-lg shadow-none" : "max-h-[460px] rounded-2xl shadow-sm")}>
+      <table className={cn("border-separate border-spacing-0 table-fixed text-left", expanded ? "min-w-[1180px] text-[13px]" : "min-w-[980px] text-xs")}>
+        <thead className="sticky top-0 z-20 bg-surface-elevated text-text-primary shadow-[0_1px_0_var(--surface-border)]">
           <tr>
-            <th className={cn("border-b border-surface-border font-semibold", expanded ? "px-4 py-3.5 text-[13px]" : "px-3 py-3")}>{t("notebook.studio.columnModule")}</th>
-            <th className={cn("border-b border-surface-border font-semibold", expanded ? "px-4 py-3.5 text-[13px]" : "px-3 py-3")}>{t("notebook.studio.columnCapability")}</th>
-            <th className={cn("border-b border-surface-border font-semibold [writing-mode:vertical-rl]", expanded ? "px-3 py-3.5 text-[13px]" : "px-3 py-3")}>{t("notebook.studio.columnStatus")}</th>
-            <th className={cn("border-b border-surface-border font-semibold", expanded ? "px-4 py-3.5 text-[13px]" : "px-3 py-3")}>{t("notebook.studio.columnImplementation")}</th>
-            <th className={cn("border-b border-surface-border font-semibold", expanded ? "px-4 py-3.5 text-[13px]" : "px-3 py-3")}>{t("notebook.studio.columnValue")}</th>
-            <th className={cn("border-b border-surface-border font-semibold", expanded ? "px-4 py-3.5 text-[13px]" : "px-3 py-3")}>{t("notebook.studio.columnSource")}</th>
+            <th className={cn("w-[180px] border-b border-surface-border bg-surface-elevated font-semibold leading-5 align-middle", expanded ? "px-5 py-4 text-[13px]" : "px-4 py-3.5")}>{t("notebook.studio.columnModule")}</th>
+            <th className={cn("w-[300px] border-b border-surface-border bg-surface-elevated font-semibold leading-5 align-middle", expanded ? "px-5 py-4 text-[13px]" : "px-4 py-3.5")}>{t("notebook.studio.columnCapability")}</th>
+            <th className={cn("w-[72px] border-b border-surface-border bg-surface-elevated text-center font-semibold leading-5 align-middle", expanded ? "px-3 py-4 text-[13px]" : "px-3 py-3.5")}>{t("notebook.studio.columnStatus")}</th>
+            <th className={cn("w-[260px] border-b border-surface-border bg-surface-elevated font-semibold leading-5 align-middle", expanded ? "px-5 py-4 text-[13px]" : "px-4 py-3.5")}>{t("notebook.studio.columnImplementation")}</th>
+            <th className={cn("w-[240px] border-b border-surface-border bg-surface-elevated font-semibold leading-5 align-middle", expanded ? "px-5 py-4 text-[13px]" : "px-4 py-3.5")}>{t("notebook.studio.columnValue")}</th>
+            <th className={cn("w-[128px] border-b border-surface-border bg-surface-elevated font-semibold leading-5 align-middle", expanded ? "px-5 py-4 text-[13px]" : "px-4 py-3.5")}>{t("notebook.studio.columnSource")}</th>
           </tr>
         </thead>
         <tbody>
           {artifact.rows.map((row, index) => (
             <tr key={`${row.module}-${index}`} className="align-top hover:bg-surface-hover/60">
-              <td className={cn("border-b border-surface-border font-semibold text-text-primary", expanded ? "px-4 py-[18px] leading-6" : "px-3 py-4")}>{row.module}</td>
-              <td className={cn("border-b border-surface-border text-text-secondary", expanded ? "px-4 py-[18px] leading-6" : "px-3 py-4 leading-5")}>{row.capability}</td>
-              <td className={cn("border-b border-surface-border text-center font-medium text-text-secondary [writing-mode:vertical-rl]", expanded ? "px-3 py-[18px] leading-6" : "px-3 py-4")}>{row.status}</td>
-              <td className={cn("border-b border-surface-border text-text-secondary", expanded ? "px-4 py-[18px] leading-6" : "px-3 py-4 leading-5")}>{row.implementation}</td>
-              <td className={cn("border-b border-surface-border text-text-secondary", expanded ? "px-4 py-[18px] leading-6" : "px-3 py-4 leading-5")}>{row.value}</td>
-              <td className={cn("border-b border-surface-border font-medium text-brand", expanded ? "px-4 py-[18px] leading-6" : "px-3 py-4")}>
+              <td className={cn("break-words border-b border-surface-border bg-surface-card font-semibold text-text-primary align-top", expanded ? "px-5 py-5 leading-6" : "px-4 py-4 leading-5")}>{row.module}</td>
+              <td className={cn("break-words border-b border-surface-border bg-surface-card text-text-secondary align-top", expanded ? "px-5 py-5 leading-6" : "px-4 py-4 leading-5")}>{row.capability}</td>
+              <td className={cn("break-words border-b border-surface-border bg-surface-card text-center font-medium text-text-secondary align-top", expanded ? "px-3 py-5 leading-6" : "px-3 py-4 leading-5")}>{row.status}</td>
+              <td className={cn("break-words border-b border-surface-border bg-surface-card text-text-secondary align-top", expanded ? "px-5 py-5 leading-6" : "px-4 py-4 leading-5")}>{row.implementation}</td>
+              <td className={cn("break-words border-b border-surface-border bg-surface-card text-text-secondary align-top", expanded ? "px-5 py-5 leading-6" : "px-4 py-4 leading-5")}>{row.value}</td>
+              <td className={cn("break-words border-b border-surface-border bg-surface-card font-medium text-brand align-top", expanded ? "px-5 py-5 leading-6" : "px-4 py-4 leading-5")}>
                 {row.citations?.length ? <CitationMarkers citations={row.citations} onOpenSource={onOpenSource} /> : row.source}
               </td>
             </tr>
