@@ -768,8 +768,8 @@ function NotebookDetailContent() {
   const [urlDialogOpen, setUrlDialogOpen] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
   const [selectedFileIds, setSelectedFileIds] = useState<number[]>([]);
-  const [sourcesWidth, setSourcesWidth] = useState(340);
-  const [studioWidth, setStudioWidth] = useState(390);
+  const [sourcesWidth, setSourcesWidth] = useState(300);
+  const [studioWidth, setStudioWidth] = useState(340);
   const [previewSource, setPreviewSource] = useState<NotebookFile | null>(null);
   const [previewData, setPreviewData] = useState<NotebookFileContent | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -1532,15 +1532,9 @@ function NotebookDetailContent() {
           <Link href="/notebooks" className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-text-tertiary transition hover:text-text-primary">
             <ArrowLeft className="h-3.5 w-3.5" />{t("notebook.back")}
           </Link>
-          <div className="space-y-3">
-            <div className="flex items-center gap-2.5">
-              <img src={NOTEBOOK_DEFAULT_COVER_LOGO} alt="AI Space" className="h-[26px] w-[26px] shrink-0 object-contain" />
-              <span className="text-[22px] font-semibold leading-none tracking-[-0.03em] text-[#111827] dark:text-text-primary">Notebook</span>
-            </div>
-            <div className="min-w-0">
-              <button onClick={handleRename} disabled={!writableNotebookId} className="block max-w-full truncate text-left text-[15px] font-medium leading-5 text-text-primary hover:text-brand disabled:cursor-default disabled:hover:text-text-primary">{notebook?.title || t("notebook.untitled")}</button>
-              <p className="mt-1 text-xs text-text-tertiary">{t("notebook.readyCount").replace("{ready}", String(readyCount)).replace("{total}", String(files.length))}</p>
-            </div>
+          <div className="min-w-0">
+            <button onClick={handleRename} disabled={!writableNotebookId} className="block max-w-full truncate text-left text-[15px] font-medium leading-5 text-text-primary hover:text-brand disabled:cursor-default disabled:hover:text-text-primary">{notebook?.title || t("notebook.untitled")}</button>
+            <p className="mt-1 text-xs text-text-tertiary">{t("notebook.readyCount").replace("{ready}", String(readyCount)).replace("{total}", String(files.length))}</p>
           </div>
         </div>
 
