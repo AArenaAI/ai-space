@@ -14,9 +14,15 @@ const navItems = [
   { href: `${ADMIN_BASE}/usage`, label: "用量", icon: BarChart3 },
   { href: `${ADMIN_BASE}/models`, label: "模型", icon: Bot },
   { href: `${ADMIN_BASE}/tasks`, label: "任务", icon: ClipboardList },
-  { href: `${ADMIN_BASE}/beta-applications`, label: "内测申请", icon: Shield },
-  { href: `${ADMIN_BASE}/beta-invites`, label: "邀请码", icon: CreditCard },
-  { href: `${ADMIN_BASE}/beta-configs`, label: "内测配置", icon: Settings },
+  {
+    label: "内测运营",
+    icon: Shield,
+    children: [
+      { href: `${ADMIN_BASE}/beta-applications`, label: "内测申请" },
+      { href: `${ADMIN_BASE}/beta-invites`, label: "邀请码" },
+      { href: `${ADMIN_BASE}/beta-configs`, label: "内测配置" },
+    ],
+  },
   { href: `${ADMIN_BASE}/billing`, label: "支付", icon: CreditCard, disabled: true },
 ];
 
@@ -43,8 +49,43 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
 
         <nav className="mt-8 space-y-1">
           {navItems.map((item) => {
-            const active = item.exact ? pathname === item.href : pathname?.startsWith(item.href);
             const Icon = item.icon;
+            if ("children" in item) {
+              // 有子菜单的项
+              const isGroupActive = item.children?.some((c) => pathname?.startsWith(c.href));
+              return (
+                <div key={item.label} className="space-y-1">
+                  <div
+                    className={cn(
+                      "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium",
+                      isGroupActive ? "text-brand" : "text-text-secondary"
+                    )}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {item.label}
+                  </div>
+                  <div className="ml-6 space-y-0.5 border-l border-surface-border pl-3">
+                    {item.children?.map((child) => {
+                      const childActive = pathname?.startsWith(child.href);
+                      return (
+                        <Link
+                          key={child.href}
+                          href={child.href}
+                          className={cn(
+                            "flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors",
+                            childActive
+                              ? "bg-brand/10 text-brand font-medium"
+                              : "text-text-secondary hover:bg-surface-elevated hover:text-text-primary"
+                          )}
+                        >
+                          {child.label}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            }
             if (item.disabled) {
               return (
                 <div key={item.href} className="flex items-center justify-between rounded-xl px-3 py-2.5 text-sm text-text-tertiary opacity-60">
@@ -53,6 +94,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                 </div>
               );
             }
+            const active = item.exact ? pathname === item.href : pathname?.startsWith(item.href);
             return (
               <Link
                 key={item.href}

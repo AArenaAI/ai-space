@@ -30,6 +30,13 @@ export interface AdminOverview {
   usage: { today_requests: number; today_cost_rmb: number; today_failures: number };
   tasks: { running: number; failed_today: number };
   models: { top_by_cost: Array<{ model: string; provider: string; cost_rmb: number; requests: number }> };
+  beta?: {
+    pending_applications: number;
+    today_applications: number;
+    active_invites: number;
+    total_invites: number;
+    pending_bad_cases: number;
+  };
 }
 
 export interface AdminUsersResponse {

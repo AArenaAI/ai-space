@@ -185,11 +185,30 @@ func (h *AdminHandler) Overview(c *gin.Context) {
 
 	topModels := h.topUsageModels(startOfDay, 5)
 
+	// 内测运营数据
+	var pendingApplications int64
+	var todayApplications int64
+	var activeInvites int64
+	var totalInvites int64
+	var pendingBadCases int64
+	h.db.Model(&models.BetaApplication{}).Where("status = ?", "pending").Count(&pendingApplications)
+	h.db.Model(&models.BetaApplication{}).Where("created_at >= ?", startOfDay).Count(&todayApplications)
+	h.db.Model(&models.BetaInvite{}).Where("status = ?", "active").Count(&activeInvites)
+	h.db.Model(&models.BetaInvite{}).Count(&totalInvites)
+	h.db.Model(&models.BadCase{}).Where("status = ?", "pending").Count(&pendingBadCases)
+
 	c.JSON(http.StatusOK, gin.H{
 		"users":  gin.H{"total": totalUsers, "today_new": todayNewUsers},
 		"usage":  gin.H{"today_requests": todayRequests, "today_cost_rmb": todayCost, "today_failures": todayFailures},
 		"tasks":  gin.H{"running": runningTasks, "failed_today": failedTasksToday},
 		"models": gin.H{"top_by_cost": topModels},
+		"beta": gin.H{
+			"pending_applications": pendingApplications,
+			"today_applications":   todayApplications,
+			"active_invites":       activeInvites,
+			"total_invites":        totalInvites,
+			"pending_bad_cases":    pendingBadCases,
+		},
 	})
 }
 

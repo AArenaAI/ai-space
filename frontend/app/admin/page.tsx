@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertCircle, Bot, Clock, DollarSign, Loader2, Users, Zap } from "lucide-react";
+import { AlertCircle, Bot, Clock, DollarSign, Loader2, Shield, Tag, Users, Zap } from "lucide-react";
+import Link from "next/link";
 import { getAdminOverview } from "@/lib/admin/api";
 import type { AdminOverview } from "@/lib/admin/types";
 import { formatNumber, formatRMB } from "@/lib/admin/format";
@@ -48,6 +49,39 @@ export default function AdminOverviewPage() {
         <MetricCard title="今日成本" value={formatRMB(data.usage.today_cost_rmb)} helper="基于 api_usage_logs 汇总" icon={DollarSign} tone="amber" />
         <MetricCard title="运行中任务" value={formatNumber(data.tasks.running)} helper={`今日失败 ${formatNumber(data.tasks.failed_today)} 个`} icon={Clock} tone="purple" />
       </div>
+
+      {/* 内测运营数据 */}
+      {data.beta && (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <Link href="/admin/beta-applications" className="block">
+            <MetricCard
+              title="待审核申请"
+              value={formatNumber(data.beta.pending_applications)}
+              helper={`今日新增 ${formatNumber(data.beta.today_applications)} 条`}
+              icon={Shield}
+              tone="red"
+            />
+          </Link>
+          <Link href="/admin/beta-invites" className="block">
+            <MetricCard
+              title="可用邀请码"
+              value={formatNumber(data.beta.active_invites)}
+              helper={`总计 ${formatNumber(data.beta.total_invites)} 个`}
+              icon={Tag}
+              tone="teal"
+            />
+          </Link>
+          <Link href="/admin/beta-applications" className="block">
+            <MetricCard
+              title="待处理 Bad Case"
+              value={formatNumber(data.beta.pending_bad_cases)}
+              helper="需要审核并发放额度"
+              icon={AlertCircle}
+              tone="orange"
+            />
+          </Link>
+        </div>
+      )}
 
       <section className="rounded-2xl border border-surface-border bg-surface-card p-5 shadow-sm">
         <div className="flex items-center justify-between gap-4">

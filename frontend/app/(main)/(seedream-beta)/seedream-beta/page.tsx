@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Copy, Download, ImageIcon, Loader2, Layers, MessageSquare, PanelLeftOpen, Paperclip, Play, Plus, RefreshCw, Send, Sparkles, Trash2, UploadCloud, Video, Wand2, X } from "lucide-react";
+import { Copy, Download, ImageIcon, Loader2, Layers, MessageSquare, PanelLeftOpen, Paperclip, Play, Plus, RefreshCw, Send, Sparkles, Trash2, UploadCloud, Video, Wand2, X, LayoutGrid, Film, Grid3X3, List, Search } from "lucide-react";
 import { toast } from "sonner";
 import { useImage, type GeneratedImage } from "@/hooks/useImage";
 import { useVideo, type VideoGeneration } from "@/hooks/useVideo";
@@ -67,6 +67,7 @@ import {
 } from "./directorBlock";
 import Grid4x3 from "./Grid4x3";
 import VideoSegmentGenerator from "./VideoSegmentGenerator";
+import AssetLibraryLayout from "./AssetLibraryLayout";
 import Director3DPanel from "./Director3DPanel";
 import DirectorPanel from "./DirectorPanel";
 
@@ -1729,22 +1730,80 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
               <p className="truncate text-xs text-text-tertiary">当前项目：{workspaceProjectName}</p>
             </div>
           </div>
+          <div className="flex items-center gap-2">
+            {/* 全局工具栏 */}
+            <button
+              onClick={() => setActiveTab("assets")}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
+                activeTab === "assets"
+                  ? "bg-brand/10 text-brand"
+                  : "text-text-secondary hover:text-text-primary"
+              )}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              资产库
+            </button>
+            <button
+              onClick={() => setActiveTab("workflow")}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
+                activeTab === "workflow"
+                  ? "bg-brand/10 text-brand"
+                  : "text-text-secondary hover:text-text-primary"
+              )}
+            >
+              <Film className="h-3.5 w-3.5" />
+              工作台
+            </button>
+            <button
+              onClick={() => setWorkflowView("overview")}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-surface-border bg-surface-card px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary"
+            >
+              <Grid3X3 className="h-3.5 w-3.5" />
+              故事板
+            </button>
+          </div>
         </header>
 
         <section className="min-w-0 rounded-3xl border border-surface-border bg-surface-elevated p-5 shadow-sm">
-            {tab === "workflow" ? (
-              <div className="space-y-6">
-                {/* Step Navigation: production benches are first-class pages; earlier workflow steps keep a compact return bar. */}
-                {workflowView === "step" && !isProductionBenchMode && (
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowDirector3DPanel(true)}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-brand/30 bg-brand/10 px-3 py-1.5 text-xs font-medium text-brand hover:bg-brand/20"
-                    >
-                      <Layers className="h-3.5 w-3.5" />
-                      3D导演台
-                    </button>
+          {tab === "assets" && (
+            <AssetLibraryLayout
+              semanticAssets={semanticAssets}
+              storedAssets={assets}
+              selectedAssetIds={selectedAssetIds}
+              onSelectAsset={(id) => {
+                setSelectedAssetIds((prev) =>
+                  prev.includes(id)
+                    ? prev.filter((x) => x !== id)
+                    : [...prev, id]
+                );
+              }}
+              onGenerateAssetImage={(asset) => {
+                generateAssetImage(asset);
+              }}
+              onSearch={(query) => {
+                // TODO: 搜索过滤
+              }}
+              onFilterByKind={(kind) => {
+                setAssetKindFilter(kind as any);
+              }}
+              activeKind={assetKindFilter === "all" ? null : assetKindFilter}
+            />
+          )}
+          {tab === "workflow" && (
+            <div className="space-y-6">
+              {/* Step Navigation: production benches are first-class pages; earlier workflow steps keep a compact return bar. */}
+              {workflowView === "step" && !isProductionBenchMode && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowDirector3DPanel(true)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-brand/30 bg-brand/10 px-3 py-1.5 text-xs font-medium text-brand hover:bg-brand/20"
+                  >
+                    <Layers className="h-3.5 w-3.5" />
+                    3D导演台
+                  </button>
                     <button
                       type="button"
                       onClick={() => setShowDirectorPanel(true)}
@@ -1942,7 +2001,6 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
                     </div>
                   </div>
                 )}
-
 
                 {/* Step 2: Script */}
                 {workflowView === "step" && workflowMode === "script" && (
