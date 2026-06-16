@@ -131,7 +131,7 @@ function NotebookActionsMenu({
       {open && (
         <div
           className={cn(
-            "absolute top-9 z-40 w-[152px] overflow-hidden rounded-xl border border-[#e5e7eb] bg-white py-1.5 shadow-[0_12px_28px_rgba(15,23,42,0.16)]",
+            "absolute top-9 z-[200] w-[152px] overflow-hidden rounded-xl border border-[#e5e7eb] bg-white py-1.5 shadow-[0_12px_28px_rgba(15,23,42,0.16)]",
             align === "right" ? "right-0" : "left-0"
           )}
         >
@@ -369,6 +369,7 @@ export default function NotebooksPage() {
         }}
         className={cn(
           "group relative flex aspect-[1.62] cursor-pointer flex-col overflow-visible rounded-[20px] p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md",
+          openMenuId === notebook.id ? "z-[180]" : "z-0",
           hasImage ? "bg-slate-900 text-white" : "bg-[#eef4ff] text-slate-950"
         )}
       >
@@ -428,7 +429,10 @@ export default function NotebooksPage() {
             router.push(`/notebooks/detail?notebook_id=${notebook.id}`);
           }
         }}
-        className="grid min-h-[58px] cursor-pointer grid-cols-[minmax(520px,1fr)_140px_190px_110px_48px] items-center border-b border-[#e5e7eb] bg-white px-0 py-3.5 transition-colors duration-100 hover:bg-[#f9fafb]"
+        className={cn(
+          "relative grid min-h-[58px] cursor-pointer grid-cols-[minmax(520px,1fr)_140px_190px_110px_48px] items-center border-b border-[#e5e7eb] bg-white px-0 py-3.5 transition-colors duration-100 hover:bg-[#f9fafb]",
+          openMenuId === notebook.id ? "z-[180]" : "z-0"
+        )}
       >
         <span className="flex min-w-0 items-center gap-2 pr-8 text-[14px] font-normal leading-6 text-[#111827]">
           {pinned && <Pin className="h-4 w-4 shrink-0 fill-current text-[#6b7280]" />}
