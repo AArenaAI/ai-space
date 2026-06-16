@@ -47,7 +47,7 @@ function notebookCoverPreset(coverIcon?: string) {
 }
 
 function notebookSourceIcon(file?: NotebookFile) {
-  if (!file) return "📕";
+  if (!file) return "FILE";
   const mime = (file.file.mime_type || "").toLowerCase();
   const filename = (file.file.filename || "").toLowerCase();
   if (mime.includes("pdf") || filename.endsWith(".pdf")) return "PDF";
@@ -58,7 +58,7 @@ function notebookSourceIcon(file?: NotebookFile) {
   if (mime.includes("html") || filename.startsWith("http") || filename.endsWith(".url")) return "WEB";
   if (mime.includes("markdown") || filename.endsWith(".md")) return "MD";
   if (mime.includes("text") || filename.endsWith(".txt")) return "TXT";
-  return "📄";
+  return "FILE";
 }
 
 function stripFileExtension(filename: string) {
@@ -116,10 +116,25 @@ function readNotebookUploadedCover(key: string) {
   }
 }
 
-function SourcePdfIcon() {
+function sourceIconClass(label: string) {
+  switch (label) {
+    case "PDF": return "bg-red-500 text-white";
+    case "DOC": return "bg-blue-500 text-white";
+    case "XLS": return "bg-emerald-500 text-white";
+    case "PPT": return "bg-orange-500 text-white";
+    case "IMG": return "bg-fuchsia-500 text-white";
+    case "WEB": return "bg-cyan-500 text-white";
+    case "MD": return "bg-slate-700 text-white";
+    case "TXT": return "bg-zinc-500 text-white";
+    default: return "bg-surface-elevated text-text-secondary ring-1 ring-surface-border";
+  }
+}
+
+function SourceFileIcon({ file }: { file: NotebookFile }) {
+  const label = notebookSourceIcon(file);
   return (
-    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] bg-red-500 text-[8px] font-bold leading-none tracking-[-0.02em] text-white shadow-sm">
-      PDF
+    <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] text-[8px] font-bold leading-none tracking-[-0.02em] shadow-sm", sourceIconClass(label))}>
+      {label}
     </span>
   );
 }
@@ -1762,7 +1777,7 @@ function NotebookDetailContent() {
                 return (
                   <div key={file.id} role="button" tabIndex={0} onClick={() => openPreview(file)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") openPreview(file); }} className={cn("group w-full cursor-pointer rounded-md px-2 py-2 text-left transition hover:bg-slate-100 dark:hover:bg-slate-800/60", !selected && "opacity-75")}>
                     <div className="flex items-center gap-3">
-                      <SourcePdfIcon />
+                      <SourceFileIcon file={file} />
                       <div className="min-w-0 flex-1 overflow-hidden">
                         <div className="truncate text-sm font-medium text-text-primary">{file.file.filename}</div>
                         <div className="mt-1.5 flex min-w-0 items-center gap-2">
