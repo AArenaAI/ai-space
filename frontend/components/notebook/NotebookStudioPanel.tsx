@@ -1768,7 +1768,7 @@ export function NotebookStudioPanel({
           </div>
         )}
         <div className="border-t border-surface-border px-4 py-3">
-          <button type="button" className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-full bg-brand px-4 text-sm font-medium text-white transition hover:bg-brand-hover">
+          <button type="button" className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-full bg-[#111827] px-4 text-sm font-medium text-white transition hover:bg-[#1f2937]">
             <Pencil className="h-4 w-4" />
             {t("notebook.studio.summary")}
           </button>

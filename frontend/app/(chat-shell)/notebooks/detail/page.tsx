@@ -1584,9 +1584,9 @@ function NotebookDetailContent() {
 
           {files.length > 0 && (
             <div className="mb-2 flex justify-end">
-              <button type="button" onClick={selectAllSources} className="inline-flex items-center gap-2 rounded-full px-1.5 py-1 text-sm font-semibold text-text-primary transition hover:text-brand">
+              <button type="button" onClick={selectAllSources} className="inline-flex items-center gap-2 rounded-full px-1.5 py-1 text-sm font-semibold text-[#111827] transition hover:text-[#111827]">
                 {t("notebook.selectAllSources")}
-                <span className={cn("flex h-4 w-4 items-center justify-center rounded border transition", allSourcesSelected ? "border-brand bg-brand text-white" : "border-surface-border text-transparent")}>
+                <span className={cn("flex h-4 w-4 items-center justify-center rounded border transition", allSourcesSelected ? "border-[#111827] bg-[#111827] text-white" : "border-surface-border text-transparent")}>
                   <Check className="h-3 w-3" />
                 </span>
               </button>
@@ -1679,7 +1679,7 @@ function NotebookDetailContent() {
                       <button
                         type="button"
                         onClick={(event) => { event.stopPropagation(); toggleSource(file.file_id); }}
-                        className={cn("flex h-4 w-4 shrink-0 items-center justify-center rounded border transition", selected ? "border-brand bg-brand text-white" : "border-surface-border text-transparent group-hover:border-text-tertiary group-hover:text-text-tertiary")}
+                        className={cn("flex h-4 w-4 shrink-0 items-center justify-center rounded border transition", selected ? "border-[#111827] bg-[#111827] text-white" : "border-surface-border text-transparent group-hover:border-text-tertiary group-hover:text-text-tertiary")}
                         aria-label={selected ? "selected" : "unselected"}
                       >
                         <Check className="h-3 w-3" />
