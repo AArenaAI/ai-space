@@ -18,6 +18,8 @@ import { useI18n } from "@/lib/i18n";
 import InputDialog from "@/components/ui/InputDialog";
 import type { ModelRecommendationContext } from "@/lib/models/modelRecommendations";
 import { emitChatRenderProfileEvent } from "@/lib/chatRenderProfile";
+import { useCredits, getTierName, getModelTier } from "@/hooks/useCredits";
+import CreditExhaustedModal from "@/components/credits/CreditExhaustedModal";
 
 const ForkCompareDialog = dynamic(() => import("./ForkCompareDialog"), {
   ssr: false,
@@ -59,6 +61,7 @@ interface ChatInterfaceProps {
   targetMessageId?: number;
   externalSendRequest?: { id: number; content: string; hidden?: boolean } | null;
   modelSelectionOptions?: { storageKey?: string; defaultModelId?: string };
+  onSaveAssistantToNote?: (content: string) => void;
 }
 
 const HIDDEN_USER_MESSAGE_PREFIX = "<!-- ai-space:hidden-user-message -->";
@@ -67,7 +70,7 @@ export function buildHiddenUserMessageContent(content: string) {
   return `${HIDDEN_USER_MESSAGE_PREFIX}\n${content}`;
 }
 
-export default function ChatInterface({ conversationId, notebookId, notebookTitle, notebookFileCount, notebookFileIds, notebookHero, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId, externalSendRequest, modelSelectionOptions }: ChatInterfaceProps) {
+export default function ChatInterface({ conversationId, notebookId, notebookTitle, notebookFileCount, notebookFileIds, notebookHero, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId, externalSendRequest, modelSelectionOptions, onSaveAssistantToNote }: ChatInterfaceProps) {
   const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
   const { t } = useI18n();
   const [compareMode, setCompareMode] = useState(false);
@@ -86,6 +89,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   const handledExternalSendIdRef = useRef<number | null>(null);
   const [modelRecommendationContext, setModelRecommendationContext] = useState<ModelRecommendationContext>();
   const [userName, setUserName] = useState<string>("");
+  const [creditExhaustedOpen, setCreditExhaustedOpen] = useState(false);
   useEffect(() => {
     try {
       const raw = localStorage.getItem("user");
@@ -129,6 +133,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   } = useChat(conversationId, models, skillKey, notebookId, notebookFileIds, modelSelectionOptions);
 
   const { templates } = useTemplates();
+  const { hasEnoughCredits, getTierCredits } = useCredits();
 
   const chatInterfaceProfile = useMemo(() => ({
     conversationId,
@@ -304,10 +309,11 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   };
 
   const handleSend = async (content: string, reasoning: ReasoningConfig | undefined, search: boolean, attachments?: { filename: string; content: string; type: string; public_id?: string }[], file_ids?: string[], skipUserMessage = false) => {
-    // 【积分限制已临时取消】保畔代码但不执行
-    /* Credit checks are temporarily disabled.
-     * If re-enabled, route insufficient-credit messages through i18n keys instead of hardcoded copy.
-     */
+    // 积分检查：额度不足时弹出 Bad Case 提交模态框
+    if (selectedModel && !hasEnoughCredits(selectedModel.id)) {
+      setCreditExhaustedOpen(true);
+      return;
+    }
 
     const activeCompareMode = compareMode || isCompare;
     if (activeCompareMode) {
@@ -610,6 +616,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
           onSelectModeChange={setMessageSelectMode}
           onExitCompare={handleExitCompare}
           onQuoteSelection={handleQuoteSelection}
+          onSaveAssistantToNote={notebookId ? onSaveAssistantToNote : undefined}
         />
       )}
 
@@ -726,6 +733,31 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
           </div>
         </div>
       )}
+
+      {/* 额度耗尽 - Bad Case 提交模态框 */}
+      <CreditExhaustedModal
+        open={creditExhaustedOpen}
+        onClose={() => setCreditExhaustedOpen(false)}
+        onSubmit={async (data) => {
+          const token = localStorage.getItem("token");
+          if (!token) throw new Error("未登录");
+          const res = await fetch("/api/bad-cases", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify(data),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ error: "提交失败" }));
+            throw new Error(err.error || "提交失败");
+          }
+        }}
+        currentModel={selectedModel ? { id: selectedModel.id, name: selectedModel.name || selectedModel.id } : undefined}
+        conversationId={conversationId}
+        tierName={selectedModel ? getTierName(getModelTier(selectedModel.id)) : undefined}
+      />
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 import { CSSProperties, useEffect, useMemo, useRef, useState, type ComponentType, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
 import { createPortal } from "react-dom";
-import { BarChart3, CheckCircle2, ChevronLeft, ChevronRight, ChevronsRight, Copy, Download, ExternalLink, FileQuestion, FileText, HelpCircle, Lightbulb, Loader2, Map as MapIcon, Maximize2, MessageCircle, MoreHorizontal, Pencil, Presentation, Printer, RefreshCw, Sparkles, Trash2, X, XCircle, ZoomIn, ZoomOut } from "lucide-react";
+import { BarChart3, CheckCircle2, ChevronLeft, ChevronRight, ChevronsRight, Copy, Download, ExternalLink, FileQuestion, FileText, HelpCircle, Info, Lightbulb, Loader2, Map as MapIcon, Maximize2, MessageCircle, MoreHorizontal, Pencil, Presentation, Printer, RefreshCw, Sparkles, StickyNote, Trash2, X, XCircle, ZoomIn, ZoomOut } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -65,6 +65,15 @@ export type NotebookStudioSource = {
   id: number;
   filename: string;
   mimeType?: string;
+};
+
+export type NotebookStudioNote = {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: string;
+  readonly?: boolean;
+  origin?: "manual" | "chat";
 };
 
 export type NotebookStudioFlashcard = {
@@ -155,11 +164,14 @@ export type NotebookStudioArtifact =
 type NotebookStudioPanelProps = {
   width?: number;
   artifacts: NotebookStudioArtifact[];
+  notes?: NotebookStudioNote[];
   activeArtifactId: string | null;
   generatingType?: NotebookStudioActionId | null;
   selectedSourceCount?: number;
   sourceFiles?: NotebookStudioSource[];
   onGenerate: (type: NotebookStudioActionId, options?: { orientation?: string; style?: string; detail_level?: string; prompt?: string }) => void;
+  onCreateNote?: (note: { title: string; content: string }) => void;
+  onUpdateNote?: (noteId: string, note: { title: string; content: string }) => void;
   onOpenArtifact: (artifactId: string | null) => void;
   onRenameArtifact?: (artifact: NotebookStudioArtifact) => void;
   onRegenerateArtifact?: (artifact: NotebookStudioArtifact) => void;
@@ -306,6 +318,73 @@ function sourceAccent(source: NotebookStudioSource) {
   if (mime.includes("pdf") || name.endsWith(".pdf")) return "bg-red-500/10 text-red-500";
   if (mime.startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(name)) return "bg-rose-500/10 text-rose-500";
   return "bg-blue-500/10 text-blue-500";
+}
+
+function NoteEditorDialog({ open, saving, initialTitle, initialContent, onClose, onSave }: { open: boolean; saving?: boolean; initialTitle?: string; initialContent?: string; onClose: () => void; onSave: (note: { title: string; content: string }) => void }) {
+  const [title, setTitle] = useState(initialTitle || "新建笔记");
+  const [content, setContent] = useState(initialContent || "");
+
+  useEffect(() => {
+    if (!open) return;
+    setTitle(initialTitle || "新建笔记");
+    setContent(initialContent || "");
+  }, [initialContent, initialTitle, open]);
+
+  if (!open) return null;
+  const canSave = title.trim() || content.trim();
+  return (
+    <div className="fixed inset-0 z-[170] flex items-center justify-center bg-black/45 p-5 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="flex h-[min(760px,88vh)] w-[min(760px,94vw)] flex-col overflow-hidden rounded-[28px] border border-surface-border bg-surface-card shadow-2xl">
+        <div className="flex items-center justify-between border-b border-surface-border px-5 py-3">
+          <div className="text-sm font-medium text-text-tertiary">Studio &gt; 笔记</div>
+          <button type="button" onClick={onClose} className="rounded-full p-2 text-text-tertiary transition hover:bg-surface-hover hover:text-text-primary" title="关闭">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto px-7 py-6">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <input
+              autoFocus
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              className="min-w-0 flex-1 border-none bg-transparent text-[30px] font-bold leading-tight tracking-[-0.04em] text-text-primary outline-none placeholder:text-text-tertiary"
+              placeholder="新建笔记"
+            />
+            <Trash2 className="h-5 w-5 shrink-0 text-text-tertiary" />
+          </div>
+          <div className="mb-4 flex flex-wrap items-center gap-1.5 rounded-2xl border border-surface-border bg-surface-elevated px-3 py-2 text-xs text-text-secondary">
+            <button type="button" className="rounded-lg px-2 py-1 hover:bg-surface-hover">↶</button>
+            <button type="button" className="rounded-lg px-2 py-1 hover:bg-surface-hover">↷</button>
+            <span className="mx-1 h-4 w-px bg-surface-border" />
+            <button type="button" className="rounded-lg px-2 py-1 hover:bg-surface-hover">正常</button>
+            <button type="button" className="rounded-lg px-2 py-1 font-bold hover:bg-surface-hover">B</button>
+            <button type="button" className="rounded-lg px-2 py-1 italic hover:bg-surface-hover">I</button>
+            <button type="button" className="rounded-lg px-2 py-1 hover:bg-surface-hover">• 列表</button>
+            <button type="button" className="rounded-lg px-2 py-1 hover:bg-surface-hover">1. 列表</button>
+          </div>
+          <textarea
+            value={content}
+            onChange={(event) => setContent(event.target.value)}
+            className="min-h-[420px] w-full resize-none border-none bg-transparent text-[15px] leading-7 text-text-primary outline-none placeholder:text-text-tertiary"
+            placeholder="在此笔记中撰写或粘贴文本。"
+          />
+        </div>
+        <div className="flex items-center justify-between gap-3 border-t border-surface-border px-5 py-3">
+          <div className="flex items-center gap-2 text-xs text-text-tertiary">
+            <Info className="h-4 w-4" />
+            <span>每个笔记本最多可以创建 1,000 条笔记。</span>
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} disabled={saving} className="rounded-full border border-surface-border px-4 py-2 text-sm font-semibold text-text-secondary transition hover:bg-surface-hover disabled:opacity-60">取消</button>
+            <button type="button" onClick={() => canSave && onSave({ title: title.trim() || "未命名笔记", content: content.trim() })} disabled={saving || !canSave} className="inline-flex items-center gap-2 rounded-full bg-[#111827] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#1f2937] disabled:opacity-60">
+              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+              保存笔记
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function SourcePopover({ sources, title, emptyLabel, onOpenSource }: { sources: NotebookStudioSource[]; title: string; emptyLabel: string; onOpenSource?: (sourceId: number, target?: NotebookSourceOpenTarget) => void }) {
@@ -1526,11 +1605,14 @@ function ArtifactMenu({
 export function NotebookStudioPanel({
   width = 390,
   artifacts,
+  notes = [],
   activeArtifactId,
   generatingType,
   selectedSourceCount = 0,
   sourceFiles = [],
   onGenerate,
+  onCreateNote,
+  onUpdateNote,
   onOpenArtifact,
   onRenameArtifact,
   onRegenerateArtifact,
@@ -1550,8 +1632,11 @@ export function NotebookStudioPanel({
   const [sourcePopoverKey, setSourcePopoverKey] = useState<string | null>(null);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [infographicDialogOpen, setInfographicDialogOpen] = useState(false);
+  const [noteDialogOpen, setNoteDialogOpen] = useState(false);
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const activeArtifact = artifacts.find((artifact) => artifact.id === activeArtifactId) || null;
   const viewerArtifact = artifacts.find((artifact) => artifact.id === viewerArtifactId) || null;
+  const editingNote = editingNoteId ? notes.find((note) => note.id === editingNoteId) || null : null;
   const sourcesForArtifact = (artifact: NotebookStudioArtifact) => {
     const ids = Array.isArray(artifact.sourceFileIds) ? artifact.sourceFileIds.filter((id) => Number.isFinite(id) && id > 0) : [];
     if (ids.length > 0) {
@@ -1596,6 +1681,26 @@ export function NotebookStudioPanel({
   const handleInfographicGenerate = (options: { orientation: string; style: string; detail_level: string; prompt: string }) => {
     setInfographicDialogOpen(false);
     onGenerate("infographic", options);
+  };
+
+  const openNewNote = () => {
+    setEditingNoteId(null);
+    setNoteDialogOpen(true);
+  };
+
+  const openExistingNote = (note: NotebookStudioNote) => {
+    setEditingNoteId(note.id);
+    setNoteDialogOpen(true);
+  };
+
+  const handleSaveNote = (note: { title: string; content: string }) => {
+    if (editingNoteId) {
+      onUpdateNote?.(editingNoteId, note);
+    } else {
+      onCreateNote?.(note);
+    }
+    setNoteDialogOpen(false);
+    setEditingNoteId(null);
   };
 
   if (isCollapsed) {
@@ -1825,10 +1930,31 @@ export function NotebookStudioPanel({
             </div>
           </div>
         )}
+        {notes.length > 0 && (
+          <div className="border-t border-surface-border px-4 py-3">
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-text-primary">笔记</h3>
+              <span className="text-xs text-text-tertiary">{notes.length}</span>
+            </div>
+            <div className="max-h-48 space-y-1.5 overflow-y-auto pr-1">
+              {notes.map((note) => (
+                <button key={note.id} type="button" onClick={() => openExistingNote(note)} className="group flex w-full items-start gap-3 rounded-2xl px-2.5 py-2.5 text-left transition hover:bg-surface-elevated">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/30 dark:text-amber-300">
+                    <StickyNote className="h-5 w-5" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold text-text-primary">{note.title}</span>
+                    <span className="mt-1 block truncate text-xs text-text-tertiary">{note.readonly ? "已保存的回答只能查看" : note.content || "空笔记"} · {formatTime(note.createdAt)}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="border-t border-surface-border px-4 py-3">
-          <button type="button" className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-full bg-[#111827] px-4 text-sm font-medium text-white transition hover:bg-[#1f2937]">
+          <button type="button" onClick={openNewNote} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-full bg-[#111827] px-4 text-sm font-medium text-white transition hover:bg-[#1f2937]">
             <Pencil className="h-4 w-4" />
-            {t("notebook.studio.summary")}
+            添加笔记
           </button>
         </div>
       </div>
@@ -1873,6 +1999,13 @@ export function NotebookStudioPanel({
       onClose={() => setInfographicDialogOpen(false)}
       onGenerate={handleInfographicGenerate}
       t={t}
+    />
+    <NoteEditorDialog
+      open={noteDialogOpen}
+      initialTitle={editingNote?.title}
+      initialContent={editingNote?.content}
+      onClose={() => { setNoteDialogOpen(false); setEditingNoteId(null); }}
+      onSave={handleSaveNote}
     />
     </>
   );

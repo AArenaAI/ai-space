@@ -127,6 +127,7 @@ interface MessageListProps {
   onSelectModeChange?: (active: boolean) => void;
   onExitCompare?: () => void;
   onQuoteSelection?: (quote: string) => void;
+  onSaveAssistantToNote?: (content: string) => void;
 }
 
 function normalizeExportPlainText(content: string, t: (key: string, params?: Record<string, string>) => string): string {
@@ -230,6 +231,7 @@ function MessageList({
   onSelectModeChange,
   onExitCompare,
   onQuoteSelection,
+  onSaveAssistantToNote,
 }: MessageListProps) {
   const { t, language } = useI18n();
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -1911,6 +1913,7 @@ function MessageList({
               onRegenerate={onRegenerate}
               onContinueGenerate={onContinueGenerate}
               onForkCompare={onForkCompare}
+              onSaveAssistantToNote={onSaveAssistantToNote}
               onAssistantViewed={handleAssistantViewed}
               imageLoadFailedLabel={t("chat.imageLoadFailed")}
               MarkdownRenderer={LazyMarkdownRenderer}

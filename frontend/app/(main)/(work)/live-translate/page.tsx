@@ -1,7 +1,21 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Languages, Loader2, Mic, Pause, Play, Search, Square, Volume2, VolumeX } from "lucide-react";
+import { useEffect, useRef, useState, useCallback } from "react";
+import {
+  ChevronDown,
+  Languages,
+  Loader2,
+  Mic,
+  Play,
+  Search,
+  Square,
+  Volume2,
+  VolumeX,
+  Copy,
+  Check,
+  RotateCcw,
+  ArrowRightLeft,
+} from "lucide-react";
 import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -217,6 +231,74 @@ function pcm16ToFloat32(buffer: ArrayBuffer) {
   return output;
 }
 
+/* ── Waveform visualizer component ── */
+function WaveformBars({ level, isActive }: { level: number; isActive: boolean }) {
+  const bars = 12;
+  return (
+    <div className="flex items-end gap-[2px] h-5">
+      {Array.from({ length: bars }).map((_, i) => {
+        const threshold = (i / bars) * 100;
+        const filled = isActive && level > threshold;
+        const height = filled ? Math.max(20, ((level - threshold) / (100 - threshold)) * 100) : 8;
+        return (
+          <div
+            key={i}
+            className={cn(
+              "w-[3px] rounded-full transition-all duration-75",
+              filled ? "bg-brand" : "bg-surface-border"
+            )}
+            style={{ height: `${height}%`, opacity: filled ? 0.6 + (level / 100) * 0.4 : 0.35 }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/* ── Compact status bar ── */
+function StatusBar({
+  status,
+  level,
+  isTranslating,
+  sentChunks,
+  playTranslatedAudio,
+  playedChunks,
+  t,
+}: {
+  status: string;
+  level: number;
+  isTranslating: boolean;
+  sentChunks: number;
+  playTranslatedAudio: boolean;
+  playedChunks: number;
+  t: (key: string) => string;
+}) {
+  const getStatusDot = () => {
+    if (!isTranslating) return "bg-text-tertiary";
+    if (status === t("translator.live.active")) return "bg-emerald-500 animate-pulse";
+    if (status === t("translator.live.connecting") || status === t("translator.live.ready")) return "bg-amber-500";
+    return "bg-red-500";
+  };
+
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-surface-border bg-surface px-3 py-2">
+      <span className={cn("inline-flex h-2 w-2 rounded-full shrink-0", getStatusDot())} />
+      <span className="text-xs text-text-secondary truncate">
+        {status || t("translator.live.idle")}
+      </span>
+      <div className="ml-auto">
+        <WaveformBars level={level} isActive={isTranslating && level > 1} />
+      </div>
+      {isTranslating && (
+        <span className="text-[10px] text-text-tertiary tabular-nums shrink-0">
+          {sentChunks > 0 ? `${sentChunks}` : "·"}
+          {playTranslatedAudio && playedChunks > 0 ? ` / ${playedChunks}` : ""}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function LangDropdown({
   value,
   options,
@@ -329,7 +411,6 @@ export default function LiveTranslatePage() {
   const [languageOptions, setLanguageOptions] = useState<LangOption[]>(getFallbackLanguageOptions());
   const [isLiveTranslating, setIsLiveTranslating] = useState(false);
   const [hasLiveSession, setHasLiveSession] = useState(false);
-  const [isLivePaused, setIsLivePaused] = useState(false);
   const [liveStatus, setLiveStatus] = useState("");
   const [liveInputTranscript, setLiveInputTranscript] = useState("");
   const [liveOutputTranscript, setLiveOutputTranscript] = useState("");
@@ -337,6 +418,7 @@ export default function LiveTranslatePage() {
   const [liveSentChunks, setLiveSentChunks] = useState(0);
   const [livePlayedChunks, setLivePlayedChunks] = useState(0);
   const [playTranslatedAudio, setPlayTranslatedAudio] = useState(false);
+  const [copiedOutput, setCopiedOutput] = useState(false);
   const liveSocketRef = useRef<WebSocket | null>(null);
   const liveAudioContextRef = useRef<AudioContext | null>(null);
   const livePlaybackContextRef = useRef<AudioContext | null>(null);
@@ -348,6 +430,8 @@ export default function LiveTranslatePage() {
   const liveSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const liveSentChunksRef = useRef(0);
   const liveMicLevelUpdateRef = useRef(0);
+  const inputScrollRef = useRef<HTMLDivElement>(null);
+  const outputScrollRef = useRef<HTMLDivElement>(null);
 
   const targetLanguageOptions = languageOptions.filter((lang) => lang.value !== "auto" && lang.supportTarget !== false);
 
@@ -377,6 +461,19 @@ export default function LiveTranslatePage() {
     playTranslatedAudioRef.current = playTranslatedAudio;
   }, [playTranslatedAudio]);
 
+  // Auto-scroll transcripts
+  useEffect(() => {
+    if (inputScrollRef.current) {
+      inputScrollRef.current.scrollTop = inputScrollRef.current.scrollHeight;
+    }
+  }, [liveInputTranscript]);
+
+  useEffect(() => {
+    if (outputScrollRef.current) {
+      outputScrollRef.current.scrollTop = outputScrollRef.current.scrollHeight;
+    }
+  }, [liveOutputTranscript]);
+
   const stopLiveAudioCapture = () => {
     liveProcessorRef.current?.disconnect();
     liveProcessorRef.current = null;
@@ -398,7 +495,6 @@ export default function LiveTranslatePage() {
     liveSocketRef.current?.close();
     liveSocketRef.current = null;
     setHasLiveSession(false);
-    setIsLivePaused(false);
     setLiveStatus((status) => status === t("translator.live.error.connection") || status === t("translator.live.error.failed") ? status : "");
   };
 
@@ -518,46 +614,9 @@ export default function LiveTranslatePage() {
     setIsLiveTranslating(true);
   };
 
-  const pauseLiveTranslate = () => {
-    const socket = liveSocketRef.current;
-    if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "pause" }));
-    }
-    stopLiveAudioCapture();
-    setIsLivePaused(true);
-    setLiveStatus(t("translator.live.paused"));
-  };
-
-  const resumeLiveTranslate = async () => {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      toast.error(t("translator.live.error.unsupported"));
-      return;
-    }
-    try {
-      setLiveStatus(t("translator.live.resuming"));
-      const socket = liveSocketRef.current;
-      if (socket?.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: "resume" }));
-      }
-      await startLiveAudioCapture();
-      setIsLivePaused(false);
-      setLiveStatus(t("translator.live.active"));
-    } catch (err) {
-      const message = err instanceof Error && err.message ? err.message : t("translator.live.error.start");
-      stopLiveAudioCapture();
-      setIsLivePaused(true);
-      setLiveStatus(message);
-      toast.error(message);
-    }
-  };
-
   const startLiveTranslate = async () => {
-    if (isLiveTranslating) {
-      pauseLiveTranslate();
-      return;
-    }
-    if (hasLiveSession && isLivePaused) {
-      await resumeLiveTranslate();
+    if (isLiveTranslating || hasLiveSession) {
+      stopLiveTranslate();
       return;
     }
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -642,7 +701,6 @@ export default function LiveTranslatePage() {
       ws.onclose = (event) => {
         stopLiveAudioCapture();
         setHasLiveSession(false);
-        setIsLivePaused(false);
         if (liveSentChunksRef.current === 0) {
           setLiveStatus(event.reason || t("translator.live.error.closedBeforeAudio"));
         } else {
@@ -657,7 +715,6 @@ export default function LiveTranslatePage() {
 
       await startLiveAudioCapture();
       setHasLiveSession(true);
-      setIsLivePaused(false);
       setLiveStatus(t("translator.live.active"));
     } catch (err) {
       const message = err instanceof Error && err.message ? err.message : t("translator.live.error.start");
@@ -673,13 +730,29 @@ export default function LiveTranslatePage() {
     setLiveOutputTranscript("");
   };
 
+  const copyOutput = useCallback(async () => {
+    if (!liveOutputTranscript) return;
+    try {
+      await navigator.clipboard.writeText(liveOutputTranscript);
+      setCopiedOutput(true);
+      setTimeout(() => setCopiedOutput(false), 2000);
+      toast.success(t("sidebar.menu.copied"));
+    } catch {
+      toast.error(t("common.error"));
+    }
+  }, [liveOutputTranscript, t]);
+
   return (
     <div className="flex h-full flex-col bg-surface-elevated text-text-primary">
+      {/* Header */}
       <header className="shrink-0 border-b border-surface-border bg-surface-elevated px-6 py-4 md:px-10">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand">
-              <Mic className="h-5 w-5" />
+            <div className={cn(
+              "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors",
+              isLiveTranslating ? "bg-brand/15 text-brand" : "bg-brand/10 text-brand"
+            )}>
+              <Mic className={cn("h-5 w-5", isLiveTranslating && "animate-pulse")} />
             </div>
             <div className="min-w-0">
               <h1 className="text-xl font-semibold tracking-tight text-text-primary">{t("translator.live.title")}</h1>
@@ -692,6 +765,7 @@ export default function LiveTranslatePage() {
               disabled={isLiveTranslating || (!liveInputTranscript && !liveOutputTranscript)}
               className="inline-flex h-10 items-center gap-2 rounded-xl border border-surface-border bg-surface-card px-3 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-card hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
             >
+              <RotateCcw className="h-4 w-4" />
               {t("translator.live.clear")}
             </button>
           </div>
@@ -700,13 +774,31 @@ export default function LiveTranslatePage() {
 
       <main className="flex min-h-0 flex-1 overflow-auto px-6 py-6 md:px-10 md:py-8">
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-5">
+          {/* Control panel */}
           <section className="rounded-2xl border border-surface-border bg-surface-card p-5 shadow-sm">
-            <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+            <div className="grid gap-4 md:grid-cols-[1fr_auto_1fr] md:items-end">
               <div>
                 <div className="mb-2 text-sm font-medium text-text-secondary">{t("translator.live.targetLanguage")}</div>
                 <LangDropdown value={targetLang} options={targetLanguageOptions} onChange={setTargetLang} t={t} />
               </div>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!isLiveTranslating) {
+                      const current = targetLang;
+                      setTargetLang("zh");
+                      setTimeout(() => setTargetLang(current), 0);
+                    }
+                  }}
+                  disabled={isLiveTranslating}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-surface-border bg-surface text-text-tertiary transition hover:text-text-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                  title={t("translator.live.targetLanguage")}
+                >
+                  <ArrowRightLeft className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setPlayTranslatedAudio((value) => !value)}
@@ -722,93 +814,108 @@ export default function LiveTranslatePage() {
                 <button
                   onClick={startLiveTranslate}
                   className={cn(
-                    "inline-flex h-11 min-w-40 items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60",
+                    "inline-flex h-11 min-w-36 items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60",
                     isLiveTranslating
-                      ? "bg-amber-500 text-white hover:bg-amber-500/90"
+                      ? "bg-red-500 text-white hover:bg-red-500/90"
                       : "bg-brand text-white hover:bg-brand/90"
                   )}
                 >
-                  {isLiveTranslating ? <Pause className="h-4 w-4" /> : isLivePaused ? <Play className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-                  {isLiveTranslating ? t("translator.live.pause") : isLivePaused ? t("translator.live.resume") : t("translator.live.start")}
+                  {isLiveTranslating ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                  {isLiveTranslating ? t("translator.live.stop") : t("translator.live.start")}
                 </button>
-                {hasLiveSession && (
-                  <button
-                    type="button"
-                    onClick={stopLiveTranslate}
-                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 text-sm font-medium text-red-500 transition hover:bg-red-500/15"
-                  >
-                    <Square className="h-4 w-4" />
-                    {t("translator.live.end")}
-                  </button>
-                )}
               </div>
             </div>
-            <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-text-tertiary">
-              <span className={cn("inline-flex items-center gap-2 rounded-full border border-surface-border bg-surface px-3 py-1.5", isLiveTranslating && "border-brand/40 text-brand")}>
-                {isLiveTranslating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Volume2 className="h-3.5 w-3.5" />}
-                {liveStatus || t("translator.live.idle")}
-              </span>
-              <span>{t("translator.live.hint")}</span>
+
+            {/* Status bar + waveform */}
+            <div className="mt-4">
+              <StatusBar
+                status={liveStatus}
+                level={liveMicLevel}
+                isTranslating={isLiveTranslating}
+                sentChunks={liveSentChunks}
+                playTranslatedAudio={playTranslatedAudio}
+                playedChunks={livePlayedChunks}
+                t={t}
+              />
             </div>
-            <div className="mt-3 grid gap-2 text-xs text-text-tertiary md:grid-cols-3">
-              <div className="rounded-xl border border-surface-border bg-surface px-3 py-2">
-                <div className="mb-1 flex items-center justify-between">
-                  <span>{t("translator.live.micStatus")}</span>
-                  <span className={cn("inline-flex h-2 w-2 rounded-full", liveMicLevel > 1 ? "bg-emerald-500" : (isLiveTranslating || isLivePaused) ? "bg-amber-500" : "bg-text-tertiary")} />
-                </div>
-                <div>{liveMicLevel > 1 ? t("translator.live.micStatusActive") : isLivePaused ? t("translator.live.paused") : isLiveTranslating ? t("translator.live.micStatusWaiting") : t("translator.live.micStatusIdle")}</div>
-              </div>
-              <div className="rounded-xl border border-surface-border bg-surface px-3 py-2">
-                <div className="mb-1 flex items-center justify-between">
-                  <span>{t("translator.live.streamStatus")}</span>
-                  <span className={cn("inline-flex h-2 w-2 rounded-full", liveSentChunks > 0 && !isLivePaused ? "bg-emerald-500" : (isLiveTranslating || isLivePaused) ? "bg-amber-500" : "bg-text-tertiary")} />
-                </div>
-                <div>{isLivePaused ? t("translator.live.paused") : liveSentChunks > 0 ? t("translator.live.streamStatusActive") : isLiveTranslating ? t("translator.live.streamStatusConnecting") : t("translator.live.streamStatusIdle")}</div>
-              </div>
-              <div className="rounded-xl border border-surface-border bg-surface px-3 py-2">
-                <div className="mb-1 flex items-center justify-between">
-                  <span>{t("translator.live.voiceStatus")}</span>
-                  <span className={cn("inline-flex h-2 w-2 rounded-full", playTranslatedAudio && livePlayedChunks > 0 ? "bg-emerald-500" : playTranslatedAudio ? "bg-amber-500" : "bg-text-tertiary")} />
-                </div>
-                <div>{playTranslatedAudio ? (livePlayedChunks > 0 ? t("translator.live.voiceStatusPlaying") : t("translator.live.voiceStatusWaiting")) : t("translator.live.voiceStatusOff")}</div>
-              </div>
+            <div className="mt-2 text-xs text-text-tertiary">
+              {t("translator.live.hint")}
             </div>
           </section>
 
-          <section className="grid min-h-[460px] flex-1 gap-5 lg:grid-cols-2">
+          {/* Transcript panels */}
+          <section className="grid min-h-[460px] flex-1 gap-5 md:grid-cols-2">
+            {/* Input */}
             <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-surface-border bg-surface-card shadow-sm">
-              <div className="flex h-14 items-center gap-2 border-b border-surface-border px-5 text-sm font-medium text-text-primary">
-                <Languages className="h-4 w-4 text-text-tertiary" />
-                {t("translator.live.inputTranscript")}
+              <div className="flex h-12 items-center justify-between border-b border-surface-border px-5">
+                <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
+                  <Languages className="h-4 w-4 text-text-tertiary" />
+                  {t("translator.live.inputTranscript")}
+                </div>
+                <span className="text-[10px] text-text-tertiary">{t("translator.lang.auto")}</span>
               </div>
-              <div className="min-h-0 flex-1 overflow-auto p-5">
+              <div ref={inputScrollRef} className="min-h-0 flex-1 overflow-auto p-5">
                 {liveInputTranscript ? (
                   <div data-i18n-skip="true" className="whitespace-pre-wrap rounded-xl bg-surface-elevated p-4 text-base leading-7 text-text-primary">
                     {liveInputTranscript}
+                    {isLiveTranslating && <span className="inline-block h-4 w-0.5 bg-brand animate-pulse ml-0.5 align-middle" />}
                   </div>
                 ) : (
                   <div className="flex h-full flex-col items-center justify-center rounded-xl bg-surface text-center text-text-secondary">
                     <Mic className="mb-3 h-10 w-10 text-text-tertiary" />
                     <div className="text-sm">{t("translator.live.emptyInput")}</div>
+                    {!isLiveTranslating && (
+                      <button
+                        onClick={startLiveTranslate}
+                        className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-brand/10 px-3 py-1.5 text-xs font-medium text-brand transition hover:bg-brand/15"
+                      >
+                        <Play className="h-3 w-3" />
+                        {t("translator.live.start")}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
             </div>
 
+            {/* Output */}
             <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-surface-border bg-surface-card shadow-sm">
-              <div className="flex h-14 items-center gap-2 border-b border-surface-border px-5 text-sm font-medium text-text-primary">
-                <Languages className="h-4 w-4 text-brand" />
-                {t("translator.live.outputTranscript")}
+              <div className="flex h-12 items-center justify-between border-b border-surface-border px-5">
+                <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
+                  <Languages className="h-4 w-4 text-brand" />
+                  {t("translator.live.outputTranscript")}
+                </div>
+                <div className="flex items-center gap-1">
+                  {liveOutputTranscript && (
+                    <button
+                      onClick={copyOutput}
+                      className="inline-flex h-7 items-center gap-1 rounded-lg border border-surface-border bg-surface px-2 text-xs text-text-secondary transition hover:text-text-primary"
+                    >
+                      {copiedOutput ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                      {copiedOutput ? t("sidebar.menu.copied") : t("common.copy")}
+                    </button>
+                  )}
+                </div>
               </div>
-              <div className="min-h-0 flex-1 overflow-auto p-5">
+              <div ref={outputScrollRef} className="min-h-0 flex-1 overflow-auto p-5">
                 {liveOutputTranscript ? (
                   <div data-i18n-skip="true" className="whitespace-pre-wrap rounded-xl bg-surface-elevated p-4 text-base leading-7 text-text-primary">
                     {liveOutputTranscript}
+                    {isLiveTranslating && <span className="inline-block h-4 w-0.5 bg-brand animate-pulse ml-0.5 align-middle" />}
                   </div>
                 ) : (
                   <div className="flex h-full flex-col items-center justify-center rounded-xl bg-surface text-center text-text-secondary">
                     <Languages className="mb-3 h-10 w-10 text-text-tertiary" />
                     <div className="text-sm">{t("translator.live.emptyOutput")}</div>
+                    {!isLiveTranslating && (
+                      <button
+                        onClick={startLiveTranslate}
+                        className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-brand/10 px-3 py-1.5 text-xs font-medium text-brand transition hover:bg-brand/15"
+                      >
+                        <Play className="h-3 w-3" />
+                        {t("translator.live.start")}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

@@ -51,6 +51,9 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		skills.InitDefaultLoader("../skills")
 	}
 
+	// 注入数据库连接到公共模型接口，使其能读取管理员配置
+	InitModelConfigDB(db)
+
 	// AI 服务
 	aiService := services.NewAIService(cfg)
 	searchService := services.NewSearchService(cfg)
@@ -158,6 +161,19 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	router.GET("/api/models/tiers", creditsHandler.GetModelTiers)
 	router.GET("/api/plans", creditsHandler.GetPublicPlans)
 
+	// 注册 Bad Case 路由（公开提交，需认证）
+	badCaseHandler := NewBadCaseHandler(db)
+	publicWithAuth.POST("/bad-cases", badCaseHandler.CreateBadCase)
+	publicWithAuth.GET("/bad-cases", badCaseHandler.GetMyBadCases)
+
+	// 注册 Beta 邀请路由（公开申请/验证）
+	emailService := services.NewEmailService(cfg)
+	betaInviteHandler := NewBetaInviteHandler(db, cfg, emailService)
+	publicWithAuth.POST("/beta/apply", betaInviteHandler.SubmitApplication)
+	publicWithAuth.POST("/beta/verify-invite", betaInviteHandler.VerifyInvite)
+	publicWithAuth.POST("/beta/use-invite", betaInviteHandler.UseInvite)
+	publicWithAuth.GET("/beta/application-status", betaInviteHandler.GetApplicationStatus)
+
 	// 公开对比问答（支持匿名用户，内部已有额度与权限校验）
 	publicWithAuth.POST("/chat/compare", chatHandler.CompareChat)
 	publicWithAuth.POST("/chat/:message_id/fork", chatHandler.ForkChat)
@@ -192,7 +208,13 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			admin.PATCH("/model-configs/:id", adminHandler.UpdateModelConfig)
 			admin.PUT("/model-configs/batch", adminHandler.BatchUpdateModelConfigs)
 			admin.GET("/tasks", adminHandler.Tasks)
-		}
+			admin.GET("/bad-cases", badCaseHandler.ListBadCases)
+			admin.PATCH("/bad-cases/:id/review", badCaseHandler.ReviewBadCase)
+			admin.GET("/beta-invites", betaInviteHandler.ListInvites)
+			admin.POST("/beta-invites/generate", betaInviteHandler.GenerateInvites)
+			admin.GET("/beta-applications", betaInviteHandler.ListApplications)
+			admin.PATCH("/beta-applications/:id/review", betaInviteHandler.ReviewApplication)
+			}
 
 		convHandler := NewConversationHandler(db)
 		notebookHandler := NewNotebookHandler(db, fileService, aiService, imageService)

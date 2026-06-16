@@ -7,7 +7,7 @@ import { ArrowLeft, FileText, Globe, Loader2, MoreVertical, Plus, Search, Zap, A
 import { toast } from "sonner";
 import ChatInterface from "@/components/chat/ChatInterface";
 import { NotebookSourcePreviewDrawer } from "@/components/notebook/NotebookSourcePreviewDrawer";
-import { NotebookStudioPanel, type NotebookSourceOpenTarget, type NotebookStudioActionId, type NotebookStudioArtifact, type NotebookStudioCitation, type NotebookStudioFlashcard, type NotebookStudioQuizQuestion, type NotebookStudioMindmapEdge, type NotebookStudioMindmapNode, type NotebookStudioReportSection, type NotebookStudioReportTable, type NotebookStudioSource, type NotebookStudioTableRow, type NotebookStudioTextSection } from "@/components/notebook/NotebookStudioPanel";
+import { NotebookStudioPanel, type NotebookSourceOpenTarget, type NotebookStudioActionId, type NotebookStudioArtifact, type NotebookStudioCitation, type NotebookStudioFlashcard, type NotebookStudioMindmapEdge, type NotebookStudioMindmapNode, type NotebookStudioNote, type NotebookStudioQuizQuestion, type NotebookStudioReportSection, type NotebookStudioReportTable, type NotebookStudioSource, type NotebookStudioTableRow, type NotebookStudioTextSection } from "@/components/notebook/NotebookStudioPanel";
 import { NotebookUrlSourceDialog } from "@/components/notebook/NotebookUrlSourceDialog";
 import { MODELS } from "@/hooks/useChat";
 import { addNotebookFile, addNotebookUrlSource, deleteNotebookArtifact, fetchNotebook, fetchNotebookArtifacts, fetchNotebookFileContent, generateNotebookArtifact, reindexNotebookFile, removeNotebookFile, suggestNotebookReportFormats, updateNotebook, updateNotebookArtifact, updateNotebookFile, type NotebookReportFormatSuggestion } from "@/lib/notebookApi";
@@ -34,6 +34,28 @@ function notebookSelectionStorageKey(notebookId: number) {
 
 function notebookAutoSummaryStorageKey(notebookId: number, fileId: number) {
   return `notebook:${notebookId}:auto-summary-file:${fileId}`;
+}
+
+function notebookNotesStorageKey(notebookId: number) {
+  return `notebook:${notebookId}:studio-notes`;
+}
+
+function readStoredNotebookNotes(notebookId: number): NotebookStudioNote[] {
+  try {
+    const raw = localStorage.getItem(notebookNotesStorageKey(notebookId));
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((item) => item && typeof item.id === "string" && typeof item.title === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredNotebookNotes(notebookId: number, notes: NotebookStudioNote[]) {
+  try {
+    localStorage.setItem(notebookNotesStorageKey(notebookId), JSON.stringify(notes.slice(0, 1000)));
+  } catch {
+    toast.error("笔记保存到本地失败");
+  }
 }
 
 const NOTEBOOK_DEFAULT_COVER_LOGO = "/brand-dark-logo.png";
@@ -893,6 +915,7 @@ function NotebookDetailContent() {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewTarget, setPreviewTarget] = useState<NotebookSourceOpenTarget | null>(null);
   const [studioArtifacts, setStudioArtifacts] = useState<NotebookStudioArtifact[]>([]);
+  const [studioNotes, setStudioNotes] = useState<NotebookStudioNote[]>([]);
   const [activeStudioArtifactId, setActiveStudioArtifactId] = useState<string | null>(null);
   const [generatingStudioType, setGeneratingStudioType] = useState<NotebookStudioActionId | null>(null);
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
@@ -941,6 +964,7 @@ function NotebookDetailContent() {
         setFiles(readonlyFiles);
         setSelectedFileIds(readonlyFiles.map((file) => file.file_id));
         setStudioArtifacts([]);
+        setStudioNotes(readStoredNotebookNotes(readonlyNotebook.id));
         setActiveStudioArtifactId(null);
         setPageError(null);
         selectionInitializedRef.current = true;
@@ -956,6 +980,7 @@ function NotebookDetailContent() {
     try {
       const data = await fetchNotebook(writableNotebookId);
       setNotebook(data.notebook);
+      setStudioNotes(readStoredNotebookNotes(data.notebook.id));
       const nextFiles = data.files || [];
       setFiles(nextFiles);
       setSelectedFileIds((prev) => {
@@ -1480,6 +1505,33 @@ function NotebookDetailContent() {
     await generateStudioArtifactByType(type, type);
   };
 
+  const handleCreateStudioNote = (input: { title: string; content: string }) => {
+    if (!notebook) return;
+    const note: NotebookStudioNote = {
+      id: `note-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      title: input.title.trim() || "未命名笔记",
+      content: input.content.trim(),
+      createdAt: new Date().toISOString(),
+      origin: "manual",
+    };
+    setStudioNotes((prev) => {
+      const next = [note, ...prev].slice(0, 1000);
+      writeStoredNotebookNotes(notebook.id, next);
+      return next;
+    });
+    toast.success("笔记已添加");
+  };
+
+  const handleUpdateStudioNote = (noteId: string, input: { title: string; content: string }) => {
+    if (!notebook) return;
+    setStudioNotes((prev) => {
+      const next = prev.map((note) => note.id === noteId ? { ...note, title: input.title.trim() || "未命名笔记", content: input.content.trim() } : note);
+      writeStoredNotebookNotes(notebook.id, next);
+      return next;
+    });
+    toast.success("笔记已更新");
+  };
+
   const handleRegenerateArtifact = async (artifact: NotebookStudioArtifact) => {
     if (!writableNotebookId) return;
     const request = regenerationRequestForArtifact(artifact);
@@ -1904,11 +1956,14 @@ function NotebookDetailContent() {
       <NotebookStudioPanel
         width={studioWidth}
         artifacts={studioArtifacts}
+        notes={studioNotes}
         activeArtifactId={activeStudioArtifactId}
         generatingType={generatingStudioType}
         selectedSourceCount={selectedFileIds.length}
         sourceFiles={studioSourceFiles}
         onGenerate={handleStudioGenerate}
+        onCreateNote={handleCreateStudioNote}
+        onUpdateNote={handleUpdateStudioNote}
         onOpenArtifact={setActiveStudioArtifactId}
         onRenameArtifact={handleRenameArtifact}
         onRegenerateArtifact={handleRegenerateArtifact}

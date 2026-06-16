@@ -1072,7 +1072,13 @@ func (h *ImageHandler) ListImages(c *gin.Context) {
 	var images []services.ImageGeneration
 	query := h.db.Where("user_id = ?", userID)
 	if provider != "" {
-		query = query.Where("provider = ?", provider)
+		if provider == "seedream" && strings.EqualFold(strings.TrimSpace(c.Query("include_legacy")), "1") {
+			// 兼容 Seedream Beta 早期历史：provider 字段上线前，Seedream 入口生成的记录
+			// 会以空 provider 写入；显式 include_legacy 时带回这些记录，避免历史列表看起来被清空。
+			query = query.Where("provider = ? OR provider = '' OR provider IS NULL", provider)
+		} else {
+			query = query.Where("provider = ?", provider)
+		}
 	} else {
 		// 默认图片入口不展示 Seedream Beta 的独立测试历史，避免和正式图片功能混合。
 		query = query.Where("provider = '' OR provider IS NULL")

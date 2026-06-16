@@ -44,13 +44,18 @@ export function useImage(provider?: string) {
     try {
       const token = localStorage.getItem("token");
       if (!token) {
-        setImages([]);
-        cachedImagesByProvider[providerKey] = [];
+        // 保留已有缓存，避免临时认证状态/刷新竞态把历史列表直接清空。
+        if (!cachedImagesByProvider[providerKey]) {
+          setImages([]);
+        }
         return;
       }
       const headers: Record<string, string> = {};
       if (token) headers.Authorization = `Bearer ${token}`;
-      const query = providerKey ? `?provider=${encodeURIComponent(providerKey)}` : "";
+      const params = new URLSearchParams();
+      if (providerKey) params.set("provider", providerKey);
+      if (providerKey === "seedream") params.set("include_legacy", "1");
+      const query = params.toString() ? `?${params.toString()}` : "";
       const response = await fetch(`${API_BASE_URL}/api/images${query}`, { headers });
       if (!response.ok) {
         throw await readApiError(response);

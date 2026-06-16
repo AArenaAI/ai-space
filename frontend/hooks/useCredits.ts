@@ -144,12 +144,9 @@ export function useCredits() {
     [token]
   );
 
-  // 检查积分是否足够
-  // 【积分限制已临时取消】永远返回 true
+  // 检查积分是否足够（已恢复）
   const hasEnoughCredits = useCallback(
-    (_modelId: string): boolean => {
-      return true;
-      /* 如需恢复，取消下面注释：
+    (modelId: string): boolean => {
       if (!credits) return true;
       const tier = getModelTier(modelId);
       const quota = credits.daily_quota?.[tier] ?? 0;
@@ -164,7 +161,6 @@ export function useCredits() {
         default:
           return true;
       }
-      */
     },
     [credits]
   );

@@ -18,6 +18,13 @@ type Config struct {
 	JWTSecret   string
 	FrontendURL string
 
+	// ========== SMTP / Email ==========
+	SMTPHost     string
+	SMTPPort     string
+	SMTPUser     string
+	SMTPPassword string
+	SMTPFrom     string
+
 	// ========== Google Cloud Translation（专用翻译 API，后端服务账号认证）==========
 	GoogleCloudProjectID    string
 	GoogleTranslateLocation string
@@ -178,6 +185,13 @@ func Load() *Config {
 		DatabaseURL: getEnv("DATABASE_URL", "postgres://aipool:***@localhost:5432/aipool?sslmode=disable"),
 		JWTSecret:   getEnv("JWT_SECRET", "your-secret-key-change-in-production"),
 		FrontendURL: getEnv("FRONTEND_URL", "http://localhost:9090"),
+
+		// SMTP / Email
+		SMTPHost:     getEnv("SMTP_HOST", ""),
+		SMTPPort:     getEnv("SMTP_PORT", "587"),
+		SMTPUser:     getEnv("SMTP_USER", ""),
+		SMTPPassword: getEnv("SMTP_PASSWORD", ""),
+		SMTPFrom:     getEnv("SMTP_FROM", ""),
 
 		GoogleCloudProjectID:    getEnv("GOOGLE_CLOUD_PROJECT_ID", ""),
 		GoogleTranslateLocation: getEnv("GOOGLE_TRANSLATE_LOCATION", "global"),

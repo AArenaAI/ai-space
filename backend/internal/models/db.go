@@ -45,6 +45,9 @@ func InitDB(databaseURL string) (*gorm.DB, error) {
 		&MessageFavorite{},
 		&MessageGroup{}, // 新增
 		&ModelConfig{}, // 新增：模型配置表
+		&BadCase{}, // 新增：Bad Case 提交表
+		&BetaInvite{}, // 新增：内测邀请码
+		&BetaApplication{}, // 新增：内测申请表
 	); err != nil {
 		return nil, err
 	}

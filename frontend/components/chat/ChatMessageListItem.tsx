@@ -36,6 +36,7 @@ export type ChatMessageListItemProps = {
   onRegenerate?: () => void;
   onContinueGenerate?: () => void;
   onForkCompare?: (messageId: number) => void;
+  onSaveAssistantToNote?: (content: string) => void;
   onAssistantViewed?: (messageId: string) => void;
   imageLoadFailedLabel: string;
   MarkdownRenderer: MessageRowProps["MarkdownRenderer"];
@@ -74,6 +75,7 @@ function ChatMessageListItem({
   onRegenerate,
   onContinueGenerate,
   onForkCompare,
+  onSaveAssistantToNote,
   onAssistantViewed,
   imageLoadFailedLabel,
   MarkdownRenderer,
@@ -111,6 +113,7 @@ function ChatMessageListItem({
       onRegenerate={onRegenerate}
       onContinueGenerate={onContinueGenerate}
       onForkCompare={onForkCompare}
+      onSaveAssistantToNote={onSaveAssistantToNote}
       onAssistantViewed={onAssistantViewed}
       imageLoadFailedLabel={imageLoadFailedLabel}
       MarkdownRenderer={MarkdownRenderer}

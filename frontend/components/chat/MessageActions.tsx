@@ -2,7 +2,7 @@
 
 import { memo, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, Columns3, Copy, MoreHorizontal, RotateCcw, Share2, Star, Trash2 } from "lucide-react";
+import { Check, Columns3, Copy, MoreHorizontal, RotateCcw, Share2, Star, StickyNote, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 import { emitChatRenderProfileEvent, isChatRenderProfileEnabled } from "@/lib/chatRenderProfile";
@@ -20,6 +20,7 @@ export type MessageActionsProps = {
   createdAt: number;
   completedAt?: number;
   onForkCompare?: () => void;
+  onSaveToNote?: () => void;
 };
 
 function formatTime(ts: number, language: string) {
@@ -94,6 +95,7 @@ function MessageActions({
   createdAt,
   completedAt,
   onForkCompare,
+  onSaveToNote,
 }: MessageActionsProps) {
   const profileEnabled = isChatRenderProfileEnabled();
   const renderStartedAt = profileEnabled ? nowMs() : 0;
@@ -233,6 +235,16 @@ function MessageActions({
                   <span className="text-text-tertiary">{t("chat.action.startTime")}</span>
                   <span className="text-text-secondary">{formatTime(createdAt, language)}</span>
                 </div>
+                {onSaveToNote && (
+                  <button
+                    type="button"
+                    onClick={() => { onSaveToNote(); setMoreOpen(false); }}
+                    className="mt-1 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs font-medium text-text-secondary transition hover:bg-surface-hover hover:text-text-primary"
+                  >
+                    <StickyNote className="h-3.5 w-3.5" />
+                    保存到笔记
+                  </button>
+                )}
                 {completedAt && durationMs >= 0 && (
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-text-tertiary">{t("chat.action.duration")}</span>

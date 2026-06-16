@@ -812,6 +812,30 @@ func parseUintQuery(c *gin.Context, key string) uint {
 	return uint(parsed)
 }
 
+func parseIntQuery(c *gin.Context, key string, defaultValue int) int {
+	value := c.Query(key)
+	if value == "" {
+		return defaultValue
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return defaultValue
+	}
+	return parsed
+}
+
+func parseUintParam(c *gin.Context, key string) uint {
+	value := c.Param(key)
+	if value == "" {
+		return 0
+	}
+	parsed, err := strconv.ParseUint(value, 10, 32)
+	if err != nil {
+		return 0
+	}
+	return uint(parsed)
+}
+
 type notebookURLPage struct {
 	URL     string
 	Title   string

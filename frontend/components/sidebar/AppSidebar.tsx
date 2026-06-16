@@ -146,6 +146,17 @@ const SKILL_ICON_MAP: Record<string, { icon: React.ElementType; color: string }>
   "translator":       { icon: Languages,       color: "text-indigo-400" },
 };
 
+const CHAT_HISTORY_HIDDEN_SKILL_KEYS = new Set([
+  "ai-writing-assistant",
+  "translator",
+  "document-reader",
+  "seedream-beta",
+]);
+
+function isMainChatConversation(conv: Conversation): boolean {
+  return !conv.skill_key || !CHAT_HISTORY_HIDDEN_SKILL_KEYS.has(conv.skill_key);
+}
+
 async function fetchConversations(workspaceId?: number): Promise<Conversation[] | null> {
   const token = localStorage.getItem("token");
   if (!token) return [];
@@ -158,8 +169,8 @@ async function fetchConversations(workspaceId?: number): Promise<Conversation[] 
     });
     if (!res.ok) return null;
     const data = await res.json();
-    if (Array.isArray(data)) return data;
-    if (data && Array.isArray(data.conversations)) return data.conversations;
+    if (Array.isArray(data)) return data.filter(isMainChatConversation);
+    if (data && Array.isArray(data.conversations)) return data.conversations.filter(isMainChatConversation);
     return null;
   } catch { return null; }
 }
@@ -178,7 +189,7 @@ async function searchConversations(keyword: string, workspaceId?: number, signal
     });
     if (!res.ok) return [];
     const data = await res.json();
-    return Array.isArray(data) ? data : [];
+    return Array.isArray(data) ? data.filter(isMainChatConversation) : [];
   } catch {
     return [];
   }
@@ -684,6 +695,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
         updated_at: d.updated_at || now,
         skill_key: d.skill_key,
       };
+      if (!isMainChatConversation(conv)) return;
       updateConversationsStable(prev => sortConversations([conv, ...prev.filter(c => c.id !== conv.id)]));
     };
     window.addEventListener("conversation-created", h);
@@ -957,7 +969,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     const token = localStorage.getItem("token");
     if (!token) return;
     const recent = sortConversations(conversations)
-      .filter((conv) => conv.skill_key !== "ai-writing-assistant" && conv.skill_key !== "translator" && conv.skill_key !== "document-reader")
+      .filter(isMainChatConversation)
       .filter((conv) => String(conv.id) !== currentConvId)
       .slice(0, 5);
     if (recent.length === 0) return;
@@ -1025,7 +1037,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
       );
     }
 
-    const sidebarConversations = conversations.filter(c => c.skill_key !== "ai-writing-assistant" && c.skill_key !== "translator" && c.skill_key !== "document-reader");
+    const sidebarConversations = conversations.filter(isMainChatConversation);
     const pinned = sidebarConversations.filter(c => c.pinned);
     const unpinned = sidebarConversations.filter(c => !c.pinned);
     const groups = groupConversationsByTime(unpinned, t);
@@ -1471,6 +1483,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
             items: [
               { icon: ImageIcon, label: t("image.generateImage"), href: "/image", color: "text-purple-500", bg: "bg-purple-500/10" },
               { icon: Video, label: t("video.generateVideo"), href: "/video", color: "text-blue-500", bg: "bg-blue-500/10" },
+              { icon: Sparkles, label: t("seedreamBeta.navLabel"), href: "/seedream-beta", color: "text-amber-500", bg: "bg-amber-500/10" },
               { icon: Image, label: t("sidebar.panel.remove_bg"), href: "/create?mode=remove-bg", color: "text-green-500", bg: "bg-green-500/10" },
               { icon: Eraser, label: t("sidebar.panel.replace_bg"), href: "/create?mode=replace-bg", color: "text-purple-500", bg: "bg-purple-500/10" },
               { icon: Type, label: t("sidebar.panel.text_removal"), href: "/create?mode=text-removal", color: "text-amber-500", bg: "bg-amber-500/10" },

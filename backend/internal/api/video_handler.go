@@ -387,6 +387,6 @@ func normalizeVideoGenerationParams(modelID string, ratio string, resolution str
 
 // GetVideoModelsHandler returns supported video generation models
 func GetVideoModelsHandler(c *gin.Context) {
-	models := modelmeta.VideoModels()
+	models := mergeModelConfigs(modelmeta.VideoModels())
 	c.JSON(http.StatusOK, models)
 }

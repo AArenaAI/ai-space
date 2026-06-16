@@ -57,6 +57,15 @@ export const ERROR_CATALOG = {
     action: "switch_model",
     actionLabel: "更换模型",
   },
+  modelServiceUnavailable: {
+    code: "model_service_unavailable",
+    category: "model",
+    severity: "error",
+    title: "模型服务暂时不可用",
+    message: "当前模型服务暂时不可用，请稍后重试，或切换其他模型。",
+    action: "switch_model",
+    actionLabel: "切换模型",
+  },
   loginRequired: {
     code: "login_required",
     category: "auth",

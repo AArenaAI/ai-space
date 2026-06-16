@@ -8,7 +8,7 @@ export default function CreativeLayout({ children }: { children: React.ReactNode
       <div className="hidden shrink-0 md:block">
         <ToolsSidebar />
       </div>
-      <main className="min-w-0 flex-1">{children}</main>
+      <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">{children}</main>
     </>
   );
 }

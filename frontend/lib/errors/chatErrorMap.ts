@@ -4,6 +4,18 @@ export function mapChatError(raw: string): Partial<UserFacingError> | null {
   const message = raw.trim();
   if (!message) return null;
 
+  if (/OpenAI response status\s*=\s*failed|response status\s*=\s*failed|insufficient[_\s-]?quota|quota[_\s-]?exceeded|billing|credit|balance|额度|积分|余额|provider.*failed|model.*failed|provider.*unavailable|上游.*失败|模型服务.*不可用/i.test(message)) {
+    return {
+      code: "model_service_unavailable",
+      category: "model",
+      severity: "error",
+      title: "模型服务暂时不可用",
+      message: "当前模型服务暂时不可用，请稍后重试，或切换其他模型。",
+      action: "switch_model",
+      actionLabel: "切换模型",
+    };
+  }
+
   if (/context.*length|maximum context|上下文|token.*limit|too many tokens/i.test(message)) {
     return {
       code: "chat_context_too_long",

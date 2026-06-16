@@ -198,30 +198,24 @@ func (h *CreditsHandler) DeductCredits(c *gin.Context) {
 	isUnlimited := quota < 0
 	_ = isUnlimited // 暂时避免未使用报错，恢复积分限制时删除此行
 
-	// 【积分限制已临时取消】保留检查逻辑但永远通过
-	// 如需恢复积分限制，取消下面注释：
-	/*
-		if !isUnlimited && *creditsField < req.Amount {
-			tierName := GetTierName(tier)
-			c.JSON(http.StatusPaymentRequired, gin.H{
-				"error":         "积分不足",
-				"tier":          tier,
-				"tier_name":     tierName,
-				"required":      req.Amount,
-				"remaining":     *creditsField,
-				"upgrade_tip":   "升级套餐以获取更多" + tierName + "积分",
-			})
-			return
-		}
-	*/
+	// 积分限制检查：余额不足时返回 402
+	if !isUnlimited && *creditsField < req.Amount {
+		tierName := GetTierName(tier)
+		c.JSON(http.StatusPaymentRequired, gin.H{
+			"error":         "积分不足",
+			"tier":          tier,
+			"tier_name":     tierName,
+			"required":      req.Amount,
+			"remaining":     *creditsField,
+			"upgrade_tip":   "升级套餐以获取更多" + tierName + "积分",
+		})
+		return
+	}
 
-	// 扣减积分已临时取消 — 保留数据但不实际扣减
-	// 如需恢复积分扣减，取消下面注释：
-	/*
-		if !isUnlimited {
-			*creditsField -= req.Amount
-		}
-	*/
+	// 实际扣减积分
+	if !isUnlimited {
+		*creditsField -= req.Amount
+	}
 	user.UpdatedAt = now
 	h.db.Save(&user)
 
