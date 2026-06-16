@@ -1804,18 +1804,18 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
                     <Layers className="h-3.5 w-3.5" />
                     3D导演台
                   </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowDirectorPanel(true)}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-surface-border bg-surface-card px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary"
-                    >
-                      <Layers className="h-3.5 w-3.5" />
-                      2D导演台
-                    </button>
-                    <span className="text-xs text-text-tertiary">·</span>
-                    <span className="text-xs font-medium text-text-primary">{t(workflowStepCards.find((s) => s.id === workflowMode)?.titleKey || "")}</span>
-                  </div>
-                )}
+                  <button
+                    type="button"
+                    onClick={() => setShowDirectorPanel(true)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-surface-border bg-surface-card px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary"
+                  >
+                    <Layers className="h-3.5 w-3.5" />
+                    2D导演台
+                  </button>
+                  <span className="text-xs text-text-tertiary">·</span>
+                  <span className="text-xs font-medium text-text-primary">{t(workflowStepCards.find((s) => s.id === workflowMode)?.titleKey || "")}</span>
+                </div>
+              )}
 
                 {showDirector3DPanel && activeShot && (
                   <Director3DPanel
@@ -1867,7 +1867,7 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
                   />
                 )}
 
-                {workflowView === "overview" && (
+              {workflowView === "overview" && (
                   <div className="space-y-4">
                     {/* 4×3 故事板网格 */}
                     {storyboardShots.length > 0 && (
@@ -1893,13 +1893,11 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
                       <VideoSegmentGenerator
                         shots={storyboardShots}
                         onGenerateSegment={async (segment) => {
-                          // 依次生成段落中的每个镜头视频
                           for (const shot of segment.shots) {
                             await generateShotVideo(shot);
                           }
                         }}
                         onExtractLastFrame={async (videoUrl) => {
-                          // TODO: 从视频提取尾帧
                           return videoUrl;
                         }}
                       />
@@ -2560,47 +2558,56 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
                             </div>
                           )}
                         </div>
-                      ) : <div className="rounded-2xl border border-dashed border-surface-border p-6 text-center text-sm text-text-tertiary">还没有镜头卡。先点“生成提示词”，再点“解析为镜头卡”，或直接“加镜头”。</div>}
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-surface-border p-6 text-center text-sm text-text-tertiary">
+                          还没有镜头卡。先点"生成提示词"，再点"解析为镜头卡"，或直接"加镜头"。
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
               </div>
-            ) : tab === "image" ? (
-              <div className="space-y-5">
-                <div>
-                  <FieldLabel>{t("seedreamBeta.prompt")}</FieldLabel>
-                  <textarea
-                    value={imagePrompt}
-                    onChange={(event) => setImagePrompt(event.target.value)}
-                    placeholder={t("seedreamBeta.imagePromptPlaceholder")}
-                    className="min-h-40 w-full resize-none rounded-2xl border border-surface-border bg-surface-card px-4 py-3 text-sm outline-none transition-colors placeholder:text-text-tertiary focus:border-brand/60 focus:ring-2 focus:ring-brand/10"
-                  />
-                </div>
+            )}
+          </div>
+        )}
+      </section>
 
-                <div>
-                  <FieldLabel>{t("seedreamBeta.aspect")}</FieldLabel>
-                  <div className="flex flex-wrap gap-2">
-                    {IMAGE_ASPECTS.map((item) => (
-                      <PillButton key={item} active={imageAspect === item} onClick={() => setImageAspect(item)}>{item}</PillButton>
-                    ))}
-                  </div>
-                </div>
+      {tab === "image" && (
+          <div className="space-y-5">
+            <div>
+              <FieldLabel>{t("seedreamBeta.prompt")}</FieldLabel>
+              <textarea
+                value={imagePrompt}
+                onChange={(event) => setImagePrompt(event.target.value)}
+                placeholder={t("seedreamBeta.imagePromptPlaceholder")}
+                className="min-h-40 w-full resize-none rounded-2xl border border-surface-border bg-surface-card px-4 py-3 text-sm outline-none transition-colors placeholder:text-text-tertiary focus:border-brand/60 focus:ring-2 focus:ring-brand/10"
+              />
+            </div>
 
-                <div>
-                  <FieldLabel>{t("seedreamBeta.resolution")}</FieldLabel>
-                  <div className="flex flex-wrap gap-2">
-                    {IMAGE_RESOLUTIONS.map((item) => (
-                      <PillButton key={item} active={imageResolution === item} onClick={() => setImageResolution(item)}>{item}</PillButton>
-                    ))}
-                  </div>
-                  <p className="mt-2 text-xs text-text-tertiary">{t("seedreamBeta.seedreamImageSettingsHint")}</p>
-                </div>
+            <div>
+              <FieldLabel>{t("seedreamBeta.aspect")}</FieldLabel>
+              <div className="flex flex-wrap gap-2">
+                {IMAGE_ASPECTS.map((item) => (
+                  <PillButton key={item} active={imageAspect === item} onClick={() => setImageAspect(item)}>{item}</PillButton>
+                ))}
+              </div>
+            </div>
 
-                {selectedImageRefs.length > 0 && (
-                  <div className="rounded-2xl border border-brand/20 bg-brand/5 px-4 py-3 text-xs text-text-secondary">
-                    {t("seedreamBeta.assets.imageRefs", { count: String(selectedImageRefs.length) })}
-                  </div>
-                )}
+            <div>
+              <FieldLabel>{t("seedreamBeta.resolution")}</FieldLabel>
+              <div className="flex flex-wrap gap-2">
+                {IMAGE_RESOLUTIONS.map((item) => (
+                  <PillButton key={item} active={imageResolution === item} onClick={() => setImageResolution(item)}>{item}</PillButton>
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-text-tertiary">{t("seedreamBeta.seedreamImageSettingsHint")}</p>
+            </div>
+
+            {selectedImageRefs.length > 0 && (
+              <div className="rounded-2xl border border-brand/20 bg-brand/5 px-4 py-3 text-xs text-text-secondary">
+                {t("seedreamBeta.assets.imageRefs", { count: String(selectedImageRefs.length) })}
+              </div>
+            )}
 
                 <button
                   type="button"
@@ -2686,9 +2693,8 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
                 </button>
               </div>
             )}
-          </section>
-
-
+          </div>
+        )}
       </div>
       {previewAsset && (
         <div
