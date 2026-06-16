@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
 import {
   AlertCircle, ChevronLeft, ChevronRight, ExternalLink, Filter,
   Loader2, RefreshCw, Search, Shield, SlidersHorizontal, Users, Wallet,
-  X, TrendingUp, Clock, Mail, CreditCard, Tag, CheckCircle2, XCircle
+  X, TrendingUp, Clock, Mail, CreditCard, Tag, CheckCircle2, XCircle,
+  ChevronDown, ChevronUp, Pencil, Save, Ban
 } from "lucide-react";
 import { getAdminUsers, updateAdminUser } from "@/lib/admin/api";
 import type { AdminUser, AdminUsersResponse, AdminUserUsageSummary } from "@/lib/admin/types";
@@ -18,7 +18,6 @@ const PAGE_SIZE = 20;
 const PLAN_OPTIONS = ["free", "basic", "plus", "ultra"];
 
 export default function AdminUsersPage() {
-  const router = useRouter();
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const [data, setData] = useState<AdminUsersResponse | null>(null);
@@ -29,6 +28,8 @@ export default function AdminUsersPage() {
   const [roleFilter, setRoleFilter] = useState("");
   const [planFilter, setPlanFilter] = useState("");
   const [betaFilter, setBetaFilter] = useState("");
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [editingCredits, setEditingCredits] = useState<Record<number, boolean>>({});
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil((data?.total || 0) / PAGE_SIZE)), [data?.total]);
 
@@ -220,48 +221,14 @@ export default function AdminUsersPage() {
 
       {/* Metrics */}
       <div className="grid gap-4 md:grid-cols-4">
-        <MetricCard
-          title="当前页用户"
-          value={formatNumber(data?.users?.length || 0)}
-          icon={Users}
-          helper={`共 ${formatNumber(data?.total || 0)} 个用户`}
-        />
-        <MetricCard
-          title="30d 成本"
-          value={formatRMB(usageRollup.cost)}
-          icon={Wallet}
-          helper={`${formatNumber(usageRollup.requests)} 次调用`}
-        />
-        <MetricCard
-          title="图片"
-          value={formatNumber(usageRollup.images)}
-          icon={TrendingUp}
-          helper="当前页用户 30d"
-        />
-        <MetricCard
-          title="视频秒数"
-          value={`${formatNumber(usageRollup.video)}s`}
-          icon={TrendingUp}
-          helper="当前页用户 30d"
-        />
+        <MetricCard title="当前页用户" value={formatNumber(data?.users?.length || 0)} icon={Users} helper={`共 ${formatNumber(data?.total || 0)} 个用户`} />
+        <MetricCard title="30d 成本" value={formatRMB(usageRollup.cost)} icon={Wallet} helper={`${formatNumber(usageRollup.requests)} 次调用`} />
+        <MetricCard title="图片" value={formatNumber(usageRollup.images)} icon={TrendingUp} helper="当前页用户 30d" />
+        <MetricCard title="视频秒数" value={`${formatNumber(usageRollup.video)}s`} icon={TrendingUp} helper="当前页用户 30d" />
       </div>
 
-      {/* Table */}
-      <div className="rounded-2xl border border-surface-border bg-surface-card shadow-sm">
-        <div className="flex items-center justify-between border-b border-surface-border px-5 py-4">
-          <div className="text-sm text-text-secondary">
-            共 <span className="font-medium text-text-primary">{formatNumber(data?.total || 0)}</span> 个用户
-            {activeFilterCount > 0 && (
-              <span className="ml-2 text-xs text-brand">（已筛选 {activeFilterCount} 项）</span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-text-tertiary">
-              Page {page} / {totalPages}
-            </span>
-          </div>
-        </div>
-
+      {/* User Cards */}
+      <div className="space-y-3">
         {loading ? (
           <div className="flex h-72 items-center justify-center text-sm text-text-secondary">
             <Loader2 className="mr-2 h-4 w-4 animate-spin text-brand" />
@@ -272,191 +239,30 @@ export default function AdminUsersPage() {
             <AlertCircle className="mb-2 h-5 w-5" />
             {error}
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1180px] text-left text-sm">
-              <thead className="bg-surface-elevated text-xs uppercase text-text-tertiary">
-                <tr>
-                  <th className="px-4 py-3 font-medium w-48">用户</th>
-                  <th className="px-4 py-3 font-medium w-32">角色/套餐</th>
-                  <th className="px-4 py-3 font-medium w-28">内测阶段</th>
-                  <th className="px-4 py-3 font-medium w-40">积分</th>
-                  <th className="px-4 py-3 font-medium w-28">30d 成本</th>
-                  <th className="px-4 py-3 font-medium w-36">30d 用量</th>
-                  <th className="px-4 py-3 font-medium w-28">风险</th>
-                  <th className="px-4 py-3 font-medium w-32">最近使用</th>
-                  <th className="px-4 py-3 font-medium w-24">操作</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-surface-border">
-                {filteredUsers.map((user) => {
-                  const usage = user.usage_30d;
-                  return (
-                    <tr key={user.id} className="hover:bg-surface-elevated/50">
-                      {/* User */}
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand/10 text-brand text-xs font-bold">
-                            {(user.name || user.email || "?")[0].toUpperCase()}
-                          </div>
-                          <div className="min-w-0">
-                            <div className="truncate font-medium text-text-primary">{user.name || user.email}</div>
-                            <div className="mt-0.5 flex items-center gap-1 text-xs text-text-tertiary">
-                              <Mail className="h-3 w-3" />
-                              <span className="truncate">{user.email}</span>
-                            </div>
-                            <div className="text-xs text-text-tertiary">ID: {user.id}</div>
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* Role/Plan */}
-                      <td className="px-4 py-3 align-top">
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-1.5">
-                            <select
-                              disabled={savingId === user.id}
-                              value={user.role}
-                              onChange={(event) =>
-                                patchUser(user, { role: event.target.value as AdminUser["role"] })
-                              }
-                              className="rounded-lg border border-surface-border bg-surface-elevated px-2 py-1 text-xs text-text-primary outline-none"
-                            >
-                              <option value="user">user</option>
-                              <option value="admin">admin</option>
-                            </select>
-                            {user.role === "admin" && (
-                              <StatusBadge tone="purple">
-                                <Shield className="mr-1 h-3 w-3" />
-                                Admin
-                              </StatusBadge>
-                            )}
-                          </div>
-                          <select
-                            disabled={savingId === user.id}
-                            value={user.plan_tier || "free"}
-                            onChange={(event) => patchUser(user, { plan_tier: event.target.value })}
-                            className="block rounded-lg border border-surface-border bg-surface-elevated px-2 py-1 text-xs text-text-primary outline-none"
-                          >
-                            {PLAN_OPTIONS.map((plan) => (
-                              <option key={plan} value={plan}>
-                                {plan}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </td>
-
-                      {/* Beta Phase */}
-                      <td className="px-4 py-3 align-top">
-                        {user.beta_phase ? (
-                          <div className="flex flex-col gap-1">
-                            <StatusBadge tone={getBetaPhaseTone(user.beta_phase)}>
-                              {user.beta_phase_name || user.beta_phase}
-                            </StatusBadge>
-                            <span className="text-xs text-text-tertiary">
-                              {getBetaPhaseDesc(user.beta_phase)}
-                            </span>
-                          </div>
-                        ) : (
-                          <StatusBadge tone="neutral">未参与</StatusBadge>
-                        )}
-                      </td>
-
-                      {/* Credits */}
-                      <td className="px-4 py-3 text-xs">
-                        <div className="space-y-1.5">
-                          <CreditInput
-                            label="基础"
-                            value={user.basic_credits}
-                            disabled={savingId === user.id}
-                            onSave={(value) => patchUser(user, { basic_credits: value })}
-                          />
-                          <CreditInput
-                            label="高级"
-                            value={user.advanced_credits}
-                            disabled={savingId === user.id}
-                            onSave={(value) => patchUser(user, { advanced_credits: value })}
-                          />
-                          <CreditInput
-                            label="精英"
-                            value={user.elite_credits}
-                            disabled={savingId === user.id}
-                            onSave={(value) => patchUser(user, { elite_credits: value })}
-                          />
-                        </div>
-                      </td>
-
-                      {/* 30d Cost */}
-                      <td className="px-4 py-3 align-top">
-                        <div className="font-semibold text-text-primary">
-                          {formatRMB(usage?.cost_rmb || 0)}
-                        </div>
-                        <div className="mt-1 text-xs text-text-tertiary">
-                          {usage?.requests
-                            ? `${formatRMB((usage.cost_rmb || 0) / Math.max(usage.requests, 1))}/次`
-                            : "暂无调用"}
-                        </div>
-                      </td>
-
-                      {/* 30d Usage */}
-                      <td className="px-4 py-3 align-top text-xs text-text-secondary">
-                        <div>
-                          {formatNumber(usage?.requests || 0)} 次 · {formatNumber(usage?.total_tokens || 0)} tok
-                        </div>
-                        <div className="mt-1 text-text-tertiary">
-                          {formatNumber(usage?.image_count || 0)} 图 · {formatNumber(usage?.video_seconds || 0)}s 视频
-                        </div>
-                      </td>
-
-                      {/* Risk */}
-                      <td className="px-4 py-3 align-top">
-                        <UserRiskBadges usage={usage} />
-                      </td>
-
-                      {/* Last Used */}
-                      <td className="px-4 py-3 text-xs text-text-secondary">
-                        <div className="flex items-center gap-1">
-                          <Clock className="h-3 w-3 text-text-tertiary" />
-                          {usage?.last_used_at
-                            ? formatDateTime(usage.last_used_at)
-                            : formatDateTime(user.created_at)}
-                        </div>
-                      </td>
-
-                      {/* Actions */}
-                      <td className="px-4 py-3 align-top">
-                        <div className="flex flex-col gap-1.5">
-                          <a
-                            href={`/admin/usage?range=30d&user_id=${user.id}`}
-                            className="inline-flex items-center gap-1 rounded-lg border border-surface-border px-2.5 py-1 text-xs text-text-secondary hover:text-text-primary transition-colors"
-                          >
-                            查看成本 <ExternalLink className="h-3 w-3" />
-                          </a>
-                          <span className="text-[10px] text-text-tertiary">
-                            {savingId === user.id ? "保存中…" : "已同步"}
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {filteredUsers.length === 0 && (
-                  <tr>
-                    <td colSpan={9} className="px-4 py-12 text-center text-text-tertiary">
-                      {data?.users && data.users.length > 0
-                        ? "没有符合筛选条件的用户"
-                        : "没有找到用户"}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+        ) : filteredUsers.length === 0 ? (
+          <div className="flex h-72 flex-col items-center justify-center text-sm text-text-tertiary">
+            <Users className="mb-2 h-8 w-8 opacity-40" />
+            {data?.users && data.users.length > 0 ? "没有符合筛选条件的用户" : "没有找到用户"}
           </div>
+        ) : (
+          filteredUsers.map((user) => (
+            <UserCard
+              key={user.id}
+              user={user}
+              isExpanded={expandedId === user.id}
+              isEditing={editingCredits[user.id] || false}
+              isSaving={savingId === user.id}
+              onToggleExpand={() => setExpandedId(expandedId === user.id ? null : user.id)}
+              onToggleEdit={() => setEditingCredits((prev) => ({ ...prev, [user.id]: !prev[user.id] }))}
+              onPatch={patchUser}
+            />
+          ))
         )}
+      </div>
 
-        {/* Pagination */}
-        <div className="flex items-center justify-between border-t border-surface-border px-5 py-4">
+      {/* Pagination */}
+      {!loading && !error && filteredUsers.length > 0 && (
+        <div className="flex items-center justify-between rounded-2xl border border-surface-border bg-surface-card px-5 py-4">
           <button
             disabled={page <= 1 || loading}
             onClick={() => setPage((prev) => Math.max(1, prev - 1))}
@@ -475,9 +281,7 @@ export default function AdminUsersPage() {
                   disabled={loading}
                   className={cn(
                     "h-8 w-8 rounded-lg text-sm font-medium transition-colors",
-                    page === p
-                      ? "bg-brand text-white"
-                      : "text-text-secondary hover:bg-surface-elevated"
+                    page === p ? "bg-brand text-white" : "text-text-secondary hover:bg-surface-elevated"
                   )}
                 >
                   {p}
@@ -505,14 +309,265 @@ export default function AdminUsersPage() {
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>
-      </div>
+      )}
     </div>
   );
 }
 
+function UserCard({
+  user,
+  isExpanded,
+  isEditing,
+  isSaving,
+  onToggleExpand,
+  onToggleEdit,
+  onPatch,
+}: {
+  user: AdminUser;
+  isExpanded: boolean;
+  isEditing: boolean;
+  isSaving: boolean;
+  onToggleExpand: () => void;
+  onToggleEdit: () => void;
+  onPatch: (user: AdminUser, patch: Partial<AdminUser>) => Promise<void>;
+}) {
+  const usage = user.usage_30d;
+  const totalCredits = user.basic_credits + user.advanced_credits + user.elite_credits;
+
+  return (
+    <div className="rounded-2xl border border-surface-border bg-surface-card shadow-sm overflow-hidden">
+      {/* Main Row */}
+      <div
+        className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-surface-hover/50 transition-colors"
+        onClick={onToggleExpand}
+      >
+        {/* Avatar */}
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand/10 text-brand text-sm font-bold">
+          {(user.name || user.email || "?")[0].toUpperCase()}
+        </div>
+
+        {/* User Info */}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-text-primary">{user.name || user.email}</span>
+            {user.role === "admin" && (
+              <StatusBadge tone="purple">
+                <Shield className="mr-1 h-3 w-3" />
+                Admin
+              </StatusBadge>
+            )}
+            <BetaPhaseBadge phase={user.beta_phase} phaseName={user.beta_phase_name} />
+          </div>
+          <div className="mt-0.5 flex items-center gap-3 text-xs text-text-tertiary">
+            <span className="flex items-center gap-1">
+              <Mail className="h-3 w-3" />
+              {user.email}
+            </span>
+            <span>ID: {user.id}</span>
+          </div>
+        </div>
+
+        {/* Plan */}
+        <div className="hidden md:flex items-center gap-2 shrink-0">
+          <select
+            disabled={isSaving}
+            value={user.plan_tier || "free"}
+            onChange={(e) => onPatch(user, { plan_tier: e.target.value })}
+            onClick={(e) => e.stopPropagation()}
+            className="rounded-lg border border-surface-border bg-surface-elevated px-2 py-1 text-xs text-text-primary outline-none"
+          >
+            {PLAN_OPTIONS.map((plan) => (
+              <option key={plan} value={plan}>{plan}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Credits Summary */}
+        <div className="hidden lg:flex flex-col items-end shrink-0 w-28">
+          <div className="text-sm font-semibold text-text-primary">
+            {(totalCredits / 100).toFixed(1)} 积分
+          </div>
+          <div className="text-[10px] text-text-tertiary">
+            基础 {(user.basic_credits / 100).toFixed(1)} · 高级 {(user.advanced_credits / 100).toFixed(1)} · 精英 {(user.elite_credits / 100).toFixed(1)}
+          </div>
+        </div>
+
+        {/* 30d Cost */}
+        <div className="hidden xl:flex flex-col items-end shrink-0 w-24">
+          <div className="text-sm font-semibold text-text-primary">
+            {formatRMB(usage?.cost_rmb || 0)}
+          </div>
+          <div className="text-[10px] text-text-tertiary">
+            {usage?.requests ? `${usage.requests} 次` : "暂无"}
+          </div>
+        </div>
+
+        {/* Risk */}
+        <div className="hidden xl:block shrink-0 w-20">
+          <UserRiskBadges usage={usage} />
+        </div>
+
+        {/* Last Used */}
+        <div className="hidden xl:flex items-center gap-1 shrink-0 text-xs text-text-tertiary w-32">
+          <Clock className="h-3 w-3" />
+          {usage?.last_used_at ? formatDateTime(usage.last_used_at) : formatDateTime(user.created_at)}
+        </div>
+
+        {/* Expand Icon */}
+        <div className="shrink-0 text-text-tertiary">
+          {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+        </div>
+      </div>
+
+      {/* Expanded Detail */}
+      {isExpanded && (
+        <div className="border-t border-surface-border px-5 py-4 bg-surface-elevated/30">
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {/* Credits Section */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-text-primary flex items-center gap-1.5">
+                  <CreditCard className="h-4 w-4 text-brand" />
+                  积分管理
+                </h3>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onToggleEdit(); }}
+                  className="flex items-center gap-1 rounded-lg border border-surface-border px-2 py-1 text-xs text-text-secondary hover:text-text-primary transition-colors"
+                >
+                  {isEditing ? <Save className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
+                  {isEditing ? "完成" : "编辑"}
+                </button>
+              </div>
+              <div className="space-y-2">
+                {[
+                  { key: "basic", label: "基础积分", value: user.basic_credits, field: "basic_credits" as const },
+                  { key: "advanced", label: "高级积分", value: user.advanced_credits, field: "advanced_credits" as const },
+                  { key: "elite", label: "精英积分", value: user.elite_credits, field: "elite_credits" as const },
+                ].map((item) => (
+                  <div key={item.key} className="flex items-center justify-between rounded-lg border border-surface-border bg-surface-card px-3 py-2">
+                    <span className="text-xs text-text-secondary">{item.label}</span>
+                    {isEditing ? (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          defaultValue={item.value}
+                          disabled={isSaving}
+                          id={`credit-${user.id}-${item.key}`}
+                          className="w-20 rounded-md border border-surface-border bg-surface-elevated px-2 py-1 text-xs text-text-primary outline-none text-right"
+                        />
+                        <button
+                          disabled={isSaving}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const input = document.getElementById(`credit-${user.id}-${item.key}`) as HTMLInputElement;
+                            const val = parseInt(input.value);
+                            if (!isNaN(val) && val >= 0) {
+                              onPatch(user, { [item.field]: val });
+                            }
+                          }}
+                          className="rounded-md bg-brand px-2 py-1 text-[10px] text-white hover:bg-brand-hover"
+                        >
+                          {isSaving ? "..." : "保存"}
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-sm font-medium text-text-primary">{(item.value / 100).toFixed(1)}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Usage Section */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-text-primary flex items-center gap-1.5">
+                <TrendingUp className="h-4 w-4 text-brand" />
+                30 天用量
+              </h3>
+              <div className="grid grid-cols-2 gap-2">
+                <StatItem label="请求数" value={formatNumber(usage?.requests || 0)} />
+                <StatItem label="Token" value={formatNumber(usage?.total_tokens || 0)} />
+                <StatItem label="图片" value={formatNumber(usage?.image_count || 0)} />
+                <StatItem label="视频(秒)" value={formatNumber(usage?.video_seconds || 0)} />
+                <StatItem label="字符" value={formatNumber(usage?.character_count || 0)} />
+                <StatItem label="失败率" value={`${((usage?.failures || 0) / Math.max(usage?.requests || 1, 1) * 100).toFixed(1)}%`} />
+              </div>
+            </div>
+
+            {/* Role & Actions */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-text-primary flex items-center gap-1.5">
+                <Shield className="h-4 w-4 text-brand" />
+                角色与操作
+              </h3>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between rounded-lg border border-surface-border bg-surface-card px-3 py-2">
+                  <span className="text-xs text-text-secondary">角色</span>
+                  <select
+                    disabled={isSaving}
+                    value={user.role}
+                    onChange={(e) => onPatch(user, { role: e.target.value as AdminUser["role"] })}
+                    onClick={(e) => e.stopPropagation()}
+                    className="rounded-md border border-surface-border bg-surface-elevated px-2 py-1 text-xs text-text-primary outline-none"
+                  >
+                    <option value="user">user</option>
+                    <option value="admin">admin</option>
+                  </select>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border border-surface-border bg-surface-card px-3 py-2">
+                  <span className="text-xs text-text-secondary">套餐</span>
+                  <select
+                    disabled={isSaving}
+                    value={user.plan_tier || "free"}
+                    onChange={(e) => onPatch(user, { plan_tier: e.target.value })}
+                    onClick={(e) => e.stopPropagation()}
+                    className="rounded-md border border-surface-border bg-surface-elevated px-2 py-1 text-xs text-text-primary outline-none"
+                  >
+                    {PLAN_OPTIONS.map((plan) => (
+                      <option key={plan} value={plan}>{plan}</option>
+                    ))}
+                  </select>
+                </div>
+                <a
+                  href={`/admin/usage?range=30d&user_id=${user.id}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex items-center justify-center gap-1 rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-xs text-text-secondary hover:text-text-primary transition-colors"
+                >
+                  查看成本详情 <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-surface-border bg-surface-card px-3 py-2">
+      <div className="text-[10px] text-text-tertiary">{label}</div>
+      <div className="text-sm font-semibold text-text-primary">{value}</div>
+    </div>
+  );
+}
+
+function BetaPhaseBadge({ phase, phaseName }: { phase?: string; phaseName?: string }) {
+  if (!phase) return null;
+  const toneMap: Record<string, { tone: "green" | "amber" | "orange" | "neutral"; label: string }> = {
+    phase_1: { tone: "green", label: phaseName || "试探期" },
+    phase_2: { tone: "amber", label: phaseName || "深水区" },
+    phase_3: { tone: "orange", label: phaseName || "枯竭期" },
+    completed: { tone: "neutral", label: phaseName || "已完成" },
+  };
+  const info = toneMap[phase];
+  if (!info) return null;
+  return <StatusBadge tone={info.tone}>{info.label}</StatusBadge>;
+}
+
 function UserRiskBadges({ usage }: { usage?: AdminUserUsageSummary }) {
-  if (!usage || usage.requests === 0)
-    return <StatusBadge tone="neutral">暂无成本</StatusBadge>;
+  if (!usage || usage.requests === 0) return <StatusBadge tone="neutral">暂无成本</StatusBadge>;
   const failureRate = usage.requests ? (usage.failures || 0) / usage.requests : 0;
   const badges: Array<{ label: string; tone: "red" | "purple" | "blue" | "green" | "neutral" }> = [];
   if ((usage.cost_rmb || 0) >= 50) badges.push({ label: "高成本", tone: "red" });
@@ -521,80 +576,12 @@ function UserRiskBadges({ usage }: { usage?: AdminUserUsageSummary }) {
   if ((usage.image_count || 0) >= 20) badges.push({ label: "图片重度", tone: "blue" });
   if (badges.length === 0) badges.push({ label: "正常", tone: "green" });
   return (
-    <div className="flex max-w-[180px] flex-wrap gap-1">
-      {badges.slice(0, 3).map((badge) => (
+    <div className="flex flex-wrap gap-1">
+      {badges.slice(0, 2).map((badge) => (
         <StatusBadge key={badge.label} tone={badge.tone}>
           {badge.label}
         </StatusBadge>
       ))}
-    </div>
-  );
-}
-
-function getBetaPhaseTone(phase: string): "red" | "orange" | "amber" | "green" | "neutral" {
-  switch (phase) {
-    case "phase_1":
-      return "green";
-    case "phase_2":
-      return "amber";
-    case "phase_3":
-      return "orange";
-    case "completed":
-      return "neutral";
-    default:
-      return "neutral";
-  }
-}
-
-function getBetaPhaseDesc(phase: string): string {
-  switch (phase) {
-    case "phase_1":
-      return "试探期 50积分";
-    case "phase_2":
-      return "深水区 150积分";
-    case "phase_3":
-      return "枯竭期 100积分";
-    case "completed":
-      return "内测已完成";
-    default:
-      return "";
-  }
-}
-
-function CreditInput({
-  label,
-  value,
-  disabled,
-  onSave,
-}: {
-  label: string;
-  value: number;
-  disabled: boolean;
-  onSave: (value: number) => void;
-}) {
-  const [draft, setDraft] = useState(String(value));
-  useEffect(() => setDraft(String(value)), [value]);
-  const parsed = Number(draft);
-  const changed = parsed !== value && Number.isFinite(parsed) && parsed >= 0;
-  return (
-    <div className="flex items-center gap-2">
-      <span className="w-8 text-[10px] text-text-tertiary">{label}</span>
-      <input
-        disabled={disabled}
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        className="w-20 rounded-lg border border-surface-border bg-surface-elevated px-2 py-1 text-xs text-text-primary outline-none focus:border-brand/50"
-      />
-      <button
-        disabled={!changed || disabled}
-        onClick={() => onSave(parsed)}
-        className={cn(
-          "rounded-md px-2 py-1 text-[10px] font-medium transition-colors",
-          changed ? "bg-brand text-white hover:bg-brand-hover" : "text-text-tertiary"
-        )}
-      >
-        保存
-      </button>
     </div>
   );
 }
