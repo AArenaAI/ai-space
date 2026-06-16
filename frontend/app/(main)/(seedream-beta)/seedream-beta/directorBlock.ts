@@ -1,4 +1,4 @@
-import type { CharacterBlock, DirectorBlock, FixedElement, PosePreset, SceneBlock, SemanticAsset, StoredAsset, StoryboardShot } from "./types";
+import type { Camera3DData, CharacterBlock, DirectorBlock, FixedElement, PosePreset, SceneBlock, SemanticAsset, StoredAsset, StoryboardShot } from "./types";
 
 // ===== 导演台 Prompt 构建 =====
 
@@ -261,6 +261,123 @@ export function getSceneReferenceAssets(
   }
 
   return refs;
+}
+
+/**
+ * 将 3D 机位参数转换为 Seedance 提示词片段
+ */
+export function buildCameraPrompt(camera: Camera3DData): string {
+  const parts: string[] = [];
+
+  // 景别
+  const shotTypeMap: Record<string, string> = {
+    extreme_long: "大远景",
+    long: "远景",
+    full: "全景",
+    medium: "中景",
+    close: "近景",
+    extreme_close: "特写",
+  };
+  if (camera.shotType) {
+    parts.push(`景别：${shotTypeMap[camera.shotType] || camera.shotType}`);
+  }
+
+  // 机位角度（从 position 和 target 计算）
+  const dx = camera.target[0] - camera.position[0];
+  const dy = camera.target[1] - camera.position[1];
+  const dz = camera.target[2] - camera.position[2];
+  const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  const horizontalAngle = Math.atan2(dx, dz) * (180 / Math.PI);
+  const verticalAngle = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)) * (180 / Math.PI);
+
+  // 水平角度 → 方向描述
+  let direction = "";
+  if (Math.abs(horizontalAngle) < 15) direction = "正面";
+  else if (horizontalAngle > 15 && horizontalAngle < 75) direction = "右前侧";
+  else if (horizontalAngle >= 75 && horizontalAngle <= 105) direction = "右侧";
+  else if (horizontalAngle > 105 && horizontalAngle < 165) direction = "右后侧";
+  else if (Math.abs(horizontalAngle) >= 165) direction = "背面";
+  else if (horizontalAngle < -105 && horizontalAngle > -165) direction = "左后侧";
+  else if (horizontalAngle <= -75 && horizontalAngle >= -105) direction = "左侧";
+  else if (horizontalAngle < -15 && horizontalAngle > -75) direction = "左前侧";
+
+  if (direction) {
+    parts.push(`机位：${direction}，距离 ${distance.toFixed(1)}m`);
+  }
+
+  // 垂直角度 → 俯仰描述
+  if (verticalAngle > 20) {
+    parts.push(`俯角 ${Math.round(verticalAngle)}°`);
+  } else if (verticalAngle < -10) {
+    parts.push(`仰角 ${Math.round(-verticalAngle)}°`);
+  } else {
+    parts.push("平视");
+  }
+
+  // FOV → 镜头描述
+  if (camera.fov) {
+    if (camera.fov < 35) {
+      parts.push(`长焦镜头 ${camera.fov}mm`);
+    } else if (camera.fov > 70) {
+      parts.push(`广角镜头 ${camera.fov}mm`);
+    } else {
+      parts.push(`标准镜头 ${camera.fov}mm`);
+    }
+  }
+
+  // 运镜
+  const moveMap: Record<string, string> = {
+    static: "固定机位",
+    push: "推镜头",
+    pull: "拉镜头",
+    pan: "摇镜头",
+    tilt: "移镜头",
+    follow: "跟镜头",
+    crane: "升降镜头",
+    handheld: "手持镜头",
+    orbit: "环绕镜头",
+  };
+  if (camera.cameraMove) {
+    parts.push(`运镜：${moveMap[camera.cameraMove] || camera.cameraMove}`);
+  }
+
+  return parts.join("，");
+}
+
+/**
+ * 将 3D 导演台数据注入到视频提示词
+ */
+export function inject3DDirectorBlockToPrompt(
+  basePrompt: string,
+  directorBlock: DirectorBlock,
+  assets: StoredAsset[],
+  activeCameraId?: string
+): string {
+  const parts: string[] = [basePrompt];
+
+  // 场景锁定
+  const scenePrompt = buildSceneLockPrompt(directorBlock.sceneBlock, assets);
+  if (scenePrompt) {
+    parts.push("【场景锁定】" + scenePrompt);
+  }
+
+  // 角色站位
+  const charPrompt = buildCharacterPositionPrompt(directorBlock.characters, assets);
+  if (charPrompt) {
+    parts.push("【人物站位】" + charPrompt);
+  }
+
+  // 机位参数
+  if (directorBlock.cameras?.length) {
+    const camera = activeCameraId
+      ? directorBlock.cameras.find((c) => c.id === activeCameraId)
+      : directorBlock.cameras[0];
+    if (camera) {
+      parts.push("【机位设定】" + buildCameraPrompt(camera));
+    }
+  }
+
+  return parts.join("\n");
 }
 
 export function getCharacterReferenceAssets(

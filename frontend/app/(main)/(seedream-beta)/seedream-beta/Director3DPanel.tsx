@@ -570,7 +570,7 @@ export default function Director3DPanel({
                     key={el.id}
                     className="flex items-center gap-2 rounded py-1 text-xs text-text-secondary"
                   >
-                    <Box className="h-3 w-3 text-amber-500" />
+                    <span className="inline-block h-3 w-3 rounded bg-amber-500/20 text-amber-500" />
                     <span>{el.name}</span>
                     <span className="text-text-tertiary">({el.position})</span>
                   </div>

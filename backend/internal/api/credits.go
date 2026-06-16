@@ -122,9 +122,15 @@ func getDefaultModelCostFen(modelID string) int {
 		"deepseek-v4-flash": 100,
 		"kimi-k2.5": 100,
 		"kimi-k2.6": 100,
-		"gpt-5.5-pro": 2200,
-		"deepseek-v4-pro": 1500,
-		"chat-1": 2200,
+		"gpt-5.5-pro":          2200,
+		"deepseek-v4-pro":      1500,
+		"chat-1":               2200,
+		"gpt-image-2":          500,
+		"gemini-2.5-pro":       500,
+		"gemini-3.1-pro-preview": 500,
+		"gemini-3.1-flash-lite": 50,
+		"doubao-seedance-2-0-fast-260128": 1000,
+		"doubao-seedance-2-0-260128":      2000,
 	}
 	if cost, ok := defaults[modelID]; ok {
 		return cost

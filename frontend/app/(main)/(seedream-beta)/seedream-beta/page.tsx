@@ -1760,11 +1760,14 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
                   <Director3DPanel
                     directorBlock={
                       directorBlocks.find((b) => b.shotId === activeShot.id) ||
-                      createDefaultDirectorBlock(activeShot, semanticAssets)
+                      createDefaultDirectorBlock(
+                        activeShot.id,
+                        semanticAssets.find((a) => a.kind === "scene")
+                      )
                     }
                     characterAssets={semanticAssets
                       .filter((a) => a.kind === "character")
-                      .map((a) => ({ id: a.id, name: a.name, color: a.color }))}
+                      .map((a) => ({ id: a.id, name: a.name, color: (a as any).color }))}
                     cameras={
                       directorBlocks.find((b) => b.shotId === activeShot.id)?.cameras || [
                         {

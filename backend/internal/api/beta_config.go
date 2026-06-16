@@ -27,13 +27,17 @@ func (h *BetaConfigHandler) InitDefaultConfigs() {
 		{Key: models.BetaConfigPhase1Credits, Value: "5000", Desc: "试探期额度（单位：分，1积分=100分）"},
 		{Key: models.BetaConfigPhase2Credits, Value: "15000", Desc: "深水区额度（单位：分）"},
 		{Key: models.BetaConfigPhase3Credits, Value: "10000", Desc: "枯竭期额度（单位：分）"},
-		{Key: models.BetaConfigModelCosts, Value: `{"gpt-5.4-mini":10,"gemini-2.0-flash-exp":10,"gemini-3.5-flash":20,"gpt-5.4":100,"gpt-5.5":200,"claude-3-5-sonnet-20241022":300,"deepseek-v4-flash":100,"kimi-k2.5":100,"kimi-k2.6":100,"gpt-5.5-pro":2200,"deepseek-v4-pro":1500,"chat-1":2200}`, Desc: "模型成本（单位：分/次）"},
+		{Key: models.BetaConfigModelCosts, Value: `{"gpt-5.4-mini":10,"gemini-2.0-flash-exp":10,"gemini-3.5-flash":20,"gpt-5.4":100,"gpt-5.5":200,"claude-3-5-sonnet-20241022":300,"deepseek-v4-flash":100,"kimi-k2.5":100,"kimi-k2.6":100,"gpt-5.5-pro":2200,"deepseek-v4-pro":1500,"chat-1":2200,"gpt-image-2":500,"gemini-2.5-pro":500,"gemini-3.1-pro-preview":500,"gemini-3.1-flash-lite":50,"doubao-seedance-2-0-fast-260128":1000,"doubao-seedance-2-0-260128":2000}`, Desc: "模型成本（单位：分/次）"},
 	}
 
 	for _, cfg := range defaults {
 		var existing models.BetaConfig
 		if err := h.db.Where("key = ?", cfg.Key).First(&existing).Error; err != nil {
+			// 配置不存在，创建新配置
 			h.db.Create(&cfg)
+		} else {
+			// 配置已存在，更新值（保留描述）
+			h.db.Model(&existing).Update("value", cfg.Value)
 		}
 	}
 }
