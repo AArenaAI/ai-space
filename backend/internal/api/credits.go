@@ -314,6 +314,8 @@ func (h *CreditsHandler) DeductCredits(c *gin.Context) {
 		"elite_credits_display":    float64(user.EliteCredits) / 100.0,
 		"remaining":        *creditsField,
 		"remaining_display": float64(*creditsField) / 100.0,
+		"beta_phase":       user.BetaPhase,
+		"is_beta_phase":    isInBetaPhase,
 	})
 }
 
