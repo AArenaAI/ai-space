@@ -66,6 +66,7 @@ import {
   copyDirectorBlockToShots,
 } from "./directorBlock";
 import Grid4x3 from "./Grid4x3";
+import VideoSegmentGenerator from "./VideoSegmentGenerator";
 import Director3DPanel from "./Director3DPanel";
 import DirectorPanel from "./DirectorPanel";
 
@@ -1824,6 +1825,23 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
                         }}
                         onGenerateVideo={(shot) => {
                           generateShotVideo(shot);
+                        }}
+                      />
+                    )}
+
+                    {/* 视频分段生成器 */}
+                    {storyboardShots.length > 0 && (
+                      <VideoSegmentGenerator
+                        shots={storyboardShots}
+                        onGenerateSegment={async (segment) => {
+                          // 依次生成段落中的每个镜头视频
+                          for (const shot of segment.shots) {
+                            await generateShotVideo(shot);
+                          }
+                        }}
+                        onExtractLastFrame={async (videoUrl) => {
+                          // TODO: 从视频提取尾帧
+                          return videoUrl;
                         }}
                       />
                     )}
