@@ -350,19 +350,19 @@ export function buildCameraPrompt(camera: Camera3DData): string {
 export function inject3DDirectorBlockToPrompt(
   basePrompt: string,
   directorBlock: DirectorBlock,
-  assets: StoredAsset[],
+  semanticAssets: SemanticAsset[],
   activeCameraId?: string
 ): string {
   const parts: string[] = [basePrompt];
 
   // 场景锁定
-  const scenePrompt = buildSceneLockPrompt(directorBlock.sceneBlock, assets);
+  const scenePrompt = buildSceneLockPrompt(directorBlock.sceneBlock, semanticAssets);
   if (scenePrompt) {
     parts.push("【场景锁定】" + scenePrompt);
   }
 
   // 角色站位
-  const charPrompt = buildCharacterPositionPrompt(directorBlock.characters, assets);
+  const charPrompt = buildCharacterPositionPrompt(directorBlock.characters, semanticAssets);
   if (charPrompt) {
     parts.push("【人物站位】" + charPrompt);
   }

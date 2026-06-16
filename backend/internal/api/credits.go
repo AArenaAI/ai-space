@@ -267,8 +267,11 @@ func (h *CreditsHandler) DeductCredits(c *gin.Context) {
 	quota := dailyQuota[user.PlanTier][tier]
 	isUnlimited := quota < 0
 
+	// 内测阶段：如果用户处于内测阶段（beta_phase 非空），只扣内测积分，不扣会员积分
+	isInBetaPhase := user.BetaPhase != "" && user.BetaPhase != "completed"
+
 	// 积分限制检查：余额不足时返回 402
-	if !isUnlimited && *creditsField < costFen {
+	if !isUnlimited && !isInBetaPhase && *creditsField < costFen {
 		tierName := GetTierName(tier)
 		c.JSON(http.StatusPaymentRequired, gin.H{
 			"error":         "积分不足",
@@ -284,8 +287,15 @@ func (h *CreditsHandler) DeductCredits(c *gin.Context) {
 	}
 
 	// 实际扣减积分（单位：分）
-	if !isUnlimited {
+	if !isUnlimited && !isInBetaPhase {
 		*creditsField -= costFen
+	}
+	// 内测阶段：也扣内测积分（从 basic_credits 扣，因为内测只有 basic 档位）
+	if isInBetaPhase {
+		user.BasicCredits -= costFen
+		if user.BasicCredits < 0 {
+			user.BasicCredits = 0
+		}
 	}
 	user.UpdatedAt = now
 	h.db.Save(&user)

@@ -65,6 +65,7 @@ import {
   autoInheritDirectorBlocks,
   copyDirectorBlockToShots,
 } from "./directorBlock";
+import Grid4x3 from "./Grid4x3";
 import Director3DPanel from "./Director3DPanel";
 import DirectorPanel from "./DirectorPanel";
 
@@ -1808,6 +1809,25 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
 
                 {workflowView === "overview" && (
                   <div className="space-y-4">
+                    {/* 4×3 故事板网格 */}
+                    {storyboardShots.length > 0 && (
+                      <Grid4x3
+                        shots={storyboardShots}
+                        selectedShotId={activeShot?.id}
+                        onSelectShot={(shot) => {
+                          setActiveShotId(shot.id);
+                          setWorkflowView("production" as any);
+                          setWorkflowMode("storyboardImage");
+                        }}
+                        onGenerateImage={(shot) => {
+                          sendShotToImage(shot);
+                        }}
+                        onGenerateVideo={(shot) => {
+                          generateShotVideo(shot);
+                        }}
+                      />
+                    )}
+
                     <div className="rounded-3xl border border-surface-border bg-surface-card p-4">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
