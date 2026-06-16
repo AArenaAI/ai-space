@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -79,6 +80,58 @@ func GetTierName(tier string) string {
 	}
 }
 
+// getModelCostFen 获取模型成本（单位：分）
+func getModelCostFen(db *gorm.DB, modelID string) int {
+	var cfg models.BetaConfig
+	if err := db.Where("key = ?", models.BetaConfigModelCosts).First(&cfg).Error; err != nil {
+		return getDefaultModelCostFen(modelID)
+	}
+	var costs map[string]int
+	if err := json.Unmarshal([]byte(cfg.Value), &costs); err != nil {
+		return getDefaultModelCostFen(modelID)
+	}
+	if cost, ok := costs[modelID]; ok {
+		return cost
+	}
+	return getDefaultModelCostFen(modelID)
+}
+
+// getBetaPhaseName 获取阶段中文名
+func getBetaPhaseName(phase string) string {
+	switch phase {
+	case "phase_1":
+		return "试探期"
+	case "phase_2":
+		return "深水区"
+	case "phase_3":
+		return "枯竭期"
+	case "completed":
+		return "已完成"
+	default:
+		return ""
+	}
+}
+func getDefaultModelCostFen(modelID string) int {
+	defaults := map[string]int{
+		"gpt-5.4-mini": 10,
+		"gemini-2.0-flash-exp": 10,
+		"gemini-3.5-flash": 20,
+		"gpt-5.4": 100,
+		"gpt-5.5": 200,
+		"claude-3-5-sonnet-20241022": 300,
+		"deepseek-v4-flash": 100,
+		"kimi-k2.5": 100,
+		"kimi-k2.6": 100,
+		"gpt-5.5-pro": 2200,
+		"deepseek-v4-pro": 1500,
+		"chat-1": 2200,
+	}
+	if cost, ok := defaults[modelID]; ok {
+		return cost
+	}
+	return 100 // 默认 1.00 积分
+}
+
 // ========== CreditsHandler ==========
 
 type CreditsHandler struct {
@@ -125,6 +178,9 @@ func (h *CreditsHandler) GetCredits(c *gin.Context) {
 		"basic_credits":    user.BasicCredits,
 		"advanced_credits": user.AdvancedCredits,
 		"elite_credits":    user.EliteCredits,
+		"basic_credits_display":    float64(user.BasicCredits) / 100.0,
+		"advanced_credits_display": float64(user.AdvancedCredits) / 100.0,
+		"elite_credits_display":    float64(user.EliteCredits) / 100.0,
 		"plan_tier":        user.PlanTier,
 		"credits_reset_at": user.CreditsResetAt.Format(time.RFC3339),
 		"daily_quota":      dailyQuota[user.PlanTier],
@@ -133,16 +189,21 @@ func (h *CreditsHandler) GetCredits(c *gin.Context) {
 			"advanced": "高级",
 			"elite":    "精英",
 		},
+		"beta_phase":       user.BetaPhase,
+		"beta_phase_name":  getBetaPhaseName(user.BetaPhase),
+		"beta_phase_1_used": user.BetaPhase1Used,
+		"beta_phase_2_used": user.BetaPhase2Used,
+		"beta_phase_3_used": user.BetaPhase3Used,
 	})
 }
 
 // DeductRequest 扣减积分请求
 type DeductRequest struct {
 	ModelID string `json:"model_id" binding:"required"`
-	Amount  int    `json:"amount"` // 默认扣 1 点
+	Amount  int    `json:"amount"` // 默认自动计算
 }
 
-// DeductCredits 扣减积分
+// DeductCredits 扣减积分（支持差异化模型成本，单位：分）
 // @Summary 扣减模型使用积分
 // @Tags credits
 // @Accept json
@@ -180,8 +241,11 @@ func (h *CreditsHandler) DeductCredits(c *gin.Context) {
 	}
 
 	tier := GetModelTier(req.ModelID)
-	if req.Amount <= 0 {
-		req.Amount = 1
+
+	// 获取模型成本（单位：分）
+	costFen := getModelCostFen(h.db, req.ModelID)
+	if req.Amount > 0 {
+		costFen = req.Amount // 允许前端指定自定义扣减量
 	}
 
 	var creditsField *int
@@ -196,25 +260,26 @@ func (h *CreditsHandler) DeductCredits(c *gin.Context) {
 
 	quota := dailyQuota[user.PlanTier][tier]
 	isUnlimited := quota < 0
-	_ = isUnlimited // 暂时避免未使用报错，恢复积分限制时删除此行
 
 	// 积分限制检查：余额不足时返回 402
-	if !isUnlimited && *creditsField < req.Amount {
+	if !isUnlimited && *creditsField < costFen {
 		tierName := GetTierName(tier)
 		c.JSON(http.StatusPaymentRequired, gin.H{
 			"error":         "积分不足",
 			"tier":          tier,
 			"tier_name":     tierName,
-			"required":      req.Amount,
+			"required":      costFen,
+			"required_display": float64(costFen) / 100.0,
 			"remaining":     *creditsField,
+			"remaining_display": float64(*creditsField) / 100.0,
 			"upgrade_tip":   "升级套餐以获取更多" + tierName + "积分",
 		})
 		return
 	}
 
-	// 实际扣减积分
+	// 实际扣减积分（单位：分）
 	if !isUnlimited {
-		*creditsField -= req.Amount
+		*creditsField -= costFen
 	}
 	user.UpdatedAt = now
 	h.db.Save(&user)
@@ -223,11 +288,16 @@ func (h *CreditsHandler) DeductCredits(c *gin.Context) {
 		"success":          true,
 		"tier":             tier,
 		"tier_name":        GetTierName(tier),
-		"deducted":         req.Amount,
+		"deducted":         costFen,
+		"deducted_display": float64(costFen) / 100.0,
 		"basic_credits":    user.BasicCredits,
 		"advanced_credits": user.AdvancedCredits,
 		"elite_credits":    user.EliteCredits,
+		"basic_credits_display":    float64(user.BasicCredits) / 100.0,
+		"advanced_credits_display": float64(user.AdvancedCredits) / 100.0,
+		"elite_credits_display":    float64(user.EliteCredits) / 100.0,
 		"remaining":        *creditsField,
+		"remaining_display": float64(*creditsField) / 100.0,
 	})
 }
 

@@ -16,9 +16,10 @@ import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { useI18n } from "@/lib/i18n";
 import InputDialog from "@/components/ui/InputDialog";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import type { ModelRecommendationContext } from "@/lib/models/modelRecommendations";
 import { emitChatRenderProfileEvent } from "@/lib/chatRenderProfile";
-import { useCredits, getTierName, getModelTier } from "@/hooks/useCredits";
+import { useCredits, getTierName, getModelTier, isExpensiveModel } from "@/hooks/useCredits";
 import CreditExhaustedModal from "@/components/credits/CreditExhaustedModal";
 
 const ForkCompareDialog = dynamic(() => import("./ForkCompareDialog"), {
@@ -133,7 +134,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   } = useChat(conversationId, models, skillKey, notebookId, notebookFileIds, modelSelectionOptions);
 
   const { templates } = useTemplates();
-  const { hasEnoughCredits, getTierCredits } = useCredits();
+  const { hasEnoughCredits, getTierCredits, isCreditExhausted, getBetaPhaseInfo, credits } = useCredits();
 
   const chatInterfaceProfile = useMemo(() => ({
     conversationId,
@@ -308,10 +309,27 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     return ["extended", "heavy", "high", "max"].includes(reasoning.effort);
   };
 
+  const [expensiveModelConfirmOpen, setExpensiveModelConfirmOpen] = useState(false);
+  const [pendingSendPayload, setPendingSendPayload] = useState<{
+    content: string;
+    reasoning: ReasoningConfig | undefined;
+    search: boolean;
+    attachments?: { filename: string; content: string; type: string; public_id?: string }[];
+    file_ids?: string[];
+    skipUserMessage: boolean;
+  } | null>(null);
+
   const handleSend = async (content: string, reasoning: ReasoningConfig | undefined, search: boolean, attachments?: { filename: string; content: string; type: string; public_id?: string }[], file_ids?: string[], skipUserMessage = false) => {
     // 积分检查：额度不足时弹出 Bad Case 提交模态框
     if (selectedModel && !hasEnoughCredits(selectedModel.id)) {
       setCreditExhaustedOpen(true);
+      return;
+    }
+
+    // 昂贵模型二次确认（Chat 1，22元/次）
+    if (selectedModel && isExpensiveModel(selectedModel.id)) {
+      setPendingSendPayload({ content, reasoning, search, attachments, file_ids, skipUserMessage });
+      setExpensiveModelConfirmOpen(true);
       return;
     }
 
@@ -757,7 +775,48 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
         currentModel={selectedModel ? { id: selectedModel.id, name: selectedModel.name || selectedModel.id } : undefined}
         conversationId={conversationId}
         tierName={selectedModel ? getTierName(getModelTier(selectedModel.id)) : undefined}
+        betaPhaseInfo={getBetaPhaseInfo()}
       />
+
+      {/* 昂贵模型二次确认弹窗 */}
+      {expensiveModelConfirmOpen && pendingSendPayload && (
+        <ConfirmDialog
+          open={expensiveModelConfirmOpen}
+          onClose={() => {
+            setExpensiveModelConfirmOpen(false);
+            setPendingSendPayload(null);
+          }}
+          onConfirm={() => {
+            const payload = pendingSendPayload;
+            setExpensiveModelConfirmOpen(false);
+            setPendingSendPayload(null);
+            // 继续发送
+            const activeCompareMode = compareMode || isCompare;
+            if (activeCompareMode) {
+              setCompareTargetMessageId(undefined);
+              const currentSelectedModels = normalizeCompareModelIds(
+                selectedModelsRef.current.length ? selectedModelsRef.current : (selectedModels.length ? selectedModels : compareModels),
+                models
+              );
+              selectedModelsRef.current = currentSelectedModels;
+              if (currentSelectedModels.length >= 2) {
+                setIsComplexTask(isComplexReasoningTask(payload.reasoning, currentSelectedModels));
+                const { templateId, templatePrefix } = getSelectedTemplatePayload();
+                sendCompareMessages(payload.content, currentSelectedModels, payload.reasoning, payload.search, templateId, payload.attachments, payload.file_ids, templatePrefix);
+              }
+            } else {
+              setIsComplexTask(isComplexReasoningTask(payload.reasoning));
+              const { templateId, templatePrefix } = getSelectedTemplatePayload();
+              sendMessage(payload.content, payload.reasoning, false, payload.search, templateId, payload.skipUserMessage, payload.attachments, payload.file_ids, templatePrefix);
+            }
+          }}
+          title="⚠️ 高成本模型确认"
+          description={`您正在使用 ${selectedModel?.name || selectedModel?.id}，该模型每次调用消耗 22 积分（精英档位）。当前精英积分：${credits?.elite_credits || 0}。确认继续？`}
+          confirmText="确认发送（22积分）"
+          cancelText="取消"
+          variant="danger"
+        />
+      )}
     </div>
   );
 }

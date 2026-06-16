@@ -150,21 +150,21 @@ export default function LandingHeader() {
                           <Zap className="w-3.5 h-3.5 text-teal-500" />
                           <span className="text-xs font-semibold text-text-primary">{t("landing.credits.basic")}</span>
                         </div>
-                        <span className="text-xs font-mono text-text-primary">{credits?.basic_credits ?? 0}</span>
+                        <span className="text-xs font-mono text-text-primary">{(credits?.basic_credits_display ?? credits?.basic_credits ?? 0) / 100}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <Sparkles className="w-3.5 h-3.5 text-purple-500" />
                           <span className="text-xs font-semibold text-text-primary">{t("landing.credits.advanced")}</span>
                         </div>
-                        <span className="text-xs font-mono text-text-primary">{credits?.advanced_credits ?? 0}</span>
+                        <span className="text-xs font-mono text-text-primary">{(credits?.advanced_credits_display ?? credits?.advanced_credits ?? 0) / 100}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <Crown className="w-3.5 h-3.5 text-orange-500" />
                           <span className="text-xs font-semibold text-text-primary">{t("landing.credits.elite")}</span>
                         </div>
-                        <span className="text-xs font-mono text-text-primary">{credits?.elite_credits ?? 0}</span>
+                        <span className="text-xs font-mono text-text-primary">{(credits?.elite_credits_display ?? credits?.elite_credits ?? 0) / 100}</span>
                       </div>
                     </div>
 
@@ -266,21 +266,21 @@ export default function LandingHeader() {
                         <Zap className="w-3 h-3 text-teal-500" />
                         <span className="text-xs text-text-secondary">{t("landing.credits.basic")}</span>
                       </div>
-                      <span className="text-xs font-mono text-text-primary">{credits?.basic_credits ?? 0}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <Sparkles className="w-3 h-3 text-purple-500" />
-                        <span className="text-xs text-text-secondary">{t("landing.credits.advanced")}</span>
+                      <span className="text-xs font-mono text-text-primary">{(credits?.basic_credits_display ?? credits?.basic_credits ?? 0) / 100}</span>
                       </div>
-                      <span className="text-xs font-mono text-text-primary">{credits?.advanced_credits ?? 0}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <Crown className="w-3 h-3 text-orange-500" />
-                        <span className="text-xs text-text-secondary">{t("landing.credits.elite")}</span>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="w-3.5 h-3.5 text-purple-500" />
+                          <span className="text-xs text-text-secondary">{t("landing.credits.advanced")}</span>
+                        </div>
+                        <span className="text-xs font-mono text-text-primary">{(credits?.advanced_credits_display ?? credits?.advanced_credits ?? 0) / 100}</span>
                       </div>
-                      <span className="text-xs font-mono text-text-primary">{credits?.elite_credits ?? 0}</span>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Crown className="w-3.5 h-3.5 text-orange-500" />
+                          <span className="text-xs text-text-secondary">{t("landing.credits.elite")}</span>
+                        </div>
+                        <span className="text-xs font-mono text-text-primary">{(credits?.elite_credits_display ?? credits?.elite_credits ?? 0) / 100}</span>
                     </div>
                   </div>
 

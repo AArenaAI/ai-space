@@ -190,7 +190,7 @@ func (h *BadCaseHandler) ReviewBadCase(c *gin.Context) {
 		return
 	}
 
-	// 如果审核通过且指定了发放额度，给用户增加额度
+	// 如果审核通过且指定了发放额度，给用户增加额度并推进阶段
 	if req.Status == "approved" && req.GrantCredits != nil {
 		var user models.User
 		if err := h.db.First(&user, badCase.UserID).Error; err == nil {
@@ -203,14 +203,27 @@ func (h *BadCaseHandler) ReviewBadCase(c *gin.Context) {
 			if req.GrantCredits.Elite > 0 {
 				user.EliteCredits += req.GrantCredits.Elite
 			}
+			// 推进内测阶段
+			switch user.BetaPhase {
+			case "phase_1":
+				user.BetaPhase = "phase_2"
+				user.BetaPhase1Used = true
+			case "phase_2":
+				user.BetaPhase = "phase_3"
+				user.BetaPhase2Used = true
+			case "phase_3", "completed":
+				user.BetaPhase = "completed"
+				user.BetaPhase3Used = true
+			}
 			h.db.Save(&user)
 		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"id":     badCase.ID,
-		"status": req.Status,
+		"id":      badCase.ID,
+		"status":  req.Status,
 		"message": "审核完成",
+		"phase_transition": req.Status == "approved",
 	})
 }
 

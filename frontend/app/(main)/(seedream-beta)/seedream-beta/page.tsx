@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Copy, Download, ImageIcon, Loader2, MessageSquare, PanelLeftOpen, Paperclip, Play, Plus, RefreshCw, Send, Sparkles, Trash2, UploadCloud, Video, Wand2, X } from "lucide-react";
+import { Copy, Download, ImageIcon, Loader2, Layers, MessageSquare, PanelLeftOpen, Paperclip, Play, Plus, RefreshCw, Send, Sparkles, Trash2, UploadCloud, Video, Wand2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useImage, type GeneratedImage } from "@/hooks/useImage";
 import { useVideo, type VideoGeneration } from "@/hooks/useVideo";
@@ -52,9 +52,21 @@ import type {
   Tab,
   WorkflowMode,
   WorkflowView,
+  DirectorBlock,
 } from "./types";
 import { FieldLabel, PillButton } from "./components";
 import { useSeedreamProjects } from "./useSeedreamProjects";
+import {
+  findDirectorBlockForShot,
+  getDirectorReferenceAssets,
+  injectDirectorBlockToPrompt,
+  createDefaultDirectorBlock,
+  getSceneAssetForShot,
+  autoInheritDirectorBlocks,
+  copyDirectorBlockToShots,
+} from "./directorBlock";
+import Director3DPanel from "./Director3DPanel";
+import DirectorPanel from "./DirectorPanel";
 
 function getAuthHeaders() {
   const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
@@ -408,6 +420,11 @@ export default function SeedreamBetaPage() {
   const [semanticAssets, setSemanticAssets] = useState<SemanticAsset[]>([]);
   const [activeSemanticAssetId, setActiveSemanticAssetId] = useState<string | undefined>();
   const [assetImageGeneratingId, setAssetImageGeneratingId] = useState<string | null>(null);
+  // 导演台
+  const [directorBlocks, setDirectorBlocks] = useState<DirectorBlock[]>([]);
+  const [showDirectorPanel, setShowDirectorPanel] = useState(false);
+  const [showDirector3DPanel, setShowDirector3DPanel] = useState(false); // 3D 导演台
+  const [showSkeletonOverlay, setShowSkeletonOverlay] = useState(false); // 骨骼可视化开关
   const [showAssetLibraryPicker, setShowAssetLibraryPicker] = useState(false);
   const [assetKindFilter, setAssetKindFilter] = useState<AssetKindFilter>("all");
   const [batchGenerating, setBatchGenerating] = useState<"sketches" | "images" | "videos" | null>(null);
@@ -637,8 +654,22 @@ export default function SeedreamBetaPage() {
     setGenerationJobs(activeProject.generationJobs || []);
     setSemanticAssets(activeProject.semanticAssets || []);
     setActiveSemanticAssetId(activeProject.semanticAssets?.[0]?.id);
+    // 导演台
+    setDirectorBlocks(activeProject.directorBlocks || []);
+    setShowDirectorPanel(false);
     setLoadedProjectId(activeProject.id);
   }, [activeProject?.id]);
+
+  // 导演台自动继承：当 storyboardShots 变化时，为同场景无导演台的镜头自动继承
+  useEffect(() => {
+    if (!storyboardShots.length || !semanticAssets.length) return;
+    setDirectorBlocks((prev) => {
+      const inherited = autoInheritDirectorBlocks(storyboardShots, prev, semanticAssets);
+      // 只有真正新增了 block 才更新，避免无限循环
+      if (inherited.length === prev.length) return prev;
+      return inherited;
+    });
+  }, [storyboardShots.map((s) => s.id + s.scene).join(",")]);
 
 
   useEffect(() => {
@@ -662,6 +693,7 @@ export default function SeedreamBetaPage() {
       activeShotId,
       generationJobs,
       semanticAssets,
+      directorBlocks,
       updatedAt: new Date().toISOString(),
     } : project));
   }, [activeProject?.id, loadedProjectId, workflowIdea, workflowNovel, scriptSourceExcerpt, scriptAdaptationInstruction, workflowScript, workflowAssets, workflowStoryboardVideo, workflowStoryboardImage, assets, selectedAssetIds, imagePrompt, videoPrompt, storyboardShots, activeShotId, generationJobs, semanticAssets]);
@@ -1446,7 +1478,14 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
 
   const buildImagePromptForGeneration = (shot: StoryboardShot) => {
     const base = shot.imagePrompt?.trim() || "";
-    if (base) return base;
+    // 注入导演台空间锁定
+    const directorBlock = findDirectorBlockForShot(directorBlocks, shot.id);
+    const directorLock = directorBlock
+      ? injectDirectorBlockToPrompt("", directorBlock, semanticAssets)
+      : "";
+    if (base) {
+      return directorLock ? `${directorLock}\n\n${base}` : base;
+    }
     const structured = [
       `分镜${shot.index}：${shot.title}`,
       shot.scene ? `画面场景：${shot.scene}` : "",
@@ -1456,7 +1495,8 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
       shot.dialogue ? `关键对白：${shot.dialogue}` : "",
       shot.purpose ? `目的：${shot.purpose}` : "",
     ].filter(Boolean).join("\n");
-    return structured || "";
+    const combined = structured || "";
+    return directorLock ? `${directorLock}\n\n${combined}` : combined;
   };
 
   const generateShotImage = async (shot: StoryboardShot) => {
@@ -1467,7 +1507,11 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     }
     setActiveShotId(shot.id);
     updateShot(shot.id, { status: "image_generating" });
-    const refs = assets.filter((asset) => shot.referenceAssetIds.includes(asset.id) && asset.type === "image").map((asset) => asset.publicId || asset.url);
+    // 导演台参考图：场景背景 + 角色资产
+    const directorBlock = findDirectorBlockForShot(directorBlocks, shot.id);
+    const directorRefs = directorBlock ? getDirectorReferenceAssets(directorBlock, assets) : [];
+    const shotRefs = assets.filter((asset) => shot.referenceAssetIds.includes(asset.id) && asset.type === "image").map((asset) => asset.publicId || asset.url);
+    const refs = Array.from(new Set([...directorRefs, ...shotRefs]));
     try {
       const data = await generateImage(prompt, shot.aspectRatio || imageAspect, imageResolution, SEEDREAM_IMAGE_QUALITY, refs, "seedream");
       setLastImageId(data.id);
@@ -1501,20 +1545,29 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
       toast.error("镜头缺少视频提示词");
       return null;
     }
+    // 注入导演台空间锁定到视频提示词
+    const directorBlock = findDirectorBlockForShot(directorBlocks, shot.id);
+    const directorLock = directorBlock
+      ? injectDirectorBlockToPrompt("", directorBlock, semanticAssets)
+      : "";
+    const finalPrompt = directorLock ? `${directorLock}\n\n${prompt}` : prompt;
     setActiveShotId(shot.id);
     updateShot(shot.id, { status: "video_generating" });
     const refs = getShotAssets(shot, assets);
     const imageAssets = refs.filter((asset) => asset.type === "image" && !isStoryboardSketchAsset(asset) && VIDEO_REFERENCE_ROLES.has(asset.role || "reference_image"));
     const videoAssets = refs.filter((asset) => asset.type === "video");
+    // 导演台参考图：场景背景 + 角色资产（追加到参考图）
+    const directorRefs = directorBlock ? getDirectorReferenceAssets(directorBlock, assets) : [];
+    const allImageRefs = Array.from(new Set([...imageAssets.map((asset) => asset.publicId || asset.url), ...directorRefs]));
     try {
       const data = await generateVideo({
-        prompt,
+        prompt: finalPrompt,
         model: videoModel,
         ratio: shot.aspectRatio || videoAspect,
         duration: shot.duration || videoDuration,
         generate_audio: videoAudio,
         watermark: false,
-        reference_image_urls: imageAssets.map((asset) => asset.publicId || asset.url),
+        reference_image_urls: allImageRefs,
         reference_image_roles: imageAssets.map((asset) => (asset.id === shot.firstFrameAssetId ? "first_frame" : asset.id === shot.lastFrameAssetId ? "last_frame" : asset.role === "first_frame" || asset.role === "last_frame" ? asset.role : "reference_image") as "reference_image" | "first_frame" | "last_frame"),
         reference_video_urls: videoAssets.map((asset) => asset.publicId || asset.url),
       });
@@ -1684,15 +1737,70 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={openWorkflowOverview}
-                      className="inline-flex items-center gap-1.5 rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-xs font-medium text-text-secondary transition-colors hover:border-brand/40 hover:text-text-primary"
+                      onClick={() => setShowDirector3DPanel(true)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-brand/30 bg-brand/10 px-3 py-1.5 text-xs font-medium text-brand hover:bg-brand/20"
                     >
-                      <PanelLeftOpen className="h-3.5 w-3.5" />
-                      返回创作流程
+                      <Layers className="h-3.5 w-3.5" />
+                      3D导演台
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowDirectorPanel(true)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-surface-border bg-surface-card px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary"
+                    >
+                      <Layers className="h-3.5 w-3.5" />
+                      2D导演台
                     </button>
                     <span className="text-xs text-text-tertiary">·</span>
                     <span className="text-xs font-medium text-text-primary">{t(workflowStepCards.find((s) => s.id === workflowMode)?.titleKey || "")}</span>
                   </div>
+                )}
+
+                {showDirector3DPanel && activeShot && (
+                  <Director3DPanel
+                    directorBlock={
+                      directorBlocks.find((b) => b.shotId === activeShot.id) ||
+                      createDefaultDirectorBlock(activeShot, semanticAssets)
+                    }
+                    characterAssets={semanticAssets
+                      .filter((a) => a.kind === "character")
+                      .map((a) => ({ id: a.id, name: a.name, color: a.color }))}
+                    cameras={
+                      directorBlocks.find((b) => b.shotId === activeShot.id)?.cameras || [
+                        {
+                          id: "机位1",
+                          position: [3, 2, 5],
+                          target: [0, 1, 0],
+                          fov: 50,
+                          near: 0.1,
+                          far: 100,
+                          shotType: activeShot.shotType,
+                          cameraMove: activeShot.cameraMove,
+                        },
+                      ]
+                    }
+                    onUpdateDirectorBlock={(block) => {
+                      setDirectorBlocks((prev) => {
+                        const existing = prev.find((b) => b.shotId === block.shotId);
+                        if (existing) {
+                          return prev.map((b) => (b.shotId === block.shotId ? block : b));
+                        }
+                        return [...prev, block];
+                      });
+                    }}
+                    onUpdateCameras={(cameras) => {
+                      setDirectorBlocks((prev) =>
+                        prev.map((b) =>
+                          b.shotId === activeShot.id ? { ...b, cameras } : b
+                        )
+                      );
+                    }}
+                    onClose={() => setShowDirector3DPanel(false)}
+                    onGenerateShot={(cameraId) => {
+                      // TODO: 用机位参数生成视频
+                      toast.success(`使用 ${cameraId} 生成视频`);
+                    }}
+                  />
                 )}
 
                 {workflowView === "overview" && (
@@ -2204,10 +2312,46 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
                                   <input value={activeShot.title} onChange={(event) => updateShot(activeShot.id, { title: event.target.value })} className="w-full rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm font-medium outline-none focus:border-brand/60" />
                                 </div>
                                 <div className="mt-6 flex gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowDirectorPanel(!showDirectorPanel)}
+                                    className={cn(
+                                      "inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors",
+                                      showDirectorPanel
+                                        ? "border-brand/40 bg-brand/10 text-brand"
+                                        : "border-surface-border bg-surface-card text-text-secondary hover:border-brand/40 hover:text-text-primary"
+                                    )}
+                                  >
+                                    <Layers className="h-3.5 w-3.5" />
+                                    导演台
+                                  </button>
                                   <button type="button" onClick={() => applySemanticAssetsToShotPrompts(activeShot)} className="inline-flex h-9 items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-3 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary"><Sparkles className="h-3.5 w-3.5" />注入资产词</button>
                                   <button type="button" onClick={() => deleteShot(activeShot.id)} className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-surface-border text-text-tertiary hover:border-red-300 hover:text-red-500"><Trash2 className="h-4 w-4" /></button>
                                 </div>
                               </div>
+                              {showDirectorPanel && (
+                                <div className="rounded-2xl border border-brand/20 bg-brand/5 p-3">
+                                  <DirectorPanel
+                                    directorBlock={findDirectorBlockForShot(directorBlocks, activeShot.id) || createDefaultDirectorBlock(activeShot.id, getSceneAssetForShot(activeShot, semanticAssets))}
+                                    semanticAssets={semanticAssets}
+                                    assets={assets}
+                                    shotTitle={activeShot.title}
+                                    shotScene={activeShot.scene}
+                                    onChange={(block) => {
+                                      setDirectorBlocks((prev) => {
+                                        const existing = prev.findIndex((b) => b.shotId === block.shotId);
+                                        if (existing >= 0) {
+                                          const next = [...prev];
+                                          next[existing] = block;
+                                          return next;
+                                        }
+                                        return [...prev, block];
+                                      });
+                                    }}
+                                    onClose={() => setShowDirectorPanel(false)}
+                                  />
+                                </div>
+                              )}
                               <div className="grid gap-3 md:grid-cols-5">
                                 <div><FieldLabel>类型</FieldLabel><select value={activeShot.shotType} onChange={(event) => updateShot(activeShot.id, { shotType: event.target.value as ShotType })} className="w-full rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm outline-none focus:border-brand/60">{SHOT_TYPES.map((item) => <option key={item} value={item}>{item}</option>)}</select></div>
                                 <div><FieldLabel>运镜</FieldLabel><select value={activeShot.cameraMove} onChange={(event) => updateShot(activeShot.id, { cameraMove: event.target.value as CameraMove })} className="w-full rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm outline-none focus:border-brand/60">{CAMERA_MOVES.map((item) => <option key={item} value={item}>{item}</option>)}</select></div>
@@ -2279,6 +2423,40 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
                               <div className="flex flex-wrap gap-2">
                                 <button type="button" onClick={() => sendShotToImage(activeShot)} className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary"><ImageIcon className="h-3.5 w-3.5" />送到图片页</button>
                                 <button type="button" onClick={() => sendShotToVideo(activeShot)} className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary"><Video className="h-3.5 w-3.5" />送到视频页</button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const otherShots = storyboardShots.filter((s) => s.id !== activeShot.id && s.scene === activeShot.scene);
+                                    if (!otherShots.length) {
+                                      toast.info("同场景没有其他镜头可继承");
+                                      return;
+                                    }
+                                    const sourceBlock = findDirectorBlockForShot(directorBlocks, activeShot.id);
+                                    if (!sourceBlock) {
+                                      toast.error("当前镜头没有导演台设置");
+                                      return;
+                                    }
+                                    const copied = copyDirectorBlockToShots(
+                                      sourceBlock,
+                                      otherShots.map((s) => s.id),
+                                      { keepCharacterPositions: true }
+                                    );
+                                    setDirectorBlocks((prev) => {
+                                      const next = [...prev];
+                                      for (const block of copied) {
+                                        const existing = next.findIndex((b) => b.shotId === block.shotId);
+                                        if (existing >= 0) next[existing] = block;
+                                        else next.push(block);
+                                      }
+                                      return next;
+                                    });
+                                    toast.success(`已复制导演台到 ${copied.length} 个同场景镜头`);
+                                  }}
+                                  className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary"
+                                >
+                                  <Copy className="h-3.5 w-3.5" />
+                                  复制到同场景镜头
+                                </button>
                               </div>
                             </div>
                           )}

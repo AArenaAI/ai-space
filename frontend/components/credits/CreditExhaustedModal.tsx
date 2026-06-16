@@ -21,6 +21,16 @@ interface CreditExhaustedModalProps {
   currentModel?: { id: string; name: string };
   conversationId?: number;
   tierName?: string;
+  betaPhaseInfo?: {
+    phase: string;
+    phase_name: string;
+    next_phase?: {
+      phase: string;
+      phase_name: string;
+      unlock_condition: string;
+      credits: number;
+    };
+  } | null;
 }
 
 export default function CreditExhaustedModal({
@@ -29,7 +39,8 @@ export default function CreditExhaustedModal({
   onSubmit,
   currentModel,
   conversationId,
-  tierName = "当前等级",
+  tierName,
+  betaPhaseInfo,
 }: CreditExhaustedModalProps) {
   const { t } = useI18n();
   const [step, setStep] = useState<"exhausted" | "submitting" | "submitted">("exhausted");

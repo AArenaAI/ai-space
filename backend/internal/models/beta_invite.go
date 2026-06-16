@@ -12,9 +12,13 @@ type BetaInvite struct {
 	UsedAt      *time.Time `json:"used_at,omitempty"`
 	Batch       string    `gorm:"size:32;index" json:"batch"`                // 批次：batch-1, batch-2, batch-3
 	Industry    string    `gorm:"size:64" json:"industry,omitempty"`          // 行业标签
-	CreditsBasic     int `gorm:"default:50" json:"credits_basic"`         // 初始基础积分
+	CreditsBasic     int `gorm:"default:50" json:"credits_basic"`         // 初始基础积分（试探期 50）
 	CreditsAdvanced  int `gorm:"default:0" json:"credits_advanced"`       // 初始高级积分
 	CreditsElite     int `gorm:"default:0" json:"credits_elite"`          // 初始精英积分
+	Phase            string `gorm:"size:32;default:'phase_1'" json:"phase"` // 当前阶段：phase_1(试探期) | phase_2(深水区) | phase_3(枯竭期) | completed
+	Phase1Granted    bool   `gorm:"default:true" json:"phase_1_granted"`   // 试探期已发放
+	Phase2Granted    bool   `gorm:"default:false" json:"phase_2_granted"`  // 深水区已发放
+	Phase3Granted    bool   `gorm:"default:false" json:"phase_3_granted"`  // 枯竭期已发放
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

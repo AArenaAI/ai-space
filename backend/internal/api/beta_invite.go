@@ -376,16 +376,28 @@ func (h *BetaInviteHandler) UseInvite(c *gin.Context) {
 		user.AdvancedCredits += invite.CreditsAdvanced
 		user.EliteCredits += invite.CreditsElite
 		user.PlanTier = "basic"
+		user.BetaPhase = "phase_1" // 初始阶段：试探期
+		user.BetaPhase1Used = false
+		user.BetaPhase2Used = false
+		user.BetaPhase3Used = false
 		h.db.Save(&user)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "激活成功",
+		"phase": "phase_1",
+		"phase_name": "试探期",
 		"credits_granted": map[string]int{
 			"basic":    invite.CreditsBasic,
 			"advanced": invite.CreditsAdvanced,
 			"elite":    invite.CreditsElite,
+		},
+		"next_phase": map[string]interface{}{
+			"phase":       "phase_2",
+			"phase_name":  "深水区",
+			"unlock_condition": "提交 1 个有效 Bad Case 并通过审核",
+			"credits":     150,
 		},
 	})
 }

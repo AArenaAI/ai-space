@@ -15,8 +15,9 @@ const navItems = [
   { href: `${ADMIN_BASE}/models`, label: "模型", icon: Bot },
   { href: `${ADMIN_BASE}/tasks`, label: "任务", icon: ClipboardList },
   { href: `${ADMIN_BASE}/beta-applications`, label: "内测申请", icon: Shield },
+  { href: `${ADMIN_BASE}/beta-invites`, label: "邀请码", icon: CreditCard },
+  { href: `${ADMIN_BASE}/beta-configs`, label: "内测配置", icon: Settings },
   { href: `${ADMIN_BASE}/billing`, label: "支付", icon: CreditCard, disabled: true },
-  { href: `${ADMIN_BASE}/settings`, label: "设置", icon: Settings, disabled: true },
 ];
 
 export function AdminShell({ children }: { children: React.ReactNode }) {

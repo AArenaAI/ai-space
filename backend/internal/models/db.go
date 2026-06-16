@@ -48,6 +48,7 @@ func InitDB(databaseURL string) (*gorm.DB, error) {
 		&BadCase{}, // 新增：Bad Case 提交表
 		&BetaInvite{}, // 新增：内测邀请码
 		&BetaApplication{}, // 新增：内测申请表
+		&BetaConfig{}, // 新增：内测运营配置
 	); err != nil {
 		return nil, err
 	}

@@ -174,6 +174,11 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	publicWithAuth.POST("/beta/use-invite", betaInviteHandler.UseInvite)
 	publicWithAuth.GET("/beta/application-status", betaInviteHandler.GetApplicationStatus)
 
+	// 初始化 Beta 配置
+	betaConfigHandler := NewBetaConfigHandler(db)
+	betaConfigHandler.InitDefaultConfigs()
+	publicWithAuth.GET("/beta/config", betaConfigHandler.GetPublicConfig)
+
 	// 公开对比问答（支持匿名用户，内部已有额度与权限校验）
 	publicWithAuth.POST("/chat/compare", chatHandler.CompareChat)
 	publicWithAuth.POST("/chat/:message_id/fork", chatHandler.ForkChat)
@@ -214,6 +219,8 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			admin.POST("/beta-invites/generate", betaInviteHandler.GenerateInvites)
 			admin.GET("/beta-applications", betaInviteHandler.ListApplications)
 			admin.PATCH("/beta-applications/:id/review", betaInviteHandler.ReviewApplication)
+			admin.GET("/beta-configs", betaConfigHandler.ListConfigs)
+			admin.PATCH("/beta-configs/:key", betaConfigHandler.UpdateConfig)
 			}
 
 		convHandler := NewConversationHandler(db)
