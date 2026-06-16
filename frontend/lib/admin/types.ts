@@ -215,8 +215,25 @@ export interface AdminModel {
   capabilities: string[];
 }
 
-export interface AdminModelsResponse {
-  models: AdminModel[];
+export interface AdminModelConfig {
+  id: number;
+  model_id: string;
+  name: string;
+  provider: string;
+  description: string;
+  color: string;
+  category: string;
+  capabilities: string[];
+  enabled: boolean;
+  tier: string;
+  status: string;
+  status_message: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface AdminModelConfigsResponse {
+  models: AdminModelConfig[];
   total: number;
 }
 

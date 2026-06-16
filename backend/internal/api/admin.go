@@ -600,6 +600,266 @@ func (h *AdminHandler) Models(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"models": items, "total": len(items)})
 }
 
+// ========== Model Config Management ==========
+
+type adminModelConfigResponse struct {
+	ID            uint   `json:"id"`
+	ModelID       string `json:"model_id"`
+	Name          string `json:"name"`
+	Provider      string `json:"provider"`
+	Description   string `json:"description"`
+	Color         string `json:"color"`
+	Category      string `json:"category"`
+	Capabilities  []string `json:"capabilities"`
+	Enabled       bool   `json:"enabled"`
+	Tier          string `json:"tier"`
+	Status        string `json:"status"`
+	StatusMessage string `json:"status_message"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
+}
+
+func (h *AdminHandler) ListModelConfigs(c *gin.Context) {
+	// 加载所有代码模型
+	codeModels := modelmeta.AllModels()
+
+	// 加载数据库配置
+	var configs []models.ModelConfig
+	h.db.Find(&configs)
+	configMap := make(map[string]*models.ModelConfig, len(configs))
+	for i := range configs {
+		configMap[configs[i].ModelID] = &configs[i]
+	}
+
+	items := make([]adminModelConfigResponse, 0, len(codeModels))
+	for _, model := range codeModels {
+		cfg, ok := configMap[model.ID]
+		if !ok {
+			// 未配置时，使用代码默认值
+			items = append(items, adminModelConfigResponse{
+				ID:            0,
+				ModelID:       model.ID,
+				Name:          model.Name,
+				Provider:      model.Provider,
+				Description:   model.Description,
+				Color:         model.Color,
+				Category:      firstCapability(model.Capabilities),
+				Capabilities:  model.Capabilities,
+				Enabled:       true,
+				Tier:          GetModelTier(model.ID),
+				Status:        "available",
+				StatusMessage: "",
+			})
+			continue
+		}
+
+		// 有配置时，合并数据库覆盖
+		status := cfg.Status
+		if status == "" {
+			status = "available"
+		}
+		items = append(items, adminModelConfigResponse{
+			ID:            cfg.ID,
+			ModelID:       model.ID,
+			Name:          model.Name,
+			Provider:      model.Provider,
+			Description:   model.Description,
+			Color:         model.Color,
+			Category:      firstCapability(model.Capabilities),
+			Capabilities:  model.Capabilities,
+			Enabled:       cfg.Enabled,
+			Tier:          cfg.Tier,
+			Status:        status,
+			StatusMessage: cfg.StatusMsg,
+			CreatedAt:     cfg.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:     cfg.UpdatedAt.Format(time.RFC3339),
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"models": items, "total": len(items)})
+}
+
+type adminUpdateModelConfigRequest struct {
+	Enabled       *bool   `json:"enabled,omitempty"`
+	Tier          *string `json:"tier,omitempty"`
+	Status        *string `json:"status,omitempty"`
+	StatusMessage *string `json:"status_message,omitempty"`
+}
+
+func (h *AdminHandler) UpdateModelConfig(c *gin.Context) {
+	modelID := strings.TrimSpace(c.Param("id"))
+	if modelID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "模型 ID 不能为空"})
+		return
+	}
+
+	// 验证模型存在于代码中
+	found := false
+	for _, m := range modelmeta.AllModels() {
+		if m.ID == modelID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		c.JSON(http.StatusNotFound, gin.H{"error": "模型不存在"})
+		return
+	}
+
+	var req adminUpdateModelConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效"})
+		return
+	}
+
+	updates := map[string]any{}
+	if req.Enabled != nil {
+		updates["enabled"] = *req.Enabled
+	}
+	if req.Tier != nil {
+		tier := strings.TrimSpace(*req.Tier)
+		if tier != "" && tier != "basic" && tier != "advanced" && tier != "elite" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "tier 只能是 basic / advanced / elite"})
+			return
+		}
+		updates["tier"] = tier
+	}
+	if req.Status != nil {
+		status := strings.TrimSpace(*req.Status)
+		if status != "" && status != "available" && status != "disabled" && status != "maintenance" && status != "quota_exhausted" && status != "rate_limited" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "status 无效"})
+			return
+		}
+		updates["status"] = status
+	}
+	if req.StatusMessage != nil {
+		updates["status_msg"] = strings.TrimSpace(*req.StatusMessage)
+	}
+
+	if len(updates) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "没有可更新的字段"})
+		return
+	}
+
+	// upsert
+	var cfg models.ModelConfig
+	if err := h.db.Where("model_id = ?", modelID).First(&cfg).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			cfg = models.ModelConfig{ModelID: modelID}
+			if v, ok := updates["enabled"]; ok {
+				cfg.Enabled = v.(bool)
+			}
+			if v, ok := updates["tier"]; ok {
+				cfg.Tier = v.(string)
+			}
+			if v, ok := updates["status"]; ok {
+				cfg.Status = v.(string)
+			}
+			if v, ok := updates["status_msg"]; ok {
+				cfg.StatusMsg = v.(string)
+			}
+			if err := h.db.Create(&cfg).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "创建模型配置失败"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"config": cfg})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询模型配置失败"})
+		return
+	}
+
+	if err := h.db.Model(&cfg).Updates(updates).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新模型配置失败"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"config": cfg})
+}
+
+type adminBatchModelConfigItem struct {
+	ModelID       string  `json:"model_id" binding:"required"`
+	Enabled       *bool   `json:"enabled,omitempty"`
+	Tier          *string `json:"tier,omitempty"`
+	Status        *string `json:"status,omitempty"`
+	StatusMessage *string `json:"status_message,omitempty"`
+}
+
+func (h *AdminHandler) BatchUpdateModelConfigs(c *gin.Context) {
+	var req []adminBatchModelConfigItem
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效"})
+		return
+	}
+
+	if len(req) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "更新列表不能为空"})
+		return
+	}
+
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		for _, item := range req {
+			updates := map[string]any{}
+			if item.Enabled != nil {
+				updates["enabled"] = *item.Enabled
+			}
+			if item.Tier != nil {
+				tier := strings.TrimSpace(*item.Tier)
+				if tier != "" && tier != "basic" && tier != "advanced" && tier != "elite" {
+					continue
+				}
+				updates["tier"] = tier
+			}
+			if item.Status != nil {
+				status := strings.TrimSpace(*item.Status)
+				if status != "" && status != "available" && status != "disabled" && status != "maintenance" && status != "quota_exhausted" && status != "rate_limited" {
+					continue
+				}
+				updates["status"] = status
+			}
+			if item.StatusMessage != nil {
+				updates["status_msg"] = strings.TrimSpace(*item.StatusMessage)
+			}
+			if len(updates) == 0 {
+				continue
+			}
+
+			var cfg models.ModelConfig
+			if err := tx.Where("model_id = ?", item.ModelID).First(&cfg).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					cfg = models.ModelConfig{ModelID: item.ModelID}
+					if v, ok := updates["enabled"]; ok {
+						cfg.Enabled = v.(bool)
+					}
+					if v, ok := updates["tier"]; ok {
+						cfg.Tier = v.(string)
+					}
+					if v, ok := updates["status"]; ok {
+						cfg.Status = v.(string)
+					}
+					if v, ok := updates["status_msg"]; ok {
+						cfg.StatusMsg = v.(string)
+					}
+					if err := tx.Create(&cfg).Error; err != nil {
+						return err
+					}
+					continue
+				}
+				return err
+			}
+			if err := tx.Model(&cfg).Updates(updates).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "批量更新模型配置失败"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"updated": len(req)})
+}
+
 func (h *AdminHandler) Tasks(c *gin.Context) {
 	page := parsePositiveInt(c.Query("page"), 1)
 	pageSize := parsePositiveInt(c.Query("page_size"), 20)

@@ -1,5 +1,6 @@
 import type {
-  AdminModelsResponse,
+  AdminModelConfigsResponse,
+  AdminModelConfig,
   AdminOverview,
   AdminTasksResponse,
   AdminUsageConversationDetail,
@@ -219,7 +220,19 @@ export function getAdminUsageConversationDetail(id: number, params: { range?: st
 }
 
 export function getAdminModels() {
-  return adminFetch<AdminModelsResponse>("/models");
+  return adminFetch<AdminModelConfigsResponse>("/models");
+}
+
+export function getAdminModelConfigs() {
+  return adminFetch<AdminModelConfigsResponse>("/model-configs");
+}
+
+export function updateAdminModelConfig(modelID: string, patch: Partial<Pick<AdminModelConfig, "enabled" | "tier" | "status" | "status_message">>) {
+  return adminFetch<{ config: AdminModelConfig }>(`/model-configs/${encodeURIComponent(modelID)}`, { method: "PATCH", body: JSON.stringify(patch) });
+}
+
+export function batchUpdateAdminModelConfigs(items: Array<Partial<Pick<AdminModelConfig, "model_id" | "enabled" | "tier" | "status" | "status_message">>>) {
+  return adminFetch<{ updated: number }>("/model-configs/batch", { method: "PUT", body: JSON.stringify(items) });
 }
 
 export function getAdminTasks(params: { page?: number; pageSize?: number; status?: string; provider?: string; model?: string } = {}) {

@@ -188,6 +188,9 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			admin.GET("/usage/conversations", adminHandler.UsageConversations)
 			admin.GET("/usage/conversations/:id", adminHandler.UsageConversationDetail)
 			admin.GET("/models", adminHandler.Models)
+			admin.GET("/model-configs", adminHandler.ListModelConfigs)
+			admin.PATCH("/model-configs/:id", adminHandler.UpdateModelConfig)
+			admin.PUT("/model-configs/batch", adminHandler.BatchUpdateModelConfigs)
 			admin.GET("/tasks", adminHandler.Tasks)
 		}
 

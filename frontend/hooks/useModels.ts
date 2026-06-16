@@ -58,8 +58,14 @@ function useModelList(endpoint: string, cacheKey: string, fallback: ChatModel[])
       .then((res) => res.json())
       .then((data: ChatModel[]) => {
         if (cancelled || !Array.isArray(data) || data.length === 0) return;
-        cacheModels(cacheKey, data);
-        setModels(data);
+        // 过滤掉被管理员禁用的模型（available=false 或 status=disabled）
+        const visible = data.filter((m) => {
+          if (m.available === false) return false;
+          if (m.status === "disabled" || m.status === "maintenance" || m.status === "quota_exhausted") return false;
+          return true;
+        });
+        cacheModels(cacheKey, visible);
+        setModels(visible);
       })
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoading(false); });

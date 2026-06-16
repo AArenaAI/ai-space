@@ -44,6 +44,7 @@ func InitDB(databaseURL string) (*gorm.DB, error) {
 		&ImageChat{}, &ImageChatMessage{},
 		&MessageFavorite{},
 		&MessageGroup{}, // 新增
+		&ModelConfig{}, // 新增：模型配置表
 	); err != nil {
 		return nil, err
 	}
