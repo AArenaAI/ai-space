@@ -1,7 +1,6 @@
 "use client";
 
 import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BookOpen, Check, Clock, Grid3X3, List, Loader2, MoreHorizontal, Pencil, Pin, PinOff, Plus, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
@@ -344,11 +343,19 @@ export default function NotebooksPage() {
     const hasImage = Boolean(uploadedCover);
     const pinned = pinnedIds.has(notebook.id);
     return (
-      <Link
+      <div
         key={notebook.id}
-        href={`/notebooks/detail?notebook_id=${notebook.id}`}
+        role="link"
+        tabIndex={0}
+        onClick={() => router.push(`/notebooks/detail?notebook_id=${notebook.id}`)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            router.push(`/notebooks/detail?notebook_id=${notebook.id}`);
+          }
+        }}
         className={cn(
-          "group relative flex aspect-[1.62] flex-col overflow-visible rounded-[20px] p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md",
+          "group relative flex aspect-[1.62] cursor-pointer flex-col overflow-visible rounded-[20px] p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md",
           hasImage ? "bg-slate-900 text-white" : "bg-[#eef4ff] text-slate-950"
         )}
       >
@@ -380,7 +387,7 @@ export default function NotebooksPage() {
             <span>{t("notebook.fileCount").replace("{count}", String(notebook.file_count || 0))}</span>
           </div>
         </div>
-      </Link>
+      </div>
     );
   };
 
@@ -397,10 +404,18 @@ export default function NotebooksPage() {
   const renderListRow = (notebook: Notebook) => {
     const pinned = pinnedIds.has(notebook.id);
     return (
-      <Link
+      <div
         key={notebook.id}
-        href={`/notebooks/detail?notebook_id=${notebook.id}`}
-        className="grid min-h-[58px] grid-cols-[minmax(520px,1fr)_140px_190px_110px_48px] items-center border-b border-[#e5e7eb] bg-white px-0 py-3.5 transition-colors duration-100 hover:bg-[#f9fafb]"
+        role="link"
+        tabIndex={0}
+        onClick={() => router.push(`/notebooks/detail?notebook_id=${notebook.id}`)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            router.push(`/notebooks/detail?notebook_id=${notebook.id}`);
+          }
+        }}
+        className="grid min-h-[58px] cursor-pointer grid-cols-[minmax(520px,1fr)_140px_190px_110px_48px] items-center border-b border-[#e5e7eb] bg-white px-0 py-3.5 transition-colors duration-100 hover:bg-[#f9fafb]"
       >
         <span className="flex min-w-0 items-center gap-2 pr-8 text-[14px] font-normal leading-6 text-[#111827]">
           {pinned && <Pin className="h-4 w-4 shrink-0 fill-current text-[#6b7280]" />}
@@ -410,7 +425,7 @@ export default function NotebooksPage() {
         <span className="text-[14px] font-normal leading-6 text-[#4b5563]">{formatFullDate(notebook.created_at || notebook.updated_at)}</span>
         <span className="text-[14px] font-normal leading-6 text-[#4b5563]">Owner</span>
         <span className="flex justify-end text-[#6b7280]">{renderActions(notebook)}</span>
-      </Link>
+      </div>
     );
   };
 
