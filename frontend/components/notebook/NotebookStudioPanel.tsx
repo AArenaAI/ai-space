@@ -1386,19 +1386,22 @@ function InfographicConfigDialog({
   );
 }
 
-function GeneratingStudioCard({ type, sourceCount, t }: { type: NotebookStudioActionId; sourceCount: number; t: (key: string, params?: Record<string, string>) => string }) {
-  const titleKey = type === "mindmap" ? "notebook.studio.generatingMindmap" : type === "flashcards" ? "notebook.studio.generatingFlashcards" : type === "quiz" ? "notebook.studio.generatingQuiz" : type === "report" ? "notebook.studio.generatingReport" : type === "infographic" ? "notebook.studio.generatingInfographic" : "notebook.studio.generatingTable";
+function GeneratingStudioCard({ sourceCount, t }: { type: NotebookStudioActionId; sourceCount: number; t: (key: string, params?: Record<string, string>) => string }) {
   return (
-    <div className="mb-3 rounded-2xl border border-surface-border bg-surface-card px-3 py-3 shadow-sm">
-      <div className="flex items-center gap-3">
-        <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-surface-elevated text-brand">
-          <RefreshCw className="absolute h-5 w-5 animate-spin" />
-          <RefreshCw className="h-3.5 w-3.5 animate-[spin_1.2s_linear_infinite_reverse] opacity-70" />
+    <div className="mb-3 overflow-hidden rounded-[18px] border border-[#e5e7eb] bg-white shadow-sm dark:border-surface-border dark:bg-surface-card">
+      <div className="flex items-center gap-3 px-4 py-3.5">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#111827] text-white shadow-sm">
+          <Loader2 className="h-5 w-5 animate-spin" />
         </div>
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-text-primary">{t(titleKey)}</div>
-          <div className="mt-1 text-xs text-text-tertiary">{t("notebook.studio.basedOnSources", { count: String(sourceCount) })}</div>
+          <div className="text-sm font-semibold text-[#111827] dark:text-text-primary">生成数据中</div>
+          <div className="mt-1 text-xs leading-5 text-[#6b7280] dark:text-text-tertiary">
+            正在整理和分析 {sourceCount} 个来源
+          </div>
         </div>
+      </div>
+      <div className="h-[3px] w-full overflow-hidden bg-[#f3f4f6] dark:bg-surface-elevated">
+        <div className="h-full w-1/2 animate-[notebook-studio-loading_1.35s_ease-in-out_infinite] rounded-full bg-[#111827]" />
       </div>
     </div>
   );

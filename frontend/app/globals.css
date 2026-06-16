@@ -806,3 +806,15 @@
     border-radius: 0 !important;
   }
 }
+
+@keyframes notebook-studio-loading {
+  0% {
+    transform: translateX(-105%);
+  }
+  55% {
+    transform: translateX(70%);
+  }
+  100% {
+    transform: translateX(205%);
+  }
+}
