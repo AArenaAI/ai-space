@@ -1,6 +1,7 @@
 "use client";
 
 import { type SyntheticEvent, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { BookOpen, Check, Clock, Grid3X3, List, Loader2, MoreHorizontal, Pencil, Pin, PinOff, Plus, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
@@ -103,38 +104,47 @@ function NotebookActionsMenu({
 }) {
   const readonly = isReadonlyNotebook(notebook);
   const iconClass = variant === "dark" ? "text-white/80 hover:bg-white/15 hover:text-white" : "text-slate-500 hover:bg-white/80 hover:text-slate-950";
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
 
   const stop = (event: SyntheticEvent) => {
     event.preventDefault();
     event.stopPropagation();
   };
 
+  const updateMenuPosition = () => {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const menuWidth = 152;
+    const rawLeft = align === "right" ? rect.right - menuWidth : rect.left;
+    const left = Math.max(8, Math.min(rawLeft, window.innerWidth - menuWidth - 8));
+    setMenuPosition({ top: rect.bottom + 4, left });
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    updateMenuPosition();
+    window.addEventListener("resize", updateMenuPosition);
+    window.addEventListener("scroll", updateMenuPosition, true);
+    return () => {
+      window.removeEventListener("resize", updateMenuPosition);
+      window.removeEventListener("scroll", updateMenuPosition, true);
+    };
+  }, [open, align]);
+
   const triggerPin = (event: SyntheticEvent) => {
     stop(event);
     onTogglePin();
   };
 
-  return (
-    <div className="relative z-30">
-      <button
-        type="button"
-        onClick={(event) => {
-          stop(event);
-          onToggleOpen();
-        }}
-        className={cn("flex h-8 w-8 items-center justify-center rounded-full transition", iconClass)}
-        aria-label="更多操作"
-        aria-expanded={open}
-      >
-        <MoreHorizontal className="h-4 w-4" />
-      </button>
-      {open && (
-        <div
-          className={cn(
-            "absolute top-9 z-[200] w-[152px] overflow-hidden rounded-xl border border-[#e5e7eb] bg-white py-1.5 shadow-[0_12px_28px_rgba(15,23,42,0.16)]",
-            align === "right" ? "right-0" : "left-0"
-          )}
-        >
+  const menu = open && menuPosition ? createPortal(
+    <div
+      className="fixed z-[9999] w-[152px] overflow-hidden rounded-xl border border-[#e5e7eb] bg-white py-1.5 shadow-[0_12px_28px_rgba(15,23,42,0.16)]"
+      style={{ top: menuPosition.top, left: menuPosition.left }}
+      onClick={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+      role="menu"
+    >
           <button
             type="button"
             disabled={readonly}
@@ -176,8 +186,27 @@ function NotebookActionsMenu({
             {isPinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
             {isPinned ? "取消置顶" : "置顶"}
           </button>
-        </div>
-      )}
+    </div>,
+    document.body
+  ) : null;
+
+  return (
+    <div className="relative z-30">
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={(event) => {
+          stop(event);
+          updateMenuPosition();
+          onToggleOpen();
+        }}
+        className={cn("flex h-8 w-8 items-center justify-center rounded-full transition", iconClass)}
+        aria-label="更多操作"
+        aria-expanded={open}
+      >
+        <MoreHorizontal className="h-4 w-4" />
+      </button>
+      {menu}
     </div>
   );
 }
