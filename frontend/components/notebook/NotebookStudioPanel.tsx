@@ -1495,37 +1495,19 @@ export function NotebookStudioPanel({
     }
     return sourceFiles.slice(0, Math.max(0, artifact.sourceCount || 0));
   };
-  const artifactTypeLabel = (type: NotebookStudioArtifact["type"]) => {
-    switch (type) {
-      case "table": return t("notebook.studio.table");
-      case "summary": return t("notebook.studio.summary");
-      case "faq": return t("notebook.studio.faq");
-      case "briefing": return t("notebook.studio.briefing");
-      case "mindmap": return t("notebook.studio.mindmap");
-      case "flashcards": return t("notebook.studio.flashcards");
-      case "quiz": return t("notebook.studio.quiz");
-      case "report": return t("notebook.studio.report");
-      case "infographic": return t("notebook.studio.infographic");
-      default: return type;
-    }
-  };
-  const artifactGroups = useMemo(() => {
-    const groups: Array<{ type: NotebookStudioArtifact["type"]; items: Array<{ artifact: NotebookStudioArtifact; version: number }> }> = [];
-    const byType = new Map<NotebookStudioArtifact["type"], { type: NotebookStudioArtifact["type"]; items: Array<{ artifact: NotebookStudioArtifact; version: number }> }>();
-    artifacts.forEach((artifact) => {
-      let group = byType.get(artifact.type);
-      if (!group) {
-        group = { type: artifact.type, items: [] };
-        byType.set(artifact.type, group);
-        groups.push(group);
-      }
-      group.items.push({ artifact, version: 1 });
-    });
-    groups.forEach((group) => {
-      const total = group.items.length;
-      group.items = group.items.map((item, index) => ({ ...item, version: total - index }));
-    });
-    return groups;
+  const sortedArtifacts = useMemo(() => {
+    const typeCounts = new Map<NotebookStudioArtifact["type"], number>();
+    return [...artifacts]
+      .sort((a, b) => {
+        const aTime = new Date(a.createdAt).getTime();
+        const bTime = new Date(b.createdAt).getTime();
+        return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
+      })
+      .map((artifact) => {
+        const nextVersion = (typeCounts.get(artifact.type) || 0) + 1;
+        typeCounts.set(artifact.type, nextVersion);
+        return { artifact, version: nextVersion };
+      });
   }, [artifacts]);
   const actions: Array<{ id: NotebookStudioActionId; title: string; desc: string; accent: string; bgClass: string }> = [
     { id: "table", title: t("notebook.studio.table"), desc: t("notebook.studio.tableDesc"), accent: "from-emerald-500/15 to-cyan-500/10 text-emerald-500", bgClass: "bg-indigo-50 dark:bg-indigo-950/30" },
@@ -1587,7 +1569,7 @@ export function NotebookStudioPanel({
               </div>
             )}
             <div className="flex flex-col items-center gap-2">
-              {artifacts.map((artifact) => {
+              {sortedArtifacts.map(({ artifact }) => {
                 const Icon = artifactIconMap[artifact.type];
                 return (
                   <button key={artifact.id} type="button" onClick={() => { setIsCollapsed(false); handleArtifactClick(artifact); }} title={artifact.title} className={cn("flex h-11 w-11 items-center justify-center rounded-2xl transition hover:bg-surface-elevated", activeArtifactId === artifact.id && "bg-surface-elevated ring-1 ring-brand-border")}>
@@ -1720,16 +1702,10 @@ export function NotebookStudioPanel({
           </div>
         ) : (
           <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5">
-            <div className="space-y-4">
-              {artifactGroups.map((group) => (
-                <section key={group.type} className="space-y-1.5">
-                  <div className="flex items-center justify-between px-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-tertiary">
-                    <span>{artifactTypeLabel(group.type)}</span>
-                    <span className="font-medium normal-case tracking-normal">{t("notebook.studio.outputVersions", { count: String(group.items.length) })}</span>
-                  </div>
-                  {group.items.map(({ artifact, version }) => {
-                    const Icon = artifactIconMap[artifact.type];
-                    return (
+            <div className="space-y-1.5">
+              {sortedArtifacts.map(({ artifact, version }) => {
+                const Icon = artifactIconMap[artifact.type];
+                return (
                       <div key={artifact.id} className="group relative rounded-[18px] transition hover:bg-surface-elevated/70">
                         <div className="flex w-full items-center gap-3.5 px-2.5 py-3 pr-20 text-left">
                           <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", artifactVisualMap[artifact.type].surfaceClass)}>
@@ -1786,10 +1762,8 @@ export function NotebookStudioPanel({
                           floating
                         />
                       </div>
-                    );
-                  })}
-                </section>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
