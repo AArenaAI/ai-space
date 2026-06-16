@@ -1,6 +1,6 @@
 "use client";
 
-import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type SyntheticEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BookOpen, Check, Clock, Grid3X3, List, Loader2, MoreHorizontal, Pencil, Pin, PinOff, Plus, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
@@ -104,13 +104,18 @@ function NotebookActionsMenu({
   const readonly = isReadonlyNotebook(notebook);
   const iconClass = variant === "dark" ? "text-white/80 hover:bg-white/15 hover:text-white" : "text-slate-500 hover:bg-white/80 hover:text-slate-950";
 
-  const stop = (event: MouseEvent) => {
+  const stop = (event: SyntheticEvent) => {
     event.preventDefault();
     event.stopPropagation();
   };
 
+  const triggerPin = (event: SyntheticEvent) => {
+    stop(event);
+    onTogglePin();
+  };
+
   return (
-    <div className="relative z-30" onClick={stop}>
+    <div className="relative z-30">
       <button
         type="button"
         onClick={(event) => {
@@ -156,11 +161,17 @@ function NotebookActionsMenu({
           </button>
           <button
             type="button"
+            onPointerDown={triggerPin}
             onClick={(event) => {
-              stop(event);
-              onTogglePin();
+              event.preventDefault();
+              event.stopPropagation();
             }}
-            className="flex h-10 w-full items-center gap-3 px-3 text-left text-[14px] font-normal text-[#111827] transition hover:bg-[#f6f7f9]"
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                triggerPin(event);
+              }
+            }}
+            className="flex h-10 w-full cursor-pointer items-center gap-3 px-3 text-left text-[14px] font-normal text-[#111827] transition hover:bg-[#f6f7f9]"
           >
             {isPinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
             {isPinned ? "取消置顶" : "置顶"}
