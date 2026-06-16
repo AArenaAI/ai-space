@@ -43,6 +43,8 @@ type adminUserResponse struct {
 	BasicCredits    int                   `json:"basic_credits"`
 	AdvancedCredits int                   `json:"advanced_credits"`
 	EliteCredits    int                   `json:"elite_credits"`
+	BetaPhase       string                `json:"beta_phase,omitempty"`
+	BetaPhaseName   string                `json:"beta_phase_name,omitempty"`
 	CreatedAt       time.Time             `json:"created_at"`
 	UpdatedAt       time.Time             `json:"updated_at"`
 	Usage30D        adminUserUsageSummary `json:"usage_30d"`
@@ -120,6 +122,17 @@ func toAdminUserResponse(user models.User) adminUserResponse {
 	if role == "" {
 		role = "user"
 	}
+	phaseName := ""
+	switch user.BetaPhase {
+	case "phase_1":
+		phaseName = "试探期"
+	case "phase_2":
+		phaseName = "深水区"
+	case "phase_3":
+		phaseName = "枯竭期"
+	case "completed":
+		phaseName = "已完成"
+	}
 	return adminUserResponse{
 		ID:              user.ID,
 		Email:           user.Email,
@@ -129,6 +142,8 @@ func toAdminUserResponse(user models.User) adminUserResponse {
 		BasicCredits:    user.BasicCredits,
 		AdvancedCredits: user.AdvancedCredits,
 		EliteCredits:    user.EliteCredits,
+		BetaPhase:       user.BetaPhase,
+		BetaPhaseName:   phaseName,
 		CreatedAt:       user.CreatedAt,
 		UpdatedAt:       user.UpdatedAt,
 	}

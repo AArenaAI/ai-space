@@ -107,6 +107,7 @@ export default function AdminUsersPage() {
                 <tr>
                   <th className="px-4 py-3 font-medium">用户</th>
                   <th className="px-4 py-3 font-medium">角色/套餐</th>
+                  <th className="px-4 py-3 font-medium">内测阶段</th>
                   <th className="px-4 py-3 font-medium">积分</th>
                   <th className="px-4 py-3 font-medium">30d 成本</th>
                   <th className="px-4 py-3 font-medium">30d 用量</th>
@@ -134,6 +135,18 @@ export default function AdminUsersPage() {
                         {PLAN_OPTIONS.map((plan) => <option key={plan} value={plan}>{plan}</option>)}
                       </select>
                     </td>
+                    <td className="px-4 py-3 align-top">
+                      {user.beta_phase ? (
+                        <div className="flex flex-col gap-1">
+                          <StatusBadge tone={getBetaPhaseTone(user.beta_phase)}>
+                            {user.beta_phase_name || user.beta_phase}
+                          </StatusBadge>
+                          <span className="text-xs text-text-tertiary">{getBetaPhaseDesc(user.beta_phase)}</span>
+                        </div>
+                      ) : (
+                        <StatusBadge tone="neutral">未参与</StatusBadge>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-xs text-text-secondary">
                       <CreditInput label="基础" value={user.basic_credits} disabled={savingId === user.id} onSave={(value) => patchUser(user, { basic_credits: value })} />
                       <CreditInput label="高级" value={user.advanced_credits} disabled={savingId === user.id} onSave={(value) => patchUser(user, { advanced_credits: value })} />
@@ -157,7 +170,7 @@ export default function AdminUsersPage() {
                     </td>
                   </tr>
                 );})}
-                {(data?.users || []).length === 0 && <tr><td colSpan={8} className="px-4 py-12 text-center text-text-tertiary">没有找到用户</td></tr>}
+                {(data?.users || []).length === 0 && <tr><td colSpan={9} className="px-4 py-12 text-center text-text-tertiary">没有找到用户</td></tr>}
               </tbody>
             </table>
           </div>
@@ -182,6 +195,26 @@ function UserRiskBadges({ usage }: { usage?: AdminUserUsageSummary }) {
   if ((usage.image_count || 0) >= 20) badges.push({ label: "图片重度", tone: "blue" });
   if (badges.length === 0) badges.push({ label: "正常", tone: "green" });
   return <div className="flex max-w-[180px] flex-wrap gap-1">{badges.slice(0, 3).map((badge) => <StatusBadge key={badge.label} tone={badge.tone}>{badge.label}</StatusBadge>)}</div>;
+}
+
+function getBetaPhaseTone(phase: string): "red" | "orange" | "amber" | "green" | "neutral" {
+  switch (phase) {
+    case "phase_1": return "green";
+    case "phase_2": return "amber";
+    case "phase_3": return "orange";
+    case "completed": return "neutral";
+    default: return "neutral";
+  }
+}
+
+function getBetaPhaseDesc(phase: string): string {
+  switch (phase) {
+    case "phase_1": return "试探期 50积分";
+    case "phase_2": return "深水区 150积分";
+    case "phase_3": return "枯竭期 100积分";
+    case "completed": return "内测已完成";
+    default: return "";
+  }
 }
 
 function CreditInput({ label, value, disabled, onSave }: { label: string; value: number; disabled: boolean; onSave: (value: number) => void }) {

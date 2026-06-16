@@ -23,6 +23,8 @@ export interface AdminUser {
   created_at: string;
   updated_at: string;
   usage_30d?: AdminUserUsageSummary;
+  beta_phase?: string;
+  beta_phase_name?: string;
 }
 
 export interface AdminOverview {

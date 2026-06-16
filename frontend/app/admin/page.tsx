@@ -116,7 +116,71 @@ export default function AdminOverviewPage() {
           </table>
         </div>
       </section>
+
+      {/* 快捷操作 */}
+      {data.beta && (
+        <section className="rounded-2xl border border-surface-border bg-surface-card p-5 shadow-sm">
+          <div className="flex items-center justify-between gap-4 mb-4">
+            <div>
+              <h2 className="text-base font-semibold text-text-primary">快捷操作</h2>
+              <p className="mt-1 text-sm text-text-tertiary">一键处理常见内测运营任务。</p>
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            <QuickActionCard
+              title="生成邀请码"
+              description="批量生成新的内测邀请码"
+              href="/admin/beta-invites"
+              icon={Tag}
+              tone="teal"
+            />
+            <QuickActionCard
+              title="审核申请"
+              description={`当前有 ${data.beta.pending_applications} 条待审核申请`}
+              href="/admin/beta-applications"
+              icon={Shield}
+              tone="amber"
+              badge={data.beta.pending_applications > 0 ? String(data.beta.pending_applications) : undefined}
+            />
+            <QuickActionCard
+              title="处理 Bad Case"
+              description={`当前有 ${data.beta.pending_bad_cases} 条待处理`}
+              href="/admin/beta-applications?tab=badcases"
+              icon={AlertCircle}
+              tone="red"
+              badge={data.beta.pending_bad_cases > 0 ? String(data.beta.pending_bad_cases) : undefined}
+            />
+          </div>
+        </section>
+      )}
     </div>
+  );
+}
+
+function QuickActionCard({ title, description, href, icon: Icon, tone, badge }: { title: string; description: string; href: string; icon: React.ComponentType<{ className?: string }>; tone: string; badge?: string }) {
+  const toneMap: Record<string, { bg: string; text: string; hover: string }> = {
+    teal: { bg: "bg-teal-500/10", text: "text-teal-400", hover: "hover:bg-teal-500/20" },
+    amber: { bg: "bg-amber-500/10", text: "text-amber-400", hover: "hover:bg-amber-500/20" },
+    red: { bg: "bg-red-500/10", text: "text-red-400", hover: "hover:bg-red-500/20" },
+  };
+  const t = toneMap[tone] || toneMap.teal;
+  return (
+    <Link href={href} className={`flex items-center gap-3 rounded-xl border border-surface-border p-4 transition-colors hover:border-surface-elevated ${t.hover}`}>
+      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${t.bg} ${t.text}`}>
+        <Icon className="h-5 w-5" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-medium text-text-primary">{title}</h3>
+          {badge && (
+            <span className="bg-red-500/20 text-red-400 text-xs px-1.5 py-0.5 rounded-full font-medium">
+              {badge}
+            </span>
+          )}
+        </div>
+        <p className="mt-0.5 text-xs text-text-tertiary truncate">{description}</p>
+      </div>
+    </Link>
   );
 }
 
