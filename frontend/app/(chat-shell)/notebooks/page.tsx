@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BookOpen, Check, ChevronDown, Clock, Grid3X3, List, Loader2, MoreHorizontal, Plus, Search, X } from "lucide-react";
+import { BookOpen, Check, Clock, Grid3X3, List, Loader2, MoreHorizontal, Plus, Search, X } from "lucide-react";
 import { toast } from "sonner";
 import InputDialog from "@/components/ui/InputDialog";
 import { useI18n } from "@/lib/i18n";
@@ -206,10 +206,6 @@ export default function NotebooksPage() {
               </div>
               {!isSearching && (
                 <>
-                  <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-[#d9dde5] bg-white px-3 text-[13px] font-medium text-[#374151] shadow-[0_1px_1px_rgba(15,23,42,0.04)] transition hover:bg-[#f6f7f9]">
-                    最近
-                    <ChevronDown className="h-3.5 w-3.5 text-[#6b7280]" />
-                  </button>
                   <button
                     type="button"
                     onClick={() => setCreateOpen(true)}
