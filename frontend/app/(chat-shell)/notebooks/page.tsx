@@ -131,8 +131,9 @@ export default function NotebooksPage() {
         <header className="mb-8 flex flex-col gap-0">
           <div className={cn("flex flex-col gap-4 lg:flex-row lg:items-center", isSearching ? "lg:justify-end" : "lg:justify-between")}>
             {!isSearching && (
-              <div className="flex items-center gap-2 text-[14px] font-medium text-slate-600">
-                <button type="button" className="inline-flex h-8 items-center rounded-[8px] border border-[#d9dde5] bg-[#f6f7f9] px-3 text-[#111827] shadow-[0_1px_1px_rgba(15,23,42,0.04)]">全部</button>
+              <div className="flex items-center gap-2.5">
+                <img src={NOTEBOOK_DEFAULT_COVER_LOGO} alt="AI Space" className="h-[26px] w-[26px] shrink-0 object-contain" />
+                <span className="text-[22px] font-semibold leading-none tracking-[-0.03em] text-[#111827]">Notebook</span>
               </div>
             )}
 
