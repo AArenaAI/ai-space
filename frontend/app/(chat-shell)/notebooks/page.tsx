@@ -69,7 +69,11 @@ function readPinnedNotebookIds() {
 
 function writePinnedNotebookIds(ids: Set<number>) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(PINNED_NOTEBOOKS_STORAGE_KEY, JSON.stringify(Array.from(ids)));
+  try {
+    localStorage.setItem(PINNED_NOTEBOOKS_STORAGE_KEY, JSON.stringify(Array.from(ids)));
+  } catch {
+    // Pinning should still update the current UI even if browser storage is unavailable.
+  }
 }
 
 function isReadonlyNotebook(notebook: Notebook) {
@@ -256,19 +260,17 @@ export default function NotebooksPage() {
   };
 
   const togglePin = (notebook: Notebook) => {
+    const next = new Set(pinnedIds);
+    const willPin = !next.has(notebook.id);
+    if (willPin) {
+      next.add(notebook.id);
+    } else {
+      next.delete(notebook.id);
+    }
+    setPinnedIds(next);
+    writePinnedNotebookIds(next);
     setOpenMenuId(null);
-    setPinnedIds((current) => {
-      const next = new Set(current);
-      if (next.has(notebook.id)) {
-        next.delete(notebook.id);
-        toast.success("已取消置顶");
-      } else {
-        next.add(notebook.id);
-        toast.success("已置顶");
-      }
-      writePinnedNotebookIds(next);
-      return next;
-    });
+    toast.success(willPin ? "已置顶" : "已取消置顶");
   };
 
   const handleRename = async (title: string) => {
