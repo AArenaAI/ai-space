@@ -1553,7 +1553,7 @@ function NotebookDetailContent() {
             type="button"
             onClick={() => writableNotebookId && setUrlDialogOpen(true)}
             disabled={addingUrl || !writableNotebookId}
-            className="mb-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-brand-muted text-sm font-semibold text-text-primary transition hover:bg-brand-muted/80 disabled:cursor-not-allowed disabled:opacity-60"
+            className="mb-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-[#111827] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(15,23,42,0.12)] transition hover:bg-[#1f2937] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {addingUrl ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             {t("notebook.addSource")}
