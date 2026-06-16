@@ -527,7 +527,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
 
       {notebookHero && !activeCompareMode && (
         <div className="relative z-30 shrink-0 px-4 pb-3">
-          <div className={cn("group relative min-h-[176px] overflow-hidden rounded-[28px] px-6 py-5 shadow-sm ring-1 ring-black/5", hasNotebookHeroImage ? "bg-slate-900 text-white" : notebookHero.coverClassName || "bg-gradient-to-br from-[#edf4ff] via-[#eef0ff] to-[#f6efff] text-slate-950")}>
+          <div className={cn("group relative min-h-[204px] overflow-hidden rounded-[28px] px-6 py-5 shadow-sm ring-1 ring-black/5", hasNotebookHeroImage ? "bg-slate-900 text-white" : notebookHero.coverClassName || "bg-gradient-to-br from-[#edf4ff] via-[#eef0ff] to-[#f6efff] text-slate-950")}>
             {hasNotebookHeroImage ? (
               <>
                 <img src={notebookHero.imageUrl} alt="笔记本底图" className="absolute inset-0 h-full w-full object-cover" />
@@ -542,7 +542,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
               </>
             )}
 
-            <div className="relative z-10 flex h-full min-h-[136px] flex-col justify-between gap-5">
+            <div className="relative z-10 flex h-full min-h-[164px] flex-col justify-between gap-5">
               <div className="flex items-start justify-between gap-4">
                 {notebookHero.icon && (
                   <div className={cn("inline-flex h-10 min-w-10 items-center justify-center rounded-full px-2.5 text-sm font-black leading-none shadow-sm ring-1 ring-black/10", notebookHeroUsesDarkText ? "bg-white/70 text-slate-900" : "bg-white/92 text-slate-900")}>
