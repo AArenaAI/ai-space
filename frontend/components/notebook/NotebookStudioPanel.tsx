@@ -1441,6 +1441,18 @@ function ArtifactMenu({
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [menuStyle, setMenuStyle] = useState<CSSProperties | null>(null);
 
+  const menuItemCount = [
+    onRenameArtifact,
+    onRegenerateArtifact,
+    onCopyArtifact,
+    artifact.type === "table" && onCopyTableMarkdown,
+    artifact.type === "report" && onPrintArtifact,
+    onDownloadArtifact,
+    artifact.type === "table" && onExportTableToGoogleSheets,
+    onDeleteArtifact,
+  ].filter(Boolean).length;
+  const estimatedMenuHeight = Math.max(48, menuItemCount * 32 + 8);
+
   const closeAndRun = (callback?: () => void) => {
     onToggle();
     callback?.();
@@ -1456,7 +1468,7 @@ function ArtifactMenu({
       if (!trigger) return;
       const rect = trigger.getBoundingClientRect();
       const menuWidth = 208;
-      const menuHeight = menuRef.current?.offsetHeight || 312;
+      const menuHeight = menuRef.current?.offsetHeight || estimatedMenuHeight;
       const gap = 8;
       const viewportPadding = 8;
       const spaceBelow = window.innerHeight - rect.bottom;
@@ -1485,7 +1497,7 @@ function ArtifactMenu({
       window.removeEventListener("scroll", updatePosition, true);
       document.removeEventListener("pointerdown", handlePointerDown);
     };
-  }, [open, onToggle]);
+  }, [estimatedMenuHeight, open, onToggle]);
 
   const menu = open && menuStyle && typeof document !== "undefined" ? createPortal(
     <div ref={menuRef} style={menuStyle} className="fixed z-[240] overflow-hidden rounded-2xl border border-surface-border bg-surface-card py-1 text-xs shadow-xl">
