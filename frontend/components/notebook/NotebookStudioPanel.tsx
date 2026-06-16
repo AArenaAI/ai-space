@@ -260,24 +260,37 @@ const artifactIconMap: Record<NotebookStudioArtifact["type"], StudioIcon> = {
   infographic: StudioInfographicIcon,
 };
 
-const artifactIconTone: Record<NotebookStudioArtifact["type"], string> = {
-  table: "text-blue-900 dark:text-blue-300",
-  summary: "text-slate-700 dark:text-slate-300",
-  faq: "text-indigo-700 dark:text-indigo-300",
-  briefing: "text-amber-700 dark:text-amber-300",
-  mindmap: "text-emerald-700 dark:text-emerald-300",
-  flashcards: "text-red-900 dark:text-rose-300",
-  quiz: "text-purple-800 dark:text-purple-300",
-  report: "text-[#8a7a35] dark:text-yellow-300",
-  infographic: "text-violet-600 dark:text-violet-300",
+const studioActionVisualMap: Record<NotebookStudioActionId, { iconClass: string; surfaceClass: string }> = {
+  table: { iconClass: "text-emerald-600 dark:text-emerald-300", surfaceClass: "bg-indigo-50 dark:bg-indigo-950/30" },
+  summary: { iconClass: "text-slate-600 dark:text-slate-300", surfaceClass: "bg-slate-50 dark:bg-slate-950/30" },
+  faq: { iconClass: "text-indigo-600 dark:text-indigo-300", surfaceClass: "bg-indigo-50 dark:bg-indigo-950/30" },
+  briefing: { iconClass: "text-amber-600 dark:text-amber-300", surfaceClass: "bg-amber-50 dark:bg-amber-950/30" },
+  mindmap: { iconClass: "text-violet-600 dark:text-violet-300", surfaceClass: "bg-purple-50 dark:bg-purple-950/30" },
+  flashcards: { iconClass: "text-pink-600 dark:text-rose-300", surfaceClass: "bg-rose-50 dark:bg-rose-950/30" },
+  quiz: { iconClass: "text-purple-700 dark:text-purple-300", surfaceClass: "bg-sky-50 dark:bg-sky-950/30" },
+  report: { iconClass: "text-slate-600 dark:text-slate-300", surfaceClass: "bg-yellow-50 dark:bg-yellow-950/30" },
+  slides: { iconClass: "text-blue-600 dark:text-blue-300", surfaceClass: "bg-blue-50 dark:bg-blue-950/30" },
+  infographic: { iconClass: "text-violet-600 dark:text-violet-300", surfaceClass: "bg-fuchsia-50 dark:bg-fuchsia-950/30" },
+};
+
+const artifactVisualMap: Record<NotebookStudioArtifact["type"], { iconClass: string; surfaceClass: string }> = {
+  table: studioActionVisualMap.table,
+  summary: studioActionVisualMap.summary,
+  faq: studioActionVisualMap.faq,
+  briefing: studioActionVisualMap.briefing,
+  mindmap: studioActionVisualMap.mindmap,
+  flashcards: studioActionVisualMap.flashcards,
+  quiz: studioActionVisualMap.quiz,
+  report: studioActionVisualMap.report,
+  infographic: studioActionVisualMap.infographic,
 };
 
 const primaryStudioActionIconTone: Partial<Record<NotebookStudioActionId, string>> = {
-  table: artifactIconTone.table,
-  flashcards: artifactIconTone.flashcards,
-  quiz: artifactIconTone.quiz,
-  report: artifactIconTone.report,
-  infographic: artifactIconTone.infographic,
+  table: studioActionVisualMap.table.iconClass,
+  flashcards: studioActionVisualMap.flashcards.iconClass,
+  quiz: studioActionVisualMap.quiz.iconClass,
+  report: studioActionVisualMap.report.iconClass,
+  infographic: studioActionVisualMap.infographic.iconClass,
 };
 
 function formatTime(value: string) {
@@ -1578,7 +1591,7 @@ export function NotebookStudioPanel({
                 const Icon = artifactIconMap[artifact.type];
                 return (
                   <button key={artifact.id} type="button" onClick={() => { setIsCollapsed(false); handleArtifactClick(artifact); }} title={artifact.title} className={cn("flex h-11 w-11 items-center justify-center rounded-2xl transition hover:bg-surface-elevated", activeArtifactId === artifact.id && "bg-surface-elevated ring-1 ring-brand-border")}>
-                    <Icon className={cn("h-[23px] w-[23px]", artifactIconTone[artifact.type])} />
+                    <Icon className={cn("h-[23px] w-[23px]", artifactVisualMap[artifact.type].iconClass)} />
                   </button>
                 );
               })}
@@ -1719,8 +1732,8 @@ export function NotebookStudioPanel({
                     return (
                       <div key={artifact.id} className="group relative rounded-[18px] transition hover:bg-surface-elevated/70">
                         <div className="flex w-full items-center gap-3.5 px-2.5 py-3 pr-20 text-left">
-                          <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", artifactIconTone[artifact.type])}>
-                            <Icon className="h-[23px] w-[23px]" />
+                          <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", artifactVisualMap[artifact.type].surfaceClass)}>
+                            <Icon className={cn("h-[23px] w-[23px]", artifactVisualMap[artifact.type].iconClass)} />
                           </div>
                           <div className="min-w-0 flex-1">
                             <button type="button" onClick={() => handleArtifactClick(artifact)} className="block w-full text-left">
