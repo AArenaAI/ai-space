@@ -1685,21 +1685,12 @@ export function NotebookStudioPanel({
     }
     return sourceFiles.slice(0, Math.max(0, artifact.sourceCount || 0));
   };
-  const sortedArtifacts = useMemo(() => {
-    return [...artifacts]
-      .sort((a, b) => {
-        const aTime = new Date(a.createdAt).getTime();
-        const bTime = new Date(b.createdAt).getTime();
-        return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
-      });
-  }, [artifacts]);
-  const sortedNotes = useMemo(() => {
-    return [...notes].sort((a, b) => {
-      const aTime = new Date(a.createdAt).getTime();
-      const bTime = new Date(b.createdAt).getTime();
-      return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
-    });
-  }, [notes]);
+  const sortedOutputs = useMemo(() => {
+    const artifactItems = artifacts.map((a) => ({ kind: "artifact" as const, data: a, time: new Date(a.createdAt).getTime() }));
+    const noteItems = notes.map((n) => ({ kind: "note" as const, data: n, time: new Date(n.createdAt).getTime() }));
+    return [...artifactItems, ...noteItems]
+      .sort((a, b) => (Number.isNaN(b.time) ? 0 : b.time) - (Number.isNaN(a.time) ? 0 : a.time));
+  }, [artifacts, notes]);
   const actions: Array<{ id: NotebookStudioActionId; title: string; desc: string; accent: string; bgClass: string }> = [
     { id: "table", title: t("notebook.studio.table"), desc: t("notebook.studio.tableDesc"), accent: "from-emerald-500/15 to-cyan-500/10 text-emerald-500", bgClass: "bg-indigo-50 dark:bg-indigo-950/30" },
     { id: "mindmap", title: t("notebook.studio.mindmap"), desc: t("notebook.studio.mindmapDesc"), accent: "from-violet-500/15 to-fuchsia-500/10 text-violet-500", bgClass: "bg-purple-50 dark:bg-purple-950/30" },
@@ -1780,7 +1771,7 @@ export function NotebookStudioPanel({
               </div>
             )}
             <div className="flex flex-col items-center gap-2">
-              {sortedArtifacts.map((artifact) => {
+              {artifacts.map((artifact) => {
                 const Icon = artifactIconMap[artifact.type];
                 return (
                   <button key={artifact.id} type="button" onClick={() => { setIsCollapsed(false); handleArtifactClick(artifact); }} title={artifact.title} className={cn("flex h-11 w-11 items-center justify-center rounded-2xl transition hover:bg-surface-elevated", activeArtifactId === artifact.id && "bg-surface-elevated ring-1 ring-brand-border")}>
@@ -1902,7 +1893,7 @@ export function NotebookStudioPanel({
           <MoreHorizontal className="h-4 w-4 text-text-tertiary" />
         </div>
         {(generatingType === "table" || generatingType === "mindmap" || generatingType === "flashcards" || generatingType === "quiz" || generatingType === "report" || generatingType === "infographic") && <div className="px-4 pb-3"><GeneratingStudioCard type={generatingType} sourceCount={selectedSourceCount} t={t} /></div>}
-        {artifacts.length === 0 && sortedNotes.length === 0 ? (
+        {sortedOutputs.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
             <div className="mb-4 text-text-tertiary">
               <Sparkles className="absolute ml-6 mt-0 h-3.5 w-3.5" />
@@ -1914,87 +1905,91 @@ export function NotebookStudioPanel({
         ) : (
           <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5">
             <div className="space-y-1.5">
-              {sortedArtifacts.map((artifact) => {
-                const Icon = artifactIconMap[artifact.type];
-                return (
-                      <div key={artifact.id} className="group relative rounded-[18px] transition hover:bg-surface-elevated/70">
-                        <div className="flex w-full items-center gap-3.5 px-2.5 py-3 pr-20 text-left">
-                          <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", artifactVisualMap[artifact.type].surfaceClass)}>
-                            <Icon className={cn("h-[23px] w-[23px]", artifactVisualMap[artifact.type].iconClass)} />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <button type="button" onClick={() => handleArtifactClick(artifact)} className="block w-full text-left">
-                              <div className="flex min-w-0 items-center gap-2">
-                                <span className="truncate text-[14px] font-semibold leading-5 tracking-[-0.01em] text-text-primary">{artifact.title}</span>
-                              </div>
-                              <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px] leading-4 text-text-tertiary">
-                                <span className="truncate">{artifact.subtitle}</span>
-                                <span className="text-text-tertiary/70">·</span>
-                                <span className="shrink-0">{formatTime(artifact.createdAt)}</span>
-                              </div>
-                            </button>
-                            <div className="relative mt-2 inline-block">
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setSourcePopoverKey((current) => current === `list-${artifact.id}` ? null : `list-${artifact.id}`);
-                                }}
-                                className="rounded-full border border-surface-border bg-surface-elevated px-2.5 py-1 text-[11px] font-medium text-text-secondary transition hover:border-brand-border hover:text-brand"
-                              >
-                                {t("notebook.studio.viewSources", { count: String(artifact.sourceCount) })}
-                              </button>
-                              {sourcePopoverKey === `list-${artifact.id}` && <SourcePopover sources={sourcesForArtifact(artifact)} title={t("notebook.sourcesTitle")} emptyLabel={t("notebook.sourcesEmpty")} onOpenSource={onOpenSource} />}
+              {sortedOutputs.map((item) => {
+                if (item.kind === "artifact") {
+                  const artifact = item.data;
+                  const Icon = artifactIconMap[artifact.type];
+                  return (
+                    <div key={artifact.id} className="group relative rounded-[18px] transition hover:bg-surface-elevated/70">
+                      <div className="flex w-full items-center gap-3.5 px-2.5 py-3 pr-20 text-left">
+                        <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", artifactVisualMap[artifact.type].surfaceClass)}>
+                          <Icon className={cn("h-[23px] w-[23px]", artifactVisualMap[artifact.type].iconClass)} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <button type="button" onClick={() => handleArtifactClick(artifact)} className="block w-full text-left">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className="truncate text-[14px] font-semibold leading-5 tracking-[-0.01em] text-text-primary">{artifact.title}</span>
                             </div>
+                            <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px] leading-4 text-text-tertiary">
+                              <span className="truncate">{artifact.subtitle}</span>
+                              <span className="text-text-tertiary/70">·</span>
+                              <span className="shrink-0">{formatTime(artifact.createdAt)}</span>
+                            </div>
+                          </button>
+                          <div className="relative mt-2 inline-block">
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setSourcePopoverKey((current) => current === `list-${artifact.id}` ? null : `list-${artifact.id}`);
+                              }}
+                              className="rounded-full border border-surface-border bg-surface-elevated px-2.5 py-1 text-[11px] font-medium text-text-secondary transition hover:border-brand-border hover:text-brand"
+                            >
+                              {t("notebook.studio.viewSources", { count: String(artifact.sourceCount) })}
+                            </button>
+                            {sourcePopoverKey === `list-${artifact.id}` && <SourcePopover sources={sourcesForArtifact(artifact)} title={t("notebook.sourcesTitle")} emptyLabel={t("notebook.sourcesEmpty")} onOpenSource={onOpenSource} />}
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setViewerArtifactId(artifact.id)}
-                          className="absolute right-9 top-1/2 z-20 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-text-tertiary opacity-0 transition hover:bg-surface-hover hover:text-text-primary group-hover:opacity-100"
-                          title={t("notebook.studio.expandViewer")}
-                        >
-                          <Maximize2 className="h-3.5 w-3.5" />
-                        </button>
-                        <ArtifactMenu
-                          artifact={artifact}
-                          open={openMenuArtifactId === artifact.id}
-                          onToggle={() => setOpenMenuArtifactId((current) => current === artifact.id ? null : artifact.id)}
-                          onRenameArtifact={onRenameArtifact}
-                          onRegenerateArtifact={onRegenerateArtifact}
-                          onCopyArtifact={onCopyArtifact}
-                          onDownloadArtifact={onDownloadArtifact}
-                          onCopyTableMarkdown={onCopyTableMarkdown}
-                          onPrintArtifact={onPrintArtifact}
-                          onExportTableToGoogleSheets={onExportTableToGoogleSheets}
-                          onDeleteArtifact={onDeleteArtifact}
-                          t={t}
-                          floating
-                        />
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => setViewerArtifactId(artifact.id)}
+                        className="absolute right-9 top-1/2 z-20 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-text-tertiary opacity-0 transition hover:bg-surface-hover hover:text-text-primary group-hover:opacity-100"
+                        title={t("notebook.studio.expandViewer")}
+                      >
+                        <Maximize2 className="h-3.5 w-3.5" />
+                      </button>
+                      <ArtifactMenu
+                        artifact={artifact}
+                        open={openMenuArtifactId === artifact.id}
+                        onToggle={() => setOpenMenuArtifactId((current) => current === artifact.id ? null : artifact.id)}
+                        onRenameArtifact={onRenameArtifact}
+                        onRegenerateArtifact={onRegenerateArtifact}
+                        onCopyArtifact={onCopyArtifact}
+                        onDownloadArtifact={onDownloadArtifact}
+                        onCopyTableMarkdown={onCopyTableMarkdown}
+                        onPrintArtifact={onPrintArtifact}
+                        onExportTableToGoogleSheets={onExportTableToGoogleSheets}
+                        onDeleteArtifact={onDeleteArtifact}
+                        t={t}
+                        floating
+                      />
+                    </div>
+                  );
+                }
+                const note = item.data;
+                return (
+                  <div key={note.id} className="group relative rounded-[18px] transition hover:bg-surface-elevated/70">
+                    <button type="button" onClick={() => openExistingNote(note)} className="flex w-full items-center gap-3.5 px-2.5 py-3 pr-12 text-left">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-surface-muted text-text-secondary">
+                        <FileText className="h-[24px] w-[24px] stroke-[1.8]" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[14px] font-semibold leading-5 tracking-[-0.01em] text-text-primary">{note.title}</span>
+                        <span className="mt-1 block truncate text-[12px] leading-4 text-text-tertiary">{formatTime(note.createdAt)}</span>
+                      </span>
+                    </button>
+                    <NoteMenu
+                      note={note}
+                      open={openNoteMenuId === note.id}
+                      onToggle={() => setOpenNoteMenuId((current) => current === note.id ? null : note.id)}
+                      onConvertNoteToSource={onConvertNoteToSource}
+                      onConvertAllNotesToSource={onConvertAllNotesToSource}
+                      onDeleteNote={onDeleteNote}
+                    />
+                  </div>
                 );
               })}
-              {sortedNotes.map((note) => (
-                <div key={note.id} className="group relative rounded-[18px] transition hover:bg-surface-elevated/70">
-                  <button type="button" onClick={() => openExistingNote(note)} className="flex w-full items-center gap-3.5 px-2.5 py-3 pr-12 text-left">
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-text-secondary">
-                      <FileText className="h-[24px] w-[24px] stroke-[1.8]" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[14px] font-semibold leading-5 tracking-[-0.01em] text-text-primary">{note.title}</span>
-                      <span className="mt-1 block truncate text-[12px] leading-4 text-text-tertiary">{formatTime(note.createdAt)}</span>
-                    </span>
-                  </button>
-                  <NoteMenu
-                    note={note}
-                    open={openNoteMenuId === note.id}
-                    onToggle={() => setOpenNoteMenuId((current) => current === note.id ? null : note.id)}
-                    onConvertNoteToSource={onConvertNoteToSource}
-                    onConvertAllNotesToSource={onConvertAllNotesToSource}
-                    onDeleteNote={onDeleteNote}
-                  />
-                </div>
-              ))}
             </div>
           </div>
         )}
