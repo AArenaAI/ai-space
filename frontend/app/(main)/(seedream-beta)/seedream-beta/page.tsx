@@ -1818,6 +1818,25 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     const shotsPerScene = scenes.map((scene) =>
       storyboardShots.filter((s) => (s.scene || "未分组") === scene)
     );
+    const newShots: StoryboardShot[] = [];
+    let currentY = 40;
+    const COL_WIDTH = 280;
+    const ROW_HEIGHT = 200;
+    const GAP_X = 40;
+    const GAP_Y = 60;
+    for (const sceneShots of shotsPerScene) {
+      let currentX = 40;
+      for (let i = 0; i < sceneShots.length; i++) {
+        const shot = sceneShots[i];
+        newShots.push({
+          ...shot,
+          index: newShots.length + 1,
+        });
+        currentX += COL_WIDTH + GAP_X;
+      }
+      currentY += ROW_HEIGHT + GAP_Y;
+    }
+    setStoryboardShots(newShots);
   }, [storyboardShots, setStoryboardShots]);
 
   return (
@@ -1860,6 +1879,10 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
             setActiveShotId(shot.id);
             setWorkflowView("step");
           }
+        }}
+        onGenerateAsset={(assetId) => {
+          const asset = semanticAssets.find((a) => a.id === assetId);
+          if (asset) generateSemanticAssetImage(asset);
         }}
         onAutoLayout={autoLayoutNodes}
         onSave={() => toast.info("开发中")}

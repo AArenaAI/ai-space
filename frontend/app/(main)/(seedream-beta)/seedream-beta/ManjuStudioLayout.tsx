@@ -45,6 +45,7 @@ export interface ManjuStudioLayoutProps {
   selectedNodeId?: string | null;
 
   /* 项目操作 */
+  onGenerateAsset?: (assetId: string) => void;
   onAutoLayout?: () => void;
   onSave?: () => void;
   onExport?: () => void;
@@ -74,6 +75,7 @@ export default function ManjuStudioLayout({
   onToggleCollapse,
   selectedNodeId,
   onSave,
+  onGenerateAsset,
   onAutoLayout,
   onExport,
   onImport,
@@ -216,6 +218,7 @@ export default function ManjuStudioLayout({
             onDropAddNode={(type: string, x: number, y: number) => {
               onAddNode?.(type as CanvasNode["type"], x, y);
             }}
+            onGenerateAsset={onGenerateAsset}
             />
           {/* 浮层子内容（如节点编辑器弹窗） */}
           {children}

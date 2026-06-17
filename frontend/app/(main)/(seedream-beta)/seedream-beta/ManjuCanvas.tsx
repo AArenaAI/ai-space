@@ -44,18 +44,17 @@ export interface ManjuCanvasProps {
   onNodeDoubleClick?: (node: CanvasNode) => void;
   onNodeContextMenu?: (node: CanvasNode, e: React.MouseEvent) => void;
   onCanvasContextMenu?: (e: React.MouseEvent) => void;
+  onGenerateAsset?: (assetId: string) => void;
   onAddNode?: (type: CanvasNode["type"], x: number, y: number) => void;
   onDeleteNode?: (id: string) => void;
   onToggleCollapse?: (id: string) => void;
   selectedNodeId?: string | null;
-  readOnly?: boolean;
-  children?: React.ReactNode;
   onDropAddNode?: (type: string, x: number, y: number) => void;
 }
-
-const GRID_SIZE = 24;
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 2.0;
+
+const GRID_SIZE = 24;
 
 export default function ManjuCanvas({
   nodes,
@@ -69,9 +68,8 @@ export default function ManjuCanvas({
   onDeleteNode,
   onToggleCollapse,
   selectedNodeId,
-  readOnly,
-  children,
   onDropAddNode,
+  onGenerateAsset,
 }: ManjuCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
@@ -144,7 +142,6 @@ export default function ManjuCanvas({
 
   const onNodeMouseDown = useCallback(
     (e: React.MouseEvent, node: CanvasNode) => {
-      if (readOnly) return;
       e.stopPropagation();
       onNodeSelect?.(node.id);
       setDraggingNode(node.id);
@@ -156,7 +153,7 @@ export default function ManjuCanvas({
         });
       }
     },
-    [readOnly, onNodeSelect, pan, zoom]
+    [onNodeSelect, pan, zoom]
   );
 
   const onDoubleClick = useCallback(
@@ -334,11 +331,7 @@ export default function ManjuCanvas({
             {/* 节点内容 */}
             {!node.collapsed && (
               <div className="px-3 pb-3">
-                {children ? (
-                  children
-                ) : (
-                  <ManjuNodeContent node={node} />
-                )}
+                <ManjuNodeContent node={node} />
               </div>
             )}
           </div>
@@ -443,6 +436,19 @@ export default function ManjuCanvas({
                 <Trash2 className="h-3.5 w-3.5" />
                 删除
               </button>
+              {nodes.find((n) => n.id === contextMenu.nodeId)?.type === "shot" && onGenerateAsset && (
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-brand hover:bg-brand/10"
+                  onClick={() => {
+                    onGenerateAsset(contextMenu.nodeId!);
+                    setContextMenu(null);
+                  }}
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  生成资产图
+                </button>
+              )}
             </>
           ) : (
             <>

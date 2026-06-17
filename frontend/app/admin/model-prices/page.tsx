@@ -43,7 +43,7 @@ export default function ModelPricesPage() {
     try {
       const [priceData, costData] = await Promise.all([
         adminFetch<{ prices: ModelPrice[] }>("/model-prices"),
-        adminFetch<{ items: { key: string; parsed_value?: unknown }[] }>("/api/admin/beta-configs"),
+        adminFetch<{ items: { key: string; parsed_value?: unknown }[] }>("/beta-configs"),
       ]);
       setPrices(priceData.prices);
       // 解析 beta_model_costs
@@ -51,6 +51,7 @@ export default function ModelPricesPage() {
       setCosts((costItem?.parsed_value as ModelCostMap) || {});
     } catch (err) {
       toast.error("加载定价数据失败");
+      console.error("Model prices fetch error:", err);
     } finally {
       setLoading(false);
     }
