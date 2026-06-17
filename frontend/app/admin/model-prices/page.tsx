@@ -38,17 +38,19 @@ export default function ModelPricesPage() {
   const [prices, setPrices] = useState<ModelPrice[]>([]);
   const [costs, setCosts] = useState<ModelCostMap>({});
   const [loading, setLoading] = useState(true);
+  const [exchangeRate, setExchangeRate] = useState(7.2);
 
   const fetchData = useCallback(async () => {
     try {
-      const [priceData, costData] = await Promise.all([
+      const [priceData, costData, rateData] = await Promise.all([
         adminFetch<{ prices: ModelPrice[] }>("/model-prices"),
         adminFetch<{ items: { key: string; parsed_value?: unknown }[] }>("/beta-configs"),
+        adminFetch<{ usd_to_cny: number }>("/exchange-rate"),
       ]);
       setPrices(priceData.prices);
-      // 解析 beta_model_costs
       const costItem = costData.items.find((i) => i.key === "beta_model_costs");
       setCosts((costItem?.parsed_value as ModelCostMap) || {});
+      setExchangeRate(rateData.usd_to_cny || 7.2);
     } catch (err) {
       toast.error("加载定价数据失败");
       console.error("Model prices fetch error:", err);
@@ -83,7 +85,7 @@ export default function ModelPricesPage() {
   // 转换为人民币价格（参考后端 convertSourceUnitToRMB 逻辑）
   const convertToRMB = (price: number, currency: string, unit: string) => {
     if (price === undefined || price === 0) return null;
-    const rate = currency === "USD" ? 7.2 : 1; // 简化汇率，实际应从后端获取
+    const rate = currency === "USD" ? exchangeRate : 1;
     switch (unit) {
       case "per_1m_tokens":
         return (price * rate) / 1000; // 转为 ¥/千tokens

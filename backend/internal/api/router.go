@@ -251,6 +251,9 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			// 模型定价（只读，管理员查看供应商成本）
 			modelPriceHandler := NewModelPriceHandler("config/model-prices.json")
 			admin.GET("/model-prices", modelPriceHandler.ListModelPrices)
+			// 汇率接口
+			exchangeRateHandler := NewExchangeRateHandler()
+			admin.GET("/exchange-rate", exchangeRateHandler.GetExchangeRate)
 		}
 	}
 
