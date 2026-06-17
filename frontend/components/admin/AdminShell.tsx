@@ -22,6 +22,7 @@ const navItems = [
       { href: `${ADMIN_BASE}/beta-invites`, label: "邀请码" },
       { href: `${ADMIN_BASE}/beta-configs`, label: "内测配置" },
       { href: `${ADMIN_BASE}/changelogs`, label: "更新日志" },
+      { href: `${ADMIN_BASE}/analytics`, label: "数据分析" },
     ],
   },
   { href: `${ADMIN_BASE}/billing`, label: "支付", icon: CreditCard, disabled: true },

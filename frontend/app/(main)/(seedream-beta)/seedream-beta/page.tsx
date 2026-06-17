@@ -1602,6 +1602,60 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     }
   };
 
+  const batchGenerateSketchesForShots = async (targets: StoryboardShot[]) => {
+    if (!targets.length) return toast.error("没有选中的镜头可生成草稿图");
+    batchCancelRef.current = false;
+    setBatchGenerating("sketches");
+    try {
+      for (const shot of targets) {
+        if (batchCancelRef.current) break;
+        await generateShotSketch(shot, "batch");
+      }
+      toast.success(batchCancelRef.current ? "已暂停批量故事版草稿图提交" : `已提交 ${targets.length} 个故事版草稿图任务`);
+    } catch (err) {
+      toast.error(getErrorMessage(err, { module: "image", fallbackMessage: "批量故事版草稿图提交失败" }));
+    } finally {
+      setBatchGenerating(null);
+      batchCancelRef.current = false;
+    }
+  };
+
+  const batchGenerateImagesForShots = async (targets: StoryboardShot[]) => {
+    if (!targets.length) return toast.error("没有选中的镜头可生成正式图");
+    batchCancelRef.current = false;
+    setBatchGenerating("images");
+    try {
+      for (const shot of targets) {
+        if (batchCancelRef.current) break;
+        await generateShotImage(shot, "batch");
+      }
+      toast.success(batchCancelRef.current ? "已暂停批量分镜图提交" : `已提交 ${targets.length} 个分镜图任务`);
+    } catch (err) {
+      toast.error(getErrorMessage(err, { module: "image", fallbackMessage: "批量分镜图提交失败" }));
+    } finally {
+      setBatchGenerating(null);
+      batchCancelRef.current = false;
+    }
+  };
+
+  const batchGenerateVideosForShots = async (targets: StoryboardShot[]) => {
+    if (!targets.length) return toast.error("没有选中的镜头可生成视频");
+    batchCancelRef.current = false;
+    setBatchGenerating("videos");
+    try {
+      for (const shot of targets) {
+        if (batchCancelRef.current) break;
+        await generateShotVideo(shot, "batch");
+      }
+      toast.success(batchCancelRef.current ? "已暂停批量视频提交" : `已提交 ${targets.length} 个视频任务`);
+    } catch (err) {
+      toast.error(getErrorMessage(err, { module: "video", fallbackMessage: "批量视频提交失败" }));
+    } finally {
+      setBatchGenerating(null);
+      batchCancelRef.current = false;
+    }
+  };
+
   const pauseBatchGeneration = () => {
     batchCancelRef.current = true;
     toast.message("正在暂停，当前任务提交完成后停止");
@@ -2202,8 +2256,21 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
                         selectedShotIds={selectedOverviewShotIds}
                         onSelectShot={setActiveShotId}
                         onToggleSelectedShot={toggleOverviewShotSelection}
+                        onBatchGenerate={(kind, shotIds) => {
+                          if (kind === "sketch") {
+                            const targets = storyboardShots.filter((s) => shotIds.includes(s.id));
+                            batchGenerateSketchesForShots(targets);
+                          } else if (kind === "image") {
+                            const targets = storyboardShots.filter((s) => shotIds.includes(s.id));
+                            batchGenerateImagesForShots(targets);
+                          } else {
+                            const targets = storyboardShots.filter((s) => shotIds.includes(s.id));
+                            batchGenerateVideosForShots(targets);
+                          }
+                        }}
                         isStoryboardSketchAsset={isStoryboardSketchAsset}
                         getShotStatusLabel={getShotStatusLabel}
+                        assetViewUrl={assetViewUrl}
                       />
                       <details className="mb-4 rounded-2xl border border-surface-border bg-surface-elevated/70 p-3">
                         <summary className="cursor-pointer text-xs font-medium text-text-secondary">查看 / 编辑 AI 生成的原始提示词文本</summary>

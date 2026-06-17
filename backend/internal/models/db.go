@@ -50,7 +50,8 @@ func InitDB(databaseURL string) (*gorm.DB, error) {
 		&BetaApplication{}, // 新增：内测申请表
 		&BetaConfig{}, // 新增：内测运营配置
 		&Changelog{}, // 新增：产品更新日志
-		&ChangelogRead{}, // 新增：更新日志已读记录
+		&ChangelogRead{}, // 新增：已读记录
+		&AnalyticsEvent{}, // 新增：用户行为事件追踪
 	); err != nil {
 		return nil, err
 	}
