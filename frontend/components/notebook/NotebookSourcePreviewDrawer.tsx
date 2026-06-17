@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import { ChevronDown, ExternalLink, FileText, Loader2, Plus, Sparkles, X, CheckCircle2, AlertCircle, Search } from "lucide-react";
+import { ChevronDown, ExternalLink, FileText, Loader2, Plus, Sparkles, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import type { NotebookFile, NotebookFileContent } from "@/lib/notebookTypes";
 import type { NotebookSourceOpenTarget } from "@/components/notebook/NotebookStudioPanel";
@@ -45,21 +45,21 @@ function splitPreviewLines(value: string) {
     .slice(0, 80);
 }
 
-function renderSourceLine(line: string, key: string) {
+function renderSourceLine(line: string, key: string, highlight?: boolean) {
   const trimmed = line.trim();
   if (/^#{1,3}\s+/.test(trimmed)) {
     const level = trimmed.match(/^#+/)?.[0].length || 1;
     const text = trimmed.replace(/^#{1,3}\s+/, "");
-    if (level === 1) return <h2 key={key} className="mb-3 mt-6 text-[22px] font-semibold leading-tight tracking-[-0.03em] text-text-primary">{text}</h2>;
-    return <h3 key={key} className="mb-2 mt-5 text-[17px] font-semibold leading-snug text-text-primary">{text}</h3>;
+    if (level === 1) return <h2 key={key} className={cn("mb-3 mt-6 text-[22px] font-semibold leading-tight tracking-[-0.03em] text-text-primary", highlight && "bg-brand/10 px-1 rounded")}>{text}</h2>;
+    return <h3 key={key} className={cn("mb-2 mt-5 text-[17px] font-semibold leading-snug text-text-primary", highlight && "bg-brand/10 px-1 rounded")}>{text}</h3>;
   }
   if (/^[-*•]\s+/.test(trimmed)) {
-    return <li key={key} className="ml-5 list-disc text-[14px] leading-7 text-text-secondary">{trimmed.replace(/^[-*•]\s+/, "")}</li>;
+    return <li key={key} className={cn("ml-5 list-disc text-[14px] leading-7 text-text-secondary", highlight && "bg-brand/10 px-1 rounded")}>{trimmed.replace(/^[-*•]\s+/, "")}</li>;
   }
   if (/^\d+[.)]\s+/.test(trimmed)) {
-    return <p key={key} className="mt-3 text-[15px] font-semibold leading-7 text-text-primary">{trimmed}</p>;
+    return <p key={key} className={cn("mt-3 text-[15px] font-semibold leading-7 text-text-primary", highlight && "bg-brand/10 px-1 rounded")}>{trimmed}</p>;
   }
-  return <p key={key} className="mb-3 text-[14px] leading-7 text-text-secondary">{trimmed}</p>;
+  return <p key={key} className={cn("mb-3 text-[14px] leading-7 text-text-secondary", highlight && "bg-brand/10 px-1 rounded")}>{trimmed}</p>;
 }
 
 export function NotebookSourcePreviewDrawer({ open, source, data, loading, error, target, onClose, onAddSource }: NotebookSourcePreviewDrawerProps) {
@@ -95,10 +95,18 @@ export function NotebookSourcePreviewDrawer({ open, source, data, loading, error
     file?.size ? formatBytes(file.size) : null,
   ].filter(Boolean) as string[];
 
-  const previewLines = useMemo(() => {
-    if (data?.chunks?.length) return data.chunks.map((chunk) => chunk.content).flatMap(splitPreviewLines).slice(0, 100);
-    return splitPreviewLines(content);
-  }, [content, data?.chunks]);
+  const contentLines = useMemo(() => {
+    if (!data) return [];
+    if (data.chunks?.length) {
+      return data.chunks.map((chunk) => ({
+        chunkIndex: chunk.index,
+        page: chunk.page,
+        sheetName: chunk.sheet_name,
+        lines: splitPreviewLines(chunk.content),
+      }));
+    }
+    return [{ chunkIndex: -1, page: undefined, sheetName: undefined, lines: splitPreviewLines(content) }];
+  }, [content, data]);
 
   if (!open) return null;
 
@@ -177,27 +185,33 @@ export function NotebookSourcePreviewDrawer({ open, source, data, loading, error
 
           {loading ? null : error ? null : !data ? (
             <div className="rounded-2xl bg-white p-4 text-sm text-text-secondary shadow-sm dark:bg-surface-card">{t("notebook.previewEmpty")}</div>
-          ) : previewLines.length > 0 ? (
+          ) : contentLines.length > 0 ? (
             <article className="mx-auto max-w-none pb-8">
-              {data.chunks?.length ? data.chunks.map((chunk) => {
-                const isTarget = targetChunk?.index === chunk.index;
+              {contentLines.map((block) => {
+                const isTarget = targetChunk?.index === block.chunkIndex;
+                const pageChanged = block.page !== undefined && block.page !== null;
                 return (
-                  <section
-                    key={`${chunk.index}-${chunk.page || 0}-${chunk.slide || 0}`}
-                    id={chunkAnchorId(chunk.index)}
-                    className={cn("scroll-mt-8 rounded-2xl px-1 py-2 transition", isTarget && "bg-brand/10 ring-2 ring-brand/15")}
+                  <div
+                    key={block.chunkIndex >= 0 ? block.chunkIndex : "raw"}
+                    id={block.chunkIndex >= 0 ? chunkAnchorId(block.chunkIndex) : undefined}
+                    className={cn(isTarget && "scroll-mt-8 bg-brand/5 rounded-2xl px-3 py-2 -mx-3")}
                   >
-                    {isTarget || chunk.page || chunk.sheet_name ? (
-                      <div className="mb-2 flex flex-wrap gap-2 text-xs text-text-tertiary">
-                        {chunk.page ? <span className="rounded-full bg-white px-2.5 py-1 shadow-sm dark:bg-surface-card">第 {chunk.page} 页</span> : null}
-                        {chunk.sheet_name ? <span className="rounded-full bg-white px-2.5 py-1 shadow-sm dark:bg-surface-card">{chunk.sheet_name}</span> : null}
-                        {isTarget ? <span className="rounded-full bg-brand px-2.5 py-1 text-white">引用定位</span> : null}
+                    {pageChanged && block.page ? (
+                      <div className="mb-2 mt-4 flex items-center gap-2 text-xs text-text-tertiary">
+                        <span className="h-px flex-1 bg-surface-border" />
+                        <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-medium shadow-sm dark:bg-surface-card">第 {block.page} 页</span>
+                        <span className="h-px flex-1 bg-surface-border" />
                       </div>
                     ) : null}
-                    {splitPreviewLines(chunk.content).map((line, index) => renderSourceLine(line, `${chunk.index}-${index}-${line.slice(0, 12)}`))}
-                  </section>
+                    {block.sheetName ? (
+                      <div className="mb-2 mt-4 text-xs font-medium text-text-tertiary">
+                        <span className="rounded-full bg-white px-2.5 py-1 shadow-sm dark:bg-surface-card">{block.sheetName}</span>
+                      </div>
+                    ) : null}
+                    {block.lines.map((line, index) => renderSourceLine(line, `${block.chunkIndex}-${index}-${line.slice(0, 12)}`, isTarget))}
+                  </div>
                 );
-              }) : previewLines.map((line, index) => renderSourceLine(line, `${index}-${line.slice(0, 12)}`))}
+              })}
             </article>
           ) : (
             <div className="rounded-2xl bg-white p-4 text-sm text-text-secondary shadow-sm dark:bg-surface-card">{t("notebook.previewNoContent")}</div>
