@@ -343,9 +343,14 @@ function noteContentPreview(value?: string) {
   return (el.textContent || el.innerText || "").replace(/\s+/g, " ").trim() || "空笔记";
 }
 
+function noteHasRichEmptyBlock(value?: string) {
+  return /<(h1|h2|ul|ol|li|blockquote|hr)\b/i.test(value || "");
+}
+
 function NoteEditorDialog({ open, saving, initialTitle, initialContent, onClose, onSave }: { open: boolean; saving?: boolean; initialTitle?: string; initialContent?: string; onClose: () => void; onSave: (note: { title: string; content: string }) => void }) {
   const [title, setTitle] = useState(initialTitle || "新建笔记");
   const [content, setContent] = useState(noteContentToHtml(initialContent));
+  const [editorFocused, setEditorFocused] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -353,6 +358,7 @@ function NoteEditorDialog({ open, saving, initialTitle, initialContent, onClose,
     const nextContent = noteContentToHtml(initialContent);
     setTitle(initialTitle || "新建笔记");
     setContent(nextContent);
+    setEditorFocused(false);
     window.setTimeout(() => {
       if (editorRef.current) editorRef.current.innerHTML = nextContent;
     }, 0);
@@ -367,18 +373,21 @@ function NoteEditorDialog({ open, saving, initialTitle, initialContent, onClose,
   };
 
   const runCommand = (command: string, value?: string) => {
+    setEditorFocused(true);
     editorRef.current?.focus();
     document.execCommand(command, false, value);
     syncContent();
   };
 
   const insertDivider = () => {
+    setEditorFocused(true);
     editorRef.current?.focus();
     document.execCommand("insertHTML", false, '<hr style="border:0;border-top:1px solid rgba(148,163,184,.45);margin:18px 0;" />');
     syncContent();
   };
 
   const plainContent = noteContentPreview(content);
+  const showPlaceholder = !editorFocused && plainContent === "空笔记" && !noteHasRichEmptyBlock(content);
   const canSave = title.trim() || plainContent !== "空笔记";
   const toolbarButton = "rounded-lg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition hover:bg-surface-hover hover:text-text-primary";
   const toolbarDivider = <span className="mx-1 h-5 w-px bg-surface-border" />;
@@ -423,7 +432,7 @@ function NoteEditorDialog({ open, saving, initialTitle, initialContent, onClose,
             <button type="button" onMouseDown={(event) => { event.preventDefault(); runCommand("removeFormat"); }} className={toolbarButton}>清除格式</button>
           </div>
           <div className="relative rounded-3xl border border-surface-border bg-surface px-5 py-5 shadow-inner">
-            {plainContent === "空笔记" && (
+            {showPlaceholder && (
               <div className="pointer-events-none absolute left-5 top-5 text-[15px] leading-7 text-text-tertiary">
                 在此笔记中撰写或粘贴文本。支持标题、列表、引用、加粗等富文本格式。
               </div>
@@ -432,8 +441,9 @@ function NoteEditorDialog({ open, saving, initialTitle, initialContent, onClose,
               ref={editorRef}
               contentEditable
               suppressContentEditableWarning
+              onFocus={() => setEditorFocused(true)}
               onInput={syncContent}
-              onBlur={syncContent}
+              onBlur={() => { syncContent(); setEditorFocused(false); }}
               className="notebook-note-editor min-h-[440px] max-w-none text-[15px] leading-7 text-text-primary outline-none [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-brand/40 [&_blockquote]:pl-4 [&_blockquote]:text-text-secondary [&_h1]:mb-3 [&_h1]:mt-5 [&_h1]:text-2xl [&_h1]:font-bold [&_h2]:mb-2 [&_h2]:mt-4 [&_h2]:text-xl [&_h2]:font-semibold [&_li]:my-1 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6"
             />
           </div>
