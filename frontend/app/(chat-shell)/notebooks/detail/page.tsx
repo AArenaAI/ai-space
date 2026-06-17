@@ -12,7 +12,7 @@ import { NotebookUrlSourceDialog } from "@/components/notebook/NotebookUrlSource
 import { MODELS } from "@/hooks/useChat";
 import { addNotebookFile, addNotebookUrlSource, deleteNotebookArtifact, fetchNotebook, fetchNotebookArtifacts, fetchNotebookFileContent, generateNotebookArtifact, reindexNotebookFile, removeNotebookFile, suggestNotebookReportFormats, updateNotebook, updateNotebookArtifact, updateNotebookFile, type NotebookReportFormatSuggestion } from "@/lib/notebookApi";
 import { READONLY_NOTEBOOKS, readonlyNotebookFileContent, readonlyNotebookFiles } from "@/lib/notebookDemos";
-import { normalizeNotebookError, showNotebookError, uploadNotebookSourceFile } from "@/lib/notebookErrors";
+import { normalizeNotebookError, showNotebookError, uploadNotebookSourceFile, isNotebookSourceFileSupported, NOTEBOOK_SOURCE_FILE_ACCEPT } from "@/lib/notebookErrors";
 import type { Notebook, NotebookArtifact as PersistedNotebookArtifact, NotebookFile, NotebookFileContent } from "@/lib/notebookTypes";
 import { useI18n, type LanguageCode } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -1159,6 +1159,15 @@ function NotebookDetailContent() {
   const handleUpload = async (selected: FileList | File[] | null) => {
     const selectedFiles = Array.from(selected || []);
     if (!selectedFiles.length || !writableNotebookId) return;
+    const unsupported = selectedFiles.filter((f) => !isNotebookSourceFileSupported(f));
+    if (unsupported.length > 0) {
+      const names = unsupported.map((f) => f.name).join(", ");
+      const msg = `暂不支持以下文件类型：${names}，请换用支持的资料文件。`;
+      setPageError(msg);
+      toast.error(msg);
+      if (inputRef.current) inputRef.current.value = "";
+      return;
+    }
     setUploading(true);
     setPageError(null);
     try {
@@ -1824,7 +1833,7 @@ function NotebookDetailContent() {
               </button>
             </div>
           </div>
-          <input ref={inputRef} type="file" multiple disabled={!writableNotebookId} className="hidden" onChange={(e) => handleUpload(e.target.files)} />
+          <input ref={inputRef} type="file" multiple accept={NOTEBOOK_SOURCE_FILE_ACCEPT} disabled={!writableNotebookId} className="hidden" onChange={(e) => handleUpload(e.target.files)} />
 
           {pageError && (
             <div className="mb-3 flex items-start gap-2 rounded-2xl border border-red-500/20 bg-red-500/10 px-3 py-2.5 text-xs leading-5 text-red-600 dark:text-red-300">

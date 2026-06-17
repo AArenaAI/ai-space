@@ -2,8 +2,10 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { ChevronDown, Clipboard, Globe, Link2, Loader2, Search, UploadCloud, X, Zap } from "lucide-react";
+import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { isNotebookSourceFileSupported, NOTEBOOK_SOURCE_FILE_ACCEPT } from "@/lib/notebookErrors";
 
 interface NotebookUrlSourceDialogProps {
   open: boolean;
@@ -52,6 +54,12 @@ export function NotebookUrlSourceDialog({
   const handleUpload = (files: FileList | File[] | null) => {
     const selectedFiles = files ? Array.from(files) : [];
     if (busy || selectedFiles.length === 0) return;
+    const unsupported = selectedFiles.filter((f) => !isNotebookSourceFileSupported(f));
+    if (unsupported.length > 0) {
+      const names = unsupported.map((f) => f.name).join(", ");
+      toast.error(`暂不支持以下文件类型：${names}，请换用支持的资料文件。`);
+      return;
+    }
     onClose();
     void onUploadFiles?.(selectedFiles);
   };
@@ -113,12 +121,12 @@ export function NotebookUrlSourceDialog({
             onDragLeave={() => setDragActive(false)}
             onDrop={(event) => { event.preventDefault(); setDragActive(false); handleUpload(Array.from(event.dataTransfer.files)); }}
           >
-            <input type="file" multiple className="hidden" disabled={loading} onChange={(event) => handleUpload(event.target.files)} />
+            <input type="file" multiple accept={NOTEBOOK_SOURCE_FILE_ACCEPT} className="hidden" disabled={loading} onChange={(event) => handleUpload(event.target.files)} />
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-card text-brand shadow-sm">
               {uploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <UploadCloud className="h-5 w-5" />}
             </div>
             <div className="mt-4 text-base font-semibold text-text-primary">或拖放文件</div>
-            <div className="mt-1 text-sm text-text-tertiary">PDF、图片、文档、音频，等等</div>
+            <div className="mt-1 text-sm text-text-tertiary">PDF、Word、Excel、PPT、图片、文本、代码等</div>
             <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
               <span className="inline-flex h-9 items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-3 text-xs font-medium text-text-secondary"><UploadCloud className="h-3.5 w-3.5" />上传文件</span>
               <span className="inline-flex h-9 items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-3 text-xs font-medium text-text-secondary"><Link2 className="h-3.5 w-3.5" />网站</span>
