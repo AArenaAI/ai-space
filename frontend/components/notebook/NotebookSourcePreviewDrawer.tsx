@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import { ChevronDown, ExternalLink, FileText, Loader2, Plus, Sparkles, X } from "lucide-react";
+import { ChevronDown, ExternalLink, Loader2, Plus, Sparkles, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import type { NotebookFile, NotebookFileContent } from "@/lib/notebookTypes";
 import type { NotebookSourceOpenTarget } from "@/components/notebook/NotebookStudioPanel";
@@ -37,29 +37,76 @@ function plainSummary(file: NotebookFile["file"] | null, content: string) {
   return text.slice(0, 260) + (text.length > 260 ? "…" : "");
 }
 
-function splitPreviewLines(value: string) {
-  return value
-    .split("\n")
-    .map((line) => line.trimEnd())
-    .filter((line) => line.trim().length > 0)
-    .slice(0, 80);
+/** Split text into paragraphs by blank lines, preserving inner structure */
+function splitParagraphs(text: string): string[] {
+  return text
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
 }
 
-function renderSourceLine(line: string, key: string, highlight?: boolean) {
-  const trimmed = line.trim();
-  if (/^#{1,3}\s+/.test(trimmed)) {
-    const level = trimmed.match(/^#+/)?.[0].length || 1;
-    const text = trimmed.replace(/^#{1,3}\s+/, "");
-    if (level === 1) return <h2 key={key} className={cn("mb-3 mt-6 text-[22px] font-semibold leading-tight tracking-[-0.03em] text-text-primary", highlight && "bg-brand/10 px-1 rounded")}>{text}</h2>;
-    return <h3 key={key} className={cn("mb-2 mt-5 text-[17px] font-semibold leading-snug text-text-primary", highlight && "bg-brand/10 px-1 rounded")}>{text}</h3>;
+function isTableParagraph(text: string): boolean {
+  const lines = text.split("\n").filter((l) => l.trim().length > 0);
+  return lines.length >= 2 && lines.every((l) => l.trim().startsWith("|"));
+}
+
+function isUnorderedList(text: string): boolean {
+  const lines = text.split("\n").filter((l) => l.trim().length > 0);
+  return lines.length > 0 && lines.every((l) => /^[-*•]\s/.test(l.trim()));
+}
+
+function isOrderedList(text: string): boolean {
+  const lines = text.split("\n").filter((l) => l.trim().length > 0);
+  return lines.length > 0 && lines.every((l) => /^\d+[.)]\s/.test(l.trim()));
+}
+
+function renderParagraph(text: string, key: string) {
+  // Table: keep raw text with monospace formatting
+  if (isTableParagraph(text)) {
+    return (
+      <div key={key} className="my-4 overflow-x-auto rounded-xl border border-surface-border bg-white p-4 shadow-sm dark:bg-surface-card">
+        <pre className="text-[13px] leading-6 text-text-secondary whitespace-pre">{text}</pre>
+      </div>
+    );
   }
-  if (/^[-*•]\s+/.test(trimmed)) {
-    return <li key={key} className={cn("ml-5 list-disc text-[14px] leading-7 text-text-secondary", highlight && "bg-brand/10 px-1 rounded")}>{trimmed.replace(/^[-*•]\s+/, "")}</li>;
+
+  // Heading
+  if (/^#{1,3}\s/.test(text)) {
+    const level = text.match(/^#+/)?.[0].length || 1;
+    const headingText = text.replace(/^#{1,3}\s+/, "").replace(/\n/g, " ");
+    if (level === 1) {
+      return <h2 key={key} className="mb-3 mt-6 text-[22px] font-semibold leading-tight tracking-[-0.03em] text-text-primary">{headingText}</h2>;
+    }
+    return <h3 key={key} className="mb-2 mt-5 text-[17px] font-semibold leading-snug text-text-primary">{headingText}</h3>;
   }
-  if (/^\d+[.)]\s+/.test(trimmed)) {
-    return <p key={key} className={cn("mt-3 text-[15px] font-semibold leading-7 text-text-primary", highlight && "bg-brand/10 px-1 rounded")}>{trimmed}</p>;
+
+  // Unordered list
+  if (isUnorderedList(text)) {
+    const items = text.split("\n").filter((l) => l.trim().length > 0);
+    return (
+      <ul key={key} className="my-3 ml-5 list-disc space-y-1.5">
+        {items.map((item, i) => (
+          <li key={i} className="text-[14px] leading-7 text-text-secondary">{item.trim().replace(/^[-*•]\s+/, "")}</li>
+        ))}
+      </ul>
+    );
   }
-  return <p key={key} className={cn("mb-3 text-[14px] leading-7 text-text-secondary", highlight && "bg-brand/10 px-1 rounded")}>{trimmed}</p>;
+
+  // Ordered list
+  if (isOrderedList(text)) {
+    const items = text.split("\n").filter((l) => l.trim().length > 0);
+    return (
+      <ol key={key} className="my-3 ml-5 list-decimal space-y-1.5">
+        {items.map((item, i) => (
+          <li key={i} className="text-[14px] leading-7 text-text-secondary">{item.trim().replace(/^\d+[.)]\s+/, "")}</li>
+        ))}
+      </ol>
+    );
+  }
+
+  // Normal paragraph: merge soft line breaks into a single paragraph
+  const paragraph = text.replace(/\n\s*/g, " ");
+  return <p key={key} className="mb-3 text-[14px] leading-7 text-text-secondary">{paragraph}</p>;
 }
 
 export function NotebookSourcePreviewDrawer({ open, source, data, loading, error, target, onClose, onAddSource }: NotebookSourcePreviewDrawerProps) {
@@ -94,8 +141,6 @@ export function NotebookSourcePreviewDrawer({ open, source, data, loading, error
     file?.token_count ? `${file.token_count.toLocaleString()} tokens` : null,
     file?.size ? formatBytes(file.size) : null,
   ].filter(Boolean) as string[];
-
-
 
   if (!open) return null;
 
@@ -177,9 +222,9 @@ export function NotebookSourcePreviewDrawer({ open, source, data, loading, error
           ) : (
             <article className="mx-auto max-w-none pb-8">
               {(() => {
-                const raw = data.content || data.chunks?.map((c) => c.content).join("\n") || "";
-                const lines = splitPreviewLines(raw);
-                return lines.map((line, index) => renderSourceLine(line, `${index}-${line.slice(0, 12)}`));
+                const raw = data.content || data.chunks?.map((c) => c.content).join("\n\n") || "";
+                const paragraphs = splitParagraphs(raw);
+                return paragraphs.map((para, index) => renderParagraph(para, `${index}-${para.slice(0, 12)}`));
               })()}
             </article>
           )}
