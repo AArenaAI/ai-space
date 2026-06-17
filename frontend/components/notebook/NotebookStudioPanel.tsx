@@ -320,21 +320,72 @@ function sourceAccent(source: NotebookStudioSource) {
   return "bg-blue-500/10 text-blue-500";
 }
 
+function escapeNoteHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function noteContentToHtml(value?: string) {
+  const content = value || "";
+  if (/<\/?[a-z][\s\S]*>/i.test(content)) return content;
+  return escapeNoteHtml(content).replace(/\n/g, "<br />");
+}
+
+function noteContentPreview(value?: string) {
+  if (!value) return "空笔记";
+  if (typeof document === "undefined") return value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() || "空笔记";
+  const el = document.createElement("div");
+  el.innerHTML = value;
+  return (el.textContent || el.innerText || "").replace(/\s+/g, " ").trim() || "空笔记";
+}
+
 function NoteEditorDialog({ open, saving, initialTitle, initialContent, onClose, onSave }: { open: boolean; saving?: boolean; initialTitle?: string; initialContent?: string; onClose: () => void; onSave: (note: { title: string; content: string }) => void }) {
   const [title, setTitle] = useState(initialTitle || "新建笔记");
-  const [content, setContent] = useState(initialContent || "");
+  const [content, setContent] = useState(noteContentToHtml(initialContent));
+  const editorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
+    const nextContent = noteContentToHtml(initialContent);
     setTitle(initialTitle || "新建笔记");
-    setContent(initialContent || "");
+    setContent(nextContent);
+    window.setTimeout(() => {
+      if (editorRef.current) editorRef.current.innerHTML = nextContent;
+    }, 0);
   }, [initialContent, initialTitle, open]);
 
   if (!open) return null;
-  const canSave = title.trim() || content.trim();
+
+  const syncContent = () => {
+    const html = editorRef.current?.innerHTML || "";
+    setContent(html);
+    return html;
+  };
+
+  const runCommand = (command: string, value?: string) => {
+    editorRef.current?.focus();
+    document.execCommand(command, false, value);
+    syncContent();
+  };
+
+  const insertDivider = () => {
+    editorRef.current?.focus();
+    document.execCommand("insertHTML", false, '<hr style="border:0;border-top:1px solid rgba(148,163,184,.45);margin:18px 0;" />');
+    syncContent();
+  };
+
+  const plainContent = noteContentPreview(content);
+  const canSave = title.trim() || plainContent !== "空笔记";
+  const toolbarButton = "rounded-lg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition hover:bg-surface-hover hover:text-text-primary";
+  const toolbarDivider = <span className="mx-1 h-5 w-px bg-surface-border" />;
+
   return (
     <div className="fixed inset-0 z-[170] flex items-center justify-center bg-black/45 p-5 backdrop-blur-sm" role="dialog" aria-modal="true">
-      <div className="flex h-[min(760px,88vh)] w-[min(760px,94vw)] flex-col overflow-hidden rounded-[28px] border border-surface-border bg-surface-card shadow-2xl">
+      <div className="flex h-[min(820px,90vh)] w-[min(860px,94vw)] flex-col overflow-hidden rounded-[28px] border border-surface-border bg-surface-card shadow-2xl">
         <div className="flex items-center justify-between border-b border-surface-border px-5 py-3">
           <div className="text-sm font-medium text-text-tertiary">Studio &gt; 笔记</div>
           <button type="button" onClick={onClose} className="rounded-full p-2 text-text-tertiary transition hover:bg-surface-hover hover:text-text-primary" title="关闭">
@@ -352,22 +403,40 @@ function NoteEditorDialog({ open, saving, initialTitle, initialContent, onClose,
             />
             <Trash2 className="h-5 w-5 shrink-0 text-text-tertiary" />
           </div>
-          <div className="mb-4 flex flex-wrap items-center gap-1.5 rounded-2xl border border-surface-border bg-surface-elevated px-3 py-2 text-xs text-text-secondary">
-            <button type="button" className="rounded-lg px-2 py-1 hover:bg-surface-hover">↶</button>
-            <button type="button" className="rounded-lg px-2 py-1 hover:bg-surface-hover">↷</button>
-            <span className="mx-1 h-4 w-px bg-surface-border" />
-            <button type="button" className="rounded-lg px-2 py-1 hover:bg-surface-hover">正常</button>
-            <button type="button" className="rounded-lg px-2 py-1 font-bold hover:bg-surface-hover">B</button>
-            <button type="button" className="rounded-lg px-2 py-1 italic hover:bg-surface-hover">I</button>
-            <button type="button" className="rounded-lg px-2 py-1 hover:bg-surface-hover">• 列表</button>
-            <button type="button" className="rounded-lg px-2 py-1 hover:bg-surface-hover">1. 列表</button>
+          <div className="sticky top-0 z-10 mb-4 flex flex-wrap items-center gap-1.5 rounded-2xl border border-surface-border bg-surface-elevated/95 px-3 py-2 text-xs text-text-secondary shadow-sm backdrop-blur">
+            <button type="button" onMouseDown={(event) => { event.preventDefault(); runCommand("undo"); }} className={toolbarButton}>↶</button>
+            <button type="button" onMouseDown={(event) => { event.preventDefault(); runCommand("redo"); }} className={toolbarButton}>↷</button>
+            {toolbarDivider}
+            <button type="button" onMouseDown={(event) => { event.preventDefault(); runCommand("formatBlock", "p"); }} className={toolbarButton}>正文</button>
+            <button type="button" onMouseDown={(event) => { event.preventDefault(); runCommand("formatBlock", "h1"); }} className={toolbarButton}>标题 1</button>
+            <button type="button" onMouseDown={(event) => { event.preventDefault(); runCommand("formatBlock", "h2"); }} className={toolbarButton}>标题 2</button>
+            {toolbarDivider}
+            <button type="button" onMouseDown={(event) => { event.preventDefault(); runCommand("bold"); }} className={`${toolbarButton} font-bold`}>B</button>
+            <button type="button" onMouseDown={(event) => { event.preventDefault(); runCommand("italic"); }} className={`${toolbarButton} italic`}>I</button>
+            <button type="button" onMouseDown={(event) => { event.preventDefault(); runCommand("underline"); }} className={`${toolbarButton} underline`}>U</button>
+            {toolbarDivider}
+            <button type="button" onMouseDown={(event) => { event.preventDefault(); runCommand("insertUnorderedList"); }} className={toolbarButton}>• 列表</button>
+            <button type="button" onMouseDown={(event) => { event.preventDefault(); runCommand("insertOrderedList"); }} className={toolbarButton}>1. 列表</button>
+            <button type="button" onMouseDown={(event) => { event.preventDefault(); runCommand("formatBlock", "blockquote"); }} className={toolbarButton}>引用</button>
+            <button type="button" onMouseDown={(event) => { event.preventDefault(); insertDivider(); }} className={toolbarButton}>分割线</button>
+            {toolbarDivider}
+            <button type="button" onMouseDown={(event) => { event.preventDefault(); runCommand("removeFormat"); }} className={toolbarButton}>清除格式</button>
           </div>
-          <textarea
-            value={content}
-            onChange={(event) => setContent(event.target.value)}
-            className="min-h-[420px] w-full resize-none border-none bg-transparent text-[15px] leading-7 text-text-primary outline-none placeholder:text-text-tertiary"
-            placeholder="在此笔记中撰写或粘贴文本。"
-          />
+          <div className="relative rounded-3xl border border-surface-border bg-surface px-5 py-5 shadow-inner">
+            {plainContent === "空笔记" && (
+              <div className="pointer-events-none absolute left-5 top-5 text-[15px] leading-7 text-text-tertiary">
+                在此笔记中撰写或粘贴文本。支持标题、列表、引用、加粗等富文本格式。
+              </div>
+            )}
+            <div
+              ref={editorRef}
+              contentEditable
+              suppressContentEditableWarning
+              onInput={syncContent}
+              onBlur={syncContent}
+              className="notebook-note-editor min-h-[440px] max-w-none text-[15px] leading-7 text-text-primary outline-none [&_blockquote]:my-3 [&_blockquote]:border-l-4 [&_blockquote]:border-brand/40 [&_blockquote]:pl-4 [&_blockquote]:text-text-secondary [&_h1]:mb-3 [&_h1]:mt-5 [&_h1]:text-2xl [&_h1]:font-bold [&_h2]:mb-2 [&_h2]:mt-4 [&_h2]:text-xl [&_h2]:font-semibold [&_li]:my-1 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6"
+            />
+          </div>
         </div>
         <div className="flex items-center justify-between gap-3 border-t border-surface-border px-5 py-3">
           <div className="flex items-center gap-2 text-xs text-text-tertiary">
@@ -376,7 +445,7 @@ function NoteEditorDialog({ open, saving, initialTitle, initialContent, onClose,
           </div>
           <div className="flex gap-2">
             <button type="button" onClick={onClose} disabled={saving} className="rounded-full border border-surface-border px-4 py-2 text-sm font-semibold text-text-secondary transition hover:bg-surface-hover disabled:opacity-60">取消</button>
-            <button type="button" onClick={() => canSave && onSave({ title: title.trim() || "未命名笔记", content: content.trim() })} disabled={saving || !canSave} className="inline-flex items-center gap-2 rounded-full bg-[#111827] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#1f2937] disabled:opacity-60">
+            <button type="button" onClick={() => canSave && onSave({ title: title.trim() || "未命名笔记", content: syncContent() })} disabled={saving || !canSave} className="inline-flex items-center gap-2 rounded-full bg-[#111827] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#1f2937] disabled:opacity-60">
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}
               保存笔记
             </button>
@@ -1944,7 +2013,7 @@ export function NotebookStudioPanel({
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-semibold text-text-primary">{note.title}</span>
-                    <span className="mt-1 block truncate text-xs text-text-tertiary">{note.readonly ? "已保存的回答只能查看" : note.content || "空笔记"} · {formatTime(note.createdAt)}</span>
+                    <span className="mt-1 block truncate text-xs text-text-tertiary">{note.readonly ? "已保存的回答只能查看" : noteContentPreview(note.content)} · {formatTime(note.createdAt)}</span>
                   </span>
                 </button>
               ))}
