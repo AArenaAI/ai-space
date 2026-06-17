@@ -1818,32 +1818,6 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     const shotsPerScene = scenes.map((scene) =>
       storyboardShots.filter((s) => (s.scene || "未分组") === scene)
     );
-  const autoLayoutNodes = useCallback(() => {
-    if (storyboardShots.length === 0) return;
-    const scenes = Array.from(new Set(storyboardShots.map((s) => s.scene || "未分组")));
-    const shotsPerScene = scenes.map((scene) =>
-      storyboardShots.filter((s) => (s.scene || "未分组") === scene)
-    );
-    const newShots: StoryboardShot[] = [];
-    let currentY = 40;
-    const COL_WIDTH = 280;
-    const ROW_HEIGHT = 200;
-    const GAP_X = 40;
-    const GAP_Y = 60;
-    for (const sceneShots of shotsPerScene) {
-      let currentX = 40;
-      for (let i = 0; i < sceneShots.length; i++) {
-        const shot = sceneShots[i];
-        newShots.push({
-          ...shot,
-          index: newShots.length + 1,
-        });
-        currentX += COL_WIDTH + GAP_X;
-      }
-      currentY += ROW_HEIGHT + GAP_Y;
-    }
-    setStoryboardShots(newShots);
-  }, [storyboardShots, setStoryboardShots]);
   }, [storyboardShots, setStoryboardShots]);
 
   return (

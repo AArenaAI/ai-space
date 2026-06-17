@@ -248,12 +248,11 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			admin.GET("/alert-history", alertHandler.ListAlertHistory)
 			admin.PATCH("/alert-history/:id/resolve", alertHandler.ResolveAlert)
 			admin.GET("/alert-stats", alertHandler.GetAlertStats)
+			// 模型定价（只读，管理员查看供应商成本）
+			modelPriceHandler := NewModelPriceHandler("config/model-prices.json")
+			admin.GET("/model-prices", modelPriceHandler.ListModelPrices)
 		}
 	}
-
-	// 模型定价（只读，管理员查看供应商成本）
-	modelPriceHandler := NewModelPriceHandler("config/model-prices.json")
-	authorized.GET("/model-prices", modelPriceHandler.ListModelPrices)
 
 	notebookHandler := NewNotebookHandler(db, fileService, aiService, imageService)
 	documentArtifactHandler := NewDocumentArtifactHandler(db)

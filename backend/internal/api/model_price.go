@@ -47,9 +47,26 @@ func NewModelPriceHandler(configPath string) *ModelPriceHandler {
 
 // ListModelPrices 获取模型定价列表
 func (h *ModelPriceHandler) ListModelPrices(c *gin.Context) {
-	data, err := os.ReadFile(h.configPath)
+	// 尝试多个路径
+	paths := []string{
+		h.configPath,
+		"./config/model-prices.json",
+		"../config/model-prices.json",
+		"../../config/model-prices.json",
+		"/home/ubuntu/workspace/ai-space/backend/config/model-prices.json",
+	}
+	
+	var data []byte
+	var err error
+	for _, p := range paths {
+		data, err = os.ReadFile(p)
+		if err == nil {
+			break
+		}
+	}
+	
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取定价配置失败"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取定价配置失败: " + err.Error()})
 		return
 	}
 

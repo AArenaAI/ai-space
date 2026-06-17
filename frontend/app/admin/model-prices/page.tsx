@@ -42,7 +42,7 @@ export default function ModelPricesPage() {
   const fetchData = useCallback(async () => {
     try {
       const [priceData, costData] = await Promise.all([
-        adminFetch<{ prices: ModelPrice[] }>("/api/admin/model-prices"),
+        adminFetch<{ prices: ModelPrice[] }>("/model-prices"),
         adminFetch<{ items: { key: string; parsed_value?: unknown }[] }>("/api/admin/beta-configs"),
       ]);
       setPrices(priceData.prices);
