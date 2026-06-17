@@ -8,6 +8,7 @@ import {
   Clapperboard,
   Download,
   FolderOpen,
+  LayoutGrid,
   MoreHorizontal,
   Plus,
   Save,
@@ -16,7 +17,10 @@ import {
 } from "lucide-react";
 import ManjuFlowSidebar, { buildFlowSteps, type FlowStep } from "./ManjuFlowSidebar";
 import ManjuCanvas, { type CanvasNode, type CanvasConnection } from "./ManjuCanvas";
+import ManjuNodePanel from "./ManjuNodePanel";
+import ManjuProjectIO from "./ManjuProjectIO";
 import type { WorkflowMode } from "./types";
+import { toast } from "sonner";
 
 export interface ManjuStudioLayoutProps {
   /* 项目信息 */
@@ -41,6 +45,7 @@ export interface ManjuStudioLayoutProps {
   selectedNodeId?: string | null;
 
   /* 项目操作 */
+  onAutoLayout?: () => void;
   onSave?: () => void;
   onExport?: () => void;
   onImport?: () => void;
@@ -69,6 +74,7 @@ export default function ManjuStudioLayout({
   onToggleCollapse,
   selectedNodeId,
   onSave,
+  onAutoLayout,
   onExport,
   onImport,
   onNewProject,
@@ -79,6 +85,8 @@ export default function ManjuStudioLayout({
 }: ManjuStudioLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  const [internalSelectedNodeId, setInternalSelectedNodeId] = useState<string | null>(null);
+  const [rightPanelTab, setRightPanelTab] = useState<"node" | "project">("node");
 
   /* 从 nodes 推导步骤状态（简化版） */
   const steps: FlowStep[] = buildFlowSteps({
@@ -131,30 +139,24 @@ export default function ManjuStudioLayout({
         <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={onSave}
+            onClick={() => {
+              setRightPanelTab("project");
+              setRightPanelOpen(true);
+            }}
             className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs text-text-secondary hover:bg-surface-card hover:text-text-primary"
-            title="保存"
+            title="保存/导出/导入"
           >
             <Save className="h-3.5 w-3.5" />
             <span className="hidden md:inline">保存</span>
           </button>
           <button
             type="button"
-            onClick={onExport}
+            onClick={() => toast.info("开发中")}
             className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs text-text-secondary hover:bg-surface-card hover:text-text-primary"
-            title="导出"
+            title="自动布局"
           >
-            <Download className="h-3.5 w-3.5" />
-            <span className="hidden md:inline">导出</span>
-          </button>
-          <button
-            type="button"
-            onClick={onImport}
-            className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs text-text-secondary hover:bg-surface-card hover:text-text-primary"
-            title="导入"
-          >
-            <Upload className="h-3.5 w-3.5" />
-            <span className="hidden md:inline">导入</span>
+            <LayoutGrid className="h-3.5 w-3.5" />
+            <span className="hidden md:inline">布局</span>
           </button>
           <span className="h-5 w-px bg-surface-border" />
           <button
@@ -201,13 +203,20 @@ export default function ManjuStudioLayout({
             nodes={nodes}
             connections={connections}
             onNodeMove={onNodeMove}
-            onNodeSelect={onNodeSelect}
+            onNodeSelect={(id) => {
+              setInternalSelectedNodeId(id);
+              setRightPanelOpen(!!id);
+              onNodeSelect?.(id);
+            }}
             onNodeDoubleClick={onNodeDoubleClick}
             onAddNode={onAddNode}
             onDeleteNode={onDeleteNode}
             onToggleCollapse={onToggleCollapse}
-            selectedNodeId={selectedNodeId}
-          />
+            selectedNodeId={internalSelectedNodeId}
+            onDropAddNode={(type: string, x: number, y: number) => {
+              onAddNode?.(type as CanvasNode["type"], x, y);
+            }}
+            />
           {/* 浮层子内容（如节点编辑器弹窗） */}
           {children}
         </div>
@@ -232,7 +241,37 @@ export default function ManjuStudioLayout({
                     <ChevronRight className="h-4 w-4" />
                   </button>
                 </div>
-                <div className="flex-1 overflow-y-auto p-3">{rightPanel}</div>
+                <div className="flex-1 overflow-y-auto p-3">
+                  {rightPanelTab === "node" ? (
+                    <ManjuNodePanel
+                      node={nodes.find((n) => n.id === internalSelectedNodeId) || null}
+                      onClose={() => {
+                        setRightPanelOpen(false);
+                        setInternalSelectedNodeId(null);
+                      }}
+                      onDeleteNode={onDeleteNode}
+                    />
+                  ) : (
+                    <ManjuProjectIO
+                      projectName={projectName}
+                      nodes={nodes}
+                      connections={connections || []}
+                      onSave={(data) => {
+                        onSave?.();
+                        toast.success("已保存到本地");
+                      }}
+                      onExport={(data) => {
+                        onExport?.();
+                        toast.success("已导出 JSON");
+                      }}
+                      onImport={(data) => {
+                        onImport?.();
+                        toast.success("已导入项目");
+                      }}
+                      onClose={() => setRightPanelOpen(false)}
+                    />
+                  )}
+                </div>
               </div>
             )}
           </div>

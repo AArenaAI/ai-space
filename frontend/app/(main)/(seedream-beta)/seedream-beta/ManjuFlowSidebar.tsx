@@ -8,8 +8,13 @@ import {
   Image,
   LayoutGrid,
   Video,
+  Plus,
+  GripHorizontal,
+  Layers,
+  FileText,
 } from "lucide-react";
 import type { WorkflowMode } from "./types";
+import type { CanvasNode } from "./ManjuCanvas";
 
 export interface FlowStep {
   id: WorkflowMode | "overview";
@@ -28,6 +33,7 @@ export interface ManjuFlowSidebarProps {
   generating?: WorkflowMode | null;
   projectName: string;
   collapsed?: boolean;
+  onDragAddNode?: (type: CanvasNode["type"]) => void;
   onToggleCollapse?: () => void;
 }
 
@@ -48,7 +54,24 @@ export default function ManjuFlowSidebar({
   projectName,
   collapsed,
   onToggleCollapse,
+  onDragAddNode,
 }: ManjuFlowSidebarProps) {
+  const handleDragStart = (e: React.DragEvent, type: CanvasNode["type"]) => {
+    e.dataTransfer.setData("nodeType", type);
+    e.dataTransfer.effectAllowed = "copy";
+  };
+
+  const nodeTypes: { type: CanvasNode["type"]; label: string; icon: React.ReactNode }[] = [
+    { type: "script", label: "剧本", icon: <BookOpen className="h-3.5 w-3.5" /> },
+    { type: "assets", label: "资产", icon: <Box className="h-3.5 w-3.5" /> },
+    { type: "shot", label: "镜头", icon: <Clapperboard className="h-3.5 w-3.5" /> },
+    { type: "image", label: "分镜图", icon: <Image className="h-3.5 w-3.5" /> },
+    { type: "video", label: "视频", icon: <Video className="h-3.5 w-3.5" /> },
+    { type: "director", label: "导演台", icon: <Layers className="h-3.5 w-3.5" /> },
+    { type: "text", label: "文本", icon: <FileText className="h-3.5 w-3.5" /> },
+    { type: "group", label: "组", icon: <Layers className="h-3.5 w-3.5" /> },
+  ];
+
   const orderedSteps = STEP_ORDER.map<FlowStep>((id) =>
     steps.find((s) => s.id === id) || { id, title: id, icon: <Box className="h-4 w-4" /> }
   );
@@ -155,6 +178,30 @@ export default function ManjuFlowSidebar({
             </button>
           );
         })}
+      </div>
+
+      {/* 节点库 - 可拖拽添加 */}
+      <div className="border-t border-surface-border p-2">
+        <div className={cn("mb-1 text-[10px] font-medium text-text-tertiary", collapsed && "hidden")}>
+          节点库
+        </div>
+        <div className={cn("grid gap-1", collapsed ? "grid-cols-1" : "grid-cols-2")}>
+          {nodeTypes.map((nt) => (
+            <div
+              key={nt.type}
+              draggable
+              onDragStart={(e) => handleDragStart(e, nt.type)}
+              className={cn(
+                "flex cursor-grab items-center gap-1.5 rounded-lg border border-surface-border bg-surface-base px-2 py-1.5 text-[10px] text-text-secondary transition-colors hover:border-brand/40 hover:bg-surface-card active:cursor-grabbing",
+                collapsed && "justify-center px-1"
+              )}
+              title={nt.label}
+            >
+              {nt.icon}
+              {!collapsed && <span>{nt.label}</span>}
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* 底部折叠按钮 */}

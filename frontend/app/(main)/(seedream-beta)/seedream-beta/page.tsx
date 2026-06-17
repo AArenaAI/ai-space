@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Copy, Download, ImageIcon, Loader2, MessageSquare, PanelLeftOpen, Paperclip, Play, Plus, RefreshCw, Send, Sparkles, Trash2, UploadCloud, Video, Wand2, X } from "lucide-react";
 import { toast } from "sonner";
@@ -64,7 +64,9 @@ import ShotPromptInspector from "./ShotPromptInspector";
 import BatchPreflightPanel from "./BatchPreflightPanel";
 import DirectorInheritanceControls from "./DirectorInheritanceControls";
 import ShotOverviewTable from "./ShotOverviewTable";
+import ManjuNodePanel from "./ManjuNodePanel";
 import ManjuStudioLayout from "./ManjuStudioLayout";
+import type { CanvasNode } from "./ManjuCanvas";
 import { copyDirectorBlockToShots, createDefaultDirectorBlock, findDirectorBlockForShot, getSceneAssetForShot, injectDirectorBlockToPrompt } from "./directorBlock";
 
 function getAuthHeaders() {
@@ -356,10 +358,6 @@ export default function SeedreamBetaPage() {
   const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
 
   const [tab, setTab] = useState<Tab>("workflow");
-  const [studioMode, setStudioMode] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem("seedream-studio-mode") === "1";
-  });
   const [imagePrompt, setImagePrompt] = useState("");
   const [imageAspect, setImageAspect] = useState("1:1");
   const [imageResolution, setImageResolution] = useState("2K");
@@ -1814,861 +1812,269 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     }
   };
 
+  const autoLayoutNodes = useCallback(() => {
+    if (storyboardShots.length === 0) return;
+    const scenes = Array.from(new Set(storyboardShots.map((s) => s.scene || "未分组")));
+    const shotsPerScene = scenes.map((scene) =>
+      storyboardShots.filter((s) => (s.scene || "未分组") === scene)
+    );
+  const autoLayoutNodes = useCallback(() => {
+    if (storyboardShots.length === 0) return;
+    const scenes = Array.from(new Set(storyboardShots.map((s) => s.scene || "未分组")));
+    const shotsPerScene = scenes.map((scene) =>
+      storyboardShots.filter((s) => (s.scene || "未分组") === scene)
+    );
+    const newShots: StoryboardShot[] = [];
+    let currentY = 40;
+    const COL_WIDTH = 280;
+    const ROW_HEIGHT = 200;
+    const GAP_X = 40;
+    const GAP_Y = 60;
+    for (const sceneShots of shotsPerScene) {
+      let currentX = 40;
+      for (let i = 0; i < sceneShots.length; i++) {
+        const shot = sceneShots[i];
+        newShots.push({
+          ...shot,
+          index: newShots.length + 1,
+        });
+        currentX += COL_WIDTH + GAP_X;
+      }
+      currentY += ROW_HEIGHT + GAP_Y;
+    }
+    setStoryboardShots(newShots);
+  }, [storyboardShots, setStoryboardShots]);
+  }, [storyboardShots, setStoryboardShots]);
+
   return (
-    <div className="h-full min-h-0 overflow-y-auto bg-surface-base px-6 py-8 text-text-primary">
-      <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-5 pb-8">
-        <header className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-surface-border bg-surface-elevated px-4 py-2.5 shadow-sm">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand">
-              <Sparkles className="h-4 w-4" />
+    <div className="fixed inset-0 z-50">
+      <ManjuStudioLayout
+        projectName={activeProject?.title || t("seedreamBeta.projects.newProject")}
+        activeStep={workflowMode}
+        onStepChange={(step) => {
+          if (step === "overview") {
+            setWorkflowView("overview");
+          } else {
+            setWorkflowMode(step as WorkflowMode);
+            setWorkflowView("step");
+          }
+        }}
+        onGenerate={(step) => {
+          setWorkflowMode(step);
+          setWorkflowView("step");
+        }}
+        generating={workflowGenerating}
+        nodes={storyboardShots.map((shot, i) => ({
+          id: shot.id,
+          type: shot.videoAssetIds && shot.videoAssetIds.length > 0 ? "video" : shot.imageAssetIds && shot.imageAssetIds.length > 0 ? "image" : "shot",
+          title: `${i + 1}. ${shot.title || shot.scene || "未命名镜头"}`,
+          x: (i % 4) * 280 + 40,
+          y: Math.floor(i / 4) * 200 + 40,
+          width: 240,
+          height: 160,
+          status: shot.videoAssetIds && shot.videoAssetIds.length > 0 ? "done" : shot.imageAssetIds && shot.imageAssetIds.length > 0 ? "draft" : "empty",
+          data: shot,
+        }))}
+        connections={storyboardShots.slice(0, -1).map((shot, i) => ({
+          id: `conn-${i}`,
+          from: shot.id,
+          to: storyboardShots[i + 1].id,
+        }))}
+        onNodeDoubleClick={(node) => {
+          const shot = storyboardShots.find((s) => s.id === node.id);
+          if (shot) {
+            setActiveShotId(shot.id);
+            setWorkflowView("step");
+          }
+        }}
+        onAutoLayout={autoLayoutNodes}
+        onSave={() => toast.info("开发中")}
+        onExport={() => toast.info("开发中")}
+        onImport={() => toast.info("开发中")}
+        onNewProject={() => toast.info("开发中")}
+        onOpenProject={() => toast.info("开发中")}
+        onSettings={() => toast.info("开发中")}
+      >
+        {workflowView === "step" && activeShotId ? (
+          <div className="h-full overflow-y-auto p-4">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-text-primary">
+                {storyboardShots.find((s) => s.id === activeShotId)?.title || "未命名镜头"}
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveShotId(undefined);
+                  setWorkflowView("overview");
+                }}
+                className="rounded p-1 text-text-tertiary hover:bg-surface-card hover:text-text-secondary"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
-            <div className="min-w-0">
-              <h1 className="truncate text-base font-semibold">漫剧 Studio</h1>
-              <p className="truncate text-xs text-text-tertiary">当前项目：{workspaceProjectName}</p>
-            </div>
-          </div>
-        </header>
 
-        <section className="min-w-0 rounded-3xl border border-surface-border bg-surface-elevated p-5 shadow-sm">
-            {tab === "workflow" ? (
-              <div className="space-y-6">
-                {/* Step Navigation: production benches are first-class pages; earlier workflow steps keep a compact return bar. */}
-                {workflowView === "step" && !isProductionBenchMode && (
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={openWorkflowOverview}
-                      className="inline-flex items-center gap-1.5 rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-xs font-medium text-text-secondary transition-colors hover:border-brand/40 hover:text-text-primary"
-                    >
-                      <PanelLeftOpen className="h-3.5 w-3.5" />
-                      返回创作流程
-                    </button>
-                    <span className="text-xs text-text-tertiary">·</span>
-                    <span className="text-xs font-medium text-text-primary">{t(workflowStepCards.find((s) => s.id === workflowMode)?.titleKey || "")}</span>
-                  </div>
-                )}
+            {/* Shot 编辑表单 */}
+            <div className="space-y-4">
+              {/* 基础信息 */}
+              <div className="space-y-2">
+                <label className="text-[10px] font-medium text-text-tertiary">标题</label>
+                <input
+                  type="text"
+                  value={storyboardShots.find((s) => s.id === activeShotId)?.title || ""}
+                  onChange={(e) => {
+                    const title = e.target.value;
+                    setStoryboardShots((prev) =>
+                      prev.map((s) => (s.id === activeShotId ? { ...s, title } : s))
+                    );
+                  }}
+                  className="w-full rounded-lg border border-surface-border bg-surface-base px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-brand"
+                />
+              </div>
 
-                {workflowView === "overview" && (
-                  <SeedreamWorkflowOverview
-                    workspaceProjectName={workspaceProjectName}
-                    workflowStepCards={workflowStepCards}
-                    projectStats={projectStats}
-                    importChecks={importChecks}
-                    scriptImportText={scriptImportText}
-                    storyboardImportText={storyboardImportText}
-                    seedanceImportText={seedanceImportText}
-                    setScriptImportText={setScriptImportText}
-                    setStoryboardImportText={setStoryboardImportText}
-                    setSeedanceImportText={setSeedanceImportText}
-                    handleImportFile={handleImportFile}
-                    importLayerText={importLayerText}
-                    openWorkflowStep={openWorkflowStep}
-                    t={t}
-                    storyboardShots={storyboardShots}
-                    activeShotId={activeShotId}
-                    sendShotToImage={sendShotToImage}
-                    sendShotToVideo={sendShotToVideo}
-                    generateShotImage={generateShotImage}
-                    generateShotVideo={generateShotVideo}
-                  />
-                )}
+              {/* 场景 */}
+              <div className="space-y-2">
+                <label className="text-[10px] font-medium text-text-tertiary">场景</label>
+                <input
+                  type="text"
+                  value={storyboardShots.find((s) => s.id === activeShotId)?.scene || ""}
+                  onChange={(e) => {
+                    const scene = e.target.value;
+                    setStoryboardShots((prev) =>
+                      prev.map((s) => (s.id === activeShotId ? { ...s, scene } : s))
+                    );
+                  }}
+                  className="w-full rounded-lg border border-surface-border bg-surface-base px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-brand"
+                />
+              </div>
 
-                {/* Step 2: Script */}
-                {workflowView === "step" && workflowMode === "script" && (
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <h2 className="text-lg font-semibold">剧本</h2>
-                        <p className="text-xs text-text-tertiary">DeepSeek V4 Pro 生成初稿；GPT-5.5 负责精修、强钩子和对白重写。</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <button type="button" onClick={() => generateWorkflow("script")} disabled={workflowGenerating !== null || !(scriptSourceExcerpt.trim() || workflowIdea.trim())} className="inline-flex items-center gap-2 rounded-2xl border border-surface-border bg-surface-elevated px-4 py-2 text-sm font-medium text-text-secondary transition-colors hover:border-brand/40 hover:text-text-primary disabled:opacity-50">
-                          {workflowGenerating === "script" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                          DeepSeek 生成初稿
-                        </button>
-                        <button type="button" onClick={() => reviseScriptWithInstruction("请对当前剧本做高质量精修：强化开头钩子，压缩拖沓旁白，增强人物动机和信息差，重写生硬对白，保持主线不变，只输出精修后的完整剧本。")} disabled={scriptRevising || !workflowScript.trim()} className="inline-flex items-center gap-2 rounded-2xl border border-brand/30 bg-brand/10 px-4 py-2 text-sm font-medium text-brand transition-colors hover:bg-brand/15 disabled:opacity-50">
-                          {scriptRevising ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                          GPT 一键精修
-                        </button>
-                        <button type="button" onClick={() => { openWorkflowStep("assets"); generateWorkflow("assets"); }} disabled={workflowGenerating !== null || !workflowScript.trim()} className="inline-flex items-center gap-2 rounded-2xl bg-brand px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-hover disabled:opacity-50">
-                          剧本确认，生成资产 →
-                        </button>
-                      </div>
-                    </div>
-                    <div className="rounded-2xl border border-brand/20 bg-brand/5 p-4">
-                      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-semibold text-text-primary">本集大概内容</div>
-                          <div className="text-xs leading-5 text-text-tertiary">
-                            不上传整本小说。直接输入这一集/这个副本的大概剧情、关键规则、人物关系和结尾钩子，再生成剧本。
-                          </div>
-                        </div>
-                      </div>
-                      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,0.75fr)]">
-                        <div>
-                          <FieldLabel>本集大概内容 / 副本梗概 / 关键情节</FieldLabel>
-                          <textarea
-                            value={scriptSourceExcerpt}
-                            onChange={(event) => setScriptSourceExcerpt(event.target.value)}
-                            placeholder="例如：校摄副本。主角进入学校摄影社，规则是拍照会把人留在照片里。张豪提醒不能看废片，子衿发现社团墙上有自己的旧照片。结尾钩子：主角冲洗出一张明天才会发生的合照。"
-                            className="min-h-36 w-full resize-y rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm leading-6 outline-none focus:border-brand/60"
-                          />
-                        </div>
-                        <div>
-                          <FieldLabel>剧本生成要求</FieldLabel>
-                          <textarea
-                            value={scriptAdaptationInstruction}
-                            onChange={(event) => setScriptAdaptationInstruction(event.target.value)}
-                            placeholder="例如：改成第1集，强钩子开场，保留悬疑信息差，2分钟竖屏漫剧，减少旁白，多对白。"
-                            className="min-h-36 w-full resize-y rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm leading-6 outline-none focus:border-brand/60"
-                          />
-                        </div>
-                      </div>
-                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                        <div className="text-xs text-text-tertiary">
-                          {scriptSourceExcerpt.trim() ? `当前本集大概内容约 ${scriptSourceExcerpt.trim().length} 字` : "先输入本集大概内容，不需要上传整本小说。"}
-                        </div>
-                        <button type="button" onClick={() => generateWorkflow("script")} disabled={workflowGenerating !== null || !(scriptSourceExcerpt.trim() || workflowIdea.trim())} className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-hover disabled:opacity-50">
-                          {workflowGenerating === "script" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-                          DeepSeek 根据大概内容生成初稿
-                        </button>
-                      </div>
-                    </div>
-                    <div className="rounded-2xl border border-surface-border bg-surface-card p-4">
-                      <div className="mb-3 flex items-center gap-2">
-                        <button type="button" onClick={() => setScriptAssistantMode("chat")} className={cn("rounded-full px-3 py-1 text-xs font-medium transition-colors", scriptAssistantMode === "chat" ? "bg-brand text-white" : "text-text-secondary hover:bg-surface-elevated")}>💬 GPT 精修建议</button>
-                        <button type="button" onClick={() => setScriptAssistantMode("rewrite")} className={cn("rounded-full px-3 py-1 text-xs font-medium transition-colors", scriptAssistantMode === "rewrite" ? "bg-brand text-white" : "text-text-secondary hover:bg-surface-elevated")}>✏️ GPT 执行改稿</button>
-                        <span className="text-xs text-text-tertiary">{scriptAssistantMode === "chat" ? "GPT-5.5 只给建议，不改正文" : "GPT-5.5 会覆盖当前剧本"}</span>
-                      </div>
-                      {scriptAssistantMode === "chat" ? (
-                        <div className="space-y-3">
-                          <div className="max-h-48 space-y-2 overflow-y-auto rounded-xl border border-surface-border bg-surface-elevated p-3">
-                            {scriptChatMessages.length ? scriptChatMessages.map((msg) => (
-                              <div key={msg.id} className={cn("rounded-xl px-3 py-2 text-sm leading-6", msg.role === "user" ? "ml-6 bg-brand text-white" : "mr-6 bg-surface-card text-text-secondary")}>{msg.content}</div>
-                            )) : <div className="text-center text-xs text-text-tertiary">问：这个剧本钩子够不够？人物动机哪里弱？</div>}
-                          </div>
-                          <div className="flex gap-2">
-                            <textarea value={scriptChatInput} onChange={(event) => setScriptChatInput(event.target.value)} placeholder="输入讨论内容……" className="min-h-16 flex-1 resize-y rounded-xl border border-surface-border bg-surface-elevated px-3 py-2 text-sm outline-none focus:border-brand/60" />
-                            <button type="button" onClick={chatAboutScript} disabled={scriptChatting || !scriptChatInput.trim()} className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-hover disabled:opacity-50">
-                              {scriptChatting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex gap-2">
-                          <textarea value={scriptRevisionInstruction} onChange={(event) => setScriptRevisionInstruction(event.target.value)} placeholder="输入改稿指令，例如：保留主线，重写前两场，压缩旁白……" className="min-h-16 flex-1 resize-y rounded-xl border border-surface-border bg-surface-elevated px-3 py-2 text-sm outline-none focus:border-brand/60" />
-                          <button type="button" onClick={() => reviseScriptWithInstruction()} disabled={scriptRevising || !scriptRevisionInstruction.trim()} className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-hover disabled:opacity-50">
-                            {scriptRevising ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-                            GPT 改稿
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                    <textarea
-                      value={workflowScript}
-                      onChange={(event) => setWorkflowScript(event.target.value)}
-                      placeholder="剧本正文……"
-                      className="min-h-[40vh] w-full resize-y rounded-2xl border border-surface-border bg-surface-elevated px-4 py-3 font-mono text-sm leading-6 outline-none transition-colors placeholder:text-text-tertiary focus:border-brand/60 focus:ring-2 focus:ring-brand/10"
-                    />
-                  </div>
-                )}
+              {/* 分镜图提示词 */}
+              <div className="space-y-2">
+                <label className="text-[10px] font-medium text-text-tertiary">分镜图提示词</label>
+                <textarea
+                  value={storyboardShots.find((s) => s.id === activeShotId)?.imagePrompt || ""}
+                  onChange={(e) => {
+                    const imagePrompt = e.target.value;
+                    setStoryboardShots((prev) =>
+                      prev.map((s) => (s.id === activeShotId ? { ...s, imagePrompt } : s))
+                    );
+                  }}
+                  placeholder="输入分镜图提示词..."
+                  className="h-32 w-full rounded-lg border border-surface-border bg-surface-base p-2 text-[11px] leading-relaxed text-text-secondary outline-none focus:border-brand"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const shot = storyboardShots.find((s) => s.id === activeShotId);
+                    if (shot) generateShotImage(shot);
+                  }}
+                  disabled={isGenerating}
+                  className="flex w-full items-center justify-center gap-1 rounded-lg bg-brand/10 py-2 text-[11px] font-medium text-brand hover:bg-brand/20 disabled:opacity-50"
+                >
+                  {isGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                  生成分镜图
+                </button>
+              </div>
 
-                {/* Step 3: Assets */}
-                {workflowView === "step" && workflowMode === "assets" && (
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <h2 className="text-lg font-semibold">语义资产</h2>
-                        <p className="text-xs text-text-tertiary">角色、场景、道具、风格。顶部“重新生成全部资产”会覆盖整套解析；右侧“编辑当前资产”只改当前选中项。</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <button type="button" onClick={() => addSemanticAsset(assetKindFilter === "all" ? "character" : assetKindFilter)} className="inline-flex items-center gap-2 rounded-2xl border border-surface-border bg-surface-elevated px-4 py-2 text-sm font-medium text-text-secondary transition-colors hover:border-brand/40 hover:text-text-primary">
-                          <Plus className="h-4 w-4" />
-                          新增资产
-                        </button>
-                        <button type="button" onClick={() => generateWorkflow("assets")} disabled={workflowGenerating !== null} className="inline-flex items-center gap-2 rounded-2xl border border-surface-border bg-surface-elevated px-4 py-2 text-sm font-medium text-text-secondary transition-colors hover:border-brand/40 hover:text-text-primary disabled:opacity-50">
-                          {workflowGenerating === "assets" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                          重新生成全部资产
-                        </button>
-                        <button type="button" onClick={() => openWorkflowStep("storyboardVideo")} disabled={!semanticAssets.length} className="inline-flex items-center gap-2 rounded-2xl bg-brand px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-hover disabled:opacity-50">
-                          资产确认，去分镜 →
-                        </button>
-                      </div>
-                    </div>
-                    <div
-                      className="relative overflow-hidden rounded-3xl border border-surface-border bg-surface-card p-4"
-                      style={{ backgroundImage: "radial-gradient(circle at 1px 1px, rgba(148, 163, 184, 0.22) 1px, transparent 0)", backgroundSize: "20px 20px" }}
-                    >
-                      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-semibold text-text-primary">资产画布</div>
-                          <div className="text-xs text-text-tertiary">像小云雀一样先看资产类型，再点进具体角色/场景/道具/风格编辑。</div>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <button type="button" onClick={() => focusAssetKind("all")} className={cn("inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors", assetKindFilter === "all" ? "border-brand/40 bg-brand/10 text-brand" : "border-surface-border bg-surface-elevated text-text-secondary hover:border-brand/40 hover:text-text-primary")}>全部资产</button>
-                          <button type="button" onClick={rebuildSemanticAssetsFromOutput} className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-elevated px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary"><RefreshCw className="h-3.5 w-3.5" />解析资产</button>
-                        </div>
-                      </div>
-                      <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                        {SEMANTIC_ASSET_KINDS.map((kind) => {
-                          const count = semanticAssets.filter((asset) => asset.kind === kind.value).length;
-                          return (
-                            <button
-                              key={kind.value}
-                              type="button"
-                              onClick={() => focusAssetKind(kind.value)}
-                              className={cn("group min-h-28 rounded-3xl border p-4 text-left transition-all hover:-translate-y-0.5 hover:border-brand/50", assetKindFilter === kind.value ? "border-brand/60 bg-brand/10" : "border-surface-border bg-surface-elevated/90")}
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand/10 text-brand">
-                                  {kind.value === "character" ? "角" : kind.value === "scene" ? "景" : kind.value === "prop" ? "物" : "风"}
-                                </div>
-                                <span className="rounded-full bg-surface-card px-2.5 py-1 text-[11px] text-text-tertiary">{count} 个</span>
-                              </div>
-                              <div className="mt-3 text-sm font-semibold text-text-primary">{kind.label}</div>
-                              <div className="mt-1 text-xs leading-5 text-text-tertiary">{kind.value === "character" ? "脸、服装、性格与固定提示词" : kind.value === "scene" ? "地点、时代、空间关系" : kind.value === "prop" ? "关键道具与剧情功能" : "统一画风、镜头质感和禁用项"}</div>
-                              <div className="mt-3 text-xs font-medium text-brand">{count ? "查看 / 聚焦" : `+ 新建${kind.label}`}</div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <div className="mb-5 rounded-2xl border border-surface-border bg-surface-elevated/90 p-4">
-                        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                          <div>
-                            <div className="text-sm font-semibold text-text-primary">项目素材库</div>
-                            <div className="text-xs text-text-tertiary">生成图、上传图片/视频都会放在这里；可关联到当前资产，也可直接删除。</div>
-                          </div>
-                          <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary">
-                            {uploadingAsset ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UploadCloud className="h-3.5 w-3.5" />}
-                            上传素材
-                            <input type="file" className="hidden" multiple accept="image/*,video/*" onChange={handleAssetFileSelect} disabled={uploadingAsset} />
-                          </label>
-                        </div>
-                        {assets.length ? (
-                          <div className="grid max-h-60 gap-2 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                            {assets.map((asset) => {
-                              const linkedToCurrent = Boolean(activeSemanticAsset?.linkedAssetIds.includes(asset.id));
-                              const isImage = asset.type === "image";
-                              return (
-                                <div key={asset.id} className={cn("group overflow-hidden rounded-xl border bg-surface-card", linkedToCurrent ? "border-brand/60" : "border-surface-border")}>
-                                  {isImage ? (
-                                    <button type="button" onClick={() => setPreviewAsset(asset)} className="relative block aspect-square w-full overflow-hidden bg-surface-elevated">
-                                      <img src={asset.url || assetViewUrl(asset.publicId)} alt={asset.name} className="h-full w-full object-cover transition-transform group-hover:scale-105" />
-                                      <span className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-medium text-white">查看</span>
-                                    </button>
-                                  ) : (
-                                    <div className="flex aspect-square items-center justify-center bg-surface-elevated text-text-tertiary">
-                                      {asset.type === "video" ? <Video className="h-7 w-7" /> : <Paperclip className="h-7 w-7" />}
-                                    </div>
-                                  )}
-                                  <div className="space-y-2 p-2.5">
-                                    <div className="truncate text-xs font-medium text-text-primary" title={asset.name}>{asset.name}</div>
-                                    <div className="flex items-center gap-2">
-                                      {activeSemanticAsset && (
-                                        <button type="button" onClick={() => toggleSemanticLinkedAsset(activeSemanticAsset.id, asset.id)} className={cn("flex-1 rounded-full border px-2.5 py-1 text-[11px] font-medium", linkedToCurrent ? "border-brand/40 bg-brand/10 text-brand" : "border-surface-border text-text-secondary hover:border-brand/40")}>{linkedToCurrent ? "已关联当前" : "关联当前"}</button>
-                                      )}
-                                      <button type="button" onClick={() => removeAsset(asset.id)} className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-surface-border text-text-tertiary hover:border-red-300 hover:text-red-500" title="删除素材"><Trash2 className="h-3.5 w-3.5" /></button>
-                                    </div>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <div className="rounded-xl border border-dashed border-surface-border p-4 text-center text-xs text-text-tertiary">素材库暂无素材。生成资产图后会自动进入素材库，也可以手动上传。</div>
-                        )}
-                      </div>
-                      {semanticAssets.length ? (
-                        <div className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)]">
-                          <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
-                            {filteredSemanticAssets.map((asset) => <button key={asset.id} type="button" onClick={() => setActiveSemanticAssetId(asset.id)} className={cn("w-full rounded-xl border p-3 text-left transition-colors", activeSemanticAsset?.id === asset.id ? "border-brand/60 bg-brand/10" : "border-surface-border bg-surface-elevated hover:border-brand/40")}><div className="flex items-center justify-between gap-2"><span className="text-[10px] text-text-tertiary">{getSemanticAssetKindLabel(asset.kind)}</span><span className="rounded-full bg-surface-card px-2 py-0.5 text-[10px] text-text-tertiary">{asset.linkedAssetIds.length}</span></div><div className="mt-1 truncate text-sm font-semibold text-text-primary">{asset.name}</div><div className="mt-1 line-clamp-2 text-xs leading-5 text-text-tertiary">{asset.summary || asset.lockPrompt}</div></button>)}
-                          </div>
-                          {activeSemanticAsset && (
-                            <div className="space-y-3 rounded-2xl border border-surface-border bg-surface-elevated p-4">
-                              <div className="grid gap-3 md:grid-cols-[140px_minmax(0,1fr)_auto_auto]">
-                                <div><FieldLabel>类型</FieldLabel><select value={activeSemanticAsset.kind} onChange={(event) => updateSemanticAsset(activeSemanticAsset.id, { kind: event.target.value as SemanticAssetKind })} className="w-full rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm outline-none focus:border-brand/60">{SEMANTIC_ASSET_KINDS.map((kind) => <option key={kind.value} value={kind.value}>{kind.label}</option>)}</select></div>
-                                <div><FieldLabel>名称</FieldLabel><input value={activeSemanticAsset.name} onChange={(event) => updateSemanticAsset(activeSemanticAsset.id, { name: event.target.value })} className="w-full rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm outline-none focus:border-brand/60" /></div>
-                                <button type="button" onClick={() => generateSemanticAssetImage(activeSemanticAsset)} disabled={assetImageGeneratingId === activeSemanticAsset.id || activeSemanticAssetImagePending || isGenerating} className="mt-6 inline-flex h-9 items-center gap-1.5 rounded-full bg-brand px-3 text-xs font-medium text-white hover:bg-brand-hover disabled:opacity-50">
-                                  {assetImageGeneratingId === activeSemanticAsset.id || activeSemanticAssetImagePending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
-                                  {activeSemanticAssetImagePending ? "生成中" : "生成资产图"}
-                                </button>
-                                <button type="button" onClick={() => deleteSemanticAsset(activeSemanticAsset.id)} className="mt-6 inline-flex h-9 w-9 items-center justify-center rounded-full border border-surface-border text-text-tertiary hover:border-red-300 hover:text-red-500"><Trash2 className="h-4 w-4" /></button>
-                              </div>
-                              {activeSemanticAssetImageJobs.length > 0 && (
-                                <div className="space-y-2 rounded-2xl border border-brand/20 bg-brand/5 p-3">
-                                  <div className="flex items-center justify-between gap-2">
-                                    <div className="text-xs font-medium text-text-primary">资产图生成进度</div>
-                                    <button type="button" onClick={fetchImages} className="inline-flex items-center gap-1 rounded-full border border-surface-border bg-surface-card px-2.5 py-1 text-[11px] text-text-secondary hover:border-brand/40 hover:text-text-primary">
-                                      <RefreshCw className="h-3 w-3" />刷新
-                                    </button>
-                                  </div>
-                                  {activeSemanticAssetImageJobs.map((job) => {
-                                    const image = images.find((item) => item.id === job.mediaId);
-                                    const imageStatus = image?.status || job.status;
-                                    const done = Boolean(image?.image_url && (imageStatus === "succeeded" || imageStatus === "completed"));
-                                    const failed = imageStatus === "failed" || job.status === "failed";
-                                    return (
-                                      <div key={job.id} className={cn("flex items-start gap-2 rounded-xl border px-3 py-2 text-xs", done ? "border-emerald-200 bg-emerald-50 text-emerald-700" : failed ? "border-red-200 bg-red-50 text-red-700" : "border-amber-200 bg-amber-50 text-amber-700")}>
-                                        {done ? <ImageIcon className="mt-0.5 h-3.5 w-3.5" /> : failed ? <X className="mt-0.5 h-3.5 w-3.5" /> : <Loader2 className="mt-0.5 h-3.5 w-3.5 animate-spin" />}
-                                        <div className="min-w-0 flex-1">
-                                          <div className="font-medium">任务 #{job.mediaId} · {done ? "已完成，已自动关联" : failed ? "生成失败" : "排队/生成中，系统会自动轮询"}</div>
-                                          {failed && image?.error_message && <div className="mt-1 line-clamp-2 opacity-80">{image.error_message}</div>}
-                                          {!done && !failed && <div className="mt-1 opacity-80">不用重复点击；完成后这里会出现缩略图。</div>}
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                              <div><FieldLabel>摘要</FieldLabel><textarea value={activeSemanticAsset.summary} onChange={(event) => updateSemanticAsset(activeSemanticAsset.id, { summary: event.target.value })} className="min-h-16 w-full resize-y rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm outline-none focus:border-brand/60" /></div>
-                              <div className="grid gap-3 md:grid-cols-2">
-                                <div><FieldLabel>锁定词</FieldLabel><textarea value={activeSemanticAsset.lockPrompt} onChange={(event) => updateSemanticAsset(activeSemanticAsset.id, { lockPrompt: event.target.value })} className="min-h-24 w-full resize-y rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm leading-6 outline-none focus:border-brand/60" /></div>
-                                <div><FieldLabel>禁用项</FieldLabel><textarea value={activeSemanticAsset.negativePrompt || ""} onChange={(event) => updateSemanticAsset(activeSemanticAsset.id, { negativePrompt: event.target.value })} className="min-h-24 w-full resize-y rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm leading-6 outline-none focus:border-brand/60" /></div>
-                              </div>
-                              <div className="rounded-2xl border border-brand/20 bg-brand/5 p-3">
-                                <div className="mb-2 flex items-center gap-2">
-                                  <button type="button" onClick={() => setAssetAssistantMode("chat")} className={cn("rounded-full px-3 py-1 text-xs font-medium transition-colors", assetAssistantMode === "chat" ? "bg-brand text-white" : "text-text-secondary hover:bg-surface-elevated")}>💬 聊当前资产</button>
-                                  <button type="button" onClick={() => setAssetAssistantMode("rewrite")} className={cn("rounded-full px-3 py-1 text-xs font-medium transition-colors", assetAssistantMode === "rewrite" ? "bg-brand text-white" : "text-text-secondary hover:bg-surface-elevated")}>✏️ 编辑当前资产</button>
-                                  <span className="text-xs text-text-tertiary">{assetAssistantMode === "chat" ? "只给建议" : "会写回资产字段"}</span>
-                                </div>
-                                {assetAssistantMode === "chat" ? (
-                                  <div className="space-y-2">
-                                    <div className="max-h-40 space-y-2 overflow-y-auto rounded-xl border border-surface-border bg-surface-elevated p-2">
-                                      {assetChatMessages.length ? assetChatMessages.map((msg) => (
-                                        <div key={msg.id} className={cn("rounded-xl px-3 py-2 text-sm leading-6", msg.role === "user" ? "ml-6 bg-brand text-white" : "mr-6 bg-surface-card text-text-secondary")}>{msg.content}</div>
-                                      )) : <div className="text-center text-xs text-text-tertiary">问：这个角色描述够稳定吗？要不要加禁用项？</div>}
-                                    </div>
-                                    <div className="flex gap-2">
-                                      <textarea value={assetChatInput} onChange={(event) => setAssetChatInput(event.target.value)} placeholder="输入讨论内容……" className="min-h-16 flex-1 resize-y rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm outline-none focus:border-brand/60" />
-                                      <button type="button" onClick={() => chatAboutAsset(activeSemanticAsset)} disabled={assetChatting || !assetChatInput.trim()} className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-hover disabled:opacity-50">
-                                        {assetChatting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                                      </button>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="flex gap-2">
-                                    <textarea value={assetRegenerateInstruction} onChange={(event) => setAssetRegenerateInstruction(event.target.value)} placeholder="输入编辑指令，例如：更年轻、服装固定黑色长衫……" className="min-h-16 flex-1 resize-y rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm outline-none focus:border-brand/60" />
-                                    <button type="button" onClick={() => regenerateSemanticAsset(activeSemanticAsset)} disabled={assetRegeneratingId === activeSemanticAsset.id} className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-hover disabled:opacity-50">
-                                      {assetRegeneratingId === activeSemanticAsset.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                                      写回当前资产
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                              <div>
-                                <div className="mb-2 flex items-center justify-between gap-2">
-                                  <FieldLabel>已关联素材 / 预览</FieldLabel>
-                                  <button type="button" onClick={() => setShowAssetLibraryPicker((value) => !value)} className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-3 py-1 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary">
-                                    <Paperclip className="h-3.5 w-3.5" />
-                                    {showAssetLibraryPicker ? "收起素材库" : "从素材库关联"}
-                                  </button>
-                                </div>
-                                {(() => {
-                                  const linkedAssets = assets.filter((asset) => activeSemanticAsset.linkedAssetIds.includes(asset.id));
-                                  const visibleAssets = showAssetLibraryPicker ? assets : linkedAssets;
-                                  if (!visibleAssets.length) {
-                                    return <div className="rounded-xl border border-dashed border-surface-border p-3 text-center text-xs text-text-tertiary">{showAssetLibraryPicker ? "素材库暂无素材" : "当前资产还没有关联素材；点击“生成资产图”，或展开素材库手动关联。"}</div>;
-                                  }
-                                  return <div className="grid max-h-72 gap-2 overflow-y-auto sm:grid-cols-2 xl:grid-cols-3">{visibleAssets.map((asset) => {
-                                    const linked = activeSemanticAsset.linkedAssetIds.includes(asset.id);
-                                    const isImage = asset.type === "image";
-                                    return (
-                                      <div key={asset.id} className={cn("group overflow-hidden rounded-xl border transition-colors", linked ? "border-brand/60 bg-brand/10" : "border-surface-border bg-surface-card hover:border-brand/40")}>
-                                        {isImage ? (
-                                          <button type="button" onClick={() => setPreviewAsset(asset)} className="relative block aspect-square w-full overflow-hidden bg-surface-elevated">
-                                            <img src={asset.url || assetViewUrl(asset.publicId)} alt={asset.name} className="h-full w-full object-cover transition-transform group-hover:scale-105" />
-                                            <span className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-medium text-white">查看</span>
-                                          </button>
-                                        ) : (
-                                          <div className="flex aspect-square items-center justify-center bg-surface-elevated text-text-tertiary">
-                                            {asset.type === "video" ? <Video className="h-7 w-7" /> : <Paperclip className="h-7 w-7" />}
-                                          </div>
-                                        )}
-                                        <div className="flex items-center gap-1 px-2.5 py-2">
-                                          <button type="button" onClick={() => toggleSemanticLinkedAsset(activeSemanticAsset.id, asset.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-                                            <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", linked ? "bg-brand" : "bg-text-tertiary/30")} />
-                                            <span className="min-w-0 flex-1 truncate text-xs font-medium text-text-primary">{asset.name}</span>
-                                          </button>
-                                          <button type="button" onClick={() => removeAsset(asset.id)} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-text-tertiary hover:bg-red-50 hover:text-red-500" title="删除素材"><Trash2 className="h-3.5 w-3.5" /></button>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}</div>;
-                                })()}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ) : <div className="rounded-2xl border border-dashed border-surface-border p-6 text-center text-sm text-text-tertiary">
-                        <div>还没有语义资产。先生成/解析，或手动新增。</div>
-                        <button type="button" onClick={() => addSemanticAsset("character")} className="mt-3 inline-flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-xs font-medium text-white hover:bg-brand-hover">
-                          <Plus className="h-3.5 w-3.5" />
-                          新增角色资产
-                        </button>
-                      </div>}
-                    </div>
-                  </div>
-                )}
+              {/* 视频提示词 */}
+              <div className="space-y-2">
+                <label className="text-[10px] font-medium text-text-tertiary">视频提示词</label>
+                <textarea
+                  value={storyboardShots.find((s) => s.id === activeShotId)?.videoPrompt || ""}
+                  onChange={(e) => {
+                    const videoPrompt = e.target.value;
+                    setStoryboardShots((prev) =>
+                      prev.map((s) => (s.id === activeShotId ? { ...s, videoPrompt } : s))
+                    );
+                  }}
+                  placeholder="输入视频提示词..."
+                  className="h-32 w-full rounded-lg border border-surface-border bg-surface-base p-2 text-[11px] leading-relaxed text-text-secondary outline-none focus:border-brand"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const shot = storyboardShots.find((s) => s.id === activeShotId);
+                    if (shot) generateShotVideo(shot);
+                  }}
+                  disabled={isGenerating}
+                  className="flex w-full items-center justify-center gap-1 rounded-lg bg-rose-50 py-2 text-[11px] font-medium text-rose-600 hover:bg-rose-100 disabled:opacity-50"
+                >
+                  {isGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+                  生成视频
+                </button>
+              </div>
 
-                {/* Step 4 & 5: Storyboard */}
-                {workflowView === "step" && (workflowMode === "storyboardVideo" || workflowMode === "storyboardImage") && (
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <h2 className="text-lg font-semibold">{workflowMode === "storyboardVideo" ? "故事板生产台" : "分镜图生产台"}</h2>
-                        <p className="text-xs text-text-tertiary">{workflowMode === "storyboardVideo" ? "管理镜头结构、资产绑定、Seedance 视频提示词和视频生成。" : "专注故事版草稿图与正式分镜图：先验构图站位，再出视频首帧。"}</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <button type="button" onClick={() => generateWorkflow(workflowMode)} disabled={workflowGenerating !== null} className="inline-flex items-center gap-2 rounded-2xl border border-surface-border bg-surface-elevated px-4 py-2 text-sm font-medium text-text-secondary transition-colors hover:border-brand/40 hover:text-text-primary disabled:opacity-50">
-                          {workflowGenerating === workflowMode ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-                          {t(workflowStep.buttonKey)}
-                        </button>
-                        <button type="button" onClick={() => openWorkflowStep(workflowMode === "storyboardVideo" ? "storyboardImage" : "storyboardVideo")} className="inline-flex items-center gap-2 rounded-2xl bg-brand px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-hover">
-                          {workflowMode === "storyboardVideo" ? "去分镜图生产台 →" : "去故事板生产台 →"}
-                        </button>
-                      </div>
-                    </div>
-                    <div className="rounded-2xl border border-surface-border bg-surface-card p-4">
-                      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <h2 className="text-base font-semibold">{workflowMode === "storyboardVideo" ? "镜头/视频生产台" : "分镜图生产台"}</h2>
-                          <p className="text-xs text-text-tertiary">{workflowMode === "storyboardVideo" ? "左边选镜头，右边调整镜头信息、绑定资产、生成视频。" : "左边选镜头，右边只处理故事版草稿图和正式分镜图。"}</p>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <button type="button" onClick={rebuildShotsFromOutputs} className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-elevated px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary"><RefreshCw className="h-3.5 w-3.5" />解析为镜头卡</button>
-                          <button type="button" onClick={addShot} className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-elevated px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary"><Plus className="h-3.5 w-3.5" />加镜头</button>
-                          {workflowMode === "storyboardImage" && <button type="button" onClick={batchGenerateSketches} disabled={batchGenerating !== null || isGenerating || queuedSketchShots.length === 0} className="inline-flex items-center gap-1.5 rounded-full border border-brand/30 bg-brand/10 px-3 py-1.5 text-xs font-medium text-brand hover:bg-brand/15 disabled:opacity-50">{batchGenerating === "sketches" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}批量草稿图({queuedSketchShots.length})</button>}
-                          {workflowMode === "storyboardImage" && <button type="button" onClick={batchGenerateImages} disabled={batchGenerating !== null || isGenerating || queuedImageShots.length === 0} className="inline-flex items-center gap-1.5 rounded-full bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-hover disabled:opacity-50">{batchGenerating === "images" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImageIcon className="h-3.5 w-3.5" />}批量生成图({queuedImageShots.length})</button>}
-                          {workflowMode === "storyboardVideo" && <button type="button" onClick={batchGenerateVideos} disabled={batchGenerating !== null || videoGenerating || queuedVideoShots.length === 0} className="inline-flex items-center gap-1.5 rounded-full bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-hover disabled:opacity-50">{batchGenerating === "videos" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Video className="h-3.5 w-3.5" />}批量生成视频({queuedVideoShots.length})</button>}
-                          {batchGenerating && <button type="button" onClick={pauseBatchGeneration} className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-100">暂停</button>}
-                        </div>
-                      </div>
-                      {workflowMode === "storyboardImage" && (
-                        <>
-                          <BatchPreflightPanel kind="sketches" queue={queuedSketchShots} assets={assets} directorBlocks={directorBlocks} />
-                          <BatchPreflightPanel kind="images" queue={queuedImageShots} assets={assets} directorBlocks={directorBlocks} />
-                        </>
-                      )}
-                      {workflowMode === "storyboardVideo" && (
-                        <BatchPreflightPanel kind="videos" queue={queuedVideoShots} assets={assets} directorBlocks={directorBlocks} />
-                      )}
-                      <ShotOverviewTable
-                        shots={storyboardShots}
-                        assets={assets}
-                        generationJobs={generationJobs}
-                        directorBlocks={directorBlocks}
-                        activeShotId={activeShot?.id}
-                        selectedShotIds={selectedOverviewShotIds}
-                        onSelectShot={setActiveShotId}
-                        onToggleSelectedShot={toggleOverviewShotSelection}
-                        onSelectAll={(ids) => setSelectedOverviewShotIds(ids)}
-                        onBatchGenerate={(kind, shotIds) => {
-                          if (kind === "sketch") {
-                            const targets = storyboardShots.filter((s) => shotIds.includes(s.id));
-                            batchGenerateSketchesForShots(targets);
-                          } else if (kind === "image") {
-                            const targets = storyboardShots.filter((s) => shotIds.includes(s.id));
-                            batchGenerateImagesForShots(targets);
-                          } else {
-                            const targets = storyboardShots.filter((s) => shotIds.includes(s.id));
-                            batchGenerateVideosForShots(targets);
-                          }
-                        }}
-                        onBatchDelete={(ids) => {
-                          const count = ids.length;
-                          if (!confirm(`确定删除选中的 ${count} 个镜头？`)) return;
-                          setStoryboardShots((prev) => prev.filter((s) => !ids.includes(s.id)).map((s, i) => ({ ...s, index: i + 1 })));
-                          setSelectedOverviewShotIds((prev) => prev.filter((id) => !ids.includes(id)));
-                          if (activeShotId && ids.includes(activeShotId)) {
-                            const remaining = storyboardShots.filter((s) => !ids.includes(s.id));
-                            setActiveShotId(remaining[0]?.id);
-                          }
-                          toast.success(`已删除 ${count} 个镜头`);
-                        }}
-                        onReorderShots={(orderedIds) => {
-                          const map = new Map(storyboardShots.map((s) => [s.id, s]));
-                          const next = orderedIds.map((id, i) => ({ ...map.get(id)!, index: i + 1 }));
-                          setStoryboardShots(next);
-                        }}
-                        isStoryboardSketchAsset={isStoryboardSketchAsset}
-                        getShotStatusLabel={getShotStatusLabel}
-                        assetViewUrl={assetViewUrl}
-                      />
-                      <details className="mb-4 rounded-2xl border border-surface-border bg-surface-elevated/70 p-3">
-                        <summary className="cursor-pointer text-xs font-medium text-text-secondary">查看 / 编辑 AI 生成的原始提示词文本</summary>
-                        <div className="mt-3 space-y-2">
-                          <textarea value={workflowOutput} onChange={(event) => setWorkflowOutput(workflowMode, event.target.value)} placeholder={t(workflowStep.placeholderKey)} className="min-h-28 w-full resize-y rounded-2xl border border-surface-border bg-surface-card px-4 py-3 font-mono text-xs leading-6 outline-none focus:border-brand/60" />
-                          <div className="flex flex-wrap gap-2">
-                            <button type="button" onClick={copyWorkflowOutput} disabled={!workflowOutput.trim()} className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-3 py-1 text-xs font-medium text-text-secondary hover:border-brand/40"><Copy className="h-3.5 w-3.5" />复制</button>
-                            <button type="button" onClick={sendWorkflowToImage} disabled={!workflowOutput.trim()} className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-3 py-1 text-xs font-medium text-text-secondary hover:border-brand/40"><ImageIcon className="h-3.5 w-3.5" />发图片页</button>
-                            <button type="button" onClick={sendWorkflowToVideo} disabled={!workflowOutput.trim()} className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-3 py-1 text-xs font-medium text-text-secondary hover:border-brand/40"><Video className="h-3.5 w-3.5" />发视频页</button>
-                          </div>
-                        </div>
-                      </details>
-                      {storyboardShots.length > 0 ? (
-                        <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
-                          <div className="space-y-3">
-                            <div className="grid grid-cols-4 gap-2 text-center text-[11px]">
-                              <div className="rounded-xl bg-surface-elevated p-2"><div className="font-semibold text-text-primary">{shotStats.total}</div><div className="text-text-tertiary">镜头</div></div>
-                              <div className="rounded-xl bg-surface-elevated p-2"><div className="font-semibold text-text-primary">{shotStats.readyImages}</div><div className="text-text-tertiary">有图</div></div>
-                              <div className="rounded-xl bg-surface-elevated p-2"><div className="font-semibold text-text-primary">{shotStats.readyVideos}</div><div className="text-text-tertiary">有视频</div></div>
-                              <div className="rounded-xl bg-surface-elevated p-2"><div className="font-semibold text-text-primary">{shotStats.pendingJobs}</div><div className="text-text-tertiary">队列</div></div>
-                            </div>
-                            <div className="max-h-[68vh] space-y-2 overflow-y-auto pr-1">
-                              {storyboardShots.map((shot) => (
-                                <button key={shot.id} type="button" onClick={() => setActiveShotId(shot.id)} className={cn("w-full rounded-2xl border p-3 text-left transition-colors", activeShot?.id === shot.id ? "border-brand/60 bg-brand/10" : "border-surface-border bg-surface-elevated hover:border-brand/40")}>
-                                  <div className="flex items-center justify-between gap-2"><span className="text-xs font-medium text-text-tertiary">镜头 {shot.index}</span><span className="rounded-full bg-surface-card px-2 py-0.5 text-[10px] text-text-tertiary">{getShotStatusLabel(shot.status)}</span></div>
-                                  <div className="mt-1 line-clamp-1 text-sm font-semibold text-text-primary">{shot.title}</div>
-                                  <div className="mt-1 line-clamp-2 text-xs leading-5 text-text-tertiary">{shot.scene || shot.videoPrompt || shot.imagePrompt}</div>
-                                  <div className="mt-2 flex flex-wrap gap-1 text-[10px] text-text-tertiary"><span>{shot.referenceAssetIds.length} 素材</span><span>·</span><span>{shot.imageAssetIds.length} 图</span><span>·</span><span>{shot.videoAssetIds.length} 视频</span></div>
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                          {activeShot && (
-                            <div className="space-y-4 rounded-2xl border border-surface-border bg-surface-elevated p-4">
-                              <div className="flex flex-wrap items-start justify-between gap-3">
-                                <div className="min-w-0 flex-1">
-                                  <FieldLabel>当前镜头</FieldLabel>
-                                  <input value={activeShot.title} onChange={(event) => updateShot(activeShot.id, { title: event.target.value })} className="w-full rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm font-medium outline-none focus:border-brand/60" />
-                                </div>
-                                <div className="mt-6 flex gap-2">
-                                  <button type="button" onClick={() => applySemanticAssetsToShotPrompts(activeShot)} className="inline-flex h-9 items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-3 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary"><Sparkles className="h-3.5 w-3.5" />注入资产词</button>
-                                  <button type="button" onClick={() => { ensureDirectorBlockForShot(activeShot); setShowDirectorPanel((value) => !value); }} className={cn("inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-medium", activeDirectorBlock ? "border-brand/40 bg-brand/10 text-brand" : "border-surface-border bg-surface-card text-text-secondary hover:border-brand/40 hover:text-text-primary")}>导演台{activeDirectorBlock ? "已启用" : ""}</button>
-                                  <button type="button" onClick={() => deleteShot(activeShot.id)} className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-surface-border text-text-tertiary hover:border-red-300 hover:text-red-500"><Trash2 className="h-4 w-4" /></button>
-                                </div>
-                              </div>
-                              {showDirectorPanel && activeDirectorBlock && (
-                                <DirectorPanel
-                                  directorBlock={activeDirectorBlock}
-                                  semanticAssets={semanticAssets}
-                                  assets={assets}
-                                  onChange={updateDirectorBlock}
-                                  onClose={() => setShowDirectorPanel(false)}
-                                  shotTitle={activeShot.title}
-                                  shotScene={activeShot.scene}
-                                />
-                              )}
-                              <DirectorInheritanceControls
-                                activeShot={activeShot}
-                                shots={storyboardShots}
-                                directorBlocks={directorBlocks}
-                                selectedShotIds={selectedOverviewShotIds}
-                                onInheritFromPrevious={inheritDirectorBlockFromPrevious}
-                                onApplyToFollowing={applyDirectorBlockToFollowingShots}
-                                onApplyToSelected={applyDirectorBlockToSelectedShots}
-                              />
-                              <div className="grid gap-3 md:grid-cols-5">
-                                <div><FieldLabel>类型</FieldLabel><select value={activeShot.shotType} onChange={(event) => updateShot(activeShot.id, { shotType: event.target.value as ShotType })} className="w-full rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm outline-none focus:border-brand/60">{SHOT_TYPES.map((item) => <option key={item} value={item}>{item}</option>)}</select></div>
-                                <div><FieldLabel>运镜</FieldLabel><select value={activeShot.cameraMove} onChange={(event) => updateShot(activeShot.id, { cameraMove: event.target.value as CameraMove })} className="w-full rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm outline-none focus:border-brand/60">{CAMERA_MOVES.map((item) => <option key={item} value={item}>{item}</option>)}</select></div>
-                                <div><FieldLabel>目的</FieldLabel><select value={activeShot.purpose} onChange={(event) => updateShot(activeShot.id, { purpose: event.target.value as ShotPurpose })} className="w-full rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm outline-none focus:border-brand/60">{SHOT_PURPOSES.map((item) => <option key={item} value={item}>{item}</option>)}</select></div>
-                                <div><FieldLabel>时长</FieldLabel><select value={activeShot.duration} onChange={(event) => updateShot(activeShot.id, { duration: Number(event.target.value) })} className="w-full rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm outline-none focus:border-brand/60">{VIDEO_DURATIONS.map((item) => <option key={item} value={item}>{item}s</option>)}</select></div>
-                                <div><FieldLabel>画幅</FieldLabel><select value={activeShot.aspectRatio} onChange={(event) => updateShot(activeShot.id, { aspectRatio: event.target.value })} className="w-full rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm outline-none focus:border-brand/60">{VIDEO_ASPECTS.filter((item) => item !== "adaptive").map((item) => <option key={item} value={item}>{item}</option>)}</select></div>
-                              </div>
-                              <div className="grid gap-3 md:grid-cols-2">
-                                <div><FieldLabel>场景 / 动作摘要</FieldLabel><textarea value={activeShot.scene} onChange={(event) => updateShot(activeShot.id, { scene: event.target.value })} className="min-h-20 w-full resize-y rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm outline-none focus:border-brand/60" /></div>
-                                <div className="grid gap-3 sm:grid-cols-2"><div><FieldLabel>台词</FieldLabel><textarea value={activeShot.dialogue || ""} onChange={(event) => updateShot(activeShot.id, { dialogue: event.target.value })} className="min-h-20 w-full resize-y rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm outline-none focus:border-brand/60" /></div><div><FieldLabel>旁白</FieldLabel><textarea value={activeShot.narration || ""} onChange={(event) => updateShot(activeShot.id, { narration: event.target.value })} className="min-h-20 w-full resize-y rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm outline-none focus:border-brand/60" /></div></div>
-                              </div>
-                              {workflowMode === "storyboardImage" ? (
-                                <>
-                                  <div className="rounded-2xl border border-dashed border-brand/30 bg-brand/5 p-3">
-                                    <div className="flex flex-wrap items-start justify-between gap-3">
-                                      <div>
-                                        <div className="text-sm font-semibold text-text-primary">故事版草稿图</div>
-                                        <p className="mt-1 text-xs leading-5 text-text-tertiary">黑白草稿线 + 少量彩色箭头，用来先验证构图、站位、动作方向；不会自动作为视频首帧。</p>
-                                      </div>
-                                      <button type="button" onClick={() => generateShotSketch(activeShot).catch((err) => toast.error(getErrorMessage(err, { module: "image", fallbackMessage: "故事版草稿图提交失败" })))} disabled={isGenerating} className="inline-flex items-center gap-1.5 rounded-full border border-brand/30 bg-brand/10 px-3 py-1 text-xs font-medium text-brand hover:bg-brand/15 disabled:opacity-50">{isGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}生成草稿图</button>
-                                    </div>
-                                    <textarea readOnly value={buildStoryboardSketchPrompt(activeShot)} className="mt-3 max-h-36 min-h-24 w-full resize-y rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-xs leading-5 text-text-secondary outline-none" />
-                                  </div>
-                                  <div className="rounded-2xl border border-surface-border bg-surface-card p-3">
-                                    <div className="mb-2 flex items-center justify-between gap-2"><FieldLabel>正式分镜图提示词</FieldLabel><button type="button" onClick={() => generateShotImage(activeShot).catch((err) => toast.error(getErrorMessage(err, { module: "image", fallbackMessage: "镜头图提交失败" })))} disabled={isGenerating} className="inline-flex items-center gap-1.5 rounded-full bg-brand px-3 py-1 text-xs font-medium text-white hover:bg-brand-hover disabled:opacity-50">{isGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImageIcon className="h-3.5 w-3.5" />}生成正式图</button></div>
-                                    <textarea value={activeShot.imagePrompt} onChange={(event) => updateShot(activeShot.id, { imagePrompt: event.target.value })} className="min-h-40 w-full resize-y rounded-xl border border-surface-border bg-surface-elevated px-3 py-2 text-sm leading-6 outline-none focus:border-brand/60" />
-                                    <div className="mt-3">
-                                      <ShotPromptInspector
-                                        mode="image"
-                                        shot={activeShot}
-                                        finalPrompt={buildImagePromptForGeneration(activeShot)}
-                                        directorBlock={activeDirectorBlock}
-                                        referenceImageCount={shotImageRefs.length}
-                                        referenceVideoCount={0}
-                                        onCopy={copyToClipboard}
-                                      />
-                                    </div>
-                                  </div>
-                                </>
-                              ) : (
-                                <div className="rounded-2xl border border-surface-border bg-surface-card p-3">
-                                  <div className="mb-2 flex items-center justify-between gap-2"><FieldLabel>Seedance 视频提示词</FieldLabel><button type="button" onClick={() => generateShotVideo(activeShot).catch((err) => toast.error(getErrorMessage(err, { module: "video", fallbackMessage: "镜头视频提交失败" })))} disabled={videoGenerating} className="inline-flex items-center gap-1.5 rounded-full bg-brand px-3 py-1 text-xs font-medium text-white hover:bg-brand-hover disabled:opacity-50">{videoGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}生成视频</button></div>
-                                  <textarea value={activeShot.videoPrompt} onChange={(event) => updateShot(activeShot.id, { videoPrompt: event.target.value })} className="min-h-56 w-full resize-y rounded-xl border border-surface-border bg-surface-elevated px-3 py-2 text-sm leading-6 outline-none focus:border-brand/60" />
-                                  <div className="mt-3">
-                                    <ShotPromptInspector
-                                      mode="video"
-                                      shot={activeShot}
-                                      finalPrompt={injectDirectorBlockToPrompt((activeShot.videoPrompt || activeShot.imagePrompt).trim(), activeDirectorBlock, semanticAssets)}
-                                      directorBlock={activeDirectorBlock}
-                                      referenceImageCount={shotImageRefs.length}
-                                      referenceVideoCount={shotVideoRefs.length}
-                                      onCopy={copyToClipboard}
-                                    />
-                                  </div>
-                                </div>
-                              )}
-                              <div className="grid gap-3 lg:grid-cols-2">
-                                <div className="rounded-2xl border border-surface-border bg-surface-card p-3">
-                                  <FieldLabel>绑定语义资产</FieldLabel>
-                                  <div className="mt-2 flex max-h-32 flex-wrap gap-2 overflow-y-auto">
-                                    {semanticAssets.length ? semanticAssets.map((asset) => {
-                                      const active = activeShot.semanticAssetIds.includes(asset.id);
-                                      return <button key={asset.id} type="button" onClick={() => toggleShotSemanticAsset(activeShot.id, asset.id)} className={cn("rounded-full border px-3 py-1 text-xs font-medium", active ? "border-brand/40 bg-brand/10 text-brand" : "border-surface-border text-text-secondary hover:border-brand/40")}>{getSemanticAssetKindLabel(asset.kind)} · {asset.name}</button>;
-                                    }) : <div className="text-xs text-text-tertiary">暂无语义资产，先到资产步骤生成角色/场景/道具。</div>}
-                                  </div>
-                                </div>
-                                <div className="rounded-2xl border border-surface-border bg-surface-card p-3">
-                                  <FieldLabel>绑定素材库参考</FieldLabel>
-                                  <div className="mt-2 grid max-h-40 gap-2 overflow-y-auto sm:grid-cols-2">
-                                    {assets.length ? assets.map((asset) => {
-                                      const active = activeShot.referenceAssetIds.includes(asset.id);
-                                      return <button key={asset.id} type="button" onClick={() => toggleShotAsset(activeShot.id, asset.id)} className={cn("flex items-center gap-2 rounded-xl border p-2 text-left", active ? "border-brand/50 bg-brand/10" : "border-surface-border bg-surface-elevated hover:border-brand/40")}>
-                                        {asset.type === "image" ? <img src={asset.url || assetViewUrl(asset.publicId)} alt="" className="h-10 w-10 shrink-0 rounded-lg object-cover" /> : <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-surface-card text-text-tertiary">{asset.type === "video" ? <Video className="h-4 w-4" /> : <Paperclip className="h-4 w-4" />}</div>}
-                                        <span className="min-w-0 flex-1 truncate text-xs font-medium text-text-primary">{asset.name}</span>
-                                      </button>;
-                                    }) : <div className="text-xs text-text-tertiary">素材库暂无素材。</div>}
-                                  </div>
-                                </div>
-                              </div>
-                              {(activeShotImageAssets.length > 0 || activeShotVideoAssets.length > 0 || generationJobs.some((job) => job.shotId === activeShot.id)) && (
-                                <div className="rounded-2xl border border-surface-border bg-surface-card p-3">
-                                  <FieldLabel>当前镜头产物 / 队列</FieldLabel>
-                                  <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                                    {activeShotSketchAssets.map((asset) => <button key={asset.id} type="button" onClick={() => setPreviewAsset(asset)} className="overflow-hidden rounded-xl border border-brand/30 bg-brand/5 text-left"><img src={asset.url || assetViewUrl(asset.publicId)} alt={asset.name} className="aspect-video w-full object-cover" /><div className="truncate px-2 py-1 text-xs text-brand">草稿 · {asset.name}</div></button>)}
-                                    {activeShotFormalImageAssets.map((asset) => <button key={asset.id} type="button" onClick={() => setPreviewAsset(asset)} className="overflow-hidden rounded-xl border border-surface-border bg-surface-elevated text-left"><img src={asset.url || assetViewUrl(asset.publicId)} alt={asset.name} className="aspect-video w-full object-cover" /><div className="truncate px-2 py-1 text-xs text-text-secondary">正式图 · {asset.name}</div></button>)}
-                                    {activeShotVideoAssets.map((asset) => <button key={asset.id} type="button" onClick={() => setPreviewAsset(asset)} className="flex items-center gap-2 rounded-xl border border-surface-border bg-surface-elevated p-3 text-left text-xs text-text-secondary"><Video className="h-4 w-4" />视频 · {asset.name}</button>)}
-                                    {generationJobs.filter((job) => job.shotId === activeShot.id && job.status === "pending").map((job) => <div key={job.id} className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700"><Loader2 className="h-3.5 w-3.5 animate-spin" />{job.intent === "storyboard_sketch" ? "草稿图" : job.type === "image" ? "正式图" : "视频"}任务 #{job.mediaId} 生成中</div>)}
-                                  </div>
-                                </div>
-                              )}
-                              <div className="flex flex-wrap gap-2">
-                                <button type="button" onClick={() => sendShotToImage(activeShot)} className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary"><ImageIcon className="h-3.5 w-3.5" />送到图片页</button>
-                                <button type="button" onClick={() => sendShotToVideo(activeShot)} className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary"><Video className="h-3.5 w-3.5" />送到视频页</button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ) : <div className="rounded-2xl border border-dashed border-surface-border p-6 text-center text-sm text-text-tertiary">还没有镜头卡。先点“生成提示词”，再点“解析为镜头卡”，或直接“加镜头”。</div>}
-                    </div>
+              {/* 导演台 */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-medium text-text-tertiary">导演台</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const shot = storyboardShots.find((s) => s.id === activeShotId);
+                      if (shot) ensureDirectorBlockForShot(shot);
+                      setShowDirectorPanel(true);
+                    }}
+                    className="text-[10px] text-brand hover:text-brand-hover"
+                  >
+                    {findDirectorBlockForShot(directorBlocks, activeShotId) ? "已启用" : "启用"}
+                  </button>
+                </div>
+                {findDirectorBlockForShot(directorBlocks, activeShotId) && (
+                  <div className="rounded-lg bg-surface-card p-2 text-[10px] text-text-secondary">
+                    导演台已启用，空间约束已注入生成流程
                   </div>
                 )}
               </div>
-            ) : tab === "image" ? (
-              <SeedreamImageTab
-                t={t}
-                imagePrompt={imagePrompt}
-                setImagePrompt={setImagePrompt}
-                imageAspect={imageAspect}
-                setImageAspect={setImageAspect}
-                imageResolution={imageResolution}
-                setImageResolution={setImageResolution}
-                selectedImageRefs={selectedImageRefs}
-                isGenerating={isGenerating}
-                submitImage={submitImage}
-              />
-            ) : (
-              <SeedreamVideoTab
-                t={t}
-                videoPrompt={videoPrompt}
-                setVideoPrompt={setVideoPrompt}
-                videoModel={videoModel}
-                setVideoModel={setVideoModel}
-                videoAspect={videoAspect}
-                setVideoAspect={setVideoAspect}
-                videoResolution={videoResolution}
-                setVideoResolution={setVideoResolution}
-                videoDuration={videoDuration}
-                setVideoDuration={setVideoDuration}
-                videoAudio={videoAudio}
-                setVideoAudio={setVideoAudio}
-                selectedImageRefs={selectedImageRefs}
-                selectedVideoRefs={selectedVideoRefs}
-                videoGenerating={videoGenerating}
-                submitVideo={submitVideo}
-              />
-            )}
-          </section>
 
-
-      </div>
-
-      {/* ===== Studio Mode 切换按钮 ===== */}
-      <div className="fixed bottom-6 left-6 z-40">
-        <button
-          type="button"
-          onClick={() => {
-            setStudioMode((v) => {
-              const next = !v;
-              localStorage.setItem("seedream-studio-mode", next ? "1" : "0");
-              return next;
-            });
-          }}
-          className={cn(
-            "flex h-10 items-center gap-2 rounded-full px-4 text-xs font-medium shadow-lg transition-colors",
-            studioMode
-              ? "bg-brand text-white hover:bg-brand-hover"
-              : "bg-surface-elevated text-text-secondary hover:text-text-primary border border-surface-border"
-          )}
-        >
-          {studioMode ? "退出 Studio" : "Studio 模式"}
-        </button>
-      </div>
-
-      {/* ===== Studio Mode 覆盖层 ===== */}
-      {studioMode && (
-        <div className="fixed inset-0 z-50">
-          <ManjuStudioLayout
-            projectName={activeProject?.title || t("seedreamBeta.projects.newProject")}
-            activeStep={workflowMode}
-            onStepChange={(step) => {
-              if (step === "overview") {
-                setWorkflowView("overview");
-              } else {
-                setWorkflowMode(step as WorkflowMode);
-                setWorkflowView("step");
-              }
-              setStudioMode(false);
-            }}
-            onGenerate={(step) => {
-              setWorkflowMode(step);
-              setWorkflowView("step");
-              setStudioMode(false);
-            }}
-            generating={workflowGenerating}
-            nodes={storyboardShots.map((shot, i) => ({
-              id: shot.id,
-              type: shot.videoAssetIds && shot.videoAssetIds.length > 0 ? "video" : shot.imageAssetIds && shot.imageAssetIds.length > 0 ? "image" : "shot",
-              title: `${i + 1}. ${shot.title || shot.scene || "未命名镜头"}`,
-              x: (i % 4) * 280 + 40,
-              y: Math.floor(i / 4) * 200 + 40,
-              width: 240,
-              height: 160,
-              data: shot as unknown as Record<string, unknown>,
-              status: shot.videoAssetIds && shot.videoAssetIds.length > 0 ? "done" : shot.imageAssetIds && shot.imageAssetIds.length > 0 ? "draft" : "empty",
-            }))}
-            connections={storyboardShots.slice(1).map((shot, i) => ({
-              id: `conn-${i}`,
-              from: storyboardShots[i].id,
-              to: shot.id,
-            }))}
-            onNodeSelect={(id) => {
-              if (id) {
-                setActiveShotId(id);
-                setWorkflowView("step");
-                setStudioMode(false);
-              }
-            }}
-            onNodeDoubleClick={(node) => {
-              setActiveShotId(node.id);
-              setWorkflowView("step");
-              setStudioMode(false);
-            }}
-            onSave={() => { toast.info("保存功能开发中"); }}
-            onExport={() => { toast.info("导出功能开发中"); }}
-            onImport={() => { toast.info("导入功能开发中"); }}
-            onNewProject={() => { toast.info("新建项目功能开发中"); }}
-            onOpenProject={() => { toast.info("打开项目功能开发中"); }}
-            onSettings={() => { toast.info("设置功能开发中"); }}
-          />
-        </div>
-      )}
-
-      {previewAsset && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
-          role="dialog"
-          aria-modal="true"
-          aria-label="预览素材"
-          onClick={() => setPreviewAsset(null)}
-        >
-          <div className="absolute right-4 top-4 flex gap-2">
-            <a
-              href={previewAsset.url || assetViewUrl(previewAsset.publicId)}
-              download
-              target="_blank"
-              rel="noreferrer"
-              onClick={(event) => event.stopPropagation()}
-              className="inline-flex h-10 items-center gap-2 rounded-full bg-white/10 px-4 text-sm font-medium text-white backdrop-blur transition-colors hover:bg-white/20"
-            >
-              <Download className="h-4 w-4" />
-              打开原图
-            </a>
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                setPreviewAsset(null);
-              }}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur transition-colors hover:bg-white/20"
-              aria-label={t("seedreamBeta.closePreview")}
-            >
-              <X className="h-5 w-5" />
-            </button>
+              {/* 操作按钮 */}
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const shot = storyboardShots.find((s) => s.id === activeShotId);
+                    if (!shot) return;
+                    const newShot: StoryboardShot = {
+                      ...shot,
+                      id: `shot-${Date.now()}`,
+                      title: `${shot.title || "镜头"} (复制)`,
+                      imageAssetIds: [],
+                      videoAssetIds: [],
+                    };
+                    setStoryboardShots((prev) => [...prev, newShot]);
+                  }}
+                  className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-surface-border py-2 text-[11px] text-text-secondary hover:bg-surface-card"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  复制
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStoryboardShots((prev) => prev.filter((s) => s.id !== activeShotId));
+                    setActiveShotId(undefined);
+                    setWorkflowView("overview");
+                  }}
+                  className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-red-100 py-2 text-[11px] text-red-500 hover:bg-red-50"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  删除
+                </button>
+              </div>
+            </div>
           </div>
-          {previewAsset.type === "image" ? (
-            <img
-              src={previewAsset.url || assetViewUrl(previewAsset.publicId)}
-              alt={previewAsset.name}
-              className="max-h-[88vh] max-w-[92vw] rounded-2xl object-contain shadow-2xl"
-              onClick={(event) => event.stopPropagation()}
-            />
-          ) : previewAsset.type === "video" ? (
-            <video
-              src={previewAsset.url || assetViewUrl(previewAsset.publicId)}
-              controls
-              className="max-h-[88vh] max-w-[92vw] rounded-2xl shadow-2xl"
-              onClick={(event) => event.stopPropagation()}
-            />
-          ) : null}
-        </div>
-      )}
-      {previewImage?.image_url && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
-          role="dialog"
-          aria-modal="true"
-          aria-label={t("seedreamBeta.previewImage")}
-          onClick={() => setPreviewImage(null)}
-        >
-          <div className="absolute right-4 top-4 flex gap-2">
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                downloadImage(previewImage);
+        ) : workflowView === "overview" ? (
+          <div className="h-full overflow-y-auto p-4">
+            <SeedreamWorkflowOverview
+              shots={storyboardShots}
+              onSelectShot={(shot: StoryboardShot) => {
+                setActiveShotId(shot.id);
+                setWorkflowView("step");
               }}
-              className="inline-flex h-10 items-center gap-2 rounded-full bg-white/10 px-4 text-sm font-medium text-white backdrop-blur transition-colors hover:bg-white/20"
-            >
-              <Download className="h-4 w-4" />
-              {t("seedreamBeta.saveImage")}
-            </button>
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                setPreviewImage(null);
-              }}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur transition-colors hover:bg-white/20"
-              aria-label={t("seedreamBeta.closePreview")}
-            >
-              <X className="h-5 w-5" />
-            </button>
+              onReorderShots={(shots: StoryboardShot[]) => setStoryboardShots(shots)}
+            />
           </div>
-          <img
-            src={previewImage.image_url}
-            alt={previewImage.prompt}
-            className="max-h-[88vh] max-w-[92vw] rounded-2xl object-contain shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          />
-        </div>
-      )}
+        ) : null}
+      </ManjuStudioLayout>
     </div>
   );
 }

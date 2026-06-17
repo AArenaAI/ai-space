@@ -32,26 +32,29 @@ type ImportCheck = {
 type ImportLayer = "script" | "storyboard" | "seedance";
 
 type Props = {
-  workspaceProjectName: string;
-  workflowStepCards: WorkflowStepCard[];
-  projectStats: ProjectStat[];
-  importChecks: ImportCheck[];
-  scriptImportText: string;
-  storyboardImportText: string;
-  seedanceImportText: string;
-  setScriptImportText: (value: string) => void;
-  setStoryboardImportText: (value: string) => void;
-  setSeedanceImportText: (value: string) => void;
-  handleImportFile: (layer: ImportLayer, event: React.ChangeEvent<HTMLInputElement>) => void;
-  importLayerText: (layer: ImportLayer, value: string) => void;
-  openWorkflowStep: (mode: WorkflowMode) => void;
-  t: (key: string) => string;
-  storyboardShots: StoryboardShot[];
+  workspaceProjectName?: string;
+  workflowStepCards?: WorkflowStepCard[];
+  projectStats?: ProjectStat[];
+  importChecks?: ImportCheck[];
+  scriptImportText?: string;
+  storyboardImportText?: string;
+  seedanceImportText?: string;
+  setScriptImportText?: (value: string) => void;
+  setStoryboardImportText?: (value: string) => void;
+  setSeedanceImportText?: (value: string) => void;
+  handleImportFile?: (layer: ImportLayer, event: React.ChangeEvent<HTMLInputElement>) => void;
+  importLayerText?: (layer: ImportLayer, value: string) => void;
+  openWorkflowStep?: (mode: WorkflowMode) => void;
+  t?: (key: string) => string;
+  storyboardShots?: StoryboardShot[];
   activeShotId?: string;
-  sendShotToImage: (shot: StoryboardShot) => void;
-  sendShotToVideo: (shot: StoryboardShot) => void;
-  generateShotImage: (shot: StoryboardShot) => Promise<unknown>;
-  generateShotVideo: (shot: StoryboardShot) => Promise<unknown>;
+  sendShotToImage?: (shot: StoryboardShot) => void;
+  sendShotToVideo?: (shot: StoryboardShot) => void;
+  generateShotImage?: (shot: StoryboardShot) => Promise<unknown>;
+  generateShotVideo?: (shot: StoryboardShot) => Promise<unknown>;
+  onSelectShot?: (shot: StoryboardShot) => void;
+  onReorderShots?: (shots: StoryboardShot[]) => void;
+  shots?: StoryboardShot[];
 };
 
 export default function SeedreamWorkflowOverview({
@@ -75,6 +78,8 @@ export default function SeedreamWorkflowOverview({
   sendShotToVideo,
   generateShotImage,
   generateShotVideo,
+  onSelectShot,
+  onReorderShots,
 }: Props) {
   const importCards: Array<{
     key: ImportLayer;
@@ -83,12 +88,13 @@ export default function SeedreamWorkflowOverview({
     value: string;
     setter: (value: string) => void;
   }> = [
-    { key: "script", title: "纯剧本版", desc: "写入剧本层，不带生成指令", value: scriptImportText, setter: setScriptImportText },
-    { key: "storyboard", title: "故事板版", desc: "解析段落/镜头，生成故事板卡片", value: storyboardImportText, setter: setStoryboardImportText },
-    { key: "seedance", title: "Seedance直接投喂版", desc: "写入每镜头视频提示词", value: seedanceImportText, setter: setSeedanceImportText },
+    { key: "script", title: "纯剧本版", desc: "写入剧本层，不带生成指令", value: scriptImportText || "", setter: setScriptImportText || (() => {}) },
+    { key: "storyboard", title: "故事板版", desc: "解析段落/镜头，生成故事板卡片", value: storyboardImportText || "", setter: setStoryboardImportText || (() => {}) },
+    { key: "seedance", title: "Seedance直接投喂版", desc: "写入每镜头视频提示词", value: seedanceImportText || "", setter: setSeedanceImportText || (() => {}) },
   ];
 
   const generateSegment = async (segment: VideoSegment) => {
+    if (!generateShotVideo) return;
     for (const shot of segment.shots) {
       await generateShotVideo(shot);
     }
@@ -99,14 +105,14 @@ export default function SeedreamWorkflowOverview({
       <div className="rounded-3xl border border-surface-border bg-surface-card p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold">{workspaceProjectName}</h2>
+            <h2 className="text-lg font-semibold">{workspaceProjectName || "未命名项目"}</h2>
             <p className="text-xs text-text-tertiary">
-              漫剧生产线 · {workflowStepCards.filter((s) => s.done).length}/{workflowStepCards.length} 阶段已准备
+              漫剧生产线 · {(workflowStepCards || []).filter((s) => s.done).length}/{(workflowStepCards || []).length} 阶段已准备
             </p>
           </div>
         </div>
         <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          {projectStats.map((stat) => (
+          {(projectStats || []).map((stat) => (
             <div
               key={stat.label}
               className={cn(
@@ -131,7 +137,7 @@ export default function SeedreamWorkflowOverview({
           </div>
         </div>
         <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-          {importChecks.map((item) => (
+          {(importChecks || []).map((item) => (
             <div key={item.label} className={cn("rounded-2xl border p-3", item.ok ? "border-emerald-200 bg-emerald-50/70" : "border-amber-200 bg-amber-50/70")}>
               <div className="flex items-center justify-between gap-2">
                 <span className={cn("text-xs font-semibold", item.ok ? "text-emerald-700" : "text-amber-700")}>{item.label}</span>
@@ -144,20 +150,20 @@ export default function SeedreamWorkflowOverview({
         </div>
       </div>
 
-      {storyboardShots.length > 0 && (
+      {(storyboardShots || []).length > 0 && (
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
           <div className="rounded-3xl border border-surface-border bg-surface-card p-4">
             <Grid4x3
-              shots={storyboardShots}
+              shots={storyboardShots || []}
               selectedShotId={activeShotId}
-              onSelectShot={sendShotToImage}
-              onGenerateImage={generateShotImage}
-              onGenerateVideo={generateShotVideo}
+              onSelectShot={sendShotToImage || ((shot) => onSelectShot?.(shot))}
+              onGenerateImage={generateShotImage || (async () => {})}
+              onGenerateVideo={generateShotVideo || (async () => {})}
             />
           </div>
           <div className="rounded-3xl border border-surface-border bg-surface-card p-4">
             <VideoSegmentGenerator
-              shots={storyboardShots}
+              shots={storyboardShots || []}
               onGenerateSegment={generateSegment}
               onExtractLastFrame={async () => ""}
             />
@@ -185,7 +191,7 @@ export default function SeedreamWorkflowOverview({
                 <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-surface-border bg-surface-elevated px-2.5 py-1.5 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary">
                   <UploadCloud className="h-3.5 w-3.5" />
                   文件
-                  <input type="file" accept=".md,.txt,text/markdown,text/plain" className="hidden" onChange={(event) => handleImportFile(item.key, event)} />
+                  <input type="file" accept=".md,.txt,text/markdown,text/plain" className="hidden" onChange={(event) => handleImportFile?.(item.key, event)} />
                 </label>
               </div>
               <textarea
@@ -198,7 +204,7 @@ export default function SeedreamWorkflowOverview({
                 <span className="text-[11px] text-text-tertiary">{item.value.trim() ? `${item.value.trim().length} 字` : "可粘贴或上传"}</span>
                 <button
                   type="button"
-                  onClick={() => importLayerText(item.key, item.value)}
+                  onClick={() => importLayerText?.(item.key, item.value)}
                   disabled={!item.value.trim()}
                   className="rounded-xl bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-hover disabled:opacity-50"
                 >
@@ -211,11 +217,11 @@ export default function SeedreamWorkflowOverview({
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {workflowStepCards.map((step) => (
+        {(workflowStepCards || []).map((step) => (
           <button
             key={step.id}
             type="button"
-            onClick={() => openWorkflowStep(step.id)}
+            onClick={() => openWorkflowStep?.(step.id)}
             className={cn(
               "group rounded-2xl border p-4 text-left transition-all hover:-translate-y-0.5",
               step.done ? "border-brand/40 bg-brand/5" : "border-surface-border bg-surface-card"
@@ -223,10 +229,10 @@ export default function SeedreamWorkflowOverview({
           >
             <div className="flex items-start justify-between gap-3">
               <div className={cn("flex h-9 w-9 items-center justify-center rounded-xl text-sm font-bold", step.done ? "bg-brand text-white" : "bg-surface-elevated text-text-tertiary")}>{step.index + 1}</div>
-              <span className={cn("rounded-full px-2.5 py-1 text-[11px] font-medium", step.done ? "bg-brand/10 text-brand" : "bg-surface-elevated text-text-tertiary")}>{step.done ? t("seedreamBeta.workflow.ready") : t("seedreamBeta.workflow.empty")}</span>
+              <span className={cn("rounded-full px-2.5 py-1 text-[11px] font-medium", step.done ? "bg-brand/10 text-brand" : "bg-surface-elevated text-text-tertiary")}>{step.done ? (t?.("seedreamBeta.workflow.ready") || "就绪") : (t?.("seedreamBeta.workflow.empty") || "待开始")}</span>
             </div>
-            <div className="mt-3 text-sm font-semibold text-text-primary">{t(step.titleKey)}</div>
-            <p className="mt-1 line-clamp-2 text-xs leading-5 text-text-tertiary">{step.preview || t(step.descKey)}</p>
+            <div className="mt-3 text-sm font-semibold text-text-primary">{t?.(step.titleKey) || step.titleKey}</div>
+            <p className="mt-1 line-clamp-2 text-xs leading-5 text-text-tertiary">{step.preview || t?.(step.descKey) || step.descKey}</p>
             <div className="mt-3 text-xs font-medium text-brand">{step.done ? "查看" : "开始"} →</div>
           </button>
         ))}

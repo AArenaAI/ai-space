@@ -8,7 +8,12 @@ import {
   Minimize2,
   X,
   Plus,
+  Sparkles,
+  Trash2,
+  Type,
+  Folder,
 } from "lucide-react";
+import ManjuNodeContent from "./ManjuNodeContent";
 
 export interface CanvasNode {
   id: string;
@@ -45,6 +50,7 @@ export interface ManjuCanvasProps {
   selectedNodeId?: string | null;
   readOnly?: boolean;
   children?: React.ReactNode;
+  onDropAddNode?: (type: string, x: number, y: number) => void;
 }
 
 const GRID_SIZE = 24;
@@ -65,6 +71,7 @@ export default function ManjuCanvas({
   selectedNodeId,
   readOnly,
   children,
+  onDropAddNode,
 }: ManjuCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
@@ -73,6 +80,8 @@ export default function ManjuCanvas({
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [panning, setPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId?: string } | null>(null);
 
   // 滚轮缩放
   const onWheel = useCallback(
@@ -102,6 +111,7 @@ export default function ManjuCanvas({
       }
       if (e.button === 0 && e.target === containerRef.current) {
         onNodeSelect?.(null);
+        setContextMenu(null);
       }
     },
     [pan, onNodeSelect]
@@ -180,7 +190,11 @@ export default function ManjuCanvas({
       onMouseUp={onMouseUp}
       onMouseLeave={onMouseUp}
       onDoubleClick={onDoubleClick}
-      onContextMenu={onCanvasContextMenu}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setContextMenu({ x: e.clientX, y: e.clientY });
+        onCanvasContextMenu?.(e);
+      }}
     >
       {/* 背景网格 */}
       <div
@@ -200,6 +214,20 @@ export default function ManjuCanvas({
         style={{
           transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
           transformOrigin: "0 0",
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          const type = e.dataTransfer.getData("nodeType");
+          if (!type || !onDropAddNode) return;
+          const rect = containerRef.current?.getBoundingClientRect();
+          if (!rect) return;
+          const x = Math.round((e.clientX - rect.left - pan.x) / zoom / GRID_SIZE) * GRID_SIZE;
+          const y = Math.round((e.clientY - rect.top - pan.y) / zoom / GRID_SIZE) * GRID_SIZE;
+          onDropAddNode(type, x, y);
         }}
       >
         {/* 连接线 SVG */}
@@ -253,6 +281,7 @@ export default function ManjuCanvas({
             onContextMenu={(e) => {
               e.preventDefault();
               e.stopPropagation();
+              setContextMenu({ x: e.clientX, y: e.clientY, nodeId: node.id });
               onNodeContextMenu?.(node, e);
             }}
           >
@@ -303,7 +332,15 @@ export default function ManjuCanvas({
             </div>
 
             {/* 节点内容 */}
-            {!node.collapsed && <div className="px-3 pb-3">{children}</div>}
+            {!node.collapsed && (
+              <div className="px-3 pb-3">
+                {children ? (
+                  children
+                ) : (
+                  <ManjuNodeContent node={node} />
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -358,6 +395,109 @@ export default function ManjuCanvas({
           <Plus className="h-5 w-5" />
         </button>
       </div>
+      {/* 右键菜单 */}
+      {contextMenu && (
+        <div
+          className="fixed z-50 min-w-[140px] rounded-lg border border-surface-border bg-surface-elevated py-1 shadow-lg"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          {contextMenu.nodeId ? (
+            <>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:bg-surface-card"
+                onClick={() => {
+                  const node = nodes.find((n) => n.id === contextMenu.nodeId);
+                  if (node) onNodeDoubleClick?.(node);
+                  setContextMenu(null);
+                }}
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                编辑
+              </button>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:bg-surface-card"
+                onClick={() => {
+                  const node = nodes.find((n) => n.id === contextMenu.nodeId);
+                  if (node) onToggleCollapse?.(node.id);
+                  setContextMenu(null);
+                }}
+              >
+                {nodes.find((n) => n.id === contextMenu.nodeId)?.collapsed ? (
+                  <Maximize2 className="h-3.5 w-3.5" />
+                ) : (
+                  <Minimize2 className="h-3.5 w-3.5" />
+                )}
+                {nodes.find((n) => n.id === contextMenu.nodeId)?.collapsed ? "展开" : "折叠"}
+              </button>
+              <div className="my-1 h-px bg-surface-border" />
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-red-500 hover:bg-red-50"
+                onClick={() => {
+                  onDeleteNode?.(contextMenu.nodeId!);
+                  setContextMenu(null);
+                }}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                删除
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:bg-surface-card"
+                onClick={() => {
+                  const rect = containerRef.current?.getBoundingClientRect();
+                  if (rect && onAddNode) {
+                    const x = Math.round((contextMenu.x - rect.left - pan.x) / zoom / GRID_SIZE) * GRID_SIZE;
+                    const y = Math.round((contextMenu.y - rect.top - pan.y) / zoom / GRID_SIZE) * GRID_SIZE;
+                    onAddNode("shot", x, y);
+                  }
+                  setContextMenu(null);
+                }}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                添加镜头
+              </button>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:bg-surface-card"
+                onClick={() => {
+                  const rect = containerRef.current?.getBoundingClientRect();
+                  if (rect && onAddNode) {
+                    const x = Math.round((contextMenu.x - rect.left - pan.x) / zoom / GRID_SIZE) * GRID_SIZE;
+                    const y = Math.round((contextMenu.y - rect.top - pan.y) / zoom / GRID_SIZE) * GRID_SIZE;
+                    onAddNode("text", x, y);
+                  }
+                  setContextMenu(null);
+                }}
+              >
+                <Type className="h-3.5 w-3.5" />
+                添加文本
+              </button>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:bg-surface-card"
+                onClick={() => {
+                  const rect = containerRef.current?.getBoundingClientRect();
+                  if (rect && onAddNode) {
+                    const x = Math.round((contextMenu.x - rect.left - pan.x) / zoom / GRID_SIZE) * GRID_SIZE;
+                    const y = Math.round((contextMenu.y - rect.top - pan.y) / zoom / GRID_SIZE) * GRID_SIZE;
+                    onAddNode("group", x, y);
+                  }
+                  setContextMenu(null);
+                }}
+              >
+                <Folder className="h-3.5 w-3.5" />
+                添加分组
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

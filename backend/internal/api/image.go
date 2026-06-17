@@ -844,26 +844,10 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 	providerImagePath := imageFilePath
 	canvasTransform := editCanvasTransform{Original: targetSize, Canvas: targetSize, Content: image.Rect(0, 0, targetSize.X, targetSize.Y)}
 	cleanupEditCanvas := func() {}
-	editPrompt := req.Prompt
+	editPrompt := buildImageEditPrompt(req.Prompt, editRoute)
 	background := ""
-	switch req.EditMode {
-	case "remove-bg":
-		editPrompt = "Remove the background. Keep only the main subject in the exact same position, size, and framing. Do NOT zoom in, crop, or recompose."
+	if editRoute.EditMode == "remove-bg" {
 		background = "transparent"
-	case "text-removal":
-		editPrompt = "Remove all detected text/watermark-like content from the image. Keep everything else intact."
-	case "upscale":
-		editPrompt = "Enhance image quality locally without changing size, aspect ratio, composition, or content."
-	case "inpaint":
-		editPrompt = "STRICT LOCAL INPAINTING TASK. The provided mask marks the ONLY editable region: transparent pixels in the mask must be replaced, fully opaque pixels must remain unchanged. First remove the original object/content inside the transparent masked area, then replace that same masked area with: " + req.Prompt + ". Do not add the requested object anywhere outside the masked area. Do not keep the original masked object visible. Preserve every unmasked pixel, composition, lighting, perspective, and identity exactly."
-	case "region-brush":
-		if req.Prompt != "" {
-			editPrompt = "Remove the object/content inside the transparent masked area and naturally fill the area using surrounding context. User note: " + req.Prompt + ". Do not add a new object unless explicitly required. Keep all unmasked pixels unchanged."
-		} else {
-			editPrompt = "Remove the object/content inside the transparent masked area. Fill the area naturally using surrounding context so the selected object disappears. Keep all unmasked pixels unchanged."
-		}
-	default:
-		editPrompt = req.Prompt + ". Keep the subject the same, only change the background."
 	}
 
 	gen := &services.ImageGeneration{
@@ -932,11 +916,11 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 			return
 		}
 		if req.EditMode == "replace-bg" {
-			h.processBackgroundReplacementJob(gen.ID, imageFilePath, req.Prompt, size, baseURL)
+			h.processBackgroundReplacementJob(gen.ID, imageFilePath, req.Prompt, size, baseURL, editRoute)
 			return
 		}
 		if req.EditMode == "text-removal" {
-			h.processTextRemovalJob(gen.ID, imageFilePath, req.Prompt, baseURL)
+			h.processTextRemovalJob(gen.ID, imageFilePath, req.Prompt, baseURL, editRoute)
 			return
 		}
 		if req.EditMode == "upscale" {
@@ -956,6 +940,90 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 		"status":     gen.Status,
 		"created_at": gen.CreatedAt,
 	})
+}
+
+func buildImageEditPrompt(userPrompt string, route services.ImageEditRoute) string {
+	prompt := strings.TrimSpace(userPrompt)
+	subMode := strings.ToLower(strings.TrimSpace(route.SubMode))
+	switch route.EditMode {
+	case "remove-bg":
+		base := "Remove the background. Keep only the main subject in the exact same position, size, and framing. Do NOT zoom in, crop, or recompose."
+		switch subMode {
+		case "fine-hair":
+			return base + " Preserve fine hair, fur, translucent edges, and soft semi-transparent boundary pixels. Avoid hard cutout halos."
+		case "product-edge":
+			return base + " Preserve crisp product edges, straight lines, holes, handles, and small protrusions. Avoid rounding corners or erasing thin product parts."
+		case "defringe":
+			return base + " Remove colored edge spill/fringing from the old background while preserving the subject contour."
+		default:
+			return base
+		}
+	case "text-removal":
+		switch subMode {
+		case "screenshot":
+			return "Remove UI text labels and watermark-like text only. Preserve icons, buttons, app windows, lines, charts, and layout pixels outside detected glyph strokes."
+		case "poster":
+			return "Remove large poster/banner text and typography blocks. Reconstruct the underlying image texture, gradients, and illustration details without changing composition."
+		case "watermark":
+			return "Remove watermark/logo-like overlaid text and semi-transparent marks only. Preserve original image details and global colors."
+		default:
+			return "Remove all detected text/watermark-like content from the image. Keep everything else intact."
+		}
+	case "upscale":
+		if subMode == "ai" {
+			return "Improve clarity and restore lost detail while preserving the exact size, aspect ratio, identity, composition, and all object positions. Do not stylize or redraw unrelated content."
+		}
+		return "Enhance image quality locally without changing size, aspect ratio, composition, identity, or content."
+	case "inpaint":
+		if prompt == "" {
+			prompt = "naturally repair the selected area"
+		}
+		switch subMode {
+		case "modify":
+			return "STRICT LOCAL MODIFICATION TASK. The transparent mask marks the ONLY editable region. Modify the existing masked content according to: " + prompt + ". Keep the same object/location structure unless explicitly requested. Preserve every unmasked pixel exactly."
+		case "add":
+			return "STRICT LOCAL ADDITION TASK. Add the requested content only inside the transparent masked area: " + prompt + ". Match surrounding lighting, perspective, scale, and occlusion. Do not alter or add anything outside the mask."
+		case "repair":
+			return "STRICT LOCAL REPAIR TASK. Repair defects only inside the transparent masked area. Use surrounding context and the user note if helpful: " + prompt + ". Do not invent new objects. Preserve every unmasked pixel exactly."
+		default:
+			return "STRICT LOCAL INPAINTING TASK. The provided mask marks the ONLY editable region: transparent pixels in the mask must be replaced, fully opaque pixels must remain unchanged. First remove the original object/content inside the transparent masked area, then replace that same masked area with: " + prompt + ". Do not add the requested object anywhere outside the masked area. Do not keep the original masked object visible. Preserve every unmasked pixel, composition, lighting, perspective, and identity exactly."
+		}
+	case "region-brush":
+		base := "Remove the object/content inside the transparent masked area. Fill the area naturally using surrounding context so the selected object disappears. Keep all unmasked pixels unchanged."
+		if prompt != "" {
+			base = "Remove the object/content inside the transparent masked area and naturally fill the area using surrounding context. User note: " + prompt + ". Do not add a new object unless explicitly required. Keep all unmasked pixels unchanged."
+		}
+		switch subMode {
+		case "include-shadow":
+			return base + " Also remove the selected object's attached shadow/reflection/contact mark when it is inside or adjacent to the mask. Reconstruct the clean background plane."
+		case "strong-cleanup":
+			return base + " Use stronger cleanup: remove leftover edges, halos, shadows, reflections, and object fragments in the masked region while avoiding changes outside the mask."
+		default:
+			return base
+		}
+	default:
+		if prompt == "" {
+			return "Keep the subject the same, only change the background."
+		}
+		return prompt + ". Keep the subject the same, only change the background."
+	}
+}
+
+func buildBackgroundOnlyPrompt(userPrompt string, subMode string) string {
+	prompt := strings.TrimSpace(userPrompt)
+	base := "Create only a background image, with no foreground subject, no person, no product, no main object. The output is a background plate that will be composited behind an existing subject."
+	switch strings.ToLower(strings.TrimSpace(subMode)) {
+	case "solid":
+		return base + " Use a clean solid or subtle gradient background with no props and no distracting texture. Background description: " + prompt
+	case "commerce":
+		return base + " Use a clean e-commerce product background, soft realistic shadow-compatible surface, uncluttered, premium catalog style. Background description: " + prompt
+	case "studio":
+		return base + " Use a professional studio backdrop with controlled lighting, natural floor/wall transition, and no foreground objects. Background description: " + prompt
+	case "stylized":
+		return base + " Use the requested stylized/artistic environment, but keep it as a background-only plate without foreground subjects or objects that compete with the original subject. Background description: " + prompt
+	default:
+		return base + " Match realistic perspective and lighting so the original subject can be composited naturally. Background description: " + prompt
+	}
 }
 
 // saveBase64ToImages 将 base64 数据保存到 data/images/ 目录，返回完整文件路径
@@ -1439,7 +1507,7 @@ func (h *ImageHandler) processBackgroundRemovalJob(recordID uint, sourcePath str
 	h.recordLocalImageUtility(recordID, "remove_bg")
 }
 
-func (h *ImageHandler) processTextRemovalJob(recordID uint, sourcePath string, prompt string, baseURL string) {
+func (h *ImageHandler) processTextRemovalJob(recordID uint, sourcePath string, prompt string, baseURL string, route services.ImageEditRoute) {
 	if sourcePath == "" {
 		h.failImageGeneration(recordID, "文字消除失败：源图片路径为空")
 		return
@@ -1474,7 +1542,7 @@ func (h *ImageHandler) processTextRemovalJob(recordID uint, sourcePath string, p
 
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", script, "--input", sourcePath, "--output", outputPath, "--prompt", prompt)
+	cmd := exec.CommandContext(ctx, "python3", script, "--input", sourcePath, "--output", outputPath, "--prompt", prompt, "--sub-mode", route.SubMode)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -1502,7 +1570,7 @@ func (h *ImageHandler) processTextRemovalJob(recordID uint, sourcePath string, p
 		fmt.Printf("[文字消除更新记录失败] ID=%d err=%v\n", recordID, saveErr)
 		return
 	}
-	fmt.Printf("[文字消除成功] ID=%d output_size=%s url=%s stdout=%s\n", recordID, outputSize, imageURL, stdout.String())
+	fmt.Printf("[文字消除成功] ID=%d sub_mode=%s output_size=%s url=%s stdout=%s\n", recordID, route.SubMode, outputSize, imageURL, stdout.String())
 	h.recordLocalImageUtility(recordID, "text_removal")
 }
 
@@ -1576,7 +1644,7 @@ func (h *ImageHandler) processQualityEnhancementJob(recordID uint, sourcePath st
 	h.recordLocalImageUtility(recordID, "upscale")
 }
 
-func (h *ImageHandler) processBackgroundReplacementJob(recordID uint, sourcePath string, prompt string, originalSize string, baseURL string) {
+func (h *ImageHandler) processBackgroundReplacementJob(recordID uint, sourcePath string, prompt string, originalSize string, baseURL string, route services.ImageEditRoute) {
 	if sourcePath == "" {
 		h.failImageGeneration(recordID, "背景替换失败：源图片路径为空")
 		return
@@ -1596,7 +1664,7 @@ func (h *ImageHandler) processBackgroundReplacementJob(recordID uint, sourcePath
 
 	originalPoint, _ := parseImageSize(originalSize)
 	backgroundSize := fitBackgroundGenerationSize(originalPoint)
-	backgroundPrompt := "Create only a background image, with no foreground subject, no person, no product, no main object. Background description: " + prompt
+	backgroundPrompt := buildBackgroundOnlyPrompt(prompt, route.SubMode)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -1664,7 +1732,7 @@ func (h *ImageHandler) processBackgroundReplacementJob(recordID uint, sourcePath
 		fmt.Printf("[背景替换更新记录失败] ID=%d err=%v\n", recordID, saveErr)
 		return
 	}
-	fmt.Printf("[背景替换成功] ID=%d output_size=%s background_size=%s url=%s stdout=%s\n", recordID, outputSize, backgroundSize, imageURL, stdout.String())
+	fmt.Printf("[背景替换成功] ID=%d sub_mode=%s output_size=%s background_size=%s url=%s stdout=%s\n", recordID, route.SubMode, outputSize, backgroundSize, imageURL, stdout.String())
 	h.recordLocalImageUtility(recordID, "replace_bg_composite")
 }
 
