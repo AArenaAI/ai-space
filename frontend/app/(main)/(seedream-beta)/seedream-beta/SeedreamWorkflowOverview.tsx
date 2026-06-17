@@ -4,7 +4,8 @@ import { UploadCloud } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { WorkflowMode, StoryboardShot } from "./types";
 import Grid4x3 from "./Grid4x3";
-import VideoSegmentGenerator, { type VideoSegment } from "./VideoSegmentGenerator";
+import VideoSegmentGenerator from "./VideoSegmentGenerator";
+import type { VideoSegment } from "./types";
 
 type WorkflowStepCard = {
   id: WorkflowMode;
@@ -164,8 +165,8 @@ export default function SeedreamWorkflowOverview({
           <div className="rounded-3xl border border-surface-border bg-surface-card p-4">
             <VideoSegmentGenerator
               shots={storyboardShots || []}
+              assets={[]}
               onGenerateSegment={generateSegment}
-              onExtractLastFrame={async () => ""}
             />
           </div>
         </div>

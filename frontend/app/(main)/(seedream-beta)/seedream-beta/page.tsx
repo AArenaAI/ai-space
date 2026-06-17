@@ -66,6 +66,7 @@ import DirectorInheritanceControls from "./DirectorInheritanceControls";
 import ShotOverviewTable from "./ShotOverviewTable";
 import ManjuNodePanel from "./ManjuNodePanel";
 import ManjuStudioLayout from "./ManjuStudioLayout";
+import VideoSegmentGenerator from "./VideoSegmentGenerator";
 import type { CanvasNode } from "./ManjuCanvas";
 import { copyDirectorBlockToShots, createDefaultDirectorBlock, findDirectorBlockForShot, getSceneAssetForShot, injectDirectorBlockToPrompt } from "./directorBlock";
 
@@ -1847,6 +1848,8 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
         onStepChange={(step) => {
           if (step === "overview") {
             setWorkflowView("overview");
+          } else if (step === "videoSegments") {
+            setWorkflowView("videoSegments");
           } else {
             setWorkflowMode(step as WorkflowMode);
             setWorkflowView("step");
@@ -1855,6 +1858,9 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
         onGenerate={(step) => {
           setWorkflowMode(step);
           setWorkflowView("step");
+          if (step === "storyboardImage" || step === "storyboardVideo") {
+            generateWorkflow(step);
+          }
         }}
         generating={workflowGenerating}
         nodes={storyboardShots.map((shot, i) => ({
@@ -1892,7 +1898,32 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
         onOpenProject={() => toast.info("开发中")}
         onSettings={() => toast.info("开发中")}
       >
-        {workflowView === "step" && activeShotId ? (
+        {workflowView === "videoSegments" ? (
+          <div className="h-full overflow-y-auto p-4">
+            <VideoSegmentGenerator
+              shots={storyboardShots}
+              assets={assets}
+              onGenerateSegment={async (segment) => {
+                // 逐镜头生成视频，使用尾帧衔接
+                for (let i = 0; i < segment.shots.length; i++) {
+                  const shot = segment.shots[i];
+                  const prevShot = i > 0 ? segment.shots[i - 1] : undefined;
+                  
+                  // 如果有前一段的尾帧，设置为当前镜头的首帧参考
+                  if (prevShot?.lastFrameAssetId) {
+                    updateShot(shot.id, {
+                      firstFrameAssetId: prevShot.lastFrameAssetId,
+                      referenceAssetIds: Array.from(new Set([...(shot.referenceAssetIds || []), prevShot.lastFrameAssetId])),
+                    });
+                  }
+                  
+                  await generateShotVideo(shot, "batch");
+                }
+                toast.success(`段落 ${segment.index} 视频生成已提交`);
+              }}
+            />
+          </div>
+        ) : workflowView === "step" && activeShotId ? (
           <div className="h-full overflow-y-auto p-4">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-text-primary">

@@ -80,26 +80,42 @@ export default function ModelPricesPage() {
     return unit;
   };
 
+  // 转换为人民币价格（参考后端 convertSourceUnitToRMB 逻辑）
+  const convertToRMB = (price: number, currency: string, unit: string) => {
+    if (price === undefined || price === 0) return null;
+    const rate = currency === "USD" ? 7.2 : 1; // 简化汇率，实际应从后端获取
+    switch (unit) {
+      case "per_1m_tokens":
+        return (price * rate) / 1000; // 转为 ¥/千tokens
+      case "per_1m_characters_source":
+      case "per_1m_characters_input_output":
+        return price * rate; // 百万字符
+      default:
+        return price * rate;
+    }
+  };
+
   // 估算单次对话成本（假设 4k 输入 / 2k 输出）
   const estimateChatCost = (price: ModelPrice) => {
     const inputTokens = 4000;
     const outputTokens = 2000;
-    let inputCost = 0;
-    let outputCost = 0;
 
-    if (price.source_input_cache_miss_price !== undefined) {
-      inputCost = (price.source_input_cache_miss_price * inputTokens) / 1_000_000;
-    } else if (price.source_input_price !== undefined) {
-      inputCost = (price.source_input_price * inputTokens) / 1_000_000;
-    }
+    const inputPriceRMB = convertToRMB(
+      price.source_input_cache_miss_price ?? price.source_input_price ?? 0,
+      price.source_currency,
+      price.source_unit
+    );
+    const outputPriceRMB = convertToRMB(
+      price.source_output_price ?? 0,
+      price.source_currency,
+      price.source_unit
+    );
 
-    if (price.source_output_price !== undefined) {
-      outputCost = (price.source_output_price * outputTokens) / 1_000_000;
-    }
-
+    const inputCost = inputPriceRMB ? (inputPriceRMB * inputTokens) / 1000 : 0;
+    const outputCost = outputPriceRMB ? (outputPriceRMB * outputTokens) / 1000 : 0;
     const total = inputCost + outputCost;
-    const currency = price.source_currency === "CNY" ? "¥" : "$";
-    return { total, currency, inputCost, outputCost };
+
+    return { total, inputCost, outputCost };
   };
 
   // 查找对应的平台积分成本
@@ -202,8 +218,13 @@ export default function ModelPricesPage() {
                 <div className="rounded-lg bg-surface-elevated p-3">
                   <p className="text-xs text-text-tertiary">估算单次（4k/2k）</p>
                   <p className="mt-1 text-sm font-medium text-text-primary">
-                    {estimate.currency}
-                    {estimate.total.toFixed(4)}
+                    {estimate.total > 0 ? (
+                      <>
+                        ¥{estimate.total.toFixed(4)}
+                      </>
+                    ) : (
+                      <span className="text-text-tertiary">-</span>
+                    )}
                   </p>
                 </div>
 

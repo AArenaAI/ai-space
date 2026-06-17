@@ -1,6 +1,6 @@
 export type Tab = "workflow" | "image" | "video";
-export type WorkflowMode = "novel" | "script" | "assets" | "storyboardVideo" | "storyboardImage";
-export type WorkflowView = "overview" | "step";
+export type WorkflowMode = "novel" | "script" | "assets" | "storyboardVideo" | "storyboardImage" | "videoSegments";
+export type WorkflowView = "overview" | "step" | "videoSegments";
 export type AssetKind = "image" | "video" | "file";
 export type AssetRole = "reference_image" | "first_frame" | "last_frame" | "reference_video" | "character" | "scene" | "prop" | "style";
 export type SemanticAssetKind = "character" | "scene" | "prop" | "style";
@@ -43,6 +43,15 @@ export type SemanticAsset = {
   negativePrompt?: string;
   linkedAssetIds: string[];
   createdAt: string;
+};
+
+export type VideoSegment = {
+  id: string;
+  index: number;
+  title: string;
+  shots: StoryboardShot[];
+  lastFrameShotId?: string; // 用于尾帧衔接
+  status: "draft" | "generating" | "done" | "failed";
 };
 
 export type StoryboardShot = {
