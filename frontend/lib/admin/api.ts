@@ -127,6 +127,13 @@ export function updateAdminUser(id: number, patch: Partial<Pick<AdminUser, "role
   return adminFetch<{ user: AdminUser }>(`/users/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
+export function adjustUserCredits(id: number, tier: "basic" | "advanced" | "elite", amount: number, mode: "add" | "set" = "add", reason?: string) {
+  return adminFetch<{ user: AdminUser }>(`/users/${id}/credits/adjust`, {
+    method: "POST",
+    body: JSON.stringify({ tier, amount, mode, reason: reason || "admin_adjust" }),
+  });
+}
+
 export function getAdminUsageSummary(range = "7d") {
   return cachedAdminFetch<AdminUsageSummary>(`/usage/summary${qs({ range })}`);
 }

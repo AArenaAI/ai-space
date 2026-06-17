@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Copy, Download, ImageIcon, Loader2, Layers, MessageSquare, PanelLeftOpen, Paperclip, Play, Plus, RefreshCw, Send, Sparkles, Trash2, UploadCloud, Video, Wand2, X, LayoutGrid, Film, Grid3X3, List, Search } from "lucide-react";
+import { Copy, Download, ImageIcon, Loader2, MessageSquare, PanelLeftOpen, Paperclip, Play, Plus, RefreshCw, Send, Sparkles, Trash2, UploadCloud, Video, Wand2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useImage, type GeneratedImage } from "@/hooks/useImage";
 import { useVideo, type VideoGeneration } from "@/hooks/useVideo";
@@ -47,29 +47,24 @@ import type {
   ShotPurpose,
   ShotStatus,
   ShotType,
+  DirectorBlock,
   StoredAsset,
   StoryboardShot,
   Tab,
   WorkflowMode,
   WorkflowView,
-  DirectorBlock,
 } from "./types";
 import { FieldLabel, PillButton } from "./components";
 import { useSeedreamProjects } from "./useSeedreamProjects";
-import {
-  findDirectorBlockForShot,
-  getDirectorReferenceAssets,
-  injectDirectorBlockToPrompt,
-  createDefaultDirectorBlock,
-  getSceneAssetForShot,
-  autoInheritDirectorBlocks,
-  copyDirectorBlockToShots,
-} from "./directorBlock";
-import Grid4x3 from "./Grid4x3";
-import VideoSegmentGenerator from "./VideoSegmentGenerator";
-import AssetLibraryLayout from "./AssetLibraryLayout";
-import Director3DPanel from "./Director3DPanel";
+import SeedreamWorkflowOverview from "./SeedreamWorkflowOverview";
+import SeedreamVideoTab from "./SeedreamVideoTab";
+import SeedreamImageTab from "./SeedreamImageTab";
 import DirectorPanel from "./DirectorPanel";
+import ShotPromptInspector from "./ShotPromptInspector";
+import BatchPreflightPanel from "./BatchPreflightPanel";
+import DirectorInheritanceControls from "./DirectorInheritanceControls";
+import ShotOverviewTable from "./ShotOverviewTable";
+import { copyDirectorBlockToShots, createDefaultDirectorBlock, findDirectorBlockForShot, getSceneAssetForShot, injectDirectorBlockToPrompt } from "./directorBlock";
 
 function getAuthHeaders() {
   const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
@@ -421,18 +416,16 @@ export default function SeedreamBetaPage() {
   const [activeShotId, setActiveShotId] = useState<string | undefined>();
   const [generationJobs, setGenerationJobs] = useState<GenerationJob[]>([]);
   const [semanticAssets, setSemanticAssets] = useState<SemanticAsset[]>([]);
+  const [directorBlocks, setDirectorBlocks] = useState<DirectorBlock[]>([]);
+  const [selectedOverviewShotIds, setSelectedOverviewShotIds] = useState<string[]>([]);
   const [activeSemanticAssetId, setActiveSemanticAssetId] = useState<string | undefined>();
   const [assetImageGeneratingId, setAssetImageGeneratingId] = useState<string | null>(null);
-  // 导演台
-  const [directorBlocks, setDirectorBlocks] = useState<DirectorBlock[]>([]);
-  const [showDirectorPanel, setShowDirectorPanel] = useState(false);
-  const [showDirector3DPanel, setShowDirector3DPanel] = useState(false); // 3D 导演台
-  const [showSkeletonOverlay, setShowSkeletonOverlay] = useState(false); // 骨骼可视化开关
   const [showAssetLibraryPicker, setShowAssetLibraryPicker] = useState(false);
   const [assetKindFilter, setAssetKindFilter] = useState<AssetKindFilter>("all");
   const [batchGenerating, setBatchGenerating] = useState<"sketches" | "images" | "videos" | null>(null);
   const [batchMode, setBatchMode] = useState<BatchMode>("missing");
   const [batchLimit, setBatchLimit] = useState(6);
+  const [showDirectorPanel, setShowDirectorPanel] = useState(false);
   const [scriptImportText, setScriptImportText] = useState("");
   const [storyboardImportText, setStoryboardImportText] = useState("");
   const [seedanceImportText, setSeedanceImportText] = useState("");
@@ -656,23 +649,10 @@ export default function SeedreamBetaPage() {
     setActiveShotId(activeProject.activeShotId || loadedShots[0]?.id);
     setGenerationJobs(activeProject.generationJobs || []);
     setSemanticAssets(activeProject.semanticAssets || []);
-    setActiveSemanticAssetId(activeProject.semanticAssets?.[0]?.id);
-    // 导演台
     setDirectorBlocks(activeProject.directorBlocks || []);
-    setShowDirectorPanel(false);
+    setActiveSemanticAssetId(activeProject.semanticAssets?.[0]?.id);
     setLoadedProjectId(activeProject.id);
   }, [activeProject?.id]);
-
-  // 导演台自动继承：当 storyboardShots 变化时，为同场景无导演台的镜头自动继承
-  useEffect(() => {
-    if (!storyboardShots.length || !semanticAssets.length) return;
-    setDirectorBlocks((prev) => {
-      const inherited = autoInheritDirectorBlocks(storyboardShots, prev, semanticAssets);
-      // 只有真正新增了 block 才更新，避免无限循环
-      if (inherited.length === prev.length) return prev;
-      return inherited;
-    });
-  }, [storyboardShots.map((s) => s.id + s.scene).join(",")]);
 
 
   useEffect(() => {
@@ -699,7 +679,7 @@ export default function SeedreamBetaPage() {
       directorBlocks,
       updatedAt: new Date().toISOString(),
     } : project));
-  }, [activeProject?.id, loadedProjectId, workflowIdea, workflowNovel, scriptSourceExcerpt, scriptAdaptationInstruction, workflowScript, workflowAssets, workflowStoryboardVideo, workflowStoryboardImage, assets, selectedAssetIds, imagePrompt, videoPrompt, storyboardShots, activeShotId, generationJobs, semanticAssets]);
+  }, [activeProject?.id, loadedProjectId, workflowIdea, workflowNovel, scriptSourceExcerpt, scriptAdaptationInstruction, workflowScript, workflowAssets, workflowStoryboardVideo, workflowStoryboardImage, assets, selectedAssetIds, imagePrompt, videoPrompt, storyboardShots, activeShotId, generationJobs, semanticAssets, directorBlocks]);
 
 
 
@@ -753,6 +733,7 @@ export default function SeedreamBetaPage() {
 
   const selectedAssets = useMemo(() => assets.filter((item) => selectedAssetIds.includes(item.id)), [assets, selectedAssetIds]);
   const activeShot = useMemo(() => storyboardShots.find((item) => item.id === activeShotId) || storyboardShots[0], [storyboardShots, activeShotId]);
+  const activeDirectorBlock = useMemo(() => activeShot ? findDirectorBlockForShot(directorBlocks, activeShot.id) : undefined, [directorBlocks, activeShot]);
   const activeSemanticAsset = useMemo(() => semanticAssets.find((item) => item.id === activeSemanticAssetId) || semanticAssets[0], [semanticAssets, activeSemanticAssetId]);
   const activeSemanticAssetImageJobs = useMemo(() => activeSemanticAsset
     ? generationJobs.filter((job) => job.type === "image" && job.semanticAssetId === activeSemanticAsset.id).slice(0, 3)
@@ -1480,15 +1461,9 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
   };
 
   const buildImagePromptForGeneration = (shot: StoryboardShot) => {
-    const base = shot.imagePrompt?.trim() || "";
-    // 注入导演台空间锁定
     const directorBlock = findDirectorBlockForShot(directorBlocks, shot.id);
-    const directorLock = directorBlock
-      ? injectDirectorBlockToPrompt("", directorBlock, semanticAssets)
-      : "";
-    if (base) {
-      return directorLock ? `${directorLock}\n\n${base}` : base;
-    }
+    const base = shot.imagePrompt?.trim() || "";
+    if (base) return injectDirectorBlockToPrompt(base, directorBlock, semanticAssets);
     const structured = [
       `分镜${shot.index}：${shot.title}`,
       shot.scene ? `画面场景：${shot.scene}` : "",
@@ -1498,11 +1473,10 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
       shot.dialogue ? `关键对白：${shot.dialogue}` : "",
       shot.purpose ? `目的：${shot.purpose}` : "",
     ].filter(Boolean).join("\n");
-    const combined = structured || "";
-    return directorLock ? `${directorLock}\n\n${combined}` : combined;
+    return structured ? injectDirectorBlockToPrompt(structured, directorBlock, semanticAssets) : "";
   };
 
-  const generateShotImage = async (shot: StoryboardShot) => {
+  const generateShotImage = async (shot: StoryboardShot, entryPath: "single" | "batch" = "single") => {
     const prompt = buildImagePromptForGeneration(shot);
     if (!prompt) {
       toast.error("镜头缺少分镜图提示词");
@@ -1510,15 +1484,11 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     }
     setActiveShotId(shot.id);
     updateShot(shot.id, { status: "image_generating" });
-    // 导演台参考图：场景背景 + 角色资产
-    const directorBlock = findDirectorBlockForShot(directorBlocks, shot.id);
-    const directorRefs = directorBlock ? getDirectorReferenceAssets(directorBlock, assets) : [];
-    const shotRefs = assets.filter((asset) => shot.referenceAssetIds.includes(asset.id) && asset.type === "image").map((asset) => asset.publicId || asset.url);
-    const refs = Array.from(new Set([...directorRefs, ...shotRefs]));
+    const refs = assets.filter((asset) => shot.referenceAssetIds.includes(asset.id) && asset.type === "image").map((asset) => asset.publicId || asset.url);
     try {
       const data = await generateImage(prompt, shot.aspectRatio || imageAspect, imageResolution, SEEDREAM_IMAGE_QUALITY, refs, "seedream");
       setLastImageId(data.id);
-      addGenerationJob({ id: `job-image-${data.id}-${Date.now()}`, shotId: shot.id, type: "image", mediaId: data.id, prompt, status: "pending", intent: "shot_image", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+      addGenerationJob({ id: `job-image-${data.id}-${Date.now()}`, shotId: shot.id, type: "image", mediaId: data.id, prompt, status: "pending", intent: "shot_image", entryPath, promptSource: shot.imagePrompt.trim() ? "imagePrompt" : "structuredFallback", directorInjected: Boolean(findDirectorBlockForShot(directorBlocks, shot.id)), referenceImageCount: refs.length, referenceVideoCount: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
       updateShot(shot.id, { status: "image_generating" });
       return data;
     } catch (err) {
@@ -1527,13 +1497,13 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     }
   };
 
-  const generateShotSketch = async (shot: StoryboardShot) => {
+  const generateShotSketch = async (shot: StoryboardShot, entryPath: "single" | "batch" = "single") => {
     const prompt = buildStoryboardSketchPrompt(shot);
     setActiveShotId(shot.id);
     try {
       const data = await generateImage(prompt, shot.aspectRatio || imageAspect, imageResolution, "standard", [], "seedream");
       setLastImageId(data.id);
-      addGenerationJob({ id: `job-sketch-${data.id}-${Date.now()}`, shotId: shot.id, type: "image", mediaId: data.id, prompt, status: "pending", intent: "storyboard_sketch", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+      addGenerationJob({ id: `job-sketch-${data.id}-${Date.now()}`, shotId: shot.id, type: "image", mediaId: data.id, prompt, status: "pending", intent: "storyboard_sketch", entryPath, promptSource: "storyboardSketch", directorInjected: false, referenceImageCount: 0, referenceVideoCount: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
       toast.success("已提交故事版草稿图任务");
       return data;
     } catch (err) {
@@ -1542,40 +1512,32 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     }
   };
 
-  const generateShotVideo = async (shot: StoryboardShot) => {
-    const prompt = (shot.videoPrompt || shot.imagePrompt).trim();
+  const generateShotVideo = async (shot: StoryboardShot, entryPath: "single" | "batch" = "single") => {
+    const rawPrompt = (shot.videoPrompt || shot.imagePrompt).trim();
+    const prompt = injectDirectorBlockToPrompt(rawPrompt, findDirectorBlockForShot(directorBlocks, shot.id), semanticAssets);
     if (!prompt) {
       toast.error("镜头缺少视频提示词");
       return null;
     }
-    // 注入导演台空间锁定到视频提示词
-    const directorBlock = findDirectorBlockForShot(directorBlocks, shot.id);
-    const directorLock = directorBlock
-      ? injectDirectorBlockToPrompt("", directorBlock, semanticAssets)
-      : "";
-    const finalPrompt = directorLock ? `${directorLock}\n\n${prompt}` : prompt;
     setActiveShotId(shot.id);
     updateShot(shot.id, { status: "video_generating" });
     const refs = getShotAssets(shot, assets);
     const imageAssets = refs.filter((asset) => asset.type === "image" && !isStoryboardSketchAsset(asset) && VIDEO_REFERENCE_ROLES.has(asset.role || "reference_image"));
     const videoAssets = refs.filter((asset) => asset.type === "video");
-    // 导演台参考图：场景背景 + 角色资产（追加到参考图）
-    const directorRefs = directorBlock ? getDirectorReferenceAssets(directorBlock, assets) : [];
-    const allImageRefs = Array.from(new Set([...imageAssets.map((asset) => asset.publicId || asset.url), ...directorRefs]));
     try {
       const data = await generateVideo({
-        prompt: finalPrompt,
+        prompt,
         model: videoModel,
         ratio: shot.aspectRatio || videoAspect,
         duration: shot.duration || videoDuration,
         generate_audio: videoAudio,
         watermark: false,
-        reference_image_urls: allImageRefs,
+        reference_image_urls: imageAssets.map((asset) => asset.publicId || asset.url),
         reference_image_roles: imageAssets.map((asset) => (asset.id === shot.firstFrameAssetId ? "first_frame" : asset.id === shot.lastFrameAssetId ? "last_frame" : asset.role === "first_frame" || asset.role === "last_frame" ? asset.role : "reference_image") as "reference_image" | "first_frame" | "last_frame"),
         reference_video_urls: videoAssets.map((asset) => asset.publicId || asset.url),
       });
       setLastVideoId(data.id);
-      addGenerationJob({ id: `job-video-${data.id}-${Date.now()}`, shotId: shot.id, type: "video", mediaId: data.id, prompt, status: "pending", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+      addGenerationJob({ id: `job-video-${data.id}-${Date.now()}`, shotId: shot.id, type: "video", mediaId: data.id, prompt, status: "pending", entryPath, promptSource: shot.videoPrompt.trim() ? "videoPrompt" : "imagePromptFallback", directorInjected: Boolean(findDirectorBlockForShot(directorBlocks, shot.id)), referenceImageCount: imageAssets.length, referenceVideoCount: videoAssets.length, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
       return data;
     } catch (err) {
       updateShot(shot.id, { status: "failed" });
@@ -1591,7 +1553,7 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     try {
       for (const shot of queue) {
         if (batchCancelRef.current) break;
-        await generateShotSketch(shot);
+        await generateShotSketch(shot, "batch");
       }
       toast.success(batchCancelRef.current ? "已暂停批量故事版草稿图提交" : `已提交 ${queue.length} 个故事版草稿图任务`);
     } catch (err) {
@@ -1610,7 +1572,7 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     try {
       for (const shot of queue) {
         if (batchCancelRef.current) break;
-        await generateShotImage(shot);
+        await generateShotImage(shot, "batch");
       }
       toast.success(batchCancelRef.current ? "已暂停批量分镜图提交" : `已提交 ${queue.length} 个分镜图任务`);
     } catch (err) {
@@ -1629,7 +1591,7 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     try {
       for (const shot of queue) {
         if (batchCancelRef.current) break;
-        await generateShotVideo(shot);
+        await generateShotVideo(shot, "batch");
       }
       toast.success(batchCancelRef.current ? "已暂停批量视频提交" : `已提交 ${queue.length} 个视频任务`);
     } catch (err) {
@@ -1649,6 +1611,82 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     setBatchMode("failed");
     setBatchLimit(Math.max(1, storyboardShots.filter((shot) => shot.status === "failed").length || batchLimit));
     toast.message("已切到失败重试队列，可选择批量分镜图或批量视频");
+  };
+
+  const ensureDirectorBlockForShot = (shot: StoryboardShot) => {
+    const existing = findDirectorBlockForShot(directorBlocks, shot.id);
+    if (existing) return existing;
+    const created = createDefaultDirectorBlock(shot.id, getSceneAssetForShot(shot, semanticAssets));
+    setDirectorBlocks((prev) => [created, ...prev]);
+    return created;
+  };
+
+  const updateDirectorBlock = (block: DirectorBlock) => {
+    setDirectorBlocks((prev) => {
+      const exists = prev.some((item) => item.id === block.id || item.shotId === block.shotId);
+      if (!exists) return [block, ...prev];
+      return prev.map((item) => (item.id === block.id || item.shotId === block.shotId ? block : item));
+    });
+  };
+
+  const mergeDirectorBlocks = (blocks: DirectorBlock[]) => {
+    if (!blocks.length) return;
+    const targetIds = new Set(blocks.map((block) => block.shotId));
+    setDirectorBlocks((prev) => [...blocks, ...prev.filter((block) => !targetIds.has(block.shotId))]);
+  };
+
+  const copyDirectorBlockFromShotToTargets = (sourceShotId: string, targetShotIds: string[], successMessage: string) => {
+    const sourceBlock = findDirectorBlockForShot(directorBlocks, sourceShotId);
+    if (!sourceBlock) {
+      toast.error("源镜头还没有导演台设置");
+      return;
+    }
+    const uniqueTargets = Array.from(new Set(targetShotIds.filter((id) => id && id !== sourceShotId)));
+    if (!uniqueTargets.length) {
+      toast.error("没有可应用的目标镜头");
+      return;
+    }
+    mergeDirectorBlocks(copyDirectorBlockToShots(sourceBlock, uniqueTargets, { keepCharacterPositions: true }));
+    toast.success(successMessage);
+  };
+
+  const inheritDirectorBlockFromPrevious = () => {
+    if (!activeShot) return;
+    const activeIndex = storyboardShots.findIndex((shot) => shot.id === activeShot.id);
+    const previousShot = activeIndex > 0 ? storyboardShots[activeIndex - 1] : undefined;
+    if (!previousShot) {
+      toast.error("当前已经是第一个镜头");
+      return;
+    }
+    copyDirectorBlockFromShotToTargets(previousShot.id, [activeShot.id], `已从镜头 ${previousShot.index} 继承导演台`);
+    setShowDirectorPanel(true);
+  };
+
+  const applyDirectorBlockToFollowingShots = () => {
+    if (!activeShot) return;
+    const activeIndex = storyboardShots.findIndex((shot) => shot.id === activeShot.id);
+    const targetShotIds = activeIndex >= 0 ? storyboardShots.slice(activeIndex + 1).map((shot) => shot.id) : [];
+    copyDirectorBlockFromShotToTargets(activeShot.id, targetShotIds, `已应用到后续 ${targetShotIds.length} 个镜头`);
+  };
+
+  const applyDirectorBlockToSelectedShots = () => {
+    if (!activeShot) return;
+    const targetShotIds = selectedOverviewShotIds.filter((id) => id !== activeShot.id);
+    copyDirectorBlockFromShotToTargets(activeShot.id, targetShotIds, `已应用到选中的 ${targetShotIds.length} 个镜头`);
+  };
+
+  const toggleOverviewShotSelection = (shotId: string) => {
+    setSelectedOverviewShotIds((prev) => prev.includes(shotId) ? prev.filter((id) => id !== shotId) : [...prev, shotId]);
+  };
+
+  const copyToClipboard = async (value: string) => {
+    if (!value.trim()) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success("已复制");
+    } catch {
+      toast.error("复制失败");
+    }
   };
 
   const submitImage = async () => {
@@ -1730,274 +1768,50 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
               <p className="truncate text-xs text-text-tertiary">当前项目：{workspaceProjectName}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            {/* 全局工具栏 */}
-            <button
-              onClick={() => setActiveTab("assets")}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
-                activeTab === "assets"
-                  ? "bg-brand/10 text-brand"
-                  : "text-text-secondary hover:text-text-primary"
-              )}
-            >
-              <LayoutGrid className="h-3.5 w-3.5" />
-              资产库
-            </button>
-            <button
-              onClick={() => setActiveTab("workflow")}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
-                activeTab === "workflow"
-                  ? "bg-brand/10 text-brand"
-                  : "text-text-secondary hover:text-text-primary"
-              )}
-            >
-              <Film className="h-3.5 w-3.5" />
-              工作台
-            </button>
-            <button
-              onClick={() => setWorkflowView("overview")}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-surface-border bg-surface-card px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary"
-            >
-              <Grid3X3 className="h-3.5 w-3.5" />
-              故事板
-            </button>
-          </div>
         </header>
 
         <section className="min-w-0 rounded-3xl border border-surface-border bg-surface-elevated p-5 shadow-sm">
-          {tab === "assets" && (
-            <AssetLibraryLayout
-              semanticAssets={semanticAssets}
-              storedAssets={assets}
-              selectedAssetIds={selectedAssetIds}
-              onSelectAsset={(id) => {
-                setSelectedAssetIds((prev) =>
-                  prev.includes(id)
-                    ? prev.filter((x) => x !== id)
-                    : [...prev, id]
-                );
-              }}
-              onGenerateAssetImage={(asset) => {
-                generateAssetImage(asset);
-              }}
-              onSearch={(query) => {
-                // TODO: 搜索过滤
-              }}
-              onFilterByKind={(kind) => {
-                setAssetKindFilter(kind as any);
-              }}
-              activeKind={assetKindFilter === "all" ? null : assetKindFilter}
-            />
-          )}
-          {tab === "workflow" && (
-            <div className="space-y-6">
-              {/* Step Navigation: production benches are first-class pages; earlier workflow steps keep a compact return bar. */}
-              {workflowView === "step" && !isProductionBenchMode && (
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowDirector3DPanel(true)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-brand/30 bg-brand/10 px-3 py-1.5 text-xs font-medium text-brand hover:bg-brand/20"
-                  >
-                    <Layers className="h-3.5 w-3.5" />
-                    3D导演台
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowDirectorPanel(true)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-surface-border bg-surface-card px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary"
-                  >
-                    <Layers className="h-3.5 w-3.5" />
-                    2D导演台
-                  </button>
-                  <span className="text-xs text-text-tertiary">·</span>
-                  <span className="text-xs font-medium text-text-primary">{t(workflowStepCards.find((s) => s.id === workflowMode)?.titleKey || "")}</span>
-                </div>
-              )}
-
-                {showDirector3DPanel && activeShot && (
-                  <Director3DPanel
-                    directorBlock={
-                      directorBlocks.find((b) => b.shotId === activeShot.id) ||
-                      createDefaultDirectorBlock(
-                        activeShot.id,
-                        semanticAssets.find((a) => a.kind === "scene")
-                      )
-                    }
-                    characterAssets={semanticAssets
-                      .filter((a) => a.kind === "character")
-                      .map((a) => ({ id: a.id, name: a.name, color: (a as any).color }))}
-                    cameras={
-                      directorBlocks.find((b) => b.shotId === activeShot.id)?.cameras || [
-                        {
-                          id: "机位1",
-                          position: [3, 2, 5],
-                          target: [0, 1, 0],
-                          fov: 50,
-                          near: 0.1,
-                          far: 100,
-                          shotType: activeShot.shotType,
-                          cameraMove: activeShot.cameraMove,
-                        },
-                      ]
-                    }
-                    onUpdateDirectorBlock={(block) => {
-                      setDirectorBlocks((prev) => {
-                        const existing = prev.find((b) => b.shotId === block.shotId);
-                        if (existing) {
-                          return prev.map((b) => (b.shotId === block.shotId ? block : b));
-                        }
-                        return [...prev, block];
-                      });
-                    }}
-                    onUpdateCameras={(cameras) => {
-                      setDirectorBlocks((prev) =>
-                        prev.map((b) =>
-                          b.shotId === activeShot.id ? { ...b, cameras } : b
-                        )
-                      );
-                    }}
-                    onClose={() => setShowDirector3DPanel(false)}
-                    onGenerateShot={(cameraId) => {
-                      // TODO: 用机位参数生成视频
-                      toast.success(`使用 ${cameraId} 生成视频`);
-                    }}
-                  />
+            {tab === "workflow" ? (
+              <div className="space-y-6">
+                {/* Step Navigation: production benches are first-class pages; earlier workflow steps keep a compact return bar. */}
+                {workflowView === "step" && !isProductionBenchMode && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={openWorkflowOverview}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-xs font-medium text-text-secondary transition-colors hover:border-brand/40 hover:text-text-primary"
+                    >
+                      <PanelLeftOpen className="h-3.5 w-3.5" />
+                      返回创作流程
+                    </button>
+                    <span className="text-xs text-text-tertiary">·</span>
+                    <span className="text-xs font-medium text-text-primary">{t(workflowStepCards.find((s) => s.id === workflowMode)?.titleKey || "")}</span>
+                  </div>
                 )}
 
-              {workflowView === "overview" && (
-                  <div className="space-y-4">
-                    {/* 4×3 故事板网格 */}
-                    {storyboardShots.length > 0 && (
-                      <Grid4x3
-                        shots={storyboardShots}
-                        selectedShotId={activeShot?.id}
-                        onSelectShot={(shot) => {
-                          setActiveShotId(shot.id);
-                          setWorkflowView("production" as any);
-                          setWorkflowMode("storyboardImage");
-                        }}
-                        onGenerateImage={(shot) => {
-                          sendShotToImage(shot);
-                        }}
-                        onGenerateVideo={(shot) => {
-                          generateShotVideo(shot);
-                        }}
-                      />
-                    )}
-
-                    {/* 视频分段生成器 */}
-                    {storyboardShots.length > 0 && (
-                      <VideoSegmentGenerator
-                        shots={storyboardShots}
-                        onGenerateSegment={async (segment) => {
-                          for (const shot of segment.shots) {
-                            await generateShotVideo(shot);
-                          }
-                        }}
-                        onExtractLastFrame={async (videoUrl) => {
-                          return videoUrl;
-                        }}
-                      />
-                    )}
-
-                    <div className="rounded-3xl border border-surface-border bg-surface-card p-4">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <h2 className="text-lg font-semibold">{workspaceProjectName}</h2>
-                          <p className="text-xs text-text-tertiary">漫剧生产线 · {workflowStepCards.filter((s) => s.done).length}/{workflowStepCards.length} 阶段已准备</p>
-                        </div>
-                      </div>
-                      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-                        {projectStats.map((stat) => (
-                          <div key={stat.label} className={cn("rounded-2xl border px-3 py-2.5", stat.done ? "border-brand/30 bg-brand/5" : "border-surface-border bg-surface-elevated") }>
-                            <div className="text-[11px] font-medium text-text-tertiary">{stat.label}</div>
-                            <div className={cn("mt-1 text-sm font-semibold", stat.done ? "text-brand" : "text-text-secondary")}>{stat.value}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="rounded-3xl border border-surface-border bg-surface-card p-4">
-                      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <h3 className="text-sm font-semibold text-text-primary">导入检查</h3>
-                          <p className="mt-1 text-xs leading-5 text-text-tertiary">用来确认三件套是否落到正确层级：剧本、故事板镜头卡、Seedance视频提示词、资产/素材绑定。</p>
-                        </div>
-                      </div>
-                      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-                        {importChecks.map((item) => (
-                          <div key={item.label} className={cn("rounded-2xl border p-3", item.ok ? "border-emerald-200 bg-emerald-50/70" : "border-amber-200 bg-amber-50/70")}>
-                            <div className="flex items-center justify-between gap-2">
-                              <span className={cn("text-xs font-semibold", item.ok ? "text-emerald-700" : "text-amber-700")}>{item.label}</span>
-                              <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-medium", item.ok ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700")}>{item.ok ? "正常" : "待处理"}</span>
-                            </div>
-                            <div className="mt-1 text-sm font-semibold text-text-primary">{item.value}</div>
-                            <div className="mt-1 text-[11px] leading-4 text-text-tertiary">{item.hint}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="rounded-3xl border border-brand/20 bg-brand/5 p-4">
-                      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <h3 className="text-sm font-semibold text-text-primary">导入三件套</h3>
-                          <p className="mt-1 text-xs leading-5 text-text-tertiary">已拆好的纯剧本版、故事板版、Seedance直接投喂版可以分别导入到对应层；故事板和投喂版会自动解析成镜头卡。</p>
-                        </div>
-                      </div>
-                      <div className="grid gap-3 lg:grid-cols-3">
-                        {[
-                          { key: "script", title: "纯剧本版", desc: "写入剧本层，不带生成指令", value: scriptImportText, setter: setScriptImportText },
-                          { key: "storyboard", title: "故事板版", desc: "解析段落/镜头，生成故事板卡片", value: storyboardImportText, setter: setStoryboardImportText },
-                          { key: "seedance", title: "Seedance直接投喂版", desc: "写入每镜头视频提示词", value: seedanceImportText, setter: setSeedanceImportText },
-                        ].map((item) => (
-                          <div key={item.key} className="rounded-2xl border border-surface-border bg-surface-card p-3">
-                            <div className="mb-2 flex items-center justify-between gap-2">
-                              <div>
-                                <div className="text-sm font-semibold text-text-primary">{item.title}</div>
-                                <div className="text-[11px] text-text-tertiary">{item.desc}</div>
-                              </div>
-                              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-surface-border bg-surface-elevated px-2.5 py-1.5 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary">
-                                <UploadCloud className="h-3.5 w-3.5" />
-                                文件
-                                <input type="file" accept=".md,.txt,text/markdown,text/plain" className="hidden" onChange={(event) => handleImportFile(item.key as "script" | "storyboard" | "seedance", event)} />
-                              </label>
-                            </div>
-                            <textarea value={item.value} onChange={(event) => item.setter(event.target.value)} placeholder={`粘贴${item.title}内容……`} className="min-h-24 w-full resize-y rounded-xl border border-surface-border bg-surface-elevated px-3 py-2 text-xs leading-5 outline-none focus:border-brand/60" />
-                            <div className="mt-2 flex items-center justify-between gap-2">
-                              <span className="text-[11px] text-text-tertiary">{item.value.trim() ? `${item.value.trim().length} 字` : "可粘贴或上传"}</span>
-                              <button type="button" onClick={() => importLayerText(item.key as "script" | "storyboard" | "seedance", item.value)} disabled={!item.value.trim()} className="rounded-xl bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-hover disabled:opacity-50">导入</button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                      {workflowStepCards.map((step) => (
-                        <button
-                          key={step.id}
-                          type="button"
-                          onClick={() => openWorkflowStep(step.id)}
-                          className={cn(
-                            "group rounded-2xl border p-4 text-left transition-all hover:-translate-y-0.5",
-                            step.done ? "border-brand/40 bg-brand/5" : "border-surface-border bg-surface-card"
-                          )}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className={cn("flex h-9 w-9 items-center justify-center rounded-xl text-sm font-bold", step.done ? "bg-brand text-white" : "bg-surface-elevated text-text-tertiary")}>{step.index + 1}</div>
-                            <span className={cn("rounded-full px-2.5 py-1 text-[11px] font-medium", step.done ? "bg-brand/10 text-brand" : "bg-surface-elevated text-text-tertiary")}>{step.done ? t("seedreamBeta.workflow.ready") : t("seedreamBeta.workflow.empty")}</span>
-                          </div>
-                          <div className="mt-3 text-sm font-semibold text-text-primary">{t(step.titleKey)}</div>
-                          <p className="mt-1 line-clamp-2 text-xs leading-5 text-text-tertiary">{step.preview || t(step.descKey)}</p>
-                          <div className="mt-3 text-xs font-medium text-brand">{step.done ? "查看" : "开始"} →</div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                {workflowView === "overview" && (
+                  <SeedreamWorkflowOverview
+                    workspaceProjectName={workspaceProjectName}
+                    workflowStepCards={workflowStepCards}
+                    projectStats={projectStats}
+                    importChecks={importChecks}
+                    scriptImportText={scriptImportText}
+                    storyboardImportText={storyboardImportText}
+                    seedanceImportText={seedanceImportText}
+                    setScriptImportText={setScriptImportText}
+                    setStoryboardImportText={setStoryboardImportText}
+                    setSeedanceImportText={setSeedanceImportText}
+                    handleImportFile={handleImportFile}
+                    importLayerText={importLayerText}
+                    openWorkflowStep={openWorkflowStep}
+                    t={t}
+                    storyboardShots={storyboardShots}
+                    activeShotId={activeShotId}
+                    sendShotToImage={sendShotToImage}
+                    sendShotToVideo={sendShotToVideo}
+                    generateShotImage={generateShotImage}
+                    generateShotVideo={generateShotVideo}
+                  />
                 )}
 
                 {/* Step 2: Script */}
@@ -2370,6 +2184,27 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
                           {batchGenerating && <button type="button" onClick={pauseBatchGeneration} className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-100">暂停</button>}
                         </div>
                       </div>
+                      {workflowMode === "storyboardImage" && (
+                        <>
+                          <BatchPreflightPanel kind="sketches" queue={queuedSketchShots} assets={assets} directorBlocks={directorBlocks} />
+                          <BatchPreflightPanel kind="images" queue={queuedImageShots} assets={assets} directorBlocks={directorBlocks} />
+                        </>
+                      )}
+                      {workflowMode === "storyboardVideo" && (
+                        <BatchPreflightPanel kind="videos" queue={queuedVideoShots} assets={assets} directorBlocks={directorBlocks} />
+                      )}
+                      <ShotOverviewTable
+                        shots={storyboardShots}
+                        assets={assets}
+                        generationJobs={generationJobs}
+                        directorBlocks={directorBlocks}
+                        activeShotId={activeShot?.id}
+                        selectedShotIds={selectedOverviewShotIds}
+                        onSelectShot={setActiveShotId}
+                        onToggleSelectedShot={toggleOverviewShotSelection}
+                        isStoryboardSketchAsset={isStoryboardSketchAsset}
+                        getShotStatusLabel={getShotStatusLabel}
+                      />
                       <details className="mb-4 rounded-2xl border border-surface-border bg-surface-elevated/70 p-3">
                         <summary className="cursor-pointer text-xs font-medium text-text-secondary">查看 / 编辑 AI 生成的原始提示词文本</summary>
                         <div className="mt-3 space-y-2">
@@ -2409,46 +2244,31 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
                                   <input value={activeShot.title} onChange={(event) => updateShot(activeShot.id, { title: event.target.value })} className="w-full rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm font-medium outline-none focus:border-brand/60" />
                                 </div>
                                 <div className="mt-6 flex gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => setShowDirectorPanel(!showDirectorPanel)}
-                                    className={cn(
-                                      "inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors",
-                                      showDirectorPanel
-                                        ? "border-brand/40 bg-brand/10 text-brand"
-                                        : "border-surface-border bg-surface-card text-text-secondary hover:border-brand/40 hover:text-text-primary"
-                                    )}
-                                  >
-                                    <Layers className="h-3.5 w-3.5" />
-                                    导演台
-                                  </button>
                                   <button type="button" onClick={() => applySemanticAssetsToShotPrompts(activeShot)} className="inline-flex h-9 items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-3 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary"><Sparkles className="h-3.5 w-3.5" />注入资产词</button>
+                                  <button type="button" onClick={() => { ensureDirectorBlockForShot(activeShot); setShowDirectorPanel((value) => !value); }} className={cn("inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-medium", activeDirectorBlock ? "border-brand/40 bg-brand/10 text-brand" : "border-surface-border bg-surface-card text-text-secondary hover:border-brand/40 hover:text-text-primary")}>导演台{activeDirectorBlock ? "已启用" : ""}</button>
                                   <button type="button" onClick={() => deleteShot(activeShot.id)} className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-surface-border text-text-tertiary hover:border-red-300 hover:text-red-500"><Trash2 className="h-4 w-4" /></button>
                                 </div>
                               </div>
-                              {showDirectorPanel && (
-                                <div className="rounded-2xl border border-brand/20 bg-brand/5 p-3">
-                                  <DirectorPanel
-                                    directorBlock={findDirectorBlockForShot(directorBlocks, activeShot.id) || createDefaultDirectorBlock(activeShot.id, getSceneAssetForShot(activeShot, semanticAssets))}
-                                    semanticAssets={semanticAssets}
-                                    assets={assets}
-                                    shotTitle={activeShot.title}
-                                    shotScene={activeShot.scene}
-                                    onChange={(block) => {
-                                      setDirectorBlocks((prev) => {
-                                        const existing = prev.findIndex((b) => b.shotId === block.shotId);
-                                        if (existing >= 0) {
-                                          const next = [...prev];
-                                          next[existing] = block;
-                                          return next;
-                                        }
-                                        return [...prev, block];
-                                      });
-                                    }}
-                                    onClose={() => setShowDirectorPanel(false)}
-                                  />
-                                </div>
+                              {showDirectorPanel && activeDirectorBlock && (
+                                <DirectorPanel
+                                  directorBlock={activeDirectorBlock}
+                                  semanticAssets={semanticAssets}
+                                  assets={assets}
+                                  onChange={updateDirectorBlock}
+                                  onClose={() => setShowDirectorPanel(false)}
+                                  shotTitle={activeShot.title}
+                                  shotScene={activeShot.scene}
+                                />
                               )}
+                              <DirectorInheritanceControls
+                                activeShot={activeShot}
+                                shots={storyboardShots}
+                                directorBlocks={directorBlocks}
+                                selectedShotIds={selectedOverviewShotIds}
+                                onInheritFromPrevious={inheritDirectorBlockFromPrevious}
+                                onApplyToFollowing={applyDirectorBlockToFollowingShots}
+                                onApplyToSelected={applyDirectorBlockToSelectedShots}
+                              />
                               <div className="grid gap-3 md:grid-cols-5">
                                 <div><FieldLabel>类型</FieldLabel><select value={activeShot.shotType} onChange={(event) => updateShot(activeShot.id, { shotType: event.target.value as ShotType })} className="w-full rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm outline-none focus:border-brand/60">{SHOT_TYPES.map((item) => <option key={item} value={item}>{item}</option>)}</select></div>
                                 <div><FieldLabel>运镜</FieldLabel><select value={activeShot.cameraMove} onChange={(event) => updateShot(activeShot.id, { cameraMove: event.target.value as CameraMove })} className="w-full rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-sm outline-none focus:border-brand/60">{CAMERA_MOVES.map((item) => <option key={item} value={item}>{item}</option>)}</select></div>
@@ -2475,12 +2295,34 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
                                   <div className="rounded-2xl border border-surface-border bg-surface-card p-3">
                                     <div className="mb-2 flex items-center justify-between gap-2"><FieldLabel>正式分镜图提示词</FieldLabel><button type="button" onClick={() => generateShotImage(activeShot).catch((err) => toast.error(getErrorMessage(err, { module: "image", fallbackMessage: "镜头图提交失败" })))} disabled={isGenerating} className="inline-flex items-center gap-1.5 rounded-full bg-brand px-3 py-1 text-xs font-medium text-white hover:bg-brand-hover disabled:opacity-50">{isGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImageIcon className="h-3.5 w-3.5" />}生成正式图</button></div>
                                     <textarea value={activeShot.imagePrompt} onChange={(event) => updateShot(activeShot.id, { imagePrompt: event.target.value })} className="min-h-40 w-full resize-y rounded-xl border border-surface-border bg-surface-elevated px-3 py-2 text-sm leading-6 outline-none focus:border-brand/60" />
+                                    <div className="mt-3">
+                                      <ShotPromptInspector
+                                        mode="image"
+                                        shot={activeShot}
+                                        finalPrompt={buildImagePromptForGeneration(activeShot)}
+                                        directorBlock={activeDirectorBlock}
+                                        referenceImageCount={shotImageRefs.length}
+                                        referenceVideoCount={0}
+                                        onCopy={copyToClipboard}
+                                      />
+                                    </div>
                                   </div>
                                 </>
                               ) : (
                                 <div className="rounded-2xl border border-surface-border bg-surface-card p-3">
                                   <div className="mb-2 flex items-center justify-between gap-2"><FieldLabel>Seedance 视频提示词</FieldLabel><button type="button" onClick={() => generateShotVideo(activeShot).catch((err) => toast.error(getErrorMessage(err, { module: "video", fallbackMessage: "镜头视频提交失败" })))} disabled={videoGenerating} className="inline-flex items-center gap-1.5 rounded-full bg-brand px-3 py-1 text-xs font-medium text-white hover:bg-brand-hover disabled:opacity-50">{videoGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}生成视频</button></div>
                                   <textarea value={activeShot.videoPrompt} onChange={(event) => updateShot(activeShot.id, { videoPrompt: event.target.value })} className="min-h-56 w-full resize-y rounded-xl border border-surface-border bg-surface-elevated px-3 py-2 text-sm leading-6 outline-none focus:border-brand/60" />
+                                  <div className="mt-3">
+                                    <ShotPromptInspector
+                                      mode="video"
+                                      shot={activeShot}
+                                      finalPrompt={injectDirectorBlockToPrompt((activeShot.videoPrompt || activeShot.imagePrompt).trim(), activeDirectorBlock, semanticAssets)}
+                                      directorBlock={activeDirectorBlock}
+                                      referenceImageCount={shotImageRefs.length}
+                                      referenceVideoCount={shotVideoRefs.length}
+                                      onCopy={copyToClipboard}
+                                    />
+                                  </div>
                                 </div>
                               )}
                               <div className="grid gap-3 lg:grid-cols-2">
@@ -2520,181 +2362,52 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
                               <div className="flex flex-wrap gap-2">
                                 <button type="button" onClick={() => sendShotToImage(activeShot)} className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary"><ImageIcon className="h-3.5 w-3.5" />送到图片页</button>
                                 <button type="button" onClick={() => sendShotToVideo(activeShot)} className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary"><Video className="h-3.5 w-3.5" />送到视频页</button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const otherShots = storyboardShots.filter((s) => s.id !== activeShot.id && s.scene === activeShot.scene);
-                                    if (!otherShots.length) {
-                                      toast.info("同场景没有其他镜头可继承");
-                                      return;
-                                    }
-                                    const sourceBlock = findDirectorBlockForShot(directorBlocks, activeShot.id);
-                                    if (!sourceBlock) {
-                                      toast.error("当前镜头没有导演台设置");
-                                      return;
-                                    }
-                                    const copied = copyDirectorBlockToShots(
-                                      sourceBlock,
-                                      otherShots.map((s) => s.id),
-                                      { keepCharacterPositions: true }
-                                    );
-                                    setDirectorBlocks((prev) => {
-                                      const next = [...prev];
-                                      for (const block of copied) {
-                                        const existing = next.findIndex((b) => b.shotId === block.shotId);
-                                        if (existing >= 0) next[existing] = block;
-                                        else next.push(block);
-                                      }
-                                      return next;
-                                    });
-                                    toast.success(`已复制导演台到 ${copied.length} 个同场景镜头`);
-                                  }}
-                                  className="inline-flex items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-brand/40 hover:text-text-primary"
-                                >
-                                  <Copy className="h-3.5 w-3.5" />
-                                  复制到同场景镜头
-                                </button>
                               </div>
                             </div>
                           )}
                         </div>
-                      ) : (
-                        <div className="rounded-2xl border border-dashed border-surface-border p-6 text-center text-sm text-text-tertiary">
-                          还没有镜头卡。先点"生成提示词"，再点"解析为镜头卡"，或直接"加镜头"。
-                        </div>
-                      )}
+                      ) : <div className="rounded-2xl border border-dashed border-surface-border p-6 text-center text-sm text-text-tertiary">还没有镜头卡。先点“生成提示词”，再点“解析为镜头卡”，或直接“加镜头”。</div>}
                     </div>
                   </div>
                 )}
               </div>
-            )}
-          </div>
-        )}
-      </section>
-
-      {tab === "image" && (
-          <div className="space-y-5">
-            <div>
-              <FieldLabel>{t("seedreamBeta.prompt")}</FieldLabel>
-              <textarea
-                value={imagePrompt}
-                onChange={(event) => setImagePrompt(event.target.value)}
-                placeholder={t("seedreamBeta.imagePromptPlaceholder")}
-                className="min-h-40 w-full resize-none rounded-2xl border border-surface-border bg-surface-card px-4 py-3 text-sm outline-none transition-colors placeholder:text-text-tertiary focus:border-brand/60 focus:ring-2 focus:ring-brand/10"
+            ) : tab === "image" ? (
+              <SeedreamImageTab
+                t={t}
+                imagePrompt={imagePrompt}
+                setImagePrompt={setImagePrompt}
+                imageAspect={imageAspect}
+                setImageAspect={setImageAspect}
+                imageResolution={imageResolution}
+                setImageResolution={setImageResolution}
+                selectedImageRefs={selectedImageRefs}
+                isGenerating={isGenerating}
+                submitImage={submitImage}
               />
-            </div>
-
-            <div>
-              <FieldLabel>{t("seedreamBeta.aspect")}</FieldLabel>
-              <div className="flex flex-wrap gap-2">
-                {IMAGE_ASPECTS.map((item) => (
-                  <PillButton key={item} active={imageAspect === item} onClick={() => setImageAspect(item)}>{item}</PillButton>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <FieldLabel>{t("seedreamBeta.resolution")}</FieldLabel>
-              <div className="flex flex-wrap gap-2">
-                {IMAGE_RESOLUTIONS.map((item) => (
-                  <PillButton key={item} active={imageResolution === item} onClick={() => setImageResolution(item)}>{item}</PillButton>
-                ))}
-              </div>
-              <p className="mt-2 text-xs text-text-tertiary">{t("seedreamBeta.seedreamImageSettingsHint")}</p>
-            </div>
-
-            {selectedImageRefs.length > 0 && (
-              <div className="rounded-2xl border border-brand/20 bg-brand/5 px-4 py-3 text-xs text-text-secondary">
-                {t("seedreamBeta.assets.imageRefs", { count: String(selectedImageRefs.length) })}
-              </div>
-            )}
-
-                <button
-                  type="button"
-                  onClick={submitImage}
-                  disabled={isGenerating}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-brand px-5 py-3 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                  {isGenerating ? t("seedreamBeta.submitting") : t("seedreamBeta.generateImage")}
-                </button>
-              </div>
             ) : (
-              <div className="space-y-5">
-                <div>
-                  <FieldLabel>{t("seedreamBeta.prompt")}</FieldLabel>
-                  <textarea
-                    value={videoPrompt}
-                    onChange={(event) => setVideoPrompt(event.target.value)}
-                    placeholder={t("seedreamBeta.videoPromptPlaceholder")}
-                    className="min-h-40 w-full resize-none rounded-2xl border border-surface-border bg-surface-card px-4 py-3 text-sm outline-none transition-colors placeholder:text-text-tertiary focus:border-brand/60 focus:ring-2 focus:ring-brand/10"
-                  />
-                </div>
-
-                <div>
-                  <FieldLabel>{t("seedreamBeta.model")}</FieldLabel>
-                  <select
-                    value={videoModel}
-                    onChange={(event) => setVideoModel(event.target.value)}
-                    className="w-full rounded-2xl border border-surface-border bg-surface-card px-4 py-3 text-sm outline-none focus:border-brand/60 focus:ring-2 focus:ring-brand/10"
-                  >
-                    {VIDEO_MODELS.map((item) => <option key={item} value={item}>{item}</option>)}
-                  </select>
-                </div>
-
-                <div>
-                  <FieldLabel>{t("seedreamBeta.aspect")}</FieldLabel>
-                  <div className="flex flex-wrap gap-2">
-                    {VIDEO_ASPECTS.map((item) => (
-                      <PillButton key={item} active={videoAspect === item} onClick={() => setVideoAspect(item)}>{item}</PillButton>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-3">
-                  <div>
-                    <FieldLabel>{t("seedreamBeta.resolution")}</FieldLabel>
-                    <div className="flex flex-wrap gap-2">
-                      {VIDEO_RESOLUTIONS.map((item) => (
-                        <PillButton key={item} active={videoResolution === item} onClick={() => setVideoResolution(item)}>{item}</PillButton>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <FieldLabel>{t("seedreamBeta.duration")}</FieldLabel>
-                    <div className="flex flex-wrap gap-2">
-                      {VIDEO_DURATIONS.map((item) => (
-                        <PillButton key={item} active={videoDuration === item} onClick={() => setVideoDuration(item)}>{item}s</PillButton>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <FieldLabel>{t("seedreamBeta.audio")}</FieldLabel>
-                    <PillButton active={videoAudio} onClick={() => setVideoAudio(!videoAudio)}>
-                      {videoAudio ? t("seedreamBeta.audioOn") : t("seedreamBeta.audioOff")}
-                    </PillButton>
-                  </div>
-                </div>
-
-                {(selectedImageRefs.length > 0 || selectedVideoRefs.length > 0) && (
-                  <div className="rounded-2xl border border-brand/20 bg-brand/5 px-4 py-3 text-xs text-text-secondary">
-                    {t("seedreamBeta.assets.videoRefs", { imageCount: String(selectedImageRefs.length), videoCount: String(selectedVideoRefs.length) })}
-                  </div>
-                )}
-
-                <button
-                  type="button"
-                  onClick={submitVideo}
-                  disabled={videoGenerating}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-brand px-5 py-3 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {videoGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                  {videoGenerating ? t("seedreamBeta.submitting") : t("seedreamBeta.generateVideo")}
-                </button>
-              </div>
+              <SeedreamVideoTab
+                t={t}
+                videoPrompt={videoPrompt}
+                setVideoPrompt={setVideoPrompt}
+                videoModel={videoModel}
+                setVideoModel={setVideoModel}
+                videoAspect={videoAspect}
+                setVideoAspect={setVideoAspect}
+                videoResolution={videoResolution}
+                setVideoResolution={setVideoResolution}
+                videoDuration={videoDuration}
+                setVideoDuration={setVideoDuration}
+                videoAudio={videoAudio}
+                setVideoAudio={setVideoAudio}
+                selectedImageRefs={selectedImageRefs}
+                selectedVideoRefs={selectedVideoRefs}
+                videoGenerating={videoGenerating}
+                submitVideo={submitVideo}
+              />
             )}
-          </div>
-        )}
+          </section>
+
+
       </div>
       {previewAsset && (
         <div

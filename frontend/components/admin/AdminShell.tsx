@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, Bot, ClipboardList, CreditCard, Home, LayoutDashboard, LogOut, Settings, Shield, Users } from "lucide-react";
+import { BarChart3, Bell, Bot, ClipboardList, CreditCard, Home, LayoutDashboard, LogOut, Settings, Shield, Users } from "lucide-react";
 import { clearAdminSession } from "@/lib/admin/api";
 import { cn } from "@/lib/utils";
 
@@ -21,6 +21,7 @@ const navItems = [
       { href: `${ADMIN_BASE}/beta-applications`, label: "内测申请" },
       { href: `${ADMIN_BASE}/beta-invites`, label: "邀请码" },
       { href: `${ADMIN_BASE}/beta-configs`, label: "内测配置" },
+      { href: `${ADMIN_BASE}/changelogs`, label: "更新日志" },
     ],
   },
   { href: `${ADMIN_BASE}/billing`, label: "支付", icon: CreditCard, disabled: true },

@@ -173,11 +173,10 @@ export default function AssetLibraryLayout({
           {viewMode === "grid" ? (
             <div className="grid grid-cols-3 gap-3">
               {filteredAssets.map((asset) => {
-                const stored = storedAssets.find(
-                  (s) => s.semanticAssetId === asset.id
-                );
+                const stored = storedAssets.find((s) => asset.linkedAssetIds.includes(s.id));
+                const storedUrl = stored?.url || "";
                 const isSelected = selectedAssetIds.includes(asset.id);
-                const hasImage = stored?.imageAssetIds?.length > 0;
+                const hasImage = Boolean(storedUrl);
 
                 return (
                   <div
@@ -194,7 +193,7 @@ export default function AssetLibraryLayout({
                     <div className="relative mb-2 aspect-square overflow-hidden rounded-lg bg-surface-elevated">
                       {hasImage ? (
                         <img
-                          src={stored.imageAssetIds[0]}
+                          src={storedUrl}
                           alt={asset.name}
                           className="h-full w-full object-cover"
                         />
@@ -264,11 +263,10 @@ export default function AssetLibraryLayout({
           ) : (
             <div className="space-y-1">
               {filteredAssets.map((asset) => {
-                const stored = storedAssets.find(
-                  (s) => s.semanticAssetId === asset.id
-                );
+                const stored = storedAssets.find((s) => asset.linkedAssetIds.includes(s.id));
+                const storedUrl = stored?.url || "";
                 const isSelected = selectedAssetIds.includes(asset.id);
-                const hasImage = stored?.imageAssetIds?.length > 0;
+                const hasImage = Boolean(storedUrl);
 
                 return (
                   <div
@@ -283,7 +281,7 @@ export default function AssetLibraryLayout({
                   >
                     {hasImage ? (
                       <img
-                        src={stored.imageAssetIds[0]}
+                        src={storedUrl}
                         alt=""
                         className="h-10 w-10 rounded object-cover"
                       />

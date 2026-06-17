@@ -179,6 +179,9 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	betaConfigHandler.InitDefaultConfigs()
 	publicWithAuth.GET("/beta/config", betaConfigHandler.GetPublicConfig)
 
+	// 初始化 Changelog Handler
+	changelogHandler := NewChangelogHandler(db)
+
 	// 公开对比问答（支持匿名用户，内部已有额度与权限校验）
 	publicWithAuth.POST("/chat/compare", chatHandler.CompareChat)
 	publicWithAuth.POST("/chat/:message_id/fork", chatHandler.ForkChat)
@@ -221,6 +224,12 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			admin.PATCH("/beta-applications/:id/review", betaInviteHandler.ReviewApplication)
 			admin.GET("/beta-configs", betaConfigHandler.ListConfigs)
 			admin.PATCH("/beta-configs/:key", betaConfigHandler.UpdateConfig)
+			admin.GET("/changelogs", changelogHandler.ListChangelogsAdmin)
+			admin.POST("/changelogs", changelogHandler.CreateChangelog)
+			admin.PUT("/changelogs/:id", changelogHandler.UpdateChangelog)
+			admin.POST("/changelogs/:id/publish", changelogHandler.PublishChangelog)
+			admin.POST("/changelogs/:id/unpublish", changelogHandler.UnpublishChangelog)
+			admin.DELETE("/changelogs/:id", changelogHandler.DeleteChangelog)
 			}
 
 		convHandler := NewConversationHandler(db)
@@ -397,6 +406,14 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	// 公开对比记录查看路由（无需认证：通过 slug 访问）
 	router.GET("/api/compare/share/:slug", compareRecordHandler.GetBySlug)
+
+	// Changelog 公开路由
+	router.GET("/api/changelogs", changelogHandler.ListChangelogsPublic)
+	router.GET("/api/changelogs/:id", changelogHandler.GetChangelogDetail)
+	// 需认证路由
+	authorized.GET("/changelogs/unread-count", changelogHandler.GetChangelogUnreadCount)
+	authorized.POST("/changelogs/:id/read", changelogHandler.MarkChangelogRead)
+	authorized.POST("/changelogs/read-all", changelogHandler.MarkAllChangelogsRead)
 
 	return router
 }

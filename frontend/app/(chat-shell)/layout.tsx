@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import AppSidebar from "@/components/sidebar/AppSidebar";
 import MobileNav from "@/components/mobile/MobileNav";
+import { ChangelogBell } from "@/components/changelog/ChangelogBell";
 
 function useAuth() {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {

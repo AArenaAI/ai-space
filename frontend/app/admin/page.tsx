@@ -68,7 +68,7 @@ export default function AdminOverviewPage() {
               value={formatNumber(data.beta.active_invites)}
               helper={`总计 ${formatNumber(data.beta.total_invites)} 个`}
               icon={Tag}
-              tone="teal"
+              tone="green"
             />
           </Link>
           <Link href="/admin/beta-applications" className="block">
@@ -77,7 +77,7 @@ export default function AdminOverviewPage() {
               value={formatNumber(data.beta.pending_bad_cases)}
               helper="需要审核并发放额度"
               icon={AlertCircle}
-              tone="orange"
+              tone="amber"
             />
           </Link>
         </div>
@@ -132,7 +132,7 @@ export default function AdminOverviewPage() {
               description="批量生成新的内测邀请码"
               href="/admin/beta-invites"
               icon={Tag}
-              tone="teal"
+              tone="green"
             />
             <QuickActionCard
               title="审核申请"

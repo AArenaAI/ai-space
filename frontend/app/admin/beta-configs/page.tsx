@@ -14,121 +14,38 @@ interface BetaConfigItem {
   parsed_value?: unknown;
 }
 
+interface ModelInfo {
+  id: string;
+  name: string;
+  provider: string;
+  description: string;
+  color: string;
+  category: string;
+  capabilities: string[];
+  tier: string;
+  status: string;
+  enabled: boolean;
+}
+
 interface ModelCostMap {
   [modelId: string]: number;
 }
 
-// 模型分类定义（与前端模型选择器一致）
-const MODEL_CATEGORIES: { key: string; label: string; icon: string; models: string[] }[] = [
-  {
-    key: "basic",
-    label: "基础模型",
-    icon: "📝",
-    models: [
-      "gpt-5.4-mini",
-      "gemini-2.0-flash-exp",
-      "gemini-3.1-flash-lite",
-      "gemini-3.5-flash",
-    ],
-  },
-  {
-    key: "advanced",
-    label: "高级模型",
-    icon: "⚡",
-    models: [
-      "gpt-5.4",
-      "gpt-5.5",
-      "deepseek-v4-flash",
-      "kimi-k2.5",
-      "kimi-k2.6",
-      "claude-3-5-sonnet-20241022",
-    ],
-  },
-  {
-    key: "elite",
-    label: "精英模型",
-    icon: "👑",
-    models: [
-      "deepseek-v4-pro",
-      "gpt-5.5-pro",
-      "chat-1",
-    ],
-  },
-  {
-    key: "image",
-    label: "图像生成",
-    icon: "🎨",
-    models: [
-      "gpt-image-2",
-      "gemini-2.5-pro",
-      "gemini-3.1-pro-preview",
-    ],
-  },
-  {
-    key: "video",
-    label: "视频生成",
-    icon: "🎬",
-    models: [
-      "doubao-seedance-2-0-fast-260128",
-      "doubao-seedance-2-0-260128",
-    ],
-  },
-];
-
-// 模型显示名称映射
-const MODEL_DISPLAY_NAMES: Record<string, string> = {
-  "gpt-5.4-mini": "GPT 5.4 Mini",
-  "gemini-2.0-flash-exp": "Gemini 2.0 Flash",
-  "gemini-3.1-flash-lite": "Gemini 3.1 Flash Lite",
-  "gemini-3.5-flash": "Gemini 3.5 Flash",
-  "gpt-5.4": "GPT 5.4",
-  "gpt-5.5": "GPT 5.5",
-  "deepseek-v4-flash": "DeepSeek-V4 Flash",
-  "kimi-k2.5": "Kimi K2.5",
-  "kimi-k2.6": "Kimi K2.6",
-  "claude-3-5-sonnet-20241022": "Claude 3.5 Sonnet",
-  "deepseek-v4-pro": "DeepSeek-V4 Pro",
-  "gpt-5.5-pro": "GPT 5.5 Pro",
-  "chat-1": "Chat 1",
-  "gpt-image-2": "GPT Image 2",
-  "gemini-2.5-pro": "Gemini 2.5 Pro",
-  "gemini-3.1-pro-preview": "Gemini 3.1 Pro",
-  "doubao-seedance-2-0-fast-260128": "Seedance 2.0 Fast",
-  "doubao-seedance-2-0-260128": "Seedance 2.0",
-};
-
-// 获取模型分类
-function getModelCategory(modelId: string): string {
-  for (const cat of MODEL_CATEGORIES) {
-    if (cat.models.includes(modelId)) return cat.key;
-  }
-  return "other";
-}
-
-// 获取分类标签
-function getCategoryLabel(modelId: string): string {
-  const cat = MODEL_CATEGORIES.find((c) => c.models.includes(modelId));
-  return cat ? cat.label : "其他";
-}
-
-// 获取分类图标
-function getCategoryIcon(modelId: string): string {
-  const cat = MODEL_CATEGORIES.find((c) => c.models.includes(modelId));
-  return cat ? cat.icon : "❓";
-}
-
 export default function BetaConfigPage() {
   const [configs, setConfigs] = useState<BetaConfigItem[]>([]);
+  const [models, setModels] = useState<ModelInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [activeCategory, setActiveCategory] = useState<string | null>(null);
 
   const fetchConfigs = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await adminFetch<{ items: BetaConfigItem[] }>("/beta-configs");
-      setConfigs(data.items);
+      const [configData, modelData] = await Promise.all([
+        adminFetch<{ items: BetaConfigItem[] }>("/beta-configs"),
+        adminFetch<{ models: ModelInfo[] }>("/model-configs"),
+      ]);
+      setConfigs(configData.items);
+      setModels(modelData.models);
     } catch (err) {
       toast.error("加载配置失败");
     } finally {
@@ -176,7 +93,7 @@ export default function BetaConfigPage() {
 
   return (
     <AdminShell>
-      <div className="p-6 max-w-5xl mx-auto">
+      <div className="p-6 max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-xl font-semibold text-text-primary">内测运营配置</h1>
@@ -238,24 +155,15 @@ export default function BetaConfigPage() {
 
             {/* 模型成本配置 */}
             <section className="bg-surface-elevated rounded-xl border border-surface-border p-5">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <Cpu className="w-5 h-5 text-brand" />
-                  <h2 className="text-lg font-medium text-text-primary">模型成本配置</h2>
-                </div>
-                <div className="text-xs text-text-tertiary">
-                  共 {Object.keys(modelCosts).length} 个模型 · 1 积分 = 100 分
-                </div>
+              <div className="flex items-center gap-2 mb-4">
+                <Cpu className="w-5 h-5 text-brand" />
+                <h2 className="text-lg font-medium text-text-primary">模型成本配置</h2>
               </div>
-
               <ModelCostEditor
                 costs={modelCosts}
+                models={models}
                 onSave={(costs) => updateConfig("beta_model_costs", JSON.stringify(costs))}
                 saving={saving === "beta_model_costs"}
-                searchQuery={searchQuery}
-                onSearchChange={setSearchQuery}
-                activeCategory={activeCategory}
-                onCategoryChange={setActiveCategory}
               />
             </section>
           </div>
@@ -332,218 +240,168 @@ function PhaseConfigCard({
 
 function ModelCostEditor({
   costs,
+  models,
   onSave,
   saving,
-  searchQuery,
-  onSearchChange,
-  activeCategory,
-  onCategoryChange,
 }: {
   costs: ModelCostMap;
+  models: ModelInfo[];
   onSave: (costs: ModelCostMap) => void;
   saving: boolean;
-  searchQuery: string;
-  onSearchChange: (q: string) => void;
-  activeCategory: string | null;
-  onCategoryChange: (cat: string | null) => void;
 }) {
   const [editCosts, setEditCosts] = useState<ModelCostMap>({});
-  const [newModel, setNewModel] = useState("");
-  const [newCost, setNewCost] = useState("");
-  const [hasChanges, setHasChanges] = useState(false);
+  const [search, setSearch] = useState("");
+  const [activeCategory, setActiveCategory] = useState<string>("all");
 
   useEffect(() => {
     setEditCosts({ ...costs });
-    setHasChanges(false);
   }, [costs]);
 
   const updateCost = (modelId: string, cost: number) => {
-    setEditCosts((prev) => {
-      const next = { ...prev, [modelId]: cost };
-      setHasChanges(true);
-      return next;
-    });
+    setEditCosts((prev) => ({ ...prev, [modelId]: cost }));
   };
 
-  const removeModel = (modelId: string) => {
-    setEditCosts((prev) => {
-      const next = { ...prev };
-      delete next[modelId];
-      setHasChanges(true);
-      return next;
-    });
+  const getCategoryLabel = (cat: string) => {
+    const map: Record<string, string> = {
+      chat: "对话",
+      image: "图像",
+      video: "视频",
+      reasoning: "推理",
+      document: "文档",
+      search: "搜索",
+    };
+    return map[cat] || cat;
   };
 
-  const addModel = () => {
-    if (!newModel.trim() || !newCost.trim()) return;
-    const cost = parseInt(newCost);
-    if (isNaN(cost) || cost < 0) {
-      toast.error("请输入有效的成本");
-      return;
-    }
-    updateCost(newModel.trim(), cost);
-    setNewModel("");
-    setNewCost("");
+  const getCategoryIcon = (cat: string) => {
+    const map: Record<string, string> = {
+      chat: "💬",
+      image: "🎨",
+      video: "🎬",
+      reasoning: "🧠",
+      document: "📄",
+      search: "🔍",
+    };
+    return map[cat] || "⚙️";
   };
 
-  const handleSave = () => {
-    onSave(editCosts);
-    setHasChanges(false);
-  };
+  const categories = ["all", ...Array.from(new Set(models.map((m) => m.category).filter(Boolean)))];
 
-  // 按分类过滤和排序
-  const getFilteredModels = () => {
-    let entries = Object.entries(editCosts);
+  const filteredModels = models.filter((m) => {
+    const matchSearch =
+      !search.trim() ||
+      m.id.toLowerCase().includes(search.toLowerCase()) ||
+      m.name.toLowerCase().includes(search.toLowerCase());
+    const matchCategory = activeCategory === "all" || m.category === activeCategory;
+    return matchSearch && matchCategory;
+  });
 
-    // 搜索过滤
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      entries = entries.filter(([modelId, _]) => {
-        const name = MODEL_DISPLAY_NAMES[modelId] || modelId;
-        return modelId.toLowerCase().includes(q) || name.toLowerCase().includes(q);
-      });
-    }
-
-    // 分类过滤
-    if (activeCategory) {
-      const catModels = MODEL_CATEGORIES.find((c) => c.key === activeCategory)?.models || [];
-      entries = entries.filter(([modelId, _]) => catModels.includes(modelId));
-    }
-
-    // 按分类排序，然后按名称排序
-    return entries.sort(([a], [b]) => {
-      const catA = getModelCategory(a);
-      const catB = getModelCategory(b);
-      if (catA !== catB) {
-        const orderA = MODEL_CATEGORIES.findIndex((c) => c.key === catA);
-        const orderB = MODEL_CATEGORIES.findIndex((c) => c.key === catB);
-        return (orderA === -1 ? 999 : orderA) - (orderB === -1 ? 999 : orderB);
-      }
-      return a.localeCompare(b);
-    });
-  };
-
-  const filteredModels = getFilteredModels();
-
-  // 统计各分类模型数量
-  const categoryCounts = MODEL_CATEGORIES.map((cat) => ({
-    ...cat,
-    count: cat.models.filter((m) => editCosts[m] !== undefined).length,
-  }));
+  const hasChanges = JSON.stringify(editCosts) !== JSON.stringify(costs);
 
   return (
     <div>
-      {/* 分类筛选 + 搜索 */}
+      {/* 搜索 + 分类筛选 */}
       <div className="flex items-center gap-3 mb-4">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <button
-            onClick={() => onCategoryChange(null)}
-            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-              activeCategory === null
-                ? "bg-brand text-white"
-                : "bg-surface-card border border-surface-border text-text-secondary hover:text-text-primary"
-            }`}
-          >
-            全部
-          </button>
-          {categoryCounts.map((cat) => (
-            <button
-              key={cat.key}
-              onClick={() => onCategoryChange(cat.key === activeCategory ? null : cat.key)}
-              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors flex items-center gap-1 ${
-                activeCategory === cat.key
-                  ? "bg-brand text-white"
-                  : "bg-surface-card border border-surface-border text-text-secondary hover:text-text-primary"
-              }`}
-            >
-              <span>{cat.icon}</span>
-              <span>{cat.label}</span>
-              <span className={`text-[10px] px-1 rounded ${activeCategory === cat.key ? "bg-white/20" : "bg-surface-elevated"}`}>
-                {cat.count}
-              </span>
-            </button>
-          ))}
-        </div>
-        <div className="flex-1" />
-        <div className="relative">
-          <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary" />
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary" />
           <input
             type="text"
-            value={searchQuery}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="搜索模型..."
-            className="pl-8 pr-3 py-1.5 rounded-lg bg-surface-card border border-surface-border text-sm text-text-primary outline-none focus:border-brand/50 w-48"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="搜索模型名称或 ID..."
+            className="w-full pl-9 pr-3 py-2 rounded-lg bg-surface-card border border-surface-border text-sm text-text-primary outline-none focus:border-brand/50"
           />
         </div>
       </div>
 
-      {/* 模型成本表格 - 按分类分组 */}
-      <div className="overflow-x-auto rounded-lg border border-surface-border">
+      <div className="flex flex-wrap gap-2 mb-4">
+        {categories.map((cat) => (
+          <button
+            key={cat}
+            onClick={() => setActiveCategory(cat)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              activeCategory === cat
+                ? "bg-brand text-white"
+                : "bg-surface-card border border-surface-border text-text-secondary hover:bg-surface-elevated"
+            }`}
+          >
+            {cat === "all" ? "全部" : `${getCategoryIcon(cat)} ${getCategoryLabel(cat)}`}
+          </button>
+        ))}
+      </div>
+
+      {hasChanges && (
+        <div className="mb-4 p-2 bg-amber-500/10 rounded-lg flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+          <span className="text-xs text-amber-600">有未保存的修改，请点击下方「保存全部」</span>
+        </div>
+      )}
+
+      <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="bg-surface-card border-b border-surface-border">
-              <th className="text-left py-2.5 px-3 text-text-secondary font-medium w-8">#</th>
-              <th className="text-left py-2.5 px-3 text-text-secondary font-medium">模型</th>
-              <th className="text-left py-2.5 px-3 text-text-secondary font-medium">分类</th>
-              <th className="text-left py-2.5 px-3 text-text-secondary font-medium">成本（分/次）</th>
-              <th className="text-left py-2.5 px-3 text-text-secondary font-medium">显示（积分）</th>
-              <th className="text-right py-2.5 px-3 text-text-secondary font-medium">操作</th>
+            <tr className="border-b border-surface-border">
+              <th className="text-left py-2 px-3 text-text-secondary font-medium w-8">#</th>
+              <th className="text-left py-2 px-3 text-text-secondary font-medium">模型</th>
+              <th className="text-left py-2 px-3 text-text-secondary font-medium">分类</th>
+              <th className="text-left py-2 px-3 text-text-secondary font-medium">成本（分/次）</th>
+              <th className="text-left py-2 px-3 text-text-secondary font-medium">显示（积分）</th>
             </tr>
           </thead>
           <tbody>
-            {filteredModels.map(([modelId, cost], index) => {
-              const displayName = MODEL_DISPLAY_NAMES[modelId] || modelId;
-              const category = getCategoryLabel(modelId);
-              const icon = getCategoryIcon(modelId);
-              const isModified = cost !== (costs[modelId] || 0);
+            {filteredModels.map((model, idx) => {
+              const cost = editCosts[model.id] ?? 0;
+              const originalCost = costs[model.id] ?? 0;
+              const isModified = cost !== originalCost;
+              const isHighCost = cost >= 1000;
 
               return (
                 <tr
-                  key={modelId}
+                  key={model.id}
                   className={`border-b border-surface-border/50 ${isModified ? "bg-brand/5" : ""}`}
                 >
-                  <td className="py-2.5 px-3 text-text-tertiary text-xs">{index + 1}</td>
-                  <td className="py-2.5 px-3">
-                    <div className="flex flex-col">
-                      <span className="text-text-primary font-medium text-sm">{displayName}</span>
-                      <span className="text-text-tertiary text-xs font-mono">{modelId}</span>
+                  <td className="py-2 px-3 text-text-tertiary text-xs">{idx + 1}</td>
+                  <td className="py-2 px-3">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-2 h-2 rounded-full shrink-0"
+                        style={{ backgroundColor: model.color || "#999" }}
+                      />
+                      <div>
+                        <div className="text-sm font-medium text-text-primary">{model.name}</div>
+                        <div className="text-xs text-text-tertiary font-mono">{model.id}</div>
+                      </div>
                     </div>
                   </td>
-                  <td className="py-2.5 px-3">
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-surface-card border border-surface-border">
-                      <span>{icon}</span>
-                      <span className="text-text-secondary">{category}</span>
+                  <td className="py-2 px-3">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-surface-card border border-surface-border text-text-secondary">
+                      <Tag className="w-3 h-3" />
+                      {getCategoryLabel(model.category)}
                     </span>
                   </td>
-                  <td className="py-2.5 px-3">
+                  <td className="py-2 px-3">
                     <input
                       type="number"
                       value={cost}
-                      onChange={(e) => updateCost(modelId, parseInt(e.target.value) || 0)}
-                      className="w-24 px-2 py-1 rounded bg-surface-elevated border border-surface-border text-sm text-text-primary outline-none focus:border-brand/50"
+                      onChange={(e) => updateCost(model.id, parseInt(e.target.value) || 0)}
+                      className={`w-24 px-2 py-1 rounded bg-surface-elevated border text-sm text-text-primary outline-none focus:border-brand/50 ${
+                        isHighCost ? "border-amber-500/50" : "border-surface-border"
+                      }`}
                       min="0"
                     />
                   </td>
-                  <td className="py-2.5 px-3">
-                    <span className={`text-sm font-mono ${cost >= 1000 ? "text-orange-500 font-semibold" : "text-text-secondary"}`}>
-                      {(cost / 100).toFixed(2)}
-                    </span>
-                  </td>
-                  <td className="py-2.5 px-3 text-right">
-                    <button
-                      onClick={() => removeModel(modelId)}
-                      className="text-xs text-red-500 hover:text-red-600 transition-colors px-2 py-1 rounded hover:bg-red-500/10"
-                    >
-                      删除
-                    </button>
+                  <td className={`py-2 px-3 text-sm ${isHighCost ? "text-amber-600 font-medium" : "text-text-secondary"}`}>
+                    {(cost / 100).toFixed(2)}
                   </td>
                 </tr>
               );
             })}
             {filteredModels.length === 0 && (
               <tr>
-                <td colSpan={6} className="py-8 text-center text-text-tertiary text-sm">
-                  {searchQuery || activeCategory ? "未找到匹配的模型" : "暂无模型成本配置"}
+                <td colSpan={5} className="py-8 text-center text-text-tertiary text-sm">
+                  {search || activeCategory !== "all"
+                    ? "没有匹配的模型"
+                    : "暂无模型数据，请确认模型列表已加载"}
                 </td>
               </tr>
             )}
@@ -551,49 +409,15 @@ function ModelCostEditor({
         </table>
       </div>
 
-      {/* 添加新模型 */}
-      <div className="flex items-end gap-2 mt-4 p-3 bg-surface-card rounded-lg border border-surface-border">
-        <div className="flex-1">
-          <label className="text-xs text-text-secondary block mb-1">模型 ID</label>
-          <input
-            type="text"
-            value={newModel}
-            onChange={(e) => setNewModel(e.target.value)}
-            placeholder="例如：gpt-5.4-mini"
-            className="w-full px-3 py-2 rounded-lg bg-surface-elevated border border-surface-border text-sm text-text-primary outline-none focus:border-brand/50"
-          />
-        </div>
-        <div className="w-32">
-          <label className="text-xs text-text-secondary block mb-1">成本（分）</label>
-          <input
-            type="number"
-            value={newCost}
-            onChange={(e) => setNewCost(e.target.value)}
-            placeholder="100"
-            className="w-full px-3 py-2 rounded-lg bg-surface-elevated border border-surface-border text-sm text-text-primary outline-none focus:border-brand/50"
-            min="0"
-          />
-        </div>
-        <button
-          onClick={addModel}
-          className="px-3 py-2 rounded-lg text-sm font-medium text-white bg-surface-border hover:bg-surface-elevated transition-colors"
-        >
-          添加
-        </button>
-      </div>
-
-      {/* 保存按钮 */}
       <div className="flex items-center justify-between mt-4">
-        <div className="flex items-center gap-2">
+        <p className="text-xs text-text-tertiary">
+          共 {filteredModels.length} 个模型 · 1 积分 = 100 分
           {hasChanges && (
-            <span className="text-xs text-amber-500 flex items-center gap-1">
-              <AlertTriangle className="w-3 h-3" />
-              有未保存的修改
-            </span>
+            <span className="ml-2 text-amber-500">· 有未保存的修改</span>
           )}
-        </div>
+        </p>
         <button
-          onClick={handleSave}
+          onClick={() => onSave(editCosts)}
           disabled={saving || !hasChanges}
           className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-brand hover:bg-brand-hover disabled:opacity-50 transition-colors flex items-center gap-2"
         >

@@ -79,6 +79,11 @@ export type GenerationJob = {
   prompt: string;
   status: GenerationJobStatus;
   intent?: "asset_image" | "shot_image" | "storyboard_sketch";
+  entryPath?: "single" | "batch" | "asset";
+  promptSource?: "assetPrompt" | "storyboardSketch" | "imagePrompt" | "structuredFallback" | "videoPrompt" | "imagePromptFallback";
+  directorInjected?: boolean;
+  referenceImageCount?: number;
+  referenceVideoCount?: number;
   createdAt: string;
   updatedAt: string;
 };

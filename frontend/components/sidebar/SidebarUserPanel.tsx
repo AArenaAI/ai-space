@@ -1,6 +1,7 @@
 "use client";
 
-import { User, Settings } from "lucide-react";
+import { User, Settings, Bell } from "lucide-react";
+import { ChangelogBell } from "@/components/changelog/ChangelogBell";
 
 interface SidebarUserPanelProps {
   user: { name?: string; email?: string } | null;
@@ -17,19 +18,24 @@ export default function SidebarUserPanel({
   onShowTooltip,
   onHideTooltip,
 }: SidebarUserPanelProps) {
-  // 折叠态：登录后只保留设置入口，退出登录统一放到设置页
+  // 折叠态：登录后保留设置入口和更新铃铛
   if (collapsed) {
     return (
       <div className="flex flex-col items-center gap-1">
         {user ? (
-          <button
-            onClick={onOpenSettings}
-            onMouseEnter={onShowTooltip ? () => onShowTooltip("设置") : undefined}
-            onMouseLeave={onHideTooltip}
-            className="p-2.5 rounded-xl hover:bg-surface-card transition-colors"
-          >
-            <Settings className="w-5 h-5 text-text-tertiary" />
-          </button>
+          <>
+            <div className="p-2.5 rounded-xl hover:bg-surface-card transition-colors">
+              <ChangelogBell />
+            </div>
+            <button
+              onClick={onOpenSettings}
+              onMouseEnter={onShowTooltip ? () => onShowTooltip("设置") : undefined}
+              onMouseLeave={onHideTooltip}
+              className="p-2.5 rounded-xl hover:bg-surface-card transition-colors"
+            >
+              <Settings className="w-5 h-5 text-text-tertiary" />
+            </button>
+          </>
         ) : (
           <a
             href="/login"
@@ -61,7 +67,11 @@ export default function SidebarUserPanel({
 
   // 已登录态
   return (
-    <div className="p-2">
+    <div className="p-2 space-y-1">
+      <div className="flex items-center justify-between px-3 py-2">
+        <span className="text-xs font-medium text-text-tertiary">通知</span>
+        <ChangelogBell />
+      </div>
       <button
         type="button"
         onClick={onOpenSettings}
