@@ -230,15 +230,25 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			admin.POST("/changelogs/:id/publish", changelogHandler.PublishChangelog)
 			admin.POST("/changelogs/:id/unpublish", changelogHandler.UnpublishChangelog)
 			admin.DELETE("/changelogs/:id", changelogHandler.DeleteChangelog)
-		// Analytics 路由
-		analyticsHandler := NewAnalyticsHandler(db)
-		admin.GET("/analytics/summary", analyticsHandler.GetAnalyticsSummary)
-		admin.GET("/analytics/funnel", analyticsHandler.GetFunnelAnalysis)
-		admin.GET("/analytics/model-usage", analyticsHandler.GetModelUsageStats)
-		admin.GET("/analytics/retention", analyticsHandler.GetRetentionAnalysis)
-		admin.GET("/analytics/realtime", analyticsHandler.GetRealtimeStats)
+			// Analytics 路由
+			analyticsHandler := NewAnalyticsHandler(db)
+			admin.GET("/analytics/summary", analyticsHandler.GetAnalyticsSummary)
+			admin.GET("/analytics/funnel", analyticsHandler.GetFunnelAnalysis)
+			admin.GET("/analytics/model-usage", analyticsHandler.GetModelUsageStats)
+			admin.GET("/analytics/retention", analyticsHandler.GetRetentionAnalysis)
+			admin.GET("/analytics/realtime", analyticsHandler.GetRealtimeStats)
+			// Alert 路由
+			alertHandler := NewAlertHandler(db, emailService)
+			alertHandler.InitDefaultRules()
+			admin.GET("/alert-rules", alertHandler.ListAlertRules)
+			admin.POST("/alert-rules", alertHandler.CreateAlertRule)
+			admin.PUT("/alert-rules/:id", alertHandler.UpdateAlertRule)
+			admin.DELETE("/alert-rules/:id", alertHandler.DeleteAlertRule)
+			admin.GET("/alert-history", alertHandler.ListAlertHistory)
+			admin.PATCH("/alert-history/:id/resolve", alertHandler.ResolveAlert)
+			admin.GET("/alert-stats", alertHandler.GetAlertStats)
 		}
-	convHandler := NewConversationHandler(db)
+	}
 	notebookHandler := NewNotebookHandler(db, fileService, aiService, imageService)
 	documentArtifactHandler := NewDocumentArtifactHandler(db)
 	documentArtifactHandler.AutoMigrate()
@@ -421,6 +431,14 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	authorized.POST("/changelogs/:id/read", changelogHandler.MarkChangelogRead)
 	authorized.POST("/changelogs/read-all", changelogHandler.MarkAllChangelogsRead)
 
+	// 定时告警检测（每分钟执行一次）
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			alertHandler.CheckAlerts()
+		}
+	}()
 
 	return router
 }

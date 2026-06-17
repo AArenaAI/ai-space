@@ -22,7 +22,7 @@ func (s *EmailService) IsEnabled() bool {
 	return s.cfg.SMTPHost != "" && s.cfg.SMTPUser != "" && s.cfg.SMTPPassword != ""
 }
 
-// SendEmail 发送纯文本邮件
+// SendEmail 发送 HTML 邮件
 func (s *EmailService) SendEmail(to, subject, body string) error {
 	if !s.IsEnabled() {
 		return fmt.Errorf("邮件服务未配置")
@@ -36,6 +36,28 @@ func (s *EmailService) SendEmail(to, subject, body string) error {
 			"From: %s\r\n"+
 			"Subject: %s\r\n"+
 			"Content-Type: text/html; charset=UTF-8\r\n"+
+			"\r\n"+
+			"%s",
+		to, s.cfg.SMTPFrom, subject, body,
+	))
+
+	return smtp.SendMail(addr, auth, s.cfg.SMTPFrom, []string{to}, msg)
+}
+
+// SendAlertEmail 发送告警邮件（纯文本）
+func (s *EmailService) SendAlertEmail(to, subject, body string) error {
+	if !s.IsEnabled() {
+		return fmt.Errorf("邮件服务未配置")
+	}
+
+	addr := fmt.Sprintf("%s:%s", s.cfg.SMTPHost, s.cfg.SMTPPort)
+	auth := smtp.PlainAuth("", s.cfg.SMTPUser, s.cfg.SMTPPassword, s.cfg.SMTPHost)
+
+	msg := []byte(fmt.Sprintf(
+		"To: %s\r\n"+
+			"From: %s\r\n"+
+			"Subject: %s\r\n"+
+			"Content-Type: text/plain; charset=UTF-8\r\n"+
 			"\r\n"+
 			"%s",
 		to, s.cfg.SMTPFrom, subject, body,
