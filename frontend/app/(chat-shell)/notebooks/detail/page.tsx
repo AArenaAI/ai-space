@@ -1532,6 +1532,50 @@ function NotebookDetailContent() {
     toast.success("笔记已更新");
   };
 
+  const handleDeleteStudioNote = (note: NotebookStudioNote) => {
+    if (!notebook) return;
+    setStudioNotes((prev) => {
+      const next = prev.filter((item) => item.id !== note.id);
+      writeStoredNotebookNotes(notebook.id, next);
+      return next;
+    });
+    toast.success("笔记已删除");
+  };
+
+  const noteContentAsPlainText = (content: string) => {
+    if (!content) return "";
+    const el = document.createElement("div");
+    el.innerHTML = content;
+    return (el.textContent || el.innerText || content).replace(/\n{3,}/g, "\n\n").trim();
+  };
+
+  const convertNotesToSource = async (notesToConvert: NotebookStudioNote[], successMessage: string) => {
+    if (!writableNotebookId || notesToConvert.length === 0) return;
+    try {
+      const title = notesToConvert.length === 1 ? notesToConvert[0].title : `Notebook notes ${new Date().toLocaleString()}`;
+      const body = notesToConvert.map((note) => `# ${note.title}\n\n${noteContentAsPlainText(note.content)}`).join("\n\n---\n\n");
+      const safeName = `${title || "note"}`.replace(/[\\/:*?\"<>|]+/g, " ").trim().slice(0, 80) || "note";
+      const file = new File([body], `${safeName}.txt`, { type: "text/plain" });
+      const publicId = await uploadNotebookSourceFile(file, currentWorkspaceId());
+      const next = await addNotebookFile(writableNotebookId, publicId);
+      const nextFiles = [next, ...files.filter((old) => old.file_id !== next.file_id)];
+      setFiles(nextFiles);
+      setSelectedFileIds((prev) => reconcileSelectedFileIds(prev, nextFiles));
+      toast.success(successMessage);
+      window.setTimeout(load, 1200);
+    } catch (error) {
+      showNotebookError(error, "转换为来源失败");
+    }
+  };
+
+  const handleConvertStudioNoteToSource = (note: NotebookStudioNote) => {
+    void convertNotesToSource([note], "笔记已转换为来源");
+  };
+
+  const handleConvertAllStudioNotesToSource = () => {
+    void convertNotesToSource(studioNotes, "所有笔记已转换为来源");
+  };
+
   const handleRegenerateArtifact = async (artifact: NotebookStudioArtifact) => {
     if (!writableNotebookId) return;
     const request = regenerationRequestForArtifact(artifact);
@@ -1964,6 +2008,9 @@ function NotebookDetailContent() {
         onGenerate={handleStudioGenerate}
         onCreateNote={handleCreateStudioNote}
         onUpdateNote={handleUpdateStudioNote}
+        onDeleteNote={handleDeleteStudioNote}
+        onConvertNoteToSource={handleConvertStudioNoteToSource}
+        onConvertAllNotesToSource={handleConvertAllStudioNotesToSource}
         onOpenArtifact={setActiveStudioArtifactId}
         onRenameArtifact={handleRenameArtifact}
         onRegenerateArtifact={handleRegenerateArtifact}

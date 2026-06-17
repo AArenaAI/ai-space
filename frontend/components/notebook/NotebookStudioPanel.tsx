@@ -3,7 +3,7 @@
 import { CSSProperties, useEffect, useMemo, useRef, useState, type ComponentType, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
 import dynamic from "next/dynamic";
 import { createPortal } from "react-dom";
-import { BarChart3, CheckCircle2, ChevronLeft, ChevronRight, ChevronsRight, Copy, Download, ExternalLink, FileQuestion, FileText, HelpCircle, Info, Lightbulb, Loader2, Map as MapIcon, Maximize2, MessageCircle, MoreHorizontal, Pencil, Presentation, Printer, RefreshCw, Sparkles, StickyNote, Trash2, X, XCircle, ZoomIn, ZoomOut } from "lucide-react";
+import { BarChart3, CheckCircle2, ChevronLeft, ChevronRight, ChevronsRight, Copy, Download, ExternalLink, FileQuestion, FileText, HelpCircle, Info, Lightbulb, Loader2, Map as MapIcon, Maximize2, MessageCircle, MoreHorizontal, Pencil, Presentation, Printer, RefreshCw, Sparkles, Trash2, X, XCircle, ZoomIn, ZoomOut } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -173,6 +173,9 @@ type NotebookStudioPanelProps = {
   onGenerate: (type: NotebookStudioActionId, options?: { orientation?: string; style?: string; detail_level?: string; prompt?: string }) => void;
   onCreateNote?: (note: { title: string; content: string }) => void;
   onUpdateNote?: (noteId: string, note: { title: string; content: string }) => void;
+  onDeleteNote?: (note: NotebookStudioNote) => void;
+  onConvertNoteToSource?: (note: NotebookStudioNote) => void;
+  onConvertAllNotesToSource?: () => void;
   onOpenArtifact: (artifactId: string | null) => void;
   onRenameArtifact?: (artifact: NotebookStudioArtifact) => void;
   onRegenerateArtifact?: (artifact: NotebookStudioArtifact) => void;
@@ -1549,6 +1552,92 @@ function ArtifactMenu({
   );
 }
 
+function NoteMenu({
+  note,
+  open,
+  onToggle,
+  onConvertNoteToSource,
+  onConvertAllNotesToSource,
+  onDeleteNote,
+}: {
+  note: NotebookStudioNote;
+  open: boolean;
+  onToggle: () => void;
+  onConvertNoteToSource?: (note: NotebookStudioNote) => void;
+  onConvertAllNotesToSource?: () => void;
+  onDeleteNote?: (note: NotebookStudioNote) => void;
+}) {
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [menuStyle, setMenuStyle] = useState<CSSProperties | null>(null);
+
+  const closeAndRun = (callback?: () => void) => {
+    onToggle();
+    callback?.();
+  };
+
+  useEffect(() => {
+    if (!open) {
+      setMenuStyle(null);
+      return;
+    }
+    const updatePosition = () => {
+      const trigger = triggerRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      const menuWidth = 236;
+      const menuHeight = menuRef.current?.offsetHeight || 184;
+      const gap = 8;
+      const viewportPadding = 8;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      const openDown = spaceBelow >= menuHeight + gap || spaceBelow >= spaceAbove;
+      const left = Math.min(Math.max(viewportPadding, rect.right - menuWidth), window.innerWidth - menuWidth - viewportPadding);
+      const top = openDown
+        ? Math.min(rect.bottom + gap, window.innerHeight - menuHeight - viewportPadding)
+        : Math.max(viewportPadding, rect.top - menuHeight - gap);
+      setMenuStyle({ left, top, width: menuWidth });
+    };
+    updatePosition();
+    const animationFrame = window.requestAnimationFrame(updatePosition);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    const handlePointerDown = (event: globalThis.PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      onToggle();
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [open, onToggle]);
+
+  const menu = open && menuStyle && typeof document !== "undefined" ? createPortal(
+    <div ref={menuRef} style={menuStyle} className="fixed z-[250] overflow-hidden rounded-2xl border border-surface-border bg-surface-card py-1 text-[13px] shadow-xl">
+      {onConvertNoteToSource && <button type="button" onClick={() => closeAndRun(() => onConvertNoteToSource(note))} className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-text-secondary hover:bg-surface-hover hover:text-text-primary"><FileText className="h-4 w-4" />转换为来源</button>}
+      {onConvertAllNotesToSource && <button type="button" onClick={() => closeAndRun(onConvertAllNotesToSource)} className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-text-secondary hover:bg-surface-hover hover:text-text-primary"><Copy className="h-4 w-4" />将所有笔记转换为来源</button>}
+      <button type="button" onClick={() => closeAndRun(() => navigator.clipboard?.writeText(noteContentPreview(note.content)))} className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-text-secondary hover:bg-surface-hover hover:text-text-primary"><ExternalLink className="h-4 w-4" />导出到 Google 文档</button>
+      <button type="button" onClick={() => closeAndRun(() => navigator.clipboard?.writeText(noteContentPreview(note.content)))} className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-text-secondary hover:bg-surface-hover hover:text-text-primary"><BarChart3 className="h-4 w-4" />导出到 Google 表格</button>
+      {onDeleteNote && <button type="button" onClick={() => closeAndRun(() => onDeleteNote(note))} className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-red-500 hover:bg-red-500/10"><Trash2 className="h-4 w-4" />删除</button>}
+    </div>,
+    document.body
+  ) : null;
+
+  return (
+    <div className="absolute right-2 top-1/2 z-20 -translate-y-1/2">
+      <button ref={triggerRef} type="button" onClick={(event) => { event.stopPropagation(); onToggle(); }} className="rounded-full p-1.5 text-text-tertiary transition hover:bg-surface-elevated hover:text-text-primary" title="更多操作">
+        <MoreHorizontal className="h-4 w-4 rotate-90" />
+      </button>
+      {menu}
+    </div>
+  );
+}
+
 export function NotebookStudioPanel({
   width = 390,
   artifacts,
@@ -1560,6 +1649,9 @@ export function NotebookStudioPanel({
   onGenerate,
   onCreateNote,
   onUpdateNote,
+  onDeleteNote,
+  onConvertNoteToSource,
+  onConvertAllNotesToSource,
   onOpenArtifact,
   onRenameArtifact,
   onRegenerateArtifact,
@@ -1581,6 +1673,7 @@ export function NotebookStudioPanel({
   const [infographicDialogOpen, setInfographicDialogOpen] = useState(false);
   const [noteDialogOpen, setNoteDialogOpen] = useState(false);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [openNoteMenuId, setOpenNoteMenuId] = useState<string | null>(null);
   const activeArtifact = artifacts.find((artifact) => artifact.id === activeArtifactId) || null;
   const viewerArtifact = artifacts.find((artifact) => artifact.id === viewerArtifactId) || null;
   const editingNote = editingNoteId ? notes.find((note) => note.id === editingNoteId) || null : null;
@@ -1600,6 +1693,13 @@ export function NotebookStudioPanel({
         return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
       });
   }, [artifacts]);
+  const sortedNotes = useMemo(() => {
+    return [...notes].sort((a, b) => {
+      const aTime = new Date(a.createdAt).getTime();
+      const bTime = new Date(b.createdAt).getTime();
+      return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
+    });
+  }, [notes]);
   const actions: Array<{ id: NotebookStudioActionId; title: string; desc: string; accent: string; bgClass: string }> = [
     { id: "table", title: t("notebook.studio.table"), desc: t("notebook.studio.tableDesc"), accent: "from-emerald-500/15 to-cyan-500/10 text-emerald-500", bgClass: "bg-indigo-50 dark:bg-indigo-950/30" },
     { id: "mindmap", title: t("notebook.studio.mindmap"), desc: t("notebook.studio.mindmapDesc"), accent: "from-violet-500/15 to-fuchsia-500/10 text-violet-500", bgClass: "bg-purple-50 dark:bg-purple-950/30" },
@@ -1802,7 +1902,7 @@ export function NotebookStudioPanel({
           <MoreHorizontal className="h-4 w-4 text-text-tertiary" />
         </div>
         {(generatingType === "table" || generatingType === "mindmap" || generatingType === "flashcards" || generatingType === "quiz" || generatingType === "report" || generatingType === "infographic") && <div className="px-4 pb-3"><GeneratingStudioCard type={generatingType} sourceCount={selectedSourceCount} t={t} /></div>}
-        {artifacts.length === 0 ? (
+        {artifacts.length === 0 && sortedNotes.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
             <div className="mb-4 text-text-tertiary">
               <Sparkles className="absolute ml-6 mt-0 h-3.5 w-3.5" />
@@ -1874,26 +1974,26 @@ export function NotebookStudioPanel({
                       </div>
                 );
               })}
-            </div>
-          </div>
-        )}
-        {notes.length > 0 && (
-          <div className="border-t border-surface-border px-4 py-3">
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-text-primary">笔记</h3>
-              <span className="text-xs text-text-tertiary">{notes.length}</span>
-            </div>
-            <div className="max-h-48 space-y-1.5 overflow-y-auto pr-1">
-              {notes.map((note) => (
-                <button key={note.id} type="button" onClick={() => openExistingNote(note)} className="group flex w-full items-start gap-3 rounded-2xl px-2.5 py-2.5 text-left transition hover:bg-surface-elevated">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/30 dark:text-amber-300">
-                    <StickyNote className="h-5 w-5" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold text-text-primary">{note.title}</span>
-                    <span className="mt-1 block truncate text-xs text-text-tertiary">{note.readonly ? "已保存的回答只能查看" : noteContentPreview(note.content)} · {formatTime(note.createdAt)}</span>
-                  </span>
-                </button>
+              {sortedNotes.map((note) => (
+                <div key={note.id} className="group relative rounded-[18px] transition hover:bg-surface-elevated/70">
+                  <button type="button" onClick={() => openExistingNote(note)} className="flex w-full items-center gap-3.5 px-2.5 py-3 pr-12 text-left">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-text-secondary">
+                      <FileText className="h-[24px] w-[24px] stroke-[1.8]" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[14px] font-semibold leading-5 tracking-[-0.01em] text-text-primary">{note.title}</span>
+                      <span className="mt-1 block truncate text-[12px] leading-4 text-text-tertiary">{formatTime(note.createdAt)}</span>
+                    </span>
+                  </button>
+                  <NoteMenu
+                    note={note}
+                    open={openNoteMenuId === note.id}
+                    onToggle={() => setOpenNoteMenuId((current) => current === note.id ? null : note.id)}
+                    onConvertNoteToSource={onConvertNoteToSource}
+                    onConvertAllNotesToSource={onConvertAllNotesToSource}
+                    onDeleteNote={onDeleteNote}
+                  />
+                </div>
               ))}
             </div>
           </div>
