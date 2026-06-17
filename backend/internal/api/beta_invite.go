@@ -168,6 +168,14 @@ func (h *BetaInviteHandler) SubmitApplication(c *gin.Context) {
 		return
 	}
 
+	// 记录内测申请事件（埋点）
+	h.db.Create(&models.AnalyticsEvent{
+		EventType: "beta_apply",
+		EventName: "beta_apply",
+		PagePath:  c.Request.URL.Path,
+		Metadata:  fmt.Sprintf(`{"email":"%s","industry":"%s"}`, req.Email, req.Industry),
+	})
+
 	c.JSON(http.StatusCreated, gin.H{
 		"id":      app.ID,
 		"status":  app.Status,
@@ -382,6 +390,15 @@ func (h *BetaInviteHandler) UseInvite(c *gin.Context) {
 		user.BetaPhase3Used = false
 		h.db.Save(&user)
 	}
+
+	// 记录邀请码使用事件（埋点）
+	h.db.Create(&models.AnalyticsEvent{
+		UserID:    uid,
+		EventType: "invite_use",
+		EventName: "invite_use",
+		PagePath:  c.Request.URL.Path,
+		Metadata:  fmt.Sprintf(`{"code":"%s","batch":"%s","credits_basic":%d}`, invite.Code, invite.Batch, invite.CreditsBasic),
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

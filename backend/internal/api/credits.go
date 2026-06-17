@@ -300,6 +300,23 @@ func (h *CreditsHandler) DeductCredits(c *gin.Context) {
 	user.UpdatedAt = now
 	h.db.Save(&user)
 
+	// 记录积分使用事件（埋点）
+	metadata, _ := json.Marshal(map[string]interface{}{
+		"amount":         costFen,
+		"amount_display": float64(costFen) / 100.0,
+		"tier":           tier,
+		"is_beta":        isInBetaPhase,
+		"remaining":      *creditsField,
+	})
+	h.db.Create(&models.AnalyticsEvent{
+		UserID:    user.ID,
+		EventType: "credit_use",
+		EventName: "credit_use",
+		PagePath:  c.Request.URL.Path,
+		ModelID:   req.ModelID,
+		Metadata:  string(metadata),
+	})
+
 	c.JSON(http.StatusOK, gin.H{
 		"success":          true,
 		"tier":             tier,

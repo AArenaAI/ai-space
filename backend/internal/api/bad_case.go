@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -66,6 +67,20 @@ func (h *BadCaseHandler) CreateBadCase(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "提交失败"})
 		return
 	}
+
+	// 记录 Bad Case 提交事件（埋点）
+	metadata, _ := json.Marshal(map[string]interface{}{
+		"model_id": req.ModelID,
+		"has_conversation": req.ConversationID != nil,
+	})
+	h.db.Create(&models.AnalyticsEvent{
+		UserID:    userID.(uint),
+		EventType: "bad_case_submit",
+		EventName: "bad_case_submit",
+		PagePath:  c.Request.URL.Path,
+		ModelID:   req.ModelID,
+		Metadata:  string(metadata),
+	})
 
 	c.JSON(http.StatusCreated, gin.H{
 		"id":      badCase.ID,
