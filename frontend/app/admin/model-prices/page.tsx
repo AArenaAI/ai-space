@@ -179,19 +179,20 @@ export default function ModelPricesPage() {
               <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
                 {/* 输入价格 */}
                 <div className="rounded-lg bg-surface-elevated p-3">
-                  <p className="text-xs text-text-tertiary">输入价格</p>
+                  <p className="text-xs text-text-tertiary">输入价格（原始）</p>
                   <p className="mt-1 text-sm font-medium text-text-primary">
                     {price.source_input_price !== undefined && (
                       <>
                         {price.source_currency === "CNY" ? "¥" : "$"}
                         {price.source_input_price}
+                        <span className="text-xs text-text-tertiary ml-1">/ 1M tokens</span>
                       </>
                     )}
                     {price.source_input_cache_miss_price !== undefined && (
                       <>
                         {price.source_currency === "CNY" ? "¥" : "$"}
                         {price.source_input_cache_miss_price}
-                        <span className="text-xs text-text-tertiary ml-1">(cache miss)</span>
+                        <span className="text-xs text-text-tertiary ml-1">/ 1M tokens (cache miss)</span>
                       </>
                     )}
                     {price.source_input_price === undefined &&
@@ -199,26 +200,45 @@ export default function ModelPricesPage() {
                         <span className="text-text-tertiary">-</span>
                       )}
                   </p>
+                  {/* 人民币价格 */}
+                  {(() => {
+                    const rmb = convertToRMB(price.source_input_cache_miss_price ?? price.source_input_price ?? 0, price.source_currency, price.source_unit);
+                    return rmb !== null ? (
+                      <p className="mt-1 text-xs text-green-600">
+                        ≈ ¥{rmb.toFixed(4)} / 1K tokens
+                      </p>
+                    ) : null;
+                  })()}
                 </div>
 
                 {/* 输出价格 */}
                 <div className="rounded-lg bg-surface-elevated p-3">
-                  <p className="text-xs text-text-tertiary">输出价格</p>
+                  <p className="text-xs text-text-tertiary">输出价格（原始）</p>
                   <p className="mt-1 text-sm font-medium text-text-primary">
                     {price.source_output_price !== undefined ? (
                       <>
                         {price.source_currency === "CNY" ? "¥" : "$"}
                         {price.source_output_price}
+                        <span className="text-xs text-text-tertiary ml-1">/ 1M tokens</span>
                       </>
                     ) : (
                       <span className="text-text-tertiary">-</span>
                     )}
                   </p>
+                  {/* 人民币价格 */}
+                  {(() => {
+                    const rmb = convertToRMB(price.source_output_price ?? 0, price.source_currency, price.source_unit);
+                    return rmb !== null ? (
+                      <p className="mt-1 text-xs text-green-600">
+                        ≈ ¥{rmb.toFixed(4)} / 1K tokens
+                      </p>
+                    ) : null;
+                  })()}
                 </div>
 
                 {/* 估算单次成本 */}
                 <div className="rounded-lg bg-surface-elevated p-3">
-                  <p className="text-xs text-text-tertiary">估算单次（4k/2k）</p>
+                  <p className="text-xs text-text-tertiary">估算单次成本</p>
                   <p className="mt-1 text-sm font-medium text-text-primary">
                     {estimate.total > 0 ? (
                       <>
@@ -228,6 +248,7 @@ export default function ModelPricesPage() {
                       <span className="text-text-tertiary">-</span>
                     )}
                   </p>
+                  <p className="mt-1 text-xs text-text-tertiary">假设 4K 输入 / 2K 输出</p>
                 </div>
 
                 {/* 平台积分定价 */}

@@ -257,31 +257,47 @@ export default function ManjuCanvas({
           })}
         </svg>
 
-        {/* 节点卡片 */}
-        {nodes.map((node) => (
-          <div
-            key={node.id}
-            className={cn(
-              "absolute rounded-2xl border bg-surface-elevated shadow-sm transition-shadow",
-              selectedNodeId === node.id
-                ? "border-brand/60 shadow-md ring-1 ring-brand/20"
-                : "border-surface-border hover:border-brand/30"
-            )}
-            style={{
-              left: node.x,
-              top: node.y,
-              width: node.width,
-              height: node.collapsed ? 44 : node.height,
-            }}
-            onMouseDown={(e) => onNodeMouseDown(e, node)}
-            onDoubleClick={() => onNodeDoubleClick?.(node)}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              setContextMenu({ x: e.clientX, y: e.clientY, nodeId: node.id });
-              onNodeContextMenu?.(node, e);
-            }}
-          >
+        {/* 节点卡片 — 虚拟渲染：只渲染视口内节点 */}
+        {nodes.map((node) => {
+          // 视口裁剪：计算节点在屏幕上的位置
+          const screenX = node.x * zoom + pan.x;
+          const screenY = node.y * zoom + pan.y;
+          const screenW = node.width * zoom;
+          const screenH = (node.collapsed ? 44 : node.height) * zoom;
+          const containerW = containerRef.current?.clientWidth ?? 1920;
+          const containerH = containerRef.current?.clientHeight ?? 1080;
+          const padding = 100; // 预渲染边界
+          const isVisible =
+            screenX + screenW >= -padding &&
+            screenX <= containerW + padding &&
+            screenY + screenH >= -padding &&
+            screenY <= containerH + padding;
+          if (!isVisible) return null;
+          return (
+            <div
+              key={node.id}
+              className={cn(
+                "absolute rounded-2xl border bg-surface-elevated shadow-sm transition-shadow",
+                selectedNodeId === node.id
+                  ? "border-brand/60 shadow-md ring-1 ring-brand/20"
+                  : "border-surface-border hover:border-brand/30"
+              )}
+              style={{
+                left: node.x,
+                top: node.y,
+                width: node.width,
+                height: node.collapsed ? 44 : node.height,
+                willChange: draggingNode === node.id ? "transform" : undefined,
+              }}
+              onMouseDown={(e) => onNodeMouseDown(e, node)}
+              onDoubleClick={() => onNodeDoubleClick?.(node)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setContextMenu({ x: e.clientX, y: e.clientY, nodeId: node.id });
+                onNodeContextMenu?.(node, e);
+              }}
+            >
             {/* 节点头部 */}
             <div className="flex items-center gap-2 px-3 py-2">
               <GripVertical className="h-3.5 w-3.5 text-text-tertiary" />
@@ -335,7 +351,8 @@ export default function ManjuCanvas({
               </div>
             )}
           </div>
-        ))}
+        );
+      })}
       </div>
 
       {/* 底部控制栏 */}

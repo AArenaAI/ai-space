@@ -56,15 +56,6 @@ import type {
 } from "./types";
 import { FieldLabel, PillButton } from "./components";
 import { useSeedreamProjects } from "./useSeedreamProjects";
-import SeedreamWorkflowOverview from "./SeedreamWorkflowOverview";
-import SeedreamVideoTab from "./SeedreamVideoTab";
-import SeedreamImageTab from "./SeedreamImageTab";
-import DirectorPanel from "./DirectorPanel";
-import ShotPromptInspector from "./ShotPromptInspector";
-import BatchPreflightPanel from "./BatchPreflightPanel";
-import DirectorInheritanceControls from "./DirectorInheritanceControls";
-import ShotOverviewTable from "./ShotOverviewTable";
-import ManjuNodePanel from "./ManjuNodePanel";
 import ManjuStudioLayout from "./ManjuStudioLayout";
 import VideoSegmentGenerator from "./VideoSegmentGenerator";
 import type { CanvasNode } from "./ManjuCanvas";
@@ -2092,14 +2083,10 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
           </div>
         ) : workflowView === "overview" ? (
           <div className="h-full overflow-y-auto p-4">
-            <SeedreamWorkflowOverview
-              shots={storyboardShots}
-              onSelectShot={(shot: StoryboardShot) => {
-                setActiveShotId(shot.id);
-                setWorkflowView("step");
-              }}
-              onReorderShots={(shots: StoryboardShot[]) => setStoryboardShots(shots)}
-            />
+            <div className="text-center py-8">
+              <p className="text-sm text-text-secondary">总览视图</p>
+              <p className="text-xs text-text-tertiary mt-1">点击画布节点编辑镜头</p>
+            </div>
           </div>
         ) : null}
       </ManjuStudioLayout>
