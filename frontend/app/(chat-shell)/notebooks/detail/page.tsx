@@ -2046,6 +2046,7 @@ function NotebookDetailContent() {
       error={previewError}
       target={previewTarget}
       onClose={closePreview}
+      onAddSource={() => setUrlDialogOpen(true)}
     />
     <ReportFormatDialog
       open={reportDialogOpen}
