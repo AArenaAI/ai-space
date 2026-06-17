@@ -64,6 +64,7 @@ import ShotPromptInspector from "./ShotPromptInspector";
 import BatchPreflightPanel from "./BatchPreflightPanel";
 import DirectorInheritanceControls from "./DirectorInheritanceControls";
 import ShotOverviewTable from "./ShotOverviewTable";
+import ManjuStudioLayout from "./ManjuStudioLayout";
 import { copyDirectorBlockToShots, createDefaultDirectorBlock, findDirectorBlockForShot, getSceneAssetForShot, injectDirectorBlockToPrompt } from "./directorBlock";
 
 function getAuthHeaders() {
@@ -355,6 +356,10 @@ export default function SeedreamBetaPage() {
   const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
 
   const [tab, setTab] = useState<Tab>("workflow");
+  const [studioMode, setStudioMode] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("seedream-studio-mode") === "1";
+  });
   const [imagePrompt, setImagePrompt] = useState("");
   const [imageAspect, setImageAspect] = useState("1:1");
   const [imageResolution, setImageResolution] = useState("2K");
@@ -2493,6 +2498,88 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
 
 
       </div>
+
+      {/* ===== Studio Mode 切换按钮 ===== */}
+      <div className="fixed bottom-6 left-6 z-40">
+        <button
+          type="button"
+          onClick={() => {
+            setStudioMode((v) => {
+              const next = !v;
+              localStorage.setItem("seedream-studio-mode", next ? "1" : "0");
+              return next;
+            });
+          }}
+          className={cn(
+            "flex h-10 items-center gap-2 rounded-full px-4 text-xs font-medium shadow-lg transition-colors",
+            studioMode
+              ? "bg-brand text-white hover:bg-brand-hover"
+              : "bg-surface-elevated text-text-secondary hover:text-text-primary border border-surface-border"
+          )}
+        >
+          {studioMode ? "退出 Studio" : "Studio 模式"}
+        </button>
+      </div>
+
+      {/* ===== Studio Mode 覆盖层 ===== */}
+      {studioMode && (
+        <div className="fixed inset-0 z-50">
+          <ManjuStudioLayout
+            projectName={activeProject?.title || t("seedreamBeta.projects.newProject")}
+            activeStep={workflowMode}
+            onStepChange={(step) => {
+              if (step === "overview") {
+                setWorkflowView("overview");
+              } else {
+                setWorkflowMode(step as WorkflowMode);
+                setWorkflowView("step");
+              }
+              setStudioMode(false);
+            }}
+            onGenerate={(step) => {
+              setWorkflowMode(step);
+              setWorkflowView("step");
+              setStudioMode(false);
+            }}
+            generating={workflowGenerating}
+            nodes={storyboardShots.map((shot, i) => ({
+              id: shot.id,
+              type: shot.videoAssetIds && shot.videoAssetIds.length > 0 ? "video" : shot.imageAssetIds && shot.imageAssetIds.length > 0 ? "image" : "shot",
+              title: `${i + 1}. ${shot.title || shot.scene || "未命名镜头"}`,
+              x: (i % 4) * 280 + 40,
+              y: Math.floor(i / 4) * 200 + 40,
+              width: 240,
+              height: 160,
+              data: shot as unknown as Record<string, unknown>,
+              status: shot.videoAssetIds && shot.videoAssetIds.length > 0 ? "done" : shot.imageAssetIds && shot.imageAssetIds.length > 0 ? "draft" : "empty",
+            }))}
+            connections={storyboardShots.slice(1).map((shot, i) => ({
+              id: `conn-${i}`,
+              from: storyboardShots[i].id,
+              to: shot.id,
+            }))}
+            onNodeSelect={(id) => {
+              if (id) {
+                setActiveShotId(id);
+                setWorkflowView("step");
+                setStudioMode(false);
+              }
+            }}
+            onNodeDoubleClick={(node) => {
+              setActiveShotId(node.id);
+              setWorkflowView("step");
+              setStudioMode(false);
+            }}
+            onSave={() => { toast.info("保存功能开发中"); }}
+            onExport={() => { toast.info("导出功能开发中"); }}
+            onImport={() => { toast.info("导入功能开发中"); }}
+            onNewProject={() => { toast.info("新建项目功能开发中"); }}
+            onOpenProject={() => { toast.info("打开项目功能开发中"); }}
+            onSettings={() => { toast.info("设置功能开发中"); }}
+          />
+        </div>
+      )}
+
       {previewAsset && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm"

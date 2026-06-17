@@ -188,6 +188,9 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	// 对比记录 Handler（供认证路由与公开查看共用）
 	compareRecordHandler := NewCompareRecordHandler(db)
+	convHandler := NewConversationHandler(db)
+	alertHandler := NewAlertHandler(db, emailService)
+	alertHandler.InitDefaultRules()
 
 	// 需要认证的路由
 	authorized := router.Group("/api")
@@ -238,8 +241,6 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			admin.GET("/analytics/retention", analyticsHandler.GetRetentionAnalysis)
 			admin.GET("/analytics/realtime", analyticsHandler.GetRealtimeStats)
 			// Alert 路由
-			alertHandler := NewAlertHandler(db, emailService)
-			alertHandler.InitDefaultRules()
 			admin.GET("/alert-rules", alertHandler.ListAlertRules)
 			admin.POST("/alert-rules", alertHandler.CreateAlertRule)
 			admin.PUT("/alert-rules/:id", alertHandler.UpdateAlertRule)
@@ -408,7 +409,6 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	authorized.GET("/favorites", favoriteHandler.List)
 	authorized.GET("/favorites/check", favoriteHandler.Check)
 	authorized.GET("/favorites/check-batch", favoriteHandler.CheckBatch)
-	}
 
 	// 文件详情（无需认证，未登录用户上传后需要查询解析状态）
 	// router.GET("/api/files/:id", fileHandler.GetFile)

@@ -661,6 +661,8 @@ type EditImageRequest struct {
 	ImageData string `json:"image_data"`                   // 源图 base64 数据（可选，和 image_url 二选一）
 	MaskURL   string `json:"mask_url"`                     // 蒙版 URL/public_id（局部重绘、区域涂抹）
 	MaskData  string `json:"mask_data"`                    // 蒙版 base64 数据（局部重绘、区域涂抹）
+	SubMode   string `json:"sub_mode"`                     // 子模式：faithful/ai、replace/modify/add/repair 等
+	Intent    string `json:"intent"`                       // 规范化意图，可由前端显式传入；后端会安全回退
 	EditMode  string `json:"edit_mode" binding:"required"` // remove-bg / replace-bg / text-removal / upscale / inpaint / region-brush
 }
 
@@ -683,6 +685,7 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "edit_mode 必须是 remove-bg、replace-bg、text-removal、upscale、inpaint 或 region-brush"})
 		return
 	}
+	editRoute := services.ResolveImageEditRoute(req.EditMode, req.SubMode, req.Intent)
 
 	// 替换背景时必须提供 prompt
 	if req.EditMode == "replace-bg" && req.Prompt == "" {
@@ -947,6 +950,9 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 		"id":         gen.ID,
 		"prompt":     gen.Prompt,
 		"size":       gen.Size,
+		"edit_mode":  editRoute.EditMode,
+		"sub_mode":   editRoute.SubMode,
+		"intent":     editRoute.Intent,
 		"status":     gen.Status,
 		"created_at": gen.CreatedAt,
 	})
@@ -1295,12 +1301,13 @@ func (h *ImageHandler) processImageEditJob(recordID uint, prompt, size, quality,
 	var imageURL, b64Data string
 	var err error
 
-	if len(referenceImagePaths) > 0 {
+	if strings.EqualFold(strings.TrimSpace(provider), "seedream") {
+		// Seedream Beta 模式：显式 provider=seedream 时，文本生成与参考图生成都走 Seedream，
+		// 避免 Beta 资产/分镜参考图误入 OpenAI image edit 链路。
+		imageURL, b64Data, err = h.imageService.GenerateSeedreamImageWithReferences(ctx, prompt, size, referenceImagePaths)
+	} else if len(referenceImagePaths) > 0 {
 		// image-to-image / mask 编辑模式：基于参考图编辑
 		imageURL, b64Data, err = h.imageService.EditImageStream(ctx, prompt, size, quality, referenceImagePaths, maskPath, background, nil)
-	} else if strings.EqualFold(strings.TrimSpace(provider), "seedream") {
-		// Seedream Beta 文生图模式：仅在请求显式指定 provider=seedream 时分流
-		imageURL, b64Data, err = h.imageService.GenerateSeedreamImage(ctx, prompt, size)
 	} else {
 		// 普通文生图模式
 		imageURL, b64Data, err = h.imageService.GenerateImage(ctx, prompt, size, quality)

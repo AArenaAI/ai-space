@@ -41,13 +41,14 @@ type imageGenResponse struct {
 }
 
 type seedreamImageRequest struct {
-	Model          string `json:"model"`
-	Prompt         string `json:"prompt"`
-	Size           string `json:"size,omitempty"`
-	ResponseFormat string `json:"response_format,omitempty"`
-	OutputFormat   string `json:"output_format,omitempty"`
-	Watermark      bool   `json:"watermark"`
-	N              int    `json:"n,omitempty"`
+	Model          string   `json:"model"`
+	Prompt         string   `json:"prompt"`
+	Image          []string `json:"image,omitempty"`
+	Size           string   `json:"size,omitempty"`
+	ResponseFormat string   `json:"response_format,omitempty"`
+	OutputFormat   string   `json:"output_format,omitempty"`
+	Watermark      bool     `json:"watermark"`
+	N              int      `json:"n,omitempty"`
 }
 
 type ImageStreamEvent struct {
@@ -364,7 +365,34 @@ func roundUpToMultiple(value, multiple int) int {
 
 }
 
+func fileToImageDataURL(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	contentType := "image/png"
+	if ext := strings.ToLower(filepath.Ext(path)); ext != "" {
+		switch ext {
+		case ".jpg", ".jpeg":
+			contentType = "image/jpeg"
+		case ".webp":
+			contentType = "image/webp"
+		case ".gif":
+			contentType = "image/gif"
+		}
+	}
+	return "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(data), nil
+}
+
 func (s *ImageGenService) generateSeedreamImage(ctx context.Context, baseURL, apiKey, model, prompt, size string) (string, error) {
+	return s.generateSeedreamImageWithReferences(ctx, baseURL, apiKey, model, prompt, size, nil)
+}
+
+func (s *ImageGenService) GenerateSeedreamImageWithReferences(ctx context.Context, baseURL, apiKey, model, prompt, size string, referenceImagePaths []string) (string, error) {
+	return s.generateSeedreamImageWithReferences(ctx, baseURL, apiKey, model, prompt, size, referenceImagePaths)
+}
+
+func (s *ImageGenService) generateSeedreamImageWithReferences(ctx context.Context, baseURL, apiKey, model, prompt, size string, referenceImagePaths []string) (string, error) {
 	baseURL = normalizeSeedreamBaseURL(baseURL)
 	if model == "" {
 		model = "doubao-seedream-5-0-260128"
@@ -379,6 +407,17 @@ func (s *ImageGenService) generateSeedreamImage(ctx context.Context, baseURL, ap
 		OutputFormat:   "png",
 		Watermark:      false,
 		N:              1,
+	}
+	for _, path := range referenceImagePaths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		dataURL, err := fileToImageDataURL(path)
+		if err != nil {
+			return "", fmt.Errorf("读取 Seedream 参考图失败: %w", err)
+		}
+		reqBody.Image = append(reqBody.Image, dataURL)
 	}
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {

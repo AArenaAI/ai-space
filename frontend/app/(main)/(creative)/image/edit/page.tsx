@@ -17,6 +17,28 @@ import type { UserFacingError } from "@/lib/errors";
 const API_BASE_URL = "";
 
 type EditMode = "remove-bg" | "replace-bg" | "text-removal" | "upscale" | "inpaint" | "region-brush";
+type ImageEditIntent =
+  | "remove_background"
+  | "replace_background"
+  | "remove_text"
+  | "faithful_enhance"
+  | "ai_upscale"
+  | "local_replace"
+  | "local_modify"
+  | "local_add"
+  | "local_repair"
+  | "object_remove_repair";
+
+type ImageEditRoute = { subMode: string; intent: ImageEditIntent };
+
+const DEFAULT_EDIT_ROUTES: Record<EditMode, ImageEditRoute> = {
+  "remove-bg": { subMode: "standard", intent: "remove_background" },
+  "replace-bg": { subMode: "realistic", intent: "replace_background" },
+  "text-removal": { subMode: "auto", intent: "remove_text" },
+  upscale: { subMode: "faithful", intent: "faithful_enhance" },
+  inpaint: { subMode: "replace", intent: "local_replace" },
+  "region-brush": { subMode: "remove", intent: "object_remove_repair" },
+};
 
 /* 示例：展示原图 vs 处理后效果 */
 const MODE_CONFIG = {
@@ -1031,6 +1053,8 @@ function ImageEditContent() {
       const body: Record<string, any> = {
         image_url: imagePublicId,
         edit_mode: editMode,
+        sub_mode: DEFAULT_EDIT_ROUTES[editMode].subMode,
+        intent: DEFAULT_EDIT_ROUTES[editMode].intent,
       };
       body.title = t(config.tabKey);
       if (editMode === "replace-bg") body.prompt = replacePrompt.trim();
