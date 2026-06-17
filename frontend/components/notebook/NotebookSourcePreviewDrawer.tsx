@@ -95,18 +95,7 @@ export function NotebookSourcePreviewDrawer({ open, source, data, loading, error
     file?.size ? formatBytes(file.size) : null,
   ].filter(Boolean) as string[];
 
-  const contentLines = useMemo(() => {
-    if (!data) return [];
-    if (data.chunks?.length) {
-      return data.chunks.map((chunk) => ({
-        chunkIndex: chunk.index,
-        page: chunk.page,
-        sheetName: chunk.sheet_name,
-        lines: splitPreviewLines(chunk.content),
-      }));
-    }
-    return [{ chunkIndex: -1, page: undefined, sheetName: undefined, lines: splitPreviewLines(content) }];
-  }, [content, data]);
+
 
   if (!open) return null;
 
@@ -185,36 +174,14 @@ export function NotebookSourcePreviewDrawer({ open, source, data, loading, error
 
           {loading ? null : error ? null : !data ? (
             <div className="rounded-2xl bg-white p-4 text-sm text-text-secondary shadow-sm dark:bg-surface-card">{t("notebook.previewEmpty")}</div>
-          ) : contentLines.length > 0 ? (
-            <article className="mx-auto max-w-none pb-8">
-              {contentLines.map((block) => {
-                const isTarget = targetChunk?.index === block.chunkIndex;
-                const pageChanged = block.page !== undefined && block.page !== null;
-                return (
-                  <div
-                    key={block.chunkIndex >= 0 ? block.chunkIndex : "raw"}
-                    id={block.chunkIndex >= 0 ? chunkAnchorId(block.chunkIndex) : undefined}
-                    className={cn(isTarget && "scroll-mt-8 bg-brand/5 rounded-2xl px-3 py-2 -mx-3")}
-                  >
-                    {pageChanged && block.page ? (
-                      <div className="mb-2 mt-4 flex items-center gap-2 text-xs text-text-tertiary">
-                        <span className="h-px flex-1 bg-surface-border" />
-                        <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-medium shadow-sm dark:bg-surface-card">第 {block.page} 页</span>
-                        <span className="h-px flex-1 bg-surface-border" />
-                      </div>
-                    ) : null}
-                    {block.sheetName ? (
-                      <div className="mb-2 mt-4 text-xs font-medium text-text-tertiary">
-                        <span className="rounded-full bg-white px-2.5 py-1 shadow-sm dark:bg-surface-card">{block.sheetName}</span>
-                      </div>
-                    ) : null}
-                    {block.lines.map((line, index) => renderSourceLine(line, `${block.chunkIndex}-${index}-${line.slice(0, 12)}`, isTarget))}
-                  </div>
-                );
-              })}
-            </article>
           ) : (
-            <div className="rounded-2xl bg-white p-4 text-sm text-text-secondary shadow-sm dark:bg-surface-card">{t("notebook.previewNoContent")}</div>
+            <article className="mx-auto max-w-none pb-8">
+              {(() => {
+                const raw = data.content || data.chunks?.map((c) => c.content).join("\n") || "";
+                const lines = splitPreviewLines(raw);
+                return lines.map((line, index) => renderSourceLine(line, `${index}-${line.slice(0, 12)}`));
+              })()}
+            </article>
           )}
         </div>
       </aside>
