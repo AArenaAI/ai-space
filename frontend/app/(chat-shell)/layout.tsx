@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import AppSidebar from "@/components/sidebar/AppSidebar";
 import MobileNav from "@/components/mobile/MobileNav";
+import { useFlushOnUnload, useGlobalErrorTracking, usePageDuration } from "@/hooks/useAnalytics";
 import { ChangelogBell } from "@/components/changelog/ChangelogBell";
 
 function useAuth() {
@@ -30,6 +31,11 @@ function useAuth() {
 export default function ChatShellLayout({ children }: { children: React.ReactNode }) {
   const { t } = useI18n();
   const { isLoggedIn } = useAuth();
+
+  // 全局埋点
+  usePageDuration();
+  useGlobalErrorTracking();
+  useFlushOnUnload();
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-surface-elevated">

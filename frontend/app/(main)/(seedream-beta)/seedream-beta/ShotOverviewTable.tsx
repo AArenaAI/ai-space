@@ -1,7 +1,20 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { CheckCircle2, Circle, ChevronDown, ChevronRight, Clapperboard, ImageIcon, Loader2, Play, Video, Wand2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  CheckCircle2,
+  Circle,
+  ChevronDown,
+  ChevronRight,
+  Clapperboard,
+  GripVertical,
+  ImageIcon,
+  Loader2,
+  Play,
+  Trash2,
+  Video,
+  Wand2,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { DirectorBlock, GenerationJob, StoredAsset, StoryboardShot } from "./types";
 import { findDirectorBlockForShot } from "./directorBlock";
@@ -15,7 +28,10 @@ type Props = {
   selectedShotIds: string[];
   onSelectShot: (shotId: string) => void;
   onToggleSelectedShot: (shotId: string) => void;
+  onSelectAll: (shotIds: string[]) => void;
   onBatchGenerate?: (kind: "sketch" | "image" | "video", shotIds: string[]) => void;
+  onBatchDelete?: (shotIds: string[]) => void;
+  onReorderShots?: (orderedIds: string[]) => void;
   isStoryboardSketchAsset: (asset: StoredAsset) => boolean;
   getShotStatusLabel: (status: StoryboardShot["status"]) => string;
   assetViewUrl: (publicIdOrUrl: string) => string;
@@ -23,10 +39,12 @@ type Props = {
 
 function StatusPill({ ok, label, pending }: { ok: boolean; label: string; pending?: boolean }) {
   return (
-    <span className={cn(
-      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
-      ok ? "bg-emerald-500/10 text-emerald-600" : pending ? "bg-amber-500/10 text-amber-600" : "bg-surface-elevated text-text-tertiary",
-    )}>
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
+        ok ? "bg-emerald-500/10 text-emerald-600" : pending ? "bg-amber-500/10 text-amber-600" : "bg-surface-elevated text-text-tertiary",
+      )}
+    >
       {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : ok ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
       {label}
     </span>
@@ -52,13 +70,19 @@ export default function ShotOverviewTable({
   selectedShotIds,
   onSelectShot,
   onToggleSelectedShot,
+  onSelectAll,
   onBatchGenerate,
+  onBatchDelete,
+  onReorderShots,
   isStoryboardSketchAsset,
   getShotStatusLabel,
   assetViewUrl,
 }: Props) {
   const selectedSet = new Set(selectedShotIds);
   const [collapsedScenes, setCollapsedScenes] = useState<Set<string>>(new Set());
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const dragOverIdRef = useRef<string | null>(null);
 
   const sceneGroups = useMemo(() => {
     const map = new Map<string, StoryboardShot[]>();
@@ -73,7 +97,8 @@ export default function ShotOverviewTable({
   const toggleScene = (scene: string) => {
     setCollapsedScenes((prev) => {
       const next = new Set(prev);
-      if (next.has(scene)) next.delete(scene); else next.add(scene);
+      if (next.has(scene)) next.delete(scene);
+      else next.add(scene);
       return next;
     });
   };
@@ -95,6 +120,61 @@ export default function ShotOverviewTable({
     return { missingSketches, missingImages, missingVideos };
   }, [shots, assets, selectedSet, isStoryboardSketchAsset]);
 
+  const transitionHints = useMemo(() => {
+    const hints: Record<string, string> = {};
+    for (let i = 0; i < shots.length - 1; i++) {
+      const current = shots[i];
+      const next = shots[i + 1];
+      if (current.scene !== next.scene) {
+        hints[current.id] = `→ ${next.scene || "未分组"}`;
+      }
+    }
+    return hints;
+  }, [shots]);
+
+  const handleDragStart = (shotId: string) => (e: React.DragEvent) => {
+    setDraggingId(shotId);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", shotId);
+  };
+
+  const handleDragOver = (shotId: string) => (e: React.DragEvent) => {
+    e.preventDefault();
+    if (dragOverIdRef.current !== shotId) {
+      dragOverIdRef.current = shotId;
+      setDragOverId(shotId);
+    }
+  };
+
+  const handleDrop = useCallback(
+    (targetId: string) => (e: React.DragEvent) => {
+      e.preventDefault();
+      const sourceId = e.dataTransfer.getData("text/plain") || draggingId;
+      setDragOverId(null);
+      dragOverIdRef.current = null;
+      setDraggingId(null);
+      if (!sourceId || sourceId === targetId) return;
+      const sourceIndex = shots.findIndex((s) => s.id === sourceId);
+      const targetIndex = shots.findIndex((s) => s.id === targetId);
+      if (sourceIndex < 0 || targetIndex < 0) return;
+      const next = [...shots];
+      const [removed] = next.splice(sourceIndex, 1);
+      next.splice(targetIndex, 0, removed);
+      const reindexed = next.map((shot, idx) => ({ ...shot, index: idx + 1 }));
+      onReorderShots?.(reindexed.map((s) => s.id));
+    },
+    [shots, draggingId, onReorderShots],
+  );
+
+  const handleDragEnd = () => {
+    setDraggingId(null);
+    setDragOverId(null);
+    dragOverIdRef.current = null;
+  };
+
+  const allShotIds = useMemo(() => shots.map((s) => s.id), [shots]);
+  const allSelected = selectedShotIds.length === shots.length && shots.length > 0;
+
   const renderShotRow = (shot: StoryboardShot) => {
     const shotImages = assets.filter((asset) => shot.imageAssetIds.includes(asset.id) && asset.type === "image");
     const sketchAssets = shotImages.filter(isStoryboardSketchAsset);
@@ -105,43 +185,87 @@ export default function ShotOverviewTable({
     const failedJobs = generationJobs.filter((job) => job.shotId === shot.id && job.status === "failed");
     const selected = selectedSet.has(shot.id);
     const active = shot.id === activeShotId;
+    const transition = transitionHints[shot.id];
+    const isDragOver = dragOverId === shot.id;
+    const isDragging = draggingId === shot.id;
 
     const firstSketch = sketchAssets[0];
     const firstFormal = formalAssets[0];
     const firstVideo = videoAssets[0];
 
     return (
-      <tr key={shot.id} className={cn("transition-colors hover:bg-surface-elevated/70", active && "bg-brand/5")}>
+      <tr
+        key={shot.id}
+        draggable={Boolean(onReorderShots)}
+        onDragStart={handleDragStart(shot.id)}
+        onDragOver={handleDragOver(shot.id)}
+        onDrop={handleDrop(shot.id)}
+        onDragEnd={handleDragEnd}
+        className={cn(
+          "transition-colors hover:bg-surface-elevated/70",
+          active && "bg-brand/5",
+          isDragging && "opacity-40",
+          isDragOver && "bg-brand/10",
+        )}
+      >
         <td className="px-3 py-2">
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={() => onToggleSelectedShot(shot.id)}
-            className="h-4 w-4 rounded border-surface-border text-brand focus:ring-brand/40"
-            aria-label={`选择镜头 ${shot.index}`}
-          />
+          <div className="flex items-center gap-2">
+            {onReorderShots && (
+              <span className="cursor-grab text-text-tertiary active:cursor-grabbing">
+                <GripVertical className="h-3.5 w-3.5" />
+              </span>
+            )}
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={() => onToggleSelectedShot(shot.id)}
+              className="h-4 w-4 rounded border-surface-border text-brand focus:ring-brand/40"
+              aria-label={`选择镜头 ${shot.index}`}
+            />
+          </div>
         </td>
         <td className="px-3 py-2">
           <button type="button" onClick={() => onSelectShot(shot.id)} className="max-w-[260px] text-left hover:text-brand">
-            <div className="font-semibold text-text-primary">#{shot.index} {shot.title || "未命名镜头"}</div>
+            <div className="flex items-center gap-1.5">
+              <span className="font-semibold text-text-primary">
+                #{shot.index} {shot.title || "未命名镜头"}
+              </span>
+              {transition && (
+                <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600" title="场景切换，注意转场">
+                  {transition}
+                </span>
+              )}
+            </div>
             <div className="line-clamp-1 text-[11px] text-text-tertiary">{shot.scene || shot.videoPrompt || shot.imagePrompt || "暂无描述"}</div>
           </button>
         </td>
         <td className="px-3 py-2">
           <div className="flex items-center gap-2">
-            <StatusPill ok={sketchAssets.length > 0} label={sketchAssets.length ? `${sketchAssets.length} 张` : "缺"} pending={pendingJobs.some((job) => job.intent === "storyboard_sketch")} />
+            <StatusPill
+              ok={sketchAssets.length > 0}
+              label={sketchAssets.length ? `${sketchAssets.length} 张` : "缺"}
+              pending={pendingJobs.some((job) => job.intent === "storyboard_sketch")}
+            />
             {firstSketch && <Thumbnail src={assetViewUrl(firstSketch.publicId || firstSketch.url)} label="草稿" />}
           </div>
         </td>
         <td className="px-3 py-2">
           <div className="flex items-center gap-2">
-            <StatusPill ok={formalAssets.length > 0} label={formalAssets.length ? `${formalAssets.length} 张` : "缺"} pending={pendingJobs.some((job) => job.type === "image" && job.intent !== "storyboard_sketch")} />
+            <StatusPill
+              ok={formalAssets.length > 0}
+              label={formalAssets.length ? `${formalAssets.length} 张` : "缺"}
+              pending={pendingJobs.some((job) => job.type === "image" && job.intent !== "storyboard_sketch")}
+            />
             {firstFormal && <Thumbnail src={assetViewUrl(firstFormal.publicId || firstFormal.url)} label="正式图" />}
           </div>
         </td>
         <td className="px-3 py-2">
           <div className="flex items-center gap-2">
-            <StatusPill ok={videoAssets.length > 0} label={videoAssets.length ? `${videoAssets.length} 条` : "缺"} pending={pendingJobs.some((job) => job.type === "video")} />
+            <StatusPill
+              ok={videoAssets.length > 0}
+              label={videoAssets.length ? `${videoAssets.length} 条` : "缺"}
+              pending={pendingJobs.some((job) => job.type === "video")}
+            />
             {firstVideo && (
               <div className="group relative inline-block overflow-hidden rounded-lg border border-surface-border">
                 <video src={assetViewUrl(firstVideo.publicId || firstVideo.url)} className="h-10 w-14 object-cover" muted preload="metadata" />
@@ -152,10 +276,15 @@ export default function ShotOverviewTable({
             )}
           </div>
         </td>
-        <td className="px-3 py-2"><StatusPill ok={hasDirector} label={hasDirector ? "已设" : "未设"} /></td>
+        <td className="px-3 py-2">
+          <StatusPill ok={hasDirector} label={hasDirector ? "已设" : "未设"} />
+        </td>
         <td className="px-3 py-2">
           {pendingJobs.length > 0 ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600"><Loader2 className="h-3 w-3 animate-spin" />{pendingJobs.length} 进行中</span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              {pendingJobs.length} 进行中
+            </span>
           ) : failedJobs.length > 0 ? (
             <span className="rounded-full bg-red-500/10 px-2 py-0.5 text-[10px] font-medium text-red-600">{failedJobs.length} 失败</span>
           ) : (
@@ -177,33 +306,72 @@ export default function ShotOverviewTable({
           <p className="mt-1 text-xs text-text-tertiary">一屏检查草稿、正式图、视频、导演台和队列状态；勾选后可批量生成缺失项。</p>
         </div>
         <div className="flex items-center gap-3">
-          {selectedShotIds.length > 0 && onBatchGenerate && (
+          {selectedShotIds.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
-              {selectedMissing.missingSketches.length > 0 && (
-                <button type="button" onClick={() => onBatchGenerate("sketch", selectedMissing.missingSketches)} className="inline-flex items-center gap-1 rounded-full border border-brand/30 bg-brand/10 px-2.5 py-1 text-[11px] font-medium text-brand hover:bg-brand/15">
-                  <Wand2 className="h-3 w-3" />补草稿({selectedMissing.missingSketches.length})
+              {onBatchGenerate && selectedMissing.missingSketches.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onBatchGenerate("sketch", selectedMissing.missingSketches)}
+                  className="inline-flex items-center gap-1 rounded-full border border-brand/30 bg-brand/10 px-2.5 py-1 text-[11px] font-medium text-brand hover:bg-brand/15"
+                >
+                  <Wand2 className="h-3 w-3" />
+                  补草稿({selectedMissing.missingSketches.length})
                 </button>
               )}
-              {selectedMissing.missingImages.length > 0 && (
-                <button type="button" onClick={() => onBatchGenerate("image", selectedMissing.missingImages)} className="inline-flex items-center gap-1 rounded-full border border-brand/30 bg-brand/10 px-2.5 py-1 text-[11px] font-medium text-brand hover:bg-brand/15">
-                  <ImageIcon className="h-3 w-3" />补正式图({selectedMissing.missingImages.length})
+              {onBatchGenerate && selectedMissing.missingImages.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onBatchGenerate("image", selectedMissing.missingImages)}
+                  className="inline-flex items-center gap-1 rounded-full border border-brand/30 bg-brand/10 px-2.5 py-1 text-[11px] font-medium text-brand hover:bg-brand/15"
+                >
+                  <ImageIcon className="h-3 w-3" />
+                  补正式图({selectedMissing.missingImages.length})
                 </button>
               )}
-              {selectedMissing.missingVideos.length > 0 && (
-                <button type="button" onClick={() => onBatchGenerate("video", selectedMissing.missingVideos)} className="inline-flex items-center gap-1 rounded-full border border-brand/30 bg-brand/10 px-2.5 py-1 text-[11px] font-medium text-brand hover:bg-brand/15">
-                  <Video className="h-3 w-3" />补视频({selectedMissing.missingVideos.length})
+              {onBatchGenerate && selectedMissing.missingVideos.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onBatchGenerate("video", selectedMissing.missingVideos)}
+                  className="inline-flex items-center gap-1 rounded-full border border-brand/30 bg-brand/10 px-2.5 py-1 text-[11px] font-medium text-brand hover:bg-brand/15"
+                >
+                  <Video className="h-3 w-3" />
+                  补视频({selectedMissing.missingVideos.length})
+                </button>
+              )}
+              {onBatchDelete && (
+                <button
+                  type="button"
+                  onClick={() => onBatchDelete(selectedShotIds)}
+                  className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-[11px] font-medium text-red-600 hover:bg-red-100"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  删除({selectedShotIds.length})
                 </button>
               )}
             </div>
           )}
-          <div className="text-xs text-text-tertiary">已选 {selectedShotIds.length} / {shots.length}</div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onSelectAll(allSelected ? [] : allShotIds)}
+              className="text-[11px] text-text-secondary hover:text-brand"
+            >
+              {allSelected ? "取消全选" : "全选"}
+            </button>
+            <span className="text-xs text-text-tertiary">已选 {selectedShotIds.length} / {shots.length}</span>
+          </div>
         </div>
       </div>
       <div className="max-h-80 overflow-auto rounded-xl border border-surface-border">
         <table className="w-full min-w-[860px] border-collapse text-left text-xs">
           <thead className="sticky top-0 z-10 bg-surface-elevated text-[11px] uppercase tracking-wide text-text-tertiary">
             <tr>
-              <th className="w-10 px-3 py-2">选</th>
+              <th className="w-10 px-3 py-2">
+                <div className="flex items-center gap-1">
+                  {onReorderShots && <span className="inline-block w-3.5" />}
+                  选
+                </div>
+              </th>
               <th className="px-3 py-2">镜头</th>
               <th className="px-3 py-2">草稿</th>
               <th className="px-3 py-2">正式图</th>
@@ -220,7 +388,11 @@ export default function ShotOverviewTable({
                 <>
                   <tr key={`scene-${scene}`} className="bg-surface-elevated/40">
                     <td colSpan={8} className="px-3 py-1.5">
-                      <button type="button" onClick={() => toggleScene(scene)} className="flex w-full items-center gap-1.5 text-left text-[11px] font-medium text-text-secondary hover:text-text-primary">
+                      <button
+                        type="button"
+                        onClick={() => toggleScene(scene)}
+                        className="flex w-full items-center gap-1.5 text-left text-[11px] font-medium text-text-secondary hover:text-text-primary"
+                      >
                         {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                         <span className="truncate">{scene}</span>
                         <span className="ml-1 rounded-full bg-surface-card px-1.5 py-0.5 text-[10px] text-text-tertiary">{sceneShots.length} 镜头</span>
@@ -235,10 +407,22 @@ export default function ShotOverviewTable({
         </table>
       </div>
       <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-text-tertiary">
-        <span className="inline-flex items-center gap-1"><Wand2 className="h-3 w-3" />草稿用于验证构图</span>
-        <span className="inline-flex items-center gap-1"><ImageIcon className="h-3 w-3" />正式图可做首帧/参考图</span>
-        <span className="inline-flex items-center gap-1"><Video className="h-3 w-3" />视频生成状态独立追踪</span>
-        <span className="inline-flex items-center gap-1"><Clapperboard className="h-3 w-3" />导演台控制空间/站位</span>
+        <span className="inline-flex items-center gap-1">
+          <Wand2 className="h-3 w-3" />
+          草稿用于验证构图
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <ImageIcon className="h-3 w-3" />
+          正式图可做首帧/参考图
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <Video className="h-3 w-3" />
+          视频生成状态独立追踪
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <Clapperboard className="h-3 w-3" />
+          导演台控制空间/站位
+        </span>
       </div>
     </div>
   );

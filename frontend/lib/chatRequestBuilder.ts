@@ -16,9 +16,10 @@ export function buildChatRequestHeaders({ token, guestId }: ChatRequestHeadersOp
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
-  if (token) {
+  if (token && token !== "null" && token !== "undefined") {
     headers.Authorization = `Bearer ${token}`;
-  } else {
+  }
+  if (guestId) {
     headers["X-Guest-ID"] = guestId;
   }
   return headers;

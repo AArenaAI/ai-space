@@ -2256,6 +2256,7 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
                         selectedShotIds={selectedOverviewShotIds}
                         onSelectShot={setActiveShotId}
                         onToggleSelectedShot={toggleOverviewShotSelection}
+                        onSelectAll={(ids) => setSelectedOverviewShotIds(ids)}
                         onBatchGenerate={(kind, shotIds) => {
                           if (kind === "sketch") {
                             const targets = storyboardShots.filter((s) => shotIds.includes(s.id));
@@ -2267,6 +2268,22 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
                             const targets = storyboardShots.filter((s) => shotIds.includes(s.id));
                             batchGenerateVideosForShots(targets);
                           }
+                        }}
+                        onBatchDelete={(ids) => {
+                          const count = ids.length;
+                          if (!confirm(`确定删除选中的 ${count} 个镜头？`)) return;
+                          setStoryboardShots((prev) => prev.filter((s) => !ids.includes(s.id)).map((s, i) => ({ ...s, index: i + 1 })));
+                          setSelectedOverviewShotIds((prev) => prev.filter((id) => !ids.includes(id)));
+                          if (activeShotId && ids.includes(activeShotId)) {
+                            const remaining = storyboardShots.filter((s) => !ids.includes(s.id));
+                            setActiveShotId(remaining[0]?.id);
+                          }
+                          toast.success(`已删除 ${count} 个镜头`);
+                        }}
+                        onReorderShots={(orderedIds) => {
+                          const map = new Map(storyboardShots.map((s) => [s.id, s]));
+                          const next = orderedIds.map((id, i) => ({ ...map.get(id)!, index: i + 1 }));
+                          setStoryboardShots(next);
                         }}
                         isStoryboardSketchAsset={isStoryboardSketchAsset}
                         getShotStatusLabel={getShotStatusLabel}

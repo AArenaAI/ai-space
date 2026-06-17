@@ -21,6 +21,7 @@ import type { ModelRecommendationContext } from "@/lib/models/modelRecommendatio
 import { emitChatRenderProfileEvent } from "@/lib/chatRenderProfile";
 import { useCredits, getTierName, getModelTier, isExpensiveModel } from "@/hooks/useCredits";
 import CreditExhaustedModal from "@/components/credits/CreditExhaustedModal";
+import { useChatAnalytics, trackCreditUse, trackFeatureUse } from "@/hooks/useAnalytics";
 
 const ForkCompareDialog = dynamic(() => import("./ForkCompareDialog"), {
   ssr: false,
@@ -319,6 +320,10 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     skipUserMessage: boolean;
   } | null>(null);
 
+  // 埋点追踪
+  const { trackChatStart, trackChatComplete, trackModelSwitch } = useChatAnalytics();
+  const prevModelRef = useRef<string>("");
+
   const handleSend = async (content: string, reasoning: ReasoningConfig | undefined, search: boolean, attachments?: { filename: string; content: string; type: string; public_id?: string }[], file_ids?: string[], skipUserMessage = false) => {
     // 积分检查：额度不足时弹出 Bad Case 提交模态框
     if (selectedModel && !hasEnoughCredits(selectedModel.id)) {
@@ -328,9 +333,14 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
 
     // 昂贵模型二次确认（Chat 1，22元/次）
     if (selectedModel && isExpensiveModel(selectedModel.id)) {
-      setPendingSendPayload({ content, reasoning, search, attachments, file_ids, skipUserMessage });
+      setPendingSendPayload({ content, reasoning, search, attachments, file_ids, skipUserMessage: skipUserMessage || false });
       setExpensiveModelConfirmOpen(true);
       return;
+    }
+
+    // 埋点：聊天开始
+    if (selectedModel) {
+      trackChatStart(selectedModel.id, selectedModel.name);
     }
 
     const activeCompareMode = compareMode || isCompare;
@@ -397,10 +407,15 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
       while (next.length <= index && next.length < COMPARE_MODEL_LIMIT) {
         next.push(models[next.length]?.id || modelId);
       }
+      const oldModelId = next[index];
       next[index] = modelId;
       const normalized = normalizeCompareModelIds(next, models);
       selectedModelsRef.current = normalized;
       localStorage.setItem(COMPARE_MODELS_KEY, JSON.stringify(normalized));
+      // 埋点：模型切换
+      if (oldModelId && oldModelId !== modelId) {
+        trackModelSwitch(oldModelId, modelId);
+      }
       return normalized;
     });
   };
@@ -496,7 +511,13 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
             <ModelSelector
               models={models}
               selected={selectedModel}
-              onSelect={handleModelSelect}
+              onSelect={(model) => {
+                if (prevModelRef.current && prevModelRef.current !== model.id) {
+                  trackModelSwitch(prevModelRef.current, model.id);
+                }
+                prevModelRef.current = model.id;
+                handleModelSelect(model);
+              }}
               recommendationContext={modelRecommendationContext}
             />
           </div>
@@ -771,6 +792,8 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
             const err = await res.json().catch(() => ({ error: "提交失败" }));
             throw new Error(err.error || "提交失败");
           }
+          // 埋点：Bad Case 提交
+          trackFeatureUse("bad_case_submit", { model_id: data.model_id });
         }}
         currentModel={selectedModel ? { id: selectedModel.id, name: selectedModel.name || selectedModel.id } : undefined}
         conversationId={conversationId}

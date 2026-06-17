@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { getGuestId, clearGuestId } from "@/lib/guestId";
+import { getGuestId } from "@/lib/guestId";
 import { normalizeError } from "@/lib/errors";
 import { toast } from "sonner";
 
@@ -39,13 +39,8 @@ export default function AuthInterceptor() {
     // 只在客户端执行
     if (typeof window === "undefined") return;
 
-    // 初始化 guest ID（如果已登录则清除）
-    const initialToken = localStorage.getItem("token");
-    if (initialToken) {
-      clearGuestId();
-    } else {
-      getGuestId(); // 保证存在
-    }
+    // 初始化 guest ID：即使存在 token 也保留匿名兜底，避免脏/过期 token 导致 guest_id_required。
+    getGuestId();
 
     const originalFetch = window.fetch;
     let refreshPromise: Promise<string | null> | null = null;
@@ -78,7 +73,6 @@ export default function AuthInterceptor() {
                 localStorage.setItem("current-workspace", String(data.user.default_workspace_id));
               }
             }
-            clearGuestId();
             window.dispatchEvent(new Event("auth-changed"));
             return data.token as string;
           })
@@ -120,11 +114,9 @@ export default function AuthInterceptor() {
         if (!hasAuth && token && token !== "null" && token !== "undefined") {
           headers.set("Authorization", `Bearer ${token}`);
         }
-        // 只有在未携带 Authorization 时才发送 guest ID（避免已登录用户被误识别为匿名）
-        if (!headers.has("Authorization")) {
-          const guestId = getGuestId();
-          if (guestId) headers.set("X-Guest-ID", guestId);
-        }
+        // 始终携带 guest ID 作为匿名兜底；有效 Authorization 仍由后端优先识别为登录用户。
+        const guestId = getGuestId();
+        if (guestId) headers.set("X-Guest-ID", guestId);
         nextInit = { ...nextInit, headers, credentials: nextInit?.credentials || "include" };
       }
 
