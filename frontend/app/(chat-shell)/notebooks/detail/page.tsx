@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, FileText, Globe, Loader2, MoreVertical, Plus, Search, Zap, AlertCircle, CheckCircle2, Clock3, Check, ImageIcon, Upload, Trash2, Pencil, RotateCcw } from "lucide-react";
+import { ArrowLeft, FileText, Loader2, MoreVertical, Plus, AlertCircle, CheckCircle2, Clock3, Check, ImageIcon, Upload, Trash2, Pencil, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import ChatInterface from "@/components/chat/ChatInterface";
 import { NotebookSourcePreviewDrawer } from "@/components/notebook/NotebookSourcePreviewDrawer";
@@ -77,7 +77,7 @@ function notebookSourceIcon(file?: NotebookFile) {
   if (mime.includes("spreadsheet") || mime.includes("excel") || filename.endsWith(".xls") || filename.endsWith(".xlsx") || filename.endsWith(".csv")) return "XLS";
   if (mime.includes("presentation") || filename.endsWith(".ppt") || filename.endsWith(".pptx")) return "PPT";
   if (mime.includes("image/")) return "IMG";
-  if (mime.includes("html") || filename.startsWith("http") || filename.endsWith(".url")) return "WEB";
+  if (mime.includes("uri-list") || mime.includes("html") || filename.startsWith("http") || filename.endsWith(".url")) return "WEB";
   if (mime.includes("markdown") || filename.endsWith(".md")) return "MD";
   if (mime.includes("text") || filename.endsWith(".txt")) return "TXT";
   return "FILE";
@@ -85,6 +85,10 @@ function notebookSourceIcon(file?: NotebookFile) {
 
 function stripFileExtension(filename: string) {
   return filename.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
+}
+
+function displaySourceFilename(filename: string) {
+  return filename.replace(/\.url$/i, "");
 }
 
 function buildAutoNotebookTitle(file?: NotebookFile) {
@@ -212,7 +216,7 @@ function normalizeFlashcardArtifactTitle(title: string) {
 }
 
 function toStudioArtifact(artifact: PersistedNotebookArtifact): NotebookStudioArtifact | null {
-  const content = artifact.content as { rows?: NotebookStudioTableRow[]; sections?: NotebookStudioTextSection[] | NotebookStudioReportSection[]; nodes?: NotebookStudioMindmapNode[]; edges?: NotebookStudioMindmapEdge[]; cards?: NotebookStudioFlashcard[]; questions?: NotebookStudioQuizQuestion[]; format_id?: string; format_title?: string; executive_summary?: string; tables?: NotebookStudioReportTable[]; orientation?: string; style?: string; detail_level?: string; prompt?: string; image_url?: string; color_scheme?: Record<string, string> } | null;
+  const content = artifact.content as { rows?: NotebookStudioTableRow[]; sections?: NotebookStudioTextSection[] | NotebookStudioReportSection[]; nodes?: NotebookStudioMindmapNode[]; edges?: NotebookStudioMindmapEdge[]; cards?: NotebookStudioFlashcard[]; questions?: NotebookStudioQuizQuestion[]; format_id?: string; format_title?: string; executive_summary?: string; tables?: NotebookStudioReportTable[]; orientation?: string; style?: string; detail_level?: string; prompt?: string; html?: string; image_prompt?: string; image_url?: string; error_message?: string; color_scheme?: Record<string, string> } | null;
   const base = {
     id: String(artifact.id),
     title: artifact.type === "flashcards" ? normalizeFlashcardArtifactTitle(artifact.title) : artifact.title,
@@ -260,7 +264,10 @@ function toStudioArtifact(artifact: PersistedNotebookArtifact): NotebookStudioAr
       style: typeof content?.style === "string" ? content.style : "auto",
       detail_level: typeof content?.detail_level === "string" ? content.detail_level : "standard",
       prompt: typeof content?.prompt === "string" ? content.prompt : "",
+      html: typeof content?.html === "string" ? content.html : "",
+      image_prompt: typeof content?.image_prompt === "string" ? content.image_prompt : "",
       image_url: typeof content?.image_url === "string" ? content.image_url : "",
+      error_message: typeof content?.error_message === "string" ? content.error_message : "",
       color_scheme: typeof content?.color_scheme === "object" && content?.color_scheme ? content.color_scheme : undefined,
     };
   }
@@ -381,6 +388,9 @@ function artifactToMarkdown(artifact: NotebookStudioArtifact) {
     case "infographic":
       lines.push("## Infographic", "", `- Orientation: ${artifact.orientation}`, `- Style: ${artifact.style}`, `- Detail level: ${artifact.detail_level}`, "");
       if (artifact.prompt) lines.push("## Custom prompt", "", artifact.prompt, "");
+      if (artifact.html) lines.push("## HTML", "", artifact.html, "");
+      if (artifact.image_prompt) lines.push("## Image prompt", "", artifact.image_prompt, "");
+      if (artifact.error_message) lines.push("## Generation error", "", artifact.error_message, "");
       if (artifact.image_url) lines.push("## Image", "", artifact.image_url, "");
       break;
   }
@@ -1817,22 +1827,6 @@ function NotebookDetailContent() {
             {addingUrl ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             {t("notebook.addSource")}
           </button>
-          <div className="mb-3 rounded-[22px] border border-surface-border bg-surface-elevated p-3">
-            <button type="button" onClick={() => writableNotebookId && setUrlDialogOpen(true)} className="block w-full rounded-2xl px-2 py-1.5 text-left text-sm font-medium text-text-secondary transition hover:text-text-primary">
-              {t("notebook.searchNewSources")}
-            </button>
-            <div className="mt-2 flex items-center gap-2">
-              <button type="button" onClick={() => writableNotebookId && setUrlDialogOpen(true)} className="inline-flex h-8 items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-2.5 text-xs font-medium text-text-secondary transition hover:text-text-primary">
-                <Globe className="h-3.5 w-3.5" />Web
-              </button>
-              <button type="button" onClick={() => writableNotebookId && setUrlDialogOpen(true)} className="inline-flex h-8 items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-2.5 text-xs font-medium text-text-secondary transition hover:text-text-primary">
-                <Zap className="h-3.5 w-3.5 text-brand" />Fast Research
-              </button>
-              <button type="button" onClick={() => writableNotebookId && setUrlDialogOpen(true)} className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-full bg-surface-card text-text-secondary transition hover:bg-brand hover:text-white">
-                <Search className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
           <input ref={inputRef} type="file" multiple accept={NOTEBOOK_SOURCE_FILE_ACCEPT} disabled={!writableNotebookId} className="hidden" onChange={(e) => handleUpload(e.target.files)} />
 
           {pageError && (
@@ -1880,7 +1874,7 @@ function NotebookDetailContent() {
                     <div className="flex items-center gap-3">
                       <SourceFileIcon file={file} />
                       <div className="min-w-0 flex-1 overflow-hidden">
-                        <div className="truncate text-sm font-medium text-text-primary">{file.file.filename}</div>
+                        <div className="truncate text-sm font-medium text-text-primary">{displaySourceFilename(file.file.filename)}</div>
                         <div className="mt-1.5 flex min-w-0 items-center gap-2">
                           <span className={cn("inline-flex h-5 shrink-0 items-center gap-1 rounded-full border px-2 text-[11px] font-medium", meta.className)} title={detail || meta.label}>
                             <StatusIcon className={cn("h-3 w-3", isNotebookFileProcessing(file) && "animate-spin")} />

@@ -4,10 +4,69 @@ export const IMAGE_ASPECTS = ["1:1", "16:9", "9:16", "4:3", "3:4"];
 export const IMAGE_RESOLUTIONS = ["2K"];
 export const SEEDREAM_IMAGE_QUALITY = "medium";
 
-export const VIDEO_MODELS = ["doubao-seedance-2-0-fast-260128", "doubao-seedance-2-0-pro-260128"];
+export const VIDEO_MODELS = [
+  "doubao-seedance-2.0-mini",
+  "doubao-seedance-1.5-pro",
+  "doubao-seedance-1.0-pro",
+  "doubao-seedance-1.0-pro-fast",
+  // Legacy endpoint IDs kept for old projects/tasks and admin pricing compatibility.
+  "doubao-seedance-2-0-fast-260128",
+  "doubao-seedance-2-0-260128",
+];
 export const VIDEO_ASPECTS = ["adaptive", "16:9", "9:16", "1:1", "4:3", "3:4"];
 export const VIDEO_RESOLUTIONS = ["480p", "720p", "1080p"];
-export const VIDEO_DURATIONS = [5, 10, 15];
+export const VIDEO_DURATIONS = [-1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+
+function range(start: number, end: number) {
+  return Array.from({ length: end - start + 1 }, (_, index) => start + index);
+}
+
+function normalizeModelId(model?: string) {
+  return (model || "").toLowerCase().replace(/[._]/g, "-");
+}
+
+function isSeedance1(model?: string) {
+  return normalizeModelId(model).includes("seedance-1-0");
+}
+
+function isSeedance15(model?: string) {
+  return normalizeModelId(model).includes("seedance-1-5");
+}
+
+function isSeedance2(model?: string) {
+  return normalizeModelId(model).includes("seedance-2-0");
+}
+
+function isFastLikeSeedance(model?: string) {
+  const normalized = normalizeModelId(model);
+  return normalized.includes("seedance-2-0-fast") || normalized.includes("seedance-2-0-mini") || normalized.includes("seedance-1-0-pro-fast");
+}
+
+export function getVideoDurationOptions(model?: string) {
+  if (isSeedance1(model)) return range(2, 12);
+  if (isSeedance15(model)) return [-1, ...range(4, 12)];
+  if (isSeedance2(model)) return [-1, ...range(4, 15)];
+  return VIDEO_DURATIONS;
+}
+
+export function getVideoResolutionOptions(model?: string) {
+  return isFastLikeSeedance(model) ? ["480p", "720p"] : VIDEO_RESOLUTIONS;
+}
+
+export function normalizeVideoDurationForModel(model: string | undefined, duration?: number) {
+  const options = getVideoDurationOptions(model);
+  const fallback = options.includes(5) ? 5 : options[0];
+  const raw = Number(duration ?? fallback);
+  if (options.includes(raw)) return raw;
+  const numericOptions = options.filter((item) => item > 0);
+  return numericOptions.reduce((best, item) => Math.abs(item - raw) < Math.abs(best - raw) ? item : best, numericOptions[0] || fallback);
+}
+
+export function normalizeVideoResolutionForModel(model: string | undefined, resolution?: string) {
+  const options = getVideoResolutionOptions(model);
+  const raw = resolution || "720p";
+  return options.includes(raw) ? raw : "720p";
+}
 // Seedream Beta 文本工作流分层：DeepSeek 负责低成本剧本初稿，GPT 负责高质量精修/强钩子/对白重写。
 export const WORKFLOW_DRAFT_MODEL = "deepseek-v4-pro";
 export const WORKFLOW_POLISH_MODEL = "gpt-5.5";

@@ -30,7 +30,73 @@ func cleanVideoTaskSubmissionErrorMessage(err error) string {
 		containsAny(message, "超时") {
 		return "视频任务提交超时，请稍后重新提交。"
 	}
+	if containsAny(lower, "quota", "insufficient", "balance", "billing", "credit", "credits") ||
+		containsAny(message, "额度", "余额", "欠费", "扣费", "积分") {
+		return "当前生成服务额度不足，暂时无法完成生成。请稍后再试，"
+	}
+	if containsAny(lower, "unauthorized", "authentication", "permission", "api key", "apikey", "access denied", "401", "403") ||
+		containsAny(message, "认证", "鉴权", "无权限", "未授权", "密钥") {
+		return "生成服务暂时不可用，请稍后再试。"
+	}
+	if detail := extractProviderErrorDetail(message); detail != "" {
+		return "视频任务提交失败：" + detail
+	}
+	if summary := summarizeProviderSubmissionError(message); summary != "" {
+		return "视频任务提交失败：" + summary
+	}
 	return cleanVideoGenerationErrorMessage(err)
+}
+
+func extractProviderErrorDetail(message string) string {
+	text := strings.TrimSpace(strings.ReplaceAll(message, "\n", " "))
+	if text == "" {
+		return ""
+	}
+	lower := strings.ToLower(text)
+	// Prefer the provider's concrete parameter/safety message over our broad category copy.
+	for _, marker := range []string{"message:", "error message:", "error_message:", "msg:"} {
+		if idx := strings.LastIndex(lower, marker); idx >= 0 {
+			detail := strings.TrimSpace(text[idx+len(marker):])
+			return sanitizeProviderDetail(detail)
+		}
+	}
+	if containsAny(lower, "duration", "resolution", "ratio", "reference", "first_frame", "last_frame", "image", "video") && len([]rune(text)) <= 220 {
+		return sanitizeProviderDetail(text)
+	}
+	return ""
+}
+
+func sanitizeProviderDetail(detail string) string {
+	detail = strings.TrimSpace(strings.Trim(detail, `"'`))
+	for _, marker := range []string{"request id", "request_id", "requestId"} {
+		lower := strings.ToLower(detail)
+		if idx := strings.Index(lower, strings.ToLower(marker)); idx >= 0 {
+			detail = strings.TrimSpace(detail[:idx])
+		}
+	}
+	if len([]rune(detail)) > 180 {
+		runes := []rune(detail)
+		detail = string(runes[:180]) + "..."
+	}
+	return strings.TrimSpace(detail)
+}
+
+func summarizeProviderSubmissionError(message string) string {
+	text := strings.TrimSpace(strings.ReplaceAll(message, "\n", " "))
+	if text == "" {
+		return ""
+	}
+	for _, prefix := range []string{"create video task failed:", "failed to create task:", "CreateContentGenerationTask"} {
+		if idx := strings.Index(strings.ToLower(text), strings.ToLower(prefix)); idx >= 0 {
+			text = strings.TrimSpace(text[idx+len(prefix):])
+		}
+	}
+	text = strings.ReplaceAll(text, "	", " ")
+	text = strings.Join(strings.Fields(text), " ")
+	if text == "" {
+		return ""
+	}
+	return sanitizeProviderDetail(text)
 }
 
 func cleanImageGenerationErrorMessage(err error) string {

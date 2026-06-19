@@ -102,8 +102,9 @@ type notebookStudioInfographic struct {
 	Style       string            `json:"style"`
 	DetailLevel string            `json:"detail_level"`
 	Prompt      string            `json:"prompt"`
-	ImagePrompt string            `json:"image_prompt"`
-	ImageURL    string            `json:"image_url"`
+	HTML        string            `json:"html"`
+	ImagePrompt string            `json:"image_prompt,omitempty"`
+	ImageURL    string            `json:"image_url,omitempty"`
 	ColorScheme map[string]string `json:"color_scheme,omitempty"`
 }
 
@@ -166,23 +167,24 @@ func buildGeneratedNotebookArtifactDraft(generationType string, notebookTitle st
 		opt = opts[0]
 	}
 	attachNotebookGenerationSourceChunks(sources, opt.SourceChunks)
+	artifactSubject := notebookArtifactTitleSubject(sources)
 
 	var payload any
 	switch artifactType {
 	case "data-table":
 		payload = map[string]any{"rows": buildNotebookGeneratedTableRows(sources)}
 	case "mindmap":
-		payload = buildNotebookGeneratedMindmap(notebookTitle, sources)
+		payload = buildNotebookGeneratedMindmap(artifactSubject, sources)
 	case "flashcards":
 		payload = map[string]any{"cards": buildNotebookGeneratedFlashcards(sources, language)}
 	case "quiz":
 		payload = map[string]any{"questions": buildNotebookGeneratedQuizQuestions(sources, language)}
 	case "infographic":
-		payload = buildNotebookGeneratedInfographic(notebookTitle, sources, language, opt)
+		payload = buildNotebookGeneratedInfographic(artifactSubject, sources, language, opt)
 	case "report":
-		payload = buildNotebookGeneratedReport(reportGenerationFormatID(generationType), notebookTitle, sources, language)
+		payload = buildNotebookGeneratedReport(reportGenerationFormatID(generationType), artifactSubject, sources, language)
 	case "summary", "faq", "briefing":
-		payload = map[string]any{"sections": buildNotebookGeneratedTextSections(generationType, notebookTitle, sources, language)}
+		payload = map[string]any{"sections": buildNotebookGeneratedTextSections(generationType, artifactSubject, sources, language)}
 	}
 	content, err := json.Marshal(payload)
 	if err != nil {
@@ -190,7 +192,7 @@ func buildGeneratedNotebookArtifactDraft(generationType string, notebookTitle st
 	}
 	return generatedNotebookArtifactDraft{
 		Type:          artifactType,
-		Title:         notebookGeneratedArtifactTitle(generationType, notebookTitle),
+		Title:         notebookGeneratedArtifactTitle(generationType, artifactSubject),
 		Subtitle:      fmt.Sprintf("基于 %d 个资料源生成", len(sources)),
 		Content:       content,
 		SourceCount:   len(sources),
@@ -281,27 +283,18 @@ func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, 
 	if generationType == "mindmap" && !notebookMindmapDraftLooksUseful(draft.Content) {
 		return generatedNotebookArtifactDraft{}, fmt.Errorf("思维导图分析结果不完整，请重新生成")
 	}
-	if generationType == "infographic" && imageService != nil {
+	if generationType == "infographic" {
 		var content notebookStudioInfographic
-		if err := json.Unmarshal(draft.Content, &content); err == nil && strings.TrimSpace(content.ImagePrompt) != "" {
-			size := "1024x1024"
-			switch content.Orientation {
-			case "landscape":
-				size = "1024x576"
-			case "portrait":
-				size = "576x1024"
-			case "square":
-				size = "1024x1024"
+		if err := json.Unmarshal(draft.Content, &content); err != nil {
+			return generatedNotebookArtifactDraft{}, fmt.Errorf("信息图内容格式无效，请重新生成")
+		}
+		content.HTML = strings.TrimSpace(content.HTML)
+		if content.HTML == "" {
+			fallbackContent := draft.Content
+			if rebuilt, err := buildGeneratedNotebookArtifactDraft(generationType, notebookTitle, files, selectedFileIDs, language, opts...); err == nil {
+				fallbackContent = rebuilt.Content
 			}
-			imageURL, _, err := imageService.GenerateImage(ctx, content.ImagePrompt, size, "medium")
-			if err == nil && imageURL != "" {
-				if !strings.HasPrefix(imageURL, "http") && !strings.HasPrefix(imageURL, "/") {
-					imageURL = "/api/images/file/" + imageURL
-				}
-				content.ImageURL = imageURL
-				updated, _ := json.Marshal(content)
-				draft.Content = updated
-			}
+			draft.Content = fallbackContent
 		}
 	}
 	return draft, nil
@@ -335,7 +328,7 @@ func buildNotebookArtifactAIMessages(generationType string, notebookTitle string
 	} else if generationType == "quiz" {
 		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For quiz content must be {\"questions\":[{\"question\":string,\"options\":[{\"id\":\"A\",\"text\":string,\"reason\":string},{\"id\":\"B\",\"text\":string,\"reason\":string},{\"id\":\"C\",\"text\":string,\"reason\":string},{\"id\":\"D\",\"text\":string,\"reason\":string}],\"correct_option_id\":\"A|B|C|D\",\"hint\":string,\"explanation\":string}]}. Create exactly 10 multiple-choice questions from the source material. Questions should test concrete facts, mechanisms, comparisons, capabilities, numeric details, or implications in the documents. Each question has exactly 4 plausible options, exactly one correct answer, a short hint for before answering, and an explanation grounded in the source for after answering. Every option MUST include a short reason field: for the correct option, reason explains why it is correct; for each incorrect option, reason explains why it is wrong in one concise sentence. Avoid generic questions, file names, parse/index status, citation labels, and unsupported facts.\n")
 	} else if generationType == "infographic" {
-		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For infographic content must be {\"orientation\":string,\"style\":string,\"detail_level\":string,\"prompt\":string,\"image_prompt\":string,\"color_scheme\":{\"primary\":string,\"secondary\":string,\"accent\":string,\"background\":string,\"text\":string}}. You are the prompt engineer for an image generation model.\n")
+		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For infographic content must be {\"orientation\":string,\"style\":string,\"detail_level\":string,\"prompt\":string,\"html\":string,\"color_scheme\":{\"primary\":string,\"secondary\":string,\"accent\":string,\"background\":string,\"text\":string}}. You are designing a self-contained HTML/SVG infographic, not an image prompt.\n")
 		b.WriteString(fmt.Sprintf("Orientation: %s\n", fallbackText(opt.Orientation, "landscape")))
 		b.WriteString(fmt.Sprintf("Style: %s\n", fallbackText(opt.Style, "auto")))
 		b.WriteString(fmt.Sprintf("Detail level: %s\n", fallbackText(opt.DetailLevel, "standard")))
@@ -343,13 +336,11 @@ func buildNotebookArtifactAIMessages(generationType string, notebookTitle string
 			b.WriteString(fmt.Sprintf("User prompt: %s\n", opt.Prompt))
 		}
 		b.WriteString("Requirements:\n")
-		b.WriteString("- Analyze the uploaded sources and design a compelling infographic concept.\n")
-		b.WriteString("- The image_prompt field must be a single detailed English text-to-image prompt (300-900 characters) optimized for DALL-E / GPT-image / Seedream. Describe layout, visual hierarchy, color palette, typography style, key statistics or comparisons, icons/charts, and overall mood.\n")
-		b.WriteString("- The prompt field should be a short human-readable description in the requested language (used as caption).\n")
-		b.WriteString("- Choose color_scheme to match the visual style: cute=rounded pastels/emojis; clay=soft 3D shadows/pastels; sketch=hand-drawn lines/paper texture; anime=bold gradients/speed lines; professional=clean corporate palette with navy, slate, white; auto=harmonious modern palette.\n")
-		b.WriteString("- Ground all facts in the provided sources. Do not invent unsupported numbers.\n")
-		b.WriteString("- Avoid prompts that request text, labels, or small legible characters unless essential, because image models often render text poorly. Instead describe visual hierarchy, relative sizes, icons, charts, and color blocks that communicate the idea.\n")
-		b.WriteString("- Keep the output strictly JSON with no markdown fences.\n")
+		b.WriteString("- Analyze the uploaded sources and create a polished visual infographic as self-contained HTML with inline CSS.\n")
+		b.WriteString("- The html field must contain one complete embeddable HTML snippet: a root <div> or <section>, inline <style>, no external scripts, no external fonts, no remote images. SVG is allowed inline.\n")
+		b.WriteString("- Use large readable text, cards, icons made from CSS/SVG, simple charts, and clear hierarchy. Avoid tiny labels.\n")
+		b.WriteString("- Match orientation/style/detail level and the user's prompt. Ground all facts in sources; do not invent numbers.\n")
+		b.WriteString("- Keep html under 30000 characters and output strictly JSON with no markdown fences.\n")
 	} else if strings.HasPrefix(generationType, "report") {
 		formatID := reportGenerationFormatID(generationType)
 		fmt.Fprintf(&b, "Report format id: %s\n", formatID)
@@ -489,11 +480,10 @@ func parseAINotebookArtifactResponse(body []byte, fallback generatedNotebookArti
 	if len(ai.Content) == 0 || !json.Valid(ai.Content) {
 		return generatedNotebookArtifactDraft{}, fmt.Errorf("AI artifact content is not valid JSON")
 	}
-	if fallback.Type != "flashcards" {
-		fallback.Title = fallbackText(ai.Title, fallback.Title)
-	}
+	cleanContent := sanitizeNotebookArtifactContent(fallback.Type, ai.Content)
+	fallback.Title = notebookResolveArtifactTitle(fallback.Type, ai.Title, fallback.Title, cleanContent)
 	fallback.Subtitle = fallbackText(ai.Subtitle, fallback.Subtitle)
-	fallback.Content = sanitizeNotebookArtifactContent(fallback.Type, ai.Content)
+	fallback.Content = cleanContent
 	return fallback, nil
 }
 
@@ -1118,17 +1108,8 @@ func sanitizeNotebookQuizQuestions(questions []notebookStudioQuizQuestion) []not
 func buildNotebookGeneratedInfographic(notebookTitle string, sources []notebookGenerationSource, language string, opts notebookArtifactGenerationOptions) map[string]any {
 	style := fallbackText(strings.TrimSpace(opts.Style), "auto")
 	detailLevel := fallbackText(strings.TrimSpace(opts.DetailLevel), "standard")
+	orientation := fallbackText(strings.TrimSpace(opts.Orientation), "landscape")
 	prompt := strings.TrimSpace(opts.Prompt)
-
-	var width, height int
-	switch opts.Orientation {
-	case "portrait":
-		width, height = 800, 1200
-	case "square":
-		width, height = 1000, 1000
-	default:
-		width, height = 1200, 800
-	}
 
 	primary := "#4f46e5"
 	secondary := "#10b981"
@@ -1137,83 +1118,58 @@ func buildNotebookGeneratedInfographic(notebookTitle string, sources []notebookG
 	textColor := "#1f2937"
 	switch style {
 	case "cute":
-		primary = "#f472b6"
-		secondary = "#a78bfa"
-		accent = "#fcd34d"
+		primary, secondary, accent, background = "#ec4899", "#a78bfa", "#fcd34d", "#fff7ed"
 	case "clay":
-		primary = "#818cf8"
-		secondary = "#34d399"
-		accent = "#fbbf24"
+		primary, secondary, accent, background = "#818cf8", "#34d399", "#fbbf24", "#f8fafc"
 	case "sketch":
-		primary = "#374151"
-		secondary = "#6b7280"
-		accent = "#ef4444"
+		primary, secondary, accent, background = "#374151", "#6b7280", "#d97706", "#fffbeb"
 	case "anime":
-		primary = "#6366f1"
-		secondary = "#ec4899"
-		accent = "#22d3ee"
+		primary, secondary, accent, background = "#6366f1", "#ec4899", "#22d3ee", "#f8fafc"
 	case "professional":
-		primary = "#1e3a8a"
-		secondary = "#64748b"
-		accent = "#d97706"
+		primary, secondary, accent, background = "#1e3a8a", "#64748b", "#d97706", "#ffffff"
 	}
 
-	title := notebookTitle
-	if title == "" {
-		title = "未命名笔记本"
-	}
-	var points []string
+	title := fallbackText(strings.TrimSpace(notebookTitle), "资料信息图")
+	points := make([]string, 0, 6)
 	for _, source := range sources {
-		if source.Summary != "" {
-			points = append(points, source.Summary)
-		} else if source.Excerpt != "" {
-			points = append(points, truncateNotebookRunes(source.Excerpt, 120, "…"))
+		candidate := fallbackText(source.Summary, source.Excerpt)
+		for _, block := range splitNotebookFeatureBlocks(candidate) {
+			line := fallbackText(block.title, block.body)
+			if line != "" {
+				points = append(points, truncateNotebookRunes(line, 64, "…"))
+			}
+			if len(points) >= 6 {
+				break
+			}
+		}
+		if len(points) < 6 && candidate != "" {
+			for _, sentence := range splitNotebookSentences(candidate) {
+				if strings.TrimSpace(sentence) != "" {
+					points = append(points, truncateNotebookRunes(sentence, 72, "…"))
+				}
+				if len(points) >= 6 {
+					break
+				}
+			}
 		}
 		if len(points) >= 6 {
 			break
 		}
 	}
 	if len(points) == 0 {
-		points = []string{"基于上传资料生成的视觉摘要"}
+		points = []string{"基于上传资料生成的视觉摘要", "提炼核心观点", "用于快速浏览和复盘"}
+	}
+	if detailLevel == "short" && len(points) > 4 {
+		points = points[:4]
 	}
 
-	imagePrompt := fmt.Sprintf("A polished flat-design infographic, %dx%d pixels, with a clean white background, modern corporate typography, and a structured layout. Title: %s. Visual sections include numbered cards in a%s grid showing key insights: ", width, height, title, opts.Orientation)
-	if opts.Orientation == "portrait" {
-		imagePrompt = fmt.Sprintf("A polished flat-design vertical infographic, %dx%d pixels, clean white background, modern corporate typography, single-column structured layout. Title: %s. Visual sections include numbered stacked cards showing key insights: ", width, height, title)
-	} else if opts.Orientation == "square" {
-		imagePrompt = fmt.Sprintf("A polished flat-design square infographic, %dx%d pixels, clean white background, modern corporate typography, balanced two-column layout. Title: %s. Visual sections include numbered tiles showing key insights: ", width, height, title)
-	}
-	for i, p := range points {
-		if i > 0 {
-			imagePrompt += "; "
-		}
-		imagePrompt += fmt.Sprintf("%d) %s", i+1, truncateNotebookRunes(p, 120, "…"))
-	}
-	switch style {
-	case "cute":
-		imagePrompt += ". Style: cute kawaii illustration, rounded shapes, soft pastel pink/purple/yellow palette, friendly icons, no small text."
-	case "clay":
-		imagePrompt += ". Style: 3D clay render, soft shadows, rounded forms, pastel colors, tactile material feel, no small text."
-	case "sketch":
-		imagePrompt += ". Style: hand-drawn sketch on paper texture, ink outlines, monochrome with warm accent, doodle icons, no small text."
-	case "anime":
-		imagePrompt += ". Style: anime key-visual, bold saturated gradients, speed lines, futuristic UI frames, no small text."
-	case "professional":
-		imagePrompt += ". Style: minimalist corporate infographic, navy and slate palette, crisp data visualizations, no small text."
-	default:
-		imagePrompt += ". Style: modern flat infographic, harmonious indigo/emerald/amber accents, simple iconography, no small text."
-	}
-	if prompt != "" {
-		imagePrompt += " Additional direction: " + prompt + "."
-	}
-
+	htmlContent := buildNotebookInfographicHTML(title, points, orientation, style, primary, secondary, accent, background, textColor, prompt)
 	return map[string]any{
-		"orientation":  opts.Orientation,
+		"orientation":  orientation,
 		"style":        style,
 		"detail_level": detailLevel,
 		"prompt":       prompt,
-		"image_prompt": imagePrompt,
-		"image_url":    "",
+		"html":         htmlContent,
 		"color_scheme": map[string]string{
 			"primary":    primary,
 			"secondary":  secondary,
@@ -1222,6 +1178,32 @@ func buildNotebookGeneratedInfographic(notebookTitle string, sources []notebookG
 			"text":       textColor,
 		},
 	}
+}
+
+func buildNotebookInfographicHTML(title string, points []string, orientation string, style string, primary string, secondary string, accent string, background string, textColor string, prompt string) string {
+	canvasClass := "landscape"
+	if orientation == "portrait" || orientation == "square" {
+		canvasClass = orientation
+	}
+	var cards strings.Builder
+	for i, point := range points {
+		color := primary
+		if i%3 == 1 {
+			color = secondary
+		} else if i%3 == 2 {
+			color = accent
+		}
+		fmt.Fprintf(&cards, `<article class="card"><div class="badge" style="background:%s">%02d</div><p>%s</p></article>`, html.EscapeString(color), i+1, html.EscapeString(point))
+	}
+	caption := html.EscapeString(prompt)
+	if caption == "" {
+		caption = "从资料中提炼关键结构与重点信息"
+	}
+	return fmt.Sprintf(`<section class="nb-infographic %s %s">
+<style>
+.nb-infographic{box-sizing:border-box;width:min(100%%,1200px);margin:0 auto;padding:40px;border-radius:28px;background:%s;color:%s;font-family:Inter,"PingFang SC","Microsoft YaHei",Arial,sans-serif;box-shadow:0 24px 80px rgba(15,23,42,.14);overflow:hidden;position:relative}.nb-infographic *{box-sizing:border-box}.nb-infographic:before{content:"";position:absolute;inset:-120px auto auto -120px;width:280px;height:280px;border-radius:999px;background:%s22}.nb-infographic:after{content:"";position:absolute;right:-100px;bottom:-120px;width:300px;height:300px;border-radius:999px;background:%s22}.nb-infographic .hero{position:relative;z-index:1;display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:28px}.nb-infographic h1{margin:0;font-size:clamp(34px,5vw,64px);line-height:.98;letter-spacing:-.06em;color:%s}.nb-infographic .caption{max-width:420px;margin:0;color:#64748b;font-size:16px;line-height:1.7}.nb-infographic .grid{position:relative;z-index:1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}.nb-infographic .card{min-height:150px;border:1px solid rgba(148,163,184,.28);border-radius:22px;background:rgba(255,255,255,.78);padding:20px;box-shadow:0 16px 40px rgba(15,23,42,.08);backdrop-filter:blur(10px)}.nb-infographic .badge{width:44px;height:44px;border-radius:16px;color:white;display:grid;place-items:center;font-weight:800;margin-bottom:16px;box-shadow:0 10px 24px rgba(15,23,42,.16)}.nb-infographic p{margin:0;font-size:18px;line-height:1.55;font-weight:650}.nb-infographic.portrait{max-width:800px}.nb-infographic.portrait .hero{display:block}.nb-infographic.portrait .caption{margin-top:14px}.nb-infographic.portrait .grid{grid-template-columns:1fr}.nb-infographic.square{max-width:900px}.nb-infographic.square .grid{grid-template-columns:repeat(2,minmax(0,1fr))}.nb-infographic.sketch{border:2px solid #374151;box-shadow:8px 8px 0 #11182722}.nb-infographic.sketch .card{border:2px solid #374151;box-shadow:4px 4px 0 #11182718;background:#fffaf0}@media(max-width:760px){.nb-infographic{padding:24px}.nb-infographic .hero{display:block}.nb-infographic .caption{margin-top:12px}.nb-infographic .grid{grid-template-columns:1fr}.nb-infographic p{font-size:16px}}
+</style>
+<div class="hero"><h1>%s</h1><p class="caption">%s</p></div><div class="grid">%s</div></section>`, canvasClass, html.EscapeString(style), html.EscapeString(background), html.EscapeString(textColor), html.EscapeString(primary), html.EscapeString(secondary), html.EscapeString(primary), html.EscapeString(title), caption, cards.String())
 }
 
 func splitNotebookFlashcardBlocks(text string) []notebookFeatureBlock {
@@ -2089,28 +2071,193 @@ func notebookCitationChunk(source notebookGenerationSource) (models.FileChunk, b
 	return models.FileChunk{}, false
 }
 
-func notebookGeneratedArtifactTitle(generationType string, notebookTitle string) string {
+func notebookGeneratedArtifactTitle(generationType string, subject string) string {
+	subject = cleanNotebookArtifactTitleSubject(subject)
 	switch generationType {
 	case "table":
-		return fmt.Sprintf("%s · 数据表格", notebookTitle)
+		return fmt.Sprintf("%s · 数据表格", subject)
 	case "faq":
-		return fmt.Sprintf("%s · FAQ", notebookTitle)
+		return fmt.Sprintf("%s · FAQ", subject)
 	case "briefing":
-		return fmt.Sprintf("%s · 简报", notebookTitle)
+		return fmt.Sprintf("%s · 简报", subject)
 	case "mindmap":
-		return fmt.Sprintf("%s · 思维导图", notebookTitle)
+		return fmt.Sprintf("%s · 思维导图", subject)
 	case "flashcards":
-		return fmt.Sprintf("%s · 闪卡", notebookTitle)
+		return fmt.Sprintf("%s · 闪卡", subject)
 	case "quiz":
-		return fmt.Sprintf("%s · 测验", notebookTitle)
+		return fmt.Sprintf("%s · 测验", subject)
 	case "report", "report:briefing-document", "report:custom", "report:study-guide", "report:blog-post":
-		return fmt.Sprintf("%s · Report", notebookTitle)
+		return fmt.Sprintf("%s · Report", subject)
 	default:
 		if strings.HasPrefix(generationType, "report:") {
-			return fmt.Sprintf("%s · Report", notebookTitle)
+			return fmt.Sprintf("%s · Report", subject)
 		}
-		return fmt.Sprintf("%s · 摘要", notebookTitle)
+		return fmt.Sprintf("%s · 摘要", subject)
 	}
+}
+
+func notebookResolveArtifactTitle(artifactType string, aiTitle string, fallbackTitle string, content json.RawMessage) string {
+	aiTitle = cleanNotebookArtifactTitle(aiTitle)
+	if aiTitle != "" && !isGenericNotebookArtifactTitle(aiTitle) {
+		return aiTitle
+	}
+	if derived := notebookArtifactTitleFromContent(artifactType, content); derived != "" {
+		return notebookGeneratedArtifactTitle(notebookGenerationTypeForArtifactType(artifactType), derived)
+	}
+	fallbackTitle = cleanNotebookArtifactTitle(fallbackTitle)
+	if fallbackTitle != "" {
+		return fallbackTitle
+	}
+	return notebookGeneratedArtifactTitle(notebookGenerationTypeForArtifactType(artifactType), "资料主题")
+}
+
+func notebookArtifactTitleSubject(sources []notebookGenerationSource) string {
+	for _, source := range sources {
+		for _, block := range splitNotebookFeatureBlocks(fallbackText(source.Excerpt, source.Summary)) {
+			if subject := cleanNotebookArtifactTitleSubject(block.title); subject != "" {
+				return subject
+			}
+		}
+		if subject := cleanNotebookArtifactTitleSubject(source.Summary); subject != "" {
+			return subject
+		}
+		if subject := cleanNotebookArtifactTitleSubject(notebookTableTopic(source)); subject != "" {
+			return subject
+		}
+	}
+	return "资料主题"
+}
+
+func notebookArtifactTitleFromContent(artifactType string, content json.RawMessage) string {
+	switch artifactType {
+	case "summary", "faq", "briefing":
+		var payload struct {
+			Sections []notebookStudioTextSection `json:"sections"`
+		}
+		if json.Unmarshal(content, &payload) == nil {
+			for _, section := range payload.Sections {
+				if subject := cleanNotebookArtifactTitleSubject(section.Heading); subject != "" {
+					return subject
+				}
+			}
+		}
+	case "data-table":
+		var payload struct {
+			Rows []notebookStudioTableRow `json:"rows"`
+		}
+		if json.Unmarshal(content, &payload) == nil {
+			for _, row := range payload.Rows {
+				if subject := cleanNotebookArtifactTitleSubject(row.Module); subject != "" {
+					return subject
+				}
+			}
+		}
+	case "mindmap":
+		var payload struct {
+			Nodes []notebookStudioMindmapNode `json:"nodes"`
+		}
+		if json.Unmarshal(content, &payload) == nil {
+			for _, node := range payload.Nodes {
+				if node.ID == "root" {
+					return cleanNotebookArtifactTitleSubject(node.Label)
+				}
+			}
+			for _, node := range payload.Nodes {
+				if subject := cleanNotebookArtifactTitleSubject(node.Label); subject != "" {
+					return subject
+				}
+			}
+		}
+	case "flashcards":
+		var payload struct {
+			Cards []notebookStudioFlashcard `json:"cards"`
+		}
+		if json.Unmarshal(content, &payload) == nil {
+			for _, card := range payload.Cards {
+				if subject := cleanNotebookArtifactTitleSubject(card.Front); subject != "" {
+					return subject
+				}
+			}
+		}
+	case "quiz":
+		var payload struct {
+			Questions []notebookStudioQuizQuestion `json:"questions"`
+		}
+		if json.Unmarshal(content, &payload) == nil {
+			for _, question := range payload.Questions {
+				if subject := cleanNotebookArtifactTitleSubject(question.Question); subject != "" {
+					return subject
+				}
+			}
+		}
+	case "report":
+		var payload notebookStudioReportContent
+		if json.Unmarshal(content, &payload) == nil {
+			if subject := cleanNotebookArtifactTitleSubject(payload.FormatTitle); subject != "" {
+				return subject
+			}
+			for _, section := range payload.Sections {
+				if subject := cleanNotebookArtifactTitleSubject(section.Heading); subject != "" {
+					return subject
+				}
+			}
+		}
+	case "infographic":
+		var payload notebookStudioInfographic
+		if json.Unmarshal(content, &payload) == nil {
+			if subject := cleanNotebookArtifactTitleSubject(payload.Prompt); subject != "" {
+				return subject
+			}
+		}
+	}
+	return ""
+}
+
+func notebookGenerationTypeForArtifactType(artifactType string) string {
+	switch artifactType {
+	case "data-table":
+		return "table"
+	case "report":
+		return "report"
+	default:
+		return artifactType
+	}
+}
+
+func cleanNotebookArtifactTitle(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.Trim(value, " 	\r\n-—：:，,。；;·|[]（）()《》\"")
+	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, " ")
+	return truncateNotebookRunes(value, 48, "")
+}
+
+func cleanNotebookArtifactTitleSubject(value string) string {
+	value = cleanNotebookArtifactTitle(value)
+	value = regexp.MustCompile(`^(?:#+\s*|(?:\d+|[一二三四五六七八九十]+)[、.)．]\s*)`).ReplaceAllString(value, "")
+	for _, separator := range []string{"？", "?", "：", ":", "——", "—", "，", ",", "。"} {
+		if index := strings.Index(value, separator); index > 1 {
+			value = strings.TrimSpace(value[:index])
+		}
+	}
+	value = cleanNotebookArtifactTitle(value)
+	if value == "" || isGenericNotebookArtifactTitle(value) {
+		return ""
+	}
+	return truncateNotebookRunes(value, 24, "")
+}
+
+func isGenericNotebookArtifactTitle(title string) bool {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return true
+	}
+	generic := []string{"摘要", "总结", "概要", "FAQ", "问答", "简报", "报告", "Report", "数据表格", "表格", "思维导图", "脑图", "闪卡", "抽认卡", "测验", "Quiz", "信息图", "Infographic", "资料主题"}
+	for _, item := range generic {
+		if strings.EqualFold(title, item) {
+			return true
+		}
+	}
+	return containsAnyNotebookText(title, []string{"测试", "未命名", "笔记本"}) && len([]rune(title)) <= 18
 }
 
 func fallbackText(primary string, fallback string) string {

@@ -70,7 +70,7 @@ func (h *BadCaseHandler) CreateBadCase(c *gin.Context) {
 
 	// 记录 Bad Case 提交事件（埋点）
 	metadata, _ := json.Marshal(map[string]interface{}{
-		"model_id": req.ModelID,
+		"model_id":         req.ModelID,
 		"has_conversation": req.ConversationID != nil,
 	})
 	h.db.Create(&models.AnalyticsEvent{
@@ -143,10 +143,10 @@ func (h *BadCaseHandler) ListBadCases(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"items":      enriched,
-		"total":      total,
-		"page":       page,
-		"page_size":  pageSize,
+		"items":       enriched,
+		"total":       total,
+		"page":        page,
+		"page_size":   pageSize,
 		"total_pages": (int(total) + pageSize - 1) / pageSize,
 	})
 }
@@ -156,9 +156,10 @@ type ReviewBadCaseRequest struct {
 	Status        string `json:"status" binding:"required,oneof=approved rejected fixed"`
 	StatusMessage string `json:"status_message"`
 	GrantCredits  *struct {
-		Basic     int `json:"basic,omitempty"`
-		Advanced  int `json:"advanced,omitempty"`
-		Elite     int `json:"elite,omitempty"`
+		Beta     int `json:"beta,omitempty"`
+		Basic    int `json:"basic,omitempty"`    // legacy override compatibility
+		Advanced int `json:"advanced,omitempty"` // legacy override compatibility
+		Elite    int `json:"elite,omitempty"`    // legacy override compatibility
 	} `json:"grant_credits,omitempty"`
 }
 
@@ -194,10 +195,10 @@ func (h *BadCaseHandler) ReviewBadCase(c *gin.Context) {
 
 	now := time.Now()
 	updates := map[string]interface{}{
-		"status":        req.Status,
+		"status":         req.Status,
 		"status_message": req.StatusMessage,
-		"admin_id":      adminID,
-		"reviewed_at":   &now,
+		"admin_id":       adminID,
+		"reviewed_at":    &now,
 	}
 
 	if err := h.db.Model(&badCase).Updates(updates).Error; err != nil {
@@ -205,18 +206,29 @@ func (h *BadCaseHandler) ReviewBadCase(c *gin.Context) {
 		return
 	}
 
-	// 如果审核通过且指定了发放额度，给用户增加额度并推进阶段
-	if req.Status == "approved" && req.GrantCredits != nil {
+	// 审核通过后推进内测阶段，并按后台阶段配置默认发放下一阶段内测 Credit；管理员显式填写 grant_credits 时覆盖默认值。
+	if req.Status == "approved" {
 		var user models.User
 		if err := h.db.First(&user, badCase.UserID).Error; err == nil {
-			if req.GrantCredits.Basic > 0 {
-				user.BasicCredits += req.GrantCredits.Basic
+			grantBeta := 0
+			if req.GrantCredits != nil {
+				grantBeta = req.GrantCredits.Beta
+				// 兼容旧前端/接口：如果只传 basic，则视为 beta grant。
+				if grantBeta == 0 {
+					grantBeta = req.GrantCredits.Basic
+				}
+			} else {
+				cfg := NewBetaConfigHandler(h.db)
+				switch user.BetaPhase {
+				case "phase_1":
+					grantBeta = cfg.GetConfigInt(models.BetaConfigPhase2Credits, 15000)
+				case "phase_2":
+					grantBeta = cfg.GetConfigInt(models.BetaConfigPhase3Credits, 10000)
+				}
 			}
-			if req.GrantCredits.Advanced > 0 {
-				user.AdvancedCredits += req.GrantCredits.Advanced
-			}
-			if req.GrantCredits.Elite > 0 {
-				user.EliteCredits += req.GrantCredits.Elite
+			if grantBeta > 0 {
+				user.BetaCreditBalance += grantBeta
+				user.BetaCreditGrantedTotal += grantBeta
 			}
 			// 推进内测阶段
 			switch user.BetaPhase {
@@ -235,9 +247,9 @@ func (h *BadCaseHandler) ReviewBadCase(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"id":      badCase.ID,
-		"status":  req.Status,
-		"message": "审核完成",
+		"id":               badCase.ID,
+		"status":           req.Status,
+		"message":          "审核完成",
 		"phase_transition": req.Status == "approved",
 	})
 }

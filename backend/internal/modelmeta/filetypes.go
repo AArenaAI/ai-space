@@ -97,6 +97,7 @@ var SupportedFileTypes = []FileType{
 	{Extension: ".srt", MimeType: "text/srt", InputType: "txt"},
 	{Extension: ".text", MimeType: "text/plain", InputType: "txt"},
 	{Extension: ".txt", MimeType: "text/plain", InputType: "txt"},
+	{Extension: ".url", MimeType: "text/uri-list", InputType: "txt"},
 	{Extension: ".vcf", MimeType: "text/x-vcard", InputType: "txt"},
 	{Extension: ".vtt", MimeType: "text/vtt", InputType: "txt"},
 	{Extension: ".xml", MimeType: "text/xml", InputType: "code"},

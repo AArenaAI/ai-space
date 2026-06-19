@@ -289,7 +289,7 @@ func (h *NotebookHandler) AddURLSource(c *gin.Context) {
 		return
 	}
 	filename := notebookURLSourceFilename(page.Title, page.URL)
-	content := fmt.Sprintf("# %s\n\n来源：%s\n\n%s\n", page.Title, page.URL, page.Content)
+	content := fmt.Sprintf("%s\n\n%s\n", page.URL, page.Content)
 	file, err := h.fileService.UploadAndParse(c.Request.Context(), userID, "", filename, []byte(content), nb.WorkspaceID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "网页资料处理失败"})
@@ -900,17 +900,43 @@ func isPrivateNotebookURLHost(host string) bool {
 }
 
 func extractNotebookURLText(html string, fallbackTitle string) (string, string) {
-	text := html
 	title := firstRegexGroup(`(?is)<title[^>]*>(.*?)</title>`, html)
+	text := html
 	text = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`).ReplaceAllString(text, " ")
 	text = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`).ReplaceAllString(text, " ")
 	text = regexp.MustCompile(`(?is)<noscript[^>]*>.*?</noscript>`).ReplaceAllString(text, " ")
-	text = regexp.MustCompile(`(?is)</(p|div|section|article|header|footer|li|h[1-6]|tr)>`).ReplaceAllString(text, "\n")
+	text = regexp.MustCompile(`(?is)<svg[^>]*>.*?</svg>`).ReplaceAllString(text, " ")
+	text = regexp.MustCompile(`(?is)<iframe[^>]*>.*?</iframe>`).ReplaceAllString(text, " ")
+
+	// Preserve common article structure instead of flattening the whole DOM into one blob.
+	text = regexp.MustCompile(`(?is)<h([1-6])[^>]*>(.*?)</h[1-6]>`).ReplaceAllStringFunc(text, func(match string) string {
+		levelText := firstRegexGroup(`(?is)<h([1-6])`, match)
+		level, _ := strconv.Atoi(levelText)
+		if level <= 0 {
+			level = 2
+		}
+		if level > 3 {
+			level = 3
+		}
+		inner := stripNotebookHTMLTags(firstRegexGroup(`(?is)<h[1-6][^>]*>(.*?)</h[1-6]>`, match))
+		if inner == "" {
+			return "\n\n"
+		}
+		return "\n\n" + strings.Repeat("#", level) + " " + inner + "\n\n"
+	})
+	text = regexp.MustCompile(`(?is)<li[^>]*>(.*?)</li>`).ReplaceAllStringFunc(text, func(match string) string {
+		inner := stripNotebookHTMLTags(firstRegexGroup(`(?is)<li[^>]*>(.*?)</li>`, match))
+		if inner == "" {
+			return "\n"
+		}
+		return "\n- " + inner + "\n"
+	})
+	text = regexp.MustCompile(`(?is)</(p|blockquote|pre|table|tr|ul|ol|section|article|main)>`).ReplaceAllString(text, "\n\n")
 	text = regexp.MustCompile(`(?is)<br\s*/?>`).ReplaceAllString(text, "\n")
 	text = regexp.MustCompile(`(?is)<[^>]+>`).ReplaceAllString(text, " ")
 	text = htmlEntityDecode(text)
-	text = normalizeNotebookURLWhitespace(text)
-	title = normalizeNotebookURLWhitespace(htmlEntityDecode(title))
+	text = normalizeNotebookURLMarkdown(text)
+	title = normalizeNotebookURLWhitespace(htmlEntityDecode(stripNotebookHTMLTags(title)))
 	if title == "" {
 		title = fallbackTitle
 	}
@@ -918,6 +944,12 @@ func extractNotebookURLText(html string, fallbackTitle string) (string, string) 
 		text = text[:120000]
 	}
 	return title, text
+}
+
+func stripNotebookHTMLTags(text string) string {
+	text = regexp.MustCompile(`(?is)<br\s*/?>`).ReplaceAllString(text, "\n")
+	text = regexp.MustCompile(`(?is)<[^>]+>`).ReplaceAllString(text, " ")
+	return normalizeNotebookURLWhitespace(htmlEntityDecode(text))
 }
 
 func firstRegexGroup(pattern, text string) string {
@@ -950,6 +982,28 @@ func normalizeNotebookURLWhitespace(text string) string {
 	return strings.Join(out, "\n")
 }
 
+func normalizeNotebookURLMarkdown(text string) string {
+	lines := strings.Split(text, "\n")
+	var out []string
+	blank := false
+	for _, line := range lines {
+		line = strings.Join(strings.Fields(line), " ")
+		if line == "" {
+			if len(out) > 0 && !blank {
+				out = append(out, "")
+				blank = true
+			}
+			continue
+		}
+		out = append(out, line)
+		blank = false
+	}
+	for len(out) > 0 && out[len(out)-1] == "" {
+		out = out[:len(out)-1]
+	}
+	return strings.Join(out, "\n")
+}
+
 func notebookURLSourceFilename(title string, sourceURL string) string {
 	name := strings.TrimSpace(title)
 	if name == "" {
@@ -963,7 +1017,7 @@ func notebookURLSourceFilename(title string, sourceURL string) string {
 	if len(name) > 80 {
 		name = name[:80]
 	}
-	return name + ".md"
+	return name + ".url"
 }
 
 func (h *ChatHandler) loadNotebookFiles(notebookID uint, userID uint, guestID string) []models.File {

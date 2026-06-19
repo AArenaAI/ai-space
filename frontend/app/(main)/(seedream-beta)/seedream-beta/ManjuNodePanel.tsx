@@ -117,7 +117,7 @@ export default function ManjuNodePanel({
                 type="text"
                 value={node.title}
                 onChange={(e) => onUpdateNode?.(node.id, { title: e.target.value })}
-                className="w-full rounded-lg border border-surface-border bg-surface-base px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-brand"
+                className="h-9 w-full rounded-lg border border-surface-border bg-surface-base px-3 text-xs text-text-primary outline-none focus:border-brand"
               />
             </div>
 
@@ -212,7 +212,7 @@ export default function ManjuNodePanel({
                 <textarea
                   value={String(shot.imagePrompt)}
                   readOnly
-                  className="h-32 w-full rounded-lg border border-surface-border bg-surface-base p-2 text-[11px] leading-relaxed text-text-secondary outline-none"
+                  className="h-32 w-full rounded-lg border border-surface-border bg-surface-base p-3 text-[11px] leading-relaxed text-text-secondary outline-none"
                 />
               </div>
             )}
@@ -222,7 +222,7 @@ export default function ManjuNodePanel({
                 <textarea
                   value={String(shot.videoPrompt)}
                   readOnly
-                  className="h-32 w-full rounded-lg border border-surface-border bg-surface-base p-2 text-[11px] leading-relaxed text-text-secondary outline-none"
+                  className="h-32 w-full rounded-lg border border-surface-border bg-surface-base p-3 text-[11px] leading-relaxed text-text-secondary outline-none"
                 />
               </div>
             )}

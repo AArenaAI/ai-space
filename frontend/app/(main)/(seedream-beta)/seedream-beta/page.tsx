@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Copy, Download, ImageIcon, Loader2, MessageSquare, PanelLeftOpen, Paperclip, Play, Plus, RefreshCw, Send, Sparkles, Trash2, UploadCloud, Video, Wand2, X } from "lucide-react";
+import { BookOpen, Copy, Download, FileText, ImageIcon, Layers, Loader2, MessageSquare, PanelLeftOpen, Paperclip, Play, Plus, RefreshCw, Send, Sparkles, Trash2, UploadCloud, Video, Wand2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useImage, type GeneratedImage } from "@/hooks/useImage";
 import { useVideo, type VideoGeneration } from "@/hooks/useVideo";
@@ -14,6 +14,10 @@ import { getErrorMessage, readApiError } from "@/lib/errors";
 import {
   ASSET_ROLE_OPTIONS,
   CAMERA_MOVES,
+  getVideoDurationOptions,
+  getVideoResolutionOptions,
+  normalizeVideoDurationForModel,
+  normalizeVideoResolutionForModel,
   IMAGE_ASPECTS,
   IMAGE_RESOLUTIONS,
   SEEDREAM_IMAGE_QUALITY,
@@ -22,10 +26,8 @@ import {
   SHOT_PURPOSES,
   SHOT_TYPES,
   VIDEO_ASPECTS,
-  VIDEO_DURATIONS,
   VIDEO_MODELS,
   VIDEO_REFERENCE_ROLES,
-  VIDEO_RESOLUTIONS,
   WORKFLOW_DRAFT_MODEL,
   WORKFLOW_MODEL,
   WORKFLOW_POLISH_MODEL,
@@ -38,6 +40,7 @@ import type {
   AssetRole,
   BatchMode,
   CameraMove,
+  GeneratorGroup,
   GenerationJob,
   ScriptAssistantMode,
   ScriptChatMessage,
@@ -57,9 +60,19 @@ import type {
 import { FieldLabel, PillButton } from "./components";
 import { useSeedreamProjects } from "./useSeedreamProjects";
 import ManjuStudioLayout from "./ManjuStudioLayout";
+import FloatingToolbar from "./FloatingToolbar";
 import VideoSegmentGenerator from "./VideoSegmentGenerator";
-import type { CanvasNode } from "./ManjuCanvas";
+import BatchPreflightPanel from "./BatchPreflightPanel";
+import ManjuCanvas, { type CanvasAssetDropPayload, type CanvasConnection, type CanvasNode } from "./ManjuCanvas";
 import { copyDirectorBlockToShots, createDefaultDirectorBlock, findDirectorBlockForShot, getSceneAssetForShot, injectDirectorBlockToPrompt } from "./directorBlock";
+import {
+  ASSET_KIND_LABELS,
+  buildGeneratorGroupSummaryPrompt,
+  buildSemanticAssetImagePrompt,
+  buildStoryboardSketchPrompt,
+  buildStructuredShotImagePrompt,
+  buildWorkflowSystemPrompt,
+} from "./seedreamPrompts";
 
 function getAuthHeaders() {
   const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
@@ -99,6 +112,29 @@ function assetViewUrl(publicIdOrUrl: string) {
   return publicIdOrUrl;
 }
 
+function getSeedreamVideoErrorMessage(message?: string | null) {
+  const text = (message || "").trim();
+  if (!text) return "后端未返回具体失败原因，请检查视频任务日志或重试。";
+  const genericMessages = [
+    "视频生成失败，请稍后再试。若多次失败，请换个提示词或素材。",
+    "视频生成失败，请稍后重试或调整描述。",
+    "视频生成失败，请稍后重试。",
+    "视频生成失败",
+    "服务暂时不可用",
+  ];
+  return genericMessages.includes(text) || text.includes("服务暂时不可用")
+    ? "后端未返回具体失败原因，请检查视频任务日志或重试。"
+    : text;
+}
+
+function normalizeVideoDuration(duration?: number, model?: string) {
+  return normalizeVideoDurationForModel(model, duration);
+}
+
+function normalizeVideoResolution(resolution?: string, model?: string) {
+  return normalizeVideoResolutionForModel(model, resolution);
+}
+
 function formatAssetSize(size?: number) {
   if (!size) return "";
   if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
@@ -111,7 +147,7 @@ function getAssetRoleLabel(role?: AssetRole) {
 }
 
 function getSemanticAssetKindLabel(kind: SemanticAssetKind) {
-  return SEMANTIC_ASSET_KINDS.find((item) => item.value === kind)?.label || "资产";
+  return ASSET_KIND_LABELS[kind] || SEMANTIC_ASSET_KINDS.find((item) => item.value === kind)?.label || "资产";
 }
 
 function isStoryboardSketchAsset(asset: StoredAsset) {
@@ -223,6 +259,7 @@ function createShot(index: number, patch: Partial<StoryboardShot> = {}): Storybo
     lastFrameAssetId: patch.lastFrameAssetId,
     referenceVideoAssetId: patch.referenceVideoAssetId,
     semanticAssetIds: patch.semanticAssetIds || [],
+    generationActions: patch.generationActions,
   };
 }
 
@@ -230,7 +267,87 @@ function stripJsonFence(text: string) {
   return text.replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "").trim();
 }
 
-function parseStoryboardShots(text: string): StoryboardShot[] {
+function cleanShotBody(chunk: string) {
+  return chunk
+    .replace(/^#{2,4}\s*段\s*\d+[^\n]*\n?/i, "")
+    .replace(/^\*\*场景：\*\*.*$/gm, "")
+    .replace(/^\*\*视角：\*\*.*$/gm, "")
+    .replace(/^---$/gm, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+function inferShotTypeFromText(text: string): ShotType {
+  if (/空镜|固定画面|走廊深处/.test(text)) return "空镜";
+  if (/特写|手机屏幕|屏幕特写|下半张脸/.test(text)) return "特写";
+  if (/全景|所有人|空间|门厅空间/.test(text)) return "全景";
+  if (/走近|快步|拉门|动作|穿过/.test(text)) return "动作镜头";
+  return "中景";
+}
+
+function inferCameraMoveFromText(text: string): CameraMove {
+  if (/上摇|摇到|环视/.test(text)) return "摇";
+  if (/走近|跟上|跟/.test(text)) return "跟";
+  if (/手持|手机画面|微晃|POV/.test(text)) return "手持";
+  if (/扫过|光束|从左到右|下落/.test(text)) return "移";
+  if (/推近/.test(text)) return "推";
+  return "固定";
+}
+
+function inferShotPurposeFromText(text: string): ShotPurpose {
+  if (/钩子|黑屏|没有信号|弹幕|敲窗/.test(text)) return "悬念钩子";
+  if (/规则|不是人|信息|确认|电话/.test(text)) return "信息揭示";
+  if (/进入|走向|闭合|拉门|衔接/.test(text)) return "动作衔接";
+  if (/环境|空间|门厅|教学楼/.test(text)) return "交代环境";
+  return "信息揭示";
+}
+
+function normalizeSentence(value: string) {
+  return value.replace(/[。\.\s]+$/g, "");
+}
+
+function extractCharactersFromShotText(text: string) {
+  const names = ["寸头男", "王彦", "小陈", "长发女人", "大东", "五个人", "玩家", "博主"];
+  const found = names.filter((name) => text.includes(name));
+  if (/深色人影|窗户后站着|贴紧玻璃|看不清它的五官|看不清衣服/.test(text)) found.push("窗后的深色人影");
+  if (/楼梯口.*站着一个人|走廊深处.*站着一个人/.test(text)) found.push("黑暗中的人影");
+  return Array.from(new Set(found));
+}
+
+function buildModelAgnosticAction(action: string, actionInput: string, supplementary: Record<string, unknown>) {
+  return { action, actionInput: actionInput.trim(), supplementary };
+}
+
+function buildShotImagePromptFromScript(shot: StoryboardShot, chunk: string) {
+  const body = cleanShotBody(chunk).split("\n").slice(0, 8).join(" ");
+  return [
+    "静态分镜画面，竖屏9:16。",
+    `镜头${shot.index}《${shot.title}》。`,
+    shot.scene ? `场景：${normalizeSentence(shot.scene)}。` : "",
+    shot.characters.length ? `画面人物/实体：${shot.characters.join("、")}。` : "画面人物/实体：无明确角色，只保留环境主体。",
+    `景别：${shot.shotType}。`,
+    `画面重点：${body}`,
+    "恐怖悬疑漫剧质感，低照度，真实空间关系，电影感构图；不要字幕水印，不要血腥，不要角色变脸。",
+  ].filter(Boolean).join("\n");
+}
+
+function buildShotVideoPromptFromScript(shot: StoryboardShot, chunk: string) {
+  const body = cleanShotBody(chunk).split("\n").slice(0, 12).join(" ");
+  return [
+    `视频镜头${shot.index}《${shot.title}》，${shot.duration}秒，${shot.aspectRatio}。`,
+    shot.scene ? `场景：${normalizeSentence(shot.scene)}。` : "",
+    shot.characters.length ? `出场人物/实体：${shot.characters.join("、")}。` : "出场人物/实体：无明确角色，只保留环境主体。",
+    `视角/运镜：${shot.cameraMove}，${shot.shotType}。`,
+    `动作与节奏：${body}`,
+    shot.dialogue ? `对白：${shot.dialogue}` : "",
+    shot.narration ? `旁白/字幕：${shot.narration}` : "",
+    "保持角色和场景一致，动作连续，恐怖悬疑氛围；不要字幕水印，不要血腥。",
+  ].filter(Boolean).join("\n");
+}
+
+function parseStoryboardShots(text: string, model?: string): StoryboardShot[] {
   const cleaned = stripJsonFence(text);
   try {
     const parsed = JSON.parse(cleaned);
@@ -243,13 +360,31 @@ function parseStoryboardShots(text: string): StoryboardShot[] {
         characters: Array.isArray(item.characters) ? item.characters : String(item.characters || "").split(/[、,，]/).map((x) => x.trim()).filter(Boolean),
         dialogue: item.dialogue || "",
         narration: item.narration || item.voiceover || "",
-        imagePrompt: item.imagePrompt || item.image_prompt || item.seedream_prompt || "",
-        videoPrompt: item.videoPrompt || item.video_prompt || item.seedance_prompt || "",
+        imagePrompt: item.imagePrompt || item.image_prompt || item.seedream_prompt || item.storyboard_image?.action_input || item.generation_actions?.storyboard_image?.action_input || item.generationActions?.storyboardImage?.actionInput || "",
+        videoPrompt: item.videoPrompt || item.video_prompt || item.seedance_prompt || item.shot_video?.action_input || item.generation_actions?.shot_video?.action_input || item.generationActions?.shotVideo?.actionInput || "",
         shotType: isShotType(String(item.shotType || item.shot_type || item.shot_size || "")) ? String(item.shotType || item.shot_type || item.shot_size) as ShotType : "中景",
         cameraMove: isCameraMove(String(item.cameraMove || item.camera_move || item.camera || "")) ? String(item.cameraMove || item.camera_move || item.camera) as CameraMove : "固定",
         purpose: isShotPurpose(String(item.purpose || item.shot_purpose || "")) ? String(item.purpose || item.shot_purpose) as ShotPurpose : "信息揭示",
-        duration: Number(item.duration || item.duration_seconds || 5),
+        duration: normalizeVideoDuration(Number(item.duration || item.duration_seconds || 5), model),
         aspectRatio: item.aspectRatio || item.aspect_ratio || "9:16",
+        generationActions: item.generationActions || item.generation_actions
+          ? {
+            storyboardImage: item.generationActions?.storyboardImage || item.generation_actions?.storyboard_image
+              ? buildModelAgnosticAction(
+                item.generationActions?.storyboardImage?.action || item.generation_actions?.storyboard_image?.action || "image.generate",
+                item.generationActions?.storyboardImage?.actionInput || item.generation_actions?.storyboard_image?.action_input || item.image_prompt || "",
+                item.generationActions?.storyboardImage?.supplementary || item.generation_actions?.storyboard_image?.supplementary || {}
+              )
+              : undefined,
+            shotVideo: item.generationActions?.shotVideo || item.generation_actions?.shot_video
+              ? buildModelAgnosticAction(
+                item.generationActions?.shotVideo?.action || item.generation_actions?.shot_video?.action || "video.generate",
+                item.generationActions?.shotVideo?.actionInput || item.generation_actions?.shot_video?.action_input || item.video_prompt || "",
+                item.generationActions?.shotVideo?.supplementary || item.generation_actions?.shot_video?.supplementary || {}
+              )
+              : undefined,
+          }
+          : undefined,
       }));
     }
   } catch {
@@ -263,28 +398,55 @@ function parseStoryboardShots(text: string): StoryboardShot[] {
   if (!chunks.length) return [];
   return chunks.map((chunk, idx) => {
     const firstLine = chunk.split("\n").find((line) => line.trim())?.replace(/^#{1,6}\s*/, "").trim() || `镜头 ${idx + 1}`;
-    const seedancePrompt = chunk.match(/(?:\*\*Seedance提示词：\*\*|Seedance提示词[:：]|直接投喂提示词[:：]|视频提示词[:：]|video_prompt[:：])\s*([\s\S]*?)(?=\n\s*(?:\*\*[^*]+：\*\*|#{2,4}\s*段|#{2,4}\s*(?:镜头|分镜)|---|$))/i)?.[1]?.trim();
-    const imagePrompt = chunk.match(/(?:image_prompt|图片提示词|分镜图提示词|Seedream提示词)[:：]\s*([\s\S]*?)(?=\n\s*(?:video_prompt|视频提示词|Seedance提示词|直接投喂提示词|#{2,4}\s*段|#{2,4}\s*(?:镜头|分镜)|---|$))/i)?.[1]?.trim() || "";
-    const scene = chunk.match(/(?:场景|地点|素材绑定)[:：]\s*(.+)/)?.[1]?.trim()
+    const titleMatch = firstLine.match(/^段\s*(\d+)\s*(.+?)(?:\s*\/\s*\d+秒)?$/);
+    const normalizedTitle = titleMatch ? `段${titleMatch[1].padStart(2, "0")} ${titleMatch[2].trim()}` : firstLine;
+    const explicitVideoPrompt = chunk.match(/(?:\*\*Seedance提示词：\*\*|Seedance提示词[:：]|直接投喂提示词[:：]|视频提示词[:：]|video_prompt[:：])\s*([\s\S]*?)(?=\n\s*(?:\*\*[^*]+：\*\*|#{2,4}\s*段|#{2,4}\s*(?:镜头|分镜)|---|$))/i)?.[1]?.trim();
+    const explicitImagePrompt = chunk.match(/(?:image_prompt|图片提示词|分镜图提示词|Seedream提示词)[:：]\s*([\s\S]*?)(?=\n\s*(?:video_prompt|视频提示词|Seedance提示词|直接投喂提示词|#{2,4}\s*段|#{2,4}\s*(?:镜头|分镜)|---|$))/i)?.[1]?.trim() || "";
+    const scene = chunk.match(/(?:\*\*场景：\*\*)\s*(.+)/)?.[1]?.trim()
+      || chunk.match(/(?:场景|地点|素材绑定)[:：]\s*(.+)/)?.[1]?.replace(/^\*+\s*/, "").trim()
       || chunk.match(/(?:\*\*空间锚点：\*\*)\s*(.+)/)?.[1]?.trim()
       || chunk.match(/(?:空间锚点)[:：]\s*(.+)/)?.[1]?.trim()
-      || chunk.match(/(?:\*\*视角：\*\*)\s*(.+)/)?.[1]?.trim()
-      || chunk.match(/(?:视角)[:：]\s*(.+)/)?.[1]?.trim()
       || "";
-    const durationMatch = chunk.match(/[（(]?(\d+)\s*秒[）)]?/) || chunk.match(/(?:时长|duration)[:：]\s*(\d+)/i);
+    const durationMatch = chunk.match(/\/\s*(\d+)\s*秒/) || chunk.match(/[（(]?(\d+)\s*秒[）)]?/) || chunk.match(/(?:时长|duration)[:：]\s*(\d+)/i);
     const seedanceMarked = extractSeedanceMarkedText(chunk);
-    return createShot(idx + 1, {
-      title: firstLine.slice(0, 60),
+    const parsedShotType = chunk.match(/(?:景别|镜头类型)[:：]\s*(.+)/)?.[1]?.trim() || "";
+    const parsedCameraMove = chunk.match(/(?:运镜|镜头运动)[:：]\s*(.+)/)?.[1]?.trim() || "";
+    const shot = createShot(idx + 1, {
+      title: normalizedTitle.slice(0, 60),
       scene,
+      characters: extractCharactersFromShotText(chunk),
       dialogue: seedanceMarked.dialogue,
       narration: seedanceMarked.narration,
-      imagePrompt,
-      videoPrompt: seedancePrompt || chunk.match(/(?:video_prompt|视频提示词)[:：]\s*([\s\S]*?)$/i)?.[1]?.trim() || chunk,
-      shotType: isShotType(chunk.match(/(?:景别|镜头类型)[:：]\s*(.+)/)?.[1]?.trim() || "") ? chunk.match(/(?:景别|镜头类型)[:：]\s*(.+)/)![1].trim() as ShotType : "中景",
-      cameraMove: isCameraMove(chunk.match(/(?:运镜|镜头运动|视角)[:：]\s*(.+)/)?.[1]?.trim() || "") ? chunk.match(/(?:运镜|镜头运动|视角)[:：]\s*(.+)/)![1].trim() as CameraMove : "固定",
-      purpose: (chunk.match(/(?:功能|镜头目的|目的)[:：]\s*(.+)/)?.[1]?.trim().slice(0, 20) as ShotPurpose) || "信息揭示",
-      duration: durationMatch ? Number(durationMatch[1]) : 5,
+      shotType: isShotType(parsedShotType) ? parsedShotType as ShotType : inferShotTypeFromText(chunk),
+      cameraMove: isCameraMove(parsedCameraMove) ? parsedCameraMove as CameraMove : inferCameraMoveFromText(chunk),
+      purpose: inferShotPurposeFromText(chunk),
+      duration: normalizeVideoDuration(durationMatch ? Number(durationMatch[1]) : 5, model),
+      aspectRatio: "9:16",
     });
+    const imagePrompt = explicitImagePrompt || buildShotImagePromptFromScript(shot, chunk);
+    const videoPrompt = explicitVideoPrompt || buildShotVideoPromptFromScript({ ...shot, imagePrompt }, chunk);
+    return {
+      ...shot,
+      imagePrompt,
+      videoPrompt,
+      generationActions: {
+        storyboardImage: buildModelAgnosticAction("image.generate", imagePrompt, {
+          role: "storyboard_image",
+          aspect_ratio: shot.aspectRatio,
+          resolution: "2K",
+          style: ["恐怖悬疑", "漫剧分镜", "低照度电影感"],
+          negative_prompt: "字幕、水印、血腥、肢体畸形、角色变脸",
+        }),
+        shotVideo: buildModelAgnosticAction("video.generate", videoPrompt, {
+          role: "shot_video",
+          duration: shot.duration,
+          aspect_ratio: shot.aspectRatio,
+          resolution: "720p",
+          audio: false,
+          input_image: "storyboard_image",
+        }),
+      },
+    };
   });
 }
 
@@ -326,18 +488,106 @@ function parseSemanticAssets(text: string): SemanticAsset[] {
   });
 }
 
-function workflowSystemPrompt(mode: WorkflowMode) {
-  const common = "你是 AI Space 的影视/小说创作前期助手。不要联网搜索。输出要直接可编辑、可复制，不要解释思考过程，不要使用 Markdown 代码块。";
-  if (mode === "novel") return `${common}\n任务：根据用户创意写完整小说，有明确开端、发展、高潮和结尾；人物动机清楚；画面感强。输出格式：<TITLE>标题</TITLE><CONTENT>完整小说正文</CONTENT>`;
-  if (mode === "script") return `${common}\n任务：把用户输入的【本集大概内容】改写成影视剧本。不要要求或依赖整本小说/附件素材；只基于用户提供的本集梗概、关键情节、人物关系和明确改编要求生成。缺失细节可以合理补足，但不要声称读取了原小说。按幕/场组织，每场包含地点、时间、人物、动作、对白/旁白；优先服务本集强钩子和可拍摄性。输出格式：<TITLE>剧本标题</TITLE><SCRIPT>完整剧本</SCRIPT>`;
-  if (mode === "assets") return `${common}\n任务：根据剧本提取前期制作资产。必须覆盖角色、场景、关键道具、整体风格。每个资产都要包含可用于 Seedream 生图的 lock_prompt 和 negative_prompt。优先输出 JSON：{ "assets": [{ "kind": "character", "name": "", "summary": "", "lock_prompt": "", "negative_prompt": "" }] }，kind 只能是 character/scene/prop/style。不要输出代码块。`;
-  if (mode === "storyboardVideo") return `${common}\n任务：根据剧本和资产设定生成视频分镜脚本提示词。每个镜头必须包含：镜头编号、场景、画面、镜头运动、角色动作、台词/旁白、建议时长、可直接用于 Seedance 视频生成的 video_prompt。优先输出 JSON：{ "shots": [{ "index": 1, "title": "", "scene": "", "characters": [], "shot_type": "中景", "camera_move": "固定", "purpose": "信息揭示", "dialogue": "", "narration": "", "duration": 5, "aspectRatio": "9:16", "video_prompt": "" }] }。不要输出代码块。`;
-  return `${common}\n任务：根据剧本、资产和视频分镜，生成 Seedream 分镜图提示词。每个镜头一条 image_prompt，强调静态构图、主体、景别、光线、角色/服装/场景一致性。优先输出 JSON：{ "shots": [{ "index": 1, "title": "", "scene": "", "characters": [], "shot_type": "中景", "camera_move": "固定", "purpose": "信息揭示", "dialogue": "", "narration": "", "duration": 5, "aspectRatio": "9:16", "image_prompt": "", "video_prompt": "" }] }。不要输出代码块。`;
-}
-
 
 const TAB_VALUES: Tab[] = ["workflow", "image", "video"];
 const WORKFLOW_MODE_VALUES: WorkflowMode[] = ["script", "assets", "storyboardVideo", "storyboardImage"];
+
+function canvasNodesSignature(nodes: CanvasNode[]) {
+  return nodes
+    .map((node) => {
+      const data = (node.data || {}) as Record<string, unknown>;
+      const dataSig = [
+        data.sourceShotId,
+        data.imagePrompt,
+        data.videoPrompt,
+        data.scene,
+        data.content,
+        data.thumbnail,
+        data.url,
+      ].map((value) => String(value || "").slice(0, 120)).join("~");
+      return `${node.id}:${node.type}:${node.title}:${node.x}:${node.y}:${node.status || ""}:${dataSig}`;
+    })
+    .join("|");
+}
+
+function canvasConnectionsSignature(connections: CanvasConnection[]) {
+  return connections
+    .map((conn) => `${conn.id}:${conn.from}:${conn.to}:${conn.type || ""}:${conn.label || ""}`)
+    .join("|");
+}
+
+function storyboardGridPosition(index: number) {
+  const columns = 4;
+  const cardWidth = 360;
+  const cardHeight = 420;
+  const gapX = 140;
+  const gapY = 170;
+  const startX = 560;
+  const startY = 520;
+  return {
+    x: startX + (index % columns) * (cardWidth + gapX),
+    y: startY + Math.floor(index / columns) * (cardHeight + gapY),
+  };
+}
+
+function storyboardVideoPosition(index: number) {
+  const base = storyboardGridPosition(index);
+  return { x: base.x + 500, y: base.y };
+}
+
+function assetShelfPosition(index: number) {
+  const columns = 4;
+  const cardWidth = 360;
+  const cardHeight = 440;
+  const gapX = 120;
+  const gapY = 120;
+  const startX = 560;
+  const startY = 40;
+  return {
+    x: startX + (index % columns) * (cardWidth + gapX),
+    y: startY + Math.floor(index / columns) * (cardHeight + gapY),
+  };
+}
+
+function layoutStudioNodes(nodes: CanvasNode[]) {
+  const shotNodes = nodes
+    .filter((node) => node.type === "shot")
+    .sort((a, b) => {
+      const ai = Number(String(a.title).match(/^\s*(\d+)/)?.[1] || 9999);
+      const bi = Number(String(b.title).match(/^\s*(\d+)/)?.[1] || 9999);
+      return ai - bi;
+    });
+  const assetNodes = nodes.filter((node) => node.type === "assets");
+  const shotPositions = new Map(shotNodes.map((node, index) => [node.id, storyboardGridPosition(index)]));
+  const videoPositions = new Map(shotNodes.map((node, index) => [`video-node-${node.id}`, storyboardVideoPosition(index)]));
+  const assetPositions = new Map(assetNodes.map((node, index) => [node.id, assetShelfPosition(index)]));
+  const bottomY = storyboardGridPosition(Math.max(shotNodes.length, 1)).y + 120;
+
+  return nodes.map((node, index) => {
+    if (node.id === "script-main") return { ...node, x: 60, y: 120 };
+    if (assetPositions.has(node.id)) return { ...node, ...assetPositions.get(node.id)! };
+    if (shotPositions.has(node.id)) return { ...node, ...shotPositions.get(node.id)! };
+    if (videoPositions.has(node.id)) return { ...node, ...videoPositions.get(node.id)! };
+    if (node.type === "director") return { ...node, x: 60, y: bottomY };
+    if (node.type === "generator") return { ...node, x: 560 + (index % 3) * 480, y: bottomY + Math.floor(index / 3) * 380 };
+    return node;
+  });
+}
+
+function hasCongestedShotLayout(nodes: CanvasNode[]) {
+  const shotNodes = nodes.filter((node) => node.type === "shot");
+  if (shotNodes.length < 2) return false;
+  for (let i = 0; i < shotNodes.length; i++) {
+    for (let j = i + 1; j < shotNodes.length; j++) {
+      const a = shotNodes[i];
+      const b = shotNodes[j];
+      const xOverlap = Math.abs(a.x - b.x) < 390;
+      const yOverlap = Math.abs(a.y - b.y) < 450;
+      if (xOverlap && yOverlap) return true;
+    }
+  }
+  return false;
+}
 
 export default function SeedreamBetaPage() {
   const { t } = useI18n();
@@ -346,13 +596,14 @@ export default function SeedreamBetaPage() {
   const { images, generateImage, isGenerating, fetchImages } = useImage("seedream");
   const { videos, generateVideo, generating: videoGenerating } = useVideo();
 
-  const { setProjects, activeProject } = useSeedreamProjects(t("seedreamBeta.projects.newProject"));
+  const { setProjects, activeProject, createProject } = useSeedreamProjects(t("seedreamBeta.projects.newProject"));
   const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
 
   const [tab, setTab] = useState<Tab>("workflow");
   const [imagePrompt, setImagePrompt] = useState("");
   const [imageAspect, setImageAspect] = useState("1:1");
   const [imageResolution, setImageResolution] = useState("2K");
+  const [assetPreset, setAssetPreset] = useState<"character" | "characterTurnaround" | "asset">("character");
   const [lastImageId, setLastImageId] = useState<number | null>(null);
   const [previewImage, setPreviewImage] = useState<GeneratedImage | null>(null);
   const [previewAsset, setPreviewAsset] = useState<StoredAsset | null>(null);
@@ -367,21 +618,21 @@ export default function SeedreamBetaPage() {
 
   const [workflowView, setWorkflowView] = useState<WorkflowView>("overview");
   const [workflowMode, setWorkflowMode] = useState<WorkflowMode>("script");
+  const tabParam = searchParams.get("tab");
+  const modeParam = searchParams.get("mode");
 
   useEffect(() => {
-    const tabParam = searchParams.get("tab");
-    const modeParam = searchParams.get("mode");
     if (tabParam && TAB_VALUES.includes(tabParam as Tab)) {
-      setTab(tabParam as Tab);
+      setTab((current) => (current === tabParam ? current : (tabParam as Tab)));
     }
     if (modeParam && WORKFLOW_MODE_VALUES.includes(modeParam as WorkflowMode)) {
-      setTab("workflow");
-      setWorkflowMode(modeParam as WorkflowMode);
-      setWorkflowView("step");
+      setTab((current) => (current === "workflow" ? current : "workflow"));
+      setWorkflowMode((current) => (current === modeParam ? current : (modeParam as WorkflowMode)));
+      setWorkflowView((current) => (current === "step" ? current : "step"));
     } else if (tabParam === "workflow" && !modeParam) {
-      setWorkflowView("overview");
+      setWorkflowView((current) => (current === "overview" ? current : "overview"));
     }
-  }, [searchParams]);
+  }, [modeParam, tabParam]);
 
   const [workflowIdea, setWorkflowIdea] = useState("");
   const [workflowNovel, setWorkflowNovel] = useState("");
@@ -425,6 +676,245 @@ export default function SeedreamBetaPage() {
   const [storyboardImportText, setStoryboardImportText] = useState("");
   const [seedanceImportText, setSeedanceImportText] = useState("");
   const batchCancelRef = useRef(false);
+
+  // ===== Studio 画布状态 =====
+  const [studioNodes, setStudioNodes] = useState<CanvasNode[]>([]);
+  const [studioConnections, setStudioConnections] = useState<CanvasConnection[]>([]);
+  const [studioSelectedNodeId, setStudioSelectedNodeId] = useState<string | null>(null);
+  const [generatorGroups, setGeneratorGroups] = useState<GeneratorGroup[]>([]);
+  const [videoNodeStates, setVideoNodeStates] = useState<Record<string, { status: CanvasNode["status"]; errorMessage?: string }>>({});
+
+  const storedAssetUrlById = useMemo(() => {
+    const map = new Map<string, string>();
+    assets.forEach((asset) => {
+      if (asset.url) map.set(asset.id, asset.url);
+      if (asset.publicId) map.set(asset.publicId, asset.url || asset.publicId);
+    });
+    return map;
+  }, [assets]);
+
+  // 从项目数据同步画布节点（保留已有位置）
+  useEffect(() => {
+    setStudioNodes((currentNodes) => {
+      const positionMap = new Map(currentNodes.map((n) => [n.id, { x: n.x, y: n.y }]));
+      const nodes: CanvasNode[] = [];
+
+    // 不再为空项目补默认节点；画布只显示真实项目数据或用户手动新增节点。
+    if (workflowScript?.trim()) {
+      const pos = positionMap.get("script-main");
+      nodes.push({
+        id: "script-main",
+        type: "script",
+        title: "剧本",
+        x: pos?.x ?? 60,
+        y: pos?.y ?? 120,
+        width: 420,
+        height: 300,
+        data: { content: workflowScript },
+        status: "done",
+      });
+    }
+
+    // 资产节点
+    semanticAssets.forEach((asset, i) => {
+      const pos = positionMap.get(asset.id);
+      nodes.push({
+        id: asset.id,
+        type: "assets",
+        title: asset.name || "未命名资产",
+        x: pos?.x ?? assetShelfPosition(i).x,
+        y: pos?.y ?? assetShelfPosition(i).y,
+        width: 360,
+        height: 440,
+        data: { asset, kind: asset.kind },
+        status: asset.imageUrl || asset.imageAssetId ? "done" : "empty",
+      });
+    });
+
+    // 镜头卡固定为 shot；分镜图直接显示在镜头卡内部预览区，避免额外节点挤压画布。
+    // 视频是更重的产物，作为镜头卡右侧的稳定派生节点展示，避免切参数时被同步清掉。
+    storyboardShots.forEach((shot, i) => {
+      const hasImage = shot.imageAssetIds && shot.imageAssetIds.length > 0;
+      const hasVideo = shot.videoAssetIds && shot.videoAssetIds.length > 0;
+      const videoNodeState = videoNodeStates[shot.id];
+      const hasActiveVideoNode = hasVideo || videoNodeState?.status === "generating" || videoNodeState?.status === "error";
+      const firstImageAssetId = shot.imageAssetIds?.[0];
+      const firstVideoAssetId = shot.videoAssetIds?.[0];
+      const resolvedShotImageUrl = firstImageAssetId ? storedAssetUrlById.get(firstImageAssetId) : undefined;
+      const resolvedShotVideoUrl = firstVideoAssetId ? storedAssetUrlById.get(firstVideoAssetId) : undefined;
+      const shotPos = positionMap.get(shot.id);
+      nodes.push({
+        id: shot.id,
+        type: "shot",
+        title: `${i + 1}. ${shot.title || shot.scene || "未命名镜头"}`,
+        x: shotPos?.x ?? storyboardGridPosition(i).x,
+        y: shotPos?.y ?? storyboardGridPosition(i).y,
+        width: 360,
+        height: 420,
+        data: { ...shot, imageUrl: resolvedShotImageUrl, videoUrl: resolvedShotVideoUrl },
+        status: shot.status === "image_generating" ? "generating" : hasImage ? "done" : shot.status === "failed" ? "error" : "draft",
+      });
+
+      if (hasActiveVideoNode) {
+        const videoNodeId = `video-node-${shot.id}`;
+        const videoPos = positionMap.get(videoNodeId);
+        nodes.push({
+          id: videoNodeId,
+          type: "video",
+          title: `${i + 1}. 视频片段`,
+          x: videoPos?.x ?? storyboardVideoPosition(i).x,
+          y: videoPos?.y ?? storyboardVideoPosition(i).y,
+          width: 360,
+          height: 420,
+          data: { ...shot, sourceShotId: shot.id, imageUrl: resolvedShotImageUrl, videoUrl: resolvedShotVideoUrl, errorMessage: videoNodeState?.status === "error" ? getSeedreamVideoErrorMessage(videoNodeState?.errorMessage) : undefined },
+          status: videoNodeState?.status === "error" ? "error" : videoNodeState?.status === "generating" ? "generating" : hasVideo ? "done" : "empty",
+        });
+      }
+    });
+
+    // 导演台节点只在已有导演台数据时显示，不再为空项目补默认入口。
+    if (directorBlocks.length > 0) {
+      const pos = positionMap.get("director-main");
+      nodes.push({
+        id: "director-main",
+        type: "director",
+        title: "导演台",
+        x: pos?.x ?? 60,
+        y: pos?.y ?? storyboardGridPosition(Math.max(storyboardShots.length, 1)).y + 120,
+        width: 420,
+        height: 280,
+        data: { shotCount: storyboardShots.length },
+        status: "done",
+      });
+    }
+
+    generatorGroups.forEach((group, i) => {
+      const pos = positionMap.get(group.id);
+      nodes.push({
+        id: group.id,
+        type: "generator",
+        title: group.title,
+        x: pos?.x ?? 560 + (i % 3) * 480,
+        y: pos?.y ?? storyboardGridPosition(Math.max(storyboardShots.length, 1)).y + 120 + Math.floor(i / 3) * 380,
+        width: 420,
+        height: 300,
+        data: {
+          mode: group.mode,
+          shotIds: group.shotIds,
+          promptPreview: group.promptPreview,
+          scene: group.mode === "image" ? "批量分镜图生成器" : "批量视频生成器",
+        },
+        status: group.shotIds.length ? "draft" : "empty",
+      });
+    });
+
+      const generatedIds = new Set(nodes.map((node) => node.id));
+      const autoVideoSourceIds = new Set(
+        nodes
+          .filter((node) => node.type === "video" && node.id.startsWith("video-node-"))
+          .map((node) => typeof node.data?.sourceShotId === "string" ? node.data.sourceShotId : node.id.replace("video-node-", ""))
+      );
+      const manualStudioNodes = currentNodes
+        .filter((node) => {
+          if (!node.id.startsWith("studio-") || generatedIds.has(node.id)) return false;
+          const sourceShotId = typeof node.data?.sourceShotId === "string" ? node.data.sourceShotId : undefined;
+          return !(node.type === "video" && sourceShotId && autoVideoSourceIds.has(sourceShotId));
+        })
+        .map((node) => {
+          const sourceShotId = typeof node.data?.sourceShotId === "string" ? node.data.sourceShotId : undefined;
+          const sourceShot = sourceShotId ? storyboardShots.find((shot) => shot.id === sourceShotId) : undefined;
+          if (!sourceShot) return node;
+          const videoNodeState = videoNodeStates[sourceShot.id];
+          const sourceImageAssetId = sourceShot.imageAssetIds?.[0];
+          const sourceVideoAssetId = sourceShot.videoAssetIds?.[0];
+          const sourceImageUrl = sourceImageAssetId ? storedAssetUrlById.get(sourceImageAssetId) : undefined;
+          const sourceVideoUrl = sourceVideoAssetId ? storedAssetUrlById.get(sourceVideoAssetId) : undefined;
+          const syncedStatus: CanvasNode["status"] = node.type === "video" && videoNodeState?.status
+            ? videoNodeState.status
+            : sourceShot.status === "image_generating"
+              ? "generating"
+              : sourceShot.status === "image_ready" || (node.type === "video" && sourceShot.videoAssetIds?.length) || (node.type === "image" && sourceShot.imageAssetIds?.length)
+                ? "done"
+                : sourceShot.status === "failed" && node.type !== "video"
+                  ? "error"
+                  : node.status;
+          return {
+            ...node,
+            status: syncedStatus,
+            data: {
+              ...node.data,
+              videoPrompt: node.type === "video" ? sourceShot.videoPrompt || sourceShot.imagePrompt || "" : node.data?.videoPrompt,
+              imagePrompt: sourceShot.imagePrompt || node.data?.imagePrompt || "",
+              scene: sourceShot.scene || node.data?.scene || "",
+              videoAssetIds: sourceShot.videoAssetIds || node.data?.videoAssetIds,
+              imageAssetIds: sourceShot.imageAssetIds || node.data?.imageAssetIds,
+              imageUrl: sourceImageUrl || node.data?.imageUrl,
+              videoUrl: sourceVideoUrl || node.data?.videoUrl,
+              errorMessage: node.type === "video" && videoNodeState?.status === "error" ? getSeedreamVideoErrorMessage(videoNodeState?.errorMessage) : node.data?.errorMessage,
+            },
+          };
+        });
+      const mergedNodes = [...nodes, ...manualStudioNodes];
+      const nextNodes = hasCongestedShotLayout(mergedNodes) ? layoutStudioNodes(mergedNodes) : mergedNodes;
+      return canvasNodesSignature(currentNodes) === canvasNodesSignature(nextNodes) ? currentNodes : nextNodes;
+    });
+
+    // 自动连线：按场景 + 索引顺序
+    const conns: CanvasConnection[] = [];
+    const sorted = [...storyboardShots].sort((a, b) => a.index - b.index);
+    const scriptNodeExists = Boolean(workflowScript?.trim());
+    const shotNodeIds = sorted.map((shot) => shot.id);
+    const directorNodeExists = directorBlocks.length > 0;
+
+    if (scriptNodeExists && shotNodeIds[0]) {
+      conns.push({ id: `ctx-script-${shotNodeIds[0]}`, from: "script-main", to: shotNodeIds[0], label: "生成分镜", type: "context" });
+    }
+
+
+    sorted.forEach((shot) => {
+      const videoNodeState = videoNodeStates[shot.id];
+      const hasVideoNode = (shot.videoAssetIds && shot.videoAssetIds.length > 0) || videoNodeState?.status === "generating" || videoNodeState?.status === "error";
+      if (hasVideoNode) {
+        conns.push({ id: `gen-video-${shot.id}`, from: shot.id, to: `video-node-${shot.id}`, label: "生成视频", type: "generator" });
+      }
+    });
+
+    if (directorNodeExists && shotNodeIds.length > 0) {
+      conns.push({ id: `ctx-${shotNodeIds[shotNodeIds.length - 1]}-director-main`, from: shotNodeIds[shotNodeIds.length - 1], to: "director-main", label: "导演调度", type: "context" });
+    }
+    generatorGroups.forEach((group) => {
+      group.shotIds.forEach((shotId) => {
+        conns.push({
+          id: `gen-${shotId}-${group.id}`,
+          from: shotId,
+          to: group.id,
+          label: group.mode === "image" ? "生图" : "生视频",
+          type: "generator",
+        });
+      });
+    });
+    // 多镜头故事板默认不画每一条顺序线：编号已经表达顺序，满屏转场线会让画布显得堆积。
+    if (sorted.length <= 4) {
+      for (let i = 0; i < sorted.length - 1; i++) {
+        const curr = sorted[i];
+        const next = sorted[i + 1];
+        const isTransition = curr.scene !== next.scene;
+        conns.push({
+          id: `conn-${curr.id}-${next.id}`,
+          from: curr.id,
+          to: next.id,
+          label: isTransition ? "转场" : undefined,
+          type: isTransition ? "scene-transition" : "sequence",
+        });
+      }
+    }
+    setStudioConnections((currentConnections) => {
+      const autoIds = new Set(conns.map((connection) => connection.id));
+      const manualConnections = currentConnections.filter((connection) => !autoIds.has(connection.id) && connection.id.startsWith("manual-"));
+      const nextConnections = [...manualConnections, ...conns];
+      return canvasConnectionsSignature(currentConnections) === canvasConnectionsSignature(nextConnections) ? currentConnections : nextConnections;
+    });
+  }, [workflowScript, semanticAssets, storyboardShots, directorBlocks.length, generatorGroups, videoNodeStates, storedAssetUrlById]);
 
   const lastImage: GeneratedImage | undefined = useMemo(() => {
     if (!lastImageId) return images[0];
@@ -520,7 +1010,7 @@ export default function SeedreamBetaPage() {
   };
 
   const mergeStoryboardShots = (nextText: string, mode: "storyboard" | "seedance") => {
-    const parsedShots = parseStoryboardShots(nextText);
+    const parsedShots = parseStoryboardShots(nextText, videoModel);
     if (!parsedShots.length) {
       toast.error("没有解析到镜头/段落，请检查格式是否包含“段01”或“镜头1”。");
       return;
@@ -549,6 +1039,7 @@ export default function SeedreamBetaPage() {
           narration: shot.narration,
           imagePrompt: shot.imagePrompt || existing.imagePrompt,
           videoPrompt: shot.videoPrompt || existing.videoPrompt,
+          generationActions: shot.generationActions || existing.generationActions,
           shotType: shot.shotType || existing.shotType,
           cameraMove: shot.cameraMove || existing.cameraMove,
           purpose: shot.purpose || existing.purpose,
@@ -587,6 +1078,37 @@ export default function SeedreamBetaPage() {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => importLayerText(layer, String(reader.result || ""));
+    reader.onerror = () => toast.error("读取文件失败");
+    reader.readAsText(file);
+  };
+
+  const handleImportScriptAndShotsFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const clean = stripWorkflowText(String(reader.result || ""));
+      if (!clean) {
+        toast.error("导入内容为空");
+        return;
+      }
+      setWorkflowScript(clean);
+      setScriptSourceExcerpt((prev) => prev || clean.slice(0, 2000));
+      const parsedShots = parseStoryboardShots(clean, videoModel);
+      if (parsedShots.length) {
+        setStoryboardShots(parsedShots);
+        setActiveShotId(parsedShots[0]?.id);
+        setWorkflowStoryboardVideo(clean);
+        setWorkflowMode("storyboardImage");
+        setWorkflowView("step");
+        toast.success(`剧本已上传，并解析为 ${parsedShots.length} 张镜头卡`);
+      } else {
+        setWorkflowMode("script");
+        setWorkflowView("step");
+        toast.success(`剧本已上传，约 ${clean.length} 字，可继续拆成镜头卡`);
+      }
+    };
     reader.onerror = () => toast.error("读取文件失败");
     reader.readAsText(file);
   };
@@ -645,6 +1167,7 @@ export default function SeedreamBetaPage() {
     setGenerationJobs(activeProject.generationJobs || []);
     setSemanticAssets(activeProject.semanticAssets || []);
     setDirectorBlocks(activeProject.directorBlocks || []);
+    setGeneratorGroups(activeProject.generatorGroups || []);
     setActiveSemanticAssetId(activeProject.semanticAssets?.[0]?.id);
     setLoadedProjectId(activeProject.id);
   }, [activeProject?.id]);
@@ -672,9 +1195,10 @@ export default function SeedreamBetaPage() {
       generationJobs,
       semanticAssets,
       directorBlocks,
+      generatorGroups,
       updatedAt: new Date().toISOString(),
     } : project));
-  }, [activeProject?.id, loadedProjectId, workflowIdea, workflowNovel, scriptSourceExcerpt, scriptAdaptationInstruction, workflowScript, workflowAssets, workflowStoryboardVideo, workflowStoryboardImage, assets, selectedAssetIds, imagePrompt, videoPrompt, storyboardShots, activeShotId, generationJobs, semanticAssets, directorBlocks]);
+  }, [activeProject?.id, loadedProjectId, workflowIdea, workflowNovel, scriptSourceExcerpt, scriptAdaptationInstruction, workflowScript, workflowAssets, workflowStoryboardVideo, workflowStoryboardImage, assets, selectedAssetIds, imagePrompt, videoPrompt, storyboardShots, activeShotId, generationJobs, semanticAssets, directorBlocks, generatorGroups]);
 
 
 
@@ -685,7 +1209,10 @@ export default function SeedreamBetaPage() {
     setGenerationJobs((prev) => prev.map((job) => {
       if (job.type !== "image" || job.status !== "pending") return job;
       const failedImage = failedImages.find((item) => item.id === job.mediaId);
-      if (failedImage) return { ...job, status: "failed", updatedAt: new Date().toISOString() };
+      if (failedImage) {
+        if (job.shotId) updateShot(job.shotId, { status: "failed" });
+        return { ...job, status: "failed", updatedAt: new Date().toISOString() };
+      }
       const image = succeededImages.find((item) => item.id === job.mediaId);
       if (!image) return job;
       const shot = storyboardShots.find((item) => item.id === job.shotId);
@@ -701,7 +1228,12 @@ export default function SeedreamBetaPage() {
           : { status: "image_ready", imageAssetIds: Array.from(new Set([...(shot.imageAssetIds || []), assetIdToLink])), referenceAssetIds: Array.from(new Set([...(shot.referenceAssetIds || []), assetIdToLink])), firstFrameAssetId: shot.firstFrameAssetId || assetIdToLink });
         if (semanticAsset) {
           setSemanticAssets((current) => current.map((item) => item.id === semanticAsset.id
-            ? { ...item, linkedAssetIds: Array.from(new Set([...(item.linkedAssetIds || []), assetIdToLink])) }
+            ? {
+                ...item,
+                linkedAssetIds: Array.from(new Set([...(item.linkedAssetIds || []), assetIdToLink])),
+                imageAssetId: assetIdToLink,
+                imageUrl: asset.url,
+              }
             : item));
         }
       }
@@ -711,16 +1243,28 @@ export default function SeedreamBetaPage() {
 
   useEffect(() => {
     const succeededVideos = videos.filter((video) => video.video_url && video.status === "succeeded");
-    if (!succeededVideos.length) return;
+    const failedVideos = videos.filter((video) => video.status === "failed");
+    if (!succeededVideos.length && !failedVideos.length) return;
     setGenerationJobs((prev) => prev.map((job) => {
       if (job.type !== "video" || job.status !== "pending") return job;
+      const failedVideo = failedVideos.find((item) => item.id === job.mediaId);
+      if (failedVideo) {
+        const errorMessage = getSeedreamVideoErrorMessage(failedVideo.error_message);
+        if (job.shotId) {
+          markStudioVideoProgress(job.shotId, "error", errorMessage);
+        }
+        return { ...job, status: "failed", updatedAt: new Date().toISOString() };
+      }
       const video = succeededVideos.find((item) => item.id === job.mediaId);
       if (!video) return job;
       const shot = storyboardShots.find((item) => item.id === job.shotId);
       const asset = createAssetFromVideo(video, shot);
       if (asset && !assets.some((item) => item.publicId === asset.publicId && item.shotId === shot?.id)) {
         setAssets((current) => [asset, ...current]);
-        if (shot) updateShot(shot.id, { status: "video_ready", videoAssetIds: Array.from(new Set([...(shot.videoAssetIds || []), asset.id])), referenceVideoAssetId: shot.referenceVideoAssetId || asset.id });
+        if (shot) {
+          updateShot(shot.id, { status: "video_ready", errorMessage: undefined, videoAssetIds: Array.from(new Set([...(shot.videoAssetIds || []), asset.id])), referenceVideoAssetId: shot.referenceVideoAssetId || asset.id });
+          markStudioVideoProgress(shot.id, "done");
+        }
       }
       return { ...job, status: "succeeded", updatedAt: new Date().toISOString() };
     }));
@@ -800,6 +1344,41 @@ export default function SeedreamBetaPage() {
     return filtered.slice(0, Math.max(1, batchLimit));
   }, [storyboardShots, batchMode, batchLimit]);
 
+  const selectedGeneratorGroup = useMemo(
+    () => generatorGroups.find((group) => group.id === studioSelectedNodeId),
+    [generatorGroups, studioSelectedNodeId],
+  );
+
+  const selectedStudioNode = useMemo(
+    () => studioNodes.find((node) => node.id === studioSelectedNodeId),
+    [studioNodes, studioSelectedNodeId],
+  );
+
+  const selectedComposerSettings = useMemo(() => {
+    const sourceShotId = typeof selectedStudioNode?.data?.sourceShotId === "string"
+      ? selectedStudioNode.data.sourceShotId
+      : selectedStudioNode?.type === "shot"
+        ? selectedStudioNode.id
+        : undefined;
+    const selectedShot = sourceShotId ? storyboardShots.find((shot) => shot.id === sourceShotId) : undefined;
+    return {
+      imageAspect: selectedShot?.aspectRatio || imageAspect,
+      imageResolution,
+      assetPreset,
+      videoModel,
+      videoAspect: selectedShot?.aspectRatio || videoAspect,
+      videoResolution: normalizeVideoResolution(videoResolution, selectedGeneratorGroup?.modelLabel || videoModel),
+      videoDuration: normalizeVideoDuration(selectedShot?.duration || selectedGeneratorGroup?.duration || videoDuration, selectedGeneratorGroup?.modelLabel || videoModel),
+      videoAudio,
+    };
+  }, [assetPreset, imageAspect, imageResolution, selectedGeneratorGroup?.duration, selectedStudioNode, storyboardShots, videoAspect, videoAudio, videoDuration, videoModel, videoResolution]);
+
+  const selectedGeneratorQueue = useMemo(() => {
+    if (!selectedGeneratorGroup) return [];
+    const idSet = new Set(selectedGeneratorGroup.shotIds);
+    return storyboardShots.filter((shot) => idSet.has(shot.id)).sort((a, b) => a.index - b.index);
+  }, [selectedGeneratorGroup, storyboardShots]);
+
 
   const workflowOutput = useMemo(() => {
     if (workflowMode === "novel") return workflowNovel;
@@ -851,7 +1430,7 @@ export default function SeedreamBetaPage() {
           search: false,
           reasoning: false,
           messages: [
-            { role: "system", content: workflowSystemPrompt(mode) },
+            { role: "system", content: buildWorkflowSystemPrompt(mode) },
             { role: "user", content: input },
           ],
         }),
@@ -871,7 +1450,7 @@ export default function SeedreamBetaPage() {
         }
       }
       if (mode === "storyboardVideo" || mode === "storyboardImage") {
-        const parsedShots = parseStoryboardShots(clean);
+        const parsedShots = parseStoryboardShots(clean, videoModel);
         if (parsedShots.length > 0) {
           let nextActiveShotId = parsedShots[0]?.id;
           setStoryboardShots((prev) => {
@@ -885,6 +1464,7 @@ export default function SeedreamBetaPage() {
               status: prev[index]?.status || shot.status,
               imagePrompt: shot.imagePrompt || prev[index]?.imagePrompt || "",
               videoPrompt: shot.videoPrompt || prev[index]?.videoPrompt || "",
+              generationActions: shot.generationActions || prev[index]?.generationActions,
             }));
             nextActiveShotId = next[0]?.id;
             return next;
@@ -1240,6 +1820,23 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     setStoryboardShots((prev) => prev.map((shot) => shot.id === id ? { ...shot, ...patch } : shot));
   };
 
+  const markStudioVideoProgress = (shotId: string, status: CanvasNode["status"], errorMessage?: string) => {
+    setVideoNodeStates((prev) => ({
+      ...prev,
+      [shotId]: { status, errorMessage: status === "error" ? errorMessage : undefined },
+    }));
+    setStudioNodes((prev) => prev.map((node) => {
+      const sourceShotId = typeof node.data?.sourceShotId === "string"
+        ? node.data.sourceShotId
+        : node.id.startsWith("video-node-")
+          ? node.id.replace("video-node-", "")
+          : undefined;
+      return node.type === "video" && sourceShotId === shotId
+        ? { ...node, status, data: { ...node.data, errorMessage: status === "error" ? errorMessage : undefined } }
+        : node;
+    }));
+  };
+
   const addShot = () => {
     const shot = createShot(storyboardShots.length + 1);
     setStoryboardShots((prev) => [...prev, shot]);
@@ -1252,7 +1849,7 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
   };
 
   const rebuildShotsFromOutputs = () => {
-    const parsed = parseStoryboardShots(workflowStoryboardImage.trim() || workflowStoryboardVideo.trim());
+    const parsed = parseStoryboardShots(workflowStoryboardImage.trim() || workflowStoryboardVideo.trim(), videoModel);
     if (!parsed.length) {
       toast.error("没有可解析的分镜输出，请先生成视频/图片分镜提示词");
       return;
@@ -1273,17 +1870,19 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     toast.success(`已生成 ${parsed.length} 个语义资产`);
   };
 
+  const createSemanticAssetDraft = (kind: SemanticAssetKind = "character", name?: string): SemanticAsset => ({
+    id: `semantic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    kind,
+    name: name || `新${getSemanticAssetKindLabel(kind)}`,
+    summary: "",
+    lockPrompt: "",
+    negativePrompt: "",
+    linkedAssetIds: [],
+    createdAt: new Date().toISOString(),
+  });
+
   const addSemanticAsset = (kind: SemanticAssetKind = "character") => {
-    const asset: SemanticAsset = {
-      id: `semantic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      kind,
-      name: `新${getSemanticAssetKindLabel(kind)}`,
-      summary: "",
-      lockPrompt: "",
-      negativePrompt: "",
-      linkedAssetIds: [],
-      createdAt: new Date().toISOString(),
-    };
+    const asset = createSemanticAssetDraft(kind);
     setSemanticAssets((prev) => [asset, ...prev]);
     setActiveSemanticAssetId(asset.id);
     setAssetKindFilter(kind);
@@ -1362,7 +1961,7 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
   const sendShotToVideo = (shot: StoryboardShot) => {
     setVideoPrompt(shot.videoPrompt || shot.imagePrompt);
     setVideoAspect(shot.aspectRatio || videoAspect);
-    setVideoDuration(shot.duration || videoDuration);
+    setVideoDuration(normalizeVideoDuration(shot.duration || videoDuration, videoModel));
     setSelectedAssetIds(shot.referenceAssetIds);
     setActiveShotId(shot.id);
     setTab("video");
@@ -1407,68 +2006,34 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     setGenerationJobs((prev) => [job, ...prev]);
   };
 
-  const buildSemanticAssetImagePrompt = (asset: SemanticAsset) => {
-    const kindLabel = getSemanticAssetKindLabel(asset.kind);
-    const base = [
-      `【资产类型】${kindLabel}`,
-      `【资产名称】${asset.name}`,
-      asset.summary ? `【摘要】${asset.summary}` : "",
-      asset.lockPrompt ? `【Seedream 资产锁定词】${asset.lockPrompt}` : "",
-      "生成一张可作为漫剧制作资产库使用的清晰参考图。主体单一、特征稳定、构图干净、方便后续作为参考图复用。",
-      asset.kind === "character" ? "角色资产：单人正面或三分之二视角，完整外观、服装、发型、年龄气质清晰，背景简洁。" : "",
-      asset.kind === "scene" ? "场景资产：无人或弱人物干扰，空间结构、光线、关键物件位置清晰。" : "",
-      asset.kind === "prop" ? "道具资产：单个道具居中展示，材质、形状、使用痕迹清晰，背景干净。" : "",
-      asset.kind === "style" ? "风格资产：建立统一美术风格、色彩、光影和质感，不要复杂叙事。" : "",
-      asset.negativePrompt ? `【禁用项】${asset.negativePrompt}` : "",
-    ];
-    return base.filter(Boolean).join("\n");
-  };
-
-  const generateSemanticAssetImage = async (asset: SemanticAsset) => {
-    const prompt = buildSemanticAssetImagePrompt(asset).trim();
+  const generateSemanticAssetImage = async (asset: SemanticAsset, mode: "default" | "character-turnaround" = "default") => {
+    const prompt = buildSemanticAssetImagePrompt(asset, mode).trim();
     if (!prompt) return toast.error("资产缺少可用于生图的描述");
     setAssetImageGeneratingId(asset.id);
     try {
       // 资产图生成必须走 Seedream 文生图。不要自动把已有资产图作为 reference_image_urls 传入：
       // 当前后端一旦收到参考图会进入图片编辑链路，而不是 Seedream 文生图，导致已有资产“重新生成”稳定失败。
-      const data = await generateImage(prompt, "1:1", imageResolution, SEEDREAM_IMAGE_QUALITY, [], "seedream");
+      const data = await generateImage(prompt, imageAspect, imageResolution, SEEDREAM_IMAGE_QUALITY, [], "seedream");
       setLastImageId(data.id);
       addGenerationJob({ id: `job-asset-image-${data.id}-${Date.now()}`, semanticAssetId: asset.id, type: "image", mediaId: data.id, prompt, status: "pending", intent: "asset_image", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
-      toast.success("已提交资产图生成任务，完成后会自动关联到该资产");
+      toast.success(mode === "character-turnaround" ? "已提交角色三视图生成任务，完成后会自动关联到该角色资产" : asset.kind === "character" ? "已提交角色设定图生成任务，完成后会自动关联到该角色资产" : "已提交资产图生成任务，完成后会自动关联到该资产");
     } catch (err) {
-      toast.error(getErrorMessage(err, { module: "image", fallbackMessage: "资产图生成失败" }));
+      toast.error(getErrorMessage(err, { module: "image", fallbackMessage: mode === "character-turnaround" ? "角色三视图生成失败" : "资产图生成失败" }));
     } finally {
       setAssetImageGeneratingId(null);
     }
   };
 
-  const buildStoryboardSketchPrompt = (shot: StoryboardShot) => {
-    const source = [
-      `分镜${shot.index}：${shot.title}`,
-      shot.shotType ? `景别：${shot.shotType}` : "",
-      shot.cameraMove ? `运镜：${shot.cameraMove}` : "",
-      shot.scene ? `画面内容：${shot.scene}` : "",
-      shot.characters.length ? `出场人物：${shot.characters.join("、")}` : "",
-      shot.dialogue ? `关键对白：${shot.dialogue}` : "",
-      shot.imagePrompt ? `补充描述：${shot.imagePrompt}` : "",
-    ].filter(Boolean).join("\n");
-    return `根据以下分镜内容绘制故事版草稿图。\n风格要求：松散随性草稿线，黑白单色线稿，低细节，像导演分镜板；只用少量彩色手绘箭头标注运动轨迹、视线方向和动作方向；不要做精修插画，不要电影海报，不要复杂上色，不要清晰可读字幕。\n构图要求：重点验证人物站位、空间关系、景别、运镜方向和动作可读性。\n\n${source}`;
+  const generateNodeAssetImage = async (nodeId: string) => {
+    const existingAsset = semanticAssets.find((asset) => asset.id === nodeId);
+    if (!existingAsset) return;
+    await generateSemanticAssetImage(existingAsset, "default");
   };
 
   const buildImagePromptForGeneration = (shot: StoryboardShot) => {
     const directorBlock = findDirectorBlockForShot(directorBlocks, shot.id);
-    const base = shot.imagePrompt?.trim() || "";
-    if (base) return injectDirectorBlockToPrompt(base, directorBlock, semanticAssets);
-    const structured = [
-      `分镜${shot.index}：${shot.title}`,
-      shot.scene ? `画面场景：${shot.scene}` : "",
-      shot.shotType ? `景别：${shot.shotType}` : "",
-      shot.cameraMove ? `运镜：${shot.cameraMove}` : "",
-      shot.characters.length ? `出场人物：${shot.characters.join("、")}` : "",
-      shot.dialogue ? `关键对白：${shot.dialogue}` : "",
-      shot.purpose ? `目的：${shot.purpose}` : "",
-    ].filter(Boolean).join("\n");
-    return structured ? injectDirectorBlockToPrompt(structured, directorBlock, semanticAssets) : "";
+    const base = shot.imagePrompt?.trim() || buildStructuredShotImagePrompt(shot);
+    return base ? injectDirectorBlockToPrompt(base, directorBlock, semanticAssets) : "";
   };
 
   const generateShotImage = async (shot: StoryboardShot, entryPath: "single" | "batch" = "single") => {
@@ -1515,7 +2080,7 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
       return null;
     }
     setActiveShotId(shot.id);
-    updateShot(shot.id, { status: "video_generating" });
+    markStudioVideoProgress(shot.id, "generating");
     const refs = getShotAssets(shot, assets);
     const imageAssets = refs.filter((asset) => asset.type === "image" && !isStoryboardSketchAsset(asset) && VIDEO_REFERENCE_ROLES.has(asset.role || "reference_image"));
     const videoAssets = refs.filter((asset) => asset.type === "video");
@@ -1524,10 +2089,11 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
         prompt,
         model: videoModel,
         ratio: shot.aspectRatio || videoAspect,
-        duration: shot.duration || videoDuration,
+        duration: normalizeVideoDuration(shot.duration || videoDuration, videoModel),
+        resolution: normalizeVideoResolution(videoResolution, videoModel),
         generate_audio: videoAudio,
         watermark: false,
-        reference_image_urls: imageAssets.map((asset) => asset.publicId || asset.url),
+        reference_image_urls: imageAssets.map((asset) => asset.url || asset.publicId).filter(Boolean),
         reference_image_roles: imageAssets.map((asset) => (asset.id === shot.firstFrameAssetId ? "first_frame" : asset.id === shot.lastFrameAssetId ? "last_frame" : asset.role === "first_frame" || asset.role === "last_frame" ? asset.role : "reference_image") as "reference_image" | "first_frame" | "last_frame"),
         reference_video_urls: videoAssets.map((asset) => asset.publicId || asset.url),
       });
@@ -1535,7 +2101,12 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
       addGenerationJob({ id: `job-video-${data.id}-${Date.now()}`, shotId: shot.id, type: "video", mediaId: data.id, prompt, status: "pending", entryPath, promptSource: shot.videoPrompt.trim() ? "videoPrompt" : "imagePromptFallback", directorInjected: Boolean(findDirectorBlockForShot(directorBlocks, shot.id)), referenceImageCount: imageAssets.length, referenceVideoCount: videoAssets.length, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
       return data;
     } catch (err) {
-      updateShot(shot.id, { status: "failed" });
+      const errorMessage = err instanceof Error && err.message.trim()
+        ? err.message.trim()
+        : typeof err === "string" && err.trim()
+          ? err.trim()
+          : getErrorMessage(err, { module: "video", fallbackMessage: "视频生成提交失败" });
+      markStudioVideoProgress(shot.id, "error", getSeedreamVideoErrorMessage(errorMessage));
       throw err;
     }
   };
@@ -1764,7 +2335,8 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
         prompt,
         model: videoModel,
         ratio: videoAspect,
-        duration: videoDuration,
+        duration: normalizeVideoDuration(videoDuration, videoModel),
+        resolution: normalizeVideoResolution(videoResolution, videoModel),
         generate_audio: videoAudio,
         watermark: false,
         reference_image_urls: selectedImageRefs,
@@ -1805,290 +2377,1049 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
   };
 
   const autoLayoutNodes = useCallback(() => {
-    if (storyboardShots.length === 0) return;
-    const scenes = Array.from(new Set(storyboardShots.map((s) => s.scene || "未分组")));
-    const shotsPerScene = scenes.map((scene) =>
-      storyboardShots.filter((s) => (s.scene || "未分组") === scene)
-    );
-    const newShots: StoryboardShot[] = [];
-    let currentY = 40;
-    const COL_WIDTH = 280;
-    const ROW_HEIGHT = 200;
-    const GAP_X = 40;
-    const GAP_Y = 60;
-    for (const sceneShots of shotsPerScene) {
-      let currentX = 40;
-      for (let i = 0; i < sceneShots.length; i++) {
-        const shot = sceneShots[i];
-        newShots.push({
-          ...shot,
-          index: newShots.length + 1,
-        });
-        currentX += COL_WIDTH + GAP_X;
-      }
-      currentY += ROW_HEIGHT + GAP_Y;
+    setStudioNodes((prev) => layoutStudioNodes(prev));
+    toast.success("已按剧本 / 资产 / 分镜泳道重新排版");
+  }, []);
+
+  // ===== Studio 画布交互 =====
+  const createGeneratorGroupNode = useCallback((nodeIds: string[], mode: "image" | "video") => {
+    const shotIds = Array.from(new Set(nodeIds.filter((id) => storyboardShots.some((shot) => shot.id === id))));
+    if (!shotIds.length) {
+      toast.error("先选择或连入镜头节点，再创建生成器组");
+      return;
     }
-    setStoryboardShots(newShots);
-  }, [storyboardShots, setStoryboardShots]);
+    const id = `generator-${mode}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const group: GeneratorGroup = {
+      id,
+      title: mode === "image" ? `分镜图生成器组 · ${shotIds.length}镜` : `视频生成器组 · ${shotIds.length}镜`,
+      mode,
+      shotIds,
+      modelLabel: mode === "image" ? "Seedream" : videoModel,
+      aspectRatio: mode === "image" ? imageAspect : videoAspect,
+      resolution: mode === "image" ? imageResolution : normalizeVideoResolution(videoResolution, videoModel),
+      duration: mode === "video" ? normalizeVideoDuration(videoDuration, videoModel) : undefined,
+      promptPreview: buildGeneratorGroupSummaryPrompt({
+        mode,
+        shotCount: shotIds.length,
+        modelLabel: mode === "image" ? "Seedream" : videoModel,
+        aspect: mode === "image" ? imageAspect : videoAspect,
+        resolution: mode === "image" ? imageResolution : normalizeVideoResolution(videoResolution, videoModel),
+        duration: mode === "video" ? normalizeVideoDuration(videoDuration, videoModel) : undefined,
+      }),
+      createdAt: new Date().toISOString(),
+    };
+    setGeneratorGroups((prev) => [group, ...prev]);
+    setStudioSelectedNodeId(id);
+    toast.success(`已创建${mode === "image" ? "分镜图" : "视频"}生成器组`);
+  }, [imageAspect, imageResolution, storyboardShots, videoAspect, videoDuration, videoModel, videoResolution]);
+
+  const addManualStudioConnection = useCallback((from: string, to: string, label: string, type: CanvasConnection["type"] = "binding") => {
+    if (!from || !to || from === to) return;
+    setStudioConnections((prev) => {
+      if (prev.some((connection) => connection.from === from && connection.to === to)) return prev;
+      return [
+        ...prev,
+        {
+          id: `manual-${from}-${to}-${Date.now()}`,
+          from,
+          to,
+          label,
+          type,
+        },
+      ];
+    });
+  }, []);
+
+  const handleCanvasConnectNodes = useCallback((from: string, to: string) => {
+    const sourceShot = storyboardShots.find((shot) => shot.id === from);
+    const targetShot = storyboardShots.find((shot) => shot.id === to);
+    const sourceAsset = semanticAssets.find((asset) => asset.id === from);
+    const targetAsset = semanticAssets.find((asset) => asset.id === to);
+    const sourceGroup = generatorGroups.find((group) => group.id === from);
+    const targetGroup = generatorGroups.find((group) => group.id === to);
+
+    if (sourceAsset && targetShot) {
+      addManualStudioConnection(from, to, "引用", "binding");
+      setStoryboardShots((prev) => prev.map((shot) => shot.id === targetShot.id ? { ...shot, semanticAssetIds: Array.from(new Set([...shot.semanticAssetIds, sourceAsset.id])) } : shot));
+      toast.success(`已绑定资产「${sourceAsset.name}」到镜头「${targetShot.title || targetShot.index}」`);
+      return;
+    }
+    if (sourceShot && targetAsset) {
+      addManualStudioConnection(from, to, "引用", "binding");
+      setStoryboardShots((prev) => prev.map((shot) => shot.id === sourceShot.id ? { ...shot, semanticAssetIds: Array.from(new Set([...shot.semanticAssetIds, targetAsset.id])) } : shot));
+      toast.success(`已绑定资产「${targetAsset.name}」到镜头「${sourceShot.title || sourceShot.index}」`);
+      return;
+    }
+    if (sourceShot && targetGroup) {
+      addManualStudioConnection(from, to, targetGroup.mode === "image" ? "生图" : "生视频", "generator");
+      setGeneratorGroups((prev) => prev.map((group) => group.id === targetGroup.id ? { ...group, shotIds: Array.from(new Set([...group.shotIds, sourceShot.id])) } : group));
+      toast.success("已把镜头加入生成器组");
+      return;
+    }
+    if (sourceGroup && targetShot) {
+      addManualStudioConnection(from, to, sourceGroup.mode === "image" ? "生图" : "生视频", "generator");
+      setGeneratorGroups((prev) => prev.map((group) => group.id === sourceGroup.id ? { ...group, shotIds: Array.from(new Set([...group.shotIds, targetShot.id])) } : group));
+      toast.success("已把镜头加入生成器组");
+      return;
+    }
+    if (sourceShot && targetShot) {
+      addManualStudioConnection(from, to, "顺序", "sequence");
+      const sourceIndex = sourceShot.index;
+      const targetIndex = targetShot.index;
+      setStoryboardShots((prev) => prev.map((shot) => {
+        if (shot.id === from) return { ...shot, index: Math.min(sourceIndex, targetIndex) };
+        if (shot.id === to) return { ...shot, index: Math.max(sourceIndex, targetIndex) };
+        return shot;
+      }).sort((a, b) => a.index - b.index).map((shot, index) => ({ ...shot, index: index + 1 })));
+      toast.success("已建立镜头顺序关系");
+      return;
+    }
+    addManualStudioConnection(from, to, "引用", "binding");
+    toast.message("该连线已记录为画布上下文，后续可扩展为更多自动引用");
+  }, [addManualStudioConnection, generatorGroups, semanticAssets, storyboardShots]);
+
+  const handleBindAssetMention = useCallback((nodeId: string, assetId: string) => {
+    const asset = semanticAssets.find((item) => item.id === assetId);
+    if (!asset) return;
+    const node = studioNodes.find((item) => item.id === nodeId);
+    const sourceShotId = typeof node?.data?.sourceShotId === "string"
+      ? node.data.sourceShotId
+      : nodeId.startsWith("video-node-")
+        ? nodeId.replace("video-node-", "")
+        : nodeId.startsWith("image-node-")
+          ? nodeId.replace("image-node-", "")
+          : nodeId;
+    const shot = storyboardShots.find((item) => item.id === sourceShotId);
+    if (!shot) {
+      toast.message("当前节点不是镜头链路节点，已只插入 @资产名");
+      return;
+    }
+    setStoryboardShots((prev) => prev.map((item) => item.id === sourceShotId
+      ? { ...item, semanticAssetIds: Array.from(new Set([...item.semanticAssetIds, assetId])) }
+      : item
+    ));
+    addManualStudioConnection(assetId, shot.id, "引用", "binding");
+    toast.success(`已绑定资产「${asset.name}」到镜头「${shot.title || shot.index}」`);
+  }, [addManualStudioConnection, semanticAssets, storyboardShots, studioNodes]);
+
+  const handleStudioAddNode = useCallback((type: CanvasNode["type"], x: number, y: number, sourceNodeId?: string, sourceSide: "left" | "right" = "right") => {
+    const id = `studio-${type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    if (type === "generator") {
+      const selectedShotIds = studioSelectedNodeId && storyboardShots.some((shot) => shot.id === studioSelectedNodeId) ? [studioSelectedNodeId] : storyboardShots.slice(0, Math.max(1, Math.min(batchLimit, storyboardShots.length))).map((shot) => shot.id);
+      createGeneratorGroupNode(selectedShotIds, "image");
+      return;
+    }
+    const sourceNode = sourceNodeId ? studioNodes.find((node) => node.id === sourceNodeId) : undefined;
+    const sourceShotId = sourceNodeId && storyboardShots.some((shot) => shot.id === sourceNodeId) ? sourceNodeId : undefined;
+    const sourceShot = sourceShotId ? storyboardShots.find((shot) => shot.id === sourceShotId) : undefined;
+    const newNode: CanvasNode = {
+      id,
+      type,
+      title: type === "script" ? "新剧本" : type === "assets" ? "未命名资产" : type === "shot" ? "新镜头" : type === "image" ? "新分镜图" : type === "video" ? "新视频" : type === "director" ? "3D导演台" : "新节点",
+      x,
+      y,
+      width: type === "script" || type === "director" ? 420 : 360,
+      height: type === "script" || type === "director" ? 300 : type === "assets" ? 440 : 420,
+      status: "empty",
+      data: sourceShotId && (type === "video" || type === "image") ? {
+        sourceShotId,
+        ...(type === "video" ? {
+          videoPrompt: sourceShot?.videoPrompt || sourceShot?.imagePrompt || "",
+          imagePrompt: sourceShot?.imagePrompt || "",
+          scene: sourceShot?.scene || "",
+        } : {
+          imagePrompt: sourceShot?.imagePrompt || "",
+          scene: sourceShot?.scene || "",
+        }),
+      } : {},
+    };
+    setStudioNodes((prev) => [...prev, newNode]);
+    if (sourceNodeId) {
+      const from = sourceSide === "left" ? id : sourceNodeId;
+      const to = sourceSide === "left" ? sourceNodeId : id;
+      const label = sourceNode?.type === "assets" || type === "assets" ? "引用" : type === "image" ? "生成分镜" : type === "video" ? "生成视频" : "引用";
+      const edgeType: CanvasConnection["type"] = sourceNode?.type === "assets" || type === "assets" ? "binding" : "sequence";
+      addManualStudioConnection(from, to, label, edgeType);
+    }
+    setStudioSelectedNodeId(id);
+
+    // 同步到对应工作流状态
+    if (type === "shot") {
+      const newShot = createShot(storyboardShots.length + 1, { id: newNode.id });
+      setStoryboardShots((prev) => [...prev, newShot]);
+      setActiveShotId(id);
+      setWorkflowMode("storyboardVideo");
+      setWorkflowView("step");
+    } else if (type === "assets") {
+      const newAsset: SemanticAsset = {
+        id,
+        kind: "character",
+        name: "未命名资产",
+        summary: "",
+        lockPrompt: "",
+        negativePrompt: "",
+        linkedAssetIds: [],
+        createdAt: new Date().toISOString(),
+      };
+      setSemanticAssets((prev) => [...prev, newAsset]);
+      setActiveSemanticAssetId(id);
+      setWorkflowMode("assets");
+      setWorkflowView("step");
+    } else if (type === "script") {
+      setWorkflowMode("script");
+      setWorkflowView("step");
+    } else if (type === "director") {
+      setWorkflowMode("storyboardVideo");
+      setWorkflowView("step");
+    }
+  }, [addManualStudioConnection, batchLimit, createGeneratorGroupNode, storyboardShots, studioNodes, studioSelectedNodeId]);
+
+  const handleDropAssetToCanvas = useCallback((asset: CanvasAssetDropPayload, x: number, y: number) => {
+    const kind = (["character", "scene", "prop", "style"].includes(String(asset.kind)) ? asset.kind : "character") as SemanticAssetKind;
+    const existingNode = studioNodes.find((node) => node.id === asset.id);
+    if (existingNode) {
+      setStudioNodes((prev) => prev.map((node) => node.id === asset.id ? { ...node, x, y } : node));
+      setStudioSelectedNodeId(asset.id);
+      if (existingNode.type === "assets") {
+        setActiveSemanticAssetId(asset.id);
+        setWorkflowMode("assets");
+        setWorkflowView("step");
+      }
+      toast.success(`已把「${asset.name || existingNode.title}」放到画布`);
+      return;
+    }
+
+    const id = semanticAssets.some((item) => item.id === asset.id) ? asset.id : `asset-node-${asset.id}-${Date.now()}`;
+    const title = asset.name || "未命名资产";
+    const linkedAssetIds = asset.source === "library" ? [asset.id] : [];
+    const newSemanticAsset: SemanticAsset = {
+      id,
+      kind,
+      name: title,
+      summary: asset.summary || "",
+      lockPrompt: asset.summary || "",
+      negativePrompt: "",
+      linkedAssetIds,
+      createdAt: new Date().toISOString(),
+      imageUrl: asset.image || undefined,
+      imageAssetId: asset.source === "library" ? asset.id : undefined,
+    };
+    const newNode: CanvasNode = {
+      id,
+      type: "assets",
+      title,
+      x,
+      y,
+      width: 360,
+      height: 440,
+      status: asset.image || asset.summary ? "draft" : "empty",
+      data: {
+        kind,
+        category: kind,
+        summary: asset.summary || "",
+        content: asset.summary || "",
+        thumbnail: asset.image || "",
+        image_url: asset.image || "",
+        url: asset.image || "",
+        linkedAssetId: asset.id,
+        source: asset.source || "library",
+      },
+    };
+    setSemanticAssets((prev) => prev.some((item) => item.id === id) ? prev : [...prev, newSemanticAsset]);
+    setStudioNodes((prev) => [...prev, newNode]);
+    setStudioSelectedNodeId(id);
+    setActiveSemanticAssetId(id);
+    setWorkflowMode("assets");
+    setWorkflowView("step");
+    toast.success(`已从资产库创建「${title}」节点`);
+  }, [semanticAssets, studioNodes]);
+
+  const handleStudioNodeMove = useCallback((id: string, x: number, y: number) => {
+    setStudioNodes((prev) => prev.map((n) => (n.id === id ? { ...n, x, y } : n)));
+  }, []);
+
+  const handleStudioNodeDelete = useCallback((id: string) => {
+    setStudioNodes((prev) => prev.filter((n) => n.id !== id));
+    setStudioConnections((prev) => prev.filter((connection) => connection.from !== id && connection.to !== id));
+    if (id === "script-main") {
+      setWorkflowScript("");
+      setWorkflowStoryboardImage("");
+      setWorkflowStoryboardVideo("");
+    }
+    setStoryboardShots((prev) => prev.filter((s) => s.id !== id));
+    setSemanticAssets((prev) => prev.filter((a) => a.id !== id));
+    setDirectorBlocks((prev) => id === "director-main" ? [] : prev.filter((block) => block.id !== id && block.shotId !== id));
+    setGeneratorGroups((prev) => prev.filter((group) => group.id !== id).map((group) => ({ ...group, shotIds: group.shotIds.filter((shotId) => shotId !== id) })));
+    if (activeShotId === id) setActiveShotId(undefined);
+    if (activeSemanticAssetId === id) setActiveSemanticAssetId(undefined);
+    if (studioSelectedNodeId === id) setStudioSelectedNodeId(null);
+  }, [activeShotId, activeSemanticAssetId, studioSelectedNodeId]);
+
+  const handleUpdateNodeContent = useCallback((nodeId: string, updates: { title?: string; body?: string }) => {
+    if (updates.title !== undefined) {
+      setStudioNodes((prev) => prev.map((node) => node.id === nodeId ? { ...node, title: updates.title || "未命名节点" } : node));
+      setStoryboardShots((prev) => prev.map((shot) => shot.id === nodeId ? { ...shot, title: updates.title || shot.title } : shot));
+      setSemanticAssets((prev) => prev.map((asset) => asset.id === nodeId ? { ...asset, name: updates.title || asset.name } : asset));
+      setGeneratorGroups((prev) => prev.map((group) => group.id === nodeId ? { ...group, title: updates.title || group.title } : group));
+    }
+
+    if (updates.body !== undefined) {
+      const body = updates.body;
+      if (nodeId === "script-main") {
+        setWorkflowScript(body);
+        return;
+      }
+      const currentNode = studioNodes.find((node) => node.id === nodeId);
+      const targetShotId = typeof currentNode?.data?.sourceShotId === "string"
+        ? currentNode.data.sourceShotId
+        : nodeId.startsWith("video-node-") ? nodeId.replace("video-node-", "") : nodeId;
+      setStoryboardShots((prev) => prev.map((shot) => {
+        if (shot.id !== targetShotId) return shot;
+        if (currentNode?.type === "video" || shot.videoAssetIds?.length || shot.videoPrompt) return { ...shot, videoPrompt: body };
+        return { ...shot, imagePrompt: body, scene: shot.scene || body.slice(0, 60) };
+      }));
+      setStudioNodes((prev) => prev.map((node) => node.id === nodeId ? { ...node, data: { ...node.data, [node.type === "video" ? "videoPrompt" : "imagePrompt"]: body } } : node));
+      setSemanticAssets((prev) => prev.map((asset) => asset.id === nodeId ? { ...asset, lockPrompt: body, summary: asset.summary || body.slice(0, 80) } : asset));
+      setGeneratorGroups((prev) => prev.map((group) => group.id === nodeId ? { ...group, promptPreview: body } : group));
+    }
+  }, [studioNodes]);
+
+  const handleComposerSettingsChange = useCallback((nodeId: string, updates: Partial<{
+    imageAspect: string;
+    imageResolution: string;
+    assetPreset: "character" | "characterTurnaround" | "asset";
+    videoModel: string;
+    videoAspect: string;
+    videoResolution: string;
+    videoDuration: number;
+    videoAudio: boolean;
+  }>) => {
+    if (updates.imageAspect !== undefined) setImageAspect(updates.imageAspect);
+    if (updates.imageResolution !== undefined) setImageResolution(updates.imageResolution);
+    if (updates.assetPreset !== undefined) setAssetPreset(updates.assetPreset);
+    const nextVideoModel = updates.videoModel || videoModel;
+    if (updates.videoModel !== undefined) setVideoModel(updates.videoModel);
+    if (updates.videoAspect !== undefined) setVideoAspect(updates.videoAspect);
+    const normalizedVideoResolution = updates.videoResolution !== undefined || updates.videoModel !== undefined
+      ? normalizeVideoResolution(updates.videoResolution || videoResolution, nextVideoModel)
+      : undefined;
+    if (normalizedVideoResolution !== undefined) setVideoResolution(normalizedVideoResolution);
+    const normalizedVideoDuration = updates.videoDuration !== undefined
+      ? normalizeVideoDuration(updates.videoDuration, updates.videoModel || videoModel)
+      : updates.videoModel !== undefined
+        ? normalizeVideoDuration(videoDuration, updates.videoModel)
+        : undefined;
+    if (normalizedVideoDuration !== undefined) setVideoDuration(normalizedVideoDuration);
+    if (updates.videoAudio !== undefined) setVideoAudio(updates.videoAudio);
+
+    const currentNode = studioNodes.find((node) => node.id === nodeId);
+    const targetShotId = typeof currentNode?.data?.sourceShotId === "string"
+      ? currentNode.data.sourceShotId
+      : nodeId.startsWith("image-node-") ? nodeId.replace("image-node-", "") : nodeId.startsWith("video-node-") ? nodeId.replace("video-node-", "") : nodeId;
+    setStoryboardShots((prev) => prev.map((shot) => {
+      if (shot.id !== targetShotId) return shot;
+      const patch: Partial<StoryboardShot> = {};
+      if (updates.imageAspect !== undefined) patch.aspectRatio = updates.imageAspect;
+      if (updates.videoAspect !== undefined) patch.aspectRatio = updates.videoAspect;
+      if (normalizedVideoDuration !== undefined) patch.duration = normalizedVideoDuration;
+      return Object.keys(patch).length ? { ...shot, ...patch } : shot;
+    }));
+
+    setGeneratorGroups((prev) => prev.map((group) => group.id === nodeId ? {
+      ...group,
+      modelLabel: updates.videoModel || group.modelLabel,
+      aspectRatio: updates.videoAspect || updates.imageAspect || group.aspectRatio,
+      resolution: normalizedVideoResolution || updates.imageResolution || group.resolution,
+      duration: normalizedVideoDuration ?? group.duration,
+    } : group));
+  }, [studioNodes]);
+
+  const handleComposerGenerate = useCallback(async (nodeId: string) => {
+    const group = generatorGroups.find((item) => item.id === nodeId);
+    if (group) {
+      const queue = storyboardShots.filter((shot) => group.shotIds.includes(shot.id));
+      if (!queue.length) return toast.error("生成器组里没有镜头，先把镜头连入生成器组");
+      if (group.mode === "video") await batchGenerateVideosForShots(queue);
+      else await batchGenerateImagesForShots(queue);
+      return;
+    }
+
+    const node = studioNodes.find((item) => item.id === nodeId);
+    const sourceShotId = typeof node?.data?.sourceShotId === "string"
+      ? node.data.sourceShotId
+      : nodeId.startsWith("image-node-") ? nodeId.replace("image-node-", "") : nodeId.startsWith("video-node-") ? nodeId.replace("video-node-", "") : nodeId;
+    const shot = storyboardShots.find((item) => item.id === sourceShotId);
+    if (shot) {
+      if (node?.type === "video" || (shot.videoPrompt && !shot.imagePrompt)) {
+        await generateShotVideo(shot);
+      } else {
+        await generateShotImage(shot);
+      }
+      return;
+    }
+
+    const asset = semanticAssets.find((item) => item.id === nodeId);
+    if (asset) {
+      await generateSemanticAssetImage(asset, asset.kind === "character" && assetPreset === "characterTurnaround" ? "character-turnaround" : "default");
+      return;
+    }
+
+    if (nodeId.startsWith("asset-")) {
+      await generateNodeAssetImage(nodeId);
+      return;
+    }
+
+    toast.message("当前节点没有可直接生成的任务");
+  }, [batchGenerateImagesForShots, batchGenerateVideosForShots, generateNodeAssetImage, generateSemanticAssetImage, generateShotImage, generateShotVideo, generatorGroups, semanticAssets, storyboardShots, studioNodes]);
+
+  const handleStudioNodeDoubleClick = useCallback((node: CanvasNode) => {
+    setStudioSelectedNodeId(node.id);
+    if (node.type === "script") {
+      setWorkflowMode("script");
+      setWorkflowView("step");
+      setActiveShotId(undefined);
+      setActiveSemanticAssetId(undefined);
+    } else if (node.type === "assets") {
+      const asset = semanticAssets.find((a) => a.id === node.id);
+      setActiveSemanticAssetId(asset?.id);
+      setWorkflowMode("assets");
+      setWorkflowView("step");
+      setActiveShotId(undefined);
+    } else if (node.type === "shot" || node.type === "image" || node.type === "video") {
+      const sourceShotId = node.id.startsWith("image-node-") ? node.id.replace("image-node-", "") : node.id.startsWith("video-node-") ? node.id.replace("video-node-", "") : node.id;
+      const shot = storyboardShots.find((s) => s.id === sourceShotId);
+      setActiveShotId(shot?.id);
+      setWorkflowMode("storyboardVideo");
+      setWorkflowView("step");
+      setActiveSemanticAssetId(undefined);
+    } else if (node.type === "generator") {
+      const group = generatorGroups.find((item) => item.id === node.id);
+      setWorkflowMode(group?.mode === "video" ? "storyboardVideo" : "storyboardImage");
+      setWorkflowView("step");
+      setActiveShotId(undefined);
+      setActiveSemanticAssetId(undefined);
+    } else if (node.type === "director") {
+      setWorkflowMode("storyboardVideo");
+      setWorkflowView("step");
+      setActiveShotId(undefined);
+      setActiveSemanticAssetId(undefined);
+    }
+  }, [generatorGroups, semanticAssets, storyboardShots]);
+
+  // ===== 右侧面板内容 =====
+  const rightPanelContent = (() => {
+    if (workflowView === "videoSegments") {
+      return <VideoSegmentGenerator
+        shots={storyboardShots}
+        assets={assets}
+        onGenerateSegment={async (segment) => {
+          for (let i = 0; i < segment.shots.length; i++) {
+            const shot = segment.shots[i];
+            const prevShot = i > 0 ? segment.shots[i - 1] : undefined;
+            if (prevShot?.lastFrameAssetId) {
+              updateShot(shot.id, {
+                firstFrameAssetId: prevShot.lastFrameAssetId,
+                referenceAssetIds: Array.from(new Set([...(shot.referenceAssetIds || []), prevShot.lastFrameAssetId])),
+              });
+            }
+            await generateShotVideo(shot, "batch");
+          }
+          toast.success(`段落 ${segment.index} 视频生成已提交`);
+        }}
+      />;
+    }
+
+    if (selectedGeneratorGroup) {
+      const kind = selectedGeneratorGroup.mode === "video" ? "videos" : "images";
+      const missingPromptCount = selectedGeneratorQueue.filter((shot) =>
+        selectedGeneratorGroup.mode === "video"
+          ? !(shot.videoPrompt || shot.imagePrompt).trim()
+          : !(shot.imagePrompt || shot.scene || shot.title).trim(),
+      ).length;
+      return (
+        <div className="space-y-4">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-text-primary">{selectedGeneratorGroup.title}</h3>
+              <p className="mt-1 text-[11px] text-text-tertiary">
+                {selectedGeneratorGroup.mode === "video" ? "Seedance 视频批量队列" : "Seedream 分镜图批量队列"}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setStudioSelectedNodeId(null)}
+              className="rounded p-1 text-text-tertiary hover:bg-surface-card hover:text-text-secondary"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <BatchPreflightPanel
+            kind={kind}
+            queue={selectedGeneratorQueue}
+            assets={assets}
+            directorBlocks={directorBlocks}
+          />
+
+          <div className="rounded-2xl border border-surface-border bg-surface-card/70 p-3">
+            <div className="mb-2 flex items-center justify-between text-[11px]">
+              <span className="font-semibold text-text-primary">生成参数</span>
+              <span className="rounded-full bg-white px-2 py-0.5 text-text-tertiary">{selectedGeneratorQueue.length} 镜</span>
+            </div>
+            <div className="space-y-1 text-[11px] leading-relaxed text-text-secondary">
+              <div>模型：{selectedGeneratorGroup.modelLabel || (selectedGeneratorGroup.mode === "video" ? videoModel : "Seedream")}</div>
+              <div>比例：{selectedGeneratorGroup.aspectRatio || (selectedGeneratorGroup.mode === "video" ? videoAspect : imageAspect)}</div>
+              <div>分辨率：{selectedGeneratorGroup.resolution || (selectedGeneratorGroup.mode === "video" ? videoResolution : imageResolution)}</div>
+              {selectedGeneratorGroup.mode === "video" && <div>时长：{selectedGeneratorGroup.duration || videoDuration}s</div>}
+            </div>
+          </div>
+
+          <div className="max-h-72 space-y-2 overflow-auto pr-1">
+            {selectedGeneratorQueue.map((shot) => (
+              <button
+                key={shot.id}
+                type="button"
+                onClick={() => {
+                  setActiveShotId(shot.id);
+                  setWorkflowMode(selectedGeneratorGroup.mode === "video" ? "storyboardVideo" : "storyboardImage");
+                }}
+                className="w-full rounded-xl border border-surface-border bg-surface-base p-3 text-left transition-colors hover:border-brand/40 hover:bg-brand/5"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-[11px] font-semibold text-text-primary">{shot.index}. {shot.title || shot.scene || "未命名镜头"}</span>
+                  <span className="shrink-0 rounded-full bg-surface-card px-2 py-0.5 text-[10px] text-text-tertiary">{shot.duration}s</span>
+                </div>
+                <p className="mt-1 line-clamp-2 text-[10px] leading-relaxed text-text-tertiary">
+                  {selectedGeneratorGroup.mode === "video" ? (shot.videoPrompt || shot.imagePrompt || "缺视频提示词") : (shot.imagePrompt || shot.scene || "缺分镜图提示词")}
+                </p>
+              </button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setGeneratorGroups((prev) => prev.map((group) => group.id === selectedGeneratorGroup.id ? { ...group, shotIds: storyboardShots.map((shot) => shot.id) } : group))}
+              className="rounded-lg border border-surface-border py-2 text-[11px] font-medium text-text-secondary hover:bg-surface-card"
+            >
+              全部镜头入组
+            </button>
+            <button
+              type="button"
+              onClick={() => setGeneratorGroups((prev) => prev.filter((group) => group.id !== selectedGeneratorGroup.id))}
+              className="rounded-lg border border-red-100 py-2 text-[11px] font-medium text-red-500 hover:bg-red-50"
+            >
+              删除生成器组
+            </button>
+          </div>
+
+          <button
+            type="button"
+            disabled={Boolean(batchGenerating) || !selectedGeneratorQueue.length || missingPromptCount > 0}
+            onClick={() => selectedGeneratorGroup.mode === "video" ? batchGenerateVideosForShots(selectedGeneratorQueue) : batchGenerateImagesForShots(selectedGeneratorQueue)}
+            className="flex w-full items-center justify-center gap-1 rounded-xl bg-slate-950 py-2.5 text-[12px] font-semibold text-white hover:bg-brand disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {batchGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            {missingPromptCount > 0 ? `先补齐 ${missingPromptCount} 个 Prompt` : selectedGeneratorGroup.mode === "video" ? "提交本组视频生成" : "提交本组分镜图生成"}
+          </button>
+
+          {batchGenerating && (
+            <button
+              type="button"
+              onClick={pauseBatchGeneration}
+              className="w-full rounded-xl border border-amber-200 bg-amber-50 py-2 text-[11px] font-medium text-amber-700 hover:bg-amber-100"
+            >
+              暂停批量提交
+            </button>
+          )}
+        </div>
+      );
+    }
+
+    if (workflowView === "step" && activeShotId) {
+      const shot = storyboardShots.find((s) => s.id === activeShotId);
+      return (
+        <div className="space-y-4">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-text-primary">{shot?.title || "未命名镜头"}</h3>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveShotId(undefined);
+                setWorkflowView("overview");
+              }}
+              className="rounded p-1 text-text-tertiary hover:bg-surface-card hover:text-text-secondary"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-[10px] font-medium text-text-tertiary">标题</label>
+              <input
+                type="text"
+                value={shot?.title || ""}
+                onChange={(e) => updateShot(activeShotId, { title: e.target.value })}
+                className="w-full rounded-lg border border-surface-border bg-surface-base px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-brand"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-medium text-text-tertiary">场景</label>
+              <input
+                type="text"
+                value={shot?.scene || ""}
+                onChange={(e) => updateShot(activeShotId, { scene: e.target.value })}
+                className="w-full rounded-lg border border-surface-border bg-surface-base px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-brand"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-medium text-text-tertiary">分镜图提示词</label>
+              <textarea
+                value={shot?.imagePrompt || ""}
+                onChange={(e) => updateShot(activeShotId, { imagePrompt: e.target.value })}
+                placeholder="输入分镜图提示词..."
+                className="h-24 w-full rounded-lg border border-surface-border bg-surface-base p-2 text-[11px] leading-relaxed text-text-secondary outline-none focus:border-brand"
+              />
+              <button
+                type="button"
+                onClick={() => shot && generateShotImage(shot)}
+                disabled={isGenerating}
+                className="flex w-full items-center justify-center gap-1 rounded-lg bg-brand/10 py-2 text-[11px] font-medium text-brand hover:bg-brand/20 disabled:opacity-50"
+              >
+                {isGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                生成分镜图
+              </button>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-medium text-text-tertiary">视频提示词</label>
+              <textarea
+                value={shot?.videoPrompt || ""}
+                onChange={(e) => updateShot(activeShotId, { videoPrompt: e.target.value })}
+                placeholder="输入视频提示词..."
+                className="h-24 w-full rounded-lg border border-surface-border bg-surface-base p-2 text-[11px] leading-relaxed text-text-secondary outline-none focus:border-brand"
+              />
+              <button
+                type="button"
+                onClick={() => shot && generateShotVideo(shot)}
+                disabled={isGenerating}
+                className="flex w-full items-center justify-center gap-1 rounded-lg bg-rose-50 py-2 text-[11px] font-medium text-rose-600 hover:bg-rose-100 disabled:opacity-50"
+              >
+                {isGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+                生成视频
+              </button>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-medium text-text-tertiary">导演台</label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (shot) ensureDirectorBlockForShot(shot);
+                    setShowDirectorPanel(true);
+                  }}
+                  className="text-[10px] text-brand hover:text-brand-hover"
+                >
+                  {findDirectorBlockForShot(directorBlocks, activeShotId) ? "已启用" : "启用"}
+                </button>
+              </div>
+              {findDirectorBlockForShot(directorBlocks, activeShotId) && (
+                <div className="rounded-lg bg-surface-card p-2 text-[10px] text-text-secondary">导演台已启用，空间约束已注入生成流程</div>
+              )}
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (!shot) return;
+                  const newShot: StoryboardShot = {
+                    ...shot,
+                    id: `shot-${Date.now()}`,
+                    title: `${shot.title || "镜头"} (复制)`,
+                    imageAssetIds: [],
+                    videoAssetIds: [],
+                  };
+                  setStoryboardShots((prev) => [...prev, newShot]);
+                }}
+                className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-surface-border py-2 text-[11px] text-text-secondary hover:bg-surface-card"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                复制
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setStoryboardShots((prev) => prev.filter((s) => s.id !== activeShotId));
+                  setActiveShotId(undefined);
+                  setWorkflowView("overview");
+                }}
+                className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-red-100 py-2 text-[11px] text-red-500 hover:bg-red-50"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                删除
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (workflowView === "step" && workflowMode === "script") {
+      return (
+        <div className="space-y-3">
+          <h3 className="mb-3 text-sm font-semibold text-text-primary">剧本编辑器</h3>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <label className="text-[10px] font-medium text-text-tertiary">本集剧情/小说片段</label>
+              <textarea
+                value={scriptSourceExcerpt}
+                onChange={(e) => setScriptSourceExcerpt(e.target.value)}
+                placeholder="粘贴本集剧情、小说片段或简短创意..."
+                className="h-24 w-full rounded-lg border border-surface-border bg-surface-base p-2 text-[11px] leading-relaxed text-text-secondary outline-none focus:border-brand"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-medium text-text-tertiary">改编要求</label>
+              <input
+                type="text"
+                value={scriptAdaptationInstruction}
+                onChange={(e) => setScriptAdaptationInstruction(e.target.value)}
+                placeholder="例：第一幕要强钩子，对白更口语化..."
+                className="w-full rounded-lg border border-surface-border bg-surface-base px-2.5 py-1.5 text-xs text-text-secondary outline-none focus:border-brand"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => generateWorkflow("novel")}
+                disabled={Boolean(workflowGenerating)}
+                className="flex items-center justify-center gap-1 rounded-lg bg-brand/10 py-2 text-[11px] font-medium text-brand hover:bg-brand/20 disabled:opacity-50"
+              >
+                {workflowGenerating === "novel" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <BookOpen className="h-3.5 w-3.5" />}
+                一键写小说
+              </button>
+              <button
+                type="button"
+                onClick={() => generateWorkflow("script")}
+                disabled={Boolean(workflowGenerating)}
+                className="flex items-center justify-center gap-1 rounded-lg bg-brand/10 py-2 text-[11px] font-medium text-brand hover:bg-brand/20 disabled:opacity-50"
+              >
+                {workflowGenerating === "script" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                一键生成剧本
+              </button>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-medium text-text-tertiary">修改意见</label>
+              <textarea
+                value={scriptRevisionInstruction}
+                onChange={(e) => setScriptRevisionInstruction(e.target.value)}
+                placeholder="输入要如何修改剧本..."
+                className="h-20 w-full rounded-lg border border-surface-border bg-surface-base p-2 text-[11px] leading-relaxed text-text-secondary outline-none focus:border-brand"
+              />
+              <button
+                type="button"
+                onClick={() => reviseScriptWithInstruction()}
+                disabled={scriptRevising}
+                className="flex w-full items-center justify-center gap-1 rounded-lg bg-surface-card py-2 text-[11px] font-medium text-text-primary hover:bg-surface-border disabled:opacity-50"
+              >
+                {scriptRevising ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+                一键改剧本
+              </button>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-medium text-text-tertiary">剧本正文</label>
+              <textarea
+                value={workflowScript}
+                onChange={(e) => setWorkflowScript(e.target.value)}
+                placeholder="剧本内容..."
+                className="h-48 w-full rounded-lg border border-surface-border bg-surface-base p-2 text-[11px] leading-relaxed text-text-secondary outline-none focus:border-brand"
+              />
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (workflowView === "step" && workflowMode === "assets") {
+      return (
+        <div className="space-y-3">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-text-primary">资产编辑器</h3>
+            <button
+              type="button"
+              onClick={() => generateWorkflow("assets")}
+              disabled={Boolean(workflowGenerating)}
+              className="flex items-center gap-1 rounded-lg bg-brand/10 px-3 py-1.5 text-[11px] font-medium text-brand hover:bg-brand/20 disabled:opacity-50"
+            >
+              {workflowGenerating === "assets" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+              一键生成资产
+            </button>
+          </div>
+          <div className="space-y-3">
+            {semanticAssets.length === 0 && (
+              <div className="rounded-lg border border-dashed border-surface-border p-4 text-center text-xs text-text-tertiary">
+                暂无资产，点击上方按钮或画布 + 号添加
+              </div>
+            )}
+            {semanticAssets.map((asset) => (
+              <div
+                key={asset.id}
+                onClick={() => setActiveSemanticAssetId(asset.id)}
+                className={cn(
+                  "cursor-pointer rounded-lg border p-3 transition-colors",
+                  activeSemanticAssetId === asset.id
+                    ? "border-brand/40 bg-brand/5"
+                    : "border-surface-border bg-surface-base hover:bg-surface-card"
+                )}
+              >
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="rounded bg-surface-card px-1.5 py-0.5 text-[10px] text-text-tertiary">
+                      {asset.kind === "character" ? "角色" : asset.kind === "scene" ? "场景" : asset.kind === "prop" ? "道具" : "风格"}
+                    </span>
+                    <span className="text-xs font-medium text-text-primary">{asset.name}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      generateSemanticAssetImage(asset);
+                    }}
+                    disabled={assetImageGeneratingId === asset.id}
+                    className="flex items-center gap-1 rounded-md bg-brand/10 px-2 py-1 text-[10px] font-medium text-brand hover:bg-brand/20 disabled:opacity-50"
+                  >
+                    {assetImageGeneratingId === asset.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <ImageIcon className="h-3 w-3" />}
+                    生成图
+                  </button>
+                </div>
+                <textarea
+                  value={asset.lockPrompt}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setSemanticAssets((prev) => prev.map((a) => (a.id === asset.id ? { ...a, lockPrompt: value } : a)));
+                  }}
+                  placeholder="lock_prompt..."
+                  className="h-16 w-full rounded border border-surface-border bg-surface-elevated p-1.5 text-[10px] text-text-secondary outline-none focus:border-brand"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    if (workflowView === "step" && (workflowMode === "storyboardVideo" || workflowMode === "storyboardImage")) {
+      const isImage = workflowMode === "storyboardImage";
+      const raw = isImage ? workflowStoryboardImage : workflowStoryboardVideo;
+      const setRaw = (v: string) => isImage ? setWorkflowStoryboardImage(v) : setWorkflowStoryboardVideo(v);
+      return (
+        <div className="space-y-3">
+          <h3 className="mb-3 text-sm font-semibold text-text-primary">{isImage ? "分镜图提示词" : "分镜剧本/视频提示词"}</h3>
+          <div className="space-y-3">
+            <textarea
+              value={raw}
+              onChange={(e) => setRaw(e.target.value)}
+              placeholder={isImage ? "输入分镜图提示词..." : "输入分镜剧本或 Seedance 视频提示词..."}
+              className="h-56 w-full rounded-lg border border-surface-border bg-surface-base p-2 text-[11px] leading-relaxed text-text-secondary outline-none focus:border-brand"
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => generateWorkflow(workflowMode)}
+                disabled={Boolean(workflowGenerating)}
+                className="flex items-center justify-center gap-1 rounded-lg bg-brand/10 py-2 text-[11px] font-medium text-brand hover:bg-brand/20 disabled:opacity-50"
+              >
+                {workflowGenerating === workflowMode ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                一键生成
+              </button>
+              <button
+                type="button"
+                onClick={() => mergeStoryboardShots(raw, isImage ? "storyboard" : "seedance")}
+                disabled={!raw.trim()}
+                className="flex items-center justify-center gap-1 rounded-lg bg-surface-card py-2 text-[11px] font-medium text-text-primary hover:bg-surface-border disabled:opacity-50"
+              >
+                <Layers className="h-3.5 w-3.5" />
+                解析为镜头卡
+              </button>
+            </div>
+            <div className="rounded-lg bg-surface-card p-3 text-[10px] text-text-secondary">
+              <p className="mb-1 font-medium text-text-primary">快捷操作</p>
+              <ul className="list-inside list-disc space-y-0.5">
+                <li>双击画布镜头节点可编辑单个镜头</li>
+                <li>点击左侧步骤可切换到剧本/资产</li>
+                <li>生成后点击解析，系统会自动创建镜头卡</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex flex-col items-center justify-center py-8 text-center">
+        <p className="text-sm text-text-secondary">总览</p>
+        <p className="mt-1 text-xs text-text-tertiary">点击左侧步骤或画布节点开始编辑</p>
+      </div>
+    );
+  })();
+
+  // ===== 保存项目 =====
+  const saveProject = useCallback(() => {
+    if (!activeProject) return;
+    setProjects((prev) =>
+      prev.map((p) =>
+        p.id === activeProject.id
+          ? {
+              ...p,
+              updatedAt: new Date().toISOString(),
+              idea: workflowIdea,
+              novel: workflowNovel,
+              scriptSourceExcerpt,
+              scriptAdaptationInstruction,
+              script: workflowScript,
+              assetsText: workflowAssets,
+              storyboardVideo: workflowStoryboardVideo,
+              storyboardImage: workflowStoryboardImage,
+              assets,
+              selectedAssetIds,
+              imagePrompt,
+              videoPrompt,
+              storyboardShots,
+              activeShotId,
+              generationJobs,
+              semanticAssets,
+              directorBlocks,
+              generatorGroups,
+            }
+          : p
+      )
+    );
+    toast.success("已保存项目");
+  }, [activeProject, workflowIdea, workflowNovel, scriptSourceExcerpt, scriptAdaptationInstruction, workflowScript, workflowAssets, workflowStoryboardVideo, workflowStoryboardImage, assets, selectedAssetIds, imagePrompt, videoPrompt, storyboardShots, activeShotId, generationJobs, semanticAssets, directorBlocks, generatorGroups, setProjects]);
 
   return (
     <div className="fixed inset-0 z-50">
       <ManjuStudioLayout
         projectName={activeProject?.title || t("seedreamBeta.projects.newProject")}
-        activeStep={workflowMode}
+        activeStep={workflowView === "videoSegments" ? "storyboardVideo" : workflowMode}
+        nodeAssets={assets.map((asset) => ({
+          id: asset.id,
+          publicId: asset.publicId,
+          name: asset.name,
+          category: asset.role || asset.type,
+          kind: asset.role || asset.type,
+          summary: asset.source || asset.mimeType || "",
+          url: asset.url,
+          image_url: asset.url,
+        }))}
+        mentionAssets={semanticAssets.map((asset) => ({
+          id: asset.id,
+          name: asset.name,
+          kind: asset.kind,
+          category: asset.kind,
+          summary: asset.summary || asset.lockPrompt,
+          imageUrl: asset.imageUrl,
+          image_url: asset.imageUrl,
+        }))}
         onStepChange={(step) => {
+          setStudioSelectedNodeId(null);
           if (step === "overview") {
             setWorkflowView("overview");
+            setActiveShotId(undefined);
+            setActiveSemanticAssetId(undefined);
           } else if (step === "videoSegments") {
             setWorkflowView("videoSegments");
           } else {
             setWorkflowMode(step as WorkflowMode);
             setWorkflowView("step");
+            if (step === "assets" && semanticAssets.length) setActiveSemanticAssetId(semanticAssets[0].id);
+            if ((step === "storyboardVideo" || step === "storyboardImage") && storyboardShots.length) setActiveShotId(storyboardShots[0].id);
           }
         }}
         onGenerate={(step) => {
           setWorkflowMode(step);
           setWorkflowView("step");
-          if (step === "storyboardImage" || step === "storyboardVideo") {
-            generateWorkflow(step);
-          }
+          generateWorkflow(step);
         }}
         generating={workflowGenerating}
-        nodes={storyboardShots.map((shot, i) => ({
-          id: shot.id,
-          type: shot.videoAssetIds && shot.videoAssetIds.length > 0 ? "video" : shot.imageAssetIds && shot.imageAssetIds.length > 0 ? "image" : "shot",
-          title: `${i + 1}. ${shot.title || shot.scene || "未命名镜头"}`,
-          x: (i % 4) * 280 + 40,
-          y: Math.floor(i / 4) * 200 + 40,
-          width: 240,
-          height: 160,
-          status: shot.videoAssetIds && shot.videoAssetIds.length > 0 ? "done" : shot.imageAssetIds && shot.imageAssetIds.length > 0 ? "draft" : "empty",
-          data: shot,
-        }))}
-        connections={storyboardShots.slice(0, -1).map((shot, i) => ({
-          id: `conn-${i}`,
-          from: shot.id,
-          to: storyboardShots[i + 1].id,
-        }))}
-        onNodeDoubleClick={(node) => {
-          const shot = storyboardShots.find((s) => s.id === node.id);
-          if (shot) {
-            setActiveShotId(shot.id);
-            setWorkflowView("step");
-          }
-        }}
+        nodes={studioNodes}
+        connections={studioConnections}
+        onNodeMove={handleStudioNodeMove}
+        onNodeSelect={setStudioSelectedNodeId}
+        onNodeDoubleClick={handleStudioNodeDoubleClick}
+        onUpdateNodeContent={handleUpdateNodeContent}
+        onAddNode={handleStudioAddNode}
+        onDeleteNode={handleStudioNodeDelete}
         onGenerateAsset={(assetId) => {
-          const asset = semanticAssets.find((a) => a.id === assetId);
-          if (asset) generateSemanticAssetImage(asset);
+          generateNodeAssetImage(assetId);
         }}
+        onNodeGenerate={handleComposerGenerate}
+        composerSettings={selectedComposerSettings}
+        composerOptions={{
+          imageAspects: IMAGE_ASPECTS,
+          imageResolutions: IMAGE_RESOLUTIONS,
+          videoModels: VIDEO_MODELS,
+          videoAspects: VIDEO_ASPECTS,
+          videoResolutions: getVideoResolutionOptions(selectedComposerSettings.videoModel),
+          videoDurations: getVideoDurationOptions(selectedComposerSettings.videoModel),
+        }}
+        onComposerSettingsChange={handleComposerSettingsChange}
+        onBindAssetMention={handleBindAssetMention}
+        composerGenerating={isGenerating || videoGenerating || Boolean(batchGenerating) || Boolean(assetImageGeneratingId)}
         onAutoLayout={autoLayoutNodes}
-        onSave={() => toast.info("开发中")}
-        onExport={() => toast.info("开发中")}
-        onImport={() => toast.info("开发中")}
-        onNewProject={() => toast.info("开发中")}
-        onOpenProject={() => toast.info("开发中")}
-        onSettings={() => toast.info("开发中")}
+        onBatchGenerate={(nodeIds, mode) => createGeneratorGroupNode(nodeIds, mode)}
+        onConnectNodes={handleCanvasConnectNodes}
+        onDropAsset={handleDropAssetToCanvas}
+        onSave={saveProject}
+        onExport={() => {
+          const data = {
+            project: activeProject,
+            nodes: studioNodes,
+            connections: studioConnections,
+            generatorGroups,
+            exportedAt: new Date().toISOString(),
+          };
+          const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `${activeProject?.title || "seedream-project"}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+          toast.success("已导出项目");
+        }}
+        onImportScriptFile={handleImportScriptAndShotsFile}
+        onImport={() => {
+          const input = document.createElement("input");
+          input.type = "file";
+          input.accept = ".json";
+          input.onchange = async (e) => {
+            const file = (e.target as HTMLInputElement).files?.[0];
+            if (!file) return;
+            try {
+              const text = await file.text();
+              const data = JSON.parse(text);
+              if (data.project) {
+                setProjects((prev) => [data.project, ...prev]);
+                toast.success("已导入项目");
+              }
+            } catch {
+              toast.error("导入失败，请检查文件格式");
+            }
+          };
+          input.click();
+        }}
+        onNewProject={() => {
+          const project = createProject(t("seedreamBeta.projects.newProject"));
+          toast.success(`已创建项目：${project.title}`);
+        }}
+        onOpenProject={() => toast.info("请使用顶部保存面板切换项目")}
+        onSettings={() => toast.info("设置开发中")}
+        rightPanel={rightPanelContent}
       >
-        {workflowView === "videoSegments" ? (
-          <div className="h-full overflow-y-auto p-4">
-            <VideoSegmentGenerator
-              shots={storyboardShots}
-              assets={assets}
-              onGenerateSegment={async (segment) => {
-                // 逐镜头生成视频，使用尾帧衔接
-                for (let i = 0; i < segment.shots.length; i++) {
-                  const shot = segment.shots[i];
-                  const prevShot = i > 0 ? segment.shots[i - 1] : undefined;
-                  
-                  // 如果有前一段的尾帧，设置为当前镜头的首帧参考
-                  if (prevShot?.lastFrameAssetId) {
-                    updateShot(shot.id, {
-                      firstFrameAssetId: prevShot.lastFrameAssetId,
-                      referenceAssetIds: Array.from(new Set([...(shot.referenceAssetIds || []), prevShot.lastFrameAssetId])),
-                    });
-                  }
-                  
-                  await generateShotVideo(shot, "batch");
-                }
-                toast.success(`段落 ${segment.index} 视频生成已提交`);
-              }}
-            />
-          </div>
-        ) : workflowView === "step" && activeShotId ? (
-          <div className="h-full overflow-y-auto p-4">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-text-primary">
-                {storyboardShots.find((s) => s.id === activeShotId)?.title || "未命名镜头"}
-              </h3>
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveShotId(undefined);
-                  setWorkflowView("overview");
-                }}
-                className="rounded p-1 text-text-tertiary hover:bg-surface-card hover:text-text-secondary"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            {/* Shot 编辑表单 */}
-            <div className="space-y-4">
-              {/* 基础信息 */}
-              <div className="space-y-2">
-                <label className="text-[10px] font-medium text-text-tertiary">标题</label>
-                <input
-                  type="text"
-                  value={storyboardShots.find((s) => s.id === activeShotId)?.title || ""}
-                  onChange={(e) => {
-                    const title = e.target.value;
-                    setStoryboardShots((prev) =>
-                      prev.map((s) => (s.id === activeShotId ? { ...s, title } : s))
-                    );
-                  }}
-                  className="w-full rounded-lg border border-surface-border bg-surface-base px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-brand"
-                />
-              </div>
-
-              {/* 场景 */}
-              <div className="space-y-2">
-                <label className="text-[10px] font-medium text-text-tertiary">场景</label>
-                <input
-                  type="text"
-                  value={storyboardShots.find((s) => s.id === activeShotId)?.scene || ""}
-                  onChange={(e) => {
-                    const scene = e.target.value;
-                    setStoryboardShots((prev) =>
-                      prev.map((s) => (s.id === activeShotId ? { ...s, scene } : s))
-                    );
-                  }}
-                  className="w-full rounded-lg border border-surface-border bg-surface-base px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-brand"
-                />
-              </div>
-
-              {/* 分镜图提示词 */}
-              <div className="space-y-2">
-                <label className="text-[10px] font-medium text-text-tertiary">分镜图提示词</label>
-                <textarea
-                  value={storyboardShots.find((s) => s.id === activeShotId)?.imagePrompt || ""}
-                  onChange={(e) => {
-                    const imagePrompt = e.target.value;
-                    setStoryboardShots((prev) =>
-                      prev.map((s) => (s.id === activeShotId ? { ...s, imagePrompt } : s))
-                    );
-                  }}
-                  placeholder="输入分镜图提示词..."
-                  className="h-32 w-full rounded-lg border border-surface-border bg-surface-base p-2 text-[11px] leading-relaxed text-text-secondary outline-none focus:border-brand"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const shot = storyboardShots.find((s) => s.id === activeShotId);
-                    if (shot) generateShotImage(shot);
-                  }}
-                  disabled={isGenerating}
-                  className="flex w-full items-center justify-center gap-1 rounded-lg bg-brand/10 py-2 text-[11px] font-medium text-brand hover:bg-brand/20 disabled:opacity-50"
-                >
-                  {isGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                  生成分镜图
-                </button>
-              </div>
-
-              {/* 视频提示词 */}
-              <div className="space-y-2">
-                <label className="text-[10px] font-medium text-text-tertiary">视频提示词</label>
-                <textarea
-                  value={storyboardShots.find((s) => s.id === activeShotId)?.videoPrompt || ""}
-                  onChange={(e) => {
-                    const videoPrompt = e.target.value;
-                    setStoryboardShots((prev) =>
-                      prev.map((s) => (s.id === activeShotId ? { ...s, videoPrompt } : s))
-                    );
-                  }}
-                  placeholder="输入视频提示词..."
-                  className="h-32 w-full rounded-lg border border-surface-border bg-surface-base p-2 text-[11px] leading-relaxed text-text-secondary outline-none focus:border-brand"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const shot = storyboardShots.find((s) => s.id === activeShotId);
-                    if (shot) generateShotVideo(shot);
-                  }}
-                  disabled={isGenerating}
-                  className="flex w-full items-center justify-center gap-1 rounded-lg bg-rose-50 py-2 text-[11px] font-medium text-rose-600 hover:bg-rose-100 disabled:opacity-50"
-                >
-                  {isGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
-                  生成视频
-                </button>
-              </div>
-
-              {/* 导演台 */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-[10px] font-medium text-text-tertiary">导演台</label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const shot = storyboardShots.find((s) => s.id === activeShotId);
-                      if (shot) ensureDirectorBlockForShot(shot);
-                      setShowDirectorPanel(true);
-                    }}
-                    className="text-[10px] text-brand hover:text-brand-hover"
-                  >
-                    {findDirectorBlockForShot(directorBlocks, activeShotId) ? "已启用" : "启用"}
-                  </button>
-                </div>
-                {findDirectorBlockForShot(directorBlocks, activeShotId) && (
-                  <div className="rounded-lg bg-surface-card p-2 text-[10px] text-text-secondary">
-                    导演台已启用，空间约束已注入生成流程
-                  </div>
-                )}
-              </div>
-
-              {/* 操作按钮 */}
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const shot = storyboardShots.find((s) => s.id === activeShotId);
-                    if (!shot) return;
-                    const newShot: StoryboardShot = {
-                      ...shot,
-                      id: `shot-${Date.now()}`,
-                      title: `${shot.title || "镜头"} (复制)`,
-                      imageAssetIds: [],
-                      videoAssetIds: [],
-                    };
-                    setStoryboardShots((prev) => [...prev, newShot]);
-                  }}
-                  className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-surface-border py-2 text-[11px] text-text-secondary hover:bg-surface-card"
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                  复制
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStoryboardShots((prev) => prev.filter((s) => s.id !== activeShotId));
-                    setActiveShotId(undefined);
-                    setWorkflowView("overview");
-                  }}
-                  className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-red-100 py-2 text-[11px] text-red-500 hover:bg-red-50"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  删除
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : workflowView === "overview" ? (
-          <div className="h-full overflow-y-auto p-4">
-            <div className="text-center py-8">
-              <p className="text-sm text-text-secondary">总览视图</p>
-              <p className="text-xs text-text-tertiary mt-1">点击画布节点编辑镜头</p>
-            </div>
-          </div>
-        ) : null}
+        <FloatingToolbar
+          onAddNode={handleStudioAddNode}
+          onHelp={() => toast.info("画布操作：滚轮缩放、拖拽移动、双击节点编辑")}
+        />
       </ManjuStudioLayout>
     </div>
   );

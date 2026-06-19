@@ -24,6 +24,8 @@ interface CreditExhaustedModalProps {
   betaPhaseInfo?: {
     phase: string;
     phase_name: string;
+    balance?: number;
+    balance_display?: number;
     next_phase?: {
       phase: string;
       phase_name: string;
@@ -111,9 +113,8 @@ export default function CreditExhaustedModal({
             <div className="space-y-4">
               <div className="rounded-xl bg-amber-400/10 border border-amber-400/20 p-4">
                 <p className="text-sm text-amber-300 leading-relaxed">
-                  您的 <span className="font-semibold">{tierName}</span> 积分额度已耗尽。
-                  若需解锁下一阶段的测试额度，请提供过去使用中模型最致命的
-                  <span className="font-semibold"> 3 次逻辑错误（Bad Cases）</span>。
+                  您的 <span className="font-semibold">{betaPhaseInfo ? `内测 ${betaPhaseInfo.phase_name}` : tierName}</span> Credit 额度已耗尽。
+                  {betaPhaseInfo?.phase === "phase_1" ? "若需解锁深水区，请提交 1 个有效 Bug 报告或逻辑错误案例。" : betaPhaseInfo?.phase === "phase_2" ? "若需解锁终局额度，请提交 2 个包含详尽上下文的致命逻辑断点及人类专家级标准答案。" : "若需继续测试，请提交高质量 Bad Case 等待审核。"}
                 </p>
               </div>
 
@@ -121,8 +122,8 @@ export default function CreditExhaustedModal({
                 <p className="font-medium text-text-primary">请指明：</p>
                 <ul className="space-y-1.5 list-disc list-inside">
                   <li>模型的错误点（具体哪一步推理断裂）</li>
-                  <li>您认为的"人类专家级正确推演"</li>
-                  <li>敷衍填写将失去测试资格</li>
+                  <li>完整上下文、复现步骤和您认为的“人类专家级正确推演”</li>
+                  <li>{betaPhaseInfo?.phase === "phase_1" ? "Phase 1 至少 1 个有效案例" : betaPhaseInfo?.phase === "phase_2" ? "Phase 2 需要 2 个致命逻辑断点" : "敷衍填写将失去测试资格"}</li>
                 </ul>
               </div>
 

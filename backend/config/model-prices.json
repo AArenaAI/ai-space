@@ -234,6 +234,217 @@
     "source_url": "https://www.volcengine.com/docs/82379/1544106?lang=zh#02affcb8"
   },
   {
+    "provider": "volcengine",
+    "model": "doubao-seedance-2.0-mini",
+    "pricing_unit": "token_1k",
+    "source_currency": "CNY",
+    "source_unit": "per_1m_tokens",
+    "video_pricing_rules": [
+      {
+        "resolution": "480p",
+        "input_contains_video": false,
+        "source_output_price": 37.0,
+        "pricing_basis": "seedance_2_fast_480p_720p_no_input_video"
+      },
+      {
+        "resolution": "720p",
+        "input_contains_video": false,
+        "source_output_price": 37.0,
+        "pricing_basis": "seedance_2_fast_480p_720p_no_input_video"
+      },
+      {
+        "resolution": "480p",
+        "input_contains_video": true,
+        "source_output_price": 22.0,
+        "pricing_basis": "seedance_2_fast_480p_720p_with_input_video"
+      },
+      {
+        "resolution": "720p",
+        "input_contains_video": true,
+        "source_output_price": 22.0,
+        "pricing_basis": "seedance_2_fast_480p_720p_with_input_video"
+      }
+    ],
+    "pricing_basis": "seedance_2_0_mini_mapped_to_fast_until_official_price_configured; official_completion_tokens_x_token_unit_price_success_only; 1080p_not_supported_for_fast",
+    "source_url": "https://www.volcengine.com/docs/82379/1544106?lang=zh#02affcb8"
+  },
+  {
+    "provider": "volcengine",
+    "model": "doubao-seedance-1.5-pro",
+    "pricing_unit": "token_1k",
+    "source_currency": "CNY",
+    "source_unit": "per_1m_tokens",
+    "video_pricing_rules": [
+      {
+        "resolution": "480p",
+        "input_contains_video": false,
+        "source_output_price": 46.0,
+        "pricing_basis": "seedance_2_480p_720p_no_input_video"
+      },
+      {
+        "resolution": "720p",
+        "input_contains_video": false,
+        "source_output_price": 46.0,
+        "pricing_basis": "seedance_2_480p_720p_no_input_video"
+      },
+      {
+        "resolution": "1080p",
+        "input_contains_video": false,
+        "source_output_price": 51.0,
+        "pricing_basis": "seedance_2_1080p_no_input_video"
+      },
+      {
+        "resolution": "480p",
+        "input_contains_video": true,
+        "source_output_price": 28.0,
+        "pricing_basis": "seedance_2_480p_720p_with_input_video"
+      },
+      {
+        "resolution": "720p",
+        "input_contains_video": true,
+        "source_output_price": 28.0,
+        "pricing_basis": "seedance_2_480p_720p_with_input_video"
+      },
+      {
+        "resolution": "1080p",
+        "input_contains_video": true,
+        "source_output_price": 31.0,
+        "pricing_basis": "seedance_2_1080p_with_input_video"
+      }
+    ],
+    "pricing_basis": "seedance_1_5_pro_mapped_to_standard_until_official_price_configured; official_completion_tokens_x_token_unit_price_success_only",
+    "source_url": "https://www.volcengine.com/docs/82379/1544106?lang=zh#02affcb8"
+  },
+  {
+    "provider": "volcengine",
+    "model": "doubao-seedance-1.0-pro",
+    "pricing_unit": "token_1k",
+    "source_currency": "CNY",
+    "source_unit": "per_1m_tokens",
+    "video_pricing_rules": [
+      {
+        "resolution": "480p",
+        "input_contains_video": false,
+        "source_output_price": 46.0,
+        "pricing_basis": "seedance_2_480p_720p_no_input_video"
+      },
+      {
+        "resolution": "720p",
+        "input_contains_video": false,
+        "source_output_price": 46.0,
+        "pricing_basis": "seedance_2_480p_720p_no_input_video"
+      },
+      {
+        "resolution": "1080p",
+        "input_contains_video": false,
+        "source_output_price": 51.0,
+        "pricing_basis": "seedance_2_1080p_no_input_video"
+      },
+      {
+        "resolution": "480p",
+        "input_contains_video": true,
+        "source_output_price": 28.0,
+        "pricing_basis": "seedance_2_480p_720p_with_input_video"
+      },
+      {
+        "resolution": "720p",
+        "input_contains_video": true,
+        "source_output_price": 28.0,
+        "pricing_basis": "seedance_2_480p_720p_with_input_video"
+      },
+      {
+        "resolution": "1080p",
+        "input_contains_video": true,
+        "source_output_price": 31.0,
+        "pricing_basis": "seedance_2_1080p_with_input_video"
+      }
+    ],
+    "pricing_basis": "seedance_1_0_pro_mapped_to_standard_until_official_price_configured; official_completion_tokens_x_token_unit_price_success_only",
+    "source_url": "https://www.volcengine.com/docs/82379/1544106?lang=zh#02affcb8"
+  },
+  {
+    "provider": "volcengine",
+    "model": "doubao-seedance-1.0-pro-fast",
+    "pricing_unit": "token_1k",
+    "source_currency": "CNY",
+    "source_unit": "per_1m_tokens",
+    "video_pricing_rules": [
+      {
+        "resolution": "480p",
+        "input_contains_video": false,
+        "source_output_price": 37.0,
+        "pricing_basis": "seedance_2_fast_480p_720p_no_input_video"
+      },
+      {
+        "resolution": "720p",
+        "input_contains_video": false,
+        "source_output_price": 37.0,
+        "pricing_basis": "seedance_2_fast_480p_720p_no_input_video"
+      },
+      {
+        "resolution": "480p",
+        "input_contains_video": true,
+        "source_output_price": 22.0,
+        "pricing_basis": "seedance_2_fast_480p_720p_with_input_video"
+      },
+      {
+        "resolution": "720p",
+        "input_contains_video": true,
+        "source_output_price": 22.0,
+        "pricing_basis": "seedance_2_fast_480p_720p_with_input_video"
+      }
+    ],
+    "pricing_basis": "seedance_1_0_pro_fast_mapped_to_fast_until_official_price_configured; official_completion_tokens_x_token_unit_price_success_only; 1080p_not_supported_for_fast",
+    "source_url": "https://www.volcengine.com/docs/82379/1544106?lang=zh#02affcb8"
+  },
+  {
+    "provider": "volcengine",
+    "model": "doubao-seedance-2-0-pro-260128",
+    "pricing_unit": "token_1k",
+    "source_currency": "CNY",
+    "source_unit": "per_1m_tokens",
+    "video_pricing_rules": [
+      {
+        "resolution": "480p",
+        "input_contains_video": false,
+        "source_output_price": 46.0,
+        "pricing_basis": "seedance_2_480p_720p_no_input_video"
+      },
+      {
+        "resolution": "720p",
+        "input_contains_video": false,
+        "source_output_price": 46.0,
+        "pricing_basis": "seedance_2_480p_720p_no_input_video"
+      },
+      {
+        "resolution": "1080p",
+        "input_contains_video": false,
+        "source_output_price": 51.0,
+        "pricing_basis": "seedance_2_1080p_no_input_video"
+      },
+      {
+        "resolution": "480p",
+        "input_contains_video": true,
+        "source_output_price": 28.0,
+        "pricing_basis": "seedance_2_480p_720p_with_input_video"
+      },
+      {
+        "resolution": "720p",
+        "input_contains_video": true,
+        "source_output_price": 28.0,
+        "pricing_basis": "seedance_2_480p_720p_with_input_video"
+      },
+      {
+        "resolution": "1080p",
+        "input_contains_video": true,
+        "source_output_price": 31.0,
+        "pricing_basis": "seedance_2_1080p_with_input_video"
+      }
+    ],
+    "pricing_basis": "legacy_seedance_2_0_pro_alias; official_completion_tokens_x_token_unit_price_success_only",
+    "source_url": "https://www.volcengine.com/docs/82379/1544106?lang=zh#02affcb8"
+  },
+  {
     "provider": "google-cloud-translate-v3",
     "model": "general/nmt",
     "pricing_unit": "character_1m",

@@ -202,8 +202,61 @@ func TestBuildAINotebookArtifactDraftKeepsFlashcardTitleWhenAIReturnsSummaryTitl
 	if draft.Title == "摘要" || strings.Contains(draft.Title, "摘要") {
 		t.Fatalf("flashcards should not use a generic AI summary title, got %q", draft.Title)
 	}
-	if !strings.Contains(draft.Title, "闪卡") {
-		t.Fatalf("flashcards should keep a flashcard-specific title, got %q", draft.Title)
+	if !strings.Contains(draft.Title, "闪卡") || !strings.Contains(draft.Title, "技能系统") {
+		t.Fatalf("flashcards should use a content-derived flashcard title, got %q", draft.Title)
+	}
+	if strings.Contains(draft.Title, "测试") {
+		t.Fatalf("flashcards should not use notebook title in generated title, got %q", draft.Title)
+	}
+}
+
+func TestBuildAINotebookArtifactDraftDerivesGenericAITitlesFromContent(t *testing.T) {
+	files := []models.File{
+		{ID: 1, Filename: "产品方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "白标能力", Content: "白标能力支持 Logo 替换、域名配置和品牌色定制。"},
+	}
+	cases := []struct {
+		generationType string
+		aiTitle        string
+		content        string
+		want           string
+	}{
+		{"summary", "摘要", `{"sections":[{"heading":"白标能力","body":"支持 Logo 替换。"}]}`, "白标能力"},
+		{"table", "数据表格", `{"rows":[{"module":"白标能力","capability":"Logo 替换","status":"成熟","implementation":"品牌定制","value":"企业部署","source":"[1]"}]}`, "白标能力"},
+		{"mindmap", "思维导图", `{"nodes":[{"id":"root","label":"白标能力","summary":"品牌定制"},{"id":"branch-1","label":"Logo 替换","summary":"支持品牌标识替换"},{"id":"branch-1-1","label":"上传入口","summary":"上传企业 Logo"},{"id":"branch-1-2","label":"应用范围","summary":"登录页和导航栏"},{"id":"branch-2","label":"域名配置","summary":"支持企业域名"},{"id":"branch-2-1","label":"绑定流程","summary":"配置域名解析"},{"id":"branch-2-2","label":"访问入口","summary":"统一企业入口"},{"id":"branch-3","label":"品牌色系","summary":"支持主题色"},{"id":"branch-3-1","label":"主色设置","summary":"调整品牌主色"},{"id":"branch-3-2","label":"组件适配","summary":"按钮和面板适配"},{"id":"branch-4","label":"企业部署","summary":"适配私有化"},{"id":"branch-4-1","label":"环境配置","summary":"部署参数"},{"id":"branch-5","label":"运营配置","summary":"后台统一管理"},{"id":"branch-5-1","label":"权限控制","summary":"控制管理入口"}],"edges":[{"from":"root","to":"branch-1"},{"from":"branch-1","to":"branch-1-1"},{"from":"branch-1","to":"branch-1-2"},{"from":"root","to":"branch-2"},{"from":"branch-2","to":"branch-2-1"},{"from":"branch-2","to":"branch-2-2"},{"from":"root","to":"branch-3"},{"from":"branch-3","to":"branch-3-1"},{"from":"branch-3","to":"branch-3-2"},{"from":"root","to":"branch-4"},{"from":"branch-4","to":"branch-4-1"},{"from":"root","to":"branch-5"},{"from":"branch-5","to":"branch-5-1"}]}`, "白标能力"},
+		{"quiz", "测验", `{"questions":[{"question":"白标能力支持什么？","options":[{"id":"A","text":"Logo 替换","reason":"资料提到 Logo 替换。"},{"id":"B","text":"无","reason":"不符合资料。"},{"id":"C","text":"无","reason":"不符合资料。"},{"id":"D","text":"无","reason":"不符合资料。"}],"correct_option_id":"A","hint":"看品牌配置","explanation":"资料提到 Logo 替换。"}]}`, "白标能力"},
+		{"report:briefing-document", "Report", `{"format_id":"briefing-document","format_title":"白标能力分析","executive_summary":"支持品牌定制。","sections":[{"number":"1","heading":"Logo 替换","body":"支持。"}]}`, "白标能力分析"},
+	}
+	for _, tc := range cases {
+		ai := &fakeNotebookAIService{response: `{"title":"` + tc.aiTitle + `","subtitle":"AI 副标题","content":` + tc.content + `}`}
+		draft, err := buildAINotebookArtifactDraft(context.Background(), ai, nil, tc.generationType, "测试 1", files, []uint{1}, "zh-CN")
+		if err != nil {
+			t.Fatalf("%s AI draft should succeed: %v", tc.generationType, err)
+		}
+		if !strings.Contains(draft.Title, tc.want) {
+			t.Fatalf("%s title should derive from content, got %q want contains %q", tc.generationType, draft.Title, tc.want)
+		}
+		if strings.Contains(draft.Title, "测试") {
+			t.Fatalf("%s title should not use notebook title, got %q", tc.generationType, draft.Title)
+		}
+	}
+}
+
+func TestBuildAINotebookArtifactDraftInfographicFallsBackToHTMLWithoutImageService(t *testing.T) {
+	files := []models.File{
+		{ID: 1, Filename: "产品方案.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "产品定位", Content: "AI Space 是知识工作台。"},
+	}
+	ai := &fakeNotebookAIService{response: `{"title":"信息图","subtitle":"AI 副标题","content":{"orientation":"landscape","style":"professional","detail_level":"standard","prompt":"视觉概览","image_prompt":"A professional infographic about AI Space","color_scheme":{"primary":"#111827"}}}`}
+
+	draft, err := buildAINotebookArtifactDraft(context.Background(), ai, nil, "infographic", "知识库", files, []uint{1}, "zh-CN")
+	if err != nil {
+		t.Fatalf("infographic should fall back to HTML when AI returns legacy image_prompt content: %v", err)
+	}
+	encoded := string(draft.Content)
+	if !strings.Contains(encoded, "html") || !strings.Contains(encoded, "nb-infographic") {
+		t.Fatalf("infographic fallback should save renderable HTML, got %s", encoded)
+	}
+	if strings.Contains(encoded, "image_url") {
+		t.Fatalf("new infographic fallback should not depend on image_url, got %s", encoded)
 	}
 }
 

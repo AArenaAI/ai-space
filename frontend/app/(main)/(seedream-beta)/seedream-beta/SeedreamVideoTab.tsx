@@ -1,7 +1,7 @@
 "use client";
 
 import { Loader2, Play } from "lucide-react";
-import { VIDEO_ASPECTS, VIDEO_DURATIONS, VIDEO_MODELS, VIDEO_RESOLUTIONS } from "./constants";
+import { getVideoDurationOptions, getVideoResolutionOptions, VIDEO_ASPECTS, VIDEO_MODELS } from "./constants";
 import { FieldLabel, PillButton } from "./components";
 
 type Props = {
@@ -79,7 +79,7 @@ export default function SeedreamVideoTab({
         <div>
           <FieldLabel>{t("seedreamBeta.resolution")}</FieldLabel>
           <div className="flex flex-wrap gap-2">
-            {VIDEO_RESOLUTIONS.map((item) => (
+            {getVideoResolutionOptions(videoModel).map((item) => (
               <PillButton key={item} active={videoResolution === item} onClick={() => setVideoResolution(item)}>{item}</PillButton>
             ))}
           </div>
@@ -87,8 +87,8 @@ export default function SeedreamVideoTab({
         <div>
           <FieldLabel>{t("seedreamBeta.duration")}</FieldLabel>
           <div className="flex flex-wrap gap-2">
-            {VIDEO_DURATIONS.map((item) => (
-              <PillButton key={item} active={videoDuration === item} onClick={() => setVideoDuration(item)}>{item}s</PillButton>
+            {getVideoDurationOptions(videoModel).map((item) => (
+              <PillButton key={item} active={videoDuration === item} onClick={() => setVideoDuration(item)}>{item === -1 ? "自动" : `${item}s`}</PillButton>
             ))}
           </div>
         </div>

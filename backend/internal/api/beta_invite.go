@@ -18,9 +18,9 @@ import (
 
 // BetaInviteHandler 处理内测邀请与申请
 type BetaInviteHandler struct {
-	db            *gorm.DB
-	cfg           *config.Config
-	emailService  *services.EmailService
+	db           *gorm.DB
+	cfg          *config.Config
+	emailService *services.EmailService
 }
 
 // NewBetaInviteHandler 创建 BetaInviteHandler
@@ -56,7 +56,7 @@ func (h *BetaInviteHandler) GenerateInvites(c *gin.Context) {
 
 	basic := req.Basic
 	if basic == 0 {
-		basic = 50
+		basic = NewBetaConfigHandler(h.db).GetConfigInt(models.BetaConfigPhase1Credits, 5000)
 	}
 
 	var codes []string
@@ -263,20 +263,20 @@ func (h *BetaInviteHandler) ReviewApplication(c *gin.Context) {
 	if req.Status == "approved" && req.InviteCode != "" {
 		var invite models.BetaInvite
 		if err := h.db.Where("code = ? AND status = ?", req.InviteCode, "unused").First(&invite).Error; err == nil {
-	// 发送激活码邮件（如果邮件服务已配置）
-	if h.emailService != nil && h.emailService.IsEnabled() && app.Email != "" {
-		frontendURL := "https://testnet.ai-space.xyz"
-		go func() {
-			if err := h.emailService.SendBetaInviteEmail(
-				app.Email,
-				app.Name,
-				req.InviteCode,
-				frontendURL,
-			); err != nil {
-				fmt.Printf("[Email] 发送激活码邮件失败: %v\n", err)
+			// 发送激活码邮件（如果邮件服务已配置）
+			if h.emailService != nil && h.emailService.IsEnabled() && app.Email != "" {
+				frontendURL := "https://testnet.ai-space.xyz"
+				go func() {
+					if err := h.emailService.SendBetaInviteEmail(
+						app.Email,
+						app.Name,
+						req.InviteCode,
+						frontendURL,
+					); err != nil {
+						fmt.Printf("[Email] 发送激活码邮件失败: %v\n", err)
+					}
+				}()
 			}
-		}()
-	}
 		}
 	}
 
@@ -380,11 +380,11 @@ func (h *BetaInviteHandler) UseInvite(c *gin.Context) {
 
 	var user models.User
 	if err := h.db.First(&user, uid).Error; err == nil {
-		user.BasicCredits += invite.CreditsBasic
-		user.AdvancedCredits += invite.CreditsAdvanced
-		user.EliteCredits += invite.CreditsElite
-		user.PlanTier = "basic"
+		// 内测 Credit 使用独立钱包，不混入会员 basic/advanced/elite，也不修改 PlanTier。
+		user.BetaBatch = invite.Batch
 		user.BetaPhase = "phase_1" // 初始阶段：试探期
+		user.BetaCreditBalance += invite.CreditsBasic
+		user.BetaCreditGrantedTotal += invite.CreditsBasic
 		user.BetaPhase1Used = false
 		user.BetaPhase2Used = false
 		user.BetaPhase3Used = false
@@ -400,21 +400,28 @@ func (h *BetaInviteHandler) UseInvite(c *gin.Context) {
 		Metadata:  fmt.Sprintf(`{"code":"%s","batch":"%s","credits_basic":%d}`, invite.Code, invite.Batch, invite.CreditsBasic),
 	})
 
+	phase2Credits := NewBetaConfigHandler(h.db).GetConfigInt(models.BetaConfigPhase2Credits, 15000)
+
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "激活成功",
-		"phase": "phase_1",
+		"success":    true,
+		"message":    "激活成功",
+		"phase":      "phase_1",
 		"phase_name": "试探期",
 		"credits_granted": map[string]int{
-			"basic":    invite.CreditsBasic,
-			"advanced": invite.CreditsAdvanced,
-			"elite":    invite.CreditsElite,
+			"beta":     invite.CreditsBasic,
+			"basic":    0,
+			"advanced": 0,
+			"elite":    0,
 		},
+		"beta_batch":                  invite.Batch,
+		"beta_credit_balance":         invite.CreditsBasic,
+		"beta_credit_balance_display": float64(invite.CreditsBasic) / 100.0,
 		"next_phase": map[string]interface{}{
-			"phase":       "phase_2",
-			"phase_name":  "深水区",
+			"phase":            "phase_2",
+			"phase_name":       "深水区",
 			"unlock_condition": "提交 1 个有效 Bad Case 并通过审核",
-			"credits":     150,
+			"credits":          float64(phase2Credits) / 100.0,
+			"fen":              phase2Credits,
 		},
 	})
 }

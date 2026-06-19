@@ -27,6 +27,9 @@ const STATUS_LABELS: Record<string, { label: string; color: string; icon: React.
 };
 
 const BATCHES = ["batch-1", "batch-2", "batch-3"];
+const DEFAULT_PHASE_1_CREDITS_FEN = 5000;
+
+const formatCredits = (fen: number) => `${(fen / 100).toLocaleString("zh-CN", { maximumFractionDigits: 2 })} Credits`;
 
 export default function BetaInvitesPage() {
   const [invites, setInvites] = useState<BetaInvite[]>([]);
@@ -39,7 +42,7 @@ export default function BetaInvitesPage() {
     count: 10,
     batch: "batch-1",
     industry: "",
-    credits_basic: 50,
+    credits_basic: DEFAULT_PHASE_1_CREDITS_FEN,
     credits_advanced: 0,
     credits_elite: 0,
   });
@@ -192,7 +195,7 @@ export default function BetaInvitesPage() {
                 <th className="px-4 py-3">邀请码</th>
                 <th className="px-4 py-3">批次</th>
                 <th className="px-4 py-3">行业</th>
-                <th className="px-4 py-3">积分</th>
+                <th className="px-4 py-3">内测 Credit</th>
                 <th className="px-4 py-3">状态</th>
                 <th className="px-4 py-3">使用者</th>
                 <th className="px-4 py-3">时间</th>
@@ -242,10 +245,11 @@ export default function BetaInvitesPage() {
                       </td>
                       <td className="px-4 py-3 text-text-secondary">{invite.industry || "—"}</td>
                       <td className="px-4 py-3">
-                        <div className="flex gap-1 text-xs">
-                          <span className="rounded bg-amber-400/10 px-1.5 py-0.5 text-amber-400">{invite.credits_basic}</span>
-                          <span className="rounded bg-orange-400/10 px-1.5 py-0.5 text-orange-400">{invite.credits_advanced}</span>
-                          <span className="rounded bg-purple-400/10 px-1.5 py-0.5 text-purple-400">{invite.credits_elite}</span>
+                        <div className="flex flex-col gap-1 text-xs">
+                          <span className="rounded bg-amber-400/10 px-1.5 py-0.5 text-amber-400 w-fit" title={`${invite.credits_basic} 分`}>{formatCredits(invite.credits_basic)}</span>
+                          {(invite.credits_advanced > 0 || invite.credits_elite > 0) && (
+                            <span className="text-[11px] text-text-tertiary">兼容字段：高级 {formatCredits(invite.credits_advanced)} / 精英 {formatCredits(invite.credits_elite)}</span>
+                          )}
                         </div>
                       </td>
                       <td className="px-4 py-3">
@@ -323,16 +327,17 @@ export default function BetaInvitesPage() {
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-text-primary">基础积分</label>
+                  <label className="text-sm font-medium text-text-primary">Phase 1 内测 Credit（分）</label>
                   <input
                     type="number"
                     value={generateForm.credits_basic}
                     onChange={(e) => setGenerateForm({ ...generateForm, credits_basic: parseInt(e.target.value) || 0 })}
                     className="w-full rounded-xl border border-surface-border bg-surface px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-brand/30"
                   />
+                  <p className="text-xs text-text-tertiary">{formatCredits(generateForm.credits_basic)}，Phase 1 默认 50 Credits = 5000 分</p>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-text-primary">高级积分</label>
+                  <label className="text-sm font-medium text-text-primary">高级兼容字段（分）</label>
                   <input
                     type="number"
                     value={generateForm.credits_advanced}
@@ -341,7 +346,7 @@ export default function BetaInvitesPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-text-primary">精英积分</label>
+                  <label className="text-sm font-medium text-text-primary">精英兼容字段（分）</label>
                   <input
                     type="number"
                     value={generateForm.credits_elite}

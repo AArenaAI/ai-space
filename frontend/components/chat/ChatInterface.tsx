@@ -8,7 +8,7 @@ import MessageList from "./MessageList";
 import MessageInput, { ReasoningConfig, type QuoteDraft } from "./MessageInput";
 import ModelSelector from "./ModelSelector";
 import ThemeToggle from "@/components/theme/ThemeToggle";
-import { Zap, X, Pencil, Bot, BookOpen, FileText } from "lucide-react";
+import { Zap, X, Pencil, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { showUserError } from "@/lib/errors";
@@ -135,7 +135,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   } = useChat(conversationId, models, skillKey, notebookId, notebookFileIds, modelSelectionOptions);
 
   const { templates } = useTemplates();
-  const { hasEnoughCredits, getTierCredits, isCreditExhausted, getBetaPhaseInfo, credits } = useCredits();
+  const { hasEnoughCredits, getTierCredits, isCreditExhausted, getBetaPhaseInfo, credits, getModelCostFen, getBetaModelBlockedMessage } = useCredits();
 
   const chatInterfaceProfile = useMemo(() => ({
     conversationId,
@@ -325,14 +325,29 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   const prevModelRef = useRef<string>("");
 
   const handleSend = async (content: string, reasoning: ReasoningConfig | undefined, search: boolean, attachments?: { filename: string; content: string; type: string; public_id?: string }[], file_ids?: string[], skipUserMessage = false) => {
-    // 积分检查：额度不足时弹出 Bad Case 提交模态框
-    if (selectedModel && !hasEnoughCredits(selectedModel.id)) {
+    const activeCompareMode = compareMode || isCompare;
+    const currentSelectedModels = activeCompareMode
+      ? normalizeCompareModelIds(
+          selectedModelsRef.current.length ? selectedModelsRef.current : (selectedModels.length ? selectedModels : compareModels),
+          models
+        )
+      : [selectedModel.id];
+
+    // 内测批次权限检查：被当前 batch 锁定的模型直接提示，不进入 Bad Case 解锁流程。
+    const blockedModelId = currentSelectedModels.find((modelId) => getBetaModelBlockedMessage(modelId));
+    if (blockedModelId) {
+      toast.error(getBetaModelBlockedMessage(blockedModelId) || "当前内测批次暂未开放该模型");
+      return;
+    }
+
+    // 积分检查：额度不足时弹出 Bad Case 提交模态框。对比模式必须校验所有将要调用的模型。
+    if (currentSelectedModels.some((modelId) => !hasEnoughCredits(modelId))) {
       setCreditExhaustedOpen(true);
       return;
     }
 
-    // 昂贵模型二次确认（Chat 1，22元/次）
-    if (selectedModel && isExpensiveModel(selectedModel.id)) {
+    // 昂贵模型二次确认（Chat 1，22 Credits/次）
+    if (currentSelectedModels.some((modelId) => isExpensiveModel(modelId))) {
       setPendingSendPayload({ content, reasoning, search, attachments, file_ids, skipUserMessage: skipUserMessage || false });
       setExpensiveModelConfirmOpen(true);
       return;
@@ -343,14 +358,9 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
       trackChatStart(selectedModel.id, selectedModel.name);
     }
 
-    const activeCompareMode = compareMode || isCompare;
     if (activeCompareMode) {
       // 对比模式 - 依次流式发送给多个模型
       setCompareTargetMessageId(undefined);
-      const currentSelectedModels = normalizeCompareModelIds(
-        selectedModelsRef.current.length ? selectedModelsRef.current : (selectedModels.length ? selectedModels : compareModels),
-        models
-      );
       selectedModelsRef.current = currentSelectedModels;
       if (currentSelectedModels.length < 2) {
         toast.error(t("chat.compareMinModels"));
@@ -537,16 +547,6 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
           )}
 
           <div className="flex items-center gap-2">
-            {notebookId && (
-              <div className="hidden items-center gap-2 rounded-full border border-brand-border bg-brand-muted px-3 py-1.5 text-xs font-medium text-brand sm:flex">
-                <BookOpen className="h-3.5 w-3.5" />
-                <span className="max-w-[180px] truncate">{notebookTitle || t("sidebar.nav.notebook")}</span>
-                <span className="inline-flex items-center gap-1 text-brand/80">
-                  <FileText className="h-3 w-3" />
-                  {notebookFileCount ?? 0}
-                </span>
-              </div>
-            )}
             <ThemeToggle />
           </div>
         </header>
@@ -833,9 +833,9 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
               sendMessage(payload.content, payload.reasoning, false, payload.search, templateId, payload.skipUserMessage, payload.attachments, payload.file_ids, templatePrefix);
             }
           }}
-          title="⚠️ 高成本模型确认"
-          description={`您正在使用 ${selectedModel?.name || selectedModel?.id}，该模型每次调用消耗 22 积分（精英档位）。当前精英积分：${credits?.elite_credits || 0}。确认继续？`}
-          confirmText="确认发送（22积分）"
+          title="⚠️ 极度深度推理确认"
+          description={`本次极度深度推理将消耗 ${((selectedModel ? getModelCostFen(selectedModel.id) : 2200) / 100).toLocaleString("zh-CN", { maximumFractionDigits: 2 })} Credits，确定执行？当前${credits?.beta_phase && credits.beta_phase !== "completed" ? "内测" : "精英"}余额：${((credits?.beta_phase && credits.beta_phase !== "completed" ? (credits?.beta_credit_balance || 0) : (credits?.elite_credits || 0)) / 100).toLocaleString("zh-CN", { maximumFractionDigits: 2 })} Credits。`}
+          confirmText={`确认执行（${((selectedModel ? getModelCostFen(selectedModel.id) : 2200) / 100).toLocaleString("zh-CN", { maximumFractionDigits: 2 })} Credits）`}
           cancelText="取消"
           variant="danger"
         />

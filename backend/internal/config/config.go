@@ -481,7 +481,7 @@ func knownModelsForProvider(provider string) []string {
 	case "moonshot":
 		return []string{"kimi-k2.5", "kimi-k2.6"}
 	case "volcengine":
-		return []string{"doubao-seedance-2-0-fast-260128", "doubao-seedance-2-0-260128"}
+		return []string{"doubao-seedance-2.0-mini", "doubao-seedance-1.5-pro", "doubao-seedance-1.0-pro", "doubao-seedance-1.0-pro-fast", "doubao-seedance-2-0-fast-260128", "doubao-seedance-2-0-260128", "doubao-seedance-2-0-pro-260128"}
 	case "google-cloud-translate-v3":
 		return []string{"general/nmt", "general/translation-llm"}
 	default:

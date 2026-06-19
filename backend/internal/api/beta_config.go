@@ -27,7 +27,7 @@ func (h *BetaConfigHandler) InitDefaultConfigs() {
 		{Key: models.BetaConfigPhase1Credits, Value: "5000", Desc: "试探期额度（单位：分，1积分=100分）"},
 		{Key: models.BetaConfigPhase2Credits, Value: "15000", Desc: "深水区额度（单位：分）"},
 		{Key: models.BetaConfigPhase3Credits, Value: "10000", Desc: "枯竭期额度（单位：分）"},
-		{Key: models.BetaConfigModelCosts, Value: `{"gpt-5.4-mini":10,"gemini-2.0-flash-exp":10,"gemini-3.5-flash":20,"gpt-5.4":100,"gpt-5.5":200,"claude-3-5-sonnet-20241022":300,"deepseek-v4-flash":100,"kimi-k2.5":100,"kimi-k2.6":100,"gpt-5.5-pro":2200,"deepseek-v4-pro":1500,"chat-1":2200,"gpt-image-2":500,"gemini-2.5-pro":500,"gemini-3.1-pro-preview":500,"gemini-3.1-flash-lite":50,"doubao-seedance-2-0-fast-260128":1000,"doubao-seedance-2-0-260128":2000}`, Desc: "模型成本（单位：分/次）"},
+		{Key: models.BetaConfigModelCosts, Value: `{"chat-1":2200,"gpt-5.5-pro":2200,"gpt-5.5":50,"kimi-k2.6":50,"kimi-k2.5":50,"deepseek-v4-pro":50,"deepseek-v4-flash":1,"gemini-3.1-flash-lite":1,"gpt-image-2":100,"gemini-2.5-pro":20,"doubao-seedance-2-0-260128":150,"doubao-seedance-2-0-fast-260128":50,"gpt-5.4-mini":1,"gemini-2.0-flash-exp":1,"gemini-3.5-flash":1,"gpt-5.4":50,"claude-3-5-sonnet-20241022":50,"gemini-3.1-pro-preview":50}`, Desc: "内测模型成本（单位：分；1 Credit=1元=100分；视频模型为每秒成本）"},
 	}
 
 	for _, cfg := range defaults {
@@ -89,18 +89,29 @@ func (h *BetaConfigHandler) GetModelCost(modelID string) int {
 // getDefaultModelCosts 默认模型成本
 func (h *BetaConfigHandler) getDefaultModelCosts() map[string]int {
 	return map[string]int{
-		"gpt-5.4-mini": 10,
-		"gemini-2.0-flash-exp": 10,
-		"gemini-3.5-flash": 20,
-		"gpt-5.4": 100,
-		"gpt-5.5": 200,
-		"claude-3-5-sonnet-20241022": 300,
-		"deepseek-v4-flash": 100,
-		"kimi-k2.5": 100,
-		"kimi-k2.6": 100,
-		"gpt-5.5-pro": 2200,
-		"deepseek-v4-pro": 1500,
-		"chat-1": 2200,
+		"chat-1":                          2200,
+		"gpt-5.5-pro":                     2200,
+		"gpt-5.5":                         50,
+		"kimi-k2.6":                       50,
+		"kimi-k2.5":                       50,
+		"deepseek-v4-pro":                 50,
+		"deepseek-v4-flash":               1,
+		"gemini-3.1-flash-lite":           1,
+		"gpt-image-2":                     100,
+		"gemini-2.5-pro":                  20,
+		"doubao-seedance-2.0-mini":        50,
+		"doubao-seedance-1.5-pro":         150,
+		"doubao-seedance-1.0-pro":         150,
+		"doubao-seedance-1.0-pro-fast":    50,
+		"doubao-seedance-2-0-260128":      150,
+		"doubao-seedance-2-0-pro-260128":  150,
+		"doubao-seedance-2-0-fast-260128": 50,
+		"gpt-5.4-mini":                    1,
+		"gemini-2.0-flash-exp":            1,
+		"gemini-3.5-flash":                1,
+		"gpt-5.4":                         50,
+		"claude-3-5-sonnet-20241022":      50,
+		"gemini-3.1-pro-preview":          50,
 	}
 }
 
@@ -232,7 +243,13 @@ func (h *BetaConfigHandler) GetPublicConfig(c *gin.Context) {
 			"phase_2": map[string]interface{}{"fen": phase2, "credits": float64(phase2) / 100.0},
 			"phase_3": map[string]interface{}{"fen": phase3, "credits": float64(phase3) / 100.0},
 		},
-		"model_costs": costsDisplay,
-		"unit":        "1 积分 = 100 分",
+		"model_costs":     costsDisplay,
+		"model_costs_fen": costs,
+		"batch_model_rules": map[string]interface{}{
+			"batch-1": map[string]interface{}{"blocked_models": []string{"gpt-image-2", "doubao-seedance-2.0-mini", "doubao-seedance-1.5-pro", "doubao-seedance-1.0-pro", "doubao-seedance-1.0-pro-fast", "doubao-seedance-2-0-260128", "doubao-seedance-2-0-pro-260128", "doubao-seedance-2-0-fast-260128"}, "message": "第一批文本逻辑专场：关闭 Image 1 与 Seedance 视频模型"},
+			"batch-2": map[string]interface{}{"blocked_models": []string{"chat-1", "gpt-5.5-pro"}, "message": "第二批图像与多模态专场：锁死 Chat 1"},
+			"batch-3": map[string]interface{}{"blocked_models": []string{}, "message": "第三批综合极限抗压：模型全开"},
+		},
+		"unit": "1 Credit = 1 元人民币 = 100 分",
 	})
 }

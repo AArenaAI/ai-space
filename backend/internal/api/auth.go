@@ -59,12 +59,12 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	var user models.User
 	var defaultWorkspace models.Workspace
 	if err := h.db.Transaction(func(tx *gorm.DB) error {
-		// 创建用户（初始化 free 套餐 + 30 基础积分）
+		// 创建用户（初始化 free 套餐 + 30 基础积分；内部单位：分，1 积分 = 100 分）
 		user = models.User{
 			Email:           req.Email,
 			Password:        req.Password,
 			Name:            req.Name,
-			BasicCredits:    30,
+			BasicCredits:    3000,
 			AdvancedCredits: 0,
 			EliteCredits:    0,
 			PlanTier:        "free",

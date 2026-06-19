@@ -1,6 +1,7 @@
 export type Tab = "workflow" | "image" | "video";
 export type WorkflowMode = "novel" | "script" | "assets" | "storyboardVideo" | "storyboardImage" | "videoSegments";
-export type WorkflowView = "overview" | "step" | "videoSegments";
+export type GeneratorGroupMode = "image" | "video";
+export type WorkflowView = "overview" | "step" | "videoSegments" | "assets" | "script";
 export type AssetKind = "image" | "video" | "file";
 export type AssetRole = "reference_image" | "first_frame" | "last_frame" | "reference_video" | "character" | "scene" | "prop" | "style";
 export type SemanticAssetKind = "character" | "scene" | "prop" | "style";
@@ -13,6 +14,12 @@ export type BatchMode = "missing" | "failed" | "all";
 export type ScriptAssistantMode = "chat" | "rewrite";
 export type AssetAssistantMode = "chat" | "rewrite";
 export type AssetKindFilter = SemanticAssetKind | "all";
+
+export type GenerationAction = {
+  action: "image.generate" | "image.edit" | "video.generate" | "video.extend" | string;
+  actionInput: string;
+  supplementary?: Record<string, unknown>;
+};
 
 export type ScriptChatMessage = {
   id: string;
@@ -43,6 +50,8 @@ export type SemanticAsset = {
   negativePrompt?: string;
   linkedAssetIds: string[];
   createdAt: string;
+  imageUrl?: string; // 已生成的资产图
+  imageAssetId?: string; // 关联的存储资产ID
 };
 
 export type VideoSegment = {
@@ -70,6 +79,7 @@ export type StoryboardShot = {
   duration: number;
   aspectRatio: string;
   status: ShotStatus;
+  errorMessage?: string;
   referenceAssetIds: string[];
   imageAssetIds: string[];
   videoAssetIds: string[];
@@ -77,6 +87,11 @@ export type StoryboardShot = {
   lastFrameAssetId?: string;
   referenceVideoAssetId?: string;
   semanticAssetIds: string[];
+  generationActions?: {
+    storyboardImage?: GenerationAction;
+    shotVideo?: GenerationAction;
+    [key: string]: GenerationAction | undefined;
+  };
 };
 
 export type GenerationJob = {
@@ -211,5 +226,19 @@ export type SeedreamProject = {
   activeShotId?: string;
   generationJobs: GenerationJob[];
   semanticAssets: SemanticAsset[];
-  directorBlocks?: DirectorBlock[]; // 导演台数据
+  directorBlocks?: DirectorBlock[];
+  generatorGroups?: GeneratorGroup[];
+};
+
+export type GeneratorGroup = {
+  id: string;
+  title: string;
+  mode: GeneratorGroupMode;
+  shotIds: string[];
+  modelLabel: string;
+  aspectRatio: string;
+  resolution?: string;
+  duration?: number;
+  promptPreview: string;
+  createdAt: string;
 };

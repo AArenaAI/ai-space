@@ -27,8 +27,10 @@ const DEFAULT_IMAGE: ChatModel[] = [
 ];
 
 const DEFAULT_VIDEO: ChatModel[] = [
-  { id: "doubao-seedance-2-0-fast-260128", name: "Seedance 2.0 Fast", provider: "Volcengine", description: "载入中...", color: "#ff6a00", capabilities: ["video"] },
-  { id: "doubao-seedance-2-0-260128", name: "Seedance 2.0", provider: "Volcengine", description: "载入中...", color: "#ff0050", capabilities: ["video"] },
+  { id: "doubao-seedance-2.0-mini", name: "Seedance 2.0 Mini", provider: "Volcengine", description: "载入中...", color: "#ff6a00", capabilities: ["video"] },
+  { id: "doubao-seedance-1.5-pro", name: "Seedance 1.5 Pro", provider: "Volcengine", description: "载入中...", color: "#ff0050", capabilities: ["video"] },
+  { id: "doubao-seedance-1.0-pro", name: "Seedance 1.0 Pro", provider: "Volcengine", description: "载入中...", color: "#fb7185", capabilities: ["video"] },
+  { id: "doubao-seedance-1.0-pro-fast", name: "Seedance 1.0 Pro Fast", provider: "Volcengine", description: "载入中...", color: "#f97316", capabilities: ["video"] },
 ];
 
 function loadCached(key: string, fallback: ChatModel[]): { models: ChatModel[]; cacheHit: boolean } {

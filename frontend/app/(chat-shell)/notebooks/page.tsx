@@ -102,8 +102,9 @@ function NotebookActionsMenu({
   align?: "left" | "right";
   variant?: "light" | "dark";
 }) {
+  const { t } = useI18n();
   const readonly = isReadonlyNotebook(notebook);
-  const iconClass = variant === "dark" ? "text-white/80 hover:bg-white/15 hover:text-white" : "text-slate-500 hover:bg-white/80 hover:text-slate-950";
+  const iconClass = variant === "dark" ? "text-text-primary/80 hover:bg-surface-card/15 hover:text-text-primary" : "text-slate-500 hover:bg-surface-card/80 hover:text-slate-950";
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
 
@@ -139,7 +140,7 @@ function NotebookActionsMenu({
 
   const menu = open && menuPosition ? createPortal(
     <div
-      className="fixed z-[9999] w-[152px] overflow-hidden rounded-xl border border-[#e5e7eb] bg-white py-1.5 shadow-[0_12px_28px_rgba(15,23,42,0.16)]"
+      className="fixed z-[9999] w-[152px] overflow-hidden rounded-xl border border-surface-border bg-surface-card py-1.5 shadow-[0_12px_28px_rgba(15,23,42,0.16)]"
       style={{ top: menuPosition.top, left: menuPosition.left }}
       onClick={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.stopPropagation()}
@@ -152,10 +153,10 @@ function NotebookActionsMenu({
               stop(event);
               onDelete();
             }}
-            className="flex h-10 w-full items-center gap-3 px-3 text-left text-[14px] font-normal text-[#111827] transition hover:bg-[#f6f7f9] disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex h-10 w-full items-center gap-3 px-3 text-left text-[14px] font-normal text-text-primary transition hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Trash2 className="h-4 w-4" />
-            删除
+            {t("common.delete")}
           </button>
           <button
             type="button"
@@ -164,10 +165,10 @@ function NotebookActionsMenu({
               stop(event);
               onRename();
             }}
-            className="flex h-10 w-full items-center gap-3 px-3 text-left text-[14px] font-normal text-[#111827] transition hover:bg-[#f6f7f9] disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex h-10 w-full items-center gap-3 px-3 text-left text-[14px] font-normal text-text-primary transition hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Pencil className="h-4 w-4" />
-            修改标题
+            {t("notebook.renameTitle")}
           </button>
           <button
             type="button"
@@ -181,10 +182,10 @@ function NotebookActionsMenu({
                 triggerPin(event);
               }
             }}
-            className="flex h-10 w-full cursor-pointer items-center gap-3 px-3 text-left text-[14px] font-normal text-[#111827] transition hover:bg-[#f6f7f9]"
+            className="flex h-10 w-full cursor-pointer items-center gap-3 px-3 text-left text-[14px] font-normal text-text-primary transition hover:bg-surface-hover"
           >
             {isPinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
-            {isPinned ? "取消置顶" : "置顶"}
+            {isPinned ? t("notebook.unpin") : t("notebook.pin")}
           </button>
     </div>,
     document.body
@@ -201,7 +202,7 @@ function NotebookActionsMenu({
           onToggleOpen();
         }}
         className={cn("flex h-8 w-8 items-center justify-center rounded-full transition", iconClass)}
-        aria-label="更多操作"
+        aria-label={t("notebook.moreActions")}
         aria-expanded={open}
       >
         <MoreHorizontal className="h-4 w-4" />
@@ -310,7 +311,7 @@ export default function NotebooksPage() {
     setPinnedIds(next);
     writePinnedNotebookIds(next);
     setOpenMenuId(null);
-    toast.success(willPin ? "已置顶" : "已取消置顶");
+    toast.success(willPin ? t("notebook.pinned") : t("notebook.unpinned"));
   };
 
   const handleRename = async (title: string) => {
@@ -325,9 +326,9 @@ export default function NotebooksPage() {
       const updated = await updateNotebook(renameTarget.id, { title: trimmed });
       setNotebooks((items) => items.map((item) => (item.id === updated.id ? { ...item, title: updated.title, updated_at: updated.updated_at } : item)));
       setRenameTarget(null);
-      toast.success("标题已修改");
+      toast.success(t("notebook.renameTitleSuccess"));
     } catch (error) {
-      showNotebookError(error, "修改标题失败");
+      showNotebookError(error, t("notebook.renameTitleFailed"));
     } finally {
       setRenaming(false);
     }
@@ -346,9 +347,9 @@ export default function NotebooksPage() {
         return next;
       });
       setDeleteTarget(null);
-      toast.success("笔记本已删除");
+      toast.success(t("notebook.deleteNotebookSuccess"));
     } catch (error) {
-      showNotebookError(error, "删除笔记本失败");
+      showNotebookError(error, t("notebook.deleteNotebookFailed"));
     } finally {
       setDeleting(false);
     }
@@ -399,7 +400,7 @@ export default function NotebooksPage() {
         className={cn(
           "group relative flex aspect-[1.62] cursor-pointer flex-col overflow-visible rounded-[20px] p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md",
           openMenuId === notebook.id ? "z-[180]" : "z-0",
-          hasImage ? "bg-slate-900 text-white" : "bg-[#eef4ff] text-slate-950"
+          hasImage ? "bg-slate-900 text-text-primary" : "bg-surface-elevated text-slate-950"
         )}
       >
         <div className="absolute inset-0 overflow-hidden rounded-[20px]">
@@ -417,15 +418,15 @@ export default function NotebooksPage() {
         </div>
         <div className="relative z-10 flex items-start justify-end gap-1">
           {pinned && (
-            <span className={cn("flex h-8 w-8 items-center justify-center rounded-full", hasImage ? "text-white/85" : "text-slate-600")}>
+            <span className={cn("flex h-8 w-8 items-center justify-center rounded-full", hasImage ? "text-text-primary/85" : "text-slate-600")}>
               <Pin className="h-4 w-4 fill-current" />
             </span>
           )}
           {renderActions(notebook, hasImage ? "dark" : "light")}
         </div>
         <div className="relative z-10 mt-auto">
-          <h3 className={cn("line-clamp-2 text-[20px] font-semibold leading-6 tracking-[-0.02em]", hasImage ? "text-white" : "text-slate-950")}>{notebook.title || t("notebook.untitled")}</h3>
-          <div className={cn("mt-3 flex items-center justify-between text-xs font-medium", hasImage ? "text-white/75" : "text-slate-500")}>
+          <h3 className={cn("line-clamp-2 text-[20px] font-semibold leading-6 tracking-[-0.02em]", hasImage ? "text-text-primary" : "text-slate-950")}>{notebook.title || t("notebook.untitled")}</h3>
+          <div className={cn("mt-3 flex items-center justify-between text-xs font-medium", hasImage ? "text-text-primary/75" : "text-slate-500")}>
             <span className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" />{formatDate(notebook.updated_at)}</span>
             <span>{t("notebook.fileCount").replace("{count}", String(notebook.file_count || 0))}</span>
           </div>
@@ -435,11 +436,11 @@ export default function NotebooksPage() {
   };
 
   const renderListHeader = () => (
-    <div className="grid grid-cols-[minmax(520px,1fr)_140px_190px_110px_48px] border-b border-[#e5e7eb] bg-white px-0 pb-3 text-[14px] font-medium leading-5 text-[#6b7280]">
-      <span>标题</span>
-      <span>来源</span>
-      <span>创建日期</span>
-      <span>角色</span>
+    <div className="grid grid-cols-[minmax(520px,1fr)_140px_190px_110px_48px] border-b border-surface-border bg-surface-card px-0 pb-3 text-[14px] font-medium leading-5 text-text-tertiary">
+      <span>{t("notebook.tableHeader.title")}</span>
+      <span>{t("notebook.tableHeader.sources")}</span>
+      <span>{t("notebook.tableHeader.created")}</span>
+      <span>{t("notebook.tableHeader.role")}</span>
       <span />
     </div>
   );
@@ -459,51 +460,51 @@ export default function NotebooksPage() {
           }
         }}
         className={cn(
-          "relative grid min-h-[58px] cursor-pointer grid-cols-[minmax(520px,1fr)_140px_190px_110px_48px] items-center border-b border-[#e5e7eb] bg-white px-0 py-3.5 transition-colors duration-100 hover:bg-[#f9fafb]",
+          "relative grid min-h-[58px] cursor-pointer grid-cols-[minmax(520px,1fr)_140px_190px_110px_48px] items-center border-b border-surface-border bg-surface-card px-0 py-3.5 transition-colors duration-100 hover:bg-surface-hover",
           openMenuId === notebook.id ? "z-[180]" : "z-0"
         )}
       >
-        <span className="flex min-w-0 items-center gap-2 pr-8 text-[14px] font-normal leading-6 text-[#111827]">
-          {pinned && <Pin className="h-4 w-4 shrink-0 fill-current text-[#6b7280]" />}
+        <span className="flex min-w-0 items-center gap-2 pr-8 text-[14px] font-normal leading-6 text-text-primary">
+          {pinned && <Pin className="h-4 w-4 shrink-0 fill-current text-text-tertiary" />}
           <span className="truncate">{notebook.title || t("notebook.untitled")}</span>
         </span>
-        <span className="text-[14px] font-normal leading-6 text-[#4b5563]">{t("notebook.fileCount").replace("{count}", String(notebook.file_count || 0))}</span>
-        <span className="text-[14px] font-normal leading-6 text-[#4b5563]">{formatFullDate(notebook.created_at || notebook.updated_at)}</span>
-        <span className="text-[14px] font-normal leading-6 text-[#4b5563]">Owner</span>
-        <span className="flex justify-end text-[#6b7280]">{renderActions(notebook)}</span>
+        <span className="text-[14px] font-normal leading-6 text-text-secondary">{t("notebook.fileCount").replace("{count}", String(notebook.file_count || 0))}</span>
+        <span className="text-[14px] font-normal leading-6 text-text-secondary">{formatFullDate(notebook.created_at || notebook.updated_at)}</span>
+        <span className="text-[14px] font-normal leading-6 text-text-secondary">Owner</span>
+        <span className="flex justify-end text-text-tertiary">{renderActions(notebook)}</span>
       </div>
     );
   };
 
   return (
-    <div className="min-h-full bg-white text-slate-950">
+    <div className="min-h-full bg-surface-card text-text-primary">
       <main className="mx-auto flex w-full max-w-[1180px] flex-col px-8 pb-12 pt-7">
         <header className="mb-8 flex flex-col gap-0">
           <div className={cn("flex flex-col gap-4 lg:flex-row lg:items-center", isSearching ? "lg:justify-end" : "lg:justify-between")}>
             {!isSearching && (
               <div className="flex items-center gap-2.5">
                 <img src={NOTEBOOK_DEFAULT_COVER_LOGO} alt="AI Space" className="h-[26px] w-[26px] shrink-0 object-contain" />
-                <span className="text-[22px] font-semibold leading-none tracking-[-0.03em] text-[#111827]">Notebook</span>
+                <span className="text-[22px] font-semibold leading-none tracking-[-0.03em] text-text-primary">Notebook</span>
               </div>
             )}
 
             <div className={cn("flex flex-wrap items-center gap-2", isSearching && "w-full")}>
               {isSearching ? (
                 <div className="relative h-10 min-w-0 flex-1 transition-all duration-200 ease-out">
-                  <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#5f6368]" />
+                  <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-text-tertiary" />
                   <input
                     ref={searchInputRef}
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
-                    placeholder="按笔记本标题搜索"
-                    className="h-10 w-full rounded-full border-2 border-[#1a73e8] bg-white pl-11 pr-10 text-[14px] font-normal text-[#202124] outline-none placeholder:text-[#5f6368]"
+                    placeholder={t("notebook.searchByTitle")}
+                    className="h-10 w-full rounded-full border-2 border-brand bg-surface-card pl-11 pr-10 text-[14px] font-normal text-text-primary outline-none placeholder:text-text-tertiary"
                   />
                   {query && (
                     <button
                       type="button"
                       onClick={() => setQuery("")}
-                      className="absolute right-3 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-[#5f6368] transition hover:bg-[#f1f3f4] hover:text-[#202124]"
-                      aria-label="清空搜索"
+                      className="absolute right-3 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-text-tertiary transition hover:bg-surface-hover hover:text-text-primary"
+                      aria-label={t("notebook.clearSearch")}
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -513,7 +514,7 @@ export default function NotebooksPage() {
                 <button
                   type="button"
                   onClick={() => setSearchOpen(true)}
-                  className="flex h-8 w-8 items-center justify-center rounded-full border border-transparent bg-[#f1f3f4] text-[#3c4043] transition hover:bg-[#e8eaed]"
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-transparent bg-surface-elevated text-text-secondary transition hover:bg-surface-hover"
                   aria-label={t("notebook.searchPlaceholder")}
                 >
                   <Search className="h-4 w-4" />
@@ -523,19 +524,19 @@ export default function NotebooksPage() {
                 <button
                   type="button"
                   onClick={closeSearch}
-                  className="h-8 shrink-0 px-2 text-[14px] font-medium text-[#1a73e8] transition hover:text-[#1558b0]"
+                  className="h-8 shrink-0 px-2 text-[14px] font-medium text-brand transition hover:text-brand/80"
                 >
-                  取消
+                  {t("common.cancel")}
                 </button>
               )}
-              <div className="flex h-8 items-center rounded-[9px] border border-[#d9dde5] bg-white p-[2px] shadow-[0_1px_1px_rgba(15,23,42,0.04)]">
+              <div className="flex h-8 items-center rounded-[9px] border border-surface-border bg-surface-card p-[2px] shadow-[0_1px_1px_rgba(15,23,42,0.04)]">
                 <button
                   type="button"
                   aria-pressed={viewMode === "grid"}
                   onClick={() => setViewMode("grid")}
                   className={cn(
-                    "inline-flex h-7 w-[52px] items-center justify-center gap-1 rounded-[7px] px-2 text-[#4b5563] transition-colors duration-150 ease-out",
-                    isGridView ? "bg-[#e8edf5] text-[#111827] shadow-[inset_0_0_0_1px_rgba(148,163,184,0.16)]" : "hover:bg-[#f6f7f9] hover:text-[#111827]"
+                    "inline-flex h-7 w-[52px] items-center justify-center gap-1 rounded-[7px] px-2 text-text-secondary transition-colors duration-150 ease-out",
+                    isGridView ? "bg-surface-hover text-text-primary shadow-[inset_0_0_0_1px_rgba(148,163,184,0.16)]" : "hover:bg-surface-hover hover:text-text-primary"
                   )}
                 >
                   <Check className={cn("h-3.5 w-3.5 stroke-[2.4] transition-opacity duration-150", isGridView ? "opacity-100" : "opacity-0")} />
@@ -546,8 +547,8 @@ export default function NotebooksPage() {
                   aria-pressed={viewMode === "list"}
                   onClick={() => setViewMode("list")}
                   className={cn(
-                    "inline-flex h-7 w-[52px] items-center justify-center gap-1 rounded-[7px] px-2 text-[#4b5563] transition-colors duration-150 ease-out",
-                    !isGridView ? "bg-[#e8edf5] text-[#111827] shadow-[inset_0_0_0_1px_rgba(148,163,184,0.16)]" : "hover:bg-[#f6f7f9] hover:text-[#111827]"
+                    "inline-flex h-7 w-[52px] items-center justify-center gap-1 rounded-[7px] px-2 text-text-secondary transition-colors duration-150 ease-out",
+                    !isGridView ? "bg-surface-hover text-text-primary shadow-[inset_0_0_0_1px_rgba(148,163,184,0.16)]" : "hover:bg-surface-hover hover:text-text-primary"
                   )}
                 >
                   <Check className={cn("h-3.5 w-3.5 stroke-[2.4] transition-opacity duration-150", !isGridView ? "opacity-100" : "opacity-0")} />
@@ -559,7 +560,7 @@ export default function NotebooksPage() {
                   <button
                     type="button"
                     onClick={() => setCreateOpen(true)}
-                    className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[8px] bg-[#111827] px-3.5 text-[13px] font-medium text-white shadow-[0_1px_2px_rgba(15,23,42,0.12)] transition hover:bg-[#1f2937]"
+                    className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[8px] bg-surface-elevated px-3.5 text-[13px] font-medium text-text-primary shadow-[0_1px_2px_rgba(15,23,42,0.12)] transition hover:bg-surface-hover"
                   >
                     <Plus className="h-3.5 w-3.5" />
                     {t("notebook.new")}
@@ -571,11 +572,11 @@ export default function NotebooksPage() {
         </header>
 
         {loading ? (
-          <div className="flex min-h-[360px] items-center justify-center rounded-2xl border border-slate-200 bg-white">
+          <div className="flex min-h-[360px] items-center justify-center rounded-2xl border border-slate-200 bg-surface-card">
             <Loader2 className="h-5 w-5 animate-spin text-slate-500" />
           </div>
         ) : filtered.length === 0 && !isSearching ? (
-          <div className="flex min-h-[360px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-white px-6 text-center">
+          <div className="flex min-h-[360px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-surface-card px-6 text-center">
             <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-3xl bg-slate-100 text-slate-600">
               <BookOpen className="h-8 w-8" />
             </div>
@@ -585,7 +586,7 @@ export default function NotebooksPage() {
               <button
                 type="button"
                 onClick={() => setCreateOpen(true)}
-                className="mt-6 inline-flex h-10 items-center gap-2 rounded-full bg-slate-950 px-4 text-sm font-medium text-white transition hover:bg-slate-800"
+                className="mt-6 inline-flex h-10 items-center gap-2 rounded-full bg-slate-950 px-4 text-sm font-medium text-text-primary transition hover:bg-slate-800"
               >
                 <Plus className="h-4 w-4" />
                 {t("notebook.new")}
@@ -593,19 +594,19 @@ export default function NotebooksPage() {
             )}
           </div>
         ) : (
-          <div className="min-h-[420px] bg-white">
-            <section className="space-y-9 bg-white">
+          <div className="min-h-[420px] bg-surface-card">
+            <section className="space-y-9 bg-surface-card">
               {pinnedNotebooks.length > 0 && (
                 <div>
-                  <div className="mb-5 flex items-center gap-2 text-[24px] font-medium tracking-[-0.025em] text-slate-950">
-                    <Pin className="h-5 w-5 fill-current text-slate-700" />
-                    <h2>已固定</h2>
+                  <div className="mb-5 flex items-center gap-2 text-[24px] font-medium tracking-[-0.025em] text-text-primary">
+                    <Pin className="h-5 w-5 fill-current text-text-secondary" />
+                    <h2>{t("notebook.fixedSection")}</h2>
                   </div>
                   {viewMode === "grid" ? (
                     <div className="grid gap-6 lg:grid-cols-3">{pinnedNotebooks.map(renderGridCard)}</div>
                   ) : (
-                    <div className="relative isolate bg-white">
-                      <div className="absolute inset-0 -z-10 bg-white" aria-hidden="true" />
+                    <div className="relative isolate bg-surface-card">
+                      <div className="absolute inset-0 -z-10 bg-surface-card" aria-hidden="true" />
                       {renderListHeader()}
                       {pinnedNotebooks.map(renderListRow)}
                     </div>
@@ -616,11 +617,11 @@ export default function NotebooksPage() {
               <div>
                 <div className="mb-5">
                   {trimmedQuery && (
-                    <div className="mb-1.5 text-[13px] font-normal text-[#5f6368]">搜索结果（{visibleCount}条）</div>
+                    <div className="mb-1.5 text-[13px] font-normal text-text-tertiary">{t("notebook.searchResults", { count: String(visibleCount) })}</div>
                   )}
                   <div className="flex items-center justify-between">
-                    <h2 className="text-[24px] font-medium tracking-[-0.025em] text-slate-950">全部</h2>
-                    {!trimmedQuery && <div className="text-sm text-slate-500">{t("notebook.count").replace("{count}", String(visibleCount))}</div>}
+                    <h2 className="text-[24px] font-medium tracking-[-0.025em] text-text-primary">{t("notebook.allSection")}</h2>
+                    {!trimmedQuery && <div className="text-sm text-text-secondary">{t("notebook.count").replace("{count}", String(visibleCount))}</div>}
                   </div>
                 </div>
                 {viewMode === "grid" ? (
@@ -629,31 +630,31 @@ export default function NotebooksPage() {
                       <button
                         type="button"
                         onClick={() => setCreateOpen(true)}
-                        className="flex aspect-[1.62] flex-col items-center justify-center rounded-[20px] border border-slate-200 bg-white text-center shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 hover:shadow-md"
+                        className="flex aspect-[1.62] flex-col items-center justify-center rounded-[20px] border border-surface-border bg-surface-card text-center shadow-sm transition hover:-translate-y-0.5 hover:border-surface-border hover:bg-surface-hover hover:shadow-md"
                       >
                         <span className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600">
                           <Plus className="h-6 w-6" />
                         </span>
-                        <span className="text-sm font-medium text-slate-700">{t("notebook.new")}</span>
+                        <span className="text-sm font-medium text-text-secondary">{t("notebook.new")}</span>
                       </button>
                     )}
                     {regularNotebooks.length === 0 && trimmedQuery ? (
-                      <div className="col-span-full flex min-h-[220px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-white px-6 text-center">
-                        <BookOpen className="mb-4 h-8 w-8 text-slate-400" />
-                        <h3 className="text-base font-medium text-slate-950">{t("notebook.emptySearchTitle")}</h3>
-                        <p className="mt-2 text-sm text-slate-500">{t("notebook.emptySearchDesc")}</p>
+                      <div className="col-span-full flex min-h-[220px] flex-col items-center justify-center rounded-2xl border border-dashed border-surface-border bg-surface-card px-6 text-center">
+                        <BookOpen className="mb-4 h-8 w-8 text-text-tertiary" />
+                        <h3 className="text-base font-medium text-text-primary">{t("notebook.emptySearchTitle")}</h3>
+                        <p className="mt-2 text-sm text-text-secondary">{t("notebook.emptySearchDesc")}</p>
                       </div>
                     ) : regularNotebooks.map(renderGridCard)}
                   </div>
                 ) : (
-                  <div className="relative isolate bg-white">
-                    <div className="absolute inset-0 -z-10 bg-white" aria-hidden="true" />
+                  <div className="relative isolate bg-surface-card">
+                    <div className="absolute inset-0 -z-10 bg-surface-card" aria-hidden="true" />
                     {renderListHeader()}
                     {regularNotebooks.length === 0 && trimmedQuery ? (
-                      <div className="flex min-h-[180px] flex-col items-center justify-center border-b border-[#e5e7eb] px-6 text-center">
-                        <BookOpen className="mb-4 h-8 w-8 text-slate-400" />
-                        <h3 className="text-base font-medium text-slate-950">{t("notebook.emptySearchTitle")}</h3>
-                        <p className="mt-2 text-sm text-slate-500">{t("notebook.emptySearchDesc")}</p>
+                      <div className="flex min-h-[180px] flex-col items-center justify-center border-b border-surface-border px-6 text-center">
+                        <BookOpen className="mb-4 h-8 w-8 text-text-tertiary" />
+                        <h3 className="text-base font-medium text-text-primary">{t("notebook.emptySearchTitle")}</h3>
+                        <p className="mt-2 text-sm text-text-secondary">{t("notebook.emptySearchDesc")}</p>
                       </div>
                     ) : regularNotebooks.map(renderListRow)}
                   </div>
@@ -677,8 +678,8 @@ export default function NotebooksPage() {
 
       <InputDialog
         isOpen={Boolean(renameTarget)}
-        title="修改标题"
-        placeholder="输入新的笔记本标题"
+        title={t("notebook.renameTitle")}
+        placeholder={t("notebook.enterNewTitle")}
         defaultValue={renameTarget?.title || ""}
         confirmText={renaming ? t("common.processing") : t("common.confirm")}
         cancelText={t("common.cancel")}
@@ -690,7 +691,7 @@ export default function NotebooksPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !deleting && setDeleteTarget(null)} />
           <div className="relative mx-4 w-full max-w-[360px] rounded-2xl border border-surface-border bg-surface-elevated p-6 shadow-2xl animate-dialog-appear">
-            <h3 className="mb-2 text-base font-semibold text-text-primary">确认删除笔记本？</h3>
+            <h3 className="mb-2 text-base font-semibold text-text-primary">{t("notebook.deleteConfirmTitle")}</h3>
             <p className="mb-5 text-sm leading-relaxed text-text-secondary">
               删除后将无法在当前列表中恢复：<span className="font-medium text-text-primary">{deleteTarget.title || t("notebook.untitled")}</span>
             </p>
@@ -707,7 +708,7 @@ export default function NotebooksPage() {
                 type="button"
                 disabled={deleting}
                 onClick={handleDelete}
-                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {deleting ? t("common.processing") : "确认删除"}
               </button>

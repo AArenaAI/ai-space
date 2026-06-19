@@ -9,7 +9,8 @@ import {
   LayoutGrid,
   Video,
   Plus,
-  GripHorizontal,
+  Sparkles,
+  Wand2,
   Layers,
   FileText,
 } from "lucide-react";
@@ -33,7 +34,7 @@ export interface ManjuFlowSidebarProps {
   generating?: WorkflowMode | null;
   projectName: string;
   collapsed?: boolean;
-  onDragAddNode?: (type: CanvasNode["type"]) => void;
+  onAddNode?: (type: CanvasNode["type"], x: number, y: number) => void;
   onToggleCollapse?: () => void;
 }
 
@@ -54,22 +55,13 @@ export default function ManjuFlowSidebar({
   projectName,
   collapsed,
   onToggleCollapse,
-  onDragAddNode,
+  onAddNode,
 }: ManjuFlowSidebarProps) {
-  const handleDragStart = (e: React.DragEvent, type: CanvasNode["type"]) => {
-    e.dataTransfer.setData("nodeType", type);
-    e.dataTransfer.effectAllowed = "copy";
-  };
-
-  const nodeTypes: { type: CanvasNode["type"]; label: string; icon: React.ReactNode }[] = [
-    { type: "script", label: "剧本", icon: <BookOpen className="h-3.5 w-3.5" /> },
-    { type: "assets", label: "资产", icon: <Box className="h-3.5 w-3.5" /> },
-    { type: "shot", label: "镜头", icon: <Clapperboard className="h-3.5 w-3.5" /> },
-    { type: "image", label: "分镜图", icon: <Image className="h-3.5 w-3.5" /> },
-    { type: "video", label: "视频", icon: <Video className="h-3.5 w-3.5" /> },
-    { type: "director", label: "导演台", icon: <Layers className="h-3.5 w-3.5" /> },
-    { type: "text", label: "文本", icon: <FileText className="h-3.5 w-3.5" /> },
-    { type: "group", label: "组", icon: <Layers className="h-3.5 w-3.5" /> },
+  // 快捷操作按钮配置
+  const quickActions = [
+    { label: "添加镜头", icon: <Plus className="h-3.5 w-3.5" />, action: () => onAddNode?.("shot", 100, 100) },
+    { label: "批量生成分镜图", icon: <Sparkles className="h-3.5 w-3.5" />, action: () => onStepChange("storyboardImage") },
+    { label: "批量生成视频", icon: <Wand2 className="h-3.5 w-3.5" />, action: () => onStepChange("storyboardVideo") },
   ];
 
   const orderedSteps = STEP_ORDER.map<FlowStep>((id) =>
@@ -87,13 +79,13 @@ export default function ManjuFlowSidebar({
     >
       {/* 项目标题区 */}
       <div className="flex items-center gap-2 border-b border-surface-border px-3 py-2.5">
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand">
-          <Clapperboard className="h-3.5 w-3.5" />
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand">
+          <Clapperboard className="h-4 w-4" />
         </div>
         {!collapsed && (
           <div className="min-w-0">
-            <div className="truncate text-xs font-semibold text-text-primary">{projectName}</div>
-            <div className="truncate text-[10px] text-text-tertiary">漫剧 Studio</div>
+            <div className="truncate text-sm font-semibold text-text-primary">{projectName}</div>
+            <div className="truncate text-xs text-text-tertiary">漫剧 Studio</div>
           </div>
         )}
       </div>
@@ -116,7 +108,7 @@ export default function ManjuFlowSidebar({
               )}
             >
               {/* 状态指示器 */}
-              <div className="relative flex h-6 w-6 shrink-0 items-center justify-center">
+              <div className="relative flex h-7 w-7 shrink-0 items-center justify-center">
                 {step.status === "done" && (
                   <span className="absolute inset-0 rounded-full bg-emerald-50" />
                 )}
@@ -130,7 +122,7 @@ export default function ManjuFlowSidebar({
                   className={cn(
                     "relative z-10",
                     isActive && "text-brand",
-                    isPast && !isActive && "text-emerald-500"
+                    isPast && !isActive && "text-status-done"
                   )}
                 >
                   {step.icon}
@@ -140,23 +132,23 @@ export default function ManjuFlowSidebar({
               {!collapsed && (
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
-                    <span className="truncate text-xs font-medium">{step.title}</span>
+                    <span className="truncate text-sm font-medium">{step.title}</span>
                     {step.count !== undefined && step.count > 0 && (
-                      <span className="shrink-0 rounded-full bg-surface-card px-1.5 py-0 text-[10px] tabular-nums text-text-tertiary">
+                      <span className="shrink-0 rounded-full bg-surface-card px-2 py-0.5 text-xs tabular-nums text-text-tertiary">
                         {step.count}
                       </span>
                     )}
                   </div>
                   {step.description && (
-                    <div className="truncate text-[10px] text-text-tertiary">{step.description}</div>
+                    <div className="truncate text-xs text-text-tertiary">{step.description}</div>
                   )}
                 </div>
               )}
 
-              {/* 一键生成按钮（仅对可生成步骤） */}
+              {/* 一键生成按钮（仅对分镜图和视频） */}
               {!collapsed &&
                 onGenerate &&
-                step.id !== "overview" &&
+                (step.id === "storyboardImage" || step.id === "storyboardVideo") &&
                 step.status !== "done" && (
                   <button
                     type="button"
@@ -166,7 +158,7 @@ export default function ManjuFlowSidebar({
                     }}
                     disabled={generating === step.id}
                     className={cn(
-                      "shrink-0 rounded-lg px-2 py-1 text-[10px] font-medium transition-colors",
+                      "shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
                       generating === step.id
                         ? "bg-surface-card text-text-tertiary"
                         : "bg-brand/10 text-brand hover:bg-brand/20"
@@ -180,27 +172,36 @@ export default function ManjuFlowSidebar({
         })}
       </div>
 
-      {/* 节点库 - 可拖拽添加 */}
+      {/* 快捷操作区 */}
       <div className="border-t border-surface-border p-2">
-        <div className={cn("mb-1 text-[10px] font-medium text-text-tertiary", collapsed && "hidden")}>
-          节点库
+        <div className={cn("mb-2 text-xs font-medium text-text-tertiary", collapsed && "hidden")}>
+          快捷操作
         </div>
-        <div className={cn("grid gap-1", collapsed ? "grid-cols-1" : "grid-cols-2")}>
-          {nodeTypes.map((nt) => (
-            <div
-              key={nt.type}
-              draggable
-              onDragStart={(e) => handleDragStart(e, nt.type)}
-              className={cn(
-                "flex cursor-grab items-center gap-1.5 rounded-lg border border-surface-border bg-surface-base px-2 py-1.5 text-[10px] text-text-secondary transition-colors hover:border-brand/40 hover:bg-surface-card active:cursor-grabbing",
-                collapsed && "justify-center px-1"
-              )}
-              title={nt.label}
-            >
-              {nt.icon}
-              {!collapsed && <span>{nt.label}</span>}
-            </div>
-          ))}
+        <div className={cn("grid gap-1.5", collapsed ? "grid-cols-1" : "grid-cols-1")}>
+          <button
+            type="button"
+            onClick={() => onAddNode?.("shot", 100, 100)}
+            className="flex items-center gap-1.5 rounded-lg border border-surface-border bg-surface-base px-2.5 py-2 text-sm text-text-secondary transition-colors hover:border-brand/40 hover:bg-surface-hover hover:text-brand"
+          >
+            <Plus className="h-4 w-4" />
+            {!collapsed && <span>添加镜头</span>}
+          </button>
+          <button
+            type="button"
+            onClick={() => onStepChange("storyboardImage")}
+            className="flex items-center gap-1.5 rounded-lg border border-surface-border bg-surface-base px-2.5 py-2 text-sm text-text-secondary transition-colors hover:border-brand/40 hover:bg-surface-hover hover:text-brand"
+          >
+            <Sparkles className="h-4 w-4" />
+            {!collapsed && <span>批量生成分镜图</span>}
+          </button>
+          <button
+            type="button"
+            onClick={() => onStepChange("storyboardVideo")}
+            className="flex items-center gap-1.5 rounded-lg border border-surface-border bg-surface-base px-2.5 py-2 text-sm text-text-secondary transition-colors hover:border-brand/40 hover:bg-surface-hover hover:text-brand"
+          >
+            <Wand2 className="h-4 w-4" />
+            {!collapsed && <span>批量生成视频</span>}
+          </button>
         </div>
       </div>
 
@@ -209,7 +210,7 @@ export default function ManjuFlowSidebar({
         <button
           type="button"
           onClick={onToggleCollapse}
-          className="flex w-full items-center justify-center gap-1 rounded-lg py-1.5 text-[10px] text-text-tertiary hover:bg-surface-card hover:text-text-secondary"
+          className="flex w-full items-center justify-center gap-1 rounded-lg py-2 text-xs text-text-tertiary hover:bg-surface-card hover:text-text-secondary"
         >
           {collapsed ? "→" : "← 收起"}
         </button>
