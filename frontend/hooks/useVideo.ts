@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotifications";
 import { normalizeError, readApiError } from "@/lib/errors";
+import { refreshVideoTaskThrottled } from "@/lib/videoRefreshThrottle";
 
 export interface VideoGeneration {
   id: number;
@@ -36,6 +37,7 @@ interface UseVideoReturn {
     reference_image_urls?: string[];
     reference_image_roles?: Array<"reference_image" | "first_frame" | "last_frame">;
     reference_video_urls?: string[];
+    reference_image_role_mode?: "reference" | "first_frame" | "first_last_frame";
   }) => Promise<VideoGeneration>;
   refreshVideo: (id: number) => Promise<VideoGeneration | null>;
   deleteVideo: (id: number) => Promise<void>;
@@ -166,12 +168,9 @@ export function useVideo(): UseVideoReturn {
 
   const refreshVideo = useCallback(async (id: number): Promise<VideoGeneration | null> => {
     try {
-      const res = await fetch(`/api/videos/${id}/refresh`, {
-        credentials: "include",
-        headers: getAuthHeaders(),
-      });
-      if (!res.ok) return null;
-      const data: VideoGeneration = await res.json();
+      const result = await refreshVideoTaskThrottled(id, getAuthHeaders());
+      if (result.kind !== "ok") return null;
+      const data: VideoGeneration = result.video;
       setVideos((prev) => prev.map((v) => (v.id === id ? data : v)));
       setCurrentVideo((prev) => (prev?.id === id ? data : prev));
       if (data.status === "succeeded" || data.status === "failed") {
@@ -206,13 +205,20 @@ export function useVideo(): UseVideoReturn {
   const startPolling = useCallback(
     (id: number) => {
       if (pollTimers.current.has(id)) return;
-      const timer = setInterval(async () => {
-        const video = await refreshVideo(id);
-        if (video && (video.status === "succeeded" || video.status === "failed")) {
-          stopPolling(id);
-        }
-      }, 8000);
-      pollTimers.current.set(id, timer);
+      const scheduleNext = (delayMs: number) => {
+        const timer = setTimeout(async () => {
+          pollTimers.current.delete(id);
+          const video = await refreshVideo(id);
+          if (video && (video.status === "succeeded" || video.status === "failed")) {
+            stopPolling(id);
+            return;
+          }
+          const staggerMs = 20_000 + (id % 7) * 2_000;
+          scheduleNext(video ? staggerMs : Math.max(staggerMs, 45_000));
+        }, delayMs);
+        pollTimers.current.set(id, timer);
+      };
+      scheduleNext(4_000 + (id % 5) * 1_500);
     },
     [refreshVideo]
   );
