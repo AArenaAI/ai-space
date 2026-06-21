@@ -39,12 +39,12 @@ export function buildStreamErrorIntent({
   fallbackRequestId?: string;
   includeContentInPatch?: boolean;
 }): StreamErrorIntent {
-  const nextAccumulated = accumulated || payload.message;
+  const nextAccumulated = accumulated || (payload.retryable ? "" : payload.message);
   return {
     type: "stream_error",
     accumulated: nextAccumulated,
     patch: {
-      ...(includeContentInPatch ? { content: accumulated || payload.message } : {}),
+      ...(includeContentInPatch && nextAccumulated ? { content: nextAccumulated } : {}),
       ...buildStreamErrorPatch({
         errorCode: payload.errorCode,
         retryable: payload.retryable,
