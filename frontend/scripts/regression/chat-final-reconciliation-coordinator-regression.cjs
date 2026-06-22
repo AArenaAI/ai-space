@@ -92,24 +92,32 @@ test("recover action before DONE starts task stream and optional background poll
   assert.equal(action.result.content, "partial");
 });
 
-test("recover action does not start background polling without server id or background flag", () => {
-  const noBackground = decideFinalStreamReconciliation({
-    state: { ...baseState, useBackground: false, sawDone: false },
+test("unrecoverable content before DONE marks completed to stop spinner", () => {
+  const action = decideFinalStreamReconciliation({
+    state: { ...baseState, serverMessageId: undefined, generationTaskId: undefined, useBackground: false, sawDone: false },
     abortReason: null,
     streamContent: "partial",
-    hasRealtimeData: false,
+    hasRealtimeData: true,
   });
-  assert.equal(noBackground.type, "recover");
-  assert.equal(noBackground.shouldStartBackgroundPolling, false);
+  assert.equal(action.type, "complete_or_cleanup");
+  assert.equal(action.shouldSyncFinalData, true);
+  assert.equal(action.finalContent, "partial");
+  assert.equal(action.shouldClearStores, true);
+  assert.equal(action.shouldMarkCompleted, true);
+  assert.equal(action.result.content, "partial");
+});
 
-  const noServer = decideFinalStreamReconciliation({
-    state: { ...baseState, serverMessageId: undefined, useBackground: true, sawDone: false },
+test("no content before DONE recovers task stream", () => {
+  const noContent = decideFinalStreamReconciliation({
+    state: { ...baseState, useBackground: false, sawDone: false, accumulated: "" },
     abortReason: null,
-    streamContent: "partial",
+    streamContent: "",
     hasRealtimeData: false,
   });
-  assert.equal(noServer.type, "recover");
-  assert.equal(noServer.shouldStartBackgroundPolling, false);
+  assert.equal(noContent.type, "recover");
+  assert.equal(noContent.serverMessageId, 9);
+  assert.equal(noContent.generationTaskId, 5);
+  assert.equal(noContent.lastSequence, 12);
 });
 
 test("normal DONE with server id completes without DB replay polling", () => {
