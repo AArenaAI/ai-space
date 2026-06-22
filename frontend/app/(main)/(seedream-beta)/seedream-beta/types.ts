@@ -2,6 +2,7 @@ export type Tab = "workflow" | "image" | "video";
 export type WorkflowMode = "novel" | "script" | "assets" | "storyboardVideo" | "storyboardImage" | "videoSegments";
 export type GeneratorGroupMode = "image" | "video";
 export type WorkflowView = "overview" | "step" | "videoSegments" | "assets" | "script";
+export type StoryFlowStage = "idea" | "ideaContent" | "outline" | "episodeScript" | "canvas";
 export type AssetKind = "image" | "video" | "file";
 export type AssetRole = "reference_image" | "first_frame" | "last_frame" | "reference_video" | "character" | "scene" | "prop" | "style";
 export type SemanticAssetKind = "character" | "scene" | "prop" | "style";
@@ -14,6 +15,9 @@ export type BatchMode = "missing" | "failed" | "all";
 export type ScriptAssistantMode = "chat" | "rewrite";
 export type AssetAssistantMode = "chat" | "rewrite";
 export type AssetKindFilter = SemanticAssetKind | "all";
+export type WorkflowModelStrategy = "economy" | "balanced" | "quality" | "custom";
+export type WorkflowModelTask = "ideaChat" | "ideaExtract" | "outline" | "episodeScript" | "scriptRewrite" | "assetExtract" | "storyboardVideoPrompt" | "storyboardImagePrompt";
+export type WorkflowModelConfig = Record<WorkflowModelTask, string>;
 
 export type GenerationAction = {
   action: "image.generate" | "image.edit" | "video.generate" | "video.extend" | string;
@@ -25,6 +29,49 @@ export type ScriptChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+};
+
+export type ScriptSummary = {
+  episodeCount: number;
+  genre: string;
+  targetAudience: string;
+  coreHook: string;
+  logline: string;
+  charactersText: string;
+  synopsis: string;
+};
+
+export type EpisodeOutline = {
+  episode: number;
+  title: string;
+  summary: string;
+};
+
+export type EpisodeScriptDialogue = {
+  character: string;
+  text: string;
+  tone?: string;
+};
+
+export type EpisodeScriptScene = {
+  scene: number;
+  title?: string;
+  location: string;
+  time: string;
+  characters: string[];
+  visualAction: string;
+  dialogue: EpisodeScriptDialogue[];
+  narration?: string;
+  emotion?: string;
+  hook?: string;
+};
+
+export type EpisodeScript = {
+  episode: number;
+  title: string;
+  script: string;
+  scenes?: EpisodeScriptScene[];
+  status: "draft" | "generating" | "done" | "failed";
 };
 
 export type StoredAsset = {
@@ -65,6 +112,7 @@ export type VideoSegment = {
 
 export type StoryboardShot = {
   id: string;
+  episode?: number;
   index: number;
   title: string;
   scene: string;
@@ -102,9 +150,10 @@ export type GenerationJob = {
   mediaId: number;
   prompt: string;
   status: GenerationJobStatus;
-  intent?: "asset_image" | "shot_image" | "storyboard_sketch";
-  entryPath?: "single" | "batch" | "asset";
-  promptSource?: "assetPrompt" | "storyboardSketch" | "imagePrompt" | "structuredFallback" | "videoPrompt" | "imagePromptFallback";
+  canvasNodeId?: string;
+  intent?: "asset_image" | "shot_image" | "storyboard_sketch" | "canvas_image";
+  entryPath?: "single" | "batch" | "asset" | "canvas";
+  promptSource?: "assetPrompt" | "storyboardSketch" | "imagePrompt" | "structuredFallback" | "videoPrompt" | "imagePromptFallback" | "canvasPrompt";
   directorInjected?: boolean;
   referenceImageCount?: number;
   referenceVideoCount?: number;
@@ -211,6 +260,17 @@ export type SeedreamProject = {
   createdAt: string;
   updatedAt: string;
   idea: string;
+  flowStage?: StoryFlowStage;
+  modelStrategy?: WorkflowModelStrategy;
+  workflowModels?: Partial<WorkflowModelConfig>;
+  originalIdea?: string;
+  outlineSource?: string;
+  ideaSourceReference?: string;
+  ideaChatMessages?: ScriptChatMessage[];
+  scriptSummary?: ScriptSummary;
+  episodeOutlines?: EpisodeOutline[];
+  episodeScripts?: EpisodeScript[];
+  activeEpisode?: number;
   novel: string;
   scriptSourceExcerpt: string;
   scriptAdaptationInstruction: string;
@@ -228,6 +288,8 @@ export type SeedreamProject = {
   semanticAssets: SemanticAsset[];
   directorBlocks?: DirectorBlock[];
   generatorGroups?: GeneratorGroup[];
+  canvasNodes?: import("./ManjuCanvas").CanvasNode[];
+  canvasConnections?: import("./ManjuCanvas").CanvasConnection[];
 };
 
 export type GeneratorGroup = {

@@ -27,15 +27,11 @@ import {
   Image,
   LocateFixed,
   Maximize2,
-  Music,
   Sparkles,
   Type,
   Video,
   WandSparkles,
   Plus,
-  Code2,
-  Link2,
-  Scissors,
   ChevronRight,
 } from "lucide-react";
 import ManjuNodeContent from "./ManjuNodeContent";
@@ -68,8 +64,9 @@ export type CanvasAssetDropPayload = {
   name: string;
   kind?: string;
   summary?: string;
+  lockPrompt?: string;
   image?: string;
-  source?: "node" | "library";
+  source?: "node" | "library" | "semantic";
 };
 
 export interface ManjuCanvasProps {
@@ -98,7 +95,7 @@ export interface ManjuCanvasProps {
   onNodeGenerate?: (nodeId: string) => void;
   onNodePickFromLibrary?: (nodeId: string) => void;
   nodeAssets?: Array<{ id: string; publicId?: string; name: string; category?: string; url?: string; image_url?: string }>;
-  mentionAssets?: Array<{ id: string; name: string; kind?: string; category?: string; summary?: string; imageUrl?: string; image_url?: string; url?: string }>;
+  mentionAssets?: Array<{ id: string; name: string; kind?: string; category?: string; summary?: string; lockPrompt?: string; imageUrl?: string; image_url?: string; url?: string }>;
   composerSettings?: ComposerSettings;
   composerOptions?: {
     imageAspects: string[];
@@ -109,9 +106,14 @@ export interface ManjuCanvasProps {
     videoDurations: number[];
   };
   composerGenerating?: boolean;
+  surfaceMode?: "day" | "night" | "eye";
   onUpdateNodeContent?: (nodeId: string, updates: { title?: string; body?: string }) => void;
   onComposerSettingsChange?: (nodeId: string, updates: Partial<ComposerSettings>) => void;
   onBindAssetMention?: (nodeId: string, assetId: string) => void;
+  onRewriteAsset?: (nodeId: string, instruction: string) => void;
+  onChatAsset?: (nodeId: string, question: string) => void;
+  assetRewriting?: boolean;
+  assetChatting?: boolean;
 }
 
 type SeedreamNodeData = {
@@ -121,6 +123,8 @@ type SeedreamNodeData = {
   composerSettings?: ComposerSettings;
   composerOptions?: ManjuCanvasProps["composerOptions"];
   composerGenerating?: boolean;
+  assetRewriting?: boolean;
+  assetChatting?: boolean;
   viewportMoving?: boolean;
 };
 
@@ -128,7 +132,7 @@ type CanvasActionHandlers = Pick<
   ManjuCanvasProps,
   "onNodeUpload" | "onNodeGenerate" | "onNodePickFromLibrary" | "onNodeSelect"
 >;
-type ComposerActionHandlers = Pick<ManjuCanvasProps, "onUpdateNodeContent" | "onComposerSettingsChange" | "onBindAssetMention" | "onNodeGenerate" | "onNodeSelect">;
+type ComposerActionHandlers = Pick<ManjuCanvasProps, "onUpdateNodeContent" | "onComposerSettingsChange" | "onBindAssetMention" | "onNodeGenerate" | "onNodeSelect" | "onRewriteAsset" | "onChatAsset">;
 
 type NodeAddMenu = {
   nodeId: string;
@@ -147,22 +151,26 @@ type NodeAddMenuItem = {
 };
 
 const nodeAddMenuItems: NodeAddMenuItem[] = [
-  { type: "text", label: "文本素材", icon: Type },
-  { type: "image", label: "分镜图片", icon: Image },
-  { type: "video", label: "视频片段", icon: Video },
-  { type: "composite", label: "视频合成", icon: Scissors, badge: "Beta" },
-  { type: "director", label: "导演台", icon: Maximize2, badge: "NEW" },
-  { type: "audio", label: "音频", icon: Music, disabled: true },
-  { type: "script", label: "剧本源", icon: Code2, submenu: true },
-  { type: "reference", label: "参考节点", icon: Link2 },
+  { type: "text", label: "文本", icon: Type },
+  { type: "image", label: "图片", icon: Image },
+  { type: "video", label: "视频", icon: Video },
 ];
+
+function getNodeAddMenuItems(sourceNode?: CanvasNode): NodeAddMenuItem[] {
+  if (sourceNode?.type !== "assets") return nodeAddMenuItems;
+  return [
+    { type: "text", label: "文本", icon: Type },
+    { type: "image", label: "图片", icon: Image },
+    { type: "video", label: "视频", icon: Video },
+  ];
+}
 
 const canvasActionHandlers: { current: CanvasActionHandlers } = { current: {} };
 const composerActionHandlers: { current: ComposerActionHandlers } = { current: {} };
 const canvasNodeAddMenuHandlers: { current: { open?: (nodeId: string, side: "left" | "right", event: React.MouseEvent) => void } } = { current: {} };
 
 const handleBaseClass =
-  "!top-1/2 !z-20 !flex !h-8 !w-8 !-translate-y-1/2 !items-center !justify-center !rounded-full !border !border-slate-200/80 !bg-white !text-slate-700 !opacity-100 !shadow-sm transition-colors hover:!border-slate-300 hover:!bg-slate-950 hover:!text-white";
+  "!top-1/2 !z-20 !flex !h-8 !w-8 !-translate-y-1/2 !items-center !justify-center !rounded-full !border !border-white/[0.18] !bg-black !text-white/70 !opacity-100 !shadow-[0_10px_28px_rgba(0,0,0,0.38)] transition-all hover:!scale-105 hover:!border-white hover:!bg-white hover:!text-black";
 
 function nodeVisual(type: CanvasNode["type"]) {
   switch (type) {
@@ -173,7 +181,7 @@ function nodeVisual(type: CanvasNode["type"]) {
     case "shot":
       return { label: "镜头卡", icon: Clapperboard, accent: "from-sky-400 to-cyan-500", soft: "bg-sky-500/10 text-sky-500" };
     case "image":
-      return { label: "分镜图片", icon: Image, accent: "from-emerald-400 to-teal-500", soft: "bg-emerald-500/10 text-emerald-500" };
+      return { label: "图片", icon: Image, accent: "from-emerald-400 to-teal-500", soft: "bg-emerald-500/10 text-emerald-500" };
     case "video":
       return { label: "视频片段", icon: Video, accent: "from-rose-400 to-pink-500", soft: "bg-rose-500/10 text-rose-500" };
     case "director":
@@ -254,7 +262,7 @@ const SeedreamFlowNode = memo(function SeedreamFlowNode({ data, selected }: Node
         canvasActionHandlers.current.onNodeSelect?.(node.id);
       }}
       className={cn(
-        "group relative flex flex-col rounded-[24px] will-change-transform [contain:layout_paint_style]",
+        "group relative flex flex-col overflow-visible rounded-[24px] will-change-transform [contain:layout_style]",
         selected ? "z-10" : ""
       )}
       style={{ width: node.width || 380, minHeight: node.collapsed ? undefined : node.height || 430 }}
@@ -291,27 +299,27 @@ const SeedreamFlowNode = memo(function SeedreamFlowNode({ data, selected }: Node
       </Handle>
       <div
         className={cn(
-          "flex flex-1 flex-col overflow-hidden rounded-[24px] border bg-white shadow-[0_6px_16px_rgba(15,23,42,0.08)] ring-1 ring-white/70",
-          selected ? "border-slate-900" : "border-white/80 hover:border-slate-300"
+          "flex flex-1 flex-col overflow-hidden rounded-[24px] border bg-[#101011]/95 shadow-[0_22px_55px_rgba(0,0,0,0.42)] ring-1 ring-white/[0.06] backdrop-blur-xl",
+          selected ? "border-white/70 shadow-[0_0_0_1px_rgba(255,255,255,0.55),0_26px_68px_rgba(0,0,0,0.52)]" : "border-white/[0.08] hover:border-white/20"
         )}
       >
-        <div className={cn("h-1 bg-gradient-to-r", visual.accent)} />
+        <div className="h-px bg-gradient-to-r from-transparent via-white/25 to-transparent" />
         <div className="flex items-center gap-3 px-4 py-3">
-          <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-xl", visual.soft)}>
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.06] text-white/[0.72]">
             <Icon className="h-[18px] w-[18px]" />
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <span className="truncate text-[15px] font-semibold tracking-[-0.01em] text-slate-900">{node.title}</span>
-              <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-500">
+              <span className="truncate text-[15px] font-semibold tracking-[-0.01em] text-white">{node.title}</span>
+              <span className="shrink-0 rounded-full border border-white/[0.08] bg-white/[0.06] px-2.5 py-0.5 text-[11px] font-medium text-white/[0.45]">
                 {visual.label}
               </span>
             </div>
-            <div className="mt-0.5 text-[11px] font-medium text-slate-400">{statusLabel(node.status)}</div>
+            <div className="mt-0.5 text-[11px] font-medium text-white/[0.34]">{statusLabel(node.status)}</div>
           </div>
         </div>
         {!node.collapsed && (
-          <div className="flex flex-1 border-t border-black/5 bg-slate-50/55 p-3">
+          <div className="flex flex-1 border-t border-white/[0.06] bg-white/[0.035] p-3">
             <ManjuNodeContent
               node={node}
               onUpload={canvasActionHandlers.current.onNodeUpload}
@@ -335,6 +343,10 @@ const SeedreamFlowNode = memo(function SeedreamFlowNode({ data, selected }: Node
           onSettingsChange={composerActionHandlers.current.onComposerSettingsChange}
           onBindAssetMention={composerActionHandlers.current.onBindAssetMention}
           onGenerate={composerActionHandlers.current.onNodeGenerate}
+          onRewriteAsset={composerActionHandlers.current.onRewriteAsset}
+          onChatAsset={composerActionHandlers.current.onChatAsset}
+          assetRewriting={data.assetRewriting}
+          assetChatting={data.assetChatting}
           onClose={() => composerActionHandlers.current.onNodeSelect?.(null)}
         />
       )}
@@ -343,7 +355,7 @@ const SeedreamFlowNode = memo(function SeedreamFlowNode({ data, selected }: Node
 });
 
 const nodeTypes = { seedream: SeedreamFlowNode };
-const defaultEdgeOptions = { type: "bezier" };
+const defaultEdgeOptions = { type: "default" };
 const proOptions = { hideAttribution: true };
 
 function stableNodesSignature(nodes: CanvasNode[]) {
@@ -374,7 +386,7 @@ function stableAssetsSignature(assets?: Array<{ id: string; name: string; catego
 }
 
 function edgeType(connection?: CanvasConnection["type"]) {
-  return connection === "scene-transition" ? "smoothstep" : "bezier";
+  return connection === "scene-transition" ? "smoothstep" : "default";
 }
 
 function edgeColor(connection?: CanvasConnection["type"]) {
@@ -392,7 +404,7 @@ function edgeWidth(connection?: CanvasConnection["type"]) {
 
 function toFlowNodes(
   nodes: CanvasNode[],
-  props: Pick<ManjuCanvasProps, "nodeAssets" | "mentionAssets" | "selectedNodeId" | "composerSettings" | "composerOptions" | "composerGenerating"> & { viewportMoving?: boolean }
+  props: Pick<ManjuCanvasProps, "nodeAssets" | "mentionAssets" | "selectedNodeId" | "composerSettings" | "composerOptions" | "composerGenerating" | "assetRewriting" | "assetChatting"> & { viewportMoving?: boolean }
 ): Node<SeedreamNodeData>[] {
   return nodes.map((node) => ({
     id: node.id,
@@ -407,6 +419,8 @@ function toFlowNodes(
       composerSettings: props.composerSettings,
       composerOptions: props.composerOptions,
       composerGenerating: props.composerGenerating,
+      assetRewriting: props.assetRewriting,
+      assetChatting: props.assetChatting,
       viewportMoving: props.viewportMoving,
     },
   }));
@@ -462,9 +476,14 @@ function ManjuCanvasInner({
   composerSettings,
   composerOptions,
   composerGenerating,
+  surfaceMode = "night",
   onUpdateNodeContent,
   onComposerSettingsChange,
   onBindAssetMention,
+  onRewriteAsset,
+  onChatAsset,
+  assetRewriting,
+  assetChatting,
 }: ManjuCanvasProps) {
   const [flow, setFlow] = useState<ReactFlowInstance<Node<SeedreamNodeData>, Edge> | null>(null);
   const [nodeAddMenu, setNodeAddMenu] = useState<NodeAddMenu | null>(null);
@@ -474,7 +493,7 @@ function ManjuCanvasInner({
   const handlerRef = useRef({ onNodeMove, onNodeSelect, onCanvasContextMenu, onConnectNodes });
   handlerRef.current = { onNodeMove, onNodeSelect, onCanvasContextMenu, onConnectNodes };
   canvasActionHandlers.current = { onNodeUpload, onNodeGenerate, onNodePickFromLibrary, onNodeSelect };
-  composerActionHandlers.current = { onUpdateNodeContent, onComposerSettingsChange, onBindAssetMention, onNodeGenerate, onNodeSelect };
+  composerActionHandlers.current = { onUpdateNodeContent, onComposerSettingsChange, onBindAssetMention, onNodeGenerate, onNodeSelect, onRewriteAsset, onChatAsset };
   const markViewportMoving = useCallback(() => {
     if (!viewportMovingRef.current) {
       viewportMovingRef.current = true;
@@ -514,8 +533,8 @@ function ManjuCanvasInner({
   const connectionsSignature = stableConnectionsSignature(connections);
   const stableConnections = useMemo(() => connections, [connectionsSignature]);
   const externalFlowNodes = useMemo(
-    () => toFlowNodes(stableNodes, { nodeAssets: stableNodeAssets, mentionAssets: stableMentionAssets, selectedNodeId, composerSettings, composerOptions, composerGenerating, viewportMoving }),
-    [stableNodeAssets, stableMentionAssets, stableNodes, selectedNodeId, composerSettings, composerOptions, composerGenerating, viewportMoving]
+    () => toFlowNodes(stableNodes, { nodeAssets: stableNodeAssets, mentionAssets: stableMentionAssets, selectedNodeId, composerSettings, composerOptions, composerGenerating, assetRewriting, assetChatting, viewportMoving }),
+    [stableNodeAssets, stableMentionAssets, stableNodes, selectedNodeId, composerSettings, composerOptions, composerGenerating, assetRewriting, assetChatting, viewportMoving]
   );
   const externalFlowEdges = useMemo(() => toFlowEdges(stableConnections), [stableConnections]);
   const [flowNodes, setFlowNodes] = useState<Node<SeedreamNodeData>[]>(externalFlowNodes);
@@ -638,9 +657,77 @@ function ManjuCanvasInner({
   }, [onDeleteNode, readOnly, selectedNodeId]);
 
   const selectedFlowNodes = useMemo(() => flowNodes.filter((node) => node.selected).map((node) => node.id), [flowNodes]);
+  const surface = surfaceMode === "day"
+    ? {
+        canvas: "border-black/[0.08] bg-[#f4f2ec] shadow-inner",
+        grid: "rgba(20,20,18,0.07)",
+        toolbar: "border-black/[0.08] bg-white/[0.82] text-black shadow-[0_12px_36px_rgba(25,23,18,0.12)]",
+        toolbarText: "text-black/[0.58] hover:bg-black hover:text-white",
+        selectedPanel: "border-black/[0.08] bg-white/[0.86] shadow-[0_12px_36px_rgba(25,23,18,0.12)]",
+        selectedText: "text-black/[0.58]",
+        primaryButton: "bg-black text-white hover:bg-black/[0.86]",
+        secondaryButton: "border-black/[0.1] bg-black/[0.04] text-black/[0.58] hover:bg-black/[0.08] hover:text-black",
+      }
+    : surfaceMode === "eye"
+      ? {
+          canvas: "border-[#9d907b]/[0.24] bg-[#26231d] shadow-inner",
+          grid: "rgba(232,220,196,0.06)",
+          toolbar: "border-[#e8dcc4]/[0.12] bg-[#1e1b17]/[0.78] text-[#efe6d1] shadow-[0_12px_36px_rgba(0,0,0,0.28)]",
+          toolbarText: "text-[#efe6d1]/[0.62] hover:bg-[#efe6d1] hover:text-[#1d1a15]",
+          selectedPanel: "border-[#e8dcc4]/[0.12] bg-[#1e1b17]/[0.78] shadow-[0_12px_36px_rgba(0,0,0,0.28)]",
+          selectedText: "text-[#efe6d1]/[0.62]",
+          primaryButton: "bg-[#efe6d1] text-[#1d1a15] hover:bg-[#efe6d1]/[0.9]",
+          secondaryButton: "border-[#efe6d1]/[0.12] bg-[#efe6d1]/[0.06] text-[#efe6d1]/[0.62] hover:bg-[#efe6d1]/[0.1] hover:text-[#efe6d1]",
+        }
+      : {
+          canvas: "border-white/[0.08] bg-[#070707] shadow-inner",
+          grid: "rgba(255,255,255,0.055)",
+          toolbar: "border-white/[0.1] bg-black/[0.72] text-white shadow-[0_12px_36px_rgba(0,0,0,0.36)]",
+          toolbarText: "text-white/[0.58] hover:bg-white hover:text-black",
+          selectedPanel: "border-white/[0.1] bg-black/[0.72] shadow-[0_12px_36px_rgba(0,0,0,0.36)]",
+          selectedText: "text-white/[0.58]",
+          primaryButton: "bg-white text-black hover:bg-white/[0.88]",
+          secondaryButton: "border-white/[0.1] bg-white/[0.05] text-white/[0.58] hover:bg-white/[0.09] hover:text-white",
+        };
 
   return (
-    <div className="relative h-full w-full overflow-hidden rounded-[26px] border border-white/80 bg-[#f4f7f1]">
+    <div className={cn("relative h-full w-full overflow-hidden rounded-[26px] border", surface.canvas)}>
+      <style jsx global>{`
+        .seedream-react-flow .react-flow__controls {
+          display: flex;
+          flex-direction: column;
+          gap: 1px;
+          background: rgba(255, 255, 255, 0.96) !important;
+          border-color: rgba(255, 255, 255, 0.9) !important;
+          box-shadow: 0 18px 42px rgba(0, 0, 0, 0.45) !important;
+        }
+        .seedream-react-flow .react-flow__controls-button {
+          width: 34px !important;
+          height: 34px !important;
+          background: #ffffff !important;
+          border: 0 !important;
+          border-bottom: 1px solid rgba(0, 0, 0, 0.12) !important;
+          color: #050505 !important;
+          fill: #050505 !important;
+          transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+        }
+        .seedream-react-flow .react-flow__controls-button:last-child {
+          border-bottom: 0 !important;
+        }
+        .seedream-react-flow .react-flow__controls-button svg {
+          width: 17px !important;
+          height: 17px !important;
+          max-width: 17px !important;
+          max-height: 17px !important;
+          fill: currentColor !important;
+          stroke: currentColor !important;
+        }
+        .seedream-react-flow .react-flow__controls-button:hover {
+          background: #0a0a0a !important;
+          color: #ffffff !important;
+          fill: #ffffff !important;
+        }
+      `}</style>
       <ReactFlow
         nodes={flowNodes}
         edges={flowEdges}
@@ -676,35 +763,32 @@ function ManjuCanvasInner({
         onlyRenderVisibleElements
         className="seedream-react-flow"
       >
-        <Background variant={BackgroundVariant.Lines} gap={96} size={1} color="rgba(15,23,42,0.055)" />
+        <Background variant={BackgroundVariant.Lines} gap={96} size={1} color={surface.grid} />
         <Controls
-          className="!bottom-4 !left-4 !top-auto overflow-hidden !rounded-2xl !border !border-white/80 !bg-white/88 !shadow-sm"
+          className={cn("!bottom-4 !left-4 !top-auto overflow-hidden !rounded-2xl !border !backdrop-blur-xl", surface.toolbar)}
           showInteractive={false}
         />
-        <Panel position="bottom-center" className="mb-3 flex items-center gap-1 rounded-full border border-white/80 bg-white/92 p-1.5 shadow-sm">
-          <button type="button" className="flex h-8 items-center gap-1 rounded-full px-3 text-[11px] font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-950" onClick={() => flow?.fitView({ padding: 0.24, duration: 280 })}>
+        <Panel position="bottom-center" className={cn("mb-3 flex items-center gap-1 rounded-full border p-1.5 backdrop-blur-xl", surface.toolbar)}>
+          <button type="button" className={cn("flex h-8 items-center gap-1 rounded-full px-3 text-[11px] font-semibold", surface.toolbarText)} onClick={() => flow?.fitView({ padding: 0.24, duration: 280 })}>
             <LocateFixed className="h-3.5 w-3.5" />归位
           </button>
           {onAutoLayout && (
             <button
               type="button"
-              className="flex h-8 items-center gap-1 rounded-full px-3 text-[11px] font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-950"
-              onClick={() => {
-                onAutoLayout();
-                window.setTimeout(() => flow?.fitView({ padding: 0.26, duration: 320 }), 80);
-              }}
+              className={cn("flex h-8 items-center gap-1 rounded-full px-3 text-[11px] font-semibold", surface.toolbarText)}
+              onClick={onAutoLayout}
             >
               <WandSparkles className="h-3.5 w-3.5" />自动布局
             </button>
           )}
         </Panel>
         {onBatchGenerate && selectedFlowNodes.length > 0 && (
-          <Panel position="top-right" className="mr-3 mt-3 flex items-center gap-2 rounded-2xl border border-surface-border/70 bg-surface-elevated/95 px-3 py-2 shadow-sm">
-            <span className="text-xs text-text-secondary">已选 {selectedFlowNodes.length} 个节点</span>
-            <button type="button" className="rounded-lg bg-brand px-2.5 py-1 text-xs font-medium text-white hover:bg-brand-hover" onClick={() => onBatchGenerate(selectedFlowNodes, "image")}>
+          <Panel position="top-right" className={cn("mr-3 mt-3 flex items-center gap-2 rounded-2xl border px-3 py-2 backdrop-blur-xl", surface.selectedPanel)}>
+            <span className={cn("text-xs", surface.selectedText)}>已选 {selectedFlowNodes.length} 个节点</span>
+            <button type="button" className={cn("rounded-lg px-2.5 py-1 text-xs font-medium", surface.primaryButton)} onClick={() => onBatchGenerate(selectedFlowNodes, "image")}>
               批量分镜
             </button>
-            <button type="button" className="rounded-lg bg-surface-card px-2.5 py-1 text-xs font-medium text-text-secondary hover:text-text-primary" onClick={() => onBatchGenerate(selectedFlowNodes, "video")}>
+            <button type="button" className={cn("rounded-lg border px-2.5 py-1 text-xs font-medium", surface.secondaryButton)} onClick={() => onBatchGenerate(selectedFlowNodes, "video")}>
               批量视频
             </button>
           </Panel>
@@ -720,9 +804,9 @@ function ManjuCanvasInner({
               }}
               onClick={(event) => event.stopPropagation()}
             >
-              <div className="px-2.5 pb-2 pt-1.5 text-[12px] font-semibold text-white/86">引用该节点生成</div>
+              <div className="px-2.5 pb-2 pt-1.5 text-[12px] font-semibold text-white/[0.86]">引用该节点生成</div>
               <div className="space-y-0.5">
-                {nodeAddMenuItems.map((item) => {
+                {getNodeAddMenuItems(stableNodes.find((node) => node.id === nodeAddMenu.nodeId)).map((item) => {
                   const Icon = item.icon;
                   return (
                     <button
@@ -732,17 +816,17 @@ function ManjuCanvasInner({
                       onClick={() => handleNodeMenuAction(item)}
                       className={cn(
                         "flex h-10 w-full items-center gap-3 rounded-xl px-2.5 text-left text-[13px] font-medium transition-colors",
-                        item.disabled ? "cursor-not-allowed text-white/28" : "text-white/88 hover:bg-white/10"
+                        item.disabled ? "cursor-not-allowed text-white/[0.28]" : "text-white/[0.88] hover:bg-white/10"
                       )}
                     >
-                      <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-lg", item.disabled ? "bg-white/5 text-white/25" : "bg-white/8 text-white/86")}>
+                      <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-lg", item.disabled ? "bg-white/5 text-white/25" : "bg-white/8 text-white/[0.86]")}>
                         <Icon className="h-4 w-4" />
                       </span>
                       <span className="min-w-0 flex-1 truncate">{item.label}</span>
                       {item.badge && (
                         <span className={cn("rounded-md px-1.5 py-0.5 text-[10px] font-bold", item.badge === "NEW" ? "bg-blue-500 text-white" : "bg-white/12 text-white/75")}>{item.badge}</span>
                       )}
-                      {item.submenu && <ChevronRight className="h-3.5 w-3.5 text-white/45" />}
+                      {item.submenu && <ChevronRight className="h-3.5 w-3.5 text-white/[0.45]" />}
                     </button>
                   );
                 })}

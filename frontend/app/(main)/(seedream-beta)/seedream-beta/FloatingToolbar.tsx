@@ -9,7 +9,6 @@ import {
   HelpCircle,
   X,
   BookOpen,
-  Clapperboard,
   Image,
   Video,
   Layers,
@@ -20,20 +19,20 @@ import type { CanvasNode } from "./ManjuCanvas";
 interface FloatingToolbarProps {
   onAddNode: (type: CanvasNode["type"], x: number, y: number, sourceNodeId?: string, sourceSide?: "left" | "right") => void;
   onOpenProjectPanel?: () => void;
+  onOpenCanvasElements?: () => void;
   onOpenAssetLibrary?: () => void;
   onHelp?: () => void;
 }
 
 const NODE_TYPES: { type: CanvasNode["type"]; label: string; icon: React.ReactNode; description?: string }[] = [
   { type: "script", label: "剧本源", icon: <BookOpen className="h-4 w-4" />, description: "可拆镜头的结构化剧本" },
-  { type: "shot", label: "镜头卡", icon: <Clapperboard className="h-4 w-4" />, description: "单镜头生产单元" },
   { type: "image", label: "分镜图片", icon: <Image className="h-4 w-4" />, description: "Seedream 生成的静态分镜图" },
   { type: "video", label: "视频片段", icon: <Video className="h-4 w-4" />, description: "Seedance 生成的单镜头视频" },
   { type: "director", label: "导演台", icon: <Layers className="h-4 w-4" />, description: "镜头预演、构图与走位" },
   { type: "text", label: "文本素材", icon: <FileText className="h-4 w-4" />, description: "旁白、备注、设定或 Prompt 草稿" },
 ];
 
-export default function FloatingToolbar({ onAddNode, onOpenAssetLibrary, onHelp }: FloatingToolbarProps) {
+export default function FloatingToolbar({ onAddNode, onOpenCanvasElements, onOpenAssetLibrary, onHelp }: FloatingToolbarProps) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -55,10 +54,10 @@ export default function FloatingToolbar({ onAddNode, onOpenAssetLibrary, onHelp 
           {expanded ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
         </button>
 
-        {/* 画布元素按钮：项目入口已经在右上角，避免重复 */}
+        {/* 画布元素按钮：查看当前画布内节点 */}
         <button
           type="button"
-          onClick={onOpenAssetLibrary}
+          onClick={onOpenCanvasElements}
           className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/65 text-slate-500 transition-colors hover:bg-brand/10 hover:text-brand"
           title="画布元素"
         >

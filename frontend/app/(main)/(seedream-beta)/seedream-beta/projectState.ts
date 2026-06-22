@@ -1,4 +1,5 @@
-import type { SeedreamProject, StoredAsset } from "./types";
+import type { EpisodeScript, SeedreamProject, StoredAsset } from "./types";
+import { DEFAULT_WORKFLOW_MODELS, DEFAULT_WORKFLOW_MODEL_STRATEGY, WORKFLOW_MODEL_STRATEGIES } from "./constants";
 
 export function createSeedreamProject(title: string, assets: StoredAsset[] = []): SeedreamProject {
   const now = new Date().toISOString();
@@ -9,6 +10,25 @@ export function createSeedreamProject(title: string, assets: StoredAsset[] = [])
     createdAt: now,
     updatedAt: now,
     idea: "",
+    flowStage: "idea",
+    modelStrategy: DEFAULT_WORKFLOW_MODEL_STRATEGY,
+    workflowModels: DEFAULT_WORKFLOW_MODELS,
+    originalIdea: "",
+    outlineSource: "",
+    ideaSourceReference: "",
+    ideaChatMessages: [],
+    scriptSummary: {
+      episodeCount: 5,
+      genre: "",
+      targetAudience: "大众",
+      coreHook: "",
+      logline: "",
+      charactersText: "",
+      synopsis: "",
+    },
+    episodeOutlines: [],
+    episodeScripts: [],
+    activeEpisode: 1,
     novel: "",
     scriptSourceExcerpt: "",
     scriptAdaptationInstruction: "",
@@ -24,6 +44,29 @@ export function createSeedreamProject(title: string, assets: StoredAsset[] = [])
     activeShotId: undefined,
     generationJobs: [],
     semanticAssets: [],
+  };
+}
+
+function normalizeEpisodeScript(script: any): EpisodeScript {
+  const episode = Number(script?.episode || 1);
+  return {
+    episode,
+    title: String(script?.title || `第${episode}集`),
+    script: String(script?.script || ""),
+    scenes: Array.isArray(script?.scenes) ? script.scenes : [],
+    status: script?.status === "draft" || script?.status === "generating" || script?.status === "failed" ? script.status : "done",
+  };
+}
+
+const IDEA_SOURCE_REFERENCE_MARKER = "【用户最后确认剧情原文】";
+
+function splitIdeaSourceAndReference(value: string) {
+  const source = (value || "").trim();
+  const markerIndex = source.indexOf(IDEA_SOURCE_REFERENCE_MARKER);
+  if (markerIndex < 0) return { outlineSource: source, ideaSourceReference: "" };
+  return {
+    outlineSource: source.slice(0, markerIndex).trim(),
+    ideaSourceReference: source.slice(markerIndex + IDEA_SOURCE_REFERENCE_MARKER.length).trim(),
   };
 }
 
@@ -45,6 +88,7 @@ export function normalizeProject(project: any): SeedreamProject {
   })) : [];
   const shots = Array.isArray(project?.storyboardShots) ? project.storyboardShots.map((shot: any, index: number) => ({
     id: shot.id || `shot-${Date.now()}-${index}`,
+    episode: Number(shot.episode || project?.activeEpisode || 1),
     index: Number(shot.index || index + 1),
     title: shot.title || `镜头 ${index + 1}`,
     scene: shot.scene || "",
@@ -67,12 +111,31 @@ export function normalizeProject(project: any): SeedreamProject {
     referenceVideoAssetId: shot.referenceVideoAssetId,
     semanticAssetIds: Array.isArray(shot.semanticAssetIds) ? shot.semanticAssetIds : [],
   })) : [];
+  const storedModelStrategy = project?.modelStrategy;
+  const baseModelStrategy: keyof typeof WORKFLOW_MODEL_STRATEGIES = storedModelStrategy === "economy" || storedModelStrategy === "balanced" || storedModelStrategy === "quality"
+    ? storedModelStrategy
+    : DEFAULT_WORKFLOW_MODEL_STRATEGY;
+  const splitIdea = splitIdeaSourceAndReference(project?.outlineSource || "");
   return {
     ...base,
     ...project,
     conversationId: typeof project?.conversationId === "number" ? project.conversationId : typeof project?.conversation_id === "number" ? project.conversation_id : undefined,
     assets,
     selectedAssetIds: Array.isArray(project?.selectedAssetIds) ? project.selectedAssetIds : [],
+    modelStrategy: project?.modelStrategy || DEFAULT_WORKFLOW_MODEL_STRATEGY,
+    workflowModels: {
+      ...WORKFLOW_MODEL_STRATEGIES[baseModelStrategy],
+      ...(project?.workflowModels || {}),
+    },
+    flowStage: project?.flowStage || (project?.episodeScripts?.length ? "episodeScript" : project?.episodeOutlines?.length ? "outline" : project?.outlineSource ? "ideaContent" : "idea"),
+    originalIdea: project?.originalIdea || project?.idea || project?.scriptSourceExcerpt || "",
+    outlineSource: splitIdea.outlineSource || project?.originalIdea || project?.idea || project?.scriptSourceExcerpt || "",
+    ideaSourceReference: project?.ideaSourceReference || splitIdea.ideaSourceReference || "",
+    ideaChatMessages: Array.isArray(project?.ideaChatMessages) ? project.ideaChatMessages : [],
+    scriptSummary: project?.scriptSummary || base.scriptSummary,
+    episodeOutlines: Array.isArray(project?.episodeOutlines) ? project.episodeOutlines : [],
+    episodeScripts: Array.isArray(project?.episodeScripts) ? project.episodeScripts.map(normalizeEpisodeScript) : [],
+    activeEpisode: Number(project?.activeEpisode || 1),
     scriptSourceExcerpt: project?.scriptSourceExcerpt || project?.script_source_excerpt || "",
     scriptAdaptationInstruction: project?.scriptAdaptationInstruction || project?.script_adaptation_instruction || "",
     storyboardShots: shots,

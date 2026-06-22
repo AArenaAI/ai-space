@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { BookOpen, Copy, Download, FileText, ImageIcon, Layers, Loader2, MessageSquare, PanelLeftOpen, Paperclip, Play, Plus, RefreshCw, Send, Sparkles, Trash2, UploadCloud, Video, Wand2, X } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { ArrowLeft, BookOpen, Copy, Download, FileText, ImageIcon, Layers, Loader2, MessageSquare, PanelLeftOpen, Paperclip, Play, Plus, RefreshCw, Send, Sparkles, Trash2, UploadCloud, Video, Wand2, X, Clapperboard, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { useImage, type GeneratedImage } from "@/hooks/useImage";
 import { useVideo, type VideoGeneration } from "@/hooks/useVideo";
@@ -28,9 +30,12 @@ import {
   VIDEO_ASPECTS,
   VIDEO_MODELS,
   VIDEO_REFERENCE_ROLES,
-  WORKFLOW_DRAFT_MODEL,
-  WORKFLOW_MODEL,
-  WORKFLOW_POLISH_MODEL,
+  DEFAULT_WORKFLOW_MODELS,
+  DEFAULT_WORKFLOW_MODEL_STRATEGY,
+  WORKFLOW_MODEL_OPTIONS,
+  WORKFLOW_MODEL_STRATEGIES,
+  WORKFLOW_MODEL_STRATEGY_LABELS,
+  WORKFLOW_MODEL_TASKS,
   WORKFLOW_STEPS,
 } from "./constants";
 import type {
@@ -44,17 +49,25 @@ import type {
   GenerationJob,
   ScriptAssistantMode,
   ScriptChatMessage,
+  ScriptSummary,
+  EpisodeOutline,
+  EpisodeScript,
+  EpisodeScriptScene,
   SeedreamProject,
   SemanticAsset,
   SemanticAssetKind,
   ShotPurpose,
   ShotStatus,
   ShotType,
+  StoryFlowStage,
   DirectorBlock,
   StoredAsset,
   StoryboardShot,
   Tab,
   WorkflowMode,
+  WorkflowModelConfig,
+  WorkflowModelStrategy,
+  WorkflowModelTask,
   WorkflowView,
 } from "./types";
 import { FieldLabel, PillButton } from "./components";
@@ -63,6 +76,7 @@ import ManjuStudioLayout from "./ManjuStudioLayout";
 import FloatingToolbar from "./FloatingToolbar";
 import VideoSegmentGenerator from "./VideoSegmentGenerator";
 import BatchPreflightPanel from "./BatchPreflightPanel";
+import ShotOverviewTable from "./ShotOverviewTable";
 import ManjuCanvas, { type CanvasAssetDropPayload, type CanvasConnection, type CanvasNode } from "./ManjuCanvas";
 import { copyDirectorBlockToShots, createDefaultDirectorBlock, findDirectorBlockForShot, getSceneAssetForShot, injectDirectorBlockToPrompt } from "./directorBlock";
 import {
@@ -72,6 +86,9 @@ import {
   buildStoryboardSketchPrompt,
   buildStructuredShotImagePrompt,
   buildWorkflowSystemPrompt,
+  buildScriptOutlineSystemPrompt,
+  buildEffectiveIdeaSystemPrompt,
+  buildEpisodeScriptSystemPrompt,
 } from "./seedreamPrompts";
 
 function getAuthHeaders() {
@@ -133,6 +150,85 @@ function normalizeVideoDuration(duration?: number, model?: string) {
 
 function normalizeVideoResolution(resolution?: string, model?: string) {
   return normalizeVideoResolutionForModel(model, resolution);
+}
+
+type SeedanceVideoReferenceMode = "text_to_video" | "omni_reference" | "image_to_video" | "first_last_frame";
+
+type SeedanceVideoReferencePayload = {
+  mode: SeedanceVideoReferenceMode;
+  reference_image_urls?: string[];
+  reference_image_roles?: Array<"reference_image" | "first_frame" | "last_frame">;
+  reference_video_urls?: string[];
+  reference_image_role_mode?: "reference" | "first_frame" | "first_last_frame";
+  promptInjection?: string;
+};
+
+function assetReferenceUrl(asset?: StoredAsset) {
+  return asset ? asset.publicId || asset.url || "" : "";
+}
+
+function compactRefs(values: Array<string | undefined | null>) {
+  return values.map((item) => (item || "").trim()).filter(Boolean);
+}
+
+function buildSeedanceVideoReferences(input: {
+  mode?: SeedanceVideoReferenceMode;
+  images?: string[];
+  videos?: string[];
+  firstFrame?: string;
+  lastFrame?: string;
+}): SeedanceVideoReferencePayload {
+  const images = compactRefs(input.images || []);
+  const videos = compactRefs(input.videos || []);
+  const firstFrame = (input.firstFrame || "").trim();
+  const lastFrame = (input.lastFrame || "").trim();
+  const mode = input.mode || (firstFrame && lastFrame ? "first_last_frame" : images.length || firstFrame ? "image_to_video" : videos.length ? "omni_reference" : "text_to_video");
+
+  if (mode === "text_to_video") return { mode };
+
+  if (mode === "first_last_frame") {
+    const frameImages = compactRefs([firstFrame || images[0], lastFrame || images[1]]).slice(0, 2);
+    return {
+      mode,
+      reference_image_urls: frameImages,
+      reference_image_roles: frameImages.map((_, index) => index === 0 ? "first_frame" : "last_frame"),
+      reference_image_role_mode: frameImages.length >= 2 ? "first_last_frame" : "first_frame",
+    };
+  }
+
+  if (mode === "image_to_video") {
+    const singleImage = compactRefs([firstFrame || images[0]]).slice(0, 1);
+    return {
+      mode,
+      reference_image_urls: singleImage,
+      reference_image_roles: singleImage.map(() => "reference_image" as const),
+      reference_image_role_mode: "reference",
+    };
+  }
+
+  // 全能参考模式：所有图片统一为 reference_image。
+  // 如果有首帧/尾帧图片，按官方示例把语义注入 prompt 文本（"首帧为图片N，尾帧定格为图片N。"），
+  // 而不是用 first_frame/last_frame role 字段。
+  const allImages = [...images];
+  const promptParts: string[] = [];
+  if (firstFrame) {
+    let idx = allImages.indexOf(firstFrame);
+    if (idx === -1) { allImages.push(firstFrame); idx = allImages.length - 1; }
+    promptParts.push(`首帧为图片${idx + 1}`);
+  }
+  if (lastFrame) {
+    let idx = allImages.indexOf(lastFrame);
+    if (idx === -1) { allImages.push(lastFrame); idx = allImages.length - 1; }
+    promptParts.push(`尾帧定格为图片${idx + 1}`);
+  }
+  return {
+    mode: "omni_reference",
+    reference_image_urls: allImages,
+    reference_image_roles: allImages.map(() => "reference_image" as const),
+    reference_video_urls: videos,
+    reference_image_role_mode: "reference",
+    promptInjection: promptParts.length ? promptParts.join("，") + "。" : undefined,
+  };
 }
 
 function formatAssetSize(size?: number) {
@@ -238,6 +334,7 @@ function getShotAssets(shot: StoryboardShot | undefined, allAssets: StoredAsset[
 function createShot(index: number, patch: Partial<StoryboardShot> = {}): StoryboardShot {
   return {
     id: patch.id || `shot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    episode: patch.episode,
     index,
     title: patch.title || `镜头 ${index}`,
     scene: patch.scene || "",
@@ -265,6 +362,182 @@ function createShot(index: number, patch: Partial<StoryboardShot> = {}): Storybo
 
 function stripJsonFence(text: string) {
   return text.replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "").trim();
+}
+
+function parseLooseJson(text: string): any | null {
+  const candidates = [stripJsonFence(stripWorkflowText(text))];
+  const first = candidates[0];
+  if (/\\"(?:episode|title|script|scenes)\\"/.test(first)) {
+    candidates.push(first.replace(/\\"/g, '"').replace(/\\n/g, "\n"));
+  }
+  if ((first.startsWith('"') && first.endsWith('"')) || (first.startsWith("'") && first.endsWith("'"))) {
+    candidates.push(first.slice(1, -1).replace(/\\"/g, '"').replace(/\\n/g, "\n"));
+  }
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (typeof parsed === "string") {
+        const nested = parseLooseJson(parsed);
+        return nested || parsed;
+      }
+      return parsed;
+    } catch {}
+  }
+  return null;
+}
+
+function extractVisibleEpisodeScript(text: string) {
+  const parsed = parseLooseJson(text);
+  if (parsed && typeof parsed === "object" && typeof parsed.script === "string") return parsed.script;
+  return stripJsonFence(stripWorkflowText(text));
+}
+
+function RichMarkdown({ content, inverse = false }: { content: string; inverse?: boolean }) {
+  const tone = inverse ? "text-black" : "text-white/76";
+  return (
+    <div className={cn("max-w-none text-sm leading-6", tone)}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          h1: ({ children }) => <h1 className="mb-2 mt-1 text-xl font-semibold leading-7 tracking-[-0.03em]">{children}</h1>,
+          h2: ({ children }) => <h2 className="mb-2 mt-4 text-lg font-semibold leading-7 tracking-[-0.02em] first:mt-0">{children}</h2>,
+          h3: ({ children }) => <h3 className="mb-2 mt-3 text-base font-semibold leading-6 first:mt-0">{children}</h3>,
+          p: ({ children }) => <p className="my-1.5">{children}</p>,
+          strong: ({ children }) => <strong className="font-semibold text-inherit">{children}</strong>,
+          ul: ({ children }) => <ul className="my-2 list-disc space-y-1 pl-5">{children}</ul>,
+          ol: ({ children }) => <ol className="my-2 list-decimal space-y-1 pl-5">{children}</ol>,
+          li: ({ children }) => <li className="pl-1">{children}</li>,
+          hr: () => <div className={cn("my-4 h-px", inverse ? "bg-black/12" : "bg-white/12")} />,
+          code: ({ children }) => <code className={cn("rounded px-1 py-0.5 text-[0.92em]", inverse ? "bg-black/8" : "bg-white/10")}>{children}</code>,
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+const DEFAULT_SCRIPT_SUMMARY: ScriptSummary = {
+  episodeCount: 5,
+  genre: "",
+  targetAudience: "大众",
+  coreHook: "",
+  logline: "",
+  charactersText: "",
+  synopsis: "",
+};
+
+function formatOutlineSourceFromSummary(summary: ScriptSummary) {
+  return [
+    summary.genre ? `【类型】\n${summary.genre}` : "",
+    summary.targetAudience ? `【目标受众】\n${summary.targetAudience}` : "",
+    summary.coreHook ? `【核心梗】\n${summary.coreHook}` : "",
+    summary.logline ? `【一句话故事】\n${summary.logline}` : "",
+    summary.charactersText ? `【人物关系】\n${summary.charactersText}` : "",
+    summary.synopsis ? `【故事梗概】\n${summary.synopsis}` : "",
+  ].filter(Boolean).join("\n\n").trim();
+}
+
+function parseEffectiveIdeaResult(raw: string) {
+  const cleaned = stripJsonFence(stripWorkflowText(raw));
+  const parsed = parseLooseJson(cleaned);
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && typeof (parsed as any).outlineSource === "string") {
+    return String((parsed as any).outlineSource || "").trim();
+  }
+  return cleaned.trim();
+}
+
+const IDEA_SOURCE_REFERENCE_MARKER = "【用户最后确认剧情原文】";
+
+function splitIdeaSourceAndReference(value: string) {
+  const source = (value || "").trim();
+  const markerIndex = source.indexOf(IDEA_SOURCE_REFERENCE_MARKER);
+  if (markerIndex < 0) return { outlineSource: source, ideaSourceReference: "" };
+  return {
+    outlineSource: source.slice(0, markerIndex).trim(),
+    ideaSourceReference: source.slice(markerIndex + IDEA_SOURCE_REFERENCE_MARKER.length).trim(),
+  };
+}
+
+function parseScriptOutlineResult(raw: string): { summary: ScriptSummary; episodes: EpisodeOutline[] } {
+  const cleaned = stripJsonFence(stripWorkflowText(raw));
+  try {
+    const parsed = JSON.parse(cleaned);
+    const summary = parsed?.summary || {};
+    const episodes = Array.isArray(parsed?.episodes) ? parsed.episodes : [];
+    return {
+      summary: {
+        ...DEFAULT_SCRIPT_SUMMARY,
+        episodeCount: Number(summary.episodeCount || summary.episode_count || episodes.length || 5),
+        genre: String(summary.genre || ""),
+        targetAudience: String(summary.targetAudience || summary.target_audience || "大众"),
+        coreHook: String(summary.coreHook || summary.core_hook || ""),
+        logline: String(summary.logline || ""),
+        charactersText: String(summary.charactersText || summary.characters_text || summary.characters || ""),
+        synopsis: String(summary.synopsis || ""),
+      },
+      episodes: episodes.map((item: any, index: number) => ({
+        episode: Number(item.episode || index + 1),
+        title: String(item.title || `第${index + 1}集`),
+        summary: String(item.summary || item.description || ""),
+      })).filter((item: EpisodeOutline) => item.summary.trim()),
+    };
+  } catch {
+    return { summary: { ...DEFAULT_SCRIPT_SUMMARY, synopsis: cleaned }, episodes: [] };
+  }
+}
+
+function normalizeEpisodeScenes(value: any): EpisodeScriptScene[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((scene, index) => ({
+    scene: Number(scene?.scene || scene?.index || index + 1),
+    title: scene?.title ? String(scene.title) : undefined,
+    location: String(scene?.location || scene?.place || ""),
+    time: String(scene?.time || scene?.timeOfDay || ""),
+    characters: Array.isArray(scene?.characters) ? scene.characters.map((item: any) => String(item)).filter(Boolean) : [],
+    visualAction: String(scene?.visual_action || scene?.visualAction || scene?.action || ""),
+    dialogue: Array.isArray(scene?.dialogue) ? scene.dialogue.map((line: any) => ({
+      character: String(line?.character || line?.speaker || ""),
+      text: String(line?.text || line?.line || ""),
+      tone: line?.tone ? String(line.tone) : undefined,
+    })).filter((line: { text: string }) => line.text.trim()) : [],
+    narration: scene?.narration ? String(scene.narration) : undefined,
+    emotion: scene?.emotion ? String(scene.emotion) : undefined,
+    hook: scene?.hook ? String(scene.hook) : undefined,
+  })).filter((scene) => scene.location || scene.visualAction || scene.dialogue.length || scene.narration || scene.hook);
+}
+
+function formatEpisodeScriptFromScenes(episode: number, title: string, scenes: EpisodeScriptScene[]) {
+  if (!scenes.length) return "";
+  const blocks = scenes.map((scene) => {
+    const people = scene.characters.length ? scene.characters.join("、") : "未标注人物";
+    const dialogue = scene.dialogue.length
+      ? scene.dialogue.map((line) => `${line.character || "角色"}${line.tone ? `（${line.tone}）` : ""}：${line.text}`).join("\n")
+      : "无";
+    return [
+      `场${scene.scene}｜${scene.location || "未标注地点"}｜${scene.time || "未标注时间"}｜${people}`,
+      scene.title ? `【场景标题】\n${scene.title}` : "",
+      scene.visualAction ? `【画面动作】\n${scene.visualAction}` : "",
+      `【对白】\n${dialogue}`,
+      scene.narration ? `【旁白】\n${scene.narration}` : "",
+      scene.emotion ? `【情绪推进】\n${scene.emotion}` : "",
+      scene.hook ? `【悬念钩子】\n${scene.hook}` : "",
+    ].filter(Boolean).join("\n");
+  });
+  return [`第${episode}集：${title}`, ...blocks].join("\n\n");
+}
+
+function parseEpisodeScriptResult(raw: string, outline: EpisodeOutline): EpisodeScript {
+  const cleaned = stripJsonFence(stripWorkflowText(raw));
+  const parsed = parseLooseJson(cleaned);
+  if (parsed && typeof parsed === "object") {
+    const episode = Number(parsed?.episode || outline.episode);
+    const title = String(parsed?.title || outline.title);
+    const scenes = normalizeEpisodeScenes(parsed?.scenes);
+    const script = extractVisibleEpisodeScript(String(parsed?.script || formatEpisodeScriptFromScenes(episode, title, scenes) || cleaned));
+    return { episode, title, script, scenes, status: "done" };
+  }
+  return { episode: outline.episode, title: outline.title, script: extractVisibleEpisodeScript(cleaned), scenes: [], status: "done" };
 }
 
 function cleanShotBody(chunk: string) {
@@ -456,16 +729,22 @@ function parseSemanticAssets(text: string): SemanticAsset[] {
     const parsed = JSON.parse(cleaned);
     const list = Array.isArray(parsed) ? parsed : parsed?.assets || parsed?.semanticAssets;
     if (Array.isArray(list)) {
-      return list.map((item: any) => ({
-        id: item.id || `semantic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        kind: (item.kind || item.type || "character") as SemanticAssetKind,
-        name: item.name || item.title || "未命名资产",
-        summary: item.summary || item.description || "",
-        lockPrompt: item.lockPrompt || item.lock_prompt || item.image_prompt || item.prompt || "",
-        negativePrompt: item.negativePrompt || item.negative_prompt || "",
-        linkedAssetIds: Array.isArray(item.linkedAssetIds) ? item.linkedAssetIds : [],
-        createdAt: item.createdAt || new Date().toISOString(),
-      })).filter((item: SemanticAsset) => ["character", "scene", "prop", "style"].includes(item.kind));
+      return list.map((item: any) => {
+        const kind = (item.kind || item.type || "character") as SemanticAssetKind;
+        const name = item.name || item.title || "未命名资产";
+        const summary = item.summary || item.description || `${ASSET_KIND_LABELS[kind] || "资产"}：${name}。根据剧情材料提取，需在录入资产库前补充外观/空间/用途/剧情功能。`;
+        const lockPrompt = item.lockPrompt || item.lock_prompt || item.image_prompt || item.prompt || `${name}，${summary}，可作为 Seedream 资产参考图的一致性锁定词，清晰主体，稳定特征，干净构图`;
+        return {
+          id: item.id || `semantic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          kind,
+          name,
+          summary,
+          lockPrompt,
+          negativePrompt: item.negativePrompt || item.negative_prompt || "避免文字水印、错乱结构、重复肢体、低清晰度、风格不一致",
+          linkedAssetIds: Array.isArray(item.linkedAssetIds) ? item.linkedAssetIds : [],
+          createdAt: item.createdAt || new Date().toISOString(),
+        };
+      }).filter((item: SemanticAsset) => ["character", "scene", "prop", "style"].includes(item.kind));
     }
   } catch {
     // fallback below
@@ -488,9 +767,81 @@ function parseSemanticAssets(text: string): SemanticAsset[] {
   });
 }
 
+function normalizeSemanticAssetKey(asset: Pick<SemanticAsset, "kind" | "name">) {
+  return `${asset.kind}::${asset.name.trim().replace(/\s+/g, "").toLowerCase()}`;
+}
+
+function chooseCanonicalSemanticAsset(group: SemanticAsset[]) {
+  return [...group].sort((a, b) => {
+    const score = (asset: SemanticAsset) =>
+      (asset.imageUrl || asset.imageAssetId ? 1000 : 0)
+      + ((asset.linkedAssetIds?.length || 0) * 20)
+      + (asset.summary?.trim().length || 0)
+      + (asset.lockPrompt?.trim().length || 0);
+    return score(b) - score(a);
+  })[0];
+}
+
+function mergeDuplicateSemanticAssets(assets: SemanticAsset[]) {
+  const groups = new Map<string, SemanticAsset[]>();
+  assets.forEach((asset) => {
+    const key = normalizeSemanticAssetKey(asset);
+    groups.set(key, [...(groups.get(key) || []), asset]);
+  });
+
+  const idMap = new Map<string, string>();
+  const merged: SemanticAsset[] = [];
+  let removedCount = 0;
+
+  groups.forEach((group) => {
+    if (group.length === 1) {
+      merged.push(group[0]);
+      idMap.set(group[0].id, group[0].id);
+      return;
+    }
+
+    removedCount += group.length - 1;
+    const canonical = chooseCanonicalSemanticAsset(group);
+    const newestText = group[0];
+    group.forEach((asset) => idMap.set(asset.id, canonical.id));
+    merged.push({
+      ...canonical,
+      kind: newestText.kind,
+      name: newestText.name,
+      summary: newestText.summary || canonical.summary,
+      lockPrompt: newestText.lockPrompt || canonical.lockPrompt,
+      negativePrompt: newestText.negativePrompt || canonical.negativePrompt,
+      linkedAssetIds: Array.from(new Set(group.flatMap((asset) => asset.linkedAssetIds || []))),
+      imageAssetId: canonical.imageAssetId || group.find((asset) => asset.imageAssetId)?.imageAssetId,
+      imageUrl: canonical.imageUrl || group.find((asset) => asset.imageUrl)?.imageUrl,
+      createdAt: canonical.createdAt || newestText.createdAt,
+    });
+  });
+
+  return { assets: merged, idMap, removedCount };
+}
+
+function remapSemanticAssetIds(ids: string[] | undefined, idMap: Map<string, string>) {
+  return Array.from(new Set((ids || []).map((id) => idMap.get(id) || id).filter(Boolean)));
+}
 
 const TAB_VALUES: Tab[] = ["workflow", "image", "video"];
 const WORKFLOW_MODE_VALUES: WorkflowMode[] = ["script", "assets", "storyboardVideo", "storyboardImage"];
+
+const DEFAULT_ASSET_EXTRACT_INSTRUCTION = [
+  "从剧本大纲、分集正文和当前镜头列表中提取后续制作必须进入资产库的候选资产，不生成图片。",
+  "人物资产优先读取【剧本大纲/人物小传】，因为这里包含定妆、性格、关系和成长弧线；不要只按第一集正文里短暂出场信息生成角色。",
+  "场景、关键道具和本集临时视觉元素优先读取【分集正文/当前镜头列表】；整体风格综合大纲类型、故事梗概和本集画面。",
+  "必须覆盖四类：角色、场景、关键道具、整体风格；不要把普通一次性动作当资产。",
+  "每个资产必须填满 summary、lock_prompt、negative_prompt，禁止留空，内容用中文输出。",
+  "人物资产的 summary 只能写【人物外貌定妆】，不是人物介绍/人物小传；只保留年龄段、体型、脸部气质、发型、服装、随身物、标志性动作/姿态、可视化伤痕或器物痕迹。",
+  "人物资产禁止写团队职责、人物关系、性格弧线、通关结局、剧情作用、规则解释、内心动机、能力强弱等不可直接画出来的信息。",
+  "场景 summary 写空间结构/陈设/光线/材质/年代感；道具 summary 写形制/材质/磨损/符号/用途可视细节；风格 summary 写画面质感/色彩/镜头语言。",
+  "lock_prompt 写给 Seedream 生图：同样只写可视化信息，用中文写稳定外观、服装、材质、光线、时代、风格和关键可视特征；除 Seedream 等模型名外不要输出英文句子。",
+  "输出严格 JSON：{ \"assets\": [{ \"kind\": \"character|scene|prop|style\", \"name\": \"\", \"summary\": \"\", \"lock_prompt\": \"\", \"negative_prompt\": \"\" }] }。",
+].join("\n");
+
+type AssetCandidate = SemanticAsset & { selected: boolean };
 
 function canvasNodesSignature(nodes: CanvasNode[]) {
   return nodes
@@ -635,11 +986,29 @@ export default function SeedreamBetaPage() {
   }, [modeParam, tabParam]);
 
   const [workflowIdea, setWorkflowIdea] = useState("");
+  const [flowStage, setFlowStage] = useState<StoryFlowStage>("idea");
+  const [modelStrategy, setModelStrategy] = useState<WorkflowModelStrategy>(DEFAULT_WORKFLOW_MODEL_STRATEGY);
+  const [workflowModels, setWorkflowModels] = useState<WorkflowModelConfig>(DEFAULT_WORKFLOW_MODELS);
+  const [showModelAdvanced, setShowModelAdvanced] = useState(false);
+  const [originalIdea, setOriginalIdea] = useState("");
+  const [outlineSource, setOutlineSource] = useState("");
+  const [ideaSourceReference, setIdeaSourceReference] = useState("");
+  const [ideaInput, setIdeaInput] = useState("");
+  const [ideaChatMessages, setIdeaChatMessages] = useState<ScriptChatMessage[]>([]);
+  const [ideaChatting, setIdeaChatting] = useState(false);
+  const [scriptSummary, setScriptSummary] = useState<ScriptSummary>(DEFAULT_SCRIPT_SUMMARY);
+  const [episodeOutlines, setEpisodeOutlines] = useState<EpisodeOutline[]>([]);
+  const [episodeScripts, setEpisodeScripts] = useState<EpisodeScript[]>([]);
+  const [activeEpisode, setActiveEpisode] = useState(1);
+  const [ideaExtracting, setIdeaExtracting] = useState(false);
+  const [outlineGenerating, setOutlineGenerating] = useState(false);
+  const [episodeScriptGenerating, setEpisodeScriptGenerating] = useState<number | "all" | null>(null);
   const [workflowNovel, setWorkflowNovel] = useState("");
   const [scriptSourceExcerpt, setScriptSourceExcerpt] = useState("");
   const [scriptAdaptationInstruction, setScriptAdaptationInstruction] = useState("");
   const [workflowScript, setWorkflowScript] = useState("");
   const [workflowAssets, setWorkflowAssets] = useState("");
+  const [assetExtractInstruction, setAssetExtractInstruction] = useState(DEFAULT_ASSET_EXTRACT_INSTRUCTION);
   const [workflowStoryboardVideo, setWorkflowStoryboardVideo] = useState("");
   const [workflowStoryboardImage, setWorkflowStoryboardImage] = useState("");
   const [workflowGenerating, setWorkflowGenerating] = useState<WorkflowMode | null>(null);
@@ -662,6 +1031,9 @@ export default function SeedreamBetaPage() {
   const [activeShotId, setActiveShotId] = useState<string | undefined>();
   const [generationJobs, setGenerationJobs] = useState<GenerationJob[]>([]);
   const [semanticAssets, setSemanticAssets] = useState<SemanticAsset[]>([]);
+  const cleanedAssetProjectIdsRef = useRef<Set<string>>(new Set());
+  const [assetCandidates, setAssetCandidates] = useState<AssetCandidate[]>([]);
+  const [assetPreprocessOpen, setAssetPreprocessOpen] = useState(false);
   const [directorBlocks, setDirectorBlocks] = useState<DirectorBlock[]>([]);
   const [selectedOverviewShotIds, setSelectedOverviewShotIds] = useState<string[]>([]);
   const [activeSemanticAssetId, setActiveSemanticAssetId] = useState<string | undefined>();
@@ -693,6 +1065,34 @@ export default function SeedreamBetaPage() {
     return map;
   }, [assets]);
 
+  const activeEpisodeShots = useMemo(
+    () => storyboardShots.filter((shot) => Number(shot.episode || activeEpisode) === activeEpisode),
+    [storyboardShots, activeEpisode],
+  );
+
+  const storyboardFormalImageReadyCount = useMemo(
+    () => storyboardShots.filter((shot) => assets.some((asset) => shot.imageAssetIds.includes(asset.id) && asset.type === "image" && !isStoryboardSketchAsset(asset))).length,
+    [assets, storyboardShots],
+  );
+  const storyboardVideoReadyCount = useMemo(
+    () => storyboardShots.filter((shot) => (shot.videoAssetIds || []).length > 0 || shot.status === "video_ready").length,
+    [storyboardShots],
+  );
+
+  const setWorkflowModelStrategy = (strategy: WorkflowModelStrategy) => {
+    setModelStrategy(strategy);
+    if (strategy !== "custom") {
+      setWorkflowModels(WORKFLOW_MODEL_STRATEGIES[strategy]);
+    }
+  };
+
+  const updateWorkflowModel = (task: WorkflowModelTask, model: string) => {
+    setModelStrategy("custom");
+    setWorkflowModels((prev) => ({ ...prev, [task]: model }));
+  };
+
+  const getWorkflowModel = (task: WorkflowModelTask) => workflowModels[task] || DEFAULT_WORKFLOW_MODELS[task];
+
   // 从项目数据同步画布节点（保留已有位置）
   useEffect(() => {
     setStudioNodes((currentNodes) => {
@@ -715,45 +1115,36 @@ export default function SeedreamBetaPage() {
       });
     }
 
-    // 资产节点
-    semanticAssets.forEach((asset, i) => {
-      const pos = positionMap.get(asset.id);
-      nodes.push({
-        id: asset.id,
-        type: "assets",
-        title: asset.name || "未命名资产",
-        x: pos?.x ?? assetShelfPosition(i).x,
-        y: pos?.y ?? assetShelfPosition(i).y,
-        width: 360,
-        height: 440,
-        data: { asset, kind: asset.kind },
-        status: asset.imageUrl || asset.imageAssetId ? "done" : "empty",
-      });
-    });
+    // 资产库不自动派生成画布节点；只有用户从资产库主动插入/拖入时，才保留对应的 studio-assets-* 画布节点。
 
-    // 镜头卡固定为 shot；分镜图直接显示在镜头卡内部预览区，避免额外节点挤压画布。
-    // 视频是更重的产物，作为镜头卡右侧的稳定派生节点展示，避免切参数时被同步清掉。
-    storyboardShots.forEach((shot, i) => {
+    // 镜头卡是结构数据，不再作为画布主元素自动铺开；画布只放可生产/可引用的产物节点。
+    activeEpisodeShots.forEach((shot, i) => {
       const hasImage = shot.imageAssetIds && shot.imageAssetIds.length > 0;
       const hasVideo = shot.videoAssetIds && shot.videoAssetIds.length > 0;
       const videoNodeState = videoNodeStates[shot.id];
+      const hasActiveImageNode = hasImage || shot.status === "image_generating";
       const hasActiveVideoNode = hasVideo || videoNodeState?.status === "generating" || videoNodeState?.status === "error";
       const firstImageAssetId = shot.imageAssetIds?.[0];
       const firstVideoAssetId = shot.videoAssetIds?.[0];
       const resolvedShotImageUrl = firstImageAssetId ? storedAssetUrlById.get(firstImageAssetId) : undefined;
+      const resolvedFirstFrameUrl = shot.firstFrameAssetId ? storedAssetUrlById.get(shot.firstFrameAssetId) : undefined;
       const resolvedShotVideoUrl = firstVideoAssetId ? storedAssetUrlById.get(firstVideoAssetId) : undefined;
-      const shotPos = positionMap.get(shot.id);
-      nodes.push({
-        id: shot.id,
-        type: "shot",
-        title: `${i + 1}. ${shot.title || shot.scene || "未命名镜头"}`,
-        x: shotPos?.x ?? storyboardGridPosition(i).x,
-        y: shotPos?.y ?? storyboardGridPosition(i).y,
-        width: 360,
-        height: 420,
-        data: { ...shot, imageUrl: resolvedShotImageUrl, videoUrl: resolvedShotVideoUrl },
-        status: shot.status === "image_generating" ? "generating" : hasImage ? "done" : shot.status === "failed" ? "error" : "draft",
-      });
+
+      if (hasActiveImageNode) {
+        const imageNodeId = `image-node-${shot.id}`;
+        const imagePos = positionMap.get(imageNodeId);
+        nodes.push({
+          id: imageNodeId,
+          type: "image",
+          title: `${i + 1}. 分镜图`,
+          x: imagePos?.x ?? storyboardGridPosition(i).x,
+          y: imagePos?.y ?? storyboardGridPosition(i).y,
+          width: 360,
+          height: 420,
+          data: { ...shot, sourceShotId: shot.id, imageUrl: resolvedShotImageUrl, imageAssetId: firstImageAssetId, errorMessage: shot.status === "failed" ? "分镜图生成失败，请检查任务日志或重试。" : undefined },
+          status: shot.status === "image_generating" ? "generating" : hasImage ? "done" : shot.status === "failed" ? "error" : "empty",
+        });
+      }
 
       if (hasActiveVideoNode) {
         const videoNodeId = `video-node-${shot.id}`;
@@ -766,7 +1157,7 @@ export default function SeedreamBetaPage() {
           y: videoPos?.y ?? storyboardVideoPosition(i).y,
           width: 360,
           height: 420,
-          data: { ...shot, sourceShotId: shot.id, imageUrl: resolvedShotImageUrl, videoUrl: resolvedShotVideoUrl, errorMessage: videoNodeState?.status === "error" ? getSeedreamVideoErrorMessage(videoNodeState?.errorMessage) : undefined },
+          data: { ...shot, sourceShotId: shot.id, firstFrameUrl: resolvedFirstFrameUrl, videoUrl: resolvedShotVideoUrl, errorMessage: videoNodeState?.status === "error" ? getSeedreamVideoErrorMessage(videoNodeState?.errorMessage) : undefined },
           status: videoNodeState?.status === "error" ? "error" : videoNodeState?.status === "generating" ? "generating" : hasVideo ? "done" : "empty",
         });
       }
@@ -780,10 +1171,10 @@ export default function SeedreamBetaPage() {
         type: "director",
         title: "导演台",
         x: pos?.x ?? 60,
-        y: pos?.y ?? storyboardGridPosition(Math.max(storyboardShots.length, 1)).y + 120,
+        y: pos?.y ?? storyboardGridPosition(Math.max(activeEpisodeShots.length, 1)).y + 120,
         width: 420,
         height: 280,
-        data: { shotCount: storyboardShots.length },
+        data: { shotCount: activeEpisodeShots.length, episode: activeEpisode },
         status: "done",
       });
     }
@@ -795,7 +1186,7 @@ export default function SeedreamBetaPage() {
         type: "generator",
         title: group.title,
         x: pos?.x ?? 560 + (i % 3) * 480,
-        y: pos?.y ?? storyboardGridPosition(Math.max(storyboardShots.length, 1)).y + 120 + Math.floor(i / 3) * 380,
+        y: pos?.y ?? storyboardGridPosition(Math.max(activeEpisodeShots.length, 1)).y + 120 + Math.floor(i / 3) * 380,
         width: 420,
         height: 300,
         data: {
@@ -821,6 +1212,37 @@ export default function SeedreamBetaPage() {
           return !(node.type === "video" && sourceShotId && autoVideoSourceIds.has(sourceShotId));
         })
         .map((node) => {
+          if (node.type === "assets") {
+            const linkedAssetId = typeof node.data?.linkedAssetId === "string" ? node.data.linkedAssetId : node.id;
+            const linkedAsset = semanticAssets.find((asset) => asset.id === linkedAssetId);
+            if (!linkedAsset) return node;
+            const assetJob = generationJobs.find((job) => job.type === "image" && job.semanticAssetId === linkedAssetId && (job.status === "pending" || job.status === "failed"));
+            const nextStatus: CanvasNode["status"] = assetJob?.status === "pending"
+              ? "generating"
+              : assetJob?.status === "failed"
+                ? "error"
+                : linkedAsset.imageUrl || linkedAsset.imageAssetId
+                  ? "done"
+                  : node.status === "generating" ? "draft" : node.status;
+            return {
+              ...node,
+              title: linkedAsset.name || node.title,
+              status: nextStatus,
+              data: {
+                ...node.data,
+                linkedAssetId,
+                kind: linkedAsset.kind,
+                category: linkedAsset.kind,
+                summary: linkedAsset.summary || node.data?.summary,
+                content: linkedAsset.summary || node.data?.content,
+                lockPrompt: linkedAsset.lockPrompt || node.data?.lockPrompt,
+                imageAssetId: linkedAsset.imageAssetId || node.data?.imageAssetId,
+                imageUrl: linkedAsset.imageUrl || node.data?.imageUrl,
+                asset: linkedAsset,
+                errorMessage: assetJob?.status === "failed" ? "资产图生成失败，请检查任务日志或重试。" : node.data?.errorMessage,
+              },
+            };
+          }
           const sourceShotId = typeof node.data?.sourceShotId === "string" ? node.data.sourceShotId : undefined;
           const sourceShot = sourceShotId ? storyboardShots.find((shot) => shot.id === sourceShotId) : undefined;
           if (!sourceShot) return node;
@@ -828,6 +1250,7 @@ export default function SeedreamBetaPage() {
           const sourceImageAssetId = sourceShot.imageAssetIds?.[0];
           const sourceVideoAssetId = sourceShot.videoAssetIds?.[0];
           const sourceImageUrl = sourceImageAssetId ? storedAssetUrlById.get(sourceImageAssetId) : undefined;
+          const sourceFirstFrameUrl = sourceShot.firstFrameAssetId ? storedAssetUrlById.get(sourceShot.firstFrameAssetId) : undefined;
           const sourceVideoUrl = sourceVideoAssetId ? storedAssetUrlById.get(sourceVideoAssetId) : undefined;
           const syncedStatus: CanvasNode["status"] = node.type === "video" && videoNodeState?.status
             ? videoNodeState.status
@@ -848,7 +1271,9 @@ export default function SeedreamBetaPage() {
               scene: sourceShot.scene || node.data?.scene || "",
               videoAssetIds: sourceShot.videoAssetIds || node.data?.videoAssetIds,
               imageAssetIds: sourceShot.imageAssetIds || node.data?.imageAssetIds,
-              imageUrl: sourceImageUrl || node.data?.imageUrl,
+              imageUrl: node.type === "image" ? sourceImageUrl || node.data?.imageUrl : node.data?.imageUrl,
+              storyboardImageUrl: node.type === "shot" ? sourceImageUrl || node.data?.storyboardImageUrl : node.data?.storyboardImageUrl,
+              firstFrameUrl: node.type === "video" ? sourceFirstFrameUrl : node.data?.firstFrameUrl,
               videoUrl: sourceVideoUrl || node.data?.videoUrl,
               errorMessage: node.type === "video" && videoNodeState?.status === "error" ? getSeedreamVideoErrorMessage(videoNodeState?.errorMessage) : node.data?.errorMessage,
             },
@@ -859,62 +1284,27 @@ export default function SeedreamBetaPage() {
       return canvasNodesSignature(currentNodes) === canvasNodesSignature(nextNodes) ? currentNodes : nextNodes;
     });
 
-    // 自动连线：按场景 + 索引顺序
+    // 自动连线只连接画布上真实存在的产物节点；镜头数据不再作为画布节点参与连线。
     const conns: CanvasConnection[] = [];
-    const sorted = [...storyboardShots].sort((a, b) => a.index - b.index);
-    const scriptNodeExists = Boolean(workflowScript?.trim());
-    const shotNodeIds = sorted.map((shot) => shot.id);
-    const directorNodeExists = directorBlocks.length > 0;
-
-    if (scriptNodeExists && shotNodeIds[0]) {
-      conns.push({ id: `ctx-script-${shotNodeIds[0]}`, from: "script-main", to: shotNodeIds[0], label: "生成分镜", type: "context" });
-    }
-
+    const sorted = [...activeEpisodeShots].sort((a, b) => a.index - b.index);
 
     sorted.forEach((shot) => {
+      const hasImageNode = (shot.imageAssetIds && shot.imageAssetIds.length > 0) || shot.status === "image_generating";
       const videoNodeState = videoNodeStates[shot.id];
       const hasVideoNode = (shot.videoAssetIds && shot.videoAssetIds.length > 0) || videoNodeState?.status === "generating" || videoNodeState?.status === "error";
-      if (hasVideoNode) {
-        conns.push({ id: `gen-video-${shot.id}`, from: shot.id, to: `video-node-${shot.id}`, label: "生成视频", type: "generator" });
+      const imageNodeId = `image-node-${shot.id}`;
+      const videoNodeId = `video-node-${shot.id}`;
+      if (hasImageNode && hasVideoNode && shot.firstFrameAssetId && shot.imageAssetIds?.includes(shot.firstFrameAssetId)) {
+        conns.push({ id: `gen-image-video-${shot.id}`, from: imageNodeId, to: videoNodeId, label: "首帧", type: "generator" });
       }
     });
-
-    if (directorNodeExists && shotNodeIds.length > 0) {
-      conns.push({ id: `ctx-${shotNodeIds[shotNodeIds.length - 1]}-director-main`, from: shotNodeIds[shotNodeIds.length - 1], to: "director-main", label: "导演调度", type: "context" });
-    }
-    generatorGroups.forEach((group) => {
-      group.shotIds.forEach((shotId) => {
-        conns.push({
-          id: `gen-${shotId}-${group.id}`,
-          from: shotId,
-          to: group.id,
-          label: group.mode === "image" ? "生图" : "生视频",
-          type: "generator",
-        });
-      });
-    });
-    // 多镜头故事板默认不画每一条顺序线：编号已经表达顺序，满屏转场线会让画布显得堆积。
-    if (sorted.length <= 4) {
-      for (let i = 0; i < sorted.length - 1; i++) {
-        const curr = sorted[i];
-        const next = sorted[i + 1];
-        const isTransition = curr.scene !== next.scene;
-        conns.push({
-          id: `conn-${curr.id}-${next.id}`,
-          from: curr.id,
-          to: next.id,
-          label: isTransition ? "转场" : undefined,
-          type: isTransition ? "scene-transition" : "sequence",
-        });
-      }
-    }
     setStudioConnections((currentConnections) => {
       const autoIds = new Set(conns.map((connection) => connection.id));
       const manualConnections = currentConnections.filter((connection) => !autoIds.has(connection.id) && connection.id.startsWith("manual-"));
       const nextConnections = [...manualConnections, ...conns];
       return canvasConnectionsSignature(currentConnections) === canvasConnectionsSignature(nextConnections) ? currentConnections : nextConnections;
     });
-  }, [workflowScript, semanticAssets, storyboardShots, directorBlocks.length, generatorGroups, videoNodeStates, storedAssetUrlById]);
+  }, [workflowScript, storyboardShots, activeEpisodeShots, activeEpisode, directorBlocks.length, generatorGroups, videoNodeStates, storedAssetUrlById, semanticAssets, generationJobs]);
 
   const lastImage: GeneratedImage | undefined = useMemo(() => {
     if (!lastImageId) return images[0];
@@ -983,7 +1373,7 @@ export default function SeedreamBetaPage() {
       { label: "纯剧本", value: workflowScript.trim() ? `${workflowScript.trim().length} 字` : "未导入", ok: workflowScript.trim().length > 100, hint: "应只有场景、动作、对白、旁白，不混入 Seedance 指令。" },
       { label: "语义资产", value: semanticAssets.length ? `${semanticAssets.length} 个` : "未导入/未生成", ok: semanticAssets.length > 0, hint: "角色、场景、道具、风格应在这里，不只是素材库图片。" },
       { label: "素材库", value: assets.length ? `${assets.length} 个素材` : "暂无素材", ok: assets.length > 0, hint: "已有角色图/场景图应上传到素材库并关联资产或镜头。" },
-      { label: "镜头卡", value: totalShots ? `${totalShots} 镜头` : "未解析", ok: totalShots > 0, hint: "故事板版应解析成镜头卡，而不是只留在原始文本里。" },
+      { label: "镜头列表", value: totalShots ? `${totalShots} 镜头` : "未解析", ok: totalShots > 0, hint: "故事板版应解析成镜头列表，而不是只留在原始文本里。" },
       { label: "视频提示词", value: totalShots ? `${videoPromptCount}/${totalShots}` : "0/0", ok: totalShots > 0 && videoPromptCount === totalShots, hint: "Seedance直接投喂版应覆盖每个镜头的视频提示词。" },
       { label: "分镜图提示词", value: totalShots ? `${imagePromptCount}/${totalShots}` : "0/0", ok: totalShots > 0 && imagePromptCount > 0, hint: "可为空一部分，但生成正式图前需要补齐关键镜头。" },
       { label: "镜头资产绑定", value: totalShots ? `${Math.max(semanticBoundCount, materialBoundCount)}/${totalShots}` : "0/0", ok: totalShots > 0 && (semanticBoundCount > 0 || materialBoundCount > 0), hint: "导入后还需要给镜头绑定角色/场景/参考素材。" },
@@ -1010,18 +1400,21 @@ export default function SeedreamBetaPage() {
   };
 
   const mergeStoryboardShots = (nextText: string, mode: "storyboard" | "seedance") => {
-    const parsedShots = parseStoryboardShots(nextText, videoModel);
+    const parsedShots = parseStoryboardShots(nextText, videoModel).map((shot) => ({ ...shot, episode: activeEpisode }));
     if (!parsedShots.length) {
       toast.error("没有解析到镜头/段落，请检查格式是否包含“段01”或“镜头1”。");
       return;
     }
     setStoryboardShots((prev) => {
+      const currentEpisodeShots = prev.filter((shot) => Number(shot.episode || activeEpisode) === activeEpisode);
+      const otherEpisodeShots = prev.filter((shot) => Number(shot.episode || activeEpisode) !== activeEpisode);
       const merged = parsedShots.map((shot, index) => {
-        const existing = prev[index];
+        const existing = currentEpisodeShots[index];
         if (!existing) return shot;
         if (mode === "seedance") {
           return {
             ...existing,
+            episode: activeEpisode,
             videoPrompt: shot.videoPrompt || existing.videoPrompt,
             dialogue: shot.dialogue || cleanLegacyDialogueNarration(existing.dialogue),
             narration: shot.narration || cleanLegacyDialogueNarration(existing.narration),
@@ -1031,6 +1424,7 @@ export default function SeedreamBetaPage() {
         }
         return {
           ...existing,
+          episode: activeEpisode,
           index: shot.index || index + 1,
           title: shot.title || existing.title,
           scene: shot.scene || existing.scene,
@@ -1048,12 +1442,12 @@ export default function SeedreamBetaPage() {
         };
       });
       setActiveShotId(merged[0]?.id);
-      return merged;
+      return [...otherEpisodeShots, ...merged].sort((a, b) => (Number(a.episode || 1) - Number(b.episode || 1)) || a.index - b.index);
     });
     if (mode === "storyboard") setWorkflowStoryboardVideo(nextText);
     else setWorkflowStoryboardVideo((prev) => prev || nextText);
     openWorkflowStep("storyboardVideo");
-    toast.success(`${mode === "storyboard" ? "故事板" : "Seedance投喂版"}已导入，并进入故事板生产台（${parsedShots.length} 张镜头卡）`);
+    toast.success(`${mode === "storyboard" ? "故事板" : "Seedance投喂版"}已导入，并进入故事板生产台（${parsedShots.length} 条镜头）`);
   };
 
   const importLayerText = (layer: "script" | "storyboard" | "seedance", text: string) => {
@@ -1072,45 +1466,56 @@ export default function SeedreamBetaPage() {
     mergeStoryboardShots(clean, layer);
   };
 
+  const isSupportedTextImportFile = (file: File) => {
+    const name = file.name.toLowerCase();
+    const type = file.type.toLowerCase();
+    return name.endsWith(".txt") || name.endsWith(".md") || name.endsWith(".markdown") || type === "text/plain" || type === "text/markdown" || type === "text/x-markdown";
+  };
+
+  const readTextImportFile = (file: File, onText: (text: string) => void) => {
+    if (!isSupportedTextImportFile(file)) {
+      toast.error("仅支持 .txt / .md / .markdown 文本文件");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => onText(String(reader.result || ""));
+    reader.onerror = () => toast.error("读取文件失败");
+    reader.readAsText(file, "utf-8");
+  };
+
   const handleImportFile = (layer: "script" | "storyboard" | "seedance", event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => importLayerText(layer, String(reader.result || ""));
-    reader.onerror = () => toast.error("读取文件失败");
-    reader.readAsText(file);
+    readTextImportFile(file, (text) => importLayerText(layer, text));
   };
 
   const handleImportScriptAndShotsFile = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const clean = stripWorkflowText(String(reader.result || ""));
+    readTextImportFile(file, (text) => {
+      const clean = stripWorkflowText(text);
       if (!clean) {
         toast.error("导入内容为空");
         return;
       }
       setWorkflowScript(clean);
       setScriptSourceExcerpt((prev) => prev || clean.slice(0, 2000));
-      const parsedShots = parseStoryboardShots(clean, videoModel);
+      const parsedShots = parseStoryboardShots(clean, videoModel).map((shot) => ({ ...shot, episode: activeEpisode }));
       if (parsedShots.length) {
         setStoryboardShots(parsedShots);
         setActiveShotId(parsedShots[0]?.id);
         setWorkflowStoryboardVideo(clean);
         setWorkflowMode("storyboardImage");
         setWorkflowView("step");
-        toast.success(`剧本已上传，并解析为 ${parsedShots.length} 张镜头卡`);
+        toast.success(`剧本已上传，并解析为 ${parsedShots.length} 条镜头列表`);
       } else {
         setWorkflowMode("script");
         setWorkflowView("step");
-        toast.success(`剧本已上传，约 ${clean.length} 字，可继续拆成镜头卡`);
+        toast.success(`剧本已上传，约 ${clean.length} 字，可继续拆成镜头列表`);
       }
-    };
-    reader.onerror = () => toast.error("读取文件失败");
-    reader.readAsText(file);
+    });
   };
 
   const focusAssetKind = (kind: AssetKindFilter) => {
@@ -1133,7 +1538,7 @@ export default function SeedreamBetaPage() {
       headers: getAuthHeaders(),
       body: JSON.stringify({
         title: workspaceProjectName || "漫剧项目",
-        model: WORKFLOW_MODEL,
+        model: getWorkflowModel("ideaChat"),
         skill_key: "seedream-beta",
       }),
     });
@@ -1150,10 +1555,41 @@ export default function SeedreamBetaPage() {
   useEffect(() => {
     if (!activeProject) return;
     setWorkflowIdea(activeProject.idea || "");
+    setModelStrategy(activeProject.modelStrategy || DEFAULT_WORKFLOW_MODEL_STRATEGY);
+    setWorkflowModels({ ...DEFAULT_WORKFLOW_MODELS, ...(activeProject.workflowModels || {}) });
+    // 已在画布工作过且保存了 flowStage="canvas" 的项目，切走再切回来应恢复画布，而不是被强制拉回剧本孵化。
+    // 全新项目仍从 "idea" 开始；无生产数据的空项目也不自动进入画布。
+    const hasCanvasContent =
+      (activeProject.storyboardShots?.length || 0) > 0 ||
+      (activeProject.canvasNodes?.length || 0) > 0 ||
+      (activeProject.semanticAssets?.length || 0) > 0;
+    const initialFlowStage: StoryFlowStage =
+      hasCanvasContent
+        ? "canvas"
+        : activeProject.flowStage && activeProject.flowStage !== "canvas"
+          ? activeProject.flowStage
+          : activeProject.episodeScripts?.length
+            ? "episodeScript"
+            : activeProject.episodeOutlines?.length
+              ? "outline"
+              : activeProject.outlineSource
+                ? "ideaContent"
+                : "idea";
+    setFlowStage(initialFlowStage);
+    setOriginalIdea(activeProject.originalIdea || activeProject.idea || activeProject.scriptSourceExcerpt || "");
+    const splitIdea = splitIdeaSourceAndReference(activeProject.outlineSource || "");
+    setOutlineSource(splitIdea.outlineSource || activeProject.originalIdea || activeProject.idea || activeProject.scriptSourceExcerpt || "");
+    setIdeaSourceReference(activeProject.ideaSourceReference || splitIdea.ideaSourceReference || "");
+    setIdeaInput("");
+    setIdeaChatMessages(activeProject.ideaChatMessages || []);
+    setScriptSummary(activeProject.scriptSummary || DEFAULT_SCRIPT_SUMMARY);
+    setEpisodeOutlines(activeProject.episodeOutlines || []);
+    setEpisodeScripts(activeProject.episodeScripts || []);
+    setActiveEpisode(activeProject.activeEpisode || 1);
     setWorkflowNovel(activeProject.novel || "");
     setScriptSourceExcerpt(activeProject.scriptSourceExcerpt || "");
     setScriptAdaptationInstruction(activeProject.scriptAdaptationInstruction || "");
-    setWorkflowScript(activeProject.script || "");
+    setWorkflowScript(extractVisibleEpisodeScript(activeProject.script || activeProject.episodeScripts?.find((item) => item.episode === (activeProject.activeEpisode || 1))?.script || ""));
     setWorkflowAssets(activeProject.assetsText || "");
     setWorkflowStoryboardVideo(activeProject.storyboardVideo || "");
     setWorkflowStoryboardImage(activeProject.storyboardImage || "");
@@ -1164,13 +1600,67 @@ export default function SeedreamBetaPage() {
     const loadedShots = (activeProject.storyboardShots || []).map(normalizeLoadedShot);
     setStoryboardShots(loadedShots);
     setActiveShotId(activeProject.activeShotId || loadedShots[0]?.id);
+    if (initialFlowStage === "canvas") {
+      // 切到别处再切回来时，不能只恢复画布外壳；
+      // 有镜头列表的项目应直接回到“分镜成片”生产检查，否则右侧会停在总览/其他步骤，看起来像镜头列表丢了。
+      if (loadedShots.length > 0) {
+        setWorkflowMode("storyboardImage");
+        setWorkflowView("step");
+      } else if ((activeProject.semanticAssets?.length || 0) > 0) {
+        setWorkflowMode("assets");
+        setWorkflowView("step");
+      }
+    }
     setGenerationJobs(activeProject.generationJobs || []);
     setSemanticAssets(activeProject.semanticAssets || []);
     setDirectorBlocks(activeProject.directorBlocks || []);
     setGeneratorGroups(activeProject.generatorGroups || []);
+    setStudioNodes(activeProject.canvasNodes || []);
+    setStudioConnections(activeProject.canvasConnections || []);
     setActiveSemanticAssetId(activeProject.semanticAssets?.[0]?.id);
     setLoadedProjectId(activeProject.id);
   }, [activeProject?.id]);
+
+
+  useEffect(() => {
+    if (!activeProject || loadedProjectId !== activeProject.id || cleanedAssetProjectIdsRef.current.has(activeProject.id)) return;
+    const { assets: mergedAssets, idMap, removedCount } = mergeDuplicateSemanticAssets(semanticAssets);
+    cleanedAssetProjectIdsRef.current.add(activeProject.id);
+    if (!removedCount) return;
+
+    setSemanticAssets(mergedAssets);
+    setActiveSemanticAssetId((prev) => idMap.get(prev || "") || mergedAssets[0]?.id);
+    setStoryboardShots((prev) => prev.map((shot) => ({
+      ...shot,
+      semanticAssetIds: remapSemanticAssetIds(shot.semanticAssetIds, idMap),
+    })));
+    setGenerationJobs((prev) => prev.map((job) => job.semanticAssetId
+      ? { ...job, semanticAssetId: idMap.get(job.semanticAssetId) || job.semanticAssetId }
+      : job));
+    setDirectorBlocks((prev) => prev.map((block) => ({
+      ...block,
+      sceneBlock: {
+        ...block.sceneBlock,
+        sceneAssetId: block.sceneBlock.sceneAssetId ? idMap.get(block.sceneBlock.sceneAssetId) || block.sceneBlock.sceneAssetId : block.sceneBlock.sceneAssetId,
+      },
+      characters: block.characters.map((character) => ({
+        ...character,
+        semanticAssetId: idMap.get(character.semanticAssetId) || character.semanticAssetId,
+      })),
+    })));
+    setStudioNodes((prev) => prev.map((node) => {
+      const linkedAssetId = typeof node.data?.linkedAssetId === "string" ? node.data.linkedAssetId : undefined;
+      if (!linkedAssetId) return node;
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          linkedAssetId: idMap.get(linkedAssetId) || linkedAssetId,
+        },
+      };
+    }));
+    toast.success(`已清理资产库：合并 ${removedCount} 张重复资产卡`);
+  }, [activeProject, loadedProjectId, semanticAssets]);
 
 
   useEffect(() => {
@@ -1179,6 +1669,17 @@ export default function SeedreamBetaPage() {
       ...project,
       title: activeProject.title,
       idea: workflowIdea,
+      flowStage,
+      modelStrategy,
+      workflowModels,
+      originalIdea,
+      outlineSource,
+      ideaSourceReference,
+      ideaChatMessages,
+      scriptSummary,
+      episodeOutlines,
+      episodeScripts,
+      activeEpisode,
       novel: workflowNovel,
       scriptSourceExcerpt,
       scriptAdaptationInstruction,
@@ -1196,9 +1697,11 @@ export default function SeedreamBetaPage() {
       semanticAssets,
       directorBlocks,
       generatorGroups,
+      canvasNodes: studioNodes,
+      canvasConnections: studioConnections,
       updatedAt: new Date().toISOString(),
     } : project));
-  }, [activeProject?.id, loadedProjectId, workflowIdea, workflowNovel, scriptSourceExcerpt, scriptAdaptationInstruction, workflowScript, workflowAssets, workflowStoryboardVideo, workflowStoryboardImage, assets, selectedAssetIds, imagePrompt, videoPrompt, storyboardShots, activeShotId, generationJobs, semanticAssets, directorBlocks, generatorGroups]);
+  }, [activeProject?.id, loadedProjectId, workflowIdea, flowStage, modelStrategy, workflowModels, originalIdea, outlineSource, ideaSourceReference, ideaChatMessages, scriptSummary, episodeOutlines, episodeScripts, activeEpisode, workflowNovel, scriptSourceExcerpt, scriptAdaptationInstruction, workflowScript, workflowAssets, workflowStoryboardVideo, workflowStoryboardImage, assets, selectedAssetIds, imagePrompt, videoPrompt, storyboardShots, activeShotId, generationJobs, semanticAssets, directorBlocks, generatorGroups, studioNodes, studioConnections]);
 
 
 
@@ -1211,12 +1714,18 @@ export default function SeedreamBetaPage() {
       const failedImage = failedImages.find((item) => item.id === job.mediaId);
       if (failedImage) {
         if (job.shotId) updateShot(job.shotId, { status: "failed" });
+        if (job.canvasNodeId) {
+          setStudioNodes((current) => current.map((item) => item.id === job.canvasNodeId
+            ? { ...item, status: "error", data: { ...item.data, errorMessage: getErrorMessage(failedImage.error_message || failedImage, { module: "image", fallbackMessage: "图片生成失败" }) } }
+            : item));
+        }
         return { ...job, status: "failed", updatedAt: new Date().toISOString() };
       }
       const image = succeededImages.find((item) => item.id === job.mediaId);
       if (!image) return job;
       const shot = storyboardShots.find((item) => item.id === job.shotId);
       const semanticAsset = semanticAssets.find((item) => item.id === job.semanticAssetId);
+      const canvasNode = job.canvasNodeId ? studioNodes.find((item) => item.id === job.canvasNodeId) : undefined;
       const asset = createAssetFromImage(image, shot, semanticAsset, job.intent || (semanticAsset ? "asset_image" : "shot_image"));
       if (asset) {
         const existingAsset = assets.find((item) => item.publicId === asset.publicId && item.shotId === shot?.id);
@@ -1236,10 +1745,24 @@ export default function SeedreamBetaPage() {
               }
             : item));
         }
+        if (canvasNode) {
+          setStudioNodes((current) => current.map((item) => item.id === canvasNode.id
+            ? {
+                ...item,
+                status: "done",
+                data: {
+                  ...item.data,
+                  imageAssetId: assetIdToLink,
+                  imageUrl: asset.url,
+                  errorMessage: undefined,
+                },
+              }
+            : item));
+        }
       }
       return { ...job, status: "succeeded", updatedAt: new Date().toISOString() };
     }));
-  }, [images, storyboardShots, semanticAssets, assets]);
+  }, [images, storyboardShots, semanticAssets, assets, studioNodes]);
 
   useEffect(() => {
     const succeededVideos = videos.filter((video) => video.video_url && video.status === "succeeded");
@@ -1396,6 +1919,45 @@ export default function SeedreamBetaPage() {
     else setWorkflowStoryboardImage(value);
   };
 
+  const getActiveEpisodeScriptForGeneration = () => {
+    const activeScript = episodeScripts.find((item) => item.episode === activeEpisode);
+    const sceneText = activeScript?.scenes?.length
+      ? `【结构化场次 JSON】\n${JSON.stringify(activeScript.scenes, null, 2)}`
+      : "";
+    const scriptText = workflowScript.trim() || activeScript?.script || workflowNovel.trim() || workflowIdea.trim();
+    return [scriptText ? `【剧本正文】\n${scriptText}` : "", sceneText].filter(Boolean).join("\n\n");
+  };
+
+  const getActiveCanvasShotsForAssetExtraction = () => activeEpisodeShots.length
+    ? `【当前镜头列表】\n${JSON.stringify(activeEpisodeShots.map((shot) => ({
+      index: shot.index,
+      title: shot.title,
+      scene: shot.scene,
+      characters: shot.characters,
+      shotType: shot.shotType,
+      purpose: shot.purpose,
+      imagePrompt: shot.imagePrompt,
+      videoPrompt: shot.videoPrompt,
+    })), null, 2)}`
+    : "";
+
+  const getScriptOutlineForAssetExtraction = () => [
+    scriptSummary.charactersText ? `【剧本大纲｜人物小传】\n${scriptSummary.charactersText}` : "",
+    scriptSummary.genre || scriptSummary.coreHook || scriptSummary.logline || scriptSummary.synopsis
+      ? `【剧本大纲｜摘要】\n类型：${scriptSummary.genre || ""}\n核心梗：${scriptSummary.coreHook || ""}\n一句话故事：${scriptSummary.logline || ""}\n故事梗概：${scriptSummary.synopsis || ""}`
+      : "",
+    episodeOutlines.length
+      ? `【剧本大纲｜分集梗概】\n${episodeOutlines.map((episode) => `第${episode.episode}集｜${episode.title}\n${episode.summary}`).join("\n\n")}`
+      : "",
+  ].filter(Boolean).join("\n\n");
+
+  const getAssetExtractionSourceInput = () => [
+    getScriptOutlineForAssetExtraction(),
+    getActiveEpisodeScriptForGeneration(),
+    getActiveCanvasShotsForAssetExtraction(),
+    workflowIdea.trim() ? `【原始创意】\n${workflowIdea.trim()}` : "",
+  ].filter(Boolean).join("\n\n");
+
   const buildWorkflowInput = (mode: WorkflowMode) => {
     if (mode === "novel") return workflowIdea.trim();
     if (mode === "script") {
@@ -1405,11 +1967,24 @@ export default function SeedreamBetaPage() {
       if (!source) return "";
       return `【本集大概内容】\n${source}\n\n【剧本生成要求】\n${instruction || "改成适合竖屏漫剧的一集/一段影视剧本；只基于上面的本集大概内容生成，不读取、不等待、不假设整本小说素材。"}`;
     }
-    if (mode === "assets") return workflowScript.trim() || workflowNovel.trim() || workflowIdea.trim();
-    if (mode === "storyboardVideo") return `【剧本】\n${workflowScript.trim() || workflowNovel.trim() || workflowIdea.trim()}\n\n【资产】\n${workflowAssets.trim() || "（暂无资产，请自行提取必要一致性信息）"}`;
-    return `【资产】\n${workflowAssets.trim() || "（暂无资产，请自行提取必要一致性信息）"}\n\n【分镜/剧本】\n${workflowStoryboardVideo.trim() || workflowScript.trim() || workflowNovel.trim() || workflowIdea.trim()}`;
+    const activeEpisodeScriptForGeneration = getActiveEpisodeScriptForGeneration();
+    if (mode === "assets") {
+      const source = getAssetExtractionSourceInput();
+      if (!source.trim()) return "";
+      return `【资产提取预设提示词】\n${assetExtractInstruction.trim() || DEFAULT_ASSET_EXTRACT_INSTRUCTION}\n\n【剧情材料】\n${source}`;
+    }
+    if (mode === "storyboardVideo") return `【剧本】\n${activeEpisodeScriptForGeneration || workflowIdea.trim()}\n\n【资产】\n${workflowAssets.trim() || "（暂无资产，请自行提取必要一致性信息）"}`;
+    return `【资产】\n${workflowAssets.trim() || "（暂无资产，请自行提取必要一致性信息）"}\n\n【分镜/剧本】\n${workflowStoryboardVideo.trim() || activeEpisodeScriptForGeneration || workflowIdea.trim()}`;
   };
 
+
+  const getWorkflowModeModel = (mode: WorkflowMode) => {
+    if (mode === "script") return getWorkflowModel("episodeScript");
+    if (mode === "assets") return getWorkflowModel("assetExtract");
+    if (mode === "storyboardVideo") return getWorkflowModel("storyboardVideoPrompt");
+    if (mode === "storyboardImage") return getWorkflowModel("storyboardImagePrompt");
+    return getWorkflowModel("episodeScript");
+  };
 
   const generateWorkflow = async (mode: WorkflowMode) => {
     const input = buildWorkflowInput(mode);
@@ -1424,7 +1999,7 @@ export default function SeedreamBetaPage() {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          model: mode === "script" ? WORKFLOW_DRAFT_MODEL : WORKFLOW_MODEL,
+          model: getWorkflowModeModel(mode),
           conversation_id: conversationId,
           stream: true,
           search: false,
@@ -1444,33 +2019,43 @@ export default function SeedreamBetaPage() {
       setWorkflowOutput(mode, clean);
       if (mode === "assets") {
         const parsedAssets = parseSemanticAssets(clean);
+        setAssetPreprocessOpen(true);
         if (parsedAssets.length > 0) {
-          setSemanticAssets(parsedAssets);
-          setActiveSemanticAssetId((prev) => prev || parsedAssets[0]?.id);
+          setAssetCandidates(parsedAssets.map((asset) => ({ ...asset, selected: true })));
+          setActiveSemanticAssetId(parsedAssets[0].id);
+          toast.success("已提取资产候选，请确认或修改后录入资产库");
+        } else {
+          toast.message("已打开资产预处理，可查看模型原始输出或手动补资产描述");
         }
       }
       if (mode === "storyboardVideo" || mode === "storyboardImage") {
-        const parsedShots = parseStoryboardShots(clean, videoModel);
+        const parsedShots = parseStoryboardShots(clean, videoModel).map((shot) => ({ ...shot, episode: activeEpisode }));
         if (parsedShots.length > 0) {
           let nextActiveShotId = parsedShots[0]?.id;
           setStoryboardShots((prev) => {
-            const next = !prev.length ? parsedShots : parsedShots.map((shot, index) => ({
-              ...prev[index],
-              ...shot,
-              id: prev[index]?.id || shot.id,
-              referenceAssetIds: prev[index]?.referenceAssetIds || shot.referenceAssetIds,
-              imageAssetIds: prev[index]?.imageAssetIds || [],
-              videoAssetIds: prev[index]?.videoAssetIds || [],
-              status: prev[index]?.status || shot.status,
-              imagePrompt: shot.imagePrompt || prev[index]?.imagePrompt || "",
-              videoPrompt: shot.videoPrompt || prev[index]?.videoPrompt || "",
-              generationActions: shot.generationActions || prev[index]?.generationActions,
-            }));
-            nextActiveShotId = next[0]?.id;
-            return next;
+            const currentEpisodeShots = prev.filter((shot) => Number(shot.episode || activeEpisode) === activeEpisode);
+            const otherEpisodeShots = prev.filter((shot) => Number(shot.episode || activeEpisode) !== activeEpisode);
+            const nextEpisodeShots = !currentEpisodeShots.length ? parsedShots : parsedShots.map((shot, index) => {
+              const existing = currentEpisodeShots[index];
+              return {
+                ...existing,
+                ...shot,
+                episode: activeEpisode,
+                id: existing?.id || shot.id,
+                referenceAssetIds: existing?.referenceAssetIds || shot.referenceAssetIds,
+                imageAssetIds: existing?.imageAssetIds || [],
+                videoAssetIds: existing?.videoAssetIds || [],
+                status: existing?.status || shot.status,
+                imagePrompt: shot.imagePrompt || existing?.imagePrompt || "",
+                videoPrompt: shot.videoPrompt || existing?.videoPrompt || "",
+                generationActions: shot.generationActions || existing?.generationActions,
+              };
+            });
+            nextActiveShotId = nextEpisodeShots[0]?.id;
+            return [...otherEpisodeShots, ...nextEpisodeShots].sort((a, b) => (Number(a.episode || 1) - Number(b.episode || 1)) || a.index - b.index);
           });
           setActiveShotId((prev) => prev || nextActiveShotId);
-          toast.success(`已生成文字分镜，并自动解析为 ${parsedShots.length} 张镜头卡`);
+          toast.success(`已生成文字分镜，并自动解析为 ${parsedShots.length} 条镜头列表`);
           return clean;
         }
       }
@@ -1496,6 +2081,233 @@ export default function SeedreamBetaPage() {
     return generated?.trim() || "";
   };
 
+  const chatAboutIdea = async () => {
+    const question = ideaInput.trim();
+    if (!question) {
+      toast.error("先输入你想聊的剧本想法");
+      return;
+    }
+    const userMessage: ScriptChatMessage = { id: `idea-u-${Date.now()}`, role: "user", content: question };
+    const assistantId = `idea-a-${Date.now()}`;
+    const history = [...ideaChatMessages, userMessage];
+    setIdeaInput("");
+    setIdeaChatMessages([...history, { id: assistantId, role: "assistant", content: "" }]);
+    setIdeaChatting(true);
+    try {
+      const conversationId = await ensureWorkflowConversationId();
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          model: getWorkflowModel("ideaChat"),
+          conversation_id: conversationId,
+          stream: true,
+          search: false,
+          reasoning: false,
+          messages: [
+            { role: "system", content: "你是短剧开发顾问。目标是和用户把短剧想法聊清楚，再沉淀成可生成大纲的原始创意。多问关键缺口：类型、核心钩子、主角处境、人物关系、集数、目标受众、情绪曲线、结尾钩子。不要写小说正文，不要直接生成完整分镜。回复简洁，优先给2-4个可选方向。" },
+            { role: "user", content: history.map((msg) => `${msg.role === "user" ? "用户" : "AI"}：${msg.content}`).join("\n") },
+          ],
+        }),
+      });
+      if (!response.ok) throw await readApiError(response);
+      const raw = response.headers.get("content-type")?.includes("text/event-stream") && response.body
+        ? await consumeChatStream(response)
+        : extractTextFromChatResponse(await response.json());
+      const answer = stripWorkflowText(raw);
+      setIdeaChatMessages((prev) => prev.map((msg) => msg.id === assistantId ? { ...msg, content: answer } : msg));
+      if (!originalIdea.trim() && question) {
+        setOriginalIdea(question);
+        setWorkflowIdea(question);
+      }
+    } catch (err) {
+      const message = getErrorMessage(err, { module: "chat", fallbackMessage: "聊剧本失败" });
+      toast.error(message);
+      setIdeaChatMessages((prev) => prev.map((msg) => msg.id === assistantId ? { ...msg, content: `失败：${message}` } : msg));
+    } finally {
+      setIdeaChatting(false);
+    }
+  };
+
+  const extractEffectiveIdeaForOutline = async (sourceMessages: ScriptChatMessage[], typedIdea: string, existingBrief: string) => {
+    const transcript = sourceMessages.map((msg) => `${msg.role === "user" ? "用户" : "AI"}：${msg.content}`).join("\n");
+    const lastUserContent = [...sourceMessages].reverse().find((msg) => msg.role === "user")?.content?.trim() || typedIdea || existingBrief;
+    if (!transcript.trim()) return { outlineSource: typedIdea || existingBrief, ideaSourceReference: "" };
+    const conversationId = await ensureWorkflowConversationId();
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        model: getWorkflowModel("ideaExtract"),
+        conversation_id: conversationId,
+        stream: true,
+        search: false,
+        reasoning: false,
+        messages: [
+          { role: "system", content: buildEffectiveIdeaSystemPrompt() },
+          { role: "user", content: `【AI聊剧本完整对话】\n${transcript}\n\n【用户最后明确给出/认可的剧情内容】\n${lastUserContent || "无"}\n\n【当前补充输入】\n${typedIdea || "无"}\n\n请只提取最终确认的有效创意。被用户否决、放弃、推翻的内容不要进入 outlineSource。特别注意：如果【用户最后明确给出/认可的剧情内容】里有具体剧情流程、桥段、行动步骤或结尾钩子，必须逐条保留到【剧情流程｜逐场细节版】或【关键桥段｜不可丢失细节】中。不要把剧情抽成摘要，不要删除原文里的具体执行信息：人物如何移动、处在什么空间位置、使用或观察了什么道具/物件、和谁/什么互动、哪句话或哪个动作触发了后果、事件先后顺序如何变化。` },
+        ],
+      }),
+    });
+    if (!response.ok) throw await readApiError(response);
+    const raw = response.headers.get("content-type")?.includes("text/event-stream") && response.body
+      ? await consumeChatStream(response)
+      : extractTextFromChatResponse(await response.json());
+    const parsedIdea = parseEffectiveIdeaResult(raw) || typedIdea || existingBrief || transcript;
+    const splitIdea = splitIdeaSourceAndReference(parsedIdea);
+    const referenceFromModel = splitIdea.ideaSourceReference;
+    const shouldPreserveLastPlot = lastUserContent.length >= 80 && !splitIdea.outlineSource.includes(lastUserContent.slice(0, 40));
+    return {
+      outlineSource: splitIdea.outlineSource || parsedIdea,
+      ideaSourceReference: referenceFromModel || (shouldPreserveLastPlot ? lastUserContent : ""),
+    };
+  };
+
+  const extractEffectiveIdeaContent = async () => {
+    const typedIdea = ideaInput.trim();
+    const existingBrief = outlineSource.trim() || originalIdea.trim() || workflowIdea.trim();
+    const userText = typedIdea || existingBrief;
+    if (!userText && !ideaChatMessages.length) {
+      toast.error("先聊一下剧本内容，比如类型、核心梗、集数和主角处境");
+      return;
+    }
+    const nextUserMessage: ScriptChatMessage = { id: `idea-u-${Date.now()}`, role: "user", content: typedIdea || userText };
+    const sourceMessages = [...ideaChatMessages, ...(typedIdea ? [nextUserMessage] : [])];
+    if (typedIdea) setIdeaChatMessages(sourceMessages);
+    setIdeaInput("");
+    setIdeaExtracting(true);
+    try {
+      const extractedIdea = await extractEffectiveIdeaForOutline(sourceMessages, typedIdea, existingBrief);
+      setOutlineSource(extractedIdea.outlineSource);
+      setIdeaSourceReference(extractedIdea.ideaSourceReference);
+      setOriginalIdea(extractedIdea.outlineSource);
+      setWorkflowIdea(extractedIdea.outlineSource);
+      setScriptSourceExcerpt(extractedIdea.outlineSource.slice(0, 2000));
+      setFlowStage("ideaContent");
+      toast.success("已提炼最终有效创意，请确认后生成剧本大纲");
+    } catch (err) {
+      toast.error(getErrorMessage(err, { module: "chat", fallbackMessage: "创意内容提炼失败" }));
+    } finally {
+      setIdeaExtracting(false);
+    }
+  };
+
+  const generateScriptOutlineFromIdea = async () => {
+    const effectiveIdea = outlineSource.trim() || originalIdea.trim() || workflowIdea.trim();
+    if (!effectiveIdea) {
+      toast.error("先提炼并确认创意内容");
+      setFlowStage("idea");
+      return;
+    }
+    setOutlineGenerating(true);
+    try {
+      const conversationId = await ensureWorkflowConversationId();
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          model: getWorkflowModel("outline"),
+          conversation_id: conversationId,
+          stream: true,
+          search: false,
+          reasoning: false,
+          messages: [
+            { role: "system", content: buildScriptOutlineSystemPrompt() },
+            { role: "user", content: `【最终确认的有效创意】\n${effectiveIdea}\n\n【默认要求】\n集数：${scriptSummary.episodeCount || 5}\n目标受众：${scriptSummary.targetAudience || "大众"}` },
+          ],
+        }),
+      });
+      if (!response.ok) throw await readApiError(response);
+      const raw = response.headers.get("content-type")?.includes("text/event-stream") && response.body
+        ? await consumeChatStream(response)
+        : extractTextFromChatResponse(await response.json());
+      const parsed = parseScriptOutlineResult(raw);
+      setScriptSummary(parsed.summary);
+      setEpisodeOutlines(parsed.episodes);
+      setOutlineSource(effectiveIdea);
+      setOriginalIdea(effectiveIdea);
+      setWorkflowIdea(effectiveIdea);
+      setWorkflowScript(parsed.summary.synopsis || effectiveIdea);
+      setScriptSourceExcerpt(effectiveIdea.slice(0, 2000));
+      setFlowStage("outline");
+      toast.success(`已生成剧本大纲${parsed.episodes.length ? `（${parsed.episodes.length} 集）` : ""}`);
+    } catch (err) {
+      toast.error(getErrorMessage(err, { module: "chat", fallbackMessage: "剧本大纲生成失败" }));
+    } finally {
+      setOutlineGenerating(false);
+    }
+  };
+
+  const generateEpisodeScript = async (outline: EpisodeOutline) => {
+    setEpisodeScriptGenerating(outline.episode);
+    try {
+      const conversationId = await ensureWorkflowConversationId();
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          model: getWorkflowModel("episodeScript"),
+          conversation_id: conversationId,
+          stream: true,
+          search: false,
+          reasoning: false,
+          messages: [
+            { role: "system", content: buildEpisodeScriptSystemPrompt() },
+            { role: "user", content: `【最终有效创意】\n${outlineSource || originalIdea || workflowIdea}\n\n【剧本摘要】\n${JSON.stringify(scriptSummary, null, 2)}\n\n【完整剧本大纲 / 全部分集】\n${JSON.stringify(episodeOutlines, null, 2)}\n\n【本次要生成正文的分集】\n${JSON.stringify(outline, null, 2)}\n\n要求：本集正文必须服从最终有效创意和完整剧本大纲，不能只根据本集简介自由发挥；必须承接前后集的因果、人物关系和悬念安排。` },
+          ],
+        }),
+      });
+      if (!response.ok) throw await readApiError(response);
+      const raw = response.headers.get("content-type")?.includes("text/event-stream") && response.body
+        ? await consumeChatStream(response)
+        : extractTextFromChatResponse(await response.json());
+      const episodeScript = parseEpisodeScriptResult(raw, outline);
+      setEpisodeScripts((prev) => {
+        const rest = prev.filter((item) => item.episode !== episodeScript.episode);
+        return [...rest, episodeScript].sort((a, b) => a.episode - b.episode);
+      });
+      setWorkflowScript(extractVisibleEpisodeScript(episodeScript.script));
+      setActiveEpisode(episodeScript.episode);
+      setFlowStage("episodeScript");
+      toast.success(`已生成${outline.title || `第${outline.episode}集`}正文`);
+      return episodeScript;
+    } catch (err) {
+      toast.error(getErrorMessage(err, { module: "chat", fallbackMessage: "分集正文生成失败" }));
+      return null;
+    } finally {
+      setEpisodeScriptGenerating(null);
+    }
+  };
+
+  const confirmOutlineAndGenerateFirstEpisode = async () => {
+    if (!episodeOutlines.length) {
+      toast.error("先生成或填写分集剧本");
+      return;
+    }
+    await generateEpisodeScript(episodeOutlines[0]);
+  };
+
+  const enterEpisodeCanvas = async (episode = activeEpisode) => {
+    const existing = episodeScripts.find((item) => item.episode === episode);
+    if (!existing) {
+      const outline = episodeOutlines.find((item) => item.episode === episode) || episodeOutlines[0];
+      if (!outline) return;
+      const generated = await generateEpisodeScript(outline);
+      if (!generated) return;
+      setWorkflowScript(extractVisibleEpisodeScript(generated.script));
+    } else {
+      setWorkflowScript(extractVisibleEpisodeScript(existing.script));
+    }
+    setActiveEpisode(episode);
+    setFlowStage("canvas");
+    setWorkflowMode("storyboardVideo");
+    setWorkflowView("step");
+    if (!storyboardShots.length) {
+      const generated = await generateWorkflow("storyboardVideo");
+      if (generated) setWorkflowMode("storyboardImage");
+    }
+  };
+
   const chatAboutScript = async () => {
     const question = scriptChatInput.trim();
     if (!question) {
@@ -1515,7 +2327,7 @@ export default function SeedreamBetaPage() {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          model: WORKFLOW_POLISH_MODEL,
+          model: getWorkflowModel("scriptRewrite"),
           conversation_id: conversationId,
           stream: true,
           search: false,
@@ -1559,15 +2371,15 @@ ${question}` },
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          model: WORKFLOW_POLISH_MODEL,
+          model: getWorkflowModel("scriptRewrite"),
           conversation_id: conversationId,
           stream: true,
           search: false,
           reasoning: false,
           messages: [
-            { role: "system", content: "你是影视剧本精修改稿助手。重点负责强钩子、对白重写、节奏压缩、人物动机和悬念升级；严格根据用户修改意见重写剧本；保留未要求改动的剧情、人物关系和已定台词。只输出修改后的完整剧本，不要解释，不要 Markdown 代码块。" },
-            { role: "user", content: `【当前剧本】
-${baseScript}
+            { role: "system", content: "你是影视剧本精修改稿助手。重点负责强钩子、对白重写、节奏压缩、人物动机和悬念升级；严格根据用户修改意见重写剧本；保留未要求改动的剧情、人物关系和已定台词。不要解释，不要 Markdown 代码块。必须输出与分集正文一致的严格 JSON：{\"episode\":1,\"title\":\"第1集\",\"script\":\"给人阅读的完整剧本正文\",\"scenes\":[{\"scene\":1,\"title\":\"\",\"location\":\"\",\"time\":\"\",\"characters\":[\"\"],\"visual_action\":\"\",\"dialogue\":[{\"character\":\"\",\"text\":\"\",\"tone\":\"\"}],\"narration\":\"\",\"emotion\":\"\",\"hook\":\"\"}]}。script 与 scenes 必须一致。" },
+            { role: "user", content: `【当前剧本与结构】
+${getActiveEpisodeScriptForGeneration() || baseScript}
 
 【修改意见】
 ${instruction}` },
@@ -1578,7 +2390,10 @@ ${instruction}` },
       const raw = response.headers.get("content-type")?.includes("text/event-stream") && response.body
         ? await consumeChatStream(response)
         : extractTextFromChatResponse(await response.json());
-      setWorkflowScript(stripWorkflowText(raw));
+      const outline = episodeOutlines.find((item) => item.episode === activeEpisode) || { episode: activeEpisode, title: `第${activeEpisode}集`, summary: "" };
+      const revisedEpisode = parseEpisodeScriptResult(raw, outline);
+      setWorkflowScript(revisedEpisode.script);
+      setEpisodeScripts((prev) => prev.map((item) => item.episode === activeEpisode ? { ...item, ...revisedEpisode, status: "done" } : item));
       setWorkflowMode("script");
       if (!overrideInstruction) setScriptRevisionInstruction("");
       toast.success("剧本已按修改意见更新");
@@ -1589,15 +2404,15 @@ ${instruction}` },
     }
   };
 
-  const chatAboutAsset = async (asset: SemanticAsset) => {
-    const question = assetChatInput.trim();
+  const chatAboutAsset = async (asset: SemanticAsset, overrideQuestion?: string) => {
+    const question = (overrideQuestion ?? assetChatInput).trim();
     if (!question) {
       toast.error("先输入想聊什么");
       return;
     }
     const userMessage: ScriptChatMessage = { id: `asset-u-${Date.now()}`, role: "user", content: question };
     const assistantId = `asset-a-${Date.now()}`;
-    setAssetChatInput("");
+    if (!overrideQuestion) setAssetChatInput("");
     setAssetChatMessages((prev) => [...prev, userMessage, { id: assistantId, role: "assistant", content: "" }]);
     setAssetChatting(true);
     try {
@@ -1606,7 +2421,7 @@ ${instruction}` },
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          model: WORKFLOW_MODEL,
+          model: getWorkflowModel("assetExtract"),
           conversation_id: conversationId,
           stream: true,
           search: false,
@@ -1642,8 +2457,8 @@ ${question}` },
     }
   };
 
-  const regenerateSemanticAsset = async (asset: SemanticAsset) => {
-    const instruction = assetRegenerateInstruction.trim();
+  const regenerateSemanticAsset = async (asset: SemanticAsset, overrideInstruction?: string) => {
+    const instruction = (overrideInstruction ?? assetRegenerateInstruction).trim();
     setAssetRegeneratingId(asset.id);
     try {
       const conversationId = await ensureWorkflowConversationId();
@@ -1651,13 +2466,13 @@ ${question}` },
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          model: WORKFLOW_MODEL,
+          model: getWorkflowModel("assetExtract"),
           conversation_id: conversationId,
           stream: true,
           search: false,
           reasoning: false,
           messages: [
-            { role: "system", content: '你是 Seedream/Seedance 前期资产设定助手。根据剧本、当前资产和用户补充要求，重新生成单个资产。只输出 JSON，不要代码块。格式：{"summary":"","lock_prompt":"","negative_prompt":""}' },
+            { role: "system", content: '你是 Seedream/Seedance 前期资产设定助手。根据剧本、当前资产和用户补充要求，重新生成单个资产。只输出 JSON，不要代码块。格式：{"summary":"","lock_prompt":"","negative_prompt":""}。summary 是给用户看的中文资产描述；lock_prompt 是中文生图一致性锁定词；negative_prompt 是中文禁用项。人物资产只能写外貌定妆：年龄段、体型、脸部气质、发型、服装、随身物、标志性姿态、可视化痕迹；禁止写团队职责、人物关系、性格弧线、通关结局、剧情作用、规则解释、内心动机、能力强弱。场景/道具/风格也只写可直接画出来的信息。' },
             { role: "user", content: `【剧本】
 ${workflowScript || workflowNovel || workflowIdea}
 
@@ -1696,6 +2511,26 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     } finally {
       setAssetRegeneratingId(null);
     }
+  };
+
+  const resolveSemanticAssetFromNode = (nodeId: string) => {
+    const node = studioNodes.find((item) => item.id === nodeId);
+    const linkedAssetId = typeof node?.data?.linkedAssetId === "string" ? node.data.linkedAssetId : node?.id;
+    const asset = semanticAssets.find((item) => item.id === linkedAssetId);
+    if (!asset) toast.error("当前画布节点没有绑定可改写的资产库卡片");
+    return asset;
+  };
+
+  const handleRewriteNodeAsset = (nodeId: string, instruction: string) => {
+    const asset = resolveSemanticAssetFromNode(nodeId);
+    if (!asset) return;
+    regenerateSemanticAsset(asset, instruction);
+  };
+
+  const handleChatNodeAsset = (nodeId: string, question: string) => {
+    const asset = resolveSemanticAssetFromNode(nodeId);
+    if (!asset) return;
+    chatAboutAsset(asset, question);
   };
 
   const copyWorkflowOutput = async () => {
@@ -1776,6 +2611,7 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
       imageAssetIds: shot.imageAssetIds.filter((item) => item !== id),
       videoAssetIds: shot.videoAssetIds.filter((item) => item !== id),
       firstFrameAssetId: shot.firstFrameAssetId === id ? undefined : shot.firstFrameAssetId,
+      lastFrameAssetId: shot.lastFrameAssetId === id ? undefined : shot.lastFrameAssetId,
       referenceVideoAssetId: shot.referenceVideoAssetId === id ? undefined : shot.referenceVideoAssetId,
     })));
     toast.success("已删除素材并解除所有引用");
@@ -1838,7 +2674,7 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
   };
 
   const addShot = () => {
-    const shot = createShot(storyboardShots.length + 1);
+    const shot = createShot(activeEpisodeShots.length + 1, { episode: activeEpisode });
     setStoryboardShots((prev) => [...prev, shot]);
     setActiveShotId(shot.id);
   };
@@ -1846,6 +2682,15 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
   const deleteShot = (id: string) => {
     setStoryboardShots((prev) => prev.filter((shot) => shot.id !== id).map((shot, index) => ({ ...shot, index: index + 1 })));
     if (activeShotId === id) setActiveShotId(storyboardShots.find((shot) => shot.id !== id)?.id);
+  };
+
+  const reorderShots = (orderedIds: string[]) => {
+    setStoryboardShots((prev) => {
+      const order = new Map(orderedIds.map((id, index) => [id, index]));
+      return [...prev]
+        .sort((a, b) => (order.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.id) ?? Number.MAX_SAFE_INTEGER))
+        .map((shot, index) => ({ ...shot, index: index + 1 }));
+    });
   };
 
   const rebuildShotsFromOutputs = () => {
@@ -1856,7 +2701,7 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     }
     setStoryboardShots(parsed);
     setActiveShotId(parsed[0]?.id);
-    toast.success(`已生成 ${parsed.length} 张镜头卡`);
+    toast.success(`已生成 ${parsed.length} 条镜头列表`);
   };
 
   const rebuildSemanticAssetsFromOutput = () => {
@@ -1865,9 +2710,73 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
       toast.error("没有可解析的资产输出，请先生成资产文本");
       return;
     }
-    setSemanticAssets(parsed);
-    setActiveSemanticAssetId(parsed[0]?.id);
-    toast.success(`已生成 ${parsed.length} 个语义资产`);
+    setAssetCandidates(parsed.map((asset) => ({ ...asset, selected: true })));
+    setAssetPreprocessOpen(true);
+    toast.success(`已解析 ${parsed.length} 个资产候选，请确认后录入资产库`);
+  };
+
+  const updateAssetCandidate = (id: string, patch: Partial<AssetCandidate>) => {
+    setAssetCandidates((prev) => prev.map((asset) => asset.id === id ? { ...asset, ...patch } : asset));
+  };
+
+  const applySelectedAssetCandidates = () => {
+    const selected = assetCandidates.filter((asset) => asset.selected);
+    if (!selected.length) {
+      toast.error("请先勾选要录入资产库的资产");
+      return;
+    }
+    const makeAssetKey = (asset: Pick<SemanticAsset, "kind" | "name">) => `${asset.kind}::${asset.name.trim().replace(/\s+/g, "").toLowerCase()}`;
+    const normalized = selected.map(({ selected: _selected, ...asset }) => ({
+      ...asset,
+      id: asset.id || `semantic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      linkedAssetIds: asset.linkedAssetIds || [],
+      createdAt: asset.createdAt || new Date().toISOString(),
+    }));
+
+    let addedCount = 0;
+    let updatedCount = 0;
+    let firstActiveId = normalized[0]?.id;
+    setSemanticAssets((prev) => {
+      const merged = [...prev];
+      normalized.forEach((asset) => {
+        const key = makeAssetKey(asset);
+        const existingIndex = merged.findIndex((item) => makeAssetKey(item) === key || item.id === asset.id);
+        if (existingIndex >= 0) {
+          const existing = merged[existingIndex];
+          merged[existingIndex] = {
+            ...existing,
+            kind: asset.kind,
+            name: asset.name,
+            summary: asset.summary,
+            lockPrompt: asset.lockPrompt,
+            negativePrompt: asset.negativePrompt,
+            // 保留已生成图片、已绑定素材、创建时间，避免重新提取覆盖生产成果。
+            linkedAssetIds: existing.linkedAssetIds || asset.linkedAssetIds || [],
+            imageAssetId: existing.imageAssetId,
+            imageUrl: existing.imageUrl,
+            createdAt: existing.createdAt || asset.createdAt,
+          };
+          firstActiveId = existing.id;
+          updatedCount += 1;
+        } else {
+          const nextAsset: SemanticAsset = {
+            ...asset,
+            id: `semantic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            imageUrl: undefined,
+            imageAssetId: undefined,
+          };
+          merged.unshift(nextAsset);
+          firstActiveId = nextAsset.id;
+          addedCount += 1;
+        }
+      });
+      return merged;
+    });
+    setActiveSemanticAssetId(firstActiveId);
+    setAssetKindFilter(normalized[0]?.kind || "all");
+    setAssetCandidates((prev) => prev.filter((asset) => !asset.selected));
+    setAssetPreprocessOpen(false);
+    toast.success(`已更新 ${updatedCount} 个、录入 ${addedCount} 个资产；可继续修改后再手动生成图`);
   };
 
   const createSemanticAssetDraft = (kind: SemanticAssetKind = "character", name?: string): SemanticAsset => ({
@@ -2025,7 +2934,9 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
   };
 
   const generateNodeAssetImage = async (nodeId: string) => {
-    const existingAsset = semanticAssets.find((asset) => asset.id === nodeId);
+    const node = studioNodes.find((item) => item.id === nodeId);
+    const linkedAssetId = typeof node?.data?.linkedAssetId === "string" ? node.data.linkedAssetId : nodeId;
+    const existingAsset = semanticAssets.find((asset) => asset.id === linkedAssetId);
     if (!existingAsset) return;
     await generateSemanticAssetImage(existingAsset, "default");
   };
@@ -2057,6 +2968,93 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     }
   };
 
+  const generateCanvasImageNode = async (node: CanvasNode) => {
+    const prompt = String(node.data?.imagePrompt || node.data?.scene || node.data?.content || "").trim();
+    if (!prompt) {
+      toast.error("图片节点缺少提示词");
+      return null;
+    }
+    const referenceAssetId = typeof node.data?.referenceAssetId === "string" ? node.data.referenceAssetId : "";
+    const referenceImageUrl = typeof node.data?.referenceImageUrl === "string" ? node.data.referenceImageUrl : "";
+    const assetRef = referenceAssetId ? assets.find((asset) => asset.id === referenceAssetId || asset.publicId === referenceAssetId) : undefined;
+    const refs = [assetRef?.publicId || assetRef?.url || referenceImageUrl].filter(Boolean) as string[];
+    setStudioNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, status: "generating", data: { ...item.data, errorMessage: undefined } } : item));
+    try {
+      const data = await generateImage(prompt, imageAspect, imageResolution, SEEDREAM_IMAGE_QUALITY, refs, "seedream");
+      setLastImageId(data.id);
+      addGenerationJob({
+        id: `job-canvas-image-${data.id}-${Date.now()}`,
+        canvasNodeId: node.id,
+        type: "image",
+        mediaId: data.id,
+        prompt,
+        status: "pending",
+        intent: "canvas_image",
+        entryPath: "canvas",
+        promptSource: "canvasPrompt",
+        referenceImageCount: refs.length,
+        referenceVideoCount: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      toast.success(refs.length ? "已提交参考图生图任务" : "已提交图片生成任务");
+      return data;
+    } catch (err) {
+      setStudioNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, status: "error", data: { ...item.data, errorMessage: getErrorMessage(err, { module: "image", fallbackMessage: "图片生成失败" }) } } : item));
+      throw err;
+    }
+  };
+
+  const generateCanvasVideoNode = async (node: CanvasNode) => {
+    const prompt = String(node.data?.videoPrompt || node.data?.content || "").trim();
+    if (!prompt) {
+      toast.error("视频节点缺少视频提示词");
+      return null;
+    }
+    const firstFrameAssetId = typeof node.data?.firstFrameAssetId === "string" ? node.data.firstFrameAssetId : "";
+    const firstFrameUrl = typeof node.data?.firstFrameUrl === "string" ? node.data.firstFrameUrl : "";
+    const assetRef = firstFrameAssetId ? assets.find((asset) => asset.id === firstFrameAssetId || asset.publicId === firstFrameAssetId) : undefined;
+    const references = buildSeedanceVideoReferences({
+      mode: firstFrameAssetId || firstFrameUrl ? "image_to_video" : "text_to_video",
+      images: [assetReferenceUrl(assetRef) || firstFrameUrl],
+    });
+    setStudioNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, status: "generating", data: { ...item.data, errorMessage: undefined } } : item));
+    try {
+      const data = await generateVideo({
+        prompt,
+        model: videoModel,
+        ratio: videoAspect,
+        duration: normalizeVideoDuration(videoDuration, videoModel),
+        resolution: normalizeVideoResolution(videoResolution, videoModel),
+        generate_audio: videoAudio,
+        watermark: false,
+        reference_image_urls: references.reference_image_urls,
+        reference_image_roles: references.reference_image_roles,
+        reference_image_role_mode: references.reference_image_role_mode,
+      });
+      setLastVideoId(data.id);
+      addGenerationJob({
+        id: `job-canvas-video-${data.id}-${Date.now()}`,
+        canvasNodeId: node.id,
+        type: "video",
+        mediaId: data.id,
+        prompt,
+        status: "pending",
+        entryPath: "canvas",
+        promptSource: "canvasPrompt",
+        referenceImageCount: references.reference_image_urls?.length || 0,
+        referenceVideoCount: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      toast.success(references.reference_image_urls?.length ? "已提交图生视频任务" : "已提交文生视频任务");
+      return data;
+    } catch (err) {
+      setStudioNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, status: "error", data: { ...item.data, errorMessage: getErrorMessage(err, { module: "video", fallbackMessage: "视频生成提交失败" }) } } : item));
+      throw err;
+    }
+  };
+
   const generateShotSketch = async (shot: StoryboardShot, entryPath: "single" | "batch" = "single") => {
     const prompt = buildStoryboardSketchPrompt(shot);
     setActiveShotId(shot.id);
@@ -2073,7 +3071,7 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
   };
 
   const generateShotVideo = async (shot: StoryboardShot, entryPath: "single" | "batch" = "single") => {
-    const rawPrompt = (shot.videoPrompt || shot.imagePrompt).trim();
+    const rawPrompt = shot.videoPrompt.trim();
     const prompt = injectDirectorBlockToPrompt(rawPrompt, findDirectorBlockForShot(directorBlocks, shot.id), semanticAssets);
     if (!prompt) {
       toast.error("镜头缺少视频提示词");
@@ -2082,23 +3080,41 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     setActiveShotId(shot.id);
     markStudioVideoProgress(shot.id, "generating");
     const refs = getShotAssets(shot, assets);
-    const imageAssets = refs.filter((asset) => asset.type === "image" && !isStoryboardSketchAsset(asset) && VIDEO_REFERENCE_ROLES.has(asset.role || "reference_image"));
+    const videoCandidateImages = refs.filter((asset) => asset.type === "image" && !isStoryboardSketchAsset(asset) && VIDEO_REFERENCE_ROLES.has(asset.role || "reference_image"));
+    const firstFrameAsset = shot.firstFrameAssetId
+      ? videoCandidateImages.find((asset) => asset.id === shot.firstFrameAssetId || asset.publicId === shot.firstFrameAssetId)
+      : undefined;
+    const lastFrameAsset = shot.lastFrameAssetId
+      ? videoCandidateImages.find((asset) => asset.id === shot.lastFrameAssetId || asset.publicId === shot.lastFrameAssetId)
+      : undefined;
+    const hasReferenceVideos = refs.some((asset) => asset.type === "video");
+    const references = buildSeedanceVideoReferences({
+      // 有参考视频时走全能参考模式，首帧/尾帧语义注入 prompt 文本
+      // 无参考视频时，有首尾帧走首尾帧模式，有图走图生视频
+      mode: hasReferenceVideos ? "omni_reference" : firstFrameAsset && lastFrameAsset ? "first_last_frame" : videoCandidateImages.length ? "image_to_video" : "text_to_video",
+      images: videoCandidateImages.map(assetReferenceUrl),
+      firstFrame: assetReferenceUrl(firstFrameAsset),
+      lastFrame: assetReferenceUrl(lastFrameAsset),
+      videos: refs.filter((asset) => asset.type === "video").map(assetReferenceUrl),
+    });
     const videoAssets = refs.filter((asset) => asset.type === "video");
+    const finalPrompt = references.promptInjection ? `${references.promptInjection} ${prompt}` : prompt;
     try {
       const data = await generateVideo({
-        prompt,
+        prompt: finalPrompt,
         model: videoModel,
         ratio: shot.aspectRatio || videoAspect,
         duration: normalizeVideoDuration(shot.duration || videoDuration, videoModel),
         resolution: normalizeVideoResolution(videoResolution, videoModel),
         generate_audio: videoAudio,
         watermark: false,
-        reference_image_urls: imageAssets.map((asset) => asset.url || asset.publicId).filter(Boolean),
-        reference_image_roles: imageAssets.map((asset) => (asset.id === shot.firstFrameAssetId ? "first_frame" : asset.id === shot.lastFrameAssetId ? "last_frame" : asset.role === "first_frame" || asset.role === "last_frame" ? asset.role : "reference_image") as "reference_image" | "first_frame" | "last_frame"),
-        reference_video_urls: videoAssets.map((asset) => asset.publicId || asset.url),
+        reference_image_urls: references.reference_image_urls,
+        reference_image_roles: references.reference_image_roles,
+        reference_video_urls: references.reference_video_urls,
+        reference_image_role_mode: references.reference_image_role_mode,
       });
       setLastVideoId(data.id);
-      addGenerationJob({ id: `job-video-${data.id}-${Date.now()}`, shotId: shot.id, type: "video", mediaId: data.id, prompt, status: "pending", entryPath, promptSource: shot.videoPrompt.trim() ? "videoPrompt" : "imagePromptFallback", directorInjected: Boolean(findDirectorBlockForShot(directorBlocks, shot.id)), referenceImageCount: imageAssets.length, referenceVideoCount: videoAssets.length, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+      addGenerationJob({ id: `job-video-${data.id}-${Date.now()}`, shotId: shot.id, type: "video", mediaId: data.id, prompt: finalPrompt, status: "pending", entryPath, promptSource: "videoPrompt", directorInjected: Boolean(findDirectorBlockForShot(directorBlocks, shot.id)), referenceImageCount: references.reference_image_urls?.length || 0, referenceVideoCount: references.reference_video_urls?.length || videoAssets.length, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
       return data;
     } catch (err) {
       const errorMessage = err instanceof Error && err.message.trim()
@@ -2330,6 +3346,11 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
       toast.error(t("seedreamBeta.promptRequired"));
       return;
     }
+    const references = buildSeedanceVideoReferences({
+      mode: selectedVideoRefs.length || selectedImageRefs.length > 1 ? "omni_reference" : selectedImageRefs.length === 1 ? "image_to_video" : "text_to_video",
+      images: selectedImageRefs,
+      videos: selectedVideoRefs,
+    });
     try {
       const data = await generateVideo({
         prompt,
@@ -2339,9 +3360,10 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
         resolution: normalizeVideoResolution(videoResolution, videoModel),
         generate_audio: videoAudio,
         watermark: false,
-        reference_image_urls: selectedImageRefs,
-        reference_image_roles: selectedImageRefs.map(() => "reference_image" as const),
-        reference_video_urls: selectedVideoRefs,
+        reference_image_urls: references.reference_image_urls,
+        reference_image_roles: references.reference_image_roles,
+        reference_video_urls: references.reference_video_urls,
+        reference_image_role_mode: references.reference_image_role_mode,
       });
       setLastVideoId(data.id);
       toast.success(t("seedreamBeta.videoSubmitted"));
@@ -2512,16 +3534,41 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     const sourceNode = sourceNodeId ? studioNodes.find((node) => node.id === sourceNodeId) : undefined;
     const sourceShotId = sourceNodeId && storyboardShots.some((shot) => shot.id === sourceNodeId) ? sourceNodeId : undefined;
     const sourceShot = sourceShotId ? storyboardShots.find((shot) => shot.id === sourceShotId) : undefined;
+    const sourceAssetId = sourceNode?.type === "assets" ? String(sourceNode.data?.linkedAssetId || sourceNode.id || "") : "";
+    const sourceSemanticAsset = sourceAssetId ? semanticAssets.find((asset) => asset.id === sourceAssetId) : undefined;
+    const isAssetImageNode = sourceNode?.type === "assets" && type === "image";
+    const isImageToVideoNode = sourceNode?.type === "image" && type === "video";
+    const assetImageTitle = isAssetImageNode
+      ? `${sourceSemanticAsset?.name || sourceNode?.title || "资产"}${sourceSemanticAsset?.kind === "character" ? "角色图" : "资产图"}`
+      : "";
     const newNode: CanvasNode = {
       id,
       type,
-      title: type === "script" ? "新剧本" : type === "assets" ? "未命名资产" : type === "shot" ? "新镜头" : type === "image" ? "新分镜图" : type === "video" ? "新视频" : type === "director" ? "3D导演台" : "新节点",
+      title: type === "script" ? "新剧本" : type === "assets" ? "未命名资产" : type === "shot" ? "新镜头" : isAssetImageNode ? assetImageTitle : type === "image" ? "新分镜图" : type === "video" ? "新视频" : type === "director" ? "3D导演台" : "新节点",
       x,
       y,
       width: type === "script" || type === "director" ? 420 : 360,
       height: type === "script" || type === "director" ? 300 : type === "assets" ? 440 : 420,
-      status: "empty",
-      data: sourceShotId && (type === "video" || type === "image") ? {
+      status: isAssetImageNode ? "draft" : "empty",
+      data: isAssetImageNode ? {
+        sourceAssetNodeId: sourceNode?.id,
+        linkedAssetId: sourceAssetId,
+        kind: sourceSemanticAsset?.kind || sourceNode?.data?.kind || sourceNode?.data?.category || "character",
+        category: sourceSemanticAsset?.kind || sourceNode?.data?.category || "character",
+        imagePrompt: "",
+        summary: sourceSemanticAsset?.summary || sourceNode?.data?.summary || sourceNode?.data?.content || "",
+        content: "",
+        referenceImageUrl: sourceSemanticAsset?.imageUrl || String(sourceNode?.data?.imageUrl || sourceNode?.data?.image || sourceNode?.data?.thumbnail || ""),
+        referenceAssetId: sourceSemanticAsset?.imageAssetId || sourceNode?.data?.imageAssetId,
+        referenceAssetNodeId: sourceNode?.id,
+      } : isImageToVideoNode ? {
+        sourceImageNodeId: sourceNode?.id,
+        videoPrompt: String(sourceNode?.data?.videoPrompt || sourceNode?.data?.imagePrompt || sourceNode?.data?.scene || ""),
+        imagePrompt: String(sourceNode?.data?.imagePrompt || sourceNode?.data?.scene || ""),
+        scene: String(sourceNode?.data?.scene || ""),
+        firstFrameUrl: String(sourceNode?.data?.imageUrl || sourceNode?.data?.url || ""),
+        firstFrameAssetId: typeof sourceNode?.data?.imageAssetId === "string" ? sourceNode.data.imageAssetId : undefined,
+      } : sourceShotId && (type === "video" || type === "image") ? {
         sourceShotId,
         ...(type === "video" ? {
           videoPrompt: sourceShot?.videoPrompt || sourceShot?.imagePrompt || "",
@@ -2537,7 +3584,7 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     if (sourceNodeId) {
       const from = sourceSide === "left" ? id : sourceNodeId;
       const to = sourceSide === "left" ? sourceNodeId : id;
-      const label = sourceNode?.type === "assets" || type === "assets" ? "引用" : type === "image" ? "生成分镜" : type === "video" ? "生成视频" : "引用";
+      const label = sourceNode?.type === "assets" && type === "image" ? "派生图片" : sourceNode?.type === "assets" || type === "assets" ? "引用" : type === "image" ? "生成分镜" : type === "video" ? "生成视频" : "引用";
       const edgeType: CanvasConnection["type"] = sourceNode?.type === "assets" || type === "assets" ? "binding" : "sequence";
       addManualStudioConnection(from, to, label, edgeType);
     }
@@ -2572,66 +3619,67 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
       setWorkflowMode("storyboardVideo");
       setWorkflowView("step");
     }
-  }, [addManualStudioConnection, batchLimit, createGeneratorGroupNode, storyboardShots, studioNodes, studioSelectedNodeId]);
+  }, [addManualStudioConnection, batchLimit, createGeneratorGroupNode, semanticAssets, storyboardShots, studioNodes, studioSelectedNodeId]);
 
   const handleDropAssetToCanvas = useCallback((asset: CanvasAssetDropPayload, x: number, y: number) => {
     const kind = (["character", "scene", "prop", "style"].includes(String(asset.kind)) ? asset.kind : "character") as SemanticAssetKind;
-    const existingNode = studioNodes.find((node) => node.id === asset.id);
+    const title = asset.name || "未命名资产";
+    const normalizedTitle = title.replace(/-资产图$|资产图$/g, "").trim();
+    const linkedSemanticAsset = asset.source === "semantic"
+      ? semanticAssets.find((item) => item.id === asset.id)
+      : semanticAssets.find((item) => item.imageAssetId === asset.id
+        || item.linkedAssetIds.includes(asset.id)
+        || normalizeSemanticAssetKey(item) === normalizeSemanticAssetKey({ kind, name: normalizedTitle }));
+    const linkedAssetId = linkedSemanticAsset?.id;
+    const existingNode = studioNodes.find((node) => node.type === "assets" && (
+      (linkedAssetId && node.data?.linkedAssetId === linkedAssetId)
+      || (!linkedAssetId && node.data?.linkedMediaAssetId === asset.id)
+    ));
     if (existingNode) {
-      setStudioNodes((prev) => prev.map((node) => node.id === asset.id ? { ...node, x, y } : node));
-      setStudioSelectedNodeId(asset.id);
-      if (existingNode.type === "assets") {
-        setActiveSemanticAssetId(asset.id);
-        setWorkflowMode("assets");
-        setWorkflowView("step");
-      }
+      setStudioNodes((prev) => prev.map((node) => node.id === existingNode.id ? { ...node, x, y } : node));
+      setStudioSelectedNodeId(existingNode.id);
+      if (linkedAssetId) setActiveSemanticAssetId(linkedAssetId);
+      setWorkflowMode("assets");
+      setWorkflowView("step");
       toast.success(`已把「${asset.name || existingNode.title}」放到画布`);
       return;
     }
 
-    const id = semanticAssets.some((item) => item.id === asset.id) ? asset.id : `asset-node-${asset.id}-${Date.now()}`;
-    const title = asset.name || "未命名资产";
-    const linkedAssetIds = asset.source === "library" ? [asset.id] : [];
-    const newSemanticAsset: SemanticAsset = {
-      id,
-      kind,
-      name: title,
-      summary: asset.summary || "",
-      lockPrompt: asset.summary || "",
-      negativePrompt: "",
-      linkedAssetIds,
-      createdAt: new Date().toISOString(),
-      imageUrl: asset.image || undefined,
-      imageAssetId: asset.source === "library" ? asset.id : undefined,
-    };
+    const id = `studio-assets-${asset.id}-${Date.now()}`;
+    const nodeSummary = linkedSemanticAsset?.summary || asset.summary || "";
+    const nodeLockPrompt = linkedSemanticAsset?.lockPrompt || asset.lockPrompt || asset.summary || "";
+    const nodeImage = linkedSemanticAsset?.imageUrl || asset.image || "";
     const newNode: CanvasNode = {
       id,
       type: "assets",
-      title,
+      title: linkedSemanticAsset?.name || normalizedTitle || title,
       x,
       y,
       width: 360,
       height: 440,
-      status: asset.image || asset.summary ? "draft" : "empty",
+      status: nodeImage || nodeSummary ? "draft" : "empty",
       data: {
-        kind,
-        category: kind,
-        summary: asset.summary || "",
-        content: asset.summary || "",
-        thumbnail: asset.image || "",
-        image_url: asset.image || "",
-        url: asset.image || "",
-        linkedAssetId: asset.id,
+        kind: linkedSemanticAsset?.kind || kind,
+        category: linkedSemanticAsset?.kind || kind,
+        summary: nodeSummary,
+        content: nodeSummary,
+        lockPrompt: nodeLockPrompt,
+        thumbnail: nodeImage,
+        imageUrl: nodeImage,
+        image_url: nodeImage,
+        url: nodeImage,
+        linkedAssetId,
+        linkedMediaAssetId: asset.source === "library" ? asset.id : undefined,
+        asset: linkedSemanticAsset,
         source: asset.source || "library",
       },
     };
-    setSemanticAssets((prev) => prev.some((item) => item.id === id) ? prev : [...prev, newSemanticAsset]);
     setStudioNodes((prev) => [...prev, newNode]);
     setStudioSelectedNodeId(id);
-    setActiveSemanticAssetId(id);
+    if (linkedAssetId) setActiveSemanticAssetId(linkedAssetId);
     setWorkflowMode("assets");
     setWorkflowView("step");
-    toast.success(`已从资产库创建「${title}」节点`);
+    toast.success(`已从资产库创建「${newNode.title}」节点`);
   }, [semanticAssets, studioNodes]);
 
   const handleStudioNodeMove = useCallback((id: string, x: number, y: number) => {
@@ -2655,11 +3703,44 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     if (studioSelectedNodeId === id) setStudioSelectedNodeId(null);
   }, [activeShotId, activeSemanticAssetId, studioSelectedNodeId]);
 
+  const handleDeleteSemanticAsset = useCallback((assetId: string) => {
+    const asset = semanticAssets.find((item) => item.id === assetId);
+    const ok = typeof window === "undefined" ? true : window.confirm(`删除资产「${asset?.name || "未命名资产"}」？\n\n会同时移除画布中引用它的资产节点和镜头/导演台绑定。`);
+    if (!ok) return;
+
+    const linkedCanvasNodeIds = studioNodes
+      .filter((node) => node.id === assetId || node.data?.linkedAssetId === assetId)
+      .map((node) => node.id);
+    const linkedCanvasNodeIdSet = new Set(linkedCanvasNodeIds);
+
+    setSemanticAssets((prev) => prev.filter((item) => item.id !== assetId));
+    setStoryboardShots((prev) => prev.map((shot) => ({
+      ...shot,
+      semanticAssetIds: shot.semanticAssetIds?.filter((id) => id !== assetId),
+    })));
+    setGenerationJobs((prev) => prev.filter((job) => job.semanticAssetId !== assetId));
+    setDirectorBlocks((prev) => prev.map((block) => ({
+      ...block,
+      sceneBlock: {
+        ...block.sceneBlock,
+        sceneAssetId: block.sceneBlock.sceneAssetId === assetId ? undefined : block.sceneBlock.sceneAssetId,
+      },
+      characters: block.characters.filter((character) => character.semanticAssetId !== assetId),
+    })));
+    setStudioNodes((prev) => prev.filter((node) => !linkedCanvasNodeIdSet.has(node.id)));
+    setStudioConnections((prev) => prev.filter((connection) => !linkedCanvasNodeIdSet.has(connection.from) && !linkedCanvasNodeIdSet.has(connection.to)));
+    if (activeSemanticAssetId === assetId) setActiveSemanticAssetId(undefined);
+    if (studioSelectedNodeId && linkedCanvasNodeIdSet.has(studioSelectedNodeId)) setStudioSelectedNodeId(null);
+    toast.success("已删除资产");
+  }, [activeSemanticAssetId, semanticAssets, studioNodes, studioSelectedNodeId]);
+
   const handleUpdateNodeContent = useCallback((nodeId: string, updates: { title?: string; body?: string }) => {
     if (updates.title !== undefined) {
       setStudioNodes((prev) => prev.map((node) => node.id === nodeId ? { ...node, title: updates.title || "未命名节点" } : node));
       setStoryboardShots((prev) => prev.map((shot) => shot.id === nodeId ? { ...shot, title: updates.title || shot.title } : shot));
-      setSemanticAssets((prev) => prev.map((asset) => asset.id === nodeId ? { ...asset, name: updates.title || asset.name } : asset));
+      const currentNode = studioNodes.find((node) => node.id === nodeId);
+      const linkedAssetId = typeof currentNode?.data?.linkedAssetId === "string" ? currentNode.data.linkedAssetId : nodeId;
+      setSemanticAssets((prev) => prev.map((asset) => asset.id === linkedAssetId ? { ...asset, name: updates.title || asset.name } : asset));
       setGeneratorGroups((prev) => prev.map((group) => group.id === nodeId ? { ...group, title: updates.title || group.title } : group));
     }
 
@@ -2670,6 +3751,12 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
         return;
       }
       const currentNode = studioNodes.find((node) => node.id === nodeId);
+      if (currentNode?.type === "assets") {
+        const linkedAssetId = typeof currentNode.data?.linkedAssetId === "string" ? currentNode.data.linkedAssetId : nodeId;
+        setStudioNodes((prev) => prev.map((node) => node.id === nodeId ? { ...node, data: { ...node.data, summary: body, content: body } } : node));
+        setSemanticAssets((prev) => prev.map((asset) => asset.id === linkedAssetId ? { ...asset, summary: body } : asset));
+        return;
+      }
       const targetShotId = typeof currentNode?.data?.sourceShotId === "string"
         ? currentNode.data.sourceShotId
         : nodeId.startsWith("video-node-") ? nodeId.replace("video-node-", "") : nodeId;
@@ -2745,12 +3832,34 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     }
 
     const node = studioNodes.find((item) => item.id === nodeId);
+    if (node?.type === "assets") {
+      const linkedAssetId = typeof node.data?.linkedAssetId === "string" ? node.data.linkedAssetId : nodeId;
+      const asset = semanticAssets.find((item) => item.id === linkedAssetId);
+      if (asset) {
+        await generateSemanticAssetImage(asset, asset.kind === "character" && assetPreset === "characterTurnaround" ? "character-turnaround" : "default");
+        return;
+      }
+      toast.message("当前资产节点没有关联到资产库记录");
+      return;
+    }
+    if (node?.type === "image" && !node.data?.sourceShotId) {
+      await generateCanvasImageNode(node);
+      return;
+    }
+    if (node?.type === "video" && !node.data?.sourceShotId) {
+      await generateCanvasVideoNode(node);
+      return;
+    }
     const sourceShotId = typeof node?.data?.sourceShotId === "string"
       ? node.data.sourceShotId
       : nodeId.startsWith("image-node-") ? nodeId.replace("image-node-", "") : nodeId.startsWith("video-node-") ? nodeId.replace("video-node-", "") : nodeId;
     const shot = storyboardShots.find((item) => item.id === sourceShotId);
     if (shot) {
-      if (node?.type === "video" || (shot.videoPrompt && !shot.imagePrompt)) {
+      if (node?.type === "video") {
+        await generateShotVideo(shot);
+      } else if (node?.type === "image" || node?.type === "shot") {
+        await generateShotImage(shot);
+      } else if (shot.videoPrompt && !shot.imagePrompt) {
         await generateShotVideo(shot);
       } else {
         await generateShotImage(shot);
@@ -2770,7 +3879,7 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     }
 
     toast.message("当前节点没有可直接生成的任务");
-  }, [batchGenerateImagesForShots, batchGenerateVideosForShots, generateNodeAssetImage, generateSemanticAssetImage, generateShotImage, generateShotVideo, generatorGroups, semanticAssets, storyboardShots, studioNodes]);
+  }, [batchGenerateImagesForShots, batchGenerateVideosForShots, generateCanvasImageNode, generateCanvasVideoNode, generateNodeAssetImage, generateSemanticAssetImage, generateShotImage, generateShotVideo, generatorGroups, semanticAssets, storyboardShots, studioNodes]);
 
   const handleStudioNodeDoubleClick = useCallback((node: CanvasNode) => {
     setStudioSelectedNodeId(node.id);
@@ -2780,7 +3889,8 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
       setActiveShotId(undefined);
       setActiveSemanticAssetId(undefined);
     } else if (node.type === "assets") {
-      const asset = semanticAssets.find((a) => a.id === node.id);
+      const linkedAssetId = typeof node.data?.linkedAssetId === "string" ? node.data.linkedAssetId : node.id;
+      const asset = semanticAssets.find((a) => a.id === linkedAssetId);
       setActiveSemanticAssetId(asset?.id);
       setWorkflowMode("assets");
       setWorkflowView("step");
@@ -2936,7 +4046,7 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
       );
     }
 
-    if (workflowView === "step" && activeShotId) {
+    if (workflowView === "step" && activeShotId && !(workflowMode === "storyboardVideo" || workflowMode === "storyboardImage")) {
       const shot = storyboardShots.find((s) => s.id === activeShotId);
       return (
         <div className="space-y-4">
@@ -3151,13 +4261,28 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
               className="flex items-center gap-1 rounded-lg bg-brand/10 px-3 py-1.5 text-[11px] font-medium text-brand hover:bg-brand/20 disabled:opacity-50"
             >
               {workflowGenerating === "assets" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-              一键生成资产
+              提取资产候选
             </button>
           </div>
+          <div className="rounded-lg border border-amber-400/20 bg-amber-400/5 p-3 text-[11px] leading-relaxed text-amber-700 dark:text-amber-200">
+            资产生成不会直接生成图片。系统会先从剧本提取角色/场景/道具/风格候选，用户确认或修改后再录入资产库；资产卡内再手动生成图片。
+          </div>
+          {assetCandidates.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setAssetPreprocessOpen(true)}
+              className="flex w-full items-center justify-between rounded-xl border border-brand/20 bg-brand/5 p-3 text-left text-[11px] text-text-secondary hover:bg-brand/10"
+            >
+              <span>
+                已提取 <span className="font-semibold text-brand">{assetCandidates.length}</span> 个待确认资产候选，请在独立预处理弹层中勾选、修改后再录入资产库。
+              </span>
+              <span className="shrink-0 rounded-lg bg-brand px-3 py-1.5 font-semibold text-white">打开预处理</span>
+            </button>
+          )}
           <div className="space-y-3">
             {semanticAssets.length === 0 && (
               <div className="rounded-lg border border-dashed border-surface-border p-4 text-center text-xs text-text-tertiary">
-                暂无资产，点击上方按钮或画布 + 号添加
+                暂无资产，点击“提取资产候选”预处理后录入，或用画布 + 号手动添加
               </div>
             )}
             {semanticAssets.map((asset) => (
@@ -3191,15 +4316,73 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
                     生成图
                   </button>
                 </div>
-                <textarea
-                  value={asset.lockPrompt}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setSemanticAssets((prev) => prev.map((a) => (a.id === asset.id ? { ...a, lockPrompt: value } : a)));
-                  }}
-                  placeholder="lock_prompt..."
-                  className="h-16 w-full rounded border border-surface-border bg-surface-elevated p-1.5 text-[10px] text-text-secondary outline-none focus:border-brand"
-                />
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-semibold text-text-tertiary">资产描述</label>
+                  <textarea
+                    value={asset.summary}
+                    onChange={(e) => updateSemanticAsset(asset.id, { summary: e.target.value })}
+                    placeholder="人物外貌定妆 / 场景结构 / 道具形制 / 风格要点..."
+                    className="h-20 w-full rounded border border-surface-border bg-surface-elevated p-1.5 text-[10px] leading-relaxed text-text-secondary outline-none focus:border-brand"
+                  />
+                  <label className="block text-[10px] font-semibold text-text-tertiary">生图锁定词</label>
+                  <textarea
+                    value={asset.lockPrompt}
+                    onChange={(e) => updateSemanticAsset(asset.id, { lockPrompt: e.target.value })}
+                    placeholder="lock_prompt..."
+                    className="h-16 w-full rounded border border-surface-border bg-surface-elevated p-1.5 text-[10px] leading-relaxed text-text-secondary outline-none focus:border-brand"
+                  />
+                  {activeSemanticAssetId === asset.id && (
+                    <div className="space-y-2 rounded-lg border border-brand/15 bg-brand/5 p-2" onClick={(event) => event.stopPropagation()}>
+                      <textarea
+                        value={assetRegenerateInstruction}
+                        onChange={(event) => setAssetRegenerateInstruction(event.target.value)}
+                        placeholder="告诉 AI 怎么改这张资产：例如“只保留外貌定妆，去掉剧情作用，强化黑色旧蓑衣和旧刀缺口”"
+                        className="h-16 w-full resize-none rounded border border-surface-border bg-surface-base p-2 text-[10px] leading-relaxed text-text-secondary outline-none focus:border-brand"
+                      />
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => regenerateSemanticAsset(asset)}
+                          disabled={assetRegeneratingId === asset.id}
+                          className="flex items-center justify-center gap-1 rounded-md bg-brand px-2 py-1.5 text-[10px] font-semibold text-white disabled:opacity-50"
+                        >
+                          {assetRegeneratingId === asset.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
+                          AI改写并覆盖
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => chatAboutAsset(asset)}
+                          disabled={assetChatting || !assetChatInput.trim()}
+                          className="flex items-center justify-center gap-1 rounded-md border border-surface-border bg-surface-card px-2 py-1.5 text-[10px] font-semibold text-text-primary disabled:opacity-50"
+                        >
+                          {assetChatting ? <Loader2 className="h-3 w-3 animate-spin" /> : <MessageSquare className="h-3 w-3" />}
+                          聊一下
+                        </button>
+                      </div>
+                      <input
+                        value={assetChatInput}
+                        onChange={(event) => setAssetChatInput(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" && !event.shiftKey) {
+                            event.preventDefault();
+                            chatAboutAsset(asset);
+                          }
+                        }}
+                        placeholder="问这张资产怎么改：如“这个人物描述为什么不适合生图？”"
+                        className="h-8 w-full rounded border border-surface-border bg-surface-base px-2 text-[10px] text-text-secondary outline-none focus:border-brand"
+                      />
+                      {assetChatMessages.length > 0 && (
+                        <div className="max-h-32 space-y-1 overflow-y-auto rounded border border-surface-border bg-surface-base p-2 text-[10px] leading-relaxed text-text-secondary">
+                          {assetChatMessages.slice(-4).map((message) => (
+                            <div key={message.id} className={message.role === "user" ? "text-text-tertiary" : "text-text-primary"}>
+                              <span className="font-semibold">{message.role === "user" ? "你：" : "AI："}</span>{message.content || "..."}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -3211,15 +4394,54 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
       const isImage = workflowMode === "storyboardImage";
       const raw = isImage ? workflowStoryboardImage : workflowStoryboardVideo;
       const setRaw = (v: string) => isImage ? setWorkflowStoryboardImage(v) : setWorkflowStoryboardVideo(v);
+      const selectedShots = selectedOverviewShotIds.length ? selectedOverviewShotIds : storyboardShots.map((shot) => shot.id);
+      const batchGenerateFromOverview = (kind: "sketch" | "image" | "video", shotIds: string[]) => {
+        const queue = storyboardShots.filter((shot) => shotIds.includes(shot.id));
+        if (!queue.length) return;
+        if (kind === "video") batchGenerateVideosForShots(queue);
+        else batchGenerateImagesForShots(queue);
+      };
       return (
         <div className="space-y-3">
-          <h3 className="mb-3 text-sm font-semibold text-text-primary">{isImage ? "分镜图提示词" : "分镜剧本/视频提示词"}</h3>
-          <div className="space-y-3">
+          <div className="rounded-2xl border border-brand/15 bg-brand/5 p-3 text-[11px] leading-relaxed text-text-secondary">
+            <div className="mb-1 font-semibold text-text-primary">镜头列表 = 逻辑/空间审核层</div>
+            <div>先检查镜头顺序、场景切换、人物站位、动作因果和视频提示词；确认后再生成分镜图。画布只承载资产、分镜图和视频产物。</div>
+          </div>
+
+          {storyboardShots.length > 0 && (
+            <ShotOverviewTable
+              shots={storyboardShots}
+              assets={assets}
+              generationJobs={generationJobs}
+              directorBlocks={directorBlocks}
+              activeShotId={activeShotId}
+              selectedShotIds={selectedOverviewShotIds}
+              onSelectShot={(shotId) => {
+                setActiveShotId(shotId);
+                setWorkflowView("step");
+              }}
+              onToggleSelectedShot={(shotId) => setSelectedOverviewShotIds((prev) => prev.includes(shotId) ? prev.filter((id) => id !== shotId) : [...prev, shotId])}
+              onSelectAll={setSelectedOverviewShotIds}
+              onBatchGenerate={batchGenerateFromOverview}
+              onBatchDelete={(shotIds) => {
+                setStoryboardShots((prev) => prev.filter((shot) => !shotIds.includes(shot.id)).map((shot, index) => ({ ...shot, index: index + 1 })));
+                setSelectedOverviewShotIds([]);
+                if (activeShotId && shotIds.includes(activeShotId)) setActiveShotId(undefined);
+              }}
+              onReorderShots={reorderShots}
+              isStoryboardSketchAsset={isStoryboardSketchAsset}
+              getShotStatusLabel={getShotStatusLabel}
+              assetViewUrl={assetViewUrl}
+            />
+          )}
+
+          <div className="space-y-3 rounded-2xl border border-surface-border bg-surface-card/70 p-3">
+            <h3 className="text-sm font-semibold text-text-primary">{isImage ? "生成/解析分镜图提示词" : "生成/解析视频提示词"}</h3>
             <textarea
               value={raw}
               onChange={(e) => setRaw(e.target.value)}
               placeholder={isImage ? "输入分镜图提示词..." : "输入分镜剧本或 Seedance 视频提示词..."}
-              className="h-56 w-full rounded-lg border border-surface-border bg-surface-base p-2 text-[11px] leading-relaxed text-text-secondary outline-none focus:border-brand"
+              className="h-40 w-full rounded-lg border border-surface-border bg-surface-base p-2 text-[11px] leading-relaxed text-text-secondary outline-none focus:border-brand"
             />
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -3229,7 +4451,7 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
                 className="flex items-center justify-center gap-1 rounded-lg bg-brand/10 py-2 text-[11px] font-medium text-brand hover:bg-brand/20 disabled:opacity-50"
               >
                 {workflowGenerating === workflowMode ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                一键生成
+                一键生成提示词
               </button>
               <button
                 type="button"
@@ -3238,15 +4460,37 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
                 className="flex items-center justify-center gap-1 rounded-lg bg-surface-card py-2 text-[11px] font-medium text-text-primary hover:bg-surface-border disabled:opacity-50"
               >
                 <Layers className="h-3.5 w-3.5" />
-                解析为镜头卡
+                解析为镜头列表
               </button>
             </div>
-            <div className="rounded-lg bg-surface-card p-3 text-[10px] text-text-secondary">
-              <p className="mb-1 font-medium text-text-primary">快捷操作</p>
+            {storyboardShots.length > 0 && (
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => batchGenerateImagesForShots(storyboardShots.filter((shot) => selectedShots.includes(shot.id)))}
+                  disabled={Boolean(batchGenerating) || !selectedShots.length}
+                  className="flex items-center justify-center gap-1 rounded-lg bg-slate-950 py-2 text-[11px] font-semibold text-white hover:bg-brand disabled:opacity-50"
+                >
+                  {batchGenerating === "images" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImageIcon className="h-3.5 w-3.5" />}
+                  生成分镜图
+                </button>
+                <button
+                  type="button"
+                  onClick={() => batchGenerateVideosForShots(storyboardShots.filter((shot) => selectedShots.includes(shot.id)))}
+                  disabled={Boolean(batchGenerating) || !selectedShots.length}
+                  className="flex items-center justify-center gap-1 rounded-lg bg-rose-600 py-2 text-[11px] font-semibold text-white hover:bg-rose-500 disabled:opacity-50"
+                >
+                  {batchGenerating === "videos" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Video className="h-3.5 w-3.5" />}
+                  生成视频
+                </button>
+              </div>
+            )}
+            <div className="rounded-lg bg-surface-base p-3 text-[10px] text-text-secondary">
+              <p className="mb-1 font-medium text-text-primary">正确顺序</p>
               <ul className="list-inside list-disc space-y-0.5">
-                <li>双击画布镜头节点可编辑单个镜头</li>
-                <li>点击左侧步骤可切换到剧本/资产</li>
-                <li>生成后点击解析，系统会自动创建镜头卡</li>
+                <li>镜头列表先审核逻辑、空间、动作连续性。</li>
+                <li>分镜图用于确认构图、人物视觉和首帧候选。</li>
+                <li>视频节点只使用明确首帧或纯文本提示，不把镜头列表当首帧。</li>
               </ul>
             </div>
           </div>
@@ -3262,6 +4506,417 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     );
   })();
 
+  const activeEpisodeScript = episodeScripts.find((item) => item.episode === activeEpisode);
+
+  const flowStepLabels: Array<{ id: StoryFlowStage; label: string }> = [
+    { id: "idea", label: "AI聊剧本" },
+    { id: "ideaContent", label: "创意内容" },
+    { id: "outline", label: "剧本大纲" },
+    { id: "episodeScript", label: "分集正文" },
+    { id: "canvas", label: `第${activeEpisode}集画布` },
+  ];
+
+  const workflowModelPanel = (
+    <div className="rounded-[24px] border border-white/[0.08] bg-black/30 p-3 text-left shadow-[0_20px_80px_rgba(0,0,0,0.25)] backdrop-blur-xl">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-xs font-semibold text-white">模型策略</div>
+          <div className="text-[10px] text-white/40">按成本/质量选择文本工作流模型</div>
+        </div>
+        <button type="button" onClick={() => setShowModelAdvanced((value) => !value)} className="rounded-full border border-white/[0.1] px-2.5 py-1 text-[10px] text-white/60 hover:bg-white hover:text-black">
+          {showModelAdvanced ? "收起" : "高级"}
+        </button>
+      </div>
+      <div className="mt-3 grid grid-cols-3 gap-1 rounded-full border border-white/[0.08] bg-white/[0.04] p-1">
+        {(["economy", "balanced", "quality"] as WorkflowModelStrategy[]).map((strategy) => (
+          <button key={strategy} type="button" onClick={() => setWorkflowModelStrategy(strategy)} className={cn("rounded-full px-2 py-1.5 text-[10px] font-semibold transition", modelStrategy === strategy ? "bg-white text-black" : "text-white/45 hover:bg-white/[0.08] hover:text-white")}>
+            {WORKFLOW_MODEL_STRATEGY_LABELS[strategy]}
+          </button>
+        ))}
+      </div>
+      <div className="mt-2 text-[10px] leading-5 text-white/45">
+        当前：聊剧本/改剧本 {getWorkflowModel("ideaChat")}，批量生成 {getWorkflowModel("episodeScript")}
+      </div>
+      {showModelAdvanced && (
+        <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
+          {WORKFLOW_MODEL_TASKS.map((task) => (
+            <label key={task.key} className="block rounded-2xl border border-white/[0.06] bg-white/[0.04] p-2">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <span className="text-[11px] font-semibold text-white/85">{task.label}</span>
+                <span className="text-[9px] text-white/35">{task.desc}</span>
+              </div>
+              <select value={getWorkflowModel(task.key)} onChange={(event) => updateWorkflowModel(task.key, event.target.value)} className="w-full rounded-xl border border-white/[0.08] bg-black/40 px-2 py-1.5 text-[11px] text-white outline-none focus:border-white/40">
+                {WORKFLOW_MODEL_OPTIONS.map((model) => (
+                  <option key={model.value} value={model.value}>{model.label} · {model.cost}</option>
+                ))}
+              </select>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const storyFlowPage = flowStage !== "canvas" ? (
+    <div className="fixed inset-0 z-50 overflow-hidden bg-[radial-gradient(circle_at_18%_0%,rgba(255,255,255,0.10),transparent_28%),linear-gradient(135deg,#050505_0%,#0b0b0d_48%,#17120f_100%)] text-white">
+      <header className="flex h-14 items-center justify-between border-b border-white/[0.08] bg-black/35 px-5 backdrop-blur-xl">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => router.push("/chat")}
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.12] bg-white/[0.06] text-white/70 transition hover:bg-white hover:text-black"
+            title="返回聊天"
+            aria-label="返回聊天"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+          <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-white text-black shadow-sm"><Clapperboard className="h-4 w-4" /></span>
+          <div>
+            <div className="text-sm font-semibold">{activeProject?.title || "未命名漫剧"}</div>
+            <div className="text-[11px] text-white/40">从想法到剧本，再进入单集画布</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-1 rounded-full border border-white/[0.08] bg-white/[0.04] p-1">
+          {flowStepLabels.map((step, index) => (
+            <button
+              key={step.id}
+              type="button"
+              onClick={() => {
+                if (step.id === "canvas") {
+                  void enterEpisodeCanvas(activeEpisode);
+                  return;
+                }
+                if ((step.id === "ideaContent" || step.id === "outline") && !outlineSource.trim()) {
+                  toast.info("先提炼创意内容");
+                  return;
+                }
+                setFlowStage(step.id);
+              }}
+              className={cn("rounded-full px-3 py-1.5 text-[11px] font-semibold transition", flowStage === step.id ? "bg-white text-black" : "text-white/45 hover:bg-white/[0.08] hover:text-white")}
+            >
+              {index + 1}. {step.label}
+            </button>
+          ))}
+        </div>
+        <button type="button" onClick={() => void enterEpisodeCanvas(activeEpisode)} className="rounded-full border border-white/[0.1] bg-white/[0.06] px-3 py-2 text-xs font-semibold text-white/70 hover:bg-white hover:text-black">
+          跳到画布
+        </button>
+      </header>
+
+      {flowStage === "idea" && (
+        <main className="mx-auto flex h-[calc(100vh-56px)] max-w-6xl gap-5 p-5">
+          <section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[32px] border border-white/[0.08] bg-white/[0.05] shadow-[0_32px_100px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+            <div className="border-b border-white/[0.08] px-6 py-5">
+              <div className="flex items-center gap-2 text-xs font-semibold text-amber-200/80"><MessageSquare className="h-4 w-4" /> AI聊剧本内容</div>
+              <h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em]">先把短剧想法聊清楚</h1>
+              <p className="mt-2 text-sm leading-6 text-white/45">这里不是生成小说。先把类型、核心梗、主角处境、集数、结尾钩子聊清楚，再提炼成可确认编辑的最终有效创意。</p>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5">
+              {ideaChatMessages.length ? (
+                <div className="space-y-3">
+                  {ideaChatMessages.map((msg) => (
+                    <div key={msg.id} className={cn("max-w-[82%] rounded-3xl border px-4 py-3 text-sm leading-6", msg.role === "user" ? "ml-auto border-white/[0.12] bg-white text-black" : "border-white/[0.08] bg-black/30 text-white/72")}>
+                      <RichMarkdown content={msg.content} inverse={msg.role === "user"} />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="grid h-full place-items-center text-center">
+                  <div className="max-w-xl">
+                    <Sparkles className="mx-auto mb-4 h-10 w-10 text-amber-200/70" />
+                    <div className="text-xl font-semibold">例如：5集中式民俗恐怖，响器班误入黄泉戏班，规则压迫，主角靠观察交易漏洞破局。</div>
+                    <div className="mt-3 text-sm leading-6 text-white/42">也可以粘贴已有小说梗概/剧情片段，但流程目标是改成短剧大纲，不是续写小说。</div>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="border-t border-white/[0.08] bg-black/20 p-4">
+              <textarea
+                value={ideaInput}
+                onChange={(e) => setIdeaInput(e.target.value)}
+                placeholder="输入你的短剧想法：类型、主角、核心梗、集数、目标受众、想要的情绪..."
+                className="h-28 w-full resize-none rounded-3xl border border-white/[0.1] bg-black/35 p-4 text-sm leading-6 text-white outline-none placeholder:text-white/25 focus:border-white/35"
+              />
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <label className="flex cursor-pointer items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-xs font-semibold text-white/52 hover:bg-white hover:text-black">
+                  <UploadCloud className="h-3.5 w-3.5" /> 上传小说/梗概文本
+                  <input type="file" accept=".txt,.md,.markdown,text/plain,text/markdown,text/x-markdown" className="hidden" onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = "";
+                    if (!file) return;
+                    readTextImportFile(file, setIdeaInput);
+                  }} />
+                </label>
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={chatAboutIdea} disabled={ideaChatting} className="flex items-center gap-2 rounded-full border border-white/[0.12] bg-white/[0.06] px-4 py-2.5 text-sm font-semibold text-white/72 hover:bg-white hover:text-black disabled:opacity-60">
+                    {ideaChatting ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageSquare className="h-4 w-4" />}
+                    发送给 AI
+                  </button>
+                  <button type="button" onClick={extractEffectiveIdeaContent} disabled={ideaExtracting || ideaChatting || outlineGenerating} className="flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black shadow-sm hover:bg-white/88 disabled:opacity-60">
+                    {ideaExtracting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    提炼创意内容
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+          <aside className="w-[360px] space-y-4 rounded-[32px] border border-white/[0.08] bg-black/28 p-5 backdrop-blur-xl">
+            {workflowModelPanel}
+            <div className="text-sm font-semibold">生成目标</div>
+            <div className="mt-4 space-y-3 text-sm text-white/55">
+              <div className="rounded-2xl bg-white/[0.05] p-4"><b className="text-white/78">最终有效创意</b><br />从聊天中排除被否决方案，只保留用户确认的创意。</div>
+              <div className="rounded-2xl bg-white/[0.05] p-4"><b className="text-white/78">剧本摘要</b><br />故事类型、核心梗、一句话故事、人物小传、故事梗概。</div>
+              <div className="rounded-2xl bg-white/[0.05] p-4"><b className="text-white/78">分集剧本</b><br />按集拆出简介、主事件、关系推进和结尾钩子。</div>
+            </div>
+          </aside>
+        </main>
+      )}
+
+      {flowStage === "ideaContent" && (
+        <main className="mx-auto grid h-[calc(100vh-56px)] max-w-6xl grid-cols-[minmax(0,1fr)_360px] gap-5 overflow-hidden p-5">
+          <section className="flex min-h-0 flex-col overflow-hidden rounded-[32px] border border-white/[0.08] bg-white/[0.05] shadow-[0_32px_100px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+            <div className="border-b border-white/[0.08] px-6 py-5">
+              <div className="flex items-center gap-2 text-xs font-semibold text-amber-200/80"><Sparkles className="h-4 w-4" /> 创意内容</div>
+              <h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em]">确认最终有效创意</h1>
+              <p className="mt-2 text-sm leading-6 text-white/45">这是后续剧本摘要、分集正文、资产、分镜和视频提示词的唯一上游。被否决的聊天想法不会进入这里。</p>
+            </div>
+            <textarea
+              value={outlineSource}
+              onChange={(e) => { setOutlineSource(e.target.value); setOriginalIdea(e.target.value); setWorkflowIdea(e.target.value); setScriptSourceExcerpt(e.target.value.slice(0, 2000)); }}
+              placeholder="这里会显示从 AI聊剧本中提炼出的最终有效创意。你可以直接修改、删掉不需要的设定，再生成剧本大纲。"
+              className="min-h-0 flex-1 resize-none bg-transparent p-6 text-sm leading-7 text-white/72 outline-none placeholder:text-white/25"
+            />
+            <div className="flex items-center justify-between gap-3 border-t border-white/[0.08] bg-black/20 p-4">
+              <button type="button" onClick={() => setFlowStage("idea")} className="rounded-full border border-white/[0.1] px-4 py-2.5 text-xs font-semibold text-white/60 hover:bg-white hover:text-black">
+                返回继续聊
+              </button>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={extractEffectiveIdeaContent} disabled={ideaExtracting || ideaChatting || outlineGenerating} className="flex items-center gap-2 rounded-full border border-white/[0.12] bg-white/[0.06] px-4 py-2.5 text-sm font-semibold text-white/72 hover:bg-white hover:text-black disabled:opacity-60">
+                  {ideaExtracting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  重新提炼
+                </button>
+                <button type="button" onClick={generateScriptOutlineFromIdea} disabled={outlineGenerating || ideaExtracting || !outlineSource.trim()} className="flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black shadow-sm hover:bg-white/88 disabled:opacity-60">
+                  {outlineGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  确认并生成剧本大纲
+                </button>
+              </div>
+            </div>
+          </section>
+          <aside className="space-y-4 overflow-y-auto rounded-[32px] border border-white/[0.08] bg-black/28 p-5 backdrop-blur-xl">
+            {workflowModelPanel}
+            <div className="rounded-3xl border border-white/[0.08] bg-white/[0.045] p-4 text-sm leading-6 text-white/55">
+              <div className="mb-2 text-sm font-semibold text-white">检查重点</div>
+              <ul className="list-inside list-disc space-y-1 text-xs leading-5 text-white/48">
+                <li>只保留最后确认的方向。</li>
+                <li>删掉 AI 提过但你没采纳的选项。</li>
+                <li>确认主角、规则、人物关系和集数。</li>
+                <li>后续大纲/正文/分镜只读这份创意。</li>
+              </ul>
+            </div>
+            <div className="rounded-3xl border border-white/[0.08] bg-white/[0.045] p-4 text-xs leading-5 text-white/42">
+              <div className="mb-2 text-sm font-semibold text-white/82">上一阶段聊天</div>
+              {ideaChatMessages.length ? `${ideaChatMessages.length} 条消息已用于提炼。` : "还没有聊天记录，可返回 AI聊剧本继续补充。"}
+            </div>
+            <details className="rounded-3xl border border-white/[0.08] bg-white/[0.045] p-4 text-xs leading-5 text-white/48">
+              <summary className="cursor-pointer text-sm font-semibold text-white/82">用户原文参考{ideaSourceReference ? ` · ${ideaSourceReference.length} 字` : ""}</summary>
+              <p className="mt-2 text-white/38">仅作回溯参考，默认不传给剧本大纲/正文；后续生成只读取左侧结构化剧情母版。</p>
+              <textarea
+                value={ideaSourceReference}
+                onChange={(e) => setIdeaSourceReference(e.target.value)}
+                placeholder="用户最后确认的原始剧情文本会放在这里，折叠保存，不混入最终有效创意。"
+                className="mt-3 h-56 w-full resize-none rounded-2xl border border-white/[0.08] bg-black/35 p-3 text-xs leading-5 text-white/58 outline-none placeholder:text-white/25"
+              />
+            </details>
+          </aside>
+        </main>
+      )}
+
+      {flowStage === "outline" && (
+        <main className="grid h-[calc(100vh-56px)] grid-cols-[360px_1fr] gap-5 overflow-hidden p-5">
+          <section className="flex min-h-0 flex-col gap-4 overflow-hidden rounded-[28px] border border-white/[0.08] bg-white/[0.05] p-4">
+            {workflowModelPanel}
+            <div className="min-h-0 flex-1 overflow-hidden rounded-[24px] border border-white/[0.08] bg-black/20">
+              <div className="border-b border-white/[0.08] px-5 py-4 text-sm font-semibold">最终有效创意</div>
+              <textarea value={outlineSource} onChange={(e) => { setOutlineSource(e.target.value); setOriginalIdea(e.target.value); setWorkflowIdea(e.target.value); }} className="h-[calc(100%-53px)] w-full resize-none bg-transparent p-5 text-sm leading-6 text-white/68 outline-none" />
+            </div>
+          </section>
+          <section className="min-w-0 overflow-y-auto rounded-[28px] border border-white/[0.08] bg-black/24 p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-semibold">剧本大纲</h2>
+                <p className="mt-1 text-xs text-white/38">包含剧本摘要和分集剧本，确认后生成第一集正文。</p>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={generateScriptOutlineFromIdea} disabled={outlineGenerating} className="rounded-full border border-white/[0.1] px-4 py-2 text-xs font-semibold text-white/60 hover:bg-white hover:text-black disabled:opacity-50">重新生成</button>
+                <button type="button" onClick={confirmOutlineAndGenerateFirstEpisode} disabled={episodeScriptGenerating !== null} className="flex items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-semibold text-black disabled:opacity-50">{episodeScriptGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ChevronRight className="h-3.5 w-3.5" />} 确认分集，生成第1集正文</button>
+              </div>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="space-y-3 rounded-3xl border border-white/[0.08] bg-white/[0.045] p-4">
+                <div className="text-sm font-semibold">剧本摘要</div>
+                {([
+                  ["episodeCount", "自定义集数"], ["genre", "故事类型"], ["targetAudience", "目标受众"], ["coreHook", "核心梗"], ["logline", "一句话故事"], ["charactersText", "人物小传"], ["synopsis", "故事梗概"],
+                ] as const).map(([key, label]) => (
+                  <label key={key} className="block text-[11px] font-semibold text-white/42">
+                    {label}
+                    {key === "episodeCount" ? (
+                      <input type="number" value={scriptSummary.episodeCount} onChange={(e) => setScriptSummary((prev) => ({ ...prev, episodeCount: Number(e.target.value || 1) }))} className="mt-1 h-9 w-full rounded-xl border border-white/[0.08] bg-black/35 px-3 text-sm text-white outline-none" />
+                    ) : (
+                      <textarea value={String(scriptSummary[key] || "")} onChange={(e) => setScriptSummary((prev) => ({ ...prev, [key]: e.target.value }))} className={cn("mt-1 w-full resize-none rounded-xl border border-white/[0.08] bg-black/35 p-3 text-sm leading-5 text-white outline-none", key === "charactersText" || key === "synopsis" ? "h-32" : "h-16")} />
+                    )}
+                  </label>
+                ))}
+              </div>
+              <div className="space-y-3 rounded-3xl border border-white/[0.08] bg-white/[0.045] p-4">
+                <div className="flex items-center justify-between"><div className="text-sm font-semibold">分集剧本</div><span className="text-[11px] text-white/35">{episodeOutlines.length} 集</span></div>
+                {episodeOutlines.map((episode, index) => (
+                  <div key={episode.episode} className="rounded-2xl border border-white/[0.08] bg-black/28 p-3">
+                    <div className="mb-2 flex items-center gap-2">
+                      <input value={episode.title} onChange={(e) => setEpisodeOutlines((prev) => prev.map((item, i) => i === index ? { ...item, title: e.target.value } : item))} className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-white outline-none" />
+                      <button type="button" onClick={() => generateEpisodeScript(episode)} disabled={episodeScriptGenerating !== null} className="rounded-full bg-white/[0.08] px-2 py-1 text-[10px] font-semibold text-white/58 hover:bg-white hover:text-black">生成此集</button>
+                    </div>
+                    <textarea value={episode.summary} onChange={(e) => setEpisodeOutlines((prev) => prev.map((item, i) => i === index ? { ...item, summary: e.target.value } : item))} className="h-32 w-full resize-none bg-transparent text-xs leading-5 text-white/58 outline-none" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        </main>
+      )}
+
+      {flowStage === "episodeScript" && (
+        <main className="mx-auto flex h-[calc(100vh-56px)] max-w-6xl flex-col gap-4 overflow-hidden p-5">
+          <div className="flex items-center justify-between gap-4 rounded-[26px] border border-white/[0.08] bg-white/[0.05] px-5 py-4">
+            <div><div className="text-lg font-semibold">分集正文</div><div className="mt-1 text-xs text-white/38">默认已生成第一集正文，确认后进入当前集画布。</div></div>
+            <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+              <input value={scriptRevisionInstruction} onChange={(e) => setScriptRevisionInstruction(e.target.value)} placeholder="一句话修改当前集：强化钩子/压缩节奏/改对白..." className="h-9 min-w-[260px] max-w-md flex-1 rounded-full border border-white/[0.1] bg-black/30 px-4 text-xs text-white outline-none placeholder:text-white/28" />
+              <button type="button" onClick={() => reviseScriptWithInstruction()} disabled={scriptRevising} className="flex items-center gap-1 rounded-full border border-white/[0.1] px-4 py-2 text-xs font-semibold text-white/68 hover:bg-white hover:text-black disabled:opacity-50">{scriptRevising ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />} 一键改剧本</button>
+              <button type="button" onClick={async () => { setEpisodeScriptGenerating("all"); for (const outline of episodeOutlines) await generateEpisodeScript(outline); setEpisodeScriptGenerating(null); }} disabled={episodeScriptGenerating !== null} className="rounded-full border border-white/[0.1] px-4 py-2 text-xs font-semibold text-white/60 hover:bg-white hover:text-black disabled:opacity-50">生成全部集正文</button>
+              <button type="button" onClick={() => enterEpisodeCanvas(activeEpisode)} className="rounded-full bg-white px-4 py-2 text-xs font-semibold text-black">进入第{activeEpisode}集画布</button>
+            </div>
+          </div>
+          <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)_320px] gap-4">
+            <aside className="overflow-y-auto rounded-[26px] border border-white/[0.08] bg-white/[0.04] p-3">
+              {episodeOutlines.map((outline) => {
+                const done = episodeScripts.some((item) => item.episode === outline.episode);
+                return <button key={outline.episode} type="button" onClick={() => { setActiveEpisode(outline.episode); const script = episodeScripts.find((item) => item.episode === outline.episode); if (script) setWorkflowScript(extractVisibleEpisodeScript(script.script)); }} className={cn("mb-2 w-full rounded-2xl border px-3 py-3 text-left text-xs transition", activeEpisode === outline.episode ? "border-white bg-white text-black" : "border-white/[0.08] bg-black/20 text-white/58 hover:bg-white/[0.08]")}>{outline.title}<div className="mt-1 text-[10px] opacity-60">{done ? "正文已生成" : "未生成"}</div></button>;
+              })}
+            </aside>
+            <section className="overflow-hidden rounded-[26px] border border-white/[0.08] bg-white/[0.045]">
+              <div className="border-b border-white/[0.08] px-5 py-3 text-sm font-semibold">第{activeEpisode}集正文</div>
+              <textarea value={workflowScript} onChange={(e) => { setWorkflowScript(e.target.value); setEpisodeScripts((prev) => prev.map((item) => item.episode === activeEpisode ? { ...item, script: e.target.value, scenes: [] } : item)); }} className="h-[calc(100%-45px)] w-full resize-none bg-transparent p-5 text-sm leading-7 text-white/72 outline-none" />
+            </section>
+            <aside className="overflow-y-auto rounded-[26px] border border-white/[0.08] bg-white/[0.04] p-4">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-sm font-semibold">结构化场次</div>
+                <span className="text-[10px] text-white/35">{activeEpisodeScript?.scenes?.length || 0} 场</span>
+              </div>
+              <div className="mt-3 space-y-3">
+                {activeEpisodeScript?.scenes?.length ? activeEpisodeScript.scenes.map((scene) => (
+                  <div key={`${activeEpisode}-${scene.scene}`} className="rounded-2xl border border-white/[0.08] bg-black/24 p-3 text-xs text-white/58">
+                    <div className="font-semibold text-white/82">场{scene.scene}｜{scene.location || "地点未标注"}</div>
+                    <div className="mt-1 text-[10px] text-white/38">{scene.time || "时间未标注"} · {scene.characters.join("、") || "人物未标注"}</div>
+                    {scene.visualAction && <div className="mt-2 leading-5"><b className="text-white/68">动作：</b>{scene.visualAction}</div>}
+                    {scene.dialogue.length > 0 && <div className="mt-2 leading-5"><b className="text-white/68">对白：</b>{scene.dialogue.slice(0, 2).map((line) => `${line.character || "角色"}：${line.text}`).join(" / ")}</div>}
+                    {scene.hook && <div className="mt-2 leading-5"><b className="text-white/68">钩子：</b>{scene.hook}</div>}
+                  </div>
+                )) : (
+                  <div className="rounded-2xl border border-dashed border-white/[0.1] p-4 text-xs leading-5 text-white/42">旧剧本或手动编辑后的文本暂无结构化场次。重新生成或一键改剧本后，会生成 scenes[] 并供后续资产/分镜流程使用。</div>
+                )}
+              </div>
+            </aside>
+          </div>
+        </main>
+      )}
+    </div>
+  ) : null;
+
+  const canvasStoryFlowNav = (
+    <div className="flex items-center justify-between gap-3">
+      <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
+        {flowStepLabels.map((step, index) => {
+          const isCanvasStep = step.id === "canvas";
+          const isActive = isCanvasStep;
+          const label = isCanvasStep ? `第${activeEpisode}集画布` : step.label;
+          return (
+            <div key={step.id} className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  if (step.id === "canvas") return;
+                  setFlowStage(step.id);
+                  if (step.id === "episodeScript") {
+                    const script = episodeScripts.find((item) => item.episode === activeEpisode);
+                    if (script) setWorkflowScript(extractVisibleEpisodeScript(script.script));
+                  }
+                }}
+                className={cn(
+                  "flex h-8 min-w-[104px] items-center justify-center rounded-full border px-3 text-xs font-semibold transition",
+                  isActive ? "border-white bg-white text-black" : "border-white/[0.08] bg-white/[0.04] text-white/58 hover:bg-white/[0.1] hover:text-white",
+                )}
+              >
+                {label}
+              </button>
+              {index < flowStepLabels.length - 1 && <ChevronRight className="h-3 w-3 text-white/[0.2]" />}
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <span className="rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1 text-[11px] text-white/42">当前：第{activeEpisode}集 · {activeEpisodeShots.length} 镜头</span>
+        <button
+          type="button"
+          onClick={() => {
+            setWorkflowMode("assets");
+            setWorkflowView("step");
+            if (semanticAssets.length) setActiveSemanticAssetId(semanticAssets[0].id);
+          }}
+          className={cn(
+            "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+            workflowView === "step" && workflowMode === "assets" ? "border-white bg-white text-black" : "border-white/[0.12] bg-white/[0.06] text-white/72 hover:bg-white hover:text-black",
+          )}
+        >
+          角色场景
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setWorkflowMode("storyboardImage");
+            setWorkflowView("step");
+          }}
+          className={cn(
+            "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+            workflowView === "step" && (workflowMode === "storyboardImage" || workflowMode === "storyboardVideo") ? "border-white bg-white text-black" : "border-white/[0.12] bg-white/[0.06] text-white/72 hover:bg-white hover:text-black",
+          )}
+        >
+          分镜成片
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setAssetPreprocessOpen(true);
+            generateWorkflow("assets");
+          }}
+          disabled={Boolean(workflowGenerating)}
+          className="rounded-full border border-brand/30 bg-brand/15 px-3 py-1.5 text-xs font-semibold text-brand hover:bg-brand/25 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {workflowGenerating === "assets" ? "提取中..." : "提取资产候选"}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            const script = episodeScripts.find((item) => item.episode === activeEpisode);
+            if (script) setWorkflowScript(extractVisibleEpisodeScript(script.script));
+            setFlowStage("episodeScript");
+          }}
+          className="rounded-full border border-white/[0.12] bg-white/[0.06] px-3 py-1.5 text-xs font-semibold text-white/72 hover:bg-white hover:text-black"
+        >
+          返回分集正文
+        </button>
+      </div>
+    </div>
+  );
+
   // ===== 保存项目 =====
   const saveProject = useCallback(() => {
     if (!activeProject) return;
@@ -3272,6 +4927,16 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
               ...p,
               updatedAt: new Date().toISOString(),
               idea: workflowIdea,
+              flowStage,
+              modelStrategy,
+              workflowModels,
+              originalIdea,
+              outlineSource,
+              ideaChatMessages,
+              scriptSummary,
+              episodeOutlines,
+              episodeScripts,
+              activeEpisode,
               novel: workflowNovel,
               scriptSourceExcerpt,
               scriptAdaptationInstruction,
@@ -3294,7 +4959,9 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
       )
     );
     toast.success("已保存项目");
-  }, [activeProject, workflowIdea, workflowNovel, scriptSourceExcerpt, scriptAdaptationInstruction, workflowScript, workflowAssets, workflowStoryboardVideo, workflowStoryboardImage, assets, selectedAssetIds, imagePrompt, videoPrompt, storyboardShots, activeShotId, generationJobs, semanticAssets, directorBlocks, generatorGroups, setProjects]);
+  }, [activeProject, workflowIdea, flowStage, modelStrategy, workflowModels, originalIdea, outlineSource, ideaChatMessages, scriptSummary, episodeOutlines, episodeScripts, activeEpisode, workflowNovel, scriptSourceExcerpt, scriptAdaptationInstruction, workflowScript, workflowAssets, workflowStoryboardVideo, workflowStoryboardImage, assets, selectedAssetIds, imagePrompt, videoPrompt, storyboardShots, activeShotId, generationJobs, semanticAssets, directorBlocks, generatorGroups, setProjects]);
+
+  if (storyFlowPage) return storyFlowPage;
 
   return (
     <div className="fixed inset-0 z-50">
@@ -3317,6 +4984,7 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
           kind: asset.kind,
           category: asset.kind,
           summary: asset.summary || asset.lockPrompt,
+          lockPrompt: asset.lockPrompt,
           imageUrl: asset.imageUrl,
           image_url: asset.imageUrl,
         }))}
@@ -3364,11 +5032,28 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
         }}
         onComposerSettingsChange={handleComposerSettingsChange}
         onBindAssetMention={handleBindAssetMention}
+        storyboardShotCount={storyboardShots.length}
+        storyboardImageCount={storyboardFormalImageReadyCount}
+        storyboardVideoCount={storyboardVideoReadyCount}
+        onRewriteAsset={handleRewriteNodeAsset}
+        onChatAsset={handleChatNodeAsset}
+        assetRewriting={Boolean(assetRegeneratingId)}
+        assetChatting={assetChatting}
         composerGenerating={isGenerating || videoGenerating || Boolean(batchGenerating) || Boolean(assetImageGeneratingId)}
         onAutoLayout={autoLayoutNodes}
         onBatchGenerate={(nodeIds, mode) => createGeneratorGroupNode(nodeIds, mode)}
         onConnectNodes={handleCanvasConnectNodes}
         onDropAsset={handleDropAssetToCanvas}
+        onDeleteAsset={(assetId, source) => {
+          if (source === "library") {
+            const asset = assets.find((item) => item.id === assetId || item.publicId === assetId);
+            const ok = typeof window === "undefined" ? true : window.confirm(`删除素材「${asset?.name || "未命名素材"}」？\n\n会同时解除镜头和语义资产中的引用。`);
+            if (!ok) return;
+            removeAsset(asset?.id || assetId);
+            return;
+          }
+          handleDeleteSemanticAsset(assetId);
+        }}
         onSave={saveProject}
         onExport={() => {
           const data = {
@@ -3415,12 +5100,194 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
         onOpenProject={() => toast.info("请使用顶部保存面板切换项目")}
         onSettings={() => toast.info("设置开发中")}
         rightPanel={rightPanelContent}
+        storyFlowNav={canvasStoryFlowNav}
       >
+        <div className="absolute left-1/2 top-4 z-30 flex max-w-[calc(100%-160px)] -translate-x-1/2 items-center gap-2 rounded-full border border-white/[0.1] bg-[#0c0c0d]/88 px-3 py-2 shadow-[0_18px_50px_rgba(0,0,0,0.42)] backdrop-blur-xl">
+          <span className="shrink-0 rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1 text-[11px] font-semibold text-white/52">
+            镜头列表 · {activeEpisodeShots.length}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setWorkflowMode("storyboardImage");
+              setWorkflowView("step");
+            }}
+            className="shrink-0 rounded-full border border-white bg-white px-3 py-1.5 text-xs font-semibold text-black shadow-sm hover:bg-white/90"
+          >
+            分镜成片
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setWorkflowMode("storyboardImage");
+              setWorkflowView("step");
+              if (activeEpisodeShots.length) setActiveShotId(activeEpisodeShots[0].id);
+              void batchGenerateImagesForShots(activeEpisodeShots);
+            }}
+            disabled={Boolean(workflowGenerating) || Boolean(batchGenerating) || !activeEpisodeShots.length}
+            className="shrink-0 rounded-full border border-white/[0.12] bg-white/[0.06] px-3 py-1.5 text-xs font-semibold text-white/72 hover:bg-white hover:text-black disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {batchGenerating === "images" ? "生成中..." : "生成分镜图"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setWorkflowMode("storyboardVideo");
+              setWorkflowView("step");
+              if (activeEpisodeShots.length) setActiveShotId(activeEpisodeShots[0].id);
+              void batchGenerateVideosForShots(activeEpisodeShots);
+            }}
+            disabled={Boolean(workflowGenerating) || Boolean(batchGenerating) || !activeEpisodeShots.length}
+            className="shrink-0 rounded-full border border-brand/30 bg-brand/15 px-3 py-1.5 text-xs font-semibold text-brand hover:bg-brand/25 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {batchGenerating === "videos" ? "生成中..." : "生成视频"}
+          </button>
+        </div>
         <FloatingToolbar
           onAddNode={handleStudioAddNode}
           onHelp={() => toast.info("画布操作：滚轮缩放、拖拽移动、双击节点编辑")}
         />
       </ManjuStudioLayout>
+      {assetPreprocessOpen && (
+        <div className="absolute inset-0 z-[80] flex items-center justify-center bg-black/55 p-6 backdrop-blur-sm">
+          <div className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-[28px] border border-white/[0.1] bg-[#0f1012] [color-scheme:dark] shadow-[0_28px_100px_rgba(0,0,0,0.55)]">
+            <div className="flex items-start justify-between gap-4 border-b border-white/[0.08] bg-white/[0.04] px-5 py-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-brand" />
+                  <h2 className="text-base font-semibold text-white">剧情资产预处理</h2>
+                </div>
+                <p className="mt-1 text-xs leading-relaxed text-white/52">
+                  从剧本大纲、分集正文和当前镜头列表提取角色、场景、道具、风格候选。人物资产优先读大纲人物小传；这里不会生成图片，确认后再录入资产库。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAssetPreprocessOpen(false)}
+                className="rounded-full p-2 text-white/42 hover:bg-white/[0.08] hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/[0.08] bg-black/24 p-3">
+                <div className="text-xs text-white/52">
+                  当前候选：<span className="font-semibold text-white">{assetCandidates.length}</span> 个 · 已勾选：<span className="font-semibold text-white">{assetCandidates.filter((asset) => asset.selected).length}</span> 个
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => generateWorkflow("assets")}
+                    disabled={Boolean(workflowGenerating)}
+                    className="rounded-full border border-brand/30 bg-brand/15 px-3 py-1.5 text-xs font-semibold text-brand hover:bg-brand/25 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {workflowGenerating === "assets" ? "提取中..." : assetCandidates.length ? "重新提取" : "开始提取"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={applySelectedAssetCandidates}
+                    disabled={!assetCandidates.some((asset) => asset.selected)}
+                    className="rounded-full bg-brand px-4 py-1.5 text-xs font-semibold text-white hover:bg-brand/90 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    录入资产库
+                  </button>
+                </div>
+              </div>
+
+              <div className="mb-4 grid gap-3 lg:grid-cols-2">
+                <div className="rounded-2xl border border-white/[0.08] bg-white/[0.035] p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="text-xs font-semibold text-white">预设提取提示词</div>
+                    <button
+                      type="button"
+                      onClick={() => setAssetExtractInstruction(DEFAULT_ASSET_EXTRACT_INSTRUCTION)}
+                      className="rounded-full border border-white/[0.08] px-2 py-1 text-[10px] text-white/48 hover:bg-white/[0.08] hover:text-white"
+                    >
+                      恢复默认
+                    </button>
+                  </div>
+                  <textarea
+                    value={assetExtractInstruction}
+                    onChange={(event) => setAssetExtractInstruction(event.target.value)}
+                    className="h-44 w-full rounded-xl border border-white/15 bg-[#17191f] p-3 text-[13px] leading-6 text-white outline-none placeholder:text-white/45 focus:border-brand focus:bg-[#1b1e25]"
+                    placeholder="这里是默认资产提取规则，会和剧情材料一起发送给模型"
+                  />
+                </div>
+                <div className="rounded-2xl border border-white/[0.08] bg-white/[0.035] p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="text-xs font-semibold text-white">剧情材料来源预览</div>
+                    <div className="text-[10px] text-white/36">大纲人物小传 / 正文 / 镜头列表自动读取</div>
+                  </div>
+                  <pre className="h-44 overflow-y-auto whitespace-pre-wrap rounded-xl border border-white/15 bg-[#17191f] p-3 text-[12px] leading-6 text-white/82">
+                    {(getAssetExtractionSourceInput() || "暂无剧本大纲、剧情正文或镜头列表。请先确认剧本大纲/生成分集正文，或返回剧情阶段补充内容。").slice(0, 4000)}
+                  </pre>
+                </div>
+              </div>
+
+              {assetCandidates.length > 0 && assetCandidates.some((candidate) => !candidate.summary.trim() || !candidate.lockPrompt.trim()) && (
+                <div className="mb-4 rounded-2xl border border-amber-400/20 bg-amber-400/8 p-3 text-xs leading-relaxed text-amber-100">
+                  有候选资产缺少描述或生图锁定词，可以点击“重新提取”让模型按上方预设补全，或直接在卡片里手动修改。
+                </div>
+              )}
+
+              {assetCandidates.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-white/[0.12] bg-white/[0.03] p-8 text-center">
+                  <div className="text-sm font-semibold text-white">暂无资产候选</div>
+                  <p className="mt-2 text-xs leading-relaxed text-white/45">
+                    点击“开始提取”，系统会从本集剧情正文或当前镜头列表里整理出需要进入资产库的角色、场景、道具和风格。
+                  </p>
+                </div>
+              ) : (
+                <div className="grid gap-3 md:grid-cols-2">
+                  {assetCandidates.map((candidate) => (
+                    <div key={candidate.id} className="rounded-2xl border border-white/[0.08] bg-white/[0.04] p-3">
+                      <div className="mb-3 flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={candidate.selected}
+                          onChange={(event) => updateAssetCandidate(candidate.id, { selected: event.target.checked })}
+                          className="h-4 w-4 accent-brand"
+                        />
+                        <select
+                          value={candidate.kind}
+                          onChange={(event) => updateAssetCandidate(candidate.id, { kind: event.target.value as SemanticAssetKind })}
+                          className="rounded-lg border border-white/15 bg-[#17191f] px-2 py-1.5 text-xs text-white outline-none focus:border-brand"
+                        >
+                          <option value="character">角色</option>
+                          <option value="scene">场景</option>
+                          <option value="prop">道具</option>
+                          <option value="style">风格</option>
+                        </select>
+                        <input
+                          value={candidate.name}
+                          onChange={(event) => updateAssetCandidate(candidate.id, { name: event.target.value })}
+                          className="min-w-0 flex-1 rounded-lg border border-white/15 bg-[#17191f] px-2 py-1.5 text-xs text-white outline-none placeholder:text-white/45 focus:border-brand"
+                          placeholder="资产名称"
+                        />
+                      </div>
+                      <label className="mb-1 block text-[11px] font-semibold text-white/72">资产描述</label>
+                      <textarea
+                        value={candidate.summary}
+                        onChange={(event) => updateAssetCandidate(candidate.id, { summary: event.target.value })}
+                        className="mb-3 h-20 w-full rounded-xl border border-white/15 bg-[#17191f] p-3 text-[13px] leading-6 text-white outline-none placeholder:text-white/45 focus:border-brand focus:bg-[#1b1e25]"
+                        placeholder="人物身份/性格、场景空间、道具作用、剧情功能..."
+                      />
+                      <label className="mb-1 block text-[11px] font-semibold text-white/72">生图锁定词</label>
+                      <textarea
+                        value={candidate.lockPrompt}
+                        onChange={(event) => updateAssetCandidate(candidate.id, { lockPrompt: event.target.value })}
+                        className="h-20 w-full rounded-xl border border-white/15 bg-[#17191f] p-3 text-[13px] leading-6 text-white outline-none placeholder:text-white/45 focus:border-brand focus:bg-[#1b1e25]"
+                        placeholder="后续生成图片用的一致性提示词，可先修改再录入资产库"
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

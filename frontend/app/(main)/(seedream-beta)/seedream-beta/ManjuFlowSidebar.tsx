@@ -59,7 +59,7 @@ export default function ManjuFlowSidebar({
 }: ManjuFlowSidebarProps) {
   // 快捷操作按钮配置
   const quickActions = [
-    { label: "添加镜头", icon: <Plus className="h-3.5 w-3.5" />, action: () => onAddNode?.("shot", 100, 100) },
+    { label: "镜头列表", icon: <Plus className="h-3.5 w-3.5" />, action: () => onStepChange("storyboardImage") },
     { label: "批量生成分镜图", icon: <Sparkles className="h-3.5 w-3.5" />, action: () => onStepChange("storyboardImage") },
     { label: "批量生成视频", icon: <Wand2 className="h-3.5 w-3.5" />, action: () => onStepChange("storyboardVideo") },
   ];
@@ -180,11 +180,11 @@ export default function ManjuFlowSidebar({
         <div className={cn("grid gap-1.5", collapsed ? "grid-cols-1" : "grid-cols-1")}>
           <button
             type="button"
-            onClick={() => onAddNode?.("shot", 100, 100)}
+            onClick={() => onStepChange("storyboardImage")}
             className="flex items-center gap-1.5 rounded-lg border border-surface-border bg-surface-base px-2.5 py-2 text-sm text-text-secondary transition-colors hover:border-brand/40 hover:bg-surface-hover hover:text-brand"
           >
             <Plus className="h-4 w-4" />
-            {!collapsed && <span>添加镜头</span>}
+            {!collapsed && <span>镜头列表</span>}
           </button>
           <button
             type="button"

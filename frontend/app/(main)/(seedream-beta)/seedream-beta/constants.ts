@@ -1,17 +1,18 @@
-import type { AssetRole, CameraMove, SemanticAssetKind, ShotPurpose, ShotType, WorkflowMode } from "./types";
+import type { AssetRole, CameraMove, SemanticAssetKind, ShotPurpose, ShotType, WorkflowMode, WorkflowModelConfig, WorkflowModelStrategy, WorkflowModelTask } from "./types";
 
 export const IMAGE_ASPECTS = ["1:1", "16:9", "9:16", "4:3", "3:4"];
 export const IMAGE_RESOLUTIONS = ["2K"];
 export const SEEDREAM_IMAGE_QUALITY = "medium";
 
 export const VIDEO_MODELS = [
+  // Match backend .env default / currently accessible Ark endpoint first.
+  "doubao-seedance-2-0-fast-260128",
+  "doubao-seedance-2-0-260128",
+  // Newer display IDs are kept for environments that have explicit access.
   "doubao-seedance-2.0-mini",
   "doubao-seedance-1.5-pro",
   "doubao-seedance-1.0-pro",
   "doubao-seedance-1.0-pro-fast",
-  // Legacy endpoint IDs kept for old projects/tasks and admin pricing compatibility.
-  "doubao-seedance-2-0-fast-260128",
-  "doubao-seedance-2-0-260128",
 ];
 export const VIDEO_ASPECTS = ["adaptive", "16:9", "9:16", "1:1", "4:3", "3:4"];
 export const VIDEO_RESOLUTIONS = ["480p", "720p", "1080p"];
@@ -71,6 +72,60 @@ export function normalizeVideoResolutionForModel(model: string | undefined, reso
 export const WORKFLOW_DRAFT_MODEL = "deepseek-v4-pro";
 export const WORKFLOW_POLISH_MODEL = "gpt-5.5";
 export const WORKFLOW_MODEL = WORKFLOW_DRAFT_MODEL;
+export const WORKFLOW_MODEL_OPTIONS = [
+  { value: "deepseek-v4-pro", label: "DeepSeek V4 Pro", cost: "低成本", hint: "适合批量正文/资产/分镜提示词" },
+  { value: "gpt-5.5", label: "GPT-5.5", cost: "高质量", hint: "适合聊剧本/改剧本/强钩子" },
+] as const;
+export const WORKFLOW_MODEL_TASKS: Array<{ key: WorkflowModelTask; label: string; desc: string }> = [
+  { key: "ideaChat", label: "AI聊剧本", desc: "追问创意、钩子、人物关系" },
+  { key: "ideaExtract", label: "提炼创意内容", desc: "最终有效创意/剧情母版" },
+  { key: "outline", label: "生成大纲", desc: "剧本摘要与分集结构" },
+  { key: "episodeScript", label: "分集正文", desc: "批量写每集正文" },
+  { key: "scriptRewrite", label: "一键改剧本", desc: "对白、节奏、钩子重写" },
+  { key: "assetExtract", label: "生成资产", desc: "角色/场景/道具/风格" },
+  { key: "storyboardVideoPrompt", label: "视频分镜提示词", desc: "Seedance 可投喂文本" },
+  { key: "storyboardImagePrompt", label: "分镜图提示词", desc: "Seedream 静态分镜图" },
+];
+export const WORKFLOW_MODEL_STRATEGY_LABELS: Record<WorkflowModelStrategy, string> = {
+  economy: "省钱",
+  balanced: "平衡",
+  quality: "高质量",
+  custom: "自定义",
+};
+export const WORKFLOW_MODEL_STRATEGIES: Record<Exclude<WorkflowModelStrategy, "custom">, WorkflowModelConfig> = {
+  economy: {
+    ideaChat: WORKFLOW_DRAFT_MODEL,
+    ideaExtract: WORKFLOW_DRAFT_MODEL,
+    outline: WORKFLOW_DRAFT_MODEL,
+    episodeScript: WORKFLOW_DRAFT_MODEL,
+    scriptRewrite: WORKFLOW_DRAFT_MODEL,
+    assetExtract: WORKFLOW_DRAFT_MODEL,
+    storyboardVideoPrompt: WORKFLOW_DRAFT_MODEL,
+    storyboardImagePrompt: WORKFLOW_DRAFT_MODEL,
+  },
+  balanced: {
+    ideaChat: WORKFLOW_POLISH_MODEL,
+    ideaExtract: WORKFLOW_POLISH_MODEL,
+    outline: WORKFLOW_POLISH_MODEL,
+    episodeScript: WORKFLOW_DRAFT_MODEL,
+    scriptRewrite: WORKFLOW_POLISH_MODEL,
+    assetExtract: WORKFLOW_DRAFT_MODEL,
+    storyboardVideoPrompt: WORKFLOW_DRAFT_MODEL,
+    storyboardImagePrompt: WORKFLOW_DRAFT_MODEL,
+  },
+  quality: {
+    ideaChat: WORKFLOW_POLISH_MODEL,
+    ideaExtract: WORKFLOW_POLISH_MODEL,
+    outline: WORKFLOW_POLISH_MODEL,
+    episodeScript: WORKFLOW_POLISH_MODEL,
+    scriptRewrite: WORKFLOW_POLISH_MODEL,
+    assetExtract: WORKFLOW_POLISH_MODEL,
+    storyboardVideoPrompt: WORKFLOW_POLISH_MODEL,
+    storyboardImagePrompt: WORKFLOW_POLISH_MODEL,
+  },
+};
+export const DEFAULT_WORKFLOW_MODEL_STRATEGY: WorkflowModelStrategy = "balanced";
+export const DEFAULT_WORKFLOW_MODELS: WorkflowModelConfig = WORKFLOW_MODEL_STRATEGIES[DEFAULT_WORKFLOW_MODEL_STRATEGY];
 
 export const ASSET_STORAGE_KEY = "seedream-beta-assets-v1";
 export const PROJECTS_STORAGE_KEY = "seedream-beta-projects-v1";
