@@ -701,7 +701,8 @@ func (s *AIService) callDeepSeek(ctx context.Context, model string, messages []M
 		MaxTokens: openai.Int(int64(s.cfg.DeepSeekMaxTokens)),
 	}
 
-	// DeepSeek 官方文档: thinking 默认为 enabled，如果不开启必须显式设置 disabled
+	// DeepSeek 官方文档: thinking 默认为 enabled，如果不开启必须显式设置 disabled。
+	// ChatHandler 已经把三选一档位解析成 effective reasoning；fast=off 会传入 reasoning=false。
 	thinkingType := "disabled"
 	if reasoning {
 		thinkingType = "enabled"

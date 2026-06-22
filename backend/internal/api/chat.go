@@ -95,7 +95,6 @@ type ChatRequest struct {
 	Messages        []services.Message `json:"messages" binding:"required"`
 	ConversationID  uint               `json:"conversation_id"`
 	Stream          bool               `json:"stream"`
-	Reasoning       bool               `json:"reasoning"`
 	ReasoningEffort string             `json:"reasoning_effort"`
 	Search          bool               `json:"search"`
 	TemplateID      uint               `json:"template_id,omitempty"`
@@ -133,7 +132,6 @@ type CompareRequest struct {
 	ModelIDs        []string `json:"models" binding:"required,min=2,max=4"`
 	TemplateID      uint     `json:"template_id,omitempty"`
 	ConversationID  uint     `json:"conversation_id,omitempty"`
-	Reasoning       bool     `json:"reasoning"`
 	WorkspaceID     uint     `json:"workspace_id,omitempty"`
 	ReasoningEffort string   `json:"reasoning_effort"`
 	Search          bool     `json:"search"`
@@ -147,7 +145,6 @@ type CompareRequest struct {
 
 type ForkChatRequest struct {
 	ModelIDs        []string `json:"models" binding:"required,min=1,max=4"`
-	Reasoning       bool     `json:"reasoning"`
 	ReasoningEffort string   `json:"reasoning_effort"`
 	Search          bool     `json:"search"`
 	InitOnly        bool     `json:"init_only"`
@@ -170,6 +167,31 @@ func findModelName(modelID string) string {
 		return model.Name
 	}
 	return modelID
+}
+
+func (h *ChatHandler) reasoningEffortForModel(modelID string, requestedLevel string) services.ReasoningEffort {
+	level := services.NormalizeReasoningLevel(requestedLevel)
+	if h == nil || h.db == nil {
+		return services.ReasoningEffortForPublicLevel(level)
+	}
+	if model, ok := modelmeta.FindModelInfo(modelID); !ok || !modelmeta.ModelHasCapability(model, "reasoning") {
+		return services.ReasoningEffortForPublicLevel(level)
+	}
+	var cfg models.ModelConfig
+	if err := h.db.Where("model_id = ?", modelID).First(&cfg).Error; err != nil {
+		return services.ReasoningEffortForPublicLevel(level)
+	}
+	overrides := services.ReasoningEffortOverrides{
+		Fast:     cfg.ReasoningFastValue,
+		Thinking: cfg.ReasoningThinkingValue,
+		Expert:   cfg.ReasoningExpertValue,
+	}
+	return services.ReasoningEffortForPublicLevelWithOverrides(level, overrides)
+}
+
+func (h *ChatHandler) effectiveReasoningForModel(modelID string, requestedLevel string) (bool, services.ReasoningEffort) {
+	effort := h.reasoningEffortForModel(modelID, requestedLevel)
+	return effort != services.ReasoningEffortOff, effort
 }
 
 // isFileQuestion 判断用户问题是否是针对上传文件/图片的指代性提问。
@@ -814,6 +836,17 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 	}
 	// ========== 匿名用户检查结束 ==========
 
+	// ========== 服务端强制积分校验与扣减 ==========
+	// 登录用户在调用模型前必须通过积分校验；匿名用户已由 requireGuestOrUser 中的 guest 限额检查覆盖。
+	if userID > 0 {
+		creditResult := checkAndDeductCredits(h.db, userID, req.Model, 0)
+		if !creditResult.OK {
+			c.JSON(creditResult.HTTPStatus, creditResult.ErrorResp)
+			return
+		}
+	}
+	// ========== 积分校验结束 ==========
+
 	// 如果有模板 ID，加载模板前缀并注入到 messages 开头
 	if req.TemplateID > 0 {
 		var tpl services.Template
@@ -918,11 +951,18 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 	}
 	// ========== 文件上下文注入结束 ==========
 
-	// 保存用户消息（除非标记了跳过）
+	// 保存用户消息（除非标记了跳过）。不要假设最后一条 message 一定是 user：
+	// 上方可能注入当前时间、技能、图表、搜索等 system message。
 	savedUserMessageID := req.UserMessageID
 	if !req.SkipSaveUserMsg {
-		userMsg := req.Messages[len(req.Messages)-1]
-		if userMsg.Role == "user" {
+		var userMsg *services.Message
+		for i := len(req.Messages) - 1; i >= 0; i-- {
+			if req.Messages[i].Role == "user" {
+				userMsg = &req.Messages[i]
+				break
+			}
+		}
+		if userMsg != nil {
 			msg := models.Message{
 				ConversationID: conversationID,
 				Role:           "user",
@@ -967,8 +1007,9 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 	}
 
 	if req.Transient {
+		effectiveReasoning, effectiveEffort := h.effectiveReasoningForModel(req.Model, req.ReasoningEffort)
 		if req.Stream {
-			resp, err := h.aiService.ChatCompletion(c.Request.Context(), req.Model, req.Messages, true, req.Reasoning, services.ParseReasoningEffort(req.ReasoningEffort), useSearchTool, req.TextFormat)
+			resp, err := h.aiService.ChatCompletion(c.Request.Context(), req.Model, req.Messages, true, effectiveReasoning, effectiveEffort, useSearchTool, req.TextFormat)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
@@ -977,11 +1018,11 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 			c.Header("Content-Type", "text/event-stream")
 			c.Header("Cache-Control", "no-cache")
 			c.Header("Connection", "keep-alive")
-			_, _, _ = h.forwardUnifiedStream(resp, c.Writer, req.Reasoning, 0, false, userID, guestID, 0, req.Model, resp.Provider, nil, 0)
+			_, _, _ = h.forwardUnifiedStream(resp, c.Writer, effectiveReasoning, 0, false, userID, guestID, 0, req.Model, resp.Provider, nil, 0)
 			return
 		}
 
-		resp, err := h.aiService.ChatCompletion(c.Request.Context(), req.Model, req.Messages, false, req.Reasoning, services.ParseReasoningEffort(req.ReasoningEffort), useSearchTool, req.TextFormat)
+		resp, err := h.aiService.ChatCompletion(c.Request.Context(), req.Model, req.Messages, false, effectiveReasoning, effectiveEffort, useSearchTool, req.TextFormat)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -998,7 +1039,8 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 	}
 
 	// 深度思考的语言指令：按模板要求 → 如果没模板则按用户语言
-	if req.Reasoning && req.TemplateID == 0 {
+	effectiveReasoning, effectiveEffort := h.effectiveReasoningForModel(req.Model, req.ReasoningEffort)
+	if effectiveReasoning && req.TemplateID == 0 {
 		// 获取用户最后一条消息的语言来判断（简单检测有无中文字符）
 		langInstruct := "请使用简体中文进行思考和回答。"
 		if len(req.Messages) > 0 {
@@ -1026,7 +1068,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 
 	// GPT 5.5 后台规则仍保留 stream=true：background=true + stream=true + webhook。
 	// 从这里开始，流式生成彻底从 HTTP handler 拆出去：handler 只创建 task，runner 独立消费上游 stream，当前请求只是订阅 task events。
-	useBackground := services.OpenAIUsesBackground(req.Model, services.ParseReasoningEffort(req.ReasoningEffort))
+	useBackground := services.OpenAIUsesBackground(req.Model, effectiveEffort)
 
 	if req.Stream {
 		// 先创建一条空的 assistant 消息，确保即使用户跳转/刷新也能看到生成中的消息
@@ -1090,7 +1132,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 			Task:               streamTask,
 			Messages:           append([]services.Message(nil), req.Messages...),
 			Model:              req.Model,
-			Reasoning:          req.Reasoning,
+			Reasoning:          effectiveReasoning,
 			ReasoningEffort:    req.ReasoningEffort,
 			UseSearchTool:      useSearchTool,
 			UseBackground:      useBackground,
@@ -1108,7 +1150,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		h.streamGenerationTaskEvents(c, streamTask, 0)
 		return
 	} else {
-		resp, err := h.aiService.ChatCompletion(c.Request.Context(), req.Model, req.Messages, false, req.Reasoning, services.ParseReasoningEffort(req.ReasoningEffort), useSearchTool, nil)
+		resp, err := h.aiService.ChatCompletion(c.Request.Context(), req.Model, req.Messages, false, effectiveReasoning, effectiveEffort, useSearchTool, nil)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -1310,7 +1352,8 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 			fmt.Printf("[GenerationRunner] task=%d 重试第%d次\n", req.Task.ID, attempt)
 		}
 
-		resp, err := h.aiService.ChatCompletion(ctx, req.Model, req.Messages, true, req.Reasoning, services.ParseReasoningEffort(req.ReasoningEffort), req.UseSearchTool, req.TextFormat)
+		effectiveReasoning, effectiveEffort := h.effectiveReasoningForModel(req.Model, req.ReasoningEffort)
+		resp, err := h.aiService.ChatCompletion(ctx, req.Model, req.Messages, true, effectiveReasoning, effectiveEffort, req.UseSearchTool, req.TextFormat)
 		if err != nil {
 			// 检查是否是 rate limit 错误，且还有重试次数
 			if attempt < maxRetries {
@@ -1336,7 +1379,7 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 			req.Task.Provider = resp.Provider
 		}
 
-		streamResult, usage, forwardErr := h.forwardUnifiedStream(resp, nil, req.Reasoning, req.AssistantMessageID, req.UseBackground, req.UserID, req.GuestID, req.ConversationID, req.Model, resp.Provider, req.Task, req.InitialSequence)
+		streamResult, usage, forwardErr := h.forwardUnifiedStream(resp, nil, effectiveReasoning, req.AssistantMessageID, req.UseBackground, req.UserID, req.GuestID, req.ConversationID, req.Model, resp.Provider, req.Task, req.InitialSequence)
 		if forwardErr != nil {
 			fmt.Printf("[GenerationRunner] forwardUnifiedStream error task=%d message=%d: %v\n", req.Task.ID, req.AssistantMessageID, forwardErr)
 		}
@@ -2414,8 +2457,9 @@ func (h *ChatHandler) streamGenerationTaskEvents(c *gin.Context, task *models.AI
 }
 
 // ---- 辅助方法：非流式调用 AI 并返回完整内容 ----
-func (h *ChatHandler) callModel(ctx context.Context, modelID string, messages []services.Message, reasoning bool, reasoningEffort string, search bool) (string, error) {
-	resp, err := h.aiService.ChatCompletion(ctx, modelID, messages, false, reasoning, services.ParseReasoningEffort(reasoningEffort), search, nil)
+func (h *ChatHandler) callModel(ctx context.Context, modelID string, messages []services.Message, reasoningEffort string, search bool) (string, error) {
+	effectiveReasoning, effectiveEffort := h.effectiveReasoningForModel(modelID, reasoningEffort)
+	resp, err := h.aiService.ChatCompletion(ctx, modelID, messages, false, effectiveReasoning, effectiveEffort, search, nil)
 	if err != nil {
 		return "", err
 	}
@@ -2504,6 +2548,18 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 		return
 	}
 	// ========== 匿名用户检查结束 ==========
+
+	// ========== 服务端强制积分校验与扣减（对比模式：校验所有模型） ==========
+	if userID > 0 {
+		for _, modelID := range req.ModelIDs {
+			creditResult := checkAndDeductCredits(h.db, userID, modelID, 0)
+			if !creditResult.OK {
+				c.JSON(creditResult.HTTPStatus, creditResult.ErrorResp)
+				return
+			}
+		}
+	}
+	// ========== 积分校验结束 ==========
 
 	// 构建基础 messages
 	messages := []services.Message{
@@ -2599,7 +2655,7 @@ func (h *ChatHandler) CompareChat(c *gin.Context) {
 			} else {
 				modelMessages = baseMessages
 			}
-			content, err := h.callModel(ctx, modelID, modelMessages, req.Reasoning, req.ReasoningEffort, useSearchTool)
+			content, err := h.callModel(ctx, modelID, modelMessages, req.ReasoningEffort, useSearchTool)
 			elapsed := time.Since(start).Milliseconds()
 			res := CompareResult{
 				ModelID:   modelID,
@@ -2781,6 +2837,21 @@ func (h *ChatHandler) ForkChat(c *gin.Context) {
 		return
 	}
 
+	// ========== 服务端强制积分校验与扣减（Fork 对比模式） ==========
+	// InitOnly 请求只初始化消息组不调用模型，跳过积分校验；
+	// 否则对所有目标模型校验并扣减（复用已有答案的模型后续会跳过实际调用，
+	// 但积分仍需扣减——因为 fork 是新的一轮对比，复用的答案也会以新消息形式呈现）。
+	if userID > 0 && !req.InitOnly {
+		for _, modelID := range req.ModelIDs {
+			creditResult := checkAndDeductCredits(h.db, userID, modelID, 0)
+			if !creditResult.OK {
+				c.JSON(creditResult.HTTPStatus, creditResult.ErrorResp)
+				return
+			}
+		}
+	}
+	// ========== 积分校验结束 ==========
+
 	var source models.Message
 	if err := h.db.First(&source, uint(messageID64)).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "消息不存在"})
@@ -2927,7 +2998,7 @@ func (h *ChatHandler) ForkChat(c *gin.Context) {
 			if req.Search {
 				modelMessages, _, modelUseSearch = h.preprocessSearch(messages, modelID, req.Search, c.ClientIP())
 			}
-			content, err := h.callModel(ctx, modelID, modelMessages, req.Reasoning, req.ReasoningEffort, modelUseSearch)
+			content, err := h.callModel(ctx, modelID, modelMessages, req.ReasoningEffort, modelUseSearch)
 			res := CompareResult{ModelID: modelID, ModelName: findModelName(modelID), ElapsedMs: time.Since(start).Milliseconds(), GroupID: group.ID}
 			if err != nil {
 				res.Error = err.Error()

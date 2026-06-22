@@ -418,6 +418,15 @@ function catalogFromCode(code?: string): Partial<UserFacingError> | null {
     case "provider_unavailable":
     case "model_service_unavailable":
       return ERROR_CATALOG.modelServiceUnavailable;
+    case "not_activated":
+      return {
+        code: "not_activated",
+        category: "auth",
+        severity: "warning",
+        title: "账号未激活",
+        message: "您的账号尚未激活内测权限。请使用邀请码激活或提交内测申请。",
+        action: "none",
+      };
     default:
       return null;
   }
@@ -425,6 +434,16 @@ function catalogFromCode(code?: string): Partial<UserFacingError> | null {
 
 function mapGeneric(raw: string, httpStatus?: number): Partial<UserFacingError> | null {
   if (httpStatus === 401 || /unauthorized|401|请先登录|login required/i.test(raw)) return ERROR_CATALOG.loginRequired;
+  if (httpStatus === 403 && /not_activated|未激活|need_invite/i.test(raw)) {
+    return {
+      code: "not_activated",
+      category: "auth",
+      severity: "warning",
+      title: "账号未激活",
+      message: "您的账号尚未激活内测权限。请使用邀请码激活或提交内测申请。",
+      action: "none",
+    };
+  }
   if (/OpenAI response status\s*=\s*failed|response status\s*=\s*failed|insufficient[_\s-]?quota|quota[_\s-]?exceeded|billing|credit|balance|额度|积分|余额|provider.*failed|model.*failed|provider.*unavailable|上游.*失败|模型服务.*不可用/i.test(raw)) return ERROR_CATALOG.modelServiceUnavailable;
   if (httpStatus === 429 || /rate.?limit|too many requests|429|频率|限流/i.test(raw)) return ERROR_CATALOG.rateLimit;
   if (/timeout|timed?\s*out|deadline|超时/i.test(raw)) return ERROR_CATALOG.timeout;

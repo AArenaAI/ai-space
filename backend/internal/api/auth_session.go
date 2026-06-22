@@ -109,6 +109,8 @@ func authUserPayload(user models.User, defaultWorkspaceID uint) gin.H {
 		"advanced_credits":     user.AdvancedCredits,
 		"elite_credits":        user.EliteCredits,
 		"plan_tier":            user.PlanTier,
+		"beta_phase":           user.BetaPhase,
+		"beta_batch":           user.BetaBatch,
 		"default_workspace_id": defaultWorkspaceID,
 	}
 }

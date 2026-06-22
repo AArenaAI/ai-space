@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { MessageSquare, Menu, X, LogOut, User, Zap, Sparkles, Crown, ChevronRight } from "lucide-react";
+import { MessageSquare, Menu, X, LogOut, User, Zap, Sparkles, ChevronRight, FlaskConical, KeyRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 import AuthAwareButton, { showLoginModal } from "./AuthAwareButton";
 import { useTheme } from "@/components/theme/ThemeProvider";
@@ -16,6 +16,16 @@ const navLinks = [
   { labelKey: "landing.nav.pricing", href: "/pricing" },
 ];
 
+function readStoredUser() {
+  if (typeof window === "undefined") return null;
+  try {
+    const s = localStorage.getItem("user");
+    return s ? JSON.parse(s) : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function LandingHeader() {
   const { t } = useI18n();
   const themeCtx = useTheme();
@@ -26,6 +36,12 @@ export default function LandingHeader() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const { credits } = useCredits();
+  const isActiveBetaUser = Boolean(credits?.beta_phase && credits.beta_phase !== "completed");
+  const shouldShowBetaActivateEntry = Boolean(user) && !credits?.beta_phase;
+  const displayCredits = (displayValue?: number, rawValue?: number) =>
+    (displayValue ?? (rawValue ?? 0) / 100).toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+  const betaPhaseLabel = credits?.beta_phase_name ||
+    (credits?.beta_phase === "phase_1" ? "试探期" : credits?.beta_phase === "phase_2" ? "深水区" : credits?.beta_phase === "phase_3" ? "枯竭期" : credits?.beta_phase || "");
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20);
@@ -34,15 +50,16 @@ export default function LandingHeader() {
   }, []);
 
   useEffect(() => {
-    const readUser = () => {
-      try {
-        const s = localStorage.getItem("user");
-        setUser(s ? JSON.parse(s) : null);
-      } catch { setUser(null); }
-    };
+    const readUser = () => setUser(readStoredUser());
     readUser();
     window.addEventListener("storage", readUser);
-    return () => window.removeEventListener("storage", readUser);
+    window.addEventListener("focus", readUser);
+    window.addEventListener("auth-state-changed", readUser);
+    return () => {
+      window.removeEventListener("storage", readUser);
+      window.removeEventListener("focus", readUser);
+      window.removeEventListener("auth-state-changed", readUser);
+    };
   }, []);
 
   useEffect(() => {
@@ -145,31 +162,53 @@ export default function LandingHeader() {
 
                     {/* 积分卡片 */}
                     <div className="mt-3 rounded-xl bg-purple-50/60 dark:bg-purple-500/[0.07] p-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Zap className="w-3.5 h-3.5 text-teal-500" />
-                          <span className="text-xs font-semibold text-text-primary">{t("landing.credits.basic")}</span>
+                      {/* 内测积分：仅内测用户显示 */}
+                      {isActiveBetaUser && (
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <FlaskConical className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                            <span className="text-xs font-semibold text-text-primary">内测积分</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100/80 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-200/70 dark:border-amber-500/20">
+                              {betaPhaseLabel}
+                            </span>
+                          </div>
+                          <span className="text-xs font-mono text-text-primary">
+                            {displayCredits(credits?.beta_credit_balance_display, credits?.beta_credit_balance)}
+                          </span>
                         </div>
-                        <span className="text-xs font-mono text-text-primary">{(credits?.basic_credits_display ?? credits?.basic_credits ?? 0) / 100}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Sparkles className="w-3.5 h-3.5 text-purple-500" />
-                          <span className="text-xs font-semibold text-text-primary">{t("landing.credits.advanced")}</span>
-                        </div>
-                        <span className="text-xs font-mono text-text-primary">{(credits?.advanced_credits_display ?? credits?.advanced_credits ?? 0) / 100}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Crown className="w-3.5 h-3.5 text-orange-500" />
-                          <span className="text-xs font-semibold text-text-primary">{t("landing.credits.elite")}</span>
-                        </div>
-                        <span className="text-xs font-mono text-text-primary">{(credits?.elite_credits_display ?? credits?.elite_credits ?? 0) / 100}</span>
-                      </div>
+                      )}
+                      {!isActiveBetaUser && (
+                        <>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Zap className="w-3.5 h-3.5 text-teal-500" />
+                              <span className="text-xs font-semibold text-text-primary">{t("landing.credits.basic")}</span>
+                            </div>
+                            <span className="text-xs font-mono text-text-primary">{displayCredits(credits?.basic_credits_display, credits?.basic_credits)}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Sparkles className="w-3.5 h-3.5 text-purple-500" />
+                              <span className="text-xs font-semibold text-text-primary">{t("landing.credits.advanced")}</span>
+                            </div>
+                            <span className="text-xs font-mono text-text-primary">{displayCredits(credits?.advanced_credits_display, credits?.advanced_credits)}</span>
+                          </div>
+
+                        </>
+                      )}
                     </div>
 
                     {/* 菜单项 */}
                     <div className="mt-3 space-y-0.5">
+                      {shouldShowBetaActivateEntry && (
+                        <Link href="/beta/activate" onClick={() => setDropdownOpen(false)} className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-surface-card text-sm text-brand hover:text-brand-hover transition-colors">
+                          <span className="flex items-center gap-2">
+                            <KeyRound className="w-4 h-4" />
+                            激活内测码
+                          </span>
+                          <ChevronRight className="w-4 h-4 text-text-tertiary" />
+                        </Link>
+                      )}
                       <Link href="/settings" onClick={() => setDropdownOpen(false)} className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-surface-card text-sm text-text-secondary hover:text-text-primary transition-colors">
                         <span>{t("landing.user.accountBilling")}</span>
                         <ChevronRight className="w-4 h-4 text-text-tertiary" />
@@ -261,28 +300,50 @@ export default function LandingHeader() {
                         {t("landing.user.upgrade")}
                       </Link>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <Zap className="w-3 h-3 text-teal-500" />
-                        <span className="text-xs text-text-secondary">{t("landing.credits.basic")}</span>
-                      </div>
-                      <span className="text-xs font-mono text-text-primary">{(credits?.basic_credits_display ?? credits?.basic_credits ?? 0) / 100}</span>
-                      </div>
+                    {/* 内测积分：仅内测用户显示 */}
+                    {isActiveBetaUser && (
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Sparkles className="w-3.5 h-3.5 text-purple-500" />
-                          <span className="text-xs text-text-secondary">{t("landing.credits.advanced")}</span>
+                        <div className="flex items-center gap-1.5">
+                          <FlaskConical className="w-3 h-3 text-amber-500" />
+                          <span className="text-xs text-text-secondary">
+                            内测 {betaPhaseLabel}
+                          </span>
                         </div>
-                        <span className="text-xs font-mono text-text-primary">{(credits?.advanced_credits_display ?? credits?.advanced_credits ?? 0) / 100}</span>
+                        <span className="text-xs font-mono text-text-primary">
+                          {displayCredits(credits?.beta_credit_balance_display, credits?.beta_credit_balance)}
+                        </span>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Crown className="w-3.5 h-3.5 text-orange-500" />
-                          <span className="text-xs text-text-secondary">{t("landing.credits.elite")}</span>
+                    )}
+                    {!isActiveBetaUser && (
+                      <>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <Zap className="w-3 h-3 text-teal-500" />
+                            <span className="text-xs text-text-secondary">{t("landing.credits.basic")}</span>
+                          </div>
+                          <span className="text-xs font-mono text-text-primary">{displayCredits(credits?.basic_credits_display, credits?.basic_credits)}</span>
                         </div>
-                        <span className="text-xs font-mono text-text-primary">{(credits?.elite_credits_display ?? credits?.elite_credits ?? 0) / 100}</span>
-                    </div>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Sparkles className="w-3.5 h-3.5 text-purple-500" />
+                            <span className="text-xs text-text-secondary">{t("landing.credits.advanced")}</span>
+                          </div>
+                          <span className="text-xs font-mono text-text-primary">{displayCredits(credits?.advanced_credits_display, credits?.advanced_credits)}</span>
+                        </div>
+
+                      </>
+                    )}
                   </div>
+
+                  {shouldShowBetaActivateEntry && (
+                    <Link href="/beta/activate" onClick={() => setMobileOpen(false)} className="flex items-center justify-between px-3 py-2 rounded-xl text-sm text-brand hover:bg-surface-card transition-colors">
+                      <span className="flex items-center gap-2">
+                        <KeyRound className="w-4 h-4" />
+                        激活内测码
+                      </span>
+                      <ChevronRight className="w-4 h-4 text-text-tertiary" />
+                    </Link>
+                  )}
 
                   <Link href="/settings" onClick={() => setMobileOpen(false)} className="flex items-center justify-between px-3 py-2 rounded-xl text-sm text-text-secondary hover:bg-surface-card transition-colors">
                     <span>{t("landing.user.accountBilling")}</span>

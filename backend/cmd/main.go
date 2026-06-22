@@ -3,6 +3,8 @@ package main
 import (
 	"aipool-backend/internal/api"
 	"aipool-backend/internal/config"
+	"aipool-backend/internal/modelconfigseed"
+	"aipool-backend/internal/modelmeta"
 	"aipool-backend/internal/models"
 	"log"
 )
@@ -13,6 +15,9 @@ func main() {
 	db, err := models.InitDB(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("数据库初始化失败: %v", err)
+	}
+	if err := modelconfigseed.EnsureRows(db, modelmeta.AllModels()); err != nil {
+		log.Fatalf("初始化模型配置失败: %v", err)
 	}
 
 	router := api.NewRouter(db, cfg)

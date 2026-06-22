@@ -74,7 +74,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	// 专用翻译服务（Google Cloud Translation）
 	translateService := services.NewTranslateService(cfg)
-	liveTranslateHandler := NewLiveTranslateHandler(cfg)
+	liveTranslateHandler := NewLiveTranslateHandler(db, cfg)
 
 	// 文件服务
 	fileParser := services.NewFileParser(cfg, aiService)
@@ -87,7 +87,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	// Handler 实例（在外层定义，供公开路由和认证路由共用）
 	chatHandler := NewChatHandler(db, cfg, aiService, searchService, fileService, retrievalSvc, contextBuilder, usageService)
 	openAIWebhookHandler := NewOpenAIWebhookHandler(db, cfg, aiService, usageService)
-	fileHandler := NewFileHandler(fileService)
+	fileHandler := NewFileHandler(fileService, db)
 	// OpenAI Webhook 必须是公开路由，不能走用户 JWT；签名由 OPENAI_WEBHOOK_SECRET 校验。
 	router.POST("/api/openai/webhook", openAIWebhookHandler.Handle)
 
@@ -118,7 +118,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		publicWithAuth.POST("/chat", chatHandler.Chat)
 
 		// 专用翻译路由
-		translateHandler := NewTranslateHandler(translateService, usageService)
+		translateHandler := NewTranslateHandler(db, translateService, usageService)
 		publicWithAuth.POST("/translate", translateHandler.Translate)
 		publicWithAuth.GET("/translate/languages", translateHandler.SupportedLanguages)
 		publicWithAuth.GET("/translate/live/ws", liveTranslateHandler.WebSocket)

@@ -1,6 +1,6 @@
 "use client";
 
-import { getTierName, getTierIcon, CreditsData } from "@/hooks/useCredits";
+import { CreditsData } from "@/hooks/useCredits";
 
 interface CreditTooltipProps {
   credits: CreditsData | null;
@@ -13,8 +13,10 @@ export default function CreditTooltip({ credits, onUpgrade }: CreditTooltipProps
   const tiers = [
     { key: "basic", label: "基础", icon: "☕", color: "#fbbf24", bg: "bg-amber-500/10", border: "border-amber-500/20", text: "text-amber-400" },
     { key: "advanced", label: "高级", icon: "🔥", color: "#fb923c", bg: "bg-orange-500/10", border: "border-orange-500/20", text: "text-orange-400" },
-    { key: "elite", label: "精英", icon: "⭐", color: "#c084fc", bg: "bg-purple-500/10", border: "border-purple-500/20", text: "text-purple-400" },
   ];
+
+  const displayCredits = (displayValue?: number, rawValue?: number) =>
+    (displayValue ?? (rawValue ?? 0) / 100).toLocaleString("zh-CN", { maximumFractionDigits: 2 });
 
   const planNames: Record<string, string> = {
     free: "免费版",
@@ -38,13 +40,12 @@ export default function CreditTooltip({ credits, onUpgrade }: CreditTooltipProps
       {/* 积分条目 */}
       <div className="px-3 py-2 space-y-1">
         {tiers.map((t) => {
-          const value =
-            t.key === "basic"
-              ? credits.basic_credits
-              : t.key === "advanced"
-              ? credits.advanced_credits
-              : credits.elite_credits;
+          const value = t.key === "basic" ? credits.basic_credits : credits.advanced_credits;
+          const displayValue = t.key === "basic"
+            ? displayCredits(credits.basic_credits_display, credits.basic_credits)
+            : displayCredits(credits.advanced_credits_display, credits.advanced_credits);
           const quota = credits.daily_quota?.[t.key] ?? 0;
+          const quotaDisplay = quota < 0 ? "∞" : displayCredits(undefined, quota);
           const isUnlimited = quota < 0;
           const percent = isUnlimited ? 100 : quota > 0 ? Math.min(100, (value / quota) * 100) : 0;
 
@@ -55,8 +56,8 @@ export default function CreditTooltip({ credits, onUpgrade }: CreditTooltipProps
                 <div className="flex items-center justify-between mb-0.5">
                   <span className="text-[12px] text-text-secondary">{t.label}</span>
                   <span className={`text-[12px] font-mono font-medium ${t.text}`}>
-                    {isUnlimited ? "∞" : value}
-                    {!isUnlimited && <span className="text-text-tertiary">/{quota}</span>}
+                    {isUnlimited ? "∞" : displayValue}
+                    {!isUnlimited && <span className="text-text-tertiary">/{quotaDisplay}</span>}
                   </span>
                 </div>
                 {/* 进度条 */}

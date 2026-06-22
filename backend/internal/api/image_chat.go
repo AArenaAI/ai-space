@@ -144,6 +144,33 @@ func (h *ImageChatHandler) CreateImageChat(c *gin.Context) {
 	if mediaType == "" {
 		mediaType = "image"
 	}
+	if req.Prompt != "" {
+		if mediaType == "video" {
+			modelID := req.Model
+			if modelID == "" {
+				modelID = "doubao-seedance-2-0-fast-260128"
+			}
+			duration := req.Duration
+			if duration == 0 {
+				duration = 5
+			}
+			costFen := getModelCostFen(h.db, modelID)
+			if duration > 0 {
+				costFen *= int(duration)
+			}
+			if !ensureModelAccess(c, h.db, userID, modelID, costFen) {
+				return
+			}
+		} else {
+			imageModelID := h.cfg.ImageGenModel
+			if imageModelID == "" {
+				imageModelID = "gpt-image-2"
+			}
+			if !ensureModelAccess(c, h.db, userID, imageModelID, 0) {
+				return
+			}
+		}
+	}
 
 	// 创建会话
 	title := imageChatTitleFromPrompt(req.Prompt)
@@ -309,6 +336,19 @@ func (h *ImageChatHandler) SendImageChatMessage(c *gin.Context) {
 		return
 	}
 
+	size := resolveSizeFromReq(req.AspectRatio, req.Resolution)
+	quality := req.Quality
+	if quality == "" {
+		quality = "medium"
+	}
+	imageModelID := h.cfg.ImageGenModel
+	if imageModelID == "" {
+		imageModelID = "gpt-image-2"
+	}
+	if !ensureModelAccess(c, h.db, userID, imageModelID, 0) {
+		return
+	}
+
 	// 保存用户消息
 	userMsg := models.ImageChatMessage{
 		ChatID:  chat.ID,
@@ -328,12 +368,6 @@ func (h *ImageChatHandler) SendImageChatMessage(c *gin.Context) {
 
 	// 更新会话时间
 	h.db.Model(&chat).Update("updated_at", time.Now())
-
-	size := resolveSizeFromReq(req.AspectRatio, req.Resolution)
-	quality := req.Quality
-	if quality == "" {
-		quality = "medium"
-	}
 
 	var refPaths []string
 	for _, url := range req.RefImages {

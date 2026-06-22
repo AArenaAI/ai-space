@@ -101,6 +101,9 @@ export default function AuthInterceptor() {
       const requestForRetry = input instanceof Request ? input.clone() : input;
       const url = typeof input === "string" || input instanceof URL ? input.toString() : input.url;
       const isApi = isApiUrl(url);
+      if (!isApi) {
+        return originalFetch(input, init);
+      }
       const path = toPath(url);
       const shouldAttemptRefresh = isApi && !isAuthLifecyclePath(path);
 

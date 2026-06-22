@@ -11,6 +11,7 @@ import (
 	"aipool-backend/pkg/publicid"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 const maxFileSize = 20 * 1024 * 1024       // 20MB
@@ -18,10 +19,15 @@ const maxVideoFileSize = 200 * 1024 * 1024 // 200MB
 
 type FileHandler struct {
 	fileService *services.FileService
+	db          *gorm.DB
 }
 
-func NewFileHandler(fileService *services.FileService) *FileHandler {
-	return &FileHandler{fileService: fileService}
+func NewFileHandler(fileService *services.FileService, db ...*gorm.DB) *FileHandler {
+	h := &FileHandler{fileService: fileService}
+	if len(db) > 0 {
+		h.db = db[0]
+	}
+	return h
 }
 
 type UploadResponse struct {
@@ -71,6 +77,18 @@ func (h *FileHandler) UploadFile(c *gin.Context) {
 		return
 	}
 
+	// 上传后的解析/检索链路可能触发 Vision 或 Embedding 模型调用。
+	// 未激活用户不能通过文件上传绕过模型能力入口。
+	if userID > 0 && h.db != nil && fileUploadMayUseModel(fileMeta.InputType) {
+		modelID := "text-embedding"
+		if fileMeta.InputType == "image" || fileMeta.InputType == "pdf" || fileMeta.InputType == "word" || fileMeta.InputType == "ppt" {
+			modelID = "gpt-5.4-mini"
+		}
+		if !ensureModelAccess(c, h.db, userID, modelID, 0) {
+			return
+		}
+	}
+
 	data, err := io.ReadAll(file)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取文件失败"})
@@ -108,6 +126,15 @@ func (h *FileHandler) UploadFile(c *gin.Context) {
 		ParseStatus:    f.ParseStatus,
 		MimeType:       f.MimeType,
 	})
+}
+
+func fileUploadMayUseModel(inputType string) bool {
+	switch strings.ToLower(strings.TrimSpace(inputType)) {
+	case "image", "pdf", "word", "ppt", "excel", "csv", "txt", "code":
+		return true
+	default:
+		return false
+	}
 }
 
 func (h *FileHandler) ListFiles(c *gin.Context) {

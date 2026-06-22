@@ -90,6 +90,13 @@ func (h *VideoHandler) CreateVideo(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	costFen := getModelCostFen(h.db, modelID)
+	if duration > 0 {
+		costFen *= int(duration)
+	}
+	if !ensureModelAccess(c, h.db, userID, modelID, costFen) {
+		return
+	}
 
 	createReq := services.CreateVideoTaskRequest{
 		Model:                  modelID,

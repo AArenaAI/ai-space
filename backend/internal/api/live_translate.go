@@ -18,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"google.golang.org/genai"
+	"gorm.io/gorm"
 )
 
 const (
@@ -40,6 +41,7 @@ type liveTranslateTicket struct {
 }
 
 type LiveTranslateHandler struct {
+	db              *gorm.DB
 	cfg             *config.Config
 	mu              sync.Mutex
 	tickets         map[string]*liveTranslateTicket
@@ -47,8 +49,9 @@ type LiveTranslateHandler struct {
 	lastTicketSweep time.Time
 }
 
-func NewLiveTranslateHandler(cfg *config.Config) *LiveTranslateHandler {
+func NewLiveTranslateHandler(db *gorm.DB, cfg *config.Config) *LiveTranslateHandler {
 	return &LiveTranslateHandler{
+		db:           db,
 		cfg:          cfg,
 		tickets:      make(map[string]*liveTranslateTicket),
 		activeByUser: make(map[uint]time.Time),
@@ -68,6 +71,9 @@ func (h *LiveTranslateHandler) CreateTicket(c *gin.Context) {
 	}
 	_ = c.ShouldBindJSON(&req)
 	targetLanguage := normalizeLiveTargetLanguage(req.TargetLanguage)
+	if !ensureModelAccess(c, h.db, userID, liveTranslateModel, 0) {
+		return
+	}
 	ticket, err := newLiveTranslateTicketToken()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "ticket_create_failed"})

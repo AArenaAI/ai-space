@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useModels } from "@/hooks/useModels";
 import ChatInterface from "./ChatInterface";
@@ -17,9 +17,11 @@ function ChatSkeleton() {
 }
 
 export default function ChatContent() {
+  const [mounted, setMounted] = useState(false);
   const searchParams = useSearchParams();
-  const conversationId = searchParams.get("id")
-    ? Number(searchParams.get("id"))
+  const conversationIdParam = searchParams.get("id") || searchParams.get("conversation_id");
+  const conversationId = conversationIdParam
+    ? Number(conversationIdParam)
     : undefined;
   const newChatToken = searchParams.get("t") || "default";
   const targetMessageId = searchParams.get("message")
@@ -27,6 +29,10 @@ export default function ChatContent() {
     : undefined;
   const { models, loading } = useModels();
   const previousConversationIdRef = useRef<number | undefined>(conversationId);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     const previousConversationId = previousConversationIdRef.current;
@@ -39,7 +45,7 @@ export default function ChatContent() {
     });
   }, [conversationId, targetMessageId, loading]);
 
-  if (loading || models.length === 0) return <ChatSkeleton />;
+  if (!mounted || loading || models.length === 0) return <ChatSkeleton />;
 
   // 只用 t 参数强制重置“新对话”实例；创建对话后 URL 会从 /chat?t=xxx 变成 /chat?t=xxx&id=123，
   // key 必须保持不变，否则 ChatInterface 会 remount，正在流式写入的本地 assistant 消息会丢失。

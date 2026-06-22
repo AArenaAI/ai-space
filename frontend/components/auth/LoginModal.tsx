@@ -9,7 +9,7 @@ import { getErrorMessage, readApiError } from "@/lib/errors";
 interface LoginModalProps {
   isOpen: boolean;
   onClose?: () => void;
-  onLoginSuccess?: () => void;
+  onLoginSuccess?: (data: any, mode: Mode) => void;
 }
 
 type Mode = "login" | "register";
@@ -104,7 +104,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
       // 触发全局登录状态更新
       window.dispatchEvent(new Event("auth-changed"));
 
-      onLoginSuccess?.();
+      onLoginSuccess?.(data, mode);
       onClose?.();
     } catch (err) {
       setError(getErrorMessage(err, { module: "auth", fallbackMessage: mode === "login" ? t("auth.error.loginFailed") : t("auth.error.registerFailed") }));

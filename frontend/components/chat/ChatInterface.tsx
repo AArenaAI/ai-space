@@ -341,8 +341,14 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     }
 
     // 积分检查：额度不足时弹出 Bad Case 提交模态框。对比模式必须校验所有将要调用的模型。
-    if (currentSelectedModels.some((modelId) => !hasEnoughCredits(modelId))) {
-      setCreditExhaustedOpen(true);
+    // 未激活用户优先提示激活，不显示额度耗尽。
+    const firstModelWithoutCredits = currentSelectedModels.find((modelId) => !hasEnoughCredits(modelId));
+    if (firstModelWithoutCredits) {
+      if (credits?.beta_phase === "") {
+        toast.error("🔒 账号未激活：请使用邀请码激活或提交内测申请。");
+      } else {
+        setCreditExhaustedOpen(true);
+      }
       return;
     }
 

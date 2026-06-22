@@ -266,7 +266,6 @@ export function createForkChatAction({
               notebookId,
               notebookFileIds,
               messageFileIds: sourceMessageFileIds,
-              reasoningEnabled: reasoning.enabled,
               reasoningEffort: reasoning.effort,
               search,
               templateId,

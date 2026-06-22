@@ -546,6 +546,7 @@ func (h *ImageHandler) refineMaskWithScript(imagePath, maskData string, objectBo
 }
 
 func (h *ImageHandler) RecognizeMask(c *gin.Context) {
+	userID := getUserID(c)
 	var req RecognizeMaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误: " + err.Error()})
@@ -568,6 +569,9 @@ func (h *ImageHandler) RecognizeMask(c *gin.Context) {
 	model := h.cfg.VisionModel
 	if model == "" {
 		model = "gpt-5.4-mini"
+	}
+	if !ensureModelAccess(c, h.db, userID, model, 0) {
+		return
 	}
 	prompt := `你是图像编辑工具里的物件识别器。用户用半透明紫色笔刷粗略涂抹了想处理的对象或区域。请识别紫色涂抹主要覆盖的“具体物件/主体”，不要只回答“涂抹区域”。
 
@@ -698,6 +702,13 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 	}
 	if (req.EditMode == "inpaint" || req.EditMode == "region-brush") && req.MaskURL == "" && req.MaskData == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请先涂抹需要处理的区域"})
+		return
+	}
+	imageModelID := h.cfg.ImageGenModel
+	if imageModelID == "" {
+		imageModelID = "gpt-image-2"
+	}
+	if !ensureModelAccess(c, h.db, userID, imageModelID, 0) {
 		return
 	}
 
@@ -1085,6 +1096,13 @@ func (h *ImageHandler) GenerateImage(c *gin.Context) {
 	quality := req.Quality
 	if quality == "" {
 		quality = "medium"
+	}
+	imageModelID := h.cfg.ImageGenModel
+	if imageModelID == "" {
+		imageModelID = "gpt-image-2"
+	}
+	if !ensureModelAccess(c, h.db, userID, imageModelID, 0) {
+		return
 	}
 
 	// 处理参考图：支持单张兼容和多张新格式

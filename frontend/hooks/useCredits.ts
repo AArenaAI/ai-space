@@ -57,19 +57,20 @@ interface BetaPublicConfig {
 // 模型等级映射（与后端保持一致）
 export const MODEL_TIER_MAP: Record<string, string> = {
   "gpt-5.4-mini": "basic",
-  "gemini-2.0-flash-exp": "basic",
   "gemini-3.5-flash": "basic",
+  "gemini-3.1-flash-lite": "basic",
+  "deepseek-v4-flash": "basic",
 
   "gpt-5.4": "advanced",
   "gpt-5.5": "advanced",
-  "claude-3-5-sonnet-20241022": "advanced",
-  "deepseek-v4-flash": "advanced",
+  "gpt-5.5-pro": "advanced",
+  "gemini-3.1-pro-preview": "advanced",
+  "gemini-2.5-pro": "advanced",
+  "gemini-2.5-pro-preview": "advanced",
+  "deepseek-v4-pro": "advanced",
   "kimi-k2.5": "advanced",
   "kimi-k2.6": "advanced",
-
-  "gpt-5.5-pro": "elite",
-  "deepseek-v4-pro": "elite",
-  "chat-1": "elite", // Chat 1: 22 Credits/次，昂贵模型
+  "kimi-k2.7-code": "advanced",
 };
 
 // 昂贵模型列表（需要二次确认）
@@ -87,7 +88,6 @@ export function getTierName(tier: string): string {
   const names: Record<string, string> = {
     basic: "基础",
     advanced: "高级",
-    elite: "精英",
   };
   return names[tier] || "基础";
 }
@@ -98,8 +98,6 @@ export function getTierIcon(tier: string): string {
       return "☕";
     case "advanced":
       return "🔥";
-    case "elite":
-      return "⭐";
     default:
       return "☕";
   }
@@ -111,8 +109,6 @@ export function getTierColor(tier: string): string {
       return "#fbbf24"; // amber-400
     case "advanced":
       return "#fb923c"; // orange-400
-    case "elite":
-      return "#c084fc"; // purple-400
     default:
       return "#fbbf24";
   }
@@ -229,10 +225,14 @@ export function useCredits() {
     return null;
   }, [credits, batchModelRules]);
 
-  // 检查积分是否足够：内测使用独立 beta wallet；会员使用 basic/advanced/elite。
+  // 检查积分是否足够：内测使用独立 beta wallet；会员使用 basic/advanced 两档额度。
   const hasEnoughCredits = useCallback(
     (modelId: string): boolean => {
       if (!credits) return true;
+      // 未激活用户（beta_phase 为空）不能使用任何模型
+      if (credits.beta_phase === "") {
+        return false;
+      }
       if (!isBetaModelAllowed(modelId)) return false;
       const requiredFen = getModelCostFen(modelId);
       if (credits.beta_phase && credits.beta_phase !== "completed") {
@@ -246,8 +246,6 @@ export function useCredits() {
           return credits.basic_credits >= requiredFen;
         case "advanced":
           return credits.advanced_credits >= requiredFen;
-        case "elite":
-          return credits.elite_credits >= requiredFen;
         default:
           return true;
       }
@@ -266,8 +264,6 @@ export function useCredits() {
         return credits.basic_credits_display ?? credits.basic_credits / 100;
       case "advanced":
         return credits.advanced_credits_display ?? credits.advanced_credits / 100;
-      case "elite":
-        return credits.elite_credits_display ?? credits.elite_credits / 100;
       default:
         return 0;
     }
@@ -288,8 +284,7 @@ export function useCredits() {
     }
     return (
       credits.basic_credits <= 0 &&
-      credits.advanced_credits <= 0 &&
-      credits.elite_credits <= 0
+      credits.advanced_credits <= 0
     );
   }, [credits]);
 
