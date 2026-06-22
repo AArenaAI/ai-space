@@ -20,11 +20,18 @@ export interface AdminUser {
   basic_credits: number;
   advanced_credits: number;
   elite_credits: number;
+  beta_batch?: string;
   created_at: string;
   updated_at: string;
   usage_30d?: AdminUserUsageSummary;
   beta_phase?: string;
   beta_phase_name?: string;
+  beta_credit_balance?: number;
+  beta_credit_balance_display?: number;
+  beta_credit_granted_total?: number;
+  beta_credit_granted_display?: number;
+  beta_credit_used_total?: number;
+  beta_credit_used_display?: number;
 }
 
 export interface AdminOverview {
@@ -235,6 +242,13 @@ export interface AdminModelConfig {
   capabilities: string[];
   enabled: boolean;
   tier: string;
+  reasoning_level?: string;
+  reasoning_level_name?: string;
+  reasoning_effort?: string;
+  reasoning_parameter?: string;
+  reasoning_fast_value?: string;
+  reasoning_thinking_value?: string;
+  reasoning_expert_value?: string;
   status: string;
   status_message: string;
   created_at?: string;

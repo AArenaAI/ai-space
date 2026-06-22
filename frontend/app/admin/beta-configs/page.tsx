@@ -15,7 +15,8 @@ interface BetaConfigItem {
 }
 
 interface ModelInfo {
-  id: string;
+  id: number;
+  model_id: string;
   name: string;
   provider: string;
   description: string;
@@ -290,7 +291,7 @@ function ModelCostEditor({
   const filteredModels = models.filter((m) => {
     const matchSearch =
       !search.trim() ||
-      m.id.toLowerCase().includes(search.toLowerCase()) ||
+      m.model_id.toLowerCase().includes(search.toLowerCase()) ||
       m.name.toLowerCase().includes(search.toLowerCase());
     const matchCategory = activeCategory === "all" || m.category === activeCategory;
     return matchSearch && matchCategory;
@@ -350,14 +351,15 @@ function ModelCostEditor({
           </thead>
           <tbody>
             {filteredModels.map((model, idx) => {
-              const cost = editCosts[model.id] ?? 0;
-              const originalCost = costs[model.id] ?? 0;
+              const modelId = model.model_id;
+              const cost = editCosts[modelId] ?? 0;
+              const originalCost = costs[modelId] ?? 0;
               const isModified = cost !== originalCost;
               const isHighCost = cost >= 1000;
 
               return (
                 <tr
-                  key={model.id}
+                  key={modelId}
                   className={`border-b border-surface-border/50 ${isModified ? "bg-brand/5" : ""}`}
                 >
                   <td className="py-2 px-3 text-text-tertiary text-xs">{idx + 1}</td>
@@ -369,7 +371,7 @@ function ModelCostEditor({
                       />
                       <div>
                         <div className="text-sm font-medium text-text-primary">{model.name}</div>
-                        <div className="text-xs text-text-tertiary font-mono">{model.id}</div>
+                        <div className="text-xs text-text-tertiary font-mono">{modelId}</div>
                       </div>
                     </div>
                   </td>
@@ -383,7 +385,7 @@ function ModelCostEditor({
                     <input
                       type="number"
                       value={cost}
-                      onChange={(e) => updateCost(model.id, parseInt(e.target.value) || 0)}
+                      onChange={(e) => updateCost(modelId, parseInt(e.target.value) || 0)}
                       className={`w-24 px-2 py-1 rounded bg-surface-elevated border text-sm text-text-primary outline-none focus:border-brand/50 ${
                         isHighCost ? "border-amber-500/50" : "border-surface-border"
                       }`}

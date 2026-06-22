@@ -247,9 +247,7 @@ export default function BetaInvitesPage() {
                       <td className="px-4 py-3">
                         <div className="flex flex-col gap-1 text-xs">
                           <span className="rounded bg-amber-400/10 px-1.5 py-0.5 text-amber-400 w-fit" title={`${invite.credits_basic} 分`}>{formatCredits(invite.credits_basic)}</span>
-                          {(invite.credits_advanced > 0 || invite.credits_elite > 0) && (
-                            <span className="text-[11px] text-text-tertiary">兼容字段：高级 {formatCredits(invite.credits_advanced)} / 精英 {formatCredits(invite.credits_elite)}</span>
-                          )}
+
                         </div>
                       </td>
                       <td className="px-4 py-3">
@@ -325,7 +323,7 @@ export default function BetaInvitesPage() {
                   className="w-full rounded-xl border border-surface-border bg-surface px-3 py-2.5 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-brand/30"
                 />
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-2">
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-text-primary">Phase 1 内测 Credit（分）</label>
                   <input
@@ -335,24 +333,6 @@ export default function BetaInvitesPage() {
                     className="w-full rounded-xl border border-surface-border bg-surface px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-brand/30"
                   />
                   <p className="text-xs text-text-tertiary">{formatCredits(generateForm.credits_basic)}，Phase 1 默认 50 Credits = 5000 分</p>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-text-primary">高级兼容字段（分）</label>
-                  <input
-                    type="number"
-                    value={generateForm.credits_advanced}
-                    onChange={(e) => setGenerateForm({ ...generateForm, credits_advanced: parseInt(e.target.value) || 0 })}
-                    className="w-full rounded-xl border border-surface-border bg-surface px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-brand/30"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-text-primary">精英兼容字段（分）</label>
-                  <input
-                    type="number"
-                    value={generateForm.credits_elite}
-                    onChange={(e) => setGenerateForm({ ...generateForm, credits_elite: parseInt(e.target.value) || 0 })}
-                    className="w-full rounded-xl border border-surface-border bg-surface px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-brand/30"
-                  />
                 </div>
               </div>
             </div>

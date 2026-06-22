@@ -8,8 +8,10 @@ import { MetricCard } from "@/components/admin/MetricCard";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { cn } from "@/lib/utils";
 
-const tierLabels: Record<string, string> = { basic: "基础", advanced: "高级", elite: "精英" };
-const tierOptions = ["basic", "advanced", "elite"];
+const tierLabels: Record<string, string> = { basic: "基础", advanced: "高级" };
+const tierOptions = ["basic", "advanced"];
+const reasoningLabels: Record<string, string> = { fast: "快速", thinking: "思考", expert: "专家" };
+const reasoningOptions = ["fast", "thinking", "expert"];
 const statusOptions = [
   { value: "available", label: "可用" },
   { value: "disabled", label: "禁用" },
@@ -17,6 +19,56 @@ const statusOptions = [
   { value: "quota_exhausted", label: "配额耗尽" },
   { value: "rate_limited", label: "限流" },
 ];
+
+// Provider 思考等级选项（统一全集，各 provider 实际支持子集）。
+// 后台配置保存明确值，不暴露“继承默认”，避免 JSON/DB 主从语义混淆。
+const reasoningValueOptions = [
+  { value: "minimal", label: "minimal" },
+  { value: "low", label: "low" },
+  { value: "medium", label: "medium" },
+  { value: "high", label: "high" },
+  { value: "xhigh", label: "xhigh" },
+  { value: "max", label: "max" },
+];
+
+// 按模型/Provider 显示推荐的等级子集。
+// Gemini 2.5 不支持 thinkingLevel，只支持 thinkingBudget；Gemini 3 才使用 minimal/low/medium/high。
+function getModelReasoningOptions(model: AdminModelConfig) {
+  const p = (model.provider || "").toLowerCase();
+  const modelID = (model.model_id || "").toLowerCase();
+  if (p === "openai") {
+    return [
+      { value: "low", label: "low" },
+      { value: "medium", label: "medium" },
+      { value: "high", label: "high" },
+      { value: "xhigh", label: "xhigh" },
+    ];
+  }
+  if (p === "deepseek") {
+    return [
+      { value: "off", label: "off / 非思考" },
+      { value: "high", label: "high" },
+      { value: "max", label: "max" },
+    ];
+  }
+  if (modelID.startsWith("gemini-2.5-")) {
+    return [
+      { value: "1024", label: "1024" },
+      { value: "-1", label: "-1 动态" },
+      { value: "32768", label: "32768" },
+    ];
+  }
+  if (p === "google" || p === "gemini") {
+    return [
+      { value: "minimal", label: "minimal" },
+      { value: "low", label: "low" },
+      { value: "medium", label: "medium" },
+      { value: "high", label: "high" },
+    ];
+  }
+  // 通用 fallback
+  return reasoningValueOptions;
+}
 
 export default function ManagementModelsPage() {
   const [models, setModels] = useState<AdminModelConfig[]>([]);
@@ -119,6 +171,17 @@ export default function ManagementModelsPage() {
     updateLocal(model.model_id, { tier });
   };
 
+  const changeReasoningLevel = (model: AdminModelConfig, reasoning_level: string) => {
+    updateLocal(model.model_id, {
+      reasoning_level,
+      reasoning_level_name: reasoningLabels[reasoning_level] || reasoning_level,
+    });
+  };
+
+  const changeReasoningMapping = (model: AdminModelConfig, field: "reasoning_fast_value" | "reasoning_thinking_value" | "reasoning_expert_value", value: string) => {
+    updateLocal(model.model_id, { [field]: value });
+  };
+
   const changeStatus = (model: AdminModelConfig, status: string) => {
     updateLocal(model.model_id, { status });
   };
@@ -217,6 +280,7 @@ export default function ManagementModelsPage() {
                 <th className="px-4 py-3 font-medium">模型</th>
                 <th className="px-4 py-3 font-medium">Provider</th>
                 <th className="px-4 py-3 font-medium">等级</th>
+                <th className="px-4 py-3 font-medium">思考映射</th>
                 <th className="px-4 py-3 font-medium">状态</th>
                 <th className="px-4 py-3 font-medium">能力</th>
                 <th className="px-4 py-3 font-medium text-right">操作</th>
@@ -225,7 +289,7 @@ export default function ManagementModelsPage() {
             <tbody className="divide-y divide-surface-border">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-text-tertiary">
+                  <td colSpan={8} className="px-4 py-12 text-center text-text-tertiary">
                     {loading ? "加载中…" : "没有匹配的模型"}
                   </td>
                 </tr>
@@ -274,6 +338,54 @@ export default function ManagementModelsPage() {
                             <option key={t} value={t}>{tierLabels[t]}</option>
                           ))}
                         </select>
+                      </td>
+                      <td className="px-4 py-3">
+                        {model.capabilities.includes("reasoning") ? (
+                          <div className="space-y-2">
+                            <div className="text-[10px] text-text-tertiary">{model.reasoning_parameter || "provider_default"}</div>
+                            <div className="flex items-center gap-1">
+                              <span className="text-[10px] text-text-tertiary w-8">快速</span>
+                              <select
+                                value={model.reasoning_fast_value || ""}
+                                onChange={(e) => changeReasoningMapping(model, "reasoning_fast_value", e.target.value)}
+                                disabled={isSaving}
+                                className="w-24 rounded-lg border border-surface-border bg-surface-elevated px-2 py-1 text-xs text-text-primary outline-none"
+                              >
+                                {getModelReasoningOptions(model).map((opt) => (
+                                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <span className="text-[10px] text-text-tertiary w-8">思考</span>
+                              <select
+                                value={model.reasoning_thinking_value || ""}
+                                onChange={(e) => changeReasoningMapping(model, "reasoning_thinking_value", e.target.value)}
+                                disabled={isSaving}
+                                className="w-24 rounded-lg border border-surface-border bg-surface-elevated px-2 py-1 text-xs text-text-primary outline-none"
+                              >
+                                {getModelReasoningOptions(model).map((opt) => (
+                                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <span className="text-[10px] text-text-tertiary w-8">专家</span>
+                              <select
+                                value={model.reasoning_expert_value || ""}
+                                onChange={(e) => changeReasoningMapping(model, "reasoning_expert_value", e.target.value)}
+                                disabled={isSaving}
+                                className="w-24 rounded-lg border border-surface-border bg-surface-elevated px-2 py-1 text-xs text-text-primary outline-none"
+                              >
+                                {getModelReasoningOptions(model).map((opt) => (
+                                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="rounded-md bg-surface-elevated px-2 py-1 text-xs text-text-tertiary">无</span>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">

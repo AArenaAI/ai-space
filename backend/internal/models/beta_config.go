@@ -27,4 +27,9 @@ const (
 
 	// 模型成本配置（单位：分/次）
 	BetaConfigModelCosts = "beta_model_costs" // JSON: {"gpt-5.4-mini":10, "chat-1":2200, ...}
+
+	// 内测截止时间（RFC3339 格式，如 "2026-08-31T23:59:59+08:00"）
+	// 到期后：停止接受新申请、停止激活新邀请码、停止 Bad Case 审核发放新阶段额度。
+	// 现有内测用户可继续用完已发余额。
+	BetaConfigEndDate = "beta_end_date"
 )

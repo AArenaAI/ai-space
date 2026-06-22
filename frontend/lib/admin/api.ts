@@ -127,7 +127,7 @@ export function updateAdminUser(id: number, patch: Partial<Pick<AdminUser, "role
   return adminFetch<{ user: AdminUser }>(`/users/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
-export function adjustUserCredits(id: number, tier: "basic" | "advanced" | "elite", amount: number, mode: "add" | "set" = "add", reason?: string) {
+export function adjustUserCredits(id: number, tier: "basic" | "advanced" | "beta", amount: number, mode: "add" | "set" = "add", reason?: string) {
   return adminFetch<{ user: AdminUser }>(`/users/${id}/credits/adjust`, {
     method: "POST",
     body: JSON.stringify({ tier, amount, mode, reason: reason || "admin_adjust" }),
@@ -234,11 +234,11 @@ export function getAdminModelConfigs() {
   return adminFetch<AdminModelConfigsResponse>("/model-configs");
 }
 
-export function updateAdminModelConfig(modelID: string, patch: Partial<Pick<AdminModelConfig, "enabled" | "tier" | "status" | "status_message">>) {
+export function updateAdminModelConfig(modelID: string, patch: Partial<Pick<AdminModelConfig, "enabled" | "tier" | "reasoning_level" | "reasoning_fast_value" | "reasoning_thinking_value" | "reasoning_expert_value" | "status" | "status_message">>) {
   return adminFetch<{ config: AdminModelConfig }>(`/model-configs/${encodeURIComponent(modelID)}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
-export function batchUpdateAdminModelConfigs(items: Array<Partial<Pick<AdminModelConfig, "model_id" | "enabled" | "tier" | "status" | "status_message">>>) {
+export function batchUpdateAdminModelConfigs(items: Array<Partial<Pick<AdminModelConfig, "model_id" | "enabled" | "tier" | "reasoning_level" | "reasoning_fast_value" | "reasoning_thinking_value" | "reasoning_expert_value" | "status" | "status_message">>>) {
   return adminFetch<{ updated: number }>("/model-configs/batch", { method: "PUT", body: JSON.stringify(items) });
 }
 

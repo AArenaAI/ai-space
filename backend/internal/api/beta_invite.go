@@ -140,6 +140,11 @@ type SubmitApplicationRequest struct {
 
 // SubmitApplication 提交内测申请（公开）
 func (h *BetaInviteHandler) SubmitApplication(c *gin.Context) {
+	if NewBetaConfigHandler(h.db).IsBetaExpired() {
+		c.JSON(http.StatusForbidden, gin.H{"error": "beta_ended", "message": "内测已结束，不再接受新申请"})
+		return
+	}
+
 	var req SubmitApplicationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -342,6 +347,11 @@ type UseInviteRequest struct {
 
 // UseInvite 使用邀请码激活账户
 func (h *BetaInviteHandler) UseInvite(c *gin.Context) {
+	if NewBetaConfigHandler(h.db).IsBetaExpired() {
+		c.JSON(http.StatusForbidden, gin.H{"error": "beta_ended", "message": "内测已结束，邀请码激活通道已关闭"})
+		return
+	}
+
 	userID, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})

@@ -207,9 +207,21 @@ func (h *BadCaseHandler) ReviewBadCase(c *gin.Context) {
 	}
 
 	// 审核通过后推进内测阶段，并按后台阶段配置默认发放下一阶段内测 Credit；管理员显式填写 grant_credits 时覆盖默认值。
+	// 内测到期后不再发放新额度、不再推进阶段，只标记 Bad Case 审核结果。
 	if req.Status == "approved" {
+		betaExpired := NewBetaConfigHandler(h.db).IsBetaExpired()
 		var user models.User
 		if err := h.db.First(&user, badCase.UserID).Error; err == nil {
+			if betaExpired {
+				// 到期：只保存审核状态，不发额度、不推进阶段
+				c.JSON(http.StatusOK, gin.H{
+					"id":               badCase.ID,
+					"status":           req.Status,
+					"message":          "审核完成（内测已结束，不再发放新额度）",
+					"phase_transition": false,
+				})
+				return
+			}
 			grantBeta := 0
 			if req.GrantCredits != nil {
 				grantBeta = req.GrantCredits.Beta

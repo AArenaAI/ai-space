@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"aipool-backend/internal/models"
 
@@ -27,7 +28,8 @@ func (h *BetaConfigHandler) InitDefaultConfigs() {
 		{Key: models.BetaConfigPhase1Credits, Value: "5000", Desc: "试探期额度（单位：分，1积分=100分）"},
 		{Key: models.BetaConfigPhase2Credits, Value: "15000", Desc: "深水区额度（单位：分）"},
 		{Key: models.BetaConfigPhase3Credits, Value: "10000", Desc: "枯竭期额度（单位：分）"},
-		{Key: models.BetaConfigModelCosts, Value: `{"chat-1":2200,"gpt-5.5-pro":2200,"gpt-5.5":50,"kimi-k2.6":50,"kimi-k2.5":50,"deepseek-v4-pro":50,"deepseek-v4-flash":1,"gemini-3.1-flash-lite":1,"gpt-image-2":100,"gemini-2.5-pro":20,"doubao-seedance-2-0-260128":150,"doubao-seedance-2-0-fast-260128":50,"gpt-5.4-mini":1,"gemini-2.0-flash-exp":1,"gemini-3.5-flash":1,"gpt-5.4":50,"claude-3-5-sonnet-20241022":50,"gemini-3.1-pro-preview":50}`, Desc: "内测模型成本（单位：分；1 Credit=1元=100分；视频模型为每秒成本）"},
+		{Key: models.BetaConfigModelCosts, Value: `{"chat-1":2200,"gpt-5.5-pro":2200,"gpt-5.5":50,"kimi-k2.6":50,"kimi-k2.5":50,"deepseek-v4-pro":50,"deepseek-v4-flash":1,"gemini-3.1-flash-lite":1,"gpt-image-2":100,"gemini-2.5-pro":20,"doubao-seedance-2-0-260128":150,"doubao-seedance-2-0-fast-260128":50,"gpt-5.4-mini":1,"gemini-2.0-flash-exp":1,"gemini-3.5-flash":1,"gpt-5.4":50,"claude-3-5-sonnet-20241022":50,"gemini-3.1-pro-preview":50,"google-cloud-translate-v3:general/translation-llm":1,"gemini-3.5-live-translate-preview":1}`, Desc: "内测模型成本（单位：分；1 Credit=1元=100分；视频模型为每秒成本）"},
+		{Key: models.BetaConfigEndDate, Value: "", Desc: "内测截止时间（RFC3339，空=不过期；到期后停止新申请/激活/发额度）"},
 	}
 
 	for _, cfg := range defaults {
@@ -112,6 +114,8 @@ func (h *BetaConfigHandler) getDefaultModelCosts() map[string]int {
 		"gpt-5.4":                         50,
 		"claude-3-5-sonnet-20241022":      50,
 		"gemini-3.1-pro-preview":          50,
+		"google-cloud-translate-v3:general/translation-llm": 1,
+		"gemini-3.5-live-translate-preview":                 1,
 	}
 }
 
@@ -120,6 +124,28 @@ func (h *BetaConfigHandler) GetPhaseCredits() (phase1, phase2, phase3 int) {
 	return h.GetConfigInt(models.BetaConfigPhase1Credits, 5000),
 		h.GetConfigInt(models.BetaConfigPhase2Credits, 15000),
 		h.GetConfigInt(models.BetaConfigPhase3Credits, 10000)
+}
+
+// GetEndDate 获取内测截止时间，空串返回零值
+func (h *BetaConfigHandler) GetEndDate() time.Time {
+	val, err := h.GetConfig(models.BetaConfigEndDate)
+	if err != nil || val == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, val)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+// IsBetaExpired 判断内测是否已过期（空配置=不过期）
+func (h *BetaConfigHandler) IsBetaExpired() bool {
+	end := h.GetEndDate()
+	if end.IsZero() {
+		return false
+	}
+	return time.Now().After(end)
 }
 
 // ========== HTTP API ==========
@@ -163,9 +189,9 @@ func (h *BetaConfigHandler) ListConfigs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": result})
 }
 
-// UpdateConfigRequest 更新配置请求
+// UpdateConfigRequest 更新配置请求（Value 为空表示清空 end_date）
 type UpdateConfigRequest struct {
-	Value string `json:"value" binding:"required"`
+	Value string `json:"value"`
 	Desc  string `json:"desc"`
 }
 
@@ -197,6 +223,14 @@ func (h *BetaConfigHandler) UpdateConfig(c *gin.Context) {
 		if err := json.Unmarshal([]byte(req.Value), &costs); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "模型成本必须是有效的 JSON 对象，格式：{\"model-id\": 分}"})
 			return
+		}
+	case models.BetaConfigEndDate:
+		// 空字符串=不过期；非空必须可解析为 RFC3339
+		if req.Value != "" {
+			if _, err := time.Parse(time.RFC3339, req.Value); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "截止时间必须是 RFC3339 格式，例如 2026-08-31T23:59:59+08:00"})
+				return
+			}
 		}
 	}
 
@@ -251,5 +285,13 @@ func (h *BetaConfigHandler) GetPublicConfig(c *gin.Context) {
 			"batch-3": map[string]interface{}{"blocked_models": []string{}, "message": "第三批综合极限抗压：模型全开"},
 		},
 		"unit": "1 Credit = 1 元人民币 = 100 分",
+		"beta_end_date": func() string {
+			t := h.GetEndDate()
+			if t.IsZero() {
+				return ""
+			}
+			return t.Format(time.RFC3339)
+		}(),
+		"beta_expired": h.IsBetaExpired(),
 	})
 }

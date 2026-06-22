@@ -355,10 +355,12 @@ function UserCard({
   onToggleEdit: () => void;
   onToggleAdjust: () => void;
   onPatch: (user: AdminUser, patch: Partial<AdminUser>) => Promise<void>;
-  onAdjust: (tier: "basic" | "advanced" | "elite", amount: number, mode: "add" | "set", reason: string) => Promise<void>;
+  onAdjust: (tier: "basic" | "advanced" | "beta", amount: number, mode: "add" | "set", reason: string) => Promise<void>;
 }) {
   const usage = user.usage_30d;
-  const totalCredits = user.basic_credits + user.advanced_credits + user.elite_credits;
+  const membershipCredits = user.basic_credits + user.advanced_credits;
+  const betaCredits = user.beta_credit_balance ?? 0;
+  const isActiveBeta = Boolean(user.beta_phase && user.beta_phase !== "completed");
 
   return (
     <div className="rounded-2xl border border-surface-border bg-surface-card shadow-sm overflow-hidden">
@@ -409,13 +411,26 @@ function UserCard({
         </div>
 
         {/* Credits Summary */}
-        <div className="hidden lg:flex flex-col items-end shrink-0 w-28">
-          <div className="text-sm font-semibold text-text-primary">
-            {(totalCredits / 100).toFixed(1)} 积分
-          </div>
-          <div className="text-[10px] text-text-tertiary">
-            基础 {(user.basic_credits / 100).toFixed(1)} · 高级 {(user.advanced_credits / 100).toFixed(1)} · 精英 {(user.elite_credits / 100).toFixed(1)}
-          </div>
+        <div className="hidden lg:flex flex-col items-end shrink-0 w-36">
+          {isActiveBeta ? (
+            <>
+              <div className="text-sm font-semibold text-brand">
+                内测 {(betaCredits / 100).toFixed(1)} 积分
+              </div>
+              <div className="text-[10px] text-text-tertiary">
+                独立钱包 · 与会员积分分离
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-sm font-semibold text-text-primary">
+                {(membershipCredits / 100).toFixed(1)} 会员积分
+              </div>
+              <div className="text-[10px] text-text-tertiary">
+                基础 {(user.basic_credits / 100).toFixed(1)} · 高级 {(user.advanced_credits / 100).toFixed(1)}
+              </div>
+            </>
+          )}
         </div>
 
         {/* 30d Cost */}
@@ -488,10 +503,20 @@ function UserCard({
                 </div>
               </div>
               <div className="space-y-2">
+                <div className="rounded-lg border border-brand/20 bg-brand/5 px-3 py-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-brand">内测积分</span>
+                    <span className="text-sm font-semibold text-brand">{(betaCredits / 100).toFixed(1)}</span>
+                  </div>
+                  <div className="mt-1 text-[10px] text-text-tertiary">
+                    {user.beta_phase ? `${user.beta_phase_name || user.beta_phase}${user.beta_batch ? ` · ${user.beta_batch}` : ""}` : "未参与内测"}
+                    {" · "}累计发放 {((user.beta_credit_granted_total ?? 0) / 100).toFixed(1)} · 已用 {((user.beta_credit_used_total ?? 0) / 100).toFixed(1)}
+                  </div>
+                </div>
+                <div className="text-[10px] font-medium uppercase tracking-wide text-text-tertiary">会员积分</div>
                 {[
                   { key: "basic", label: "基础积分", value: user.basic_credits, field: "basic_credits" as const },
                   { key: "advanced", label: "高级积分", value: user.advanced_credits, field: "advanced_credits" as const },
-                  { key: "elite", label: "精英积分", value: user.elite_credits, field: "elite_credits" as const },
                 ].map((item) => (
                   <div key={item.key} className="flex items-center justify-between rounded-lg border border-surface-border bg-surface-card px-3 py-2">
                     <span className="text-xs text-text-secondary">{item.label}</span>
@@ -634,16 +659,16 @@ function CreditAdjustDialog({
 }: {
   user: AdminUser;
   onClose: () => void;
-  onAdjust: (tier: "basic" | "advanced" | "elite", amount: number, mode: "add" | "set", reason: string) => Promise<void>;
+  onAdjust: (tier: "basic" | "advanced" | "beta", amount: number, mode: "add" | "set", reason: string) => Promise<void>;
   isSaving: boolean;
 }) {
-  const [tier, setTier] = useState<"basic" | "advanced" | "elite">("basic");
+  const [tier, setTier] = useState<"basic" | "advanced" | "beta">(user.beta_phase && user.beta_phase !== "completed" ? "beta" : "basic");
   const [mode, setMode] = useState<"add" | "set">("add");
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
 
-  const tierLabel = { basic: "基础积分（内测积分）", advanced: "高级积分", elite: "精英积分" };
-  const currentValue = { basic: user.basic_credits, advanced: user.advanced_credits, elite: user.elite_credits }[tier];
+  const tierLabel = { beta: "内测积分", basic: "会员基础积分", advanced: "会员高级积分" };
+  const currentValue = { beta: user.beta_credit_balance ?? 0, basic: user.basic_credits, advanced: user.advanced_credits }[tier];
 
   const handleSubmit = async () => {
     const val = parseInt(amount);
@@ -668,13 +693,14 @@ function CreditAdjustDialog({
           <label className="text-xs text-text-secondary block mb-1">积分类型</label>
           <select
             value={tier}
-            onChange={(e) => setTier(e.target.value as "basic" | "advanced" | "elite")}
+            onChange={(e) => setTier(e.target.value as "basic" | "advanced" | "beta")}
             className="w-full rounded-lg border border-surface-border bg-surface-elevated px-3 py-2 text-sm text-text-primary outline-none"
           >
-            <option value="basic">基础积分（内测积分）</option>
-            <option value="advanced">高级积分</option>
-            <option value="elite">精英积分</option>
+            <option value="beta">内测积分（独立钱包）</option>
+            <option value="basic">会员基础积分</option>
+            <option value="advanced">会员高级积分</option>
           </select>
+          <p className="mt-1 text-[10px] text-text-tertiary">内测积分不会写入会员基础/高级额度。</p>
         </div>
         <div>
           <label className="text-xs text-text-secondary block mb-1">调整模式</label>
@@ -706,7 +732,7 @@ function CreditAdjustDialog({
         <div>
           <label className="text-xs text-text-secondary block mb-1">当前值</label>
           <div className="px-3 py-2 rounded-lg border border-surface-border bg-surface-elevated/50 text-sm text-text-secondary">
-            {currentValue} 分（{(currentValue / 100).toFixed(2)} 积分）
+            {tierLabel[tier]}：{currentValue} 分（{(currentValue / 100).toFixed(2)} 积分）
           </div>
         </div>
       </div>
