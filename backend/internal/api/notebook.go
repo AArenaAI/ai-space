@@ -26,6 +26,8 @@ type NotebookHandler struct {
 	imageService *services.ImageService
 }
 
+const notebookArtifactCreditModelID = "gpt-5.4"
+
 func NewNotebookHandler(db *gorm.DB, fileService *services.FileService, aiService chatAIService, imageService *services.ImageService) *NotebookHandler {
 	return &NotebookHandler{db: db, fileService: fileService, aiService: aiService, imageService: imageService}
 }
@@ -270,6 +272,9 @@ func (h *NotebookHandler) AddURLSource(c *gin.Context) {
 		return
 	}
 	userID := getUserID(c)
+	if !ensureModelAccess(c, h.db, userID, notebookArtifactCreditModelID, 0) {
+		return
+	}
 	var req struct {
 		URL       string `json:"url"`
 		SortOrder int    `json:"sort_order"`
@@ -400,6 +405,9 @@ func (h *NotebookHandler) ReindexFile(c *gin.Context) {
 	userID := getUserID(c)
 	if link.File.UserID != userID {
 		c.JSON(http.StatusNotFound, gin.H{"error": "资料不存在或无权访问"})
+		return
+	}
+	if !ensureModelAccess(c, h.db, userID, notebookArtifactCreditModelID, 0) {
 		return
 	}
 
@@ -541,6 +549,9 @@ func (h *NotebookHandler) SuggestReportFormats(c *gin.Context) {
 		return
 	}
 	files := h.loadNotebookGenerationFiles(nb.ID, getUserID(c))
+	if !ensureModelAccess(c, h.db, getUserID(c), notebookArtifactCreditModelID, 0) {
+		return
+	}
 	formats := suggestAINotebookReportFormats(c.Request.Context(), h.aiService, files, req.FileIDs, req.Language)
 	c.JSON(http.StatusOK, gin.H{"formats": formats})
 }
@@ -551,25 +562,34 @@ func (h *NotebookHandler) GenerateArtifact(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Type        string `json:"type"`
-		FileIDs     []uint `json:"file_ids"`
-		Language    string `json:"language"`
-		Orientation string `json:"orientation"`
-		Style       string `json:"style"`
-		DetailLevel string `json:"detail_level"`
-		Prompt      string `json:"prompt"`
+		Type           string `json:"type"`
+		FileIDs        []uint `json:"file_ids"`
+		Language       string `json:"language"`
+		Orientation    string `json:"orientation"`
+		Style          string `json:"style"`
+		DetailLevel    string `json:"detail_level"`
+		Prompt         string `json:"prompt"`
+		FlashcardCount string `json:"flashcard_count"`
+		QuizCount      string `json:"quiz_count"`
+		Difficulty     string `json:"difficulty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if !ensureModelAccess(c, h.db, getUserID(c), notebookArtifactCreditModelID, 0) {
+		return
+	}
 	files := h.loadNotebookGenerationFiles(nb.ID, getUserID(c))
 	opts := notebookArtifactGenerationOptions{
-		Orientation:  strings.TrimSpace(req.Orientation),
-		Style:        strings.TrimSpace(req.Style),
-		DetailLevel:  strings.TrimSpace(req.DetailLevel),
-		Prompt:       strings.TrimSpace(req.Prompt),
-		SourceChunks: h.loadNotebookGenerationFileChunks(files),
+		Orientation:    strings.TrimSpace(req.Orientation),
+		Style:          strings.TrimSpace(req.Style),
+		DetailLevel:    strings.TrimSpace(req.DetailLevel),
+		Prompt:         strings.TrimSpace(req.Prompt),
+		FlashcardCount: strings.TrimSpace(req.FlashcardCount),
+		QuizCount:      strings.TrimSpace(req.QuizCount),
+		Difficulty:     strings.TrimSpace(req.Difficulty),
+		SourceChunks:   h.loadNotebookGenerationFileChunks(files),
 	}
 	draft, err := buildAINotebookArtifactDraft(c.Request.Context(), h.aiService, h.imageService, req.Type, nb.Title, files, req.FileIDs, req.Language, opts)
 	if err != nil {

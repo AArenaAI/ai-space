@@ -4,10 +4,21 @@ import { CSSProperties, useEffect, useMemo, useRef, useState, type ComponentType
 import dynamic from "next/dynamic";
 import { createPortal } from "react-dom";
 import { BarChart3, CheckCircle2, ChevronLeft, ChevronRight, ChevronsRight, Copy, Download, ExternalLink, FileQuestion, FileText, HelpCircle, Info, Lightbulb, Loader2, Map as MapIcon, Maximize2, MessageCircle, MoreHorizontal, Pencil, Presentation, Printer, RefreshCw, Sparkles, Trash2, X, XCircle, ZoomIn, ZoomOut } from "lucide-react";
-import { useI18n } from "@/lib/i18n";
+import { LANGUAGES, type LanguageCode, useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 export type NotebookStudioActionId = "table" | "summary" | "faq" | "briefing" | "mindmap" | "flashcards" | "quiz" | "report" | "slides" | "infographic";
+
+export type NotebookStudioGenerateOptions = {
+  orientation?: string;
+  style?: string;
+  detail_level?: string;
+  prompt?: string;
+  language?: LanguageCode;
+  flashcard_count?: string;
+  quiz_count?: string;
+  difficulty?: string;
+};
 
 export type NotebookStudioInfographic = {
   orientation: string;
@@ -176,7 +187,7 @@ type NotebookStudioPanelProps = {
   generatingType?: NotebookStudioActionId | null;
   selectedSourceCount?: number;
   sourceFiles?: NotebookStudioSource[];
-  onGenerate: (type: NotebookStudioActionId, options?: { orientation?: string; style?: string; detail_level?: string; prompt?: string }) => void;
+  onGenerate: (type: NotebookStudioActionId, options?: NotebookStudioGenerateOptions) => void;
   onCreateNote?: (note: { title: string; content: string }) => void;
   onUpdateNote?: (noteId: string, note: { title: string; content: string }) => void;
   onDeleteNote?: (note: NotebookStudioNote) => void;
@@ -1245,14 +1256,17 @@ function InfographicArtifactView({
           expanded ? "min-h-0" : "max-h-[480px]"
         )}
       >
-        <div className="flex min-h-full min-w-full items-center justify-center p-6" style={{ transform: `scale(${scale})`, transformOrigin: "center top" }}>
+        <div className="flex min-h-full min-w-full items-start justify-center p-6">
           {htmlContent ? (
-            <iframe
-              title={artifact.title}
-              sandbox=""
-              srcDoc={htmlContent}
-              className="h-[720px] w-[1120px] max-w-none rounded-xl border-0 bg-white shadow-xl"
-            />
+            <div style={{ width: `${1280 * scale}px`, height: `${720 * scale}px` }}>
+              <iframe
+                title={artifact.title}
+                sandbox=""
+                srcDoc={htmlContent}
+                className="h-[720px] w-[1280px] max-w-none rounded-xl border-0 bg-white shadow-xl"
+                style={{ transform: `scale(${scale})`, transformOrigin: "left top" }}
+              />
+            </div>
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={imageUrl} alt={artifact.title} className="max-w-none rounded-xl shadow-xl" style={{ maxHeight: expanded ? "none" : "420px" }} />
@@ -1306,6 +1320,344 @@ function renderActiveArtifact(artifact: NotebookStudioArtifact, t: (key: string,
   }
 }
 
+
+function TableConfigDialog({
+  open,
+  generating,
+  onClose,
+  onGenerate,
+  t,
+}: {
+  open: boolean;
+  generating: boolean;
+  onClose: () => void;
+  onGenerate: (options: { language: LanguageCode; prompt: string }) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const [language, setLanguage] = useState<LanguageCode>("en");
+  const [prompt, setPrompt] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setLanguage("en");
+    setPrompt("");
+  }, [open]);
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/40 p-5 backdrop-blur-[2px]" role="dialog" aria-modal="true">
+      <div className="flex max-h-[88vh] w-[min(720px,94vw)] flex-col overflow-hidden rounded-2xl border border-surface-border bg-surface-card shadow-2xl">
+        <div className="flex items-center justify-between border-b border-surface-border px-6 py-4">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center text-emerald-600 dark:text-emerald-300">
+              <StudioTableIcon className="h-5 w-5" />
+            </span>
+            <h3 className="text-lg font-semibold tracking-[-0.02em] text-text-primary">{t("notebook.studio.tableDialogTitle")}</h3>
+          </div>
+          <button type="button" onClick={onClose} disabled={generating} className="flex h-8 w-8 items-center justify-center rounded-full text-lg leading-none text-text-tertiary transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-50" aria-label="Close">×</button>
+        </div>
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
+          <div className="space-y-2.5">
+            <label className="text-sm font-semibold text-text-primary">{t("notebook.studio.tableLanguage")}</label>
+            <div className="relative w-[220px]">
+              <select
+                value={language}
+                onChange={(event) => setLanguage(event.target.value as LanguageCode)}
+                disabled={generating}
+                className="h-10 w-full appearance-none rounded-lg border border-slate-900 bg-surface-card px-3.5 pr-9 text-sm font-medium text-text-primary outline-none transition focus:border-slate-950 focus:ring-2 focus:ring-slate-900/10 disabled:opacity-60 dark:border-slate-300 dark:focus:border-white"
+              >
+                {LANGUAGES.map((item) => (
+                  <option key={item.code} value={item.code}>{item.labelEn}</option>
+                ))}
+              </select>
+              <ChevronRight className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 rotate-90 text-text-tertiary" />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-semibold text-text-primary">{t("notebook.studio.tablePromptLabel")}</label>
+            <textarea
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              placeholder={t("notebook.studio.tablePromptPlaceholder")}
+              rows={7}
+              autoFocus
+              className="min-h-[170px] w-full resize-none rounded-lg border border-slate-900 bg-surface-card px-4 py-3 text-sm leading-6 text-text-primary placeholder:text-text-tertiary focus:border-slate-950 focus:outline-none focus:ring-2 focus:ring-slate-900/10 dark:border-slate-300 dark:focus:border-white"
+            />
+          </div>
+        </div>
+        <div className="flex items-center justify-end px-6 pb-5 pt-0">
+          <button
+            type="button"
+            onClick={() => onGenerate({ language, prompt })}
+            disabled={generating}
+            className="inline-flex h-10 min-w-[82px] items-center justify-center gap-2 rounded-full bg-blue-600 px-5 text-sm font-semibold text-white shadow-md shadow-blue-600/20 transition hover:bg-blue-700 disabled:opacity-70"
+          >
+            {generating && <Loader2 className="h-4 w-4 animate-spin" />}
+            {t("notebook.studio.tableGenerate")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function MindmapConfigDialog({
+  open,
+  generating,
+  onClose,
+  onGenerate,
+  t,
+}: {
+  open: boolean;
+  generating: boolean;
+  onClose: () => void;
+  onGenerate: (options: { prompt: string }) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const [prompt, setPrompt] = useState("");
+
+  if (!open) return null;
+
+  const handleSubmit = () => {
+    onGenerate({ prompt: prompt.trim() });
+  };
+
+  return (
+    <div className="fixed inset-0 z-[180] flex items-center justify-center bg-black/40 px-4 py-6" role="dialog" aria-modal="true">
+      <div className="flex w-[min(720px,94vw)] max-h-[92vh] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-950">
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+          <div className="flex items-center gap-3">
+            <MapIcon className="h-6 w-6 text-violet-500" />
+            <h3 className="text-lg font-semibold tracking-[-0.01em] text-slate-950 dark:text-slate-50">{t("notebook.studio.mindmapDialogTitle")}</h3>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-full p-1.5 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100" title={t("common.close")}>
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="space-y-3 px-5 py-5">
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300" htmlFor="mindmap-prompt">{t("notebook.studio.mindmapTopic")}</label>
+          <textarea
+            id="mindmap-prompt"
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+            rows={8}
+            className="w-full resize-none rounded-xl border border-slate-900 bg-white px-4 py-3 text-sm leading-6 text-slate-900 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/15 dark:border-slate-100 dark:bg-slate-950 dark:text-slate-50 dark:placeholder:text-slate-400"
+            placeholder={t("notebook.studio.mindmapPromptPlaceholder")}
+          />
+        </div>
+        <div className="flex items-center justify-end border-t border-slate-200 px-5 py-4 dark:border-slate-800">
+          <button type="button" onClick={handleSubmit} disabled={generating} className="inline-flex h-10 items-center justify-center rounded-full bg-blue-600 px-6 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60">
+            {generating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            {t("notebook.studio.tableGenerate")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FlashcardsConfigDialog({
+  open,
+  generating,
+  onClose,
+  onGenerate,
+  t,
+}: {
+  open: boolean;
+  generating: boolean;
+  onClose: () => void;
+  onGenerate: (options: { flashcard_count: string; difficulty: string; prompt: string }) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const [cardCount, setCardCount] = useState<"less" | "standard" | "more">("standard");
+  const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard">("medium");
+  const [prompt, setPrompt] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setCardCount("standard");
+    setDifficulty("medium");
+    setPrompt("");
+  }, [open]);
+
+  const OptionButton = ({ selected, onClick, label }: { selected: boolean; onClick: () => void; label: string }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={generating}
+      className={cn(
+        "inline-flex h-9 items-center whitespace-nowrap rounded-lg border px-4 text-sm font-medium transition disabled:opacity-60",
+        selected
+          ? "border-slate-700 bg-slate-100 text-slate-900 shadow-sm dark:border-slate-300 dark:bg-slate-700/70 dark:text-white"
+          : "border-surface-border bg-surface-card text-text-secondary hover:border-slate-400 hover:bg-surface-hover hover:text-text-primary"
+      )}
+    >
+      {label}
+    </button>
+  );
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/40 p-5 backdrop-blur-[2px]" role="dialog" aria-modal="true">
+      <div className="flex max-h-[88vh] w-[min(720px,94vw)] flex-col overflow-hidden rounded-2xl border border-surface-border bg-surface-card shadow-2xl">
+        <div className="flex items-center justify-between border-b border-surface-border px-6 py-4">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center text-rose-700 dark:text-rose-300">
+              <StudioFlashcardIcon className="h-5 w-5" />
+            </span>
+            <h3 className="text-lg font-semibold tracking-[-0.02em] text-text-primary">{t("notebook.studio.flashcardsDialogTitle")}</h3>
+          </div>
+          <button type="button" onClick={onClose} disabled={generating} className="flex h-8 w-8 items-center justify-center rounded-full text-lg leading-none text-text-tertiary transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-50" aria-label="Close">×</button>
+        </div>
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
+          <div className="grid gap-8 sm:grid-cols-2">
+            <div className="space-y-2.5">
+              <label className="text-sm font-semibold text-text-primary">{t("notebook.studio.flashcardsCardCount")}</label>
+              <div className="flex flex-nowrap gap-2">
+                <OptionButton selected={cardCount === "less"} onClick={() => setCardCount("less")} label={t("notebook.studio.flashcardsCardCount.less")} />
+                <OptionButton selected={cardCount === "standard"} onClick={() => setCardCount("standard")} label={t("notebook.studio.flashcardsCardCount.standard")} />
+                <OptionButton selected={cardCount === "more"} onClick={() => setCardCount("more")} label={t("notebook.studio.flashcardsCardCount.more")} />
+              </div>
+            </div>
+            <div className="space-y-2.5">
+              <label className="text-sm font-semibold text-text-primary">{t("notebook.studio.flashcardsDifficulty")}</label>
+              <div className="flex flex-nowrap gap-2">
+                <OptionButton selected={difficulty === "easy"} onClick={() => setDifficulty("easy")} label={t("notebook.studio.flashcardsDifficulty.easy")} />
+                <OptionButton selected={difficulty === "medium"} onClick={() => setDifficulty("medium")} label={t("notebook.studio.flashcardsDifficulty.medium")} />
+                <OptionButton selected={difficulty === "hard"} onClick={() => setDifficulty("hard")} label={t("notebook.studio.flashcardsDifficulty.hard")} />
+              </div>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-semibold text-text-primary">{t("notebook.studio.flashcardsTopicLabel")}</label>
+            <textarea
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              placeholder={t("notebook.studio.flashcardsTopicPlaceholder")}
+              rows={6}
+              autoFocus
+              className="min-h-[154px] w-full resize-none rounded-lg border border-slate-900 bg-surface-card px-4 py-3 text-sm leading-6 text-text-primary placeholder:text-text-tertiary focus:border-slate-950 focus:outline-none focus:ring-2 focus:ring-slate-900/10 dark:border-slate-300 dark:focus:border-white"
+            />
+          </div>
+        </div>
+        <div className="flex items-center justify-end px-6 pb-5 pt-0">
+          <button
+            type="button"
+            onClick={() => onGenerate({ flashcard_count: cardCount, difficulty, prompt })}
+            disabled={generating}
+            className="inline-flex h-10 min-w-[82px] items-center justify-center gap-2 rounded-full bg-blue-600 px-5 text-sm font-semibold text-white shadow-md shadow-blue-600/20 transition hover:bg-blue-700 disabled:opacity-70"
+          >
+            {generating && <Loader2 className="h-4 w-4 animate-spin" />}
+            {t("notebook.studio.flashcardsGenerate")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function QuizConfigDialog({
+  open,
+  generating,
+  onClose,
+  onGenerate,
+  t,
+}: {
+  open: boolean;
+  generating: boolean;
+  onClose: () => void;
+  onGenerate: (options: { quiz_count: string; difficulty: string; prompt: string }) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const [questionCount, setQuestionCount] = useState<"less" | "standard" | "more">("standard");
+  const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard">("medium");
+  const [prompt, setPrompt] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setQuestionCount("standard");
+    setDifficulty("medium");
+    setPrompt("");
+  }, [open]);
+
+  const OptionButton = ({ selected, onClick, label }: { selected: boolean; onClick: () => void; label: string }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={generating}
+      className={cn(
+        "inline-flex h-9 items-center whitespace-nowrap rounded-lg border px-4 text-sm font-medium transition disabled:opacity-60",
+        selected
+          ? "border-slate-700 bg-slate-100 text-slate-900 shadow-sm dark:border-slate-300 dark:bg-slate-700/70 dark:text-white"
+          : "border-surface-border bg-surface-card text-text-secondary hover:border-slate-400 hover:bg-surface-hover hover:text-text-primary"
+      )}
+    >
+      {label}
+    </button>
+  );
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/40 p-5 backdrop-blur-[2px]" role="dialog" aria-modal="true">
+      <div className="flex max-h-[88vh] w-[min(720px,94vw)] flex-col overflow-hidden rounded-2xl border border-surface-border bg-surface-card shadow-2xl">
+        <div className="flex items-center justify-between border-b border-surface-border px-6 py-4">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center text-blue-600 dark:text-blue-300">
+              <StudioQuizIcon className="h-5 w-5" />
+            </span>
+            <h3 className="text-lg font-semibold tracking-[-0.02em] text-text-primary">{t("notebook.studio.quizDialogTitle")}</h3>
+          </div>
+          <button type="button" onClick={onClose} disabled={generating} className="flex h-8 w-8 items-center justify-center rounded-full text-lg leading-none text-text-tertiary transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-50" aria-label="Close">×</button>
+        </div>
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
+          <div className="grid gap-8 sm:grid-cols-2">
+            <div className="space-y-2.5">
+              <label className="text-sm font-semibold text-text-primary">{t("notebook.studio.quizQuestionCount")}</label>
+              <div className="flex flex-nowrap gap-2">
+                <OptionButton selected={questionCount === "less"} onClick={() => setQuestionCount("less")} label={t("notebook.studio.quizQuestionCount.less")} />
+                <OptionButton selected={questionCount === "standard"} onClick={() => setQuestionCount("standard")} label={t("notebook.studio.quizQuestionCount.standard")} />
+                <OptionButton selected={questionCount === "more"} onClick={() => setQuestionCount("more")} label={t("notebook.studio.quizQuestionCount.more")} />
+              </div>
+            </div>
+            <div className="space-y-2.5">
+              <label className="text-sm font-semibold text-text-primary">{t("notebook.studio.quizDifficulty")}</label>
+              <div className="flex flex-nowrap gap-2">
+                <OptionButton selected={difficulty === "easy"} onClick={() => setDifficulty("easy")} label={t("notebook.studio.quizDifficulty.easy")} />
+                <OptionButton selected={difficulty === "medium"} onClick={() => setDifficulty("medium")} label={t("notebook.studio.quizDifficulty.medium")} />
+                <OptionButton selected={difficulty === "hard"} onClick={() => setDifficulty("hard")} label={t("notebook.studio.quizDifficulty.hard")} />
+              </div>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-semibold text-text-primary">{t("notebook.studio.quizTopicLabel")}</label>
+            <textarea
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              placeholder={t("notebook.studio.quizTopicPlaceholder")}
+              rows={6}
+              autoFocus
+              className="min-h-[154px] w-full resize-none rounded-lg border border-slate-900 bg-surface-card px-4 py-3 text-sm leading-6 text-text-primary placeholder:text-text-tertiary focus:border-slate-950 focus:outline-none focus:ring-2 focus:ring-slate-900/10 dark:border-slate-300 dark:focus:border-white"
+            />
+          </div>
+        </div>
+        <div className="flex items-center justify-end px-6 pb-5 pt-0">
+          <button
+            type="button"
+            onClick={() => onGenerate({ quiz_count: questionCount, difficulty, prompt })}
+            disabled={generating}
+            className="inline-flex h-10 min-w-[82px] items-center justify-center gap-2 rounded-full bg-blue-600 px-5 text-sm font-semibold text-white shadow-md shadow-blue-600/20 transition hover:bg-blue-700 disabled:opacity-70"
+          >
+            {generating && <Loader2 className="h-4 w-4 animate-spin" />}
+            {t("notebook.studio.quizGenerate")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function InfographicConfigDialog({
   open,
   generating,
@@ -1316,102 +1668,106 @@ function InfographicConfigDialog({
   open: boolean;
   generating: boolean;
   onClose: () => void;
-  onGenerate: (options: { orientation: string; style: string; detail_level: string; prompt: string }) => void;
+  onGenerate: (options: { language: LanguageCode; orientation: string; style: string; detail_level: string; prompt: string }) => void;
   t: (key: string, params?: Record<string, string>) => string;
 }) {
+  const [language, setLanguage] = useState<LanguageCode>("en");
   const [orientation, setOrientation] = useState<"landscape" | "portrait" | "square">("landscape");
   const [detailLevel, setDetailLevel] = useState<"short" | "standard" | "detailed">("standard");
   const [style, setStyle] = useState<string>("auto");
   const [prompt, setPrompt] = useState("");
 
+  useEffect(() => {
+    if (!open) return;
+    setLanguage("en");
+    setOrientation("landscape");
+    setDetailLevel("standard");
+    setStyle("auto");
+    setPrompt("");
+  }, [open]);
+
   const styles = [
-    { id: "auto", label: t("notebook.studio.infographicStyleAuto"), icon: Sparkles },
-    { id: "cute", label: t("notebook.studio.infographicStyleCute"), icon: null },
-    { id: "clay", label: t("notebook.studio.infographicStyleClay"), icon: null },
-    { id: "sketch", label: t("notebook.studio.infographicStyleSketch"), icon: null },
-    { id: "anime", label: t("notebook.studio.infographicStyleAnime"), icon: null },
-    { id: "professional", label: t("notebook.studio.infographicStyleProfessional"), icon: null },
+    { id: "auto", label: t("notebook.studio.infographicStyleAuto") },
+    { id: "cute", label: t("notebook.studio.infographicStyleCute") },
+    { id: "clay", label: t("notebook.studio.infographicStyleClay") },
+    { id: "sketch", label: t("notebook.studio.infographicStyleSketch") },
+    { id: "anime", label: t("notebook.studio.infographicStyleAnime") },
+    { id: "professional", label: t("notebook.studio.infographicStyleProfessional") },
   ];
+
+  const OptionButton = ({ selected, onClick, label, beta }: { selected: boolean; onClick: () => void; label: string; beta?: boolean }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={generating}
+      className={cn(
+        "inline-flex h-9 items-center whitespace-nowrap rounded-lg border px-4 text-sm font-medium transition disabled:opacity-60",
+        selected
+          ? "border-slate-700 bg-slate-100 text-slate-900 shadow-sm dark:border-slate-300 dark:bg-slate-700/70 dark:text-white"
+          : "border-surface-border bg-surface-card text-text-secondary hover:border-slate-400 hover:bg-surface-hover hover:text-text-primary"
+      )}
+    >
+      {label}
+      {beta ? <span className="ml-1.5 rounded bg-slate-900 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white dark:bg-slate-100 dark:text-slate-900">{t("notebook.studio.infographicDetailLevel.beta")}</span> : null}
+    </button>
+  );
 
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/45 p-5 backdrop-blur-sm" role="dialog" aria-modal="true">
-      <div className="flex max-h-[88vh] w-[min(640px,94vw)] flex-col overflow-hidden rounded-[22px] border border-surface-border bg-surface-card shadow-2xl">
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/40 p-5 backdrop-blur-[2px]" role="dialog" aria-modal="true">
+      <div className="flex max-h-[88vh] w-[min(720px,94vw)] flex-col overflow-hidden rounded-2xl border border-surface-border bg-surface-card shadow-2xl">
         <div className="flex items-center justify-between border-b border-surface-border px-6 py-4">
-          <div className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-500/10 text-violet-600">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center text-violet-600 dark:text-violet-300">
               <StudioInfographicIcon className="h-5 w-5" />
             </span>
-            <div>
-              <h3 className="text-lg font-semibold tracking-[-0.02em] text-text-primary">{t("notebook.studio.infographicDialogTitle")}</h3>
-              <p className="text-xs text-text-tertiary">{t("notebook.studio.infographicDialogSubtitle")}</p>
-            </div>
+            <h3 className="text-lg font-semibold tracking-[-0.02em] text-text-primary">{t("notebook.studio.infographicDialogTitle")}</h3>
           </div>
-          <button type="button" onClick={onClose} disabled={generating} className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-elevated text-lg leading-none text-text-tertiary transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-50" aria-label="Close">×</button>
+          <button type="button" onClick={onClose} disabled={generating} className="flex h-8 w-8 items-center justify-center rounded-full text-lg leading-none text-text-tertiary transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-50" aria-label="Close">×</button>
         </div>
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-text-primary">{t("notebook.studio.infographicOrientation")}</label>
-            <div className="inline-flex rounded-xl border border-surface-border bg-surface-elevated p-1">
-              {(["landscape", "portrait", "square"] as const).map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setOrientation(value)}
-                  className={cn(
-                    "rounded-lg px-4 py-2 text-sm font-medium transition",
-                    orientation === value ? "bg-surface-card text-text-primary shadow-sm" : "text-text-tertiary hover:text-text-secondary"
-                  )}
+          <div className="grid gap-8 sm:grid-cols-2">
+            <div className="space-y-2.5">
+              <label className="text-sm font-semibold text-text-primary">{t("notebook.studio.infographicLanguage")}</label>
+              <div className="relative w-full max-w-[260px]">
+                <select
+                  value={language}
+                  onChange={(event) => setLanguage(event.target.value as LanguageCode)}
+                  disabled={generating}
+                  className="h-10 w-full appearance-none rounded-lg border border-slate-900 bg-surface-card px-3.5 pr-9 text-sm font-medium text-text-primary outline-none transition focus:border-slate-950 focus:ring-2 focus:ring-slate-900/10 disabled:opacity-60 dark:border-slate-300 dark:focus:border-white"
                 >
-                  {t(`notebook.studio.infographicOrientation.${value}`)}
-                </button>
-              ))}
+                  {LANGUAGES.map((item) => (
+                    <option key={item.code} value={item.code}>{item.labelEn}</option>
+                  ))}
+                </select>
+                <ChevronRight className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 rotate-90 text-text-tertiary" />
+              </div>
+            </div>
+            <div className="space-y-2.5">
+              <label className="text-sm font-semibold text-text-primary">{t("notebook.studio.infographicOrientation")}</label>
+              <div className="flex flex-nowrap gap-2">
+                {(["landscape", "portrait", "square"] as const).map((value) => (
+                  <OptionButton key={value} selected={orientation === value} onClick={() => setOrientation(value)} label={t(`notebook.studio.infographicOrientation.${value}`)} />
+                ))}
+              </div>
             </div>
           </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-text-primary">{t("notebook.studio.infographicDetailLevel")}</label>
-            <div className="inline-flex rounded-xl border border-surface-border bg-surface-elevated p-1">
-              {(["short", "standard", "detailed"] as const).map((value, index) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setDetailLevel(value)}
-                  className={cn(
-                    "rounded-lg px-4 py-2 text-sm font-medium transition",
-                    detailLevel === value ? "bg-surface-card text-text-primary shadow-sm" : "text-text-tertiary hover:text-text-secondary"
-                  )}
-                >
-                  {t(`notebook.studio.infographicDetailLevel.${value}`)}
-                  {index === 2 ? <span className="ml-1.5 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-300">Beta</span> : null}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-2">
+          <div className="space-y-2.5">
             <label className="text-sm font-semibold text-text-primary">{t("notebook.studio.infographicVisualStyle")}</label>
-            <div className="flex gap-3 overflow-x-auto pb-2">
-              {styles.map((item) => {
-                const Icon = item.icon;
-                const selected = style === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setStyle(item.id)}
-                    className={cn(
-                      "flex min-w-[88px] flex-col items-center gap-2 rounded-xl border px-3 py-3 transition",
-                      selected ? "border-brand bg-brand-muted/30 ring-1 ring-brand/20" : "border-surface-border bg-surface-elevated hover:border-surface-border hover:bg-surface-hover"
-                    )}
-                  >
-                    <span className={cn("flex h-10 w-10 items-center justify-center rounded-full", selected ? "bg-brand text-white" : "bg-surface-card text-text-secondary")}>
-                      {Icon ? <Icon className="h-5 w-5" /> : <span className="text-sm font-semibold">{item.label.slice(0, 1)}</span>}
-                    </span>
-                    <span className="text-xs font-medium text-text-secondary">{item.label}</span>
-                  </button>
-                );
-              })}
+            <div className="flex flex-wrap gap-2">
+              {styles.map((item) => (
+                <OptionButton key={item.id} selected={style === item.id} onClick={() => setStyle(item.id)} label={item.label} />
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2.5">
+            <label className="text-sm font-semibold text-text-primary">{t("notebook.studio.infographicDetailLevel")}</label>
+            <div className="flex flex-nowrap gap-2">
+              {(["short", "standard", "detailed"] as const).map((value) => (
+                <OptionButton key={value} selected={detailLevel === value} onClick={() => setDetailLevel(value)} label={t(`notebook.studio.infographicDetailLevel.${value}`)} beta={value === "detailed"} />
+              ))}
             </div>
           </div>
 
@@ -1421,25 +1777,21 @@ function InfographicConfigDialog({
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               placeholder={t("notebook.studio.infographicPromptPlaceholder")}
-              rows={3}
-              className="w-full resize-none rounded-xl border border-surface-border bg-surface-elevated px-4 py-3 text-sm text-text-primary placeholder:text-text-tertiary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/10"
+              rows={5}
+              className="min-h-[132px] w-full resize-none rounded-lg border border-slate-900 bg-surface-card px-4 py-3 text-sm leading-6 text-text-primary placeholder:text-text-tertiary focus:border-slate-950 focus:outline-none focus:ring-2 focus:ring-slate-900/10 dark:border-slate-300 dark:focus:border-white"
             />
           </div>
         </div>
-        <div className="flex items-center justify-between border-t border-surface-border px-6 py-4">
-          <div className="text-xs text-text-tertiary">{t("notebook.studio.infographicGenerationHint")}</div>
-          <div className="flex gap-2">
-            <button type="button" onClick={onClose} disabled={generating} className="rounded-full border border-surface-border px-4 py-2 text-sm font-semibold text-text-secondary transition hover:bg-surface-hover disabled:opacity-50">{t("common.cancel")}</button>
-            <button
-              type="button"
-              onClick={() => onGenerate({ orientation, style, detail_level: detailLevel, prompt })}
-              disabled={generating}
-              className="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white transition hover:bg-brand-hover disabled:opacity-70"
-            >
-              {generating && <Loader2 className="h-4 w-4 animate-spin" />}
-              {t("notebook.studio.infographicGenerate")}
-            </button>
-          </div>
+        <div className="flex items-center justify-end px-6 pb-5 pt-0">
+          <button
+            type="button"
+            onClick={() => onGenerate({ language, orientation, style, detail_level: detailLevel, prompt })}
+            disabled={generating}
+            className="inline-flex h-10 min-w-[82px] items-center justify-center gap-2 rounded-full bg-blue-600 px-5 text-sm font-semibold text-white shadow-md shadow-blue-600/20 transition hover:bg-blue-700 disabled:opacity-70"
+          >
+            {generating && <Loader2 className="h-4 w-4 animate-spin" />}
+            {t("notebook.studio.tableGenerate")}
+          </button>
         </div>
       </div>
     </div>
@@ -1702,6 +2054,10 @@ export function NotebookStudioPanel({
   const [sourcePopoverKey, setSourcePopoverKey] = useState<string | null>(null);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [infographicDialogOpen, setInfographicDialogOpen] = useState(false);
+  const [tableDialogOpen, setTableDialogOpen] = useState(false);
+  const [mindmapDialogOpen, setMindmapDialogOpen] = useState(false);
+  const [flashcardsDialogOpen, setFlashcardsDialogOpen] = useState(false);
+  const [quizDialogOpen, setQuizDialogOpen] = useState(false);
   const [noteDialogOpen, setNoteDialogOpen] = useState(false);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [openNoteMenuId, setOpenNoteMenuId] = useState<string | null>(null);
@@ -1732,6 +2088,26 @@ export function NotebookStudioPanel({
   ];
 
   const handleActionClick = (actionId: NotebookStudioActionId) => {
+    onGenerate(actionId);
+  };
+
+  const handleActionConfigClick = (actionId: NotebookStudioActionId) => {
+    if (actionId === "table") {
+      setTableDialogOpen(true);
+      return;
+    }
+    if (actionId === "mindmap") {
+      setMindmapDialogOpen(true);
+      return;
+    }
+    if (actionId === "flashcards") {
+      setFlashcardsDialogOpen(true);
+      return;
+    }
+    if (actionId === "quiz") {
+      setQuizDialogOpen(true);
+      return;
+    }
     if (actionId === "infographic") {
       setInfographicDialogOpen(true);
       return;
@@ -1747,9 +2123,29 @@ export function NotebookStudioPanel({
     onOpenArtifact(artifact.id);
   };
 
-  const handleInfographicGenerate = (options: { orientation: string; style: string; detail_level: string; prompt: string }) => {
+  const handleInfographicGenerate = (options: { language: LanguageCode; orientation: string; style: string; detail_level: string; prompt: string }) => {
     setInfographicDialogOpen(false);
     onGenerate("infographic", options);
+  };
+
+  const handleTableGenerate = (options: { language: LanguageCode; prompt: string }) => {
+    setTableDialogOpen(false);
+    onGenerate("table", options);
+  };
+
+  const handleMindmapGenerate = (options: { prompt: string }) => {
+    setMindmapDialogOpen(false);
+    onGenerate("mindmap", options);
+  };
+
+  const handleFlashcardsGenerate = (options: { flashcard_count: string; difficulty: string; prompt: string }) => {
+    setFlashcardsDialogOpen(false);
+    onGenerate("flashcards", options);
+  };
+
+  const handleQuizGenerate = (options: { quiz_count: string; difficulty: string; prompt: string }) => {
+    setQuizDialogOpen(false);
+    onGenerate("quiz", options);
   };
 
   const openNewNote = () => {
@@ -1909,7 +2305,7 @@ export function NotebookStudioPanel({
                   </div>
                   <div className="text-sm font-semibold text-text-primary">{action.title}</div>
                 </button>
-                <button type="button" onClick={() => handleActionClick(action.id)} disabled={Boolean(generatingType)} className="absolute right-3 top-1/2 z-10 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-white/70 text-text-secondary shadow-sm ring-1 ring-black/5 transition hover:scale-105 hover:bg-brand hover:text-white hover:shadow-md disabled:cursor-not-allowed disabled:opacity-70">
+                <button type="button" onClick={() => handleActionConfigClick(action.id)} disabled={Boolean(generatingType)} className="absolute right-3 top-1/2 z-10 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-white/70 text-text-secondary shadow-sm ring-1 ring-black/5 transition hover:scale-105 hover:bg-brand hover:text-white hover:shadow-md disabled:cursor-not-allowed disabled:opacity-70">
                   <ChevronRight className="h-4 w-4" />
                 </button>
               </div>
@@ -1943,8 +2339,8 @@ export function NotebookStudioPanel({
                   return (
                     <div key={artifact.id} className="group relative rounded-[18px] transition hover:bg-surface-elevated/70">
                       <div className="flex w-full items-center gap-3.5 px-2.5 py-3 pr-20 text-left">
-                        <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", artifactVisualMap[artifact.type].surfaceClass)}>
-                          <Icon className={cn("h-[23px] w-[23px]", artifactVisualMap[artifact.type].iconClass)} />
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center">
+                          <Icon className={cn("h-[25px] w-[25px]", artifactVisualMap[artifact.type].iconClass)} />
                         </div>
                         <div className="min-w-0 flex-1">
                           <button type="button" onClick={() => handleArtifactClick(artifact)} className="block w-full text-left">
@@ -2002,8 +2398,8 @@ export function NotebookStudioPanel({
                 return (
                   <div key={note.id} className="group relative rounded-[18px] transition hover:bg-surface-elevated/70">
                     <button type="button" onClick={() => openExistingNote(note)} className="flex w-full items-center gap-3.5 px-2.5 py-3 pr-12 text-left">
-                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-surface-muted text-text-secondary">
-                        <FileText className="h-[24px] w-[24px] stroke-[1.8]" />
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center text-text-secondary">
+                        <FileText className="h-[25px] w-[25px] stroke-[1.8]" />
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[14px] font-semibold leading-5 tracking-[-0.01em] text-text-primary">{note.title}</span>
@@ -2066,6 +2462,34 @@ export function NotebookStudioPanel({
         </div>
       </div>
     )}
+    <TableConfigDialog
+      open={tableDialogOpen}
+      generating={generatingType === "table"}
+      onClose={() => setTableDialogOpen(false)}
+      onGenerate={handleTableGenerate}
+      t={t}
+    />
+    <MindmapConfigDialog
+      open={mindmapDialogOpen}
+      generating={generatingType === "mindmap"}
+      onClose={() => setMindmapDialogOpen(false)}
+      onGenerate={handleMindmapGenerate}
+      t={t}
+    />
+    <FlashcardsConfigDialog
+      open={flashcardsDialogOpen}
+      generating={generatingType === "flashcards"}
+      onClose={() => setFlashcardsDialogOpen(false)}
+      onGenerate={handleFlashcardsGenerate}
+      t={t}
+    />
+    <QuizConfigDialog
+      open={quizDialogOpen}
+      generating={generatingType === "quiz"}
+      onClose={() => setQuizDialogOpen(false)}
+      onGenerate={handleQuizGenerate}
+      t={t}
+    />
     <InfographicConfigDialog
       open={infographicDialogOpen}
       generating={generatingType === "infographic"}

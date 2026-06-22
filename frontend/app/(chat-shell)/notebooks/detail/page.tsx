@@ -7,7 +7,7 @@ import { ArrowLeft, FileText, Loader2, MoreVertical, Plus, AlertCircle, CheckCir
 import { toast } from "sonner";
 import ChatInterface from "@/components/chat/ChatInterface";
 import { NotebookSourcePreviewDrawer } from "@/components/notebook/NotebookSourcePreviewDrawer";
-import { NotebookStudioPanel, type NotebookSourceOpenTarget, type NotebookStudioActionId, type NotebookStudioArtifact, type NotebookStudioCitation, type NotebookStudioFlashcard, type NotebookStudioMindmapEdge, type NotebookStudioMindmapNode, type NotebookStudioNote, type NotebookStudioQuizQuestion, type NotebookStudioReportSection, type NotebookStudioReportTable, type NotebookStudioSource, type NotebookStudioTableRow, type NotebookStudioTextSection } from "@/components/notebook/NotebookStudioPanel";
+import { NotebookStudioPanel, type NotebookSourceOpenTarget, type NotebookStudioActionId, type NotebookStudioArtifact, type NotebookStudioCitation, type NotebookStudioFlashcard, type NotebookStudioGenerateOptions, type NotebookStudioMindmapEdge, type NotebookStudioMindmapNode, type NotebookStudioNote, type NotebookStudioQuizQuestion, type NotebookStudioReportSection, type NotebookStudioReportTable, type NotebookStudioSource, type NotebookStudioTableRow, type NotebookStudioTextSection } from "@/components/notebook/NotebookStudioPanel";
 import { NotebookUrlSourceDialog } from "@/components/notebook/NotebookUrlSourceDialog";
 import { MODELS } from "@/hooks/useChat";
 import { addNotebookFile, addNotebookUrlSource, deleteNotebookArtifact, fetchNotebook, fetchNotebookArtifacts, fetchNotebookFileContent, generateNotebookArtifact, reindexNotebookFile, removeNotebookFile, suggestNotebookReportFormats, updateNotebook, updateNotebookArtifact, updateNotebookFile, type NotebookReportFormatSuggestion } from "@/lib/notebookApi";
@@ -1465,7 +1465,7 @@ function NotebookDetailContent() {
     }
   };
 
-  const generateStudioArtifactByType = async (type: string, visualType: NotebookStudioActionId, options?: { orientation?: string; style?: string; detail_level?: string; prompt?: string; file_ids?: number[]; successMessage?: string }) => {
+  const generateStudioArtifactByType = async (type: string, visualType: NotebookStudioActionId, options?: NotebookStudioGenerateOptions & { file_ids?: number[]; successMessage?: string }) => {
     if (!writableNotebookId) return;
     setGeneratingStudioType(visualType);
     try {
@@ -1473,11 +1473,14 @@ function NotebookDetailContent() {
         notebookId: writableNotebookId,
         type,
         file_ids: options?.file_ids || selectedFileIds,
-        language: language as LanguageCode,
+        language: options?.language || (language as LanguageCode),
         orientation: options?.orientation,
         style: options?.style,
         detail_level: options?.detail_level,
         prompt: options?.prompt,
+        flashcard_count: options?.flashcard_count,
+        quiz_count: options?.quiz_count,
+        difficulty: options?.difficulty,
       });
       const artifact = toStudioArtifact(saved);
       if (artifact) {

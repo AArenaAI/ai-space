@@ -5,6 +5,7 @@ import (
 	"aipool-backend/internal/services"
 	"context"
 	"io"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -257,6 +258,34 @@ func TestBuildAINotebookArtifactDraftInfographicFallsBackToHTMLWithoutImageServi
 	}
 	if strings.Contains(encoded, "image_url") {
 		t.Fatalf("new infographic fallback should not depend on image_url, got %s", encoded)
+	}
+	for _, token := range []string{"poster-shell", "metric-strip", "roadmap-card", "matrix-card", "module-card"} {
+		if !strings.Contains(encoded, token) {
+			t.Fatalf("infographic fallback should use rich bento/dashboard structure and include %s, got %s", token, encoded)
+		}
+	}
+	if strings.Count(encoded, "class=\\\"module-card") < 4 {
+		t.Fatalf("infographic fallback should include at least 4 module cards, got %s", encoded)
+	}
+}
+
+func TestBuildAINotebookArtifactDraftInfographicRejectsWeakAIHTML(t *testing.T) {
+	files := []models.File{
+		{ID: 1, Filename: "合约工程师.md", ParseStatus: "done", EmbeddingStatus: "done", Summary: "合约高级工程师学习路径", Content: "Delegatecall、Proxy 合约模式、ABI 编解码、Layer 2、MEV、跨链交互。"},
+	}
+	weakHTML := `<section class="nb-infographic"><article>进阶功能</article><article>学习清单</article></section>`
+	ai := &fakeNotebookAIService{response: `{"title":"信息图","subtitle":"AI 副标题","content":{"orientation":"landscape","style":"professional","detail_level":"standard","prompt":"合约高级工程师成长路径","html":` + strconv.Quote(weakHTML) + `}}`}
+
+	draft, err := buildAINotebookArtifactDraft(context.Background(), ai, nil, "infographic", "知识库", files, []uint{1}, "zh-CN")
+	if err != nil {
+		t.Fatalf("weak infographic AI html should fall back instead of failing: %v", err)
+	}
+	encoded := string(draft.Content)
+	if !strings.Contains(encoded, "poster-shell") || !strings.Contains(encoded, "roadmap-card") || !strings.Contains(encoded, "matrix-card") {
+		t.Fatalf("weak AI html should be replaced with poster fallback, got %s", encoded)
+	}
+	if strings.Contains(encoded, weakHTML) {
+		t.Fatalf("weak AI html should not be preserved, got %s", encoded)
 	}
 }
 
