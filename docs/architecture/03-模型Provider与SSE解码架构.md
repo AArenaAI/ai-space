@@ -93,3 +93,4 @@ flowchart LR
 2. Provider 差异不得进入前端；前端只消费统一事件。
 3. 搜索、reasoning、native file input 这类能力要通过 capability 判断开启。
 4. 结构化输出 `TextFormat` 只在支持的 Provider 生效，其他 Provider 应安全忽略或报明确错误。
+5. Gemini Webhooks 不支持普通 chat streaming 的 OpenAI-style background 完成回调；Gemini / 非 OpenAI 模型的后台聊天恢复应走本地 Background Chat Task，详见 `docs/todo.md#gemini--非-openai-模型本地-background-chat-task`。
