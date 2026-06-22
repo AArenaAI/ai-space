@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback, useMemo, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { createPortal } from "react-dom";
 import { Check, ChevronDown, Star } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -126,7 +127,10 @@ export default function ModelSelector({
   const [favoriteIds, setFavoriteIds] = useState<string[]>(() => getFavoriteModels().slice(0, SHORTCUT_LIMIT));
   const [recentIds, setRecentIds] = useState<string[]>(() => getRecentModels().slice(0, SHORTCUT_LIMIT));
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const portalRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [dropdownStyle, setDropdownStyle] = useState<{ top: number; left: number } | null>(null);
 
   const modelById = useMemo(() => {
     const map = new Map<string, ChatModel>();
@@ -146,19 +150,45 @@ export default function ModelSelector({
   const selectedAvailable = isModelAvailable(selected);
   const selectedStatusLabel = getModelStatusLabel(selected);
 
-  // 点击外部关闭
+  const updateDropdownPosition = useCallback(() => {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setDropdownStyle({
+      top: Math.round(rect.bottom + 8),
+      left: Math.round(rect.left),
+    });
+  }, []);
+
+  // 点击外部关闭。下拉通过 portal 渲染到 body，所以需要同时判断 trigger 与 portal 内容。
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setOpen(false);
-        setHoveredProvider(null);
+      const target = event.target as Node;
+      if (
+        dropdownRef.current?.contains(target) ||
+        portalRef.current?.contains(target) ||
+        triggerRef.current?.contains(target)
+      ) {
+        return;
       }
+      setOpen(false);
+      setHoveredProvider(null);
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    updateDropdownPosition();
+    window.addEventListener("resize", updateDropdownPosition);
+    window.addEventListener("scroll", updateDropdownPosition, true);
+    return () => {
+      window.removeEventListener("resize", updateDropdownPosition);
+      window.removeEventListener("scroll", updateDropdownPosition, true);
+    };
+  }, [open, updateDropdownPosition]);
 
   // 构建分组：保留既有厂商顺序，同时兼容后端新增 provider。
   const providerOrder = [
@@ -377,7 +407,11 @@ export default function ModelSelector({
     <div className={cn("relative max-w-[240px] sm:max-w-none", className)} ref={dropdownRef}>
       {/* 触发按钮 */}
       <button
-        onClick={() => setOpen((v) => !v)}
+        ref={triggerRef}
+        onClick={() => {
+          updateDropdownPosition();
+          setOpen((v) => !v);
+        }}
         className={cn(
           "flex items-center gap-2.5 px-2.5 py-1.5 text-[15px] font-medium transition-all duration-200 w-full",
           "rounded-lg",
@@ -405,17 +439,21 @@ export default function ModelSelector({
         />
       </button>
 
-      {/* 下拉面板 + 蒙版 */}
-      {open && (
+      {/* 下拉面板 + 蒙版：通过 portal 渲染到 body，避免被 header/input 的 stacking context 压住 */}
+      {open && dropdownStyle && typeof document !== "undefined" && createPortal(
         <>
           <div
-            className="fixed inset-0 z-[80] bg-black/20 backdrop-blur-[2px]"
+            className="fixed inset-0 z-[150] bg-black/20 backdrop-blur-[2px]"
             onClick={() => {
               setOpen(false);
               setHoveredProvider(null);
             }}
           />
-          <div className="absolute top-full left-0 mt-2 z-[90] flex rounded-2xl border border-surface-border bg-surface-elevated shadow-xl overflow-hidden">
+          <div
+            ref={portalRef}
+            className="fixed z-[160] flex max-w-[calc(100vw-24px)] rounded-2xl border border-surface-border bg-surface-elevated shadow-xl overflow-hidden"
+            style={dropdownStyle}
+          >
             {/* 左侧：提供商列表 */}
             <div className="w-[260px] py-3">
               <div className="px-4 py-2 text-xs font-medium text-text-tertiary uppercase tracking-wider border-b border-surface-border mb-1.5">
@@ -516,7 +554,8 @@ export default function ModelSelector({
               </div>
             )}
           </div>
-        </>
+        </>,
+        document.body
       )}
     </div>
   );

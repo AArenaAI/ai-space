@@ -20,9 +20,18 @@ export interface AdminUser {
   basic_credits: number;
   advanced_credits: number;
   elite_credits: number;
+  beta_batch?: string;
   created_at: string;
   updated_at: string;
   usage_30d?: AdminUserUsageSummary;
+  beta_phase?: string;
+  beta_phase_name?: string;
+  beta_credit_balance?: number;
+  beta_credit_balance_display?: number;
+  beta_credit_granted_total?: number;
+  beta_credit_granted_display?: number;
+  beta_credit_used_total?: number;
+  beta_credit_used_display?: number;
 }
 
 export interface AdminOverview {
@@ -30,6 +39,13 @@ export interface AdminOverview {
   usage: { today_requests: number; today_cost_rmb: number; today_failures: number };
   tasks: { running: number; failed_today: number };
   models: { top_by_cost: Array<{ model: string; provider: string; cost_rmb: number; requests: number }> };
+  beta?: {
+    pending_applications: number;
+    today_applications: number;
+    active_invites: number;
+    total_invites: number;
+    pending_bad_cases: number;
+  };
 }
 
 export interface AdminUsersResponse {
@@ -215,8 +231,32 @@ export interface AdminModel {
   capabilities: string[];
 }
 
-export interface AdminModelsResponse {
-  models: AdminModel[];
+export interface AdminModelConfig {
+  id: number;
+  model_id: string;
+  name: string;
+  provider: string;
+  description: string;
+  color: string;
+  category: string;
+  capabilities: string[];
+  enabled: boolean;
+  tier: string;
+  reasoning_level?: string;
+  reasoning_level_name?: string;
+  reasoning_effort?: string;
+  reasoning_parameter?: string;
+  reasoning_fast_value?: string;
+  reasoning_thinking_value?: string;
+  reasoning_expert_value?: string;
+  status: string;
+  status_message: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface AdminModelConfigsResponse {
+  models: AdminModelConfig[];
   total: number;
 }
 

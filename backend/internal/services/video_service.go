@@ -60,10 +60,13 @@ func (s *VideoService) CreateVideoTask(ctx context.Context, req CreateVideoTaskR
 	}
 
 	// 添加参考图。
-	// 默认按 Seedance 2.0 多模态参考图处理；只有调用方显式指定 first_frame / first_last_frame 时，才强约束首/尾帧。
+	// Seedance 2.0 有四种视频生成模式：
+	//   多模态参考：图片 role=reference_image，视频 role=reference_video，首帧/尾帧语义写进 prompt 文本
+	//   图生视频-首尾帧：图片 role=first_frame/last_frame，不传参考视频
+	//   图生视频-首帧：图片 role=first_frame，不传参考视频
+	//   文生视频：纯文本
+	// 有参考视频时，图片统一为 reference_image（多模态参考模式），首帧/尾帧由 prompt 文本引导。
 	imageRole := func(index, total int) string {
-		// 火山 Seedance 不允许 first_frame/last_frame 与 reference_video 同时下发。
-		// 同时有参考视频时，图片统一作为弱参考图；只有纯图片参考时才强约束首/尾帧。
 		if len(req.ReferenceVideos) > 0 {
 			return "reference_image"
 		}

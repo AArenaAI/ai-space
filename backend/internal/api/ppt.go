@@ -248,6 +248,9 @@ func (h *PPTHandler) GenerateOutline(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "PPT 不存在"})
 		return
 	}
+	if !ensureModelAccess(c, h.db, userID, h.pptService.DocGenModel(), 0) {
+		return
+	}
 
 	gen.Status = models.PPTStatusPlanning
 	gen.Progress = 10
@@ -312,6 +315,9 @@ func (h *PPTHandler) ConfirmOutline(c *gin.Context) {
 		outlineJSON, _ := json.Marshal(req.Outline)
 		gen.OutlineJSON = string(outlineJSON)
 		gen.Title = req.Outline.Title
+	}
+	if !ensureModelAccess(c, h.db, userID, h.pptService.DocGenModel(), 0) {
+		return
 	}
 
 	gen.Status = models.PPTStatusGeneratingSlides
@@ -472,6 +478,9 @@ func (h *PPTHandler) RewriteSlide(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if !ensureModelAccess(c, h.db, userID, h.pptService.DocGenModel(), 0) {
+		return
+	}
 
 	// 找到当前 slide
 	var slides []services.FullSlide
@@ -533,6 +542,9 @@ func (h *PPTHandler) RegenerateSlideImage(c *gin.Context) {
 		Instruction string `json:"instruction"`
 	}
 	c.ShouldBindJSON(&req)
+	if !ensureModelAccess(c, h.db, userID, h.pptService.DocGenModel(), 0) {
+		return
+	}
 
 	// 找到当前 slide
 	var slides []services.FullSlide

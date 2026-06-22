@@ -46,9 +46,16 @@
     
     /* 自定义变量 - 白天模式 */
     --surface: #FFFFFF;                 /* 主背景 - 冷白 */
+    --surface-base: #FFFFFF;            /* 画布/基础背景 */
     --surface-elevated: #F6F7F9;       /* 外层背景 - 冷灰 */
     --surface-card: #FFFFFF;            /* 卡片背景 */
+    --surface-hover: #F3F4F6;          /* 悬停背景 */
     --surface-border: #E5E7EB;          /* 边框 - 冷灰 */
+
+    --status-empty: #94A3B8;
+    --status-draft: #F59E0B;
+    --status-done: #10B981;
+    --status-error: #EF4444;
     
     --text-primary: #111827;            /* 主文字 - slate-900 冷黑 */
     --text-secondary: #64748B;          /* 次级文字 - slate-500 冷灰 */
@@ -107,9 +114,16 @@
     
     /* 自定义变量 - 绿色护眼模式 */
     --surface: #D4E0C8;                 /* 主背景 - 暖绿豆沙 */
+    --surface-base: #D4E0C8;            /* 画布/基础背景 */
     --surface-elevated: #DAE5CF;       /* 比背景亮一层 */
     --surface-card: #E2ECD9;            /* 卡片背景 */
+    --surface-hover: #C8D2BE;          /* 悬停背景 */
     --surface-border: #B5BFAE;          /* 边框 */
+
+    --status-empty: #7A7D72;
+    --status-draft: #D4A03A;
+    --status-done: #5F8A4F;
+    --status-error: #C45B4A;
     
     --text-primary: #35362E;            /* 主文字 - 暖灰 */
     --text-secondary: #5C5E54;          /* 次级文字 */
@@ -168,9 +182,16 @@
     
     /* 自定义变量 - 黑夜模式 */
     --surface: #0A0A0A;
+    --surface-base: #0A0A0A;
     --surface-elevated: #111111;
     --surface-card: #1A1A1A;
+    --surface-hover: #1A1A1A;
     --surface-border: #2A2A2A;
+
+    --status-empty: #555555;
+    --status-draft: #F59E0B;
+    --status-done: #34D399;
+    --status-error: #EF4444;
     
     --text-primary: #EDEDED;
     --text-secondary: #888888;
@@ -804,5 +825,17 @@
   [data-sonner-toast][data-testid="aispace-task-toast"] {
     padding: 0 !important;
     border-radius: 0 !important;
+  }
+}
+
+@keyframes notebook-studio-loading {
+  0% {
+    transform: translateX(-105%);
+  }
+  55% {
+    transform: translateX(70%);
+  }
+  100% {
+    transform: translateX(205%);
   }
 }

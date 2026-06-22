@@ -24,11 +24,6 @@ function extractDeltaFromPayload(payload: any): string {
   return stringifyDelta(rawDelta.content) || stringifyDelta(choice?.message?.content) || stringifyDelta(payload?.message?.content) || stringifyDelta(payload?.content);
 }
 
-function getErrorMessage(payload: any): string {
-  const err = payload?._error || payload?._error_meta;
-  return normalizeError(err || payload, { module: "chat", fallbackMessage: "生成失败，请稍后重试。" }).message;
-}
-
 export async function consumeChatStream(response: Response, callbacks: ChatStreamCallbacks = {}): Promise<string> {
   const reader = response.body?.getReader();
   if (!reader) throw normalizeError("无法读取流", { module: "chat", fallbackMessage: "连接中断，已保留当前内容，可稍后重试。" });
@@ -57,7 +52,8 @@ export async function consumeChatStream(response: Response, callbacks: ChatStrea
       const parsed = JSON.parse(data);
 
       if (parsed._error || parsed._error_meta) {
-        const error = new Error(getErrorMessage(parsed));
+        const userError = normalizeError(parsed._error || parsed._error_meta || parsed, { module: "chat", fallbackMessage: "生成失败，请稍后重试。" });
+        const error = Object.assign(new Error(userError.message), userError);
         callbacks.onError?.(error);
         throw error;
       }

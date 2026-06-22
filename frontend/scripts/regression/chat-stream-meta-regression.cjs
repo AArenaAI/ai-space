@@ -6,10 +6,8 @@ const path = require("node:path");
 const ts = require("typescript");
 
 const projectRoot = path.resolve(__dirname, "../..");
-const sourcePath = path.join(projectRoot, "lib/chatStreamMeta.ts");
-
-function loadModule() {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "chat-stream-meta-regression-"));
+function transpileModule(sourceFile, tmpDir) {
+  const sourcePath = path.join(projectRoot, sourceFile);
   const source = fs.readFileSync(sourcePath, "utf8");
   const transpiled = ts.transpileModule(source, {
     compilerOptions: {
@@ -20,9 +18,24 @@ function loadModule() {
     },
     fileName: sourcePath,
   }).outputText;
-  const outPath = path.join(tmpDir, "chatStreamMeta.cjs");
+  const outPath = path.join(tmpDir, sourceFile.replace(/^lib\//, "").replace(/\.ts$/, ".js"));
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, transpiled);
-  return require(outPath);
+}
+
+function loadModule() {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "chat-stream-meta-regression-"));
+  [
+    "lib/errors/errorCatalog.ts",
+    "lib/errors/authErrorMap.ts",
+    "lib/errors/chatErrorMap.ts",
+    "lib/errors/fileErrorMap.ts",
+    "lib/errors/mediaErrorMap.ts",
+    "lib/errors/translateErrorMap.ts",
+    "lib/errors/normalizeError.ts",
+    "lib/chatStreamMeta.ts",
+  ].forEach((file) => transpileModule(file, tmpDir));
+  return require(path.join(tmpDir, "chatStreamMeta.js"));
 }
 
 const mod = loadModule();

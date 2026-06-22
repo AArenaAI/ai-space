@@ -23,7 +23,7 @@ import {
   Type, ZoomIn,
   Briefcase, FileCode, PenTool, BarChart3, Mail, ClipboardList, Terminal, GraduationCap, Languages,
   Zap, Shield, BookOpen, Wrench, Globe, Code2,
-  Star,
+  Star, Mic,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
@@ -39,6 +39,7 @@ import { invalidateConversationSnapshot } from "@/lib/chatConversationCache";
 import { prefetchConversationSnapshot } from "@/lib/chatConversationPrefetch";
 import { deletePersistentConversationSnapshot } from "@/lib/chatConversationPersistentCache";
 import { createNotebook, fetchNotebooks } from "@/lib/notebookApi";
+import { NOTEBOOK_DEMOS } from "@/lib/notebookDemos";
 import type { Notebook } from "@/lib/notebookTypes";
 
 
@@ -74,12 +75,6 @@ interface ConversationSearchResult extends Conversation {
   matched_role?: string;
   matched_message_id?: number;
 }
-
-const NOTEBOOK_DEMOS: Array<Pick<Notebook, "id" | "title" | "description" | "file_count" | "updated_at"> & { demo?: boolean; color: string }> = [
-  { id: -1, title: "Demo: Introduction to Wisebase", description: "Learn how notebooks organize sources", file_count: 3, updated_at: new Date().toISOString(), demo: true, color: "text-violet-500 bg-violet-500/10" },
-  { id: -2, title: "Demo: Research on LLMs", description: "Research notes and source Q&A", file_count: 5, updated_at: new Date().toISOString(), demo: true, color: "text-orange-500 bg-orange-500/10" },
-  { id: -3, title: "Demo: NVIDIA Business Outlook", description: "Business analysis knowledge base", file_count: 4, updated_at: new Date().toISOString(), demo: true, color: "text-emerald-500 bg-emerald-500/10" },
-];
 
 type SidebarNotebookItem = Pick<Notebook, "id" | "title" | "description" | "file_count" | "updated_at"> & {
   color: string;
@@ -151,6 +146,17 @@ const SKILL_ICON_MAP: Record<string, { icon: React.ElementType; color: string }>
   "translator":       { icon: Languages,       color: "text-indigo-400" },
 };
 
+const CHAT_HISTORY_HIDDEN_SKILL_KEYS = new Set([
+  "ai-writing-assistant",
+  "translator",
+  "document-reader",
+  "seedream-beta",
+]);
+
+function isMainChatConversation(conv: Conversation): boolean {
+  return !conv.skill_key || !CHAT_HISTORY_HIDDEN_SKILL_KEYS.has(conv.skill_key);
+}
+
 async function fetchConversations(workspaceId?: number): Promise<Conversation[] | null> {
   const token = localStorage.getItem("token");
   if (!token) return [];
@@ -163,8 +169,8 @@ async function fetchConversations(workspaceId?: number): Promise<Conversation[] 
     });
     if (!res.ok) return null;
     const data = await res.json();
-    if (Array.isArray(data)) return data;
-    if (data && Array.isArray(data.conversations)) return data.conversations;
+    if (Array.isArray(data)) return data.filter(isMainChatConversation);
+    if (data && Array.isArray(data.conversations)) return data.conversations.filter(isMainChatConversation);
     return null;
   } catch { return null; }
 }
@@ -183,7 +189,7 @@ async function searchConversations(keyword: string, workspaceId?: number, signal
     });
     if (!res.ok) return [];
     const data = await res.json();
-    return Array.isArray(data) ? data : [];
+    return Array.isArray(data) ? data.filter(isMainChatConversation) : [];
   } catch {
     return [];
   }
@@ -410,6 +416,10 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   const router = useRouter();
   const isWorkRoute = isPathInGroup(pathname, WORK_PAGE_PATHS);
   const isCreativeRoute = isPathInGroup(pathname, CREATIVE_PAGE_PATHS);
+  const navigateToNotebooks = useCallback(() => {
+    setCollapsed(true);
+    router.push("/notebooks");
+  }, [router]);
 
   useEffect(() => {
     if (isNotebookDetailPath(pathname)) {
@@ -685,6 +695,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
         updated_at: d.updated_at || now,
         skill_key: d.skill_key,
       };
+      if (!isMainChatConversation(conv)) return;
       updateConversationsStable(prev => sortConversations([conv, ...prev.filter(c => c.id !== conv.id)]));
     };
     window.addEventListener("conversation-created", h);
@@ -749,11 +760,13 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
 
   const sidebarNotebookItems = useMemo<SidebarNotebookItem[]>(() => {
     const colors = ["text-violet-500 bg-violet-500/10", "text-orange-500 bg-orange-500/10", "text-emerald-500 bg-emerald-500/10"];
-    const realItems = notebooks.map((item, index) => ({
-      ...item,
-      itemKey: `notebook:${item.id}`,
-      color: colors[index % colors.length],
-    }));
+    const realItems = [...notebooks]
+      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+      .map((item, index) => ({
+        ...item,
+        itemKey: `notebook:${item.id}`,
+        color: colors[index % colors.length],
+      }));
     const demoItems = NOTEBOOK_DEMOS.map((item) => ({
       ...item,
       itemKey: `demo:${Math.abs(item.id)}`,
@@ -763,7 +776,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     const ordered = notebookOrder.map((key) => byKey.get(key)).filter(Boolean) as SidebarNotebookItem[];
     const missingReal = realItems.filter((item) => !notebookOrder.includes(item.itemKey));
     const missingDemo = demoItems.filter((item) => !notebookOrder.includes(item.itemKey));
-    return [...missingReal, ...ordered, ...missingDemo];
+    return [...missingReal, ...ordered, ...missingDemo].slice(0, 3);
   }, [notebooks, notebookOrder]);
 
   const moveNotebookItem = useCallback((fromKey: string, toKey: string) => {
@@ -956,7 +969,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     const token = localStorage.getItem("token");
     if (!token) return;
     const recent = sortConversations(conversations)
-      .filter((conv) => conv.skill_key !== "ai-writing-assistant" && conv.skill_key !== "translator" && conv.skill_key !== "document-reader")
+      .filter(isMainChatConversation)
       .filter((conv) => String(conv.id) !== currentConvId)
       .slice(0, 5);
     if (recent.length === 0) return;
@@ -1024,7 +1037,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
       );
     }
 
-    const sidebarConversations = conversations.filter(c => c.skill_key !== "ai-writing-assistant" && c.skill_key !== "translator" && c.skill_key !== "document-reader");
+    const sidebarConversations = conversations.filter(isMainChatConversation);
     const pinned = sidebarConversations.filter(c => c.pinned);
     const unpinned = sidebarConversations.filter(c => !c.pinned);
     const groups = groupConversationsByTime(unpinned, t);
@@ -1226,6 +1239,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
               </Link>
               <Link
                 href="/notebooks"
+                onClick={() => setCollapsed(true)}
                 onMouseEnter={showSidebarTooltip(t("sidebar.nav.notebook"))}
                 onMouseLeave={hideSidebarTooltip}
                 className={cn(
@@ -1340,11 +1354,11 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                 <div
                   role="button"
                   tabIndex={0}
-                  onClick={() => router.push("/notebooks")}
+                  onClick={navigateToNotebooks}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      router.push("/notebooks");
+                      navigateToNotebooks();
                     }
                   }}
                   className={cn(
@@ -1382,7 +1396,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                   </div>
                 ) : sidebarNotebookItems.map((notebook) => {
                   const isDemo = "demo" in notebook && notebook.demo;
-                  const href = isDemo ? "/notebooks" : `/notebooks/detail?notebook_id=${notebook.id}`;
+                  const href = `/notebooks/detail?notebook_id=${notebook.id}`;
                   return (
                     <button
                       key={notebook.itemKey}
@@ -1469,6 +1483,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
             items: [
               { icon: ImageIcon, label: t("image.generateImage"), href: "/image", color: "text-purple-500", bg: "bg-purple-500/10" },
               { icon: Video, label: t("video.generateVideo"), href: "/video", color: "text-blue-500", bg: "bg-blue-500/10" },
+              { icon: Sparkles, label: t("seedreamBeta.navLabel"), href: "/seedream-beta", color: "text-amber-500", bg: "bg-amber-500/10" },
               { icon: Image, label: t("sidebar.panel.remove_bg"), href: "/create?mode=remove-bg", color: "text-green-500", bg: "bg-green-500/10" },
               { icon: Eraser, label: t("sidebar.panel.replace_bg"), href: "/create?mode=replace-bg", color: "text-purple-500", bg: "bg-purple-500/10" },
               { icon: Type, label: t("sidebar.panel.text_removal"), href: "/create?mode=text-removal", color: "text-amber-500", bg: "bg-amber-500/10" },
@@ -1491,6 +1506,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
             items: [
               { icon: PenTool, label: t("work.writingAssistant"), href: "/writing-assistant", color: "text-pink-500", bg: "bg-pink-500/10" },
               { icon: Languages, label: t("work.translator"), href: "/translator", color: "text-fuchsia-500", bg: "bg-fuchsia-500/10" },
+              { icon: Mic, label: t("work.liveTranslate"), href: "/live-translate", color: "text-emerald-500", bg: "bg-emerald-500/10" },
               { icon: FileText, label: t("work.documentReader"), href: "/document-reader", color: "text-orange-500", bg: "bg-orange-500/10" },
             ],
           },

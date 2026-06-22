@@ -15,18 +15,23 @@ import (
 )
 
 type generatedNotebookArtifactDraft struct {
-	Type        string
-	Title       string
-	Subtitle    string
-	Content     json.RawMessage
-	SourceCount int
+	Type          string
+	Title         string
+	Subtitle      string
+	Content       json.RawMessage
+	SourceCount   int
+	SourceFileIDs []uint
 }
 
 type notebookArtifactGenerationOptions struct {
-	Orientation string `json:"orientation,omitempty"`
-	Style       string `json:"style,omitempty"`
-	DetailLevel string `json:"detail_level,omitempty"`
-	Prompt      string `json:"prompt,omitempty"`
+	Orientation    string                      `json:"orientation,omitempty"`
+	Style          string                      `json:"style,omitempty"`
+	DetailLevel    string                      `json:"detail_level,omitempty"`
+	Prompt         string                      `json:"prompt,omitempty"`
+	FlashcardCount string                      `json:"flashcard_count,omitempty"`
+	QuizCount      string                      `json:"quiz_count,omitempty"`
+	Difficulty     string                      `json:"difficulty,omitempty"`
+	SourceChunks   map[uint][]models.FileChunk `json:"-"`
 }
 
 type notebookGeneratedAIResponse struct {
@@ -40,23 +45,34 @@ type notebookGenerationSource struct {
 	File     models.File
 	Summary  string
 	Excerpt  string
+	Chunks   []models.FileChunk
 	IsReady  bool
 	Selected bool
 }
 
 type notebookStudioTextSection struct {
-	Heading string   `json:"heading"`
-	Body    string   `json:"body,omitempty"`
-	Bullets []string `json:"bullets,omitempty"`
+	Heading   string                     `json:"heading"`
+	Body      string                     `json:"body,omitempty"`
+	Bullets   []string                   `json:"bullets,omitempty"`
+	Citations []notebookArtifactCitation `json:"citations,omitempty"`
+}
+
+type notebookArtifactCitation struct {
+	FileID      uint   `json:"file_id"`
+	SourceIndex int    `json:"source_index"`
+	Quote       string `json:"quote"`
+	Page        int    `json:"page,omitempty"`
+	ChunkIndex  int    `json:"chunk_index,omitempty"`
 }
 
 type notebookStudioTableRow struct {
-	Module         string `json:"module"`
-	Capability     string `json:"capability"`
-	Status         string `json:"status"`
-	Implementation string `json:"implementation"`
-	Value          string `json:"value"`
-	Source         string `json:"source"`
+	Module         string                     `json:"module"`
+	Capability     string                     `json:"capability"`
+	Status         string                     `json:"status"`
+	Implementation string                     `json:"implementation"`
+	Value          string                     `json:"value"`
+	Source         string                     `json:"source"`
+	Citations      []notebookArtifactCitation `json:"citations,omitempty"`
 }
 
 type notebookStudioMindmapNode struct {
@@ -89,8 +105,9 @@ type notebookStudioInfographic struct {
 	Style       string            `json:"style"`
 	DetailLevel string            `json:"detail_level"`
 	Prompt      string            `json:"prompt"`
-	ImagePrompt string            `json:"image_prompt"`
-	ImageURL    string            `json:"image_url"`
+	HTML        string            `json:"html"`
+	ImagePrompt string            `json:"image_prompt,omitempty"`
+	ImageURL    string            `json:"image_url,omitempty"`
 	ColorScheme map[string]string `json:"color_scheme,omitempty"`
 }
 
@@ -115,6 +132,7 @@ type notebookStudioReportSection struct {
 	Body        string                        `json:"body,omitempty"`
 	Subsections []notebookStudioReportSection `json:"subsections,omitempty"`
 	Bullets     []string                      `json:"bullets,omitempty"`
+	Citations   []notebookArtifactCitation    `json:"citations,omitempty"`
 }
 
 type notebookStudioReportTable struct {
@@ -151,35 +169,59 @@ func buildGeneratedNotebookArtifactDraft(generationType string, notebookTitle st
 	if len(opts) > 0 {
 		opt = opts[0]
 	}
+	attachNotebookGenerationSourceChunks(sources, opt.SourceChunks)
+	artifactSubject := notebookArtifactTitleSubject(sources)
 
 	var payload any
 	switch artifactType {
 	case "data-table":
 		payload = map[string]any{"rows": buildNotebookGeneratedTableRows(sources)}
 	case "mindmap":
-		payload = buildNotebookGeneratedMindmap(notebookTitle, sources)
+		payload = buildNotebookGeneratedMindmap(artifactSubject, sources, opt)
 	case "flashcards":
-		payload = map[string]any{"cards": buildNotebookGeneratedFlashcards(sources, language)}
+		payload = map[string]any{"cards": buildNotebookGeneratedFlashcards(sources, language, opt)}
 	case "quiz":
-		payload = map[string]any{"questions": buildNotebookGeneratedQuizQuestions(sources, language)}
+		payload = map[string]any{"questions": buildNotebookGeneratedQuizQuestions(sources, language, opt)}
 	case "infographic":
-		payload = buildNotebookGeneratedInfographic(notebookTitle, sources, language, opt)
+		payload = buildNotebookGeneratedInfographic(artifactSubject, sources, language, opt)
 	case "report":
-		payload = buildNotebookGeneratedReport(reportGenerationFormatID(generationType), notebookTitle, sources, language)
+		payload = buildNotebookGeneratedReport(reportGenerationFormatID(generationType), artifactSubject, sources, language)
 	case "summary", "faq", "briefing":
-		payload = map[string]any{"sections": buildNotebookGeneratedTextSections(generationType, notebookTitle, sources, language)}
+		payload = map[string]any{"sections": buildNotebookGeneratedTextSections(generationType, artifactSubject, sources, language)}
 	}
 	content, err := json.Marshal(payload)
 	if err != nil {
 		return generatedNotebookArtifactDraft{}, err
 	}
 	return generatedNotebookArtifactDraft{
-		Type:        artifactType,
-		Title:       notebookGeneratedArtifactTitle(generationType, notebookTitle),
-		Subtitle:    fmt.Sprintf("基于 %d 个资料源生成", len(sources)),
-		Content:     content,
-		SourceCount: len(sources),
+		Type:          artifactType,
+		Title:         notebookGeneratedArtifactTitle(generationType, artifactSubject),
+		Subtitle:      fmt.Sprintf("基于 %d 个资料源生成", len(sources)),
+		Content:       content,
+		SourceCount:   len(sources),
+		SourceFileIDs: notebookGenerationSourceFileIDs(sources),
 	}, nil
+}
+
+func notebookGenerationSourceFileIDs(sources []notebookGenerationSource) []uint {
+	ids := make([]uint, 0, len(sources))
+	for _, source := range sources {
+		if source.File.ID > 0 {
+			ids = append(ids, source.File.ID)
+		}
+	}
+	return ids
+}
+
+func attachNotebookGenerationSourceChunks(sources []notebookGenerationSource, chunksByFileID map[uint][]models.FileChunk) {
+	if len(chunksByFileID) == 0 {
+		return
+	}
+	for i := range sources {
+		if chunks := chunksByFileID[sources[i].File.ID]; len(chunks) > 0 {
+			sources[i].Chunks = chunks
+		}
+	}
 }
 
 func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, imageService *services.ImageService, generationType string, notebookTitle string, files []models.File, selectedFileIDs []uint, language string, opts ...notebookArtifactGenerationOptions) (generatedNotebookArtifactDraft, error) {
@@ -190,11 +232,12 @@ func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, 
 	if aiService == nil {
 		return fallback, nil
 	}
-	sources := selectNotebookGenerationSources(files, selectedFileIDs, generationType)
 	var opt notebookArtifactGenerationOptions
 	if len(opts) > 0 {
 		opt = opts[0]
 	}
+	sources := selectNotebookGenerationSources(files, selectedFileIDs, generationType)
+	attachNotebookGenerationSourceChunks(sources, opt.SourceChunks)
 	messages := buildNotebookArtifactAIMessages(generationType, notebookTitle, sources, language, opt)
 	resp, err := aiService.ChatCompletion(ctx, notebookArtifactAIModel(generationType), messages, false, false, "", false, nil)
 	if err != nil || resp == nil || resp.Body == nil {
@@ -230,33 +273,67 @@ func buildAINotebookArtifactDraft(ctx context.Context, aiService chatAIService, 
 	if generationType == "table" && !notebookTableDraftLooksUseful(draft.Content) {
 		return fallback, nil
 	}
+	if artifactType, ok := notebookArtifactTypeForGeneration(generationType); ok {
+		switch artifactType {
+		case "summary", "faq", "briefing":
+			draft.Content = notebookEnsureTextSectionCitations(draft.Content, sources)
+		case "data-table":
+			draft.Content = notebookEnsureTableRowCitations(draft.Content, sources)
+		case "report":
+			draft.Content = notebookEnsureReportSectionCitations(draft.Content, sources)
+		case "flashcards", "quiz":
+			draft.Content = sanitizeNotebookArtifactContentWithOptions(artifactType, draft.Content, opt)
+		}
+	}
 	if generationType == "mindmap" && !notebookMindmapDraftLooksUseful(draft.Content) {
 		return generatedNotebookArtifactDraft{}, fmt.Errorf("思维导图分析结果不完整，请重新生成")
 	}
-	if generationType == "infographic" && imageService != nil {
+	if generationType == "infographic" {
 		var content notebookStudioInfographic
-		if err := json.Unmarshal(draft.Content, &content); err == nil && strings.TrimSpace(content.ImagePrompt) != "" {
-			size := "1024x1024"
-			switch content.Orientation {
-			case "landscape":
-				size = "1024x576"
-			case "portrait":
-				size = "576x1024"
-			case "square":
-				size = "1024x1024"
+		if err := json.Unmarshal(draft.Content, &content); err != nil {
+			return generatedNotebookArtifactDraft{}, fmt.Errorf("信息图内容格式无效，请重新生成")
+		}
+		content.HTML = strings.TrimSpace(content.HTML)
+		if !notebookInfographicHTMLLooksUseful(content.HTML) {
+			fallbackContent := draft.Content
+			if rebuilt, err := buildGeneratedNotebookArtifactDraft(generationType, notebookTitle, files, selectedFileIDs, language, opts...); err == nil {
+				fallbackContent = rebuilt.Content
 			}
-			imageURL, _, err := imageService.GenerateImage(ctx, content.ImagePrompt, size, "medium")
-			if err == nil && imageURL != "" {
-				if !strings.HasPrefix(imageURL, "http") && !strings.HasPrefix(imageURL, "/") {
-					imageURL = "/api/images/file/" + imageURL
-				}
-				content.ImageURL = imageURL
-				updated, _ := json.Marshal(content)
-				draft.Content = updated
-			}
+			draft.Content = fallbackContent
 		}
 	}
 	return draft, nil
+}
+
+func notebookInfographicHTMLLooksUseful(htmlContent string) bool {
+	htmlContent = strings.TrimSpace(htmlContent)
+	if htmlContent == "" {
+		return false
+	}
+	lower := strings.ToLower(htmlContent)
+	if strings.Contains(lower, "image_url") || strings.Contains(lower, "placeholder") {
+		return false
+	}
+	if strings.Count(lower, "<article") < 4 && strings.Count(lower, "module-card") < 4 {
+		return false
+	}
+	requiredAny := []string{"poster-shell", "value-map", "svg", "roadmap", "matrix", "module-card", "Decision Matrix", "Enterprise"}
+	matched := 0
+	for _, token := range requiredAny {
+		if strings.Contains(lower, token) {
+			matched++
+		}
+	}
+	if matched < 5 {
+		return false
+	}
+	badCompletenessSignals := []string{"continued", "下一页", "第二页", "part 1", "part one", "待续", "...", "… …"}
+	for _, token := range badCompletenessSignals {
+		if strings.Contains(lower, token) {
+			return false
+		}
+	}
+	return true
 }
 
 func buildNotebookArtifactAIMessages(generationType string, notebookTitle string, sources []notebookGenerationSource, language string, opts ...notebookArtifactGenerationOptions) []services.Message {
@@ -268,40 +345,72 @@ func buildNotebookArtifactAIMessages(generationType string, notebookTitle string
 		opt = opts[0]
 	}
 	if generationType == "mindmap" {
-		return buildNotebookMindmapAIMessages(notebookTitle, sources, language)
+		return buildNotebookMindmapAIMessages(notebookTitle, sources, language, opt)
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "Notebook: %s\n", fallbackText(notebookTitle, "未命名笔记本"))
 	fmt.Fprintf(&b, "Artifact type: %s\n", generationType)
 	fmt.Fprintf(&b, "Language: %s\n\n", language)
-	b.WriteString("Sources:\n")
+	if generationType == "infographic" {
+		b.WriteString("Sources with broad available text for synthesis:\n")
+	} else {
+		b.WriteString("Sources:\n")
+	}
 	for _, source := range sources {
-		fmt.Fprintf(&b, "[%d] %s\nSummary: %s\nExcerpt: %s\n\n", source.Index, source.File.Filename, fallbackText(source.Summary, "无摘要"), fallbackText(source.Excerpt, "无正文摘录"))
+		if generationType == "infographic" {
+			fmt.Fprintf(&b, "[%d] %s\nSummary: %s\nAvailableText:\n%s\n\n", source.Index, source.File.Filename, fallbackText(source.Summary, "无摘要"), fallbackText(source.Excerpt, "无正文摘录"))
+		} else {
+			fmt.Fprintf(&b, "[%d] %s\nSummary: %s\nExcerpt: %s\n\n", source.Index, source.File.Filename, fallbackText(source.Summary, "无摘要"), fallbackText(source.Excerpt, "无正文摘录"))
+		}
 	}
 	if generationType == "table" {
 		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For table content must be {\"rows\":[{\"module\":string,\"capability\":string,\"status\":string,\"implementation\":string,\"value\":string,\"source\":string}]}. You MUST read the uploaded source text and extract a functional/specification table: each row is one product feature, capability, module, workflow, scenario, or business item described in the documents. Use columns as: module=模块名称, capability=核心功能, status=当前状态/成熟度, implementation=差异化竞争优势, value=对标产品/参照对象/适用场景, source=bracket citations like [1]. Do NOT create a file list, parse/index status checklist, or one row per file. If one document describes multiple functions, output multiple rows from that same document. Prefer 6-12 high-signal rows when enough content exists. Keep all cells grounded in the source text.\n")
+		if strings.TrimSpace(opt.Prompt) != "" {
+			fmt.Fprintf(&b, "User table requirement: %s. Follow this requested table topic, grouping, and columns where possible while staying grounded in the sources.\n", opt.Prompt)
+		}
 	} else if generationType == "mindmap" {
 		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For mindmap content must be {\"nodes\":[{\"id\":string,\"label\":string,\"summary\":string,\"source\":string}],\"edges\":[{\"from\":string,\"to\":string,\"label\":string}]}. You MUST first read the whole provided source text for each file (it may be a long PDF extract), reconstruct the document outline, then draw a NotebookLM-style product/knowledge mind map, not a sentence list. Required structure: exactly one root node with id=root; 5-8 first-level branches that are clear sections/modules; each important branch has 2-5 second-level child nodes; add third-level nodes only when the source has concrete details. Good first-level branch examples for product documents: 产品定位, 已落地功能, 核心优势, 技术架构, 业务场景, 规划路线, 竞争壁垒, 风险与缺口. Node labels must be clean Chinese phrases of 2-18 characters when possible; never use broken OCR fragments, truncated words, ellipses, file names, raw sentences, parse/index status, or meaningless snippets. Summaries may contain one concise sentence. Use stable ids like root, branch-1, branch-1-1. Cite sources using bracket numbers such as [1]. If the source contains an existing feature table or product architecture, preserve that sectional structure.\n")
 	} else if generationType == "flashcards" {
-		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For flashcards content must be {\"cards\":[{\"front\":string,\"back\":string,\"source\":string}]}. Create compact study flashcards from the source material. Each card front is a clean self-test question about one concrete concept, number, capability, process, comparison, role, architecture point, pricing/detail, or named fact. Each back is a concise answer in 1 short sentence, preferably under 80 Chinese characters, grounded in the source but NOT copied as a long quote. Prefer 12-30 cards when enough source content exists. Avoid generic questions, duplicate cards, file names, parse status, unsupported facts, source citation labels, and heading numbers like 1, 1.3, 一、. Leave source empty; do not put [1] or 【1】 in any card field.\n")
+		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For flashcards content must be {\"cards\":[{\"front\":string,\"back\":string,\"source\":string}]}. Create compact study flashcards from the source material. Each card front is a clean self-test question about one concrete concept, number, capability, process, comparison, role, architecture point, pricing/detail, or named fact. Each back is a concise answer in 1 short sentence, preferably under 80 Chinese characters, grounded in the source but NOT copied as a long quote. Avoid generic questions, duplicate cards, file names, parse status, unsupported facts, source citation labels, and heading numbers like 1, 1.3, 一、. Leave source empty; do not put [1] or 【1】 in any card field.\n")
+		fmt.Fprintf(&b, "Card count preference: %s. Target about %d cards; do not exceed this target unless absolutely necessary.\n", fallbackText(opt.FlashcardCount, "standard"), notebookFlashcardTargetCount(opt.FlashcardCount))
+		if strings.TrimSpace(opt.Difficulty) != "" {
+			fmt.Fprintf(&b, "Difficulty: %s. easy means simpler wording and basic recall; medium means normal understanding; hard means comparisons, implications, and edge details.\n", opt.Difficulty)
+		}
+		if strings.TrimSpace(opt.Prompt) != "" {
+			fmt.Fprintf(&b, "User topic requirement: %s. Focus the flashcards on this specific topic and ignore unrelated source material where possible.\n", opt.Prompt)
+		}
 	} else if generationType == "quiz" {
-		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For quiz content must be {\"questions\":[{\"question\":string,\"options\":[{\"id\":\"A\",\"text\":string,\"reason\":string},{\"id\":\"B\",\"text\":string,\"reason\":string},{\"id\":\"C\",\"text\":string,\"reason\":string},{\"id\":\"D\",\"text\":string,\"reason\":string}],\"correct_option_id\":\"A|B|C|D\",\"hint\":string,\"explanation\":string}]}. Create exactly 10 multiple-choice questions from the source material. Questions should test concrete facts, mechanisms, comparisons, capabilities, numeric details, or implications in the documents. Each question has exactly 4 plausible options, exactly one correct answer, a short hint for before answering, and an explanation grounded in the source for after answering. Every option MUST include a short reason field: for the correct option, reason explains why it is correct; for each incorrect option, reason explains why it is wrong in one concise sentence. Avoid generic questions, file names, parse/index status, citation labels, and unsupported facts.\n")
+		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For quiz content must be {\"questions\":[{\"question\":string,\"options\":[{\"id\":\"A\",\"text\":string,\"reason\":string},{\"id\":\"B\",\"text\":string,\"reason\":string},{\"id\":\"C\",\"text\":string,\"reason\":string},{\"id\":\"D\",\"text\":string,\"reason\":string}],\"correct_option_id\":\"A|B|C|D\",\"hint\":string,\"explanation\":string}]}. Create multiple-choice questions from the source material. Questions should test concrete facts, mechanisms, comparisons, capabilities, numeric details, or implications in the documents. Each question has exactly 4 plausible options, exactly one correct answer, a short hint for before answering, and an explanation grounded in the source for after answering. Every option MUST include a short reason field: for the correct option, reason explains why it is correct; for each incorrect option, reason explains why it is wrong in one concise sentence. Avoid generic questions, file names, parse/index status, citation labels, and unsupported facts.\n")
+		fmt.Fprintf(&b, "Question count preference: %s. Target exactly %d questions unless the source material is insufficient.\n", fallbackText(opt.QuizCount, "standard"), notebookQuizTargetCount(opt.QuizCount))
+		if strings.TrimSpace(opt.Difficulty) != "" {
+			fmt.Fprintf(&b, "Difficulty: %s. easy means direct factual recall; medium means normal understanding; hard means comparisons, implications, subtle details, and tempting distractors.\n", opt.Difficulty)
+		}
+		if strings.TrimSpace(opt.Prompt) != "" {
+			fmt.Fprintf(&b, "User topic requirement: %s. Focus the quiz on this specific topic and ignore unrelated source material where possible.\n", opt.Prompt)
+		}
 	} else if generationType == "infographic" {
-		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For infographic content must be {\"orientation\":string,\"style\":string,\"detail_level\":string,\"prompt\":string,\"image_prompt\":string,\"color_scheme\":{\"primary\":string,\"secondary\":string,\"accent\":string,\"background\":string,\"text\":string}}. You are the prompt engineer for an image generation model.\n")
+		b.WriteString("Return strict JSON only with keys: title, subtitle, content. For infographic content must be {\"orientation\":string,\"style\":string,\"detail_level\":string,\"prompt\":string,\"html\":string,\"color_scheme\":{\"primary\":string,\"secondary\":string,\"accent\":string,\"background\":string,\"text\":string}}. You are designing a self-contained HTML/SVG infographic, not an image prompt.\n")
 		b.WriteString(fmt.Sprintf("Orientation: %s\n", fallbackText(opt.Orientation, "landscape")))
 		b.WriteString(fmt.Sprintf("Style: %s\n", fallbackText(opt.Style, "auto")))
 		b.WriteString(fmt.Sprintf("Detail level: %s\n", fallbackText(opt.DetailLevel, "standard")))
 		if strings.TrimSpace(opt.Prompt) != "" {
 			b.WriteString(fmt.Sprintf("User prompt: %s\n", opt.Prompt))
 		}
-		b.WriteString("Requirements:\n")
-		b.WriteString("- Analyze the uploaded sources and design a compelling infographic concept.\n")
-		b.WriteString("- The image_prompt field must be a single detailed English text-to-image prompt (300-900 characters) optimized for DALL-E / GPT-image / Seedream. Describe layout, visual hierarchy, color palette, typography style, key statistics or comparisons, icons/charts, and overall mood.\n")
-		b.WriteString("- The prompt field should be a short human-readable description in the requested language (used as caption).\n")
-		b.WriteString("- Choose color_scheme to match the visual style: cute=rounded pastels/emojis; clay=soft 3D shadows/pastels; sketch=hand-drawn lines/paper texture; anime=bold gradients/speed lines; professional=clean corporate palette with navy, slate, white; auto=harmonious modern palette.\n")
-		b.WriteString("- Ground all facts in the provided sources. Do not invent unsupported numbers.\n")
-		b.WriteString("- Avoid prompts that request text, labels, or small legible characters unless essential, because image models often render text poorly. Instead describe visual hierarchy, relative sizes, icons, charts, and color blocks that communicate the idea.\n")
-		b.WriteString("- Keep the output strictly JSON with no markdown fences.\n")
+		b.WriteString("Reference-grade synthesis workflow before HTML:\n")
+		b.WriteString("1) First summarize the whole document into a one-page executive information architecture, like mature NotebookLM/Gamma-style infographics: headline positioning, 4-6 strategic modules, concrete proof points, comparison matrix, and roadmap/process.\n")
+		b.WriteString("2) Each visual card must follow Claim → Evidence → Value: a short claim title, 1-2 concrete facts/keywords/numbers from sources, and the user-facing value/implication.\n")
+		b.WriteString("3) The infographic is not a page excerpt. It must be a complete compressed overview of the whole source. If the source is long, group and abstract; never show only the first half or imply a second page.\n")
+		b.WriteString("4) Prefer decision-maker language over raw section titles: translate technical facts into why they matter while staying grounded.\n")
+		b.WriteString("HTML requirements:\n")
+		b.WriteString("- The html field must contain one complete embeddable HTML snippet: a root <div> or <section>, inline <style>, no external scripts, no external fonts, no remote images. SVG is allowed inline.\n")
+		b.WriteString("- Layout must resemble the provided mature reference: full-width headline/subtitle, left column for product capabilities, center column for platform hub + comparison matrix + billing/commercialization, right tall card for enterprise customization + technical foundation + roadmap, plus metric/proof row.\n")
+		b.WriteString("- Use icons/SVG mini-diagrams/tables to compress meaning. Do not rely on long paragraphs. Avoid raw ellipses; if text is too long, rewrite shorter and complete.\n")
+		b.WriteString("- Modules should be specific, not generic. Bad: '进阶功能'. Good: '多模型并列对比', '白标私有化部署', '三级积分计费', when supported by the sources.\n")
+		b.WriteString("- Cover the entire document at a high level. The final image should answer: what this is, main capabilities/themes, evidence/proof, why it matters, process/path, and comparison/priorities.\n")
+		b.WriteString("- Fill the canvas deliberately without clipping. Do NOT output only 1-2 cards, do NOT leave most of the lower/right area empty, and do NOT create a two-page continuation unless explicitly requested.\n")
+		b.WriteString("- Use modern rounded cards, consistent shadows, CSS/SVG icons, clear visual hierarchy, and source-grounded module titles.\n")
+		b.WriteString("- Match orientation/style/detail level and the user's prompt. Ground all facts in sources; do not invent numbers.\n")
+		b.WriteString("- Keep html under 30000 characters and output strictly JSON with no markdown fences.\n")
 	} else if strings.HasPrefix(generationType, "report") {
 		formatID := reportGenerationFormatID(generationType)
 		fmt.Fprintf(&b, "Report format id: %s\n", formatID)
@@ -315,12 +424,20 @@ func buildNotebookArtifactAIMessages(generationType string, notebookTitle string
 	}
 }
 
-func buildNotebookMindmapAIMessages(notebookTitle string, sources []notebookGenerationSource, language string) []services.Message {
+func buildNotebookMindmapAIMessages(notebookTitle string, sources []notebookGenerationSource, language string, opts ...notebookArtifactGenerationOptions) []services.Message {
+	var opt notebookArtifactGenerationOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "Notebook: %s\n", fallbackText(notebookTitle, "未命名笔记本"))
 	fmt.Fprintf(&b, "Artifact type: mindmap\nLanguage: %s\n\n", language)
 	b.WriteString("Task:\n")
-	b.WriteString("Read the COMPLETE provided PDF text below, infer the real document outline, and build a NotebookLM-style mind map. The output must look like a high-quality product/knowledge map, not an outline fragment, not numbered raw headings, and not a few quoted sentences.\n\n")
+	b.WriteString("Read the COMPLETE provided PDF text below, infer the real document outline, and build a NotebookLM-style mind map. The output must look like a high-quality product/knowledge map, not an outline fragment, not numbered raw headings, and not a few quoted sentences.\n")
+	if strings.TrimSpace(opt.Prompt) != "" {
+		fmt.Fprintf(&b, "User mind map requirement: %s. Focus the root, branches, and hierarchy around this requested topic while staying grounded in the sources.\n", opt.Prompt)
+	}
+	b.WriteString("\n")
 	b.WriteString("Quality target:\n")
 	b.WriteString("- Root label should be the document/product theme, not the notebook test name when the source has a better title.\n")
 	b.WriteString("- Create 5-7 first-level sections covering the whole document. For an AI/product whitepaper, prefer sections like 产品简介与定位, 核心优势, 技术架构特色, Workspace进化路径, 规划中稀缺能力, 已落地功能, 商业/部署能力 when supported by the source.\n")
@@ -441,16 +558,15 @@ func parseAINotebookArtifactResponse(body []byte, fallback generatedNotebookArti
 	if len(ai.Content) == 0 || !json.Valid(ai.Content) {
 		return generatedNotebookArtifactDraft{}, fmt.Errorf("AI artifact content is not valid JSON")
 	}
-	if fallback.Type != "flashcards" {
-		fallback.Title = fallbackText(ai.Title, fallback.Title)
-	}
+	cleanContent := sanitizeNotebookArtifactContent(fallback.Type, ai.Content)
+	fallback.Title = notebookResolveArtifactTitle(fallback.Type, ai.Title, fallback.Title, cleanContent)
 	fallback.Subtitle = fallbackText(ai.Subtitle, fallback.Subtitle)
-	fallback.Content = sanitizeNotebookArtifactContent(fallback.Type, ai.Content)
+	fallback.Content = cleanContent
 	return fallback, nil
 }
 
 func notebookArtifactAIModel(generationType string) string {
-	if generationType == "table" || generationType == "mindmap" || strings.HasPrefix(generationType, "report") {
+	if generationType == "table" || generationType == "mindmap" || generationType == "infographic" || strings.HasPrefix(generationType, "report") {
 		return "gpt-5.5"
 	}
 	return "gpt-5.4-mini"
@@ -599,18 +715,31 @@ func reportGenerationFormatID(generationType string) string {
 }
 
 func selectNotebookGenerationSources(files []models.File, selectedFileIDs []uint, generationType string) []notebookGenerationSource {
-	selected := map[uint]bool{}
+	fileByID := map[uint]models.File{}
+	for _, file := range files {
+		fileByID[file.ID] = file
+	}
+	selected := make([]uint, 0, len(selectedFileIDs))
+	seen := map[uint]bool{}
 	for _, id := range selectedFileIDs {
-		if id > 0 {
-			selected[id] = true
+		if id > 0 && !seen[id] {
+			selected = append(selected, id)
+			seen[id] = true
 		}
 	}
 	useSelection := len(selected) > 0
-	sources := make([]notebookGenerationSource, 0, len(files))
-	for _, file := range files {
-		if useSelection && !selected[file.ID] {
-			continue
+	orderedFiles := make([]models.File, 0, len(files))
+	if useSelection {
+		for _, id := range selected {
+			if file, ok := fileByID[id]; ok {
+				orderedFiles = append(orderedFiles, file)
+			}
 		}
+	} else {
+		orderedFiles = files
+	}
+	sources := make([]notebookGenerationSource, 0, len(orderedFiles))
+	for _, file := range orderedFiles {
 		if !isNotebookGenerationFileReady(file) {
 			continue
 		}
@@ -638,7 +767,7 @@ func selectNotebookGenerationSources(files []models.File, selectedFileIDs []uint
 
 func notebookGenerationExcerptLimit(generationType string) int {
 	switch generationType {
-	case "mindmap":
+	case "mindmap", "infographic":
 		return 60000
 	case "table", "flashcards", "quiz":
 		return 16000
@@ -863,10 +992,10 @@ func buildNotebookGeneratedReport(formatID string, notebookTitle string, sources
 		fmt.Sprintf("执行摘要：%s 基于上传资料整理为一份执行简报，概述核心定位、已落地能力、技术架构、战略路线和业务价值。", fallbackText(notebookTitle, "该笔记本")),
 	)
 	sections := []notebookStudioReportSection{
-		{Number: "1", Heading: ifEnglish(isEN, "Product Core Positioning and Key Features", "产品核心定位与关键功能"), Body: reportSourceBody(sources, 0, isEN)},
-		{Number: "1.1", Heading: ifEnglish(isEN, "Mature Feature Set", "成熟功能集"), Body: reportSourceBody(sources, 1, isEN)},
-		{Number: "2", Heading: ifEnglish(isEN, "Technical Architecture and Differentiation", "技术架构与差异化优势"), Body: reportSourceBody(sources, 2, isEN)},
-		{Number: "3", Heading: ifEnglish(isEN, "Strategic Roadmap and Market Positioning", "战略路线与市场定位"), Body: reportSourceBody(sources, 3, isEN)},
+		{Number: "1", Heading: ifEnglish(isEN, "Product Core Positioning and Key Features", "产品核心定位与关键功能"), Body: reportSourceBody(sources, 0, isEN), Citations: notebookCitationForSourceAt(sources, 0)},
+		{Number: "1.1", Heading: ifEnglish(isEN, "Mature Feature Set", "成熟功能集"), Body: reportSourceBody(sources, 1, isEN), Citations: notebookCitationForSourceAt(sources, 1)},
+		{Number: "2", Heading: ifEnglish(isEN, "Technical Architecture and Differentiation", "技术架构与差异化优势"), Body: reportSourceBody(sources, 2, isEN), Citations: notebookCitationForSourceAt(sources, 2)},
+		{Number: "3", Heading: ifEnglish(isEN, "Strategic Roadmap and Market Positioning", "战略路线与市场定位"), Body: reportSourceBody(sources, 3, isEN), Citations: notebookCitationForSourceAt(sources, 3)},
 	}
 	rows := make([][]string, 0, len(sources)+3)
 	for _, source := range sources {
@@ -910,7 +1039,11 @@ func buildNotebookGeneratedTableRows(sources []notebookGenerationSource) []noteb
 	return dedupeNotebookTableRows(rows)
 }
 
-func buildNotebookGeneratedFlashcards(sources []notebookGenerationSource, language string) []notebookStudioFlashcard {
+func buildNotebookGeneratedFlashcards(sources []notebookGenerationSource, language string, opts ...notebookArtifactGenerationOptions) []notebookStudioFlashcard {
+	var opt notebookArtifactGenerationOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
 	cards := make([]notebookStudioFlashcard, 0, len(sources)*6)
 	for _, source := range sources {
 		blocks := splitNotebookFlashcardBlocks(source.Excerpt)
@@ -937,11 +1070,51 @@ func buildNotebookGeneratedFlashcards(sources []notebookGenerationSource, langua
 			}
 		}
 	}
-	return dedupeNotebookFlashcards(cards)
+	return limitNotebookFlashcards(dedupeNotebookFlashcards(cards), notebookFlashcardTargetCount(opt.FlashcardCount))
 }
 
-func buildNotebookGeneratedQuizQuestions(sources []notebookGenerationSource, language string) []notebookStudioQuizQuestion {
-	cards := buildNotebookGeneratedFlashcards(sources, language)
+func notebookFlashcardTargetCount(value string) int {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "less", "few", "fewer", "short":
+		return 6
+	case "more", "many", "detailed":
+		return 24
+	default:
+		return 14
+	}
+}
+
+func limitNotebookFlashcards(cards []notebookStudioFlashcard, limit int) []notebookStudioFlashcard {
+	if limit <= 0 || len(cards) <= limit {
+		return cards
+	}
+	return cards[:limit]
+}
+func notebookQuizTargetCount(pref string) int {
+	switch strings.ToLower(strings.TrimSpace(pref)) {
+	case "less", "fewer", "short":
+		return 6
+	case "more", "many", "detailed":
+		return 18
+	default:
+		return 10
+	}
+}
+
+func limitNotebookQuizQuestions(questions []notebookStudioQuizQuestion, limit int) []notebookStudioQuizQuestion {
+	if limit <= 0 || len(questions) <= limit {
+		return questions
+	}
+	return questions[:limit]
+}
+
+func buildNotebookGeneratedQuizQuestions(sources []notebookGenerationSource, language string, opts ...notebookArtifactGenerationOptions) []notebookStudioQuizQuestion {
+	var opt notebookArtifactGenerationOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	target := notebookQuizTargetCount(opt.QuizCount)
+	cards := buildNotebookGeneratedFlashcards(sources, language, notebookArtifactGenerationOptions{FlashcardCount: opt.QuizCount, Difficulty: opt.Difficulty, Prompt: opt.Prompt})
 	if len(cards) == 0 {
 		for _, source := range sources {
 			fact := summarizeNotebookFlashcardAnswer(fallbackText(source.Summary, source.Excerpt))
@@ -950,7 +1123,7 @@ func buildNotebookGeneratedQuizQuestions(sources []notebookGenerationSource, lan
 			}
 		}
 	}
-	questions := make([]notebookStudioQuizQuestion, 0, 10)
+	questions := make([]notebookStudioQuizQuestion, 0, target)
 	for i, card := range cards {
 		fact := summarizeNotebookFlashcardAnswer(card.Back)
 		topic := cleanNotebookFlashcardText(card.Front)
@@ -971,11 +1144,11 @@ func buildNotebookGeneratedQuizQuestions(sources []notebookGenerationSource, lan
 			Explanation:     fmt.Sprintf("正确。资料中的关键表述是：%s", fact),
 			WrongReason:     fmt.Sprintf("这道题需要回到资料原文中的具体事实；正确选项体现的是：%s", fact),
 		})
-		if len(questions) >= 10 {
+		if len(questions) >= target {
 			break
 		}
 	}
-	for len(questions) < 10 {
+	for len(questions) < target {
 		index := len(questions)
 		fact := "资料强调需要结合原文事实进行判断"
 		if len(cards) > 0 {
@@ -991,7 +1164,7 @@ func buildNotebookGeneratedQuizQuestions(sources []notebookGenerationSource, lan
 			WrongReason:     fmt.Sprintf("错误选项通常混入了未在资料中出现或过度泛化的说法；正确依据是：%s", fact),
 		})
 	}
-	return sanitizeNotebookQuizQuestions(questions)
+	return limitNotebookQuizQuestions(sanitizeNotebookQuizQuestions(questions), target)
 }
 
 func buildNotebookQuizOptions(correct string, seed int, correctID string) []notebookStudioQuizOption {
@@ -1021,7 +1194,7 @@ func buildNotebookQuizOptions(correct string, seed int, correctID string) []note
 }
 
 func sanitizeNotebookQuizQuestions(questions []notebookStudioQuizQuestion) []notebookStudioQuizQuestion {
-	cleaned := make([]notebookStudioQuizQuestion, 0, 10)
+	cleaned := make([]notebookStudioQuizQuestion, 0, len(questions))
 	for _, question := range questions {
 		question.Question = cleanNotebookFlashcardText(question.Question)
 		question.Hint = truncateNotebookRunes(cleanNotebookFlashcardText(question.Hint), 120, "…")
@@ -1047,112 +1220,56 @@ func sanitizeNotebookQuizQuestions(questions []notebookStudioQuizQuestion) []not
 		}
 		question.Options = []notebookStudioQuizOption{optionByID["A"], optionByID["B"], optionByID["C"], optionByID["D"]}
 		cleaned = append(cleaned, question)
-		if len(cleaned) >= 10 {
-			break
-		}
 	}
 	return cleaned
+}
+
+type notebookInfographicModule struct {
+	Title string
+	Body  string
 }
 
 func buildNotebookGeneratedInfographic(notebookTitle string, sources []notebookGenerationSource, language string, opts notebookArtifactGenerationOptions) map[string]any {
 	style := fallbackText(strings.TrimSpace(opts.Style), "auto")
 	detailLevel := fallbackText(strings.TrimSpace(opts.DetailLevel), "standard")
+	orientation := fallbackText(strings.TrimSpace(opts.Orientation), "landscape")
 	prompt := strings.TrimSpace(opts.Prompt)
 
-	var width, height int
-	switch opts.Orientation {
-	case "portrait":
-		width, height = 800, 1200
-	case "square":
-		width, height = 1000, 1000
-	default:
-		width, height = 1200, 800
-	}
-
-	primary := "#4f46e5"
-	secondary := "#10b981"
+	primary := "#2563eb"
+	secondary := "#14b8a6"
 	accent := "#f59e0b"
-	background := "#ffffff"
-	textColor := "#1f2937"
+	background := "#f3f7fb"
+	textColor := "#172033"
 	switch style {
 	case "cute":
-		primary = "#f472b6"
-		secondary = "#a78bfa"
-		accent = "#fcd34d"
+		primary, secondary, accent, background = "#ec4899", "#8b5cf6", "#f59e0b", "#fff7ed"
 	case "clay":
-		primary = "#818cf8"
-		secondary = "#34d399"
-		accent = "#fbbf24"
+		primary, secondary, accent, background = "#818cf8", "#34d399", "#f59e0b", "#f8fafc"
 	case "sketch":
-		primary = "#374151"
-		secondary = "#6b7280"
-		accent = "#ef4444"
+		primary, secondary, accent, background = "#334155", "#64748b", "#d97706", "#fffbeb"
 	case "anime":
-		primary = "#6366f1"
-		secondary = "#ec4899"
-		accent = "#22d3ee"
+		primary, secondary, accent, background = "#6366f1", "#ec4899", "#22d3ee", "#f8fafc"
 	case "professional":
-		primary = "#1e3a8a"
-		secondary = "#64748b"
-		accent = "#d97706"
+		primary, secondary, accent, background = "#1d4ed8", "#0f766e", "#d97706", "#f5f8fc"
 	}
 
-	title := notebookTitle
-	if title == "" {
-		title = "未命名笔记本"
-	}
-	var points []string
-	for _, source := range sources {
-		if source.Summary != "" {
-			points = append(points, source.Summary)
-		} else if source.Excerpt != "" {
-			points = append(points, truncateNotebookRunes(source.Excerpt, 120, "…"))
-		}
-		if len(points) >= 6 {
-			break
+	title := inferNotebookInfographicTitle(notebookTitle, sources, prompt)
+	modules := extractNotebookInfographicModules(sources, detailLevel)
+	if len(modules) == 0 {
+		modules = []notebookInfographicModule{
+			{Title: "核心主题", Body: "基于上传资料提炼主题、结构与关键判断。"},
+			{Title: "能力模块", Body: "将分散内容整理为可快速浏览的功能模块。"},
+			{Title: "关键证据", Body: "优先保留资料中的事实、术语、阶段和约束。"},
+			{Title: "下一步", Body: "辅助复盘、汇报和后续追问。"},
 		}
 	}
-	if len(points) == 0 {
-		points = []string{"基于上传资料生成的视觉摘要"}
-	}
-
-	imagePrompt := fmt.Sprintf("A polished flat-design infographic, %dx%d pixels, with a clean white background, modern corporate typography, and a structured layout. Title: %s. Visual sections include numbered cards in a%s grid showing key insights: ", width, height, title, opts.Orientation)
-	if opts.Orientation == "portrait" {
-		imagePrompt = fmt.Sprintf("A polished flat-design vertical infographic, %dx%d pixels, clean white background, modern corporate typography, single-column structured layout. Title: %s. Visual sections include numbered stacked cards showing key insights: ", width, height, title)
-	} else if opts.Orientation == "square" {
-		imagePrompt = fmt.Sprintf("A polished flat-design square infographic, %dx%d pixels, clean white background, modern corporate typography, balanced two-column layout. Title: %s. Visual sections include numbered tiles showing key insights: ", width, height, title)
-	}
-	for i, p := range points {
-		if i > 0 {
-			imagePrompt += "; "
-		}
-		imagePrompt += fmt.Sprintf("%d) %s", i+1, truncateNotebookRunes(p, 120, "…"))
-	}
-	switch style {
-	case "cute":
-		imagePrompt += ". Style: cute kawaii illustration, rounded shapes, soft pastel pink/purple/yellow palette, friendly icons, no small text."
-	case "clay":
-		imagePrompt += ". Style: 3D clay render, soft shadows, rounded forms, pastel colors, tactile material feel, no small text."
-	case "sketch":
-		imagePrompt += ". Style: hand-drawn sketch on paper texture, ink outlines, monochrome with warm accent, doodle icons, no small text."
-	case "anime":
-		imagePrompt += ". Style: anime key-visual, bold saturated gradients, speed lines, futuristic UI frames, no small text."
-	case "professional":
-		imagePrompt += ". Style: minimalist corporate infographic, navy and slate palette, crisp data visualizations, no small text."
-	default:
-		imagePrompt += ". Style: modern flat infographic, harmonious indigo/emerald/amber accents, simple iconography, no small text."
-	}
-	if prompt != "" {
-		imagePrompt += " Additional direction: " + prompt + "."
-	}
-
+	htmlContent := buildNotebookInfographicHTML(title, modules, sources, orientation, style, primary, secondary, accent, background, textColor, prompt)
 	return map[string]any{
-		"orientation":  opts.Orientation,
+		"orientation":  orientation,
 		"style":        style,
 		"detail_level": detailLevel,
 		"prompt":       prompt,
-		"image_prompt": imagePrompt,
-		"image_url":    "",
+		"html":         htmlContent,
 		"color_scheme": map[string]string{
 			"primary":    primary,
 			"secondary":  secondary,
@@ -1161,6 +1278,195 @@ func buildNotebookGeneratedInfographic(notebookTitle string, sources []notebookG
 			"text":       textColor,
 		},
 	}
+}
+
+func inferNotebookInfographicTitle(notebookTitle string, sources []notebookGenerationSource, prompt string) string {
+	if title := cleanNotebookArtifactTitleSubject(prompt); title != "" {
+		return truncateNotebookRunes(title, 28, "")
+	}
+	for _, source := range sources {
+		for _, candidate := range []string{source.File.Filename, source.Summary, source.Excerpt} {
+			candidate = cleanNotebookArtifactTitleSubject(candidate)
+			if candidate != "" {
+				return truncateNotebookRunes(candidate, 28, "")
+			}
+		}
+	}
+	return fallbackText(strings.TrimSpace(notebookTitle), "资料信息图")
+}
+
+func extractNotebookInfographicModules(sources []notebookGenerationSource, detailLevel string) []notebookInfographicModule {
+	limit := 6
+	if detailLevel == "short" {
+		limit = 4
+	} else if detailLevel == "detailed" {
+		limit = 6
+	}
+	fullTextParts := make([]string, 0, len(sources)*2)
+	for _, source := range sources {
+		fullTextParts = append(fullTextParts, fallbackText(source.Summary, ""), fallbackText(source.Excerpt, ""))
+	}
+	fullText := strings.Join(fullTextParts, "\n")
+	clusters := []struct {
+		title    string
+		keywords []string
+	}{
+		{title: "一句话定位", keywords: []string{"定位", "简介", "目标", "愿景", "是什么", "核心", "概述", "背景"}},
+		{title: "核心能力", keywords: []string{"功能", "能力", "模块", "支持", "生成", "上传", "编辑", "导出", "分析"}},
+		{title: "证据支撑", keywords: []string{"架构", "模型", "API", "数据库", "向量", "检索", "RAG", "工作流", "插件", "系统", "数据", "参数", "指标"}},
+		{title: "适用场景", keywords: []string{"场景", "用户", "应用", "适用", "业务", "案例", "流程", "角色"}},
+		{title: "差异优势", keywords: []string{"优势", "差异", "对比", "竞争", "效率", "成本", "质量", "壁垒", "稀缺"}},
+		{title: "路径规划", keywords: []string{"规划", "路线", "下一步", "未来", "阶段", "迭代", "风险", "限制", "演进"}},
+	}
+	sentences := splitNotebookSentences(fullText)
+	modules := make([]notebookInfographicModule, 0, limit)
+	used := map[int]bool{}
+	for _, cluster := range clusters {
+		if len(modules) >= limit {
+			break
+		}
+		selected := make([]string, 0, 3)
+		for i, sentence := range sentences {
+			if used[i] || !notebookInfographicSentenceUseful(sentence) || !containsAnyNotebookText(sentence, cluster.keywords) {
+				continue
+			}
+			selected = append(selected, sentence)
+			used[i] = true
+			if len(selected) >= 3 {
+				break
+			}
+		}
+		if len(selected) == 0 {
+			continue
+		}
+		body := summarizeNotebookInfographicSentences(selected)
+		if body != "" {
+			modules = append(modules, notebookInfographicModule{Title: cluster.title, Body: body})
+		}
+	}
+	for _, source := range sources {
+		if len(modules) >= limit {
+			break
+		}
+		for _, block := range splitNotebookFeatureBlocks(fallbackText(source.Excerpt, source.Summary)) {
+			title := truncateNotebookRunes(cleanNotebookFlashcardText(block.title), 14, "")
+			body := summarizeNotebookInfographicSentences(splitNotebookSentences(block.body))
+			if title == "" || body == "" || notebookInfographicModuleExists(modules, title) {
+				continue
+			}
+			modules = append(modules, notebookInfographicModule{Title: title, Body: body})
+			if len(modules) >= limit {
+				break
+			}
+		}
+	}
+	return modules
+}
+
+func notebookInfographicSentenceUseful(sentence string) bool {
+	sentence = strings.TrimSpace(sentence)
+	runes := len([]rune(sentence))
+	if runes < 8 || runes > 180 {
+		return false
+	}
+	bad := []string{"parse_status", "embedding_status", "解析状态", "索引状态", "暂无摘要", "```", "http://", "https://"}
+	return !containsAnyNotebookText(sentence, bad)
+}
+
+func summarizeNotebookInfographicSentences(sentences []string) string {
+	parts := make([]string, 0, 2)
+	seen := map[string]bool{}
+	for _, sentence := range sentences {
+		sentence = cleanNotebookFlashcardText(sentence)
+		if !notebookInfographicSentenceUseful(sentence) {
+			continue
+		}
+		sentence = truncateNotebookRunes(sentence, 34, "")
+		key := strings.ToLower(sentence)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		parts = append(parts, sentence)
+		if len(parts) >= 2 {
+			break
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return truncateNotebookRunes(strings.Join(parts, "；"), 72, "")
+}
+
+func notebookInfographicModuleExists(modules []notebookInfographicModule, title string) bool {
+	key := strings.ToLower(strings.TrimSpace(title))
+	for _, module := range modules {
+		if strings.ToLower(strings.TrimSpace(module.Title)) == key {
+			return true
+		}
+	}
+	return false
+}
+
+func buildNotebookInfographicHTML(title string, modules []notebookInfographicModule, sources []notebookGenerationSource, orientation string, style string, primary string, secondary string, accent string, background string, textColor string, prompt string) string {
+	canvasClass := "landscape"
+	if orientation == "portrait" || orientation == "square" {
+		canvasClass = orientation
+	}
+	for len(modules) < 6 {
+		fallbacks := []notebookInfographicModule{
+			{Title: "一句话定位", Body: "把资料压缩成面向决策者的一页完整价值地图"},
+			{Title: "核心能力", Body: "提炼功能模块、关键流程与可交付能力"},
+			{Title: "差异优势", Body: "保留对比、指标和能证明价值的事实"},
+		}
+		modules = append(modules, fallbacks[len(modules)%len(fallbacks)])
+	}
+	if len(modules) > 6 {
+		modules = modules[:6]
+	}
+	subtitle := strings.TrimSpace(prompt)
+	if subtitle == "" {
+		subtitle = "完整覆盖定位、能力、差异、商业化、技术底座与演进路径"
+	}
+	title = truncateNotebookRunes(title, 26, "")
+	subtitle = truncateNotebookRunes(cleanNotebookFlashcardText(subtitle), 56, "")
+	cleanTitle := func(v string, limit int) string {
+		return html.EscapeString(truncateNotebookRunes(cleanNotebookFlashcardText(v), limit, ""))
+	}
+	cleanBody := func(v string, limit int) string {
+		return html.EscapeString(truncateNotebookRunes(cleanNotebookFlashcardText(v), limit, ""))
+	}
+	m := func(i int) notebookInfographicModule { return modules[i%len(modules)] }
+
+	return fmt.Sprintf(`<section class="nb-infographic value-map poster-shell %s %s">
+<style>
+.nb-infographic{box-sizing:border-box;width:min(100%%,1280px);aspect-ratio:16/9;margin:0 auto;padding:30px 34px;border-radius:34px;background:linear-gradient(135deg,#f7fbff 0%%,%s 54%%,#eef8f5 100%%);color:%s;font-family:Inter,"PingFang SC","Microsoft YaHei",Arial,sans-serif;box-shadow:0 28px 90px rgba(15,23,42,.16);overflow:hidden;position:relative}.nb-infographic *{box-sizing:border-box}.nb-infographic:before{content:"";position:absolute;right:-120px;top:-110px;width:320px;height:320px;border-radius:80px;background:linear-gradient(135deg,%s20,%s24);transform:rotate(18deg)}.nb-infographic:after{content:"AI";position:absolute;right:52px;top:42px;font-size:54px;font-weight:1000;color:%s14;letter-spacing:-.08em}.value-header{position:relative;z-index:1;display:grid;grid-template-columns:1fr auto;gap:18px;align-items:start;margin-bottom:18px}.value-header h1{margin:0;font-size:36px;line-height:1.08;letter-spacing:-.055em;color:#0f172a}.value-header p{margin:8px 0 0;max-width:780px;font-size:15px;line-height:1.45;color:#475569}.proof-row{display:flex;gap:8px;align-items:center}.proof-pill{border-radius:999px;background:white;border:1px solid rgba(148,163,184,.35);padding:8px 11px;box-shadow:0 10px 24px rgba(15,23,42,.06);font-size:11px;color:#475569}.proof-pill b{display:block;font-size:18px;line-height:1;color:%s}.value-grid{position:relative;z-index:1;display:grid;grid-template-columns:31%% 31%% 34%%;gap:16px;height:calc(100%% - 94px)}.stack{display:grid;gap:13px;min-height:0}.card{border-radius:24px;background:rgba(255,255,255,.92);border:1px solid rgba(148,163,184,.25);box-shadow:0 16px 36px rgba(15,23,42,.08);padding:16px;overflow:hidden}.card h2{margin:0 0 8px;font-size:17px;line-height:1.18;letter-spacing:-.03em;color:#111827}.card p{margin:0;color:#64748b;font-size:12px;line-height:1.42}.eyebrow{display:inline-flex;align-items:center;gap:6px;margin-bottom:9px;border-radius:999px;background:%s14;color:%s;padding:5px 9px;font-size:10px;font-weight:900;letter-spacing:.06em;text-transform:uppercase}.module-card{display:grid;grid-template-columns:36px 1fr;gap:10px;align-items:start}.iconbox{width:36px;height:36px;border-radius:14px;background:linear-gradient(135deg,%s,%s);display:grid;place-items:center;color:white;font-weight:1000}.logo-wall{display:flex;gap:7px;margin:12px 0 10px}.logo-wall span{width:46px;height:34px;border-radius:13px;background:#f8fafc;border:1px solid #dbe4ef;display:grid;place-items:center;font-size:10px;font-weight:900;color:#334155}.mock-columns{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.mock-columns i{display:block;height:48px;border-radius:13px;background:linear-gradient(180deg,#eff6ff,#fff);border:1px solid #dbeafe}.workbench-icons{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}.workbench-icons div{border-radius:16px;background:#f8fafc;border:1px solid #e2e8f0;padding:10px 7px;text-align:center;font-size:11px;font-weight:800;color:#334155}.hub-card{position:relative;min-height:170px;display:grid;place-items:center;background:radial-gradient(circle at 50%% 45%%,%s16 0 34%%,transparent 35%%),rgba(255,255,255,.9)}.hub{width:96px;height:96px;border-radius:30px;background:linear-gradient(135deg,%s,%s);box-shadow:0 24px 50px rgba(37,99,235,.25);display:grid;place-items:center;color:white;font-size:42px;font-weight:1000;letter-spacing:-.08em}.hub-card .orbit{position:absolute;inset:20px;border-radius:24px;border:1px dashed #cbd5e1}.compare-table{width:100%%;border-collapse:separate;border-spacing:0 6px;font-size:11px}.compare-table th{text-align:left;color:#64748b;font-size:10px}.compare-table td{background:#f8fafc;padding:7px;border-top:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;color:#334155}.compare-table td:first-child{border-left:1px solid #e2e8f0;border-radius:10px 0 0 10px;font-weight:800}.compare-table td:last-child{border-right:1px solid #e2e8f0;border-radius:0 10px 10px 0}.good{color:#059669;font-weight:900}.bad{color:#dc2626;font-weight:900}.billing-flow{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}.tier{border-radius:16px;background:linear-gradient(180deg,#fffbeb,#fff);border:1px solid #fde68a;padding:9px;text-align:center}.tier b{display:block;color:#92400e;font-size:12px}.tier span{font-size:10px;color:#a16207}.enterprise{display:grid;grid-template-rows:auto auto 1fr;gap:12px;background:linear-gradient(180deg,rgba(255,255,255,.95),rgba(248,250,252,.95))}.mini-panel{border-radius:18px;background:white;border:1px solid #e2e8f0;padding:12px}.brand-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px}.brand-grid span{border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0;padding:8px;font-size:10px;font-weight:800;color:#475569}.tech-row{display:grid;grid-template-columns:52px 1fr;gap:10px;align-items:center}.gopher{width:52px;height:52px;border-radius:18px;background:linear-gradient(135deg,#dbeafe,#ccfbf1);display:grid;place-items:center;font-size:25px}.tech-points{display:grid;grid-template-columns:1fr 1fr;gap:7px}.tech-points span{border-radius:12px;background:#eff6ff;padding:8px;font-size:10px;font-weight:850;color:#1d4ed8}.roadmap{position:relative;margin-top:8px;height:86px}.roadmap svg{width:100%%;height:100%%}.road-labels{position:absolute;inset:0;display:grid;grid-template-columns:repeat(3,1fr);align-items:end;gap:8px}.road-labels span{border-radius:13px;background:#f8fafc;border:1px solid #e2e8f0;padding:7px;text-align:center;font-size:10px;font-weight:850;color:#334155}.matrix-card{min-height:154px}.nb-infographic.portrait,.nb-infographic.square{aspect-ratio:auto}.nb-infographic.portrait .value-grid,.nb-infographic.square .value-grid{height:auto;grid-template-columns:1fr}.nb-infographic.portrait .value-header,.nb-infographic.square .value-header{grid-template-columns:1fr}@media(max-width:860px){.nb-infographic{aspect-ratio:auto;padding:22px}.value-header,.value-grid{height:auto;grid-template-columns:1fr}.proof-row{flex-wrap:wrap}}
+</style>
+<div class="value-header"><div><h1>%s</h1><p>%s</p></div><div class="proof-row metric-strip"><span class="proof-pill"><b>%d</b>资料源</span><span class="proof-pill"><b>%d</b>核心模块</span><span class="proof-pill"><b>1</b>完整单页</span></div></div>
+<div class="value-grid">
+  <div class="stack">
+    <article class="module-card card"><div class="iconbox">01</div><div><span class="eyebrow">Positioning</span><h2>%s</h2><p>%s</p><div class="logo-wall"><span>OpenAI</span><span>Claude</span><span>DeepSeek</span></div><div class="mock-columns"><i></i><i></i><i></i></div></div></article>
+    <article class="module-card card"><div class="iconbox">02</div><div><span class="eyebrow">Workbench</span><h2>%s</h2><p>%s</p><div class="workbench-icons"><div>AI绘图</div><div>图片编辑</div><div>RAG检索</div></div></div></article>
+  </div>
+  <div class="stack">
+    <article class="card hub-card"><div class="orbit"></div><div class="hub">AI</div></article>
+    <article class="module-card card matrix-card"><span class="eyebrow">Decision Matrix</span><h2>差异化决策矩阵</h2><table class="compare-table"><thead><tr><th>维度</th><th>本方案</th><th>通用平台</th></tr></thead><tbody><tr><td>%s</td><td class="good">完整支持</td><td class="bad">受限</td></tr><tr><td>%s</td><td class="good">可控交付</td><td class="bad">依赖SaaS</td></tr><tr><td>%s</td><td class="good">原生能力</td><td class="bad">需拼插件</td></tr></tbody></table></article>
+    <article class="module-card card"><span class="eyebrow">Business</span><h2>%s</h2><p>%s</p><div class="billing-flow"><div class="tier"><b>基础</b><span>入门</span></div><div class="tier"><b>高级</b><span>增长</span></div><div class="tier"><b>精英</b><span>规模化</span></div></div></article>
+  </div>
+  <article class="module-card card enterprise"><div><span class="eyebrow">Enterprise</span><h2>企业定制与技术底座优势</h2><p>%s</p></div><div class="mini-panel"><h2>%s</h2><p>%s</p><div class="brand-grid"><span>Logo/域名</span><span>主题变量</span><span>权限配置</span><span>零代码交付</span></div></div><div class="mini-panel"><div class="tech-row"><div class="gopher">⚙</div><div><h2>%s</h2><p>%s</p></div></div><div class="tech-points"><span>单文件部署</span><span>SSE流式</span></div><div class="roadmap roadmap-card"><svg viewBox="0 0 420 90"><path d="M20 68 C110 60 130 20 210 38 S322 76 400 18" fill="none" stroke="%s" stroke-width="8" stroke-linecap="round"/><circle cx="20" cy="68" r="8" fill="%s"/><circle cx="210" cy="38" r="8" fill="%s"/><circle cx="400" cy="18" r="8" fill="%s"/></svg><div class="road-labels"><span>工具</span><span>Agent</span><span>生态</span></div></div></div></article>
+</div>
+</section>`,
+		canvasClass, html.EscapeString(style),
+		html.EscapeString(background), html.EscapeString(textColor), html.EscapeString(primary), html.EscapeString(secondary), html.EscapeString(primary), html.EscapeString(primary), html.EscapeString(primary), html.EscapeString(primary), html.EscapeString(primary), html.EscapeString(primary), html.EscapeString(secondary), html.EscapeString(primary), html.EscapeString(secondary),
+		html.EscapeString(title), html.EscapeString(subtitle), len(sources), len(modules),
+		cleanTitle(m(0).Title, 16), cleanBody(m(0).Body, 58),
+		cleanTitle(m(1).Title, 16), cleanBody(m(1).Body, 58),
+		cleanTitle(m(2).Title, 8), cleanTitle(m(3).Title, 8), cleanTitle(m(4).Title, 8),
+		cleanTitle(m(5).Title, 16), cleanBody(m(5).Body, 48),
+		cleanBody(m(2).Body, 64),
+		cleanTitle(m(3).Title, 16), cleanBody(m(3).Body, 52),
+		cleanTitle(m(4).Title, 16), cleanBody(m(4).Body, 52),
+		html.EscapeString(primary), html.EscapeString(primary), html.EscapeString(secondary), html.EscapeString(accent))
 }
 
 func splitNotebookFlashcardBlocks(text string) []notebookFeatureBlock {
@@ -1281,6 +1587,10 @@ func summarizeNotebookFlashcardAnswer(value string) string {
 }
 
 func sanitizeNotebookArtifactContent(artifactType string, content json.RawMessage) json.RawMessage {
+	return sanitizeNotebookArtifactContentWithOptions(artifactType, content, notebookArtifactGenerationOptions{})
+}
+
+func sanitizeNotebookArtifactContentWithOptions(artifactType string, content json.RawMessage, opt notebookArtifactGenerationOptions) json.RawMessage {
 	switch artifactType {
 	case "data-table":
 		var payload struct {
@@ -1302,7 +1612,7 @@ func sanitizeNotebookArtifactContent(artifactType string, content json.RawMessag
 		if err := json.Unmarshal(content, &payload); err != nil {
 			return content
 		}
-		payload.Cards = dedupeNotebookFlashcards(payload.Cards)
+		payload.Cards = limitNotebookFlashcards(dedupeNotebookFlashcards(payload.Cards), notebookFlashcardTargetCount(opt.FlashcardCount))
 		cleaned, err := json.Marshal(payload)
 		if err != nil {
 			return content
@@ -1315,7 +1625,7 @@ func sanitizeNotebookArtifactContent(artifactType string, content json.RawMessag
 		if err := json.Unmarshal(content, &payload); err != nil {
 			return content
 		}
-		payload.Questions = sanitizeNotebookQuizQuestions(payload.Questions)
+		payload.Questions = limitNotebookQuizQuestions(sanitizeNotebookQuizQuestions(payload.Questions), notebookQuizTargetCount(opt.QuizCount))
 		cleaned, err := json.Marshal(payload)
 		if err != nil {
 			return content
@@ -1357,6 +1667,7 @@ func normalizeNotebookTableDedupeText(value string) string {
 
 func mergeNotebookTableRows(primary notebookStudioTableRow, duplicate notebookStudioTableRow) notebookStudioTableRow {
 	primary.Source = mergeNotebookSourceCitations(primary.Source, duplicate.Source)
+	primary.Citations = mergeNotebookArtifactCitations(primary.Citations, duplicate.Citations)
 	if strings.TrimSpace(primary.Status) == "" {
 		primary.Status = duplicate.Status
 	}
@@ -1434,6 +1745,7 @@ func extractNotebookExistingTableRows(source notebookGenerationSource, text stri
 				Implementation: notebookTableAdvantageForModule(module, text),
 				Value:          notebookTableBenchmarkForModule(module),
 				Source:         fmt.Sprintf("[%d]", source.Index),
+				Citations:      notebookCitationsFromSources([]notebookGenerationSource{source}),
 			}
 			continue
 		}
@@ -1637,6 +1949,7 @@ func notebookTableRowFromBlock(source notebookGenerationSource, title string, bo
 		Implementation: truncateNotebookTableCell(extractNotebookLabeledValue(body, []string{"差异化竞争优势", "差异化优势", "竞争优势", "优势", "价值"}, notebookTableMethod(body)), 180),
 		Value:          truncateNotebookTableCell(extractNotebookLabeledValue(body, []string{"对标产品", "参照对象", "对标", "适用场景", "场景"}, notebookTableValue(body)), 160),
 		Source:         fmt.Sprintf("[%d]", source.Index),
+		Citations:      notebookCitationsFromSources([]notebookGenerationSource{source}),
 	}
 }
 
@@ -1761,8 +2074,13 @@ func truncateNotebookTableCell(value string, limit int) string {
 	return value[:limit] + "…"
 }
 
-func buildNotebookGeneratedMindmap(notebookTitle string, sources []notebookGenerationSource) map[string]any {
-	nodes := []notebookStudioMindmapNode{{ID: "root", Label: truncateNotebookMindmapLabel(notebookTitle), Summary: fmt.Sprintf("基于 %d 个资料源生成的主题结构", len(sources))}}
+func buildNotebookGeneratedMindmap(notebookTitle string, sources []notebookGenerationSource, opts ...notebookArtifactGenerationOptions) map[string]any {
+	var opt notebookArtifactGenerationOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	rootLabel := fallbackText(strings.TrimSpace(opt.Prompt), notebookTitle)
+	nodes := []notebookStudioMindmapNode{{ID: "root", Label: truncateNotebookMindmapLabel(rootLabel), Summary: fmt.Sprintf("基于 %d 个资料源生成的主题结构", len(sources))}}
 	edges := make([]notebookStudioMindmapEdge, 0, len(sources)*4)
 	seenTopics := map[string]bool{}
 	for _, source := range sources {
@@ -1837,50 +2155,381 @@ func buildNotebookGeneratedTextSections(generationType string, notebookTitle str
 	for _, source := range sources {
 		bullets = append(bullets, fmt.Sprintf("[%d] %s：%s", source.Index, source.File.Filename, fallbackText(source.Summary, source.Excerpt)))
 	}
+	citations := notebookCitationsFromSources(sources)
 	switch generationType {
 	case "faq":
 		return []notebookStudioTextSection{
-			{Heading: "这个笔记本覆盖哪些资料？", Body: fmt.Sprintf("当前 FAQ 基于《%s》中的 %d 个就绪资料源生成。", notebookTitle, len(sources))},
-			{Heading: "可以从哪些资料继续追问？", Bullets: bullets},
+			{Heading: "这个笔记本覆盖哪些资料？", Body: fmt.Sprintf("当前 FAQ 基于《%s》中的 %d 个就绪资料源生成。", notebookTitle, len(sources)), Citations: citations},
+			{Heading: "可以从哪些资料继续追问？", Bullets: bullets, Citations: citations},
 			{Heading: "建议追问", Bullets: []string{"请对比不同资料中的共同结论", "请列出目前资料中的风险和缺口", "请把资料整理成执行清单"}},
 		}
 	case "briefing":
 		return []notebookStudioTextSection{
-			{Heading: "态势概览", Body: fmt.Sprintf("《%s》目前有 %d 个就绪资料源，可用于形成简报。", notebookTitle, len(sources))},
-			{Heading: "关键信号", Bullets: bullets},
+			{Heading: "态势概览", Body: fmt.Sprintf("《%s》目前有 %d 个就绪资料源，可用于形成简报。", notebookTitle, len(sources)), Citations: citations},
+			{Heading: "关键信号", Bullets: bullets, Citations: citations},
 			{Heading: "建议动作", Bullets: []string{"核对关键来源原文", "围绕高价值主题继续追问", "导出简报并补充业务判断"}},
 		}
 	default:
 		return []notebookStudioTextSection{
-			{Heading: "整体摘要", Body: fmt.Sprintf("《%s》当前选中的 %d 个就绪资料源已整理为摘要草稿。", notebookTitle, len(sources))},
-			{Heading: "资料要点", Bullets: bullets},
+			{Heading: "整体摘要", Body: fmt.Sprintf("《%s》当前选中的 %d 个就绪资料源已整理为摘要草稿。", notebookTitle, len(sources)), Citations: citations},
+			{Heading: "资料要点", Bullets: bullets, Citations: citations},
 			{Heading: "下一步", Bullets: []string{"继续向 Notebook Chat 追问细节", "生成数据表格做结构化对比", "补充更多资料后重新生成"}},
 		}
 	}
 }
 
-func notebookGeneratedArtifactTitle(generationType string, notebookTitle string) string {
+func notebookEnsureTextSectionCitations(content json.RawMessage, sources []notebookGenerationSource) json.RawMessage {
+	var payload struct {
+		Sections []notebookStudioTextSection `json:"sections"`
+	}
+	if err := json.Unmarshal(content, &payload); err != nil || len(payload.Sections) == 0 {
+		return content
+	}
+	citations := notebookCitationsFromSources(sources)
+	if len(citations) == 0 {
+		return content
+	}
+	changed := false
+	for i := range payload.Sections {
+		if len(payload.Sections[i].Citations) == 0 {
+			payload.Sections[i].Citations = citations
+			changed = true
+		}
+	}
+	if !changed {
+		return content
+	}
+	updated, err := json.Marshal(payload)
+	if err != nil {
+		return content
+	}
+	return updated
+}
+
+func notebookEnsureTableRowCitations(content json.RawMessage, sources []notebookGenerationSource) json.RawMessage {
+	var payload struct {
+		Rows []notebookStudioTableRow `json:"rows"`
+	}
+	if err := json.Unmarshal(content, &payload); err != nil || len(payload.Rows) == 0 {
+		return content
+	}
+	all := notebookCitationsFromSources(sources)
+	if len(all) == 0 {
+		return content
+	}
+	changed := false
+	for i := range payload.Rows {
+		if len(payload.Rows[i].Citations) == 0 {
+			payload.Rows[i].Citations = all
+			changed = true
+		}
+	}
+	if !changed {
+		return content
+	}
+	updated, err := json.Marshal(payload)
+	if err != nil {
+		return content
+	}
+	return updated
+}
+
+func notebookEnsureReportSectionCitations(content json.RawMessage, sources []notebookGenerationSource) json.RawMessage {
+	var payload notebookStudioReportContent
+	if err := json.Unmarshal(content, &payload); err != nil || len(payload.Sections) == 0 {
+		return content
+	}
+	all := notebookCitationsFromSources(sources)
+	if len(all) == 0 {
+		return content
+	}
+	changed := false
+	for i := range payload.Sections {
+		if len(payload.Sections[i].Citations) == 0 {
+			payload.Sections[i].Citations = all
+			changed = true
+		}
+		for j := range payload.Sections[i].Subsections {
+			if len(payload.Sections[i].Subsections[j].Citations) == 0 {
+				payload.Sections[i].Subsections[j].Citations = payload.Sections[i].Citations
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		return content
+	}
+	updated, err := json.Marshal(payload)
+	if err != nil {
+		return content
+	}
+	return updated
+}
+
+func notebookCitationsFromSources(sources []notebookGenerationSource) []notebookArtifactCitation {
+	citations := make([]notebookArtifactCitation, 0, len(sources))
+	for _, source := range sources {
+		quote := truncateNotebookRunes(fallbackText(source.Summary, source.Excerpt), 180, "…")
+		page := 0
+		chunkIndex := 0
+		if chunk, ok := notebookCitationChunk(source); ok {
+			quote = truncateNotebookRunes(strings.TrimSpace(fallbackText(chunk.Content, chunk.Markdown)), 180, "…")
+			page = chunk.Page
+			chunkIndex = chunk.ChunkIndex
+		}
+		if strings.TrimSpace(quote) == "" || source.File.ID == 0 {
+			continue
+		}
+		citations = append(citations, notebookArtifactCitation{FileID: source.File.ID, SourceIndex: source.Index, Quote: quote, Page: page, ChunkIndex: chunkIndex})
+	}
+	return citations
+}
+
+func notebookCitationForSourceAt(sources []notebookGenerationSource, offset int) []notebookArtifactCitation {
+	if len(sources) == 0 {
+		return nil
+	}
+	return notebookCitationsFromSources([]notebookGenerationSource{sources[offset%len(sources)]})
+}
+
+func mergeNotebookArtifactCitations(groups ...[]notebookArtifactCitation) []notebookArtifactCitation {
+	seen := map[uint]bool{}
+	merged := make([]notebookArtifactCitation, 0)
+	for _, group := range groups {
+		for _, citation := range group {
+			if citation.FileID == 0 || seen[citation.FileID] {
+				continue
+			}
+			seen[citation.FileID] = true
+			merged = append(merged, citation)
+		}
+	}
+	return merged
+}
+
+func notebookCitationChunk(source notebookGenerationSource) (models.FileChunk, bool) {
+	if len(source.Chunks) == 0 {
+		return models.FileChunk{}, false
+	}
+	needle := strings.TrimSpace(fallbackText(source.Summary, source.Excerpt))
+	if needle != "" {
+		needleLower := strings.ToLower(needle)
+		for _, chunk := range source.Chunks {
+			text := strings.TrimSpace(fallbackText(chunk.Content, chunk.Markdown))
+			if text == "" {
+				continue
+			}
+			lower := strings.ToLower(text)
+			if strings.Contains(lower, needleLower) || strings.Contains(needleLower, lower) {
+				return chunk, true
+			}
+		}
+	}
+	var best models.FileChunk
+	bestLen := 0
+	for _, chunk := range source.Chunks {
+		text := strings.TrimSpace(fallbackText(chunk.Content, chunk.Markdown))
+		if text == "" {
+			continue
+		}
+		if l := len([]rune(text)); l > bestLen {
+			best = chunk
+			bestLen = l
+		}
+	}
+	if bestLen > 0 {
+		return best, true
+	}
+	return models.FileChunk{}, false
+}
+
+func notebookGeneratedArtifactTitle(generationType string, subject string) string {
+	subject = cleanNotebookArtifactTitleSubject(subject)
 	switch generationType {
 	case "table":
-		return fmt.Sprintf("%s · 数据表格", notebookTitle)
+		return fmt.Sprintf("%s · 数据表格", subject)
 	case "faq":
-		return fmt.Sprintf("%s · FAQ", notebookTitle)
+		return fmt.Sprintf("%s · FAQ", subject)
 	case "briefing":
-		return fmt.Sprintf("%s · 简报", notebookTitle)
+		return fmt.Sprintf("%s · 简报", subject)
 	case "mindmap":
-		return fmt.Sprintf("%s · 思维导图", notebookTitle)
+		return fmt.Sprintf("%s · 思维导图", subject)
 	case "flashcards":
-		return fmt.Sprintf("%s · 闪卡", notebookTitle)
+		return fmt.Sprintf("%s · 闪卡", subject)
 	case "quiz":
-		return fmt.Sprintf("%s · 测验", notebookTitle)
+		return fmt.Sprintf("%s · 测验", subject)
 	case "report", "report:briefing-document", "report:custom", "report:study-guide", "report:blog-post":
-		return fmt.Sprintf("%s · Report", notebookTitle)
+		return fmt.Sprintf("%s · Report", subject)
 	default:
 		if strings.HasPrefix(generationType, "report:") {
-			return fmt.Sprintf("%s · Report", notebookTitle)
+			return fmt.Sprintf("%s · Report", subject)
 		}
-		return fmt.Sprintf("%s · 摘要", notebookTitle)
+		return fmt.Sprintf("%s · 摘要", subject)
 	}
+}
+
+func notebookResolveArtifactTitle(artifactType string, aiTitle string, fallbackTitle string, content json.RawMessage) string {
+	aiTitle = cleanNotebookArtifactTitle(aiTitle)
+	if aiTitle != "" && !isGenericNotebookArtifactTitle(aiTitle) {
+		return aiTitle
+	}
+	if derived := notebookArtifactTitleFromContent(artifactType, content); derived != "" {
+		return notebookGeneratedArtifactTitle(notebookGenerationTypeForArtifactType(artifactType), derived)
+	}
+	fallbackTitle = cleanNotebookArtifactTitle(fallbackTitle)
+	if fallbackTitle != "" {
+		return fallbackTitle
+	}
+	return notebookGeneratedArtifactTitle(notebookGenerationTypeForArtifactType(artifactType), "资料主题")
+}
+
+func notebookArtifactTitleSubject(sources []notebookGenerationSource) string {
+	for _, source := range sources {
+		for _, block := range splitNotebookFeatureBlocks(fallbackText(source.Excerpt, source.Summary)) {
+			if subject := cleanNotebookArtifactTitleSubject(block.title); subject != "" {
+				return subject
+			}
+		}
+		if subject := cleanNotebookArtifactTitleSubject(source.Summary); subject != "" {
+			return subject
+		}
+		if subject := cleanNotebookArtifactTitleSubject(notebookTableTopic(source)); subject != "" {
+			return subject
+		}
+	}
+	return "资料主题"
+}
+
+func notebookArtifactTitleFromContent(artifactType string, content json.RawMessage) string {
+	switch artifactType {
+	case "summary", "faq", "briefing":
+		var payload struct {
+			Sections []notebookStudioTextSection `json:"sections"`
+		}
+		if json.Unmarshal(content, &payload) == nil {
+			for _, section := range payload.Sections {
+				if subject := cleanNotebookArtifactTitleSubject(section.Heading); subject != "" {
+					return subject
+				}
+			}
+		}
+	case "data-table":
+		var payload struct {
+			Rows []notebookStudioTableRow `json:"rows"`
+		}
+		if json.Unmarshal(content, &payload) == nil {
+			for _, row := range payload.Rows {
+				if subject := cleanNotebookArtifactTitleSubject(row.Module); subject != "" {
+					return subject
+				}
+			}
+		}
+	case "mindmap":
+		var payload struct {
+			Nodes []notebookStudioMindmapNode `json:"nodes"`
+		}
+		if json.Unmarshal(content, &payload) == nil {
+			for _, node := range payload.Nodes {
+				if node.ID == "root" {
+					return cleanNotebookArtifactTitleSubject(node.Label)
+				}
+			}
+			for _, node := range payload.Nodes {
+				if subject := cleanNotebookArtifactTitleSubject(node.Label); subject != "" {
+					return subject
+				}
+			}
+		}
+	case "flashcards":
+		var payload struct {
+			Cards []notebookStudioFlashcard `json:"cards"`
+		}
+		if json.Unmarshal(content, &payload) == nil {
+			for _, card := range payload.Cards {
+				if subject := cleanNotebookArtifactTitleSubject(card.Front); subject != "" {
+					return subject
+				}
+			}
+		}
+	case "quiz":
+		var payload struct {
+			Questions []notebookStudioQuizQuestion `json:"questions"`
+		}
+		if json.Unmarshal(content, &payload) == nil {
+			for _, question := range payload.Questions {
+				if subject := cleanNotebookArtifactTitleSubject(question.Question); subject != "" {
+					return subject
+				}
+			}
+		}
+	case "report":
+		var payload notebookStudioReportContent
+		if json.Unmarshal(content, &payload) == nil {
+			if subject := cleanNotebookArtifactTitleSubject(payload.FormatTitle); subject != "" {
+				return subject
+			}
+			for _, section := range payload.Sections {
+				if subject := cleanNotebookArtifactTitleSubject(section.Heading); subject != "" {
+					return subject
+				}
+			}
+		}
+	case "infographic":
+		var payload notebookStudioInfographic
+		if json.Unmarshal(content, &payload) == nil {
+			if subject := cleanNotebookArtifactTitleSubject(payload.Prompt); subject != "" {
+				return subject
+			}
+		}
+	}
+	return ""
+}
+
+func notebookGenerationTypeForArtifactType(artifactType string) string {
+	switch artifactType {
+	case "data-table":
+		return "table"
+	case "report":
+		return "report"
+	default:
+		return artifactType
+	}
+}
+
+func cleanNotebookArtifactTitle(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.Trim(value, " 	\r\n-—：:，,。；;·|[]（）()《》\"")
+	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, " ")
+	return truncateNotebookRunes(value, 48, "")
+}
+
+func cleanNotebookArtifactTitleSubject(value string) string {
+	value = cleanNotebookArtifactTitle(value)
+	value = regexp.MustCompile(`^(?:#+\s*|(?:\d+|[一二三四五六七八九十]+)[、.)．]\s*)`).ReplaceAllString(value, "")
+	for _, separator := range []string{"？", "?", "：", ":", "——", "—", "，", ",", "。"} {
+		if index := strings.Index(value, separator); index > 1 {
+			value = strings.TrimSpace(value[:index])
+		}
+	}
+	value = cleanNotebookArtifactTitle(value)
+	if value == "" || isGenericNotebookArtifactTitle(value) {
+		return ""
+	}
+	return truncateNotebookRunes(value, 24, "")
+}
+
+func isGenericNotebookArtifactTitle(title string) bool {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return true
+	}
+	generic := []string{"摘要", "总结", "概要", "FAQ", "问答", "简报", "报告", "Report", "数据表格", "表格", "思维导图", "脑图", "闪卡", "抽认卡", "测验", "Quiz", "信息图", "Infographic", "资料主题"}
+	for _, item := range generic {
+		if strings.EqualFold(title, item) {
+			return true
+		}
+	}
+	return containsAnyNotebookText(title, []string{"测试", "未命名", "笔记本"}) && len([]rune(title)) <= 18
 }
 
 func fallbackText(primary string, fallback string) string {

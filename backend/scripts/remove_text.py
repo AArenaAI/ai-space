@@ -23,11 +23,18 @@ def odd_kernel(value: int) -> int:
     return value if value % 2 == 1 else value + 1
 
 
-def merge_close_components(mask: np.ndarray, width: int, height: int) -> np.ndarray:
+def merge_close_components(mask: np.ndarray, width: int, height: int, sub_mode: str = "auto") -> np.ndarray:
     # Link neighboring glyph strokes into word/line masks without expanding to the
     # whole image. Kernel sizes scale with image dimensions.
-    kx = max(3, width // 180)
-    ky = max(2, height // 240)
+    if sub_mode == "poster":
+        kx = max(5, width // 120)
+        ky = max(3, height // 180)
+    elif sub_mode == "watermark":
+        kx = max(3, width // 220)
+        ky = max(2, height // 280)
+    else:
+        kx = max(3, width // 180)
+        ky = max(2, height // 240)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kx, ky))
     merged = cv2.dilate(mask, kernel, iterations=1)
     merged = cv2.morphologyEx(merged, cv2.MORPH_CLOSE, kernel, iterations=1)
@@ -47,7 +54,7 @@ def remove_skinny_full_height_artifacts(mask: np.ndarray, width: int, height: in
     return cleaned
 
 
-def glyph_candidate_filter(mask: np.ndarray, width: int, height: int) -> np.ndarray:
+def glyph_candidate_filter(mask: np.ndarray, width: int, height: int, sub_mode: str = "auto") -> np.ndarray:
     """Keep only small stroke-like components before word/line merging.
 
     This prevents non-text objects such as desktop/app icons from being joined
@@ -57,8 +64,15 @@ def glyph_candidate_filter(mask: np.ndarray, width: int, height: int) -> np.ndar
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     image_area = width * height
     min_area = max(3, image_area // 600000)
-    max_glyph_h = max(36, int(height * 0.07))
-    max_glyph_w = max(80, int(width * 0.45))
+    if sub_mode == "poster":
+        max_glyph_h = max(72, int(height * 0.16))
+        max_glyph_w = max(160, int(width * 0.70))
+    elif sub_mode == "watermark":
+        max_glyph_h = max(48, int(height * 0.10))
+        max_glyph_w = max(120, int(width * 0.55))
+    else:
+        max_glyph_h = max(36, int(height * 0.07))
+        max_glyph_w = max(80, int(width * 0.45))
     for cnt in contours:
         x, y, w, h = cv2.boundingRect(cnt)
         if w < 1 or h < 1:
@@ -73,24 +87,31 @@ def glyph_candidate_filter(mask: np.ndarray, width: int, height: int) -> np.ndar
         # Icons/logos and UI blocks are usually square-ish, saturated, and/or
         # much larger than individual glyph strokes. Reject them before dilation
         # can merge them with adjacent text labels.
-        if h > max_glyph_h and aspect < 3.0:
+        if h > max_glyph_h and aspect < (2.2 if sub_mode == "poster" else 3.0):
             continue
-        if w > max_glyph_w and aspect < 1.8:
+        if w > max_glyph_w and aspect < (1.5 if sub_mode == "poster" else 1.8):
             continue
-        if fill > 0.72 and 0.35 <= aspect <= 3.2 and max(w, h) > 12:
+        fill_limit = 0.82 if sub_mode == "poster" else 0.72
+        if fill > fill_limit and 0.35 <= aspect <= 3.2 and max(w, h) > 12:
             continue
-        if h > height * 0.20 or w > width * 0.90:
+        max_height_ratio = 0.34 if sub_mode == "poster" else 0.20
+        if h > height * max_height_ratio or w > width * 0.90:
             continue
         cv2.drawContours(filtered, [cnt], -1, 255, thickness=cv2.FILLED)
     return filtered
 
 
-def component_filter(mask: np.ndarray, width: int, height: int) -> np.ndarray:
+def component_filter(mask: np.ndarray, width: int, height: int, sub_mode: str = "auto") -> np.ndarray:
     filtered = np.zeros_like(mask)
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     image_area = width * height
     min_area = max(8, image_area // 250000)
-    max_area = max(2000, image_area // 22)
+    if sub_mode == "poster":
+        max_area = max(6000, image_area // 8)
+    elif sub_mode == "watermark":
+        max_area = max(3000, image_area // 16)
+    else:
+        max_area = max(2000, image_area // 22)
     for cnt in contours:
         x, y, w, h = cv2.boundingRect(cnt)
         roi = mask[y : y + h, x : x + w]
@@ -99,7 +120,8 @@ def component_filter(mask: np.ndarray, width: int, height: int) -> np.ndarray:
             continue
         if w < 2 or h < 2:
             continue
-        if w > width * 0.95 or h > height * 0.28:
+        max_h_ratio = 0.42 if sub_mode == "poster" else 0.28
+        if w > width * 0.95 or h > height * max_h_ratio:
             continue
         aspect = w / float(h)
         fill = area / float(w * h)
@@ -112,12 +134,18 @@ def component_filter(mask: np.ndarray, width: int, height: int) -> np.ndarray:
             continue
         if fill > 0.92:
             continue
-        if h > max(24, height * 0.09) and aspect < 2.2:
-            continue
-        if h > max(28, height * 0.07) and fill > 0.58 and aspect < 2.8:
-            continue
-        if h > height * 0.18 and w > width * 0.25:
-            continue
+        if sub_mode != "poster":
+            if h > max(24, height * 0.09) and aspect < 2.2:
+                continue
+            if h > max(28, height * 0.07) and fill > 0.58 and aspect < 2.8:
+                continue
+            if h > height * 0.18 and w > width * 0.25:
+                continue
+        else:
+            if h > height * 0.34 and aspect < 1.4:
+                continue
+            if fill > 0.88 and aspect < 1.8:
+                continue
         cv2.drawContours(filtered, [cnt], -1, 255, thickness=cv2.FILLED)
     return filtered
 
@@ -252,7 +280,10 @@ def build_chalkboard_mask(rgb: np.ndarray) -> np.ndarray:
     return filtered
 
 
-def build_text_mask(rgb: np.ndarray) -> np.ndarray:
+def build_text_mask(rgb: np.ndarray, sub_mode: str = "auto") -> np.ndarray:
+    sub_mode = (sub_mode or "auto").strip().lower()
+    if sub_mode not in {"auto", "screenshot", "poster", "watermark"}:
+        sub_mode = "auto"
     height, width = rgb.shape[:2]
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
     chalkboard = is_chalkboard_scene(rgb)
@@ -290,22 +321,29 @@ def build_text_mask(rgb: np.ndarray) -> np.ndarray:
     combined = np.zeros_like(gray)
     for cand in candidates:
         cand = remove_skinny_full_height_artifacts(cand, width, height)
-        combined = cv2.bitwise_or(combined, glyph_candidate_filter(cand, width, height))
+        combined = cv2.bitwise_or(combined, glyph_candidate_filter(cand, width, height, sub_mode))
 
-    combined = merge_close_components(combined, width, height)
-    combined = component_filter(combined, width, height)
+    combined = merge_close_components(combined, width, height, sub_mode)
+    component_mode = "screenshot" if sub_mode == "auto" and not chalkboard else sub_mode
+    combined = component_filter(combined, width, height, component_mode)
 
     if chalkboard:
         combined = cv2.bitwise_or(combined, build_chalkboard_mask(rgb))
 
     # Slight expansion covers anti-aliased glyph edges. Keep it modest so non-text
     # parts are preserved as much as possible.
-    dilate_px = max(2 if chalkboard else 1, round(min(width, height) / (320 if chalkboard else 500)))
+    if sub_mode == "poster":
+        dilate_px = max(2, round(min(width, height) / 240))
+    elif sub_mode == "watermark":
+        dilate_px = max(1, round(min(width, height) / 620))
+    else:
+        dilate_px = max(2 if chalkboard else 1, round(min(width, height) / (320 if chalkboard else 500)))
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * dilate_px + 1, 2 * dilate_px + 1))
     combined = cv2.dilate(combined, kernel, iterations=1)
     combined = cv2.GaussianBlur(combined, (3, 3), 0)
     _, combined = cv2.threshold(combined, 20, 255, cv2.THRESH_BINARY)
-    combined = limit_mask_coverage(combined, width, height, max_coverage=0.18 if chalkboard else 0.10)
+    coverage_cap = 0.18 if chalkboard else {"screenshot": 0.07, "poster": 0.22, "watermark": 0.12}.get(sub_mode, 0.10)
+    combined = limit_mask_coverage(combined, width, height, max_coverage=coverage_cap)
     return combined
 
 
@@ -314,6 +352,7 @@ def main() -> int:
     parser.add_argument("--input", required=True, help="Input source image path")
     parser.add_argument("--output", required=True, help="Output PNG path")
     parser.add_argument("--prompt", default="", help="User text description; currently used for logging only")
+    parser.add_argument("--sub-mode", default="auto", choices=["auto", "screenshot", "poster", "watermark"], help="Detection strategy: conservative screenshot labels, large poster text, or watermark overlays")
     parser.add_argument("--mask-output", default="", help="Optional debug mask output path")
     args = parser.parse_args()
 
@@ -329,7 +368,7 @@ def main() -> int:
         original_size = source.size
         rgb = np.array(source)
         chalkboard = is_chalkboard_scene(rgb)
-        mask = build_text_mask(rgb)
+        mask = build_text_mask(rgb, args.sub_mode)
 
         if args.mask_output:
             mask_path = Path(args.mask_output)
@@ -375,6 +414,7 @@ def main() -> int:
                     "output_size": [result.size[0], result.size[1]],
                     "mask_pixels": mask_pixels,
                     "mask_coverage": round(mask_pixels / total_pixels, 6) if total_pixels else 0,
+                    "sub_mode": args.sub_mode,
                     "output": str(output_path),
                 },
                 ensure_ascii=False,

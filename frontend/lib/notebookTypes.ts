@@ -61,6 +61,7 @@ export interface NotebookArtifact {
   subtitle?: string;
   content: unknown;
   source_count: number;
+  source_file_ids?: number[];
   created_at: string;
   updated_at: string;
 }

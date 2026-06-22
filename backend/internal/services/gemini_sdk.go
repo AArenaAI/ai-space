@@ -37,7 +37,7 @@ func (s *AIService) callGeminiSDK(ctx context.Context, model string, messages []
 		return nil, err
 	}
 
-	contents, config := s.buildGeminiGenerateContentRequest(messages, stream, reasoning, reasoningEffort, search)
+	contents, config := s.buildGeminiGenerateContentRequest(model, messages, stream, reasoning, reasoningEffort, search)
 	fmt.Printf("[Gemini SDK] model=%s stream=%v reasoning=%v effort=%s search=%v max_output_tokens=%d contents=%d\n", model, stream, reasoning, reasoningEffort, search, config.MaxOutputTokens, len(contents))
 
 	if stream {
@@ -62,7 +62,7 @@ func (s *AIService) callGeminiSDK(ctx context.Context, model string, messages []
 	return &AICompletionResponse{Body: body, ModelType: "gemini", Provider: "gemini", Model: model}, nil
 }
 
-func (s *AIService) buildGeminiGenerateContentRequest(messages []Message, stream bool, reasoning bool, reasoningEffort ReasoningEffort, search bool) ([]*genai.Content, *genai.GenerateContentConfig) {
+func (s *AIService) buildGeminiGenerateContentRequest(model string, messages []Message, stream bool, reasoning bool, reasoningEffort ReasoningEffort, search bool) ([]*genai.Content, *genai.GenerateContentConfig) {
 	var systemParts []*genai.Part
 	contents := make([]*genai.Content, 0, len(messages))
 
@@ -103,16 +103,33 @@ func (s *AIService) buildGeminiGenerateContentRequest(messages []Message, stream
 		config.SystemInstruction = genai.NewContentFromParts(systemParts, genai.RoleUser)
 	}
 	if reasoning {
-		config.ThinkingConfig = &genai.ThinkingConfig{
-			IncludeThoughts: true,
-			ThinkingLevel:   reasoningEffort.ToGeminiValue(),
+		config.ThinkingConfig = geminiThinkingConfigForModel(model, reasoningEffort)
+		if config.ThinkingConfig.ThinkingBudget != nil {
+			fmt.Printf("[Gemini SDK] reasoning enabled, thinkingBudget=%d\n", *config.ThinkingConfig.ThinkingBudget)
+		} else {
+			fmt.Printf("[Gemini SDK] reasoning enabled, thinkingLevel=%s\n", config.ThinkingConfig.ThinkingLevel)
 		}
-		fmt.Printf("[Gemini SDK] reasoning enabled, thinkingLevel=%s\n", config.ThinkingConfig.ThinkingLevel)
 	}
 	if search {
 		config.Tools = []*genai.Tool{{GoogleSearch: &genai.GoogleSearch{}}}
 	}
 	return contents, config
+}
+
+func geminiThinkingConfigForModel(model string, reasoningEffort ReasoningEffort) *genai.ThinkingConfig {
+	cfg := &genai.ThinkingConfig{IncludeThoughts: true}
+	if isGemini25Model(model) {
+		budget := reasoningEffort.ToGemini25ThinkingBudget()
+		cfg.ThinkingBudget = &budget
+		return cfg
+	}
+	cfg.ThinkingLevel = reasoningEffort.ToGeminiValue()
+	return cfg
+}
+
+func isGemini25Model(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(model, "gemini-2.5-")
 }
 
 func geminiSDKPartsFromMessage(m Message) []*genai.Part {

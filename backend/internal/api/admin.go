@@ -8,8 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"aipool-backend/internal/modelconfigseed"
 	"aipool-backend/internal/modelmeta"
 	"aipool-backend/internal/models"
+	"aipool-backend/internal/services"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -35,17 +37,26 @@ type adminUserUsageSummary struct {
 }
 
 type adminUserResponse struct {
-	ID              uint                  `json:"id"`
-	Email           string                `json:"email"`
-	Name            string                `json:"name"`
-	Role            string                `json:"role"`
-	PlanTier        string                `json:"plan_tier"`
-	BasicCredits    int                   `json:"basic_credits"`
-	AdvancedCredits int                   `json:"advanced_credits"`
-	EliteCredits    int                   `json:"elite_credits"`
-	CreatedAt       time.Time             `json:"created_at"`
-	UpdatedAt       time.Time             `json:"updated_at"`
-	Usage30D        adminUserUsageSummary `json:"usage_30d"`
+	ID                       uint                  `json:"id"`
+	Email                    string                `json:"email"`
+	Name                     string                `json:"name"`
+	Role                     string                `json:"role"`
+	PlanTier                 string                `json:"plan_tier"`
+	BasicCredits             int                   `json:"basic_credits"`
+	AdvancedCredits          int                   `json:"advanced_credits"`
+	EliteCredits             int                   `json:"elite_credits"`
+	BetaBatch                string                `json:"beta_batch,omitempty"`
+	BetaPhase                string                `json:"beta_phase,omitempty"`
+	BetaPhaseName            string                `json:"beta_phase_name,omitempty"`
+	BetaCreditBalance        int                   `json:"beta_credit_balance"`
+	BetaCreditBalanceDisplay float64               `json:"beta_credit_balance_display"`
+	BetaCreditGrantedTotal   int                   `json:"beta_credit_granted_total"`
+	BetaCreditGrantedDisplay float64               `json:"beta_credit_granted_display"`
+	BetaCreditUsedTotal      int                   `json:"beta_credit_used_total"`
+	BetaCreditUsedDisplay    float64               `json:"beta_credit_used_display"`
+	CreatedAt                time.Time             `json:"created_at"`
+	UpdatedAt                time.Time             `json:"updated_at"`
+	Usage30D                 adminUserUsageSummary `json:"usage_30d"`
 }
 
 type adminUsageSummaryResponse struct {
@@ -120,17 +131,37 @@ func toAdminUserResponse(user models.User) adminUserResponse {
 	if role == "" {
 		role = "user"
 	}
+	phaseName := ""
+	switch user.BetaPhase {
+	case "phase_1":
+		phaseName = "试探期"
+	case "phase_2":
+		phaseName = "深水区"
+	case "phase_3":
+		phaseName = "枯竭期"
+	case "completed":
+		phaseName = "已完成"
+	}
 	return adminUserResponse{
-		ID:              user.ID,
-		Email:           user.Email,
-		Name:            user.Name,
-		Role:            role,
-		PlanTier:        user.PlanTier,
-		BasicCredits:    user.BasicCredits,
-		AdvancedCredits: user.AdvancedCredits,
-		EliteCredits:    user.EliteCredits,
-		CreatedAt:       user.CreatedAt,
-		UpdatedAt:       user.UpdatedAt,
+		ID:                       user.ID,
+		Email:                    user.Email,
+		Name:                     user.Name,
+		Role:                     role,
+		PlanTier:                 user.PlanTier,
+		BasicCredits:             user.BasicCredits,
+		AdvancedCredits:          user.AdvancedCredits,
+		EliteCredits:             user.EliteCredits,
+		BetaBatch:                user.BetaBatch,
+		BetaPhase:                user.BetaPhase,
+		BetaPhaseName:            phaseName,
+		BetaCreditBalance:        user.BetaCreditBalance,
+		BetaCreditBalanceDisplay: float64(user.BetaCreditBalance) / 100,
+		BetaCreditGrantedTotal:   user.BetaCreditGrantedTotal,
+		BetaCreditGrantedDisplay: float64(user.BetaCreditGrantedTotal) / 100,
+		BetaCreditUsedTotal:      user.BetaCreditUsedTotal,
+		BetaCreditUsedDisplay:    float64(user.BetaCreditUsedTotal) / 100,
+		CreatedAt:                user.CreatedAt,
+		UpdatedAt:                user.UpdatedAt,
 	}
 }
 
@@ -185,11 +216,30 @@ func (h *AdminHandler) Overview(c *gin.Context) {
 
 	topModels := h.topUsageModels(startOfDay, 5)
 
+	// 内测运营数据
+	var pendingApplications int64
+	var todayApplications int64
+	var activeInvites int64
+	var totalInvites int64
+	var pendingBadCases int64
+	h.db.Model(&models.BetaApplication{}).Where("status = ?", "pending").Count(&pendingApplications)
+	h.db.Model(&models.BetaApplication{}).Where("created_at >= ?", startOfDay).Count(&todayApplications)
+	h.db.Model(&models.BetaInvite{}).Where("status = ?", "active").Count(&activeInvites)
+	h.db.Model(&models.BetaInvite{}).Count(&totalInvites)
+	h.db.Model(&models.BadCase{}).Where("status = ?", "pending").Count(&pendingBadCases)
+
 	c.JSON(http.StatusOK, gin.H{
 		"users":  gin.H{"total": totalUsers, "today_new": todayNewUsers},
 		"usage":  gin.H{"today_requests": todayRequests, "today_cost_rmb": todayCost, "today_failures": todayFailures},
 		"tasks":  gin.H{"running": runningTasks, "failed_today": failedTasksToday},
 		"models": gin.H{"top_by_cost": topModels},
+		"beta": gin.H{
+			"pending_applications": pendingApplications,
+			"today_applications":   todayApplications,
+			"active_invites":       activeInvites,
+			"total_invites":        totalInvites,
+			"pending_bad_cases":    pendingBadCases,
+		},
 	})
 }
 
@@ -338,14 +388,14 @@ func (h *AdminHandler) AdjustCredits(c *gin.Context) {
 		field = "basic_credits"
 	case "advanced":
 		field = "advanced_credits"
-	case "elite":
-		field = "elite_credits"
+	case "beta":
+		field = "beta_credit_balance"
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "积分类型只能是 basic / advanced / elite"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "积分类型只能是 basic / advanced / beta"})
 		return
 	}
 
-	current := map[string]int{"basic_credits": user.BasicCredits, "advanced_credits": user.AdvancedCredits, "elite_credits": user.EliteCredits}[field]
+	current := map[string]int{"basic_credits": user.BasicCredits, "advanced_credits": user.AdvancedCredits, "beta_credit_balance": user.BetaCreditBalance}[field]
 	newValue := current
 	switch mode {
 	case "add":
@@ -366,7 +416,7 @@ func (h *AdminHandler) AdjustCredits(c *gin.Context) {
 		reason = "admin_adjust"
 	}
 	operatorID := currentAdminID(c)
-	if err := h.db.Transaction(func(tx *gorm.DB) error {
+	err := h.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&user).Update(field, newValue).Error; err != nil {
 			return err
 		}
@@ -381,7 +431,8 @@ func (h *AdminHandler) AdjustCredits(c *gin.Context) {
 			SourceID:     strconv.FormatUint(uint64(operatorID), 10),
 			OperatorID:   operatorID,
 		}).Error
-	}).Error; err != nil {
+	})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "调整积分失败"})
 		return
 	}
@@ -598,6 +649,397 @@ func (h *AdminHandler) Models(c *gin.Context) {
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"models": items, "total": len(items)})
+}
+
+// ========== Model Config Management ==========
+
+type adminModelConfigResponse struct {
+	ID                 uint     `json:"id"`
+	ModelID            string   `json:"model_id"`
+	Name               string   `json:"name"`
+	Provider           string   `json:"provider"`
+	Description            string   `json:"description"`
+	Color                  string   `json:"color"`
+	Category               string   `json:"category"`
+	Capabilities           []string `json:"capabilities"`
+	Enabled                bool     `json:"enabled"`
+	Tier                   string   `json:"tier"`
+	ReasoningLevel         string   `json:"reasoning_level"`
+	ReasoningLevelName      string   `json:"reasoning_level_name"`
+	ReasoningEffort        string   `json:"reasoning_effort"`
+	ReasoningParameter     string   `json:"reasoning_parameter"`
+	ReasoningFastValue     string   `json:"reasoning_fast_value"`
+	ReasoningThinkingValue string   `json:"reasoning_thinking_value"`
+	ReasoningExpertValue   string   `json:"reasoning_expert_value"`
+	Status                 string   `json:"status"`
+	StatusMessage          string   `json:"status_message"`
+	CreatedAt              string   `json:"created_at"`
+	UpdatedAt              string   `json:"updated_at"`
+}
+
+func defaultModelReasoningLevel(model modelmeta.ModelInfo) string {
+	if !modelmeta.ModelHasCapability(model, "reasoning") {
+		return ""
+	}
+	return services.ReasoningLevelThinking
+}
+
+func reasoningLevelForAdmin(model modelmeta.ModelInfo, cfg models.ModelConfig) (string, string, string, string, string, string, string) {
+	if !modelmeta.ModelHasCapability(model, "reasoning") {
+		return "", "", "", "", "", "", ""
+	}
+	publicLevel := services.NormalizeReasoningLevel(cfg.ReasoningLevel)
+	overrides := services.ReasoningEffortOverrides{
+		Fast:     cfg.ReasoningFastValue,
+		Thinking: cfg.ReasoningThinkingValue,
+		Expert:   cfg.ReasoningExpertValue,
+	}
+	effort := services.ReasoningEffortForPublicLevelWithOverrides(publicLevel, overrides)
+	fastValue, thinkingValue, expertValue := services.EffectiveReasoningOverrideValuesForModel(model.ID, overrides)
+	return publicLevel, services.ReasoningLevelName(publicLevel), effort.String(), services.ReasoningParameterName(model.ID), fastValue, thinkingValue, expertValue
+}
+
+func ensureModelConfigRows(db *gorm.DB, codeModels []modelmeta.ModelInfo) error {
+	return modelconfigseed.EnsureRows(db, codeModels)
+}
+
+func (h *AdminHandler) ListModelConfigs(c *gin.Context) {
+	// 加载所有代码模型
+	codeModels := modelmeta.AllModels()
+	if err := ensureModelConfigRows(h.db, codeModels); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "初始化模型配置失败"})
+		return
+	}
+
+	// 加载数据库配置
+	var configs []models.ModelConfig
+	h.db.Find(&configs)
+	configMap := make(map[string]*models.ModelConfig, len(configs))
+	for i := range configs {
+		configMap[configs[i].ModelID] = &configs[i]
+	}
+
+	items := make([]adminModelConfigResponse, 0, len(codeModels))
+	for _, model := range codeModels {
+		cfg, ok := configMap[model.ID]
+		if !ok {
+			// 未配置时，使用代码默认值
+			reasoningLevel, reasoningLevelName, reasoningEffort, reasoningParameter, reasoningFastValue, reasoningThinkingValue, reasoningExpertValue := reasoningLevelForAdmin(model, models.ModelConfig{ReasoningLevel: defaultModelReasoningLevel(model)})
+			items = append(items, adminModelConfigResponse{
+				ID:                     0,
+				ModelID:                model.ID,
+				Name:                   model.Name,
+				Provider:               model.Provider,
+				Description:            model.Description,
+				Color:                  model.Color,
+				Category:               firstCapability(model.Capabilities),
+				Capabilities:           model.Capabilities,
+				Enabled:                true,
+				Tier:                   GetModelTier(model.ID),
+				ReasoningLevel:         reasoningLevel,
+				ReasoningLevelName:     reasoningLevelName,
+				ReasoningEffort:        reasoningEffort,
+				ReasoningParameter:     reasoningParameter,
+				ReasoningFastValue:     reasoningFastValue,
+				ReasoningThinkingValue: reasoningThinkingValue,
+				ReasoningExpertValue:   reasoningExpertValue,
+				Status:                 "available",
+				StatusMessage:          "",
+			})
+			continue
+		}
+
+		// 有配置时，合并数据库覆盖
+		status := cfg.Status
+		if status == "" {
+			status = "available"
+		}
+		reasoningLevel, reasoningLevelName, reasoningEffort, reasoningParameter, reasoningFastValue, reasoningThinkingValue, reasoningExpertValue := reasoningLevelForAdmin(model, *cfg)
+		items = append(items, adminModelConfigResponse{
+			ID:                     cfg.ID,
+			ModelID:                model.ID,
+			Name:                   model.Name,
+			Provider:               model.Provider,
+			Description:            model.Description,
+			Color:                  model.Color,
+			Category:               firstCapability(model.Capabilities),
+			Capabilities:           model.Capabilities,
+			Enabled:                cfg.Enabled,
+			Tier:                   normalizeModelTier(cfg.Tier, model.ID),
+			ReasoningLevel:         reasoningLevel,
+			ReasoningLevelName:     reasoningLevelName,
+			ReasoningEffort:        reasoningEffort,
+			ReasoningParameter:     reasoningParameter,
+			ReasoningFastValue:     reasoningFastValue,
+			ReasoningThinkingValue: reasoningThinkingValue,
+			ReasoningExpertValue:   reasoningExpertValue,
+			Status:                 status,
+			StatusMessage:          cfg.StatusMsg,
+			CreatedAt:              cfg.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:              cfg.UpdatedAt.Format(time.RFC3339),
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"models": items, "total": len(items)})
+}
+
+type adminUpdateModelConfigRequest struct {
+	Enabled              *bool   `json:"enabled,omitempty"`
+	Tier                 *string `json:"tier,omitempty"`
+	ReasoningLevel       *string `json:"reasoning_level,omitempty"`
+	ReasoningFastValue   *string `json:"reasoning_fast_value,omitempty"`
+	ReasoningThinkingValue *string `json:"reasoning_thinking_value,omitempty"`
+	ReasoningExpertValue *string `json:"reasoning_expert_value,omitempty"`
+	Status               *string `json:"status,omitempty"`
+	StatusMessage        *string `json:"status_message,omitempty"`
+}
+
+func (h *AdminHandler) UpdateModelConfig(c *gin.Context) {
+	modelID := strings.TrimSpace(c.Param("id"))
+	if modelID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "模型 ID 不能为空"})
+		return
+	}
+
+	// 验证模型存在于代码中
+	found := false
+	for _, m := range modelmeta.AllModels() {
+		if m.ID == modelID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		c.JSON(http.StatusNotFound, gin.H{"error": "模型不存在"})
+		return
+	}
+
+	var req adminUpdateModelConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效"})
+		return
+	}
+
+	updates := map[string]any{}
+	if req.Enabled != nil {
+		updates["enabled"] = *req.Enabled
+	}
+	if req.Tier != nil {
+		tier := strings.TrimSpace(*req.Tier)
+		if tier != "" && tier != "basic" && tier != "advanced" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "tier 只能是 basic / advanced"})
+			return
+		}
+		updates["tier"] = tier
+	}
+	if req.ReasoningLevel != nil {
+		level := services.NormalizeReasoningLevel(*req.ReasoningLevel)
+		updates["reasoning_level"] = level
+	}
+	if req.ReasoningFastValue != nil {
+		updates["reasoning_fast_value"] = strings.TrimSpace(*req.ReasoningFastValue)
+	}
+	if req.ReasoningThinkingValue != nil {
+		updates["reasoning_thinking_value"] = strings.TrimSpace(*req.ReasoningThinkingValue)
+	}
+	if req.ReasoningExpertValue != nil {
+		updates["reasoning_expert_value"] = strings.TrimSpace(*req.ReasoningExpertValue)
+	}
+	if req.Status != nil {
+		status := strings.TrimSpace(*req.Status)
+		if status != "" && status != "available" && status != "disabled" && status != "maintenance" && status != "quota_exhausted" && status != "rate_limited" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "status 无效"})
+			return
+		}
+		updates["status"] = status
+	}
+	if req.StatusMessage != nil {
+		updates["status_msg"] = strings.TrimSpace(*req.StatusMessage)
+	}
+
+	if len(updates) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "没有可更新的字段"})
+		return
+	}
+
+	// upsert
+	var cfg models.ModelConfig
+	if err := h.db.Where("model_id = ?", modelID).First(&cfg).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			cfg = models.ModelConfig{ModelID: modelID, Enabled: true}
+			if v, ok := updates["enabled"]; ok {
+				cfg.Enabled = v.(bool)
+			}
+			if v, ok := updates["tier"]; ok {
+				cfg.Tier = v.(string)
+			}
+			if v, ok := updates["reasoning_level"]; ok {
+				cfg.ReasoningLevel = v.(string)
+			} else {
+				cfg.ReasoningLevel = services.ReasoningLevelThinking
+			}
+			if v, ok := updates["reasoning_fast_value"]; ok {
+				cfg.ReasoningFastValue = v.(string)
+			}
+			if v, ok := updates["reasoning_thinking_value"]; ok {
+				cfg.ReasoningThinkingValue = v.(string)
+			}
+			if v, ok := updates["reasoning_expert_value"]; ok {
+				cfg.ReasoningExpertValue = v.(string)
+			}
+			if v, ok := updates["status"]; ok {
+				cfg.Status = v.(string)
+			}
+			if v, ok := updates["status_msg"]; ok {
+				cfg.StatusMsg = v.(string)
+			}
+			if err := h.db.Create(&cfg).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "创建模型配置失败"})
+				return
+			}
+			if err := modelconfigseed.SyncDBToFile(h.db, modelmeta.AllModels()); err != nil {
+				c.JSON(http.StatusOK, gin.H{"config": cfg, "config_file_warning": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"config": cfg})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询模型配置失败"})
+		return
+	}
+
+	if err := h.db.Model(&cfg).Updates(updates).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新模型配置失败"})
+		return
+	}
+	if err := h.db.Where("model_id = ?", modelID).First(&cfg).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取更新后的模型配置失败"})
+		return
+	}
+	if err := modelconfigseed.SyncDBToFile(h.db, modelmeta.AllModels()); err != nil {
+		c.JSON(http.StatusOK, gin.H{"config": cfg, "config_file_warning": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"config": cfg})
+}
+
+type adminBatchModelConfigItem struct {
+	ModelID                string  `json:"model_id" binding:"required"`
+	Enabled                *bool   `json:"enabled,omitempty"`
+	Tier                   *string `json:"tier,omitempty"`
+	ReasoningLevel         *string `json:"reasoning_level,omitempty"`
+	ReasoningFastValue     *string `json:"reasoning_fast_value,omitempty"`
+	ReasoningThinkingValue *string `json:"reasoning_thinking_value,omitempty"`
+	ReasoningExpertValue   *string `json:"reasoning_expert_value,omitempty"`
+	Status                 *string `json:"status,omitempty"`
+	StatusMessage          *string `json:"status_message,omitempty"`
+}
+
+func (h *AdminHandler) BatchUpdateModelConfigs(c *gin.Context) {
+	var req []adminBatchModelConfigItem
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效"})
+		return
+	}
+
+	if len(req) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "更新列表不能为空"})
+		return
+	}
+
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		for _, item := range req {
+			updates := map[string]any{}
+			if item.Enabled != nil {
+				updates["enabled"] = *item.Enabled
+			}
+			if item.Tier != nil {
+				tier := strings.TrimSpace(*item.Tier)
+				if tier != "" && tier != "basic" && tier != "advanced" {
+					continue
+				}
+				updates["tier"] = tier
+			}
+			if item.ReasoningLevel != nil {
+				updates["reasoning_level"] = services.NormalizeReasoningLevel(*item.ReasoningLevel)
+			}
+			if item.ReasoningFastValue != nil {
+				updates["reasoning_fast_value"] = strings.TrimSpace(*item.ReasoningFastValue)
+			}
+			if item.ReasoningThinkingValue != nil {
+				updates["reasoning_thinking_value"] = strings.TrimSpace(*item.ReasoningThinkingValue)
+			}
+			if item.ReasoningExpertValue != nil {
+				updates["reasoning_expert_value"] = strings.TrimSpace(*item.ReasoningExpertValue)
+			}
+			if item.Status != nil {
+				status := strings.TrimSpace(*item.Status)
+				if status != "" && status != "available" && status != "disabled" && status != "maintenance" && status != "quota_exhausted" && status != "rate_limited" {
+					continue
+				}
+				updates["status"] = status
+			}
+			if item.StatusMessage != nil {
+				updates["status_msg"] = strings.TrimSpace(*item.StatusMessage)
+			}
+			if len(updates) == 0 {
+				continue
+			}
+
+			var cfg models.ModelConfig
+			if err := tx.Where("model_id = ?", item.ModelID).First(&cfg).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					cfg = models.ModelConfig{ModelID: item.ModelID, Enabled: true}
+					if v, ok := updates["enabled"]; ok {
+						cfg.Enabled = v.(bool)
+					}
+					if v, ok := updates["tier"]; ok {
+						cfg.Tier = v.(string)
+					}
+					if v, ok := updates["reasoning_level"]; ok {
+						cfg.ReasoningLevel = v.(string)
+					} else {
+						cfg.ReasoningLevel = services.ReasoningLevelThinking
+					}
+					if v, ok := updates["reasoning_fast_value"]; ok {
+						cfg.ReasoningFastValue = v.(string)
+					}
+					if v, ok := updates["reasoning_thinking_value"]; ok {
+						cfg.ReasoningThinkingValue = v.(string)
+					}
+					if v, ok := updates["reasoning_expert_value"]; ok {
+						cfg.ReasoningExpertValue = v.(string)
+					}
+					if v, ok := updates["status"]; ok {
+						cfg.Status = v.(string)
+					}
+					if v, ok := updates["status_msg"]; ok {
+						cfg.StatusMsg = v.(string)
+					}
+					if err := tx.Create(&cfg).Error; err != nil {
+						return err
+					}
+					continue
+				}
+				return err
+			}
+			if err := tx.Model(&cfg).Updates(updates).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "批量更新模型配置失败"})
+		return
+	}
+
+	if err := modelconfigseed.SyncDBToFile(h.db, modelmeta.AllModels()); err != nil {
+		c.JSON(http.StatusOK, gin.H{"updated": len(req), "config_file_warning": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"updated": len(req)})
 }
 
 func (h *AdminHandler) Tasks(c *gin.Context) {

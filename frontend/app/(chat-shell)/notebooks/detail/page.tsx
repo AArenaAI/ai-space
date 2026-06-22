@@ -3,15 +3,16 @@
 import { Suspense, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, BookOpen, FileText, Globe, Loader2, MoreVertical, Plus, Search, Zap, AlertCircle, CheckCircle2, Clock3, Check, ImageIcon, Upload, Trash2, Pencil } from "lucide-react";
+import { ArrowLeft, FileText, Loader2, MoreVertical, Plus, AlertCircle, CheckCircle2, Clock3, Check, ImageIcon, Upload, Trash2, Pencil, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import ChatInterface from "@/components/chat/ChatInterface";
 import { NotebookSourcePreviewDrawer } from "@/components/notebook/NotebookSourcePreviewDrawer";
-import { NotebookStudioPanel, type NotebookStudioActionId, type NotebookStudioArtifact, type NotebookStudioFlashcard, type NotebookStudioQuizQuestion, type NotebookStudioMindmapEdge, type NotebookStudioMindmapNode, type NotebookStudioReportSection, type NotebookStudioReportTable, type NotebookStudioSource, type NotebookStudioTableRow, type NotebookStudioTextSection } from "@/components/notebook/NotebookStudioPanel";
+import { NotebookStudioPanel, type NotebookSourceOpenTarget, type NotebookStudioActionId, type NotebookStudioArtifact, type NotebookStudioCitation, type NotebookStudioFlashcard, type NotebookStudioGenerateOptions, type NotebookStudioMindmapEdge, type NotebookStudioMindmapNode, type NotebookStudioNote, type NotebookStudioQuizQuestion, type NotebookStudioReportSection, type NotebookStudioReportTable, type NotebookStudioSource, type NotebookStudioTableRow, type NotebookStudioTextSection } from "@/components/notebook/NotebookStudioPanel";
 import { NotebookUrlSourceDialog } from "@/components/notebook/NotebookUrlSourceDialog";
 import { MODELS } from "@/hooks/useChat";
-import { addNotebookFile, addNotebookUrlSource, deleteNotebookArtifact, fetchNotebook, fetchNotebookArtifacts, fetchNotebookFileContent, generateNotebookArtifact, removeNotebookFile, suggestNotebookReportFormats, updateNotebook, updateNotebookArtifact, updateNotebookFile, type NotebookReportFormatSuggestion } from "@/lib/notebookApi";
-import { normalizeNotebookError, showNotebookError, uploadNotebookSourceFile } from "@/lib/notebookErrors";
+import { addNotebookFile, addNotebookUrlSource, deleteNotebookArtifact, fetchNotebook, fetchNotebookArtifacts, fetchNotebookFileContent, generateNotebookArtifact, reindexNotebookFile, removeNotebookFile, suggestNotebookReportFormats, updateNotebook, updateNotebookArtifact, updateNotebookFile, type NotebookReportFormatSuggestion } from "@/lib/notebookApi";
+import { READONLY_NOTEBOOKS, readonlyNotebookFileContent, readonlyNotebookFiles } from "@/lib/notebookDemos";
+import { normalizeNotebookError, showNotebookError, uploadNotebookSourceFile, isNotebookSourceFileSupported, NOTEBOOK_SOURCE_FILE_ACCEPT } from "@/lib/notebookErrors";
 import type { Notebook, NotebookArtifact as PersistedNotebookArtifact, NotebookFile, NotebookFileContent } from "@/lib/notebookTypes";
 import { useI18n, type LanguageCode } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -35,20 +36,59 @@ function notebookAutoSummaryStorageKey(notebookId: number, fileId: number) {
   return `notebook:${notebookId}:auto-summary-file:${fileId}`;
 }
 
+function notebookNotesStorageKey(notebookId: number) {
+  return `notebook:${notebookId}:studio-notes`;
+}
+
+function readStoredNotebookNotes(notebookId: number): NotebookStudioNote[] {
+  try {
+    const raw = localStorage.getItem(notebookNotesStorageKey(notebookId));
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((item) => item && typeof item.id === "string" && typeof item.title === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredNotebookNotes(notebookId: number, notes: NotebookStudioNote[]) {
+  try {
+    localStorage.setItem(notebookNotesStorageKey(notebookId), JSON.stringify(notes.slice(0, 1000)));
+  } catch {
+    toast.error("笔记保存到本地失败");
+  }
+}
+
+const NOTEBOOK_DEFAULT_COVER_LOGO = "/brand-dark-logo.png";
+
 const NOTEBOOK_COVER_PRESETS = [
-  { id: "book-open", icon: "🚀", className: "bg-gradient-to-br from-violet-100 via-indigo-50 to-slate-100 text-slate-950" },
-  { id: "aurora", icon: "✨", className: "bg-gradient-to-br from-cyan-100 via-sky-100 to-indigo-100 text-slate-950" },
-  { id: "sunset", icon: "🌅", className: "bg-gradient-to-br from-amber-100 via-orange-100 to-rose-100 text-slate-950" },
-  { id: "forest", icon: "🌿", className: "bg-gradient-to-br from-emerald-100 via-teal-100 to-lime-100 text-slate-950" },
-  { id: "ink", icon: "📘", className: "bg-gradient-to-br from-slate-800 via-indigo-900 to-violet-900 text-white" },
+  { id: "aispace-logo", icon: NOTEBOOK_DEFAULT_COVER_LOGO, className: "bg-gradient-to-br from-[#edf4ff] via-[#eef0ff] to-[#f6efff] text-slate-950" },
 ];
 
 function notebookCoverPreset(coverIcon?: string) {
   return NOTEBOOK_COVER_PRESETS.find((preset) => preset.id === coverIcon) || NOTEBOOK_COVER_PRESETS[0];
 }
 
+function notebookSourceIcon(file?: NotebookFile) {
+  if (!file) return "FILE";
+  const mime = (file.file.mime_type || "").toLowerCase();
+  const filename = (file.file.filename || "").toLowerCase();
+  if (mime.includes("pdf") || filename.endsWith(".pdf")) return "PDF";
+  if (mime.includes("word") || filename.endsWith(".doc") || filename.endsWith(".docx")) return "DOC";
+  if (mime.includes("spreadsheet") || mime.includes("excel") || filename.endsWith(".xls") || filename.endsWith(".xlsx") || filename.endsWith(".csv")) return "XLS";
+  if (mime.includes("presentation") || filename.endsWith(".ppt") || filename.endsWith(".pptx")) return "PPT";
+  if (mime.includes("image/")) return "IMG";
+  if (mime.includes("uri-list") || mime.includes("html") || filename.startsWith("http") || filename.endsWith(".url")) return "WEB";
+  if (mime.includes("markdown") || filename.endsWith(".md")) return "MD";
+  if (mime.includes("text") || filename.endsWith(".txt")) return "TXT";
+  return "FILE";
+}
+
 function stripFileExtension(filename: string) {
   return filename.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
+}
+
+function displaySourceFilename(filename: string) {
+  return filename.replace(/\.url$/i, "");
 }
 
 function buildAutoNotebookTitle(file?: NotebookFile) {
@@ -102,10 +142,25 @@ function readNotebookUploadedCover(key: string) {
   }
 }
 
-function SourcePdfIcon() {
+function sourceIconClass(label: string) {
+  switch (label) {
+    case "PDF": return "bg-red-500 text-white";
+    case "DOC": return "bg-blue-500 text-white";
+    case "XLS": return "bg-emerald-500 text-white";
+    case "PPT": return "bg-orange-500 text-white";
+    case "IMG": return "bg-fuchsia-500 text-white";
+    case "WEB": return "bg-cyan-500 text-white";
+    case "MD": return "bg-slate-700 text-white";
+    case "TXT": return "bg-zinc-500 text-white";
+    default: return "bg-surface-elevated text-text-secondary ring-1 ring-surface-border";
+  }
+}
+
+function SourceFileIcon({ file }: { file: NotebookFile }) {
+  const label = notebookSourceIcon(file);
   return (
-    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] bg-red-500 text-[8px] font-bold leading-none tracking-[-0.02em] text-white shadow-sm">
-      PDF
+    <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] text-[8px] font-bold leading-none tracking-[-0.02em] shadow-sm", sourceIconClass(label))}>
+      {label}
     </span>
   );
 }
@@ -144,6 +199,16 @@ function statusDetail(file: NotebookFile, t: Translate) {
   return null;
 }
 
+function canRetryNotebookIndex(file: NotebookFile) {
+  const parse = file.file.parse_status;
+  const embed = file.file.embedding_status;
+  return parse === "done" && (embed === "error" || embed === "skipped");
+}
+
+function retryNotebookIndexLabel(file: NotebookFile, t: Translate) {
+  return file.file.embedding_status === "skipped" ? t("notebook.startIndexing") : t("notebook.retryIndexing");
+}
+
 function normalizeFlashcardArtifactTitle(title: string) {
   const trimmed = title.trim();
   if (trimmed === "摘要") return "闪卡";
@@ -151,13 +216,14 @@ function normalizeFlashcardArtifactTitle(title: string) {
 }
 
 function toStudioArtifact(artifact: PersistedNotebookArtifact): NotebookStudioArtifact | null {
-  const content = artifact.content as { rows?: NotebookStudioTableRow[]; sections?: NotebookStudioTextSection[] | NotebookStudioReportSection[]; nodes?: NotebookStudioMindmapNode[]; edges?: NotebookStudioMindmapEdge[]; cards?: NotebookStudioFlashcard[]; questions?: NotebookStudioQuizQuestion[]; format_id?: string; format_title?: string; executive_summary?: string; tables?: NotebookStudioReportTable[]; orientation?: string; style?: string; detail_level?: string; prompt?: string; image_url?: string; color_scheme?: Record<string, string> } | null;
+  const content = artifact.content as { rows?: NotebookStudioTableRow[]; sections?: NotebookStudioTextSection[] | NotebookStudioReportSection[]; nodes?: NotebookStudioMindmapNode[]; edges?: NotebookStudioMindmapEdge[]; cards?: NotebookStudioFlashcard[]; questions?: NotebookStudioQuizQuestion[]; format_id?: string; format_title?: string; executive_summary?: string; tables?: NotebookStudioReportTable[]; orientation?: string; style?: string; detail_level?: string; prompt?: string; html?: string; image_prompt?: string; image_url?: string; error_message?: string; color_scheme?: Record<string, string> } | null;
   const base = {
     id: String(artifact.id),
     title: artifact.type === "flashcards" ? normalizeFlashcardArtifactTitle(artifact.title) : artifact.title,
     subtitle: artifact.subtitle || "",
     createdAt: artifact.created_at,
     sourceCount: artifact.source_count || 0,
+    sourceFileIds: Array.isArray(artifact.source_file_ids) ? artifact.source_file_ids.filter((id) => Number.isFinite(id) && id > 0) : [],
   };
   if (artifact.type === "data-table") {
     return { ...base, type: "table", rows: Array.isArray(content?.rows) ? content.rows : [] };
@@ -198,7 +264,10 @@ function toStudioArtifact(artifact: PersistedNotebookArtifact): NotebookStudioAr
       style: typeof content?.style === "string" ? content.style : "auto",
       detail_level: typeof content?.detail_level === "string" ? content.detail_level : "standard",
       prompt: typeof content?.prompt === "string" ? content.prompt : "",
+      html: typeof content?.html === "string" ? content.html : "",
+      image_prompt: typeof content?.image_prompt === "string" ? content.image_prompt : "",
       image_url: typeof content?.image_url === "string" ? content.image_url : "",
+      error_message: typeof content?.error_message === "string" ? content.error_message : "",
       color_scheme: typeof content?.color_scheme === "object" && content?.color_scheme ? content.color_scheme : undefined,
     };
   }
@@ -209,16 +278,50 @@ function safeFilename(value: string) {
   return (value || "notebook-output").replace(/[\\/:*?\"<>|]+/g, "-").replace(/\s+/g, " ").trim().slice(0, 80) || "notebook-output";
 }
 
+function escapeMarkdownTableCell(value: string) {
+  return String(value || "").replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+}
+
+function citationMarker(citation: NotebookStudioCitation) {
+  return `[${citation.source_index || 1}]`;
+}
+
+function citationToExportText(citation: NotebookStudioCitation) {
+  const parts = [citationMarker(citation), `file:${citation.file_id}`];
+  if (citation.page) parts.push(`page:${citation.page}`);
+  if (citation.chunk_index !== undefined && citation.chunk_index !== null) parts.push(`chunk:${citation.chunk_index}`);
+  if (citation.quote) parts.push(`quote:${citation.quote}`);
+  return parts.join(" ");
+}
+
+function citationsToExportText(citations?: NotebookStudioCitation[]) {
+  if (!citations?.length) return "";
+  return citations.map(citationToExportText).join("; ");
+}
+
+function appendCitationBlock(lines: string[], citations?: NotebookStudioCitation[]) {
+  if (!citations?.length) return;
+  lines.push("", "**引用来源**");
+  citations.forEach((citation) => {
+    const meta = [`file:${citation.file_id}`];
+    if (citation.page) meta.push(`page:${citation.page}`);
+    if (citation.chunk_index !== undefined && citation.chunk_index !== null) meta.push(`chunk:${citation.chunk_index}`);
+    lines.push(`- ${citationMarker(citation)} ${meta.join(" · ")}${citation.quote ? ` — ${citation.quote}` : ""}`);
+  });
+}
+
+function tableArtifactToMarkdown(artifact: Extract<NotebookStudioArtifact, { type: "table" }>) {
+  const lines = [`# ${artifact.title}`, "", artifact.subtitle, "", "| 功能模块 / 来源 | 具体能力 / 内容摘要 | 状态 | 核心技术 / 处理方式 | 业务价值 | 来源 | 结构化引用 |", "| --- | --- | --- | --- | --- | --- | --- |"];
+  artifact.rows.forEach((row) => {
+    lines.push(`| ${escapeMarkdownTableCell(row.module)} | ${escapeMarkdownTableCell(row.capability)} | ${escapeMarkdownTableCell(row.status)} | ${escapeMarkdownTableCell(row.implementation)} | ${escapeMarkdownTableCell(row.value)} | ${escapeMarkdownTableCell(row.source)} | ${escapeMarkdownTableCell(citationsToExportText(row.citations))} |`);
+  });
+  return lines.join("\n").trim() + "\n";
+}
+
 function artifactToMarkdown(artifact: NotebookStudioArtifact) {
+  if (artifact.type === "table") return tableArtifactToMarkdown(artifact);
   const lines = [`# ${artifact.title}`, "", artifact.subtitle, ""].filter((line) => line !== undefined);
   switch (artifact.type) {
-    case "table":
-      lines.push("| 功能模块 / 来源 | 具体能力 / 内容摘要 | 状态 | 核心技术 / 处理方式 | 业务价值 | 来源 |");
-      lines.push("| --- | --- | --- | --- | --- | --- |");
-      artifact.rows.forEach((row) => {
-        lines.push(`| ${row.module} | ${row.capability} | ${row.status} | ${row.implementation} | ${row.value} | ${row.source} |`);
-      });
-      break;
     case "mindmap":
       lines.push("## 节点", "");
       artifact.nodes.forEach((node) => {
@@ -243,17 +346,21 @@ function artifactToMarkdown(artifact: NotebookStudioArtifact) {
         lines.push("", `正确答案：${question.correct_option_id}`, question.explanation, "");
       });
       break;
-    case "report":
-      lines.push(`_Format: ${artifact.formatTitle}_`, "", "## Executive Summary", "", artifact.executiveSummary, "");
-      artifact.sections.forEach((section) => {
-        lines.push(`## ${section.number ? `${section.number}. ` : ""}${section.heading}`);
+    case "report": {
+      const appendReportSection = (section: NotebookStudioReportSection, depth = 2) => {
+        const prefix = "#".repeat(Math.min(Math.max(depth, 2), 4));
+        lines.push(`${prefix} ${section.number ? `${section.number}. ` : ""}${section.heading}`);
         if (section.body) lines.push("", section.body);
         if (section.bullets?.length) {
           lines.push("");
           section.bullets.forEach((bullet) => lines.push(`- ${bullet}`));
         }
+        appendCitationBlock(lines, section.citations);
         lines.push("");
-      });
+        section.subsections?.forEach((subsection) => appendReportSection(subsection, depth + 1));
+      };
+      lines.push(`_Format: ${artifact.formatTitle}_`, "", "## Executive Summary", "", artifact.executiveSummary, "");
+      artifact.sections.forEach((section) => appendReportSection(section));
       artifact.tables.forEach((table) => {
         lines.push(`## ${table.title}`, "");
         if (table.headers.length) {
@@ -264,6 +371,7 @@ function artifactToMarkdown(artifact: NotebookStudioArtifact) {
         }
       });
       break;
+    }
     case "summary":
     case "faq":
     case "briefing":
@@ -280,18 +388,49 @@ function artifactToMarkdown(artifact: NotebookStudioArtifact) {
     case "infographic":
       lines.push("## Infographic", "", `- Orientation: ${artifact.orientation}`, `- Style: ${artifact.style}`, `- Detail level: ${artifact.detail_level}`, "");
       if (artifact.prompt) lines.push("## Custom prompt", "", artifact.prompt, "");
+      if (artifact.html) lines.push("## HTML", "", artifact.html, "");
+      if (artifact.image_prompt) lines.push("## Image prompt", "", artifact.image_prompt, "");
+      if (artifact.error_message) lines.push("## Generation error", "", artifact.error_message, "");
       if (artifact.image_url) lines.push("## Image", "", artifact.image_url, "");
       break;
   }
   return lines.join("\n").trim() + "\n";
 }
 
+function regenerationRequestForArtifact(artifact: NotebookStudioArtifact): { type: string; visualType: NotebookStudioActionId; options?: { orientation?: string; style?: string; detail_level?: string; prompt?: string } } | null {
+  switch (artifact.type) {
+    case "table":
+      return { type: "table", visualType: "table" };
+    case "mindmap":
+      return { type: "mindmap", visualType: "mindmap" };
+    case "flashcards":
+      return { type: "flashcards", visualType: "flashcards" };
+    case "quiz":
+      return { type: "quiz", visualType: "quiz" };
+    case "report":
+      return { type: `report:${artifact.formatId || "briefing-document"}`, visualType: "report" };
+    case "infographic":
+      return { type: "infographic", visualType: "infographic", options: { orientation: artifact.orientation, style: artifact.style, detail_level: artifact.detail_level, prompt: artifact.prompt } };
+    case "summary":
+    case "faq":
+    case "briefing":
+      return { type: artifact.type, visualType: "summary" };
+    default:
+      return null;
+  }
+}
+
+function artifactSourceIdsForRegeneration(artifact: NotebookStudioArtifact, files: NotebookFile[]) {
+  if (Array.isArray(artifact.sourceFileIds) && artifact.sourceFileIds.length > 0) return artifact.sourceFileIds;
+  return files.slice(0, Math.max(0, artifact.sourceCount || 0)).map((file) => file.file_id);
+}
+
 function artifactToCsv(artifact: NotebookStudioArtifact) {
   if (artifact.type !== "table") return artifactToMarkdown(artifact);
   const escape = (value: string) => `"${String(value || "").replace(/"/g, '""')}"`;
   const rows = [
-    ["功能模块 / 来源", "具体能力 / 内容摘要", "状态", "核心技术 / 处理方式", "业务价值", "来源"],
-    ...artifact.rows.map((row) => [row.module, row.capability, row.status, row.implementation, row.value, row.source]),
+    ["功能模块 / 来源", "具体能力 / 内容摘要", "状态", "核心技术 / 处理方式", "业务价值", "来源", "结构化引用"],
+    ...artifact.rows.map((row) => [row.module, row.capability, row.status, row.implementation, row.value, row.source, citationsToExportText(row.citations)]),
   ];
   return rows.map((row) => row.map(escape).join(",")).join("\n") + "\n";
 }
@@ -306,6 +445,56 @@ function downloadTextFile(filename: string, content: string, type: string) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+function escapeHtml(value: string) {
+  return String(value || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function reportArtifactToPrintHtml(artifact: Extract<NotebookStudioArtifact, { type: "report" }>) {
+  const sections = artifact.sections.map((section) => `
+    <section>
+      <h2>${escapeHtml(section.number ? `${section.number}. ${section.heading}` : section.heading)}</h2>
+      ${section.body ? `<p>${escapeHtml(section.body).replace(/\n/g, "<br>")}</p>` : ""}
+      ${section.bullets?.length ? `<ul>${section.bullets.map((bullet) => `<li>${escapeHtml(bullet)}</li>`).join("")}</ul>` : ""}
+    </section>
+  `).join("");
+  const tables = artifact.tables.map((table) => `
+    <section>
+      <h2>${escapeHtml(table.title)}</h2>
+      <table>
+        <thead><tr>${table.headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
+        <tbody>${table.rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody>
+      </table>
+    </section>
+  `).join("");
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(artifact.title)}</title>
+  <style>
+    @page { margin: 18mm; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #111827; line-height: 1.65; }
+    h1 { font-size: 28px; margin: 0 0 8px; }
+    .subtitle { color: #6b7280; margin-bottom: 24px; }
+    .summary { border-left: 4px solid #6366f1; padding: 12px 16px; background: #f5f7ff; margin: 20px 0 28px; }
+    h2 { font-size: 18px; margin: 26px 0 10px; page-break-after: avoid; }
+    p { margin: 0 0 12px; }
+    ul { margin: 8px 0 14px 22px; padding: 0; }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0 24px; font-size: 12px; }
+    th, td { border: 1px solid #d1d5db; padding: 8px 10px; vertical-align: top; }
+    th { background: #f3f4f6; text-align: left; }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(artifact.title)}</h1>
+  <div class="subtitle">${escapeHtml(artifact.subtitle)} · ${escapeHtml(artifact.formatTitle || "Report")}</div>
+  <div class="summary"><strong>Executive Summary</strong><br>${escapeHtml(artifact.executiveSummary).replace(/\n/g, "<br>")}</div>
+  ${sections}
+  ${tables}
+</body>
+</html>`;
 }
 
 const FIXED_REPORT_FORMATS: NotebookReportFormatSuggestion[] = [
@@ -512,6 +701,108 @@ function RenameSourceDialog({
   );
 }
 
+function RenameArtifactDialog({
+  open,
+  artifact,
+  value,
+  saving,
+  onChange,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  artifact: NotebookStudioArtifact | null;
+  value: string;
+  saving: boolean;
+  onChange: (value: string) => void;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  if (!open || !artifact) return null;
+  return (
+    <div className="fixed inset-0 z-[160] flex items-center justify-center bg-black/45 p-5 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="w-[min(460px,94vw)] rounded-[24px] border border-surface-border bg-surface-card p-6 shadow-2xl">
+        <div className="mb-5 flex items-start gap-3">
+          <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#111827]/10 text-[#111827] dark:bg-white/10 dark:text-white">
+            <Pencil className="h-5 w-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h3 className="text-base font-semibold text-text-primary">重命名输出文件</h3>
+            <p className="mt-1 text-sm leading-6 text-text-secondary">修改这个 Studio 输出文件在列表中的显示名称。</p>
+          </div>
+        </div>
+        <label className="mb-2 block text-sm font-semibold text-text-primary">输出文件名称</label>
+        <input
+          autoFocus
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => { if (event.key === "Enter" && value.trim() && !saving) onConfirm(); }}
+          className="mb-5 h-11 w-full rounded-xl border border-surface-border bg-surface-elevated px-3 text-sm text-text-primary outline-none transition focus:border-[#111827] focus:bg-surface-card dark:focus:border-white/70"
+          placeholder="输入输出文件名称"
+        />
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} disabled={saving} className="rounded-full border border-surface-border px-4 py-2 text-sm font-semibold text-text-secondary transition hover:bg-surface-hover disabled:opacity-60">取消</button>
+          <button type="button" onClick={onConfirm} disabled={saving || !value.trim()} className="inline-flex items-center gap-2 rounded-full bg-[#111827] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#1f2937] disabled:opacity-60">
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            确认修改
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RenameNotebookDialog({
+  open,
+  notebook,
+  value,
+  saving,
+  onChange,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  notebook: Notebook | null;
+  value: string;
+  saving: boolean;
+  onChange: (value: string) => void;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  if (!open || !notebook) return null;
+  return (
+    <div className="fixed inset-0 z-[160] flex items-center justify-center bg-black/45 p-5 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="w-[min(460px,94vw)] rounded-[24px] border border-surface-border bg-surface-card p-6 shadow-2xl">
+        <div className="mb-5 flex items-start gap-3">
+          <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#111827]/10 text-[#111827] dark:bg-white/10 dark:text-white">
+            <Pencil className="h-5 w-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h3 className="text-base font-semibold text-text-primary">重命名 Notebook</h3>
+            <p className="mt-1 text-sm leading-6 text-text-secondary">修改这个 Notebook 的标题。</p>
+          </div>
+        </div>
+        <label className="mb-2 block text-sm font-semibold text-text-primary">Notebook 名称</label>
+        <input
+          autoFocus
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => { if (event.key === "Enter" && value.trim() && !saving) onConfirm(); }}
+          className="mb-5 h-11 w-full rounded-xl border border-surface-border bg-surface-elevated px-3 text-sm text-text-primary outline-none transition focus:border-[#111827] focus:bg-surface-card dark:focus:border-white/70"
+          placeholder="输入 Notebook 名称"
+        />
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} disabled={saving} className="rounded-full border border-surface-border px-4 py-2 text-sm font-semibold text-text-secondary transition hover:bg-surface-hover disabled:opacity-60">取消</button>
+          <button type="button" onClick={onConfirm} disabled={saving || !value.trim()} className="inline-flex items-center gap-2 rounded-full bg-[#111827] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#1f2937] disabled:opacity-60">
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            确认修改
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NotebookCustomizeDialog({
   open,
   notebook,
@@ -559,14 +850,17 @@ function NotebookCustomizeDialog({
         <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-5">
           <div className={cn("relative mb-5 flex h-40 items-center justify-center overflow-hidden rounded-[22px]", uploadedImage ? "bg-slate-900" : activePreset.className)}>
             {uploadedImage ? (
-              <img src={uploadedImage} alt="笔记本底图预览" className="absolute inset-0 h-full w-full object-cover" />
+              <>
+                <img src={uploadedImage} alt="笔记本底图预览" className="absolute inset-0 h-full w-full object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-black/15 to-transparent" />
+              </>
             ) : (
               <>
-                <div className="pointer-events-none absolute -right-8 -bottom-16 text-[150px] font-black leading-none text-white/35 opacity-80">M</div>
-                <div className="relative z-10 text-[46px] leading-none">{activePreset.icon}</div>
+                <div className="pointer-events-none absolute -right-10 -bottom-14 h-36 w-36 rotate-12 rounded-[34px] bg-fuchsia-400/10" />
+                <div className="pointer-events-none absolute right-10 bottom-4 h-20 w-28 -rotate-6 rounded-[28px] bg-indigo-300/10" />
+                <img src={NOTEBOOK_DEFAULT_COVER_LOGO} alt="AI Space" className="relative z-10 h-14 w-14 object-contain drop-shadow-sm" />
               </>
             )}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent" />
             <input
               ref={fileInputRef}
               type="file"
@@ -589,7 +883,7 @@ function NotebookCustomizeDialog({
                   className={cn("flex h-16 items-center justify-center rounded-2xl border text-2xl transition", preset.className, coverIcon === preset.id ? "border-brand ring-2 ring-brand/25" : "border-surface-border hover:border-brand/50")}
                   aria-label={preset.id}
                 >
-                  {preset.icon}
+                  <img src={preset.icon} alt="AI Space" className="h-8 w-8 object-contain drop-shadow-sm" />
                 </button>
               ))}
             </div>
@@ -611,6 +905,9 @@ function NotebookDetailContent() {
   const { t, language } = useI18n();
   const searchParams = useSearchParams();
   const notebookId = Number(searchParams.get("notebook_id") || searchParams.get("id"));
+  const isReadonlyNotebook = notebookId < 0;
+  const readonlyNotebook = READONLY_NOTEBOOKS.find((item) => item.id === notebookId) || null;
+  const writableNotebookId = isReadonlyNotebook ? 0 : notebookId;
   const conversationId = searchParams.get("conversation_id") ? Number(searchParams.get("conversation_id")) : undefined;
   const [notebook, setNotebook] = useState<Notebook | null>(null);
   const [files, setFiles] = useState<NotebookFile[]>([]);
@@ -620,13 +917,15 @@ function NotebookDetailContent() {
   const [urlDialogOpen, setUrlDialogOpen] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
   const [selectedFileIds, setSelectedFileIds] = useState<number[]>([]);
-  const [sourcesWidth, setSourcesWidth] = useState(340);
-  const [studioWidth, setStudioWidth] = useState(390);
+  const [sourcesWidth, setSourcesWidth] = useState(300);
+  const [studioWidth, setStudioWidth] = useState(340);
   const [previewSource, setPreviewSource] = useState<NotebookFile | null>(null);
   const [previewData, setPreviewData] = useState<NotebookFileContent | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<NotebookSourceOpenTarget | null>(null);
   const [studioArtifacts, setStudioArtifacts] = useState<NotebookStudioArtifact[]>([]);
+  const [studioNotes, setStudioNotes] = useState<NotebookStudioNote[]>([]);
   const [activeStudioArtifactId, setActiveStudioArtifactId] = useState<string | null>(null);
   const [generatingStudioType, setGeneratingStudioType] = useState<NotebookStudioActionId | null>(null);
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
@@ -635,21 +934,28 @@ function NotebookDetailContent() {
   const [loadingReportSuggestions, setLoadingReportSuggestions] = useState(false);
   const [externalChatSendRequest, setExternalChatSendRequest] = useState<{ id: number; content: string; hidden?: boolean } | null>(null);
   const [customizeDialogOpen, setCustomizeDialogOpen] = useState(false);
-  const [customCoverIcon, setCustomCoverIcon] = useState("book-open");
+  const [customCoverIcon, setCustomCoverIcon] = useState("aispace-logo");
   const [savingNotebookCustom, setSavingNotebookCustom] = useState(false);
+  const [renameNotebookDialogOpen, setRenameNotebookDialogOpen] = useState(false);
+  const [notebookRenameValue, setNotebookRenameValue] = useState("");
+  const [renamingNotebook, setRenamingNotebook] = useState(false);
   const [sourceMenuFileId, setSourceMenuFileId] = useState<number | null>(null);
   const [sourceToRemove, setSourceToRemove] = useState<NotebookFile | null>(null);
   const [removingSource, setRemovingSource] = useState(false);
   const [sourceToRename, setSourceToRename] = useState<NotebookFile | null>(null);
   const [sourceRenameValue, setSourceRenameValue] = useState("");
   const [renamingSource, setRenamingSource] = useState(false);
+  const [artifactToRename, setArtifactToRename] = useState<NotebookStudioArtifact | null>(null);
+  const [artifactRenameValue, setArtifactRenameValue] = useState("");
+  const [renamingArtifact, setRenamingArtifact] = useState(false);
+  const [reindexingSourceFileId, setReindexingSourceFileId] = useState<number | null>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const selectionInitializedRef = useRef(false);
   const loadStudioArtifacts = async () => {
-    if (!notebookId) return;
+    if (!writableNotebookId) return;
     try {
-      const persisted = await fetchNotebookArtifacts(notebookId);
+      const persisted = await fetchNotebookArtifacts(writableNotebookId);
       const next = persisted.map(toStudioArtifact).filter((item): item is NotebookStudioArtifact => Boolean(item));
       setStudioArtifacts(next);
       setActiveStudioArtifactId((prev) => (prev && next.some((item) => item.id === prev) ? prev : null));
@@ -660,14 +966,35 @@ function NotebookDetailContent() {
 
   const load = async () => {
     if (!notebookId) { setLoading(false); return; }
+    if (isReadonlyNotebook) {
+      setLoading(true);
+      if (readonlyNotebook) {
+        const readonlyFiles = readonlyNotebookFiles(readonlyNotebook);
+        setNotebook(readonlyNotebook);
+        setFiles(readonlyFiles);
+        setSelectedFileIds(readonlyFiles.map((file) => file.file_id));
+        setStudioArtifacts([]);
+        setStudioNotes(readStoredNotebookNotes(readonlyNotebook.id));
+        setActiveStudioArtifactId(null);
+        setPageError(null);
+        selectionInitializedRef.current = true;
+      } else {
+        setNotebook(null);
+        setFiles([]);
+        setPageError(t("notebook.loadFailed"));
+      }
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const data = await fetchNotebook(notebookId);
+      const data = await fetchNotebook(writableNotebookId);
       setNotebook(data.notebook);
+      setStudioNotes(readStoredNotebookNotes(data.notebook.id));
       const nextFiles = data.files || [];
       setFiles(nextFiles);
       setSelectedFileIds((prev) => {
-        const baseline = selectionInitializedRef.current ? prev : (readStoredSelectedFileIds(notebookId) || []);
+        const baseline = selectionInitializedRef.current ? prev : (readStoredSelectedFileIds(writableNotebookId) || []);
         selectionInitializedRef.current = true;
         return reconcileSelectedFileIds(baseline, nextFiles);
       });
@@ -688,25 +1015,25 @@ function NotebookDetailContent() {
   }, [notebookId]);
 
   useEffect(() => {
-    if (!notebookId || !selectionInitializedRef.current) return;
-    localStorage.setItem(notebookSelectionStorageKey(notebookId), JSON.stringify(selectedFileIds));
-  }, [notebookId, selectedFileIds]);
+    if (!writableNotebookId || !selectionInitializedRef.current) return;
+    localStorage.setItem(notebookSelectionStorageKey(writableNotebookId), JSON.stringify(selectedFileIds));
+  }, [writableNotebookId, selectedFileIds]);
 
   useEffect(() => {
     if (!notebook) return;
-    setCustomCoverIcon(notebook.cover_icon || "book-open");
+    setCustomCoverIcon(notebook.cover_icon || "aispace-logo");
   }, [notebook?.id, notebook?.cover_icon]);
 
   useEffect(() => {
-    if (!notebookId || !notebook || files.length !== 1) return;
+    if (!writableNotebookId || !notebook || files.length !== 1) return;
     const firstFile = files[0];
     if (!firstFile || !isNotebookFileReady(firstFile)) return;
-    const storageKey = notebookAutoSummaryStorageKey(notebookId, firstFile.file_id);
+    const storageKey = notebookAutoSummaryStorageKey(writableNotebookId, firstFile.file_id);
     if (localStorage.getItem(storageKey) === "done") return;
     localStorage.setItem(storageKey, "done");
     const autoTitle = buildAutoNotebookTitle(firstFile);
     if (!notebook.title || notebook.title === "未命名笔记本") {
-      updateNotebook(notebookId, { title: autoTitle }).then((updated) => {
+      updateNotebook(writableNotebookId, { title: autoTitle }).then((updated) => {
         setNotebook(updated);
       }).catch((error) => {
         showNotebookError(error, "自动更新笔记本标题失败");
@@ -718,15 +1045,16 @@ function NotebookDetailContent() {
       content: buildNotebookAutoSummaryPrompt(firstFile, autoTitle),
       hidden: true,
     });
-  }, [notebookId, notebook, files]);
+  }, [writableNotebookId, notebook, files]);
 
   const readyCount = useMemo(() => files.filter(isNotebookFileReady).length, [files]);
 
   const firstFile = files[0];
   const heroTitle = notebook?.title && notebook.title !== "未命名笔记本" ? notebook.title : buildAutoNotebookTitle(firstFile);
-  const heroCoverIcon = notebook?.cover_icon || "book-open";
+  const heroCoverIcon = notebook?.cover_icon || "aispace-logo";
   const heroCover = notebookCoverPreset(heroCoverIcon);
   const heroCoverImageUrl = heroCoverIcon.startsWith("uploaded:") ? readNotebookUploadedCover(heroCoverIcon) : "";
+  const heroIcon = undefined;
 
   const studioSourceFiles = useMemo<NotebookStudioSource[]>(() => files.map((file) => ({
     id: file.file_id,
@@ -799,15 +1127,15 @@ function NotebookDetailContent() {
   };
 
   const openCustomizeDialog = () => {
-    setCustomCoverIcon(notebook?.cover_icon || "book-open");
+    setCustomCoverIcon(notebook?.cover_icon || "aispace-logo");
     setCustomizeDialogOpen(true);
   };
 
   const saveNotebookCustom = async () => {
-    if (!notebookId) return;
+    if (!writableNotebookId) return;
     setSavingNotebookCustom(true);
     try {
-      const updated = await updateNotebook(notebookId, {
+      const updated = await updateNotebook(writableNotebookId, {
         cover_icon: customCoverIcon,
       });
       setNotebook(updated);
@@ -821,9 +1149,9 @@ function NotebookDetailContent() {
   };
 
   useEffect(() => {
-    if (!hasProcessingFiles || !notebookId) return;
+    if (!hasProcessingFiles || !writableNotebookId) return;
     const timer = window.setInterval(() => {
-      fetchNotebook(notebookId)
+      fetchNotebook(writableNotebookId)
         .then((data) => {
           setNotebook(data.notebook);
           const nextFiles = data.files || [];
@@ -836,11 +1164,20 @@ function NotebookDetailContent() {
         });
     }, 3500);
     return () => window.clearInterval(timer);
-  }, [hasProcessingFiles, notebookId, t]);
+  }, [hasProcessingFiles, writableNotebookId, t]);
 
   const handleUpload = async (selected: FileList | File[] | null) => {
     const selectedFiles = Array.from(selected || []);
-    if (!selectedFiles.length || !notebookId) return;
+    if (!selectedFiles.length || !writableNotebookId) return;
+    const unsupported = selectedFiles.filter((f) => !isNotebookSourceFileSupported(f));
+    if (unsupported.length > 0) {
+      const names = unsupported.map((f) => f.name).join(", ");
+      const msg = `暂不支持以下文件类型：${names}，请换用支持的资料文件。`;
+      setPageError(msg);
+      toast.error(msg);
+      if (inputRef.current) inputRef.current.value = "";
+      return;
+    }
     setUploading(true);
     setPageError(null);
     try {
@@ -849,7 +1186,7 @@ function NotebookDetailContent() {
       for (const file of selectedFiles) {
         try {
           const publicId = await uploadNotebookSourceFile(file, currentWorkspaceId());
-          next.push(await addNotebookFile(notebookId, publicId));
+          next.push(await addNotebookFile(writableNotebookId, publicId));
         } catch (error) {
           const normalized = normalizeNotebookError(error, `${file.name} ${t("notebook.uploadFailed")}`);
           failures.push(`${file.name}: ${normalized.message}`);
@@ -876,11 +1213,11 @@ function NotebookDetailContent() {
   };
 
   const handleAddUrlSource = async (url: string) => {
-    if (!notebookId) return;
+    if (!writableNotebookId) return;
     setAddingUrl(true);
     setPageError(null);
     try {
-      const next = await addNotebookUrlSource(notebookId, url);
+      const next = await addNotebookUrlSource(writableNotebookId, url);
       const nextFiles = [next, ...files.filter((old) => old.file_id !== next.file_id)];
       setFiles(nextFiles);
       setSelectedFileIds((prev) => reconcileSelectedFileIds(prev, nextFiles));
@@ -895,14 +1232,23 @@ function NotebookDetailContent() {
     }
   };
 
-  const openPreview = async (file: NotebookFile) => {
-    if (!notebookId) return;
+  const openPreview = async (file: NotebookFile, target?: NotebookSourceOpenTarget) => {
+    if (isReadonlyNotebook && readonlyNotebook) {
+      setPreviewSource(file);
+      setPreviewTarget(target || null);
+      setPreviewData(readonlyNotebookFileContent(readonlyNotebook, file.file_id));
+      setPreviewError(null);
+      setPreviewLoading(false);
+      return;
+    }
+    if (!writableNotebookId) return;
     setPreviewSource(file);
+    setPreviewTarget(target || null);
     setPreviewData(null);
     setPreviewError(null);
     setPreviewLoading(true);
     try {
-      const data = await fetchNotebookFileContent(notebookId, file.file_id);
+      const data = await fetchNotebookFileContent(writableNotebookId, file.file_id);
       setPreviewData(data);
       if (data.file) {
         setPreviewSource((current) => current && current.file_id === file.file_id ? { ...current, file: data.file } : current);
@@ -920,6 +1266,7 @@ function NotebookDetailContent() {
     setPreviewSource(null);
     setPreviewData(null);
     setPreviewError(null);
+    setPreviewTarget(null);
     setPreviewLoading(false);
   };
 
@@ -935,11 +1282,11 @@ function NotebookDetailContent() {
   };
 
   const confirmRemoveSource = async () => {
-    if (!notebookId || !sourceToRemove) return;
+    if (!writableNotebookId || !sourceToRemove) return;
     const file = sourceToRemove;
     setRemovingSource(true);
     try {
-      await removeNotebookFile(notebookId, file.file_id);
+      await removeNotebookFile(writableNotebookId, file.file_id);
       setFiles((prev) => prev.filter((item) => item.id !== file.id));
       setSelectedFileIds((prev) => prev.filter((id) => id !== file.file_id));
       if (previewSource?.id === file.id) closePreview();
@@ -953,12 +1300,12 @@ function NotebookDetailContent() {
   };
 
   const confirmRenameSource = async () => {
-    if (!notebookId || !sourceToRename) return;
+    if (!writableNotebookId || !sourceToRename) return;
     const filename = sourceRenameValue.trim();
     if (!filename) return;
     setRenamingSource(true);
     try {
-      const updated = await updateNotebookFile(notebookId, sourceToRename.file_id, { filename });
+      const updated = await updateNotebookFile(writableNotebookId, sourceToRename.file_id, { filename });
       setFiles((prev) => prev.map((item) => item.file_id === updated.file_id ? updated : item));
       setPreviewSource((current) => current?.file_id === updated.file_id ? updated : current);
       setSourceToRename(null);
@@ -967,6 +1314,21 @@ function NotebookDetailContent() {
       showNotebookError(error, "重命名来源失败");
     } finally {
       setRenamingSource(false);
+    }
+  };
+
+  const retrySourceIndexing = async (file: NotebookFile) => {
+    if (!writableNotebookId || !canRetryNotebookIndex(file)) return;
+    setReindexingSourceFileId(file.file_id);
+    try {
+      const updated = await reindexNotebookFile(writableNotebookId, file.file_id);
+      setFiles((prev) => prev.map((item) => item.file_id === updated.file_id ? updated : item));
+      setPreviewSource((current) => current?.file_id === updated.file_id ? updated : current);
+      toast.success(t("notebook.reindexQueued"));
+    } catch (error) {
+      showNotebookError(error, t("notebook.reindexFailed"));
+    } finally {
+      setReindexingSourceFileId(null);
     }
   };
 
@@ -1080,7 +1442,7 @@ function NotebookDetailContent() {
   };
 
   const openReportDialog = async () => {
-    if (!notebookId) return;
+    if (!writableNotebookId) return;
     if (selectedFileIds.length === 0) {
       toast.info(t("notebook.studio.selectSourcesFirst"));
       return;
@@ -1090,7 +1452,7 @@ function NotebookDetailContent() {
     setLoadingReportSuggestions(true);
     try {
       const suggestions = await suggestNotebookReportFormats({
-        notebookId,
+        notebookId: writableNotebookId,
         file_ids: selectedFileIds,
         language: language as LanguageCode,
       });
@@ -1103,30 +1465,29 @@ function NotebookDetailContent() {
     }
   };
 
-  const generateStudioArtifactByType = async (type: string, visualType: NotebookStudioActionId, options?: { orientation?: string; style?: string; detail_level?: string; prompt?: string }) => {
-    if (!notebookId) return;
+  const generateStudioArtifactByType = async (type: string, visualType: NotebookStudioActionId, options?: NotebookStudioGenerateOptions & { file_ids?: number[]; successMessage?: string }) => {
+    if (!writableNotebookId) return;
     setGeneratingStudioType(visualType);
     try {
       const saved = await generateNotebookArtifact({
-        notebookId,
+        notebookId: writableNotebookId,
         type,
-        file_ids: selectedFileIds,
-        language: language as LanguageCode,
+        file_ids: options?.file_ids || selectedFileIds,
+        language: options?.language || (language as LanguageCode),
         orientation: options?.orientation,
         style: options?.style,
         detail_level: options?.detail_level,
         prompt: options?.prompt,
+        flashcard_count: options?.flashcard_count,
+        quiz_count: options?.quiz_count,
+        difficulty: options?.difficulty,
       });
       const artifact = toStudioArtifact(saved);
       if (artifact) {
         setStudioArtifacts((prev) => [artifact, ...prev.filter((item) => item.id !== artifact.id)]);
-        if (artifact.type === "infographic") {
-          setActiveStudioArtifactId(null);
-        } else {
-          setActiveStudioArtifactId(artifact.id);
-        }
+        setActiveStudioArtifactId(null);
       }
-      toast.success(visualType === "table" ? t("notebook.studio.tableGenerated") : visualType === "quiz" ? t("notebook.studio.quizGenerated") : visualType === "report" ? t("notebook.studio.reportGenerated") : visualType === "infographic" ? t("notebook.studio.infographicGenerated") : t("notebook.studio.textGenerated"));
+      toast.success(options?.successMessage || (visualType === "table" ? t("notebook.studio.tableGenerated") : visualType === "quiz" ? t("notebook.studio.quizGenerated") : visualType === "report" ? t("notebook.studio.reportGenerated") : visualType === "infographic" ? t("notebook.studio.infographicGenerated") : t("notebook.studio.textGenerated")));
     } catch (error) {
       showNotebookError(error, t("notebook.studio.saveFailed"));
     } finally {
@@ -1150,7 +1511,7 @@ function NotebookDetailContent() {
       return;
     }
     if (type === "infographic") {
-      if (!notebookId) return;
+      if (!writableNotebookId) return;
       if (selectedFileIds.length === 0) {
         toast.info(t("notebook.studio.selectSourcesFirst"));
         return;
@@ -1158,7 +1519,7 @@ function NotebookDetailContent() {
       await generateStudioArtifactByType("infographic", "infographic", options);
       return;
     }
-    if (!notebookId) return;
+    if (!writableNotebookId) return;
     if (selectedFileIds.length === 0) {
       toast.info(t("notebook.studio.selectSourcesFirst"));
       return;
@@ -1166,28 +1527,138 @@ function NotebookDetailContent() {
     await generateStudioArtifactByType(type, type);
   };
 
-  const handleRenameArtifact = async (artifact: NotebookStudioArtifact) => {
-    if (!notebookId) return;
-    const title = window.prompt(t("notebook.studio.renamePrompt"), artifact.title)?.trim();
-    if (!title || title === artifact.title) return;
+  const handleCreateStudioNote = (input: { title: string; content: string }) => {
+    if (!notebook) return;
+    const note: NotebookStudioNote = {
+      id: `note-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      title: input.title.trim() || "未命名笔记",
+      content: input.content.trim(),
+      createdAt: new Date().toISOString(),
+      origin: "manual",
+    };
+    setStudioNotes((prev) => {
+      const next = [note, ...prev].slice(0, 1000);
+      writeStoredNotebookNotes(notebook.id, next);
+      return next;
+    });
+    toast.success("笔记已添加");
+  };
+
+  const handleUpdateStudioNote = (noteId: string, input: { title: string; content: string }) => {
+    if (!notebook) return;
+    setStudioNotes((prev) => {
+      const next = prev.map((note) => note.id === noteId ? { ...note, title: input.title.trim() || "未命名笔记", content: input.content.trim() } : note);
+      writeStoredNotebookNotes(notebook.id, next);
+      return next;
+    });
+    toast.success("笔记已更新");
+  };
+
+  const handleDeleteStudioNote = (note: NotebookStudioNote) => {
+    if (!notebook) return;
+    setStudioNotes((prev) => {
+      const next = prev.filter((item) => item.id !== note.id);
+      writeStoredNotebookNotes(notebook.id, next);
+      return next;
+    });
+    toast.success("笔记已删除");
+  };
+
+  const noteContentAsPlainText = (content: string) => {
+    if (!content) return "";
+    const el = document.createElement("div");
+    el.innerHTML = content;
+    return (el.textContent || el.innerText || content).replace(/\n{3,}/g, "\n\n").trim();
+  };
+
+  const convertNotesToSource = async (notesToConvert: NotebookStudioNote[], successMessage: string) => {
+    if (!writableNotebookId || notesToConvert.length === 0) return;
     try {
-      const updated = await updateNotebookArtifact(notebookId, Number(artifact.id), { title, subtitle: artifact.subtitle });
+      const title = notesToConvert.length === 1 ? notesToConvert[0].title : `Notebook notes ${new Date().toLocaleString()}`;
+      const body = notesToConvert.map((note) => `# ${note.title}\n\n${noteContentAsPlainText(note.content)}`).join("\n\n---\n\n");
+      const safeName = `${title || "note"}`.replace(/[\\/:*?\"<>|]+/g, " ").trim().slice(0, 80) || "note";
+      const file = new File([body], `${safeName}.txt`, { type: "text/plain" });
+      const publicId = await uploadNotebookSourceFile(file, currentWorkspaceId());
+      const next = await addNotebookFile(writableNotebookId, publicId);
+      const nextFiles = [next, ...files.filter((old) => old.file_id !== next.file_id)];
+      setFiles(nextFiles);
+      setSelectedFileIds((prev) => reconcileSelectedFileIds(prev, nextFiles));
+      toast.success(successMessage);
+      window.setTimeout(load, 1200);
+    } catch (error) {
+      showNotebookError(error, "转换为来源失败");
+    }
+  };
+
+  const handleConvertStudioNoteToSource = (note: NotebookStudioNote) => {
+    void convertNotesToSource([note], "笔记已转换为来源");
+  };
+
+  const handleConvertAllStudioNotesToSource = () => {
+    void convertNotesToSource(studioNotes, "所有笔记已转换为来源");
+  };
+
+  const handleRegenerateArtifact = async (artifact: NotebookStudioArtifact) => {
+    if (!writableNotebookId) return;
+    const request = regenerationRequestForArtifact(artifact);
+    if (!request) {
+      toast.error(t("notebook.studio.regenerateFailed"));
+      return;
+    }
+    const fileIds = artifactSourceIdsForRegeneration(artifact, files);
+    if (fileIds.length === 0) {
+      toast.info(t("notebook.studio.selectSourcesFirst"));
+      return;
+    }
+    await generateStudioArtifactByType(request.type, request.visualType, {
+      ...request.options,
+      file_ids: fileIds,
+      successMessage: t("notebook.studio.regenerateSuccess"),
+    });
+  };
+
+  const handleRenameArtifact = (artifact: NotebookStudioArtifact) => {
+    setArtifactToRename(artifact);
+    setArtifactRenameValue(artifact.title);
+  };
+
+  const closeRenameArtifactDialog = () => {
+    if (renamingArtifact) return;
+    setArtifactToRename(null);
+    setArtifactRenameValue("");
+  };
+
+  const confirmRenameArtifact = async () => {
+    if (!writableNotebookId || !artifactToRename) return;
+    const title = artifactRenameValue.trim();
+    if (!title) return;
+    if (title === artifactToRename.title) {
+      closeRenameArtifactDialog();
+      return;
+    }
+    setRenamingArtifact(true);
+    try {
+      const updated = await updateNotebookArtifact(writableNotebookId, Number(artifactToRename.id), { title, subtitle: artifactToRename.subtitle });
       const next = toStudioArtifact(updated);
       if (next) {
         setStudioArtifacts((prev) => prev.map((item) => item.id === next.id ? next : item));
         setActiveStudioArtifactId(next.id);
       }
+      setArtifactToRename(null);
+      setArtifactRenameValue("");
       toast.success(t("notebook.studio.renameSuccess"));
     } catch (error) {
       showNotebookError(error, t("notebook.studio.renameFailed"));
+    } finally {
+      setRenamingArtifact(false);
     }
   };
 
   const handleDeleteArtifact = async (artifact: NotebookStudioArtifact) => {
-    if (!notebookId) return;
+    if (!writableNotebookId) return;
     if (!window.confirm(t("notebook.studio.deleteConfirm", { title: artifact.title }))) return;
     try {
-      await deleteNotebookArtifact(notebookId, Number(artifact.id));
+      await deleteNotebookArtifact(writableNotebookId, Number(artifact.id));
       setStudioArtifacts((prev) => {
         const next = prev.filter((item) => item.id !== artifact.id);
         setActiveStudioArtifactId((current) => current === artifact.id ? next[0]?.id || null : current);
@@ -1208,14 +1679,62 @@ function NotebookDetailContent() {
     }
   };
 
-  const handleDownloadArtifact = (artifact: NotebookStudioArtifact) => {
+  const handleDownloadArtifact = async (artifact: NotebookStudioArtifact) => {
     const base = safeFilename(artifact.title);
     if (artifact.type === "table") {
       downloadTextFile(`${base}.csv`, artifactToCsv(artifact), "text/csv;charset=utf-8");
-    } else {
-      downloadTextFile(`${base}.md`, artifactToMarkdown(artifact), "text/markdown;charset=utf-8");
+      toast.success(t("notebook.studio.downloadSuccess"));
+      return;
     }
+    if (artifact.type === "infographic" && artifact.image_url) {
+      try {
+        const imageUrl = artifact.image_url.startsWith("http") || artifact.image_url.startsWith("/") ? artifact.image_url : `/${artifact.image_url}`;
+        const response = await fetch(imageUrl);
+        if (!response.ok) throw new Error("image download failed");
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        const ext = blob.type?.includes("jpeg") || blob.type?.includes("jpg") ? "jpg" : "png";
+        link.href = objectUrl;
+        link.download = `${base}.${ext}`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 5000);
+        toast.success(t("notebook.studio.downloadSuccess"));
+        return;
+      } catch {
+        downloadTextFile(`${base}.md`, artifactToMarkdown(artifact), "text/markdown;charset=utf-8");
+        toast.error(t("notebook.studio.infographicDownloadImageFailed"));
+        return;
+      }
+    }
+    downloadTextFile(`${base}.md`, artifactToMarkdown(artifact), "text/markdown;charset=utf-8");
     toast.success(t("notebook.studio.downloadSuccess"));
+  };
+
+  const handleCopyTableMarkdown = async (artifact: Extract<NotebookStudioArtifact, { type: "table" }>) => {
+    try {
+      await navigator.clipboard.writeText(tableArtifactToMarkdown(artifact));
+      toast.success(t("notebook.studio.copyMarkdownTableSuccess"));
+    } catch {
+      toast.error(t("notebook.studio.copyFailed"));
+    }
+  };
+
+  const handlePrintArtifact = (artifact: NotebookStudioArtifact) => {
+    if (artifact.type !== "report") return;
+    const printWindow = window.open("", "_blank", "noopener,noreferrer,width=960,height=720");
+    if (!printWindow) {
+      toast.error(t("notebook.studio.printBlocked"));
+      return;
+    }
+    printWindow.document.open();
+    printWindow.document.write(reportArtifactToPrintHtml(artifact));
+    printWindow.document.close();
+    printWindow.focus();
+    window.setTimeout(() => printWindow.print(), 250);
+    toast.success(t("notebook.studio.printReady"));
   };
 
   const handleExportTableToGoogleSheets = (artifact: Extract<NotebookStudioArtifact, { type: "table" }>) => {
@@ -1241,16 +1760,37 @@ function NotebookDetailContent() {
     setExternalChatSendRequest({ id: Date.now(), content });
   };
 
-  const handleRename = async () => {
-    if (!notebook) return;
-    const title = window.prompt(t("notebook.renamePrompt"), notebook.title)?.trim();
-    if (!title || title === notebook.title) return;
+  const handleRename = () => {
+    if (!notebook || !writableNotebookId) return;
+    setNotebookRenameValue(notebook.title);
+    setRenameNotebookDialogOpen(true);
+  };
+
+  const closeRenameNotebookDialog = () => {
+    if (renamingNotebook) return;
+    setRenameNotebookDialogOpen(false);
+    setNotebookRenameValue("");
+  };
+
+  const confirmRenameNotebook = async () => {
+    if (!notebook || !writableNotebookId) return;
+    const title = notebookRenameValue.trim();
+    if (!title) return;
+    if (title === notebook.title) {
+      closeRenameNotebookDialog();
+      return;
+    }
+    setRenamingNotebook(true);
     try {
-      const updated = await updateNotebook(notebook.id, { title });
+      const updated = await updateNotebook(writableNotebookId, { title });
       setNotebook(updated);
+      setRenameNotebookDialogOpen(false);
+      setNotebookRenameValue("");
       toast.success(t("notebook.renameSuccess"));
     } catch (error) {
       showNotebookError(error, t("notebook.renameFailed"));
+    } finally {
+      setRenamingNotebook(false);
     }
   };
 
@@ -1270,12 +1810,9 @@ function NotebookDetailContent() {
           <Link href="/notebooks" className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-text-tertiary transition hover:text-text-primary">
             <ArrowLeft className="h-3.5 w-3.5" />{t("notebook.back")}
           </Link>
-          <div className="flex items-start gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-brand-muted text-brand"><BookOpen className="h-5 w-5" /></div>
-            <div className="min-w-0 flex-1">
-              <button onClick={handleRename} className="block max-w-full truncate text-left text-lg font-semibold text-text-primary hover:text-brand">{notebook?.title || t("notebook.untitled")}</button>
-              <p className="mt-1 text-xs text-text-tertiary">{t("notebook.readyCount").replace("{ready}", String(readyCount)).replace("{total}", String(files.length))}</p>
-            </div>
+          <div className="min-w-0">
+            <button onClick={handleRename} disabled={!writableNotebookId} className="block max-w-full truncate text-left text-[15px] font-medium leading-5 text-text-primary hover:text-brand disabled:cursor-default disabled:hover:text-text-primary">{notebook?.title || t("notebook.untitled")}</button>
+            <p className="mt-1 text-xs text-text-tertiary">{t("notebook.readyCount").replace("{ready}", String(readyCount)).replace("{total}", String(files.length))}</p>
           </div>
         </div>
 
@@ -1286,30 +1823,14 @@ function NotebookDetailContent() {
           </div>
           <button
             type="button"
-            onClick={() => setUrlDialogOpen(true)}
-            disabled={addingUrl}
-            className="mb-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-brand-muted text-sm font-semibold text-text-primary transition hover:bg-brand-muted/80 disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={() => writableNotebookId && setUrlDialogOpen(true)}
+            disabled={addingUrl || !writableNotebookId}
+            className="mb-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-[#111827] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(15,23,42,0.12)] transition hover:bg-[#1f2937] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {addingUrl ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             {t("notebook.addSource")}
           </button>
-          <div className="mb-3 rounded-[22px] border border-surface-border bg-surface-elevated p-3">
-            <button type="button" onClick={() => setUrlDialogOpen(true)} className="block w-full rounded-2xl px-2 py-1.5 text-left text-sm font-medium text-text-secondary transition hover:text-text-primary">
-              {t("notebook.searchNewSources")}
-            </button>
-            <div className="mt-2 flex items-center gap-2">
-              <button type="button" onClick={() => setUrlDialogOpen(true)} className="inline-flex h-8 items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-2.5 text-xs font-medium text-text-secondary transition hover:text-text-primary">
-                <Globe className="h-3.5 w-3.5" />Web
-              </button>
-              <button type="button" onClick={() => setUrlDialogOpen(true)} className="inline-flex h-8 items-center gap-1.5 rounded-full border border-surface-border bg-surface-card px-2.5 text-xs font-medium text-text-secondary transition hover:text-text-primary">
-                <Zap className="h-3.5 w-3.5 text-brand" />Fast Research
-              </button>
-              <button type="button" onClick={() => setUrlDialogOpen(true)} className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-full bg-surface-card text-text-secondary transition hover:bg-brand hover:text-white">
-                <Search className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-          <input ref={inputRef} type="file" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
+          <input ref={inputRef} type="file" multiple accept={NOTEBOOK_SOURCE_FILE_ACCEPT} disabled={!writableNotebookId} className="hidden" onChange={(e) => handleUpload(e.target.files)} />
 
           {pageError && (
             <div className="mb-3 flex items-start gap-2 rounded-2xl border border-red-500/20 bg-red-500/10 px-3 py-2.5 text-xs leading-5 text-red-600 dark:text-red-300">
@@ -1317,12 +1838,17 @@ function NotebookDetailContent() {
               <span>{pageError}</span>
             </div>
           )}
+          {isReadonlyNotebook && (
+            <div className="mb-3 rounded-2xl border border-brand/20 bg-brand-muted/60 px-3 py-2.5 text-xs leading-5 text-text-secondary">
+              精选/Demo 笔记本为只读示例。要上传来源或生成 Studio 内容，请新建自己的笔记本。
+            </div>
+          )}
 
           {files.length > 0 && (
             <div className="mb-2 flex justify-end">
-              <button type="button" onClick={selectAllSources} className="inline-flex items-center gap-2 rounded-full px-1.5 py-1 text-sm font-semibold text-text-primary transition hover:text-brand">
+              <button type="button" onClick={selectAllSources} className="inline-flex items-center gap-2 rounded-full px-1.5 py-1 text-sm font-semibold text-[#111827] transition hover:text-[#111827]">
                 {t("notebook.selectAllSources")}
-                <span className={cn("flex h-4 w-4 items-center justify-center rounded border transition", allSourcesSelected ? "border-brand bg-brand text-white" : "border-surface-border text-transparent")}>
+                <span className={cn("flex h-4 w-4 items-center justify-center rounded border transition", allSourcesSelected ? "border-[#111827] bg-[#111827] text-white" : "border-surface-border text-transparent")}>
                   <Check className="h-3 w-3" />
                 </span>
               </button>
@@ -1341,12 +1867,39 @@ function NotebookDetailContent() {
             <div className="space-y-1 rounded-[24px] border border-transparent p-0 transition">
               {files.map((file) => {
                 const selected = selectedFileIds.includes(file.file_id);
+                const meta = statusMeta(file, t);
+                const StatusIcon = meta.icon;
+                const detail = statusDetail(file, t);
+                const canRetryIndex = canRetryNotebookIndex(file);
+                const retryingIndex = reindexingSourceFileId === file.file_id;
                 return (
                   <div key={file.id} role="button" tabIndex={0} onClick={() => openPreview(file)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") openPreview(file); }} className={cn("group w-full cursor-pointer rounded-md px-2 py-2 text-left transition hover:bg-slate-100 dark:hover:bg-slate-800/60", !selected && "opacity-75")}>
                     <div className="flex items-center gap-3">
-                      <SourcePdfIcon />
+                      <SourceFileIcon file={file} />
                       <div className="min-w-0 flex-1 overflow-hidden">
-                        <div className="truncate text-sm font-medium text-text-primary">{file.file.filename}</div>
+                        <div className="truncate text-sm font-medium text-text-primary">{displaySourceFilename(file.file.filename)}</div>
+                        <div className="mt-1.5 flex min-w-0 items-center gap-2">
+                          <span className={cn("inline-flex h-5 shrink-0 items-center gap-1 rounded-full border px-2 text-[11px] font-medium", meta.className)} title={detail || meta.label}>
+                            <StatusIcon className={cn("h-3 w-3", isNotebookFileProcessing(file) && "animate-spin")} />
+                            {meta.label}
+                          </span>
+                          {detail && <span className="truncate text-[11px] leading-4 text-text-tertiary" title={detail}>{detail}</span>}
+                          {canRetryIndex && (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                retrySourceIndexing(file);
+                              }}
+                              disabled={retryingIndex}
+                              className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full border border-surface-border bg-surface-elevated px-2 text-[11px] font-medium text-text-secondary transition hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-60"
+                              title={retryNotebookIndexLabel(file, t)}
+                            >
+                              {retryingIndex ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+                              {retryNotebookIndexLabel(file, t)}
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <div className="relative shrink-0">
                         <button
@@ -1388,7 +1941,7 @@ function NotebookDetailContent() {
                       <button
                         type="button"
                         onClick={(event) => { event.stopPropagation(); toggleSource(file.file_id); }}
-                        className={cn("flex h-4 w-4 shrink-0 items-center justify-center rounded border transition", selected ? "border-brand bg-brand text-white" : "border-surface-border text-transparent group-hover:border-text-tertiary group-hover:text-text-tertiary")}
+                        className={cn("flex h-4 w-4 shrink-0 items-center justify-center rounded border transition", selected ? "border-[#111827] bg-[#111827] text-white" : "border-surface-border text-transparent group-hover:border-text-tertiary group-hover:text-text-tertiary")}
                         aria-label={selected ? "selected" : "unselected"}
                       >
                         <Check className="h-3 w-3" />
@@ -1416,17 +1969,17 @@ function NotebookDetailContent() {
       <section className="min-w-[420px] flex-1 overflow-hidden rounded-[28px] border border-surface-border bg-surface-card shadow-sm">
         <ChatInterface
           conversationId={conversationId}
-          notebookId={notebookId}
+          notebookId={writableNotebookId || undefined}
           notebookTitle={notebook?.title}
           notebookFileCount={files.length}
           notebookFileIds={selectedFileIds}
-          notebookHero={files.length > 0 ? {
+          notebookHero={notebook ? {
             title: heroTitle,
             meta: `${files.length} 个来源`,
             coverClassName: heroCover.className,
-            icon: heroCover.icon,
+            icon: heroIcon,
             imageUrl: heroCoverImageUrl,
-            onCustomize: openCustomizeDialog,
+            onCustomize: writableNotebookId ? openCustomizeDialog : undefined,
           } : undefined}
           models={MODELS}
           welcomeTitle="让我们开始制作笔记本..."
@@ -1437,6 +1990,7 @@ function NotebookDetailContent() {
             { title: t("notebook.exampleCompare"), desc: t("notebook.exampleCompareDesc"), prompt: t("notebook.exampleComparePrompt") },
           ]}
           externalSendRequest={externalChatSendRequest}
+          modelSelectionOptions={{ storageKey: "notebook-selected-model", defaultModelId: "gpt-5.5" }}
         />
       </section>
       <div
@@ -1452,19 +2006,32 @@ function NotebookDetailContent() {
       <NotebookStudioPanel
         width={studioWidth}
         artifacts={studioArtifacts}
+        notes={studioNotes}
         activeArtifactId={activeStudioArtifactId}
         generatingType={generatingStudioType}
         selectedSourceCount={selectedFileIds.length}
         sourceFiles={studioSourceFiles}
         onGenerate={handleStudioGenerate}
+        onCreateNote={handleCreateStudioNote}
+        onUpdateNote={handleUpdateStudioNote}
+        onDeleteNote={handleDeleteStudioNote}
+        onConvertNoteToSource={handleConvertStudioNoteToSource}
+        onConvertAllNotesToSource={handleConvertAllStudioNotesToSource}
         onOpenArtifact={setActiveStudioArtifactId}
         onRenameArtifact={handleRenameArtifact}
+        onRegenerateArtifact={handleRegenerateArtifact}
         onDeleteArtifact={handleDeleteArtifact}
         onCopyArtifact={handleCopyArtifact}
         onDownloadArtifact={handleDownloadArtifact}
+        onCopyTableMarkdown={handleCopyTableMarkdown}
+        onPrintArtifact={handlePrintArtifact}
         onExportTableToGoogleSheets={handleExportTableToGoogleSheets}
         onExplainFlashcard={handleExplainFlashcard}
         onExplainQuiz={handleExplainQuiz}
+        onOpenSource={(sourceId, target) => {
+          const source = files.find((file) => file.file_id === sourceId);
+          if (source) openPreview(source, target);
+        }}
       />
     </div>
     <NotebookUrlSourceDialog
@@ -1483,7 +2050,9 @@ function NotebookDetailContent() {
       data={previewData}
       loading={previewLoading}
       error={previewError}
+      target={previewTarget}
       onClose={closePreview}
+      onAddSource={() => setUrlDialogOpen(true)}
     />
     <ReportFormatDialog
       open={reportDialogOpen}
@@ -1520,6 +2089,24 @@ function NotebookDetailContent() {
       onChange={setSourceRenameValue}
       onClose={() => setSourceToRename(null)}
       onConfirm={confirmRenameSource}
+    />
+    <RenameArtifactDialog
+      open={Boolean(artifactToRename)}
+      artifact={artifactToRename}
+      value={artifactRenameValue}
+      saving={renamingArtifact}
+      onChange={setArtifactRenameValue}
+      onClose={closeRenameArtifactDialog}
+      onConfirm={confirmRenameArtifact}
+    />
+    <RenameNotebookDialog
+      open={renameNotebookDialogOpen}
+      notebook={notebook}
+      value={notebookRenameValue}
+      saving={renamingNotebook}
+      onChange={setNotebookRenameValue}
+      onClose={closeRenameNotebookDialog}
+      onConfirm={confirmRenameNotebook}
     />
     </>
   );

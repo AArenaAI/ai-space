@@ -26,6 +26,8 @@ type NotebookHandler struct {
 	imageService *services.ImageService
 }
 
+const notebookArtifactCreditModelID = "gpt-5.4"
+
 func NewNotebookHandler(db *gorm.DB, fileService *services.FileService, aiService chatAIService, imageService *services.ImageService) *NotebookHandler {
 	return &NotebookHandler{db: db, fileService: fileService, aiService: aiService, imageService: imageService}
 }
@@ -79,15 +81,16 @@ type NotebookFileContentChunk struct {
 }
 
 type NotebookArtifactResponse struct {
-	ID          uint            `json:"id"`
-	NotebookID  uint            `json:"notebook_id"`
-	Type        string          `json:"type"`
-	Title       string          `json:"title"`
-	Subtitle    string          `json:"subtitle"`
-	Content     json.RawMessage `json:"content"`
-	SourceCount int             `json:"source_count"`
-	CreatedAt   time.Time       `json:"created_at"`
-	UpdatedAt   time.Time       `json:"updated_at"`
+	ID            uint            `json:"id"`
+	NotebookID    uint            `json:"notebook_id"`
+	Type          string          `json:"type"`
+	Title         string          `json:"title"`
+	Subtitle      string          `json:"subtitle"`
+	Content       json.RawMessage `json:"content"`
+	SourceCount   int             `json:"source_count"`
+	SourceFileIDs []uint          `json:"source_file_ids"`
+	CreatedAt     time.Time       `json:"created_at"`
+	UpdatedAt     time.Time       `json:"updated_at"`
 }
 
 func (h *NotebookHandler) List(c *gin.Context) {
@@ -269,6 +272,9 @@ func (h *NotebookHandler) AddURLSource(c *gin.Context) {
 		return
 	}
 	userID := getUserID(c)
+	if !ensureModelAccess(c, h.db, userID, notebookArtifactCreditModelID, 0) {
+		return
+	}
 	var req struct {
 		URL       string `json:"url"`
 		SortOrder int    `json:"sort_order"`
@@ -288,7 +294,7 @@ func (h *NotebookHandler) AddURLSource(c *gin.Context) {
 		return
 	}
 	filename := notebookURLSourceFilename(page.Title, page.URL)
-	content := fmt.Sprintf("# %s\n\n来源：%s\n\n%s\n", page.Title, page.URL, page.Content)
+	content := fmt.Sprintf("%s\n\n%s\n", page.URL, page.Content)
 	file, err := h.fileService.UploadAndParse(c.Request.Context(), userID, "", filename, []byte(content), nb.WorkspaceID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "网页资料处理失败"})
@@ -374,6 +380,49 @@ func (h *NotebookHandler) GetFileContent(c *gin.Context) {
 		Chunks:  chunkItems,
 		HasMore: hasMore,
 	})
+}
+
+func (h *NotebookHandler) ReindexFile(c *gin.Context) {
+	nb, ok := h.loadNotebook(c)
+	if !ok {
+		return
+	}
+	if h.fileService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "资料处理服务暂不可用"})
+		return
+	}
+	fid64, err := strconv.ParseUint(c.Param("file_id"), 10, 32)
+	if err != nil || fid64 == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的文件 ID"})
+		return
+	}
+
+	var link models.NotebookFile
+	if err := h.db.Preload("File").Where("notebook_id = ? AND file_id = ?", nb.ID, uint(fid64)).First(&link).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "资料不存在或无权访问"})
+		return
+	}
+	userID := getUserID(c)
+	if link.File.UserID != userID {
+		c.JSON(http.StatusNotFound, gin.H{"error": "资料不存在或无权访问"})
+		return
+	}
+	if !ensureModelAccess(c, h.db, userID, notebookArtifactCreditModelID, 0) {
+		return
+	}
+
+	file, err := h.fileService.RequeueEmbedding(link.File.ID, userID)
+	if err != nil {
+		if strings.Contains(err.Error(), "尚未解析完成") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "重新索引资料失败"})
+		return
+	}
+	h.db.Model(&models.Notebook{}).Where("id = ?", nb.ID).Update("updated_at", time.Now())
+	link.File = *file
+	c.JSON(http.StatusOK, link)
 }
 
 func (h *NotebookHandler) UpdateFile(c *gin.Context) {
@@ -479,7 +528,7 @@ func (h *NotebookHandler) CreateArtifact(c *gin.Context) {
 	}
 	artifactType := strings.TrimSpace(req.Type)
 	title := strings.TrimSpace(req.Title)
-	artifact, ok := h.saveNotebookArtifact(c, nb, artifactType, title, strings.TrimSpace(req.Subtitle), req.Content, req.SourceCount)
+	artifact, ok := h.saveNotebookArtifact(c, nb, artifactType, title, strings.TrimSpace(req.Subtitle), req.Content, req.SourceCount, nil)
 	if !ok {
 		return
 	}
@@ -500,6 +549,9 @@ func (h *NotebookHandler) SuggestReportFormats(c *gin.Context) {
 		return
 	}
 	files := h.loadNotebookGenerationFiles(nb.ID, getUserID(c))
+	if !ensureModelAccess(c, h.db, getUserID(c), notebookArtifactCreditModelID, 0) {
+		return
+	}
 	formats := suggestAINotebookReportFormats(c.Request.Context(), h.aiService, files, req.FileIDs, req.Language)
 	c.JSON(http.StatusOK, gin.H{"formats": formats})
 }
@@ -510,24 +562,34 @@ func (h *NotebookHandler) GenerateArtifact(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Type        string `json:"type"`
-		FileIDs     []uint `json:"file_ids"`
-		Language    string `json:"language"`
-		Orientation string `json:"orientation"`
-		Style       string `json:"style"`
-		DetailLevel string `json:"detail_level"`
-		Prompt      string `json:"prompt"`
+		Type           string `json:"type"`
+		FileIDs        []uint `json:"file_ids"`
+		Language       string `json:"language"`
+		Orientation    string `json:"orientation"`
+		Style          string `json:"style"`
+		DetailLevel    string `json:"detail_level"`
+		Prompt         string `json:"prompt"`
+		FlashcardCount string `json:"flashcard_count"`
+		QuizCount      string `json:"quiz_count"`
+		Difficulty     string `json:"difficulty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if !ensureModelAccess(c, h.db, getUserID(c), notebookArtifactCreditModelID, 0) {
+		return
+	}
 	files := h.loadNotebookGenerationFiles(nb.ID, getUserID(c))
 	opts := notebookArtifactGenerationOptions{
-		Orientation: strings.TrimSpace(req.Orientation),
-		Style:       strings.TrimSpace(req.Style),
-		DetailLevel: strings.TrimSpace(req.DetailLevel),
-		Prompt:      strings.TrimSpace(req.Prompt),
+		Orientation:    strings.TrimSpace(req.Orientation),
+		Style:          strings.TrimSpace(req.Style),
+		DetailLevel:    strings.TrimSpace(req.DetailLevel),
+		Prompt:         strings.TrimSpace(req.Prompt),
+		FlashcardCount: strings.TrimSpace(req.FlashcardCount),
+		QuizCount:      strings.TrimSpace(req.QuizCount),
+		Difficulty:     strings.TrimSpace(req.Difficulty),
+		SourceChunks:   h.loadNotebookGenerationFileChunks(files),
 	}
 	draft, err := buildAINotebookArtifactDraft(c.Request.Context(), h.aiService, h.imageService, req.Type, nb.Title, files, req.FileIDs, req.Language, opts)
 	if err != nil {
@@ -535,7 +597,7 @@ func (h *NotebookHandler) GenerateArtifact(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	artifact, ok := h.saveNotebookArtifact(c, nb, draft.Type, draft.Title, draft.Subtitle, draft.Content, draft.SourceCount)
+	artifact, ok := h.saveNotebookArtifact(c, nb, draft.Type, draft.Title, draft.Subtitle, draft.Content, draft.SourceCount, draft.SourceFileIDs)
 	if !ok {
 		return
 	}
@@ -606,7 +668,7 @@ func (h *NotebookHandler) DeleteArtifact(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-func (h *NotebookHandler) saveNotebookArtifact(c *gin.Context, nb models.Notebook, artifactType string, title string, subtitle string, rawContent json.RawMessage, sourceCount int) (models.NotebookArtifact, bool) {
+func (h *NotebookHandler) saveNotebookArtifact(c *gin.Context, nb models.Notebook, artifactType string, title string, subtitle string, rawContent json.RawMessage, sourceCount int, sourceFileIDs []uint) (models.NotebookArtifact, bool) {
 	artifactType = strings.TrimSpace(artifactType)
 	title = strings.TrimSpace(title)
 	if artifactType == "" || len(artifactType) > 64 {
@@ -630,14 +692,16 @@ func (h *NotebookHandler) saveNotebookArtifact(c *gin.Context, nb models.Noteboo
 		c.JSON(http.StatusBadRequest, gin.H{"error": "输出文件内容不是有效 JSON"})
 		return models.NotebookArtifact{}, false
 	}
+	sourceFileIDBytes, _ := json.Marshal(cleanNotebookSourceFileIDs(sourceFileIDs))
 	artifact := models.NotebookArtifact{
-		NotebookID:  nb.ID,
-		UserID:      getUserID(c),
-		Type:        artifactType,
-		Title:       title,
-		Subtitle:    strings.TrimSpace(subtitle),
-		Content:     string(content),
-		SourceCount: sourceCount,
+		NotebookID:    nb.ID,
+		UserID:        getUserID(c),
+		Type:          artifactType,
+		Title:         title,
+		Subtitle:      strings.TrimSpace(subtitle),
+		Content:       string(content),
+		SourceCount:   sourceCount,
+		SourceFileIDs: string(sourceFileIDBytes),
 	}
 	if artifact.SourceCount < 0 {
 		artifact.SourceCount = 0
@@ -661,6 +725,27 @@ func (h *NotebookHandler) loadNotebookGenerationFiles(notebookID uint, userID ui
 	return files
 }
 
+func (h *NotebookHandler) loadNotebookGenerationFileChunks(files []models.File) map[uint][]models.FileChunk {
+	ids := make([]uint, 0, len(files))
+	for _, file := range files {
+		if file.ID > 0 {
+			ids = append(ids, file.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	var chunks []models.FileChunk
+	if err := h.db.Where("file_id IN ?", ids).Order("file_id ASC, chunk_index ASC, id ASC").Find(&chunks).Error; err != nil {
+		return nil
+	}
+	byFileID := make(map[uint][]models.FileChunk, len(ids))
+	for _, chunk := range chunks {
+		byFileID[chunk.FileID] = append(byFileID[chunk.FileID], chunk)
+	}
+	return byFileID
+}
+
 func notebookArtifactResponse(artifact models.NotebookArtifact) NotebookArtifactResponse {
 	content := json.RawMessage(strings.TrimSpace(artifact.Content))
 	if len(content) == 0 {
@@ -669,8 +754,28 @@ func notebookArtifactResponse(artifact models.NotebookArtifact) NotebookArtifact
 	return NotebookArtifactResponse{
 		ID: artifact.ID, NotebookID: artifact.NotebookID, Type: artifact.Type,
 		Title: artifact.Title, Subtitle: artifact.Subtitle, Content: content,
-		SourceCount: artifact.SourceCount, CreatedAt: artifact.CreatedAt, UpdatedAt: artifact.UpdatedAt,
+		SourceCount: artifact.SourceCount, SourceFileIDs: parseNotebookSourceFileIDs(artifact.SourceFileIDs), CreatedAt: artifact.CreatedAt, UpdatedAt: artifact.UpdatedAt,
 	}
+}
+
+func cleanNotebookSourceFileIDs(ids []uint) []uint {
+	cleaned := make([]uint, 0, len(ids))
+	seen := map[uint]bool{}
+	for _, id := range ids {
+		if id > 0 && !seen[id] {
+			cleaned = append(cleaned, id)
+			seen[id] = true
+		}
+	}
+	return cleaned
+}
+
+func parseNotebookSourceFileIDs(raw string) []uint {
+	var ids []uint
+	if strings.TrimSpace(raw) == "" || json.Unmarshal([]byte(raw), &ids) != nil {
+		return nil
+	}
+	return cleanNotebookSourceFileIDs(ids)
 }
 
 func (h *NotebookHandler) listNotebookFiles(notebookID uint) []NotebookFileItem {
@@ -717,6 +822,30 @@ func defaultWorkspaceID(db *gorm.DB, userID uint) uint {
 
 func parseUintQuery(c *gin.Context, key string) uint {
 	value := c.Query(key)
+	if value == "" {
+		return 0
+	}
+	parsed, err := strconv.ParseUint(value, 10, 32)
+	if err != nil {
+		return 0
+	}
+	return uint(parsed)
+}
+
+func parseIntQuery(c *gin.Context, key string, defaultValue int) int {
+	value := c.Query(key)
+	if value == "" {
+		return defaultValue
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return defaultValue
+	}
+	return parsed
+}
+
+func parseUintParam(c *gin.Context, key string) uint {
+	value := c.Param(key)
 	if value == "" {
 		return 0
 	}
@@ -791,17 +920,43 @@ func isPrivateNotebookURLHost(host string) bool {
 }
 
 func extractNotebookURLText(html string, fallbackTitle string) (string, string) {
-	text := html
 	title := firstRegexGroup(`(?is)<title[^>]*>(.*?)</title>`, html)
+	text := html
 	text = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`).ReplaceAllString(text, " ")
 	text = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`).ReplaceAllString(text, " ")
 	text = regexp.MustCompile(`(?is)<noscript[^>]*>.*?</noscript>`).ReplaceAllString(text, " ")
-	text = regexp.MustCompile(`(?is)</(p|div|section|article|header|footer|li|h[1-6]|tr)>`).ReplaceAllString(text, "\n")
+	text = regexp.MustCompile(`(?is)<svg[^>]*>.*?</svg>`).ReplaceAllString(text, " ")
+	text = regexp.MustCompile(`(?is)<iframe[^>]*>.*?</iframe>`).ReplaceAllString(text, " ")
+
+	// Preserve common article structure instead of flattening the whole DOM into one blob.
+	text = regexp.MustCompile(`(?is)<h([1-6])[^>]*>(.*?)</h[1-6]>`).ReplaceAllStringFunc(text, func(match string) string {
+		levelText := firstRegexGroup(`(?is)<h([1-6])`, match)
+		level, _ := strconv.Atoi(levelText)
+		if level <= 0 {
+			level = 2
+		}
+		if level > 3 {
+			level = 3
+		}
+		inner := stripNotebookHTMLTags(firstRegexGroup(`(?is)<h[1-6][^>]*>(.*?)</h[1-6]>`, match))
+		if inner == "" {
+			return "\n\n"
+		}
+		return "\n\n" + strings.Repeat("#", level) + " " + inner + "\n\n"
+	})
+	text = regexp.MustCompile(`(?is)<li[^>]*>(.*?)</li>`).ReplaceAllStringFunc(text, func(match string) string {
+		inner := stripNotebookHTMLTags(firstRegexGroup(`(?is)<li[^>]*>(.*?)</li>`, match))
+		if inner == "" {
+			return "\n"
+		}
+		return "\n- " + inner + "\n"
+	})
+	text = regexp.MustCompile(`(?is)</(p|blockquote|pre|table|tr|ul|ol|section|article|main)>`).ReplaceAllString(text, "\n\n")
 	text = regexp.MustCompile(`(?is)<br\s*/?>`).ReplaceAllString(text, "\n")
 	text = regexp.MustCompile(`(?is)<[^>]+>`).ReplaceAllString(text, " ")
 	text = htmlEntityDecode(text)
-	text = normalizeNotebookURLWhitespace(text)
-	title = normalizeNotebookURLWhitespace(htmlEntityDecode(title))
+	text = normalizeNotebookURLMarkdown(text)
+	title = normalizeNotebookURLWhitespace(htmlEntityDecode(stripNotebookHTMLTags(title)))
 	if title == "" {
 		title = fallbackTitle
 	}
@@ -809,6 +964,12 @@ func extractNotebookURLText(html string, fallbackTitle string) (string, string) 
 		text = text[:120000]
 	}
 	return title, text
+}
+
+func stripNotebookHTMLTags(text string) string {
+	text = regexp.MustCompile(`(?is)<br\s*/?>`).ReplaceAllString(text, "\n")
+	text = regexp.MustCompile(`(?is)<[^>]+>`).ReplaceAllString(text, " ")
+	return normalizeNotebookURLWhitespace(htmlEntityDecode(text))
 }
 
 func firstRegexGroup(pattern, text string) string {
@@ -841,6 +1002,28 @@ func normalizeNotebookURLWhitespace(text string) string {
 	return strings.Join(out, "\n")
 }
 
+func normalizeNotebookURLMarkdown(text string) string {
+	lines := strings.Split(text, "\n")
+	var out []string
+	blank := false
+	for _, line := range lines {
+		line = strings.Join(strings.Fields(line), " ")
+		if line == "" {
+			if len(out) > 0 && !blank {
+				out = append(out, "")
+				blank = true
+			}
+			continue
+		}
+		out = append(out, line)
+		blank = false
+	}
+	for len(out) > 0 && out[len(out)-1] == "" {
+		out = out[:len(out)-1]
+	}
+	return strings.Join(out, "\n")
+}
+
 func notebookURLSourceFilename(title string, sourceURL string) string {
 	name := strings.TrimSpace(title)
 	if name == "" {
@@ -854,7 +1037,7 @@ func notebookURLSourceFilename(title string, sourceURL string) string {
 	if len(name) > 80 {
 		name = name[:80]
 	}
-	return name + ".md"
+	return name + ".url"
 }
 
 func (h *ChatHandler) loadNotebookFiles(notebookID uint, userID uint, guestID string) []models.File {

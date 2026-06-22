@@ -1,6 +1,7 @@
 package services
 
 import (
+	"strconv"
 	"strings"
 
 	"google.golang.org/genai"
@@ -11,6 +12,7 @@ import (
 type ReasoningEffort string
 
 const (
+	ReasoningEffortOff     ReasoningEffort = "off"
 	ReasoningEffortMinimal ReasoningEffort = "minimal"
 	ReasoningEffortLow     ReasoningEffort = "low"
 	ReasoningEffortMedium  ReasoningEffort = "medium"
@@ -20,9 +22,16 @@ const (
 
 // ParseReasoningEffort 从字符串解析为统一的思考强度等级。
 // 支持的输入值包括：minimal / light / low / standard / medium / extended / high / heavy / max / xhigh。
+// Gemini 2.5 的 thinkingBudget 数字覆盖值（如 -1 / 1024 / 32768）会原样保留。
 // 空字符串或无效值默认返回 Medium。
 func ParseReasoningEffort(s string) ReasoningEffort {
-	switch strings.ToLower(strings.TrimSpace(s)) {
+	value := strings.ToLower(strings.TrimSpace(s))
+	if _, err := strconv.Atoi(value); err == nil {
+		return ReasoningEffort(value)
+	}
+	switch value {
+	case "off", "none", "disabled", "disable", "false":
+		return ReasoningEffortOff
 	case "minimal":
 		return ReasoningEffortMinimal
 	case "light", "low":
@@ -66,13 +75,15 @@ func (e ReasoningEffort) ToDeepSeekValue() string {
 	switch e {
 	case ReasoningEffortMax:
 		return "max"
+	case ReasoningEffortOff:
+		return ""
 	default:
 		// minimal / low / medium / high 全部映射为 high
 		return "high"
 	}
 }
 
-// ToGeminiValue 返回 Gemini SDK 的 ThinkingLevel。
+// ToGeminiValue 返回 Gemini 3 SDK 的 ThinkingLevel。
 func (e ReasoningEffort) ToGeminiValue() genai.ThinkingLevel {
 	switch e {
 	case ReasoningEffortMinimal:
@@ -83,5 +94,22 @@ func (e ReasoningEffort) ToGeminiValue() genai.ThinkingLevel {
 		return genai.ThinkingLevelHigh
 	default:
 		return genai.ThinkingLevelMedium
+	}
+}
+
+// ToGemini25ThinkingBudget 返回 Gemini 2.5 系列支持的 thinkingBudget。
+// Gemini 2.5 不支持 thinkingLevel；2.5 Pro 也不能设为 0 关闭思考。
+// 产品三档映射为：快速=1024，思考=-1 动态预算，专家=32768。
+func (e ReasoningEffort) ToGemini25ThinkingBudget() int32 {
+	if n, err := strconv.Atoi(strings.TrimSpace(e.String())); err == nil {
+		return int32(n)
+	}
+	switch e {
+	case ReasoningEffortMinimal, ReasoningEffortLow:
+		return 1024
+	case ReasoningEffortHigh, ReasoningEffortMax:
+		return 32768
+	default:
+		return -1
 	}
 }

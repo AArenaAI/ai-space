@@ -84,6 +84,16 @@ test("shouldReconcileAfterDone only runs for background tasks after DONE with id
   assert.equal(mod.shouldReconcileAfterDone({ sawDone: true, abortReason: "navigation", serverMessageId: 1, useBackground: true }), false);
 });
 
+test("shouldCompleteUnrecoverablePartial only completes content without recovery ids", () => {
+  assert.equal(mod.shouldCompleteUnrecoverablePartial({ sawDone: false, hasContent: true }), true);
+  assert.equal(mod.shouldCompleteUnrecoverablePartial({ sawDone: false, hasContent: true, serverMessageId: 1 }), false);
+  assert.equal(mod.shouldCompleteUnrecoverablePartial({ sawDone: false, hasContent: true, generationTaskId: 2 }), false);
+  assert.equal(mod.shouldCompleteUnrecoverablePartial({ sawDone: true, hasContent: true }), false);
+  assert.equal(mod.shouldCompleteUnrecoverablePartial({ sawDone: false, hasContent: false }), false);
+  assert.equal(mod.shouldCompleteUnrecoverablePartial({ sawDone: false, hasContent: true, abortReason: "user" }), false);
+  assert.equal(mod.shouldCompleteUnrecoverablePartial({ sawDone: false, hasContent: true, abortReason: "navigation" }), false);
+});
+
 test("shouldMarkCompleted requires DONE, content and non-abort reason", () => {
   assert.equal(mod.shouldMarkCompleted({ sawDone: true, hasFinalContent: true }), true);
   assert.equal(mod.shouldMarkCompleted({ sawDone: true, hasFinalContent: false }), false);

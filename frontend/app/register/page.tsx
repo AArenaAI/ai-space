@@ -52,7 +52,12 @@ export default function RegisterPage() {
       // 注册成功后清除匿名 ID，避免已登录用户被误识别为匿名
       import("@/lib/guestId").then(({ clearGuestId }) => clearGuestId());
       window.dispatchEvent(new Event("auth-changed"));
-      router.push("/chat");
+      // 新注册用户需要激活内测权限，引导到激活页面
+      if (data.user?.beta_phase === "" || data.user?.beta_phase === null || data.user?.beta_phase === undefined) {
+        router.push("/beta/activate");
+      } else {
+        router.push("/chat");
+      }
     } catch (err) {
       setError(getErrorMessage(err, { module: "auth", fallbackTitle: t("auth.error.registerFailed"), fallbackMessage: t("auth.error.registerFailed") }));
     } finally {

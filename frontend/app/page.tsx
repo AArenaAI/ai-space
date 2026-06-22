@@ -34,9 +34,14 @@ export default function Home() {
       <LoginModal
         isOpen={showLogin}
         onClose={() => setShowLogin(false)}
-        onLoginSuccess={() => {
+        onLoginSuccess={(data, mode) => {
           setShowLogin(false);
-          window.location.href = "/chat";
+          const betaPhase = data?.user?.beta_phase;
+          if (mode === "register" && (betaPhase === "" || betaPhase === null || betaPhase === undefined)) {
+            window.location.href = "/beta/activate";
+          } else {
+            window.location.href = "/chat";
+          }
         }}
       />
     </div>

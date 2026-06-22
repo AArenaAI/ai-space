@@ -1,0 +1,205 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "model_id": "gpt-5.4",
+      "enabled": true,
+      "tier": "advanced",
+      "reasoning_level": "fast",
+      "reasoning_fast_value": "low",
+      "reasoning_thinking_value": "medium",
+      "reasoning_expert_value": "high",
+      "status": "available"
+    },
+    {
+      "model_id": "gpt-5.4-mini",
+      "enabled": true,
+      "tier": "basic",
+      "reasoning_level": "thinking",
+      "reasoning_fast_value": "low",
+      "reasoning_thinking_value": "medium",
+      "reasoning_expert_value": "high",
+      "status": "available"
+    },
+    {
+      "model_id": "gpt-5.5",
+      "enabled": true,
+      "tier": "advanced",
+      "reasoning_level": "thinking",
+      "reasoning_fast_value": "low",
+      "reasoning_thinking_value": "medium",
+      "reasoning_expert_value": "high",
+      "status": "available"
+    },
+    {
+      "model_id": "gpt-5.5-pro",
+      "enabled": false,
+      "tier": "advanced",
+      "reasoning_level": "thinking",
+      "reasoning_fast_value": "low",
+      "reasoning_thinking_value": "medium",
+      "reasoning_expert_value": "high",
+      "status": "available"
+    },
+    {
+      "model_id": "gpt-image-2",
+      "enabled": true,
+      "tier": "basic",
+      "reasoning_level": "thinking",
+      "reasoning_fast_value": "low",
+      "reasoning_thinking_value": "medium",
+      "reasoning_expert_value": "high",
+      "status": "available"
+    },
+    {
+      "model_id": "deepseek-v4-pro",
+      "enabled": true,
+      "tier": "advanced",
+      "reasoning_level": "thinking",
+      "reasoning_fast_value": "off",
+      "reasoning_thinking_value": "high",
+      "reasoning_expert_value": "max",
+      "status": "available"
+    },
+    {
+      "model_id": "deepseek-v4-flash",
+      "enabled": true,
+      "tier": "basic",
+      "reasoning_level": "thinking",
+      "reasoning_fast_value": "off",
+      "reasoning_thinking_value": "high",
+      "reasoning_expert_value": "max",
+      "status": "available"
+    },
+    {
+      "model_id": "gemini-2.5-pro",
+      "enabled": true,
+      "tier": "advanced",
+      "reasoning_level": "thinking",
+      "reasoning_fast_value": "1024",
+      "reasoning_thinking_value": "-1",
+      "reasoning_expert_value": "32768",
+      "status": "available"
+    },
+    {
+      "model_id": "gemini-3.1-pro-preview",
+      "enabled": true,
+      "tier": "advanced",
+      "reasoning_level": "expert",
+      "reasoning_fast_value": "low",
+      "reasoning_thinking_value": "medium",
+      "reasoning_expert_value": "high",
+      "status": "available"
+    },
+    {
+      "model_id": "gemini-3.5-flash",
+      "enabled": true,
+      "tier": "basic",
+      "reasoning_level": "thinking",
+      "reasoning_fast_value": "low",
+      "reasoning_thinking_value": "medium",
+      "reasoning_expert_value": "high",
+      "status": "available"
+    },
+    {
+      "model_id": "gemini-3.1-flash-lite",
+      "enabled": true,
+      "tier": "basic",
+      "reasoning_level": "thinking",
+      "reasoning_fast_value": "low",
+      "reasoning_thinking_value": "medium",
+      "reasoning_expert_value": "high",
+      "status": "available"
+    },
+    {
+      "model_id": "doubao-seedance-2.0-mini",
+      "enabled": true,
+      "tier": "basic",
+      "reasoning_level": "thinking",
+      "reasoning_fast_value": "low",
+      "reasoning_thinking_value": "medium",
+      "reasoning_expert_value": "high",
+      "status": "available"
+    },
+    {
+      "model_id": "doubao-seedance-1.5-pro",
+      "enabled": true,
+      "tier": "basic",
+      "reasoning_level": "thinking",
+      "reasoning_fast_value": "low",
+      "reasoning_thinking_value": "medium",
+      "reasoning_expert_value": "high",
+      "status": "available"
+    },
+    {
+      "model_id": "doubao-seedance-1.0-pro",
+      "enabled": true,
+      "tier": "basic",
+      "reasoning_level": "thinking",
+      "reasoning_fast_value": "low",
+      "reasoning_thinking_value": "medium",
+      "reasoning_expert_value": "high",
+      "status": "available"
+    },
+    {
+      "model_id": "doubao-seedance-1.0-pro-fast",
+      "enabled": true,
+      "tier": "basic",
+      "reasoning_level": "thinking",
+      "reasoning_fast_value": "low",
+      "reasoning_thinking_value": "medium",
+      "reasoning_expert_value": "high",
+      "status": "available"
+    },
+    {
+      "model_id": "doubao-seedance-2-0-fast-260128",
+      "enabled": true,
+      "tier": "basic",
+      "reasoning_level": "thinking",
+      "reasoning_fast_value": "low",
+      "reasoning_thinking_value": "medium",
+      "reasoning_expert_value": "high",
+      "status": "available"
+    },
+    {
+      "model_id": "doubao-seedance-2-0-260128",
+      "enabled": true,
+      "tier": "basic",
+      "reasoning_level": "thinking",
+      "reasoning_fast_value": "low",
+      "reasoning_thinking_value": "medium",
+      "reasoning_expert_value": "high",
+      "status": "available"
+    },
+    {
+      "model_id": "kimi-k2.5",
+      "enabled": true,
+      "tier": "advanced",
+      "reasoning_level": "thinking",
+      "reasoning_fast_value": "low",
+      "reasoning_thinking_value": "medium",
+      "reasoning_expert_value": "high",
+      "status": "available"
+    },
+    {
+      "model_id": "kimi-k2.6",
+      "enabled": true,
+      "tier": "advanced",
+      "reasoning_level": "thinking",
+      "reasoning_fast_value": "low",
+      "reasoning_thinking_value": "medium",
+      "reasoning_expert_value": "high",
+      "status": "available"
+    },
+    {
+      "model_id": "kimi-k2.7-code",
+      "enabled": true,
+      "tier": "advanced",
+      "reasoning_level": "thinking",
+      "reasoning_fast_value": "low",
+      "reasoning_thinking_value": "medium",
+      "reasoning_expert_value": "high",
+      "status": "available"
+    }
+  ]
+}

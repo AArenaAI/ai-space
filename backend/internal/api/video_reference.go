@@ -88,6 +88,11 @@ func resolveVideoReferenceURL(db *gorm.DB, cfg *config.Config, userID uint, ref 
 	if ref == "" {
 		return "", 0, nil
 	}
+	if mediaKind == "image" {
+		if resolved, ok, err := resolveGeneratedImageAssetReferenceURL(cfg, ref, index); ok || err != nil {
+			return resolved, 0, err
+		}
+	}
 	if mediaKind == "video" {
 		if resolved, ok, err := resolveGeneratedVideoAssetReferenceURL(cfg, ref); ok || err != nil {
 			return resolved, 0, err
@@ -239,6 +244,64 @@ func isSupportedVideoURL(ref string) bool {
 	}
 	ext := strings.ToLower(filepath.Ext(parsed.Path))
 	return ext == ".mp4" || ext == ".mov"
+}
+
+func isSupportedImageAssetURL(ref string) bool {
+	parsed, err := url.Parse(ref)
+	if err != nil {
+		return false
+	}
+	ext := strings.ToLower(filepath.Ext(parsed.Path))
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".webp":
+		return true
+	default:
+		return false
+	}
+}
+
+func resolveGeneratedImageAssetReferenceURL(cfg *config.Config, ref string, index int) (string, bool, error) {
+	filename, ok := localAssetFilenameFromURL(ref, localImageURLPrefix)
+	if !ok {
+		candidate := strings.TrimSpace(ref)
+		if candidate != "" && !strings.Contains(candidate, "/") && !strings.Contains(candidate, "..") && isSupportedImageAssetURL(localImageURLPrefix+candidate) {
+			if _, err := os.Stat(filepath.Join(imageAssetsDir(), candidate)); err == nil {
+				filename = candidate
+				ok = true
+			}
+		}
+	}
+	if !ok {
+		return "", false, nil
+	}
+	if !isSupportedImageAssetURL(localImageURLPrefix + filename) {
+		return "", true, fmt.Errorf("参考素材 #%d 不符合要求：参考图仅支持 jpg、jpeg、png、webp 格式", index+1)
+	}
+	path := filepath.Join(imageAssetsDir(), filename)
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", true, fmt.Errorf("参考素材 #%d 不符合要求：参考图不存在: %s", index+1, filename)
+	}
+	base := publicBaseURL(cfg)
+	if base != "" {
+		publicURL := strings.TrimRight(base, "/") + localImageURLPrefix + url.PathEscape(filename)
+		if isPublicReferenceURLReachable(publicURL) {
+			return publicURL, true, nil
+		}
+		return "", true, fmt.Errorf("参考素材 #%d 不符合要求：参考图需要公网可访问 URL；当前 BASE_URL/FRONTEND_URL 对外不可访问，火山无法下载素材", index+1)
+	}
+	if info.Size() > maxInlineReferenceImageBytes {
+		return "", true, fmt.Errorf("参考素材 #%d 不符合要求：参考图过大，请配置可公网访问的 BASE_URL 后再生成视频", index+1)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", true, fmt.Errorf("参考素材 #%d 不符合要求：读取参考图失败: %w", index+1, err)
+	}
+	mimeType := mime.TypeByExtension(strings.ToLower(filepath.Ext(filename)))
+	if mimeType == "" {
+		mimeType = "image/jpeg"
+	}
+	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data), true, nil
 }
 
 func resolveGeneratedVideoAssetReferenceURL(cfg *config.Config, ref string) (string, bool, error) {

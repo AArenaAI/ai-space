@@ -97,12 +97,12 @@ export const MODELS: ChatModel[] = [
   },
 ];
 
-export function useChat(conversationId: number | undefined, models: ChatModel[], skillKey?: string, notebookId?: number, notebookFileIds?: number[]) {
+export function useChat(conversationId: number | undefined, models: ChatModel[], skillKey?: string, notebookId?: number, notebookFileIds?: number[], modelSelectionOptions?: { storageKey?: string; defaultModelId?: string }) {
   const { t } = useI18n();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-  const { selectedModel, setSelectedModel, initialized } = useChatModelSelection(models);
+  const { selectedModel, setSelectedModel, initialized } = useChatModelSelection(models, modelSelectionOptions);
   const {
     conversationTitle,
     setConversationTitle,

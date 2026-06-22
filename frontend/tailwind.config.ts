@@ -54,9 +54,17 @@ const config: Config = {
         // 自定义变量 - 使用 CSS 变量以支持主题切换
         surface: {
           DEFAULT: "var(--surface)",
+          base: "var(--surface-base)",
           elevated: "var(--surface-elevated)",
           card: "var(--surface-card)",
+          hover: "var(--surface-hover)",
           border: "var(--surface-border)",
+        },
+        status: {
+          empty: "var(--status-empty)",
+          draft: "var(--status-draft)",
+          done: "var(--status-done)",
+          error: "var(--status-error)",
         },
         text: {
           primary: "var(--text-primary)",

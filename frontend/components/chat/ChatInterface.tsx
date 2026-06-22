@@ -8,7 +8,7 @@ import MessageList from "./MessageList";
 import MessageInput, { ReasoningConfig, type QuoteDraft } from "./MessageInput";
 import ModelSelector from "./ModelSelector";
 import ThemeToggle from "@/components/theme/ThemeToggle";
-import { Zap, X, Pencil, Bot, BookOpen, FileText } from "lucide-react";
+import { Zap, X, Pencil, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { showUserError } from "@/lib/errors";
@@ -16,8 +16,12 @@ import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { useI18n } from "@/lib/i18n";
 import InputDialog from "@/components/ui/InputDialog";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import type { ModelRecommendationContext } from "@/lib/models/modelRecommendations";
 import { emitChatRenderProfileEvent } from "@/lib/chatRenderProfile";
+import { useCredits, getTierName, getModelTier, isExpensiveModel } from "@/hooks/useCredits";
+import CreditExhaustedModal from "@/components/credits/CreditExhaustedModal";
+import { useChatAnalytics, trackCreditUse, trackFeatureUse } from "@/hooks/useAnalytics";
 
 const ForkCompareDialog = dynamic(() => import("./ForkCompareDialog"), {
   ssr: false,
@@ -58,6 +62,8 @@ interface ChatInterfaceProps {
   welcomeExamples?: { title: string; desc: string; prompt: string }[];
   targetMessageId?: number;
   externalSendRequest?: { id: number; content: string; hidden?: boolean } | null;
+  modelSelectionOptions?: { storageKey?: string; defaultModelId?: string };
+  onSaveAssistantToNote?: (content: string) => void;
 }
 
 const HIDDEN_USER_MESSAGE_PREFIX = "<!-- ai-space:hidden-user-message -->";
@@ -66,7 +72,7 @@ export function buildHiddenUserMessageContent(content: string) {
   return `${HIDDEN_USER_MESSAGE_PREFIX}\n${content}`;
 }
 
-export default function ChatInterface({ conversationId, notebookId, notebookTitle, notebookFileCount, notebookFileIds, notebookHero, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId, externalSendRequest }: ChatInterfaceProps) {
+export default function ChatInterface({ conversationId, notebookId, notebookTitle, notebookFileCount, notebookFileIds, notebookHero, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId, externalSendRequest, modelSelectionOptions, onSaveAssistantToNote }: ChatInterfaceProps) {
   const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
   const { t } = useI18n();
   const [compareMode, setCompareMode] = useState(false);
@@ -85,6 +91,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   const handledExternalSendIdRef = useRef<number | null>(null);
   const [modelRecommendationContext, setModelRecommendationContext] = useState<ModelRecommendationContext>();
   const [userName, setUserName] = useState<string>("");
+  const [creditExhaustedOpen, setCreditExhaustedOpen] = useState(false);
   useEffect(() => {
     try {
       const raw = localStorage.getItem("user");
@@ -125,9 +132,10 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     isLoadingMore,
     hasMoreMessages,
     loadMoreMessages,
-  } = useChat(conversationId, models, skillKey, notebookId, notebookFileIds);
+  } = useChat(conversationId, models, skillKey, notebookId, notebookFileIds, modelSelectionOptions);
 
   const { templates } = useTemplates();
+  const { hasEnoughCredits, getTierCredits, isCreditExhausted, getBetaPhaseInfo, credits, getModelCostFen, getBetaModelBlockedMessage } = useCredits();
 
   const chatInterfaceProfile = useMemo(() => ({
     conversationId,
@@ -302,20 +310,63 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     return ["extended", "heavy", "high", "max"].includes(reasoning.effort);
   };
 
-  const handleSend = async (content: string, reasoning: ReasoningConfig | undefined, search: boolean, attachments?: { filename: string; content: string; type: string; public_id?: string }[], file_ids?: string[], skipUserMessage = false) => {
-    // 【积分限制已临时取消】保畔代码但不执行
-    /* Credit checks are temporarily disabled.
-     * If re-enabled, route insufficient-credit messages through i18n keys instead of hardcoded copy.
-     */
+  const [expensiveModelConfirmOpen, setExpensiveModelConfirmOpen] = useState(false);
+  const [pendingSendPayload, setPendingSendPayload] = useState<{
+    content: string;
+    reasoning: ReasoningConfig | undefined;
+    search: boolean;
+    attachments?: { filename: string; content: string; type: string; public_id?: string }[];
+    file_ids?: string[];
+    skipUserMessage: boolean;
+  } | null>(null);
 
+  // 埋点追踪
+  const { trackChatStart, trackChatComplete, trackModelSwitch } = useChatAnalytics();
+  const prevModelRef = useRef<string>("");
+
+  const handleSend = async (content: string, reasoning: ReasoningConfig | undefined, search: boolean, attachments?: { filename: string; content: string; type: string; public_id?: string }[], file_ids?: string[], skipUserMessage = false) => {
     const activeCompareMode = compareMode || isCompare;
+    const currentSelectedModels = activeCompareMode
+      ? normalizeCompareModelIds(
+          selectedModelsRef.current.length ? selectedModelsRef.current : (selectedModels.length ? selectedModels : compareModels),
+          models
+        )
+      : [selectedModel.id];
+
+    // 内测批次权限检查：被当前 batch 锁定的模型直接提示，不进入 Bad Case 解锁流程。
+    const blockedModelId = currentSelectedModels.find((modelId) => getBetaModelBlockedMessage(modelId));
+    if (blockedModelId) {
+      toast.error(getBetaModelBlockedMessage(blockedModelId) || "当前内测批次暂未开放该模型");
+      return;
+    }
+
+    // 积分检查：额度不足时弹出 Bad Case 提交模态框。对比模式必须校验所有将要调用的模型。
+    // 未激活用户优先提示激活，不显示额度耗尽。
+    const firstModelWithoutCredits = currentSelectedModels.find((modelId) => !hasEnoughCredits(modelId));
+    if (firstModelWithoutCredits) {
+      if (credits?.beta_phase === "") {
+        toast.error("🔒 账号未激活：请使用邀请码激活或提交内测申请。");
+      } else {
+        setCreditExhaustedOpen(true);
+      }
+      return;
+    }
+
+    // 昂贵模型二次确认（Chat 1，22 Credits/次）
+    if (currentSelectedModels.some((modelId) => isExpensiveModel(modelId))) {
+      setPendingSendPayload({ content, reasoning, search, attachments, file_ids, skipUserMessage: skipUserMessage || false });
+      setExpensiveModelConfirmOpen(true);
+      return;
+    }
+
+    // 埋点：聊天开始
+    if (selectedModel) {
+      trackChatStart(selectedModel.id, selectedModel.name);
+    }
+
     if (activeCompareMode) {
       // 对比模式 - 依次流式发送给多个模型
       setCompareTargetMessageId(undefined);
-      const currentSelectedModels = normalizeCompareModelIds(
-        selectedModelsRef.current.length ? selectedModelsRef.current : (selectedModels.length ? selectedModels : compareModels),
-        models
-      );
       selectedModelsRef.current = currentSelectedModels;
       if (currentSelectedModels.length < 2) {
         toast.error(t("chat.compareMinModels"));
@@ -372,10 +423,15 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
       while (next.length <= index && next.length < COMPARE_MODEL_LIMIT) {
         next.push(models[next.length]?.id || modelId);
       }
+      const oldModelId = next[index];
       next[index] = modelId;
       const normalized = normalizeCompareModelIds(next, models);
       selectedModelsRef.current = normalized;
       localStorage.setItem(COMPARE_MODELS_KEY, JSON.stringify(normalized));
+      // 埋点：模型切换
+      if (oldModelId && oldModelId !== modelId) {
+        trackModelSwitch(oldModelId, modelId);
+      }
       return normalized;
     });
   };
@@ -459,6 +515,9 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     return () => window.clearTimeout(timer);
   }, [isEmptyNewCompareMode]);
 
+  const hasNotebookHeroImage = Boolean(notebookHero?.imageUrl);
+  const notebookHeroUsesDarkText = Boolean(notebookHero && !hasNotebookHeroImage && !notebookHero.coverClassName?.includes("text-white"));
+
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
       {/* 顶部栏 - 对比模式下隐藏，释放垂直空间 */}
@@ -468,7 +527,13 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
             <ModelSelector
               models={models}
               selected={selectedModel}
-              onSelect={handleModelSelect}
+              onSelect={(model) => {
+                if (prevModelRef.current && prevModelRef.current !== model.id) {
+                  trackModelSwitch(prevModelRef.current, model.id);
+                }
+                prevModelRef.current = model.id;
+                handleModelSelect(model);
+              }}
               recommendationContext={modelRecommendationContext}
             />
           </div>
@@ -488,16 +553,6 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
           )}
 
           <div className="flex items-center gap-2">
-            {notebookId && (
-              <div className="hidden items-center gap-2 rounded-full border border-brand-border bg-brand-muted px-3 py-1.5 text-xs font-medium text-brand sm:flex">
-                <BookOpen className="h-3.5 w-3.5" />
-                <span className="max-w-[180px] truncate">{notebookTitle || t("sidebar.nav.notebook")}</span>
-                <span className="inline-flex items-center gap-1 text-brand/80">
-                  <FileText className="h-3 w-3" />
-                  {notebookFileCount ?? 0}
-                </span>
-              </div>
-            )}
             <ThemeToggle />
           </div>
         </header>
@@ -523,31 +578,48 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
 
       {notebookHero && !activeCompareMode && (
         <div className="relative z-30 shrink-0 px-4 pb-3">
-          <div className={cn("group relative overflow-hidden rounded-[26px] px-6 py-5 shadow-sm", notebookHero.imageUrl ? "bg-slate-900 text-white" : (notebookHero.coverClassName || "bg-gradient-to-br from-violet-100 via-indigo-50 to-slate-100 text-slate-950"))}>
-            {notebookHero.imageUrl ? (
-              <img src={notebookHero.imageUrl} alt="笔记本底图" className="absolute inset-0 h-full w-full object-cover" />
+          <div className={cn("group relative min-h-[204px] overflow-hidden rounded-[28px] px-6 py-5 shadow-sm ring-1 ring-black/5", hasNotebookHeroImage ? "bg-slate-900 text-white" : notebookHero.coverClassName || "bg-gradient-to-br from-[#edf4ff] via-[#eef0ff] to-[#f6efff] text-slate-950")}>
+            {hasNotebookHeroImage ? (
+              <>
+                <img src={notebookHero.imageUrl} alt="笔记本底图" className="absolute inset-0 h-full w-full object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/35 to-black/10" />
+                <div className="absolute inset-0 bg-gradient-to-r from-black/45 via-transparent to-transparent" />
+              </>
             ) : (
-              <div className="pointer-events-none absolute -right-8 -bottom-12 text-[150px] font-black leading-none text-white/35 opacity-80">M</div>
+              <>
+                <div className="pointer-events-none absolute -right-10 -bottom-14 h-36 w-36 rotate-12 rounded-[34px] bg-fuchsia-400/10 transition duration-500 group-hover:scale-[1.03]" />
+                <div className="pointer-events-none absolute right-10 bottom-4 h-20 w-28 -rotate-6 rounded-[28px] bg-indigo-300/10 transition duration-500 group-hover:scale-[1.03]" />
+                <img src="/brand-dark-logo.png" alt="AI Space" className="pointer-events-none absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 object-contain opacity-90" />
+              </>
             )}
-            <div className={cn("absolute inset-0", notebookHero.imageUrl ? "bg-gradient-to-r from-black/55 via-black/20 to-transparent" : "bg-transparent")} />
-            <div className="relative z-10 flex items-start justify-between gap-4">
-              <div className="min-w-0 flex-1">
-                <div className="mb-4 text-[30px] leading-none">{notebookHero.icon || "🚀"}</div>
-                <h1 className={cn("max-w-2xl text-[24px] font-bold leading-[1.12] tracking-[-0.035em]", notebookHero.imageUrl ? "text-white drop-shadow-sm" : "text-slate-950")}>
+
+            <div className="relative z-10 flex h-full min-h-[164px] flex-col justify-between gap-5">
+              <div className="flex items-start justify-between gap-4">
+                {notebookHero.icon && (
+                  <div className={cn("inline-flex h-10 min-w-10 items-center justify-center rounded-full px-2.5 text-sm font-black leading-none shadow-sm ring-1 ring-black/10", notebookHeroUsesDarkText ? "bg-white/70 text-slate-900" : "bg-white/92 text-slate-900")}>
+                    {notebookHero.icon}
+                  </div>
+                )}
+                <div className="ml-auto">
+                  {notebookHero.onCustomize && (
+                    <button
+                      type="button"
+                      onClick={notebookHero.onCustomize}
+                      className={cn("relative z-20 inline-flex h-10 shrink-0 items-center gap-2 rounded-full px-4 text-sm font-semibold shadow-sm ring-1 ring-black/5 transition group-hover:shadow-md", notebookHeroUsesDarkText ? "bg-white/70 text-slate-700 hover:bg-white/90 hover:text-slate-950" : "bg-white/92 text-slate-700 hover:bg-white hover:text-slate-950")}
+                    >
+                      <Pencil className="h-4 w-4" />
+                      自定义
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="max-w-2xl">
+                <h1 className={cn("text-[28px] font-bold leading-[1.08] tracking-[-0.04em]", notebookHeroUsesDarkText ? "text-slate-950" : "text-white drop-shadow-sm")}>
                   {notebookHero.title}
                 </h1>
-                {notebookHero.meta && <p className={cn("mt-3 text-sm font-medium", notebookHero.imageUrl ? "text-white/80" : "text-slate-700/75")}>{notebookHero.meta}</p>}
+                {notebookHero.meta && <p className={cn("mt-3 text-sm font-medium", notebookHeroUsesDarkText ? "text-slate-600" : "text-white/82")}>{notebookHero.meta}</p>}
               </div>
-              {notebookHero.onCustomize && (
-                <button
-                  type="button"
-                  onClick={notebookHero.onCustomize}
-                  className="relative z-20 inline-flex h-11 shrink-0 items-center gap-2 rounded-full bg-white/90 px-4 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-black/5 transition hover:bg-white hover:text-slate-950 group-hover:shadow-md"
-                >
-                  <Pencil className="h-4 w-4" />
-                  自定义
-                </button>
-              )}
             </div>
           </div>
         </div>
@@ -589,6 +661,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
           onSelectModeChange={setMessageSelectMode}
           onExitCompare={handleExitCompare}
           onQuoteSelection={handleQuoteSelection}
+          onSaveAssistantToNote={notebookId ? onSaveAssistantToNote : undefined}
         />
       )}
 
@@ -704,6 +777,74 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
             </div>
           </div>
         </div>
+      )}
+
+      {/* 额度耗尽 - Bad Case 提交模态框 */}
+      <CreditExhaustedModal
+        open={creditExhaustedOpen}
+        onClose={() => setCreditExhaustedOpen(false)}
+        onSubmit={async (data) => {
+          const token = localStorage.getItem("token");
+          if (!token) throw new Error("未登录");
+          const res = await fetch("/api/bad-cases", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify(data),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ error: "提交失败" }));
+            throw new Error(err.error || "提交失败");
+          }
+          // 埋点：Bad Case 提交
+          trackFeatureUse("bad_case_submit", { model_id: data.model_id });
+        }}
+        currentModel={selectedModel ? { id: selectedModel.id, name: selectedModel.name || selectedModel.id } : undefined}
+        conversationId={conversationId}
+        tierName={selectedModel ? getTierName(getModelTier(selectedModel.id)) : undefined}
+        betaPhaseInfo={getBetaPhaseInfo()}
+      />
+
+      {/* 昂贵模型二次确认弹窗 */}
+      {expensiveModelConfirmOpen && pendingSendPayload && (
+        <ConfirmDialog
+          open={expensiveModelConfirmOpen}
+          onClose={() => {
+            setExpensiveModelConfirmOpen(false);
+            setPendingSendPayload(null);
+          }}
+          onConfirm={() => {
+            const payload = pendingSendPayload;
+            setExpensiveModelConfirmOpen(false);
+            setPendingSendPayload(null);
+            // 继续发送
+            const activeCompareMode = compareMode || isCompare;
+            if (activeCompareMode) {
+              setCompareTargetMessageId(undefined);
+              const currentSelectedModels = normalizeCompareModelIds(
+                selectedModelsRef.current.length ? selectedModelsRef.current : (selectedModels.length ? selectedModels : compareModels),
+                models
+              );
+              selectedModelsRef.current = currentSelectedModels;
+              if (currentSelectedModels.length >= 2) {
+                setIsComplexTask(isComplexReasoningTask(payload.reasoning, currentSelectedModels));
+                const { templateId, templatePrefix } = getSelectedTemplatePayload();
+                sendCompareMessages(payload.content, currentSelectedModels, payload.reasoning, payload.search, templateId, payload.attachments, payload.file_ids, templatePrefix);
+              }
+            } else {
+              setIsComplexTask(isComplexReasoningTask(payload.reasoning));
+              const { templateId, templatePrefix } = getSelectedTemplatePayload();
+              sendMessage(payload.content, payload.reasoning, false, payload.search, templateId, payload.skipUserMessage, payload.attachments, payload.file_ids, templatePrefix);
+            }
+          }}
+          title="⚠️ 极度深度推理确认"
+          description={`本次极度深度推理将消耗 ${((selectedModel ? getModelCostFen(selectedModel.id) : 2200) / 100).toLocaleString("zh-CN", { maximumFractionDigits: 2 })} Credits，确定执行？当前${credits?.beta_phase && credits.beta_phase !== "completed" ? "内测" : "精英"}余额：${((credits?.beta_phase && credits.beta_phase !== "completed" ? (credits?.beta_credit_balance || 0) : (credits?.elite_credits || 0)) / 100).toLocaleString("zh-CN", { maximumFractionDigits: 2 })} Credits。`}
+          confirmText={`确认执行（${((selectedModel ? getModelCostFen(selectedModel.id) : 2200) / 100).toLocaleString("zh-CN", { maximumFractionDigits: 2 })} Credits）`}
+          cancelText="取消"
+          variant="danger"
+        />
       )}
     </div>
   );

@@ -43,7 +43,18 @@ func InitDB(databaseURL string) (*gorm.DB, error) {
 		&PPTTemplate{}, &PPTGeneration{}, &PPTSlide{}, &PPTRevision{},
 		&ImageChat{}, &ImageChatMessage{},
 		&MessageFavorite{},
-		&MessageGroup{}, // 新增
+		&MessageGroup{},    // 新增
+		&ModelConfig{},     // 新增：模型配置表
+		&BadCase{},         // 新增：Bad Case 提交表
+		&BetaInvite{},      // 新增：内测邀请码
+		&BetaApplication{}, // 新增：内测申请表
+		&BetaConfig{},      // 新增：内测运营配置
+		&Changelog{},       // 新增：产品更新日志
+		&ChangelogRead{},   // 新增：已读记录
+		&AnalyticsEvent{},  // 新增：用户行为事件追踪
+		&AlertRule{},       // 新增：告警规则
+		&AlertHistory{},    // 新增：告警历史
+		&AlertSilence{},    // 新增：告警静默
 	); err != nil {
 		return nil, err
 	}
@@ -62,7 +73,7 @@ func InitDB(databaseURL string) (*gorm.DB, error) {
 	}
 
 	// 更新旧用户缺失的积分字段
-	if err := db.Model(&User{}).Where("basic_credits IS NULL OR basic_credits = 0").Update("basic_credits", 30).Error; err != nil {
+	if err := db.Model(&User{}).Where("basic_credits IS NULL OR basic_credits = 0").Update("basic_credits", 3000).Error; err != nil {
 		return nil, err
 	}
 	if err := db.Model(&User{}).Where("plan_tier IS NULL OR plan_tier = ''").Update("plan_tier", "free").Error; err != nil {

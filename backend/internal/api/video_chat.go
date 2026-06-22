@@ -134,6 +134,26 @@ func (h *VideoChatHandler) CreateVideoChat(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	modelID := req.Model
+	if modelID == "" {
+		modelID = "doubao-seedance-2-0-fast-260128"
+	}
+	ratioInput := req.Ratio
+	if ratioInput == "" {
+		ratioInput = req.AspectRatio
+	}
+	_, duration, _, err := normalizeVideoGenerationParams(modelID, ratioInput, req.Resolution, req.Duration, len(req.ReferenceImages), len(req.ReferenceVideos))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	costFen := getModelCostFen(h.db, modelID)
+	if duration > 0 {
+		costFen *= int(duration)
+	}
+	if !ensureModelAccess(c, h.db, userID, modelID, costFen) {
+		return
+	}
 
 	title := videoChatTitleFromPrompt(req.Prompt)
 	chat := models.VideoChat{UserID: userID, Title: title}
@@ -262,6 +282,26 @@ func (h *VideoChatHandler) SendVideoChatMessage(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	modelID := req.Model
+	if modelID == "" {
+		modelID = "doubao-seedance-2-0-fast-260128"
+	}
+	ratioInput := req.Ratio
+	if ratioInput == "" {
+		ratioInput = req.AspectRatio
+	}
+	_, duration, _, err := normalizeVideoGenerationParams(modelID, ratioInput, req.Resolution, req.Duration, len(req.ReferenceImages), len(req.ReferenceVideos))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	costFen := getModelCostFen(h.db, modelID)
+	if duration > 0 {
+		costFen *= int(duration)
+	}
+	if !ensureModelAccess(c, h.db, userID, modelID, costFen) {
+		return
+	}
 
 	assistantMsg, err := h.createVideoChatMessagesAndTask(userID, chat.ID, req)
 	if err != nil {
@@ -291,7 +331,6 @@ func (h *VideoChatHandler) createVideoChatMessagesAndTask(userID uint, chatID ui
 	if err != nil {
 		return nil, err
 	}
-
 	userMsg := models.VideoChatMessage{ChatID: chatID, Role: "user", Content: req.Prompt}
 	if err := h.db.Create(&userMsg).Error; err != nil {
 		return nil, err

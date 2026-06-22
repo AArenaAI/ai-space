@@ -1,4 +1,5 @@
 import { toast } from "sonner";
+import { getGuestId } from "@/lib/guestId";
 
 export type NotebookErrorCategory =
   | "auth"
@@ -114,14 +115,49 @@ export async function parseNotebookResponse<T>(response: Response, fallback = "�
   }
 }
 
+const ALLOWED_NOTEBOOK_SOURCE_EXTENSIONS = new Set([
+  ".txt", ".md", ".json", ".csv", ".js", ".ts", ".go", ".py", ".java", ".cpp", ".c", ".h", ".hpp", ".rs",
+  ".html", ".css", ".xml", ".yaml", ".yml", ".log", ".sql", ".sh", ".bash", ".tsx", ".jsx", ".vue",
+  ".php", ".rb", ".swift", ".kt", ".scala", ".r", ".matlab", ".tex",
+  ".pdf", ".docx", ".pptx", ".xlsx",
+  ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp",
+  ".mp4", ".mov",
+]);
+
+export function isNotebookSourceFileSupported(file: File): boolean {
+  const ext = "." + (file.name.split(".").pop() || "").toLowerCase();
+  return ALLOWED_NOTEBOOK_SOURCE_EXTENSIONS.has(ext);
+}
+
+export function validateNotebookSourceFile(file: File): NotebookUserError | null {
+  if (!isNotebookSourceFileSupported(file)) {
+    const ext = "." + (file.name.split(".").pop() || "").toLowerCase();
+    return new NotebookUserError(`暂不支持 ${ext} 文件类型，请换一个支持的资料文件。`, { category: "file_type" });
+  }
+  return null;
+}
+
+export const NOTEBOOK_SOURCE_FILE_ACCEPT = [
+  ".txt", ".md", ".json", ".csv", ".js", ".ts", ".go", ".py", ".java", ".cpp", ".c", ".h", ".hpp", ".rs",
+  ".html", ".css", ".xml", ".yaml", ".yml", ".log", ".sql", ".sh", ".bash", ".tsx", ".jsx", ".vue",
+  ".php", ".rb", ".swift", ".kt", ".scala", ".r", ".matlab", ".tex",
+  ".pdf", ".docx", ".pptx", ".xlsx",
+  ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp",
+  ".mp4", ".mov",
+].join(",");
+
 export async function uploadNotebookSourceFile(file: File, workspaceId?: string | null) {
   const token = localStorage.getItem("token");
+  const guestId = getGuestId();
+  const headers: Record<string, string> = {};
+  if (token && token !== "null" && token !== "undefined") headers.Authorization = `Bearer ${token}`;
+  if (guestId) headers["X-Guest-ID"] = guestId;
   const form = new FormData();
   form.append("file", file);
   if (workspaceId) form.append("workspace_id", workspaceId);
   const response = await fetch("/api/files/upload", {
     method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    headers,
     body: form,
   });
   const data = await parseNotebookResponse<{ public_id?: string }>(response, `${file.name} 上传失败，请重新选择文件。`);

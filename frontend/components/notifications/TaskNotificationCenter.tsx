@@ -13,6 +13,7 @@ import {
   TaskFinishedNotification,
 } from "@/lib/taskNotifications";
 import TaskToastCard from "@/components/notifications/TaskToastCard";
+import { refreshVideoTaskThrottled } from "@/lib/videoRefreshThrottle";
 
 class AuthExpiredError extends Error {}
 
@@ -111,9 +112,10 @@ async function checkTask(task: BackgroundTaskRecord): Promise<{ done: boolean; o
       return { done: isTerminal(status), ok: ["succeeded", "completed"].includes(status) && Boolean(message.video_url) };
     }
 
-    const res = await fetch(`/api/videos/${task.id}/refresh`, { credentials: "include", headers: getAuthHeaders() });
-    if (!(await ensureTaskResponse(res))) return null;
-    const video = await res.json().catch(() => ({}));
+    const result = await refreshVideoTaskThrottled(Number(task.id), getAuthHeaders());
+    if (result.kind === "rate_limited" || result.kind === "skipped") return null;
+    if (result.kind !== "ok") return null;
+    const video = result.video;
     return { done: isTerminal(video.status), ok: isOk(video.status, !!video.video_url) };
   }
 

@@ -1,0 +1,299 @@
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import { Loader2, ExternalLink, DollarSign, Coins, ArrowRightLeft } from "lucide-react";
+import { adminFetch } from "@/lib/admin/api";
+import { toast } from "sonner";
+
+interface ModelPrice {
+  provider: string;
+  model: string;
+  pricing_unit: string;
+  source_currency: string;
+  source_unit: string;
+  source_input_price?: number;
+  source_output_price?: number;
+  source_input_cache_hit_price?: number;
+  source_input_cache_miss_price?: number;
+  source_image_input_price?: number;
+  source_image_input_cache_hit_price?: number;
+  video_pricing_rules?: VideoPricingRule[];
+  context_window_tokens?: number;
+  pricing_basis: string;
+  source_url: string;
+}
+
+interface VideoPricingRule {
+  resolution: string;
+  input_contains_video: boolean;
+  source_output_price: number;
+  pricing_basis: string;
+}
+
+interface ModelCostMap {
+  [modelId: string]: number;
+}
+
+export default function ModelPricesPage() {
+  const [prices, setPrices] = useState<ModelPrice[]>([]);
+  const [costs, setCosts] = useState<ModelCostMap>({});
+  const [loading, setLoading] = useState(true);
+  const [exchangeRate, setExchangeRate] = useState(7.2);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const [priceData, costData, rateData] = await Promise.all([
+        adminFetch<{ prices: ModelPrice[] }>("/model-prices"),
+        adminFetch<{ items: { key: string; parsed_value?: unknown }[] }>("/beta-configs"),
+        adminFetch<{ usd_to_cny: number }>("/exchange-rate"),
+      ]);
+      setPrices(priceData.prices);
+      const costItem = costData.items.find((i) => i.key === "beta_model_costs");
+      setCosts((costItem?.parsed_value as ModelCostMap) || {});
+      setExchangeRate(rateData.usd_to_cny || 7.2);
+    } catch (err) {
+      toast.error("加载定价数据失败");
+      console.error("Model prices fetch error:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  const getProviderLabel = (p: string) => {
+    const map: Record<string, string> = {
+      openai: "OpenAI",
+      gemini: "Google Gemini",
+      deepseek: "DeepSeek",
+      moonshot: "Moonshot",
+      volcengine: "火山引擎",
+      "google-cloud-translate-v3": "Google Cloud",
+    };
+    return map[p] || p;
+  };
+
+  const getUnitLabel = (unit: string) => {
+    if (unit === "per_1m_tokens") return "百万 tokens";
+    if (unit === "per_1m_characters_source") return "百万字符（源）";
+    if (unit === "per_1m_characters_input_output") return "百万字符（输入+输出）";
+    return unit;
+  };
+
+  // 转换为人民币价格（参考后端 convertSourceUnitToRMB 逻辑）
+  const convertToRMB = (price: number, currency: string, unit: string) => {
+    if (price === undefined || price === 0) return null;
+    const rate = currency === "USD" ? exchangeRate : 1;
+    switch (unit) {
+      case "per_1m_tokens":
+        return (price * rate) / 1000; // 转为 ¥/千tokens
+      case "per_1m_characters_source":
+      case "per_1m_characters_input_output":
+        return price * rate; // 百万字符
+      default:
+        return price * rate;
+    }
+  };
+
+  // 估算单次对话成本（假设 4k 输入 / 2k 输出）
+  const estimateChatCost = (price: ModelPrice) => {
+    const inputTokens = 4000;
+    const outputTokens = 2000;
+
+    const inputPriceRMB = convertToRMB(
+      price.source_input_cache_miss_price ?? price.source_input_price ?? 0,
+      price.source_currency,
+      price.source_unit
+    );
+    const outputPriceRMB = convertToRMB(
+      price.source_output_price ?? 0,
+      price.source_currency,
+      price.source_unit
+    );
+
+    const inputCost = inputPriceRMB ? (inputPriceRMB * inputTokens) / 1000 : 0;
+    const outputCost = outputPriceRMB ? (outputPriceRMB * outputTokens) / 1000 : 0;
+    const total = inputCost + outputCost;
+
+    return { total, inputCost, outputCost };
+  };
+
+  // 查找对应的平台积分成本
+  const getPlatformCost = (modelId: string) => {
+    return costs[modelId] || 0;
+  };
+
+  if (loading) {
+    return (
+      <div className="flex h-96 items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-text-tertiary" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-text-primary">模型供应商定价</h1>
+        <p className="mt-1 text-sm text-text-secondary">
+          来自 config/model-prices.json 的原始供应商成本，与平台积分定价对比
+        </p>
+      </div>
+
+      <div className="space-y-4">
+        {prices.map((price) => {
+          const estimate = estimateChatCost(price);
+          const platformCostFen = getPlatformCost(price.model);
+          const platformCostYuan = platformCostFen / 100;
+
+          return (
+            <div
+              key={`${price.provider}-${price.model}`}
+              className="rounded-xl border border-surface-border bg-surface-card p-5"
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface-elevated text-lg">
+                    {price.source_currency === "CNY" ? "🇨🇳" : "🇺🇸"}
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-text-primary">{price.model}</h3>
+                    <p className="text-xs text-text-secondary">
+                      {getProviderLabel(price.provider)} · {getUnitLabel(price.source_unit)}
+                    </p>
+                  </div>
+                </div>
+                <a
+                  href={price.source_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-xs text-brand hover:underline"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  来源
+                </a>
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+                {/* 输入价格 */}
+                <div className="rounded-lg bg-surface-elevated p-3">
+                  <p className="text-xs text-text-tertiary">输入价格（原始）</p>
+                  <p className="mt-1 text-sm font-medium text-text-primary">
+                    {price.source_input_price !== undefined && (
+                      <>
+                        {price.source_currency === "CNY" ? "¥" : "$"}
+                        {price.source_input_price}
+                        <span className="text-xs text-text-tertiary ml-1">/ 1M tokens</span>
+                      </>
+                    )}
+                    {price.source_input_cache_miss_price !== undefined && (
+                      <>
+                        {price.source_currency === "CNY" ? "¥" : "$"}
+                        {price.source_input_cache_miss_price}
+                        <span className="text-xs text-text-tertiary ml-1">/ 1M tokens (cache miss)</span>
+                      </>
+                    )}
+                    {price.source_input_price === undefined &&
+                      price.source_input_cache_miss_price === undefined && (
+                        <span className="text-text-tertiary">-</span>
+                      )}
+                  </p>
+                  {/* 人民币价格 */}
+                  {(() => {
+                    const rmb = convertToRMB(price.source_input_cache_miss_price ?? price.source_input_price ?? 0, price.source_currency, price.source_unit);
+                    return rmb !== null ? (
+                      <p className="mt-1 text-xs text-green-600">
+                        ≈ ¥{rmb.toFixed(4)} / 1K tokens
+                      </p>
+                    ) : null;
+                  })()}
+                </div>
+
+                {/* 输出价格 */}
+                <div className="rounded-lg bg-surface-elevated p-3">
+                  <p className="text-xs text-text-tertiary">输出价格（原始）</p>
+                  <p className="mt-1 text-sm font-medium text-text-primary">
+                    {price.source_output_price !== undefined ? (
+                      <>
+                        {price.source_currency === "CNY" ? "¥" : "$"}
+                        {price.source_output_price}
+                        <span className="text-xs text-text-tertiary ml-1">/ 1M tokens</span>
+                      </>
+                    ) : (
+                      <span className="text-text-tertiary">-</span>
+                    )}
+                  </p>
+                  {/* 人民币价格 */}
+                  {(() => {
+                    const rmb = convertToRMB(price.source_output_price ?? 0, price.source_currency, price.source_unit);
+                    return rmb !== null ? (
+                      <p className="mt-1 text-xs text-green-600">
+                        ≈ ¥{rmb.toFixed(4)} / 1K tokens
+                      </p>
+                    ) : null;
+                  })()}
+                </div>
+
+                {/* 估算单次成本 */}
+                <div className="rounded-lg bg-surface-elevated p-3">
+                  <p className="text-xs text-text-tertiary">估算单次成本</p>
+                  <p className="mt-1 text-sm font-medium text-text-primary">
+                    {estimate.total > 0 ? (
+                      <>
+                        ¥{estimate.total.toFixed(4)}
+                      </>
+                    ) : (
+                      <span className="text-text-tertiary">-</span>
+                    )}
+                  </p>
+                  <p className="mt-1 text-xs text-text-tertiary">假设 4K 输入 / 2K 输出</p>
+                </div>
+
+                {/* 平台积分定价 */}
+                <div className="rounded-lg bg-brand/5 border border-brand/20 p-3">
+                  <p className="text-xs text-brand">平台积分定价</p>
+                  <p className="mt-1 text-sm font-medium text-brand">
+                    {platformCostYuan > 0 ? (
+                      <>
+                        <Coins className="inline h-3 w-3 mr-1" />
+                        {platformCostYuan.toFixed(2)} 积分
+                      </>
+                    ) : (
+                      <span className="text-text-tertiary">未配置</span>
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              {/* 视频定价规则 */}
+              {price.video_pricing_rules && price.video_pricing_rules.length > 0 && (
+                <div className="mt-4">
+                  <p className="text-xs text-text-tertiary mb-2">视频定价规则</p>
+                  <div className="flex flex-wrap gap-2">
+                    {price.video_pricing_rules.map((rule, idx) => (
+                      <span
+                        key={idx}
+                        className="inline-flex items-center gap-1 rounded-lg bg-surface-elevated px-2 py-1 text-xs text-text-secondary"
+                      >
+                        {rule.resolution}
+                        {rule.input_contains_video ? "（含输入视频）" : "（无输入视频）"}
+                        <span className="font-medium text-text-primary">
+                          ¥{rule.source_output_price}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 定价依据 */}
+              <p className="mt-3 text-xs text-text-tertiary">{price.pricing_basis}</p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

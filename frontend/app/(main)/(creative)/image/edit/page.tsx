@@ -17,6 +17,66 @@ import type { UserFacingError } from "@/lib/errors";
 const API_BASE_URL = "";
 
 type EditMode = "remove-bg" | "replace-bg" | "text-removal" | "upscale" | "inpaint" | "region-brush";
+type ImageEditIntent =
+  | "remove_background"
+  | "replace_background"
+  | "remove_text"
+  | "faithful_enhance"
+  | "ai_upscale"
+  | "local_replace"
+  | "local_modify"
+  | "local_add"
+  | "local_repair"
+  | "object_remove_repair";
+
+type ImageEditRoute = { subMode: string; intent: ImageEditIntent };
+type PrecisionModeOption = ImageEditRoute & { labelKey: string; descriptionKey: string };
+
+const DEFAULT_EDIT_ROUTES: Record<EditMode, ImageEditRoute> = {
+  "remove-bg": { subMode: "standard", intent: "remove_background" },
+  "replace-bg": { subMode: "realistic", intent: "replace_background" },
+  "text-removal": { subMode: "auto", intent: "remove_text" },
+  upscale: { subMode: "faithful", intent: "faithful_enhance" },
+  inpaint: { subMode: "replace", intent: "local_replace" },
+  "region-brush": { subMode: "remove", intent: "object_remove_repair" },
+};
+
+const PRECISION_MODE_OPTIONS: Record<EditMode, PrecisionModeOption[]> = {
+  "remove-bg": [
+    { subMode: "standard", intent: "remove_background", labelKey: "image.edit.precision.removeBg.standard", descriptionKey: "image.edit.precision.removeBg.standardDesc" },
+    { subMode: "fine-hair", intent: "remove_background", labelKey: "image.edit.precision.removeBg.fineHair", descriptionKey: "image.edit.precision.removeBg.fineHairDesc" },
+    { subMode: "product-edge", intent: "remove_background", labelKey: "image.edit.precision.removeBg.productEdge", descriptionKey: "image.edit.precision.removeBg.productEdgeDesc" },
+    { subMode: "defringe", intent: "remove_background", labelKey: "image.edit.precision.removeBg.defringe", descriptionKey: "image.edit.precision.removeBg.defringeDesc" },
+  ],
+  "replace-bg": [
+    { subMode: "solid", intent: "replace_background", labelKey: "image.edit.precision.replaceBg.solid", descriptionKey: "image.edit.precision.replaceBg.solidDesc" },
+    { subMode: "commerce", intent: "replace_background", labelKey: "image.edit.precision.replaceBg.commerce", descriptionKey: "image.edit.precision.replaceBg.commerceDesc" },
+    { subMode: "studio", intent: "replace_background", labelKey: "image.edit.precision.replaceBg.studio", descriptionKey: "image.edit.precision.replaceBg.studioDesc" },
+    { subMode: "realistic", intent: "replace_background", labelKey: "image.edit.precision.replaceBg.realistic", descriptionKey: "image.edit.precision.replaceBg.realisticDesc" },
+    { subMode: "stylized", intent: "replace_background", labelKey: "image.edit.precision.replaceBg.stylized", descriptionKey: "image.edit.precision.replaceBg.stylizedDesc" },
+  ],
+  "text-removal": [
+    { subMode: "auto", intent: "remove_text", labelKey: "image.edit.precision.textRemoval.auto", descriptionKey: "image.edit.precision.textRemoval.autoDesc" },
+    { subMode: "screenshot", intent: "remove_text", labelKey: "image.edit.precision.textRemoval.screenshot", descriptionKey: "image.edit.precision.textRemoval.screenshotDesc" },
+    { subMode: "poster", intent: "remove_text", labelKey: "image.edit.precision.textRemoval.poster", descriptionKey: "image.edit.precision.textRemoval.posterDesc" },
+    { subMode: "watermark", intent: "remove_text", labelKey: "image.edit.precision.textRemoval.watermark", descriptionKey: "image.edit.precision.textRemoval.watermarkDesc" },
+  ],
+  upscale: [
+    { subMode: "faithful", intent: "faithful_enhance", labelKey: "image.edit.precision.upscale.faithful", descriptionKey: "image.edit.precision.upscale.faithfulDesc" },
+    { subMode: "ai", intent: "ai_upscale", labelKey: "image.edit.precision.upscale.ai", descriptionKey: "image.edit.precision.upscale.aiDesc" },
+  ],
+  inpaint: [
+    { subMode: "replace", intent: "local_replace", labelKey: "image.edit.precision.inpaint.replace", descriptionKey: "image.edit.precision.inpaint.replaceDesc" },
+    { subMode: "modify", intent: "local_modify", labelKey: "image.edit.precision.inpaint.modify", descriptionKey: "image.edit.precision.inpaint.modifyDesc" },
+    { subMode: "add", intent: "local_add", labelKey: "image.edit.precision.inpaint.add", descriptionKey: "image.edit.precision.inpaint.addDesc" },
+    { subMode: "repair", intent: "local_repair", labelKey: "image.edit.precision.inpaint.repair", descriptionKey: "image.edit.precision.inpaint.repairDesc" },
+  ],
+  "region-brush": [
+    { subMode: "remove", intent: "object_remove_repair", labelKey: "image.edit.precision.regionBrush.remove", descriptionKey: "image.edit.precision.regionBrush.removeDesc" },
+    { subMode: "include-shadow", intent: "object_remove_repair", labelKey: "image.edit.precision.regionBrush.includeShadow", descriptionKey: "image.edit.precision.regionBrush.includeShadowDesc" },
+    { subMode: "strong-cleanup", intent: "object_remove_repair", labelKey: "image.edit.precision.regionBrush.strongCleanup", descriptionKey: "image.edit.precision.regionBrush.strongCleanupDesc" },
+  ],
+};
 
 /* 示例：展示原图 vs 处理后效果 */
 const MODE_CONFIG = {
@@ -733,6 +793,7 @@ function ImageEditContent() {
   const [sourceFileId, setSourceFileId] = useState("");
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [replacePrompt, setReplacePrompt] = useState("");
+  const [selectedPrecisionRoute, setSelectedPrecisionRoute] = useState<ImageEditRoute>(DEFAULT_EDIT_ROUTES[editMode]);
   const [isEditing, setIsEditing] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -886,6 +947,10 @@ function ImageEditContent() {
   }, [editMode, uploadRecognitionImage, t]);
 
   useEffect(() => {
+    setSelectedPrecisionRoute(DEFAULT_EDIT_ROUTES[editMode]);
+  }, [editMode]);
+
+  useEffect(() => {
     const image = searchParams.get("image") || "";
     setSourceUrl(image);
     setSourceFile(null);
@@ -1031,6 +1096,8 @@ function ImageEditContent() {
       const body: Record<string, any> = {
         image_url: imagePublicId,
         edit_mode: editMode,
+        sub_mode: selectedPrecisionRoute.subMode,
+        intent: selectedPrecisionRoute.intent,
       };
       body.title = t(config.tabKey);
       if (editMode === "replace-bg") body.prompt = replacePrompt.trim();
@@ -1173,9 +1240,43 @@ function ImageEditContent() {
   }, [images]);
 
   const examples = config.examples;
+  const precisionOptions = PRECISION_MODE_OPTIONS[editMode];
   const needsPrompt = editMode === "replace-bg" || (editMode === "inpaint" && regionStep === "recognized");
   const promptRequired = editMode === "replace-bg" || (editMode === "inpaint" && regionStep === "recognized");
   const submitDisabled = (promptRequired && !replacePrompt.trim()) || (requiresRegionRecognition && regionStep !== "recognized");
+
+  const renderPrecisionModeSelector = (compact = false) => (
+    <div className={cn("w-full rounded-xl border border-surface-border bg-surface-card p-4 shadow-sm", compact ? "max-w-3xl" : "max-w-4xl")}>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-text-primary">{t("image.edit.precision.title")}</p>
+          <p className="mt-1 text-xs text-text-tertiary">{t("image.edit.precision.desc")}</p>
+        </div>
+      </div>
+      <div className={cn("grid gap-2", precisionOptions.length <= 2 ? "sm:grid-cols-2" : "sm:grid-cols-2 lg:grid-cols-3")}>
+        {precisionOptions.map((option) => {
+          const selected = selectedPrecisionRoute.subMode === option.subMode;
+          return (
+            <button
+              key={option.subMode}
+              type="button"
+              onClick={() => setSelectedPrecisionRoute({ subMode: option.subMode, intent: option.intent })}
+              disabled={isEditing}
+              className={cn(
+                "rounded-lg border px-3 py-2 text-left transition-all",
+                selected
+                  ? "border-[color:var(--brand-border)] bg-brand-muted text-brand shadow-sm"
+                  : "border-surface-border bg-surface-elevated text-text-secondary hover:border-[color:var(--brand-border)] hover:text-text-primary"
+              )}
+            >
+              <span className="block text-xs font-semibold">{t(option.labelKey)}</span>
+              <span className={cn("mt-1 block text-[11px] leading-4", selected ? "text-brand/80" : "text-text-tertiary")}>{t(option.descriptionKey)}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 
   // 选择 TabIcon
   const TabIcon = config.tabIcon;
@@ -1334,6 +1435,7 @@ function ImageEditContent() {
                           </div>
                         )}
                       </div>
+                      {!isEditing && renderPrecisionModeSelector()}
                       {!isEditing && (
                         <div className="flex items-center justify-center gap-3">
                           <input
@@ -1534,6 +1636,8 @@ function ImageEditContent() {
                           )
                         )}
                       </div>
+
+                      {!isEditing && renderPrecisionModeSelector()}
 
                       {requiresRegionRecognition && !isEditing && (
                         <div className="w-full max-w-2xl rounded-xl border border-surface-border bg-surface-card p-4 shadow-sm">

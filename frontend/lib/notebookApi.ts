@@ -80,6 +80,14 @@ export async function updateNotebookFile(notebookId: number, fileId: number, inp
   return parseNotebookResponse<NotebookFile>(response, "重命名资料失败");
 }
 
+export async function reindexNotebookFile(notebookId: number, fileId: number): Promise<NotebookFile> {
+  const response = await fetch(`/api/notebooks/${notebookId}/files/${fileId}/reindex`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  return parseNotebookResponse<NotebookFile>(response, "重新索引资料失败");
+}
+
 export async function removeNotebookFile(notebookId: number, fileId: number): Promise<void> {
   const response = await fetch(`/api/notebooks/${notebookId}/files/${fileId}`, {
     method: "DELETE",
@@ -152,6 +160,9 @@ export async function generateNotebookArtifact(input: {
   style?: string;
   detail_level?: string;
   prompt?: string;
+  flashcard_count?: string;
+  quiz_count?: string;
+  difficulty?: string;
 }): Promise<NotebookArtifact> {
   const response = await fetch(`/api/notebooks/${input.notebookId}/artifacts/generate`, {
     method: "POST",
@@ -164,6 +175,9 @@ export async function generateNotebookArtifact(input: {
       style: input.style,
       detail_level: input.detail_level,
       prompt: input.prompt,
+      flashcard_count: input.flashcard_count,
+      quiz_count: input.quiz_count,
+      difficulty: input.difficulty,
     }),
   });
   return parseNotebookResponse<NotebookArtifact>(response, "生成 Studio 输出失败");

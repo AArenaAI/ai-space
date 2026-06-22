@@ -60,7 +60,7 @@ func (p *FileParser) Parse(ctx context.Context, data []byte, filename string) (*
 	ext := strings.ToLower(filepath.Ext(filename))
 
 	switch ext {
-	case ".txt", ".md", ".json", ".csv", ".js", ".ts", ".go", ".py", ".java",
+	case ".txt", ".md", ".url", ".json", ".csv", ".js", ".ts", ".go", ".py", ".java",
 		".cpp", ".c", ".h", ".hpp", ".rs", ".html", ".css", ".xml", ".yaml",
 		".yml", ".log", ".sql", ".sh", ".bash", ".tsx", ".jsx", ".vue", ".php",
 		".rb", ".swift", ".kt", ".scala", ".r", ".matlab", ".tex":

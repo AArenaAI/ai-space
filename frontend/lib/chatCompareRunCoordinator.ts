@@ -143,7 +143,6 @@ export function buildCompareRunRequestBody({
     messages: modelMessages,
     conversationId,
     notebookId,
-    reasoningEnabled: reasoning.enabled,
     reasoningEffort: reasoning.effort,
     search,
     templateId,
@@ -208,9 +207,9 @@ export async function runCompareModel<TAssistant extends CompareAssistantLike>({
     });
     if (!response.ok) {
       const errorBody = await response.json().catch(() => ({}));
-      const errorCode = errorBody.error || "unknown";
+      const errorCode = errorBody.error || errorBody.code || "unknown";
       const errorMsg = errorBody.message || "请求失败";
-      throw Object.assign(new Error(errorMsg), { errorCode });
+      throw Object.assign(new Error(errorMsg), { errorCode, status: response.status, needInvite: errorBody.need_invite });
     }
 
     streamResult = await options.callbacks.streamResponse(

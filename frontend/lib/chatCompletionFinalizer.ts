@@ -110,6 +110,9 @@ export function buildDisplayErrorMessage({ errorCode, message, guestLimitMessage
   if (errorCode === "guest_limit_exceeded") {
     return `⚠️ ${guestLimitMessage || message || "匿名用户每日额度已用完，请登录后继续"}`;
   }
+  if (errorCode === "not_activated") {
+    return "🔒 账号未激活：请使用邀请码激活或提交内测申请后才能使用模型服务。";
+  }
   return `❌ ${message || "请求失败"}`;
 }
 

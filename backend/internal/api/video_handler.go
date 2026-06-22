@@ -31,6 +31,17 @@ func NewVideoHandler(db *gorm.DB, cfg *config.Config) *VideoHandler {
 	}
 }
 
+func ensureVideoFailureMessage(video *models.VideoGeneration) {
+	if video == nil || video.Status != "failed" || strings.TrimSpace(video.ErrorMessage) != "" {
+		return
+	}
+	if strings.TrimSpace(video.TaskID) == "" {
+		video.ErrorMessage = "视频任务提交失败，但后端未返回具体原因。请检查任务提交日志或重新提交。"
+		return
+	}
+	video.ErrorMessage = fmt.Sprintf("视频任务 %s 生成失败，但生成服务未返回具体原因。请检查视频任务日志或更换提示词/素材后重试。", video.TaskID)
+}
+
 func (h *VideoHandler) AutoMigrate() {
 	h.db.AutoMigrate(&models.VideoGeneration{})
 }
@@ -42,6 +53,9 @@ func (h *VideoHandler) ListVideos(c *gin.Context) {
 	if err := h.db.Where("user_id = ?", userID).Order("created_at DESC").Find(&videos).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get video list"})
 		return
+	}
+	for i := range videos {
+		ensureVideoFailureMessage(&videos[i])
 	}
 	c.JSON(http.StatusOK, gin.H{"videos": videos})
 }
@@ -73,7 +87,14 @@ func (h *VideoHandler) CreateVideo(c *gin.Context) {
 	}
 	ratio, duration, resolution, err := normalizeVideoGenerationParams(modelID, req.Ratio, req.Resolution, req.Duration, len(req.ReferenceImages), len(req.ReferenceVideos))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": cleanVideoGenerationErrorMessage(err)})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	costFen := getModelCostFen(h.db, modelID)
+	if duration > 0 {
+		costFen *= int(duration)
+	}
+	if !ensureModelAccess(c, h.db, userID, modelID, costFen) {
 		return
 	}
 
@@ -90,13 +111,13 @@ func (h *VideoHandler) CreateVideo(c *gin.Context) {
 	}
 	createReq.ReferenceImages, err = resolveVideoReferenceURLs(h.db, h.cfg, userID, req.ReferenceImages, "image")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": cleanVideoGenerationErrorMessage(err)})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	createReq.ReferenceImageRoles = normalizedReferenceImageRoles(req.ReferenceImageRoles, len(createReq.ReferenceImages))
 	createReq.ReferenceVideos, err = resolveVideoReferenceURLs(h.db, h.cfg, userID, req.ReferenceVideos, "video")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": cleanVideoGenerationErrorMessage(err)})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	log.Printf("[Video] create task refs images=%d videos=%d model=%s", len(createReq.ReferenceImages), len(createReq.ReferenceVideos), modelID)
@@ -146,7 +167,7 @@ func (h *VideoHandler) GetVideo(c *gin.Context) {
 		return
 	}
 
-	if video.Status != "succeeded" && video.Status != "completed" && video.Status != "failed" {
+	if video.Status != "succeeded" && video.Status != "completed" && video.Status != "failed" && strings.TrimSpace(video.TaskID) != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		resp, err := h.videoService.GetVideoTask(ctx, video.TaskID)
@@ -167,8 +188,13 @@ func (h *VideoHandler) GetVideo(c *gin.Context) {
 					}
 				}
 			}
-			if resp.Status == "failed" && resp.ErrorMessage != "" {
-				video.ErrorMessage = cleanVideoGenerationErrorString(resp.ErrorMessage)
+			if resp.Status == "failed" {
+				if resp.ErrorMessage != "" {
+					video.ErrorMessage = cleanVideoGenerationErrorString(resp.ErrorMessage)
+				} else if resp.ErrorCode != "" {
+					video.ErrorMessage = cleanVideoGenerationErrorString(resp.ErrorCode)
+				}
+				ensureVideoFailureMessage(&video)
 			}
 			h.db.Save(&video)
 			if video.Status == "succeeded" || video.Status == "completed" {
@@ -177,6 +203,7 @@ func (h *VideoHandler) GetVideo(c *gin.Context) {
 		}
 	}
 
+	ensureVideoFailureMessage(&video)
 	c.JSON(http.StatusOK, video)
 }
 
@@ -206,6 +233,15 @@ func (h *VideoHandler) RefreshVideoStatus(c *gin.Context) {
 		return
 	}
 
+	if video.Status == "failed" || video.Status == "succeeded" || video.Status == "completed" || strings.TrimSpace(video.TaskID) == "" {
+		ensureVideoFailureMessage(&video)
+		if video.Status == "failed" && strings.TrimSpace(video.ErrorMessage) != "" {
+			h.db.Model(&models.VideoGeneration{}).Where("id = ?", video.ID).Update("error_message", video.ErrorMessage)
+		}
+		c.JSON(http.StatusOK, video)
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	resp, err := h.videoService.GetVideoTask(ctx, video.TaskID)
@@ -230,8 +266,13 @@ func (h *VideoHandler) RefreshVideoStatus(c *gin.Context) {
 			}
 		}
 	}
-	if resp.Status == "failed" && resp.ErrorMessage != "" {
-		video.ErrorMessage = cleanVideoGenerationErrorString(resp.ErrorMessage)
+	if resp.Status == "failed" {
+		if resp.ErrorMessage != "" {
+			video.ErrorMessage = cleanVideoGenerationErrorString(resp.ErrorMessage)
+		} else if resp.ErrorCode != "" {
+			video.ErrorMessage = cleanVideoGenerationErrorString(resp.ErrorCode)
+		}
+		ensureVideoFailureMessage(&video)
 	}
 	video.UpdatedAt = time.Now()
 	h.db.Save(&video)
@@ -289,7 +330,10 @@ func (h *VideoHandler) submitVideoTaskAsync(userID uint, videoID uint, createReq
 	resp, err := h.videoService.CreateVideoTask(ctx, createReq)
 	if err != nil {
 		errMsg := cleanVideoTaskSubmissionErrorMessage(err)
-		log.Printf("[Video] async create task failed video_id=%d err=%v", videoID, err)
+		if !strings.Contains(errMsg, "model=") {
+			errMsg = fmt.Sprintf("%s（model=%s, ratio=%s, resolution=%s, duration=%d, refs=image:%d/video:%d）", errMsg, createReq.Model, createReq.Ratio, createReq.Resolution, createReq.Duration, len(createReq.ReferenceImages), len(createReq.ReferenceVideos))
+		}
+		log.Printf("[Video] async create task failed video_id=%d model=%s ratio=%s resolution=%s duration=%d refs=image:%d/video:%d err=%v", videoID, createReq.Model, createReq.Ratio, createReq.Resolution, createReq.Duration, len(createReq.ReferenceImages), len(createReq.ReferenceVideos), err)
 		h.db.Model(&models.VideoGeneration{}).Where("id = ?", videoID).Updates(map[string]interface{}{
 			"status":        "failed",
 			"error_message": errMsg,
@@ -332,8 +376,45 @@ var officialVideoRatios = map[string]bool{
 	"adaptive": true,
 }
 
-var officialVideoDurations = map[int64]bool{
-	4: true, 5: true, 6: true, 7: true, 9: true, 10: true, 11: true, 13: true, 14: true, 15: true,
+func normalizeSeedanceModelKey(modelID string) string {
+	model := strings.ToLower(strings.TrimSpace(modelID))
+	model = strings.NewReplacer(".", "-", "_", "-").Replace(model)
+	if model == "doubao-seedance-2-0-pro-260128" {
+		return "doubao-seedance-2-0-260128"
+	}
+	return model
+}
+
+func isSeedance1Model(modelID string) bool {
+	return strings.Contains(normalizeSeedanceModelKey(modelID), "seedance-1-0")
+}
+
+func isSeedance15Model(modelID string) bool {
+	return strings.Contains(normalizeSeedanceModelKey(modelID), "seedance-1-5")
+}
+
+func isFastLikeSeedanceModel(modelID string) bool {
+	model := normalizeSeedanceModelKey(modelID)
+	return strings.Contains(model, "seedance-2-0-fast") || strings.Contains(model, "seedance-2-0-mini") || strings.Contains(model, "seedance-1-0-pro-fast")
+}
+
+func validateSeedanceDuration(modelID string, duration int64) error {
+	if isSeedance1Model(modelID) {
+		if duration >= 2 && duration <= 12 {
+			return nil
+		}
+		return fmt.Errorf("Seedance 1.0 duration must be an integer from 2 to 12 seconds")
+	}
+	if isSeedance15Model(modelID) {
+		if duration == -1 || (duration >= 4 && duration <= 12) {
+			return nil
+		}
+		return fmt.Errorf("Seedance 1.5 Pro duration must be -1 or an integer from 4 to 12 seconds")
+	}
+	if duration == -1 || (duration >= 4 && duration <= 15) {
+		return nil
+	}
+	return fmt.Errorf("Seedance 2.0 duration must be -1 or an integer from 4 to 15 seconds")
 }
 
 var standardSeedanceResolutions = map[string]bool{
@@ -358,8 +439,8 @@ func normalizeVideoGenerationParams(modelID string, ratio string, resolution str
 	if duration == 0 {
 		duration = 5
 	}
-	if !officialVideoDurations[duration] {
-		return "", 0, "", fmt.Errorf("duration must be one of 4, 5, 6, 7, 9, 10, 11, 13, 14, 15 seconds")
+	if err := validateSeedanceDuration(modelID, duration); err != nil {
+		return "", 0, "", err
 	}
 
 	if referenceImageCount > 9 {
@@ -373,20 +454,20 @@ func normalizeVideoGenerationParams(modelID string, ratio string, resolution str
 		resolution = "720p"
 	}
 	allowedResolutions := standardSeedanceResolutions
-	if strings.Contains(modelID, "seedance-2-0-fast") {
+	if isFastLikeSeedanceModel(modelID) {
 		allowedResolutions = fastSeedanceResolutions
 	}
 	if !allowedResolutions[resolution] {
-		if strings.Contains(modelID, "seedance-2-0-fast") {
-			return "", 0, "", fmt.Errorf("Seedance 2.0 Fast resolution must be 480p or 720p")
+		if isFastLikeSeedanceModel(modelID) {
+			return "", 0, "", fmt.Errorf("Seedance fast/mini models support 480p or 720p resolution")
 		}
-		return "", 0, "", fmt.Errorf("Seedance 2.0 resolution must be 480p, 720p, or 1080p")
+		return "", 0, "", fmt.Errorf("Seedance resolution must be 480p, 720p, or 1080p")
 	}
 	return ratio, duration, resolution, nil
 }
 
 // GetVideoModelsHandler returns supported video generation models
 func GetVideoModelsHandler(c *gin.Context) {
-	models := modelmeta.VideoModels()
+	models := mergeModelConfigs(modelmeta.VideoModels())
 	c.JSON(http.StatusOK, models)
 }

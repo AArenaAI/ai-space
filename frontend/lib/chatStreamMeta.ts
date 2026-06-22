@@ -30,10 +30,13 @@ export function normalizeChatStreamPayload(parsed: any): ChatStreamPayload {
   if (parsed?._error || parsed?._error_meta) {
     const error = parsed._error || parsed._error_meta;
     const userError = normalizeError(error, { module: "chat", fallbackMessage: "请求失败，请稍后重试。" });
+    const streamMessage = typeof error.user_message === "string" && error.user_message.trim()
+      ? error.user_message
+      : userError.message;
     return {
       type: "error",
       error,
-      message: userError.message,
+      message: streamMessage,
       errorCode: error.error_code || error.code || "unknown",
       retryable: error.retryable === true || error.retriable === true,
       requestId: error.request_id,

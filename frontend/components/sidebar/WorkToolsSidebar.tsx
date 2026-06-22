@@ -1,6 +1,6 @@
 "use client";
 
-import { PenLine, Languages, FileText } from "lucide-react";
+import { FileText, Languages, Mic, PenLine } from "lucide-react";
 import ModuleSidebar, { type ModuleSidebarGroup } from "./ModuleSidebar";
 
 export const WORK_NAV_GROUPS: ModuleSidebarGroup[] = [
@@ -18,6 +18,12 @@ export const WORK_NAV_GROUPS: ModuleSidebarGroup[] = [
         labelKey: "work.translator",
         href: "/translator",
         matchPath: "/translator",
+      },
+      {
+        icon: Mic,
+        labelKey: "work.liveTranslate",
+        href: "/live-translate",
+        matchPath: "/live-translate",
       },
       {
         icon: FileText,

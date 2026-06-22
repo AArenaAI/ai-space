@@ -2,6 +2,7 @@ import {
   buildChatStreamRunResult,
   ChatStreamGroupContext,
   ChatStreamRunResult,
+  shouldCompleteUnrecoverablePartial,
   shouldMarkCompleted,
   shouldRecoverStream,
   shouldReconcileAfterDone,
@@ -103,6 +104,7 @@ export function decideFinalStreamReconciliation({
 }: ChatFinalReconciliationInput): ChatFinalReconciliationAction {
   const finalContent = resolveFinalStreamContent({ streamContent, accumulated: state.accumulated });
   const shouldSyncFinalData = shouldSyncFinalRealtimeData({ finalContent, hasRealtimeData });
+  const hasContent = finalContent.trim().length > 0;
 
   if (shouldRecoverStream({
     sawDone: state.sawDone,
@@ -119,6 +121,23 @@ export function decideFinalStreamReconciliation({
       generationTaskId: state.generationTaskId,
       lastSequence: state.lastSequence,
       shouldStartBackgroundPolling: Boolean(state.useBackground && state.serverMessageId),
+    };
+  }
+
+  if (shouldCompleteUnrecoverablePartial({
+    sawDone: state.sawDone,
+    abortReason,
+    hasContent,
+    serverMessageId: state.serverMessageId,
+    generationTaskId: state.generationTaskId,
+  })) {
+    return {
+      type: "complete_or_cleanup",
+      shouldSyncFinalData,
+      finalContent,
+      result: buildFinalStreamRunResult({ state, finalContent }),
+      shouldClearStores: true,
+      shouldMarkCompleted: true,
     };
   }
 

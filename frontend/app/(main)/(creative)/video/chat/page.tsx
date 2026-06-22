@@ -284,6 +284,7 @@ function VideoChatPageInner() {
 
   const [referenceImageRoles, setReferenceImageRoles] = useState<ReferenceImageRole[]>(() => referenceImages.map(() => "reference_image"));
   const [uploadingRef, setUploadingRef] = useState(false);
+  const [isDraggingReference, setIsDraggingReference] = useState(false);
   const [selectedAspectRatio, setSelectedAspectRatio] = useState(searchParams.get("aspect") || "adaptive");
   const [selectedDuration, setSelectedDuration] = useState(searchParams.get("duration") || "5s");
   const [musicEnabled, setMusicEnabled] = useState(searchParams.get("audio") === "1");
@@ -660,18 +661,47 @@ function VideoChatPageInner() {
 
   const handleSubmit = () => handleSend(prompt);
 
+  const uploadReferenceMediaFiles = useCallback((files: FileList | File[]) => {
+    Array.from(files).forEach((file) => uploadReferenceMedia(file));
+  }, [uploadReferenceMedia]);
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
     e.target.value = "";
-    uploadReferenceMedia(file);
+    uploadReferenceMediaFiles(files);
+  };
+
+  const handleReferenceDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    if (generating) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    setIsDraggingReference(true);
+  };
+
+  const handleReferenceDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+      setIsDraggingReference(false);
+    }
+  };
+
+  const handleReferenceDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDraggingReference(false);
+    if (generating) return;
+    const files = Array.from(e.dataTransfer.files || []).filter((file) => isImageFile(file) || isVideoFile(file));
+    if (files.length === 0) {
+      toast.error(t("video.uploadUnsupported"));
+      return;
+    }
+    uploadReferenceMediaFiles(files);
   };
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const files = getClipboardFiles(e);
     if (files.length === 0) return;
     e.preventDefault();
-    files.forEach((file) => uploadReferenceMedia(file));
+    uploadReferenceMediaFiles(files);
   };
 
   const handleUseLastFrame = (lastFrameUrl?: string) => {
@@ -754,7 +784,7 @@ function VideoChatPageInner() {
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-surface">
       <DeleteSuccessNotice open={deleteSuccessOpen} label={t("video.chatSession")} onClose={() => setDeleteSuccessOpen(false)} />
-      <input ref={fileInputRef} type="file" accept="image/*,video/mp4,video/quicktime" className="hidden" onChange={handleFileSelect} />
+      <input ref={fileInputRef} type="file" accept="image/*,video/mp4,video/quicktime" multiple className="hidden" onChange={handleFileSelect} />
 
       <div className="shrink-0 flex items-center gap-3 px-4 py-3 border-b border-surface-border">
         <button
@@ -911,9 +941,13 @@ function VideoChatPageInner() {
       <div className="shrink-0 border-t border-surface-border px-4 md:px-6 py-3">
         <div className="max-w-3xl mx-auto">
           <div
+            onDragOver={handleReferenceDragOver}
+            onDragLeave={handleReferenceDragLeave}
+            onDrop={handleReferenceDrop}
             className={cn(
               "relative flex flex-col rounded-2xl border transition-all duration-300 bg-surface-card",
-              hasReferenceMedia ? "border-brand/20 focus-within:border-brand/40" : "border-surface-border focus-within:border-brand/30"
+              hasReferenceMedia ? "border-brand/20 focus-within:border-brand/40" : "border-surface-border focus-within:border-brand/30",
+              isDraggingReference && "border-brand/70 bg-brand/5 ring-2 ring-brand/20"
             )}
           >
             {/* 右上角按钮：历史记录 + 新建会话 */}

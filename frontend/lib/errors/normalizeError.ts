@@ -117,19 +117,36 @@ const LOCALIZED_ERROR_COPY: Record<string, Record<string, Partial<Pick<UserFacin
   },
   quota_insufficient: {
     en: {
-      title: "Insufficient quota",
-      message: "Your current quota is insufficient. Please switch models or try again later.",
+      title: "Model service temporarily unavailable",
+      message: "The current model service is temporarily unavailable. Please try again later or switch to another model.",
       actionLabel: "Switch model",
     },
     "zh-CN": {
-      title: "额度不足",
-      message: "当前额度不足，请更换模型或稍后重试。",
-      actionLabel: "更换模型",
+      title: "模型服务暂时不可用",
+      message: "当前模型服务暂时不可用，请稍后重试，或切换其他模型。",
+      actionLabel: "切换模型",
     },
     "zh-TW": {
-      title: "額度不足",
-      message: "目前額度不足，請更換模型或稍後重試。",
-      actionLabel: "更換模型",
+      title: "模型服務暫時不可用",
+      message: "目前模型服務暫時不可用，請稍後重試，或切換其他模型。",
+      actionLabel: "切換模型",
+    },
+  },
+  model_service_unavailable: {
+    en: {
+      title: "Model service temporarily unavailable",
+      message: "The current model service is temporarily unavailable. Please try again later or switch to another model.",
+      actionLabel: "Switch model",
+    },
+    "zh-CN": {
+      title: "模型服务暂时不可用",
+      message: "当前模型服务暂时不可用，请稍后重试，或切换其他模型。",
+      actionLabel: "切换模型",
+    },
+    "zh-TW": {
+      title: "模型服務暫時不可用",
+      message: "目前模型服務暫時不可用，請稍後重試，或切換其他模型。",
+      actionLabel: "切換模型",
     },
   },
   login_required: {
@@ -395,6 +412,21 @@ function catalogFromCode(code?: string): Partial<UserFacingError> | null {
     case "unauthorized":
     case "login_required":
       return ERROR_CATALOG.loginRequired;
+    case "insufficient_quota":
+    case "quota_exceeded":
+    case "quota_insufficient":
+    case "provider_unavailable":
+    case "model_service_unavailable":
+      return ERROR_CATALOG.modelServiceUnavailable;
+    case "not_activated":
+      return {
+        code: "not_activated",
+        category: "auth",
+        severity: "warning",
+        title: "账号未激活",
+        message: "您的账号尚未激活内测权限。请使用邀请码激活或提交内测申请。",
+        action: "none",
+      };
     default:
       return null;
   }
@@ -402,10 +434,21 @@ function catalogFromCode(code?: string): Partial<UserFacingError> | null {
 
 function mapGeneric(raw: string, httpStatus?: number): Partial<UserFacingError> | null {
   if (httpStatus === 401 || /unauthorized|401|请先登录|login required/i.test(raw)) return ERROR_CATALOG.loginRequired;
+  if (httpStatus === 403 && /not_activated|未激活|need_invite/i.test(raw)) {
+    return {
+      code: "not_activated",
+      category: "auth",
+      severity: "warning",
+      title: "账号未激活",
+      message: "您的账号尚未激活内测权限。请使用邀请码激活或提交内测申请。",
+      action: "none",
+    };
+  }
+  if (/OpenAI response status\s*=\s*failed|response status\s*=\s*failed|insufficient[_\s-]?quota|quota[_\s-]?exceeded|billing|credit|balance|额度|积分|余额|provider.*failed|model.*failed|provider.*unavailable|上游.*失败|模型服务.*不可用/i.test(raw)) return ERROR_CATALOG.modelServiceUnavailable;
   if (httpStatus === 429 || /rate.?limit|too many requests|429|频率|限流/i.test(raw)) return ERROR_CATALOG.rateLimit;
   if (/timeout|timed?\s*out|deadline|超时/i.test(raw)) return ERROR_CATALOG.timeout;
   if (/network|failed to fetch|fetch failed|ECONN|连接|网络/i.test(raw)) return ERROR_CATALOG.network;
-  if (/insufficient|quota|credit|balance|额度|积分|余额/i.test(raw)) return ERROR_CATALOG.quota;
+  if (/insufficient|quota|credit|balance|额度|积分|余额/i.test(raw)) return ERROR_CATALOG.modelServiceUnavailable;
   if (/content policy|safety|unsafe|violat|内容.*(违规|安全|无法)/i.test(raw)) return ERROR_CATALOG.contentPolicy;
   if (httpStatus && httpStatus >= 500) return ERROR_CATALOG.server;
   return null;

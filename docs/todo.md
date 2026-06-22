@@ -280,3 +280,90 @@ max-h-64 overflow-y-auto
      - `git diff --check`
      - `CHAT_FIXTURE_BASE_URL=http://127.0.0.1:3000 npm run test:chat-streaming-state-fixture`
      - 必要时跑生产构建 `NEXT_PRIVATE_BUILD_WORKER=1 npm run build`
+
+---
+
+## Gemini / 非 OpenAI 模型本地 Background Chat Task
+
+### 背景
+
+Gemini API 当前没有等价 OpenAI Responses `background` 的聊天后台生成能力。Gemini Webhooks 主要覆盖 Batch、Video、Interactions 等异步作业通知，不支持普通 `generateContent` / chat streaming 的完成回调，也不会直接推送完整聊天内容。
+
+因此，不能依赖 Gemini 官方 Webhook 来解决“用户离开页面、浏览器 SSE 断开、Next.js proxy 断流后仍继续生成并恢复结果”的聊天场景。
+
+### 当前问题
+
+以 Gemini 3.1 Pro 为代表的模型更容易触发流式不稳定：
+
+1. Gemini 3.1 Pro thinking / 首包较慢，长时间无正文 delta。
+2. Next.js dev proxy 或中间层可能在 SSE `[DONE]` 前断开连接。
+3. 后端可能已继续生成并周期性落库，但前端没有收到最终 `[DONE]`。
+4. 当前前端只能做有限兜底：有恢复 ID 时继续恢复；无恢复通道但已有内容时停止 spinner。
+
+这只能缓解 UI 永久转圈，不能提供完整的 provider-agnostic 后台聊天能力。
+
+### 目标
+
+为 Gemini、Claude、DeepSeek、Moonshot 等不支持原生 background chat 的 Provider 增加一层 **本地 Background Chat Task**，把“后台生成、事件持久化、断线重连、结果恢复”收敛到 AI Space 后端，而不是依赖各 Provider 是否原生支持 background。
+
+目标体验：
+
+```text
+用户发送聊天消息
+  → 后端立即创建 assistant message + local generation task
+  → goroutine 独立调用 Provider stream
+  → 每个 chunk / meta / error / done 写入 task event 表
+  → 前端 SSE 断线后可按 task/message id 续流或轮询
+  → 用户刷新/切页后仍能看到最终结果和终态
+```
+
+### 建议实现方向
+
+1. **统一本地任务层**
+   - 所有长耗时聊天请求先创建本地 `AIBackgroundTask` / `AIBackgroundTaskEvent`。
+   - Handler 不直接依赖浏览器连接生命周期来决定 Provider 调用是否继续。
+   - Provider stream 在后端 goroutine 中独立消费。
+
+2. **Provider 能力分层**
+   - OpenAI 支持原生 background：继续保存 provider response id，并用 retrieve/webhook/轮询补齐。
+   - Gemini 等不支持原生 background：使用本地 goroutine + task event replay 模拟 background。
+   - 前端不感知 Provider 差异，只消费统一 `generationTaskId` / `serverMessageId`。
+
+3. **事件持久化与恢复**
+   - 每个 delta/reasoning/search_meta/error/done 分配单调 `sequence`。
+   - 前端重连时从 `lastSequence` 之后续流。
+   - 后端最终写 assistant message 内容、usage、cost、finish reason。
+   - `DONE` 必须作为最后事件。
+
+4. **前端恢复策略**
+   - 发送后立即拿到 `serverMessageId` / `generationTaskId`。
+   - 主 SSE 断开时优先通过 task stream 恢复。
+   - 如果 task stream 也失败，降级轮询 task 状态或 message 内容。
+   - 避免用“收到 `[DONE]`”作为唯一完成依据；终态应来自 task/message 状态。
+
+5. **Heartbeat / 首包保护**
+   - Provider 首包前、重试等待期间，后端应持续向前端发送 task meta 或 heartbeat。
+   - 目的只是降低代理空闲断流概率，不能替代本地 background task。
+
+### 风险与注意事项
+
+- 需要处理用户取消：取消本地 task 时要 cancel provider context。
+- 需要防止 goroutine 泄漏和 orphan task。
+- 需要控制事件写入频率，避免 SQLite 压力过高。
+- 对比模式要保留 `group_id`、`group_index`、`user_message_id` 语义。
+- 断线重放不能重复追加同一段 delta。
+- 错误事件必须保留 provider/category/code/user_message，不能混入 assistant 正文。
+
+### 验证要求
+
+- Gemini 3.1 Pro 长回复：主 SSE 人为断开后，刷新/重连可恢复最终消息。
+- 首包慢场景：前端不永久转圈。
+- 用户主动停止：task 进入 cancelled，不再继续写内容。
+- 页面切换/刷新：通过 `generationTaskId` 或 `serverMessageId` 恢复。
+- 对比模式：两个模型并发生成时各自 task/event 不串列。
+- 回归：OpenAI background 原路径不退化。
+
+### 相关文档
+
+- `docs/architecture/02-聊天消息与流式生成架构.md`
+- `docs/architecture/03-模型Provider与SSE解码架构.md`

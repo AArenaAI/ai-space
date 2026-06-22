@@ -71,6 +71,7 @@ export type MessageRowProps = {
   onRegenerate?: () => void;
   onContinueGenerate?: () => void;
   onForkCompare?: (messageId: number) => void;
+  onSaveAssistantToNote?: (content: string) => void;
   imageLoadFailedLabel: string;
   MarkdownRenderer: MarkdownRendererComponent;
   onAssistantViewed?: (messageId: string) => void;
@@ -108,6 +109,7 @@ function MessageRow({
   onRegenerate,
   onContinueGenerate,
   onForkCompare,
+  onSaveAssistantToNote,
   imageLoadFailedLabel,
   MarkdownRenderer,
   onAssistantViewed,
@@ -352,7 +354,7 @@ function MessageRow({
                 <UserMessageContent message={msg} imageLoadFailedLabel={imageLoadFailedLabel} />
               ) : (
                 <>
-                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={!blockRichTextHydration && (isNearViewport || forceHydrateRichText)} priorityHydrateRichText={!blockRichTextHydration && (forceHydrateRichText || stabilizeInitialRichText || deferOffscreenRichTextHydration)} allowRichLiteFallback={allowRichLiteFallback || forceStableRichLiteFallback} compactRichLitePreview={!historyPrependSettling && !forceStableRichLiteFallback && !isInitialReadingAssistant && !isViewedAssistant} recoverEmptyContent={isLast} onRegenerate={onRegenerate} />
+                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={!blockRichTextHydration && (isNearViewport || forceHydrateRichText)} priorityHydrateRichText={!blockRichTextHydration && (forceHydrateRichText || stabilizeInitialRichText || deferOffscreenRichTextHydration)} allowRichLiteFallback={allowRichLiteFallback || forceStableRichLiteFallback || isInitialReadingAssistant || isViewedAssistant} compactRichLitePreview={!historyPrependSettling && !forceStableRichLiteFallback && !isInitialReadingAssistant && !isViewedAssistant} recoverEmptyContent={isLast} onRegenerate={onRegenerate} />
                   {msg.stopped && onContinueGenerate && (
                     <button
                       onClick={onContinueGenerate}
@@ -379,6 +381,7 @@ function MessageRow({
                 createdAt={msg.createdAt}
                 completedAt={msg.completedAt}
                 onForkCompare={!isUser && msg.serverMessageId && conversationId ? () => onForkCompare?.(msg.serverMessageId!) : undefined}
+                onSaveToNote={!isUser && msg.content && onSaveAssistantToNote ? () => onSaveAssistantToNote(msg.content) : undefined}
               />
             )}
           </div>

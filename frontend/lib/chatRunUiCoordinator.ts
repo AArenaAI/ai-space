@@ -39,6 +39,8 @@ export function decideSingleSendError(input: {
       errorCode: input.error?.errorCode,
       message: input.error?.errorCode === "guest_limit_exceeded"
         ? "匿名用户每日次数用完，请登录后继续"
+        : input.error?.errorCode === "not_activated"
+        ? "账号未激活：请使用邀请码激活或提交内测申请。"
         : input.error?.message,
     }),
   };

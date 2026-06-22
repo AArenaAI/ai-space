@@ -110,6 +110,7 @@ function applyCachedSnapshot({
   setEffectiveSkillKey,
   setIsLoadingHistory,
 }: ApplyCachedSnapshotOptions) {
+  setIsLoadingHistory(false);
   setConversationTitle(snapshot.title || "");
   setMessages(snapshot.messages);
   setLoadedPersistedMessages(snapshot.loadedPersistedMessages);
@@ -125,7 +126,6 @@ function applyCachedSnapshot({
   setIsCompare(snapshot.isCompare);
   setCompareModels(snapshot.compareModels);
   setEffectiveSkillKey(snapshot.skillKey ?? fallbackSkillKey);
-  setIsLoadingHistory(false);
 }
 
 export type UseChatConversationRestoreRuntimeOptions = {
@@ -279,10 +279,12 @@ export function useChatConversationRestoreRuntime({
     const authToken: string = token as string;
     emitConversationSwitchPerformanceEvent("start", { conversationId: loadConversationId, loadSeq, stage: "start" });
 
-    if (navigationPlan.shouldSetLoadingHistory) setIsLoadingHistory(navigationPlan.loadingHistory);
+    const cachedSnapshot = getConversationSnapshot(loadConversationId);
+    if (navigationPlan.shouldSetLoadingHistory && !cachedSnapshot) {
+      setIsLoadingHistory(navigationPlan.loadingHistory);
+    }
     applyLoadExistingNavigationLifecycle(navigationPlan);
 
-    const cachedSnapshot = getConversationSnapshot(loadConversationId);
     let hasDisplayedSnapshot = false;
     let displayedSnapshotSource: ConversationSwitchPerformanceDetail["snapshotSource"];
     let displayedSnapshotVersion: string | undefined = cachedSnapshot?.snapshotVersion;

@@ -1,6 +1,6 @@
 "use client";
 
-import { Image, Eraser, Type, ZoomIn, ImageIcon, Video, Sparkles } from "lucide-react";
+import { Brush, Image, Eraser, Paintbrush, Type, ZoomIn, ImageIcon, Video, Sparkles } from "lucide-react";
 import ModuleSidebar, { type ModuleSidebarGroup } from "./ModuleSidebar";
 
 export const MORE_NAV_GROUPS: ModuleSidebarGroup[] = [
@@ -52,6 +52,18 @@ export const MORE_NAV_GROUPS: ModuleSidebarGroup[] = [
         icon: ZoomIn,
         labelKey: "image.edit.upscale",
         href: "/create?mode=upscale",
+        matchPath: "/create",
+      },
+      {
+        icon: Brush,
+        labelKey: "image.edit.inpaint",
+        href: "/create?mode=inpaint",
+        matchPath: "/create",
+      },
+      {
+        icon: Paintbrush,
+        labelKey: "image.edit.regionBrush",
+        href: "/create?mode=region-brush",
         matchPath: "/create",
       },
     ],

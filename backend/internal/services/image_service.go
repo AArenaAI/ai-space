@@ -233,6 +233,10 @@ func (s *ImageService) GenerateImage(ctx context.Context, prompt string, size st
 // GenerateSeedreamImage 生成 Seedream 图片，仅供显式 Seedream/Beta 流程调用。
 // 普通 /image 不会自动切到 Seedream，避免影响现有图片创作主流程。
 func (s *ImageService) GenerateSeedreamImage(ctx context.Context, prompt string, size string) (imageURL string, b64Data string, err error) {
+	return s.GenerateSeedreamImageWithReferences(ctx, prompt, size, nil)
+}
+
+func (s *ImageService) GenerateSeedreamImageWithReferences(ctx context.Context, prompt string, size string, referenceImagePaths []string) (imageURL string, b64Data string, err error) {
 	apiKey := s.cfg.SeedreamAPIKey
 	if apiKey == "" {
 		apiKey = s.cfg.VolcengineAPIKey
@@ -249,7 +253,7 @@ func (s *ImageService) GenerateSeedreamImage(ctx context.Context, prompt string,
 	if model == "" {
 		model = "doubao-seedream-5-0-260128"
 	}
-	url, err := s.imageGenSvc.Generate(ctx, baseURL, apiKey, model, prompt, size, "")
+	url, err := s.imageGenSvc.GenerateSeedreamImageWithReferences(ctx, baseURL, apiKey, model, prompt, size, referenceImagePaths)
 	if err != nil {
 		return "", "", err
 	}

@@ -9,15 +9,19 @@ import (
 	"aipool-backend/internal/services"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
+const translatorCreditModelID = "google-cloud-translate-v3:general/translation-llm"
+
 type TranslateHandler struct {
+	db           *gorm.DB
 	service      *services.TranslateService
 	usageService *services.UsageService
 }
 
-func NewTranslateHandler(service *services.TranslateService, usageService *services.UsageService) *TranslateHandler {
-	return &TranslateHandler{service: service, usageService: usageService}
+func NewTranslateHandler(db *gorm.DB, service *services.TranslateService, usageService *services.UsageService) *TranslateHandler {
+	return &TranslateHandler{db: db, service: service, usageService: usageService}
 }
 
 type translateAPIRequest struct {
@@ -31,6 +35,11 @@ func (h *TranslateHandler) Translate(c *gin.Context) {
 	var req translateAPIRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 翻译同样属于模型能力，必须走统一内测激活/积分扣减链路，避免未激活用户绕过 /chat 校验。
+	if !ensureModelAccess(c, h.db, getUserID(c), translatorCreditModelID, 0) {
 		return
 	}
 

@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { Check, Coffee, Flame, Star, Infinity } from "lucide-react";
+import { Check, Coffee, Flame, Star, Infinity, PenLine, Languages, Mic, FileText, ImageIcon, Video, Sparkles, Wand2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useI18n } from "@/lib/i18n";
 
 const plans = [
@@ -15,7 +16,7 @@ const plans = [
     bgGradient: "from-amber-500/5 to-transparent",
     border: "border-amber-500/20",
     featureKeys: ["pricing.free.feature.dailyBasic", "pricing.free.feature.basicModels", "pricing.free.feature.standardSpeed", "pricing.free.feature.reset"],
-    credits: { basic: 30, advanced: 0, elite: 0 },
+    credits: { basic: 30, advanced: 0 },
     ctaKey: "pricing.free.cta",
     current: true,
   },
@@ -28,8 +29,8 @@ const plans = [
     iconColor: "text-orange-400",
     bgGradient: "from-orange-500/5 to-transparent",
     border: "border-orange-500/20",
-    featureKeys: ["pricing.basic.feature.basic", "pricing.basic.feature.advanced", "pricing.basic.feature.elite", "pricing.feature.advancedModels", "pricing.feature.noAds"],
-    credits: { basic: 100, advanced: 20, elite: 5 },
+    featureKeys: ["pricing.basic.feature.basic", "pricing.basic.feature.advanced", "pricing.feature.advancedModels", "pricing.feature.noAds"],
+    credits: { basic: 100, advanced: 25 },
     ctaKey: "pricing.chooseBasic",
     popular: false,
   },
@@ -42,8 +43,8 @@ const plans = [
     iconColor: "text-purple-400",
     bgGradient: "from-purple-500/5 to-transparent",
     border: "border-purple-500/20",
-    featureKeys: ["pricing.plus.feature.basic", "pricing.plus.feature.advanced", "pricing.plus.feature.elite", "pricing.feature.eliteModels", "pricing.feature.prioritySpeed", "pricing.feature.noAds"],
-    credits: { basic: 300, advanced: 80, elite: 20 },
+    featureKeys: ["pricing.plus.feature.basic", "pricing.plus.feature.advanced", "pricing.feature.advancedModels", "pricing.feature.prioritySpeed", "pricing.feature.noAds"],
+    credits: { basic: 300, advanced: 100 },
     ctaKey: "pricing.choosePlus",
     popular: true,
   },
@@ -56,8 +57,8 @@ const plans = [
     iconColor: "text-emerald-400",
     bgGradient: "from-emerald-500/5 to-transparent",
     border: "border-emerald-500/20",
-    featureKeys: ["pricing.ultra.feature.basic", "pricing.ultra.feature.advanced", "pricing.ultra.feature.elite", "pricing.feature.allModels", "pricing.feature.fastestSpeed", "pricing.feature.noAds"],
-    credits: { basic: -1, advanced: 200, elite: 60 },
+    featureKeys: ["pricing.ultra.feature.basic", "pricing.ultra.feature.advanced", "pricing.feature.allModels", "pricing.feature.fastestSpeed", "pricing.feature.noAds"],
+    credits: { basic: -1, advanced: 260 },
     ctaKey: "pricing.chooseUltra",
     popular: false,
   },
@@ -66,11 +67,86 @@ const plans = [
 const tierBadges = [
   { icon: "☕", labelKey: "pricing.badge.basic", color: "text-amber-400", bg: "bg-amber-500/10" },
   { icon: "🔥", labelKey: "pricing.badge.advanced", color: "text-orange-400", bg: "bg-orange-500/10" },
-  { icon: "⭐", labelKey: "pricing.badge.elite", color: "text-purple-400", bg: "bg-purple-500/10" },
+];
+
+type TierKey = "basic" | "advanced";
+type TierModel = { id: string; name: string; provider?: string; tier?: TierKey };
+
+const fallbackTierModels: Record<TierKey, TierModel[]> = {
+  basic: [
+    { id: "gpt-5.4-mini", name: "GPT 5.4 Mini" },
+    { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash" },
+    { id: "deepseek-v4-flash", name: "DeepSeek-V4 Flash" },
+    { id: "gemini-3.1-flash-lite", name: "Gemini 3.1 Flash" },
+  ],
+  advanced: [
+    { id: "gpt-5.4", name: "GPT 5.4" },
+    { id: "gpt-5.5", name: "GPT 5.5" },
+    { id: "gpt-5.5-pro", name: "GPT 5.5 Pro" },
+    { id: "gemini-3.1-pro-preview", name: "Gemini 3.1 Pro" },
+    { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
+    { id: "deepseek-v4-pro", name: "DeepSeek-V4 Pro" },
+    { id: "kimi-k2.5", name: "Kimi K2.5" },
+    { id: "kimi-k2.6", name: "Kimi K2.6" },
+    { id: "kimi-k2.7-code", name: "Kimi K2.7 Code" },
+  ],
+};
+
+const tierInfo: Array<{ key: TierKey; icon: string; color: string; labelKey: string }> = [
+  { key: "basic", icon: "☕", color: "text-amber-400", labelKey: "pricing.modelTiers.basic" },
+  { key: "advanced", icon: "🔥", color: "text-orange-400", labelKey: "pricing.modelTiers.advanced" },
+];
+
+const advancedFeatureGroups = [
+  {
+    title: "AI 工作",
+    subtitle: "面向日常办公、资料处理与跨语言协作",
+    accent: "from-blue-500/10 to-cyan-500/5",
+    border: "border-blue-500/20",
+    items: [
+      { icon: PenLine, name: "写作助手", desc: "文章、邮件、方案与长文改写" },
+      { icon: Languages, name: "文本翻译", desc: "多语言文本翻译与润色" },
+      { icon: Mic, name: "实时语音翻译", desc: "会议与对话场景实时转译" },
+      { icon: FileText, name: "文档阅读器", desc: "PDF / Word / PPT 资料阅读、摘要与问答" },
+    ],
+  },
+  {
+    title: "AI 创作",
+    subtitle: "面向图像、视频、漫剧与视觉编辑工作流",
+    accent: "from-purple-500/10 to-pink-500/5",
+    border: "border-purple-500/20",
+    items: [
+      { icon: ImageIcon, name: "图像生成", desc: "文生图、参考图与创意视觉生成" },
+      { icon: Video, name: "视频生成", desc: "Seedance 视频生成与分段成片" },
+      { icon: Sparkles, name: "漫剧 Studio", desc: "剧情、资产、分镜、视频一体化生产" },
+      { icon: Wand2, name: "图像编辑工具", desc: "去背景、换背景、文字移除、放大与局部重绘" },
+    ],
+  },
 ];
 
 export default function PricingPage() {
   const { t } = useI18n();
+  const [tierModels, setTierModels] = useState<Record<TierKey, TierModel[]>>(fallbackTierModels);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/models/tiers")
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((data) => {
+        const incoming = data?.tier_models;
+        if (!incoming || cancelled) return;
+        setTierModels({
+          basic: Array.isArray(incoming.basic) && incoming.basic.length ? incoming.basic : fallbackTierModels.basic,
+          advanced: Array.isArray(incoming.advanced) && incoming.advanced.length ? incoming.advanced : fallbackTierModels.advanced,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setTierModels(fallbackTierModels);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-surface">
@@ -124,7 +200,6 @@ export default function PricingPage() {
                 <div className="flex items-center gap-2 mb-4 text-[11px]">
                   <span className="flex items-center gap-0.5 text-amber-400"><span>☕</span><span className="font-mono">{plan.credits.basic < 0 ? "∞" : plan.credits.basic}</span></span>
                   <span className="flex items-center gap-0.5 text-orange-400"><span>🔥</span><span className="font-mono">{plan.credits.advanced}</span></span>
-                  <span className="flex items-center gap-0.5 text-purple-400"><span>⭐</span><span className="font-mono">{plan.credits.elite}</span></span>
                 </div>
 
                 <ul className="space-y-2 mb-5 flex-1">
@@ -146,10 +221,55 @@ export default function PricingPage() {
 
         <div className="mt-12 rounded-2xl border border-surface-border bg-surface-elevated p-6">
           <h2 className="text-sm font-semibold text-text-primary mb-4">{t("pricing.modelTiers.title")}</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="space-y-2"><div className="flex items-center gap-2"><span className="text-amber-400">☕</span><span className="text-sm font-medium text-text-primary">{t("pricing.modelTiers.basic")}</span></div><p className="text-[12px] text-text-tertiary">GPT 5.4 Mini、DeepSeek V4 Flash、Gemini 3.1 Flash</p></div>
-            <div className="space-y-2"><div className="flex items-center gap-2"><span className="text-orange-400">🔥</span><span className="text-sm font-medium text-text-primary">{t("pricing.modelTiers.advanced")}</span></div><p className="text-[12px] text-text-tertiary">GPT 5.4、GPT 5.5、Gemini 3.1 Pro、Kimi K2.5</p></div>
-            <div className="space-y-2"><div className="flex items-center gap-2"><span className="text-purple-400">⭐</span><span className="text-sm font-medium text-text-primary">{t("pricing.modelTiers.elite")}</span></div><p className="text-[12px] text-text-tertiary">GPT 5.5 Pro、DeepSeek V4 Pro、Kimi K2.6</p></div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {tierInfo.map((tier) => (
+              <div key={tier.key} className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className={tier.color}>{tier.icon}</span>
+                  <span className="text-sm font-medium text-text-primary">{t(tier.labelKey)}</span>
+                </div>
+                <p className="text-[12px] text-text-tertiary">
+                  {tierModels[tier.key].map((model) => model.name).join("、")}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-6 rounded-2xl border border-surface-border bg-surface-elevated p-6">
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2 mb-5">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brand mb-2">Advanced features</div>
+              <h2 className="text-sm font-semibold text-text-primary">高级功能</h2>
+            </div>
+            <p className="text-[12px] text-text-tertiary max-w-xl sm:text-right">
+              会员额度不仅用于模型对话，也覆盖侧边栏里的 AI 工作与 AI 创作入口。
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {advancedFeatureGroups.map((group) => (
+              <div key={group.title} className={`rounded-2xl border ${group.border} bg-gradient-to-br ${group.accent} p-4`}>
+                <div className="mb-4">
+                  <div className="text-sm font-semibold text-text-primary">{group.title}</div>
+                  <p className="mt-1 text-[12px] text-text-tertiary">{group.subtitle}</p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {group.items.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <div key={item.name} className="rounded-xl border border-surface-border/70 bg-surface-card/70 p-3">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <Icon className="w-4 h-4 text-brand" />
+                          <span className="text-[12px] font-medium text-text-primary">{item.name}</span>
+                        </div>
+                        <p className="text-[11px] leading-relaxed text-text-tertiary">{item.desc}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 

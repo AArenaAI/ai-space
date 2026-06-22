@@ -15,6 +15,13 @@ type ModelInfo struct {
 	SupportedFileMimeTypes  []string `json:"supported_file_mime_types,omitempty"`
 	FileAccept              string   `json:"file_accept,omitempty"`
 	Available               bool     `json:"available"`
+	ReasoningLevel          string   `json:"reasoning_level,omitempty"`      // 对外三档：fast / thinking / expert
+	ReasoningLevelName      string   `json:"reasoning_level_name,omitempty"` // 快速 / 思考 / 专家
+	ReasoningEffort         string   `json:"reasoning_effort,omitempty"`     // 当前默认档位映射后的 provider effort/budget
+	ReasoningParameter      string   `json:"reasoning_parameter,omitempty"`  // provider 实际字段说明：OpenAI reasoning.effort / Gemini thinking_level / Gemini 2.5 thinking_budget
+	ReasoningFastValue      string   `json:"reasoning_fast_value,omitempty"`
+	ReasoningThinkingValue  string   `json:"reasoning_thinking_value,omitempty"`
+	ReasoningExpertValue    string   `json:"reasoning_expert_value,omitempty"`
 	Status                  string   `json:"status,omitempty"`
 	StatusMessage           string   `json:"status_message,omitempty"`
 }
@@ -28,18 +35,23 @@ var SupportedModels = []ModelInfo{
 	{ID: "gpt-image-2", Name: "GPT Image 2", Provider: "OpenAI", Description: "Native multimodal model for image generation", Color: "#10a37f", Capabilities: []string{"image"}, SupportedInputs: []string{"text"}},
 	// DeepSeek
 	{ID: "deepseek-v4-pro", Name: "DeepSeek-V4 Pro", Provider: "DeepSeek", Description: "Enhanced V4 Pro with the strongest reasoning capability", Color: "#4d6bfa", Capabilities: []string{"chat", "reasoning"}, SupportedInputs: []string{"text"}},
-	{ID: "deepseek-v4-flash", Name: "DeepSeek-V4 Flash", Provider: "DeepSeek", Description: "Lightweight V4 with ultra-fast responses", Color: "#6366f1", Capabilities: []string{"chat"}, SupportedInputs: []string{"text"}},
+	{ID: "deepseek-v4-flash", Name: "DeepSeek-V4 Flash", Provider: "DeepSeek", Description: "Lightweight V4 with ultra-fast responses", Color: "#6366f1", Capabilities: []string{"chat", "reasoning"}, SupportedInputs: []string{"text"}},
 	// Google
-	{ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", Provider: "Google", Description: "Long-context multimodal document understanding model for document research workflows", Color: "#4285f4", Capabilities: []string{"document", "reasoning", "search"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
+	{ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", Provider: "Google", Description: "Long-context multimodal document understanding model for document research workflows", Color: "#4285f4", Capabilities: []string{"chat", "document", "reasoning", "search"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
 	{ID: "gemini-3.1-pro-preview", Name: "Gemini 3.1 Pro", Provider: "Google", Description: "Next-generation flagship reasoning model with stronger multimodal capability", Color: "#4285f4", Capabilities: []string{"chat", "reasoning", "search"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
-	{ID: "gemini-3.5-flash", Name: "Gemini 3.5 Flash", Provider: "Google", Description: "Next-generation high-speed model with faster, steadier responses", Color: "#4285f4", Capabilities: []string{"chat", "search"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
-	{ID: "gemini-3.1-flash-lite", Name: "Gemini 3.1 Flash", Provider: "Google", Description: "Next-generation fast model, ideal for everyday Q&A", Color: "#4285f4", Capabilities: []string{"chat", "search"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
+	{ID: "gemini-3.5-flash", Name: "Gemini 3.5 Flash", Provider: "Google", Description: "Next-generation high-speed model with faster, steadier responses", Color: "#4285f4", Capabilities: []string{"chat", "reasoning", "search"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
+	{ID: "gemini-3.1-flash-lite", Name: "Gemini 3.1 Flash", Provider: "Google", Description: "Next-generation fast model, ideal for everyday Q&A", Color: "#4285f4", Capabilities: []string{"chat", "reasoning", "search"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
 	// Volcengine Video
-	{ID: "doubao-seedance-2-0-fast-260128", Name: "Seedance 2.0 Fast", Provider: "Volcengine", Description: "Fast video generation model from Volcengine", Color: "#ff6a00", Capabilities: []string{"video"}, SupportedInputs: []string{"text"}},
-	{ID: "doubao-seedance-2-0-260128", Name: "Seedance 2.0", Provider: "Volcengine", Description: "Standard video generation model from Volcengine", Color: "#ff0050", Capabilities: []string{"video"}, SupportedInputs: []string{"text"}},
+	{ID: "doubao-seedance-2.0-mini", Name: "Seedance 2.0 Mini", Provider: "Volcengine", Description: "Seedance 2.0 mini video generation model from Volcengine", Color: "#ff6a00", Capabilities: []string{"video"}, SupportedInputs: []string{"text", "image", "video"}},
+	{ID: "doubao-seedance-1.5-pro", Name: "Seedance 1.5 Pro", Provider: "Volcengine", Description: "Seedance 1.5 Pro video generation model from Volcengine", Color: "#ff0050", Capabilities: []string{"video"}, SupportedInputs: []string{"text", "image", "video"}},
+	{ID: "doubao-seedance-1.0-pro", Name: "Seedance 1.0 Pro", Provider: "Volcengine", Description: "Seedance 1.0 Pro video generation model from Volcengine", Color: "#fb7185", Capabilities: []string{"video"}, SupportedInputs: []string{"text", "image"}},
+	{ID: "doubao-seedance-1.0-pro-fast", Name: "Seedance 1.0 Pro Fast", Provider: "Volcengine", Description: "Seedance 1.0 Pro Fast video generation model from Volcengine", Color: "#f97316", Capabilities: []string{"video"}, SupportedInputs: []string{"text", "image"}},
+	{ID: "doubao-seedance-2-0-fast-260128", Name: "Seedance 2.0 Fast (Legacy)", Provider: "Volcengine", Description: "Legacy fast video generation model from Volcengine", Color: "#ff6a00", Capabilities: []string{"video"}, SupportedInputs: []string{"text", "image", "video"}},
+	{ID: "doubao-seedance-2-0-260128", Name: "Seedance 2.0 (Legacy)", Provider: "Volcengine", Description: "Legacy standard video generation model from Volcengine", Color: "#ff0050", Capabilities: []string{"video"}, SupportedInputs: []string{"text", "image", "video"}},
 	// Moonshot
 	{ID: "kimi-k2.5", Name: "Kimi K2.5", Provider: "Moonshot", Description: "Flagship multimodal model with image understanding and 256K context", Color: "#00b96b", Capabilities: []string{"chat"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
 	{ID: "kimi-k2.6", Name: "Kimi K2.6", Provider: "Moonshot", Description: "Latest flagship with stronger multimodal and reasoning capability", Color: "#00b96b", Capabilities: []string{"chat"}, SupportedInputs: []string{"text", "image", "pdf", "word", "excel", "ppt", "csv", "txt", "code"}},
+	{ID: "kimi-k2.7-code", Name: "Kimi K2.7 Code", Provider: "Moonshot", Description: "Advanced coding model for software development and code reasoning", Color: "#00b96b", Capabilities: []string{"chat"}, SupportedInputs: []string{"text", "code", "pdf", "word", "excel", "ppt", "csv", "txt"}},
 }
 
 // AllModels 返回所有模型，并补齐前端展示所需的默认状态与文件能力字段。

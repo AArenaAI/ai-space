@@ -16,9 +16,10 @@ export function buildChatRequestHeaders({ token, guestId }: ChatRequestHeadersOp
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
-  if (token) {
+  if (token && token !== "null" && token !== "undefined") {
     headers.Authorization = `Bearer ${token}`;
-  } else {
+  }
+  if (guestId) {
     headers["X-Guest-ID"] = guestId;
   }
   return headers;
@@ -34,7 +35,6 @@ export type CommonChatRequestOptions = {
   messages: ModelMessage[];
   conversationId?: number;
   notebookId?: number;
-  reasoningEnabled: boolean;
   reasoningEffort?: string;
   search: boolean;
   templateId: number;
@@ -53,7 +53,6 @@ export function buildSingleChatRequestBody({
   messages,
   conversationId,
   notebookId,
-  reasoningEnabled,
   reasoningEffort,
   search,
   templateId,
@@ -69,8 +68,7 @@ export function buildSingleChatRequestBody({
     stream: true,
     conversation_id: conversationId,
     notebook_id: notebookId,
-    reasoning: reasoningEnabled,
-    reasoning_effort: reasoningEffort || "high",
+    reasoning_effort: reasoningEffort || "thinking",
     search,
     template_id: templateId,
     skip_save_user_msg: skipSaveUserMessage,
@@ -96,7 +94,6 @@ export function buildCompareChatRequestBody({
   messages,
   conversationId,
   notebookId,
-  reasoningEnabled,
   reasoningEffort,
   search,
   templateId,
@@ -118,8 +115,7 @@ export function buildCompareChatRequestBody({
     stream: true,
     conversation_id: conversationId,
     notebook_id: notebookId,
-    reasoning: reasoningEnabled,
-    reasoning_effort: reasoningEffort || "high",
+    reasoning_effort: reasoningEffort || "thinking",
     search,
     template_id: templateId,
     template_prefix: templatePrefix,

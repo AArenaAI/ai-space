@@ -436,11 +436,11 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
 
       const token = localStorage.getItem("token");
       const fetchHeaders: Record<string, string> = {};
-      if (token) {
+      if (token && token !== "null" && token !== "undefined") {
         fetchHeaders["Authorization"] = `Bearer ${token}`;
-      } else {
-        fetchHeaders["X-Guest-ID"] = getGuestId();
       }
+      const guestId = getGuestId();
+      if (guestId) fetchHeaders["X-Guest-ID"] = guestId;
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ""}/api/files/upload`, {
         method: "POST",
         headers: fetchHeaders,

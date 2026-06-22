@@ -43,15 +43,16 @@ type NotebookConversation struct {
 
 // NotebookArtifact 保存 Studio 生成的输出文件，例如数据表格、摘要、FAQ、简报等。
 type NotebookArtifact struct {
-	ID          uint           `gorm:"primarykey" json:"id"`
-	NotebookID  uint           `gorm:"not null;index" json:"notebook_id"`
-	UserID      uint           `gorm:"not null;index" json:"user_id"`
-	Type        string         `gorm:"size:64;not null;index" json:"type"`
-	Title       string         `gorm:"size:255;not null" json:"title"`
-	Subtitle    string         `gorm:"size:255" json:"subtitle"`
-	Content     string         `gorm:"type:text" json:"content"`
-	SourceCount int            `gorm:"default:0" json:"source_count"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
+	ID            uint           `gorm:"primarykey" json:"id"`
+	NotebookID    uint           `gorm:"not null;index" json:"notebook_id"`
+	UserID        uint           `gorm:"not null;index" json:"user_id"`
+	Type          string         `gorm:"size:64;not null;index" json:"type"`
+	Title         string         `gorm:"size:255;not null" json:"title"`
+	Subtitle      string         `gorm:"size:255" json:"subtitle"`
+	Content       string         `gorm:"type:text" json:"content"`
+	SourceCount   int            `gorm:"default:0" json:"source_count"`
+	SourceFileIDs string         `gorm:"type:text" json:"source_file_ids"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
+	DeletedAt     gorm.DeletedAt `gorm:"index" json:"-"`
 }

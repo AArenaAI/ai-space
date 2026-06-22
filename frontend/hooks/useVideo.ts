@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotifications";
-import { getErrorMessage, normalizeError, readApiError } from "@/lib/errors";
+import { normalizeError, readApiError } from "@/lib/errors";
+import { refreshVideoTaskThrottled } from "@/lib/videoRefreshThrottle";
 
 export interface VideoGeneration {
   id: number;
@@ -30,11 +31,13 @@ interface UseVideoReturn {
     model: string;
     ratio?: string;
     duration?: number;
+    resolution?: string;
     generate_audio?: boolean;
     watermark?: boolean;
     reference_image_urls?: string[];
     reference_image_roles?: Array<"reference_image" | "first_frame" | "last_frame">;
     reference_video_urls?: string[];
+    reference_image_role_mode?: "reference" | "first_frame" | "first_last_frame";
   }) => Promise<VideoGeneration>;
   refreshVideo: (id: number) => Promise<VideoGeneration | null>;
   deleteVideo: (id: number) => Promise<void>;
@@ -89,9 +92,11 @@ export function useVideo(): UseVideoReturn {
       model: string;
       ratio?: string;
       duration?: number;
+      resolution?: string;
       generate_audio?: boolean;
       watermark?: boolean;
       reference_image_urls?: string[];
+      reference_image_roles?: Array<"reference_image" | "first_frame" | "last_frame">;
       reference_video_urls?: string[];
       reference_audio_urls?: string[];
     }): Promise<VideoGeneration> => {
@@ -104,7 +109,19 @@ export function useVideo(): UseVideoReturn {
           body: JSON.stringify(payload),
         });
         if (!res.ok) {
-          throw await readApiError(res);
+          const apiError = await readApiError(res);
+          if (typeof apiError === "object" && apiError !== null) {
+            const record = apiError as { message?: unknown; error?: unknown; debug?: unknown };
+            const rawMessage = typeof record.message === "string"
+              ? record.message
+              : typeof record.error === "string"
+                ? record.error
+                : typeof record.debug === "string"
+                  ? record.debug
+                  : "";
+            throw new Error(rawMessage.trim() ? `视频任务提交失败（HTTP ${res.status}）：${rawMessage.trim()}` : `视频任务提交失败（HTTP ${res.status}），接口未返回错误详情。`);
+          }
+          throw new Error(`视频任务提交失败（HTTP ${res.status}），接口未返回错误详情。`);
         }
         const data = await res.json();
         const newVideo: VideoGeneration = {
@@ -129,7 +146,19 @@ export function useVideo(): UseVideoReturn {
         startPolling(newVideo.id);
         return newVideo;
       } catch (err) {
-        throw normalizeError(err, { module: "video", fallbackMessage: "视频生成失败，请稍后重试。" });
+        if (typeof err === "object" && err !== null) {
+          const record = err as { message?: unknown; error?: unknown; debug?: unknown };
+          const rawMessage = typeof record.message === "string"
+            ? record.message
+            : typeof record.error === "string"
+              ? record.error
+              : typeof record.debug === "string"
+                ? record.debug
+                : "";
+          if (rawMessage.trim()) throw new Error(rawMessage.trim());
+        }
+        if (typeof err === "string" && err.trim()) throw new Error(err.trim());
+        throw normalizeError(err, { module: "video", fallbackMessage: "视频任务提交失败：浏览器请求没有成功发出或接口无响应。请检查登录状态、反向代理和网络连接。" });
       } finally {
         setGenerating(false);
       }
@@ -139,12 +168,9 @@ export function useVideo(): UseVideoReturn {
 
   const refreshVideo = useCallback(async (id: number): Promise<VideoGeneration | null> => {
     try {
-      const res = await fetch(`/api/videos/${id}/refresh`, {
-        credentials: "include",
-        headers: getAuthHeaders(),
-      });
-      if (!res.ok) return null;
-      const data: VideoGeneration = await res.json();
+      const result = await refreshVideoTaskThrottled(id, getAuthHeaders());
+      if (result.kind !== "ok") return null;
+      const data: VideoGeneration = result.video;
       setVideos((prev) => prev.map((v) => (v.id === id ? data : v)));
       setCurrentVideo((prev) => (prev?.id === id ? data : prev));
       if (data.status === "succeeded" || data.status === "failed") {
@@ -152,7 +178,7 @@ export function useVideo(): UseVideoReturn {
           key: `video:${data.id}`,
           type: "video",
           title: data.status === "succeeded" ? "视频任务已完成" : "视频任务未完成",
-          description: data.status === "succeeded" ? data.prompt : getErrorMessage(data.error_message || data.prompt, { module: "video", fallbackMessage: "视频生成失败，请稍后重试或调整描述。" }),
+          description: data.status === "succeeded" ? data.prompt : data.error_message || "后端未返回具体失败原因，请检查视频任务日志或重试。",
           href: "/video",
           ok: data.status === "succeeded",
         });
@@ -179,13 +205,20 @@ export function useVideo(): UseVideoReturn {
   const startPolling = useCallback(
     (id: number) => {
       if (pollTimers.current.has(id)) return;
-      const timer = setInterval(async () => {
-        const video = await refreshVideo(id);
-        if (video && (video.status === "succeeded" || video.status === "failed")) {
-          stopPolling(id);
-        }
-      }, 8000);
-      pollTimers.current.set(id, timer);
+      const scheduleNext = (delayMs: number) => {
+        const timer = setTimeout(async () => {
+          pollTimers.current.delete(id);
+          const video = await refreshVideo(id);
+          if (video && (video.status === "succeeded" || video.status === "failed")) {
+            stopPolling(id);
+            return;
+          }
+          const staggerMs = 20_000 + (id % 7) * 2_000;
+          scheduleNext(video ? staggerMs : Math.max(staggerMs, 45_000));
+        }, delayMs);
+        pollTimers.current.set(id, timer);
+      };
+      scheduleNext(4_000 + (id % 5) * 1_500);
     },
     [refreshVideo]
   );

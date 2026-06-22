@@ -54,16 +54,37 @@ test("buildTextAppendIntent appends text and returns original data", () => {
   });
 });
 
-test("buildStreamErrorIntent builds task-stream error patch without content", () => {
+test("buildStreamErrorIntent keeps retryable task-stream error content empty", () => {
   assert.deepEqual(mod.buildStreamErrorIntent({
     payload: { type: "error", error: {}, message: "boom", errorCode: "rate_limit", retryable: true },
     accumulated: "",
     fallbackRequestId: "req_old",
   }), {
     type: "stream_error",
-    accumulated: "boom",
+    accumulated: "",
     patch: {
       errorCode: "rate_limit",
+      retryable: true,
+      requestId: "req_old",
+      activityStatus: undefined,
+      searchStatus: undefined,
+      searchSources: undefined,
+      phase: "failed",
+    },
+  });
+});
+
+test("buildStreamErrorIntent keeps retryable main-stream error content empty so regenerate card is shown", () => {
+  assert.deepEqual(mod.buildStreamErrorIntent({
+    payload: { type: "error", error: {}, message: "Gemini 上游响应超时", errorCode: "upstream_timeout", retryable: true },
+    accumulated: "",
+    fallbackRequestId: "req_old",
+    includeContentInPatch: true,
+  }), {
+    type: "stream_error",
+    accumulated: "",
+    patch: {
+      errorCode: "upstream_timeout",
       retryable: true,
       requestId: "req_old",
       activityStatus: undefined,

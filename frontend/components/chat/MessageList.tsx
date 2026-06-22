@@ -45,6 +45,10 @@ function LoadableMarkdownRenderer(props: MarkdownRendererProps) {
     };
   }, [Renderer]);
 
+  if (props.allowRichLiteFallback) {
+    return <DeferredMarkdownRenderer {...props} />;
+  }
+
   if (!Renderer) {
     if (props.priorityHydrateRichText) {
       return <DeferredMarkdownRenderer {...props} />;
@@ -123,6 +127,7 @@ interface MessageListProps {
   onSelectModeChange?: (active: boolean) => void;
   onExitCompare?: () => void;
   onQuoteSelection?: (quote: string) => void;
+  onSaveAssistantToNote?: (content: string) => void;
 }
 
 function normalizeExportPlainText(content: string, t: (key: string, params?: Record<string, string>) => string): string {
@@ -226,6 +231,7 @@ function MessageList({
   onSelectModeChange,
   onExitCompare,
   onQuoteSelection,
+  onSaveAssistantToNote,
 }: MessageListProps) {
   const { t, language } = useI18n();
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -1799,8 +1805,8 @@ function MessageList({
       data-hidden-local-message-count={hiddenLocalMessageCount}
     >
       {!hasRenderedInitialRange && (
-        <div className="pointer-events-none absolute inset-0 z-10 bg-surface/80 backdrop-blur-[1px]">
-          <ChatHistoryLoadingState />
+        <div data-testid="chat-initial-range-stability-overlay" className="pointer-events-none absolute inset-0 z-10 bg-surface/80 backdrop-blur-[1px]">
+          {(isLoadingHistory || visibleMessages.length === 0) && <ChatHistoryLoadingState />}
         </div>
       )}
       <Virtuoso
@@ -1907,6 +1913,7 @@ function MessageList({
               onRegenerate={onRegenerate}
               onContinueGenerate={onContinueGenerate}
               onForkCompare={onForkCompare}
+              onSaveAssistantToNote={onSaveAssistantToNote}
               onAssistantViewed={handleAssistantViewed}
               imageLoadFailedLabel={t("chat.imageLoadFailed")}
               MarkdownRenderer={LazyMarkdownRenderer}
