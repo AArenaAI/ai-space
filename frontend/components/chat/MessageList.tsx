@@ -934,9 +934,10 @@ function MessageList({
     isContentHeavyConversation && !localWindowReleasedRef.current && renderedMessageWindow === INITIAL_RENDERED_MESSAGE_WINDOW
       ? CONTENT_HEAVY_INITIAL_RENDERED_MESSAGE_WINDOW
       : renderedMessageWindow;
-  const shouldWindowInitialMessages = isCompare && (
-    isContentHeavyConversation || allVisibleMessages.length - initialMessageWindow >= MIN_HIDDEN_MESSAGES_TO_WINDOW
-  );
+  // Normal and compare chat now share the same DOM scroller. Keep all loaded
+  // messages/groups mounted so history prepend uses one stable scrollHeight
+  // delta instead of a second local hidden-message window.
+  const shouldWindowInitialMessages = false;
   const effectiveRenderedMessageWindow = shouldWindowInitialMessages
     ? Math.min(Math.max(effectiveRenderedMessageWindowState, targetMessageWindow, initialMessageWindow), allVisibleMessages.length)
     : allVisibleMessages.length;
@@ -1125,8 +1126,8 @@ function MessageList({
     const startedAt = Date.now();
     const restoreAnchor = () => {
       if (cancelled) return;
-      if (!isCompare && anchor.source === "remote-history" && typeof anchor.scrollHeight === "number" && typeof anchor.scrollTop === "number") {
-        // Normal DOM prepend is best anchored by total height delta. Do this before
+      if (anchor.source === "remote-history" && typeof anchor.scrollHeight === "number" && typeof anchor.scrollTop === "number") {
+        // DOM prepend is best anchored by total height delta. Do this before
         // looking up the old row: real conversations can group/filter messages, so
         // the pre-prepend anchor row may be temporarily absent even though height
         // has already changed and the viewport needs compensation immediately.
@@ -1229,6 +1230,12 @@ function MessageList({
     setRenderedMessageWindow(INITIAL_RENDERED_MESSAGE_WINDOW);
     setHasRenderedInitialRange(false);
   }, [conversationId, targetMessageId]);
+
+  useEffect(() => {
+    if (!isCompare || hasRenderedInitialRange || visibleMessages.length === 0) return;
+    const markReady = window.setTimeout(() => setHasRenderedInitialRange(true), 240);
+    return () => window.clearTimeout(markReady);
+  }, [hasRenderedInitialRange, isCompare, visibleMessages.length]);
 
   const userOverviewMessages = useMemo(() => {
     return allVisibleMessages
@@ -1853,7 +1860,7 @@ function MessageList({
           onModelChange={onCompareModelChange}
           onExitCompare={onExitCompare}
         />
-        {/* 滚动内容区域：对比模式也使用 Virtuoso，和单聊共享滚动/锁底体系 */}
+        {/* 滚动内容区域：对比模式和普通聊天共享普通 DOM scroller */}
         {messages.length === 0 ? (
           isLoadingHistory ? (
             <ChatHistoryLoadingVirtuoso<InferredGroup>
@@ -1872,53 +1879,68 @@ function MessageList({
             />
           )
         ) : (
-          <Virtuoso
-            style={{ height: "100%", overflowAnchor: userBrowsing ? "none" : "auto" }}
-            data={compareGroups}
-            ref={virtuosoRef}
-            scrollerRef={handleVirtuosoScrollerRef}
-            followOutput={false}
-            atBottomThreshold={AT_BOTTOM_THRESHOLD}
-            atBottomStateChange={(atBottom) => {
-              atBottomRef.current = atBottom;
-              if (atBottom && Date.now() >= userScrollOverrideUntilRef.current) stickToBottomRef.current = true;
-              setAtBottom(atBottom);
+          <div
+            ref={(el) => handleVirtuosoScrollerRef(el)}
+            className="chat-history-scroll-container"
+            style={{
+              height: "100%",
+              overflowY: "auto",
+              overflowX: "hidden",
+              overflowAnchor: userBrowsing ? "none" : "auto",
             }}
-            computeItemKey={(_, group) => group.id}
-            itemsRendered={lockBottomOnRenderedRange}
             onScroll={handleVirtuosoScroll}
             onWheel={(event) => handleUserScrollIntent(event.deltaY)}
             onTouchMove={() => stopBottomLockForUserBrowse(2500)}
-            increaseViewportBy={{
-          top: fastScrollPreload ? FAST_SCROLL_PRELOAD_PX : (isContentHeavyConversation ? HEAVY_HISTORY_PRELOAD_TOP_PX : HISTORY_PRELOAD_TOP_PX),
-          bottom: (returnToBottomPreload || fastScrollPreload) ? RETURN_TO_BOTTOM_PRELOAD_BOTTOM_PX : HISTORY_PRELOAD_BOTTOM_PX,
-        }}
-            overscan={{ main: 2, reverse: HISTORY_OVERSCAN_REVERSE }}
-            components={compareVirtuosoComponents}
-            itemContent={(groupIndex, group) => (
-              <ChatCompareGroupRow
-                group={group}
-                groupIndex={groupIndex}
-                groupCount={compareGroups.length}
-                compareModels={activeCompareModels.length ? activeCompareModels : compareModels}
-                resolveAssistant={resolveCompareAssistant}
-                modelById={modelById}
-                isLoading={isLoading}
-                isComplexTask={!!isComplexTask}
-                conversationId={conversationId}
-                deepReasoningLabel={t("chat.deepReasoning")}
-                imageLoadFailedLabel={t("chat.imageLoadFailed")}
-                MarkdownRenderer={LazyMarkdownRenderer}
-                onCopy={handleCopy}
-                onDelete={setDeleteTarget}
-                onRegenerate={onRegenerate}
-                onShareSelectMode={(id) => enterSelectMode("share", id)}
-                onFavoriteSelectMode={(id) => enterSelectMode("favorite", id)}
-                isFavorited={isFavorited}
-                onForkCompare={onForkCompare}
-              />
-            )}
-          />
+            data-testid="chat-history-scroll-container"
+          >
+            <div data-testid="chat-history-container" className="min-h-full">
+              {hasMoreMessages && (
+                <div
+                  className="flex justify-center py-3 text-xs text-muted-foreground"
+                  data-testid="chat-history-top-sentinel"
+                >
+                  {t("chat.history.loading")}
+                </div>
+              )}
+              {compareGroups.map((group, groupIndex) => (
+                <ChatCompareGroupRow
+                  key={group.id}
+                  group={group}
+                  aggregateGroup={aggregateGroupByUserId.get(group.userMessage.id)}
+                  groupIndex={groupIndex}
+                  groupCount={compareGroups.length}
+                  compareModels={activeCompareModels.length ? activeCompareModels : compareModels}
+                  resolveAssistant={resolveCompareAssistant}
+                  modelById={modelById}
+                  isLoading={isLoading}
+                  isComplexTask={!!isComplexTask}
+                  conversationId={conversationId}
+                  deepReasoningLabel={t("chat.deepReasoning")}
+                  imageLoadFailedLabel={t("chat.imageLoadFailed")}
+                  MarkdownRenderer={LazyMarkdownRenderer}
+                  onCopy={handleCopy}
+                  onDelete={setDeleteTarget}
+                  onRegenerate={onRegenerate}
+                  onContinueGenerate={onContinueGenerate}
+                  onShareSelectMode={(id) => enterSelectMode("share", id)}
+                  onFavoriteSelectMode={(id) => enterSelectMode("favorite", id)}
+                  isFavorited={isFavorited}
+                  onForkCompare={onForkCompare}
+                  onSaveToNote={onSaveAssistantToNote}
+                  onAssistantViewed={handleAssistantViewed}
+                  initialReadingAssistantIds={renderedWindowStableAssistantIds}
+                  viewedAssistantIds={viewedAssistantIds}
+                  historyPrependSettling={historyPrependSettling}
+                  useContentVisibility={useRowContentVisibility}
+                  deferRichTextHydration={shouldDeferRowsForActiveBrowse}
+                  deferOffscreenRichTextHydration={deferOffscreenRichTextHydration}
+                  allowRichLiteFallback={historyRichLiteFallbackMessageIds.has(group.userMessage.id)}
+                  stabilizeInitialRichText={!hasRenderedInitialRange}
+                />
+              ))}
+              <div style={{ height: CHAT_BOTTOM_SPACER + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0) }} aria-hidden="true" />
+            </div>
+          </div>
         )}
 
         <ChatScrollProgress
@@ -1933,6 +1955,34 @@ function MessageList({
           onClick={handleScrollToBottomClick}
         />
 
+        <ChatSelectionOverlays
+          textSelection={textSelection}
+          onCopySelectedText={handleCopySelectedText}
+          onCopySelectedQuote={handleCopySelectedQuote}
+          selectMode={selectMode}
+          selectionMode={selectionMode}
+          selectedCount={selectedIds.size}
+          selectedMessages={selectedMessages}
+          allSelected={allSelected}
+          sharing={sharing}
+          exporting={exporting}
+          favoriteLoading={favoriteLoading}
+          shareOpen={shareOpen}
+          shareSlug={shareSlug}
+          exportPreviewOpen={exportPreviewOpen}
+          exportPreviewCardRef={exportPreviewCardRef}
+          exportCardRef={exportCardRef}
+          onCancelSelection={exitSelectMode}
+          onToggleSelectAll={toggleSelectAll}
+          onConfirmShare={handleShareSelected}
+          onConfirmFavorite={handleFavoriteSelected}
+          onExportImage={handleExportImage}
+          onExportText={handleExportText}
+          onCloseShare={() => setShareOpen(false)}
+          onCloseExportPreview={() => setExportPreviewOpen(false)}
+          onDownloadImage={handleDownloadImage}
+        />
+
         <ChatDeleteMessageDialog
           targetId={deleteTarget}
           title={t("chat.deleteMessageTitle")}
@@ -1942,7 +1992,6 @@ function MessageList({
           onDelete={onDeleteMessage}
           onClose={() => setDeleteTarget(null)}
         />
-        <ShareDialog isOpen={shareOpen} slug={shareSlug} onClose={() => setShareOpen(false)} />
       </div>
     );
   }

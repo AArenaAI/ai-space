@@ -140,7 +140,7 @@ export function SelectionFloatingBar({
 }) {
   const { t } = useI18n();
   return (
-    <div className="absolute bottom-0 left-0 right-0 z-[80] flex flex-wrap items-center justify-center gap-3 px-4 pb-4 pb-[max(1rem,env(safe-area-inset-bottom))] pointer-events-none">
+    <div className="absolute bottom-0 left-0 right-0 z-[170] flex flex-wrap items-center justify-center gap-3 px-4 pb-4 pb-[max(1rem,env(safe-area-inset-bottom))] pointer-events-none">
       <ActionBar>
         <ActionBarGroup>
           <ActionBarButton onClick={onSelectAll}>

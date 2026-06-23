@@ -24,13 +24,21 @@ export type ChatCompareGroupRowProps = {
   onCopy: (content: string) => void;
   onDelete: (id: string) => void;
   onRegenerate?: () => void;
+  onContinueGenerate?: () => void;
   onShareSelectMode: (id: string) => void;
   onFavoriteSelectMode: (id: string) => void;
   isFavorited: (serverMessageId: number) => boolean;
   onForkCompare?: (messageId: number) => void;
+  onSaveToNote?: (content: string) => void;
+  onAssistantViewed?: (messageId: string) => void;
+  initialReadingAssistantIds?: Set<string>;
+  viewedAssistantIds?: Set<string>;
+  historyPrependSettling?: boolean;
   useContentVisibility?: boolean;
   deferRichTextHydration?: boolean;
+  deferOffscreenRichTextHydration?: boolean;
   allowRichLiteFallback?: boolean;
+  stabilizeInitialRichText?: boolean;
 };
 
 function ChatCompareGroupRow({
@@ -50,13 +58,21 @@ function ChatCompareGroupRow({
   onCopy,
   onDelete,
   onRegenerate,
+  onContinueGenerate,
   onShareSelectMode,
   onFavoriteSelectMode,
   isFavorited,
   onForkCompare,
+  onSaveToNote,
+  onAssistantViewed,
+  initialReadingAssistantIds,
+  viewedAssistantIds,
+  historyPrependSettling,
   useContentVisibility,
   deferRichTextHydration,
+  deferOffscreenRichTextHydration,
   allowRichLiteFallback,
+  stabilizeInitialRichText,
 }: ChatCompareGroupRowProps) {
   const isLastGroup = groupIndex === groupCount - 1;
   const isSingleChat = group.models.length <= 1;
@@ -67,7 +83,12 @@ function ChatCompareGroupRow({
   const columnModels = useMemo(() => compareModels.slice(0, 2), [compareModels]);
 
   return (
-    <div className="mx-auto max-w-[1440px]">
+    <div
+      className="mx-auto max-w-[1440px]"
+      data-chat-message-row="true"
+      data-message-id={group.userMessage.id}
+      data-message-role="user"
+    >
       <div className="flex items-stretch">
         {columnModels.map((modelId, colIndex) => {
           const defaultAssistant = resolveAssistant(group, colIndex, modelId);
@@ -97,13 +118,22 @@ function ChatCompareGroupRow({
                 onCopy={onCopy}
                 onDelete={onDelete}
                 onRegenerate={onRegenerate}
+                onContinueGenerate={onContinueGenerate}
                 onShareSelectMode={onShareSelectMode}
                 onFavoriteSelectMode={onFavoriteSelectMode}
                 isFavorited={isFavorited}
                 onForkCompare={onForkCompare}
+                onSaveToNote={onSaveToNote}
+                onAssistantViewed={onAssistantViewed}
+                isInitialReadingAssistant={assistant ? initialReadingAssistantIds?.has(String(assistant.id)) : false}
+                isViewedAssistant={assistant ? viewedAssistantIds?.has(String(assistant.id)) : false}
+                historyPrependSettling={historyPrependSettling}
                 useContentVisibility={useContentVisibility}
                 deferRichTextHydration={deferRichTextHydration}
+                deferOffscreenRichTextHydration={deferOffscreenRichTextHydration}
                 allowRichLiteFallback={allowRichLiteFallback}
+                stabilizeInitialRichText={stabilizeInitialRichText}
+                suppressRowMarker
               />
             </div>
           );

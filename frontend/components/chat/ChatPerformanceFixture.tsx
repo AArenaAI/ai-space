@@ -46,6 +46,40 @@ function buildMessages(count: number, longEvery: number): Message[] {
   });
 }
 
+function buildCompareMessages(groupCount: number, longEvery: number): Message[] {
+  const now = 1_700_000_000_000;
+  const messages: Message[] = [];
+  for (let index = 0; index < groupCount; index += 1) {
+    const groupId = 10_000 + index;
+    const pair = index + 1;
+    messages.push({
+      id: `compare-user-${pair}`,
+      role: "user",
+      content: `这是第 ${pair} 轮对比模式用户消息。`,
+      createdAt: now + index * 3000,
+      serverMessageId: groupId * 10,
+    });
+    ["perf-model", "perf-model-alt"].forEach((modelId, colIndex) => {
+      const isLong = longEvery > 0 && pair % longEvery === 0 && colIndex === 1;
+      messages.push({
+        id: `compare-assistant-${pair}-${colIndex}`,
+        role: "assistant",
+        content: isLong
+          ? `${LONG_MARKDOWN}\n\n对比列：${colIndex + 1}\n\n${"补充说明。".repeat(260)}`
+          : `这是第 ${pair} 轮 ${modelId} 的对比回复。\n\n- 要点一\n- 要点二`,
+        model: modelId,
+        createdAt: now + index * 3000 + 800 + colIndex * 120,
+        completedAt: now + index * 3000 + 1200 + colIndex * 120,
+        serverMessageId: groupId * 10 + colIndex + 1,
+        groupId,
+        groupIndex: colIndex,
+        groupModels: ["perf-model", "perf-model-alt"],
+      });
+    });
+  }
+  return messages;
+}
+
 function buildStreamingMessages(historyCount: number): Message[] {
   const evenHistoryCount = historyCount % 2 === 0 ? historyCount : historyCount - 1;
   const history = buildMessages(evenHistoryCount, 0);
@@ -89,6 +123,7 @@ const STREAM_DELTA = "这是一段真实浏览器流式渲染增量，包含中�
 
 const models: ChatModel[] = [
   { id: "perf-model", name: "性能模型", provider: "local", description: "Synthetic performance model", color: "#64748b" },
+  { id: "perf-model-alt", name: "性能模型 B", provider: "local", description: "Synthetic compare model", color: "#8b5cf6" },
 ];
 
 export default function ChatPerformanceFixture() {
@@ -99,14 +134,16 @@ export default function ChatPerformanceFixture() {
   const mode = params?.get("mode") || "static";
   const deltaCount = Math.max(1, Number(params?.get("deltas") || 240));
   const deltaInterval = Math.max(0, Number(params?.get("deltaInterval") || 16));
+  const compare = params?.get("compare") === "1";
   const [loadMoreCount, setLoadMoreCount] = useState(0);
   const staticMessages = useMemo(() => buildMessages(count, longEvery), [count, longEvery]);
+  const compareMessages = useMemo(() => buildCompareMessages(Math.ceil(count / 3), longEvery), [count, longEvery]);
   const initialStreamingMessages = useMemo(() => buildStreamingMessages(count), [count]);
   const [streamMessages, setStreamMessages] = useState<Message[]>(initialStreamingMessages);
   const [renderMetrics, setRenderMetrics] = useState<RenderMetrics | null>(null);
   const frameGapsRef = useRef<number[]>([]);
   const longTaskRef = useRef({ count: 0, duration: 0 });
-  const messages = mode === "stream" ? streamMessages : staticMessages;
+  const messages = compare ? compareMessages : mode === "stream" ? streamMessages : staticMessages;
 
   useEffect(() => {
     if (mode !== "stream") return;
@@ -184,7 +221,7 @@ export default function ChatPerformanceFixture() {
   return (
     <div className="flex h-screen min-h-0 flex-col bg-surface text-text-primary" data-testid="chat-performance-fixture">
       <div className="shrink-0 border-b border-surface-border px-4 py-2 text-xs text-text-secondary">
-        perf fixture · mode={mode} · messages={messages.length} · loadMore={loadMoreCount}
+        perf fixture · mode={mode}{compare ? " · compare" : ""} · messages={messages.length} · loadMore={loadMoreCount}
         {renderMetrics && (
           <span
             className="ml-2"
@@ -204,6 +241,9 @@ export default function ChatPerformanceFixture() {
           isLoadingMore={false}
           hasMoreMessages={hasMore}
           onLoadMore={() => setLoadMoreCount((value) => value + 1)}
+          isCompare={compare}
+          compareModels={compare ? ["perf-model", "perf-model-alt"] : []}
+          onSaveAssistantToNote={compare ? () => undefined : undefined}
         />
       </div>
     </div>
