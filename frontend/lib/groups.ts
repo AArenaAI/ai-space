@@ -68,21 +68,56 @@ function pushLegacyGroup(groups: InferredGroup[], userMessage: Message | null, a
 }
 
 /**
- * 优先按后端持久化 MessageGroup 分组；旧数据无 group_id 时再按相邻 user→assistant 推断。
+ * 优先按后端持久化 MessageGroup 的 user_message_id 归组；旧数据无该字段时再按相邻 user→assistant 推断。
  */
 export function inferGroups(messages: Message[]): InferredGroup[] {
   const groups: InferredGroup[] = [];
   let fallbackGroupId = -1;
   const nextFallbackId = () => fallbackGroupId--;
   const pushedGroupIds = new Set<number>();
+  const authoritativeUserIds = new Set<number>();
+  const userByServerId = new Map<number, Message>();
+
+  for (const msg of messages) {
+    if (msg.role === "user" && msg.serverMessageId) {
+      userByServerId.set(msg.serverMessageId, msg);
+    }
+  }
+
+  const authoritativeAssistants = messages.filter(
+    (msg) => msg.role === "assistant" && !!msg.groupId && !!msg.userMessageId && userByServerId.has(msg.userMessageId)
+  );
+  const authoritativeByGroupId = new Map<number, Message[]>();
+  for (const msg of authoritativeAssistants) {
+    if (!msg.groupId) continue;
+    const list = authoritativeByGroupId.get(msg.groupId) || [];
+    list.push(msg);
+    authoritativeByGroupId.set(msg.groupId, list);
+  }
+
+  for (const [id, assistants] of Array.from(authoritativeByGroupId.entries())) {
+    const sortedAssistants = dedupeAssistantsByModel(assistants);
+    const userMessageId = sortedAssistants[0]?.userMessageId;
+    const userMessage = userMessageId ? userByServerId.get(userMessageId) : undefined;
+    if (!userMessage) continue;
+    pushedGroupIds.add(id);
+    if (userMessage.serverMessageId) authoritativeUserIds.add(userMessage.serverMessageId);
+    groups.push({
+      id,
+      userMessage,
+      assistantMessages: sortedAssistants,
+      models: uniqueModels(sortedAssistants, sortedAssistants[0]?.groupModels),
+    });
+  }
 
   let currentUser: Message | null = null;
   let currentAssistants: Message[] = [];
 
   const flushCurrent = () => {
     if (!currentUser) return;
+    if (currentAssistants.length === 0 && currentUser.serverMessageId && authoritativeUserIds.has(currentUser.serverMessageId)) return;
 
-    const groupedAssistants = currentAssistants.filter((m) => !!m.groupId);
+    const groupedAssistants = currentAssistants.filter((m) => !!m.groupId && !pushedGroupIds.has(m.groupId));
     if (groupedAssistants.length > 0) {
       const byGroupId = new Map<number, Message[]>();
       for (const msg of groupedAssistants) {
@@ -109,7 +144,8 @@ export function inferGroups(messages: Message[]): InferredGroup[] {
         pushLegacyGroup(groups, currentUser, legacyAssistants, nextFallbackId);
       }
     } else {
-      pushLegacyGroup(groups, currentUser, currentAssistants, nextFallbackId);
+      const legacyAssistants = currentAssistants.filter((m) => !m.groupId || !pushedGroupIds.has(m.groupId));
+      pushLegacyGroup(groups, currentUser, legacyAssistants, nextFallbackId);
     }
   };
 
@@ -118,11 +154,11 @@ export function inferGroups(messages: Message[]): InferredGroup[] {
       flushCurrent();
       currentUser = msg;
       currentAssistants = [];
-    } else if (msg.role === "assistant") {
+    } else if (msg.role === "assistant" && (!msg.groupId || !pushedGroupIds.has(msg.groupId))) {
       currentAssistants.push(msg);
     }
   }
 
   flushCurrent();
-  return groups;
+  return groups.sort((a, b) => messageRecency(a.userMessage) - messageRecency(b.userMessage));
 }

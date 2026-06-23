@@ -26,6 +26,7 @@ export type ForkChatPersistedMessage = {
   group_id?: number | null;
   group_index?: number | null;
   group_models?: string[] | null;
+  user_message_id?: number | string | null;
 };
 
 export type ForkChatMessage = {
@@ -44,6 +45,7 @@ export type ForkChatMessage = {
   groupId?: number;
   groupIndex?: number;
   groupModels?: string[];
+  userMessageId?: number;
 };
 
 export type ForkChatResponse = {
@@ -113,6 +115,7 @@ export function mapPersistedChatMessage(
     groupId: message.group_id || undefined,
     groupIndex: message.group_index ?? undefined,
     groupModels: Array.isArray(message.group_models) ? message.group_models : undefined,
+    userMessageId: Number(message.user_message_id || 0) || undefined,
   };
 }
 

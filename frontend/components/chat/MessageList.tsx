@@ -1457,10 +1457,24 @@ function MessageList({
 
   const activeCompareModels = useMemo(() => {
     if (!isCompare) return [];
-    return compareModels && compareModels.length > 0
-      ? compareModels
-      : Array.from(new Set(messages.filter((m) => m.role === "assistant" && m.model).map((m) => m.model!))).slice(0, 2);
-  }, [compareModels, isCompare, messages]);
+    const availableModelIds = new Set(models.map((model) => model.id));
+    const dedupeValid = (ids: string[]) => Array.from(new Set(ids.filter((id) => availableModelIds.has(id)))).slice(0, 2);
+    const latestGroupedModels = [...groups]
+      .reverse()
+      .find((group) => group.assistantMessages.length > 1)
+      ?.models || [];
+    const groupModels = dedupeValid(latestGroupedModels);
+    const explicitModels = dedupeValid(compareModels || []);
+
+    // Existing normal conversations can enter compare mode from a persisted
+    // message group whose models are authoritative. Prefer that group metadata
+    // over stale local compare-model selections; otherwise duplicated local
+    // state like [gpt-5.4, gpt-5.4] makes both columns resolve to the same
+    // assistant.
+    if (groupModels.length >= 2) return groupModels;
+    if (explicitModels.length >= 2) return explicitModels;
+    return dedupeValid(messages.filter((m) => m.role === "assistant" && m.model).map((m) => m.model!));
+  }, [compareModels, groups, isCompare, messages, models]);
   const columnMessages = useMemo(() => {
     if (!isCompare) return [];
     return activeCompareModels.map((modelId) =>
@@ -1909,7 +1923,7 @@ function MessageList({
                   aggregateGroup={aggregateGroupByUserId.get(group.userMessage.id)}
                   groupIndex={groupIndex}
                   groupCount={compareGroups.length}
-                  compareModels={activeCompareModels.length ? activeCompareModels : compareModels}
+                  compareModels={group.models.length >= 2 ? group.models : (activeCompareModels.length ? activeCompareModels : compareModels)}
                   resolveAssistant={resolveCompareAssistant}
                   modelById={modelById}
                   isLoading={isLoading}

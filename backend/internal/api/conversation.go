@@ -457,6 +457,7 @@ func (h *ConversationHandler) buildMessagesWithGroupPayload(conversationID uint,
 		}
 		if g, ok := groupMap[m.GroupID]; ok {
 			result[i].GroupModels = g.GetModels()
+			result[i].UserMessageID = g.UserMessageID
 		}
 	}
 	return result
@@ -467,9 +468,10 @@ func (h *ConversationHandler) buildMessagesWithGroupPayload(conversationID uint,
 // /conversations/:id and /conversations/:id/messages.
 type MessageWithGroup struct {
 	models.Message
-	GroupID     uint     `json:"group_id,omitempty"`
-	GroupIndex  int      `json:"group_index"`
-	GroupModels []string `json:"group_models,omitempty"`
+	GroupID       uint     `json:"group_id,omitempty"`
+	GroupIndex    int      `json:"group_index"`
+	GroupModels   []string `json:"group_models,omitempty"`
+	UserMessageID uint     `json:"user_message_id,omitempty"`
 }
 
 func (h *ConversationHandler) expandMessagesToCompleteGroups(conversationID uint, messages []models.Message) ([]models.Message, error) {
