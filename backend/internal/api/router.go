@@ -196,6 +196,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	// 对比记录 Handler（供认证路由与公开查看共用）
 	compareRecordHandler := NewCompareRecordHandler(db)
 	convHandler := NewConversationHandler(db)
+	chatBootstrapHandler := NewChatBootstrapHandler(db)
 	alertHandler := NewAlertHandler(db, emailService)
 	alertHandler.InitDefaultRules()
 
@@ -269,6 +270,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	documentArtifactHandler.AutoMigrate()
 	authorized.POST("/translate/live/ticket", liveTranslateHandler.CreateTicket)
 
+	authorized.GET("/chat/bootstrap", chatBootstrapHandler.Get)
 	authorized.GET("/conversations", convHandler.List)
 	authorized.GET("/conversations/search", convHandler.Search)
 	authorized.POST("/conversations", convHandler.Create)

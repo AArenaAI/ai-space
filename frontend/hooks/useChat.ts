@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useMemo, useState, useRef } from "react";
 import { useChatModelSelection } from "@/hooks/useChatModelSelection";
 import { useChatLocalActions } from "@/hooks/useChatLocalActions";
 import { useChatBackgroundPollingRuntime } from "@/hooks/useChatBackgroundPollingRuntime";
@@ -20,12 +20,15 @@ import {
 import { useI18n } from "@/lib/i18n";
 import { v4 as uuidv4 } from "uuid";
 import { createFinalizingStatus } from "@/lib/chatActivityStatus";
-import type {
+import {
   ChatModel,
   Conversation,
   Message,
   SearchSource,
 } from "@/lib/chatTypes";
+import type { ChatBootstrapPayload } from "@/lib/chatBootstrapCoordinator";
+import { mapPersistedChatMessages, buildGroupViewsFromMessages } from "@/lib/chatForkCoordinator";
+import type { CachedConversationSnapshot } from "@/lib/chatConversationCache";
 
 const API_BASE_URL = ""; // 使用相对路径，nginx 同域名代理 /api -> 后端
 
@@ -97,7 +100,7 @@ export const MODELS: ChatModel[] = [
   },
 ];
 
-export function useChat(conversationId: number | undefined, models: ChatModel[], skillKey?: string, notebookId?: number, notebookFileIds?: number[], modelSelectionOptions?: { storageKey?: string; defaultModelId?: string }) {
+export function useChat(conversationId: number | undefined, models: ChatModel[], skillKey?: string, notebookId?: number, notebookFileIds?: number[], modelSelectionOptions?: { storageKey?: string; defaultModelId?: string }, bootstrap?: ChatBootstrapPayload) {
   const { t } = useI18n();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -135,6 +138,26 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   const taskStreamsRef = useRef<Record<string, AbortController>>({});
   const abortReasonRef = useRef<"user" | "navigation" | null>(null);
   const modelsKey = models.map((m) => m.id).join("|");
+  const bootstrapSnapshot: CachedConversationSnapshot | undefined = useMemo(() => {
+    if (!bootstrap?.conversation || !bootstrap.snapshot) return undefined;
+    const mappedMessages = mapPersistedChatMessages(bootstrap.snapshot.messages || [], { fallbackId: uuidv4 });
+    return {
+      conversationId: bootstrap.conversation.id,
+      title: bootstrap.conversation.title || "",
+      messages: mappedMessages,
+      loadedPersistedMessages: mappedMessages.length,
+      totalMessages: bootstrap.snapshot.total,
+      groupViews: buildGroupViewsFromMessages(mappedMessages),
+      isLoading: false,
+      isCompare: !!bootstrap.conversation.compare,
+      compareModels: bootstrap.conversation.compare_models || [],
+      model: bootstrap.conversation.model,
+      skillKey: bootstrap.conversation.skill_key || skillKey,
+      snapshotVersion: bootstrap.snapshot.snapshot_version,
+      fetchedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+  }, [bootstrap, skillKey]);
   const stopTaskStream = useStopTaskStreamAction(taskStreamsRef);
 
   const {
@@ -209,6 +232,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     applyLoadExistingNavigationLifecycle,
     startTaskEventStream,
     translate: t,
+    bootstrapSnapshot,
   });
 
   const {

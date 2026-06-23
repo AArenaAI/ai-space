@@ -547,9 +547,33 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     if (stored) { try { setUser(JSON.parse(stored)); } catch {} }
   }, []);
 
+  useEffect(() => {
+    const handleBootstrapReady = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        user?: any;
+        sidebar?: { conversations?: Conversation[] };
+      }>).detail;
+      if (!detail) return;
+      if (detail.user) {
+        setUser(detail.user);
+      }
+      if (Array.isArray(detail.sidebar?.conversations)) {
+        const next = sortConversations(detail.sidebar.conversations.filter(isMainChatConversation));
+        cachedConversations = next;
+        setConversations(next);
+        setLoading(false);
+      }
+    };
+    window.addEventListener("chat-bootstrap-ready", handleBootstrapReady);
+    return () => window.removeEventListener("chat-bootstrap-ready", handleBootstrapReady);
+  }, []);
+
   /* 加载对话 */
   const loadConversations = useCallback(async () => {
-    if (!user) { setConversations([]); setLoading(false); return; }
+    if (!user) {
+      if (cachedConversations === null) setLoading(false);
+      return;
+    }
     const isFirstLoad = cachedConversations === null;
     if (isFirstLoad) setLoading(true);
     const data = await fetchConversations(currentWS?.id);

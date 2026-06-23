@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useModels } from "@/hooks/useModels";
+import { useChatBootstrapRuntime } from "@/hooks/useChatBootstrapRuntime";
 import ChatInterface from "./ChatInterface";
 import { useI18n } from "@/lib/i18n";
 import { emitChatRenderProfileEvent } from "@/lib/chatRenderProfile";
@@ -28,6 +29,8 @@ export default function ChatContent() {
     ? Number(searchParams?.get("message"))
     : undefined;
   const { models, loading } = useModels();
+  const bootstrap = useChatBootstrapRuntime({ conversationId });
+  const effectiveModels = bootstrap.models.length > 0 ? bootstrap.models : models;
   const previousConversationIdRef = useRef<number | undefined>(conversationId);
 
   useEffect(() => {
@@ -45,7 +48,7 @@ export default function ChatContent() {
     });
   }, [conversationId, targetMessageId, loading]);
 
-  if (!mounted || loading || models.length === 0) return <ChatSkeleton />;
+  if (!mounted || (bootstrap.status === "loading" && effectiveModels.length === 0) || (loading && effectiveModels.length === 0)) return <ChatSkeleton />;
 
   // 只用 t 参数强制重置“新对话”实例；创建对话后 URL 会从 /chat?t=xxx 变成 /chat?t=xxx&id=123，
   // key 必须保持不变，否则 ChatInterface 会 remount，正在流式写入的本地 assistant 消息会丢失。
@@ -53,7 +56,7 @@ export default function ChatContent() {
   const chatKey = newChatToken !== "default" ? `new-${newChatToken}` : "chat";
   return (
     <div className="h-full min-h-0 overflow-hidden">
-      <ChatInterface key={chatKey} conversationId={conversationId} models={models} targetMessageId={targetMessageId} />
+      <ChatInterface key={chatKey} conversationId={conversationId} models={effectiveModels} targetMessageId={targetMessageId} bootstrap={bootstrap.payload} />
     </div>
   );
 }

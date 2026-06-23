@@ -162,6 +162,7 @@ export type UseChatConversationRestoreRuntimeOptions = {
   fetchRestore?: typeof fetchConversationRestore;
   fetchMessageStatus?: typeof fetchConversationMessageStatus;
   fetchMessageCount?: typeof fetchConversationMessageCount;
+  bootstrapSnapshot?: CachedConversationSnapshot;
 };
 
 export function useChatConversationRestoreRuntime({
@@ -198,6 +199,7 @@ export function useChatConversationRestoreRuntime({
   fetchRestore = fetchConversationRestore,
   fetchMessageStatus = fetchConversationMessageStatus,
   fetchMessageCount = fetchConversationMessageCount,
+  bootstrapSnapshot,
 }: UseChatConversationRestoreRuntimeOptions) {
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -279,7 +281,11 @@ export function useChatConversationRestoreRuntime({
     const authToken: string = token as string;
     emitConversationSwitchPerformanceEvent("start", { conversationId: loadConversationId, loadSeq, stage: "start" });
 
-    const cachedSnapshot = getConversationSnapshot(loadConversationId);
+    const cachedSnapshot = bootstrapSnapshot?.conversationId === loadConversationId
+      ? bootstrapSnapshot
+      : getConversationSnapshot(loadConversationId);
+    const cachedSnapshotSource: ConversationSwitchPerformanceDetail["snapshotSource"] = cachedSnapshot === bootstrapSnapshot ? "backend" : "memory";
+    const cachedDisplayMode: ConversationSwitchPerformanceDetail["displayMode"] = cachedSnapshot === bootstrapSnapshot ? "backend" : "cached";
     if (navigationPlan.shouldSetLoadingHistory && !cachedSnapshot) {
       setIsLoadingHistory(navigationPlan.loadingHistory);
     }
@@ -291,14 +297,14 @@ export function useChatConversationRestoreRuntime({
     let persistentSnapshotReady: Promise<void> = Promise.resolve();
     if (cachedSnapshot) {
       hasDisplayedSnapshot = true;
-      displayedSnapshotSource = "memory";
+      displayedSnapshotSource = cachedSnapshotSource;
       emitConversationSwitchPerformanceEvent("first-snapshot", {
         conversationId: loadConversationId,
         loadSeq,
-        source: "memory",
+        source: cachedSnapshotSource,
         stage: "cache",
-        displayMode: "cached",
-        snapshotSource: "memory",
+        displayMode: cachedDisplayMode,
+        snapshotSource: cachedSnapshotSource,
         durationMs: elapsedSinceSwitchStart(),
         messageCount: cachedSnapshot.messages.length,
         totalMessages: cachedSnapshot.totalMessages,
@@ -588,5 +594,5 @@ export function useChatConversationRestoreRuntime({
       });
 
     return () => loadController.abort();
-  }, [conversationId, modelsKey, setSelectedModel, skillKey]);
+  }, [conversationId, modelsKey, setSelectedModel, skillKey, bootstrapSnapshot]);
 }

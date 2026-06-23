@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useChat } from "@/hooks/useChat";
 import type { ChatModel } from "@/lib/chatTypes";
+import type { ChatBootstrapPayload } from "@/lib/chatBootstrapCoordinator";
 import { useTemplates } from "@/hooks/useTemplates";
 import MessageList from "./MessageList";
 import MessageInput, { ReasoningConfig, type QuoteDraft } from "./MessageInput";
@@ -64,6 +65,7 @@ interface ChatInterfaceProps {
   externalSendRequest?: { id: number; content: string; hidden?: boolean } | null;
   modelSelectionOptions?: { storageKey?: string; defaultModelId?: string };
   onSaveAssistantToNote?: (content: string) => void;
+  bootstrap?: ChatBootstrapPayload;
 }
 
 const HIDDEN_USER_MESSAGE_PREFIX = "<!-- ai-space:hidden-user-message -->";
@@ -72,7 +74,7 @@ export function buildHiddenUserMessageContent(content: string) {
   return `${HIDDEN_USER_MESSAGE_PREFIX}\n${content}`;
 }
 
-export default function ChatInterface({ conversationId, notebookId, notebookTitle, notebookFileCount, notebookFileIds, notebookHero, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId, externalSendRequest, modelSelectionOptions, onSaveAssistantToNote }: ChatInterfaceProps) {
+export default function ChatInterface({ conversationId, notebookId, notebookTitle, notebookFileCount, notebookFileIds, notebookHero, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId, externalSendRequest, modelSelectionOptions, onSaveAssistantToNote, bootstrap }: ChatInterfaceProps) {
   const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
   const { t } = useI18n();
   const [compareMode, setCompareMode] = useState(false);
@@ -132,7 +134,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     isLoadingMore,
     hasMoreMessages,
     loadMoreMessages,
-  } = useChat(conversationId, models, skillKey, notebookId, notebookFileIds, modelSelectionOptions);
+  } = useChat(conversationId, models, skillKey, notebookId, notebookFileIds, modelSelectionOptions, bootstrap);
 
   const { templates } = useTemplates();
   const { hasEnoughCredits, getTierCredits, isCreditExhausted, getBetaPhaseInfo, credits, getModelCostFen, getBetaModelBlockedMessage } = useCredits();
