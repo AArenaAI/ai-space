@@ -79,6 +79,7 @@ type CompareColumnTurnProps = {
   allowRichLiteFallback?: boolean;
   stabilizeInitialRichText?: boolean;
   suppressRowMarker?: boolean;
+  showUserMessage?: boolean;
 };
 
 function CompareColumnTurn({
@@ -116,6 +117,7 @@ function CompareColumnTurn({
   allowRichLiteFallback = false,
   stabilizeInitialRichText = false,
   suppressRowMarker = false,
+  showUserMessage = true,
 }: CompareColumnTurnProps) {
   const { t } = useI18n();
   const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -277,7 +279,7 @@ function CompareColumnTurn({
       style={useContentVisibility ? COMPARE_COLUMN_CONTENT_VISIBILITY_STYLE : undefined}
       className="flex h-full flex-col gap-3"
     >
-      <CompareUserMessageBubble message={userMessage} imageLoadFailedLabel={imageLoadFailedLabel} />
+      {showUserMessage && <CompareUserMessageBubble message={userMessage} imageLoadFailedLabel={imageLoadFailedLabel} />}
       <div className="flex flex-1 flex-col">
         {msg ? (
           <div className="group flex gap-3 animate-message-appear">

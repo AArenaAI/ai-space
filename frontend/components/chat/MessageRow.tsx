@@ -345,7 +345,7 @@ function MessageRow({
             <div
               className={cn(
                 "px-4 py-3 relative w-fit max-w-full transition-shadow duration-500",
-                isUser ? "rounded-2xl rounded-br-sm bg-[#EFF6FF] shadow-sm dark:bg-[#1E293B]" : "rounded-2xl rounded-bl-sm bg-surface-elevated",
+                isUser ? "rounded-2xl rounded-br-sm bg-surface-elevated shadow-sm" : "rounded-2xl rounded-bl-sm bg-surface-elevated",
                 isHighlighted && "ring-2 ring-brand/40 shadow-lg shadow-brand/10"
               )}
             >

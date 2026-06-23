@@ -4,6 +4,7 @@ import { memo, useMemo, useState } from "react";
 import type { ChatModel, Message } from "@/lib/chatTypes";
 import type { InferredGroup } from "@/lib/groups";
 import CompareColumnTurn from "./CompareColumnTurn";
+import CompareSharedPromptBlock from "./CompareSharedPromptBlock";
 
 type MarkdownRendererComponent = Parameters<typeof CompareColumnTurn>[0]["MarkdownRenderer"];
 
@@ -84,12 +85,15 @@ function ChatCompareGroupRow({
 
   return (
     <div
-      className="mx-auto max-w-[1440px]"
+      className="mx-auto max-w-[1440px] px-4 py-4"
       data-chat-message-row="true"
       data-message-id={group.userMessage.id}
       data-message-role="user"
     >
-      <div className="flex items-stretch">
+      <div className="mb-4 pl-10 pr-0">
+        <CompareSharedPromptBlock message={group.userMessage} imageLoadFailedLabel={imageLoadFailedLabel} />
+      </div>
+      <div className="flex items-stretch gap-4">
         {columnModels.map((modelId, colIndex) => {
           const defaultAssistant = resolveAssistant(group, colIndex, modelId);
           const selectedAssistantId = columnSelections[colIndex];
@@ -98,7 +102,7 @@ function ChatCompareGroupRow({
             : defaultAssistant;
 
           return (
-            <div key={modelId || colIndex} className="flex min-w-[320px] flex-1 flex-col px-4 py-4">
+            <div key={modelId || colIndex} className="flex min-w-[320px] flex-1 flex-col py-1">
               <CompareColumnTurn
                 userMessage={group.userMessage}
                 assistantMessage={assistant}
@@ -134,6 +138,7 @@ function ChatCompareGroupRow({
                 allowRichLiteFallback={allowRichLiteFallback}
                 stabilizeInitialRichText={stabilizeInitialRichText}
                 suppressRowMarker
+                showUserMessage={false}
               />
             </div>
           );

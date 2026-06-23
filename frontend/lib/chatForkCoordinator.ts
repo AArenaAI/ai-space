@@ -17,6 +17,7 @@ export type ForkChatPersistedMessage = {
   reasoning?: string;
   thinking?: string;
   model?: string;
+  tokens_used?: number;
   created_at?: string;
   completed_at?: string | null;
   files?: unknown;
@@ -35,6 +36,7 @@ export type ForkChatMessage = {
   content: string;
   reasoningContent?: string;
   model?: string;
+  tokensUsed?: number;
   createdAt: number;
   completedAt?: number;
   files?: any[];
@@ -105,6 +107,7 @@ export function mapPersistedChatMessage(
     content,
     reasoningContent: reasoningContent || undefined,
     model: message.model,
+    tokensUsed: typeof message.tokens_used === "number" ? message.tokens_used : undefined,
     createdAt: message.created_at ? parseTime(message.created_at) : 0,
     completedAt: message.completed_at ? parseTime(message.completed_at) : undefined,
     files: parsePersistedMessageFiles(message.files),
