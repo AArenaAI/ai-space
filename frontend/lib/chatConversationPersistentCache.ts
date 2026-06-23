@@ -2,7 +2,7 @@ import type { CachedConversationSnapshot } from "@/lib/chatConversationCache";
 import { setConversationSnapshot } from "@/lib/chatConversationCache";
 
 const DB_NAME = "ai-space-chat-snapshot-cache";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_NAME = "conversationSnapshots";
 const DEFAULT_MAX_ENTRIES = 100;
 const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;

@@ -4,6 +4,7 @@ import (
 	"aipool-backend/internal/models"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -260,7 +261,11 @@ func (h *ConversationHandler) Get(c *gin.Context) {
 
 	var total int64
 	h.db.Model(&models.Message{}).Where("conversation_id = ?", conv.ID).Count(&total)
-	snapshotVersion := fmt.Sprintf("%d:%d:%d", conv.ID, total, conv.UpdatedAt.UnixNano())
+	// Include the message paging shape version so browser/persistent caches are invalidated
+	// when the server changes how paged message windows are assembled. In particular,
+	// v2 expands partial compare message groups to full groups; old cached snapshots can
+	// otherwise get a 304 and keep rendering split groups.
+	snapshotVersion := fmt.Sprintf("%d:%d:%d:group-window-v2", conv.ID, total, conv.UpdatedAt.UnixNano())
 	c.Header("ETag", snapshotVersion)
 	if c.GetHeader("If-None-Match") == snapshotVersion {
 		c.Status(http.StatusNotModified)
@@ -283,6 +288,9 @@ func (h *ConversationHandler) Get(c *gin.Context) {
 		msgQuery = msgQuery.Limit(msgLimit)
 	}
 	msgQuery.Find(&conv.Messages)
+	if expanded, err := h.expandMessagesToCompleteGroups(conv.ID, conv.Messages); err == nil {
+		conv.Messages = expanded
+	}
 
 	for i := len(conv.Messages) - 1; i >= 0; i-- {
 		if conv.Messages[i].Role == "assistant" && conv.Messages[i].Model != "" {
@@ -290,6 +298,8 @@ func (h *ConversationHandler) Get(c *gin.Context) {
 			break
 		}
 	}
+
+	messagesPayload := h.buildMessagesWithGroupPayload(conv.ID, conv.Messages)
 
 	response := gin.H{
 		"id":               conv.ID,
@@ -303,7 +313,7 @@ func (h *ConversationHandler) Get(c *gin.Context) {
 		"pinned":           conv.Pinned,
 		"created_at":       conv.CreatedAt,
 		"updated_at":       conv.UpdatedAt,
-		"messages":         conv.Messages,
+		"messages":         messagesPayload,
 		"total":            total,
 		"has_more":         len(conv.Messages) < int(total),
 		"snapshot_version": snapshotVersion,
@@ -416,22 +426,28 @@ func (h *ConversationHandler) GetMessages(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取消息失败"})
 		return
 	}
+	if expanded, err := h.expandMessagesToCompleteGroups(conv.ID, messages); err == nil {
+		messages = expanded
+	}
 
-	// 加载消息组信息
+	result := h.buildMessagesWithGroupPayload(conv.ID, messages)
+
+	c.JSON(http.StatusOK, gin.H{
+		"messages": result,
+		"total":    total,
+		"limit":    limit,
+		"offset":   offset,
+	})
+}
+
+func (h *ConversationHandler) buildMessagesWithGroupPayload(conversationID uint, messages []models.Message) []MessageWithGroup {
 	var groups []models.MessageGroup
-	h.db.Where("conversation_id = ?", convID).Find(&groups)
+	h.db.Where("conversation_id = ?", conversationID).Find(&groups)
 	groupMap := make(map[uint]*models.MessageGroup)
 	for i := range groups {
 		groupMap[groups[i].ID] = &groups[i]
 	}
 
-	// 组装响应：包含 group_id / group_index
-	type MessageWithGroup struct {
-		models.Message
-		GroupID     uint     `json:"group_id,omitempty"`
-		GroupIndex  int      `json:"group_index"`
-		GroupModels []string `json:"group_models,omitempty"`
-	}
 	result := make([]MessageWithGroup, len(messages))
 	for i, m := range messages {
 		result[i] = MessageWithGroup{
@@ -443,13 +459,88 @@ func (h *ConversationHandler) GetMessages(c *gin.Context) {
 			result[i].GroupModels = g.GetModels()
 		}
 	}
+	return result
+}
 
-	c.JSON(http.StatusOK, gin.H{
-		"messages": result,
-		"total":    total,
-		"limit":    limit,
-		"offset":   offset,
+// MessageWithGroup is the response shape used by both conversation restore and
+// paged message loading, so the frontend receives identical group metadata from
+// /conversations/:id and /conversations/:id/messages.
+type MessageWithGroup struct {
+	models.Message
+	GroupID     uint     `json:"group_id,omitempty"`
+	GroupIndex  int      `json:"group_index"`
+	GroupModels []string `json:"group_models,omitempty"`
+}
+
+func (h *ConversationHandler) expandMessagesToCompleteGroups(conversationID uint, messages []models.Message) ([]models.Message, error) {
+	if len(messages) == 0 {
+		return messages, nil
+	}
+
+	groupIDSet := make(map[uint]struct{})
+	for _, message := range messages {
+		if message.GroupID > 0 {
+			groupIDSet[message.GroupID] = struct{}{}
+		}
+	}
+	if len(groupIDSet) == 0 {
+		return messages, nil
+	}
+
+	groupIDs := make([]uint, 0, len(groupIDSet))
+	for id := range groupIDSet {
+		groupIDs = append(groupIDs, id)
+	}
+
+	var groupMessages []models.Message
+	if err := h.db.Where("conversation_id = ? AND group_id IN ?", conversationID, groupIDs).
+		Order("created_at asc, id asc").
+		Preload("MessageFiles").
+		Find(&groupMessages).Error; err != nil {
+		return messages, err
+	}
+
+	byID := make(map[uint]models.Message)
+	for _, message := range messages {
+		byID[message.ID] = message
+	}
+	for _, message := range groupMessages {
+		byID[message.ID] = message
+	}
+
+	firstGroupMessage := make(map[uint]models.Message)
+	for _, message := range groupMessages {
+		current, ok := firstGroupMessage[message.GroupID]
+		if !ok || message.CreatedAt.Before(current.CreatedAt) || (message.CreatedAt.Equal(current.CreatedAt) && message.ID < current.ID) {
+			firstGroupMessage[message.GroupID] = message
+		}
+	}
+
+	for _, first := range firstGroupMessage {
+		var prompt models.Message
+		err := h.db.Where("conversation_id = ? AND role = ? AND (created_at < ? OR (created_at = ? AND id < ?))", conversationID, "user", first.CreatedAt, first.CreatedAt, first.ID).
+			Order("created_at desc, id desc").
+			Preload("MessageFiles").
+			First(&prompt).Error
+		if err == nil {
+			byID[prompt.ID] = prompt
+		} else if err != gorm.ErrRecordNotFound {
+			return messages, err
+		}
+	}
+
+	expanded := make([]models.Message, 0, len(byID))
+	for _, message := range byID {
+		expanded = append(expanded, message)
+	}
+	sort.SliceStable(expanded, func(i, j int) bool {
+		if expanded[i].CreatedAt.Equal(expanded[j].CreatedAt) {
+			return expanded[i].ID < expanded[j].ID
+		}
+		return expanded[i].CreatedAt.Before(expanded[j].CreatedAt)
 	})
+
+	return expanded, nil
 }
 
 func (h *ConversationHandler) buildLastAssistantStatusPayload(messages []models.Message) gin.H {

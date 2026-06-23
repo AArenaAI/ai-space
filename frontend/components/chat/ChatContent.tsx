@@ -19,13 +19,13 @@ function ChatSkeleton() {
 export default function ChatContent() {
   const [mounted, setMounted] = useState(false);
   const searchParams = useSearchParams();
-  const conversationIdParam = searchParams.get("id") || searchParams.get("conversation_id");
+  const conversationIdParam = searchParams?.get("id") || searchParams?.get("conversation_id");
   const conversationId = conversationIdParam
     ? Number(conversationIdParam)
     : undefined;
-  const newChatToken = searchParams.get("t") || "default";
-  const targetMessageId = searchParams.get("message")
-    ? Number(searchParams.get("message"))
+  const newChatToken = searchParams?.get("t") || "default";
+  const targetMessageId = searchParams?.get("message")
+    ? Number(searchParams?.get("message"))
     : undefined;
   const { models, loading } = useModels();
   const previousConversationIdRef = useRef<number | undefined>(conversationId);

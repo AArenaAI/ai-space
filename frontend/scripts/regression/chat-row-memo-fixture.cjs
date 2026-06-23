@@ -36,7 +36,7 @@ async function readCounts(page) {
     await page.waitForSelector('[data-message-id="row-memo-short-assistant"]', { state: "attached", timeout: 20_000 });
     await page.waitForTimeout(700);
 
-    await page.locator('[data-testid="row-memo-reset-events"]').click();
+    await page.locator('[data-testid="row-memo-reset-events"]').evaluate((button) => button.click());
     await page.waitForFunction(() => Number(document.querySelector('[data-testid="chat-row-memo-fixture"]')?.getAttribute("data-row-commits") || 0) === 0, null, { timeout: 10_000 });
     const baseline = await readCounts(page);
     assert.equal(baseline.longRowCommits, 0, "reset should clear long-row commit events");

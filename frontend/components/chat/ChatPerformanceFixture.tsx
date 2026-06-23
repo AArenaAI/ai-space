@@ -93,12 +93,12 @@ const models: ChatModel[] = [
 
 export default function ChatPerformanceFixture() {
   const params = useSearchParams();
-  const count = Math.max(0, Number(params.get("count") || 1000));
-  const longEvery = Math.max(0, Number(params.get("longEvery") || 10));
-  const hasMore = params.get("hasMore") !== "0";
-  const mode = params.get("mode") || "static";
-  const deltaCount = Math.max(1, Number(params.get("deltas") || 240));
-  const deltaInterval = Math.max(0, Number(params.get("deltaInterval") || 16));
+  const count = Math.max(0, Number(params?.get("count") || 1000));
+  const longEvery = Math.max(0, Number(params?.get("longEvery") || 10));
+  const hasMore = params?.get("hasMore") !== "0";
+  const mode = params?.get("mode") || "static";
+  const deltaCount = Math.max(1, Number(params?.get("deltas") || 240));
+  const deltaInterval = Math.max(0, Number(params?.get("deltaInterval") || 16));
   const [loadMoreCount, setLoadMoreCount] = useState(0);
   const staticMessages = useMemo(() => buildMessages(count, longEvery), [count, longEvery]);
   const initialStreamingMessages = useMemo(() => buildStreamingMessages(count), [count]);
