@@ -47,6 +47,7 @@ export type ChatBootstrapPayload = {
 };
 
 export type FetchChatBootstrapInput = {
+  apiBaseUrl?: string;
   conversationId?: number;
   workspaceId?: number;
   token: string;
@@ -56,17 +57,18 @@ export type FetchChatBootstrapInput = {
   fetchImpl?: typeof fetch;
 };
 
-export function buildChatBootstrapUrl(input: Pick<FetchChatBootstrapInput, "conversationId" | "workspaceId" | "messageTail" | "conversationLimit">): string {
+export function buildChatBootstrapUrl(input: Pick<FetchChatBootstrapInput, "apiBaseUrl" | "conversationId" | "workspaceId" | "messageTail" | "conversationLimit">): string {
   const params = new URLSearchParams();
   if (input.conversationId) params.set("id", String(input.conversationId));
   if (input.workspaceId) params.set("workspace_id", String(input.workspaceId));
   if (input.messageTail) params.set("message_tail", String(input.messageTail));
   if (input.conversationLimit) params.set("conversation_limit", String(input.conversationLimit));
   const query = params.toString();
-  return `/api/chat/bootstrap${query ? `?${query}` : ""}`;
+  return `${input.apiBaseUrl || ""}/api/chat/bootstrap${query ? `?${query}` : ""}`;
 }
 
 export async function fetchChatBootstrap({
+  apiBaseUrl = "",
   conversationId,
   workspaceId,
   token,
@@ -75,7 +77,7 @@ export async function fetchChatBootstrap({
   signal,
   fetchImpl = fetch,
 }: FetchChatBootstrapInput): Promise<ChatBootstrapPayload> {
-  const res = await fetchImpl(buildChatBootstrapUrl({ conversationId, workspaceId, messageTail, conversationLimit }), {
+  const res = await fetchImpl(buildChatBootstrapUrl({ apiBaseUrl, conversationId, workspaceId, messageTail, conversationLimit }), {
     headers: { Authorization: `Bearer ${token}` },
     credentials: "include",
     signal,

@@ -7,6 +7,7 @@ import {
   resolveConversationSkillKey,
   type ConversationRestoreResponse,
 } from "@/lib/chatConversationRestoreCoordinator";
+import { fetchChatBootstrap, type ChatBootstrapPayload } from "@/lib/chatBootstrapCoordinator";
 import {
   hasConversationSnapshot,
   setConversationSnapshot,
@@ -57,6 +58,7 @@ export async function prefetchConversationSnapshot({
   force = false,
   fetchRestore = fetchConversationRestore,
   fetchCount = fetchConversationMessageCount,
+  fetchBootstrap = fetchChatBootstrap,
 }: {
   apiBaseUrl?: string;
   conversationId: number;
@@ -66,6 +68,7 @@ export async function prefetchConversationSnapshot({
   force?: boolean;
   fetchRestore?: typeof fetchConversationRestore;
   fetchCount?: typeof fetchConversationMessageCount;
+  fetchBootstrap?: typeof fetchChatBootstrap;
 }): Promise<boolean> {
   if (!token || !Number.isFinite(conversationId)) return false;
   if (!force && hasConversationSnapshot(conversationId)) return true;
@@ -78,7 +81,12 @@ export async function prefetchConversationSnapshot({
     let data: ConversationRestoreResponse;
     let totalMessages: number | undefined;
     try {
-      data = await fetchRestore({ apiBaseUrl, conversationId, token, signal });
+      if (fetchRestore === fetchConversationRestore && fetchBootstrap === fetchChatBootstrap) {
+        const bootstrap = await fetchBootstrap({ apiBaseUrl, conversationId, token, messageTail: prefetchTail, signal });
+        data = mapBootstrapPayloadToRestoreResponse(bootstrap);
+      } else {
+        data = await fetchRestore({ apiBaseUrl, conversationId, token, signal });
+      }
       totalMessages = typeof data.total === "number"
         ? data.total
         : await fetchCount({ apiBaseUrl, conversationId, token, signal }).catch(() => undefined);
@@ -121,4 +129,19 @@ export async function prefetchConversationSnapshot({
 
   inFlightPrefetches.set(conversationId, task);
   return task;
+}
+
+function mapBootstrapPayloadToRestoreResponse(payload: ChatBootstrapPayload): ConversationRestoreResponse {
+  return {
+    title: payload.conversation?.title || "",
+    model: payload.conversation?.model,
+    compare: !!payload.conversation?.compare,
+    compare_models: JSON.stringify(payload.conversation?.compare_models || []),
+    skill_key: payload.conversation?.skill_key,
+    messages: payload.snapshot?.messages || [],
+    total: payload.snapshot?.total,
+    has_more: payload.snapshot?.has_more,
+    snapshot_version: payload.snapshot?.snapshot_version,
+    last_assistant_status: payload.snapshot?.last_assistant_status,
+  };
 }
