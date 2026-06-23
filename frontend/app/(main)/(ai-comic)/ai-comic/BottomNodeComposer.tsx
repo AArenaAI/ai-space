@@ -295,7 +295,25 @@ function BottomNodeComposerInner({ node, mentionAssets = [], settings, options, 
               {settings.assetPreset === "characterTurnaround" ? "三视图" : "角色图"}
             </span>
           )}
-          <button type="button" onClick={onClose} className="flex h-10 w-10 items-center justify-center rounded-full text-white/50 hover:bg-white/10 hover:text-white">
+          <button
+            type="button"
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onMouseDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onClose?.();
+            }}
+            className="flex h-10 w-10 items-center justify-center rounded-full text-white/50 hover:bg-white/10 hover:text-white"
+            aria-label="关闭节点编辑器"
+            title="关闭"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -391,9 +409,12 @@ function BottomNodeComposerInner({ node, mentionAssets = [], settings, options, 
               onKeyDown={(event) => {
                 if ((event.nativeEvent as KeyboardEvent & { isComposing?: boolean }).isComposing || event.keyCode === 229) return;
                 if (event.key === "Escape") {
+                  event.preventDefault();
+                  event.stopPropagation();
                   setMentionQuery(null);
                   setTemplateMenuOpen(false);
                   setSettingsOpen(false);
+                  onClose?.();
                 }
                 if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && canGenerate && !generating) {
                   event.preventDefault();

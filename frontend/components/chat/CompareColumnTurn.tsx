@@ -1,7 +1,7 @@
 "use client";
 
-import { memo, useState, type CSSProperties } from "react";
-import { Bot, Check } from "lucide-react";
+import { memo, useEffect, useRef, useState, type CSSProperties } from "react";
+import { Bot, Check, Play } from "lucide-react";
 import type { ChatModel, Message } from "@/lib/chatTypes";
 import type { InferredGroup } from "@/lib/groups";
 import { isMessageGenerating } from "@/lib/chatContent";
@@ -15,6 +15,7 @@ import MessageActions from "./MessageActions";
 import CompareEmptySlot from "./CompareEmptySlot";
 import CompareLoadingSlot from "./CompareLoadingSlot";
 import CompareUserMessageBubble from "./CompareUserMessageBubble";
+import { emitChatRenderProfileEvent } from "@/lib/chatRenderProfile";
 
 type MarkdownRendererComponent = Parameters<typeof AssistantMessageContent>[0]["MarkdownRenderer"];
 
@@ -22,6 +23,26 @@ const COMPARE_COLUMN_CONTENT_VISIBILITY_STYLE: CSSProperties = {
   contentVisibility: "auto",
   containIntrinsicSize: "auto 180px",
 };
+const MARKDOWN_HYDRATE_ROOT_MARGIN = "1800px 0px";
+const SIMPLE_ASSISTANT_VIEWPORT_OBSERVER_SKIP_LENGTH = 500;
+
+function getMarkdownWeight(content?: string) {
+  const text = content || "";
+  const codeFenceCount = (text.match(/```/g) || []).length;
+  const tableLineCount = text.split("\n").filter((line) => /^\s*\|.+\|\s*$/.test(line)).length;
+  return {
+    codeFenceCount,
+    tableLineCount,
+    hasCodeFence: codeFenceCount > 0,
+    hasTableLine: tableLineCount > 0,
+  };
+}
+
+function shouldSkipViewportObserversForAssistant(content?: string) {
+  if (!content || content.length > SIMPLE_ASSISTANT_VIEWPORT_OBSERVER_SKIP_LENGTH) return false;
+  const weight = getMarkdownWeight(content);
+  return !weight.hasCodeFence && !weight.hasTableLine;
+}
 
 type CompareColumnTurnProps = {
   userMessage: Message;
@@ -42,13 +63,23 @@ type CompareColumnTurnProps = {
   onCopy: (content: string) => void;
   onDelete: (id: string) => void;
   onRegenerate?: () => void;
+  onContinueGenerate?: () => void;
   onShareSelectMode: (id: string) => void;
   onFavoriteSelectMode: (id: string) => void;
   isFavorited: (serverMessageId: number) => boolean;
   onForkCompare?: (messageId: number) => void;
+  onSaveToNote?: (content: string) => void;
+  onAssistantViewed?: (messageId: string) => void;
+  isInitialReadingAssistant?: boolean;
+  isViewedAssistant?: boolean;
+  historyPrependSettling?: boolean;
   useContentVisibility?: boolean;
   deferRichTextHydration?: boolean;
+  deferOffscreenRichTextHydration?: boolean;
   allowRichLiteFallback?: boolean;
+  stabilizeInitialRichText?: boolean;
+  suppressRowMarker?: boolean;
+  showUserMessage?: boolean;
 };
 
 function CompareColumnTurn({
@@ -70,15 +101,28 @@ function CompareColumnTurn({
   onCopy,
   onDelete,
   onRegenerate,
+  onContinueGenerate,
   onShareSelectMode,
   onFavoriteSelectMode,
   isFavorited,
   onForkCompare,
+  onSaveToNote,
+  onAssistantViewed,
+  isInitialReadingAssistant = false,
+  isViewedAssistant = false,
+  historyPrependSettling = false,
   useContentVisibility = true,
   deferRichTextHydration = false,
+  deferOffscreenRichTextHydration = false,
   allowRichLiteFallback = false,
+  stabilizeInitialRichText = false,
+  suppressRowMarker = false,
+  showUserMessage = true,
 }: CompareColumnTurnProps) {
   const { t } = useI18n();
+  const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  const profileSnapshotRef = useRef<Record<string, unknown> | null>(null);
   const [openBadgeMenu, setOpenBadgeMenu] = useState(false);
   const showBadgeSwitcher = !!badgeGroup && badgeGroup.assistantMessages.length > 2 && !!onSelectAssistant;
   const hasLiveGenerationSignal = !!msg && !msg.completedAt && !msg.stopped && !!(
@@ -91,17 +135,151 @@ function CompareColumnTurn({
   );
   const isStreaming = !!msg && isLastGroup && (isLoading || hasLiveGenerationSignal) && isMessageGenerating(msg, true);
   const isGenerating = !!msg && isMessageGenerating(msg, isStreaming);
-  const canRegenerate = !!msg && isLastGroup && !isStreaming && !isGenerating;
+  // Compare columns do not support single-column regeneration yet: the current
+  // onRegenerate action is conversation/global and would make both columns show
+  // generation UI. Keep the button hidden until regenerate can target a specific
+  // assistant/model.
+  const canRegenerate = false;
+  const forceHydrateRichText = !!msg && (isLastGroup || isInitialReadingAssistant);
+  const skipViewportObservers = !!msg && !deferOffscreenRichTextHydration && shouldSkipViewportObserversForAssistant(msg.content);
+  const initialViewportState = forceHydrateRichText || skipViewportObservers;
+  const [isNearViewport, setIsNearViewport] = useState(initialViewportState);
+  const [isInViewport, setIsInViewport] = useState(initialViewportState);
+  const canBypassBrowsingHydrationDefer = forceHydrateRichText && !isStreaming;
+  const blockRichTextHydration = historyPrependSettling || (deferRichTextHydration && !canBypassBrowsingHydrationDefer);
+  const forceStableRichLiteFallback = blockRichTextHydration || stabilizeInitialRichText || (forceHydrateRichText && !isInViewport);
+  const markdownWeight = getMarkdownWeight(msg?.content);
+  const profileSnapshot = msg ? {
+    allowRichLiteFallback,
+    blockRichTextHydration,
+    canBypassBrowsingHydrationDefer,
+    canRegenerate,
+    codeFenceCount: markdownWeight.codeFenceCount,
+    contentLength: msg.content?.length || 0,
+    deferRichTextHydration,
+    forceHydrateRichText,
+    forceStableRichLiteFallback,
+    hasCodeFence: markdownWeight.hasCodeFence,
+    hasTableLine: markdownWeight.hasTableLine,
+    historyPrependSettling,
+    isGenerating,
+    isInViewport,
+    isInitialReadingAssistant,
+    isLastGroup,
+    isLoading,
+    isNearViewport,
+    isStreaming,
+    isViewedAssistant,
+    skipViewportObservers,
+    tableLineCount: markdownWeight.tableLineCount,
+  } : null;
+  const previousProfileSnapshot = profileSnapshotRef.current;
+  const changedProfileKeys = profileSnapshot
+    ? previousProfileSnapshot
+      ? Object.entries(profileSnapshot)
+        .filter(([key, value]) => previousProfileSnapshot[key] !== value)
+        .map(([key]) => key)
+      : ["mount"]
+    : undefined;
+  if (profileSnapshot) profileSnapshotRef.current = profileSnapshot;
+
+  useEffect(() => {
+    if (!msg) return;
+    const commitAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    emitChatRenderProfileEvent("compare-column-commit", {
+      conversationId,
+      messageId: msg.id,
+      role: msg.role,
+      ...(changedProfileKeys ? { changedKeys: changedProfileKeys } : {}),
+      contentLength: msg.content?.length || 0,
+      durationMs: commitAt - renderStartedAt,
+      ...(profileSnapshot || {}),
+    });
+  });
+
+  useEffect(() => {
+    if (!msg) return;
+    setIsNearViewport(initialViewportState);
+    setIsInViewport(initialViewportState);
+  }, [initialViewportState, msg?.id]);
+
+  useEffect(() => {
+    if (!msg) return;
+    if (skipViewportObservers) {
+      setIsNearViewport(true);
+      return;
+    }
+    if (forceHydrateRichText) {
+      setIsNearViewport(true);
+      return;
+    }
+    if (isNearViewport) return;
+    const row = rowRef.current;
+    if (!row || !("IntersectionObserver" in window)) {
+      setIsNearViewport(true);
+      return;
+    }
+    const root = row.closest('[data-testid="chat-history-scroll-container"], [data-testid="virtuoso-scroller"]') as Element | null;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setIsNearViewport(true);
+        emitChatRenderProfileEvent("compare-column-markdown-near-viewport", {
+          conversationId,
+          messageId: msg.id,
+          contentLength: msg.content?.length || 0,
+        });
+        observer.disconnect();
+      }
+    }, { root, rootMargin: deferOffscreenRichTextHydration ? "0px" : MARKDOWN_HYDRATE_ROOT_MARGIN });
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [conversationId, deferOffscreenRichTextHydration, forceHydrateRichText, isNearViewport, msg, skipViewportObservers]);
+
+  useEffect(() => {
+    if (!msg) return;
+    if (skipViewportObservers) {
+      setIsInViewport(true);
+      return;
+    }
+    if (forceHydrateRichText) {
+      setIsInViewport(true);
+      return;
+    }
+    const row = rowRef.current;
+    if (!row || !("IntersectionObserver" in window)) {
+      setIsInViewport(true);
+      return;
+    }
+    const root = row.closest('[data-testid="chat-history-scroll-container"], [data-testid="virtuoso-scroller"]') as Element | null;
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries.some((entry) => entry.isIntersecting);
+      setIsInViewport(visible);
+      if (visible) {
+        onAssistantViewed?.(String(msg.id));
+        emitChatRenderProfileEvent("compare-column-markdown-in-viewport", {
+          conversationId,
+          messageId: msg.id,
+          forceStableRichLiteFallback,
+          isInitialReadingAssistant,
+          isViewedAssistant,
+          contentLength: msg.content?.length || 0,
+        });
+      }
+    }, { root, rootMargin: "0px" });
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [conversationId, forceHydrateRichText, forceStableRichLiteFallback, isInitialReadingAssistant, isViewedAssistant, msg, onAssistantViewed, skipViewportObservers]);
 
   return (
     <div
-      data-chat-message-row="true"
-      data-message-id={userMessage.id}
-      data-message-role="user"
+      ref={rowRef}
+      data-chat-message-row={suppressRowMarker ? undefined : "true"}
+      data-message-id={suppressRowMarker ? undefined : userMessage.id}
+      data-message-role={suppressRowMarker ? undefined : "user"}
       style={useContentVisibility ? COMPARE_COLUMN_CONTENT_VISIBILITY_STYLE : undefined}
       className="flex h-full flex-col gap-3"
     >
-      <CompareUserMessageBubble message={userMessage} imageLoadFailedLabel={imageLoadFailedLabel} />
+      {showUserMessage && <CompareUserMessageBubble message={userMessage} imageLoadFailedLabel={imageLoadFailedLabel} />}
       <div className="flex flex-1 flex-col">
         {msg ? (
           <div className="group flex gap-3 animate-message-appear">
@@ -166,10 +344,21 @@ function CompareColumnTurn({
                   isStreaming={isStreaming}
                   MarkdownRenderer={MarkdownRenderer}
                   recoverEmptyContent
-                  shouldHydrateRichText={!deferRichTextHydration}
-                  allowRichLiteFallback={allowRichLiteFallback}
-                  compactRichLitePreview={false}
+                  onRegenerate={onRegenerate}
+                  shouldHydrateRichText={!blockRichTextHydration && (isNearViewport || forceHydrateRichText)}
+                  priorityHydrateRichText={!blockRichTextHydration && (forceHydrateRichText || stabilizeInitialRichText || deferOffscreenRichTextHydration)}
+                  allowRichLiteFallback={allowRichLiteFallback || forceStableRichLiteFallback || isInitialReadingAssistant || isViewedAssistant}
+                  compactRichLitePreview={!historyPrependSettling && !forceStableRichLiteFallback && !isInitialReadingAssistant && !isViewedAssistant}
                 />
+                {msg.stopped && onContinueGenerate && (
+                  <button
+                    onClick={onContinueGenerate}
+                    className="mt-3 flex items-center gap-1.5 rounded-lg border border-surface-border px-3 py-1.5 text-sm text-text-secondary transition-colors hover:bg-surface-card hover:text-text-primary"
+                  >
+                    <Play className="h-3.5 w-3.5" />
+                    {t("chat.action.continueGenerate")}
+                  </button>
+                )}
               </div>
               {!isStreaming && (
                 <div className="flex items-center gap-2 px-2 opacity-0 transition-opacity group-hover:opacity-100">
@@ -186,6 +375,7 @@ function CompareColumnTurn({
                     createdAt={msg.createdAt}
                     completedAt={msg.completedAt}
                     onForkCompare={undefined}
+                    onSaveToNote={msg.content && onSaveToNote ? () => onSaveToNote(msg.content) : undefined}
                   />
                 </div>
               )}

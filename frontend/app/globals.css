@@ -828,6 +828,15 @@
   }
 }
 
+.chat-history-scroll-container {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.chat-history-scroll-container::-webkit-scrollbar {
+  display: none;
+}
+
 @keyframes notebook-studio-loading {
   0% {
     transform: translateX(-105%);

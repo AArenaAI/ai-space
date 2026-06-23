@@ -4,6 +4,7 @@ import { memo, useMemo, useState } from "react";
 import type { ChatModel, Message } from "@/lib/chatTypes";
 import type { InferredGroup } from "@/lib/groups";
 import CompareColumnTurn from "./CompareColumnTurn";
+import CompareSharedPromptBlock from "./CompareSharedPromptBlock";
 
 type MarkdownRendererComponent = Parameters<typeof CompareColumnTurn>[0]["MarkdownRenderer"];
 
@@ -24,13 +25,21 @@ export type ChatCompareGroupRowProps = {
   onCopy: (content: string) => void;
   onDelete: (id: string) => void;
   onRegenerate?: () => void;
+  onContinueGenerate?: () => void;
   onShareSelectMode: (id: string) => void;
   onFavoriteSelectMode: (id: string) => void;
   isFavorited: (serverMessageId: number) => boolean;
   onForkCompare?: (messageId: number) => void;
+  onSaveToNote?: (content: string) => void;
+  onAssistantViewed?: (messageId: string) => void;
+  initialReadingAssistantIds?: Set<string>;
+  viewedAssistantIds?: Set<string>;
+  historyPrependSettling?: boolean;
   useContentVisibility?: boolean;
   deferRichTextHydration?: boolean;
+  deferOffscreenRichTextHydration?: boolean;
   allowRichLiteFallback?: boolean;
+  stabilizeInitialRichText?: boolean;
 };
 
 function ChatCompareGroupRow({
@@ -50,13 +59,21 @@ function ChatCompareGroupRow({
   onCopy,
   onDelete,
   onRegenerate,
+  onContinueGenerate,
   onShareSelectMode,
   onFavoriteSelectMode,
   isFavorited,
   onForkCompare,
+  onSaveToNote,
+  onAssistantViewed,
+  initialReadingAssistantIds,
+  viewedAssistantIds,
+  historyPrependSettling,
   useContentVisibility,
   deferRichTextHydration,
+  deferOffscreenRichTextHydration,
   allowRichLiteFallback,
+  stabilizeInitialRichText,
 }: ChatCompareGroupRowProps) {
   const isLastGroup = groupIndex === groupCount - 1;
   const isSingleChat = group.models.length <= 1;
@@ -67,8 +84,16 @@ function ChatCompareGroupRow({
   const columnModels = useMemo(() => compareModels.slice(0, 2), [compareModels]);
 
   return (
-    <div className="mx-auto max-w-[1440px]">
-      <div className="flex items-stretch">
+    <div
+      className="mx-auto max-w-[1440px] px-4 py-4"
+      data-chat-message-row="true"
+      data-message-id={group.userMessage.id}
+      data-message-role="user"
+    >
+      <div className="mb-4 pl-10 pr-0">
+        <CompareSharedPromptBlock message={group.userMessage} imageLoadFailedLabel={imageLoadFailedLabel} />
+      </div>
+      <div className="flex items-stretch gap-4">
         {columnModels.map((modelId, colIndex) => {
           const defaultAssistant = resolveAssistant(group, colIndex, modelId);
           const selectedAssistantId = columnSelections[colIndex];
@@ -77,7 +102,7 @@ function ChatCompareGroupRow({
             : defaultAssistant;
 
           return (
-            <div key={modelId || colIndex} className="flex min-w-[320px] flex-1 flex-col px-4 py-4">
+            <div key={modelId || colIndex} className="flex min-w-[320px] flex-1 flex-col py-1">
               <CompareColumnTurn
                 userMessage={group.userMessage}
                 assistantMessage={assistant}
@@ -97,13 +122,23 @@ function ChatCompareGroupRow({
                 onCopy={onCopy}
                 onDelete={onDelete}
                 onRegenerate={onRegenerate}
+                onContinueGenerate={onContinueGenerate}
                 onShareSelectMode={onShareSelectMode}
                 onFavoriteSelectMode={onFavoriteSelectMode}
                 isFavorited={isFavorited}
                 onForkCompare={onForkCompare}
+                onSaveToNote={onSaveToNote}
+                onAssistantViewed={onAssistantViewed}
+                isInitialReadingAssistant={assistant ? initialReadingAssistantIds?.has(String(assistant.id)) : false}
+                isViewedAssistant={assistant ? viewedAssistantIds?.has(String(assistant.id)) : false}
+                historyPrependSettling={historyPrependSettling}
                 useContentVisibility={useContentVisibility}
                 deferRichTextHydration={deferRichTextHydration}
+                deferOffscreenRichTextHydration={deferOffscreenRichTextHydration}
                 allowRichLiteFallback={allowRichLiteFallback}
+                stabilizeInitialRichText={stabilizeInitialRichText}
+                suppressRowMarker
+                showUserMessage={false}
               />
             </div>
           );

@@ -1,12 +1,18 @@
 "use client";
 
-import { FileText, Languages, Mic, PenLine } from "lucide-react";
+import { FileText, Languages, Mic, PenLine, Sparkles } from "lucide-react";
 import ModuleSidebar, { type ModuleSidebarGroup } from "./ModuleSidebar";
 
 export const WORK_NAV_GROUPS: ModuleSidebarGroup[] = [
   {
     titleKey: "sidebar.panel.agents",
     items: [
+      {
+        icon: Sparkles,
+        labelKey: "seedreamBeta.navLabel",
+        href: "/ai-comic",
+        matchPath: "/ai-comic",
+      },
       {
         icon: PenLine,
         labelKey: "work.writingAssistant",

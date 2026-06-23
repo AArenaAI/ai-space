@@ -202,42 +202,43 @@ export function updateStatusTimeline(
   return timeline.length ? timeline : previousTimeline;
 }
 
+function shortStatusLabel(t: (key: string, params?: Record<string, string>) => string, key: string, fallback: string) {
+  const value = t(key);
+  return value === key ? fallback : value;
+}
+
 export function getTimelineStepLabel(
   t: (key: string, params?: Record<string, string>) => string,
   step: ChatStatusTimelineStep,
   generationStartedAt?: number,
 ): string {
   if (step.status === "completed") {
-    if (step.kind === "waiting_provider") return t("chat.status.modelResponseDone");
+    if (step.kind === "waiting_provider") return shortStatusLabel(t, "chat.status.short.responded", "Responded");
     if (step.kind === "web_search") {
-      return `${t("chat.status.webSearchDone")}${step.count ? ` · ${t("chat.status.cited")}${step.count}${t("chat.status.sources")}` : ""}`;
+      return `${shortStatusLabel(t, "chat.status.short.searchDone", "Search done")}${step.count ? ` · ${step.count}${shortStatusLabel(t, "chat.status.short.sources", " sources")}` : ""}`;
     }
-    if (step.kind === "file_search") return t("chat.status.fileSearchDone");
-    if (step.kind === "tool_call") return t("chat.status.toolCallDone");
-    if (step.kind === "reasoning") return t("chat.status.reasoningDone");
-    if (step.kind === "streaming_answer") return t("chat.status.answerDone");
-    if (step.kind === "finalizing") return t("chat.status.finalizingDone");
+    if (step.kind === "file_search") return shortStatusLabel(t, "chat.status.short.filesDone", "Files done");
+    if (step.kind === "tool_call") return shortStatusLabel(t, "chat.status.short.toolDone", "Tool done");
+    if (step.kind === "reasoning") return shortStatusLabel(t, "chat.status.short.reasoned", "Reasoned");
+    if (step.kind === "streaming_answer") return shortStatusLabel(t, "chat.status.short.generated", "Generated");
+    if (step.kind === "finalizing") return shortStatusLabel(t, "chat.status.short.finalized", "Finalized");
   }
-  if (step.kind === "web_search" && step.status === "failed") return t("chat.status.webSearch");
-  if (step.status === "failed") return step.label || t("chat.status.failed");
+  if (step.kind === "web_search" && step.status === "failed") return shortStatusLabel(t, "chat.status.short.searchFailed", "Search failed");
+  if (step.status === "failed") return step.label || shortStatusLabel(t, "chat.status.short.failed", "Failed");
+  if (step.status === "stopped") return shortStatusLabel(t, "chat.status.short.stopped", "Stopped");
 
-  const statusKey = {
-    waiting_provider: "chat.phase.waiting_provider",
-    web_search: "chat.phase.searching",
-    file_search: "chat.status.fileSearch",
-    tool_call: "chat.status.toolCall",
-    reasoning: "chat.phase.reasoning",
-    streaming_answer: "chat.phase.streaming_answer",
-    finalizing: "chat.phase.finalizing",
+  const label = {
+    waiting_provider: shortStatusLabel(t, "chat.status.short.waiting", "Waiting"),
+    web_search: shortStatusLabel(t, "chat.status.short.searching", "Searching"),
+    file_search: shortStatusLabel(t, "chat.status.short.files", "Files"),
+    tool_call: step.label || shortStatusLabel(t, "chat.status.short.tool", "Tool"),
+    reasoning: shortStatusLabel(t, "chat.status.short.reasoning", "Reasoning"),
+    streaming_answer: shortStatusLabel(t, "chat.status.short.generating", "Generating"),
+    finalizing: shortStatusLabel(t, "chat.status.short.finalizing", "Finalizing"),
   }[step.kind];
-  const canonicalPhaseLabel = t(statusKey);
-  const label = step.kind === "tool_call" ? (step.label || canonicalPhaseLabel) : canonicalPhaseLabel;
   if (step.status !== "running") return label;
   const base = generationStartedAt || step.startedAt;
-  return t("chat.phase.withElapsed", {
-    status: label,
-    elapsed: formatElapsedTime(Math.max(0, step.startedAt - base), t),
-  });
+  return `${label} · ${formatElapsedTime(Math.max(0, step.startedAt - base), t)}`;
 }
 
 export function getCompletedStatusLabel(

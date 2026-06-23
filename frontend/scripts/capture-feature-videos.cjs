@@ -27,7 +27,7 @@ const features = [
   },
   {
     id: 'studio',
-    route: '/seedream-beta',
+    route: '/ai-comic',
     waitText: 'Seedream',
     actions: async (page) => {
       await page.waitForTimeout(700);

@@ -367,3 +367,86 @@ Gemini API 当前没有等价 OpenAI Responses `background` 的聊天后台生�
 
 - `docs/architecture/02-聊天消息与流式生成架构.md`
 - `docs/architecture/03-模型Provider与SSE解码架构.md`
+
+---
+
+## Chat 动态 Bootstrap Shell（后续优化点）
+
+### 背景
+
+对比 Gemini、ChatGPT、DeepSeek 等官方聊天产品，它们的入口普遍不是纯静态导出的聊天页，而是经过服务端或边缘层的 **动态 bootstrap shell**：服务端/边缘层先处理 session、cookie、风控、实验配置、区域与账号状态，再返回应用壳和必要的初始化数据，最后由客户端接管聊天 UI。
+
+AI Space 当前 `/chat` 更接近静态壳：首屏先返回静态 HTML，客户端 mounted 后再读取 `localStorage`、workspace、模型列表和 `id` 对应的历史会话。这会导致历史会话打开时出现错误中间态，例如未登录侧栏、新聊天欢迎态或空 loading 态，再切换成真实会话。
+
+### 当前优先级
+
+该项暂列为后续架构优化，不是当前第一优先级。
+
+当前更重要的是先解决现有聊天体验问题：
+
+1. `/chat/?id=xxx` 首屏闪屏：避免在 auth / conversation restore 完成前渲染未登录侧栏或新聊天欢迎态。
+2. 消息列表上滑闪屏：治理 `MessageList` 本地窗口释放、Virtuoso 虚拟化和 Markdown late measurement 的重排问题。
+
+### 动态 Bootstrap Shell 的目标
+
+不要求完整 SSR 聊天消息 DOM，而是让服务端首包至少注入稳定的初始化状态：
+
+```ts
+type ChatBootstrapPayload = {
+  authStatus: "authenticated" | "anonymous" | "unknown";
+  user?: {
+    id: number;
+    email: string;
+    name?: string;
+    defaultWorkspaceId?: number;
+    role?: string;
+  };
+  workspaceId?: number;
+  conversationId?: number;
+  initialConversationMeta?: {
+    id: number;
+    title: string;
+    model?: string;
+    skillKey?: string;
+    compare?: boolean;
+  };
+  initialConversationSnapshot?: {
+    messages: unknown[];
+    totalMessages?: number;
+    snapshotVersion?: string;
+  };
+  modelList?: unknown[];
+  betaStatus?: unknown;
+  featureFlags?: Record<string, boolean>;
+};
+```
+
+这样客户端 hydrate 时可以直接进入正确状态，避免：
+
+- 未登录态 → 登录态
+- 新聊天欢迎态 → 历史会话
+- 默认 workspace → 用户 workspace
+- 默认模型 → 会话模型
+
+### 推荐实施路线
+
+1. **短期不做动态 shell**
+   - 继续先修客户端状态闸门和消息列表滚动闪屏。
+   - 确保 `authBootstrapping`、`conversationRestoring`、`conversationReady`、`newChatReady` 状态清晰。
+
+2. **中期评估动态 bootstrap endpoint**
+   - 新增 `/api/chat/bootstrap?id=xxx` 或 Next 动态 route，统一返回 user、workspace、conversation meta、模型列表、beta 状态和可选 snapshot。
+   - 客户端进入 `/chat?id=xxx` 时先消费 bootstrap payload，再启动后续 revalidate。
+
+3. **长期再考虑动态 SSR/边缘渲染**
+   - 如果未来部署形态允许，不排除让 `/chat` 走动态 Next server 或边缘渲染。
+   - 但完整 SSR 聊天消息 DOM 对 Markdown、虚拟列表、hydration 一致性要求高，当前不建议作为第一阶段目标。
+
+### 验证要求
+
+- 打开 `/chat/?id=762` 不出现未登录侧栏或新聊天欢迎态闪屏。
+- 有初始 snapshot 时首屏直接显示历史会话尾部消息。
+- 无 snapshot 时只显示稳定 skeleton，不显示错误空态。
+- 刷新、直接打开、侧栏点击切换历史会话表现一致。
+- 不影响新聊天 `/chat` 和创建会话后的 URL 替换逻辑。
+- 回归 `npx tsc --noEmit --pretty false`、`git diff --check`、真实页面 E2E。

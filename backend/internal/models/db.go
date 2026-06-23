@@ -52,9 +52,10 @@ func InitDB(databaseURL string) (*gorm.DB, error) {
 		&Changelog{},       // 新增：产品更新日志
 		&ChangelogRead{},   // 新增：已读记录
 		&AnalyticsEvent{},  // 新增：用户行为事件追踪
-		&AlertRule{},       // 新增：告警规则
-		&AlertHistory{},    // 新增：告警历史
-		&AlertSilence{},    // 新增：告警静默
+		&AlertRule{},         // 新增：告警规则
+		&AlertHistory{},      // 新增：告警历史
+		&AlertSilence{},      // 新增：告警静默
+		&EmailVerification{}, // 新增：邮箱验证码
 	); err != nil {
 		return nil, err
 	}

@@ -17,6 +17,7 @@ export type ForkChatPersistedMessage = {
   reasoning?: string;
   thinking?: string;
   model?: string;
+  tokens_used?: number;
   created_at?: string;
   completed_at?: string | null;
   files?: unknown;
@@ -26,6 +27,7 @@ export type ForkChatPersistedMessage = {
   group_id?: number | null;
   group_index?: number | null;
   group_models?: string[] | null;
+  user_message_id?: number | string | null;
 };
 
 export type ForkChatMessage = {
@@ -34,6 +36,7 @@ export type ForkChatMessage = {
   content: string;
   reasoningContent?: string;
   model?: string;
+  tokensUsed?: number;
   createdAt: number;
   completedAt?: number;
   files?: any[];
@@ -44,6 +47,7 @@ export type ForkChatMessage = {
   groupId?: number;
   groupIndex?: number;
   groupModels?: string[];
+  userMessageId?: number;
 };
 
 export type ForkChatResponse = {
@@ -103,6 +107,7 @@ export function mapPersistedChatMessage(
     content,
     reasoningContent: reasoningContent || undefined,
     model: message.model,
+    tokensUsed: typeof message.tokens_used === "number" ? message.tokens_used : undefined,
     createdAt: message.created_at ? parseTime(message.created_at) : 0,
     completedAt: message.completed_at ? parseTime(message.completed_at) : undefined,
     files: parsePersistedMessageFiles(message.files),
@@ -113,6 +118,7 @@ export function mapPersistedChatMessage(
     groupId: message.group_id || undefined,
     groupIndex: message.group_index ?? undefined,
     groupModels: Array.isArray(message.group_models) ? message.group_models : undefined,
+    userMessageId: Number(message.user_message_id || 0) || undefined,
   };
 }
 

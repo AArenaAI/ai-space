@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect } from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, CheckCircle2 } from "lucide-react";
 
 interface NoticeDialogProps {
   isOpen: boolean;
   title: string;
   description?: string;
   confirmText?: string;
+  variant?: "warning" | "success";
   onConfirm: () => void;
 }
 
@@ -16,6 +17,7 @@ export default function NoticeDialog({
   title,
   description,
   confirmText = "我知道了",
+  variant = "warning",
   onConfirm,
 }: NoticeDialogProps) {
   useEffect(() => {
@@ -31,6 +33,12 @@ export default function NoticeDialog({
 
   if (!isOpen) return null;
 
+  const Icon = variant === "success" ? CheckCircle2 : AlertTriangle;
+  const iconClassName = variant === "success" ? "text-green-500" : "text-amber-500";
+  const iconBoxClassName = variant === "success"
+    ? "bg-green-500/10 border-green-500/20"
+    : "bg-amber-500/10 border-amber-500/20";
+
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center">
       {/* 毛玻璃背景 */}
@@ -43,8 +51,8 @@ export default function NoticeDialog({
       <div className="relative w-full max-w-[360px] mx-4 rounded-2xl bg-surface-elevated border border-surface-border shadow-2xl p-6 animate-dialog-appear">
         {/* 图标 */}
         <div className="flex justify-center mb-4">
-          <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
-            <AlertTriangle className="w-7 h-7 text-amber-500" />
+          <div className={`w-14 h-14 rounded-2xl border flex items-center justify-center ${iconBoxClassName}`}>
+            <Icon className={`w-7 h-7 ${iconClassName}`} />
           </div>
         </div>
 

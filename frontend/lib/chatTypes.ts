@@ -29,6 +29,7 @@ export interface Message {
   content: string;
   reasoningContent?: string;
   model?: string;
+  tokensUsed?: number;
   createdAt: number;
   completedAt?: number;
   generationStartedAt?: number;

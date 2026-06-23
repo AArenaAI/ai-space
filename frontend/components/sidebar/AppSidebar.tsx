@@ -411,7 +411,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   const rawPathname = usePathname();
   const pathname = cleanPathname(rawPathname);
   const searchParams = useSearchParams();
-  const routeConvId = searchParams.get("id");
+  const routeConvId = searchParams?.get("id");
   const currentConvId = optimisticConvId ?? routeConvId;
   const router = useRouter();
   const isWorkRoute = isPathInGroup(pathname, WORK_PAGE_PATHS);
@@ -1297,6 +1297,19 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                 <span className="text-sm font-medium text-slate-950 tracking-wide dark:text-text-primary">Agents</span>
               </div>
               <div className="space-y-0.5">
+                <Link
+                  href="/ai-comic"
+                  className={cn(
+                    "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-normal transition-all duration-150 w-full text-left",
+                    isPathInGroup(pathname, ["/ai-comic"])
+                      ? "bg-surface-card text-slate-900 font-medium shadow-sm shadow-black/[0.02] dark:text-text-primary"
+                      : "text-slate-500 hover:bg-surface-card hover:text-slate-900 dark:text-text-secondary dark:hover:text-text-primary"
+                  )}
+                >
+                  <Sparkles className={cn("w-[18px] h-[18px] shrink-0 transition-colors", isPathInGroup(pathname, ["/ai-comic"]) ? "text-amber-500" : "text-text-tertiary")} />
+                  <span>{t("seedreamBeta.navLabel")}</span>
+                </Link>
+
                 {/* AI工作 - hover 展开 */}
                 <div
                   onMouseEnter={handleWorkEnter}
@@ -1306,14 +1319,14 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                     ref={workBtnRef}
                     className={cn(
                       "flex items-center justify-between w-full px-3 py-2.5 rounded-xl text-sm font-normal transition-all duration-150",
-                      isWorkRoute
+                      isWorkRoute && !isPathInGroup(pathname, ["/ai-comic"])
                         ? "bg-surface-card text-slate-900 font-medium shadow-sm shadow-black/[0.02] dark:text-text-primary"
                         : "text-slate-500 hover:bg-surface-card hover:text-slate-900 dark:text-text-secondary dark:hover:text-text-primary"
                     )}
                   >
                     <div className="flex items-center gap-3">
                       <Briefcase className={cn("w-[18px] h-[18px] shrink-0 transition-colors",
-                        isWorkRoute
+                        isWorkRoute && !isPathInGroup(pathname, ["/ai-comic"])
                           ? "text-orange-500"
                           : "text-text-tertiary"
                       )} />
@@ -1421,7 +1434,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                         "group flex w-full touch-none items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-normal transition-all duration-150 select-none",
                         draggingNotebookKey === notebook.itemKey ? "cursor-grabbing bg-brand-muted text-text-primary ring-1 ring-brand-border" : "cursor-pointer",
                         draggingNotebookKey && draggingNotebookKey !== notebook.itemKey ? "ring-1 ring-transparent hover:ring-brand-border" : "",
-                        !isDemo && isPathInGroup(pathname, ["/notebooks"]) && searchParams.get("notebook_id") === String(notebook.id)
+                        !isDemo && isPathInGroup(pathname, ["/notebooks"]) && searchParams?.get("notebook_id") === String(notebook.id)
                           ? "bg-brand-muted text-text-primary font-medium"
                           : "text-slate-500 hover:bg-surface-card hover:text-slate-900 dark:text-text-secondary dark:hover:text-text-primary"
                       )}
@@ -1483,7 +1496,6 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
             items: [
               { icon: ImageIcon, label: t("image.generateImage"), href: "/image", color: "text-purple-500", bg: "bg-purple-500/10" },
               { icon: Video, label: t("video.generateVideo"), href: "/video", color: "text-blue-500", bg: "bg-blue-500/10" },
-              { icon: Sparkles, label: t("seedreamBeta.navLabel"), href: "/seedream-beta", color: "text-amber-500", bg: "bg-amber-500/10" },
               { icon: Image, label: t("sidebar.panel.remove_bg"), href: "/create?mode=remove-bg", color: "text-green-500", bg: "bg-green-500/10" },
               { icon: Eraser, label: t("sidebar.panel.replace_bg"), href: "/create?mode=replace-bg", color: "text-purple-500", bg: "bg-purple-500/10" },
               { icon: Type, label: t("sidebar.panel.text_removal"), href: "/create?mode=text-removal", color: "text-amber-500", bg: "bg-amber-500/10" },

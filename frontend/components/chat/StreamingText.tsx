@@ -101,22 +101,22 @@ export function StreamingText({
   return (
     <Host className={className}>
       {hasReason && (
-        <div className="mb-3 rounded-xl border border-purple-200 dark:border-purple-800/40 overflow-hidden">
+        <div className="mb-2">
           <button
             type="button"
             aria-expanded={reasoningExpanded}
             onClick={() => setReasoningExpanded((value) => !value)}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors bg-purple-50 hover:bg-purple-100 dark:bg-[#1A1A2E] dark:hover:bg-[#252542]"
+            className="flex w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
           >
-            <Lightbulb className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
-            <span className="text-sm font-medium text-text-secondary flex-1">{t("chat.reasoning.thinking")}</span>
-            <div className="flex gap-0.5 ml-1">
-              <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce" />
-              <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce [animation-delay:0.15s]" />
-              <div className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-400 animate-bounce [animation-delay:0.3s]" />
+            <Lightbulb className="h-3 w-3 shrink-0 text-text-tertiary" />
+            <span className="flex-1 text-xs font-medium">{t("chat.reasoning.thinking")}</span>
+            <div className="ml-1 flex gap-0.5">
+              <div className="h-1 w-1 animate-bounce rounded-full bg-text-tertiary" />
+              <div className="h-1 w-1 animate-bounce rounded-full bg-text-tertiary [animation-delay:0.15s]" />
+              <div className="h-1 w-1 animate-bounce rounded-full bg-text-tertiary [animation-delay:0.3s]" />
             </div>
             <ChevronDown
-              className={`w-3.5 h-3.5 text-text-tertiary shrink-0 transition-transform duration-300 ease-out ${reasoningExpanded ? "rotate-180" : "rotate-0"}`}
+              className={`h-3.5 w-3.5 shrink-0 text-text-tertiary transition-transform duration-300 ease-out ${reasoningExpanded ? "rotate-180" : "rotate-0"}`}
             />
           </button>
           <div
@@ -126,7 +126,7 @@ export function StreamingText({
             <div className="min-h-0 overflow-hidden">
               <div
                 data-i18n-skip="true"
-                className={`reasoning-markdown relative px-3 py-2.5 bg-slate-50 dark:bg-[#0F0F1A] transition-[transform,filter] duration-300 ease-out ${reasoningExpanded ? "translate-y-0 blur-0" : "-translate-y-1 blur-[1px]"}`}
+                className={`reasoning-markdown relative ml-2 mt-1 border-l border-surface-border py-1.5 pl-3 pr-1 text-text-secondary transition-[transform,filter] duration-300 ease-out ${reasoningExpanded ? "translate-y-0 blur-0" : "-translate-y-1 blur-[1px]"}`}
               >
                 <StreamingMarkdownView content={parsed.reasoning || ""} idleTimeout={80} keepRenderedOnContentChange isStreaming={stableMarkdownStreamingMode} />
               </div>

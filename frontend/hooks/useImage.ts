@@ -6,7 +6,7 @@ import { getErrorMessage, normalizeError, readApiError } from "@/lib/errors";
 
 const API_BASE_URL = "";
 
-// 模块级缓存：避免组件重新挂载时图片列表消失；按 provider 隔离，避免 Seedream Beta 历史混入普通图片入口。
+// 模块级缓存：避免组件重新挂载时图片列表消失；按 provider 隔离，避免 AI 漫剧 历史混入普通图片入口。
 const cachedImagesByProvider: Record<string, GeneratedImage[] | null> = {};
 
 export interface GeneratedImage {
@@ -72,7 +72,7 @@ export function useImage(provider?: string) {
             type: "image",
             title: image.status === "succeeded" || image.status === "completed" ? "图片任务已完成" : "图片任务未完成",
             description: image.status === "succeeded" || image.status === "completed" ? image.prompt : getErrorMessage(image.error_message || image.prompt, { module: "image", fallbackMessage: "图片生成失败，请稍后重试或调整描述。" }),
-            href: isSeedream ? "/seedream-beta" : "/image",
+            href: isSeedream ? "/ai-comic" : "/image",
             ok: image.status === "succeeded" || image.status === "completed",
           });
         }
@@ -160,7 +160,7 @@ export function useImage(provider?: string) {
           id: data.id,
           title: "图片生成中",
           description: prompt,
-          href: requestProvider === "seedream" ? "/seedream-beta" : "/image",
+          href: requestProvider === "seedream" ? "/ai-comic" : "/image",
         });
         // 立即将 pending 记录加入列表并更新缓存
         const next = [data, ...images];

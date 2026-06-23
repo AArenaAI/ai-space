@@ -82,7 +82,7 @@ def draw_frame(i):
     rr(d, (26, 30, 246, 570), 22, (250, 248, 251), (238, 232, 240), 1)
     text_top(d, (52, 60), 'Generate Image', font=FMB, fill=(28, 28, 34))
     menu = [
-        ('Generate Video', True), ('Seedream Beta', False), ('', False), ('TOOLS', False),
+        ('Generate Video', True), ('AI 漫剧', False), ('', False), ('TOOLS', False),
         ('Background Removal', True), ('Background Replacement', False), ('Text Removal', True),
         ('Image Upscale', False), ('Local Redraw', False), ('Region Brush', False),
     ]
