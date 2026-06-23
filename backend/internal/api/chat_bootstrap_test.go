@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"aipool-backend/internal/config"
 	"aipool-backend/internal/models"
 
 	"github.com/gin-gonic/gin"
@@ -29,6 +30,7 @@ func TestChatBootstrapIncludesStableConversationSnapshot(t *testing.T) {
 		&models.NotebookConversation{},
 		&models.AIBackgroundTask{},
 		&models.AIBackgroundTaskEvent{},
+		&models.RefreshToken{},
 		&models.ModelConfig{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -65,7 +67,7 @@ func TestChatBootstrapIncludesStableConversationSnapshot(t *testing.T) {
 		t.Fatalf("create assistant B: %v", err)
 	}
 
-	handler := NewChatBootstrapHandler(db)
+	handler := NewChatBootstrapHandler(db, &config.Config{JWTSecret: "test-secret"})
 	router := gin.New()
 	router.GET("/api/chat/bootstrap", func(c *gin.Context) {
 		c.Set("userID", user.ID)

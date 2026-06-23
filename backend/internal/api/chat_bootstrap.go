@@ -1,6 +1,7 @@
 package api
 
 import (
+	"aipool-backend/internal/config"
 	"aipool-backend/internal/modelmeta"
 	"aipool-backend/internal/models"
 	"fmt"
@@ -16,11 +17,12 @@ const defaultChatBootstrapTail = 32
 const defaultChatBootstrapConversationLimit = 30
 
 type ChatBootstrapHandler struct {
-	db *gorm.DB
+	db  *gorm.DB
+	cfg *config.Config
 }
 
-func NewChatBootstrapHandler(db *gorm.DB) *ChatBootstrapHandler {
-	return &ChatBootstrapHandler{db: db}
+func NewChatBootstrapHandler(db *gorm.DB, cfg *config.Config) *ChatBootstrapHandler {
+	return &ChatBootstrapHandler{db: db, cfg: cfg}
 }
 
 type ChatBootstrapConversationMeta struct {
@@ -44,8 +46,22 @@ type ChatBootstrapSnapshot struct {
 	LastAssistantStatus gin.H              `json:"last_assistant_status,omitempty"`
 }
 
+type ChatBootstrapActiveTask struct {
+	ID                 uint      `json:"id"`
+	ConversationID     uint      `json:"conversation_id"`
+	AssistantMessageID uint      `json:"assistant_message_id"`
+	Model              string    `json:"model,omitempty"`
+	Provider           string    `json:"provider,omitempty"`
+	Status             string    `json:"status"`
+	LastSequenceNumber int64     `json:"last_sequence_number"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
 func (h *ChatBootstrapHandler) Get(c *gin.Context) {
-	userID := getUserID(c)
+	userID, refreshedToken, ok := h.resolveBootstrapUser(c)
+	if !ok {
+		return
+	}
 	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{"auth_status": "anonymous", "error": "未提供认证信息"})
 		return
@@ -85,6 +101,7 @@ func (h *ChatBootstrapHandler) Get(c *gin.Context) {
 		"auth_status": "authenticated",
 		"server_time": time.Now().UTC().Format(time.RFC3339Nano),
 		"user":        authUserPayload(user, defaultWorkspaceID),
+		"token":       refreshedToken,
 		"workspace": gin.H{
 			"current_id": workspaceID,
 			"default_id": defaultWorkspaceID,
@@ -102,6 +119,9 @@ func (h *ChatBootstrapHandler) Get(c *gin.Context) {
 			"local_background_chat_task": true,
 		},
 	}
+	if refreshedToken == "" {
+		delete(payload, "token")
+	}
 
 	conversationID := parseOptionalUint(firstNonEmptyBootstrap(c.Query("id"), c.Query("conversation_id")))
 	if conversationID > 0 {
@@ -112,8 +132,66 @@ func (h *ChatBootstrapHandler) Get(c *gin.Context) {
 		payload["conversation"] = meta
 		payload["snapshot"] = snapshot
 	}
+	payload["active_tasks"] = gin.H{"chat": h.listActiveChatTasks(userID, conversationID)}
 
 	c.JSON(http.StatusOK, payload)
+}
+
+func (h *ChatBootstrapHandler) resolveBootstrapUser(c *gin.Context) (uint, string, bool) {
+	if userID := getUserID(c); userID > 0 {
+		return userID, "", true
+	}
+	cookie, err := c.Request.Cookie(refreshTokenCookieName)
+	if err != nil || cookie == nil || cookie.Value == "" {
+		return 0, "", true
+	}
+	now := time.Now()
+	var stored models.RefreshToken
+	if err := h.db.Where("token_hash = ?", hashRefreshToken(cookie.Value)).First(&stored).Error; err != nil || !isRefreshTokenUsable(stored, now) {
+		auth := NewAuthHandler(h.db, h.cfg)
+		auth.clearRefreshTokenCookie(c)
+		return 0, "", true
+	}
+	var user models.User
+	if err := h.db.First(&user, stored.UserID).Error; err != nil {
+		return 0, "", true
+	}
+	var token string
+	auth := NewAuthHandler(h.db, h.cfg)
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.RefreshToken{}).Where("id = ? AND revoked_at IS NULL", stored.ID).Update("revoked_at", now).Error; err != nil {
+			return err
+		}
+		var err error
+		token, err = generateAccessToken(user.ID, user.Email, h.cfg.JWTSecret)
+		if err != nil {
+			return err
+		}
+		return auth.issueRefreshToken(c, tx, user.ID)
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"auth_status": "anonymous", "error": "刷新登录状态失败"})
+		return 0, "", false
+	}
+	c.Set("userID", user.ID)
+	c.Set("email", user.Email)
+	return user.ID, token, true
+}
+
+func (h *ChatBootstrapHandler) listActiveChatTasks(userID uint, conversationID uint) []ChatBootstrapActiveTask {
+	statuses := []string{"running", "streaming", "retrying", "incomplete"}
+	query := h.db.Model(&models.AIBackgroundTask{}).Where("user_id = ? AND status IN ?", userID, statuses)
+	if conversationID > 0 {
+		query = query.Where("conversation_id = ?", conversationID)
+	}
+	var tasks []models.AIBackgroundTask
+	if err := query.Order("updated_at DESC, id DESC").Limit(20).Find(&tasks).Error; err != nil {
+		return []ChatBootstrapActiveTask{}
+	}
+	out := make([]ChatBootstrapActiveTask, len(tasks))
+	for i, task := range tasks {
+		out[i] = ChatBootstrapActiveTask{ID: task.ID, ConversationID: task.ConversationID, AssistantMessageID: task.AssistantMessageID, Model: task.Model, Provider: task.Provider, Status: task.Status, LastSequenceNumber: task.LastSequenceNumber, UpdatedAt: task.UpdatedAt}
+	}
+	return out
 }
 
 func (h *ChatBootstrapHandler) listBootstrapConversations(userID uint, workspaceID uint, limit int) ([]models.Conversation, int64) {

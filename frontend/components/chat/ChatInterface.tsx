@@ -66,6 +66,7 @@ interface ChatInterfaceProps {
   modelSelectionOptions?: { storageKey?: string; defaultModelId?: string };
   onSaveAssistantToNote?: (content: string) => void;
   bootstrap?: ChatBootstrapPayload;
+  isConversationShellLoading?: boolean;
 }
 
 const HIDDEN_USER_MESSAGE_PREFIX = "<!-- ai-space:hidden-user-message -->";
@@ -74,7 +75,7 @@ export function buildHiddenUserMessageContent(content: string) {
   return `${HIDDEN_USER_MESSAGE_PREFIX}\n${content}`;
 }
 
-export default function ChatInterface({ conversationId, notebookId, notebookTitle, notebookFileCount, notebookFileIds, notebookHero, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId, externalSendRequest, modelSelectionOptions, onSaveAssistantToNote, bootstrap }: ChatInterfaceProps) {
+export default function ChatInterface({ conversationId, notebookId, notebookTitle, notebookFileCount, notebookFileIds, notebookHero, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId, externalSendRequest, modelSelectionOptions, onSaveAssistantToNote, bootstrap, isConversationShellLoading = false }: ChatInterfaceProps) {
   const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
   const { t } = useI18n();
   const [compareMode, setCompareMode] = useState(false);
@@ -505,7 +506,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   const activeTargetMessageId = compareTargetMessageId ?? (currentConversation === conversationId ? targetMessageId : undefined);
   const isEmptyNewCompareMode = messages.length === 0 && !conversationId && activeCompareMode;
   const shouldDelayEmptyCompareLayout = isEmptyNewCompareMode && !emptyCompareLayoutReady;
-  const isNewEmptyChat = messages.length === 0 && !conversationId && !activeCompareMode;
+  const isNewEmptyChat = messages.length === 0 && !conversationId && !activeCompareMode && !isConversationShellLoading;
 
   useEffect(() => {
     if (!isEmptyNewCompareMode) {
@@ -633,6 +634,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
           messages={messages}
           isLoading={isLoading}
           isLoadingHistory={isLoadingHistory}
+          isConversationShellLoading={isConversationShellLoading}
           isComplexTask={isComplexTask}
           models={models}
           conversationId={conversationId}

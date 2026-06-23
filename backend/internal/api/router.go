@@ -86,6 +86,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	// Handler 实例（在外层定义，供公开路由和认证路由共用）
 	chatHandler := NewChatHandler(db, cfg, aiService, searchService, fileService, retrievalSvc, contextBuilder, usageService)
+	chatBootstrapHandler := NewChatBootstrapHandler(db, cfg)
 	openAIWebhookHandler := NewOpenAIWebhookHandler(db, cfg, aiService, usageService)
 	fileHandler := NewFileHandler(fileService, db)
 	// OpenAI Webhook 必须是公开路由，不能走用户 JWT；签名由 OPENAI_WEBHOOK_SECRET 校验。
@@ -118,6 +119,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	{
 		// 聊天路由
 		publicWithAuth.POST("/chat", chatHandler.Chat)
+		publicWithAuth.GET("/chat/bootstrap", chatBootstrapHandler.Get)
 
 		// 专用翻译路由
 		translateHandler := NewTranslateHandler(db, translateService, usageService)
@@ -196,7 +198,6 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	// 对比记录 Handler（供认证路由与公开查看共用）
 	compareRecordHandler := NewCompareRecordHandler(db)
 	convHandler := NewConversationHandler(db)
-	chatBootstrapHandler := NewChatBootstrapHandler(db)
 	alertHandler := NewAlertHandler(db, emailService)
 	alertHandler.InitDefaultRules()
 
@@ -270,7 +271,6 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	documentArtifactHandler.AutoMigrate()
 	authorized.POST("/translate/live/ticket", liveTranslateHandler.CreateTicket)
 
-	authorized.GET("/chat/bootstrap", chatBootstrapHandler.Get)
 	authorized.GET("/conversations", convHandler.List)
 	authorized.GET("/conversations/search", convHandler.Search)
 	authorized.POST("/conversations", convHandler.Create)

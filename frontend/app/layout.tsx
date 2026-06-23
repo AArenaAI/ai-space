@@ -6,6 +6,7 @@ import { I18nProvider } from "@/lib/i18n";
 import AuthInterceptor from "@/components/AuthInterceptor";
 import AppToaster from "@/components/notifications/AppToaster";
 import TaskNotificationCenter from "@/components/notifications/TaskNotificationCenter";
+import { AppBootstrapProvider } from "@/lib/appBootstrapContext";
 
 export const metadata: Metadata = {
   title: "AI Space - 多模型AI聚合平台",
@@ -93,10 +94,12 @@ export default function RootLayout({
       <body className="antialiased">
         <I18nProvider>
           <ThemeProvider>
-            <AuthInterceptor />
-            <TaskNotificationCenter />
-            {children}
-            <AppToaster />
+            <AppBootstrapProvider>
+              <AuthInterceptor />
+              <TaskNotificationCenter />
+              {children}
+              <AppToaster />
+            </AppBootstrapProvider>
           </ThemeProvider>
         </I18nProvider>
       </body>

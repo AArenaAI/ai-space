@@ -60,7 +60,7 @@ func (h *AuthHandler) setRefreshTokenCookie(c *gin.Context, token string, expire
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     refreshTokenCookieName,
 		Value:    token,
-		Path:     "/api/auth",
+		Path:     "/api",
 		MaxAge:   maxAge,
 		Expires:  expiresAt,
 		HttpOnly: true,
@@ -73,7 +73,7 @@ func (h *AuthHandler) clearRefreshTokenCookie(c *gin.Context) {
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     refreshTokenCookieName,
 		Value:    "",
-		Path:     "/api/auth",
+		Path:     "/api",
 		MaxAge:   -1,
 		Expires:  time.Unix(0, 0),
 		HttpOnly: true,

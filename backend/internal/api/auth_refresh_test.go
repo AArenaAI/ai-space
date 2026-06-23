@@ -39,8 +39,8 @@ func TestRefreshCookieSettingsUseHttpOnlySecureSameSiteLax(t *testing.T) {
 	if cookie.SameSite != http.SameSiteLaxMode {
 		t.Fatalf("refresh cookie SameSite = %v, want Lax", cookie.SameSite)
 	}
-	if cookie.Path != "/api/auth" {
-		t.Fatalf("refresh cookie path = %q, want /api/auth", cookie.Path)
+	if cookie.Path != "/api" {
+		t.Fatalf("refresh cookie path = %q, want /api", cookie.Path)
 	}
 }
 

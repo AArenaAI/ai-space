@@ -44,13 +44,26 @@ export type ChatBootstrapPayload = {
   snapshot?: ChatBootstrapSnapshot;
   sidebar?: ChatBootstrapSidebar;
   feature_flags?: Record<string, boolean>;
+  token?: string;
+  active_tasks?: {
+    chat?: Array<{
+      id: number;
+      conversation_id: number;
+      assistant_message_id: number;
+      model?: string;
+      provider?: string;
+      status: string;
+      last_sequence_number: number;
+      updated_at: string;
+    }>;
+  };
 };
 
 export type FetchChatBootstrapInput = {
   apiBaseUrl?: string;
   conversationId?: number;
   workspaceId?: number;
-  token: string;
+  token?: string;
   messageTail?: number;
   conversationLimit?: number;
   signal?: AbortSignal;
@@ -77,13 +90,16 @@ export async function fetchChatBootstrap({
   signal,
   fetchImpl = fetch,
 }: FetchChatBootstrapInput): Promise<ChatBootstrapPayload> {
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
   const res = await fetchImpl(buildChatBootstrapUrl({ apiBaseUrl, conversationId, workspaceId, messageTail, conversationLimit }), {
-    headers: { Authorization: `Bearer ${token}` },
+    headers,
     credentials: "include",
     signal,
   });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) return { auth_status: "anonymous", ...data } as ChatBootstrapPayload;
   if (!res.ok) throw new Error(`chat bootstrap failed: ${res.status}`);
-  return await res.json();
+  return data;
 }
 
 export function parseBootstrapCompareModels(value: unknown): string[] {

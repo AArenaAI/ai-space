@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useRef } from "react";
+import { useCallback, useMemo, useState, useRef } from "react";
 import { useChatModelSelection } from "@/hooks/useChatModelSelection";
 import { useChatLocalActions } from "@/hooks/useChatLocalActions";
 import { useChatBackgroundPollingRuntime } from "@/hooks/useChatBackgroundPollingRuntime";
@@ -26,9 +26,10 @@ import {
   Message,
   SearchSource,
 } from "@/lib/chatTypes";
-import type { ChatBootstrapPayload } from "@/lib/chatBootstrapCoordinator";
+import { fetchChatBootstrap, type ChatBootstrapPayload } from "@/lib/chatBootstrapCoordinator";
 import { mapPersistedChatMessages, buildGroupViewsFromMessages } from "@/lib/chatForkCoordinator";
 import type { CachedConversationSnapshot } from "@/lib/chatConversationCache";
+import type { ConversationRestoreResponse } from "@/lib/chatConversationRestoreCoordinator";
 
 const API_BASE_URL = ""; // 使用相对路径，nginx 同域名代理 /api -> 后端
 
@@ -158,6 +159,32 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       updatedAt: Date.now(),
     };
   }, [bootstrap, skillKey]);
+  const fetchBootstrapRestore = useCallback(async ({
+    apiBaseUrl,
+    conversationId: restoreConversationId,
+    token,
+    signal,
+  }: {
+    apiBaseUrl?: string;
+    conversationId: number;
+    token: string;
+    signal?: AbortSignal;
+    snapshotVersion?: string;
+  }): Promise<ConversationRestoreResponse> => {
+    const payload = await fetchChatBootstrap({ apiBaseUrl, conversationId: restoreConversationId, token, signal });
+    return {
+      title: payload.conversation?.title || "",
+      model: payload.conversation?.model,
+      compare: !!payload.conversation?.compare,
+      compare_models: JSON.stringify(payload.conversation?.compare_models || []),
+      skill_key: payload.conversation?.skill_key,
+      messages: payload.snapshot?.messages || [],
+      total: payload.snapshot?.total,
+      has_more: payload.snapshot?.has_more,
+      snapshot_version: payload.snapshot?.snapshot_version,
+      last_assistant_status: payload.snapshot?.last_assistant_status,
+    };
+  }, []);
   const stopTaskStream = useStopTaskStreamAction(taskStreamsRef);
 
   const {
@@ -233,6 +260,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     startTaskEventStream,
     translate: t,
     bootstrapSnapshot,
+    fetchRestore: fetchBootstrapRestore,
   });
 
   const {

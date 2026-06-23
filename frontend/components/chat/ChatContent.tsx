@@ -31,6 +31,16 @@ export default function ChatContent() {
   const { models, loading } = useModels();
   const bootstrap = useChatBootstrapRuntime({ conversationId });
   const effectiveModels = bootstrap.models.length > 0 ? bootstrap.models : models;
+  const chatPageState = !conversationId
+    ? "new-chat"
+    : bootstrap.status === "ready"
+      ? "conversation-ready"
+      : bootstrap.status === "failed"
+        ? "conversation-error"
+        : bootstrap.status === "anonymous"
+          ? "anonymous"
+          : "conversation-loading";
+  const isConversationShellLoading = !!conversationId && chatPageState === "conversation-loading";
   const previousConversationIdRef = useRef<number | undefined>(conversationId);
 
   useEffect(() => {
@@ -56,7 +66,7 @@ export default function ChatContent() {
   const chatKey = newChatToken !== "default" ? `new-${newChatToken}` : "chat";
   return (
     <div className="h-full min-h-0 overflow-hidden">
-      <ChatInterface key={chatKey} conversationId={conversationId} models={effectiveModels} targetMessageId={targetMessageId} bootstrap={bootstrap.payload} />
+      <ChatInterface key={chatKey} conversationId={conversationId} models={effectiveModels} targetMessageId={targetMessageId} bootstrap={bootstrap.payload} isConversationShellLoading={isConversationShellLoading} />
     </div>
   );
 }

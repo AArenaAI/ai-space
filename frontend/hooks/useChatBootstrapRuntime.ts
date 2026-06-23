@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ChatBootstrapPayload } from "@/lib/chatBootstrapCoordinator";
 import { fetchChatBootstrap } from "@/lib/chatBootstrapCoordinator";
 import type { ChatModel } from "@/lib/chatTypes";
+import { useAppBootstrap } from "@/lib/appBootstrapContext";
 
 type ChatBootstrapStatus = "idle" | "loading" | "ready" | "anonymous" | "failed";
 
@@ -22,15 +23,13 @@ export function useChatBootstrapRuntime({
   enabled?: boolean;
 }): ChatBootstrapRuntimeState {
   const [state, setState] = useState<ChatBootstrapRuntimeState>({ status: "idle", models: [] });
+  const { setChatBootstrap } = useAppBootstrap();
 
   useEffect(() => {
     if (!enabled || typeof window === "undefined") return;
     const controller = new AbortController();
-    const token = localStorage.getItem("token");
-    if (!token || token === "null" || token === "undefined") {
-      setState({ status: "anonymous", models: [] });
-      return () => controller.abort();
-    }
+    const storedToken = localStorage.getItem("token");
+    const token = storedToken && storedToken !== "null" && storedToken !== "undefined" ? storedToken : "";
 
     setState((current) => ({ ...current, status: "loading", error: undefined }));
     const workspaceId = Number(localStorage.getItem("current-workspace") || 0) || undefined;
@@ -44,6 +43,9 @@ export function useChatBootstrapRuntime({
         if (payload.user) {
           localStorage.setItem("user", JSON.stringify(payload.user));
         }
+        if (payload.token) {
+          localStorage.setItem("token", payload.token);
+        }
         if (payload.workspace?.current_id) {
           localStorage.setItem("current-workspace", String(payload.workspace.current_id));
         }
@@ -51,6 +53,7 @@ export function useChatBootstrapRuntime({
           localStorage.setItem("cached-chat-models", JSON.stringify(payload.models));
         }
         if (payload.sidebar || payload.user || payload.workspace) {
+          setChatBootstrap(payload);
           window.dispatchEvent(new CustomEvent("chat-bootstrap-ready", { detail: payload }));
         }
         setState({ status: "ready", payload, models: payload.models || [] });
@@ -61,7 +64,7 @@ export function useChatBootstrapRuntime({
       });
 
     return () => controller.abort();
-  }, [conversationId, enabled]);
+  }, [conversationId, enabled, setChatBootstrap]);
 
   return useMemo(() => state, [state]);
 }

@@ -103,6 +103,7 @@ interface MessageListProps {
   messages: Message[];
   isLoading: boolean;
   isLoadingHistory?: boolean;
+  isConversationShellLoading?: boolean;
   isComplexTask?: boolean;
   models: ChatModel[];
   conversationId?: number;
@@ -208,6 +209,7 @@ function MessageList({
   messages,
   isLoading,
   isLoadingHistory,
+  isConversationShellLoading = false,
   isComplexTask = false,
   models,
   conversationId,
@@ -1876,7 +1878,7 @@ function MessageList({
         />
         {/* 滚动内容区域：对比模式和普通聊天共享普通 DOM scroller */}
         {messages.length === 0 ? (
-          isLoadingHistory ? (
+          (isLoadingHistory || isConversationShellLoading) ? (
             <ChatHistoryLoadingVirtuoso<InferredGroup>
               data={[]}
               virtuosoRef={virtuosoRef}
@@ -2011,7 +2013,7 @@ function MessageList({
   }
 
   if (messages.length === 0) {
-    if (isLoadingHistory) {
+    if (isLoadingHistory || isConversationShellLoading) {
       return (
         <ChatHistoryLoadingVirtuoso<Message>
           data={[]}

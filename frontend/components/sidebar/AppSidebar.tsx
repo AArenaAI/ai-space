@@ -41,6 +41,7 @@ import { deletePersistentConversationSnapshot } from "@/lib/chatConversationPers
 import { createNotebook, fetchNotebooks } from "@/lib/notebookApi";
 import { NOTEBOOK_DEMOS } from "@/lib/notebookDemos";
 import type { Notebook } from "@/lib/notebookTypes";
+import { useAppBootstrap } from "@/lib/appBootstrapContext";
 
 
 const isPathInGroup = (pathname: string | null, paths: string[]) => {
@@ -414,6 +415,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   const routeConvId = searchParams?.get("id");
   const currentConvId = optimisticConvId ?? routeConvId;
   const router = useRouter();
+  const { chatBootstrap } = useAppBootstrap();
   const isWorkRoute = isPathInGroup(pathname, WORK_PAGE_PATHS);
   const isCreativeRoute = isPathInGroup(pathname, CREATIVE_PAGE_PATHS);
   const navigateToNotebooks = useCallback(() => {
@@ -546,6 +548,17 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     const stored = localStorage.getItem("user");
     if (stored) { try { setUser(JSON.parse(stored)); } catch {} }
   }, []);
+
+  useEffect(() => {
+    if (!chatBootstrap) return;
+    if (chatBootstrap.user) setUser(chatBootstrap.user);
+    if (Array.isArray(chatBootstrap.sidebar?.conversations)) {
+      const next = sortConversations((chatBootstrap.sidebar.conversations as Conversation[]).filter(isMainChatConversation));
+      cachedConversations = next;
+      setConversations(next);
+      setLoading(false);
+    }
+  }, [chatBootstrap]);
 
   useEffect(() => {
     const handleBootstrapReady = (event: Event) => {
