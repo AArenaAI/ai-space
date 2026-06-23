@@ -164,14 +164,14 @@ const studioSurfaceStyle: Record<StudioSurfaceMode, {
     canvasShell: "border-white/[0.08] bg-white/[0.035] shadow-[0_30px_100px_rgba(0,0,0,0.45)]",
   },
   eye: {
-    root: "bg-[radial-gradient(circle_at_28%_0%,rgba(239,230,209,0.13),transparent_30%),linear-gradient(135deg,#1b1814_0%,#222018_48%,#2a261d_100%)] text-[#efe6d1]",
-    header: "border-[#e8dcc4]/[0.1] bg-[#171410]/[0.76] shadow-[0_12px_40px_rgba(0,0,0,0.25)]",
-    logo: "border-[#efe6d1]/[0.14] bg-[#efe6d1] text-[#1d1a15]",
-    title: "text-[#f5ecd8]",
-    subtitle: "text-[#efe6d1]/[0.46]",
-    chromeButton: "border-[#efe6d1]/[0.1] bg-[#efe6d1]/[0.05] text-[#efe6d1]/[0.52] hover:bg-[#efe6d1] hover:text-[#1d1a15]",
-    chromeActive: "bg-[#efe6d1] text-[#1d1a15]",
-    canvasShell: "border-[#e8dcc4]/[0.1] bg-[#efe6d1]/[0.035] shadow-[0_30px_100px_rgba(0,0,0,0.34)]",
+    root: "bg-[radial-gradient(circle_at_28%_0%,rgba(79,127,69,0.16),transparent_30%),linear-gradient(135deg,#d4e0c8_0%,#dbe6d0_48%,#c8d2be_100%)] text-[#4f7f45]",
+    header: "border-[#b5bfae]/[0.1] bg-[#e2ecd9]/[0.76] shadow-[0_12px_40px_rgba(0,0,0,0.25)]",
+    logo: "border-[#4f7f45]/[0.14] bg-[#4f7f45] text-white",
+    title: "text-[#35362e]",
+    subtitle: "text-[#4f7f45]/[0.46]",
+    chromeButton: "border-[#4f7f45]/[0.1] bg-[#4f7f45]/[0.05] text-[#35362e]/[0.62] hover:bg-[#4f7f45] hover:text-white",
+    chromeActive: "bg-[#4f7f45] text-white",
+    canvasShell: "border-[#b5bfae]/[0.1] bg-[#4f7f45]/[0.035] shadow-[0_30px_100px_rgba(0,0,0,0.34)]",
   },
 };
 
@@ -388,13 +388,13 @@ export default function ManjuStudioLayout({
       }
     : surfaceMode === "eye"
       ? {
-          shell: "border-[#9f927b]/[0.22] bg-[#242017]/95 shadow-[0_24px_70px_rgba(0,0,0,0.32)]",
-          header: "border-[#e8dcc4]/[0.10] bg-[#2f2a20]",
-          title: "text-[#f1e6cf]",
-          icon: "text-[#efe6d1]/[0.46] hover:bg-[#efe6d1]/[0.10] hover:text-[#efe6d1]",
-          body: "bg-[#211e17]",
-          collapsed: "bg-[#211e17]",
-          collapsedLabel: "border-[#e8dcc4]/[0.12] bg-[#efe6d1]/[0.06] text-[#efe6d1]/[0.50]",
+          shell: "border-[#b5bfae]/[0.22] bg-[#e2ecd9]/95 shadow-[0_24px_70px_rgba(0,0,0,0.32)]",
+          header: "border-[#b5bfae]/[0.10] bg-[#d0dac6]",
+          title: "text-[#35362e]",
+          icon: "text-[#35362e]/[0.46] hover:bg-[#4f7f45]/[0.10] hover:text-[#35362e]",
+          body: "bg-[#d4e0c8]",
+          collapsed: "bg-[#d4e0c8]",
+          collapsedLabel: "border-[#b5bfae]/[0.12] bg-[#4f7f45]/[0.06] text-[#35362e]/[0.56]",
         }
       : {
           shell: "border-white/[0.08] bg-[#0d0d0e]/92 shadow-[0_24px_70px_rgba(0,0,0,0.42)]",
@@ -693,22 +693,22 @@ export default function ManjuStudioLayout({
         }
         .ai-comic-studio[data-ai-comic-surface="eye"] .ai-comic-right-panel .bg-surface-card,
         .ai-comic-studio[data-ai-comic-surface="eye"] .ai-comic-right-panel .bg-surface-card\/70 {
-          background-color: rgba(48, 43, 32, 0.92) !important;
+          background-color: rgba(226, 236, 217, 0.94) !important;
         }
         .ai-comic-studio[data-ai-comic-surface="eye"] .ai-comic-right-panel .bg-surface-base {
-          background-color: #27231a !important;
+          background-color: #e2ecd9 !important;
         }
         .ai-comic-studio[data-ai-comic-surface="eye"] .ai-comic-right-panel .border-surface-border {
-          border-color: rgba(232, 220, 196, 0.16) !important;
+          border-color: rgba(181, 191, 174, 0.58) !important;
         }
         .ai-comic-studio[data-ai-comic-surface="eye"] .ai-comic-right-panel .text-text-primary {
-          color: rgba(245, 236, 216, 0.90) !important;
+          color: rgba(53, 54, 46, 0.92) !important;
         }
         .ai-comic-studio[data-ai-comic-surface="eye"] .ai-comic-right-panel .text-text-secondary {
-          color: rgba(239, 230, 209, 0.66) !important;
+          color: rgba(92, 94, 84, 0.92) !important;
         }
         .ai-comic-studio[data-ai-comic-surface="eye"] .ai-comic-right-panel .text-text-tertiary {
-          color: rgba(239, 230, 209, 0.44) !important;
+          color: rgba(122, 125, 114, 0.92) !important;
         }
         .ai-comic-right-panel textarea,
         .ai-comic-right-panel input {
@@ -735,21 +735,28 @@ export default function ManjuStudioLayout({
           </div>
         </div>
 
-        <div className="flex min-w-0 flex-1 items-center justify-start gap-0.5 overflow-hidden pr-2">
+        <div
+          className="flex min-w-0 flex-1 items-center justify-start gap-1.5 overflow-hidden px-2"
+          onClickCapture={() => {
+            if (!storyFlowNav) return;
+            setRightPanelOpen(true);
+            setRightPanelTab("node");
+          }}
+        >
           {storyFlowNav ? storyFlowNav : stages.map((stage, index) => {
             const action = getStageActionMeta(stage);
             const actionGenerate = action?.generate || stage.generate;
             const isActiveStage = stage.activeWhen?.includes(activeStep) || activeStep === stage.id;
             const isGeneratingStage = Boolean(actionGenerate && generating === actionGenerate);
             return (
-              <div key={stage.id} className="flex items-center gap-1">
+              <div key={stage.id} className="flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => {
                     onStepChange(stage.id);
                   }}
                   className={cn(
-                    "group flex h-8 min-w-[112px] items-center justify-between gap-2 rounded-full border px-2.5 text-left transition hover:border-white/[0.24] hover:bg-white/[0.08]",
+                    "group flex h-8 min-w-[118px] items-center justify-between gap-2.5 rounded-full border px-3 text-left transition hover:border-white/[0.24] hover:bg-white/[0.08]",
                     isActiveStage ? "border-white bg-white text-black shadow-sm" : "border-white/[0.08] bg-white/[0.04] text-white/[0.68]"
                   )}
                   title={`进入${stage.label}工作区：${stage.desc}`}
@@ -764,7 +771,7 @@ export default function ManjuStudioLayout({
                 </button>
                 {stage.id === "script" && onImportScriptFile && (
                   <label
-                    className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-white/[0.1] bg-white/[0.05] px-2.5 text-[11px] font-semibold text-white/[0.58] shadow-sm transition hover:bg-white hover:text-black"
+                    className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-white/[0.1] bg-white/[0.05] px-3 text-[11px] font-semibold text-white/[0.58] shadow-sm transition hover:bg-white hover:text-black"
                     title="上传 .md/.txt 剧本，并自动解析成镜头列表"
                   >
                     <UploadCloud className="h-3.5 w-3.5" />
@@ -785,7 +792,7 @@ export default function ManjuStudioLayout({
                       if (actionGenerate) onGenerate?.(actionGenerate);
                     }}
                     className={cn(
-                      "flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-semibold transition",
+                      "flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[11px] font-semibold transition",
                       action.disabled || isGeneratingStage
                         ? "cursor-not-allowed border-white/[0.05] bg-white/[0.03] text-white/[0.22]"
                         : "border-white bg-white text-black shadow-sm hover:bg-white/[0.88]"
@@ -803,10 +810,7 @@ export default function ManjuStudioLayout({
           })}
         </div>
 
-        <div className="flex shrink-0 items-center gap-1">
-          <div className={cn("flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold", surfaceStyle.chromeButton)} title="项目内容会自动保存到当前项目">
-            <span className="h-1.5 w-1.5 rounded-full bg-white/[0.62]" />自动保存
-          </div>
+        <div className="flex shrink-0 items-center gap-2">
           <button type="button" onClick={openProjectPanel} className={cn("flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-xs", surfaceStyle.chromeButton)} title="项目/导入导出">
             <FolderOpen className="h-3.5 w-3.5" />项目
           </button>
@@ -999,6 +1003,9 @@ export default function ManjuStudioLayout({
 
       <div className="flex flex-1 overflow-hidden p-3 pt-2">
         <div className={cn("relative flex-1 overflow-hidden rounded-[30px] border", surfaceStyle.canvasShell)}>
+          <div className="pointer-events-none absolute right-4 bottom-4 z-30 flex h-8 items-center gap-1.5 rounded-full border border-white/[0.10] bg-[#0c0c0d]/82 px-3 text-xs font-semibold text-white/58 shadow-[0_12px_36px_rgba(0,0,0,0.34)] backdrop-blur-xl" title="自动保存已开启：项目内容会自动保存到当前项目，无需点击。">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400/80" />自动保存
+          </div>
           <div className="absolute inset-0 p-1.5">
             <ManjuCanvas
               nodes={nodes}
