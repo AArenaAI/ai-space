@@ -99,10 +99,12 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	// 认证路由
 	authHandler := NewAuthHandler(db, cfg)
+	router.POST("/api/auth/send-email-code", authHandler.SendEmailCode)
 	router.POST("/api/auth/register", authHandler.Register)
 	router.POST("/api/auth/login", authHandler.Login)
 	router.POST("/api/auth/refresh", authHandler.Refresh)
 	router.POST("/api/auth/logout", authHandler.Logout)
+	router.POST("/api/auth/reset-password", authHandler.ResetPassword)
 
 	// 技能公开路由
 	skillHandler := NewSkillHandler(db, skills.GetLoader())
@@ -156,10 +158,15 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	// PPT服务
 	pptService := services.NewPPTService(db, cfg, imageService, imageGenSvc)
 
-	// 积分路由
+	// 积分与支付路由
 	creditsHandler := NewCreditsHandler(db, cfg)
+	paymentHandler := NewPaymentHandler(db, cfg)
 	router.GET("/api/models/tiers", creditsHandler.GetModelTiers)
 	router.GET("/api/plans", creditsHandler.GetPublicPlans)
+	// 付呗回调与支付宝授权入口为公开路由；回调使用付呗签名校验，授权入口只绑定已创建订单。
+	router.GET("/api/payments/fubei/alipay/auth", paymentHandler.AlipayAuth)
+	router.GET("/api/payments/fubei/alipay/callback", paymentHandler.AlipayCallback)
+	router.POST("/api/payments/fubei/notify", paymentHandler.FubeiNotify)
 
 	// 注册 Bad Case 路由（公开提交，需认证）
 	badCaseHandler := NewBadCaseHandler(db)
@@ -391,11 +398,16 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	// 用户账号路由
 	authorized.PUT("/user/profile", authHandler.UpdateProfile)
+	authorized.POST("/user/change-password", authHandler.ChangePassword)
 	authorized.DELETE("/user/account", authHandler.DeleteAccount)
 
 	// 积分认证路由
 	authorized.GET("/user/credits", creditsHandler.GetCredits)
 	authorized.POST("/user/credits/deduct", creditsHandler.DeductCredits)
+
+	// 支付认证路由
+	authorized.POST("/payments/fubei/alipay/orders", paymentHandler.CreateFubeiAlipayOrder)
+	authorized.GET("/payments/orders/:order_no", paymentHandler.GetPaymentOrder)
 
 	// 文件管理路由
 	authorized.GET("/files", fileHandler.ListFiles)

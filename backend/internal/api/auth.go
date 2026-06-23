@@ -21,9 +21,10 @@ func NewAuthHandler(db *gorm.DB, cfg *config.Config) *AuthHandler {
 }
 
 type RegisterRequest struct {
-	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required,min=6"`
-	Name     string `json:"name"`
+	Email            string `json:"email" binding:"required,email"`
+	Password         string `json:"password" binding:"required,min=6"`
+	Name             string `json:"name"`
+	VerificationCode string `json:"verification_code" binding:"required"`
 }
 
 type LoginRequest struct {
@@ -59,6 +60,10 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	var user models.User
 	var defaultWorkspace models.Workspace
 	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := h.verifyEmailCode(tx, req.Email, EmailCodePurposeRegister, req.VerificationCode); err != nil {
+			return err
+		}
+
 		// 创建用户（初始化 free 套餐 + 30 基础积分；内部单位：分，1 积分 = 100 分）
 		user = models.User{
 			Email:           req.Email,
@@ -88,7 +93,13 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		}
 		return tx.Create(&defaultWorkspace).Error
 	}); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建账号失败"})
+		status := http.StatusInternalServerError
+		message := "创建账号失败"
+		if strings.Contains(err.Error(), "验证码") {
+			status = http.StatusBadRequest
+			message = err.Error()
+		}
+		c.JSON(status, gin.H{"error": message})
 		return
 	}
 
@@ -129,7 +140,6 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "邮箱或密码错误"})
 		return
 	}
-
 	// 生成短期 access token，并签发长期 refresh cookie
 	token, err := generateAccessToken(user.ID, user.Email, h.cfg.JWTSecret)
 	if err != nil {

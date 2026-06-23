@@ -4,7 +4,7 @@ const path = require('path');
 
 const routes = [
   ['models', '/chat'],
-  ['studio', '/seedream-beta'],
+  ['studio', '/ai-comic'],
   ['notebook', '/notebooks'],
   ['creative', '/image'],
   ['work', '/translator'],

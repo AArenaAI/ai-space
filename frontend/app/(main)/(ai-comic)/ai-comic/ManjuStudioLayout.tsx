@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 import { useCredits } from "@/hooks/useCredits";
+import { useTheme } from "@/components/theme/ThemeProvider";
 import {
   ArrowLeft,
   Box,
@@ -303,28 +304,107 @@ export default function ManjuStudioLayout({
 }: ManjuStudioLayoutProps) {
   const router = useRouter();
   const { language, setLanguage, languages } = useI18n();
+  const themeContext = useTheme();
   const { credits, fetchCredits } = useCredits();
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  const [rightPanelWidth, setRightPanelWidth] = useState(() => {
+    if (typeof window === "undefined") return 400;
+    const saved = Number(window.localStorage.getItem("ai-comic-production-panel-width"));
+    return Number.isFinite(saved) ? Math.min(640, Math.max(320, saved)) : 400;
+  });
+  const rightPanelResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const [internalSelectedNodeId, setInternalSelectedNodeId] = useState<string | null>(null);
   const [rightPanelTab, setRightPanelTab] = useState<"node" | "project">("node");
   const [assetLibraryOpen, setAssetLibraryOpen] = useState(false);
   const [assetLibraryMode, setAssetLibraryMode] = useState<"canvas" | "assets">("canvas");
   const [assetKind, setAssetKind] = useState<string>("all");
   const [assetQuery, setAssetQuery] = useState("");
-  const [surfaceMode, setSurfaceMode] = useState<StudioSurfaceMode>("night");
+  const [surfaceMode, setSurfaceMode] = useState<StudioSurfaceMode>(() => {
+    if (typeof window === "undefined") return "day";
+    const saved = window.localStorage.getItem("ai-comic-surface-mode") as StudioSurfaceMode | null;
+    if (saved === "day" || saved === "night" || saved === "eye") return saved;
+    const platformTheme = window.localStorage.getItem("theme");
+    if (platformTheme === "dark") return "night";
+    if (platformTheme === "green") return "eye";
+    return "day";
+  });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<StudioSettingsTab>("general");
   const [studioUser, setStudioUser] = useState<StudioUser | null>(null);
   const previousActiveStepRef = useRef(activeStep);
 
   useEffect(() => {
-    if (activeStep === "storyboardImage" || activeStep === "storyboardVideo") {
-      setRightPanelOpen(true);
-      setRightPanelTab("node");
-    }
-  }, [activeStep]);
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("ai-comic-production-panel-width", String(rightPanelWidth));
+  }, [rightPanelWidth]);
+
+  useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      const resize = rightPanelResizeRef.current;
+      if (!resize) return;
+      const nextWidth = resize.startWidth + resize.startX - event.clientX;
+      setRightPanelWidth(Math.min(640, Math.max(320, nextWidth)));
+    };
+    const stopResize = () => {
+      rightPanelResizeRef.current = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopResize);
+    window.addEventListener("pointercancel", stopResize);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const saved = window.localStorage.getItem("ai-comic-surface-mode");
+    if (saved === "day" || saved === "night" || saved === "eye") return;
+    const platformTheme = themeContext?.theme;
+    if (platformTheme === "dark") setSurfaceMode("night");
+    else if (platformTheme === "green") setSurfaceMode("eye");
+    else setSurfaceMode("day");
+  }, [themeContext?.theme]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("ai-comic-surface-mode", surfaceMode);
+  }, [surfaceMode]);
 
   const surfaceStyle = studioSurfaceStyle[surfaceMode];
+  const rightPanelStyle = surfaceMode === "day"
+    ? {
+        shell: "border-black/[0.10] bg-[#fbfaf6]/95 shadow-[0_24px_70px_rgba(25,23,18,0.14)]",
+        header: "border-black/[0.08] bg-[#f1eee6]",
+        title: "text-[#191713]",
+        icon: "text-black/[0.46] hover:bg-black/[0.06] hover:text-black",
+        body: "bg-[#f6f3ec]",
+        collapsed: "bg-[#f6f3ec]",
+        collapsedLabel: "border-black/[0.10] bg-white/[0.74] text-black/[0.50]",
+      }
+    : surfaceMode === "eye"
+      ? {
+          shell: "border-[#9f927b]/[0.22] bg-[#242017]/95 shadow-[0_24px_70px_rgba(0,0,0,0.32)]",
+          header: "border-[#e8dcc4]/[0.10] bg-[#2f2a20]",
+          title: "text-[#f1e6cf]",
+          icon: "text-[#efe6d1]/[0.46] hover:bg-[#efe6d1]/[0.10] hover:text-[#efe6d1]",
+          body: "bg-[#211e17]",
+          collapsed: "bg-[#211e17]",
+          collapsedLabel: "border-[#e8dcc4]/[0.12] bg-[#efe6d1]/[0.06] text-[#efe6d1]/[0.50]",
+        }
+      : {
+          shell: "border-white/[0.08] bg-[#0d0d0e]/92 shadow-[0_24px_70px_rgba(0,0,0,0.42)]",
+          header: "border-white/[0.08] bg-white/[0.035]",
+          title: "text-white/[0.78]",
+          icon: "text-white/[0.38] hover:bg-white/[0.08] hover:text-white",
+          body: "bg-black/20",
+          collapsed: "bg-black/30",
+          collapsedLabel: "border-white/[0.08] bg-white/[0.04] text-white/[0.34]",
+        };
 
   useEffect(() => {
     const readUser = () => {
@@ -356,12 +436,7 @@ export default function ManjuStudioLayout({
   }, [fetchCredits, settingsOpen, settingsTab]);
 
   useEffect(() => {
-    const previous = previousActiveStepRef.current;
     previousActiveStepRef.current = activeStep;
-    if (activeStep !== previous && activeStep !== "overview") {
-      setRightPanelOpen(true);
-      setRightPanelTab("node");
-    }
   }, [activeStep]);
 
   const scriptNode = nodes.find((n) => n.type === "script");
@@ -576,7 +651,70 @@ export default function ManjuStudioLayout({
   };
 
   return (
-    <div className={cn("flex h-screen w-screen flex-col overflow-hidden", surfaceStyle.root)}>
+    <div className={cn("ai-comic-studio flex h-screen w-screen flex-col overflow-hidden", surfaceStyle.root)} data-ai-comic-surface={surfaceMode}>
+      <style jsx global>{`
+        .ai-comic-studio[data-ai-comic-surface="day"] .ai-comic-right-panel .bg-surface-card,
+        .ai-comic-studio[data-ai-comic-surface="day"] .ai-comic-right-panel .bg-surface-card\/70 {
+          background-color: rgba(255, 255, 255, 0.92) !important;
+        }
+        .ai-comic-studio[data-ai-comic-surface="day"] .ai-comic-right-panel .bg-surface-base {
+          background-color: #fffdf8 !important;
+        }
+        .ai-comic-studio[data-ai-comic-surface="day"] .ai-comic-right-panel .border-surface-border {
+          border-color: rgba(41, 37, 29, 0.12) !important;
+        }
+        .ai-comic-studio[data-ai-comic-surface="day"] .ai-comic-right-panel .text-text-primary {
+          color: #1d1a14 !important;
+        }
+        .ai-comic-studio[data-ai-comic-surface="day"] .ai-comic-right-panel .text-text-secondary {
+          color: rgba(29, 26, 20, 0.70) !important;
+        }
+        .ai-comic-studio[data-ai-comic-surface="day"] .ai-comic-right-panel .text-text-tertiary {
+          color: rgba(29, 26, 20, 0.46) !important;
+        }
+        .ai-comic-studio[data-ai-comic-surface="night"] .ai-comic-right-panel .bg-surface-card,
+        .ai-comic-studio[data-ai-comic-surface="night"] .ai-comic-right-panel .bg-surface-card\/70 {
+          background-color: rgba(24, 24, 26, 0.92) !important;
+        }
+        .ai-comic-studio[data-ai-comic-surface="night"] .ai-comic-right-panel .bg-surface-base {
+          background-color: #101012 !important;
+        }
+        .ai-comic-studio[data-ai-comic-surface="night"] .ai-comic-right-panel .border-surface-border {
+          border-color: rgba(255, 255, 255, 0.10) !important;
+        }
+        .ai-comic-studio[data-ai-comic-surface="night"] .ai-comic-right-panel .text-text-primary {
+          color: rgba(255, 255, 255, 0.88) !important;
+        }
+        .ai-comic-studio[data-ai-comic-surface="night"] .ai-comic-right-panel .text-text-secondary {
+          color: rgba(255, 255, 255, 0.62) !important;
+        }
+        .ai-comic-studio[data-ai-comic-surface="night"] .ai-comic-right-panel .text-text-tertiary {
+          color: rgba(255, 255, 255, 0.40) !important;
+        }
+        .ai-comic-studio[data-ai-comic-surface="eye"] .ai-comic-right-panel .bg-surface-card,
+        .ai-comic-studio[data-ai-comic-surface="eye"] .ai-comic-right-panel .bg-surface-card\/70 {
+          background-color: rgba(48, 43, 32, 0.92) !important;
+        }
+        .ai-comic-studio[data-ai-comic-surface="eye"] .ai-comic-right-panel .bg-surface-base {
+          background-color: #27231a !important;
+        }
+        .ai-comic-studio[data-ai-comic-surface="eye"] .ai-comic-right-panel .border-surface-border {
+          border-color: rgba(232, 220, 196, 0.16) !important;
+        }
+        .ai-comic-studio[data-ai-comic-surface="eye"] .ai-comic-right-panel .text-text-primary {
+          color: rgba(245, 236, 216, 0.90) !important;
+        }
+        .ai-comic-studio[data-ai-comic-surface="eye"] .ai-comic-right-panel .text-text-secondary {
+          color: rgba(239, 230, 209, 0.66) !important;
+        }
+        .ai-comic-studio[data-ai-comic-surface="eye"] .ai-comic-right-panel .text-text-tertiary {
+          color: rgba(239, 230, 209, 0.44) !important;
+        }
+        .ai-comic-right-panel textarea,
+        .ai-comic-right-panel input {
+          caret-color: #8b5cf6;
+        }
+      `}</style>
       <header className={cn("flex h-[52px] shrink-0 items-center gap-2 border-b px-3 backdrop-blur-xl", surfaceStyle.header)}>
         <div className="flex min-w-[190px] items-center gap-2">
           <button
@@ -724,7 +862,7 @@ export default function ManjuStudioLayout({
                     <div className="mb-3 flex items-center justify-between gap-4">
                       <div>
                         <div className="text-[15px] font-semibold text-black">画布外观</div>
-                        <div className="mt-0.5 text-[12px] text-black/[0.45]">选择 Seedream Beta 的工作台背景样式</div>
+                        <div className="mt-0.5 text-[12px] text-black/[0.45]">选择 AI 漫剧 的工作台背景样式</div>
                       </div>
                       <span className="rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-medium text-black/[0.45]">
                         当前：{surfaceModeOptions.find((option) => option.id === surfaceMode)?.label}
@@ -800,7 +938,7 @@ export default function ManjuStudioLayout({
                         onClick={() => {
                           setSettingsOpen(false);
                           if (!studioUser) {
-                            router.push("/login?returnUrl=/seedream-beta");
+                            router.push("/login?returnUrl=/ai-comic");
                             return;
                           }
                           localStorage.removeItem("token");
@@ -1080,16 +1218,31 @@ export default function ManjuStudioLayout({
           )}
         </div>
 
-        <div className={cn("ml-3 flex flex-col overflow-hidden rounded-[28px] border border-white/[0.08] bg-[#0d0d0e]/92 shadow-[0_24px_70px_rgba(0,0,0,0.42)] backdrop-blur-xl transition-all duration-200", rightPanelOpen ? "w-[400px]" : "w-10")}>
+        <div
+          className={cn("ai-comic-right-panel relative ml-3 flex flex-col overflow-hidden rounded-[28px] border backdrop-blur-xl transition-all duration-200", rightPanelStyle.shell, rightPanelOpen ? "" : "w-10")}
+          style={rightPanelOpen ? { width: rightPanelWidth } : undefined}
+        >
           {rightPanelOpen ? (
             <div className="flex h-full flex-col">
-              <div className="flex h-11 items-center justify-between border-b border-white/[0.08] bg-white/[0.035] px-3">
-                <span className="text-xs font-semibold text-white/[0.78]">生产检查</span>
-                <button type="button" onClick={() => setRightPanelOpen(false)} className="rounded-full p-1 text-white/[0.38] hover:bg-white/[0.08] hover:text-white">
+              <div
+                role="separator"
+                aria-orientation="vertical"
+                title="拖动调整生产检查宽度"
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  rightPanelResizeRef.current = { startX: event.clientX, startWidth: rightPanelWidth };
+                  document.body.style.cursor = "col-resize";
+                  document.body.style.userSelect = "none";
+                }}
+                className="absolute inset-y-0 left-0 z-20 w-2 cursor-col-resize bg-transparent transition hover:bg-brand/35"
+              />
+              <div className={cn("flex h-11 items-center justify-between border-b px-3", rightPanelStyle.header)}>
+                <span className={cn("text-xs font-semibold", rightPanelStyle.title)}>生产检查</span>
+                <button type="button" onClick={() => setRightPanelOpen(false)} className={cn("rounded-full p-1", rightPanelStyle.icon)}>
                   <ChevronRight className="h-4 w-4" />
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto bg-black/20 p-3">
+              <div className={cn("flex-1 overflow-y-auto p-3", rightPanelStyle.body)}>
                 {rightPanelTab === "node" ? (
                   rightPanel ? (
                     rightPanel
@@ -1126,11 +1279,11 @@ export default function ManjuStudioLayout({
               </div>
             </div>
           ) : (
-            <div className="flex h-full flex-col items-center gap-2 bg-black/30 py-2">
-              <button type="button" onClick={() => setRightPanelOpen(true)} className="rounded-full p-1.5 text-white/[0.38] hover:bg-white hover:text-black" title="展开生产检查">
+            <div className={cn("flex h-full flex-col items-center gap-2 py-2", rightPanelStyle.collapsed)}>
+              <button type="button" onClick={() => setRightPanelOpen(true)} className={cn("rounded-full p-1.5", rightPanelStyle.icon)} title="展开生产检查">
                 <ChevronLeft className="h-4 w-4" />
               </button>
-              <span className="mt-1 rounded-full border border-white/[0.08] bg-white/[0.04] px-1.5 py-1 text-[10px] font-bold text-white/[0.34] [writing-mode:vertical-rl]">生产检查</span>
+              <span className={cn("mt-1 rounded-full border px-1.5 py-1 text-[10px] font-bold [writing-mode:vertical-rl]", rightPanelStyle.collapsedLabel)}>生产检查</span>
             </div>
           )}
         </div>

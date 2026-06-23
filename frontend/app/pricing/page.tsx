@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { Check, Coffee, Flame, Star, Infinity, PenLine, Languages, Mic, FileText, ImageIcon, Video, Sparkles, Wand2 } from "lucide-react";
+import { Check, Coffee, Flame, Star, Infinity, PenLine, Languages, Mic, FileText, ImageIcon, Video, Sparkles, Wand2, X, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import QRCode from "qrcode";
 import { useI18n } from "@/lib/i18n";
 
 const plans = [
@@ -72,6 +73,14 @@ const tierBadges = [
 type TierKey = "basic" | "advanced";
 type TierModel = { id: string; name: string; provider?: string; tier?: TierKey };
 
+type PaymentModalState = {
+  orderNo: string;
+  planName: string;
+  amountDisplay: number;
+  qrDataUrl: string;
+  status: string;
+};
+
 const fallbackTierModels: Record<TierKey, TierModel[]> = {
   basic: [
     { id: "gpt-5.4-mini", name: "GPT 5.4 Mini" },
@@ -127,6 +136,9 @@ const advancedFeatureGroups = [
 export default function PricingPage() {
   const { t } = useI18n();
   const [tierModels, setTierModels] = useState<Record<TierKey, TierModel[]>>(fallbackTierModels);
+  const [payment, setPayment] = useState<PaymentModalState | null>(null);
+  const [paymentLoadingPlan, setPaymentLoadingPlan] = useState<string | null>(null);
+  const [paymentError, setPaymentError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -147,6 +159,62 @@ export default function PricingPage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!payment?.orderNo || payment.status === "paid") return;
+    const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
+    if (!token) return;
+    const timer = window.setInterval(() => {
+      fetch(`/api/payments/orders/${encodeURIComponent(payment.orderNo)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (!data?.status) return;
+          setPayment((prev) => (prev && prev.orderNo === payment.orderNo ? { ...prev, status: data.status } : prev));
+          if (data.status === "paid") {
+            window.dispatchEvent(new Event("auth-changed"));
+          }
+        })
+        .catch(() => undefined);
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [payment?.orderNo, payment?.status]);
+
+  async function startAlipayCheckout(plan: (typeof plans)[number]) {
+    setPaymentError("");
+    const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
+    if (!token) {
+      window.location.href = `/login?returnUrl=${encodeURIComponent("/pricing")}`;
+      return;
+    }
+    setPaymentLoadingPlan(plan.id);
+    try {
+      const res = await fetch("/api/payments/fubei/alipay/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ plan_code: plan.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "创建支付订单失败");
+      const qrDataUrl = await QRCode.toDataURL(data.mobile_pay_url, {
+        margin: 1,
+        width: 240,
+        color: { dark: "#0b0b0c", light: "#ffffff" },
+      });
+      setPayment({
+        orderNo: data.order_no,
+        planName: data.plan_name || plan.id,
+        amountDisplay: data.amount_display || data.amount_cents / 100,
+        qrDataUrl,
+        status: data.status || "pending",
+      });
+    } catch (err: any) {
+      setPaymentError(err?.message || "创建支付订单失败");
+    } finally {
+      setPaymentLoadingPlan(null);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-surface">
@@ -211,8 +279,13 @@ export default function PricingPage() {
                   ))}
                 </ul>
 
-                <button disabled={plan.current} className={`w-full py-2 rounded-xl text-sm font-medium transition-colors ${plan.current ? "bg-surface-card border border-surface-border text-text-tertiary cursor-default" : plan.popular ? "bg-purple-500 hover:bg-purple-600 text-white" : "bg-surface-card border border-surface-border text-text-primary hover:bg-surface-elevated"}`}>
-                  {plan.current ? t("pricing.currentPlan") : t(plan.ctaKey)}
+                <button
+                  disabled={plan.current || paymentLoadingPlan === plan.id}
+                  onClick={() => !plan.current && startAlipayCheckout(plan)}
+                  className={`w-full py-2 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2 ${plan.current ? "bg-surface-card border border-surface-border text-text-tertiary cursor-default" : plan.popular ? "bg-purple-500 hover:bg-purple-600 text-white" : "bg-surface-card border border-surface-border text-text-primary hover:bg-surface-elevated"}`}
+                >
+                  {paymentLoadingPlan === plan.id && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {plan.current ? t("pricing.currentPlan") : paymentLoadingPlan === plan.id ? "创建订单中" : t(plan.ctaKey)}
                 </button>
               </div>
             );
@@ -274,9 +347,34 @@ export default function PricingPage() {
         </div>
 
         <div className="mt-8 text-center">
+          {paymentError && <p className="mb-3 text-[12px] text-red-400">{paymentError}</p>}
           <p className="text-[11px] text-text-tertiary">{t("pricing.footerNote")}</p>
         </div>
       </div>
+
+      {payment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+          <div className="relative w-full max-w-sm rounded-3xl border border-surface-border bg-[#202024] p-6 text-center shadow-2xl">
+            <button onClick={() => setPayment(null)} className="absolute right-4 top-4 rounded-full p-1 text-text-tertiary hover:text-text-primary">
+              <X className="w-5 h-5" />
+            </button>
+            <div className="mb-4 text-sm font-semibold text-[#1677ff]">支付宝 ALIPAY</div>
+            <h2 className="text-lg font-semibold text-text-primary">扫一扫付款</h2>
+            <p className="mt-1 text-xs text-text-tertiary">AI Space {payment.planName} 会员套餐</p>
+            <div className="mt-4 text-3xl font-bold text-text-primary">¥{payment.amountDisplay.toFixed(2)}</div>
+            <div className="mx-auto mt-5 flex h-[260px] w-[260px] items-center justify-center rounded-2xl bg-white p-3">
+              <img src={payment.qrDataUrl} alt="支付宝支付二维码" className="h-full w-full" />
+            </div>
+            <p className="mt-4 text-xs text-text-tertiary">请使用手机支付宝扫码完成付款</p>
+            <p className="mt-1 text-xs text-text-tertiary">二维码有效期约 15 分钟</p>
+            {payment.status === "paid" ? (
+              <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">支付成功，会员已开通</div>
+            ) : (
+              <div className="mt-4 flex items-center justify-center gap-2 text-xs text-text-tertiary"><Loader2 className="w-3.5 h-3.5 animate-spin" />正在等待支付结果</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -36,7 +36,7 @@ function AccountSection() {
   const handleLogout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
-    router.push("/login");
+    router.push("/");
   };
 
   const name = user?.name || "";

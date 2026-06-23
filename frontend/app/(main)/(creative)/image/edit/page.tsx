@@ -785,10 +785,10 @@ function ImageEditContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const editMode = useMemo(() => {
-    const mode = searchParams.get("mode") as EditMode | null;
+    const mode = searchParams?.get("mode") as EditMode | null;
     return mode && MODE_ORDER.includes(mode) ? mode : "remove-bg";
   }, [searchParams]);
-  const initialImageUrl = searchParams.get("image") || "";
+  const initialImageUrl = searchParams?.get("image") || "";
   const [sourceUrl, setSourceUrl] = useState(initialImageUrl);
   const [sourceFileId, setSourceFileId] = useState("");
   const [sourceFile, setSourceFile] = useState<File | null>(null);
@@ -951,7 +951,7 @@ function ImageEditContent() {
   }, [editMode]);
 
   useEffect(() => {
-    const image = searchParams.get("image") || "";
+    const image = searchParams?.get("image") || "";
     setSourceUrl(image);
     setSourceFile(null);
     setSourceFileId(extractUploadedFileId(image));

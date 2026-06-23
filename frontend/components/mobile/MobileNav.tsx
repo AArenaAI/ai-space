@@ -183,7 +183,7 @@ export default function MobileNav() {
   const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const routeConvId = searchParams.get("id");
+  const routeConvId = searchParams?.get("id") || null;
   const router = useRouter();
   const drawerRef = useRef<HTMLDivElement>(null);
   const historyScrollRef = useRef<HTMLDivElement>(null);
@@ -300,7 +300,7 @@ export default function MobileNav() {
   useEffect(() => { document.body.style.overflow = menuOpen ? "hidden" : ""; return () => { document.body.style.overflow = ""; }; }, [menuOpen]);
   useEffect(() => { if (!menuOpen) return; const h = (e: MouseEvent) => { if (drawerRef.current && !drawerRef.current.contains(e.target as Node)) setMenuOpen(false); }; document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h); }, [menuOpen]);
 
-  const handleLogout = () => { localStorage.removeItem("token"); localStorage.removeItem("user"); import("@/lib/guestId").then(({ getGuestId }) => getGuestId()); setUser(null); setConversations([]); cachedConversationsMobile = null; setMenuOpen(false); router.push("/login"); };
+  const handleLogout = () => { localStorage.removeItem("token"); localStorage.removeItem("user"); import("@/lib/guestId").then(({ getGuestId }) => getGuestId()); setUser(null); setConversations([]); cachedConversationsMobile = null; setMenuOpen(false); router.push("/"); };
   const handleNewChat = () => { router.push(`/chat?t=${Date.now()}`); setMenuOpen(false); };
   const handleOpenConversation = useCallback((conv: Conversation) => {
     setCurrentConvId(String(conv.id));
@@ -337,7 +337,7 @@ export default function MobileNav() {
         {user ? (
           <div className="w-7 h-7 rounded-full bg-brand/10 flex items-center justify-center"><User className="w-3.5 h-3.5 text-brand" /></div>
         ) : (
-          <Link href="/login" className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm text-brand hover:bg-brand/5 transition-colors"><LogIn className="w-3.5 h-3.5" /><span className="font-medium">登录</span></Link>
+          <Link href="/" className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm text-brand hover:bg-brand/5 transition-colors"><LogIn className="w-3.5 h-3.5" /><span className="font-medium">登录</span></Link>
         )}
       </header>
 
@@ -430,7 +430,7 @@ export default function MobileNav() {
               <button onClick={handleLogout} className="flex items-center justify-center gap-2 w-full px-3 py-2 rounded-lg text-sm text-red-400 hover:bg-red-500/10 transition-colors">退出登录</button>
             </div>
           ) : (
-            <Link href="/login" onClick={() => setMenuOpen(false)} className="flex items-center justify-center gap-2 w-full px-3 py-2.5 rounded-lg bg-brand text-white text-sm font-medium hover:bg-brand-hover transition-colors"><LogIn className="w-4 h-4" />登录 / 注册</Link>
+            <Link href="/" onClick={() => setMenuOpen(false)} className="flex items-center justify-center gap-2 w-full px-3 py-2.5 rounded-lg bg-brand text-white text-sm font-medium hover:bg-brand-hover transition-colors"><LogIn className="w-4 h-4" />登录 / 注册</Link>
           )}
         </div>
       </div>

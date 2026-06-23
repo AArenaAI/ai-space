@@ -25,6 +25,20 @@ type Config struct {
 	SMTPPassword string
 	SMTPFrom     string
 
+	// ========== Payment / Fubei + Alipay ==========
+	PublicAppURL           string
+	FubeiGatewayURL        string
+	FubeiAppID             string
+	FubeiAppSecret         string
+	FubeiStoreID           int
+	FubeiOrderCreateMethod string
+	FubeiPlanBasicCents    int64
+	FubeiPlanPlusCents     int64
+	FubeiPlanUltraCents    int64
+	AlipayGatewayURL       string
+	AlipayAppID            string
+	AlipayPrivateKey       string
+
 	// ========== Google Cloud Translation（专用翻译 API，后端服务账号认证）==========
 	GoogleCloudProjectID    string
 	GoogleTranslateLocation string
@@ -192,6 +206,19 @@ func Load() *Config {
 		SMTPUser:     getEnv("SMTP_USER", ""),
 		SMTPPassword: getEnv("SMTP_PASSWORD", ""),
 		SMTPFrom:     getEnv("SMTP_FROM", ""),
+
+		PublicAppURL:           getEnv("PUBLIC_APP_URL", getEnv("FRONTEND_URL", "")),
+		FubeiGatewayURL:        getEnv("FUBEI_GATEWAY_URL", ""),
+		FubeiAppID:             getEnv("FUBEI_APP_ID", ""),
+		FubeiAppSecret:         getEnv("FUBEI_APP_SECRET", ""),
+		FubeiStoreID:           getEnvInt("FUBEI_STORE_ID", 0),
+		FubeiOrderCreateMethod: getEnv("FUBEI_ORDER_CREATE_METHOD", "fbpay.order.create"),
+		FubeiPlanBasicCents:    int64(getEnvInt("FUBEI_PLAN_BASIC_CENTS", 0)),
+		FubeiPlanPlusCents:     int64(getEnvInt("FUBEI_PLAN_PLUS_CENTS", 0)),
+		FubeiPlanUltraCents:    int64(getEnvInt("FUBEI_PLAN_ULTRA_CENTS", 0)),
+		AlipayGatewayURL:       getEnv("ALIPAY_GATEWAY_URL", "https://openapi.alipay.com/gateway.do"),
+		AlipayAppID:            getEnv("ALIPAY_APP_ID", ""),
+		AlipayPrivateKey:       getEnv("ALIPAY_PRIVATE_KEY", ""),
 
 		GoogleCloudProjectID:    getEnv("GOOGLE_CLOUD_PROJECT_ID", ""),
 		GoogleTranslateLocation: getEnv("GOOGLE_TRANSLATE_LOCATION", "global"),

@@ -26,20 +26,24 @@ type BillingPlan struct {
 
 // BillingOrder stores payment/order state independently from current user entitlements.
 type BillingOrder struct {
-	ID                 uint       `gorm:"primaryKey" json:"id"`
-	OrderNo            string     `gorm:"size:64;uniqueIndex" json:"order_no"`
-	UserID             uint       `gorm:"index" json:"user_id"`
-	PlanID             uint       `gorm:"index" json:"plan_id"`
-	AmountCents        int64      `json:"amount_cents"`
-	Currency           string     `gorm:"size:12" json:"currency"`
-	Status             string     `gorm:"size:32;index" json:"status"` // pending / paid / failed / cancelled / refunded
-	Provider           string     `gorm:"size:32;index" json:"provider"`
-	ProviderOrderID    string     `gorm:"size:128;index" json:"provider_order_id"`
-	ProviderCustomerID string     `gorm:"size:128;index" json:"provider_customer_id"`
-	FailedReason       string     `gorm:"type:text" json:"failed_reason"`
-	PaidAt             *time.Time `json:"paid_at,omitempty"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
+	ID                  uint       `gorm:"primaryKey" json:"id"`
+	OrderNo             string     `gorm:"size:64;uniqueIndex" json:"order_no"`
+	UserID              uint       `gorm:"index" json:"user_id"`
+	PlanID              uint       `gorm:"index" json:"plan_id"`
+	AmountCents         int64      `json:"amount_cents"`
+	Currency            string     `gorm:"size:12" json:"currency"`
+	Status              string     `gorm:"size:32;index" json:"status"` // pending / paid / failed / cancelled / refunded
+	Provider            string     `gorm:"size:32;index" json:"provider"`
+	Channel             string     `gorm:"size:32;index" json:"channel"`
+	PlanCode            string     `gorm:"size:64;index" json:"plan_code"`
+	PlanName            string     `gorm:"size:128" json:"plan_name"`
+	ProviderOrderID     string     `gorm:"size:128;index" json:"provider_order_id"`
+	ProviderCustomerID  string     `gorm:"size:128;index" json:"provider_customer_id"`
+	ProviderRawResponse string     `gorm:"type:text" json:"provider_raw_response,omitempty"`
+	FailedReason        string     `gorm:"type:text" json:"failed_reason"`
+	PaidAt              *time.Time `json:"paid_at,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
 }
 
 // BillingSubscription stores recurring entitlement relationships.

@@ -68,7 +68,7 @@ export function normalizeVideoResolutionForModel(model: string | undefined, reso
   const raw = resolution || "720p";
   return options.includes(raw) ? raw : "720p";
 }
-// Seedream Beta 文本工作流分层：DeepSeek 负责低成本剧本初稿，GPT 负责高质量精修/强钩子/对白重写。
+// AI 漫剧 文本工作流分层：DeepSeek 负责低成本剧本初稿，GPT 负责高质量精修/强钩子/对白重写。
 export const WORKFLOW_DRAFT_MODEL = "deepseek-v4-pro";
 export const WORKFLOW_POLISH_MODEL = "gpt-5.5";
 export const WORKFLOW_MODEL = WORKFLOW_DRAFT_MODEL;
@@ -162,9 +162,9 @@ export const WORKFLOW_STEPS: Array<{ id: WorkflowMode; titleKey: string; descKey
 ];
 
 export const SETTING_BOARD_IMAGES = [
-  { name: "沈青檀", role: "图一", src: "/seedream-beta/settings/shen-qingtan.png" },
-  { name: "顾南舟", role: "图二", src: "/seedream-beta/settings/gu-nanzhou.png" },
-  { name: "沈砚山", role: "图三", src: "/seedream-beta/settings/shen-yanshan.png" },
-  { name: "陆衡", role: "图四", src: "/seedream-beta/settings/lu-heng.png" },
-  { name: "洄州百姓 / 喜堂宾客群像", role: "图五", src: "/seedream-beta/settings/huizhou-guests.png" },
+  { name: "沈青檀", role: "图一", src: "/ai-comic/settings/shen-qingtan.png" },
+  { name: "顾南舟", role: "图二", src: "/ai-comic/settings/gu-nanzhou.png" },
+  { name: "沈砚山", role: "图三", src: "/ai-comic/settings/shen-yanshan.png" },
+  { name: "陆衡", role: "图四", src: "/ai-comic/settings/lu-heng.png" },
+  { name: "洄州百姓 / 喜堂宾客群像", role: "图五", src: "/ai-comic/settings/huizhou-guests.png" },
 ];

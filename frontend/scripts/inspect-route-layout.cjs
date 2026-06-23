@@ -3,7 +3,7 @@ const { chromium } = require('playwright');
 (async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, locale: 'zh-CN' });
-  for (const route of ['/chat','/image','/translator','/document-reader','/seedream-beta','/ppt']) {
+  for (const route of ['/chat','/image','/translator','/document-reader','/ai-comic','/ppt']) {
     await page.goto(`http://localhost:3000${route}`, { waitUntil: 'domcontentloaded', timeout: 45000 });
     await page.waitForTimeout(6000);
     const info = await page.evaluate(() => {

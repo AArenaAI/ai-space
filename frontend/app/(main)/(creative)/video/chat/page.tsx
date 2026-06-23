@@ -266,33 +266,33 @@ function VideoChatPageInner() {
 
   const [displayMessages, setDisplayMessages] = useState<DisplayMessage[]>([]);
   const [currentChatId, setCurrentChatId] = useState<number | null>(() => {
-    const chatId = searchParams.get("chatId");
+    const chatId = searchParams?.get("chatId");
     return chatId ? Number(chatId) : null;
   });
   const [generating, setGenerating] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [referenceImages, setReferenceImages] = useState<string[]>(() => {
-    const refs = searchParams.get("refs");
+    const refs = searchParams?.get("refs");
     return refs ? refs.split(",").filter(Boolean) : [];
   });
   const [referenceVideos, setReferenceVideos] = useState<string[]>(() => {
-    const refs = searchParams.get("videoRefs");
+    const refs = searchParams?.get("videoRefs");
     return refs ? refs.split(",").filter(Boolean) : [];
   });
 
-  const draftPrompt = searchParams.get("draft");
+  const draftPrompt = searchParams?.get("draft");
 
   const [referenceImageRoles, setReferenceImageRoles] = useState<ReferenceImageRole[]>(() => referenceImages.map(() => "reference_image"));
   const [uploadingRef, setUploadingRef] = useState(false);
   const [isDraggingReference, setIsDraggingReference] = useState(false);
-  const [selectedAspectRatio, setSelectedAspectRatio] = useState(searchParams.get("aspect") || "adaptive");
-  const [selectedDuration, setSelectedDuration] = useState(searchParams.get("duration") || "5s");
-  const [musicEnabled, setMusicEnabled] = useState(searchParams.get("audio") === "1");
-  const [selectedModel, setSelectedModel] = useState(searchParams.get("model") || "");
+  const [selectedAspectRatio, setSelectedAspectRatio] = useState(searchParams?.get("aspect") || "adaptive");
+  const [selectedDuration, setSelectedDuration] = useState(searchParams?.get("duration") || "5s");
+  const [musicEnabled, setMusicEnabled] = useState(searchParams?.get("audio") === "1");
+  const [selectedModel, setSelectedModel] = useState(searchParams?.get("model") || "");
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [aspectMenuOpen, setAspectMenuOpen] = useState(false);
   const [durationMenuOpen, setDurationMenuOpen] = useState(false);
-  const [selectedResolution, setSelectedResolution] = useState(searchParams.get("resolution") || "720p");
+  const [selectedResolution, setSelectedResolution] = useState(searchParams?.get("resolution") || "720p");
   const [resolutionMenuOpen, setResolutionMenuOpen] = useState(false);
   const [referenceModeMenuOpen, setReferenceModeMenuOpen] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
@@ -313,12 +313,12 @@ function VideoChatPageInner() {
   const hasReferenceMedia = referenceImages.length > 0 || referenceVideos.length > 0;
   const selectedReferenceMode = REFERENCE_IMAGE_ROLE_PRESETS[0];
   useEffect(() => {
-    const refsFromQuery = searchParams.get("refs");
-    const videoRefsFromQuery = searchParams.get("videoRefs");
+    const refsFromQuery = searchParams?.get("refs");
+    const videoRefsFromQuery = searchParams?.get("videoRefs");
 
     if (refsFromQuery) {
       const nextRefs = refsFromQuery.split(",").filter(Boolean);
-      const roleParams = (searchParams.get("refRoles") || "").split(",").filter(Boolean) as ReferenceImageRole[];
+      const roleParams = (searchParams?.get("refRoles") || "").split(",").filter(Boolean) as ReferenceImageRole[];
       setReferenceImages(nextRefs);
       setReferenceImageRoles(
         nextRefs.map((_, index) => {
@@ -461,7 +461,7 @@ function VideoChatPageInner() {
   }, [messages]);
 
   useEffect(() => {
-    const chatId = searchParams.get("chatId");
+    const chatId = searchParams?.get("chatId");
     if (!chatId) return;
     const numericChatId = Number(chatId);
     if (!numericChatId) return;
@@ -591,8 +591,8 @@ function VideoChatPageInner() {
   }, [createChat, currentChatId, fetchChats, fetchMessages, musicEnabled, referenceImageRoles, referenceImages, referenceVideos, router, selectedAspectRatio, selectedDuration, selectedModel, selectedModelInfo, selectedResolution, sendMessage, t, videoErrorMessages]);
 
   useEffect(() => {
-    let initialPrompt = searchParams.get("prompt") || "";
-    if (!initialPrompt && searchParams.get("draft") === "1") {
+    let initialPrompt = searchParams?.get("prompt") || "";
+    if (!initialPrompt && searchParams?.get("draft") === "1") {
       initialPrompt = sessionStorage.getItem(VIDEO_CHAT_DRAFT_PROMPT_KEY) || "";
     }
     if (!initialPrompt || autoSubmittedRef.current) return;
@@ -810,7 +810,7 @@ function VideoChatPageInner() {
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 md:px-6"
       >
         <div className="max-w-3xl mx-auto space-y-6">
-          {displayMessages.length === 0 && !searchParams.get("prompt") && searchParams.get("draft") !== "1" && (
+          {displayMessages.length === 0 && !searchParams?.get("prompt") && searchParams?.get("draft") !== "1" && (
             <div className="flex flex-col items-center justify-center h-full text-text-tertiary py-20">
               <div className="w-16 h-16 rounded-2xl bg-surface-card border border-surface-border flex items-center justify-center mb-4">
                 <Video className="w-8 h-8 text-text-tertiary/50" />

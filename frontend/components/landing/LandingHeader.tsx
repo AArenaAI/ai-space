@@ -78,6 +78,7 @@ export default function LandingHeader() {
     localStorage.removeItem("user");
     setUser(null);
     setDropdownOpen(false);
+    window.location.href = "/";
   };
 
   const avatarEl = (size: number, textSize: string) => {

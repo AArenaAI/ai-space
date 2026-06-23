@@ -305,13 +305,13 @@ function ImageChatPageInner() {
   const selectedModelInfo = imageModels.find((m) => m.id === selectedModel) || imageModels[0];
   const selectedAspect = ASPECT_RATIOS.find((item) => item.value === selectedAspectRatio) || ASPECT_RATIOS[0];
 
-  const initialPromptFromUrl = searchParams.get("prompt") || "";
-  const initialAspect = searchParams.get("aspect") || "auto";
-  const initialResolution = searchParams.get("resolution") || "1K";
-  const initialQuality = searchParams.get("quality") || "medium";
-  const initialRefs = searchParams.get("refs");
+  const initialPromptFromUrl = searchParams?.get("prompt") || "";
+  const initialAspect = searchParams?.get("aspect") || "auto";
+  const initialResolution = searchParams?.get("resolution") || "1K";
+  const initialQuality = searchParams?.get("quality") || "medium";
+  const initialRefs = searchParams?.get("refs");
   const initialRefImages = initialRefs ? initialRefs.split(",") : [];
-  const urlChatId = searchParams.get("chatId");
+  const urlChatId = searchParams?.get("chatId");
 
   useEffect(() => {
     if (!selectedModel && imageModels.length > 0) {
@@ -400,7 +400,7 @@ function ImageChatPageInner() {
   // 页面加载时如果有初始 prompt 且没有 chatId，自动发起生成
   useEffect(() => {
     let initialPrompt = initialPromptFromUrl;
-    if (!initialPrompt && searchParams.get("draft") === "1") {
+    if (!initialPrompt && searchParams?.get("draft") === "1") {
       initialPrompt = sessionStorage.getItem(IMAGE_CHAT_DRAFT_PROMPT_KEY) || "";
     }
     if (!initialPrompt || urlChatId || displayMessages.length > 0 || autoSubmittedRef.current) return;
@@ -741,7 +741,7 @@ function ImageChatPageInner() {
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 md:px-6"
       >
         <div className="max-w-3xl mx-auto space-y-6">
-          {displayMessages.length === 0 && !initialPromptFromUrl && searchParams.get("draft") !== "1" && (
+          {displayMessages.length === 0 && !initialPromptFromUrl && searchParams?.get("draft") !== "1" && (
             <div className="flex flex-col items-center justify-center h-full text-text-tertiary py-20">
               <div className="w-16 h-16 rounded-2xl bg-surface-card border border-surface-border flex items-center justify-center mb-4">
                 <ImageIcon className="w-8 h-8 text-text-tertiary/50" />

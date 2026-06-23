@@ -147,9 +147,9 @@ function ChatSkeleton() {
 
 export default function SkillChatContent() {
   const searchParams = useSearchParams();
-  const urlSkillKey = searchParams.get("key") || "";
-  const conversationId = searchParams.get("id")
-    ? Number(searchParams.get("id"))
+  const urlSkillKey = searchParams?.get("key") || "";
+  const conversationId = searchParams?.get("id")
+    ? Number(searchParams?.get("id"))
     : undefined;
 
   const [skillKey, setSkillKey] = useState(urlSkillKey);

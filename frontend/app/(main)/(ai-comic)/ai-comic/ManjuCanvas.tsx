@@ -697,18 +697,18 @@ function ManjuCanvasInner({
           display: flex;
           flex-direction: column;
           gap: 1px;
-          background: rgba(255, 255, 255, 0.96) !important;
-          border-color: rgba(255, 255, 255, 0.9) !important;
-          box-shadow: 0 18px 42px rgba(0, 0, 0, 0.45) !important;
+          background: ${surfaceMode === "day" ? "rgba(255, 255, 255, 0.94)" : surfaceMode === "eye" ? "rgba(48, 43, 32, 0.92)" : "rgba(18, 18, 20, 0.92)"} !important;
+          border-color: ${surfaceMode === "day" ? "rgba(20, 20, 18, 0.10)" : surfaceMode === "eye" ? "rgba(232, 220, 196, 0.14)" : "rgba(255, 255, 255, 0.12)"} !important;
+          box-shadow: ${surfaceMode === "day" ? "0 18px 42px rgba(25, 23, 18, 0.14)" : "0 18px 42px rgba(0, 0, 0, 0.42)"} !important;
         }
         .seedream-react-flow .react-flow__controls-button {
           width: 34px !important;
           height: 34px !important;
-          background: #ffffff !important;
+          background: ${surfaceMode === "day" ? "#ffffff" : surfaceMode === "eye" ? "#302b20" : "#121214"} !important;
           border: 0 !important;
-          border-bottom: 1px solid rgba(0, 0, 0, 0.12) !important;
-          color: #050505 !important;
-          fill: #050505 !important;
+          border-bottom: 1px solid ${surfaceMode === "day" ? "rgba(0, 0, 0, 0.10)" : surfaceMode === "eye" ? "rgba(232, 220, 196, 0.12)" : "rgba(255, 255, 255, 0.10)"} !important;
+          color: ${surfaceMode === "day" ? "#111111" : surfaceMode === "eye" ? "#efe6d1" : "#ffffff"} !important;
+          fill: currentColor !important;
           transition: background 160ms ease, color 160ms ease, transform 160ms ease;
         }
         .seedream-react-flow .react-flow__controls-button:last-child {
@@ -723,9 +723,9 @@ function ManjuCanvasInner({
           stroke: currentColor !important;
         }
         .seedream-react-flow .react-flow__controls-button:hover {
-          background: #0a0a0a !important;
-          color: #ffffff !important;
-          fill: #ffffff !important;
+          background: ${surfaceMode === "day" ? "#0a0a0a" : surfaceMode === "eye" ? "#efe6d1" : "#ffffff"} !important;
+          color: ${surfaceMode === "day" ? "#ffffff" : surfaceMode === "eye" ? "#1d1a15" : "#050505"} !important;
+          fill: currentColor !important;
         }
       `}</style>
       <ReactFlow

@@ -44,7 +44,7 @@ export default function ModuleSidebar({ groups, storageKey }: ModuleSidebarProps
   const pathname = cleanPathname(rawPathname);
   const router = useRouter();
   const searchParams = useSearchParams();
-  const search = searchParams.toString();
+  const search = (searchParams?.toString() || "");
   const handleNewChat = () => router.push(`/chat?t=${Date.now()}`);
   const [collapsed, setCollapsed] = useState(false);
   const [user, setUser] = useState<any>(null);

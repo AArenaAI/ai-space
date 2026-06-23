@@ -97,7 +97,7 @@ const defaultFilters: UsageFilters = {
 
 export default function AdminUsagePage() {
   const router = useRouter();
-  const pathname = usePathname();
+  const pathname = usePathname() || "/admin/usage";
   const searchParams = useSearchParams();
   const [filters, setFilters] = useState<UsageFilters>(() => filtersFromSearch(searchParams));
   const [debouncedFilters, setDebouncedFilters] = useState<UsageFilters>(() => filtersFromSearch(searchParams));
@@ -1023,29 +1023,29 @@ function usageFiltersToQuery(filters: UsageFilters, tab: UsageTab) {
   return params.toString();
 }
 
-function usageTabFromSearch(params: URLSearchParams): UsageTab {
-  const tab = params.get("tab") as UsageTab | null;
+function usageTabFromSearch(params: Pick<URLSearchParams, "get"> | null): UsageTab {
+  const tab = params?.get("tab") as UsageTab | null;
   return tabs.some((item) => item.value === tab) ? tab! : "modules";
 }
 
-function filtersFromSearch(params: URLSearchParams): UsageFilters {
+function filtersFromSearch(params: Pick<URLSearchParams, "get"> | null): UsageFilters {
   return {
     ...defaultFilters,
-    range: params.get("range") || defaultFilters.range,
-    module: params.get("module") || "",
-    feature: params.get("feature") || "",
-    operation: params.get("operation") || "",
-    service: params.get("service") || "",
-    provider: params.get("provider") || "",
-    model: params.get("model") || "",
-    status: params.get("status") || "",
-    userId: params.get("user_id") || "",
-    messageId: params.get("message_id") || "",
-    taskId: params.get("task_id") || "",
-    resourceType: params.get("resource_type") || "",
-    resourceId: params.get("resource_id") || "",
-    requestId: params.get("request_id") || "",
-    q: params.get("q") || "",
+    range: params?.get("range") || defaultFilters.range,
+    module: params?.get("module") || "",
+    feature: params?.get("feature") || "",
+    operation: params?.get("operation") || "",
+    service: params?.get("service") || "",
+    provider: params?.get("provider") || "",
+    model: params?.get("model") || "",
+    status: params?.get("status") || "",
+    userId: params?.get("user_id") || "",
+    messageId: params?.get("message_id") || "",
+    taskId: params?.get("task_id") || "",
+    resourceType: params?.get("resource_type") || "",
+    resourceId: params?.get("resource_id") || "",
+    requestId: params?.get("request_id") || "",
+    q: params?.get("q") || "",
   };
 }
 

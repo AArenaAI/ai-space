@@ -23,7 +23,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 import SidebarUserPanel from "@/components/sidebar/SidebarUserPanel";
-import { useSeedreamProjects } from "@/app/(main)/(seedream-beta)/seedream-beta/useSeedreamProjects";
+import { useSeedreamProjects } from "@/app/(main)/(ai-comic)/ai-comic/useSeedreamProjects";
 
 const SIDEBAR_WIDTH_KEY = "seedream-beta-sidebar-width";
 
@@ -31,19 +31,19 @@ const NAV_GROUPS = [
   {
     titleKey: "seedreamBeta.sidebar.creation",
     items: [
-      { icon: Wand2, labelKey: "seedreamBeta.workflowTab", href: "/seedream-beta?tab=workflow", matchPath: "/seedream-beta", matchQuery: "tab=workflow" },
-      { icon: FileText, labelKey: "seedreamBeta.workflow.scriptTitle", href: "/seedream-beta?tab=workflow&mode=script", matchPath: "/seedream-beta", matchQuery: "tab=workflow&mode=script" },
-      { icon: Library, labelKey: "seedreamBeta.workflow.assetsTitle", href: "/seedream-beta?tab=workflow&mode=assets", matchPath: "/seedream-beta", matchQuery: "tab=workflow&mode=assets" },
-      { icon: Clapperboard, labelKey: "seedreamBeta.workflow.storyboardVideoTitle", href: "/seedream-beta?tab=workflow&mode=storyboardVideo", matchPath: "/seedream-beta", matchQuery: "tab=workflow&mode=storyboardVideo" },
-      { icon: ImageIcon, labelKey: "seedreamBeta.workflow.storyboardImageTitle", href: "/seedream-beta?tab=workflow&mode=storyboardImage", matchPath: "/seedream-beta", matchQuery: "tab=workflow&mode=storyboardImage" },
+      { icon: Wand2, labelKey: "seedreamBeta.workflowTab", href: "/ai-comic?tab=workflow", matchPath: "/ai-comic", matchQuery: "tab=workflow" },
+      { icon: FileText, labelKey: "seedreamBeta.workflow.scriptTitle", href: "/ai-comic?tab=workflow&mode=script", matchPath: "/ai-comic", matchQuery: "tab=workflow&mode=script" },
+      { icon: Library, labelKey: "seedreamBeta.workflow.assetsTitle", href: "/ai-comic?tab=workflow&mode=assets", matchPath: "/ai-comic", matchQuery: "tab=workflow&mode=assets" },
+      { icon: Clapperboard, labelKey: "seedreamBeta.workflow.storyboardVideoTitle", href: "/ai-comic?tab=workflow&mode=storyboardVideo", matchPath: "/ai-comic", matchQuery: "tab=workflow&mode=storyboardVideo" },
+      { icon: ImageIcon, labelKey: "seedreamBeta.workflow.storyboardImageTitle", href: "/ai-comic?tab=workflow&mode=storyboardImage", matchPath: "/ai-comic", matchQuery: "tab=workflow&mode=storyboardImage" },
     ],
   },
   {
     titleKey: "seedreamBeta.sidebar.production",
     items: [
-      { icon: ImageIcon, labelKey: "seedreamBeta.imageTab", href: "/seedream-beta?tab=image", matchPath: "/seedream-beta", matchQuery: "tab=image" },
-      { icon: Video, labelKey: "seedreamBeta.videoTab", href: "/seedream-beta?tab=video", matchPath: "/seedream-beta", matchQuery: "tab=video" },
-      { icon: Sparkles, labelKey: "seedreamBeta.sidebar.queue", href: "/seedream-beta?tab=workflow&mode=storyboardImage", matchPath: "/seedream-beta", matchQuery: "tab=workflow&mode=storyboardImage" },
+      { icon: ImageIcon, labelKey: "seedreamBeta.imageTab", href: "/ai-comic?tab=image", matchPath: "/ai-comic", matchQuery: "tab=image" },
+      { icon: Video, labelKey: "seedreamBeta.videoTab", href: "/ai-comic?tab=video", matchPath: "/ai-comic", matchQuery: "tab=video" },
+      { icon: Sparkles, labelKey: "seedreamBeta.sidebar.queue", href: "/ai-comic?tab=workflow&mode=storyboardImage", matchPath: "/ai-comic", matchQuery: "tab=workflow&mode=storyboardImage" },
     ],
   },
 ];
@@ -289,8 +289,8 @@ export default function SeedreamBetaSidebar() {
               {group.items.map((item) => {
                 const itemQuery = getQuery(item.href);
                 const expected = new URLSearchParams(itemQuery || "");
-                const currentTab = searchParams.get("tab") || "workflow";
-                const currentMode = searchParams.get("mode") || "";
+                const currentTab = searchParams?.get("tab") || "workflow";
+                const currentMode = searchParams?.get("mode") || "";
                 const expectedTab = expected.get("tab") || "workflow";
                 const expectedMode = expected.get("mode") || "";
                 const isActive = pathname === item.matchPath && currentTab === expectedTab && currentMode === expectedMode;

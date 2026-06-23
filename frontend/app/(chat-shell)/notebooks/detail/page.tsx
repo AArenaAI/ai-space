@@ -904,11 +904,11 @@ function NotebookCustomizeDialog({
 function NotebookDetailContent() {
   const { t, language } = useI18n();
   const searchParams = useSearchParams();
-  const notebookId = Number(searchParams.get("notebook_id") || searchParams.get("id"));
+  const notebookId = Number(searchParams?.get("notebook_id") || searchParams?.get("id"));
   const isReadonlyNotebook = notebookId < 0;
   const readonlyNotebook = READONLY_NOTEBOOKS.find((item) => item.id === notebookId) || null;
   const writableNotebookId = isReadonlyNotebook ? 0 : notebookId;
-  const conversationId = searchParams.get("conversation_id") ? Number(searchParams.get("conversation_id")) : undefined;
+  const conversationId = searchParams?.get("conversation_id") ? Number(searchParams?.get("conversation_id")) : undefined;
   const [notebook, setNotebook] = useState<Notebook | null>(null);
   const [files, setFiles] = useState<NotebookFile[]>([]);
   const [loading, setLoading] = useState(true);

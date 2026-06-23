@@ -27,6 +27,22 @@ export function mapAuthError(raw: string): Partial<UserFacingError> | null {
     return authError("auth_email_registered", "该邮箱已被注册", "login");
   }
 
+  if (/该邮箱尚未注册|邮箱尚未注册|email.*not.*registered|user.*not.*found/i.test(message)) {
+    return authError("auth_email_not_registered", "该邮箱尚未注册，请先注册账号。", "none");
+  }
+
+  if (/验证码|verification code|code/i.test(message)) {
+    return authError("auth_verification_code", message, "none");
+  }
+
+  if (/发送过于频繁|too many requests|rate.?limit|稍后再试/i.test(message)) {
+    return authError("auth_rate_limited", message, "wait");
+  }
+
+  if (/邮件服务未配置|邮件.*发送失败|验证码邮件发送失败|SMTP|mail.*failed|email.*failed/i.test(message)) {
+    return authError("auth_email_send_failed", message, "retry");
+  }
+
   if (/创建账号失败|create.*account|register.*failed|signup.*failed/i.test(message)) {
     return authError("auth_register_failed", "注册失败，请稍后重试。", "retry");
   }
