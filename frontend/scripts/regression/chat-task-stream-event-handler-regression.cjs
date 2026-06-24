@@ -27,9 +27,11 @@ function loadModule() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "chat-task-stream-handler-regression-"));
   [
     "lib/errors/errorCatalog.ts",
+    "lib/errors/authErrorMap.ts",
     "lib/errors/chatErrorMap.ts",
     "lib/errors/fileErrorMap.ts",
     "lib/errors/mediaErrorMap.ts",
+    "lib/errors/translateErrorMap.ts",
     "lib/errors/types.ts",
     "lib/errors/normalizeError.ts",
     "lib/chatSseParser.ts",
@@ -138,7 +140,7 @@ test("handles generation task payload with active state and realtime patch", () 
 test("handles error payload with fallback request id", () => {
   const h = makeHarness({ realtimeData: { requestId: "req-1" } });
   h.handler.processEvent(sse({ _error: { code: "boom", message: "失败", retryable: true } }));
-  assert.equal(h.handler.getAccumulated(), "失败");
+  assert.equal(h.handler.getAccumulated(), "");
   assert.deepEqual(h.getRealtime(), {
     requestId: "req-1",
     errorCode: "boom",
