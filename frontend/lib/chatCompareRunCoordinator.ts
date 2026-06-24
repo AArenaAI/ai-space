@@ -53,6 +53,7 @@ export type RunCompareModelsOptions<TAssistant extends CompareAssistantLike> = {
   templatePrefix?: string;
   skillKey?: string;
   messageFileIds?: string[];
+  explicitGroupContext?: CompareGroupContext;
   callbacks: CompareRunCallbacks<TAssistant>;
 };
 
@@ -121,6 +122,7 @@ export function buildCompareRunRequestBody({
   skillKey,
   messageFileIds,
   clientTimezone,
+  precreatedUserMessage,
 }: {
   assistant: CompareAssistantLike;
   index: number;
@@ -137,6 +139,7 @@ export function buildCompareRunRequestBody({
   skillKey?: string;
   messageFileIds?: string[];
   clientTimezone?: string;
+  precreatedUserMessage?: boolean;
 }): Record<string, any> {
   return buildCompareChatRequestBody({
     model: assistant.model || "",
@@ -147,7 +150,7 @@ export function buildCompareRunRequestBody({
     search,
     templateId,
     templatePrefix,
-    skipSaveUserMessage: shouldSkipSaveUserMessage(index),
+    skipSaveUserMessage: precreatedUserMessage || shouldSkipSaveUserMessage(index),
     groupId: requestGroupContext?.groupId,
     userMessageId: requestGroupContext?.userMessageId,
     groupIndex: index,
@@ -203,6 +206,7 @@ export async function runCompareModel<TAssistant extends CompareAssistantLike>({
         skillKey: options.skillKey,
         messageFileIds: options.messageFileIds,
         clientTimezone: getClientTimezone(),
+        precreatedUserMessage: !!options.explicitGroupContext?.userMessageId,
       })),
     });
     if (!response.ok) {
@@ -252,6 +256,18 @@ export async function runCompareModels<TAssistant extends CompareAssistantLike>(
 
   const firstAssistant = options.assistantMessages[0];
   if (!firstAssistant) return;
+
+  if (options.explicitGroupContext?.groupId && options.explicitGroupContext.userMessageId) {
+    coordinator.setGroupContext(options.explicitGroupContext);
+    await Promise.all(options.assistantMessages.map((assistant, index) => runCompareModel({
+      assistant,
+      index,
+      explicitGroupContext: options.explicitGroupContext,
+      coordinator,
+      options,
+    })));
+    return;
+  }
 
   const firstRun = runCompareModel({
     assistant: firstAssistant,

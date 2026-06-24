@@ -108,6 +108,45 @@ test("coordinator resolves once when group context is ready", async () => {
   assert.equal(resolved.length, 1);
 });
 
+test("runCompareModels starts every model immediately when explicit group context is provided", async () => {
+  const calls = [];
+  const result = await Promise.race([
+    runCompareModels({
+      headers: { "Content-Type": "application/json" },
+      controllers: [new AbortController(), new AbortController()],
+      assistantMessages: [{ id: "a1", model: "deepseek-v4-pro" }, { id: "a2", model: "gemini-3.1-flash-lite" }],
+      compareModelIds: ["deepseek-v4-pro", "gemini-3.1-flash-lite"],
+      modelMessages: [{ role: "user", content: "hi" }],
+      conversationId: 77,
+      reasoning: { enabled: true, effort: "high" },
+      search: false,
+      templateId: 0,
+      explicitGroupContext: { groupId: 900, userMessageId: 901, groupModels: ["deepseek-v4-pro", "gemini-3.1-flash-lite"] },
+      callbacks: {
+        fetchImpl: async (_url, init) => {
+          calls.push(JSON.parse(init.body));
+          return okResponse();
+        },
+        streamResponse: async () => ({ lastSequence: 1, content: "", useBackground: false, sawDone: true }),
+        onGroupContextResolved: () => {},
+        onRecoverableResult: () => {},
+        onAbortUser: () => {},
+        onRunError: () => {},
+        getAbortReason: () => null,
+      },
+    }).then(() => "completed"),
+    new Promise((resolve) => setTimeout(() => resolve("timeout"), 30)),
+  ]);
+
+  assert.equal(result, "completed");
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls.map((body) => body.model), ["deepseek-v4-pro", "gemini-3.1-flash-lite"]);
+  assert.deepEqual(calls.map((body) => body.group_index), [0, 1]);
+  assert.deepEqual(calls.map((body) => body.group_id), [900, 900]);
+  assert.deepEqual(calls.map((body) => body.user_message_id), [901, 901]);
+  assert.deepEqual(calls.map((body) => body.skip_save_user_msg), [true, true]);
+});
+
 test("runCompareModels runs first request then rest after context", async () => {
   const calls = [];
   const controllers = [new AbortController(), new AbortController(), new AbortController()];

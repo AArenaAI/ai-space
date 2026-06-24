@@ -32,6 +32,12 @@ const tmpFile = compileHook("useChatSendRuntime.ts");
 
 let singleRequestImpl = async () => {};
 let compareRunImpl = async () => {};
+let compareInitImpl = async () => ({
+  conversation_id: 10,
+  user_message: { id: 501, conversation_id: 10, role: "user", content: "compare" },
+  group: { id: 601, conversation_id: 10, user_message_id: 501, group_models: ["m1", "m2"] },
+  compare_models: ["m1", "m2"],
+});
 let createConversationRequestImpl = async () => ({ id: 42, title: "created" });
 let realtimeGetImpl = () => undefined;
 let uuidCounter = 0;
@@ -49,6 +55,7 @@ function loadModule(file) {
     if (specifier === "@/lib/guestId") return { getGuestId: () => "guest-id" };
     if (specifier === "@/lib/streaming") return { realtimeGet: (...args) => realtimeGetImpl(...args) };
     if (specifier === "@/lib/chatCompareRunCoordinator") return { runCompareModels: (...args) => compareRunImpl(...args) };
+    if (specifier === "@/lib/chatCompareInitCoordinator") return { initCompareRun: (...args) => compareInitImpl(...args) };
     if (specifier === "@/lib/chatSingleSendCoordinator") {
       return {
         shouldStartSingleSend: ({ content, isRegenerate, attachments }) => Boolean((content || "").trim() || isRegenerate || (attachments && attachments.length)),
@@ -234,6 +241,16 @@ async function testSingleSendRequestErrorPatchesAssistant() {
 
 async function testCompareSendStartsCompareAndRunCoordinator() {
   let compareOpts;
+  let initOpts;
+  compareInitImpl = async (opts) => {
+    initOpts = opts;
+    return {
+      conversation_id: 10,
+      user_message: { id: 501, conversation_id: 10, role: "user", content: opts.content },
+      group: { id: 601, conversation_id: 10, user_message_id: 501, group_models: ["m1", "m2"] },
+      compare_models: ["m1", "m2"],
+    };
+  };
   compareRunImpl = async (opts) => {
     compareOpts = opts;
     opts.callbacks.onGroupContextResolved({ groupId: "g", userMessageId: "u", groupModels: ["m1", "m2"] });
@@ -244,8 +261,13 @@ async function testCompareSendStartsCompareAndRunCoordinator() {
   await runtime.sendCompareMessages("compare", ["m1", "missing", "m2"], { enabled: false }, true);
   assert.equal(state.isCompare, true);
   assert.deepEqual(state.compareModels, ["m1", "m2"]);
+  assert.deepEqual(initOpts.compareModelIds, ["m1", "m2"]);
+  assert.equal(initOpts.workspaceId, "7");
   assert.equal(compareOpts.conversationId, 10);
+  assert.deepEqual(compareOpts.explicitGroupContext, { groupId: 601, userMessageId: 501, groupModels: ["m1", "m2"] });
   assert.equal(compareOpts.assistantMessages.length, 2);
+  assert.deepEqual(compareOpts.assistantMessages.map((message) => message.groupId), [601, 601]);
+  assert.deepEqual(compareOpts.assistantMessages.map((message) => message.groupIndex), [0, 1]);
   assert.equal(refs.compareAbortControllersRef.current.length, 0);
   assert.deepEqual(startPolls[0], [10, compareOpts.assistantMessages[0].id, 202]);
 }

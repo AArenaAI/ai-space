@@ -146,6 +146,7 @@ export function useChatSendRuntime({
     now,
     createId,
     getToken,
+    getWorkspaceId,
     dispatchWindowEvent,
   });
 

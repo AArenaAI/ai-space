@@ -16,6 +16,7 @@ import {
   patchMessageById,
 } from "@/lib/chatMessageStatePatch";
 import { buildChatRequestHeaders } from "@/lib/chatRequestBuilder";
+import { initCompareRun } from "@/lib/chatCompareInitCoordinator";
 import { toModelMessages } from "@/lib/chatHistoryTransform";
 import {
   buildMessageFiles,
@@ -92,6 +93,7 @@ export type UseChatCompareSendRuntimeOptions = {
   now?: () => number;
   createId?: () => string;
   getToken?: () => string | null;
+  getWorkspaceId?: () => string | null;
   dispatchWindowEvent?: (event: Event) => void;
 };
 
@@ -121,6 +123,7 @@ export function useChatCompareSendRuntime({
   now = Date.now,
   createId = uuidv4,
   getToken = () => localStorage.getItem("token"),
+  getWorkspaceId = () => localStorage.getItem("currentWorkspaceId"),
   dispatchWindowEvent = (event) => window.dispatchEvent(event),
 }: UseChatCompareSendRuntimeOptions) {
   const sendCompareMessages = useCallback(
@@ -153,18 +156,45 @@ export function useChatCompareSendRuntime({
 
       const finalContent = content.trim();
       const userFiles = buildMessageFiles(attachments, { defaultType: "file" });
-      const userMsg = createUserChatMessage({
-        id: createId(),
+      const init = await initCompareRun({
+        apiBaseUrl,
+        token,
+        guestId: getGuestId(),
+        conversationId: convId,
+        workspaceId: getWorkspaceId(),
         content: finalContent,
-        createdAt: now(),
-        files: userFiles,
-      }) as Message;
+        model: compareModelIds[0],
+        compareModelIds,
+        skillKey: effectiveSkillKey,
+      });
+      convId = init.conversation_id || convId;
+      const groupContext = {
+        groupId: init.group.id,
+        userMessageId: init.user_message.id,
+        groupModels: init.compare_models.length ? init.compare_models : compareModelIds,
+      };
+      const userMsg = {
+        ...createUserChatMessage({
+          id: String(init.user_message.id),
+          content: finalContent,
+          createdAt: now(),
+          files: userFiles,
+        }),
+        serverMessageId: init.user_message.id,
+        userMessageId: init.user_message.id,
+      } as Message;
       const assistantMsgs = createCompareAssistantMessages({
         modelIds: compareModelIds,
         ids: compareModelIds.map(() => createId()),
         createdAt: now(),
         search: lastSearchRef.current,
-      }) as Message[];
+      }).map((message, index) => ({
+        ...message,
+        groupId: groupContext.groupId,
+        groupIndex: index,
+        groupModels: groupContext.groupModels,
+        userMessageId: groupContext.userMessageId,
+      })) as Message[];
       const contextMessages = [...messages, userMsg];
 
       initializeAssistantRealtimeBatch(assistantMsgs, userMsg.createdAt || now());
@@ -237,6 +267,7 @@ export function useChatCompareSendRuntime({
           templatePrefix,
           skillKey: effectiveSkillKey,
           messageFileIds: file_ids,
+          explicitGroupContext: groupContext,
           callbacks: {
             streamResponse,
             onGroupContextResolved: handleCompareGroupContextResolved,
@@ -277,6 +308,7 @@ export function useChatCompareSendRuntime({
       createId,
       now,
       getToken,
+      getWorkspaceId,
       setIsCompare,
       setCompareModels,
       setMessages,

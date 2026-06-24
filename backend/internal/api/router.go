@@ -119,6 +119,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	{
 		// 聊天路由
 		publicWithAuth.POST("/chat", chatHandler.Chat)
+		publicWithAuth.POST("/chat/compare/init", chatHandler.InitCompareChat)
 		publicWithAuth.GET("/chat/bootstrap", chatBootstrapHandler.Get)
 
 		// 专用翻译路由
