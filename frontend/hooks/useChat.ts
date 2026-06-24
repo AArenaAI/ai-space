@@ -171,7 +171,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     signal?: AbortSignal;
     snapshotVersion?: string;
   }): Promise<ConversationRestoreResponse> => {
-    const payload = await fetchChatBootstrap({ apiBaseUrl, conversationId: restoreConversationId, token, signal });
+    const payload = bootstrap?.conversation?.id === restoreConversationId && bootstrap.snapshot
+      ? bootstrap
+      : await fetchChatBootstrap({ apiBaseUrl, conversationId: restoreConversationId, token, signal });
     return {
       title: payload.conversation?.title || "",
       model: payload.conversation?.model,
@@ -184,7 +186,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       snapshot_version: payload.snapshot?.snapshot_version,
       last_assistant_status: payload.snapshot?.last_assistant_status,
     };
-  }, []);
+  }, [bootstrap]);
   const stopTaskStream = useStopTaskStreamAction(taskStreamsRef);
 
   const {
