@@ -211,28 +211,108 @@ const comparisonGroups = [
   {
     title: "AI 模型",
     rows: [
-      ["GPT 系列", "支持", "支持"],
-      ["Claude / Gemini / DeepSeek / Kimi", "支持", "不支持"],
+      ["GPT 系列模型", "支持", "支持"],
+      ["Claude 系列模型", "支持", "不支持"],
+      ["Gemini 系列模型", "支持", "不支持"],
+      ["DeepSeek 系列模型", "支持", "不支持"],
+      ["Kimi 系列模型", "支持", "不支持"],
+      ["基础模型与高级模型分层", "支持", "不支持"],
       ["多模型统一入口", "支持", "不支持"],
-      ["模型对比回答", "支持", "不支持"],
+      ["同一问题多模型对比回答", "支持", "不支持"],
+      ["按场景切换模型", "支持", "部分支持"],
     ],
   },
   {
-    title: "文档与翻译",
+    title: "聊天机器人功能",
+    rows: [
+      ["多轮上下文对话", "支持", "支持"],
+      ["深度推理模式", "支持", "支持"],
+      ["联网搜索", "支持", "支持"],
+      ["Artifacts / 富文本输出", "支持", "支持"],
+      ["模型回答状态与推理过程展示", "支持", "部分支持"],
+      ["聊天历史工作区", "支持", "支持"],
+      ["收藏与会话管理", "支持", "部分支持"],
+      ["文件 / 图片作为聊天附件", "支持", "支持"],
+      ["普通聊天与对比聊天统一入口", "支持", "不支持"],
+    ],
+  },
+  {
+    title: "文档处理与翻译工具",
     rows: [
       ["文档阅读器", "支持", "部分支持"],
+      ["PDF 资料阅读与问答", "支持", "支持"],
+      ["Word 资料阅读与问答", "支持", "部分支持"],
+      ["PPT 资料阅读与问答", "支持", "部分支持"],
+      ["多文档分析", "支持", "支持"],
+      ["网页资料导入", "支持", "部分支持"],
+      ["Notebook 知识库", "支持", "不支持"],
+      ["来源摘要", "支持", "支持"],
+      ["数据表格生成", "支持", "部分支持"],
+      ["FAQ 生成", "支持", "部分支持"],
+      ["思维导图 / 闪卡 / 测验", "支持", "不支持"],
       ["文本翻译", "支持", "支持"],
+      ["图片 / 网页翻译", "支持", "部分支持"],
       ["实时语音翻译", "支持", "不支持"],
-      ["PDF / Word / PPT 资料问答", "支持", "部分支持"],
     ],
   },
   {
-    title: "AI 创作",
+    title: "图像工具",
     rows: [
-      ["图像生成 / 编辑", "支持", "部分支持"],
+      ["文生图", "支持", "支持"],
+      ["参考图生成", "支持", "部分支持"],
+      ["多模型图像生成入口", "支持", "部分支持"],
+      ["图像编辑工具", "支持", "部分支持"],
+      ["背景移除", "支持", "不支持"],
+      ["背景替换", "支持", "不支持"],
+      ["文字移除", "支持", "不支持"],
+      ["局部重绘", "支持", "部分支持"],
+      ["画质提升 / 放大", "支持", "部分支持"],
+      ["图片作为聊天上下文", "支持", "支持"],
+      ["创作资产沉淀", "支持", "不支持"],
+    ],
+  },
+  {
+    title: "视频与 AI 漫剧",
+    rows: [
       ["视频生成", "支持", "不支持"],
+      ["Seedance 视频生成", "支持", "不支持"],
+      ["首帧 / 参考图生成视频", "支持", "不支持"],
+      ["分段成片", "支持", "不支持"],
       ["AI 漫剧 Studio", "支持", "不支持"],
-      ["分镜 / 资产 / 视频链路", "支持", "不支持"],
+      ["故事剧本到资产候选", "支持", "不支持"],
+      ["角色 / 场景 / 道具资产库", "支持", "不支持"],
+      ["分镜卡片", "支持", "不支持"],
+      ["视频节点绑定源镜头", "支持", "不支持"],
+      ["图像、视频、漫剧一体化流程", "支持", "不支持"],
+    ],
+  },
+  {
+    title: "生产力与创作工作流",
+    rows: [
+      ["写作助手", "支持", "支持"],
+      ["长文改写", "支持", "支持"],
+      ["邮件 / 方案 / 文案生成", "支持", "支持"],
+      ["PPT 生成", "支持", "部分支持"],
+      ["AI 创意工作室", "支持", "部分支持"],
+      ["数据分析", "支持", "支持"],
+      ["智能联网", "支持", "支持"],
+      ["人工智能作家", "支持", "支持"],
+      ["音频转文本", "支持", "部分支持"],
+      ["AI 朗读", "支持", "部分支持"],
+    ],
+  },
+  {
+    title: "额度、支付与权益",
+    rows: [
+      ["基础额度池", "支持", "不支持"],
+      ["高级额度池", "支持", "不支持"],
+      ["会员额度与内测额度独立", "支持", "不支持"],
+      ["模型按等级透明扣费", "支持", "不支持"],
+      ["支付宝扫码支付", "支持", "不支持"],
+      ["支付成功自动开通会员", "支持", "不支持"],
+      ["订单状态轮询", "支持", "不支持"],
+      ["无广告体验", "支持", "部分支持"],
+      ["商用使用", "支持", "部分支持"],
     ],
   },
 ];
@@ -477,18 +557,25 @@ export default function PricingPage() {
             <h2 className="text-3xl font-semibold tracking-[-0.04em]">完整功能比较</h2>
             <p className="mt-3 text-sm text-[#6b7280]">比较 AI Space Plus 与单一模型订阅的差异。</p>
           </div>
-          <div className="mt-8 overflow-hidden rounded-[24px] border border-[#e5e7eb]">
-            <div className="grid grid-cols-[1.2fr_0.9fr_0.9fr] bg-[#f5f6f8] px-4 py-4 text-sm font-semibold md:px-6">
-              <div>功能项</div>
-              <div className="text-center">AI Space Plus</div>
-              <div className="text-center">ChatGPT Plus</div>
+          <div className="mt-8 overflow-hidden rounded-[24px] border border-[#e5e7eb] bg-white">
+            <div className="grid grid-cols-[1.25fr_0.9fr_0.9fr] items-start bg-[#f5f6f8] px-4 py-5 text-sm md:px-6">
+              <div className="pt-2 font-semibold text-[#71717a]">功能项</div>
+              <div className="text-center">
+                <div className="text-base font-semibold text-[#111827]">AI Space Plus</div>
+                <div className="mt-1 text-xs text-[#71717a]">内测价 · 多模型工作台</div>
+                <button className="mt-3 rounded-full bg-[#111827] px-4 py-2 text-xs font-semibold text-white">升级 Plus</button>
+              </div>
+              <div className="text-center">
+                <div className="text-base font-semibold text-[#111827]">ChatGPT Plus ▾</div>
+                <div className="mt-1 text-xs text-[#71717a]">单一模型订阅</div>
+              </div>
             </div>
             {comparisonGroups.map((group) => (
               <div key={group.title}>
-                <div className="border-t border-[#e5e7eb] bg-white px-4 py-3 text-sm font-semibold md:px-6">{group.title}</div>
+                <div className="border-t border-[#e5e7eb] bg-white px-4 py-4 text-base font-semibold text-[#111827] md:px-6">{group.title}</div>
                 {group.rows.map(([name, aiSpace, chatgpt]) => (
-                  <div key={name} className="grid grid-cols-[1.2fr_0.9fr_0.9fr] items-center border-t border-[#eef0f3] px-4 py-3 text-sm md:px-6">
-                    <div className="text-[#374151]">{name}</div>
+                  <div key={name} className="grid grid-cols-[1.25fr_0.9fr_0.9fr] items-center border-t border-[#eef0f3] px-4 py-3.5 text-sm md:px-6">
+                    <div className="text-[#374151] underline decoration-dotted underline-offset-4">{name}</div>
                     <div className="text-center"><CompareValue value={aiSpace} /></div>
                     <div className="text-center"><CompareValue value={chatgpt} /></div>
                   </div>
