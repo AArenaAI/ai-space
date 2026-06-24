@@ -49,6 +49,13 @@ func TestChatBootstrapIncludesStableConversationSnapshot(t *testing.T) {
 	if err := db.Create(&conv).Error; err != nil {
 		t.Fatalf("create conversation: %v", err)
 	}
+	oldAssistant := models.Message{ConversationID: conv.ID, Role: "assistant", Content: "old active", Model: "gpt-5.4"}
+	if err := db.Create(&oldAssistant).Error; err != nil {
+		t.Fatalf("create old active assistant: %v", err)
+	}
+	if err := db.Create(&models.AIBackgroundTask{ResponseID: "resp_old_active", UserID: user.ID, ConversationID: conv.ID, AssistantMessageID: oldAssistant.ID, Model: oldAssistant.Model, Provider: "openai", Status: "incomplete", LastSequenceNumber: 3}).Error; err != nil {
+		t.Fatalf("create active task: %v", err)
+	}
 	userMsg := models.Message{ConversationID: conv.ID, Role: "user", Content: "你好"}
 	if err := db.Create(&userMsg).Error; err != nil {
 		t.Fatalf("create user message: %v", err)
@@ -116,11 +123,18 @@ func TestChatBootstrapIncludesStableConversationSnapshot(t *testing.T) {
 	if payload.Conversation.ID != conv.ID || !payload.Conversation.Compare || len(payload.Conversation.CompareModels) != 2 {
 		t.Fatalf("unexpected conversation payload: %+v", payload.Conversation)
 	}
-	if payload.Snapshot.Total != 3 || len(payload.Snapshot.Messages) != 3 {
+	if payload.Snapshot.Total != 4 || len(payload.Snapshot.Messages) != 4 {
 		t.Fatalf("unexpected snapshot total/messages: total=%d len=%d", payload.Snapshot.Total, len(payload.Snapshot.Messages))
 	}
+	foundOldActive := false
 	for _, message := range payload.Snapshot.Messages {
+		if message.ID == oldAssistant.ID {
+			foundOldActive = true
+		}
 		if message.Role == "assistant" {
+			if message.ID == oldAssistant.ID {
+				continue
+			}
 			if message.UserMessageID != userMsg.ID {
 				t.Fatalf("assistant %d missing user_message_id: %+v", message.ID, message)
 			}
@@ -128,6 +142,9 @@ func TestChatBootstrapIncludesStableConversationSnapshot(t *testing.T) {
 				t.Fatalf("assistant %d missing group_models: %+v", message.ID, message)
 			}
 		}
+	}
+	if !foundOldActive {
+		t.Fatalf("active task assistant %d outside tail was not included in snapshot", oldAssistant.ID)
 	}
 	if payload.Sidebar.Total != 1 || len(payload.Sidebar.Conversations) != 1 {
 		t.Fatalf("unexpected sidebar conversations: total=%d len=%d", payload.Sidebar.Total, len(payload.Sidebar.Conversations))

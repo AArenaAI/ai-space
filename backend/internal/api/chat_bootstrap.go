@@ -6,6 +6,7 @@ import (
 	"aipool-backend/internal/models"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -256,6 +257,7 @@ func (h *ChatBootstrapHandler) buildConversationBootstrap(c *gin.Context, userID
 	}
 	var messages []models.Message
 	msgQuery.Find(&messages)
+	h.ensureActiveTaskMessages(&messages, conv.ID, userID)
 	convHandler := NewConversationHandler(h.db)
 	if expanded, err := convHandler.expandMessagesToCompleteGroups(conv.ID, messages); err == nil {
 		messages = expanded
@@ -293,6 +295,48 @@ func (h *ChatBootstrapHandler) buildConversationBootstrap(c *gin.Context, userID
 		LastAssistantStatus: statusPayload,
 	}
 	return meta, snapshot, true
+}
+
+func (h *ChatBootstrapHandler) ensureActiveTaskMessages(messages *[]models.Message, conversationID uint, userID uint) {
+	if messages == nil {
+		return
+	}
+	statuses := []string{"running", "streaming", "retrying", "incomplete"}
+	var tasks []models.AIBackgroundTask
+	if err := h.db.Where("user_id = ? AND conversation_id = ? AND status IN ?", userID, conversationID, statuses).
+		Order("updated_at DESC, id DESC").
+		Limit(20).
+		Find(&tasks).Error; err != nil || len(tasks) == 0 {
+		return
+	}
+	existing := make(map[uint]bool, len(*messages))
+	for _, message := range *messages {
+		existing[message.ID] = true
+	}
+	missingIDs := make([]uint, 0)
+	for _, task := range tasks {
+		if task.AssistantMessageID > 0 && !existing[task.AssistantMessageID] {
+			missingIDs = append(missingIDs, task.AssistantMessageID)
+			existing[task.AssistantMessageID] = true
+		}
+	}
+	if len(missingIDs) == 0 {
+		return
+	}
+	var activeMessages []models.Message
+	if err := h.db.Where("conversation_id = ? AND id IN ?", conversationID, missingIDs).
+		Order("created_at asc, id asc").
+		Preload("MessageFiles").
+		Find(&activeMessages).Error; err != nil || len(activeMessages) == 0 {
+		return
+	}
+	*messages = append(*messages, activeMessages...)
+	sort.SliceStable(*messages, func(i, j int) bool {
+		if (*messages)[i].CreatedAt.Equal((*messages)[j].CreatedAt) {
+			return (*messages)[i].ID < (*messages)[j].ID
+		}
+		return (*messages)[i].CreatedAt.Before((*messages)[j].CreatedAt)
+	})
 }
 
 func parseOptionalUint(value string) uint {
