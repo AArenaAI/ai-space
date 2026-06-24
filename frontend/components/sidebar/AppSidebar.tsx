@@ -388,9 +388,14 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     return 260;
   });
   const isResizing = useRef(false);
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<any>(() => {
+    if (typeof window === "undefined") return null;
+    const stored = localStorage.getItem("user");
+    if (!stored) return null;
+    try { return JSON.parse(stored); } catch { return null; }
+  });
   const [conversations, setConversations] = useState<Conversation[]>(cachedConversations || []);
-  const [loading, setLoading] = useState(cachedConversations === null);
+  const [loading, setLoading] = useState(() => cachedConversations === null && typeof window !== "undefined" && !!localStorage.getItem("token"));
   const [optimisticConvId, setOptimisticConvId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);

@@ -830,15 +830,7 @@ function MessageList({
   const virtuosoComponents = useMemo(() => createVirtuosoComponents<Message>(), [createVirtuosoComponents]);
   const compareVirtuosoComponents = useMemo(() => createVirtuosoComponents<InferredGroup>(), [createVirtuosoComponents]);
   const groups = useMemo(() => inferGroups(messages), [messages]);
-  const hasAuthoritativeCompareGroups = useMemo(
-    () => groups.some((group) => (
-      group.models.length >= 2
-      && group.assistantMessages.length >= 2
-      && group.assistantMessages.some((assistant) => !!assistant.userMessageId && Array.isArray(assistant.groupModels) && assistant.groupModels.length >= 2)
-    )),
-    [groups]
-  );
-  const effectiveIsCompare = isCompare || hasAuthoritativeCompareGroups;
+  const effectiveIsCompare = isCompare;
   const groupByMessageId = useMemo(() => {
     const map = new Map<string, InferredGroup>();
     groups.forEach((group) => {
