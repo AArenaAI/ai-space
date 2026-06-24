@@ -53,46 +53,47 @@ export default function LoginForm() {
   return (
     <div className="min-h-screen bg-[#ececec] p-3 text-[#111827] md:p-5">
       <div className="grid min-h-[calc(100vh-1.5rem)] overflow-hidden rounded-[34px] bg-white shadow-[0_26px_90px_rgba(15,23,42,0.12)] md:min-h-[calc(100vh-2.5rem)] lg:grid-cols-[1.08fr_0.92fr]">
-        <section className="relative hidden overflow-hidden bg-[#e7e7e5] lg:block">
+        <section className="relative hidden overflow-hidden bg-[#050816] lg:block">
           <div className="absolute left-8 top-8 z-20 flex items-center gap-3">
-            <img src="/brand-light-logo.png" alt="AI Space" className="h-9 w-9 object-contain" />
-            <span className="text-[15px] font-medium uppercase tracking-[0.16em] text-[#173a5e]">AI SPACE</span>
+            <img src="/brand-light-logo.png" alt="AI Space" className="h-9 w-9 object-contain drop-shadow-[0_0_18px_rgba(96,165,250,0.45)]" />
+            <span className="text-[15px] font-medium uppercase tracking-[0.16em] text-white/90">AI SPACE</span>
           </div>
 
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_25%_20%,rgba(255,255,255,0.9),transparent_28%),radial-gradient(circle_at_70%_76%,rgba(23,58,94,0.14),transparent_34%)]" />
-          <div className="absolute inset-0 opacity-55 [background-image:linear-gradient(rgba(23,58,94,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(23,58,94,0.08)_1px,transparent_1px)] [background-size:56px_56px]" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_48%,rgba(37,99,235,0.32),transparent_24%),radial-gradient(circle_at_24%_20%,rgba(124,58,237,0.34),transparent_30%),radial-gradient(circle_at_78%_78%,rgba(14,165,233,0.24),transparent_34%),linear-gradient(135deg,#030712_0%,#07111f_48%,#0b1020_100%)]" />
+          <div className="absolute inset-0 opacity-70 [background-image:radial-gradient(circle,rgba(255,255,255,0.95)_1px,transparent_1.4px),radial-gradient(circle,rgba(147,197,253,0.75)_1px,transparent_1.5px)] [background-position:0_0,26px_34px] [background-size:74px_74px,118px_118px]" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_48%,transparent_0%,rgba(3,7,18,0.08)_34%,rgba(3,7,18,0.82)_100%)]" />
 
           <div className="absolute left-1/2 top-1/2 h-[560px] w-[560px] -translate-x-1/2 -translate-y-1/2">
-            <div className="absolute left-[42px] top-[70px] h-[420px] w-[420px] animate-[spin_28s_linear_infinite] rounded-full border border-dashed border-[#173a5e]/20" />
-            <div className="absolute left-[96px] top-[124px] h-[312px] w-[312px] animate-[spin_18s_linear_infinite_reverse] rounded-full border border-[#173a5e]/12" />
-            <div className="absolute left-[168px] top-[196px] h-[168px] w-[168px] animate-[spin_12s_linear_infinite] rounded-full border border-dotted border-white/70" />
+            <div className="absolute left-1/2 top-1/2 h-[430px] w-[430px] -translate-x-1/2 -translate-y-1/2 animate-[spin_30s_linear_infinite] rounded-full border border-dashed border-sky-200/35 shadow-[0_0_80px_rgba(59,130,246,0.12)]" />
+            <div className="absolute left-1/2 top-1/2 h-[322px] w-[322px] -translate-x-1/2 -translate-y-1/2 animate-[spin_18s_linear_infinite_reverse] rounded-full border border-sky-300/20" />
+            <div className="absolute left-1/2 top-1/2 h-[190px] w-[190px] -translate-x-1/2 -translate-y-1/2 animate-[spin_11s_linear_infinite] rounded-full border border-dotted border-white/55" />
 
-            <div className="absolute left-[110px] top-[340px] h-24 w-80 -rotate-12 rounded-full bg-gradient-to-r from-transparent via-[#173a5e]/15 to-transparent blur-2xl" />
-            <div className="absolute left-[142px] top-[294px] h-36 w-16 -rotate-12 rounded-full bg-gradient-to-b from-[#3b82f6]/65 via-[#93c5fd]/35 to-transparent blur-xl" />
-            <div className="absolute left-[158px] top-[322px] h-28 w-9 -rotate-12 animate-pulse rounded-full bg-gradient-to-b from-white/85 via-[#60a5fa]/45 to-transparent blur-md" />
-            <div className="absolute left-[170px] top-[360px] h-36 w-5 -rotate-12 animate-pulse rounded-full bg-gradient-to-b from-[#f97316]/55 to-transparent blur-lg" />
+            <div className="absolute left-1/2 top-1/2 h-[150px] w-[520px] -translate-x-1/2 -translate-y-1/2 -rotate-12 rounded-full bg-gradient-to-r from-transparent via-sky-300/16 to-transparent blur-2xl" />
+            <div className="absolute left-1/2 top-1/2 h-[280px] w-[74px] -translate-x-1/2 translate-y-[88px] -rotate-12 rounded-full bg-gradient-to-b from-sky-300/70 via-blue-400/35 to-transparent blur-2xl" />
+            <div className="absolute left-1/2 top-1/2 h-[210px] w-[36px] -translate-x-1/2 translate-y-[112px] -rotate-12 animate-pulse rounded-full bg-gradient-to-b from-white/90 via-sky-300/50 to-transparent blur-lg" />
+            <div className="absolute left-1/2 top-1/2 h-[260px] w-[18px] -translate-x-1/2 translate-y-[138px] -rotate-12 animate-pulse rounded-full bg-gradient-to-b from-orange-400/70 to-transparent blur-xl" />
 
             <img
               src="/brand-light-logo.png"
               alt="AI Space rocket"
-              className="absolute left-[170px] top-[116px] h-48 w-48 -rotate-12 animate-[float_4s_ease-in-out_infinite] object-contain drop-shadow-[0_34px_44px_rgba(23,58,94,0.28)]"
+              className="absolute left-1/2 top-1/2 h-48 w-48 -translate-x-1/2 -translate-y-1/2 -rotate-12 animate-pulse object-contain drop-shadow-[0_0_44px_rgba(96,165,250,0.48)]"
             />
 
-            <div className="absolute left-[86px] top-[152px] h-2 w-2 animate-ping rounded-full bg-white" />
-            <div className="absolute left-[86px] top-[152px] h-2 w-2 rounded-full bg-white shadow-[0_0_28px_rgba(255,255,255,0.95)]" />
-            <div className="absolute right-[106px] top-[92px] h-7 w-7 rotate-45 animate-pulse bg-white shadow-[0_0_32px_rgba(255,255,255,0.9)]" />
-            <div className="absolute right-[142px] bottom-[126px] h-3 w-3 rounded-full bg-[#173a5e]/45 shadow-[0_0_18px_rgba(23,58,94,0.45)]" />
-            <div className="absolute left-[120px] bottom-[96px] h-2 w-2 rounded-full bg-[#173a5e]/35" />
-            <div className="absolute right-[214px] bottom-[72px] h-1.5 w-1.5 rounded-full bg-white/90" />
+            <div className="absolute left-[68px] top-[142px] h-2 w-2 animate-ping rounded-full bg-white" />
+            <div className="absolute left-[68px] top-[142px] h-2 w-2 rounded-full bg-white shadow-[0_0_28px_rgba(255,255,255,0.95)]" />
+            <div className="absolute right-[92px] top-[82px] h-7 w-7 rotate-45 animate-pulse bg-white shadow-[0_0_36px_rgba(255,255,255,0.95)]" />
+            <div className="absolute right-[116px] bottom-[112px] h-3 w-3 rounded-full bg-sky-300/80 shadow-[0_0_20px_rgba(125,211,252,0.8)]" />
+            <div className="absolute left-[112px] bottom-[92px] h-2 w-2 rounded-full bg-blue-200/75" />
+            <div className="absolute right-[214px] bottom-[68px] h-1.5 w-1.5 rounded-full bg-white/90" />
           </div>
 
-          <div className="absolute bottom-10 left-10 max-w-md">
-            <div className="inline-flex items-center gap-2 rounded-full bg-white/70 px-4 py-2 text-sm font-medium text-[#173a5e] shadow-sm backdrop-blur">
+          <div className="absolute bottom-10 left-10 max-w-md text-white">
+            <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-sm font-medium text-sky-100 shadow-sm ring-1 ring-white/15 backdrop-blur">
               <Sparkles className="h-4 w-4" />
               Multi-model AI workspace
             </div>
-            <h2 className="mt-5 text-4xl font-semibold tracking-[-0.05em] text-[#111827]">Launch your AI workflow</h2>
-            <p className="mt-3 text-sm leading-6 text-[#4b5563]">从聊天、文档、翻译到图像视频创作，进入你的 AI Space 工作台。</p>
+            <h2 className="mt-5 text-4xl font-semibold tracking-[-0.05em] text-white">Launch your AI workflow</h2>
+            <p className="mt-3 text-sm leading-6 text-slate-300">从聊天、文档、翻译到图像视频创作，进入你的 AI Space 工作台。</p>
           </div>
         </section>
 
