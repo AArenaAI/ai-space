@@ -830,6 +830,15 @@ function MessageList({
   const virtuosoComponents = useMemo(() => createVirtuosoComponents<Message>(), [createVirtuosoComponents]);
   const compareVirtuosoComponents = useMemo(() => createVirtuosoComponents<InferredGroup>(), [createVirtuosoComponents]);
   const groups = useMemo(() => inferGroups(messages), [messages]);
+  const hasAuthoritativeCompareGroups = useMemo(
+    () => groups.some((group) => (
+      group.models.length >= 2
+      && group.assistantMessages.length >= 2
+      && group.assistantMessages.some((assistant) => !!assistant.userMessageId && Array.isArray(assistant.groupModels) && assistant.groupModels.length >= 2)
+    )),
+    [groups]
+  );
+  const effectiveIsCompare = isCompare || hasAuthoritativeCompareGroups;
   const groupByMessageId = useMemo(() => {
     const map = new Map<string, InferredGroup>();
     groups.forEach((group) => {
@@ -1404,7 +1413,7 @@ function MessageList({
       return;
     }
 
-    const scrollIndex = isCompare
+    const scrollIndex = effectiveIsCompare
       ? Math.max(0, groups.findIndex((group) => group.userMessage.id === anchorMessage.id))
       : index;
     locatedTargetKeyRef.current = targetKey;
@@ -1428,7 +1437,7 @@ function MessageList({
       window.cancelAnimationFrame(raf);
       window.clearTimeout(settleTimer);
     };
-  }, [allVisibleMessages, centerMessageRowInScroller, conversationId, targetMessageId, targetAnchorMessage, visibleMessages, isLoadingHistory, isLoadingMore, hasMoreMessages, onLoadMore, highlightMessage, groups, isCompare]);
+  }, [allVisibleMessages, centerMessageRowInScroller, conversationId, targetMessageId, targetAnchorMessage, visibleMessages, isLoadingHistory, isLoadingMore, hasMoreMessages, onLoadMore, highlightMessage, groups, effectiveIsCompare]);
 
   useEffect(() => {
     if (!targetMessageId) {
@@ -1458,7 +1467,7 @@ function MessageList({
   }, [conversationId, targetMessageId, isLoadingHistory, messages, lockBottomAfterLayout]);
 
   const activeCompareModels = useMemo(() => {
-    if (!isCompare) return [];
+    if (!effectiveIsCompare) return [];
     const availableModelIds = new Set(models.map((model) => model.id));
     const dedupeValid = (ids: string[]) => Array.from(new Set(ids.filter((id) => availableModelIds.has(id)))).slice(0, 2);
     const latestGroupedModels = [...groups]
@@ -1476,13 +1485,13 @@ function MessageList({
     if (groupModels.length >= 2) return groupModels;
     if (explicitModels.length >= 2) return explicitModels;
     return dedupeValid(messages.filter((m) => m.role === "assistant" && m.model).map((m) => m.model!));
-  }, [compareModels, groups, isCompare, messages, models]);
+  }, [compareModels, groups, effectiveIsCompare, messages, models]);
   const columnMessages = useMemo(() => {
-    if (!isCompare) return [];
+    if (!effectiveIsCompare) return [];
     return activeCompareModels.map((modelId) =>
       messages.filter((msg) => msg.role === "user" || msg.model === modelId)
     );
-  }, [activeCompareModels, isCompare, messages]);
+  }, [activeCompareModels, effectiveIsCompare, messages]);
 
   // 收藏功能
   const { addFavorite, isFavorited, checkBatch, loading: favoriteLoading } = useFavorites();
@@ -1855,7 +1864,7 @@ function MessageList({
     Footer: () => <div style={{ height: CHAT_BOTTOM_SPACER + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0) }} aria-hidden="true" />,
   }), [selectMode]);
 
-  if (isCompare) {
+  if (effectiveIsCompare) {
     const compareGroups = groups;
     const resolveCompareAssistant = (group: InferredGroup, colIndex: number, modelId: string) => {
       return group.assistantMessages.find((m) => m.model === modelId)
