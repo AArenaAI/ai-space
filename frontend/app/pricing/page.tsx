@@ -405,11 +405,11 @@ export default function PricingPage() {
                   {paymentLoadingPlan === plan.id ? "创建订单中" : plan.cta}
                 </button>
 
-                <div className="mt-6 min-h-0 flex-1 overflow-hidden border-t border-[#eef0f3] pt-4">
-                  <div className="h-[430px] space-y-5 overflow-y-auto pr-2 text-sm [scrollbar-color:#d4d4d8_transparent] [scrollbar-width:thin]">
+                <div className="mt-6 flex-1 border-t border-[#eef0f3] pt-5">
+                  <div className="space-y-6 text-sm">
                     {plan.benefitGroups.map((group) => (
                       <div key={group.title}>
-                        <div className="sticky top-0 z-10 mb-2 bg-white/95 py-1 text-sm font-semibold text-[#111827] backdrop-blur">
+                        <div className="mb-2 py-1 text-sm font-semibold text-[#111827]">
                           {group.title}
                         </div>
                         {group.note && <p className="mb-2 text-[11px] leading-5 text-[#8a8f98]">{group.note}</p>}
