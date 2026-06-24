@@ -112,11 +112,11 @@ function createState(initialMessages = []) {
 
 function runRuntime(overrides = {}) {
   effectCleanup = undefined;
-  const state = createState();
+  const state = overrides.state || createState();
   const mainController = overrides.mainController || makeController();
   const compareController = makeController();
   const refs = {
-    conversationLoadSeqRef: { current: overrides.loadSeq || 0 },
+    conversationLoadSeqRef: overrides.conversationLoadSeqRef || { current: overrides.loadSeq || 0 },
     shouldResetRef: { current: overrides.shouldReset ?? true },
     justCreatedRef: { current: overrides.justCreated },
     abortControllerRef: { current: overrides.hasMain ? mainController : null },
@@ -327,6 +327,37 @@ async function testStatusResumeStartsTaskStream() {
   assert.deepEqual(starts[0], [9, "a", 12, 5, "partial", 99]);
   assert.ok(state.messages[0].activityStatus);
 }
+async function testLateRestoreResponseCannotOverwriteLatestConversation() {
+  snapshotCache.clear();
+  persistentSnapshotCache.clear();
+  const sharedSeqRef = { current: 0 };
+  const state = createState();
+  const resolvers = new Map();
+  restoreImpl = async ({ conversationId }) => new Promise((resolve) => resolvers.set(conversationId, resolve));
+  statusImpl = async () => undefined;
+  countImpl = async () => undefined;
+
+  const first = runRuntime({ conversationId: 101, token: "tok", conversationLoadSeqRef: sharedSeqRef, state });
+  await flush();
+  const firstCleanup = effectCleanup;
+  const second = runRuntime({ conversationId: 202, token: "tok", conversationLoadSeqRef: sharedSeqRef, state });
+  await flush();
+  firstCleanup?.();
+
+  resolvers.get(202)({ title: "B", model: "m1", messages: [{ id: "b", role: "assistant", content: "B" }] });
+  await flush(); await flush();
+  assert.equal(state.messages[0].content, "B");
+  assert.equal(state.calls.filter((c) => c[0] === "title").at(-1)?.[1], "B");
+
+  resolvers.get(101)({ title: "A", model: "m1", messages: [{ id: "a", role: "assistant", content: "A" }] });
+  await flush(); await flush();
+  assert.equal(state.messages[0].content, "B");
+  assert.equal(state.calls.filter((c) => c[0] === "title").at(-1)?.[1], "B");
+  assert.equal(snapshotCache.has(101), false);
+  assert.equal(snapshotCache.get(202).messages[0].content, "B");
+  second.refs.conversationLoadSeqRef.current = sharedSeqRef.current;
+}
+
 async function testNavigationAbortsControllers() {
   const { refs, mainController, compareController } = runRuntime({ conversationId: 9, token: null, hasMain: true, hasCompare: true });
   assert.equal(mainController.aborted, true);
@@ -346,6 +377,7 @@ async function testNavigationAbortsControllers() {
   await testSnapshotVersionSkipsUnchangedRestoreReconcile();
   await testRestoreMetaSkipsCountAndStatusFetches();
   await testStatusResumeStartsTaskStream();
+  await testLateRestoreResponseCannotOverwriteLatestConversation();
   await testNavigationAbortsControllers();
   console.log("chat conversation restore runtime hook regression passed");
 })();
