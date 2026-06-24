@@ -1,5 +1,18 @@
 export type AdminRole = "user" | "admin";
 
+
+export interface AdminUserCreditUsageSummary {
+  basic_used: number;
+  advanced_used: number;
+  beta_used: number;
+  total_used: number;
+  basic_used_display: number;
+  advanced_used_display: number;
+  beta_used_display: number;
+  total_used_display: number;
+  last_used_at?: string;
+}
+
 export interface AdminUserUsageSummary {
   requests: number;
   failures: number;
@@ -24,6 +37,7 @@ export interface AdminUser {
   created_at: string;
   updated_at: string;
   usage_30d?: AdminUserUsageSummary;
+  credit_usage_30d?: AdminUserCreditUsageSummary;
   beta_phase?: string;
   beta_phase_name?: string;
   beta_credit_balance?: number;
@@ -140,6 +154,7 @@ export interface AdminUsageMetric {
   video_seconds?: number;
   audio_seconds?: number;
 }
+
 
 export interface AdminUsageSummary extends AdminUsageMetric {
   successes: number;

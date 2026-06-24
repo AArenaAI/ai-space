@@ -358,7 +358,6 @@ function UsageExecutiveSummary({ summary, ledgerSummary, modules, chatCost, onDr
           <SummaryPill label="成功率" value={summary?.requests ? `${successRate.toFixed(1)}%` : "-"} helper={`失败 ${formatNumber(summary?.failures || 0)}`} />
         </div>
       </div>
-
       <div className="rounded-3xl border border-surface-border bg-surface-card p-5 shadow-sm">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
@@ -394,6 +393,7 @@ function UsageExecutiveSummary({ summary, ledgerSummary, modules, chatCost, onDr
     </section>
   );
 }
+
 
 function SummaryPill({ label, value, helper }: { label: string; value: string; helper: string }) {
   return <div className="rounded-2xl bg-surface-card/80 px-4 py-3"><div className="text-xs text-text-tertiary">{label}</div><div className="mt-1 font-semibold text-text-primary">{value}</div><div className="mt-1 text-xs text-text-secondary">{helper}</div></div>;

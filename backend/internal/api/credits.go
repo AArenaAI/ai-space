@@ -733,6 +733,22 @@ func checkAndDeductCredits(db *gorm.DB, userID uint, modelID string, amount int)
 		remainingAfter = user.BetaCreditBalance
 	}
 
+	transactionTier := tier
+	if isInBetaPhase {
+		transactionTier = "beta"
+	}
+	_ = db.Create(&models.CreditTransaction{
+		UserID:       user.ID,
+		Type:         "deduct",
+		Tier:         transactionTier,
+		Amount:       -costFen,
+		BalanceAfter: remainingAfter,
+		Reason:       "model_usage:" + modelID,
+		SourceType:   "model_usage",
+		SourceID:     modelID,
+		CreatedAt:    now,
+	}).Error
+
 	// 记录埋点
 	metadata, _ := json.Marshal(map[string]interface{}{
 		"amount":         costFen,

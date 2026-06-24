@@ -44,27 +44,40 @@ type adminUserUsageSummary struct {
 	LastUsedAt     *time.Time `json:"last_used_at,omitempty"`
 }
 
+type adminUserCreditUsageSummary struct {
+	BasicUsedFen    int        `json:"basic_used"`
+	AdvancedUsedFen int        `json:"advanced_used"`
+	BetaUsedFen     int        `json:"beta_used"`
+	TotalUsedFen    int        `json:"total_used"`
+	BasicUsed       float64    `json:"basic_used_display"`
+	AdvancedUsed    float64    `json:"advanced_used_display"`
+	BetaUsed        float64    `json:"beta_used_display"`
+	TotalUsed       float64    `json:"total_used_display"`
+	LastUsedAt      *time.Time `json:"last_used_at,omitempty"`
+}
+
 type adminUserResponse struct {
-	ID                       uint                  `json:"id"`
-	Email                    string                `json:"email"`
-	Name                     string                `json:"name"`
-	Role                     string                `json:"role"`
-	PlanTier                 string                `json:"plan_tier"`
-	BasicCredits             int                   `json:"basic_credits"`
-	AdvancedCredits          int                   `json:"advanced_credits"`
-	EliteCredits             int                   `json:"elite_credits"`
-	BetaBatch                string                `json:"beta_batch,omitempty"`
-	BetaPhase                string                `json:"beta_phase,omitempty"`
-	BetaPhaseName            string                `json:"beta_phase_name,omitempty"`
-	BetaCreditBalance        int                   `json:"beta_credit_balance"`
-	BetaCreditBalanceDisplay float64               `json:"beta_credit_balance_display"`
-	BetaCreditGrantedTotal   int                   `json:"beta_credit_granted_total"`
-	BetaCreditGrantedDisplay float64               `json:"beta_credit_granted_display"`
-	BetaCreditUsedTotal      int                   `json:"beta_credit_used_total"`
-	BetaCreditUsedDisplay    float64               `json:"beta_credit_used_display"`
-	CreatedAt                time.Time             `json:"created_at"`
-	UpdatedAt                time.Time             `json:"updated_at"`
-	Usage30D                 adminUserUsageSummary `json:"usage_30d"`
+	ID                       uint                        `json:"id"`
+	Email                    string                      `json:"email"`
+	Name                     string                      `json:"name"`
+	Role                     string                      `json:"role"`
+	PlanTier                 string                      `json:"plan_tier"`
+	BasicCredits             int                         `json:"basic_credits"`
+	AdvancedCredits          int                         `json:"advanced_credits"`
+	EliteCredits             int                         `json:"elite_credits"`
+	BetaBatch                string                      `json:"beta_batch,omitempty"`
+	BetaPhase                string                      `json:"beta_phase,omitempty"`
+	BetaPhaseName            string                      `json:"beta_phase_name,omitempty"`
+	BetaCreditBalance        int                         `json:"beta_credit_balance"`
+	BetaCreditBalanceDisplay float64                     `json:"beta_credit_balance_display"`
+	BetaCreditGrantedTotal   int                         `json:"beta_credit_granted_total"`
+	BetaCreditGrantedDisplay float64                     `json:"beta_credit_granted_display"`
+	BetaCreditUsedTotal      int                         `json:"beta_credit_used_total"`
+	BetaCreditUsedDisplay    float64                     `json:"beta_credit_used_display"`
+	CreatedAt                time.Time                   `json:"created_at"`
+	UpdatedAt                time.Time                   `json:"updated_at"`
+	Usage30D                 adminUserUsageSummary       `json:"usage_30d"`
+	CreditUsage30D           adminUserCreditUsageSummary `json:"credit_usage_30d"`
 }
 
 type adminUsageSummaryResponse struct {
@@ -224,6 +237,45 @@ func (h *AdminHandler) userUsageSummary(userID uint, start time.Time) adminUserU
 	}{Requests: &out.Requests, Failures: &out.Failures, CostRMB: &out.CostRMB, TotalTokens: &out.TotalTokens, ImageCount: &out.ImageCount, CharacterCount: &out.CharacterCount, VideoSeconds: &out.VideoSeconds, LastUsedAt: &lastUsed}).Error; err == nil && !lastUsed.IsZero() {
 		out.LastUsedAt = &lastUsed
 	}
+
+	return out
+}
+
+func (h *AdminHandler) userCreditUsageSummary(userID uint, start time.Time) adminUserCreditUsageSummary {
+	var out adminUserCreditUsageSummary
+	if h == nil || h.db == nil || userID == 0 {
+		return out
+	}
+	var rows []struct {
+		Tier string
+		Used int
+	}
+	if err := h.db.Model(&models.CreditTransaction{}).
+		Select("tier, COALESCE(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END), 0) AS used").
+		Where("user_id = ? AND type = ? AND created_at >= ?", userID, "deduct", start).
+		Group("tier").Scan(&rows).Error; err == nil {
+		for _, row := range rows {
+			switch row.Tier {
+			case "basic":
+				out.BasicUsedFen = row.Used
+			case "advanced":
+				out.AdvancedUsedFen = row.Used
+			case "beta":
+				out.BetaUsedFen = row.Used
+			}
+		}
+	}
+	var lastUsed time.Time
+	if err := h.db.Model(&models.CreditTransaction{}).
+		Where("user_id = ? AND type = ? AND amount < 0 AND created_at >= ?", userID, "deduct", start).
+		Select("MAX(created_at)").Scan(&lastUsed).Error; err == nil && !lastUsed.IsZero() {
+		out.LastUsedAt = &lastUsed
+	}
+	out.TotalUsedFen = out.BasicUsedFen + out.AdvancedUsedFen + out.BetaUsedFen
+	out.BasicUsed = float64(out.BasicUsedFen) / 100.0
+	out.AdvancedUsed = float64(out.AdvancedUsedFen) / 100.0
+	out.BetaUsed = float64(out.BetaUsedFen) / 100.0
+	out.TotalUsed = float64(out.TotalUsedFen) / 100.0
 	return out
 }
 
@@ -461,6 +513,7 @@ func (h *AdminHandler) ListUsers(c *gin.Context) {
 	for _, user := range users {
 		item := toAdminUserResponse(user)
 		item.Usage30D = h.userUsageSummary(user.ID, usageStart)
+		item.CreditUsage30D = h.userCreditUsageSummary(user.ID, usageStart)
 		items = append(items, item)
 	}
 

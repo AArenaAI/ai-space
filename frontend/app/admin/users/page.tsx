@@ -358,6 +358,7 @@ function UserCard({
   onAdjust: (tier: "basic" | "advanced" | "beta", amount: number, mode: "add" | "set", reason: string) => Promise<void>;
 }) {
   const usage = user.usage_30d;
+  const creditUsage = user.credit_usage_30d;
   const membershipCredits = user.basic_credits + user.advanced_credits;
   const betaCredits = user.beta_credit_balance ?? 0;
   const isActiveBeta = Boolean(user.beta_phase && user.beta_phase !== "completed");
@@ -428,6 +429,9 @@ function UserCard({
               </div>
               <div className="text-[10px] text-text-tertiary">
                 基础 {(user.basic_credits / 100).toFixed(1)} · 高级 {(user.advanced_credits / 100).toFixed(1)}
+              </div>
+              <div className="text-[10px] text-text-tertiary">
+                30天已用 {(creditUsage?.total_used_display || 0).toFixed(1)}
               </div>
             </>
           )}
@@ -511,6 +515,18 @@ function UserCard({
                   <div className="mt-1 text-[10px] text-text-tertiary">
                     {user.beta_phase ? `${user.beta_phase_name || user.beta_phase}${user.beta_batch ? ` · ${user.beta_batch}` : ""}` : "未参与内测"}
                     {" · "}累计发放 {((user.beta_credit_granted_total ?? 0) / 100).toFixed(1)} · 已用 {((user.beta_credit_used_total ?? 0) / 100).toFixed(1)}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-surface-border bg-surface-card px-3 py-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-text-secondary">30天积分使用</span>
+                    <span className="text-sm font-semibold text-text-primary">{(creditUsage?.total_used_display || 0).toFixed(1)}</span>
+                  </div>
+                  <div className="mt-1 text-[10px] text-text-tertiary">
+                    基础 {(creditUsage?.basic_used_display || 0).toFixed(1)} · 高级 {(creditUsage?.advanced_used_display || 0).toFixed(1)} · 内测 {(creditUsage?.beta_used_display || 0).toFixed(1)}
+                  </div>
+                  <div className="mt-1 text-[10px] text-text-tertiary">
+                    {creditUsage?.last_used_at ? `最后扣费 ${formatDateTime(creditUsage.last_used_at)}` : "暂无扣费流水"}
                   </div>
                 </div>
                 <div className="text-[10px] font-medium uppercase tracking-wide text-text-tertiary">会员积分</div>
