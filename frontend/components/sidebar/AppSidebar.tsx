@@ -448,6 +448,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   const historyScrollRef = useRef<HTMLDivElement>(null);
   const conversationPrefetchHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const conversationPrefetchHoverControllerRef = useRef<AbortController | null>(null);
+  const chatBootstrapReadyRef = useRef(false);
 
   const captureHistoryAnchor = useCallback(() => {
     const container = historyScrollRef.current;
@@ -551,6 +552,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
 
   useEffect(() => {
     if (!chatBootstrap) return;
+    chatBootstrapReadyRef.current = true;
     if (chatBootstrap.user) setUser(chatBootstrap.user);
     if (Array.isArray(chatBootstrap.sidebar?.conversations)) {
       const next = sortConversations((chatBootstrap.sidebar.conversations as Conversation[]).filter(isMainChatConversation));
@@ -567,6 +569,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
         sidebar?: { conversations?: Conversation[] };
       }>).detail;
       if (!detail) return;
+      chatBootstrapReadyRef.current = true;
       if (detail.user) {
         setUser(detail.user);
       }
@@ -587,6 +590,12 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
       if (cachedConversations === null) setLoading(false);
       return;
     }
+    const isChatConversationRoute = pathname === "/chat" && !!routeConvId;
+    const hasUsableBootstrapForRoute = isChatConversationRoute
+      && chatBootstrap?.conversation?.id === Number(routeConvId)
+      && Array.isArray(chatBootstrap.sidebar?.conversations);
+    if (hasUsableBootstrapForRoute) return;
+    if (isChatConversationRoute && !chatBootstrapReadyRef.current) return;
     const isFirstLoad = cachedConversations === null;
     if (isFirstLoad) setLoading(true);
     const data = await fetchConversations(currentWS?.id);
@@ -601,7 +610,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     } else {
       updateConversationsStable(() => data);
     }
-  }, [user, currentWS?.id, updateConversationsStable]);
+  }, [user, currentWS?.id, pathname, routeConvId, chatBootstrap, updateConversationsStable]);
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
 
