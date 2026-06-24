@@ -15,6 +15,25 @@ export type ChatBootstrapRuntimeState = {
   error?: Error;
 };
 
+function applyBootstrapClientSideEffects(payload: ChatBootstrapPayload, setChatBootstrap: (payload?: ChatBootstrapPayload) => void) {
+  if (payload.user) {
+    localStorage.setItem("user", JSON.stringify(payload.user));
+  }
+  if (payload.token) {
+    localStorage.setItem("token", payload.token);
+  }
+  if (payload.workspace?.current_id) {
+    localStorage.setItem("current-workspace", String(payload.workspace.current_id));
+  }
+  if (payload.models?.length) {
+    localStorage.setItem("cached-chat-models", JSON.stringify(payload.models));
+  }
+  if (payload.sidebar || payload.user || payload.workspace) {
+    setChatBootstrap(payload);
+    window.dispatchEvent(new CustomEvent("chat-bootstrap-ready", { detail: payload }));
+  }
+}
+
 export function useChatBootstrapRuntime({
   conversationId,
   enabled = true,
@@ -31,6 +50,7 @@ export function useChatBootstrapRuntime({
     const injectedMatches = chatBootstrap && (!conversationId || injectedConversationId === conversationId);
     if (injectedMatches) {
       const statusCode = chatBootstrap.http_status || 200;
+      applyBootstrapClientSideEffects(chatBootstrap, setChatBootstrap);
       if (chatBootstrap.auth_status !== "authenticated" || statusCode === 401) {
         setState({ status: "anonymous", payload: chatBootstrap, models: chatBootstrap.models || [] });
         return;
@@ -57,22 +77,7 @@ export function useChatBootstrapRuntime({
           setState({ status: "anonymous", payload, models: payload.models || [] });
           return;
         }
-        if (payload.user) {
-          localStorage.setItem("user", JSON.stringify(payload.user));
-        }
-        if (payload.token) {
-          localStorage.setItem("token", payload.token);
-        }
-        if (payload.workspace?.current_id) {
-          localStorage.setItem("current-workspace", String(payload.workspace.current_id));
-        }
-        if (payload.models?.length) {
-          localStorage.setItem("cached-chat-models", JSON.stringify(payload.models));
-        }
-        if (payload.sidebar || payload.user || payload.workspace) {
-          setChatBootstrap(payload);
-          window.dispatchEvent(new CustomEvent("chat-bootstrap-ready", { detail: payload }));
-        }
+        applyBootstrapClientSideEffects(payload, setChatBootstrap);
         setState({ status: "ready", payload, models: payload.models || [] });
       })
       .catch((error) => {

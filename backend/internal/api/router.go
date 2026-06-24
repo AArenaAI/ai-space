@@ -95,9 +95,13 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	dynamicShell.Use(middleware.OptionalAuthMiddleware(cfg))
 	{
 		dynamicShell.GET("/chat", chatShellHandler.ServeChat)
+		dynamicShell.HEAD("/chat", chatShellHandler.ServeChat)
 		dynamicShell.GET("/chat/", chatShellHandler.ServeChat)
+		dynamicShell.HEAD("/chat/", chatShellHandler.ServeChat)
 		dynamicShell.GET("/skills/chat", chatShellHandler.ServeSkillChat)
+		dynamicShell.HEAD("/skills/chat", chatShellHandler.ServeSkillChat)
 		dynamicShell.GET("/skills/chat/", chatShellHandler.ServeSkillChat)
+		dynamicShell.HEAD("/skills/chat/", chatShellHandler.ServeSkillChat)
 	}
 
 	// OpenAI Webhook 必须是公开路由，不能走用户 JWT；签名由 OPENAI_WEBHOOK_SECRET 校验。
