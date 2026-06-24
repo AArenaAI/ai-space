@@ -1865,7 +1865,8 @@ function MessageList({
   }), [selectMode]);
 
   if (effectiveIsCompare) {
-    const compareGroups = groups;
+    const compareGroups = Array.from(aggregateGroupByUserId.values())
+      .sort((a, b) => (a.userMessage.createdAt || 0) - (b.userMessage.createdAt || 0));
     const resolveCompareAssistant = (group: InferredGroup, colIndex: number, modelId: string) => {
       return group.assistantMessages.find((m) => m.model === modelId)
         || group.assistantMessages.find((m) => group.models[m.groupIndex ?? -1] === modelId)
