@@ -215,98 +215,107 @@ const advancedFeatureGroups = [
   },
 ];
 
-const comparisonGroups = [
+const comparisonCompetitors = [
+  { id: "chatgpt", name: "ChatGPT Plus", subtitle: "OpenAI 单一订阅" },
+  { id: "claude", name: "Claude Pro", subtitle: "Anthropic 单一订阅" },
+  { id: "gemini", name: "Gemini Advanced", subtitle: "Google AI 订阅" },
+  { id: "deepseek", name: "DeepSeek Pro", subtitle: "DeepSeek 单模型服务" },
+  { id: "kimi", name: "Kimi 会员", subtitle: "Moonshot 长文本助手" },
+] as const;
+
+type CompetitorId = (typeof comparisonCompetitors)[number]["id"];
+type CompareStatus = "支持" | "部分支持" | "不支持";
+type ComparisonRow = [string, CompareStatus, Record<CompetitorId, CompareStatus>];
+
+const comparisonGroups: Array<{ title: string; rows: ComparisonRow[] }> = [
   {
     title: "AI 模型",
     rows: [
-      ["GPT 系列模型", "支持", "支持"],
-      ["Claude 系列模型", "支持", "不支持"],
-      ["Gemini 系列模型", "支持", "不支持"],
-      ["DeepSeek 系列模型", "支持", "不支持"],
-      ["Kimi 系列模型", "支持", "不支持"],
-      ["基础模型与高级模型分层", "支持", "不支持"],
-      ["多模型统一入口", "支持", "不支持"],
-      ["同一问题多模型对比回答", "支持", "不支持"],
-      ["按场景切换模型", "支持", "部分支持"],
+      ["GPT 系列模型", "支持", { chatgpt: "支持", claude: "不支持", gemini: "不支持", deepseek: "不支持", kimi: "不支持" }],
+      ["Claude 系列模型", "支持", { chatgpt: "不支持", claude: "支持", gemini: "不支持", deepseek: "不支持", kimi: "不支持" }],
+      ["Gemini 系列模型", "支持", { chatgpt: "不支持", claude: "不支持", gemini: "支持", deepseek: "不支持", kimi: "不支持" }],
+      ["DeepSeek 系列模型", "支持", { chatgpt: "不支持", claude: "不支持", gemini: "不支持", deepseek: "支持", kimi: "不支持" }],
+      ["Kimi / Moonshot 系列模型", "支持", { chatgpt: "不支持", claude: "不支持", gemini: "不支持", deepseek: "不支持", kimi: "支持" }],
+      ["基础模型与高级模型分层", "支持", { chatgpt: "不支持", claude: "不支持", gemini: "部分支持", deepseek: "不支持", kimi: "部分支持" }],
+      ["多模型统一入口", "支持", { chatgpt: "不支持", claude: "不支持", gemini: "不支持", deepseek: "不支持", kimi: "不支持" }],
+      ["同一问题多模型对比回答", "支持", { chatgpt: "不支持", claude: "不支持", gemini: "不支持", deepseek: "不支持", kimi: "不支持" }],
+      ["按场景切换模型", "支持", { chatgpt: "部分支持", claude: "部分支持", gemini: "部分支持", deepseek: "部分支持", kimi: "部分支持" }],
     ],
   },
   {
     title: "聊天机器人功能",
     rows: [
-      ["多轮上下文对话", "支持", "支持"],
-      ["深度推理模式", "支持", "支持"],
-      ["联网搜索", "支持", "支持"],
-      ["Artifacts / 富文本输出", "支持", "支持"],
-      ["模型回答状态与推理过程展示", "支持", "部分支持"],
-      ["聊天历史工作区", "支持", "支持"],
-      ["收藏与会话管理", "支持", "部分支持"],
-      ["文件 / 图片作为聊天附件", "支持", "支持"],
-      ["普通聊天与对比聊天统一入口", "支持", "不支持"],
+      ["多轮上下文对话", "支持", { chatgpt: "支持", claude: "支持", gemini: "支持", deepseek: "支持", kimi: "支持" }],
+      ["深度推理模式", "支持", { chatgpt: "支持", claude: "支持", gemini: "支持", deepseek: "支持", kimi: "支持" }],
+      ["联网搜索", "支持", { chatgpt: "支持", claude: "支持", gemini: "支持", deepseek: "支持", kimi: "支持" }],
+      ["Artifacts / Canvas / 富文本输出", "支持", { chatgpt: "支持", claude: "支持", gemini: "部分支持", deepseek: "不支持", kimi: "部分支持" }],
+      ["模型回答状态与推理过程展示", "支持", { chatgpt: "部分支持", claude: "部分支持", gemini: "部分支持", deepseek: "支持", kimi: "部分支持" }],
+      ["聊天历史工作区", "支持", { chatgpt: "支持", claude: "支持", gemini: "支持", deepseek: "部分支持", kimi: "支持" }],
+      ["收藏与会话管理", "支持", { chatgpt: "部分支持", claude: "部分支持", gemini: "部分支持", deepseek: "部分支持", kimi: "部分支持" }],
+      ["文件 / 图片作为聊天附件", "支持", { chatgpt: "支持", claude: "支持", gemini: "支持", deepseek: "部分支持", kimi: "支持" }],
+      ["普通聊天与对比聊天统一入口", "支持", { chatgpt: "不支持", claude: "不支持", gemini: "不支持", deepseek: "不支持", kimi: "不支持" }],
     ],
   },
   {
     title: "文档处理与翻译工具",
     rows: [
-      ["文档阅读器", "支持", "部分支持"],
-      ["PDF 资料阅读与问答", "支持", "支持"],
-      ["Word 资料阅读与问答", "支持", "部分支持"],
-      ["PPT 资料阅读与问答", "支持", "部分支持"],
-      ["多文档分析", "支持", "支持"],
-      ["网页资料导入", "支持", "部分支持"],
-      ["Notebook 知识库", "支持", "不支持"],
-      ["来源摘要", "支持", "支持"],
-      ["数据表格生成", "支持", "部分支持"],
-      ["FAQ 生成", "支持", "部分支持"],
-      ["思维导图 / 闪卡 / 测验", "支持", "不支持"],
-      ["文本翻译", "支持", "支持"],
-      ["图片 / 网页翻译", "支持", "部分支持"],
-      ["实时语音翻译", "支持", "不支持"],
+      ["文档阅读器", "支持", { chatgpt: "部分支持", claude: "支持", gemini: "支持", deepseek: "部分支持", kimi: "支持" }],
+      ["PDF 资料阅读与问答", "支持", { chatgpt: "支持", claude: "支持", gemini: "支持", deepseek: "部分支持", kimi: "支持" }],
+      ["Word / PPT 资料阅读与问答", "支持", { chatgpt: "部分支持", claude: "部分支持", gemini: "部分支持", deepseek: "部分支持", kimi: "部分支持" }],
+      ["多文档分析", "支持", { chatgpt: "支持", claude: "支持", gemini: "支持", deepseek: "部分支持", kimi: "支持" }],
+      ["网页资料导入", "支持", { chatgpt: "部分支持", claude: "部分支持", gemini: "支持", deepseek: "部分支持", kimi: "支持" }],
+      ["Notebook 知识库", "支持", { chatgpt: "不支持", claude: "不支持", gemini: "部分支持", deepseek: "不支持", kimi: "不支持" }],
+      ["来源摘要 / 引用整理", "支持", { chatgpt: "支持", claude: "支持", gemini: "支持", deepseek: "部分支持", kimi: "支持" }],
+      ["数据表格生成", "支持", { chatgpt: "部分支持", claude: "部分支持", gemini: "部分支持", deepseek: "部分支持", kimi: "部分支持" }],
+      ["FAQ / 思维导图 / 闪卡 / 测验", "支持", { chatgpt: "部分支持", claude: "部分支持", gemini: "部分支持", deepseek: "不支持", kimi: "部分支持" }],
+      ["文本翻译", "支持", { chatgpt: "支持", claude: "支持", gemini: "支持", deepseek: "支持", kimi: "支持" }],
+      ["PDF / 图片 / 网页翻译", "支持", { chatgpt: "部分支持", claude: "部分支持", gemini: "支持", deepseek: "不支持", kimi: "部分支持" }],
+      ["实时语音翻译", "支持", { chatgpt: "不支持", claude: "不支持", gemini: "支持", deepseek: "不支持", kimi: "不支持" }],
     ],
   },
   {
     title: "图像工具",
     rows: [
-      ["文生图", "支持", "支持"],
-      ["参考图生成", "支持", "部分支持"],
-      ["多模型图像生成入口", "支持", "部分支持"],
-      ["图像编辑工具", "支持", "部分支持"],
-      ["背景移除", "支持", "不支持"],
-      ["背景替换", "支持", "不支持"],
-      ["文字移除", "支持", "不支持"],
-      ["局部重绘", "支持", "部分支持"],
-      ["画质提升 / 放大", "支持", "部分支持"],
-      ["图片作为聊天上下文", "支持", "支持"],
-      ["创作资产沉淀", "支持", "不支持"],
+      ["文生图", "支持", { chatgpt: "支持", claude: "不支持", gemini: "支持", deepseek: "不支持", kimi: "不支持" }],
+      ["参考图生成", "支持", { chatgpt: "部分支持", claude: "不支持", gemini: "部分支持", deepseek: "不支持", kimi: "不支持" }],
+      ["多模型图像生成入口", "支持", { chatgpt: "不支持", claude: "不支持", gemini: "不支持", deepseek: "不支持", kimi: "不支持" }],
+      ["图像编辑工具", "支持", { chatgpt: "部分支持", claude: "不支持", gemini: "部分支持", deepseek: "不支持", kimi: "不支持" }],
+      ["背景移除 / 背景替换", "支持", { chatgpt: "不支持", claude: "不支持", gemini: "不支持", deepseek: "不支持", kimi: "不支持" }],
+      ["文字移除", "支持", { chatgpt: "不支持", claude: "不支持", gemini: "不支持", deepseek: "不支持", kimi: "不支持" }],
+      ["局部重绘", "支持", { chatgpt: "部分支持", claude: "不支持", gemini: "部分支持", deepseek: "不支持", kimi: "不支持" }],
+      ["画质提升 / 放大", "支持", { chatgpt: "部分支持", claude: "不支持", gemini: "不支持", deepseek: "不支持", kimi: "不支持" }],
+      ["图片作为聊天上下文", "支持", { chatgpt: "支持", claude: "支持", gemini: "支持", deepseek: "部分支持", kimi: "支持" }],
+      ["创作资产沉淀", "支持", { chatgpt: "不支持", claude: "不支持", gemini: "不支持", deepseek: "不支持", kimi: "不支持" }],
     ],
   },
   {
     title: "视频与 AI 漫剧",
     rows: [
-      ["视频生成", "支持", "不支持"],
-      ["Seedance 视频生成", "支持", "不支持"],
-      ["首帧 / 参考图生成视频", "支持", "不支持"],
-      ["分段成片", "支持", "不支持"],
-      ["AI 漫剧 Studio", "支持", "不支持"],
-      ["故事剧本到资产候选", "支持", "不支持"],
-      ["角色 / 场景 / 道具资产库", "支持", "不支持"],
-      ["分镜卡片", "支持", "不支持"],
-      ["视频节点绑定源镜头", "支持", "不支持"],
-      ["图像、视频、漫剧一体化流程", "支持", "不支持"],
+      ["视频生成", "支持", { chatgpt: "部分支持", claude: "不支持", gemini: "部分支持", deepseek: "不支持", kimi: "不支持" }],
+      ["Seedance 视频生成", "支持", { chatgpt: "不支持", claude: "不支持", gemini: "不支持", deepseek: "不支持", kimi: "不支持" }],
+      ["首帧 / 参考图生成视频", "支持", { chatgpt: "部分支持", claude: "不支持", gemini: "部分支持", deepseek: "不支持", kimi: "不支持" }],
+      ["分段成片", "支持", { chatgpt: "不支持", claude: "不支持", gemini: "不支持", deepseek: "不支持", kimi: "不支持" }],
+      ["AI 漫剧 Studio", "支持", { chatgpt: "不支持", claude: "不支持", gemini: "不支持", deepseek: "不支持", kimi: "不支持" }],
+      ["故事剧本到资产候选", "支持", { chatgpt: "不支持", claude: "不支持", gemini: "不支持", deepseek: "不支持", kimi: "不支持" }],
+      ["角色 / 场景 / 道具资产库", "支持", { chatgpt: "不支持", claude: "不支持", gemini: "不支持", deepseek: "不支持", kimi: "不支持" }],
+      ["分镜卡片", "支持", { chatgpt: "不支持", claude: "不支持", gemini: "不支持", deepseek: "不支持", kimi: "不支持" }],
+      ["视频节点绑定源镜头", "支持", { chatgpt: "不支持", claude: "不支持", gemini: "不支持", deepseek: "不支持", kimi: "不支持" }],
+      ["图像、视频、漫剧一体化流程", "支持", { chatgpt: "不支持", claude: "不支持", gemini: "不支持", deepseek: "不支持", kimi: "不支持" }],
     ],
   },
   {
     title: "生产力与创作工作流",
     rows: [
-      ["写作助手", "支持", "支持"],
-      ["长文改写", "支持", "支持"],
-      ["邮件 / 方案 / 文案生成", "支持", "支持"],
-      ["PPT 生成", "支持", "部分支持"],
-      ["AI 创意工作室", "支持", "部分支持"],
-      ["数据分析", "支持", "支持"],
-      ["智能联网", "支持", "支持"],
-      ["人工智能作家", "支持", "支持"],
-      ["音频转文本", "支持", "部分支持"],
-      ["AI 朗读", "支持", "部分支持"],
+      ["写作助手", "支持", { chatgpt: "支持", claude: "支持", gemini: "支持", deepseek: "支持", kimi: "支持" }],
+      ["长文改写", "支持", { chatgpt: "支持", claude: "支持", gemini: "支持", deepseek: "支持", kimi: "支持" }],
+      ["邮件 / 方案 / 文案生成", "支持", { chatgpt: "支持", claude: "支持", gemini: "支持", deepseek: "支持", kimi: "支持" }],
+      ["PPT 生成", "支持", { chatgpt: "部分支持", claude: "部分支持", gemini: "部分支持", deepseek: "不支持", kimi: "部分支持" }],
+      ["AI 创意工作室", "支持", { chatgpt: "部分支持", claude: "部分支持", gemini: "部分支持", deepseek: "不支持", kimi: "不支持" }],
+      ["数据分析", "支持", { chatgpt: "支持", claude: "部分支持", gemini: "支持", deepseek: "部分支持", kimi: "部分支持" }],
+      ["智能联网", "支持", { chatgpt: "支持", claude: "支持", gemini: "支持", deepseek: "支持", kimi: "支持" }],
+      ["YouTube / 网页内容总结", "支持", { chatgpt: "部分支持", claude: "部分支持", gemini: "支持", deepseek: "不支持", kimi: "部分支持" }],
+      ["音频转文本", "支持", { chatgpt: "部分支持", claude: "不支持", gemini: "支持", deepseek: "不支持", kimi: "不支持" }],
+      ["AI 朗读", "支持", { chatgpt: "部分支持", claude: "不支持", gemini: "支持", deepseek: "不支持", kimi: "不支持" }],
     ],
   },
 ];
@@ -382,6 +391,9 @@ export default function PricingPage() {
   const [paymentLoadingPlan, setPaymentLoadingPlan] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState("");
   const [openFaq, setOpenFaq] = useState<number | null>(0);
+  const [selectedCompetitorId, setSelectedCompetitorId] = useState<CompetitorId>("chatgpt");
+  const [competitorDropdownOpen, setCompetitorDropdownOpen] = useState(false);
+  const selectedCompetitor = comparisonCompetitors.find((item) => item.id === selectedCompetitorId) || comparisonCompetitors[0];
 
   useEffect(() => {
     let cancelled = false;
@@ -614,19 +626,47 @@ export default function PricingPage() {
                 <div className="mt-1 text-xs text-[#71717a]">内测价 · 多模型工作台</div>
                 <button className="mt-3 rounded-full bg-[#111827] px-4 py-2 text-xs font-semibold text-white">升级 Plus</button>
               </div>
-              <div className="text-center">
-                <div className="text-base font-semibold text-[#111827]">ChatGPT Plus ▾</div>
-                <div className="mt-1 text-xs text-[#71717a]">单一模型订阅</div>
+              <div
+                className="relative text-center"
+                onMouseEnter={() => setCompetitorDropdownOpen(true)}
+                onMouseLeave={() => setCompetitorDropdownOpen(false)}
+              >
+                <button type="button" className="inline-flex items-center justify-center gap-1 text-base font-semibold text-[#111827]">
+                  {selectedCompetitor.name}
+                  <ChevronDown className={`h-4 w-4 text-[#71717a] transition-transform ${competitorDropdownOpen ? "rotate-180" : ""}`} />
+                </button>
+                <div className="mt-1 text-xs text-[#71717a]">{selectedCompetitor.subtitle}</div>
+                {competitorDropdownOpen && (
+                  <div className="absolute left-1/2 top-full z-20 mt-2 w-56 -translate-x-1/2 rounded-xl bg-white p-1.5 text-left shadow-[0_18px_50px_rgba(15,23,42,0.16)] ring-1 ring-black/5">
+                    {comparisonCompetitors.map((competitor) => {
+                      const active = competitor.id === selectedCompetitorId;
+                      return (
+                        <button
+                          key={competitor.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedCompetitorId(competitor.id);
+                            setCompetitorDropdownOpen(false);
+                          }}
+                          className={`block w-full rounded-lg px-3 py-2.5 text-sm transition-colors ${active ? "bg-[#f1f2f4] font-semibold text-[#111827]" : "text-[#374151] hover:bg-[#f5f6f8]"}`}
+                        >
+                          <div>{competitor.name}</div>
+                          <div className="mt-0.5 text-[11px] font-normal text-[#9ca3af]">{competitor.subtitle}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
             {comparisonGroups.map((group) => (
               <div key={group.title}>
                 <div className="border-t border-[#e5e7eb] bg-white px-4 py-4 text-base font-semibold text-[#111827] md:px-6">{group.title}</div>
-                {group.rows.map(([name, aiSpace, chatgpt]) => (
+                {group.rows.map(([name, aiSpace, competitors]) => (
                   <div key={name} className="grid grid-cols-[1.25fr_0.9fr_0.9fr] items-center border-t border-[#eef0f3] px-4 py-3.5 text-sm md:px-6">
                     <div className="text-[#374151] underline decoration-dotted underline-offset-4">{name}</div>
                     <div className="text-center"><CompareValue value={aiSpace} /></div>
-                    <div className="text-center"><CompareValue value={chatgpt} /></div>
+                    <div className="text-center"><CompareValue value={competitors[selectedCompetitorId]} /></div>
                   </div>
                 ))}
               </div>
