@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, useRef } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { useChatModelSelection } from "@/hooks/useChatModelSelection";
 import { useChatLocalActions } from "@/hooks/useChatLocalActions";
 import { useChatBackgroundPollingRuntime } from "@/hooks/useChatBackgroundPollingRuntime";
@@ -19,7 +19,7 @@ import {
 } from "@/hooks/useChatConversationLifecycle";
 import { useI18n } from "@/lib/i18n";
 import { v4 as uuidv4 } from "uuid";
-import { createFinalizingStatus } from "@/lib/chatActivityStatus";
+import { createBusyGeneratingStatus, createFinalizingStatus } from "@/lib/chatActivityStatus";
 import {
   ChatModel,
   Conversation,
@@ -30,6 +30,7 @@ import { fetchChatBootstrap, type ChatBootstrapPayload } from "@/lib/chatBootstr
 import { mapPersistedChatMessages, buildGroupViewsFromMessages } from "@/lib/chatForkCoordinator";
 import type { CachedConversationSnapshot } from "@/lib/chatConversationCache";
 import type { ConversationRestoreResponse } from "@/lib/chatConversationRestoreCoordinator";
+import { buildBootstrapTaskResumePlan } from "@/lib/chatBootstrapTaskResume";
 
 const API_BASE_URL = ""; // 使用相对路径，nginx 同域名代理 /api -> 后端
 
@@ -137,6 +138,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   const [effectiveSkillKey, setEffectiveSkillKey] = useState<string | undefined>(skillKey);
   const [groupViews, setGroupViews] = useState<Map<number, number>>(new Map());
   const taskStreamsRef = useRef<Record<string, AbortController>>({});
+  const resumedBootstrapTaskIdsRef = useRef<Set<number>>(new Set());
   const abortReasonRef = useRef<"user" | "navigation" | null>(null);
   const modelsKey = models.map((m) => m.id).join("|");
   const bootstrapSnapshot: CachedConversationSnapshot | undefined = useMemo(() => {
@@ -229,6 +231,39 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     startBackgroundPolling,
     translate: t,
   });
+
+  useEffect(() => {
+    const activeTasks = bootstrap?.active_tasks?.chat || [];
+    if (!conversationId || activeTasks.length === 0 || messages.length === 0) return;
+    const busyStatus = createBusyGeneratingStatus(t);
+    const plan = buildBootstrapTaskResumePlan({
+      activeTasks,
+      messages,
+      alreadyResumedTaskIds: resumedBootstrapTaskIdsRef.current,
+    });
+    plan.forEach(({ task, message, after, initialContent }) => {
+      resumedBootstrapTaskIdsRef.current.add(task.id);
+      setMessages((prev) => prev.map((item) =>
+        item.id === message.id
+          ? {
+              ...item,
+              generationTaskId: task.id,
+              lastSequence: after || item.lastSequence,
+              activityStatus: item.activityStatus ?? busyStatus,
+              generationStartedAt: item.generationStartedAt ?? Date.now(),
+            }
+          : item
+      ));
+      startTaskEventStream(
+        task.conversation_id || conversationId,
+        message.id,
+        task.assistant_message_id,
+        after,
+        initialContent,
+        task.id
+      );
+    });
+  }, [bootstrap, conversationId, messages, setMessages, startTaskEventStream, t]);
 
   useChatRuntimeCleanup({ stopAllBackgroundPollers, stopAllTaskStreams });
 

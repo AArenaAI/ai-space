@@ -47,6 +47,7 @@
     "test:chat-conversation-cache": "node scripts/regression/chat-conversation-cache-regression.cjs",
     "test:chat-conversation-persistent-cache": "node scripts/regression/chat-conversation-persistent-cache-regression.cjs",
     "test:chat-conversation-prefetch": "node scripts/regression/chat-conversation-prefetch-regression.cjs",
+    "test:chat-bootstrap-task-resume": "node scripts/regression/chat-bootstrap-task-resume-regression.cjs",
     "test:chat-conversation-restore-coordinator": "node scripts/regression/chat-conversation-restore-coordinator-regression.cjs",
     "test:chat-final-reconciliation-coordinator": "node scripts/regression/chat-final-reconciliation-coordinator-regression.cjs",
     "test:chat-navigation-reset-coordinator": "node scripts/regression/chat-navigation-reset-coordinator-regression.cjs",
