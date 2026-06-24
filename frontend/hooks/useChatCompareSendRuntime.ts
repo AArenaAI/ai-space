@@ -47,6 +47,24 @@ type StartBackgroundPolling = (
   localMessageId: string,
   serverMessageId?: number
 ) => void;
+export async function persistCompareConversationState({
+  apiBaseUrl,
+  conversationId,
+  token,
+  compareModelIds,
+}: {
+  apiBaseUrl: string;
+  conversationId?: number;
+  token?: string | null;
+  compareModelIds: string[];
+}) {
+  if (!conversationId || !token || compareModelIds.length < 2) return;
+  await fetch(`${apiBaseUrl}/api/conversations/${conversationId}`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ compare: true, compare_models: JSON.stringify(compareModelIds) }),
+  }).catch(() => undefined);
+}
 
 export type UseChatCompareSendRuntimeOptions = {
   apiBaseUrl: string;
@@ -131,6 +149,7 @@ export function useChatCompareSendRuntime({
         const title = content.trim().slice(0, 20) + (content.trim().length > 20 ? "..." : "");
         convId = await createConversation(title, compareModelIds[0], effectiveSkillKey);
       }
+      await persistCompareConversationState({ apiBaseUrl, conversationId: convId, token, compareModelIds });
 
       const finalContent = content.trim();
       const userFiles = buildMessageFiles(attachments, { defaultType: "file" });
