@@ -1012,37 +1012,6 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     });
   }, [cancelConversationHoverPrefetch, prefetchConversation, router]);
 
-  useEffect(() => {
-    if (!user || conversations.length === 0 || isConversationPrefetchDisabledForTest()) return;
-    const token = localStorage.getItem("token");
-    if (!token) return;
-    const recent = sortConversations(conversations)
-      .filter(isMainChatConversation)
-      .filter((conv) => String(conv.id) !== currentConvId)
-      .slice(0, 5);
-    if (recent.length === 0) return;
-    const controller = new AbortController();
-    let cancelled = false;
-    const run = () => {
-      if (cancelled) return;
-      recent.forEach((conv, index) => {
-        window.setTimeout(() => {
-          if (!cancelled && !controller.signal.aborted) {
-            prefetchConversationSnapshot({ conversationId: conv.id, token, skillKey: conv.skill_key, signal: controller.signal });
-          }
-        }, index * 180);
-      });
-    };
-    const requestIdle = window.requestIdleCallback ?? ((callback: IdleRequestCallback) => window.setTimeout(() => callback({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 500));
-    const cancelIdle = window.cancelIdleCallback ?? window.clearTimeout;
-    const idleId = requestIdle(run, { timeout: 2000 });
-    return () => {
-      cancelled = true;
-      cancelIdle(idleId as any);
-      controller.abort();
-    };
-  }, [conversations, currentConvId, isConversationPrefetchDisabledForTest, user]);
-
   useEffect(() => cancelConversationHoverPrefetch, [cancelConversationHoverPrefetch]);
 
   /* ── 拖拽调整宽度 ── */
