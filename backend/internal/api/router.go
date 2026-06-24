@@ -239,6 +239,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			admin.POST("/beta-invites/generate", betaInviteHandler.GenerateInvites)
 			admin.GET("/beta-applications", betaInviteHandler.ListApplications)
 			admin.PATCH("/beta-applications/:id/review", betaInviteHandler.ReviewApplication)
+			admin.GET("/beta-feedback", betaFeedbackHandler.ListAdmin)
 			admin.GET("/beta-configs", betaConfigHandler.ListConfigs)
 			admin.PATCH("/beta-configs/:key", betaConfigHandler.UpdateConfig)
 			admin.GET("/changelogs", changelogHandler.ListChangelogsAdmin)

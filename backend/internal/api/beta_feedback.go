@@ -25,6 +25,49 @@ type SubmitBetaFeedbackRequest struct {
 	ExpectedImprovement string `json:"expected_improvement"`
 }
 
+func (h *BetaFeedbackHandler) ListAdmin(c *gin.Context) {
+	status := c.Query("status")
+	category := c.Query("category")
+	q := strings.TrimSpace(c.Query("q"))
+	page := parseIntQuery(c, "page", 1)
+	pageSize := parseIntQuery(c, "page_size", 20)
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	query := h.db.Model(&models.BetaFeedback{})
+	if status != "" {
+		query = query.Where("status = ?", status)
+	}
+	if category != "" {
+		query = query.Where("category = ?", category)
+	}
+	if q != "" {
+		like := "%" + q + "%"
+		query = query.Where("email ILIKE ? OR name ILIKE ? OR title ILIKE ? OR content ILIKE ? OR expected_improvement ILIKE ?", like, like, like, like, like)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询失败"})
+		return
+	}
+
+	var items []models.BetaFeedback
+	if err := query.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&items).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询失败"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"items":       items,
+		"total":       total,
+		"page":        page,
+		"page_size":   pageSize,
+		"total_pages": (int(total) + pageSize - 1) / pageSize,
+	})
+}
+
 func (h *BetaFeedbackHandler) Submit(c *gin.Context) {
 	var req SubmitBetaFeedbackRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

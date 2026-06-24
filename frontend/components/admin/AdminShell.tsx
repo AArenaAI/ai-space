@@ -19,6 +19,7 @@ const navItems = [
     icon: Shield,
     children: [
       { href: `${ADMIN_BASE}/beta-applications`, label: "内测申请" },
+      { href: `${ADMIN_BASE}/beta-feedback`, label: "内测反馈" },
       { href: `${ADMIN_BASE}/beta-invites`, label: "邀请码" },
       { href: `${ADMIN_BASE}/beta-configs`, label: "内测配置" },
       { href: `${ADMIN_BASE}/changelogs`, label: "更新日志" },
