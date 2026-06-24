@@ -62,29 +62,28 @@ export default function LoginForm() {
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_25%_20%,rgba(255,255,255,0.9),transparent_28%),radial-gradient(circle_at_70%_76%,rgba(23,58,94,0.14),transparent_34%)]" />
           <div className="absolute inset-0 opacity-55 [background-image:linear-gradient(rgba(23,58,94,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(23,58,94,0.08)_1px,transparent_1px)] [background-size:56px_56px]" />
 
-          <div className="absolute left-1/2 top-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2">
-            <div className="absolute left-[78px] top-[322px] h-28 w-80 rounded-[100%] bg-[#f97316] shadow-[0_28px_70px_rgba(249,115,22,0.24)]" />
-            <div className="absolute left-[120px] top-[265px] h-40 w-72 rounded-[42%_58%_48%_52%] bg-[#f4c542] shadow-[0_24px_70px_rgba(234,179,8,0.24)]" />
-            <div className="absolute left-[210px] top-[220px] h-44 w-28 rounded-[28px] bg-[#111827] shadow-[0_24px_70px_rgba(15,23,42,0.24)]">
-              <div className="absolute left-6 top-12 h-4 w-4 rounded-full bg-white" />
-              <div className="absolute right-6 top-12 h-4 w-4 rounded-full bg-white" />
-            </div>
-            <div className="absolute left-[275px] top-[112px] h-64 w-28 -rotate-6 rounded-[38px] bg-[#6d28d9] shadow-[0_24px_70px_rgba(109,40,217,0.28)]">
-              <div className="absolute left-1/2 top-7 h-7 w-11 -translate-x-1/2 rounded-full bg-[#efe7ff]" />
-            </div>
+          <div className="absolute left-1/2 top-1/2 h-[560px] w-[560px] -translate-x-1/2 -translate-y-1/2">
+            <div className="absolute left-[42px] top-[70px] h-[420px] w-[420px] animate-[spin_28s_linear_infinite] rounded-full border border-dashed border-[#173a5e]/20" />
+            <div className="absolute left-[96px] top-[124px] h-[312px] w-[312px] animate-[spin_18s_linear_infinite_reverse] rounded-full border border-[#173a5e]/12" />
+            <div className="absolute left-[168px] top-[196px] h-[168px] w-[168px] animate-[spin_12s_linear_infinite] rounded-full border border-dotted border-white/70" />
 
-            <div className="absolute left-[93px] top-[86px] h-72 w-72 animate-[spin_22s_linear_infinite] rounded-full border border-dashed border-[#173a5e]/20" />
-            <div className="absolute left-[150px] top-[120px] h-52 w-52 animate-[spin_16s_linear_infinite_reverse] rounded-full border border-[#173a5e]/10" />
+            <div className="absolute left-[110px] top-[340px] h-24 w-80 -rotate-12 rounded-full bg-gradient-to-r from-transparent via-[#173a5e]/15 to-transparent blur-2xl" />
+            <div className="absolute left-[142px] top-[294px] h-36 w-16 -rotate-12 rounded-full bg-gradient-to-b from-[#3b82f6]/65 via-[#93c5fd]/35 to-transparent blur-xl" />
+            <div className="absolute left-[158px] top-[322px] h-28 w-9 -rotate-12 animate-pulse rounded-full bg-gradient-to-b from-white/85 via-[#60a5fa]/45 to-transparent blur-md" />
+            <div className="absolute left-[170px] top-[360px] h-36 w-5 -rotate-12 animate-pulse rounded-full bg-gradient-to-b from-[#f97316]/55 to-transparent blur-lg" />
 
             <img
               src="/brand-light-logo.png"
               alt="AI Space rocket"
-              className="absolute left-[148px] top-[98px] h-40 w-40 -rotate-12 object-contain drop-shadow-[0_30px_38px_rgba(23,58,94,0.25)]"
+              className="absolute left-[170px] top-[116px] h-48 w-48 -rotate-12 animate-[float_4s_ease-in-out_infinite] object-contain drop-shadow-[0_34px_44px_rgba(23,58,94,0.28)]"
             />
-            <div className="absolute left-[144px] top-[247px] h-24 w-12 -rotate-12 rounded-full bg-gradient-to-b from-[#60a5fa]/60 via-[#93c5fd]/30 to-transparent blur-xl" />
-            <div className="absolute left-[88px] top-[140px] h-4 w-4 rounded-full bg-white shadow-[0_0_36px_rgba(255,255,255,0.95)]" />
-            <div className="absolute right-[84px] top-[82px] h-8 w-8 rotate-45 bg-white shadow-[0_0_32px_rgba(255,255,255,0.85)]" />
-            <div className="absolute right-[112px] bottom-[96px] h-3 w-3 rounded-full bg-[#173a5e]/50" />
+
+            <div className="absolute left-[86px] top-[152px] h-2 w-2 animate-ping rounded-full bg-white" />
+            <div className="absolute left-[86px] top-[152px] h-2 w-2 rounded-full bg-white shadow-[0_0_28px_rgba(255,255,255,0.95)]" />
+            <div className="absolute right-[106px] top-[92px] h-7 w-7 rotate-45 animate-pulse bg-white shadow-[0_0_32px_rgba(255,255,255,0.9)]" />
+            <div className="absolute right-[142px] bottom-[126px] h-3 w-3 rounded-full bg-[#173a5e]/45 shadow-[0_0_18px_rgba(23,58,94,0.45)]" />
+            <div className="absolute left-[120px] bottom-[96px] h-2 w-2 rounded-full bg-[#173a5e]/35" />
+            <div className="absolute right-[214px] bottom-[72px] h-1.5 w-1.5 rounded-full bg-white/90" />
           </div>
 
           <div className="absolute bottom-10 left-10 max-w-md">
