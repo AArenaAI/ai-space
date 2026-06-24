@@ -53,7 +53,15 @@ type Plan = {
   cta: string;
 };
 
-const modelChips = ["GPT-5.5", "Claude", "Gemini", "DeepSeek", "Kimi", "Seedance", "Seedream"];
+const modelChips = [
+  { name: "GPT-5.5", icon: "/model-icons/openai.svg" },
+  { name: "Claude", icon: "/model-icons/anthropic.svg" },
+  { name: "Gemini", icon: "/model-icons/googlegemini.svg" },
+  { name: "DeepSeek", icon: "/model-icons/deepseek.svg" },
+  { name: "Kimi", icon: "/model-icons/moonshotai.svg" },
+  { name: "Seedance", icon: "/model-icons/bytedance.svg" },
+  { name: "Seedream", icon: "/model-icons/bytedance.svg" },
+];
 
 const plans: Plan[] = [
   {
@@ -477,7 +485,12 @@ export default function PricingPage() {
           </p>
           <div className="mt-7 flex flex-wrap justify-center gap-2">
             {modelChips.map((model) => (
-              <span key={model} className="rounded-full bg-white px-3.5 py-2 text-sm font-medium text-[#374151] ring-1 ring-[#e5e7eb]">{model}</span>
+              <span key={model.name} className="inline-flex items-center gap-2 rounded-full bg-white px-3.5 py-2 text-sm font-medium text-[#374151] shadow-sm ring-1 ring-[#e5e7eb]">
+                <span className="flex h-5 w-5 items-center justify-center overflow-hidden rounded-full bg-white ring-1 ring-[#eef0f3]">
+                  <img src={model.icon} alt={model.name} className="h-3.5 w-3.5 object-contain" />
+                </span>
+                {model.name}
+              </span>
             ))}
           </div>
           <div className="mt-8 inline-flex rounded-full bg-white p-1.5 shadow-sm ring-1 ring-[#e5e7eb]">
