@@ -137,7 +137,8 @@ function assertOnlyCurrentBootstrap(result) {
     assertOnlyCurrentBootstrap(result762);
 
     const fallback903 = await openConversationWithBootstrapFailure(browser, auth, "903");
-    assert.equal(fallback903.errors.length, 0, `fallback console/page errors: ${fallback903.errors.join("\n")}`);
+      const unexpectedFallbackErrors = fallback903.errors.filter((message) => !message.includes("503") && !message.includes("Service Unavailable"));
+    assert.equal(unexpectedFallbackErrors.length, 0, `fallback console/page errors: ${unexpectedFallbackErrors.join("\n")}`);
     assert.equal(fallback903.finalState.hasLogin, false, "fallback should not show login");
     assert.ok(fallback903.finalState.rowCount > 0, "fallback should render rows from legacy restore when bootstrap fails");
     assert.ok(
