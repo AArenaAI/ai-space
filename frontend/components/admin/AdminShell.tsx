@@ -27,7 +27,7 @@ const navItems = [
       { href: `${ADMIN_BASE}/model-prices`, label: "供应商定价" },
     ],
   },
-  { href: `${ADMIN_BASE}/billing`, label: "支付", icon: CreditCard, disabled: true },
+  { href: `${ADMIN_BASE}/billing`, label: "定价", icon: CreditCard },
 ];
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
@@ -90,7 +90,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                 </div>
               );
             }
-            if (item.disabled) {
+            if ("disabled" in item && item.disabled) {
               return (
                 <div key={item.href} className="flex items-center justify-between rounded-xl px-3 py-2.5 text-sm text-text-tertiary opacity-60">
                   <span className="flex items-center gap-3"><Icon className="h-4 w-4" />{item.label}</span>

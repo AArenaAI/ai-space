@@ -883,6 +883,15 @@ func (s *UsageService) getTokenPrice(provider, model string) config.ModelPrice {
 	return s.getTokenPriceWithFallback(provider, model, fallbackInput, fallbackOutput)
 }
 
+// GetTokenPriceSnapshot exposes the same resolved token pricing used by usage ledger writes.
+// It is read-only and intended for admin-side preflight/ops estimates.
+func (s *UsageService) GetTokenPriceSnapshot(provider, model string) config.ModelPrice {
+	if s == nil {
+		s = NewUsageService(nil)
+	}
+	return s.getTokenPrice(provider, model)
+}
+
 func (s *UsageService) getTokenPriceWithFallback(provider, model string, fallbackInput, fallbackOutput float64) config.ModelPrice {
 	if price, ok := s.getModelPrice(provider, model); ok && hasTokenPrice(price) {
 		if price.PricingUnit == "" {
@@ -1151,6 +1160,9 @@ func (s *UsageService) getModelPrice(provider, model string) (config.ModelPrice,
 }
 
 func (s *UsageService) getProviderChatPrice(provider string) (inputPrice, outputPrice float64) {
+	if s == nil || s.cfg == nil {
+		return 0, 0
+	}
 	switch strings.ToLower(provider) {
 	case "openai":
 		return s.cfg.OpenAIInputPrice, s.cfg.OpenAIOutputPrice

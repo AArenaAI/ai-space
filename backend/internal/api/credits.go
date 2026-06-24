@@ -533,31 +533,45 @@ func (h *CreditsHandler) GetModelTiers(c *gin.Context) {
 // @Success 200 {object} map[string]interface{}
 // @Router /api/plans [get]
 func (h *CreditsHandler) GetPublicPlans(c *gin.Context) {
+	var billingPlans []models.BillingPlan
+	if h != nil && h.db != nil {
+		h.db.Where("enabled = ? AND public_visible = ?", true, true).Order("sort_order ASC, price_cents ASC, id ASC").Find(&billingPlans)
+	}
+	if len(billingPlans) > 0 {
+		plans := map[string]interface{}{}
+		for _, plan := range billingPlans {
+			plans[plan.Code] = map[string]interface{}{
+				"id":               plan.ID,
+				"code":             plan.Code,
+				"name":             plan.Name,
+				"description":      plan.Description,
+				"price_cents":      plan.PriceCents,
+				"price":            float64(plan.PriceCents) / 100.0,
+				"currency":         plan.Currency,
+				"interval":         plan.Interval,
+				"basic":            plan.BasicCredits,
+				"advanced":         plan.AdvancedCredits,
+				"elite":            plan.EliteCredits,
+				"basic_credits":    plan.BasicCredits,
+				"advanced_credits": plan.AdvancedCredits,
+				"elite_credits":    plan.EliteCredits,
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"plans": plans})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"plans": map[string]interface{}{
-			"free": map[string]interface{}{
-				"name":     "免费版",
-				"basic":    30,
-				"advanced": 0,
-				"features": []string{"每日免费重置", "基础模型", "标准速度"},
-			},
 			"basic": map[string]interface{}{
-				"name":     "Basic",
-				"basic":    100,
-				"advanced": 25,
-				"features": []string{"基础+高级积分", "无广告", "标准速度"},
-			},
-			"plus": map[string]interface{}{
-				"name":     "Plus",
-				"basic":    300,
-				"advanced": 100,
-				"features": []string{"更多积分", "优先响应", "高级模型"},
-			},
-			"ultra": map[string]interface{}{
-				"name":     "Ultra",
-				"basic":    -1,
-				"advanced": 260,
-				"features": []string{"基础无限", "最高优先级", "全部模型"},
+				"name":             "基础版",
+				"price_cents":      14900,
+				"price":            149,
+				"currency":         "CNY",
+				"interval":         "monthly",
+				"basic":            3600,
+				"advanced":         200,
+				"basic_credits":    3600,
+				"advanced_credits": 200,
 			},
 		},
 	})

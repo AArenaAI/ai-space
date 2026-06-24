@@ -206,7 +206,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	authorized := router.Group("/api")
 	authorized.Use(middleware.AuthMiddleware(cfg))
 	{
-		adminHandler := NewAdminHandler(db)
+		adminHandler := NewAdminHandler(db, cfg)
 		admin := authorized.Group("/admin")
 		admin.Use(middleware.AdminMiddleware(db))
 		{
@@ -216,6 +216,9 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			admin.GET("/users/:id", adminHandler.GetUser)
 			admin.PATCH("/users/:id", adminHandler.UpdateUser)
 			admin.POST("/users/:id/credits/adjust", adminHandler.AdjustCredits)
+			admin.GET("/billing/plans", adminHandler.ListBillingPlans)
+			admin.POST("/billing/plans", adminHandler.CreateBillingPlan)
+			admin.PATCH("/billing/plans/:id", adminHandler.UpdateBillingPlan)
 			admin.GET("/usage/summary", adminHandler.UsageSummary)
 			admin.GET("/usage/logs", adminHandler.UsageLogs)
 			admin.GET("/usage/users", adminHandler.UsageUsers)

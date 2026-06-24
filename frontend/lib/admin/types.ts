@@ -34,6 +34,31 @@ export interface AdminUser {
   beta_credit_used_display?: number;
 }
 
+
+export interface AdminBillingPlan {
+  id: number;
+  code: string;
+  name: string;
+  description: string;
+  price_cents: number;
+  currency: string;
+  interval: string;
+  basic_credits: number;
+  advanced_credits: number;
+  elite_credits: number;
+  enabled: boolean;
+  public_visible: boolean;
+  sort_order: number;
+  provider: string;
+  provider_price_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminBillingPlansResponse {
+  plans: AdminBillingPlan[];
+}
+
 export interface AdminOverview {
   users: { total: number; today_new: number };
   usage: { today_requests: number; today_cost_rmb: number; today_failures: number };
@@ -274,6 +299,25 @@ export interface AdminTaskUsageSummary {
   last_usage_at?: string;
 }
 
+
+export interface AdminTaskCostEstimate {
+  available: boolean;
+  estimated_prompt_tokens: number;
+  estimated_completion_tokens: number;
+  estimated_total_tokens: number;
+  estimated_input_cost_rmb: number;
+  estimated_output_cost_rmb: number;
+  estimated_total_cost_rmb: number;
+  actual_total_cost_rmb: number;
+  delta_cost_rmb: number;
+  delta_rate: number;
+  pricing_unit: string;
+  input_unit_price_rmb: number;
+  output_unit_price_rmb: number;
+  method: string;
+  note: string;
+}
+
 export interface AdminTask {
   id: number;
   response_id: string;
@@ -286,6 +330,7 @@ export interface AdminTask {
   status: string;
   error_message?: string;
   usage?: AdminTaskUsageSummary;
+  cost_estimate?: AdminTaskCostEstimate;
   recent_usage_logs?: AdminUsageLog[];
   created_at: string;
   updated_at: string;

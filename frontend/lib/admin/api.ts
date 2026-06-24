@@ -1,4 +1,6 @@
 import type {
+  AdminBillingPlan,
+  AdminBillingPlansResponse,
   AdminModelConfigsResponse,
   AdminModelConfig,
   AdminOverview,
@@ -117,6 +119,18 @@ export function getAdminMe() {
 
 export function getAdminOverview() {
   return adminFetch<AdminOverview>("/overview");
+}
+
+export function getAdminBillingPlans() {
+  return adminFetch<AdminBillingPlansResponse>("/billing/plans");
+}
+
+export function createAdminBillingPlan(plan: Omit<AdminBillingPlan, "id" | "created_at" | "updated_at">) {
+  return adminFetch<{ plan: AdminBillingPlan }>("/billing/plans", { method: "POST", body: JSON.stringify(plan) });
+}
+
+export function updateAdminBillingPlan(id: number, plan: Omit<AdminBillingPlan, "id" | "created_at" | "updated_at">) {
+  return adminFetch<{ plan: AdminBillingPlan }>(`/billing/plans/${id}`, { method: "PATCH", body: JSON.stringify(plan) });
 }
 
 export function getAdminUsers(params: { page?: number; pageSize?: number; q?: string } = {}) {
