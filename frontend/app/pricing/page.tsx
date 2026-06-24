@@ -1,74 +1,27 @@
 "use client";
 
 import Link from "next/link";
-import { Check, Coffee, Flame, Star, Infinity, PenLine, Languages, Mic, FileText, ImageIcon, Video, Sparkles, Wand2, X, Loader2 } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Coffee,
+  FileText,
+  Flame,
+  ImageIcon,
+  Infinity,
+  Languages,
+  Loader2,
+  Mic,
+  Minus,
+  PenLine,
+  Sparkles,
+  Star,
+  Video,
+  Wand2,
+  X,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
-import { useI18n } from "@/lib/i18n";
-
-const plans = [
-  {
-    id: "free",
-    nameKey: "pricing.free.name",
-    price: "0",
-    priceDisplayKey: "pricing.free.price",
-    icon: Coffee,
-    iconColor: "text-amber-400",
-    bgGradient: "from-amber-500/5 to-transparent",
-    border: "border-amber-500/20",
-    featureKeys: ["pricing.free.feature.dailyBasic", "pricing.free.feature.basicModels", "pricing.free.feature.standardSpeed", "pricing.free.feature.reset"],
-    credits: { basic: 30, advanced: 0 },
-    ctaKey: "pricing.free.cta",
-    current: true,
-  },
-  {
-    id: "basic",
-    nameKey: "pricing.basic.name",
-    price: "***",
-    priceDisplayKey: "pricing.placeholderPrice",
-    icon: Flame,
-    iconColor: "text-orange-400",
-    bgGradient: "from-orange-500/5 to-transparent",
-    border: "border-orange-500/20",
-    featureKeys: ["pricing.basic.feature.basic", "pricing.basic.feature.advanced", "pricing.feature.advancedModels", "pricing.feature.noAds"],
-    credits: { basic: 100, advanced: 25 },
-    ctaKey: "pricing.chooseBasic",
-    popular: false,
-  },
-  {
-    id: "plus",
-    nameKey: "pricing.plus.name",
-    price: "***",
-    priceDisplayKey: "pricing.placeholderPrice",
-    icon: Star,
-    iconColor: "text-purple-400",
-    bgGradient: "from-purple-500/5 to-transparent",
-    border: "border-purple-500/20",
-    featureKeys: ["pricing.plus.feature.basic", "pricing.plus.feature.advanced", "pricing.feature.advancedModels", "pricing.feature.prioritySpeed", "pricing.feature.noAds"],
-    credits: { basic: 300, advanced: 100 },
-    ctaKey: "pricing.choosePlus",
-    popular: true,
-  },
-  {
-    id: "ultra",
-    nameKey: "pricing.ultra.name",
-    price: "***",
-    priceDisplayKey: "pricing.placeholderPrice",
-    icon: Infinity,
-    iconColor: "text-emerald-400",
-    bgGradient: "from-emerald-500/5 to-transparent",
-    border: "border-emerald-500/20",
-    featureKeys: ["pricing.ultra.feature.basic", "pricing.ultra.feature.advanced", "pricing.feature.allModels", "pricing.feature.fastestSpeed", "pricing.feature.noAds"],
-    credits: { basic: -1, advanced: 260 },
-    ctaKey: "pricing.chooseUltra",
-    popular: false,
-  },
-];
-
-const tierBadges = [
-  { icon: "☕", labelKey: "pricing.badge.basic", color: "text-amber-400", bg: "bg-amber-500/10" },
-  { icon: "🔥", labelKey: "pricing.badge.advanced", color: "text-orange-400", bg: "bg-orange-500/10" },
-];
 
 type TierKey = "basic" | "advanced";
 type TierModel = { id: string; name: string; provider?: string; tier?: TierKey };
@@ -80,6 +33,138 @@ type PaymentModalState = {
   qrDataUrl: string;
   status: string;
 };
+
+type Plan = {
+  id: "free" | "basic" | "plus" | "ultra";
+  name: string;
+  tagline: string;
+  price: string;
+  priceNote: string;
+  yearlyNote?: string;
+  icon: any;
+  badge?: string;
+  current?: boolean;
+  popular?: boolean;
+  credits: { basic: string; advanced: string };
+  models: string[];
+  work: Array<{ label: string; enabled: boolean }>;
+  creation: Array<{ label: string; enabled: boolean }>;
+  service: Array<{ label: string; enabled: boolean }>;
+  cta: string;
+};
+
+const modelChips = ["GPT-5.5", "Claude", "Gemini", "DeepSeek", "Kimi", "Seedance", "Seedream"];
+
+const plans: Plan[] = [
+  {
+    id: "free",
+    name: "Free",
+    tagline: "轻量体验与偶尔使用",
+    price: "¥0",
+    priceNote: "免费开始",
+    icon: Coffee,
+    current: true,
+    credits: { basic: "每日 30", advanced: "—" },
+    models: ["基础模型", "标准速度", "每日重置"],
+    work: [
+      { label: "基础聊天", enabled: true },
+      { label: "文档阅读", enabled: false },
+      { label: "实时语音翻译", enabled: false },
+    ],
+    creation: [
+      { label: "图像生成", enabled: false },
+      { label: "视频生成", enabled: false },
+      { label: "AI 漫剧 Studio", enabled: false },
+    ],
+    service: [
+      { label: "普通队列", enabled: true },
+      { label: "商用使用", enabled: false },
+    ],
+    cta: "当前方案",
+  },
+  {
+    id: "basic",
+    name: "Basic",
+    tagline: "适合日常问答与轻量工作",
+    price: "内测价",
+    priceNote: "以订单确认金额为准",
+    yearlyNote: "年付优惠开放中",
+    icon: Flame,
+    badge: "入门",
+    credits: { basic: "100", advanced: "25" },
+    models: ["GPT Mini", "Gemini Flash", "DeepSeek Flash", "更多..."],
+    work: [
+      { label: "基础与部分高级模型", enabled: true },
+      { label: "写作助手 / 翻译", enabled: true },
+      { label: "文档阅读", enabled: true },
+    ],
+    creation: [
+      { label: "图像生成", enabled: true },
+      { label: "视频生成", enabled: false },
+      { label: "AI 漫剧 Studio", enabled: false },
+    ],
+    service: [
+      { label: "无广告体验", enabled: true },
+      { label: "标准速度", enabled: true },
+    ],
+    cta: "选择 Basic",
+  },
+  {
+    id: "plus",
+    name: "Plus",
+    tagline: "最适合高频创作与日常 AI 工作",
+    price: "内测价",
+    priceNote: "以订单确认金额为准",
+    yearlyNote: "最推荐 · 年付更划算",
+    icon: Star,
+    badge: "最推荐",
+    popular: true,
+    credits: { basic: "300", advanced: "100" },
+    models: ["GPT-5.5", "Gemini Pro", "DeepSeek Pro", "Kimi", "更多..."],
+    work: [
+      { label: "高级模型优先使用", enabled: true },
+      { label: "文档阅读 / 多语言翻译", enabled: true },
+      { label: "实时语音翻译", enabled: true },
+    ],
+    creation: [
+      { label: "图像生成 / 图像编辑", enabled: true },
+      { label: "视频生成", enabled: true },
+      { label: "AI 漫剧 Studio", enabled: true },
+    ],
+    service: [
+      { label: "优先速度", enabled: true },
+      { label: "商用使用", enabled: true },
+    ],
+    cta: "升级 Plus",
+  },
+  {
+    id: "ultra",
+    name: "Ultra",
+    tagline: "专业重度用户与高频生产",
+    price: "内测价",
+    priceNote: "以订单确认金额为准",
+    yearlyNote: "专业额度包",
+    icon: Infinity,
+    badge: "专业",
+    credits: { basic: "∞", advanced: "260" },
+    models: ["全部基础模型", "全部高级模型", "高负载任务", "更多..."],
+    work: [
+      { label: "全模型访问", enabled: true },
+      { label: "复杂文档与长任务", enabled: true },
+      { label: "实时语音翻译", enabled: true },
+    ],
+    creation: [
+      { label: "图像生成 / 编辑", enabled: true },
+      { label: "视频生成", enabled: true },
+      { label: "AI 漫剧 Studio", enabled: true },
+    ],
+    service: [
+      { label: "最快速度", enabled: true },
+      { label: "商用使用", enabled: true },
+    ],
+    cta: "选择 Ultra",
+  },
+];
 
 const fallbackTierModels: Record<TierKey, TierModel[]> = {
   basic: [
@@ -101,17 +186,10 @@ const fallbackTierModels: Record<TierKey, TierModel[]> = {
   ],
 };
 
-const tierInfo: Array<{ key: TierKey; icon: string; color: string; labelKey: string }> = [
-  { key: "basic", icon: "☕", color: "text-amber-400", labelKey: "pricing.modelTiers.basic" },
-  { key: "advanced", icon: "🔥", color: "text-orange-400", labelKey: "pricing.modelTiers.advanced" },
-];
-
 const advancedFeatureGroups = [
   {
     title: "AI 工作",
     subtitle: "面向日常办公、资料处理与跨语言协作",
-    accent: "from-blue-500/10 to-cyan-500/5",
-    border: "border-blue-500/20",
     items: [
       { icon: PenLine, name: "写作助手", desc: "文章、邮件、方案与长文改写" },
       { icon: Languages, name: "文本翻译", desc: "多语言文本翻译与润色" },
@@ -122,8 +200,6 @@ const advancedFeatureGroups = [
   {
     title: "AI 创作",
     subtitle: "面向图像、视频、漫剧与视觉编辑工作流",
-    accent: "from-purple-500/10 to-pink-500/5",
-    border: "border-purple-500/20",
     items: [
       { icon: ImageIcon, name: "图像生成", desc: "文生图、参考图与创意视觉生成" },
       { icon: Video, name: "视频生成", desc: "Seedance 视频生成与分段成片" },
@@ -133,12 +209,66 @@ const advancedFeatureGroups = [
   },
 ];
 
+const comparisonGroups = [
+  {
+    title: "AI 模型",
+    rows: [
+      ["GPT 系列", "支持", "支持"],
+      ["Claude / Gemini / DeepSeek / Kimi", "支持", "不支持"],
+      ["多模型统一入口", "支持", "不支持"],
+      ["模型对比回答", "支持", "不支持"],
+    ],
+  },
+  {
+    title: "文档与翻译",
+    rows: [
+      ["文档阅读器", "支持", "部分支持"],
+      ["文本翻译", "支持", "支持"],
+      ["实时语音翻译", "支持", "不支持"],
+      ["PDF / Word / PPT 资料问答", "支持", "部分支持"],
+    ],
+  },
+  {
+    title: "AI 创作",
+    rows: [
+      ["图像生成 / 编辑", "支持", "部分支持"],
+      ["视频生成", "支持", "不支持"],
+      ["AI 漫剧 Studio", "支持", "不支持"],
+      ["分镜 / 资产 / 视频链路", "支持", "不支持"],
+    ],
+  },
+];
+
+const faqs = [
+  ["基础额度和高级额度有什么区别？", "基础额度面向轻量模型和日常问答；高级额度面向更强模型、复杂推理和创作任务。不同模型会按实际消耗扣除对应额度。"],
+  ["会员额度和内测额度是否互通？", "不互通。内测额度是独立钱包，用于 beta 测试；正式会员额度按会员套餐发放和消耗。"],
+  ["图像和视频生成如何扣费？", "图像、视频和高级创作能力会按所选模型、任务类型和生成成本扣除额度，页面会逐步补充更详细的消耗说明。"],
+  ["支付后多久开通？", "支付宝扫码支付成功后，系统会通过订单轮询和回调自动开通会员；如果页面未刷新，可重新进入账户或定价页查看状态。"],
+  ["支持退款或发票吗？", "正式付费开放后会补充退款、发票和订单管理规则。内测阶段如遇支付问题，请联系管理员处理。"],
+  ["后续新增模型会包含在会员里吗？", "AI Space 会持续接入新模型。新增模型会按成本归入基础、高级或更高等级额度池，具体以页面展示为准。"],
+];
+
+function FeatureLine({ label, enabled }: { label: string; enabled: boolean }) {
+  return (
+    <div className={`flex items-start gap-2 text-[12px] ${enabled ? "text-[#111827]" : "text-[#a1a1aa]"}`}>
+      {enabled ? <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : <Minus className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function CompareValue({ value }: { value: string }) {
+  if (value === "支持") return <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-[#111827] px-2 text-[11px] font-medium text-white">✓</span>;
+  if (value === "部分支持") return <span className="text-xs font-medium text-[#71717a]">部分支持</span>;
+  return <span className="text-xs text-[#a1a1aa]">—</span>;
+}
+
 export default function PricingPage() {
-  const { t } = useI18n();
   const [tierModels, setTierModels] = useState<Record<TierKey, TierModel[]>>(fallbackTierModels);
   const [payment, setPayment] = useState<PaymentModalState | null>(null);
   const [paymentLoadingPlan, setPaymentLoadingPlan] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState("");
+  const [openFaq, setOpenFaq] = useState<number | null>(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -172,16 +302,14 @@ export default function PricingPage() {
         .then((data) => {
           if (!data?.status) return;
           setPayment((prev) => (prev && prev.orderNo === payment.orderNo ? { ...prev, status: data.status } : prev));
-          if (data.status === "paid") {
-            window.dispatchEvent(new Event("auth-changed"));
-          }
+          if (data.status === "paid") window.dispatchEvent(new Event("auth-changed"));
         })
         .catch(() => undefined);
     }, 2500);
     return () => window.clearInterval(timer);
   }, [payment?.orderNo, payment?.status]);
 
-  async function startAlipayCheckout(plan: (typeof plans)[number]) {
+  async function startAlipayCheckout(plan: Plan) {
     setPaymentError("");
     const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
     if (!token) {
@@ -217,126 +345,122 @@ export default function PricingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-surface">
-      <nav className="h-14 border-b border-surface-border flex items-center justify-between px-6">
-        <Link href="/chat" className="text-sm font-semibold text-text-primary tracking-tight hover:text-amber-400 transition-colors">
-          {t("pricing.back")}
-        </Link>
-        <span className="text-xs text-text-tertiary">{t("pricing.navTitle")}</span>
+    <div className="min-h-screen bg-[#f7f7f8] text-[#111827]">
+      <nav className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-[#e5e7eb] bg-white/90 px-6 backdrop-blur">
+        <Link href="/chat" className="text-sm font-semibold tracking-tight hover:text-[#374151]">← 返回 AI Space</Link>
+        <div className="hidden items-center gap-6 text-sm text-[#71717a] md:flex">
+          <a href="#plans" className="hover:text-[#111827]">套餐</a>
+          <a href="#features" className="hover:text-[#111827]">功能</a>
+          <a href="#compare" className="hover:text-[#111827]">对比</a>
+          <a href="#faq" className="hover:text-[#111827]">FAQ</a>
+        </div>
+        <span className="text-xs text-[#9ca3af]">Pricing</span>
       </nav>
 
-      <div className="max-w-5xl mx-auto px-6 py-12">
-        <div className="text-center mb-12">
-          <h1 className="text-3xl font-bold text-text-primary mb-3">{t("pricing.title")}</h1>
-          <p className="text-sm text-text-secondary max-w-lg mx-auto">{t("pricing.subtitle")}</p>
-
-          <div className="mt-6 flex items-center justify-center gap-4">
-            {tierBadges.map((tier) => (
-              <div key={tier.labelKey} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full ${tier.bg}`}>
-                <span>{tier.icon}</span>
-                <span className={`text-xs font-medium ${tier.color}`}>{t(tier.labelKey)}{t("pricing.badge.credits")}</span>
-              </div>
+      <main className="mx-auto max-w-7xl px-5 py-12 md:px-8">
+        <section className="mx-auto max-w-4xl text-center">
+          <div className="mx-auto inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-medium text-[#374151] shadow-sm ring-1 ring-[#e5e7eb]">
+            <Sparkles className="h-4 w-4" />
+            多模型会员 · AI 工作台 · 创作工具
+          </div>
+          <h1 className="mt-6 text-4xl font-semibold tracking-[-0.045em] md:text-6xl">一个会员，解锁主流 AI 模型与创作工具</h1>
+          <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-[#6b7280]">
+            GPT、Claude、Gemini、DeepSeek、Kimi 等模型统一入口。会员额度可用于聊天、文档、翻译、图像、视频和 AI 漫剧创作。
+          </p>
+          <div className="mt-7 flex flex-wrap justify-center gap-2">
+            {modelChips.map((model) => (
+              <span key={model} className="rounded-full bg-white px-3.5 py-2 text-sm font-medium text-[#374151] ring-1 ring-[#e5e7eb]">{model}</span>
             ))}
           </div>
-        </div>
+          <div className="mt-8 inline-flex rounded-full bg-white p-1.5 shadow-sm ring-1 ring-[#e5e7eb]">
+            <button className="rounded-full bg-[#111827] px-5 py-2 text-sm font-semibold text-white">个人</button>
+            <button className="rounded-full px-5 py-2 text-sm font-semibold text-[#71717a]">团队稍后开放</button>
+          </div>
+        </section>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <section id="plans" className="mt-14 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
           {plans.map((plan) => {
             const Icon = plan.icon;
-            const name = t(plan.nameKey);
-            const priceDisplay = t(plan.priceDisplayKey);
+            const isPopular = !!plan.popular;
             return (
-              <div key={plan.id} className={`relative rounded-2xl border ${plan.border} bg-gradient-to-b ${plan.bgGradient} p-5 flex flex-col transition-all duration-200 hover:shadow-lg hover:border-opacity-40`}>
-                {plan.popular && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full bg-purple-500 text-white text-[10px] font-medium">
-                    {t("pricing.popular")}
-                  </div>
+              <div key={plan.id} className={`relative flex flex-col rounded-[28px] border bg-white p-5 shadow-sm transition-all ${isPopular ? "border-[#111827] shadow-[0_24px_60px_rgba(15,23,42,0.16)]" : "border-[#e5e7eb] hover:border-[#cbd5e1]"}`}>
+                {plan.badge && (
+                  <div className={`absolute right-5 top-5 rounded-full px-3 py-1 text-xs font-semibold ${isPopular ? "bg-[#111827] text-white" : "bg-[#f1f2f4] text-[#374151]"}`}>{plan.badge}</div>
                 )}
-
-                <div className="flex items-center gap-2 mb-3">
-                  <Icon className={`w-4 h-4 ${plan.iconColor}`} />
-                  <span className="text-sm font-semibold text-text-primary">{name}</span>
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#f5f6f8]"><Icon className="h-5 w-5" /></div>
+                <div className="mt-5">
+                  <h2 className="text-xl font-semibold tracking-[-0.03em]">{plan.name}</h2>
+                  <p className="mt-1 min-h-10 text-sm leading-5 text-[#6b7280]">{plan.tagline}</p>
                 </div>
-
-                <div className="mb-4">
-                  <span className="text-2xl font-bold text-text-primary">{priceDisplay}</span>
-                  {plan.price !== "0" && plan.price !== "***" && (
-                    <span className="text-xs text-text-tertiary ml-1">{t("pricing.perMonth")}</span>
-                  )}
+                <div className="mt-5 border-t border-[#eef0f3] pt-5">
+                  <div className="text-3xl font-semibold tracking-[-0.04em]">{plan.price}</div>
+                  <div className="mt-1 text-xs text-[#9ca3af]">{plan.priceNote}</div>
+                  {plan.yearlyNote && <div className="mt-3 inline-flex rounded-full bg-[#f1f2f4] px-3 py-1 text-xs font-medium text-[#374151]">{plan.yearlyNote}</div>}
                 </div>
-
-                <div className="flex items-center gap-2 mb-4 text-[11px]">
-                  <span className="flex items-center gap-0.5 text-amber-400"><span>☕</span><span className="font-mono">{plan.credits.basic < 0 ? "∞" : plan.credits.basic}</span></span>
-                  <span className="flex items-center gap-0.5 text-orange-400"><span>🔥</span><span className="font-mono">{plan.credits.advanced}</span></span>
-                </div>
-
-                <ul className="space-y-2 mb-5 flex-1">
-                  {plan.featureKeys.map((f) => (
-                    <li key={f} className="flex items-start gap-2 text-[12px] text-text-secondary">
-                      <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
-                      <span>{t(f)}</span>
-                    </li>
-                  ))}
-                </ul>
 
                 <button
                   disabled={plan.current || paymentLoadingPlan === plan.id}
                   onClick={() => !plan.current && startAlipayCheckout(plan)}
-                  className={`w-full py-2 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2 ${plan.current ? "bg-surface-card border border-surface-border text-text-tertiary cursor-default" : plan.popular ? "bg-purple-500 hover:bg-purple-600 text-white" : "bg-surface-card border border-surface-border text-text-primary hover:bg-surface-elevated"}`}
+                  className={`mt-5 flex w-full items-center justify-center gap-2 rounded-full px-4 py-3 text-sm font-semibold transition-colors ${plan.current ? "cursor-default bg-[#f1f2f4] text-[#9ca3af]" : isPopular ? "bg-[#111827] text-white hover:bg-[#374151]" : "border border-[#d1d5db] bg-white text-[#111827] hover:bg-[#f5f6f8]"}`}
                 >
-                  {paymentLoadingPlan === plan.id && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {plan.current ? t("pricing.currentPlan") : paymentLoadingPlan === plan.id ? "创建订单中" : t(plan.ctaKey)}
+                  {paymentLoadingPlan === plan.id && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {paymentLoadingPlan === plan.id ? "创建订单中" : plan.cta}
                 </button>
+
+                <div className="mt-6 space-y-5 text-sm">
+                  <div>
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#9ca3af]">模型额度</div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded-2xl bg-[#f5f6f8] p-3"><span className="mr-1">☕</span>基础 {plan.credits.basic}</div>
+                      <div className="rounded-2xl bg-[#f5f6f8] p-3"><span className="mr-1">🔥</span>高级 {plan.credits.advanced}</div>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#9ca3af]">可用模型</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {plan.models.map((model) => <span key={model} className="rounded-full bg-[#f5f6f8] px-2.5 py-1 text-[11px] text-[#52525b]">{model}</span>)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#9ca3af]">AI 工作</div>
+                    <div className="space-y-2">{plan.work.map((item) => <FeatureLine key={item.label} {...item} />)}</div>
+                  </div>
+                  <div>
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#9ca3af]">AI 创作</div>
+                    <div className="space-y-2">{plan.creation.map((item) => <FeatureLine key={item.label} {...item} />)}</div>
+                  </div>
+                  <div>
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#9ca3af]">服务权益</div>
+                    <div className="space-y-2">{plan.service.map((item) => <FeatureLine key={item.label} {...item} />)}</div>
+                  </div>
+                </div>
               </div>
             );
           })}
-        </div>
+        </section>
 
-        <div className="mt-12 rounded-2xl border border-surface-border bg-surface-elevated p-6">
-          <h2 className="text-sm font-semibold text-text-primary mb-4">{t("pricing.modelTiers.title")}</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {tierInfo.map((tier) => (
-              <div key={tier.key} className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <span className={tier.color}>{tier.icon}</span>
-                  <span className="text-sm font-medium text-text-primary">{t(tier.labelKey)}</span>
-                </div>
-                <p className="text-[12px] text-text-tertiary">
-                  {tierModels[tier.key].map((model) => model.name).join("、")}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="mt-6 rounded-2xl border border-surface-border bg-surface-elevated p-6">
-          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2 mb-5">
+        <section id="features" className="mt-12 rounded-[30px] border border-[#e5e7eb] bg-white p-6 shadow-sm md:p-8">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div>
-              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brand mb-2">Advanced features</div>
-              <h2 className="text-sm font-semibold text-text-primary">高级功能</h2>
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#9ca3af]">Advanced features</div>
+              <h2 className="mt-2 text-2xl font-semibold tracking-[-0.035em]">会员额度覆盖整个 AI 工作台</h2>
             </div>
-            <p className="text-[12px] text-text-tertiary max-w-xl sm:text-right">
-              会员额度不仅用于模型对话，也覆盖侧边栏里的 AI 工作与 AI 创作入口。
-            </p>
+            <p className="max-w-xl text-sm leading-6 text-[#6b7280]">不只是模型对话，也覆盖侧边栏里的 AI 工作与 AI 创作入口。</p>
           </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
             {advancedFeatureGroups.map((group) => (
-              <div key={group.title} className={`rounded-2xl border ${group.border} bg-gradient-to-br ${group.accent} p-4`}>
+              <div key={group.title} className="rounded-[24px] bg-[#f5f6f8] p-5">
                 <div className="mb-4">
-                  <div className="text-sm font-semibold text-text-primary">{group.title}</div>
-                  <p className="mt-1 text-[12px] text-text-tertiary">{group.subtitle}</p>
+                  <div className="text-base font-semibold">{group.title}</div>
+                  <p className="mt-1 text-sm text-[#6b7280]">{group.subtitle}</p>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {group.items.map((item) => {
                     const Icon = item.icon;
                     return (
-                      <div key={item.name} className="rounded-xl border border-surface-border/70 bg-surface-card/70 p-3">
-                        <div className="flex items-center gap-2 mb-1.5">
-                          <Icon className="w-4 h-4 text-brand" />
-                          <span className="text-[12px] font-medium text-text-primary">{item.name}</span>
-                        </div>
-                        <p className="text-[11px] leading-relaxed text-text-tertiary">{item.desc}</p>
+                      <div key={item.name} className="rounded-2xl bg-white p-4 shadow-sm">
+                        <div className="flex items-center gap-2"><Icon className="h-4 w-4" /><span className="text-sm font-semibold">{item.name}</span></div>
+                        <p className="mt-2 text-xs leading-5 text-[#6b7280]">{item.desc}</p>
                       </div>
                     );
                   })}
@@ -344,34 +468,98 @@ export default function PricingPage() {
               </div>
             ))}
           </div>
-        </div>
+        </section>
 
-        <div className="mt-8 text-center">
-          {paymentError && <p className="mb-3 text-[12px] text-red-400">{paymentError}</p>}
-          <p className="text-[11px] text-text-tertiary">{t("pricing.footerNote")}</p>
-        </div>
-      </div>
+        <section className="mt-8 rounded-[30px] border border-[#e5e7eb] bg-white p-6 shadow-sm md:p-8">
+          <h2 className="text-xl font-semibold tracking-[-0.03em]">模型等级说明</h2>
+          <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="rounded-[22px] bg-[#f5f6f8] p-5">
+              <div className="font-semibold">☕ 基础模型</div>
+              <p className="mt-2 text-sm leading-6 text-[#6b7280]">{tierModels.basic.map((model) => model.name).join("、")}</p>
+            </div>
+            <div className="rounded-[22px] bg-[#f5f6f8] p-5">
+              <div className="font-semibold">🔥 高级模型</div>
+              <p className="mt-2 text-sm leading-6 text-[#6b7280]">{tierModels.advanced.map((model) => model.name).join("、")}</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="compare" className="mt-12 rounded-[30px] border border-[#e5e7eb] bg-white p-6 shadow-sm md:p-8">
+          <div className="text-center">
+            <h2 className="text-3xl font-semibold tracking-[-0.04em]">完整功能比较</h2>
+            <p className="mt-3 text-sm text-[#6b7280]">比较 AI Space Plus 与单一模型订阅的差异。</p>
+          </div>
+          <div className="mt-8 overflow-hidden rounded-[24px] border border-[#e5e7eb]">
+            <div className="grid grid-cols-[1.2fr_0.9fr_0.9fr] bg-[#f5f6f8] px-4 py-4 text-sm font-semibold md:px-6">
+              <div>功能项</div>
+              <div className="text-center">AI Space Plus</div>
+              <div className="text-center">ChatGPT Plus</div>
+            </div>
+            {comparisonGroups.map((group) => (
+              <div key={group.title}>
+                <div className="border-t border-[#e5e7eb] bg-white px-4 py-3 text-sm font-semibold md:px-6">{group.title}</div>
+                {group.rows.map(([name, aiSpace, chatgpt]) => (
+                  <div key={name} className="grid grid-cols-[1.2fr_0.9fr_0.9fr] items-center border-t border-[#eef0f3] px-4 py-3 text-sm md:px-6">
+                    <div className="text-[#374151]">{name}</div>
+                    <div className="text-center"><CompareValue value={aiSpace} /></div>
+                    <div className="text-center"><CompareValue value={chatgpt} /></div>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section id="faq" className="mx-auto mt-12 max-w-3xl">
+          <div className="text-center">
+            <h2 className="text-3xl font-semibold tracking-[-0.04em]">常见问题解答</h2>
+            <p className="mt-3 text-sm leading-6 text-[#6b7280]">AI Space 致力于提供稳定、安全、透明的 AI 服务。请勿共享、转售或滥用账号额度。</p>
+          </div>
+          <div className="mt-7 overflow-hidden rounded-[26px] border border-[#e5e7eb] bg-white shadow-sm">
+            {faqs.map(([q, a], idx) => {
+              const open = openFaq === idx;
+              return (
+                <button key={q} onClick={() => setOpenFaq(open ? null : idx)} className="block w-full border-b border-[#eef0f3] px-5 py-4 text-left last:border-b-0">
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-sm font-semibold">{q}</span>
+                    <ChevronDown className={`h-4 w-4 shrink-0 text-[#9ca3af] transition-transform ${open ? "rotate-180" : ""}`} />
+                  </div>
+                  {open && <p className="mt-3 text-sm leading-6 text-[#6b7280]">{a}</p>}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      </main>
 
       {payment && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
-          <div className="relative w-full max-w-sm rounded-3xl border border-surface-border bg-[#202024] p-6 text-center shadow-2xl">
-            <button onClick={() => setPayment(null)} className="absolute right-4 top-4 rounded-full p-1 text-text-tertiary hover:text-text-primary">
-              <X className="w-5 h-5" />
-            </button>
-            <div className="mb-4 text-sm font-semibold text-[#1677ff]">支付宝 ALIPAY</div>
-            <h2 className="text-lg font-semibold text-text-primary">扫一扫付款</h2>
-            <p className="mt-1 text-xs text-text-tertiary">AI Space {payment.planName} 会员套餐</p>
-            <div className="mt-4 text-3xl font-bold text-text-primary">¥{payment.amountDisplay.toFixed(2)}</div>
-            <div className="mx-auto mt-5 flex h-[260px] w-[260px] items-center justify-center rounded-2xl bg-white p-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4 backdrop-blur-sm">
+          <div className="relative w-full max-w-md rounded-[32px] bg-white p-6 text-center shadow-2xl">
+            <button onClick={() => setPayment(null)} className="absolute right-4 top-4 rounded-full bg-[#f5f6f8] p-2 text-[#71717a] hover:text-[#111827]"><X className="h-5 w-5" /></button>
+            <div className="mx-auto inline-flex rounded-full bg-[#eaf2ff] px-3 py-1 text-xs font-semibold text-[#1677ff]">支付宝 ALIPAY</div>
+            <h2 className="mt-4 text-xl font-semibold tracking-[-0.03em]">确认订单</h2>
+            <p className="mt-1 text-sm text-[#6b7280]">AI Space {payment.planName} 会员套餐</p>
+            <div className="mt-4 text-4xl font-semibold tracking-[-0.05em]">¥{payment.amountDisplay.toFixed(2)}</div>
+            <div className="mx-auto mt-5 flex h-[260px] w-[260px] items-center justify-center rounded-[24px] border border-[#e5e7eb] bg-white p-3">
               <img src={payment.qrDataUrl} alt="支付宝支付二维码" className="h-full w-full" />
             </div>
-            <p className="mt-4 text-xs text-text-tertiary">请使用手机支付宝扫码完成付款</p>
-            <p className="mt-1 text-xs text-text-tertiary">二维码有效期约 15 分钟</p>
+            <p className="mt-4 text-sm text-[#374151]">请使用手机支付宝扫码完成付款</p>
+            <p className="mt-1 text-xs text-[#9ca3af]">订单号：{payment.orderNo} · 二维码有效期约 15 分钟</p>
             {payment.status === "paid" ? (
-              <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">支付成功，会员已开通</div>
+              <div className="mt-5 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">支付成功，会员已开通</div>
             ) : (
-              <div className="mt-4 flex items-center justify-center gap-2 text-xs text-text-tertiary"><Loader2 className="w-3.5 h-3.5 animate-spin" />正在等待支付结果</div>
+              <div className="mt-5 flex items-center justify-center gap-2 rounded-2xl bg-[#f5f6f8] px-4 py-3 text-sm text-[#6b7280]"><Loader2 className="h-4 w-4 animate-spin" />正在等待支付结果</div>
             )}
+          </div>
+        </div>
+      )}
+
+      {paymentError && !payment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-[30px] bg-white p-6 text-center shadow-2xl">
+            <h2 className="text-lg font-semibold tracking-[-0.03em]">暂时无法创建支付订单</h2>
+            <p className="mt-3 text-sm leading-6 text-red-500">{paymentError}</p>
+            <button onClick={() => setPaymentError("")} className="mt-5 w-full rounded-full bg-[#111827] px-4 py-3 text-sm font-semibold text-white hover:bg-[#374151]">我知道了</button>
           </div>
         </div>
       )}
