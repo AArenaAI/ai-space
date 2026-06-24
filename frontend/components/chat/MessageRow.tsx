@@ -274,7 +274,7 @@ function MessageRow({
       className={cn("max-w-[800px] mx-auto px-4 py-4 rounded-2xl transition-colors duration-500", isHighlighted && "bg-brand/10")}
     >
       <div key={msg.id} className={cn("flex gap-3 group", !suppressAppearAnimation && "animate-message-appear", isUser ? "justify-end" : "justify-start")}>
-        <div className={cn("mt-1 shrink-0", isUser && !selectMode ? "hidden" : "w-7")}>
+        <div className={cn("mt-1 shrink-0", isUser && !selectMode ? "w-7 invisible" : "w-7")}>
           {!isUser && !selectMode && (
             <div className="relative">
               <button
