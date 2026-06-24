@@ -413,6 +413,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   const pathname = cleanPathname(rawPathname);
   const searchParams = useSearchParams();
   const routeConvId = searchParams?.get("id");
+  const effectiveRouteConvId = routeConvId || (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("id") : null);
   const currentConvId = optimisticConvId ?? routeConvId;
   const router = useRouter();
   const { chatBootstrap } = useAppBootstrap();
@@ -590,9 +591,10 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
       if (cachedConversations === null) setLoading(false);
       return;
     }
-    const isChatConversationRoute = pathname === "/chat" && !!routeConvId;
+    const normalizedPathname = pathname === "/" ? pathname : pathname.replace(/\/$/, "");
+    const isChatConversationRoute = normalizedPathname === "/chat" && !!effectiveRouteConvId;
     const hasUsableBootstrapForRoute = isChatConversationRoute
-      && chatBootstrap?.conversation?.id === Number(routeConvId)
+      && chatBootstrap?.conversation?.id === Number(effectiveRouteConvId)
       && Array.isArray(chatBootstrap.sidebar?.conversations);
     if (hasUsableBootstrapForRoute) return;
     if (isChatConversationRoute && !chatBootstrapReadyRef.current) return;
@@ -610,7 +612,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     } else {
       updateConversationsStable(() => data);
     }
-  }, [user, currentWS?.id, pathname, routeConvId, chatBootstrap, updateConversationsStable]);
+  }, [user, currentWS?.id, pathname, effectiveRouteConvId, chatBootstrap, updateConversationsStable]);
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
 

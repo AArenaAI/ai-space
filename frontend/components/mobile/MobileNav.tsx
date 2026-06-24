@@ -185,6 +185,7 @@ export default function MobileNav() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const routeConvId = searchParams?.get("id") || null;
+  const effectiveRouteConvId = routeConvId || (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("id") : null);
   const router = useRouter();
   const drawerRef = useRef<HTMLDivElement>(null);
   const historyScrollRef = useRef<HTMLDivElement>(null);
@@ -270,9 +271,10 @@ export default function MobileNav() {
   
   const loadConversations = useCallback(async () => {
     if (!user) { setConversations([]); setLoading(false); return; }
-    const isChatConversationRoute = pathname === "/chat" && !!routeConvId;
+    const normalizedPathname = (pathname || "/") === "/" ? "/" : (pathname || "").replace(/\/$/, "");
+    const isChatConversationRoute = normalizedPathname === "/chat" && !!effectiveRouteConvId;
     const hasUsableBootstrapForRoute = isChatConversationRoute
-      && chatBootstrap?.conversation?.id === Number(routeConvId)
+      && chatBootstrap?.conversation?.id === Number(effectiveRouteConvId)
       && Array.isArray(chatBootstrap.sidebar?.conversations);
     if (hasUsableBootstrapForRoute) return;
     if (isChatConversationRoute && !chatBootstrapReadyRef.current) return;
@@ -291,7 +293,7 @@ export default function MobileNav() {
     } else {
       updateConversationsStable(() => data);
     }
-  }, [user, pathname, routeConvId, chatBootstrap, updateConversationsStable]);
+  }, [user, pathname, effectiveRouteConvId, chatBootstrap, updateConversationsStable]);
   
   useEffect(() => { loadConversations(); }, [loadConversations]);
   useEffect(() => {
