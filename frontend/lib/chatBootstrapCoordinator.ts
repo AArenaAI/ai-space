@@ -98,7 +98,11 @@ export async function fetchChatBootstrap({
   });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) return { auth_status: "anonymous", ...data } as ChatBootstrapPayload;
-  if (!res.ok) throw new Error(`chat bootstrap failed: ${res.status}`);
+  if (!res.ok) {
+    const error = new Error(`chat bootstrap failed: ${res.status}`) as Error & { status?: number };
+    error.status = res.status;
+    throw error;
+  }
   return data;
 }
 
