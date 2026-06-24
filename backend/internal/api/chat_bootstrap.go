@@ -68,19 +68,29 @@ type ChatBootstrapBilling struct {
 }
 
 func (h *ChatBootstrapHandler) Get(c *gin.Context) {
-	userID, refreshedToken, ok := h.resolveBootstrapUser(c)
+	payload, status, ok := h.BuildPayload(c)
 	if !ok {
 		return
 	}
-	if userID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"auth_status": "anonymous", "error": "未提供认证信息"})
+	if status == http.StatusNotModified {
+		c.Status(http.StatusNotModified)
 		return
+	}
+	c.JSON(status, payload)
+}
+
+func (h *ChatBootstrapHandler) BuildPayload(c *gin.Context) (gin.H, int, bool) {
+	userID, refreshedToken, ok := h.resolveBootstrapUser(c)
+	if !ok {
+		return nil, http.StatusInternalServerError, false
+	}
+	if userID == 0 {
+		return gin.H{"auth_status": "anonymous", "http_status": http.StatusUnauthorized, "error": "未提供认证信息"}, http.StatusUnauthorized, true
 	}
 
 	var user models.User
 	if err := h.db.First(&user, userID).Error; err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"auth_status": "anonymous", "error": "用户不存在"})
-		return
+		return gin.H{"auth_status": "anonymous", "http_status": http.StatusUnauthorized, "error": "用户不存在"}, http.StatusUnauthorized, true
 	}
 
 	var workspaces []models.Workspace
@@ -111,6 +121,7 @@ func (h *ChatBootstrapHandler) Get(c *gin.Context) {
 
 	payload := gin.H{
 		"auth_status": "authenticated",
+		"http_status": http.StatusOK,
 		"server_time": time.Now().UTC().Format(time.RFC3339Nano),
 		"user":        authUserPayload(user, defaultWorkspaceID),
 		"token":       refreshedToken,
@@ -140,20 +151,22 @@ func (h *ChatBootstrapHandler) Get(c *gin.Context) {
 
 	conversationID := parseOptionalUint(firstNonEmptyBootstrap(c.Query("id"), c.Query("conversation_id")))
 	if conversationID > 0 {
+		payload["requested_conversation_id"] = conversationID
 		meta, snapshot, ok := h.buildConversationBootstrap(c, userID, conversationID)
 		if !ok {
-			return
+			payload["http_status"] = http.StatusNotFound
+			payload["error"] = "对话不存在"
+			return payload, http.StatusNotFound, true
 		}
 		if chatBootstrapETagMatches(c.GetHeader("If-None-Match"), snapshot.SnapshotVersion) {
-			c.Status(http.StatusNotModified)
-			return
+			return payload, http.StatusNotModified, true
 		}
 		payload["conversation"] = meta
 		payload["snapshot"] = snapshot
 	}
 	payload["active_tasks"] = gin.H{"chat": h.listActiveChatTasks(userID, conversationID)}
 
-	c.JSON(http.StatusOK, payload)
+	return payload, http.StatusOK, true
 }
 
 func (h *ChatBootstrapHandler) resolveBootstrapUser(c *gin.Context) (uint, string, bool) {
@@ -300,7 +313,6 @@ func (h *ChatBootstrapHandler) listBootstrapRecentNotebooks(userID uint, workspa
 func (h *ChatBootstrapHandler) buildConversationBootstrap(c *gin.Context, userID uint, conversationID uint) (ChatBootstrapConversationMeta, ChatBootstrapSnapshot, bool) {
 	var conv models.Conversation
 	if err := h.db.Where("id = ? AND user_id = ?", conversationID, userID).First(&conv).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "对话不存在"})
 		return ChatBootstrapConversationMeta{}, ChatBootstrapSnapshot{}, false
 	}
 

@@ -23,10 +23,27 @@ export function useChatBootstrapRuntime({
   enabled?: boolean;
 }): ChatBootstrapRuntimeState {
   const [state, setState] = useState<ChatBootstrapRuntimeState>({ status: "idle", models: [] });
-  const { setChatBootstrap } = useAppBootstrap();
+  const { chatBootstrap, setChatBootstrap } = useAppBootstrap();
 
   useEffect(() => {
     if (!enabled || typeof window === "undefined") return;
+    const injectedConversationId = chatBootstrap?.conversation?.id || chatBootstrap?.requested_conversation_id;
+    const injectedMatches = chatBootstrap && (!conversationId || injectedConversationId === conversationId);
+    if (injectedMatches) {
+      const statusCode = chatBootstrap.http_status || 200;
+      if (chatBootstrap.auth_status !== "authenticated" || statusCode === 401) {
+        setState({ status: "anonymous", payload: chatBootstrap, models: chatBootstrap.models || [] });
+        return;
+      }
+      if (statusCode >= 400) {
+        const error = new Error(`chat bootstrap failed: ${statusCode}`) as Error & { status?: number };
+        error.status = statusCode;
+        setState({ status: "failed", payload: chatBootstrap, models: chatBootstrap.models || [], error });
+        return;
+      }
+      setState({ status: "ready", payload: chatBootstrap, models: chatBootstrap.models || [] });
+      return;
+    }
     const controller = new AbortController();
     const storedToken = localStorage.getItem("token");
     const token = storedToken && storedToken !== "null" && storedToken !== "undefined" ? storedToken : "";
@@ -64,7 +81,7 @@ export function useChatBootstrapRuntime({
       });
 
     return () => controller.abort();
-  }, [conversationId, enabled, setChatBootstrap]);
+  }, [conversationId, enabled, chatBootstrap, setChatBootstrap]);
 
   return useMemo(() => state, [state]);
 }

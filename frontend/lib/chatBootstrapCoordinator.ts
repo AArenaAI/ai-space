@@ -56,6 +56,8 @@ export type ChatBootstrapBilling = {
 
 export type ChatBootstrapPayload = {
   auth_status: "authenticated" | "anonymous" | "unknown";
+  http_status?: number;
+  requested_conversation_id?: number;
   server_time?: string;
   user?: Record<string, any>;
   workspace?: ChatBootstrapWorkspace;

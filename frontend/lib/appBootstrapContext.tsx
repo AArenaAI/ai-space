@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import type { ChatBootstrapPayload } from "@/lib/chatBootstrapCoordinator";
+import { readInjectedChatBootstrap } from "@/lib/injectedBootstrap";
 
 type AppBootstrapContextValue = {
   chatBootstrap?: ChatBootstrapPayload;
@@ -11,7 +12,7 @@ type AppBootstrapContextValue = {
 const AppBootstrapContext = createContext<AppBootstrapContextValue | undefined>(undefined);
 
 export function AppBootstrapProvider({ children }: { children: ReactNode }) {
-  const [chatBootstrap, setChatBootstrapState] = useState<ChatBootstrapPayload | undefined>(undefined);
+  const [chatBootstrap, setChatBootstrapState] = useState<ChatBootstrapPayload | undefined>(() => readInjectedChatBootstrap());
   const setChatBootstrap = useCallback((payload?: ChatBootstrapPayload) => {
     setChatBootstrapState(payload);
   }, []);

@@ -87,8 +87,19 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	// Handler 实例（在外层定义，供公开路由和认证路由共用）
 	chatHandler := NewChatHandler(db, cfg, aiService, searchService, fileService, retrievalSvc, contextBuilder, usageService)
 	chatBootstrapHandler := NewChatBootstrapHandler(db, cfg)
+	chatShellHandler := NewChatShellHandler(db, cfg)
 	openAIWebhookHandler := NewOpenAIWebhookHandler(db, cfg, aiService, usageService)
 	fileHandler := NewFileHandler(fileService, db)
+	// 动态 Chat Shell（需由 nginx 将 /chat 与 /skills/chat 转发到 Go 后启用；静态部署未转发时保持原行为）。
+	dynamicShell := router.Group("")
+	dynamicShell.Use(middleware.OptionalAuthMiddleware(cfg))
+	{
+		dynamicShell.GET("/chat", chatShellHandler.ServeChat)
+		dynamicShell.GET("/chat/", chatShellHandler.ServeChat)
+		dynamicShell.GET("/skills/chat", chatShellHandler.ServeSkillChat)
+		dynamicShell.GET("/skills/chat/", chatShellHandler.ServeSkillChat)
+	}
+
 	// OpenAI Webhook 必须是公开路由，不能走用户 JWT；签名由 OPENAI_WEBHOOK_SECRET 校验。
 	router.POST("/api/openai/webhook", openAIWebhookHandler.Handle)
 
