@@ -669,53 +669,50 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
         />
       )}
 
-      {/* 空状态容器 - 始终渲染，通过 opacity/translate/scale 切换 */}
-      <div className={cn(
-        "absolute inset-0 flex flex-col items-center justify-center px-4 z-10 transition-all duration-700 ease-[cubic-bezier(0.34,1.56,0.64,1)]",
-        isNewEmptyChat
-          ? "opacity-100 translate-y-0 scale-100 pointer-events-auto"
-          : "opacity-0 -translate-y-12 scale-95 pointer-events-none"
-      )}>
-        <div className="mb-6 w-fit max-w-md text-left">
-          {welcomeTitle ? (
-            <>
-              <div className="mb-6 flex h-12 w-12 items-center justify-center text-[34px] leading-none">
-                👋
-              </div>
-              <h2 className="text-xl font-semibold tracking-tight mb-2 text-text-primary">{welcomeTitle}</h2>
-              {welcomeSubtitle && (
-                <p className="text-text-secondary text-sm leading-relaxed mb-8">{welcomeSubtitle}</p>
-              )}
-            </>
-          ) : (
-            <>
-              <h1 className="text-[32px] font-semibold leading-tight tracking-tight mb-2 text-text-primary">
-                {userName ? t("chat.userGreeting").replace("{name}", userName) : t("chat.greeting")}
-              </h1>
-              <p className="text-[25px] font-medium leading-tight tracking-tight text-text-primary/80">{t("chat.whatCanWeDo")}</p>
-            </>
+      {/* 空状态容器 - 只在真正新空对话时渲染，避免历史会话 DOM 中残留 welcome 文案 */}
+      {isNewEmptyChat && (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center px-4 transition-all duration-700 ease-[cubic-bezier(0.34,1.56,0.64,1)]">
+          <div className="mb-6 w-fit max-w-md text-left">
+            {welcomeTitle ? (
+              <>
+                <div className="mb-6 flex h-12 w-12 items-center justify-center text-[34px] leading-none">
+                  👋
+                </div>
+                <h2 className="text-xl font-semibold tracking-tight mb-2 text-text-primary">{welcomeTitle}</h2>
+                {welcomeSubtitle && (
+                  <p className="text-text-secondary text-sm leading-relaxed mb-8">{welcomeSubtitle}</p>
+                )}
+              </>
+            ) : (
+              <>
+                <h1 className="text-[32px] font-semibold leading-tight tracking-tight mb-2 text-text-primary">
+                  {userName ? t("chat.userGreeting").replace("{name}", userName) : t("chat.greeting")}
+                </h1>
+                <p className="text-[25px] font-medium leading-tight tracking-tight text-text-primary/80">{t("chat.whatCanWeDo")}</p>
+              </>
+            )}
+          </div>
+          {!messageSelectMode && (
+            <div className="w-full max-w-2xl relative shrink-0">
+              <MessageInput
+                onSend={handleSend}
+                onStop={handleStop}
+                isLoading={isLoading}
+                compareMode={activeCompareMode}
+                onToggleCompare={toggleCompareMode}
+                currentModel={selectedModel}
+                compareModels={inputCompareModels}
+                templates={templates}
+                selectedTemplateId={selectedTemplateId}
+                onSelectTemplate={handleTemplateSelect}
+                onNewChat={handleNewChat}
+                onRecommendationContextChange={setModelRecommendationContext}
+                quoteDraft={quoteDraft}
+              />
+            </div>
           )}
         </div>
-        {!messageSelectMode && (
-          <div className="w-full max-w-2xl relative shrink-0">
-            <MessageInput
-              onSend={handleSend}
-              onStop={handleStop}
-              isLoading={isLoading}
-              compareMode={activeCompareMode}
-              onToggleCompare={toggleCompareMode}
-              currentModel={selectedModel}
-              compareModels={inputCompareModels}
-              templates={templates}
-              selectedTemplateId={selectedTemplateId}
-              onSelectTemplate={handleTemplateSelect}
-              onNewChat={handleNewChat}
-              onRecommendationContextChange={setModelRecommendationContext}
-              quoteDraft={quoteDraft}
-            />
-          </div>
-        )}
-      </div>
+      )}
 
       {/* 重命名对话 */}
       <InputDialog
