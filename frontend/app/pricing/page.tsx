@@ -4,7 +4,6 @@ import Link from "next/link";
 import {
   Check,
   ChevronDown,
-  Coffee,
   FileText,
   Flame,
   ImageIcon,
@@ -35,7 +34,7 @@ type PaymentModalState = {
 };
 
 type Plan = {
-  id: "free" | "basic" | "plus" | "ultra";
+  id: "basic" | "plus" | "ultra";
   name: string;
   tagline: string;
   price: string;
@@ -56,32 +55,6 @@ type Plan = {
 const modelChips = ["GPT-5.5", "Claude", "Gemini", "DeepSeek", "Kimi", "Seedance", "Seedream"];
 
 const plans: Plan[] = [
-  {
-    id: "free",
-    name: "Free",
-    tagline: "轻量体验与偶尔使用",
-    price: "¥0",
-    priceNote: "免费开始",
-    icon: Coffee,
-    current: true,
-    credits: { basic: "每日 30", advanced: "—" },
-    models: ["基础模型", "标准速度", "每日重置"],
-    work: [
-      { label: "基础聊天", enabled: true },
-      { label: "文档阅读", enabled: false },
-      { label: "实时语音翻译", enabled: false },
-    ],
-    creation: [
-      { label: "图像生成", enabled: false },
-      { label: "视频生成", enabled: false },
-      { label: "AI 漫剧 Studio", enabled: false },
-    ],
-    service: [
-      { label: "普通队列", enabled: true },
-      { label: "商用使用", enabled: false },
-    ],
-    cta: "当前方案",
-  },
   {
     id: "basic",
     name: "Basic",
@@ -378,7 +351,7 @@ export default function PricingPage() {
           </div>
         </section>
 
-        <section id="plans" className="mt-14 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <section id="plans" className="mx-auto mt-14 grid max-w-6xl grid-cols-1 gap-6 md:grid-cols-3">
           {plans.map((plan) => {
             const Icon = plan.icon;
             const isPopular = !!plan.popular;
