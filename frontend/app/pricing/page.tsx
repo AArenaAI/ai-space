@@ -49,6 +49,7 @@ type Plan = {
   work: Array<{ label: string; enabled: boolean }>;
   creation: Array<{ label: string; enabled: boolean }>;
   service: Array<{ label: string; enabled: boolean }>;
+  benefitGroups: Array<{ title: string; note?: string; items: Array<{ label: string; enabled?: boolean }> }>;
   cta: string;
 };
 
@@ -80,6 +81,14 @@ const plans: Plan[] = [
       { label: "无广告体验", enabled: true },
       { label: "标准速度", enabled: true },
     ],
+    benefitGroups: [
+      { title: "100 基础积分 / 月", items: [{ label: "GPT Mini" }, { label: "Gemini Flash" }, { label: "DeepSeek Flash" }, { label: "Kimi 轻量模型" }, { label: "更多基础模型..." }] },
+      { title: "25 高级积分 / 月", items: [{ label: "GPT 5.5 轻量使用" }, { label: "Gemini Pro 轻量使用" }, { label: "DeepSeek Pro 轻量使用" }, { label: "高级模型按实际消耗扣除" }] },
+      { title: "AI 工作", items: [{ label: "多模型聊天" }, { label: "写作助手" }, { label: "文本翻译" }, { label: "文档阅读器" }, { label: "PDF / Word / PPT 摘要" }, { label: "基础联网搜索" }] },
+      { title: "图像和视频生成", items: [{ label: "图像生成" }, { label: "参考图生成" }, { label: "基础图像编辑" }, { label: "视频生成", enabled: false }, { label: "AI 漫剧 Studio", enabled: false }] },
+      { title: "高级功能", items: [{ label: "ChatPDF" }, { label: "AI PDF / 图片 / 网页翻译器" }, { label: "AI 图片生成 / 编辑器" }, { label: "思考模式" }, { label: "Artifacts" }, { label: "音频转文本", enabled: false }, { label: "允许商业使用", enabled: false }] },
+      { title: "支持", items: [{ label: "网页端使用" }, { label: "标准速度队列" }, { label: "无广告体验" }] },
+    ],
     cta: "选择 Basic",
   },
   {
@@ -108,6 +117,14 @@ const plans: Plan[] = [
       { label: "优先速度", enabled: true },
       { label: "商用使用", enabled: true },
     ],
+    benefitGroups: [
+      { title: "300 基础积分 / 月", items: [{ label: "GPT Mini" }, { label: "Gemini Flash" }, { label: "DeepSeek Flash" }, { label: "Kimi 轻量模型" }, { label: "更多基础模型..." }] },
+      { title: "100 高级积分 / 月", note: "适合日常高频创作与复杂模型调用。", items: [{ label: "GPT 5.5" }, { label: "GPT 5.5 Pro" }, { label: "Gemini Pro" }, { label: "DeepSeek Pro" }, { label: "Kimi K2.5 / K2.6" }, { label: "更多高级模型..." }] },
+      { title: "精英能力", items: [{ label: "Deep Research" }, { label: "Scholar Research" }, { label: "AI PPT" }, { label: "网站生成器" }, { label: "复杂文档分析" }] },
+      { title: "图像和视频生成", items: [{ label: "图像生成" }, { label: "参考图生成" }, { label: "图像编辑工具" }, { label: "去背景 / 换背景" }, { label: "文字移除 / 局部重绘" }, { label: "Seedance 视频生成" }, { label: "分段成片" }, { label: "更多..." }] },
+      { title: "高级功能", items: [{ label: "YouTube 总结" }, { label: "AI 创意工作室" }, { label: "AI 图片生成 / 编辑器" }, { label: "ChatPDF" }, { label: "AI PDF / 图片 / 网页翻译器" }, { label: "AI 朗读" }, { label: "数据分析" }, { label: "思考模式" }, { label: "Artifacts" }, { label: "智能联网" }, { label: "人工智能作家" }, { label: "音频转文本" }, { label: "允许商业使用" }] },
+      { title: "支持", items: [{ label: "优先速度队列" }, { label: "多设备登录" }, { label: "商用使用" }, { label: "会员额度自动发放" }] },
+    ],
     cta: "升级 Plus",
   },
   {
@@ -134,6 +151,14 @@ const plans: Plan[] = [
     service: [
       { label: "最快速度", enabled: true },
       { label: "商用使用", enabled: true },
+    ],
+    benefitGroups: [
+      { title: "无限基础积分 / 月", items: [{ label: "全部基础模型" }, { label: "GPT Mini" }, { label: "Gemini Flash" }, { label: "DeepSeek Flash" }, { label: "Kimi 轻量模型" }, { label: "更多基础模型..." }] },
+      { title: "260 高级积分 / 月", note: "面向重度模型调用、长文档和高频生产。", items: [{ label: "GPT 5.5" }, { label: "GPT 5.5 Pro" }, { label: "Gemini Pro" }, { label: "DeepSeek Pro" }, { label: "Kimi K2.7 Code" }, { label: "所有高级模型" }] },
+      { title: "精英能力", items: [{ label: "Deep Research" }, { label: "Scholar Research" }, { label: "AI PPT" }, { label: "网站生成器" }, { label: "长任务与复杂推理" }, { label: "批量生产工作流" }] },
+      { title: "图像和视频生成", items: [{ label: "GPT Image / 高级图像生成" }, { label: "参考图生成" }, { label: "图像编辑工具" }, { label: "去背景 / 换背景" }, { label: "文字移除 / 局部重绘" }, { label: "Seedance 视频生成" }, { label: "高频分段成片" }, { label: "AI 漫剧 Studio" }, { label: "资产 / 分镜 / 视频链路" }, { label: "更多..." }] },
+      { title: "高级功能", items: [{ label: "YouTube 总结" }, { label: "AI 创意工作室" }, { label: "AI 图片生成 / 编辑器" }, { label: "ChatPDF" }, { label: "多文档分析" }, { label: "AI PDF / 图片 / 网页翻译器" }, { label: "AI 朗读" }, { label: "数据分析" }, { label: "思考模式" }, { label: "Artifacts" }, { label: "智能联网" }, { label: "人工智能作家" }, { label: "音频转文本" }, { label: "允许商业使用" }] },
+      { title: "支持", items: [{ label: "最快速度队列" }, { label: "更多设备登录" }, { label: "商用使用" }, { label: "专业额度包" }, { label: "优先体验新模型" }] },
     ],
     cta: "选择 Ultra",
   },
@@ -380,31 +405,21 @@ export default function PricingPage() {
                   {paymentLoadingPlan === plan.id ? "创建订单中" : plan.cta}
                 </button>
 
-                <div className="mt-6 space-y-5 text-sm">
-                  <div>
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#9ca3af]">模型额度</div>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="rounded-2xl bg-[#f5f6f8] p-3"><span className="mr-1">☕</span>基础 {plan.credits.basic}</div>
-                      <div className="rounded-2xl bg-[#f5f6f8] p-3"><span className="mr-1">🔥</span>高级 {plan.credits.advanced}</div>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#9ca3af]">可用模型</div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {plan.models.map((model) => <span key={model} className="rounded-full bg-[#f5f6f8] px-2.5 py-1 text-[11px] text-[#52525b]">{model}</span>)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#9ca3af]">AI 工作</div>
-                    <div className="space-y-2">{plan.work.map((item) => <FeatureLine key={item.label} {...item} />)}</div>
-                  </div>
-                  <div>
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#9ca3af]">AI 创作</div>
-                    <div className="space-y-2">{plan.creation.map((item) => <FeatureLine key={item.label} {...item} />)}</div>
-                  </div>
-                  <div>
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#9ca3af]">服务权益</div>
-                    <div className="space-y-2">{plan.service.map((item) => <FeatureLine key={item.label} {...item} />)}</div>
+                <div className="mt-6 min-h-0 flex-1 overflow-hidden border-t border-[#eef0f3] pt-4">
+                  <div className="h-[430px] space-y-5 overflow-y-auto pr-2 text-sm [scrollbar-color:#d4d4d8_transparent] [scrollbar-width:thin]">
+                    {plan.benefitGroups.map((group) => (
+                      <div key={group.title}>
+                        <div className="sticky top-0 z-10 mb-2 bg-white/95 py-1 text-sm font-semibold text-[#111827] backdrop-blur">
+                          {group.title}
+                        </div>
+                        {group.note && <p className="mb-2 text-[11px] leading-5 text-[#8a8f98]">{group.note}</p>}
+                        <div className="space-y-2.5">
+                          {group.items.map((item) => (
+                            <FeatureLine key={item.label} label={item.label} enabled={item.enabled !== false} />
+                          ))}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
