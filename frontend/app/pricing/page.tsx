@@ -450,7 +450,10 @@ export default function PricingPage() {
   return (
     <div className="min-h-screen bg-[#f7f7f8] text-[#111827]">
       <nav className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-[#e5e7eb] bg-white/90 px-6 backdrop-blur">
-        <Link href="/chat" className="text-sm font-semibold tracking-tight hover:text-[#374151]">← 返回 AI Space</Link>
+        <Link href="/" className="flex items-center gap-2 text-sm font-semibold tracking-tight hover:text-[#374151]">
+          <img src="/brand-dark-logo.png" alt="AI Space" className="h-7 w-7 rounded-lg" />
+          <span className="text-base font-semibold tracking-[-0.03em]">AI Space</span>
+        </Link>
         <div className="hidden items-center gap-6 text-sm text-[#71717a] md:flex">
           <a href="#plans" className="hover:text-[#111827]">套餐</a>
           <a href="#features" className="hover:text-[#111827]">功能</a>
