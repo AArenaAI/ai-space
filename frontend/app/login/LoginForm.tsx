@@ -73,11 +73,17 @@ export default function LoginForm() {
             <div className="absolute left-1/2 top-1/2 h-[210px] w-[36px] -translate-x-1/2 translate-y-[112px] -rotate-12 animate-pulse rounded-full bg-gradient-to-b from-white/90 via-sky-300/50 to-transparent blur-lg" />
             <div className="absolute left-1/2 top-1/2 h-[260px] w-[18px] -translate-x-1/2 translate-y-[138px] -rotate-12 animate-pulse rounded-full bg-gradient-to-b from-orange-400/70 to-transparent blur-xl" />
 
-            <img
-              src="/brand-light-logo.png"
-              alt="AI Space rocket"
-              className="absolute left-1/2 top-1/2 h-48 w-48 -translate-x-1/2 -translate-y-1/2 -rotate-12 animate-pulse object-contain drop-shadow-[0_0_44px_rgba(96,165,250,0.48)]"
-            />
+            <div className="absolute left-1/2 top-1/2 h-48 w-48 -translate-x-1/2 -translate-y-1/2 -rotate-12 animate-pulse drop-shadow-[0_0_44px_rgba(96,165,250,0.48)]">
+              <div className="absolute left-1/2 top-5 h-28 w-16 -translate-x-1/2 overflow-hidden rounded-t-[42px] rounded-b-[18px] bg-gradient-to-b from-white via-slate-100 to-sky-100 shadow-[inset_-10px_-16px_22px_rgba(15,23,42,0.16),0_18px_40px_rgba(14,165,233,0.28)]">
+                <div className="absolute left-1/2 top-4 h-5 w-5 -translate-x-1/2 rounded-full border-4 border-sky-200 bg-[#0b1120] shadow-[0_0_18px_rgba(56,189,248,0.85)]" />
+                <div className="absolute bottom-0 left-0 h-8 w-full bg-gradient-to-r from-sky-500 via-blue-500 to-cyan-400" />
+              </div>
+              <div className="absolute left-[42px] top-[94px] h-12 w-8 rounded-bl-[24px] rounded-tl-[6px] bg-gradient-to-br from-sky-400 to-blue-700 shadow-[0_10px_24px_rgba(37,99,235,0.35)]" />
+              <div className="absolute right-[42px] top-[94px] h-12 w-8 rounded-br-[24px] rounded-tr-[6px] bg-gradient-to-bl from-sky-400 to-blue-700 shadow-[0_10px_24px_rgba(37,99,235,0.35)]" />
+              <div className="absolute left-1/2 top-[132px] h-8 w-10 -translate-x-1/2 rounded-b-[18px] bg-slate-800" />
+              <div className="absolute left-1/2 top-[154px] h-20 w-10 -translate-x-1/2 animate-pulse rounded-full bg-gradient-to-b from-white via-sky-300 to-transparent blur-md" />
+              <div className="absolute left-1/2 top-[162px] h-24 w-5 -translate-x-1/2 animate-pulse rounded-full bg-gradient-to-b from-orange-300 via-orange-500/70 to-transparent blur-lg" />
+            </div>
 
             <div className="absolute left-[68px] top-[142px] h-2 w-2 animate-ping rounded-full bg-white" />
             <div className="absolute left-[68px] top-[142px] h-2 w-2 rounded-full bg-white shadow-[0_0_28px_rgba(255,255,255,0.95)]" />
