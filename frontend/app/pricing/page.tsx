@@ -376,12 +376,12 @@ export default function PricingPage() {
           </div>
         </section>
 
-        <section id="plans" className="mx-auto mt-14 grid max-w-6xl grid-cols-1 gap-6 md:grid-cols-3">
+        <section id="plans" className="mx-auto mt-14 grid max-w-6xl grid-cols-1 gap-6 md:grid-cols-3 md:items-start">
           {plans.map((plan) => {
             const Icon = plan.icon;
             const isPopular = !!plan.popular;
             return (
-              <div key={plan.id} className={`relative flex flex-col rounded-[28px] border bg-white p-5 shadow-sm transition-all ${isPopular ? "border-[#111827] shadow-[0_24px_60px_rgba(15,23,42,0.16)]" : "border-[#e5e7eb] hover:border-[#cbd5e1]"}`}>
+              <div key={plan.id} className={`relative flex h-[min(1040px,calc(100vh-112px))] min-h-[760px] flex-col overflow-hidden rounded-[28px] border bg-white p-5 shadow-sm transition-all ${isPopular ? "border-[#111827] shadow-[0_24px_60px_rgba(15,23,42,0.16)]" : "border-[#e5e7eb] hover:border-[#cbd5e1]"}`}>
                 {plan.badge && (
                   <div className={`absolute right-5 top-5 rounded-full px-3 py-1 text-xs font-semibold ${isPopular ? "bg-[#111827] text-white" : "bg-[#f1f2f4] text-[#374151]"}`}>{plan.badge}</div>
                 )}
@@ -405,8 +405,8 @@ export default function PricingPage() {
                   {paymentLoadingPlan === plan.id ? "创建订单中" : plan.cta}
                 </button>
 
-                <div className="mt-6 flex-1 border-t border-[#eef0f3] pt-5">
-                  <div className="space-y-6 text-sm">
+                <div className="mt-6 min-h-0 flex-1 overflow-hidden border-t border-[#eef0f3] pt-5">
+                  <div className="h-full space-y-6 overflow-y-auto pr-1 text-sm [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {plan.benefitGroups.map((group) => (
                       <div key={group.title}>
                         <div className="mb-2 py-1 text-sm font-semibold text-[#111827]">
