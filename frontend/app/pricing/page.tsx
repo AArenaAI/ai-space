@@ -327,28 +327,28 @@ function CompareValue({ value }: { value: string }) {
   return <span className="text-xs text-[#a1a1aa]">—</span>;
 }
 
-const supportModelsByPlan: Record<Plan["id"], Array<{ name: string; mark: string; className: string }>> = {
+const supportModelsByPlan: Record<Plan["id"], Array<{ name: string; icon: string }>> = {
   basic: [
-    { name: "ChatGPT", mark: "G", className: "bg-[#10a37f] text-white" },
-    { name: "Gemini", mark: "✦", className: "bg-gradient-to-br from-[#4285f4] to-[#9b5cff] text-white" },
-    { name: "DeepSeek", mark: "D", className: "bg-[#4f7cff] text-white" },
+    { name: "ChatGPT", icon: "/model-icons/openai.svg" },
+    { name: "Gemini", icon: "/model-icons/googlegemini.svg" },
+    { name: "DeepSeek", icon: "/model-icons/deepseek.svg" },
   ],
   plus: [
-    { name: "ChatGPT", mark: "G", className: "bg-[#10a37f] text-white" },
-    { name: "Claude", mark: "C", className: "bg-[#d97757] text-white" },
-    { name: "Gemini", mark: "✦", className: "bg-gradient-to-br from-[#4285f4] to-[#9b5cff] text-white" },
-    { name: "DeepSeek", mark: "D", className: "bg-[#4f7cff] text-white" },
-    { name: "Kimi", mark: "K", className: "bg-[#111827] text-white" },
-    { name: "Seedance", mark: "S", className: "bg-[#7c3aed] text-white" },
+    { name: "ChatGPT", icon: "/model-icons/openai.svg" },
+    { name: "Claude", icon: "/model-icons/anthropic.svg" },
+    { name: "Gemini", icon: "/model-icons/googlegemini.svg" },
+    { name: "DeepSeek", icon: "/model-icons/deepseek.svg" },
+    { name: "Kimi", icon: "/model-icons/moonshotai.svg" },
+    { name: "Seedance", icon: "/model-icons/bytedance.svg" },
   ],
   ultra: [
-    { name: "ChatGPT", mark: "G", className: "bg-[#10a37f] text-white" },
-    { name: "Claude", mark: "C", className: "bg-[#d97757] text-white" },
-    { name: "Gemini", mark: "✦", className: "bg-gradient-to-br from-[#4285f4] to-[#9b5cff] text-white" },
-    { name: "DeepSeek", mark: "D", className: "bg-[#4f7cff] text-white" },
-    { name: "Kimi", mark: "K", className: "bg-[#111827] text-white" },
-    { name: "Seedance", mark: "S", className: "bg-[#7c3aed] text-white" },
-    { name: "Seedream", mark: "SD", className: "bg-[#f97316] text-white" },
+    { name: "ChatGPT", icon: "/model-icons/openai.svg" },
+    { name: "Claude", icon: "/model-icons/anthropic.svg" },
+    { name: "Gemini", icon: "/model-icons/googlegemini.svg" },
+    { name: "DeepSeek", icon: "/model-icons/deepseek.svg" },
+    { name: "Kimi", icon: "/model-icons/moonshotai.svg" },
+    { name: "Seedance", icon: "/model-icons/bytedance.svg" },
+    { name: "Seedream", icon: "/model-icons/bytedance.svg" },
   ],
 };
 
@@ -358,7 +358,9 @@ function SupportedModelLogos({ planId }: { planId: Plan["id"] }) {
       <span className="mr-1 text-sm font-semibold text-[#111827]">支持</span>
       {supportModelsByPlan[planId].map((model) => (
         <span key={model.name} className="inline-flex items-center gap-1.5 text-[12px] font-medium text-[#374151]">
-          <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-bold shadow-sm ${model.className}`}>{model.mark}</span>
+          <span className="flex h-5 w-5 items-center justify-center overflow-hidden rounded-full bg-white shadow-sm ring-1 ring-[#e5e7eb]">
+            <img src={model.icon} alt={model.name} className="h-3.5 w-3.5 object-contain" />
+          </span>
           {model.name}
         </span>
       ))}
