@@ -29,7 +29,7 @@ import {
 import { fetchChatBootstrap, type ChatBootstrapPayload } from "@/lib/chatBootstrapCoordinator";
 import { mapPersistedChatMessages, buildGroupViewsFromMessages } from "@/lib/chatForkCoordinator";
 import type { CachedConversationSnapshot } from "@/lib/chatConversationCache";
-import type { ConversationRestoreResponse } from "@/lib/chatConversationRestoreCoordinator";
+import { fetchConversationRestore, type ConversationRestoreResponse } from "@/lib/chatConversationRestoreCoordinator";
 import { buildBootstrapTaskResumePlan } from "@/lib/chatBootstrapTaskResume";
 
 const API_BASE_URL = ""; // 使用相对路径，nginx 同域名代理 /api -> 后端
@@ -173,21 +173,26 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     signal?: AbortSignal;
     snapshotVersion?: string;
   }): Promise<ConversationRestoreResponse> => {
-    const payload = bootstrap?.conversation?.id === restoreConversationId && bootstrap.snapshot
-      ? bootstrap
-      : await fetchChatBootstrap({ apiBaseUrl, conversationId: restoreConversationId, token, signal });
-    return {
-      title: payload.conversation?.title || "",
-      model: payload.conversation?.model,
-      compare: !!payload.conversation?.compare,
-      compare_models: JSON.stringify(payload.conversation?.compare_models || []),
-      skill_key: payload.conversation?.skill_key,
-      messages: payload.snapshot?.messages || [],
-      total: payload.snapshot?.total,
-      has_more: payload.snapshot?.has_more,
-      snapshot_version: payload.snapshot?.snapshot_version,
-      last_assistant_status: payload.snapshot?.last_assistant_status,
-    };
+    try {
+      const payload = bootstrap?.conversation?.id === restoreConversationId && bootstrap.snapshot
+        ? bootstrap
+        : await fetchChatBootstrap({ apiBaseUrl, conversationId: restoreConversationId, token, signal });
+      return {
+        title: payload.conversation?.title || "",
+        model: payload.conversation?.model,
+        compare: !!payload.conversation?.compare,
+        compare_models: JSON.stringify(payload.conversation?.compare_models || []),
+        skill_key: payload.conversation?.skill_key,
+        messages: payload.snapshot?.messages || [],
+        total: payload.snapshot?.total,
+        has_more: payload.snapshot?.has_more,
+        snapshot_version: payload.snapshot?.snapshot_version,
+        last_assistant_status: payload.snapshot?.last_assistant_status,
+      };
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      return fetchConversationRestore({ apiBaseUrl, conversationId: restoreConversationId, token, signal });
+    }
   }, [bootstrap]);
   const stopTaskStream = useStopTaskStreamAction(taskStreamsRef);
 

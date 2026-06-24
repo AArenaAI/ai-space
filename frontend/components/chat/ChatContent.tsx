@@ -40,7 +40,7 @@ export default function ChatContent() {
         : bootstrap.status === "anonymous"
           ? "anonymous"
           : "conversation-loading";
-  const isConversationShellLoading = !!conversationId && chatPageState === "conversation-loading";
+  const isConversationShellLoading = !!conversationId && (chatPageState === "conversation-loading" || chatPageState === "conversation-error");
   const previousConversationIdRef = useRef<number | undefined>(conversationId);
 
   useEffect(() => {
