@@ -7,7 +7,9 @@ import AppSidebar from "@/components/sidebar/AppSidebar";
 import MobileNav from "@/components/mobile/MobileNav";
 import ChatInterface from "@/components/chat/ChatInterface";
 import { useModels } from "@/hooks/useModels";
+import { useChatBootstrapRuntime } from "@/hooks/useChatBootstrapRuntime";
 import { ChatModel } from "@/lib/chatTypes";
+import { deriveChatPageState, shouldShowConversationShell } from "@/lib/chatPageState";
 import {
   Sparkles, ArrowLeft, Zap, Search, Shield, FileCode, BookOpen,
   Wrench, PenTool, MessageSquare, Globe, Briefcase, Code2,
@@ -145,6 +147,32 @@ function ChatSkeleton() {
   );
 }
 
+function SkillChatPageStateNotice({ state, onRetry }: { state: string; onRetry: () => void }) {
+  const title = state === "conversation-not-found"
+    ? "对话不存在"
+    : state === "conversation-forbidden"
+      ? "无权访问此对话"
+      : state === "anonymous"
+        ? "需要登录"
+        : "对话加载失败";
+  const description = state === "conversation-not-found"
+    ? "这个技能会话可能已被删除，或链接不正确。"
+    : state === "conversation-forbidden"
+      ? "当前账号没有权限查看这个技能会话。"
+      : state === "anonymous"
+        ? "请登录后再打开这个技能会话链接。"
+        : "网络或服务异常，请重试。";
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center bg-surface px-6 text-center">
+      <div className="max-w-sm rounded-3xl border border-surface-border bg-surface-card p-6 shadow-sm">
+        <h2 className="text-base font-semibold text-text-primary">{title}</h2>
+        <p className="mt-2 text-sm text-text-secondary">{description}</p>
+        <button onClick={onRetry} className="mt-5 rounded-xl bg-brand px-4 py-2 text-sm font-medium text-white hover:opacity-90">重试</button>
+      </div>
+    </div>
+  );
+}
+
 export default function SkillChatContent() {
   const searchParams = useSearchParams();
   const urlSkillKey = searchParams?.get("key") || "";
@@ -158,31 +186,27 @@ export default function SkillChatContent() {
   const [recommendedModel, setRecommendedModel] = useState<ChatModel | undefined>(undefined);
   const [skillLoading, setSkillLoading] = useState(true);
   const { models, loading: modelsLoading } = useModels();
+  const bootstrap = useChatBootstrapRuntime({ conversationId });
+  const effectiveModels = bootstrap.models.length > 0 ? bootstrap.models : models;
+  const chatPageState = deriveChatPageState({ conversationId, bootstrap });
+  const isConversationShellLoading = shouldShowConversationShell(chatPageState);
 
-  // 当 URL 只有 id 没有 key 时，从对话 API 恢复 skillKey
+  // 当 URL 只有 id 没有 key 时，优先从 bootstrap conversation 恢复 skillKey，避免额外请求和空态闪烁。
   useEffect(() => {
     if (urlSkillKey || !conversationId) return;
-    const token = localStorage.getItem("token");
-    if (!token) return;
-
-    fetch(`/api/conversations/${conversationId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.skill_key) {
-          setSkillKey(data.skill_key);
-        } else {
-          // 对话没有关联 skill，不再加载
-          setSkillLoading(false);
-        }
-      })
-      .catch(() => setSkillLoading(false));
-  }, [urlSkillKey, conversationId]);
+    if (bootstrap.payload?.conversation?.skill_key) {
+      setSkillKey(bootstrap.payload.conversation.skill_key);
+      return;
+    }
+    if (bootstrap.status === "ready") {
+      // 对话没有关联 skill，不再加载
+      setSkillLoading(false);
+    }
+  }, [urlSkillKey, conversationId, bootstrap.payload?.conversation?.skill_key, bootstrap.status]);
 
   useEffect(() => {
     if (!skillKey) {
-      setSkillLoading(false);
+      setSkillLoading(Boolean(conversationId && chatPageState === "conversation-loading"));
       return;
     }
     setSkillLoading(true);
@@ -201,16 +225,16 @@ export default function SkillChatContent() {
         setRecommendedModel(undefined);
       })
       .finally(() => setSkillLoading(false));
-  }, [skillKey]);
+  }, [skillKey, conversationId, chatPageState]);
 
   useEffect(() => {
     if (!recommendedModelId) {
       setRecommendedModel(undefined);
       return;
     }
-    const model = models.find((m) => m.id === recommendedModelId);
+    const model = effectiveModels.find((m) => m.id === recommendedModelId);
     setRecommendedModel(model);
-  }, [recommendedModelId, models]);
+  }, [recommendedModelId, effectiveModels]);
 
   const Icon = skill ? ICON_MAP[skill.icon] || Sparkles : Sparkles;
   const iconColor = skill
@@ -277,7 +301,9 @@ export default function SkillChatContent() {
           </header>
 
           {/* 聊天区域 */}
-          {modelsLoading || skillLoading ? (
+          {chatPageState === "anonymous" || chatPageState === "conversation-not-found" || chatPageState === "conversation-forbidden" || chatPageState === "conversation-error" ? (
+            <SkillChatPageStateNotice state={chatPageState} onRetry={() => window.location.reload()} />
+          ) : (modelsLoading && effectiveModels.length === 0) || skillLoading ? (
             <ChatSkeleton />
           ) : !skill ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center">
@@ -296,12 +322,14 @@ export default function SkillChatContent() {
             <ChatInterface
               key={skillKey || "chat"}
               conversationId={conversationId}
-              models={models}
+              models={effectiveModels}
               skillKey={skillKey}
               recommendedModel={recommendedModel}
               welcomeTitle={skill.title}
               welcomeSubtitle={skill.description}
               welcomeExamples={SKILL_EXAMPLES[skillKey]}
+              bootstrap={bootstrap.payload}
+              isConversationShellLoading={isConversationShellLoading}
             />
           )}
         </main>

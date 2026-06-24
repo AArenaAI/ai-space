@@ -27,6 +27,8 @@ func TestChatBootstrapIncludesStableConversationSnapshot(t *testing.T) {
 		&models.Message{},
 		&models.MessageGroup{},
 		&models.MessageFile{},
+		&models.Notebook{},
+		&models.NotebookFile{},
 		&models.NotebookConversation{},
 		&models.AIBackgroundTask{},
 		&models.AIBackgroundTaskEvent{},
@@ -44,7 +46,14 @@ func TestChatBootstrapIncludesStableConversationSnapshot(t *testing.T) {
 	if err := db.Create(&workspace).Error; err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	conv := models.Conversation{UserID: user.ID, WorkspaceID: workspace.ID, Title: "Compare conversation", Compare: true}
+	user.BasicCredits = 1200
+	user.AdvancedCredits = 3400
+	user.BetaCreditBalance = 5600
+	user.PlanTier = "plus"
+	if err := db.Save(&user).Error; err != nil {
+		t.Fatalf("update user credits: %v", err)
+	}
+	conv := models.Conversation{UserID: user.ID, WorkspaceID: workspace.ID, Title: "Compare conversation", Compare: true, Pinned: true}
 	conv.SetCompareModels([]string{"kimi-k2.6", "gpt-5.4"})
 	if err := db.Create(&conv).Error; err != nil {
 		t.Fatalf("create conversation: %v", err)
@@ -73,6 +82,10 @@ func TestChatBootstrapIncludesStableConversationSnapshot(t *testing.T) {
 	}
 	if err := db.Create(&assistantB).Error; err != nil {
 		t.Fatalf("create assistant B: %v", err)
+	}
+	notebook := models.Notebook{UserID: user.ID, WorkspaceID: workspace.ID, Title: "Recent notebook"}
+	if err := db.Create(&notebook).Error; err != nil {
+		t.Fatalf("create notebook: %v", err)
 	}
 
 	handler := NewChatBootstrapHandler(db, &config.Config{JWTSecret: "test-secret"})
@@ -108,9 +121,21 @@ func TestChatBootstrapIncludesStableConversationSnapshot(t *testing.T) {
 				UserMessageID uint     `json:"user_message_id"`
 			} `json:"messages"`
 		} `json:"snapshot"`
+		Billing struct {
+			Tier            string `json:"tier"`
+			BetaCredits     int    `json:"beta_credits"`
+			BasicCredits    int    `json:"basic_credits"`
+			AdvancedCredits int    `json:"advanced_credits"`
+		} `json:"billing"`
 		Sidebar struct {
-			Conversations []models.Conversation `json:"conversations"`
-			Total         int64                 `json:"total"`
+			Conversations   []models.Conversation `json:"conversations"`
+			Pinned          []models.Conversation `json:"pinned"`
+			RecentNotebooks []struct {
+				ID        uint   `json:"id"`
+				Title     string `json:"title"`
+				FileCount int64  `json:"file_count"`
+			} `json:"recent_notebooks"`
+			Total int64 `json:"total"`
 		} `json:"sidebar"`
 	}
 	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
@@ -168,7 +193,16 @@ func TestChatBootstrapIncludesStableConversationSnapshot(t *testing.T) {
 	if !foundOldActive {
 		t.Fatalf("active task assistant %d outside tail was not included in snapshot", oldAssistant.ID)
 	}
+	if payload.Billing.Tier != "plus" || payload.Billing.BasicCredits != 1200 || payload.Billing.AdvancedCredits != 3400 || payload.Billing.BetaCredits != 5600 {
+		t.Fatalf("unexpected billing payload: %+v", payload.Billing)
+	}
 	if payload.Sidebar.Total != 1 || len(payload.Sidebar.Conversations) != 1 {
 		t.Fatalf("unexpected sidebar conversations: total=%d len=%d", payload.Sidebar.Total, len(payload.Sidebar.Conversations))
+	}
+	if len(payload.Sidebar.Pinned) != 1 || payload.Sidebar.Pinned[0].ID != conv.ID {
+		t.Fatalf("unexpected pinned conversations: %+v", payload.Sidebar.Pinned)
+	}
+	if len(payload.Sidebar.RecentNotebooks) != 1 || payload.Sidebar.RecentNotebooks[0].ID != notebook.ID || payload.Sidebar.RecentNotebooks[0].Title != notebook.Title {
+		t.Fatalf("unexpected recent notebooks: %+v", payload.Sidebar.RecentNotebooks)
 	}
 }

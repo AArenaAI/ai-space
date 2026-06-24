@@ -29,9 +29,29 @@ export type ChatBootstrapSnapshot = {
   last_assistant_status?: ConversationRestoreStatusResponse;
 };
 
+export type ChatBootstrapNotebookListItem = {
+  id?: number;
+  title?: string;
+  description?: string;
+  cover_icon?: string;
+  workspace_id?: number;
+  file_count?: number;
+  updated_at?: string;
+};
+
 export type ChatBootstrapSidebar = {
   conversations?: Conversation[];
+  pinned?: Conversation[];
+  recent_notebooks?: ChatBootstrapNotebookListItem[];
   total?: number;
+};
+
+export type ChatBootstrapBilling = {
+  tier?: string;
+  beta_credits?: number;
+  basic_credits?: number;
+  advanced_credits?: number;
+  elite_credits?: number;
 };
 
 export type ChatBootstrapPayload = {
@@ -40,6 +60,7 @@ export type ChatBootstrapPayload = {
   user?: Record<string, any>;
   workspace?: ChatBootstrapWorkspace;
   models?: ChatModel[];
+  billing?: ChatBootstrapBilling;
   conversation?: ChatBootstrapConversation;
   snapshot?: ChatBootstrapSnapshot;
   sidebar?: ChatBootstrapSidebar;

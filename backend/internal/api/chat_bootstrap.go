@@ -59,6 +59,14 @@ type ChatBootstrapActiveTask struct {
 	UpdatedAt          time.Time `json:"updated_at"`
 }
 
+type ChatBootstrapBilling struct {
+	Tier            string `json:"tier"`
+	BetaCredits     int    `json:"beta_credits"`
+	BasicCredits    int    `json:"basic_credits"`
+	AdvancedCredits int    `json:"advanced_credits"`
+	EliteCredits    int    `json:"elite_credits"`
+}
+
 func (h *ChatBootstrapHandler) Get(c *gin.Context) {
 	userID, refreshedToken, ok := h.resolveBootstrapUser(c)
 	if !ok {
@@ -98,6 +106,8 @@ func (h *ChatBootstrapHandler) Get(c *gin.Context) {
 		conversationLimit = limit
 	}
 	conversationList, conversationTotal := h.listBootstrapConversations(userID, workspaceID, conversationLimit)
+	pinnedConversations := h.listBootstrapPinnedConversations(userID, workspaceID, 12)
+	recentNotebooks := h.listBootstrapRecentNotebooks(userID, workspaceID, 8)
 
 	payload := gin.H{
 		"auth_status": "authenticated",
@@ -109,10 +119,13 @@ func (h *ChatBootstrapHandler) Get(c *gin.Context) {
 			"default_id": defaultWorkspaceID,
 			"items":      workspaces,
 		},
-		"models": mergeModelConfigs(modelmeta.ChatModels()),
+		"models":  mergeModelConfigs(modelmeta.ChatModels()),
+		"billing": h.bootstrapBillingPayload(user),
 		"sidebar": gin.H{
-			"conversations": conversationList,
-			"total":         conversationTotal,
+			"conversations":    conversationList,
+			"pinned":           pinnedConversations,
+			"recent_notebooks": recentNotebooks,
+			"total":            conversationTotal,
 		},
 		"feature_flags": gin.H{
 			"chat_bootstrap":             true,
@@ -200,6 +213,16 @@ func (h *ChatBootstrapHandler) listActiveChatTasks(userID uint, conversationID u
 	return out
 }
 
+func (h *ChatBootstrapHandler) bootstrapBillingPayload(user models.User) ChatBootstrapBilling {
+	return ChatBootstrapBilling{
+		Tier:            user.PlanTier,
+		BetaCredits:     user.BetaCreditBalance,
+		BasicCredits:    user.BasicCredits,
+		AdvancedCredits: user.AdvancedCredits,
+		EliteCredits:    user.EliteCredits,
+	}
+}
+
 func (h *ChatBootstrapHandler) listBootstrapConversations(userID uint, workspaceID uint, limit int) ([]models.Conversation, int64) {
 	queryBase := h.db.Model(&models.Conversation{}).
 		Where("user_id = ? AND deleted_at IS NULL", userID).
@@ -234,6 +257,44 @@ func (h *ChatBootstrapHandler) listBootstrapConversations(userID uint, workspace
 		conversations[i] = rows[i].Conversation
 	}
 	return conversations, total
+}
+
+func (h *ChatBootstrapHandler) listBootstrapPinnedConversations(userID uint, workspaceID uint, limit int) []models.Conversation {
+	if limit <= 0 {
+		limit = 12
+	}
+	query := h.db.Model(&models.Conversation{}).
+		Where("user_id = ? AND deleted_at IS NULL AND pinned = ?", userID, true).
+		Where("NOT EXISTS (SELECT 1 FROM notebook_conversations WHERE notebook_conversations.conversation_id = conversations.id)")
+	if workspaceID > 0 {
+		query = query.Where("workspace_id = ?", workspaceID)
+	}
+	var conversations []models.Conversation
+	if err := query.Order("updated_at DESC").Limit(limit).Find(&conversations).Error; err != nil {
+		return []models.Conversation{}
+	}
+	return conversations
+}
+
+func (h *ChatBootstrapHandler) listBootstrapRecentNotebooks(userID uint, workspaceID uint, limit int) []NotebookListItem {
+	if limit <= 0 {
+		limit = 8
+	}
+	query := h.db.Model(&models.Notebook{}).Where("user_id = ?", userID)
+	if workspaceID > 0 {
+		query = query.Where("workspace_id = ?", workspaceID)
+	}
+	var notebooks []models.Notebook
+	if err := query.Order("updated_at DESC").Limit(limit).Find(&notebooks).Error; err != nil {
+		return []NotebookListItem{}
+	}
+	items := make([]NotebookListItem, 0, len(notebooks))
+	for _, notebook := range notebooks {
+		var count int64
+		h.db.Model(&models.NotebookFile{}).Where("notebook_id = ?", notebook.ID).Count(&count)
+		items = append(items, NotebookListItem{Notebook: notebook, FileCount: count})
+	}
+	return items
 }
 
 func (h *ChatBootstrapHandler) buildConversationBootstrap(c *gin.Context, userID uint, conversationID uint) (ChatBootstrapConversationMeta, ChatBootstrapSnapshot, bool) {
