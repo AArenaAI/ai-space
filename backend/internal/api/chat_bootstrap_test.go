@@ -53,7 +53,8 @@ func TestChatBootstrapIncludesStableConversationSnapshot(t *testing.T) {
 	if err := db.Create(&oldAssistant).Error; err != nil {
 		t.Fatalf("create old active assistant: %v", err)
 	}
-	if err := db.Create(&models.AIBackgroundTask{ResponseID: "resp_old_active", UserID: user.ID, ConversationID: conv.ID, AssistantMessageID: oldAssistant.ID, Model: oldAssistant.Model, Provider: "openai", Status: "streaming", LastSequenceNumber: 3}).Error; err != nil {
+	activeTask := models.AIBackgroundTask{ResponseID: "resp_old_active", UserID: user.ID, ConversationID: conv.ID, AssistantMessageID: oldAssistant.ID, Model: oldAssistant.Model, Provider: "openai", Status: "streaming", LastSequenceNumber: 3}
+	if err := db.Create(&activeTask).Error; err != nil {
 		t.Fatalf("create active task: %v", err)
 	}
 	userMsg := models.Message{ConversationID: conv.ID, Role: "user", Content: "你好"}
@@ -97,8 +98,9 @@ func TestChatBootstrapIncludesStableConversationSnapshot(t *testing.T) {
 			CompareModels []string `json:"compare_models"`
 		} `json:"conversation"`
 		Snapshot struct {
-			Total    int64 `json:"total"`
-			Messages []struct {
+			Total           int64  `json:"total"`
+			SnapshotVersion string `json:"snapshot_version"`
+			Messages        []struct {
 				ID            uint     `json:"id"`
 				Role          string   `json:"role"`
 				GroupIndex    int      `json:"group_index"`
@@ -125,6 +127,26 @@ func TestChatBootstrapIncludesStableConversationSnapshot(t *testing.T) {
 	}
 	if payload.Snapshot.Total != 4 || len(payload.Snapshot.Messages) != 4 {
 		t.Fatalf("unexpected snapshot total/messages: total=%d len=%d", payload.Snapshot.Total, len(payload.Snapshot.Messages))
+	}
+	if payload.Snapshot.SnapshotVersion == "" {
+		t.Fatalf("expected snapshot_version in bootstrap payload")
+	}
+	unchangedReq := httptest.NewRequest(http.MethodGet, "/api/chat/bootstrap?id=1&message_tail=2", nil)
+	unchangedReq.Header.Set("If-None-Match", payload.Snapshot.SnapshotVersion)
+	unchangedRes := httptest.NewRecorder()
+	router.ServeHTTP(unchangedRes, unchangedReq)
+	if unchangedRes.Code != http.StatusNotModified {
+		t.Fatalf("expected 304 for unchanged snapshot, got %d body=%s", unchangedRes.Code, unchangedRes.Body.String())
+	}
+	if err := db.Model(&activeTask).Updates(map[string]any{"last_sequence_number": int64(4)}).Error; err != nil {
+		t.Fatalf("update active task: %v", err)
+	}
+	changedTaskReq := httptest.NewRequest(http.MethodGet, "/api/chat/bootstrap?id=1&message_tail=2", nil)
+	changedTaskReq.Header.Set("If-None-Match", payload.Snapshot.SnapshotVersion)
+	changedTaskRes := httptest.NewRecorder()
+	router.ServeHTTP(changedTaskRes, changedTaskReq)
+	if changedTaskRes.Code != http.StatusOK {
+		t.Fatalf("expected 200 when active task progress changed, got %d body=%s", changedTaskRes.Code, changedTaskRes.Body.String())
 	}
 	foundOldActive := false
 	for _, message := range payload.Snapshot.Messages {

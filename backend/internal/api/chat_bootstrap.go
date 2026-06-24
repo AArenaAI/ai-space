@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -130,6 +131,10 @@ func (h *ChatBootstrapHandler) Get(c *gin.Context) {
 		if !ok {
 			return
 		}
+		if chatBootstrapETagMatches(c.GetHeader("If-None-Match"), snapshot.SnapshotVersion) {
+			c.Status(http.StatusNotModified)
+			return
+		}
 		payload["conversation"] = meta
 		payload["snapshot"] = snapshot
 	}
@@ -245,7 +250,7 @@ func (h *ChatBootstrapHandler) buildConversationBootstrap(c *gin.Context, userID
 
 	var total int64
 	h.db.Model(&models.Message{}).Where("conversation_id = ?", conv.ID).Count(&total)
-	snapshotVersion := fmt.Sprintf("%d:%d:%d:group-window-v2", conv.ID, total, conv.UpdatedAt.UnixNano())
+	snapshotVersion := fmt.Sprintf("%d:%d:%d:%s:group-window-v2", conv.ID, total, conv.UpdatedAt.UnixNano(), h.activeChatTaskSnapshotSignature(userID, conv.ID))
 
 	msgQuery := h.db.Where("conversation_id = ?", conv.ID).Order("created_at asc, id asc").Preload("MessageFiles")
 	if msgTail > 0 {
@@ -337,6 +342,35 @@ func (h *ChatBootstrapHandler) ensureActiveTaskMessages(messages *[]models.Messa
 		}
 		return (*messages)[i].CreatedAt.Before((*messages)[j].CreatedAt)
 	})
+}
+
+func (h *ChatBootstrapHandler) activeChatTaskSnapshotSignature(userID uint, conversationID uint) string {
+	statuses := []string{"running", "streaming", "retrying"}
+	var tasks []models.AIBackgroundTask
+	if err := h.db.Where("user_id = ? AND conversation_id = ? AND status IN ?", userID, conversationID, statuses).
+		Order("updated_at DESC, id DESC").
+		Limit(20).
+		Find(&tasks).Error; err != nil || len(tasks) == 0 {
+		return "no-active-task"
+	}
+	parts := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		parts = append(parts, fmt.Sprintf("%d:%d:%s:%d:%d", task.ID, task.AssistantMessageID, task.Status, task.LastSequenceNumber, task.UpdatedAt.UnixNano()))
+	}
+	return strings.Join(parts, "|")
+}
+
+func chatBootstrapETagMatches(headerValue string, snapshotVersion string) bool {
+	if headerValue == "" || snapshotVersion == "" {
+		return false
+	}
+	for _, value := range strings.Split(headerValue, ",") {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == snapshotVersion || trimmed == fmt.Sprintf("\"%s\"", snapshotVersion) {
+			return true
+		}
+	}
+	return false
 }
 
 func parseOptionalUint(value string) uint {
