@@ -4,7 +4,7 @@
     {
       "model_id": "gpt-5.4",
       "enabled": true,
-      "tier": "advanced",
+      "tier": "basic",
       "reasoning_level": "fast",
       "reasoning_fast_value": "low",
       "reasoning_thinking_value": "medium",
