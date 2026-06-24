@@ -482,7 +482,6 @@ export default function PricingPage() {
           <a href="#compare" className="hover:text-[#111827]">对比</a>
           <a href="#faq" className="hover:text-[#111827]">FAQ</a>
         </div>
-        <span className="text-xs text-[#9ca3af]">Pricing</span>
       </nav>
 
       <main className="mx-auto max-w-7xl px-5 py-12 md:px-8">
