@@ -4,6 +4,7 @@ import {
   ForkChatPersistedMessage,
   mapPersistedChatMessages,
 } from "./chatForkCoordinator";
+import { buildChatBootstrapUrl, type ChatBootstrapPayload } from "@/lib/chatBootstrapCoordinator";
 
 export type ConversationRestoreResponse = {
   notModified?: boolean;
@@ -114,13 +115,29 @@ export async function fetchConversationRestore({
 }): Promise<ConversationRestoreResponse> {
   const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
   if (snapshotVersion) headers["If-None-Match"] = snapshotVersion;
-  const res = await fetchImpl(buildConversationRestoreUrl({ apiBaseUrl, conversationId }), {
+  const res = await fetchImpl(buildChatBootstrapUrl({ apiBaseUrl, conversationId, messageTail: DEFAULT_CONVERSATION_RESTORE_TAIL, conversationLimit: 30 }), {
     headers,
+    credentials: "include",
     signal,
   });
   if (res.status === 304) return { notModified: true, snapshot_version: snapshotVersion };
-  if (!res.ok) throw new Error(`load conversation failed: ${res.status}`);
-  return await res.json();
+  if (!res.ok) throw new Error(`chat bootstrap failed: ${res.status}`);
+  return mapChatBootstrapPayloadToConversationRestore(await res.json());
+}
+
+export function mapChatBootstrapPayloadToConversationRestore(payload: ChatBootstrapPayload): ConversationRestoreResponse {
+  return {
+    title: payload.conversation?.title || "",
+    model: payload.conversation?.model,
+    compare: !!payload.conversation?.compare,
+    compare_models: JSON.stringify(payload.conversation?.compare_models || []),
+    skill_key: payload.conversation?.skill_key,
+    messages: payload.snapshot?.messages || [],
+    total: payload.snapshot?.total,
+    has_more: payload.snapshot?.has_more,
+    snapshot_version: payload.snapshot?.snapshot_version,
+    last_assistant_status: payload.snapshot?.last_assistant_status,
+  };
 }
 
 export async function fetchConversationMessageStatus({

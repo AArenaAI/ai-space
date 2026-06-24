@@ -9,7 +9,7 @@ const projectRoot = path.resolve(__dirname, "../..");
 
 function loadModule() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "chat-conversation-restore-coordinator-regression-"));
-  for (const name of ["chatForkCoordinator", "chatConversationRestoreCoordinator"]) {
+  for (const name of ["chatForkCoordinator", "chatBootstrapCoordinator", "chatConversationRestoreCoordinator"]) {
     let source = fs.readFileSync(path.join(projectRoot, `lib/${name}.ts`), "utf8");
     source = source.replace(
       /import \{ normalizeError, readApiError \} from "@\/lib\/errors";\n/g,
@@ -21,7 +21,22 @@ function loadModule() {
     }).outputText;
     fs.writeFileSync(path.join(tmpDir, `${name}.js`), output);
   }
-  return require(path.join(tmpDir, "chatConversationRestoreCoordinator.js"));
+  const restorePath = path.join(tmpDir, "chatConversationRestoreCoordinator.js");
+  const bootstrapPath = path.join(tmpDir, "chatBootstrapCoordinator.js");
+  const forkPath = path.join(tmpDir, "chatForkCoordinator.js");
+  const Module = require("module");
+  const originalLoad = Module._load;
+  Module._load = function(request, parent, isMain) {
+    if (request === "@/lib/chatBootstrapCoordinator") return originalLoad(bootstrapPath, parent, isMain);
+    if (request === "./chatForkCoordinator") return originalLoad(forkPath, parent, isMain);
+    if (request.startsWith("@/")) return {};
+    return originalLoad(request, parent, isMain);
+  };
+  try {
+    return require(restorePath);
+  } finally {
+    Module._load = originalLoad;
+  }
 }
 
 const {
@@ -64,7 +79,7 @@ const response = (ok, data, status = ok ? 200 : 500) => ({ ok, status, json: asy
     assert.equal(buildConversationMessageCountUrl({ apiBaseUrl: "http://api", conversationId: 7 }), "http://api/api/conversations/7/messages?limit=1");
   });
 
-  await test("fetchConversationRestore uses bearer token and throws non-ok", async () => {
+  await test("fetchConversationRestore uses bootstrap payload by default", async () => {
     const calls = [];
     const data = await fetchConversationRestore({
       apiBaseUrl: "http://api",
@@ -72,12 +87,22 @@ const response = (ok, data, status = ok ? 200 : 500) => ({ ok, status, json: asy
       token: "tok",
       fetchImpl: async (url, init) => {
         calls.push([url, init.headers.Authorization]);
-        return response(true, { title: "T", messages: [] });
+        return response(true, {
+          conversation: { id: 3, title: "Boot", model: "m2", compare: true, compare_models: ["m1", "m2"], skill_key: "s" },
+          snapshot: { total: 2, has_more: false, snapshot_version: "v1", messages: [{ id: 31, role: "user", content: "u" }] },
+        });
       },
     });
-    assert.deepEqual(calls, [["http://api/api/conversations/3?message_tail=32", "Bearer tok"]]);
-    assert.equal(data.title, "T");
-    await assert.rejects(fetchConversationRestore({ conversationId: 3, token: "tok", fetchImpl: async () => response(false, {}, 503) }), /load conversation failed: 503/);
+    assert.deepEqual(calls, [["http://api/api/chat/bootstrap?id=3&message_tail=32&conversation_limit=30", "Bearer tok"]]);
+    assert.equal(data.title, "Boot");
+    assert.equal(data.model, "m2");
+    assert.equal(data.compare, true);
+    assert.equal(data.compare_models, '["m1","m2"]');
+    assert.equal(data.skill_key, "s");
+    assert.equal(data.total, 2);
+    assert.equal(data.snapshot_version, "v1");
+    assert.equal(data.messages.length, 1);
+    await assert.rejects(fetchConversationRestore({ conversationId: 3, token: "tok", fetchImpl: async () => response(false, {}, 503) }), /chat bootstrap failed: 503/);
   });
 
   await test("fetch status and count helpers ignore invalid responses", async () => {
