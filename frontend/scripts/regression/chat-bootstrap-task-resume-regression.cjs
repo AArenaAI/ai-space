@@ -46,13 +46,14 @@ function testSkipsCompletedMissingAndAlreadyResumedTasks() {
   assert.equal(plan.length, 0);
 }
 
-function testAllowsRetryingAndIncomplete() {
+function testAllowsRunningStreamingAndRetryingOnly() {
   const plan = buildBootstrapTaskResumePlan({
     alreadyResumedTaskIds: new Set(),
     messages: [assistant('local-a', 101), assistant('local-b', 102)],
     activeTasks: [
       { id: 11, conversation_id: 762, assistant_message_id: 101, status: 'retrying', last_sequence_number: 0, updated_at: 'now' },
-      { id: 12, conversation_id: 762, assistant_message_id: 102, status: 'incomplete', last_sequence_number: 4, updated_at: 'now' },
+      { id: 12, conversation_id: 762, assistant_message_id: 102, status: 'streaming', last_sequence_number: 4, updated_at: 'now' },
+      { id: 13, conversation_id: 762, assistant_message_id: 102, status: 'incomplete', last_sequence_number: 5, updated_at: 'now' },
     ],
   });
   assert.deepEqual(plan.map((item) => item.task.id), [11, 12]);
@@ -61,5 +62,5 @@ function testAllowsRetryingAndIncomplete() {
 
 testBuildsResumePlanForMatchingAssistant();
 testSkipsCompletedMissingAndAlreadyResumedTasks();
-testAllowsRetryingAndIncomplete();
+testAllowsRunningStreamingAndRetryingOnly();
 console.log('chat bootstrap task resume regression passed');

@@ -53,7 +53,7 @@ func TestChatBootstrapIncludesStableConversationSnapshot(t *testing.T) {
 	if err := db.Create(&oldAssistant).Error; err != nil {
 		t.Fatalf("create old active assistant: %v", err)
 	}
-	if err := db.Create(&models.AIBackgroundTask{ResponseID: "resp_old_active", UserID: user.ID, ConversationID: conv.ID, AssistantMessageID: oldAssistant.ID, Model: oldAssistant.Model, Provider: "openai", Status: "incomplete", LastSequenceNumber: 3}).Error; err != nil {
+	if err := db.Create(&models.AIBackgroundTask{ResponseID: "resp_old_active", UserID: user.ID, ConversationID: conv.ID, AssistantMessageID: oldAssistant.ID, Model: oldAssistant.Model, Provider: "openai", Status: "streaming", LastSequenceNumber: 3}).Error; err != nil {
 		t.Fatalf("create active task: %v", err)
 	}
 	userMsg := models.Message{ConversationID: conv.ID, Role: "user", Content: "你好"}

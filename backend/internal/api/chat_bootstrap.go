@@ -179,7 +179,7 @@ func (h *ChatBootstrapHandler) resolveBootstrapUser(c *gin.Context) (uint, strin
 }
 
 func (h *ChatBootstrapHandler) listActiveChatTasks(userID uint, conversationID uint) []ChatBootstrapActiveTask {
-	statuses := []string{"running", "streaming", "retrying", "incomplete"}
+	statuses := []string{"running", "streaming", "retrying"}
 	query := h.db.Model(&models.AIBackgroundTask{}).Where("user_id = ? AND status IN ?", userID, statuses)
 	if conversationID > 0 {
 		query = query.Where("conversation_id = ?", conversationID)
@@ -301,7 +301,7 @@ func (h *ChatBootstrapHandler) ensureActiveTaskMessages(messages *[]models.Messa
 	if messages == nil {
 		return
 	}
-	statuses := []string{"running", "streaming", "retrying", "incomplete"}
+	statuses := []string{"running", "streaming", "retrying"}
 	var tasks []models.AIBackgroundTask
 	if err := h.db.Where("user_id = ? AND conversation_id = ? AND status IN ?", userID, conversationID, statuses).
 		Order("updated_at DESC, id DESC").

@@ -10,7 +10,7 @@ export type BootstrapTaskResumePlanItem = {
   initialContent: string;
 };
 
-const RESUMABLE_BOOTSTRAP_TASK_STATUSES = new Set(["running", "streaming", "retrying", "incomplete"]);
+const RESUMABLE_BOOTSTRAP_TASK_STATUSES = new Set(["running", "streaming", "retrying"]);
 
 export function buildBootstrapTaskResumePlan({
   activeTasks,
