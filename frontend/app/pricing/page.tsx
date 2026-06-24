@@ -68,12 +68,12 @@ const plans: Plan[] = [
     id: "basic",
     name: "Basic",
     tagline: "适合日常问答与轻量工作",
-    price: "内测价",
-    priceNote: "以订单确认金额为准",
-    yearlyNote: "年付优惠开放中",
+    price: "***",
+    priceNote: "***",
+    yearlyNote: "***",
     icon: Flame,
     badge: "入门",
-    credits: { basic: "100", advanced: "25" },
+    credits: { basic: "***", advanced: "***" },
     models: ["GPT Mini", "Gemini Flash", "DeepSeek Flash", "更多..."],
     work: [
       { label: "基础与部分高级模型", enabled: true },
@@ -90,8 +90,8 @@ const plans: Plan[] = [
       { label: "标准速度", enabled: true },
     ],
     benefitGroups: [
-      { title: "100 基础积分 / 月", items: [{ label: "GPT Mini" }, { label: "Gemini Flash" }, { label: "DeepSeek Flash" }, { label: "Kimi 轻量模型" }, { label: "更多基础模型..." }] },
-      { title: "25 高级积分 / 月", items: [{ label: "GPT 5.5 轻量使用" }, { label: "Gemini Pro 轻量使用" }, { label: "DeepSeek Pro 轻量使用" }, { label: "高级模型按实际消耗扣除" }] },
+      { title: "***", items: [{ label: "GPT Mini" }, { label: "Gemini Flash" }, { label: "DeepSeek Flash" }, { label: "Kimi 轻量模型" }, { label: "更多基础模型..." }] },
+      { title: "***", items: [{ label: "GPT 5.5 轻量使用" }, { label: "Gemini Pro 轻量使用" }, { label: "DeepSeek Pro 轻量使用" }, { label: "***" }] },
       { title: "AI 工作", items: [{ label: "多模型聊天" }, { label: "写作助手" }, { label: "文本翻译" }, { label: "文档阅读器" }, { label: "PDF / Word / PPT 摘要" }, { label: "基础联网搜索" }] },
       { title: "图像和视频生成", items: [{ label: "图像生成" }, { label: "参考图生成" }, { label: "基础图像编辑" }, { label: "视频生成", enabled: false }, { label: "AI 漫剧 Studio", enabled: false }] },
       { title: "高级功能", items: [{ label: "ChatPDF" }, { label: "AI PDF / 图片 / 网页翻译器" }, { label: "AI 图片生成 / 编辑器" }, { label: "思考模式" }, { label: "Artifacts" }, { label: "音频转文本", enabled: false }, { label: "允许商业使用", enabled: false }] },
@@ -103,13 +103,13 @@ const plans: Plan[] = [
     id: "plus",
     name: "Plus",
     tagline: "最适合高频创作与日常 AI 工作",
-    price: "内测价",
-    priceNote: "以订单确认金额为准",
-    yearlyNote: "最推荐 · 年付更划算",
+    price: "***",
+    priceNote: "***",
+    yearlyNote: "***",
     icon: Star,
     badge: "最推荐",
     popular: true,
-    credits: { basic: "300", advanced: "100" },
+    credits: { basic: "***", advanced: "***" },
     models: ["GPT-5.5", "Gemini Pro", "DeepSeek Pro", "Kimi", "更多..."],
     work: [
       { label: "高级模型优先使用", enabled: true },
@@ -126,12 +126,12 @@ const plans: Plan[] = [
       { label: "商用使用", enabled: true },
     ],
     benefitGroups: [
-      { title: "300 基础积分 / 月", items: [{ label: "GPT Mini" }, { label: "Gemini Flash" }, { label: "DeepSeek Flash" }, { label: "Kimi 轻量模型" }, { label: "更多基础模型..." }] },
-      { title: "100 高级积分 / 月", note: "适合日常高频创作与复杂模型调用。", items: [{ label: "GPT 5.5" }, { label: "GPT 5.5 Pro" }, { label: "Gemini Pro" }, { label: "DeepSeek Pro" }, { label: "Kimi K2.5 / K2.6" }, { label: "更多高级模型..." }] },
+      { title: "***", items: [{ label: "GPT Mini" }, { label: "Gemini Flash" }, { label: "DeepSeek Flash" }, { label: "Kimi 轻量模型" }, { label: "更多基础模型..." }] },
+      { title: "***", note: "***", items: [{ label: "GPT 5.5" }, { label: "GPT 5.5 Pro" }, { label: "Gemini Pro" }, { label: "DeepSeek Pro" }, { label: "Kimi K2.5 / K2.6" }, { label: "更多高级模型..." }] },
       { title: "精英能力", items: [{ label: "Deep Research" }, { label: "Scholar Research" }, { label: "AI PPT" }, { label: "网站生成器" }, { label: "复杂文档分析" }] },
       { title: "图像和视频生成", items: [{ label: "图像生成" }, { label: "参考图生成" }, { label: "图像编辑工具" }, { label: "去背景 / 换背景" }, { label: "文字移除 / 局部重绘" }, { label: "Seedance 视频生成" }, { label: "分段成片" }, { label: "更多..." }] },
       { title: "高级功能", items: [{ label: "YouTube 总结" }, { label: "AI 创意工作室" }, { label: "AI 图片生成 / 编辑器" }, { label: "ChatPDF" }, { label: "AI PDF / 图片 / 网页翻译器" }, { label: "AI 朗读" }, { label: "数据分析" }, { label: "思考模式" }, { label: "Artifacts" }, { label: "智能联网" }, { label: "人工智能作家" }, { label: "音频转文本" }, { label: "允许商业使用" }] },
-      { title: "支持", items: [{ label: "优先速度队列" }, { label: "多设备登录" }, { label: "商用使用" }, { label: "会员额度自动发放" }] },
+      { title: "支持", items: [{ label: "优先速度队列" }, { label: "多设备登录" }, { label: "商用使用" }, { label: "***" }] },
     ],
     cta: "升级 Plus",
   },
@@ -139,12 +139,12 @@ const plans: Plan[] = [
     id: "ultra",
     name: "Ultra",
     tagline: "专业重度用户与高频生产",
-    price: "内测价",
-    priceNote: "以订单确认金额为准",
-    yearlyNote: "专业额度包",
+    price: "***",
+    priceNote: "***",
+    yearlyNote: "***",
     icon: Infinity,
     badge: "专业",
-    credits: { basic: "∞", advanced: "260" },
+    credits: { basic: "***", advanced: "***" },
     models: ["全部基础模型", "全部高级模型", "高负载任务", "更多..."],
     work: [
       { label: "全模型访问", enabled: true },
@@ -161,12 +161,12 @@ const plans: Plan[] = [
       { label: "商用使用", enabled: true },
     ],
     benefitGroups: [
-      { title: "无限基础积分 / 月", items: [{ label: "全部基础模型" }, { label: "GPT Mini" }, { label: "Gemini Flash" }, { label: "DeepSeek Flash" }, { label: "Kimi 轻量模型" }, { label: "更多基础模型..." }] },
-      { title: "260 高级积分 / 月", note: "面向重度模型调用、长文档和高频生产。", items: [{ label: "GPT 5.5" }, { label: "GPT 5.5 Pro" }, { label: "Gemini Pro" }, { label: "DeepSeek Pro" }, { label: "Kimi K2.7 Code" }, { label: "所有高级模型" }] },
+      { title: "***", items: [{ label: "全部基础模型" }, { label: "GPT Mini" }, { label: "Gemini Flash" }, { label: "DeepSeek Flash" }, { label: "Kimi 轻量模型" }, { label: "更多基础模型..." }] },
+      { title: "***", note: "***", items: [{ label: "GPT 5.5" }, { label: "GPT 5.5 Pro" }, { label: "Gemini Pro" }, { label: "DeepSeek Pro" }, { label: "Kimi K2.7 Code" }, { label: "所有高级模型" }] },
       { title: "精英能力", items: [{ label: "Deep Research" }, { label: "Scholar Research" }, { label: "AI PPT" }, { label: "网站生成器" }, { label: "长任务与复杂推理" }, { label: "批量生产工作流" }] },
       { title: "图像和视频生成", items: [{ label: "GPT Image / 高级图像生成" }, { label: "参考图生成" }, { label: "图像编辑工具" }, { label: "去背景 / 换背景" }, { label: "文字移除 / 局部重绘" }, { label: "Seedance 视频生成" }, { label: "高频分段成片" }, { label: "AI 漫剧 Studio" }, { label: "资产 / 分镜 / 视频链路" }, { label: "更多..." }] },
       { title: "高级功能", items: [{ label: "YouTube 总结" }, { label: "AI 创意工作室" }, { label: "AI 图片生成 / 编辑器" }, { label: "ChatPDF" }, { label: "多文档分析" }, { label: "AI PDF / 图片 / 网页翻译器" }, { label: "AI 朗读" }, { label: "数据分析" }, { label: "思考模式" }, { label: "Artifacts" }, { label: "智能联网" }, { label: "人工智能作家" }, { label: "音频转文本" }, { label: "允许商业使用" }] },
-      { title: "支持", items: [{ label: "最快速度队列" }, { label: "更多设备登录" }, { label: "商用使用" }, { label: "专业额度包" }, { label: "优先体验新模型" }] },
+      { title: "支持", items: [{ label: "最快速度队列" }, { label: "更多设备登录" }, { label: "商用使用" }, { label: "***" }, { label: "优先体验新模型" }] },
     ],
     cta: "选择 Ultra",
   },
@@ -321,12 +321,12 @@ const comparisonGroups: Array<{ title: string; rows: ComparisonRow[] }> = [
 ];
 
 const faqs = [
-  ["基础额度和高级额度有什么区别？", "基础额度面向轻量模型和日常问答；高级额度面向更强模型、复杂推理和创作任务。不同模型会按实际消耗扣除对应额度。"],
-  ["会员额度和内测额度是否互通？", "不互通。内测额度是独立钱包，用于 beta 测试；正式会员额度按会员套餐发放和消耗。"],
-  ["图像和视频生成如何扣费？", "图像、视频和高级创作能力会按所选模型、任务类型和生成成本扣除额度，页面会逐步补充更详细的消耗说明。"],
-  ["支付后多久开通？", "支付宝扫码支付成功后，系统会通过订单轮询和回调自动开通会员；如果页面未刷新，可重新进入账户或定价页查看状态。"],
-  ["支持退款或发票吗？", "正式付费开放后会补充退款、发票和订单管理规则。内测阶段如遇支付问题，请联系管理员处理。"],
-  ["后续新增模型会包含在会员里吗？", "AI Space 会持续接入新模型。新增模型会按成本归入基础、高级或更高等级额度池，具体以页面展示为准。"],
+  ["***", "***"],
+  ["***", "***"],
+  ["***", "***"],
+  ["***", "***"],
+  ["***", "***"],
+  ["***", "***"],
 ];
 
 function FeatureLine({ label, enabled }: { label: string; enabled: boolean }) {
@@ -492,7 +492,7 @@ export default function PricingPage() {
           </div>
           <h1 className="mt-6 text-4xl font-semibold tracking-[-0.045em] md:text-6xl">一个会员，解锁主流 AI 模型与创作工具</h1>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-[#6b7280]">
-            GPT、Claude、Gemini、DeepSeek、Kimi 等模型统一入口。会员额度可用于聊天、文档、翻译、图像、视频和 AI 漫剧创作。
+            GPT、Claude、Gemini、DeepSeek、Kimi 等模型统一入口。***
           </p>
           <div className="mt-7 flex flex-wrap justify-center gap-2">
             {modelChips.map((model) => (
@@ -571,9 +571,9 @@ export default function PricingPage() {
           <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#9ca3af]">Advanced features</div>
-              <h2 className="mt-2 text-2xl font-semibold tracking-[-0.035em]">会员额度覆盖整个 AI 工作台</h2>
+              <h2 className="mt-2 text-2xl font-semibold tracking-[-0.035em]">***</h2>
             </div>
-            <p className="max-w-xl text-sm leading-6 text-[#6b7280]">不只是模型对话，也覆盖侧边栏里的 AI 工作与 AI 创作入口。</p>
+            <p className="max-w-xl text-sm leading-6 text-[#6b7280]">***</p>
           </div>
           <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
             {advancedFeatureGroups.map((group) => (
@@ -622,7 +622,7 @@ export default function PricingPage() {
               <div className="pt-2 font-semibold text-[#71717a]">功能项</div>
               <div className="text-center">
                 <div className="text-base font-semibold text-[#111827]">AI Space Plus</div>
-                <div className="mt-1 text-xs text-[#71717a]">内测价 · 多模型工作台</div>
+                <div className="mt-1 text-xs text-[#71717a]">*** · 多模型工作台</div>
                 <button className="mt-3 rounded-full bg-[#111827] px-4 py-2 text-xs font-semibold text-white">升级 Plus</button>
               </div>
               <div
@@ -676,7 +676,7 @@ export default function PricingPage() {
         <section id="faq" className="mx-auto mt-12 max-w-3xl">
           <div className="text-center">
             <h2 className="text-3xl font-semibold tracking-[-0.04em]">常见问题解答</h2>
-            <p className="mt-3 text-sm leading-6 text-[#6b7280]">AI Space 致力于提供稳定、安全、透明的 AI 服务。请勿共享、转售或滥用账号额度。</p>
+            <p className="mt-3 text-sm leading-6 text-[#6b7280]">***</p>
           </div>
           <div className="mt-7 overflow-hidden rounded-[26px] border border-[#e5e7eb] bg-white shadow-sm">
             {faqs.map(([q, a], idx) => {
@@ -702,12 +702,12 @@ export default function PricingPage() {
             <div className="mx-auto inline-flex rounded-full bg-[#eaf2ff] px-3 py-1 text-xs font-semibold text-[#1677ff]">支付宝 ALIPAY</div>
             <h2 className="mt-4 text-xl font-semibold tracking-[-0.03em]">确认订单</h2>
             <p className="mt-1 text-sm text-[#6b7280]">AI Space {payment.planName} 会员套餐</p>
-            <div className="mt-4 text-4xl font-semibold tracking-[-0.05em]">¥{payment.amountDisplay.toFixed(2)}</div>
+            <div className="mt-4 text-4xl font-semibold tracking-[-0.05em]">***</div>
             <div className="mx-auto mt-5 flex h-[260px] w-[260px] items-center justify-center rounded-[24px] border border-[#e5e7eb] bg-white p-3">
               <img src={payment.qrDataUrl} alt="支付宝支付二维码" className="h-full w-full" />
             </div>
             <p className="mt-4 text-sm text-[#374151]">请使用手机支付宝扫码完成付款</p>
-            <p className="mt-1 text-xs text-[#9ca3af]">订单号：{payment.orderNo} · 二维码有效期约 15 分钟</p>
+            <p className="mt-1 text-xs text-[#9ca3af]">订单号：{payment.orderNo} · ***</p>
             {payment.status === "paid" ? (
               <div className="mt-5 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">支付成功，会员已开通</div>
             ) : (
