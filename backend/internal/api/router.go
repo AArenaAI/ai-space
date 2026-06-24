@@ -173,6 +173,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	// 注册 Bad Case 路由（公开提交，需认证）
 	badCaseHandler := NewBadCaseHandler(db)
+	betaFeedbackHandler := NewBetaFeedbackHandler(db)
 	publicWithAuth.POST("/bad-cases", badCaseHandler.CreateBadCase)
 	publicWithAuth.GET("/bad-cases", badCaseHandler.GetMyBadCases)
 
@@ -274,6 +275,8 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	documentArtifactHandler := NewDocumentArtifactHandler(db)
 	documentArtifactHandler.AutoMigrate()
 	authorized.POST("/translate/live/ticket", liveTranslateHandler.CreateTicket)
+
+	authorized.POST("/beta/feedback", betaFeedbackHandler.Submit)
 
 	authorized.GET("/conversations", convHandler.List)
 	authorized.GET("/conversations/search", convHandler.Search)
