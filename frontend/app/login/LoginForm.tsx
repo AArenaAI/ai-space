@@ -64,25 +64,24 @@ export default function LoginForm() {
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_48%,transparent_0%,rgba(3,7,18,0.08)_34%,rgba(3,7,18,0.82)_100%)]" />
 
           <div className="absolute inset-0 flex items-center justify-center">
-            <img
-              src="/login-rocket-hero.png"
-              alt="Rocket launching through deep space"
-              className="h-full w-full object-cover"
-            />
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,transparent_0%,transparent_42%,rgba(3,7,18,0.62)_100%)]" />
-            <div className="absolute left-1/2 top-1/2 h-[430px] w-[430px] -translate-x-1/2 -translate-y-1/2 animate-[spin_30s_linear_infinite] rounded-full border border-dashed border-sky-200/30" />
+            <div className="absolute left-1/2 top-1/2 h-[620px] w-[620px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(56,189,248,0.20)_0%,rgba(59,130,246,0.10)_28%,transparent_62%)] blur-xl" />
+            <div className="absolute left-1/2 top-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 animate-[spin_42s_linear_infinite] rounded-full border border-dashed border-sky-200/22" />
+            <div className="absolute left-1/2 top-1/2 h-[390px] w-[390px] -translate-x-1/2 -translate-y-1/2 animate-[spin_30s_linear_infinite_reverse] rounded-full border border-sky-300/18" />
+            <div className="absolute left-1/2 top-1/2 h-[270px] w-[270px] -translate-x-1/2 -translate-y-1/2 animate-[spin_18s_linear_infinite] rounded-full border border-dotted border-white/28" />
+            <div className="absolute left-1/2 top-1/2 h-[130px] w-[720px] -translate-x-1/2 -translate-y-1/2 -rotate-12 rounded-full bg-gradient-to-r from-transparent via-sky-300/12 to-transparent blur-2xl" />
             <div className="absolute left-[18%] top-[22%] h-2 w-2 animate-ping rounded-full bg-white" />
+            <div className="absolute left-[28%] bottom-[24%] h-1.5 w-1.5 animate-pulse rounded-full bg-sky-200" />
             <div className="absolute right-[18%] top-[18%] h-6 w-6 rotate-45 animate-pulse bg-white/90 shadow-[0_0_36px_rgba(255,255,255,0.95)]" />
             <div className="absolute right-[22%] bottom-[22%] h-3 w-3 animate-pulse rounded-full bg-sky-300/90 shadow-[0_0_20px_rgba(125,211,252,0.9)]" />
           </div>
 
-          <div className="absolute bottom-10 left-10 max-w-md text-white">
-            <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-sm font-medium text-sky-100 shadow-sm ring-1 ring-white/15 backdrop-blur">
+          <div className="absolute left-1/2 top-1/2 z-10 w-full max-w-xl -translate-x-1/2 -translate-y-1/2 px-10 text-center text-white">
+            <div className="mx-auto inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-sm font-medium text-sky-100 shadow-sm ring-1 ring-white/15 backdrop-blur">
               <Sparkles className="h-4 w-4" />
               Multi-model AI workspace
             </div>
-            <h2 className="mt-5 text-4xl font-semibold tracking-[-0.05em] text-white">Launch your AI workflow</h2>
-            <p className="mt-3 text-sm leading-6 text-slate-300">从聊天、文档、翻译到图像视频创作，进入你的 AI Space 工作台。</p>
+            <h2 className="mt-6 text-5xl font-semibold tracking-[-0.06em] text-white drop-shadow-[0_0_32px_rgba(125,211,252,0.28)]">Launch your AI workflow</h2>
+            <p className="mx-auto mt-4 max-w-md text-sm leading-7 text-slate-300">从聊天、文档、翻译到图像视频创作，进入你的 AI Space 工作台。</p>
           </div>
         </section>
 
