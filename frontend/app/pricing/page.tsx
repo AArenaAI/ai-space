@@ -327,6 +327,45 @@ function CompareValue({ value }: { value: string }) {
   return <span className="text-xs text-[#a1a1aa]">—</span>;
 }
 
+const supportModelsByPlan: Record<Plan["id"], Array<{ name: string; mark: string; className: string }>> = {
+  basic: [
+    { name: "ChatGPT", mark: "G", className: "bg-[#10a37f] text-white" },
+    { name: "Gemini", mark: "✦", className: "bg-gradient-to-br from-[#4285f4] to-[#9b5cff] text-white" },
+    { name: "DeepSeek", mark: "D", className: "bg-[#4f7cff] text-white" },
+  ],
+  plus: [
+    { name: "ChatGPT", mark: "G", className: "bg-[#10a37f] text-white" },
+    { name: "Claude", mark: "C", className: "bg-[#d97757] text-white" },
+    { name: "Gemini", mark: "✦", className: "bg-gradient-to-br from-[#4285f4] to-[#9b5cff] text-white" },
+    { name: "DeepSeek", mark: "D", className: "bg-[#4f7cff] text-white" },
+    { name: "Kimi", mark: "K", className: "bg-[#111827] text-white" },
+    { name: "Seedance", mark: "S", className: "bg-[#7c3aed] text-white" },
+  ],
+  ultra: [
+    { name: "ChatGPT", mark: "G", className: "bg-[#10a37f] text-white" },
+    { name: "Claude", mark: "C", className: "bg-[#d97757] text-white" },
+    { name: "Gemini", mark: "✦", className: "bg-gradient-to-br from-[#4285f4] to-[#9b5cff] text-white" },
+    { name: "DeepSeek", mark: "D", className: "bg-[#4f7cff] text-white" },
+    { name: "Kimi", mark: "K", className: "bg-[#111827] text-white" },
+    { name: "Seedance", mark: "S", className: "bg-[#7c3aed] text-white" },
+    { name: "Seedream", mark: "SD", className: "bg-[#f97316] text-white" },
+  ],
+};
+
+function SupportedModelLogos({ planId }: { planId: Plan["id"] }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <span className="mr-1 text-sm font-semibold text-[#111827]">支持</span>
+      {supportModelsByPlan[planId].map((model) => (
+        <span key={model.name} className="inline-flex items-center gap-1.5 text-[12px] font-medium text-[#374151]">
+          <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-bold shadow-sm ${model.className}`}>{model.mark}</span>
+          {model.name}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export default function PricingPage() {
   const [tierModels, setTierModels] = useState<Record<TierKey, TierModel[]>>(fallbackTierModels);
   const [payment, setPayment] = useState<PaymentModalState | null>(null);
@@ -475,15 +514,21 @@ export default function PricingPage() {
                   <div className="h-full space-y-6 overflow-y-auto pr-1 text-sm [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {plan.benefitGroups.map((group) => (
                       <div key={group.title}>
-                        <div className="mb-2 py-1 text-sm font-semibold text-[#111827]">
-                          {group.title}
-                        </div>
-                        {group.note && <p className="mb-2 text-[11px] leading-5 text-[#8a8f98]">{group.note}</p>}
-                        <div className="space-y-2.5">
-                          {group.items.map((item) => (
-                            <FeatureLine key={item.label} label={item.label} enabled={item.enabled !== false} />
-                          ))}
-                        </div>
+                        {group.title === "支持" ? (
+                          <SupportedModelLogos planId={plan.id} />
+                        ) : (
+                          <>
+                            <div className="mb-2 py-1 text-sm font-semibold text-[#111827]">
+                              {group.title}
+                            </div>
+                            {group.note && <p className="mb-2 text-[11px] leading-5 text-[#8a8f98]">{group.note}</p>}
+                            <div className="space-y-2.5">
+                              {group.items.map((item) => (
+                                <FeatureLine key={item.label} label={item.label} enabled={item.enabled !== false} />
+                              ))}
+                            </div>
+                          </>
+                        )}
                       </div>
                     ))}
                   </div>
