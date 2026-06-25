@@ -1538,6 +1538,22 @@ function MessageList({
     lockBottomAfterLayout(true);
   }, [conversationId, targetMessageId, isLoadingHistory, messages, lockBottomAfterLayout]);
 
+  const lastMessageGrowthKey = useMemo(() => {
+    const last = messages[messages.length - 1];
+    return `${conversationId || "new"}:${last?.id || ""}:${last?.content?.length || 0}:${last?.reasoningContent?.length || 0}:${last?.activityStatus?.status || ""}`;
+  }, [conversationId, messages]);
+
+  useEffect(() => {
+    if (targetMessageId || isLoadingHistory || messages.length === 0) return;
+    const savedScroll = getConversationScrollState(conversationId);
+    if (savedScroll && !savedScroll.atBottom) return;
+    if (!stickToBottomRef.current) return;
+    if (Date.now() < userScrollOverrideUntilRef.current) return;
+    programmaticScrollUntilRef.current = Date.now() + 700;
+    scrollToBottom("auto", true);
+    lockBottomAfterLayout(false);
+  }, [conversationId, isLoadingHistory, lastMessageGrowthKey, lockBottomAfterLayout, messages.length, scrollToBottom, targetMessageId]);
+
   const activeCompareModels = useMemo(() => {
     if (!effectiveIsCompare) return [];
     const availableModelIds = new Set(models.map((model) => model.id));
