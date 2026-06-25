@@ -261,6 +261,7 @@ function MessageList({
   const bottomSmoothRafRef = useRef<number>(0);
   const restoringConversationScrollUntilRef = useRef(0);
   const restoredConversationBrowseRef = useRef<{ conversationId?: number; distanceToBottom: number; until: number } | null>(null);
+  const pendingConversationScrollRestoreRef = useRef<number | undefined>(undefined);
   const initialRangeRevealRafRef = useRef<number>(0);
   const [atBottom, setAtBottom] = useState(true);
   const atBottomRef = useRef(true);
@@ -512,7 +513,7 @@ function MessageList({
     const el = ref instanceof HTMLElement ? (ref as HTMLDivElement) : null;
     scrollRef.current = el;
     if (el) {
-      const savedScroll = getConversationScrollState(conversationId);
+      const savedScroll = pendingConversationScrollRestoreRef.current === conversationId ? getConversationScrollState(conversationId) : undefined;
       const shouldRestoreBrowsePosition = Boolean(savedScroll && !savedScroll.atBottom && !targetMessageId);
       if (shouldRestoreBrowsePosition) {
         const until = Date.now() + 6000;
@@ -1386,6 +1387,7 @@ function MessageList({
       localWindowReleasedRef.current = false;
       localWindowReleaseIntentUntilRef.current = 0;
       openedConversationBottomKeyRef.current = "";
+      pendingConversationScrollRestoreRef.current = conversationId;
       const savedScroll = getConversationScrollState(conversationId);
       const shouldRestoreBrowsePosition = Boolean(savedScroll && !savedScroll.atBottom && !targetMessageId);
       stickToBottomRef.current = !shouldRestoreBrowsePosition;
@@ -1424,8 +1426,9 @@ function MessageList({
   }, [messages.length, updateScrollProgressFromElement]);
 
   useEffect(() => {
-    if (!conversationId || targetMessageId || messages.length === 0) return;
+    if (!conversationId || targetMessageId || messages.length === 0 || pendingConversationScrollRestoreRef.current !== conversationId) return;
     const saved = getConversationScrollState(conversationId);
+    pendingConversationScrollRestoreRef.current = undefined;
     if (!saved || saved.atBottom) return;
     const until = Date.now() + 6000;
     restoringConversationScrollUntilRef.current = until;
@@ -1527,7 +1530,7 @@ function MessageList({
   }, [conversationId, targetMessageId]);
 
   useEffect(() => {
-    const savedScroll = getConversationScrollState(conversationId);
+    const savedScroll = pendingConversationScrollRestoreRef.current === conversationId ? getConversationScrollState(conversationId) : undefined;
     if (savedScroll && !savedScroll.atBottom && !targetMessageId) return;
     if (targetMessageId || isLoadingHistory || messages.length === 0 || Date.now() < historyPrependUntilRef.current || Date.now() < userScrollOverrideUntilRef.current || !stickToBottomRef.current) return;
     const key = `${conversationId || "new"}:${messages[0]?.id || ""}:${messages[messages.length - 1]?.id || ""}`;
@@ -1555,7 +1558,7 @@ function MessageList({
 
   useEffect(() => {
     if (targetMessageId || isLoadingHistory || messages.length === 0 || shouldPreserveRestoredBrowsePosition()) return;
-    const savedScroll = getConversationScrollState(conversationId);
+    const savedScroll = pendingConversationScrollRestoreRef.current === conversationId ? getConversationScrollState(conversationId) : undefined;
     if (savedScroll && !savedScroll.atBottom) return;
     if (!stickToBottomRef.current) return;
     if (Date.now() < userScrollOverrideUntilRef.current) return;
