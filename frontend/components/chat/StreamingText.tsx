@@ -70,14 +70,16 @@ export function StreamingText({
   const canUseRealtime = isStreaming || !!realtime?.completedAt;
   const effectiveText = canUseRealtime ? (streamText || realtime?.content || canonicalContent) : canonicalContent;
   const hasSplitRealtime = canUseRealtime && !!realtime && (realtime.answerContent !== undefined || realtime.reasoningContent !== undefined);
-  const hasThinkTag = !hasSplitRealtime && effectiveText.includes("<think>");
+  const legacyParsed = parseThinkContent(effectiveText);
+  const splitAnswerParsed = parseThinkContent(realtime?.answerContent || "");
+  const hasThinkTag = effectiveText.includes("<think>") || !!realtime?.answerContent?.includes("<think>");
   const fullParsed = hasSplitRealtime
     ? {
-        reasoning: realtime?.reasoningContent ?? null,
-        answer: realtime?.answerContent ?? effectiveText,
-        isThinking: !!realtime?.isReasoning,
+        reasoning: realtime?.reasoningContent?.trim() ? realtime.reasoningContent : (legacyParsed.reasoning || splitAnswerParsed.reasoning),
+        answer: splitAnswerParsed.answer.trim() ? splitAnswerParsed.answer : legacyParsed.answer,
+        isThinking: !!realtime?.isReasoning || legacyParsed.isThinking || splitAnswerParsed.isThinking,
       }
-    : parseThinkContent(effectiveText);
+    : legacyParsed;
   const shouldAnimateText = isStreaming && !hasThinkTag && !hasSplitRealtime;
   const shouldAnimateSplit = isStreaming && (hasThinkTag || hasSplitRealtime);
   const isFinalizingRealtime = !isStreaming && !!realtime?.completedAt;
