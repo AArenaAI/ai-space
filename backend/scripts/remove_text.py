@@ -347,6 +347,54 @@ def build_text_mask(rgb: np.ndarray, sub_mode: str = "auto") -> np.ndarray:
     return combined
 
 
+
+
+def fill_uniform_mask_regions(rgb: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, np.ndarray, int]:
+    """Fill masked regions whose surroundings are near-uniform UI/background.
+
+    Manual text removal on game/dialog UI should not use texture inpainting:
+    inpaint pulls grass/scene texture into the dark dialogue box and creates a
+    blurred smear. For each external-mask component, inspect a surrounding ring;
+    if the ring is dark/low-variance enough, fill the component with the ring's
+    median color and remove it from the inpaint mask. Return (image, remaining_mask,
+    filled_pixels).
+    """
+    repaired = rgb.copy()
+    remaining = mask.copy()
+    height, width = mask.shape[:2]
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    filled_pixels = 0
+    for cnt in contours:
+        component = np.zeros_like(mask)
+        cv2.drawContours(component, [cnt], -1, 255, thickness=cv2.FILLED)
+        x, y, w, h = cv2.boundingRect(cnt)
+        if w < 2 or h < 2:
+            continue
+        ring_px = max(6, round(min(width, height) / 220))
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * ring_px + 1, 2 * ring_px + 1))
+        dilated = cv2.dilate(component, kernel, iterations=1)
+        ring = (dilated > 0) & (component == 0) & (mask == 0)
+        samples = rgb[ring]
+        if samples.size == 0 or samples.shape[0] < 16:
+            continue
+        med = np.median(samples, axis=0)
+        # Robust spread: percentile range is less sensitive to UI highlights.
+        p10 = np.percentile(samples, 10, axis=0)
+        p90 = np.percentile(samples, 90, axis=0)
+        spread = float(np.mean(p90 - p10))
+        brightness = float(np.mean(med))
+        # Dialogue boxes / caption bars are usually dark and fairly uniform. Also
+        # allow light uniform panels. Avoid this path on textured scenery.
+        uniform_dark = brightness < 85 and spread < 45
+        uniform_light = brightness >= 85 and spread < 32
+        if not (uniform_dark or uniform_light):
+            continue
+        repaired[component > 0] = np.clip(med, 0, 255).astype(np.uint8)
+        remaining[component > 0] = 0
+        filled_pixels += int(np.count_nonzero(component))
+    return repaired, remaining, filled_pixels
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Remove text/watermarks locally while preserving visual dimensions")
     parser.add_argument("--input", required=True, help="Input source image path")
@@ -371,7 +419,8 @@ def main() -> int:
         chalkboard = is_chalkboard_scene(rgb)
 
         # Use external mask if provided, otherwise auto-detect
-        if args.mask_input:
+        external_mask = bool(args.mask_input)
+        if external_mask:
             mask_path = Path(args.mask_input)
             if not mask_path.exists():
                 print(json.dumps({"ok": False, "error": f"mask_not_found: {mask_path}"}, ensure_ascii=False), file=sys.stderr)
@@ -382,15 +431,12 @@ def main() -> int:
                     mask_im = mask_im.resize(original_size, Image.Resampling.NEAREST)
                 mask = np.array(mask_im.convert("L"))
             mask = (mask > 127).astype(np.uint8) * 255
-            if args.sub_mode == "manual":
-                # Manual brush strokes are user intent, not exact glyph masks.
-                # Expand them to cover anti-aliasing, glow, stroke outlines, and
-                # small gaps left by fast brushing; otherwise game/UI text leaves
-                # dotted white residue around the painted area.
-                expand_px = max(5, round(min(original_size) / 180))
-                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * expand_px + 1, 2 * expand_px + 1))
-                mask = cv2.dilate(mask, kernel, iterations=1)
-                mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+            # External masks come from user selection/brush. Expand only modestly
+            # to catch antialiasing/glow; excessive expansion destroys UI panels.
+            expand_px = max(3, round(min(original_size) / 360))
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * expand_px + 1, 2 * expand_px + 1))
+            mask = cv2.dilate(mask, kernel, iterations=1)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
         else:
             mask = build_text_mask(rgb, args.sub_mode)
 
@@ -399,14 +445,27 @@ def main() -> int:
             mask_path.parent.mkdir(parents=True, exist_ok=True)
             Image.fromarray(mask).save(mask_path)
 
+        # External/manual masks: first fill near-uniform UI/background regions
+        # with neighboring median color. Only remaining textured regions use
+        # OpenCV inpaint. This avoids smearing game dialogue boxes into blurry
+        # scene-colored strips.
+        fill_pixels = 0
+        inpaint_source = rgb
+        inpaint_mask = mask
+        if external_mask:
+            inpaint_source, inpaint_mask, fill_pixels = fill_uniform_mask_regions(rgb, mask)
+
         # OpenCV expects BGR. Telea inpaint changes only masked pixels.
-        bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-        if args.sub_mode == "manual":
-            radius = max(5, round(min(original_size) / 260))
+        bgr = cv2.cvtColor(inpaint_source, cv2.COLOR_RGB2BGR)
+        if external_mask:
+            radius = max(3, round(min(original_size) / 420))
         else:
             radius = max(4 if chalkboard else 3, round(min(original_size) / (220 if chalkboard else 350)))
-        repaired_bgr = cv2.inpaint(bgr, mask, radius, cv2.INPAINT_TELEA)
-        repaired_rgb = cv2.cvtColor(repaired_bgr, cv2.COLOR_BGR2RGB)
+        if np.count_nonzero(inpaint_mask) > 0:
+            repaired_bgr = cv2.inpaint(bgr, inpaint_mask, radius, cv2.INPAINT_TELEA)
+            repaired_rgb = cv2.cvtColor(repaired_bgr, cv2.COLOR_BGR2RGB)
+        else:
+            repaired_rgb = inpaint_source.copy()
         # Hard pixel-preservation guard: OpenCV inpaint is only supposed to
         # change masked pixels, but force every unmasked pixel back to the exact
         # original RGB value before saving. This prevents any accidental global
@@ -441,6 +500,7 @@ def main() -> int:
                     "output_size": [result.size[0], result.size[1]],
                     "mask_pixels": mask_pixels,
                     "mask_coverage": round(mask_pixels / total_pixels, 6) if total_pixels else 0,
+                    "uniform_fill_pixels": fill_pixels,
                     "sub_mode": args.sub_mode,
                     "output": str(output_path),
                 },
