@@ -8,6 +8,7 @@ import {
   fetchConversationMessageStatus,
   fetchConversationRestore,
   findLastAssistantStatusTarget,
+  hasCompletedLastAssistantStatus,
   parseConversationCompareModels,
   resolveConversationSkillKey,
 } from "@/lib/chatConversationRestoreCoordinator";
@@ -490,7 +491,13 @@ export function useChatConversationRestoreRuntime({
         });
         if (restoreState) {
           const { loadedMessages, activeByServerMessageId } = restoreState;
-          const pendingLocalMessages = Object.entries(pendingLocalAssistantsRef?.current || {})
+          const backendLastAssistantCompleted = hasCompletedLastAssistantStatus(data.last_assistant_status) && activeByServerMessageId.size === 0;
+          if (backendLastAssistantCompleted && pendingLocalAssistantsRef) {
+            Object.entries(pendingLocalAssistantsRef.current).forEach(([id, entry]) => {
+              if (entry.convId === loadConversationId) delete pendingLocalAssistantsRef.current[id];
+            });
+          }
+          const pendingLocalMessages = backendLastAssistantCompleted ? [] : Object.entries(pendingLocalAssistantsRef?.current || {})
             .filter(([, entry]) => entry.convId === loadConversationId)
             .map(([id, entry]) => ({ id, message: entry.message }))
             .filter(({ id, message }) => {

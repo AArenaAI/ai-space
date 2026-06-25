@@ -64,6 +64,7 @@ function loadModule(file) {
           return { loadedMessages, mergedMessages, groupViews: new Map([[1, 0]]), activeByServerMessageId, isLoading: Boolean(data.isLoading) };
         },
         findLastAssistantStatusTarget: (messages) => [...messages].reverse().find((m) => m.role === "assistant" && m.serverMessageId),
+        hasCompletedLastAssistantStatus: (statusData) => statusData?.background_task?.status === 'completed' && String(statusData?.message?.content || '').trim().length > 0,
         buildConversationStatusDecision: ({ statusData, currentMessage, busyActivityStatus }) => {
           const bgTask = statusData?.background_task || {};
           const status = bgTask.status || '';

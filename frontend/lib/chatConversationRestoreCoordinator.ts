@@ -36,7 +36,7 @@ export type ConversationRestoreMessage = ForkChatMessage & {
 };
 
 export type ConversationRestoreStatusResponse = {
-  message?: { content?: string };
+  message?: { id?: number | string; content?: string };
   background_task?: {
     id?: number | string;
     task_id?: number | string;
@@ -45,6 +45,12 @@ export type ConversationRestoreStatusResponse = {
     completed_at?: string | null;
   };
 };
+
+export function hasCompletedLastAssistantStatus(statusData?: ConversationRestoreStatusResponse): boolean {
+  const status = statusData?.background_task?.status || "";
+  const content = statusData?.message?.content || "";
+  return status === "completed" && content.trim().length > 0;
+}
 
 export type ConversationRestoreStatusDecision = {
   hasTask: boolean;
