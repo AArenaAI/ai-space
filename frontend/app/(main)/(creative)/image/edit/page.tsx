@@ -29,7 +29,16 @@ type ImageEditIntent =
   | "local_repair"
   | "object_remove_repair";
 
-type TextRegion = { bbox: [number, number, number, number]; text: string; confidence: number };
+type TextRegion = {
+  bbox: [number, number, number, number];
+  text: string;
+  confidence: number;
+  detector?: string;
+  type?: string;
+  repair_strategy?: string;
+  risk?: "low" | "medium" | "high" | string;
+  selectable?: boolean;
+};
 
 type ImageEditRoute = { subMode: string; intent: ImageEditIntent };
 type PrecisionModeOption = ImageEditRoute & { labelKey: string; descriptionKey: string };
@@ -1073,8 +1082,9 @@ function ImageEditContent() {
         setSelectedTextIndices(new Set(regions.map((_: TextRegion, i: number) => i)));
         setTextDetectionDone(true);
         if (regions.length > 0) {
-          setTextDetectionNote("");
-          toast.success(`检测到 ${regions.length} 处文字`);
+          const typeLabel = data.image_type ? `图片类型：${data.image_type}；` : "";
+          setTextDetectionNote(`${typeLabel}检测到 ${regions.length} 处文字区域。可点击框切换删除范围。`);
+          toast.success(`检测到 ${regions.length} 处文字区域`);
         } else if (data.fallback_reason === "too_many_candidates") {
           setTextDetectionNote("自动检测不稳定，已隐藏疑似纹理误检框。请切换截图保护或后续使用手动选择区域。");
           toast.error("自动检测不稳定，未展示疑似误检框");
@@ -1839,7 +1849,7 @@ function ImageEditContent() {
                               <p className="text-sm font-semibold text-text-primary">文字检测</p>
                               <p className="mt-1 text-xs text-text-tertiary">
                                 {textDetectionDone
-                                  ? (textRegions.length > 0 ? `检测到 ${textRegions.length} 处文字，已选 ${selectedTextIndices.size} 处。点击框可切换。` : textDetectionNote || "未识别到稳定文字区域。")
+                                  ? (textRegions.length > 0 ? (textDetectionNote || `检测到 ${textRegions.length} 处文字，已选 ${selectedTextIndices.size} 处。点击框可切换。`) : textDetectionNote || "未识别到稳定文字区域。")
                                   : "点击下方按钮检测图片中的文字区域，可选择要删除的文字。"}
                               </p>
                             </div>

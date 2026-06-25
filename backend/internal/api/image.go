@@ -1885,19 +1885,27 @@ type TextDetectionPreviewRequest struct {
 
 // TextRegion 文字区域
 type TextRegion struct {
-	Bbox       [4]int `json:"bbox"`       // [x1, y1, x2, y2]
-	Text       string `json:"text"`       // OCR 识别的文字内容
-	Confidence float64 `json:"confidence"` // 置信度
+	Bbox           [4]int  `json:"bbox"`                      // [x1, y1, x2, y2]
+	Text           string  `json:"text"`                      // OCR 识别的文字内容
+	Confidence     float64 `json:"confidence"`                // 置信度
+	Detector       string  `json:"detector,omitempty"`        // tesseract/local-vision/hybrid
+	Type           string  `json:"type,omitempty"`            // ui_text/code_line/document_text
+	RepairStrategy string  `json:"repair_strategy,omitempty"` // uniform_fill/local_inpaint/paper_fill_or_inpaint
+	Risk           string  `json:"risk,omitempty"`            // low/medium/high
+	Selectable     bool    `json:"selectable,omitempty"`
 }
 
 // TextDetectionPreviewResponse 文字检测预览响应
 type TextDetectionPreviewResponse struct {
-	OK       bool         `json:"ok"`
-	Width    int          `json:"width"`
-	Height   int          `json:"height"`
-	Detector string       `json:"detector"`
-	Regions  []TextRegion `json:"regions"`
-	Count    int          `json:"count"`
+	OK             bool                   `json:"ok"`
+	Width          int                    `json:"width"`
+	Height         int                    `json:"height"`
+	Detector       string                 `json:"detector"`
+	ImageType      string                 `json:"image_type,omitempty"`
+	Analysis       map[string]interface{} `json:"analysis,omitempty"`
+	Regions        []TextRegion           `json:"regions"`
+	Count          int                    `json:"count"`
+	FallbackReason string                 `json:"fallback_reason,omitempty"`
 }
 
 // TextDetectionPreview 检测图片中的文字区域，返回坐标和内容供前端预览选择
@@ -1956,13 +1964,16 @@ func (h *ImageHandler) TextDetectionPreview(c *gin.Context) {
 
 	// 解析脚本输出
 	var scriptResult struct {
-		OK       bool        `json:"ok"`
-		Width    int         `json:"width"`
-		Height   int         `json:"height"`
-		Detector string      `json:"detector"`
-		Regions  []TextRegion `json:"regions"`
-		Count    int         `json:"count"`
-		Error    string      `json:"error"`
+		OK             bool                   `json:"ok"`
+		Width          int                    `json:"width"`
+		Height         int                    `json:"height"`
+		Detector       string                 `json:"detector"`
+		ImageType      string                 `json:"image_type"`
+		Analysis       map[string]interface{} `json:"analysis"`
+		Regions        []TextRegion           `json:"regions"`
+		Count          int                    `json:"count"`
+		FallbackReason string                 `json:"fallback_reason"`
+		Error          string                 `json:"error"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &scriptResult); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "文字检测结果解析失败: " + err.Error()})
@@ -1978,11 +1989,14 @@ func (h *ImageHandler) TextDetectionPreview(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, TextDetectionPreviewResponse{
-		OK:       true,
-		Width:    scriptResult.Width,
-		Height:   scriptResult.Height,
-		Detector: scriptResult.Detector,
-		Regions:  scriptResult.Regions,
-		Count:    scriptResult.Count,
+		OK:             true,
+		Width:          scriptResult.Width,
+		Height:         scriptResult.Height,
+		Detector:       scriptResult.Detector,
+		ImageType:      scriptResult.ImageType,
+		Analysis:       scriptResult.Analysis,
+		Regions:        scriptResult.Regions,
+		Count:          scriptResult.Count,
+		FallbackReason: scriptResult.FallbackReason,
 	})
 }
