@@ -12,7 +12,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
+import subprocess
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 import cv2
@@ -66,6 +69,120 @@ def detect_with_paddle(image_path: str) -> list[dict]:
         })
 
     return regions
+
+
+
+def available_tesseract_langs() -> set[str]:
+    if not shutil.which("tesseract"):
+        return set()
+    try:
+        proc = subprocess.run(["tesseract", "--list-langs"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
+    except Exception:
+        return set()
+    langs: set[str] = set()
+    for line in (proc.stdout + "\n" + proc.stderr).splitlines():
+        line = line.strip()
+        if not line or line.startswith("List of"):
+            continue
+        langs.add(line)
+    return langs
+
+
+def choose_tesseract_lang() -> str:
+    langs = available_tesseract_langs()
+    # chi_sim may not be installed on every host; include English when available
+    # so UI labels / ASCII watermarks are still detected.
+    parts = []
+    if "chi_sim" in langs:
+        parts.append("chi_sim")
+    if "chi_tra" in langs:
+        parts.append("chi_tra")
+    if "eng" in langs:
+        parts.append("eng")
+    return "+".join(parts)
+
+
+def detect_with_tesseract(image_path: str, sub_mode: str = "auto") -> list[dict]:
+    """Detect real OCR text boxes with tesseract TSV output.
+
+    Unlike OpenCV morphology, this only returns boxes with recognized text and
+    confidence, so textured game/background regions are not exposed as selectable
+    text boxes.
+    """
+    if not shutil.which("tesseract"):
+        return []
+    lang = choose_tesseract_lang()
+    if not lang:
+        return []
+    psm = "6" if sub_mode in {"screenshot", "poster"} else "11"
+    cmd = ["tesseract", image_path, "stdout", "-l", lang, "--psm", psm, "tsv"]
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=45)
+    if proc.returncode != 0:
+        print(f"[detect_text_mask] tesseract failed: {proc.stderr.strip()}", file=sys.stderr)
+        return []
+
+    rows = []
+    lines = proc.stdout.splitlines()
+    if not lines:
+        return []
+    header = lines[0].split("\t")
+    col = {name: i for i, name in enumerate(header)}
+    required = {"level", "page_num", "block_num", "par_num", "line_num", "left", "top", "width", "height", "conf", "text"}
+    if not required.issubset(col):
+        return []
+
+    min_conf = 35
+    with Image.open(image_path) as im:
+        source = ImageOps.exif_transpose(im)
+        img_w, img_h = source.size
+
+    for raw in lines[1:]:
+        parts = raw.split("\t")
+        if len(parts) < len(header):
+            continue
+        text = parts[col["text"]].strip()
+        if not text:
+            continue
+        try:
+            conf = float(parts[col["conf"]])
+            x = int(float(parts[col["left"]])); y = int(float(parts[col["top"]]))
+            w = int(float(parts[col["width"]])); h = int(float(parts[col["height"]]))
+        except Exception:
+            continue
+        if conf < min_conf or w < 5 or h < 5:
+            continue
+        # Reject very large/non-texty OCR artifacts.
+        if w > img_w * 0.92 or h > img_h * 0.30:
+            continue
+        rows.append({
+            "key": (parts[col["page_num"]], parts[col["block_num"]], parts[col["par_num"]], parts[col["line_num"]]),
+            "bbox": [x, y, x + w, y + h],
+            "text": text,
+            "confidence": conf,
+        })
+
+    # Merge words in the same OCR line into one selectable region.
+    grouped: dict[tuple[str, str, str, str], list[dict]] = defaultdict(list)
+    for row in rows:
+        grouped[row["key"]].append(row)
+
+    regions: list[dict] = []
+    for group in grouped.values():
+        if not group:
+            continue
+        x1 = min(r["bbox"][0] for r in group)
+        y1 = min(r["bbox"][1] for r in group)
+        x2 = max(r["bbox"][2] for r in group)
+        y2 = max(r["bbox"][3] for r in group)
+        text = "".join(r["text"] for r in group) if any(ord(ch) > 127 for r in group for ch in r["text"]) else " ".join(r["text"] for r in group)
+        conf = sum(float(r["confidence"]) for r in group) / len(group)
+        if (x2 - x1) < 6 or (y2 - y1) < 6:
+            continue
+        regions.append({"bbox": [x1, y1, x2, y2], "text": text.strip(), "confidence": round(conf / 100.0, 3)})
+
+    # Stable UX guard: OCR preview should never flood the image.
+    regions.sort(key=lambda r: (r["bbox"][1], r["bbox"][0]))
+    return regions[:30]
 
 
 def detect_with_opencv(image_path: str, sub_mode: str = "auto") -> list[dict]:
@@ -162,6 +279,40 @@ def merge_overlapping(regions: list[dict], overlap_threshold: float = 0.6) -> li
     return merged
 
 
+
+def filter_opencv_preview_regions(regions: list[dict], width: int, height: int, sub_mode: str) -> list[dict]:
+    """Make OpenCV fallback safe for preview.
+
+    OpenCV morphology is useful for building an internal removal mask, but raw
+    contours are not reliable OCR boxes. Only expose line-like, reasonably sized
+    candidates and cap the count; otherwise return a reason for manual selection.
+    """
+    out: list[dict] = []
+    for r in regions:
+        x1, y1, x2, y2 = r["bbox"]
+        w = max(0, x2 - x1)
+        h = max(0, y2 - y1)
+        area = w * h
+        if w < max(18, width * 0.018) or h < max(8, height * 0.008):
+            continue
+        if area < width * height * 0.00008 or area > width * height * 0.035:
+            continue
+        aspect = w / float(h or 1)
+        if aspect < 1.8 or aspect > 28:
+            continue
+        if h > height * 0.09:
+            continue
+        # Screenshot/game UI text often lives in lower UI bands; in screenshot
+        # mode prefer those line-like regions and avoid foliage/texture noise.
+        if sub_mode == "screenshot" and y1 < height * 0.35:
+            continue
+        out.append(r)
+
+    out.sort(key=lambda r: (r["bbox"][1], r["bbox"][0]))
+    # If still too many, this is not a stable preview; caller will suppress.
+    return out[:60]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Detect text regions for removal preview")
     parser.add_argument("--input", required=True, help="Input source image path")
@@ -181,20 +332,35 @@ def main() -> int:
             source = ImageOps.exif_transpose(im)
             width, height = source.size
 
+        fallback_reason = ""
+
+        # Prefer stable OCR boxes for preview. OpenCV morphology is a last-resort
+        # fallback and must not flood the frontend with texture/edge candidates.
+        regions = detect_with_tesseract(str(input_path), args.sub_mode)
+        detector = "tesseract" if regions else ""
+
         # PaddleOCR can segfault on some ARM/Linux runtime builds. Keep it behind
-        # an explicit opt-in and use the stable OpenCV detector by default.
+        # an explicit opt-in after tesseract.
         use_paddle = os.getenv("AI_SPACE_ENABLE_PADDLE_OCR", "").strip().lower() in {"1", "true", "yes"}
-        if use_paddle:
+        if not regions and use_paddle:
             try:
                 regions = detect_with_paddle(str(input_path))
                 detector = "paddleocr"
             except Exception as exc:
-                print(f"[detect_text_mask] PaddleOCR failed, falling back to OpenCV: {exc}", file=sys.stderr)
-                regions = detect_with_opencv(str(input_path), args.sub_mode)
+                print(f"[detect_text_mask] PaddleOCR failed: {exc}", file=sys.stderr)
+
+        if not regions:
+            opencv_regions = detect_with_opencv(str(input_path), args.sub_mode)
+            opencv_regions = filter_opencv_preview_regions(opencv_regions, width, height, args.sub_mode)
+            if len(opencv_regions) > 30:
+                regions = []
                 detector = "opencv"
-        else:
-            regions = detect_with_opencv(str(input_path), args.sub_mode)
-            detector = "opencv"
+                fallback_reason = "too_many_candidates"
+            else:
+                regions = opencv_regions
+                detector = "opencv"
+                if not regions:
+                    fallback_reason = "no_stable_text_regions"
 
         # Merge overlapping regions
         regions = merge_overlapping(regions)
@@ -209,6 +375,7 @@ def main() -> int:
             "detector": detector,
             "regions": regions,
             "count": len(regions),
+            "fallback_reason": fallback_reason,
         }, ensure_ascii=False))
         return 0
 

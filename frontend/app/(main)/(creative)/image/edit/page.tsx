@@ -816,6 +816,7 @@ function ImageEditContent() {
   const [selectedTextIndices, setSelectedTextIndices] = useState<Set<number>>(new Set());
   const [isDetectingText, setIsDetectingText] = useState(false);
   const [textDetectionDone, setTextDetectionDone] = useState(false);
+  const [textDetectionNote, setTextDetectionNote] = useState("");
   const textOverlayImgRef = useRef<HTMLImageElement>(null);
   const [textOverlayScale, setTextOverlayScale] = useState(1);
   const isRegionBrushMode = editMode === "region-brush";
@@ -957,6 +958,10 @@ function ImageEditContent() {
 
   useEffect(() => {
     setSelectedPrecisionRoute(DEFAULT_EDIT_ROUTES[editMode]);
+    setTextRegions([]);
+    setSelectedTextIndices(new Set());
+    setTextDetectionDone(false);
+    setTextDetectionNote("");
   }, [editMode]);
 
   useEffect(() => {
@@ -1064,10 +1069,20 @@ function ImageEditContent() {
       if (!res.ok) throw await readApiError(res);
       const data = await res.json();
       if (data.ok && data.regions) {
-        setTextRegions(data.regions);
-        setSelectedTextIndices(new Set(data.regions.map((_: TextRegion, i: number) => i)));
+        const regions = Array.isArray(data.regions) ? data.regions : [];
+        setTextRegions(regions);
+        setSelectedTextIndices(new Set(regions.map((_: TextRegion, i: number) => i)));
         setTextDetectionDone(true);
-        toast.success(`检测到 ${data.regions.length} 处文字`);
+        if (regions.length > 0) {
+          setTextDetectionNote("");
+          toast.success(`检测到 ${regions.length} 处文字`);
+        } else if (data.fallback_reason === "too_many_candidates") {
+          setTextDetectionNote("自动检测不稳定，已隐藏疑似纹理误检框。请切换截图保护或后续使用手动选择区域。");
+          toast.error("自动检测不稳定，未展示疑似误检框");
+        } else {
+          setTextDetectionNote("未识别到稳定文字区域，请尝试截图保护模式或手动选择区域。");
+          toast.error("未识别到稳定文字区域");
+        }
       } else {
         toast.error("未检测到文字");
       }
@@ -1294,6 +1309,7 @@ function ImageEditContent() {
     setTextRegions([]);
     setSelectedTextIndices(new Set());
     setTextDetectionDone(false);
+    setTextDetectionNote("");
     maskEditorRef.current?.clearMask();
   };
 
@@ -1350,7 +1366,15 @@ function ImageEditContent() {
             <button
               key={option.subMode}
               type="button"
-              onClick={() => setSelectedPrecisionRoute({ subMode: option.subMode, intent: option.intent })}
+              onClick={() => {
+                setSelectedPrecisionRoute({ subMode: option.subMode, intent: option.intent });
+                if (editMode === "text-removal") {
+                  setTextRegions([]);
+                  setSelectedTextIndices(new Set());
+                  setTextDetectionDone(false);
+                  setTextDetectionNote("");
+                }
+              }}
               disabled={isEditing}
               className={cn(
                 "rounded-lg border px-3 py-2 text-left transition-all",
@@ -1783,7 +1807,7 @@ function ImageEditContent() {
                               <p className="text-sm font-semibold text-text-primary">文字检测</p>
                               <p className="mt-1 text-xs text-text-tertiary">
                                 {textDetectionDone
-                                  ? `检测到 ${textRegions.length} 处文字，已选 ${selectedTextIndices.size} 处。点击框可切换。`
+                                  ? (textRegions.length > 0 ? `检测到 ${textRegions.length} 处文字，已选 ${selectedTextIndices.size} 处。点击框可切换。` : textDetectionNote || "未识别到稳定文字区域。")
                                   : "点击下方按钮检测图片中的文字区域，可选择要删除的文字。"}
                               </p>
                             </div>
