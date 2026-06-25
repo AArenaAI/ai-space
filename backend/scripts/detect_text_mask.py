@@ -80,10 +80,19 @@ def classify_image(rgb: np.ndarray) -> dict:
     # Receipt/document photos often have a large pink/white low-saturation paper
     # area and non-axis-aligned real-world background.
     mean = rgb.reshape(-1, 3).mean(axis=0)
-    paper_mask = (rgb[:, :, 0] > 120) & (rgb[:, :, 1] > 75) & (rgb[:, :, 2] > 85) & (rgb[:, :, 0] > rgb[:, :, 1] + 4)
+    paper_mask = (
+        (rgb[:, :, 0] > 125)
+        & (rgb[:, :, 1] > 70)
+        & (rgb[:, :, 1] < 220)
+        & (rgb[:, :, 2] > 75)
+        & (rgb[:, :, 2] < 220)
+        & (rgb[:, :, 0] > rgb[:, :, 1] + 10)
+        & (rgb[:, :, 0] > rgb[:, :, 2] + 10)
+        & (sat > 18)
+    )
     paper_fraction = float(np.mean(paper_mask))
-    paper_like = ((mean[0] > 130 and mean[1] > 95 and mean[2] > 95 and float(np.mean(sat < 120)) > 0.25) or paper_fraction > 0.18)
-    pinkish = (mean[0] > mean[1] + 6 and mean[0] > mean[2] + 3) or paper_fraction > 0.18
+    paper_like = ((mean[0] > 130 and mean[1] > 95 and mean[2] > 95 and float(np.mean(sat < 120)) > 0.25) or paper_fraction > 0.12)
+    pinkish = (mean[0] > mean[1] + 6 and mean[0] > mean[2] + 3) or paper_fraction > 0.12
 
     # Code/devtools screenshots have large flat bright UI surfaces and many dark
     # small components spread across the canvas.
@@ -94,10 +103,10 @@ def classify_image(rgb: np.ndarray) -> dict:
     dark_bottom = float(np.mean(bottom_gray < 70)) > 0.25
     bright_text_bottom = float(np.mean((bottom_gray > 150))) > 0.015
 
-    if bright_flat:
-        image_type = "code_ui_screenshot"
-    elif paper_like and pinkish:
+    if paper_like and pinkish and paper_fraction > 0.12:
         image_type = "receipt_document"
+    elif bright_flat:
+        image_type = "code_ui_screenshot"
     elif dark_bottom and bright_text_bottom:
         image_type = "game_ui_screenshot"
     else:
@@ -304,11 +313,26 @@ def detect_bright_text_regions(rgb: np.ndarray, image_type: str) -> list[dict]:
         region_type = "code_line"
         repair = "uniform_fill"
     elif image_type == "receipt_document":
-        # ink on pink/white paper: dark or reddish strokes
-        mask = ((gray < 170) | ((hsv[:, :, 0] < 15) & (hsv[:, :, 1] > 50) & (gray < 220))).astype(np.uint8) * 255
+        # Receipt/document mode must recall printed text, handwriting, serial
+        # numbers, red/orange stamps and low-contrast small text on pink paper.
+        # Use a broader ink mask than UI/game modes; this is later marked
+        # medium-risk so users can deselect noisy document/background boxes.
+        hue = hsv[:, :, 0]
+        sat = hsv[:, :, 1]
+        val = hsv[:, :, 2]
+        # Do not require the ink pixel itself to be pink/paper-colored: actual
+        # printed strokes are dark brown/black and handwriting is blue/black.
+        dark_ink = gray < 198
+        red_or_orange_ink = ((hue < 38) | (hue > 150)) & (sat > 12) & (val < 255)
+        blue_handwriting = (hue > 72) & (hue < 150) & (sat > 10) & (val < 248)
+        # Low-contrast receipt print/stamps can be close to paper color; edge
+        # strokes recover faint serial/date/stamp text without relying on OCR.
+        edges = cv2.Canny(gray, 35, 105)
+        low_contrast_edges = (edges > 0) & (sat > 8) & (val < 245)
+        mask = (dark_ink | red_or_orange_ink | blue_handwriting | low_contrast_edges).astype(np.uint8) * 255
         work = mask
-        kx, ky = max(7, w // 240), max(3, h // 360)
-        x_gap = max(8, w // 180)
+        kx, ky = max(5, w // 300), max(2, h // 520)
+        x_gap = max(10, w // 150)
         region_type = "document_text"
         repair = "paper_fill_or_inpaint"
     else:
@@ -362,6 +386,45 @@ def detect_bright_text_regions(rgb: np.ndarray, image_type: str) -> list[dict]:
     return regions[:120]
 
 
+
+
+def detect_receipt_color_marks(rgb: np.ndarray) -> list[dict]:
+    """Supplement receipt detection with colored serial/stamp/handwriting boxes."""
+    h, w = rgb.shape[:2]
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    hue, sat, val = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+    # Red/orange serial numbers and PAID stamps; blue/black handwriting.
+    red = (((hue < 24) | (hue > 168)) & (sat > 35) & (val < 245)).astype(np.uint8) * 255
+    blue = ((hue > 82) & (hue < 140) & (sat > 28) & (val < 235)).astype(np.uint8) * 255
+    masks = [(red, "receipt_red_mark"), (blue, "receipt_handwriting")]
+    regions: list[dict] = []
+    for mask, typ in masks:
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2)))
+        # Link digits/letters within the same printed number/stamp/handwritten word.
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(9, w // 120), max(3, h // 360)))
+        linked = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+        contours, _ = cv2.findContours(linked, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in contours:
+            x, y, ww, hh = cv2.boundingRect(cnt)
+            area = int(np.count_nonzero(mask[y:y+hh, x:x+ww]))
+            if area < max(10, (w*h)//900000):
+                continue
+            if ww < 8 or hh < 5 or ww > w * 0.45 or hh > h * 0.18:
+                continue
+            aspect = ww / float(hh)
+            if aspect < 0.25 or aspect > 28:
+                continue
+            # Ignore large bottom UI text if a user accidentally screenshots the AI Space page.
+            if y > h * 0.70 and typ == "receipt_red_mark":
+                continue
+            r = make_region([x, y, x + ww, y + hh], "", 0.58, "color-mark", "receipt_document", typ)
+            r["repair_strategy"] = "paper_fill_or_inpaint"
+            r["risk"] = "medium"
+            regions.append(r)
+    return regions
+
+
 def dedupe_regions(regions: list[dict]) -> list[dict]:
     out: list[dict] = []
     for r in sorted(regions, key=lambda x: (bbox_area(x["bbox"]), x["confidence"]), reverse=True):
@@ -404,7 +467,8 @@ def main() -> int:
 
         ocr_regions = run_tesseract(str(input_path), image_type)
         local_regions = detect_bright_text_regions(rgb, image_type)
-        regions = dedupe_regions(ocr_regions + local_regions)
+        color_regions = detect_receipt_color_marks(rgb) if image_type == "receipt_document" else []
+        regions = dedupe_regions(ocr_regions + local_regions + color_regions)
         if image_type == "game_ui_screenshot":
             filtered = []
             for r in regions:
