@@ -133,13 +133,25 @@ def is_meaningful_ocr_text(text: str) -> bool:
     text = (text or "").strip()
     if not text:
         return False
-    cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
-    # For text-removal preview, prefer precision over recall. In game/pixel-art
-    # screenshots, Tesseract often hallucinates short English fragments from
-    # foliage/robes/ground textures. Only expose CJK text boxes by default;
-    # users can use manual brush for anything OCR misses.
-    if cjk >= 1:
+    letters = [ch for ch in text if ch.isalpha()]
+    digits = [ch for ch in text if ch.isdigit()]
+    if not letters and not digits:
+        return False
+
+    # Accept real text scripts: CJK ideographs, Japanese kana, Hangul, Thai,
+    # Cyrillic, Devanagari, etc. Python isalpha() handles most scripts.
+    non_latin_letters = [ch for ch in letters if not ("a" <= ch.lower() <= "z")]
+    if non_latin_letters:
         return True
+
+    # Latin OCR is noisy on pixel-art textures. Keep only substantial words or
+    # likely UI labels/watermarks; reject fragments like "ss", "ie", "kas".
+    latin = "".join(ch.lower() for ch in letters)
+    if len(latin) >= 5:
+        vowels = sum(1 for ch in latin if ch in "aeiou")
+        return vowels >= 2
+    # Numeric labels can be valid, but very short isolated digits are usually UI
+    # bullets/noise in the preview. Let users brush those manually.
     return False
 
 

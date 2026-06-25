@@ -1163,7 +1163,9 @@ function ImageEditContent() {
           maskData = resizedMaskBlob ? await blobToDataUrl(resizedMaskBlob) : "";
           if (!maskData) throw new Error(t("image.edit.error.maskExportFailed"));
         } else {
-          const maskBlob = await maskEditorRef.current?.exportMaskBlob();
+          const maskBlob = isManualTextRemovalMode
+            ? await maskEditorRef.current?.exportVisibleMaskBlob()
+            : await maskEditorRef.current?.exportMaskBlob();
           if (!maskBlob) throw new Error(t("image.edit.error.maskExportFailed"));
           if (isManualTextRemovalMode) {
             const maskImg = await loadHtmlImage(await blobToDataUrl(maskBlob));
