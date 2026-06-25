@@ -352,7 +352,7 @@ def main() -> int:
     parser.add_argument("--input", required=True, help="Input source image path")
     parser.add_argument("--output", required=True, help="Output PNG path")
     parser.add_argument("--prompt", default="", help="User text description; currently used for logging only")
-    parser.add_argument("--sub-mode", default="auto", choices=["auto", "screenshot", "poster", "watermark"], help="Detection strategy: conservative screenshot labels, large poster text, or watermark overlays")
+    parser.add_argument("--sub-mode", default="auto", choices=["auto", "manual", "screenshot", "poster", "watermark"], help="Detection strategy: auto/manual/legacy modes; manual expects --mask-input")
     parser.add_argument("--mask-input", default="", help="External mask image path (white=process, black=preserve). If provided, skips auto text detection.")
     parser.add_argument("--mask-output", default="", help="Optional debug mask output path")
     args = parser.parse_args()

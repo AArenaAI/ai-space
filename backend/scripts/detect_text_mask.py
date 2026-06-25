@@ -93,13 +93,40 @@ def choose_tesseract_lang() -> str:
     # chi_sim may not be installed on every host; include English when available
     # so UI labels / ASCII watermarks are still detected.
     parts = []
+    # Keep OCR fast: simplified Chinese + English is enough for current AI Space UI.
+    # Loading both chi_sim and chi_tra roughly doubles latency on large screenshots.
     if "chi_sim" in langs:
         parts.append("chi_sim")
-    if "chi_tra" in langs:
-        parts.append("chi_tra")
     if "eng" in langs:
         parts.append("eng")
     return "+".join(parts)
+
+
+def prepare_tesseract_input(image_path: str, sub_mode: str = "auto") -> tuple[str, float, int]:
+    """Create a faster OCR input image and return (path, scale, y_offset).
+
+    Full-resolution Chinese OCR is slow. For screenshots/game dialogs, most text
+    is in the bottom UI band, so crop that band. For all modes, downscale large
+    images to a bounded width to keep detection interactive.
+    """
+    with Image.open(image_path) as im:
+        source = ImageOps.exif_transpose(im).convert("RGB")
+    width, height = source.size
+    y_offset = 0
+    crop = source
+    if sub_mode in {"auto", "screenshot"} and height > 480:
+        y_offset = int(height * 0.45)
+        crop = source.crop((0, y_offset, width, height))
+    max_w = 1280
+    scale = 1.0
+    if crop.size[0] > max_w:
+        scale = max_w / float(crop.size[0])
+        crop = crop.resize((max_w, max(1, round(crop.size[1] * scale))), Image.Resampling.LANCZOS)
+    tmp_path = str(Path(image_path).with_suffix(".tesseract-preview.png"))
+    # Light binarization can help UI/game text and reduces OCR work.
+    gray = ImageOps.grayscale(crop)
+    gray.save(tmp_path)
+    return tmp_path, scale, y_offset
 
 
 def detect_with_tesseract(image_path: str, sub_mode: str = "auto") -> list[dict]:
@@ -114,9 +141,10 @@ def detect_with_tesseract(image_path: str, sub_mode: str = "auto") -> list[dict]
     lang = choose_tesseract_lang()
     if not lang:
         return []
-    psm = "6" if sub_mode in {"screenshot", "poster"} else "11"
-    cmd = ["tesseract", image_path, "stdout", "-l", lang, "--psm", psm, "tsv"]
-    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=45)
+    ocr_input, scale, y_offset = prepare_tesseract_input(image_path, sub_mode)
+    psm = "6"
+    cmd = ["tesseract", ocr_input, "stdout", "-l", lang, "--psm", psm, "tsv"]
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
     if proc.returncode != 0:
         print(f"[detect_text_mask] tesseract failed: {proc.stderr.strip()}", file=sys.stderr)
         return []
@@ -145,8 +173,8 @@ def detect_with_tesseract(image_path: str, sub_mode: str = "auto") -> list[dict]
             continue
         try:
             conf = float(parts[col["conf"]])
-            x = int(float(parts[col["left"]])); y = int(float(parts[col["top"]]))
-            w = int(float(parts[col["width"]])); h = int(float(parts[col["height"]]))
+            x = int(float(parts[col["left"]]) / scale); y = int(float(parts[col["top"]]) / scale) + y_offset
+            w = int(float(parts[col["width"]]) / scale); h = int(float(parts[col["height"]]) / scale)
         except Exception:
             continue
         if conf < min_conf or w < 5 or h < 5:

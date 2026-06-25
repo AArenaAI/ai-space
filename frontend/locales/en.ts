@@ -884,6 +884,8 @@ const translations: Record<string, string> = {
   "image.edit.precision.replaceBg.stylizedDesc": "For posters, illustrations, and creative visual backdrops.",
   "image.edit.precision.textRemoval.auto": "Standard detection",
   "image.edit.precision.textRemoval.autoDesc": "Default removal for obvious text, watermarks, and signatures.",
+  "image.edit.precision.textRemoval.manual": "Manual brush",
+  "image.edit.precision.textRemoval.manualDesc": "Skip automatic detection and brush the text area directly. Fastest and most reliable.",
   "image.edit.precision.textRemoval.screenshot": "Screenshot-safe",
   "image.edit.precision.textRemoval.screenshotDesc": "More conservative to avoid deleting icons, buttons, and UI elements.",
   "image.edit.precision.textRemoval.poster": "Poster strong scan",

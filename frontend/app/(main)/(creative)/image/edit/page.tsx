@@ -59,9 +59,7 @@ const PRECISION_MODE_OPTIONS: Record<EditMode, PrecisionModeOption[]> = {
   ],
   "text-removal": [
     { subMode: "auto", intent: "remove_text", labelKey: "image.edit.precision.textRemoval.auto", descriptionKey: "image.edit.precision.textRemoval.autoDesc" },
-    { subMode: "screenshot", intent: "remove_text", labelKey: "image.edit.precision.textRemoval.screenshot", descriptionKey: "image.edit.precision.textRemoval.screenshotDesc" },
-    { subMode: "poster", intent: "remove_text", labelKey: "image.edit.precision.textRemoval.poster", descriptionKey: "image.edit.precision.textRemoval.posterDesc" },
-    { subMode: "watermark", intent: "remove_text", labelKey: "image.edit.precision.textRemoval.watermark", descriptionKey: "image.edit.precision.textRemoval.watermarkDesc" },
+    { subMode: "manual", intent: "remove_text", labelKey: "image.edit.precision.textRemoval.manual", descriptionKey: "image.edit.precision.textRemoval.manualDesc" },
   ],
   upscale: [
     { subMode: "faithful", intent: "faithful_enhance", labelKey: "image.edit.precision.upscale.faithful", descriptionKey: "image.edit.precision.upscale.faithfulDesc" },
@@ -806,7 +804,8 @@ function ImageEditContent() {
   const maskEditorRef = useRef<MaskEditorHandle>(null);
   const config = MODE_CONFIG[editMode];
   const isRemoveBgMode = editMode === "remove-bg";
-  const isMaskMode = editMode === "inpaint" || editMode === "region-brush";
+  const isManualTextRemovalMode = editMode === "text-removal" && selectedPrecisionRoute.subMode === "manual";
+  const isMaskMode = editMode === "inpaint" || editMode === "region-brush" || isManualTextRemovalMode;
   const [regionStep, setRegionStep] = useState<"paint" | "recognized">("paint");
   const [recognizedObject, setRecognizedObject] = useState<{ label: string; description?: string; confidence?: number } | null>(null);
   const [recognizedEditMaskData, setRecognizedEditMaskData] = useState("");
@@ -1103,7 +1102,7 @@ function ImageEditContent() {
       return;
     }
     if (isMaskMode && !maskEditorRef.current?.hasMask()) {
-      toast.error(t("image.edit.error.maskRequired"));
+      toast.error(isManualTextRemovalMode ? "请先涂抹要删除的文字区域" : t("image.edit.error.maskRequired"));
       return;
     }
     if (requiresRegionRecognition && regionStep !== "recognized") {
@@ -1742,7 +1741,7 @@ function ImageEditContent() {
                           </div>
                         ) : (
                           isMaskMode ? (
-                            <MaskBrushEditor ref={maskEditorRef} embedded imageUrl={sourceUrl} disabled={isEditing || isRecognizingRegion} t={t} onMaskChange={resetRegionRecognition} recognized={requiresRegionRecognition && regionStep === "recognized"} recognizedLabel={recognizedObject?.label ? `${t("image.edit.selectedObject")}: ${recognizedObject.label}` : undefined} />
+                            <MaskBrushEditor ref={maskEditorRef} embedded imageUrl={sourceUrl} disabled={isEditing || isRecognizingRegion} t={t} onMaskChange={isManualTextRemovalMode ? undefined : resetRegionRecognition} recognized={requiresRegionRecognition && regionStep === "recognized"} recognizedLabel={isManualTextRemovalMode ? "涂抹要删除的文字区域" : (recognizedObject?.label ? `${t("image.edit.selectedObject")}: ${recognizedObject.label}` : undefined)} />
                           ) : isTextRemovalMode && textDetectionDone && textRegions.length > 0 ? (
                             <div className={cn(imageSlotClass, "p-3 bg-surface-card")}>
                               <div className="relative inline-flex max-w-full max-h-full">
@@ -1800,7 +1799,7 @@ function ImageEditContent() {
 
                       {!isEditing && renderPrecisionModeSelector()}
 
-                      {isTextRemovalMode && !isEditing && (
+                      {isTextRemovalMode && !isManualTextRemovalMode && !isEditing && (
                         <div className="w-full max-w-2xl rounded-xl border border-surface-border bg-surface-card p-4 shadow-sm">
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div>

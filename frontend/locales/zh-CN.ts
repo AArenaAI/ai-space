@@ -883,6 +883,8 @@ const translations: Record<string, string> = {
   "image.edit.precision.replaceBg.stylizedDesc": "适合海报、插画、创意视觉背景。",
   "image.edit.precision.textRemoval.auto": "标准检测",
   "image.edit.precision.textRemoval.autoDesc": "默认移除明显文字、水印、签名。",
+  "image.edit.precision.textRemoval.manual": "手动涂抹",
+  "image.edit.precision.textRemoval.manualDesc": "不跑自动检测，直接涂抹要删除的文字区域，最快最稳。",
   "image.edit.precision.textRemoval.screenshot": "截图保护",
   "image.edit.precision.textRemoval.screenshotDesc": "更保守，降低误删图标、按钮和 UI 元素。",
   "image.edit.precision.textRemoval.poster": "海报强检",
