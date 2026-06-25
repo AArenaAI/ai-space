@@ -427,7 +427,13 @@ export function useChatConversationRestoreRuntime({
           conversationId: loadConversationId,
           token: authToken,
           signal: loadController.signal,
-          snapshotVersion: displayedSnapshotVersion,
+          // Client-side memory/IndexedDB snapshots are optimistic UI caches.
+          // They can contain an in-flight reasoning-only message while sharing
+          // the latest backend snapshot_version, so allowing a 304 here can keep
+          // stale reasoning UI and hide the persisted answer until hard refresh.
+          // Only a backend/dynamic-shell snapshot is authoritative enough for
+          // conditional revalidation.
+          snapshotVersion: displayedSnapshotSource === "backend" ? displayedSnapshotVersion : undefined,
         });
       })
       .then((data) => {

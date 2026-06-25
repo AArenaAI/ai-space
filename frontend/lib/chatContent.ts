@@ -83,7 +83,7 @@ export function isMessageGenerating(msg: MessageGenerationLike, isStreaming: boo
   if (msg.completedAt || msg.stopped) return false;
   if (msg.activityStatus?.status === "running" || msg.activityStatus?.status === "searching") return true;
   if (msg.searchStatus === "searching") return true;
-  if (msg.serverMessageId || msg.generationTaskId || msg.backgroundTaskId || msg.useBackground || msg.isComplexTask) return true;
+  if (msg.generationTaskId || msg.backgroundTaskId || msg.useBackground || msg.isComplexTask) return true;
   if (!msg.content?.trim() && typeof msg.createdAt === "number" && Date.now() - msg.createdAt < EMPTY_ASSISTANT_RECOVERY_GRACE_MS) {
     return true;
   }
