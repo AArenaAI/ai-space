@@ -152,6 +152,14 @@ export function createStartTaskEventStreamAction({
 
     const controller = createAbortController();
     taskStreamsRef.current[localMessageId] = controller;
+    if (initialContent && !realtimeGet(localMessageId)?.content) {
+      realtimeUpdate(localMessageId, {
+        content: initialContent,
+        serverMessageId,
+        generationTaskId,
+        lastSequence: after || 0,
+      });
+    }
 
     const taskEventHandler: TaskStreamEventHandler = createTaskStreamEventHandler({
       convId,

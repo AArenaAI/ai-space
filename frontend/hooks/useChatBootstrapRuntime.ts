@@ -6,6 +6,7 @@ import { fetchChatBootstrap } from "@/lib/chatBootstrapCoordinator";
 import { registerBackgroundTask } from "@/lib/taskNotifications";
 import type { ChatModel } from "@/lib/chatTypes";
 import { useAppBootstrap } from "@/lib/appBootstrapContext";
+import { getConversationSnapshot } from "@/lib/chatConversationCache";
 
 type ChatBootstrapStatus = "idle" | "loading" | "ready" | "anonymous" | "failed";
 
@@ -105,7 +106,21 @@ export function useChatBootstrapRuntime({
       })
       .catch((error) => {
         if (controller.signal.aborted || error?.name === "AbortError") return;
-        setState({ status: "failed", models: [], error: error instanceof Error ? error : new Error(String(error)) });
+        const err = error instanceof Error ? error : new Error(String(error));
+        // If we have a local conversation snapshot, keep ChatInterface mounted so
+        // the restore runtime can display cached/streaming content while backend
+        // bootstrap recovers from transient failures such as 429.
+        if (conversationId && getConversationSnapshot(conversationId)) {
+          setState((current) => ({
+            ...current,
+            status: "ready",
+            payload: current.payload,
+            models: current.models,
+            error: err,
+          }));
+          return;
+        }
+        setState({ status: "failed", models: [], error: err });
       });
 
     return () => controller.abort();

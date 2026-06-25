@@ -29,6 +29,8 @@ import {
 import { fetchChatBootstrap, type ChatBootstrapPayload } from "@/lib/chatBootstrapCoordinator";
 import { mapPersistedChatMessages, buildGroupViewsFromMessages } from "@/lib/chatForkCoordinator";
 import type { CachedConversationSnapshot } from "@/lib/chatConversationCache";
+import { setConversationSnapshot } from "@/lib/chatConversationCache";
+import { setPersistentConversationSnapshot } from "@/lib/chatConversationPersistentCache";
 import { fetchConversationRestore, type ConversationRestoreResponse } from "@/lib/chatConversationRestoreCoordinator";
 import { buildBootstrapTaskResumePlan } from "@/lib/chatBootstrapTaskResume";
 
@@ -196,6 +198,33 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   }, [bootstrap]);
   const stopTaskStream = useStopTaskStreamAction(taskStreamsRef);
 
+  const persistCurrentConversationSnapshot = useCallback(() => {
+    if (!currentConversation || messages.length === 0) return;
+    const snapshot: CachedConversationSnapshot = {
+      conversationId: currentConversation,
+      title: conversationTitle || "",
+      messages,
+      loadedPersistedMessages: Math.max(loadedPersistedMessages, messages.length),
+      totalMessages: Math.max(totalMessages || 0, messages.length),
+      groupViews,
+      isLoading,
+      isCompare,
+      compareModels,
+      model: selectedModel?.id,
+      skillKey: effectiveSkillKey,
+      fetchedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    setConversationSnapshot(snapshot);
+    void setPersistentConversationSnapshot(snapshot);
+  }, [compareModels, conversationTitle, currentConversation, effectiveSkillKey, groupViews, isCompare, isLoading, loadedPersistedMessages, messages, selectedModel?.id, totalMessages]);
+
+  useEffect(() => {
+    const handleBeforeRouteChange = () => persistCurrentConversationSnapshot();
+    window.addEventListener("chat-conversation-before-route-change", handleBeforeRouteChange);
+    return () => window.removeEventListener("chat-conversation-before-route-change", handleBeforeRouteChange);
+  }, [persistCurrentConversationSnapshot]);
+
   const {
     backgroundPollersRef,
     stopBackgroundPoller,
@@ -300,6 +329,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     applyJustCreatedNavigationLifecycle,
     applyLoadExistingNavigationLifecycle,
     startTaskEventStream,
+    startBackgroundPolling,
     translate: t,
     bootstrapSnapshot,
     fetchRestore: fetchBootstrapRestore,

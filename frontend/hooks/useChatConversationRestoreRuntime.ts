@@ -77,6 +77,12 @@ type StartTaskEventStream = (
   generationTaskId?: number
 ) => void;
 
+type StartBackgroundPolling = (
+  convId: number | undefined,
+  localMessageId: string,
+  serverMessageId?: number
+) => void;
+
 type ApplyCachedSnapshotOptions = {
   snapshot: CachedConversationSnapshot;
   fallbackSkillKey?: string;
@@ -156,6 +162,7 @@ export type UseChatConversationRestoreRuntimeOptions = {
   applyJustCreatedNavigationLifecycle: (plan: JustCreatedConversationPlan) => void;
   applyLoadExistingNavigationLifecycle: (plan: ExistingConversationPlan) => void;
   startTaskEventStream: StartTaskEventStream;
+  startBackgroundPolling: StartBackgroundPolling;
   translate: (key: string) => string;
   getToken?: () => string | null;
   createId?: () => string;
@@ -193,6 +200,7 @@ export function useChatConversationRestoreRuntime({
   applyJustCreatedNavigationLifecycle,
   applyLoadExistingNavigationLifecycle,
   startTaskEventStream,
+  startBackgroundPolling,
   translate,
   getToken = () => localStorage.getItem("token"),
   createId = uuidv4,
@@ -541,17 +549,15 @@ export function useChatConversationRestoreRuntime({
 
             if (decision.shouldResumePolling && decision.resume) {
               setIsLoading(true);
-              startTaskEventStream(
-                loadConversationId,
-                lastAssistant.id,
-                lastAssistant.serverMessageId,
-                decision.resume.lastSequence,
-                decision.resume.initialContent,
-                decision.resume.generationTaskId
-              );
+              startBackgroundPolling(loadConversationId, lastAssistant.id, lastAssistant.serverMessageId);
             }
           };
           if (lastAssistant?.serverMessageId) {
+            // Always start lightweight server-message polling after restoring a
+            // conversation. Polling reconciles against the full persisted
+            // message content, so it cannot duplicate cached prefixes the way a
+            // resumed delta stream can when bootstrap/task state is stale.
+            startBackgroundPolling(loadConversationId, lastAssistant.id, lastAssistant.serverMessageId);
             if (data.last_assistant_status) {
               applyStatusData(data.last_assistant_status);
             } else {
@@ -589,8 +595,21 @@ export function useChatConversationRestoreRuntime({
       })
       .catch((err) => {
         if (!isLatestLoad() || loadController.signal.aborted || err?.name === "AbortError") return;
-        setMessages([]);
+        // Revalidation is a background freshness pass. A transient bootstrap/restore
+        // failure (notably 429 during rapid mid-generation switching) must never
+        // blank an already displayed conversation or discard an in-memory snapshot.
         setIsLoadingHistory(false);
+        if (hasDisplayedSnapshot) {
+          emitConversationSwitchPerformanceEvent("restore-failed-preserved-snapshot", {
+            conversationId: loadConversationId,
+            loadSeq,
+            source: "backend",
+            stage: "revalidate",
+            displayMode: "background",
+            snapshotSource: displayedSnapshotSource ?? "miss",
+            durationMs: elapsedSinceSwitchStart(),
+          });
+        }
       });
 
     return () => loadController.abort();
