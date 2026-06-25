@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -29,7 +30,7 @@ def detect_with_paddle(image_path: str) -> list[dict]:
 
     # use angle classification + detection, no recognition needed for removal
     # but recognition helps user identify which text block is which
-    ocr = PaddleOCR(use_angle_cls=True, lang="ch", show_log=False)
+    ocr = PaddleOCR(use_textline_orientation=True, lang="ch")
 
     with Image.open(image_path) as im:
         source = ImageOps.exif_transpose(im)
@@ -180,12 +181,18 @@ def main() -> int:
             source = ImageOps.exif_transpose(im)
             width, height = source.size
 
-        # Try PaddleOCR first, fall back to OpenCV
-        try:
-            import paddleocr  # noqa: F401
-            regions = detect_with_paddle(str(input_path))
-            detector = "paddleocr"
-        except ImportError:
+        # PaddleOCR can segfault on some ARM/Linux runtime builds. Keep it behind
+        # an explicit opt-in and use the stable OpenCV detector by default.
+        use_paddle = os.getenv("AI_SPACE_ENABLE_PADDLE_OCR", "").strip().lower() in {"1", "true", "yes"}
+        if use_paddle:
+            try:
+                regions = detect_with_paddle(str(input_path))
+                detector = "paddleocr"
+            except Exception as exc:
+                print(f"[detect_text_mask] PaddleOCR failed, falling back to OpenCV: {exc}", file=sys.stderr)
+                regions = detect_with_opencv(str(input_path), args.sub_mode)
+                detector = "opencv"
+        else:
             regions = detect_with_opencv(str(input_path), args.sub_mode)
             detector = "opencv"
 
