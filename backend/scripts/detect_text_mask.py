@@ -341,8 +341,14 @@ def detect_bright_text_regions(rgb: np.ndarray, image_type: str) -> list[dict]:
         bw, bh = b[2] - b[0], b[3] - b[1]
         if bw < 8 or bh < 6:
             continue
-        if image_type == "game_ui_screenshot" and b[1] < h * 0.52:
-            continue
+        if image_type == "game_ui_screenshot":
+            cx = (b[0] + b[2]) / 2.0 / max(1, w)
+            cy = (b[1] + b[3]) / 2.0 / max(1, h)
+            # Keep only main dialogue text band and right-bottom UI buttons.
+            in_dialogue = 0.24 <= cx <= 0.86 and 0.80 <= cy <= 0.91
+            in_right_buttons = 0.84 <= cx <= 0.99 and 0.86 <= cy <= 0.98
+            if not (in_dialogue or in_right_buttons):
+                continue
         if image_type == "code_ui_screenshot" and bw < 14:
             continue
         risk = "medium" if image_type == "receipt_document" else "low"
@@ -397,6 +403,17 @@ def main() -> int:
         ocr_regions = run_tesseract(str(input_path), image_type)
         local_regions = detect_bright_text_regions(rgb, image_type)
         regions = dedupe_regions(ocr_regions + local_regions)
+        if image_type == "game_ui_screenshot":
+            filtered = []
+            for r in regions:
+                b = r["bbox"]
+                cx = (b[0] + b[2]) / 2.0 / max(1, width)
+                cy = (b[1] + b[3]) / 2.0 / max(1, height)
+                in_dialogue = 0.24 <= cx <= 0.86 and 0.80 <= cy <= 0.91
+                in_right_buttons = 0.84 <= cx <= 0.99 and 0.86 <= cy <= 0.98
+                if in_dialogue or in_right_buttons:
+                    filtered.append(r)
+            regions = filtered
         detector = "hybrid" if ocr_regions and local_regions else ("tesseract" if ocr_regions else ("local-vision" if local_regions else "none"))
         if not regions:
             fallback_reason = "no_stable_text_regions"

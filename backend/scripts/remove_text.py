@@ -431,12 +431,27 @@ def main() -> int:
                     mask_im = mask_im.resize(original_size, Image.Resampling.NEAREST)
                 mask = np.array(mask_im.convert("L"))
             mask = (mask > 127).astype(np.uint8) * 255
-            # External masks come from user selection/brush. Expand only modestly
-            # to catch antialiasing/glow; excessive expansion destroys UI panels.
-            expand_px = max(3, round(min(original_size) / 360))
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * expand_px + 1, 2 * expand_px + 1))
-            mask = cv2.dilate(mask, kernel, iterations=1)
-            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+            if args.sub_mode != "manual":
+                # Automatic preview boxes are rectangular. Do not repair the
+                # whole rectangle; shrink to visible text-like strokes inside it.
+                # This prevents obvious rectangular patches on semi-transparent
+                # dialogue panels.
+                hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+                gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+                bright_text = ((gray > 135) & (hsv[:, :, 1] < 145)).astype(np.uint8) * 255
+                mask = cv2.bitwise_and(mask, bright_text)
+                refine_px = max(2, round(min(original_size) / 520))
+                refine_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * refine_px + 1, 2 * refine_px + 1))
+                mask = cv2.dilate(mask, refine_kernel, iterations=1)
+                mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, refine_kernel, iterations=1)
+            else:
+                # Manual masks come from direct user painting. Expand only
+                # modestly to catch antialiasing/glow; excessive expansion
+                # destroys UI panels.
+                expand_px = max(3, round(min(original_size) / 360))
+                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * expand_px + 1, 2 * expand_px + 1))
+                mask = cv2.dilate(mask, kernel, iterations=1)
+                mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
         else:
             mask = build_text_mask(rgb, args.sub_mode)
 
