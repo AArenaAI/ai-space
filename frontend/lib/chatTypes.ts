@@ -47,6 +47,7 @@ export interface Message {
   serverMessageId?: number;
   backgroundTaskId?: string;
   generationTaskId?: number;
+  serverGenerationStatus?: "pending" | "running" | "streaming" | "polling" | "completed" | "failed" | "cancelled" | "incomplete" | string;
   useBackground?: boolean;
   isComplexTask?: boolean;
   lastSequence?: number;

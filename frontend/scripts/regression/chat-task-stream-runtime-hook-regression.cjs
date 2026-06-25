@@ -17,6 +17,7 @@ finalizerSource = finalizerSource.replace(/import \{ buildFinalizingPatch, type 
 source = source.replace(/import type[^;]+react[^;]+;\n/g, "");
 source = source.replace(/import type[^;]+streaming[^;]+;\n/g, "");
 source = source.replace(/import type[^;]+chatTypes[^;]+;\n/g, "");
+source = source.replace(/import \{ getConversationSnapshot, patchConversationSnapshot \} from "@\/lib\/chatConversationCache";\n/g, "const getConversationSnapshot = () => undefined; const patchConversationSnapshot = () => {};\n");
 source = source.replace(/import \{ useCallback, useRef \} from "react";\n/g, "const useCallback = (fn) => fn; const useRef = (current) => ({ current });\n");
 source = source.replace(/import \{ getGuestId as defaultGetGuestId \} from "@\/lib\/guestId";\n/g, "const defaultGetGuestId = () => 'guest';\n");
 source = source.replace(/import \{ realtimeAppend as defaultRealtimeAppend, realtimeGet as defaultRealtimeGet, realtimeUpdate as defaultRealtimeUpdate, realtimeMarkCompleted as defaultRealtimeMarkCompleted \} from "@\/lib\/streaming";\n/g, "const defaultRealtimeAppend = () => {}; const defaultRealtimeGet = () => undefined; const defaultRealtimeUpdate = () => {}; const defaultRealtimeMarkCompleted = () => {};\n");

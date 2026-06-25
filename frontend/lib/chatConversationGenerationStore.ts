@@ -1,6 +1,10 @@
 import type { Message } from "@/lib/chatTypes";
 import { isMessageGenerating } from "@/lib/chatContent";
 
+function isTerminalGenerationStatus(status?: string) {
+  return status === "completed" || status === "failed" || status === "cancelled" || status === "incomplete";
+}
+
 export type ConversationGenerationStatus = "idle" | "pending" | "streaming" | "polling" | "stopped" | "completed" | "failed";
 
 export type ConversationGenerationState = {
@@ -58,9 +62,11 @@ export function inferConversationGenerationState(input: {
   const { conversationId } = input;
   if (!conversationId) return undefined;
   const now = input.now ?? Date.now();
-  const hasGeneratingMessage = input.messages.some((message) => isMessageGenerating(message, false));
-  if (input.hasActiveTaskStream) return { ...(input.previous || { conversationId }), conversationId, status: "streaming", updatedAt: now };
-  if (input.hasCurrentPoller) return { ...(input.previous || { conversationId }), conversationId, status: "polling", updatedAt: now };
+  const hasTerminalGenerationMessage = input.messages.some((message) => isTerminalGenerationStatus(message.serverGenerationStatus));
+  const hasGeneratingMessage = input.messages.some((message) => !isTerminalGenerationStatus(message.serverGenerationStatus) && isMessageGenerating(message, false));
+  const allowExternalActiveState = hasGeneratingMessage || !hasTerminalGenerationMessage;
+  if (input.hasActiveTaskStream && allowExternalActiveState) return { ...(input.previous || { conversationId }), conversationId, status: "streaming", updatedAt: now };
+  if (input.hasCurrentPoller && allowExternalActiveState) return { ...(input.previous || { conversationId }), conversationId, status: "polling", updatedAt: now };
   if (input.hasPendingLocalAssistant || hasGeneratingMessage || (input.hasMainStream && hasGeneratingMessage)) {
     return { ...(input.previous || { conversationId }), conversationId, status: "pending", updatedAt: now };
   }

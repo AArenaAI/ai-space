@@ -59,11 +59,20 @@ function loadModule(file) {
           return { loadedMessages, mergedMessages, groupViews: new Map([[1, 0]]), activeByServerMessageId, isLoading: Boolean(data.isLoading) };
         },
         findLastAssistantStatusTarget: (messages) => [...messages].reverse().find((m) => m.role === "assistant" && m.serverMessageId),
-        buildConversationStatusDecision: ({ statusData, currentMessage, busyActivityStatus }) => ({
-          patch: { content: statusData.content || currentMessage.content, activityStatus: busyActivityStatus },
-          shouldResumePolling: Boolean(statusData.resume),
-          resume: statusData.resume,
-        }),
+        buildConversationStatusDecision: ({ statusData, currentMessage, busyActivityStatus }) => {
+          const bgTask = statusData?.background_task || {};
+          const status = bgTask.status || '';
+          const terminalStatus = status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'incomplete';
+          const content = statusData.content || statusData.message?.content || currentMessage.content;
+          const hasTask = Boolean(bgTask.id || bgTask.task_id || bgTask.status);
+          const shouldResumePolling = Boolean(statusData.resume) || (hasTask && (!terminalStatus || !String(content || '').trim()));
+          return {
+            hasTask,
+            patch: { content, activityStatus: shouldResumePolling ? busyActivityStatus : undefined, serverGenerationStatus: status || currentMessage.serverGenerationStatus },
+            shouldResumePolling,
+            resume: statusData.resume,
+          };
+        },
         parseConversationCompareModels: (value) => Array.isArray(value) ? value : (typeof value === "string" ? JSON.parse(value || "[]") : []),
         resolveConversationSkillKey: (historical, fallback) => historical || fallback,
       };
@@ -295,6 +304,27 @@ async function testSnapshotVersionSkipsUnchangedRestoreReconcile() {
   assert.equal(persistentSnapshotCache.has(9), false);
 }
 
+async function testTerminalStatusDoesNotStartPolling() {
+  snapshotCache.clear();
+  persistentSnapshotCache.clear();
+  restoreImpl = async () => ({
+    title: "Done",
+    model: "m1",
+    messages: [{ id: "a", role: "assistant", content: "done", serverMessageId: 12, generationTaskId: 99, activityStatus: { status: "running" } }],
+    last_assistant_status: {
+      message: { content: "done" },
+      background_task: { id: 99, status: "completed", completed_at: "2026-01-01T00:00:00Z" },
+    },
+  });
+  statusImpl = async () => { throw new Error("status should not fetch when terminal status is present"); };
+  countImpl = async () => undefined;
+  const { starts, state } = runRuntime({ conversationId: 9, token: "tok" });
+  await flush(); await flush();
+  assert.equal(starts.some((entry) => entry[0] === "poll"), false);
+  assert.equal(state.messages[0].serverGenerationStatus, "completed");
+  assert.equal(state.messages[0].activityStatus, undefined);
+}
+
 async function testRestoreMetaSkipsCountAndStatusFetches() {
   snapshotCache.clear();
   persistentSnapshotCache.clear();
@@ -410,6 +440,7 @@ async function testNavigationAbortsControllers() {
   await testCacheHitShowsSnapshotImmediatelyAndRefreshes();
   await testPersistentCacheHitShowsSnapshotBeforeRefresh();
   await testSnapshotVersionSkipsUnchangedRestoreReconcile();
+  await testTerminalStatusDoesNotStartPolling();
   await testRestoreMetaSkipsCountAndStatusFetches();
   await testStatusResumeStartsTaskStream();
   await testLateRestoreResponseCannotOverwriteLatestConversation();

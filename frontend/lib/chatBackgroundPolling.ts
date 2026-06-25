@@ -120,6 +120,7 @@ export function buildBackgroundPollingMessagePatch({
     serverMessageId,
     generationStartedAt,
     statusTimeline,
+    serverGenerationStatus: status || (isFinished ? "completed" : undefined),
     activityStatus: isFinished ? undefined : createBusyStatus(),
     completedAt: isFinished ? now : undefined,
   };

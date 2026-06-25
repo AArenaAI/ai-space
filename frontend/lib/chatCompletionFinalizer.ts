@@ -18,6 +18,7 @@ export type ChatCompletionPatch = {
   retryable?: boolean;
   requestId?: string;
   stopped?: boolean;
+  serverGenerationStatus?: "pending" | "running" | "streaming" | "polling" | "completed" | "failed" | "cancelled" | "incomplete" | string;
   phase?: "waiting_provider" | "searching" | "reasoning" | "streaming_answer" | "finalizing" | "completed" | "failed" | "stopped";
   generationStartedAt?: number;
   statusTimeline?: ChatStatusTimelineStep[];
@@ -50,6 +51,7 @@ export function buildStreamErrorPatch({ errorCode, retryable, requestId }: Build
     requestId,
     activityStatus: undefined,
     searchStatus: undefined,
+    serverGenerationStatus: "failed",
     searchSources: undefined,
     phase: "failed",
   };
@@ -61,6 +63,7 @@ export function buildStoppedPatch(now?: number): ChatCompletionPatch {
     completedAt: now,
     activityStatus: undefined,
     searchStatus: undefined,
+    serverGenerationStatus: "cancelled",
     phase: "stopped",
   };
 }
@@ -90,6 +93,7 @@ export function buildCompletedPatch(now: number): ChatCompletionPatch {
     completedAt: now,
     activityStatus: undefined,
     searchStatus: undefined,
+    serverGenerationStatus: "completed",
     phase: "completed",
   };
 }
@@ -122,6 +126,7 @@ export function buildDisplayErrorPatch(options: BuildDisplayErrorPatchOptions): 
     completedAt: options.now,
     activityStatus: undefined,
     searchStatus: undefined,
+    serverGenerationStatus: "failed",
     phase: "failed",
   };
 }

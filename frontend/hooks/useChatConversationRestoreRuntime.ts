@@ -556,7 +556,7 @@ export function useChatConversationRestoreRuntime({
 
           const lastAssistant = findLastAssistantStatusTarget(restoreState.mergedMessages as any, activeByServerMessageId);
           const applyStatusData = (statusData: NonNullable<typeof data.last_assistant_status>) => {
-            if (!lastAssistant || !isLatestLoad() || loadController.signal.aborted) return;
+            if (!lastAssistant || !isLatestLoad() || loadController.signal.aborted) return undefined;
             emitConversationSwitchPerformanceEvent("message-status", {
               conversationId: loadConversationId,
               loadSeq,
@@ -575,15 +575,14 @@ export function useChatConversationRestoreRuntime({
               setIsLoading(true);
               startBackgroundPolling(loadConversationId, lastAssistant.id, lastAssistant.serverMessageId);
             }
+            return decision;
           };
           if (lastAssistant?.serverMessageId) {
-            // Always start lightweight server-message polling after restoring a
-            // conversation. Polling reconciles against the full persisted
-            // message content, so it cannot duplicate cached prefixes the way a
-            // resumed delta stream can when bootstrap/task state is stale.
-            startBackgroundPolling(loadConversationId, lastAssistant.id, lastAssistant.serverMessageId);
             if (data.last_assistant_status) {
-              applyStatusData(data.last_assistant_status);
+              const decision = applyStatusData(data.last_assistant_status);
+              if (!decision?.hasTask) {
+                startBackgroundPolling(loadConversationId, lastAssistant.id, lastAssistant.serverMessageId);
+              }
             } else {
               fetchMessageStatus({
                 apiBaseUrl,
@@ -593,7 +592,14 @@ export function useChatConversationRestoreRuntime({
                 signal: loadController.signal,
               })
                 .then((statusData) => {
-                  if (statusData) applyStatusData(statusData);
+                  if (statusData) {
+                    const decision = applyStatusData(statusData);
+                    if (!decision?.hasTask && isLatestLoad() && !loadController.signal.aborted) {
+                      startBackgroundPolling(loadConversationId, lastAssistant.id, lastAssistant.serverMessageId);
+                    }
+                  } else if (isLatestLoad() && !loadController.signal.aborted) {
+                    startBackgroundPolling(loadConversationId, lastAssistant.id, lastAssistant.serverMessageId);
+                  }
                 })
                 .catch((err: any) => {
                   if (loadController.signal.aborted || err?.name === "AbortError") return;

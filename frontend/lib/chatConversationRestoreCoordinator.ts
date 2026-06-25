@@ -32,6 +32,7 @@ export type ConversationRestoreMessage = ForkChatMessage & {
   generationTaskId?: number;
   lastSequence?: number;
   activityStatus?: unknown;
+  serverGenerationStatus?: string;
 };
 
 export type ConversationRestoreStatusResponse = {
@@ -305,7 +306,8 @@ export function buildConversationStatusDecision({
     generationTaskId: generationTaskId || currentMessage.generationTaskId,
     lastSequence: lastSequence || currentMessage.lastSequence,
     completedAt,
-    activityStatus: shouldResumePolling ? busyActivityStatus : currentMessage.activityStatus,
+    activityStatus: shouldResumePolling ? busyActivityStatus : (terminalStatus ? undefined : currentMessage.activityStatus),
+    serverGenerationStatus: status || currentMessage.serverGenerationStatus,
   };
   return {
     hasTask,
