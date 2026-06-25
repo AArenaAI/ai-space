@@ -119,6 +119,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     setSelectedModel,
     sendMessage,
     stopGeneration,
+    clearMessages,
     deleteMessage,
     regenerateMessage,
     currentConversation,
@@ -416,6 +417,8 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   };
 
   const handleNewChat = () => {
+    window.dispatchEvent(new Event("chat-conversation-before-route-change"));
+    clearMessages();
     router.push(`/chat?t=${Date.now()}`);
   };
 

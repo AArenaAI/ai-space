@@ -228,6 +228,11 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     return () => window.removeEventListener("chat-conversation-before-route-change", handleBeforeRouteChange);
   }, [persistCurrentConversationSnapshot]);
 
+  useEffect(() => {
+    if (!currentConversation || messages.length === 0 || !isLoading) return;
+    persistCurrentConversationSnapshot();
+  }, [currentConversation, isLoading, messages, persistCurrentConversationSnapshot]);
+
   const {
     backgroundPollersRef,
     stopBackgroundPoller,

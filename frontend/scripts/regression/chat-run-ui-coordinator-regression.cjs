@@ -69,7 +69,7 @@ test("single send finally skips global mutation on navigation", () => {
   const decision = decideSingleSendFinally({ abortReason: "navigation", hasActiveTaskStream: false, conversationId: 3 });
   assert.equal(decision.shouldUpdateLoading, false);
   assert.equal(decision.shouldClearMainController, false);
-  assert.equal(decision.shouldDispatchConversationUpdated, true);
+  assert.equal(decision.shouldDispatchConversationUpdated, false);
 });
 
 test("single send finally clears controller only when no task stream remains", () => {

@@ -129,6 +129,7 @@ function loadModule(file) {
     if (specifier === "@/lib/chatRequestBuilder") return { buildChatRequestHeaders: ({ token, guestId }) => token ? { Authorization: `Bearer ${token}` } : { "X-Guest-ID": guestId } };
     if (specifier === "@/lib/chatHistoryTransform") return { toModelMessages: (messages) => messages.map((m) => ({ role: m.role, content: m.content })) };
     if (specifier === "@/lib/chatInitialRealtime") return { initializeAssistantRealtime: () => {}, initializeAssistantRealtimeBatch: () => {} };
+    if (specifier === "@/lib/chatConversationCache") return { setConversationSnapshot: () => {} };
     if (specifier === "@/lib/chatMessageFactory") {
       return {
         buildMessageFiles: (attachments) => (attachments || []).filter((a) => a.public_id).map((a) => ({ public_id: a.public_id, filename: a.filename, type: a.type || "file" })),
