@@ -105,7 +105,6 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     } catch {}
   }, []);
   const router = useRouter();
-  const [forceInputIdle, setForceInputIdle] = useState(false);
 
   useEffect(() => {
     selectedModelsRef.current = selectedModels;
@@ -418,7 +417,6 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   };
 
   const handleNewChat = () => {
-    setForceInputIdle(true);
     window.dispatchEvent(new Event("chat-conversation-before-route-change"));
     clearMessages();
     router.push(`/chat?t=${Date.now()}`);
@@ -508,7 +506,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   );
 
   const activeCompareMode = compareMode || isCompare;
-  const inputIsLoading = forceInputIdle ? false : isCurrentConversationGenerating;
+  const inputIsLoading = isCurrentConversationGenerating;
   const activeCompareModelIds = compareMode ? selectedModels : (compareModels.length > 0 ? compareModels : selectedModels);
   const activeTargetMessageId = compareTargetMessageId ?? (currentConversation === conversationId ? targetMessageId : undefined);
   const isEmptyNewCompareMode = messages.length === 0 && !conversationId && activeCompareMode;

@@ -33,8 +33,12 @@ import { setConversationSnapshot } from "@/lib/chatConversationCache";
 import { setPersistentConversationSnapshot } from "@/lib/chatConversationPersistentCache";
 import { fetchConversationRestore, type ConversationRestoreResponse } from "@/lib/chatConversationRestoreCoordinator";
 import { buildBootstrapTaskResumePlan } from "@/lib/chatBootstrapTaskResume";
-import { isMessageGenerating } from "@/lib/chatContent";
 import { buildStoppedPatch } from "@/lib/chatCompletionFinalizer";
+import {
+  inferConversationGenerationState,
+  isConversationGenerationActive,
+  type ConversationGenerationStore,
+} from "@/lib/chatConversationGenerationStore";
 
 const API_BASE_URL = ""; // 使用相对路径，nginx 同域名代理 /api -> 后端
 
@@ -141,6 +145,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   // 从对话历史或 prop 恢复的有效 skillKey（优先级：历史 > prop）
   const [effectiveSkillKey, setEffectiveSkillKey] = useState<string | undefined>(skillKey);
   const [groupViews, setGroupViews] = useState<Map<number, number>>(new Map());
+  const [generationStore, setGenerationStore] = useState<ConversationGenerationStore>({});
   const taskStreamsRef = useRef<Record<string, AbortController>>({});
   const pendingLocalAssistantsRef = useRef<Record<string, { convId?: number; message: Message }>>({});
   const resumedBootstrapTaskIdsRef = useRef<Set<number>>(new Set());
@@ -447,15 +452,35 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     setTotalMessages,
   });
 
+  useEffect(() => {
+    if (!currentConversation) return;
+    setGenerationStore((prev) => ({
+      ...prev,
+      [currentConversation]: inferConversationGenerationState({
+        conversationId: currentConversation,
+        messages,
+        hasActiveTaskStream: Object.values(activeTaskStreamsRef.current).some((state) => state.convId === currentConversation),
+        hasCurrentPoller: Object.keys(backgroundPollersRef.current).some((messageId) => messages.some((message) => message.id === messageId)),
+        hasPendingLocalAssistant: Object.values(pendingLocalAssistantsRef.current).some((entry) => entry.convId === currentConversation),
+        hasMainStream: Boolean(abortControllerRef.current),
+        previous: prev[currentConversation],
+      }),
+    }));
+  }, [currentConversation, messages]);
+
   const isCurrentConversationGenerating = useMemo(() => {
     if (!currentConversation) return false;
-    const hasActiveTaskStream = Object.values(activeTaskStreamsRef.current).some((state) => state.convId === currentConversation);
-    const hasCurrentPoller = Object.keys(backgroundPollersRef.current).some((messageId) => messages.some((message) => message.id === messageId));
-    const hasPendingLocalAssistant = Object.values(pendingLocalAssistantsRef.current).some((entry) => entry.convId === currentConversation);
-    const hasGeneratingMessage = messages.some((message) => isMessageGenerating(message, false));
-    const hasMainStream = Boolean(abortControllerRef.current) && hasGeneratingMessage;
-    return hasActiveTaskStream || hasCurrentPoller || hasPendingLocalAssistant || hasMainStream || hasGeneratingMessage;
-  }, [currentConversation, messages]);
+    const currentState = inferConversationGenerationState({
+      conversationId: currentConversation,
+      messages,
+      hasActiveTaskStream: Object.values(activeTaskStreamsRef.current).some((state) => state.convId === currentConversation),
+      hasCurrentPoller: Object.keys(backgroundPollersRef.current).some((messageId) => messages.some((message) => message.id === messageId)),
+      hasPendingLocalAssistant: Object.values(pendingLocalAssistantsRef.current).some((entry) => entry.convId === currentConversation),
+      hasMainStream: Boolean(abortControllerRef.current),
+      previous: generationStore[currentConversation],
+    });
+    return isConversationGenerationActive(currentState);
+  }, [currentConversation, generationStore, messages]);
 
   return {
     messages,
