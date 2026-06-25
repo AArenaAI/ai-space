@@ -344,10 +344,12 @@ def detect_bright_text_regions(rgb: np.ndarray, image_type: str) -> list[dict]:
         if image_type == "game_ui_screenshot":
             cx = (b[0] + b[2]) / 2.0 / max(1, w)
             cy = (b[1] + b[3]) / 2.0 / max(1, h)
-            # Keep only main dialogue text band and right-bottom UI buttons.
+            # Keep only main dialogue text band, right-bottom UI buttons,
+            # and the left-bottom speaker-name label. Exclude avatar/body areas.
             in_dialogue = 0.24 <= cx <= 0.86 and 0.80 <= cy <= 0.91
             in_right_buttons = 0.84 <= cx <= 0.99 and 0.86 <= cy <= 0.98
-            if not (in_dialogue or in_right_buttons):
+            in_speaker_name = 0.10 <= cx <= 0.24 and 0.88 <= cy <= 0.99
+            if not (in_dialogue or in_right_buttons or in_speaker_name):
                 continue
         if image_type == "code_ui_screenshot" and bw < 14:
             continue
@@ -411,7 +413,8 @@ def main() -> int:
                 cy = (b[1] + b[3]) / 2.0 / max(1, height)
                 in_dialogue = 0.24 <= cx <= 0.86 and 0.80 <= cy <= 0.91
                 in_right_buttons = 0.84 <= cx <= 0.99 and 0.86 <= cy <= 0.98
-                if in_dialogue or in_right_buttons:
+                in_speaker_name = 0.10 <= cx <= 0.24 and 0.88 <= cy <= 0.99
+                if in_dialogue or in_right_buttons or in_speaker_name:
                     filtered.append(r)
             regions = filtered
         detector = "hybrid" if ocr_regions and local_regions else ("tesseract" if ocr_regions else ("local-vision" if local_regions else "none"))

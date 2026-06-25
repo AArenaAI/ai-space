@@ -389,7 +389,24 @@ def fill_uniform_mask_regions(rgb: np.ndarray, mask: np.ndarray) -> tuple[np.nda
         uniform_light = brightness >= 85 and spread < 32
         if not (uniform_dark or uniform_light):
             continue
-        repaired[component > 0] = np.clip(med, 0, 255).astype(np.uint8)
+        fill_color = np.clip(med, 0, 255).astype(np.uint8)
+        # Fill row-by-row when possible so semi-transparent dialogue panels keep
+        # their vertical gradient/noise instead of becoming a flat rectangle.
+        rows = np.where(np.any(component > 0, axis=1))[0]
+        for yy in rows:
+            xs = np.where(component[yy] > 0)[0]
+            if xs.size == 0:
+                continue
+            x1, x2 = int(xs.min()), int(xs.max())
+            pad = max(8, round(width / 220))
+            left = rgb[yy, max(0, x1 - pad):x1]
+            right = rgb[yy, x2 + 1:min(width, x2 + 1 + pad)]
+            row_samples = np.concatenate([left, right], axis=0) if left.size or right.size else np.empty((0, 3), dtype=np.uint8)
+            if row_samples.shape[0] >= 4:
+                row_color = np.median(row_samples, axis=0).astype(np.uint8)
+            else:
+                row_color = fill_color
+            repaired[yy, xs] = row_color
         remaining[component > 0] = 0
         filled_pixels += int(np.count_nonzero(component))
     return repaired, remaining, filled_pixels
