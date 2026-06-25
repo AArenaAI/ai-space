@@ -461,7 +461,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         messages,
         hasActiveTaskStream: Object.values(activeTaskStreamsRef.current).some((state) => state.convId === currentConversation),
         hasCurrentPoller: Object.keys(backgroundPollersRef.current).some((messageId) => messages.some((message) => message.id === messageId)),
-        hasPendingLocalAssistant: Object.values(pendingLocalAssistantsRef.current).some((entry) => entry.convId === currentConversation),
+        hasPendingLocalAssistant: Object.entries(pendingLocalAssistantsRef.current).some(([messageId, entry]) =>
+          entry.convId === currentConversation && messages.some((message) => message.id === messageId)
+        ),
         hasMainStream: Boolean(abortControllerRef.current),
         previous: prev[currentConversation],
       }),
@@ -475,7 +477,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       messages,
       hasActiveTaskStream: Object.values(activeTaskStreamsRef.current).some((state) => state.convId === currentConversation),
       hasCurrentPoller: Object.keys(backgroundPollersRef.current).some((messageId) => messages.some((message) => message.id === messageId)),
-      hasPendingLocalAssistant: Object.values(pendingLocalAssistantsRef.current).some((entry) => entry.convId === currentConversation),
+      hasPendingLocalAssistant: Object.entries(pendingLocalAssistantsRef.current).some(([messageId, entry]) =>
+        entry.convId === currentConversation && messages.some((message) => message.id === messageId)
+      ),
       hasMainStream: Boolean(abortControllerRef.current),
       previous: generationStore[currentConversation],
     });
