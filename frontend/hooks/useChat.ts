@@ -464,7 +464,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         hasPendingLocalAssistant: Object.entries(pendingLocalAssistantsRef.current).some(([messageId, entry]) =>
           entry.convId === currentConversation && messages.some((message) => message.id === messageId)
         ),
-        hasMainStream: Boolean(abortControllerRef.current),
+        hasMainStream: Boolean(abortControllerRef.current) && messages.some((message) =>
+          message.role === "assistant" && !message.completedAt && !message.stopped && !message.errorCode && !message.content?.trim()
+        ),
         previous: prev[currentConversation],
       }),
     }));
@@ -480,7 +482,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       hasPendingLocalAssistant: Object.entries(pendingLocalAssistantsRef.current).some(([messageId, entry]) =>
         entry.convId === currentConversation && messages.some((message) => message.id === messageId)
       ),
-      hasMainStream: Boolean(abortControllerRef.current),
+      hasMainStream: Boolean(abortControllerRef.current) && messages.some((message) =>
+        message.role === "assistant" && !message.completedAt && !message.stopped && !message.errorCode && !message.content?.trim()
+      ),
       previous: generationStore[currentConversation],
     });
     return isConversationGenerationActive(currentState);
