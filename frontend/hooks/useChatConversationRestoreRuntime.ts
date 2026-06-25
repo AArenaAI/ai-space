@@ -254,6 +254,7 @@ export function useChatConversationRestoreRuntime({
       if (navigationPlan.shouldSetLoadingHistory) setIsLoadingHistory(navigationPlan.loadingHistory);
       applyNavigationResetLifecycle(navigationPlan);
       if (navigationPlan.shouldResetMessages) setMessages([]);
+      setIsLoading(false);
       setIsCompare(navigationPlan.isCompare);
       setCompareModels(navigationPlan.compareModels);
       setEffectiveSkillKey(navigationPlan.effectiveSkillKey);
@@ -298,6 +299,7 @@ export function useChatConversationRestoreRuntime({
       setIsLoadingHistory(navigationPlan.loadingHistory);
     }
     applyLoadExistingNavigationLifecycle(navigationPlan);
+    setIsLoading(false);
 
     let hasDisplayedSnapshot = false;
     let displayedSnapshotSource: ConversationSwitchPerformanceDetail["snapshotSource"];

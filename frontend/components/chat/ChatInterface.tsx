@@ -113,6 +113,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   const {
     messages,
     isLoading,
+    isCurrentConversationGenerating,
     isLoadingHistory,
     selectedModel,
     setSelectedModel,
@@ -697,7 +698,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
               <MessageInput
                 onSend={handleSend}
                 onStop={handleStop}
-                isLoading={isLoading}
+                isLoading={isCurrentConversationGenerating}
                 compareMode={activeCompareMode}
                 onToggleCompare={toggleCompareMode}
                 currentModel={selectedModel}

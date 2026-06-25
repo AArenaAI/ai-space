@@ -33,6 +33,7 @@ import { setConversationSnapshot } from "@/lib/chatConversationCache";
 import { setPersistentConversationSnapshot } from "@/lib/chatConversationPersistentCache";
 import { fetchConversationRestore, type ConversationRestoreResponse } from "@/lib/chatConversationRestoreCoordinator";
 import { buildBootstrapTaskResumePlan } from "@/lib/chatBootstrapTaskResume";
+import { isMessageGenerating } from "@/lib/chatContent";
 
 const API_BASE_URL = ""; // 使用相对路径，nginx 同域名代理 /api -> 后端
 
@@ -420,9 +421,19 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     setTotalMessages,
   });
 
+  const isCurrentConversationGenerating = useMemo(() => {
+    if (!isLoading || !currentConversation) return false;
+    const hasActiveTaskStream = Object.values(activeTaskStreamsRef.current).some((state) => state.convId === currentConversation);
+    const hasCurrentPoller = Object.keys(backgroundPollersRef.current).some((messageId) => messages.some((message) => message.id === messageId));
+    const hasGeneratingMessage = messages.some((message) => isMessageGenerating(message, false));
+    const hasMainStream = Boolean(abortControllerRef.current) && hasGeneratingMessage;
+    return hasActiveTaskStream || hasCurrentPoller || hasMainStream || hasGeneratingMessage;
+  }, [currentConversation, isLoading, messages]);
+
   return {
     messages,
     isLoading,
+    isCurrentConversationGenerating,
     isLoadingHistory,
     selectedModel,
     setSelectedModel,
