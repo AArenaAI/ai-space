@@ -129,6 +129,25 @@ def prepare_tesseract_input(image_path: str, sub_mode: str = "auto") -> tuple[st
     return tmp_path, scale, y_offset
 
 
+def is_meaningful_ocr_text(text: str) -> bool:
+    text = (text or "").strip()
+    if not text:
+        return False
+    cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+    alnum = sum(1 for ch in text if ch.isalnum() or ("\u4e00" <= ch <= "\u9fff"))
+    latin = sum(1 for ch in text if ("a" <= ch.lower() <= "z"))
+    if cjk >= 1:
+        return True
+    # Keep English/watermark words only when they are substantial; reject OCR
+    # garbage like "ak nls", "ss", "ie", "kas" from pixel-art textures.
+    if alnum >= 6 and latin >= 4:
+        compact = "".join(ch.lower() for ch in text if ch.isalnum())
+        # reject mostly alternating tiny fragments without vowels/meaning
+        vowels = sum(1 for ch in compact if ch in "aeiou")
+        return vowels >= 2
+    return False
+
+
 def detect_with_tesseract(image_path: str, sub_mode: str = "auto") -> list[dict]:
     """Detect real OCR text boxes with tesseract TSV output.
 
@@ -159,7 +178,7 @@ def detect_with_tesseract(image_path: str, sub_mode: str = "auto") -> list[dict]
     if not required.issubset(col):
         return []
 
-    min_conf = 35
+    min_conf = 55
     with Image.open(image_path) as im:
         source = ImageOps.exif_transpose(im)
         img_w, img_h = source.size
@@ -169,7 +188,7 @@ def detect_with_tesseract(image_path: str, sub_mode: str = "auto") -> list[dict]
         if len(parts) < len(header):
             continue
         text = parts[col["text"]].strip()
-        if not text:
+        if not is_meaningful_ocr_text(text):
             continue
         try:
             conf = float(parts[col["conf"]])
@@ -204,9 +223,10 @@ def detect_with_tesseract(image_path: str, sub_mode: str = "auto") -> list[dict]
         y2 = max(r["bbox"][3] for r in group)
         text = "".join(r["text"] for r in group) if any(ord(ch) > 127 for r in group for ch in r["text"]) else " ".join(r["text"] for r in group)
         conf = sum(float(r["confidence"]) for r in group) / len(group)
-        if (x2 - x1) < 6 or (y2 - y1) < 6:
+        text = text.strip()
+        if (x2 - x1) < 6 or (y2 - y1) < 6 or not is_meaningful_ocr_text(text):
             continue
-        regions.append({"bbox": [x1, y1, x2, y2], "text": text.strip(), "confidence": round(conf / 100.0, 3)})
+        regions.append({"bbox": [x1, y1, x2, y2], "text": text, "confidence": round(conf / 100.0, 3)})
 
     # Stable UX guard: OCR preview should never flood the image.
     regions.sort(key=lambda r: (r["bbox"][1], r["bbox"][0]))
@@ -378,17 +398,11 @@ def main() -> int:
                 print(f"[detect_text_mask] PaddleOCR failed: {exc}", file=sys.stderr)
 
         if not regions:
-            opencv_regions = detect_with_opencv(str(input_path), args.sub_mode)
-            opencv_regions = filter_opencv_preview_regions(opencv_regions, width, height, args.sub_mode)
-            if len(opencv_regions) > 30:
-                regions = []
-                detector = "opencv"
-                fallback_reason = "too_many_candidates"
-            else:
-                regions = opencv_regions
-                detector = "opencv"
-                if not regions:
-                    fallback_reason = "no_stable_text_regions"
+            # Do not expose OpenCV morphology contours as frontend text boxes.
+            # They are useful for internal mask generation, but on game/pixel
+            # screenshots they mis-detect foliage, clothes and UI edges as text.
+            detector = "opencv"
+            fallback_reason = "no_stable_ocr_regions"
 
         # Merge overlapping regions
         regions = merge_overlapping(regions)
