@@ -134,17 +134,12 @@ def is_meaningful_ocr_text(text: str) -> bool:
     if not text:
         return False
     cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
-    alnum = sum(1 for ch in text if ch.isalnum() or ("\u4e00" <= ch <= "\u9fff"))
-    latin = sum(1 for ch in text if ("a" <= ch.lower() <= "z"))
+    # For text-removal preview, prefer precision over recall. In game/pixel-art
+    # screenshots, Tesseract often hallucinates short English fragments from
+    # foliage/robes/ground textures. Only expose CJK text boxes by default;
+    # users can use manual brush for anything OCR misses.
     if cjk >= 1:
         return True
-    # Keep English/watermark words only when they are substantial; reject OCR
-    # garbage like "ak nls", "ss", "ie", "kas" from pixel-art textures.
-    if alnum >= 6 and latin >= 4:
-        compact = "".join(ch.lower() for ch in text if ch.isalnum())
-        # reject mostly alternating tiny fragments without vowels/meaning
-        vowels = sum(1 for ch in compact if ch in "aeiou")
-        return vowels >= 2
     return False
 
 

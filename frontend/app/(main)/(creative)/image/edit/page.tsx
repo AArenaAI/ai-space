@@ -1165,7 +1165,28 @@ function ImageEditContent() {
         } else {
           const maskBlob = await maskEditorRef.current?.exportMaskBlob();
           if (!maskBlob) throw new Error(t("image.edit.error.maskExportFailed"));
-          maskData = await blobToDataUrl(maskBlob);
+          if (isManualTextRemovalMode) {
+            const maskImg = await loadHtmlImage(await blobToDataUrl(maskBlob));
+            const maskCanvas = document.createElement("canvas");
+            maskCanvas.width = maskImg.naturalWidth || maskImg.width;
+            maskCanvas.height = maskImg.naturalHeight || maskImg.height;
+            const maskCtx = maskCanvas.getContext("2d", { willReadFrequently: true });
+            if (!maskCtx) throw new Error(t("image.edit.error.maskExportFailed"));
+            maskCtx.drawImage(maskImg, 0, 0, maskCanvas.width, maskCanvas.height);
+            const pixels = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+            for (let i = 0; i < pixels.data.length; i += 4) {
+              const selected = pixels.data[i + 3] > 8;
+              pixels.data[i] = selected ? 255 : 0;
+              pixels.data[i + 1] = selected ? 255 : 0;
+              pixels.data[i + 2] = selected ? 255 : 0;
+              pixels.data[i + 3] = 255;
+            }
+            maskCtx.putImageData(pixels, 0, 0);
+            const binaryMaskBlob = await canvasToBlob(maskCanvas, "image/png");
+            maskData = binaryMaskBlob ? await blobToDataUrl(binaryMaskBlob) : "";
+          } else {
+            maskData = await blobToDataUrl(maskBlob);
+          }
           if (!maskData) throw new Error(t("image.edit.error.maskExportFailed"));
         }
       }
