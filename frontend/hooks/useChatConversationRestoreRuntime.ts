@@ -523,7 +523,7 @@ export function useChatConversationRestoreRuntime({
           );
           setLoadedPersistedMessages(loadedMessages.length);
           setGroupViews(groupViews);
-          setIsLoading(restoreState.isLoading);
+          setIsLoading(restoreState.isLoading || pendingLocalMessages.length > 0);
           const snapshot: CachedConversationSnapshot = {
             conversationId: loadConversationId,
             title: data.title || "",
@@ -531,7 +531,7 @@ export function useChatConversationRestoreRuntime({
             loadedPersistedMessages: loadedMessages.length,
             totalMessages: resolvedTotalMessages,
             groupViews,
-            isLoading: restoreState.isLoading,
+            isLoading: restoreState.isLoading || pendingLocalMessages.length > 0,
             isCompare: !!data.compare,
             compareModels: parseConversationCompareModels(data.compare_models),
             model: data.model,

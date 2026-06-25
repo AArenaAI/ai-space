@@ -34,6 +34,7 @@ import { setPersistentConversationSnapshot } from "@/lib/chatConversationPersist
 import { fetchConversationRestore, type ConversationRestoreResponse } from "@/lib/chatConversationRestoreCoordinator";
 import { buildBootstrapTaskResumePlan } from "@/lib/chatBootstrapTaskResume";
 import { isMessageGenerating } from "@/lib/chatContent";
+import { buildStoppedPatch } from "@/lib/chatCompletionFinalizer";
 
 const API_BASE_URL = ""; // 使用相对路径，nginx 同域名代理 /api -> 后端
 
@@ -392,6 +393,23 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     translate: t,
   });
 
+  const stopCurrentConversationGeneration = useCallback(() => {
+    stopGeneration();
+    if (!currentConversation) return;
+    const pendingIds = Object.entries(pendingLocalAssistantsRef.current)
+      .filter(([, entry]) => entry.convId === currentConversation)
+      .map(([id]) => id);
+    if (pendingIds.length === 0) return;
+    const stoppedPatch = buildStoppedPatch(Date.now());
+    setMessages((prev) => prev.map((message) =>
+      pendingIds.includes(message.id) ? { ...message, ...stoppedPatch } : message
+    ));
+    pendingIds.forEach((id) => {
+      delete pendingLocalAssistantsRef.current[id];
+    });
+    setIsLoading(false);
+  }, [currentConversation, stopGeneration, setMessages, setIsLoading]);
+
   const {
     clearMessages,
     deleteMessage,
@@ -425,13 +443,14 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   });
 
   const isCurrentConversationGenerating = useMemo(() => {
-    if (!isLoading || !currentConversation) return false;
+    if (!currentConversation) return false;
     const hasActiveTaskStream = Object.values(activeTaskStreamsRef.current).some((state) => state.convId === currentConversation);
     const hasCurrentPoller = Object.keys(backgroundPollersRef.current).some((messageId) => messages.some((message) => message.id === messageId));
+    const hasPendingLocalAssistant = Object.values(pendingLocalAssistantsRef.current).some((entry) => entry.convId === currentConversation);
     const hasGeneratingMessage = messages.some((message) => isMessageGenerating(message, false));
     const hasMainStream = Boolean(abortControllerRef.current) && hasGeneratingMessage;
-    return hasActiveTaskStream || hasCurrentPoller || hasMainStream || hasGeneratingMessage;
-  }, [currentConversation, isLoading, messages]);
+    return hasActiveTaskStream || hasCurrentPoller || hasPendingLocalAssistant || hasMainStream || hasGeneratingMessage;
+  }, [currentConversation, messages]);
 
   return {
     messages,
@@ -441,7 +460,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     selectedModel,
     setSelectedModel,
     sendMessage,
-    stopGeneration,
+    stopGeneration: stopCurrentConversationGeneration,
     clearMessages,
     deleteMessage,
     regenerateMessage,
