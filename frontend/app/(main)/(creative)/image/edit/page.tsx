@@ -1149,7 +1149,7 @@ function ImageEditContent() {
 
       let maskData = "";
       if (isMaskMode) {
-        if (recognizedEditMaskData) {
+        if (!isManualTextRemovalMode && recognizedEditMaskData) {
           // 识别 mask 是按压缩识别图生成的；最终编辑使用原图时，必须把 mask 映射回原图画布尺寸。
           const maskImg = await loadHtmlImage(recognizedEditMaskData);
           const targetImg = await loadHtmlImage(sourceUrl);
@@ -1395,6 +1395,9 @@ function ImageEditContent() {
                   setSelectedTextIndices(new Set());
                   setTextDetectionDone(false);
                   setTextDetectionNote("");
+                  setRegionStep("paint");
+                  setRecognizedObject(null);
+                  setRecognizedEditMaskData("");
                 }
               }}
               disabled={isEditing}
