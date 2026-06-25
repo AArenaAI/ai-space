@@ -452,6 +452,34 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     setTotalMessages,
   });
 
+  const latestAssistantMessage = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index]?.role === "assistant") return messages[index];
+    }
+    return undefined;
+  }, [messages]);
+
+  const hasCurrentPendingLocalAssistant = useMemo(() => {
+    if (!currentConversation || !latestAssistantMessage) return false;
+    const pending = pendingLocalAssistantsRef.current[latestAssistantMessage.id];
+    return Boolean(
+      pending?.convId === currentConversation &&
+      !latestAssistantMessage.completedAt &&
+      !latestAssistantMessage.stopped &&
+      !latestAssistantMessage.errorCode
+    );
+  }, [currentConversation, latestAssistantMessage, messages]);
+
+  const hasCurrentMainStream = useMemo(() => {
+    return Boolean(abortControllerRef.current) && Boolean(
+      latestAssistantMessage &&
+      !latestAssistantMessage.completedAt &&
+      !latestAssistantMessage.stopped &&
+      !latestAssistantMessage.errorCode &&
+      !latestAssistantMessage.content?.trim()
+    );
+  }, [latestAssistantMessage, messages]);
+
   useEffect(() => {
     if (!currentConversation) return;
     setGenerationStore((prev) => ({
@@ -461,16 +489,12 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
         messages,
         hasActiveTaskStream: Object.values(activeTaskStreamsRef.current).some((state) => state.convId === currentConversation),
         hasCurrentPoller: Object.keys(backgroundPollersRef.current).some((messageId) => messages.some((message) => message.id === messageId)),
-        hasPendingLocalAssistant: Object.entries(pendingLocalAssistantsRef.current).some(([messageId, entry]) =>
-          entry.convId === currentConversation && messages.some((message) => message.id === messageId)
-        ),
-        hasMainStream: Boolean(abortControllerRef.current) && messages.some((message) =>
-          message.role === "assistant" && !message.completedAt && !message.stopped && !message.errorCode && !message.content?.trim()
-        ),
+        hasPendingLocalAssistant: hasCurrentPendingLocalAssistant,
+        hasMainStream: hasCurrentMainStream,
         previous: prev[currentConversation],
       }),
     }));
-  }, [currentConversation, messages]);
+  }, [currentConversation, messages, hasCurrentPendingLocalAssistant, hasCurrentMainStream]);
 
   const isCurrentConversationGenerating = useMemo(() => {
     if (!currentConversation) return false;
@@ -479,16 +503,12 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       messages,
       hasActiveTaskStream: Object.values(activeTaskStreamsRef.current).some((state) => state.convId === currentConversation),
       hasCurrentPoller: Object.keys(backgroundPollersRef.current).some((messageId) => messages.some((message) => message.id === messageId)),
-      hasPendingLocalAssistant: Object.entries(pendingLocalAssistantsRef.current).some(([messageId, entry]) =>
-        entry.convId === currentConversation && messages.some((message) => message.id === messageId)
-      ),
-      hasMainStream: Boolean(abortControllerRef.current) && messages.some((message) =>
-        message.role === "assistant" && !message.completedAt && !message.stopped && !message.errorCode && !message.content?.trim()
-      ),
+      hasPendingLocalAssistant: hasCurrentPendingLocalAssistant,
+      hasMainStream: hasCurrentMainStream,
       previous: generationStore[currentConversation],
     });
     return isConversationGenerationActive(currentState);
-  }, [currentConversation, generationStore, messages]);
+  }, [currentConversation, generationStore, messages, hasCurrentPendingLocalAssistant, hasCurrentMainStream]);
 
   return {
     messages,
