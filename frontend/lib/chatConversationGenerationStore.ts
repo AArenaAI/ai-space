@@ -77,9 +77,8 @@ export function inferConversationGenerationState(input: {
     if (hasCompletedAssistantContent(message) && !hasExplicitGenerationAnchor(message)) return false;
     return true;
   });
-  const allowExternalActiveState = hasRecoverableGeneratingMessage || !hasTerminalGenerationMessage;
-  if (input.hasActiveTaskStream && allowExternalActiveState) return { ...(input.previous || { conversationId }), conversationId, status: "streaming", updatedAt: now };
-  if (input.hasCurrentPoller && allowExternalActiveState) return { ...(input.previous || { conversationId }), conversationId, status: "polling", updatedAt: now };
+  if (input.hasActiveTaskStream && hasRecoverableGeneratingMessage) return { ...(input.previous || { conversationId }), conversationId, status: "streaming", updatedAt: now };
+  if (input.hasCurrentPoller && hasRecoverableGeneratingMessage) return { ...(input.previous || { conversationId }), conversationId, status: "polling", updatedAt: now };
   if (input.hasPendingLocalAssistant || hasRecoverableGeneratingMessage || (input.hasMainStream && hasRecoverableGeneratingMessage)) {
     return { ...(input.previous || { conversationId }), conversationId, status: "pending", updatedAt: now };
   }

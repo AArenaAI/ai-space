@@ -111,7 +111,27 @@ test('restored finished assistant content with stale search or reasoning activit
   assert.equal(state.status, 'idle');
 });
 
-test('explicit active task stream still wins for current conversation', () => {
+test('stale poller cannot keep completed assistant content active without a task anchor', () => {
+  const state = store.inferConversationGenerationState({
+    conversationId: 7,
+    messages: [{
+      id: 'a',
+      role: 'assistant',
+      content: '<think>done reasoning</think>\n\n今天是 2026 年 6 月 26 日。',
+      activityStatus: { status: 'running' },
+      searchStatus: 'searching',
+    }],
+    hasActiveTaskStream: false,
+    hasCurrentPoller: true,
+    hasPendingLocalAssistant: false,
+    hasMainStream: false,
+    previous: { conversationId: 7, status: 'polling', updatedAt: 1 },
+    now: 2,
+  });
+  assert.equal(state.status, 'idle');
+});
+
+test('explicit active task stream still wins for current conversation when message has a task anchor', () => {
   const state = store.inferConversationGenerationState({
     conversationId: 7,
     messages: [{ id: 'a', role: 'assistant', content: 'partial', generationTaskId: 99 }],
