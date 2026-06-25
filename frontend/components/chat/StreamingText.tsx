@@ -141,8 +141,12 @@ export function StreamingText({
           <StreamingMarkdownView content={parsed.answer} idleTimeout={80} keepRenderedOnContentChange isStreaming={stableMarkdownStreamingMode} />
         </span>
       )}
-      {!hasContent && !hasReason && <ThinkingDots />}
-      {isStreaming && <StreamingCursor />}
+      {!hasContent && !hasReason && (
+        <span className="flex min-h-[44px] items-center gap-1 text-text-secondary" data-chat-empty-streaming-placeholder="true">
+          <ThinkingDots />
+        </span>
+      )}
+      {isStreaming && (hasContent || hasReason) && <StreamingCursor />}
     </Host>
   );
 }
