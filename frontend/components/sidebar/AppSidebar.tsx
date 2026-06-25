@@ -35,13 +35,14 @@ import { useTheme } from "@/components/theme/ThemeProvider";
 import { usePlatform } from "@/hooks/usePlatform";
 import { CREATIVE_PAGE_HREFS, CREATIVE_PAGE_PATHS } from "./ToolsSidebar";
 import { WORK_PAGE_HREFS, WORK_PAGE_PATHS } from "./WorkToolsSidebar";
-import { invalidateConversationSnapshot } from "@/lib/chatConversationCache";
+import { hasConversationSnapshot, invalidateConversationSnapshot } from "@/lib/chatConversationCache";
 import { prefetchConversationSnapshot } from "@/lib/chatConversationPrefetch";
 import { deletePersistentConversationSnapshot } from "@/lib/chatConversationPersistentCache";
 import { createNotebook, fetchNotebooks } from "@/lib/notebookApi";
 import { NOTEBOOK_DEMOS } from "@/lib/notebookDemos";
 import type { Notebook } from "@/lib/notebookTypes";
 import { useAppBootstrap } from "@/lib/appBootstrapContext";
+import { saveConversationScrollState } from "@/lib/chatConversationScrollState";
 
 
 const isPathInGroup = (pathname: string | null, paths: string[]) => {
@@ -156,6 +157,20 @@ const CHAT_HISTORY_HIDDEN_SKILL_KEYS = new Set([
 
 function isMainChatConversation(conv: Conversation): boolean {
   return !conv.skill_key || !CHAT_HISTORY_HIDDEN_SKILL_KEYS.has(conv.skill_key);
+}
+
+function mapBootstrapNotebook(item: any): Notebook {
+  return {
+    id: Number(item.id || 0),
+    user_id: Number(item.user_id || 0),
+    workspace_id: Number(item.workspace_id || 0),
+    title: item.title || "Untitled notebook",
+    description: item.description || "",
+    cover_icon: item.cover_icon || "📓",
+    created_at: item.created_at || item.updated_at || new Date().toISOString(),
+    updated_at: item.updated_at || new Date().toISOString(),
+    file_count: item.file_count || 0,
+  };
 }
 
 async function fetchConversations(workspaceId?: number): Promise<Conversation[] | null> {
@@ -566,13 +581,17 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
       setConversations(next);
       setLoading(false);
     }
+    if (Array.isArray(chatBootstrap.sidebar?.recent_notebooks)) {
+      setNotebooks(chatBootstrap.sidebar.recent_notebooks.map(mapBootstrapNotebook));
+      setNotebooksLoading(false);
+    }
   }, [chatBootstrap]);
 
   useEffect(() => {
     const handleBootstrapReady = (event: Event) => {
       const detail = (event as CustomEvent<{
         user?: any;
-        sidebar?: { conversations?: Conversation[] };
+        sidebar?: { conversations?: Conversation[]; recent_notebooks?: any[] };
       }>).detail;
       if (!detail) return;
       chatBootstrapReadyRef.current = true;
@@ -584,6 +603,10 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
         cachedConversations = next;
         setConversations(next);
         setLoading(false);
+      }
+      if (Array.isArray(detail.sidebar?.recent_notebooks)) {
+        setNotebooks(detail.sidebar.recent_notebooks.map(mapBootstrapNotebook));
+        setNotebooksLoading(false);
       }
     };
     window.addEventListener("chat-bootstrap-ready", handleBootstrapReady);
@@ -622,6 +645,21 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   useEffect(() => { loadConversations(); }, [loadConversations]);
 
   const loadNotebooks = useCallback(async () => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+    const normalizedPathname = pathname === "/" ? pathname : pathname.replace(/\/$/, "");
+    const isChatConversationRoute = normalizedPathname === "/chat" && !!effectiveRouteConvId;
+    const hasBootstrapNotebooks = Array.isArray(chatBootstrap?.sidebar?.recent_notebooks);
+    if (!token) {
+      if (hasBootstrapNotebooks) {
+        setNotebooks(chatBootstrap.sidebar!.recent_notebooks!.map(mapBootstrapNotebook));
+        setNotebooksLoading(false);
+        return;
+      }
+      if (isChatConversationRoute && !chatBootstrapReadyRef.current) return;
+      setNotebooksLoading(false);
+      return;
+    }
+    if (isChatConversationRoute && hasBootstrapNotebooks && !notebooksLoading && notebooks.length > 0) return;
     setNotebooksLoading(true);
     try {
       setNotebooks(await fetchNotebooks(currentWS?.id));
@@ -630,7 +668,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     } finally {
       setNotebooksLoading(false);
     }
-  }, [currentWS?.id]);
+  }, [currentWS?.id, pathname, effectiveRouteConvId, chatBootstrap, notebooks.length, notebooksLoading]);
 
   useEffect(() => { loadNotebooks(); }, [loadNotebooks]);
 
@@ -966,16 +1004,26 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     return window.localStorage.getItem("chat-conversation-disable-prefetch") === "1";
   }, []);
 
-  const prefetchConversation = useCallback((conv: Conversation, options?: { signal?: AbortSignal }) => {
-    if (isConversationPrefetchDisabledForTest()) return;
+  const prefetchConversation = useCallback((conv: Conversation, options?: { signal?: AbortSignal; force?: boolean }) => {
+    if (isConversationPrefetchDisabledForTest()) return Promise.resolve(false);
     const token = localStorage.getItem("token");
     return prefetchConversationSnapshot({
       conversationId: conv.id,
       token,
       skillKey: conv.skill_key,
       signal: options?.signal,
+      force: options?.force,
     });
   }, [isConversationPrefetchDisabledForTest]);
+
+  const prefetchConversationImmediately = useCallback((conv: Conversation, force = false) => {
+    if (String(conv.id) === currentConvId) return Promise.resolve(false);
+    if (conversationPrefetchHoverTimerRef.current) {
+      clearTimeout(conversationPrefetchHoverTimerRef.current);
+      conversationPrefetchHoverTimerRef.current = null;
+    }
+    return prefetchConversation(conv, { force });
+  }, [currentConvId, prefetchConversation]);
 
   const scheduleConversationHoverPrefetch = useCallback((conv: Conversation) => {
     if (String(conv.id) === currentConvId) return;
@@ -985,7 +1033,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     conversationPrefetchHoverControllerRef.current = controller;
     conversationPrefetchHoverTimerRef.current = setTimeout(() => {
       prefetchConversation(conv, { signal: controller.signal });
-    }, 220);
+    }, 150);
   }, [currentConvId, prefetchConversation]);
 
   const cancelConversationHoverPrefetch = useCallback(() => {
@@ -993,29 +1041,53 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
       clearTimeout(conversationPrefetchHoverTimerRef.current);
       conversationPrefetchHoverTimerRef.current = null;
     }
-    conversationPrefetchHoverControllerRef.current?.abort();
     conversationPrefetchHoverControllerRef.current = null;
   }, []);
+
+  const saveActiveChatScrollStateBeforeRouteChange = useCallback(() => {
+    const activeId = currentConvId ? Number(currentConvId) : undefined;
+    const scroller = document.querySelector<HTMLElement>(".chat-history-scroll-container");
+    if (!activeId || !scroller) return;
+    const distanceToBottom = Math.max(0, scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight);
+    saveConversationScrollState({
+      conversationId: activeId,
+      scrollTop: scroller.scrollTop,
+      scrollHeight: scroller.scrollHeight,
+      clientHeight: scroller.clientHeight,
+      distanceToBottom,
+      atBottom: distanceToBottom <= 24,
+      updatedAt: Date.now(),
+    });
+  }, [currentConvId]);
 
   const handleOpenConversation = useCallback((conv: Conversation) => {
     const href = conv.skill_key
       ? `/skills/chat?key=${conv.skill_key}&id=${conv.id}`
       : `/chat?id=${conv.id}`;
+    saveActiveChatScrollStateBeforeRouteChange();
     cancelConversationHoverPrefetch();
-    prefetchConversation(conv);
+    const prefetchPromise = hasConversationSnapshot(conv.id)
+      ? Promise.resolve(true)
+      : Promise.race([
+        prefetchConversation(conv, { force: true }),
+        new Promise<boolean>((resolve) => window.setTimeout(() => resolve(false), 90)),
+      ]);
     const routeStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
     emitChatRouteProfileEvent("route-push-start", { conversationId: conv.id, href });
+    window.dispatchEvent(new CustomEvent("chat-conversation-before-route-change", { detail: { nextConversationId: conv.id, href } }));
     setOptimisticConvId(String(conv.id));
-    router.push(href, { scroll: false });
-    window.requestAnimationFrame(() => {
-      const routeCommittedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
-      emitChatRouteProfileEvent("route-push-next-frame", {
-        conversationId: conv.id,
-        href,
-        durationMs: routeCommittedAt - routeStartedAt,
+    void prefetchPromise.finally(() => {
+      router.push(href, { scroll: false });
+      window.requestAnimationFrame(() => {
+        const routeCommittedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+        emitChatRouteProfileEvent("route-push-next-frame", {
+          conversationId: conv.id,
+          href,
+          durationMs: routeCommittedAt - routeStartedAt,
+        });
       });
     });
-  }, [cancelConversationHoverPrefetch, prefetchConversation, router]);
+  }, [cancelConversationHoverPrefetch, prefetchConversation, router, saveActiveChatScrollStateBeforeRouteChange]);
 
   useEffect(() => cancelConversationHoverPrefetch, [cancelConversationHoverPrefetch]);
 
@@ -1079,7 +1151,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                   ? (skillMeta ? skillMeta.color : "text-brand")
                   : "text-text-tertiary group-hover:text-text-secondary";
                 return (
-                  <div key={conv.id} role="button" tabIndex={0} data-conversation-row data-conversation-id={conv.id} onMouseEnter={() => scheduleConversationHoverPrefetch(conv)} onMouseLeave={cancelConversationHoverPrefetch} onClick={() => handleOpenConversation(conv)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleOpenConversation(conv); } }} className={cn("group flex w-full cursor-pointer items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
+                  <div key={conv.id} role="button" tabIndex={0} data-conversation-row data-conversation-id={conv.id} onMouseEnter={() => scheduleConversationHoverPrefetch(conv)} onMouseLeave={cancelConversationHoverPrefetch} onPointerDown={() => { void prefetchConversationImmediately(conv, true); }} onFocus={() => { void prefetchConversationImmediately(conv); }} onClick={() => handleOpenConversation(conv)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleOpenConversation(conv); } }} className={cn("group flex w-full cursor-pointer items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
                     <IconComp className={cn("w-3.5 h-3.5 shrink-0 transition-all duration-200", iconColor)} />
                     <Pin className="w-3 h-3 shrink-0 text-brand" />
                     <span className={cn("flex-1 truncate text-left", isActive && "font-medium")}>{conv.title || t("sidebar.empty.new_chat")}</span>
@@ -1119,7 +1191,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                   ? (skillMeta ? skillMeta.color : "text-brand")
                   : "text-text-tertiary group-hover:text-text-secondary";
                 return (
-                  <div key={conv.id} role="button" tabIndex={0} data-conversation-row data-conversation-id={conv.id} onMouseEnter={() => scheduleConversationHoverPrefetch(conv)} onMouseLeave={cancelConversationHoverPrefetch} onClick={() => handleOpenConversation(conv)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleOpenConversation(conv); } }} className={cn("group flex w-full cursor-pointer items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
+                  <div key={conv.id} role="button" tabIndex={0} data-conversation-row data-conversation-id={conv.id} onMouseEnter={() => scheduleConversationHoverPrefetch(conv)} onMouseLeave={cancelConversationHoverPrefetch} onPointerDown={() => { void prefetchConversationImmediately(conv, true); }} onFocus={() => { void prefetchConversationImmediately(conv); }} onClick={() => handleOpenConversation(conv)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleOpenConversation(conv); } }} className={cn("group flex w-full cursor-pointer items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
                     <IconComp className={cn("w-3.5 h-3.5 shrink-0 transition-all duration-200", iconColor)} />
                     <span className={cn("flex-1 truncate text-left", isActive && "font-medium")}>{conv.title || t("sidebar.empty.new_chat")}</span>
                     <div className="opacity-0 group-hover:opacity-100 transition-opacity"><ConvMenu onRename={() => setRenameTarget(conv)} onTogglePin={() => handleTogglePin(conv)} pinned={conv.pinned} onShare={() => handleShare(conv)} onDelete={() => handleDelete(conv.id)} /></div>

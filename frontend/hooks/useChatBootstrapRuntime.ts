@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { ChatBootstrapPayload } from "@/lib/chatBootstrapCoordinator";
+import type { ChatBootstrapMediaTask, ChatBootstrapPayload } from "@/lib/chatBootstrapCoordinator";
 import { fetchChatBootstrap } from "@/lib/chatBootstrapCoordinator";
+import { registerBackgroundTask } from "@/lib/taskNotifications";
 import type { ChatModel } from "@/lib/chatTypes";
 import { useAppBootstrap } from "@/lib/appBootstrapContext";
 
@@ -15,7 +16,29 @@ export type ChatBootstrapRuntimeState = {
   error?: Error;
 };
 
+function registerBootstrapMediaTask(type: "image" | "video", task: ChatBootstrapMediaTask) {
+  const isChatTask = task.kind === "chat" && task.chat_id && task.message_id;
+  const key = isChatTask ? `${type}-chat:${task.message_id}` : `${type}:${task.id}`;
+  registerBackgroundTask({
+    key,
+    type,
+    id: isChatTask ? task.message_id! : task.id,
+    title: type === "image" ? "图片生成中" : "视频生成中",
+    description: task.prompt || task.conversation_title || task.model || undefined,
+    href: task.href || (type === "image" ? "/image" : "/video"),
+    conversationId: task.chat_id,
+    serverMessageId: task.message_id,
+    conversationTitle: task.conversation_title,
+  });
+}
+
+function registerBootstrapActiveMediaTasks(payload: ChatBootstrapPayload) {
+  (payload.active_tasks?.image || []).forEach((task) => registerBootstrapMediaTask("image", task));
+  (payload.active_tasks?.video || []).forEach((task) => registerBootstrapMediaTask("video", task));
+}
+
 function applyBootstrapClientSideEffects(payload: ChatBootstrapPayload, setChatBootstrap: (payload?: ChatBootstrapPayload) => void) {
+  registerBootstrapActiveMediaTasks(payload);
   if (payload.user) {
     localStorage.setItem("user", JSON.stringify(payload.user));
   }

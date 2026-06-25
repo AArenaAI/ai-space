@@ -54,6 +54,22 @@ export type ChatBootstrapBilling = {
   elite_credits?: number;
 };
 
+export type ChatBootstrapMediaTask = {
+  id: number;
+  kind: "standalone" | "chat" | string;
+  status: string;
+  prompt?: string;
+  model?: string;
+  provider?: string;
+  chat_id?: number;
+  message_id?: number;
+  generation_id?: number;
+  task_id?: string;
+  href: string;
+  conversation_title?: string;
+  updated_at: string;
+};
+
 export type ChatBootstrapPayload = {
   auth_status: "authenticated" | "anonymous" | "unknown";
   http_status?: number;
@@ -79,6 +95,8 @@ export type ChatBootstrapPayload = {
       last_sequence_number: number;
       updated_at: string;
     }>;
+    image?: ChatBootstrapMediaTask[];
+    video?: ChatBootstrapMediaTask[];
   };
 };
 

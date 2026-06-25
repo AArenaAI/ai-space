@@ -4,6 +4,7 @@ import (
 	"aipool-backend/internal/config"
 	"aipool-backend/internal/modelmeta"
 	"aipool-backend/internal/models"
+	"aipool-backend/internal/services"
 	"fmt"
 	"net/http"
 	"sort"
@@ -57,6 +58,22 @@ type ChatBootstrapActiveTask struct {
 	Status             string    `json:"status"`
 	LastSequenceNumber int64     `json:"last_sequence_number"`
 	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+type ChatBootstrapMediaTask struct {
+	ID                uint      `json:"id"`
+	Kind              string    `json:"kind"`
+	Status            string    `json:"status"`
+	Prompt            string    `json:"prompt,omitempty"`
+	Model             string    `json:"model,omitempty"`
+	Provider          string    `json:"provider,omitempty"`
+	ChatID            uint      `json:"chat_id,omitempty"`
+	MessageID         uint      `json:"message_id,omitempty"`
+	GenerationID      uint      `json:"generation_id,omitempty"`
+	TaskID            string    `json:"task_id,omitempty"`
+	Href              string    `json:"href"`
+	ConversationTitle string    `json:"conversation_title,omitempty"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type ChatBootstrapBilling struct {
@@ -164,7 +181,11 @@ func (h *ChatBootstrapHandler) BuildPayload(c *gin.Context) (gin.H, int, bool) {
 		payload["conversation"] = meta
 		payload["snapshot"] = snapshot
 	}
-	payload["active_tasks"] = gin.H{"chat": h.listActiveChatTasks(userID, conversationID)}
+	payload["active_tasks"] = gin.H{
+		"chat":  h.listActiveChatTasks(userID, conversationID),
+		"image": h.listActiveImageTasks(userID),
+		"video": h.listActiveVideoTasks(userID),
+	}
 
 	return payload, http.StatusOK, true
 }
@@ -222,6 +243,71 @@ func (h *ChatBootstrapHandler) listActiveChatTasks(userID uint, conversationID u
 	out := make([]ChatBootstrapActiveTask, len(tasks))
 	for i, task := range tasks {
 		out[i] = ChatBootstrapActiveTask{ID: task.ID, ConversationID: task.ConversationID, AssistantMessageID: task.AssistantMessageID, Model: task.Model, Provider: task.Provider, Status: task.Status, LastSequenceNumber: task.LastSequenceNumber, UpdatedAt: task.UpdatedAt}
+	}
+	return out
+}
+
+func (h *ChatBootstrapHandler) listActiveImageTasks(userID uint) []ChatBootstrapMediaTask {
+	out := make([]ChatBootstrapMediaTask, 0, 20)
+	var generations []services.ImageGeneration
+	if err := h.db.Where("user_id = ? AND status IN ?", userID, []string{"pending"}).Order("updated_at DESC, id DESC").Limit(20).Find(&generations).Error; err == nil {
+		for _, item := range generations {
+			href := "/image"
+			if strings.Contains(strings.ToLower(item.Provider), "seedream") {
+				href = "/ai-comic"
+			}
+			out = append(out, ChatBootstrapMediaTask{ID: item.ID, Kind: "standalone", Status: item.Status, Prompt: item.Prompt, Provider: item.Provider, Href: href, UpdatedAt: item.UpdatedAt})
+		}
+	}
+	type imageChatRow struct {
+		models.ImageChatMessage
+		ChatTitle string `gorm:"column:chat_title"`
+	}
+	var chatRows []imageChatRow
+	if err := h.db.Table("image_chat_messages").
+		Select("image_chat_messages.*, image_chats.title AS chat_title").
+		Joins("JOIN image_chats ON image_chats.id = image_chat_messages.chat_id").
+		Where("image_chats.user_id = ? AND image_chat_messages.role = ? AND image_chat_messages.status IN ?", userID, "assistant", []string{"pending"}).
+		Where("(image_chat_messages.media_type = '' OR image_chat_messages.media_type = 'image' OR image_chat_messages.media_type IS NULL)").
+		Order("image_chat_messages.updated_at DESC, image_chat_messages.id DESC").
+		Limit(20).
+		Find(&chatRows).Error; err == nil {
+		for _, item := range chatRows {
+			out = append(out, ChatBootstrapMediaTask{ID: item.ID, Kind: "chat", Status: item.Status, Prompt: item.Content, Model: item.Model, ChatID: item.ChatID, MessageID: item.ID, TaskID: item.TaskID, Href: fmt.Sprintf("/image/chat?chatId=%d", item.ChatID), ConversationTitle: item.ChatTitle, UpdatedAt: item.CreatedAt})
+		}
+	}
+	if len(out) > 20 {
+		out = out[:20]
+	}
+	return out
+}
+
+func (h *ChatBootstrapHandler) listActiveVideoTasks(userID uint) []ChatBootstrapMediaTask {
+	out := make([]ChatBootstrapMediaTask, 0, 20)
+	var generations []models.VideoGeneration
+	if err := h.db.Where("user_id = ? AND status IN ?", userID, []string{"pending", "running"}).Order("updated_at DESC, id DESC").Limit(20).Find(&generations).Error; err == nil {
+		for _, item := range generations {
+			out = append(out, ChatBootstrapMediaTask{ID: item.ID, Kind: "standalone", Status: item.Status, Prompt: item.Prompt, Model: item.Model, TaskID: item.TaskID, Href: "/video", UpdatedAt: item.UpdatedAt})
+		}
+	}
+	type videoChatRow struct {
+		models.VideoChatMessage
+		ChatTitle string `gorm:"column:chat_title"`
+	}
+	var chatRows []videoChatRow
+	if err := h.db.Table("video_chat_messages").
+		Select("video_chat_messages.*, video_chats.title AS chat_title").
+		Joins("JOIN video_chats ON video_chats.id = video_chat_messages.chat_id").
+		Where("video_chats.user_id = ? AND video_chat_messages.role = ? AND video_chat_messages.status IN ?", userID, "assistant", []string{"pending", "running"}).
+		Order("video_chat_messages.updated_at DESC, video_chat_messages.id DESC").
+		Limit(20).
+		Find(&chatRows).Error; err == nil {
+		for _, item := range chatRows {
+			out = append(out, ChatBootstrapMediaTask{ID: item.ID, Kind: "chat", Status: item.Status, Prompt: item.Content, Model: item.Model, ChatID: item.ChatID, MessageID: item.ID, GenerationID: item.GenerationID, TaskID: item.TaskID, Href: fmt.Sprintf("/video/chat?chatId=%d", item.ChatID), ConversationTitle: item.ChatTitle, UpdatedAt: item.UpdatedAt})
+		}
+	}
+	if len(out) > 20 {
+		out = out[:20]
 	}
 	return out
 }

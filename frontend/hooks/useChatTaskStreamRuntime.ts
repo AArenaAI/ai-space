@@ -17,6 +17,7 @@ import {
   patchMessageById,
 } from "@/lib/chatMessageStatePatch";
 import type { Message } from "@/lib/chatTypes";
+import { getConversationSnapshot, patchConversationSnapshot } from "@/lib/chatConversationCache";
 
 export type TaskStreamActiveState = {
   convId?: number;
@@ -31,6 +32,20 @@ type TaskStreamEventHandler = {
   getAccumulated: () => string;
   getLatestSequence: () => number;
 };
+
+function patchSnapshotTaskMessage(convId: number | undefined, localMessageId: string, patch: Partial<Message>) {
+  if (!convId) return;
+  const snapshot = getConversationSnapshot(convId);
+  if (!snapshot) return;
+  patchConversationSnapshot(convId, {
+    messages: snapshot.messages.map((message) =>
+      message.id === localMessageId || String(message.serverMessageId || "") === String(patch.serverMessageId || "")
+        ? { ...message, ...patch }
+        : message
+    ),
+    updatedAt: Date.now(),
+  });
+}
 
 type CreateTaskStreamEventHandler = typeof defaultCreateTaskStreamEventHandler;
 type RunTaskEventStream = typeof defaultRunTaskEventStream;
@@ -194,6 +209,12 @@ export function createStartTaskEventStreamAction({
               forceContentFallback: true,
             })
           ));
+          patchSnapshotTaskMessage(convId, localMessageId, {
+            content: accumulated,
+            serverMessageId,
+            lastSequence: latestSequence,
+            generationTaskId,
+          });
         }
         realtimeMarkCompleted(localMessageId);
         const completedRealtimeData = realtimeGet(localMessageId);
