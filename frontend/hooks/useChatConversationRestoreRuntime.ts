@@ -490,15 +490,23 @@ export function useChatConversationRestoreRuntime({
         });
         if (restoreState) {
           const { loadedMessages, activeByServerMessageId } = restoreState;
-          const pendingLocalMessages = Object.values(pendingLocalAssistantsRef?.current || {})
-            .filter((entry) => entry.convId === loadConversationId)
-            .map((entry) => entry.message)
-            .filter((message) => {
+          const pendingLocalMessages = Object.entries(pendingLocalAssistantsRef?.current || {})
+            .filter(([, entry]) => entry.convId === loadConversationId)
+            .map(([id, entry]) => ({ id, message: entry.message }))
+            .filter(({ id, message }) => {
               if (restoreState.mergedMessages.some((item) => item.id === message.id)) return false;
-              return !restoreState.mergedMessages.some((item) =>
-                item.role === "assistant" && (item.createdAt || 0) >= (message.createdAt || 0) - 5000
+              const supersededByServerAssistant = restoreState.mergedMessages.some((item) =>
+                item.role === "assistant" &&
+                Boolean(item.content?.trim() || item.completedAt || item.serverGenerationStatus === "completed") &&
+                (item.createdAt || 0) >= (message.createdAt || 0) - 5000
               );
-            });
+              if (supersededByServerAssistant) {
+                if (pendingLocalAssistantsRef) delete pendingLocalAssistantsRef.current[id];
+                return false;
+              }
+              return true;
+            })
+            .map(({ message }) => message);
           const mergedMessages = (pendingLocalMessages.length > 0
             ? [...restoreState.mergedMessages, ...pendingLocalMessages]
             : restoreState.mergedMessages) as Message[];

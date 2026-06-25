@@ -53,7 +53,12 @@ function loadModule(file) {
         fetchConversationMessageCount: (...args) => countImpl(...args),
         buildConversationRestoreState: ({ data }) => {
           if (data.noState) return undefined;
-          const loadedMessages = data.messages || [];
+          const loadedMessages = (data.messages || []).map((m) => ({
+            ...m,
+            serverMessageId: m.serverMessageId ?? (Number(m.id) || undefined),
+            createdAt: m.createdAt ?? (m.created_at ? Date.parse(m.created_at) : undefined),
+            completedAt: m.completedAt ?? (m.completed_at ? Date.parse(m.completed_at) : undefined),
+          }));
           const mergedMessages = loadedMessages.map((m) => ({ ...m }));
           const activeByServerMessageId = new Map();
           return { loadedMessages, mergedMessages, groupViews: new Map([[1, 0]]), activeByServerMessageId, isLoading: Boolean(data.isLoading) };
@@ -423,6 +428,43 @@ async function testPendingLocalAssistantIsPreservedBeforeServerContent() {
   assert.equal(state.messages[1].activityStatus.kind, "generating");
 }
 
+async function testCompletedServerAssistantDropsPendingLocalPlaceholder() {
+  snapshotCache.clear();
+  persistentSnapshotCache.clear();
+  restoreImpl = async () => ({
+    title: "Done",
+    model: "m1",
+    messages: [
+      { id: "u1", role: "user", content: "waiting", created_at: "2026-01-01T00:00:00Z" },
+      { id: "srv-a1", role: "assistant", content: "final answer", completed_at: "2026-01-01T00:00:08Z", created_at: "2026-01-01T00:00:02Z" },
+    ],
+    last_assistant_status: {
+      message: { content: "final answer" },
+      background_task: { id: 9, status: "completed", completed_at: "2026-01-01T00:00:08Z" },
+    },
+  });
+  statusImpl = async () => undefined;
+  countImpl = async () => undefined;
+  const pendingMessage = {
+    id: "local-a1",
+    role: "assistant",
+    content: "",
+    model: "m1",
+    createdAt: Date.parse("2026-01-01T00:00:02Z"),
+    activityStatus: { kind: "generating", label: "busy" },
+    generationStartedAt: Date.parse("2026-01-01T00:00:02Z"),
+  };
+  const { state, refs } = runRuntime({
+    conversationId: 9,
+    token: "tok",
+    pendingLocalAssistants: { "local-a1": { convId: 9, message: pendingMessage } },
+  });
+  await flush(); await flush();
+  assert.equal(state.messages.some((message) => message.id === "local-a1"), false);
+  assert.equal(state.messages.some((message) => message.id === "srv-a1" && message.content === "final answer"), true);
+  assert.equal(refs.pendingLocalAssistantsRef.current["local-a1"], undefined);
+}
+
 async function testNavigationAbortsControllers() {
   const { refs, mainController, compareController } = runRuntime({ conversationId: 9, token: null, hasMain: true, hasCompare: true });
   assert.equal(mainController.aborted, true);
@@ -445,6 +487,7 @@ async function testNavigationAbortsControllers() {
   await testStatusResumeStartsTaskStream();
   await testLateRestoreResponseCannotOverwriteLatestConversation();
   await testPendingLocalAssistantIsPreservedBeforeServerContent();
+  await testCompletedServerAssistantDropsPendingLocalPlaceholder();
   await testNavigationAbortsControllers();
   console.log("chat conversation restore runtime hook regression passed");
 })();
