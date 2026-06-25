@@ -1025,17 +1025,41 @@ function ImageEditContent() {
   };
 
   const handleDetectText = async () => {
-    if (!sourceFileId) {
-      toast.error("请先上传图片");
+    if (!sourceUrl) {
+      toast.error(t("image.edit.error.uploadFirst"));
       return;
     }
     setIsDetectingText(true);
     try {
-      const token = localStorage.getItem("token") || "";
+      let imagePublicId = sourceFileId || extractUploadedFileId(sourceUrl);
+      if (!imagePublicId) {
+        const formData = new FormData();
+        if (sourceFile) {
+          formData.append("file", sourceFile, sourceFile.name || "edit-image.png");
+        } else if (sourceUrl.startsWith("data:")) {
+          const imageBlob = await (await fetch(sourceUrl)).blob();
+          formData.append("file", imageBlob, "edit-image.png");
+        } else {
+          throw new Error(t("image.edit.error.sourceReadFailed"));
+        }
+        const uploadResp = await fetch(`${API_BASE_URL}/api/files/upload`, {
+          method: "POST",
+          headers: buildUploadHeaders(),
+          body: formData,
+        });
+        if (!uploadResp.ok) throw await readApiError(uploadResp);
+        const uploadData = await uploadResp.json();
+        imagePublicId = uploadData.public_id;
+        if (imagePublicId) setSourceFileId(imagePublicId);
+      }
+      if (!imagePublicId) {
+        throw new Error(t("image.edit.error.sourceReadFailed"));
+      }
+      const token = getStoredToken();
       const res = await fetch(`${API_BASE_URL}/api/images/edit/preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ image_url: sourceFileId, sub_mode: selectedPrecisionRoute.subMode }),
+        body: JSON.stringify({ image_url: imagePublicId, sub_mode: selectedPrecisionRoute.subMode }),
       });
       if (!res.ok) throw await readApiError(res);
       const data = await res.json();
