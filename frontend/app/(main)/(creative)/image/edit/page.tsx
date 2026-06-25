@@ -29,6 +29,8 @@ type ImageEditIntent =
   | "local_repair"
   | "object_remove_repair";
 
+type TextRegion = { bbox: [number, number, number, number]; text: string; confidence: number };
+
 type ImageEditRoute = { subMode: string; intent: ImageEditIntent };
 type PrecisionModeOption = ImageEditRoute & { labelKey: string; descriptionKey: string };
 
@@ -810,8 +812,15 @@ function ImageEditContent() {
   const [recognizedEditMaskData, setRecognizedEditMaskData] = useState("");
   const [recognitionSourceFileId, setRecognitionSourceFileId] = useState("");
   const [isRecognizingRegion, setIsRecognizingRegion] = useState(false);
+  const [textRegions, setTextRegions] = useState<TextRegion[]>([]);
+  const [selectedTextIndices, setSelectedTextIndices] = useState<Set<number>>(new Set());
+  const [isDetectingText, setIsDetectingText] = useState(false);
+  const [textDetectionDone, setTextDetectionDone] = useState(false);
+  const textOverlayImgRef = useRef<HTMLImageElement>(null);
+  const [textOverlayScale, setTextOverlayScale] = useState(1);
   const isRegionBrushMode = editMode === "region-brush";
   const requiresRegionRecognition = editMode === "inpaint" || editMode === "region-brush";
+  const isTextRemovalMode = editMode === "text-removal";
   const isRegionRecognized = !requiresRegionRecognition || regionStep === "recognized";
   const totalFrameClass = "mx-auto flex h-[clamp(640px,78vh,820px)] min-h-[640px] w-full flex-col rounded-2xl border border-surface-border bg-surface-card p-6 shadow-sm";
   const imageSlotClass = "relative flex h-full min-h-0 flex-1 w-full items-center justify-center overflow-hidden rounded-xl border border-surface-border bg-surface-elevated/55";
@@ -1015,6 +1024,36 @@ function ImageEditContent() {
     handleFileSelect({ target: { files: dt.files } } as any);
   };
 
+  const handleDetectText = async () => {
+    if (!sourceFileId) {
+      toast.error("请先上传图片");
+      return;
+    }
+    setIsDetectingText(true);
+    try {
+      const token = localStorage.getItem("token") || "";
+      const res = await fetch(`${API_BASE_URL}/api/images/edit/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ image_url: sourceFileId, sub_mode: selectedPrecisionRoute.subMode }),
+      });
+      if (!res.ok) throw await readApiError(res);
+      const data = await res.json();
+      if (data.ok && data.regions) {
+        setTextRegions(data.regions);
+        setSelectedTextIndices(new Set(data.regions.map((_: TextRegion, i: number) => i)));
+        setTextDetectionDone(true);
+        toast.success(`检测到 ${data.regions.length} 处文字`);
+      } else {
+        toast.error("未检测到文字");
+      }
+    } catch (err) {
+      toast.error(getUserFacingEditError(err, t));
+    } finally {
+      setIsDetectingText(false);
+    }
+  };
+
   const handleEdit = async () => {
     if (!sourceUrl) {
       toast.error(t("image.edit.error.uploadFirst"));
@@ -1103,6 +1142,30 @@ function ImageEditContent() {
       if (editMode === "replace-bg") body.prompt = replacePrompt.trim();
       if (editMode === "inpaint") body.prompt = replacePrompt.trim();
       if (editMode === "region-brush" && replacePrompt.trim()) body.prompt = replacePrompt.trim();
+      if (editMode === "text-removal" && textDetectionDone && selectedTextIndices.size > 0) {
+        const maskCanvas = document.createElement("canvas");
+        const maskImg = await loadHtmlImage(sourceUrl);
+        maskCanvas.width = maskImg.naturalWidth || maskImg.width;
+        maskCanvas.height = maskImg.naturalHeight || maskImg.height;
+        const maskCtx = maskCanvas.getContext("2d");
+        if (maskCtx) {
+          maskCtx.fillStyle = "black";
+          maskCtx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+          maskCtx.fillStyle = "white";
+          const pad = Math.max(2, Math.round(Math.min(maskCanvas.width, maskCanvas.height) / 500));
+          textRegions.forEach((region, i) => {
+            if (selectedTextIndices.has(i)) {
+              const [x1, y1, x2, y2] = region.bbox;
+              maskCtx.fillRect(x1 - pad, y1 - pad, (x2 - x1) + pad * 2, (y2 - y1) + pad * 2);
+            }
+          });
+          const maskBlob = await canvasToBlob(maskCanvas, "image/png");
+          if (maskBlob) {
+            const maskDataUrl = await blobToDataUrl(maskBlob);
+            if (maskDataUrl) body.mask_data = maskDataUrl;
+          }
+        }
+      }
       if (maskData) body.mask_data = maskData;
 
       const res = await fetchWithTransientRetry(`${API_BASE_URL}/api/images/edit`, {
@@ -1204,6 +1267,9 @@ function ImageEditContent() {
     setRegionStep("paint");
     setRecognizedEditMaskData("");
     setRecognitionSourceFileId("");
+    setTextRegions([]);
+    setSelectedTextIndices(new Set());
+    setTextDetectionDone(false);
     maskEditorRef.current?.clearMask();
   };
 
@@ -1243,7 +1309,7 @@ function ImageEditContent() {
   const precisionOptions = PRECISION_MODE_OPTIONS[editMode];
   const needsPrompt = editMode === "replace-bg" || (editMode === "inpaint" && regionStep === "recognized");
   const promptRequired = editMode === "replace-bg" || (editMode === "inpaint" && regionStep === "recognized");
-  const submitDisabled = (promptRequired && !replacePrompt.trim()) || (requiresRegionRecognition && regionStep !== "recognized");
+  const submitDisabled = (promptRequired && !replacePrompt.trim()) || (requiresRegionRecognition && regionStep !== "recognized") || (isTextRemovalMode && textDetectionDone && selectedTextIndices.size === 0);
 
   const renderPrecisionModeSelector = (compact = false) => (
     <div className={cn("w-full rounded-xl border border-surface-border bg-surface-card p-4 shadow-sm", compact ? "max-w-3xl" : "max-w-4xl")}>
@@ -1629,6 +1695,53 @@ function ImageEditContent() {
                         ) : (
                           isMaskMode ? (
                             <MaskBrushEditor ref={maskEditorRef} embedded imageUrl={sourceUrl} disabled={isEditing || isRecognizingRegion} t={t} onMaskChange={resetRegionRecognition} recognized={requiresRegionRecognition && regionStep === "recognized"} recognizedLabel={recognizedObject?.label ? `${t("image.edit.selectedObject")}: ${recognizedObject.label}` : undefined} />
+                          ) : isTextRemovalMode && textDetectionDone && textRegions.length > 0 ? (
+                            <div className={cn(imageSlotClass, "p-3 bg-surface-card")}>
+                              <div className="relative inline-flex max-w-full max-h-full">
+                                <img
+                                  ref={textOverlayImgRef}
+                                  src={sourceUrl}
+                                  alt={t("image.edit.sourceImage")}
+                                  className="max-h-full max-w-full rounded-lg object-contain"
+                                  onLoad={() => {
+                                    const img = textOverlayImgRef.current;
+                                    if (img) setTextOverlayScale(img.clientWidth / (img.naturalWidth || img.width || 1));
+                                  }}
+                                />
+                                {textRegions.map((region, i) => {
+                                  const selected = selectedTextIndices.has(i);
+                                  const [rx1, ry1, rx2, ry2] = region.bbox;
+                                  const s = textOverlayScale;
+                                  return (
+                                    <button
+                                      key={i}
+                                      type="button"
+                                      onClick={() => {
+                                        const next = new Set(selectedTextIndices);
+                                        if (next.has(i)) next.delete(i);
+                                        else next.add(i);
+                                        setSelectedTextIndices(next);
+                                      }}
+                                      className={cn(
+                                        "absolute border-2 rounded transition-all cursor-pointer",
+                                        selected ? "border-red-500 bg-red-500/20" : "border-gray-400/60 bg-gray-400/10 hover:border-gray-500"
+                                      )}
+                                      style={{
+                                        left: `${rx1 * s}px`,
+                                        top: `${ry1 * s}px`,
+                                        width: `${(rx2 - rx1) * s}px`,
+                                        height: `${(ry2 - ry1) * s}px`,
+                                      }}
+                                      title={region.text || `区域 ${i + 1}`}
+                                    >
+                                      {region.text && (
+                                        <span className="absolute -top-5 left-0 text-[10px] px-1 rounded bg-red-500 text-white whitespace-nowrap pointer-events-none">{region.text}</span>
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
                           ) : (
                             <div className={cn(imageSlotClass, "p-3 bg-surface-card")}>
                               <img src={sourceUrl} alt={t("image.edit.sourceImage")} className="h-full max-h-full max-w-full rounded-lg object-contain" />
@@ -1638,6 +1751,47 @@ function ImageEditContent() {
                       </div>
 
                       {!isEditing && renderPrecisionModeSelector()}
+
+                      {isTextRemovalMode && !isEditing && (
+                        <div className="w-full max-w-2xl rounded-xl border border-surface-border bg-surface-card p-4 shadow-sm">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <p className="text-sm font-semibold text-text-primary">文字检测</p>
+                              <p className="mt-1 text-xs text-text-tertiary">
+                                {textDetectionDone
+                                  ? `检测到 ${textRegions.length} 处文字，已选 ${selectedTextIndices.size} 处。点击框可切换。`
+                                  : "点击下方按钮检测图片中的文字区域，可选择要删除的文字。"}
+                              </p>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2">
+                              {textDetectionDone && textRegions.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (selectedTextIndices.size === textRegions.length) {
+                                      setSelectedTextIndices(new Set());
+                                    } else {
+                                      setSelectedTextIndices(new Set(textRegions.map((_, i) => i)));
+                                    }
+                                  }}
+                                  className="flex items-center gap-1.5 rounded-lg border border-surface-border bg-surface-elevated px-3 py-1.5 text-xs font-medium text-text-secondary hover:text-text-primary"
+                                >
+                                  {selectedTextIndices.size === textRegions.length ? "取消全选" : "全选"}
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={handleDetectText}
+                                disabled={isDetectingText}
+                                className="flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-hover disabled:opacity-50"
+                              >
+                                {isDetectingText ? <Spinner className="h-4 w-4 animate-spin" /> : <ScanSearch className="h-4 w-4" />}
+                                {isDetectingText ? "检测中..." : textDetectionDone ? "重新检测" : "检测文字"}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
 
                       {requiresRegionRecognition && !isEditing && (
                         <div className="w-full max-w-2xl rounded-xl border border-surface-border bg-surface-card p-4 shadow-sm">

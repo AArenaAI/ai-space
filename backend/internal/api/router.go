@@ -337,6 +337,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	authorized.POST("/images/generate", imageHandler.GenerateImage)
 	authorized.POST("/images/recognize-mask", imageHandler.RecognizeMask)
 	authorized.POST("/images/edit", imageHandler.EditImage)
+	authorized.POST("/images/edit/preview", imageHandler.TextDetectionPreview)
 	authorized.GET("/images", imageHandler.ListImages)
 	authorized.GET("/images/:id", imageHandler.GetImage)
 	authorized.DELETE("/images/:id", imageHandler.DeleteImage)

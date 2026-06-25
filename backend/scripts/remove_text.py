@@ -353,6 +353,7 @@ def main() -> int:
     parser.add_argument("--output", required=True, help="Output PNG path")
     parser.add_argument("--prompt", default="", help="User text description; currently used for logging only")
     parser.add_argument("--sub-mode", default="auto", choices=["auto", "screenshot", "poster", "watermark"], help="Detection strategy: conservative screenshot labels, large poster text, or watermark overlays")
+    parser.add_argument("--mask-input", default="", help="External mask image path (white=process, black=preserve). If provided, skips auto text detection.")
     parser.add_argument("--mask-output", default="", help="Optional debug mask output path")
     args = parser.parse_args()
 
@@ -368,7 +369,21 @@ def main() -> int:
         original_size = source.size
         rgb = np.array(source)
         chalkboard = is_chalkboard_scene(rgb)
-        mask = build_text_mask(rgb, args.sub_mode)
+
+        # Use external mask if provided, otherwise auto-detect
+        if args.mask_input:
+            mask_path = Path(args.mask_input)
+            if not mask_path.exists():
+                print(json.dumps({"ok": False, "error": f"mask_not_found: {mask_path}"}, ensure_ascii=False), file=sys.stderr)
+                return 2
+            with Image.open(mask_path) as mask_im:
+                mask_im = ImageOps.exif_transpose(mask_im)
+                if mask_im.size != original_size:
+                    mask_im = mask_im.resize(original_size, Image.Resampling.NEAREST)
+                mask = np.array(mask_im.convert("L"))
+            mask = (mask > 127).astype(np.uint8) * 255
+        else:
+            mask = build_text_mask(rgb, args.sub_mode)
 
         if args.mask_output:
             mask_path = Path(args.mask_output)
