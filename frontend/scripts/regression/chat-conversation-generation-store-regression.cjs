@@ -131,6 +131,23 @@ test('stale poller cannot keep completed assistant content active without a task
   assert.equal(state.status, 'idle');
 });
 
+test('older stale assistant task cannot keep latest completed answer active', () => {
+  const state = store.inferConversationGenerationState({
+    conversationId: 7,
+    messages: [
+      { id: 'old', role: 'assistant', content: '', generationTaskId: 99, activityStatus: { status: 'running' } },
+      { id: 'new', role: 'assistant', content: 'final answer', completedAt: 1000, serverGenerationStatus: 'completed' },
+    ],
+    hasActiveTaskStream: false,
+    hasCurrentPoller: false,
+    hasPendingLocalAssistant: false,
+    hasMainStream: true,
+    previous: { conversationId: 7, status: 'streaming', updatedAt: 1 },
+    now: 2,
+  });
+  assert.equal(state.status, 'idle');
+});
+
 test('explicit active task stream still wins for current conversation when message has a task anchor', () => {
   const state = store.inferConversationGenerationState({
     conversationId: 7,
