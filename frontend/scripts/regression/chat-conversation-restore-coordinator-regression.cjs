@@ -68,7 +68,12 @@ async function test(name, fn) {
   }
 }
 
-const response = (ok, data, status = ok ? 200 : 500) => ({ ok, status, json: async () => data });
+const response = (ok, data, status = ok ? 200 : 500, headers = {}) => ({
+  ok,
+  status,
+  headers: { get: (name) => headers[name.toLowerCase()] || headers[name] || null },
+  json: async () => data,
+});
 
 (async () => {
   await test("build restore/status/count URLs", () => {
@@ -103,6 +108,28 @@ const response = (ok, data, status = ok ? 200 : 500) => ({ ok, status, json: asy
     assert.equal(data.snapshot_version, "v1");
     assert.equal(data.messages.length, 1);
     await assert.rejects(fetchConversationRestore({ conversationId: 3, token: "tok", fetchImpl: async () => response(false, {}, 503) }), /chat bootstrap failed: 503/);
+  });
+
+  await test("fetchConversationRestore retries 429 bootstrap responses", async () => {
+    let calls = 0;
+    const sleeps = [];
+    const data = await fetchConversationRestore({
+      apiBaseUrl: "http://api",
+      conversationId: 4,
+      token: "tok",
+      sleep: (ms) => { sleeps.push(ms); return Promise.resolve(); },
+      fetchImpl: async () => {
+        calls += 1;
+        if (calls === 1) return response(false, { error: "too many" }, 429, { "retry-after": "0.05" });
+        return response(true, {
+          conversation: { id: 4, title: "Retried", model: "m1", compare: false },
+          snapshot: { total: 0, messages: [] },
+        });
+      },
+    });
+    assert.equal(calls, 2);
+    assert.ok(sleeps[0] >= 50, `expected retry sleep >=50ms, got ${sleeps[0]}`);
+    assert.equal(data.title, "Retried");
   });
 
   await test("fetch status and count helpers ignore invalid responses", async () => {
@@ -194,7 +221,7 @@ const response = (ok, data, status = ok ? 200 : 500) => ({ ok, status, json: asy
       now: 1000,
     });
     assert.equal(running.shouldResumePolling, true);
-    assert.deepEqual(running.patch, { content: "live", generationTaskId: 6, lastSequence: 4, completedAt: undefined, activityStatus: { busy: true } });
+    assert.deepEqual(running.patch, { content: "live", generationTaskId: 6, lastSequence: 4, completedAt: undefined, activityStatus: { busy: true }, serverGenerationStatus: "running" });
     assert.deepEqual(running.resume, { generationTaskId: 6, lastSequence: 4, initialContent: "live" });
 
     const emptyRunning = buildConversationStatusDecision({
@@ -204,7 +231,7 @@ const response = (ok, data, status = ok ? 200 : 500) => ({ ok, status, json: asy
       now: 1000,
     });
     assert.equal(emptyRunning.shouldResumePolling, true);
-    assert.deepEqual(emptyRunning.patch, { content: "", generationTaskId: 6, lastSequence: 8, completedAt: undefined, activityStatus: { busy: true } });
+    assert.deepEqual(emptyRunning.patch, { content: "", generationTaskId: 6, lastSequence: 8, completedAt: undefined, activityStatus: { busy: true }, serverGenerationStatus: "running" });
     assert.deepEqual(emptyRunning.resume, { generationTaskId: 6, lastSequence: 0, initialContent: "" });
 
     const emptyCompleted = buildConversationStatusDecision({

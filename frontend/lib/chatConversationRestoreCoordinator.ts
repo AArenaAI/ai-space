@@ -4,7 +4,7 @@ import {
   ForkChatPersistedMessage,
   mapPersistedChatMessages,
 } from "./chatForkCoordinator";
-import { buildChatBootstrapUrl, type ChatBootstrapPayload } from "@/lib/chatBootstrapCoordinator";
+import { buildChatBootstrapUrl, defaultBootstrapSleep, type ChatBootstrapPayload } from "@/lib/chatBootstrapCoordinator";
 
 export type ConversationRestoreResponse = {
   notModified?: boolean;
@@ -106,6 +106,9 @@ export async function fetchConversationRestore({
   signal,
   snapshotVersion,
   fetchImpl = fetch,
+  sleep = defaultBootstrapSleep,
+  retry429 = true,
+  max429Retries = 2,
 }: {
   apiBaseUrl?: string;
   conversationId: number;
@@ -113,17 +116,32 @@ export async function fetchConversationRestore({
   signal?: AbortSignal;
   snapshotVersion?: string;
   fetchImpl?: typeof fetch;
+  sleep?: (ms: number) => Promise<void>;
+  retry429?: boolean;
+  max429Retries?: number;
 }): Promise<ConversationRestoreResponse> {
   const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
   if (snapshotVersion) headers["If-None-Match"] = snapshotVersion;
-  const res = await fetchImpl(buildChatBootstrapUrl({ apiBaseUrl, conversationId, messageTail: DEFAULT_CONVERSATION_RESTORE_TAIL, conversationLimit: 30 }), {
-    headers,
-    credentials: "include",
-    signal,
-  });
-  if (res.status === 304) return { notModified: true, snapshot_version: snapshotVersion };
-  if (!res.ok) throw new Error(`chat bootstrap failed: ${res.status}`);
-  return mapChatBootstrapPayloadToConversationRestore(await res.json());
+  const url = buildChatBootstrapUrl({ apiBaseUrl, conversationId, messageTail: DEFAULT_CONVERSATION_RESTORE_TAIL, conversationLimit: 30 });
+  let attempt = 0;
+  for (;;) {
+    const res = await fetchImpl(url, {
+      headers,
+      credentials: "include",
+      signal,
+    });
+    if (res.status === 304) return { notModified: true, snapshot_version: snapshotVersion };
+    if (res.status === 429 && retry429 && attempt < max429Retries && !signal?.aborted) {
+      attempt += 1;
+      const retryAfter = res.headers?.get?.("Retry-After");
+      const seconds = retryAfter ? Number(retryAfter) : NaN;
+      const retryAfterMs = Number.isFinite(seconds) && seconds >= 0 ? Math.min(Math.max(seconds * 1000, 250), 5000) : undefined;
+      await sleep(retryAfterMs ?? Math.min(250 * 2 ** (attempt - 1), 1000));
+      continue;
+    }
+    if (!res.ok) throw new Error(`chat bootstrap failed: ${res.status}`);
+    return mapChatBootstrapPayloadToConversationRestore(await res.json());
+  }
 }
 
 export function mapChatBootstrapPayloadToConversationRestore(payload: ChatBootstrapPayload): ConversationRestoreResponse {

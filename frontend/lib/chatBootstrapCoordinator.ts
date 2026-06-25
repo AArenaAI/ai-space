@@ -109,7 +109,29 @@ export type FetchChatBootstrapInput = {
   conversationLimit?: number;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
+  sleep?: (ms: number) => Promise<void>;
+  retry429?: boolean;
+  max429Retries?: number;
 };
+
+const bootstrapInFlight = new Map<string, Promise<ChatBootstrapPayload>>();
+
+export function defaultBootstrapSleep(ms: number) {
+  return new Promise<void>((resolve) => globalThis.setTimeout(resolve, ms));
+}
+
+function parseRetryAfterMs(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(Math.max(seconds * 1000, 250), 5000);
+  const at = Date.parse(value);
+  if (Number.isFinite(at)) return Math.min(Math.max(at - Date.now(), 250), 5000);
+  return undefined;
+}
+
+function buildBootstrapInFlightKey(input: { url: string; token?: string }) {
+  return `${input.token || "guest"} ${input.url}`;
+}
 
 export function buildChatBootstrapUrl(input: Pick<FetchChatBootstrapInput, "apiBaseUrl" | "conversationId" | "workspaceId" | "messageTail" | "conversationLimit">): string {
   const params = new URLSearchParams();
@@ -130,21 +152,50 @@ export async function fetchChatBootstrap({
   conversationLimit = 30,
   signal,
   fetchImpl = fetch,
+  sleep = defaultBootstrapSleep,
+  retry429 = true,
+  max429Retries = 2,
 }: FetchChatBootstrapInput): Promise<ChatBootstrapPayload> {
   const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-  const res = await fetchImpl(buildChatBootstrapUrl({ apiBaseUrl, conversationId, workspaceId, messageTail, conversationLimit }), {
-    headers,
-    credentials: "include",
-    signal,
-  });
-  const data = await res.json().catch(() => ({}));
-  if (res.status === 401) return { auth_status: "anonymous", ...data } as ChatBootstrapPayload;
-  if (!res.ok) {
-    const error = new Error(`chat bootstrap failed: ${res.status}`) as Error & { status?: number };
-    error.status = res.status;
-    throw error;
+  const url = buildChatBootstrapUrl({ apiBaseUrl, conversationId, workspaceId, messageTail, conversationLimit });
+  const key = buildBootstrapInFlightKey({ url, token });
+  if (!signal) {
+    const existing = bootstrapInFlight.get(key);
+    if (existing) return existing;
   }
-  return data;
+
+  const task = (async () => {
+    let attempt = 0;
+    for (;;) {
+      const res = await fetchImpl(url, {
+        headers,
+        credentials: "include",
+        signal,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) return { auth_status: "anonymous", ...data } as ChatBootstrapPayload;
+      if (res.status === 429 && retry429 && attempt < max429Retries && !signal?.aborted) {
+        attempt += 1;
+        const retryAfterMs = parseRetryAfterMs(res.headers?.get?.("Retry-After") || null);
+        const backoffMs = retryAfterMs ?? Math.min(250 * 2 ** (attempt - 1), 1000);
+        await sleep(backoffMs);
+        continue;
+      }
+      if (!res.ok) {
+        const error = new Error(`chat bootstrap failed: ${res.status}`) as Error & { status?: number; retryAfterMs?: number };
+        error.status = res.status;
+        error.retryAfterMs = parseRetryAfterMs(res.headers?.get?.("Retry-After") || null);
+        throw error;
+      }
+      return data;
+    }
+  })();
+
+  if (!signal) {
+    bootstrapInFlight.set(key, task);
+    task.finally(() => bootstrapInFlight.delete(key));
+  }
+  return task;
 }
 
 export function parseBootstrapCompareModels(value: unknown): string[] {
