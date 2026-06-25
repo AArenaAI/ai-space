@@ -382,6 +382,15 @@ def main() -> int:
                     mask_im = mask_im.resize(original_size, Image.Resampling.NEAREST)
                 mask = np.array(mask_im.convert("L"))
             mask = (mask > 127).astype(np.uint8) * 255
+            if args.sub_mode == "manual":
+                # Manual brush strokes are user intent, not exact glyph masks.
+                # Expand them to cover anti-aliasing, glow, stroke outlines, and
+                # small gaps left by fast brushing; otherwise game/UI text leaves
+                # dotted white residue around the painted area.
+                expand_px = max(5, round(min(original_size) / 180))
+                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * expand_px + 1, 2 * expand_px + 1))
+                mask = cv2.dilate(mask, kernel, iterations=1)
+                mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
         else:
             mask = build_text_mask(rgb, args.sub_mode)
 
@@ -392,7 +401,10 @@ def main() -> int:
 
         # OpenCV expects BGR. Telea inpaint changes only masked pixels.
         bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-        radius = max(4 if chalkboard else 3, round(min(original_size) / (220 if chalkboard else 350)))
+        if args.sub_mode == "manual":
+            radius = max(5, round(min(original_size) / 260))
+        else:
+            radius = max(4 if chalkboard else 3, round(min(original_size) / (220 if chalkboard else 350)))
         repaired_bgr = cv2.inpaint(bgr, mask, radius, cv2.INPAINT_TELEA)
         repaired_rgb = cv2.cvtColor(repaired_bgr, cv2.COLOR_BGR2RGB)
         # Hard pixel-preservation guard: OpenCV inpaint is only supposed to
