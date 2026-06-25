@@ -1822,6 +1822,13 @@ function ImageEditContent() {
 
                       {!isEditing && renderPrecisionModeSelector()}
 
+                      {isManualTextRemovalMode && !isEditing && (
+                        <div className="w-full max-w-2xl rounded-xl border border-surface-border bg-surface-card p-4 shadow-sm">
+                          <p className="text-sm font-semibold text-text-primary">手动涂抹</p>
+                          <p className="mt-1 text-xs text-text-tertiary">直接在图片上涂抹要删除的文字区域，然后点击下方“移除文字”。这条路径不跑自动检测，速度最快、最稳定。</p>
+                        </div>
+                      )}
+
                       {isTextRemovalMode && !isManualTextRemovalMode && !isEditing && (
                         <div className="w-full max-w-2xl rounded-xl border border-surface-border bg-surface-card p-4 shadow-sm">
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

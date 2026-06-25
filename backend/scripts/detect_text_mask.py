@@ -170,7 +170,11 @@ def detect_with_tesseract(image_path: str, sub_mode: str = "auto") -> list[dict]
     ocr_input, scale, y_offset = prepare_tesseract_input(image_path, sub_mode)
     psm = "6"
     cmd = ["tesseract", ocr_input, "stdout", "-l", lang, "--psm", psm, "tsv"]
-    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
+    try:
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=8)
+    except subprocess.TimeoutExpired:
+        print("[detect_text_mask] tesseract timed out; falling back to manual selection", file=sys.stderr)
+        return []
     if proc.returncode != 0:
         print(f"[detect_text_mask] tesseract failed: {proc.stderr.strip()}", file=sys.stderr)
         return []
