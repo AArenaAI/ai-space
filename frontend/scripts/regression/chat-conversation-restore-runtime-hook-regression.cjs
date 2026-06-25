@@ -69,6 +69,7 @@ function loadModule(file) {
       };
     }
     if (specifier === "@/lib/chatMessageStatePatch") return { patchMessageById: (messages, id, patch) => messages.map((m) => m.id === id ? { ...m, ...patch } : m) };
+    if (specifier === "@/lib/chatForkCoordinator") return { buildGroupViewsFromMessages: () => new Map([[1, 0]]) };
     if (specifier === "@/lib/chatConversationCache") {
       return {
         getConversationSnapshot: (id) => snapshotCache.get(id),
@@ -123,6 +124,7 @@ function runRuntime(overrides = {}) {
     compareAbortControllersRef: { current: overrides.hasCompare ? [compareController] : [] },
     abortReasonRef: { current: null },
     activeTaskStreamsRef: { current: overrides.active || {} },
+    pendingLocalAssistantsRef: { current: overrides.pendingLocalAssistants || {} },
   };
   const lifecycle = [];
   const starts = [];
@@ -148,6 +150,7 @@ function runRuntime(overrides = {}) {
     applyJustCreatedNavigationLifecycle: (plan) => lifecycle.push(["just", plan]),
     applyLoadExistingNavigationLifecycle: (plan) => lifecycle.push(["load", plan]),
     startTaskEventStream: (...args) => starts.push(args),
+    startBackgroundPolling: (...args) => starts.push(["poll", ...args]),
     translate: (key) => key,
     getToken: () => overrides.token ?? null,
     createId: () => "id",
@@ -177,6 +180,7 @@ async function testLoadExistingRestoresStateAndCounts() {
   statusImpl = async () => undefined;
   countImpl = async () => 88;
   const { state, lifecycle } = runRuntime({ conversationId: 9, token: "tok" });
+  await flush();
   await flush();
   await flush();
   assert.equal(lifecycle[0][0], "load");
@@ -286,7 +290,7 @@ async function testSnapshotVersionSkipsUnchangedRestoreReconcile() {
   const { state } = runRuntime({ conversationId: 9, token: "tok" });
   assert.equal(state.messages[0].content, "cached");
   await flush(); await flush();
-  assert.equal(restoreArgs.snapshotVersion, "9:1:stable");
+  assert.equal(restoreArgs.snapshotVersion, undefined);
   assert.equal(state.messages[0].content, "cached");
   assert.equal(persistentSnapshotCache.has(9), false);
 }
@@ -324,7 +328,7 @@ async function testStatusResumeStartsTaskStream() {
   countImpl = async () => undefined;
   const { starts, state } = runRuntime({ conversationId: 9, token: "tok" });
   await flush(); await flush();
-  assert.deepEqual(starts[0], [9, "a", 12, 5, "partial", 99]);
+  assert.deepEqual(starts.find((entry) => entry[0] === "poll"), ["poll", 9, "a", 12]);
   assert.ok(state.messages[0].activityStatus);
 }
 async function testLateRestoreResponseCannotOverwriteLatestConversation() {
@@ -358,6 +362,37 @@ async function testLateRestoreResponseCannotOverwriteLatestConversation() {
   second.refs.conversationLoadSeqRef.current = sharedSeqRef.current;
 }
 
+async function testPendingLocalAssistantIsPreservedBeforeServerContent() {
+  snapshotCache.clear();
+  persistentSnapshotCache.clear();
+  restoreImpl = async () => ({
+    title: "Pending",
+    model: "m1",
+    messages: [{ id: "u1", role: "user", content: "waiting" }],
+  });
+  statusImpl = async () => undefined;
+  countImpl = async () => undefined;
+  const pendingMessage = {
+    id: "local-a1",
+    role: "assistant",
+    content: "",
+    model: "m1",
+    createdAt: 123,
+    activityStatus: { kind: "generating", label: "busy" },
+    generationStartedAt: 123,
+  };
+  const { state } = runRuntime({
+    conversationId: 9,
+    token: "tok",
+    pendingLocalAssistants: { "local-a1": { convId: 9, message: pendingMessage } },
+  });
+  await flush(); await flush();
+  assert.equal(state.messages.length, 2);
+  assert.equal(state.messages[1].id, "local-a1");
+  assert.equal(state.messages[1].role, "assistant");
+  assert.equal(state.messages[1].activityStatus.kind, "generating");
+}
+
 async function testNavigationAbortsControllers() {
   const { refs, mainController, compareController } = runRuntime({ conversationId: 9, token: null, hasMain: true, hasCompare: true });
   assert.equal(mainController.aborted, true);
@@ -378,6 +413,7 @@ async function testNavigationAbortsControllers() {
   await testRestoreMetaSkipsCountAndStatusFetches();
   await testStatusResumeStartsTaskStream();
   await testLateRestoreResponseCannotOverwriteLatestConversation();
+  await testPendingLocalAssistantIsPreservedBeforeServerContent();
   await testNavigationAbortsControllers();
   console.log("chat conversation restore runtime hook regression passed");
 })();

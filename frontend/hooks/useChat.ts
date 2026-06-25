@@ -141,6 +141,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   const [effectiveSkillKey, setEffectiveSkillKey] = useState<string | undefined>(skillKey);
   const [groupViews, setGroupViews] = useState<Map<number, number>>(new Map());
   const taskStreamsRef = useRef<Record<string, AbortController>>({});
+  const pendingLocalAssistantsRef = useRef<Record<string, { convId?: number; message: Message }>>({});
   const resumedBootstrapTaskIdsRef = useRef<Set<number>>(new Set());
   const abortReasonRef = useRef<"user" | "navigation" | null>(null);
   const modelsKey = models.map((m) => m.id).join("|");
@@ -315,6 +316,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     compareAbortControllersRef,
     abortReasonRef,
     activeTaskStreamsRef,
+    pendingLocalAssistantsRef,
     setMessages,
     setConversationTitle,
     setLoadedPersistedMessages,
@@ -358,6 +360,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     compareAbortControllersRef,
     abortReasonRef,
     taskStreamsRef,
+    pendingLocalAssistantsRef,
     backgroundPollersRef,
     lastReasoningRef,
     lastSearchRef,

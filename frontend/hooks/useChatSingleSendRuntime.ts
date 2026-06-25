@@ -52,6 +52,7 @@ export type UseChatSingleSendRuntimeOptions = {
   abortControllerRef: MutableRefObject<AbortController | null>;
   abortReasonRef: MutableRefObject<AbortReason>;
   taskStreamsRef: MutableRefObject<Record<string, AbortController>>;
+  pendingLocalAssistantsRef?: MutableRefObject<Record<string, { convId?: number; message: Message }>>;
   lastReasoningRef: MutableRefObject<SendReasoning>;
   lastSearchRef: MutableRefObject<boolean>;
   streamResponse: StreamResponse;
@@ -76,6 +77,7 @@ export function useChatSingleSendRuntime({
   abortControllerRef,
   abortReasonRef,
   taskStreamsRef,
+  pendingLocalAssistantsRef,
   lastReasoningRef,
   lastSearchRef,
   streamResponse,
@@ -136,6 +138,16 @@ export function useChatSingleSendRuntime({
       const contextMessages = messagePlan.contextMessages;
       const assistantMsg = messagePlan.assistantMessage;
       initializeAssistantRealtime(assistantMsg.id, assistantMsg.createdAt || now());
+      if (pendingLocalAssistantsRef && convId) {
+        pendingLocalAssistantsRef.current[assistantMsg.id] = {
+          convId,
+          message: {
+            ...assistantMsg,
+            activityStatus: createBusyGeneratingStatus(translate),
+            generationStartedAt: assistantMsg.createdAt || now(),
+          } as Message,
+        };
+      }
       setMessages((prev) => applySingleSendMessagePlan(prev, messagePlan));
 
       setIsLoading(true);
@@ -175,8 +187,12 @@ export function useChatSingleSendRuntime({
           setMessages((prev) => patchMessageById(prev, assistantMsg.id, decision.patch));
         }
       } finally {
+        const finalAbortReason = abortReasonRef.current;
+        if (pendingLocalAssistantsRef && finalAbortReason !== "navigation") {
+          delete pendingLocalAssistantsRef.current[assistantMsg.id];
+        }
         const decision = decideSingleSendFinally({
-          abortReason: abortReasonRef.current,
+          abortReason: finalAbortReason,
           hasActiveTaskStream: Object.keys(taskStreamsRef.current).length > 0,
           conversationId: convId,
         });

@@ -38,6 +38,7 @@ import {
   createGeneratingStatus,
 } from "@/lib/chatActivityStatus";
 import type { ChatModel, Message } from "@/lib/chatTypes";
+import { buildGroupViewsFromMessages } from "@/lib/chatForkCoordinator";
 import type { TaskStreamActiveState } from "@/hooks/useChatTaskStreamRuntime";
 
 type AbortReason = "user" | "navigation" | null;
@@ -147,6 +148,7 @@ export type UseChatConversationRestoreRuntimeOptions = {
   compareAbortControllersRef: MutableRefObject<AbortController[]>;
   abortReasonRef: MutableRefObject<AbortReason>;
   activeTaskStreamsRef: MutableRefObject<Record<string, TaskStreamActiveState>>;
+  pendingLocalAssistantsRef?: MutableRefObject<Record<string, { convId?: number; message: Message }>>;
   setMessages: Dispatch<SetStateAction<Message[]>>;
   setConversationTitle: Dispatch<SetStateAction<string>>;
   setLoadedPersistedMessages: Dispatch<SetStateAction<number>>;
@@ -185,6 +187,7 @@ export function useChatConversationRestoreRuntime({
   compareAbortControllersRef,
   abortReasonRef,
   activeTaskStreamsRef,
+  pendingLocalAssistantsRef,
   setMessages,
   setConversationTitle,
   setLoadedPersistedMessages,
@@ -486,7 +489,20 @@ export function useChatConversationRestoreRuntime({
           activeActivityStatus: createGeneratingStatus(translate),
         });
         if (restoreState) {
-          const { loadedMessages, mergedMessages, groupViews, activeByServerMessageId } = restoreState;
+          const { loadedMessages, activeByServerMessageId } = restoreState;
+          const pendingLocalMessages = Object.values(pendingLocalAssistantsRef?.current || {})
+            .filter((entry) => entry.convId === loadConversationId)
+            .map((entry) => entry.message)
+            .filter((message) => {
+              if (restoreState.mergedMessages.some((item) => item.id === message.id)) return false;
+              return !restoreState.mergedMessages.some((item) =>
+                item.role === "assistant" && (item.createdAt || 0) >= (message.createdAt || 0) - 5000
+              );
+            });
+          const mergedMessages = (pendingLocalMessages.length > 0
+            ? [...restoreState.mergedMessages, ...pendingLocalMessages]
+            : restoreState.mergedMessages) as Message[];
+          const groupViews = buildGroupViewsFromMessages(mergedMessages);
           if (!hasDisplayedSnapshot) {
             hasDisplayedSnapshot = true;
             displayedSnapshotSource = "backend";
@@ -538,7 +554,7 @@ export function useChatConversationRestoreRuntime({
             totalMessages: resolvedTotalMessages,
           });
 
-          const lastAssistant = findLastAssistantStatusTarget(mergedMessages, activeByServerMessageId);
+          const lastAssistant = findLastAssistantStatusTarget(restoreState.mergedMessages as any, activeByServerMessageId);
           const applyStatusData = (statusData: NonNullable<typeof data.last_assistant_status>) => {
             if (!lastAssistant || !isLatestLoad() || loadController.signal.aborted) return;
             emitConversationSwitchPerformanceEvent("message-status", {

@@ -38,6 +38,7 @@ export type UseChatSendRuntimeOptions = {
   compareAbortControllersRef: MutableRefObject<AbortController[]>;
   abortReasonRef: MutableRefObject<AbortReason>;
   taskStreamsRef: MutableRefObject<Record<string, AbortController>>;
+  pendingLocalAssistantsRef?: MutableRefObject<Record<string, { convId?: number; message: Message }>>;
   backgroundPollersRef: MutableRefObject<Record<string, number>>;
   lastReasoningRef: MutableRefObject<SendReasoning>;
   lastSearchRef: MutableRefObject<boolean>;
@@ -71,6 +72,7 @@ export function useChatSendRuntime({
   compareAbortControllersRef,
   abortReasonRef,
   taskStreamsRef,
+  pendingLocalAssistantsRef,
   backgroundPollersRef,
   lastReasoningRef,
   lastSearchRef,
@@ -110,6 +112,7 @@ export function useChatSendRuntime({
     abortControllerRef,
     abortReasonRef,
     taskStreamsRef,
+    pendingLocalAssistantsRef,
     lastReasoningRef,
     lastSearchRef,
     streamResponse,
