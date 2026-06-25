@@ -5,6 +5,14 @@ function isTerminalGenerationStatus(status?: string) {
   return status === "completed" || status === "failed" || status === "cancelled" || status === "incomplete";
 }
 
+function hasCompletedAssistantContent(message: Message) {
+  return message.role === "assistant" && Boolean(message.content?.trim());
+}
+
+function hasExplicitGenerationAnchor(message: Message) {
+  return Boolean(message.generationTaskId || message.backgroundTaskId || message.useBackground || message.isComplexTask);
+}
+
 export type ConversationGenerationStatus = "idle" | "pending" | "streaming" | "polling" | "stopped" | "completed" | "failed";
 
 export type ConversationGenerationState = {
@@ -63,11 +71,16 @@ export function inferConversationGenerationState(input: {
   if (!conversationId) return undefined;
   const now = input.now ?? Date.now();
   const hasTerminalGenerationMessage = input.messages.some((message) => isTerminalGenerationStatus(message.serverGenerationStatus));
-  const hasGeneratingMessage = input.messages.some((message) => !isTerminalGenerationStatus(message.serverGenerationStatus) && isMessageGenerating(message, false));
-  const allowExternalActiveState = hasGeneratingMessage || !hasTerminalGenerationMessage;
+  const hasRecoverableGeneratingMessage = input.messages.some((message) => {
+    if (isTerminalGenerationStatus(message.serverGenerationStatus)) return false;
+    if (!isMessageGenerating(message, false)) return false;
+    if (hasCompletedAssistantContent(message) && !hasExplicitGenerationAnchor(message)) return false;
+    return true;
+  });
+  const allowExternalActiveState = hasRecoverableGeneratingMessage || !hasTerminalGenerationMessage;
   if (input.hasActiveTaskStream && allowExternalActiveState) return { ...(input.previous || { conversationId }), conversationId, status: "streaming", updatedAt: now };
   if (input.hasCurrentPoller && allowExternalActiveState) return { ...(input.previous || { conversationId }), conversationId, status: "polling", updatedAt: now };
-  if (input.hasPendingLocalAssistant || hasGeneratingMessage || (input.hasMainStream && hasGeneratingMessage)) {
+  if (input.hasPendingLocalAssistant || hasRecoverableGeneratingMessage || (input.hasMainStream && hasRecoverableGeneratingMessage)) {
     return { ...(input.previous || { conversationId }), conversationId, status: "pending", updatedAt: now };
   }
   if (input.previous && isConversationGenerationActive(input.previous)) {

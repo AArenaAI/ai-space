@@ -13,6 +13,7 @@ source = source.replace(/import type \{ Message \} from "@\/lib\/chatTypes";\n/g
 source = source.replace(/import \{ isMessageGenerating \} from "@\/lib\/chatContent";\n/g, `
 function isMessageGenerating(msg, isStreaming) {
   if (isStreaming) return true;
+  if (msg.serverGenerationStatus === 'completed' || msg.serverGenerationStatus === 'failed' || msg.serverGenerationStatus === 'cancelled' || msg.serverGenerationStatus === 'incomplete') return false;
   if (msg.completedAt || msg.stopped) return false;
   if (msg.activityStatus && (msg.activityStatus.status === 'running' || msg.activityStatus.status === 'searching')) return true;
   if (msg.searchStatus === 'searching') return true;
@@ -85,6 +86,26 @@ test('terminal server status wins over stale current poller refs', () => {
     hasPendingLocalAssistant: false,
     hasMainStream: false,
     previous: { conversationId: 7, status: 'polling', updatedAt: 1 },
+    now: 2,
+  });
+  assert.equal(state.status, 'idle');
+});
+
+test('restored finished assistant content with stale search or reasoning activity is idle', () => {
+  const state = store.inferConversationGenerationState({
+    conversationId: 7,
+    messages: [{
+      id: 'a',
+      role: 'assistant',
+      content: '<think>done reasoning</think>\n\n今天是 2026 年 6 月 25 日。',
+      activityStatus: { status: 'running' },
+      searchStatus: 'searching',
+    }],
+    hasActiveTaskStream: false,
+    hasCurrentPoller: false,
+    hasPendingLocalAssistant: false,
+    hasMainStream: false,
+    previous: { conversationId: 7, status: 'streaming', updatedAt: 1 },
     now: 2,
   });
   assert.equal(state.status, 'idle');
