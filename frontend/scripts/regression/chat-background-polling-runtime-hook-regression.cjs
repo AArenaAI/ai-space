@@ -152,6 +152,36 @@ test("poll state patches message without overriding live stream content", () => 
   assert.equal(messages.get()[0].completedAt, 123);
 });
 
+test("poll state patches restored server-id message after local placeholder was replaced", () => {
+  const messages = createState([{ id: "srv-9", content: "", serverMessageId: 9, activityStatus: { kind: "generating", label: "busy" } }]);
+  let callbacks;
+  const action = createStartBackgroundPollingAction({
+    apiBaseUrl: "",
+    backgroundPollersRef: { current: {} },
+    taskStreamsRef: { current: {} },
+    setMessages: messages.set,
+    setIsLoading: () => {},
+    getConversationTitle: () => "title",
+    getSelectedModel: () => ({ id: "model", name: "Model" }),
+    stopBackgroundPoller: () => {},
+    stopTaskStream: () => {},
+    getToken: () => "tok",
+    realtimeGet: () => undefined,
+    runner: (opts) => {
+      callbacks = opts.callbacks;
+      return { timer: 7 };
+    },
+    now: () => 456,
+    translate: (key) => `t:${key}`,
+  });
+  action(5, "local-placeholder", 9);
+  callbacks.onPollState({ content: "final from db", isFinished: true, isCompleted: true, status: "completed" });
+  assert.equal(messages.get()[0].content, "final from db");
+  assert.equal(messages.get()[0].completedAt, 456);
+  assert.equal(messages.get()[0].activityStatus, undefined);
+  assert.equal(messages.get()[0].serverGenerationStatus, "completed");
+});
+
 test("finished callback stops poller/stream, emits notification, and updates loading", () => {
   const backgroundPollersRef = { current: { local: 7, otherPoller: 8 } };
   const taskStreamsRef = { current: { local: {}, otherStream: {} } };
