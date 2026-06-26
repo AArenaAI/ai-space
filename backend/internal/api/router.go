@@ -205,8 +205,11 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	betaConfigHandler.InitDefaultConfigs()
 	publicWithAuth.GET("/beta/config", betaConfigHandler.GetPublicConfig)
 
-	// 初始化 Changelog Handler
+	// 初始化 Changelog / Analytics Handler
 	changelogHandler := NewChangelogHandler(db)
+	analyticsHandler := NewAnalyticsHandler(db)
+	publicWithAuth.POST("/analytics/track", analyticsHandler.TrackEvent)
+	publicWithAuth.POST("/analytics/track-batch", analyticsHandler.BatchTrackEvents)
 
 	// 公开对比问答（支持匿名用户，内部已有额度与权限校验）
 	publicWithAuth.POST("/chat/compare", chatHandler.CompareChat)
