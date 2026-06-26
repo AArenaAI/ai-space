@@ -1079,12 +1079,12 @@ function ImageEditContent() {
       if (data.ok && data.regions) {
         const regions = Array.isArray(data.regions) ? data.regions : [];
         setTextRegions(regions);
-        setSelectedTextIndices(new Set(regions.map((_: TextRegion, i: number) => i)));
+        setSelectedTextIndices(new Set());
         setTextDetectionDone(true);
         if (regions.length > 0) {
           const typeLabel = data.image_type ? `图片类型：${data.image_type}；` : "";
-          setTextDetectionNote(`${typeLabel}检测到 ${regions.length} 处文字区域。可点击框切换删除范围。`);
-          toast.success(`检测到 ${regions.length} 处文字区域`);
+          setTextDetectionNote(`${typeLabel}已读取 ${regions.length} 条候选文字。请在下方列表勾选要删除的内容。`);
+          toast.success(`已读取 ${regions.length} 条候选文字`);
         } else if (data.fallback_reason === "too_many_candidates") {
           setTextDetectionNote("自动检测不稳定，已隐藏疑似纹理误检框。请切换截图保护或后续使用手动选择区域。");
           toast.error("自动检测不稳定，未展示疑似误检框");
@@ -1792,7 +1792,7 @@ function ImageEditContent() {
                                   }}
                                 />
                                 {textRegions.map((region, i) => {
-                                  const selected = selectedTextIndices.has(i);
+                                  if (!selectedTextIndices.has(i)) return null;
                                   const [rx1, ry1, rx2, ry2] = region.bbox;
                                   const s = textOverlayScale;
                                   return (
@@ -1801,26 +1801,18 @@ function ImageEditContent() {
                                       type="button"
                                       onClick={() => {
                                         const next = new Set(selectedTextIndices);
-                                        if (next.has(i)) next.delete(i);
-                                        else next.add(i);
+                                        next.delete(i);
                                         setSelectedTextIndices(next);
                                       }}
-                                      className={cn(
-                                        "absolute border-2 rounded transition-all cursor-pointer",
-                                        selected ? "border-red-500 bg-red-500/20" : "border-gray-400/60 bg-gray-400/10 hover:border-gray-500"
-                                      )}
+                                      className="absolute cursor-pointer rounded border-2 border-red-500 bg-red-500/20 transition-all"
                                       style={{
                                         left: `${rx1 * s}px`,
                                         top: `${ry1 * s}px`,
                                         width: `${(rx2 - rx1) * s}px`,
                                         height: `${(ry2 - ry1) * s}px`,
                                       }}
-                                      title={region.text || `区域 ${i + 1}`}
-                                    >
-                                      {region.text && (
-                                        <span className="absolute -top-5 left-0 text-[10px] px-1 rounded bg-red-500 text-white whitespace-nowrap pointer-events-none">{region.text}</span>
-                                      )}
-                                    </button>
+                                      title={region.text || `候选 ${i + 1}`}
+                                    />
                                   );
                                 })}
                               </div>
@@ -1849,7 +1841,7 @@ function ImageEditContent() {
                               <p className="text-sm font-semibold text-text-primary">文字检测</p>
                               <p className="mt-1 text-xs text-text-tertiary">
                                 {textDetectionDone
-                                  ? (textRegions.length > 0 ? (textDetectionNote || `检测到 ${textRegions.length} 处文字，已选 ${selectedTextIndices.size} 处。点击框可切换。`) : textDetectionNote || "未识别到稳定文字区域。")
+                                  ? (textRegions.length > 0 ? (textDetectionNote || `已读取 ${textRegions.length} 条候选文字，已选 ${selectedTextIndices.size} 条。`) : textDetectionNote || "未识别到稳定文字区域。")
                                   : "点击下方按钮检测图片中的文字区域，可选择要删除的文字。"}
                               </p>
                             </div>
@@ -1879,6 +1871,52 @@ function ImageEditContent() {
                                 {isDetectingText ? "检测中..." : textDetectionDone ? "重新检测" : "检测文字"}
                               </button>
                             </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {isTextRemovalMode && !isManualTextRemovalMode && !isEditing && textDetectionDone && textRegions.length > 0 && (
+                        <div className="w-full max-w-4xl rounded-xl border border-surface-border bg-surface-card p-4 shadow-sm">
+                          <div className="mb-3 flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-semibold text-text-primary">识别文字内容</p>
+                              <p className="mt-1 text-xs text-text-tertiary">从列表勾选要删除的内容；左侧图片只高亮已选项。</p>
+                            </div>
+                            <span className="rounded-full bg-surface-elevated px-2.5 py-1 text-xs text-text-tertiary">已选 {selectedTextIndices.size}/{textRegions.length}</span>
+                          </div>
+                          <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                            {textRegions.map((region, i) => {
+                              const selected = selectedTextIndices.has(i);
+                              const label = region.text?.trim() || `${region.type || "文字区域"} #${i + 1}`;
+                              const riskLabel = region.risk === "high" ? "高风险" : region.risk === "medium" ? "中风险" : "低风险";
+                              return (
+                                <label
+                                  key={i}
+                                  className={cn(
+                                    "flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-all",
+                                    selected ? "border-red-400 bg-red-500/10" : "border-surface-border bg-surface-elevated hover:border-[color:var(--brand-border)]"
+                                  )}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={selected}
+                                    onChange={() => {
+                                      const next = new Set(selectedTextIndices);
+                                      if (next.has(i)) next.delete(i);
+                                      else next.add(i);
+                                      setSelectedTextIndices(next);
+                                    }}
+                                    className="mt-1 h-4 w-4 accent-red-500"
+                                  />
+                                  <div className="min-w-0 flex-1">
+                                    <p className="break-words text-sm font-medium text-text-primary">{label}</p>
+                                    <p className="mt-1 text-[11px] text-text-tertiary">
+                                      {region.type || "text"} · {region.repair_strategy || "local"} · {riskLabel}
+                                    </p>
+                                  </div>
+                                </label>
+                              );
+                            })}
                           </div>
                         </div>
                       )}
