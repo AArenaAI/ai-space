@@ -468,10 +468,13 @@ func (h *ConversationHandler) buildMessagesWithGroupPayload(conversationID uint,
 // /conversations/:id and /conversations/:id/messages.
 type MessageWithGroup struct {
 	models.Message
-	GroupID       uint     `json:"group_id,omitempty"`
-	GroupIndex    int      `json:"group_index"`
-	GroupModels   []string `json:"group_models,omitempty"`
-	UserMessageID uint     `json:"user_message_id,omitempty"`
+	GroupID                uint     `json:"group_id,omitempty"`
+	GroupIndex             int      `json:"group_index"`
+	GroupModels            []string `json:"group_models,omitempty"`
+	UserMessageID          uint     `json:"user_message_id,omitempty"`
+	GenerationTaskID       uint     `json:"generation_task_id,omitempty"`
+	LastSequenceNumber     int64    `json:"last_sequence_number,omitempty"`
+	ServerGenerationStatus string   `json:"server_generation_status,omitempty"`
 }
 
 func (h *ConversationHandler) expandMessagesToCompleteGroups(conversationID uint, messages []models.Message) ([]models.Message, error) {

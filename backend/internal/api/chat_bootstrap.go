@@ -434,9 +434,13 @@ func (h *ChatBootstrapHandler) buildConversationBootstrap(c *gin.Context, userID
 	}
 
 	messagesPayload := convHandler.buildMessagesWithGroupPayload(conv.ID, messages)
+	h.applyActiveChatTaskMessageState(&messagesPayload, conv.ID, userID, conv.Model)
 	var statusPayload gin.H
 	if status := convHandler.buildLastAssistantStatusPayload(messages); status != nil {
 		statusPayload = status
+	}
+	if statusPayload == nil {
+		statusPayload = h.buildActiveTaskLastAssistantStatus(conv.ID, userID)
 	}
 
 	meta := ChatBootstrapConversationMeta{
@@ -501,6 +505,93 @@ func (h *ChatBootstrapHandler) ensureActiveTaskMessages(messages *[]models.Messa
 		}
 		return (*messages)[i].CreatedAt.Before((*messages)[j].CreatedAt)
 	})
+}
+
+func (h *ChatBootstrapHandler) activeChatTasksForConversation(userID uint, conversationID uint) []models.AIBackgroundTask {
+	statuses := []string{"running", "streaming", "retrying"}
+	var tasks []models.AIBackgroundTask
+	if err := h.db.Where("user_id = ? AND conversation_id = ? AND status IN ?", userID, conversationID, statuses).
+		Order("updated_at DESC, id DESC").
+		Limit(20).
+		Find(&tasks).Error; err != nil {
+		return nil
+	}
+	return tasks
+}
+
+func (h *ChatBootstrapHandler) applyActiveChatTaskMessageState(messages *[]MessageWithGroup, conversationID uint, userID uint, fallbackModel string) {
+	if messages == nil {
+		return
+	}
+	tasks := h.activeChatTasksForConversation(userID, conversationID)
+	if len(tasks) == 0 {
+		return
+	}
+	existing := make(map[uint]int, len(*messages))
+	for i, message := range *messages {
+		if message.Role == "assistant" {
+			existing[message.ID] = i
+		}
+	}
+	for _, task := range tasks {
+		model := firstNonEmptyBootstrap(task.Model, fallbackModel)
+		if idx, ok := existing[task.AssistantMessageID]; ok && task.AssistantMessageID > 0 {
+			(*messages)[idx].GenerationTaskID = task.ID
+			(*messages)[idx].LastSequenceNumber = task.LastSequenceNumber
+			(*messages)[idx].ServerGenerationStatus = task.Status
+			continue
+		}
+		pending := MessageWithGroup{
+			Message: models.Message{
+				ID:             task.AssistantMessageID,
+				ConversationID: task.ConversationID,
+				Role:           "assistant",
+				Content:        "",
+				Model:          model,
+				CreatedAt:      task.CreatedAt,
+			},
+			GenerationTaskID:       task.ID,
+			LastSequenceNumber:     task.LastSequenceNumber,
+			ServerGenerationStatus: task.Status,
+		}
+		*messages = append(*messages, pending)
+		if task.AssistantMessageID > 0 {
+			existing[task.AssistantMessageID] = len(*messages) - 1
+		}
+	}
+	sort.SliceStable(*messages, func(i, j int) bool {
+		if (*messages)[i].CreatedAt.Equal((*messages)[j].CreatedAt) {
+			return (*messages)[i].ID < (*messages)[j].ID
+		}
+		return (*messages)[i].CreatedAt.Before((*messages)[j].CreatedAt)
+	})
+}
+
+func (h *ChatBootstrapHandler) buildActiveTaskLastAssistantStatus(conversationID uint, userID uint) gin.H {
+	tasks := h.activeChatTasksForConversation(userID, conversationID)
+	if len(tasks) == 0 {
+		return nil
+	}
+	task := tasks[0]
+	return gin.H{
+		"message": gin.H{
+			"id":              task.AssistantMessageID,
+			"conversation_id": task.ConversationID,
+			"role":            "assistant",
+			"content":         "",
+			"model":           task.Model,
+			"created_at":      task.CreatedAt,
+		},
+		"background_task": gin.H{
+			"id":                   task.ID,
+			"task_id":              task.ID,
+			"assistant_message_id": task.AssistantMessageID,
+			"conversation_id":      task.ConversationID,
+			"status":               task.Status,
+			"last_sequence_number": task.LastSequenceNumber,
+			"completed_at":         task.CompletedAt,
+		},
+	}
 }
 
 func (h *ChatBootstrapHandler) activeChatTaskSnapshotSignature(userID uint, conversationID uint) string {

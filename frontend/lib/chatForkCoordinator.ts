@@ -28,6 +28,9 @@ export type ForkChatPersistedMessage = {
   group_index?: number | null;
   group_models?: string[] | null;
   user_message_id?: number | string | null;
+  generation_task_id?: number | string | null;
+  last_sequence_number?: number | string | null;
+  server_generation_status?: string | null;
 };
 
 export type ForkChatMessage = {
@@ -48,6 +51,9 @@ export type ForkChatMessage = {
   groupIndex?: number;
   groupModels?: string[];
   userMessageId?: number;
+  generationTaskId?: number;
+  lastSequence?: number;
+  serverGenerationStatus?: string;
 };
 
 export type ForkChatResponse = {
@@ -119,6 +125,9 @@ export function mapPersistedChatMessage(
     groupIndex: message.group_index ?? undefined,
     groupModels: Array.isArray(message.group_models) ? message.group_models : undefined,
     userMessageId: Number(message.user_message_id || 0) || undefined,
+    generationTaskId: Number(message.generation_task_id || 0) || undefined,
+    lastSequence: Number(message.last_sequence_number || 0) || undefined,
+    serverGenerationStatus: message.server_generation_status || undefined,
   };
 }
 
