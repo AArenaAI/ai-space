@@ -36,10 +36,11 @@ export type ConversationRestoreMessage = ForkChatMessage & {
 };
 
 export type ConversationRestoreStatusResponse = {
-  message?: { id?: number | string; content?: string };
+  message?: { id?: number | string; content?: string; model?: string };
   background_task?: {
     id?: number | string;
     task_id?: number | string;
+    assistant_message_id?: number | string;
     status?: string;
     last_sequence_number?: number | string;
     completed_at?: string | null;
@@ -277,13 +278,44 @@ export function buildConversationRestoreState({
   if (!data.messages) return undefined;
   const loadedMessages = mapConversationRestoreMessages(data.messages, { fallbackId, parseTime });
   const activeByServerMessageId = buildActiveTaskStreamsByServerMessageId(activeEntries, conversationId);
-  const mergedMessages = mergeActiveTaskStreamsIntoMessages(loadedMessages, activeByServerMessageId, activeActivityStatus);
+  let mergedMessages = mergeActiveTaskStreamsIntoMessages(loadedMessages, activeByServerMessageId, activeActivityStatus);
+  const statusData = data.last_assistant_status;
+  const bgTask = statusData?.background_task;
+  const status = bgTask?.status || "";
+  const terminalStatus = status === "completed" || status === "failed" || status === "cancelled" || status === "incomplete";
+  const statusContent = statusData?.message?.content || "";
+  const statusServerMessageId = Number(statusData?.message?.id || bgTask?.assistant_message_id || 0) || undefined;
+  const shouldAppendPendingStatusAssistant =
+    !!bgTask &&
+    !terminalStatus &&
+    !statusContent.trim() &&
+    !mergedMessages.some((message) =>
+      message.role === "assistant" &&
+      (statusServerMessageId ? String(message.serverMessageId || message.id) === String(statusServerMessageId) : false)
+    );
+  if (shouldAppendPendingStatusAssistant) {
+    mergedMessages = [
+      ...mergedMessages,
+      {
+        id: fallbackId(),
+        role: "assistant",
+        content: "",
+        model: statusData?.message?.model || data.model,
+        createdAt: Date.now(),
+        serverMessageId: statusServerMessageId,
+        generationTaskId: Number(bgTask?.id || bgTask?.task_id || 0) || undefined,
+        lastSequence: Number(bgTask?.last_sequence_number || 0) || undefined,
+        activityStatus: activeActivityStatus,
+        serverGenerationStatus: status,
+      },
+    ];
+  }
   return {
     loadedMessages,
     mergedMessages,
     groupViews: buildGroupViewsFromMessages(mergedMessages),
     activeByServerMessageId,
-    isLoading: activeByServerMessageId.size > 0,
+    isLoading: activeByServerMessageId.size > 0 || shouldAppendPendingStatusAssistant,
   };
 }
 

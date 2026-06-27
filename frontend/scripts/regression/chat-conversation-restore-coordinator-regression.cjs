@@ -203,6 +203,29 @@ const response = (ok, data, status = ok ? 200 : 500, headers = {}) => ({
     assert.equal(buildConversationRestoreState({ data: {}, activeEntries: [], conversationId: 7, fallbackId: () => "fallback", activeActivityStatus: {} }), undefined);
   });
 
+  await test("buildConversationRestoreState synthesizes pending assistant from running status", () => {
+    const state = buildConversationRestoreState({
+      data: {
+        model: "deepseek-v4-pro",
+        messages: [{ id: 20, role: "user", content: "u" }],
+        last_assistant_status: {
+          message: { id: 21, content: "", model: "deepseek-v4-pro" },
+          background_task: { id: 99, assistant_message_id: 21, status: "running", last_sequence_number: 3 },
+        },
+      },
+      activeEntries: [],
+      conversationId: 7,
+      fallbackId: () => "pending-id",
+      activeActivityStatus: { kind: "generating" },
+    });
+    assert.equal(state.isLoading, true);
+    assert.equal(state.mergedMessages.length, 2);
+    assert.equal(state.mergedMessages[1].id, "pending-id");
+    assert.equal(state.mergedMessages[1].serverMessageId, 21);
+    assert.equal(state.mergedMessages[1].generationTaskId, 99);
+    assert.equal(state.mergedMessages[1].activityStatus.kind, "generating");
+  });
+
   await test("findLastAssistantStatusTarget skips active last assistant", () => {
     const messages = [
       { id: "1", role: "assistant", content: "a", createdAt: 1, serverMessageId: 1 },

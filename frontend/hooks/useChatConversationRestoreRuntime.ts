@@ -497,7 +497,7 @@ export function useChatConversationRestoreRuntime({
               if (entry.convId === loadConversationId) delete pendingLocalAssistantsRef.current[id];
             });
           }
-          const pendingLocalMessages = backendLastAssistantCompleted ? [] : Object.entries(pendingLocalAssistantsRef?.current || {})
+          const pendingLocalMessagesFromRef = backendLastAssistantCompleted ? [] : Object.entries(pendingLocalAssistantsRef?.current || {})
             .filter(([, entry]) => entry.convId === loadConversationId)
             .map(([id, entry]) => ({ id, message: entry.message }))
             .filter(({ id, message }) => {
@@ -514,10 +514,24 @@ export function useChatConversationRestoreRuntime({
               return true;
             })
             .map(({ message }) => message);
-          const mergedMessages = (pendingLocalMessages.length > 0
-            ? [...restoreState.mergedMessages, ...pendingLocalMessages]
-            : restoreState.mergedMessages) as Message[];
-          const groupViews = buildGroupViewsFromMessages(mergedMessages);
+          const pendingLocalMessagesById = new Map(pendingLocalMessagesFromRef.map((message) => [message.id, message]));
+          const baseMergedMessages = restoreState.mergedMessages as Message[];
+          const mergePendingMessages = (prevMessages: Message[]) => {
+            if (backendLastAssistantCompleted) return baseMergedMessages;
+            const visiblePendingMessages = prevMessages.filter((message) =>
+              message.role === "assistant" &&
+              !message.content?.trim() &&
+              !message.completedAt &&
+              !message.stopped &&
+              !message.errorCode &&
+              !baseMergedMessages.some((item) => item.id === message.id)
+            );
+            visiblePendingMessages.forEach((message) => pendingLocalMessagesById.set(message.id, message));
+            return pendingLocalMessagesById.size > 0
+              ? [...baseMergedMessages, ...Array.from(pendingLocalMessagesById.values())]
+              : baseMergedMessages;
+          };
+          let mergedMessages = baseMergedMessages;
           if (!hasDisplayedSnapshot) {
             hasDisplayedSnapshot = true;
             displayedSnapshotSource = "backend";
@@ -533,12 +547,22 @@ export function useChatConversationRestoreRuntime({
               totalMessages: resolvedTotalMessages,
             });
           }
-          setMessages((prev) =>
-            areConversationMessagesEquivalent(prev, mergedMessages as Message[]) ? prev : (mergedMessages as Message[])
+          setMessages((prev) => {
+            const nextMessages = mergePendingMessages(prev) as Message[];
+            mergedMessages = nextMessages;
+            return areConversationMessagesEquivalent(prev, nextMessages) ? prev : nextMessages;
+          });
+          const hasPendingLocalMessages = !backendLastAssistantCompleted && mergedMessages.some((message) =>
+            message.role === "assistant" &&
+            !message.content?.trim() &&
+            !message.completedAt &&
+            !message.stopped &&
+            !message.errorCode
           );
+          const groupViews = buildGroupViewsFromMessages(mergedMessages);
           setLoadedPersistedMessages(loadedMessages.length);
           setGroupViews(groupViews);
-          setIsLoading(restoreState.isLoading || pendingLocalMessages.length > 0);
+          setIsLoading(restoreState.isLoading || hasPendingLocalMessages);
           const snapshot: CachedConversationSnapshot = {
             conversationId: loadConversationId,
             title: data.title || "",
@@ -546,7 +570,7 @@ export function useChatConversationRestoreRuntime({
             loadedPersistedMessages: loadedMessages.length,
             totalMessages: resolvedTotalMessages,
             groupViews,
-            isLoading: restoreState.isLoading || pendingLocalMessages.length > 0,
+            isLoading: restoreState.isLoading || hasPendingLocalMessages,
             isCompare: !!data.compare,
             compareModels: parseConversationCompareModels(data.compare_models),
             model: data.model,

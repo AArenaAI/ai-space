@@ -59,9 +59,20 @@ function loadModule(file) {
             createdAt: m.createdAt ?? (m.created_at ? Date.parse(m.created_at) : undefined),
             completedAt: m.completedAt ?? (m.completed_at ? Date.parse(m.completed_at) : undefined),
           }));
-          const mergedMessages = loadedMessages.map((m) => ({ ...m }));
+          let mergedMessages = loadedMessages.map((m) => ({ ...m }));
           const activeByServerMessageId = new Map();
-          return { loadedMessages, mergedMessages, groupViews: new Map([[1, 0]]), activeByServerMessageId, isLoading: Boolean(data.isLoading) };
+          const status = data.last_assistant_status?.background_task?.status || '';
+          if (data.last_assistant_status?.background_task && status !== 'completed' && !String(data.last_assistant_status?.message?.content || '').trim()) {
+            mergedMessages = [...mergedMessages, {
+              id: 'pending-from-status',
+              role: 'assistant',
+              content: '',
+              serverMessageId: data.last_assistant_status?.message?.id,
+              generationTaskId: data.last_assistant_status?.background_task?.id,
+              activityStatus: { kind: 'generating', label: 'busy' },
+            }];
+          }
+          return { loadedMessages, mergedMessages, groupViews: new Map([[1, 0]]), activeByServerMessageId, isLoading: Boolean(data.isLoading || mergedMessages.some((m) => m.activityStatus)) };
         },
         findLastAssistantStatusTarget: (messages) => [...messages].reverse().find((m) => m.role === "assistant" && m.serverMessageId),
         hasCompletedLastAssistantStatus: (statusData) => statusData?.background_task?.status === 'completed' && String(statusData?.message?.content || '').trim().length > 0,
@@ -429,6 +440,40 @@ async function testPendingLocalAssistantIsPreservedBeforeServerContent() {
   assert.equal(state.messages[1].activityStatus.kind, "generating");
 }
 
+async function testVisiblePendingAssistantSurvivesRestoreWhenBackendHasNoAnswerYet() {
+  snapshotCache.clear();
+  persistentSnapshotCache.clear();
+  restoreImpl = async () => ({
+    title: "Waiting",
+    model: "m1",
+    messages: [{ id: "u1", role: "user", content: "waiting" }],
+    last_assistant_status: {
+      message: { content: "" },
+      background_task: { id: 9, status: "running" },
+    },
+  });
+  statusImpl = async () => undefined;
+  countImpl = async () => undefined;
+  const visiblePending = {
+    id: "local-visible",
+    role: "assistant",
+    content: "",
+    model: "m1",
+    createdAt: Date.parse("2026-01-01T00:00:02Z"),
+    activityStatus: { kind: "generating", label: "busy" },
+    generationStartedAt: Date.parse("2026-01-01T00:00:02Z"),
+  };
+  const state = createState([
+    { id: "local-user", role: "user", content: "waiting" },
+    visiblePending,
+  ]);
+  runRuntime({ conversationId: 9, token: "tok", state, pendingLocalAssistants: {} });
+  await flush(); await flush();
+  assert.equal(state.messages.some((message) => message.role === "assistant" && message.activityStatus?.kind === "generating"), true);
+  assert.equal(state.messages.at(-1).role, "assistant");
+  assert.equal(state.messages.at(-1).activityStatus.kind, "generating");
+}
+
 async function testCompletedServerAssistantDropsPendingLocalPlaceholder() {
   snapshotCache.clear();
   persistentSnapshotCache.clear();
@@ -488,6 +533,7 @@ async function testNavigationAbortsControllers() {
   await testStatusResumeStartsTaskStream();
   await testLateRestoreResponseCannotOverwriteLatestConversation();
   await testPendingLocalAssistantIsPreservedBeforeServerContent();
+  await testVisiblePendingAssistantSurvivesRestoreWhenBackendHasNoAnswerYet();
   await testCompletedServerAssistantDropsPendingLocalPlaceholder();
   await testNavigationAbortsControllers();
   console.log("chat conversation restore runtime hook regression passed");
