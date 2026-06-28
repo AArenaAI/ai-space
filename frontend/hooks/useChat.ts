@@ -148,6 +148,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   const [generationStore, setGenerationStore] = useState<ConversationGenerationStore>({});
   const taskStreamsRef = useRef<Record<string, AbortController>>({});
   const pendingLocalAssistantsRef = useRef<Record<string, { convId?: number; message: Message }>>({});
+  const resumedBootstrapTaskKeysRef = useRef<Set<string>>(new Set());
   const abortReasonRef = useRef<"user" | "navigation" | null>(null);
   const modelsKey = models.map((m) => m.id).join("|");
   const bootstrapSnapshot: CachedConversationSnapshot | undefined = useMemo(() => {
@@ -287,7 +288,9 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       messages,
     });
     plan.forEach(({ task, message, after, initialContent }) => {
-      if (taskStreamsRef.current[message.id] || activeTaskStreamsRef.current[message.id]) return;
+      const resumeKey = `${message.id}:${task.id}:${after || 0}`;
+      if (taskStreamsRef.current[message.id] || activeTaskStreamsRef.current[message.id] || resumedBootstrapTaskKeysRef.current.has(resumeKey)) return;
+      resumedBootstrapTaskKeysRef.current.add(resumeKey);
       setMessages((prev) => prev.map((item) => {
         if (item.id !== message.id) return item;
         const nextLastSequence = after || item.lastSequence;
