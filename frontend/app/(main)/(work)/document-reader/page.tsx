@@ -274,6 +274,32 @@ async function createConversation(title: string, model: string) {
   return res.json() as Promise<{ id: number }>;
 }
 
+async function fetchDocumentReaderChatStream(payload: Record<string, any>): Promise<Response> {
+  let conversationId = payload.conversation_id;
+  if (!conversationId) {
+    const fallbackTitle = payload.transient ? "Document visualization" : "Document reader";
+    const conv = await createConversation(fallbackTitle, payload.model || DEFAULT_MODEL);
+    conversationId = conv.id;
+  }
+  const initResponse = await fetch("/api/chat/init", {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ ...payload, conversation_id: conversationId, stream: true, init_only: true }),
+  });
+  if (!initResponse.ok) return initResponse;
+  const init = await initResponse.json();
+  const taskId = Number(init?.task_id || init?.assistant_message?.generation_task_id || 0);
+  if (!taskId) {
+    return new Response(JSON.stringify(init), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  return fetch(`/api/tasks/${taskId}/stream?after=0`, {
+    headers: getUploadHeaders(),
+  });
+}
+
 const fetchFileStatus = async (publicId: string): Promise<FileStatus> => {
   const res = await fetch(`/api/files/${publicId}`, { headers: getAuthHeaders() });
   if (!res.ok) throw await readApiError(res);
@@ -1318,11 +1344,7 @@ ${buildLanguageConfigPrompt(targetLanguage, "markdown")}
           payload.message_file_ids = fileIds;
         }
 
-        const res = await fetch("/api/chat", {
-          method: "POST",
-          headers: getAuthHeaders(),
-          body: JSON.stringify(payload),
-        });
+        const res = await fetchDocumentReaderChatStream(payload);
 
         if (!res.ok) {
           throw await readApiError(res);
@@ -1541,11 +1563,7 @@ Strict output rules:
         ],
       };
 
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: getAuthHeaders(),
-        body: JSON.stringify(payload),
-      });
+      const res = await fetchDocumentReaderChatStream(payload);
       if (!res.ok) {
         throw await readApiError(res);
       }
