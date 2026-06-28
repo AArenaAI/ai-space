@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { getGuestId } from "@/lib/guestId";
@@ -87,6 +87,7 @@ export function useChatSingleSendRuntime({
   getToken = () => localStorage.getItem("token"),
   dispatchWindowEvent = (event) => window.dispatchEvent(event),
 }: UseChatSingleSendRuntimeOptions) {
+  const inFlightSendKeysRef = useRef<Set<string>>(new Set());
   const sendMessage = useCallback(
     async (
       content: string,
@@ -134,6 +135,19 @@ export function useChatSingleSendRuntime({
         now,
       });
       if (!messagePlan) return;
+
+      const sendDedupKey = JSON.stringify({
+        convId: convId || "new",
+        modelId: selectedModel.id,
+        content: content.trim(),
+        isRegenerate,
+        skipUserMsg,
+        search,
+        templateId,
+        fileIds: file_ids || [],
+      });
+      if (inFlightSendKeysRef.current.has(sendDedupKey)) return;
+      inFlightSendKeysRef.current.add(sendDedupKey);
 
       const contextMessages = messagePlan.contextMessages;
       const assistantMsg = messagePlan.assistantMessage;
@@ -217,6 +231,7 @@ export function useChatSingleSendRuntime({
           setMessages((prev) => patchMessageById(prev, assistantMsg.id, decision.patch));
         }
       } finally {
+        inFlightSendKeysRef.current.delete(sendDedupKey);
         const finalAbortReason = abortReasonRef.current;
         if (pendingLocalAssistantsRef && finalAbortReason !== "navigation") {
           delete pendingLocalAssistantsRef.current[assistantMsg.id];

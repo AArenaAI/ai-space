@@ -58,7 +58,7 @@ function loadModule(file) {
   const module = { exports: {} };
   moduleCache.set(file, module);
   const localRequire = (specifier) => {
-    if (specifier === "react") return { useCallback: (fn) => fn };
+    if (specifier === "react") return { useCallback: (fn) => fn, useRef: (initialValue) => ({ current: initialValue }) };
     if (specifier === "uuid") return { v4: () => `uuid-${++uuidCounter}` };
     if (specifier === "@/lib/guestId") return { getGuestId: () => "guest-id" };
     if (specifier === "@/lib/streaming") return { realtimeGet: (...args) => realtimeGetImpl(...args) };

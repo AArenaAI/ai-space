@@ -102,6 +102,45 @@ type ApplyCachedSnapshotOptions = {
   setIsLoadingHistory: Dispatch<SetStateAction<boolean>>;
 };
 
+function getAssistantDedupKey(message: Message): string | undefined {
+  if (message.role !== "assistant") return undefined;
+  if (message.serverMessageId) return `server:${message.serverMessageId}`;
+  if (message.generationTaskId) return `task:${message.generationTaskId}`;
+  return undefined;
+}
+
+function shouldPreferDedupCandidate(candidate: Message, existing: Message): boolean {
+  const candidateCanonical = candidate.serverMessageId && candidate.id === String(candidate.serverMessageId);
+  const existingCanonical = existing.serverMessageId && existing.id === String(existing.serverMessageId);
+  if (candidateCanonical !== existingCanonical) return Boolean(candidateCanonical);
+  const candidateCompleted = Boolean(candidate.completedAt || candidate.serverGenerationStatus === "completed");
+  const existingCompleted = Boolean(existing.completedAt || existing.serverGenerationStatus === "completed");
+  if (candidateCompleted !== existingCompleted) return candidateCompleted;
+  return (candidate.content || "").length >= (existing.content || "").length;
+}
+
+function dedupeConversationMessages(messages: Message[]): Message[] {
+  const result: Message[] = [];
+  const seen = new Map<string, number>();
+  messages.forEach((message) => {
+    const key = getAssistantDedupKey(message);
+    if (!key) {
+      result.push(message);
+      return;
+    }
+    const existingIndex = seen.get(key);
+    if (existingIndex === undefined) {
+      seen.set(key, result.length);
+      result.push(message);
+      return;
+    }
+    if (shouldPreferDedupCandidate(message, result[existingIndex])) {
+      result[existingIndex] = message;
+    }
+  });
+  return result;
+}
+
 function applyCachedSnapshot({
   snapshot,
   fallbackSkillKey,
@@ -120,9 +159,10 @@ function applyCachedSnapshot({
 }: ApplyCachedSnapshotOptions) {
   setIsLoadingHistory(false);
   setConversationTitle(snapshot.title || "");
-  setMessages(snapshot.messages);
+  const dedupedMessages = dedupeConversationMessages(snapshot.messages);
+  setMessages(dedupedMessages);
   setLoadedPersistedMessages(snapshot.loadedPersistedMessages);
-  setGroupViews(snapshot.groupViews);
+  setGroupViews(buildGroupViewsFromMessages(dedupedMessages));
   setIsLoading(snapshot.isLoading);
   if (typeof snapshot.totalMessages === "number") {
     setTotalMessages(snapshot.totalMessages);
@@ -556,7 +596,7 @@ export function useChatConversationRestoreRuntime({
             });
           }
           setMessages((prev) => {
-            const nextMessages = mergePendingMessages(prev) as Message[];
+            const nextMessages = dedupeConversationMessages(mergePendingMessages(prev) as Message[]);
             mergedMessages = nextMessages;
             return areConversationMessagesEquivalent(prev, nextMessages) ? prev : nextMessages;
           });

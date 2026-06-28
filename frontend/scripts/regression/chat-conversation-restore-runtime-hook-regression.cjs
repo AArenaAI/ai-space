@@ -554,6 +554,45 @@ async function testCompletedServerAssistantDropsPendingLocalPlaceholder() {
   assert.equal(refs.pendingLocalAssistantsRef.current["local-a1"], undefined);
 }
 
+async function testCachedStreamingAndServerAssistantDedupesByServerId() {
+  snapshotCache.clear();
+  persistentSnapshotCache.clear();
+  snapshotCache.set(9, {
+    conversationId: 9,
+    title: "Cached duplicate",
+    messages: [
+      { id: "u1", role: "user", content: "today" },
+      { id: "local-a1", role: "assistant", content: "final answer", serverMessageId: 42, generationTaskId: 7, serverGenerationStatus: "completed", completedAt: 1000 },
+      { id: "42", role: "assistant", content: "final answer", serverMessageId: 42, generationTaskId: 7, serverGenerationStatus: "completed", completedAt: 1000 },
+    ],
+    loadedPersistedMessages: 3,
+    totalMessages: 3,
+    groupViews: new Map([[1, 0]]),
+    isLoading: false,
+    isCompare: false,
+    compareModels: [],
+    model: "m1",
+  });
+  restoreImpl = async () => ({
+    title: "Backend",
+    model: "m1",
+    messages: [
+      { id: "u1", role: "user", content: "today" },
+      { id: "42", role: "assistant", content: "final answer", serverMessageId: 42, generationTaskId: 7, serverGenerationStatus: "completed", completedAt: 1000 },
+    ],
+  });
+  statusImpl = async () => undefined;
+  countImpl = async () => undefined;
+  const { state } = runRuntime({ conversationId: 9, token: "tok" });
+  const cachedAssistants = state.messages.filter((message) => message.role === "assistant");
+  assert.equal(cachedAssistants.length, 1);
+  assert.equal(cachedAssistants[0].id, "42");
+  await flush(); await flush();
+  const restoredAssistants = state.messages.filter((message) => message.role === "assistant");
+  assert.equal(restoredAssistants.length, 1);
+  assert.equal(restoredAssistants[0].serverMessageId, 42);
+}
+
 async function testNavigationAbortsControllers() {
   const { refs, mainController, compareController } = runRuntime({ conversationId: 9, token: null, hasMain: true, hasCompare: true });
   assert.equal(mainController.aborted, true);
@@ -579,6 +618,7 @@ async function testNavigationAbortsControllers() {
   await testOptimisticCachedPendingSurvivesBackendUserOnlyRestore();
   await testVisiblePendingAssistantSurvivesRestoreWhenBackendHasNoAnswerYet();
   await testCompletedServerAssistantDropsPendingLocalPlaceholder();
+  await testCachedStreamingAndServerAssistantDedupesByServerId();
   await testNavigationAbortsControllers();
   console.log("chat conversation restore runtime hook regression passed");
 })();
