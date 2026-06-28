@@ -78,7 +78,12 @@ export function selectFinalAssistantContent({
   dbContent = "",
   taskStatus,
 }: SelectFinalAssistantContentOptions): string {
-  if (taskStatus === "completed" && dbContent.trim() && dbContent.length >= liveContent.length) return dbContent;
+  // Completed polling is a reconciliation step, not another streaming append.
+  // The database message content is the canonical final answer; liveContent can
+  // be a transient combined stream snapshot and may already contain the same
+  // answer plus replayed deltas. Choosing the longer live value here can make
+  // completed messages display the final answer twice after background polling.
+  if (taskStatus === "completed" && dbContent.trim()) return dbContent;
   if (liveContent.trim()) return liveContent;
   return existingContent;
 }

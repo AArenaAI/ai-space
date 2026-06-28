@@ -152,6 +152,34 @@ test("poll state patches message without overriding live stream content", () => 
   assert.equal(messages.get()[0].completedAt, 123);
 });
 
+test("completed polling canonicalizes to db content instead of duplicated live content", () => {
+  const messages = createState([{ id: "local", content: "old", serverMessageId: 9 }]);
+  let callbacks;
+  const action = createStartBackgroundPollingAction({
+    apiBaseUrl: "",
+    backgroundPollersRef: { current: {} },
+    taskStreamsRef: { current: {} },
+    setMessages: messages.set,
+    setIsLoading: () => {},
+    getConversationTitle: () => "title",
+    getSelectedModel: () => ({ id: "model", name: "Model" }),
+    stopBackgroundPoller: () => {},
+    stopTaskStream: () => {},
+    getToken: () => "tok",
+    realtimeGet: () => ({ content: "final db final db" }),
+    runner: (opts) => {
+      callbacks = opts.callbacks;
+      return { timer: 7 };
+    },
+    now: () => 321,
+    translate: (key) => `t:${key}`,
+  });
+  action(5, "local", 9);
+  callbacks.onPollState({ content: "final db", isFinished: true, isCompleted: true, status: "completed" });
+  assert.equal(messages.get()[0].content, "final db");
+  assert.equal(messages.get()[0].completedAt, 321);
+});
+
 test("poll state patches restored server-id message after local placeholder was replaced", () => {
   const messages = createState([{ id: "srv-9", content: "", serverMessageId: 9, activityStatus: { kind: "generating", label: "busy" } }]);
   let callbacks;
