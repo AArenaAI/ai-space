@@ -79,8 +79,23 @@ func (h *AnalyticsHandler) TrackEvent(c *gin.Context) {
 // BatchTrackEvents 批量追踪事件
 func (h *AnalyticsHandler) BatchTrackEvents(c *gin.Context) {
 	var reqs []TrackEventRequest
-	if err := c.ShouldBindJSON(&reqs); err != nil {
+	var raw json.RawMessage
+	if err := c.ShouldBindJSON(&raw); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "参数错误"})
+		return
+	}
+	if err := json.Unmarshal(raw, &reqs); err != nil {
+		var wrapped struct {
+			Events []TrackEventRequest `json:"events"`
+		}
+		if wrappedErr := json.Unmarshal(raw, &wrapped); wrappedErr != nil || len(wrapped.Events) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "参数错误"})
+			return
+		}
+		reqs = wrapped.Events
+	}
+	if len(reqs) == 0 {
+		c.JSON(http.StatusOK, gin.H{"success": true, "count": 0})
 		return
 	}
 
