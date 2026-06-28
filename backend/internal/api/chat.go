@@ -2206,8 +2206,11 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 				select {
 				case <-dbUpdateTicker.C:
 					content, reasoning := getSnapshot()
-					if content != "" {
-						updates := map[string]interface{}{"content": content}
+					if content != "" || strings.TrimSpace(reasoning) != "" {
+						updates := map[string]interface{}{}
+						if content != "" {
+							updates["content"] = content
+						}
 						if strings.TrimSpace(reasoning) != "" {
 							updates["reasoning_content"] = reasoning
 						}

@@ -33,7 +33,7 @@ function testBuildsResumePlanForMatchingAssistant() {
   assert.equal(plan[0].initialContent, 'hello');
 }
 
-function testSkipsCompletedMissingAndAlreadyResumedTasks() {
+function testSkipsCompletedAndMissingButAllowsReconnection() {
   const plan = buildBootstrapTaskResumePlan({
     alreadyResumedTaskIds: new Set([8]),
     messages: [assistant('local-a', 101, 'hello')],
@@ -43,7 +43,11 @@ function testSkipsCompletedMissingAndAlreadyResumedTasks() {
       { id: 10, conversation_id: 762, assistant_message_id: 999, status: 'streaming', last_sequence_number: 3, updated_at: 'now' },
     ],
   });
-  assert.equal(plan.length, 0);
+  // A task stream may have been aborted during route navigation; allow the same
+  // running task to reconnect for the restored server message row. Duplicate
+  // live streams for the same message are still blocked by startTaskEventStream.
+  assert.equal(plan.length, 1);
+  assert.equal(plan[0].task.id, 8);
 }
 
 function testAllowsRunningStreamingAndRetryingOnly() {
@@ -61,6 +65,6 @@ function testAllowsRunningStreamingAndRetryingOnly() {
 }
 
 testBuildsResumePlanForMatchingAssistant();
-testSkipsCompletedMissingAndAlreadyResumedTasks();
+testSkipsCompletedAndMissingButAllowsReconnection();
 testAllowsRunningStreamingAndRetryingOnly();
 console.log('chat bootstrap task resume regression passed');

@@ -148,7 +148,6 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   const [generationStore, setGenerationStore] = useState<ConversationGenerationStore>({});
   const taskStreamsRef = useRef<Record<string, AbortController>>({});
   const pendingLocalAssistantsRef = useRef<Record<string, { convId?: number; message: Message }>>({});
-  const resumedBootstrapTaskIdsRef = useRef<Set<number>>(new Set());
   const abortReasonRef = useRef<"user" | "navigation" | null>(null);
   const modelsKey = models.map((m) => m.id).join("|");
   const bootstrapSnapshot: CachedConversationSnapshot | undefined = useMemo(() => {
@@ -286,21 +285,27 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     const plan = buildBootstrapTaskResumePlan({
       activeTasks,
       messages,
-      alreadyResumedTaskIds: resumedBootstrapTaskIdsRef.current,
     });
     plan.forEach(({ task, message, after, initialContent }) => {
-      resumedBootstrapTaskIdsRef.current.add(task.id);
-      setMessages((prev) => prev.map((item) =>
-        item.id === message.id
-          ? {
-              ...item,
-              generationTaskId: task.id,
-              lastSequence: after || item.lastSequence,
-              activityStatus: item.activityStatus ?? busyStatus,
-              generationStartedAt: item.generationStartedAt ?? Date.now(),
-            }
-          : item
-      ));
+      if (taskStreamsRef.current[message.id] || activeTaskStreamsRef.current[message.id]) return;
+      setMessages((prev) => prev.map((item) => {
+        if (item.id !== message.id) return item;
+        const nextLastSequence = after || item.lastSequence;
+        if (
+          item.generationTaskId === task.id &&
+          item.lastSequence === nextLastSequence &&
+          item.activityStatus
+        ) {
+          return item;
+        }
+        return {
+          ...item,
+          generationTaskId: task.id,
+          lastSequence: nextLastSequence,
+          activityStatus: item.activityStatus ?? busyStatus,
+          generationStartedAt: item.generationStartedAt ?? Date.now(),
+        };
+      }));
       startTaskEventStream(
         task.conversation_id || conversationId,
         message.id,

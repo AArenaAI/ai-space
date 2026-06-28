@@ -15,11 +15,10 @@ const RESUMABLE_BOOTSTRAP_TASK_STATUSES = new Set(["running", "streaming", "retr
 export function buildBootstrapTaskResumePlan({
   activeTasks,
   messages,
-  alreadyResumedTaskIds,
 }: {
   activeTasks: BootstrapChatActiveTask[] | undefined;
   messages: Message[];
-  alreadyResumedTaskIds: Set<number>;
+  alreadyResumedTaskIds?: Set<number>;
 }): BootstrapTaskResumePlanItem[] {
   if (!activeTasks?.length || !messages.length) return [];
   const assistantByServerMessageId = new Map<number, Message>();
@@ -31,7 +30,6 @@ export function buildBootstrapTaskResumePlan({
   const plan: BootstrapTaskResumePlanItem[] = [];
   activeTasks.forEach((task) => {
     if (!RESUMABLE_BOOTSTRAP_TASK_STATUSES.has(task.status)) return;
-    if (alreadyResumedTaskIds.has(task.id)) return;
     const message = assistantByServerMessageId.get(task.assistant_message_id);
     if (!message) return;
     plan.push({
