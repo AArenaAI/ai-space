@@ -36,7 +36,10 @@ function loadModule(file) {
       };
     }
     if (specifier === "@/lib/chatActivityStatus") {
-      return { createGeneratingStatus: (t) => ({ kind: "generating", status: "running", label: t("chat.status.generating") }) };
+      return {
+        createGeneratingStatus: (t) => ({ kind: "generating", status: "running", label: t("chat.status.generating") }),
+        createBusyGeneratingStatus: (t) => ({ kind: "generating", status: "running", label: t("chat.status.generating") }),
+      };
     }
     if (specifier === "@/lib/chatInitialRealtime") {
       return { initializeAssistantRealtimeBatch: () => undefined };
@@ -61,8 +64,10 @@ function loadModule(file) {
         },
       };
     }
+    if (specifier === "@/lib/chatActivityStatus") return { createGeneratingStatus: () => ({ kind: 'generating', status: 'running', label: '生成中' }), createBusyGeneratingStatus: () => ({ kind: 'generating', status: 'running', label: '生成中' }) };
     if (specifier === "@/lib/chatModelMessageTransform") return { toModelMessages: (messages) => messages };
     if (specifier === "@/lib/chatHistoryTransform") return { toModelMessages: (messages) => messages };
+    if (specifier === "@/lib/chatMessageStatePatch") return { patchMessageById: (messages, id, patch) => messages.map((message) => message.id === id ? (typeof patch === 'function' ? patch(message) : { ...message, ...patch }) : message) };
     if (specifier.startsWith("@/")) return {};
     return require(specifier);
   };
@@ -271,8 +276,11 @@ async function testStreamingForkPassesSourceUserAttachments() {
     runForkChatRequest: async () => ({ conversation_id: 5, group_id: 77, user_message_id: 10, models: ["m1", "m2"] }),
   });
   const originalFetch = global.fetch;
-  global.fetch = async (_url, init) => {
-    requests.push(JSON.parse(init.body));
+  global.fetch = async (url, init = {}) => {
+    if (init.body) requests.push(JSON.parse(init.body));
+    if (String(url).includes('/api/chat/init')) {
+      return { ok: true, json: async () => ({ assistant_message_id: 120, task_id: 220, assistant_message: { generation_status: 'running' } }) };
+    }
     return { ok: true };
   };
   try {

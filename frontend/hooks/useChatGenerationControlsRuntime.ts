@@ -255,31 +255,50 @@ export function createForkChatAction({
 
         await Promise.all(placeholderMessages.map(async (assistantMsg, idx) => {
           const controller = controllers[idx];
-          const response = await fetch(`${apiBaseUrl}/api/chat`, {
+          const initResponse = await fetch(`${apiBaseUrl}/api/chat/init`, {
             method: "POST",
             headers,
             signal: controller.signal,
-            body: JSON.stringify(buildCompareChatRequestBody({
-              model: assistantMsg.model || "",
-              messages: toModelMessages(contextMessages),
-              conversationId: convId,
-              notebookId,
-              notebookFileIds,
-              messageFileIds: sourceMessageFileIds,
-              reasoningEffort: reasoning.effort,
-              search,
-              templateId,
-              templatePrefix,
-              skipSaveUserMessage: true,
-              groupId,
-              userMessageId,
-              groupIndex: assistantMsg.groupIndex ?? idx,
-              groupModels: resolvedModels,
-              fallbackGroupModels: resolvedModels,
-              skillKey,
-            })),
+            body: JSON.stringify({
+              ...buildCompareChatRequestBody({
+                model: assistantMsg.model || "",
+                messages: toModelMessages(contextMessages),
+                conversationId: convId,
+                notebookId,
+                notebookFileIds,
+                messageFileIds: sourceMessageFileIds,
+                reasoningEffort: reasoning.effort,
+                search,
+                templateId,
+                templatePrefix,
+                skipSaveUserMessage: true,
+                groupId,
+                userMessageId,
+                groupIndex: assistantMsg.groupIndex ?? idx,
+                groupModels: resolvedModels,
+                fallbackGroupModels: resolvedModels,
+                skillKey,
+              }),
+              stream: true,
+              init_only: true,
+            }),
           });
-          if (!response.ok) throw new Error("Fork stream request failed");
+          if (!initResponse.ok) throw new Error("Fork init request failed");
+          const init = await initResponse.json();
+          const serverMessageId = Number(init.assistant_message_id || init.assistant_message?.id || 0) || undefined;
+          const generationTaskId = Number(init.task_id || init.assistant_message?.generation_task_id || 0) || undefined;
+          setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) => ({
+            ...m,
+            serverMessageId: serverMessageId || m.serverMessageId,
+            generationTaskId: generationTaskId || m.generationTaskId,
+            serverGenerationStatus: init.assistant_message?.server_generation_status || init.assistant_message?.generation_status || m.serverGenerationStatus,
+            activityStatus: createBusyGeneratingStatus(translate),
+          })));
+          const response = await fetch(`${apiBaseUrl}/api/tasks/${generationTaskId}/stream?after=0`, {
+            headers,
+            signal: controller.signal,
+          });
+          if (!response.ok) throw new Error("Fork task stream request failed");
           const result = await streamResponse(response, assistantMsg, controller, convId);
           if (result?.recoverable) {
             setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) => ({
