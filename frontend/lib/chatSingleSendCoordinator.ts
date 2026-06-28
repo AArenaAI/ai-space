@@ -7,7 +7,6 @@ import {
 } from "./chatMessageFactory";
 import { buildSingleChatRequestBody, getClientTimezone, type ModelMessage } from "./chatRequestBuilder";
 import { mapPersistedChatMessage, type ForkChatPersistedMessage } from "./chatForkCoordinator";
-import type { ChatStreamRunResult } from "./chatStreamRunResult";
 
 export type SingleSendMessageLike = {
   id: string;
@@ -157,31 +156,6 @@ export type SingleChatRunReasoningOptions = {
   effort?: string;
 };
 
-export type RunSingleChatRequestOptions<TAssistant extends SingleSendMessageLike> = {
-  apiBaseUrl?: string;
-  headers: Record<string, string>;
-  controller: AbortController;
-  assistantMessage: TAssistant;
-  modelId: string;
-  modelMessages: ModelMessage[];
-  conversationId?: number;
-  notebookId?: number;
-  reasoning: SingleChatRunReasoningOptions;
-  search: boolean;
-  templateId: number;
-  skipSaveUserMessage: boolean;
-  skillKey?: string;
-  messageFileIds?: string[];
-  notebookFileIds?: number[];
-  fetchImpl?: typeof fetch;
-  streamResponse: (
-    response: Response,
-    assistant: TAssistant,
-    controller: AbortController,
-    conversationId: number | undefined
-  ) => Promise<ChatStreamRunResult | undefined>;
-};
-
 export type ChatInitResponse<TMessage extends SingleSendMessageLike> = {
   conversation_id: number;
   user_message_id?: number;
@@ -194,7 +168,21 @@ export type ChatInitResponse<TMessage extends SingleSendMessageLike> = {
   mappedAssistantMessage: TMessage;
 };
 
-export type RunSingleChatInitOptions<TAssistant extends SingleSendMessageLike> = Omit<RunSingleChatRequestOptions<TAssistant>, "streamResponse" | "assistantMessage"> & {
+export type RunSingleChatInitOptions<TAssistant extends SingleSendMessageLike> = {
+  apiBaseUrl?: string;
+  headers: Record<string, string>;
+  controller: AbortController;
+  modelId: string;
+  modelMessages: ModelMessage[];
+  conversationId?: number;
+  notebookId?: number;
+  reasoning: SingleChatRunReasoningOptions;
+  search: boolean;
+  templateId: number;
+  skipSaveUserMessage: boolean;
+  skillKey?: string;
+  messageFileIds?: string[];
+  notebookFileIds?: number[];
   fallbackId: () => string;
   fetchImpl?: typeof fetch;
 };
@@ -251,53 +239,4 @@ export async function runSingleChatInit<TAssistant extends SingleSendMessageLike
     ...data,
     mappedAssistantMessage: mapPersistedChatMessage(data.assistant_message, { fallbackId }) as TAssistant,
   };
-}
-
-export async function runSingleChatRequest<TAssistant extends SingleSendMessageLike>({
-  apiBaseUrl = "",
-  headers,
-  controller,
-  assistantMessage,
-  modelId,
-  modelMessages,
-  conversationId,
-  notebookId,
-  reasoning,
-  search,
-  templateId,
-  skipSaveUserMessage,
-  skillKey,
-  messageFileIds,
-  notebookFileIds,
-  fetchImpl = fetch,
-  streamResponse,
-}: RunSingleChatRequestOptions<TAssistant>): Promise<ChatStreamRunResult | undefined> {
-  const response = await fetchImpl(`${apiBaseUrl}/api/chat`, {
-    method: "POST",
-    headers,
-    signal: controller.signal,
-    body: JSON.stringify(buildSingleChatRequestBody({
-      model: modelId,
-      messages: modelMessages,
-      conversationId,
-      notebookId,
-      reasoningEffort: reasoning.effort,
-      search,
-      templateId,
-      skipSaveUserMessage,
-      skillKey,
-      messageFileIds,
-      notebookFileIds,
-      clientTimezone: getClientTimezone(),
-    })),
-  });
-
-  if (!response.ok) {
-    const errorBody = await response.json().catch(() => ({}));
-    const errorCode = errorBody.error || errorBody.code || "unknown";
-    const errorMsg = errorBody.message || "请求失败";
-    throw Object.assign(new Error(errorMsg), { errorCode, status: response.status, needInvite: errorBody.need_invite });
-  }
-
-  return streamResponse(response, assistantMessage, controller, conversationId);
 }
