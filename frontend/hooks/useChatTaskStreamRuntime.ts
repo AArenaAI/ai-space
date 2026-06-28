@@ -60,6 +60,7 @@ type StartTaskEventStreamDeps = {
   apiBaseUrl: string;
   taskStreamsRef: MutableRefObject<Record<string, AbortController>>;
   activeTaskStreamsRef: MutableRefObject<Record<string, TaskStreamActiveState>>;
+  appliedTaskSequencesRef?: MutableRefObject<Record<string, Set<number>>>;
   setMessages: Dispatch<SetStateAction<Message[]>>;
   setIsLoading: Dispatch<SetStateAction<boolean>>;
   startBackgroundPolling: StartBackgroundPolling;
@@ -116,6 +117,7 @@ export function createStartTaskEventStreamAction({
   apiBaseUrl,
   taskStreamsRef,
   activeTaskStreamsRef,
+  appliedTaskSequencesRef = { current: {} },
   setMessages,
   setIsLoading,
   startBackgroundPolling,
@@ -141,6 +143,11 @@ export function createStartTaskEventStreamAction({
     if (!convId || (!serverMessageId && !generationTaskId) || taskStreamsRef.current[localMessageId]) return;
     activeTaskStreamsRef.current[localMessageId] = { convId, serverMessageId, generationTaskId, lastSequence: after || 0, content: initialContent || "" };
     setIsLoading(true);
+
+    const sequenceKey = `${generationTaskId || serverMessageId || localMessageId}`;
+    if (!appliedTaskSequencesRef.current[sequenceKey]) {
+      appliedTaskSequencesRef.current[sequenceKey] = new Set<number>();
+    }
 
     const token = getToken();
     const headers: Record<string, string> = {};
@@ -181,6 +188,12 @@ export function createStartTaskEventStreamAction({
         streamGet: () => realtimeGet(localMessageId)?.content || "",
         realtimeGet: () => realtimeGet(localMessageId),
         realtimeUpdate: (patch: Partial<RealtimeData>) => realtimeUpdate(localMessageId, patch),
+        shouldApplySequence: (sequence: number) => {
+          const applied = appliedTaskSequencesRef.current[sequenceKey] || (appliedTaskSequencesRef.current[sequenceKey] = new Set<number>());
+          if (applied.has(sequence)) return false;
+          applied.add(sequence);
+          return true;
+        },
         startBackgroundPolling: (resolvedServerMessageId: number | undefined) => {
           if (resolvedServerMessageId) {
             startBackgroundPolling(convId, localMessageId, resolvedServerMessageId);
@@ -263,12 +276,14 @@ export function useChatTaskStreamRuntime({
   translate,
 }: UseChatTaskStreamRuntimeOptions) {
   const activeTaskStreamsRef = useRef<Record<string, TaskStreamActiveState>>({});
+  const appliedTaskSequencesRef = useRef<Record<string, Set<number>>>({});
 
   const startTaskEventStream = useCallback(
     createStartTaskEventStreamAction({
       apiBaseUrl,
       taskStreamsRef,
       activeTaskStreamsRef,
+      appliedTaskSequencesRef,
       setMessages,
       setIsLoading,
       startBackgroundPolling,

@@ -175,8 +175,9 @@ test("completed polling canonicalizes to db content instead of duplicated live c
     translate: (key) => `t:${key}`,
   });
   action(5, "local", 9);
-  callbacks.onPollState({ content: "final db", isFinished: true, isCompleted: true, status: "completed" });
+  callbacks.onPollState({ content: "final db", reasoningContent: "final reasoning", isFinished: true, isCompleted: true, status: "completed" });
   assert.equal(messages.get()[0].content, "final db");
+  assert.equal(messages.get()[0].reasoningContent, "final reasoning");
   assert.equal(messages.get()[0].completedAt, 321);
 });
 

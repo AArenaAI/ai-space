@@ -3,6 +3,7 @@ import type { ChatStatusTimelineStep } from "./chatStatusTimeline";
 
 export type BackgroundTaskPollInput = {
   content?: string;
+  reasoningContent?: string;
   status?: string;
   previousContent?: string;
   terminalStableCount?: number;
@@ -10,6 +11,7 @@ export type BackgroundTaskPollInput = {
 
 export type BackgroundTaskPollState = {
   content: string;
+  reasoningContent: string;
   status: string;
   hasContent: boolean;
   isCompleted: boolean;
@@ -21,6 +23,7 @@ export type BackgroundTaskPollState = {
 
 export function evaluateBackgroundTaskPoll({
   content = "",
+  reasoningContent = "",
   status = "",
   previousContent = "",
   terminalStableCount = 0,
@@ -36,6 +39,7 @@ export function evaluateBackgroundTaskPoll({
 
   return {
     content,
+    reasoningContent,
     status,
     hasContent,
     isCompleted,
@@ -91,6 +95,7 @@ export function selectFinalAssistantContent({
 export type BuildBackgroundPollingMessagePatchOptions = {
   existingContent: string;
   polledContent: string;
+  polledReasoningContent?: string;
   liveContent?: string;
   generationStartedAt?: number;
   statusTimeline?: ChatStatusTimelineStep[];
@@ -105,6 +110,7 @@ export type BuildBackgroundPollingMessagePatchOptions = {
 export function buildBackgroundPollingMessagePatch({
   existingContent,
   polledContent,
+  polledReasoningContent = "",
   liveContent = "",
   generationStartedAt,
   statusTimeline,
@@ -122,6 +128,7 @@ export function buildBackgroundPollingMessagePatch({
       : selectFinalAssistantContent({ existingContent, liveContent, dbContent: polledContent, taskStatus: status || (isFinished ? "completed" : undefined) }));
   return {
     content,
+    reasoningContent: polledReasoningContent || undefined,
     serverMessageId,
     generationStartedAt,
     statusTimeline,

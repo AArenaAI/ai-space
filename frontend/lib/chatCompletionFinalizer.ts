@@ -8,6 +8,7 @@ export type ChatActivityStatus = {
 
 export type ChatCompletionPatch = {
   content?: string;
+  reasoningContent?: string;
   serverMessageId?: number;
   generationTaskId?: number;
   activityStatus?: ChatActivityStatus;

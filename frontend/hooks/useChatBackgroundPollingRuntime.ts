@@ -99,6 +99,7 @@ export function createStartBackgroundPollingAction(input: CreateStartBackgroundP
               ...buildBackgroundPollingMessagePatch({
                 existingContent: message.content,
                 polledContent: pollState.content,
+                polledReasoningContent: pollState.reasoningContent,
                 liveContent,
                 generationStartedAt: realtime?.generationStartedAt ?? message.generationStartedAt,
                 statusTimeline: realtime?.statusTimeline ?? message.statusTimeline,
