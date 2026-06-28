@@ -12,6 +12,9 @@ import type { ChatStreamRunResult } from "./chatStreamRunResult";
 export type CompareAssistantLike = {
   id: string;
   model?: string;
+  serverMessageId?: number;
+  generationTaskId?: number;
+  serverGenerationStatus?: string;
 };
 
 export type CompareAbortReason = "user" | "navigation" | null | undefined;
@@ -188,32 +191,57 @@ export async function runCompareModel<TAssistant extends CompareAssistantLike>({
       explicitContext: explicitGroupContext,
       currentContext: coordinator.getGroupContext(),
     });
-    const response = await fetchImpl(`${options.apiBaseUrl || ""}/api/chat`, {
+    const requestBody = buildCompareRunRequestBody({
+      assistant,
+      index,
+      requestGroupContext,
+      compareModelIds: options.compareModelIds,
+      modelMessages: options.modelMessages,
+      conversationId: options.conversationId,
+      reasoning: options.reasoning,
+      search: options.search,
+      templateId: options.templateId,
+      templatePrefix: options.templatePrefix,
+      skillKey: options.skillKey,
+      messageFileIds: options.messageFileIds,
+      clientTimezone: getClientTimezone(),
+      precreatedUserMessage: !!options.explicitGroupContext?.userMessageId,
+    });
+    const initResponse = await fetchImpl(`${options.apiBaseUrl || ""}/api/chat/init`, {
       method: "POST",
       headers: options.headers,
       signal: controller.signal,
-      body: JSON.stringify(buildCompareRunRequestBody({
-        assistant,
-        index,
-        requestGroupContext,
-        compareModelIds: options.compareModelIds,
-        modelMessages: options.modelMessages,
-        conversationId: options.conversationId,
-        reasoning: options.reasoning,
-        search: options.search,
-        templateId: options.templateId,
-        templatePrefix: options.templatePrefix,
-        skillKey: options.skillKey,
-        messageFileIds: options.messageFileIds,
-        clientTimezone: getClientTimezone(),
-        precreatedUserMessage: !!options.explicitGroupContext?.userMessageId,
-      })),
+      body: JSON.stringify({ ...requestBody, stream: true, init_only: true }),
+    });
+    if (!initResponse.ok) {
+      const errorBody = await initResponse.json().catch(() => ({}));
+      const errorCode = errorBody.error || errorBody.code || "unknown";
+      const errorMsg = errorBody.message || "请求失败";
+      throw Object.assign(new Error(errorMsg), { errorCode, status: initResponse.status, needInvite: errorBody.need_invite });
+    }
+    const init = await initResponse.json();
+    const serverMessageId = Number(init.assistant_message_id || init.assistant_message?.id || 0) || undefined;
+    const generationTaskId = Number(init.task_id || init.assistant_message?.generation_task_id || 0) || undefined;
+    if (serverMessageId || generationTaskId) {
+      options.callbacks.onRecoverableResult(assistant, {
+        serverMessageId,
+        generationTaskId,
+        lastSequence: Number(init.assistant_message?.last_sequence_number || 0) || 0,
+        content: "",
+        useBackground: true,
+        sawDone: false,
+        recoverable: false,
+      });
+    }
+    const response = await fetchImpl(`${options.apiBaseUrl || ""}/api/tasks/${generationTaskId}/stream?after=0`, {
+      headers: options.headers,
+      signal: controller.signal,
     });
     if (!response.ok) {
       const errorBody = await response.json().catch(() => ({}));
-      const errorCode = errorBody.error || errorBody.code || "unknown";
-      const errorMsg = errorBody.message || "请求失败";
-      throw Object.assign(new Error(errorMsg), { errorCode, status: response.status, needInvite: errorBody.need_invite });
+      const errorCode = errorBody.error || errorBody.code || "task_stream_failed";
+      const errorMsg = errorBody.message || "连接生成任务失败";
+      throw Object.assign(new Error(errorMsg), { errorCode, status: response.status });
     }
 
     streamResult = await options.callbacks.streamResponse(

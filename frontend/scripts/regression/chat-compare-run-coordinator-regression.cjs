@@ -124,7 +124,7 @@ test("runCompareModels starts every model immediately when explicit group contex
       explicitGroupContext: { groupId: 900, userMessageId: 901, groupModels: ["deepseek-v4-pro", "gemini-3.1-flash-lite"] },
       callbacks: {
         fetchImpl: async (_url, init) => {
-          calls.push(JSON.parse(init.body));
+          calls.push((init.body ? JSON.parse(init.body) : {}));
           return okResponse();
         },
         streamResponse: async () => ({ lastSequence: 1, content: "", useBackground: false, sawDone: true }),
@@ -139,19 +139,20 @@ test("runCompareModels starts every model immediately when explicit group contex
   ]);
 
   assert.equal(result, "completed");
-  assert.equal(calls.length, 2);
-  assert.deepEqual(calls.map((body) => body.model), ["deepseek-v4-pro", "gemini-3.1-flash-lite"]);
-  assert.deepEqual(calls.map((body) => body.group_index), [0, 1]);
-  assert.deepEqual(calls.map((body) => body.group_id), [900, 900]);
-  assert.deepEqual(calls.map((body) => body.user_message_id), [901, 901]);
-  assert.deepEqual(calls.map((body) => body.skip_save_user_msg), [true, true]);
+  const initBodies = calls.filter((body) => body.model);
+  assert.equal(initBodies.length, 2);
+  assert.deepEqual(initBodies.map((body) => body.model), ["deepseek-v4-pro", "gemini-3.1-flash-lite"]);
+  assert.deepEqual(initBodies.map((body) => body.group_index), [0, 1]);
+  assert.deepEqual(initBodies.map((body) => body.group_id), [900, 900]);
+  assert.deepEqual(initBodies.map((body) => body.user_message_id), [901, 901]);
+  assert.deepEqual(initBodies.map((body) => body.skip_save_user_msg), [true, true]);
 });
 
 test("runCompareModels runs first request then rest after context", async () => {
   const calls = [];
   const controllers = [new AbortController(), new AbortController(), new AbortController()];
   const fetchImpl = async (url, init) => {
-    calls.push(["fetch", JSON.parse(init.body)]);
+    calls.push(["fetch", (init.body ? JSON.parse(init.body) : {})]);
     return okResponse();
   };
   const streamResponse = async (_response, assistant, _controller, _convId, onGroupContext) => {
@@ -184,7 +185,7 @@ test("runCompareModels runs first request then rest after context", async () => 
     },
   });
 
-  const fetchBodies = calls.filter((call) => call[0] === "fetch").map((call) => call[1]);
+  const fetchBodies = calls.filter((call) => call[0] === "fetch").map((call) => call[1]).filter((body) => body.model);
   assert.equal(fetchBodies.length, 3);
   assert.equal(fetchBodies[0].skip_save_user_msg, false);
   assert.equal(fetchBodies[1].skip_save_user_msg, true);
@@ -205,7 +206,7 @@ test("runCompareModels waits for first run when context is missing", async () =>
     search: false,
     templateId: 0,
     callbacks: {
-      fetchImpl: async (_url, init) => { calls.push(["fetch", JSON.parse(init.body)]); return okResponse(); },
+      fetchImpl: async (_url, init) => { calls.push(["fetch", (init.body ? JSON.parse(init.body) : {})]); return okResponse(); },
       streamResponse: async () => ({ lastSequence: 1, content: "", useBackground: false, sawDone: true }),
       onGroupContextResolved: () => calls.push(["resolved"]),
       onRecoverableResult: () => calls.push(["recoverable"]),
