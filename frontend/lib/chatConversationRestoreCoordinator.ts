@@ -36,7 +36,7 @@ export type ConversationRestoreMessage = ForkChatMessage & {
 };
 
 export type ConversationRestoreStatusResponse = {
-  message?: { id?: number | string; content?: string; model?: string };
+  message?: { id?: number | string; content?: string; model?: string; reasoning_content?: string; reasoning?: string; thinking?: string };
   background_task?: {
     id?: number | string;
     task_id?: number | string;
@@ -346,6 +346,7 @@ export function buildConversationStatusDecision({
   const status = bgTask.status || "";
   const terminalStatus = status === "completed" || status === "failed" || status === "cancelled" || status === "incomplete";
   const serverContent = statusData?.message?.content || "";
+  const serverReasoningContent = statusData?.message?.reasoning_content || statusData?.message?.reasoning || statusData?.message?.thinking || "";
   const hasContent = serverContent.trim().length > 0;
   const shouldResumePolling = hasTask && (!terminalStatus || !hasContent);
   const generationTaskId = Number(bgTask.id || bgTask.task_id || 0) || undefined;
@@ -359,6 +360,9 @@ export function buildConversationStatusDecision({
       : currentMessage.completedAt);
   const patch: Partial<ConversationRestoreMessage> = {
     content: serverContent || currentMessage.content,
+    ...(serverReasoningContent || currentMessage.reasoningContent
+      ? { reasoningContent: serverReasoningContent || currentMessage.reasoningContent }
+      : {}),
     generationTaskId: generationTaskId || currentMessage.generationTaskId,
     lastSequence: lastSequence || currentMessage.lastSequence,
     completedAt,
