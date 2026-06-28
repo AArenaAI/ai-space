@@ -15,8 +15,8 @@ const transformed = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
 fs.writeFileSync(tmpFile, transformed);
 const { buildBootstrapTaskResumePlan } = require(tmpFile);
 
-function assistant(id, serverMessageId, content = '') {
-  return { id, role: 'assistant', content, createdAt: 1, serverMessageId };
+function assistant(id, serverMessageId, content = '', reasoningContent) {
+  return { id, role: 'assistant', content, reasoningContent, createdAt: 1, serverMessageId };
 }
 
 function testBuildsResumePlanForMatchingAssistant() {
@@ -53,7 +53,7 @@ function testSkipsCompletedAndMissingButAllowsReconnection() {
 function testAllowsRunningStreamingAndRetryingOnly() {
   const plan = buildBootstrapTaskResumePlan({
     alreadyResumedTaskIds: new Set(),
-    messages: [assistant('local-a', 101), assistant('local-b', 102)],
+    messages: [assistant('local-a', 101), assistant('local-b', 102, 'persisted')],
     activeTasks: [
       { id: 11, conversation_id: 762, assistant_message_id: 101, status: 'retrying', last_sequence_number: 0, updated_at: 'now' },
       { id: 12, conversation_id: 762, assistant_message_id: 102, status: 'streaming', last_sequence_number: 4, updated_at: 'now' },
@@ -64,7 +64,29 @@ function testAllowsRunningStreamingAndRetryingOnly() {
   assert.deepEqual(plan.map((item) => item.after), [0, 4]);
 }
 
+function testReplaysFromBeginningWhenServerMessageHasNoVisibleProgress() {
+  const plan = buildBootstrapTaskResumePlan({
+    messages: [assistant('server-a', 201, '')],
+    activeTasks: [{ id: 21, conversation_id: 762, assistant_message_id: 201, status: 'streaming', last_sequence_number: 99, updated_at: 'now' }],
+  });
+  assert.equal(plan.length, 1);
+  assert.equal(plan[0].after, 0);
+  assert.equal(plan[0].initialContent, '');
+}
+
+function testKeepsPersistedReasoningWhenResumingVisibleMessage() {
+  const plan = buildBootstrapTaskResumePlan({
+    messages: [assistant('server-b', 202, '', '已有思考')],
+    activeTasks: [{ id: 22, conversation_id: 762, assistant_message_id: 202, status: 'streaming', last_sequence_number: 10, updated_at: 'now' }],
+  });
+  assert.equal(plan.length, 1);
+  assert.equal(plan[0].after, 10);
+  assert.equal(plan[0].initialContent, '<think>已有思考</think>');
+}
+
 testBuildsResumePlanForMatchingAssistant();
 testSkipsCompletedAndMissingButAllowsReconnection();
 testAllowsRunningStreamingAndRetryingOnly();
+testReplaysFromBeginningWhenServerMessageHasNoVisibleProgress();
+testKeepsPersistedReasoningWhenResumingVisibleMessage();
 console.log('chat bootstrap task resume regression passed');
