@@ -43,6 +43,74 @@ func (h *ChatHandler) touchConversation(conversationID uint) {
 	}
 }
 
+func (h *ChatHandler) RecoverGenerationMessages() {
+	if h == nil || h.db == nil {
+		return
+	}
+	terminalStatuses := []string{"completed", "failed", "cancelled", "incomplete"}
+	var terminalTasks []models.AIBackgroundTask
+	if err := h.db.Where("status IN ? AND assistant_message_id > 0", terminalStatuses).
+		Order("updated_at DESC").
+		Limit(1000).
+		Find(&terminalTasks).Error; err == nil {
+		for _, task := range terminalTasks {
+			updates := map[string]interface{}{
+				"generation_task_id":   task.ID,
+				"generation_status":    task.Status,
+				"last_sequence_number": task.LastSequenceNumber,
+				"phase":                task.Status,
+			}
+			if task.CompletedAt != nil {
+				updates["completed_at"] = task.CompletedAt
+			}
+			h.db.Model(&models.Message{}).
+				Where("id = ? AND role = ? AND (generation_status IS NULL OR generation_status = '' OR generation_status NOT IN ?)", task.AssistantMessageID, "assistant", terminalStatuses).
+				Updates(updates)
+		}
+	}
+
+	cutoff := time.Now().Add(-30 * time.Minute)
+	now := time.Now()
+	var staleMessages []models.Message
+	if err := h.db.Where("role = ? AND generation_status IN ? AND created_at < ?", "assistant", []string{"queued", "running", "streaming", "retrying", "pending"}, cutoff).
+		Limit(1000).
+		Find(&staleMessages).Error; err == nil {
+		for _, msg := range staleMessages {
+			var task models.AIBackgroundTask
+			err := h.db.Where("assistant_message_id = ?", msg.ID).Order("updated_at DESC, id DESC").First(&task).Error
+			if err == nil {
+				if containsChatStatus(terminalStatuses, task.Status) {
+					updates := map[string]interface{}{
+						"generation_task_id":   task.ID,
+						"generation_status":    task.Status,
+						"last_sequence_number": task.LastSequenceNumber,
+						"phase":                task.Status,
+					}
+					if task.CompletedAt != nil {
+						updates["completed_at"] = task.CompletedAt
+					}
+					h.db.Model(&models.Message{}).Where("id = ?", msg.ID).Updates(updates)
+				}
+				continue
+			}
+			h.db.Model(&models.Message{}).Where("id = ?", msg.ID).Updates(map[string]interface{}{
+				"generation_status": "incomplete",
+				"phase":             "failed",
+				"completed_at":      &now,
+			})
+		}
+	}
+}
+
+func containsChatStatus(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *ChatHandler) createMessageGroup(conversationID uint, userMessageID uint, modelIDs []string) (*models.MessageGroup, error) {
 	group := &models.MessageGroup{
 		ConversationID: conversationID,

@@ -23,8 +23,6 @@ import { buildChatRequestHeaders } from "@/lib/chatRequestBuilder";
 import { toModelMessages } from "@/lib/chatHistoryTransform";
 import { initializeAssistantRealtime } from "@/lib/chatInitialRealtime";
 import { createBusyGeneratingStatus } from "@/lib/chatActivityStatus";
-import { setConversationSnapshot } from "@/lib/chatConversationCache";
-import { setPersistentConversationSnapshot } from "@/lib/chatConversationPersistentCache";
 import type { ChatStreamGroupContext, ChatStreamRunResult } from "@/lib/chatStreamRunResult";
 import type { ChatModel, Message } from "@/lib/chatTypes";
 import type { CreateConversationAction } from "@/hooks/useChatConversationCreateRuntime";
@@ -149,35 +147,6 @@ export function useChatSingleSendRuntime({
             generationStartedAt: assistantMsg.createdAt || now(),
           } as Message,
         };
-      }
-      if (convId) {
-        const nextMessagesForSnapshot = applySingleSendMessagePlan(messages, messagePlan) as Message[];
-        const snapshotMessages = nextMessagesForSnapshot.map((message) =>
-          message.id === assistantMsg.id
-            ? {
-              ...message,
-              activityStatus: createBusyGeneratingStatus(translate),
-              generationStartedAt: assistantMsg.createdAt || now(),
-            } as Message
-            : message
-        );
-        const optimisticSnapshot = {
-          conversationId: convId,
-          title: "",
-          messages: snapshotMessages,
-          loadedPersistedMessages: snapshotMessages.length,
-          totalMessages: snapshotMessages.length,
-          groupViews: new Map(),
-          isLoading: true,
-          isCompare: false,
-          compareModels: [],
-          model: selectedModel.id,
-          skillKey: effectiveSkillKey,
-          fetchedAt: Date.now(),
-          updatedAt: Date.now(),
-        };
-        setConversationSnapshot(optimisticSnapshot);
-        void setPersistentConversationSnapshot(optimisticSnapshot);
       }
       setMessages((prev) => applySingleSendMessagePlan(prev, messagePlan));
 
