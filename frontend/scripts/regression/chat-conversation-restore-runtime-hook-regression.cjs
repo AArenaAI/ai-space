@@ -440,6 +440,49 @@ async function testPendingLocalAssistantIsPreservedBeforeServerContent() {
   assert.equal(state.messages[1].activityStatus.kind, "generating");
 }
 
+async function testOptimisticCachedPendingSurvivesBackendUserOnlyRestore() {
+  snapshotCache.clear();
+  persistentSnapshotCache.clear();
+  const pendingAssistant = {
+    id: "optimistic-assistant",
+    role: "assistant",
+    content: "",
+    model: "m1",
+    createdAt: Date.parse("2026-01-01T00:00:02Z"),
+    activityStatus: { kind: "generating", label: "busy" },
+    generationStartedAt: Date.parse("2026-01-01T00:00:02Z"),
+  };
+  snapshotCache.set(9, {
+    conversationId: 9,
+    title: "Optimistic",
+    messages: [
+      { id: "optimistic-user", role: "user", content: "waiting", createdAt: Date.parse("2026-01-01T00:00:01Z") },
+      pendingAssistant,
+    ],
+    loadedPersistedMessages: 2,
+    totalMessages: 2,
+    groupViews: new Map([[1, 0]]),
+    isLoading: true,
+    isCompare: false,
+    compareModels: [],
+    model: "m1",
+    fetchedAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+  restoreImpl = async () => ({
+    title: "Backend only user",
+    model: "m1",
+    messages: [{ id: "u1", role: "user", content: "waiting" }],
+  });
+  statusImpl = async () => undefined;
+  countImpl = async () => undefined;
+  const { state } = runRuntime({ conversationId: 9, token: "tok", pendingLocalAssistants: {} });
+  await flush(); await flush();
+  assert.equal(state.messages.some((message) => message.id === "optimistic-assistant"), true);
+  assert.equal(state.messages.at(-1).role, "assistant");
+  assert.equal(state.messages.at(-1).activityStatus.kind, "generating");
+}
+
 async function testVisiblePendingAssistantSurvivesRestoreWhenBackendHasNoAnswerYet() {
   snapshotCache.clear();
   persistentSnapshotCache.clear();
@@ -533,6 +576,7 @@ async function testNavigationAbortsControllers() {
   await testStatusResumeStartsTaskStream();
   await testLateRestoreResponseCannotOverwriteLatestConversation();
   await testPendingLocalAssistantIsPreservedBeforeServerContent();
+  await testOptimisticCachedPendingSurvivesBackendUserOnlyRestore();
   await testVisiblePendingAssistantSurvivesRestoreWhenBackendHasNoAnswerYet();
   await testCompletedServerAssistantDropsPendingLocalPlaceholder();
   await testNavigationAbortsControllers();

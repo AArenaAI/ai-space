@@ -516,17 +516,25 @@ export function useChatConversationRestoreRuntime({
             .map(({ message }) => message);
           const pendingLocalMessagesById = new Map(pendingLocalMessagesFromRef.map((message) => [message.id, message]));
           const baseMergedMessages = restoreState.mergedMessages as Message[];
+          const collectPendingMessages = (sourceMessages: Message[] | undefined) => {
+            if (backendLastAssistantCompleted) return;
+            (sourceMessages || []).forEach((message) => {
+              if (
+                message.role === "assistant" &&
+                !message.content?.trim() &&
+                !message.completedAt &&
+                !message.stopped &&
+                !message.errorCode &&
+                !baseMergedMessages.some((item) => item.id === message.id)
+              ) {
+                pendingLocalMessagesById.set(message.id, message);
+              }
+            });
+          };
+          collectPendingMessages(cachedSnapshot?.messages as Message[] | undefined);
           const mergePendingMessages = (prevMessages: Message[]) => {
             if (backendLastAssistantCompleted) return baseMergedMessages;
-            const visiblePendingMessages = prevMessages.filter((message) =>
-              message.role === "assistant" &&
-              !message.content?.trim() &&
-              !message.completedAt &&
-              !message.stopped &&
-              !message.errorCode &&
-              !baseMergedMessages.some((item) => item.id === message.id)
-            );
-            visiblePendingMessages.forEach((message) => pendingLocalMessagesById.set(message.id, message));
+            collectPendingMessages(prevMessages);
             return pendingLocalMessagesById.size > 0
               ? [...baseMergedMessages, ...Array.from(pendingLocalMessagesById.values())]
               : baseMergedMessages;
