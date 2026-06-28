@@ -451,9 +451,12 @@ func (h *ConversationHandler) buildMessagesWithGroupPayload(conversationID uint,
 	result := make([]MessageWithGroup, len(messages))
 	for i, m := range messages {
 		result[i] = MessageWithGroup{
-			Message:    m,
-			GroupID:    m.GroupID,
-			GroupIndex: m.GroupIndex,
+			Message:                m,
+			GroupID:                m.GroupID,
+			GroupIndex:             m.GroupIndex,
+			GenerationTaskID:       m.GenerationTaskID,
+			LastSequenceNumber:     m.LastSequenceNumber,
+			ServerGenerationStatus: m.GenerationStatus,
 		}
 		if g, ok := groupMap[m.GroupID]; ok {
 			result[i].GroupModels = g.GetModels()

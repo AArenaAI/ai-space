@@ -1,4 +1,5 @@
 import type { ChatStatusTimelineStep } from "./chatStatusTimeline";
+import type { RuntimePhase } from "./streaming";
 
 export interface SearchSource {
   title: string;
@@ -48,6 +49,7 @@ export interface Message {
   backgroundTaskId?: string;
   generationTaskId?: number;
   serverGenerationStatus?: "pending" | "running" | "streaming" | "polling" | "completed" | "failed" | "cancelled" | "incomplete" | string;
+  phase?: RuntimePhase;
   useBackground?: boolean;
   isComplexTask?: boolean;
   lastSequence?: number;

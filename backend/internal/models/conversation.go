@@ -48,6 +48,10 @@ type Message struct {
 	TokensUsed         int            `json:"tokens_used"`
 	SearchSources      string         `gorm:"type:text" json:"search_sources,omitempty"`
 	SearchSourcesCount int            `json:"search_sources_count,omitempty"`
+	GenerationStatus   string         `gorm:"size:32;index" json:"generation_status,omitempty"` // queued | running | streaming | completed | failed | cancelled | incomplete
+	GenerationTaskID   uint           `gorm:"index" json:"generation_task_id,omitempty"`
+	LastSequenceNumber int64          `json:"last_sequence_number,omitempty"`
+	Phase              string         `gorm:"size:32" json:"phase,omitempty"`
 	CompletedAt        *time.Time     `json:"completed_at,omitempty"`
 	CreatedAt          time.Time      `json:"created_at"`
 	DeletedAt          gorm.DeletedAt `gorm:"index" json:"-"`

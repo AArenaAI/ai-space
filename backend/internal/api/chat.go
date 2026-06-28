@@ -986,6 +986,42 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "message_group_failed", "message": err.Error()})
 		return
 	}
+	// For streaming requests, persist the assistant placeholder and generation task
+	// before any slow search/model preparation. This makes /api/chat/bootstrap
+	// authoritative immediately after the user sends, even if /api/chat has not
+	// returned yet.
+	var assistantMsgID uint
+	var streamTask *models.AIBackgroundTask
+	if req.Stream {
+		assistantMsg := models.Message{
+			ConversationID:     conversationID,
+			Role:               "assistant",
+			Content:            "",
+			Model:              req.Model,
+			GroupID:            groupCtx.Group.ID,
+			GroupIndex:         groupCtx.GroupIndex,
+			GenerationStatus:   "running",
+			LastSequenceNumber: 0,
+			Phase:              "queued",
+			CreatedAt:          time.Now(),
+		}
+		if err := h.db.Create(&assistantMsg).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存 assistant 占位消息失败"})
+			return
+		}
+		assistantMsgID = assistantMsg.ID
+		streamTask = h.createBackgroundTask(fmt.Sprintf("stream:%d", assistantMsgID), userID, guestID, conversationID, assistantMsgID, req.Model, "", "running", 0)
+		if streamTask == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "创建生成任务失败"})
+			return
+		}
+		h.db.Model(&models.Message{}).Where("id = ?", assistantMsgID).Updates(map[string]interface{}{
+			"generation_task_id": streamTask.ID,
+			"generation_status":  "running",
+			"phase":              "queued",
+		})
+		h.touchConversation(conversationID)
+	}
 	// ========== 保存消息与会话结束 ==========
 
 	var searchSources []services.SearchResult
@@ -1071,26 +1107,8 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 	useBackground := services.OpenAIUsesBackground(req.Model, effectiveEffort)
 
 	if req.Stream {
-		// 先创建一条空的 assistant 消息，确保即使用户跳转/刷新也能看到生成中的消息
-		assistantMsg := models.Message{
-			ConversationID: conversationID,
-			Role:           "assistant",
-			Content:        "",
-			Model:          req.Model,
-			GroupID:        groupCtx.Group.ID,
-			GroupIndex:     groupCtx.GroupIndex,
-			CreatedAt:      time.Now(),
-		}
-		if err := h.db.Create(&assistantMsg).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存 assistant 占位消息失败"})
-			return
-		}
-		h.touchConversation(conversationID)
-		assistantMsgID := assistantMsg.ID
-
-		streamTask := h.createBackgroundTask(fmt.Sprintf("stream:%d", assistantMsgID), userID, guestID, conversationID, assistantMsgID, req.Model, "", "running", 0)
-		if streamTask == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "创建生成任务失败"})
+		if assistantMsgID == 0 || streamTask == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "生成任务未初始化"})
 			return
 		}
 
@@ -1450,8 +1468,11 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 			content = "任务已完成，但未返回可展示文本。"
 		}
 		updates := map[string]interface{}{
-			"content":      content,
-			"completed_at": time.Now(),
+			"content":              content,
+			"completed_at":         time.Now(),
+			"generation_status":    finalStatus,
+			"last_sequence_number": streamResult.LastSequenceNumber,
+			"phase":                finalStatus,
 		}
 		if strings.TrimSpace(streamResult.ReasoningContent) != "" {
 			updates["reasoning_content"] = streamResult.ReasoningContent
@@ -1637,8 +1658,10 @@ func (h *ChatHandler) failGenerationTaskWithMeta(task *models.AIBackgroundTask, 
 	now := time.Now()
 	persistedContent := h.failurePersistedContent(assistantMessageID, task, message)
 	h.db.Model(&models.Message{}).Where("id = ?", assistantMessageID).Updates(map[string]interface{}{
-		"content":      persistedContent,
-		"completed_at": &now,
+		"content":           persistedContent,
+		"completed_at":      &now,
+		"generation_status": "failed",
+		"phase":             "failed",
 	})
 	h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", task.ID).Updates(map[string]interface{}{
 		"status":               "failed",
@@ -1691,6 +1714,29 @@ func (h *ChatHandler) persistTaskEvent(task *models.AIBackgroundTask, assistantM
 		return
 	}
 	h.db.Model(&models.AIBackgroundTask{}).Where("id = ? AND last_sequence_number < ?", task.ID, sequenceNumber).Update("last_sequence_number", sequenceNumber)
+	phase := "streaming"
+	if eventType == "generation_task" {
+		phase = "queued"
+	} else if eventType == "reasoning" || eventType == "reasoning_delta" {
+		phase = "reasoning"
+	} else if eventType == "search_meta" {
+		phase = "searching"
+	} else if eventType == "done" {
+		phase = "completed"
+	} else if eventType == "error" {
+		phase = "failed"
+	}
+	messageUpdates := map[string]interface{}{
+		"generation_task_id":   task.ID,
+		"last_sequence_number": sequenceNumber,
+	}
+	if phase == "completed" || phase == "failed" {
+		messageUpdates["generation_status"] = phase
+	} else {
+		messageUpdates["generation_status"] = "running"
+	}
+	messageUpdates["phase"] = phase
+	h.db.Model(&models.Message{}).Where("id = ? AND last_sequence_number < ?", assistantMessageID, sequenceNumber).Updates(messageUpdates)
 	task.LastSequenceNumber = sequenceNumber
 }
 
@@ -2325,7 +2371,9 @@ func (h *ChatHandler) CancelGenerationTask(c *gin.Context) {
 	h.persistTaskEvent(&task, task.AssistantMessageID, seq+1, "done", "[DONE]")
 	now := time.Now()
 	h.db.Model(&models.Message{}).Where("id = ?", task.AssistantMessageID).Updates(map[string]interface{}{
-		"completed_at": &now,
+		"completed_at":      &now,
+		"generation_status": "cancelled",
+		"phase":             "cancelled",
 	})
 	h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", task.ID).Updates(map[string]interface{}{
 		"status":               "cancelled",

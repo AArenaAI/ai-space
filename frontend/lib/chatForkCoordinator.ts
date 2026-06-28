@@ -1,4 +1,5 @@
 import { normalizeError, readApiError } from "@/lib/errors";
+import type { RuntimePhase } from "@/lib/streaming";
 
 function getClientTimezone(): string | undefined {
   if (typeof Intl === "undefined") return undefined;
@@ -31,6 +32,8 @@ export type ForkChatPersistedMessage = {
   generation_task_id?: number | string | null;
   last_sequence_number?: number | string | null;
   server_generation_status?: string | null;
+  generation_status?: string | null;
+  phase?: string | null;
 };
 
 export type ForkChatMessage = {
@@ -54,6 +57,7 @@ export type ForkChatMessage = {
   generationTaskId?: number;
   lastSequence?: number;
   serverGenerationStatus?: string;
+  phase?: RuntimePhase;
 };
 
 export type ForkChatResponse = {
@@ -89,6 +93,20 @@ export function parsePersistedMessageSearchSources(raw: Pick<ForkChatPersistedMe
   } catch {
     return undefined;
   }
+}
+
+function normalizePersistedPhase(phase?: string | null): RuntimePhase | undefined {
+  if (!phase) return undefined;
+  if (phase === "queued") return "starting";
+  if (phase === "streaming") return "streaming_answer";
+  if (phase === "cancelled") return "stopped";
+  if (
+    phase === "idle" || phase === "starting" || phase === "waiting_provider" || phase === "thinking" ||
+    phase === "reasoning" || phase === "searching" || phase === "retrieving_files" || phase === "generating" ||
+    phase === "streaming_answer" || phase === "finalizing" || phase === "completed" || phase === "stopped" ||
+    phase === "failed"
+  ) return phase;
+  return undefined;
 }
 
 export function mapPersistedChatMessage(
@@ -127,7 +145,8 @@ export function mapPersistedChatMessage(
     userMessageId: Number(message.user_message_id || 0) || undefined,
     generationTaskId: Number(message.generation_task_id || 0) || undefined,
     lastSequence: Number(message.last_sequence_number || 0) || undefined,
-    serverGenerationStatus: message.server_generation_status || undefined,
+    serverGenerationStatus: message.server_generation_status || message.generation_status || undefined,
+    phase: normalizePersistedPhase(message.phase),
   };
 }
 
