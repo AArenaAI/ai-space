@@ -31,6 +31,13 @@ compileHook("useChatCompareSendRuntime.ts");
 const tmpFile = compileHook("useChatSendRuntime.ts");
 
 let singleRequestImpl = async () => {};
+let singleInitImpl = async () => ({
+  conversation_id: 42,
+  user_message_id: 501,
+  assistant_message_id: 502,
+  task_id: 900,
+  mappedAssistantMessage: { id: "502", role: "assistant", content: "", model: "m1", createdAt: 1000, serverMessageId: 502, generationTaskId: 900, serverGenerationStatus: "running" },
+});
 let compareRunImpl = async () => {};
 let compareInitImpl = async () => ({
   conversation_id: 10,
@@ -42,6 +49,7 @@ let createConversationRequestImpl = async () => ({ id: 42, title: "created" });
 let realtimeGetImpl = () => undefined;
 let uuidCounter = 0;
 const events = [];
+global.fetch = async () => ({ ok: true, body: null });
 
 const moduleCache = new Map();
 function loadModule(file) {
@@ -71,6 +79,7 @@ function loadModule(file) {
           };
         },
         applySingleSendMessagePlan: (prev, plan) => [...prev, ...plan.visibleMessages],
+        runSingleChatInit: (...args) => singleInitImpl(...args),
         runSingleChatRequest: (...args) => singleRequestImpl(...args),
       };
     }
@@ -209,13 +218,22 @@ function makeRuntime(overrides = {}) {
 async function testSingleSendCreatesConversationAndRunsRequest() {
   events.length = 0;
   let request;
-  singleRequestImpl = async (opts) => { request = opts; };
+  singleInitImpl = async (opts) => { request = opts; return {
+    conversation_id: 42,
+    user_message_id: 501,
+    assistant_message_id: 502,
+    task_id: 900,
+    mappedAssistantMessage: { id: "502", role: "assistant", content: "", model: "m1", createdAt: 1000, serverMessageId: 502, generationTaskId: 900, serverGenerationStatus: "running" },
+  }; };
   createConversationRequestImpl = async ({ body }) => ({ id: 42, title: body.title });
   const { runtime, state, refs } = makeRuntime({ token: "tok" });
   await runtime.sendMessage("hello world", { enabled: true, effort: "low" }, false, true, 3, false, [{ filename: "a", content: "", type: "file", public_id: "p" }], ["f1"], "tpl");
   assert.equal(events.find((e) => e[0] === "created")?.[1], 42);
   assert.equal(state.messages.length, 2);
   assert.equal(state.messages[1].role, "assistant");
+  assert.equal(state.messages[1].id, "id-1");
+  assert.equal(state.messages[1].serverMessageId, 502);
+  assert.equal(state.messages[1].generationTaskId, 900);
   assert.equal(request.conversationId, 42);
   assert.equal(request.modelId, "m1");
   assert.deepEqual(request.messageFileIds, ["f1"]);
@@ -234,7 +252,7 @@ async function testSingleSendCreateFailureAppendsPlaceholder() {
 }
 
 async function testSingleSendRequestErrorPatchesAssistant() {
-  singleRequestImpl = async () => { throw new Error("boom"); };
+  singleInitImpl = async () => { throw new Error("boom"); };
   const { runtime, state } = makeRuntime({ currentConversation: 9 });
   await runtime.sendMessage("hello");
   assert.equal(state.messages.length, 2);

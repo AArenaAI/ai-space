@@ -90,6 +90,17 @@ type FileContextPolicy struct {
 	IncludePinnedFiles   bool   `json:"include_pinned_files,omitempty"`
 }
 
+type ChatInitResponse struct {
+	ConversationID     uint             `json:"conversation_id"`
+	UserMessageID      uint             `json:"user_message_id,omitempty"`
+	AssistantMessageID uint             `json:"assistant_message_id"`
+	TaskID             uint             `json:"task_id"`
+	GroupID            uint             `json:"group_id,omitempty"`
+	GroupIndex         int              `json:"group_index"`
+	GroupModels        []string         `json:"group_models,omitempty"`
+	AssistantMessage   MessageWithGroup `json:"assistant_message"`
+}
+
 type ChatRequest struct {
 	Model           string             `json:"model" binding:"required"`
 	Messages        []services.Message `json:"messages" binding:"required"`
@@ -125,6 +136,9 @@ type ChatRequest struct {
 	// Used by document-reader structured artifact generation where the output is
 	// persisted separately and must not appear in the study chat/history.
 	Transient bool `json:"transient,omitempty"`
+	// InitOnly creates the persisted user/assistant/task state and starts the
+	// generation runner, then returns a job handle instead of holding an SSE stream.
+	InitOnly bool `json:"init_only,omitempty"`
 }
 
 type CompareRequest struct {
@@ -822,13 +836,28 @@ func (h *ChatHandler) preprocessSearch(messages []services.Message, modelID stri
 	return processed, sources, false
 }
 
+func (h *ChatHandler) InitChat(c *gin.Context) {
+	var req ChatRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	req.Stream = true
+	req.InitOnly = true
+	c.Set("chat_init_request", req)
+	h.chatWithRequest(c, &req)
+}
+
 func (h *ChatHandler) Chat(c *gin.Context) {
 	var req ChatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	h.chatWithRequest(c, &req)
+}
 
+func (h *ChatHandler) chatWithRequest(c *gin.Context, req *ChatRequest) {
 	// ========== 匿名用户检查 ==========
 	userID, guestID, ok := requireGuestOrUser(c, h.cfg, h.db)
 	if !ok {
@@ -915,7 +944,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 	query := lastUserContent(req.Messages)
 
 	if h.fileService != nil {
-		filePlan = h.buildChatFilePlan(req, userID, guestID)
+		filePlan = h.buildChatFilePlan(*req, userID, guestID)
 	}
 
 	var fileContextSources []services.SearchResult
@@ -981,7 +1010,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		}
 	}
 
-	groupCtx, err := h.ensureMessageGroup(conversationID, req, savedUserMessageID)
+	groupCtx, err := h.ensureMessageGroup(conversationID, *req, savedUserMessageID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "message_group_failed", "message": err.Error()})
 		return
@@ -1023,6 +1052,130 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		h.touchConversation(conversationID)
 	}
 	// ========== 保存消息与会话结束 ==========
+
+	if req.InitOnly {
+		metaOut, _ := json.Marshal(map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{"delta": map[string]string{"content": ""}},
+			},
+			"_generation_task": map[string]interface{}{
+				"id":                   streamTask.ID,
+				"status":               "running",
+				"conversation_id":      conversationID,
+				"assistant_message_id": assistantMsgID,
+				"user_message_id":      groupCtx.UserMessageID,
+				"group_id":             groupCtx.Group.ID,
+				"group_index":          groupCtx.GroupIndex,
+				"group_models":         groupCtx.GroupModels,
+			},
+		})
+		h.persistTaskEvent(streamTask, assistantMsgID, 1, "generation_task", string(metaOut))
+
+		reqCopy := *req
+		clientIP := c.ClientIP()
+		go func() {
+			searchSources := append([]services.SearchResult(nil), fileContextSources...)
+			var useSearchTool bool
+			lastUserQuery := ""
+			if len(reqCopy.Messages) > 0 {
+				lastUserQuery = reqCopy.Messages[len(reqCopy.Messages)-1].Content
+			}
+			if (len(filePlan.MessageFiles) > 0 || len(filePlan.HistoricalFiles) > 0) && isFileQuestion(lastUserQuery) {
+				fmt.Printf("[Chat] 文件问答模式，跳过联网搜索 currentFiles=%d historicalFiles=%d query=%q\n", len(filePlan.MessageFiles), len(filePlan.HistoricalFiles), lastUserQuery)
+				useSearchTool = false
+			} else if len(fileContextSources) == 0 {
+				reqCopy.Messages, searchSources, useSearchTool = h.preprocessSearch(reqCopy.Messages, reqCopy.Model, reqCopy.Search, clientIP)
+			}
+
+			effectiveReasoning, effectiveEffort := h.effectiveReasoningForModel(reqCopy.Model, reqCopy.ReasoningEffort)
+			if effectiveReasoning && reqCopy.TemplateID == 0 {
+				langInstruct := "请使用简体中文进行思考和回答。"
+				if len(reqCopy.Messages) > 0 {
+					lastMsg := reqCopy.Messages[len(reqCopy.Messages)-1].Content
+					hasChinese := false
+					for _, r := range lastMsg {
+						if r >= 0x4e00 && r <= 0x9fff {
+							hasChinese = true
+							break
+						}
+					}
+					if !hasChinese {
+						langInstruct = "Please think and respond in English."
+					}
+				}
+				reqCopy.Messages = append([]services.Message{{Role: "system", Content: langInstruct}}, reqCopy.Messages...)
+			}
+			reqCopy.Messages = mergeSystemMessages(reqCopy.Messages)
+			reqCopy.Messages = truncateHistoryMessages(reqCopy.Messages)
+
+			initialSequence := int64(1)
+			if len(searchSources) > 0 {
+				meta := map[string]interface{}{
+					"choices": []map[string]interface{}{{"delta": map[string]string{"content": ""}}},
+					"_search_meta": map[string]interface{}{
+						"status":        "completed",
+						"sources_count": len(searchSources),
+						"sources":       searchSources,
+					},
+				}
+				out, _ := json.Marshal(meta)
+				initialSequence = 2
+				h.persistTaskEvent(streamTask, assistantMsgID, initialSequence, "search_meta", string(out))
+			}
+
+			h.runGenerationTask(GenerationTaskRunRequest{
+				Task:               streamTask,
+				Messages:           append([]services.Message(nil), reqCopy.Messages...),
+				Model:              reqCopy.Model,
+				Reasoning:          effectiveReasoning,
+				ReasoningEffort:    reqCopy.ReasoningEffort,
+				UseSearchTool:      useSearchTool,
+				UseBackground:      services.OpenAIUsesBackground(reqCopy.Model, effectiveEffort),
+				TextFormat:         reqCopy.TextFormat,
+				UserID:             userID,
+				GuestID:            guestID,
+				ConversationID:     conversationID,
+				AssistantMessageID: assistantMsgID,
+				InitialSequence:    initialSequence,
+				SearchSources:      searchSources,
+			})
+		}()
+
+		assistantPayload := MessageWithGroup{
+			Message: models.Message{
+				ID:                 assistantMsgID,
+				ConversationID:     conversationID,
+				Role:               "assistant",
+				Content:            "",
+				Model:              req.Model,
+				GroupID:            groupCtx.Group.ID,
+				GroupIndex:         groupCtx.GroupIndex,
+				GenerationStatus:   "running",
+				GenerationTaskID:   streamTask.ID,
+				LastSequenceNumber: 1,
+				Phase:              "queued",
+				CreatedAt:          time.Now(),
+			},
+			GroupID:                groupCtx.Group.ID,
+			GroupIndex:             groupCtx.GroupIndex,
+			GroupModels:            groupCtx.GroupModels,
+			UserMessageID:          groupCtx.UserMessageID,
+			GenerationTaskID:       streamTask.ID,
+			LastSequenceNumber:     1,
+			ServerGenerationStatus: "running",
+		}
+		c.JSON(http.StatusAccepted, ChatInitResponse{
+			ConversationID:     conversationID,
+			UserMessageID:      groupCtx.UserMessageID,
+			AssistantMessageID: assistantMsgID,
+			TaskID:             streamTask.ID,
+			GroupID:            groupCtx.Group.ID,
+			GroupIndex:         groupCtx.GroupIndex,
+			GroupModels:        groupCtx.GroupModels,
+			AssistantMessage:   assistantPayload,
+		})
+		return
+	}
 
 	var searchSources []services.SearchResult
 	var useSearchTool bool

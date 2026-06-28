@@ -6,7 +6,7 @@ import {
   applySingleSendMessagePlan,
   buildNewConversationTitle,
   prepareSingleSendMessages,
-  runSingleChatRequest,
+  runSingleChatInit,
   shouldStartSingleSend,
 } from "@/lib/chatSingleSendCoordinator";
 import {
@@ -188,11 +188,10 @@ export function useChatSingleSendRuntime({
 
       try {
         const headers = buildChatRequestHeaders({ token, guestId: getGuestId() });
-        await runSingleChatRequest({
+        const initResult = await runSingleChatInit<Message>({
           apiBaseUrl,
           headers,
           controller,
-          assistantMessage: assistantMsg,
           modelId: selectedModel.id,
           modelMessages: toModelMessages(contextMessages),
           conversationId: convId,
@@ -204,8 +203,39 @@ export function useChatSingleSendRuntime({
           skipSaveUserMessage: skipUserMsg,
           skillKey: effectiveSkillKey,
           messageFileIds: file_ids,
-          streamResponse,
+          fallbackId: () => assistantMsg.id,
         });
+        convId = initResult.conversation_id || convId;
+        const serverAssistant = {
+          ...assistantMsg,
+          ...initResult.mappedAssistantMessage,
+          id: assistantMsg.id,
+          createdAt: initResult.mappedAssistantMessage.createdAt || assistantMsg.createdAt,
+          search,
+          searchStatus: search ? "searching" : initResult.mappedAssistantMessage.searchStatus,
+          activityStatus: createBusyGeneratingStatus(translate),
+          generationStartedAt: assistantMsg.createdAt || now(),
+        } as Message;
+        setMessages((prev) => patchMessageById(prev.map((message) => {
+          if (initResult.user_message_id && message.id === messagePlan.userMessage?.id) {
+            return { ...message, id: String(initResult.user_message_id), serverMessageId: initResult.user_message_id } as Message;
+          }
+          return message;
+        }), assistantMsg.id, serverAssistant));
+        if (pendingLocalAssistantsRef && convId) {
+          pendingLocalAssistantsRef.current[assistantMsg.id] = { convId, message: serverAssistant };
+        }
+        const streamRes = await fetch(`${apiBaseUrl}/api/tasks/${initResult.task_id}/stream?after=0`, {
+          headers,
+          signal: controller.signal,
+        });
+        if (!streamRes.ok) {
+          const errorBody = await streamRes.json().catch(() => ({}));
+          const errorCode = errorBody.error || errorBody.code || "unknown";
+          const errorMsg = errorBody.message || "连接生成任务失败";
+          throw Object.assign(new Error(errorMsg), { errorCode, status: streamRes.status });
+        }
+        await streamResponse(streamRes, serverAssistant, controller, convId);
       } catch (error: any) {
         const decision = decideSingleSendError({
           error,

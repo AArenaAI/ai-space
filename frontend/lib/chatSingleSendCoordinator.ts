@@ -6,6 +6,7 @@ import {
   type FactoryChatMessage,
 } from "./chatMessageFactory";
 import { buildSingleChatRequestBody, getClientTimezone, type ModelMessage } from "./chatRequestBuilder";
+import { mapPersistedChatMessage, type ForkChatPersistedMessage } from "./chatForkCoordinator";
 import type { ChatStreamRunResult } from "./chatStreamRunResult";
 
 export type SingleSendMessageLike = {
@@ -180,6 +181,77 @@ export type RunSingleChatRequestOptions<TAssistant extends SingleSendMessageLike
     conversationId: number | undefined
   ) => Promise<ChatStreamRunResult | undefined>;
 };
+
+export type ChatInitResponse<TMessage extends SingleSendMessageLike> = {
+  conversation_id: number;
+  user_message_id?: number;
+  assistant_message_id: number;
+  task_id: number;
+  group_id?: number;
+  group_index?: number;
+  group_models?: string[];
+  assistant_message: ForkChatPersistedMessage;
+  mappedAssistantMessage: TMessage;
+};
+
+export type RunSingleChatInitOptions<TAssistant extends SingleSendMessageLike> = Omit<RunSingleChatRequestOptions<TAssistant>, "streamResponse" | "assistantMessage"> & {
+  fallbackId: () => string;
+  fetchImpl?: typeof fetch;
+};
+
+export async function runSingleChatInit<TAssistant extends SingleSendMessageLike>({
+  apiBaseUrl = "",
+  headers,
+  controller,
+  modelId,
+  modelMessages,
+  conversationId,
+  notebookId,
+  reasoning,
+  search,
+  templateId,
+  skipSaveUserMessage,
+  skillKey,
+  messageFileIds,
+  notebookFileIds,
+  fallbackId,
+  fetchImpl = fetch,
+}: RunSingleChatInitOptions<TAssistant>): Promise<ChatInitResponse<TAssistant>> {
+  const response = await fetchImpl(`${apiBaseUrl}/api/chat/init`, {
+    method: "POST",
+    headers,
+    signal: controller.signal,
+    body: JSON.stringify({
+      ...buildSingleChatRequestBody({
+        model: modelId,
+        messages: modelMessages,
+        conversationId,
+        notebookId,
+        reasoningEffort: reasoning.effort,
+        search,
+        templateId,
+        skipSaveUserMessage,
+        skillKey,
+        messageFileIds,
+        notebookFileIds,
+        clientTimezone: getClientTimezone(),
+      }),
+      stream: true,
+      init_only: true,
+    }),
+  });
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    const errorCode = errorBody.error || errorBody.code || "unknown";
+    const errorMsg = errorBody.message || "请求失败";
+    throw Object.assign(new Error(errorMsg), { errorCode, status: response.status, needInvite: errorBody.need_invite });
+  }
+  const data = await response.json();
+  return {
+    ...data,
+    mappedAssistantMessage: mapPersistedChatMessage(data.assistant_message, { fallbackId }) as TAssistant,
+  };
+}
 
 export async function runSingleChatRequest<TAssistant extends SingleSendMessageLike>({
   apiBaseUrl = "",
