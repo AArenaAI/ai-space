@@ -249,6 +249,132 @@ route switching abort 原 stream，切回后 task stream replay 多次连接。
 
 ---
 
+## 用例 8：发送后空占位到 reasoning 首屏不能二次抖动
+
+### 场景
+
+发送后 assistant pending row 先显示空 streaming placeholder，随后第一段 reasoning 出现。若空占位高度过低，reasoning 首屏出现时会把卡片突然撑高，表现为“占位二次抖动”。
+
+### 操作
+
+1. 使用 reasoning 模型，如 `deepseek-v4-pro`。
+2. 发送会触发 reasoning 的 prompt。
+3. 点击发送后每 50ms 采样 2~3 秒：
+   - latest assistant row id
+   - latest assistant row height
+   - placeholder count
+   - text prefix
+   - spinner / Stop
+
+### 预期
+
+- latest assistant row id 不变；不应因为 optimistic UUID → server id 造成行消失/替换。
+- placeholder 阶段和 reasoning 首屏阶段高度应接近。
+- 空占位 → 第一段 reasoning 时不能出现大幅高度跳变。
+- 后续 reasoning 内容自然变多导致高度增长是允许的。
+
+### 参考通过信号
+
+```text
+placeholder:
+height ≈ 180
+placeholder=1
+text=DeepSeek-V4 Pro...
+
+reasoning first token:
+height ≈ 180
+placeholder=0
+text=DeepSeek-V4 Pro Deep reasoning in progress...
+```
+
+### 失败信号
+
+- 空占位高度明显偏小，例如 `128px`，reasoning 首屏瞬间涨到 `180px+`。
+- latest assistant row id 改变并导致行重新 mount/动画重播。
+- placeholder 消失后短暂空白，再出现 reasoning。
+
+### 关键实现约束
+
+- 空 streaming placeholder 应预留接近 reasoning 首屏的高度。
+- 不要用延迟/隐藏掩盖；应该稳定布局高度。
+
+---
+
+## 用例 9：stream ownership 接管，旧 stream abort 后不能继续 final sync/fallback
+
+### 场景
+
+真实 UI 发送后，先有 optimistic local assistant stream；切屏/恢复后 server message id stream 接管同一个 generation task。如果两个 stream 并行处理同一批 sequence，就会造成重复 append 或 completed 瞬间重复。
+
+### 操作
+
+1. 发送长 reasoning 或长正文 prompt。
+2. 快速切走/切回，触发：
+   - optimistic local stream
+   - restored server message stream
+3. 记录 `/api/tasks/:task_id/stream?after=...`。
+4. 检查同一 `generationTaskId` 下的 owner stream 行为。
+
+### 预期
+
+- 同一个 `generationTaskId` / `serverMessageId` 只允许一个 active owner stream。
+- 新 server message stream 接管时，应 abort 旧 optimistic stream。
+- 旧 stream abort 后不能再执行：
+  - final realtime sync
+  - fallback background polling
+  - completed mark
+- 同一 sequence 跨 stream handler 只能 apply 一次。
+
+### 失败信号
+
+- optimistic stream 和 server-id stream 并行 append。
+- 旧 stream abort 后仍触发 background polling。
+- completed 瞬间出现重复正文，随后 polling 才修正。
+- 同一 sequence 在不同 handler 中各 append 一次。
+
+### 关键实现约束
+
+- sequence 去重必须是 task/message 级别共享状态，不只是单个 stream handler 内的局部 `seenSequences`。
+- owner transfer 时主动 abort 旧 controller，并清理旧 `taskStreamsRef` / `activeTaskStreamsRef`。
+- abort 的 stream finally 阶段应直接退出，不做 final sync/fallback。
+
+---
+
+## 用例 10：completed polling 同步 reasoning_content，no-refresh 与 refresh 思考一致
+
+### 场景
+
+task stream completed 后，background polling / final reconciliation 同步 backend final message。若只同步 `content`，不同步 `reasoning_content`，会出现 no-refresh 的思考内容短/重复/不完整，refresh 后才正确。
+
+### 操作
+
+1. 使用 reasoning 模型。
+2. 发送后切走/切回。
+3. 等 completed，但不刷新，采样 latest assistant reasoning。
+4. 再刷新作为对照。
+5. 对比：
+   - no-refresh reasoning 长度/内容
+   - refresh 后 reasoning 长度/内容
+   - backend `message.reasoning_content.length`
+
+### 预期
+
+- completed polling 返回 backend message 时，应同时把：
+  - `message.content`
+  - `message.reasoning_content`
+  同步进前端 message。
+- no-refresh 和 refresh 后的 reasoning 内容基本一致。
+- 差异只应来自 UI 标签文案，例如 `Collapsed`，不应是正文/思考主体缺失。
+
+### 失败信号
+
+- no-refresh completed 后 reasoning 明显短于 refresh。
+- refresh 后才出现完整 reasoning。
+- backend `reasoning_content` 已完整，但前端 message 没有 `reasoningContent`。
+- completed polling 只 patch `content`，不 patch `reasoningContent`。
+
+---
+
 ## 推荐采样字段
 
 ### DOM
@@ -328,6 +454,10 @@ npm run build
 - [ ] reasoning 不跳过切走期间 delta。
 - [ ] 正文在 running 阶段继续增长。
 - [ ] completed 后正文 canonical 为 backend `message.content`，不重复叠加。
+- [ ] completed polling 同步 backend `reasoning_content`，no-refresh 和 refresh 思考主体一致。
+- [ ] 同一 generation task 跨 optimistic/server stream 只能有一个 owner；旧 stream abort 后不 final sync/fallback。
+- [ ] 同一 task sequence 跨 stream handler 只能 apply 一次。
+- [ ] 空 placeholder 到 reasoning 首屏高度稳定，无明显二次抖动。
 - [ ] completed 后 Stop 消失。
 - [ ] completed 后 spinner/ellipsis 消失。
 - [ ] completed 状态 no-refresh 正常。
