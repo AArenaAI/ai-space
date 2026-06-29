@@ -296,7 +296,7 @@ function MessageList({
   const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
 
   const getStableRunningAssistantDisplayId = useCallback((message: Message) => {
-    if (message.role !== "assistant" || message.completedAt) return message.id;
+    if (message.role !== "assistant") return message.id;
     const registry = runningAssistantDisplayIdsRef.current;
     const messageKey = `${conversationId ?? "none"}:msg:${message.id}`;
     const taskOrServerId = message.generationTaskId || message.serverMessageId;
@@ -312,6 +312,7 @@ function MessageList({
         registry.byGroup.set(groupKey, existingForMessage);
         return existingForMessage;
       }
+      if (message.completedAt) return message.id;
       const seededDisplayId = message.serverMessageId && message.id === String(message.serverMessageId)
         ? `assistant-task:${taskOrServerId}`
         : message.id;
@@ -320,6 +321,7 @@ function MessageList({
       return seededDisplayId;
     }
     if (existingForMessage) return existingForMessage;
+    if (message.completedAt) return message.id;
     registry.byMessageId.set(messageKey, message.id);
     return message.id;
   }, [conversationId]);
@@ -331,7 +333,7 @@ function MessageList({
       if (!key.startsWith(`${conversationId ?? "none"}:msg:`) || !liveMessageKeys.has(key)) registry.byMessageId.delete(key);
     }
     const liveGroupKeys = new Set(messages
-      .filter((message) => message.role === "assistant" && !message.completedAt && (message.generationTaskId || message.serverMessageId))
+      .filter((message) => message.role === "assistant" && (message.generationTaskId || message.serverMessageId))
       .map((message) => `${conversationId ?? "none"}:task:${message.generationTaskId || message.serverMessageId}`));
     for (const key of Array.from(registry.byGroup.keys())) {
       if (!key.startsWith(`${conversationId ?? "none"}:task:`) || !liveGroupKeys.has(key)) registry.byGroup.delete(key);
