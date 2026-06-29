@@ -19,6 +19,7 @@ type AIBackgroundTask struct {
 	Provider           string         `gorm:"size:32" json:"provider"`
 	Status             string         `gorm:"size:32;index" json:"status"` // running | streaming | retrying | completed | failed | cancelled | incomplete
 	LastSequenceNumber int64          `json:"last_sequence_number"`
+	StatusTimeline     string         `gorm:"type:text" json:"status_timeline,omitempty"`
 	Result             string         `gorm:"type:text" json:"result,omitempty"`
 	ErrorMessage       string         `gorm:"type:text" json:"error_message,omitempty"`
 	CreatedAt          time.Time      `json:"created_at"`

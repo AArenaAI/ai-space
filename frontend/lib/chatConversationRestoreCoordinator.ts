@@ -3,6 +3,7 @@ import {
   ForkChatMessage,
   ForkChatPersistedMessage,
   mapPersistedChatMessages,
+  parsePersistedStatusTimeline,
 } from "./chatForkCoordinator";
 import { buildChatBootstrapUrl, defaultBootstrapSleep, type ChatBootstrapPayload } from "@/lib/chatBootstrapCoordinator";
 
@@ -36,7 +37,7 @@ export type ConversationRestoreMessage = ForkChatMessage & {
 };
 
 export type ConversationRestoreStatusResponse = {
-  message?: { id?: number | string; content?: string; model?: string; reasoning_content?: string; reasoning?: string; thinking?: string };
+  message?: { id?: number | string; content?: string; model?: string; reasoning_content?: string; reasoning?: string; thinking?: string; status_timeline?: unknown; statusTimeline?: unknown };
   background_task?: {
     id?: number | string;
     task_id?: number | string;
@@ -44,6 +45,8 @@ export type ConversationRestoreStatusResponse = {
     status?: string;
     last_sequence_number?: number | string;
     completed_at?: string | null;
+    status_timeline?: unknown;
+    statusTimeline?: unknown;
   };
 };
 
@@ -307,6 +310,9 @@ export function buildConversationRestoreState({
         lastSequence: Number(bgTask?.last_sequence_number || 0) || undefined,
         activityStatus: activeActivityStatus,
         serverGenerationStatus: status,
+        statusTimeline: parsePersistedStatusTimeline((statusData?.message?.status_timeline || statusData?.background_task?.status_timeline) ? {
+          status_timeline: statusData?.message?.status_timeline || statusData?.background_task?.status_timeline,
+        } as ForkChatPersistedMessage : {} as ForkChatPersistedMessage),
       },
     ];
   }
@@ -353,6 +359,9 @@ export function buildConversationStatusDecision({
   const lastSequence = Number(bgTask.last_sequence_number || 0) || 0;
   const currentMessageSequence = currentMessage.lastSequence || 0;
   const resumeAfterSequence = hasContent ? (lastSequence || currentMessageSequence) : currentMessageSequence;
+  const statusTimeline = parsePersistedStatusTimeline({
+    status_timeline: statusData?.message?.status_timeline || bgTask?.status_timeline,
+  } as ForkChatPersistedMessage);
   const completedAt = shouldResumePolling
     ? undefined
     : (hasTask && terminalStatus && hasContent && !currentMessage.completedAt
@@ -368,6 +377,7 @@ export function buildConversationStatusDecision({
     completedAt,
     activityStatus: shouldResumePolling ? busyActivityStatus : (terminalStatus ? undefined : currentMessage.activityStatus),
     serverGenerationStatus: status || currentMessage.serverGenerationStatus,
+    statusTimeline: statusTimeline || currentMessage.statusTimeline,
   };
   return {
     hasTask,

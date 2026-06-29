@@ -584,6 +584,7 @@ func (h *ConversationHandler) buildLastAssistantStatusPayload(messages []models.
 			"last_sequence_number": lastSequence,
 			"completed_at":         task.CompletedAt,
 			"error_message":        task.ErrorMessage,
+			"status_timeline":      task.StatusTimeline,
 		}
 	}
 	if status == "" {
@@ -640,6 +641,7 @@ func (h *ConversationHandler) GetMessage(c *gin.Context) {
 			"last_sequence_number": lastSequence,
 			"completed_at":         task.CompletedAt,
 			"error_message":        task.ErrorMessage,
+			"status_timeline":      task.StatusTimeline,
 		}
 	}
 	if status == "" {

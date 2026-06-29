@@ -52,6 +52,7 @@ type Message struct {
 	GenerationTaskID   uint           `gorm:"index" json:"generation_task_id,omitempty"`
 	LastSequenceNumber int64          `json:"last_sequence_number,omitempty"`
 	Phase              string         `gorm:"size:32" json:"phase,omitempty"`
+	StatusTimeline     string         `gorm:"type:text" json:"status_timeline,omitempty"`
 	CompletedAt        *time.Time     `json:"completed_at,omitempty"`
 	CreatedAt          time.Time      `json:"created_at"`
 	DeletedAt          gorm.DeletedAt `gorm:"index" json:"-"`

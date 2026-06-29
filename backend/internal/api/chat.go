@@ -1911,6 +1911,157 @@ func (h *ChatHandler) failurePersistedContent(assistantMessageID uint, task *mod
 	return fallbackMessage
 }
 
+type chatStatusTimelineStep struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	Status    string `json:"status"`
+	StartedAt int64  `json:"startedAt"`
+	EndedAt   int64  `json:"endedAt,omitempty"`
+	Count     int    `json:"count,omitempty"`
+	Label     string `json:"label,omitempty"`
+}
+
+func loadChatStatusTimeline(raw string) []chatStatusTimelineStep {
+	var steps []chatStatusTimelineStep
+	if strings.TrimSpace(raw) == "" {
+		return steps
+	}
+	_ = json.Unmarshal([]byte(raw), &steps)
+	return steps
+}
+
+func saveChatStatusTimeline(steps []chatStatusTimelineStep) string {
+	out, _ := json.Marshal(steps)
+	return string(out)
+}
+
+func chatTimelineEventID(kind string, status string) string {
+	return kind + ":" + status
+}
+
+func closeRunningChatTimelineSteps(steps []chatStatusTimelineStep, nowMs int64, status string, exceptKind string) []chatStatusTimelineStep {
+	for i := range steps {
+		if steps[i].Status == "running" && steps[i].Kind != exceptKind && steps[i].EndedAt == 0 {
+			steps[i].Status = status
+			steps[i].EndedAt = nowMs
+			steps[i].ID = chatTimelineEventID(steps[i].Kind, status)
+		}
+	}
+	return steps
+}
+
+func upsertChatTimelineStep(steps []chatStatusTimelineStep, kind string, status string, nowMs int64, count int, label string) []chatStatusTimelineStep {
+	if kind == "" || status == "" {
+		return steps
+	}
+	if status == "running" {
+		for i := range steps {
+			if steps[i].Kind == kind && steps[i].Status == "running" {
+				if label != "" {
+					steps[i].Label = label
+				}
+				if count > 0 {
+					steps[i].Count = count
+				}
+				return steps
+			}
+		}
+		steps = closeRunningChatTimelineSteps(steps, nowMs, "completed", kind)
+		return append(steps, chatStatusTimelineStep{ID: chatTimelineEventID(kind, status), Kind: kind, Status: status, StartedAt: nowMs, Count: count, Label: label})
+	}
+	startedAt := nowMs
+	for i := range steps {
+		if steps[i].Kind == kind && steps[i].Status == "running" {
+			startedAt = steps[i].StartedAt
+			steps[i] = chatStatusTimelineStep{ID: chatTimelineEventID(kind, status), Kind: kind, Status: status, StartedAt: startedAt, EndedAt: nowMs, Count: count, Label: label}
+			return steps
+		}
+	}
+	for i := range steps {
+		if steps[i].Kind == kind && steps[i].Status == status {
+			if steps[i].EndedAt == 0 {
+				steps[i].EndedAt = nowMs
+			}
+			if count > 0 {
+				steps[i].Count = count
+			}
+			if label != "" {
+				steps[i].Label = label
+			}
+			return steps
+		}
+	}
+	return append(steps, chatStatusTimelineStep{ID: chatTimelineEventID(kind, status), Kind: kind, Status: status, StartedAt: startedAt, EndedAt: nowMs, Count: count, Label: label})
+}
+
+func (h *ChatHandler) updateStatusTimelineForTaskEvent(task *models.AIBackgroundTask, assistantMessageID uint, eventType string, payload string) {
+	if h == nil || h.db == nil || task == nil || assistantMessageID == 0 {
+		return
+	}
+	now := time.Now()
+	nowMs := now.UnixMilli()
+	steps := loadChatStatusTimeline(task.StatusTimeline)
+	kind, status, label := "", "", ""
+	count := 0
+	switch eventType {
+	case "generation_task":
+		kind, status = "waiting_provider", "running"
+	case "search_meta":
+		kind, status = "web_search", "completed"
+		var meta map[string]any
+		if json.Unmarshal([]byte(payload), &meta) == nil {
+			if searchMeta, ok := meta["_search_meta"].(map[string]any); ok {
+				if n, ok := searchMeta["sources_count"].(float64); ok {
+					count = int(n)
+				}
+			}
+		}
+	case "activity_meta":
+		var meta map[string]any
+		if json.Unmarshal([]byte(payload), &meta) == nil {
+			if activityMeta, ok := meta["_activity_meta"].(map[string]any); ok {
+				kind, _ = activityMeta["kind"].(string)
+				status, _ = activityMeta["status"].(string)
+				label, _ = activityMeta["label"].(string)
+				if status == "searching" {
+					status = "running"
+				}
+			}
+		}
+	case "delta":
+		var meta map[string]any
+		if json.Unmarshal([]byte(payload), &meta) == nil {
+			if choices, ok := meta["choices"].([]any); ok && len(choices) > 0 {
+				if choice, ok := choices[0].(map[string]any); ok {
+					if delta, ok := choice["delta"].(map[string]any); ok {
+						if text, _ := delta["reasoning_content"].(string); strings.TrimSpace(text) != "" {
+							kind, status = "reasoning", "running"
+						} else if text, _ := delta["content"].(string); text != "" {
+							kind, status = "streaming_answer", "running"
+						}
+					}
+				}
+			}
+		}
+	case "done":
+		steps = closeRunningChatTimelineSteps(steps, nowMs, "completed", "")
+	case "error":
+		steps = closeRunningChatTimelineSteps(steps, nowMs, "failed", "")
+	case "cancelled":
+		steps = closeRunningChatTimelineSteps(steps, nowMs, "stopped", "")
+	}
+	if kind != "" && status != "" {
+		steps = upsertChatTimelineStep(steps, kind, status, nowMs, count, label)
+	}
+	if len(steps) == 0 {
+		return
+	}
+	timelineJSON := saveChatStatusTimeline(steps)
+	h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", task.ID).Update("status_timeline", timelineJSON)
+	h.db.Model(&models.Message{}).Where("id = ?", assistantMessageID).Update("status_timeline", timelineJSON)
+	task.StatusTimeline = timelineJSON
+}
+
 func (h *ChatHandler) persistTaskEvent(task *models.AIBackgroundTask, assistantMessageID uint, sequenceNumber int64, eventType string, payload string) {
 	if assistantMessageID == 0 || sequenceNumber <= 0 || payload == "" {
 		return
@@ -1959,6 +2110,7 @@ func (h *ChatHandler) persistTaskEvent(task *models.AIBackgroundTask, assistantM
 	messageUpdates["phase"] = phase
 	h.db.Model(&models.Message{}).Where("id = ? AND last_sequence_number < ?", assistantMessageID, sequenceNumber).Updates(messageUpdates)
 	task.LastSequenceNumber = sequenceNumber
+	h.updateStatusTimelineForTaskEvent(task, assistantMessageID, eventType, payload)
 }
 
 func (h *ChatHandler) isGenerationTaskCancelled(taskID uint) bool {

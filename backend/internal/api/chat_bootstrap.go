@@ -539,6 +539,9 @@ func (h *ChatBootstrapHandler) applyActiveChatTaskMessageState(messages *[]Messa
 			(*messages)[idx].GenerationTaskID = task.ID
 			(*messages)[idx].LastSequenceNumber = task.LastSequenceNumber
 			(*messages)[idx].ServerGenerationStatus = task.Status
+			if (*messages)[idx].StatusTimeline == "" {
+				(*messages)[idx].StatusTimeline = task.StatusTimeline
+			}
 			continue
 		}
 		pending := MessageWithGroup{
@@ -548,6 +551,7 @@ func (h *ChatBootstrapHandler) applyActiveChatTaskMessageState(messages *[]Messa
 				Role:           "assistant",
 				Content:        "",
 				Model:          model,
+				StatusTimeline: task.StatusTimeline,
 				CreatedAt:      task.CreatedAt,
 			},
 			GenerationTaskID:       task.ID,
@@ -590,6 +594,7 @@ func (h *ChatBootstrapHandler) buildActiveTaskLastAssistantStatus(conversationID
 			"status":               task.Status,
 			"last_sequence_number": task.LastSequenceNumber,
 			"completed_at":         task.CompletedAt,
+			"status_timeline":      task.StatusTimeline,
 		},
 	}
 }
