@@ -8,6 +8,7 @@ import type { ChatModel, Message } from "@/lib/chatTypes";
 import { getModelAvatarMeta } from "@/lib/models/modelAvatars";
 import type { InferredGroup } from "@/lib/groups";
 import { isMessageGenerating } from "@/lib/chatContent";
+import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 import { AssistantMessageMeta } from "./AssistantMessageMeta";
 import MessageActions from "./MessageActions";
 import UserMessageContent from "./UserMessageContent";
@@ -131,11 +132,17 @@ function MessageRow({
   const [isInViewport, setIsInViewport] = useState(initialViewportState);
   const hasAssistantGenerationTask = Boolean(msg.generationTaskId || msg.backgroundTaskId || msg.activityStatus);
   const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && !msg.errorCode && !msg.stopped && isLatestAssistant && hasAssistantGenerationTask;
+  const realtime = useMessageRealtime(msg.id, isStreaming);
+  const realtimeHasVisiblePayload = Boolean(
+    realtime?.content?.trim() ||
+    realtime?.answerContent?.trim() ||
+    realtime?.reasoningContent?.trim()
+  );
   const canBypassBrowsingHydrationDefer = forceHydrateRichText && !isStreaming;
   const blockRichTextHydration = historyPrependSettling || (deferRichTextHydration && !canBypassBrowsingHydrationDefer);
   const forceStableRichLiteFallback = blockRichTextHydration || stabilizeInitialRichText || (forceHydrateRichText && !isInViewport);
   const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
-  const isEmptyPendingAssistant = !isUser && isGenerating && !msg.content?.trim() && !msg.reasoningContent?.trim() && !msg.completedAt && !msg.stopped && !msg.errorCode;
+  const isEmptyPendingAssistant = !isUser && isGenerating && !realtimeHasVisiblePayload && !msg.content?.trim() && !msg.reasoningContent?.trim() && !msg.completedAt && !msg.stopped && !msg.errorCode;
   const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
   const suppressAppearAnimation = historyPrependSettling || deferRichTextHydration || isGenerating || (!isUser && !msg.content?.trim() && !msg.completedAt);
   const assistantAvatarMeta = getModelAvatarMeta(model || msg.model || "AI");
