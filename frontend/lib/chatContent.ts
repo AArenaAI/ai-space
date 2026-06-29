@@ -60,7 +60,7 @@ export function sanitizeContent(content: string): string {
     (_match, formula) => `$$${String(formula).trim()}$$`
   );
 
-  result = result.replace(/\n{2,}[*_]*\s*(?:引用来源|参考来源|References|参考链接)[：:]\s*[\s\S]*$/, "");
+  result = result.replace(/\n{2,}[*_]*\s*(?:引用来源|参考来源|References|参考链接)\s*[：:]?\s*[\s\S]*$/, "");
   result = result.replace(/(?:\n+\[\d+\]\s+[^\n]*)+$/, "");
   result = result.replace(/\n*---+\s*$/, "");
   result = result.replace(/(?<!\d)\[(\d+)\](?!\s*[.)])/g, "");

@@ -29,15 +29,25 @@ function isLowSignalCompletedStep(step: ChatStatusTimelineStep) {
   return false;
 }
 
+function formatReasoningSections(text: string) {
+  return text
+    .replace(/\r\n/g, "\n")
+    .split(/\n{2,}|(?<=[。！？.!?])\s+(?=[\u4e00-\u9fa5A-Z])/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
 export default function ChatActivityPanel({ message, model, onClose }: { message?: Message | null; model?: ChatModel; onClose: () => void }) {
   const { t } = useI18n();
-  const [reasoningOpen, setReasoningOpen] = useState(false);
+  const [reasoningOpen, setReasoningOpen] = useState(true);
   const realtime = useMessageRealtime(message?.id || "", Boolean(message));
   if (!message) return null;
   const timeline = getOrderedTimelineSteps(mergeTimeline(message, realtime)).filter((step) => !isLowSignalCompletedStep(step));
-  const sources = realtime?.searchSources || message.searchSources || [];
+  const sources = Array.from(new Map((realtime?.searchSources || message.searchSources || []).map((source) => [source.url || source.title, source])).values());
   const files = message.files || [];
   const reasoning = (realtime?.reasoningContent || message.reasoningContent || "").trim();
+  const reasoningSections = formatReasoningSections(reasoning);
   const active = !((realtime?.completedAt || message.completedAt) || realtime?.stopped || message.stopped || realtime?.errorCode || message.errorCode);
   const elapsedSeconds = Math.max(0, Math.round(((realtime?.completedAt || message.completedAt || Date.now()) - (realtime?.generationStartedAt || message.generationStartedAt || message.createdAt || Date.now())) / 1000));
 
@@ -45,7 +55,7 @@ export default function ChatActivityPanel({ message, model, onClose }: { message
     <aside className="fixed inset-x-3 bottom-3 z-40 flex max-h-[72vh] flex-col rounded-3xl border border-surface-border/70 bg-surface-elevated/95 p-4 shadow-2xl shadow-black/10 backdrop-blur-xl dark:shadow-black/40 lg:inset-y-0 lg:left-auto lg:right-0 lg:bottom-auto lg:h-full lg:w-[336px] lg:max-h-none lg:rounded-none lg:border-y-0 lg:border-r-0 lg:shadow-none" data-chat-activity-panel="true">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-text-primary">活动{active ? ` · ${elapsedSeconds}s` : ""}</div>
+          <div className="text-sm font-semibold text-text-primary">思考与来源{active ? ` · ${elapsedSeconds}s` : ""}</div>
           <div className="mt-0.5 truncate text-xs text-text-tertiary">{model?.name || message.model || "AI"}</div>
         </div>
         <button type="button" onClick={onClose} className="rounded-full p-1.5 text-text-tertiary hover:bg-surface-card hover:text-text-primary" aria-label="Close activity panel">
@@ -82,8 +92,14 @@ export default function ChatActivityPanel({ message, model, onClose }: { message
               <ChevronDown className={cn("h-3.5 w-3.5 text-text-tertiary transition-transform", reasoningOpen && "rotate-180")} />
             </button>
             {reasoningOpen && (
-              <div className="max-h-56 overflow-y-auto border-l border-surface-border pl-3 text-xs leading-relaxed text-text-tertiary">
-                {reasoning.slice(0, 2400)}{reasoning.length > 2400 ? "…" : ""}
+              <div className="max-h-72 overflow-y-auto space-y-2 border-l border-surface-border pl-3 text-xs leading-relaxed text-text-tertiary">
+                {reasoningSections.length ? reasoningSections.map((section, index) => (
+                  <div key={`${index}:${section.slice(0, 16)}`} className="rounded-xl bg-surface-card/40 px-2.5 py-2">
+                    {section}
+                  </div>
+                )) : (
+                  <div className="rounded-xl bg-surface-card/40 px-2.5 py-2">{reasoning.slice(0, 2400)}{reasoning.length > 2400 ? "…" : ""}</div>
+                )}
               </div>
             )}
           </section>
