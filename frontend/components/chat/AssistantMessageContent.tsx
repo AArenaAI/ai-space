@@ -39,6 +39,7 @@ export function AssistantMessageContent({
   compactRichLitePreview = true,
   recoverEmptyContent = false,
   onRegenerate,
+  onOpenActivity,
 }: {
   message: Message;
   isStreaming: boolean;
@@ -50,6 +51,7 @@ export function AssistantMessageContent({
   compactRichLitePreview?: boolean;
   recoverEmptyContent?: boolean;
   onRegenerate?: () => void;
+  onOpenActivity?: () => void;
 }) {
   const { t } = useI18n();
   const realtime = useMessageRealtime(message.id);
@@ -101,6 +103,7 @@ export function AssistantMessageContent({
         reasoningContent={message.reasoningContent}
         isStreaming={generating}
         className="text-[15px] leading-relaxed text-text-primary"
+        onOpenActivity={onOpenActivity}
       />
     );
   }
@@ -148,6 +151,7 @@ export function AssistantMessageContent({
           allowRichLiteFallback={allowRichLiteFallback}
           compactRichLitePreview={compactRichLitePreview}
           messageId={message.id}
+          onOpenActivity={onOpenActivity}
         />
       )}
       <MarkdownRenderer content={cleanAnswer} shouldHydrateRichText={shouldHydrateRichText} priorityHydrateRichText={priorityHydrateRichText} allowRichLiteFallback={allowRichLiteFallback} compactRichLitePreview={compactRichLitePreview} messageId={message.id} />

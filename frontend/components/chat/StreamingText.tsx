@@ -45,6 +45,7 @@ export function StreamingText({
   isStreaming,
   className,
   as = "div",
+  onOpenActivity,
 }: {
   messageId: string;
   content: string;
@@ -52,6 +53,7 @@ export function StreamingText({
   isStreaming: boolean;
   className?: string;
   as?: "div" | "span";
+  onOpenActivity?: () => void;
 }) {
   const { t } = useI18n();
   const realtime = useMessageRealtime(messageId);
@@ -97,7 +99,10 @@ export function StreamingText({
           <button
             type="button"
             aria-expanded={reasoningExpanded}
-            onClick={() => setReasoningExpanded((value) => !value)}
+            onClick={() => {
+              setReasoningExpanded((value) => !value);
+              onOpenActivity?.();
+            }}
             className="inline-flex max-w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
           >
             <Lightbulb className="h-3 w-3 shrink-0 text-text-tertiary" />

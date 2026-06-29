@@ -18,6 +18,7 @@ export function ThinkBlock({
   compactRichLitePreview = true,
   messageId,
   stabilizeCompletionHeight = false,
+  onOpenActivity,
 }: {
   content: string;
   isThinking: boolean;
@@ -29,6 +30,7 @@ export function ThinkBlock({
   compactRichLitePreview?: boolean;
   messageId?: string | number;
   stabilizeCompletionHeight?: boolean;
+  onOpenActivity?: () => void;
 }) {
   const { t } = useI18n();
   const shouldCollapseByDefault = !defaultExpanded && !isThinking && content.length >= collapseThreshold;
@@ -43,7 +45,10 @@ export function ThinkBlock({
   return (
     <div className="mb-2">
       <button
-        onClick={() => setExpanded(!expanded)}
+        onClick={() => {
+          setExpanded(!expanded);
+          onOpenActivity?.();
+        }}
         aria-expanded={expanded}
         className="inline-flex max-w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
       >
