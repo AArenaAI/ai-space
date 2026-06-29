@@ -24,8 +24,8 @@ function mergeTimeline(message: Message, realtime: ReturnType<typeof useMessageR
 
 function isLowSignalCompletedStep(step: ChatStatusTimelineStep) {
   const duration = Math.max(0, (step.endedAt || step.startedAt) - step.startedAt);
-  if (step.status === "completed" && duration < 1000 && (step.kind === "waiting_provider" || step.kind === "streaming_answer" || step.kind === "finalizing")) return true;
-  if (step.status === "completed" && step.kind === "finalizing") return true;
+  if (duration < 1000 && (step.kind === "waiting_provider" || step.kind === "streaming_answer" || step.kind === "finalizing")) return true;
+  if (step.kind === "finalizing") return true;
   return false;
 }
 

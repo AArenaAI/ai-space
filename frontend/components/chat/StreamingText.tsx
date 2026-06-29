@@ -103,11 +103,6 @@ export function StreamingText({
             className="inline-flex max-w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
           >
             <span className="text-xs font-medium">思考中</span>
-            <div className="ml-0.5 flex gap-0.5">
-              <div className="h-1 w-1 animate-bounce rounded-full bg-text-tertiary" />
-              <div className="h-1 w-1 animate-bounce rounded-full bg-text-tertiary [animation-delay:0.15s]" />
-              <div className="h-1 w-1 animate-bounce rounded-full bg-text-tertiary [animation-delay:0.3s]" />
-            </div>
             <ChevronDown
               className="h-3.5 w-3.5 -rotate-90 shrink-0 text-text-tertiary/80"
             />
