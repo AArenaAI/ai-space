@@ -2196,10 +2196,13 @@ function MessageList({
             const model = msg.model ? modelById.get(msg.model) : undefined;
             const isSelected = selectedIds.has(msg.id);
             const isHighlighted = highlightedMessageId === msg.id;
+            const rowKey = msg.role === "assistant" && !msg.completedAt && (msg.generationTaskId || msg.serverMessageId)
+              ? `assistant-task:${msg.generationTaskId || msg.serverMessageId}`
+              : msg.id;
 
             return (
               <ChatMessageListItem
-                key={msg.id}
+                key={rowKey}
                 index={index}
                 message={msg}
                 visibleMessageCount={visibleMessages.length}

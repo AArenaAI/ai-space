@@ -149,24 +149,24 @@ export function getConversationSnapshotCacheSize(): number {
   return snapshots.size;
 }
 
+export function buildConversationMessageSnapshotKey(message: Message): string {
+  return [
+    message.serverMessageId ?? message.id,
+    message.role,
+    message.content,
+    message.reasoningContent ?? "",
+    message.model ?? "",
+    message.completedAt ?? "",
+    message.generationTaskId ?? "",
+    message.lastSequence ?? "",
+    message.searchStatus ?? "",
+    message.activityStatus?.kind ?? "",
+    message.activityStatus?.status ?? "",
+  ].join("\u001f");
+}
+
 export function buildConversationMessagesSnapshotKey(messages: Message[]): string {
-  return messages
-    .map((message) =>
-      [
-        message.serverMessageId ?? message.id,
-        message.role,
-        message.content,
-        message.reasoningContent ?? "",
-        message.model ?? "",
-        message.completedAt ?? "",
-        message.generationTaskId ?? "",
-        message.lastSequence ?? "",
-        message.searchStatus ?? "",
-        message.activityStatus?.kind ?? "",
-        message.activityStatus?.status ?? "",
-      ].join("\u001f")
-    )
-    .join("\u001e");
+  return messages.map(buildConversationMessageSnapshotKey).join("\u001e");
 }
 
 export function areConversationMessagesEquivalent(left: Message[], right: Message[]): boolean {

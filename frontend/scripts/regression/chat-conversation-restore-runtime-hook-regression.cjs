@@ -105,6 +105,7 @@ function loadModule(file) {
           if (existing) snapshotCache.set(id, { ...existing, ...patch });
         },
         invalidateConversationSnapshot: (id) => snapshotCache.delete(id),
+        buildConversationMessageSnapshotKey: (message) => [message.serverMessageId ?? message.id, message.role, message.content, message.reasoningContent ?? '', message.model ?? '', message.completedAt ?? '', message.generationTaskId ?? '', message.lastSequence ?? '', message.searchStatus ?? '', message.activityStatus?.kind ?? '', message.activityStatus?.status ?? ''].join('\u001f'),
         areConversationMessagesEquivalent: (left, right) =>
           left.length === right.length && left.every((message, index) => message.id === right[index].id && message.content === right[index].content),
       };

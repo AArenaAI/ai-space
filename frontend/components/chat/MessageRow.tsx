@@ -134,7 +134,7 @@ function MessageRow({
   const forceStableRichLiteFallback = blockRichTextHydration || stabilizeInitialRichText || (forceHydrateRichText && !isInViewport);
   const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
   const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
-  const suppressAppearAnimation = historyPrependSettling || deferRichTextHydration;
+  const suppressAppearAnimation = historyPrependSettling || deferRichTextHydration || isGenerating || (!isUser && !msg.content?.trim() && !msg.completedAt);
   const assistantAvatarMeta = getModelAvatarMeta(model || msg.model || "AI");
   const rowProfileDetailEnabled = typeof window !== "undefined" && Boolean((window as Window & { __AI_SPACE_CHAT_ROW_PROFILE_DETAIL?: boolean }).__AI_SPACE_CHAT_ROW_PROFILE_DETAIL);
   const markdownWeight = rowProfileDetailEnabled ? getMarkdownWeight(msg.content) : null;
@@ -270,10 +270,10 @@ function MessageRow({
       data-chat-message-row="true"
       data-message-id={msg.id}
       data-message-role={msg.role}
-      style={!isUser && useContentVisibility ? MESSAGE_ROW_CONTENT_VISIBILITY_STYLE : undefined}
+      style={!isUser && useContentVisibility && !isGenerating && Boolean(msg.content?.trim() || msg.completedAt) ? MESSAGE_ROW_CONTENT_VISIBILITY_STYLE : undefined}
       className={cn("max-w-[800px] mx-auto px-4 py-4 rounded-2xl transition-colors duration-500", isHighlighted && "bg-brand/10")}
     >
-      <div key={msg.id} className={cn("flex gap-3 group", !suppressAppearAnimation && "animate-message-appear", isUser ? "justify-end" : "justify-start")}>
+      <div className={cn("flex gap-3 group", !suppressAppearAnimation && "animate-message-appear", isUser ? "justify-end" : "justify-start")}>
         <div className={cn("mt-1 shrink-0", isUser && !selectMode ? "w-7 invisible" : "w-7")}>
           {!isUser && !selectMode && (
             <div className="relative">
@@ -367,7 +367,7 @@ function MessageRow({
                 </>
               )}
             </div>
-            {!selectMode && !isStreaming && (
+            {!selectMode && !isStreaming && !isGenerating && (isUser || msg.content?.trim() || msg.completedAt || msg.stopped || msg.errorCode) && (
               <MessageActions
                 onCopy={() => handleCopy(msg.content)}
                 onDelete={() => setDeleteTarget(msg.id)}

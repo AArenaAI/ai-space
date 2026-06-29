@@ -22,6 +22,7 @@ import {
 import { patchMessageById } from "@/lib/chatMessageStatePatch";
 import {
   areConversationMessagesEquivalent,
+  buildConversationMessageSnapshotKey,
   clearConversationSnapshotCache,
   getConversationSnapshot,
   invalidateConversationSnapshot,
@@ -110,12 +111,26 @@ function getAssistantDedupKey(message: Message): string | undefined {
 }
 
 function shouldPreferDedupCandidate(candidate: Message, existing: Message): boolean {
-  const candidateCanonical = candidate.serverMessageId && candidate.id === String(candidate.serverMessageId);
-  const existingCanonical = existing.serverMessageId && existing.id === String(existing.serverMessageId);
-  if (candidateCanonical !== existingCanonical) return Boolean(candidateCanonical);
   const candidateCompleted = Boolean(candidate.completedAt || candidate.serverGenerationStatus === "completed");
   const existingCompleted = Boolean(existing.completedAt || existing.serverGenerationStatus === "completed");
   if (candidateCompleted !== existingCompleted) return candidateCompleted;
+
+  const candidateGenerating = Boolean(candidate.activityStatus || candidate.generationTaskId || candidate.serverGenerationStatus === "running" || candidate.serverGenerationStatus === "streaming");
+  const existingGenerating = Boolean(existing.activityStatus || existing.generationTaskId || existing.serverGenerationStatus === "running" || existing.serverGenerationStatus === "streaming");
+  const candidateCanonical = candidate.serverMessageId && candidate.id === String(candidate.serverMessageId);
+  const existingCanonical = existing.serverMessageId && existing.id === String(existing.serverMessageId);
+  if (!candidateCompleted && !existingCompleted && (candidateGenerating || existingGenerating)) {
+    // While a task is still running, preserve the already-rendered local row id
+    // so route-switch restore does not remount the assistant placeholder and
+    // visually refresh old rows. The stream/polling layers patch server ids and
+    // content onto this stable row; canonical server ids can win after terminal.
+    if (existingCanonical && !candidateCanonical) return true;
+    if (!existingCanonical && candidateCanonical) return false;
+    if (existingGenerating) return false;
+    return true;
+  }
+
+  if (candidateCanonical !== existingCanonical) return Boolean(candidateCanonical);
   return (candidate.content || "").length >= (existing.content || "").length;
 }
 
@@ -141,6 +156,24 @@ function dedupeConversationMessages(messages: Message[]): Message[] {
   return result;
 }
 
+function reuseStableMessageObjects(previous: Message[], next: Message[]): Message[] {
+  if (!previous.length || !next.length) return next;
+  const previousByServerOrId = new Map<string, Message>();
+  previous.forEach((message) => {
+    previousByServerOrId.set(String(message.serverMessageId ?? message.id), message);
+  });
+  let changed = false;
+  const reused = next.map((message) => {
+    const previousMessage = previousByServerOrId.get(String(message.serverMessageId ?? message.id));
+    if (previousMessage && buildConversationMessageSnapshotKey(previousMessage) === buildConversationMessageSnapshotKey(message)) {
+      changed = true;
+      return previousMessage;
+    }
+    return message;
+  });
+  return changed ? reused : next;
+}
+
 function applyCachedSnapshot({
   snapshot,
   fallbackSkillKey,
@@ -159,10 +192,14 @@ function applyCachedSnapshot({
 }: ApplyCachedSnapshotOptions) {
   setIsLoadingHistory(false);
   setConversationTitle(snapshot.title || "");
-  const dedupedMessages = dedupeConversationMessages(snapshot.messages);
-  setMessages(dedupedMessages);
+  let appliedMessages = dedupeConversationMessages(snapshot.messages);
+  setMessages((previous) => {
+    const next = reuseStableMessageObjects(previous, appliedMessages);
+    appliedMessages = next;
+    return areConversationMessagesEquivalent(previous, next) ? previous : next;
+  });
   setLoadedPersistedMessages(snapshot.loadedPersistedMessages);
-  setGroupViews(buildGroupViewsFromMessages(dedupedMessages));
+  setGroupViews(buildGroupViewsFromMessages(appliedMessages));
   setIsLoading(snapshot.isLoading);
   if (typeof snapshot.totalMessages === "number") {
     setTotalMessages(snapshot.totalMessages);
@@ -596,7 +633,7 @@ export function useChatConversationRestoreRuntime({
             });
           }
           setMessages((prev) => {
-            const nextMessages = dedupeConversationMessages(mergePendingMessages(prev) as Message[]);
+            const nextMessages = reuseStableMessageObjects(prev, dedupeConversationMessages(mergePendingMessages(prev) as Message[]));
             mergedMessages = nextMessages;
             return areConversationMessagesEquivalent(prev, nextMessages) ? prev : nextMessages;
           });
