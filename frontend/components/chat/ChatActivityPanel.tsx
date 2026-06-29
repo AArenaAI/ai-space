@@ -1,6 +1,7 @@
 "use client";
 
-import { X, Brain, Globe, FileText, CheckCircle, LoaderCircle, AlertCircle, Wrench } from "lucide-react";
+import { useState } from "react";
+import { X, Brain, Globe, FileText, CheckCircle, LoaderCircle, AlertCircle, Wrench, ChevronDown } from "lucide-react";
 import type { Message, ChatModel } from "@/lib/chatTypes";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -21,11 +22,19 @@ function mergeTimeline(message: Message, realtime: ReturnType<typeof useMessageR
   return realtime?.statusTimeline?.length ? realtime.statusTimeline : message.statusTimeline;
 }
 
+function isLowSignalCompletedStep(step: ChatStatusTimelineStep) {
+  const duration = Math.max(0, (step.endedAt || step.startedAt) - step.startedAt);
+  if (step.status === "completed" && duration < 1000 && (step.kind === "waiting_provider" || step.kind === "streaming_answer" || step.kind === "finalizing")) return true;
+  if (step.status === "completed" && step.kind === "finalizing") return true;
+  return false;
+}
+
 export default function ChatActivityPanel({ message, model, onClose }: { message?: Message | null; model?: ChatModel; onClose: () => void }) {
   const { t } = useI18n();
+  const [reasoningOpen, setReasoningOpen] = useState(false);
   const realtime = useMessageRealtime(message?.id || "", Boolean(message));
   if (!message) return null;
-  const timeline = getOrderedTimelineSteps(mergeTimeline(message, realtime));
+  const timeline = getOrderedTimelineSteps(mergeTimeline(message, realtime)).filter((step) => !isLowSignalCompletedStep(step));
   const sources = realtime?.searchSources || message.searchSources || [];
   const files = message.files || [];
   const reasoning = (realtime?.reasoningContent || message.reasoningContent || "").trim();
@@ -33,7 +42,7 @@ export default function ChatActivityPanel({ message, model, onClose }: { message
   const elapsedSeconds = Math.max(0, Math.round(((realtime?.completedAt || message.completedAt || Date.now()) - (realtime?.generationStartedAt || message.generationStartedAt || message.createdAt || Date.now())) / 1000));
 
   return (
-    <aside className="fixed inset-x-3 bottom-3 z-40 flex max-h-[72vh] flex-col rounded-3xl border border-surface-border/70 bg-surface-elevated/95 p-4 shadow-2xl shadow-black/10 backdrop-blur-xl dark:shadow-black/40 lg:inset-y-0 lg:left-auto lg:right-0 lg:bottom-auto lg:h-full lg:w-[392px] lg:max-h-none lg:rounded-none lg:border-y-0 lg:border-r-0 lg:shadow-none" data-chat-activity-panel="true">
+    <aside className="fixed inset-x-3 bottom-3 z-40 flex max-h-[72vh] flex-col rounded-3xl border border-surface-border/70 bg-surface-elevated/95 p-4 shadow-2xl shadow-black/10 backdrop-blur-xl dark:shadow-black/40 lg:inset-y-0 lg:left-auto lg:right-0 lg:bottom-auto lg:h-full lg:w-[336px] lg:max-h-none lg:rounded-none lg:border-y-0 lg:border-r-0 lg:shadow-none" data-chat-activity-panel="true">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-text-primary">活动{active ? ` · ${elapsedSeconds}s` : ""}</div>
@@ -64,10 +73,19 @@ export default function ChatActivityPanel({ message, model, onClose }: { message
 
         {reasoning && (
           <section className="mb-5">
-            <div className="mb-2 text-xs font-semibold text-text-secondary">思考内容</div>
-            <div className="max-h-56 overflow-y-auto border-l border-surface-border pl-3 text-xs leading-relaxed text-text-tertiary">
-              {reasoning.slice(0, 2400)}{reasoning.length > 2400 ? "…" : ""}
-            </div>
+            <button
+              type="button"
+              onClick={() => setReasoningOpen((value) => !value)}
+              className="mb-2 inline-flex w-full items-center justify-between rounded-xl px-1 py-1 text-left text-xs font-semibold text-text-secondary hover:bg-surface-card/60"
+            >
+              <span>思考内容</span>
+              <ChevronDown className={cn("h-3.5 w-3.5 text-text-tertiary transition-transform", reasoningOpen && "rotate-180")} />
+            </button>
+            {reasoningOpen && (
+              <div className="max-h-56 overflow-y-auto border-l border-surface-border pl-3 text-xs leading-relaxed text-text-tertiary">
+                {reasoning.slice(0, 2400)}{reasoning.length > 2400 ? "…" : ""}
+              </div>
+            )}
           </section>
         )}
 

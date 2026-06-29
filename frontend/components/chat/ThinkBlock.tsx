@@ -49,9 +49,8 @@ export function ThinkBlock({
         aria-expanded={false}
         className="inline-flex max-w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
       >
-        <Lightbulb className="h-3 w-3 shrink-0 text-text-tertiary" />
         <span className="text-xs font-medium">
-          {isThinking ? t("chat.reasoning.thinking") : `${t("chat.reasoning.title")}${collapsedLabel}`}
+          {isThinking ? "思考中" : "已思考"}
         </span>
         {isThinking && (
           <div className="ml-0.5 flex gap-0.5">
