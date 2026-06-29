@@ -143,7 +143,7 @@ export function StreamingText({
         </span>
       )}
       {!hasContent && !hasReason && (
-        <span className="flex min-h-[96px] items-center gap-2 text-text-tertiary" data-chat-empty-streaming-placeholder="true">
+        <span className="flex min-h-20 items-center gap-2 py-1 text-text-tertiary" data-chat-empty-streaming-placeholder="true">
           <span className="text-[13px] leading-none">{pendingLabel}</span>
           <ThinkingDots />
         </span>
