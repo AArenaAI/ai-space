@@ -153,18 +153,25 @@ test("start action stores active state, headers and forwards events", async () =
 
 test("shared task sequence guard dedupes replay across restored message ids", async () => {
   const appliedTaskSequencesRef = { current: {} };
+  const taskStreamsRef = { current: {} };
+  const activeTaskStreamsRef = { current: {} };
   const callbacks = [];
+  const controllers = [];
   const action = createStartTaskEventStreamAction({
     apiBaseUrl: "",
-    taskStreamsRef: { current: {} },
-    activeTaskStreamsRef: { current: {} },
+    taskStreamsRef,
+    activeTaskStreamsRef,
     appliedTaskSequencesRef,
     setMessages: () => {},
     setIsLoading: () => {},
     startBackgroundPolling: () => {},
     translate: (key) => key,
     getToken: () => "tok",
-    createAbortController: makeController,
+    createAbortController: () => {
+      const controller = makeController();
+      controllers.push(controller);
+      return controller;
+    },
     createTaskStreamEventHandler: (opts) => {
       callbacks.push(opts.callbacks);
       return { processEvent(){}, getAccumulated(){ return ""; }, getLatestSequence(){ return 0; } };
@@ -174,9 +181,13 @@ test("shared task sequence guard dedupes replay across restored message ids", as
   action(9, "optimistic-local", 11, 0, "", 22);
   await Promise.resolve();
   await Promise.resolve();
+  activeTaskStreamsRef.current["optimistic-local"] = { generationTaskId: 22, serverMessageId: 11 };
+  taskStreamsRef.current["optimistic-local"] = controllers[0];
   action(9, "server-11", 11, 0, "", 22);
   await Promise.resolve();
   await Promise.resolve();
+  assert.equal(controllers[0].signal.aborted, true);
+  assert.equal(taskStreamsRef.current["optimistic-local"], undefined);
   assert.equal(callbacks.length, 2);
   assert.equal(callbacks[0].shouldApplySequence(2), true);
   assert.equal(callbacks[1].shouldApplySequence(2), false);

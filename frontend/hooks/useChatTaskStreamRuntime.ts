@@ -141,6 +141,18 @@ export function createStartTaskEventStreamAction({
     generationTaskId?: number
   ) => {
     if (!convId || (!serverMessageId && !generationTaskId) || taskStreamsRef.current[localMessageId]) return;
+    const existingStreamEntry = Object.entries(activeTaskStreamsRef.current).find(([id, state]) =>
+      id !== localMessageId && Boolean(
+        (generationTaskId && state.generationTaskId === generationTaskId) ||
+        (serverMessageId && state.serverMessageId === serverMessageId)
+      )
+    );
+    if (existingStreamEntry) {
+      const [existingLocalMessageId] = existingStreamEntry;
+      taskStreamsRef.current[existingLocalMessageId]?.abort();
+      delete taskStreamsRef.current[existingLocalMessageId];
+      delete activeTaskStreamsRef.current[existingLocalMessageId];
+    }
     activeTaskStreamsRef.current[localMessageId] = { convId, serverMessageId, generationTaskId, lastSequence: after || 0, content: initialContent || "" };
     setIsLoading(true);
 
@@ -218,6 +230,10 @@ export function createStartTaskEventStreamAction({
           startBackgroundPolling(convId, localMessageId, serverMessageId);
         }
       } finally {
+        if (controller.signal.aborted) {
+          delete taskStreamsRef.current[localMessageId];
+          return;
+        }
         const accumulated = taskEventHandler.getAccumulated();
         const latestSequence = taskEventHandler.getLatestSequence();
         const finalData = realtimeGet(localMessageId);
