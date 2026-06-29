@@ -10,10 +10,10 @@ import StreamingMarkdownView from "./StreamingMarkdownView";
 
 function ThinkingDots() {
   return (
-    <span className="inline-flex items-center">
-      <span className="animate-bounce [animation-delay:0s]">.</span>
-      <span className="animate-bounce [animation-delay:0.2s]">.</span>
-      <span className="animate-bounce [animation-delay:0.4s]">.</span>
+    <span className="inline-flex items-center gap-1" aria-hidden="true">
+      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-text-tertiary/45 [animation-delay:0s]" />
+      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-text-tertiary/45 [animation-delay:0.18s]" />
+      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-text-tertiary/45 [animation-delay:0.36s]" />
     </span>
   );
 }
