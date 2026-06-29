@@ -142,7 +142,7 @@ export function StreamingText({
         </span>
       )}
       {!hasContent && !hasReason && (
-        <span className="flex min-h-[44px] items-center gap-1 text-text-secondary" data-chat-empty-streaming-placeholder="true">
+        <span className="flex min-h-[96px] items-center gap-1 text-text-secondary" data-chat-empty-streaming-placeholder="true">
           <ThinkingDots />
         </span>
       )}
