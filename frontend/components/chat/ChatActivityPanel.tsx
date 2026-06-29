@@ -7,6 +7,7 @@ import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 import { getOrderedTimelineSteps, getTimelineStepLabel, type ChatStatusTimelineStep } from "@/lib/chatStatusTimeline";
+import { formatElapsedTime } from "@/lib/chatGenerationPhase";
 
 function statusIcon(step: ChatStatusTimelineStep) {
   if (step.status === "failed") return <AlertCircle className="h-3.5 w-3.5 text-red-500" />;
@@ -22,11 +23,22 @@ function mergeTimeline(message: Message, realtime: ReturnType<typeof useMessageR
   return realtime?.statusTimeline?.length ? realtime.statusTimeline : message.statusTimeline;
 }
 
+function stepDuration(step: ChatStatusTimelineStep) {
+  return Math.max(0, (step.endedAt || Date.now()) - step.startedAt);
+}
+
 function isLowSignalCompletedStep(step: ChatStatusTimelineStep) {
-  const duration = Math.max(0, (step.endedAt || step.startedAt) - step.startedAt);
-  if (duration < 1000 && (step.kind === "waiting_provider" || step.kind === "streaming_answer" || step.kind === "finalizing")) return true;
-  if (step.kind === "finalizing") return true;
-  return false;
+  const duration = stepDuration(step);
+  if (duration >= 1000) return false;
+  return step.kind === "waiting_provider" || step.kind === "streaming_answer" || step.kind === "finalizing";
+}
+
+function getActivityStepLabel(t: (key: string, params?: Record<string, string>) => string, step: ChatStatusTimelineStep, generationStartedAt?: number) {
+  const label = getTimelineStepLabel(t, step, generationStartedAt);
+  const duration = stepDuration(step);
+  if (duration < 1000) return label;
+  if (/\d+\s*(秒|s|sec|secs|second|seconds|分|m|min)/i.test(label)) return label;
+  return `${label} · ${formatElapsedTime(duration, t)}`;
 }
 
 function formatReasoningSections(text: string) {
@@ -70,7 +82,7 @@ export default function ChatActivityPanel({ message, model, onClose }: { message
             {timeline.length ? timeline.map((step, index) => (
               <div key={`${step.id}:${index}`} className="flex items-start gap-2 rounded-xl px-1 py-1 text-xs text-text-secondary">
                 <span className="mt-0.5 shrink-0">{statusIcon(step)}</span>
-                <span className="min-w-0">{getTimelineStepLabel(t, step, realtime?.generationStartedAt || message.generationStartedAt)}</span>
+                <span className="min-w-0">{getActivityStepLabel(t, step, realtime?.generationStartedAt || message.generationStartedAt)}</span>
               </div>
             )) : (
               <div className="flex items-center gap-2 text-xs text-text-tertiary">
