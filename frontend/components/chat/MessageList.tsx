@@ -312,8 +312,7 @@ function MessageList({
         registry.byGroup.set(groupKey, existingForMessage);
         return existingForMessage;
       }
-      if (message.completedAt) return message.id;
-      const seededDisplayId = message.serverMessageId && message.id === String(message.serverMessageId)
+      const seededDisplayId = message.serverMessageId && message.id === String(message.serverMessageId) && !message.completedAt
         ? `assistant-task:${taskOrServerId}`
         : message.id;
       registry.byGroup.set(groupKey, seededDisplayId);
@@ -321,7 +320,6 @@ function MessageList({
       return seededDisplayId;
     }
     if (existingForMessage) return existingForMessage;
-    if (message.completedAt) return message.id;
     registry.byMessageId.set(messageKey, message.id);
     return message.id;
   }, [conversationId]);

@@ -272,8 +272,8 @@ function MessageRow({
       data-chat-message-row="true"
       data-message-id={displayMessageId || msg.id}
       data-message-role={msg.role}
-      style={!isUser && useContentVisibility && !isGenerating && Boolean(msg.content?.trim() || msg.completedAt) ? MESSAGE_ROW_CONTENT_VISIBILITY_STYLE : undefined}
-      className={cn("max-w-[800px] mx-auto px-4 py-4 rounded-2xl transition-colors duration-500", isHighlighted && "bg-brand/10")}
+      style={!isUser && useContentVisibility && !isGenerating && Boolean(msg.content?.trim() || msg.completedAt) && (msg.content?.length || 0) > 2000 ? MESSAGE_ROW_CONTENT_VISIBILITY_STYLE : undefined}
+      className={cn("max-w-[800px] mx-auto px-4 py-4 rounded-2xl", isHighlighted && "bg-brand/10")}
     >
       <div className={cn("flex gap-3 group", !suppressAppearAnimation && "animate-message-appear", isUser ? "justify-end" : "justify-start")}>
         <div className={cn("mt-1 shrink-0", isUser && !selectMode ? "w-7 invisible" : "w-7")}>
@@ -346,7 +346,7 @@ function MessageRow({
           <div className={cn("flex flex-col gap-1 min-w-0", isUser ? "items-end" : "items-start")}>
             <div
               className={cn(
-                "px-4 py-3 relative w-fit max-w-full transition-shadow duration-500",
+                "px-4 py-3 relative w-fit max-w-full",
                 isUser ? "rounded-2xl rounded-br-sm bg-surface-elevated shadow-sm" : "rounded-2xl rounded-bl-sm bg-surface-elevated",
                 isHighlighted && "ring-2 ring-brand/40 shadow-lg shadow-brand/10"
               )}
