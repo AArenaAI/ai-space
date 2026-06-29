@@ -63,7 +63,7 @@ export function StreamingText({
   className?: string;
   as?: "div" | "span";
 }) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const realtime = useMessageRealtime(messageId);
   const streamText = useMessageStream(messageId, isStreaming);
   const canonicalContent = buildCanonicalReasoningContent(content, reasoningContent);
@@ -98,6 +98,7 @@ export function StreamingText({
   const hasReason = !!parsed.reasoning;
   const hasContent = !!parsed.answer.trim();
   const Host = as;
+  const pendingLabel = language === "zh-CN" || language === "zh-TW" ? "正在准备回复" : "Preparing reply";
   const [reasoningExpanded, setReasoningExpanded] = useState(true);
 
   return (
@@ -142,7 +143,8 @@ export function StreamingText({
         </span>
       )}
       {!hasContent && !hasReason && (
-        <span className="flex min-h-[96px] items-center gap-1 text-text-secondary" data-chat-empty-streaming-placeholder="true">
+        <span className="flex min-h-[96px] items-center gap-2 text-text-tertiary" data-chat-empty-streaming-placeholder="true">
+          <span className="text-[13px] leading-none">{pendingLabel}</span>
           <ThinkingDots />
         </span>
       )}
