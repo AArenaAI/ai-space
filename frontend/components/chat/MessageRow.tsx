@@ -354,14 +354,9 @@ function MessageRow({
           <div className={cn("flex flex-col gap-1 min-w-0", isUser ? "items-end" : "items-start")}>
             <div
               className={cn(
-                "relative w-fit max-w-full",
-                isEmptyPendingAssistant ? "px-1 py-1" : "px-4 py-3",
-                isUser
-                  ? "rounded-2xl rounded-br-sm bg-surface-elevated shadow-sm"
-                  : isEmptyPendingAssistant
-                    ? "rounded-none bg-transparent"
-                    : "rounded-2xl rounded-bl-sm bg-surface-elevated",
-                isHighlighted && !isEmptyPendingAssistant && "ring-2 ring-brand/40 shadow-lg shadow-brand/10"
+                "relative max-w-full",
+                isUser ? "w-fit px-4 py-3 rounded-2xl rounded-br-sm bg-surface-elevated shadow-sm" : "w-full px-0 py-1 rounded-none bg-transparent",
+                isHighlighted && isUser && "ring-2 ring-brand/40 shadow-lg shadow-brand/10"
               )}
             >
               {!isUser && model && !selectMode && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} compact={isEmptyPendingAssistant} />}
