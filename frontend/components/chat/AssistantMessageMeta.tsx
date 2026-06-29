@@ -106,7 +106,7 @@ function StatusTimelinePanel({ status, tokensUsed }: { status: MessageDisplaySta
   );
 }
 
-export function AssistantMessageMeta({ msg, isStreaming, model }: { msg: Message; isStreaming: boolean; model?: ChatModel }) {
+export function AssistantMessageMeta({ msg, isStreaming, model, compact = false }: { msg: Message; isStreaming: boolean; model?: ChatModel; compact?: boolean }) {
   const profileEnabled = isChatRenderProfileEnabled();
   const renderStartedAt = profileEnabled ? (typeof performance !== "undefined" ? performance.now() : Date.now()) : 0;
   const { t } = useI18n();
@@ -154,7 +154,7 @@ export function AssistantMessageMeta({ msg, isStreaming, model }: { msg: Message
   const canShowActiveStatusDetails = Boolean(activeStatus && (activeStatus.statusTimeline?.length || msg.tokensUsed || activeStatus.label));
 
   return (
-    <div className="relative mb-2 flex items-center justify-between gap-3" onMouseLeave={() => setActiveStatusKey(null)}>
+    <div className={cn("relative flex items-center justify-between gap-3", compact ? "mb-0" : "mb-2")} onMouseLeave={() => setActiveStatusKey(null)}>
       <div className="flex min-w-0 items-center gap-1.5">
         <span
           aria-hidden="true"

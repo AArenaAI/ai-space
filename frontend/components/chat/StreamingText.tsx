@@ -8,16 +8,6 @@ import { useMessageStream } from "@/hooks/useMessageStream";
 import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
 import StreamingMarkdownView from "./StreamingMarkdownView";
 
-function ThinkingDots() {
-  return (
-    <span className="inline-flex items-center gap-1" aria-hidden="true">
-      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-text-tertiary/45 [animation-delay:0s]" />
-      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-text-tertiary/45 [animation-delay:0.18s]" />
-      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-text-tertiary/45 [animation-delay:0.36s]" />
-    </span>
-  );
-}
-
 function StreamingCursor() {
   return <span className="inline-block w-[2px] h-[1.2em] bg-brand ml-0.5 animate-cursor-blink align-middle" />;
 }
@@ -63,7 +53,7 @@ export function StreamingText({
   className?: string;
   as?: "div" | "span";
 }) {
-  const { t, language } = useI18n();
+  const { t } = useI18n();
   const realtime = useMessageRealtime(messageId);
   const streamText = useMessageStream(messageId, isStreaming);
   const canonicalContent = buildCanonicalReasoningContent(content, reasoningContent);
@@ -98,7 +88,6 @@ export function StreamingText({
   const hasReason = !!parsed.reasoning;
   const hasContent = !!parsed.answer.trim();
   const Host = as;
-  const pendingLabel = language === "zh-CN" || language === "zh-TW" ? "正在准备回复" : "Preparing reply";
   const [reasoningExpanded, setReasoningExpanded] = useState(true);
 
   return (
@@ -143,10 +132,7 @@ export function StreamingText({
         </span>
       )}
       {!hasContent && !hasReason && (
-        <span className="flex min-h-20 items-center gap-2 py-1 text-text-tertiary" data-chat-empty-streaming-placeholder="true">
-          <span className="text-[13px] leading-none">{pendingLabel}</span>
-          <ThinkingDots />
-        </span>
+        <span className="block h-0 overflow-hidden" data-chat-empty-streaming-placeholder="true" aria-hidden="true" />
       )}
       {isStreaming && (hasContent || hasReason) && <StreamingCursor />}
     </Host>
