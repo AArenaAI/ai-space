@@ -9,6 +9,7 @@ import type { MessageRowProps } from "./MessageRow";
 export type ChatMessageListItemProps = {
   index: number;
   message: Message;
+  displayMessageId?: string;
   visibleMessageCount: number;
   latestAssistantMessageId?: string;
   initialReadingAssistantIds?: Set<string>;
@@ -48,6 +49,7 @@ export type ChatMessageListItemProps = {
 function ChatMessageListItem({
   index,
   message,
+  displayMessageId,
   visibleMessageCount,
   latestAssistantMessageId,
   initialReadingAssistantIds,
@@ -86,6 +88,7 @@ function ChatMessageListItem({
   return (
     <MessageRow
       message={message}
+      displayMessageId={displayMessageId}
       group={group}
       model={model}
       isLast={index === visibleMessageCount - 1}
@@ -175,6 +178,7 @@ function areChatMessageListItemPropsEqual(previous: ChatMessageListItemProps, ne
   if ((previous.message.role === "assistant" && !!previous.initialReadingAssistantIds?.has(String(previous.message.id))) !== (next.message.role === "assistant" && !!next.initialReadingAssistantIds?.has(String(next.message.id)))) return false;
   if ((previous.message.role === "assistant" && !!previous.viewedAssistantIds?.has(String(previous.message.id))) !== (next.message.role === "assistant" && !!next.viewedAssistantIds?.has(String(next.message.id)))) return false;
   if (previous.message !== next.message && getMessageRenderKey(previous.message) !== getMessageRenderKey(next.message)) return false;
+  if (previous.displayMessageId !== next.displayMessageId) return false;
 
   if (previous.isLoading !== next.isLoading && (previousIsLast || nextIsLast)) return false;
   if (previous.selectMode !== next.selectMode) return false;

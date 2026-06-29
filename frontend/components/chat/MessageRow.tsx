@@ -44,6 +44,7 @@ function shouldSkipViewportObserversForAssistant(content?: string) {
 
 export type MessageRowProps = {
   message: Message;
+  displayMessageId?: string;
   group?: InferredGroup;
   model?: ChatModel;
   isLast: boolean;
@@ -82,6 +83,7 @@ export type MessageRowProps = {
 
 function MessageRow({
   message: msg,
+  displayMessageId,
   group,
   model,
   isLast,
@@ -268,7 +270,7 @@ function MessageRow({
     <div
       ref={rowRef}
       data-chat-message-row="true"
-      data-message-id={msg.id}
+      data-message-id={displayMessageId || msg.id}
       data-message-role={msg.role}
       style={!isUser && useContentVisibility && !isGenerating && Boolean(msg.content?.trim() || msg.completedAt) ? MESSAGE_ROW_CONTENT_VISIBILITY_STYLE : undefined}
       className={cn("max-w-[800px] mx-auto px-4 py-4 rounded-2xl transition-colors duration-500", isHighlighted && "bg-brand/10")}
