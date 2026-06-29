@@ -72,6 +72,7 @@ import ChatHistoryLoadingState from "./ChatHistoryLoadingState";
 import ChatHistoryLoadingVirtuoso from "./ChatHistoryLoadingVirtuoso";
 import ChatEmptyState from "./ChatEmptyState";
 import ChatDeleteMessageDialog from "./ChatDeleteMessageDialog";
+import ChatActivityPanel from "./ChatActivityPanel";
 import { parseThinkContent, sanitizeContent, isMessageGenerating } from "@/lib/chatContent";
 
 
@@ -279,6 +280,7 @@ function MessageList({
   const historyPrependSettlingTimerRef = useRef<number>(0);
   const historyRichLiteFallbackTimerRef = useRef<number>(0);
   const [activeOverviewMessageId, setActiveOverviewMessageId] = useState<string | null>(null);
+  const [activeActivityMessageId, setActiveActivityMessageId] = useState<string | null>(null);
   const overviewJumpActiveRef = useRef<{ id: string; until: number } | null>(null);
   const overviewBottomLockUntilRef = useRef(0);
   const userOverviewRafRef = useRef<number>(0);
@@ -1072,6 +1074,11 @@ function MessageList({
     }
     return undefined;
   }, [visibleMessages]);
+  const activeActivityMessage = useMemo(() => {
+    if (!activeActivityMessageId) return null;
+    return messages.find((message) => String(message.id) === activeActivityMessageId) || visibleMessages.find((message) => String(message.id) === activeActivityMessageId) || null;
+  }, [activeActivityMessageId, messages, visibleMessages]);
+  const activeActivityModel = activeActivityMessage?.model ? models.find((model) => model.id === activeActivityMessage.model) : undefined;
 
   useEffect(() => {
     if (targetMessageId || isLoadingHistory || visibleMessages.length === 0) return;
@@ -2280,6 +2287,7 @@ function MessageList({
                 onForkCompare={onForkCompare}
                 onSaveAssistantToNote={onSaveAssistantToNote}
                 onAssistantViewed={handleAssistantViewed}
+                onOpenActivity={(message) => setActiveActivityMessageId(String(message.id))}
                 imageLoadFailedLabel={t("chat.imageLoadFailed")}
                 MarkdownRenderer={LazyMarkdownRenderer}
                 useContentVisibility={useRowContentVisibility}
@@ -2329,6 +2337,13 @@ function MessageList({
         bottomOffset={SCROLL_TO_BOTTOM_OFFSET + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0)}
         onClick={handleScrollToBottomClick}
       />
+      {!isCompare && activeActivityMessage && (
+        <ChatActivityPanel
+          message={activeActivityMessage}
+          model={activeActivityModel}
+          onClose={() => setActiveActivityMessageId(null)}
+        />
+      )}
 
       <ChatSelectionOverlays
         textSelection={textSelection}

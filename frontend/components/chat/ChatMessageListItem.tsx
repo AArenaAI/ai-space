@@ -39,6 +39,7 @@ export type ChatMessageListItemProps = {
   onForkCompare?: (messageId: number) => void;
   onSaveAssistantToNote?: (content: string) => void;
   onAssistantViewed?: (messageId: string) => void;
+  onOpenActivity?: (message: Message) => void;
   imageLoadFailedLabel: string;
   MarkdownRenderer: MessageRowProps["MarkdownRenderer"];
   useContentVisibility?: boolean;
@@ -79,6 +80,7 @@ function ChatMessageListItem({
   onForkCompare,
   onSaveAssistantToNote,
   onAssistantViewed,
+  onOpenActivity,
   imageLoadFailedLabel,
   MarkdownRenderer,
   useContentVisibility,
@@ -118,6 +120,7 @@ function ChatMessageListItem({
       onForkCompare={onForkCompare}
       onSaveAssistantToNote={onSaveAssistantToNote}
       onAssistantViewed={onAssistantViewed}
+      onOpenActivity={onOpenActivity}
       imageLoadFailedLabel={imageLoadFailedLabel}
       MarkdownRenderer={MarkdownRenderer}
       useContentVisibility={useContentVisibility}
@@ -188,6 +191,8 @@ function areChatMessageListItemPropsEqual(previous: ChatMessageListItemProps, ne
   if (previous.deferRichTextHydration !== next.deferRichTextHydration) return false;
   if (previous.allowRichLiteFallback !== next.allowRichLiteFallback) return false;
   if (previous.conversationId !== next.conversationId) return false;
+  if (previous.onAssistantViewed !== next.onAssistantViewed) return false;
+  if (previous.onOpenActivity !== next.onOpenActivity) return false;
   if (previous.imageLoadFailedLabel !== next.imageLoadFailedLabel) return false;
   if (previous.MarkdownRenderer !== next.MarkdownRenderer) return false;
   if (previous.useContentVisibility !== next.useContentVisibility) return false;

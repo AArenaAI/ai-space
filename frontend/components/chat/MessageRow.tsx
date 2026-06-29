@@ -77,6 +77,7 @@ export type MessageRowProps = {
   imageLoadFailedLabel: string;
   MarkdownRenderer: MarkdownRendererComponent;
   onAssistantViewed?: (messageId: string) => void;
+  onOpenActivity?: (message: Message) => void;
   useContentVisibility?: boolean;
   deferOffscreenRichTextHydration?: boolean;
   stabilizeInitialRichText?: boolean;
@@ -116,6 +117,7 @@ function MessageRow({
   imageLoadFailedLabel,
   MarkdownRenderer,
   onAssistantViewed,
+  onOpenActivity,
   useContentVisibility = true,
   deferOffscreenRichTextHydration = false,
   stabilizeInitialRichText = false,
@@ -359,7 +361,7 @@ function MessageRow({
                 isHighlighted && isUser && "ring-2 ring-brand/40 shadow-lg shadow-brand/10"
               )}
             >
-              {!isUser && model && !selectMode && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} compact={isEmptyPendingAssistant} inlineStatus />}
+              {!isUser && model && !selectMode && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} compact={isEmptyPendingAssistant} inlineStatus onOpenActivity={() => onOpenActivity?.(msg)} />}
               {isUser ? (
                 <UserMessageContent message={msg} imageLoadFailedLabel={imageLoadFailedLabel} />
               ) : (
