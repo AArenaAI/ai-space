@@ -289,7 +289,54 @@ function MessageList({
   const historyPrependUntilRef = useRef(0);
   const openedConversationBottomKeyRef = useRef("");
   const lastConversationIdRef = useRef<number | undefined>(conversationId);
+  const runningAssistantDisplayIdsRef = useRef<{
+    byGroup: Map<string, string>;
+    byMessageId: Map<string, string>;
+  }>({ byGroup: new Map(), byMessageId: new Map() });
   const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+
+  const getStableRunningAssistantDisplayId = useCallback((message: Message) => {
+    if (message.role !== "assistant" || message.completedAt) return message.id;
+    const registry = runningAssistantDisplayIdsRef.current;
+    const messageKey = `${conversationId ?? "none"}:msg:${message.id}`;
+    const taskOrServerId = message.generationTaskId || message.serverMessageId;
+    const groupKey = taskOrServerId ? `${conversationId ?? "none"}:task:${taskOrServerId}` : undefined;
+    const existingForMessage = registry.byMessageId.get(messageKey);
+    if (groupKey) {
+      const existingForGroup = registry.byGroup.get(groupKey);
+      if (existingForGroup) {
+        registry.byMessageId.set(messageKey, existingForGroup);
+        return existingForGroup;
+      }
+      if (existingForMessage) {
+        registry.byGroup.set(groupKey, existingForMessage);
+        return existingForMessage;
+      }
+      const seededDisplayId = message.serverMessageId && message.id === String(message.serverMessageId)
+        ? `assistant-task:${taskOrServerId}`
+        : message.id;
+      registry.byGroup.set(groupKey, seededDisplayId);
+      registry.byMessageId.set(messageKey, seededDisplayId);
+      return seededDisplayId;
+    }
+    if (existingForMessage) return existingForMessage;
+    registry.byMessageId.set(messageKey, message.id);
+    return message.id;
+  }, [conversationId]);
+
+  useEffect(() => {
+    const registry = runningAssistantDisplayIdsRef.current;
+    const liveMessageKeys = new Set(messages.map((message) => `${conversationId ?? "none"}:msg:${message.id}`));
+    for (const key of Array.from(registry.byMessageId.keys())) {
+      if (!key.startsWith(`${conversationId ?? "none"}:msg:`) || !liveMessageKeys.has(key)) registry.byMessageId.delete(key);
+    }
+    const liveGroupKeys = new Set(messages
+      .filter((message) => message.role === "assistant" && !message.completedAt && (message.generationTaskId || message.serverMessageId))
+      .map((message) => `${conversationId ?? "none"}:task:${message.generationTaskId || message.serverMessageId}`));
+    for (const key of Array.from(registry.byGroup.keys())) {
+      if (!key.startsWith(`${conversationId ?? "none"}:task:`) || !liveGroupKeys.has(key)) registry.byGroup.delete(key);
+    }
+  }, [conversationId, messages]);
 
   const stopBottomLockForUserBrowse = useCallback((duration = 2500) => {
     stickToBottomRef.current = false;
@@ -2196,10 +2243,7 @@ function MessageList({
             const model = msg.model ? modelById.get(msg.model) : undefined;
             const isSelected = selectedIds.has(msg.id);
             const isHighlighted = highlightedMessageId === msg.id;
-            const isRunningCanonicalAssistant = msg.role === "assistant" && !msg.completedAt && msg.serverMessageId && msg.id === String(msg.serverMessageId);
-            const stableAssistantDisplayId = isRunningCanonicalAssistant
-              ? `assistant-task:${msg.generationTaskId || msg.serverMessageId}`
-              : msg.id;
+            const stableAssistantDisplayId = getStableRunningAssistantDisplayId(msg);
 
             return (
               <ChatMessageListItem
