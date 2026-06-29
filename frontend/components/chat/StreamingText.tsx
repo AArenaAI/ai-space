@@ -98,11 +98,8 @@ export function StreamingText({
         <div className="mb-2">
           <button
             type="button"
-            aria-expanded={reasoningExpanded}
-            onClick={() => {
-              setReasoningExpanded((value) => !value);
-              onOpenActivity?.();
-            }}
+            aria-expanded={false}
+            onClick={() => onOpenActivity?.()}
             className="inline-flex max-w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
           >
             <Lightbulb className="h-3 w-3 shrink-0 text-text-tertiary" />
@@ -113,22 +110,10 @@ export function StreamingText({
               <div className="h-1 w-1 animate-bounce rounded-full bg-text-tertiary [animation-delay:0.3s]" />
             </div>
             <ChevronDown
-              className={`h-3.5 w-3.5 shrink-0 text-text-tertiary/80 transition-transform duration-300 ease-out ${reasoningExpanded ? "rotate-180" : "rotate-0"}`}
+              className="h-3.5 w-3.5 -rotate-90 shrink-0 text-text-tertiary/80"
             />
           </button>
-          <div
-            aria-hidden={!reasoningExpanded}
-            className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${reasoningExpanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}
-          >
-            <div className="min-h-0 overflow-hidden">
-              <div
-                data-i18n-skip="true"
-                className={`reasoning-markdown relative ml-2 mt-1 border-l border-surface-border py-1.5 pl-3 pr-1 text-text-secondary transition-[transform,filter] duration-300 ease-out ${reasoningExpanded ? "translate-y-0 blur-0" : "-translate-y-1 blur-[1px]"}`}
-              >
-                <StreamingMarkdownView content={parsed.reasoning || ""} idleTimeout={80} keepRenderedOnContentChange isStreaming={stableMarkdownStreamingMode} />
-              </div>
-            </div>
-          </div>
+
         </div>
       )}
       {hasContent && (

@@ -45,11 +45,8 @@ export function ThinkBlock({
   return (
     <div className="mb-2">
       <button
-        onClick={() => {
-          setExpanded(!expanded);
-          onOpenActivity?.();
-        }}
-        aria-expanded={expanded}
+        onClick={() => onOpenActivity?.()}
+        aria-expanded={false}
         className="inline-flex max-w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
       >
         <Lightbulb className="h-3 w-3 shrink-0 text-text-tertiary" />
@@ -64,29 +61,10 @@ export function ThinkBlock({
           </div>
         )}
         <ChevronDown
-          className={`h-3.5 w-3.5 shrink-0 text-text-tertiary/80 transition-transform duration-300 ease-out ${expanded ? "rotate-180" : "rotate-0"}`}
+          className="h-3.5 w-3.5 -rotate-90 shrink-0 text-text-tertiary/80"
         />
       </button>
-      <div
-        aria-hidden={!expanded}
-        className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${expanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}
-      >
-        <div className="min-h-0 overflow-hidden">
-          <div
-            data-i18n-skip="true"
-            className={`reasoning-markdown ml-2 mt-1 border-l border-surface-border py-1.5 pl-3 pr-1 text-text-secondary transition-[transform,filter] duration-300 ease-out ${stabilizeCompletionHeight ? "min-h-[64px]" : ""} ${expanded ? "translate-y-0 blur-0" : "-translate-y-1 blur-[1px]"}`}
-          >
-            <DeferredMarkdownRenderer
-              content={content}
-              shouldHydrateRichText={shouldHydrateRichText}
-              priorityHydrateRichText={priorityHydrateRichText}
-              allowRichLiteFallback={allowRichLiteFallback}
-              compactRichLitePreview={compactRichLitePreview}
-              messageId={messageId}
-            />
-          </div>
-        </div>
-      </div>
+
     </div>
   );
 }
