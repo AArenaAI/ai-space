@@ -100,7 +100,7 @@ export function AssistantMessageContent({
         content={message.content || ""}
         reasoningContent={message.reasoningContent}
         isStreaming={generating}
-        className="text-[15px] leading-relaxed text-text-primary"
+        className="min-h-[132px] text-[15px] leading-relaxed text-text-primary"
       />
     );
   }
