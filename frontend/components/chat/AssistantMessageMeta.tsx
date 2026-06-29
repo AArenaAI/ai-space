@@ -106,7 +106,7 @@ function StatusTimelinePanel({ status, tokensUsed }: { status: MessageDisplaySta
   );
 }
 
-export function AssistantMessageMeta({ msg, isStreaming, model, compact = false }: { msg: Message; isStreaming: boolean; model?: ChatModel; compact?: boolean }) {
+export function AssistantMessageMeta({ msg, isStreaming, model, compact = false, inlineStatus = false }: { msg: Message; isStreaming: boolean; model?: ChatModel; compact?: boolean; inlineStatus?: boolean }) {
   const profileEnabled = isChatRenderProfileEnabled();
   const renderStartedAt = profileEnabled ? (typeof performance !== "undefined" ? performance.now() : Date.now()) : 0;
   const { t } = useI18n();
@@ -154,7 +154,7 @@ export function AssistantMessageMeta({ msg, isStreaming, model, compact = false 
   const canShowActiveStatusDetails = Boolean(activeStatus && (activeStatus.statusTimeline?.length || msg.tokensUsed || activeStatus.label));
 
   return (
-    <div className={cn("relative flex items-center justify-between gap-3", compact ? "mb-0" : "mb-2")} onMouseLeave={() => setActiveStatusKey(null)}>
+    <div className={cn("relative flex items-center gap-2", inlineStatus ? "justify-start" : "justify-between", compact ? "mb-0" : "mb-2")} onMouseLeave={() => setActiveStatusKey(null)}>
       <div className="flex min-w-0 items-center gap-1.5">
         <span
           aria-hidden="true"
@@ -167,7 +167,7 @@ export function AssistantMessageMeta({ msg, isStreaming, model, compact = false 
         </span>
         <span className="truncate text-[11px] text-text-tertiary">{model.name}</span>
       </div>
-      <div className="ml-auto flex shrink-0 items-center gap-1">
+      <div className={cn("flex shrink-0 items-center gap-1", inlineStatus ? "ml-0" : "ml-auto")}>
         {statuses.map((status) => {
           const canShowDetails = Boolean(status.statusTimeline?.length || msg.tokensUsed || status.label);
           return (

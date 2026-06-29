@@ -45,21 +45,21 @@ export function ThinkBlock({
       <button
         onClick={() => setExpanded(!expanded)}
         aria-expanded={expanded}
-        className="flex w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
+        className="inline-flex max-w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
       >
         <Lightbulb className="h-3 w-3 shrink-0 text-text-tertiary" />
-        <span className="flex-1 text-xs font-medium">
+        <span className="text-xs font-medium">
           {isThinking ? t("chat.reasoning.thinking") : `${t("chat.reasoning.title")}${collapsedLabel}`}
         </span>
         {isThinking && (
-          <div className="flex gap-0.5">
+          <div className="ml-0.5 flex gap-0.5">
             <div className="h-1 w-1 animate-bounce rounded-full bg-text-tertiary" />
             <div className="h-1 w-1 animate-bounce rounded-full bg-text-tertiary [animation-delay:0.15s]" />
             <div className="h-1 w-1 animate-bounce rounded-full bg-text-tertiary [animation-delay:0.3s]" />
           </div>
         )}
         <ChevronDown
-          className={`h-3.5 w-3.5 shrink-0 text-text-tertiary transition-transform duration-300 ease-out ${expanded ? "rotate-180" : "rotate-0"}`}
+          className={`h-3.5 w-3.5 shrink-0 text-text-tertiary/80 transition-transform duration-300 ease-out ${expanded ? "rotate-180" : "rotate-0"}`}
         />
       </button>
       <div

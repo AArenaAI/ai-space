@@ -359,7 +359,7 @@ function MessageRow({
                 isHighlighted && isUser && "ring-2 ring-brand/40 shadow-lg shadow-brand/10"
               )}
             >
-              {!isUser && model && !selectMode && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} compact={isEmptyPendingAssistant} />}
+              {!isUser && model && !selectMode && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} compact={isEmptyPendingAssistant} inlineStatus />}
               {isUser ? (
                 <UserMessageContent message={msg} imageLoadFailedLabel={imageLoadFailedLabel} />
               ) : (
