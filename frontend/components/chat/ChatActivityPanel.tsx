@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 import { getOrderedTimelineSteps, getTimelineStepLabel, type ChatStatusTimelineStep } from "@/lib/chatStatusTimeline";
 import { formatElapsedTime } from "@/lib/chatGenerationPhase";
+import { resolveChatMessageRuntimeState } from "@/lib/chatMessageRuntimeState";
 
 function statusIcon(step: ChatStatusTimelineStep) {
   if (step.status === "failed") return <AlertCircle className="h-3.5 w-3.5 text-red-500" />;
@@ -27,55 +28,6 @@ function parseTimelineValue(value: unknown): ChatStatusTimelineStep[] | undefine
   if (!Array.isArray(parsed)) return undefined;
   const steps = parsed.filter((step): step is ChatStatusTimelineStep => !!step && typeof step === "object" && typeof step.kind === "string" && typeof step.status === "string" && typeof step.startedAt === "number");
   return steps.length ? steps : undefined;
-}
-
-function isTerminalMessage(message: Message) {
-  return Boolean(
-    message.completedAt ||
-    message.stopped ||
-    message.errorCode ||
-    message.serverGenerationStatus === "completed" ||
-    message.serverGenerationStatus === "failed" ||
-    message.serverGenerationStatus === "cancelled" ||
-    message.phase === "completed" ||
-    message.phase === "failed" ||
-    message.phase === "stopped"
-  );
-}
-
-function mergeTimeline(message: Message, realtime: ReturnType<typeof useMessageRealtime>, snapshotTimeline?: ChatStatusTimelineStep[]) {
-  if (isTerminalMessage(message)) {
-    // Persisted terminal message state is the source of truth. Realtime entries
-    // can survive briefly after route switches/open-close cycles and may still
-    // contain a stale running reasoning step; the task snapshot will correct it
-    // a second later, but the panel must not flash "reasoning" for completed
-    // replies while waiting for that fetch.
-    if (message.statusTimeline?.length) return message.statusTimeline;
-    if (snapshotTimeline?.length) return snapshotTimeline;
-    if (realtime?.completedAt || realtime?.stopped || realtime?.errorCode) return realtime.statusTimeline;
-    return undefined;
-  }
-  if (realtime?.statusTimeline?.length) return realtime.statusTimeline;
-  if (snapshotTimeline?.length) return snapshotTimeline;
-  return message.statusTimeline;
-}
-
-function mergeSources(message: Message, realtime: ReturnType<typeof useMessageRealtime>) {
-  return isTerminalMessage(message)
-    ? (message.searchSources || realtime?.searchSources || [])
-    : (realtime?.searchSources || message.searchSources || []);
-}
-
-function mergeReasoning(message: Message, realtime: ReturnType<typeof useMessageRealtime>) {
-  return isTerminalMessage(message)
-    ? (message.reasoningContent || realtime?.reasoningContent || "")
-    : (realtime?.reasoningContent || message.reasoningContent || "");
-}
-
-function mergeContent(message: Message, realtime: ReturnType<typeof useMessageRealtime>) {
-  return isTerminalMessage(message)
-    ? (message.content || realtime?.content || "")
-    : (realtime?.content || message.content || "");
 }
 
 function stepDuration(step: ChatStatusTimelineStep) {
@@ -174,20 +126,18 @@ export default function ChatActivityPanel({ message, model, onClose }: { message
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [message?.generationTaskId, message?.id]);
   if (!message) return null;
-  const terminalMessage = isTerminalMessage(message);
-  const sources = Array.from(new Map(mergeSources(message, realtime).map((source) => [source.url || source.title, source])).values());
-  const inferredSourceCount = sources.length || countMarkdownSources(mergeContent(message, realtime));
-  const timeline = getOrderedTimelineSteps(mergeTimeline(message, realtime, snapshotTimeline))
+  const runtimeState = resolveChatMessageRuntimeState({ message, realtime, snapshotTimeline });
+  const sources = Array.from(new Map(runtimeState.searchSources.map((source) => [source.url || source.title, source])).values());
+  const inferredSourceCount = sources.length || countMarkdownSources(runtimeState.content);
+  const timeline = getOrderedTimelineSteps(runtimeState.statusTimeline)
     .map((step) => step.kind === "web_search" && !step.count && inferredSourceCount ? { ...step, count: inferredSourceCount } : step)
     .filter((step) => !isLowSignalCompletedStep(step));
   const files = message.files || [];
-  const reasoning = mergeReasoning(message, realtime).trim();
+  const reasoning = runtimeState.reasoningContent.trim();
   const reasoningSections = formatReasoningSections(reasoning);
-  const active = !terminalMessage && !((realtime?.completedAt || message.completedAt) || realtime?.stopped || message.stopped || realtime?.errorCode || message.errorCode);
-  const elapsedEndAt = terminalMessage
-    ? (message.completedAt || realtime?.completedAt || Date.now())
-    : (realtime?.completedAt || message.completedAt || Date.now());
-  const elapsedStartAt = message.generationStartedAt || realtime?.generationStartedAt || message.createdAt || Date.now();
+  const active = !runtimeState.terminal && !((runtimeState.completedAt) || runtimeState.stopped || runtimeState.errorCode);
+  const elapsedEndAt = runtimeState.completedAt || Date.now();
+  const elapsedStartAt = runtimeState.generationStartedAt || message.createdAt || Date.now();
   const elapsedSeconds = Math.max(0, Math.round((elapsedEndAt - elapsedStartAt) / 1000));
 
   const timelineStartAt = timeline[0]?.startedAt || message.generationStartedAt || message.createdAt;

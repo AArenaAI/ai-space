@@ -24,6 +24,58 @@ function getActivityLabel(t, kind, status, label) {
   return t("chat.status.generating");
 }
 `);
+source = source.replace('import { resolveChatMessageRuntimeState } from "./chatMessageRuntimeState";\n', `
+function isTerminalMessage(message) {
+  return Boolean(message.completedAt || message.stopped || message.errorCode || message.serverGenerationStatus === "completed" || message.serverGenerationStatus === "failed" || message.serverGenerationStatus === "cancelled" || message.phase === "completed" || message.phase === "failed" || message.phase === "stopped");
+}
+function isTerminalRealtime(realtime) {
+  return Boolean(realtime && (realtime.completedAt || realtime.stopped || realtime.errorCode || realtime.phase === "completed" || realtime.phase === "failed" || realtime.phase === "stopped"));
+}
+function resolveChatMessageRuntimeState({ message, realtime }) {
+  const terminalFromMessage = isTerminalMessage(message);
+  const terminalFromRealtime = isTerminalRealtime(realtime);
+  if (terminalFromMessage) {
+    return {
+      terminal: true,
+      terminalSource: "message",
+      content: message.content || (realtime && realtime.content) || "",
+      answerContent: message.content || (realtime && realtime.answerContent),
+      reasoningContent: message.reasoningContent || (realtime && realtime.reasoningContent) || "",
+      searchSources: message.searchSources || (realtime && realtime.searchSources) || [],
+      searchSourcesCount: message.searchSourcesCount ?? (realtime && realtime.searchSourcesCount),
+      searchStatus: message.searchStatus ?? (realtime && realtime.searchStatus),
+      activityStatus: message.activityStatus,
+      statusTimeline: message.statusTimeline,
+      phase: message.phase || (message.completedAt ? "completed" : undefined),
+      generationStartedAt: message.generationStartedAt || (realtime && realtime.generationStartedAt) || message.createdAt,
+      completedAt: message.completedAt || (realtime && realtime.completedAt),
+      stopped: message.stopped || (realtime && realtime.stopped),
+      errorCode: message.errorCode || (realtime && realtime.errorCode),
+      retryable: message.retryable ?? (realtime && realtime.retryable),
+      requestId: message.requestId || (realtime && realtime.requestId),
+    };
+  }
+  return {
+    terminal: terminalFromRealtime,
+    terminalSource: terminalFromRealtime ? "realtime" : undefined,
+    content: (realtime && realtime.content) || message.content || "",
+    answerContent: (realtime && realtime.answerContent) || message.content,
+    reasoningContent: (realtime && realtime.reasoningContent) || message.reasoningContent || "",
+    searchSources: (realtime && realtime.searchSources) || message.searchSources || [],
+    searchSourcesCount: (realtime && realtime.searchSourcesCount) ?? message.searchSourcesCount,
+    searchStatus: (realtime && realtime.searchStatus) ?? message.searchStatus,
+    activityStatus: (realtime && realtime.activityStatus) ?? message.activityStatus,
+    statusTimeline: (realtime && realtime.statusTimeline) || message.statusTimeline,
+    phase: (realtime && realtime.phase) || message.phase,
+    generationStartedAt: (realtime && realtime.generationStartedAt) || message.generationStartedAt || message.createdAt,
+    completedAt: (realtime && realtime.completedAt) || message.completedAt,
+    stopped: (realtime && realtime.stopped) || message.stopped,
+    errorCode: (realtime && realtime.errorCode) || message.errorCode,
+    retryable: (realtime && realtime.retryable) ?? message.retryable,
+    requestId: (realtime && realtime.requestId) || message.requestId,
+  };
+}
+`);
 source = source.replace('import { buildFallbackCompletedTimeline, getCompletedStatusLabel, type ChatStatusTimelineStep } from "./chatStatusTimeline";\n', `
 function getCompletedStatusLabel(t, generationStartedAt, completedAt) {
   if (generationStartedAt && completedAt) return t("chat.status.completedWithElapsed", { elapsed: String(Math.max(0, Math.floor((completedAt - generationStartedAt) / 1000))) + "秒" });
@@ -106,6 +158,11 @@ assert.deepEqual(kinds({ message: { completedAt: 2 }, isStreaming: false }), ["c
 assert.deepEqual(kinds({ message: {}, realtime: { content: "", searchStatus: "failed" }, isStreaming: true }), ["web_search:failed:false"], "failed search should not be active");
 assert.deepEqual(kinds({ message: { searchStatus: "searching" }, realtime: { errorCode: "provider_error", searchStatus: "searching" }, isStreaming: true }), ["error:failed:false"], "realtime error should suppress search badges");
 assert.deepEqual(kinds({ message: { completedAt: 2, searchSourcesCount: 1 }, isStreaming: false }), ["completed:completed:false"], "completed history with sources should use one final badge; sources move into the timeline");
+assert.deepEqual(kinds({
+  message: { completedAt: 20, phase: "completed", serverGenerationStatus: "completed", reasoningContent: "done", statusTimeline: [{ id: "reasoning:completed", kind: "reasoning", status: "completed", startedAt: 1, endedAt: 20 }] },
+  realtime: { content: "", phase: "reasoning", reasoningContent: "stale", activityStatus: { kind: "reasoning", status: "running", label: "正在推理" }, statusTimeline: [{ id: "reasoning:running", kind: "reasoning", status: "running", startedAt: 10 }] },
+  isStreaming: false,
+}), ["completed:completed:false"], "completed persisted message must suppress stale running realtime reasoning");
 
 fs.rmSync(tmpDir, { recursive: true, force: true });
 console.log("chat message status regression tests passed");
