@@ -143,7 +143,7 @@ export default function ChatActivityPanel({ message, model, onClose, variant = "
     ? "fixed inset-x-3 bottom-3 z-[220] flex max-h-[72vh] flex-col rounded-3xl border border-surface-border/70 bg-surface-elevated/95 p-5 shadow-2xl shadow-black/10 backdrop-blur-xl dark:shadow-black/40 lg:absolute lg:inset-y-0 lg:left-auto lg:right-0 lg:bottom-auto lg:h-full lg:w-[384px] lg:max-h-none lg:rounded-none lg:border-y-0 lg:border-r-0 lg:border-l lg:border-solid lg:border-surface-border/45 lg:bg-surface/85 lg:shadow-none"
     : variant === "embedded"
       ? "flex h-full min-h-[320px] flex-col rounded-2xl border border-surface-border/65 bg-surface/80 p-4"
-      : "mt-3 flex max-h-[520px] flex-col rounded-2xl border border-surface-border/65 bg-surface/80 p-4 shadow-sm";
+      : "flex max-h-[520px] flex-col rounded-2xl border border-surface-border/65 bg-surface/80 p-4 shadow-sm";
 
   return (
     <aside className={panelClassName} data-chat-activity-panel="true" data-chat-activity-variant={variant}>

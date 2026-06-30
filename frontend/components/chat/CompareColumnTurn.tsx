@@ -348,7 +348,7 @@ function CompareColumnTurn({
               </div>
             </div>
             <div className="flex min-w-0 flex-1 flex-col gap-1">
-              <div className={cn("max-w-full rounded-2xl rounded-bl-sm bg-surface-elevated px-4 py-3", isActivityOpen && activityLayout === "split" ? "w-full" : "w-fit") }>
+              <div className="w-full max-w-full bg-transparent px-0 py-1">
                 <div className={cn(isActivityOpen && activityLayout === "split" && "grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(260px,0.72fr)]") }>
                   <div className="min-w-0">
                     <div className="mb-2 flex items-center justify-between gap-2">
@@ -362,6 +362,7 @@ function CompareColumnTurn({
                       recoverEmptyContent
                       onRegenerate={onRegenerate}
                       onOpenActivity={() => onOpenActivity?.(msg, activityLayout)}
+                      inlineActivity={isActivityOpen && activityLayout === "inline" ? <ChatActivityPanel message={msg} model={model} onClose={() => onOpenActivity?.(msg, activityLayout)} variant="inline" /> : undefined}
                       shouldHydrateRichText={!blockRichTextHydration && (isNearViewport || forceHydrateRichText)}
                       priorityHydrateRichText={!blockRichTextHydration && (forceHydrateRichText || stabilizeInitialRichText || deferOffscreenRichTextHydration)}
                       allowRichLiteFallback={allowRichLiteFallback || forceStableRichLiteFallback || isInitialReadingAssistant || isViewedAssistant}
@@ -384,9 +385,6 @@ function CompareColumnTurn({
                   )}
                 </div>
               </div>
-              {isActivityOpen && activityLayout === "inline" && (
-                <ChatActivityPanel message={msg} model={model} onClose={() => onOpenActivity?.(msg, activityLayout)} variant="inline" />
-              )}
               {!isStreaming && (
                 <div className="flex items-center gap-2 px-2 opacity-0 transition-opacity group-hover:opacity-100">
                   <MessageActions

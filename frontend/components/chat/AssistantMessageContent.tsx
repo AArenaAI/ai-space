@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { ComponentType } from "react";
+import type { ComponentType, ReactNode } from "react";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { Message } from "@/lib/chatTypes";
 import { cn } from "@/lib/utils";
@@ -69,6 +69,7 @@ export function AssistantMessageContent({
   recoverEmptyContent = false,
   onRegenerate,
   onOpenActivity,
+  inlineActivity,
 }: {
   message: Message;
   isStreaming: boolean;
@@ -81,6 +82,7 @@ export function AssistantMessageContent({
   recoverEmptyContent?: boolean;
   onRegenerate?: () => void;
   onOpenActivity?: () => void;
+  inlineActivity?: ReactNode;
 }) {
   const { t } = useI18n();
   const terminalMessage = isTerminalMessage(message);
@@ -170,6 +172,7 @@ export function AssistantMessageContent({
           messageId={message.id}
           onOpenActivity={onOpenActivity}
           elapsedLabel={elapsedLabel}
+          inlineActivity={inlineActivity}
         />
       )}
       <MarkdownRenderer content={cleanAnswer} shouldHydrateRichText={shouldHydrateRichText} priorityHydrateRichText={priorityHydrateRichText} allowRichLiteFallback={allowRichLiteFallback} compactRichLitePreview={compactRichLitePreview} messageId={message.id} />

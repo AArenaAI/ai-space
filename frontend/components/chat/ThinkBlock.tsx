@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ChevronDown, Lightbulb } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
@@ -20,6 +20,7 @@ export function ThinkBlock({
   stabilizeCompletionHeight = false,
   onOpenActivity,
   elapsedLabel,
+  inlineActivity,
 }: {
   content: string;
   isThinking: boolean;
@@ -33,6 +34,7 @@ export function ThinkBlock({
   stabilizeCompletionHeight?: boolean;
   onOpenActivity?: () => void;
   elapsedLabel?: string;
+  inlineActivity?: ReactNode;
 }) {
   const { t } = useI18n();
   const shouldCollapseByDefault = !defaultExpanded && !isThinking && content.length >= collapseThreshold;
@@ -58,6 +60,11 @@ export function ThinkBlock({
           className="h-3.5 w-3.5 -rotate-90 shrink-0 text-text-tertiary/80"
         />
       </button>
+      {inlineActivity && (
+        <div className="mt-2">
+          {inlineActivity}
+        </div>
+      )}
 
     </div>
   );
