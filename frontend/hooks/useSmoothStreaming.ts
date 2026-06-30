@@ -146,5 +146,19 @@ export function useSmoothStreaming(text: string | undefined | null, isStreaming:
     };
   }, [isStreaming, animate]);
 
+  // 页面隐藏时 RAF 会停；切回前台后如果 target 仍领先 displayed，主动恢复追赶。
+  // 否则切屏期间没有新 chunk 触发 effect 时，文本会停在旧进度。
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const handleVisibilityChange = () => {
+      if (document.hidden) return;
+      if (displayedTextRef.current.length < targetTextRef.current.length && !animationFrameRef.current) {
+        animationFrameRef.current = requestAnimationFrame(animate);
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [animate]);
+
   return displayedText;
 }
