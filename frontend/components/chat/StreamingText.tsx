@@ -7,6 +7,7 @@ import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 import { useMessageStream } from "@/hooks/useMessageStream";
 import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
 import StreamingMarkdownView from "./StreamingMarkdownView";
+import { formatElapsedTime } from "@/lib/chatGenerationPhase";
 
 function StreamingCursor() {
   return <span className="inline-block w-[2px] h-[1.2em] bg-brand ml-0.5 animate-cursor-blink align-middle" />;
@@ -36,6 +37,16 @@ function buildCanonicalReasoningContent(content: string, reasoningContent?: stri
   if (!reasoningContent?.trim()) return content;
   if (/<think>[\s\S]*?<\/think>/i.test(content || "")) return content;
   return `<think>${reasoningContent}</think>\n\n${content || ""}`.trim();
+}
+
+function reasoningElapsedMs(realtime: ReturnType<typeof useMessageRealtime>) {
+  const reasoningSteps = realtime?.statusTimeline?.filter((step) => step.kind === "reasoning") || [];
+  if (reasoningSteps.length) {
+    return reasoningSteps.reduce((sum, step) => sum + Math.max(0, (step.endedAt || Date.now()) - step.startedAt), 0);
+  }
+  const start = realtime?.generationStartedAt || realtime?.updatedAt;
+  const end = realtime?.completedAt || Date.now();
+  return start ? Math.max(0, end - start) : 0;
 }
 
 export function StreamingText({
@@ -91,6 +102,7 @@ export function StreamingText({
   const hasContent = !!parsed.answer.trim();
   const Host = as;
   const [reasoningExpanded, setReasoningExpanded] = useState(true);
+  const elapsedLabel = hasReason ? formatElapsedTime(reasoningElapsedMs(realtime), t) : "";
 
   return (
     <Host className={className}>
@@ -102,7 +114,7 @@ export function StreamingText({
             onClick={() => onOpenActivity?.()}
             className="inline-flex max-w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
           >
-            <span className="text-xs font-medium">思考中</span>
+            <span className="text-xs font-medium">思考中{elapsedLabel ? ` · ${elapsedLabel}` : ""}</span>
             <ChevronDown
               className="h-3.5 w-3.5 -rotate-90 shrink-0 text-text-tertiary/80"
             />

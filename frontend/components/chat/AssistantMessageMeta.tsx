@@ -152,7 +152,7 @@ export function AssistantMessageMeta({ msg, isStreaming, model, compact = false,
   if (!model) return null;
   const activeStatus = statuses.find((status) => status.key === activeStatusKey);
   const canShowActiveStatusDetails = Boolean(!inlineStatus && activeStatus && (activeStatus.statusTimeline?.length || msg.tokensUsed || activeStatus.label));
-  const visibleStatuses = inlineStatus ? statuses.filter((status) => status.phase !== "completed") : statuses;
+  const visibleStatuses = inlineStatus ? [] : statuses;
 
   return (
     <div className={cn("relative flex items-center gap-2", inlineStatus ? "justify-start" : "justify-between", compact ? "mb-0" : "mb-2")} onMouseLeave={() => setActiveStatusKey(null)}>

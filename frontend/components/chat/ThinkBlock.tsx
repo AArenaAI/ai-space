@@ -19,6 +19,7 @@ export function ThinkBlock({
   messageId,
   stabilizeCompletionHeight = false,
   onOpenActivity,
+  elapsedLabel,
 }: {
   content: string;
   isThinking: boolean;
@@ -31,6 +32,7 @@ export function ThinkBlock({
   messageId?: string | number;
   stabilizeCompletionHeight?: boolean;
   onOpenActivity?: () => void;
+  elapsedLabel?: string;
 }) {
   const { t } = useI18n();
   const shouldCollapseByDefault = !defaultExpanded && !isThinking && content.length >= collapseThreshold;
@@ -50,7 +52,7 @@ export function ThinkBlock({
         className="inline-flex max-w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
       >
         <span className="text-xs font-medium">
-          {isThinking ? "思考中" : "已思考"}
+          {isThinking ? "思考中" : "已思考"}{elapsedLabel ? ` · ${elapsedLabel}` : ""}
         </span>
         <ChevronDown
           className="h-3.5 w-3.5 -rotate-90 shrink-0 text-text-tertiary/80"

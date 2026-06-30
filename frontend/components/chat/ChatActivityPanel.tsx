@@ -30,8 +30,8 @@ function parseTimelineValue(value: unknown): ChatStatusTimelineStep[] | undefine
 }
 
 function mergeTimeline(message: Message, realtime: ReturnType<typeof useMessageRealtime>, snapshotTimeline?: ChatStatusTimelineStep[]) {
-  if (snapshotTimeline?.length) return snapshotTimeline;
   if (realtime?.statusTimeline?.length) return realtime.statusTimeline;
+  if (snapshotTimeline?.length) return snapshotTimeline;
   return message.statusTimeline;
 }
 
@@ -116,15 +116,19 @@ export default function ChatActivityPanel({ message, model, onClose }: { message
     const token = window.localStorage.getItem("token");
     const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
     let cancelled = false;
-    fetch(`/api/tasks/${taskId}`, { headers, credentials: "include" })
-      .then((res) => res.ok ? res.json() : undefined)
-      .then((data) => {
-        if (cancelled || !data) return;
-        const timeline = parseTimelineValue(data?.message?.status_timeline || data?.task?.status_timeline);
-        if (timeline?.length) setSnapshotTimeline(timeline);
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
+    const loadSnapshot = () => {
+      fetch(`/api/tasks/${taskId}`, { headers, credentials: "include" })
+        .then((res) => res.ok ? res.json() : undefined)
+        .then((data) => {
+          if (cancelled || !data) return;
+          const timeline = parseTimelineValue(data?.message?.status_timeline || data?.task?.status_timeline);
+          if (timeline?.length) setSnapshotTimeline(timeline);
+        })
+        .catch(() => {});
+    };
+    loadSnapshot();
+    const timer = window.setInterval(loadSnapshot, 1000);
+    return () => { cancelled = true; window.clearInterval(timer); };
   }, [message?.generationTaskId, message?.id]);
   if (!message) return null;
   const sources = Array.from(new Map((realtime?.searchSources || message.searchSources || []).map((source) => [source.url || source.title, source])).values());
