@@ -839,14 +839,14 @@
 
 @keyframes chat-thinking-dot {
   0%,
-  80%,
+  60%,
   100% {
     transform: translateY(0);
-    opacity: 0.45;
+    opacity: 0.5;
   }
-  40% {
+  30% {
     transform: translateY(-3px);
-    opacity: 0.95;
+    opacity: 1;
   }
 }
 
