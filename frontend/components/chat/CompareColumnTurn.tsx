@@ -13,6 +13,8 @@ import { getModelAvatarMeta } from "@/lib/models/modelAvatars";
 import { AssistantMessageMeta } from "./AssistantMessageMeta";
 import { AssistantMessageContent } from "./AssistantMessageContent";
 import MessageActions from "./MessageActions";
+import ChatActivityPanel from "./ChatActivityPanel";
+import type { CompareActivityLayout } from "./ChatCompareActivityLayoutControl";
 import CompareEmptySlot from "./CompareEmptySlot";
 import CompareLoadingSlot from "./CompareLoadingSlot";
 import CompareUserMessageBubble from "./CompareUserMessageBubble";
@@ -71,6 +73,9 @@ type CompareColumnTurnProps = {
   onForkCompare?: (messageId: number) => void;
   onSaveToNote?: (content: string) => void;
   onAssistantViewed?: (messageId: string) => void;
+  onOpenActivity?: (message: Message, layout: CompareActivityLayout) => void;
+  isActivityOpen?: boolean;
+  activityLayout?: CompareActivityLayout;
   isInitialReadingAssistant?: boolean;
   isViewedAssistant?: boolean;
   historyPrependSettling?: boolean;
@@ -109,6 +114,9 @@ function CompareColumnTurn({
   onForkCompare,
   onSaveToNote,
   onAssistantViewed,
+  onOpenActivity,
+  isActivityOpen = false,
+  activityLayout = "inline",
   isInitialReadingAssistant = false,
   isViewedAssistant = false,
   historyPrependSettling = false,
@@ -339,29 +347,51 @@ function CompareColumnTurn({
               </div>
             </div>
             <div className="flex min-w-0 flex-1 flex-col gap-1">
-              <div className="w-fit max-w-full rounded-2xl rounded-bl-sm bg-surface-elevated px-4 py-3">
-                {model && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} />}
-                <AssistantMessageContent
-                  message={msg}
-                  isStreaming={isStreaming}
-                  MarkdownRenderer={MarkdownRenderer}
-                  recoverEmptyContent
-                  onRegenerate={onRegenerate}
-                  shouldHydrateRichText={!blockRichTextHydration && (isNearViewport || forceHydrateRichText)}
-                  priorityHydrateRichText={!blockRichTextHydration && (forceHydrateRichText || stabilizeInitialRichText || deferOffscreenRichTextHydration)}
-                  allowRichLiteFallback={allowRichLiteFallback || forceStableRichLiteFallback || isInitialReadingAssistant || isViewedAssistant}
-                  compactRichLitePreview={!historyPrependSettling && !forceStableRichLiteFallback && !isInitialReadingAssistant && !isViewedAssistant}
-                />
-                {msg.stopped && onContinueGenerate && (
-                  <button
-                    onClick={onContinueGenerate}
-                    className="mt-3 flex items-center gap-1.5 rounded-lg border border-surface-border px-3 py-1.5 text-sm text-text-secondary transition-colors hover:bg-surface-card hover:text-text-primary"
-                  >
-                    <Play className="h-3.5 w-3.5" />
-                    {t("chat.action.continueGenerate")}
-                  </button>
-                )}
+              <div className={cn("max-w-full rounded-2xl rounded-bl-sm bg-surface-elevated px-4 py-3", isActivityOpen && activityLayout === "split" ? "w-full" : "w-fit") }>
+                <div className={cn(isActivityOpen && activityLayout === "split" && "grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(260px,0.72fr)]") }>
+                  <div className="min-w-0">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      {model && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} compact />}
+                      <button
+                        type="button"
+                        onClick={() => onOpenActivity?.(msg, activityLayout)}
+                        className="shrink-0 rounded-lg px-1.5 py-1 text-[11px] font-medium text-text-tertiary transition-colors hover:bg-surface-card hover:text-text-secondary"
+                      >
+                        思考与来源
+                      </button>
+                    </div>
+                    <AssistantMessageContent
+                      message={msg}
+                      isStreaming={isStreaming}
+                      MarkdownRenderer={MarkdownRenderer}
+                      recoverEmptyContent
+                      onRegenerate={onRegenerate}
+                      onOpenActivity={() => onOpenActivity?.(msg, activityLayout)}
+                      shouldHydrateRichText={!blockRichTextHydration && (isNearViewport || forceHydrateRichText)}
+                      priorityHydrateRichText={!blockRichTextHydration && (forceHydrateRichText || stabilizeInitialRichText || deferOffscreenRichTextHydration)}
+                      allowRichLiteFallback={allowRichLiteFallback || forceStableRichLiteFallback || isInitialReadingAssistant || isViewedAssistant}
+                      compactRichLitePreview={!historyPrependSettling && !forceStableRichLiteFallback && !isInitialReadingAssistant && !isViewedAssistant}
+                    />
+                    {msg.stopped && onContinueGenerate && (
+                      <button
+                        onClick={onContinueGenerate}
+                        className="mt-3 flex items-center gap-1.5 rounded-lg border border-surface-border px-3 py-1.5 text-sm text-text-secondary transition-colors hover:bg-surface-card hover:text-text-primary"
+                      >
+                        <Play className="h-3.5 w-3.5" />
+                        {t("chat.action.continueGenerate")}
+                      </button>
+                    )}
+                  </div>
+                  {isActivityOpen && activityLayout === "split" && (
+                    <div className="min-w-0">
+                      <ChatActivityPanel message={msg} model={model} onClose={() => onOpenActivity?.(msg, activityLayout)} variant="embedded" />
+                    </div>
+                  )}
+                </div>
               </div>
+              {isActivityOpen && activityLayout === "inline" && (
+                <ChatActivityPanel message={msg} model={model} onClose={() => onOpenActivity?.(msg, activityLayout)} variant="inline" />
+              )}
               {!isStreaming && (
                 <div className="flex items-center gap-2 px-2 opacity-0 transition-opacity group-hover:opacity-100">
                   <MessageActions

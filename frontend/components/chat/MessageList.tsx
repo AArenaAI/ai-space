@@ -73,6 +73,7 @@ import ChatHistoryLoadingVirtuoso from "./ChatHistoryLoadingVirtuoso";
 import ChatEmptyState from "./ChatEmptyState";
 import ChatDeleteMessageDialog from "./ChatDeleteMessageDialog";
 import ChatActivityPanel from "./ChatActivityPanel";
+import { useCompareActivityLayout, type CompareActivityLayout } from "./ChatCompareActivityLayoutControl";
 import { parseThinkContent, sanitizeContent, isMessageGenerating } from "@/lib/chatContent";
 
 
@@ -283,6 +284,7 @@ function MessageList({
   const historyRichLiteFallbackTimerRef = useRef<number>(0);
   const [activeOverviewMessageId, setActiveOverviewMessageId] = useState<string | null>(null);
   const [activeActivityMessageId, setActiveActivityMessageId] = useState<string | null>(null);
+  const [compareActivityLayout, setCompareActivityLayout] = useCompareActivityLayout();
   const overviewJumpActiveRef = useRef<{ id: string; until: number } | null>(null);
   const overviewBottomLockUntilRef = useRef(0);
   const userOverviewRafRef = useRef<number>(0);
@@ -1081,6 +1083,9 @@ function MessageList({
     return messages.find((message) => String(message.id) === activeActivityMessageId) || visibleMessages.find((message) => String(message.id) === activeActivityMessageId) || null;
   }, [activeActivityMessageId, messages, visibleMessages]);
   const activeActivityModel = activeActivityMessage?.model ? models.find((model) => model.id === activeActivityMessage.model) : undefined;
+  const handleCompareOpenActivity = useCallback((message: Message, layout: CompareActivityLayout) => {
+    setActiveActivityMessageId((current) => current === String(message.id) && layout !== "dock" ? null : String(message.id));
+  }, []);
 
   useEffect(() => {
     onActivityOpenChange?.(!isCompare && Boolean(activeActivityMessage));
@@ -2050,6 +2055,8 @@ function MessageList({
           closeLabel={t("chat.closeCompareColumn")}
           onModelChange={onCompareModelChange}
           onExitCompare={onExitCompare}
+          activityLayout={compareActivityLayout}
+          onActivityLayoutChange={setCompareActivityLayout}
         />
         {/* 滚动内容区域：对比模式和普通聊天共享普通 DOM scroller */}
         {messages.length === 0 ? (
@@ -2072,7 +2079,7 @@ function MessageList({
         ) : (
           <div
             ref={(el) => handleVirtuosoScrollerRef(el)}
-            className="chat-history-scroll-container"
+            className={cn("chat-history-scroll-container transition-[margin-right] duration-200 ease-out", activeActivityMessage && compareActivityLayout === "dock" && "lg:mr-[384px]")}
             style={{
               height: "100%",
               overflowY: "auto",
@@ -2119,6 +2126,9 @@ function MessageList({
                   onForkCompare={onForkCompare}
                   onSaveToNote={onSaveAssistantToNote}
                   onAssistantViewed={handleAssistantViewed}
+                  onOpenActivity={handleCompareOpenActivity}
+                  activeActivityMessageId={activeActivityMessageId}
+                  activityLayout={compareActivityLayout}
                   initialReadingAssistantIds={renderedWindowStableAssistantIds}
                   viewedAssistantIds={viewedAssistantIds}
                   historyPrependSettling={historyPrependSettling}
@@ -2131,6 +2141,17 @@ function MessageList({
               ))}
               <div style={{ height: CHAT_BOTTOM_SPACER + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0) }} aria-hidden="true" />
             </div>
+          </div>
+        )}
+
+        {activeActivityMessage && compareActivityLayout === "dock" && (
+          <div className="absolute bottom-0 right-0 top-28 z-20 hidden w-[384px] lg:block">
+            <ChatActivityPanel
+              message={activeActivityMessage}
+              model={activeActivityModel}
+              onClose={() => setActiveActivityMessageId(null)}
+              variant="embedded"
+            />
           </div>
         )}
 

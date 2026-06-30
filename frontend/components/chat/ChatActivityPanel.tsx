@@ -91,7 +91,7 @@ function countMarkdownSources(content?: string) {
   return urls.size;
 }
 
-export default function ChatActivityPanel({ message, model, onClose }: { message?: Message | null; model?: ChatModel; onClose: () => void }) {
+export default function ChatActivityPanel({ message, model, onClose, variant = "docked" }: { message?: Message | null; model?: ChatModel; onClose: () => void; variant?: "docked" | "inline" | "embedded" }) {
   const { t } = useI18n();
   const [reasoningOpen, setReasoningOpen] = useState(true);
   const [snapshotTimeline, setSnapshotTimeline] = useState<ChatStatusTimelineStep[] | undefined>();
@@ -139,9 +139,14 @@ export default function ChatActivityPanel({ message, model, onClose }: { message
   const elapsedSeconds = Math.max(0, Math.round((elapsedEndAt - elapsedStartAt) / 1000));
 
   const timelineStartAt = timeline[0]?.startedAt || message.generationStartedAt || message.createdAt;
+  const panelClassName = variant === "docked"
+    ? "fixed inset-x-3 bottom-3 z-[220] flex max-h-[72vh] flex-col rounded-3xl border border-surface-border/70 bg-surface-elevated/95 p-5 shadow-2xl shadow-black/10 backdrop-blur-xl dark:shadow-black/40 lg:absolute lg:inset-y-0 lg:left-auto lg:right-0 lg:bottom-auto lg:h-full lg:w-[384px] lg:max-h-none lg:rounded-none lg:border-y-0 lg:border-r-0 lg:border-l lg:border-solid lg:border-surface-border/45 lg:bg-surface/85 lg:shadow-none"
+    : variant === "embedded"
+      ? "flex h-full min-h-[320px] flex-col rounded-2xl border border-surface-border/65 bg-surface/80 p-4"
+      : "mt-3 flex max-h-[520px] flex-col rounded-2xl border border-surface-border/65 bg-surface/80 p-4 shadow-sm";
 
   return (
-    <aside className="fixed inset-x-3 bottom-3 z-[220] flex max-h-[72vh] flex-col rounded-3xl border border-surface-border/70 bg-surface-elevated/95 p-5 shadow-2xl shadow-black/10 backdrop-blur-xl dark:shadow-black/40 lg:absolute lg:inset-y-0 lg:left-auto lg:right-0 lg:bottom-auto lg:h-full lg:w-[384px] lg:max-h-none lg:rounded-none lg:border-y-0 lg:border-r-0 lg:border-l lg:border-solid lg:border-surface-border/45 lg:bg-surface/85 lg:shadow-none" data-chat-activity-panel="true">
+    <aside className={panelClassName} data-chat-activity-panel="true" data-chat-activity-variant={variant}>
       <div className="mb-5 flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-base font-semibold text-text-primary">思考与来源{active ? ` · ${elapsedSeconds}s` : ""}</div>
