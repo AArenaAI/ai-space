@@ -10,6 +10,7 @@ import { getOrderedTimelineSteps, getTimelineStepLabel, type ChatStatusTimelineS
 import { formatElapsedTime } from "@/lib/chatGenerationPhase";
 import { resolveChatMessageRuntimeState } from "@/lib/chatMessageRuntimeState";
 import { ensureTerminalAnswerStep, isLowSignalCompletedActivityStep } from "@/lib/chatActivityTimeline";
+import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
 
 function statusIcon(step: ChatStatusTimelineStep) {
   if (step.status === "failed") return <AlertCircle className="h-3.5 w-3.5 text-red-500" />;
@@ -129,9 +130,10 @@ export default function ChatActivityPanel({ message, model, onClose }: { message
     .map((step) => step.kind === "web_search" && !step.count && inferredSourceCount ? { ...step, count: inferredSourceCount } : step)
     .filter((step) => !isLowSignalCompletedActivityStep(step));
   const files = message.files || [];
-  const reasoning = runtimeState.reasoningContent.trim();
-  const reasoningSections = formatReasoningSections(reasoning);
   const active = !runtimeState.terminal && !((runtimeState.completedAt) || runtimeState.stopped || runtimeState.errorCode);
+  const smoothReasoning = useSmoothStreaming(runtimeState.reasoningContent, active, message.id ? `${message.id}:activity-reasoning` : undefined);
+  const reasoning = (active ? smoothReasoning : runtimeState.reasoningContent).trim();
+  const reasoningSections = formatReasoningSections(reasoning);
   const elapsedEndAt = runtimeState.completedAt || Date.now();
   const elapsedStartAt = runtimeState.generationStartedAt || message.createdAt || Date.now();
   const elapsedSeconds = Math.max(0, Math.round((elapsedEndAt - elapsedStartAt) / 1000));
