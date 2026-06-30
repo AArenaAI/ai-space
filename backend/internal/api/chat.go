@@ -1972,6 +1972,42 @@ func saveChatStatusTimeline(steps []chatStatusTimelineStep) string {
 	return string(out)
 }
 
+func isDeprecatedChatTimelineStep(step chatStatusTimelineStep) bool {
+	if step.Status != "completed" {
+		return false
+	}
+	return step.Kind == "waiting_provider" || step.Kind == "finalizing" || step.Kind == "streaming_answer"
+}
+
+func sanitizeChatStatusTimelineSteps(steps []chatStatusTimelineStep) []chatStatusTimelineStep {
+	if len(steps) == 0 {
+		return steps
+	}
+	cleaned := make([]chatStatusTimelineStep, 0, len(steps))
+	for _, step := range steps {
+		if isDeprecatedChatTimelineStep(step) {
+			continue
+		}
+		cleaned = append(cleaned, step)
+	}
+	return cleaned
+}
+
+func sanitizeChatStatusTimelineJSON(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return ""
+	}
+	steps := loadChatStatusTimeline(raw)
+	if len(steps) == 0 {
+		return raw
+	}
+	cleaned := sanitizeChatStatusTimelineSteps(steps)
+	if len(cleaned) == 0 {
+		return ""
+	}
+	return saveChatStatusTimeline(cleaned)
+}
+
 func chatTimelineEventID(kind string, status string) string {
 	return kind + ":" + status
 }
@@ -2096,7 +2132,11 @@ func (h *ChatHandler) updateStatusTimelineForTaskEvent(task *models.AIBackground
 	if len(steps) == 0 {
 		return
 	}
-	timelineJSON := saveChatStatusTimeline(steps)
+	steps = sanitizeChatStatusTimelineSteps(steps)
+	timelineJSON := ""
+	if len(steps) > 0 {
+		timelineJSON = saveChatStatusTimeline(steps)
+	}
 	h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", task.ID).Update("status_timeline", timelineJSON)
 	h.db.Model(&models.Message{}).Where("id = ?", assistantMessageID).Update("status_timeline", timelineJSON)
 	task.StatusTimeline = timelineJSON

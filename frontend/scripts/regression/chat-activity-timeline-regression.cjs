@@ -15,37 +15,14 @@ const compiled = ts.transpileModule(source, {
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "chat-activity-timeline-"));
 const tmpFile = path.join(tmpDir, "chatActivityTimeline.cjs");
 fs.writeFileSync(tmpFile, compiled, "utf8");
-const { ensureTerminalAnswerStep, isLowSignalCompletedActivityStep } = require(tmpFile);
-
-const deepseekTimelineWithoutAnswer = [
-  { id: "waiting_provider:completed", kind: "waiting_provider", status: "completed", startedAt: 1000, endedAt: 11000 },
-  { id: "web_search:completed", kind: "web_search", status: "completed", startedAt: 11000, endedAt: 19000, count: 8 },
-  { id: "reasoning:completed", kind: "reasoning", status: "completed", startedAt: 19000, endedAt: 34000 },
-];
-const completed = ensureTerminalAnswerStep({
-  timeline: deepseekTimelineWithoutAnswer,
-  hasAnswer: true,
-  completedAt: 36000,
-  generationStartedAt: 1000,
-});
-assert.deepEqual(completed.map((step) => `${step.kind}:${step.status}`), [
-  "waiting_provider:completed",
-  "web_search:completed",
-  "reasoning:completed",
-  "streaming_answer:completed",
-]);
-assert.equal(completed.at(-1).startedAt, 34000);
-assert.equal(completed.at(-1).endedAt, 36000);
-
-const alreadyHasAnswer = ensureTerminalAnswerStep({
-  timeline: [{ id: "streaming_answer:completed", kind: "streaming_answer", status: "completed", startedAt: 1, endedAt: 1 }],
-  hasAnswer: true,
-  completedAt: 2,
-});
-assert.equal(alreadyHasAnswer.length, 1, "should not duplicate existing answer completion step");
+const { isLowSignalCompletedActivityStep } = require(tmpFile);
 
 assert.equal(isLowSignalCompletedActivityStep({ id: "streaming_answer:completed", kind: "streaming_answer", status: "completed", startedAt: 10, endedAt: 10 }, 10), true, "answer completion is low-signal in the user-facing Activity panel");
-assert.equal(isLowSignalCompletedActivityStep({ id: "waiting_provider:completed", kind: "waiting_provider", status: "completed", startedAt: 10, endedAt: 10 }, 10), true, "short waiting provider remains low-signal");
+assert.equal(isLowSignalCompletedActivityStep({ id: "waiting_provider:completed", kind: "waiting_provider", status: "completed", startedAt: 10, endedAt: 10 }, 10), true, "completed waiting provider is low-signal");
+assert.equal(isLowSignalCompletedActivityStep({ id: "finalizing:completed", kind: "finalizing", status: "completed", startedAt: 10, endedAt: 20_000 }, 20_000), true, "completed finalizing is low-signal even when long");
+assert.equal(isLowSignalCompletedActivityStep({ id: "web_search:completed", kind: "web_search", status: "completed", startedAt: 10, endedAt: 10 }, 10), false, "search completion remains user-facing because it carries source count/context");
+assert.equal(isLowSignalCompletedActivityStep({ id: "reasoning:completed", kind: "reasoning", status: "completed", startedAt: 10, endedAt: 10 }, 10), false, "reasoning remains user-facing");
+assert.equal(isLowSignalCompletedActivityStep({ id: "streaming_answer:running", kind: "streaming_answer", status: "running", startedAt: 10 }, 20_000), false, "running answer generation remains useful while active");
 
 fs.rmSync(tmpDir, { recursive: true, force: true });
 console.log("chat activity timeline regression tests passed");

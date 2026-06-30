@@ -450,6 +450,7 @@ func (h *ConversationHandler) buildMessagesWithGroupPayload(conversationID uint,
 
 	result := make([]MessageWithGroup, len(messages))
 	for i, m := range messages {
+		m.StatusTimeline = sanitizeChatStatusTimelineJSON(m.StatusTimeline)
 		result[i] = MessageWithGroup{
 			Message:                m,
 			GroupID:                m.GroupID,
@@ -584,7 +585,7 @@ func (h *ConversationHandler) buildLastAssistantStatusPayload(messages []models.
 			"last_sequence_number": lastSequence,
 			"completed_at":         task.CompletedAt,
 			"error_message":        task.ErrorMessage,
-			"status_timeline":      task.StatusTimeline,
+			"status_timeline":      sanitizeChatStatusTimelineJSON(task.StatusTimeline),
 		}
 	}
 	if status == "" {
@@ -641,7 +642,7 @@ func (h *ConversationHandler) GetMessage(c *gin.Context) {
 			"last_sequence_number": lastSequence,
 			"completed_at":         task.CompletedAt,
 			"error_message":        task.ErrorMessage,
-			"status_timeline":      task.StatusTimeline,
+			"status_timeline":      sanitizeChatStatusTimelineJSON(task.StatusTimeline),
 		}
 	}
 	if status == "" {

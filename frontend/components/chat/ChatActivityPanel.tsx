@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 import { getOrderedTimelineSteps, type ChatStatusTimelineStep } from "@/lib/chatStatusTimeline";
 import { resolveChatMessageRuntimeState } from "@/lib/chatMessageRuntimeState";
-import { ensureTerminalAnswerStep, isLowSignalCompletedActivityStep } from "@/lib/chatActivityTimeline";
+import { isLowSignalCompletedActivityStep } from "@/lib/chatActivityTimeline";
 import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
 
 function statusIcon(step: ChatStatusTimelineStep) {
@@ -142,12 +142,7 @@ export default function ChatActivityPanel({ message, model, onClose, variant = "
   const runtimeState = resolveChatMessageRuntimeState({ message, realtime, snapshotTimeline });
   const sources = Array.from(new Map(runtimeState.searchSources.map((source) => [source.url || source.title, source])).values());
   const inferredSourceCount = sources.length || countMarkdownSources(runtimeState.content);
-  const timeline = ensureTerminalAnswerStep({
-    timeline: getOrderedTimelineSteps(runtimeState.statusTimeline),
-    hasAnswer: Boolean((runtimeState.answerContent || runtimeState.content || "").trim()),
-    completedAt: runtimeState.completedAt,
-    generationStartedAt: runtimeState.generationStartedAt || message.createdAt,
-  })
+  const timeline = getOrderedTimelineSteps(runtimeState.statusTimeline)
     .map((step) => step.kind === "web_search" && !step.count && inferredSourceCount ? { ...step, count: inferredSourceCount } : step)
     .filter((step) => !isLowSignalCompletedActivityStep(step));
   const files = message.files || [];
