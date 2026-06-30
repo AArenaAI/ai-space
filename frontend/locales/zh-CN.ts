@@ -50,6 +50,7 @@ const translations: Record<string, string> = {
   "chat.renderRichText": "渲染富文本",
   "chat.uploadFailed": "上传失败",
   "chat.error.networkInline": "网络连接中断，刚才的回复没有生成完成。",
+  "chat.error.cancelledInline": "生成已中断，可以重新生成这条回答。",
   "chat.error.balanceInline": "当前余额不足，请充值后再试。",
   "chat.error.genericInline": "这次回复生成失败，可以重新生成试试。",
   "chat.attachments": "附件",

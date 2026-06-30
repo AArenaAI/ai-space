@@ -13,27 +13,15 @@ import { ThinkBlock } from "./ThinkBlock";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 import { formatElapsedTime } from "@/lib/chatGenerationPhase";
 import { isTerminalMessage, resolveChatMessageRuntimeState, type ChatMessageRuntimeState } from "@/lib/chatMessageRuntimeState";
+import { getAssistantFailureCopy, isAssistantFailureState } from "@/lib/chatErrorState";
 
 type MarkdownRendererComponent = ComponentType<{ content: string; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean; allowRichLiteFallback?: boolean; compactRichLitePreview?: boolean; messageId?: string | number }>;
 
 const JUST_COMPLETED_REASONING_EXPAND_MS = 5 * 60 * 1000;
 const JUST_COMPLETED_STREAMING_HOLD_MS = 800;
 
-function getAssistantErrorCopy(message: Message, t: (key: string, params?: Record<string, string>) => string) {
-  if (!(message.errorCode || message.serverGenerationStatus === "failed")) return null;
-  const raw = (message.content || message.errorCode || "").trim();
-  const normalized = raw.toLowerCase();
-  if (!raw || normalized === "failed to fetch" || normalized.includes("networkerror") || normalized.includes("load failed")) {
-    return t("chat.error.networkInline");
-  }
-  if (normalized.includes("insufficient") || normalized.includes("balance") || normalized.includes("credit") || normalized.includes("quota")) {
-    return t("chat.error.balanceInline");
-  }
-  return raw.length > 96 ? t("chat.error.genericInline") : raw;
-}
-
 function AssistantInlineError({ message, onRegenerate, t }: { message: Message; onRegenerate?: () => void; t: (key: string, params?: Record<string, string>) => string }) {
-  const copy = getAssistantErrorCopy(message, t) || t("chat.error.genericInline");
+  const copy = getAssistantFailureCopy(message, t) || t("chat.error.genericInline");
   return (
     <div className="my-1 inline-flex max-w-full items-center gap-2 rounded-xl border border-red-500/10 bg-red-500/[0.045] px-3 py-2 text-sm leading-relaxed text-text-secondary dark:bg-red-400/[0.07]">
       <AlertCircle className="h-4 w-4 shrink-0 text-red-500/70" />
@@ -138,8 +126,9 @@ export function AssistantMessageContent({
     return () => window.clearTimeout(timer);
   }, [finalizingRealtime, generating, message.id, runtimeState.reasoningContent]);
 
-  if (message.errorCode || message.serverGenerationStatus === "failed" || runtimeState.errorCode || runtimeState.phase === "failed") {
-    return <AssistantInlineError message={{ ...message, content: runtimeState.content || message.content, errorCode: runtimeState.errorCode || message.errorCode }} onRegenerate={onRegenerate} t={t} />;
+  const failureMessage = { ...message, content: runtimeState.content || message.content, errorCode: runtimeState.errorCode || message.errorCode, phase: runtimeState.phase };
+  if (isAssistantFailureState(failureMessage)) {
+    return <AssistantInlineError message={failureMessage} onRegenerate={onRegenerate} t={t} />;
   }
 
   if (shouldRenderStreamingText) {

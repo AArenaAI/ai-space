@@ -9,6 +9,7 @@ import { getModelAvatarMeta } from "@/lib/models/modelAvatars";
 import type { InferredGroup } from "@/lib/groups";
 import { isMessageGenerating } from "@/lib/chatContent";
 import { isTerminalMessage, resolveChatMessageRuntimeState } from "@/lib/chatMessageRuntimeState";
+import { isAssistantFailureState } from "@/lib/chatErrorState";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 import { AssistantMessageMeta } from "./AssistantMessageMeta";
 import MessageActions from "./MessageActions";
@@ -147,8 +148,10 @@ function MessageRow({
   const blockRichTextHydration = historyPrependSettling || (deferRichTextHydration && !canBypassBrowsingHydrationDefer);
   const forceStableRichLiteFallback = blockRichTextHydration || stabilizeInitialRichText || (forceHydrateRichText && !isInViewport);
   const isGenerating = !isUser && isMessageGenerating({ ...msg, ...runtimeState }, isStreaming);
+  const assistantFailureMessage = { ...msg, content: runtimeState.content || msg.content, errorCode: runtimeState.errorCode || msg.errorCode, phase: runtimeState.phase };
+  const isAssistantFailure = !isUser && isAssistantFailureState(assistantFailureMessage);
   const isEmptyPendingAssistant = !isUser && isGenerating && !realtimeHasVisiblePayload && !msg.content?.trim() && !msg.reasoningContent?.trim() && !runtimeState.terminal;
-  const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
+  const canRegenerate = !isUser && !isAssistantFailure && !msg.stopped && (isLast || !msg.content) && !isLoading && !isGenerating;
   const suppressAppearAnimation = historyPrependSettling || deferRichTextHydration || isGenerating || (!isUser && !msg.content?.trim() && !runtimeState.terminal);
   const assistantAvatarMeta = getModelAvatarMeta(model || msg.model || "AI");
   const rowProfileDetailEnabled = typeof window !== "undefined" && Boolean((window as Window & { __AI_SPACE_CHAT_ROW_PROFILE_DETAIL?: boolean }).__AI_SPACE_CHAT_ROW_PROFILE_DETAIL);
@@ -372,7 +375,7 @@ function MessageRow({
               ) : (
                 <>
                   <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={!blockRichTextHydration && (isNearViewport || forceHydrateRichText)} priorityHydrateRichText={!blockRichTextHydration && (forceHydrateRichText || stabilizeInitialRichText || deferOffscreenRichTextHydration)} allowRichLiteFallback={allowRichLiteFallback || forceStableRichLiteFallback || isInitialReadingAssistant || isViewedAssistant} compactRichLitePreview={!historyPrependSettling && !forceStableRichLiteFallback && !isInitialReadingAssistant && !isViewedAssistant} recoverEmptyContent={isLast} onRegenerate={onRegenerate} onOpenActivity={() => onOpenActivity?.(msg)} />
-                  {msg.stopped && onContinueGenerate && (
+                  {msg.stopped && !isAssistantFailure && msg.content?.trim() && onContinueGenerate && (
                     <button
                       onClick={onContinueGenerate}
                       className="mt-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-text-secondary hover:text-text-primary hover:bg-surface-card border border-surface-border transition-colors"

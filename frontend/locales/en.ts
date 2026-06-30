@@ -50,6 +50,7 @@ const translations: Record<string, string> = {
   "chat.renderRichText": "Render rich text",
   "chat.uploadFailed": "Upload failed",
   "chat.error.networkInline": "The connection was interrupted and this reply was not completed.",
+  "chat.error.cancelledInline": "Generation was interrupted. You can regenerate this reply.",
   "chat.error.balanceInline": "Your balance is insufficient. Please top up and try again.",
   "chat.error.genericInline": "This reply failed to generate. You can try regenerating it.",
   "chat.attachments": "Attachments",
