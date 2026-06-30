@@ -375,6 +375,134 @@ task stream completed 后，background polling / final reconciliation 同步 bac
 
 ---
 
+## 用例 11：右侧 Activity 面板 active reasoning 平滑流式
+
+### 场景
+
+右侧 `思考与来源` 面板打开时，reasoning 内容来自 provider/task chunk。若面板直接渲染累计 `reasoningContent`，会表现为一段一段跳；应和主消息流式一样小步追赶。
+
+### 操作
+
+1. 使用 deterministic fixture：
+
+```text
+/test-chat-streaming-state?activity_reasoning_long=1&activity_panel_open=1
+```
+
+2. 打开页面后等待 `mixed-held` / active reasoning。
+3. 每 60~80ms 采样 `[data-chat-activity-panel="true"]` 中 reasoning 文本长度。
+4. 记录：
+   - length 序列
+   - 最大单次正向增长 `maxJump`
+   - distinct length 数量
+   - console/page errors
+
+### 预期
+
+- reasoning length 应多次递增，例如：`4, 8, 12, 16, ...`。
+- `maxJump` 应是小值，fixture 中建议 `<= 12`。
+- 不应一次从 0 跳到完整段落。
+- completed 后历史消息不应重新打字，应直接稳定显示完整内容。
+
+### 失败信号
+
+- active 阶段 length 长时间不变，随后一次性跳到完整段落。
+- completed 历史消息打开面板后重新逐字播放。
+- 面板 reasoning 与主消息 reasoning 行为不一致。
+
+---
+
+## 用例 12：页面隐藏 / 切回前台后 Activity 平滑流式继续追赶
+
+### 场景
+
+浏览器切到后台时 `requestAnimationFrame` 会暂停。若 `useSmoothStreaming` 在 `document.hidden` 时停止 RAF，但没有监听 `visibilitychange` 恢复，切回前台后面板可能停在旧进度，除非刚好有新 chunk 触发 effect。
+
+### 操作
+
+1. 打开 fixture：
+
+```text
+/test-chat-streaming-state?activity_reasoning_long=1&activity_panel_open=1
+```
+
+2. 等待 active reasoning 出现，记录 `beforeLen`。
+3. 强制或真实触发页面隐藏：
+   - browser tab 切后台，或 Playwright 中覆盖 `document.hidden=true` 并 dispatch `visibilitychange`。
+4. 等待 1s 左右。
+5. 切回前台：`document.hidden=false` + `visibilitychange`。
+6. 每 60~80ms 采样 Activity reasoning length。
+
+### 预期
+
+- 隐藏期间 RAF 可暂停，length 可以保持不变。
+- 切回前台后，如果 target 长于 displayed，应继续追赶。
+- length 应从 `beforeLen` 继续递增到完整 reasoning。
+- 不应卡死在隐藏前长度。
+
+### 失败信号
+
+- 切回前台后 length 不再增长。
+- 只有新 chunk 到达时才恢复，若没有新 chunk 就永久停住。
+- 为追赶而一次性全量跳出，造成段落闪现。
+
+---
+
+## 用例 13：Activity 面板 A→B→A 会话切换恢复
+
+### 场景
+
+用户在会话 A 的右侧 Activity 面板查看 reasoning，切到会话 B，再切回 A。需要验证面板不会串台、不会丢 reasoning、不会被 stale realtime 误判为 running，并且在 active/terminal 两种窗口下判定不同。
+
+### 操作
+
+1. 使用 live 专项脚本模式：
+
+```bash
+TESTNET_EMAIL=... TESTNET_PASSWORD=... TESTNET_BASE_URL=https://testnet.ai-space.xyz \
+ACTIVITY_SWITCH_MODEL=deepseek-v4-pro \
+node scripts/regression/chat-activity-panel-switch-live.cjs
+```
+
+2. 脚本应：
+   - 新建会话 A。
+   - 启动 DeepSeek search + reasoning。
+   - 打开 A 并打开 Activity 面板。
+   - 切到新会话 B。
+   - 再切回 A。
+   - 重新打开 Activity 面板。
+   - 采样 panel reasoning length、请求、console/page errors。
+
+### Active 窗口预期
+
+切回 A 时如果任务仍在 running：
+
+- `/api/tasks/:id/stream?after=...` 应出现。
+- Activity 面板可打开。
+- reasoning length 应继续小步递增。
+- 不允许出现 B 会话内容或旧会话 reasoning。
+- 无 console/page error。
+
+### Terminal 窗口预期
+
+切回 A 时如果 DeepSeek 已完成或 reasoning 已完整：
+
+- 面板应稳定显示完整 reasoning。
+- timeline 应显示 terminal 阶段：`Responded/模型响应`、`Search done/搜索完成`、`Reasoned/深度推理`、`Generated/回答完成`。
+- reasoning length flat 是允许的，不能因此判失败。
+- 不应闪 `正在推理` / running spinner。
+- 无 console/page error。
+
+### 失败信号
+
+- 切回后 Activity 面板打不开。
+- 面板显示 B 会话内容。
+- completed 消息打开面板仍闪 running reasoning。
+- active 阶段 reasoning 不增长且后端 task 仍在产生 sequence。
+- terminal 阶段缺 `Generated/回答完成`。
+
+---
+
 ## 推荐采样字段
 
 ### DOM
@@ -389,6 +517,10 @@ task stream completed 后，background polling / final reconciliation 同步 bac
 - send/submit button count
 - `[data-chat-status-icon="spinning"]` count
 - `[data-chat-status-icon="completed"]` count
+- `[data-chat-activity-panel="true"]` 是否存在
+- Activity panel reasoning text length / tail
+- Activity panel timeline labels：`Responded/模型响应`、`Search done/搜索完成`、`Reasoned/深度推理`、`Generated/回答完成`
+- Activity panel 是否出现 stale running 文案：`正在推理`、`Reasoning ·`、`Generating`
 - console/page errors
 
 ### Backend bootstrap
@@ -410,6 +542,7 @@ task stream completed 后，background polling / final reconciliation 同步 bac
 
 - `/api/chat/init`
 - `/api/tasks/:id/stream?after=...`
+- `/api/tasks/:id`（Activity panel 打开后的 latest snapshot polling）
 - `/api/chat/bootstrap?...`
 - requestfailed / aborted 是否只是切路由导致
 - 429 / 500 / console error
@@ -423,6 +556,10 @@ cd frontend
 node scripts/regression/chat-background-polling-runtime-hook-regression.cjs
 node scripts/regression/chat-bootstrap-task-resume-regression.cjs
 node scripts/regression/chat-task-stream-runtime-hook-regression.cjs
+node scripts/regression/chat-activity-timeline-regression.cjs
+TESTNET_EMAIL=... TESTNET_PASSWORD=*** TESTNET_BASE_URL=https://testnet.ai-space.xyz node scripts/regression/chat-active-task-interrupt-resume-live.cjs
+TESTNET_EMAIL=... TESTNET_PASSWORD=*** TESTNET_BASE_URL=https://testnet.ai-space.xyz node scripts/regression/chat-quick-switch-live.cjs
+TESTNET_EMAIL=... TESTNET_PASSWORD=*** TESTNET_BASE_URL=https://testnet.ai-space.xyz node scripts/regression/chat-activity-panel-switch-live.cjs
 npm run build
 ```
 
@@ -455,6 +592,9 @@ npm run build
 - [ ] 正文在 running 阶段继续增长。
 - [ ] completed 后正文 canonical 为 backend `message.content`，不重复叠加。
 - [ ] completed polling 同步 backend `reasoning_content`，no-refresh 和 refresh 思考主体一致。
+- [ ] Activity panel active reasoning 平滑小步增长，不是一段一段跳。
+- [ ] 页面隐藏/切回前台后 Activity 平滑流式可继续追赶。
+- [ ] Activity panel A→B→A 切换不串台；active 窗口继续增长，terminal 窗口完整稳定显示且有 `Generated/回答完成`。
 - [ ] 同一 generation task 跨 optimistic/server stream 只能有一个 owner；旧 stream abort 后不 final sync/fallback。
 - [ ] 同一 task sequence 跨 stream handler 只能 apply 一次。
 - [ ] 空 placeholder 到 reasoning 首屏高度稳定，无明显二次抖动。
