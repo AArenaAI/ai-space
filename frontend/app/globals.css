@@ -837,6 +837,22 @@
   display: none;
 }
 
+.chat-avatar-breathe {
+  animation: chat-avatar-breathe 2.8s ease-in-out infinite;
+}
+
+@keyframes chat-avatar-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.035);
+    opacity: 0.82;
+  }
+}
+
 @keyframes notebook-studio-loading {
   0% {
     transform: translateX(-105%);
