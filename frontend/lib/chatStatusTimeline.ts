@@ -151,7 +151,7 @@ export function getOrderedTimelineSteps(steps: ChatStatusTimelineStep[] | undefi
         id: eventId(step.kind, mergeTimelineStepStatus(existing.status, step.status)),
         status: mergeTimelineStepStatus(existing.status, step.status),
         startedAt: Math.min(existing.startedAt || step.startedAt, step.startedAt || existing.startedAt),
-        endedAt: Math.max(existing.endedAt || 0, step.endedAt || 0) || existing.endedAt || step.endedAt,
+        endedAt: (existing.endedAt || existing.startedAt || 0) + Math.max(0, (step.endedAt || step.startedAt || 0) - (step.startedAt || 0)),
         count: Math.max(existing.count || 0, step.count || 0) || existing.count || step.count,
         label: step.label || existing.label,
       });

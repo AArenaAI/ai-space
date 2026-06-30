@@ -89,6 +89,21 @@ function timelineDotClass(step: ChatStatusTimelineStep) {
   return "border-surface-border bg-surface-elevated";
 }
 
+function countMarkdownSources(content?: string) {
+  if (!content) return 0;
+  const urls = new Set<string>();
+  const markdownLinkPattern = /\[[^\]]+\]\((https?:\/\/[^)\s]+)\)/g;
+  let match: RegExpExecArray | null;
+  while ((match = markdownLinkPattern.exec(content)) !== null) {
+    urls.add(match[1].replace(/[),.;]+$/, ""));
+  }
+  const bareUrlPattern = /https?:\/\/[^\s)]+/g;
+  while ((match = bareUrlPattern.exec(content)) !== null) {
+    urls.add(match[0].replace(/[),.;]+$/, ""));
+  }
+  return urls.size;
+}
+
 export default function ChatActivityPanel({ message, model, onClose }: { message?: Message | null; model?: ChatModel; onClose: () => void }) {
   const { t } = useI18n();
   const [reasoningOpen, setReasoningOpen] = useState(true);
@@ -113,8 +128,9 @@ export default function ChatActivityPanel({ message, model, onClose }: { message
   }, [message?.generationTaskId, message?.id]);
   if (!message) return null;
   const sources = Array.from(new Map((realtime?.searchSources || message.searchSources || []).map((source) => [source.url || source.title, source])).values());
+  const inferredSourceCount = sources.length || countMarkdownSources(message.content || realtime?.content || "");
   const timeline = getOrderedTimelineSteps(mergeTimeline(message, realtime, snapshotTimeline))
-    .map((step) => step.kind === "web_search" && !step.count && sources.length ? { ...step, count: sources.length } : step)
+    .map((step) => step.kind === "web_search" && !step.count && inferredSourceCount ? { ...step, count: inferredSourceCount } : step)
     .filter((step) => !isLowSignalCompletedStep(step));
   const files = message.files || [];
   const reasoning = (realtime?.reasoningContent || message.reasoningContent || "").trim();
