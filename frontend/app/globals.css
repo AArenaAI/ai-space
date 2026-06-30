@@ -839,17 +839,16 @@
 
 .chat-avatar-breathe {
   animation: chat-avatar-breathe 2.2s ease-in-out infinite;
+  will-change: box-shadow;
 }
 
 @keyframes chat-avatar-breathe {
   0%,
   100% {
-    transform: scale(1);
-    opacity: 1;
+    box-shadow: 0 0 0 2px var(--chat-avatar-breathe-color, rgba(99, 102, 241, 0.16));
   }
   50% {
-    transform: scale(1.025);
-    opacity: 0.88;
+    box-shadow: 0 0 0 6px var(--chat-avatar-breathe-color, rgba(99, 102, 241, 0.28));
   }
 }
 

@@ -307,7 +307,7 @@ function MessageRow({
                   isStreaming && "chat-avatar-breathe",
                   group && group.assistantMessages.length > 1 && "cursor-pointer hover:bg-surface-elevated"
                 )}
-                style={{ boxShadow: isStreaming ? `0 0 0 3px ${(model?.color || "#6366f1")}22` : undefined }}
+                style={isStreaming ? { "--chat-avatar-breathe-color": `${model?.color || "#6366f1"}33` } as CSSProperties : undefined}
               >
                 <ModelAvatar meta={assistantAvatarMeta} size="lg" className="h-full w-full rounded-lg" />
                 {group && group.assistantMessages.length > 1 && (
