@@ -54,13 +54,23 @@ function getActivityStepLabel(t: (key: string, params?: Record<string, string>) 
 }
 
 function formatReasoningSections(text: string) {
-  return text
+  const normalized = text
     .replace(/\r\n/g, "\n")
-    .split(/\n{2,}|(?<=[。！？.!?])\s+(?=[\u4e00-\u9fa5A-Z])/)
+    // GPT-5.5 often returns explicit section titles inline as
+    // `**Title** body **Next title** body`. Treat those model-provided
+    // titles as real section headings without inventing frontend titles.
+    .replace(/([。！？.!?])\s*(\*\*[^*\n]{2,80}\*\*)/g, "$1\n\n$2")
+    .replace(/(^|\n)(\*\*[^*\n]{2,80}\*\*)\s+/g, "$1$2\n");
+  return normalized
+    .split(/\n{2,}/)
     .map((item) => item.trim())
     .filter(Boolean)
     .slice(0, 12)
     .map((section) => {
+      const inlineBoldHeading = section.match(/^\*\*([^*\n]{2,80})\*\*\s*([\s\S]*)$/);
+      if (inlineBoldHeading) {
+        return { title: inlineBoldHeading[1].trim(), body: inlineBoldHeading[2].trim() };
+      }
       const lines = section.split("\n").map((line) => line.trim()).filter(Boolean);
       if (lines.length > 1) {
         const first = lines[0];

@@ -134,10 +134,10 @@ export function getOrderedTimelineSteps(steps: ChatStatusTimelineStep[] | undefi
     .filter((step) => !(step.status === "running" && terminalKinds.has(step.kind)))
     .map((step, index) => ({ step, index }))
     .sort((a, b) => {
-      const kindDiff = STEP_KIND_ORDER[a.step.kind] - STEP_KIND_ORDER[b.step.kind];
-      if (kindDiff !== 0) return kindDiff;
       const startedDiff = (a.step.startedAt || 0) - (b.step.startedAt || 0);
       if (startedDiff !== 0) return startedDiff;
+      const kindDiff = STEP_KIND_ORDER[a.step.kind] - STEP_KIND_ORDER[b.step.kind];
+      if (kindDiff !== 0) return kindDiff;
       const statusDiff = STEP_STATUS_ORDER[a.step.status] - STEP_STATUS_ORDER[b.step.status];
       if (statusDiff !== 0) return statusDiff;
       return a.index - b.index;
