@@ -72,7 +72,7 @@ export default function ChatCompareActivityLayoutControl({
   }, [open]);
 
   return (
-    <div ref={rootRef} className="relative" data-chat-compare-activity-layout="true">
+    <div ref={rootRef} className="relative z-[140]" data-chat-compare-activity-layout="true">
       <button
         type="button"
         onClick={() => setOpen((next) => !next)}
@@ -87,7 +87,7 @@ export default function ChatCompareActivityLayoutControl({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-2xl border border-surface-border/75 bg-surface-elevated p-2 text-left shadow-xl animate-fade-in">
+        <div className="absolute right-0 top-full z-[160] mt-2 w-72 overflow-hidden rounded-2xl border border-surface-border/75 bg-surface-elevated p-2 text-left shadow-xl animate-fade-in">
           <div className="px-2 pb-2 pt-1 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">思考与来源显示</div>
           <div className="space-y-1">
             {OPTIONS.map((option) => {

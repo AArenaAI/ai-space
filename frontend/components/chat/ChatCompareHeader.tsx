@@ -27,7 +27,7 @@ function ChatCompareHeader({
   onActivityLayoutChange,
 }: ChatCompareHeaderProps) {
   return (
-    <div className="flex w-full shrink-0 items-center gap-2 border-b border-surface-border/45 bg-surface/80 px-4 py-2 backdrop-blur">
+    <div className="relative z-[90] flex w-full shrink-0 items-center border-b border-surface-border/45 bg-surface/80 px-4 py-2 backdrop-blur">
       <div className="flex min-w-0 flex-1">
         {compareModels.map((modelId, colIndex) => (
           <div key={modelId || colIndex} className="flex min-w-[280px] flex-1 flex-col">
@@ -44,7 +44,9 @@ function ChatCompareHeader({
         ))}
       </div>
       {onActivityLayoutChange && (
-        <ChatCompareActivityLayoutControl value={activityLayout} onChange={onActivityLayoutChange} />
+        <div className="absolute right-4 top-1/2 -translate-y-1/2">
+          <ChatCompareActivityLayoutControl value={activityLayout} onChange={onActivityLayoutChange} />
+        </div>
       )}
     </div>
   );
