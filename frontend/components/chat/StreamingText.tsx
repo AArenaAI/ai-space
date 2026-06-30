@@ -15,10 +15,10 @@ function StreamingCursor() {
 
 function ThinkingDots() {
   return (
-    <span className="inline-flex h-4 items-center gap-1 text-text-tertiary" aria-label="正在准备回复">
-      <span className="chat-thinking-dot h-1.5 w-1.5 rounded-full bg-current opacity-75" style={{ animationDelay: "0ms" }} />
-      <span className="chat-thinking-dot h-1.5 w-1.5 rounded-full bg-current opacity-75" style={{ animationDelay: "180ms" }} />
-      <span className="chat-thinking-dot h-1.5 w-1.5 rounded-full bg-current opacity-75" style={{ animationDelay: "360ms" }} />
+    <span className="inline-flex h-4 items-center gap-1 text-text-tertiary/70" aria-label="正在准备回复">
+      <span className="chat-thinking-dot h-[5px] w-[5px] rounded-full bg-current opacity-70" style={{ animationDelay: "0ms" }} />
+      <span className="chat-thinking-dot h-[5px] w-[5px] rounded-full bg-current opacity-70" style={{ animationDelay: "180ms" }} />
+      <span className="chat-thinking-dot h-[5px] w-[5px] rounded-full bg-current opacity-70" style={{ animationDelay: "360ms" }} />
     </span>
   );
 }
