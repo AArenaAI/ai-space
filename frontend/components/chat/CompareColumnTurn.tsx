@@ -5,6 +5,7 @@ import { Bot, Check, Play } from "lucide-react";
 import type { ChatModel, Message } from "@/lib/chatTypes";
 import type { InferredGroup } from "@/lib/groups";
 import { isMessageGenerating } from "@/lib/chatContent";
+import { isTerminalMessage } from "@/lib/chatMessageRuntimeState";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 import { ModelAvatar } from "./ModelAvatar";
@@ -125,7 +126,8 @@ function CompareColumnTurn({
   const profileSnapshotRef = useRef<Record<string, unknown> | null>(null);
   const [openBadgeMenu, setOpenBadgeMenu] = useState(false);
   const showBadgeSwitcher = !!badgeGroup && badgeGroup.assistantMessages.length > 2 && !!onSelectAssistant;
-  const hasLiveGenerationSignal = !!msg && !msg.completedAt && !msg.stopped && !!(
+  const terminalMessage = !!msg && isTerminalMessage(msg);
+  const hasLiveGenerationSignal = !!msg && !terminalMessage && !!(
     msg.activityStatus ||
     msg.serverMessageId ||
     msg.generationTaskId ||
@@ -133,7 +135,7 @@ function CompareColumnTurn({
     msg.useBackground ||
     msg.isComplexTask
   );
-  const isStreaming = !!msg && isLastGroup && (isLoading || hasLiveGenerationSignal) && isMessageGenerating(msg, true);
+  const isStreaming = !!msg && isLastGroup && !terminalMessage && (isLoading || hasLiveGenerationSignal) && isMessageGenerating(msg, true);
   const isGenerating = !!msg && isMessageGenerating(msg, isStreaming);
   // Compare columns do not support single-column regeneration yet: the current
   // onRegenerate action is conversation/global and would make both columns show
