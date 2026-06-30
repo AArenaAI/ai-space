@@ -217,7 +217,14 @@ export function updateStatusTimeline(
     timeline = upsertStep(timeline, step);
   }
   if (patch.completedAt || patch.phase === "completed" || patch.phase === "failed" || patch.phase === "stopped") {
-    timeline = timeline.map((step) => step.status === "running" ? { ...step, endedAt: step.endedAt ?? ts } : step);
+    const terminalStatus: ChatStatusStepStatus = patch.phase === "failed"
+      ? "failed"
+      : patch.phase === "stopped"
+        ? "stopped"
+        : "completed";
+    timeline = timeline.map((step) => step.status === "running"
+      ? { ...step, id: eventId(step.kind, terminalStatus), status: terminalStatus, endedAt: step.endedAt ?? ts }
+      : step);
   }
   return timeline.length ? timeline : previousTimeline;
 }

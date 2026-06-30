@@ -334,9 +334,13 @@ export function realtimeMarkCompleted(id: string, completedAt = now()) {
   if (!id) return;
   const prev = store.get(id);
   if (!prev) return;
+  const terminalPhase = prev.phase === "failed" || prev.phase === "stopped" ? prev.phase : "completed";
   setEntry(id, {
     completedAt,
-    phase: prev.phase === "failed" || prev.phase === "stopped" ? prev.phase : "completed",
+    phase: terminalPhase,
+    activityStatus: undefined,
+    searchStatus: prev.searchStatus === "searching" ? undefined : prev.searchStatus,
+    isReasoning: false,
     expiresAt: completedAt + FINALIZING_HOLD_TTL_MS,
   });
 }

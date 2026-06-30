@@ -152,6 +152,13 @@ test("mark completed keeps realtime snapshot briefly then expires", ({ mod, adva
   assert.equal(data.reasoningContent, "plan");
   assert.equal(data.answerContent, "answer");
   assert.equal(data.phase, "completed");
+  assert.equal(data.activityStatus, undefined);
+  assert.equal(data.searchStatus, undefined);
+  assert.equal(data.isReasoning, false);
+  assert.deepEqual((data.statusTimeline || []).map((step) => `${step.kind}:${step.status}`), [
+    "reasoning:completed",
+    "streaming_answer:completed",
+  ]);
   advance(5_001);
   mod.realtimeSweepExpiredEntries(Date.now());
   assert.equal(mod.realtimeGet("m-final"), undefined);
@@ -181,12 +188,11 @@ test("status timeline keeps original startedAt when a running step completes", (
   const timeline = data.statusTimeline || [];
   const searchRunning = timeline.find((step) => step.id === "web_search:running");
   const searchCompleted = timeline.find((step) => step.id === "web_search:completed");
-  const reasoning = timeline.find((step) => step.id === "reasoning:running");
-  const answer = timeline.find((step) => step.id === "streaming_answer:running");
+  const reasoning = timeline.find((step) => step.id === "reasoning:completed");
+  const answer = timeline.find((step) => step.id === "streaming_answer:completed");
 
-  assert.ok(searchRunning, "search running step should be present");
+  assert.equal(searchRunning, undefined, "terminal timeline should not keep stale search running step");
   assert.ok(searchCompleted, "search completed step should be present");
-  assert.equal(searchCompleted.startedAt, searchRunning.startedAt, "search completed should keep the original search start timestamp");
   assert.ok((searchCompleted.endedAt || 0) > searchCompleted.startedAt, "search completed should end after it started");
   assert.ok(reasoning.startedAt > searchCompleted.startedAt, "reasoning should start after search starts");
   assert.ok(answer.startedAt > reasoning.startedAt, "answer should start after reasoning starts");
