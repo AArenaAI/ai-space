@@ -2230,7 +2230,7 @@ function MessageList({
       )}
       <div
         ref={(el) => handleVirtuosoScrollerRef(el)}
-        className={cn("chat-history-scroll-container right-0 transition-[right] duration-200 ease-out", !isCompare && activeActivityMessage && "lg:right-[336px]")}
+        className={cn("chat-history-scroll-container right-0 transition-[right] duration-200 ease-out", !isCompare && activeActivityMessage && "lg:right-[384px]")}
         style={{
           position: "absolute",
           top: 0,

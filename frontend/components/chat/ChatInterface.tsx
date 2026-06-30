@@ -762,7 +762,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
       {!messageSelectMode && (
         <div className={cn(
           "z-[70] absolute inset-x-0 bottom-0 transition-all duration-700 ease-[cubic-bezier(0.34,1.56,0.64,1)]",
-          activityPanelOpen && !activeCompareMode && "lg:right-[336px]",
+          activityPanelOpen && !activeCompareMode && "lg:right-[384px]",
           isNewEmptyChat
             ? "opacity-0 translate-y-20 scale-95 pointer-events-none"
             : "opacity-100 translate-y-0 scale-100 pointer-events-auto"

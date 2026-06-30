@@ -45,9 +45,9 @@ function isLowSignalCompletedStep(step: ChatStatusTimelineStep) {
   return step.kind === "waiting_provider" || step.kind === "streaming_answer" || step.kind === "finalizing";
 }
 
-function getActivityStepLabel(t: (key: string, params?: Record<string, string>) => string, step: ChatStatusTimelineStep, generationStartedAt?: number) {
+function getActivityStepLabel(t: (key: string, params?: Record<string, string>) => string, step: ChatStatusTimelineStep, generationStartedAt?: number, durationStartAt?: number) {
   const label = getTimelineStepLabel(t, step, generationStartedAt);
-  const duration = stepDuration(step);
+  const duration = durationStartAt ? Math.max(0, (step.endedAt || Date.now()) - durationStartAt) : stepDuration(step);
   if (duration < 1000) return label;
   if (/\d+\s*(秒|s|sec|secs|second|seconds|分|m|min)/i.test(label)) return label;
   return `${label} · ${formatElapsedTime(duration, t)}`;
@@ -76,7 +76,6 @@ function formatReasoningSections(text: string) {
 function timelineDotClass(step: ChatStatusTimelineStep) {
   if (step.status === "failed") return "border-red-400 bg-red-400";
   if (step.status === "running") return "border-brand bg-brand shadow-[0_0_0_3px_rgba(124,92,255,0.12)]";
-  if (step.kind === "reasoning") return "border-text-tertiary bg-text-tertiary";
   return "border-surface-border bg-surface-elevated";
 }
 
@@ -111,43 +110,49 @@ export default function ChatActivityPanel({ message, model, onClose }: { message
   const active = !((realtime?.completedAt || message.completedAt) || realtime?.stopped || message.stopped || realtime?.errorCode || message.errorCode);
   const elapsedSeconds = Math.max(0, Math.round(((realtime?.completedAt || message.completedAt || Date.now()) - (realtime?.generationStartedAt || message.generationStartedAt || message.createdAt || Date.now())) / 1000));
 
+  const timelineStartAt = timeline[0]?.startedAt || message.generationStartedAt || message.createdAt;
+
   return (
-    <aside className="fixed inset-x-3 bottom-3 z-[220] flex max-h-[72vh] flex-col rounded-3xl border border-surface-border/70 bg-surface-elevated/95 p-4 shadow-2xl shadow-black/10 backdrop-blur-xl dark:shadow-black/40 lg:absolute lg:inset-y-0 lg:left-auto lg:right-0 lg:bottom-auto lg:h-full lg:w-[336px] lg:max-h-none lg:rounded-none lg:border-y-0 lg:border-r-0 lg:border-l lg:border-solid lg:border-surface-border/45 lg:bg-surface/85 lg:shadow-none" data-chat-activity-panel="true">
-      <div className="mb-4 flex items-center justify-between gap-3">
+    <aside className="fixed inset-x-3 bottom-3 z-[220] flex max-h-[72vh] flex-col rounded-3xl border border-surface-border/70 bg-surface-elevated/95 p-5 shadow-2xl shadow-black/10 backdrop-blur-xl dark:shadow-black/40 lg:absolute lg:inset-y-0 lg:left-auto lg:right-0 lg:bottom-auto lg:h-full lg:w-[384px] lg:max-h-none lg:rounded-none lg:border-y-0 lg:border-r-0 lg:border-l lg:border-solid lg:border-surface-border/45 lg:bg-surface/85 lg:shadow-none" data-chat-activity-panel="true">
+      <div className="mb-5 flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-text-primary">思考与来源{active ? ` · ${elapsedSeconds}s` : ""}</div>
-          <div className="mt-0.5 truncate text-xs text-text-tertiary">{model?.name || message.model || "AI"}</div>
+          <div className="text-base font-semibold text-text-primary">思考与来源{active ? ` · ${elapsedSeconds}s` : ""}</div>
+          <div className="mt-0.5 truncate text-sm text-text-tertiary">{model?.name || message.model || "AI"}</div>
         </div>
         <button type="button" onClick={onClose} className="rounded-full p-1.5 text-text-tertiary hover:bg-surface-card hover:text-text-primary" aria-label="Close activity panel">
           <X className="h-4 w-4" />
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1" data-chat-activity-scroll="true">
-        <section className="mb-6">
-          <div className="mb-3 text-xs font-semibold text-text-secondary">思考</div>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-chat-activity-scroll="true">
+        <section className="mb-7">
+          <div className="mb-4 text-sm font-semibold text-text-secondary">思考</div>
           <div className="relative space-y-0">
             {timeline.length ? timeline.map((step, index) => {
               const showReasoning = step.kind === "reasoning" && reasoning;
               const isLast = index === timeline.length - 1;
+              const stepLabel = getActivityStepLabel(t, step, realtime?.generationStartedAt || message.generationStartedAt, step.kind === "streaming_answer" && step.status === "completed" ? timelineStartAt : undefined);
               return (
-                <div key={`${step.id}:${index}`} className="relative grid grid-cols-[18px_1fr] gap-3 pb-4 last:pb-0">
+                <div key={`${step.id}:${index}`} className="relative grid grid-cols-[18px_1fr] gap-3 pb-5 last:pb-0">
                   {!isLast && <div className="absolute left-[8px] top-4 bottom-0 border-l border-dashed border-surface-border/80" aria-hidden="true" />}
                   <span className={cn("relative z-10 mt-1 h-2.5 w-2.5 rounded-full border", timelineDotClass(step))} aria-hidden="true" />
                   <div className="min-w-0">
-                    <div className="text-xs font-medium text-text-secondary">{getActivityStepLabel(t, step, realtime?.generationStartedAt || message.generationStartedAt)}</div>
+                    {showReasoning ? (
+                      <button
+                        type="button"
+                        onClick={() => setReasoningOpen((value) => !value)}
+                        className="flex w-full items-center justify-between gap-2 rounded-lg py-0.5 text-left text-sm font-medium text-text-secondary hover:text-text-primary"
+                      >
+                        <span>{stepLabel}</span>
+                        <ChevronDown className={cn("h-4 w-4 shrink-0 text-text-tertiary transition-transform", reasoningOpen && "rotate-180")} />
+                      </button>
+                    ) : (
+                      <div className="text-sm font-medium text-text-secondary">{stepLabel}</div>
+                    )}
                     {showReasoning && (
                       <div className="mt-3">
-                        <button
-                          type="button"
-                          onClick={() => setReasoningOpen((value) => !value)}
-                          className="mb-2 inline-flex w-full items-center justify-between rounded-lg py-1 text-left text-xs font-medium text-text-tertiary hover:text-text-secondary"
-                        >
-                          <span>思考内容</span>
-                          <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", reasoningOpen && "rotate-180")} />
-                        </button>
                         {reasoningOpen && (
-                          <div className="space-y-3 text-xs leading-relaxed text-text-tertiary">
+                          <div className="space-y-3 text-sm leading-relaxed text-text-tertiary">
                             {reasoningSections.length ? reasoningSections.map((section, sectionIndex) => (
                               <div key={`${sectionIndex}:${section.body.slice(0, 16)}`}>
                                 {section.title && <div className="mb-1 font-semibold text-text-secondary">{section.title}</div>}
@@ -164,7 +169,7 @@ export default function ChatActivityPanel({ message, model, onClose }: { message
                 </div>
               );
             }) : (
-              <div className="flex items-center gap-2 text-xs text-text-tertiary">
+              <div className="flex items-center gap-2 text-sm text-text-tertiary">
                 {active ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
                 <span>{active ? "正在处理" : "已完成"}</span>
               </div>
@@ -174,10 +179,10 @@ export default function ChatActivityPanel({ message, model, onClose }: { message
 
         {files.length > 0 && (
           <section className="mb-5">
-            <div className="mb-2 text-xs font-semibold text-text-secondary">文件 · {files.length}</div>
+            <div className="mb-2 text-sm font-semibold text-text-secondary">文件 · {files.length}</div>
             <div className="space-y-2">
               {files.map((file) => (
-                <div key={file.public_id} className="flex items-center gap-2 rounded-xl bg-surface-card/60 px-2.5 py-2 text-xs text-text-secondary">
+                <div key={file.public_id} className="flex items-center gap-2 rounded-xl bg-surface-card/60 px-2.5 py-2 text-sm text-text-secondary">
                   <FileText className="h-3.5 w-3.5 shrink-0 text-text-tertiary" />
                   <span className="truncate">{file.filename}</span>
                 </div>
@@ -188,10 +193,10 @@ export default function ChatActivityPanel({ message, model, onClose }: { message
 
         {sources.length > 0 && (
           <section>
-            <div className="mb-2 text-xs font-semibold text-text-secondary">网页 · {sources.length}</div>
+            <div className="mb-2 text-sm font-semibold text-text-secondary">网页 · {sources.length}</div>
             <div className="space-y-2">
               {sources.slice(0, 12).map((source, index) => (
-                <a key={`${source.url}:${index}`} href={source.url} target="_blank" rel="noreferrer" className="block rounded-xl bg-surface-card/60 px-2.5 py-2 text-xs hover:bg-surface-card">
+                <a key={`${source.url}:${index}`} href={source.url} target="_blank" rel="noreferrer" className="block rounded-xl bg-surface-card/60 px-2.5 py-2 text-sm hover:bg-surface-card">
                   <div className="truncate font-medium text-text-secondary">{source.title || source.url}</div>
                   <div className="mt-0.5 truncate text-text-tertiary">{source.url}</div>
                 </a>
