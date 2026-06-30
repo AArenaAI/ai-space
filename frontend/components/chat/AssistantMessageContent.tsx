@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ComponentType } from "react";
-import { AlertCircle, RefreshCw, RotateCcw } from "lucide-react";
+import { AlertCircle, RefreshCw } from "lucide-react";
 import { Message } from "@/lib/chatTypes";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
@@ -145,27 +145,7 @@ export function AssistantMessageContent({
   }
 
   if (!runtimeState.content) {
-    return (
-      <div className="flex max-w-full flex-col gap-3 rounded-xl border border-amber-400/30 bg-amber-50/70 px-3 py-3 text-[15px] leading-relaxed text-amber-900 shadow-sm dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-100">
-        <div className="flex items-start gap-2">
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-300" />
-          <div className="min-w-0">
-            <div className="font-medium">{t("chat.interrupted.title")}</div>
-            <div className="mt-0.5 text-sm text-amber-800/80 dark:text-amber-100/75">{t("chat.interrupted.description")}</div>
-          </div>
-        </div>
-        {onRegenerate && (
-          <button
-            type="button"
-            onClick={onRegenerate}
-            className="inline-flex w-fit items-center gap-1.5 rounded-lg border border-amber-500/30 bg-white/70 px-3 py-1.5 text-sm font-medium text-amber-900 transition-colors hover:bg-white dark:bg-amber-950/30 dark:text-amber-100 dark:hover:bg-amber-900/35"
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-            {t("chat.interrupted.regenerate")}
-          </button>
-        )}
-      </div>
-    );
+    return <AssistantInlineError message={{ ...message, content: "", stopped: true }} onRegenerate={onRegenerate} t={t} />;
   }
 
   const finalContent = runtimeState.reasoningContent?.trim() && !/<think>[\s\S]*?<\/think>/i.test(runtimeState.content || "")
