@@ -197,10 +197,9 @@ export function useChatCompareSendRuntime({
       })) as Message[];
       const contextMessages = [...messages, userMsg];
 
-      initializeAssistantRealtimeBatch(assistantMsgs, userMsg.createdAt || now());
       setIsCompare(true);
       setCompareModels(compareModelIds);
-      setMessages((prev) => [...prev, userMsg, ...assistantMsgs]);
+      setMessages((prev) => [...prev, userMsg]);
       setIsLoading(true);
 
       const controllers = assistantMsgs.map(() => new AbortController());
@@ -219,13 +218,33 @@ export function useChatCompareSendRuntime({
       };
 
       const handleCompareRecoverableResult = (assistantMsg: Message, streamResult: ChatStreamRunResult) => {
-        setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) => buildRecoverableResultPatch({
-          serverMessageId: streamResult.serverMessageId,
-          generationTaskId: streamResult.generationTaskId,
-          existingServerMessageId: m.serverMessageId,
-          existingGenerationTaskId: m.generationTaskId,
-          busyActivityStatus: createBusyGeneratingStatus(translate),
-        })));
+        const serverBoundAssistant = {
+          ...assistantMsg,
+          serverMessageId: streamResult.serverMessageId || assistantMsg.serverMessageId,
+          generationTaskId: streamResult.generationTaskId || assistantMsg.generationTaskId,
+          activityStatus: createBusyGeneratingStatus(translate),
+          serverGenerationStatus: assistantMsg.serverGenerationStatus || "running",
+        } as Message;
+        initializeAssistantRealtimeBatch([serverBoundAssistant], serverBoundAssistant.createdAt || userMsg.createdAt || now());
+        setMessages((prev) => {
+          const existingIndex = prev.findIndex((message) =>
+            message.id === serverBoundAssistant.id ||
+            (serverBoundAssistant.serverMessageId && message.serverMessageId === serverBoundAssistant.serverMessageId) ||
+            (serverBoundAssistant.generationTaskId && message.generationTaskId === serverBoundAssistant.generationTaskId)
+          );
+          if (existingIndex === -1) return [...prev, serverBoundAssistant];
+          return patchMessageById(prev, prev[existingIndex].id, (m) => ({
+            ...m,
+            ...serverBoundAssistant,
+            ...buildRecoverableResultPatch({
+              serverMessageId: streamResult.serverMessageId,
+              generationTaskId: streamResult.generationTaskId,
+              existingServerMessageId: m.serverMessageId,
+              existingGenerationTaskId: m.generationTaskId,
+              busyActivityStatus: createBusyGeneratingStatus(translate),
+            }),
+          }));
+        });
       };
 
       const handleCompareRunError = (assistantMsg: Message, error: any, streamResult?: ChatStreamRunResult) => {

@@ -223,6 +223,16 @@ export async function runCompareModel<TAssistant extends CompareAssistantLike>({
     const serverMessageId = Number(init.assistant_message_id || init.assistant_message?.id || 0) || undefined;
     const generationTaskId = Number(init.task_id || init.assistant_message?.generation_task_id || 0) || undefined;
     if (serverMessageId || generationTaskId) {
+      // Server-first compare path: once /api/chat/init returns, the assistant
+      // row is anchored to the persisted assistant/task identity before any
+      // stream delta is applied. Mutating the local assistant object keeps the
+      // subsequent stream owner, error handling, and final reconciliation on the
+      // same stable id instead of a UUID-only optimistic row.
+      const serverBoundId = generationTaskId ? `assistant-task:${generationTaskId}` : String(serverMessageId);
+      (assistant as any).id = serverBoundId;
+      (assistant as any).serverMessageId = serverMessageId;
+      (assistant as any).generationTaskId = generationTaskId;
+      (assistant as any).serverGenerationStatus = init.assistant_message?.server_generation_status || init.assistant_message?.generation_status || "running";
       options.callbacks.onRecoverableResult(assistant, {
         serverMessageId,
         generationTaskId,

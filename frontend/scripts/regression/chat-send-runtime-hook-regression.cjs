@@ -276,6 +276,12 @@ async function testCompareSendStartsCompareAndRunCoordinator() {
   compareRunImpl = async (opts) => {
     compareOpts = opts;
     opts.callbacks.onGroupContextResolved({ groupId: "g", userMessageId: "u", groupModels: ["m1", "m2"] });
+    opts.assistantMessages.forEach((assistant, index) => {
+      assistant.id = `assistant-task:${700 + index}`;
+      assistant.serverMessageId = 600 + index;
+      assistant.generationTaskId = 700 + index;
+      opts.callbacks.onRecoverableResult(assistant, { serverMessageId: 600 + index, generationTaskId: 700 + index, lastSequence: 0, content: "" });
+    });
     opts.callbacks.onRunError(opts.assistantMessages[0], new Error("recover"));
   };
   realtimeGetImpl = () => ({ serverMessageId: 202 });
@@ -290,6 +296,9 @@ async function testCompareSendStartsCompareAndRunCoordinator() {
   assert.equal(compareOpts.assistantMessages.length, 2);
   assert.deepEqual(compareOpts.assistantMessages.map((message) => message.groupId), [601, 601]);
   assert.deepEqual(compareOpts.assistantMessages.map((message) => message.groupIndex), [0, 1]);
+  assert.deepEqual(state.messages.filter((message) => message.role === "assistant").map((message) => message.id), ["assistant-task:700", "assistant-task:701"]);
+  assert.deepEqual(state.messages.filter((message) => message.role === "assistant").map((message) => message.serverMessageId), [600, 601]);
+  assert.deepEqual(state.messages.filter((message) => message.role === "assistant").map((message) => message.generationTaskId), [700, 701]);
   assert.equal(refs.compareAbortControllersRef.current.length, 0);
   assert.deepEqual(startPolls[0], [10, compareOpts.assistantMessages[0].id, 202]);
 }
