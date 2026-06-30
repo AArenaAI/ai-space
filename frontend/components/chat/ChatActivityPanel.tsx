@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { X, Brain, Globe, FileText, CheckCircle, LoaderCircle, AlertCircle, Wrench, ChevronDown } from "lucide-react";
 import type { Message, ChatModel } from "@/lib/chatTypes";
 import { useI18n } from "@/lib/i18n";
@@ -19,8 +19,20 @@ function statusIcon(step: ChatStatusTimelineStep) {
   return <LoaderCircle className="h-3.5 w-3.5 animate-spin text-text-tertiary" />;
 }
 
-function mergeTimeline(message: Message, realtime: ReturnType<typeof useMessageRealtime>) {
-  return realtime?.statusTimeline?.length ? realtime.statusTimeline : message.statusTimeline;
+function parseTimelineValue(value: unknown): ChatStatusTimelineStep[] | undefined {
+  if (!value) return undefined;
+  const parsed = Array.isArray(value) ? value : typeof value === "string" ? (() => {
+    try { return JSON.parse(value); } catch { return undefined; }
+  })() : undefined;
+  if (!Array.isArray(parsed)) return undefined;
+  const steps = parsed.filter((step): step is ChatStatusTimelineStep => !!step && typeof step === "object" && typeof step.kind === "string" && typeof step.status === "string" && typeof step.startedAt === "number");
+  return steps.length ? steps : undefined;
+}
+
+function mergeTimeline(message: Message, realtime: ReturnType<typeof useMessageRealtime>, snapshotTimeline?: ChatStatusTimelineStep[]) {
+  if (snapshotTimeline?.length) return snapshotTimeline;
+  if (realtime?.statusTimeline?.length) return realtime.statusTimeline;
+  return message.statusTimeline;
 }
 
 function stepDuration(step: ChatStatusTimelineStep) {
@@ -53,9 +65,27 @@ function formatReasoningSections(text: string) {
 export default function ChatActivityPanel({ message, model, onClose }: { message?: Message | null; model?: ChatModel; onClose: () => void }) {
   const { t } = useI18n();
   const [reasoningOpen, setReasoningOpen] = useState(true);
+  const [snapshotTimeline, setSnapshotTimeline] = useState<ChatStatusTimelineStep[] | undefined>();
   const realtime = useMessageRealtime(message?.id || "", Boolean(message));
+  useEffect(() => {
+    setSnapshotTimeline(undefined);
+    const taskId = message?.generationTaskId;
+    if (!taskId || typeof window === "undefined") return;
+    const token = window.localStorage.getItem("token");
+    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+    let cancelled = false;
+    fetch(`/api/tasks/${taskId}`, { headers, credentials: "include" })
+      .then((res) => res.ok ? res.json() : undefined)
+      .then((data) => {
+        if (cancelled || !data) return;
+        const timeline = parseTimelineValue(data?.message?.status_timeline || data?.task?.status_timeline);
+        if (timeline?.length) setSnapshotTimeline(timeline);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [message?.generationTaskId, message?.id]);
   if (!message) return null;
-  const timeline = getOrderedTimelineSteps(mergeTimeline(message, realtime)).filter((step) => !isLowSignalCompletedStep(step));
+  const timeline = getOrderedTimelineSteps(mergeTimeline(message, realtime, snapshotTimeline)).filter((step) => !isLowSignalCompletedStep(step));
   const sources = Array.from(new Map((realtime?.searchSources || message.searchSources || []).map((source) => [source.url || source.title, source])).values());
   const files = message.files || [];
   const reasoning = (realtime?.reasoningContent || message.reasoningContent || "").trim();
