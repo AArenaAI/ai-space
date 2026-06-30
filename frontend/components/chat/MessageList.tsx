@@ -74,6 +74,7 @@ import ChatEmptyState from "./ChatEmptyState";
 import ChatDeleteMessageDialog from "./ChatDeleteMessageDialog";
 import ChatActivityPanel from "./ChatActivityPanel";
 import { useCompareActivityLayout, type CompareActivityLayout } from "./ChatCompareActivityLayoutControl";
+import { CHAT_ACTIVITY_PANEL_MARGIN_CLASS, CHAT_ACTIVITY_PANEL_WIDTH_CLASS } from "./chatLayout";
 import { parseThinkContent, sanitizeContent, isMessageGenerating } from "@/lib/chatContent";
 
 
@@ -2079,7 +2080,7 @@ function MessageList({
         ) : (
           <div
             ref={(el) => handleVirtuosoScrollerRef(el)}
-            className={cn("chat-history-scroll-container transition-[margin-right] duration-200 ease-out", activeActivityMessage && compareActivityLayout === "dock" && "lg:mr-[384px]")}
+            className={cn("chat-history-scroll-container transition-[margin-right] duration-200 ease-out", activeActivityMessage && compareActivityLayout === "dock" && CHAT_ACTIVITY_PANEL_MARGIN_CLASS)}
             style={{
               height: "100%",
               overflowY: "auto",
@@ -2251,7 +2252,7 @@ function MessageList({
       )}
       <div
         ref={(el) => handleVirtuosoScrollerRef(el)}
-        className={cn("chat-history-scroll-container right-0 transition-[right] duration-200 ease-out", !isCompare && activeActivityMessage && "lg:right-[384px]")}
+        className={cn("chat-history-scroll-container right-0 transition-[right] duration-200 ease-out", !isCompare && activeActivityMessage && CHAT_ACTIVITY_PANEL_WIDTH_CLASS)}
         style={{
           position: "absolute",
           top: 0,

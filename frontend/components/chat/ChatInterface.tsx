@@ -11,6 +11,7 @@ import ModelSelector from "./ModelSelector";
 import ThemeToggle from "@/components/theme/ThemeToggle";
 import { Zap, X, Pencil, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { CHAT_ACTIVITY_PANEL_WIDTH_CLASS } from "./chatLayout";
 import { toast } from "sonner";
 import { showUserError } from "@/lib/errors";
 import { useRouter } from "next/navigation";
@@ -761,8 +762,8 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
       {/* 底部输入框 - 始终渲染，空状态时隐藏在下方 */}
       {!messageSelectMode && (
         <div className={cn(
-          "z-[70] absolute inset-x-0 bottom-0 transition-all duration-700 ease-[cubic-bezier(0.34,1.56,0.64,1)]",
-          activityPanelOpen && !activeCompareMode && "lg:right-[384px]",
+          "z-[70] absolute inset-x-0 bottom-0 transition-[right,opacity,transform] duration-200 ease-out",
+          activityPanelOpen && !activeCompareMode && CHAT_ACTIVITY_PANEL_WIDTH_CLASS,
           isNewEmptyChat
             ? "opacity-0 translate-y-20 scale-95 pointer-events-none"
             : "opacity-100 translate-y-0 scale-100 pointer-events-auto"

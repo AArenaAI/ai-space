@@ -10,6 +10,7 @@ import type { InferredGroup } from "@/lib/groups";
 import { isMessageGenerating } from "@/lib/chatContent";
 import { isTerminalMessage, resolveChatMessageRuntimeState } from "@/lib/chatMessageRuntimeState";
 import { isAssistantFailureState } from "@/lib/chatErrorState";
+import { CHAT_MESSAGE_ROW_CLASS } from "./chatLayout";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 import { AssistantMessageMeta } from "./AssistantMessageMeta";
 import MessageActions from "./MessageActions";
@@ -291,7 +292,7 @@ function MessageRow({
       data-generation-task-id={msg.generationTaskId ? String(msg.generationTaskId) : undefined}
       data-message-role={msg.role}
       style={!isUser && useContentVisibility && !isGenerating && Boolean(msg.content?.trim() || msg.completedAt) && (msg.content?.length || 0) > 2000 ? MESSAGE_ROW_CONTENT_VISIBILITY_STYLE : undefined}
-      className={cn("max-w-[800px] mx-auto px-4 py-4 rounded-2xl", isHighlighted && "bg-brand/10")}
+      className={cn(CHAT_MESSAGE_ROW_CLASS, "py-4 rounded-2xl", isHighlighted && "bg-brand/10")}
     >
       <div className={cn("flex gap-3 group", !suppressAppearAnimation && "animate-message-appear", isUser ? "justify-end" : "justify-start")}>
         <div className={cn("mt-1 shrink-0", isUser && !selectMode ? "w-7 invisible" : "w-7")}>
