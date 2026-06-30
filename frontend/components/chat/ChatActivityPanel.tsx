@@ -59,7 +59,25 @@ function formatReasoningSections(text: string) {
     .split(/\n{2,}|(?<=[。！？.!?])\s+(?=[\u4e00-\u9fa5A-Z])/)
     .map((item) => item.trim())
     .filter(Boolean)
-    .slice(0, 12);
+    .slice(0, 12)
+    .map((section) => {
+      const lines = section.split("\n").map((line) => line.trim()).filter(Boolean);
+      if (lines.length > 1) {
+        const first = lines[0];
+        const heading = first.match(/^#{1,4}\s+(.+)$/)?.[1]
+          || first.match(/^\*\*(.+?)\*\*$/)?.[1]
+          || first.match(/^(.{2,48})[：:]$/)?.[1];
+        if (heading) return { title: heading.trim(), body: lines.slice(1).join("\n") };
+      }
+      return { body: section };
+    });
+}
+
+function timelineDotClass(step: ChatStatusTimelineStep) {
+  if (step.status === "failed") return "border-red-400 bg-red-400";
+  if (step.status === "running") return "border-brand bg-brand shadow-[0_0_0_3px_rgba(124,92,255,0.12)]";
+  if (step.kind === "reasoning") return "border-text-tertiary bg-text-tertiary";
+  return "border-surface-border bg-surface-elevated";
 }
 
 export default function ChatActivityPanel({ message, model, onClose }: { message?: Message | null; model?: ChatModel; onClose: () => void }) {
@@ -106,15 +124,46 @@ export default function ChatActivityPanel({ message, model, onClose }: { message
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1" data-chat-activity-scroll="true">
-        <section className="mb-5">
-          <div className="mb-2 text-xs font-semibold text-text-secondary">思考</div>
-          <div className="space-y-2">
-            {timeline.length ? timeline.map((step, index) => (
-              <div key={`${step.id}:${index}`} className="flex items-start gap-2 rounded-xl px-1 py-1 text-xs text-text-secondary">
-                <span className="mt-0.5 shrink-0">{statusIcon(step)}</span>
-                <span className="min-w-0">{getActivityStepLabel(t, step, realtime?.generationStartedAt || message.generationStartedAt)}</span>
-              </div>
-            )) : (
+        <section className="mb-6">
+          <div className="mb-3 text-xs font-semibold text-text-secondary">思考</div>
+          <div className="relative space-y-0">
+            {timeline.length ? timeline.map((step, index) => {
+              const showReasoning = step.kind === "reasoning" && reasoning;
+              const isLast = index === timeline.length - 1;
+              return (
+                <div key={`${step.id}:${index}`} className="relative grid grid-cols-[18px_1fr] gap-3 pb-4 last:pb-0">
+                  {!isLast && <div className="absolute left-[8px] top-4 bottom-0 border-l border-dashed border-surface-border/80" aria-hidden="true" />}
+                  <span className={cn("relative z-10 mt-1 h-2.5 w-2.5 rounded-full border", timelineDotClass(step))} aria-hidden="true" />
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium text-text-secondary">{getActivityStepLabel(t, step, realtime?.generationStartedAt || message.generationStartedAt)}</div>
+                    {showReasoning && (
+                      <div className="mt-3">
+                        <button
+                          type="button"
+                          onClick={() => setReasoningOpen((value) => !value)}
+                          className="mb-2 inline-flex w-full items-center justify-between rounded-lg py-1 text-left text-xs font-medium text-text-tertiary hover:text-text-secondary"
+                        >
+                          <span>思考内容</span>
+                          <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", reasoningOpen && "rotate-180")} />
+                        </button>
+                        {reasoningOpen && (
+                          <div className="space-y-3 text-xs leading-relaxed text-text-tertiary">
+                            {reasoningSections.length ? reasoningSections.map((section, sectionIndex) => (
+                              <div key={`${sectionIndex}:${section.body.slice(0, 16)}`}>
+                                {section.title && <div className="mb-1 font-semibold text-text-secondary">{section.title}</div>}
+                                <div className="whitespace-pre-wrap">{section.body}</div>
+                              </div>
+                            )) : (
+                              <div className="whitespace-pre-wrap">{reasoning.slice(0, 2400)}{reasoning.length > 2400 ? "…" : ""}</div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            }) : (
               <div className="flex items-center gap-2 text-xs text-text-tertiary">
                 {active ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
                 <span>{active ? "正在处理" : "已完成"}</span>
@@ -122,30 +171,6 @@ export default function ChatActivityPanel({ message, model, onClose }: { message
             )}
           </div>
         </section>
-
-        {reasoning && (
-          <section className="mb-5">
-            <button
-              type="button"
-              onClick={() => setReasoningOpen((value) => !value)}
-              className="mb-2 inline-flex w-full items-center justify-between rounded-xl px-1 py-1 text-left text-xs font-semibold text-text-secondary hover:bg-surface-card/60"
-            >
-              <span>思考内容</span>
-              <ChevronDown className={cn("h-3.5 w-3.5 text-text-tertiary transition-transform", reasoningOpen && "rotate-180")} />
-            </button>
-            {reasoningOpen && (
-              <div className="max-h-72 overflow-y-auto space-y-2 border-l border-surface-border pl-3 text-xs leading-relaxed text-text-tertiary">
-                {reasoningSections.length ? reasoningSections.map((section, index) => (
-                  <div key={`${index}:${section.slice(0, 16)}`} className="rounded-xl bg-surface-card/40 px-2.5 py-2">
-                    {section}
-                  </div>
-                )) : (
-                  <div className="rounded-xl bg-surface-card/40 px-2.5 py-2">{reasoning.slice(0, 2400)}{reasoning.length > 2400 ? "…" : ""}</div>
-                )}
-              </div>
-            )}
-          </section>
-        )}
 
         {files.length > 0 && (
           <section className="mb-5">
