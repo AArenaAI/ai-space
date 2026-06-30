@@ -99,6 +99,7 @@ export function StreamingText({
   const Host = as;
   const [reasoningExpanded, setReasoningExpanded] = useState(true);
   const elapsedLabel = hasReason ? formatElapsedTime(generationElapsedMs(realtime), t) : "";
+  const showInitialReasoningStatus = isStreaming && !hasContent && !hasReason;
 
   return (
     <Host className={className}>
@@ -123,10 +124,27 @@ export function StreamingText({
           <StreamingMarkdownView content={parsed.answer} idleTimeout={80} keepRenderedOnContentChange isStreaming={stableMarkdownStreamingMode} />
         </span>
       )}
-      {!hasContent && !hasReason && (
+      {showInitialReasoningStatus && (
+        <div className="mb-2" data-chat-initial-reasoning-status="true">
+          <button
+            type="button"
+            aria-expanded={false}
+            onClick={() => onOpenActivity?.()}
+            className="inline-flex max-w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
+          >
+            <span className="text-xs font-medium">正在准备思考</span>
+            <span className="flex items-center gap-0.5" aria-hidden="true">
+              <span className="h-1 w-1 animate-pulse rounded-full bg-current [animation-delay:0ms]" />
+              <span className="h-1 w-1 animate-pulse rounded-full bg-current [animation-delay:160ms]" />
+              <span className="h-1 w-1 animate-pulse rounded-full bg-current [animation-delay:320ms]" />
+            </span>
+          </button>
+        </div>
+      )}
+      {!hasContent && !hasReason && !showInitialReasoningStatus && (
         <span className="block h-0 overflow-hidden" data-chat-empty-streaming-placeholder="true" aria-hidden="true" />
       )}
-      {isStreaming && (hasContent || hasReason) && <StreamingCursor />}
+      {isStreaming && (hasContent || hasReason || showInitialReasoningStatus) && <StreamingCursor />}
     </Host>
   );
 }
