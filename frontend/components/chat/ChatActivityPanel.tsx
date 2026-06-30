@@ -9,6 +9,7 @@ import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 import { getOrderedTimelineSteps, getTimelineStepLabel, type ChatStatusTimelineStep } from "@/lib/chatStatusTimeline";
 import { formatElapsedTime } from "@/lib/chatGenerationPhase";
 import { resolveChatMessageRuntimeState } from "@/lib/chatMessageRuntimeState";
+import { ensureTerminalAnswerStep, isLowSignalCompletedActivityStep } from "@/lib/chatActivityTimeline";
 
 function statusIcon(step: ChatStatusTimelineStep) {
   if (step.status === "failed") return <AlertCircle className="h-3.5 w-3.5 text-red-500" />;
@@ -30,19 +31,9 @@ function parseTimelineValue(value: unknown): ChatStatusTimelineStep[] | undefine
   return steps.length ? steps : undefined;
 }
 
-function stepDuration(step: ChatStatusTimelineStep) {
-  return Math.max(0, (step.endedAt || Date.now()) - step.startedAt);
-}
-
-function isLowSignalCompletedStep(step: ChatStatusTimelineStep) {
-  const duration = stepDuration(step);
-  if (duration >= 1000) return false;
-  return step.kind === "waiting_provider" || step.kind === "streaming_answer" || step.kind === "finalizing";
-}
-
 function getActivityStepLabel(t: (key: string, params?: Record<string, string>) => string, step: ChatStatusTimelineStep, generationStartedAt?: number, durationStartAt?: number) {
   const label = getTimelineStepLabel(t, step, generationStartedAt);
-  const duration = durationStartAt ? Math.max(0, (step.endedAt || Date.now()) - durationStartAt) : stepDuration(step);
+  const duration = durationStartAt ? Math.max(0, (step.endedAt || Date.now()) - durationStartAt) : Math.max(0, (step.endedAt || Date.now()) - step.startedAt);
   if (duration < 1000) return label;
   if (/\d+\s*(秒|s|sec|secs|second|seconds|分|m|min)/i.test(label)) return label;
   return `${label} · ${formatElapsedTime(duration, t)}`;
@@ -129,9 +120,14 @@ export default function ChatActivityPanel({ message, model, onClose }: { message
   const runtimeState = resolveChatMessageRuntimeState({ message, realtime, snapshotTimeline });
   const sources = Array.from(new Map(runtimeState.searchSources.map((source) => [source.url || source.title, source])).values());
   const inferredSourceCount = sources.length || countMarkdownSources(runtimeState.content);
-  const timeline = getOrderedTimelineSteps(runtimeState.statusTimeline)
+  const timeline = ensureTerminalAnswerStep({
+    timeline: getOrderedTimelineSteps(runtimeState.statusTimeline),
+    hasAnswer: Boolean((runtimeState.answerContent || runtimeState.content || "").trim()),
+    completedAt: runtimeState.completedAt,
+    generationStartedAt: runtimeState.generationStartedAt || message.createdAt,
+  })
     .map((step) => step.kind === "web_search" && !step.count && inferredSourceCount ? { ...step, count: inferredSourceCount } : step)
-    .filter((step) => !isLowSignalCompletedStep(step));
+    .filter((step) => !isLowSignalCompletedActivityStep(step));
   const files = message.files || [];
   const reasoning = runtimeState.reasoningContent.trim();
   const reasoningSections = formatReasoningSections(reasoning);
