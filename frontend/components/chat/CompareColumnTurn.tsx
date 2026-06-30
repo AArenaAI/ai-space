@@ -348,7 +348,7 @@ function CompareColumnTurn({
               </div>
             </div>
             <div className="flex min-w-0 flex-1 flex-col gap-1">
-              <div className={cn("max-w-full rounded-2xl rounded-bl-sm bg-surface-elevated px-4 py-3", isActivityOpen && activityLayout === "split" ? "w-full" : "w-fit") }>
+              <div className={cn("max-w-full rounded-2xl rounded-bl-sm border border-surface-border/45 bg-surface-card/35 px-4 py-3 shadow-none transition-colors group-hover:bg-surface-card/50", isActivityOpen && activityLayout === "split" ? "w-full" : "w-fit") }>
                 <div className={cn(isActivityOpen && activityLayout === "split" && "grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(260px,0.72fr)]") }>
                   <div className="min-w-0">
                     <div className="mb-2 flex items-center justify-between gap-2">
