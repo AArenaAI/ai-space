@@ -147,8 +147,7 @@ function CompareColumnTurn({
   const isGenerating = !!msg && isMessageGenerating(msg, isStreaming);
   const hasReasoningEntry = Boolean(msg?.reasoningContent?.trim() || /<think>[\s\S]*?<\/think>/i.test(msg?.content || ""));
   const hasSourceEntry = Boolean((msg?.searchSources?.length || 0) > 0 || (msg?.searchSourcesCount || 0) > 0);
-  const hasTimelineEntry = Boolean(msg?.statusTimeline?.length || msg?.activityStatus);
-  const fallbackActivityEntryLabel = hasSourceEntry ? "来源" : hasTimelineEntry ? "活动" : "";
+  const fallbackActivityEntryLabel = hasSourceEntry ? "来源" : "";
   // Compare columns do not support single-column regeneration yet: the current
   // onRegenerate action is conversation/global and would make both columns show
   // generation UI. Keep the button hidden until regenerate can target a specific
