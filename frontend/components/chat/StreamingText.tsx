@@ -39,11 +39,7 @@ function buildCanonicalReasoningContent(content: string, reasoningContent?: stri
   return `<think>${reasoningContent}</think>\n\n${content || ""}`.trim();
 }
 
-function reasoningElapsedMs(realtime: ReturnType<typeof useMessageRealtime>) {
-  const reasoningSteps = realtime?.statusTimeline?.filter((step) => step.kind === "reasoning") || [];
-  if (reasoningSteps.length) {
-    return reasoningSteps.reduce((sum, step) => sum + Math.max(0, (step.endedAt || Date.now()) - step.startedAt), 0);
-  }
+function generationElapsedMs(realtime: ReturnType<typeof useMessageRealtime>) {
   const start = realtime?.generationStartedAt || realtime?.updatedAt;
   const end = realtime?.completedAt || Date.now();
   return start ? Math.max(0, end - start) : 0;
@@ -102,7 +98,7 @@ export function StreamingText({
   const hasContent = !!parsed.answer.trim();
   const Host = as;
   const [reasoningExpanded, setReasoningExpanded] = useState(true);
-  const elapsedLabel = hasReason ? formatElapsedTime(reasoningElapsedMs(realtime), t) : "";
+  const elapsedLabel = hasReason ? formatElapsedTime(generationElapsedMs(realtime), t) : "";
 
   return (
     <Host className={className}>

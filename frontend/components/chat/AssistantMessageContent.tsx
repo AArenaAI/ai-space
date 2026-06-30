@@ -29,12 +29,7 @@ function mayStillRecoverMessage(msg: Message) {
   );
 }
 
-function reasoningElapsedMs(message: Message, realtime: ReturnType<typeof useMessageRealtime>) {
-  const timeline = realtime?.statusTimeline?.length ? realtime.statusTimeline : message.statusTimeline;
-  const reasoningSteps = timeline?.filter((step) => step.kind === "reasoning") || [];
-  if (reasoningSteps.length) {
-    return reasoningSteps.reduce((sum, step) => sum + Math.max(0, (step.endedAt || Date.now()) - step.startedAt), 0);
-  }
+function generationElapsedMs(message: Message, realtime: ReturnType<typeof useMessageRealtime>) {
   const start = realtime?.generationStartedAt || message.generationStartedAt || message.createdAt;
   const end = realtime?.completedAt || message.completedAt || Date.now();
   return start ? Math.max(0, end - start) : 0;
@@ -149,7 +144,7 @@ export function AssistantMessageContent({
     : message.content;
   const { reasoning, answer, isThinking } = parseThinkContent(finalContent);
   const cleanAnswer = sanitizeContent(answer);
-  const elapsedLabel = reasoning ? formatElapsedTime(reasoningElapsedMs(message, realtime), t) : "";
+  const elapsedLabel = reasoning ? formatElapsedTime(generationElapsedMs(message, realtime), t) : "";
 
   return (
     <div className={cn("prose prose-sm max-w-none", className)}>
