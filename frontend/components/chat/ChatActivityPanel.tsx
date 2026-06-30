@@ -112,8 +112,10 @@ export default function ChatActivityPanel({ message, model, onClose }: { message
     return () => { cancelled = true; };
   }, [message?.generationTaskId, message?.id]);
   if (!message) return null;
-  const timeline = getOrderedTimelineSteps(mergeTimeline(message, realtime, snapshotTimeline)).filter((step) => !isLowSignalCompletedStep(step));
   const sources = Array.from(new Map((realtime?.searchSources || message.searchSources || []).map((source) => [source.url || source.title, source])).values());
+  const timeline = getOrderedTimelineSteps(mergeTimeline(message, realtime, snapshotTimeline))
+    .map((step) => step.kind === "web_search" && !step.count && sources.length ? { ...step, count: sources.length } : step)
+    .filter((step) => !isLowSignalCompletedStep(step));
   const files = message.files || [];
   const reasoning = (realtime?.reasoningContent || message.reasoningContent || "").trim();
   const reasoningSections = formatReasoningSections(reasoning);
