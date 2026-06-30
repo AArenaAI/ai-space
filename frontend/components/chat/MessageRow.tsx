@@ -303,9 +303,11 @@ function MessageRow({
                   }
                 }}
                 className={cn(
-                  "w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center relative avatar-dropdown-trigger",
+                  "w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center relative avatar-dropdown-trigger transition-all duration-300",
+                  isStreaming && "animate-pulse",
                   group && group.assistantMessages.length > 1 && "cursor-pointer hover:bg-surface-elevated"
                 )}
+                style={{ boxShadow: isStreaming ? `0 0 0 3px ${(model?.color || "#6366f1")}22` : undefined }}
               >
                 <ModelAvatar meta={assistantAvatarMeta} size="lg" className="h-full w-full rounded-lg" />
                 {group && group.assistantMessages.length > 1 && (

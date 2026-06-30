@@ -156,16 +156,7 @@ export function AssistantMessageMeta({ msg, isStreaming, model, compact = false,
 
   return (
     <div className={cn("relative flex items-center gap-2", inlineStatus ? "justify-start" : "justify-between", compact ? "mb-0" : "mb-2")} onMouseLeave={() => setActiveStatusKey(null)}>
-      <div className="flex min-w-0 items-center gap-1.5">
-        <span
-          aria-hidden="true"
-          className={cn(
-            "relative inline-flex h-2 w-2 shrink-0 items-center justify-center rounded-full",
-            isStreaming && "animate-pulse"
-          )}
-        >
-          <span className="h-1.5 w-1.5 rounded-full opacity-80 shadow-[0_0_0_2px_rgba(99,102,241,0.08)]" style={{ backgroundColor: model.color }} />
-        </span>
+      <div className="flex min-w-0 items-center">
         <span className="truncate text-[11px] text-text-tertiary">{model.name}</span>
       </div>
       <div className={cn("flex shrink-0 items-center gap-1", inlineStatus ? "ml-0" : "ml-auto")}>
