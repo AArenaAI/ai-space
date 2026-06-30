@@ -145,6 +145,7 @@ function CompareColumnTurn({
   );
   const isStreaming = !!msg && isLastGroup && !terminalMessage && (isLoading || hasLiveGenerationSignal) && isMessageGenerating(msg, true);
   const isGenerating = !!msg && isMessageGenerating(msg, isStreaming);
+  const activityEntryLabel = isGenerating || isStreaming ? "思考中" : "思考与来源";
   // Compare columns do not support single-column regeneration yet: the current
   // onRegenerate action is conversation/global and would make both columns show
   // generation UI. Keep the button hidden until regenerate can target a specific
@@ -351,13 +352,13 @@ function CompareColumnTurn({
                 <div className={cn(isActivityOpen && activityLayout === "split" && "grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(260px,0.72fr)]") }>
                   <div className="min-w-0">
                     <div className="mb-2 flex items-center justify-between gap-2">
-                      {model && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} compact />}
+                      {model && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} compact inlineStatus />}
                       <button
                         type="button"
                         onClick={() => onOpenActivity?.(msg, activityLayout)}
                         className="shrink-0 rounded-lg px-1.5 py-1 text-[11px] font-medium text-text-tertiary transition-colors hover:bg-surface-card hover:text-text-secondary"
                       >
-                        思考与来源
+                        {activityEntryLabel} ›
                       </button>
                     </div>
                     <AssistantMessageContent
