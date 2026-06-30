@@ -166,6 +166,9 @@ func (d *OpenAIResponsesDecoder) parseEvent(name string, raw map[string]interfac
 			if missingText := missingOpenAICompletedSuffix(d.fullText.String(), extractTextFromRawResponse(resp)); missingText != "" {
 				d.pending = append(d.pending, &AIStreamEvent{Type: EventTextDelta, Delta: missingText})
 			}
+			if sources := ExtractOpenAIResponseSearchSources(resp); len(sources) > 0 {
+				d.pending = append(d.pending, &AIStreamEvent{Type: EventSearchDone, Delta: "网页搜索完成", SearchSources: sources})
+			}
 			if usage, ok := resp["usage"].(map[string]interface{}); ok {
 				tu := &TokenUsage{}
 				if v, ok := usage["input_tokens"].(float64); ok {
@@ -230,6 +233,54 @@ func (d *OpenAIResponsesDecoder) parseEvent(name string, raw map[string]interfac
 	}
 
 	return &AIStreamEvent{Type: EventTextDelta, Delta: ""}
+}
+
+func ExtractOpenAIResponseSearchSources(response map[string]interface{}) []SearchResult {
+	output, ok := response["output"].([]interface{})
+	if !ok {
+		return nil
+	}
+	seen := map[string]bool{}
+	var sources []SearchResult
+	for _, itemValue := range output {
+		item, ok := itemValue.(map[string]interface{})
+		if !ok || item["type"] != "message" {
+			continue
+		}
+		contentItems, ok := item["content"].([]interface{})
+		if !ok {
+			continue
+		}
+		for _, contentValue := range contentItems {
+			content, ok := contentValue.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			annotations, ok := content["annotations"].([]interface{})
+			if !ok {
+				continue
+			}
+			for _, annotationValue := range annotations {
+				annotation, ok := annotationValue.(map[string]interface{})
+				if !ok || annotation["type"] != "url_citation" {
+					continue
+				}
+				url, _ := annotation["url"].(string)
+				url = strings.TrimSpace(url)
+				if url == "" || seen[url] {
+					continue
+				}
+				seen[url] = true
+				title, _ := annotation["title"].(string)
+				title = strings.TrimSpace(title)
+				if title == "" {
+					title = url
+				}
+				sources = append(sources, SearchResult{Title: title, URL: url, Description: title})
+			}
+		}
+	}
+	return sources
 }
 
 func extractTextFromRawResponse(response map[string]interface{}) string {

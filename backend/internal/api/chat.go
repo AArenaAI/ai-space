@@ -1517,6 +1517,35 @@ func (h *ChatHandler) createBackgroundTask(responseID string, userID uint, guest
 	return &task
 }
 
+func mergeSearchSources(existing []services.SearchResult, extra []services.SearchResult) []services.SearchResult {
+	if len(existing) == 0 {
+		return append([]services.SearchResult(nil), extra...)
+	}
+	out := append([]services.SearchResult(nil), existing...)
+	seen := map[string]bool{}
+	for _, source := range out {
+		key := strings.TrimSpace(source.URL)
+		if key == "" {
+			key = strings.TrimSpace(source.Title)
+		}
+		if key != "" {
+			seen[key] = true
+		}
+	}
+	for _, source := range extra {
+		key := strings.TrimSpace(source.URL)
+		if key == "" {
+			key = strings.TrimSpace(source.Title)
+		}
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, source)
+	}
+	return out
+}
+
 func normalizeFileContextSearchSources(sources []services.FileContextSource) []services.SearchResult {
 	if len(sources) == 0 {
 		return nil
@@ -1649,7 +1678,10 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 			return
 		}
 		if forwardErr == nil && req.UseBackground && strings.TrimSpace(streamResult.ResponseID) != "" {
-			finalContent, finalUsage, finalErr := h.reconcileOpenAIBackgroundFinal(ctx, req.Task, req.AssistantMessageID, streamResult.ResponseID, content, streamResult.LastSequenceNumber)
+			finalContent, finalUsage, finalSources, finalErr := h.reconcileOpenAIBackgroundFinal(ctx, req.Task, req.AssistantMessageID, streamResult.ResponseID, content, streamResult.LastSequenceNumber)
+			if len(finalSources) > 0 {
+				streamResult.SearchSources = mergeSearchSources(streamResult.SearchSources, finalSources)
+			}
 			if finalErr != nil {
 				forwardErr = finalErr
 				streamResult.ErrorMessage = finalErr.Error()
@@ -1698,10 +1730,14 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 		if strings.TrimSpace(streamResult.ReasoningContent) != "" {
 			updates["reasoning_content"] = streamResult.ReasoningContent
 		}
-		if len(req.SearchSources) > 0 {
-			if sourcesJSON, err := json.Marshal(req.SearchSources); err == nil {
+		finalSearchSources := req.SearchSources
+		if len(streamResult.SearchSources) > 0 {
+			finalSearchSources = mergeSearchSources(finalSearchSources, streamResult.SearchSources)
+		}
+		if len(finalSearchSources) > 0 {
+			if sourcesJSON, err := json.Marshal(finalSearchSources); err == nil {
 				updates["search_sources"] = string(sourcesJSON)
-				updates["search_sources_count"] = len(req.SearchSources)
+				updates["search_sources_count"] = len(finalSearchSources)
 			}
 		}
 		_ = h.db.Model(&models.Message{}).Where("id = ?", req.AssistantMessageID).Updates(updates).Error
@@ -1751,9 +1787,9 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 	}
 }
 
-func (h *ChatHandler) reconcileOpenAIBackgroundFinal(ctx context.Context, task *models.AIBackgroundTask, assistantMessageID uint, responseID string, streamedContent string, lastSeq int64) (string, *services.TokenUsage, error) {
+func (h *ChatHandler) reconcileOpenAIBackgroundFinal(ctx context.Context, task *models.AIBackgroundTask, assistantMessageID uint, responseID string, streamedContent string, lastSeq int64) (string, *services.TokenUsage, []services.SearchResult, error) {
 	if task == nil || assistantMessageID == 0 || strings.TrimSpace(responseID) == "" {
-		return streamedContent, nil, nil
+		return streamedContent, nil, nil, nil
 	}
 
 	// OpenAI background+stream can close the streaming socket before the final
@@ -1767,7 +1803,7 @@ func (h *ChatHandler) reconcileOpenAIBackgroundFinal(ctx context.Context, task *
 	deadline := time.Now().Add(14*time.Minute + 15*time.Second)
 	for attempt := 0; time.Now().Before(deadline); attempt++ {
 		if h.isGenerationTaskCancelled(task.ID) {
-			return streamedContent, nil, fmt.Errorf("generation cancelled")
+			return streamedContent, nil, nil, fmt.Errorf("generation cancelled")
 		}
 		retrieveCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		raw, err = h.aiService.RetrieveOpenAIResponse(retrieveCtx, responseID)
@@ -1780,7 +1816,7 @@ func (h *ChatHandler) reconcileOpenAIBackgroundFinal(ctx context.Context, task *
 				break
 			}
 			if lastStatus == "failed" || lastStatus == "cancelled" || lastStatus == "incomplete" {
-				return streamedContent, nil, fmt.Errorf("OpenAI response status=%s", lastStatus)
+				return streamedContent, nil, nil, fmt.Errorf("OpenAI response status=%s", lastStatus)
 			}
 		}
 		wait := time.Duration(500+attempt*250) * time.Millisecond
@@ -1790,24 +1826,25 @@ func (h *ChatHandler) reconcileOpenAIBackgroundFinal(ctx context.Context, task *
 		time.Sleep(wait)
 	}
 	if err != nil {
-		return streamedContent, nil, err
+		return streamedContent, nil, nil, err
 	}
 	if !completed {
 		if lastStatus == "" {
 			lastStatus = "unknown"
 		}
-		return streamedContent, nil, fmt.Errorf("OpenAI response not completed yet status=%s", lastStatus)
+		return streamedContent, nil, nil, fmt.Errorf("OpenAI response not completed yet status=%s", lastStatus)
 	}
+	finalSources := services.ExtractOpenAIResponseSearchSources(raw)
 
 	finalText := services.ExtractOpenAIResponseText(raw)
 	if strings.TrimSpace(finalText) == "" {
-		return streamedContent, parseUsageFromResponse(raw), nil
+		return streamedContent, parseUsageFromResponse(raw), finalSources, nil
 	}
 
 	mergedContent := mergeReasoningPersistedContent(streamedContent, finalText)
 	missing := missingContentSuffix(streamedContent, mergedContent)
 	if strings.TrimSpace(missing) == "" {
-		return mergedContent, parseUsageFromResponse(raw), nil
+		return mergedContent, parseUsageFromResponse(raw), finalSources, nil
 	}
 
 	seq := lastSeq + 1
@@ -1821,7 +1858,7 @@ func (h *ChatHandler) reconcileOpenAIBackgroundFinal(ctx context.Context, task *
 		"_reconciled_final": true,
 	})
 	h.persistTaskEvent(task, assistantMessageID, seq, "delta", string(out))
-	return mergedContent, parseUsageFromResponse(raw), nil
+	return mergedContent, parseUsageFromResponse(raw), finalSources, nil
 }
 
 func missingContentSuffix(existing string, final string) string {
@@ -2023,6 +2060,9 @@ func (h *ChatHandler) updateStatusTimelineForTaskEvent(task *models.AIBackground
 				kind, _ = activityMeta["kind"].(string)
 				status, _ = activityMeta["status"].(string)
 				label, _ = activityMeta["label"].(string)
+				if n, ok := activityMeta["sources_count"].(float64); ok {
+					count = int(n)
+				}
 				if status == "searching" {
 					status = "running"
 				}
@@ -2211,6 +2251,7 @@ type UnifiedStreamResult struct {
 	Recoverable        bool
 	RetryAfterMs       int
 	ErrorMeta          map[string]interface{}
+	SearchSources      []services.SearchResult
 }
 
 var geminiReasoningTextPrefixPattern = regexp.MustCompile(`^\s*(思考过程|思考|分析|推理过程)\s*[:：]\s*`)
@@ -2587,13 +2628,19 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 				if label == "" {
 					label = activityKind
 				}
+				activityMeta := map[string]interface{}{
+					"kind":   activityKind,
+					"status": activityStatus,
+					"label":  label,
+				}
+				if len(event.SearchSources) > 0 {
+					outcome.SearchSources = mergeSearchSources(outcome.SearchSources, event.SearchSources)
+					activityMeta["sources_count"] = len(outcome.SearchSources)
+					activityMeta["sources"] = outcome.SearchSources
+				}
 				if err := writeDataEvent("activity_meta", map[string]interface{}{
-					"choices": []map[string]interface{}{{"delta": map[string]string{"content": ""}}},
-					"_activity_meta": map[string]interface{}{
-						"kind":   activityKind,
-						"status": activityStatus,
-						"label":  label,
-					},
+					"choices":        []map[string]interface{}{{"delta": map[string]string{"content": ""}}},
+					"_activity_meta": activityMeta,
 				}); err != nil {
 					content, reasoning := getSnapshot()
 					outcome.FullContent = strings.TrimSpace(content)

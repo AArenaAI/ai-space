@@ -155,6 +155,9 @@ func (d *OpenAIResponsesTypedDecoder) parseTypedEvent(event responses.ResponseSt
 		if missingText := missingOpenAICompletedSuffix(d.fullText.String(), extractTextFromTypedResponse(completed.Response)); missingText != "" {
 			d.pending = append(d.pending, &AIStreamEvent{Type: EventTextDelta, Delta: missingText})
 		}
+		if sources := extractSearchSourcesFromTypedResponse(completed.Response); len(sources) > 0 {
+			d.pending = append(d.pending, &AIStreamEvent{Type: EventSearchDone, Delta: "网页搜索完成", SearchSources: sources})
+		}
 		if completed.Response.Usage.InputTokens > 0 || completed.Response.Usage.OutputTokens > 0 || completed.Response.Usage.TotalTokens > 0 {
 			d.pending = append(d.pending, &AIStreamEvent{Type: EventUsage, Usage: &TokenUsage{
 				PromptTokens:     int(completed.Response.Usage.InputTokens),
@@ -211,6 +214,34 @@ func (d *OpenAIResponsesTypedDecoder) parseTypedEvent(event responses.ResponseSt
 	default:
 		return nil
 	}
+}
+
+func extractSearchSourcesFromTypedResponse(response responses.Response) []SearchResult {
+	seen := map[string]bool{}
+	var sources []SearchResult
+	for _, item := range response.Output {
+		if item.Type != "message" {
+			continue
+		}
+		for _, content := range item.Content {
+			for _, annotation := range content.Annotations {
+				if annotation.Type != "url_citation" {
+					continue
+				}
+				url := strings.TrimSpace(annotation.URL)
+				if url == "" || seen[url] {
+					continue
+				}
+				seen[url] = true
+				title := strings.TrimSpace(annotation.Title)
+				if title == "" {
+					title = url
+				}
+				sources = append(sources, SearchResult{Title: title, URL: url, Description: title})
+			}
+		}
+	}
+	return sources
 }
 
 func extractTextFromTypedResponse(response responses.Response) string {
