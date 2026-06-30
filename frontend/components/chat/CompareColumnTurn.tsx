@@ -146,8 +146,6 @@ function CompareColumnTurn({
   const isStreaming = !!msg && isLastGroup && !terminalMessage && (isLoading || hasLiveGenerationSignal) && isMessageGenerating(msg, true);
   const isGenerating = !!msg && isMessageGenerating(msg, isStreaming);
   const hasReasoningEntry = Boolean(msg?.reasoningContent?.trim() || /<think>[\s\S]*?<\/think>/i.test(msg?.content || ""));
-  const hasSourceEntry = Boolean((msg?.searchSources?.length || 0) > 0 || (msg?.searchSourcesCount || 0) > 0);
-  const fallbackActivityEntryLabel = hasSourceEntry ? "来源" : "";
   // Compare columns do not support single-column regeneration yet: the current
   // onRegenerate action is conversation/global and would make both columns show
   // generation UI. Keep the button hidden until regenerate can target a specific
@@ -355,15 +353,7 @@ function CompareColumnTurn({
                   <div className="min-w-0">
                     <div className="mb-2 flex items-center justify-between gap-2">
                       {model && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} compact inlineStatus />}
-                      {!hasReasoningEntry && fallbackActivityEntryLabel && (
-                        <button
-                          type="button"
-                          onClick={() => onOpenActivity?.(msg, activityLayout)}
-                          className="shrink-0 rounded-lg px-1.5 py-1 text-[11px] font-medium text-text-tertiary transition-colors hover:bg-surface-card hover:text-text-secondary"
-                        >
-                          {fallbackActivityEntryLabel} ›
-                        </button>
-                      )}
+
                     </div>
                     <AssistantMessageContent
                       message={msg}
