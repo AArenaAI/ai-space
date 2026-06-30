@@ -281,6 +281,8 @@ function MessageRow({
       ref={rowRef}
       data-chat-message-row="true"
       data-message-id={displayMessageId || msg.id}
+      data-server-message-id={msg.serverMessageId ? String(msg.serverMessageId) : undefined}
+      data-generation-task-id={msg.generationTaskId ? String(msg.generationTaskId) : undefined}
       data-message-role={msg.role}
       style={!isUser && useContentVisibility && !isGenerating && Boolean(msg.content?.trim() || msg.completedAt) && (msg.content?.length || 0) > 2000 ? MESSAGE_ROW_CONTENT_VISIBILITY_STYLE : undefined}
       className={cn("max-w-[800px] mx-auto px-4 py-4 rounded-2xl", isHighlighted && "bg-brand/10")}

@@ -34,6 +34,8 @@ export type ConversationRestoreMessage = ForkChatMessage & {
   lastSequence?: number;
   activityStatus?: unknown;
   serverGenerationStatus?: string;
+  stopped?: boolean;
+  errorCode?: string;
 };
 
 export type ConversationRestoreStatusResponse = {

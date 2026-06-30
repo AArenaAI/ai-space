@@ -574,6 +574,14 @@ export function useChatConversationRestoreRuntime({
               if (entry.convId === loadConversationId) delete pendingLocalAssistantsRef.current[id];
             });
           }
+          const hasBackendRunningAssistant = restoreState.mergedMessages.some((item) =>
+            item.role === "assistant" &&
+            Boolean(item.serverMessageId || item.generationTaskId) &&
+            !item.completedAt &&
+            !item.stopped &&
+            !item.errorCode &&
+            (item.serverGenerationStatus === "running" || item.serverGenerationStatus === "streaming" || item.serverGenerationStatus === "queued" || Boolean(item.generationTaskId))
+          );
           const pendingLocalMessagesFromRef = backendLastAssistantCompleted ? [] : Object.entries(pendingLocalAssistantsRef?.current || {})
             .filter(([, entry]) => entry.convId === loadConversationId)
             .map(([id, entry]) => ({ id, message: entry.message }))
@@ -581,7 +589,7 @@ export function useChatConversationRestoreRuntime({
               if (restoreState.mergedMessages.some((item) => item.id === message.id)) return false;
               const supersededByServerAssistant = restoreState.mergedMessages.some((item) =>
                 item.role === "assistant" &&
-                Boolean(item.content?.trim() || item.completedAt || item.serverGenerationStatus === "completed") &&
+                (Boolean(item.content?.trim() || item.completedAt || item.serverGenerationStatus === "completed") || (hasBackendRunningAssistant && !message.serverMessageId && !message.generationTaskId)) &&
                 (item.createdAt || 0) >= (message.createdAt || 0) - 5000
               );
               if (supersededByServerAssistant) {
