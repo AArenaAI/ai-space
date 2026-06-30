@@ -34,7 +34,7 @@ export type ChatCompareGroupRowProps = {
   onSaveToNote?: (content: string) => void;
   onAssistantViewed?: (messageId: string) => void;
   onOpenActivity?: (message: Message, layout: CompareActivityLayout) => void;
-  activeActivityMessageId?: string | null;
+  activeActivityMessageIds?: Set<string>;
   activityLayout?: CompareActivityLayout;
   initialReadingAssistantIds?: Set<string>;
   viewedAssistantIds?: Set<string>;
@@ -71,7 +71,7 @@ function ChatCompareGroupRow({
   onSaveToNote,
   onAssistantViewed,
   onOpenActivity,
-  activeActivityMessageId,
+  activeActivityMessageIds,
   activityLayout = "inline",
   initialReadingAssistantIds,
   viewedAssistantIds,
@@ -137,7 +137,7 @@ function ChatCompareGroupRow({
                 onSaveToNote={onSaveToNote}
                 onAssistantViewed={onAssistantViewed}
                 onOpenActivity={onOpenActivity}
-                isActivityOpen={Boolean(assistant && activeActivityMessageId === String(assistant.id) && activityLayout !== "dock")}
+                isActivityOpen={Boolean(assistant && activeActivityMessageIds?.has(String(assistant.id)) && activityLayout !== "dock")}
                 activityLayout={activityLayout}
                 isInitialReadingAssistant={assistant ? initialReadingAssistantIds?.has(String(assistant.id)) : false}
                 isViewedAssistant={assistant ? viewedAssistantIds?.has(String(assistant.id)) : false}

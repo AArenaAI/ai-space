@@ -285,6 +285,7 @@ function MessageList({
   const historyRichLiteFallbackTimerRef = useRef<number>(0);
   const [activeOverviewMessageId, setActiveOverviewMessageId] = useState<string | null>(null);
   const [activeActivityMessageId, setActiveActivityMessageId] = useState<string | null>(null);
+  const [activeCompareActivityMessageIds, setActiveCompareActivityMessageIds] = useState<Set<string>>(() => new Set());
   const [compareActivityLayout, setCompareActivityLayout] = useCompareActivityLayout();
   const overviewJumpActiveRef = useRef<{ id: string; until: number } | null>(null);
   const overviewBottomLockUntilRef = useRef(0);
@@ -1085,7 +1086,17 @@ function MessageList({
   }, [activeActivityMessageId, messages, visibleMessages]);
   const activeActivityModel = activeActivityMessage?.model ? models.find((model) => model.id === activeActivityMessage.model) : undefined;
   const handleCompareOpenActivity = useCallback((message: Message, layout: CompareActivityLayout) => {
-    setActiveActivityMessageId((current) => current === String(message.id) && layout !== "dock" ? null : String(message.id));
+    const id = String(message.id);
+    if (layout === "dock") {
+      setActiveActivityMessageId((current) => current === id ? null : id);
+      return;
+    }
+    setActiveCompareActivityMessageIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -2128,7 +2139,7 @@ function MessageList({
                   onSaveToNote={onSaveAssistantToNote}
                   onAssistantViewed={handleAssistantViewed}
                   onOpenActivity={handleCompareOpenActivity}
-                  activeActivityMessageId={activeActivityMessageId}
+                  activeActivityMessageIds={activeCompareActivityMessageIds}
                   activityLayout={compareActivityLayout}
                   initialReadingAssistantIds={renderedWindowStableAssistantIds}
                   viewedAssistantIds={viewedAssistantIds}
