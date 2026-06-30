@@ -128,6 +128,14 @@ func (h *ChatBootstrapHandler) BuildPayload(c *gin.Context) (gin.H, int, bool) {
 		workspaceID = defaultWorkspaceID
 	}
 
+	conversationID := parseOptionalUint(firstNonEmptyBootstrap(c.Query("id"), c.Query("conversation_id")))
+	if conversationID > 0 {
+		var routeConv models.Conversation
+		if err := h.db.Select("id", "workspace_id").Where("id = ? AND user_id = ?", conversationID, userID).First(&routeConv).Error; err == nil && routeConv.WorkspaceID > 0 {
+			workspaceID = routeConv.WorkspaceID
+		}
+	}
+
 	conversationLimit := defaultChatBootstrapConversationLimit
 	if limit, err := strconv.Atoi(c.Query("conversation_limit")); err == nil && limit > 0 && limit <= 100 {
 		conversationLimit = limit
@@ -166,7 +174,6 @@ func (h *ChatBootstrapHandler) BuildPayload(c *gin.Context) (gin.H, int, bool) {
 		delete(payload, "token")
 	}
 
-	conversationID := parseOptionalUint(firstNonEmptyBootstrap(c.Query("id"), c.Query("conversation_id")))
 	if conversationID > 0 {
 		payload["requested_conversation_id"] = conversationID
 		meta, snapshot, ok := h.buildConversationBootstrap(c, userID, conversationID)
@@ -334,10 +341,12 @@ func (h *ChatBootstrapHandler) listBootstrapConversations(userID uint, workspace
 
 	type ConversationWithModel struct {
 		models.Conversation
-		LatestModel string `gorm:"column:latest_model" json:"-"`
+		LatestModel    string `gorm:"column:latest_model" json:"-"`
+		LatestActivity string `gorm:"column:latest_activity_at" json:"-"`
 	}
+	latestActivitySQL := conversationLatestActivitySQL(h.db)
 	query := h.db.Table("conversations").
-		Select("conversations.*, (SELECT model FROM messages WHERE messages.conversation_id = conversations.id AND messages.role = 'assistant' AND messages.model <> '' ORDER BY messages.created_at DESC, messages.id DESC LIMIT 1) as latest_model").
+		Select("conversations.*, (SELECT model FROM messages WHERE messages.conversation_id = conversations.id AND messages.role = 'assistant' AND messages.model <> '' ORDER BY messages.created_at DESC, messages.id DESC LIMIT 1) as latest_model, "+latestActivitySQL+" as latest_activity_at").
 		Where("conversations.user_id = ?", userID).
 		Where("conversations.deleted_at IS NULL").
 		Where("NOT EXISTS (SELECT 1 FROM notebook_conversations WHERE notebook_conversations.conversation_id = conversations.id)")
@@ -345,7 +354,7 @@ func (h *ChatBootstrapHandler) listBootstrapConversations(userID uint, workspace
 		query = query.Where("conversations.workspace_id = ?", workspaceID)
 	}
 	var rows []ConversationWithModel
-	if err := query.Order("conversations.pinned DESC, conversations.updated_at DESC").Limit(limit).Find(&rows).Error; err != nil {
+	if err := query.Order("conversations.pinned DESC, latest_activity_at DESC, conversations.updated_at DESC").Limit(limit).Find(&rows).Error; err != nil {
 		return []models.Conversation{}, 0
 	}
 	conversations := make([]models.Conversation, len(rows))
@@ -353,6 +362,7 @@ func (h *ChatBootstrapHandler) listBootstrapConversations(userID uint, workspace
 		if rows[i].LatestModel != "" {
 			rows[i].Conversation.Model = rows[i].LatestModel
 		}
+		applyConversationActivityTimestamp(&rows[i].Conversation, rows[i].LatestActivity)
 		conversations[i] = rows[i].Conversation
 	}
 	return conversations, total

@@ -120,23 +120,6 @@ function sortConversations(conversations: Conversation[]): Conversation[] {
   });
 }
 
-function mergeCurrentConversation(conversations: Conversation[], current?: Partial<Conversation> | null): Conversation[] {
-  const base = conversations.filter(isMainChatConversation);
-  if (!current?.id) return sortConversations(base);
-  const now = new Date().toISOString();
-  const conv: Conversation = {
-    id: Number(current.id),
-    title: current.title || "Untitled",
-    model: current.model || "",
-    pinned: !!current.pinned,
-    created_at: current.created_at || current.updated_at || now,
-    updated_at: current.updated_at || current.created_at || now,
-    skill_key: current.skill_key,
-  };
-  if (!isMainChatConversation(conv)) return sortConversations(base);
-  return sortConversations([conv, ...base.filter((item) => item.id !== conv.id)]);
-}
-
 function sortGroupLabels(labels: string[], t: (key: string) => string): string[] {
   const groupOrder = getGroupOrder(t);
   const fixed = groupOrder.filter((g) => labels.includes(g));
@@ -593,7 +576,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     chatBootstrapReadyRef.current = true;
     if (chatBootstrap.user) setUser(chatBootstrap.user);
     if (Array.isArray(chatBootstrap.sidebar?.conversations)) {
-      const next = mergeCurrentConversation(chatBootstrap.sidebar.conversations as Conversation[], chatBootstrap.conversation as Partial<Conversation> | undefined);
+      const next = sortConversations((chatBootstrap.sidebar.conversations as Conversation[]).filter(isMainChatConversation));
       cachedConversations = next;
       setConversations(next);
       setLoading(false);
@@ -608,7 +591,6 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     const handleBootstrapReady = (event: Event) => {
       const detail = (event as CustomEvent<{
         user?: any;
-        conversation?: Partial<Conversation>;
         sidebar?: { conversations?: Conversation[]; recent_notebooks?: any[] };
       }>).detail;
       if (!detail) return;
@@ -617,7 +599,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
         setUser(detail.user);
       }
       if (Array.isArray(detail.sidebar?.conversations)) {
-        const next = mergeCurrentConversation(detail.sidebar.conversations, detail.conversation);
+        const next = sortConversations(detail.sidebar.conversations.filter(isMainChatConversation));
         cachedConversations = next;
         setConversations(next);
         setLoading(false);
@@ -828,18 +810,11 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
       if (rawId == null) return;
       const targetId = typeof rawId === "string" ? Number(rawId) : rawId;
       const updatedAt = d.updated_at || new Date().toISOString();
-      updateConversationsStable(prev => {
-        const exists = prev.some(c => c.id === targetId);
-        if (exists) return sortConversations(prev.map(c => c.id === targetId ? { ...c, updated_at: updatedAt } : c));
-        if (targetId === Number(effectiveRouteConvId) && chatBootstrap?.conversation) {
-          return mergeCurrentConversation(prev, { ...(chatBootstrap.conversation as Partial<Conversation>), updated_at: updatedAt });
-        }
-        return sortConversations(prev);
-      });
+      updateConversationsStable(prev => sortConversations(prev.map(c => c.id === targetId ? { ...c, updated_at: updatedAt } : c)));
     };
     window.addEventListener("conversation-updated", h);
     return () => window.removeEventListener("conversation-updated", h);
-  }, [chatBootstrap, effectiveRouteConvId, updateConversationsStable]);
+  }, [updateConversationsStable]);
   // 工作区切换 / 登录登出时刷新
   useEffect(() => { const h = () => { cachedConversations = null; loadConversations(); }; window.addEventListener("workspace-changed", h); window.addEventListener("user-login", h); window.addEventListener("user-logout", h); return () => { window.removeEventListener("workspace-changed", h); window.removeEventListener("user-login", h); window.removeEventListener("user-logout", h); }; }, [loadConversations]);
 

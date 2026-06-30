@@ -331,8 +331,9 @@ export default function MobileNav() {
   useEffect(() => {
     const h = (e: Event) => {
       const d = (e as CustomEvent).detail;
-      if (d?.id == null) return;
-      const targetId = typeof d.id === "string" ? Number(d.id) : d.id;
+      const rawId = d?.id ?? d?.conversationId;
+      if (rawId == null) return;
+      const targetId = typeof rawId === "string" ? Number(rawId) : rawId;
       const updatedAt = d.updated_at || new Date().toISOString();
       updateConversationsStable(prev => sortConversations(prev.map(c => c.id === targetId ? { ...c, updated_at: updatedAt } : c)));
     };

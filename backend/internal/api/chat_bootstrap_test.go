@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
+	"time"
 
 	"aipool-backend/internal/config"
 	"aipool-backend/internal/models"
@@ -204,5 +206,77 @@ func TestChatBootstrapIncludesStableConversationSnapshot(t *testing.T) {
 	}
 	if len(payload.Sidebar.RecentNotebooks) != 1 || payload.Sidebar.RecentNotebooks[0].ID != notebook.ID || payload.Sidebar.RecentNotebooks[0].Title != notebook.Title {
 		t.Fatalf("unexpected recent notebooks: %+v", payload.Sidebar.RecentNotebooks)
+	}
+}
+
+func TestChatBootstrapConversationListUsesLatestActivityAndRouteWorkspace(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&models.User{}, &models.Workspace{}, &models.Conversation{}, &models.Message{}, &models.AIBackgroundTask{}, &models.NotebookConversation{}, &models.RefreshToken{}, &models.ModelConfig{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	user := models.User{Email: "activity@example.com", Password: "x", Name: "Activity", Role: "user", PlanTier: "free"}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	defaultWS := models.Workspace{UserID: user.ID, Name: "默认", IsDefault: true}
+	otherWS := models.Workspace{UserID: user.ID, Name: "另一个"}
+	if err := db.Create(&defaultWS).Error; err != nil {
+		t.Fatalf("create default workspace: %v", err)
+	}
+	if err := db.Create(&otherWS).Error; err != nil {
+		t.Fatalf("create other workspace: %v", err)
+	}
+	old := time.Now().Add(-48 * time.Hour)
+	olderConv := models.Conversation{UserID: user.ID, WorkspaceID: otherWS.ID, Title: "older conv", CreatedAt: old, UpdatedAt: old}
+	activeConv := models.Conversation{UserID: user.ID, WorkspaceID: otherWS.ID, Title: "active conv", CreatedAt: old, UpdatedAt: old}
+	if err := db.Create(&olderConv).Error; err != nil {
+		t.Fatalf("create older conv: %v", err)
+	}
+	if err := db.Create(&activeConv).Error; err != nil {
+		t.Fatalf("create active conv: %v", err)
+	}
+	latest := time.Now().Add(-30 * time.Minute)
+	if err := db.Create(&models.Message{ConversationID: activeConv.ID, Role: "assistant", Content: "latest", CreatedAt: latest, CompletedAt: &latest}).Error; err != nil {
+		t.Fatalf("create latest message: %v", err)
+	}
+
+	handler := NewChatBootstrapHandler(db, &config.Config{JWTSecret: "test-secret"})
+	router := gin.New()
+	router.GET("/api/chat/bootstrap", func(c *gin.Context) {
+		c.Set("userID", user.ID)
+		handler.Get(c)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/bootstrap?id="+strconv.Itoa(int(activeConv.ID)), nil)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", res.Code, res.Body.String())
+	}
+	var payload struct {
+		Workspace struct {
+			CurrentID uint `json:"current_id"`
+		} `json:"workspace"`
+		Sidebar struct {
+			Conversations []models.Conversation `json:"conversations"`
+		} `json:"sidebar"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if payload.Workspace.CurrentID != otherWS.ID {
+		t.Fatalf("bootstrap should switch sidebar workspace to route conversation workspace: got %d want %d", payload.Workspace.CurrentID, otherWS.ID)
+	}
+	if len(payload.Sidebar.Conversations) < 2 {
+		t.Fatalf("expected both workspace conversations, got %+v", payload.Sidebar.Conversations)
+	}
+	if payload.Sidebar.Conversations[0].ID != activeConv.ID {
+		t.Fatalf("latest message activity should sort active conversation first, got %+v", payload.Sidebar.Conversations)
+	}
+	if !payload.Sidebar.Conversations[0].UpdatedAt.After(old) {
+		t.Fatalf("returned updated_at should reflect latest activity, got %s old %s", payload.Sidebar.Conversations[0].UpdatedAt, old)
 	}
 }
