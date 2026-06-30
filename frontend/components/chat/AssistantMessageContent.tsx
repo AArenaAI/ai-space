@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ComponentType } from "react";
-import { AlertCircle, RotateCcw } from "lucide-react";
+import { AlertCircle, RefreshCw, RotateCcw } from "lucide-react";
 import { Message } from "@/lib/chatTypes";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
@@ -18,6 +18,39 @@ type MarkdownRendererComponent = ComponentType<{ content: string; shouldHydrateR
 
 const JUST_COMPLETED_REASONING_EXPAND_MS = 5 * 60 * 1000;
 const JUST_COMPLETED_STREAMING_HOLD_MS = 800;
+
+function getAssistantErrorCopy(message: Message, t: (key: string, params?: Record<string, string>) => string) {
+  if (!(message.errorCode || message.serverGenerationStatus === "failed")) return null;
+  const raw = (message.content || message.errorCode || "").trim();
+  const normalized = raw.toLowerCase();
+  if (!raw || normalized === "failed to fetch" || normalized.includes("networkerror") || normalized.includes("load failed")) {
+    return t("chat.error.networkInline");
+  }
+  if (normalized.includes("insufficient") || normalized.includes("balance") || normalized.includes("credit") || normalized.includes("quota")) {
+    return t("chat.error.balanceInline");
+  }
+  return raw.length > 96 ? t("chat.error.genericInline") : raw;
+}
+
+function AssistantInlineError({ message, onRegenerate, t }: { message: Message; onRegenerate?: () => void; t: (key: string, params?: Record<string, string>) => string }) {
+  const copy = getAssistantErrorCopy(message, t) || t("chat.error.genericInline");
+  return (
+    <div className="my-1 inline-flex max-w-full items-center gap-2 rounded-xl border border-red-500/10 bg-red-500/[0.045] px-3 py-2 text-sm leading-relaxed text-text-secondary dark:bg-red-400/[0.07]">
+      <AlertCircle className="h-4 w-4 shrink-0 text-red-500/70" />
+      <span className="min-w-0 break-words">{copy}</span>
+      {message.retryable !== false && onRegenerate && (
+        <button
+          type="button"
+          onClick={onRegenerate}
+          className="ml-1 inline-flex shrink-0 items-center gap-1 rounded-lg border border-surface-border/70 bg-surface-card/70 px-2 py-1 text-xs font-medium text-text-secondary transition-colors hover:border-red-500/20 hover:bg-surface-elevated hover:text-text-primary"
+        >
+          <RefreshCw className="h-3 w-3" />
+          {t("chat.action.regenerate")}
+        </button>
+      )}
+    </div>
+  );
+}
 
 function mayStillRecoverMessage(msg: Message) {
   return !isTerminalMessage(msg) && !!(
@@ -104,6 +137,10 @@ export function AssistantMessageContent({
     const timer = window.setTimeout(() => setKeepReasoningExpanded(false), JUST_COMPLETED_REASONING_EXPAND_MS);
     return () => window.clearTimeout(timer);
   }, [finalizingRealtime, generating, message.id, runtimeState.reasoningContent]);
+
+  if (message.errorCode || message.serverGenerationStatus === "failed" || runtimeState.errorCode || runtimeState.phase === "failed") {
+    return <AssistantInlineError message={{ ...message, content: runtimeState.content || message.content, errorCode: runtimeState.errorCode || message.errorCode }} onRegenerate={onRegenerate} t={t} />;
+  }
 
   if (shouldRenderStreamingText) {
     return (
