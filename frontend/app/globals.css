@@ -852,6 +852,19 @@
   }
 }
 
+@keyframes chat-thinking-dot {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  40% {
+    transform: translateY(-3px);
+    opacity: 0.95;
+  }
+}
+
 @keyframes notebook-studio-loading {
   0% {
     transform: translateX(-105%);

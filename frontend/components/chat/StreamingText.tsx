@@ -13,6 +13,16 @@ function StreamingCursor() {
   return <span className="inline-block w-[2px] h-[1.2em] bg-brand ml-0.5 animate-cursor-blink align-middle" />;
 }
 
+function ThinkingDots() {
+  return (
+    <span className="inline-flex h-4 items-center gap-1 text-text-tertiary" aria-label="正在准备回复">
+      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-75 [animation:chat-thinking-dot_1.25s_ease-in-out_infinite] [animation-delay:0ms]" />
+      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-75 [animation:chat-thinking-dot_1.25s_ease-in-out_infinite] [animation-delay:150ms]" />
+      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-75 [animation:chat-thinking-dot_1.25s_ease-in-out_infinite] [animation-delay:300ms]" />
+    </span>
+  );
+}
+
 function parseThinkContent(content: string): { reasoning: string | null; answer: string; isThinking: boolean } {
   const startIdx = content.indexOf("<think>");
   if (startIdx === -1) return { reasoning: null, answer: content, isThinking: false };
@@ -130,21 +140,16 @@ export function StreamingText({
             type="button"
             aria-expanded={false}
             onClick={() => onOpenActivity?.()}
-            className="inline-flex max-w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
+            className="inline-flex max-w-full items-center rounded-lg px-1.5 py-1 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
           >
-            <span className="text-xs font-medium">正在准备思考</span>
-            <span className="flex items-center gap-0.5" aria-hidden="true">
-              <span className="h-1 w-1 animate-pulse rounded-full bg-current [animation-delay:0ms]" />
-              <span className="h-1 w-1 animate-pulse rounded-full bg-current [animation-delay:160ms]" />
-              <span className="h-1 w-1 animate-pulse rounded-full bg-current [animation-delay:320ms]" />
-            </span>
+            <ThinkingDots />
           </button>
         </div>
       )}
       {!hasContent && !hasReason && !showInitialReasoningStatus && (
         <span className="block h-0 overflow-hidden" data-chat-empty-streaming-placeholder="true" aria-hidden="true" />
       )}
-      {isStreaming && (hasContent || hasReason || showInitialReasoningStatus) && <StreamingCursor />}
+      {isStreaming && (hasContent || hasReason) && <StreamingCursor />}
     </Host>
   );
 }
