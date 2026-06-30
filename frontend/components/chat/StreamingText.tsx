@@ -16,9 +16,9 @@ function StreamingCursor() {
 function ThinkingDots() {
   return (
     <span className="inline-flex h-4 items-center gap-1 text-text-tertiary" aria-label="正在准备回复">
-      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-75 [animation:chat-thinking-dot_1.2s_ease-in-out_infinite] [animation-delay:0ms]" />
-      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-75 [animation:chat-thinking-dot_1.2s_ease-in-out_infinite] [animation-delay:180ms]" />
-      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-75 [animation:chat-thinking-dot_1.2s_ease-in-out_infinite] [animation-delay:360ms]" />
+      <span className="chat-thinking-dot h-1.5 w-1.5 rounded-full bg-current opacity-75" style={{ animationDelay: "0ms" }} />
+      <span className="chat-thinking-dot h-1.5 w-1.5 rounded-full bg-current opacity-75" style={{ animationDelay: "180ms" }} />
+      <span className="chat-thinking-dot h-1.5 w-1.5 rounded-full bg-current opacity-75" style={{ animationDelay: "360ms" }} />
     </span>
   );
 }

@@ -837,6 +837,14 @@
   display: none;
 }
 
+.chat-thinking-dot {
+  animation-name: chat-thinking-dot;
+  animation-duration: 1.2s;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-fill-mode: both;
+}
+
 @keyframes chat-thinking-dot {
   0%,
   60%,
