@@ -73,7 +73,9 @@ function loadModule(file) {
           const assistant = { id: createId(), role: "assistant", content: "", model: modelId, createdAt: now(), searchStatus: search ? "searching" : undefined };
           const user = skipUserMessage ? { id: createId(), role: "user", content, createdAt: now() } : { id: createId(), role: "user", content: content.trim(), files: attachments || [], createdAt: now() };
           return {
+            mode: skipUserMessage ? "skip-user" : "normal",
             assistantMessage: assistant,
+            userMessage: skipUserMessage ? undefined : user,
             contextMessages: [...messages, user],
             visibleMessages: skipUserMessage ? [assistant] : [user, assistant],
           };
@@ -231,7 +233,7 @@ async function testSingleSendCreatesConversationAndRunsRequest() {
   assert.equal(events.find((e) => e[0] === "created")?.[1], 42);
   assert.equal(state.messages.length, 2);
   assert.equal(state.messages[1].role, "assistant");
-  assert.equal(state.messages[1].id, "id-1");
+  assert.equal(state.messages[1].id, "502");
   assert.equal(state.messages[1].serverMessageId, 502);
   assert.equal(state.messages[1].generationTaskId, 900);
   assert.equal(request.conversationId, 42);

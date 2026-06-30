@@ -3,7 +3,6 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { getGuestId } from "@/lib/guestId";
 import {
-  applySingleSendMessagePlan,
   buildNewConversationTitle,
   prepareSingleSendMessages,
   runSingleChatInit,
@@ -88,6 +87,16 @@ export function useChatSingleSendRuntime({
   dispatchWindowEvent = (event) => window.dispatchEvent(event),
 }: UseChatSingleSendRuntimeOptions) {
   const inFlightSendKeysRef = useRef<Set<string>>(new Set());
+  const applyServerFirstPreInitMessages = useCallback((previous: Message[], plan: ReturnType<typeof prepareSingleSendMessages<Message>>): Message[] => {
+    if (!plan) return previous;
+    if (plan.mode === "regenerate") {
+      const lastUserIndex = plan.lastUserIndex ?? -1;
+      return previous.filter((message, index) => index <= lastUserIndex || message.role !== "assistant");
+    }
+    if (plan.mode === "skip-user") return previous;
+    return [...previous, plan.userMessage!];
+  }, []);
+
   const sendMessage = useCallback(
     async (
       content: string,
@@ -150,24 +159,15 @@ export function useChatSingleSendRuntime({
       inFlightSendKeysRef.current.add(sendDedupKey);
 
       const contextMessages = messagePlan.contextMessages;
-      const assistantMsg = messagePlan.assistantMessage;
-      initializeAssistantRealtime(assistantMsg.id, assistantMsg.createdAt || now());
-      if (pendingLocalAssistantsRef && convId) {
-        pendingLocalAssistantsRef.current[assistantMsg.id] = {
-          convId,
-          message: {
-            ...assistantMsg,
-            activityStatus: createBusyGeneratingStatus(translate),
-            generationStartedAt: assistantMsg.createdAt || now(),
-          } as Message,
-        };
-      }
-      setMessages((prev) => applySingleSendMessagePlan(prev, messagePlan));
+      const localAssistantMsg = messagePlan.assistantMessage;
+      setMessages((prev) => applyServerFirstPreInitMessages(prev, messagePlan));
 
       setIsLoading(true);
       const controller = new AbortController();
       abortReasonRef.current = null;
       abortControllerRef.current = controller;
+      let activeAssistantId = localAssistantMsg.id;
+      let hasInsertedServerAssistant = false;
 
       try {
         const headers = buildChatRequestHeaders({ token, guestId: getGuestId() });
@@ -186,27 +186,43 @@ export function useChatSingleSendRuntime({
           skipSaveUserMessage: skipUserMsg,
           skillKey: effectiveSkillKey,
           messageFileIds: file_ids,
-          fallbackId: () => assistantMsg.id,
+          fallbackId: () => localAssistantMsg.id,
         });
         convId = initResult.conversation_id || convId;
+        const serverAssistantId = String(initResult.assistant_message_id || initResult.mappedAssistantMessage.id || localAssistantMsg.id);
         const serverAssistant = {
-          ...assistantMsg,
+          ...localAssistantMsg,
           ...initResult.mappedAssistantMessage,
-          id: assistantMsg.id,
-          createdAt: initResult.mappedAssistantMessage.createdAt || assistantMsg.createdAt,
+          id: serverAssistantId,
+          serverMessageId: initResult.assistant_message_id || initResult.mappedAssistantMessage.serverMessageId,
+          generationTaskId: initResult.task_id || initResult.mappedAssistantMessage.generationTaskId,
+          createdAt: initResult.mappedAssistantMessage.createdAt || localAssistantMsg.createdAt,
           search,
           searchStatus: search ? "searching" : initResult.mappedAssistantMessage.searchStatus,
           activityStatus: createBusyGeneratingStatus(translate),
-          generationStartedAt: assistantMsg.createdAt || now(),
+          generationStartedAt: initResult.mappedAssistantMessage.createdAt || localAssistantMsg.createdAt || now(),
         } as Message;
-        setMessages((prev) => patchMessageById(prev.map((message) => {
-          if (initResult.user_message_id && message.id === messagePlan.userMessage?.id) {
-            return { ...message, id: String(initResult.user_message_id), serverMessageId: initResult.user_message_id } as Message;
-          }
-          return message;
-        }), assistantMsg.id, serverAssistant));
+        activeAssistantId = serverAssistant.id;
+        initializeAssistantRealtime(serverAssistant.id, serverAssistant.generationStartedAt || serverAssistant.createdAt || now());
+        setMessages((prev) => {
+          const patchedUsers = prev.map((message) => {
+            if (initResult.user_message_id && message.id === messagePlan.userMessage?.id) {
+              return { ...message, id: String(initResult.user_message_id), serverMessageId: initResult.user_message_id } as Message;
+            }
+            return message;
+          });
+          const withoutDuplicateAssistant = patchedUsers.filter((message) =>
+            !(message.role === "assistant" && (
+              message.id === serverAssistant.id ||
+              (serverAssistant.serverMessageId && message.serverMessageId === serverAssistant.serverMessageId) ||
+              (serverAssistant.generationTaskId && message.generationTaskId === serverAssistant.generationTaskId)
+            ))
+          );
+          return [...withoutDuplicateAssistant, serverAssistant];
+        });
+        hasInsertedServerAssistant = true;
         if (pendingLocalAssistantsRef && convId) {
-          pendingLocalAssistantsRef.current[assistantMsg.id] = { convId, message: serverAssistant };
+          pendingLocalAssistantsRef.current[serverAssistant.id] = { convId, message: serverAssistant };
         }
         const streamRes = await fetch(`${apiBaseUrl}/api/tasks/${initResult.task_id}/stream?after=0`, {
           headers,
@@ -228,13 +244,19 @@ export function useChatSingleSendRuntime({
           busyActivityStatus: createBusyGeneratingStatus(translate),
         });
         if (decision.type !== "none") {
-          setMessages((prev) => patchMessageById(prev, assistantMsg.id, decision.patch));
+          setMessages((prev) => {
+            if (prev.some((message) => message?.id === activeAssistantId)) {
+              return patchMessageById(prev, activeAssistantId, decision.patch);
+            }
+            if (hasInsertedServerAssistant) return prev;
+            return [...prev, { ...localAssistantMsg, ...decision.patch } as Message];
+          });
         }
       } finally {
         inFlightSendKeysRef.current.delete(sendDedupKey);
         const finalAbortReason = abortReasonRef.current;
         if (pendingLocalAssistantsRef && finalAbortReason !== "navigation") {
-          delete pendingLocalAssistantsRef.current[assistantMsg.id];
+          delete pendingLocalAssistantsRef.current[activeAssistantId];
         }
         const decision = decideSingleSendFinally({
           abortReason: finalAbortReason,
@@ -268,6 +290,7 @@ export function useChatSingleSendRuntime({
       setIsLoading,
       dispatchWindowEvent,
       translate,
+      applyServerFirstPreInitMessages,
     ]
   );
 
