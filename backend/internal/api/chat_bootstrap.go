@@ -334,7 +334,7 @@ func (h *ChatBootstrapHandler) listBootstrapConversations(userID uint, workspace
 		Where("user_id = ? AND deleted_at IS NULL", userID).
 		Where("NOT EXISTS (SELECT 1 FROM notebook_conversations WHERE notebook_conversations.conversation_id = conversations.id)")
 	if workspaceID > 0 {
-		queryBase = queryBase.Where("workspace_id = ?", workspaceID)
+		queryBase = applyConversationWorkspaceFilter(queryBase, userID, workspaceID, "workspace_id")
 	}
 	var total int64
 	queryBase.Count(&total)
@@ -351,7 +351,7 @@ func (h *ChatBootstrapHandler) listBootstrapConversations(userID uint, workspace
 		Where("conversations.deleted_at IS NULL").
 		Where("NOT EXISTS (SELECT 1 FROM notebook_conversations WHERE notebook_conversations.conversation_id = conversations.id)")
 	if workspaceID > 0 {
-		query = query.Where("conversations.workspace_id = ?", workspaceID)
+		query = applyConversationWorkspaceFilter(query, userID, workspaceID, "conversations.workspace_id")
 	}
 	var rows []ConversationWithModel
 	if err := query.Order("conversations.pinned DESC, latest_activity_at DESC, conversations.updated_at DESC").Limit(limit).Find(&rows).Error; err != nil {
@@ -376,7 +376,7 @@ func (h *ChatBootstrapHandler) listBootstrapPinnedConversations(userID uint, wor
 		Where("user_id = ? AND deleted_at IS NULL AND pinned = ?", userID, true).
 		Where("NOT EXISTS (SELECT 1 FROM notebook_conversations WHERE notebook_conversations.conversation_id = conversations.id)")
 	if workspaceID > 0 {
-		query = query.Where("workspace_id = ?", workspaceID)
+		query = applyConversationWorkspaceFilter(query, userID, workspaceID, "workspace_id")
 	}
 	var conversations []models.Conversation
 	if err := query.Order("updated_at DESC").Limit(limit).Find(&conversations).Error; err != nil {

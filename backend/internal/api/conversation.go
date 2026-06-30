@@ -77,6 +77,31 @@ func applyConversationActivityTimestamp(conv *models.Conversation, latestRaw str
 	}
 }
 
+func includeLegacyDefaultWorkspace(db *gorm.DB, userID uint, workspaceID uint) bool {
+	if db == nil || workspaceID == 0 {
+		return false
+	}
+	var defaultWS models.Workspace
+	workspaceDB := db.Session(&gorm.Session{NewDB: true}).Model(&models.Workspace{})
+	if err := workspaceDB.Select("id").Where("user_id = ? AND is_default = ?", userID, true).First(&defaultWS).Error; err != nil {
+		return false
+	}
+	return defaultWS.ID == workspaceID
+}
+
+func applyConversationWorkspaceFilter(query *gorm.DB, userID uint, workspaceID uint, column string) *gorm.DB {
+	if query == nil || workspaceID == 0 {
+		return query
+	}
+	if column == "" {
+		column = "workspace_id"
+	}
+	if includeLegacyDefaultWorkspace(query, userID, workspaceID) {
+		return query.Where(fmt.Sprintf("(%s = ? OR %s = 0)", column, column), workspaceID)
+	}
+	return query.Where(fmt.Sprintf("%s = ?", column), workspaceID)
+}
+
 func (h *ConversationHandler) List(c *gin.Context) {
 	userID := getUserID(c)
 
@@ -98,7 +123,7 @@ func (h *ConversationHandler) List(c *gin.Context) {
 		Where("NOT EXISTS (SELECT 1 FROM notebook_conversations WHERE notebook_conversations.conversation_id = conversations.id)")
 	if workspaceIDStr != "" {
 		if wid, err := strconv.ParseUint(workspaceIDStr, 10, 32); err == nil {
-			countQuery = countQuery.Where("workspace_id = ?", uint(wid))
+			countQuery = applyConversationWorkspaceFilter(countQuery, userID, uint(wid), "workspace_id")
 		}
 	}
 	skillKey := c.Query("skill_key")
@@ -122,7 +147,7 @@ func (h *ConversationHandler) List(c *gin.Context) {
 
 	if workspaceIDStr != "" {
 		if wid, err := strconv.ParseUint(workspaceIDStr, 10, 32); err == nil {
-			query = query.Where("conversations.workspace_id = ?", uint(wid))
+			query = applyConversationWorkspaceFilter(query, userID, uint(wid), "conversations.workspace_id")
 		}
 	}
 	if skillKey != "" {
@@ -175,7 +200,7 @@ func (h *ConversationHandler) Search(c *gin.Context) {
 
 	if workspaceIDStr := c.Query("workspace_id"); workspaceIDStr != "" {
 		if wid, err := strconv.ParseUint(workspaceIDStr, 10, 32); err == nil && wid > 0 {
-			query = query.Where("conversations.workspace_id = ?", uint(wid))
+			query = applyConversationWorkspaceFilter(query, userID, uint(wid), "conversations.workspace_id")
 		}
 	}
 	if sk := c.Query("skill_key"); sk != "" {

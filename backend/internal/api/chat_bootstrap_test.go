@@ -209,6 +209,67 @@ func TestChatBootstrapIncludesStableConversationSnapshot(t *testing.T) {
 	}
 }
 
+func TestChatBootstrapIncludesLegacyWorkspaceZeroInDefaultHistory(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&models.User{}, &models.Workspace{}, &models.Conversation{}, &models.Message{}, &models.AIBackgroundTask{}, &models.NotebookConversation{}, &models.RefreshToken{}, &models.ModelConfig{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	user := models.User{Email: "legacy@example.com", Password: "x", Name: "Legacy", Role: "user", PlanTier: "free"}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	defaultWS := models.Workspace{UserID: user.ID, Name: "默认", IsDefault: true}
+	if err := db.Create(&defaultWS).Error; err != nil {
+		t.Fatalf("create default workspace: %v", err)
+	}
+	old := time.Now().Add(-48 * time.Hour)
+	legacyConv := models.Conversation{UserID: user.ID, WorkspaceID: 0, Title: "legacy default", CreatedAt: old, UpdatedAt: old}
+	if err := db.Create(&legacyConv).Error; err != nil {
+		t.Fatalf("create legacy conv: %v", err)
+	}
+	latest := time.Now().Add(-30 * time.Minute)
+	if err := db.Create(&models.Message{ConversationID: legacyConv.ID, Role: "assistant", Content: "latest", CreatedAt: latest, CompletedAt: &latest}).Error; err != nil {
+		t.Fatalf("create latest message: %v", err)
+	}
+
+	handler := NewChatBootstrapHandler(db, &config.Config{JWTSecret: "test-secret"})
+	router := gin.New()
+	router.GET("/api/chat/bootstrap", func(c *gin.Context) {
+		c.Set("userID", user.ID)
+		handler.Get(c)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/bootstrap?id="+strconv.Itoa(int(legacyConv.ID)), nil)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", res.Code, res.Body.String())
+	}
+	var payload struct {
+		Workspace struct {
+			CurrentID uint `json:"current_id"`
+		} `json:"workspace"`
+		Sidebar struct {
+			Conversations []models.Conversation `json:"conversations"`
+		} `json:"sidebar"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if payload.Workspace.CurrentID != defaultWS.ID {
+		t.Fatalf("legacy workspace 0 route should stay in default workspace: got %d want %d", payload.Workspace.CurrentID, defaultWS.ID)
+	}
+	if len(payload.Sidebar.Conversations) == 0 || payload.Sidebar.Conversations[0].ID != legacyConv.ID {
+		t.Fatalf("legacy workspace 0 conversation should appear in default history, got %+v", payload.Sidebar.Conversations)
+	}
+	if !payload.Sidebar.Conversations[0].UpdatedAt.After(old) {
+		t.Fatalf("legacy conversation updated_at should reflect latest activity, got %s old %s", payload.Sidebar.Conversations[0].UpdatedAt, old)
+	}
+}
+
 func TestChatBootstrapConversationListUsesLatestActivityAndRouteWorkspace(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
