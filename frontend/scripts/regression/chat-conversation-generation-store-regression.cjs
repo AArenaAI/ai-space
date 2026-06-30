@@ -10,11 +10,16 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-generation-store-'))
 const outFile = path.join(tempDir, 'chatConversationGenerationStore.cjs');
 let source = fs.readFileSync(path.join(repoRoot, 'lib/chatConversationGenerationStore.ts'), 'utf8');
 source = source.replace(/import type \{ Message \} from "@\/lib\/chatTypes";\n/g, '');
+source = source.replace(/import \{ isTerminalMessage \} from "@\/lib\/chatMessageRuntimeState";\n/g, `
+function isTerminalMessage(message) {
+  return Boolean(message.completedAt || message.stopped || message.errorCode || message.serverGenerationStatus === 'completed' || message.serverGenerationStatus === 'failed' || message.serverGenerationStatus === 'cancelled' || message.phase === 'completed' || message.phase === 'failed' || message.phase === 'stopped');
+}
+`);
 source = source.replace(/import \{ isMessageGenerating \} from "@\/lib\/chatContent";\n/g, `
 function isMessageGenerating(msg, isStreaming) {
   if (isStreaming) return true;
-  if (msg.serverGenerationStatus === 'completed' || msg.serverGenerationStatus === 'failed' || msg.serverGenerationStatus === 'cancelled' || msg.serverGenerationStatus === 'incomplete') return false;
-  if (msg.completedAt || msg.stopped) return false;
+  if (isTerminalMessage(msg)) return false;
+  if (msg.serverGenerationStatus === 'incomplete') return false;
   if (msg.activityStatus && (msg.activityStatus.status === 'running' || msg.activityStatus.status === 'searching')) return true;
   if (msg.searchStatus === 'searching') return true;
   if (msg.generationTaskId || msg.backgroundTaskId || msg.useBackground || msg.isComplexTask) return true;

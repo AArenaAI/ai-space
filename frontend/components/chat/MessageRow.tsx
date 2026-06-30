@@ -8,6 +8,7 @@ import type { ChatModel, Message } from "@/lib/chatTypes";
 import { getModelAvatarMeta } from "@/lib/models/modelAvatars";
 import type { InferredGroup } from "@/lib/groups";
 import { isMessageGenerating } from "@/lib/chatContent";
+import { isTerminalMessage, resolveChatMessageRuntimeState } from "@/lib/chatMessageRuntimeState";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 import { AssistantMessageMeta } from "./AssistantMessageMeta";
 import MessageActions from "./MessageActions";
@@ -132,21 +133,23 @@ function MessageRow({
   const initialViewportState = forceHydrateRichText || skipViewportObservers;
   const [isNearViewport, setIsNearViewport] = useState(initialViewportState);
   const [isInViewport, setIsInViewport] = useState(initialViewportState);
+  const terminalMessage = isTerminalMessage(msg);
   const hasAssistantGenerationTask = Boolean(msg.generationTaskId || msg.backgroundTaskId || msg.activityStatus);
-  const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && !msg.errorCode && !msg.stopped && isLatestAssistant && hasAssistantGenerationTask;
+  const isStreaming = isLoading && msg.role === "assistant" && !terminalMessage && isLatestAssistant && hasAssistantGenerationTask;
   const realtime = useMessageRealtime(msg.id, isStreaming);
+  const runtimeState = resolveChatMessageRuntimeState({ message: msg, realtime });
   const realtimeHasVisiblePayload = Boolean(
-    realtime?.content?.trim() ||
-    realtime?.answerContent?.trim() ||
-    realtime?.reasoningContent?.trim()
+    runtimeState.content?.trim() ||
+    runtimeState.answerContent?.trim() ||
+    runtimeState.reasoningContent?.trim()
   );
   const canBypassBrowsingHydrationDefer = forceHydrateRichText && !isStreaming;
   const blockRichTextHydration = historyPrependSettling || (deferRichTextHydration && !canBypassBrowsingHydrationDefer);
   const forceStableRichLiteFallback = blockRichTextHydration || stabilizeInitialRichText || (forceHydrateRichText && !isInViewport);
-  const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
-  const isEmptyPendingAssistant = !isUser && isGenerating && !realtimeHasVisiblePayload && !msg.content?.trim() && !msg.reasoningContent?.trim() && !msg.completedAt && !msg.stopped && !msg.errorCode;
+  const isGenerating = !isUser && isMessageGenerating({ ...msg, ...runtimeState }, isStreaming);
+  const isEmptyPendingAssistant = !isUser && isGenerating && !realtimeHasVisiblePayload && !msg.content?.trim() && !msg.reasoningContent?.trim() && !runtimeState.terminal;
   const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
-  const suppressAppearAnimation = historyPrependSettling || deferRichTextHydration || isGenerating || (!isUser && !msg.content?.trim() && !msg.completedAt);
+  const suppressAppearAnimation = historyPrependSettling || deferRichTextHydration || isGenerating || (!isUser && !msg.content?.trim() && !runtimeState.terminal);
   const assistantAvatarMeta = getModelAvatarMeta(model || msg.model || "AI");
   const rowProfileDetailEnabled = typeof window !== "undefined" && Boolean((window as Window & { __AI_SPACE_CHAT_ROW_PROFILE_DETAIL?: boolean }).__AI_SPACE_CHAT_ROW_PROFILE_DETAIL);
   const markdownWeight = rowProfileDetailEnabled ? getMarkdownWeight(msg.content) : null;

@@ -1,3 +1,5 @@
+import { isTerminalMessage } from "./chatMessageRuntimeState";
+
 export type ParsedThinkContent = {
   reasoning: string | null;
   answer: string;
@@ -11,16 +13,20 @@ export type ChatSourceLike = {
 };
 
 export type MessageGenerationLike = {
+  role?: string;
   content?: string;
+  reasoningContent?: string;
   completedAt?: unknown;
   createdAt?: number;
   stopped?: boolean;
+  errorCode?: string;
   activityStatus?: { status?: string } | null;
   searchStatus?: "searching" | "completed" | "failed";
   serverMessageId?: unknown;
   generationTaskId?: unknown;
   backgroundTaskId?: unknown;
   serverGenerationStatus?: string;
+  phase?: string;
   useBackground?: boolean;
   isComplexTask?: boolean;
 };
@@ -81,8 +87,8 @@ const EMPTY_ASSISTANT_RECOVERY_GRACE_MS = 8_000;
 
 export function isMessageGenerating(msg: MessageGenerationLike, isStreaming: boolean): boolean {
   if (isStreaming) return true;
-  if (msg.serverGenerationStatus === "completed" || msg.serverGenerationStatus === "failed" || msg.serverGenerationStatus === "cancelled" || msg.serverGenerationStatus === "incomplete") return false;
-  if (msg.completedAt || msg.stopped) return false;
+  if (isTerminalMessage(msg as any)) return false;
+  if (msg.serverGenerationStatus === "incomplete") return false;
   if (msg.activityStatus?.status === "running" || msg.activityStatus?.status === "searching") return true;
   if (msg.searchStatus === "searching") return true;
   if (msg.generationTaskId || msg.backgroundTaskId || msg.useBackground || msg.isComplexTask) return true;

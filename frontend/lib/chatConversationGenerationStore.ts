@@ -1,5 +1,6 @@
 import type { Message } from "@/lib/chatTypes";
 import { isMessageGenerating } from "@/lib/chatContent";
+import { isTerminalMessage } from "@/lib/chatMessageRuntimeState";
 
 function isTerminalGenerationStatus(status?: string) {
   return status === "completed" || status === "failed" || status === "cancelled" || status === "incomplete";
@@ -76,10 +77,10 @@ export function inferConversationGenerationState(input: {
     }
     return -1;
   })();
-  const hasTerminalGenerationMessage = input.messages.some((message) => isTerminalGenerationStatus(message.serverGenerationStatus));
+  const hasTerminalGenerationMessage = input.messages.some((message) => isTerminalMessage(message) || isTerminalGenerationStatus(message.serverGenerationStatus));
   const hasRecoverableGeneratingMessage = input.messages.some((message, index) => {
     if (message.role === "assistant" && latestAssistantIndex !== -1 && index < latestAssistantIndex) return false;
-    if (isTerminalGenerationStatus(message.serverGenerationStatus)) return false;
+    if (isTerminalMessage(message) || isTerminalGenerationStatus(message.serverGenerationStatus)) return false;
     if (!isMessageGenerating(message, false)) return false;
     if (hasCompletedAssistantContent(message) && !hasExplicitGenerationAnchor(message)) return false;
     return true;
