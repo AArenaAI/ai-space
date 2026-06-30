@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 
-export type CompareActivityLayout = "inline" | "split" | "dock";
+export type CompareActivityLayout = "inline" | "split";
 
 const STORAGE_KEY = "ai-space:chat:compare-activity-layout";
 
@@ -25,18 +25,12 @@ const OPTIONS: Array<{
     badge: "大屏",
     description: "当前列内并排查看正文和思考来源，适合大屏深读。",
   },
-  {
-    value: "dock",
-    title: "右侧第三栏",
-    badge: "超宽屏",
-    description: "像工作台一样在右侧固定展示当前列的思考与来源。",
-  },
 ];
 
 function readLayout(): CompareActivityLayout {
   if (typeof window === "undefined") return "inline";
   const value = window.localStorage.getItem(STORAGE_KEY);
-  return value === "split" || value === "dock" || value === "inline" ? value : "inline";
+  return value === "split" || value === "inline" ? value : "inline";
 }
 
 export function useCompareActivityLayout() {
@@ -56,15 +50,6 @@ export function useCompareActivityLayout() {
 function LayoutPreview({ value, active }: { value: CompareActivityLayout; active: boolean }) {
   const pane = "rounded-[3px] border border-current/35 bg-current/10";
   const activity = cn("rounded-[3px] border", active ? "border-brand bg-brand/30" : "border-current/35 bg-current/20");
-  if (value === "dock") {
-    return (
-      <div className="grid h-9 grid-cols-[1fr_1fr_0.6fr] gap-1 text-current">
-        <div className={pane}><div className="m-1 h-2 rounded-sm bg-current/25" /><div className="mx-1 h-1.5 rounded-sm bg-current/15" /></div>
-        <div className={pane}><div className="m-1 h-2 rounded-sm bg-current/25" /><div className="mx-1 h-1.5 rounded-sm bg-current/15" /></div>
-        <div className={activity}><div className="m-1 h-1.5 rounded-sm bg-current/30" /><div className="mx-1 h-1 rounded-sm bg-current/20" /></div>
-      </div>
-    );
-  }
   if (value === "split") {
     return (
       <div className="grid h-9 grid-cols-2 gap-1 text-current">

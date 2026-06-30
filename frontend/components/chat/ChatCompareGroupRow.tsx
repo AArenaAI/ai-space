@@ -137,7 +137,7 @@ function ChatCompareGroupRow({
                 onSaveToNote={onSaveToNote}
                 onAssistantViewed={onAssistantViewed}
                 onOpenActivity={onOpenActivity}
-                isActivityOpen={Boolean(assistant && activeActivityMessageIds?.has(String(assistant.id)) && activityLayout !== "dock")}
+                isActivityOpen={Boolean(assistant && activeActivityMessageIds?.has(String(assistant.id)))}
                 activityLayout={activityLayout}
                 isInitialReadingAssistant={assistant ? initialReadingAssistantIds?.has(String(assistant.id)) : false}
                 isViewedAssistant={assistant ? viewedAssistantIds?.has(String(assistant.id)) : false}

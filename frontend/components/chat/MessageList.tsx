@@ -74,7 +74,7 @@ import ChatEmptyState from "./ChatEmptyState";
 import ChatDeleteMessageDialog from "./ChatDeleteMessageDialog";
 import ChatActivityPanel from "./ChatActivityPanel";
 import { useCompareActivityLayout, type CompareActivityLayout } from "./ChatCompareActivityLayoutControl";
-import { CHAT_ACTIVITY_PANEL_MARGIN_CLASS, CHAT_ACTIVITY_PANEL_WIDTH_CLASS } from "./chatLayout";
+import { CHAT_ACTIVITY_PANEL_WIDTH_CLASS } from "./chatLayout";
 import { parseThinkContent, sanitizeContent, isMessageGenerating } from "@/lib/chatContent";
 
 
@@ -1085,12 +1085,8 @@ function MessageList({
     return messages.find((message) => String(message.id) === activeActivityMessageId) || visibleMessages.find((message) => String(message.id) === activeActivityMessageId) || null;
   }, [activeActivityMessageId, messages, visibleMessages]);
   const activeActivityModel = activeActivityMessage?.model ? models.find((model) => model.id === activeActivityMessage.model) : undefined;
-  const handleCompareOpenActivity = useCallback((message: Message, layout: CompareActivityLayout) => {
+  const handleCompareOpenActivity = useCallback((message: Message, _layout: CompareActivityLayout) => {
     const id = String(message.id);
-    if (layout === "dock") {
-      setActiveActivityMessageId((current) => current === id ? null : id);
-      return;
-    }
     setActiveCompareActivityMessageIds((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
@@ -2091,7 +2087,7 @@ function MessageList({
         ) : (
           <div
             ref={(el) => handleVirtuosoScrollerRef(el)}
-            className={cn("chat-history-scroll-container transition-[margin-right] duration-200 ease-out", activeActivityMessage && compareActivityLayout === "dock" && CHAT_ACTIVITY_PANEL_MARGIN_CLASS)}
+            className="chat-history-scroll-container"
             style={{
               height: "100%",
               overflowY: "auto",
@@ -2156,16 +2152,6 @@ function MessageList({
           </div>
         )}
 
-        {activeActivityMessage && compareActivityLayout === "dock" && (
-          <div className="absolute bottom-0 right-0 top-28 z-20 hidden w-[384px] lg:block">
-            <ChatActivityPanel
-              message={activeActivityMessage}
-              model={activeActivityModel}
-              onClose={() => setActiveActivityMessageId(null)}
-              variant="embedded"
-            />
-          </div>
-        )}
 
         <ChatScrollProgress
           scrollRatio={scrollProgress.ratio}
