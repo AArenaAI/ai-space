@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import MessageList from "./MessageList";
+import ChatActivityPanel from "./ChatActivityPanel";
 import StreamingMarkdownView from "./StreamingMarkdownView";
 import { Message, ChatModel } from "@/lib/chatTypes";
 import { realtimeAppend, realtimeClear, realtimeGet, realtimeMarkCompleted, realtimeUpdate } from "@/lib/streaming";
@@ -48,9 +49,19 @@ function baseMessages(): Message[] {
 
 export default function ChatStreamingStateFixture() {
   const assistantId = "fixture-assistant";
+  const [fixtureOptions, setFixtureOptions] = useState({ longActivityReasoning: false, forceActivityPanelOpen: false });
+  const { longActivityReasoning, forceActivityPanelOpen } = fixtureOptions;
   const [messages, setMessages] = useState<Message[]>(() => baseMessages());
   const [loading, setLoading] = useState(true);
   const [phase, setPhase] = useState("init");
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setFixtureOptions({
+      longActivityReasoning: params.has("activity_reasoning_long"),
+      forceActivityPanelOpen: params.has("activity_panel_open"),
+    });
+  }, []);
 
   useEffect(() => {
     realtimeClear(assistantId);
@@ -63,6 +74,16 @@ export default function ChatStreamingStateFixture() {
       phase: "waiting_provider",
       generationStartedAt: Date.now(),
     });
+
+    const reasoningChunks = longActivityReasoning
+      ? [
+          "先分析搜索结果，确认每个来源的时间、主体和结论是否一致。",
+          "然后排除重复来源，把相互矛盾的说法按可信度排序。",
+          "最后只保留和用户问题直接相关的信息，避免把检索过程写进最终回答。",
+        ]
+      : ["先分析搜索结果，确认 **最终** 只输出简短回答。"];
+    const answerStartDelay = longActivityReasoning ? 4200 : 1700;
+    const doneDelay = longActivityReasoning ? 7000 : 3000;
 
     const timers = [
       window.setTimeout(() => {
@@ -86,20 +107,30 @@ export default function ChatStreamingStateFixture() {
         // Simulate a provider/SSE event that carries reasoning and visible answer
         // in the same payload. The frontend must show reasoning first and hold
         // the answer until reasoning is closed.
-        realtimeAppend(assistantId, { reasoningDelta: "先分析搜索结果，确认 **最终** 只输出简短回答。", reasoning: true });
+        realtimeAppend(assistantId, { reasoningDelta: reasoningChunks[0], reasoning: true });
         setPhase("mixed-held");
       }, 1200),
+      ...(longActivityReasoning ? [
+        window.setTimeout(() => {
+          realtimeAppend(assistantId, { reasoningDelta: reasoningChunks[1], reasoning: true });
+          setPhase("reasoning-chunk-2");
+        }, 2100),
+        window.setTimeout(() => {
+          realtimeAppend(assistantId, { reasoningDelta: reasoningChunks[2], reasoning: true });
+          setPhase("reasoning-chunk-3");
+        }, 3000),
+      ] : []),
       window.setTimeout(() => {
         realtimeAppend(assistantId, { reasoning: false });
         realtimeAppend(assistantId, { answerDelta: "最终回答 **", reasoning: false });
         setPhase("answer-streaming");
-      }, 1700),
+      }, answerStartDelay),
       window.setTimeout(() => {
         realtimeAppend(assistantId, { answerDelta: "OK", reasoning: false });
-      }, 1950),
+      }, answerStartDelay + 250),
       window.setTimeout(() => {
         realtimeAppend(assistantId, { answerDelta: "** 42", reasoning: false });
-      }, 2150),
+      }, answerStartDelay + 450),
       window.setTimeout(() => {
         // Simulate DONE without a search-completed meta event. This used to leave
         // the web-search badge stuck in the running state.
@@ -130,14 +161,14 @@ export default function ChatStreamingStateFixture() {
         ));
         setLoading(false);
         setPhase("done");
-      }, 3000),
+      }, doneDelay),
     ];
 
     return () => {
       timers.forEach(window.clearTimeout);
       realtimeClear(assistantId);
     };
-  }, []);
+  }, [longActivityReasoning]);
 
   const marker = useMemo(() => JSON.stringify({ phase, loading }), [phase, loading]);
 
@@ -163,6 +194,15 @@ export default function ChatStreamingStateFixture() {
           isLoadingMore={false}
           hasMoreMessages={false}
         />
+        {forceActivityPanelOpen && (
+          <div className="relative w-[420px] shrink-0 border-l border-surface-border" data-testid="fixture-activity-panel-host">
+            <ChatActivityPanel
+              message={messages.find((message) => message.id === assistantId)}
+              model={models[0]}
+              onClose={() => undefined}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
