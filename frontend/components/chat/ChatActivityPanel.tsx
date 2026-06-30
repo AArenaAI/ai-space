@@ -6,8 +6,7 @@ import type { Message, ChatModel } from "@/lib/chatTypes";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
-import { getOrderedTimelineSteps, getTimelineStepLabel, type ChatStatusTimelineStep } from "@/lib/chatStatusTimeline";
-import { formatElapsedTime } from "@/lib/chatGenerationPhase";
+import { getOrderedTimelineSteps, type ChatStatusTimelineStep } from "@/lib/chatStatusTimeline";
 import { resolveChatMessageRuntimeState } from "@/lib/chatMessageRuntimeState";
 import { ensureTerminalAnswerStep, isLowSignalCompletedActivityStep } from "@/lib/chatActivityTimeline";
 import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
@@ -32,12 +31,18 @@ function parseTimelineValue(value: unknown): ChatStatusTimelineStep[] | undefine
   return steps.length ? steps : undefined;
 }
 
-function getActivityStepLabel(t: (key: string, params?: Record<string, string>) => string, step: ChatStatusTimelineStep, generationStartedAt?: number, durationStartAt?: number) {
-  const label = getTimelineStepLabel(t, step, generationStartedAt);
-  const duration = durationStartAt ? Math.max(0, (step.endedAt || Date.now()) - durationStartAt) : Math.max(0, (step.endedAt || Date.now()) - step.startedAt);
-  if (duration < 1000) return label;
-  if (/\d+\s*(秒|s|sec|secs|second|seconds|分|m|min)/i.test(label)) return label;
-  return `${label} · ${formatElapsedTime(duration, t)}`;
+function getActivityStepLabel(_t: (key: string, params?: Record<string, string>) => string, step: ChatStatusTimelineStep, _generationStartedAt?: number, _durationStartAt?: number) {
+  if (step.kind === "web_search") {
+    const count = step.count ? `${step.count} 个来源` : "网页来源";
+    if (step.status === "running") return "正在搜索网页";
+    if (step.status === "failed") return "搜索失败";
+    return `参考了 ${count}`;
+  }
+  if (step.kind === "file_search") return step.status === "running" ? "正在检索文件" : "检索了文件";
+  if (step.kind === "tool_call") return step.status === "running" ? "正在使用工具" : "使用了工具";
+  if (step.kind === "reasoning") return step.status === "running" ? "正在思考" : "思考过程";
+  if (step.kind === "streaming_answer") return step.status === "running" ? "正在生成回答" : "回答完成";
+  return step.status === "running" ? "正在处理" : "已处理";
 }
 
 function formatReasoningSections(text: string) {
@@ -89,6 +94,22 @@ function countMarkdownSources(content?: string) {
     urls.add(match[0].replace(/[),.;]+$/, ""));
   }
   return urls.size;
+}
+
+function sourceHost(url?: string) {
+  if (!url) return "网页";
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url.replace(/^https?:\/\//, "").split("/")[0] || "网页";
+  }
+}
+
+function sourceOrganization(host: string) {
+  if (host.includes("bea.gov")) return "美国经济分析局";
+  if (host.includes("bls.gov")) return "美国劳工统计局";
+  if (host.includes("federalreserve.gov")) return "美联储";
+  return host;
 }
 
 export default function ChatActivityPanel({ message, model, onClose, variant = "docked" }: { message?: Message | null; model?: ChatModel; onClose: () => void; variant?: "docked" | "inline" | "embedded" }) {
@@ -159,7 +180,7 @@ export default function ChatActivityPanel({ message, model, onClose, variant = "
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-chat-activity-scroll="true">
         <section className="mb-7">
-          <div className="mb-4 text-sm font-semibold text-text-secondary">思考</div>
+          <div className="mb-4 text-sm font-semibold text-text-secondary">过程</div>
           <div className="relative space-y-0">
             {timeline.length ? timeline.map((step, index) => {
               const showReasoning = step.kind === "reasoning" && reasoning;
@@ -226,14 +247,19 @@ export default function ChatActivityPanel({ message, model, onClose, variant = "
 
         {sources.length > 0 && (
           <section>
-            <div className="mb-2 text-sm font-semibold text-text-secondary">网页 · {sources.length}</div>
+            <div className="mb-2 text-sm font-semibold text-text-secondary">参考来源 · {sources.length}</div>
             <div className="space-y-2">
-              {sources.slice(0, 12).map((source, index) => (
-                <a key={`${source.url}:${index}`} href={source.url} target="_blank" rel="noreferrer" className="block rounded-xl bg-surface-card/60 px-2.5 py-2 text-sm hover:bg-surface-card">
-                  <div className="truncate font-medium text-text-secondary">{source.title || source.url}</div>
-                  <div className="mt-0.5 truncate text-text-tertiary">{source.url}</div>
-                </a>
-              ))}
+              {sources.slice(0, 12).map((source, index) => {
+                const host = sourceHost(source.url);
+                const organization = sourceOrganization(host);
+                const sourceMeta = organization === host ? host : `${organization} · ${host}`;
+                return (
+                  <a key={`${source.url}:${index}`} href={source.url} target="_blank" rel="noreferrer" className="block rounded-xl bg-surface-card/60 px-2.5 py-2 text-sm hover:bg-surface-card" title={source.url}>
+                    <div className="truncate font-medium text-text-secondary">{source.title || organization}</div>
+                    <div className="mt-0.5 truncate text-text-tertiary">{sourceMeta}</div>
+                  </a>
+                );
+              })}
             </div>
           </section>
         )}

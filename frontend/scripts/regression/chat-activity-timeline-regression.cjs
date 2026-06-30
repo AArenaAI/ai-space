@@ -44,7 +44,7 @@ const alreadyHasAnswer = ensureTerminalAnswerStep({
 });
 assert.equal(alreadyHasAnswer.length, 1, "should not duplicate existing answer completion step");
 
-assert.equal(isLowSignalCompletedActivityStep({ id: "streaming_answer:completed", kind: "streaming_answer", status: "completed", startedAt: 10, endedAt: 10 }, 10), false, "answer completion must stay visible even if short");
+assert.equal(isLowSignalCompletedActivityStep({ id: "streaming_answer:completed", kind: "streaming_answer", status: "completed", startedAt: 10, endedAt: 10 }, 10), true, "answer completion is low-signal in the user-facing Activity panel");
 assert.equal(isLowSignalCompletedActivityStep({ id: "waiting_provider:completed", kind: "waiting_provider", status: "completed", startedAt: 10, endedAt: 10 }, 10), true, "short waiting provider remains low-signal");
 
 fs.rmSync(tmpDir, { recursive: true, force: true });
