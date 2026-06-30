@@ -131,6 +131,7 @@ interface MessageListProps {
   onExitCompare?: () => void;
   onQuoteSelection?: (quote: string) => void;
   onSaveAssistantToNote?: (content: string) => void;
+  onActivityOpenChange?: (open: boolean) => void;
 }
 
 function normalizeExportPlainText(content: string, t: (key: string, params?: Record<string, string>) => string): string {
@@ -236,6 +237,7 @@ function MessageList({
   onExitCompare,
   onQuoteSelection,
   onSaveAssistantToNote,
+  onActivityOpenChange,
 }: MessageListProps) {
   const { t, language } = useI18n();
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -1079,6 +1081,14 @@ function MessageList({
     return messages.find((message) => String(message.id) === activeActivityMessageId) || visibleMessages.find((message) => String(message.id) === activeActivityMessageId) || null;
   }, [activeActivityMessageId, messages, visibleMessages]);
   const activeActivityModel = activeActivityMessage?.model ? models.find((model) => model.id === activeActivityMessage.model) : undefined;
+
+  useEffect(() => {
+    onActivityOpenChange?.(!isCompare && Boolean(activeActivityMessage));
+  }, [activeActivityMessage, isCompare, onActivityOpenChange]);
+
+  useEffect(() => {
+    return () => onActivityOpenChange?.(false);
+  }, [onActivityOpenChange]);
 
   useEffect(() => {
     if (targetMessageId || isLoadingHistory || visibleMessages.length === 0) return;

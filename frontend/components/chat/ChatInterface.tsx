@@ -90,6 +90,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   const [forkTargetMessageId, setForkTargetMessageId] = useState<number | null>(null);
   const [compareTargetMessageId, setCompareTargetMessageId] = useState<number | undefined>(undefined);
   const [messageSelectMode, setMessageSelectMode] = useState(false);
+  const [activityPanelOpen, setActivityPanelOpen] = useState(false);
   const [quoteDraft, setQuoteDraft] = useState<QuoteDraft | null>(null);
   const handledExternalSendIdRef = useRef<number | null>(null);
   const [modelRecommendationContext, setModelRecommendationContext] = useState<ModelRecommendationContext>();
@@ -671,6 +672,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
           onExitCompare={handleExitCompare}
           onQuoteSelection={handleQuoteSelection}
           onSaveAssistantToNote={notebookId ? onSaveAssistantToNote : undefined}
+          onActivityOpenChange={setActivityPanelOpen}
         />
       )}
 
@@ -759,7 +761,8 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
       {/* 底部输入框 - 始终渲染，空状态时隐藏在下方 */}
       {!messageSelectMode && (
         <div className={cn(
-          "z-[70] w-full absolute inset-x-0 bottom-0 transition-all duration-700 ease-[cubic-bezier(0.34,1.56,0.64,1)]",
+          "z-[70] absolute inset-x-0 bottom-0 transition-all duration-700 ease-[cubic-bezier(0.34,1.56,0.64,1)]",
+          activityPanelOpen && !activeCompareMode && "lg:right-[336px]",
           isNewEmptyChat
             ? "opacity-0 translate-y-20 scale-95 pointer-events-none"
             : "opacity-100 translate-y-0 scale-100 pointer-events-auto"
