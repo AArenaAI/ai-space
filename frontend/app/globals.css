@@ -837,21 +837,6 @@
   display: none;
 }
 
-.chat-avatar-breathe {
-  animation: chat-avatar-breathe 2.2s ease-in-out infinite;
-  will-change: box-shadow;
-}
-
-@keyframes chat-avatar-breathe {
-  0%,
-  100% {
-    box-shadow: 0 0 0 2px var(--chat-avatar-breathe-color, rgba(99, 102, 241, 0.16));
-  }
-  50% {
-    box-shadow: 0 0 0 6px var(--chat-avatar-breathe-color, rgba(99, 102, 241, 0.28));
-  }
-}
-
 @keyframes chat-thinking-dot {
   0%,
   80%,
