@@ -219,13 +219,10 @@ async function testForkChatAddsGeneratingPlaceholderForForkedModel() {
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(requestStarted, true);
   const optimistic = setters.calls.find((call) => call[0] === "messages")[1];
-  assert.equal(optimistic.length, 3);
+  assert.equal(optimistic.length, 2);
   assert.equal(optimistic[1].groupId, -11);
   assert.equal(optimistic[1].groupIndex, 0);
-  assert.equal(optimistic[2].model, "m2");
-  assert.equal(optimistic[2].activityStatus.label, "生成中");
-  assert.equal(optimistic[2].groupId, -11);
-  assert.equal(optimistic[2].groupIndex, 1);
+  assert.equal(optimistic.some((message) => /^fork-/.test(message.id)), false);
   releaseRequest();
   await promise;
 }
@@ -251,8 +248,8 @@ async function testForkChatMarksPlaceholderFailedOnRequestError() {
 
   await assert.rejects(() => fork(11, ["m1", "m2"]), /boom/);
   const latestMessages = setters.calls.filter((call) => call[0] === "messages").at(-1)[1];
-  assert.equal(latestMessages[2].activityStatus.status, "failed");
-  assert.equal(latestMessages[2].activityStatus.label, "生成失败");
+  assert.equal(latestMessages.length, 2);
+  assert.equal(latestMessages.some((message) => /^fork-/.test(message.id)), false);
 }
 
 async function testStreamingForkPassesSourceUserAttachments() {
@@ -291,9 +288,12 @@ async function testStreamingForkPassesSourceUserAttachments() {
   assert.equal(requests.length, 1);
   assert.deepEqual(requests[0].message_file_ids || requests[0].messageFileIds, ["file-public-1"]);
   assert.equal(requests[0].messages.length, 1);
-  const optimistic = setters.calls.find((call) => call[0] === "messages")[1];
-  assert.notEqual(optimistic[2].createdAt, initialMessages[1].createdAt);
-  assert.equal(optimistic[2].generationStartedAt, 2000);
+  const serverBoundMessages = setters.calls.filter((call) => call[0] === "messages").map((call) => call[1]).find((messages) => messages.some((message) => message.id === "assistant-task:220"));
+  assert.ok(serverBoundMessages);
+  const serverBound = serverBoundMessages.find((message) => message.id === "assistant-task:220");
+  assert.equal(serverBound.serverMessageId, 120);
+  assert.equal(serverBound.generationTaskId, 220);
+  assert.equal(serverBound.model, "m2");
 }
 
 async function testForkChatSkipsRefreshWithoutTokenAndUsesFallbackConversation() {
