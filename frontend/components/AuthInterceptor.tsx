@@ -28,10 +28,24 @@ function isAuthLifecyclePath(path: string) {
   return path === AUTH_REFRESH_PATH || path === AUTH_LOGIN_PATH || path === AUTH_REGISTER_PATH || path === AUTH_LOGOUT_PATH;
 }
 
+function isAdminApiPath(path: string) {
+  return path === "/api/admin" || path.startsWith("/api/admin/");
+}
+
+function isAdminPagePath(path: string) {
+  return path === "/admin" || path.startsWith("/admin/");
+}
+
 function clearAuthState() {
   localStorage.removeItem("token");
   localStorage.removeItem("user");
   window.dispatchEvent(new Event("auth-changed"));
+}
+
+function clearAdminAuthState() {
+  localStorage.removeItem("admin_token");
+  localStorage.removeItem("admin_user");
+  window.dispatchEvent(new Event("admin-auth-changed"));
 }
 
 export default function AuthInterceptor() {
@@ -85,12 +99,20 @@ export default function AuthInterceptor() {
     };
 
     const redirectToLogin = () => {
-      if (redirecting || window.location.pathname.startsWith("/login") || window.location.pathname.startsWith("/register")) return;
+      if (redirecting || window.location.pathname.startsWith("/login") || window.location.pathname.startsWith("/register") || isAdminPagePath(window.location.pathname)) return;
       redirecting = true;
       clearAuthState();
       getGuestId();
       const returnUrl = encodeURIComponent(window.location.pathname + window.location.search);
       window.location.href = `/login?returnUrl=${returnUrl}`;
+    };
+
+    const redirectToAdminLogin = () => {
+      if (redirecting || window.location.pathname.replace(/\/+$/, "") === "/admin/login") return;
+      redirecting = true;
+      clearAdminAuthState();
+      const returnUrl = encodeURIComponent(window.location.pathname + window.location.search);
+      window.location.href = `/admin/login?returnUrl=${returnUrl}`;
     };
 
     window.fetch = async function (
@@ -105,28 +127,37 @@ export default function AuthInterceptor() {
         return originalFetch(input, init);
       }
       const path = toPath(url);
-      const shouldAttemptRefresh = isApi && !isAuthLifecyclePath(path);
+      const isAdminApi = isAdminApiPath(path);
+      const isAuthLifecycle = isAuthLifecyclePath(path);
+      const shouldAttemptRefresh = isApi && !isAdminApi && !isAuthLifecycle;
 
       let nextInit: RequestInit | undefined = init ? { ...init } : undefined;
 
-      // 给本域 API 请求自动添加 Authorization / X-Guest-ID。
+      // 给本域 API 请求自动添加 Authorization / X-Guest-ID；后台 API 使用独立 admin_token，不混用普通业务 token。
       if (isApi) {
         const headers = new Headers(input instanceof Request ? input.headers : init?.headers);
         const hasAuth = headers.has("Authorization");
-        const token = localStorage.getItem("token");
-        if (!hasAuth && token && token !== "null" && token !== "undefined") {
-          headers.set("Authorization", `Bearer ${token}`);
+        if (!hasAuth && !isAuthLifecycle) {
+          const tokenKey = isAdminApi ? "admin_token" : "token";
+          const token = localStorage.getItem(tokenKey);
+          if (token && token !== "null" && token !== "undefined") {
+            headers.set("Authorization", `Bearer ${token}`);
+          }
         }
-        // 始终携带 guest ID 作为匿名兜底；有效 Authorization 仍由后端优先识别为登录用户。
-        const guestId = getGuestId();
-        if (guestId) headers.set("X-Guest-ID", guestId);
+        if (!isAdminApi) {
+          // 始终携带 guest ID 作为匿名兜底；有效 Authorization 仍由后端优先识别为登录用户。
+          const guestId = getGuestId();
+          if (guestId) headers.set("X-Guest-ID", guestId);
+        }
         nextInit = { ...nextInit, headers, credentials: nextInit?.credentials || "include" };
       }
 
       let res = await originalFetch(requestForOriginal, nextInit);
 
-      // Access token 过期时：用 HttpOnly refresh cookie 静默续期，成功后重放一次原请求。
-      if (res.status === 401 && shouldAttemptRefresh) {
+      // Access token 过期时：普通业务接口用 HttpOnly refresh cookie 静默续期；后台接口回后台登录页，不跳普通登录。
+      if (res.status === 401 && isAdminApi) {
+        redirectToAdminLogin();
+      } else if (res.status === 401 && shouldAttemptRefresh) {
         const newToken = await refreshAccessToken();
         if (newToken) {
           const retryHeaders = new Headers(input instanceof Request ? input.headers : init?.headers);

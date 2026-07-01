@@ -49,7 +49,7 @@ export default function BetaFeedbackAdminPage() {
   const [total, setTotal] = useState(0);
 
   const fetchFeedback = useCallback(async () => {
-    const token = localStorage.getItem("admin_token") || localStorage.getItem("token");
+    const token = localStorage.getItem("admin_token");
     if (!token) return;
     setLoading(true);
     try {
