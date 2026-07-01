@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useRef, useState, type CSSProperties } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type UIEvent, type WheelEvent } from "react";
 import { Bot, Check, Play } from "lucide-react";
 import type { ChatModel, Message } from "@/lib/chatTypes";
 import type { InferredGroup } from "@/lib/groups";
@@ -26,8 +26,44 @@ const COMPARE_COLUMN_CONTENT_VISIBILITY_STYLE: CSSProperties = {
   contentVisibility: "auto",
   containIntrinsicSize: "auto 180px",
 };
+const COMPARE_COLUMN_SCROLL_STYLE: CSSProperties = {
+  maxHeight: "min(72vh, calc(100vh - 280px))",
+  overscrollBehavior: "contain",
+};
 const MARKDOWN_HYDRATE_ROOT_MARGIN = "1800px 0px";
 const SIMPLE_ASSISTANT_VIEWPORT_OBSERVER_SKIP_LENGTH = 500;
+
+type ScrollEdgeState = {
+  canScroll: boolean;
+  atTop: boolean;
+  atBottom: boolean;
+};
+
+function handleCompareColumnWheel(event: WheelEvent<HTMLDivElement>) {
+  const el = event.currentTarget;
+  if (el.scrollHeight <= el.clientHeight + 1) return;
+  const deltaY = event.deltaY;
+  const atTop = el.scrollTop <= 1;
+  const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+  const canScrollUp = deltaY < 0 && !atTop;
+  const canScrollDown = deltaY > 0 && !atBottom;
+  if (canScrollUp || canScrollDown) {
+    event.stopPropagation();
+  }
+}
+
+function getCompareColumnScrollStorageKey(conversationId: number | undefined, messageId: string | number | undefined) {
+  return `ai-space:chat:compare-column-scroll:${conversationId ?? "new"}:${messageId ?? "none"}`;
+}
+
+function getScrollEdgeState(el: HTMLElement): ScrollEdgeState {
+  const canScroll = el.scrollHeight > el.clientHeight + 1;
+  return {
+    canScroll,
+    atTop: el.scrollTop <= 1,
+    atBottom: !canScroll || el.scrollTop + el.clientHeight >= el.scrollHeight - 1,
+  };
+}
 
 function getMarkdownWeight(content?: string) {
   const text = content || "";
@@ -131,8 +167,10 @@ function CompareColumnTurn({
   const { t } = useI18n();
   const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
   const rowRef = useRef<HTMLDivElement | null>(null);
+  const columnScrollRef = useRef<HTMLDivElement | null>(null);
   const profileSnapshotRef = useRef<Record<string, unknown> | null>(null);
   const [openBadgeMenu, setOpenBadgeMenu] = useState(false);
+  const [scrollEdgeState, setScrollEdgeState] = useState<ScrollEdgeState>({ canScroll: false, atTop: true, atBottom: true });
   const showBadgeSwitcher = !!badgeGroup && badgeGroup.assistantMessages.length > 2 && !!onSelectAssistant;
   const terminalMessage = !!msg && isTerminalMessage(msg);
   const hasLiveGenerationSignal = !!msg && !terminalMessage && !!(
@@ -193,6 +231,45 @@ function CompareColumnTurn({
       : ["mount"]
     : undefined;
   if (profileSnapshot) profileSnapshotRef.current = profileSnapshot;
+  const columnScrollStorageKey = getCompareColumnScrollStorageKey(conversationId, msg?.id);
+  const updateColumnScrollEdgeState = useCallback(() => {
+    const el = columnScrollRef.current;
+    if (!el) return;
+    setScrollEdgeState(getScrollEdgeState(el));
+  }, []);
+  const persistColumnScrollTop = useCallback((el: HTMLElement) => {
+    setScrollEdgeState(getScrollEdgeState(el));
+    try {
+      window.sessionStorage.setItem(columnScrollStorageKey, String(Math.round(el.scrollTop)));
+    } catch {}
+  }, [columnScrollStorageKey]);
+  const handleColumnScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
+    persistColumnScrollTop(event.currentTarget);
+  }, [persistColumnScrollTop]);
+  const handleColumnWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
+    handleCompareColumnWheel(event);
+    const el = event.currentTarget;
+    window.requestAnimationFrame(() => persistColumnScrollTop(el));
+  }, [persistColumnScrollTop]);
+
+  useLayoutEffect(() => {
+    const el = columnScrollRef.current;
+    if (!el || !msg) return;
+    let restoredTop = 0;
+    try {
+      restoredTop = Number(window.sessionStorage.getItem(columnScrollStorageKey) || 0);
+    } catch {}
+    if (Number.isFinite(restoredTop) && restoredTop > 0) {
+      el.scrollTop = Math.min(restoredTop, Math.max(0, el.scrollHeight - el.clientHeight));
+    }
+    updateColumnScrollEdgeState();
+    const raf = window.requestAnimationFrame(updateColumnScrollEdgeState);
+    const timer = window.setTimeout(updateColumnScrollEdgeState, 180);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+    };
+  }, [activityLayout, columnScrollStorageKey, isActivityOpen, msg?.content?.length, msg?.id, msg?.reasoningContent?.length, updateColumnScrollEdgeState]);
 
   useEffect(() => {
     if (!msg) return;
@@ -349,40 +426,73 @@ function CompareColumnTurn({
             </div>
             <div className="flex min-w-0 flex-1 flex-col gap-1">
               <div className="w-full max-w-full bg-transparent px-0 py-1">
-                <div className={cn(isActivityOpen && activityLayout === "split" && "grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(260px,0.72fr)]") }>
+                <div>
                   <div className="min-w-0">
                     <div className="mb-2 flex items-center justify-between gap-2">
                       {model && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} compact inlineStatus />}
 
                     </div>
-                    <AssistantMessageContent
-                      message={msg}
-                      isStreaming={isStreaming}
-                      MarkdownRenderer={MarkdownRenderer}
-                      recoverEmptyContent
-                      onRegenerate={onRegenerate}
-                      onOpenActivity={() => onOpenActivity?.(msg, activityLayout)}
-                      inlineActivity={isActivityOpen && activityLayout === "inline" ? <ChatActivityPanel message={msg} model={model} onClose={() => onOpenActivity?.(msg, activityLayout)} variant="inline" /> : undefined}
-                      shouldHydrateRichText={!blockRichTextHydration && (isNearViewport || forceHydrateRichText)}
-                      priorityHydrateRichText={!blockRichTextHydration && (forceHydrateRichText || stabilizeInitialRichText || deferOffscreenRichTextHydration)}
-                      allowRichLiteFallback={allowRichLiteFallback || forceStableRichLiteFallback || isInitialReadingAssistant || isViewedAssistant}
-                      compactRichLitePreview={!historyPrependSettling && !forceStableRichLiteFallback && !isInitialReadingAssistant && !isViewedAssistant}
-                    />
-                    {msg.stopped && onContinueGenerate && (
-                      <button
-                        onClick={onContinueGenerate}
-                        className="mt-3 flex items-center gap-1.5 rounded-lg border border-surface-border px-3 py-1.5 text-sm text-text-secondary transition-colors hover:bg-surface-card hover:text-text-primary"
+                    <div className="relative" data-compare-column-scroll-frame="true">
+                      <div
+                        ref={columnScrollRef}
+                        data-compare-column-scroll-container="true"
+                        data-compare-column-model={model?.id || msg.model || ""}
+                        data-compare-column-can-scroll={scrollEdgeState.canScroll ? "true" : "false"}
+                        data-compare-column-at-top={scrollEdgeState.atTop ? "true" : "false"}
+                        data-compare-column-at-bottom={scrollEdgeState.atBottom ? "true" : "false"}
+                        className="compare-column-scroll-container -mx-1 overflow-y-auto overflow-x-hidden px-1 pr-2 [scrollbar-gutter:stable] [scrollbar-width:thin]"
+                        style={COMPARE_COLUMN_SCROLL_STYLE}
+                        onScroll={handleColumnScroll}
+                        onWheel={handleColumnWheel}
                       >
-                        <Play className="h-3.5 w-3.5" />
-                        {t("chat.action.continueGenerate")}
-                      </button>
-                    )}
-                  </div>
-                  {isActivityOpen && activityLayout === "split" && (
-                    <div className="min-w-0">
-                      <ChatActivityPanel message={msg} model={model} onClose={() => onOpenActivity?.(msg, activityLayout)} variant="embedded" />
+                        <div className={cn(isActivityOpen && activityLayout === "split" && "grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(260px,0.72fr)]") }>
+                          <div className="min-w-0">
+                          <AssistantMessageContent
+                            message={msg}
+                            isStreaming={isStreaming}
+                            MarkdownRenderer={MarkdownRenderer}
+                            recoverEmptyContent
+                            onRegenerate={onRegenerate}
+                            onOpenActivity={() => onOpenActivity?.(msg, activityLayout)}
+                            inlineActivity={isActivityOpen && activityLayout === "inline" ? <ChatActivityPanel message={msg} model={model} onClose={() => onOpenActivity?.(msg, activityLayout)} variant="inline" /> : undefined}
+                            shouldHydrateRichText={!blockRichTextHydration && (isNearViewport || forceHydrateRichText)}
+                            priorityHydrateRichText={!blockRichTextHydration && (forceHydrateRichText || stabilizeInitialRichText || deferOffscreenRichTextHydration)}
+                            allowRichLiteFallback={allowRichLiteFallback || forceStableRichLiteFallback || isInitialReadingAssistant || isViewedAssistant}
+                            compactRichLitePreview={!historyPrependSettling && !forceStableRichLiteFallback && !isInitialReadingAssistant && !isViewedAssistant}
+                          />
+                          {msg.stopped && onContinueGenerate && (
+                            <button
+                              onClick={onContinueGenerate}
+                              className="mt-3 flex items-center gap-1.5 rounded-lg border border-surface-border px-3 py-1.5 text-sm text-text-secondary transition-colors hover:bg-surface-card hover:text-text-primary"
+                            >
+                              <Play className="h-3.5 w-3.5" />
+                              {t("chat.action.continueGenerate")}
+                            </button>
+                          )}
+                        </div>
+                        {isActivityOpen && activityLayout === "split" && (
+                          <div className="min-w-0">
+                            <ChatActivityPanel message={msg} model={model} onClose={() => onOpenActivity?.(msg, activityLayout)} variant="embedded" />
+                          </div>
+                        )}
+                      </div>
+                      </div>
+                      {scrollEdgeState.canScroll && (
+                        <>
+                          <div
+                            data-compare-column-scroll-shadow="top"
+                            className={cn("pointer-events-none absolute inset-x-0 top-0 h-7 rounded-t-2xl bg-gradient-to-b from-surface via-surface/75 to-transparent transition-opacity duration-150", scrollEdgeState.atTop ? "opacity-0" : "opacity-100")}
+                            aria-hidden="true"
+                          />
+                          <div
+                            data-compare-column-scroll-shadow="bottom"
+                            className={cn("pointer-events-none absolute inset-x-0 bottom-0 h-8 rounded-b-2xl bg-gradient-to-t from-surface via-surface/75 to-transparent transition-opacity duration-150", scrollEdgeState.atBottom ? "opacity-0" : "opacity-100")}
+                            aria-hidden="true"
+                          />
+                        </>
+                      )}
                     </div>
-                  )}
+                  </div>
                 </div>
               </div>
               {!isStreaming && (

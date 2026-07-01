@@ -222,7 +222,7 @@ test("done handler callback can start background polling with resolved id", asyn
   assert.deepEqual(started[0], [9, "local", 33]);
 });
 
-test("finally syncs realtime data to message, marks realtime completed, removes stream and starts fallback polling", async () => {
+test("finally preserves local content for server-backed task streams and waits for fallback polling", async () => {
   const taskStreamsRef = { current: {} };
   const messages = createState([{ id: "local", content: "old" }]);
   const completed = [];
@@ -251,10 +251,11 @@ test("finally syncs realtime data to message, marks realtime completed, removes 
   assert.ok(taskStreamsRef.current.local);
   await Promise.resolve();
   await Promise.resolve();
-  assert.equal(messages.get()[0].content, "rt");
+  assert.equal(messages.get()[0].content, "old");
   assert.equal(messages.get()[0].lastSequence, 44);
-  assert.equal(messages.get()[0].completedAt, 123);
-  assert.deepEqual(completed, ["local"]);
+  assert.equal(messages.get()[0].serverMessageId, 9);
+  assert.equal(messages.get()[0].completedAt, undefined);
+  assert.deepEqual(completed, []);
   assert.equal(taskStreamsRef.current.local, undefined);
   assert.deepEqual(started.at(-1), [5, "local", 9]);
 });

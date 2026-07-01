@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { ChevronDown, Lightbulb } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
@@ -49,6 +48,11 @@ function buildCanonicalReasoningContent(content: string, reasoningContent?: stri
   return `<think>${reasoningContent}</think>\n\n${content || ""}`.trim();
 }
 
+function normalizeVisibleAnswer(content: string | undefined | null, reasoningContent?: string) {
+  const parsed = parseThinkContent(buildCanonicalReasoningContent(content || "", reasoningContent));
+  return parsed.answer.replace(/\s+/g, " ").trim();
+}
+
 function generationElapsedMs(realtime: ReturnType<typeof useMessageRealtime>) {
   const start = realtime?.generationStartedAt || realtime?.updatedAt;
   const end = realtime?.completedAt || Date.now();
@@ -60,6 +64,7 @@ export function StreamingText({
   content,
   reasoningContent,
   isStreaming,
+  preferCanonicalContent = false,
   className,
   as = "div",
   onOpenActivity,
@@ -68,6 +73,7 @@ export function StreamingText({
   content: string;
   reasoningContent?: string;
   isStreaming: boolean;
+  preferCanonicalContent?: boolean;
   className?: string;
   as?: "div" | "span";
   onOpenActivity?: () => void;
@@ -76,9 +82,15 @@ export function StreamingText({
   const realtime = useMessageRealtime(messageId);
   const streamText = useMessageStream(messageId, isStreaming);
   const canonicalContent = buildCanonicalReasoningContent(content, reasoningContent);
-  const canUseRealtime = isStreaming || !!realtime?.completedAt;
-  const effectiveText = canUseRealtime ? (streamText || realtime?.content || canonicalContent) : canonicalContent;
-  const hasSplitRealtime = canUseRealtime && !!realtime && (realtime.answerContent !== undefined || realtime.reasoningContent !== undefined);
+  const canUseRealtime = !preferCanonicalContent && (isStreaming || !!realtime?.completedAt);
+  const realtimeCandidate = streamText || realtime?.content || "";
+  const realtimeMatchesCanonical = !!realtimeCandidate && normalizeVisibleAnswer(realtimeCandidate, realtime?.reasoningContent) === normalizeVisibleAnswer(canonicalContent);
+  const effectiveText = preferCanonicalContent
+    ? canonicalContent
+    : canUseRealtime ? (realtimeCandidate || canonicalContent) : canonicalContent;
+  const usingCanonicalContent = preferCanonicalContent;
+  const answerContentSource = usingCanonicalContent ? "canonical" : canUseRealtime && realtimeCandidate ? "realtime" : "canonical";
+  const hasSplitRealtime = !usingCanonicalContent && canUseRealtime && !!realtime && (realtime.answerContent !== undefined || realtime.reasoningContent !== undefined);
   const legacyParsed = parseThinkContent(effectiveText);
   const splitAnswerParsed = parseThinkContent(realtime?.answerContent || "");
   const hasThinkTag = effectiveText.includes("<think>") || !!realtime?.answerContent?.includes("<think>");
@@ -93,9 +105,9 @@ export function StreamingText({
   const shouldAnimateSplit = isStreaming && (hasThinkTag || hasSplitRealtime);
   const isFinalizingRealtime = !isStreaming && !!realtime?.completedAt;
   const stableMarkdownStreamingMode = isStreaming || isFinalizingRealtime;
-  const displayedText = useSmoothStreaming(effectiveText, shouldAnimateText, `${messageId}:full`);
-  const displayedReasoning = useSmoothStreaming(fullParsed.reasoning || "", shouldAnimateSplit, `${messageId}:reasoning`);
-  const displayedAnswer = useSmoothStreaming(fullParsed.answer, shouldAnimateSplit, `${messageId}:answer`);
+  const displayedText = useSmoothStreaming(effectiveText, shouldAnimateText, `${messageId}:full`, { immediateWhenStopped: preferCanonicalContent });
+  const displayedReasoning = useSmoothStreaming(fullParsed.reasoning || "", shouldAnimateSplit, `${messageId}:reasoning`, { immediateWhenStopped: preferCanonicalContent });
+  const displayedAnswer = useSmoothStreaming(fullParsed.answer, shouldAnimateSplit, `${messageId}:answer`, { immediateWhenStopped: preferCanonicalContent });
 
 
   // 含 <think> 的消息必须用完整实时内容解析边界，不能先做整段打字机截断；
@@ -107,9 +119,9 @@ export function StreamingText({
   const hasReason = !!parsed.reasoning;
   const hasContent = !!parsed.answer.trim();
   const Host = as;
-  const [reasoningExpanded, setReasoningExpanded] = useState(true);
   const elapsedLabel = hasReason ? formatElapsedTime(generationElapsedMs(realtime), t) : "";
   const showInitialReasoningStatus = isStreaming && !hasContent && !hasReason;
+  const reasoningLabel = isStreaming && parsed.isThinking ? "思考中" : "已思考";
 
   return (
     <Host className={className}>
@@ -121,7 +133,7 @@ export function StreamingText({
             onClick={() => onOpenActivity?.()}
             className="inline-flex max-w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
           >
-            <span className="text-xs font-medium">思考中{elapsedLabel ? ` · ${elapsedLabel}` : ""}</span>
+            <span className="text-xs font-medium">{reasoningLabel}{elapsedLabel ? ` · ${elapsedLabel}` : ""}</span>
             <ChevronDown
               className="h-3.5 w-3.5 -rotate-90 shrink-0 text-text-tertiary/80"
             />
@@ -130,8 +142,14 @@ export function StreamingText({
         </div>
       )}
       {hasContent && (
-        <span data-i18n-skip="true" className="streaming-answer-markdown block break-words">
-          <StreamingMarkdownView content={parsed.answer} idleTimeout={80} keepRenderedOnContentChange isStreaming={stableMarkdownStreamingMode} />
+        <span
+          data-i18n-skip="true"
+          data-chat-answer-stable-layer="true"
+          data-chat-answer-content-source={answerContentSource}
+          data-chat-answer-canonical-match={preferCanonicalContent ? String(realtimeMatchesCanonical) : undefined}
+          className="streaming-answer-markdown block break-words"
+        >
+          <StreamingMarkdownView content={parsed.answer} idleTimeout={80} keepRenderedOnContentChange={!preferCanonicalContent} isStreaming={stableMarkdownStreamingMode} />
         </span>
       )}
       {showInitialReasoningStatus && (

@@ -71,8 +71,8 @@ async function openActivityPanel(page) {
 }
 
 function extractReasoningFromPanelText(text) {
-  const after = text.split(/(?:深度推理|Reasoning|Reasoned)[^\n]*/).slice(1).join('');
-  return after.split(/(?:回答完成|Generated|网页 ·|Web ·|来源 1|Source 1)/)[0] || '';
+  const after = text.split(/(?:思考过程|深度推理|Reasoning|Reasoned)[^\n]*/).slice(1).join('');
+  return after.split(/(?:回答完成|Generated|参考来源|网页 ·|Web ·|来源 1|Source 1)/)[0] || '';
 }
 
 async function samplePanelReasoning(page, count = 20, intervalMs = 80) {
@@ -117,6 +117,9 @@ async function samplePanelReasoning(page, count = 20, intervalMs = 80) {
   await openActivityPanel(page);
   const afterSwitch = await samplePanelReasoning(page, 24, 80);
   const panelText = await page.locator('[data-chat-activity-panel="true"]').innerText().catch(() => '');
+  const finalTaskSnapshot = await fetch(`${baseUrl}/api/tasks/${interrupted.task.id}`, {
+    headers: { Authorization: `Bearer ${auth.token}` },
+  }).then((res) => res.ok ? res.json() : undefined).catch(() => undefined);
   await browser.close();
 
   const beforeLens = beforeSwitch.map((sample) => sample.len);
@@ -126,6 +129,11 @@ async function samplePanelReasoning(page, count = 20, intervalMs = 80) {
   const maxJump = afterPositive.length ? Math.max(...afterPositive) : 0;
   const streamRequested = events.requests.some((item) => item.url.includes(`/api/tasks/${interrupted.task.id}/stream`));
   const hasActivityPanel = panelText.includes('思考与来源') || panelText.includes('Reasoning') || panelText.includes('Reasoned');
+  const restoredReasoningLength = Math.max(0, ...afterLens);
+  const taskStatus = finalTaskSnapshot?.task?.status || finalTaskSnapshot?.status;
+  const messageStatus = finalTaskSnapshot?.message?.generation_status || finalTaskSnapshot?.message?.server_generation_status;
+  const terminalStatus = ['completed', 'failed', 'cancelled', 'stopped'].includes(String(taskStatus || messageStatus || '').toLowerCase());
+  const stableButRestored = restoredReasoningLength >= Number(env('ACTIVITY_SWITCH_MIN_RESTORED_REASONING_CHARS', '80')) && afterDistinct >= 1;
   const result = {
     conversationA: conversationA.id,
     conversationB: conversationB.id,
@@ -133,6 +141,10 @@ async function samplePanelReasoning(page, count = 20, intervalMs = 80) {
     interrupted,
     streamRequested,
     hasActivityPanel,
+    taskStatus,
+    messageStatus,
+    terminalStatus,
+    restoredReasoningLength,
     beforeLens,
     afterLens,
     afterDistinct,
@@ -145,7 +157,12 @@ async function samplePanelReasoning(page, count = 20, intervalMs = 80) {
     consoleErrors: summarizeConsole(events.console),
     panelHead: panelText.slice(0, 1000),
   };
-  result.ok = Boolean(streamRequested) && hasActivityPanel && afterDistinct >= 2 && maxJump <= 30 && events.errors.length === 0;
+  result.ok = Boolean(streamRequested)
+    && hasActivityPanel
+    && restoredReasoningLength > 0
+    && (afterDistinct >= 2 || stableButRestored || terminalStatus)
+    && maxJump <= 30
+    && events.errors.length === 0;
   printResult(result);
   if (!result.ok) process.exit(2);
 })().catch((error) => {

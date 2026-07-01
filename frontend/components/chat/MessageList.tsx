@@ -963,6 +963,21 @@ function MessageList({
     });
   }, []);
 
+  // Activity open state is view-local and must not leak across conversations.
+  useEffect(() => {
+    setActiveActivityMessageId(null);
+    setActiveCompareActivityMessageIds(new Set());
+  }, [conversationId]);
+
+  useEffect(() => {
+    const liveAssistantIds = new Set(visibleMessages.filter((message) => message.role === "assistant").map((message) => String(message.id)));
+    setActiveCompareActivityMessageIds((current) => {
+      const next = new Set(Array.from(current).filter((id) => liveAssistantIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+    setActiveActivityMessageId((current) => current && liveAssistantIds.has(current) ? current : null);
+  }, [visibleMessages]);
+
   useEffect(() => {
     onActivityOpenChange?.(!isCompare && Boolean(activeActivityMessage));
   }, [activeActivityMessage, isCompare, onActivityOpenChange]);

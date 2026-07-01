@@ -10,7 +10,7 @@ const smoothDisplayCache = new Map<string, string>();
  * 关键优化：RAF 动画循环不依赖 safeText，只依赖 isStreaming。
  * safeText 变化时只更新 targetTextRef，RAF 继续运行，不会被取消重启，避免追赶永远落后一帧。
  */
-export function useSmoothStreaming(text: string | undefined | null, isStreaming: boolean, cacheKey?: string): string {
+export function useSmoothStreaming(text: string | undefined | null, isStreaming: boolean, cacheKey?: string, options?: { immediateWhenStopped?: boolean }): string {
   const safeText = text || "";
   const wasStreamingRef = useRef(isStreaming);
   const initialText = (() => {
@@ -101,7 +101,7 @@ export function useSmoothStreaming(text: string | undefined | null, isStreaming:
 
     if (!isStreaming) {
       targetTextRef.current = safeText;
-      if (!wasStreamingRef.current || displayedTextRef.current.length >= safeText.length) {
+      if (options?.immediateWhenStopped || !wasStreamingRef.current || displayedTextRef.current.length >= safeText.length) {
         displayedTextRef.current = safeText;
         setDisplayedText(safeText);
         if (cacheKey) smoothDisplayCache.delete(cacheKey);
@@ -122,7 +122,7 @@ export function useSmoothStreaming(text: string | undefined | null, isStreaming:
     if (!animationFrameRef.current && displayedTextRef.current.length < targetTextRef.current.length) {
       animationFrameRef.current = requestAnimationFrame(animate);
     }
-  }, [safeText, isStreaming, animate, cacheKey]);
+  }, [safeText, isStreaming, animate, cacheKey, options?.immediateWhenStopped]);
 
   // Effect 2：isStreaming 变化时管理 RAF。只依赖 isStreaming，不依赖 safeText。
   useEffect(() => {

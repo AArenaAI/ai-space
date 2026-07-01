@@ -4,21 +4,19 @@ import { useEffect, useRef, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { Message } from "@/lib/chatTypes";
-import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
-import { isMessageGenerating, parseThinkContent, sanitizeContent } from "@/lib/chatContent";
+import { isMessageGenerating } from "@/lib/chatContent";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
-import { StreamingText } from "./StreamingText";
-import { ThinkBlock } from "./ThinkBlock";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
-import { formatElapsedTime } from "@/lib/chatGenerationPhase";
 import { isTerminalMessage, resolveChatMessageRuntimeState, type ChatMessageRuntimeState } from "@/lib/chatMessageRuntimeState";
 import { getAssistantFailureCopy, isAssistantFailureState } from "@/lib/chatErrorState";
+import { AssistantAnswerRenderer } from "./AssistantAnswerRenderer";
 
 type MarkdownRendererComponent = ComponentType<{ content: string; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean; allowRichLiteFallback?: boolean; compactRichLitePreview?: boolean; messageId?: string | number }>;
 
 const JUST_COMPLETED_REASONING_EXPAND_MS = 5 * 60 * 1000;
 const JUST_COMPLETED_STREAMING_HOLD_MS = 800;
+const JUST_COMPLETED_VISUAL_STABLE_MS = 2500;
 
 function AssistantInlineError({ message, onRegenerate, t }: { message: Message; onRegenerate?: () => void; t: (key: string, params?: Record<string, string>) => string }) {
   const copy = getAssistantFailureCopy(message, t) || t("chat.error.genericInline");
@@ -49,12 +47,6 @@ function mayStillRecoverMessage(msg: Message) {
     msg.useBackground ||
     msg.isComplexTask
   );
-}
-
-function generationElapsedMs(message: Message, runtimeState: ChatMessageRuntimeState) {
-  const start = runtimeState.generationStartedAt || message.generationStartedAt || message.createdAt;
-  const end = runtimeState.completedAt || Date.now();
-  return start ? Math.max(0, end - start) : 0;
 }
 
 export function AssistantMessageContent({
@@ -97,27 +89,38 @@ export function AssistantMessageContent({
   const completedAt = runtimeState.terminalSource === "realtime" ? runtimeState.completedAt : undefined;
   const wasStreamingRef = useRef(false);
   const [keepCompletedStreaming, setKeepCompletedStreaming] = useState(false);
+  const [keepCompletedVisualStable, setKeepCompletedVisualStable] = useState(false);
   const [keepReasoningExpanded, setKeepReasoningExpanded] = useState(false);
   const justStoppedStreaming = wasStreamingRef.current && !generating;
   const finalizingRealtime = !runtimeState.terminal && !generating && (justStoppedStreaming || keepCompletedStreaming) && realtimeHasVisiblePayload;
-  const shouldRenderStreamingText = generating || finalizingRealtime || (!runtimeState.content && recoverEmptyContent && mayStillRecoverMessage(message));
+  const stableCompletedVisual = keepCompletedVisualStable && realtimeHasVisiblePayload && runtimeState.terminal;
+  const shouldRenderStreamingText = generating || finalizingRealtime || stableCompletedVisual || (!runtimeState.content && recoverEmptyContent && mayStillRecoverMessage(message));
 
   useEffect(() => {
     if (!completedAt || !realtimeHasVisiblePayload) return;
     setKeepCompletedStreaming(true);
+    setKeepCompletedVisualStable(true);
     const timer = window.setTimeout(() => setKeepCompletedStreaming(false), JUST_COMPLETED_STREAMING_HOLD_MS);
-    return () => window.clearTimeout(timer);
+    const stableTimer = window.setTimeout(() => setKeepCompletedVisualStable(false), JUST_COMPLETED_VISUAL_STABLE_MS);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(stableTimer);
+    };
   }, [completedAt, realtimeHasVisiblePayload]);
 
   useEffect(() => {
     let timer: number | undefined;
+    let stableTimer: number | undefined;
     if (wasStreamingRef.current && !generating) {
       setKeepCompletedStreaming(true);
+      setKeepCompletedVisualStable(true);
       timer = window.setTimeout(() => setKeepCompletedStreaming(false), JUST_COMPLETED_STREAMING_HOLD_MS);
+      stableTimer = window.setTimeout(() => setKeepCompletedVisualStable(false), JUST_COMPLETED_VISUAL_STABLE_MS);
     }
     wasStreamingRef.current = generating;
     return () => {
       if (timer) window.clearTimeout(timer);
+      if (stableTimer) window.clearTimeout(stableTimer);
     };
   }, [generating, message.id]);
 
@@ -133,49 +136,26 @@ export function AssistantMessageContent({
     return <AssistantInlineError message={failureMessage} onRegenerate={onRegenerate} t={t} />;
   }
 
-  if (shouldRenderStreamingText) {
-    return (
-      <StreamingText
-        messageId={message.id}
-        content={runtimeState.content || ""}
-        reasoningContent={runtimeState.reasoningContent || undefined}
-        isStreaming={generating}
-        className="text-[15px] leading-relaxed text-text-primary"
-        onOpenActivity={onOpenActivity}
-      />
-    );
-  }
-
-  if (!runtimeState.content) {
+  if (!shouldRenderStreamingText && !runtimeState.content) {
     return <AssistantInlineError message={{ ...message, content: "", stopped: true }} onRegenerate={onRegenerate} t={t} />;
   }
 
-  const finalContent = runtimeState.reasoningContent?.trim() && !/<think>[\s\S]*?<\/think>/i.test(runtimeState.content || "")
-    ? `<think>${runtimeState.reasoningContent}</think>\n\n${runtimeState.content || ""}`.trim()
-    : runtimeState.content;
-  const { reasoning, answer, isThinking } = parseThinkContent(finalContent);
-  const cleanAnswer = sanitizeContent(answer);
-  const elapsedLabel = reasoning ? formatElapsedTime(generationElapsedMs(message, runtimeState), t) : "";
-
   return (
-    <div className={cn("prose prose-sm max-w-none", className)}>
-      {reasoning && (
-        <ThinkBlock
-          content={reasoning}
-          isThinking={isThinking}
-          defaultExpanded={keepReasoningExpanded}
-          stabilizeCompletionHeight={keepReasoningExpanded}
-          shouldHydrateRichText={shouldHydrateRichText}
-          priorityHydrateRichText={priorityHydrateRichText}
-          allowRichLiteFallback={allowRichLiteFallback}
-          compactRichLitePreview={compactRichLitePreview}
-          messageId={message.id}
-          onOpenActivity={onOpenActivity}
-          elapsedLabel={elapsedLabel}
-          inlineActivity={inlineActivity}
-        />
-      )}
-      <MarkdownRenderer content={cleanAnswer} shouldHydrateRichText={shouldHydrateRichText} priorityHydrateRichText={priorityHydrateRichText} allowRichLiteFallback={allowRichLiteFallback} compactRichLitePreview={compactRichLitePreview} messageId={message.id} />
-    </div>
+    <AssistantAnswerRenderer
+      message={message}
+      runtimeState={runtimeState}
+      generating={generating}
+      shouldRenderStreamingText={shouldRenderStreamingText}
+      keepReasoningExpanded={keepReasoningExpanded}
+      className={className}
+      MarkdownRenderer={MarkdownRenderer}
+      shouldHydrateRichText={shouldHydrateRichText}
+      priorityHydrateRichText={priorityHydrateRichText}
+      allowRichLiteFallback={allowRichLiteFallback}
+      compactRichLitePreview={compactRichLitePreview}
+      onOpenActivity={onOpenActivity}
+      inlineActivity={inlineActivity}
+      t={t}
+    />
   );
 }

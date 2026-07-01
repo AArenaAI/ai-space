@@ -91,6 +91,8 @@
     "test:chat-conversation-switch-real-performance": "node scripts/regression/chat-conversation-switch-real-performance.cjs",
     "profile:chat-history-real": "node scripts/regression/chat-history-real-profile.cjs",
     "test:chat-streaming-state-fixture": "node scripts/regression/chat-streaming-state-fixture.cjs",
+    "test:chat-final-render-live": "node scripts/regression/chat-final-render-live.cjs",
+    "test:chat-compare-column-scroll-fixture": "node scripts/regression/chat-compare-column-scroll-fixture.cjs",
     "test:chat-i18n-residue-fixture": "node scripts/regression/chat-i18n-residue-fixture.cjs",
     "test:chat-markdown-code-fixture": "node scripts/regression/chat-markdown-code-fixture.cjs",
     "test:chat-markdown-token-fixture": "node scripts/regression/chat-markdown-token-fixture.cjs",

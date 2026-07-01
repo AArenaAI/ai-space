@@ -238,32 +238,42 @@ export function createStartTaskEventStreamAction({
         const latestSequence = taskEventHandler.getLatestSequence();
         const finalData = realtimeGet(localMessageId);
         if (shouldSyncTaskStreamFinalMessage({ hasFinalData: Boolean(finalData), accumulated })) {
-          setMessages((prev) => patchMessageById(prev, localMessageId, (m) =>
-            applyFinalRealtimeDataToMessage(m, {
-              finalContent: accumulated,
-              finalData,
-              latestSequence,
-              forceContentFallback: true,
-            })
-          ));
+          if (serverMessageId) {
+            setMessages((prev) => patchMessageById(prev, localMessageId, (m) => ({
+              serverMessageId,
+              generationTaskId,
+              lastSequence: Math.max(m.lastSequence || 0, latestSequence),
+            })));
+          } else {
+            setMessages((prev) => patchMessageById(prev, localMessageId, (m) =>
+              applyFinalRealtimeDataToMessage(m, {
+                finalContent: accumulated,
+                finalData,
+                latestSequence,
+                forceContentFallback: true,
+              })
+            ));
+          }
           patchSnapshotTaskMessage(convId, localMessageId, {
-            content: accumulated,
+            ...(serverMessageId ? {} : { content: accumulated }),
             serverMessageId,
             lastSequence: latestSequence,
             generationTaskId,
           });
         }
-        realtimeMarkCompleted(localMessageId);
-        const completedRealtimeData = realtimeGet(localMessageId);
-        if (completedRealtimeData?.statusTimeline?.length) {
-          setMessages((prev) => patchMessageById(prev, localMessageId, (m) =>
-            applyFinalRealtimeDataToMessage(m, {
-              finalContent: accumulated,
-              finalData: completedRealtimeData,
-              latestSequence,
-              forceContentFallback: true,
-            })
-          ));
+        if (!serverMessageId) {
+          realtimeMarkCompleted(localMessageId);
+          const completedRealtimeData = realtimeGet(localMessageId);
+          if (completedRealtimeData?.statusTimeline?.length) {
+            setMessages((prev) => patchMessageById(prev, localMessageId, (m) =>
+              applyFinalRealtimeDataToMessage(m, {
+                finalContent: accumulated,
+                finalData: completedRealtimeData,
+                latestSequence,
+                forceContentFallback: true,
+              })
+            ));
+          }
         }
         delete taskStreamsRef.current[localMessageId];
         if (shouldStartTaskStreamFallbackPolling({ serverMessageId })) {
