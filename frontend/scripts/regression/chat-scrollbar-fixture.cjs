@@ -4,13 +4,15 @@ const { chromium } = require("playwright");
 
 const baseUrl = process.env.CHAT_SCROLLBAR_FIXTURE_BASE_URL || "http://127.0.0.1:3000";
 
+const scrollerSelector = '[data-testid="chat-history-scroll-container"]';
+
 async function readMetrics(page) {
-  return page.evaluate(() => {
-    const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+  return page.evaluate((scrollerSelector) => {
+    const scroller = document.querySelector(scrollerSelector);
     const layer = document.querySelector('[data-testid="chat-scroll-progress-layer"]');
     const track = document.querySelector('[data-testid="chat-scroll-progress-track"]');
     const thumb = document.querySelector('[data-testid="chat-scroll-progress-thumb"]');
-    if (!scroller) throw new Error("virtuoso scroller not found");
+    if (!scroller) throw new Error("chat scroller not found");
     if (!layer || !track || !thumb) throw new Error("chat scroll progress overlay not found");
 
     const scrollerRect = scroller.getBoundingClientRect();
@@ -39,7 +41,7 @@ async function readMetrics(page) {
       overlayValueNow: track.getAttribute("aria-valuenow"),
       overflowY: scrollerStyle.overflowY,
     };
-  });
+  }, scrollerSelector);
 }
 
 (async () => {
@@ -68,7 +70,7 @@ async function readMetrics(page) {
     assert.ok(Math.abs(initial.trackRect.height - initial.scrollerRect.height) < 2, `progress track height should equal chat body height: track ${initial.trackRect.height}, scroller ${initial.scrollerRect.height}`);
 
     await page.evaluate(() => {
-      const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+      const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
       scroller.scrollTop = 0;
       scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
     });
@@ -90,7 +92,7 @@ async function readMetrics(page) {
 
     const stableBefore = await readMetrics(page);
     await page.evaluate(() => {
-      const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+      const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
       scroller.scrollTop = scroller.scrollTop + 40;
       scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
     });

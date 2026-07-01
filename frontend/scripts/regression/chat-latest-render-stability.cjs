@@ -74,7 +74,7 @@ function rowSnapshotScript(cid) {
     return role === "assistant" || row.querySelector('[data-markdown-token-renderer], [data-markdown-lite-renderer]');
   });
   const latest = assistants.at(-1) || rows.at(-1) || null;
-  const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+  const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
   const latestText = latest?.textContent || "";
   const token = latest ? Array.from(latest.querySelectorAll('[data-markdown-token-renderer]')).map((node) => node.getAttribute("data-markdown-token-renderer") || "") : [];
   const lite = latest ? Array.from(latest.querySelectorAll('[data-markdown-lite-renderer]')).map((node) => node.getAttribute("data-markdown-lite-renderer") || "") : [];
@@ -100,7 +100,7 @@ function rowSnapshotScript(cid) {
 async function sampleConversation(page, cid) {
   await page.evaluate(() => { window.__AI_SPACE_CHAT_PROFILE_EVENTS = []; });
   await page.goto(`${baseUrl}/chat/?id=${encodeURIComponent(cid)}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
-  await page.waitForSelector('[data-testid="virtuoso-scroller"]', { state: "attached", timeout: 30_000 });
+  await page.waitForSelector('[data-testid="chat-history-scroll-container"]', { state: "attached", timeout: 30_000 });
   await page.waitForFunction(() => document.querySelectorAll('[data-chat-message-row="true"][data-message-id]').length > 0, null, { timeout: 30_000 });
   await page.waitForTimeout(earlyDelayMs);
   const early = await page.evaluate(rowSnapshotScript, cid);

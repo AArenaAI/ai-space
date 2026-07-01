@@ -192,7 +192,7 @@ async function runBrowserBenchmarks() {
         const bodyTextLength = document.body.innerText.length;
         const markdownSkeletons = document.querySelectorAll('.animate-pulse').length;
         const renderedCodeBlocks = document.querySelectorAll('pre, code').length;
-        const visibleMessageRows = Array.from(document.querySelectorAll('[data-testid="virtuoso-item-list"] > *')).length;
+        const visibleMessageRows = Array.from(document.querySelectorAll('[data-chat-message-row="true"]')).length;
         const allElements = document.querySelectorAll('*').length;
         const nav = performance.getEntriesByType('navigation')[0];
         return {

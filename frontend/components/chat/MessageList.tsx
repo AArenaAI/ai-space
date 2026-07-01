@@ -7,7 +7,6 @@ import { useFavorites } from "@/hooks/useFavorites";
 import { toast } from "sonner";
 import dynamic from "next/dynamic";
 const ShareDialog = dynamic(() => import("@/components/ui/ShareDialog"), { ssr: false });
-import { Virtuoso, VirtuosoHandle, type Components, type ListItem } from "react-virtuoso";
 import { useMessageStream } from "@/hooks/useMessageStream";
 import { dedupeAssistantsByModel, inferGroups, InferredGroup } from "@/lib/groups";
 import { useI18n } from "@/lib/i18n";
@@ -69,7 +68,6 @@ import ChatMessageOverview, { type ChatMessageOverviewItem } from "./ChatMessage
 import ChatSelectionOverlays from "./ChatSelectionOverlays";
 import ChatScrollToBottomButton from "./ChatScrollToBottomButton";
 import ChatHistoryLoadingState from "./ChatHistoryLoadingState";
-import ChatHistoryLoadingVirtuoso from "./ChatHistoryLoadingVirtuoso";
 import ChatEmptyState from "./ChatEmptyState";
 import ChatDeleteMessageDialog from "./ChatDeleteMessageDialog";
 import ChatActivityPanel from "./ChatActivityPanel";
@@ -88,16 +86,10 @@ const HEAVY_HISTORY_PRELOAD_TOP_PX = 1800;
 const HISTORY_PRELOAD_BOTTOM_PX = CHAT_BOTTOM_SPACER;
 const FAST_SCROLL_PRELOAD_PX = 6000;
 const RETURN_TO_BOTTOM_PRELOAD_BOTTOM_PX = 6000;
-const HISTORY_OVERSCAN_REVERSE = 8;
-const CHAT_VIRTUOSO_DEFAULT_ITEM_HEIGHT = 260;
-const INITIAL_RENDERED_MESSAGE_WINDOW = 16;
-const CONTENT_HEAVY_INITIAL_RENDERED_MESSAGE_WINDOW = 32;
 const MAX_STABLE_RICH_LITE_ASSISTANTS_IN_RENDER_WINDOW = 16;
 const MARKDOWN_TOKEN_PREHEAT_DELAY_MS = 2600;
 const MARKDOWN_TOKEN_PREHEAT_MAX_ASSISTANTS = 4;
 const MARKDOWN_TOKEN_PREHEAT_MIN_CONTENT_LENGTH = 500;
-const MESSAGE_WINDOW_PAGE_SIZE = 8;
-const MIN_HIDDEN_MESSAGES_TO_WINDOW = 8;
 const CONTENT_HEAVY_TOTAL_CHARS_THRESHOLD = 24_000;
 const CONTENT_HEAVY_CODE_BLOCK_THRESHOLD = 24;
 const CONTENT_HEAVY_TABLE_LINE_THRESHOLD = 80;
@@ -243,20 +235,10 @@ function MessageList({
 }: MessageListProps) {
   const { t, language } = useI18n();
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const stickToBottomRef = useRef(true);
   const lastScrollTopRef = useRef(0);
   const loadingMoreTriggeredRef = useRef(false);
-  const loadMoreAnchorRef = useRef<{ messageId: string; top: number; messageCount: number; source?: "local-window" | "remote-history"; scrollHeight?: number; scrollTop?: number } | null>(null);
-  const localWindowReleaseAwaitingScrollAwayRef = useRef(false);
-  const localWindowReleasedRef = useRef(false);
-  const localWindowReleaseIntentUntilRef = useRef(0);
-  const localWindowReleaseStateRef = useRef({
-    hasHiddenLocalMessages: false,
-    visibleMessageCount: 0,
-    allVisibleMessageCount: 0,
-    firstVisibleMessageId: "",
-  });
+  const loadMoreAnchorRef = useRef<{ messageId: string; top: number; messageCount: number; source?: "remote-history"; scrollHeight?: number; scrollTop?: number } | null>(null);
   const visibleMessageCountRef = useRef(0);
   const programmaticScrollUntilRef = useRef(0);
   const userScrollOverrideUntilRef = useRef(0);
@@ -277,7 +259,7 @@ function MessageList({
   const [, setScrollProgressDragging] = useState(false);
   const [returnToBottomPreload, setReturnToBottomPreload] = useState(false);
   const [fastScrollPreload, setFastScrollPreload] = useState(false);
-  const [renderedMessageWindow, setRenderedMessageWindow] = useState(INITIAL_RENDERED_MESSAGE_WINDOW);
+
   const [historyPrependSettling, setHistoryPrependSettling] = useState(false);
   const [historyRichLiteFallbackMessageIds, setHistoryRichLiteFallbackMessageIds] = useState<Set<string>>(() => new Set());
   const fastScrollPreloadTimerRef = useRef<number>(0);
@@ -291,9 +273,7 @@ function MessageList({
   const overviewBottomLockUntilRef = useRef(0);
   const userOverviewRafRef = useRef<number>(0);
   const userOverviewMessagesRef = useRef<{ id: string; label: string }[]>([]);
-  const firstItemIndexRef = useRef(100_000);
   const previousAllVisibleMessagesRef = useRef<Message[]>([]);
-  const previousVisibleMessagesRef = useRef<Message[]>([]);
   const historyPrependUntilRef = useRef(0);
   const openedConversationBottomKeyRef = useRef("");
   const lastConversationIdRef = useRef<number | undefined>(conversationId);
@@ -363,15 +343,10 @@ function MessageList({
     }
     bottomLockTimersRef.current.forEach(window.clearTimeout);
     bottomLockTimersRef.current = [];
-    const scroller = scrollRef.current;
-    if (scroller) {
-      scroller.style.overflowAnchor = "none";
-      window.setTimeout(() => {
-        if (scrollRef.current === scroller && Date.now() >= userScrollOverrideUntilRef.current) {
-          scroller.style.overflowAnchor = "auto";
-        }
-      }, duration + 80);
-    }
+    // Native DOM scrolling: keep browser scroll anchoring enabled while the
+    // user is browsing. The previous implementation disabled overflow-anchor
+    // here and then tried to manually compensate history prepends with
+    // scrollHeight deltas; that made top-history loads jump by thousands of px.
     setReturnToBottomPreload(false);
   }, []);
 
@@ -379,7 +354,6 @@ function MessageList({
     if (!force && Date.now() < userScrollOverrideUntilRef.current) return;
     programmaticScrollUntilRef.current = Date.now() + 320;
     const el = scrollRef.current;
-    virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end", behavior });
     if (el) {
       const nextTop = Math.ceil(el.scrollHeight - el.clientHeight);
       if (behavior === "smooth") {
@@ -458,10 +432,9 @@ function MessageList({
       const eased = 1 - Math.pow(1 - progress, 3);
       const desiredTop = Math.min(targetTop, startTop + Math.max(0, targetTop - startTop) * eased);
       const currentTop = el.scrollTop;
-      // Keep the programmatic button scroll slow enough for Virtuoso to
-      // continuously remeasure/re-window. Larger per-frame jumps can leave a
-      // transient frame where mounted rows exist but none intersect the viewport,
-      // which reads as a message flash even though the list is not blank.
+      // Keep the programmatic button scroll smooth enough that row measurement
+      // and Markdown hydration do not create a visible flash while returning
+      // from a long compare thread to the bottom.
       const maxFrameDelta = 60;
       const cappedTop = Math.abs(desiredTop - currentTop) > maxFrameDelta
         ? currentTop + Math.sign(desiredTop - currentTop) * maxFrameDelta
@@ -539,8 +512,8 @@ function MessageList({
     bottomLockTimersRef.current.forEach(window.clearTimeout);
     bottomLockTimersRef.current = [];
 
-    // Virtuoso/compare mode still needs a longer post-layout settling window.
-    // Normal DOM chat keeps this short so it does not fight user scroll after history prepend.
+    // Compare can still need a longer post-layout settling window. Normal DOM
+    // chat keeps this short so it does not fight user scroll after history prepend.
     const delays = extraSettling
       ? (isCompare ? [50, 100, 180, 280, 400, 520, 620, 800, 1200, 1800, 2200, 2600, 3600, 5000] : [80, 180, 320, 600])
       : [80, 180];
@@ -564,7 +537,7 @@ function MessageList({
     bottomLockTimersRef.current = delays.map((delay) => window.setTimeout(lock, delay));
   }, [isCompare, scrollToBottom, shouldPreserveRestoredBrowsePosition]);
 
-  const handleVirtuosoScrollerRef = useCallback((ref: Window | HTMLElement | null) => {
+  const handleChatScrollerRef = useCallback((ref: Window | HTMLElement | null) => {
     const el = ref instanceof HTMLElement ? (ref as HTMLDivElement) : null;
     scrollRef.current = el;
     if (el) {
@@ -595,53 +568,6 @@ function MessageList({
     }
   }, [conversationId, hasRenderedInitialRange, targetMessageId, updateScrollProgressFromElement]);
 
-  const lockBottomOnRenderedRange = useCallback(() => {
-    if (targetMessageId || shouldPreserveRestoredBrowsePosition()) return;
-    if (Date.now() >= bottomLockIntentUntilRef.current) return;
-    if (Date.now() < userScrollOverrideUntilRef.current || !stickToBottomRef.current) return;
-    scrollToBottom();
-  }, [scrollToBottom, shouldPreserveRestoredBrowsePosition, targetMessageId]);
-
-  const handleItemsRendered = useCallback((items: ListItem<Message>[]) => {
-    if (items.length <= 0) return;
-    lockBottomOnRenderedRange();
-    if (hasRenderedInitialRange) return;
-    if (initialRangeRevealRafRef.current) window.cancelAnimationFrame(initialRangeRevealRafRef.current);
-
-    let attempts = 0;
-    let stableHeightFrames = 0;
-    let lastScrollHeight = -1;
-    const waitForInitialBottomStability = () => {
-      initialRangeRevealRafRef.current = 0;
-      const el = scrollRef.current;
-      if (!el || targetMessageId || !stickToBottomRef.current) {
-        setHasRenderedInitialRange(true);
-        return;
-      }
-
-      const distanceToBottom = el.scrollHeight - el.clientHeight - el.scrollTop;
-      const heightStable = Math.abs(el.scrollHeight - lastScrollHeight) <= 1;
-      stableHeightFrames = heightStable ? stableHeightFrames + 1 : 0;
-      lastScrollHeight = el.scrollHeight;
-      attempts += 1;
-
-      if (distanceToBottom > AT_BOTTOM_THRESHOLD) {
-        scrollToBottom();
-        stableHeightFrames = 0;
-      }
-
-      const atBottomAfterLock = el.scrollHeight - el.clientHeight - el.scrollTop <= AT_BOTTOM_THRESHOLD;
-      if ((atBottomAfterLock && stableHeightFrames >= 2) || attempts >= 12) {
-        if (!atBottomAfterLock && Date.now() < bottomLockIntentUntilRef.current && Date.now() >= userScrollOverrideUntilRef.current) scrollToBottom();
-        setHasRenderedInitialRange(true);
-        return;
-      }
-
-      initialRangeRevealRafRef.current = window.requestAnimationFrame(waitForInitialBottomStability);
-    };
-
-    initialRangeRevealRafRef.current = window.requestAnimationFrame(waitForInitialBottomStability);
-  }, [hasRenderedInitialRange, lockBottomOnRenderedRange, scrollToBottom, targetMessageId]);
 
   const centerMessageRowInScroller = useCallback((messageId: string) => {
     const el = scrollRef.current;
@@ -663,33 +589,25 @@ function MessageList({
     return true;
   }, [updateScrollProgressFromElement]);
 
-  const releaseHiddenLocalMessages = useCallback((el: HTMLElement) => {
-    const state = localWindowReleaseStateRef.current;
-    if (Date.now() > localWindowReleaseIntentUntilRef.current) return false;
-    if (!state.hasHiddenLocalMessages || localWindowReleaseAwaitingScrollAwayRef.current) return false;
-    const firstVisibleRow = Array.from(el.querySelectorAll<HTMLElement>('[data-chat-message-row="true"]'))
-      .find((row) => row.getBoundingClientRect().bottom >= el.getBoundingClientRect().top + 8);
-    const messageId = firstVisibleRow?.dataset.messageId || state.firstVisibleMessageId;
-    if (!messageId) return false;
+  const markHistoryPrependSettling = useCallback((duration = 1600, richLiteFallbackIds: string[] = []) => {
+    historyPrependUntilRef.current = Math.max(historyPrependUntilRef.current, Date.now() + duration);
+    setHistoryPrependSettling(true);
+    if (richLiteFallbackIds.length > 0) {
+      setHistoryRichLiteFallbackMessageIds(new Set(richLiteFallbackIds));
+    }
+    if (historyPrependSettlingTimerRef.current) window.clearTimeout(historyPrependSettlingTimerRef.current);
+    historyPrependSettlingTimerRef.current = window.setTimeout(() => {
+      historyPrependSettlingTimerRef.current = 0;
+      setHistoryPrependSettling(false);
+    }, duration);
+    if (historyRichLiteFallbackTimerRef.current) window.clearTimeout(historyRichLiteFallbackTimerRef.current);
+    historyRichLiteFallbackTimerRef.current = window.setTimeout(() => {
+      historyRichLiteFallbackTimerRef.current = 0;
+      setHistoryRichLiteFallbackMessageIds(new Set());
+    }, duration + 1200);
+  }, []);
 
-    loadMoreAnchorRef.current = {
-      messageId,
-      top: firstVisibleRow?.getBoundingClientRect().top ?? el.getBoundingClientRect().top,
-      messageCount: state.visibleMessageCount,
-      source: "local-window",
-      scrollHeight: el.scrollHeight,
-      scrollTop: el.scrollTop,
-    };
-    localWindowReleaseAwaitingScrollAwayRef.current = true;
-    localWindowReleasedRef.current = true;
-    setRenderedMessageWindow(() =>
-      Math.min(state.visibleMessageCount + MESSAGE_WINDOW_PAGE_SIZE, state.allVisibleMessageCount)
-    );
-    stopBottomLockForUserBrowse(1800);
-    return true;
-  }, [stopBottomLockForUserBrowse]);
-
-  const handleVirtuosoScroll = useCallback((event: UIEvent<HTMLElement>) => {
+  const handleChatScroll = useCallback((event: UIEvent<HTMLElement>) => {
     const el = event.currentTarget;
     scrollRef.current = el as HTMLDivElement;
 
@@ -759,9 +677,6 @@ function MessageList({
       // back to the bottom and leave the overview marker stuck on the latest item.
       stopBottomLockForUserBrowse(2500);
       setActiveOverviewMessageId((previous) => previous === userOverviewMessagesRef.current[0].id ? previous : userOverviewMessagesRef.current[0].id);
-      localWindowReleaseIntentUntilRef.current = Date.now() + 1800;
-      if (isCompare && releaseHiddenLocalMessages(el)) return;
-
       const firstVisibleRow = Array.from(el.querySelectorAll<HTMLElement>('[data-chat-message-row="true"]'))
         .find((row) => row.getBoundingClientRect().bottom >= el.getBoundingClientRect().top + 8);
       const messageId = firstVisibleRow?.dataset.messageId;
@@ -783,6 +698,9 @@ function MessageList({
           scrollHeight: el.scrollHeight,
           scrollTop: el.scrollTop,
         };
+        // Start prepend settling before the remote page mutates the DOM so the
+        // browser's own overflow-anchor does not pre-apply the height delta.
+        markHistoryPrependSettling(isCompare ? 1600 : 900);
         stopBottomLockForUserBrowse(1800);
         onLoadMore();
       }
@@ -834,7 +752,7 @@ function MessageList({
       userOverviewRafRef.current = window.requestAnimationFrame(updateActiveOverviewFromRows);
     }
 
-  }, [conversationId, hasMoreMessages, hasRenderedInitialRange, isCompare, isLoadingMore, onLoadMore, releaseHiddenLocalMessages, stopBottomLockForUserBrowse, targetMessageId, updateScrollProgressFromElement]);
+  }, [conversationId, hasMoreMessages, hasRenderedInitialRange, isCompare, isLoadingMore, markHistoryPrependSettling, onLoadMore, stopBottomLockForUserBrowse, targetMessageId, updateScrollProgressFromElement]);
 
   const markUserBrowsing = useCallback((duration = 2500) => {
     setUserBrowsing(true);
@@ -859,24 +777,6 @@ function MessageList({
     };
   }, [saveCurrentConversationScrollState]);
 
-  const markHistoryPrependSettling = useCallback((duration = 1600, richLiteFallbackIds: string[] = []) => {
-    historyPrependUntilRef.current = Math.max(historyPrependUntilRef.current, Date.now() + duration);
-    setHistoryPrependSettling(true);
-    if (richLiteFallbackIds.length > 0) {
-      setHistoryRichLiteFallbackMessageIds(new Set(richLiteFallbackIds));
-    }
-    if (historyPrependSettlingTimerRef.current) window.clearTimeout(historyPrependSettlingTimerRef.current);
-    historyPrependSettlingTimerRef.current = window.setTimeout(() => {
-      historyPrependSettlingTimerRef.current = 0;
-      setHistoryPrependSettling(false);
-    }, duration);
-    if (historyRichLiteFallbackTimerRef.current) window.clearTimeout(historyRichLiteFallbackTimerRef.current);
-    historyRichLiteFallbackTimerRef.current = window.setTimeout(() => {
-      historyRichLiteFallbackTimerRef.current = 0;
-      setHistoryRichLiteFallbackMessageIds(new Set());
-    }, duration + 1200);
-  }, []);
-
   const handleUserScrollIntent = useCallback((deltaY: number) => {
     const el = scrollRef.current;
     if (!el) return;
@@ -890,20 +790,13 @@ function MessageList({
       }, 900);
     }
 
-    if (deltaY > 0) {
-      localWindowReleaseAwaitingScrollAwayRef.current = false;
-      return;
-    }
+    if (deltaY > 0) return;
     if (deltaY === 0) return;
-    localWindowReleaseIntentUntilRef.current = Date.now() + 1800;
     if (deltaY < 0) {
       stopBottomLockForUserBrowse(2500);
       markUserBrowsing(2500);
       atBottomRef.current = false;
       setAtBottom(false);
-    }
-    if (isCompare && deltaY < 0 && el.scrollTop <= 4 && releaseHiddenLocalMessages(el)) {
-      return;
     }
     const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     if (distanceToBottom > 1) {
@@ -912,7 +805,7 @@ function MessageList({
       atBottomRef.current = false;
       setAtBottom(false);
     }
-  }, [isCompare, markUserBrowsing, releaseHiddenLocalMessages, stopBottomLockForUserBrowse]);
+  }, [isCompare, markUserBrowsing, stopBottomLockForUserBrowse]);
 
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [selectionMode, setSelectionMode] = useState<SelectionMode | null>(null);
@@ -939,11 +832,6 @@ function MessageList({
     lockBottomAfterSmoothScroll();
   }, [lockBottomAfterSmoothScroll, scrollToBottom]);
 
-  const createVirtuosoComponents = useCallback(<T,>(): Components<T, unknown> => ({
-    Footer: () => <div style={{ height: CHAT_BOTTOM_SPACER + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0) }} aria-hidden="true" />,
-  }), [selectMode]);
-  const virtuosoComponents = useMemo(() => createVirtuosoComponents<Message>(), [createVirtuosoComponents]);
-  const compareVirtuosoComponents = useMemo(() => createVirtuosoComponents<InferredGroup>(), [createVirtuosoComponents]);
   const groups = useMemo(() => inferGroups(messages), [messages]);
   const effectiveIsCompare = isCompare;
   const groupByMessageId = useMemo(() => {
@@ -1034,35 +922,15 @@ function MessageList({
     ?? (targetMessageId
       ? allVisibleMessages.find((message) => message.serverMessageId === targetMessageId || String(message.id) === String(targetMessageId))
       : undefined);
-  const targetMessageLocalIndex = targetAnchorMessage
-    ? allVisibleMessages.findIndex((message) => message.id === targetAnchorMessage.id)
-    : -1;
-  const targetMessageWindow = targetMessageLocalIndex >= 0
-    ? allVisibleMessages.length - targetMessageLocalIndex
-    : 0;
   const contentWeight = useMemo(() => getMessageContentWeight(allVisibleMessages), [allVisibleMessages]);
   const isContentHeavyConversation =
     contentWeight.totalChars >= CONTENT_HEAVY_TOTAL_CHARS_THRESHOLD ||
     contentWeight.codeBlocks >= CONTENT_HEAVY_CODE_BLOCK_THRESHOLD ||
     contentWeight.tableLines >= CONTENT_HEAVY_TABLE_LINE_THRESHOLD;
-  const initialMessageWindow = isContentHeavyConversation
-    ? CONTENT_HEAVY_INITIAL_RENDERED_MESSAGE_WINDOW
-    : INITIAL_RENDERED_MESSAGE_WINDOW;
-  const effectiveRenderedMessageWindowState =
-    isContentHeavyConversation && !localWindowReleasedRef.current && renderedMessageWindow === INITIAL_RENDERED_MESSAGE_WINDOW
-      ? CONTENT_HEAVY_INITIAL_RENDERED_MESSAGE_WINDOW
-      : renderedMessageWindow;
-  // Normal and compare chat now share the same DOM scroller. Keep all loaded
-  // messages/groups mounted so history prepend uses one stable scrollHeight
-  // delta instead of a second local hidden-message window.
-  const shouldWindowInitialMessages = false;
-  const effectiveRenderedMessageWindow = shouldWindowInitialMessages
-    ? Math.min(Math.max(effectiveRenderedMessageWindowState, targetMessageWindow, initialMessageWindow), allVisibleMessages.length)
-    : allVisibleMessages.length;
-  const visibleMessages = useMemo(() => {
-    if (allVisibleMessages.length <= effectiveRenderedMessageWindow) return allVisibleMessages;
-    return allVisibleMessages.slice(allVisibleMessages.length - effectiveRenderedMessageWindow);
-  }, [allVisibleMessages, effectiveRenderedMessageWindow]);
+  // Normal and compare chat share one native DOM scroller. Keep all loaded
+  // messages mounted; remote history prepend is stabilized by DOM row anchoring
+  // instead of a second local hidden-message window.
+  const visibleMessages = allVisibleMessages;
   visibleMessageCountRef.current = visibleMessages.length;
   useEffect(() => {
     if (!isLoadingMore) {
@@ -1152,26 +1020,9 @@ function MessageList({
   useEffect(() => {
     setViewedAssistantIds(new Set());
   }, [conversationId]);
-  const hiddenLocalMessageCount = allVisibleMessages.length - visibleMessages.length;
-  const hasHiddenLocalMessages = hiddenLocalMessageCount > 0;
-  const useWindowedRowMeasurementHints = isCompare && allVisibleMessages.length > INITIAL_RENDERED_MESSAGE_WINDOW;
-  const useRowContentVisibility = useWindowedRowMeasurementHints;
-  const deferOffscreenRichTextHydration = isCompare && !useWindowedRowMeasurementHints && !targetMessageId;
+  const useRowContentVisibility = false;
+  const deferOffscreenRichTextHydration = isCompare && !targetMessageId;
   const shouldDeferRowsForActiveBrowse = isCompare && userBrowsing;
-  localWindowReleaseStateRef.current = {
-    hasHiddenLocalMessages,
-    visibleMessageCount: visibleMessages.length,
-    allVisibleMessageCount: allVisibleMessages.length,
-    firstVisibleMessageId: visibleMessages[0]?.id ?? "",
-  };
-
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    const userIsBrowsingHistory = !stickToBottomRef.current || Date.now() < userScrollOverrideUntilRef.current;
-    if (el && userIsBrowsingHistory && el.scrollTop <= 4 && el.scrollHeight - el.clientHeight > 4 && hasHiddenLocalMessages) {
-      releaseHiddenLocalMessages(el);
-    }
-  }, [hasHiddenLocalMessages, releaseHiddenLocalMessages, visibleMessages.length]);
 
   useEffect(() => {
     if (isCompare || hasRenderedInitialRange || visibleMessages.length === 0 || targetMessageId) return;
@@ -1254,68 +1105,34 @@ function MessageList({
     const anchor = loadMoreAnchorRef.current;
     const el = scrollRef.current;
     if (!anchor || !el || visibleMessages.length <= anchor.messageCount) return;
-    if (isCompare) {
-      markHistoryPrependSettling(1600);
-    } else {
-      historyPrependUntilRef.current = Math.max(historyPrependUntilRef.current, Date.now() + 900);
-    }
-    stopBottomLockForUserBrowse(1600);
+    markHistoryPrependSettling(isCompare ? 1600 : 900);
+    stopBottomLockForUserBrowse(isCompare ? 1600 : 900);
 
     let cancelled = false;
     let raf = 0;
     const startedAt = Date.now();
     const restoreAnchor = () => {
       if (cancelled) return;
-      if (anchor.source === "remote-history" && typeof anchor.scrollHeight === "number" && typeof anchor.scrollTop === "number") {
-        // DOM prepend is best anchored by total height delta. Do this before
-        // looking up the old row: real conversations can group/filter messages, so
-        // the pre-prepend anchor row may be temporarily absent even though height
-        // has already changed and the viewport needs compensation immediately.
-        const nextTop = Math.max(0, anchor.scrollTop + (el.scrollHeight - anchor.scrollHeight));
-        if (Math.abs(el.scrollTop - nextTop) > 1) {
-          el.scrollTop = nextTop;
-          lastScrollTopRef.current = el.scrollTop;
-          updateScrollProgressFromElement(el);
-        }
-        if (Date.now() - startedAt < 500) {
-          raf = window.requestAnimationFrame(restoreAnchor);
-          return;
-        }
-        if (loadMoreAnchorRef.current?.messageId === anchor.messageId) {
-          loadMoreAnchorRef.current = null;
-        }
-        return;
-      }
       const row = el.querySelector<HTMLElement>(`[data-chat-message-row="true"][data-message-id="${CSS.escape(anchor.messageId)}"]`);
       if (!row) {
         if (Date.now() - startedAt < 800) {
           raf = window.requestAnimationFrame(restoreAnchor);
-        }
-        return;
-      }
-      if (anchor.source === "local-window") {
-        // Local window release happens while the user is actively browsing upward.
-        // Do not compensate scrollTop in the opposite direction; that creates the
-        // visible stuck-row/back-and-forth flicker.
-        if (loadMoreAnchorRef.current?.messageId === anchor.messageId) {
+        } else if (loadMoreAnchorRef.current?.messageId === anchor.messageId) {
           loadMoreAnchorRef.current = null;
         }
         return;
       }
-
+      // Native DOM prepend anchoring: during the short prepend settling window
+      // overflow-anchor is disabled, so this single DOM-row correction is the
+      // only scrollTop writer. This preserves the visible row without the old
+      // scrollHeight-delta jump/double-anchoring behavior.
       const delta = row.getBoundingClientRect().top - anchor.top;
       if (Math.abs(delta) > 4) {
         el.scrollTop += delta;
         lastScrollTopRef.current = el.scrollTop;
         updateScrollProgressFromElement(el);
       }
-      if (!isCompare) {
-        if (loadMoreAnchorRef.current?.messageId === anchor.messageId) {
-          loadMoreAnchorRef.current = null;
-        }
-        return;
-      }
-      if (Date.now() - startedAt < 800) {
+      if (Date.now() - startedAt < (isCompare ? 800 : 320)) {
         raf = window.requestAnimationFrame(restoreAnchor);
         return;
       }
@@ -1332,42 +1149,19 @@ function MessageList({
   }, [isCompare, markHistoryPrependSettling, messages.length, stopBottomLockForUserBrowse, updateScrollProgressFromElement, visibleMessages.length]);
 
   useEffect(() => {
-    const previousAllVisibleMessages = previousAllVisibleMessagesRef.current;
-    const hasUserHistoryAnchor = Boolean(loadMoreAnchorRef.current) || Date.now() < historyPrependUntilRef.current;
-    if (hasUserHistoryAnchor && previousAllVisibleMessages.length > 0 && allVisibleMessages.length > previousAllVisibleMessages.length) {
-      const firstPreviousId = previousAllVisibleMessages[0]?.id;
-      const firstPreviousIndex = firstPreviousId
-        ? allVisibleMessages.findIndex((message) => message.id === firstPreviousId)
-        : -1;
-      const isPurePrepend = firstPreviousIndex > 0 && previousAllVisibleMessages.every((message, index) => allVisibleMessages[firstPreviousIndex + index]?.id === message.id);
-      const wasFullyExpanded = previousVisibleMessagesRef.current.length >= previousAllVisibleMessages.length;
-      if (isPurePrepend && wasFullyExpanded) {
-        setRenderedMessageWindow((current) => Math.max(current + firstPreviousIndex, allVisibleMessages.length));
-      }
-    }
-    previousAllVisibleMessagesRef.current = allVisibleMessages;
-  }, [allVisibleMessages]);
-
-  useEffect(() => {
     const commitAt = typeof performance !== "undefined" ? performance.now() : Date.now();
     emitChatRenderProfileEvent("message-list-commit", {
       conversationId,
       messageCount: messages.length,
       allVisibleMessageCount: allVisibleMessages.length,
       visibleMessageCount: visibleMessages.length,
-      hiddenLocalMessageCount,
-      renderedMessageWindow,
-      effectiveRenderedMessageWindow,
-      initialMessageWindow,
-      targetMessageWindow,
       isContentHeavyConversation,
       contentWeight,
       durationMs: commitAt - renderStartedAt,
     });
-  }, [allVisibleMessages.length, contentWeight, conversationId, effectiveRenderedMessageWindow, hiddenLocalMessageCount, initialMessageWindow, isContentHeavyConversation, messages.length, renderedMessageWindow, renderStartedAt, targetMessageWindow, visibleMessages.length]);
+  }, [allVisibleMessages.length, contentWeight, conversationId, isContentHeavyConversation, messages.length, renderStartedAt, visibleMessages.length]);
 
   useEffect(() => {
-    setRenderedMessageWindow(INITIAL_RENDERED_MESSAGE_WINDOW);
     setHasRenderedInitialRange(false);
   }, [conversationId, targetMessageId]);
 
@@ -1404,13 +1198,6 @@ function MessageList({
   const jumpToUserMessage = useCallback((messageId: string) => {
     const index = visibleMessages.findIndex((message) => message.id === messageId);
     if (index < 0) {
-      const allIndex = allVisibleMessages.findIndex((message) => message.id === messageId);
-      if (allIndex < 0) return;
-      const neededWindow = allVisibleMessages.length - allIndex;
-      setRenderedMessageWindow((current) => Math.max(current, neededWindow));
-      window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(() => jumpToUserMessage(messageId));
-      });
       return;
     }
     programmaticScrollUntilRef.current = Date.now() + 900;
@@ -1419,7 +1206,7 @@ function MessageList({
     setActiveOverviewMessageId(messageId);
     highlightMessage(messageId, 2400);
     const scrollToTarget = () => {
-      virtuosoRef.current?.scrollToIndex({ index, align: "center", behavior: "auto" });
+      centerMessageRowInScroller(messageId);
       window.requestAnimationFrame(() => centerMessageRowInScroller(messageId));
     };
     const centerTarget = () => centerMessageRowInScroller(messageId);
@@ -1429,40 +1216,15 @@ function MessageList({
     window.setTimeout(centerTarget, 260);
   }, [allVisibleMessages, centerMessageRowInScroller, highlightMessage, stopBottomLockForUserBrowse, visibleMessages]);
 
-  const pendingFirstItemIndex = useMemo(() => {
-    if (lastConversationIdRef.current !== conversationId) {
-      return 100_000;
-    }
-
-    const prev = previousVisibleMessagesRef.current;
-    if (prev.length > 0 && visibleMessages.length > prev.length) {
-      const firstPrevId = prev[0]?.id;
-      const firstPrevIndex = firstPrevId
-        ? visibleMessages.findIndex((m) => m.id === firstPrevId)
-        : -1;
-      const isPurePrepend = firstPrevIndex > 0 && prev.every((message, index) => visibleMessages[firstPrevIndex + index]?.id === message.id);
-      if (isPurePrepend) {
-        return firstItemIndexRef.current - firstPrevIndex;
-      }
-    }
-    return firstItemIndexRef.current;
-  }, [conversationId, visibleMessages]);
-
   const didSwitchConversation = lastConversationIdRef.current !== conversationId;
-  const didPrependVisibleMessages = !didSwitchConversation && pendingFirstItemIndex !== firstItemIndexRef.current;
-  const firstItemIndex = pendingFirstItemIndex;
 
   useLayoutEffect(() => {
     if (didSwitchConversation) {
       lastConversationIdRef.current = conversationId;
-      firstItemIndexRef.current = 100_000;
       historyPrependUntilRef.current = 0;
       bottomLockIntentUntilRef.current = 0;
       loadMoreAnchorRef.current = null;
       loadingMoreTriggeredRef.current = false;
-      localWindowReleaseAwaitingScrollAwayRef.current = false;
-      localWindowReleasedRef.current = false;
-      localWindowReleaseIntentUntilRef.current = 0;
       openedConversationBottomKeyRef.current = "";
       pendingConversationScrollRestoreRef.current = conversationId;
       const savedScroll = getConversationScrollState(conversationId);
@@ -1474,21 +1236,8 @@ function MessageList({
       setUserBrowsing(false);
       setHistoryRichLiteFallbackMessageIds(new Set());
       previousAllVisibleMessagesRef.current = allVisibleMessages;
-    } else if (didPrependVisibleMessages) {
-      const prev = previousVisibleMessagesRef.current;
-      const firstPrevId = prev[0]?.id;
-      const firstPrevIndex = firstPrevId
-        ? visibleMessages.findIndex((message) => message.id === firstPrevId)
-        : -1;
-      const prependedVisibleIds = firstPrevIndex > 0
-        ? visibleMessages.slice(0, firstPrevIndex).map((message) => message.id)
-        : [];
-      firstItemIndexRef.current = pendingFirstItemIndex;
-      markHistoryPrependSettling(1600, prependedVisibleIds);
-      stopBottomLockForUserBrowse(1600);
     }
-    previousVisibleMessagesRef.current = visibleMessages;
-  }, [allVisibleMessages, conversationId, didSwitchConversation, didPrependVisibleMessages, markHistoryPrependSettling, pendingFirstItemIndex, saveCurrentConversationScrollState, targetMessageId, visibleMessages, stopBottomLockForUserBrowse]);
+  }, [allVisibleMessages, conversationId, didSwitchConversation, targetMessageId]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -1555,13 +1304,6 @@ function MessageList({
 
     const index = visibleMessages.findIndex((msg) => msg.id === anchorMessage.id);
     if (index < 0) {
-      const allIndex = allVisibleMessages.findIndex((msg) => msg.id === anchorMessage.id);
-      if (allIndex >= 0) {
-        const neededWindow = allVisibleMessages.length - allIndex;
-        setRenderedMessageWindow((current) => Math.max(current, neededWindow));
-        return;
-      }
-
       if (hasMoreMessages && onLoadMore && !isLoadingMore && loadingTargetKeyRef.current !== targetKey) {
         loadingTargetKeyRef.current = targetKey;
         Promise.resolve(onLoadMore()).finally(() => {
@@ -1573,9 +1315,6 @@ function MessageList({
       return;
     }
 
-    const scrollIndex = effectiveIsCompare
-      ? Math.max(0, groups.findIndex((group) => group.userMessage.id === anchorMessage.id))
-      : index;
     locatedTargetKeyRef.current = targetKey;
     loadingTargetKeyRef.current = "";
     stickToBottomRef.current = false;
@@ -1584,7 +1323,7 @@ function MessageList({
     highlightMessage(anchorMessage.id, 2600);
 
     const scrollToTarget = () => {
-      virtuosoRef.current?.scrollToIndex({ index: scrollIndex, align: "center", behavior: "auto" });
+      centerMessageRowInScroller(anchorMessage.id);
       window.requestAnimationFrame(() => centerMessageRowInScroller(anchorMessage.id));
     };
 
@@ -2035,12 +1774,12 @@ function MessageList({
   }, [streamingMessageId, streamingText.length, lockBottomAfterLayout]);
 
 
-  const renderHistoryLoadingState = () => <ChatHistoryLoadingState />;
-
-  const historyLoadingComponents = useMemo(() => ({
-    Header: renderHistoryLoadingState,
-    Footer: () => <div style={{ height: CHAT_BOTTOM_SPACER + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0) }} aria-hidden="true" />,
-  }), [selectMode]);
+  const renderHistoryLoadingState = () => (
+    <div className="relative flex-1 min-h-0 overflow-hidden">
+      <ChatHistoryLoadingState />
+      <div style={{ height: CHAT_BOTTOM_SPACER + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0) }} aria-hidden="true" />
+    </div>
+  );
 
   if (effectiveIsCompare) {
     const compareGroups = Array.from(aggregateGroupByUserId.values())
@@ -2069,14 +1808,7 @@ function MessageList({
         {/* 滚动内容区域：对比模式和普通聊天共享普通 DOM scroller */}
         {messages.length === 0 ? (
           (isLoadingHistory || isConversationShellLoading) ? (
-            <ChatHistoryLoadingVirtuoso<InferredGroup>
-              data={[]}
-              virtuosoRef={virtuosoRef}
-              scrollerRef={handleVirtuosoScrollerRef}
-              onScroll={handleVirtuosoScroll}
-              components={historyLoadingComponents}
-              computeItemKey={(_, group) => String(group.id)}
-            />
+            renderHistoryLoadingState()
           ) : (
             <ChatCompareWelcomeColumns
               compareModels={activeCompareModels.length ? activeCompareModels : compareModels}
@@ -2086,15 +1818,15 @@ function MessageList({
           )
         ) : (
           <div
-            ref={(el) => handleVirtuosoScrollerRef(el)}
+            ref={(el) => handleChatScrollerRef(el)}
             className="chat-history-scroll-container"
             style={{
               height: "100%",
               overflowY: "auto",
               overflowX: "hidden",
-              overflowAnchor: userBrowsing ? "none" : "auto",
+              overflowAnchor: historyPrependSettling ? "none" : "auto",
             }}
-            onScroll={handleVirtuosoScroll}
+            onScroll={handleChatScroll}
             onWheel={(event) => handleUserScrollIntent(event.deltaY)}
             onTouchMove={() => stopBottomLockForUserBrowse(2500)}
             data-testid="chat-history-scroll-container"
@@ -2208,17 +1940,7 @@ function MessageList({
 
   if (messages.length === 0) {
     if (isLoadingHistory || isConversationShellLoading) {
-      return (
-        <ChatHistoryLoadingVirtuoso<Message>
-          data={[]}
-          virtuosoRef={virtuosoRef}
-          scrollerRef={handleVirtuosoScrollerRef}
-          onScroll={handleVirtuosoScroll}
-          components={historyLoadingComponents}
-          computeItemKey={(_, msg) => msg.id}
-          className="relative flex-1 min-h-0 overflow-hidden"
-        />
-      );
+      return renderHistoryLoadingState();
     }
     return (
       <ChatEmptyState
@@ -2240,7 +1962,6 @@ function MessageList({
       data-testid="chat-message-list"
       data-visible-message-count={visibleMessages.length}
       data-all-visible-message-count={allVisibleMessages.length}
-      data-hidden-local-message-count={hiddenLocalMessageCount}
     >
       {isCompare && !hasRenderedInitialRange && (
         <div data-testid="chat-initial-range-stability-overlay" className="pointer-events-none absolute inset-0 z-10 bg-surface/80 backdrop-blur-[1px]">
@@ -2248,7 +1969,7 @@ function MessageList({
         </div>
       )}
       <div
-        ref={(el) => handleVirtuosoScrollerRef(el)}
+        ref={(el) => handleChatScrollerRef(el)}
         className={cn("chat-history-scroll-container right-0 transition-[right] duration-200 ease-out", !isCompare && activeActivityMessage && CHAT_ACTIVITY_PANEL_WIDTH_CLASS)}
         style={{
           position: "absolute",
@@ -2257,15 +1978,15 @@ function MessageList({
           left: 0,
           overflowY: "auto",
           overflowX: "hidden",
-          overflowAnchor: userBrowsing ? "none" : "auto",
+          overflowAnchor: historyPrependSettling ? "none" : "auto",
         }}
-        onScroll={handleVirtuosoScroll}
+        onScroll={handleChatScroll}
         onWheel={(event) => handleUserScrollIntent(event.deltaY)}
         onTouchMove={() => stopBottomLockForUserBrowse(2500)}
         data-testid="chat-history-scroll-container"
       >
         <div data-testid="chat-history-container" className="min-h-full">
-          {(hasHiddenLocalMessages || hasMoreMessages) && (
+          {hasMoreMessages && (
             <div
               className="flex justify-center py-3 text-xs text-muted-foreground"
               data-testid="chat-history-top-sentinel"

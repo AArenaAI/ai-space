@@ -8,7 +8,7 @@ import { Message, ChatModel } from "@/lib/chatTypes";
 const LONG_MARKDOWN = [
   "# 长 Markdown 性能样本",
   "",
-  "这是一段用于验证 Markdown 懒加载和虚拟列表首屏渲染的长内容。".repeat(20),
+  "这是一段用于验证 Markdown 懒加载和原生 DOM 列表首屏渲染的长内容。".repeat(20),
   "",
   "```ts",
   "export function sample(input: string) {",
@@ -119,7 +119,7 @@ type RenderMetrics = {
   bodyTextLength: number;
 };
 
-const STREAM_DELTA = "这是一段真实浏览器流式渲染增量，包含中文、标点和换行，用于观察 React commit、Virtuoso 测量和 DOM 更新成本。\n";
+const STREAM_DELTA = "这是一段真实浏览器流式渲染增量，包含中文、标点和换行，用于观察 React commit、DOM 测量和渲染更新成本。\n";
 
 const models: ChatModel[] = [
   { id: "perf-model", name: "性能模型", provider: "local", description: "Synthetic performance model", color: "#64748b" },
@@ -192,7 +192,7 @@ export default function ChatPerformanceFixture() {
         window.setTimeout(() => {
           const frameGaps = frameGapsRef.current;
           const allElements = document.querySelectorAll("*").length;
-          const visibleMessageRows = document.querySelectorAll('[data-testid="virtuoso-item-list"] > *').length;
+          const visibleMessageRows = document.querySelectorAll('[data-chat-message-row="true"]').length;
           setRenderMetrics({
             frameCount: frameGaps.length,
             maxFrameGap: frameGaps.length ? Math.max(...frameGaps) : 0,

@@ -278,18 +278,6 @@
   background: rgba(107, 138, 109, 0.5);
 }
 
-/* Chat 使用独立 overlay 阅读进度条；隐藏 Virtuoso 原生滚动条，
-   避免原生 thumb 被底部输入框渐变遮罩压住，或在虚拟列表测量时视觉跳动。 */
-[data-testid="virtuoso-scroller"] {
-  scrollbar-width: none;
-}
-
-[data-testid="virtuoso-scroller"]::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-  display: none;
-}
-
 /* 隐藏滚动条的类 */
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
@@ -834,6 +822,8 @@
 }
 
 .chat-history-scroll-container::-webkit-scrollbar {
+  width: 0;
+  height: 0;
   display: none;
 }
 

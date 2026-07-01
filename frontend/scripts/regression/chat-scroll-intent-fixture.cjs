@@ -3,11 +3,11 @@ const assert = require("node:assert/strict");
 const { chromium } = require("playwright");
 
 const baseUrl = process.env.SCROLL_FIXTURE_BASE_URL || "http://127.0.0.1:3000";
-const scrollerSelector = '[data-testid="chat-history-scroll-container"], [data-virtuoso-scroller]';
+const scrollerSelector = '[data-testid="chat-history-scroll-container"]';
 
 async function getScrollState(page) {
   return page.evaluate(() => {
-    const scroller = document.querySelector('[data-testid="chat-history-scroll-container"], [data-virtuoso-scroller]');
+    const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
     if (!(scroller instanceof HTMLElement)) {
       return { found: false, scrollTop: 0, scrollHeight: 0, clientHeight: 0, distanceToBottom: 0 };
     }
@@ -46,7 +46,7 @@ async function getScrollState(page) {
     await scroller.waitFor({ state: "attached", timeout: 20_000 });
 
     await page.waitForFunction(() => {
-      const el = document.querySelector('[data-testid="chat-history-scroll-container"], [data-virtuoso-scroller]');
+      const el = document.querySelector('[data-testid="chat-history-scroll-container"]');
       return el instanceof HTMLElement && el.scrollHeight > el.clientHeight + 200;
     }, { timeout: 20_000 });
 

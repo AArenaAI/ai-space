@@ -230,7 +230,7 @@ function CompareColumnTurn({
       setIsNearViewport(true);
       return;
     }
-    const root = row.closest('[data-testid="chat-history-scroll-container"], [data-testid="virtuoso-scroller"]') as Element | null;
+    const root = row.closest('[data-testid="chat-history-scroll-container"], [data-testid="chat-history-scroll-container"]') as Element | null;
     const observer = new IntersectionObserver((entries) => {
       if (entries.some((entry) => entry.isIntersecting)) {
         setIsNearViewport(true);
@@ -261,7 +261,7 @@ function CompareColumnTurn({
       setIsInViewport(true);
       return;
     }
-    const root = row.closest('[data-testid="chat-history-scroll-container"], [data-testid="virtuoso-scroller"]') as Element | null;
+    const root = row.closest('[data-testid="chat-history-scroll-container"], [data-testid="chat-history-scroll-container"]') as Element | null;
     const observer = new IntersectionObserver((entries) => {
       const visible = entries.some((entry) => entry.isIntersecting);
       setIsInViewport(visible);

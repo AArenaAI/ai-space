@@ -232,10 +232,9 @@ function topMessageListBuckets(events, limit = 8) {
   for (const event of events) {
     if (event.phase !== "message-list-commit") continue;
     const visible = Number(event.visibleMessageCount || 0);
-    const hidden = Number(event.hiddenLocalMessageCount || 0);
     const effectiveWindow = Number(event.effectiveRenderedMessageWindow || 0);
     const initialWindow = Number(event.initialMessageWindow || 0);
-    const key = `heavy:${event.isContentHeavyConversation ? "yes" : "no"}|visible:${visible}|hidden:${hidden}|window:${effectiveWindow}|initial:${initialWindow}`;
+    const key = `heavy:${event.isContentHeavyConversation ? "yes" : "no"}|visible:${visible}|window:${effectiveWindow}|initial:${initialWindow}`;
     const current = buckets.get(key) || {
       bucket: key,
       count: 0,
@@ -557,7 +556,7 @@ async function clickConversationAndMeasure(page, cid) {
       await new Promise((resolve) => requestAnimationFrame(resolve));
       const now = performance.now();
       const rows = Array.from(document.querySelectorAll('[data-chat-message-row="true"]'));
-      const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+      const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
       const distanceToBottom = scroller
         ? Math.round(scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight)
         : null;
@@ -592,7 +591,7 @@ function relativeMs(value, startedAt) {
 
 async function sample(page, cid, startedAt, switchTimeline = {}) {
   await page.waitForFunction((expectedCid) => {
-    const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+    const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
     const rows = document.querySelectorAll('[data-chat-message-row="true"]');
     return !!scroller && rows.length > 0 && location.search.includes(`id=${expectedCid}`);
   }, cid, { timeout: 30_000 });
@@ -603,7 +602,7 @@ async function sample(page, cid, startedAt, switchTimeline = {}) {
       return Math.round(value - startedAt);
     };
     const now = performance.now();
-    const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+    const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
     const rows = Array.from(document.querySelectorAll('[data-chat-message-row="true"]')).map((row) => {
       const rect = row.getBoundingClientRect();
       return {
