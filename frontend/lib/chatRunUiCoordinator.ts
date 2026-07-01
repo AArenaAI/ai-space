@@ -188,6 +188,6 @@ export function decideCompareRunFinally(input: {
   };
 }
 
-export function buildConversationUpdatedEventDetail(conversationId: number, nowIso: string) {
-  return { id: conversationId, updated_at: nowIso };
+export function buildConversationUpdatedEventDetail(conversationId: number, nowIso: string, extra: Record<string, any> = {}) {
+  return { id: conversationId, conversationId, updated_at: nowIso, ...extra };
 }

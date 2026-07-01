@@ -197,6 +197,16 @@ export function useChatCompareSendRuntime({
       })) as Message[];
       const contextMessages = [...messages, userMsg];
 
+      if (convId && !notebookId) {
+        dispatchWindowEvent(new CustomEvent("conversation-updated", {
+          detail: buildConversationUpdatedEventDetail(convId, new Date(now()).toISOString(), {
+            title: finalContent.slice(0, 20) + (finalContent.length > 20 ? "..." : ""),
+            model: compareModelIds[0],
+            source: "local-send",
+          }),
+        }));
+      }
+
       setIsCompare(true);
       setCompareModels(compareModelIds);
       setMessages((prev) => [...prev, userMsg]);

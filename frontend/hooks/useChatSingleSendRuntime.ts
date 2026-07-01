@@ -161,6 +161,15 @@ export function useChatSingleSendRuntime({
       const contextMessages = messagePlan.contextMessages;
       const localAssistantMsg = messagePlan.assistantMessage;
       setMessages((prev) => applyServerFirstPreInitMessages(prev, messagePlan));
+      if (convId && !notebookId) {
+        dispatchWindowEvent(new CustomEvent("conversation-updated", {
+          detail: buildConversationUpdatedEventDetail(convId, new Date(now()).toISOString(), {
+            title: content.trim().slice(0, 20) + (content.trim().length > 20 ? "..." : ""),
+            model: selectedModel.id,
+            source: "local-send",
+          }),
+        }));
+      }
 
       setIsLoading(true);
       const controller = new AbortController();

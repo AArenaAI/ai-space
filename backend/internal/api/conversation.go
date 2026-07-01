@@ -153,21 +153,38 @@ func (h *ConversationHandler) List(c *gin.Context) {
 	if skillKey != "" {
 		query = query.Where("conversations.skill_key = ?", skillKey)
 	}
+	beforeActivity := strings.TrimSpace(c.Query("before_activity_at"))
+	beforeID := uint64(0)
+	if rawBeforeID := strings.TrimSpace(c.Query("before_id")); rawBeforeID != "" {
+		beforeID, _ = strconv.ParseUint(rawBeforeID, 10, 32)
+	}
+	if beforeActivity != "" {
+		if beforeID > 0 {
+			query = query.Where("("+latestActivitySQL+") < ? OR (("+latestActivitySQL+") = ? AND conversations.id < ?)", beforeActivity, beforeActivity, beforeID)
+		} else {
+			query = query.Where("("+latestActivitySQL+") < ?", beforeActivity)
+		}
+		offset = 0
+	}
 
 	var rows []ConversationWithModel
-	if err := query.Order("conversations.pinned DESC, latest_activity_at DESC, conversations.updated_at DESC").
+	if err := query.Order("conversations.pinned DESC, latest_activity_at DESC, conversations.updated_at DESC, conversations.id DESC").
 		Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取对话列表失败"})
 		return
 	}
 
 	conversations := make([]models.Conversation, len(rows))
+	nextCursor := ""
 	for i := range rows {
 		if rows[i].LatestModel != "" {
 			rows[i].Conversation.Model = rows[i].LatestModel
 		}
 		applyConversationActivityTimestamp(&rows[i].Conversation, rows[i].LatestActivity)
 		conversations[i] = rows[i].Conversation
+		if i == len(rows)-1 {
+			nextCursor = fmt.Sprintf("%s:%d", rows[i].Conversation.UpdatedAt.Format(time.RFC3339Nano), rows[i].Conversation.ID)
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -175,6 +192,8 @@ func (h *ConversationHandler) List(c *gin.Context) {
 		"total":         total,
 		"limit":         limit,
 		"offset":        offset,
+		"next_cursor":   nextCursor,
+		"has_more":      int64(offset+len(rows)) < total,
 	})
 }
 
