@@ -46,6 +46,20 @@ func compareInitTitle(content string) string {
 	return string(runes[:20]) + "..."
 }
 
+func resolveCompareInitWorkspaceID(tx *gorm.DB, userID uint, requestedWorkspaceID uint, existingWorkspaceID uint) uint {
+	if requestedWorkspaceID > 0 {
+		return requestedWorkspaceID
+	}
+	if existingWorkspaceID > 0 {
+		return existingWorkspaceID
+	}
+	var defaultWS models.Workspace
+	if err := tx.Where("user_id = ? AND is_default = ?", userID, true).First(&defaultWS).Error; err == nil {
+		return defaultWS.ID
+	}
+	return existingWorkspaceID
+}
+
 func (h *ChatHandler) InitCompareChat(c *gin.Context) {
 	var req CompareInitRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -80,23 +94,27 @@ func (h *ChatHandler) InitCompareChat(c *gin.Context) {
 			}
 			conv.Compare = true
 			conv.Model = compareModels[0]
-			conv.WorkspaceID = req.WorkspaceID
-			conv.SkillKey = req.SkillKey
+			conv.WorkspaceID = resolveCompareInitWorkspaceID(tx, uid, req.WorkspaceID, conv.WorkspaceID)
+			conv.SkillKey = strings.TrimSpace(req.SkillKey)
 			conv.SetCompareModels(compareModels)
-			if err := tx.Model(&conv).Updates(map[string]interface{}{
+			updates := map[string]interface{}{
 				"compare":        true,
 				"model":          conv.Model,
-				"workspace_id":   conv.WorkspaceID,
 				"skill_key":      conv.SkillKey,
 				"compare_models": conv.CompareModels,
 				"updated_at":     time.Now(),
-			}).Error; err != nil {
+			}
+			if conv.WorkspaceID > 0 {
+				updates["workspace_id"] = conv.WorkspaceID
+			}
+			if err := tx.Model(&conv).Updates(updates).Error; err != nil {
 				return err
 			}
 		} else {
+			workspaceID := resolveCompareInitWorkspaceID(tx, uid, req.WorkspaceID, 0)
 			conv = models.Conversation{
 				UserID:      uid,
-				WorkspaceID: req.WorkspaceID,
+				WorkspaceID: workspaceID,
 				Title:       compareInitTitle(content),
 				Model:       compareModels[0],
 				Compare:     true,

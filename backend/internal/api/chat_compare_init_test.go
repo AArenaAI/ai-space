@@ -137,6 +137,64 @@ func TestInitCompareChatCreatesConversationUserMessageAndGroup(t *testing.T) {
 	}
 }
 
+func TestInitCompareChatDoesNotOverwriteExistingWorkspaceWithZero(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, user, workspace := setupCompareInitTestDB(t)
+	handler := &ChatHandler{db: db, cfg: &config.Config{JWTSecret: "test-secret"}}
+	existing := models.Conversation{UserID: user.ID, WorkspaceID: workspace.ID, Title: "existing", Model: "gpt-5.4"}
+	if err := db.Create(&existing).Error; err != nil {
+		t.Fatalf("create existing conversation: %v", err)
+	}
+
+	res := performCompareInitRequest(t, handler, user.ID, map[string]any{
+		"conversation_id": existing.ID,
+		"content":         "已有会话进入对比",
+		"model":           "deepseek-v4-pro",
+		"compare_models":  []string{"deepseek-v4-pro", "gemini-3.1-flash-lite"},
+	})
+	if res.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
+	}
+	var conv models.Conversation
+	if err := db.First(&conv, existing.ID).Error; err != nil {
+		t.Fatalf("find conversation: %v", err)
+	}
+	if conv.WorkspaceID != workspace.ID {
+		t.Fatalf("compare init overwrote workspace_id: got %d want %d", conv.WorkspaceID, workspace.ID)
+	}
+	if !conv.Compare {
+		t.Fatalf("conversation should be compare after init")
+	}
+}
+
+func TestInitCompareChatUsesDefaultWorkspaceWhenMissing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, user, workspace := setupCompareInitTestDB(t)
+	handler := &ChatHandler{db: db, cfg: &config.Config{JWTSecret: "test-secret"}}
+
+	res := performCompareInitRequest(t, handler, user.ID, map[string]any{
+		"content":        "新对比会话默认工作区",
+		"model":          "deepseek-v4-pro",
+		"compare_models": []string{"deepseek-v4-pro", "gemini-3.1-flash-lite"},
+	})
+	if res.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
+	}
+	var payload struct {
+		ConversationID uint `json:"conversation_id"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var conv models.Conversation
+	if err := db.First(&conv, payload.ConversationID).Error; err != nil {
+		t.Fatalf("find conversation: %v", err)
+	}
+	if conv.WorkspaceID != workspace.ID {
+		t.Fatalf("new compare conversation workspace_id: got %d want default %d", conv.WorkspaceID, workspace.ID)
+	}
+}
+
 func TestInitCompareChatRejectsSingleModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db, user, workspace := setupCompareInitTestDB(t)

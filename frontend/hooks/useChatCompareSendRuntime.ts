@@ -123,7 +123,7 @@ export function useChatCompareSendRuntime({
   now = Date.now,
   createId = uuidv4,
   getToken = () => localStorage.getItem("token"),
-  getWorkspaceId = () => localStorage.getItem("currentWorkspaceId"),
+  getWorkspaceId = () => localStorage.getItem("current-workspace"),
   dispatchWindowEvent = (event) => window.dispatchEvent(event),
 }: UseChatCompareSendRuntimeOptions) {
   const sendCompareMessages = useCallback(
