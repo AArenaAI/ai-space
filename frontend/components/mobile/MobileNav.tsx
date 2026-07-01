@@ -27,6 +27,14 @@ import InputDialog from "@/components/ui/InputDialog";
 import { createPortal } from "react-dom";
 import { useTheme } from "@/components/theme/ThemeProvider";
 import { useAppBootstrap } from "@/lib/appBootstrapContext";
+import {
+  CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE,
+  applySidebarConversationActivity,
+  hasMoreSidebarConversations,
+  mergeSidebarConversations,
+  parseSidebarCursor,
+  sortSidebarConversations,
+} from "@/lib/chatSidebarHistory";
 
 const navItems = [
   { icon: MessageSquare, label: "聊天", href: "/chat" },
@@ -72,10 +80,11 @@ function groupConversationsByTime(conversations: Conversation[]): Record<string,
 const GROUP_ORDER = ["今天", "昨天", "七天内", "30天内"];
 
 function sortConversations(conversations: Conversation[]): Conversation[] {
-  return [...conversations].sort((a, b) => {
-    if (a.pinned !== b.pinned) return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
-    return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
-  });
+  return sortSidebarConversations(conversations);
+}
+
+function mergeConversationLists(current: Conversation[], incoming: Conversation[]): Conversation[] {
+  return mergeSidebarConversations(current, incoming);
 }
 
 function sortGroupLabels(labels: string[]): string[] {
@@ -91,17 +100,43 @@ function sortGroupLabels(labels: string[]): string[] {
   return [...fixed, ...months];
 }
 
-async function fetchConversations(): Promise<Conversation[] | null> {
+type ConversationListPage = {
+  conversations: Conversation[];
+  total?: number;
+  limit: number;
+  offset: number;
+  next_cursor?: string;
+  has_more?: boolean;
+};
+
+async function fetchConversations(offset = 0, cursor?: string): Promise<ConversationListPage | null> {
   const token = localStorage.getItem("token");
-  if (!token) return [];
+  if (!token) return { conversations: [], total: 0, limit: CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE, offset };
   try {
-    const res = await fetch("/api/conversations?limit=200", {
+    const params = new URLSearchParams({ limit: String(CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE) });
+    const parsedCursor = parseSidebarCursor(cursor);
+    if (parsedCursor) {
+      params.set("before_activity_at", parsedCursor.beforeActivityAt);
+      params.set("before_id", parsedCursor.beforeId);
+    } else if (offset > 0) {
+      params.set("offset", String(offset));
+    }
+    const res = await fetch(`/api/conversations?${params.toString()}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return null;
     const data = await res.json();
-    if (Array.isArray(data)) return data;
-    if (data && Array.isArray(data.conversations)) return data.conversations;
+    if (Array.isArray(data)) return { conversations: data, limit: CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE, offset };
+    if (data && Array.isArray(data.conversations)) {
+      return {
+        conversations: data.conversations,
+        total: typeof data.total === "number" ? data.total : undefined,
+        limit: typeof data.limit === "number" ? data.limit : CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE,
+        offset: typeof data.offset === "number" ? data.offset : offset,
+        next_cursor: typeof data.next_cursor === "string" ? data.next_cursor : undefined,
+        has_more: typeof data.has_more === "boolean" ? data.has_more : undefined,
+      };
+    }
     return null;
   } catch {
     return null;
@@ -180,6 +215,11 @@ export default function MobileNav() {
   const [user, setUser] = useState<{ name?: string; email?: string } | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>(cachedConversationsMobile || []);
   const [loading, setLoading] = useState(cachedConversationsMobile === null);
+  const [conversationTotal, setConversationTotal] = useState<number | undefined>();
+  const [conversationNextOffset, setConversationNextOffset] = useState(CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE);
+  const [conversationNextCursor, setConversationNextCursor] = useState<string | undefined>();
+  const [conversationHasMore, setConversationHasMore] = useState<boolean | undefined>();
+  const [loadingMoreConversations, setLoadingMoreConversations] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
   const pathname = usePathname();
@@ -242,9 +282,8 @@ export default function MobileNav() {
     chatBootstrapReadyRef.current = true;
     if (chatBootstrap.user) setUser(chatBootstrap.user);
     if (Array.isArray(chatBootstrap.sidebar?.conversations)) {
-      const next = sortConversations(chatBootstrap.sidebar.conversations as Conversation[]);
-      cachedConversationsMobile = next;
-      setConversations(next);
+      const incoming = sortConversations(chatBootstrap.sidebar.conversations as Conversation[]);
+      updateConversationsStable((prev) => mergeConversationLists(prev, incoming));
       setLoading(false);
     }
   }, [chatBootstrap]);
@@ -259,9 +298,8 @@ export default function MobileNav() {
       chatBootstrapReadyRef.current = true;
       if (detail.user) setUser(detail.user);
       if (Array.isArray(detail.sidebar?.conversations)) {
-        const next = sortConversations(detail.sidebar.conversations);
-        cachedConversationsMobile = next;
-        setConversations(next);
+        const incoming = sortConversations(detail.sidebar.conversations);
+        updateConversationsStable((prev) => mergeConversationLists(prev, incoming));
         setLoading(false);
       }
     };
@@ -273,29 +311,46 @@ export default function MobileNav() {
     if (!user) { setConversations([]); setLoading(false); return; }
     const normalizedPathname = (pathname || "/") === "/" ? "/" : (pathname || "").replace(/\/$/, "");
     const isChatConversationRoute = normalizedPathname === "/chat" && !!effectiveRouteConvId;
-    const hasUsableBootstrapForRoute = isChatConversationRoute
-      && chatBootstrap?.conversation?.id === Number(effectiveRouteConvId)
-      && Array.isArray(chatBootstrap.sidebar?.conversations);
-    if (hasUsableBootstrapForRoute) return;
     if (isChatConversationRoute && !chatBootstrapReadyRef.current) return;
     const isFirstLoad = cachedConversationsMobile === null;
     if (isFirstLoad) setLoading(true);
-    const start = Date.now(); const data = await fetchConversations();
+    const start = Date.now(); const page = await fetchConversations();
     if (isFirstLoad) {
       const elapsed = Date.now() - start;
       if (elapsed < 600) await new Promise(r => setTimeout(r, 600 - elapsed));
       setLoading(false);
     }
-    if (data === null) return;
+    if (page === null) return;
+    setConversationTotal(page.total);
+    setConversationNextOffset((page.offset || 0) + page.conversations.length);
+    setConversationNextCursor(page.next_cursor);
+    setConversationHasMore(page.has_more);
     if (isFirstLoad) {
-      setConversations(data);
-      cachedConversationsMobile = data;
+      const next = sortConversations(page.conversations);
+      setConversations(next);
+      cachedConversationsMobile = next;
     } else {
-      updateConversationsStable(() => data);
+      updateConversationsStable(() => sortConversations(page.conversations));
     }
-  }, [user, pathname, effectiveRouteConvId, chatBootstrap, updateConversationsStable]);
+  }, [user, pathname, effectiveRouteConvId, updateConversationsStable]);
   
   useEffect(() => { loadConversations(); }, [loadConversations]);
+
+  const hasMoreConversations = hasMoreSidebarConversations(conversations.length, conversationNextOffset, conversationTotal, conversationHasMore);
+
+  const loadMoreConversations = useCallback(async () => {
+    if (loadingMoreConversations || !hasMoreConversations) return;
+    setLoadingMoreConversations(true);
+    const page = await fetchConversations(conversationNextOffset, conversationNextCursor);
+    setLoadingMoreConversations(false);
+    if (!page) return;
+    setConversationTotal(page.total);
+    setConversationNextOffset((page.offset || conversationNextOffset) + page.conversations.length);
+    setConversationNextCursor(page.next_cursor);
+    setConversationHasMore(page.has_more);
+    updateConversationsStable((prev) => mergeConversationLists(prev, page.conversations));
+  }, [conversationHasMore, conversationNextCursor, conversationNextOffset, hasMoreConversations, loadingMoreConversations, updateConversationsStable]);
+
   useEffect(() => {
     const h = (e: Event) => {
       const d = (e as CustomEvent).detail;
@@ -334,8 +389,8 @@ export default function MobileNav() {
       const rawId = d?.id ?? d?.conversationId;
       if (rawId == null) return;
       const targetId = typeof rawId === "string" ? Number(rawId) : rawId;
-      const updatedAt = d.updated_at || new Date().toISOString();
-      updateConversationsStable(prev => sortConversations(prev.map(c => c.id === targetId ? { ...c, updated_at: updatedAt } : c)));
+      if (!Number.isFinite(targetId)) return;
+      updateConversationsStable(prev => applySidebarConversationActivity(prev, { ...d, id: targetId }));
     };
     window.addEventListener("conversation-updated", h);
     return () => window.removeEventListener("conversation-updated", h);
@@ -460,6 +515,16 @@ export default function MobileNav() {
                         </div>
                       </div>
                     ))}
+                    {hasMoreConversations && (
+                      <button
+                        type="button"
+                        onClick={loadMoreConversations}
+                        disabled={loadingMoreConversations}
+                        className="mx-3 mt-2 flex w-[calc(100%-1.5rem)] items-center justify-center rounded-lg border border-surface-border px-3 py-2 text-xs text-text-secondary transition-colors hover:bg-surface-card hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {loadingMoreConversations ? "加载中..." : "加载更多历史"}
+                      </button>
+                    )}
                   </>
                 );
               })()}

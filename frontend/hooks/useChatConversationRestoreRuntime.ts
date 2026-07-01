@@ -174,6 +174,29 @@ function reuseStableMessageObjects(previous: Message[], next: Message[]): Messag
   return changed ? reused : next;
 }
 
+function getMessageMergeKey(message: Message): string {
+  return String(message.serverMessageId ?? message.id);
+}
+
+function getMessageCreatedAt(message: Message): number {
+  const createdAt = typeof message.createdAt === "number" ? message.createdAt : 0;
+  return Number.isFinite(createdAt) ? createdAt : 0;
+}
+
+function mergeFreshLocalMessagesIntoRestore(previous: Message[], restored: Message[]): Message[] {
+  if (!previous.length || !restored.length) return restored;
+  const latestRestoredCreatedAt = restored.reduce((latest, message) => Math.max(latest, getMessageCreatedAt(message)), 0);
+  const freshLocalMessages = previous.filter((message) => {
+    const createdAt = getMessageCreatedAt(message);
+    if (!createdAt || createdAt < latestRestoredCreatedAt - 1000) return false;
+    return message.role === "user" || message.role === "assistant";
+  });
+  if (freshLocalMessages.length === 0) return restored;
+  const freshKeys = new Set(freshLocalMessages.map(getMessageMergeKey));
+  const restoredWithoutFresh = restored.filter((message) => !freshKeys.has(getMessageMergeKey(message)));
+  return [...restoredWithoutFresh, ...freshLocalMessages];
+}
+
 function applyCachedSnapshot({
   snapshot,
   fallbackSkillKey,
@@ -641,7 +664,8 @@ export function useChatConversationRestoreRuntime({
             });
           }
           setMessages((prev) => {
-            const nextMessages = reuseStableMessageObjects(prev, dedupeConversationMessages(mergePendingMessages(prev) as Message[]));
+            const restoredMessages = dedupeConversationMessages(mergePendingMessages(prev) as Message[]);
+            const nextMessages = reuseStableMessageObjects(prev, mergeFreshLocalMessagesIntoRestore(prev, restoredMessages));
             mergedMessages = nextMessages;
             return areConversationMessagesEquivalent(prev, nextMessages) ? prev : nextMessages;
           });

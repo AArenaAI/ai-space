@@ -43,6 +43,14 @@ import { NOTEBOOK_DEMOS } from "@/lib/notebookDemos";
 import type { Notebook } from "@/lib/notebookTypes";
 import { useAppBootstrap } from "@/lib/appBootstrapContext";
 import { saveConversationScrollState } from "@/lib/chatConversationScrollState";
+import {
+  CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE,
+  applySidebarConversationActivity,
+  hasMoreSidebarConversations,
+  mergeSidebarConversations,
+  parseSidebarCursor,
+  sortSidebarConversations,
+} from "@/lib/chatSidebarHistory";
 
 
 const isPathInGroup = (pathname: string | null, paths: string[]) => {
@@ -114,10 +122,11 @@ function getGroupOrder(t: (key: string) => string): string[] {
 }
 
 function sortConversations(conversations: Conversation[]): Conversation[] {
-  return [...conversations].sort((a, b) => {
-    if (a.pinned !== b.pinned) return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
-    return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
-  });
+  return sortSidebarConversations(conversations);
+}
+
+function mergeConversationLists(current: Conversation[], incoming: Conversation[]): Conversation[] {
+  return mergeSidebarConversations(current, incoming);
 }
 
 function sortGroupLabels(labels: string[], t: (key: string) => string): string[] {
@@ -173,20 +182,45 @@ function mapBootstrapNotebook(item: any): Notebook {
   };
 }
 
-async function fetchConversations(workspaceId?: number): Promise<Conversation[] | null> {
+type ConversationListPage = {
+  conversations: Conversation[];
+  total?: number;
+  limit: number;
+  offset: number;
+  next_cursor?: string;
+  has_more?: boolean;
+};
+
+async function fetchConversations(workspaceId?: number, offset = 0, cursor?: string): Promise<ConversationListPage | null> {
   const token = localStorage.getItem("token");
-  if (!token) return [];
+  if (!token) return { conversations: [], total: 0, limit: CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE, offset };
   try {
     const params = new URLSearchParams();
     if (workspaceId) params.set("workspace_id", String(workspaceId));
-    params.set("limit", "200");
+    params.set("limit", String(CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE));
+    const parsedCursor = parseSidebarCursor(cursor);
+    if (parsedCursor) {
+      params.set("before_activity_at", parsedCursor.beforeActivityAt);
+      params.set("before_id", parsedCursor.beforeId);
+    } else if (offset > 0) {
+      params.set("offset", String(offset));
+    }
     const res = await fetch(`/api/conversations?${params.toString()}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return null;
     const data = await res.json();
-    if (Array.isArray(data)) return data.filter(isMainChatConversation);
-    if (data && Array.isArray(data.conversations)) return data.conversations.filter(isMainChatConversation);
+    if (Array.isArray(data)) return { conversations: data.filter(isMainChatConversation), limit: CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE, offset };
+    if (data && Array.isArray(data.conversations)) {
+      return {
+        conversations: data.conversations.filter(isMainChatConversation),
+        total: typeof data.total === "number" ? data.total : undefined,
+        limit: typeof data.limit === "number" ? data.limit : CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE,
+        offset: typeof data.offset === "number" ? data.offset : offset,
+        next_cursor: typeof data.next_cursor === "string" ? data.next_cursor : undefined,
+        has_more: typeof data.has_more === "boolean" ? data.has_more : undefined,
+      };
+    }
     return null;
   } catch { return null; }
 }
@@ -411,6 +445,11 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   });
   const [conversations, setConversations] = useState<Conversation[]>(cachedConversations || []);
   const [loading, setLoading] = useState(() => cachedConversations === null && typeof window !== "undefined" && !!localStorage.getItem("token"));
+  const [conversationTotal, setConversationTotal] = useState<number | undefined>();
+  const [conversationNextOffset, setConversationNextOffset] = useState(CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE);
+  const [conversationNextCursor, setConversationNextCursor] = useState<string | undefined>();
+  const [conversationHasMore, setConversationHasMore] = useState<boolean | undefined>();
+  const [loadingMoreConversations, setLoadingMoreConversations] = useState(false);
   const [optimisticConvId, setOptimisticConvId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
@@ -437,7 +476,8 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   const currentConvId = optimisticConvId ?? routeConvId;
   const router = useRouter();
   const { chatBootstrap } = useAppBootstrap();
-  const isWorkRoute = isPathInGroup(pathname, WORK_PAGE_PATHS);
+  const isGaokaoRoute = isPathInGroup(pathname, ["/gaokao-volunteer"]);
+  const isWorkRoute = isPathInGroup(pathname, WORK_PAGE_PATHS) && !isGaokaoRoute;
   const isCreativeRoute = isPathInGroup(pathname, CREATIVE_PAGE_PATHS);
   const navigateToNotebooks = useCallback(() => {
     setCollapsed(true);
@@ -576,9 +616,8 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     chatBootstrapReadyRef.current = true;
     if (chatBootstrap.user) setUser(chatBootstrap.user);
     if (Array.isArray(chatBootstrap.sidebar?.conversations)) {
-      const next = sortConversations((chatBootstrap.sidebar.conversations as Conversation[]).filter(isMainChatConversation));
-      cachedConversations = next;
-      setConversations(next);
+      const incoming = sortConversations((chatBootstrap.sidebar.conversations as Conversation[]).filter(isMainChatConversation));
+      updateConversationsStable((prev) => mergeConversationLists(prev, incoming));
       setLoading(false);
     }
     if (Array.isArray(chatBootstrap.sidebar?.recent_notebooks)) {
@@ -599,9 +638,8 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
         setUser(detail.user);
       }
       if (Array.isArray(detail.sidebar?.conversations)) {
-        const next = sortConversations(detail.sidebar.conversations.filter(isMainChatConversation));
-        cachedConversations = next;
-        setConversations(next);
+        const incoming = sortConversations(detail.sidebar.conversations.filter(isMainChatConversation));
+        updateConversationsStable((prev) => mergeConversationLists(prev, incoming));
         setLoading(false);
       }
       if (Array.isArray(detail.sidebar?.recent_notebooks)) {
@@ -621,28 +659,44 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     }
     const normalizedPathname = pathname === "/" ? pathname : pathname.replace(/\/$/, "");
     const isChatConversationRoute = normalizedPathname === "/chat" && !!effectiveRouteConvId;
-    const hasUsableBootstrapForRoute = isChatConversationRoute
-      && chatBootstrap?.conversation?.id === Number(effectiveRouteConvId)
-      && Array.isArray(chatBootstrap.sidebar?.conversations);
-    if (hasUsableBootstrapForRoute) return;
     if (isChatConversationRoute && !chatBootstrapReadyRef.current) return;
     const isFirstLoad = cachedConversations === null;
     if (isFirstLoad) setLoading(true);
-    const data = await fetchConversations(currentWS?.id);
-    if (data === null) {
+    const page = await fetchConversations(currentWS?.id);
+    if (page === null) {
       if (isFirstLoad) setLoading(false);
       return;
     }
+    setConversationTotal(page.total);
+    setConversationNextOffset((page.offset || 0) + page.conversations.length);
+    setConversationNextCursor(page.next_cursor);
+    setConversationHasMore(page.has_more);
     if (isFirstLoad) {
-      setConversations(data);
-      cachedConversations = data;
+      const next = sortConversations(page.conversations);
+      setConversations(next);
+      cachedConversations = next;
       setLoading(false);
     } else {
-      updateConversationsStable(() => data);
+      updateConversationsStable(() => sortConversations(page.conversations));
     }
-  }, [user, currentWS?.id, pathname, effectiveRouteConvId, chatBootstrap, updateConversationsStable]);
+  }, [user, currentWS?.id, pathname, effectiveRouteConvId, updateConversationsStable]);
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
+
+  const hasMoreConversations = hasMoreSidebarConversations(conversations.length, conversationNextOffset, conversationTotal, conversationHasMore);
+
+  const loadMoreConversations = useCallback(async () => {
+    if (loadingMoreConversations || !hasMoreConversations) return;
+    setLoadingMoreConversations(true);
+    const page = await fetchConversations(currentWS?.id, conversationNextOffset, conversationNextCursor);
+    setLoadingMoreConversations(false);
+    if (!page) return;
+    setConversationTotal(page.total);
+    setConversationNextOffset((page.offset || conversationNextOffset) + page.conversations.length);
+    setConversationNextCursor(page.next_cursor);
+    setConversationHasMore(page.has_more);
+    updateConversationsStable((prev) => mergeConversationLists(prev, page.conversations));
+  }, [conversationHasMore, conversationNextCursor, conversationNextOffset, currentWS?.id, hasMoreConversations, loadingMoreConversations, updateConversationsStable]);
 
   const loadNotebooks = useCallback(async () => {
     const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
@@ -809,8 +863,8 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
       const rawId = d?.id ?? d?.conversationId;
       if (rawId == null) return;
       const targetId = typeof rawId === "string" ? Number(rawId) : rawId;
-      const updatedAt = d.updated_at || new Date().toISOString();
-      updateConversationsStable(prev => sortConversations(prev.map(c => c.id === targetId ? { ...c, updated_at: updatedAt } : c)));
+      if (!Number.isFinite(targetId)) return;
+      updateConversationsStable(prev => applySidebarConversationActivity(prev, { ...d, id: targetId }));
     };
     window.addEventListener("conversation-updated", h);
     return () => window.removeEventListener("conversation-updated", h);
@@ -1204,6 +1258,16 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
           </div>
           );
         })}
+        {hasMoreConversations && (
+          <button
+            type="button"
+            onClick={loadMoreConversations}
+            disabled={loadingMoreConversations}
+            className="mx-3 mt-2 flex w-[calc(100%-1.5rem)] items-center justify-center rounded-lg border border-surface-border px-3 py-2 text-xs text-text-secondary transition-colors hover:bg-surface-card hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loadingMoreConversations ? "加载中..." : "加载更多历史"}
+          </button>
+        )}
       </div>
     );
   };
@@ -1274,6 +1338,20 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
 
             {/* 功能分组 - 对齐展开状态的 px-3 py-2 */}
             <div className="py-2 flex flex-col items-center space-y-0.5">
+              <Link
+                href="/gaokao-volunteer"
+                onMouseEnter={showSidebarTooltip(t("gaokao.navLabel"))}
+                onMouseLeave={hideSidebarTooltip}
+                className={cn(
+                  "p-2.5 rounded-xl transition-colors block",
+                  isGaokaoRoute
+                    ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]"
+                    : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
+                )}
+              >
+                <GraduationCap className={cn("w-5 h-5", isGaokaoRoute ? "text-blue-500" : "text-text-tertiary")} />
+              </Link>
+
               {/* AI工作 - hover 展开面板 */}
               <div
                 onMouseEnter={handleWorkEnter}
@@ -1393,6 +1471,19 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
               </div>
               <div className="space-y-0.5">
                 <Link
+                  href="/gaokao-volunteer"
+                  className={cn(
+                    "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-normal transition-all duration-150 w-full text-left",
+                    isGaokaoRoute
+                      ? "bg-surface-card text-slate-900 font-medium shadow-sm shadow-black/[0.02] dark:text-text-primary"
+                      : "text-slate-500 hover:bg-surface-card hover:text-slate-900 dark:text-text-secondary dark:hover:text-text-primary"
+                  )}
+                >
+                  <GraduationCap className={cn("w-[18px] h-[18px] shrink-0 transition-colors", isGaokaoRoute ? "text-blue-500" : "text-text-tertiary")} />
+                  <span>{t("gaokao.navLabel")}</span>
+                </Link>
+
+                <Link
                   href="/ai-comic"
                   className={cn(
                     "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-normal transition-all duration-150 w-full text-left",
@@ -1498,7 +1589,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                   <span>{t("sidebar.tooltip.favorites")}</span>
                 </Link>
 
-                {notebooksLoading && notebooks.length === 0 ? (
+                {notebooksLoading && sidebarNotebookItems.length === 0 ? (
                   <div className="space-y-1">
                     {[0, 1, 2].map((i) => <div key={i} className="h-9 rounded-xl bg-surface-border/50 animate-pulse" />)}
                   </div>

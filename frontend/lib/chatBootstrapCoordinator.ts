@@ -149,7 +149,7 @@ export async function fetchChatBootstrap({
   workspaceId,
   token,
   messageTail = 32,
-  conversationLimit = 30,
+  conversationLimit = 500,
   signal,
   fetchImpl = fetch,
   sleep = defaultBootstrapSleep,

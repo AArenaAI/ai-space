@@ -410,6 +410,57 @@ async function testLateRestoreResponseCannotOverwriteLatestConversation() {
   second.refs.conversationLoadSeqRef.current = sharedSeqRef.current;
 }
 
+async function testFreshLocalUserMessageSurvivesStaleRestoreRevalidate() {
+  snapshotCache.clear();
+  persistentSnapshotCache.clear();
+  snapshotCache.set(9, {
+    conversationId: 9,
+    title: "Cached before send",
+    messages: [
+      { id: "u-old", role: "user", content: "old", createdAt: Date.parse("2026-01-01T00:00:00Z") },
+      { id: "a-old", role: "assistant", content: "old answer", createdAt: Date.parse("2026-01-01T00:00:01Z"), completedAt: Date.parse("2026-01-01T00:00:02Z") },
+    ],
+    loadedPersistedMessages: 2,
+    totalMessages: 2,
+    groupViews: new Map([[1, 0]]),
+    isLoading: false,
+    isCompare: false,
+    compareModels: [],
+    model: "m1",
+    fetchedAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+  let restoreResolved;
+  restoreImpl = async () => new Promise((resolve) => { restoreResolved = resolve; });
+  statusImpl = async () => undefined;
+  countImpl = async () => undefined;
+  const state = createState();
+  runRuntime({ conversationId: 9, token: "tok", state });
+  assert.equal(state.messages.at(-1).content, "old answer");
+  await flush();
+
+  const freshUser = { id: "u-fresh", role: "user", content: "new question", createdAt: Date.parse("2026-01-01T00:00:10Z"), serverMessageId: 99 };
+  const freshAssistant = { id: "a-fresh", role: "assistant", content: "", createdAt: Date.parse("2026-01-01T00:00:11Z"), serverMessageId: 100, generationTaskId: 77, activityStatus: { kind: "generating", label: "busy" } };
+  state.setMessages((prev) => [...prev, freshUser, freshAssistant]);
+
+  restoreResolved({
+    title: "Stale backend",
+    model: "m1",
+    messages: [
+      { id: "u-old", role: "user", content: "old", createdAt: Date.parse("2026-01-01T00:00:00Z") },
+      { id: "a-old", role: "assistant", content: "old answer", createdAt: Date.parse("2026-01-01T00:00:01Z"), completedAt: Date.parse("2026-01-01T00:00:02Z") },
+    ],
+    total: 2,
+  });
+  await flush(); await flush();
+
+  const freshUserIndex = state.messages.findIndex((message) => message.id === "u-fresh" && message.content === "new question");
+  const freshAssistantIndex = state.messages.findIndex((message) => message.id === "a-fresh" && message.activityStatus?.kind === "generating");
+  assert.notEqual(freshUserIndex, -1);
+  assert.notEqual(freshAssistantIndex, -1);
+  assert.equal(freshUserIndex < freshAssistantIndex, true);
+}
+
 async function testPendingLocalAssistantIsPreservedBeforeServerContent() {
   snapshotCache.clear();
   persistentSnapshotCache.clear();
@@ -615,6 +666,7 @@ async function testNavigationAbortsControllers() {
   await testRestoreMetaSkipsCountAndStatusFetches();
   await testStatusResumeStartsTaskStream();
   await testLateRestoreResponseCannotOverwriteLatestConversation();
+  await testFreshLocalUserMessageSurvivesStaleRestoreRevalidate();
   await testPendingLocalAssistantIsPreservedBeforeServerContent();
   await testOptimisticCachedPendingSurvivesBackendUserOnlyRestore();
   await testVisiblePendingAssistantSurvivesRestoreWhenBackendHasNoAnswerYet();

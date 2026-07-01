@@ -129,8 +129,13 @@ test("compare finally preserves navigation and otherwise clears compare controll
   assert.equal(done.shouldDispatchConversationUpdated, true);
 });
 
-test("buildConversationUpdatedEventDetail is stable", () => {
-  assert.deepEqual(buildConversationUpdatedEventDetail(5, "2026-01-01T00:00:00.000Z"), { id: 5, updated_at: "2026-01-01T00:00:00.000Z" });
+test("buildConversationUpdatedEventDetail includes aliases and extra optimistic metadata", () => {
+  assert.deepEqual(buildConversationUpdatedEventDetail(5, "2026-01-01T00:00:00.000Z", { source: "local-send" }), {
+    id: 5,
+    conversationId: 5,
+    updated_at: "2026-01-01T00:00:00.000Z",
+    source: "local-send",
+  });
 });
 
 console.log("\nchat run UI coordinator regression tests passed");
