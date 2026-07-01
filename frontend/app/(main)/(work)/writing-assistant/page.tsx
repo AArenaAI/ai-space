@@ -145,6 +145,11 @@ function getAuthHeaders() {
   };
 }
 
+function getAuthOnlyHeaders(): Record<string, string> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -158,6 +163,26 @@ function extractGenerationTaskId(meta: Record<string, unknown>): number | null {
 function extractTextFromChatResponse(data: any): string {
   const choice = data?.choices?.[0];
   return choice?.message?.content || choice?.delta?.content || data?.message?.content || data?.content || "";
+}
+
+async function fetchWritingAssistantStream(payload: Record<string, any>): Promise<Response> {
+  const initResponse = await fetch("/api/chat/init", {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ ...payload, stream: true, init_only: true }),
+  });
+  if (!initResponse.ok) return initResponse;
+  const init = await initResponse.json();
+  const taskId = Number(init?.task_id || init?.assistant_message?.generation_task_id || 0);
+  if (!taskId) {
+    return new Response(JSON.stringify(init), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  return fetch(`/api/tasks/${taskId}/stream?after=0`, {
+    headers: getAuthOnlyHeaders(),
+  });
 }
 
 function stripJsonFence(text: string) {
@@ -523,11 +548,7 @@ export default function WritingAssistantPage() {
       ],
     };
 
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      headers: getAuthHeaders(),
-      body: JSON.stringify(payload),
-    });
+    const res = await fetchWritingAssistantStream(payload);
     if (!res.ok) throw await readApiError(res);
 
     const contentType = res.headers.get("content-type") || "";

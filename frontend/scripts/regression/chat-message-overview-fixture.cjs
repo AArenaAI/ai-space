@@ -5,7 +5,7 @@ const { chromium } = require("playwright");
 const baseUrl = process.env.CHAT_MESSAGE_OVERVIEW_FIXTURE_BASE_URL || "http://127.0.0.1:3000";
 
 async function waitForRows(page) {
-  await page.waitForSelector('[data-testid="virtuoso-scroller"]', { state: "attached", timeout: 20_000 });
+  await page.waitForSelector('[data-testid="chat-history-scroll-container"]', { state: "attached", timeout: 20_000 });
   await page.waitForFunction(() => document.querySelectorAll('[data-chat-message-row="true"]').length > 0, null, { timeout: 20_000 });
 }
 
@@ -72,7 +72,7 @@ async function getActiveOverviewId(page) {
     await waitForRows(page);
     await page.waitForSelector('[data-testid="chat-message-overview"]', { timeout: 20_000 });
     await page.waitForFunction(() => {
-      const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+      const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
       if (!scroller) return false;
       return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 4;
     }, null, { timeout: 20_000 });
@@ -86,7 +86,7 @@ async function getActiveOverviewId(page) {
 
     // Scroll to the very top: active should switch to the earliest user message.
     await page.evaluate(() => {
-      const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+      const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
       if (scroller) {
         scroller.scrollTop = 0;
         scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
@@ -98,7 +98,7 @@ async function getActiveOverviewId(page) {
 
     // Scroll back down to restore center-focus logic.
     await page.evaluate(() => {
-      const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+      const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
       if (scroller) {
         scroller.scrollTop = scroller.scrollHeight - scroller.clientHeight;
         scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
@@ -116,7 +116,7 @@ async function getActiveOverviewId(page) {
     assert.ok(Number(compact.zIndex) >= 140, `overview should sit above chat controls and floating panels, got z-index ${compact.zIndex}`);
     assert.ok(compact.rootRight <= compact.viewportWidth && compact.rootLeft >= 0, `overview should stay inside viewport: ${JSON.stringify(compact)}`);
 
-    const beforeHoverScroll = await page.locator('[data-testid="virtuoso-scroller"]').evaluate((el) => el.scrollTop);
+    const beforeHoverScroll = await page.locator('[data-testid="chat-history-scroll-container"]').evaluate((el) => el.scrollTop);
     await page.hover('[data-testid="chat-message-overview-rail"]');
     await page.waitForTimeout(260);
     const expanded = await page.evaluate(() => {
@@ -137,7 +137,7 @@ async function getActiveOverviewId(page) {
     assert.ok(expanded.labelVisibleCount >= 8, `hover overview should show all labels, got ${expanded.labelVisibleCount}`);
     assert.ok(expanded.text.includes("dydx chain") || expanded.text.includes("dydx"), "hover overview should show user message summaries");
     assert.ok(expanded.dotWidth >= 18 && expanded.dotWidth <= 24 && expanded.dotHeight >= 1 && expanded.dotHeight <= 4, `hover capsule should be thin bar, got w=${expanded.dotWidth} h=${expanded.dotHeight}`);
-    const afterHoverScroll = await page.locator('[data-testid="virtuoso-scroller"]').evaluate((el) => el.scrollTop);
+    const afterHoverScroll = await page.locator('[data-testid="chat-history-scroll-container"]').evaluate((el) => el.scrollTop);
     assert.ok(Math.abs(afterHoverScroll - beforeHoverScroll) <= 2, `hovering overview should not jump the chat scroller: before=${beforeHoverScroll} after=${afterHoverScroll}`);
 
     const targetId = "overview-user-2";
@@ -145,7 +145,7 @@ async function getActiveOverviewId(page) {
     await page.waitForTimeout(450);
     const jumped = await page.evaluate((id) => {
       const row = document.querySelector(`[data-message-id="${id}"]`);
-      const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+      const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
       const rect = row?.getBoundingClientRect();
       const scrollerRect = scroller?.getBoundingClientRect();
       const rowCenter = rect ? rect.top + rect.height / 2 : -1;
@@ -169,7 +169,7 @@ async function getActiveOverviewId(page) {
     // Let the click-jump active lock expire before testing passive scroll active-marker timing.
     await page.waitForTimeout(950);
     const activeSwitchTiming = await page.evaluate(async () => {
-      const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+      const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
       const target = document.querySelector('[data-chat-message-row="true"][data-message-id="overview-user-3"]');
       if (!scroller || !target) return { ok: false, reason: "missing scroller or target" };
       const waitFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
@@ -288,7 +288,7 @@ async function getActiveOverviewId(page) {
     assert.equal(manyExpanded.lastId, "overview-user-40", `many-message expanded panel should initially include the active/latest item: ${JSON.stringify(manyExpanded)}`);
     assert.ok(manyExpanded.width >= 300, `many-message expanded panel should still show full panel, got ${manyExpanded.width}`);
 
-    const beforePanelWheelScroll = await page.locator('[data-testid="virtuoso-scroller"]').evaluate((el) => el.scrollTop);
+    const beforePanelWheelScroll = await page.locator('[data-testid="chat-history-scroll-container"]').evaluate((el) => el.scrollTop);
     await page.hover('[data-testid="chat-message-overview-panel"]');
     await page.mouse.wheel(0, -720);
     await page.waitForTimeout(120);
@@ -299,14 +299,14 @@ async function getActiveOverviewId(page) {
         lastId: ids[ids.length - 1] || "",
       };
     });
-    const afterPanelWheelScroll = await page.locator('[data-testid="virtuoso-scroller"]').evaluate((el) => el.scrollTop);
+    const afterPanelWheelScroll = await page.locator('[data-testid="chat-history-scroll-container"]').evaluate((el) => el.scrollTop);
     assert.notEqual(afterPanelWheel.firstId, manyExpanded.firstId, `wheel over expanded overview panel should browse the overview window: before=${JSON.stringify(manyExpanded)} after=${JSON.stringify(afterPanelWheel)}`);
     assert.ok(Math.abs(afterPanelWheelScroll - beforePanelWheelScroll) <= 2, `wheel over expanded overview panel should not scroll the main chat: before=${beforePanelWheelScroll} after=${afterPanelWheelScroll}`);
 
     const scrollbarDragStart = await page.evaluate(() => {
       const thumb = document.querySelector('[data-testid="chat-message-overview-scrollbar-thumb"]');
       const track = document.querySelector('[data-testid="chat-message-overview-scrollbar"]');
-      const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+      const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
       const ids = [...document.querySelectorAll('[data-testid="chat-message-overview-item"]')].map((item) => item.getAttribute("data-message-id"));
       const thumbRect = thumb?.getBoundingClientRect();
       const trackRect = track?.getBoundingClientRect();
@@ -328,7 +328,7 @@ async function getActiveOverviewId(page) {
     await page.mouse.up();
     await page.waitForTimeout(120);
     const scrollbarDrag = await page.evaluate((start) => {
-      const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+      const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
       const ids = [...document.querySelectorAll('[data-testid="chat-message-overview-item"]')].map((item) => item.getAttribute("data-message-id"));
       return {
         ...start,
@@ -348,7 +348,7 @@ async function getActiveOverviewId(page) {
     await page.waitForTimeout(650);
     const manyJumped = await page.evaluate((id) => {
       const row = document.querySelector(`[data-message-id="${id}"]`);
-      const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+      const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
       const rect = row?.getBoundingClientRect();
       const scrollerRect = scroller?.getBoundingClientRect();
       const rowCenter = rect ? rect.top + rect.height / 2 : -1;

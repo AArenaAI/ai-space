@@ -40,6 +40,7 @@ export type TaskStreamEventHandlerCallbacks = {
   realtimeGet: () => RealtimeDataLike | undefined;
   realtimeUpdate: (patch: ChatCompletionPatch & Record<string, any>) => void;
   startBackgroundPolling: (serverMessageId?: number) => void;
+  shouldApplySequence?: (sequence: number) => boolean;
 };
 
 export type CreateTaskStreamEventHandlerOptions = {
@@ -103,6 +104,7 @@ export function createTaskStreamEventHandler({
     if (action.sequence !== undefined) {
       if (action.hasExplicitSequence) {
         if (action.sequence <= after || seenSequences.has(action.sequence)) return;
+        if (callbacks.shouldApplySequence && !callbacks.shouldApplySequence(action.sequence)) return;
         seenSequences.add(action.sequence);
       }
       if (action.sequence > latestSequence) {

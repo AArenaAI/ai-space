@@ -5,6 +5,7 @@ import type { ChatModel, Message } from "@/lib/chatTypes";
 import type { InferredGroup } from "@/lib/groups";
 import CompareColumnTurn from "./CompareColumnTurn";
 import CompareSharedPromptBlock from "./CompareSharedPromptBlock";
+import type { CompareActivityLayout } from "./ChatCompareActivityLayoutControl";
 
 type MarkdownRendererComponent = Parameters<typeof CompareColumnTurn>[0]["MarkdownRenderer"];
 
@@ -32,6 +33,9 @@ export type ChatCompareGroupRowProps = {
   onForkCompare?: (messageId: number) => void;
   onSaveToNote?: (content: string) => void;
   onAssistantViewed?: (messageId: string) => void;
+  onOpenActivity?: (message: Message, layout: CompareActivityLayout) => void;
+  activeActivityMessageIds?: Set<string>;
+  activityLayout?: CompareActivityLayout;
   initialReadingAssistantIds?: Set<string>;
   viewedAssistantIds?: Set<string>;
   historyPrependSettling?: boolean;
@@ -66,6 +70,9 @@ function ChatCompareGroupRow({
   onForkCompare,
   onSaveToNote,
   onAssistantViewed,
+  onOpenActivity,
+  activeActivityMessageIds,
+  activityLayout = "inline",
   initialReadingAssistantIds,
   viewedAssistantIds,
   historyPrependSettling,
@@ -129,6 +136,9 @@ function ChatCompareGroupRow({
                 onForkCompare={onForkCompare}
                 onSaveToNote={onSaveToNote}
                 onAssistantViewed={onAssistantViewed}
+                onOpenActivity={onOpenActivity}
+                isActivityOpen={Boolean(assistant && activeActivityMessageIds?.has(String(assistant.id)))}
+                activityLayout={activityLayout}
                 isInitialReadingAssistant={assistant ? initialReadingAssistantIds?.has(String(assistant.id)) : false}
                 isViewedAssistant={assistant ? viewedAssistantIds?.has(String(assistant.id)) : false}
                 historyPrependSettling={historyPrependSettling}

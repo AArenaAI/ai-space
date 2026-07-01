@@ -140,6 +140,16 @@ export function DeferredMarkdownRenderer({
   }, [content.length, shouldRenderMarkdown]);
 
   useEffect(() => {
+    if (isStreaming) {
+      if (!hasRenderedMarkdownRef.current) setShouldRenderMarkdown(false);
+      emitChatRenderProfileEvent("markdown-hydrate-held-for-streaming", {
+        contentLength: content.length,
+        codeBlocks: complexity.codeBlocks,
+        tableLines: complexity.tableLines,
+      });
+      return;
+    }
+
     if (keepRenderedOnContentChange && hasRenderedMarkdownRef.current) {
       if (!content) {
         hasRenderedMarkdownRef.current = false;

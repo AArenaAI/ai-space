@@ -9,6 +9,7 @@ import type { MessageRowProps } from "./MessageRow";
 export type ChatMessageListItemProps = {
   index: number;
   message: Message;
+  displayMessageId?: string;
   visibleMessageCount: number;
   latestAssistantMessageId?: string;
   initialReadingAssistantIds?: Set<string>;
@@ -38,6 +39,7 @@ export type ChatMessageListItemProps = {
   onForkCompare?: (messageId: number) => void;
   onSaveAssistantToNote?: (content: string) => void;
   onAssistantViewed?: (messageId: string) => void;
+  onOpenActivity?: (message: Message) => void;
   imageLoadFailedLabel: string;
   MarkdownRenderer: MessageRowProps["MarkdownRenderer"];
   useContentVisibility?: boolean;
@@ -48,6 +50,7 @@ export type ChatMessageListItemProps = {
 function ChatMessageListItem({
   index,
   message,
+  displayMessageId,
   visibleMessageCount,
   latestAssistantMessageId,
   initialReadingAssistantIds,
@@ -77,6 +80,7 @@ function ChatMessageListItem({
   onForkCompare,
   onSaveAssistantToNote,
   onAssistantViewed,
+  onOpenActivity,
   imageLoadFailedLabel,
   MarkdownRenderer,
   useContentVisibility,
@@ -86,6 +90,7 @@ function ChatMessageListItem({
   return (
     <MessageRow
       message={message}
+      displayMessageId={displayMessageId}
       group={group}
       model={model}
       isLast={index === visibleMessageCount - 1}
@@ -115,6 +120,7 @@ function ChatMessageListItem({
       onForkCompare={onForkCompare}
       onSaveAssistantToNote={onSaveAssistantToNote}
       onAssistantViewed={onAssistantViewed}
+      onOpenActivity={onOpenActivity}
       imageLoadFailedLabel={imageLoadFailedLabel}
       MarkdownRenderer={MarkdownRenderer}
       useContentVisibility={useContentVisibility}
@@ -175,6 +181,7 @@ function areChatMessageListItemPropsEqual(previous: ChatMessageListItemProps, ne
   if ((previous.message.role === "assistant" && !!previous.initialReadingAssistantIds?.has(String(previous.message.id))) !== (next.message.role === "assistant" && !!next.initialReadingAssistantIds?.has(String(next.message.id)))) return false;
   if ((previous.message.role === "assistant" && !!previous.viewedAssistantIds?.has(String(previous.message.id))) !== (next.message.role === "assistant" && !!next.viewedAssistantIds?.has(String(next.message.id)))) return false;
   if (previous.message !== next.message && getMessageRenderKey(previous.message) !== getMessageRenderKey(next.message)) return false;
+  if (previous.displayMessageId !== next.displayMessageId) return false;
 
   if (previous.isLoading !== next.isLoading && (previousIsLast || nextIsLast)) return false;
   if (previous.selectMode !== next.selectMode) return false;
@@ -184,6 +191,8 @@ function areChatMessageListItemPropsEqual(previous: ChatMessageListItemProps, ne
   if (previous.deferRichTextHydration !== next.deferRichTextHydration) return false;
   if (previous.allowRichLiteFallback !== next.allowRichLiteFallback) return false;
   if (previous.conversationId !== next.conversationId) return false;
+  if (previous.onAssistantViewed !== next.onAssistantViewed) return false;
+  if (previous.onOpenActivity !== next.onOpenActivity) return false;
   if (previous.imageLoadFailedLabel !== next.imageLoadFailedLabel) return false;
   if (previous.MarkdownRenderer !== next.MarkdownRenderer) return false;
   if (previous.useContentVisibility !== next.useContentVisibility) return false;

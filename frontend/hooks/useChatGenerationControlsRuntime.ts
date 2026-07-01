@@ -175,7 +175,7 @@ export function createForkChatAction({
     const forkPlaceholderGroupId = -Math.max(1, messageId);
     const placeholderCreatedAt = now();
     const placeholderIds = modelIds.map((modelId, index) => index === sourceIndex ? undefined : `fork-${messageId}-${index}-${fallbackId()}`);
-    const placeholderMessages = modelIds
+    const placeholderMessages: Message[] = modelIds
       .map((modelId, index) => ({ modelId, index, id: placeholderIds[index] }))
       .filter((item): item is { modelId: string; index: number; id: string } => !!item.id)
       .map(({ modelId, index, id }) => ({
@@ -192,21 +192,16 @@ export function createForkChatAction({
       }));
 
     if (sourceMessage && placeholderMessages.length > 0) {
-      initializeAssistantRealtimeBatch(placeholderMessages, now());
       setMessages((prev) => {
         const sourcePosition = prev.findIndex((message) => message.serverMessageId === messageId);
         if (sourcePosition < 0) return prev;
-        const existingPlaceholderIds = new Set(placeholderMessages.map((message) => message.id));
-        const withoutOldPlaceholders = prev.filter((message) => !existingPlaceholderIds.has(message.id));
-        const currentSourcePosition = withoutOldPlaceholders.findIndex((message) => message.serverMessageId === messageId);
-        const next = [...withoutOldPlaceholders];
-        next[currentSourcePosition] = {
-          ...next[currentSourcePosition],
+        const next = [...prev];
+        next[sourcePosition] = {
+          ...next[sourcePosition],
           groupId: forkPlaceholderGroupId,
           groupIndex: sourceIndex >= 0 ? sourceIndex : 0,
           groupModels: modelIds,
         };
-        next.splice(currentSourcePosition + 1, 0, ...placeholderMessages);
         return next;
       });
     }
@@ -244,42 +239,74 @@ export function createForkChatAction({
               groupModels: resolvedModels,
             };
           }
-          const placeholder = placeholderMessages.find((item) => item.id === message.id);
-          if (!placeholder) return message;
-          return {
-            ...message,
-            groupId,
-            groupModels: resolvedModels,
-          };
+          return message;
         }));
 
         await Promise.all(placeholderMessages.map(async (assistantMsg, idx) => {
           const controller = controllers[idx];
-          const response = await fetch(`${apiBaseUrl}/api/chat`, {
+          const initResponse = await fetch(`${apiBaseUrl}/api/chat/init`, {
             method: "POST",
             headers,
             signal: controller.signal,
-            body: JSON.stringify(buildCompareChatRequestBody({
-              model: assistantMsg.model || "",
-              messages: toModelMessages(contextMessages),
-              conversationId: convId,
-              notebookId,
-              notebookFileIds,
-              messageFileIds: sourceMessageFileIds,
-              reasoningEffort: reasoning.effort,
-              search,
-              templateId,
-              templatePrefix,
-              skipSaveUserMessage: true,
-              groupId,
-              userMessageId,
-              groupIndex: assistantMsg.groupIndex ?? idx,
-              groupModels: resolvedModels,
-              fallbackGroupModels: resolvedModels,
-              skillKey,
-            })),
+            body: JSON.stringify({
+              ...buildCompareChatRequestBody({
+                model: assistantMsg.model || "",
+                messages: toModelMessages(contextMessages),
+                conversationId: convId,
+                notebookId,
+                notebookFileIds,
+                messageFileIds: sourceMessageFileIds,
+                reasoningEffort: reasoning.effort,
+                search,
+                templateId,
+                templatePrefix,
+                skipSaveUserMessage: true,
+                groupId,
+                userMessageId,
+                groupIndex: assistantMsg.groupIndex ?? idx,
+                groupModels: resolvedModels,
+                fallbackGroupModels: resolvedModels,
+                skillKey,
+              }),
+              stream: true,
+              init_only: true,
+            }),
           });
-          if (!response.ok) throw new Error("Fork stream request failed");
+          if (!initResponse.ok) throw new Error("Fork init request failed");
+          const init = await initResponse.json();
+          const serverMessageId = Number(init.assistant_message_id || init.assistant_message?.id || 0) || undefined;
+          const generationTaskId = Number(init.task_id || init.assistant_message?.generation_task_id || 0) || undefined;
+          const serverBoundAssistant = {
+            ...assistantMsg,
+            id: generationTaskId ? `assistant-task:${generationTaskId}` : String(serverMessageId || assistantMsg.id),
+            serverMessageId: serverMessageId || assistantMsg.serverMessageId,
+            generationTaskId: generationTaskId || assistantMsg.generationTaskId,
+            serverGenerationStatus: init.assistant_message?.server_generation_status || init.assistant_message?.generation_status || "running",
+            activityStatus: createBusyGeneratingStatus(translate),
+          } as Message;
+          assistantMsg.id = serverBoundAssistant.id;
+          assistantMsg.serverMessageId = serverBoundAssistant.serverMessageId;
+          assistantMsg.generationTaskId = serverBoundAssistant.generationTaskId;
+          assistantMsg.serverGenerationStatus = serverBoundAssistant.serverGenerationStatus;
+          initializeAssistantRealtimeBatch([serverBoundAssistant], serverBoundAssistant.createdAt || now());
+          setMessages((prev) => {
+            const existingIndex = prev.findIndex((message) =>
+              message.id === serverBoundAssistant.id ||
+              (serverBoundAssistant.serverMessageId && message.serverMessageId === serverBoundAssistant.serverMessageId) ||
+              (serverBoundAssistant.generationTaskId && message.generationTaskId === serverBoundAssistant.generationTaskId)
+            );
+            if (existingIndex >= 0) return patchMessageById(prev, prev[existingIndex].id, serverBoundAssistant);
+            const sourcePosition = prev.findIndex((message) => message.serverMessageId === messageId);
+            if (sourcePosition < 0) return [...prev, serverBoundAssistant];
+            const next = [...prev];
+            next.splice(sourcePosition + 1 + idx, 0, serverBoundAssistant);
+            return next;
+          });
+          const response = await fetch(`${apiBaseUrl}/api/tasks/${generationTaskId}/stream?after=0`, {
+            headers,
+            signal: controller.signal,
+          });
+          if (!response.ok) throw new Error("Fork task stream request failed");
           const result = await streamResponse(response, assistantMsg, controller, convId);
           if (result?.recoverable) {
             setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) => ({
@@ -322,8 +349,9 @@ export function createForkChatAction({
       return data;
     } catch (error) {
       if (placeholderMessages.length > 0) {
+        const failedAssistantIds = new Set(placeholderMessages.map((message) => message.id));
         setMessages((prev) => prev.map((message) => {
-          if (!placeholderIds.includes(message.id)) return message;
+          if (!failedAssistantIds.has(message.id)) return message;
           return {
             ...message,
             completedAt: now(),

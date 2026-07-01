@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { useChatModelSelection } from "@/hooks/useChatModelSelection";
 import { useChatLocalActions } from "@/hooks/useChatLocalActions";
 import { useChatBackgroundPollingRuntime } from "@/hooks/useChatBackgroundPollingRuntime";
@@ -19,13 +19,26 @@ import {
 } from "@/hooks/useChatConversationLifecycle";
 import { useI18n } from "@/lib/i18n";
 import { v4 as uuidv4 } from "uuid";
-import { createFinalizingStatus } from "@/lib/chatActivityStatus";
-import type {
+import { createBusyGeneratingStatus, createFinalizingStatus } from "@/lib/chatActivityStatus";
+import {
   ChatModel,
   Conversation,
   Message,
   SearchSource,
 } from "@/lib/chatTypes";
+import { fetchChatBootstrap, type ChatBootstrapPayload } from "@/lib/chatBootstrapCoordinator";
+import { mapPersistedChatMessages, buildGroupViewsFromMessages } from "@/lib/chatForkCoordinator";
+import type { CachedConversationSnapshot } from "@/lib/chatConversationCache";
+import { setConversationSnapshot } from "@/lib/chatConversationCache";
+import { setPersistentConversationSnapshot } from "@/lib/chatConversationPersistentCache";
+import { fetchConversationRestore, type ConversationRestoreResponse } from "@/lib/chatConversationRestoreCoordinator";
+import { buildBootstrapTaskResumePlan } from "@/lib/chatBootstrapTaskResume";
+import { buildStoppedPatch } from "@/lib/chatCompletionFinalizer";
+import {
+  inferConversationGenerationState,
+  isConversationGenerationActive,
+  type ConversationGenerationStore,
+} from "@/lib/chatConversationGenerationStore";
 
 const API_BASE_URL = ""; // 使用相对路径，nginx 同域名代理 /api -> 后端
 
@@ -97,7 +110,7 @@ export const MODELS: ChatModel[] = [
   },
 ];
 
-export function useChat(conversationId: number | undefined, models: ChatModel[], skillKey?: string, notebookId?: number, notebookFileIds?: number[], modelSelectionOptions?: { storageKey?: string; defaultModelId?: string }) {
+export function useChat(conversationId: number | undefined, models: ChatModel[], skillKey?: string, notebookId?: number, notebookFileIds?: number[], modelSelectionOptions?: { storageKey?: string; defaultModelId?: string }, bootstrap?: ChatBootstrapPayload) {
   const { t } = useI18n();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -132,10 +145,98 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   // 从对话历史或 prop 恢复的有效 skillKey（优先级：历史 > prop）
   const [effectiveSkillKey, setEffectiveSkillKey] = useState<string | undefined>(skillKey);
   const [groupViews, setGroupViews] = useState<Map<number, number>>(new Map());
+  const [generationStore, setGenerationStore] = useState<ConversationGenerationStore>({});
   const taskStreamsRef = useRef<Record<string, AbortController>>({});
+  const pendingLocalAssistantsRef = useRef<Record<string, { convId?: number; message: Message }>>({});
+  const resumedBootstrapTaskKeysRef = useRef<Set<string>>(new Set());
   const abortReasonRef = useRef<"user" | "navigation" | null>(null);
   const modelsKey = models.map((m) => m.id).join("|");
+  const bootstrapSnapshot: CachedConversationSnapshot | undefined = useMemo(() => {
+    if (!bootstrap?.conversation || !bootstrap.snapshot) return undefined;
+    const mappedMessages = mapPersistedChatMessages(bootstrap.snapshot.messages || [], { fallbackId: uuidv4 });
+    return {
+      conversationId: bootstrap.conversation.id,
+      title: bootstrap.conversation.title || "",
+      messages: mappedMessages,
+      loadedPersistedMessages: mappedMessages.length,
+      totalMessages: bootstrap.snapshot.total,
+      groupViews: buildGroupViewsFromMessages(mappedMessages),
+      isLoading: false,
+      isCompare: !!bootstrap.conversation.compare,
+      compareModels: bootstrap.conversation.compare_models || [],
+      model: bootstrap.conversation.model,
+      skillKey: bootstrap.conversation.skill_key || skillKey,
+      snapshotVersion: bootstrap.snapshot.snapshot_version,
+      fetchedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+  }, [bootstrap, skillKey]);
+  const fetchBootstrapRestore = useCallback(async ({
+    apiBaseUrl,
+    conversationId: restoreConversationId,
+    token,
+    signal,
+  }: {
+    apiBaseUrl?: string;
+    conversationId: number;
+    token: string;
+    signal?: AbortSignal;
+    snapshotVersion?: string;
+  }): Promise<ConversationRestoreResponse> => {
+    try {
+      const payload = bootstrap?.conversation?.id === restoreConversationId && bootstrap.snapshot
+        ? bootstrap
+        : await fetchChatBootstrap({ apiBaseUrl, conversationId: restoreConversationId, token, signal });
+      return {
+        title: payload.conversation?.title || "",
+        model: payload.conversation?.model,
+        compare: !!payload.conversation?.compare,
+        compare_models: JSON.stringify(payload.conversation?.compare_models || []),
+        skill_key: payload.conversation?.skill_key,
+        messages: payload.snapshot?.messages || [],
+        total: payload.snapshot?.total,
+        has_more: payload.snapshot?.has_more,
+        snapshot_version: payload.snapshot?.snapshot_version,
+        last_assistant_status: payload.snapshot?.last_assistant_status,
+      };
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      return fetchConversationRestore({ apiBaseUrl, conversationId: restoreConversationId, token, signal });
+    }
+  }, [bootstrap]);
   const stopTaskStream = useStopTaskStreamAction(taskStreamsRef);
+
+  const persistCurrentConversationSnapshot = useCallback(() => {
+    if (!currentConversation || messages.length === 0) return;
+    const snapshot: CachedConversationSnapshot = {
+      conversationId: currentConversation,
+      title: conversationTitle || "",
+      messages,
+      loadedPersistedMessages: Math.max(loadedPersistedMessages, messages.length),
+      totalMessages: Math.max(totalMessages || 0, messages.length),
+      groupViews,
+      isLoading,
+      isCompare,
+      compareModels,
+      model: selectedModel?.id,
+      skillKey: effectiveSkillKey,
+      fetchedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    setConversationSnapshot(snapshot);
+    void setPersistentConversationSnapshot(snapshot);
+  }, [compareModels, conversationTitle, currentConversation, effectiveSkillKey, groupViews, isCompare, isLoading, loadedPersistedMessages, messages, selectedModel?.id, totalMessages]);
+
+  useEffect(() => {
+    const handleBeforeRouteChange = () => persistCurrentConversationSnapshot();
+    window.addEventListener("chat-conversation-before-route-change", handleBeforeRouteChange);
+    return () => window.removeEventListener("chat-conversation-before-route-change", handleBeforeRouteChange);
+  }, [persistCurrentConversationSnapshot]);
+
+  useEffect(() => {
+    if (!currentConversation || messages.length === 0 || !isLoading) return;
+    persistCurrentConversationSnapshot();
+  }, [currentConversation, isLoading, messages, persistCurrentConversationSnapshot]);
 
   const {
     backgroundPollersRef,
@@ -178,6 +279,47 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     translate: t,
   });
 
+  useEffect(() => {
+    const activeTasks = bootstrap?.active_tasks?.chat || [];
+    if (!conversationId || activeTasks.length === 0 || messages.length === 0) return;
+    const busyStatus = createBusyGeneratingStatus(t);
+    const plan = buildBootstrapTaskResumePlan({
+      activeTasks,
+      messages,
+    });
+    plan.forEach(({ task, message, after, initialContent }) => {
+      const resumeKey = `${message.id}:${task.id}:${after || 0}`;
+      if (taskStreamsRef.current[message.id] || activeTaskStreamsRef.current[message.id] || resumedBootstrapTaskKeysRef.current.has(resumeKey)) return;
+      resumedBootstrapTaskKeysRef.current.add(resumeKey);
+      setMessages((prev) => prev.map((item) => {
+        if (item.id !== message.id) return item;
+        const nextLastSequence = after || item.lastSequence;
+        if (
+          item.generationTaskId === task.id &&
+          item.lastSequence === nextLastSequence &&
+          item.activityStatus
+        ) {
+          return item;
+        }
+        return {
+          ...item,
+          generationTaskId: task.id,
+          lastSequence: nextLastSequence,
+          activityStatus: item.activityStatus ?? busyStatus,
+          generationStartedAt: item.generationStartedAt ?? Date.now(),
+        };
+      }));
+      startTaskEventStream(
+        task.conversation_id || conversationId,
+        message.id,
+        task.assistant_message_id,
+        after,
+        initialContent,
+        task.id
+      );
+    });
+  }, [bootstrap, conversationId, messages, setMessages, startTaskEventStream, t]);
+
   useChatRuntimeCleanup({ stopAllBackgroundPollers, stopAllTaskStreams });
 
   useChatConversationRestoreRuntime({
@@ -193,6 +335,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     compareAbortControllersRef,
     abortReasonRef,
     activeTaskStreamsRef,
+    pendingLocalAssistantsRef,
     setMessages,
     setConversationTitle,
     setLoadedPersistedMessages,
@@ -208,7 +351,10 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     applyJustCreatedNavigationLifecycle,
     applyLoadExistingNavigationLifecycle,
     startTaskEventStream,
+    startBackgroundPolling,
     translate: t,
+    bootstrapSnapshot,
+    fetchRestore: fetchBootstrapRestore,
   });
 
   const {
@@ -233,6 +379,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     compareAbortControllersRef,
     abortReasonRef,
     taskStreamsRef,
+    pendingLocalAssistantsRef,
     backgroundPollersRef,
     lastReasoningRef,
     lastSearchRef,
@@ -263,6 +410,23 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     notebookFileIds,
     translate: t,
   });
+
+  const stopCurrentConversationGeneration = useCallback(() => {
+    stopGeneration();
+    if (!currentConversation) return;
+    const pendingIds = Object.entries(pendingLocalAssistantsRef.current)
+      .filter(([, entry]) => entry.convId === currentConversation)
+      .map(([id]) => id);
+    if (pendingIds.length === 0) return;
+    const stoppedPatch = buildStoppedPatch(Date.now());
+    setMessages((prev) => prev.map((message) =>
+      pendingIds.includes(message.id) ? { ...message, ...stoppedPatch } : message
+    ));
+    pendingIds.forEach((id) => {
+      delete pendingLocalAssistantsRef.current[id];
+    });
+    setIsLoading(false);
+  }, [currentConversation, stopGeneration, setMessages, setIsLoading]);
 
   const {
     clearMessages,
@@ -296,14 +460,73 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     setTotalMessages,
   });
 
+  const latestAssistantMessage = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index]?.role === "assistant") return messages[index];
+    }
+    return undefined;
+  }, [messages]);
+
+  const hasCurrentPendingLocalAssistant = useMemo(() => {
+    if (!currentConversation || !latestAssistantMessage) return false;
+    const pending = pendingLocalAssistantsRef.current[latestAssistantMessage.id];
+    return Boolean(
+      pending?.convId === currentConversation &&
+      !latestAssistantMessage.completedAt &&
+      !latestAssistantMessage.stopped &&
+      !latestAssistantMessage.errorCode
+    );
+  }, [currentConversation, latestAssistantMessage, messages]);
+
+  const hasCurrentMainStream = useMemo(() => {
+    return Boolean(abortControllerRef.current) && Boolean(
+      latestAssistantMessage &&
+      !latestAssistantMessage.completedAt &&
+      !latestAssistantMessage.stopped &&
+      !latestAssistantMessage.errorCode &&
+      !latestAssistantMessage.content?.trim()
+    );
+  }, [latestAssistantMessage, messages]);
+
+  useEffect(() => {
+    if (!currentConversation) return;
+    setGenerationStore((prev) => ({
+      ...prev,
+      [currentConversation]: inferConversationGenerationState({
+        conversationId: currentConversation,
+        messages,
+        hasActiveTaskStream: Object.values(activeTaskStreamsRef.current).some((state) => state.convId === currentConversation),
+        hasCurrentPoller: Object.keys(backgroundPollersRef.current).some((messageId) => messages.some((message) => message.id === messageId)),
+        hasPendingLocalAssistant: hasCurrentPendingLocalAssistant,
+        hasMainStream: hasCurrentMainStream,
+        previous: prev[currentConversation],
+      }),
+    }));
+  }, [currentConversation, messages, hasCurrentPendingLocalAssistant, hasCurrentMainStream]);
+
+  const isCurrentConversationGenerating = useMemo(() => {
+    if (!currentConversation) return false;
+    const currentState = inferConversationGenerationState({
+      conversationId: currentConversation,
+      messages,
+      hasActiveTaskStream: Object.values(activeTaskStreamsRef.current).some((state) => state.convId === currentConversation),
+      hasCurrentPoller: Object.keys(backgroundPollersRef.current).some((messageId) => messages.some((message) => message.id === messageId)),
+      hasPendingLocalAssistant: hasCurrentPendingLocalAssistant,
+      hasMainStream: hasCurrentMainStream,
+      previous: generationStore[currentConversation],
+    });
+    return isConversationGenerationActive(currentState);
+  }, [currentConversation, generationStore, messages, hasCurrentPendingLocalAssistant, hasCurrentMainStream]);
+
   return {
     messages,
     isLoading,
+    isCurrentConversationGenerating,
     isLoadingHistory,
     selectedModel,
     setSelectedModel,
     sendMessage,
-    stopGeneration,
+    stopGeneration: stopCurrentConversationGeneration,
     clearMessages,
     deleteMessage,
     regenerateMessage,

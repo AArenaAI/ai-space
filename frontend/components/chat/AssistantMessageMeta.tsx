@@ -106,7 +106,7 @@ function StatusTimelinePanel({ status, tokensUsed }: { status: MessageDisplaySta
   );
 }
 
-export function AssistantMessageMeta({ msg, isStreaming, model }: { msg: Message; isStreaming: boolean; model?: ChatModel }) {
+export function AssistantMessageMeta({ msg, isStreaming, model, compact = false, inlineStatus = false, onOpenActivity }: { msg: Message; isStreaming: boolean; model?: ChatModel; compact?: boolean; inlineStatus?: boolean; onOpenActivity?: () => void }) {
   const profileEnabled = isChatRenderProfileEnabled();
   const renderStartedAt = profileEnabled ? (typeof performance !== "undefined" ? performance.now() : Date.now()) : 0;
   const { t } = useI18n();
@@ -151,35 +151,41 @@ export function AssistantMessageMeta({ msg, isStreaming, model }: { msg: Message
 
   if (!model) return null;
   const activeStatus = statuses.find((status) => status.key === activeStatusKey);
-  const canShowActiveStatusDetails = Boolean(activeStatus && (activeStatus.statusTimeline?.length || msg.tokensUsed || activeStatus.label));
+  const canShowActiveStatusDetails = Boolean(!inlineStatus && activeStatus && (activeStatus.statusTimeline?.length || msg.tokensUsed || activeStatus.label));
+  const visibleStatuses = inlineStatus ? [] : statuses;
 
   return (
-    <div className="relative mb-2 flex items-center justify-between gap-3" onMouseLeave={() => setActiveStatusKey(null)}>
-      <div className="flex min-w-0 items-center gap-1.5">
-        <div className="w-1 h-1 rounded-full" style={{ backgroundColor: model.color }} />
+    <div className={cn("relative flex items-center gap-2", inlineStatus ? "justify-start" : "justify-between", compact ? "mb-0" : "mb-2")} onMouseLeave={() => setActiveStatusKey(null)}>
+      <div className="flex min-w-0 items-center">
         <span className="truncate text-[11px] text-text-tertiary">{model.name}</span>
       </div>
-      <div className="ml-auto flex shrink-0 items-center gap-1">
-        {statuses.map((status) => {
-          const canShowDetails = Boolean(status.statusTimeline?.length || msg.tokensUsed || status.label);
-          return (
-            <span key={status.key} className="group/status inline-flex">
-              <span
-                data-chat-generation-phase={status.generationPhase}
-                data-chat-status-kind={status.kind}
-                title={status.label}
-                aria-label={status.label}
-                onMouseEnter={() => setActiveStatusKey(status.key)}
-                onFocus={() => setActiveStatusKey(status.key)}
-                className={cn(
-                  "inline-flex h-5 min-w-5 cursor-default items-center justify-center rounded-full text-[11px] transition-all duration-150",
-                  canShowDetails && "group-hover/status:-translate-y-0.5 group-hover/status:brightness-110",
-                  toneClass(status.tone)
-                )}
-              >
-                <StatusIcon status={status} compact />
-              </span>
+      <div className={cn("flex shrink-0 items-center gap-1", inlineStatus ? "ml-0" : "ml-auto")}>
+        {visibleStatuses.map((status) => {
+          const canShowDetails = Boolean(!inlineStatus && (status.statusTimeline?.length || msg.tokensUsed || status.label));
+          const content = (
+            <span
+              data-chat-generation-phase={status.generationPhase}
+              data-chat-status-kind={status.kind}
+              title={status.label}
+              aria-label={status.label}
+              onMouseEnter={() => !inlineStatus && setActiveStatusKey(status.key)}
+              onFocus={() => !inlineStatus && setActiveStatusKey(status.key)}
+              className={cn(
+                "inline-flex h-5 min-w-5 items-center justify-center rounded-full text-[11px] transition-all duration-150",
+                inlineStatus ? "cursor-pointer" : "cursor-default",
+                canShowDetails && "group-hover/status:-translate-y-0.5 group-hover/status:brightness-110",
+                toneClass(status.tone)
+              )}
+            >
+              <StatusIcon status={status} compact />
             </span>
+          );
+          return inlineStatus ? (
+            <button key={status.key} type="button" className="group/status inline-flex" onClick={onOpenActivity} aria-label={status.label}>
+              {content}
+            </button>
+          ) : (
+            <span key={status.key} className="group/status inline-flex">{content}</span>
           );
         })}
       </div>

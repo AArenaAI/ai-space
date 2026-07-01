@@ -25,7 +25,7 @@ const baseUrl = process.env.CHAT_HISTORY_LOADING_FIXTURE_BASE_URL || "http://127
       samples.push(await page.evaluate(() => {
         const fixture = document.querySelector('[data-testid="chat-history-loading-fixture"]');
         const rows = document.querySelectorAll('[data-chat-message-row="true"]').length;
-        const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+        const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
         const welcome = document.body.innerText.includes("有什么可以帮你") || document.body.innerText.includes("How can I help");
         const loadingDots = document.querySelector('[data-testid="chat-history-loading-state"]');
         const body = document.body.getBoundingClientRect();
@@ -54,7 +54,7 @@ const baseUrl = process.env.CHAT_HISTORY_LOADING_FIXTURE_BASE_URL || "http://127
     assert.ok(finalRows >= 2, `restored history should render messages, got ${finalRows}`);
     await page.waitForTimeout(850);
     const restoredScroll = await page.evaluate(() => {
-      const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+      const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
       const lastRow = document.querySelector('[data-chat-message-row="true"][data-message-id="restored-assistant-2"]');
       const scrollerRect = scroller?.getBoundingClientRect();
       const lastRect = lastRow?.getBoundingClientRect();

@@ -16,6 +16,7 @@ import {
   patchMessageById,
 } from "@/lib/chatMessageStatePatch";
 import { buildChatRequestHeaders } from "@/lib/chatRequestBuilder";
+import { initCompareRun } from "@/lib/chatCompareInitCoordinator";
 import { toModelMessages } from "@/lib/chatHistoryTransform";
 import {
   buildMessageFiles,
@@ -47,6 +48,24 @@ type StartBackgroundPolling = (
   localMessageId: string,
   serverMessageId?: number
 ) => void;
+export async function persistCompareConversationState({
+  apiBaseUrl,
+  conversationId,
+  token,
+  compareModelIds,
+}: {
+  apiBaseUrl: string;
+  conversationId?: number;
+  token?: string | null;
+  compareModelIds: string[];
+}) {
+  if (!conversationId || !token || compareModelIds.length < 2) return;
+  await fetch(`${apiBaseUrl}/api/conversations/${conversationId}`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ compare: true, compare_models: JSON.stringify(compareModelIds) }),
+  }).catch(() => undefined);
+}
 
 export type UseChatCompareSendRuntimeOptions = {
   apiBaseUrl: string;
@@ -74,6 +93,7 @@ export type UseChatCompareSendRuntimeOptions = {
   now?: () => number;
   createId?: () => string;
   getToken?: () => string | null;
+  getWorkspaceId?: () => string | null;
   dispatchWindowEvent?: (event: Event) => void;
 };
 
@@ -103,6 +123,7 @@ export function useChatCompareSendRuntime({
   now = Date.now,
   createId = uuidv4,
   getToken = () => localStorage.getItem("token"),
+  getWorkspaceId = () => localStorage.getItem("current-workspace"),
   dispatchWindowEvent = (event) => window.dispatchEvent(event),
 }: UseChatCompareSendRuntimeOptions) {
   const sendCompareMessages = useCallback(
@@ -131,27 +152,54 @@ export function useChatCompareSendRuntime({
         const title = content.trim().slice(0, 20) + (content.trim().length > 20 ? "..." : "");
         convId = await createConversation(title, compareModelIds[0], effectiveSkillKey);
       }
+      await persistCompareConversationState({ apiBaseUrl, conversationId: convId, token, compareModelIds });
 
       const finalContent = content.trim();
       const userFiles = buildMessageFiles(attachments, { defaultType: "file" });
-      const userMsg = createUserChatMessage({
-        id: createId(),
+      const init = await initCompareRun({
+        apiBaseUrl,
+        token,
+        guestId: getGuestId(),
+        conversationId: convId,
+        workspaceId: getWorkspaceId(),
         content: finalContent,
-        createdAt: now(),
-        files: userFiles,
-      }) as Message;
+        model: compareModelIds[0],
+        compareModelIds,
+        skillKey: effectiveSkillKey,
+      });
+      convId = init.conversation_id || convId;
+      const groupContext = {
+        groupId: init.group.id,
+        userMessageId: init.user_message.id,
+        groupModels: init.compare_models.length ? init.compare_models : compareModelIds,
+      };
+      const userMsg = {
+        ...createUserChatMessage({
+          id: String(init.user_message.id),
+          content: finalContent,
+          createdAt: now(),
+          files: userFiles,
+        }),
+        serverMessageId: init.user_message.id,
+        userMessageId: init.user_message.id,
+      } as Message;
       const assistantMsgs = createCompareAssistantMessages({
         modelIds: compareModelIds,
         ids: compareModelIds.map(() => createId()),
         createdAt: now(),
         search: lastSearchRef.current,
-      }) as Message[];
+      }).map((message, index) => ({
+        ...message,
+        groupId: groupContext.groupId,
+        groupIndex: index,
+        groupModels: groupContext.groupModels,
+        userMessageId: groupContext.userMessageId,
+      })) as Message[];
       const contextMessages = [...messages, userMsg];
 
-      initializeAssistantRealtimeBatch(assistantMsgs, userMsg.createdAt || now());
       setIsCompare(true);
       setCompareModels(compareModelIds);
-      setMessages((prev) => [...prev, userMsg, ...assistantMsgs]);
+      setMessages((prev) => [...prev, userMsg]);
       setIsLoading(true);
 
       const controllers = assistantMsgs.map(() => new AbortController());
@@ -170,13 +218,33 @@ export function useChatCompareSendRuntime({
       };
 
       const handleCompareRecoverableResult = (assistantMsg: Message, streamResult: ChatStreamRunResult) => {
-        setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) => buildRecoverableResultPatch({
-          serverMessageId: streamResult.serverMessageId,
-          generationTaskId: streamResult.generationTaskId,
-          existingServerMessageId: m.serverMessageId,
-          existingGenerationTaskId: m.generationTaskId,
-          busyActivityStatus: createBusyGeneratingStatus(translate),
-        })));
+        const serverBoundAssistant = {
+          ...assistantMsg,
+          serverMessageId: streamResult.serverMessageId || assistantMsg.serverMessageId,
+          generationTaskId: streamResult.generationTaskId || assistantMsg.generationTaskId,
+          activityStatus: createBusyGeneratingStatus(translate),
+          serverGenerationStatus: assistantMsg.serverGenerationStatus || "running",
+        } as Message;
+        initializeAssistantRealtimeBatch([serverBoundAssistant], serverBoundAssistant.createdAt || userMsg.createdAt || now());
+        setMessages((prev) => {
+          const existingIndex = prev.findIndex((message) =>
+            message.id === serverBoundAssistant.id ||
+            (serverBoundAssistant.serverMessageId && message.serverMessageId === serverBoundAssistant.serverMessageId) ||
+            (serverBoundAssistant.generationTaskId && message.generationTaskId === serverBoundAssistant.generationTaskId)
+          );
+          if (existingIndex === -1) return [...prev, serverBoundAssistant];
+          return patchMessageById(prev, prev[existingIndex].id, (m) => ({
+            ...m,
+            ...serverBoundAssistant,
+            ...buildRecoverableResultPatch({
+              serverMessageId: streamResult.serverMessageId,
+              generationTaskId: streamResult.generationTaskId,
+              existingServerMessageId: m.serverMessageId,
+              existingGenerationTaskId: m.generationTaskId,
+              busyActivityStatus: createBusyGeneratingStatus(translate),
+            }),
+          }));
+        });
       };
 
       const handleCompareRunError = (assistantMsg: Message, error: any, streamResult?: ChatStreamRunResult) => {
@@ -218,6 +286,7 @@ export function useChatCompareSendRuntime({
           templatePrefix,
           skillKey: effectiveSkillKey,
           messageFileIds: file_ids,
+          explicitGroupContext: groupContext,
           callbacks: {
             streamResponse,
             onGroupContextResolved: handleCompareGroupContextResolved,
@@ -258,6 +327,7 @@ export function useChatCompareSendRuntime({
       createId,
       now,
       getToken,
+      getWorkspaceId,
       setIsCompare,
       setCompareModels,
       setMessages,

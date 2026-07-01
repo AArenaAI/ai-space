@@ -3,7 +3,9 @@ import {
   ForkChatMessage,
   ForkChatPersistedMessage,
   mapPersistedChatMessages,
+  parsePersistedStatusTimeline,
 } from "./chatForkCoordinator";
+import { buildChatBootstrapUrl, defaultBootstrapSleep, type ChatBootstrapPayload } from "@/lib/chatBootstrapCoordinator";
 
 export type ConversationRestoreResponse = {
   notModified?: boolean;
@@ -31,18 +33,30 @@ export type ConversationRestoreMessage = ForkChatMessage & {
   generationTaskId?: number;
   lastSequence?: number;
   activityStatus?: unknown;
+  serverGenerationStatus?: string;
+  stopped?: boolean;
+  errorCode?: string;
 };
 
 export type ConversationRestoreStatusResponse = {
-  message?: { content?: string };
+  message?: { id?: number | string; content?: string; model?: string; reasoning_content?: string; reasoning?: string; thinking?: string; status_timeline?: unknown; statusTimeline?: unknown };
   background_task?: {
     id?: number | string;
     task_id?: number | string;
+    assistant_message_id?: number | string;
     status?: string;
     last_sequence_number?: number | string;
     completed_at?: string | null;
+    status_timeline?: unknown;
+    statusTimeline?: unknown;
   };
 };
+
+export function hasCompletedLastAssistantStatus(statusData?: ConversationRestoreStatusResponse): boolean {
+  const status = statusData?.background_task?.status || "";
+  const content = statusData?.message?.content || "";
+  return status === "completed" && content.trim().length > 0;
+}
 
 export type ConversationRestoreStatusDecision = {
   hasTask: boolean;
@@ -104,6 +118,9 @@ export async function fetchConversationRestore({
   signal,
   snapshotVersion,
   fetchImpl = fetch,
+  sleep = defaultBootstrapSleep,
+  retry429 = true,
+  max429Retries = 2,
 }: {
   apiBaseUrl?: string;
   conversationId: number;
@@ -111,16 +128,47 @@ export async function fetchConversationRestore({
   signal?: AbortSignal;
   snapshotVersion?: string;
   fetchImpl?: typeof fetch;
+  sleep?: (ms: number) => Promise<void>;
+  retry429?: boolean;
+  max429Retries?: number;
 }): Promise<ConversationRestoreResponse> {
   const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
   if (snapshotVersion) headers["If-None-Match"] = snapshotVersion;
-  const res = await fetchImpl(buildConversationRestoreUrl({ apiBaseUrl, conversationId }), {
-    headers,
-    signal,
-  });
-  if (res.status === 304) return { notModified: true, snapshot_version: snapshotVersion };
-  if (!res.ok) throw new Error(`load conversation failed: ${res.status}`);
-  return await res.json();
+  const url = buildChatBootstrapUrl({ apiBaseUrl, conversationId, messageTail: DEFAULT_CONVERSATION_RESTORE_TAIL, conversationLimit: 30 });
+  let attempt = 0;
+  for (;;) {
+    const res = await fetchImpl(url, {
+      headers,
+      credentials: "include",
+      signal,
+    });
+    if (res.status === 304) return { notModified: true, snapshot_version: snapshotVersion };
+    if (res.status === 429 && retry429 && attempt < max429Retries && !signal?.aborted) {
+      attempt += 1;
+      const retryAfter = res.headers?.get?.("Retry-After");
+      const seconds = retryAfter ? Number(retryAfter) : NaN;
+      const retryAfterMs = Number.isFinite(seconds) && seconds >= 0 ? Math.min(Math.max(seconds * 1000, 250), 5000) : undefined;
+      await sleep(retryAfterMs ?? Math.min(250 * 2 ** (attempt - 1), 1000));
+      continue;
+    }
+    if (!res.ok) throw new Error(`chat bootstrap failed: ${res.status}`);
+    return mapChatBootstrapPayloadToConversationRestore(await res.json());
+  }
+}
+
+export function mapChatBootstrapPayloadToConversationRestore(payload: ChatBootstrapPayload): ConversationRestoreResponse {
+  return {
+    title: payload.conversation?.title || "",
+    model: payload.conversation?.model,
+    compare: !!payload.conversation?.compare,
+    compare_models: JSON.stringify(payload.conversation?.compare_models || []),
+    skill_key: payload.conversation?.skill_key,
+    messages: payload.snapshot?.messages || [],
+    total: payload.snapshot?.total,
+    has_more: payload.snapshot?.has_more,
+    snapshot_version: payload.snapshot?.snapshot_version,
+    last_assistant_status: payload.snapshot?.last_assistant_status,
+  };
 }
 
 export async function fetchConversationMessageStatus({
@@ -235,13 +283,47 @@ export function buildConversationRestoreState({
   if (!data.messages) return undefined;
   const loadedMessages = mapConversationRestoreMessages(data.messages, { fallbackId, parseTime });
   const activeByServerMessageId = buildActiveTaskStreamsByServerMessageId(activeEntries, conversationId);
-  const mergedMessages = mergeActiveTaskStreamsIntoMessages(loadedMessages, activeByServerMessageId, activeActivityStatus);
+  let mergedMessages = mergeActiveTaskStreamsIntoMessages(loadedMessages, activeByServerMessageId, activeActivityStatus);
+  const statusData = data.last_assistant_status;
+  const bgTask = statusData?.background_task;
+  const status = bgTask?.status || "";
+  const terminalStatus = status === "completed" || status === "failed" || status === "cancelled" || status === "incomplete";
+  const statusContent = statusData?.message?.content || "";
+  const statusServerMessageId = Number(statusData?.message?.id || bgTask?.assistant_message_id || 0) || undefined;
+  const shouldAppendPendingStatusAssistant =
+    !!bgTask &&
+    !terminalStatus &&
+    !statusContent.trim() &&
+    !mergedMessages.some((message) =>
+      message.role === "assistant" &&
+      (statusServerMessageId ? String(message.serverMessageId || message.id) === String(statusServerMessageId) : false)
+    );
+  if (shouldAppendPendingStatusAssistant) {
+    mergedMessages = [
+      ...mergedMessages,
+      {
+        id: fallbackId(),
+        role: "assistant",
+        content: "",
+        model: statusData?.message?.model || data.model,
+        createdAt: Date.now(),
+        serverMessageId: statusServerMessageId,
+        generationTaskId: Number(bgTask?.id || bgTask?.task_id || 0) || undefined,
+        lastSequence: Number(bgTask?.last_sequence_number || 0) || undefined,
+        activityStatus: activeActivityStatus,
+        serverGenerationStatus: status,
+        statusTimeline: parsePersistedStatusTimeline((statusData?.message?.status_timeline || statusData?.background_task?.status_timeline) ? {
+          status_timeline: statusData?.message?.status_timeline || statusData?.background_task?.status_timeline,
+        } as ForkChatPersistedMessage : {} as ForkChatPersistedMessage),
+      },
+    ];
+  }
   return {
     loadedMessages,
     mergedMessages,
     groupViews: buildGroupViewsFromMessages(mergedMessages),
     activeByServerMessageId,
-    isLoading: activeByServerMessageId.size > 0,
+    isLoading: activeByServerMessageId.size > 0 || shouldAppendPendingStatusAssistant,
   };
 }
 
@@ -272,12 +354,16 @@ export function buildConversationStatusDecision({
   const status = bgTask.status || "";
   const terminalStatus = status === "completed" || status === "failed" || status === "cancelled" || status === "incomplete";
   const serverContent = statusData?.message?.content || "";
+  const serverReasoningContent = statusData?.message?.reasoning_content || statusData?.message?.reasoning || statusData?.message?.thinking || "";
   const hasContent = serverContent.trim().length > 0;
   const shouldResumePolling = hasTask && (!terminalStatus || !hasContent);
   const generationTaskId = Number(bgTask.id || bgTask.task_id || 0) || undefined;
   const lastSequence = Number(bgTask.last_sequence_number || 0) || 0;
   const currentMessageSequence = currentMessage.lastSequence || 0;
   const resumeAfterSequence = hasContent ? (lastSequence || currentMessageSequence) : currentMessageSequence;
+  const statusTimeline = parsePersistedStatusTimeline({
+    status_timeline: statusData?.message?.status_timeline || bgTask?.status_timeline,
+  } as ForkChatPersistedMessage);
   const completedAt = shouldResumePolling
     ? undefined
     : (hasTask && terminalStatus && hasContent && !currentMessage.completedAt
@@ -285,10 +371,15 @@ export function buildConversationStatusDecision({
       : currentMessage.completedAt);
   const patch: Partial<ConversationRestoreMessage> = {
     content: serverContent || currentMessage.content,
+    ...(serverReasoningContent || currentMessage.reasoningContent
+      ? { reasoningContent: serverReasoningContent || currentMessage.reasoningContent }
+      : {}),
     generationTaskId: generationTaskId || currentMessage.generationTaskId,
     lastSequence: lastSequence || currentMessage.lastSequence,
     completedAt,
-    activityStatus: shouldResumePolling ? busyActivityStatus : currentMessage.activityStatus,
+    activityStatus: shouldResumePolling ? busyActivityStatus : (terminalStatus ? undefined : currentMessage.activityStatus),
+    serverGenerationStatus: status || currentMessage.serverGenerationStatus,
+    statusTimeline: statusTimeline || currentMessage.statusTimeline,
   };
   return {
     hasTask,

@@ -19,6 +19,7 @@ const navItems = [
     icon: Shield,
     children: [
       { href: `${ADMIN_BASE}/beta-applications`, label: "内测申请" },
+      { href: `${ADMIN_BASE}/beta-feedback`, label: "内测反馈" },
       { href: `${ADMIN_BASE}/beta-invites`, label: "邀请码" },
       { href: `${ADMIN_BASE}/beta-configs`, label: "内测配置" },
       { href: `${ADMIN_BASE}/changelogs`, label: "更新日志" },
@@ -27,7 +28,7 @@ const navItems = [
       { href: `${ADMIN_BASE}/model-prices`, label: "供应商定价" },
     ],
   },
-  { href: `${ADMIN_BASE}/billing`, label: "支付", icon: CreditCard, disabled: true },
+  { href: `${ADMIN_BASE}/billing`, label: "定价", icon: CreditCard },
 ];
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
@@ -90,7 +91,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                 </div>
               );
             }
-            if (item.disabled) {
+            if ("disabled" in item && item.disabled) {
               return (
                 <div key={item.href} className="flex items-center justify-between rounded-xl px-3 py-2.5 text-sm text-text-tertiary opacity-60">
                   <span className="flex items-center gap-3"><Icon className="h-4 w-4" />{item.label}</span>

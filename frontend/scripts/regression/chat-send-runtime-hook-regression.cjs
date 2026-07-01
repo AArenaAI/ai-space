@@ -31,11 +31,25 @@ compileHook("useChatCompareSendRuntime.ts");
 const tmpFile = compileHook("useChatSendRuntime.ts");
 
 let singleRequestImpl = async () => {};
+let singleInitImpl = async () => ({
+  conversation_id: 42,
+  user_message_id: 501,
+  assistant_message_id: 502,
+  task_id: 900,
+  mappedAssistantMessage: { id: "502", role: "assistant", content: "", model: "m1", createdAt: 1000, serverMessageId: 502, generationTaskId: 900, serverGenerationStatus: "running" },
+});
 let compareRunImpl = async () => {};
+let compareInitImpl = async () => ({
+  conversation_id: 10,
+  user_message: { id: 501, conversation_id: 10, role: "user", content: "compare" },
+  group: { id: 601, conversation_id: 10, user_message_id: 501, group_models: ["m1", "m2"] },
+  compare_models: ["m1", "m2"],
+});
 let createConversationRequestImpl = async () => ({ id: 42, title: "created" });
 let realtimeGetImpl = () => undefined;
 let uuidCounter = 0;
 const events = [];
+global.fetch = async () => ({ ok: true, body: null });
 
 const moduleCache = new Map();
 function loadModule(file) {
@@ -44,11 +58,12 @@ function loadModule(file) {
   const module = { exports: {} };
   moduleCache.set(file, module);
   const localRequire = (specifier) => {
-    if (specifier === "react") return { useCallback: (fn) => fn };
+    if (specifier === "react") return { useCallback: (fn) => fn, useRef: (initialValue) => ({ current: initialValue }) };
     if (specifier === "uuid") return { v4: () => `uuid-${++uuidCounter}` };
     if (specifier === "@/lib/guestId") return { getGuestId: () => "guest-id" };
     if (specifier === "@/lib/streaming") return { realtimeGet: (...args) => realtimeGetImpl(...args) };
     if (specifier === "@/lib/chatCompareRunCoordinator") return { runCompareModels: (...args) => compareRunImpl(...args) };
+    if (specifier === "@/lib/chatCompareInitCoordinator") return { initCompareRun: (...args) => compareInitImpl(...args) };
     if (specifier === "@/lib/chatSingleSendCoordinator") {
       return {
         shouldStartSingleSend: ({ content, isRegenerate, attachments }) => Boolean((content || "").trim() || isRegenerate || (attachments && attachments.length)),
@@ -58,12 +73,15 @@ function loadModule(file) {
           const assistant = { id: createId(), role: "assistant", content: "", model: modelId, createdAt: now(), searchStatus: search ? "searching" : undefined };
           const user = skipUserMessage ? { id: createId(), role: "user", content, createdAt: now() } : { id: createId(), role: "user", content: content.trim(), files: attachments || [], createdAt: now() };
           return {
+            mode: skipUserMessage ? "skip-user" : "normal",
             assistantMessage: assistant,
+            userMessage: skipUserMessage ? undefined : user,
             contextMessages: [...messages, user],
             visibleMessages: skipUserMessage ? [assistant] : [user, assistant],
           };
         },
         applySingleSendMessagePlan: (prev, plan) => [...prev, ...plan.visibleMessages],
+        runSingleChatInit: (...args) => singleInitImpl(...args),
         runSingleChatRequest: (...args) => singleRequestImpl(...args),
       };
     }
@@ -122,6 +140,8 @@ function loadModule(file) {
     if (specifier === "@/lib/chatRequestBuilder") return { buildChatRequestHeaders: ({ token, guestId }) => token ? { Authorization: `Bearer ${token}` } : { "X-Guest-ID": guestId } };
     if (specifier === "@/lib/chatHistoryTransform") return { toModelMessages: (messages) => messages.map((m) => ({ role: m.role, content: m.content })) };
     if (specifier === "@/lib/chatInitialRealtime") return { initializeAssistantRealtime: () => {}, initializeAssistantRealtimeBatch: () => {} };
+    if (specifier === "@/lib/chatConversationCache") return { setConversationSnapshot: () => {} };
+    if (specifier === "@/lib/chatConversationPersistentCache") return { setPersistentConversationSnapshot: async () => {} };
     if (specifier === "@/lib/chatMessageFactory") {
       return {
         buildMessageFiles: (attachments) => (attachments || []).filter((a) => a.public_id).map((a) => ({ public_id: a.public_id, filename: a.filename, type: a.type || "file" })),
@@ -200,13 +220,22 @@ function makeRuntime(overrides = {}) {
 async function testSingleSendCreatesConversationAndRunsRequest() {
   events.length = 0;
   let request;
-  singleRequestImpl = async (opts) => { request = opts; };
+  singleInitImpl = async (opts) => { request = opts; return {
+    conversation_id: 42,
+    user_message_id: 501,
+    assistant_message_id: 502,
+    task_id: 900,
+    mappedAssistantMessage: { id: "502", role: "assistant", content: "", model: "m1", createdAt: 1000, serverMessageId: 502, generationTaskId: 900, serverGenerationStatus: "running" },
+  }; };
   createConversationRequestImpl = async ({ body }) => ({ id: 42, title: body.title });
   const { runtime, state, refs } = makeRuntime({ token: "tok" });
   await runtime.sendMessage("hello world", { enabled: true, effort: "low" }, false, true, 3, false, [{ filename: "a", content: "", type: "file", public_id: "p" }], ["f1"], "tpl");
   assert.equal(events.find((e) => e[0] === "created")?.[1], 42);
   assert.equal(state.messages.length, 2);
   assert.equal(state.messages[1].role, "assistant");
+  assert.equal(state.messages[1].id, "502");
+  assert.equal(state.messages[1].serverMessageId, 502);
+  assert.equal(state.messages[1].generationTaskId, 900);
   assert.equal(request.conversationId, 42);
   assert.equal(request.modelId, "m1");
   assert.deepEqual(request.messageFileIds, ["f1"]);
@@ -225,7 +254,7 @@ async function testSingleSendCreateFailureAppendsPlaceholder() {
 }
 
 async function testSingleSendRequestErrorPatchesAssistant() {
-  singleRequestImpl = async () => { throw new Error("boom"); };
+  singleInitImpl = async () => { throw new Error("boom"); };
   const { runtime, state } = makeRuntime({ currentConversation: 9 });
   await runtime.sendMessage("hello");
   assert.equal(state.messages.length, 2);
@@ -234,9 +263,25 @@ async function testSingleSendRequestErrorPatchesAssistant() {
 
 async function testCompareSendStartsCompareAndRunCoordinator() {
   let compareOpts;
+  let initOpts;
+  compareInitImpl = async (opts) => {
+    initOpts = opts;
+    return {
+      conversation_id: 10,
+      user_message: { id: 501, conversation_id: 10, role: "user", content: opts.content },
+      group: { id: 601, conversation_id: 10, user_message_id: 501, group_models: ["m1", "m2"] },
+      compare_models: ["m1", "m2"],
+    };
+  };
   compareRunImpl = async (opts) => {
     compareOpts = opts;
     opts.callbacks.onGroupContextResolved({ groupId: "g", userMessageId: "u", groupModels: ["m1", "m2"] });
+    opts.assistantMessages.forEach((assistant, index) => {
+      assistant.id = `assistant-task:${700 + index}`;
+      assistant.serverMessageId = 600 + index;
+      assistant.generationTaskId = 700 + index;
+      opts.callbacks.onRecoverableResult(assistant, { serverMessageId: 600 + index, generationTaskId: 700 + index, lastSequence: 0, content: "" });
+    });
     opts.callbacks.onRunError(opts.assistantMessages[0], new Error("recover"));
   };
   realtimeGetImpl = () => ({ serverMessageId: 202 });
@@ -244,8 +289,16 @@ async function testCompareSendStartsCompareAndRunCoordinator() {
   await runtime.sendCompareMessages("compare", ["m1", "missing", "m2"], { enabled: false }, true);
   assert.equal(state.isCompare, true);
   assert.deepEqual(state.compareModels, ["m1", "m2"]);
+  assert.deepEqual(initOpts.compareModelIds, ["m1", "m2"]);
+  assert.equal(initOpts.workspaceId, "7");
   assert.equal(compareOpts.conversationId, 10);
+  assert.deepEqual(compareOpts.explicitGroupContext, { groupId: 601, userMessageId: 501, groupModels: ["m1", "m2"] });
   assert.equal(compareOpts.assistantMessages.length, 2);
+  assert.deepEqual(compareOpts.assistantMessages.map((message) => message.groupId), [601, 601]);
+  assert.deepEqual(compareOpts.assistantMessages.map((message) => message.groupIndex), [0, 1]);
+  assert.deepEqual(state.messages.filter((message) => message.role === "assistant").map((message) => message.id), ["assistant-task:700", "assistant-task:701"]);
+  assert.deepEqual(state.messages.filter((message) => message.role === "assistant").map((message) => message.serverMessageId), [600, 601]);
+  assert.deepEqual(state.messages.filter((message) => message.role === "assistant").map((message) => message.generationTaskId), [700, 701]);
   assert.equal(refs.compareAbortControllersRef.current.length, 0);
   assert.deepEqual(startPolls[0], [10, compareOpts.assistantMessages[0].id, 202]);
 }

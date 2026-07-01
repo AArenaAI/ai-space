@@ -90,20 +90,28 @@ export function createStartBackgroundPollingAction(input: CreateStartBackgroundP
           const realtime = realtimeGet(localMessageId);
           const liveContent = realtime?.content || "";
           const currentTime = now();
-          input.setMessages((prev) => patchMessageById(prev, localMessageId, (message) =>
-            buildBackgroundPollingMessagePatch({
-              existingContent: message.content,
-              polledContent: pollState.content,
-              liveContent,
-              generationStartedAt: realtime?.generationStartedAt ?? message.generationStartedAt,
-              statusTimeline: realtime?.statusTimeline ?? message.statusTimeline,
-              streamActive,
-              serverMessageId,
-              isFinished: pollState.isFinished,
-              now: currentTime,
-              createBusyStatus: () => createBusyGeneratingStatus(translate),
-            })
-          ));
+          input.setMessages((prev) => prev.map((message) => {
+            const matchesLocalId = message.id === localMessageId;
+            const matchesServerId = Boolean(serverMessageId && message.serverMessageId === serverMessageId);
+            if (!matchesLocalId && !matchesServerId) return message;
+            return {
+              ...message,
+              ...buildBackgroundPollingMessagePatch({
+                existingContent: message.content,
+                polledContent: pollState.content,
+                polledReasoningContent: pollState.reasoningContent,
+                liveContent,
+                generationStartedAt: realtime?.generationStartedAt ?? message.generationStartedAt,
+                statusTimeline: realtime?.statusTimeline ?? message.statusTimeline,
+                streamActive,
+                serverMessageId,
+                isFinished: pollState.isFinished,
+                status: pollState.status,
+                now: currentTime,
+                createBusyStatus: () => createBusyGeneratingStatus(translate),
+              }),
+            };
+          }));
         },
         onFinished: (pollState) => {
           input.stopBackgroundPoller(localMessageId);

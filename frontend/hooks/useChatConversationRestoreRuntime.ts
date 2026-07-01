@@ -8,6 +8,7 @@ import {
   fetchConversationMessageStatus,
   fetchConversationRestore,
   findLastAssistantStatusTarget,
+  hasCompletedLastAssistantStatus,
   parseConversationCompareModels,
   resolveConversationSkillKey,
 } from "@/lib/chatConversationRestoreCoordinator";
@@ -21,6 +22,7 @@ import {
 import { patchMessageById } from "@/lib/chatMessageStatePatch";
 import {
   areConversationMessagesEquivalent,
+  buildConversationMessageSnapshotKey,
   clearConversationSnapshotCache,
   getConversationSnapshot,
   invalidateConversationSnapshot,
@@ -38,6 +40,7 @@ import {
   createGeneratingStatus,
 } from "@/lib/chatActivityStatus";
 import type { ChatModel, Message } from "@/lib/chatTypes";
+import { buildGroupViewsFromMessages } from "@/lib/chatForkCoordinator";
 import type { TaskStreamActiveState } from "@/hooks/useChatTaskStreamRuntime";
 
 type AbortReason = "user" | "navigation" | null;
@@ -77,6 +80,12 @@ type StartTaskEventStream = (
   generationTaskId?: number
 ) => void;
 
+type StartBackgroundPolling = (
+  convId: number | undefined,
+  localMessageId: string,
+  serverMessageId?: number
+) => void;
+
 type ApplyCachedSnapshotOptions = {
   snapshot: CachedConversationSnapshot;
   fallbackSkillKey?: string;
@@ -93,6 +102,77 @@ type ApplyCachedSnapshotOptions = {
   setEffectiveSkillKey: Dispatch<SetStateAction<string | undefined>>;
   setIsLoadingHistory: Dispatch<SetStateAction<boolean>>;
 };
+
+function getAssistantDedupKey(message: Message): string | undefined {
+  if (message.role !== "assistant") return undefined;
+  if (message.serverMessageId) return `server:${message.serverMessageId}`;
+  if (message.generationTaskId) return `task:${message.generationTaskId}`;
+  return undefined;
+}
+
+function shouldPreferDedupCandidate(candidate: Message, existing: Message): boolean {
+  const candidateCompleted = Boolean(candidate.completedAt || candidate.serverGenerationStatus === "completed");
+  const existingCompleted = Boolean(existing.completedAt || existing.serverGenerationStatus === "completed");
+  if (candidateCompleted !== existingCompleted) return candidateCompleted;
+
+  const candidateGenerating = Boolean(candidate.activityStatus || candidate.generationTaskId || candidate.serverGenerationStatus === "running" || candidate.serverGenerationStatus === "streaming");
+  const existingGenerating = Boolean(existing.activityStatus || existing.generationTaskId || existing.serverGenerationStatus === "running" || existing.serverGenerationStatus === "streaming");
+  const candidateCanonical = candidate.serverMessageId && candidate.id === String(candidate.serverMessageId);
+  const existingCanonical = existing.serverMessageId && existing.id === String(existing.serverMessageId);
+  if (!candidateCompleted && !existingCompleted && (candidateGenerating || existingGenerating)) {
+    // While a task is still running, preserve the already-rendered local row id
+    // so route-switch restore does not remount the assistant placeholder and
+    // visually refresh old rows. The stream/polling layers patch server ids and
+    // content onto this stable row; canonical server ids can win after terminal.
+    if (existingCanonical && !candidateCanonical) return true;
+    if (!existingCanonical && candidateCanonical) return false;
+    if (existingGenerating) return false;
+    return true;
+  }
+
+  if (candidateCanonical !== existingCanonical) return Boolean(candidateCanonical);
+  return (candidate.content || "").length >= (existing.content || "").length;
+}
+
+function dedupeConversationMessages(messages: Message[]): Message[] {
+  const result: Message[] = [];
+  const seen = new Map<string, number>();
+  messages.forEach((message) => {
+    const key = getAssistantDedupKey(message);
+    if (!key) {
+      result.push(message);
+      return;
+    }
+    const existingIndex = seen.get(key);
+    if (existingIndex === undefined) {
+      seen.set(key, result.length);
+      result.push(message);
+      return;
+    }
+    if (shouldPreferDedupCandidate(message, result[existingIndex])) {
+      result[existingIndex] = message;
+    }
+  });
+  return result;
+}
+
+function reuseStableMessageObjects(previous: Message[], next: Message[]): Message[] {
+  if (!previous.length || !next.length) return next;
+  const previousByServerOrId = new Map<string, Message>();
+  previous.forEach((message) => {
+    previousByServerOrId.set(String(message.serverMessageId ?? message.id), message);
+  });
+  let changed = false;
+  const reused = next.map((message) => {
+    const previousMessage = previousByServerOrId.get(String(message.serverMessageId ?? message.id));
+    if (previousMessage && buildConversationMessageSnapshotKey(previousMessage) === buildConversationMessageSnapshotKey(message)) {
+      changed = true;
+      return previousMessage;
+    }
+    return message;
+  });
+  return changed ? reused : next;
+}
 
 function applyCachedSnapshot({
   snapshot,
@@ -112,9 +192,14 @@ function applyCachedSnapshot({
 }: ApplyCachedSnapshotOptions) {
   setIsLoadingHistory(false);
   setConversationTitle(snapshot.title || "");
-  setMessages(snapshot.messages);
+  let appliedMessages = dedupeConversationMessages(snapshot.messages);
+  setMessages((previous) => {
+    const next = reuseStableMessageObjects(previous, appliedMessages);
+    appliedMessages = next;
+    return areConversationMessagesEquivalent(previous, next) ? previous : next;
+  });
   setLoadedPersistedMessages(snapshot.loadedPersistedMessages);
-  setGroupViews(snapshot.groupViews);
+  setGroupViews(buildGroupViewsFromMessages(appliedMessages));
   setIsLoading(snapshot.isLoading);
   if (typeof snapshot.totalMessages === "number") {
     setTotalMessages(snapshot.totalMessages);
@@ -141,6 +226,7 @@ export type UseChatConversationRestoreRuntimeOptions = {
   compareAbortControllersRef: MutableRefObject<AbortController[]>;
   abortReasonRef: MutableRefObject<AbortReason>;
   activeTaskStreamsRef: MutableRefObject<Record<string, TaskStreamActiveState>>;
+  pendingLocalAssistantsRef?: MutableRefObject<Record<string, { convId?: number; message: Message }>>;
   setMessages: Dispatch<SetStateAction<Message[]>>;
   setConversationTitle: Dispatch<SetStateAction<string>>;
   setLoadedPersistedMessages: Dispatch<SetStateAction<number>>;
@@ -156,12 +242,14 @@ export type UseChatConversationRestoreRuntimeOptions = {
   applyJustCreatedNavigationLifecycle: (plan: JustCreatedConversationPlan) => void;
   applyLoadExistingNavigationLifecycle: (plan: ExistingConversationPlan) => void;
   startTaskEventStream: StartTaskEventStream;
+  startBackgroundPolling: StartBackgroundPolling;
   translate: (key: string) => string;
   getToken?: () => string | null;
   createId?: () => string;
   fetchRestore?: typeof fetchConversationRestore;
   fetchMessageStatus?: typeof fetchConversationMessageStatus;
   fetchMessageCount?: typeof fetchConversationMessageCount;
+  bootstrapSnapshot?: CachedConversationSnapshot;
 };
 
 export function useChatConversationRestoreRuntime({
@@ -177,6 +265,7 @@ export function useChatConversationRestoreRuntime({
   compareAbortControllersRef,
   abortReasonRef,
   activeTaskStreamsRef,
+  pendingLocalAssistantsRef,
   setMessages,
   setConversationTitle,
   setLoadedPersistedMessages,
@@ -192,12 +281,14 @@ export function useChatConversationRestoreRuntime({
   applyJustCreatedNavigationLifecycle,
   applyLoadExistingNavigationLifecycle,
   startTaskEventStream,
+  startBackgroundPolling,
   translate,
   getToken = () => localStorage.getItem("token"),
   createId = uuidv4,
   fetchRestore = fetchConversationRestore,
   fetchMessageStatus = fetchConversationMessageStatus,
   fetchMessageCount = fetchConversationMessageCount,
+  bootstrapSnapshot,
 }: UseChatConversationRestoreRuntimeOptions) {
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -244,6 +335,7 @@ export function useChatConversationRestoreRuntime({
       if (navigationPlan.shouldSetLoadingHistory) setIsLoadingHistory(navigationPlan.loadingHistory);
       applyNavigationResetLifecycle(navigationPlan);
       if (navigationPlan.shouldResetMessages) setMessages([]);
+      setIsLoading(false);
       setIsCompare(navigationPlan.isCompare);
       setCompareModels(navigationPlan.compareModels);
       setEffectiveSkillKey(navigationPlan.effectiveSkillKey);
@@ -279,11 +371,16 @@ export function useChatConversationRestoreRuntime({
     const authToken: string = token as string;
     emitConversationSwitchPerformanceEvent("start", { conversationId: loadConversationId, loadSeq, stage: "start" });
 
-    const cachedSnapshot = getConversationSnapshot(loadConversationId);
+    const cachedSnapshot = bootstrapSnapshot?.conversationId === loadConversationId
+      ? bootstrapSnapshot
+      : getConversationSnapshot(loadConversationId);
+    const cachedSnapshotSource: ConversationSwitchPerformanceDetail["snapshotSource"] = cachedSnapshot === bootstrapSnapshot ? "backend" : "memory";
+    const cachedDisplayMode: ConversationSwitchPerformanceDetail["displayMode"] = cachedSnapshot === bootstrapSnapshot ? "backend" : "cached";
     if (navigationPlan.shouldSetLoadingHistory && !cachedSnapshot) {
       setIsLoadingHistory(navigationPlan.loadingHistory);
     }
     applyLoadExistingNavigationLifecycle(navigationPlan);
+    setIsLoading(false);
 
     let hasDisplayedSnapshot = false;
     let displayedSnapshotSource: ConversationSwitchPerformanceDetail["snapshotSource"];
@@ -291,14 +388,14 @@ export function useChatConversationRestoreRuntime({
     let persistentSnapshotReady: Promise<void> = Promise.resolve();
     if (cachedSnapshot) {
       hasDisplayedSnapshot = true;
-      displayedSnapshotSource = "memory";
+      displayedSnapshotSource = cachedSnapshotSource;
       emitConversationSwitchPerformanceEvent("first-snapshot", {
         conversationId: loadConversationId,
         loadSeq,
-        source: "memory",
+        source: cachedSnapshotSource,
         stage: "cache",
-        displayMode: "cached",
-        snapshotSource: "memory",
+        displayMode: cachedDisplayMode,
+        snapshotSource: cachedSnapshotSource,
         durationMs: elapsedSinceSwitchStart(),
         messageCount: cachedSnapshot.messages.length,
         totalMessages: cachedSnapshot.totalMessages,
@@ -411,7 +508,13 @@ export function useChatConversationRestoreRuntime({
           conversationId: loadConversationId,
           token: authToken,
           signal: loadController.signal,
-          snapshotVersion: displayedSnapshotVersion,
+          // Client-side memory/IndexedDB snapshots are optimistic UI caches.
+          // They can contain an in-flight reasoning-only message while sharing
+          // the latest backend snapshot_version, so allowing a 304 here can keep
+          // stale reasoning UI and hide the persisted answer until hard refresh.
+          // Only a backend/dynamic-shell snapshot is authoritative enough for
+          // conditional revalidation.
+          snapshotVersion: displayedSnapshotSource === "backend" ? displayedSnapshotVersion : undefined,
         });
       })
       .then((data) => {
@@ -464,7 +567,64 @@ export function useChatConversationRestoreRuntime({
           activeActivityStatus: createGeneratingStatus(translate),
         });
         if (restoreState) {
-          const { loadedMessages, mergedMessages, groupViews, activeByServerMessageId } = restoreState;
+          const { loadedMessages, activeByServerMessageId } = restoreState;
+          const backendLastAssistantCompleted = hasCompletedLastAssistantStatus(data.last_assistant_status) && activeByServerMessageId.size === 0;
+          if (backendLastAssistantCompleted && pendingLocalAssistantsRef) {
+            Object.entries(pendingLocalAssistantsRef.current).forEach(([id, entry]) => {
+              if (entry.convId === loadConversationId) delete pendingLocalAssistantsRef.current[id];
+            });
+          }
+          const hasBackendRunningAssistant = restoreState.mergedMessages.some((item) =>
+            item.role === "assistant" &&
+            Boolean(item.serverMessageId || item.generationTaskId) &&
+            !item.completedAt &&
+            !item.stopped &&
+            !item.errorCode &&
+            (item.serverGenerationStatus === "running" || item.serverGenerationStatus === "streaming" || item.serverGenerationStatus === "queued" || Boolean(item.generationTaskId))
+          );
+          const pendingLocalMessagesFromRef = backendLastAssistantCompleted ? [] : Object.entries(pendingLocalAssistantsRef?.current || {})
+            .filter(([, entry]) => entry.convId === loadConversationId)
+            .map(([id, entry]) => ({ id, message: entry.message }))
+            .filter(({ id, message }) => {
+              if (restoreState.mergedMessages.some((item) => item.id === message.id)) return false;
+              const supersededByServerAssistant = restoreState.mergedMessages.some((item) =>
+                item.role === "assistant" &&
+                (Boolean(item.content?.trim() || item.completedAt || item.serverGenerationStatus === "completed") || (hasBackendRunningAssistant && !message.serverMessageId && !message.generationTaskId)) &&
+                (item.createdAt || 0) >= (message.createdAt || 0) - 5000
+              );
+              if (supersededByServerAssistant) {
+                if (pendingLocalAssistantsRef) delete pendingLocalAssistantsRef.current[id];
+                return false;
+              }
+              return true;
+            })
+            .map(({ message }) => message);
+          const pendingLocalMessagesById = new Map(pendingLocalMessagesFromRef.map((message) => [message.id, message]));
+          const baseMergedMessages = restoreState.mergedMessages as Message[];
+          const collectPendingMessages = (sourceMessages: Message[] | undefined) => {
+            if (backendLastAssistantCompleted) return;
+            (sourceMessages || []).forEach((message) => {
+              if (
+                message.role === "assistant" &&
+                !message.content?.trim() &&
+                !message.completedAt &&
+                !message.stopped &&
+                !message.errorCode &&
+                !baseMergedMessages.some((item) => item.id === message.id)
+              ) {
+                pendingLocalMessagesById.set(message.id, message);
+              }
+            });
+          };
+          collectPendingMessages(cachedSnapshot?.messages as Message[] | undefined);
+          const mergePendingMessages = (prevMessages: Message[]) => {
+            if (backendLastAssistantCompleted) return baseMergedMessages;
+            collectPendingMessages(prevMessages);
+            return pendingLocalMessagesById.size > 0
+              ? [...baseMergedMessages, ...Array.from(pendingLocalMessagesById.values())]
+              : baseMergedMessages;
+          };
+          let mergedMessages = baseMergedMessages;
           if (!hasDisplayedSnapshot) {
             hasDisplayedSnapshot = true;
             displayedSnapshotSource = "backend";
@@ -480,12 +640,22 @@ export function useChatConversationRestoreRuntime({
               totalMessages: resolvedTotalMessages,
             });
           }
-          setMessages((prev) =>
-            areConversationMessagesEquivalent(prev, mergedMessages as Message[]) ? prev : (mergedMessages as Message[])
+          setMessages((prev) => {
+            const nextMessages = reuseStableMessageObjects(prev, dedupeConversationMessages(mergePendingMessages(prev) as Message[]));
+            mergedMessages = nextMessages;
+            return areConversationMessagesEquivalent(prev, nextMessages) ? prev : nextMessages;
+          });
+          const hasPendingLocalMessages = !backendLastAssistantCompleted && mergedMessages.some((message) =>
+            message.role === "assistant" &&
+            !message.content?.trim() &&
+            !message.completedAt &&
+            !message.stopped &&
+            !message.errorCode
           );
+          const groupViews = buildGroupViewsFromMessages(mergedMessages);
           setLoadedPersistedMessages(loadedMessages.length);
           setGroupViews(groupViews);
-          setIsLoading(restoreState.isLoading);
+          setIsLoading(restoreState.isLoading || hasPendingLocalMessages);
           const snapshot: CachedConversationSnapshot = {
             conversationId: loadConversationId,
             title: data.title || "",
@@ -493,7 +663,7 @@ export function useChatConversationRestoreRuntime({
             loadedPersistedMessages: loadedMessages.length,
             totalMessages: resolvedTotalMessages,
             groupViews,
-            isLoading: restoreState.isLoading,
+            isLoading: restoreState.isLoading || hasPendingLocalMessages,
             isCompare: !!data.compare,
             compareModels: parseConversationCompareModels(data.compare_models),
             model: data.model,
@@ -516,9 +686,9 @@ export function useChatConversationRestoreRuntime({
             totalMessages: resolvedTotalMessages,
           });
 
-          const lastAssistant = findLastAssistantStatusTarget(mergedMessages, activeByServerMessageId);
+          const lastAssistant = findLastAssistantStatusTarget(restoreState.mergedMessages as any, activeByServerMessageId);
           const applyStatusData = (statusData: NonNullable<typeof data.last_assistant_status>) => {
-            if (!lastAssistant || !isLatestLoad() || loadController.signal.aborted) return;
+            if (!lastAssistant || !isLatestLoad() || loadController.signal.aborted) return undefined;
             emitConversationSwitchPerformanceEvent("message-status", {
               conversationId: loadConversationId,
               loadSeq,
@@ -535,19 +705,16 @@ export function useChatConversationRestoreRuntime({
 
             if (decision.shouldResumePolling && decision.resume) {
               setIsLoading(true);
-              startTaskEventStream(
-                loadConversationId,
-                lastAssistant.id,
-                lastAssistant.serverMessageId,
-                decision.resume.lastSequence,
-                decision.resume.initialContent,
-                decision.resume.generationTaskId
-              );
+              startBackgroundPolling(loadConversationId, lastAssistant.id, lastAssistant.serverMessageId);
             }
+            return decision;
           };
           if (lastAssistant?.serverMessageId) {
             if (data.last_assistant_status) {
-              applyStatusData(data.last_assistant_status);
+              const decision = applyStatusData(data.last_assistant_status);
+              if (!decision?.hasTask) {
+                startBackgroundPolling(loadConversationId, lastAssistant.id, lastAssistant.serverMessageId);
+              }
             } else {
               fetchMessageStatus({
                 apiBaseUrl,
@@ -557,7 +724,14 @@ export function useChatConversationRestoreRuntime({
                 signal: loadController.signal,
               })
                 .then((statusData) => {
-                  if (statusData) applyStatusData(statusData);
+                  if (statusData) {
+                    const decision = applyStatusData(statusData);
+                    if (!decision?.hasTask && isLatestLoad() && !loadController.signal.aborted) {
+                      startBackgroundPolling(loadConversationId, lastAssistant.id, lastAssistant.serverMessageId);
+                    }
+                  } else if (isLatestLoad() && !loadController.signal.aborted) {
+                    startBackgroundPolling(loadConversationId, lastAssistant.id, lastAssistant.serverMessageId);
+                  }
                 })
                 .catch((err: any) => {
                   if (loadController.signal.aborted || err?.name === "AbortError") return;
@@ -583,10 +757,23 @@ export function useChatConversationRestoreRuntime({
       })
       .catch((err) => {
         if (!isLatestLoad() || loadController.signal.aborted || err?.name === "AbortError") return;
-        setMessages([]);
+        // Revalidation is a background freshness pass. A transient bootstrap/restore
+        // failure (notably 429 during rapid mid-generation switching) must never
+        // blank an already displayed conversation or discard an in-memory snapshot.
         setIsLoadingHistory(false);
+        if (hasDisplayedSnapshot) {
+          emitConversationSwitchPerformanceEvent("restore-failed-preserved-snapshot", {
+            conversationId: loadConversationId,
+            loadSeq,
+            source: "backend",
+            stage: "revalidate",
+            displayMode: "background",
+            snapshotSource: displayedSnapshotSource ?? "miss",
+            durationMs: elapsedSinceSwitchStart(),
+          });
+        }
       });
 
     return () => loadController.abort();
-  }, [conversationId, modelsKey, setSelectedModel, skillKey]);
+  }, [conversationId, modelsKey, setSelectedModel, skillKey, bootstrapSnapshot]);
 }

@@ -3,12 +3,12 @@ const assert = require("node:assert/strict");
 const { chromium } = require("playwright");
 
 const baseUrl = process.env.CHAT_LOAD_MORE_HISTORY_FIXTURE_BASE_URL || "http://127.0.0.1:3000";
-const scrollerSelector = '[data-testid="chat-history-scroll-container"], [data-testid="virtuoso-scroller"]';
+const scrollerSelector = '[data-testid="chat-history-scroll-container"]';
 
 async function readMarker(page, markerId) {
   return page.evaluate((id) => {
     const marker = document.querySelector(`[data-message-id="${id}"]`);
-    const scroller = document.querySelector('[data-testid="chat-history-scroll-container"], [data-testid="virtuoso-scroller"]');
+    const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
     const rows = document.querySelectorAll('[data-chat-message-row="true"]').length;
     const fixture = document.querySelector('[data-testid="chat-load-more-history-fixture"]');
     if (!marker || !scroller) return { found: false, rows, scrollTop: scroller?.scrollTop ?? -1, loadedPages: Number(fixture?.getAttribute("data-loaded-pages") || "0") };
@@ -37,7 +37,7 @@ async function readMarker(page, markerId) {
 
 async function readFirstVisibleMarkerId(page) {
   return page.evaluate(() => {
-    const scroller = document.querySelector('[data-testid="chat-history-scroll-container"], [data-testid="virtuoso-scroller"]');
+    const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
     const scrollerRect = scroller?.getBoundingClientRect();
     if (!scrollerRect) return null;
     return Array.from(document.querySelectorAll('[data-chat-message-row="true"]'))
@@ -53,11 +53,10 @@ async function readWindowState(page) {
   return page.evaluate(() => {
     const list = document.querySelector('[data-testid="chat-message-list"]');
     const fixture = document.querySelector('[data-testid="chat-load-more-history-fixture"]');
-    const scroller = document.querySelector('[data-testid="chat-history-scroll-container"], [data-testid="virtuoso-scroller"]');
+    const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
     return {
       visibleMessageCount: Number(list?.getAttribute("data-visible-message-count") || "0"),
       allVisibleMessageCount: Number(list?.getAttribute("data-all-visible-message-count") || "0"),
-      hiddenLocalMessageCount: Number(list?.getAttribute("data-hidden-local-message-count") || "0"),
       loadedPages: Number(fixture?.getAttribute("data-loaded-pages") || "0"),
       loadingMore: fixture?.getAttribute("data-loading-more") === "true",
       rowCount: document.querySelectorAll('[data-chat-message-row="true"]').length,
@@ -85,7 +84,7 @@ async function readWindowState(page) {
     await page.waitForSelector('[data-testid="chat-load-more-history-fixture"]', { state: "attached", timeout: 20_000 });
     await page.waitForSelector(scrollerSelector, { state: "attached", timeout: 20_000 });
     await page.waitForFunction(() => {
-      const scroller = document.querySelector('[data-testid="chat-history-scroll-container"], [data-testid="virtuoso-scroller"]');
+      const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
       const rect = scroller?.getBoundingClientRect();
       return rect && rect.width > 0 && rect.height > 0;
     }, null, { timeout: 20_000 });
@@ -93,10 +92,9 @@ async function readWindowState(page) {
 
     const initialWindow = await readWindowState(page);
     assert.ok(initialWindow.visibleMessageCount > 0, `initial window should render messages: ${JSON.stringify(initialWindow)}`);
-    assert.equal(initialWindow.hiddenLocalMessageCount, 0, `normal chat DOM mode should not keep a second local hidden-message window: ${JSON.stringify(initialWindow)}`);
 
     await page.evaluate(() => {
-      const scroller = document.querySelector('[data-testid="chat-history-scroll-container"], [data-testid="virtuoso-scroller"]');
+      const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
       if (!scroller) throw new Error("missing scroller");
       scroller.scrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight - 2600);
       scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
@@ -107,7 +105,7 @@ async function readWindowState(page) {
     await page.mouse.move(scrollerBox.x + scrollerBox.width / 2, scrollerBox.y + scrollerBox.height / 2);
     for (let i = 0; i < 80; i += 1) {
       const state = await page.evaluate(() => {
-        const scroller = document.querySelector('[data-testid="chat-history-scroll-container"], [data-testid="virtuoso-scroller"]');
+        const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
         const fixture = document.querySelector('[data-testid="chat-load-more-history-fixture"]');
         return {
           scrollTop: scroller?.scrollTop ?? 0,
@@ -144,7 +142,6 @@ async function readWindowState(page) {
     assert.ok(after.found, "marker should still be rendered after loading remote older history");
     assert.ok(afterWindow.loadedPages >= 1, `top reach should request remote older pages in normal DOM mode: ${JSON.stringify(afterWindow)}`);
     assert.ok(afterWindow.visibleMessageCount > initialWindow.visibleMessageCount, `remote history should prepend messages: before ${JSON.stringify(initialWindow)}, after ${JSON.stringify(afterWindow)}`);
-    assert.equal(afterWindow.hiddenLocalMessageCount, 0, `normal DOM mode should still avoid local hidden-message window after remote prepend: ${JSON.stringify(afterWindow)}`);
     assert.ok(after.scrollHeight > before.scrollHeight, `loaded remote history should increase scroll height: before ${before.scrollHeight}, after ${after.scrollHeight}`);
     const topDelta = Math.abs(after.visibleTop - before.visibleTop);
     assert.ok(topDelta < 160, `marker should remain reasonably anchored after remote prepend, moved ${topDelta}px (before ${before.visibleTop}, after ${after.visibleTop})`);

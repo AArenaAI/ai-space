@@ -17,6 +17,7 @@ import {
   patchMessageById,
 } from "@/lib/chatMessageStatePatch";
 import type { Message } from "@/lib/chatTypes";
+import { getConversationSnapshot, patchConversationSnapshot } from "@/lib/chatConversationCache";
 
 export type TaskStreamActiveState = {
   convId?: number;
@@ -32,6 +33,20 @@ type TaskStreamEventHandler = {
   getLatestSequence: () => number;
 };
 
+function patchSnapshotTaskMessage(convId: number | undefined, localMessageId: string, patch: Partial<Message>) {
+  if (!convId) return;
+  const snapshot = getConversationSnapshot(convId);
+  if (!snapshot) return;
+  patchConversationSnapshot(convId, {
+    messages: snapshot.messages.map((message) =>
+      message.id === localMessageId || String(message.serverMessageId || "") === String(patch.serverMessageId || "")
+        ? { ...message, ...patch }
+        : message
+    ),
+    updatedAt: Date.now(),
+  });
+}
+
 type CreateTaskStreamEventHandler = typeof defaultCreateTaskStreamEventHandler;
 type RunTaskEventStream = typeof defaultRunTaskEventStream;
 
@@ -45,6 +60,7 @@ type StartTaskEventStreamDeps = {
   apiBaseUrl: string;
   taskStreamsRef: MutableRefObject<Record<string, AbortController>>;
   activeTaskStreamsRef: MutableRefObject<Record<string, TaskStreamActiveState>>;
+  appliedTaskSequencesRef?: MutableRefObject<Record<string, Set<number>>>;
   setMessages: Dispatch<SetStateAction<Message[]>>;
   setIsLoading: Dispatch<SetStateAction<boolean>>;
   startBackgroundPolling: StartBackgroundPolling;
@@ -101,6 +117,7 @@ export function createStartTaskEventStreamAction({
   apiBaseUrl,
   taskStreamsRef,
   activeTaskStreamsRef,
+  appliedTaskSequencesRef = { current: {} },
   setMessages,
   setIsLoading,
   startBackgroundPolling,
@@ -124,8 +141,25 @@ export function createStartTaskEventStreamAction({
     generationTaskId?: number
   ) => {
     if (!convId || (!serverMessageId && !generationTaskId) || taskStreamsRef.current[localMessageId]) return;
+    const existingStreamEntry = Object.entries(activeTaskStreamsRef.current).find(([id, state]) =>
+      id !== localMessageId && Boolean(
+        (generationTaskId && state.generationTaskId === generationTaskId) ||
+        (serverMessageId && state.serverMessageId === serverMessageId)
+      )
+    );
+    if (existingStreamEntry) {
+      const [existingLocalMessageId] = existingStreamEntry;
+      taskStreamsRef.current[existingLocalMessageId]?.abort();
+      delete taskStreamsRef.current[existingLocalMessageId];
+      delete activeTaskStreamsRef.current[existingLocalMessageId];
+    }
     activeTaskStreamsRef.current[localMessageId] = { convId, serverMessageId, generationTaskId, lastSequence: after || 0, content: initialContent || "" };
     setIsLoading(true);
+
+    const sequenceKey = `${generationTaskId || serverMessageId || localMessageId}`;
+    if (!appliedTaskSequencesRef.current[sequenceKey]) {
+      appliedTaskSequencesRef.current[sequenceKey] = new Set<number>();
+    }
 
     const token = getToken();
     const headers: Record<string, string> = {};
@@ -137,6 +171,14 @@ export function createStartTaskEventStreamAction({
 
     const controller = createAbortController();
     taskStreamsRef.current[localMessageId] = controller;
+    if (initialContent && !realtimeGet(localMessageId)?.content) {
+      realtimeUpdate(localMessageId, {
+        content: initialContent,
+        serverMessageId,
+        generationTaskId,
+        lastSequence: after || 0,
+      });
+    }
 
     const taskEventHandler: TaskStreamEventHandler = createTaskStreamEventHandler({
       convId,
@@ -158,6 +200,12 @@ export function createStartTaskEventStreamAction({
         streamGet: () => realtimeGet(localMessageId)?.content || "",
         realtimeGet: () => realtimeGet(localMessageId),
         realtimeUpdate: (patch: Partial<RealtimeData>) => realtimeUpdate(localMessageId, patch),
+        shouldApplySequence: (sequence: number) => {
+          const applied = appliedTaskSequencesRef.current[sequenceKey] || (appliedTaskSequencesRef.current[sequenceKey] = new Set<number>());
+          if (applied.has(sequence)) return false;
+          applied.add(sequence);
+          return true;
+        },
         startBackgroundPolling: (resolvedServerMessageId: number | undefined) => {
           if (resolvedServerMessageId) {
             startBackgroundPolling(convId, localMessageId, resolvedServerMessageId);
@@ -182,30 +230,50 @@ export function createStartTaskEventStreamAction({
           startBackgroundPolling(convId, localMessageId, serverMessageId);
         }
       } finally {
+        if (controller.signal.aborted) {
+          delete taskStreamsRef.current[localMessageId];
+          return;
+        }
         const accumulated = taskEventHandler.getAccumulated();
         const latestSequence = taskEventHandler.getLatestSequence();
         const finalData = realtimeGet(localMessageId);
         if (shouldSyncTaskStreamFinalMessage({ hasFinalData: Boolean(finalData), accumulated })) {
-          setMessages((prev) => patchMessageById(prev, localMessageId, (m) =>
-            applyFinalRealtimeDataToMessage(m, {
-              finalContent: accumulated,
-              finalData,
-              latestSequence,
-              forceContentFallback: true,
-            })
-          ));
+          if (serverMessageId) {
+            setMessages((prev) => patchMessageById(prev, localMessageId, (m) => ({
+              serverMessageId,
+              generationTaskId,
+              lastSequence: Math.max(m.lastSequence || 0, latestSequence),
+            })));
+          } else {
+            setMessages((prev) => patchMessageById(prev, localMessageId, (m) =>
+              applyFinalRealtimeDataToMessage(m, {
+                finalContent: accumulated,
+                finalData,
+                latestSequence,
+                forceContentFallback: true,
+              })
+            ));
+          }
+          patchSnapshotTaskMessage(convId, localMessageId, {
+            ...(serverMessageId ? {} : { content: accumulated }),
+            serverMessageId,
+            lastSequence: latestSequence,
+            generationTaskId,
+          });
         }
-        realtimeMarkCompleted(localMessageId);
-        const completedRealtimeData = realtimeGet(localMessageId);
-        if (completedRealtimeData?.statusTimeline?.length) {
-          setMessages((prev) => patchMessageById(prev, localMessageId, (m) =>
-            applyFinalRealtimeDataToMessage(m, {
-              finalContent: accumulated,
-              finalData: completedRealtimeData,
-              latestSequence,
-              forceContentFallback: true,
-            })
-          ));
+        if (!serverMessageId) {
+          realtimeMarkCompleted(localMessageId);
+          const completedRealtimeData = realtimeGet(localMessageId);
+          if (completedRealtimeData?.statusTimeline?.length) {
+            setMessages((prev) => patchMessageById(prev, localMessageId, (m) =>
+              applyFinalRealtimeDataToMessage(m, {
+                finalContent: accumulated,
+                finalData: completedRealtimeData,
+                latestSequence,
+                forceContentFallback: true,
+              })
+            ));
+          }
         }
         delete taskStreamsRef.current[localMessageId];
         if (shouldStartTaskStreamFallbackPolling({ serverMessageId })) {
@@ -234,12 +302,14 @@ export function useChatTaskStreamRuntime({
   translate,
 }: UseChatTaskStreamRuntimeOptions) {
   const activeTaskStreamsRef = useRef<Record<string, TaskStreamActiveState>>({});
+  const appliedTaskSequencesRef = useRef<Record<string, Set<number>>>({});
 
   const startTaskEventStream = useCallback(
     createStartTaskEventStreamAction({
       apiBaseUrl,
       taskStreamsRef,
       activeTaskStreamsRef,
+      appliedTaskSequencesRef,
       setMessages,
       setIsLoading,
       startBackgroundPolling,

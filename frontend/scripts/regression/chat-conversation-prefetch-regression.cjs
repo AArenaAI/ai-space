@@ -55,6 +55,20 @@ function loadModule(file) {
         },
       };
     }
+    if (specifier === "@/lib/chatBootstrapCoordinator") {
+      return {
+        fetchChatBootstrap: async ({ conversationId }) => ({
+          conversation: { id: conversationId, title: `Bootstrap ${conversationId}`, model: "m2", compare: true, compare_models: ["m1", "m2"], skill_key: "bootstrap" },
+          snapshot: {
+            total: 2,
+            messages: [
+              { id: conversationId * 10 + 1, role: "user", content: `bu-${conversationId}` },
+              { id: conversationId * 10 + 2, role: "assistant", content: `ba-${conversationId}`, group_models: ["m1", "m2"], user_message_id: conversationId * 10 + 1 },
+            ],
+          },
+        }),
+      };
+    }
     if (specifier.startsWith("@/")) return {};
     return require(specifier);
   };
@@ -113,6 +127,22 @@ async function testPrefetchWritesSnapshot() {
   assert.equal(snap.messages.length, 2);
   assert.equal(snap.totalMessages, 2);
   assert.equal(persistentSnapshots.get(7).messages.length, 2);
+}
+
+async function testDefaultPrefetchUsesBootstrapPayload() {
+  reset();
+  const ok = await prefetch.prefetchConversationSnapshot({
+    conversationId: 8,
+    token: "token",
+  });
+  assert.equal(ok, true);
+  const snap = cache.getConversationSnapshot(8);
+  assert.equal(snap.title, "Bootstrap 8");
+  assert.equal(snap.model, "m2");
+  assert.equal(snap.isCompare, true);
+  assert.deepEqual(snap.compareModels, ["m1", "m2"]);
+  assert.equal(snap.messages.length, 2);
+  assert.equal(snap.totalMessages, 2);
 }
 
 async function testSkipWhenCachedUnlessForced() {
@@ -205,6 +235,7 @@ async function testConcurrentLimit() {
 
 (async () => {
   await testPrefetchWritesSnapshot();
+  await testDefaultPrefetchUsesBootstrapPayload();
   await testSkipWhenCachedUnlessForced();
   await testInFlightDedupes();
   await testConcurrentLimit();

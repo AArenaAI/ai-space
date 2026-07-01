@@ -195,6 +195,7 @@ export default function ChatConversationSwitchCacheFixture() {
     applyJustCreatedNavigationLifecycle: lifecycle.applyJustCreatedNavigationLifecycle,
     applyLoadExistingNavigationLifecycle: lifecycle.applyLoadExistingNavigationLifecycle,
     startTaskEventStream: () => {},
+    startBackgroundPolling: () => {},
     translate: (key) => key,
     getToken: () => "fixture-token",
     fetchRestore: ({ conversationId: restoredConversationId }: { conversationId: number }) => {

@@ -1,4 +1,6 @@
 import { normalizeError, readApiError } from "@/lib/errors";
+import type { RuntimePhase } from "@/lib/streaming";
+import type { ChatStatusTimelineStep } from "@/lib/chatStatusTimeline";
 
 function getClientTimezone(): string | undefined {
   if (typeof Intl === "undefined") return undefined;
@@ -28,6 +30,13 @@ export type ForkChatPersistedMessage = {
   group_index?: number | null;
   group_models?: string[] | null;
   user_message_id?: number | string | null;
+  generation_task_id?: number | string | null;
+  last_sequence_number?: number | string | null;
+  server_generation_status?: string | null;
+  generation_status?: string | null;
+  phase?: string | null;
+  status_timeline?: unknown;
+  statusTimeline?: unknown;
 };
 
 export type ForkChatMessage = {
@@ -48,6 +57,11 @@ export type ForkChatMessage = {
   groupIndex?: number;
   groupModels?: string[];
   userMessageId?: number;
+  generationTaskId?: number;
+  lastSequence?: number;
+  serverGenerationStatus?: string;
+  phase?: RuntimePhase;
+  statusTimeline?: ChatStatusTimelineStep[];
 };
 
 export type ForkChatResponse = {
@@ -85,6 +99,31 @@ export function parsePersistedMessageSearchSources(raw: Pick<ForkChatPersistedMe
   }
 }
 
+export function parsePersistedStatusTimeline(raw: Pick<ForkChatPersistedMessage, "status_timeline" | "statusTimeline">): ChatStatusTimelineStep[] | undefined {
+  const value = raw?.status_timeline ?? raw?.statusTimeline;
+  if (!value) return undefined;
+  const parsed = Array.isArray(value) ? value : typeof value === "string" ? (() => {
+    try { return JSON.parse(value); } catch { return undefined; }
+  })() : undefined;
+  if (!Array.isArray(parsed)) return undefined;
+  const steps = parsed.filter((step): step is ChatStatusTimelineStep => !!step && typeof step === "object" && typeof step.kind === "string" && typeof step.status === "string" && typeof step.startedAt === "number");
+  return steps.length ? steps : undefined;
+}
+
+function normalizePersistedPhase(phase?: string | null): RuntimePhase | undefined {
+  if (!phase) return undefined;
+  if (phase === "queued") return "starting";
+  if (phase === "streaming") return "streaming_answer";
+  if (phase === "cancelled") return "stopped";
+  if (
+    phase === "idle" || phase === "starting" || phase === "waiting_provider" || phase === "thinking" ||
+    phase === "reasoning" || phase === "searching" || phase === "retrieving_files" || phase === "generating" ||
+    phase === "streaming_answer" || phase === "finalizing" || phase === "completed" || phase === "stopped" ||
+    phase === "failed"
+  ) return phase;
+  return undefined;
+}
+
 export function mapPersistedChatMessage(
   message: ForkChatPersistedMessage,
   options: { fallbackId: () => string; parseTime?: (value: string) => number }
@@ -119,6 +158,11 @@ export function mapPersistedChatMessage(
     groupIndex: message.group_index ?? undefined,
     groupModels: Array.isArray(message.group_models) ? message.group_models : undefined,
     userMessageId: Number(message.user_message_id || 0) || undefined,
+    generationTaskId: Number(message.generation_task_id || 0) || undefined,
+    lastSequence: Number(message.last_sequence_number || 0) || undefined,
+    serverGenerationStatus: message.server_generation_status || message.generation_status || undefined,
+    phase: normalizePersistedPhase(message.phase),
+    statusTimeline: parsePersistedStatusTimeline(message),
   };
 }
 

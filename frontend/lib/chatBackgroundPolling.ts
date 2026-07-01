@@ -3,6 +3,7 @@ import type { ChatStatusTimelineStep } from "./chatStatusTimeline";
 
 export type BackgroundTaskPollInput = {
   content?: string;
+  reasoningContent?: string;
   status?: string;
   previousContent?: string;
   terminalStableCount?: number;
@@ -10,6 +11,7 @@ export type BackgroundTaskPollInput = {
 
 export type BackgroundTaskPollState = {
   content: string;
+  reasoningContent: string;
   status: string;
   hasContent: boolean;
   isCompleted: boolean;
@@ -21,6 +23,7 @@ export type BackgroundTaskPollState = {
 
 export function evaluateBackgroundTaskPoll({
   content = "",
+  reasoningContent = "",
   status = "",
   previousContent = "",
   terminalStableCount = 0,
@@ -36,6 +39,7 @@ export function evaluateBackgroundTaskPoll({
 
   return {
     content,
+    reasoningContent,
     status,
     hasContent,
     isCompleted,
@@ -78,7 +82,12 @@ export function selectFinalAssistantContent({
   dbContent = "",
   taskStatus,
 }: SelectFinalAssistantContentOptions): string {
-  if (taskStatus === "completed" && dbContent.trim() && dbContent.length >= liveContent.length) return dbContent;
+  // Completed polling is a reconciliation step, not another streaming append.
+  // The database message content is the canonical final answer; liveContent can
+  // be a transient combined stream snapshot and may already contain the same
+  // answer plus replayed deltas. Choosing the longer live value here can make
+  // completed messages display the final answer twice after background polling.
+  if (taskStatus === "completed" && dbContent.trim()) return dbContent;
   if (liveContent.trim()) return liveContent;
   return existingContent;
 }
@@ -86,6 +95,7 @@ export function selectFinalAssistantContent({
 export type BuildBackgroundPollingMessagePatchOptions = {
   existingContent: string;
   polledContent: string;
+  polledReasoningContent?: string;
   liveContent?: string;
   generationStartedAt?: number;
   statusTimeline?: ChatStatusTimelineStep[];
@@ -100,6 +110,7 @@ export type BuildBackgroundPollingMessagePatchOptions = {
 export function buildBackgroundPollingMessagePatch({
   existingContent,
   polledContent,
+  polledReasoningContent = "",
   liveContent = "",
   generationStartedAt,
   statusTimeline,
@@ -117,9 +128,11 @@ export function buildBackgroundPollingMessagePatch({
       : selectFinalAssistantContent({ existingContent, liveContent, dbContent: polledContent, taskStatus: status || (isFinished ? "completed" : undefined) }));
   return {
     content,
+    reasoningContent: polledReasoningContent || undefined,
     serverMessageId,
     generationStartedAt,
     statusTimeline,
+    serverGenerationStatus: status || (isFinished ? "completed" : undefined),
     activityStatus: isFinished ? undefined : createBusyStatus(),
     completedAt: isFinished ? now : undefined,
   };

@@ -3,6 +3,7 @@
 import { memo } from "react";
 import type { ChatModel } from "@/lib/chatTypes";
 import ChatCompareModelHeader from "./ChatCompareModelHeader";
+import ChatCompareActivityLayoutControl, { type CompareActivityLayout } from "./ChatCompareActivityLayoutControl";
 
 export type ChatCompareHeaderProps = {
   compareModels: string[];
@@ -11,6 +12,8 @@ export type ChatCompareHeaderProps = {
   closeLabel: string;
   onModelChange?: (index: number, modelId: string) => void;
   onExitCompare?: () => void;
+  activityLayout?: CompareActivityLayout;
+  onActivityLayoutChange?: (layout: CompareActivityLayout) => void;
 };
 
 function ChatCompareHeader({
@@ -20,22 +23,31 @@ function ChatCompareHeader({
   closeLabel,
   onModelChange,
   onExitCompare,
+  activityLayout = "inline",
+  onActivityLayoutChange,
 }: ChatCompareHeaderProps) {
   return (
-    <div className="flex w-full shrink-0">
-      {compareModels.map((modelId, colIndex) => (
-        <div key={modelId || colIndex} className="flex min-w-[320px] flex-1 flex-col">
-          <ChatCompareModelHeader
-            modelId={modelId}
-            index={colIndex}
-            models={models}
-            selectedModel={modelById.get(modelId)}
-            closeLabel={closeLabel}
-            onModelChange={onModelChange}
-            onExitCompare={onExitCompare}
-          />
+    <div className="relative z-[90] flex w-full shrink-0 items-center border-b border-surface-border/45 bg-surface/80 px-4 py-2 backdrop-blur">
+      <div className="flex min-w-0 flex-1">
+        {compareModels.map((modelId, colIndex) => (
+          <div key={modelId || colIndex} className="flex min-w-[280px] flex-1 flex-col">
+            <ChatCompareModelHeader
+              modelId={modelId}
+              index={colIndex}
+              models={models}
+              selectedModel={modelById.get(modelId)}
+              closeLabel={closeLabel}
+              onModelChange={onModelChange}
+              onExitCompare={onExitCompare}
+            />
+          </div>
+        ))}
+      </div>
+      {onActivityLayoutChange && (
+        <div className="absolute right-4 top-1/2 -translate-y-1/2">
+          <ChatCompareActivityLayoutControl value={activityLayout} onChange={onActivityLayoutChange} />
         </div>
-      ))}
+      )}
     </div>
   );
 }

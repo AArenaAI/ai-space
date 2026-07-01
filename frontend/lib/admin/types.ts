@@ -1,5 +1,18 @@
 export type AdminRole = "user" | "admin";
 
+
+export interface AdminUserCreditUsageSummary {
+  basic_used: number;
+  advanced_used: number;
+  beta_used: number;
+  total_used: number;
+  basic_used_display: number;
+  advanced_used_display: number;
+  beta_used_display: number;
+  total_used_display: number;
+  last_used_at?: string;
+}
+
 export interface AdminUserUsageSummary {
   requests: number;
   failures: number;
@@ -24,6 +37,7 @@ export interface AdminUser {
   created_at: string;
   updated_at: string;
   usage_30d?: AdminUserUsageSummary;
+  credit_usage_30d?: AdminUserCreditUsageSummary;
   beta_phase?: string;
   beta_phase_name?: string;
   beta_credit_balance?: number;
@@ -32,6 +46,31 @@ export interface AdminUser {
   beta_credit_granted_display?: number;
   beta_credit_used_total?: number;
   beta_credit_used_display?: number;
+}
+
+
+export interface AdminBillingPlan {
+  id: number;
+  code: string;
+  name: string;
+  description: string;
+  price_cents: number;
+  currency: string;
+  interval: string;
+  basic_credits: number;
+  advanced_credits: number;
+  elite_credits: number;
+  enabled: boolean;
+  public_visible: boolean;
+  sort_order: number;
+  provider: string;
+  provider_price_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminBillingPlansResponse {
+  plans: AdminBillingPlan[];
 }
 
 export interface AdminOverview {
@@ -115,6 +154,7 @@ export interface AdminUsageMetric {
   video_seconds?: number;
   audio_seconds?: number;
 }
+
 
 export interface AdminUsageSummary extends AdminUsageMetric {
   successes: number;
@@ -274,6 +314,25 @@ export interface AdminTaskUsageSummary {
   last_usage_at?: string;
 }
 
+
+export interface AdminTaskCostEstimate {
+  available: boolean;
+  estimated_prompt_tokens: number;
+  estimated_completion_tokens: number;
+  estimated_total_tokens: number;
+  estimated_input_cost_rmb: number;
+  estimated_output_cost_rmb: number;
+  estimated_total_cost_rmb: number;
+  actual_total_cost_rmb: number;
+  delta_cost_rmb: number;
+  delta_rate: number;
+  pricing_unit: string;
+  input_unit_price_rmb: number;
+  output_unit_price_rmb: number;
+  method: string;
+  note: string;
+}
+
 export interface AdminTask {
   id: number;
   response_id: string;
@@ -286,6 +345,7 @@ export interface AdminTask {
   status: string;
   error_message?: string;
   usage?: AdminTaskUsageSummary;
+  cost_estimate?: AdminTaskCostEstimate;
   recent_usage_logs?: AdminUsageLog[];
   created_at: string;
   updated_at: string;

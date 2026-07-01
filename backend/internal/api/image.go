@@ -931,7 +931,7 @@ func (h *ImageHandler) EditImage(c *gin.Context) {
 			return
 		}
 		if req.EditMode == "text-removal" {
-			h.processTextRemovalJob(gen.ID, imageFilePath, req.Prompt, baseURL, editRoute)
+			h.processTextRemovalJob(gen.ID, imageFilePath, req.Prompt, baseURL, editRoute, req.MaskData)
 			return
 		}
 		if req.EditMode == "upscale" {
@@ -1525,7 +1525,7 @@ func (h *ImageHandler) processBackgroundRemovalJob(recordID uint, sourcePath str
 	h.recordLocalImageUtility(recordID, "remove_bg")
 }
 
-func (h *ImageHandler) processTextRemovalJob(recordID uint, sourcePath string, prompt string, baseURL string, route services.ImageEditRoute) {
+func (h *ImageHandler) processTextRemovalJob(recordID uint, sourcePath string, prompt string, baseURL string, route services.ImageEditRoute, maskData string) {
 	if sourcePath == "" {
 		h.failImageGeneration(recordID, "文字消除失败：源图片路径为空")
 		return
@@ -1558,9 +1558,27 @@ func (h *ImageHandler) processTextRemovalJob(recordID uint, sourcePath string, p
 		return
 	}
 
+	// If user provided a precise mask from text detection preview, save it to a temp file
+	maskFile := ""
+	if strings.TrimSpace(maskData) != "" {
+		maskBytes, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(strings.TrimSpace(maskData), "data:image/png;base64,"))
+		if err == nil && len(maskBytes) > 0 {
+			maskFile = filepath.Join(imageAssetsDir(), "mask_"+filename)
+			if writeErr := os.WriteFile(maskFile, maskBytes, 0644); writeErr == nil {
+				defer os.Remove(maskFile)
+			} else {
+				maskFile = ""
+			}
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", script, "--input", sourcePath, "--output", outputPath, "--prompt", prompt, "--sub-mode", route.SubMode)
+	args := []string{script, "--input", sourcePath, "--output", outputPath, "--prompt", prompt, "--sub-mode", route.SubMode}
+	if maskFile != "" {
+		args = append(args, "--mask-input", maskFile)
+	}
+	cmd := exec.CommandContext(ctx, "python3", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -1857,4 +1875,128 @@ func (h *ImageHandler) RecoverPendingJobs() {
 		}
 		go h.processImageJob(job.ID, job.Prompt, job.Size, job.Quality, job.Provider, referenceImagePaths, baseURL)
 	}
+}
+
+// TextDetectionPreviewRequest 文字检测预览请求
+type TextDetectionPreviewRequest struct {
+	ImageURL string `json:"image_url" binding:"required"`
+	SubMode  string `json:"sub_mode"`
+}
+
+// TextRegion 文字区域
+type TextRegion struct {
+	Bbox           [4]int  `json:"bbox"`                      // [x1, y1, x2, y2]
+	Text           string  `json:"text"`                      // OCR 识别的文字内容
+	Confidence     float64 `json:"confidence"`                // 置信度
+	Detector       string  `json:"detector,omitempty"`        // tesseract/local-vision/hybrid
+	Type           string  `json:"type,omitempty"`            // ui_text/code_line/document_text
+	RepairStrategy string  `json:"repair_strategy,omitempty"` // uniform_fill/local_inpaint/paper_fill_or_inpaint
+	Risk           string  `json:"risk,omitempty"`            // low/medium/high
+	Selectable     bool    `json:"selectable,omitempty"`
+}
+
+// TextDetectionPreviewResponse 文字检测预览响应
+type TextDetectionPreviewResponse struct {
+	OK             bool                   `json:"ok"`
+	Width          int                    `json:"width"`
+	Height         int                    `json:"height"`
+	Detector       string                 `json:"detector"`
+	ImageType      string                 `json:"image_type,omitempty"`
+	Analysis       map[string]interface{} `json:"analysis,omitempty"`
+	Regions        []TextRegion           `json:"regions"`
+	Count          int                    `json:"count"`
+	FallbackReason string                 `json:"fallback_reason,omitempty"`
+}
+
+// TextDetectionPreview 检测图片中的文字区域，返回坐标和内容供前端预览选择
+func (h *ImageHandler) TextDetectionPreview(c *gin.Context) {
+	var req TextDetectionPreviewRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误: " + err.Error()})
+		return
+	}
+
+	// 解析图片路径
+	imagePath, err := h.resolveUploadedImagePath(req.ImageURL)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无法解析图片: " + err.Error()})
+		return
+	}
+	if _, statErr := os.Stat(imagePath); statErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "源图片不存在"})
+		return
+	}
+
+	// 查找检测脚本
+	scriptCandidates := []string{
+		"./scripts/detect_text_mask.py",
+		"backend/scripts/detect_text_mask.py",
+		"/home/ubuntu/workspace/ai-space/backend/scripts/detect_text_mask.py",
+	}
+	script := ""
+	for _, candidate := range scriptCandidates {
+		if _, err := os.Stat(candidate); err == nil {
+			script = candidate
+			break
+		}
+	}
+	if script == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "文字检测脚本不存在"})
+		return
+	}
+
+	subMode := strings.TrimSpace(req.SubMode)
+	if subMode == "" {
+		subMode = "auto"
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "python3", script, "--input", imagePath, "--sub-mode", subMode)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("[text-detection-preview] failed err=%v stdout=%s stderr=%s\n", err, stdout.String(), stderr.String())
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "文字检测失败: " + stderr.String()})
+		return
+	}
+
+	// 解析脚本输出
+	var scriptResult struct {
+		OK             bool                   `json:"ok"`
+		Width          int                    `json:"width"`
+		Height         int                    `json:"height"`
+		Detector       string                 `json:"detector"`
+		ImageType      string                 `json:"image_type"`
+		Analysis       map[string]interface{} `json:"analysis"`
+		Regions        []TextRegion           `json:"regions"`
+		Count          int                    `json:"count"`
+		FallbackReason string                 `json:"fallback_reason"`
+		Error          string                 `json:"error"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &scriptResult); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "文字检测结果解析失败: " + err.Error()})
+		return
+	}
+	if !scriptResult.OK {
+		msg := scriptResult.Error
+		if msg == "" {
+			msg = "文字检测失败"
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
+		return
+	}
+
+	c.JSON(http.StatusOK, TextDetectionPreviewResponse{
+		OK:             true,
+		Width:          scriptResult.Width,
+		Height:         scriptResult.Height,
+		Detector:       scriptResult.Detector,
+		ImageType:      scriptResult.ImageType,
+		Analysis:       scriptResult.Analysis,
+		Regions:        scriptResult.Regions,
+		Count:          scriptResult.Count,
+		FallbackReason: scriptResult.FallbackReason,
+	})
 }

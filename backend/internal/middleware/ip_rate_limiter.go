@@ -73,7 +73,7 @@ func RateLimitMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		path := c.Request.URL.Path
 		method := c.Request.Method
-		if strings.HasPrefix(path, "/api/images/file/") || strings.HasPrefix(path, "/api/videos/file/") || isHighFrequencyReadEndpoint(method, path) {
+		if shouldSkipIPRateLimit(method, path) {
 			c.Next()
 			return
 		}
@@ -88,6 +88,21 @@ func RateLimitMiddleware() gin.HandlerFunc {
 	}
 }
 
+func shouldSkipIPRateLimit(method, path string) bool {
+	if method == http.MethodOptions || method == http.MethodHead {
+		return true
+	}
+	// Static app shell / assets must not consume the API IP bucket. Otherwise a normal
+	// page restore can exhaust the bucket and make the app retry into a 429 storm.
+	if method == http.MethodGet && !strings.HasPrefix(path, "/api/") {
+		return true
+	}
+	if strings.HasPrefix(path, "/api/images/file/") || strings.HasPrefix(path, "/api/videos/file/") {
+		return true
+	}
+	return isHighFrequencyReadEndpoint(method, path)
+}
+
 func isHighFrequencyReadEndpoint(method, path string) bool {
 	if method != http.MethodGet {
 		return false
@@ -99,6 +114,15 @@ func isHighFrequencyReadEndpoint(method, path string) bool {
 		return true
 	}
 	if strings.HasPrefix(path, "/api/conversations/") {
+		return true
+	}
+	// Chat page bootstrap and shell side data are high-frequency read endpoints.
+	// They are idempotent and may be requested by multiple mounted components or
+	// retried after navigation aborts; do not let them trip the global IP bucket.
+	if path == "/api/chat/bootstrap" || path == "/api/models/chat" || path == "/api/models" || path == "/api/templates" || path == "/api/workspaces" || path == "/api/user/credits" || path == "/api/beta/config" || path == "/api/changelogs/unread-count" {
+		return true
+	}
+	if path == "/api/notebooks" {
 		return true
 	}
 	return false

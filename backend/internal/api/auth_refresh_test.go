@@ -23,12 +23,27 @@ func TestRefreshCookieSettingsUseHttpOnlySecureSameSiteLax(t *testing.T) {
 	h.setRefreshTokenCookie(c, "refresh-token-value", time.Now().Add(30*24*time.Hour))
 
 	cookies := w.Result().Cookies()
-	if len(cookies) != 1 {
-		t.Fatalf("expected one cookie, got %d", len(cookies))
+	if len(cookies) != 2 {
+		t.Fatalf("expected site cookie plus legacy cleanup cookie, got %d", len(cookies))
 	}
-	cookie := cookies[0]
-	if cookie.Name != refreshTokenCookieName {
-		t.Fatalf("expected cookie %q, got %q", refreshTokenCookieName, cookie.Name)
+	var cookie *http.Cookie
+	var legacyCleanup *http.Cookie
+	for _, item := range cookies {
+		if item.Name != refreshTokenCookieName {
+			t.Fatalf("expected cookie %q, got %q", refreshTokenCookieName, item.Name)
+		}
+		switch item.Path {
+		case "/":
+			cookie = item
+		case "/api":
+			legacyCleanup = item
+		}
+	}
+	if cookie == nil {
+		t.Fatalf("missing site-wide refresh cookie")
+	}
+	if legacyCleanup == nil || legacyCleanup.MaxAge != -1 {
+		t.Fatalf("missing legacy /api cleanup cookie: %+v", legacyCleanup)
 	}
 	if !cookie.HttpOnly {
 		t.Fatalf("refresh cookie must be HttpOnly")
@@ -39,8 +54,8 @@ func TestRefreshCookieSettingsUseHttpOnlySecureSameSiteLax(t *testing.T) {
 	if cookie.SameSite != http.SameSiteLaxMode {
 		t.Fatalf("refresh cookie SameSite = %v, want Lax", cookie.SameSite)
 	}
-	if cookie.Path != "/api/auth" {
-		t.Fatalf("refresh cookie path = %q, want /api/auth", cookie.Path)
+	if cookie.Path != "/" {
+		t.Fatalf("refresh cookie path = %q, want /", cookie.Path)
 	}
 }
 

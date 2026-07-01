@@ -347,12 +347,78 @@ def build_text_mask(rgb: np.ndarray, sub_mode: str = "auto") -> np.ndarray:
     return combined
 
 
+
+
+def fill_uniform_mask_regions(rgb: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, np.ndarray, int]:
+    """Fill masked regions whose surroundings are near-uniform UI/background.
+
+    Manual text removal on game/dialog UI should not use texture inpainting:
+    inpaint pulls grass/scene texture into the dark dialogue box and creates a
+    blurred smear. For each external-mask component, inspect a surrounding ring;
+    if the ring is dark/low-variance enough, fill the component with the ring's
+    median color and remove it from the inpaint mask. Return (image, remaining_mask,
+    filled_pixels).
+    """
+    repaired = rgb.copy()
+    remaining = mask.copy()
+    height, width = mask.shape[:2]
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    filled_pixels = 0
+    for cnt in contours:
+        component = np.zeros_like(mask)
+        cv2.drawContours(component, [cnt], -1, 255, thickness=cv2.FILLED)
+        x, y, w, h = cv2.boundingRect(cnt)
+        if w < 2 or h < 2:
+            continue
+        ring_px = max(6, round(min(width, height) / 220))
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * ring_px + 1, 2 * ring_px + 1))
+        dilated = cv2.dilate(component, kernel, iterations=1)
+        ring = (dilated > 0) & (component == 0) & (mask == 0)
+        samples = rgb[ring]
+        if samples.size == 0 or samples.shape[0] < 16:
+            continue
+        med = np.median(samples, axis=0)
+        # Robust spread: percentile range is less sensitive to UI highlights.
+        p10 = np.percentile(samples, 10, axis=0)
+        p90 = np.percentile(samples, 90, axis=0)
+        spread = float(np.mean(p90 - p10))
+        brightness = float(np.mean(med))
+        # Dialogue boxes / caption bars are usually dark and fairly uniform. Also
+        # allow light uniform panels. Avoid this path on textured scenery.
+        uniform_dark = brightness < 85 and spread < 45
+        uniform_light = brightness >= 85 and spread < 32
+        if not (uniform_dark or uniform_light):
+            continue
+        fill_color = np.clip(med, 0, 255).astype(np.uint8)
+        # Fill row-by-row when possible so semi-transparent dialogue panels keep
+        # their vertical gradient/noise instead of becoming a flat rectangle.
+        rows = np.where(np.any(component > 0, axis=1))[0]
+        for yy in rows:
+            xs = np.where(component[yy] > 0)[0]
+            if xs.size == 0:
+                continue
+            x1, x2 = int(xs.min()), int(xs.max())
+            pad = max(8, round(width / 220))
+            left = rgb[yy, max(0, x1 - pad):x1]
+            right = rgb[yy, x2 + 1:min(width, x2 + 1 + pad)]
+            row_samples = np.concatenate([left, right], axis=0) if left.size or right.size else np.empty((0, 3), dtype=np.uint8)
+            if row_samples.shape[0] >= 4:
+                row_color = np.median(row_samples, axis=0).astype(np.uint8)
+            else:
+                row_color = fill_color
+            repaired[yy, xs] = row_color
+        remaining[component > 0] = 0
+        filled_pixels += int(np.count_nonzero(component))
+    return repaired, remaining, filled_pixels
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Remove text/watermarks locally while preserving visual dimensions")
     parser.add_argument("--input", required=True, help="Input source image path")
     parser.add_argument("--output", required=True, help="Output PNG path")
     parser.add_argument("--prompt", default="", help="User text description; currently used for logging only")
-    parser.add_argument("--sub-mode", default="auto", choices=["auto", "screenshot", "poster", "watermark"], help="Detection strategy: conservative screenshot labels, large poster text, or watermark overlays")
+    parser.add_argument("--sub-mode", default="auto", choices=["auto", "manual", "screenshot", "poster", "watermark"], help="Detection strategy: auto/manual/legacy modes; manual expects --mask-input")
+    parser.add_argument("--mask-input", default="", help="External mask image path (white=process, black=preserve). If provided, skips auto text detection.")
     parser.add_argument("--mask-output", default="", help="Optional debug mask output path")
     args = parser.parse_args()
 
@@ -368,18 +434,70 @@ def main() -> int:
         original_size = source.size
         rgb = np.array(source)
         chalkboard = is_chalkboard_scene(rgb)
-        mask = build_text_mask(rgb, args.sub_mode)
+
+        # Use external mask if provided, otherwise auto-detect
+        external_mask = bool(args.mask_input)
+        if external_mask:
+            mask_path = Path(args.mask_input)
+            if not mask_path.exists():
+                print(json.dumps({"ok": False, "error": f"mask_not_found: {mask_path}"}, ensure_ascii=False), file=sys.stderr)
+                return 2
+            with Image.open(mask_path) as mask_im:
+                mask_im = ImageOps.exif_transpose(mask_im)
+                if mask_im.size != original_size:
+                    mask_im = mask_im.resize(original_size, Image.Resampling.NEAREST)
+                mask = np.array(mask_im.convert("L"))
+            mask = (mask > 127).astype(np.uint8) * 255
+            if args.sub_mode != "manual":
+                # Automatic preview boxes are rectangular. Do not repair the
+                # whole rectangle; shrink to visible text-like strokes inside it.
+                # This prevents obvious rectangular patches on semi-transparent
+                # dialogue panels.
+                hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+                gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+                bright_text = ((gray > 135) & (hsv[:, :, 1] < 145)).astype(np.uint8) * 255
+                mask = cv2.bitwise_and(mask, bright_text)
+                refine_px = max(2, round(min(original_size) / 520))
+                refine_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * refine_px + 1, 2 * refine_px + 1))
+                mask = cv2.dilate(mask, refine_kernel, iterations=1)
+                mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, refine_kernel, iterations=1)
+            else:
+                # Manual masks come from direct user painting. Expand only
+                # modestly to catch antialiasing/glow; excessive expansion
+                # destroys UI panels.
+                expand_px = max(3, round(min(original_size) / 360))
+                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * expand_px + 1, 2 * expand_px + 1))
+                mask = cv2.dilate(mask, kernel, iterations=1)
+                mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+        else:
+            mask = build_text_mask(rgb, args.sub_mode)
 
         if args.mask_output:
             mask_path = Path(args.mask_output)
             mask_path.parent.mkdir(parents=True, exist_ok=True)
             Image.fromarray(mask).save(mask_path)
 
+        # External/manual masks: first fill near-uniform UI/background regions
+        # with neighboring median color. Only remaining textured regions use
+        # OpenCV inpaint. This avoids smearing game dialogue boxes into blurry
+        # scene-colored strips.
+        fill_pixels = 0
+        inpaint_source = rgb
+        inpaint_mask = mask
+        if external_mask:
+            inpaint_source, inpaint_mask, fill_pixels = fill_uniform_mask_regions(rgb, mask)
+
         # OpenCV expects BGR. Telea inpaint changes only masked pixels.
-        bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-        radius = max(4 if chalkboard else 3, round(min(original_size) / (220 if chalkboard else 350)))
-        repaired_bgr = cv2.inpaint(bgr, mask, radius, cv2.INPAINT_TELEA)
-        repaired_rgb = cv2.cvtColor(repaired_bgr, cv2.COLOR_BGR2RGB)
+        bgr = cv2.cvtColor(inpaint_source, cv2.COLOR_RGB2BGR)
+        if external_mask:
+            radius = max(3, round(min(original_size) / 420))
+        else:
+            radius = max(4 if chalkboard else 3, round(min(original_size) / (220 if chalkboard else 350)))
+        if np.count_nonzero(inpaint_mask) > 0:
+            repaired_bgr = cv2.inpaint(bgr, inpaint_mask, radius, cv2.INPAINT_TELEA)
+            repaired_rgb = cv2.cvtColor(repaired_bgr, cv2.COLOR_BGR2RGB)
+        else:
+            repaired_rgb = inpaint_source.copy()
         # Hard pixel-preservation guard: OpenCV inpaint is only supposed to
         # change masked pixels, but force every unmasked pixel back to the exact
         # original RGB value before saving. This prevents any accidental global
@@ -414,6 +532,7 @@ def main() -> int:
                     "output_size": [result.size[0], result.size[1]],
                     "mask_pixels": mask_pixels,
                     "mask_coverage": round(mask_pixels / total_pixels, 6) if total_pixels else 0,
+                    "uniform_fill_pixels": fill_pixels,
                     "sub_mode": args.sub_mode,
                     "output": str(output_path),
                 },

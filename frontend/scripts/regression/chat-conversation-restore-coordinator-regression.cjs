@@ -9,7 +9,7 @@ const projectRoot = path.resolve(__dirname, "../..");
 
 function loadModule() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "chat-conversation-restore-coordinator-regression-"));
-  for (const name of ["chatForkCoordinator", "chatConversationRestoreCoordinator"]) {
+  for (const name of ["chatForkCoordinator", "chatBootstrapCoordinator", "chatConversationRestoreCoordinator"]) {
     let source = fs.readFileSync(path.join(projectRoot, `lib/${name}.ts`), "utf8");
     source = source.replace(
       /import \{ normalizeError, readApiError \} from "@\/lib\/errors";\n/g,
@@ -21,7 +21,22 @@ function loadModule() {
     }).outputText;
     fs.writeFileSync(path.join(tmpDir, `${name}.js`), output);
   }
-  return require(path.join(tmpDir, "chatConversationRestoreCoordinator.js"));
+  const restorePath = path.join(tmpDir, "chatConversationRestoreCoordinator.js");
+  const bootstrapPath = path.join(tmpDir, "chatBootstrapCoordinator.js");
+  const forkPath = path.join(tmpDir, "chatForkCoordinator.js");
+  const Module = require("module");
+  const originalLoad = Module._load;
+  Module._load = function(request, parent, isMain) {
+    if (request === "@/lib/chatBootstrapCoordinator") return originalLoad(bootstrapPath, parent, isMain);
+    if (request === "./chatForkCoordinator") return originalLoad(forkPath, parent, isMain);
+    if (request.startsWith("@/")) return {};
+    return originalLoad(request, parent, isMain);
+  };
+  try {
+    return require(restorePath);
+  } finally {
+    Module._load = originalLoad;
+  }
 }
 
 const {
@@ -53,7 +68,12 @@ async function test(name, fn) {
   }
 }
 
-const response = (ok, data, status = ok ? 200 : 500) => ({ ok, status, json: async () => data });
+const response = (ok, data, status = ok ? 200 : 500, headers = {}) => ({
+  ok,
+  status,
+  headers: { get: (name) => headers[name.toLowerCase()] || headers[name] || null },
+  json: async () => data,
+});
 
 (async () => {
   await test("build restore/status/count URLs", () => {
@@ -64,7 +84,7 @@ const response = (ok, data, status = ok ? 200 : 500) => ({ ok, status, json: asy
     assert.equal(buildConversationMessageCountUrl({ apiBaseUrl: "http://api", conversationId: 7 }), "http://api/api/conversations/7/messages?limit=1");
   });
 
-  await test("fetchConversationRestore uses bearer token and throws non-ok", async () => {
+  await test("fetchConversationRestore uses bootstrap payload by default", async () => {
     const calls = [];
     const data = await fetchConversationRestore({
       apiBaseUrl: "http://api",
@@ -72,12 +92,44 @@ const response = (ok, data, status = ok ? 200 : 500) => ({ ok, status, json: asy
       token: "tok",
       fetchImpl: async (url, init) => {
         calls.push([url, init.headers.Authorization]);
-        return response(true, { title: "T", messages: [] });
+        return response(true, {
+          conversation: { id: 3, title: "Boot", model: "m2", compare: true, compare_models: ["m1", "m2"], skill_key: "s" },
+          snapshot: { total: 2, has_more: false, snapshot_version: "v1", messages: [{ id: 31, role: "user", content: "u" }] },
+        });
       },
     });
-    assert.deepEqual(calls, [["http://api/api/conversations/3?message_tail=32", "Bearer tok"]]);
-    assert.equal(data.title, "T");
-    await assert.rejects(fetchConversationRestore({ conversationId: 3, token: "tok", fetchImpl: async () => response(false, {}, 503) }), /load conversation failed: 503/);
+    assert.deepEqual(calls, [["http://api/api/chat/bootstrap?id=3&message_tail=32&conversation_limit=30", "Bearer tok"]]);
+    assert.equal(data.title, "Boot");
+    assert.equal(data.model, "m2");
+    assert.equal(data.compare, true);
+    assert.equal(data.compare_models, '["m1","m2"]');
+    assert.equal(data.skill_key, "s");
+    assert.equal(data.total, 2);
+    assert.equal(data.snapshot_version, "v1");
+    assert.equal(data.messages.length, 1);
+    await assert.rejects(fetchConversationRestore({ conversationId: 3, token: "tok", fetchImpl: async () => response(false, {}, 503) }), /chat bootstrap failed: 503/);
+  });
+
+  await test("fetchConversationRestore retries 429 bootstrap responses", async () => {
+    let calls = 0;
+    const sleeps = [];
+    const data = await fetchConversationRestore({
+      apiBaseUrl: "http://api",
+      conversationId: 4,
+      token: "tok",
+      sleep: (ms) => { sleeps.push(ms); return Promise.resolve(); },
+      fetchImpl: async () => {
+        calls += 1;
+        if (calls === 1) return response(false, { error: "too many" }, 429, { "retry-after": "0.05" });
+        return response(true, {
+          conversation: { id: 4, title: "Retried", model: "m1", compare: false },
+          snapshot: { total: 0, messages: [] },
+        });
+      },
+    });
+    assert.equal(calls, 2);
+    assert.ok(sleeps[0] >= 50, `expected retry sleep >=50ms, got ${sleeps[0]}`);
+    assert.equal(data.title, "Retried");
   });
 
   await test("fetch status and count helpers ignore invalid responses", async () => {
@@ -151,6 +203,29 @@ const response = (ok, data, status = ok ? 200 : 500) => ({ ok, status, json: asy
     assert.equal(buildConversationRestoreState({ data: {}, activeEntries: [], conversationId: 7, fallbackId: () => "fallback", activeActivityStatus: {} }), undefined);
   });
 
+  await test("buildConversationRestoreState synthesizes pending assistant from running status", () => {
+    const state = buildConversationRestoreState({
+      data: {
+        model: "deepseek-v4-pro",
+        messages: [{ id: 20, role: "user", content: "u" }],
+        last_assistant_status: {
+          message: { id: 21, content: "", model: "deepseek-v4-pro" },
+          background_task: { id: 99, assistant_message_id: 21, status: "running", last_sequence_number: 3 },
+        },
+      },
+      activeEntries: [],
+      conversationId: 7,
+      fallbackId: () => "pending-id",
+      activeActivityStatus: { kind: "generating" },
+    });
+    assert.equal(state.isLoading, true);
+    assert.equal(state.mergedMessages.length, 2);
+    assert.equal(state.mergedMessages[1].id, "pending-id");
+    assert.equal(state.mergedMessages[1].serverMessageId, 21);
+    assert.equal(state.mergedMessages[1].generationTaskId, 99);
+    assert.equal(state.mergedMessages[1].activityStatus.kind, "generating");
+  });
+
   await test("findLastAssistantStatusTarget skips active last assistant", () => {
     const messages = [
       { id: "1", role: "assistant", content: "a", createdAt: 1, serverMessageId: 1 },
@@ -169,7 +244,7 @@ const response = (ok, data, status = ok ? 200 : 500) => ({ ok, status, json: asy
       now: 1000,
     });
     assert.equal(running.shouldResumePolling, true);
-    assert.deepEqual(running.patch, { content: "live", generationTaskId: 6, lastSequence: 4, completedAt: undefined, activityStatus: { busy: true } });
+    assert.deepEqual(running.patch, { content: "live", generationTaskId: 6, lastSequence: 4, completedAt: undefined, activityStatus: { busy: true }, serverGenerationStatus: "running" });
     assert.deepEqual(running.resume, { generationTaskId: 6, lastSequence: 4, initialContent: "live" });
 
     const emptyRunning = buildConversationStatusDecision({
@@ -179,7 +254,7 @@ const response = (ok, data, status = ok ? 200 : 500) => ({ ok, status, json: asy
       now: 1000,
     });
     assert.equal(emptyRunning.shouldResumePolling, true);
-    assert.deepEqual(emptyRunning.patch, { content: "", generationTaskId: 6, lastSequence: 8, completedAt: undefined, activityStatus: { busy: true } });
+    assert.deepEqual(emptyRunning.patch, { content: "", generationTaskId: 6, lastSequence: 8, completedAt: undefined, activityStatus: { busy: true }, serverGenerationStatus: "running" });
     assert.deepEqual(emptyRunning.resume, { generationTaskId: 6, lastSequence: 0, initialContent: "" });
 
     const emptyCompleted = buildConversationStatusDecision({

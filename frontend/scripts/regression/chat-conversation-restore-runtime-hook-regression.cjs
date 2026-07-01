@@ -53,22 +53,49 @@ function loadModule(file) {
         fetchConversationMessageCount: (...args) => countImpl(...args),
         buildConversationRestoreState: ({ data }) => {
           if (data.noState) return undefined;
-          const loadedMessages = data.messages || [];
-          const mergedMessages = loadedMessages.map((m) => ({ ...m }));
+          const loadedMessages = (data.messages || []).map((m) => ({
+            ...m,
+            serverMessageId: m.serverMessageId ?? (Number(m.id) || undefined),
+            createdAt: m.createdAt ?? (m.created_at ? Date.parse(m.created_at) : undefined),
+            completedAt: m.completedAt ?? (m.completed_at ? Date.parse(m.completed_at) : undefined),
+          }));
+          let mergedMessages = loadedMessages.map((m) => ({ ...m }));
           const activeByServerMessageId = new Map();
-          return { loadedMessages, mergedMessages, groupViews: new Map([[1, 0]]), activeByServerMessageId, isLoading: Boolean(data.isLoading) };
+          const status = data.last_assistant_status?.background_task?.status || '';
+          if (data.last_assistant_status?.background_task && status !== 'completed' && !String(data.last_assistant_status?.message?.content || '').trim()) {
+            mergedMessages = [...mergedMessages, {
+              id: 'pending-from-status',
+              role: 'assistant',
+              content: '',
+              serverMessageId: data.last_assistant_status?.message?.id,
+              generationTaskId: data.last_assistant_status?.background_task?.id,
+              activityStatus: { kind: 'generating', label: 'busy' },
+            }];
+          }
+          return { loadedMessages, mergedMessages, groupViews: new Map([[1, 0]]), activeByServerMessageId, isLoading: Boolean(data.isLoading || mergedMessages.some((m) => m.activityStatus)) };
         },
         findLastAssistantStatusTarget: (messages) => [...messages].reverse().find((m) => m.role === "assistant" && m.serverMessageId),
-        buildConversationStatusDecision: ({ statusData, currentMessage, busyActivityStatus }) => ({
-          patch: { content: statusData.content || currentMessage.content, activityStatus: busyActivityStatus },
-          shouldResumePolling: Boolean(statusData.resume),
-          resume: statusData.resume,
-        }),
+        hasCompletedLastAssistantStatus: (statusData) => statusData?.background_task?.status === 'completed' && String(statusData?.message?.content || '').trim().length > 0,
+        buildConversationStatusDecision: ({ statusData, currentMessage, busyActivityStatus }) => {
+          const bgTask = statusData?.background_task || {};
+          const status = bgTask.status || '';
+          const terminalStatus = status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'incomplete';
+          const content = statusData.content || statusData.message?.content || currentMessage.content;
+          const hasTask = Boolean(bgTask.id || bgTask.task_id || bgTask.status);
+          const shouldResumePolling = Boolean(statusData.resume) || (hasTask && (!terminalStatus || !String(content || '').trim()));
+          return {
+            hasTask,
+            patch: { content, activityStatus: shouldResumePolling ? busyActivityStatus : undefined, serverGenerationStatus: status || currentMessage.serverGenerationStatus },
+            shouldResumePolling,
+            resume: statusData.resume,
+          };
+        },
         parseConversationCompareModels: (value) => Array.isArray(value) ? value : (typeof value === "string" ? JSON.parse(value || "[]") : []),
         resolveConversationSkillKey: (historical, fallback) => historical || fallback,
       };
     }
     if (specifier === "@/lib/chatMessageStatePatch") return { patchMessageById: (messages, id, patch) => messages.map((m) => m.id === id ? { ...m, ...patch } : m) };
+    if (specifier === "@/lib/chatForkCoordinator") return { buildGroupViewsFromMessages: () => new Map([[1, 0]]) };
     if (specifier === "@/lib/chatConversationCache") {
       return {
         getConversationSnapshot: (id) => snapshotCache.get(id),
@@ -78,6 +105,7 @@ function loadModule(file) {
           if (existing) snapshotCache.set(id, { ...existing, ...patch });
         },
         invalidateConversationSnapshot: (id) => snapshotCache.delete(id),
+        buildConversationMessageSnapshotKey: (message) => [message.serverMessageId ?? message.id, message.role, message.content, message.reasoningContent ?? '', message.model ?? '', message.completedAt ?? '', message.generationTaskId ?? '', message.lastSequence ?? '', message.searchStatus ?? '', message.activityStatus?.kind ?? '', message.activityStatus?.status ?? ''].join('\u001f'),
         areConversationMessagesEquivalent: (left, right) =>
           left.length === right.length && left.every((message, index) => message.id === right[index].id && message.content === right[index].content),
       };
@@ -112,17 +140,18 @@ function createState(initialMessages = []) {
 
 function runRuntime(overrides = {}) {
   effectCleanup = undefined;
-  const state = createState();
+  const state = overrides.state || createState();
   const mainController = overrides.mainController || makeController();
   const compareController = makeController();
   const refs = {
-    conversationLoadSeqRef: { current: overrides.loadSeq || 0 },
+    conversationLoadSeqRef: overrides.conversationLoadSeqRef || { current: overrides.loadSeq || 0 },
     shouldResetRef: { current: overrides.shouldReset ?? true },
     justCreatedRef: { current: overrides.justCreated },
     abortControllerRef: { current: overrides.hasMain ? mainController : null },
     compareAbortControllersRef: { current: overrides.hasCompare ? [compareController] : [] },
     abortReasonRef: { current: null },
     activeTaskStreamsRef: { current: overrides.active || {} },
+    pendingLocalAssistantsRef: { current: overrides.pendingLocalAssistants || {} },
   };
   const lifecycle = [];
   const starts = [];
@@ -148,6 +177,7 @@ function runRuntime(overrides = {}) {
     applyJustCreatedNavigationLifecycle: (plan) => lifecycle.push(["just", plan]),
     applyLoadExistingNavigationLifecycle: (plan) => lifecycle.push(["load", plan]),
     startTaskEventStream: (...args) => starts.push(args),
+    startBackgroundPolling: (...args) => starts.push(["poll", ...args]),
     translate: (key) => key,
     getToken: () => overrides.token ?? null,
     createId: () => "id",
@@ -177,6 +207,7 @@ async function testLoadExistingRestoresStateAndCounts() {
   statusImpl = async () => undefined;
   countImpl = async () => 88;
   const { state, lifecycle } = runRuntime({ conversationId: 9, token: "tok" });
+  await flush();
   await flush();
   await flush();
   assert.equal(lifecycle[0][0], "load");
@@ -286,9 +317,30 @@ async function testSnapshotVersionSkipsUnchangedRestoreReconcile() {
   const { state } = runRuntime({ conversationId: 9, token: "tok" });
   assert.equal(state.messages[0].content, "cached");
   await flush(); await flush();
-  assert.equal(restoreArgs.snapshotVersion, "9:1:stable");
+  assert.equal(restoreArgs.snapshotVersion, undefined);
   assert.equal(state.messages[0].content, "cached");
   assert.equal(persistentSnapshotCache.has(9), false);
+}
+
+async function testTerminalStatusDoesNotStartPolling() {
+  snapshotCache.clear();
+  persistentSnapshotCache.clear();
+  restoreImpl = async () => ({
+    title: "Done",
+    model: "m1",
+    messages: [{ id: "a", role: "assistant", content: "done", serverMessageId: 12, generationTaskId: 99, activityStatus: { status: "running" } }],
+    last_assistant_status: {
+      message: { content: "done" },
+      background_task: { id: 99, status: "completed", completed_at: "2026-01-01T00:00:00Z" },
+    },
+  });
+  statusImpl = async () => { throw new Error("status should not fetch when terminal status is present"); };
+  countImpl = async () => undefined;
+  const { starts, state } = runRuntime({ conversationId: 9, token: "tok" });
+  await flush(); await flush();
+  assert.equal(starts.some((entry) => entry[0] === "poll"), false);
+  assert.equal(state.messages[0].serverGenerationStatus, "completed");
+  assert.equal(state.messages[0].activityStatus, undefined);
 }
 
 async function testRestoreMetaSkipsCountAndStatusFetches() {
@@ -324,9 +376,224 @@ async function testStatusResumeStartsTaskStream() {
   countImpl = async () => undefined;
   const { starts, state } = runRuntime({ conversationId: 9, token: "tok" });
   await flush(); await flush();
-  assert.deepEqual(starts[0], [9, "a", 12, 5, "partial", 99]);
+  assert.deepEqual(starts.find((entry) => entry[0] === "poll"), ["poll", 9, "a", 12]);
   assert.ok(state.messages[0].activityStatus);
 }
+async function testLateRestoreResponseCannotOverwriteLatestConversation() {
+  snapshotCache.clear();
+  persistentSnapshotCache.clear();
+  const sharedSeqRef = { current: 0 };
+  const state = createState();
+  const resolvers = new Map();
+  restoreImpl = async ({ conversationId }) => new Promise((resolve) => resolvers.set(conversationId, resolve));
+  statusImpl = async () => undefined;
+  countImpl = async () => undefined;
+
+  const first = runRuntime({ conversationId: 101, token: "tok", conversationLoadSeqRef: sharedSeqRef, state });
+  await flush();
+  const firstCleanup = effectCleanup;
+  const second = runRuntime({ conversationId: 202, token: "tok", conversationLoadSeqRef: sharedSeqRef, state });
+  await flush();
+  firstCleanup?.();
+
+  resolvers.get(202)({ title: "B", model: "m1", messages: [{ id: "b", role: "assistant", content: "B" }] });
+  await flush(); await flush();
+  assert.equal(state.messages[0].content, "B");
+  assert.equal(state.calls.filter((c) => c[0] === "title").at(-1)?.[1], "B");
+
+  resolvers.get(101)({ title: "A", model: "m1", messages: [{ id: "a", role: "assistant", content: "A" }] });
+  await flush(); await flush();
+  assert.equal(state.messages[0].content, "B");
+  assert.equal(state.calls.filter((c) => c[0] === "title").at(-1)?.[1], "B");
+  assert.equal(snapshotCache.has(101), false);
+  assert.equal(snapshotCache.get(202).messages[0].content, "B");
+  second.refs.conversationLoadSeqRef.current = sharedSeqRef.current;
+}
+
+async function testPendingLocalAssistantIsPreservedBeforeServerContent() {
+  snapshotCache.clear();
+  persistentSnapshotCache.clear();
+  restoreImpl = async () => ({
+    title: "Pending",
+    model: "m1",
+    messages: [{ id: "u1", role: "user", content: "waiting" }],
+  });
+  statusImpl = async () => undefined;
+  countImpl = async () => undefined;
+  const pendingMessage = {
+    id: "local-a1",
+    role: "assistant",
+    content: "",
+    model: "m1",
+    createdAt: 123,
+    activityStatus: { kind: "generating", label: "busy" },
+    generationStartedAt: 123,
+  };
+  const { state } = runRuntime({
+    conversationId: 9,
+    token: "tok",
+    pendingLocalAssistants: { "local-a1": { convId: 9, message: pendingMessage } },
+  });
+  await flush(); await flush();
+  assert.equal(state.messages.length, 2);
+  assert.equal(state.messages[1].id, "local-a1");
+  assert.equal(state.messages[1].role, "assistant");
+  assert.equal(state.messages[1].activityStatus.kind, "generating");
+}
+
+async function testOptimisticCachedPendingSurvivesBackendUserOnlyRestore() {
+  snapshotCache.clear();
+  persistentSnapshotCache.clear();
+  const pendingAssistant = {
+    id: "optimistic-assistant",
+    role: "assistant",
+    content: "",
+    model: "m1",
+    createdAt: Date.parse("2026-01-01T00:00:02Z"),
+    activityStatus: { kind: "generating", label: "busy" },
+    generationStartedAt: Date.parse("2026-01-01T00:00:02Z"),
+  };
+  snapshotCache.set(9, {
+    conversationId: 9,
+    title: "Optimistic",
+    messages: [
+      { id: "optimistic-user", role: "user", content: "waiting", createdAt: Date.parse("2026-01-01T00:00:01Z") },
+      pendingAssistant,
+    ],
+    loadedPersistedMessages: 2,
+    totalMessages: 2,
+    groupViews: new Map([[1, 0]]),
+    isLoading: true,
+    isCompare: false,
+    compareModels: [],
+    model: "m1",
+    fetchedAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+  restoreImpl = async () => ({
+    title: "Backend only user",
+    model: "m1",
+    messages: [{ id: "u1", role: "user", content: "waiting" }],
+  });
+  statusImpl = async () => undefined;
+  countImpl = async () => undefined;
+  const { state } = runRuntime({ conversationId: 9, token: "tok", pendingLocalAssistants: {} });
+  await flush(); await flush();
+  assert.equal(state.messages.some((message) => message.id === "optimistic-assistant"), true);
+  assert.equal(state.messages.at(-1).role, "assistant");
+  assert.equal(state.messages.at(-1).activityStatus.kind, "generating");
+}
+
+async function testVisiblePendingAssistantSurvivesRestoreWhenBackendHasNoAnswerYet() {
+  snapshotCache.clear();
+  persistentSnapshotCache.clear();
+  restoreImpl = async () => ({
+    title: "Waiting",
+    model: "m1",
+    messages: [{ id: "u1", role: "user", content: "waiting" }],
+    last_assistant_status: {
+      message: { content: "" },
+      background_task: { id: 9, status: "running" },
+    },
+  });
+  statusImpl = async () => undefined;
+  countImpl = async () => undefined;
+  const visiblePending = {
+    id: "local-visible",
+    role: "assistant",
+    content: "",
+    model: "m1",
+    createdAt: Date.parse("2026-01-01T00:00:02Z"),
+    activityStatus: { kind: "generating", label: "busy" },
+    generationStartedAt: Date.parse("2026-01-01T00:00:02Z"),
+  };
+  const state = createState([
+    { id: "local-user", role: "user", content: "waiting" },
+    visiblePending,
+  ]);
+  runRuntime({ conversationId: 9, token: "tok", state, pendingLocalAssistants: {} });
+  await flush(); await flush();
+  assert.equal(state.messages.some((message) => message.role === "assistant" && message.activityStatus?.kind === "generating"), true);
+  assert.equal(state.messages.at(-1).role, "assistant");
+  assert.equal(state.messages.at(-1).activityStatus.kind, "generating");
+}
+
+async function testCompletedServerAssistantDropsPendingLocalPlaceholder() {
+  snapshotCache.clear();
+  persistentSnapshotCache.clear();
+  restoreImpl = async () => ({
+    title: "Done",
+    model: "m1",
+    messages: [
+      { id: "u1", role: "user", content: "waiting", created_at: "2026-01-01T00:00:00Z" },
+      { id: "srv-a1", role: "assistant", content: "final answer", completed_at: "2026-01-01T00:00:08Z", created_at: "2026-01-01T00:00:02Z" },
+    ],
+    last_assistant_status: {
+      message: { content: "final answer" },
+      background_task: { id: 9, status: "completed", completed_at: "2026-01-01T00:00:08Z" },
+    },
+  });
+  statusImpl = async () => undefined;
+  countImpl = async () => undefined;
+  const pendingMessage = {
+    id: "local-a1",
+    role: "assistant",
+    content: "",
+    model: "m1",
+    createdAt: Date.parse("2026-01-01T00:00:02Z"),
+    activityStatus: { kind: "generating", label: "busy" },
+    generationStartedAt: Date.parse("2026-01-01T00:00:02Z"),
+  };
+  const { state, refs } = runRuntime({
+    conversationId: 9,
+    token: "tok",
+    pendingLocalAssistants: { "local-a1": { convId: 9, message: pendingMessage } },
+  });
+  await flush(); await flush();
+  assert.equal(state.messages.some((message) => message.id === "local-a1"), false);
+  assert.equal(state.messages.some((message) => message.id === "srv-a1" && message.content === "final answer"), true);
+  assert.equal(refs.pendingLocalAssistantsRef.current["local-a1"], undefined);
+}
+
+async function testCachedStreamingAndServerAssistantDedupesByServerId() {
+  snapshotCache.clear();
+  persistentSnapshotCache.clear();
+  snapshotCache.set(9, {
+    conversationId: 9,
+    title: "Cached duplicate",
+    messages: [
+      { id: "u1", role: "user", content: "today" },
+      { id: "local-a1", role: "assistant", content: "final answer", serverMessageId: 42, generationTaskId: 7, serverGenerationStatus: "completed", completedAt: 1000 },
+      { id: "42", role: "assistant", content: "final answer", serverMessageId: 42, generationTaskId: 7, serverGenerationStatus: "completed", completedAt: 1000 },
+    ],
+    loadedPersistedMessages: 3,
+    totalMessages: 3,
+    groupViews: new Map([[1, 0]]),
+    isLoading: false,
+    isCompare: false,
+    compareModels: [],
+    model: "m1",
+  });
+  restoreImpl = async () => ({
+    title: "Backend",
+    model: "m1",
+    messages: [
+      { id: "u1", role: "user", content: "today" },
+      { id: "42", role: "assistant", content: "final answer", serverMessageId: 42, generationTaskId: 7, serverGenerationStatus: "completed", completedAt: 1000 },
+    ],
+  });
+  statusImpl = async () => undefined;
+  countImpl = async () => undefined;
+  const { state } = runRuntime({ conversationId: 9, token: "tok" });
+  const cachedAssistants = state.messages.filter((message) => message.role === "assistant");
+  assert.equal(cachedAssistants.length, 1);
+  assert.equal(cachedAssistants[0].id, "42");
+  await flush(); await flush();
+  const restoredAssistants = state.messages.filter((message) => message.role === "assistant");
+  assert.equal(restoredAssistants.length, 1);
+  assert.equal(restoredAssistants[0].serverMessageId, 42);
+}
+
 async function testNavigationAbortsControllers() {
   const { refs, mainController, compareController } = runRuntime({ conversationId: 9, token: null, hasMain: true, hasCompare: true });
   assert.equal(mainController.aborted, true);
@@ -344,8 +611,15 @@ async function testNavigationAbortsControllers() {
   await testCacheHitShowsSnapshotImmediatelyAndRefreshes();
   await testPersistentCacheHitShowsSnapshotBeforeRefresh();
   await testSnapshotVersionSkipsUnchangedRestoreReconcile();
+  await testTerminalStatusDoesNotStartPolling();
   await testRestoreMetaSkipsCountAndStatusFetches();
   await testStatusResumeStartsTaskStream();
+  await testLateRestoreResponseCannotOverwriteLatestConversation();
+  await testPendingLocalAssistantIsPreservedBeforeServerContent();
+  await testOptimisticCachedPendingSurvivesBackendUserOnlyRestore();
+  await testVisiblePendingAssistantSurvivesRestoreWhenBackendHasNoAnswerYet();
+  await testCompletedServerAssistantDropsPendingLocalPlaceholder();
+  await testCachedStreamingAndServerAssistantDedupesByServerId();
   await testNavigationAbortsControllers();
   console.log("chat conversation restore runtime hook regression passed");
 })();

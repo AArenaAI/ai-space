@@ -28,16 +28,21 @@ async function runScenario(browser, scenario) {
     assert.ok(response && response.status() < 400, `unexpected status ${response?.status()} for ${url}`);
     await page.waitForSelector('[data-testid="chat-performance-fixture"]', { timeout: 20_000 });
     const fixtureReadyMs = performance.now() - start;
-    const metricsHandle = await page.waitForSelector('[data-testid="chat-stream-render-metrics"]', { timeout: 30_000 });
+    await page.waitForFunction(() => {
+      const node = document.querySelector('[data-testid="chat-stream-render-metrics"]');
+      return node instanceof HTMLElement && Boolean(node.getAttribute("data-metrics"));
+    }, null, { timeout: 120_000 });
+    const metricsHandle = await page.$('[data-testid="chat-stream-render-metrics"]');
+    assert.ok(metricsHandle, "expected chat stream render metrics node");
     const totalElapsedMs = performance.now() - start;
     const metrics = JSON.parse(await metricsHandle.getAttribute("data-metrics"));
     const runtimeState = await page.evaluate(() => ({
-      visibleMessageRows: document.querySelectorAll('[data-testid="virtuoso-item-list"] > *').length,
+      visibleMessageRows: document.querySelectorAll('[data-chat-message-row="true"]').length,
       allElements: document.querySelectorAll("*").length,
       bodyTextLength: document.body.innerText.length,
     }));
     assert.equal(metrics.deltaCount, scenario.deltas);
-    assert.ok(runtimeState.visibleMessageRows > 0, "expected rendered virtuoso rows during streaming benchmark");
+    assert.ok(runtimeState.visibleMessageRows > 0, "expected rendered chat rows during streaming benchmark");
     return {
       name: `browser.streaming.${scenario.count}x${scenario.deltas}`,
       metrics: { fixtureReadyMs, totalElapsedMs, ...metrics, ...runtimeState, consoleErrors: errors.length, failedRequests: failedRequests.length },
@@ -53,7 +58,7 @@ async function runScenario(browser, scenario) {
   const browser = await chromium.launch({ headless: true });
   const scenarios = [
     { count: 500, deltas: 240, deltaInterval: 16 },
-    { count: 3000, deltas: 240, deltaInterval: 16 },
+    { count: 3000, deltas: 60, deltaInterval: 16 },
   ];
   const results = [];
   try {

@@ -128,7 +128,7 @@ async function waitForHttpOk(url, timeout = 60000) {
 
 async function readState(page, label) {
   return page.evaluate((stateLabel) => {
-    const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+    const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
     const list = document.querySelector('[data-testid="chat-message-list"]');
     const scrollerRect = scroller?.getBoundingClientRect();
     const rows = Array.from(document.querySelectorAll('[data-chat-message-row="true"]')).map((row, index) => {
@@ -159,7 +159,6 @@ async function readState(page, label) {
       list: {
         visibleMessageCount: Number(list?.getAttribute("data-visible-message-count") || "0"),
         allVisibleMessageCount: Number(list?.getAttribute("data-all-visible-message-count") || "0"),
-        hiddenLocalMessageCount: Number(list?.getAttribute("data-hidden-local-message-count") || "0"),
       },
       scroller: scroller ? {
         scrollTop: Math.round(scroller.scrollTop),
@@ -182,7 +181,7 @@ async function readState(page, label) {
 
 async function readMarker(page, markerId, label) {
   return page.evaluate(({ id, stateLabel }) => {
-    const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+    const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
     const row = document.querySelector(`[data-chat-message-row="true"][data-message-id="${CSS.escape(id)}"]`);
     const scrollerRect = scroller?.getBoundingClientRect();
     if (!row || !scroller || !scrollerRect) {
@@ -210,7 +209,7 @@ async function readMarker(page, markerId, label) {
 }
 
 async function scrollNearTop(page, baselineWindow) {
-  const box = await page.locator('[data-testid="virtuoso-scroller"]').boundingBox();
+  const box = await page.locator('[data-testid="chat-history-scroll-container"]').boundingBox();
   assert.ok(box, "missing scroller bounding box");
   await page.mouse.move(box.x + box.width / 2, box.y + Math.min(160, box.height / 2));
 
@@ -226,7 +225,7 @@ async function scrollNearTop(page, baselineWindow) {
     await sleep(70);
     const current = await readState(page, `scroll-near-top-${i}`);
     samples.push(current);
-    const released = current.list.visibleMessageCount > baselineWindow.list.visibleMessageCount || current.list.hiddenLocalMessageCount < baselineWindow.list.hiddenLocalMessageCount;
+    const released = current.list.visibleMessageCount > baselineWindow.list.visibleMessageCount;
     if (released) {
       const anchorAfter = previousAnchorId ? await readMarker(page, previousAnchorId, `scroll-near-top-${i}-anchor-after-release`) : null;
       return {
@@ -252,7 +251,7 @@ async function scrollNearTop(page, baselineWindow) {
 
 async function scrollToBottomAndWait(page) {
   await page.evaluate(() => {
-    const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+    const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
     if (!scroller) throw new Error("missing scroller");
     scroller.scrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
     scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
@@ -263,7 +262,7 @@ async function scrollToBottomAndWait(page) {
     last = await readState(page, "normalizing-bottom");
     if ((last.scroller?.distanceToBottom ?? Number.POSITIVE_INFINITY) <= 4) return last;
     await page.evaluate(() => {
-      const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
+      const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
       if (scroller) {
         scroller.scrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
         scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
@@ -276,7 +275,7 @@ async function scrollToBottomAndWait(page) {
 
 async function triggerPrepend(page, beforeWindow) {
   const samples = [];
-  const box = await page.locator('[data-testid="virtuoso-scroller"]').boundingBox();
+  const box = await page.locator('[data-testid="chat-history-scroll-container"]').boundingBox();
   assert.ok(box, "missing scroller bounding box for prepend");
   await page.mouse.move(box.x + box.width / 2, box.y + Math.min(140, box.height / 2));
 
@@ -287,7 +286,7 @@ async function triggerPrepend(page, beforeWindow) {
     await sleep(80);
     const sample = await readState(page, `prepend-sample-${samples.length}`);
     samples.push(sample);
-    if (sample.list.visibleMessageCount > beforeWindow.list.visibleMessageCount || sample.list.hiddenLocalMessageCount < beforeWindow.list.hiddenLocalMessageCount) {
+    if (sample.list.visibleMessageCount > beforeWindow.list.visibleMessageCount) {
       triggered = true;
       break;
     }
@@ -297,7 +296,7 @@ async function triggerPrepend(page, beforeWindow) {
   while (Date.now() < settleDeadline) {
     const sample = await readState(page, `settle-sample-${samples.length}`);
     samples.push(sample);
-    if (sample.list.visibleMessageCount > beforeWindow.list.visibleMessageCount || sample.list.hiddenLocalMessageCount < beforeWindow.list.hiddenLocalMessageCount) break;
+    if (sample.list.visibleMessageCount > beforeWindow.list.visibleMessageCount) break;
     await sleep(100);
   }
   await sleep(360);
@@ -356,7 +355,7 @@ async function main() {
     }, { tokenValue: auth.token, userValue: auth.user || {} });
 
     await page.goto(`${proxyBase}/chat/?id=${conversationId}`, { waitUntil: "domcontentloaded", timeout: 60000 });
-    await page.waitForSelector('[data-testid="virtuoso-scroller"]', { timeout: 30000 });
+    await page.waitForSelector('[data-testid="chat-history-scroll-container"]', { timeout: 30000 });
     await page.waitForFunction(() => document.querySelectorAll('[data-chat-message-row="true"]').length > 0, null, { timeout: 30000 });
     await page.waitForTimeout(5000);
 
@@ -395,7 +394,6 @@ async function main() {
     const topDelta = anchorBefore.found && anchorAfter.found ? Math.abs(anchorAfter.visibleTop - anchorBefore.visibleTop) : null;
     const settleTopDelta = anchorBefore.found && anchorAfterSettle.found ? Math.abs(anchorAfterSettle.visibleTop - anchorBefore.visibleTop) : null;
     const releasedVisibleCount = Math.max(0, afterPrepend.list.visibleMessageCount - beforePrepend.list.visibleMessageCount);
-    const releasedHiddenCount = Math.max(0, beforePrepend.list.hiddenLocalMessageCount - afterPrepend.list.hiddenLocalMessageCount);
     const changedLocalWindow = releasedVisibleCount > 0 || releasedHiddenCount > 0;
     const postPrependEvents = summarizeEvents(events, prependStartedAt);
     const postPrependLongTasks = longTasks.filter((entry) => entry.startTime >= prependStartedAt);
@@ -453,8 +451,6 @@ async function main() {
       initialVisibleMessageCount: initial.list.visibleMessageCount,
       beforeVisibleMessageCount: beforePrepend.list.visibleMessageCount,
       afterVisibleMessageCount: afterPrepend.list.visibleMessageCount,
-      beforeHiddenLocalMessageCount: beforePrepend.list.hiddenLocalMessageCount,
-      afterHiddenLocalMessageCount: afterPrepend.list.hiddenLocalMessageCount,
       olderPageRequests: requestStats.olderPage,
       restoreRequests: requestStats.restoreRequests,
       olderPageRequestDetails: requestStats.olderPageRequests,

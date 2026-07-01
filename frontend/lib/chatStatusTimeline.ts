@@ -123,6 +123,13 @@ const STEP_STATUS_ORDER: Record<ChatStatusStepStatus, number> = {
   stopped: 3,
 };
 
+function mergeTimelineStepStatus(current: ChatStatusStepStatus, next: ChatStatusStepStatus): ChatStatusStepStatus {
+  if (current === "running" || next === "running") return "running";
+  if (current === "failed" || next === "failed") return "failed";
+  if (current === "stopped" || next === "stopped") return "stopped";
+  return "completed";
+}
+
 export function getOrderedTimelineSteps(steps: ChatStatusTimelineStep[] | undefined): ChatStatusTimelineStep[] {
   if (!steps?.length) return [];
   const terminalKinds = new Set(
@@ -130,19 +137,32 @@ export function getOrderedTimelineSteps(steps: ChatStatusTimelineStep[] | undefi
       .filter((step) => step.status !== "running")
       .map((step) => step.kind)
   );
-  return steps
+  const byKind = new Map<ChatStatusStepKind, ChatStatusTimelineStep>();
+  steps
     .filter((step) => !(step.status === "running" && terminalKinds.has(step.kind)))
-    .map((step, index) => ({ step, index }))
-    .sort((a, b) => {
-      const kindDiff = STEP_KIND_ORDER[a.step.kind] - STEP_KIND_ORDER[b.step.kind];
-      if (kindDiff !== 0) return kindDiff;
-      const startedDiff = (a.step.startedAt || 0) - (b.step.startedAt || 0);
-      if (startedDiff !== 0) return startedDiff;
-      const statusDiff = STEP_STATUS_ORDER[a.step.status] - STEP_STATUS_ORDER[b.step.status];
-      if (statusDiff !== 0) return statusDiff;
-      return a.index - b.index;
-    })
-    .map(({ step }) => step);
+    .forEach((step) => {
+      const existing = byKind.get(step.kind);
+      if (!existing) {
+        byKind.set(step.kind, { ...step });
+        return;
+      }
+      byKind.set(step.kind, {
+        ...existing,
+        id: eventId(step.kind, mergeTimelineStepStatus(existing.status, step.status)),
+        status: mergeTimelineStepStatus(existing.status, step.status),
+        startedAt: Math.min(existing.startedAt || step.startedAt, step.startedAt || existing.startedAt),
+        endedAt: (existing.endedAt || existing.startedAt || 0) + Math.max(0, (step.endedAt || step.startedAt || 0) - (step.startedAt || 0)),
+        count: Math.max(existing.count || 0, step.count || 0) || existing.count || step.count,
+        label: step.label || existing.label,
+      });
+    });
+  return Array.from(byKind.values()).sort((a, b) => {
+    const kindDiff = STEP_KIND_ORDER[a.kind] - STEP_KIND_ORDER[b.kind];
+    if (kindDiff !== 0) return kindDiff;
+    const statusDiff = STEP_STATUS_ORDER[a.status] - STEP_STATUS_ORDER[b.status];
+    if (statusDiff !== 0) return statusDiff;
+    return (a.startedAt || 0) - (b.startedAt || 0);
+  });
 }
 
 function deriveTimelineSteps(prev: TimelineSource, next: TimelineSource, patch: TimelinePatch, ts: number): Omit<ChatStatusTimelineStep, "id">[] {
@@ -197,7 +217,14 @@ export function updateStatusTimeline(
     timeline = upsertStep(timeline, step);
   }
   if (patch.completedAt || patch.phase === "completed" || patch.phase === "failed" || patch.phase === "stopped") {
-    timeline = timeline.map((step) => step.status === "running" ? { ...step, endedAt: step.endedAt ?? ts } : step);
+    const terminalStatus: ChatStatusStepStatus = patch.phase === "failed"
+      ? "failed"
+      : patch.phase === "stopped"
+        ? "stopped"
+        : "completed";
+    timeline = timeline.map((step) => step.status === "running"
+      ? { ...step, id: eventId(step.kind, terminalStatus), status: terminalStatus, endedAt: step.endedAt ?? ts }
+      : step);
   }
   return timeline.length ? timeline : previousTimeline;
 }

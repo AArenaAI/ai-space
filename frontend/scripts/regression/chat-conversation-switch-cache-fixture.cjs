@@ -35,7 +35,7 @@ function textIncludes(text, needle) {
     const missLoading = await page.evaluate(() => ({
       text: document.body.innerText,
       rows: document.querySelectorAll('[data-chat-message-row="true"]').length,
-      hasScroller: Boolean(document.querySelector('[data-testid="virtuoso-scroller"]')),
+      hasScroller: Boolean(document.querySelector('[data-testid="chat-history-scroll-container"]')),
       hasLoadingState: Boolean(document.querySelector('[data-testid="chat-history-loading-state"]')),
       phase: document.querySelector('[data-testid="chat-conversation-switch-cache-fixture"]')?.getAttribute("data-phase"),
     }));

@@ -1,0 +1,7 @@
+export const CHAT_ACTIVITY_PANEL_WIDTH_PX = 384;
+export const CHAT_ACTIVITY_PANEL_WIDTH_CLASS = "lg:right-[384px]";
+export const CHAT_ACTIVITY_PANEL_MARGIN_CLASS = "lg:mr-[384px]";
+export const CHAT_CONTENT_MAX_WIDTH_CLASS = "max-w-[800px]";
+export const CHAT_CONTENT_X_PADDING_CLASS = "px-4";
+export const CHAT_COMPOSER_SHELL_CLASS = `${CHAT_CONTENT_MAX_WIDTH_CLASS} mx-auto`;
+export const CHAT_MESSAGE_ROW_CLASS = `${CHAT_CONTENT_MAX_WIDTH_CLASS} mx-auto ${CHAT_CONTENT_X_PADDING_CLASS}`;

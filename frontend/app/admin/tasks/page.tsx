@@ -69,6 +69,7 @@ export default function ManagementTasksPage() {
   const allTasks = data?.tasks || [];
   const visibleTasks = useMemo(() => allTasks.filter((task) => matchesBillingFilter(task, billingFilter)), [allTasks, billingFilter]);
   const usageRollup = useMemo(() => rollupTaskUsage(visibleTasks), [visibleTasks]);
+  const estimateRollup = useMemo(() => rollupTaskEstimates(visibleTasks), [visibleTasks]);
   const billingStats = useMemo(() => summarizeBillingStates(allTasks), [allTasks]);
   const costedTasks = visibleTasks.filter((task) => (task.usage?.requests || 0) > 0).length;
 
@@ -100,7 +101,7 @@ export default function ManagementTasksPage() {
         <MetricCard title="任务总数" value={formatNumber(data?.total || 0)} icon={ClipboardList} helper="当前状态筛选结果" />
         <MetricCard title="运行中" value={formatNumber(runningCount)} icon={RefreshCw} helper="running / streaming / retrying" />
         <MetricCard title="已关联成本" value={formatRMB(usageRollup.cost_rmb)} icon={Wallet} helper={`${costedTasks} 个任务已有账本 · ${formatNumber(usageRollup.requests)} 条 usage`} />
-        <MetricCard title="计费中" value={formatNumber(billingStats.pending)} icon={RefreshCw} helper="运行中且尚未写账本" />
+        <MetricCard title="预估成本" value={formatRMB(estimateRollup.estimated)} icon={Wallet} helper={estimateRollup.compared ? `偏差 ${formatSignedRMB(estimateRollup.actual - estimateRollup.estimated)}` : "按模型价格基线估算"} />
         <MetricCard title="失败无成本" value={formatNumber(billingStats.free_failed)} icon={ServerCrash} helper="失败且无外部调用成本" />
         <MetricCard title="完成" value={formatNumber(completedCount)} icon={ClipboardList} helper="completed" />
       </div>
@@ -135,15 +136,15 @@ export default function ManagementTasksPage() {
         <div className="overflow-x-auto">
           <table className="min-w-[1180px] w-full text-sm">
             <thead className="text-left text-xs uppercase tracking-wide text-text-tertiary">
-              <tr><th className="py-3">任务</th><th>状态</th><th>用户</th><th>模型</th><th>消耗</th><th>用量</th><th>账本</th><th>会话/消息</th><th>错误</th><th>更新时间</th><th></th></tr>
+              <tr><th className="py-3">任务</th><th>状态</th><th>用户</th><th>模型</th><th>消耗</th><th>预估</th><th>用量</th><th>账本</th><th>会话/消息</th><th>错误</th><th>更新时间</th><th></th></tr>
             </thead>
             <tbody className="divide-y divide-surface-border text-text-secondary">
               {loading ? (
-                <tr><td colSpan={11} className="py-8 text-center text-text-tertiary">正在加载任务…</td></tr>
+                <tr><td colSpan={12} className="py-8 text-center text-text-tertiary">正在加载任务…</td></tr>
               ) : allTasks.length === 0 ? (
-                <tr><td colSpan={11} className="py-8 text-center text-text-tertiary"><Search className="mx-auto mb-2 h-5 w-5" />暂无任务。可以切换到“全部”或扩大状态范围。</td></tr>
+                <tr><td colSpan={12} className="py-8 text-center text-text-tertiary"><Search className="mx-auto mb-2 h-5 w-5" />暂无任务。可以切换到“全部”或扩大状态范围。</td></tr>
               ) : visibleTasks.length === 0 ? (
-                <tr><td colSpan={11} className="py-8 text-center text-text-tertiary"><Search className="mx-auto mb-2 h-5 w-5" />当前计费状态筛选下没有任务，可以切换到“全部计费”。</td></tr>
+                <tr><td colSpan={12} className="py-8 text-center text-text-tertiary"><Search className="mx-auto mb-2 h-5 w-5" />当前计费状态筛选下没有任务，可以切换到“全部计费”。</td></tr>
               ) : visibleTasks.map((task) => {
                 const usage = task.usage;
                 const billing = billingState(task);
@@ -163,6 +164,7 @@ export default function ManagementTasksPage() {
                       <div className="font-medium text-text-primary">{usage?.requests ? formatRMB(usage.cost_rmb) : billing.label}</div>
                       <div className="text-xs text-text-tertiary">{usage?.requests ? `${formatRMB(usage.cost_rmb / Math.max(usage.requests, 1))}/次` : billing.helper}</div>
                     </td>
+                    <td className="pr-4 text-xs text-text-secondary">{formatTaskEstimate(task)}</td>
                     <td className="pr-4 text-xs text-text-secondary">{formatUsageUnits(usage)}</td>
                     <td className="pr-4">
                       {usage?.requests ? <StatusBadge tone="blue">{formatNumber(usage.requests)} 条</StatusBadge> : <StatusBadge tone={billing.tone}>{billing.short}</StatusBadge>}
@@ -200,9 +202,10 @@ function TaskDrawer({ task, onClose }: { task: AdminTask; onClose: () => void })
           <button onClick={onClose} className="rounded-xl border border-surface-border px-3 py-2 text-sm text-text-secondary hover:text-text-primary">关闭</button>
         </div>
 
-        <div className="mt-5 grid gap-3 sm:grid-cols-4">
-          <MiniMetric label="成本" value={usage?.requests ? formatRMB(usage.cost_rmb) : billing.label} helper={usage?.requests ? `${formatNumber(usage.requests)} 条账本` : billing.helper} />
-          <MiniMetric label="平均" value={usage?.requests ? `${formatRMB(usage.cost_rmb / Math.max(usage.requests, 1))}/次` : "-"} helper="按关联账本" />
+        <div className="mt-5 grid gap-3 sm:grid-cols-5">
+          <MiniMetric label="实际成本" value={usage?.requests ? formatRMB(usage.cost_rmb) : billing.label} helper={usage?.requests ? `${formatNumber(usage.requests)} 条账本` : billing.helper} />
+          <MiniMetric label="预估成本" value={formatEstimateCost(task)} helper={task.cost_estimate?.available ? "4K输入/2K输出基线" : "价格缺失"} />
+          <MiniMetric label="偏差" value={formatEstimateDelta(task)} helper="实际 - 预估" />
           <MiniMetric label="用量" value={formatUsageUnits(usage)} helper="token / 图片 / 视频" />
           <MiniMetric label="计费状态" value={billing.label} helper={usage?.last_usage_at ? `最后账本 ${formatDateTime(usage.last_usage_at)}` : billing.helper} />
         </div>
@@ -238,6 +241,16 @@ function TaskDrawer({ task, onClose }: { task: AdminTask; onClose: () => void })
             {task.error_message && <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-600 dark:text-red-300">{task.error_message}</div>}
           </section>
         </div>
+
+        <section className="mt-5 rounded-2xl border border-surface-border bg-surface-elevated/60 p-4">
+          <h3 className="text-sm font-semibold text-text-primary">后台预估</h3>
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <MiniMetric label="预估输入" value={`${formatNumber(task.cost_estimate?.estimated_prompt_tokens || 0)} tok`} helper={`¥/1K ${(task.cost_estimate?.input_unit_price_rmb || 0).toFixed(4)}`} />
+            <MiniMetric label="预估输出" value={`${formatNumber(task.cost_estimate?.estimated_completion_tokens || 0)} tok`} helper={`¥/1K ${(task.cost_estimate?.output_unit_price_rmb || 0).toFixed(4)}`} />
+            <MiniMetric label="预估方法" value={task.cost_estimate?.available ? "可用" : "不可用"} helper={task.cost_estimate?.method || "-"} />
+          </div>
+          <p className="mt-3 text-xs text-text-tertiary">{task.cost_estimate?.note || "暂无预估说明"}</p>
+        </section>
 
         <section className="mt-5 rounded-2xl border border-surface-border bg-surface-elevated/60 p-4">
           <div className="mb-3 flex items-center justify-between">
@@ -331,6 +344,45 @@ function formatUsageUnits(usage?: AdminTaskUsageSummary) {
   if (usage.character_count) parts.push(`${formatNumber(usage.character_count)} 字符`);
   if (usage.audio_seconds) parts.push(`${formatNumber(usage.audio_seconds)} 秒音频`);
   return parts.length ? parts.join(" · ") : `${formatNumber(usage.requests)} 次调用`;
+}
+
+
+function rollupTaskEstimates(tasks: AdminTask[]) {
+  return tasks.reduce((acc, task) => {
+    const estimate = task.cost_estimate;
+    if (!estimate?.available) return acc;
+    acc.estimated += estimate.estimated_total_cost_rmb || 0;
+    if ((task.usage?.requests || 0) > 0) {
+      acc.actual += task.usage?.cost_rmb || 0;
+      acc.compared += 1;
+    }
+    return acc;
+  }, { estimated: 0, actual: 0, compared: 0 });
+}
+
+function formatTaskEstimate(task: AdminTask) {
+  const estimate = task.cost_estimate;
+  if (!estimate?.available) return estimate?.note || "-";
+  const delta = (task.usage?.requests || 0) > 0 ? ` · ${formatSignedRMB(estimate.delta_cost_rmb)}` : "";
+  return `${formatRMB(estimate.estimated_total_cost_rmb)}${delta}`;
+}
+
+function formatEstimateCost(task: AdminTask) {
+  const estimate = task.cost_estimate;
+  if (!estimate?.available) return "-";
+  return formatRMB(estimate.estimated_total_cost_rmb || 0);
+}
+
+function formatEstimateDelta(task: AdminTask) {
+  const estimate = task.cost_estimate;
+  if (!estimate?.available || !task.usage?.requests) return "-";
+  const pct = Number.isFinite(estimate.delta_rate) ? ` (${(estimate.delta_rate * 100).toFixed(0)}%)` : "";
+  return `${formatSignedRMB(estimate.delta_cost_rmb)}${pct}`;
+}
+
+function formatSignedRMB(value: number) {
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${formatRMB(value || 0)}`;
 }
 
 function usageLinkForTask(task: AdminTask) {

@@ -12,6 +12,9 @@ import type { ChatStreamRunResult } from "./chatStreamRunResult";
 export type CompareAssistantLike = {
   id: string;
   model?: string;
+  serverMessageId?: number;
+  generationTaskId?: number;
+  serverGenerationStatus?: string;
 };
 
 export type CompareAbortReason = "user" | "navigation" | null | undefined;
@@ -53,6 +56,7 @@ export type RunCompareModelsOptions<TAssistant extends CompareAssistantLike> = {
   templatePrefix?: string;
   skillKey?: string;
   messageFileIds?: string[];
+  explicitGroupContext?: CompareGroupContext;
   callbacks: CompareRunCallbacks<TAssistant>;
 };
 
@@ -121,6 +125,7 @@ export function buildCompareRunRequestBody({
   skillKey,
   messageFileIds,
   clientTimezone,
+  precreatedUserMessage,
 }: {
   assistant: CompareAssistantLike;
   index: number;
@@ -137,6 +142,7 @@ export function buildCompareRunRequestBody({
   skillKey?: string;
   messageFileIds?: string[];
   clientTimezone?: string;
+  precreatedUserMessage?: boolean;
 }): Record<string, any> {
   return buildCompareChatRequestBody({
     model: assistant.model || "",
@@ -147,7 +153,7 @@ export function buildCompareRunRequestBody({
     search,
     templateId,
     templatePrefix,
-    skipSaveUserMessage: shouldSkipSaveUserMessage(index),
+    skipSaveUserMessage: precreatedUserMessage || shouldSkipSaveUserMessage(index),
     groupId: requestGroupContext?.groupId,
     userMessageId: requestGroupContext?.userMessageId,
     groupIndex: index,
@@ -185,31 +191,67 @@ export async function runCompareModel<TAssistant extends CompareAssistantLike>({
       explicitContext: explicitGroupContext,
       currentContext: coordinator.getGroupContext(),
     });
-    const response = await fetchImpl(`${options.apiBaseUrl || ""}/api/chat`, {
+    const requestBody = buildCompareRunRequestBody({
+      assistant,
+      index,
+      requestGroupContext,
+      compareModelIds: options.compareModelIds,
+      modelMessages: options.modelMessages,
+      conversationId: options.conversationId,
+      reasoning: options.reasoning,
+      search: options.search,
+      templateId: options.templateId,
+      templatePrefix: options.templatePrefix,
+      skillKey: options.skillKey,
+      messageFileIds: options.messageFileIds,
+      clientTimezone: getClientTimezone(),
+      precreatedUserMessage: !!options.explicitGroupContext?.userMessageId,
+    });
+    const initResponse = await fetchImpl(`${options.apiBaseUrl || ""}/api/chat/init`, {
       method: "POST",
       headers: options.headers,
       signal: controller.signal,
-      body: JSON.stringify(buildCompareRunRequestBody({
-        assistant,
-        index,
-        requestGroupContext,
-        compareModelIds: options.compareModelIds,
-        modelMessages: options.modelMessages,
-        conversationId: options.conversationId,
-        reasoning: options.reasoning,
-        search: options.search,
-        templateId: options.templateId,
-        templatePrefix: options.templatePrefix,
-        skillKey: options.skillKey,
-        messageFileIds: options.messageFileIds,
-        clientTimezone: getClientTimezone(),
-      })),
+      body: JSON.stringify({ ...requestBody, stream: true, init_only: true }),
+    });
+    if (!initResponse.ok) {
+      const errorBody = await initResponse.json().catch(() => ({}));
+      const errorCode = errorBody.error || errorBody.code || "unknown";
+      const errorMsg = errorBody.message || "请求失败";
+      throw Object.assign(new Error(errorMsg), { errorCode, status: initResponse.status, needInvite: errorBody.need_invite });
+    }
+    const init = await initResponse.json();
+    const serverMessageId = Number(init.assistant_message_id || init.assistant_message?.id || 0) || undefined;
+    const generationTaskId = Number(init.task_id || init.assistant_message?.generation_task_id || 0) || undefined;
+    if (serverMessageId || generationTaskId) {
+      // Server-first compare path: once /api/chat/init returns, the assistant
+      // row is anchored to the persisted assistant/task identity before any
+      // stream delta is applied. Mutating the local assistant object keeps the
+      // subsequent stream owner, error handling, and final reconciliation on the
+      // same stable id instead of a UUID-only optimistic row.
+      const serverBoundId = generationTaskId ? `assistant-task:${generationTaskId}` : String(serverMessageId);
+      (assistant as any).id = serverBoundId;
+      (assistant as any).serverMessageId = serverMessageId;
+      (assistant as any).generationTaskId = generationTaskId;
+      (assistant as any).serverGenerationStatus = init.assistant_message?.server_generation_status || init.assistant_message?.generation_status || "running";
+      options.callbacks.onRecoverableResult(assistant, {
+        serverMessageId,
+        generationTaskId,
+        lastSequence: Number(init.assistant_message?.last_sequence_number || 0) || 0,
+        content: "",
+        useBackground: true,
+        sawDone: false,
+        recoverable: false,
+      });
+    }
+    const response = await fetchImpl(`${options.apiBaseUrl || ""}/api/tasks/${generationTaskId}/stream?after=0`, {
+      headers: options.headers,
+      signal: controller.signal,
     });
     if (!response.ok) {
       const errorBody = await response.json().catch(() => ({}));
-      const errorCode = errorBody.error || errorBody.code || "unknown";
-      const errorMsg = errorBody.message || "请求失败";
-      throw Object.assign(new Error(errorMsg), { errorCode, status: response.status, needInvite: errorBody.need_invite });
+      const errorCode = errorBody.error || errorBody.code || "task_stream_failed";
+      const errorMsg = errorBody.message || "连接生成任务失败";
+      throw Object.assign(new Error(errorMsg), { errorCode, status: response.status });
     }
 
     streamResult = await options.callbacks.streamResponse(
@@ -252,6 +294,18 @@ export async function runCompareModels<TAssistant extends CompareAssistantLike>(
 
   const firstAssistant = options.assistantMessages[0];
   if (!firstAssistant) return;
+
+  if (options.explicitGroupContext?.groupId && options.explicitGroupContext.userMessageId) {
+    coordinator.setGroupContext(options.explicitGroupContext);
+    await Promise.all(options.assistantMessages.map((assistant, index) => runCompareModel({
+      assistant,
+      index,
+      explicitGroupContext: options.explicitGroupContext,
+      coordinator,
+      options,
+    })));
+    return;
+  }
 
   const firstRun = runCompareModel({
     assistant: firstAssistant,

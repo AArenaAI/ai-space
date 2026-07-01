@@ -46,6 +46,7 @@ test("buildFinalizingPatch clears completedAt and sets finalizing status", () =>
     completedAt: undefined,
     activityStatus: { kind: "generating", status: "running", label: "同步最终内容" },
     searchStatus: undefined,
+    phase: "finalizing",
   });
 });
 
@@ -56,7 +57,9 @@ test("buildStreamErrorPatch clears activity and search transient state", () => {
     requestId: "req_1",
     activityStatus: undefined,
     searchStatus: undefined,
+    serverGenerationStatus: "failed",
     searchSources: undefined,
+    phase: "failed",
   });
 });
 
@@ -66,6 +69,8 @@ test("buildStoppedPatch marks stopped and completed time", () => {
     completedAt: 123,
     activityStatus: undefined,
     searchStatus: undefined,
+    serverGenerationStatus: "cancelled",
+    phase: "stopped",
   });
 });
 
@@ -76,6 +81,7 @@ test("buildRecoverableBusyPatch preserves task ids and clears completedAt", () =
     generationTaskId: 22,
     activityStatus,
     completedAt: undefined,
+    phase: "waiting_provider",
   });
 });
 
@@ -84,6 +90,8 @@ test("buildCompletedPatch clears activity", () => {
     completedAt: 456,
     activityStatus: undefined,
     searchStatus: undefined,
+    serverGenerationStatus: "completed",
+    phase: "completed",
   });
 });
 
@@ -99,6 +107,8 @@ test("buildDisplayErrorPatch can omit completedAt for single chat legacy behavio
     completedAt: undefined,
     activityStatus: undefined,
     searchStatus: undefined,
+    serverGenerationStatus: "failed",
+    phase: "failed",
   });
 });
 

@@ -3,6 +3,7 @@ import type { RealtimeData } from "./streaming";
 import { getActivityLabel } from "./chatActivityStatus";
 import { deriveUserGenerationPhase, getGenerationPhaseWithElapsedLabel, type UserGenerationPhase } from "./chatGenerationPhase";
 import { buildFallbackCompletedTimeline, getCompletedStatusLabel, type ChatStatusTimelineStep } from "./chatStatusTimeline";
+import { resolveChatMessageRuntimeState } from "./chatMessageRuntimeState";
 
 export type MessageDisplayStatus = {
   key: string;
@@ -75,7 +76,8 @@ function statusPhase(status: ChatActivityStatus["status"]): MessageDisplayStatus
 }
 
 export function deriveMessageStatuses({ message, realtime, isStreaming, t = fallbackT }: StatusInput): MessageDisplayStatus[] {
-  const errorCode = realtime?.errorCode ?? message.errorCode;
+  const runtimeState = resolveChatMessageRuntimeState({ message, realtime });
+  const errorCode = runtimeState.errorCode;
   if (errorCode) {
     return [{
       key: `error:${errorCode}`,
@@ -84,12 +86,12 @@ export function deriveMessageStatuses({ message, realtime, isStreaming, t = fall
       label: errorCode,
       active: false,
       tone: "red",
-      retryable: realtime?.retryable ?? message.retryable,
-      requestId: realtime?.requestId ?? message.requestId,
+      retryable: runtimeState.retryable,
+      requestId: runtimeState.requestId,
     }];
   }
 
-  if (realtime?.stopped || message.stopped) {
+  if (runtimeState.stopped) {
     return [{
       key: "stopped",
       kind: "stopped",
@@ -100,20 +102,20 @@ export function deriveMessageStatuses({ message, realtime, isStreaming, t = fall
     }];
   }
 
-  const activity = coerceActivityStatus(realtime?.activityStatus ?? message.activityStatus);
-  const searchStatus = realtime?.searchStatus ?? message.searchStatus;
-  const searchSources = realtime?.searchSources ?? message.searchSources;
-  const searchSourcesCount = realtime?.searchSourcesCount ?? message.searchSourcesCount;
+  const activity = coerceActivityStatus(runtimeState.activityStatus);
+  const searchStatus = runtimeState.searchStatus;
+  const searchSources = runtimeState.searchSources;
+  const searchSourcesCount = runtimeState.searchSourcesCount;
   const sourceCount = typeof searchSourcesCount === "number" ? searchSourcesCount : (searchSources?.length || 0);
-  const completedAt = realtime?.completedAt ?? message.completedAt;
-  const generationStartedAt = realtime?.generationStartedAt ?? message.generationStartedAt ?? message.createdAt;
-  const statusTimeline = realtime?.statusTimeline ?? message.statusTimeline;
+  const completedAt = runtimeState.completedAt;
+  const generationStartedAt = runtimeState.generationStartedAt ?? message.createdAt;
+  const statusTimeline = runtimeState.statusTimeline;
   const completedStatusTimeline = statusTimeline?.length ? statusTimeline : buildFallbackCompletedTimeline({
     generationStartedAt,
     completedAt,
     searchSourcesCount: sourceCount || undefined,
-    hasReasoning: Boolean(realtime?.reasoningContent || message.reasoningContent),
-    hasAnswer: Boolean((realtime?.answerContent || realtime?.content || message.content || "").trim()),
+    hasReasoning: Boolean(runtimeState.reasoningContent),
+    hasAnswer: Boolean((runtimeState.answerContent || runtimeState.content || "").trim()),
   });
   const statuses: MessageDisplayStatus[] = [];
 
@@ -144,7 +146,7 @@ export function deriveMessageStatuses({ message, realtime, isStreaming, t = fall
     }];
   }
 
-  const generationPhase = deriveUserGenerationPhase(realtime ?? message, isStreaming);
+  const generationPhase = runtimeState.terminal ? undefined : deriveUserGenerationPhase(realtime ?? message, isStreaming);
 
   if (generationPhase) {
     const startedAt = realtime?.generationStartedAt || realtime?.updatedAt || message.createdAt || Date.now();
@@ -199,7 +201,7 @@ export function deriveMessageStatuses({ message, realtime, isStreaming, t = fall
     }
   }
 
-  const phase = realtime?.phase;
+  const phase = runtimeState.terminal ? runtimeState.phase : realtime?.phase;
   if (!statuses.length && phase) {
     if (phase === "failed") {
       statuses.push({ key: "phase:failed", kind: "error", phase: "failed", label: t("chat.status.generating"), active: false, tone: "red" });

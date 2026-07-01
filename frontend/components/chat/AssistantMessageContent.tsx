@@ -1,24 +1,45 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { ComponentType } from "react";
-import { AlertCircle, RotateCcw } from "lucide-react";
+import type { ComponentType, ReactNode } from "react";
+import { AlertCircle, RefreshCw } from "lucide-react";
 import { Message } from "@/lib/chatTypes";
-import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
-import { isMessageGenerating, parseThinkContent, sanitizeContent } from "@/lib/chatContent";
+import { isMessageGenerating } from "@/lib/chatContent";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
-import { StreamingText } from "./StreamingText";
-import { ThinkBlock } from "./ThinkBlock";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
+import { isTerminalMessage, resolveChatMessageRuntimeState, type ChatMessageRuntimeState } from "@/lib/chatMessageRuntimeState";
+import { getAssistantFailureCopy, isAssistantFailureState } from "@/lib/chatErrorState";
+import { AssistantAnswerRenderer } from "./AssistantAnswerRenderer";
 
 type MarkdownRendererComponent = ComponentType<{ content: string; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean; allowRichLiteFallback?: boolean; compactRichLitePreview?: boolean; messageId?: string | number }>;
 
 const JUST_COMPLETED_REASONING_EXPAND_MS = 5 * 60 * 1000;
 const JUST_COMPLETED_STREAMING_HOLD_MS = 800;
+const JUST_COMPLETED_VISUAL_STABLE_MS = 2500;
+
+function AssistantInlineError({ message, onRegenerate, t }: { message: Message; onRegenerate?: () => void; t: (key: string, params?: Record<string, string>) => string }) {
+  const copy = getAssistantFailureCopy(message, t) || t("chat.error.genericInline");
+  return (
+    <div className="my-1 inline-flex max-w-full items-center gap-2 rounded-xl border border-red-500/10 bg-red-500/[0.045] px-3 py-2 text-sm leading-relaxed text-text-secondary dark:bg-red-400/[0.07]">
+      <AlertCircle className="h-4 w-4 shrink-0 text-red-500/70" />
+      <span className="min-w-0 break-words">{copy}</span>
+      {message.retryable !== false && onRegenerate && (
+        <button
+          type="button"
+          onClick={onRegenerate}
+          className="ml-1 inline-flex shrink-0 items-center gap-1 rounded-lg border border-surface-border/70 bg-surface-card/70 px-2 py-1 text-xs font-medium text-text-secondary transition-colors hover:border-red-500/20 hover:bg-surface-elevated hover:text-text-primary"
+        >
+          <RefreshCw className="h-3 w-3" />
+          {t("chat.action.regenerate")}
+        </button>
+      )}
+    </div>
+  );
+}
 
 function mayStillRecoverMessage(msg: Message) {
-  return !msg.completedAt && !msg.stopped && !!(
+  return !isTerminalMessage(msg) && !!(
     msg.activityStatus ||
     msg.serverMessageId ||
     msg.generationTaskId ||
@@ -39,6 +60,8 @@ export function AssistantMessageContent({
   compactRichLitePreview = true,
   recoverEmptyContent = false,
   onRegenerate,
+  onOpenActivity,
+  inlineActivity,
 }: {
   message: Message;
   isStreaming: boolean;
@@ -50,107 +73,89 @@ export function AssistantMessageContent({
   compactRichLitePreview?: boolean;
   recoverEmptyContent?: boolean;
   onRegenerate?: () => void;
+  onOpenActivity?: () => void;
+  inlineActivity?: ReactNode;
 }) {
   const { t } = useI18n();
-  const realtime = useMessageRealtime(message.id);
-  const generating = isMessageGenerating(message, isStreaming);
+  const terminalMessage = isTerminalMessage(message);
+  const realtime = useMessageRealtime(message.id, !terminalMessage || isStreaming);
+  const runtimeState = resolveChatMessageRuntimeState({ message, realtime });
+  const generating = isMessageGenerating({ ...message, ...runtimeState }, isStreaming);
   const realtimeHasVisiblePayload = !!(
-    realtime?.content?.trim() ||
-    realtime?.answerContent?.trim() ||
-    realtime?.reasoningContent?.trim()
+    runtimeState.content?.trim() ||
+    runtimeState.answerContent?.trim() ||
+    runtimeState.reasoningContent?.trim()
   );
-  const completedAt = realtime?.completedAt;
+  const completedAt = runtimeState.terminalSource === "realtime" ? runtimeState.completedAt : undefined;
   const wasStreamingRef = useRef(false);
   const [keepCompletedStreaming, setKeepCompletedStreaming] = useState(false);
+  const [keepCompletedVisualStable, setKeepCompletedVisualStable] = useState(false);
   const [keepReasoningExpanded, setKeepReasoningExpanded] = useState(false);
   const justStoppedStreaming = wasStreamingRef.current && !generating;
-  const finalizingRealtime = !generating && (justStoppedStreaming || keepCompletedStreaming) && realtimeHasVisiblePayload;
-  const shouldRenderStreamingText = generating || finalizingRealtime || (!message.content && recoverEmptyContent && mayStillRecoverMessage(message));
+  const finalizingRealtime = !runtimeState.terminal && !generating && (justStoppedStreaming || keepCompletedStreaming) && realtimeHasVisiblePayload;
+  const stableCompletedVisual = keepCompletedVisualStable && realtimeHasVisiblePayload && runtimeState.terminal;
+  const shouldRenderStreamingText = generating || finalizingRealtime || stableCompletedVisual || (!runtimeState.content && recoverEmptyContent && mayStillRecoverMessage(message));
 
   useEffect(() => {
     if (!completedAt || !realtimeHasVisiblePayload) return;
     setKeepCompletedStreaming(true);
+    setKeepCompletedVisualStable(true);
     const timer = window.setTimeout(() => setKeepCompletedStreaming(false), JUST_COMPLETED_STREAMING_HOLD_MS);
-    return () => window.clearTimeout(timer);
+    const stableTimer = window.setTimeout(() => setKeepCompletedVisualStable(false), JUST_COMPLETED_VISUAL_STABLE_MS);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(stableTimer);
+    };
   }, [completedAt, realtimeHasVisiblePayload]);
 
   useEffect(() => {
     let timer: number | undefined;
+    let stableTimer: number | undefined;
     if (wasStreamingRef.current && !generating) {
       setKeepCompletedStreaming(true);
+      setKeepCompletedVisualStable(true);
       timer = window.setTimeout(() => setKeepCompletedStreaming(false), JUST_COMPLETED_STREAMING_HOLD_MS);
+      stableTimer = window.setTimeout(() => setKeepCompletedVisualStable(false), JUST_COMPLETED_VISUAL_STABLE_MS);
     }
     wasStreamingRef.current = generating;
     return () => {
       if (timer) window.clearTimeout(timer);
+      if (stableTimer) window.clearTimeout(stableTimer);
     };
   }, [generating, message.id]);
 
   useEffect(() => {
-    if (!(generating || finalizingRealtime) || !(realtime?.reasoningContent?.trim() || message.reasoningContent?.trim())) return;
+    if (!(generating || finalizingRealtime) || !runtimeState.reasoningContent?.trim()) return;
     setKeepReasoningExpanded(true);
     const timer = window.setTimeout(() => setKeepReasoningExpanded(false), JUST_COMPLETED_REASONING_EXPAND_MS);
     return () => window.clearTimeout(timer);
-  }, [finalizingRealtime, generating, message.id, message.reasoningContent, realtime?.reasoningContent]);
+  }, [finalizingRealtime, generating, message.id, runtimeState.reasoningContent]);
 
-  if (shouldRenderStreamingText) {
-    return (
-      <StreamingText
-        messageId={message.id}
-        content={message.content || ""}
-        reasoningContent={message.reasoningContent}
-        isStreaming={generating}
-        className="text-[15px] leading-relaxed text-text-primary"
-      />
-    );
+  const failureMessage = { ...message, content: runtimeState.content || message.content, errorCode: runtimeState.errorCode || message.errorCode, phase: runtimeState.phase };
+  if (isAssistantFailureState(failureMessage)) {
+    return <AssistantInlineError message={failureMessage} onRegenerate={onRegenerate} t={t} />;
   }
 
-  if (!message.content) {
-    return (
-      <div className="flex max-w-full flex-col gap-3 rounded-xl border border-amber-400/30 bg-amber-50/70 px-3 py-3 text-[15px] leading-relaxed text-amber-900 shadow-sm dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-100">
-        <div className="flex items-start gap-2">
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-300" />
-          <div className="min-w-0">
-            <div className="font-medium">{t("chat.interrupted.title")}</div>
-            <div className="mt-0.5 text-sm text-amber-800/80 dark:text-amber-100/75">{t("chat.interrupted.description")}</div>
-          </div>
-        </div>
-        {onRegenerate && (
-          <button
-            type="button"
-            onClick={onRegenerate}
-            className="inline-flex w-fit items-center gap-1.5 rounded-lg border border-amber-500/30 bg-white/70 px-3 py-1.5 text-sm font-medium text-amber-900 transition-colors hover:bg-white dark:bg-amber-950/30 dark:text-amber-100 dark:hover:bg-amber-900/35"
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-            {t("chat.interrupted.regenerate")}
-          </button>
-        )}
-      </div>
-    );
+  if (!shouldRenderStreamingText && !runtimeState.content) {
+    return <AssistantInlineError message={{ ...message, content: "", stopped: true }} onRegenerate={onRegenerate} t={t} />;
   }
-
-  const finalContent = message.reasoningContent?.trim() && !/<think>[\s\S]*?<\/think>/i.test(message.content || "")
-    ? `<think>${message.reasoningContent}</think>\n\n${message.content || ""}`.trim()
-    : message.content;
-  const { reasoning, answer, isThinking } = parseThinkContent(finalContent);
-  const cleanAnswer = sanitizeContent(answer);
 
   return (
-    <div className={cn("prose prose-sm max-w-none", className)}>
-      {reasoning && (
-        <ThinkBlock
-          content={reasoning}
-          isThinking={isThinking}
-          defaultExpanded={keepReasoningExpanded}
-          stabilizeCompletionHeight={keepReasoningExpanded}
-          shouldHydrateRichText={shouldHydrateRichText}
-          priorityHydrateRichText={priorityHydrateRichText}
-          allowRichLiteFallback={allowRichLiteFallback}
-          compactRichLitePreview={compactRichLitePreview}
-          messageId={message.id}
-        />
-      )}
-      <MarkdownRenderer content={cleanAnswer} shouldHydrateRichText={shouldHydrateRichText} priorityHydrateRichText={priorityHydrateRichText} allowRichLiteFallback={allowRichLiteFallback} compactRichLitePreview={compactRichLitePreview} messageId={message.id} />
-    </div>
+    <AssistantAnswerRenderer
+      message={message}
+      runtimeState={runtimeState}
+      generating={generating}
+      shouldRenderStreamingText={shouldRenderStreamingText}
+      keepReasoningExpanded={keepReasoningExpanded}
+      className={className}
+      MarkdownRenderer={MarkdownRenderer}
+      shouldHydrateRichText={shouldHydrateRichText}
+      priorityHydrateRichText={priorityHydrateRichText}
+      allowRichLiteFallback={allowRichLiteFallback}
+      compactRichLitePreview={compactRichLitePreview}
+      onOpenActivity={onOpenActivity}
+      inlineActivity={inlineActivity}
+      t={t}
+    />
   );
 }

@@ -43,19 +43,20 @@ func InitDB(databaseURL string) (*gorm.DB, error) {
 		&PPTTemplate{}, &PPTGeneration{}, &PPTSlide{}, &PPTRevision{},
 		&ImageChat{}, &ImageChatMessage{},
 		&MessageFavorite{},
-		&MessageGroup{},    // 新增
-		&ModelConfig{},     // 新增：模型配置表
-		&BadCase{},         // 新增：Bad Case 提交表
-		&BetaInvite{},      // 新增：内测邀请码
-		&BetaApplication{}, // 新增：内测申请表
-		&BetaConfig{},      // 新增：内测运营配置
-		&Changelog{},       // 新增：产品更新日志
-		&ChangelogRead{},   // 新增：已读记录
-		&AnalyticsEvent{},  // 新增：用户行为事件追踪
+		&MessageGroup{},      // 新增
+		&ModelConfig{},       // 新增：模型配置表
+		&BadCase{},           // 新增：Bad Case 提交表
+		&BetaInvite{},        // 新增：内测邀请码
+		&BetaApplication{},   // 新增：内测申请表
+		&BetaConfig{},        // 新增：内测运营配置
+		&Changelog{},         // 新增：产品更新日志
+		&ChangelogRead{},     // 新增：已读记录
+		&AnalyticsEvent{},    // 新增：用户行为事件追踪
 		&AlertRule{},         // 新增：告警规则
 		&AlertHistory{},      // 新增：告警历史
 		&AlertSilence{},      // 新增：告警静默
 		&EmailVerification{}, // 新增：邮箱验证码
+		&BetaFeedback{},      // 新增：内测反馈
 	); err != nil {
 		return nil, err
 	}

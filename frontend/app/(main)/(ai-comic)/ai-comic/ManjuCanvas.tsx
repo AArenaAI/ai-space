@@ -118,6 +118,7 @@ export interface ManjuCanvasProps {
 
 type SeedreamNodeData = {
   canvasNode: CanvasNode;
+  surfaceMode?: "day" | "night" | "eye";
   nodeAssets?: Array<{ id: string; publicId?: string; name: string; category?: string; url?: string; image_url?: string }>;
   mentionAssets?: ManjuCanvasProps["mentionAssets"];
   composerSettings?: ComposerSettings;
@@ -253,8 +254,44 @@ function generateAutoConnections(nodes: CanvasNode[]): CanvasConnection[] {
 
 const SeedreamFlowNode = memo(function SeedreamFlowNode({ data, selected }: NodeProps<Node<SeedreamNodeData>>) {
   const node = data.canvasNode;
+  const surfaceMode = data.surfaceMode || "night";
   const visual = nodeVisual(node.type);
   const Icon = visual.icon;
+  const cardTheme = surfaceMode === "day"
+    ? {
+        shell: "border-black/[0.08] bg-white/95 shadow-[0_22px_55px_rgba(25,23,18,0.14)] ring-1 ring-black/[0.04]",
+        selected: "border-black/40 shadow-[0_0_0_1px_rgba(0,0,0,0.18),0_26px_68px_rgba(25,23,18,0.20)]",
+        idle: "hover:border-black/20",
+        topLine: "via-black/20",
+        icon: "border-black/[0.08] bg-black/[0.04] text-black/70",
+        title: "text-[#171512]",
+        badge: "border-black/[0.08] bg-black/[0.04] text-black/[0.48]",
+        status: "text-black/[0.40]",
+        content: "border-t border-black/[0.06] bg-black/[0.025]",
+      }
+    : surfaceMode === "eye"
+      ? {
+          shell: "border-[#b5bfae]/60 bg-[#e2ecd9]/95 shadow-[0_22px_55px_rgba(53,54,46,0.13)] ring-1 ring-[#b5bfae]/35",
+          selected: "border-[#4f7f45]/60 shadow-[0_0_0_1px_rgba(79,127,69,0.24),0_26px_68px_rgba(53,54,46,0.18)]",
+          idle: "hover:border-[#4f7f45]/35",
+          topLine: "via-[#4f7f45]/25",
+          icon: "border-[#b5bfae]/60 bg-[#4f7f45]/[0.06] text-[#35362e]/70",
+          title: "text-[#35362e]",
+          badge: "border-[#b5bfae]/60 bg-[#4f7f45]/[0.06] text-[#35362e]/52",
+          status: "text-[#35362e]/42",
+          content: "border-t border-[#b5bfae]/55 bg-[#4f7f45]/[0.025]",
+        }
+      : {
+          shell: "border-white/[0.08] bg-[#101011]/95 shadow-[0_22px_55px_rgba(0,0,0,0.42)] ring-1 ring-white/[0.06]",
+          selected: "border-white/70 shadow-[0_0_0_1px_rgba(255,255,255,0.55),0_26px_68px_rgba(0,0,0,0.52)]",
+          idle: "hover:border-white/20",
+          topLine: "via-white/25",
+          icon: "border-white/[0.08] bg-white/[0.06] text-white/[0.72]",
+          title: "text-white",
+          badge: "border-white/[0.08] bg-white/[0.06] text-white/[0.45]",
+          status: "text-white/[0.34]",
+          content: "border-t border-white/[0.06] bg-white/[0.035]",
+        };
 
   return (
     <div
@@ -299,29 +336,31 @@ const SeedreamFlowNode = memo(function SeedreamFlowNode({ data, selected }: Node
       </Handle>
       <div
         className={cn(
-          "flex flex-1 flex-col overflow-hidden rounded-[24px] border bg-[#101011]/95 shadow-[0_22px_55px_rgba(0,0,0,0.42)] ring-1 ring-white/[0.06] backdrop-blur-xl",
-          selected ? "border-white/70 shadow-[0_0_0_1px_rgba(255,255,255,0.55),0_26px_68px_rgba(0,0,0,0.52)]" : "border-white/[0.08] hover:border-white/20"
+          "flex flex-1 flex-col overflow-hidden rounded-[24px] border backdrop-blur-xl",
+          cardTheme.shell,
+          selected ? cardTheme.selected : cardTheme.idle
         )}
       >
-        <div className="h-px bg-gradient-to-r from-transparent via-white/25 to-transparent" />
+        <div className={cn("h-px bg-gradient-to-r from-transparent to-transparent", cardTheme.topLine)} />
         <div className="flex items-center gap-3 px-4 py-3">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.06] text-white/[0.72]">
+          <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border", cardTheme.icon)}>
             <Icon className="h-[18px] w-[18px]" />
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <span className="truncate text-[15px] font-semibold tracking-[-0.01em] text-white">{node.title}</span>
-              <span className="shrink-0 rounded-full border border-white/[0.08] bg-white/[0.06] px-2.5 py-0.5 text-[11px] font-medium text-white/[0.45]">
+              <span className={cn("truncate text-[15px] font-semibold tracking-[-0.01em]", cardTheme.title)}>{node.title}</span>
+              <span className={cn("shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] font-medium", cardTheme.badge)}>
                 {visual.label}
               </span>
             </div>
-            <div className="mt-0.5 text-[11px] font-medium text-white/[0.34]">{statusLabel(node.status)}</div>
+            <div className={cn("mt-0.5 text-[11px] font-medium", cardTheme.status)}>{statusLabel(node.status)}</div>
           </div>
         </div>
         {!node.collapsed && (
-          <div className="flex flex-1 border-t border-white/[0.06] bg-white/[0.035] p-3">
+          <div className={cn("flex flex-1 p-3", cardTheme.content)}>
             <ManjuNodeContent
               node={node}
+              surfaceMode={surfaceMode}
               onUpload={canvasActionHandlers.current.onNodeUpload}
               onGenerate={canvasActionHandlers.current.onNodeGenerate}
               onPickFromLibrary={canvasActionHandlers.current.onNodePickFromLibrary}
@@ -404,7 +443,7 @@ function edgeWidth(connection?: CanvasConnection["type"]) {
 
 function toFlowNodes(
   nodes: CanvasNode[],
-  props: Pick<ManjuCanvasProps, "nodeAssets" | "mentionAssets" | "selectedNodeId" | "composerSettings" | "composerOptions" | "composerGenerating" | "assetRewriting" | "assetChatting"> & { viewportMoving?: boolean }
+  props: Pick<ManjuCanvasProps, "nodeAssets" | "mentionAssets" | "selectedNodeId" | "composerSettings" | "composerOptions" | "composerGenerating" | "assetRewriting" | "assetChatting" | "surfaceMode"> & { viewportMoving?: boolean }
 ): Node<SeedreamNodeData>[] {
   return nodes.map((node) => ({
     id: node.id,
@@ -414,6 +453,7 @@ function toFlowNodes(
     draggable: node.type !== "group",
     data: {
       canvasNode: node,
+      surfaceMode: props.surfaceMode,
       nodeAssets: props.nodeAssets,
       mentionAssets: props.mentionAssets,
       composerSettings: props.composerSettings,
@@ -426,7 +466,17 @@ function toFlowNodes(
   }));
 }
 
-function toFlowEdges(connections: CanvasConnection[]): Edge[] {
+function toFlowEdges(connections: CanvasConnection[], surfaceMode: ManjuCanvasProps["surfaceMode"] = "night"): Edge[] {
+  const labelStyle = surfaceMode === "day"
+    ? { fill: "#171512", fontSize: 11, fontWeight: 600 }
+    : surfaceMode === "eye"
+      ? { fill: "#35362e", fontSize: 11, fontWeight: 600 }
+      : { fill: "#e5e7eb", fontSize: 11, fontWeight: 600 };
+  const labelBgStyle = surfaceMode === "day"
+    ? { fill: "rgba(255,255,255,0.92)", fillOpacity: 0.92 }
+    : surfaceMode === "eye"
+      ? { fill: "rgba(226,236,217,0.94)", fillOpacity: 0.94 }
+      : { fill: "rgba(15,15,16,0.88)", fillOpacity: 0.88 };
   return connections.map((connection) => ({
     id: connection.id,
     source: connection.from,
@@ -445,8 +495,8 @@ function toFlowEdges(connections: CanvasConnection[]): Edge[] {
       strokeWidth: edgeWidth(connection.type),
       strokeDasharray: connection.type === "scene-transition" ? "7 6" : undefined,
     },
-    labelStyle: { fill: "#64748b", fontSize: 11, fontWeight: 600 },
-    labelBgStyle: { fill: "rgba(255,255,255,0.88)", fillOpacity: 0.88 },
+    labelStyle,
+    labelBgStyle,
     labelBgPadding: [6, 3],
     labelBgBorderRadius: 8,
   }));
@@ -533,10 +583,10 @@ function ManjuCanvasInner({
   const connectionsSignature = stableConnectionsSignature(connections);
   const stableConnections = useMemo(() => connections, [connectionsSignature]);
   const externalFlowNodes = useMemo(
-    () => toFlowNodes(stableNodes, { nodeAssets: stableNodeAssets, mentionAssets: stableMentionAssets, selectedNodeId, composerSettings, composerOptions, composerGenerating, assetRewriting, assetChatting, viewportMoving }),
-    [stableNodeAssets, stableMentionAssets, stableNodes, selectedNodeId, composerSettings, composerOptions, composerGenerating, assetRewriting, assetChatting, viewportMoving]
+    () => toFlowNodes(stableNodes, { nodeAssets: stableNodeAssets, mentionAssets: stableMentionAssets, selectedNodeId, composerSettings, composerOptions, composerGenerating, assetRewriting, assetChatting, surfaceMode, viewportMoving }),
+    [stableNodeAssets, stableMentionAssets, stableNodes, selectedNodeId, composerSettings, composerOptions, composerGenerating, assetRewriting, assetChatting, surfaceMode, viewportMoving]
   );
-  const externalFlowEdges = useMemo(() => toFlowEdges(stableConnections), [stableConnections]);
+  const externalFlowEdges = useMemo(() => toFlowEdges(stableConnections, surfaceMode), [stableConnections, surfaceMode]);
   const [flowNodes, setFlowNodes] = useState<Node<SeedreamNodeData>[]>(externalFlowNodes);
   const [flowEdges, setFlowEdges] = useState<Edge[]>(externalFlowEdges);
 
@@ -667,17 +717,33 @@ function ManjuCanvasInner({
         selectedText: "text-black/[0.58]",
         primaryButton: "bg-black text-white hover:bg-black/[0.86]",
         secondaryButton: "border-black/[0.1] bg-black/[0.04] text-black/[0.58] hover:bg-black/[0.08] hover:text-black",
+        nodeAddMenu: "border-black/[0.08] bg-white/[0.94] text-black shadow-[0_18px_60px_rgba(25,23,18,0.16)]",
+        nodeAddMenuTitle: "text-black/[0.66]",
+        nodeAddMenuItem: "text-black/[0.78] hover:bg-black/[0.06]",
+        nodeAddMenuItemDisabled: "cursor-not-allowed text-black/[0.26]",
+        nodeAddMenuIcon: "bg-black/[0.05] text-black/[0.72]",
+        nodeAddMenuIconDisabled: "bg-black/[0.04] text-black/[0.24]",
+        nodeAddMenuBadge: "bg-black/[0.08] text-black/[0.62]",
+        nodeAddMenuChevron: "text-black/[0.38]",
       }
     : surfaceMode === "eye"
       ? {
-          canvas: "border-[#9d907b]/[0.24] bg-[#26231d] shadow-inner",
-          grid: "rgba(232,220,196,0.06)",
-          toolbar: "border-[#e8dcc4]/[0.12] bg-[#1e1b17]/[0.78] text-[#efe6d1] shadow-[0_12px_36px_rgba(0,0,0,0.28)]",
-          toolbarText: "text-[#efe6d1]/[0.62] hover:bg-[#efe6d1] hover:text-[#1d1a15]",
-          selectedPanel: "border-[#e8dcc4]/[0.12] bg-[#1e1b17]/[0.78] shadow-[0_12px_36px_rgba(0,0,0,0.28)]",
-          selectedText: "text-[#efe6d1]/[0.62]",
-          primaryButton: "bg-[#efe6d1] text-[#1d1a15] hover:bg-[#efe6d1]/[0.9]",
-          secondaryButton: "border-[#efe6d1]/[0.12] bg-[#efe6d1]/[0.06] text-[#efe6d1]/[0.62] hover:bg-[#efe6d1]/[0.1] hover:text-[#efe6d1]",
+          canvas: "border-[#b5bfae]/[0.24] bg-[#d4e0c8] shadow-inner",
+          grid: "rgba(53,54,46,0.08)",
+          toolbar: "border-[#b5bfae]/[0.12] bg-[#e2ecd9]/[0.78] text-[#4f7f45] shadow-[0_12px_36px_rgba(0,0,0,0.28)]",
+          toolbarText: "text-[#35362e]/[0.62] hover:bg-[#4f7f45] hover:text-white",
+          selectedPanel: "border-[#b5bfae]/[0.12] bg-[#e2ecd9]/[0.78] shadow-[0_12px_36px_rgba(0,0,0,0.28)]",
+          selectedText: "text-[#35362e]/[0.62]",
+          primaryButton: "bg-[#4f7f45] text-white hover:bg-[#3f6937]",
+          secondaryButton: "border-[#4f7f45]/[0.12] bg-[#4f7f45]/[0.06] text-[#35362e]/[0.62] hover:bg-[#4f7f45]/[0.1] hover:text-[#35362e]",
+          nodeAddMenu: "border-[#b5bfae]/[0.18] bg-[#e2ecd9]/[0.94] text-[#35362e] shadow-[0_18px_60px_rgba(53,54,46,0.18)]",
+          nodeAddMenuTitle: "text-[#35362e]/[0.66]",
+          nodeAddMenuItem: "text-[#35362e]/[0.78] hover:bg-[#4f7f45]/[0.08]",
+          nodeAddMenuItemDisabled: "cursor-not-allowed text-[#35362e]/[0.28]",
+          nodeAddMenuIcon: "bg-[#4f7f45]/[0.08] text-[#4f7f45]",
+          nodeAddMenuIconDisabled: "bg-[#4f7f45]/[0.05] text-[#35362e]/[0.24]",
+          nodeAddMenuBadge: "bg-[#4f7f45]/[0.1] text-[#35362e]/[0.66]",
+          nodeAddMenuChevron: "text-[#35362e]/[0.42]",
         }
       : {
           canvas: "border-white/[0.08] bg-[#070707] shadow-inner",
@@ -688,6 +754,14 @@ function ManjuCanvasInner({
           selectedText: "text-white/[0.58]",
           primaryButton: "bg-white text-black hover:bg-white/[0.88]",
           secondaryButton: "border-white/[0.1] bg-white/[0.05] text-white/[0.58] hover:bg-white/[0.09] hover:text-white",
+          nodeAddMenu: "border-white/10 bg-[#242424] text-white shadow-[0_18px_60px_rgba(0,0,0,0.38)]",
+          nodeAddMenuTitle: "text-white/[0.86]",
+          nodeAddMenuItem: "text-white/[0.88] hover:bg-white/10",
+          nodeAddMenuItemDisabled: "cursor-not-allowed text-white/[0.28]",
+          nodeAddMenuIcon: "bg-white/8 text-white/[0.86]",
+          nodeAddMenuIconDisabled: "bg-white/5 text-white/25",
+          nodeAddMenuBadge: "bg-white/12 text-white/75",
+          nodeAddMenuChevron: "text-white/[0.45]",
         };
 
   return (
@@ -697,17 +771,17 @@ function ManjuCanvasInner({
           display: flex;
           flex-direction: column;
           gap: 1px;
-          background: ${surfaceMode === "day" ? "rgba(255, 255, 255, 0.94)" : surfaceMode === "eye" ? "rgba(48, 43, 32, 0.92)" : "rgba(18, 18, 20, 0.92)"} !important;
-          border-color: ${surfaceMode === "day" ? "rgba(20, 20, 18, 0.10)" : surfaceMode === "eye" ? "rgba(232, 220, 196, 0.14)" : "rgba(255, 255, 255, 0.12)"} !important;
+          background: ${surfaceMode === "day" ? "rgba(255, 255, 255, 0.94)" : surfaceMode === "eye" ? "rgba(226, 236, 217, 0.94)" : "rgba(18, 18, 20, 0.92)"} !important;
+          border-color: ${surfaceMode === "day" ? "rgba(20, 20, 18, 0.10)" : surfaceMode === "eye" ? "rgba(53, 54, 46, 0.14)" : "rgba(255, 255, 255, 0.12)"} !important;
           box-shadow: ${surfaceMode === "day" ? "0 18px 42px rgba(25, 23, 18, 0.14)" : "0 18px 42px rgba(0, 0, 0, 0.42)"} !important;
         }
         .seedream-react-flow .react-flow__controls-button {
           width: 34px !important;
           height: 34px !important;
-          background: ${surfaceMode === "day" ? "#ffffff" : surfaceMode === "eye" ? "#302b20" : "#121214"} !important;
+          background: ${surfaceMode === "day" ? "#ffffff" : surfaceMode === "eye" ? "#e2ecd9" : "#121214"} !important;
           border: 0 !important;
-          border-bottom: 1px solid ${surfaceMode === "day" ? "rgba(0, 0, 0, 0.10)" : surfaceMode === "eye" ? "rgba(232, 220, 196, 0.12)" : "rgba(255, 255, 255, 0.10)"} !important;
-          color: ${surfaceMode === "day" ? "#111111" : surfaceMode === "eye" ? "#efe6d1" : "#ffffff"} !important;
+          border-bottom: 1px solid ${surfaceMode === "day" ? "rgba(0, 0, 0, 0.10)" : surfaceMode === "eye" ? "rgba(53, 54, 46, 0.12)" : "rgba(255, 255, 255, 0.10)"} !important;
+          color: ${surfaceMode === "day" ? "#111111" : surfaceMode === "eye" ? "#35362e" : "#ffffff"} !important;
           fill: currentColor !important;
           transition: background 160ms ease, color 160ms ease, transform 160ms ease;
         }
@@ -723,8 +797,8 @@ function ManjuCanvasInner({
           stroke: currentColor !important;
         }
         .seedream-react-flow .react-flow__controls-button:hover {
-          background: ${surfaceMode === "day" ? "#0a0a0a" : surfaceMode === "eye" ? "#efe6d1" : "#ffffff"} !important;
-          color: ${surfaceMode === "day" ? "#ffffff" : surfaceMode === "eye" ? "#1d1a15" : "#050505"} !important;
+          background: ${surfaceMode === "day" ? "#0a0a0a" : surfaceMode === "eye" ? "#4f7f45" : "#ffffff"} !important;
+          color: ${surfaceMode === "day" ? "#ffffff" : surfaceMode === "eye" ? "#ffffff" : "#050505"} !important;
           fill: currentColor !important;
         }
       `}</style>
@@ -797,14 +871,14 @@ function ManjuCanvasInner({
           <Panel position="top-left" className="!m-0">
             <div className="fixed inset-0 z-[80]" onClick={closeNodeAddMenu} />
             <div
-              className="absolute z-[90] w-[224px] overflow-hidden rounded-2xl border border-white/10 bg-[#242424] p-2 shadow-[0_18px_60px_rgba(0,0,0,0.38)]"
+              className={cn("absolute z-[90] w-[224px] overflow-hidden rounded-2xl border p-2", surface.nodeAddMenu)}
               style={{
                 left: nodeAddMenu.side === "right" ? nodeAddMenu.x + 18 : nodeAddMenu.x - 242,
                 top: Math.max(12, nodeAddMenu.y - 22),
               }}
               onClick={(event) => event.stopPropagation()}
             >
-              <div className="px-2.5 pb-2 pt-1.5 text-[12px] font-semibold text-white/[0.86]">引用该节点生成</div>
+              <div className={cn("px-2.5 pb-2 pt-1.5 text-[12px] font-semibold", surface.nodeAddMenuTitle)}>引用该节点生成</div>
               <div className="space-y-0.5">
                 {getNodeAddMenuItems(stableNodes.find((node) => node.id === nodeAddMenu.nodeId)).map((item) => {
                   const Icon = item.icon;
@@ -816,17 +890,17 @@ function ManjuCanvasInner({
                       onClick={() => handleNodeMenuAction(item)}
                       className={cn(
                         "flex h-10 w-full items-center gap-3 rounded-xl px-2.5 text-left text-[13px] font-medium transition-colors",
-                        item.disabled ? "cursor-not-allowed text-white/[0.28]" : "text-white/[0.88] hover:bg-white/10"
+                        item.disabled ? surface.nodeAddMenuItemDisabled : surface.nodeAddMenuItem
                       )}
                     >
-                      <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-lg", item.disabled ? "bg-white/5 text-white/25" : "bg-white/8 text-white/[0.86]")}>
+                      <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-lg", item.disabled ? surface.nodeAddMenuIconDisabled : surface.nodeAddMenuIcon)}>
                         <Icon className="h-4 w-4" />
                       </span>
                       <span className="min-w-0 flex-1 truncate">{item.label}</span>
                       {item.badge && (
-                        <span className={cn("rounded-md px-1.5 py-0.5 text-[10px] font-bold", item.badge === "NEW" ? "bg-blue-500 text-white" : "bg-white/12 text-white/75")}>{item.badge}</span>
+                        <span className={cn("rounded-md px-1.5 py-0.5 text-[10px] font-bold", item.badge === "NEW" ? "bg-blue-500 text-white" : surface.nodeAddMenuBadge)}>{item.badge}</span>
                       )}
-                      {item.submenu && <ChevronRight className="h-3.5 w-3.5 text-white/[0.45]" />}
+                      {item.submenu && <ChevronRight className={cn("h-3.5 w-3.5", surface.nodeAddMenuChevron)} />}
                     </button>
                   );
                 })}

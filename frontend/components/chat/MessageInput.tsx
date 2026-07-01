@@ -13,6 +13,7 @@ import type { ModelRecommendationContext } from "@/lib/models/modelRecommendatio
 import { getClipboardFilesWithHtmlImages } from "@/lib/clipboardFiles";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import NetworkStatusHint from "./NetworkStatusHint";
+import { CHAT_COMPOSER_SHELL_CLASS } from "./chatLayout";
 
 const TEXTAREA_MIN_HEIGHT = 92;
 const TEXTAREA_MAX_HEIGHT = 180;
@@ -581,7 +582,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
 
   return (
     <div className="shrink-0 px-4 pb-6 pt-6">
-      <form onSubmit={handleSubmit} className="max-w-[800px] mx-auto">
+      <form onSubmit={handleSubmit} className={CHAT_COMPOSER_SHELL_CLASS}>
         <NetworkStatusHint
           isOffline={isOffline}
           justRestored={justRestored}

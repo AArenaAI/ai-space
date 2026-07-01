@@ -73,6 +73,36 @@ func (h *PaymentHandler) planCatalog() map[string]planDef {
 	}
 }
 
+func (h *PaymentHandler) resolvePlan(code string) (planDef, error) {
+	normalized := strings.ToLower(strings.TrimSpace(code))
+	if normalized == "" || normalized == "free" {
+		return planDef{}, errors.New("不支持的会员套餐")
+	}
+	plan, ok := h.planCatalog()[normalized]
+	if !ok {
+		return planDef{}, errors.New("不支持的会员套餐")
+	}
+
+	var dbPlan models.BillingPlan
+	if err := h.db.Where("code = ? AND enabled = ? AND public_visible = ?", normalized, true, true).First(&dbPlan).Error; err == nil {
+		plan.Name = firstNonEmpty(dbPlan.Name, plan.Name)
+		plan.AmountCents = dbPlan.PriceCents
+		if dbPlan.BasicCredits != 0 {
+			plan.BasicCredits = dbPlan.BasicCredits
+		}
+		if dbPlan.AdvancedCredits != 0 {
+			plan.AdvancedCredits = dbPlan.AdvancedCredits
+		}
+		if dbPlan.EliteCredits != 0 {
+			plan.EliteCredits = dbPlan.EliteCredits
+		}
+	}
+	if plan.AmountCents <= 0 {
+		return planDef{}, errors.New("支付价格尚未配置，暂不能创建订单")
+	}
+	return plan, nil
+}
+
 type createFubeiAlipayOrderRequest struct {
 	PlanCode string `json:"plan_code" binding:"required"`
 }
@@ -90,13 +120,9 @@ func (h *PaymentHandler) CreateFubeiAlipayOrder(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请选择会员套餐"})
 		return
 	}
-	plan, ok := h.planCatalog()[strings.ToLower(strings.TrimSpace(req.PlanCode))]
-	if !ok || plan.Code == "free" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "不支持的会员套餐"})
-		return
-	}
-	if plan.AmountCents <= 0 {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "支付价格尚未配置，暂不能创建订单"})
+	plan, err := h.resolvePlan(req.PlanCode)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if strings.TrimSpace(h.cfg.PublicAppURL) == "" {

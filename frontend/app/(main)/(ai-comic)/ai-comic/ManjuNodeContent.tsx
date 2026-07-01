@@ -22,6 +22,7 @@ import type { CanvasNode } from "./ManjuCanvas";
 
 export interface ManjuNodeContentProps {
   node: CanvasNode;
+  surfaceMode?: "day" | "night" | "eye";
   onPlayVideo?: (nodeId: string) => void;
   onPreviewImage?: (nodeId: string) => void;
   onUpload?: (nodeId: string) => void;
@@ -53,6 +54,7 @@ const STATUS_CONFIG: Record<string, { dot: string; label: string }> = {
 
 export default function ManjuNodeContent({
   node,
+  surfaceMode = "night",
   onPreviewImage,
   onUpload,
   onGenerate,
@@ -111,71 +113,121 @@ export default function ManjuNodeContent({
   const isVideoGenerating = node.type === "video";
   const generatingLabel = isVideoGenerating ? "正在生成视频" : isAssetNode ? (isCharacter ? "正在生成角色图" : "正在生成资产图") : "正在生成图片";
   const generatingHint = isVideoGenerating ? "完成后会自动显示在这个视频节点" : isAssetNode ? "完成后会自动关联到这个资产节点" : "完成后会自动显示在这个节点";
+  const theme = surfaceMode === "day"
+    ? {
+        body: "bg-white/70 text-[#171512]",
+        statusText: "text-black/46",
+        chip: "border-black/[0.08] bg-black/[0.04] text-black/[0.45]",
+        panel: "border-black/[0.08] bg-white/80",
+        panelSoft: "border-black/[0.07] bg-black/[0.035]",
+        title: "text-[#171512]",
+        eyebrow: "text-black/38",
+        text: "text-black/64",
+        strong: "text-black/78",
+        media: "bg-white ring-black/[0.08]",
+        empty: "border-black/[0.12] bg-black/[0.025] text-black/32",
+        actionOverlay: "bg-black/30",
+        button: "bg-black text-white hover:bg-black/85",
+        hint: "border-amber-500/25 bg-amber-500/10 text-amber-700",
+      }
+    : surfaceMode === "eye"
+      ? {
+          body: "bg-[#e2ecd9]/70 text-[#35362e]",
+          statusText: "text-[#35362e]/50",
+          chip: "border-[#b5bfae]/60 bg-[#4f7f45]/[0.06] text-[#35362e]/55",
+          panel: "border-[#b5bfae]/60 bg-[#e2ecd9]/80",
+          panelSoft: "border-[#b5bfae]/55 bg-[#4f7f45]/[0.055]",
+          title: "text-[#35362e]",
+          eyebrow: "text-[#35362e]/42",
+          text: "text-[#35362e]/66",
+          strong: "text-[#35362e]/82",
+          media: "bg-[#d4e0c8] ring-[#b5bfae]/70",
+          empty: "border-[#b5bfae]/70 bg-[#4f7f45]/[0.035] text-[#35362e]/36",
+          actionOverlay: "bg-[#35362e]/25",
+          button: "bg-[#4f7f45] text-white hover:bg-[#3f6937]",
+          hint: "border-[#4f7f45]/20 bg-[#4f7f45]/[0.08] text-[#3f6937]",
+        }
+      : {
+          body: "bg-black/[0.18] text-white",
+          statusText: "text-white/36",
+          chip: "border-white/[0.08] bg-white/[0.05] text-white/[0.34]",
+          panel: "border-white/[0.08] bg-white/[0.04]",
+          panelSoft: "border-white/[0.06] bg-black/20",
+          title: "text-white/85",
+          eyebrow: "text-white/[0.36]",
+          text: "text-white/[0.58]",
+          strong: "text-white/[0.76]",
+          media: "bg-black ring-white/[0.06]",
+          empty: "border-white/[0.12] bg-white/[0.025] text-white/25",
+          actionOverlay: "bg-black/35",
+          button: "bg-white text-black hover:bg-white/[0.88]",
+          hint: "border-amber-300/15 bg-amber-300/[0.06] text-amber-100/65",
+        };
 
   return (
-    <div className="flex h-full min-h-[330px] flex-1 flex-col overflow-hidden rounded-[20px] bg-black/[0.18]">
+    <div className={cn("flex h-full min-h-[330px] flex-1 flex-col overflow-hidden rounded-[20px]", theme.body)}>
       <div className="flex items-center gap-2 px-3 pb-2 pt-1">
         <span className={cn("h-2 w-2 rounded-full", status.dot)} />
-        <span className="text-[11px] font-medium text-white/36">{status.label}</span>
+        <span className={cn("text-[11px] font-medium", theme.statusText)}>{status.label}</span>
         {isAssetNode && (
-          <span className="ml-auto rounded-full border border-white/[0.08] bg-white/[0.05] px-2.5 py-0.5 text-[10px] font-medium text-white/[0.34]">
+          <span className={cn("ml-auto rounded-full border px-2.5 py-0.5 text-[10px] font-medium", theme.chip)}>
             {isCharacter ? "角色" : assetCategory}
           </span>
         )}
       </div>
 
       {isGeneratorNode ? (
-        <div className="flex flex-1 flex-col justify-between rounded-[18px] border border-white/[0.08] bg-white/[0.04] p-4">
+        <div className={cn("flex flex-1 flex-col justify-between rounded-[18px] border p-4", theme.panel)}>
           <div className="space-y-3">
-            <div className="flex items-center justify-between text-[10px] font-semibold text-white/[0.55]">
+            <div className={cn("flex items-center justify-between text-[10px] font-semibold", theme.text)}>
               <span>{shot?.mode === "video" ? "Seedance 视频" : "Seedream 分镜图"}</span>
               <span>{Array.isArray(shot?.shotIds) ? shot?.shotIds.length : 0} 镜</span>
             </div>
-            <p className="line-clamp-6 whitespace-pre-line text-[11px] leading-relaxed text-white/[0.58]">
+            <p className={cn("line-clamp-6 whitespace-pre-line text-[11px] leading-relaxed", theme.text)}>
               {String(shot?.promptPreview || "把镜头拖线连接到这里，形成可批量执行的生成器组。")}
             </p>
           </div>
-          <div className="rounded-xl border border-white/[0.08] bg-black/30 px-3 py-2 text-[10px] leading-relaxed text-white/[0.42] shadow-sm">
+          <div className={cn("rounded-xl border px-3 py-2 text-[10px] leading-relaxed shadow-sm", theme.panelSoft, theme.statusText)}>
             支持：镜头 → 生成器组；资产 → 镜头；生成前统一检查提示词和参考图。
           </div>
         </div>
       ) : node.type === "shot" ? (
-        <div className="flex flex-1 flex-col justify-between rounded-[18px] border border-white/[0.08] bg-white/[0.035] p-4">
+        <div className={cn("flex flex-1 flex-col justify-between rounded-[18px] border p-4", theme.panel)}>
           <div className="space-y-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/[0.36]">Shot Card</div>
-                <div className="mt-1 line-clamp-2 text-[13px] font-bold leading-snug text-white/85">
+                <div className={cn("text-[10px] font-semibold uppercase tracking-[0.16em]", theme.eyebrow)}>Shot Card</div>
+                <div className={cn("mt-1 line-clamp-2 text-[13px] font-bold leading-snug", theme.title)}>
                   {String(shot?.scene || shot?.title || "镜头调度说明")}
                 </div>
               </div>
               {storyboardImageUrl && (
-                <div className="shrink-0 rounded-xl border border-white/[0.08] bg-black/30 p-1">
+                <div className={cn("shrink-0 rounded-xl border p-1", theme.panelSoft)}>
                   <img src={storyboardImageUrl} alt="分镜预览" className="h-14 w-20 rounded-lg object-cover" loading="lazy" />
                 </div>
               )}
             </div>
-            <div className="grid gap-2 text-[11px] leading-relaxed text-white/[0.58]">
-              <div className="rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2">
-                <span className="mr-2 font-bold text-white/[0.76]">分镜图提示词</span>
+            <div className={cn("grid gap-2 text-[11px] leading-relaxed", theme.text)}>
+              <div className={cn("rounded-xl border px-3 py-2", theme.panelSoft)}>
+                <span className={cn("mr-2 font-bold", theme.strong)}>分镜图提示词</span>
                 <span className="line-clamp-3">{String(shot?.imagePrompt || "未填写；用于生成分镜图，不会直接作为视频首帧。")}</span>
               </div>
-              <div className="rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2">
-                <span className="mr-2 font-bold text-white/[0.76]">视频提示词</span>
+              <div className={cn("rounded-xl border px-3 py-2", theme.panelSoft)}>
+                <span className={cn("mr-2 font-bold", theme.strong)}>视频提示词</span>
                 <span className="line-clamp-3">{String(shot?.videoPrompt || "未填写；派生视频节点时只带文本，不自动带首帧。")}</span>
               </div>
             </div>
           </div>
-          <div className="rounded-xl border border-amber-300/15 bg-amber-300/[0.06] px-3 py-2 text-[10px] leading-relaxed text-amber-100/65">
+          <div className={cn("rounded-xl border px-3 py-2 text-[10px] leading-relaxed", theme.hint)}>
             镜头卡是导演指令卡；分镜图只是预览引用。视频首帧需绑定图片节点或明确首帧素材。
           </div>
         </div>
       ) : isGenerating ? (
-        <div className="relative flex flex-1 flex-col items-center justify-center gap-3 rounded-[18px] border border-white/[0.16] bg-white/[0.04] px-4 text-white/[0.82]">
+        <div className={cn("relative flex flex-1 flex-col items-center justify-center gap-3 rounded-[18px] border px-4", theme.panel, theme.title)}>
           <Loader2 className="h-8 w-8 animate-spin" />
           <div className="text-center">
             <div className="text-[13px] font-bold">{generatingLabel}</div>
-            <div className="mt-1 text-[11px] text-white/[0.42]">{generatingHint}</div>
+            <div className={cn("mt-1 text-[11px]", theme.statusText)}>{generatingHint}</div>
           </div>
         </div>
       ) : displayStatus === "error" ? (
@@ -186,11 +238,11 @@ export default function ManjuNodeContent({
           </p>
         </div>
       ) : isAssetNode && !hasMedia ? (
-        <div className="relative flex flex-1 flex-col items-center justify-center gap-3 rounded-[18px] border border-dashed border-white/[0.12] bg-white/[0.025] px-4">
-          <div className="flex h-16 w-16 items-center justify-center rounded-[22px] border border-white/[0.08] bg-white/[0.05] text-white/25">
+        <div className={cn("relative flex flex-1 flex-col items-center justify-center gap-3 rounded-[18px] border border-dashed px-4", theme.empty)}>
+          <div className={cn("flex h-16 w-16 items-center justify-center rounded-[22px] border", theme.chip)}>
             {isCharacter ? <User className="h-7 w-7" /> : <Box className="h-7 w-7" />}
           </div>
-          <span className="text-[12px] font-medium text-white/36">
+          <span className={cn("text-[12px] font-medium", theme.statusText)}>
             {isCharacter ? "未命名角色" : "待补充资产"}
           </span>
 
@@ -239,16 +291,16 @@ export default function ManjuNodeContent({
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); onSelect?.(node.id); setShowActions(true); }}
-              className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors hover:bg-white/[0.04]"
+              className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors hover:bg-black/[0.04]"
             >
-              <span className="rounded-full border border-white bg-white px-4 py-2 text-[12px] font-semibold text-black shadow-sm">
+              <span className={cn("rounded-full px-4 py-2 text-[12px] font-semibold shadow-sm", theme.button)}>
                 补充素材
               </span>
             </button>
           )}
         </div>
       ) : hasMedia ? (
-        <div className="relative flex-1 overflow-hidden rounded-[18px] bg-black ring-1 ring-white/[0.06]">
+        <div className={cn("relative flex-1 overflow-hidden rounded-[18px] ring-1", theme.media)}>
           {resolvedVideoUrl ? (
             <div className="relative h-full w-full bg-black">
               <video
@@ -272,7 +324,7 @@ export default function ManjuNodeContent({
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onPreviewImage?.(node.id); }}
-                className="absolute inset-0 flex items-center justify-center bg-black/35 opacity-0 transition-opacity hover:opacity-100"
+                className={cn("absolute inset-0 flex items-center justify-center opacity-0 transition-opacity hover:opacity-100", theme.actionOverlay)}
               >
                 <Maximize2 className="h-4 w-4 text-white" />
               </button>
@@ -280,8 +332,8 @@ export default function ManjuNodeContent({
           )}
         </div>
       ) : (
-        <div className="flex flex-1 items-center justify-center rounded-[18px] border border-dashed border-white/[0.12] bg-white/[0.025]">
-          <div className="flex flex-col items-center gap-2 text-white/25">
+        <div className={cn("flex flex-1 items-center justify-center rounded-[18px] border border-dashed", theme.empty)}>
+          <div className="flex flex-col items-center gap-2">
             <span>{config.icon}</span>
             <span className="text-[11px]">{config.label}</span>
           </div>
@@ -289,7 +341,7 @@ export default function ManjuNodeContent({
       )}
 
       <div className="flex items-center justify-between gap-2 px-3 py-2">
-        <div className="truncate text-[11px] font-medium text-white/[0.42]">
+        <div className={cn("truncate text-[11px] font-medium", theme.statusText)}>
           {isAssetNode
             ? (isCharacter ? "角色设定图 / 基础形象" : assetCategory)
             : shot?.scene ? String(shot.scene) : "未设置场景"}
@@ -298,17 +350,17 @@ export default function ManjuNodeContent({
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onSelect?.(node.id); onGenerate?.(node.id); }}
-            className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold text-black shadow-sm transition-colors hover:bg-white/[0.88]"
+            className={cn("shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold shadow-sm transition-colors", theme.button)}
           >
             生成角色图
           </button>
         )}
         {shot?.duration ? (
-          <span className="shrink-0 rounded-full border border-white/[0.08] bg-white/[0.04] px-1.5 py-0.5 text-[9px] font-medium text-white/32">
+          <span className={cn("shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-medium", theme.chip)}>
             {String(shot.duration)}s
           </span>
         ) : isAssetNode ? (
-          <span className="shrink-0 rounded-full border border-white/[0.08] bg-white/[0.04] px-1.5 py-0.5 text-[9px] font-medium text-white/32">
+          <span className={cn("shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-medium", theme.chip)}>
             {assets?.filter((a) => (node.data?.semanticAssetIds as string[])?.includes(a.id)).length || 0} 项
           </span>
         ) : null}

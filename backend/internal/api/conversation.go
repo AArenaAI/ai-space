@@ -34,6 +34,74 @@ type ConversationSearchResult struct {
 	MatchedMessageID uint      `json:"matched_message_id"`
 }
 
+func conversationLatestActivitySQL(db *gorm.DB) string {
+	latestMessage := `(SELECT MAX(COALESCE(messages.completed_at, messages.created_at)) FROM messages WHERE messages.conversation_id = conversations.id AND messages.deleted_at IS NULL)`
+	latestTask := `(SELECT MAX(ai_background_tasks.updated_at) FROM ai_background_tasks WHERE ai_background_tasks.conversation_id = conversations.id AND ai_background_tasks.deleted_at IS NULL)`
+	if db != nil && db.Dialector != nil && db.Dialector.Name() == "postgres" {
+		return `(GREATEST(conversations.updated_at, COALESCE(` + latestMessage + `, conversations.updated_at), COALESCE(` + latestTask + `, conversations.updated_at)))::text`
+	}
+	return `CAST(MAX(conversations.updated_at, COALESCE(` + latestMessage + `, conversations.updated_at), COALESCE(` + latestTask + `, conversations.updated_at)) AS TEXT)`
+}
+
+func parseConversationActivityTimestamp(raw string) time.Time {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}
+	}
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05.999999999Z07:00",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05",
+	}
+	for _, layout := range layouts {
+		if parsed, err := time.Parse(layout, raw); err == nil {
+			return parsed
+		}
+	}
+	return time.Time{}
+}
+
+func applyConversationActivityTimestamp(conv *models.Conversation, latestRaw string) {
+	if conv == nil {
+		return
+	}
+	latest := parseConversationActivityTimestamp(latestRaw)
+	if latest.IsZero() {
+		return
+	}
+	if latest.After(conv.UpdatedAt) {
+		conv.UpdatedAt = latest
+	}
+}
+
+func includeLegacyDefaultWorkspace(db *gorm.DB, userID uint, workspaceID uint) bool {
+	if db == nil || workspaceID == 0 {
+		return false
+	}
+	var defaultWS models.Workspace
+	workspaceDB := db.Session(&gorm.Session{NewDB: true}).Model(&models.Workspace{})
+	if err := workspaceDB.Select("id").Where("user_id = ? AND is_default = ?", userID, true).First(&defaultWS).Error; err != nil {
+		return false
+	}
+	return defaultWS.ID == workspaceID
+}
+
+func applyConversationWorkspaceFilter(query *gorm.DB, userID uint, workspaceID uint, column string) *gorm.DB {
+	if query == nil || workspaceID == 0 {
+		return query
+	}
+	if column == "" {
+		column = "workspace_id"
+	}
+	if includeLegacyDefaultWorkspace(query, userID, workspaceID) {
+		return query.Where(fmt.Sprintf("(%s = ? OR %s = 0)", column, column), workspaceID)
+	}
+	return query.Where(fmt.Sprintf("%s = ?", column), workspaceID)
+}
+
 func (h *ConversationHandler) List(c *gin.Context) {
 	userID := getUserID(c)
 
@@ -55,7 +123,7 @@ func (h *ConversationHandler) List(c *gin.Context) {
 		Where("NOT EXISTS (SELECT 1 FROM notebook_conversations WHERE notebook_conversations.conversation_id = conversations.id)")
 	if workspaceIDStr != "" {
 		if wid, err := strconv.ParseUint(workspaceIDStr, 10, 32); err == nil {
-			countQuery = countQuery.Where("workspace_id = ?", uint(wid))
+			countQuery = applyConversationWorkspaceFilter(countQuery, userID, uint(wid), "workspace_id")
 		}
 	}
 	skillKey := c.Query("skill_key")
@@ -66,18 +134,20 @@ func (h *ConversationHandler) List(c *gin.Context) {
 
 	type ConversationWithModel struct {
 		models.Conversation
-		LatestModel string `gorm:"column:latest_model" json:"-"`
+		LatestModel    string `gorm:"column:latest_model" json:"-"`
+		LatestActivity string `gorm:"column:latest_activity_at" json:"-"`
 	}
+	latestActivitySQL := conversationLatestActivitySQL(h.db)
 
 	query := h.db.Table("conversations").
-		Select("conversations.*, (SELECT model FROM messages WHERE messages.conversation_id = conversations.id AND messages.role = 'assistant' AND messages.model <> '' ORDER BY messages.created_at DESC, messages.id DESC LIMIT 1) as latest_model").
+		Select("conversations.*, (SELECT model FROM messages WHERE messages.conversation_id = conversations.id AND messages.role = 'assistant' AND messages.model <> '' ORDER BY messages.created_at DESC, messages.id DESC LIMIT 1) as latest_model, "+latestActivitySQL+" as latest_activity_at").
 		Where("conversations.user_id = ?", userID).
 		Where("conversations.deleted_at IS NULL").
 		Where("NOT EXISTS (SELECT 1 FROM notebook_conversations WHERE notebook_conversations.conversation_id = conversations.id)")
 
 	if workspaceIDStr != "" {
 		if wid, err := strconv.ParseUint(workspaceIDStr, 10, 32); err == nil {
-			query = query.Where("conversations.workspace_id = ?", uint(wid))
+			query = applyConversationWorkspaceFilter(query, userID, uint(wid), "conversations.workspace_id")
 		}
 	}
 	if skillKey != "" {
@@ -85,7 +155,7 @@ func (h *ConversationHandler) List(c *gin.Context) {
 	}
 
 	var rows []ConversationWithModel
-	if err := query.Order("conversations.pinned DESC, conversations.updated_at DESC").
+	if err := query.Order("conversations.pinned DESC, latest_activity_at DESC, conversations.updated_at DESC").
 		Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取对话列表失败"})
 		return
@@ -96,6 +166,7 @@ func (h *ConversationHandler) List(c *gin.Context) {
 		if rows[i].LatestModel != "" {
 			rows[i].Conversation.Model = rows[i].LatestModel
 		}
+		applyConversationActivityTimestamp(&rows[i].Conversation, rows[i].LatestActivity)
 		conversations[i] = rows[i].Conversation
 	}
 
@@ -129,7 +200,7 @@ func (h *ConversationHandler) Search(c *gin.Context) {
 
 	if workspaceIDStr := c.Query("workspace_id"); workspaceIDStr != "" {
 		if wid, err := strconv.ParseUint(workspaceIDStr, 10, 32); err == nil && wid > 0 {
-			query = query.Where("conversations.workspace_id = ?", uint(wid))
+			query = applyConversationWorkspaceFilter(query, userID, uint(wid), "conversations.workspace_id")
 		}
 	}
 	if sk := c.Query("skill_key"); sk != "" {
@@ -450,10 +521,14 @@ func (h *ConversationHandler) buildMessagesWithGroupPayload(conversationID uint,
 
 	result := make([]MessageWithGroup, len(messages))
 	for i, m := range messages {
+		m.StatusTimeline = sanitizeChatStatusTimelineJSON(m.StatusTimeline)
 		result[i] = MessageWithGroup{
-			Message:    m,
-			GroupID:    m.GroupID,
-			GroupIndex: m.GroupIndex,
+			Message:                m,
+			GroupID:                m.GroupID,
+			GroupIndex:             m.GroupIndex,
+			GenerationTaskID:       m.GenerationTaskID,
+			LastSequenceNumber:     m.LastSequenceNumber,
+			ServerGenerationStatus: m.GenerationStatus,
 		}
 		if g, ok := groupMap[m.GroupID]; ok {
 			result[i].GroupModels = g.GetModels()
@@ -468,10 +543,13 @@ func (h *ConversationHandler) buildMessagesWithGroupPayload(conversationID uint,
 // /conversations/:id and /conversations/:id/messages.
 type MessageWithGroup struct {
 	models.Message
-	GroupID       uint     `json:"group_id,omitempty"`
-	GroupIndex    int      `json:"group_index"`
-	GroupModels   []string `json:"group_models,omitempty"`
-	UserMessageID uint     `json:"user_message_id,omitempty"`
+	GroupID                uint     `json:"group_id,omitempty"`
+	GroupIndex             int      `json:"group_index"`
+	GroupModels            []string `json:"group_models,omitempty"`
+	UserMessageID          uint     `json:"user_message_id,omitempty"`
+	GenerationTaskID       uint     `json:"generation_task_id,omitempty"`
+	LastSequenceNumber     int64    `json:"last_sequence_number,omitempty"`
+	ServerGenerationStatus string   `json:"server_generation_status,omitempty"`
 }
 
 func (h *ConversationHandler) expandMessagesToCompleteGroups(conversationID uint, messages []models.Message) ([]models.Message, error) {
@@ -578,6 +656,7 @@ func (h *ConversationHandler) buildLastAssistantStatusPayload(messages []models.
 			"last_sequence_number": lastSequence,
 			"completed_at":         task.CompletedAt,
 			"error_message":        task.ErrorMessage,
+			"status_timeline":      sanitizeChatStatusTimelineJSON(task.StatusTimeline),
 		}
 	}
 	if status == "" {
@@ -634,6 +713,7 @@ func (h *ConversationHandler) GetMessage(c *gin.Context) {
 			"last_sequence_number": lastSequence,
 			"completed_at":         task.CompletedAt,
 			"error_message":        task.ErrorMessage,
+			"status_timeline":      sanitizeChatStatusTimelineJSON(task.StatusTimeline),
 		}
 	}
 	if status == "" {

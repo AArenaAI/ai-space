@@ -6,8 +6,8 @@ const baseUrl = process.env.CHAT_USER_CONTENT_FIXTURE_BASE_URL || "http://127.0.
 
 async function scrollChat(page, position) {
   await page.evaluate((pos) => {
-    const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
-    if (!scroller) throw new Error("virtuoso scroller not found");
+    const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
+    if (!scroller) throw new Error("chat scroller not found");
     scroller.scrollTop = pos === "top" ? 0 : scroller.scrollHeight;
     scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
   }, position);
@@ -17,8 +17,8 @@ async function scrollChat(page, position) {
 async function scrollUntilUserMessageText(page, text) {
   for (const ratio of [0, 0.25, 0.5, 0.7, 0.85, 1]) {
     await page.evaluate((nextRatio) => {
-      const scroller = document.querySelector('[data-testid="virtuoso-scroller"]');
-      if (!scroller) throw new Error("virtuoso scroller not found");
+      const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
+      if (!scroller) throw new Error("chat scroller not found");
       scroller.scrollTop = (scroller.scrollHeight - scroller.clientHeight) * nextRatio;
       scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
     }, ratio);
@@ -34,8 +34,8 @@ async function scrollUntilUserMessageText(page, text) {
 
 async function assertAssistantCodeAnswerStableWhileScrolling(page) {
   const samples = [];
-  const scrollerBox = await page.locator('[data-testid="virtuoso-scroller"]').boundingBox();
-  if (!scrollerBox) throw new Error("virtuoso scroller box not found");
+  const scrollerBox = await page.locator('[data-testid="chat-history-scroll-container"]').boundingBox();
+  if (!scrollerBox) throw new Error("chat scroller box not found");
   await page.mouse.move(scrollerBox.x + scrollerBox.width / 2, scrollerBox.y + scrollerBox.height / 2);
 
   for (let step = 0; step < 80; step += 1) {
@@ -47,7 +47,7 @@ async function assertAssistantCodeAnswerStableWhileScrolling(page) {
       return {
         height: rect?.height || 0,
         hasAnswerText: Boolean(row?.textContent?.includes("下面是一个长代码块")) || Boolean(row?.querySelector('[data-testid="markdown-code-block"]')),
-        answerFallbackCount: [...(row?.querySelectorAll('[data-markdown-plain-fallback]') || [])].filter((el) => !el.closest('.reasoning-markdown')).length,
+        answerFallbackCount: [...(row?.querySelectorAll('[data-markdown-plain-fallback]') || [])].length,
         codeBlockCount: row?.querySelectorAll('[data-testid="markdown-code-block"]').length || 0,
       };
     }));
@@ -94,51 +94,38 @@ async function assertAssistantCodeAnswerStableWhileScrolling(page) {
 
     const longCodeBlock = page.locator('[data-testid="markdown-code-block"]').first();
     await longCodeBlock.waitFor({ state: "visible", timeout: 10_000 });
-    await assert.match(await longCodeBlock.innerText(), /代码块较长，已折叠/);
-    await assert.match(await longCodeBlock.innerText(), /150 行 \/ 5\.1k 字符/);
+    await assert.match(await longCodeBlock.innerText(), /代码块较长，已折叠|Long code block collapsed/);
+    await assert.match(await longCodeBlock.innerText(), /150 行 \/ 5\.1k 字符|150 lines \/ 5\.1k characters/);
     await assert.equal(await longCodeBlock.locator('text=long code line 150').count(), 0, "long code should be collapsed initially");
 
     await assertAssistantCodeAnswerStableWhileScrolling(page);
 
-    const historicalReasoningToggle = page.locator('[data-chat-message-row="true"][data-message-id="assistant-code"] button[aria-expanded]').first();
-    await historicalReasoningToggle.waitFor({ state: "attached", timeout: 10_000 });
-    await assert.equal(await historicalReasoningToggle.getAttribute("aria-expanded"), "false", "historical reasoning should be collapsed by default");
-    await assert.match(await historicalReasoningToggle.innerText(), /已折叠|collapsed/);
-    const historicalReasoningState = await page.evaluate(() => {
-      const row = document.querySelector('[data-chat-message-row="true"][data-message-id="assistant-code"]');
-      const markdown = row?.querySelector('.reasoning-markdown');
-      const collapsible = markdown?.closest('[aria-hidden]');
-      return {
-        ariaHidden: collapsible?.getAttribute('aria-hidden') || '',
-        contentHeight: markdown?.getBoundingClientRect().height || 0,
-        wrapperHeight: collapsible?.getBoundingClientRect().height || 0,
-      };
-    });
-    await assert.equal(historicalReasoningState.ariaHidden, "true", "collapsed historical reasoning body should be aria-hidden");
-    await assert.ok(historicalReasoningState.wrapperHeight <= 2, `collapsed historical reasoning wrapper should have near-zero height: ${JSON.stringify(historicalReasoningState)}`);
+    const historicalActivityEntry = page.locator('[data-chat-message-row="true"][data-message-id="assistant-code"] button').filter({ hasText: /已思考|思考中|Reasoned|Reasoning/ }).first();
+    await historicalActivityEntry.waitFor({ state: "attached", timeout: 10_000 });
+    await assert.match(await historicalActivityEntry.innerText(), /已思考|思考中|Reasoned|Reasoning/, "historical reasoning should expose an activity entry, not an inline expanded body");
 
     await longCodeBlock.locator('[data-testid="markdown-code-copy-button"]').click();
     await page.waitForFunction(() => navigator.clipboard.readText().then((text) => text.includes('long code line 150')), null, { timeout: 10_000 });
-    await longCodeBlock.getByRole('button', { name: /代码块较长|展开|收起/ }).click();
+    await longCodeBlock.getByRole('button', { name: /代码块较长|展开|收起|Long code block collapsed|Click to expand|Collapse/ }).click();
     await page.waitForSelector('text=long code line 150', { timeout: 10_000 });
 
     await scrollUntilUserMessageText(page, "请基于这段引用继续解释");
     const quoteCard = page.locator('[data-testid="user-message-quote-card"]');
     await quoteCard.waitFor({ state: "visible", timeout: 10_000 });
     const quoteText = await quoteCard.innerText();
-    await assert.match(quoteText, /引用文本|引用上下文/);
+    await assert.match(quoteText, /引用文本|引用上下文|Quoted context/);
     await assert.match(quoteText, /这是第 1 轮用户消息/);
     await assert.match(await page.locator('[data-testid="user-message-text"]').filter({ hasText: "请基于这段引用继续解释" }).innerText(), /请基于这段引用继续解释/);
 
     await scrollChat(page, "bottom");
-    await page.waitForFunction(() => document.body.innerText.includes("展开完整消息"), { timeout: 10_000 });
+    await page.waitForFunction(() => /展开完整消息|Expand full message/.test(document.body.innerText), { timeout: 10_000 });
     const longToggle = page.locator('[data-testid="user-message-collapse-toggle"]');
     await longToggle.waitFor({ state: "visible", timeout: 10_000 });
-    await assert.match(await longToggle.innerText(), /展开完整消息 · 约 1\.8k 字 \/ 48 行/);
+    await assert.match(await longToggle.innerText(), /展开完整消息 · 约 1\.8k 字 \/ 48 行|Expand full message · About 1\.8k chars \/ 48 lines/);
     await assert.equal(await page.locator('text=这是用户长消息第 48 行').count(), 0, "long user message should be collapsed initially");
     await longToggle.click();
     await page.waitForSelector('text=这是用户长消息第 48 行', { timeout: 10_000 });
-    await assert.match(await longToggle.innerText(), /收起长消息 · 约 1\.8k 字 \/ 48 行/);
+    await assert.match(await longToggle.innerText(), /收起长消息 · 约 1\.8k 字 \/ 48 行|Collapse message · About 1\.8k chars \/ 48 lines|Collapse long message · About 1\.8k chars \/ 48 lines/);
     await longToggle.click();
     await page.waitForTimeout(250);
     await assert.equal(await page.locator('text=这是用户长消息第 48 行').count(), 0, "long user message should collapse again after toggling");

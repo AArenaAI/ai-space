@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import MessageList from "./MessageList";
+import ChatActivityPanel from "./ChatActivityPanel";
 import StreamingMarkdownView from "./StreamingMarkdownView";
 import { Message, ChatModel } from "@/lib/chatTypes";
 import { realtimeAppend, realtimeClear, realtimeGet, realtimeMarkCompleted, realtimeUpdate } from "@/lib/streaming";
@@ -23,6 +24,14 @@ const COMPLEX_STREAMING_MARKDOWN = [
   "| --- | --- |",
   "| streaming | plain fallback |",
 ].join("\n");
+
+const DETERMINISTIC_ANSWER = Array.from({ length: 120 }, (_, index) => `B${String(index + 1).padStart(3, "0")}`)
+  .reduce<string[]>((lines, token, index) => {
+    const lineIndex = Math.floor(index / 12);
+    lines[lineIndex] = `${lines[lineIndex] || ""}${lines[lineIndex] ? " " : ""}${token}`;
+    return lines;
+  }, [])
+  .join("\n");
 
 function baseMessages(): Message[] {
   return [
@@ -48,9 +57,21 @@ function baseMessages(): Message[] {
 
 export default function ChatStreamingStateFixture() {
   const assistantId = "fixture-assistant";
+  const [fixtureOptions, setFixtureOptions] = useState({ longActivityReasoning: false, forceActivityPanelOpen: false, duplicateRealtimeOnComplete: false, deterministicAnswer: false });
+  const { longActivityReasoning, forceActivityPanelOpen, duplicateRealtimeOnComplete, deterministicAnswer } = fixtureOptions;
   const [messages, setMessages] = useState<Message[]>(() => baseMessages());
   const [loading, setLoading] = useState(true);
   const [phase, setPhase] = useState("init");
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setFixtureOptions({
+      longActivityReasoning: params.has("activity_reasoning_long"),
+      forceActivityPanelOpen: params.has("activity_panel_open"),
+      duplicateRealtimeOnComplete: params.has("duplicate_realtime_on_complete"),
+      deterministicAnswer: params.has("deterministic_answer"),
+    });
+  }, []);
 
   useEffect(() => {
     realtimeClear(assistantId);
@@ -63,6 +84,20 @@ export default function ChatStreamingStateFixture() {
       phase: "waiting_provider",
       generationStartedAt: Date.now(),
     });
+
+    const reasoningChunks = longActivityReasoning
+      ? [
+          "先分析搜索结果，确认每个来源的时间、主体和结论是否一致。",
+          "然后排除重复来源，把相互矛盾的说法按可信度排序。",
+          "最后只保留和用户问题直接相关的信息，避免把检索过程写进最终回答。",
+        ]
+      : ["先分析搜索结果，确认 **最终** 只输出简短回答。"];
+    const answerStartDelay = longActivityReasoning ? 4200 : 1700;
+    const doneDelay = longActivityReasoning ? 7000 : 3000;
+    const answerChunks = deterministicAnswer
+      ? (DETERMINISTIC_ANSWER.match(/(?:B\d{3}\s*){1,24}/g) || [DETERMINISTIC_ANSWER])
+      : ["最终回答 **", "OK", "** 42"];
+    const finalCanonicalAnswer = deterministicAnswer ? DETERMINISTIC_ANSWER : "最终回答 **OK** 42";
 
     const timers = [
       window.setTimeout(() => {
@@ -86,24 +121,37 @@ export default function ChatStreamingStateFixture() {
         // Simulate a provider/SSE event that carries reasoning and visible answer
         // in the same payload. The frontend must show reasoning first and hold
         // the answer until reasoning is closed.
-        realtimeAppend(assistantId, { reasoningDelta: "先分析搜索结果，确认 **最终** 只输出简短回答。", reasoning: true });
+        realtimeAppend(assistantId, { reasoningDelta: reasoningChunks[0], reasoning: true });
         setPhase("mixed-held");
       }, 1200),
+      ...(longActivityReasoning ? [
+        window.setTimeout(() => {
+          realtimeAppend(assistantId, { reasoningDelta: reasoningChunks[1], reasoning: true });
+          setPhase("reasoning-chunk-2");
+        }, 2100),
+        window.setTimeout(() => {
+          realtimeAppend(assistantId, { reasoningDelta: reasoningChunks[2], reasoning: true });
+          setPhase("reasoning-chunk-3");
+        }, 3000),
+      ] : []),
       window.setTimeout(() => {
         realtimeAppend(assistantId, { reasoning: false });
-        realtimeAppend(assistantId, { answerDelta: "最终回答 **", reasoning: false });
+        realtimeAppend(assistantId, { answerDelta: answerChunks[0], reasoning: false });
         setPhase("answer-streaming");
-      }, 1700),
-      window.setTimeout(() => {
-        realtimeAppend(assistantId, { answerDelta: "OK", reasoning: false });
-      }, 1950),
-      window.setTimeout(() => {
-        realtimeAppend(assistantId, { answerDelta: "** 42", reasoning: false });
-      }, 2150),
+      }, answerStartDelay),
+      ...answerChunks.slice(1).map((chunk, index) => window.setTimeout(() => {
+        realtimeAppend(assistantId, { answerDelta: chunk, reasoning: false });
+      }, answerStartDelay + 180 + index * 120)),
       window.setTimeout(() => {
         // Simulate DONE without a search-completed meta event. This used to leave
         // the web-search badge stuck in the running state.
         realtimeUpdate(assistantId, { activityStatus: undefined, searchStatus: undefined, phase: "completed" });
+        if (duplicateRealtimeOnComplete) {
+          realtimeUpdate(assistantId, {
+            content: `<think>先分析搜索结果，确认 **最终** 只输出简短回答。</think>${finalCanonicalAnswer}\n\n${finalCanonicalAnswer}`,
+            answerContent: `${finalCanonicalAnswer}\n\n${finalCanonicalAnswer}`,
+          });
+        }
         realtimeMarkCompleted(assistantId);
         const finalData = realtimeGet(assistantId);
         const completedAt = Date.now();
@@ -111,7 +159,7 @@ export default function ChatStreamingStateFixture() {
           ? {
               ...message,
               ...finalData,
-              content: "<think>先分析搜索结果，确认 **最终** 只输出简短回答。</think>最终回答 **OK** 42",
+              content: `<think>先分析搜索结果，确认 **最终** 只输出简短回答。</think>${finalCanonicalAnswer}`,
               completedAt,
               activityStatus: undefined,
               searchStatus: undefined,
@@ -130,14 +178,14 @@ export default function ChatStreamingStateFixture() {
         ));
         setLoading(false);
         setPhase("done");
-      }, 3000),
+      }, doneDelay),
     ];
 
     return () => {
       timers.forEach(window.clearTimeout);
       realtimeClear(assistantId);
     };
-  }, []);
+  }, [deterministicAnswer, duplicateRealtimeOnComplete, longActivityReasoning]);
 
   const marker = useMemo(() => JSON.stringify({ phase, loading }), [phase, loading]);
 
@@ -163,6 +211,15 @@ export default function ChatStreamingStateFixture() {
           isLoadingMore={false}
           hasMoreMessages={false}
         />
+        {forceActivityPanelOpen && (
+          <div className="relative w-[420px] shrink-0 border-l border-surface-border" data-testid="fixture-activity-panel-host">
+            <ChatActivityPanel
+              message={messages.find((message) => message.id === assistantId)}
+              model={models[0]}
+              onClose={() => undefined}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

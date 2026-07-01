@@ -26,6 +26,7 @@ import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import InputDialog from "@/components/ui/InputDialog";
 import { createPortal } from "react-dom";
 import { useTheme } from "@/components/theme/ThemeProvider";
+import { useAppBootstrap } from "@/lib/appBootstrapContext";
 
 const navItems = [
   { icon: MessageSquare, label: "聊天", href: "/chat" },
@@ -184,10 +185,13 @@ export default function MobileNav() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const routeConvId = searchParams?.get("id") || null;
+  const effectiveRouteConvId = routeConvId || (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("id") : null);
   const router = useRouter();
   const drawerRef = useRef<HTMLDivElement>(null);
   const historyScrollRef = useRef<HTMLDivElement>(null);
+  const chatBootstrapReadyRef = useRef(false);
   const [currentConvId, setCurrentConvId] = useState<string | null>(null);
+  const { chatBootstrap } = useAppBootstrap();
 
   const captureHistoryAnchor = useCallback(() => {
     const container = historyScrollRef.current;
@@ -232,9 +236,48 @@ export default function MobileNav() {
     setCurrentConvId(routeConvId);
   }, [routeConvId]);
   useEffect(() => { const s = localStorage.getItem("user"); if (s) try { setUser(JSON.parse(s)); } catch {} }, []);
+
+  useEffect(() => {
+    if (!chatBootstrap) return;
+    chatBootstrapReadyRef.current = true;
+    if (chatBootstrap.user) setUser(chatBootstrap.user);
+    if (Array.isArray(chatBootstrap.sidebar?.conversations)) {
+      const next = sortConversations(chatBootstrap.sidebar.conversations as Conversation[]);
+      cachedConversationsMobile = next;
+      setConversations(next);
+      setLoading(false);
+    }
+  }, [chatBootstrap]);
+
+  useEffect(() => {
+    const handleBootstrapReady = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        user?: { name?: string; email?: string };
+        sidebar?: { conversations?: Conversation[] };
+      }>).detail;
+      if (!detail) return;
+      chatBootstrapReadyRef.current = true;
+      if (detail.user) setUser(detail.user);
+      if (Array.isArray(detail.sidebar?.conversations)) {
+        const next = sortConversations(detail.sidebar.conversations);
+        cachedConversationsMobile = next;
+        setConversations(next);
+        setLoading(false);
+      }
+    };
+    window.addEventListener("chat-bootstrap-ready", handleBootstrapReady);
+    return () => window.removeEventListener("chat-bootstrap-ready", handleBootstrapReady);
+  }, []);
   
   const loadConversations = useCallback(async () => {
     if (!user) { setConversations([]); setLoading(false); return; }
+    const normalizedPathname = (pathname || "/") === "/" ? "/" : (pathname || "").replace(/\/$/, "");
+    const isChatConversationRoute = normalizedPathname === "/chat" && !!effectiveRouteConvId;
+    const hasUsableBootstrapForRoute = isChatConversationRoute
+      && chatBootstrap?.conversation?.id === Number(effectiveRouteConvId)
+      && Array.isArray(chatBootstrap.sidebar?.conversations);
+    if (hasUsableBootstrapForRoute) return;
+    if (isChatConversationRoute && !chatBootstrapReadyRef.current) return;
     const isFirstLoad = cachedConversationsMobile === null;
     if (isFirstLoad) setLoading(true);
     const start = Date.now(); const data = await fetchConversations();
@@ -250,7 +293,7 @@ export default function MobileNav() {
     } else {
       updateConversationsStable(() => data);
     }
-  }, [user, updateConversationsStable]);
+  }, [user, pathname, effectiveRouteConvId, chatBootstrap, updateConversationsStable]);
   
   useEffect(() => { loadConversations(); }, [loadConversations]);
   useEffect(() => {
@@ -288,8 +331,9 @@ export default function MobileNav() {
   useEffect(() => {
     const h = (e: Event) => {
       const d = (e as CustomEvent).detail;
-      if (d?.id == null) return;
-      const targetId = typeof d.id === "string" ? Number(d.id) : d.id;
+      const rawId = d?.id ?? d?.conversationId;
+      if (rawId == null) return;
+      const targetId = typeof rawId === "string" ? Number(rawId) : rawId;
       const updatedAt = d.updated_at || new Date().toISOString();
       updateConversationsStable(prev => sortConversations(prev.map(c => c.id === targetId ? { ...c, updated_at: updatedAt } : c)));
     };

@@ -17,6 +17,7 @@ finalizerSource = finalizerSource.replace(/import \{ buildFinalizingPatch, type 
 source = source.replace(/import type[^;]+react[^;]+;\n/g, "");
 source = source.replace(/import type[^;]+streaming[^;]+;\n/g, "");
 source = source.replace(/import type[^;]+chatTypes[^;]+;\n/g, "");
+source = source.replace(/import \{ getConversationSnapshot, patchConversationSnapshot \} from "@\/lib\/chatConversationCache";\n/g, "const getConversationSnapshot = () => undefined; const patchConversationSnapshot = () => {};\n");
 source = source.replace(/import \{ useCallback, useRef \} from "react";\n/g, "const useCallback = (fn) => fn; const useRef = (current) => ({ current });\n");
 source = source.replace(/import \{ getGuestId as defaultGetGuestId \} from "@\/lib\/guestId";\n/g, "const defaultGetGuestId = () => 'guest';\n");
 source = source.replace(/import \{ realtimeAppend as defaultRealtimeAppend, realtimeGet as defaultRealtimeGet, realtimeUpdate as defaultRealtimeUpdate, realtimeMarkCompleted as defaultRealtimeMarkCompleted \} from "@\/lib\/streaming";\n/g, "const defaultRealtimeAppend = () => {}; const defaultRealtimeGet = () => undefined; const defaultRealtimeUpdate = () => {}; const defaultRealtimeMarkCompleted = () => {};\n");
@@ -150,6 +151,49 @@ test("start action stores active state, headers and forwards events", async () =
   assert.deepEqual(events, ["event-1"]);
 });
 
+test("shared task sequence guard dedupes replay across restored message ids", async () => {
+  const appliedTaskSequencesRef = { current: {} };
+  const taskStreamsRef = { current: {} };
+  const activeTaskStreamsRef = { current: {} };
+  const callbacks = [];
+  const controllers = [];
+  const action = createStartTaskEventStreamAction({
+    apiBaseUrl: "",
+    taskStreamsRef,
+    activeTaskStreamsRef,
+    appliedTaskSequencesRef,
+    setMessages: () => {},
+    setIsLoading: () => {},
+    startBackgroundPolling: () => {},
+    translate: (key) => key,
+    getToken: () => "tok",
+    createAbortController: () => {
+      const controller = makeController();
+      controllers.push(controller);
+      return controller;
+    },
+    createTaskStreamEventHandler: (opts) => {
+      callbacks.push(opts.callbacks);
+      return { processEvent(){}, getAccumulated(){ return ""; }, getLatestSequence(){ return 0; } };
+    },
+    runTaskEventStream: async () => {},
+  });
+  action(9, "optimistic-local", 11, 0, "", 22);
+  await Promise.resolve();
+  await Promise.resolve();
+  activeTaskStreamsRef.current["optimistic-local"] = { generationTaskId: 22, serverMessageId: 11 };
+  taskStreamsRef.current["optimistic-local"] = controllers[0];
+  action(9, "server-11", 11, 0, "", 22);
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(controllers[0].signal.aborted, true);
+  assert.equal(taskStreamsRef.current["optimistic-local"], undefined);
+  assert.equal(callbacks.length, 2);
+  assert.equal(callbacks[0].shouldApplySequence(2), true);
+  assert.equal(callbacks[1].shouldApplySequence(2), false);
+  assert.equal(callbacks[1].shouldApplySequence(3), true);
+});
+
 test("done handler callback can start background polling with resolved id", async () => {
   const started = [];
   let callbacks;
@@ -178,7 +222,7 @@ test("done handler callback can start background polling with resolved id", asyn
   assert.deepEqual(started[0], [9, "local", 33]);
 });
 
-test("finally syncs realtime data to message, marks realtime completed, removes stream and starts fallback polling", async () => {
+test("finally preserves local content for server-backed task streams and waits for fallback polling", async () => {
   const taskStreamsRef = { current: {} };
   const messages = createState([{ id: "local", content: "old" }]);
   const completed = [];
@@ -207,10 +251,11 @@ test("finally syncs realtime data to message, marks realtime completed, removes 
   assert.ok(taskStreamsRef.current.local);
   await Promise.resolve();
   await Promise.resolve();
-  assert.equal(messages.get()[0].content, "rt");
+  assert.equal(messages.get()[0].content, "old");
   assert.equal(messages.get()[0].lastSequence, 44);
-  assert.equal(messages.get()[0].completedAt, 123);
-  assert.deepEqual(completed, ["local"]);
+  assert.equal(messages.get()[0].serverMessageId, 9);
+  assert.equal(messages.get()[0].completedAt, undefined);
+  assert.deepEqual(completed, []);
   assert.equal(taskStreamsRef.current.local, undefined);
   assert.deepEqual(started.at(-1), [5, "local", 9]);
 });

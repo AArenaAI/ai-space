@@ -5,6 +5,8 @@ export type BackgroundPollingTimerId = number;
 export type BackgroundPollingMessageResponse = {
   message?: {
     content?: string;
+    reasoning_content?: string;
+    reasoningContent?: string;
   };
   background_task?: {
     status?: string;
@@ -51,10 +53,12 @@ export function buildBackgroundPollingMessageUrl({
 
 export function normalizeBackgroundPollingResponse(data: BackgroundPollingMessageResponse | undefined): {
   content: string;
+  reasoningContent: string;
   status: string;
 } {
   return {
     content: data?.message?.content || "",
+    reasoningContent: data?.message?.reasoning_content || data?.message?.reasoningContent || "",
     status: data?.background_task?.status || "",
   };
 }
@@ -87,6 +91,7 @@ export function createBackgroundPollingTick({
       const normalized = normalizeBackgroundPollingResponse(data);
       const pollState = evaluateBackgroundTaskPoll({
         content: normalized.content,
+        reasoningContent: normalized.reasoningContent,
         status: normalized.status,
         previousContent: lastContent,
         terminalStableCount,

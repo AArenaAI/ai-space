@@ -8,6 +8,10 @@ import type { ChatModel, Message } from "@/lib/chatTypes";
 import { getModelAvatarMeta } from "@/lib/models/modelAvatars";
 import type { InferredGroup } from "@/lib/groups";
 import { isMessageGenerating } from "@/lib/chatContent";
+import { isTerminalMessage, resolveChatMessageRuntimeState } from "@/lib/chatMessageRuntimeState";
+import { isAssistantFailureState } from "@/lib/chatErrorState";
+import { CHAT_MESSAGE_ROW_CLASS } from "./chatLayout";
+import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 import { AssistantMessageMeta } from "./AssistantMessageMeta";
 import MessageActions from "./MessageActions";
 import UserMessageContent from "./UserMessageContent";
@@ -44,6 +48,7 @@ function shouldSkipViewportObserversForAssistant(content?: string) {
 
 export type MessageRowProps = {
   message: Message;
+  displayMessageId?: string;
   group?: InferredGroup;
   model?: ChatModel;
   isLast: boolean;
@@ -75,6 +80,7 @@ export type MessageRowProps = {
   imageLoadFailedLabel: string;
   MarkdownRenderer: MarkdownRendererComponent;
   onAssistantViewed?: (messageId: string) => void;
+  onOpenActivity?: (message: Message) => void;
   useContentVisibility?: boolean;
   deferOffscreenRichTextHydration?: boolean;
   stabilizeInitialRichText?: boolean;
@@ -82,6 +88,7 @@ export type MessageRowProps = {
 
 function MessageRow({
   message: msg,
+  displayMessageId,
   group,
   model,
   isLast,
@@ -113,6 +120,7 @@ function MessageRow({
   imageLoadFailedLabel,
   MarkdownRenderer,
   onAssistantViewed,
+  onOpenActivity,
   useContentVisibility = true,
   deferOffscreenRichTextHydration = false,
   stabilizeInitialRichText = false,
@@ -127,14 +135,25 @@ function MessageRow({
   const initialViewportState = forceHydrateRichText || skipViewportObservers;
   const [isNearViewport, setIsNearViewport] = useState(initialViewportState);
   const [isInViewport, setIsInViewport] = useState(initialViewportState);
+  const terminalMessage = isTerminalMessage(msg);
   const hasAssistantGenerationTask = Boolean(msg.generationTaskId || msg.backgroundTaskId || msg.activityStatus);
-  const isStreaming = isLoading && msg.role === "assistant" && !msg.completedAt && !msg.errorCode && !msg.stopped && isLatestAssistant && hasAssistantGenerationTask;
+  const isStreaming = isLoading && msg.role === "assistant" && !terminalMessage && isLatestAssistant && hasAssistantGenerationTask;
+  const realtime = useMessageRealtime(msg.id, isStreaming);
+  const runtimeState = resolveChatMessageRuntimeState({ message: msg, realtime });
+  const realtimeHasVisiblePayload = Boolean(
+    runtimeState.content?.trim() ||
+    runtimeState.answerContent?.trim() ||
+    runtimeState.reasoningContent?.trim()
+  );
   const canBypassBrowsingHydrationDefer = forceHydrateRichText && !isStreaming;
   const blockRichTextHydration = historyPrependSettling || (deferRichTextHydration && !canBypassBrowsingHydrationDefer);
   const forceStableRichLiteFallback = blockRichTextHydration || stabilizeInitialRichText || (forceHydrateRichText && !isInViewport);
-  const isGenerating = !isUser && isMessageGenerating(msg, isStreaming);
-  const canRegenerate = !isUser && (isLast || !msg.content) && !isLoading && !isGenerating;
-  const suppressAppearAnimation = historyPrependSettling || deferRichTextHydration;
+  const isGenerating = !isUser && isMessageGenerating({ ...msg, ...runtimeState }, isStreaming);
+  const assistantFailureMessage = { ...msg, content: runtimeState.content || msg.content, errorCode: runtimeState.errorCode || msg.errorCode, phase: runtimeState.phase };
+  const isAssistantFailure = !isUser && isAssistantFailureState(assistantFailureMessage);
+  const isEmptyPendingAssistant = !isUser && isGenerating && !realtimeHasVisiblePayload && !msg.content?.trim() && !msg.reasoningContent?.trim() && !runtimeState.terminal;
+  const canRegenerate = !isUser && !isAssistantFailure && !msg.stopped && (isLast || !msg.content) && !isLoading && !isGenerating;
+  const suppressAppearAnimation = historyPrependSettling || deferRichTextHydration || isGenerating || (!isUser && !msg.content?.trim() && !runtimeState.terminal);
   const assistantAvatarMeta = getModelAvatarMeta(model || msg.model || "AI");
   const rowProfileDetailEnabled = typeof window !== "undefined" && Boolean((window as Window & { __AI_SPACE_CHAT_ROW_PROFILE_DETAIL?: boolean }).__AI_SPACE_CHAT_ROW_PROFILE_DETAIL);
   const markdownWeight = rowProfileDetailEnabled ? getMarkdownWeight(msg.content) : null;
@@ -213,7 +232,7 @@ function MessageRow({
       setIsNearViewport(true);
       return;
     }
-    const root = row.closest('[data-testid="chat-history-scroll-container"], [data-testid="virtuoso-scroller"]') as Element | null;
+    const root = row.closest('[data-testid="chat-history-scroll-container"], [data-testid="chat-history-scroll-container"]') as Element | null;
     const observer = new IntersectionObserver((entries) => {
       if (entries.some((entry) => entry.isIntersecting)) {
         setIsNearViewport(true);
@@ -244,7 +263,7 @@ function MessageRow({
       setIsInViewport(true);
       return;
     }
-    const root = row.closest('[data-testid="chat-history-scroll-container"], [data-testid="virtuoso-scroller"]') as Element | null;
+    const root = row.closest('[data-testid="chat-history-scroll-container"], [data-testid="chat-history-scroll-container"]') as Element | null;
     const observer = new IntersectionObserver((entries) => {
       const visible = entries.some((entry) => entry.isIntersecting);
       setIsInViewport(visible);
@@ -268,13 +287,15 @@ function MessageRow({
     <div
       ref={rowRef}
       data-chat-message-row="true"
-      data-message-id={msg.id}
+      data-message-id={displayMessageId || msg.id}
+      data-server-message-id={msg.serverMessageId ? String(msg.serverMessageId) : undefined}
+      data-generation-task-id={msg.generationTaskId ? String(msg.generationTaskId) : undefined}
       data-message-role={msg.role}
-      style={isUser && useContentVisibility ? MESSAGE_ROW_CONTENT_VISIBILITY_STYLE : undefined}
-      className={cn("max-w-[800px] mx-auto px-4 py-4 rounded-2xl transition-colors duration-500", isHighlighted && "bg-brand/10")}
+      style={!isUser && useContentVisibility && !isGenerating && Boolean(msg.content?.trim() || msg.completedAt) && (msg.content?.length || 0) > 2000 ? MESSAGE_ROW_CONTENT_VISIBILITY_STYLE : undefined}
+      className={cn(CHAT_MESSAGE_ROW_CLASS, "py-4 rounded-2xl", isHighlighted && "bg-brand/10")}
     >
-      <div key={msg.id} className={cn("flex gap-3 group", !suppressAppearAnimation && "animate-message-appear", isUser ? "justify-end" : "justify-start")}>
-        <div className={cn("mt-1 shrink-0", isUser && !selectMode ? "hidden" : "w-7")}>
+      <div className={cn("flex gap-3 group", !suppressAppearAnimation && "animate-message-appear", isUser ? "justify-end" : "justify-start")}>
+        <div className={cn("mt-1 shrink-0", isUser && !selectMode ? "w-7 invisible" : "w-7")}>
           {!isUser && !selectMode && (
             <div className="relative">
               <button
@@ -286,7 +307,7 @@ function MessageRow({
                   }
                 }}
                 className={cn(
-                  "w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center relative avatar-dropdown-trigger",
+                  "w-7 h-7 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center relative avatar-dropdown-trigger transition-all duration-300",
                   group && group.assistantMessages.length > 1 && "cursor-pointer hover:bg-surface-elevated"
                 )}
               >
@@ -344,18 +365,18 @@ function MessageRow({
           <div className={cn("flex flex-col gap-1 min-w-0", isUser ? "items-end" : "items-start")}>
             <div
               className={cn(
-                "px-4 py-3 relative w-fit max-w-full transition-shadow duration-500",
-                isUser ? "rounded-2xl rounded-br-sm bg-surface-elevated shadow-sm" : "rounded-2xl rounded-bl-sm bg-surface-elevated",
-                isHighlighted && "ring-2 ring-brand/40 shadow-lg shadow-brand/10"
+                "relative max-w-full",
+                isUser ? "w-fit px-4 py-3 rounded-2xl rounded-br-sm bg-surface-elevated shadow-sm" : "w-full px-0 py-1 rounded-none bg-transparent",
+                isHighlighted && isUser && "ring-2 ring-brand/40 shadow-lg shadow-brand/10"
               )}
             >
-              {!isUser && model && !selectMode && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} />}
+              {!isUser && model && !selectMode && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} compact={isEmptyPendingAssistant} inlineStatus onOpenActivity={() => onOpenActivity?.(msg)} />}
               {isUser ? (
                 <UserMessageContent message={msg} imageLoadFailedLabel={imageLoadFailedLabel} />
               ) : (
                 <>
-                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={!blockRichTextHydration && (isNearViewport || forceHydrateRichText)} priorityHydrateRichText={!blockRichTextHydration && (forceHydrateRichText || stabilizeInitialRichText || deferOffscreenRichTextHydration)} allowRichLiteFallback={allowRichLiteFallback || forceStableRichLiteFallback || isInitialReadingAssistant || isViewedAssistant} compactRichLitePreview={!historyPrependSettling && !forceStableRichLiteFallback && !isInitialReadingAssistant && !isViewedAssistant} recoverEmptyContent={isLast} onRegenerate={onRegenerate} />
-                  {msg.stopped && onContinueGenerate && (
+                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={!blockRichTextHydration && (isNearViewport || forceHydrateRichText)} priorityHydrateRichText={!blockRichTextHydration && (forceHydrateRichText || stabilizeInitialRichText || deferOffscreenRichTextHydration)} allowRichLiteFallback={allowRichLiteFallback || forceStableRichLiteFallback || isInitialReadingAssistant || isViewedAssistant} compactRichLitePreview={!historyPrependSettling && !forceStableRichLiteFallback && !isInitialReadingAssistant && !isViewedAssistant} recoverEmptyContent={isLast} onRegenerate={onRegenerate} onOpenActivity={() => onOpenActivity?.(msg)} />
+                  {msg.stopped && !isAssistantFailure && msg.content?.trim() && onContinueGenerate && (
                     <button
                       onClick={onContinueGenerate}
                       className="mt-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-text-secondary hover:text-text-primary hover:bg-surface-card border border-surface-border transition-colors"
@@ -367,7 +388,7 @@ function MessageRow({
                 </>
               )}
             </div>
-            {!selectMode && !isStreaming && (
+            {!selectMode && !isStreaming && !isGenerating && (isUser || msg.content?.trim() || msg.completedAt || msg.stopped || msg.errorCode) && (
               <MessageActions
                 onCopy={() => handleCopy(msg.content)}
                 onDelete={() => setDeleteTarget(msg.id)}

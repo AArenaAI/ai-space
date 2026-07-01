@@ -106,6 +106,32 @@ function extractTextFromChatResponse(data: any): string {
   return choice?.message?.content || choice?.delta?.content || data?.message?.content || data?.content || "";
 }
 
+async function fetchWorkflowChat(payload: Record<string, any>): Promise<Response> {
+  const initResponse = await fetch("/api/chat/init", {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ ...payload, stream: true, init_only: true }),
+  });
+  if (!initResponse.ok) return initResponse;
+  const init = await initResponse.json();
+  const taskId = Number(init?.task_id || init?.assistant_message?.generation_task_id || 0);
+  if (!taskId) {
+    return new Response(JSON.stringify(init), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  return fetch(`/api/tasks/${taskId}/stream?after=0`, {
+    headers: getAuthOnlyHeaders(),
+  });
+}
+
+async function fetchWorkflowChatRequest(init: RequestInit): Promise<Response> {
+  const rawBody = typeof init.body === "string" ? init.body : "{}";
+  const payload = JSON.parse(rawBody || "{}");
+  return fetchWorkflowChat(payload);
+}
+
 function stripWorkflowText(text: string) {
   return text
     .replace(/^```(?:json|markdown|md)?\s*/i, "")
@@ -1995,7 +2021,7 @@ export default function SeedreamBetaPage() {
     setWorkflowGenerating(mode);
     try {
       const conversationId = await ensureWorkflowConversationId();
-      const response = await fetch("/api/chat", {
+      const response = await fetchWorkflowChatRequest({
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -2095,7 +2121,7 @@ export default function SeedreamBetaPage() {
     setIdeaChatting(true);
     try {
       const conversationId = await ensureWorkflowConversationId();
-      const response = await fetch("/api/chat", {
+      const response = await fetchWorkflowChatRequest({
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -2134,7 +2160,7 @@ export default function SeedreamBetaPage() {
     const lastUserContent = [...sourceMessages].reverse().find((msg) => msg.role === "user")?.content?.trim() || typedIdea || existingBrief;
     if (!transcript.trim()) return { outlineSource: typedIdea || existingBrief, ideaSourceReference: "" };
     const conversationId = await ensureWorkflowConversationId();
-    const response = await fetch("/api/chat", {
+    const response = await fetchWorkflowChatRequest({
       method: "POST",
       headers: getAuthHeaders(),
       body: JSON.stringify({
@@ -2202,7 +2228,7 @@ export default function SeedreamBetaPage() {
     setOutlineGenerating(true);
     try {
       const conversationId = await ensureWorkflowConversationId();
-      const response = await fetch("/api/chat", {
+      const response = await fetchWorkflowChatRequest({
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -2242,7 +2268,7 @@ export default function SeedreamBetaPage() {
     setEpisodeScriptGenerating(outline.episode);
     try {
       const conversationId = await ensureWorkflowConversationId();
-      const response = await fetch("/api/chat", {
+      const response = await fetchWorkflowChatRequest({
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -2323,7 +2349,7 @@ export default function SeedreamBetaPage() {
     setScriptChatting(true);
     try {
       const conversationId = await ensureWorkflowConversationId();
-      const response = await fetch("/api/chat", {
+      const response = await fetchWorkflowChatRequest({
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -2367,7 +2393,7 @@ ${question}` },
     setScriptRevising(true);
     try {
       const conversationId = await ensureWorkflowConversationId();
-      const response = await fetch("/api/chat", {
+      const response = await fetchWorkflowChatRequest({
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -2417,7 +2443,7 @@ ${instruction}` },
     setAssetChatting(true);
     try {
       const conversationId = await ensureWorkflowConversationId();
-      const response = await fetch("/api/chat", {
+      const response = await fetchWorkflowChatRequest({
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -2462,7 +2488,7 @@ ${question}` },
     setAssetRegeneratingId(asset.id);
     try {
       const conversationId = await ensureWorkflowConversationId();
-      const response = await fetch("/api/chat", {
+      const response = await fetchWorkflowChatRequest({
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({

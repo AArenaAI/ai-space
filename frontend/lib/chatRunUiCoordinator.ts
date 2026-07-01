@@ -85,7 +85,7 @@ export function decideSingleSendFinally(input: {
       shouldClearMainController: false,
       shouldClearAbortReason: false,
       shouldClearCompareControllers: false,
-      shouldDispatchConversationUpdated: Boolean(input.conversationId),
+      shouldDispatchConversationUpdated: false,
       conversationId: input.conversationId,
     };
   }

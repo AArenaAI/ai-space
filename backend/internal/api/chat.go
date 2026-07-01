@@ -43,6 +43,74 @@ func (h *ChatHandler) touchConversation(conversationID uint) {
 	}
 }
 
+func (h *ChatHandler) RecoverGenerationMessages() {
+	if h == nil || h.db == nil {
+		return
+	}
+	terminalStatuses := []string{"completed", "failed", "cancelled", "incomplete"}
+	var terminalTasks []models.AIBackgroundTask
+	if err := h.db.Where("status IN ? AND assistant_message_id > 0", terminalStatuses).
+		Order("updated_at DESC").
+		Limit(1000).
+		Find(&terminalTasks).Error; err == nil {
+		for _, task := range terminalTasks {
+			updates := map[string]interface{}{
+				"generation_task_id":   task.ID,
+				"generation_status":    task.Status,
+				"last_sequence_number": task.LastSequenceNumber,
+				"phase":                task.Status,
+			}
+			if task.CompletedAt != nil {
+				updates["completed_at"] = task.CompletedAt
+			}
+			h.db.Model(&models.Message{}).
+				Where("id = ? AND role = ? AND (generation_status IS NULL OR generation_status = '' OR generation_status NOT IN ?)", task.AssistantMessageID, "assistant", terminalStatuses).
+				Updates(updates)
+		}
+	}
+
+	cutoff := time.Now().Add(-30 * time.Minute)
+	now := time.Now()
+	var staleMessages []models.Message
+	if err := h.db.Where("role = ? AND generation_status IN ? AND created_at < ?", "assistant", []string{"queued", "running", "streaming", "retrying", "pending"}, cutoff).
+		Limit(1000).
+		Find(&staleMessages).Error; err == nil {
+		for _, msg := range staleMessages {
+			var task models.AIBackgroundTask
+			err := h.db.Where("assistant_message_id = ?", msg.ID).Order("updated_at DESC, id DESC").First(&task).Error
+			if err == nil {
+				if containsChatStatus(terminalStatuses, task.Status) {
+					updates := map[string]interface{}{
+						"generation_task_id":   task.ID,
+						"generation_status":    task.Status,
+						"last_sequence_number": task.LastSequenceNumber,
+						"phase":                task.Status,
+					}
+					if task.CompletedAt != nil {
+						updates["completed_at"] = task.CompletedAt
+					}
+					h.db.Model(&models.Message{}).Where("id = ?", msg.ID).Updates(updates)
+				}
+				continue
+			}
+			h.db.Model(&models.Message{}).Where("id = ?", msg.ID).Updates(map[string]interface{}{
+				"generation_status": "incomplete",
+				"phase":             "failed",
+				"completed_at":      &now,
+			})
+		}
+	}
+}
+
+func containsChatStatus(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *ChatHandler) createMessageGroup(conversationID uint, userMessageID uint, modelIDs []string) (*models.MessageGroup, error) {
 	group := &models.MessageGroup{
 		ConversationID: conversationID,
@@ -90,6 +158,17 @@ type FileContextPolicy struct {
 	IncludePinnedFiles   bool   `json:"include_pinned_files,omitempty"`
 }
 
+type ChatInitResponse struct {
+	ConversationID     uint             `json:"conversation_id"`
+	UserMessageID      uint             `json:"user_message_id,omitempty"`
+	AssistantMessageID uint             `json:"assistant_message_id"`
+	TaskID             uint             `json:"task_id"`
+	GroupID            uint             `json:"group_id,omitempty"`
+	GroupIndex         int              `json:"group_index"`
+	GroupModels        []string         `json:"group_models,omitempty"`
+	AssistantMessage   MessageWithGroup `json:"assistant_message"`
+}
+
 type ChatRequest struct {
 	Model           string             `json:"model" binding:"required"`
 	Messages        []services.Message `json:"messages" binding:"required"`
@@ -125,6 +204,9 @@ type ChatRequest struct {
 	// Used by document-reader structured artifact generation where the output is
 	// persisted separately and must not appear in the study chat/history.
 	Transient bool `json:"transient,omitempty"`
+	// InitOnly creates the persisted user/assistant/task state and starts the
+	// generation runner, then returns a job handle instead of holding an SSE stream.
+	InitOnly bool `json:"init_only,omitempty"`
 }
 
 type CompareRequest struct {
@@ -822,13 +904,28 @@ func (h *ChatHandler) preprocessSearch(messages []services.Message, modelID stri
 	return processed, sources, false
 }
 
+func (h *ChatHandler) InitChat(c *gin.Context) {
+	var req ChatRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	req.Stream = true
+	req.InitOnly = true
+	c.Set("chat_init_request", req)
+	h.chatWithRequest(c, &req)
+}
+
 func (h *ChatHandler) Chat(c *gin.Context) {
 	var req ChatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	h.chatWithRequest(c, &req)
+}
 
+func (h *ChatHandler) chatWithRequest(c *gin.Context, req *ChatRequest) {
 	// ========== 匿名用户检查 ==========
 	userID, guestID, ok := requireGuestOrUser(c, h.cfg, h.db)
 	if !ok {
@@ -915,7 +1012,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 	query := lastUserContent(req.Messages)
 
 	if h.fileService != nil {
-		filePlan = h.buildChatFilePlan(req, userID, guestID)
+		filePlan = h.buildChatFilePlan(*req, userID, guestID)
 	}
 
 	var fileContextSources []services.SearchResult
@@ -981,12 +1078,172 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		}
 	}
 
-	groupCtx, err := h.ensureMessageGroup(conversationID, req, savedUserMessageID)
+	groupCtx, err := h.ensureMessageGroup(conversationID, *req, savedUserMessageID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "message_group_failed", "message": err.Error()})
 		return
 	}
+	// For streaming requests, persist the assistant placeholder and generation task
+	// before any slow search/model preparation. This makes /api/chat/bootstrap
+	// authoritative immediately after the user sends, even if /api/chat has not
+	// returned yet.
+	var assistantMsgID uint
+	var streamTask *models.AIBackgroundTask
+	if req.Stream {
+		assistantMsg := models.Message{
+			ConversationID:     conversationID,
+			Role:               "assistant",
+			Content:            "",
+			Model:              req.Model,
+			GroupID:            groupCtx.Group.ID,
+			GroupIndex:         groupCtx.GroupIndex,
+			GenerationStatus:   "running",
+			LastSequenceNumber: 0,
+			Phase:              "queued",
+			CreatedAt:          time.Now(),
+		}
+		if err := h.db.Create(&assistantMsg).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存 assistant 占位消息失败"})
+			return
+		}
+		assistantMsgID = assistantMsg.ID
+		streamTask = h.createBackgroundTask(fmt.Sprintf("stream:%d", assistantMsgID), userID, guestID, conversationID, assistantMsgID, req.Model, "", "running", 0)
+		if streamTask == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "创建生成任务失败"})
+			return
+		}
+		h.db.Model(&models.Message{}).Where("id = ?", assistantMsgID).Updates(map[string]interface{}{
+			"generation_task_id": streamTask.ID,
+			"generation_status":  "running",
+			"phase":              "queued",
+		})
+		h.touchConversation(conversationID)
+	}
 	// ========== 保存消息与会话结束 ==========
+
+	if req.InitOnly {
+		metaOut, _ := json.Marshal(map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{"delta": map[string]string{"content": ""}},
+			},
+			"_generation_task": map[string]interface{}{
+				"id":                   streamTask.ID,
+				"status":               "running",
+				"conversation_id":      conversationID,
+				"assistant_message_id": assistantMsgID,
+				"user_message_id":      groupCtx.UserMessageID,
+				"group_id":             groupCtx.Group.ID,
+				"group_index":          groupCtx.GroupIndex,
+				"group_models":         groupCtx.GroupModels,
+			},
+		})
+		h.persistTaskEvent(streamTask, assistantMsgID, 1, "generation_task", string(metaOut))
+
+		reqCopy := *req
+		clientIP := c.ClientIP()
+		go func() {
+			searchSources := append([]services.SearchResult(nil), fileContextSources...)
+			var useSearchTool bool
+			lastUserQuery := ""
+			if len(reqCopy.Messages) > 0 {
+				lastUserQuery = reqCopy.Messages[len(reqCopy.Messages)-1].Content
+			}
+			if (len(filePlan.MessageFiles) > 0 || len(filePlan.HistoricalFiles) > 0) && isFileQuestion(lastUserQuery) {
+				fmt.Printf("[Chat] 文件问答模式，跳过联网搜索 currentFiles=%d historicalFiles=%d query=%q\n", len(filePlan.MessageFiles), len(filePlan.HistoricalFiles), lastUserQuery)
+				useSearchTool = false
+			} else if len(fileContextSources) == 0 {
+				reqCopy.Messages, searchSources, useSearchTool = h.preprocessSearch(reqCopy.Messages, reqCopy.Model, reqCopy.Search, clientIP)
+			}
+
+			effectiveReasoning, effectiveEffort := h.effectiveReasoningForModel(reqCopy.Model, reqCopy.ReasoningEffort)
+			if effectiveReasoning && reqCopy.TemplateID == 0 {
+				langInstruct := "请使用简体中文进行思考和回答。"
+				if len(reqCopy.Messages) > 0 {
+					lastMsg := reqCopy.Messages[len(reqCopy.Messages)-1].Content
+					hasChinese := false
+					for _, r := range lastMsg {
+						if r >= 0x4e00 && r <= 0x9fff {
+							hasChinese = true
+							break
+						}
+					}
+					if !hasChinese {
+						langInstruct = "Please think and respond in English."
+					}
+				}
+				reqCopy.Messages = append([]services.Message{{Role: "system", Content: langInstruct}}, reqCopy.Messages...)
+			}
+			reqCopy.Messages = mergeSystemMessages(reqCopy.Messages)
+			reqCopy.Messages = truncateHistoryMessages(reqCopy.Messages)
+
+			initialSequence := int64(1)
+			if len(searchSources) > 0 {
+				meta := map[string]interface{}{
+					"choices": []map[string]interface{}{{"delta": map[string]string{"content": ""}}},
+					"_search_meta": map[string]interface{}{
+						"status":        "completed",
+						"sources_count": len(searchSources),
+						"sources":       searchSources,
+					},
+				}
+				out, _ := json.Marshal(meta)
+				initialSequence = 2
+				h.persistTaskEvent(streamTask, assistantMsgID, initialSequence, "search_meta", string(out))
+			}
+
+			h.runGenerationTask(GenerationTaskRunRequest{
+				Task:               streamTask,
+				Messages:           append([]services.Message(nil), reqCopy.Messages...),
+				Model:              reqCopy.Model,
+				Reasoning:          effectiveReasoning,
+				ReasoningEffort:    reqCopy.ReasoningEffort,
+				UseSearchTool:      useSearchTool,
+				UseBackground:      services.OpenAIUsesBackground(reqCopy.Model, effectiveEffort),
+				TextFormat:         reqCopy.TextFormat,
+				UserID:             userID,
+				GuestID:            guestID,
+				ConversationID:     conversationID,
+				AssistantMessageID: assistantMsgID,
+				InitialSequence:    initialSequence,
+				SearchSources:      searchSources,
+			})
+		}()
+
+		assistantPayload := MessageWithGroup{
+			Message: models.Message{
+				ID:                 assistantMsgID,
+				ConversationID:     conversationID,
+				Role:               "assistant",
+				Content:            "",
+				Model:              req.Model,
+				GroupID:            groupCtx.Group.ID,
+				GroupIndex:         groupCtx.GroupIndex,
+				GenerationStatus:   "running",
+				GenerationTaskID:   streamTask.ID,
+				LastSequenceNumber: 1,
+				Phase:              "queued",
+				CreatedAt:          time.Now(),
+			},
+			GroupID:                groupCtx.Group.ID,
+			GroupIndex:             groupCtx.GroupIndex,
+			GroupModels:            groupCtx.GroupModels,
+			UserMessageID:          groupCtx.UserMessageID,
+			GenerationTaskID:       streamTask.ID,
+			LastSequenceNumber:     1,
+			ServerGenerationStatus: "running",
+		}
+		c.JSON(http.StatusAccepted, ChatInitResponse{
+			ConversationID:     conversationID,
+			UserMessageID:      groupCtx.UserMessageID,
+			AssistantMessageID: assistantMsgID,
+			TaskID:             streamTask.ID,
+			GroupID:            groupCtx.Group.ID,
+			GroupIndex:         groupCtx.GroupIndex,
+			GroupModels:        groupCtx.GroupModels,
+			AssistantMessage:   assistantPayload,
+		})
+		return
+	}
 
 	var searchSources []services.SearchResult
 	var useSearchTool bool
@@ -1071,26 +1328,8 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 	useBackground := services.OpenAIUsesBackground(req.Model, effectiveEffort)
 
 	if req.Stream {
-		// 先创建一条空的 assistant 消息，确保即使用户跳转/刷新也能看到生成中的消息
-		assistantMsg := models.Message{
-			ConversationID: conversationID,
-			Role:           "assistant",
-			Content:        "",
-			Model:          req.Model,
-			GroupID:        groupCtx.Group.ID,
-			GroupIndex:     groupCtx.GroupIndex,
-			CreatedAt:      time.Now(),
-		}
-		if err := h.db.Create(&assistantMsg).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存 assistant 占位消息失败"})
-			return
-		}
-		h.touchConversation(conversationID)
-		assistantMsgID := assistantMsg.ID
-
-		streamTask := h.createBackgroundTask(fmt.Sprintf("stream:%d", assistantMsgID), userID, guestID, conversationID, assistantMsgID, req.Model, "", "running", 0)
-		if streamTask == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "创建生成任务失败"})
+		if assistantMsgID == 0 || streamTask == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "生成任务未初始化"})
 			return
 		}
 
@@ -1278,6 +1517,35 @@ func (h *ChatHandler) createBackgroundTask(responseID string, userID uint, guest
 	return &task
 }
 
+func mergeSearchSources(existing []services.SearchResult, extra []services.SearchResult) []services.SearchResult {
+	if len(existing) == 0 {
+		return append([]services.SearchResult(nil), extra...)
+	}
+	out := append([]services.SearchResult(nil), existing...)
+	seen := map[string]bool{}
+	for _, source := range out {
+		key := strings.TrimSpace(source.URL)
+		if key == "" {
+			key = strings.TrimSpace(source.Title)
+		}
+		if key != "" {
+			seen[key] = true
+		}
+	}
+	for _, source := range extra {
+		key := strings.TrimSpace(source.URL)
+		if key == "" {
+			key = strings.TrimSpace(source.Title)
+		}
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, source)
+	}
+	return out
+}
+
 func normalizeFileContextSearchSources(sources []services.FileContextSource) []services.SearchResult {
 	if len(sources) == 0 {
 		return nil
@@ -1410,7 +1678,10 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 			return
 		}
 		if forwardErr == nil && req.UseBackground && strings.TrimSpace(streamResult.ResponseID) != "" {
-			finalContent, finalUsage, finalErr := h.reconcileOpenAIBackgroundFinal(ctx, req.Task, req.AssistantMessageID, streamResult.ResponseID, content, streamResult.LastSequenceNumber)
+			finalContent, finalUsage, finalSources, finalErr := h.reconcileOpenAIBackgroundFinal(ctx, req.Task, req.AssistantMessageID, streamResult.ResponseID, content, streamResult.LastSequenceNumber)
+			if len(finalSources) > 0 {
+				streamResult.SearchSources = mergeSearchSources(streamResult.SearchSources, finalSources)
+			}
 			if finalErr != nil {
 				forwardErr = finalErr
 				streamResult.ErrorMessage = finalErr.Error()
@@ -1450,16 +1721,23 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 			content = "任务已完成，但未返回可展示文本。"
 		}
 		updates := map[string]interface{}{
-			"content":      content,
-			"completed_at": time.Now(),
+			"content":              content,
+			"completed_at":         time.Now(),
+			"generation_status":    finalStatus,
+			"last_sequence_number": streamResult.LastSequenceNumber,
+			"phase":                finalStatus,
 		}
 		if strings.TrimSpace(streamResult.ReasoningContent) != "" {
 			updates["reasoning_content"] = streamResult.ReasoningContent
 		}
-		if len(req.SearchSources) > 0 {
-			if sourcesJSON, err := json.Marshal(req.SearchSources); err == nil {
+		finalSearchSources := req.SearchSources
+		if len(streamResult.SearchSources) > 0 {
+			finalSearchSources = mergeSearchSources(finalSearchSources, streamResult.SearchSources)
+		}
+		if len(finalSearchSources) > 0 {
+			if sourcesJSON, err := json.Marshal(finalSearchSources); err == nil {
 				updates["search_sources"] = string(sourcesJSON)
-				updates["search_sources_count"] = len(req.SearchSources)
+				updates["search_sources_count"] = len(finalSearchSources)
 			}
 		}
 		_ = h.db.Model(&models.Message{}).Where("id = ?", req.AssistantMessageID).Updates(updates).Error
@@ -1509,9 +1787,9 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 	}
 }
 
-func (h *ChatHandler) reconcileOpenAIBackgroundFinal(ctx context.Context, task *models.AIBackgroundTask, assistantMessageID uint, responseID string, streamedContent string, lastSeq int64) (string, *services.TokenUsage, error) {
+func (h *ChatHandler) reconcileOpenAIBackgroundFinal(ctx context.Context, task *models.AIBackgroundTask, assistantMessageID uint, responseID string, streamedContent string, lastSeq int64) (string, *services.TokenUsage, []services.SearchResult, error) {
 	if task == nil || assistantMessageID == 0 || strings.TrimSpace(responseID) == "" {
-		return streamedContent, nil, nil
+		return streamedContent, nil, nil, nil
 	}
 
 	// OpenAI background+stream can close the streaming socket before the final
@@ -1525,7 +1803,7 @@ func (h *ChatHandler) reconcileOpenAIBackgroundFinal(ctx context.Context, task *
 	deadline := time.Now().Add(14*time.Minute + 15*time.Second)
 	for attempt := 0; time.Now().Before(deadline); attempt++ {
 		if h.isGenerationTaskCancelled(task.ID) {
-			return streamedContent, nil, fmt.Errorf("generation cancelled")
+			return streamedContent, nil, nil, fmt.Errorf("generation cancelled")
 		}
 		retrieveCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		raw, err = h.aiService.RetrieveOpenAIResponse(retrieveCtx, responseID)
@@ -1538,7 +1816,7 @@ func (h *ChatHandler) reconcileOpenAIBackgroundFinal(ctx context.Context, task *
 				break
 			}
 			if lastStatus == "failed" || lastStatus == "cancelled" || lastStatus == "incomplete" {
-				return streamedContent, nil, fmt.Errorf("OpenAI response status=%s", lastStatus)
+				return streamedContent, nil, nil, fmt.Errorf("OpenAI response status=%s", lastStatus)
 			}
 		}
 		wait := time.Duration(500+attempt*250) * time.Millisecond
@@ -1548,24 +1826,25 @@ func (h *ChatHandler) reconcileOpenAIBackgroundFinal(ctx context.Context, task *
 		time.Sleep(wait)
 	}
 	if err != nil {
-		return streamedContent, nil, err
+		return streamedContent, nil, nil, err
 	}
 	if !completed {
 		if lastStatus == "" {
 			lastStatus = "unknown"
 		}
-		return streamedContent, nil, fmt.Errorf("OpenAI response not completed yet status=%s", lastStatus)
+		return streamedContent, nil, nil, fmt.Errorf("OpenAI response not completed yet status=%s", lastStatus)
 	}
+	finalSources := services.ExtractOpenAIResponseSearchSources(raw)
 
 	finalText := services.ExtractOpenAIResponseText(raw)
 	if strings.TrimSpace(finalText) == "" {
-		return streamedContent, parseUsageFromResponse(raw), nil
+		return streamedContent, parseUsageFromResponse(raw), finalSources, nil
 	}
 
 	mergedContent := mergeReasoningPersistedContent(streamedContent, finalText)
 	missing := missingContentSuffix(streamedContent, mergedContent)
 	if strings.TrimSpace(missing) == "" {
-		return mergedContent, parseUsageFromResponse(raw), nil
+		return mergedContent, parseUsageFromResponse(raw), finalSources, nil
 	}
 
 	seq := lastSeq + 1
@@ -1579,7 +1858,7 @@ func (h *ChatHandler) reconcileOpenAIBackgroundFinal(ctx context.Context, task *
 		"_reconciled_final": true,
 	})
 	h.persistTaskEvent(task, assistantMessageID, seq, "delta", string(out))
-	return mergedContent, parseUsageFromResponse(raw), nil
+	return mergedContent, parseUsageFromResponse(raw), finalSources, nil
 }
 
 func missingContentSuffix(existing string, final string) string {
@@ -1637,8 +1916,10 @@ func (h *ChatHandler) failGenerationTaskWithMeta(task *models.AIBackgroundTask, 
 	now := time.Now()
 	persistedContent := h.failurePersistedContent(assistantMessageID, task, message)
 	h.db.Model(&models.Message{}).Where("id = ?", assistantMessageID).Updates(map[string]interface{}{
-		"content":      persistedContent,
-		"completed_at": &now,
+		"content":           persistedContent,
+		"completed_at":      &now,
+		"generation_status": "failed",
+		"phase":             "failed",
 	})
 	h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", task.ID).Updates(map[string]interface{}{
 		"status":               "failed",
@@ -1667,6 +1948,200 @@ func (h *ChatHandler) failurePersistedContent(assistantMessageID uint, task *mod
 	return fallbackMessage
 }
 
+type chatStatusTimelineStep struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	Status    string `json:"status"`
+	StartedAt int64  `json:"startedAt"`
+	EndedAt   int64  `json:"endedAt,omitempty"`
+	Count     int    `json:"count,omitempty"`
+	Label     string `json:"label,omitempty"`
+}
+
+func loadChatStatusTimeline(raw string) []chatStatusTimelineStep {
+	var steps []chatStatusTimelineStep
+	if strings.TrimSpace(raw) == "" {
+		return steps
+	}
+	_ = json.Unmarshal([]byte(raw), &steps)
+	return steps
+}
+
+func saveChatStatusTimeline(steps []chatStatusTimelineStep) string {
+	out, _ := json.Marshal(steps)
+	return string(out)
+}
+
+func isDeprecatedChatTimelineStep(step chatStatusTimelineStep) bool {
+	if step.Status != "completed" {
+		return false
+	}
+	return step.Kind == "waiting_provider" || step.Kind == "finalizing" || step.Kind == "streaming_answer"
+}
+
+func sanitizeChatStatusTimelineSteps(steps []chatStatusTimelineStep) []chatStatusTimelineStep {
+	if len(steps) == 0 {
+		return steps
+	}
+	cleaned := make([]chatStatusTimelineStep, 0, len(steps))
+	for _, step := range steps {
+		if isDeprecatedChatTimelineStep(step) {
+			continue
+		}
+		cleaned = append(cleaned, step)
+	}
+	return cleaned
+}
+
+func sanitizeChatStatusTimelineJSON(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return ""
+	}
+	steps := loadChatStatusTimeline(raw)
+	if len(steps) == 0 {
+		return raw
+	}
+	cleaned := sanitizeChatStatusTimelineSteps(steps)
+	if len(cleaned) == 0 {
+		return ""
+	}
+	return saveChatStatusTimeline(cleaned)
+}
+
+func chatTimelineEventID(kind string, status string) string {
+	return kind + ":" + status
+}
+
+func closeRunningChatTimelineSteps(steps []chatStatusTimelineStep, nowMs int64, status string, exceptKind string) []chatStatusTimelineStep {
+	for i := range steps {
+		if steps[i].Status == "running" && steps[i].Kind != exceptKind && steps[i].EndedAt == 0 {
+			steps[i].Status = status
+			steps[i].EndedAt = nowMs
+			steps[i].ID = chatTimelineEventID(steps[i].Kind, status)
+		}
+	}
+	return steps
+}
+
+func upsertChatTimelineStep(steps []chatStatusTimelineStep, kind string, status string, nowMs int64, count int, label string) []chatStatusTimelineStep {
+	if kind == "" || status == "" {
+		return steps
+	}
+	if status == "running" {
+		for i := range steps {
+			if steps[i].Kind == kind && steps[i].Status == "running" {
+				if label != "" {
+					steps[i].Label = label
+				}
+				if count > 0 {
+					steps[i].Count = count
+				}
+				return steps
+			}
+		}
+		steps = closeRunningChatTimelineSteps(steps, nowMs, "completed", kind)
+		return append(steps, chatStatusTimelineStep{ID: chatTimelineEventID(kind, status), Kind: kind, Status: status, StartedAt: nowMs, Count: count, Label: label})
+	}
+	startedAt := nowMs
+	for i := range steps {
+		if steps[i].Kind == kind && steps[i].Status == "running" {
+			startedAt = steps[i].StartedAt
+			steps[i] = chatStatusTimelineStep{ID: chatTimelineEventID(kind, status), Kind: kind, Status: status, StartedAt: startedAt, EndedAt: nowMs, Count: count, Label: label}
+			return steps
+		}
+	}
+	for i := range steps {
+		if steps[i].Kind == kind && steps[i].Status == status {
+			if steps[i].EndedAt == 0 {
+				steps[i].EndedAt = nowMs
+			}
+			if count > 0 {
+				steps[i].Count = count
+			}
+			if label != "" {
+				steps[i].Label = label
+			}
+			return steps
+		}
+	}
+	return append(steps, chatStatusTimelineStep{ID: chatTimelineEventID(kind, status), Kind: kind, Status: status, StartedAt: startedAt, EndedAt: nowMs, Count: count, Label: label})
+}
+
+func (h *ChatHandler) updateStatusTimelineForTaskEvent(task *models.AIBackgroundTask, assistantMessageID uint, eventType string, payload string) {
+	if h == nil || h.db == nil || task == nil || assistantMessageID == 0 {
+		return
+	}
+	now := time.Now()
+	nowMs := now.UnixMilli()
+	steps := loadChatStatusTimeline(task.StatusTimeline)
+	kind, status, label := "", "", ""
+	count := 0
+	switch eventType {
+	case "generation_task":
+		kind, status = "waiting_provider", "running"
+	case "search_meta":
+		kind, status = "web_search", "completed"
+		var meta map[string]any
+		if json.Unmarshal([]byte(payload), &meta) == nil {
+			if searchMeta, ok := meta["_search_meta"].(map[string]any); ok {
+				if n, ok := searchMeta["sources_count"].(float64); ok {
+					count = int(n)
+				}
+			}
+		}
+	case "activity_meta":
+		var meta map[string]any
+		if json.Unmarshal([]byte(payload), &meta) == nil {
+			if activityMeta, ok := meta["_activity_meta"].(map[string]any); ok {
+				kind, _ = activityMeta["kind"].(string)
+				status, _ = activityMeta["status"].(string)
+				label, _ = activityMeta["label"].(string)
+				if n, ok := activityMeta["sources_count"].(float64); ok {
+					count = int(n)
+				}
+				if status == "searching" {
+					status = "running"
+				}
+			}
+		}
+	case "delta":
+		var meta map[string]any
+		if json.Unmarshal([]byte(payload), &meta) == nil {
+			if choices, ok := meta["choices"].([]any); ok && len(choices) > 0 {
+				if choice, ok := choices[0].(map[string]any); ok {
+					if delta, ok := choice["delta"].(map[string]any); ok {
+						if text, _ := delta["reasoning_content"].(string); strings.TrimSpace(text) != "" {
+							kind, status = "reasoning", "running"
+						} else if text, _ := delta["content"].(string); text != "" {
+							kind, status = "streaming_answer", "running"
+						}
+					}
+				}
+			}
+		}
+	case "done":
+		steps = closeRunningChatTimelineSteps(steps, nowMs, "completed", "")
+	case "error":
+		steps = closeRunningChatTimelineSteps(steps, nowMs, "failed", "")
+	case "cancelled":
+		steps = closeRunningChatTimelineSteps(steps, nowMs, "stopped", "")
+	}
+	if kind != "" && status != "" {
+		steps = upsertChatTimelineStep(steps, kind, status, nowMs, count, label)
+	}
+	if len(steps) == 0 {
+		return
+	}
+	steps = sanitizeChatStatusTimelineSteps(steps)
+	timelineJSON := ""
+	if len(steps) > 0 {
+		timelineJSON = saveChatStatusTimeline(steps)
+	}
+	h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", task.ID).Update("status_timeline", timelineJSON)
+	h.db.Model(&models.Message{}).Where("id = ?", assistantMessageID).Update("status_timeline", timelineJSON)
+	task.StatusTimeline = timelineJSON
+}
+
 func (h *ChatHandler) persistTaskEvent(task *models.AIBackgroundTask, assistantMessageID uint, sequenceNumber int64, eventType string, payload string) {
 	if assistantMessageID == 0 || sequenceNumber <= 0 || payload == "" {
 		return
@@ -1691,7 +2166,31 @@ func (h *ChatHandler) persistTaskEvent(task *models.AIBackgroundTask, assistantM
 		return
 	}
 	h.db.Model(&models.AIBackgroundTask{}).Where("id = ? AND last_sequence_number < ?", task.ID, sequenceNumber).Update("last_sequence_number", sequenceNumber)
+	phase := "streaming"
+	if eventType == "generation_task" {
+		phase = "queued"
+	} else if eventType == "reasoning" || eventType == "reasoning_delta" {
+		phase = "reasoning"
+	} else if eventType == "search_meta" {
+		phase = "searching"
+	} else if eventType == "done" {
+		phase = "completed"
+	} else if eventType == "error" {
+		phase = "failed"
+	}
+	messageUpdates := map[string]interface{}{
+		"generation_task_id":   task.ID,
+		"last_sequence_number": sequenceNumber,
+	}
+	if phase == "completed" || phase == "failed" {
+		messageUpdates["generation_status"] = phase
+	} else {
+		messageUpdates["generation_status"] = "running"
+	}
+	messageUpdates["phase"] = phase
+	h.db.Model(&models.Message{}).Where("id = ? AND last_sequence_number < ?", assistantMessageID, sequenceNumber).Updates(messageUpdates)
 	task.LastSequenceNumber = sequenceNumber
+	h.updateStatusTimelineForTaskEvent(task, assistantMessageID, eventType, payload)
 }
 
 func (h *ChatHandler) isGenerationTaskCancelled(taskID uint) bool {
@@ -1792,6 +2291,7 @@ type UnifiedStreamResult struct {
 	Recoverable        bool
 	RetryAfterMs       int
 	ErrorMeta          map[string]interface{}
+	SearchSources      []services.SearchResult
 }
 
 var geminiReasoningTextPrefixPattern = regexp.MustCompile(`^\s*(思考过程|思考|分析|推理过程)\s*[:：]\s*`)
@@ -1939,8 +2439,11 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 				select {
 				case <-dbUpdateTicker.C:
 					content, reasoning := getSnapshot()
-					if content != "" {
-						updates := map[string]interface{}{"content": content}
+					if content != "" || strings.TrimSpace(reasoning) != "" {
+						updates := map[string]interface{}{}
+						if content != "" {
+							updates["content"] = content
+						}
 						if strings.TrimSpace(reasoning) != "" {
 							updates["reasoning_content"] = reasoning
 						}
@@ -2165,13 +2668,19 @@ func (h *ChatHandler) forwardUnifiedStream(resp *services.AICompletionResponse, 
 				if label == "" {
 					label = activityKind
 				}
+				activityMeta := map[string]interface{}{
+					"kind":   activityKind,
+					"status": activityStatus,
+					"label":  label,
+				}
+				if len(event.SearchSources) > 0 {
+					outcome.SearchSources = mergeSearchSources(outcome.SearchSources, event.SearchSources)
+					activityMeta["sources_count"] = len(outcome.SearchSources)
+					activityMeta["sources"] = outcome.SearchSources
+				}
 				if err := writeDataEvent("activity_meta", map[string]interface{}{
-					"choices": []map[string]interface{}{{"delta": map[string]string{"content": ""}}},
-					"_activity_meta": map[string]interface{}{
-						"kind":   activityKind,
-						"status": activityStatus,
-						"label":  label,
-					},
+					"choices":        []map[string]interface{}{{"delta": map[string]string{"content": ""}}},
+					"_activity_meta": activityMeta,
 				}); err != nil {
 					content, reasoning := getSnapshot()
 					outcome.FullContent = strings.TrimSpace(content)
@@ -2325,7 +2834,9 @@ func (h *ChatHandler) CancelGenerationTask(c *gin.Context) {
 	h.persistTaskEvent(&task, task.AssistantMessageID, seq+1, "done", "[DONE]")
 	now := time.Now()
 	h.db.Model(&models.Message{}).Where("id = ?", task.AssistantMessageID).Updates(map[string]interface{}{
-		"completed_at": &now,
+		"completed_at":      &now,
+		"generation_status": "cancelled",
+		"phase":             "cancelled",
 	})
 	h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", task.ID).Updates(map[string]interface{}{
 		"status":               "cancelled",

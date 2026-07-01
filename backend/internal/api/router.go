@@ -86,8 +86,25 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	// Handler 实例（在外层定义，供公开路由和认证路由共用）
 	chatHandler := NewChatHandler(db, cfg, aiService, searchService, fileService, retrievalSvc, contextBuilder, usageService)
+	chatHandler.RecoverGenerationMessages()
+	chatBootstrapHandler := NewChatBootstrapHandler(db, cfg)
+	chatShellHandler := NewChatShellHandler(db, cfg)
 	openAIWebhookHandler := NewOpenAIWebhookHandler(db, cfg, aiService, usageService)
 	fileHandler := NewFileHandler(fileService, db)
+	// 动态 Chat Shell（需由 nginx 将 /chat 与 /skills/chat 转发到 Go 后启用；静态部署未转发时保持原行为）。
+	dynamicShell := router.Group("")
+	dynamicShell.Use(middleware.OptionalAuthMiddleware(cfg))
+	{
+		dynamicShell.GET("/chat", chatShellHandler.ServeChat)
+		dynamicShell.HEAD("/chat", chatShellHandler.ServeChat)
+		dynamicShell.GET("/chat/", chatShellHandler.ServeChat)
+		dynamicShell.HEAD("/chat/", chatShellHandler.ServeChat)
+		dynamicShell.GET("/skills/chat", chatShellHandler.ServeSkillChat)
+		dynamicShell.HEAD("/skills/chat", chatShellHandler.ServeSkillChat)
+		dynamicShell.GET("/skills/chat/", chatShellHandler.ServeSkillChat)
+		dynamicShell.HEAD("/skills/chat/", chatShellHandler.ServeSkillChat)
+	}
+
 	// OpenAI Webhook 必须是公开路由，不能走用户 JWT；签名由 OPENAI_WEBHOOK_SECRET 校验。
 	router.POST("/api/openai/webhook", openAIWebhookHandler.Handle)
 
@@ -118,6 +135,9 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	{
 		// 聊天路由
 		publicWithAuth.POST("/chat", chatHandler.Chat)
+		publicWithAuth.POST("/chat/init", chatHandler.InitChat)
+		publicWithAuth.POST("/chat/compare/init", chatHandler.InitCompareChat)
+		publicWithAuth.GET("/chat/bootstrap", chatBootstrapHandler.Get)
 
 		// 专用翻译路由
 		translateHandler := NewTranslateHandler(db, translateService, usageService)
@@ -170,6 +190,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	// 注册 Bad Case 路由（公开提交，需认证）
 	badCaseHandler := NewBadCaseHandler(db)
+	betaFeedbackHandler := NewBetaFeedbackHandler(db)
 	publicWithAuth.POST("/bad-cases", badCaseHandler.CreateBadCase)
 	publicWithAuth.GET("/bad-cases", badCaseHandler.GetMyBadCases)
 
@@ -186,8 +207,11 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	betaConfigHandler.InitDefaultConfigs()
 	publicWithAuth.GET("/beta/config", betaConfigHandler.GetPublicConfig)
 
-	// 初始化 Changelog Handler
+	// 初始化 Changelog / Analytics Handler
 	changelogHandler := NewChangelogHandler(db)
+	analyticsHandler := NewAnalyticsHandler(db)
+	publicWithAuth.POST("/analytics/track", analyticsHandler.TrackEvent)
+	publicWithAuth.POST("/analytics/track-batch", analyticsHandler.BatchTrackEvents)
 
 	// 公开对比问答（支持匿名用户，内部已有额度与权限校验）
 	publicWithAuth.POST("/chat/compare", chatHandler.CompareChat)
@@ -203,7 +227,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	authorized := router.Group("/api")
 	authorized.Use(middleware.AuthMiddleware(cfg))
 	{
-		adminHandler := NewAdminHandler(db)
+		adminHandler := NewAdminHandler(db, cfg)
 		admin := authorized.Group("/admin")
 		admin.Use(middleware.AdminMiddleware(db))
 		{
@@ -213,6 +237,9 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			admin.GET("/users/:id", adminHandler.GetUser)
 			admin.PATCH("/users/:id", adminHandler.UpdateUser)
 			admin.POST("/users/:id/credits/adjust", adminHandler.AdjustCredits)
+			admin.GET("/billing/plans", adminHandler.ListBillingPlans)
+			admin.POST("/billing/plans", adminHandler.CreateBillingPlan)
+			admin.PATCH("/billing/plans/:id", adminHandler.UpdateBillingPlan)
 			admin.GET("/usage/summary", adminHandler.UsageSummary)
 			admin.GET("/usage/logs", adminHandler.UsageLogs)
 			admin.GET("/usage/users", adminHandler.UsageUsers)
@@ -232,6 +259,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			admin.POST("/beta-invites/generate", betaInviteHandler.GenerateInvites)
 			admin.GET("/beta-applications", betaInviteHandler.ListApplications)
 			admin.PATCH("/beta-applications/:id/review", betaInviteHandler.ReviewApplication)
+			admin.GET("/beta-feedback", betaFeedbackHandler.ListAdmin)
 			admin.GET("/beta-configs", betaConfigHandler.ListConfigs)
 			admin.PATCH("/beta-configs/:key", betaConfigHandler.UpdateConfig)
 			admin.GET("/changelogs", changelogHandler.ListChangelogsAdmin)
@@ -268,6 +296,8 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	documentArtifactHandler := NewDocumentArtifactHandler(db)
 	documentArtifactHandler.AutoMigrate()
 	authorized.POST("/translate/live/ticket", liveTranslateHandler.CreateTicket)
+
+	authorized.POST("/beta/feedback", betaFeedbackHandler.Submit)
 
 	authorized.GET("/conversations", convHandler.List)
 	authorized.GET("/conversations/search", convHandler.Search)
@@ -312,6 +342,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	authorized.POST("/images/generate", imageHandler.GenerateImage)
 	authorized.POST("/images/recognize-mask", imageHandler.RecognizeMask)
 	authorized.POST("/images/edit", imageHandler.EditImage)
+	authorized.POST("/images/edit/preview", imageHandler.TextDetectionPreview)
 	authorized.GET("/images", imageHandler.ListImages)
 	authorized.GET("/images/:id", imageHandler.GetImage)
 	authorized.DELETE("/images/:id", imageHandler.DeleteImage)

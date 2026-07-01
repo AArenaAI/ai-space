@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useChat } from "@/hooks/useChat";
 import type { ChatModel } from "@/lib/chatTypes";
+import type { ChatBootstrapPayload } from "@/lib/chatBootstrapCoordinator";
 import { useTemplates } from "@/hooks/useTemplates";
 import MessageList from "./MessageList";
 import MessageInput, { ReasoningConfig, type QuoteDraft } from "./MessageInput";
@@ -10,6 +11,7 @@ import ModelSelector from "./ModelSelector";
 import ThemeToggle from "@/components/theme/ThemeToggle";
 import { Zap, X, Pencil, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { CHAT_ACTIVITY_PANEL_WIDTH_CLASS } from "./chatLayout";
 import { toast } from "sonner";
 import { showUserError } from "@/lib/errors";
 import { useRouter } from "next/navigation";
@@ -64,6 +66,8 @@ interface ChatInterfaceProps {
   externalSendRequest?: { id: number; content: string; hidden?: boolean } | null;
   modelSelectionOptions?: { storageKey?: string; defaultModelId?: string };
   onSaveAssistantToNote?: (content: string) => void;
+  bootstrap?: ChatBootstrapPayload;
+  isConversationShellLoading?: boolean;
 }
 
 const HIDDEN_USER_MESSAGE_PREFIX = "<!-- ai-space:hidden-user-message -->";
@@ -72,7 +76,7 @@ export function buildHiddenUserMessageContent(content: string) {
   return `${HIDDEN_USER_MESSAGE_PREFIX}\n${content}`;
 }
 
-export default function ChatInterface({ conversationId, notebookId, notebookTitle, notebookFileCount, notebookFileIds, notebookHero, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId, externalSendRequest, modelSelectionOptions, onSaveAssistantToNote }: ChatInterfaceProps) {
+export default function ChatInterface({ conversationId, notebookId, notebookTitle, notebookFileCount, notebookFileIds, notebookHero, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId, externalSendRequest, modelSelectionOptions, onSaveAssistantToNote, bootstrap, isConversationShellLoading = false }: ChatInterfaceProps) {
   const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
   const { t } = useI18n();
   const [compareMode, setCompareMode] = useState(false);
@@ -87,6 +91,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   const [forkTargetMessageId, setForkTargetMessageId] = useState<number | null>(null);
   const [compareTargetMessageId, setCompareTargetMessageId] = useState<number | undefined>(undefined);
   const [messageSelectMode, setMessageSelectMode] = useState(false);
+  const [activityPanelOpen, setActivityPanelOpen] = useState(false);
   const [quoteDraft, setQuoteDraft] = useState<QuoteDraft | null>(null);
   const handledExternalSendIdRef = useRef<number | null>(null);
   const [modelRecommendationContext, setModelRecommendationContext] = useState<ModelRecommendationContext>();
@@ -110,11 +115,13 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   const {
     messages,
     isLoading,
+    isCurrentConversationGenerating,
     isLoadingHistory,
     selectedModel,
     setSelectedModel,
     sendMessage,
     stopGeneration,
+    clearMessages,
     deleteMessage,
     regenerateMessage,
     currentConversation,
@@ -132,7 +139,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     isLoadingMore,
     hasMoreMessages,
     loadMoreMessages,
-  } = useChat(conversationId, models, skillKey, notebookId, notebookFileIds, modelSelectionOptions);
+  } = useChat(conversationId, models, skillKey, notebookId, notebookFileIds, modelSelectionOptions, bootstrap);
 
   const { templates } = useTemplates();
   const { hasEnoughCredits, getTierCredits, isCreditExhausted, getBetaPhaseInfo, credits, getModelCostFen, getBetaModelBlockedMessage } = useCredits();
@@ -412,6 +419,8 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   };
 
   const handleNewChat = () => {
+    window.dispatchEvent(new Event("chat-conversation-before-route-change"));
+    clearMessages();
     router.push(`/chat?t=${Date.now()}`);
   };
 
@@ -499,11 +508,12 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   );
 
   const activeCompareMode = compareMode || isCompare;
+  const inputIsLoading = isCurrentConversationGenerating;
   const activeCompareModelIds = compareMode ? selectedModels : (compareModels.length > 0 ? compareModels : selectedModels);
   const activeTargetMessageId = compareTargetMessageId ?? (currentConversation === conversationId ? targetMessageId : undefined);
   const isEmptyNewCompareMode = messages.length === 0 && !conversationId && activeCompareMode;
   const shouldDelayEmptyCompareLayout = isEmptyNewCompareMode && !emptyCompareLayoutReady;
-  const isNewEmptyChat = messages.length === 0 && !conversationId && !activeCompareMode;
+  const isNewEmptyChat = messages.length === 0 && !conversationId && !activeCompareMode && !isConversationShellLoading;
 
   useEffect(() => {
     if (!isEmptyNewCompareMode) {
@@ -631,6 +641,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
           messages={messages}
           isLoading={isLoading}
           isLoadingHistory={isLoadingHistory}
+          isConversationShellLoading={isConversationShellLoading}
           isComplexTask={isComplexTask}
           models={models}
           conversationId={conversationId}
@@ -662,56 +673,54 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
           onExitCompare={handleExitCompare}
           onQuoteSelection={handleQuoteSelection}
           onSaveAssistantToNote={notebookId ? onSaveAssistantToNote : undefined}
+          onActivityOpenChange={setActivityPanelOpen}
         />
       )}
 
-      {/* 空状态容器 - 始终渲染，通过 opacity/translate/scale 切换 */}
-      <div className={cn(
-        "absolute inset-0 flex flex-col items-center justify-center px-4 z-10 transition-all duration-700 ease-[cubic-bezier(0.34,1.56,0.64,1)]",
-        isNewEmptyChat
-          ? "opacity-100 translate-y-0 scale-100 pointer-events-auto"
-          : "opacity-0 -translate-y-12 scale-95 pointer-events-none"
-      )}>
-        <div className="mb-6 w-fit max-w-md text-left">
-          {welcomeTitle ? (
-            <>
-              <div className="mb-6 flex h-12 w-12 items-center justify-center text-[34px] leading-none">
-                👋
-              </div>
-              <h2 className="text-xl font-semibold tracking-tight mb-2 text-text-primary">{welcomeTitle}</h2>
-              {welcomeSubtitle && (
-                <p className="text-text-secondary text-sm leading-relaxed mb-8">{welcomeSubtitle}</p>
-              )}
-            </>
-          ) : (
-            <>
-              <h1 className="text-[32px] font-semibold leading-tight tracking-tight mb-2 text-text-primary">
-                {userName ? t("chat.userGreeting").replace("{name}", userName) : t("chat.greeting")}
-              </h1>
-              <p className="text-[25px] font-medium leading-tight tracking-tight text-text-primary/80">{t("chat.whatCanWeDo")}</p>
-            </>
+      {/* 空状态容器 - 只在真正新空对话时渲染，避免历史会话 DOM 中残留 welcome 文案 */}
+      {isNewEmptyChat && (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center px-4 transition-all duration-700 ease-[cubic-bezier(0.34,1.56,0.64,1)]">
+          <div className="mb-6 w-fit max-w-md text-left">
+            {welcomeTitle ? (
+              <>
+                <div className="mb-6 flex h-12 w-12 items-center justify-center text-[34px] leading-none">
+                  👋
+                </div>
+                <h2 className="text-xl font-semibold tracking-tight mb-2 text-text-primary">{welcomeTitle}</h2>
+                {welcomeSubtitle && (
+                  <p className="text-text-secondary text-sm leading-relaxed mb-8">{welcomeSubtitle}</p>
+                )}
+              </>
+            ) : (
+              <>
+                <h1 className="text-[32px] font-semibold leading-tight tracking-tight mb-2 text-text-primary">
+                  {userName ? t("chat.userGreeting").replace("{name}", userName) : t("chat.greeting")}
+                </h1>
+                <p className="text-[25px] font-medium leading-tight tracking-tight text-text-primary/80">{t("chat.whatCanWeDo")}</p>
+              </>
+            )}
+          </div>
+          {!messageSelectMode && (
+            <div className="w-full max-w-2xl relative shrink-0">
+              <MessageInput
+                onSend={handleSend}
+                onStop={handleStop}
+                isLoading={inputIsLoading}
+                compareMode={activeCompareMode}
+                onToggleCompare={toggleCompareMode}
+                currentModel={selectedModel}
+                compareModels={inputCompareModels}
+                templates={templates}
+                selectedTemplateId={selectedTemplateId}
+                onSelectTemplate={handleTemplateSelect}
+                onNewChat={handleNewChat}
+                onRecommendationContextChange={setModelRecommendationContext}
+                quoteDraft={quoteDraft}
+              />
+            </div>
           )}
         </div>
-        {!messageSelectMode && (
-          <div className="w-full max-w-2xl relative shrink-0">
-            <MessageInput
-              onSend={handleSend}
-              onStop={handleStop}
-              isLoading={isLoading}
-              compareMode={activeCompareMode}
-              onToggleCompare={toggleCompareMode}
-              currentModel={selectedModel}
-              compareModels={inputCompareModels}
-              templates={templates}
-              selectedTemplateId={selectedTemplateId}
-              onSelectTemplate={handleTemplateSelect}
-              onNewChat={handleNewChat}
-              onRecommendationContextChange={setModelRecommendationContext}
-              quoteDraft={quoteDraft}
-            />
-          </div>
-        )}
-      </div>
+      )}
 
       {/* 重命名对话 */}
       <InputDialog
@@ -753,7 +762,8 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
       {/* 底部输入框 - 始终渲染，空状态时隐藏在下方 */}
       {!messageSelectMode && (
         <div className={cn(
-          "z-[70] w-full absolute inset-x-0 bottom-0 transition-all duration-700 ease-[cubic-bezier(0.34,1.56,0.64,1)]",
+          "z-[70] absolute inset-x-0 bottom-0 transition-[right,opacity,transform] duration-200 ease-out",
+          activityPanelOpen && !activeCompareMode && CHAT_ACTIVITY_PANEL_WIDTH_CLASS,
           isNewEmptyChat
             ? "opacity-0 translate-y-20 scale-95 pointer-events-none"
             : "opacity-100 translate-y-0 scale-100 pointer-events-auto"
@@ -763,7 +773,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
               <MessageInput
                 onSend={handleSend}
                 onStop={handleStop}
-                isLoading={isLoading}
+                isLoading={inputIsLoading}
                 compareMode={activeCompareMode}
                 onToggleCompare={toggleCompareMode}
                 currentModel={selectedModel}

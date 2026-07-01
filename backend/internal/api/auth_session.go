@@ -57,29 +57,45 @@ func (h *AuthHandler) setRefreshTokenCookie(c *gin.Context, token string, expire
 	if maxAge < 0 {
 		maxAge = 0
 	}
+	secure := isRequestHTTPS(c)
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     refreshTokenCookieName,
 		Value:    token,
-		Path:     "/api/auth",
+		Path:     "/",
 		MaxAge:   maxAge,
 		Expires:  expiresAt,
 		HttpOnly: true,
-		Secure:   isRequestHTTPS(c),
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+	})
+	// Remove legacy /api-scoped refresh cookies so dynamic HTML shell requests can
+	// rely on a single site-wide cookie.
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     refreshTokenCookieName,
+		Value:    "",
+		Path:     "/api",
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
+		HttpOnly: true,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	})
 }
 
 func (h *AuthHandler) clearRefreshTokenCookie(c *gin.Context) {
-	http.SetCookie(c.Writer, &http.Cookie{
-		Name:     refreshTokenCookieName,
-		Value:    "",
-		Path:     "/api/auth",
-		MaxAge:   -1,
-		Expires:  time.Unix(0, 0),
-		HttpOnly: true,
-		Secure:   isRequestHTTPS(c),
-		SameSite: http.SameSiteLaxMode,
-	})
+	secure := isRequestHTTPS(c)
+	for _, path := range []string{"/", "/api"} {
+		http.SetCookie(c.Writer, &http.Cookie{
+			Name:     refreshTokenCookieName,
+			Value:    "",
+			Path:     path,
+			MaxAge:   -1,
+			Expires:  time.Unix(0, 0),
+			HttpOnly: true,
+			Secure:   secure,
+			SameSite: http.SameSiteLaxMode,
+		})
+	}
 }
 
 func (h *AuthHandler) issueRefreshToken(c *gin.Context, tx *gorm.DB, userID uint) error {

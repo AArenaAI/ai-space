@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"aipool-backend/internal/config"
 	"aipool-backend/internal/modelconfigseed"
 	"aipool-backend/internal/modelmeta"
 	"aipool-backend/internal/models"
@@ -18,11 +19,18 @@ import (
 )
 
 type AdminHandler struct {
-	db *gorm.DB
+	db  *gorm.DB
+	cfg *config.Config
 }
 
-func NewAdminHandler(db *gorm.DB) *AdminHandler {
-	return &AdminHandler{db: db}
+func NewAdminHandler(db *gorm.DB, cfg ...*config.Config) *AdminHandler {
+	var activeCfg *config.Config
+	if len(cfg) > 0 {
+		activeCfg = cfg[0]
+	}
+	h := &AdminHandler{db: db, cfg: activeCfg}
+	h.ensureDefaultBillingPlans()
+	return h
 }
 
 type adminUserUsageSummary struct {
@@ -36,27 +44,40 @@ type adminUserUsageSummary struct {
 	LastUsedAt     *time.Time `json:"last_used_at,omitempty"`
 }
 
+type adminUserCreditUsageSummary struct {
+	BasicUsedFen    int        `json:"basic_used"`
+	AdvancedUsedFen int        `json:"advanced_used"`
+	BetaUsedFen     int        `json:"beta_used"`
+	TotalUsedFen    int        `json:"total_used"`
+	BasicUsed       float64    `json:"basic_used_display"`
+	AdvancedUsed    float64    `json:"advanced_used_display"`
+	BetaUsed        float64    `json:"beta_used_display"`
+	TotalUsed       float64    `json:"total_used_display"`
+	LastUsedAt      *time.Time `json:"last_used_at,omitempty"`
+}
+
 type adminUserResponse struct {
-	ID                       uint                  `json:"id"`
-	Email                    string                `json:"email"`
-	Name                     string                `json:"name"`
-	Role                     string                `json:"role"`
-	PlanTier                 string                `json:"plan_tier"`
-	BasicCredits             int                   `json:"basic_credits"`
-	AdvancedCredits          int                   `json:"advanced_credits"`
-	EliteCredits             int                   `json:"elite_credits"`
-	BetaBatch                string                `json:"beta_batch,omitempty"`
-	BetaPhase                string                `json:"beta_phase,omitempty"`
-	BetaPhaseName            string                `json:"beta_phase_name,omitempty"`
-	BetaCreditBalance        int                   `json:"beta_credit_balance"`
-	BetaCreditBalanceDisplay float64               `json:"beta_credit_balance_display"`
-	BetaCreditGrantedTotal   int                   `json:"beta_credit_granted_total"`
-	BetaCreditGrantedDisplay float64               `json:"beta_credit_granted_display"`
-	BetaCreditUsedTotal      int                   `json:"beta_credit_used_total"`
-	BetaCreditUsedDisplay    float64               `json:"beta_credit_used_display"`
-	CreatedAt                time.Time             `json:"created_at"`
-	UpdatedAt                time.Time             `json:"updated_at"`
-	Usage30D                 adminUserUsageSummary `json:"usage_30d"`
+	ID                       uint                        `json:"id"`
+	Email                    string                      `json:"email"`
+	Name                     string                      `json:"name"`
+	Role                     string                      `json:"role"`
+	PlanTier                 string                      `json:"plan_tier"`
+	BasicCredits             int                         `json:"basic_credits"`
+	AdvancedCredits          int                         `json:"advanced_credits"`
+	EliteCredits             int                         `json:"elite_credits"`
+	BetaBatch                string                      `json:"beta_batch,omitempty"`
+	BetaPhase                string                      `json:"beta_phase,omitempty"`
+	BetaPhaseName            string                      `json:"beta_phase_name,omitempty"`
+	BetaCreditBalance        int                         `json:"beta_credit_balance"`
+	BetaCreditBalanceDisplay float64                     `json:"beta_credit_balance_display"`
+	BetaCreditGrantedTotal   int                         `json:"beta_credit_granted_total"`
+	BetaCreditGrantedDisplay float64                     `json:"beta_credit_granted_display"`
+	BetaCreditUsedTotal      int                         `json:"beta_credit_used_total"`
+	BetaCreditUsedDisplay    float64                     `json:"beta_credit_used_display"`
+	CreatedAt                time.Time                   `json:"created_at"`
+	UpdatedAt                time.Time                   `json:"updated_at"`
+	Usage30D                 adminUserUsageSummary       `json:"usage_30d"`
+	CreditUsage30D           adminUserCreditUsageSummary `json:"credit_usage_30d"`
 }
 
 type adminUsageSummaryResponse struct {
@@ -120,10 +141,46 @@ type adminTaskResponse struct {
 	Status             string                `json:"status"`
 	ErrorMessage       string                `json:"error_message,omitempty"`
 	Usage              adminTaskUsageSummary `json:"usage"`
+	CostEstimate       adminTaskCostEstimate `json:"cost_estimate"`
 	RecentUsageLogs    []models.APIUsageLog  `json:"recent_usage_logs,omitempty"`
 	CreatedAt          time.Time             `json:"created_at"`
 	UpdatedAt          time.Time             `json:"updated_at"`
 	CompletedAt        *time.Time            `json:"completed_at,omitempty"`
+}
+
+type adminTaskCostEstimate struct {
+	Available                 bool    `json:"available"`
+	EstimatedPromptTokens     int     `json:"estimated_prompt_tokens"`
+	EstimatedCompletionTokens int     `json:"estimated_completion_tokens"`
+	EstimatedTotalTokens      int     `json:"estimated_total_tokens"`
+	EstimatedInputCostRMB     float64 `json:"estimated_input_cost_rmb"`
+	EstimatedOutputCostRMB    float64 `json:"estimated_output_cost_rmb"`
+	EstimatedTotalCostRMB     float64 `json:"estimated_total_cost_rmb"`
+	ActualTotalCostRMB        float64 `json:"actual_total_cost_rmb"`
+	DeltaCostRMB              float64 `json:"delta_cost_rmb"`
+	DeltaRate                 float64 `json:"delta_rate"`
+	PricingUnit               string  `json:"pricing_unit"`
+	InputUnitPriceRMB         float64 `json:"input_unit_price_rmb"`
+	OutputUnitPriceRMB        float64 `json:"output_unit_price_rmb"`
+	Method                    string  `json:"method"`
+	Note                      string  `json:"note"`
+}
+
+type adminBillingPlanRequest struct {
+	Code            string `json:"code" binding:"required"`
+	Name            string `json:"name" binding:"required"`
+	Description     string `json:"description"`
+	PriceCents      int64  `json:"price_cents"`
+	Currency        string `json:"currency"`
+	Interval        string `json:"interval"`
+	BasicCredits    int    `json:"basic_credits"`
+	AdvancedCredits int    `json:"advanced_credits"`
+	EliteCredits    int    `json:"elite_credits"`
+	Enabled         *bool  `json:"enabled"`
+	PublicVisible   *bool  `json:"public_visible"`
+	SortOrder       int    `json:"sort_order"`
+	Provider        string `json:"provider"`
+	ProviderPriceID string `json:"provider_price_id"`
 }
 
 func toAdminUserResponse(user models.User) adminUserResponse {
@@ -180,7 +237,119 @@ func (h *AdminHandler) userUsageSummary(userID uint, start time.Time) adminUserU
 	}{Requests: &out.Requests, Failures: &out.Failures, CostRMB: &out.CostRMB, TotalTokens: &out.TotalTokens, ImageCount: &out.ImageCount, CharacterCount: &out.CharacterCount, VideoSeconds: &out.VideoSeconds, LastUsedAt: &lastUsed}).Error; err == nil && !lastUsed.IsZero() {
 		out.LastUsedAt = &lastUsed
 	}
+
 	return out
+}
+
+func (h *AdminHandler) userCreditUsageSummary(userID uint, start time.Time) adminUserCreditUsageSummary {
+	var out adminUserCreditUsageSummary
+	if h == nil || h.db == nil || userID == 0 {
+		return out
+	}
+	var rows []struct {
+		Tier string
+		Used int
+	}
+	if err := h.db.Model(&models.CreditTransaction{}).
+		Select("tier, COALESCE(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END), 0) AS used").
+		Where("user_id = ? AND type = ? AND created_at >= ?", userID, "deduct", start).
+		Group("tier").Scan(&rows).Error; err == nil {
+		for _, row := range rows {
+			switch row.Tier {
+			case "basic":
+				out.BasicUsedFen = row.Used
+			case "advanced":
+				out.AdvancedUsedFen = row.Used
+			case "beta":
+				out.BetaUsedFen = row.Used
+			}
+		}
+	}
+	var lastUsed time.Time
+	if err := h.db.Model(&models.CreditTransaction{}).
+		Where("user_id = ? AND type = ? AND amount < 0 AND created_at >= ?", userID, "deduct", start).
+		Select("MAX(created_at)").Scan(&lastUsed).Error; err == nil && !lastUsed.IsZero() {
+		out.LastUsedAt = &lastUsed
+	}
+	out.TotalUsedFen = out.BasicUsedFen + out.AdvancedUsedFen + out.BetaUsedFen
+	out.BasicUsed = float64(out.BasicUsedFen) / 100.0
+	out.AdvancedUsed = float64(out.AdvancedUsedFen) / 100.0
+	out.BetaUsed = float64(out.BetaUsedFen) / 100.0
+	out.TotalUsed = float64(out.TotalUsedFen) / 100.0
+	return out
+}
+
+func (h *AdminHandler) ListBillingPlans(c *gin.Context) {
+	h.ensureDefaultBillingPlans()
+	var plans []models.BillingPlan
+	if err := h.db.Order("sort_order ASC, price_cents ASC, id ASC").Find(&plans).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询套餐失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"plans": plans})
+}
+
+func (h *AdminHandler) CreateBillingPlan(c *gin.Context) {
+	var req adminBillingPlanRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效"})
+		return
+	}
+	plan := billingPlanFromRequest(req, nil)
+	if plan.Currency == "" {
+		plan.Currency = "CNY"
+	}
+	if plan.Interval == "" {
+		plan.Interval = "monthly"
+	}
+	if err := h.db.Create(&plan).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建套餐失败"})
+		return
+	}
+	h.audit(c, "admin.billing_plan.create", "billing_plan", strconv.FormatUint(uint64(plan.ID), 10), nil, plan)
+	c.JSON(http.StatusOK, gin.H{"plan": plan})
+}
+
+func (h *AdminHandler) UpdateBillingPlan(c *gin.Context) {
+	id := parsePositiveInt(c.Param("id"), 0)
+	if id == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "套餐 ID 无效"})
+		return
+	}
+	var plan models.BillingPlan
+	if err := h.db.First(&plan, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "套餐不存在"})
+		return
+	}
+	before := plan
+	var req adminBillingPlanRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效"})
+		return
+	}
+	updated := billingPlanFromRequest(req, &plan)
+	if err := h.db.Model(&plan).Updates(map[string]any{
+		"code":              updated.Code,
+		"name":              updated.Name,
+		"description":       updated.Description,
+		"price_cents":       updated.PriceCents,
+		"currency":          updated.Currency,
+		"interval":          updated.Interval,
+		"basic_credits":     updated.BasicCredits,
+		"advanced_credits":  updated.AdvancedCredits,
+		"elite_credits":     updated.EliteCredits,
+		"enabled":           updated.Enabled,
+		"public_visible":    updated.PublicVisible,
+		"sort_order":        updated.SortOrder,
+		"provider":          updated.Provider,
+		"provider_price_id": updated.ProviderPriceID,
+	}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新套餐失败"})
+		return
+	}
+	h.db.First(&plan, id)
+	h.audit(c, "admin.billing_plan.update", "billing_plan", strconv.FormatUint(uint64(plan.ID), 10), before, plan)
+	c.JSON(http.StatusOK, gin.H{"plan": plan})
 }
 
 func (h *AdminHandler) Me(c *gin.Context) {
@@ -192,6 +361,67 @@ func (h *AdminHandler) Me(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"user": toAdminUserResponse(user)})
+}
+
+func defaultBasicBillingPlan() models.BillingPlan {
+	return models.BillingPlan{
+		Code:            "basic",
+		Name:            "基础版",
+		Description:     "适合日常聊天、轻量办公与少量高级模型调用。",
+		PriceCents:      14900,
+		Currency:        "CNY",
+		Interval:        "monthly",
+		BasicCredits:    3600,
+		AdvancedCredits: 200,
+		EliteCredits:    0,
+		Enabled:         true,
+		PublicVisible:   true,
+		SortOrder:       10,
+		Provider:        "manual",
+	}
+}
+
+func (h *AdminHandler) ensureDefaultBillingPlans() {
+	if h == nil || h.db == nil {
+		return
+	}
+	var existing models.BillingPlan
+	if err := h.db.Where("code = ?", "basic").First(&existing).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			plan := defaultBasicBillingPlan()
+			_ = h.db.Create(&plan).Error
+		}
+	}
+}
+
+func billingPlanFromRequest(req adminBillingPlanRequest, existing *models.BillingPlan) models.BillingPlan {
+	plan := defaultBasicBillingPlan()
+	if existing != nil {
+		plan = *existing
+	}
+	plan.Code = strings.TrimSpace(req.Code)
+	plan.Name = strings.TrimSpace(req.Name)
+	plan.Description = strings.TrimSpace(req.Description)
+	plan.PriceCents = req.PriceCents
+	if strings.TrimSpace(req.Currency) != "" {
+		plan.Currency = strings.ToUpper(strings.TrimSpace(req.Currency))
+	}
+	if strings.TrimSpace(req.Interval) != "" {
+		plan.Interval = strings.TrimSpace(req.Interval)
+	}
+	plan.BasicCredits = req.BasicCredits
+	plan.AdvancedCredits = req.AdvancedCredits
+	plan.EliteCredits = req.EliteCredits
+	if req.Enabled != nil {
+		plan.Enabled = *req.Enabled
+	}
+	if req.PublicVisible != nil {
+		plan.PublicVisible = *req.PublicVisible
+	}
+	plan.SortOrder = req.SortOrder
+	plan.Provider = strings.TrimSpace(req.Provider)
+	plan.ProviderPriceID = strings.TrimSpace(req.ProviderPriceID)
+	return plan
 }
 
 func (h *AdminHandler) Overview(c *gin.Context) {
@@ -283,6 +513,7 @@ func (h *AdminHandler) ListUsers(c *gin.Context) {
 	for _, user := range users {
 		item := toAdminUserResponse(user)
 		item.Usage30D = h.userUsageSummary(user.ID, usageStart)
+		item.CreditUsage30D = h.userCreditUsageSummary(user.ID, usageStart)
 		items = append(items, item)
 	}
 
@@ -654,10 +885,10 @@ func (h *AdminHandler) Models(c *gin.Context) {
 // ========== Model Config Management ==========
 
 type adminModelConfigResponse struct {
-	ID                 uint     `json:"id"`
-	ModelID            string   `json:"model_id"`
-	Name               string   `json:"name"`
-	Provider           string   `json:"provider"`
+	ID                     uint     `json:"id"`
+	ModelID                string   `json:"model_id"`
+	Name                   string   `json:"name"`
+	Provider               string   `json:"provider"`
 	Description            string   `json:"description"`
 	Color                  string   `json:"color"`
 	Category               string   `json:"category"`
@@ -665,7 +896,7 @@ type adminModelConfigResponse struct {
 	Enabled                bool     `json:"enabled"`
 	Tier                   string   `json:"tier"`
 	ReasoningLevel         string   `json:"reasoning_level"`
-	ReasoningLevelName      string   `json:"reasoning_level_name"`
+	ReasoningLevelName     string   `json:"reasoning_level_name"`
 	ReasoningEffort        string   `json:"reasoning_effort"`
 	ReasoningParameter     string   `json:"reasoning_parameter"`
 	ReasoningFastValue     string   `json:"reasoning_fast_value"`
@@ -784,14 +1015,14 @@ func (h *AdminHandler) ListModelConfigs(c *gin.Context) {
 }
 
 type adminUpdateModelConfigRequest struct {
-	Enabled              *bool   `json:"enabled,omitempty"`
-	Tier                 *string `json:"tier,omitempty"`
-	ReasoningLevel       *string `json:"reasoning_level,omitempty"`
-	ReasoningFastValue   *string `json:"reasoning_fast_value,omitempty"`
+	Enabled                *bool   `json:"enabled,omitempty"`
+	Tier                   *string `json:"tier,omitempty"`
+	ReasoningLevel         *string `json:"reasoning_level,omitempty"`
+	ReasoningFastValue     *string `json:"reasoning_fast_value,omitempty"`
 	ReasoningThinkingValue *string `json:"reasoning_thinking_value,omitempty"`
-	ReasoningExpertValue *string `json:"reasoning_expert_value,omitempty"`
-	Status               *string `json:"status,omitempty"`
-	StatusMessage        *string `json:"status_message,omitempty"`
+	ReasoningExpertValue   *string `json:"reasoning_expert_value,omitempty"`
+	Status                 *string `json:"status,omitempty"`
+	StatusMessage          *string `json:"status_message,omitempty"`
 }
 
 func (h *AdminHandler) UpdateModelConfig(c *gin.Context) {
@@ -1074,6 +1305,7 @@ func (h *AdminHandler) Tasks(c *gin.Context) {
 	usageByTask, recentLogsByTask := h.taskUsageBatch(tasks)
 	items := make([]adminTaskResponse, 0, len(tasks))
 	for _, task := range tasks {
+		usage := usageByTask[task.ID]
 		items = append(items, adminTaskResponse{
 			ID:                 task.ID,
 			ResponseID:         task.ResponseID,
@@ -1085,7 +1317,8 @@ func (h *AdminHandler) Tasks(c *gin.Context) {
 			Provider:           task.Provider,
 			Status:             task.Status,
 			ErrorMessage:       task.ErrorMessage,
-			Usage:              usageByTask[task.ID],
+			Usage:              usage,
+			CostEstimate:       h.estimateTaskCost(task, usage),
 			RecentUsageLogs:    recentLogsByTask[task.ID],
 			CreatedAt:          task.CreatedAt,
 			UpdatedAt:          task.UpdatedAt,
@@ -1491,6 +1724,40 @@ func (h *AdminHandler) dailyUsage(start time.Time) []adminUsageBucket {
 		}
 	}
 	return items
+}
+
+func (h *AdminHandler) estimateTaskCost(task models.AIBackgroundTask, usage adminTaskUsageSummary) adminTaskCostEstimate {
+	est := adminTaskCostEstimate{
+		EstimatedPromptTokens:     4000,
+		EstimatedCompletionTokens: 2000,
+		EstimatedTotalTokens:      6000,
+		Method:                    "model_price_4k_input_2k_output_baseline",
+		Note:                      "后台预估：按 4K 输入 / 2K 输出基线估算；实际成本以 usage ledger 为准。",
+	}
+	if strings.TrimSpace(task.Model) == "" {
+		est.Note = "任务缺少模型信息，无法预估。"
+		return est
+	}
+	price := services.NewUsageService(h.cfg).GetTokenPriceSnapshot(task.Provider, task.Model)
+	if price.InputPriceRMB <= 0 && price.OutputPriceRMB <= 0 {
+		est.Note = "未找到该模型价格配置，无法预估。"
+		return est
+	}
+	est.Available = true
+	est.PricingUnit = price.PricingUnit
+	est.InputUnitPriceRMB = price.InputPriceRMB
+	est.OutputUnitPriceRMB = price.OutputPriceRMB
+	est.EstimatedInputCostRMB = float64(est.EstimatedPromptTokens) * price.InputPriceRMB / 1000.0
+	est.EstimatedOutputCostRMB = float64(est.EstimatedCompletionTokens) * price.OutputPriceRMB / 1000.0
+	est.EstimatedTotalCostRMB = est.EstimatedInputCostRMB + est.EstimatedOutputCostRMB
+	est.ActualTotalCostRMB = usage.CostRMB
+	if usage.Requests > 0 {
+		est.DeltaCostRMB = usage.CostRMB - est.EstimatedTotalCostRMB
+		if est.EstimatedTotalCostRMB > 0 {
+			est.DeltaRate = est.DeltaCostRMB / est.EstimatedTotalCostRMB
+		}
+	}
+	return est
 }
 
 func (h *AdminHandler) taskSummary() []gin.H {

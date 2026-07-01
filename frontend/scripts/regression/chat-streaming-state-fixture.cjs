@@ -2,7 +2,38 @@
 const { chromium } = require('playwright');
 
 const baseUrl = process.env.CHAT_FIXTURE_BASE_URL || 'http://127.0.0.1:3000';
-const path = '/test-chat-streaming-state/';
+const path = '/test-chat-streaming-state/?activity_panel_open=1&duplicate_realtime_on_complete=1&deterministic_answer=1';
+
+async function readLatestAnswerSnapshot(page, label) {
+  return page.evaluate((label) => {
+    const row = document.querySelector('[data-chat-message-row="true"][data-message-role="assistant"]');
+    const stableLayer = row?.querySelector('[data-chat-answer-stable-layer="true"]');
+    const renderer = row?.querySelector('[data-chat-answer-renderer="true"]');
+    const answer = row?.querySelector('.streaming-answer-markdown') || stableLayer || renderer;
+    return {
+      label,
+      rowId: row?.getAttribute('data-message-id') || '',
+      rowHeight: row?.getBoundingClientRect().height || 0,
+      hasStableLayer: Boolean(stableLayer),
+      answerText: answer?.textContent || '',
+      answerHtmlLength: answer?.innerHTML.length || 0,
+      answerMode: answer?.querySelector('[data-streaming-markdown-mode]')?.getAttribute('data-streaming-markdown-mode') || '',
+      renderState: renderer?.getAttribute('data-chat-answer-render-state') || '',
+      contentSource: stableLayer?.getAttribute('data-chat-answer-content-source') || '',
+      canonicalMatch: stableLayer?.getAttribute('data-chat-answer-canonical-match') || '',
+      completedSpinner: Boolean(row?.querySelector('[data-chat-status-kind="completed"] [data-chat-status-icon="spinning"], [data-chat-status-icon="spinning"].animate-spin')),
+    };
+  }, label);
+}
+
+async function openLatestActivityPanel(page) {
+  const button = page.locator('button').filter({ hasText: /思考中|已思考|Reasoning|Reasoned/ }).last();
+  await button.waitFor({ state: 'visible', timeout: 10_000 });
+  await button.click();
+  const panel = page.locator('[data-chat-activity-panel="true"]').last();
+  await panel.waitFor({ state: 'visible', timeout: 10_000 });
+  return panel;
+}
 
 (async () => {
   const browser = await chromium.launch({ headless: true });
@@ -20,125 +51,128 @@ const path = '/test-chat-streaming-state/';
 
   await page.goto(`${baseUrl}${path}`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
   await page.waitForSelector('[data-testid="chat-streaming-state-fixture"]', { timeout: 30_000 });
-  await page.waitForFunction(() => document.querySelector('[data-chat-generation-phase="searching"] [data-chat-status-icon="web_search"]'), null, { timeout: 10_000 });
-  await page.waitForFunction(() => {
-    const status = document.querySelector('[data-chat-generation-phase="searching"]')?.textContent || '';
-    const statusInBody = document.querySelector('.streaming-answer-markdown [data-chat-generation-phase], .reasoning-markdown [data-chat-generation-phase]');
-    return /\d+/.test(status) && !statusInBody;
-  }, null, { timeout: 10_000 });
+  await page.waitForSelector('[data-chat-activity-panel="true"]', { timeout: 10_000 });
   await page.waitForFunction(() => document.querySelector('[data-testid="fixture-phase"]')?.textContent === 'mixed-held', null, { timeout: 10_000 });
   await page.waitForFunction(() => {
     const phase = document.querySelector('[data-testid="fixture-phase"]')?.textContent || '';
     const body = document.body.innerText;
-    return phase === 'mixed-held' && body.includes('先分析搜索结果') && !body.includes('最终回答 OK 42') && !!document.querySelector('[data-chat-generation-phase="reasoning"] [data-chat-status-icon="thinking"]');
+    const panel = document.querySelector('[data-chat-activity-panel="true"]')?.textContent || '';
+    return phase === 'mixed-held' && panel.includes('先分析搜索结果') && !body.includes('B001');
   }, null, { timeout: 10_000 });
   const mixedSnapshot = await page.evaluate(() => ({
     phase: document.querySelector('[data-testid="fixture-phase"]')?.textContent || '',
     body: document.body.innerText,
-    reasoningStrongText: Array.from(document.querySelectorAll('.reasoning-markdown strong')).map((node) => node.textContent || '').join('|'),
+    panelText: document.querySelector('[data-chat-activity-panel="true"]')?.textContent || '',
   }));
-  if (!mixedSnapshot.body.includes('先分析搜索结果')) {
-    issues.push('reasoning text did not render during mixed reasoning phase');
+  if (!mixedSnapshot.panelText.includes('先分析搜索结果')) {
+    issues.push('reasoning text did not render in activity panel during mixed reasoning phase');
   }
-  if (mixedSnapshot.phase === 'mixed-held' && mixedSnapshot.body.includes('最终回答 OK 42')) {
+  if (mixedSnapshot.phase === 'mixed-held' && mixedSnapshot.body.includes('B001')) {
     issues.push('answer appeared while mixed reasoning delta was still held');
   }
-  await page.waitForFunction(() => document.querySelector('[data-testid="fixture-phase"]')?.textContent === 'answer-streaming', null, { timeout: 10_000 });
-  await page.waitForFunction(() => document.body.innerText.includes('最终回答 OK 42'), null, { timeout: 10_000 });
-  await page.waitForFunction(() => document.querySelector('[data-chat-generation-phase="streaming_answer"] [data-chat-status-icon="spinning"]')?.classList.contains('animate-spin'), null, { timeout: 10_000 });
-  await page.waitForFunction(() => Array.from(document.querySelectorAll('.reasoning-markdown strong')).some((node) => node.textContent?.includes('最终')), null, { timeout: 10_000 });
-  await page.waitForFunction(() => Array.from(document.querySelectorAll('.streaming-answer-markdown strong')).some((node) => node.textContent?.includes('OK')), null, { timeout: 10_000 });
+  await page.waitForFunction(() => {
+    const phase = document.querySelector('[data-testid="fixture-phase"]')?.textContent || '';
+    return phase === 'answer-streaming' || phase === 'done';
+  }, null, { timeout: 10_000 });
+  await page.waitForFunction(() => {
+    const panelText = document.querySelector('[data-chat-activity-panel="true"]')?.textContent || '';
+    const answerText = document.querySelector('[data-chat-answer-stable-layer="true"]')?.textContent || '';
+    return panelText.includes('正在生成回答') || answerText.includes('B001') || document.querySelector('[data-testid="fixture-phase"]')?.textContent === 'done';
+  }, null, { timeout: 10_000 });
+  await page.waitForFunction(() => {
+    const text = document.querySelector('[data-chat-answer-stable-layer="true"]')?.textContent || '';
+    return text.includes('B001') || document.querySelector('[data-testid="fixture-phase"]')?.textContent === 'done';
+  }, null, { timeout: 10_000 });
   const answerStreamingSnapshot = await page.evaluate(() => ({
     phase: document.querySelector('[data-testid="fixture-phase"]')?.textContent || '',
-    reasoningStrongText: Array.from(document.querySelectorAll('.reasoning-markdown strong')).map((node) => node.textContent || '').join('|'),
+    panelText: document.querySelector('[data-chat-activity-panel="true"]')?.textContent || '',
     answerStrongText: Array.from(document.querySelectorAll('.streaming-answer-markdown strong')).map((node) => node.textContent || '').join('|'),
   }));
+  const streamingAnswerSnapshot = await readLatestAnswerSnapshot(page, 'streaming');
 
   await page.waitForFunction(() => document.querySelector('[data-testid="fixture-phase"]')?.textContent === 'done', null, { timeout: 10_000 });
-  await page.waitForFunction(() => document.body.innerText.includes('最终回答 OK 42'), null, { timeout: 10_000 });
-  await page.waitForFunction(() => document.querySelector('[data-chat-status-kind="completed"] [data-chat-status-icon="completed"]'), null, { timeout: 10_000 });
-  await page.waitForFunction(() => document.querySelector('.streaming-answer-markdown [data-streaming-markdown-mode="rich"]'), null, { timeout: 10_000 });
+  await page.waitForFunction(() => document.body.innerText.includes('B001') && document.body.innerText.includes('B120'), null, { timeout: 10_000 });
+  const doneInstantAnswerSnapshot = await readLatestAnswerSnapshot(page, 'done-instant');
+  await page.waitForTimeout(300);
+  const done300AnswerSnapshot = await readLatestAnswerSnapshot(page, 'done+300ms');
+  await page.waitForTimeout(900);
+  const done1200AnswerSnapshot = await readLatestAnswerSnapshot(page, 'done+1200ms');
+  await page.waitForTimeout(1800);
+  const done3000AnswerSnapshot = await readLatestAnswerSnapshot(page, 'done+3000ms');
   const doneImmediateSnapshot = await page.evaluate(() => ({
-    answerMode: document.querySelector('.streaming-answer-markdown [data-streaming-markdown-mode]')?.getAttribute('data-streaming-markdown-mode') || '',
     rowHeight: document.querySelector('[data-chat-message-row="true"][data-message-role="assistant"]')?.getBoundingClientRect().height || 0,
-    reasoningExpanded: document.querySelector('.reasoning-markdown')?.closest('.rounded-xl')?.querySelector('button')?.getAttribute('aria-expanded') || '',
-    reasoningHeight: document.querySelector('.reasoning-markdown')?.getBoundingClientRect().height || 0,
+    activityPanelVisible: Boolean(document.querySelector('[data-chat-activity-panel="true"]')),
   }));
   await page.waitForFunction(() => document.querySelector('[data-testid="complex-streaming-markdown-active"] [data-streaming-markdown-mode="plain"]'), null, { timeout: 10_000 });
   await page.waitForFunction(() => document.querySelector('[data-testid="complex-streaming-markdown-done"] [data-streaming-markdown-mode="rich"]'), null, { timeout: 10_000 });
-  await page.waitForFunction(() => Array.from(document.querySelectorAll('strong')).some((node) => node.textContent?.includes('最终')), null, { timeout: 10_000 });
-  await page.waitForFunction(() => Array.from(document.querySelectorAll('strong')).some((node) => node.textContent?.includes('OK')), null, { timeout: 10_000 });
+  await page.waitForFunction(() => document.body.innerText.includes('B120'), null, { timeout: 10_000 });
   const doneSnapshot = await page.evaluate(() => ({
     body: document.body.innerText,
-    reasoningStrongText: Array.from(document.querySelectorAll('.reasoning-markdown strong')).map((node) => node.textContent || '').join('|'),
+    panelText: document.querySelector('[data-chat-activity-panel="true"]')?.textContent || '',
     answerStrongText: Array.from(document.querySelectorAll('strong')).map((node) => node.textContent || '').join('|'),
-    answerMode: document.querySelector('.streaming-answer-markdown [data-streaming-markdown-mode]')?.getAttribute('data-streaming-markdown-mode') || '',
     rowHeight: document.querySelector('[data-chat-message-row="true"][data-message-role="assistant"]')?.getBoundingClientRect().height || 0,
     complexStreamingMode: document.querySelector('[data-testid="complex-streaming-markdown-active"] [data-streaming-markdown-mode]')?.getAttribute('data-streaming-markdown-mode') || '',
     complexDoneMode: document.querySelector('[data-testid="complex-streaming-markdown-done"] [data-streaming-markdown-mode]')?.getAttribute('data-streaming-markdown-mode') || '',
-    completedIconKind: document.querySelector('[data-chat-status-kind="completed"] [data-chat-status-icon]')?.getAttribute('data-chat-status-icon') || '',
-    completedIconSpinning: document.querySelector('[data-chat-status-kind="completed"] [data-chat-status-icon]')?.classList.contains('animate-spin') || false,
     statusBadges: Array.from(document.querySelectorAll('span')).map((node) => node.textContent || '').filter(Boolean),
   }));
-  if (!doneSnapshot.body.includes('最终回答 OK 42')) {
+  if (!doneSnapshot.body.includes('B001') || !doneSnapshot.body.includes('B120')) {
     issues.push('answer did not appear after done flush');
   }
   if (doneSnapshot.body.includes('正在联网搜索')) {
     issues.push('web-search running badge remained after done without completed meta');
   }
-  if (doneSnapshot.completedIconKind !== 'completed' || doneSnapshot.completedIconSpinning) {
-    issues.push(`completed status should use a non-spinning completed icon: ${doneSnapshot.completedIconKind}, spinning=${doneSnapshot.completedIconSpinning}`);
+  if (!doneImmediateSnapshot.activityPanelVisible) {
+    issues.push('activity panel should remain visible after completion');
   }
-  if (doneImmediateSnapshot.reasoningExpanded !== 'true' || doneImmediateSnapshot.reasoningHeight <= 12) {
-    issues.push(`just-completed reasoning block should remain expanded after completion to avoid scroll-height collapse: expanded=${doneImmediateSnapshot.reasoningExpanded}, height=${doneImmediateSnapshot.reasoningHeight}`);
-  }
-  await page.hover('[data-chat-status-kind="completed"]');
+  const activityPanel = page.locator('[data-chat-activity-panel="true"]').last();
   await page.waitForFunction(() => {
-    const panel = document.querySelector('[data-chat-status-timeline="true"]');
-    const steps = Array.from(panel?.querySelectorAll('[data-chat-status-timeline-step]') || []);
-    const timeline = panel?.textContent || '';
-    return steps.length >= 4
-      && !timeline.includes('正在')
-      && !timeline.includes('已用时')
-      && !timeline.includes('elapsed');
+    const panel = document.querySelector('[data-chat-activity-panel="true"]');
+    const text = panel?.textContent || '';
+    return text.includes('思考与来源') && text.includes('先分析搜索结果');
   }, null, { timeout: 10_000 });
-  const timelineSnapshot = await page.evaluate(() => {
-    const panel = document.querySelector('[data-chat-status-timeline="true"]');
-    const steps = Array.from(panel?.querySelectorAll('[data-chat-status-timeline-step]') || []).map((node) => ({
-      id: node.getAttribute('data-chat-status-timeline-step') || '',
-      text: node.textContent || '',
-      icon: node.querySelector('[data-chat-status-timeline-icon]')?.textContent || '',
-      iconKind: node.querySelector('[data-chat-status-timeline-icon]')?.getAttribute('data-chat-status-timeline-icon') || '',
-    }));
-    return { steps };
-  });
-  const stepIds = timelineSnapshot.steps.map((step) => step.id);
-  const expectedOrder = ['waiting_provider:completed', 'web_search:completed', 'reasoning:completed', 'streaming_answer:completed'];
-  if (JSON.stringify(stepIds) !== JSON.stringify(expectedOrder)) {
-    issues.push(`timeline order mismatch: ${JSON.stringify(stepIds)}`);
+  const timelineSnapshot = await activityPanel.evaluate((panel) => ({
+    text: panel.textContent || '',
+    stepCount: panel.querySelectorAll('[data-chat-activity-step="true"]').length,
+  }));
+  if (!timelineSnapshot.text.includes('先分析搜索结果')) {
+    issues.push('activity panel did not expose reasoning content');
   }
-  const nonCompletedStep = timelineSnapshot.steps.find((step) => step.icon !== '✅' || step.iconKind !== 'completed');
-  if (nonCompletedStep) {
-    issues.push(`completed timeline should use ✅ icon for every step: ${JSON.stringify(nonCompletedStep)}`);
+  if (timelineSnapshot.text.includes('收尾中') || timelineSnapshot.text.includes('Finalizing') || timelineSnapshot.text.includes('0秒') || timelineSnapshot.text.includes('0s')) {
+    issues.push(`activity panel showed low-value/stale timeline text: ${timelineSnapshot.text.slice(0, 300)}`);
   }
-  const runningTextStep = timelineSnapshot.steps.find((step) => step.text.includes('正在') || step.text.includes('已用时'));
-  if (runningTextStep) {
-    issues.push(`completed timeline should not show running text or per-step elapsed time: ${JSON.stringify(runningTextStep)}`);
+  const finalRenderSnapshots = [streamingAnswerSnapshot, doneInstantAnswerSnapshot, done300AnswerSnapshot, done1200AnswerSnapshot, done3000AnswerSnapshot];
+  const completionSettleSnapshots = [doneInstantAnswerSnapshot, done300AnswerSnapshot, done1200AnswerSnapshot];
+  const rowIds = new Set(finalRenderSnapshots.map((snapshot) => snapshot.rowId));
+  if (rowIds.size !== 1) {
+    issues.push(`latest assistant row id changed across completion: ${JSON.stringify(finalRenderSnapshots)}`);
   }
-  if (!doneSnapshot.reasoningStrongText.includes('最终')) {
-    issues.push('reasoning markdown bold did not render as strong element after completion');
+  const missingStableLayer = completionSettleSnapshots.filter((snapshot) => !snapshot.hasStableLayer);
+  if (missingStableLayer.length > 0) {
+    issues.push(`answer stable layer should stay mounted through completion settling: ${JSON.stringify(missingStableLayer)}`);
   }
-  if (!answerStreamingSnapshot.reasoningStrongText.includes('最终')) {
-    issues.push('reasoning markdown bold did not render as strong element while loading');
+  const duplicateAnswer = finalRenderSnapshots.find((snapshot) => (snapshot.answerText.match(/B001/g) || []).length !== 1 || (snapshot.answerText.match(/B120/g) || []).length !== 1);
+  if (duplicateAnswer) {
+    issues.push(`answer text should appear exactly once through completion and hydration: ${JSON.stringify(duplicateAnswer)}`);
   }
-  if (!answerStreamingSnapshot.answerStrongText.includes('OK')) {
-    issues.push('streaming answer markdown bold did not render as strong element while loading');
+  const maxHeight = Math.max(...completionSettleSnapshots.map((snapshot) => snapshot.rowHeight));
+  const minHeight = Math.min(...completionSettleSnapshots.map((snapshot) => snapshot.rowHeight).filter(Boolean));
+  if (minHeight > 0 && maxHeight - minHeight > 48) {
+    issues.push(`assistant row height shifted too much during completion settling: ${JSON.stringify(finalRenderSnapshots.map((snapshot) => ({ label: snapshot.label, rowHeight: snapshot.rowHeight, mode: snapshot.answerMode })) )}`);
   }
-  if (!doneSnapshot.answerStrongText.includes('OK')) {
-    issues.push('answer markdown bold did not remain a strong element after completion');
+  const unexpectedSettleState = completionSettleSnapshots.find((snapshot) => snapshot.renderState !== 'settling');
+  if (unexpectedSettleState) {
+    issues.push(`completion settling snapshots should stay in settling render state: ${JSON.stringify(completionSettleSnapshots)}`);
   }
-  if (doneImmediateSnapshot.answerMode !== 'rich' || doneSnapshot.answerMode !== 'rich') {
-    issues.push(`completed simple markdown answer mode changed unexpectedly: ${doneImmediateSnapshot.answerMode} -> ${doneSnapshot.answerMode}`);
+  const nonCanonicalCompletionSnapshot = completionSettleSnapshots.find((snapshot) => snapshot.contentSource !== 'canonical');
+  if (nonCanonicalCompletionSnapshot) {
+    issues.push(`completion should render canonical content during settling: ${JSON.stringify(completionSettleSnapshots)}`);
+  }
+  if (done3000AnswerSnapshot.renderState !== 'hydrated') {
+    issues.push(`done+3000ms should transition to hydrated render state: ${JSON.stringify(done3000AnswerSnapshot)}`);
+  }
+  const completedSpinnerSnapshot = finalRenderSnapshots.find((snapshot) => snapshot.completedSpinner);
+  if (completedSpinnerSnapshot) {
+    issues.push(`completed answer should not keep spinner: ${JSON.stringify(completedSpinnerSnapshot)}`);
   }
   if (doneImmediateSnapshot.rowHeight > 0 && Math.abs(doneSnapshot.rowHeight - doneImmediateSnapshot.rowHeight) > 4) {
     issues.push(`assistant row height shifted after completion settle: ${doneImmediateSnapshot.rowHeight} -> ${doneSnapshot.rowHeight}`);
@@ -152,10 +186,10 @@ const path = '/test-chat-streaming-state/';
 
   await browser.close();
   if (issues.length) {
-    console.error(JSON.stringify({ ok: false, issues, mixedSnapshot, answerStreamingSnapshot, doneImmediateSnapshot, doneSnapshot }, null, 2));
+    console.error(JSON.stringify({ ok: false, issues, mixedSnapshot, answerStreamingSnapshot, finalRenderSnapshots, doneImmediateSnapshot, doneSnapshot }, null, 2));
     process.exit(1);
   }
-  console.log(JSON.stringify({ ok: true, mixedPhase: mixedSnapshot.phase, doneHasAnswer: doneSnapshot.body.includes('最终回答 OK 42') }));
+  console.log(JSON.stringify({ ok: true, mixedPhase: mixedSnapshot.phase, doneHasAnswer: doneSnapshot.body.includes('B001') && doneSnapshot.body.includes('B120') }));
 })().catch((error) => {
   console.error(error);
   process.exit(1);

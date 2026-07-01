@@ -101,6 +101,13 @@ function response(ok, data) {
       groupId: 7,
       groupIndex: 2,
       groupModels: ["a", "b"],
+      userMessageId: undefined,
+      generationTaskId: undefined,
+      lastSequence: undefined,
+      serverGenerationStatus: undefined,
+      phase: undefined,
+      statusTimeline: undefined,
+      tokensUsed: undefined,
     });
   });
 
