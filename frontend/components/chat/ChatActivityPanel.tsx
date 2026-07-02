@@ -37,9 +37,11 @@ function getActivityStepLabel(_t: (key: string, params?: Record<string, string>)
     const count = step.count ? `${step.count} 个来源` : "网页来源";
     if (step.status === "running") return "正在搜索网页";
     if (step.status === "failed") return "搜索失败";
-    return `参考了 ${count}`;
+    return `搜索完成 · ${count}`;
   }
   if (step.kind === "file_search") return step.status === "running" ? "正在检索文件" : "检索了文件";
+  if (step.kind === "waiting_provider" && step.status === "failed") return "模型生成失败";
+  if (step.kind === "streaming_answer" && step.status === "failed") return "模型生成失败";
   if (step.kind === "tool_call") return step.status === "running" ? "正在使用工具" : "使用了工具";
   if (step.kind === "reasoning") return step.status === "running" ? "正在思考" : "模型思考";
   if (step.kind === "streaming_answer") return step.status === "running" ? "正在生成回答" : "回答完成";

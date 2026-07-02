@@ -78,6 +78,8 @@ const baseMessages = [
       && panels['sources-only']?.text.includes('docs.example.org')
       && panels['failed-sources']?.title === '思考与来源'
       && panels['failed-sources']?.hasSources === true
+      && panels['failed-sources']?.text.includes('搜索完成')
+      && panels['failed-sources']?.text.includes('模型生成失败')
       && pageErrors.length === 0,
     rows,
     panels,
