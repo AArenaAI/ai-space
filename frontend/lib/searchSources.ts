@@ -60,3 +60,24 @@ export function normalizeSearchSources(sources?: SearchSource[] | null) {
   }
   return normalized;
 }
+
+export type SearchSourceGroup = {
+  host: string;
+  organization: string;
+  sources: SearchSource[];
+};
+
+export function groupSearchSourcesByHost(sources?: SearchSource[] | null) {
+  const groups = new Map<string, SearchSourceGroup>();
+  for (const source of normalizeSearchSources(sources)) {
+    const host = searchSourceHost(source);
+    const organization = sourceOrganization(host);
+    const existing = groups.get(host);
+    if (existing) {
+      existing.sources.push(source);
+    } else {
+      groups.set(host, { host, organization, sources: [source] });
+    }
+  }
+  return Array.from(groups.values());
+}

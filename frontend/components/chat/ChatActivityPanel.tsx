@@ -10,7 +10,7 @@ import { getOrderedTimelineSteps, type ChatStatusTimelineStep } from "@/lib/chat
 import { resolveChatMessageRuntimeState } from "@/lib/chatMessageRuntimeState";
 import { isLowSignalCompletedActivityStep } from "@/lib/chatActivityTimeline";
 import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
-import { normalizeSearchSources, searchSourceHost, sourceOrganization } from "@/lib/searchSources";
+import { groupSearchSourcesByHost, normalizeSearchSources } from "@/lib/searchSources";
 
 function statusIcon(step: ChatStatusTimelineStep) {
   if (step.status === "failed") return <AlertCircle className="h-3.5 w-3.5 text-red-500" />;
@@ -158,6 +158,7 @@ export default function ChatActivityPanel({
   if (!message) return null;
   const runtimeState = resolveChatMessageRuntimeState({ message, realtime, snapshotTimeline });
   const sources = normalizeSearchSources(runtimeState.searchSources);
+  const sourceGroups = groupSearchSourcesByHost(sources);
   const inferredSourceCount = sources.length || countMarkdownSources(runtimeState.content);
   const timeline = getOrderedTimelineSteps(runtimeState.statusTimeline)
     .map((step) => step.kind === "web_search" && !step.count && inferredSourceCount ? { ...step, count: inferredSourceCount } : step)
@@ -269,15 +270,24 @@ export default function ChatActivityPanel({
           <section>
             <div className="mb-2 text-sm font-semibold text-text-secondary">参考来源 · {sources.length}</div>
             <div className="space-y-2">
-              {sources.slice(0, 12).map((source, index) => {
-                const host = searchSourceHost(source);
-                const organization = sourceOrganization(host);
-                const sourceMeta = organization === host ? host : `${organization} · ${host}`;
+              {sourceGroups.slice(0, 12).map((group) => {
+                const sourceMeta = group.organization === group.host ? group.host : `${group.organization} · ${group.host}`;
+                const primarySource = group.sources[0];
+                const title = group.sources.length > 1 ? `${group.host} · ${group.sources.length}` : (primarySource.title || group.organization);
                 return (
-                  <a key={`${source.url}:${index}`} href={source.url} target="_blank" rel="noreferrer" className="block rounded-xl bg-surface-card/60 px-2.5 py-2 text-sm hover:bg-surface-card" title={source.url}>
-                    <div className="truncate font-medium text-text-secondary">{source.title || organization}</div>
-                    <div className="mt-0.5 truncate text-text-tertiary">{sourceMeta}</div>
-                  </a>
+                  <details key={group.host} className="group rounded-xl bg-surface-card/60 px-2.5 py-2 text-sm hover:bg-surface-card" open={group.sources.length === 1 ? undefined : false}>
+                    <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                      <div className="truncate font-medium text-text-secondary">{title}</div>
+                      <div className="mt-0.5 truncate text-text-tertiary">{sourceMeta}</div>
+                    </summary>
+                    <div className="mt-2 space-y-1.5 border-t border-surface-border/60 pt-2">
+                      {group.sources.map((source, sourceIndex) => (
+                        <a key={`${source.url}:${sourceIndex}`} href={source.url} target="_blank" rel="noreferrer" className="block truncate rounded-lg px-1.5 py-1 text-text-tertiary hover:bg-surface-elevated hover:text-text-secondary" title={source.url}>
+                          {source.title || source.url || group.host}
+                        </a>
+                      ))}
+                    </div>
+                  </details>
                 );
               })}
             </div>

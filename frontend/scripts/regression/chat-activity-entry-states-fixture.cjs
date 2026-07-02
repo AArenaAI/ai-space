@@ -9,7 +9,11 @@ const baseMessages = [
   },
   {
     id: 'sources-only', role: 'assistant', model: 'fixture-model', content: '只有来源没有思考的回答', createdAt: Date.now() - 4000, completedAt: Date.now() - 1000,
-    searchSources: [{ title: 'Example 2', url: 'https://example.com/b', description: 'b' }], searchSourcesCount: 1, statusTimeline: [{ id: 'web_search:completed', kind: 'web_search', status: 'completed', startedAt: Date.now() - 2500, endedAt: Date.now() - 2200, count: 1 }],
+    searchSources: [
+      { title: 'Example 2', url: 'https://example.com/b', description: 'b' },
+      { title: 'Example 3', url: 'https://example.com/c', description: 'c' },
+      { title: 'Docs', url: 'https://docs.example.org/a', description: 'docs' },
+    ], searchSourcesCount: 3, statusTimeline: [{ id: 'web_search:completed', kind: 'web_search', status: 'completed', startedAt: Date.now() - 2500, endedAt: Date.now() - 2200, count: 3 }],
   },
   {
     id: 'reasoning-only', role: 'assistant', model: 'fixture-model', content: '只有思考没有来源的回答', reasoningContent: '这里是无来源思考。', createdAt: Date.now() - 4000, completedAt: Date.now() - 1000,
@@ -59,7 +63,7 @@ const baseMessages = [
   const byId = Object.fromEntries(rows.map((row) => [row.id, row]));
   const result = {
     ok: byId['reasoning-sources']?.entryText.includes('已思考')
-      && byId['sources-only']?.entryText === '来源 · 1'
+      && byId['sources-only']?.entryText === '来源 · 3'
       && byId['reasoning-only']?.entryText.includes('已思考')
       && byId['plain']?.hasEntry === false
       && byId['failed-sources']?.entryText === '来源 · 1'
@@ -69,6 +73,8 @@ const baseMessages = [
       && panels['reasoning-only']?.hasSources === false
       && panels['sources-only']?.title === '思考与来源'
       && panels['sources-only']?.hasSources === true
+      && panels['sources-only']?.text.includes('example.com · 2')
+      && panels['sources-only']?.text.includes('docs.example.org')
       && panels['failed-sources']?.title === '思考与来源'
       && panels['failed-sources']?.hasSources === true
       && pageErrors.length === 0,
