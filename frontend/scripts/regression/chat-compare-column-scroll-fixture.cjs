@@ -98,14 +98,45 @@ async function sample(page, label) {
     await page.waitForTimeout(120);
     const reset = await sample(page, 'after-column-reset');
     const resetTarget = reset.columns[target.index];
-    const x = resetTarget.left + Math.min(resetTarget.width - 20, Math.max(20, resetTarget.width / 2));
-    const y = resetTarget.top + Math.min(resetTarget.height - 20, Math.max(20, resetTarget.height / 2));
-    await page.mouse.move(x, y);
-    const outerBeforeWheel = reset.outerScrollTop;
-    const columnBeforeWheel = resetTarget.scrollTop;
+    await page.evaluate(() => {
+      const outer = Array.from(document.querySelectorAll('[data-testid="chat-history-scroll-container"]'))
+        .find((node) => node instanceof HTMLElement && node.offsetParent !== null && node.clientHeight > 0);
+      if (outer instanceof HTMLElement) outer.scrollTop = Math.max(0, outer.scrollTop - 260);
+    });
+    await page.waitForTimeout(120);
+    const beforeLeftWheel = await sample(page, 'before-left-half-wheel');
+    const beforeLeftTarget = beforeLeftWheel.columns[target.index];
+    const y = beforeLeftTarget.top + Math.min(beforeLeftTarget.height - 20, Math.max(20, beforeLeftTarget.height / 2));
+    const leftX = beforeLeftTarget.left + Math.max(12, Math.min(beforeLeftTarget.width - 24, beforeLeftTarget.width * 0.25));
+    await page.mouse.move(leftX, y);
+    await page.waitForTimeout(80);
+    const leftFocusZone = await page.evaluate((targetIndex) => {
+      const column = Array.from(document.querySelectorAll('[data-compare-column-scroll-container="true"]'))[targetIndex];
+      return column instanceof HTMLElement
+        ? column.closest('[data-compare-column-focus-zone]')?.getAttribute('data-compare-column-focus-zone')
+        : null;
+    }, target.index);
+    await page.mouse.wheel(0, -220);
+    await page.waitForTimeout(180);
+    const afterLeftWheel = await sample(page, 'after-left-half-wheel');
+    const afterLeftTarget = afterLeftWheel.columns[target.index];
+    const leftOuterDelta = afterLeftWheel.outerScrollTop - beforeLeftWheel.outerScrollTop;
+    const leftColumnDelta = afterLeftTarget.scrollTop - beforeLeftTarget.scrollTop;
+
+    const rightX = afterLeftTarget.left + Math.max(12, Math.min(afterLeftTarget.width - 24, afterLeftTarget.width * 0.75));
+    await page.mouse.move(rightX, y);
+    await page.waitForTimeout(80);
+    const rightFocusZone = await page.evaluate((targetIndex) => {
+      const column = Array.from(document.querySelectorAll('[data-compare-column-scroll-container="true"]'))[targetIndex];
+      return column instanceof HTMLElement
+        ? column.closest('[data-compare-column-focus-zone]')?.getAttribute('data-compare-column-focus-zone')
+        : null;
+    }, target.index);
+    const outerBeforeWheel = afterLeftWheel.outerScrollTop;
+    const columnBeforeWheel = afterLeftTarget.scrollTop;
     await page.mouse.wheel(0, 620);
     await page.waitForTimeout(180);
-    const after = await sample(page, 'after-column-wheel');
+    const after = await sample(page, 'after-right-half-column-wheel');
     const afterTarget = after.columns[target.index];
     const outerDelta = Math.abs(after.outerScrollTop - outerBeforeWheel);
     const columnDelta = afterTarget.scrollTop - columnBeforeWheel;
@@ -144,7 +175,10 @@ async function sample(page, label) {
     const restoredTarget = restored.columns[target.index];
     const restoredDelta = Math.abs((restoredTarget?.scrollTop || 0) - afterTarget.scrollTop);
     const result = {
-      ok: outerDelta <= 4
+      ok: leftFocusZone === 'page'
+        && Math.abs(leftColumnDelta) <= 4
+        && rightFocusZone === 'right'
+        && outerDelta <= 4
         && columnDelta > 80
         && edgeState.canScroll === 'true'
         && edgeState.atTop === 'false'
@@ -156,6 +190,10 @@ async function sample(page, label) {
       after,
       restored,
       target,
+      leftFocusZone,
+      leftOuterDelta,
+      leftColumnDelta,
+      rightFocusZone,
       outerDelta,
       columnDelta,
       restoredDelta,
@@ -165,6 +203,10 @@ async function sample(page, label) {
     };
     const compact = {
       ok: result.ok,
+      leftFocusZone,
+      leftOuterDelta,
+      leftColumnDelta,
+      rightFocusZone,
       outerDelta,
       columnDelta,
       restoredDelta,

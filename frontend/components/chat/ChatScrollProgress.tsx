@@ -9,6 +9,7 @@ export type ChatScrollProgressProps = {
   visible: boolean;
   onJumpToRatio: (ratio: number) => void;
   onDragStateChange: (dragging: boolean) => void;
+  edgeAligned?: boolean;
 };
 
 const ChatScrollProgress = memo(function ChatScrollProgress({
@@ -16,6 +17,7 @@ const ChatScrollProgress = memo(function ChatScrollProgress({
   visible,
   onJumpToRatio,
   onDragStateChange,
+  edgeAligned = false,
 }: ChatScrollProgressProps) {
   const { t } = useI18n();
   const trackRef = useRef<HTMLDivElement>(null);
@@ -60,7 +62,10 @@ const ChatScrollProgress = memo(function ChatScrollProgress({
 
   return (
     <div
-      className="pointer-events-none absolute inset-y-0 right-1 z-[95] hidden w-7 justify-center sm:flex"
+      className={cn(
+        "pointer-events-none absolute inset-y-0 z-[95] hidden sm:flex",
+        edgeAligned ? "right-0 w-3 justify-end" : "right-1 w-7 justify-center"
+      )}
       data-testid="chat-scroll-progress-layer"
       aria-hidden="false"
     >
@@ -73,7 +78,10 @@ const ChatScrollProgress = memo(function ChatScrollProgress({
         aria-valuenow={Math.round(clampedRatio * 100)}
         aria-label={t("chat.scroll.progressAria")}
         tabIndex={0}
-        className="group pointer-events-auto relative h-full w-5 cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-brand/35"
+        className={cn(
+          "group pointer-events-auto relative h-full cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-brand/35",
+          edgeAligned ? "w-2" : "w-5"
+        )}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={finishDrag}
@@ -82,7 +90,8 @@ const ChatScrollProgress = memo(function ChatScrollProgress({
       >
         <div
           className={cn(
-            "absolute left-1/2 w-[3px] -translate-x-1/2 rounded-full bg-slate-500/45 shadow-[0_0_0_1px_rgba(255,255,255,0.25)] transition-all duration-200 ease-out",
+            "absolute w-[3px] rounded-full bg-slate-500/45 shadow-[0_0_0_1px_rgba(255,255,255,0.25)] transition-all duration-200 ease-out",
+            edgeAligned ? "right-0" : "left-1/2 -translate-x-1/2",
             "group-hover:w-1.5 group-hover:bg-slate-500/70 group-hover:shadow-sm group-focus-visible:w-1.5 group-focus-visible:bg-slate-500/70",
             "dark:bg-slate-200/38 dark:group-hover:bg-slate-200/68 green:bg-[#405E3D]/46 green:group-hover:bg-[#405E3D]/72",
             isDragging && "w-1.5 bg-slate-600/75 dark:bg-slate-100/75 green:bg-[#405E3D]/82"

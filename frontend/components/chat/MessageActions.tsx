@@ -142,7 +142,7 @@ function MessageActions({
       align === "right" ? "justify-end" : "justify-start",
       visible
         ? "mt-1 px-1 py-0.5 opacity-100"
-        : "h-0 overflow-visible px-1 py-0 opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100"
+        : "mt-1 px-1 py-0.5 opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100"
     )}>
       {profileEnabled && (
         <MessageActionsProfileProbe
