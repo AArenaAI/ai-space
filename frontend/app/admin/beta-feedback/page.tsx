@@ -50,7 +50,12 @@ export default function BetaFeedbackAdminPage() {
 
   const fetchFeedback = useCallback(async () => {
     const token = localStorage.getItem("admin_token");
-    if (!token) return;
+    if (!token) {
+      setItems([]);
+      setTotal(0);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const params = new URLSearchParams();
