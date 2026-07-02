@@ -34,6 +34,7 @@ const COMPARE_KEY = "compare-mode";
 const COMPARE_MODELS_KEY = "compare-models";
 const COMPARE_MODEL_LIMIT = 2;
 const EMPTY_COMPARE_LAYOUT_DELAY_MS = 520;
+const COMPARE_MODEL_PERSIST_DEBOUNCE_MS = 300;
 
 function normalizeCompareModelIds(modelIds: string[], models: ChatModel[]): string[] {
   const available = new Set(models.map((model) => model.id));
@@ -93,6 +94,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   const [messageSelectMode, setMessageSelectMode] = useState(false);
   const [activityPanelOpen, setActivityPanelOpen] = useState(false);
   const [quoteDraft, setQuoteDraft] = useState<QuoteDraft | null>(null);
+  const compareModelPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handledExternalSendIdRef = useRef<number | null>(null);
   const [modelRecommendationContext, setModelRecommendationContext] = useState<ModelRecommendationContext>();
   const [userName, setUserName] = useState<string>("");
@@ -111,6 +113,15 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   useEffect(() => {
     selectedModelsRef.current = selectedModels;
   }, [selectedModels]);
+
+  useEffect(() => {
+    return () => {
+      if (compareModelPersistTimerRef.current) {
+        clearTimeout(compareModelPersistTimerRef.current);
+        compareModelPersistTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const {
     messages,
@@ -242,7 +253,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     try {
       const r = await fetch(`/api/conversations/${conversationId}`, {
         method: "PUT",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
         body: JSON.stringify({ title: newTitle.trim() }),
       });
       if (r.ok) {
@@ -429,19 +440,25 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     if (!targetConversationId || modelIds.length < COMPARE_MODEL_LIMIT) return;
     const token = localStorage.getItem("token");
     if (!token) return;
-    void fetch(`/api/conversations/${targetConversationId}`, {
-      method: "PUT",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ compare: true, compare_models: JSON.stringify(modelIds) }),
-    }).then((response) => {
-      if (response.ok) {
-        window.dispatchEvent(new CustomEvent("conversation-updated", { detail: { conversationId: targetConversationId } }));
-      } else {
+    if (compareModelPersistTimerRef.current) {
+      clearTimeout(compareModelPersistTimerRef.current);
+    }
+    compareModelPersistTimerRef.current = setTimeout(() => {
+      compareModelPersistTimerRef.current = null;
+      void fetch(`/api/conversations/${targetConversationId}`, {
+        method: "PUT",
+        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+        body: JSON.stringify({ compare: true, compare_models: JSON.stringify(modelIds) }),
+      }).then((response) => {
+        if (response.ok) {
+          window.dispatchEvent(new CustomEvent("conversation-updated", { detail: { conversationId: targetConversationId } }));
+        } else {
+          toast.warning("对比模型选择未保存，刷新后可能恢复为旧模型");
+        }
+      }).catch(() => {
         toast.warning("对比模型选择未保存，刷新后可能恢复为旧模型");
-      }
-    }).catch(() => {
-      toast.warning("对比模型选择未保存，刷新后可能恢复为旧模型");
-    });
+      });
+    }, COMPARE_MODEL_PERSIST_DEBOUNCE_MS);
   }, [conversationId, currentConversation]);
 
   const handleCompareModelChange = (index: number, modelId: string) => {
@@ -513,7 +530,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
       if (token) {
         void fetch(`/api/conversations/${conversationId}`, {
           method: "PUT",
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
           body: JSON.stringify({ compare: false, compare_models: "[]" }),
         }).then((response) => {
           if (response.ok) {

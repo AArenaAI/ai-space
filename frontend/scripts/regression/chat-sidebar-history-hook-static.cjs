@@ -7,6 +7,9 @@ const repoRoot = path.resolve(__dirname, '../..');
 const read = (relative) => fs.readFileSync(path.join(repoRoot, relative), 'utf8');
 
 const hook = read('hooks/useChatSidebarHistory.ts');
+const metadataEvents = read('lib/chatConversationMetadataEvents.ts');
+const sidebarHistoryLib = read('lib/chatSidebarHistory.ts');
+const useChat = read('hooks/useChat.ts');
 const mobile = read('components/mobile/MobileNav.tsx');
 const desktop = read('components/sidebar/AppSidebar.tsx');
 
@@ -16,6 +19,32 @@ assert.ok(hook.includes('conversation-renamed'), 'hook should own conversation-r
 assert.ok(hook.includes('conversation-updated'), 'hook should own conversation-updated updates');
 assert.ok(hook.includes('before_activity_at') && hook.includes('before_id'), 'hook should own cursor pagination params');
 assert.ok(hook.includes('chat-bootstrap-ready'), 'hook should merge bootstrap sidebar payloads');
+assert.ok(metadataEvents.includes('normalizeConversationMetadataEventDetail'), 'shared conversation metadata event normalizer should exist');
+assert.ok(
+  metadataEvents.includes('eventType === "conversation-renamed"')
+    && metadataEvents.includes('incoming.source === "local-send"')
+    && metadataEvents.includes('isDefaultOrEmptyConversationTitle(currentTitle)'),
+  'chat header title should only accept manual renames or local-send titles for new/default conversations'
+);
+assert.ok(
+  sidebarHistoryLib.includes('resolveSidebarActivityTitle')
+    && sidebarHistoryLib.includes('update.source === "local-send"')
+    && sidebarHistoryLib.includes('!isDefaultOrEmptySidebarTitle(existingTitle)'),
+  'sidebar activity updates should not overwrite existing titles on every local send'
+);
+assert.ok(
+  hook.includes('getConversationMetadataEventFromDomEvent')
+    && hook.includes('applySidebarConversationActivity(prev, metadata)'),
+  'sidebar history should consume shared conversation metadata events'
+);
+assert.ok(
+  useChat.includes('getConversationMetadataEventFromDomEvent')
+    && useChat.includes('shouldApplyConversationTitleUpdate')
+    && useChat.includes('window.addEventListener("conversation-updated", handleConversationMetadata)')
+    && useChat.includes('eventType: event.type')
+    && useChat.includes('setConversationTitle(incoming!.title!)'),
+  'current chat header title should consume the same conversation metadata events as the sidebar'
+);
 
 for (const [name, source] of [['MobileNav', mobile], ['AppSidebar', desktop]]) {
   assert.ok(source.includes('useChatSidebarHistory({'), `${name} should use shared sidebar history hook`);

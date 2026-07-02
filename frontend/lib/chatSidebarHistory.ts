@@ -53,6 +53,17 @@ export function mergeSidebarConversations<T extends ChatSidebarConversation>(cur
   return sortSidebarConversations(Array.from(byId.values()));
 }
 
+function isDefaultOrEmptySidebarTitle(title?: string) {
+  const normalized = (title || "").trim();
+  return !normalized || normalized === "新对话" || normalized.toLowerCase() === "new chat";
+}
+
+function resolveSidebarActivityTitle(existingTitle: string | undefined, update: ChatSidebarActivityUpdate) {
+  if (update.title === undefined) return existingTitle || "新对话";
+  if (update.source === "local-send" && !isDefaultOrEmptySidebarTitle(existingTitle)) return existingTitle || "新对话";
+  return update.title || existingTitle || "新对话";
+}
+
 export function applySidebarConversationActivity<T extends ChatSidebarConversation>(current: T[], update: ChatSidebarActivityUpdate): T[] {
   const rawId = update.id ?? update.conversationId;
   const id = typeof rawId === "string" ? Number(rawId) : rawId;
@@ -62,7 +73,7 @@ export function applySidebarConversationActivity<T extends ChatSidebarConversati
   const nextConversation = {
     ...(existing || {}),
     id,
-    title: update.title || existing?.title || "新对话",
+    title: resolveSidebarActivityTitle(existing?.title, update),
     model: update.model ?? existing?.model ?? "",
     skill_key: update.skill_key ?? existing?.skill_key,
     pinned: existing?.pinned ?? false,

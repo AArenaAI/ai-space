@@ -8,6 +8,7 @@ import {
   sortSidebarConversations,
   type ChatSidebarConversation,
 } from "@/lib/chatSidebarHistory";
+import { getConversationMetadataEventFromDomEvent } from "@/lib/chatConversationMetadataEvents";
 
 export type SidebarConversation = ChatSidebarConversation & {
   model: string;
@@ -258,10 +259,9 @@ export function useChatSidebarHistory({
 
   useEffect(() => {
     const handleRenamed = (event: Event) => {
-      const detail = (event as CustomEvent).detail;
-      if (detail?.id == null || detail?.title == null) return;
-      const targetId = typeof detail.id === "string" ? Number(detail.id) : detail.id;
-      setConversations((prev) => prev.map((item) => item.id === targetId ? { ...item, title: detail.title } : item));
+      const metadata = getConversationMetadataEventFromDomEvent(event);
+      if (!metadata || metadata.title == null) return;
+      setConversations((prev) => prev.map((item) => item.id === metadata.id ? { ...item, title: metadata.title! } : item));
     };
     window.addEventListener("conversation-renamed", handleRenamed);
     return () => window.removeEventListener("conversation-renamed", handleRenamed);
@@ -269,12 +269,9 @@ export function useChatSidebarHistory({
 
   useEffect(() => {
     const handleUpdated = (event: Event) => {
-      const detail = (event as CustomEvent).detail;
-      const rawId = detail?.id ?? detail?.conversationId;
-      if (rawId == null) return;
-      const targetId = typeof rawId === "string" ? Number(rawId) : rawId;
-      if (!Number.isFinite(targetId)) return;
-      setConversations((prev) => applySidebarConversationActivity(prev, { ...detail, id: targetId }));
+      const metadata = getConversationMetadataEventFromDomEvent(event);
+      if (!metadata) return;
+      setConversations((prev) => applySidebarConversationActivity(prev, metadata));
     };
     window.addEventListener("conversation-updated", handleUpdated);
     return () => window.removeEventListener("conversation-updated", handleUpdated);
