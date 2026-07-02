@@ -277,7 +277,15 @@ export default function ChatActivityPanel({
                 return (
                   <details key={group.host} className="group rounded-xl bg-surface-card/60 px-2.5 py-2 text-sm hover:bg-surface-card" open={group.sources.length === 1 ? undefined : false}>
                     <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
-                      <div className="truncate font-medium text-text-secondary">{title}</div>
+                      <div className="flex min-w-0 items-center justify-between gap-2">
+                        <div className="truncate font-medium text-text-secondary">{title}</div>
+                        {group.sources.length > 1 && (
+                          <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-text-tertiary">
+                            展开
+                            <ChevronDown className="h-3.5 w-3.5 -rotate-90 transition-transform group-open:rotate-0" />
+                          </span>
+                        )}
+                      </div>
                       <div className="mt-0.5 truncate text-text-tertiary">{sourceMeta}</div>
                     </summary>
                     <div className="mt-2 space-y-1.5 border-t border-surface-border/60 pt-2">

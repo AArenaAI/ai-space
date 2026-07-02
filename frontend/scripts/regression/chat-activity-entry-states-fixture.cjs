@@ -74,6 +74,7 @@ const baseMessages = [
       && panels['sources-only']?.title === '思考与来源'
       && panels['sources-only']?.hasSources === true
       && panels['sources-only']?.text.includes('example.com · 2')
+      && panels['sources-only']?.text.includes('展开')
       && panels['sources-only']?.text.includes('docs.example.org')
       && panels['failed-sources']?.title === '思考与来源'
       && panels['failed-sources']?.hasSources === true
