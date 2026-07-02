@@ -27,9 +27,11 @@ function loadModule() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "chat-stream-event-processor-regression-"));
   [
     "lib/errors/errorCatalog.ts",
+    "lib/errors/authErrorMap.ts",
     "lib/errors/chatErrorMap.ts",
     "lib/errors/fileErrorMap.ts",
     "lib/errors/mediaErrorMap.ts",
+    "lib/errors/translateErrorMap.ts",
     "lib/errors/types.ts",
     "lib/errors/normalizeError.ts",
   ].forEach((file) => transpileModule(file, tmpDir));

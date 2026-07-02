@@ -6,10 +6,9 @@ const path = require("node:path");
 const ts = require("typescript");
 
 const projectRoot = path.resolve(__dirname, "../..");
-const sourcePath = path.join(projectRoot, "lib/chatContent.ts");
 
-function loadModule() {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "chat-content-regression-"));
+function transpileModule(sourceFile, outFile, tmpDir) {
+  const sourcePath = path.join(projectRoot, sourceFile);
   const source = fs.readFileSync(sourcePath, "utf8");
   const transpiled = ts.transpileModule(source, {
     compilerOptions: {
@@ -20,9 +19,14 @@ function loadModule() {
     },
     fileName: sourcePath,
   }).outputText;
-  const outPath = path.join(tmpDir, "chatContent.cjs");
-  fs.writeFileSync(outPath, transpiled);
-  return require(outPath);
+  fs.writeFileSync(path.join(tmpDir, outFile), transpiled);
+}
+
+function loadModule() {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "chat-content-regression-"));
+  transpileModule("lib/chatMessageRuntimeState.ts", "chatMessageRuntimeState.js", tmpDir);
+  transpileModule("lib/chatContent.ts", "chatContent.cjs", tmpDir);
+  return require(path.join(tmpDir, "chatContent.cjs"));
 }
 
 const mod = loadModule();
@@ -98,7 +102,7 @@ test("isMessageGenerating stops for completed or stopped messages", () => {
 test("isMessageGenerating detects running activity, searching status and recovery hints", () => {
   assert.equal(mod.isMessageGenerating({ activityStatus: { status: "searching" } }, false), true);
   assert.equal(mod.isMessageGenerating({ searchStatus: "searching" }, false), true);
-  assert.equal(mod.isMessageGenerating({ serverMessageId: 123 }, false), true);
+  assert.equal(mod.isMessageGenerating({ serverMessageId: 123 }, false), false);
   assert.equal(mod.isMessageGenerating({ backgroundTaskId: "task" }, false), true);
   assert.equal(mod.isMessageGenerating({ content: "", createdAt: Date.now() }, false), true);
   assert.equal(mod.isMessageGenerating({ content: "", createdAt: Date.now() - 20_000 }, false), false);

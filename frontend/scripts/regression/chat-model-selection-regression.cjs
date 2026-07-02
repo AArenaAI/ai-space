@@ -28,6 +28,7 @@ const {
   loadSavedChatModel,
   persistSelectedChatModel,
   persistRecentChatModels,
+  preserveSelectedChatModel,
 } = require(outFile);
 
 const tests = [];
@@ -86,6 +87,17 @@ test("persistRecentChatModels stores filtered recent ids", () => {
   const store = installLocalStorage({ [RECENT_MODELS_STORAGE_KEY]: JSON.stringify(["a", 1, "b"]) });
   persistRecentChatModels(models[1]);
   assert.equal(store[RECENT_MODELS_STORAGE_KEY], JSON.stringify(["b", "a"]));
+});
+
+test("preserveSelectedChatModel keeps current selection across equivalent model list refreshes", () => {
+  installLocalStorage({ [SELECTED_MODEL_STORAGE_KEY]: "a" });
+  const refreshedModels = models.map((model) => ({ ...model }));
+  assert.equal(preserveSelectedChatModel(models[1], refreshedModels).id, "b");
+});
+
+test("preserveSelectedChatModel falls back when current model disappears", () => {
+  installLocalStorage({ [SELECTED_MODEL_STORAGE_KEY]: "a" });
+  assert.equal(preserveSelectedChatModel({ ...models[1], id: "missing" }, models).id, "a");
 });
 
 (async () => {

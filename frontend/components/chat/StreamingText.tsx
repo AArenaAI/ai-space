@@ -153,7 +153,7 @@ export function StreamingText({
         </span>
       )}
       {showInitialReasoningStatus && (
-        <div className="mb-2" data-chat-initial-reasoning-status="true">
+        <div className="mb-2 flex min-h-[4.25rem] items-start" data-chat-initial-reasoning-status="true">
           <button
             type="button"
             aria-expanded={false}

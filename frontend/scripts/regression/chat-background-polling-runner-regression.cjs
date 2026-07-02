@@ -57,8 +57,8 @@ function response(ok, data) {
   });
 
   await test("normalizeBackgroundPollingResponse defaults missing content and status", () => {
-    assert.deepEqual(normalizeBackgroundPollingResponse(undefined), { content: "", status: "" });
-    assert.deepEqual(normalizeBackgroundPollingResponse({ message: { content: "hi" }, background_task: { status: "completed" } }), { content: "hi", status: "completed" });
+    assert.deepEqual(normalizeBackgroundPollingResponse(undefined), { content: "", reasoningContent: "", status: "" });
+    assert.deepEqual(normalizeBackgroundPollingResponse({ message: { content: "hi" }, background_task: { status: "completed" } }), { content: "hi", reasoningContent: "", status: "completed" });
   });
 
   await test("poll tick fetches state and keeps loading for empty content", async () => {

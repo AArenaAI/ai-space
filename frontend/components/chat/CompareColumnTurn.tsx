@@ -430,7 +430,7 @@ function CompareColumnTurn({
                   <div className="min-w-0">
                     <div className="mb-2 flex items-center justify-between gap-2">
                       {model && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} compact inlineStatus />}
-
+                      <span className="shrink-0 rounded-full border border-surface-border/70 px-2 py-0.5 text-[10px] font-medium text-text-tertiary">本轮模型</span>
                     </div>
                     <div className="relative" data-compare-column-scroll-frame="true">
                       <div

@@ -31,6 +31,7 @@ function ChatCompareHeader({
       <div className="flex min-w-0 flex-1">
         {compareModels.map((modelId, colIndex) => (
           <div key={modelId || colIndex} className="flex min-w-[280px] flex-1 flex-col">
+            <div className="px-3 pb-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-text-tertiary">下一轮模型</div>
             <ChatCompareModelHeader
               modelId={modelId}
               index={colIndex}

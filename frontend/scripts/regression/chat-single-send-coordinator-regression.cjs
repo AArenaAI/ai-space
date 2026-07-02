@@ -25,6 +25,21 @@ function loadModule() {
     "lib/chatRequestBuilder.ts",
     "lib/chatSingleSendCoordinator.ts",
   ].forEach((file) => transpileModule(file, tmpDir));
+  // chatSingleSendCoordinator imports mapPersistedChatMessage from chatForkCoordinator,
+  // but this isolated regression only needs a lightweight CommonJS stub for init response mapping.
+  fs.writeFileSync(path.join(tmpDir, "chatForkCoordinator.js"), `
+exports.mapPersistedChatMessage = function mapPersistedChatMessage(message, options) {
+  if (!message) return undefined;
+  return {
+    id: options && typeof options.fallbackId === "function" ? options.fallbackId() : String(message.id || "assistant"),
+    role: message.role || "assistant",
+    content: message.content || "",
+    model: message.model,
+    createdAt: message.created_at ? new Date(message.created_at).getTime() : 0,
+    serverMessageId: typeof message.id === "number" ? message.id : undefined,
+  };
+};
+`);
   return require(path.join(tmpDir, "chatSingleSendCoordinator.js"));
 }
 
@@ -33,7 +48,7 @@ const {
   buildNewConversationTitle,
   prepareSingleSendMessages,
   applySingleSendMessagePlan,
-  runSingleChatRequest,
+  runSingleChatInit,
 } = loadModule();
 
 async function test(name, fn) {
@@ -115,15 +130,13 @@ function failResponse(body = { error: "boom", message: "失败" }) { return { ok
     assert.deepEqual(applySingleSendMessagePlan(messages, plan).map((m) => m.id), ["u1", "id-1"]);
   });
 
-  await test("runSingleChatRequest posts body and streams response", async () => {
+  await test("runSingleChatInit posts init body and maps server assistant", async () => {
     const calls = [];
     const controller = new AbortController();
-    const assistant = { id: "a1", role: "assistant", content: "", createdAt: 1, model: "m" };
-    const result = await runSingleChatRequest({
+    const result = await runSingleChatInit({
       apiBaseUrl: "http://api",
       headers: { Authorization: "Bearer token" },
       controller,
-      assistantMessage: assistant,
       modelId: "m",
       modelMessages: [{ role: "user", content: "hi" }],
       conversationId: 9,
@@ -133,29 +146,33 @@ function failResponse(body = { error: "boom", message: "失败" }) { return { ok
       skipSaveUserMessage: true,
       skillKey: "skill",
       messageFileIds: ["file"],
-      fetchImpl: async (url, init) => { calls.push([url, JSON.parse(init.body), init.signal === controller.signal]); return okResponse(); },
-      streamResponse: async (response, msg, ctrl, convId) => {
-        calls.push(["stream", response.ok, msg.id, ctrl === controller, convId]);
-        return { content: "ok", lastSequence: 1, sawDone: true, useBackground: false };
+      fallbackId: () => "fallback-a",
+      fetchImpl: async (url, init) => {
+        calls.push([url, JSON.parse(init.body), init.signal === controller.signal]);
+        return okResponse({ conversation_id: 9, task_id: 11, assistant_message: { id: 22, role: "assistant", content: "", model: "m" } });
       },
     });
-    assert.equal(result.content, "ok");
-    assert.equal(calls[0][0], "http://api/api/chat");
+    assert.equal(result.conversation_id, 9);
+    assert.equal(result.task_id, 11);
+    assert.equal(result.mappedAssistantMessage.id, "fallback-a");
+    assert.equal(result.mappedAssistantMessage.serverMessageId, 22);
+    assert.equal(calls[0][0], "http://api/api/chat/init");
     assert.equal(calls[0][1].model, "m");
     assert.equal(calls[0][1].skip_save_user_msg, true);
     assert.equal(calls[0][1].reasoning_effort, "low");
+    assert.equal(calls[0][1].stream, true);
+    assert.equal(calls[0][1].init_only, true);
     assert.deepEqual(calls[0][1].message_file_ids, ["file"]);
     assert.equal(calls[0][2], true);
-    assert.deepEqual(calls[1], ["stream", true, "a1", true, 9]);
   });
 
-  await test("runSingleChatRequest throws normalized response errors", async () => {
+  await test("runSingleChatInit throws normalized response errors", async () => {
     await assert.rejects(
-      () => runSingleChatRequest({
-        headers: {}, controller: new AbortController(), assistantMessage: { id: "a", role: "assistant", content: "", createdAt: 1 },
+      () => runSingleChatInit({
+        headers: {}, controller: new AbortController(),
         modelId: "m", modelMessages: [], reasoning: { enabled: false }, search: false, templateId: 0, skipSaveUserMessage: false,
+        fallbackId: () => "fallback-a",
         fetchImpl: async () => failResponse({ error: "quota", message: "额度不足" }),
-        streamResponse: async () => undefined,
       }),
       (err) => err.errorCode === "quota" && err.message === "额度不足"
     );

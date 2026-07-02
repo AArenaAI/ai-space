@@ -244,7 +244,7 @@ const response = (ok, data, status = ok ? 200 : 500, headers = {}) => ({
       now: 1000,
     });
     assert.equal(running.shouldResumePolling, true);
-    assert.deepEqual(running.patch, { content: "live", generationTaskId: 6, lastSequence: 4, completedAt: undefined, activityStatus: { busy: true }, serverGenerationStatus: "running" });
+    assert.deepEqual(running.patch, { content: "live", generationTaskId: 6, lastSequence: 4, completedAt: undefined, activityStatus: { busy: true }, serverGenerationStatus: "running", statusTimeline: undefined });
     assert.deepEqual(running.resume, { generationTaskId: 6, lastSequence: 4, initialContent: "live" });
 
     const emptyRunning = buildConversationStatusDecision({
@@ -254,7 +254,7 @@ const response = (ok, data, status = ok ? 200 : 500, headers = {}) => ({
       now: 1000,
     });
     assert.equal(emptyRunning.shouldResumePolling, true);
-    assert.deepEqual(emptyRunning.patch, { content: "", generationTaskId: 6, lastSequence: 8, completedAt: undefined, activityStatus: { busy: true }, serverGenerationStatus: "running" });
+    assert.deepEqual(emptyRunning.patch, { content: "", generationTaskId: 6, lastSequence: 8, completedAt: undefined, activityStatus: { busy: true }, serverGenerationStatus: "running", statusTimeline: undefined });
     assert.deepEqual(emptyRunning.resume, { generationTaskId: 6, lastSequence: 0, initialContent: "" });
 
     const emptyCompleted = buildConversationStatusDecision({

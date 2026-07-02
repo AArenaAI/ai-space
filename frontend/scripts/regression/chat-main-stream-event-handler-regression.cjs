@@ -27,9 +27,11 @@ function loadModule() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "chat-main-stream-handler-regression-"));
   [
     "lib/errors/errorCatalog.ts",
+    "lib/errors/authErrorMap.ts",
     "lib/errors/chatErrorMap.ts",
     "lib/errors/fileErrorMap.ts",
     "lib/errors/mediaErrorMap.ts",
+    "lib/errors/translateErrorMap.ts",
     "lib/errors/types.ts",
     "lib/errors/normalizeError.ts",
     "lib/chatSseParser.ts",
@@ -145,13 +147,16 @@ test("handles background task meta and registration", () => {
   assert.equal(h.calls.find((call) => call[0] === "register")[1].key, "chat:77");
 });
 
-test("handles error payload with content patch", () => {
+test("handles retryable error payload without injecting error copy into answer content", () => {
   const h = makeHarness({ realtimeData: { requestId: "req-1" } });
   h.handler.processEvent(sse({ _error: { code: "boom", message: "失败", retryable: true } }));
-  assert.equal(h.handler.getState().accumulated, "失败");
-  assert.equal(h.getRealtime().content, "失败");
+  assert.equal(h.handler.getState().accumulated, "");
+  assert.equal(h.getRealtime().content, undefined);
   assert.equal(h.getRealtime().requestId, "req-1");
   assert.equal(h.getRealtime().errorCode, "boom");
+  assert.equal(h.getRealtime().retryable, true);
+  assert.equal(h.getRealtime().serverGenerationStatus, "failed");
+  assert.equal(h.getRealtime().phase, "failed");
 });
 
 test("handles search payload", () => {

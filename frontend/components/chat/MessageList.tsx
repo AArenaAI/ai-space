@@ -963,6 +963,10 @@ function MessageList({
     });
   }, []);
 
+  const handleOpenActivity = useCallback((message: Message) => {
+    setActiveActivityMessageId(String(message.id));
+  }, []);
+
   // Activity open state is view-local and must not leak across conversations.
   useEffect(() => {
     setActiveActivityMessageId(null);
@@ -1418,6 +1422,13 @@ function MessageList({
     if (explicitModels.length >= 2) return explicitModels;
     return dedupeValid(messages.filter((m) => m.role === "assistant" && m.model).map((m) => m.model!));
   }, [compareModels, groups, effectiveIsCompare, messages, models]);
+  const activeCompareHeaderModels = useMemo(() => {
+    if (!effectiveIsCompare) return [];
+    const availableModelIds = new Set(models.map((model) => model.id));
+    const explicitModels = Array.from(new Set((compareModels || []).filter((id) => availableModelIds.has(id)))).slice(0, 2);
+    return explicitModels.length >= 2 ? explicitModels : activeCompareModels;
+  }, [activeCompareModels, compareModels, effectiveIsCompare, models]);
+
   const columnMessages = useMemo(() => {
     if (!effectiveIsCompare) return [];
     return activeCompareModels.map((modelId) =>
@@ -1811,7 +1822,7 @@ function MessageList({
       <div className="relative flex-1 min-h-0 overflow-hidden flex flex-col">
         {/* 固定模型选择栏 */}
         <ChatCompareHeader
-          compareModels={activeCompareModels.length ? activeCompareModels : compareModels}
+          compareModels={activeCompareHeaderModels.length ? activeCompareHeaderModels : compareModels}
           models={models}
           modelById={modelById}
           closeLabel={t("chat.closeCompareColumn")}
@@ -1826,7 +1837,7 @@ function MessageList({
             renderHistoryLoadingState()
           ) : (
             <ChatCompareWelcomeColumns
-              compareModels={activeCompareModels.length ? activeCompareModels : compareModels}
+              compareModels={activeCompareHeaderModels.length ? activeCompareHeaderModels : compareModels}
               greeting={t("chat.helloComma")}
               prompt={t("chat.howCanIHelp")}
             />
@@ -2054,7 +2065,7 @@ function MessageList({
                 onForkCompare={onForkCompare}
                 onSaveAssistantToNote={onSaveAssistantToNote}
                 onAssistantViewed={handleAssistantViewed}
-                onOpenActivity={(message) => setActiveActivityMessageId(String(message.id))}
+                onOpenActivity={handleOpenActivity}
                 imageLoadFailedLabel={t("chat.imageLoadFailed")}
                 MarkdownRenderer={LazyMarkdownRenderer}
                 useContentVisibility={useRowContentVisibility}

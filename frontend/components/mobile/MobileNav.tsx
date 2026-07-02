@@ -27,14 +27,8 @@ import InputDialog from "@/components/ui/InputDialog";
 import { createPortal } from "react-dom";
 import { useTheme } from "@/components/theme/ThemeProvider";
 import { useAppBootstrap } from "@/lib/appBootstrapContext";
-import {
-  CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE,
-  applySidebarConversationActivity,
-  hasMoreSidebarConversations,
-  mergeSidebarConversations,
-  parseSidebarCursor,
-  sortSidebarConversations,
-} from "@/lib/chatSidebarHistory";
+import { sortSidebarConversations } from "@/lib/chatSidebarHistory";
+import { clearChatSidebarHistoryCache, useChatSidebarHistory, type SidebarConversation } from "@/hooks/useChatSidebarHistory";
 
 const navItems = [
   { icon: MessageSquare, label: "聊天", href: "/chat" },
@@ -42,17 +36,7 @@ const navItems = [
   { icon: Presentation, label: "PPT", href: "/ppt" },
 ];
 
-// 模块级缓存：避免组件重新挂载时历史记录反复闪烁
-let cachedConversationsMobile: Conversation[] | null = null;
-
-interface Conversation {
-  id: number;
-  title: string;
-  model: string;
-  pinned: boolean;
-  created_at: string;
-  updated_at: string;
-}
+type Conversation = SidebarConversation;
 
 function getTimeGroupLabel(dateStr: string): string {
   const date = new Date(dateStr);
@@ -83,10 +67,6 @@ function sortConversations(conversations: Conversation[]): Conversation[] {
   return sortSidebarConversations(conversations);
 }
 
-function mergeConversationLists(current: Conversation[], incoming: Conversation[]): Conversation[] {
-  return mergeSidebarConversations(current, incoming);
-}
-
 function sortGroupLabels(labels: string[]): string[] {
   const fixed = GROUP_ORDER.filter((g) => labels.includes(g));
   const months = labels
@@ -98,49 +78,6 @@ function sortGroupLabels(labels: string[]): string[] {
       return bm - am;
     });
   return [...fixed, ...months];
-}
-
-type ConversationListPage = {
-  conversations: Conversation[];
-  total?: number;
-  limit: number;
-  offset: number;
-  next_cursor?: string;
-  has_more?: boolean;
-};
-
-async function fetchConversations(offset = 0, cursor?: string): Promise<ConversationListPage | null> {
-  const token = localStorage.getItem("token");
-  if (!token) return { conversations: [], total: 0, limit: CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE, offset };
-  try {
-    const params = new URLSearchParams({ limit: String(CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE) });
-    const parsedCursor = parseSidebarCursor(cursor);
-    if (parsedCursor) {
-      params.set("before_activity_at", parsedCursor.beforeActivityAt);
-      params.set("before_id", parsedCursor.beforeId);
-    } else if (offset > 0) {
-      params.set("offset", String(offset));
-    }
-    const res = await fetch(`/api/conversations?${params.toString()}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (Array.isArray(data)) return { conversations: data, limit: CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE, offset };
-    if (data && Array.isArray(data.conversations)) {
-      return {
-        conversations: data.conversations,
-        total: typeof data.total === "number" ? data.total : undefined,
-        limit: typeof data.limit === "number" ? data.limit : CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE,
-        offset: typeof data.offset === "number" ? data.offset : offset,
-        next_cursor: typeof data.next_cursor === "string" ? data.next_cursor : undefined,
-        has_more: typeof data.has_more === "boolean" ? data.has_more : undefined,
-      };
-    }
-    return null;
-  } catch {
-    return null;
-  }
 }
 
 function ConvMenu({
@@ -213,13 +150,6 @@ export default function MobileNav() {
   const theme = themeCtx?.theme || "light";
   const [menuOpen, setMenuOpen] = useState(false);
   const [user, setUser] = useState<{ name?: string; email?: string } | null>(null);
-  const [conversations, setConversations] = useState<Conversation[]>(cachedConversationsMobile || []);
-  const [loading, setLoading] = useState(cachedConversationsMobile === null);
-  const [conversationTotal, setConversationTotal] = useState<number | undefined>();
-  const [conversationNextOffset, setConversationNextOffset] = useState(CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE);
-  const [conversationNextCursor, setConversationNextCursor] = useState<string | undefined>();
-  const [conversationHasMore, setConversationHasMore] = useState<boolean | undefined>();
-  const [loadingMoreConversations, setLoadingMoreConversations] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
   const pathname = usePathname();
@@ -262,144 +192,46 @@ export default function MobileNav() {
     });
   }, []);
 
-  const updateConversationsStable = useCallback((updater: (prev: Conversation[]) => Conversation[]) => {
-    const anchor = captureHistoryAnchor();
-    setConversations(prev => {
-      const next = updater(prev);
-      cachedConversationsMobile = next;
-      return next;
-    });
-    restoreHistoryAnchor(anchor);
-  }, [captureHistoryAnchor, restoreHistoryAnchor]);
-
   useEffect(() => {
     setCurrentConvId(routeConvId);
   }, [routeConvId]);
   useEffect(() => { const s = localStorage.getItem("user"); if (s) try { setUser(JSON.parse(s)); } catch {} }, []);
 
   useEffect(() => {
-    if (!chatBootstrap) return;
-    chatBootstrapReadyRef.current = true;
-    if (chatBootstrap.user) setUser(chatBootstrap.user);
-    if (Array.isArray(chatBootstrap.sidebar?.conversations)) {
-      const incoming = sortConversations(chatBootstrap.sidebar.conversations as Conversation[]);
-      updateConversationsStable((prev) => mergeConversationLists(prev, incoming));
-      setLoading(false);
-    }
+    if (chatBootstrap?.user) setUser(chatBootstrap.user);
   }, [chatBootstrap]);
 
   useEffect(() => {
     const handleBootstrapReady = (event: Event) => {
-      const detail = (event as CustomEvent<{
-        user?: { name?: string; email?: string };
-        sidebar?: { conversations?: Conversation[] };
-      }>).detail;
-      if (!detail) return;
-      chatBootstrapReadyRef.current = true;
-      if (detail.user) setUser(detail.user);
-      if (Array.isArray(detail.sidebar?.conversations)) {
-        const incoming = sortConversations(detail.sidebar.conversations);
-        updateConversationsStable((prev) => mergeConversationLists(prev, incoming));
-        setLoading(false);
-      }
+      const detail = (event as CustomEvent<{ user?: { name?: string; email?: string } }>).detail;
+      if (detail?.user) setUser(detail.user);
     };
     window.addEventListener("chat-bootstrap-ready", handleBootstrapReady);
     return () => window.removeEventListener("chat-bootstrap-ready", handleBootstrapReady);
   }, []);
-  
-  const loadConversations = useCallback(async () => {
-    if (!user) { setConversations([]); setLoading(false); return; }
-    const normalizedPathname = (pathname || "/") === "/" ? "/" : (pathname || "").replace(/\/$/, "");
-    const isChatConversationRoute = normalizedPathname === "/chat" && !!effectiveRouteConvId;
-    if (isChatConversationRoute && !chatBootstrapReadyRef.current) return;
-    const isFirstLoad = cachedConversationsMobile === null;
-    if (isFirstLoad) setLoading(true);
-    const start = Date.now(); const page = await fetchConversations();
-    if (isFirstLoad) {
-      const elapsed = Date.now() - start;
-      if (elapsed < 600) await new Promise(r => setTimeout(r, 600 - elapsed));
-      setLoading(false);
-    }
-    if (page === null) return;
-    setConversationTotal(page.total);
-    setConversationNextOffset((page.offset || 0) + page.conversations.length);
-    setConversationNextCursor(page.next_cursor);
-    setConversationHasMore(page.has_more);
-    if (isFirstLoad) {
-      const next = sortConversations(page.conversations);
-      setConversations(next);
-      cachedConversationsMobile = next;
-    } else {
-      updateConversationsStable(() => sortConversations(page.conversations));
-    }
-  }, [user, pathname, effectiveRouteConvId, updateConversationsStable]);
-  
-  useEffect(() => { loadConversations(); }, [loadConversations]);
 
-  const hasMoreConversations = hasMoreSidebarConversations(conversations.length, conversationNextOffset, conversationTotal, conversationHasMore);
-
-  const loadMoreConversations = useCallback(async () => {
-    if (loadingMoreConversations || !hasMoreConversations) return;
-    setLoadingMoreConversations(true);
-    const page = await fetchConversations(conversationNextOffset, conversationNextCursor);
-    setLoadingMoreConversations(false);
-    if (!page) return;
-    setConversationTotal(page.total);
-    setConversationNextOffset((page.offset || conversationNextOffset) + page.conversations.length);
-    setConversationNextCursor(page.next_cursor);
-    setConversationHasMore(page.has_more);
-    updateConversationsStable((prev) => mergeConversationLists(prev, page.conversations));
-  }, [conversationHasMore, conversationNextCursor, conversationNextOffset, hasMoreConversations, loadingMoreConversations, updateConversationsStable]);
-
-  useEffect(() => {
-    const h = (e: Event) => {
-      const d = (e as CustomEvent).detail;
-      if (!d?.id) {
-        loadConversations();
-        return;
-      }
-      const now = new Date().toISOString();
-      const conv: Conversation = {
-        id: Number(d.id),
-        title: d.title || "新对话",
-        model: d.model || "",
-        pinned: !!d.pinned,
-        created_at: d.created_at || now,
-        updated_at: d.updated_at || now,
-      };
-      updateConversationsStable(prev => sortConversations([conv, ...prev.filter(c => c.id !== conv.id)]));
-    };
-    window.addEventListener("conversation-created", h);
-    return () => window.removeEventListener("conversation-created", h);
-  }, [loadConversations, updateConversationsStable]);
-  useEffect(() => {
-    const h = (e: Event) => {
-      const d = (e as CustomEvent).detail;
-      if (d?.id != null && d?.title != null) {
-        const targetId = typeof d.id === "string" ? Number(d.id) : d.id;
-        updateConversationsStable(prev => prev.map(c => c.id === targetId ? { ...c, title: d.title } : c));
-      }
-    };
-    window.addEventListener("conversation-renamed", h);
-    return () => window.removeEventListener("conversation-renamed", h);
-  }, [updateConversationsStable]);
-  useEffect(() => {
-    const h = (e: Event) => {
-      const d = (e as CustomEvent).detail;
-      const rawId = d?.id ?? d?.conversationId;
-      if (rawId == null) return;
-      const targetId = typeof rawId === "string" ? Number(rawId) : rawId;
-      if (!Number.isFinite(targetId)) return;
-      updateConversationsStable(prev => applySidebarConversationActivity(prev, { ...d, id: targetId }));
-    };
-    window.addEventListener("conversation-updated", h);
-    return () => window.removeEventListener("conversation-updated", h);
-  }, [updateConversationsStable]);
+  const {
+    conversations,
+    setConversations,
+    loading,
+    hasMoreConversations,
+    loadMoreConversations,
+    loadingMoreConversations,
+  } = useChatSidebarHistory({
+    user,
+    pathname,
+    routeConversationId: effectiveRouteConvId,
+    chatBootstrap,
+    cacheKey: "mobile",
+    captureAnchor: captureHistoryAnchor,
+    restoreAnchor: restoreHistoryAnchor,
+    firstLoadMinMs: 600,
+  });
   
   useEffect(() => { document.body.style.overflow = menuOpen ? "hidden" : ""; return () => { document.body.style.overflow = ""; }; }, [menuOpen]);
   useEffect(() => { if (!menuOpen) return; const h = (e: MouseEvent) => { if (drawerRef.current && !drawerRef.current.contains(e.target as Node)) setMenuOpen(false); }; document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h); }, [menuOpen]);
 
-  const handleLogout = () => { localStorage.removeItem("token"); localStorage.removeItem("user"); import("@/lib/guestId").then(({ getGuestId }) => getGuestId()); setUser(null); setConversations([]); cachedConversationsMobile = null; setMenuOpen(false); router.push("/"); };
+  const handleLogout = () => { localStorage.removeItem("token"); localStorage.removeItem("user"); import("@/lib/guestId").then(({ getGuestId }) => getGuestId()); setUser(null); setConversations([]); clearChatSidebarHistoryCache("mobile"); setMenuOpen(false); router.push("/"); };
   const handleNewChat = () => { router.push(`/chat?t=${Date.now()}`); setMenuOpen(false); };
   const handleOpenConversation = useCallback((conv: Conversation) => {
     setCurrentConvId(String(conv.id));
@@ -409,17 +241,17 @@ export default function MobileNav() {
 
   const handleDelete = async (id: number) => {
     const token = localStorage.getItem("token"); if (!token) return;
-    try { await fetch(`/api/conversations/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }); const next = conversations.filter(c => c.id !== id); setConversations(next); cachedConversationsMobile = next; if (String(id) === currentConvId) router.push("/chat", { scroll: false }); } catch {}
+    try { await fetch(`/api/conversations/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }); const next = conversations.filter(c => c.id !== id); setConversations(next); if (String(id) === currentConvId) router.push("/chat", { scroll: false }); } catch {}
     setDeleteTarget(null);
   };
   const handleRename = async (newTitle: string) => {
     if (!renameTarget) return; const token = localStorage.getItem("token"); if (!token) return;
-    try { const r = await fetch(`/api/conversations/${renameTarget.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ title: newTitle }) }); if (r.ok) { const u = await r.json(); const next = conversations.map(c => c.id === u.id ? { ...c, title: u.title } : c); setConversations(next); cachedConversationsMobile = next; window.dispatchEvent(new CustomEvent("conversation-renamed", { detail: { id: u.id, title: u.title } })); } } catch {}
+    try { const r = await fetch(`/api/conversations/${renameTarget.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ title: newTitle }) }); if (r.ok) { const u = await r.json(); const next = conversations.map(c => c.id === u.id ? { ...c, title: u.title } : c); setConversations(next); window.dispatchEvent(new CustomEvent("conversation-renamed", { detail: { id: u.id, title: u.title } })); } } catch {}
     setRenameTarget(null);
   };
   const handleTogglePin = async (conv: Conversation) => {
     const token = localStorage.getItem("token"); if (!token) return;
-    try { const r = await fetch(`/api/conversations/${conv.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ pinned: !conv.pinned }) }); if (r.ok) { const u = await r.json(); const next = sortConversations(conversations.map(c => c.id === u.id ? { ...c, pinned: u.pinned } : c)); setConversations(next); cachedConversationsMobile = next; } } catch {}
+    try { const r = await fetch(`/api/conversations/${conv.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ pinned: !conv.pinned }) }); if (r.ok) { const u = await r.json(); const next = sortConversations(conversations.map(c => c.id === u.id ? { ...c, pinned: u.pinned } : c)); setConversations(next); } } catch {}
   };
   const handleShareConv = (conv: Conversation) => { const url = `${window.location.origin}/chat?id=${conv.id}`; navigator.clipboard.writeText(url); };
 
