@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE,
   applySidebarConversationActivity,
@@ -155,7 +155,7 @@ export function useChatSidebarHistory({
   const [conversationNextCursor, setConversationNextCursor] = useState<string | undefined>();
   const [conversationHasMore, setConversationHasMore] = useState<boolean | undefined>();
   const [loadingMoreConversations, setLoadingMoreConversations] = useState(false);
-  const chatBootstrapReadyRef = useRef(false);
+  const [chatBootstrapReady, setChatBootstrapReady] = useState(false);
 
   const setConversations = useCallback((nextOrUpdater: SidebarConversation[] | ((prev: SidebarConversation[]) => SidebarConversation[])) => {
     const anchor = captureAnchor?.() || null;
@@ -170,7 +170,7 @@ export function useChatSidebarHistory({
 
   const applyBootstrapConversations = useCallback((items?: SidebarConversation[]) => {
     if (!Array.isArray(items)) return;
-    chatBootstrapReadyRef.current = true;
+    setChatBootstrapReady(true);
     const incoming = sortSidebarConversations(items.map(normalizeConversation).filter((item) => isMainChatConversation(item, hiddenSkillKeys)));
     setConversations((prev) => mergeSidebarConversations(prev, incoming));
     setLoading(false);
@@ -192,8 +192,8 @@ export function useChatSidebarHistory({
 
   const shouldWaitForBootstrap = useMemo(() => {
     const normalizedPathname = normalizePathname(pathname);
-    return normalizedPathname === "/chat" && !!routeConversationId && !chatBootstrapReadyRef.current;
-  }, [pathname, routeConversationId]);
+    return normalizedPathname === "/chat" && !!routeConversationId && !chatBootstrapReady;
+  }, [chatBootstrapReady, pathname, routeConversationId]);
 
   const loadConversations = useCallback(async () => {
     if (!user) {

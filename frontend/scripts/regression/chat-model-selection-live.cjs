@@ -25,6 +25,16 @@ async function clickModelSelectorOption(page, trigger, targetName) {
   await page.waitForTimeout(500);
 }
 
+async function clickDeepSeekModelOption(page, trigger, targetName) {
+  await trigger.click({ timeout: 5000 });
+  await page.locator('div').filter({ hasText: /^DeepSeek\s*2$/i }).last().click({ timeout: 5000 });
+  const pattern = new RegExp(escapeRegExp(targetName).replace(/\\s+/g, '\\s*'), 'i');
+  const option = page.locator('button').filter({ hasText: pattern }).last();
+  await option.waitFor({ state: 'visible', timeout: 10000 });
+  await option.click({ timeout: 5000 });
+  await page.waitForTimeout(500);
+}
+
 async function waitForRequestBody(page, predicate, timeout = 30000) {
   return page.waitForRequest((req) => {
     if (req.method() !== 'POST') return false;
@@ -58,7 +68,7 @@ async function waitForRequestBody(page, predicate, timeout = 30000) {
   await page.waitForTimeout(1200);
 
   const normalTrigger = page.locator('header button').filter({ hasText: /DeepSeek|GPT|Kimi|Gemini|Claude/i }).first();
-  await clickModelSelectorOption(page, normalTrigger, 'V4 Flash');
+  await clickDeepSeekModelOption(page, normalTrigger, 'DeepSeek-V4 Flash');
   const normalHeaderText = (await page.locator('header').innerText().catch(() => '')).replace(/\s+/g, ' ');
   const normalBodyPromise = waitForRequestBody(page, (url) => url.endsWith('/api/chat') || url.includes('/api/chat'));
   await page.locator('textarea').last().fill(`模型选择普通模式 live ${Date.now()}，只回答 OK`);
@@ -77,8 +87,8 @@ async function waitForRequestBody(page, predicate, timeout = 30000) {
   await page.waitForTimeout(1000);
   const compareHeader = page.locator('[data-chat-compare-activity-layout="true"]').locator('xpath=ancestor::div[contains(@class,"border-b")][1]').first();
   const compareModelTriggers = page.locator('[data-chat-compare-activity-layout="true"]').locator('xpath=ancestor::div[contains(@class,"border-b")][1]').locator('button');
-  await clickModelSelectorOption(page, compareModelTriggers.nth(0), 'V4 Pro');
-  await clickModelSelectorOption(page, compareModelTriggers.nth(1), 'V4 Flash');
+  await clickDeepSeekModelOption(page, compareModelTriggers.nth(0), 'DeepSeek-V4 Pro');
+  await clickDeepSeekModelOption(page, compareModelTriggers.nth(1), 'DeepSeek-V4 Flash');
   const compareHeaderText = (await compareHeader.innerText().catch(() => '')).replace(/\s+/g, ' ');
   const compareBodyPromise = waitForRequestBody(page, (url) => url.includes('/api/chat/compare/init') || url.includes('/api/chat/init'));
   await page.locator('textarea').last().fill(`模型选择对比模式 live ${Date.now()}，只回答 OK`);
