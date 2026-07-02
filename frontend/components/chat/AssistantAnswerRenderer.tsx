@@ -10,6 +10,7 @@ import type { ChatMessageRuntimeState } from "@/lib/chatMessageRuntimeState";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
 import { StreamingText } from "./StreamingText";
 import { ThinkBlock } from "./ThinkBlock";
+import { normalizeSearchSources } from "@/lib/searchSources";
 
 type MarkdownRendererComponent = ComponentType<{
   content: string;
@@ -97,7 +98,7 @@ export function AssistantAnswerRenderer({
   const { reasoning, answer, isThinking } = parseThinkContent(finalContent);
   const cleanAnswer = sanitizeContent(answer);
   const elapsedLabel = reasoning ? formatElapsedTime(generationElapsedMs(message, runtimeState), t) : "";
-  const sourceCount = runtimeState.searchSources.length || runtimeState.searchSourcesCount || 0;
+  const sourceCount = normalizeSearchSources(runtimeState.searchSources).length || runtimeState.searchSourcesCount || 0;
   const showSourceOnlyActivityEntry = !reasoning && sourceCount > 0 && !!onOpenActivity;
 
   return (
@@ -119,14 +120,14 @@ export function AssistantAnswerRenderer({
         />
       )}
       {showSourceOnlyActivityEntry && (
-        <div className="mb-2">
+        <div className="mt-1 mb-2">
           <button
             type="button"
             aria-expanded={false}
             onClick={() => onOpenActivity?.()}
-            className="inline-flex max-w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
+            className="inline-flex max-w-full items-center gap-1.5 rounded-lg px-1.5 py-0.5 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
           >
-            <span className="text-xs font-medium">查看来源 · {sourceCount}</span>
+            <span className="text-xs font-medium">来源 · {sourceCount}</span>
             <ChevronDown className="h-3.5 w-3.5 -rotate-90 shrink-0 text-text-tertiary/80" />
           </button>
           {inlineActivity && <div className="mt-2">{inlineActivity}</div>}

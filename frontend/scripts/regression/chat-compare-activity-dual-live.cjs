@@ -96,7 +96,7 @@ async function createCompareConversation({ baseUrl, token, models, prompt }) {
         init_only: true,
         conversation_id: conversation.id,
         reasoning_effort: 'thinking',
-        search: false,
+        search: env('COMPARE_ACTIVITY_SEARCH', '0') === '1',
         template_id: 0,
         skip_save_user_msg: true,
         group_id: init.group.id,
@@ -153,8 +153,11 @@ async function inspectActivity(page) {
     const panels = Array.from(document.querySelectorAll('[data-chat-activity-panel="true"]'));
     const variants = panels.map((panel) => panel.getAttribute('data-chat-activity-variant') || '');
     const owners = panels.map((panel) => panel.getAttribute('data-chat-activity-owner') || '');
-    const texts = panels.map((panel) => (panel.textContent || '').slice(0, 300));
-    const hasProductProcessCopy = texts.every((text) => text.includes('生成过程') && text.includes('模型思考'));
+    const fullTexts = panels.map((panel) => panel.textContent || '');
+    const texts = fullTexts.map((text) => text.slice(0, 300));
+    const sourceLinkCounts = panels.map((panel) => Array.from(panel.querySelectorAll('a[href^="http"]')).length);
+    const hasProductProcessCopy = fullTexts.every((text) => text.includes('生成过程') && text.includes('模型思考'));
+    const hasReferenceSources = panels.length > 0 && fullTexts.every((text) => text.includes('参考来源')) && sourceLinkCounts.every((count) => count > 0);
     const hasRepeatedReasoningHeading = texts.some((text) => text.includes('生成过程思考过程'));
     const compareColumns = Array.from(document.querySelectorAll('[data-compare-column-scroll-container="true"]'));
     const openColumnCount = compareColumns.filter((column) => column.querySelector('[data-chat-activity-panel="true"]')).length;
@@ -162,7 +165,7 @@ async function inspectActivity(page) {
       const rect = panel.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0;
     }).length;
-    return { panelCount: panels.length, visiblePanels, variants, owners, openColumnCount, hasProductProcessCopy, hasRepeatedReasoningHeading, texts };
+    return { panelCount: panels.length, visiblePanels, variants, owners, openColumnCount, hasProductProcessCopy, hasReferenceSources, sourceLinkCounts, hasRepeatedReasoningHeading, texts };
   });
 }
 
@@ -172,6 +175,7 @@ async function inspectActivity(page) {
   const password = env('TESTNET_PASSWORD') || passwordFromCodes();
   const models = (env('COMPARE_ACTIVITY_MODELS', 'deepseek-v4-pro,deepseek-v4-flash')).split(',').map((item) => item.trim()).filter(Boolean);
   const prompt = env('COMPARE_ACTIVITY_PROMPT', '请用中文简短分析 AI 产品新闻的背景、影响、风险。请保留思考过程，最后给一句总结。');
+  const expectSources = env('COMPARE_ACTIVITY_SEARCH', '0') === '1';
   const auth = await login({ baseUrl, email, password });
   const created = await createCompareConversation({ baseUrl, token: auth.token, models, prompt });
 
@@ -214,6 +218,7 @@ async function inspectActivity(page) {
       && split.owners.includes('右列')
       && inline.hasProductProcessCopy
       && split.hasProductProcessCopy
+      && (!expectSources || (inline.hasReferenceSources && split.hasReferenceSources))
       && !inline.hasRepeatedReasoningHeading
       && !split.hasRepeatedReasoningHeading
       && pageErrors.length === 0,

@@ -133,7 +133,7 @@ async function inspectActivityPanel({ baseUrl, auth, conversationId }) {
     await page.goto(`${baseUrl}/chat/?id=${conversationId}&source_smoke=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
     await page.locator('[data-chat-message-row="true"][data-message-role="assistant"]').last().waitFor({ state: 'visible', timeout: 30000 });
-    const entry = page.locator('button').filter({ hasText: /查看来源|已思考|思考中/ }).last();
+    const entry = page.locator('button').filter({ hasText: /来源|查看来源|已思考|思考中/ }).last();
     const entryCount = await entry.count().catch(() => 0);
     if (entryCount > 0) {
       await entry.click({ timeout: 10000 });

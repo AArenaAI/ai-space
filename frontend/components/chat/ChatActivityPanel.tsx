@@ -10,6 +10,7 @@ import { getOrderedTimelineSteps, type ChatStatusTimelineStep } from "@/lib/chat
 import { resolveChatMessageRuntimeState } from "@/lib/chatMessageRuntimeState";
 import { isLowSignalCompletedActivityStep } from "@/lib/chatActivityTimeline";
 import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
+import { normalizeSearchSources, searchSourceHost, sourceOrganization } from "@/lib/searchSources";
 
 function statusIcon(step: ChatStatusTimelineStep) {
   if (step.status === "failed") return <AlertCircle className="h-3.5 w-3.5 text-red-500" />;
@@ -96,22 +97,6 @@ function countMarkdownSources(content?: string) {
   return urls.size;
 }
 
-function sourceHost(url?: string) {
-  if (!url) return "网页";
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return url.replace(/^https?:\/\//, "").split("/")[0] || "网页";
-  }
-}
-
-function sourceOrganization(host: string) {
-  if (host.includes("bea.gov")) return "美国经济分析局";
-  if (host.includes("bls.gov")) return "美国劳工统计局";
-  if (host.includes("federalreserve.gov")) return "美联储";
-  return host;
-}
-
 function resolveActivityPanelTitle({
   active,
   elapsedSeconds,
@@ -172,7 +157,7 @@ export default function ChatActivityPanel({
   }, [message?.generationTaskId, message?.id]);
   if (!message) return null;
   const runtimeState = resolveChatMessageRuntimeState({ message, realtime, snapshotTimeline });
-  const sources = Array.from(new Map(runtimeState.searchSources.map((source) => [source.url || source.title, source])).values());
+  const sources = normalizeSearchSources(runtimeState.searchSources);
   const inferredSourceCount = sources.length || countMarkdownSources(runtimeState.content);
   const timeline = getOrderedTimelineSteps(runtimeState.statusTimeline)
     .map((step) => step.kind === "web_search" && !step.count && inferredSourceCount ? { ...step, count: inferredSourceCount } : step)
@@ -285,7 +270,7 @@ export default function ChatActivityPanel({
             <div className="mb-2 text-sm font-semibold text-text-secondary">参考来源 · {sources.length}</div>
             <div className="space-y-2">
               {sources.slice(0, 12).map((source, index) => {
-                const host = sourceHost(source.url);
+                const host = searchSourceHost(source);
                 const organization = sourceOrganization(host);
                 const sourceMeta = organization === host ? host : `${organization} · ${host}`;
                 return (
