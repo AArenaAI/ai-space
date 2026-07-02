@@ -95,6 +95,7 @@
     "test:chat-streaming-state-fixture": "node scripts/regression/chat-streaming-state-fixture.cjs",
     "test:chat-final-render-live": "node scripts/regression/chat-final-render-live.cjs",
     "test:chat-compare-column-scroll-fixture": "node scripts/regression/chat-compare-column-scroll-fixture.cjs",
+    "test:chat-compare-mobile-layout-fixture": "node scripts/regression/chat-compare-mobile-layout-fixture.cjs",
     "test:chat-i18n-residue-fixture": "node scripts/regression/chat-i18n-residue-fixture.cjs",
     "test:chat-markdown-code-fixture": "node scripts/regression/chat-markdown-code-fixture.cjs",
     "test:chat-markdown-token-fixture": "node scripts/regression/chat-markdown-token-fixture.cjs",

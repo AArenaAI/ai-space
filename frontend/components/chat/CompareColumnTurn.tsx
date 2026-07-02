@@ -432,7 +432,7 @@ function CompareColumnTurn({
                       {model && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} compact inlineStatus />}
                       <span className="shrink-0 rounded-full border border-surface-border/70 px-2 py-0.5 text-[10px] font-medium text-text-tertiary">本轮模型</span>
                     </div>
-                    <div className="relative" data-compare-column-scroll-frame="true">
+                    <div className="relative rounded-2xl border border-surface-border/45 bg-surface/35" data-compare-column-scroll-frame="true">
                       <div
                         ref={columnScrollRef}
                         data-compare-column-scroll-container="true"
@@ -440,12 +440,12 @@ function CompareColumnTurn({
                         data-compare-column-can-scroll={scrollEdgeState.canScroll ? "true" : "false"}
                         data-compare-column-at-top={scrollEdgeState.atTop ? "true" : "false"}
                         data-compare-column-at-bottom={scrollEdgeState.atBottom ? "true" : "false"}
-                        className="compare-column-scroll-container -mx-1 overflow-y-auto overflow-x-hidden px-1 pr-2 [scrollbar-gutter:stable] [scrollbar-width:thin]"
+                        className="compare-column-scroll-container overflow-y-auto overflow-x-hidden px-3 py-2 pr-3 [scrollbar-gutter:stable] [scrollbar-width:thin]"
                         style={COMPARE_COLUMN_SCROLL_STYLE}
                         onScroll={handleColumnScroll}
                         onWheel={handleColumnWheel}
                       >
-                        <div className={cn(isActivityOpen && activityLayout === "split" && "grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(260px,0.72fr)]") }>
+                        <div className={cn("pb-5", isActivityOpen && activityLayout === "split" && "grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(260px,0.72fr)]") }>
                           <div className="min-w-0">
                           <AssistantMessageContent
                             message={msg}
@@ -481,12 +481,12 @@ function CompareColumnTurn({
                         <>
                           <div
                             data-compare-column-scroll-shadow="top"
-                            className={cn("pointer-events-none absolute inset-x-0 top-0 h-7 rounded-t-2xl bg-gradient-to-b from-surface via-surface/75 to-transparent transition-opacity duration-150", scrollEdgeState.atTop ? "opacity-0" : "opacity-100")}
+                            className={cn("pointer-events-none absolute inset-x-px top-px h-7 rounded-t-2xl bg-gradient-to-b from-surface via-surface/75 to-transparent transition-opacity duration-150", scrollEdgeState.atTop ? "opacity-0" : "opacity-100")}
                             aria-hidden="true"
                           />
                           <div
                             data-compare-column-scroll-shadow="bottom"
-                            className={cn("pointer-events-none absolute inset-x-0 bottom-0 h-8 rounded-b-2xl bg-gradient-to-t from-surface via-surface/75 to-transparent transition-opacity duration-150", scrollEdgeState.atBottom ? "opacity-0" : "opacity-100")}
+                            className={cn("pointer-events-none absolute inset-x-px bottom-px h-10 rounded-b-2xl bg-gradient-to-t from-surface via-surface/75 to-transparent transition-opacity duration-150", scrollEdgeState.atBottom ? "opacity-0" : "opacity-100")}
                             aria-hidden="true"
                           />
                         </>
