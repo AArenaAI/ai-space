@@ -25,18 +25,32 @@ function makeDomSample(args) {
 }
 
 const installSampler = () => {
+  let jitterNodeUid = 0;
   window.__AI_SPACE_JITTER_SAMPLE__ = () => {
     const rows = Array.from(document.querySelectorAll('[data-chat-message-row="true"][data-message-id]'));
     const rowInfo = rows.map((row) => {
+      if (!row.getAttribute('data-jitter-node-uid')) {
+        jitterNodeUid += 1;
+        row.setAttribute('data-jitter-node-uid', String(jitterNodeUid));
+      }
       const rect = row.getBoundingClientRect();
+      const answerNode = row.querySelector('[data-chat-answer-renderer="true"]');
+      const actionsNode = row.querySelector('[data-message-actions="true"]');
+      const answerRect = answerNode?.getBoundingClientRect();
+      const actionsRect = actionsNode?.getBoundingClientRect();
       const text = (row.textContent || '').replace(/\s+/g, ' ').trim();
       return {
+        nodeUid: row.getAttribute('data-jitter-node-uid') || '',
         id: row.getAttribute('data-message-id') || '',
         serverId: row.getAttribute('data-server-message-id') || '',
         taskId: row.getAttribute('data-generation-task-id') || '',
         role: row.getAttribute('data-message-role') || '',
+        answerState: answerNode?.getAttribute('data-chat-answer-render-state') || '',
         top: Math.round(rect.top),
         height: Math.round(rect.height),
+        answerHeight: Math.round(answerRect?.height || 0),
+        actionsHeight: Math.round(actionsRect?.height || 0),
+        actionsClass: String(actionsNode?.className || ''),
         placeholderCount: row.querySelectorAll('[data-chat-initial-reasoning-status="true"], [data-chat-empty-streaming-placeholder="true"]').length,
         spinningCount: row.querySelectorAll('.animate-spin').length,
         completedStatusCount: (text.match(/已思考|回答完成|Completed|Reasoned/g) || []).length,
@@ -45,7 +59,17 @@ const installSampler = () => {
     });
     const assistantRows = rowInfo.filter((row) => row.role === 'assistant');
     const latestAssistant = assistantRows[assistantRows.length - 1] || null;
-    const oldSignatures = rowInfo.slice(0, Math.max(0, rowInfo.length - 2)).map((row) => `${row.role}:${row.id}:${row.height}:${row.textPrefix.slice(0, 40)}`);
+    const oldRows = rowInfo.slice(0, Math.max(0, rowInfo.length - 2));
+    const oldSignatures = oldRows.map((row) => `${row.role}:${row.id}:${row.nodeUid}:${row.height}:${row.textPrefix.slice(0, 40)}`);
+    const oldRowsById = Object.fromEntries(oldRows.filter((row) => row.id).map((row) => [row.id, {
+      nodeUid: row.nodeUid,
+      height: row.height,
+      answerHeight: row.answerHeight,
+      actionsHeight: row.actionsHeight,
+      answerState: row.answerState,
+      actionsClass: row.actionsClass,
+      textPrefix: row.textPrefix.slice(0, 80),
+    }]));
     const ids = rowInfo.map((row) => row.id).filter(Boolean);
     const dupIds = Array.from(new Set(ids.filter((id, index) => ids.indexOf(id) !== index)));
     const stopButtons = Array.from(document.querySelectorAll('button')).filter((button) => /停止|Stop/i.test(button.textContent || '')).length;
@@ -61,6 +85,7 @@ const installSampler = () => {
       latestTextPrefix: latestAssistant?.textPrefix || '',
       dupIds,
       oldSignatures,
+      oldRowsById,
       stopButtons,
       sendButtons,
     };
@@ -91,8 +116,39 @@ function analyzeRound(samples) {
   const firstContent = activeSamples.find((s) => s.latestTextPrefix && s.latestPlaceholderCount === 0 && s.latestAssistantHeight > 0);
   const last = activeSamples[activeSamples.length - 1] || samples[samples.length - 1] || {};
   let oldSignatureChanges = 0;
+  let oldNodeUidChanges = 0;
+  let oldHeightChanges = 0;
+  let oldTextChanges = 0;
+  const oldHeightChangeDetails = [];
   for (let i = 1; i < activeSamples.length; i += 1) {
     if (JSON.stringify(activeSamples[i].oldSignatures) !== JSON.stringify(activeSamples[i - 1].oldSignatures)) oldSignatureChanges += 1;
+    const prevRows = activeSamples[i - 1].oldRowsById || {};
+    const nextRows = activeSamples[i].oldRowsById || {};
+    for (const id of Object.keys(prevRows)) {
+      if (!nextRows[id]) continue;
+      if (prevRows[id].nodeUid !== nextRows[id].nodeUid) oldNodeUidChanges += 1;
+      const heightDelta = Number(nextRows[id].height || 0) - Number(prevRows[id].height || 0);
+      if (Math.abs(heightDelta) > 2) {
+        oldHeightChanges += 1;
+        oldHeightChangeDetails.push({
+          sampleIndex: i,
+          id,
+          from: prevRows[id].height,
+          to: nextRows[id].height,
+          delta: heightDelta,
+          answerHeightFrom: prevRows[id].answerHeight,
+          answerHeightTo: nextRows[id].answerHeight,
+          actionsHeightFrom: prevRows[id].actionsHeight,
+          actionsHeightTo: nextRows[id].actionsHeight,
+          answerStateFrom: prevRows[id].answerState,
+          answerStateTo: nextRows[id].answerState,
+          actionsClassFrom: prevRows[id].actionsClass,
+          actionsClassTo: nextRows[id].actionsClass,
+          textPrefix: nextRows[id].textPrefix,
+        });
+      }
+      if (prevRows[id].textPrefix !== nextRows[id].textPrefix) oldTextChanges += 1;
+    }
   }
   const dupIds = Array.from(new Set(activeSamples.flatMap((s) => s.dupIds || [])));
   return {
@@ -106,6 +162,10 @@ function analyzeRound(samples) {
     firstContentHeight: firstContent?.latestAssistantHeight || 0,
     placeholderToContentJump: placeholderHeights.length && firstContent ? Math.abs(firstContent.latestAssistantHeight - placeholderHeights[placeholderHeights.length - 1]) : 0,
     oldSignatureChanges,
+    oldNodeUidChanges,
+    oldHeightChanges,
+    oldHeightChangeDetails: oldHeightChangeDetails.slice(0, 12),
+    oldTextChanges,
     dupIds,
     finalTextPrefix: last.latestTextPrefix || '',
   };
@@ -157,6 +217,9 @@ function analyzeRound(samples) {
     if (a.placeholderToContentJump > Number(env('JITTER_MAX_PLACEHOLDER_JUMP', '32'))) failures.push(`round ${round.round}: placeholder/content jump ${a.placeholderToContentJump}`);
     if (a.maxHeightJump > Number(env('JITTER_MAX_HEIGHT_JUMP', '96'))) failures.push(`round ${round.round}: max height jump ${a.maxHeightJump}`);
     if (a.oldSignatureChanges > Number(env('JITTER_MAX_OLD_SIGNATURE_CHANGES', '2'))) failures.push(`round ${round.round}: old signature changes ${a.oldSignatureChanges}`);
+    if (a.oldNodeUidChanges > Number(env('JITTER_MAX_OLD_NODE_UID_CHANGES', '0'))) failures.push(`round ${round.round}: old row remounts ${a.oldNodeUidChanges}`);
+    if (a.oldHeightChanges > Number(env('JITTER_MAX_OLD_HEIGHT_CHANGES', '0'))) failures.push(`round ${round.round}: old row height changes ${a.oldHeightChanges}`);
+    if (a.oldTextChanges > Number(env('JITTER_MAX_OLD_TEXT_CHANGES', '0'))) failures.push(`round ${round.round}: old row text changes ${a.oldTextChanges}`);
   }
   if (pageErrors.length) failures.push(`page errors: ${pageErrors.join('; ')}`);
 
