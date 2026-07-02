@@ -19,6 +19,10 @@ const baseMessages = [
     id: 'plain', role: 'assistant', model: 'fixture-model', content: '普通回答，没有思考也没有来源。', createdAt: Date.now() - 4000, completedAt: Date.now() - 1000,
     statusTimeline: [],
   },
+  {
+    id: 'failed-sources', role: 'assistant', model: 'fixture-model', content: '上游模型请求失败，但搜索已经完成。', createdAt: Date.now() - 4000, completedAt: Date.now() - 1000, phase: 'failed', serverGenerationStatus: 'failed',
+    searchSources: [{ title: 'Failure Source', url: 'https://example.com/failure', description: 'failure' }], searchSourcesCount: 1, statusTimeline: [{ id: 'web_search:completed', kind: 'web_search', status: 'completed', startedAt: Date.now() - 2500, endedAt: Date.now() - 2200, count: 1 }, { id: 'waiting_provider:failed', kind: 'waiting_provider', status: 'failed', startedAt: Date.now() - 2000, endedAt: Date.now() - 1000 }],
+  },
 ];
 
 (async () => {
@@ -58,12 +62,15 @@ const baseMessages = [
       && byId['sources-only']?.entryText === '来源 · 1'
       && byId['reasoning-only']?.entryText.includes('已思考')
       && byId['plain']?.hasEntry === false
+      && byId['failed-sources']?.entryText === '来源 · 1'
       && panels['reasoning-sources']?.title === '思考与来源'
       && panels['reasoning-sources']?.hasSources === true
       && panels['reasoning-only']?.title === '思考过程'
       && panels['reasoning-only']?.hasSources === false
       && panels['sources-only']?.title === '思考与来源'
       && panels['sources-only']?.hasSources === true
+      && panels['failed-sources']?.title === '思考与来源'
+      && panels['failed-sources']?.hasSources === true
       && pageErrors.length === 0,
     rows,
     panels,

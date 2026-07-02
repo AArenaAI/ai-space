@@ -2,10 +2,8 @@
 
 import { useEffect, useState } from "react";
 import type { Message, ChatModel } from "@/lib/chatTypes";
-import { AssistantAnswerRenderer } from "@/components/chat/AssistantAnswerRenderer";
+import { AssistantMessageContent } from "@/components/chat/AssistantMessageContent";
 import ChatActivityPanel from "@/components/chat/ChatActivityPanel";
-import { resolveChatMessageRuntimeState } from "@/lib/chatMessageRuntimeState";
-import { normalizeSearchSources } from "@/lib/searchSources";
 
 declare global {
   interface Window {
@@ -54,22 +52,14 @@ export default function ChatActivityEntryStatesFixturePage() {
     <main className="min-h-screen bg-surface p-8 text-text-primary" data-fixture-ready={messages.length > 0 ? "true" : undefined}>
       <div className="mx-auto max-w-3xl space-y-8">
         {messages.map((message) => {
-          const runtimeState = resolveChatMessageRuntimeState({ message });
-          const sourceCount = normalizeSearchSources(runtimeState.searchSources).length || runtimeState.searchSourcesCount || 0;
-          const hasReasoning = Boolean(runtimeState.reasoningContent?.trim());
-          const hasEntry = hasReasoning || sourceCount > 0;
           return (
             <section key={message.id} data-fixture-row={message.id} className="rounded-2xl border border-surface-border bg-surface-card p-4">
               <div className="mb-2 text-xs text-text-tertiary">{message.id}</div>
               <div data-fixture-entry-wrapper="true">
-                <AssistantAnswerRenderer
+                <AssistantMessageContent
                   message={message}
-                  runtimeState={runtimeState}
-                  generating={false}
-                  shouldRenderStreamingText={false}
-                  keepReasoningExpanded={false}
+                  isStreaming={false}
                   onOpenActivity={() => openActivity(message)}
-                  t={(key) => key}
                 />
               </div>
             </section>

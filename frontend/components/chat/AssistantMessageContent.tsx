@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
-import { AlertCircle, RefreshCw } from "lucide-react";
+import { AlertCircle, ChevronDown, RefreshCw } from "lucide-react";
 import { Message } from "@/lib/chatTypes";
 import { useI18n } from "@/lib/i18n";
 import { isMessageGenerating } from "@/lib/chatContent";
@@ -11,6 +11,7 @@ import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 import { isTerminalMessage, resolveChatMessageRuntimeState, type ChatMessageRuntimeState } from "@/lib/chatMessageRuntimeState";
 import { getAssistantFailureCopy, isAssistantFailureState } from "@/lib/chatErrorState";
 import { AssistantAnswerRenderer } from "./AssistantAnswerRenderer";
+import { normalizeSearchSources } from "@/lib/searchSources";
 
 type MarkdownRendererComponent = ComponentType<{ content: string; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean; allowRichLiteFallback?: boolean; compactRichLitePreview?: boolean; messageId?: string | number }>;
 
@@ -34,6 +35,24 @@ function AssistantInlineError({ message, onRegenerate, t }: { message: Message; 
           {t("chat.action.regenerate")}
         </button>
       )}
+    </div>
+  );
+}
+
+function FailureActivityEntry({ sourceCount, onOpenActivity, inlineActivity }: { sourceCount: number; onOpenActivity?: () => void; inlineActivity?: ReactNode }) {
+  if (!sourceCount || !onOpenActivity) return null;
+  return (
+    <div className="mt-1 mb-2">
+      <button
+        type="button"
+        aria-expanded={false}
+        onClick={() => onOpenActivity?.()}
+        className="inline-flex max-w-full items-center gap-1.5 rounded-lg px-1.5 py-0.5 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
+      >
+        <span className="text-xs font-medium">来源 · {sourceCount}</span>
+        <ChevronDown className="h-3.5 w-3.5 -rotate-90 shrink-0 text-text-tertiary/80" />
+      </button>
+      {inlineActivity && <div className="mt-2">{inlineActivity}</div>}
     </div>
   );
 }
@@ -133,7 +152,13 @@ export function AssistantMessageContent({
 
   const failureMessage = { ...message, content: runtimeState.content || message.content, errorCode: runtimeState.errorCode || message.errorCode, phase: runtimeState.phase };
   if (isAssistantFailureState(failureMessage)) {
-    return <AssistantInlineError message={failureMessage} onRegenerate={onRegenerate} t={t} />;
+    const sourceCount = normalizeSearchSources(runtimeState.searchSources).length || runtimeState.searchSourcesCount || 0;
+    return (
+      <>
+        <AssistantInlineError message={failureMessage} onRegenerate={onRegenerate} t={t} />
+        <FailureActivityEntry sourceCount={sourceCount} onOpenActivity={onOpenActivity} inlineActivity={inlineActivity} />
+      </>
+    );
   }
 
   if (!shouldRenderStreamingText && !runtimeState.content) {
