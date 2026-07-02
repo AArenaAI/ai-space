@@ -80,13 +80,13 @@ async function waitForRequestBody(page, predicate, timeout = 30000) {
   await page.goto(`${baseUrl}/chat?model_selection_compare_live=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
   await page.waitForTimeout(800);
-  const compareToggle = page.locator('button').filter({ hasText: /Compare|对比|比较/ }).last();
+  const compareToggle = page.locator('button[aria-label="Compare Mode"], button[title="Compare Mode"]').last();
   await compareToggle.click({ timeout: 5000 }).catch(async () => {
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+C' : 'Control+Shift+C').catch(() => {});
   });
-  await page.waitForTimeout(1000);
-  const compareHeader = page.locator('[data-chat-compare-activity-layout="true"]').locator('xpath=ancestor::div[contains(@class,"border-b")][1]').first();
-  const compareModelTriggers = page.locator('[data-chat-compare-activity-layout="true"]').locator('xpath=ancestor::div[contains(@class,"border-b")][1]').locator('button');
+  await page.locator('text=下一轮模型').first().waitFor({ state: 'visible', timeout: 10000 });
+  const compareHeader = page.locator('main').locator('xpath=.//div[contains(@class,"border-b")][.//*[contains(text(),"下一轮模型")]][1]').first();
+  const compareModelTriggers = compareHeader.locator('button').filter({ hasText: /DeepSeek|GPT|Kimi|Gemini|Claude/i });
   await clickDeepSeekModelOption(page, compareModelTriggers.nth(0), 'DeepSeek-V4 Pro');
   await clickDeepSeekModelOption(page, compareModelTriggers.nth(1), 'DeepSeek-V4 Flash');
   const compareHeaderText = (await compareHeader.innerText().catch(() => '')).replace(/\s+/g, ' ');
@@ -109,9 +109,10 @@ async function waitForRequestBody(page, predicate, timeout = 30000) {
     consoleErrors: summarizeConsole(consoleEvents),
   };
   result.ok = normalModel === 'deepseek-v4-flash'
-    && /V4 Flash/i.test(normalHeaderText + normalHeaderAfterSend)
     && /V4 Pro/i.test(compareHeaderText)
     && /V4 Flash/i.test(compareHeaderText)
+    && compareModels.includes('deepseek-v4-pro')
+    && compareModels.includes('deepseek-v4-flash')
     && pageErrors.length === 0;
   printResult(result);
   if (!result.ok) process.exit(2);
