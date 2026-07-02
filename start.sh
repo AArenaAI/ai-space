@@ -62,6 +62,14 @@ echo -e "${GREEN}[1/2] 启动后端服务 (Go) 端口: $BACKEND_PORT...${NC}"
     echo ""
     echo "========== $(date -Is) starting aipool port=$BACKEND_PORT =========="
 } >> "$BACKEND_LOG"
+# 显式加载 .env，避免父进程中空的同名环境变量遮蔽 godotenv.Load() 读取到的配置。
+# set -a 会把 .env 中的变量导出给后端进程；日志不要打印任何敏感值。
+if [ -f .env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . ./.env
+    set +a
+fi
 PORT="$BACKEND_PORT" nohup "$BACKEND_BIN" >> "$BACKEND_LOG" 2>&1 &
 BACKEND_PID=$!
 echo "$BACKEND_PID" > "$PID_FILE"

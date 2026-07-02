@@ -14,7 +14,8 @@ import (
 )
 
 func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
-	router := gin.Default()
+	router := gin.New()
+	router.Use(gin.Logger(), gin.Recovery())
 
 	// 全局 panic 恢复与统一错误处理
 	router.Use(HandlerGuard())
