@@ -94,6 +94,8 @@
     "profile:chat-history-real": "node scripts/regression/chat-history-real-profile.cjs",
     "test:chat-streaming-state-fixture": "node scripts/regression/chat-streaming-state-fixture.cjs",
     "test:chat-final-render-live": "node scripts/regression/chat-final-render-live.cjs",
+    "test:chat-compare-activity-dual-live": "node scripts/regression/chat-compare-activity-dual-live.cjs",
+    "test:chat-search-sources-family-live": "node scripts/regression/chat-search-sources-family-live.cjs",
     "test:chat-compare-column-scroll-fixture": "node scripts/regression/chat-compare-column-scroll-fixture.cjs",
     "test:chat-compare-mobile-layout-fixture": "node scripts/regression/chat-compare-mobile-layout-fixture.cjs",
     "test:chat-i18n-residue-fixture": "node scripts/regression/chat-i18n-residue-fixture.cjs",

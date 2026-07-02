@@ -1915,12 +1915,24 @@ func (h *ChatHandler) failGenerationTaskWithMeta(task *models.AIBackgroundTask, 
 	h.persistTaskEvent(task, assistantMessageID, seq+1, "done", "[DONE]")
 	now := time.Now()
 	persistedContent := h.failurePersistedContent(assistantMessageID, task, message)
-	h.db.Model(&models.Message{}).Where("id = ?", assistantMessageID).Updates(map[string]interface{}{
+	messageUpdates := map[string]interface{}{
 		"content":           persistedContent,
 		"completed_at":      &now,
 		"generation_status": "failed",
 		"phase":             "failed",
-	})
+	}
+	if h.db != nil && assistantMessageID > 0 {
+		var msg models.Message
+		if err := h.db.Select("search_sources", "search_sources_count").Where("id = ?", assistantMessageID).First(&msg).Error; err == nil {
+			if strings.TrimSpace(msg.SearchSources) == "" {
+				if sourcesJSON := h.latestSearchSourcesFromTaskEvents(task.ID); sourcesJSON != "" {
+					messageUpdates["search_sources"] = sourcesJSON
+					messageUpdates["search_sources_count"] = countSearchSourcesJSON(sourcesJSON)
+				}
+			}
+		}
+	}
+	h.db.Model(&models.Message{}).Where("id = ?", assistantMessageID).Updates(messageUpdates)
 	h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", task.ID).Updates(map[string]interface{}{
 		"status":               "failed",
 		"error_message":        message,
@@ -1929,6 +1941,54 @@ func (h *ChatHandler) failGenerationTaskWithMeta(task *models.AIBackgroundTask, 
 		"completed_at":         &now,
 	})
 	h.touchConversation(conversationID)
+}
+
+func (h *ChatHandler) latestSearchSourcesFromTaskEvents(taskID uint) string {
+	if h == nil || h.db == nil || taskID == 0 {
+		return ""
+	}
+	type taskEventPayload struct {
+		EventType string
+		Data      string
+	}
+	var events []taskEventPayload
+	if err := h.db.Table("ai_task_events").
+		Select("event_type, data").
+		Where("task_id = ? AND event_type IN ?", taskID, []string{"search_meta", "activity_meta"}).
+		Order("sequence_number DESC").
+		Limit(20).
+		Find(&events).Error; err != nil {
+		return ""
+	}
+	for _, event := range events {
+		var payload map[string]interface{}
+		if err := json.Unmarshal([]byte(event.Data), &payload); err != nil {
+			continue
+		}
+		for _, key := range []string{"_search_meta", "_activity_meta"} {
+			meta, _ := payload[key].(map[string]interface{})
+			if meta == nil {
+				continue
+			}
+			sources, ok := meta["sources"].([]interface{})
+			if !ok || len(sources) == 0 {
+				continue
+			}
+			out, err := json.Marshal(sources)
+			if err == nil {
+				return string(out)
+			}
+		}
+	}
+	return ""
+}
+
+func countSearchSourcesJSON(raw string) int {
+	var sources []interface{}
+	if err := json.Unmarshal([]byte(raw), &sources); err != nil {
+		return 0
+	}
+	return len(sources)
 }
 
 func (h *ChatHandler) failurePersistedContent(assistantMessageID uint, task *models.AIBackgroundTask, fallbackMessage string) string {

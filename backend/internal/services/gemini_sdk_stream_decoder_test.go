@@ -79,6 +79,45 @@ func TestGeminiSDKStreamDecoderReturnsFirstChunkBeforeStreamEnds(t *testing.T) {
 	}
 }
 
+func TestGeminiSDKStreamDecoderEmitsGroundingAsSearchSources(t *testing.T) {
+	seq := func(yield func(*genai.GenerateContentResponse, error) bool) {
+		yield(&genai.GenerateContentResponse{
+			Candidates: []*genai.Candidate{{
+				Content: &genai.Content{Parts: []*genai.Part{{Text: "正文二"}}},
+				GroundingMetadata: &genai.GroundingMetadata{GroundingChunks: []*genai.GroundingChunk{{
+					Web: &genai.GroundingChunkWeb{URI: "https://example.com/gemini", Title: "Gemini Source"},
+				}}},
+			}},
+		}, nil)
+	}
+
+	dec := NewGeminiSDKStreamDecoder(context.Background(), seq)
+	event, err := dec.Next()
+	if err != nil {
+		t.Fatalf("text event err: %v", err)
+	}
+	if event.Type != EventTextDelta || event.Delta != "正文二" {
+		t.Fatalf("text event = %#v, want text delta", event)
+	}
+	event, err = dec.Next()
+	if err != nil {
+		t.Fatalf("sources event err: %v", err)
+	}
+	if event.Type != EventSearchDone || len(event.SearchSources) != 1 {
+		t.Fatalf("sources event = %#v, want one search source", event)
+	}
+	if event.SearchSources[0].URL != "https://example.com/gemini" || event.SearchSources[0].Title != "Gemini Source" {
+		t.Fatalf("sources = %#v", event.SearchSources)
+	}
+	event, err = dec.Next()
+	if err != nil {
+		t.Fatalf("done err: %v", err)
+	}
+	if event.Type != EventDone {
+		t.Fatalf("done event = %#v", event)
+	}
+}
+
 func TestGeminiSDKStreamDecoderClassifiesHeaderTimeoutAsRecoverable(t *testing.T) {
 	seq := func(yield func(*genai.GenerateContentResponse, error) bool) {
 		yield(nil, errors.New(`doRequest: error sending request: Post "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:streamGenerateContent?alt=sse": net/http: timeout awaiting response headers`))
