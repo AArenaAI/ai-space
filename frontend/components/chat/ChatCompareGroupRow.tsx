@@ -116,6 +116,7 @@ function ChatCompareGroupRow({
                 model={modelById.get(assistant?.model || modelId || "")}
                 badgeGroup={badgeGroup}
                 activeAssistantId={assistant?.id}
+                columnIndex={colIndex}
                 onSelectAssistant={(assistantId) => setColumnSelections((current) => ({ ...current, [colIndex]: assistantId }))}
                 modelById={modelById}
                 isLastGroup={isLastGroup}

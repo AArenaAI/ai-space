@@ -112,7 +112,19 @@ function sourceOrganization(host: string) {
   return host;
 }
 
-export default function ChatActivityPanel({ message, model, onClose, variant = "docked" }: { message?: Message | null; model?: ChatModel; onClose: () => void; variant?: "docked" | "inline" | "embedded" }) {
+export default function ChatActivityPanel({
+  message,
+  model,
+  onClose,
+  variant = "docked",
+  ownerLabel,
+}: {
+  message?: Message | null;
+  model?: ChatModel;
+  onClose: () => void;
+  variant?: "docked" | "inline" | "embedded";
+  ownerLabel?: string;
+}) {
   const { t } = useI18n();
   const [reasoningOpen, setReasoningOpen] = useState(true);
   const [snapshotTimeline, setSnapshotTimeline] = useState<ChatStatusTimelineStep[] | undefined>();
@@ -162,11 +174,11 @@ export default function ChatActivityPanel({ message, model, onClose, variant = "
       : "flex max-h-[min(62vh,520px)] flex-col rounded-2xl border border-surface-border/65 bg-surface/80 p-4 shadow-sm";
 
   return (
-    <aside className={panelClassName} data-chat-activity-panel="true" data-chat-activity-variant={variant}>
+    <aside className={panelClassName} data-chat-activity-panel="true" data-chat-activity-variant={variant} data-chat-activity-owner={ownerLabel || undefined}>
       <div className="mb-5 flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-base font-semibold text-text-primary">思考与来源{active ? ` · ${elapsedSeconds}s` : ""}</div>
-          <div className="mt-0.5 truncate text-sm text-text-tertiary">{model?.name || message.model || "AI"}</div>
+          <div className="mt-0.5 truncate text-sm text-text-tertiary">{ownerLabel ? `${ownerLabel} · ` : ""}{model?.name || message.model || "AI"}</div>
         </div>
         <button type="button" onClick={onClose} className="rounded-full p-1.5 text-text-tertiary hover:bg-surface-card hover:text-text-primary" aria-label="Close activity panel">
           <X className="h-4 w-4" />

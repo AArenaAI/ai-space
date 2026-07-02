@@ -152,6 +152,7 @@ async function inspectActivity(page) {
   return page.evaluate(() => {
     const panels = Array.from(document.querySelectorAll('[data-chat-activity-panel="true"]'));
     const variants = panels.map((panel) => panel.getAttribute('data-chat-activity-variant') || '');
+    const owners = panels.map((panel) => panel.getAttribute('data-chat-activity-owner') || '');
     const texts = panels.map((panel) => (panel.textContent || '').slice(0, 300));
     const compareColumns = Array.from(document.querySelectorAll('[data-compare-column-scroll-container="true"]'));
     const openColumnCount = compareColumns.filter((column) => column.querySelector('[data-chat-activity-panel="true"]')).length;
@@ -159,7 +160,7 @@ async function inspectActivity(page) {
       const rect = panel.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0;
     }).length;
-    return { panelCount: panels.length, visiblePanels, variants, openColumnCount, texts };
+    return { panelCount: panels.length, visiblePanels, variants, owners, openColumnCount, texts };
   });
 }
 
@@ -205,6 +206,10 @@ async function inspectActivity(page) {
       && split.panelCount >= 2
       && split.openColumnCount >= 2
       && split.variants.every((variant) => variant === 'embedded')
+      && inline.owners.includes('左列')
+      && inline.owners.includes('右列')
+      && split.owners.includes('左列')
+      && split.owners.includes('右列')
       && pageErrors.length === 0,
     conversationId: created.conversation.id,
     models,

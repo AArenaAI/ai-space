@@ -89,6 +89,7 @@ type CompareColumnTurnProps = {
   model?: ChatModel;
   badgeGroup?: InferredGroup;
   activeAssistantId?: string;
+  columnIndex?: number;
   onSelectAssistant?: (assistantId: string) => void;
   modelById: Map<string, ChatModel>;
   isLastGroup: boolean;
@@ -130,6 +131,7 @@ function CompareColumnTurn({
   model,
   badgeGroup,
   activeAssistantId,
+  columnIndex = 0,
   onSelectAssistant,
   modelById,
   isLastGroup,
@@ -172,6 +174,7 @@ function CompareColumnTurn({
   const [openBadgeMenu, setOpenBadgeMenu] = useState(false);
   const [scrollEdgeState, setScrollEdgeState] = useState<ScrollEdgeState>({ canScroll: false, atTop: true, atBottom: true });
   const showBadgeSwitcher = !!badgeGroup && badgeGroup.assistantMessages.length > 2 && !!onSelectAssistant;
+  const ownerLabel = columnIndex === 0 ? "左列" : columnIndex === 1 ? "右列" : `第 ${columnIndex + 1} 列`;
   const terminalMessage = !!msg && isTerminalMessage(msg);
   const hasLiveGenerationSignal = !!msg && !terminalMessage && !!(
     msg.activityStatus ||
@@ -454,7 +457,7 @@ function CompareColumnTurn({
                             recoverEmptyContent
                             onRegenerate={onRegenerate}
                             onOpenActivity={() => onOpenActivity?.(msg, activityLayout)}
-                            inlineActivity={isActivityOpen && activityLayout === "inline" ? <ChatActivityPanel message={msg} model={model} onClose={() => onOpenActivity?.(msg, activityLayout)} variant="inline" /> : undefined}
+                            inlineActivity={isActivityOpen && activityLayout === "inline" ? <ChatActivityPanel message={msg} model={model} onClose={() => onOpenActivity?.(msg, activityLayout)} variant="inline" ownerLabel={ownerLabel} /> : undefined}
                             shouldHydrateRichText={!blockRichTextHydration && (isNearViewport || forceHydrateRichText)}
                             priorityHydrateRichText={!blockRichTextHydration && (forceHydrateRichText || stabilizeInitialRichText || deferOffscreenRichTextHydration)}
                             allowRichLiteFallback={allowRichLiteFallback || forceStableRichLiteFallback || isInitialReadingAssistant || isViewedAssistant}
@@ -472,7 +475,7 @@ function CompareColumnTurn({
                         </div>
                         {isActivityOpen && activityLayout === "split" && (
                           <div className="min-w-0">
-                            <ChatActivityPanel message={msg} model={model} onClose={() => onOpenActivity?.(msg, activityLayout)} variant="embedded" />
+                            <ChatActivityPanel message={msg} model={model} onClose={() => onOpenActivity?.(msg, activityLayout)} variant="embedded" ownerLabel={ownerLabel} />
                           </div>
                         )}
                       </div>
