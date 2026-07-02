@@ -43,6 +43,7 @@ test("buildChatRequestHeaders uses bearer token when present", () => {
   assert.deepEqual(mod.buildChatRequestHeaders({ token: "tok", guestId: "guest" }), {
     "Content-Type": "application/json",
     Authorization: "Bearer tok",
+    "X-Guest-ID": "guest",
   });
 });
 
@@ -70,13 +71,15 @@ test("buildSingleChatRequestBody preserves single chat fields", () => {
     messages,
     stream: true,
     conversation_id: 12,
-    reasoning: true,
+    notebook_id: undefined,
     reasoning_effort: "medium",
     search: true,
     template_id: 3,
     skip_save_user_msg: true,
     skill_key: "skill",
     message_file_ids: ["f1"],
+    notebook_file_ids: undefined,
+    client_timezone: undefined,
   });
 });
 
@@ -92,13 +95,15 @@ test("buildSingleChatRequestBody defaults reasoning effort and optional fields",
     messages,
     stream: true,
     conversation_id: undefined,
-    reasoning: false,
-    reasoning_effort: "high",
+    notebook_id: undefined,
+    reasoning_effort: "thinking",
     search: false,
     template_id: 0,
     skip_save_user_msg: false,
     skill_key: undefined,
     message_file_ids: undefined,
+    notebook_file_ids: undefined,
+    client_timezone: undefined,
   });
 });
 
@@ -125,7 +130,7 @@ test("buildCompareChatRequestBody preserves compare fields", () => {
     messages,
     stream: true,
     conversation_id: 22,
-    reasoning: true,
+    notebook_id: undefined,
     reasoning_effort: "low",
     search: false,
     template_id: 5,
@@ -137,6 +142,8 @@ test("buildCompareChatRequestBody preserves compare fields", () => {
     group_models: ["g1", "g2"],
     skill_key: "skill",
     message_file_ids: ["file"],
+    notebook_file_ids: undefined,
+    client_timezone: undefined,
   });
 });
 
@@ -153,7 +160,7 @@ test("buildCompareChatRequestBody falls back group models when context list is e
     fallbackGroupModels: ["a", "b"],
   });
   assert.deepEqual(body.group_models, ["a", "b"]);
-  assert.equal(body.reasoning_effort, "high");
+  assert.equal(body.reasoning_effort, "thinking");
 });
 
 console.log("\nchat request builder regression tests passed");

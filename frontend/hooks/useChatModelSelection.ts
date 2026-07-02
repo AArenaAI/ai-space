@@ -45,17 +45,24 @@ export function persistChatModelSelection(model: ChatModel, storageKey = SELECTE
   persistRecentChatModels(model);
 }
 
+export function preserveSelectedChatModel(current: ChatModel | undefined, models: ChatModel[], storageKey?: string, defaultModelId?: string): ChatModel {
+  if (current?.id && models.some((model) => model.id === current.id)) {
+    return current;
+  }
+  return loadSavedChatModel(models, storageKey, defaultModelId);
+}
+
 export function useChatModelSelection(models: ChatModel[], options?: { storageKey?: string; defaultModelId?: string }) {
   const configuredDefault = options?.defaultModelId ? models.find((model) => model.id === options.defaultModelId) : undefined;
   const defaultModel = configuredDefault || (models.length > 0 ? models[0] : ({} as ChatModel));
   const [selectedModel, setSelectedModelState] = useState<ChatModel>(defaultModel);
   const [initialized, setInitialized] = useState(false);
+  const modelIdsKey = models.map((model) => model.id).join("|");
 
   useEffect(() => {
-    const saved = loadSavedChatModel(models, options?.storageKey, options?.defaultModelId);
-    setSelectedModelState(saved);
+    setSelectedModelState((current) => preserveSelectedChatModel(current, models, options?.storageKey, options?.defaultModelId));
     setInitialized(true);
-  }, [models, options?.storageKey, options?.defaultModelId]);
+  }, [modelIdsKey, options?.storageKey, options?.defaultModelId]);
 
   const setSelectedModel = useCallback((model: ChatModel) => {
     setSelectedModelState(model);

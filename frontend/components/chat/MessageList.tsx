@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, memo, type ComponentType, type UIEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, memo, type ComponentType, type CSSProperties, type UIEvent } from "react";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/lib/chatTypes";
 import { useFavorites } from "@/hooks/useFavorites";
@@ -84,6 +84,7 @@ const LONG_MARKDOWN_LAZY_THRESHOLD = 0;
 const HISTORY_PRELOAD_TOP_PX = 1200;
 const HEAVY_HISTORY_PRELOAD_TOP_PX = 1800;
 const HISTORY_PRELOAD_BOTTOM_PX = CHAT_BOTTOM_SPACER;
+const CHAT_HISTORY_TOP_FADE_PX = 44;
 const FAST_SCROLL_PRELOAD_PX = 6000;
 const RETURN_TO_BOTTOM_PRELOAD_BOTTOM_PX = 6000;
 const MAX_STABLE_RICH_LITE_ASSISTANTS_IN_RENDER_WINDOW = 16;
@@ -257,6 +258,12 @@ function MessageList({
   const userBrowsingTimerRef = useRef<number>(0);
   const [scrollProgress, setScrollProgress] = useState({ ratio: 1, canScroll: false });
   const [, setScrollProgressDragging] = useState(false);
+  const chatHistoryTopMaskStyle = scrollProgress.canScroll && scrollProgress.ratio > 0.006
+    ? {
+        WebkitMaskImage: `linear-gradient(to bottom, transparent 0, #000 ${CHAT_HISTORY_TOP_FADE_PX}px, #000 100%)`,
+        maskImage: `linear-gradient(to bottom, transparent 0, #000 ${CHAT_HISTORY_TOP_FADE_PX}px, #000 100%)`,
+      } satisfies CSSProperties
+    : undefined;
   const [returnToBottomPreload, setReturnToBottomPreload] = useState(false);
   const [fastScrollPreload, setFastScrollPreload] = useState(false);
 
@@ -963,6 +970,10 @@ function MessageList({
     });
   }, []);
 
+  const handleOpenActivity = useCallback((message: Message) => {
+    setActiveActivityMessageId(String(message.id));
+  }, []);
+
   // Activity open state is view-local and must not leak across conversations.
   useEffect(() => {
     setActiveActivityMessageId(null);
@@ -1418,6 +1429,13 @@ function MessageList({
     if (explicitModels.length >= 2) return explicitModels;
     return dedupeValid(messages.filter((m) => m.role === "assistant" && m.model).map((m) => m.model!));
   }, [compareModels, groups, effectiveIsCompare, messages, models]);
+  const activeCompareHeaderModels = useMemo(() => {
+    if (!effectiveIsCompare) return [];
+    const availableModelIds = new Set(models.map((model) => model.id));
+    const explicitModels = Array.from(new Set((compareModels || []).filter((id) => availableModelIds.has(id)))).slice(0, 2);
+    return explicitModels.length >= 2 ? explicitModels : activeCompareModels;
+  }, [activeCompareModels, compareModels, effectiveIsCompare, models]);
+
   const columnMessages = useMemo(() => {
     if (!effectiveIsCompare) return [];
     return activeCompareModels.map((modelId) =>
@@ -1800,6 +1818,8 @@ function MessageList({
     const compareGroups = Array.from(aggregateGroupByUserId.values())
       .sort((a, b) => (a.userMessage.createdAt || 0) - (b.userMessage.createdAt || 0));
     const resolveCompareAssistant = (group: InferredGroup, colIndex: number, modelId: string) => {
+      const isSingleModelGroup = group.models.length < 2 && group.assistantMessages.length <= 1;
+      if (isSingleModelGroup) return colIndex === 0 ? group.assistantMessages[0] : undefined;
       return group.assistantMessages.find((m) => m.model === modelId)
         || group.assistantMessages.find((m) => group.models[m.groupIndex ?? -1] === modelId)
         || group.assistantMessages.find((m) => m.groupIndex === colIndex)
@@ -1811,7 +1831,7 @@ function MessageList({
       <div className="relative flex-1 min-h-0 overflow-hidden flex flex-col">
         {/* 固定模型选择栏 */}
         <ChatCompareHeader
-          compareModels={activeCompareModels.length ? activeCompareModels : compareModels}
+          compareModels={activeCompareHeaderModels.length ? activeCompareHeaderModels : compareModels}
           models={models}
           modelById={modelById}
           closeLabel={t("chat.closeCompareColumn")}
@@ -1826,7 +1846,7 @@ function MessageList({
             renderHistoryLoadingState()
           ) : (
             <ChatCompareWelcomeColumns
-              compareModels={activeCompareModels.length ? activeCompareModels : compareModels}
+              compareModels={activeCompareHeaderModels.length ? activeCompareHeaderModels : compareModels}
               greeting={t("chat.helloComma")}
               prompt={t("chat.howCanIHelp")}
             />
@@ -1840,6 +1860,7 @@ function MessageList({
               overflowY: "auto",
               overflowX: "hidden",
               overflowAnchor: historyPrependSettling ? "none" : "auto",
+              ...chatHistoryTopMaskStyle,
             }}
             onScroll={handleChatScroll}
             onWheel={(event) => handleUserScrollIntent(event.deltaY)}
@@ -1862,7 +1883,7 @@ function MessageList({
                   aggregateGroup={aggregateGroupByUserId.get(group.userMessage.id)}
                   groupIndex={groupIndex}
                   groupCount={compareGroups.length}
-                  compareModels={group.models.length >= 2 ? group.models : (activeCompareModels.length ? activeCompareModels : compareModels)}
+                  compareModels={group.models.length > 0 ? group.models : (activeCompareModels.length ? activeCompareModels : compareModels)}
                   resolveAssistant={resolveCompareAssistant}
                   modelById={modelById}
                   isLoading={isLoading}
@@ -1905,6 +1926,7 @@ function MessageList({
           visible={scrollProgress.canScroll}
           onJumpToRatio={jumpToScrollRatio}
           onDragStateChange={setScrollProgressDragging}
+          edgeAligned
         />
         <ChatScrollToBottomButton
           visible={!atBottom}
@@ -1994,6 +2016,7 @@ function MessageList({
           overflowY: "auto",
           overflowX: "hidden",
           overflowAnchor: historyPrependSettling ? "none" : "auto",
+          ...chatHistoryTopMaskStyle,
         }}
         onScroll={handleChatScroll}
         onWheel={(event) => handleUserScrollIntent(event.deltaY)}
@@ -2054,7 +2077,7 @@ function MessageList({
                 onForkCompare={onForkCompare}
                 onSaveAssistantToNote={onSaveAssistantToNote}
                 onAssistantViewed={handleAssistantViewed}
-                onOpenActivity={(message) => setActiveActivityMessageId(String(message.id))}
+                onOpenActivity={handleOpenActivity}
                 imageLoadFailedLabel={t("chat.imageLoadFailed")}
                 MarkdownRenderer={LazyMarkdownRenderer}
                 useContentVisibility={useRowContentVisibility}
@@ -2098,6 +2121,7 @@ function MessageList({
         visible={scrollProgress.canScroll}
         onJumpToRatio={jumpToScrollRatio}
         onDragStateChange={setScrollProgressDragging}
+        edgeAligned
       />
       <ChatScrollToBottomButton
         visible={!atBottom}

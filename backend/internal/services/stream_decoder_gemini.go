@@ -2,9 +2,7 @@ package services
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
-	"strings"
 )
 
 // GeminiDecoder 解码 Google Gemini streamGenerateContent?alt=sse 流。
@@ -40,12 +38,12 @@ func (d *GeminiDecoder) Next() (*AIStreamEvent, error) {
 		event, err := d.parser.Next()
 		if err != nil {
 			if err == io.EOF {
-				// 流结束前，如果有累积的引用来源，先发出引用文本。
+				// 流结束前，如果有累积的引用来源，先发出结构化来源事件。
 				// 这里必须返回 EventDone + nil，不能带 io.EOF；上层读取 goroutine
 				// 遇到 err 会直接退出，导致前端收不到 data: [DONE]，流式 UI 一直等待。
-				if citationDelta := d.flushCitations(); citationDelta != "" {
+				if sources := d.flushCitations(); len(sources) > 0 {
 					d.pending = append(d.pending, &AIStreamEvent{Type: EventDone})
-					return &AIStreamEvent{Type: EventTextDelta, Delta: citationDelta}, nil
+					return &AIStreamEvent{Type: EventSearchDone, Delta: "网页搜索完成", SearchSources: sources}, nil
 				}
 				return &AIStreamEvent{Type: EventDone}, nil
 			}
@@ -125,21 +123,25 @@ func (d *GeminiDecoder) extractGrounding(raw map[string]interface{}) {
 	}
 }
 
-func (d *GeminiDecoder) flushCitations() string {
+func (d *GeminiDecoder) flushCitations() []SearchResult {
 	if len(d.citations) == 0 {
-		return ""
+		return nil
 	}
-	var b strings.Builder
-	b.WriteString("\n\n---\n🔍 参考来源：\n")
-	for i, c := range d.citations {
+	var sources []SearchResult
+	seen := make(map[string]bool)
+	for _, c := range d.citations {
+		if c.URI == "" || seen[c.URI] {
+			continue
+		}
+		seen[c.URI] = true
 		title := c.Title
 		if title == "" {
 			title = c.URI
 		}
-		b.WriteString(fmt.Sprintf("%d. [%s](%s)\n", i+1, title, c.URI))
+		sources = append(sources, SearchResult{Title: title, URL: c.URI, Description: title})
 	}
 	d.citations = nil
-	return b.String()
+	return sources
 }
 
 func parseGeminiUsage(usage map[string]interface{}) *TokenUsage {

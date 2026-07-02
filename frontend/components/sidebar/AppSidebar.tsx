@@ -43,14 +43,8 @@ import { NOTEBOOK_DEMOS } from "@/lib/notebookDemos";
 import type { Notebook } from "@/lib/notebookTypes";
 import { useAppBootstrap } from "@/lib/appBootstrapContext";
 import { saveConversationScrollState } from "@/lib/chatConversationScrollState";
-import {
-  CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE,
-  applySidebarConversationActivity,
-  hasMoreSidebarConversations,
-  mergeSidebarConversations,
-  parseSidebarCursor,
-  sortSidebarConversations,
-} from "@/lib/chatSidebarHistory";
+import { sortSidebarConversations } from "@/lib/chatSidebarHistory";
+import { clearChatSidebarHistoryCache, useChatSidebarHistory, type SidebarConversation } from "@/hooks/useChatSidebarHistory";
 
 
 const isPathInGroup = (pathname: string | null, paths: string[]) => {
@@ -67,18 +61,7 @@ function emitChatRouteProfileEvent(
   window.dispatchEvent(new CustomEvent("chat-render-profile", { detail: { phase, at, ...detail } }));
 }
 
-// 模块级缓存：避免组件重新挂载时历史记录反复闪烁
-let cachedConversations: Conversation[] | null = null;
-
-interface Conversation {
-  id: number;
-  title: string;
-  model: string;
-  pinned: boolean;
-  created_at: string;
-  updated_at: string;
-  skill_key?: string;
-}
+type Conversation = SidebarConversation;
 
 interface ConversationSearchResult extends Conversation {
   matched_content?: string;
@@ -123,10 +106,6 @@ function getGroupOrder(t: (key: string) => string): string[] {
 
 function sortConversations(conversations: Conversation[]): Conversation[] {
   return sortSidebarConversations(conversations);
-}
-
-function mergeConversationLists(current: Conversation[], incoming: Conversation[]): Conversation[] {
-  return mergeSidebarConversations(current, incoming);
 }
 
 function sortGroupLabels(labels: string[], t: (key: string) => string): string[] {
@@ -180,49 +159,6 @@ function mapBootstrapNotebook(item: any): Notebook {
     updated_at: item.updated_at || new Date().toISOString(),
     file_count: item.file_count || 0,
   };
-}
-
-type ConversationListPage = {
-  conversations: Conversation[];
-  total?: number;
-  limit: number;
-  offset: number;
-  next_cursor?: string;
-  has_more?: boolean;
-};
-
-async function fetchConversations(workspaceId?: number, offset = 0, cursor?: string): Promise<ConversationListPage | null> {
-  const token = localStorage.getItem("token");
-  if (!token) return { conversations: [], total: 0, limit: CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE, offset };
-  try {
-    const params = new URLSearchParams();
-    if (workspaceId) params.set("workspace_id", String(workspaceId));
-    params.set("limit", String(CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE));
-    const parsedCursor = parseSidebarCursor(cursor);
-    if (parsedCursor) {
-      params.set("before_activity_at", parsedCursor.beforeActivityAt);
-      params.set("before_id", parsedCursor.beforeId);
-    } else if (offset > 0) {
-      params.set("offset", String(offset));
-    }
-    const res = await fetch(`/api/conversations?${params.toString()}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (Array.isArray(data)) return { conversations: data.filter(isMainChatConversation), limit: CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE, offset };
-    if (data && Array.isArray(data.conversations)) {
-      return {
-        conversations: data.conversations.filter(isMainChatConversation),
-        total: typeof data.total === "number" ? data.total : undefined,
-        limit: typeof data.limit === "number" ? data.limit : CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE,
-        offset: typeof data.offset === "number" ? data.offset : offset,
-        next_cursor: typeof data.next_cursor === "string" ? data.next_cursor : undefined,
-        has_more: typeof data.has_more === "boolean" ? data.has_more : undefined,
-      };
-    }
-    return null;
-  } catch { return null; }
 }
 
 async function searchConversations(keyword: string, workspaceId?: number, signal?: AbortSignal): Promise<ConversationSearchResult[]> {
@@ -443,13 +379,6 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     if (!stored) return null;
     try { return JSON.parse(stored); } catch { return null; }
   });
-  const [conversations, setConversations] = useState<Conversation[]>(cachedConversations || []);
-  const [loading, setLoading] = useState(() => cachedConversations === null && typeof window !== "undefined" && !!localStorage.getItem("token"));
-  const [conversationTotal, setConversationTotal] = useState<number | undefined>();
-  const [conversationNextOffset, setConversationNextOffset] = useState(CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE);
-  const [conversationNextCursor, setConversationNextCursor] = useState<string | undefined>();
-  const [conversationHasMore, setConversationHasMore] = useState<boolean | undefined>();
-  const [loadingMoreConversations, setLoadingMoreConversations] = useState(false);
   const [optimisticConvId, setOptimisticConvId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
@@ -540,15 +469,25 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     });
   }, []);
 
-  const updateConversationsStable = useCallback((updater: (prev: Conversation[]) => Conversation[]) => {
-    const anchor = captureHistoryAnchor();
-    setConversations(prev => {
-      const next = updater(prev);
-      cachedConversations = next;
-      return next;
-    });
-    restoreHistoryAnchor(anchor);
-  }, [captureHistoryAnchor, restoreHistoryAnchor]);
+  const {
+    conversations,
+    setConversations,
+    loading,
+    loadConversations,
+    hasMoreConversations,
+    loadMoreConversations,
+    loadingMoreConversations,
+  } = useChatSidebarHistory({
+    user,
+    workspaceId: currentWS?.id,
+    pathname,
+    routeConversationId: effectiveRouteConvId,
+    chatBootstrap,
+    cacheKey: `desktop:${currentWS?.id || "all"}`,
+    hiddenSkillKeys: CHAT_HISTORY_HIDDEN_SKILL_KEYS,
+    captureAnchor: captureHistoryAnchor,
+    restoreAnchor: restoreHistoryAnchor,
+  });
 
   /* 收缩状态 tooltip */
   const [sidebarTooltip, setSidebarTooltip] = useState<{text: string; x: number; y: number} | null>(null);
@@ -615,11 +554,6 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     if (!chatBootstrap) return;
     chatBootstrapReadyRef.current = true;
     if (chatBootstrap.user) setUser(chatBootstrap.user);
-    if (Array.isArray(chatBootstrap.sidebar?.conversations)) {
-      const incoming = sortConversations((chatBootstrap.sidebar.conversations as Conversation[]).filter(isMainChatConversation));
-      updateConversationsStable((prev) => mergeConversationLists(prev, incoming));
-      setLoading(false);
-    }
     if (Array.isArray(chatBootstrap.sidebar?.recent_notebooks)) {
       setNotebooks(chatBootstrap.sidebar.recent_notebooks.map(mapBootstrapNotebook));
       setNotebooksLoading(false);
@@ -630,17 +564,12 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     const handleBootstrapReady = (event: Event) => {
       const detail = (event as CustomEvent<{
         user?: any;
-        sidebar?: { conversations?: Conversation[]; recent_notebooks?: any[] };
+        sidebar?: { recent_notebooks?: any[] };
       }>).detail;
       if (!detail) return;
       chatBootstrapReadyRef.current = true;
       if (detail.user) {
         setUser(detail.user);
-      }
-      if (Array.isArray(detail.sidebar?.conversations)) {
-        const incoming = sortConversations(detail.sidebar.conversations.filter(isMainChatConversation));
-        updateConversationsStable((prev) => mergeConversationLists(prev, incoming));
-        setLoading(false);
       }
       if (Array.isArray(detail.sidebar?.recent_notebooks)) {
         setNotebooks(detail.sidebar.recent_notebooks.map(mapBootstrapNotebook));
@@ -650,53 +579,6 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     window.addEventListener("chat-bootstrap-ready", handleBootstrapReady);
     return () => window.removeEventListener("chat-bootstrap-ready", handleBootstrapReady);
   }, []);
-
-  /* 加载对话 */
-  const loadConversations = useCallback(async () => {
-    if (!user) {
-      if (cachedConversations === null) setLoading(false);
-      return;
-    }
-    const normalizedPathname = pathname === "/" ? pathname : pathname.replace(/\/$/, "");
-    const isChatConversationRoute = normalizedPathname === "/chat" && !!effectiveRouteConvId;
-    if (isChatConversationRoute && !chatBootstrapReadyRef.current) return;
-    const isFirstLoad = cachedConversations === null;
-    if (isFirstLoad) setLoading(true);
-    const page = await fetchConversations(currentWS?.id);
-    if (page === null) {
-      if (isFirstLoad) setLoading(false);
-      return;
-    }
-    setConversationTotal(page.total);
-    setConversationNextOffset((page.offset || 0) + page.conversations.length);
-    setConversationNextCursor(page.next_cursor);
-    setConversationHasMore(page.has_more);
-    if (isFirstLoad) {
-      const next = sortConversations(page.conversations);
-      setConversations(next);
-      cachedConversations = next;
-      setLoading(false);
-    } else {
-      updateConversationsStable(() => sortConversations(page.conversations));
-    }
-  }, [user, currentWS?.id, pathname, effectiveRouteConvId, updateConversationsStable]);
-
-  useEffect(() => { loadConversations(); }, [loadConversations]);
-
-  const hasMoreConversations = hasMoreSidebarConversations(conversations.length, conversationNextOffset, conversationTotal, conversationHasMore);
-
-  const loadMoreConversations = useCallback(async () => {
-    if (loadingMoreConversations || !hasMoreConversations) return;
-    setLoadingMoreConversations(true);
-    const page = await fetchConversations(currentWS?.id, conversationNextOffset, conversationNextCursor);
-    setLoadingMoreConversations(false);
-    if (!page) return;
-    setConversationTotal(page.total);
-    setConversationNextOffset((page.offset || conversationNextOffset) + page.conversations.length);
-    setConversationNextCursor(page.next_cursor);
-    setConversationHasMore(page.has_more);
-    updateConversationsStable((prev) => mergeConversationLists(prev, page.conversations));
-  }, [conversationHasMore, conversationNextCursor, conversationNextOffset, currentWS?.id, hasMoreConversations, loadingMoreConversations, updateConversationsStable]);
 
   const loadNotebooks = useCallback(async () => {
     const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
@@ -823,57 +705,11 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     }
   }, [searchSelectedIndex]);
 
-  useEffect(() => {
-    const h = (e: Event) => {
-      const d = (e as CustomEvent).detail;
-      if (!d?.id) {
-        loadConversations();
-        return;
-      }
-      const now = new Date().toISOString();
-      const conv: Conversation = {
-        id: Number(d.id),
-        title: d.title || t("sidebar.empty.new_chat"),
-        model: d.model || "",
-        pinned: !!d.pinned,
-        created_at: d.created_at || now,
-        updated_at: d.updated_at || now,
-        skill_key: d.skill_key,
-      };
-      if (!isMainChatConversation(conv)) return;
-      updateConversationsStable(prev => sortConversations([conv, ...prev.filter(c => c.id !== conv.id)]));
-    };
-    window.addEventListener("conversation-created", h);
-    return () => window.removeEventListener("conversation-created", h);
-  }, [loadConversations, t, updateConversationsStable]);
-  useEffect(() => {
-    const h = (e: Event) => {
-      const d = (e as CustomEvent).detail;
-      if (d?.id != null && d?.title != null) {
-        const targetId = typeof d.id === "string" ? Number(d.id) : d.id;
-        updateConversationsStable(prev => prev.map(c => c.id === targetId ? { ...c, title: d.title } : c));
-      }
-    };
-    window.addEventListener("conversation-renamed", h);
-    return () => window.removeEventListener("conversation-renamed", h);
-  }, [updateConversationsStable]);
-  useEffect(() => {
-    const h = (e: Event) => {
-      const d = (e as CustomEvent).detail;
-      const rawId = d?.id ?? d?.conversationId;
-      if (rawId == null) return;
-      const targetId = typeof rawId === "string" ? Number(rawId) : rawId;
-      if (!Number.isFinite(targetId)) return;
-      updateConversationsStable(prev => applySidebarConversationActivity(prev, { ...d, id: targetId }));
-    };
-    window.addEventListener("conversation-updated", h);
-    return () => window.removeEventListener("conversation-updated", h);
-  }, [updateConversationsStable]);
   // 工作区切换 / 登录登出时刷新
-  useEffect(() => { const h = () => { cachedConversations = null; loadConversations(); }; window.addEventListener("workspace-changed", h); window.addEventListener("user-login", h); window.addEventListener("user-logout", h); return () => { window.removeEventListener("workspace-changed", h); window.removeEventListener("user-login", h); window.removeEventListener("user-logout", h); }; }, [loadConversations]);
+  useEffect(() => { const h = () => { clearChatSidebarHistoryCache(`desktop:${currentWS?.id || "all"}`); loadConversations(); }; window.addEventListener("workspace-changed", h); window.addEventListener("user-login", h); window.addEventListener("user-logout", h); return () => { window.removeEventListener("workspace-changed", h); window.removeEventListener("user-login", h); window.removeEventListener("user-logout", h); }; }, [currentWS?.id, loadConversations]);
 
   /* 操作 */
-  const handleLogout = () => { localStorage.removeItem("token"); localStorage.removeItem("user"); import("@/lib/guestId").then(({ getGuestId }) => getGuestId()); setUser(null); setConversations([]); cachedConversations = null; window.location.href = "/"; };
+  const handleLogout = () => { localStorage.removeItem("token"); localStorage.removeItem("user"); import("@/lib/guestId").then(({ getGuestId }) => getGuestId()); setUser(null); setConversations([]); clearChatSidebarHistoryCache(`desktop:${currentWS?.id || "all"}`); window.location.href = "/"; };
   const handleNewChat = () => {
     const ts = Date.now();
     if (skillKey) {
@@ -1025,7 +861,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     const token = localStorage.getItem("token"); if (!token) return;
-    try { const r = await fetch(`/api/conversations/${deleteTarget}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }); if (r.ok) { invalidateConversationSnapshot(deleteTarget); deletePersistentConversationSnapshot(deleteTarget); const next = conversations.filter(c => c.id !== deleteTarget); setConversations(next); cachedConversations = next; if (String(deleteTarget) === currentConvId) {
+    try { const r = await fetch(`/api/conversations/${deleteTarget}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }); if (r.ok) { invalidateConversationSnapshot(deleteTarget); deletePersistentConversationSnapshot(deleteTarget); const next = conversations.filter(c => c.id !== deleteTarget); setConversations(next); if (String(deleteTarget) === currentConvId) {
       if (skillKey) {
         router.push(`/skills/chat?key=${skillKey}`);
       } else {
@@ -1038,13 +874,13 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   const handleRename = async (newTitle: string) => {
     if (!renameTarget) return;
     const token = localStorage.getItem("token"); if (!token) return;
-    try { const r = await fetch(`/api/conversations/${renameTarget.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ title: newTitle }) }); if (r.ok) { const u = await r.json(); const next = conversations.map(c => c.id === u.id ? { ...c, title: u.title } : c); setConversations(next); cachedConversations = next; window.dispatchEvent(new CustomEvent("conversation-renamed", { detail: { id: u.id, title: u.title } })); } } catch {}
+    try { const r = await fetch(`/api/conversations/${renameTarget.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ title: newTitle }) }); if (r.ok) { const u = await r.json(); const next = conversations.map(c => c.id === u.id ? { ...c, title: u.title } : c); setConversations(next); window.dispatchEvent(new CustomEvent("conversation-renamed", { detail: { id: u.id, title: u.title } })); } } catch {}
     setRenameTarget(null);
   };
 
   const handleTogglePin = async (conv: Conversation) => {
     const token = localStorage.getItem("token"); if (!token) return;
-    try { const r = await fetch(`/api/conversations/${conv.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ pinned: !conv.pinned }) }); if (r.ok) { const u = await r.json(); const next = sortConversations(conversations.map(c => c.id === u.id ? { ...c, pinned: u.pinned } : c)); setConversations(next); cachedConversations = next; } } catch {}
+    try { const r = await fetch(`/api/conversations/${conv.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ pinned: !conv.pinned }) }); if (r.ok) { const u = await r.json(); const next = sortConversations(conversations.map(c => c.id === u.id ? { ...c, pinned: u.pinned } : c)); setConversations(next); } } catch {}
   };
 
   const handleShare = (conv: Conversation) => {

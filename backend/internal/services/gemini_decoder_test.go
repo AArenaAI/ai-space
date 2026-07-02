@@ -61,3 +61,33 @@ func TestGeminiExtractTextSkipsThoughtParts(t *testing.T) {
 		t.Fatalf("extractGeminiThoughtText = %q, want 思考内容", got)
 	}
 }
+
+func TestGeminiDecoderEmitsGroundingAsSearchSources(t *testing.T) {
+	payload := "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"正文内容\"}]},\"groundingMetadata\":{\"groundingChunks\":[{\"web\":{\"uri\":\"https://example.com/news\",\"title\":\"Example News\"}}]}}]}\n\n"
+	dec := NewGeminiDecoder(geminiTestReadCloser{strings.NewReader(payload)})
+
+	event, err := dec.Next()
+	if err != nil {
+		t.Fatalf("text event err: %v", err)
+	}
+	if event.Type != EventTextDelta || event.Delta != "正文内容" {
+		t.Fatalf("text event = %#v", event)
+	}
+	event, err = dec.Next()
+	if err != nil {
+		t.Fatalf("sources event err: %v", err)
+	}
+	if event.Type != EventSearchDone || len(event.SearchSources) != 1 {
+		t.Fatalf("sources event = %#v, want one search source", event)
+	}
+	if event.SearchSources[0].URL != "https://example.com/news" || event.SearchSources[0].Title != "Example News" {
+		t.Fatalf("sources = %#v", event.SearchSources)
+	}
+	event, err = dec.Next()
+	if err != nil {
+		t.Fatalf("done event err: %v", err)
+	}
+	if event.Type != EventDone {
+		t.Fatalf("done event = %#v", event)
+	}
+}

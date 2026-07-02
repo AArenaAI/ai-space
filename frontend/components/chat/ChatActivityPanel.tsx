@@ -10,6 +10,7 @@ import { getOrderedTimelineSteps, type ChatStatusTimelineStep } from "@/lib/chat
 import { resolveChatMessageRuntimeState } from "@/lib/chatMessageRuntimeState";
 import { isLowSignalCompletedActivityStep } from "@/lib/chatActivityTimeline";
 import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
+import { groupSearchSourcesByHost, normalizeSearchSources } from "@/lib/searchSources";
 
 function statusIcon(step: ChatStatusTimelineStep) {
   if (step.status === "failed") return <AlertCircle className="h-3.5 w-3.5 text-red-500" />;
@@ -36,11 +37,13 @@ function getActivityStepLabel(_t: (key: string, params?: Record<string, string>)
     const count = step.count ? `${step.count} 个来源` : "网页来源";
     if (step.status === "running") return "正在搜索网页";
     if (step.status === "failed") return "搜索失败";
-    return `参考了 ${count}`;
+    return `搜索完成 · ${count}`;
   }
   if (step.kind === "file_search") return step.status === "running" ? "正在检索文件" : "检索了文件";
+  if (step.kind === "waiting_provider" && step.status === "failed") return "模型生成失败";
+  if (step.kind === "streaming_answer" && step.status === "failed") return "模型生成失败";
   if (step.kind === "tool_call") return step.status === "running" ? "正在使用工具" : "使用了工具";
-  if (step.kind === "reasoning") return step.status === "running" ? "正在思考" : "思考过程";
+  if (step.kind === "reasoning") return step.status === "running" ? "正在思考" : "模型思考";
   if (step.kind === "streaming_answer") return step.status === "running" ? "正在生成回答" : "回答完成";
   return step.status === "running" ? "正在处理" : "已处理";
 }
@@ -96,23 +99,39 @@ function countMarkdownSources(content?: string) {
   return urls.size;
 }
 
-function sourceHost(url?: string) {
-  if (!url) return "网页";
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return url.replace(/^https?:\/\//, "").split("/")[0] || "网页";
-  }
+function resolveActivityPanelTitle({
+  active,
+  elapsedSeconds,
+  filesCount,
+  hasReasoning,
+  sourceCount,
+  timeline,
+}: {
+  active: boolean;
+  elapsedSeconds: number;
+  filesCount: number;
+  hasReasoning: boolean;
+  sourceCount: number;
+  timeline: ChatStatusTimelineStep[];
+}) {
+  const hasReferenceWork = sourceCount > 0 || filesCount > 0 || timeline.some((step) => step.kind === "web_search" || step.kind === "file_search");
+  const baseTitle = hasReferenceWork ? "思考与来源" : hasReasoning ? "思考过程" : "活动";
+  return active ? `${baseTitle} · ${elapsedSeconds}s` : baseTitle;
 }
 
-function sourceOrganization(host: string) {
-  if (host.includes("bea.gov")) return "美国经济分析局";
-  if (host.includes("bls.gov")) return "美国劳工统计局";
-  if (host.includes("federalreserve.gov")) return "美联储";
-  return host;
-}
-
-export default function ChatActivityPanel({ message, model, onClose, variant = "docked" }: { message?: Message | null; model?: ChatModel; onClose: () => void; variant?: "docked" | "inline" | "embedded" }) {
+export default function ChatActivityPanel({
+  message,
+  model,
+  onClose,
+  variant = "docked",
+  ownerLabel,
+}: {
+  message?: Message | null;
+  model?: ChatModel;
+  onClose: () => void;
+  variant?: "docked" | "inline" | "embedded";
+  ownerLabel?: string;
+}) {
   const { t } = useI18n();
   const [reasoningOpen, setReasoningOpen] = useState(true);
   const [snapshotTimeline, setSnapshotTimeline] = useState<ChatStatusTimelineStep[] | undefined>();
@@ -140,7 +159,8 @@ export default function ChatActivityPanel({ message, model, onClose, variant = "
   }, [message?.generationTaskId, message?.id]);
   if (!message) return null;
   const runtimeState = resolveChatMessageRuntimeState({ message, realtime, snapshotTimeline });
-  const sources = Array.from(new Map(runtimeState.searchSources.map((source) => [source.url || source.title, source])).values());
+  const sources = normalizeSearchSources(runtimeState.searchSources);
+  const sourceGroups = groupSearchSourcesByHost(sources);
   const inferredSourceCount = sources.length || countMarkdownSources(runtimeState.content);
   const timeline = getOrderedTimelineSteps(runtimeState.statusTimeline)
     .map((step) => step.kind === "web_search" && !step.count && inferredSourceCount ? { ...step, count: inferredSourceCount } : step)
@@ -153,6 +173,14 @@ export default function ChatActivityPanel({ message, model, onClose, variant = "
   const elapsedEndAt = runtimeState.completedAt || Date.now();
   const elapsedStartAt = runtimeState.generationStartedAt || message.createdAt || Date.now();
   const elapsedSeconds = Math.max(0, Math.round((elapsedEndAt - elapsedStartAt) / 1000));
+  const panelTitle = resolveActivityPanelTitle({
+    active,
+    elapsedSeconds,
+    filesCount: files.length,
+    hasReasoning: Boolean(reasoning),
+    sourceCount: sources.length || inferredSourceCount,
+    timeline,
+  });
 
   const timelineStartAt = timeline[0]?.startedAt || message.generationStartedAt || message.createdAt;
   const panelClassName = variant === "docked"
@@ -162,11 +190,11 @@ export default function ChatActivityPanel({ message, model, onClose, variant = "
       : "flex max-h-[min(62vh,520px)] flex-col rounded-2xl border border-surface-border/65 bg-surface/80 p-4 shadow-sm";
 
   return (
-    <aside className={panelClassName} data-chat-activity-panel="true" data-chat-activity-variant={variant}>
+    <aside className={panelClassName} data-chat-activity-panel="true" data-chat-activity-variant={variant} data-chat-activity-owner={ownerLabel || undefined} data-chat-activity-title={panelTitle}>
       <div className="mb-5 flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-base font-semibold text-text-primary">思考与来源{active ? ` · ${elapsedSeconds}s` : ""}</div>
-          <div className="mt-0.5 truncate text-sm text-text-tertiary">{model?.name || message.model || "AI"}</div>
+          <div className="text-base font-semibold text-text-primary">{panelTitle}</div>
+          <div className="mt-0.5 truncate text-sm text-text-tertiary">{ownerLabel ? `${ownerLabel} · ` : ""}{model?.name || message.model || "AI"}</div>
         </div>
         <button type="button" onClick={onClose} className="rounded-full p-1.5 text-text-tertiary hover:bg-surface-card hover:text-text-primary" aria-label="Close activity panel">
           <X className="h-4 w-4" />
@@ -175,7 +203,7 @@ export default function ChatActivityPanel({ message, model, onClose, variant = "
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-chat-activity-scroll="true">
         <section className="mb-7">
-          <div className="mb-4 text-sm font-semibold text-text-secondary">过程</div>
+          <div className="mb-4 text-sm font-semibold text-text-secondary">生成过程</div>
           <div className="relative space-y-0">
             {timeline.length ? timeline.map((step, index) => {
               const showReasoning = step.kind === "reasoning" && reasoning;
@@ -244,15 +272,32 @@ export default function ChatActivityPanel({ message, model, onClose, variant = "
           <section>
             <div className="mb-2 text-sm font-semibold text-text-secondary">参考来源 · {sources.length}</div>
             <div className="space-y-2">
-              {sources.slice(0, 12).map((source, index) => {
-                const host = sourceHost(source.url);
-                const organization = sourceOrganization(host);
-                const sourceMeta = organization === host ? host : `${organization} · ${host}`;
+              {sourceGroups.slice(0, 12).map((group) => {
+                const sourceMeta = group.organization === group.host ? group.host : `${group.organization} · ${group.host}`;
+                const primarySource = group.sources[0];
+                const title = group.sources.length > 1 ? `${group.host} · ${group.sources.length}` : (primarySource.title || group.organization);
                 return (
-                  <a key={`${source.url}:${index}`} href={source.url} target="_blank" rel="noreferrer" className="block rounded-xl bg-surface-card/60 px-2.5 py-2 text-sm hover:bg-surface-card" title={source.url}>
-                    <div className="truncate font-medium text-text-secondary">{source.title || organization}</div>
-                    <div className="mt-0.5 truncate text-text-tertiary">{sourceMeta}</div>
-                  </a>
+                  <details key={group.host} className="group rounded-xl bg-surface-card/60 px-2.5 py-2 text-sm hover:bg-surface-card" open={group.sources.length === 1 ? undefined : false}>
+                    <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                      <div className="flex min-w-0 items-center justify-between gap-2">
+                        <div className="truncate font-medium text-text-secondary">{title}</div>
+                        {group.sources.length > 1 && (
+                          <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-text-tertiary">
+                            展开
+                            <ChevronDown className="h-3.5 w-3.5 -rotate-90 transition-transform group-open:rotate-0" />
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-0.5 truncate text-text-tertiary">{sourceMeta}</div>
+                    </summary>
+                    <div className="mt-2 space-y-1.5 border-t border-surface-border/60 pt-2">
+                      {group.sources.map((source, sourceIndex) => (
+                        <a key={`${source.url}:${sourceIndex}`} href={source.url} target="_blank" rel="noreferrer" className="block truncate rounded-lg px-1.5 py-1 text-text-tertiary hover:bg-surface-elevated hover:text-text-secondary" title={source.url}>
+                          {source.title || source.url || group.host}
+                        </a>
+                      ))}
+                    </div>
+                  </details>
                 );
               })}
             </div>

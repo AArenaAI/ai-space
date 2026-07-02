@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type UIEvent, type WheelEvent } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type UIEvent } from "react";
 import { Bot, Check, Play } from "lucide-react";
 import type { ChatModel, Message } from "@/lib/chatTypes";
 import type { InferredGroup } from "@/lib/groups";
@@ -30,6 +30,8 @@ const COMPARE_COLUMN_SCROLL_STYLE: CSSProperties = {
   maxHeight: "min(72vh, calc(100vh - 280px))",
   overscrollBehavior: "contain",
 };
+const COMPARE_COLUMN_FADE_TOP_PX = 44;
+const COMPARE_COLUMN_FADE_BOTTOM_PX = 56;
 const MARKDOWN_HYDRATE_ROOT_MARGIN = "1800px 0px";
 const SIMPLE_ASSISTANT_VIEWPORT_OBSERVER_SKIP_LENGTH = 500;
 
@@ -39,18 +41,12 @@ type ScrollEdgeState = {
   atBottom: boolean;
 };
 
-function handleCompareColumnWheel(event: WheelEvent<HTMLDivElement>) {
-  const el = event.currentTarget;
-  if (el.scrollHeight <= el.clientHeight + 1) return;
-  const deltaY = event.deltaY;
-  const atTop = el.scrollTop <= 1;
-  const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
-  const canScrollUp = deltaY < 0 && !atTop;
-  const canScrollDown = deltaY > 0 && !atBottom;
-  if (canScrollUp || canScrollDown) {
-    event.stopPropagation();
-  }
+function getVisibleChatHistoryScroller(): HTMLElement | null {
+  if (typeof document === "undefined") return null;
+  return Array.from(document.querySelectorAll('[data-testid="chat-history-scroll-container"]'))
+    .find((node): node is HTMLElement => node instanceof HTMLElement && node.offsetParent !== null && node.clientHeight > 0) || null;
 }
+
 
 function getCompareColumnScrollStorageKey(conversationId: number | undefined, messageId: string | number | undefined) {
   return `ai-space:chat:compare-column-scroll:${conversationId ?? "new"}:${messageId ?? "none"}`;
@@ -89,6 +85,7 @@ type CompareColumnTurnProps = {
   model?: ChatModel;
   badgeGroup?: InferredGroup;
   activeAssistantId?: string;
+  columnIndex?: number;
   onSelectAssistant?: (assistantId: string) => void;
   modelById: Map<string, ChatModel>;
   isLastGroup: boolean;
@@ -130,6 +127,7 @@ function CompareColumnTurn({
   model,
   badgeGroup,
   activeAssistantId,
+  columnIndex = 0,
   onSelectAssistant,
   modelById,
   isLastGroup,
@@ -171,8 +169,16 @@ function CompareColumnTurn({
   const profileSnapshotRef = useRef<Record<string, unknown> | null>(null);
   const [openBadgeMenu, setOpenBadgeMenu] = useState(false);
   const [scrollEdgeState, setScrollEdgeState] = useState<ScrollEdgeState>({ canScroll: false, atTop: true, atBottom: true });
+  const [rightHalfFocused, setRightHalfFocused] = useState(false);
   const showBadgeSwitcher = !!badgeGroup && badgeGroup.assistantMessages.length > 2 && !!onSelectAssistant;
+  const ownerLabel = columnIndex === 0 ? "左列" : columnIndex === 1 ? "右列" : `第 ${columnIndex + 1} 列`;
   const terminalMessage = !!msg && isTerminalMessage(msg);
+  const columnScrollMaskStyle = scrollEdgeState.canScroll
+    ? {
+        WebkitMaskImage: `linear-gradient(to bottom, ${scrollEdgeState.atTop ? "#000 0" : "transparent 0, #000 " + COMPARE_COLUMN_FADE_TOP_PX + "px"}, #000 calc(100% - ${scrollEdgeState.atBottom ? 0 : COMPARE_COLUMN_FADE_BOTTOM_PX}px), ${scrollEdgeState.atBottom ? "#000 100%" : "transparent 100%"})`,
+        maskImage: `linear-gradient(to bottom, ${scrollEdgeState.atTop ? "#000 0" : "transparent 0, #000 " + COMPARE_COLUMN_FADE_TOP_PX + "px"}, #000 calc(100% - ${scrollEdgeState.atBottom ? 0 : COMPARE_COLUMN_FADE_BOTTOM_PX}px), ${scrollEdgeState.atBottom ? "#000 100%" : "transparent 100%"})`,
+      } satisfies CSSProperties
+    : undefined;
   const hasLiveGenerationSignal = !!msg && !terminalMessage && !!(
     msg.activityStatus ||
     msg.serverMessageId ||
@@ -246,10 +252,62 @@ function CompareColumnTurn({
   const handleColumnScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
     persistColumnScrollTop(event.currentTarget);
   }, [persistColumnScrollTop]);
-  const handleColumnWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
-    handleCompareColumnWheel(event);
-    const el = event.currentTarget;
-    window.requestAnimationFrame(() => persistColumnScrollTop(el));
+  const isPointerInRightHalf = useCallback((event: { clientX: number; currentTarget: HTMLElement }) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return event.clientX >= rect.left + rect.width / 2;
+  }, []);
+
+  const handleColumnMouseMove = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    setRightHalfFocused(isPointerInRightHalf(event));
+  }, [isPointerInRightHalf]);
+
+  const handleColumnMouseLeave = useCallback(() => {
+    setRightHalfFocused(false);
+  }, []);
+
+
+  useEffect(() => {
+    const el = columnScrollRef.current;
+    if (!el) return;
+    const handleNativeWheel = (event: WheelEvent) => {
+      const rect = el.getBoundingClientRect();
+      const inRightHalf = event.clientX >= rect.left + rect.width / 2;
+      if (inRightHalf) {
+        const nestedActivityScroll = event.target instanceof Element
+          ? event.target.closest('[data-chat-activity-scroll="true"]')
+          : null;
+        const atTop = el.scrollTop <= 1;
+        const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+        const canScrollUp = event.deltaY < 0 && !atTop;
+        const canScrollDown = event.deltaY > 0 && !atBottom;
+        if (nestedActivityScroll instanceof HTMLElement && el.contains(nestedActivityScroll)) {
+          const activityAtTop = nestedActivityScroll.scrollTop <= 1;
+          const activityAtBottom = nestedActivityScroll.scrollTop + nestedActivityScroll.clientHeight >= nestedActivityScroll.scrollHeight - 1;
+          const canActivityScrollUp = event.deltaY < 0 && !activityAtTop;
+          const canActivityScrollDown = event.deltaY > 0 && !activityAtBottom;
+          if (canActivityScrollUp || canActivityScrollDown) {
+            event.stopPropagation();
+            return;
+          }
+          if (canScrollUp || canScrollDown) {
+            event.preventDefault();
+            event.stopPropagation();
+            el.scrollTop += event.deltaY;
+            window.requestAnimationFrame(() => persistColumnScrollTop(el));
+            return;
+          }
+        }
+        if (canScrollUp || canScrollDown) event.stopPropagation();
+        return;
+      }
+      const outer = getVisibleChatHistoryScroller();
+      if (!outer) return;
+      event.preventDefault();
+      event.stopPropagation();
+      outer.scrollTop += event.deltaY;
+    };
+    el.addEventListener('wheel', handleNativeWheel, { capture: true, passive: false });
+    return () => el.removeEventListener('wheel', handleNativeWheel, { capture: true });
   }, [persistColumnScrollTop]);
 
   useLayoutEffect(() => {
@@ -370,7 +428,15 @@ function CompareColumnTurn({
       {showUserMessage && <CompareUserMessageBubble message={userMessage} imageLoadFailedLabel={imageLoadFailedLabel} />}
       <div className="flex flex-1 flex-col">
         {msg ? (
-          <div className="group flex gap-3 animate-message-appear">
+          <div
+            className={cn(
+              "group flex gap-3 animate-message-appear rounded-3xl px-2 py-2 -mx-2 -my-2 transition-colors duration-200",
+              rightHalfFocused && "bg-slate-500/[0.055] dark:bg-white/[0.06] green:bg-black/[0.045]"
+            )}
+            data-compare-column-focus-zone={rightHalfFocused ? "right" : "page"}
+            onMouseMove={handleColumnMouseMove}
+            onMouseLeave={handleColumnMouseLeave}
+          >
             <div className="mt-1 w-7 shrink-0">
               <div className="relative">
                 <button
@@ -428,11 +494,10 @@ function CompareColumnTurn({
               <div className="w-full max-w-full bg-transparent px-0 py-1">
                 <div>
                   <div className="min-w-0">
-                    <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="mb-2 flex items-center gap-2">
                       {model && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} compact inlineStatus />}
-
                     </div>
-                    <div className="relative" data-compare-column-scroll-frame="true">
+                    <div className="relative rounded-2xl border border-transparent bg-transparent" data-compare-column-scroll-frame="true">
                       <div
                         ref={columnScrollRef}
                         data-compare-column-scroll-container="true"
@@ -440,12 +505,11 @@ function CompareColumnTurn({
                         data-compare-column-can-scroll={scrollEdgeState.canScroll ? "true" : "false"}
                         data-compare-column-at-top={scrollEdgeState.atTop ? "true" : "false"}
                         data-compare-column-at-bottom={scrollEdgeState.atBottom ? "true" : "false"}
-                        className="compare-column-scroll-container -mx-1 overflow-y-auto overflow-x-hidden px-1 pr-2 [scrollbar-gutter:stable] [scrollbar-width:thin]"
-                        style={COMPARE_COLUMN_SCROLL_STYLE}
+                        className="compare-column-scroll-container overflow-y-auto overflow-x-hidden px-3 py-2 pr-3 [scrollbar-gutter:stable]"
+                        style={{ ...COMPARE_COLUMN_SCROLL_STYLE, ...columnScrollMaskStyle }}
                         onScroll={handleColumnScroll}
-                        onWheel={handleColumnWheel}
                       >
-                        <div className={cn(isActivityOpen && activityLayout === "split" && "grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(260px,0.72fr)]") }>
+                        <div className={cn("pb-5", isActivityOpen && activityLayout === "split" && "grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(260px,0.72fr)]") }>
                           <div className="min-w-0">
                           <AssistantMessageContent
                             message={msg}
@@ -454,7 +518,7 @@ function CompareColumnTurn({
                             recoverEmptyContent
                             onRegenerate={onRegenerate}
                             onOpenActivity={() => onOpenActivity?.(msg, activityLayout)}
-                            inlineActivity={isActivityOpen && activityLayout === "inline" ? <ChatActivityPanel message={msg} model={model} onClose={() => onOpenActivity?.(msg, activityLayout)} variant="inline" /> : undefined}
+                            inlineActivity={isActivityOpen && activityLayout === "inline" ? <ChatActivityPanel message={msg} model={model} onClose={() => onOpenActivity?.(msg, activityLayout)} variant="inline" ownerLabel={ownerLabel} /> : undefined}
                             shouldHydrateRichText={!blockRichTextHydration && (isNearViewport || forceHydrateRichText)}
                             priorityHydrateRichText={!blockRichTextHydration && (forceHydrateRichText || stabilizeInitialRichText || deferOffscreenRichTextHydration)}
                             allowRichLiteFallback={allowRichLiteFallback || forceStableRichLiteFallback || isInitialReadingAssistant || isViewedAssistant}
@@ -472,7 +536,7 @@ function CompareColumnTurn({
                         </div>
                         {isActivityOpen && activityLayout === "split" && (
                           <div className="min-w-0">
-                            <ChatActivityPanel message={msg} model={model} onClose={() => onOpenActivity?.(msg, activityLayout)} variant="embedded" />
+                            <ChatActivityPanel message={msg} model={model} onClose={() => onOpenActivity?.(msg, activityLayout)} variant="embedded" ownerLabel={ownerLabel} />
                           </div>
                         )}
                       </div>
@@ -481,12 +545,12 @@ function CompareColumnTurn({
                         <>
                           <div
                             data-compare-column-scroll-shadow="top"
-                            className={cn("pointer-events-none absolute inset-x-0 top-0 h-7 rounded-t-2xl bg-gradient-to-b from-surface via-surface/75 to-transparent transition-opacity duration-150", scrollEdgeState.atTop ? "opacity-0" : "opacity-100")}
+                            className={cn("pointer-events-none absolute inset-x-px top-0 h-14 rounded-t-2xl transition-opacity duration-150", scrollEdgeState.atTop ? "opacity-0" : "opacity-100")}
                             aria-hidden="true"
                           />
                           <div
                             data-compare-column-scroll-shadow="bottom"
-                            className={cn("pointer-events-none absolute inset-x-0 bottom-0 h-8 rounded-b-2xl bg-gradient-to-t from-surface via-surface/75 to-transparent transition-opacity duration-150", scrollEdgeState.atBottom ? "opacity-0" : "opacity-100")}
+                            className={cn("pointer-events-none absolute inset-x-px bottom-0 h-16 rounded-b-2xl transition-opacity duration-150", scrollEdgeState.atBottom ? "opacity-0" : "opacity-100")}
                             aria-hidden="true"
                           />
                         </>

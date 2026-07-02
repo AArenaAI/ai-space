@@ -160,8 +160,8 @@ func (d *GeminiSDKStreamDecoder) runSeqAttempt(attempt int) bool {
 	if stopped {
 		return true
 	}
-	if citationDelta := d.flushSDKCitations(); citationDelta != "" {
-		if !d.emit(&AIStreamEvent{Type: EventTextDelta, Delta: citationDelta}, nil) {
+	if sources := d.flushSDKCitations(); len(sources) > 0 {
+		if !d.emit(&AIStreamEvent{Type: EventSearchDone, Delta: "网页搜索完成", SearchSources: sources}, nil) {
 			return true
 		}
 	}
@@ -230,14 +230,12 @@ func (d *GeminiSDKStreamDecoder) captureSDKGrounding(resp *genai.GenerateContent
 	}
 }
 
-func (d *GeminiSDKStreamDecoder) flushSDKCitations() string {
+func (d *GeminiSDKStreamDecoder) flushSDKCitations() []SearchResult {
 	if len(d.citations) == 0 {
-		return ""
+		return nil
 	}
-	var b strings.Builder
-	b.WriteString("\n\n---\n🔍 参考来源：\n")
+	var sources []SearchResult
 	seen := make(map[string]bool)
-	idx := 1
 	for _, c := range d.citations {
 		if c.URI == "" || seen[c.URI] {
 			continue
@@ -247,12 +245,8 @@ func (d *GeminiSDKStreamDecoder) flushSDKCitations() string {
 		if title == "" {
 			title = c.URI
 		}
-		b.WriteString("[" + title + "](" + c.URI + ")")
-		b.WriteString("\n")
-		idx++
+		sources = append(sources, SearchResult{Title: title, URL: c.URI, Description: title})
 	}
-	if idx == 1 {
-		return ""
-	}
-	return b.String()
+	d.citations = nil
+	return sources
 }

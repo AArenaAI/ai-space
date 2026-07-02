@@ -138,9 +138,11 @@ function MessageActions({
 
   return (
     <div data-message-actions="true" className={cn(
-      "mt-1 inline-flex items-center gap-0.5 rounded-xl bg-surface-card/80 px-1 py-0.5 transition-opacity duration-200",
+      "inline-flex items-center gap-0.5 rounded-xl bg-surface-card/80 transition-opacity duration-200",
       align === "right" ? "justify-end" : "justify-start",
-      visible ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+      visible
+        ? "mt-1 px-1 py-0.5 opacity-100"
+        : "mt-1 px-1 py-0.5 opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100"
     )}>
       {profileEnabled && (
         <MessageActionsProfileProbe

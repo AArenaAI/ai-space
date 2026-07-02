@@ -50,8 +50,12 @@ export default function BetaInvitesPage() {
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
   const fetchInvites = useCallback(async () => {
-    const token = localStorage.getItem("token");
-    if (!token) return;
+    const token = localStorage.getItem("admin_token");
+    if (!token) {
+      setInvites([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -75,8 +79,11 @@ export default function BetaInvitesPage() {
   }, [fetchInvites]);
 
   const handleGenerate = async () => {
-    const token = localStorage.getItem("token");
-    if (!token) return;
+    const token = localStorage.getItem("admin_token");
+    if (!token) {
+      alert("请先登录后台");
+      return;
+    }
     setGenerating(true);
     try {
       const res = await fetch("/api/admin/beta-invites/generate", {

@@ -856,11 +856,18 @@ func (s *AIService) callMoonshot(ctx context.Context, model string, messages []M
 		moonshotMessages = append(moonshotMessages, msg)
 	}
 
+	temperature := 1.0
+	if strings.HasPrefix(model, "kimi-k2") {
+		// Moonshot Kimi K2 family rejects other values with:
+		// "invalid temperature: only 0.6 is allowed for this model".
+		temperature = 0.6
+	}
+
 	reqBody := map[string]interface{}{
 		"model":       model,
 		"messages":    moonshotMessages,
 		"stream":      stream,
-		"temperature": 1.0,   // Kimi 官方推荐：思考模型使用 temperature=1.0；kimi-k2.6 固定使用 1.0
+		"temperature": temperature,
 		"max_tokens":  16384, // Kimi 官方推荐 ≥ 16000，确保 reasoning_content + content 不会被截断
 	}
 

@@ -81,7 +81,11 @@ test("message patch prefers live stream content while stream is active", () => {
   });
   assert.deepEqual(patch, {
     content: "stream half",
+    reasoningContent: undefined,
     serverMessageId: 12,
+    generationStartedAt: undefined,
+    statusTimeline: undefined,
+    serverGenerationStatus: undefined,
     activityStatus: { kind: "generating", status: "running", label: "生成中" },
     completedAt: undefined,
   });
@@ -97,7 +101,7 @@ test("shouldApplyPolledContent rejects active stream, blank db, shorter db and n
 
 test("selectFinalAssistantContent prefers completed db then live then existing", () => {
   assert.equal(mod.selectFinalAssistantContent({ existingContent: "old", liveContent: "live", dbContent: "db full", taskStatus: "completed" }), "db full");
-  assert.equal(mod.selectFinalAssistantContent({ existingContent: "old", liveContent: "live content", dbContent: "short", taskStatus: "completed" }), "live content");
+  assert.equal(mod.selectFinalAssistantContent({ existingContent: "old", liveContent: "live content", dbContent: "short", taskStatus: "completed" }), "short");
   assert.equal(mod.selectFinalAssistantContent({ existingContent: "old", liveContent: "live", dbContent: "db full", taskStatus: "running" }), "live");
   assert.equal(mod.selectFinalAssistantContent({ existingContent: "old", liveContent: "", dbContent: "db full", taskStatus: "running" }), "old");
 });
@@ -114,7 +118,11 @@ test("message patch uses polled content and clears activity when finished", () =
   });
   assert.deepEqual(patch, {
     content: "db full",
+    reasoningContent: undefined,
     serverMessageId: 12,
+    generationStartedAt: undefined,
+    statusTimeline: undefined,
+    serverGenerationStatus: "completed",
     activityStatus: undefined,
     completedAt: 100,
   });

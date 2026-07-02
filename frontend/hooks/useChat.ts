@@ -27,6 +27,10 @@ import {
   SearchSource,
 } from "@/lib/chatTypes";
 import { fetchChatBootstrap, type ChatBootstrapPayload } from "@/lib/chatBootstrapCoordinator";
+import {
+  getConversationMetadataEventFromDomEvent,
+  shouldApplyConversationTitleUpdate,
+} from "@/lib/chatConversationMetadataEvents";
 import { mapPersistedChatMessages, buildGroupViewsFromMessages } from "@/lib/chatForkCoordinator";
 import type { CachedConversationSnapshot } from "@/lib/chatConversationCache";
 import { setConversationSnapshot } from "@/lib/chatConversationCache";
@@ -232,6 +236,23 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     window.addEventListener("chat-conversation-before-route-change", handleBeforeRouteChange);
     return () => window.removeEventListener("chat-conversation-before-route-change", handleBeforeRouteChange);
   }, [persistCurrentConversationSnapshot]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleConversationMetadata = (event: Event) => {
+      const incoming = getConversationMetadataEventFromDomEvent(event);
+      if (!shouldApplyConversationTitleUpdate({ currentConversationId: currentConversation, incoming, currentTitle: conversationTitle, eventType: event.type })) return;
+      setConversationTitle(incoming!.title!);
+    };
+    window.addEventListener("conversation-updated", handleConversationMetadata);
+    window.addEventListener("conversation-renamed", handleConversationMetadata);
+    window.addEventListener("conversation-created", handleConversationMetadata);
+    return () => {
+      window.removeEventListener("conversation-updated", handleConversationMetadata);
+      window.removeEventListener("conversation-renamed", handleConversationMetadata);
+      window.removeEventListener("conversation-created", handleConversationMetadata);
+    };
+  }, [conversationTitle, currentConversation, setConversationTitle]);
 
   useEffect(() => {
     if (!currentConversation || messages.length === 0 || !isLoading) return;

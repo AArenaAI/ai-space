@@ -147,6 +147,7 @@ test("handles error payload with fallback request id", () => {
     retryable: true,
     activityStatus: undefined,
     searchStatus: undefined,
+    serverGenerationStatus: "failed",
     searchSources: undefined,
     phase: "failed",
   });

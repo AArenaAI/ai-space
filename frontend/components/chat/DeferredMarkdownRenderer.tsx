@@ -190,6 +190,16 @@ export function DeferredMarkdownRenderer({
       return;
     }
 
+    if (richFallbackEligible && !priorityHydrateRichText && !isStreaming && !complexity.isHeavy) {
+      if (!hasRenderedMarkdownRef.current) setShouldRenderMarkdown(false);
+      emitChatRenderProfileEvent("markdown-hydrate-stable-simple-lite", {
+        contentLength: content.length,
+        codeBlocks: complexity.codeBlocks,
+        tableLines: complexity.tableLines,
+      });
+      return;
+    }
+
     setShouldRenderMarkdown(false);
     if (!content) {
       hasRenderedMarkdownRef.current = false;

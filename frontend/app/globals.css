@@ -278,6 +278,72 @@
   background: rgba(107, 138, 109, 0.5);
 }
 
+/* Compare 列内滚动条：默认弱提示，hover/focus 时轻微浮现 */
+.compare-column-scroll-container {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.16) transparent;
+}
+
+.compare-column-scroll-container:hover,
+.compare-column-scroll-container:focus-within {
+  scrollbar-color: rgba(148, 163, 184, 0.36) transparent;
+}
+
+.compare-column-scroll-container::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.compare-column-scroll-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.compare-column-scroll-container::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background: rgba(148, 163, 184, 0.16);
+}
+
+.compare-column-scroll-container:hover::-webkit-scrollbar-thumb,
+.compare-column-scroll-container:focus-within::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.36);
+}
+
+.dark .compare-column-scroll-container {
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+
+.dark .compare-column-scroll-container:hover,
+.dark .compare-column-scroll-container:focus-within {
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+}
+
+.dark .compare-column-scroll-container::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.dark .compare-column-scroll-container:hover::-webkit-scrollbar-thumb,
+.dark .compare-column-scroll-container:focus-within::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.green .compare-column-scroll-container {
+  scrollbar-color: rgba(92, 94, 84, 0.18) transparent;
+}
+
+.green .compare-column-scroll-container:hover,
+.green .compare-column-scroll-container:focus-within {
+  scrollbar-color: rgba(92, 94, 84, 0.38) transparent;
+}
+
+.green .compare-column-scroll-container::-webkit-scrollbar-thumb {
+  background: rgba(92, 94, 84, 0.18);
+}
+
+.green .compare-column-scroll-container:hover::-webkit-scrollbar-thumb,
+.green .compare-column-scroll-container:focus-within::-webkit-scrollbar-thumb {
+  background: rgba(92, 94, 84, 0.38);
+}
+
 /* 隐藏滚动条的类 */
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
@@ -857,5 +923,142 @@
   }
   100% {
     transform: translateX(205%);
+  }
+}
+
+
+.gaokao-agent-orb {
+  isolation: isolate;
+  filter: drop-shadow(0 18px 34px rgba(139, 92, 246, 0.34));
+}
+
+.gaokao-agent-orb__halo {
+  position: absolute;
+  inset: 2px;
+  border-radius: 9999px;
+  background:
+    radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.96) 0 9%, rgba(196, 181, 253, 0.92) 18%, rgba(139, 92, 246, 0.84) 38%, rgba(59, 130, 246, 0.54) 62%, rgba(14, 165, 233, 0.14) 78%, transparent 100%);
+  box-shadow:
+    0 0 18px rgba(255, 255, 255, 0.76) inset,
+    0 0 28px rgba(139, 92, 246, 0.82),
+    0 0 54px rgba(59, 130, 246, 0.52),
+    0 0 88px rgba(14, 165, 233, 0.26);
+  animation: gaokao-orb-breathe 2.8s ease-in-out infinite;
+}
+
+.gaokao-agent-orb__core {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  height: 3.25rem;
+  width: 3.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.58);
+  background: radial-gradient(circle at 35% 28%, rgba(255, 255, 255, 0.96), rgba(167, 139, 250, 0.88) 34%, rgba(124, 58, 237, 0.94) 72%, rgba(37, 99, 235, 0.92));
+  box-shadow:
+    0 0 18px rgba(255, 255, 255, 0.58) inset,
+    0 0 22px rgba(139, 92, 246, 0.72);
+}
+
+.gaokao-agent-orb__ring {
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
+}
+
+.gaokao-agent-orb__ring--outer {
+  inset: -7px;
+  border: 1px solid rgba(167, 139, 250, 0.32);
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(255, 255, 255, 0.88) 38deg, rgba(96, 165, 250, 0.44) 72deg, transparent 116deg, transparent 360deg);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  animation: gaokao-orb-spin 5.8s linear infinite;
+}
+
+.gaokao-agent-orb__ring--inner {
+  inset: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  background: conic-gradient(from 180deg, transparent 0deg, rgba(125, 211, 252, 0.72) 54deg, rgba(216, 180, 254, 0.62) 98deg, transparent 145deg, transparent 360deg);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 1.5px), #000 calc(100% - 1.5px));
+  animation: gaokao-orb-spin-reverse 4.2s linear infinite;
+}
+
+.gaokao-agent-orb__particle {
+  position: absolute;
+  z-index: 2;
+  height: 0.42rem;
+  width: 0.42rem;
+  border-radius: 9999px;
+  background: #fff;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.95), 0 0 18px rgba(125, 211, 252, 0.76);
+  transform-origin: 0 0;
+}
+
+.gaokao-agent-orb__particle--one {
+  animation: gaokao-orb-particle-one 3.6s ease-in-out infinite;
+}
+
+.gaokao-agent-orb__particle--two {
+  height: 0.32rem;
+  width: 0.32rem;
+  animation: gaokao-orb-particle-two 4.8s ease-in-out infinite;
+}
+
+.gaokao-agent-orb__particle--three {
+  height: 0.28rem;
+  width: 0.28rem;
+  animation: gaokao-orb-particle-three 5.4s ease-in-out infinite;
+}
+
+.gaokao-agent-orb__notice {
+  position: absolute;
+  right: 0.35rem;
+  top: 0.45rem;
+  z-index: 4;
+  height: 0.72rem;
+  width: 0.72rem;
+  border-radius: 9999px;
+  border: 2px solid var(--surface);
+  background: #fff;
+  box-shadow: 0 0 14px rgba(255, 255, 255, 0.9), 0 0 22px rgba(139, 92, 246, 0.78);
+}
+
+@keyframes gaokao-orb-breathe {
+  0%, 100% { transform: scale(0.96); opacity: 0.88; }
+  50% { transform: scale(1.04); opacity: 1; }
+}
+
+@keyframes gaokao-orb-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes gaokao-orb-spin-reverse {
+  to { transform: rotate(-360deg); }
+}
+
+@keyframes gaokao-orb-particle-one {
+  0%, 100% { transform: translate(8px, 20px); opacity: 0.5; }
+  35% { transform: translate(58px, 5px); opacity: 1; }
+  70% { transform: translate(63px, 58px); opacity: 0.76; }
+}
+
+@keyframes gaokao-orb-particle-two {
+  0%, 100% { transform: translate(61px, 53px); opacity: 0.42; }
+  40% { transform: translate(23px, 67px); opacity: 0.9; }
+  78% { transform: translate(6px, 26px); opacity: 0.72; }
+}
+
+@keyframes gaokao-orb-particle-three {
+  0%, 100% { transform: translate(38px, 4px); opacity: 0.38; }
+  45% { transform: translate(70px, 35px); opacity: 0.95; }
+  82% { transform: translate(18px, 62px); opacity: 0.65; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gaokao-agent-orb__halo,
+  .gaokao-agent-orb__ring,
+  .gaokao-agent-orb__particle {
+    animation: none;
   }
 }

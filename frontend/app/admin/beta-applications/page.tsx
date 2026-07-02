@@ -77,8 +77,13 @@ export default function BetaApplicationsPage() {
   const [bcStats, setBcStats] = useState({ total: 0, pending: 0, reviewed: 0 });
 
   const fetchApplications = useCallback(async () => {
-    const token = localStorage.getItem("token");
-    if (!token) return;
+    const token = localStorage.getItem("admin_token");
+    if (!token) {
+      setApplications([]);
+      setAppStats({ total: 0, pending: 0, approved: 0, rejected: 0 });
+      setAppLoading(false);
+      return;
+    }
     setAppLoading(true);
     try {
       const params = new URLSearchParams();
@@ -104,8 +109,13 @@ export default function BetaApplicationsPage() {
   }, [statusFilter, industryFilter]);
 
   const fetchBadCases = useCallback(async () => {
-    const token = localStorage.getItem("token");
-    if (!token) return;
+    const token = localStorage.getItem("admin_token");
+    if (!token) {
+      setBadCases([]);
+      setBcStats({ total: 0, pending: 0, reviewed: 0 });
+      setBcLoading(false);
+      return;
+    }
     setBcLoading(true);
     try {
       const params = new URLSearchParams();
@@ -137,8 +147,11 @@ export default function BetaApplicationsPage() {
   }, [fetchBadCases]);
 
   const handleReview = async (id: number, status: "approved" | "rejected") => {
-    const token = localStorage.getItem("token");
-    if (!token) return;
+    const token = localStorage.getItem("admin_token");
+    if (!token) {
+      alert("请先登录后台");
+      return;
+    }
     setActionLoading(true);
     try {
       const res = await fetch(`/api/admin/beta-applications/${id}/review`, {
@@ -166,8 +179,11 @@ export default function BetaApplicationsPage() {
   };
 
   const handleBadCaseReview = async (id: number) => {
-    const token = localStorage.getItem("token");
-    if (!token) return;
+    const token = localStorage.getItem("admin_token");
+    if (!token) {
+      alert("请先登录后台");
+      return;
+    }
     setActionLoading(true);
     try {
       const credits = parseInt(grantedCredits) || 0;

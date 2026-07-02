@@ -100,7 +100,7 @@ function ChatCompareGroupRow({
       <div className="mb-4 pl-10 pr-0">
         <CompareSharedPromptBlock message={group.userMessage} imageLoadFailedLabel={imageLoadFailedLabel} />
       </div>
-      <div className="flex items-stretch gap-4">
+      <div className="grid grid-cols-1 items-stretch gap-5 lg:grid-cols-2 lg:gap-8 xl:gap-10" data-chat-compare-columns="true">
         {columnModels.map((modelId, colIndex) => {
           const defaultAssistant = resolveAssistant(group, colIndex, modelId);
           const selectedAssistantId = columnSelections[colIndex];
@@ -109,13 +109,14 @@ function ChatCompareGroupRow({
             : defaultAssistant;
 
           return (
-            <div key={modelId || colIndex} className="flex min-w-[320px] flex-1 flex-col py-1">
+            <div key={modelId || colIndex} className="flex min-w-0 flex-col py-1" data-chat-compare-column-shell="true">
               <CompareColumnTurn
                 userMessage={group.userMessage}
                 assistantMessage={assistant}
                 model={modelById.get(assistant?.model || modelId || "")}
                 badgeGroup={badgeGroup}
                 activeAssistantId={assistant?.id}
+                columnIndex={colIndex}
                 onSelectAssistant={(assistantId) => setColumnSelections((current) => ({ ...current, [colIndex]: assistantId }))}
                 modelById={modelById}
                 isLastGroup={isLastGroup}

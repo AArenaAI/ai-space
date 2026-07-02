@@ -34,6 +34,7 @@ const COMPARE_KEY = "compare-mode";
 const COMPARE_MODELS_KEY = "compare-models";
 const COMPARE_MODEL_LIMIT = 2;
 const EMPTY_COMPARE_LAYOUT_DELAY_MS = 520;
+const COMPARE_MODEL_PERSIST_DEBOUNCE_MS = 300;
 
 function normalizeCompareModelIds(modelIds: string[], models: ChatModel[]): string[] {
   const available = new Set(models.map((model) => model.id));
@@ -93,6 +94,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   const [messageSelectMode, setMessageSelectMode] = useState(false);
   const [activityPanelOpen, setActivityPanelOpen] = useState(false);
   const [quoteDraft, setQuoteDraft] = useState<QuoteDraft | null>(null);
+  const compareModelPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handledExternalSendIdRef = useRef<number | null>(null);
   const [modelRecommendationContext, setModelRecommendationContext] = useState<ModelRecommendationContext>();
   const [userName, setUserName] = useState<string>("");
@@ -111,6 +113,15 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   useEffect(() => {
     selectedModelsRef.current = selectedModels;
   }, [selectedModels]);
+
+  useEffect(() => {
+    return () => {
+      if (compareModelPersistTimerRef.current) {
+        clearTimeout(compareModelPersistTimerRef.current);
+        compareModelPersistTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const {
     messages,
@@ -242,7 +253,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     try {
       const r = await fetch(`/api/conversations/${conversationId}`, {
         method: "PUT",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
         body: JSON.stringify({ title: newTitle.trim() }),
       });
       if (r.ok) {
@@ -424,25 +435,57 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     router.push(`/chat?t=${Date.now()}`);
   };
 
+  const persistCompareModelsForConversation = useCallback((modelIds: string[]) => {
+    const targetConversationId = conversationId || currentConversation;
+    if (!targetConversationId || modelIds.length < COMPARE_MODEL_LIMIT) return;
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    if (compareModelPersistTimerRef.current) {
+      clearTimeout(compareModelPersistTimerRef.current);
+    }
+    compareModelPersistTimerRef.current = setTimeout(() => {
+      compareModelPersistTimerRef.current = null;
+      void fetch(`/api/conversations/${targetConversationId}`, {
+        method: "PUT",
+        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+        body: JSON.stringify({ compare: true, compare_models: JSON.stringify(modelIds) }),
+      }).then((response) => {
+        if (response.ok) {
+          window.dispatchEvent(new CustomEvent("conversation-updated", { detail: { conversationId: targetConversationId } }));
+        } else {
+          toast.warning("对比模型选择未保存，刷新后可能恢复为旧模型");
+        }
+      }).catch(() => {
+        toast.warning("对比模型选择未保存，刷新后可能恢复为旧模型");
+      });
+    }, COMPARE_MODEL_PERSIST_DEBOUNCE_MS);
+  }, [conversationId, currentConversation]);
+
   const handleCompareModelChange = (index: number, modelId: string) => {
     if (index < 0 || index >= COMPARE_MODEL_LIMIT) return;
-    setSelectedModels((prev) => {
-      const fallback = prev.length ? prev : models.slice(0, COMPARE_MODEL_LIMIT).map((m) => m.id);
-      const next = [...fallback].slice(0, COMPARE_MODEL_LIMIT);
-      while (next.length <= index && next.length < COMPARE_MODEL_LIMIT) {
-        next.push(models[next.length]?.id || modelId);
-      }
-      const oldModelId = next[index];
-      next[index] = modelId;
-      const normalized = normalizeCompareModelIds(next, models);
-      selectedModelsRef.current = normalized;
-      localStorage.setItem(COMPARE_MODELS_KEY, JSON.stringify(normalized));
-      // 埋点：模型切换
-      if (oldModelId && oldModelId !== modelId) {
-        trackModelSwitch(oldModelId, modelId);
-      }
-      return normalized;
-    });
+    const fallback = selectedModelsRef.current.length
+      ? selectedModelsRef.current
+      : selectedModels.length
+        ? selectedModels
+        : compareModels.length
+          ? compareModels
+          : models.slice(0, COMPARE_MODEL_LIMIT).map((m) => m.id);
+    const next = [...fallback].slice(0, COMPARE_MODEL_LIMIT);
+    while (next.length <= index && next.length < COMPARE_MODEL_LIMIT) {
+      next.push(models[next.length]?.id || modelId);
+    }
+    const oldModelId = next[index];
+    next[index] = modelId;
+    const normalized = normalizeCompareModelIds(next, models);
+    selectedModelsRef.current = normalized;
+    setSelectedModels(normalized);
+    setCompareModels(normalized);
+    localStorage.setItem(COMPARE_MODELS_KEY, JSON.stringify(normalized));
+    persistCompareModelsForConversation(normalized);
+    // 埋点：模型切换
+    if (oldModelId && oldModelId !== modelId) {
+      trackModelSwitch(oldModelId, modelId);
+    }
   };
 
   const toggleCompareMode = () => {
@@ -487,7 +530,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
       if (token) {
         void fetch(`/api/conversations/${conversationId}`, {
           method: "PUT",
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
           body: JSON.stringify({ compare: false, compare_models: "[]" }),
         }).then((response) => {
           if (response.ok) {
@@ -509,7 +552,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
 
   const activeCompareMode = compareMode || isCompare;
   const inputIsLoading = isCurrentConversationGenerating;
-  const activeCompareModelIds = compareMode ? selectedModels : (compareModels.length > 0 ? compareModels : selectedModels);
+  const activeCompareModelIds = selectedModels.length > 0 ? selectedModels : compareModels;
   const activeTargetMessageId = compareTargetMessageId ?? (currentConversation === conversationId ? targetMessageId : undefined);
   const isEmptyNewCompareMode = messages.length === 0 && !conversationId && activeCompareMode;
   const shouldDelayEmptyCompareLayout = isEmptyNewCompareMode && !emptyCompareLayoutReady;
