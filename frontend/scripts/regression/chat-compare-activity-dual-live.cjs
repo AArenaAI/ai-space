@@ -154,13 +154,15 @@ async function inspectActivity(page) {
     const variants = panels.map((panel) => panel.getAttribute('data-chat-activity-variant') || '');
     const owners = panels.map((panel) => panel.getAttribute('data-chat-activity-owner') || '');
     const texts = panels.map((panel) => (panel.textContent || '').slice(0, 300));
+    const hasProductProcessCopy = texts.every((text) => text.includes('生成过程') && text.includes('模型思考'));
+    const hasRepeatedReasoningHeading = texts.some((text) => text.includes('生成过程思考过程'));
     const compareColumns = Array.from(document.querySelectorAll('[data-compare-column-scroll-container="true"]'));
     const openColumnCount = compareColumns.filter((column) => column.querySelector('[data-chat-activity-panel="true"]')).length;
     const visiblePanels = panels.filter((panel) => {
       const rect = panel.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0;
     }).length;
-    return { panelCount: panels.length, visiblePanels, variants, owners, openColumnCount, texts };
+    return { panelCount: panels.length, visiblePanels, variants, owners, openColumnCount, hasProductProcessCopy, hasRepeatedReasoningHeading, texts };
   });
 }
 
@@ -210,6 +212,10 @@ async function inspectActivity(page) {
       && inline.owners.includes('右列')
       && split.owners.includes('左列')
       && split.owners.includes('右列')
+      && inline.hasProductProcessCopy
+      && split.hasProductProcessCopy
+      && !inline.hasRepeatedReasoningHeading
+      && !split.hasRepeatedReasoningHeading
       && pageErrors.length === 0,
     conversationId: created.conversation.id,
     models,

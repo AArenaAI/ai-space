@@ -40,7 +40,7 @@ function getActivityStepLabel(_t: (key: string, params?: Record<string, string>)
   }
   if (step.kind === "file_search") return step.status === "running" ? "正在检索文件" : "检索了文件";
   if (step.kind === "tool_call") return step.status === "running" ? "正在使用工具" : "使用了工具";
-  if (step.kind === "reasoning") return step.status === "running" ? "正在思考" : "思考过程";
+  if (step.kind === "reasoning") return step.status === "running" ? "正在思考" : "模型思考";
   if (step.kind === "streaming_answer") return step.status === "running" ? "正在生成回答" : "回答完成";
   return step.status === "running" ? "正在处理" : "已处理";
 }
@@ -215,7 +215,7 @@ export default function ChatActivityPanel({
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-chat-activity-scroll="true">
         <section className="mb-7">
-          <div className="mb-4 text-sm font-semibold text-text-secondary">过程</div>
+          <div className="mb-4 text-sm font-semibold text-text-secondary">生成过程</div>
           <div className="relative space-y-0">
             {timeline.length ? timeline.map((step, index) => {
               const showReasoning = step.kind === "reasoning" && reasoning;
