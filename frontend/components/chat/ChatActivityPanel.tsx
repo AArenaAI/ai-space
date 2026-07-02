@@ -112,6 +112,26 @@ function sourceOrganization(host: string) {
   return host;
 }
 
+function resolveActivityPanelTitle({
+  active,
+  elapsedSeconds,
+  filesCount,
+  hasReasoning,
+  sourceCount,
+  timeline,
+}: {
+  active: boolean;
+  elapsedSeconds: number;
+  filesCount: number;
+  hasReasoning: boolean;
+  sourceCount: number;
+  timeline: ChatStatusTimelineStep[];
+}) {
+  const hasReferenceWork = sourceCount > 0 || filesCount > 0 || timeline.some((step) => step.kind === "web_search" || step.kind === "file_search");
+  const baseTitle = hasReferenceWork ? "思考与来源" : hasReasoning ? "思考过程" : "活动";
+  return active ? `${baseTitle} · ${elapsedSeconds}s` : baseTitle;
+}
+
 export default function ChatActivityPanel({
   message,
   model,
@@ -165,6 +185,14 @@ export default function ChatActivityPanel({
   const elapsedEndAt = runtimeState.completedAt || Date.now();
   const elapsedStartAt = runtimeState.generationStartedAt || message.createdAt || Date.now();
   const elapsedSeconds = Math.max(0, Math.round((elapsedEndAt - elapsedStartAt) / 1000));
+  const panelTitle = resolveActivityPanelTitle({
+    active,
+    elapsedSeconds,
+    filesCount: files.length,
+    hasReasoning: Boolean(reasoning),
+    sourceCount: sources.length || inferredSourceCount,
+    timeline,
+  });
 
   const timelineStartAt = timeline[0]?.startedAt || message.generationStartedAt || message.createdAt;
   const panelClassName = variant === "docked"
@@ -174,10 +202,10 @@ export default function ChatActivityPanel({
       : "flex max-h-[min(62vh,520px)] flex-col rounded-2xl border border-surface-border/65 bg-surface/80 p-4 shadow-sm";
 
   return (
-    <aside className={panelClassName} data-chat-activity-panel="true" data-chat-activity-variant={variant} data-chat-activity-owner={ownerLabel || undefined}>
+    <aside className={panelClassName} data-chat-activity-panel="true" data-chat-activity-variant={variant} data-chat-activity-owner={ownerLabel || undefined} data-chat-activity-title={panelTitle}>
       <div className="mb-5 flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-base font-semibold text-text-primary">思考与来源{active ? ` · ${elapsedSeconds}s` : ""}</div>
+          <div className="text-base font-semibold text-text-primary">{panelTitle}</div>
           <div className="mt-0.5 truncate text-sm text-text-tertiary">{ownerLabel ? `${ownerLabel} · ` : ""}{model?.name || message.model || "AI"}</div>
         </div>
         <button type="button" onClick={onClose} className="rounded-full p-1.5 text-text-tertiary hover:bg-surface-card hover:text-text-primary" aria-label="Close activity panel">
