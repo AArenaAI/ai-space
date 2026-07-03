@@ -23,9 +23,9 @@
 
 | 优先级 | 主题 | 状态 | 说明 |
 |---|---|---:|---|
-| P1 | 发送后的稳定感 | 🟡 | 已补 live jitter/旧行稳定 probe；当前 3 轮 testnet 验证无旧行 remount/高度/文本变化；富文本完成态已统一到 stable token/block 渲染，后续继续做 block-level 增强。 |
+| P1 | 发送后的稳定感 | 🟡 | 已补 live jitter/旧行稳定 probe；当前 3 轮 testnet 验证无旧行 remount/高度/文本变化；富文本完成态已统一到 stable token/block 渲染，常用 Markdown + 数学/脚注/Mermaid 已覆盖，当前重点转向“完成后二次刷新”与更强 stress probe。 |
 | P2 | 模型选择与 Compare 可控感 | ✅ | Compare 模型持久化已静默 PATCH 当前会话，并有 testnet live 回归覆盖刷新与新一轮 payload。 |
-| P3 | 阅读效率 | 🟡 | Compare 双列与 Activity 来源已显著改善，但长消息/移动端/滚动细节仍需继续。 |
+| P3 | 阅读效率 | 🟡 | Compare 双列与 Activity 来源已显著改善；长 Markdown 常用结构、数学、脚注、Mermaid 已覆盖；移动端/滚动定位/长消息操作栏仍需继续。 |
 | P4 | 侧栏/历史体验 | 🟡 | “发送后会话移动到今天”等已修，hook 化未做。 |
 | P5 | 长期状态架构 | 🟡 | Markdown 渲染长期主干已落地为 `StableMarkdownRenderer`；ConversationRuntimeStore / stream ownership / merge 版本机制仍是长期工作。 |
 
@@ -144,7 +144,7 @@ npm run test:chat-placeholder-jitter-live
 
 ### 4. 富文本完成态稳定渲染长期方案
 
-**状态:** ✅ 长期主干已落地，后续做 block-level 增强
+**状态:** ✅ 长期主干与高级 Markdown 覆盖已落地，继续压“完成后二次刷新”
 
 **目标:**
 
@@ -186,6 +186,14 @@ heading / paragraph / blockquote / list / code / table / hr / html
 ```
 
 - 针对截图中 `**加粗**`、`[链接](url)` 原样显示的问题，已修正为：只有真正 `streaming` 阶段才允许 plain；完成后立即进入 token/block 渲染。
+- 列表项内 block-level `text` / `escape` token 已按 paragraph 解析，修复历史消息列表内 `**粗体**`、`[链接](url)` 原样泄漏。
+- 长 Markdown 覆盖回归已补齐并验证：标题、段落、粗体、斜体、删除线、行内代码、链接、无序/有序/任务列表、引用块、表格、代码块、分割线。
+- 高级 Markdown 已按 block-local 渐进增强落地：
+  - `$...$` 行内数学：KaTeX 渲染。
+  - `$$...$$` 块级数学：KaTeX display 渲染，`data-md-block-type="math"` + `data-md-enhance-policy="block-local"`。
+  - `[^note]` 脚注引用 / 定义：稳定 token 渲染，正文不再泄漏原始脚注语法。
+  - `mermaid` 代码块：局部 Mermaid SVG 渲染，不走整条消息 hydrate。
+  - HTML 与图片仍待定：HTML 保持安全降级，图片暂不富渲染。
 
 **不可回退规则:**
 
@@ -203,6 +211,8 @@ npm run test:chat-compare-model-selection
 npm run test:chat-placeholder-jitter-live
 npm run test:chat-old-row-stability-live
 npm run test:chat-rich-markdown-stability-live
+npm run test:chat-markdown-token-fixture
+npm run test:chat-markdown-coverage-fixture
 ```
 
 额外 DOM 验证：
@@ -218,10 +228,11 @@ tokenMode: stable
 
 **下一阶段:**
 
-- block-level progressive enhancement：
-  - code block：稳定 block 容器内局部升级 copy / highlight；不替换整条消息。
-  - table：稳定 block 容器内局部升级横向滚动 / sticky header；不替换整条消息。
-  - math / mermaid / 图表：先文本或占位，后续只升级对应 block。
+- 完成后二次刷新专项：采样 `streaming → settling → completed-visible → historical/hydrated` 的 DOM node、height、tokenMode、stable phase，确认完成后不再切换可见正文层。
+- block-level progressive enhancement 继续收敛：
+  - code block：保留稳定 block 容器内 copy / highlight；不替换整条消息。
+  - table：稳定 block 容器内横向滚动 / sticky header；不替换整条消息。
+  - math / Mermaid：已局部增强，后续只补样式和失败降级，不做消息级 hydrate。
 - block anchor：历史加载 / prepend / hydrate 时以 `messageId + data-md-block-id + offset` 恢复阅读位置。
 - 将 `AssistantAnswerRenderer` 继续收敛成显式 reducer/state machine，避免状态分支重新散落。
 
@@ -231,12 +242,12 @@ tokenMode: stable
 
 ### 4. 模型选择要有明确“当前生效范围”
 
-**状态:** 🟡 部分完成
+**状态:** 🟡 部分完成；Compare 显式 `下一轮 / 本轮` 标签不做
 
 **附件目标:**
 
-- 普通 Chat 模型选择旁提示：`用于下一条消息`。
-- Compare 顶部模型栏提示：`下一轮对比模型`。
+- 普通 Chat 模型选择旁可提示：`用于下一条消息`。
+- Compare 顶部不增加 `下一轮` 显式标签：当前认为冗余，避免视觉噪音。
 - 历史回答仍显示当时生成模型。
 
 **已完成:**
@@ -247,15 +258,15 @@ tokenMode: stable
 **未完成:**
 
 - 普通 Chat 选择器旁的轻提示。
-- Compare 顶部“下一轮模型”明确标签。
-- 历史 group 内“本轮模型”标签。
+- Compare 不做顶部“下一轮模型”和历史 group“本轮模型”显式标签；只保留实际模型展示与持久化语义。
 
 **补充优化项:**
 
-- 模型选择器 hover tooltip：
+- 模型选择器 hover tooltip 可作为低干扰解释：
   - 普通 Chat：`只影响下一条消息，不改变历史回答`。
-  - Compare：`只影响下一轮对比，历史列保留本轮实际模型`。
+  - Compare：`只影响下一次对比，历史列保留实际生成模型`。
 - 如果当前会话内 active generation 正在跑，模型选择器文案改为：`下一条生效`，避免用户以为会影响正在生成的回答。
+- 明确不做 Compare 顶部 `下一轮` / 历史 `本轮` 常驻标签，避免冗余。
 
 ---
 
@@ -297,14 +308,14 @@ npm run test:chat-compare-model-persistence-live
 
 ---
 
-### 6. Compare 历史 group 与“下一轮模型”分离展示
+### 6. Compare 历史 group 与当前模型分离展示
 
-**状态:** 🟡 部分完成
+**状态:** 🟡 部分完成；`下一轮` / `本轮` 冗余标签不做
 
 **附件目标:**
 
-- 顶部固定栏：下一轮要用的模型。
-- 每个历史回答 group：显示本轮实际模型。
+- 顶部固定栏：当前选择的 Compare 模型，实际影响下一次发送。
+- 每个历史回答 group：显示当时实际生成模型。
 - 切顶部模型不影响旧 group。
 - 新发一轮后，新 group 使用顶部模型。
 
@@ -314,14 +325,13 @@ npm run test:chat-compare-model-persistence-live
 
 **未完成:**
 
-- UI 表达仍不够明确。
-- 缺少 `下一轮` / `本轮` 极简标识。
+- 不再追加 `下一轮` / `本轮` 极简标识：用户认为冗余，容易增加视觉噪音。
+- 仍需保证数据语义正确：切顶部模型不改旧 group，新发一轮使用当前顶部模型。
 
 **补充优化项:**
 
-- 顶部 Compare 控制栏增加弱标签：`下一轮`。
-- 历史 group 的列标题旁增加弱标签：`本轮`。
-- 如果本轮模型与当前下一轮模型不同，显示轻提示：`历史模型`，避免误解。
+- 不做顶部 `下一轮`、历史 `本轮`、`历史模型` 等常驻标签。
+- 保留更低干扰方案：必要时仅在模型选择器 hover tooltip 解释生效范围。
 
 ---
 

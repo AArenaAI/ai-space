@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
 import MarkdownPlainFallback from "./markdown/MarkdownPlainFallback";
+import MarkdownTokenRenderer from "./markdown/MarkdownTokenRenderer";
 
 export type StableMarkdownPhase = "streaming" | "settling" | "completed-visible" | "historical";
 export type StableMarkdownPolicy = "plain" | "token" | "rich-deferred";
@@ -66,7 +67,10 @@ export default function StableMarkdownRenderer({
   compactRichLitePreview?: boolean;
 }) {
   const resolvedPolicy = useMemo(() => resolveStableMarkdownPolicy({ content, phase, policy }), [content, phase, policy]);
-  const isStreamingLike = resolvedPolicy !== "rich-deferred" || phase === "streaming" || phase === "settling" || phase === "completed-visible";
+  const isStreamingLike = resolvedPolicy === "rich-deferred"
+    ? phase === "streaming" || phase === "settling" || phase === "completed-visible"
+    : phase === "streaming";
+  const shouldPriorityTokenize = resolvedPolicy === "token" && phase !== "streaming";
 
   if (resolvedPolicy === "plain") {
     return (
@@ -77,6 +81,25 @@ export default function StableMarkdownRenderer({
         data-stable-markdown-policy="plain"
       >
         <MarkdownPlainFallback content={content} messageId={messageId} />
+      </div>
+    );
+  }
+
+  if (resolvedPolicy === "token") {
+    return (
+      <div
+        className={className}
+        data-stable-markdown-renderer="true"
+        data-stable-markdown-phase={phase}
+        data-stable-markdown-policy="token"
+      >
+        <MarkdownTokenRenderer
+          content={content}
+          compactPreview={compactRichLitePreview}
+          isStreaming={isStreamingLike}
+          messageId={messageId}
+          priorityHydrateRichText={shouldPriorityTokenize}
+        />
       </div>
     );
   }
@@ -95,7 +118,7 @@ export default function StableMarkdownRenderer({
         isStreaming={isStreamingLike}
         messageId={messageId}
         shouldHydrateRichText={resolvedPolicy === "rich-deferred" ? shouldHydrateRichText : true}
-        priorityHydrateRichText={resolvedPolicy === "rich-deferred" ? priorityHydrateRichText : false}
+        priorityHydrateRichText={resolvedPolicy === "rich-deferred" ? priorityHydrateRichText : shouldPriorityTokenize}
         allowRichLiteFallback={resolvedPolicy === "rich-deferred" ? allowRichLiteFallback : true}
         compactRichLitePreview={compactRichLitePreview}
       />
