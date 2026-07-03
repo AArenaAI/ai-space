@@ -46,6 +46,8 @@ import HistoryDrawer, { type HistoryItem as DrawerHistoryItem } from "@/componen
 import { consumeChatStream } from "@/lib/chatStream";
 import { getErrorMessage, normalizeError, readApiError, showUserError } from "@/lib/errors";
 import { LanguageCode, useI18n } from "@/lib/i18n";
+import { apiFetch, apiJson } from "@/lib/api/client";
+import { readAuthState } from "@/lib/auth/state";
 
 const MarkdownRenderer = dynamic(() => import("@/components/chat/MarkdownRenderer"), { ssr: false });
 const ChartLoading = ({ className = "h-[360px]" }: { className?: string }) => {
@@ -224,18 +226,6 @@ type InfographicResult = {
 
 /* ─── helpers ─── */
 
-function getAuthHeaders(): Record<string, string> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
-  return {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-}
-
-function getUploadHeaders(): Record<string, string> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -263,9 +253,8 @@ function extractTextFromChatResponse(data: any): string {
 }
 
 async function createConversation(title: string, model: string) {
-  const res = await fetch("/api/conversations", {
+  const res = await apiFetch("/conversations", {
     method: "POST",
-    headers: getAuthHeaders(),
     body: JSON.stringify({ title, model, skill_key: SKILL_KEY }),
   });
   if (!res.ok) {
@@ -281,9 +270,8 @@ async function fetchDocumentReaderChatStream(payload: Record<string, any>): Prom
     const conv = await createConversation(fallbackTitle, payload.model || DEFAULT_MODEL);
     conversationId = conv.id;
   }
-  const initResponse = await fetch("/api/chat/init", {
+  const initResponse = await apiFetch("/chat/init", {
     method: "POST",
-    headers: getAuthHeaders(),
     body: JSON.stringify({ ...payload, conversation_id: conversationId, stream: true, init_only: true }),
   });
   if (!initResponse.ok) return initResponse;
@@ -295,20 +283,18 @@ async function fetchDocumentReaderChatStream(payload: Record<string, any>): Prom
       headers: { "Content-Type": "application/json" },
     });
   }
-  return fetch(`/api/tasks/${taskId}/stream?after=0`, {
-    headers: getUploadHeaders(),
-  });
+  return apiFetch(`/tasks/${taskId}/stream?after=0`);
 }
 
 const fetchFileStatus = async (publicId: string): Promise<FileStatus> => {
-  const res = await fetch(`/api/files/${publicId}`, { headers: getAuthHeaders() });
+  const res = await apiFetch(`/files/${publicId}`);
   if (!res.ok) throw await readApiError(res);
   return res.json();
 };
 
 const fetchDocumentArtifacts = async (kind: ArtifactKind): Promise<DocumentArtifact[]> => {
   const params = new URLSearchParams({ kind });
-  const res = await fetch(`/api/document-artifacts?${params.toString()}`, { headers: getAuthHeaders() });
+  const res = await apiFetch(`/document-artifacts?${params.toString()}`);
   if (!res.ok) throw await readApiError(res);
   const data = await res.json();
   return Array.isArray(data.artifacts) ? data.artifacts : [];
@@ -322,9 +308,8 @@ const createDocumentArtifact = async (artifact: {
   payload: any;
   raw?: string;
 }): Promise<DocumentArtifact> => {
-  const res = await fetch("/api/document-artifacts", {
+  const res = await apiFetch("/document-artifacts", {
     method: "POST",
-    headers: getAuthHeaders(),
     body: JSON.stringify({
       file_public_id: artifact.filePublicId,
       kind: artifact.kind,
@@ -341,9 +326,8 @@ const createDocumentArtifact = async (artifact: {
 };
 
 const deleteDocumentArtifact = async (id: number): Promise<void> => {
-  const res = await fetch(`/api/document-artifacts/${id}`, {
+  const res = await apiFetch(`/document-artifacts/${id}`, {
     method: "DELETE",
-    headers: getAuthHeaders(),
   });
   if (!res.ok) {
     throw await readApiError(res);
@@ -943,7 +927,7 @@ export default function DocumentReaderPage() {
     if (convId) {
       setConversationId(convId);
       // load history messages
-      fetch(`/api/conversations/${convId}/messages`, { headers: getAuthHeaders() })
+      apiFetch(`/conversations/${convId}/messages`)
         .then(async (res) => {
           if (!res.ok) throw await readApiError(res);
           return res.json();
@@ -1071,9 +1055,8 @@ export default function DocumentReaderPage() {
       try {
         const formData = new FormData();
         formData.append("file", file);
-        const res = await fetch("/api/files/upload", {
+        const res = await apiFetch("/files/upload", {
           method: "POST",
-          headers: getUploadHeaders(),
           body: formData,
         });
         if (!res.ok) throw await readApiError(res);
@@ -1176,15 +1159,10 @@ export default function DocumentReaderPage() {
   };
 
   const loadHistoryList = useCallback(async (silent = false) => {
-    const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!readAuthState().user) return;
     if (!silent) setHistoryLoading(true);
     try {
-      const res = await fetch(`/api/conversations?skill_key=${SKILL_KEY}&limit=100`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = await apiJson<any>(`/conversations?skill_key=${SKILL_KEY}&limit=100`);
       setHistory(data.conversations || []);
     } finally {
       if (!silent) setHistoryLoading(false);
@@ -1192,14 +1170,9 @@ export default function DocumentReaderPage() {
   }, []);
 
   const loadHistoryConversation = useCallback(async (id: number) => {
-    const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!readAuthState().user) return;
     try {
-      const res = await fetch(`/api/conversations/${id}/messages`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = await apiJson<any>(`/conversations/${id}/messages`);
       const loaded: ChatMsg[] = (data.messages || [])
         .filter((m: any) => m.role !== "system")
         .map((m: any) => ({
@@ -1220,12 +1193,10 @@ export default function DocumentReaderPage() {
   }, []);
 
   const deleteHistoryItem = useCallback(async (id: number) => {
-    const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!readAuthState().user) return;
     try {
-      const res = await fetch(`/api/conversations/${id}`, {
+      const res = await apiFetch(`/conversations/${id}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return;
       setHistory((prev) => prev.filter((item) => item.id !== id));
@@ -1291,8 +1262,7 @@ export default function DocumentReaderPage() {
 
       try {
         let convId = conversationId;
-        const token = localStorage.getItem("token");
-        if (token && !convId) {
+        if (readAuthState().user && !convId) {
           const conv = await createConversation(content.trim().slice(0, 30), DEFAULT_MODEL);
           convId = conv.id;
           setConversationId(convId);
@@ -1412,7 +1382,7 @@ ${buildLanguageConfigPrompt(targetLanguage, "markdown")}
 
         const recoverFromTask = async () => {
           if (!taskId) return null;
-          const taskRes = await fetch(`/api/tasks/${taskId}`, { headers: getAuthHeaders() });
+          const taskRes = await apiFetch(`/tasks/${taskId}`);
           if (!taskRes.ok) return null;
           const data = await taskRes.json();
           const task = data?.task || {};
@@ -1432,7 +1402,7 @@ ${buildLanguageConfigPrompt(targetLanguage, "markdown")}
 
         const recoverFromConversation = async () => {
           if (!convId) return null;
-          const messageRes = await fetch(`/api/conversations/${convId}/messages`, { headers: getAuthHeaders() });
+          const messageRes = await apiFetch(`/conversations/${convId}/messages`);
           if (!messageRes.ok) return null;
           const data = await messageRes.json();
           const savedMessages = Array.isArray(data?.messages) ? data.messages : [];

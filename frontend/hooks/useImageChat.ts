@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { readApiError } from "@/lib/errors";
+import { apiFetch } from "@/lib/api/client";
 
 export interface ImageChat {
   id: number;
@@ -23,7 +24,6 @@ export interface ImageChatMessage {
   created_at: string;
 }
 
-const API_BASE_URL = "";
 
 async function safeJSON(res: Response): Promise<any> {
   const text = await res.text();
@@ -37,13 +37,6 @@ async function safeJSON(res: Response): Promise<any> {
   }
 }
 
-function getHeaders(): Record<string, string> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
-  return {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-}
 
 export function useImageChats() {
   const [chats, setChats] = useState<ImageChat[]>([]);
@@ -52,7 +45,7 @@ export function useImageChats() {
   const fetchChats = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/image-chats`, { headers: getHeaders() });
+      const res = await apiFetch("/image-chats");
       if (!res.ok) throw await readApiError(res);
       const data = await safeJSON(res);
       setChats(data.chats || []);
@@ -70,9 +63,8 @@ export function useImageChats() {
     quality?: string;
     reference_image_urls?: string[];
   }) => {
-    const res = await fetch(`${API_BASE_URL}/api/image-chats`, {
+    const res = await apiFetch("/image-chats", {
       method: "POST",
-      headers: getHeaders(),
       body: JSON.stringify(payload),
     });
     if (!res.ok) throw await readApiError(res);
@@ -80,18 +72,16 @@ export function useImageChats() {
   }, []);
 
   const deleteChat = useCallback(async (id: number) => {
-    const res = await fetch(`${API_BASE_URL}/api/image-chats/${id}`, {
+    const res = await apiFetch(`/image-chats/${id}`, {
       method: "DELETE",
-      headers: getHeaders(),
     });
     if (!res.ok) throw await readApiError(res);
     setChats((prev) => prev.filter((c) => c.id !== id));
   }, []);
 
   const updateChatTitle = useCallback(async (id: number, title: string) => {
-    const res = await fetch(`${API_BASE_URL}/api/image-chats/${id}`, {
+    const res = await apiFetch(`/image-chats/${id}`, {
       method: "PUT",
-      headers: getHeaders(),
       body: JSON.stringify({ title }),
     });
     if (!res.ok) throw await readApiError(res);
@@ -108,7 +98,7 @@ export function useImageChatMessages() {
   const fetchMessages = useCallback(async (chatId: number) => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/image-chats/${chatId}/messages`, { headers: getHeaders() });
+      const res = await apiFetch(`/image-chats/${chatId}/messages`);
       if (!res.ok) throw await readApiError(res);
       const data = await safeJSON(res);
       const msgs: ImageChatMessage[] = data.messages || [];
@@ -129,9 +119,8 @@ export function useImageChatMessages() {
     quality?: string;
     reference_image_urls?: string[];
   }) => {
-    const res = await fetch(`${API_BASE_URL}/api/image-chats/${chatId}/messages`, {
+    const res = await apiFetch(`/image-chats/${chatId}/messages`, {
       method: "POST",
-      headers: getHeaders(),
       body: JSON.stringify(payload),
     });
     if (!res.ok) throw await readApiError(res);

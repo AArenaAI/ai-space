@@ -14,11 +14,13 @@ import {
 } from "@/lib/taskNotifications";
 import TaskToastCard from "@/components/notifications/TaskToastCard";
 import { refreshVideoTaskThrottled } from "@/lib/videoRefreshThrottle";
+import { apiFetch } from "@/lib/api/client";
+import { ensureAuthSession, readAuthState } from "@/lib/auth/state";
 
 class AuthExpiredError extends Error {}
 
 function getAuthHeaders(): Record<string, string> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+  const token = typeof window !== "undefined" ? readAuthState().token : null;
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
@@ -81,9 +83,10 @@ function isSameTaskPage(task: Pick<BackgroundTaskRecord | TaskFinishedNotificati
 }
 
 async function checkTask(task: BackgroundTaskRecord): Promise<{ done: boolean; ok: boolean } | null> {
+  await ensureAuthSession();
   if (task.type === "image") {
     if (task.conversationId && task.serverMessageId && task.href.startsWith("/image/chat")) {
-      const res = await fetch(`/api/image-chats/${task.conversationId}/messages`, { headers: getAuthHeaders() });
+      const res = await apiFetch(`/image-chats/${task.conversationId}/messages`);
       if (!(await ensureTaskResponse(res))) return null;
       const data = await res.json().catch(() => ({}));
       const message = Array.isArray(data.messages) ? data.messages.find((item: any) => String(item.id) === String(task.serverMessageId)) : null;
@@ -93,7 +96,7 @@ async function checkTask(task: BackgroundTaskRecord): Promise<{ done: boolean; o
       return { done: isTerminal(status), ok: status === "completed" && hasImage };
     }
 
-    const res = await fetch("/api/images", { headers: getAuthHeaders() });
+    const res = await apiFetch("/images");
     if (!(await ensureTaskResponse(res))) return null;
     const data = await res.json().catch(() => ({}));
     const image = Array.isArray(data.images) ? data.images.find((item: any) => String(item.id) === String(task.id)) : null;
@@ -103,7 +106,7 @@ async function checkTask(task: BackgroundTaskRecord): Promise<{ done: boolean; o
 
   if (task.type === "video") {
     if (task.conversationId && task.serverMessageId && task.href.startsWith("/video/chat")) {
-      const res = await fetch(`/api/video-chats/${task.conversationId}/messages`, { headers: getAuthHeaders() });
+      const res = await apiFetch(`/video-chats/${task.conversationId}/messages`);
       if (!(await ensureTaskResponse(res))) return null;
       const data = await res.json().catch(() => ({}));
       const message = Array.isArray(data.messages) ? data.messages.find((item: any) => String(item.id) === String(task.serverMessageId)) : null;
@@ -121,7 +124,7 @@ async function checkTask(task: BackgroundTaskRecord): Promise<{ done: boolean; o
 
   if (task.type === "chat") {
     if (!task.conversationId || !task.serverMessageId) return null;
-    const res = await fetch(`/api/conversations/${task.conversationId}/messages/${task.serverMessageId}`, { headers: getAuthHeaders() });
+    const res = await apiFetch(`/conversations/${task.conversationId}/messages/${task.serverMessageId}`);
     if (!(await ensureTaskResponse(res))) return null;
     const data = await res.json().catch(() => ({}));
     const status = data?.background_task?.status || "";

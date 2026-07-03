@@ -4,6 +4,8 @@ import "katex/dist/katex.min.css";
 import { ThemeProvider } from "@/components/theme/ThemeProvider";
 import { I18nProvider } from "@/lib/i18n";
 import AuthInterceptor from "@/components/AuthInterceptor";
+import { AuthProvider } from "@/components/auth/AuthProvider";
+import AuthBootGate from "@/components/auth/AuthBootGate";
 import AppToaster from "@/components/notifications/AppToaster";
 import TaskNotificationCenter from "@/components/notifications/TaskNotificationCenter";
 import { AppBootstrapProvider } from "@/lib/appBootstrapContext";
@@ -94,12 +96,16 @@ export default function RootLayout({
       <body className="antialiased">
         <I18nProvider>
           <ThemeProvider>
-            <AppBootstrapProvider>
+            <AuthProvider>
               <AuthInterceptor />
-              <TaskNotificationCenter />
-              {children}
+              <AuthBootGate>
+                <AppBootstrapProvider>
+                  <TaskNotificationCenter />
+                  {children}
+                </AppBootstrapProvider>
+              </AuthBootGate>
               <AppToaster />
-            </AppBootstrapProvider>
+            </AuthProvider>
           </ThemeProvider>
         </I18nProvider>
       </body>

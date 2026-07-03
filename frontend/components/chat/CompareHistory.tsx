@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Columns2, Loader2, ChevronRight, Trash2, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
+import { apiFetch, apiJson } from "@/lib/api/client";
 
 interface CompareRecord {
   id: number;
@@ -20,30 +21,18 @@ export default function CompareHistory() {
   const [open, setOpen] = useState(false);
 
   const loadRecords = async () => {
-    const token = localStorage.getItem("token");
-    if (!token) return;
     setLoading(true);
     try {
-      const res = await fetch("/api/compare/records", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setRecords(Array.isArray(data) ? data : []);
-      }
+      const data = await apiJson<CompareRecord[]>("/compare/records");
+      setRecords(Array.isArray(data) ? data : []);
     } catch {} finally {
       setLoading(false);
     }
   };
 
   const handleDelete = async (id: number) => {
-    const token = localStorage.getItem("token");
-    if (!token) return;
     try {
-      const res = await fetch(`/api/compare/record/${id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await apiFetch(`/compare/record/${id}`, { method: "DELETE" });
       if (res.ok) {
         setRecords((prev) => prev.filter((r) => r.id !== id));
       }

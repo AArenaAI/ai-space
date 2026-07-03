@@ -161,6 +161,44 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	})
 }
 
+func (h *AuthHandler) Session(c *gin.Context) {
+	cookie, err := c.Request.Cookie(refreshTokenCookieName)
+	if err != nil || strings.TrimSpace(cookie.Value) == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "session_required"})
+		return
+	}
+
+	now := time.Now()
+	var stored models.RefreshToken
+	if err := h.db.Where("token_hash = ?", hashRefreshToken(cookie.Value)).First(&stored).Error; err != nil {
+		h.clearRefreshTokenCookie(c)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "session_invalid"})
+		return
+	}
+	if !isRefreshTokenUsable(stored, now) {
+		h.clearRefreshTokenCookie(c)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "session_expired"})
+		return
+	}
+
+	var user models.User
+	if err := h.db.First(&user, stored.UserID).Error; err != nil {
+		h.clearRefreshTokenCookie(c)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user_not_found"})
+		return
+	}
+
+	token, err := generateAccessToken(user.ID, user.Email, h.cfg.JWTSecret)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成 token 失败"})
+		return
+	}
+
+	var defaultWS models.Workspace
+	h.db.Where("user_id = ? AND is_default = ?", user.ID, true).First(&defaultWS)
+	c.JSON(http.StatusOK, gin.H{"token": token, "user": authUserPayload(user, defaultWS.ID)})
+}
+
 func (h *AuthHandler) Refresh(c *gin.Context) {
 	cookie, err := c.Request.Cookie(refreshTokenCookieName)
 	if err != nil || strings.TrimSpace(cookie.Value) == "" {
@@ -171,19 +209,16 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 	now := time.Now()
 	var stored models.RefreshToken
 	if err := h.db.Where("token_hash = ?", hashRefreshToken(cookie.Value)).First(&stored).Error; err != nil {
-		h.clearRefreshTokenCookie(c)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "refresh_token_invalid"})
 		return
 	}
 	if !isRefreshTokenUsable(stored, now) {
-		h.clearRefreshTokenCookie(c)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "refresh_token_expired"})
 		return
 	}
 
 	var user models.User
 	if err := h.db.First(&user, stored.UserID).Error; err != nil {
-		h.clearRefreshTokenCookie(c)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user_not_found"})
 		return
 	}

@@ -6,6 +6,7 @@ import DialogShell, { THEMES } from "./DialogShell";
 import { resolveImageUrl } from "@/lib/resolveImageUrl";
 import { readApiError, showUserError } from "@/lib/errors";
 import { getClipboardFiles } from "@/lib/clipboardFiles";
+import { apiFetch } from "@/lib/api/client";
 
 const EDIT_MODES = [
   { key: "remove-bg", label: "移除背景", icon: Eraser, desc: "智能识别主体并去除背景" },
@@ -51,7 +52,6 @@ export default function ImageEditDialog({ open, onClose }: { open: boolean; onCl
   const handleSubmit = async () => {
     if (!file) return;
     setLoading(true);
-    const token = localStorage.getItem("token");
 
     try {
       // 把文件转 base64
@@ -73,12 +73,8 @@ export default function ImageEditDialog({ open, onClose }: { open: boolean; onCl
       };
       if (prompt && prompt.trim()) body.prompt = prompt.trim();
 
-      const res = await fetch("/api/images/edit", {
+      const res = await apiFetch("/images/edit", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
         body: JSON.stringify(body),
       });
       if (!res.ok) {

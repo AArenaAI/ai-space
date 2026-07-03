@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import { getGuestId } from "@/lib/guestId";
 import { getErrorMessage, readApiError } from "@/lib/errors";
+import { readAuthState } from "@/lib/auth/state";
 
 const API_BASE = "/api";
 
@@ -107,8 +108,7 @@ export function usePPT() {
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
 
-  const getToken = () =>
-    typeof window !== "undefined" ? localStorage.getItem("token") : null;
+  const getToken = () => readAuthState().token;
 
   const headers = (): Record<string, string> => {
     const h: Record<string, string> = { "Content-Type": "application/json" };

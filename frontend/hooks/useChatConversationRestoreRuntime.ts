@@ -42,6 +42,7 @@ import {
 import type { ChatModel, Message } from "@/lib/chatTypes";
 import { buildGroupViewsFromMessages } from "@/lib/chatForkCoordinator";
 import type { TaskStreamActiveState } from "@/hooks/useChatTaskStreamRuntime";
+import { readAuthState } from "@/lib/auth/state";
 
 type AbortReason = "user" | "navigation" | null;
 
@@ -306,7 +307,7 @@ export function useChatConversationRestoreRuntime({
   startTaskEventStream,
   startBackgroundPolling,
   translate,
-  getToken = () => localStorage.getItem("token"),
+  getToken = () => readAuthState().token,
   createId = uuidv4,
   fetchRestore = fetchConversationRestore,
   fetchMessageStatus = fetchConversationMessageStatus,

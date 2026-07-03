@@ -9,6 +9,8 @@ import {
   type ChatSidebarConversation,
 } from "@/lib/chatSidebarHistory";
 import { getConversationMetadataEventFromDomEvent } from "@/lib/chatConversationMetadataEvents";
+import { apiFetch } from "@/lib/api/client";
+import { readAuthState } from "@/lib/auth/state";
 
 export type SidebarConversation = ChatSidebarConversation & {
   model: string;
@@ -95,8 +97,7 @@ async function fetchSidebarConversationsPage({
   cursor?: string;
   hiddenSkillKeys: Set<string>;
 }): Promise<SidebarConversationListPage | null> {
-  const token = localStorage.getItem("token");
-  if (!token) return { conversations: [], total: 0, limit: CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE, offset };
+  if (!readAuthState().user) return { conversations: [], total: 0, limit: CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE, offset };
   try {
     const params = new URLSearchParams();
     if (workspaceId) params.set("workspace_id", String(workspaceId));
@@ -108,9 +109,7 @@ async function fetchSidebarConversationsPage({
     } else if (offset > 0) {
       params.set("offset", String(offset));
     }
-    const res = await fetch(`/api/conversations?${params.toString()}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const res = await apiFetch(`/conversations?${params.toString()}`);
     if (!res.ok) return null;
     const data = await res.json();
     const normalizeList = (items: any[]) => items.map(normalizeConversation).filter((item) => isMainChatConversation(item, hiddenSkillKeys));

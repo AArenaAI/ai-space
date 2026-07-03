@@ -14,6 +14,7 @@ import {
 import { patchMessageById } from "@/lib/chatMessageStatePatch";
 import { createBusyGeneratingStatus } from "@/lib/chatActivityStatus";
 import type { ChatModel, Message } from "@/lib/chatTypes";
+import { readAuthState } from "@/lib/auth/state";
 
 type TaskStreamsRef = MutableRefObject<Record<string, AbortController>>;
 type BackgroundPollersRef = MutableRefObject<Record<string, number>>;
@@ -60,7 +61,7 @@ export function createStopBackgroundPollerAction(input: CreateStopBackgroundPoll
 }
 
 export function createStartBackgroundPollingAction(input: CreateStartBackgroundPollingActionInput) {
-  const getToken = input.getToken ?? (() => localStorage.getItem("token"));
+  const getToken = input.getToken ?? (() => readAuthState().token);
   const getGuestId = input.getGuestId ?? defaultGetGuestId;
   const realtimeGet = input.realtimeGet ?? defaultRealtimeGet;
   const emitTaskFinished = input.emitTaskFinished ?? defaultEmitTaskFinished;

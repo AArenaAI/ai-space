@@ -1,5 +1,5 @@
 "use client";
-import { getErrorMessage, readApiError } from "@/lib/errors";
+import { getErrorMessage } from "@/lib/errors";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -19,6 +19,7 @@ import ConvertDialog from "./components/dialogs/ConvertDialog";
 import ImageGenDialog from "./components/dialogs/ImageGenDialog";
 import ImageEditDialog from "./components/dialogs/ImageEditDialog";
 import ToolsDialog from "./components/dialogs/ToolsDialog";
+import { apiFetch, apiJson } from "@/lib/api/client";
 
 interface FileItem {
   id: number;
@@ -64,15 +65,13 @@ export default function WorkspacePage() {
   }, [currentWS, activeWS?.id]);
 
   const loadWorkspaceData = useCallback(async (wsId: number) => {
-    const token = localStorage.getItem("token");
-    if (!token) return;
     try {
-      const [convRes, fileRes] = await Promise.all([
-        fetch(`/api/conversations?workspace_id=${wsId}`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`/api/files?workspace_id=${wsId}`, { headers: { Authorization: `Bearer ${token}` } }),
+      const [conversationsData, filesData] = await Promise.all([
+        apiJson<any[]>(`/conversations?workspace_id=${wsId}`),
+        apiJson<FileItem[]>(`/files?workspace_id=${wsId}`),
       ]);
-      if (convRes.ok) { const data = await convRes.json(); setConversations(Array.isArray(data) ? data : []); }
-      if (fileRes.ok) { const data = await fileRes.json(); setFiles(Array.isArray(data) ? data : []); }
+      setConversations(Array.isArray(conversationsData) ? conversationsData : []);
+      setFiles(Array.isArray(filesData) ? filesData : []);
     } catch { /* ignore */ }
   }, []);
 
@@ -111,29 +110,20 @@ export default function WorkspacePage() {
     setChatLoading(true);
 
     try {
-      const token = localStorage.getItem("token");
       // 创建临时对话
-      const convRes = await fetch("/api/conversations", {
+      const conv = await apiJson<{ id: number }>("/conversations", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ title: query.slice(0, 30), workspace_id: activeWS.id }),
       });
-      if (!convRes.ok) throw await readApiError(convRes);
-      const conv = await convRes.json();
 
       // 发送消息
       const body: any = { content: query, conversation_id: conv.id };
       if (selectedModel?.id) body.model = selectedModel.id;
 
-      const msgRes = await fetch("/api/conversations/messages", {
+      const reply = await apiJson<any>("/conversations/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(body),
       });
-      if (!msgRes.ok) {
-        throw await readApiError(msgRes);
-      }
-      const reply = await msgRes.json();
       setChatMessages((prev) => [...prev, { role: "assistant", content: reply.content || "已完成" }]);
     } catch (e) {
       const userMessage = getErrorMessage(e, { module: "chat", fallbackMessage: "发送失败，请稍后重试。" });

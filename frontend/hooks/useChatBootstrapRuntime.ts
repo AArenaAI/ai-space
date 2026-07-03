@@ -7,6 +7,7 @@ import { registerBackgroundTask } from "@/lib/taskNotifications";
 import type { ChatModel } from "@/lib/chatTypes";
 import { useAppBootstrap } from "@/lib/appBootstrapContext";
 import { getConversationSnapshot } from "@/lib/chatConversationCache";
+import { readAuthState } from "@/lib/auth/state";
 
 type ChatBootstrapStatus = "idle" | "loading" | "ready" | "anonymous" | "failed";
 
@@ -89,8 +90,7 @@ export function useChatBootstrapRuntime({
       return;
     }
     const controller = new AbortController();
-    const storedToken = localStorage.getItem("token");
-    const token = storedToken && storedToken !== "null" && storedToken !== "undefined" ? storedToken : "";
+    const token = readAuthState().token || "";
 
     setState((current) => ({ ...current, status: "loading", error: undefined }));
     const workspaceId = Number(localStorage.getItem("current-workspace") || 0) || undefined;

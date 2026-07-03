@@ -45,6 +45,8 @@ import { useAppBootstrap } from "@/lib/appBootstrapContext";
 import { saveConversationScrollState } from "@/lib/chatConversationScrollState";
 import { sortSidebarConversations } from "@/lib/chatSidebarHistory";
 import { clearChatSidebarHistoryCache, useChatSidebarHistory, type SidebarConversation } from "@/hooks/useChatSidebarHistory";
+import { apiFetch, apiJson } from "@/lib/api/client";
+import { readAuthState } from "@/lib/auth/state";
 
 
 const isPathInGroup = (pathname: string | null, paths: string[]) => {
@@ -162,19 +164,12 @@ function mapBootstrapNotebook(item: any): Notebook {
 }
 
 async function searchConversations(keyword: string, workspaceId?: number, signal?: AbortSignal): Promise<ConversationSearchResult[]> {
-  const token = localStorage.getItem("token");
-  if (!token) return [];
   const q = keyword.trim();
   if (!q) return [];
   try {
     const params = new URLSearchParams({ q });
     if (workspaceId) params.set("workspace_id", String(workspaceId));
-    const res = await fetch(`/api/conversations/search?${params.toString()}`, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal,
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
+    const data = await apiJson<ConversationSearchResult[]>(`/conversations/search?${params.toString()}`, { signal });
     return Array.isArray(data) ? data.filter(isMainChatConversation) : [];
   } catch {
     return [];
@@ -439,6 +434,8 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   const conversationPrefetchHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const conversationPrefetchHoverControllerRef = useRef<AbortController | null>(null);
   const chatBootstrapReadyRef = useRef(false);
+  const notebooksLoadingRef = useRef(false);
+  const lastNotebookFetchKeyRef = useRef<string | null>(null);
 
   const captureHistoryAnchor = useCallback(() => {
     const container = historyScrollRef.current;
@@ -580,45 +577,59 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     return () => window.removeEventListener("chat-bootstrap-ready", handleBootstrapReady);
   }, []);
 
-  const loadNotebooks = useCallback(async () => {
-    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+  const loadNotebooks = useCallback(async (options: { force?: boolean } = {}) => {
+    const token = readAuthState().token;
     const normalizedPathname = pathname === "/" ? pathname : pathname.replace(/\/$/, "");
     const isChatConversationRoute = normalizedPathname === "/chat" && !!effectiveRouteConvId;
     const hasBootstrapNotebooks = Array.isArray(chatBootstrap?.sidebar?.recent_notebooks);
+
+    if (hasBootstrapNotebooks && !options.force) {
+      setNotebooks(chatBootstrap.sidebar!.recent_notebooks!.map(mapBootstrapNotebook));
+      setNotebooksLoading(false);
+      lastNotebookFetchKeyRef.current = `bootstrap:${currentWS?.id || "all"}`;
+      return;
+    }
+
     if (!token) {
-      if (hasBootstrapNotebooks) {
-        setNotebooks(chatBootstrap.sidebar!.recent_notebooks!.map(mapBootstrapNotebook));
-        setNotebooksLoading(false);
-        return;
-      }
       if (isChatConversationRoute && !chatBootstrapReadyRef.current) return;
       setNotebooksLoading(false);
       return;
     }
-    if (isChatConversationRoute && hasBootstrapNotebooks && !notebooksLoading && notebooks.length > 0) return;
+
+    const fetchKey = `workspace:${currentWS?.id || "all"}`;
+    if (!options.force && lastNotebookFetchKeyRef.current === fetchKey) return;
+    if (notebooksLoadingRef.current) return;
+
+    notebooksLoadingRef.current = true;
     setNotebooksLoading(true);
     try {
       setNotebooks(await fetchNotebooks(currentWS?.id));
+      lastNotebookFetchKeyRef.current = fetchKey;
     } catch {
       setNotebooks([]);
     } finally {
+      notebooksLoadingRef.current = false;
       setNotebooksLoading(false);
     }
-  }, [currentWS?.id, pathname, effectiveRouteConvId, chatBootstrap, notebooks.length, notebooksLoading]);
+  }, [currentWS?.id, pathname, effectiveRouteConvId, chatBootstrap]);
 
   useEffect(() => { loadNotebooks(); }, [loadNotebooks]);
 
   useEffect(() => {
-    const h = () => loadNotebooks();
-    window.addEventListener("notebook-created", h);
-    window.addEventListener("workspace-changed", h);
-    window.addEventListener("user-login", h);
-    window.addEventListener("user-logout", h);
+    const refreshNotebooks = () => loadNotebooks({ force: true });
+    const resetAndRefreshNotebooks = () => {
+      lastNotebookFetchKeyRef.current = null;
+      loadNotebooks({ force: true });
+    };
+    window.addEventListener("notebook-created", refreshNotebooks);
+    window.addEventListener("workspace-changed", resetAndRefreshNotebooks);
+    window.addEventListener("user-login", resetAndRefreshNotebooks);
+    window.addEventListener("user-logout", resetAndRefreshNotebooks);
     return () => {
-      window.removeEventListener("notebook-created", h);
-      window.removeEventListener("workspace-changed", h);
-      window.removeEventListener("user-login", h);
-      window.removeEventListener("user-logout", h);
+      window.removeEventListener("notebook-created", refreshNotebooks);
+      window.removeEventListener("workspace-changed", resetAndRefreshNotebooks);
+      window.removeEventListener("user-login", resetAndRefreshNotebooks);
+      window.removeEventListener("user-logout", resetAndRefreshNotebooks);
     };
   }, [loadNotebooks]);
 
@@ -860,27 +871,42 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
-    const token = localStorage.getItem("token"); if (!token) return;
-    try { const r = await fetch(`/api/conversations/${deleteTarget}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }); if (r.ok) { invalidateConversationSnapshot(deleteTarget); deletePersistentConversationSnapshot(deleteTarget); const next = conversations.filter(c => c.id !== deleteTarget); setConversations(next); if (String(deleteTarget) === currentConvId) {
-      if (skillKey) {
-        router.push(`/skills/chat?key=${skillKey}`);
-      } else {
-        router.push("/chat");
+    try {
+      const r = await apiFetch(`/conversations/${deleteTarget}`, { method: "DELETE" });
+      if (r.ok) {
+        invalidateConversationSnapshot(deleteTarget);
+        deletePersistentConversationSnapshot(deleteTarget);
+        const next = conversations.filter(c => c.id !== deleteTarget);
+        setConversations(next);
+        if (String(deleteTarget) === currentConvId) {
+          if (skillKey) {
+            router.push(`/skills/chat?key=${skillKey}`);
+          } else {
+            router.push("/chat");
+          }
+        }
       }
-    } } } catch {}
+    } catch {}
     setDeleteTarget(null);
   };
 
   const handleRename = async (newTitle: string) => {
     if (!renameTarget) return;
-    const token = localStorage.getItem("token"); if (!token) return;
-    try { const r = await fetch(`/api/conversations/${renameTarget.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ title: newTitle }) }); if (r.ok) { const u = await r.json(); const next = conversations.map(c => c.id === u.id ? { ...c, title: u.title } : c); setConversations(next); window.dispatchEvent(new CustomEvent("conversation-renamed", { detail: { id: u.id, title: u.title } })); } } catch {}
+    try {
+      const u = await apiJson<Conversation>(`/conversations/${renameTarget.id}`, { method: "PUT", body: JSON.stringify({ title: newTitle }) });
+      const next = conversations.map(c => c.id === u.id ? { ...c, title: u.title } : c);
+      setConversations(next);
+      window.dispatchEvent(new CustomEvent("conversation-renamed", { detail: { id: u.id, title: u.title } }));
+    } catch {}
     setRenameTarget(null);
   };
 
   const handleTogglePin = async (conv: Conversation) => {
-    const token = localStorage.getItem("token"); if (!token) return;
-    try { const r = await fetch(`/api/conversations/${conv.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ pinned: !conv.pinned }) }); if (r.ok) { const u = await r.json(); const next = sortConversations(conversations.map(c => c.id === u.id ? { ...c, pinned: u.pinned } : c)); setConversations(next); } } catch {}
+    try {
+      const u = await apiJson<Conversation>(`/conversations/${conv.id}`, { method: "PUT", body: JSON.stringify({ pinned: !conv.pinned }) });
+      const next = sortConversations(conversations.map(c => c.id === u.id ? { ...c, pinned: u.pinned } : c));
+      setConversations(next);
+    } catch {}
   };
 
   const handleShare = (conv: Conversation) => {
@@ -897,7 +923,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
 
   const prefetchConversation = useCallback((conv: Conversation, options?: { signal?: AbortSignal; force?: boolean }) => {
     if (isConversationPrefetchDisabledForTest()) return Promise.resolve(false);
-    const token = localStorage.getItem("token");
+    const token = readAuthState().token;
     return prefetchConversationSnapshot({
       conversationId: conv.id,
       token,

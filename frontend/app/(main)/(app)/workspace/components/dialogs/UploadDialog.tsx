@@ -5,6 +5,7 @@ import { UploadCloud, FileText, Trash2, X, Check, Loader2, FolderOpen, CloudUplo
 import DialogShell, { THEMES } from "./DialogShell";
 import { getClipboardFiles } from "@/lib/clipboardFiles";
 import { readApiError, showUserError } from "@/lib/errors";
+import { apiFetch } from "@/lib/api/client";
 
 interface FileItem {
   id: number;
@@ -24,10 +25,9 @@ export default function UploadDialog({ open, onClose, workspaceId }: { open: boo
   const theme = THEMES.blue;
 
   const loadFiles = useCallback(async () => {
-    const token = localStorage.getItem("token");
-    if (!token || !workspaceId) return;
+    if (!workspaceId) return;
     try {
-      const res = await fetch(`/api/files?workspace_id=${workspaceId}`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await apiFetch(`/files?workspace_id=${workspaceId}`);
       if (res.ok) {
         const data = await res.json();
         setFiles(Array.isArray(data) ? data : []);
@@ -42,16 +42,14 @@ export default function UploadDialog({ open, onClose, workspaceId }: { open: boo
   const handleUpload = async (fileList: FileList | File[] | null) => {
     if (!fileList || fileList.length === 0 || !workspaceId) return;
     setUploading(true);
-    const token = localStorage.getItem("token");
     const uploaded: FileItem[] = [];
     for (const file of Array.from(fileList)) {
       const form = new FormData();
       form.append("file", file);
       form.append("workspace_id", String(workspaceId));
       try {
-        const res = await fetch("/api/files/upload", {
+        const res = await apiFetch("/files/upload", {
           method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
           body: form,
         });
         if (!res.ok) throw await readApiError(res);
@@ -77,9 +75,8 @@ export default function UploadDialog({ open, onClose, workspaceId }: { open: boo
   };
 
   const handleDelete = async (id: number) => {
-    const token = localStorage.getItem("token");
     try {
-      const res = await fetch(`/api/files/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+      const res = await apiFetch(`/files/${id}`, { method: "DELETE" });
       if (res.ok) setFiles((prev) => prev.filter((f) => f.id !== id));
     } catch { /* ignore */ }
   };

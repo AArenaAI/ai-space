@@ -24,6 +24,8 @@ import { emitChatRenderProfileEvent } from "@/lib/chatRenderProfile";
 import { useCredits, getTierName, getModelTier, isExpensiveModel } from "@/hooks/useCredits";
 import CreditExhaustedModal from "@/components/credits/CreditExhaustedModal";
 import { useChatAnalytics, trackCreditUse, trackFeatureUse } from "@/hooks/useAnalytics";
+import { apiFetch, apiJson } from "@/lib/api/client";
+import { readAuthState } from "@/lib/auth/state";
 
 const ForkCompareDialog = dynamic(() => import("./ForkCompareDialog"), {
   ssr: false,
@@ -248,23 +250,15 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
       setRenameOpen(false);
       return;
     }
-    const token = localStorage.getItem("token");
-    if (!token) return;
     try {
-      const r = await fetch(`/api/conversations/${conversationId}`, {
+      const u = await apiJson<{ id: number; title?: string }>(`/conversations/${conversationId}`, {
         method: "PUT",
-        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
         body: JSON.stringify({ title: newTitle.trim() }),
       });
-      if (r.ok) {
-        const u = await r.json();
-        setConversationTitle(u.title || newTitle.trim());
-        toast.success(t("chat.renameSuccess"));
-        // 触发侧边栏刷新
-        window.dispatchEvent(new CustomEvent("conversation-renamed", { detail: { id: conversationId, title: u.title } }));
-      } else {
-        toast.error(t("chat.renameFailed"));
-      }
+      setConversationTitle(u.title || newTitle.trim());
+      toast.success(t("chat.renameSuccess"));
+      // 触发侧边栏刷新
+      window.dispatchEvent(new CustomEvent("conversation-renamed", { detail: { id: conversationId, title: u.title } }));
     } catch {
       toast.error(t("chat.renameFailed"));
     }
@@ -438,16 +432,13 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   const persistCompareModelsForConversation = useCallback((modelIds: string[]) => {
     const targetConversationId = conversationId || currentConversation;
     if (!targetConversationId || modelIds.length < COMPARE_MODEL_LIMIT) return;
-    const token = localStorage.getItem("token");
-    if (!token) return;
     if (compareModelPersistTimerRef.current) {
       clearTimeout(compareModelPersistTimerRef.current);
     }
     compareModelPersistTimerRef.current = setTimeout(() => {
       compareModelPersistTimerRef.current = null;
-      void fetch(`/api/conversations/${targetConversationId}`, {
+      void apiFetch(`/conversations/${targetConversationId}`, {
         method: "PUT",
-        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
         body: JSON.stringify({ compare: true, compare_models: JSON.stringify(modelIds) }),
       }).then((response) => {
         if (response.ok) {
@@ -522,20 +513,16 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     setCompareModels([]);
 
     if (conversationId) {
-      const token = localStorage.getItem("token");
-      if (token) {
-        void fetch(`/api/conversations/${conversationId}`, {
-          method: "PUT",
-          headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
-          body: JSON.stringify({ compare: false, compare_models: "[]" }),
-        }).then((response) => {
-          if (response.ok) {
-            window.dispatchEvent(new CustomEvent("conversation-updated", { detail: { conversationId } }));
-          }
-        }).catch(() => {
-          // Local exit should still work; backend state will be retried on a future explicit exit.
-        });
-      }
+      void apiFetch(`/conversations/${conversationId}`, {
+        method: "PUT",
+        body: JSON.stringify({ compare: false, compare_models: "[]" }),
+      }).then((response) => {
+        if (response.ok) {
+          window.dispatchEvent(new CustomEvent("conversation-updated", { detail: { conversationId } }));
+        }
+      }).catch(() => {
+        // Local exit should still work; backend state will be retried on a future explicit exit.
+      });
     }
   }, [conversationId, setCompareMode, setIsCompare, setCompareModels]);
   const activeSelectedModelIds = selectedModels.length > 0 ? selectedModels : compareModels;
@@ -833,14 +820,9 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
         open={creditExhaustedOpen}
         onClose={() => setCreditExhaustedOpen(false)}
         onSubmit={async (data) => {
-          const token = localStorage.getItem("token");
-          if (!token) throw new Error("未登录");
-          const res = await fetch("/api/bad-cases", {
+          if (!readAuthState().user) throw new Error("未登录");
+          const res = await apiFetch("/bad-cases", {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
             body: JSON.stringify(data),
           });
           if (!res.ok) {

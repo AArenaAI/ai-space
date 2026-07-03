@@ -11,6 +11,7 @@ import { resolveChatMessageRuntimeState } from "@/lib/chatMessageRuntimeState";
 import { isLowSignalCompletedActivityStep } from "@/lib/chatActivityTimeline";
 import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
 import { groupSearchSourcesByHost, normalizeSearchSources } from "@/lib/searchSources";
+import { apiFetch } from "@/lib/api/client";
 
 function statusIcon(step: ChatStatusTimelineStep) {
   if (step.status === "failed") return <AlertCircle className="h-3.5 w-3.5 text-red-500" />;
@@ -140,11 +141,9 @@ export default function ChatActivityPanel({
     setSnapshotTimeline(undefined);
     const taskId = message?.generationTaskId;
     if (!taskId || typeof window === "undefined") return;
-    const token = window.localStorage.getItem("token");
-    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
     let cancelled = false;
     const loadSnapshot = () => {
-      fetch(`/api/tasks/${taskId}`, { headers, credentials: "include" })
+      apiFetch(`/tasks/${taskId}`)
         .then((res) => res.ok ? res.json() : undefined)
         .then((data) => {
           if (cancelled || !data) return;

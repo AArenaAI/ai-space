@@ -25,6 +25,9 @@ import { useI18n } from "@/lib/i18n";
 import { useTheme } from "@/components/theme/ThemeProvider";
 import { cn } from "@/lib/utils";
 import TemplatesPage from "@/app/(main)/(creative)/templates/page";
+import { apiFetch } from "@/lib/api/client";
+import { readAuthState } from "@/lib/auth/state";
+import { useAuth } from "@/components/auth/AuthProvider";
 
 type Tab = "general" | "templates" | "betaCode" | "betaApply" | "feedback";
 
@@ -53,20 +56,11 @@ function formatInviteCode(value: string) {
 function AccountSection() {
   const { t } = useI18n();
   const router = useRouter();
-  const [user, setUser] = useState<any>(null);
+  const auth = useAuth();
+  const user = auth.user;
 
-  useEffect(() => {
-    const raw = localStorage.getItem("user");
-    if (raw) {
-      try {
-        setUser(JSON.parse(raw));
-      } catch { /* ignore */ }
-    }
-  }, []);
-
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
+  const handleLogout = async () => {
+    await auth.logout();
     router.push("/");
   };
 
@@ -315,24 +309,19 @@ function BetaCodeSection({ onApplyClick }: { onApplyClick: () => void }) {
     }
     setSubmitting(true);
     try {
-      const token = localStorage.getItem("token");
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (token) headers.Authorization = `Bearer ${token}`;
-
-      const res = await fetch("/api/beta/use-invite", {
+      const res = await apiFetch("/beta/use-invite", {
         method: "POST",
-        headers,
         body: JSON.stringify({ code: normalizedCode }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || data.message || "激活失败");
 
-      const raw = localStorage.getItem("user");
-      if (raw) {
-        const user = JSON.parse(raw);
-        user.beta_phase = data.phase || "phase_1";
-        user.beta_batch = data.beta_batch || data.batch || user.beta_batch;
-        localStorage.setItem("user", JSON.stringify(user));
+      const user = readAuthState().user;
+      if (user) {
+        const nextUser = { ...user } as any;
+        nextUser.beta_phase = data.phase || "phase_1";
+        nextUser.beta_batch = data.beta_batch || data.batch || nextUser.beta_batch;
+        localStorage.setItem("user", JSON.stringify(nextUser));
       }
       setActivation(data);
       setSubmitted(true);
@@ -664,20 +653,15 @@ function BetaFeedbackSection() {
       return;
     }
 
-    const token = localStorage.getItem("token");
-    if (!token) {
+    if (!readAuthState().user) {
       toast.error("请先登录后再提交反馈");
       return;
     }
 
     setSubmitting(true);
     try {
-      const res = await fetch("/api/beta/feedback", {
+      const res = await apiFetch("/beta/feedback", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
         body: JSON.stringify({
           category: form.category,
           title: form.title,

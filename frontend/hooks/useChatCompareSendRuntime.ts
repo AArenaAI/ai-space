@@ -32,6 +32,7 @@ import { createBusyGeneratingStatus } from "@/lib/chatActivityStatus";
 import type { ChatStreamGroupContext, ChatStreamRunResult } from "@/lib/chatStreamRunResult";
 import type { ChatModel, Message } from "@/lib/chatTypes";
 import type { CreateConversationAction } from "@/hooks/useChatConversationCreateRuntime";
+import { readAuthState } from "@/lib/auth/state";
 
 type AbortReason = "user" | "navigation" | null;
 type SendReasoning = { enabled: boolean; effort?: string };
@@ -122,7 +123,7 @@ export function useChatCompareSendRuntime({
   translate,
   now = Date.now,
   createId = uuidv4,
-  getToken = () => localStorage.getItem("token"),
+  getToken = () => readAuthState().token,
   getWorkspaceId = () => localStorage.getItem("current-workspace"),
   dispatchWindowEvent = (event) => window.dispatchEvent(event),
 }: UseChatCompareSendRuntimeOptions) {

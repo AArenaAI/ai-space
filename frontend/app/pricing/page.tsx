@@ -21,6 +21,8 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
+import { apiFetch } from "@/lib/api/client";
+import { readAuthState } from "@/lib/auth/state";
 
 type TierKey = "basic" | "advanced";
 type TierModel = { id: string; name: string; provider?: string; tier?: TierKey };
@@ -417,12 +419,8 @@ export default function PricingPage() {
 
   useEffect(() => {
     if (!payment?.orderNo || payment.status === "paid") return;
-    const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
-    if (!token) return;
     const timer = window.setInterval(() => {
-      fetch(`/api/payments/orders/${encodeURIComponent(payment.orderNo)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
+      apiFetch(`/payments/orders/${encodeURIComponent(payment.orderNo)}`)
         .then((res) => (res.ok ? res.json() : null))
         .then((data) => {
           if (!data?.status) return;
@@ -436,16 +434,14 @@ export default function PricingPage() {
 
   async function startAlipayCheckout(plan: Plan) {
     setPaymentError("");
-    const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
-    if (!token) {
+    if (!readAuthState().user) {
       window.location.href = `/login?returnUrl=${encodeURIComponent("/pricing")}`;
       return;
     }
     setPaymentLoadingPlan(plan.id);
     try {
-      const res = await fetch("/api/payments/fubei/alipay/orders", {
+      const res = await apiFetch("/payments/fubei/alipay/orders", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ plan_code: plan.id }),
       });
       const data = await res.json().catch(() => ({}));

@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { getGuestId } from "@/lib/guestId";
 import { normalizeError } from "@/lib/errors";
+import { applyAuthSession, clearBrowserAuthState, ensureAuthSession, readAuthState, storeAdminAuthSnapshot } from "@/lib/auth/state";
 import { toast } from "sonner";
 
 const AUTH_REFRESH_PATH = "/api/auth/refresh";
@@ -36,17 +37,6 @@ function isAdminPagePath(path: string) {
   return path === "/admin" || path.startsWith("/admin/");
 }
 
-function clearAuthState() {
-  localStorage.removeItem("token");
-  localStorage.removeItem("user");
-  window.dispatchEvent(new Event("auth-changed"));
-}
-
-function clearAdminAuthState() {
-  localStorage.removeItem("admin_token");
-  localStorage.removeItem("admin_user");
-  window.dispatchEvent(new Event("admin-auth-changed"));
-}
 
 export default function AuthInterceptor() {
   useEffect(() => {
@@ -57,6 +47,7 @@ export default function AuthInterceptor() {
     getGuestId();
 
     const originalFetch = window.fetch;
+    const sessionProbePromise = ensureAuthSession();
     let refreshPromise: Promise<string | null> | null = null;
     let redirecting = false;
     let lastToastKey = "";
@@ -80,14 +71,9 @@ export default function AuthInterceptor() {
             if (!res.ok) return null;
             const data = await res.json();
             if (!data?.token) return null;
-            localStorage.setItem("token", data.token);
             if (data.user) {
-              localStorage.setItem("user", JSON.stringify(data.user));
-              if (data.user.default_workspace_id) {
-                localStorage.setItem("current-workspace", String(data.user.default_workspace_id));
-              }
+              applyAuthSession({ token: data.token, user: data.user });
             }
-            window.dispatchEvent(new Event("auth-changed"));
             return data.token as string;
           })
           .catch(() => null)
@@ -101,8 +87,7 @@ export default function AuthInterceptor() {
     const redirectToLogin = () => {
       if (redirecting || window.location.pathname.startsWith("/login") || window.location.pathname.startsWith("/register") || isAdminPagePath(window.location.pathname)) return;
       redirecting = true;
-      clearAuthState();
-      getGuestId();
+      clearBrowserAuthState();
       const returnUrl = encodeURIComponent(window.location.pathname + window.location.search);
       window.location.href = `/login?returnUrl=${returnUrl}`;
     };
@@ -110,9 +95,17 @@ export default function AuthInterceptor() {
     const redirectToAdminLogin = () => {
       if (redirecting || window.location.pathname.replace(/\/+$/, "") === "/admin/login") return;
       redirecting = true;
-      clearAdminAuthState();
+      clearBrowserAuthState();
       const returnUrl = encodeURIComponent(window.location.pathname + window.location.search);
       window.location.href = `/admin/login?returnUrl=${returnUrl}`;
+    };
+
+    const restoreSessionAfterRefreshFailure = async () => {
+      // Refresh token rotation or request races can occasionally make /refresh fail while
+      // the HttpOnly session cookie is still valid. Do one authoritative session probe
+      // before redirecting so a transient refresh 401 does not kick the user to login.
+      const session = await ensureAuthSession({ force: true }).catch(() => null);
+      return session?.token ? session : null;
     };
 
     window.fetch = async function (
@@ -131,6 +124,11 @@ export default function AuthInterceptor() {
       const isAuthLifecycle = isAuthLifecyclePath(path);
       const shouldAttemptRefresh = isApi && !isAdminApi && !isAuthLifecycle;
 
+      // 首屏业务请求必须等 session 探测完成，避免旧/过期 localStorage token 抢跑 401 后跳登录。
+      if (!isAuthLifecycle) {
+        await sessionProbePromise;
+      }
+
       let nextInit: RequestInit | undefined = init ? { ...init } : undefined;
 
       // 给本域 API 请求自动添加 Authorization / X-Guest-ID；后台 API 使用独立 admin_token，不混用普通业务 token。
@@ -138,8 +136,8 @@ export default function AuthInterceptor() {
         const headers = new Headers(input instanceof Request ? input.headers : init?.headers);
         const hasAuth = headers.has("Authorization");
         if (!hasAuth && !isAuthLifecycle) {
-          const tokenKey = isAdminApi ? "admin_token" : "token";
-          const token = localStorage.getItem(tokenKey);
+          const authState = readAuthState();
+          const token = isAdminApi ? (authState.isAdmin ? authState.token : localStorage.getItem("admin_token")) : authState.token;
           if (token && token !== "null" && token !== "undefined") {
             headers.set("Authorization", `Bearer ${token}`);
           }
@@ -154,9 +152,52 @@ export default function AuthInterceptor() {
 
       let res = await originalFetch(requestForOriginal, nextInit);
 
-      // Access token 过期时：普通业务接口用 HttpOnly refresh cookie 静默续期；后台接口回后台登录页，不跳普通登录。
+      if (res.ok && (path === AUTH_LOGIN_PATH || path === AUTH_REGISTER_PATH || path === AUTH_REFRESH_PATH)) {
+        try {
+          const data = await res.clone().json();
+          if (data?.token && data?.user) {
+            applyAuthSession({ token: data.token, user: data.user });
+          }
+        } catch {
+          // 非 JSON 认证响应忽略
+        }
+      }
+
+      // Access token 过期时：用 HttpOnly refresh cookie 静默续期并重试；后台接口也走这里，兼容未使用 adminFetch 的旧页面。
       if (res.status === 401 && isAdminApi) {
-        redirectToAdminLogin();
+        const newToken = await refreshAccessToken();
+        if (newToken) {
+          const adminUserRaw = localStorage.getItem("user");
+          const adminUser = adminUserRaw ? JSON.parse(adminUserRaw) : null;
+          if (adminUser?.role === "admin") {
+            storeAdminAuthSnapshot(newToken, adminUser);
+            const retryHeaders = new Headers(input instanceof Request ? input.headers : init?.headers);
+            retryHeaders.set("Authorization", `Bearer ${newToken}`);
+            const retryInit: RequestInit = {
+              ...(init || {}),
+              headers: retryHeaders,
+              credentials: (init && init.credentials) || "include",
+            };
+            res = await originalFetch(requestForRetry, retryInit);
+          } else {
+            redirectToAdminLogin();
+          }
+        } else {
+          const restored = await restoreSessionAfterRefreshFailure();
+          if (restored?.user?.role === "admin") {
+            storeAdminAuthSnapshot(restored.token, restored.user);
+            const retryHeaders = new Headers(input instanceof Request ? input.headers : init?.headers);
+            retryHeaders.set("Authorization", `Bearer ${restored.token}`);
+            const retryInit: RequestInit = {
+              ...(init || {}),
+              headers: retryHeaders,
+              credentials: (init && init.credentials) || "include",
+            };
+            res = await originalFetch(requestForRetry, retryInit);
+          } else {
+            redirectToAdminLogin();
+          }
+        }
       } else if (res.status === 401 && shouldAttemptRefresh) {
         const newToken = await refreshAccessToken();
         if (newToken) {
@@ -169,7 +210,19 @@ export default function AuthInterceptor() {
           };
           res = await originalFetch(requestForRetry, retryInit);
         } else {
-          redirectToLogin();
+          const restored = await restoreSessionAfterRefreshFailure();
+          if (restored?.token) {
+            const retryHeaders = new Headers(input instanceof Request ? input.headers : init?.headers);
+            retryHeaders.set("Authorization", `Bearer ${restored.token}`);
+            const retryInit: RequestInit = {
+              ...(init || {}),
+              headers: retryHeaders,
+              credentials: (init && init.credentials) || "include",
+            };
+            res = await originalFetch(requestForRetry, retryInit);
+          } else {
+            redirectToLogin();
+          }
         }
       }
 

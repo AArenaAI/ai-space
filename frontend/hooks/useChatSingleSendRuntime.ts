@@ -25,6 +25,7 @@ import { createBusyGeneratingStatus } from "@/lib/chatActivityStatus";
 import type { ChatStreamGroupContext, ChatStreamRunResult } from "@/lib/chatStreamRunResult";
 import type { ChatModel, Message } from "@/lib/chatTypes";
 import type { CreateConversationAction } from "@/hooks/useChatConversationCreateRuntime";
+import { readAuthState } from "@/lib/auth/state";
 
 type AbortReason = "user" | "navigation" | null;
 type SendReasoning = { enabled: boolean; effort?: string };
@@ -83,7 +84,7 @@ export function useChatSingleSendRuntime({
   translate,
   now = Date.now,
   createId = uuidv4,
-  getToken = () => localStorage.getItem("token"),
+  getToken = () => readAuthState().token,
   dispatchWindowEvent = (event) => window.dispatchEvent(event),
 }: UseChatSingleSendRuntimeOptions) {
   const inFlightSendKeysRef = useRef<Set<string>>(new Set());

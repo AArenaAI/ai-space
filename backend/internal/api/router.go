@@ -120,6 +120,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	router.POST("/api/auth/send-email-code", authHandler.SendEmailCode)
 	router.POST("/api/auth/register", authHandler.Register)
 	router.POST("/api/auth/login", authHandler.Login)
+	router.GET("/api/auth/session", authHandler.Session)
 	router.POST("/api/auth/refresh", authHandler.Refresh)
 	router.POST("/api/auth/logout", authHandler.Logout)
 	router.POST("/api/auth/reset-password", authHandler.ResetPassword)

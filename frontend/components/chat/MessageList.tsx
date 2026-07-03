@@ -46,6 +46,8 @@ import ChatActivityPanel from "./ChatActivityPanel";
 import { useCompareActivityLayout, type CompareActivityLayout } from "./ChatCompareActivityLayoutControl";
 import { CHAT_ACTIVITY_PANEL_WIDTH_CLASS } from "./chatLayout";
 import { parseThinkContent, sanitizeContent, isMessageGenerating } from "@/lib/chatContent";
+import { apiFetch } from "@/lib/api/client";
+import { readAuthState } from "@/lib/auth/state";
 
 
 const CHAT_BOTTOM_SPACER = 280;
@@ -1767,17 +1769,11 @@ function MessageList({
 
   const handleShareSelected = async () => {
     if (!conversationId || selectedIds.size === 0) return;
-    const token = localStorage.getItem("token");
-    if (!token) return;
 
     setSharing(true);
     try {
-      const res = await fetch(`/api/conversations/${conversationId}/share`, {
+      const res = await apiFetch(`/conversations/${conversationId}/share`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
         body: JSON.stringify({ selected_messages: Array.from(selectedIds) }),
       });
       if (res.ok) {
@@ -1791,8 +1787,7 @@ function MessageList({
 
   const handleFavoriteSelected = async () => {
     if (!conversationId || selectedIds.size === 0 || favoriteLoading) return;
-    const token = localStorage.getItem("token");
-    if (!token) {
+    if (!readAuthState().user) {
       toast.warning(t("chat.toast.favoriteLoginRequired"));
       return;
     }

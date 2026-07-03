@@ -2,17 +2,13 @@
 
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/components/auth/AuthProvider";
 
 interface AuthAwareButtonProps {
   children: React.ReactNode;
   className?: string;
   variant?: "primary" | "secondary" | "text";
   icon?: React.ReactNode;
-}
-
-function isLoggedIn(): boolean {
-  if (typeof window === "undefined") return false;
-  return !!localStorage.getItem("token");
 }
 
 export function showLoginModal() {
@@ -28,9 +24,10 @@ export default function AuthAwareButton({
   icon,
 }: AuthAwareButtonProps) {
   const router = useRouter();
+  const auth = useAuth();
 
   const handleClick = () => {
-    if (isLoggedIn()) {
+    if (auth.status === "authenticated") {
       router.push("/chat");
     } else {
       showLoginModal();

@@ -39,6 +39,7 @@ import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
 import { getErrorMessage, readApiError, showUserError } from "@/lib/errors";
 import { getClipboardFiles } from "@/lib/clipboardFiles";
+import { apiFetch } from "@/lib/api/client";
 
 const ASPECT_RATIOS = [
   { value: "auto", label: "Auto", w: 1, h: 1 },
@@ -517,10 +518,8 @@ export default function CreativeGeneratorPage({ defaultMode = "image" }: { defau
       for (const file of validFiles) {
         const formData = new FormData();
         formData.append("file", file);
-        const token = localStorage.getItem("token");
-        const res = await fetch("/api/files/upload", {
+        const res = await apiFetch("/files/upload", {
           method: "POST",
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
           body: formData,
         });
         if (!res.ok) {

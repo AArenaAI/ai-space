@@ -43,6 +43,7 @@ import {
   isConversationGenerationActive,
   type ConversationGenerationStore,
 } from "@/lib/chatConversationGenerationStore";
+import { readAuthState } from "@/lib/auth/state";
 
 const API_BASE_URL = ""; // 使用相对路径，nginx 同域名代理 /api -> 后端
 
@@ -473,7 +474,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     hasMoreMessages,
     totalMessages,
     loadedPersistedMessages,
-    getToken: () => localStorage.getItem("token"),
+    getToken: () => readAuthState().token,
     fallbackId: uuidv4,
     setIsLoadingMore,
     setMessages,

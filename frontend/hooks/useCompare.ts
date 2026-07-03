@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { getErrorMessage, readApiError } from "@/lib/errors";
+import { apiFetch } from "@/lib/api/client";
 
 export interface CompareResult {
   model_id: string;
@@ -33,13 +34,8 @@ export function useCompare() {
     setConversationId(undefined);
 
     try {
-      const token = localStorage.getItem("token");
-      const res = await fetch("/api/chat/compare", {
+      const res = await apiFetch("/chat/compare", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
         body: JSON.stringify({
           query,
           models: modelIDs,

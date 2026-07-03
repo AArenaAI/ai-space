@@ -5,29 +5,18 @@ import AppSidebar from "@/components/sidebar/AppSidebar";
 import MobileNav from "@/components/mobile/MobileNav";
 import { useFlushOnUnload, useGlobalErrorTracking, usePageDuration } from "@/hooks/useAnalytics";
 
-function useAuth() {
+function useMounted() {
   const [mounted, setMounted] = useState(false);
-  const [, setIsLoggedIn] = useState(false);
 
   useEffect(() => {
-    const handler = () => {
-      setIsLoggedIn(!!localStorage.getItem("token"));
-    };
     setMounted(true);
-    handler();
-    window.addEventListener("auth-changed", handler);
-    window.addEventListener("storage", handler);
-    return () => {
-      window.removeEventListener("auth-changed", handler);
-      window.removeEventListener("storage", handler);
-    };
   }, []);
 
   return { mounted };
 }
 
 export default function ChatShellLayout({ children }: { children: React.ReactNode }) {
-  const { mounted } = useAuth();
+  const { mounted } = useMounted();
 
   // 全局埋点
   usePageDuration();

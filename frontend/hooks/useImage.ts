@@ -3,8 +3,8 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotifications";
 import { getErrorMessage, normalizeError, readApiError } from "@/lib/errors";
-
-const API_BASE_URL = "";
+import { apiFetch } from "@/lib/api/client";
+import { readAuthState } from "@/lib/auth/state";
 
 // 模块级缓存：避免组件重新挂载时图片列表消失；按 provider 隔离，避免 AI 漫剧 历史混入普通图片入口。
 const cachedImagesByProvider: Record<string, GeneratedImage[] | null> = {};
@@ -42,21 +42,18 @@ export function useImage(provider?: string) {
 
   const fetchImages = useCallback(async () => {
     try {
-      const token = localStorage.getItem("token");
-      if (!token) {
+      if (!readAuthState().user) {
         // 保留已有缓存，避免临时认证状态/刷新竞态把历史列表直接清空。
         if (!cachedImagesByProvider[providerKey]) {
           setImages([]);
         }
         return;
       }
-      const headers: Record<string, string> = {};
-      if (token) headers.Authorization = `Bearer ${token}`;
       const params = new URLSearchParams();
       if (providerKey) params.set("provider", providerKey);
       if (providerKey === "seedream") params.set("include_legacy", "1");
       const query = params.toString() ? `?${params.toString()}` : "";
-      const response = await fetch(`${API_BASE_URL}/api/images${query}`, { headers });
+      const response = await apiFetch(`/images${query}`);
       if (!response.ok) {
         throw await readApiError(response);
       }
@@ -133,7 +130,6 @@ export function useImage(provider?: string) {
       setError(null);
 
       try {
-        const token = localStorage.getItem("token");
         const body: Record<string, any> = { prompt, aspect_ratio: aspectRatio, resolution, quality };
         if (referenceImageUrls && referenceImageUrls.length > 0) {
           body.reference_image_urls = referenceImageUrls;
@@ -142,11 +138,8 @@ export function useImage(provider?: string) {
         if (requestProvider) {
           body.provider = requestProvider;
         }
-        const headers: Record<string, string> = { "Content-Type": "application/json" };
-        if (token) headers.Authorization = `Bearer ${token}`;
-        const response = await fetch(`${API_BASE_URL}/api/images/generate`, {
+        const response = await apiFetch("/images/generate", {
           method: "POST",
-          headers,
           body: JSON.stringify(body),
         });
 
@@ -193,12 +186,8 @@ export function useImage(provider?: string) {
 
   const deleteImage = useCallback(async (id: number) => {
     try {
-      const token = localStorage.getItem("token");
-      const headers: Record<string, string> = {};
-      if (token) headers.Authorization = `Bearer ${token}`;
-      const response = await fetch(`${API_BASE_URL}/api/images/${id}`, {
+      const response = await apiFetch(`/images/${id}`, {
         method: "DELETE",
-        headers,
       });
       if (!response.ok) {
         throw await readApiError(response);

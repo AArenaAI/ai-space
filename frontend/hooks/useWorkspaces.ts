@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { apiFetch } from "@/lib/api/client";
+import { readAuthState } from "@/lib/auth/state";
 
 export interface Workspace {
   id: number;
@@ -32,17 +34,14 @@ export function useWorkspaces() {
   const [loading, setLoading] = useState(cachedWorkspaces === null);
 
   const fetchWorkspaces = useCallback(async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
+    if (!readAuthState().user) {
       setWorkspaces([]);
       setCurrentWS(null);
       setLoading(false);
       return;
     }
     try {
-      const res = await fetch("/api/workspaces", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await apiFetch("/workspaces");
       if (!res.ok) return;
       const data = await res.json();
       const list = Array.isArray(data) ? data : (data.workspaces || []);
@@ -73,12 +72,10 @@ export function useWorkspaces() {
   }, []);
 
   const createWorkspace = useCallback(async (name: string): Promise<Workspace | null> => {
-    const token = localStorage.getItem("token");
-    if (!token) return null;
+    if (!readAuthState().user) return null;
     try {
-      const res = await fetch("/api/workspaces", {
+      const res = await apiFetch("/workspaces", {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ name }),
       });
       if (!res.ok) return null;
@@ -93,12 +90,10 @@ export function useWorkspaces() {
   }, [fetchWorkspaces]);
 
   const deleteWorkspace = useCallback(async (id: number) => {
-    const token = localStorage.getItem("token");
-    if (!token) return false;
+    if (!readAuthState().user) return false;
     try {
-      const res = await fetch(`/api/workspaces/${id}`, {
+      const res = await apiFetch(`/workspaces/${id}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return false;
       // 如果删除的是当前 workspace，切换到默认
@@ -115,12 +110,10 @@ export function useWorkspaces() {
   }, [fetchWorkspaces, currentWS, workspaces, switchWorkspace]);
 
   const renameWorkspace = useCallback(async (id: number, name: string) => {
-    const token = localStorage.getItem("token");
-    if (!token) return false;
+    if (!readAuthState().user) return false;
     try {
-      const res = await fetch(`/api/workspaces/${id}`, {
+      const res = await apiFetch(`/workspaces/${id}`, {
         method: "PUT",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ name }),
       });
       if (!res.ok) return false;

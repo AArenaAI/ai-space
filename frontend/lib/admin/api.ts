@@ -57,20 +57,58 @@ export function clearAdminSession() {
   window.dispatchEvent(new Event("admin-auth-changed"));
 }
 
+let adminRefreshPromise: Promise<string | null> | null = null;
+
+async function refreshAdminSession(): Promise<string | null> {
+  if (!adminRefreshPromise) {
+    adminRefreshPromise = fetch("/api/auth/refresh", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+    })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        const data = await response.json();
+        if (!data?.token || data.user?.role !== "admin") return null;
+        storeAdminSession(data.token, data.user);
+        return data.token as string;
+      })
+      .catch(() => null)
+      .finally(() => {
+        adminRefreshPromise = null;
+      });
+  }
+  return adminRefreshPromise;
+}
+
+function buildAdminHeaders(token: string | null, headers?: HeadersInit) {
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...headers,
+  };
+}
+
 export async function adminFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = getStoredAdminToken();
   const controller = new AbortController();
   const timeout = globalThis.setTimeout(() => controller.abort(), 12000);
   try {
-    const response = await fetch(`/api/admin${path}`, {
+    const run = (token: string | null) => fetch(`/api/admin${path}`, {
       ...options,
+      credentials: "include",
       signal: options.signal || controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...options.headers,
-      },
+      headers: buildAdminHeaders(token, options.headers),
     });
+
+    let response = await run(getStoredAdminToken());
+    if (response.status === 401) {
+      const refreshedToken = await refreshAdminSession();
+      if (refreshedToken) {
+        response = await run(refreshedToken);
+      } else {
+        clearAdminSession();
+      }
+    }
     if (!response.ok) throw new AdminApiError(await readErrorMessage(response), response.status);
     return response.json() as Promise<T>;
   } catch (error) {

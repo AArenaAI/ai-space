@@ -6,6 +6,7 @@ import {
   runCreateConversationRequest,
   shouldCreateConversation,
 } from "@/lib/chatConversationCreateCoordinator";
+import { readAuthState } from "@/lib/auth/state";
 
 export type UseChatConversationCreateRuntimeOptions = {
   apiBaseUrl: string;
@@ -28,7 +29,7 @@ export function useChatConversationCreateRuntime({
   apiBaseUrl,
   setCreatedConversation,
   notebookId,
-  getToken = () => localStorage.getItem("token"),
+  getToken = () => readAuthState().token,
   getWorkspaceId = () => localStorage.getItem("current-workspace"),
   getCurrentHref = () => window.location.href,
   replaceHistory = (url) => window.history.replaceState({}, "", url),

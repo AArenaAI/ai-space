@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { getErrorMessage, readApiError } from "@/lib/errors";
+import { apiFetch } from "@/lib/api/client";
+import { readAuthState } from "@/lib/auth/state";
 
 export interface Template {
   id: number;
@@ -19,14 +21,11 @@ export function useTemplates() {
   const [error, setError] = useState<string | null>(null);
 
   const fetchTemplates = useCallback(async () => {
-    const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!readAuthState().user) return;
 
     setLoading(true);
     try {
-      const res = await fetch("/api/templates", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await apiFetch("/templates");
       if (!res.ok) throw await readApiError(res);
       const data = await res.json();
       setTemplates(data);
@@ -42,15 +41,10 @@ export function useTemplates() {
   }, [fetchTemplates]);
 
   const createTemplate = useCallback(async (name: string, prefix: string, isDefault: boolean = false) => {
-    const token = localStorage.getItem("token");
-    if (!token) return null;
+    if (!readAuthState().user) return null;
 
-    const res = await fetch("/api/templates", {
+    const res = await apiFetch("/templates", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
       body: JSON.stringify({ name, prefix, is_default: isDefault }),
     });
 
@@ -64,15 +58,10 @@ export function useTemplates() {
   }, []);
 
   const updateTemplate = useCallback(async (id: number, updates: Partial<Template>) => {
-    const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!readAuthState().user) return;
 
-    const res = await fetch(`/api/templates/${id}`, {
+    const res = await apiFetch(`/templates/${id}`, {
       method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
       body: JSON.stringify(updates),
     });
 
@@ -86,12 +75,10 @@ export function useTemplates() {
   }, []);
 
   const deleteTemplate = useCallback(async (id: number) => {
-    const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!readAuthState().user) return;
 
-    const res = await fetch(`/api/templates/${id}`, {
+    const res = await apiFetch(`/templates/${id}`, {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` },
     });
 
     if (!res.ok) {

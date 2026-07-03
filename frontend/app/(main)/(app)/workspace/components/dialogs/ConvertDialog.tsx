@@ -5,6 +5,7 @@ import { Send, Bot, User, Loader2, FileText, X, Trash2, MessageSquareText, Spark
 import DialogShell, { THEMES } from "./DialogShell";
 import { getErrorMessage, readApiError, showUserError } from "@/lib/errors";
 import { getClipboardFiles } from "@/lib/clipboardFiles";
+import { apiFetch, apiJson } from "@/lib/api/client";
 
 interface Msg {
   role: "user" | "assistant";
@@ -38,28 +39,19 @@ export default function ConvertDialog({ open, onClose, workspaceId, modelId }: {
     setLoading(true);
 
     try {
-      const token = localStorage.getItem("token");
-      const convRes = await fetch("/api/conversations", {
+      const conv = await apiJson<{ id: number }>("/conversations", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ title: "文件转换", workspace_id: workspaceId }),
       });
-      if (!convRes.ok) throw await readApiError(convRes);
-      const conv = await convRes.json();
 
       const body: any = { content: text, conversation_id: conv.id };
       if (modelId) body.model = modelId;
       if (uploadedFiles.length > 0) body.file_ids = uploadedFiles.map((f) => f.id);
 
-      const msgRes = await fetch("/api/conversations/messages", {
+      const reply = await apiJson<any>("/conversations/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(body),
       });
-      if (!msgRes.ok) {
-        throw await readApiError(msgRes);
-      }
-      const reply = await msgRes.json();
       setMessages((prev) => [...prev, { role: "assistant", content: reply.content || "已处理完成" }]);
     } catch (e) {
       const userMessage = getErrorMessage(e, { module: "chat", fallbackMessage: "发送失败，请稍后重试。" });
@@ -71,15 +63,13 @@ export default function ConvertDialog({ open, onClose, workspaceId, modelId }: {
 
   const handleFileUpload = async (files: FileList | File[] | null) => {
     if (!files || files.length === 0 || !workspaceId) return;
-    const token = localStorage.getItem("token");
     for (const file of Array.from(files)) {
       const form = new FormData();
       form.append("file", file);
       form.append("workspace_id", String(workspaceId));
       try {
-        const res = await fetch("/api/files/upload", {
+        const res = await apiFetch("/files/upload", {
           method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
           body: form,
         });
         if (!res.ok) throw await readApiError(res);

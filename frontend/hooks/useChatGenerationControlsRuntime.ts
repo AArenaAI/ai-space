@@ -20,6 +20,7 @@ import { toModelMessages } from "@/lib/chatHistoryTransform";
 import { patchMessageById } from "@/lib/chatMessageStatePatch";
 import type { ChatStreamRunResult } from "@/lib/chatStreamRunResult";
 import type { Message } from "@/lib/chatTypes";
+import { readAuthState } from "@/lib/auth/state";
 
 type AbortReason = "user" | "navigation" | null;
 
@@ -45,7 +46,7 @@ export function createStopGenerationAction({
   abortControllerRef,
   compareAbortControllersRef,
   abortReasonRef,
-  getToken = () => (typeof localStorage === "undefined" ? null : localStorage.getItem("token")),
+  getToken = () => readAuthState().token,
   getGuestId = defaultGetGuestId,
   runStopGeneration = defaultRunStopGeneration,
   cancelGenerationTask = defaultCancelGenerationTask,
@@ -145,7 +146,7 @@ export function createForkChatAction({
   skillKey,
   notebookId,
   notebookFileIds,
-  getToken = () => (typeof localStorage === "undefined" ? null : localStorage.getItem("token")),
+  getToken = () => readAuthState().token,
   getGuestId = defaultGetGuestId,
   fallbackId = uuidv4,
   now = Date.now,

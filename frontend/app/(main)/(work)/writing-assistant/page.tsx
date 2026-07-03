@@ -28,6 +28,7 @@ import { consumeChatStream } from "@/lib/chatStream";
 import { getErrorMessage, normalizeError, readApiError, showUserError } from "@/lib/errors";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import HistoryDrawer, { type HistoryItem as DrawerHistoryItem } from "@/components/ui/HistoryDrawer";
+import { apiFetch } from "@/lib/api/client";
 
 const WRITER_MODEL = "gpt-5.5";
 const WRITER_SKILL_KEY = "ai-writing-assistant";
@@ -137,19 +138,6 @@ function pushSnapshot(stack: DocSnapshot[], snapshot: DocSnapshot) {
   return [...stack, snapshot].slice(-50);
 }
 
-function getAuthHeaders() {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
-  return {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-}
-
-function getAuthOnlyHeaders(): Record<string, string> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -166,9 +154,8 @@ function extractTextFromChatResponse(data: any): string {
 }
 
 async function fetchWritingAssistantStream(payload: Record<string, any>): Promise<Response> {
-  const initResponse = await fetch("/api/chat/init", {
+  const initResponse = await apiFetch("/chat/init", {
     method: "POST",
-    headers: getAuthHeaders(),
     body: JSON.stringify({ ...payload, stream: true, init_only: true }),
   });
   if (!initResponse.ok) return initResponse;
@@ -180,9 +167,7 @@ async function fetchWritingAssistantStream(payload: Record<string, any>): Promis
       headers: { "Content-Type": "application/json" },
     });
   }
-  return fetch(`/api/tasks/${taskId}/stream?after=0`, {
-    headers: getAuthOnlyHeaders(),
-  });
+  return apiFetch(`/tasks/${taskId}/stream?after=0`);
 }
 
 function stripJsonFence(text: string) {
@@ -365,7 +350,7 @@ export default function WritingAssistantPage() {
   const loadDocuments = useCallback(async () => {
     setLoadingDocs(true);
     try {
-      const res = await fetch("/api/conversations?limit=200", { headers: getAuthHeaders() });
+      const res = await apiFetch("/conversations?limit=200");
       if (!res.ok) throw await readApiError(res);
       const data = await res.json();
       const list = Array.isArray(data) ? data : data.conversations || [];
@@ -456,9 +441,8 @@ export default function WritingAssistantPage() {
   };
 
   const createConversation = async (title: string) => {
-    const res = await fetch("/api/conversations", {
+    const res = await apiFetch("/conversations", {
       method: "POST",
-      headers: getAuthHeaders(),
       body: JSON.stringify({ title: title || t("writer.title"), model: WRITER_MODEL, skill_key: WRITER_SKILL_KEY }),
     });
     if (!res.ok) throw await readApiError(res);
@@ -561,7 +545,7 @@ export default function WritingAssistantPage() {
     const conversationId = payload.conversation_id;
     const recoverFromTask = async () => {
       if (!taskId) return null;
-      const taskRes = await fetch(`/api/tasks/${taskId}`, { headers: getAuthHeaders() });
+      const taskRes = await apiFetch(`/tasks/${taskId}`);
       if (!taskRes.ok) return null;
       const data = await taskRes.json();
       const task = data?.task || {};
@@ -578,7 +562,7 @@ export default function WritingAssistantPage() {
 
     const recoverFromConversation = async () => {
       if (!conversationId) return null;
-      const res = await fetch(`/api/conversations/${conversationId}/messages`, { headers: getAuthHeaders() });
+      const res = await apiFetch(`/conversations/${conversationId}/messages`);
       if (!res.ok) return null;
       const data = await res.json();
       const messages = Array.isArray(data?.messages) ? data.messages : [];
@@ -636,9 +620,8 @@ export default function WritingAssistantPage() {
 
   const deleteDocument = async (conv: Conversation) => {
     try {
-      const res = await fetch(`/api/conversations/${conv.id}`, {
+      const res = await apiFetch(`/conversations/${conv.id}`, {
         method: "DELETE",
-        headers: getAuthHeaders(),
       });
       if (!res.ok) {
         throw await readApiError(res);

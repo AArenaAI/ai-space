@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Loader2, ShieldAlert } from "lucide-react";
-import { getAdminMe, AdminApiError, clearAdminSession, getStoredAdminToken } from "@/lib/admin/api";
+import { getAdminMe, AdminApiError, clearAdminSession, storeAdminSession } from "@/lib/admin/api";
+import { useAuth } from "@/components/auth/AuthProvider";
 import type { AdminUser } from "@/lib/admin/types";
 
 type GuardState =
@@ -15,32 +16,48 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [state, setState] = useState<GuardState>({ status: "loading" });
+  const auth = useAuth();
 
   useEffect(() => {
     let cancelled = false;
-    const token = getStoredAdminToken();
-    if (!token) {
+    const redirectToLogin = () => {
       router.replace(`/admin/login?returnUrl=${encodeURIComponent(pathname || "/admin")}`);
-      return;
+    };
+
+    if (auth.status === "loading") {
+      setState({ status: "loading" });
+      return () => {
+        cancelled = true;
+      };
     }
-    getAdminMe()
-      .then(({ user }) => {
+
+    const verifyAdmin = async () => {
+      setState({ status: "loading" });
+      if (!auth.token || !auth.user || auth.user.role !== "admin") {
+        redirectToLogin();
+        return;
+      }
+      storeAdminSession(auth.token, auth.user as AdminUser);
+      try {
+        const { user } = await getAdminMe();
         if (cancelled) return;
         setState({ status: "allowed", user });
-      })
-      .catch((error) => {
+      } catch (error) {
         if (cancelled) return;
         if (error instanceof AdminApiError && error.status === 401) {
           clearAdminSession();
-          router.replace(`/admin/login?returnUrl=${encodeURIComponent(pathname || "/admin")}`);
+          redirectToLogin();
           return;
         }
         setState({ status: "denied", message: error instanceof Error ? error.message : "你没有访问后台管理的权限。" });
-      });
+      }
+    };
+
+    verifyAdmin();
     return () => {
       cancelled = true;
     };
-  }, [pathname, router]);
+  }, [auth.status, auth.token, auth.user, pathname, router]);
 
   if (state.status === "loading") {
     return (

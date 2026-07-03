@@ -5,7 +5,7 @@ import { Send, Brain, Square, Search, Paperclip, X, FileText, Wrench, SlidersHor
 import { cn } from "@/lib/utils";
 import { ChatModel } from "@/lib/chatTypes";
 import { Template } from "@/hooks/useTemplates";
-import { getGuestId } from "@/lib/guestId";
+import { apiFetch } from "@/lib/api/client";
 import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
 import { getErrorMessage, readApiError, showUserError } from "@/lib/errors";
@@ -296,20 +296,11 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     const pendingFiles = attachedFiles.filter((f) => (f.parse_status === "pending" || f.parse_status === "parsing") && f.public_id);
     if (pendingFiles.length === 0) return;
 
-    const token = localStorage.getItem("token");
-    const pollHeaders: Record<string, string> = {};
-    if (token) {
-      pollHeaders["Authorization"] = `Bearer ${token}`;
-    } else {
-      pollHeaders["X-Guest-ID"] = getGuestId();
-    }
     const interval = setInterval(async () => {
       const updates = await Promise.all(
         pendingFiles.map(async (f) => {
           try {
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ""}/api/files/${f.public_id}`, {
-              headers: pollHeaders,
-            });
+            const res = await apiFetch(`/files/${f.public_id}`);
             if (!res.ok) return null;
             const data = await res.json();
             return { 
@@ -435,16 +426,8 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
       const formData = new FormData();
       formData.append("file", file);
 
-      const token = localStorage.getItem("token");
-      const fetchHeaders: Record<string, string> = {};
-      if (token && token !== "null" && token !== "undefined") {
-        fetchHeaders["Authorization"] = `Bearer ${token}`;
-      }
-      const guestId = getGuestId();
-      if (guestId) fetchHeaders["X-Guest-ID"] = guestId;
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ""}/api/files/upload`, {
+      const res = await apiFetch("/files/upload", {
         method: "POST",
-        headers: fetchHeaders,
         body: formData,
       });
 

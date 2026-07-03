@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotifications";
 import { normalizeError, readApiError } from "@/lib/errors";
 import { refreshVideoTaskThrottled } from "@/lib/videoRefreshThrottle";
+import { apiFetch } from "@/lib/api/client";
+import { readAuthState } from "@/lib/auth/state";
 
 export interface VideoGeneration {
   id: number;
@@ -46,10 +48,8 @@ interface UseVideoReturn {
 
 function getAuthHeaders(extra?: Record<string, string>): Record<string, string> {
   const headers: Record<string, string> = { ...(extra || {}) };
-  if (typeof window !== "undefined") {
-    const token = localStorage.getItem("token");
-    if (token) headers.Authorization = `Bearer ${token}`;
-  }
+  const token = typeof window !== "undefined" ? readAuthState().token : null;
+  if (token) headers.Authorization = `Bearer ${token}`;
   return headers;
 }
 
@@ -62,10 +62,7 @@ export function useVideo(): UseVideoReturn {
 
   const fetchVideos = useCallback(async () => {
     try {
-      const res = await fetch("/api/videos", {
-        credentials: "include",
-        headers: getAuthHeaders(),
-      });
+      const res = await apiFetch("/videos");
       if (!res.ok) return;
       const data = await res.json();
       if (Array.isArray(data.videos)) {
@@ -102,10 +99,8 @@ export function useVideo(): UseVideoReturn {
     }): Promise<VideoGeneration> => {
       setGenerating(true);
       try {
-        const res = await fetch("/api/videos", {
+        const res = await apiFetch("/videos", {
           method: "POST",
-          headers: getAuthHeaders({ "Content-Type": "application/json" }),
-          credentials: "include",
           body: JSON.stringify(payload),
         });
         if (!res.ok) {
@@ -190,10 +185,8 @@ export function useVideo(): UseVideoReturn {
   }, []);
 
   const deleteVideo = useCallback(async (id: number) => {
-    const res = await fetch(`/api/videos/${id}`, {
+    const res = await apiFetch(`/videos/${id}`, {
       method: "DELETE",
-      credentials: "include",
-      headers: getAuthHeaders(),
     });
     if (res.ok) {
       setVideos((prev) => prev.filter((v) => v.id !== id));

@@ -19,6 +19,8 @@ import { cn } from "@/lib/utils";
 import { readApiError, showUserError } from "@/lib/errors";
 import { postProcessTranslationFormat } from "@/lib/translatorFormat";
 import HistoryDrawer, { type HistoryItem as DrawerHistoryItem } from "@/components/ui/HistoryDrawer";
+import { apiFetch, apiJson } from "@/lib/api/client";
+import { readAuthState } from "@/lib/auth/state";
 
 const TRANSLATOR_SKILL_KEY = "translator";
 const MAX_TEXT_LENGTH = 20000;
@@ -129,13 +131,6 @@ const FALLBACK_LANGS: LangOption[] = [
   { labelKey: "translator.lang.eu", promptLabel: "巴斯克语", value: "eu" },
 ];
 
-function getAuthHeaders() {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
-  return {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-}
 
 function getLanguageLabel(option: LangOption, t: (key: string) => string) {
   return option.labelKey ? t(option.labelKey) : option.label || option.promptLabel || option.value;
@@ -320,9 +315,8 @@ function extractTranslatorResult(raw: string) {
 }
 
 async function createConversation(title: string, model: string, t: (key: string) => string) {
-  const res = await fetch("/api/conversations", {
+  const res = await apiFetch("/conversations", {
     method: "POST",
-    headers: getAuthHeaders(),
     body: JSON.stringify({ title, model, skill_key: TRANSLATOR_SKILL_KEY }),
   });
   if (!res.ok) {
@@ -332,11 +326,8 @@ async function createConversation(title: string, model: string, t: (key: string)
 }
 
 async function saveConversationMessage(conversationId: number, role: "user" | "assistant", content: string, model?: string) {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
-  if (!token) return;
-  const res = await fetch(`/api/conversations/${conversationId}/messages`, {
+  const res = await apiFetch(`/conversations/${conversationId}/messages`, {
     method: "POST",
-    headers: getAuthHeaders(),
     body: JSON.stringify({ role, content, model }),
   });
   if (!res.ok) {
@@ -365,9 +356,7 @@ export default function TranslatorPage() {
 
   const loadSupportedLanguages = async () => {
     try {
-      const res = await fetch(`/api/translate/languages?display_language=${encodeURIComponent(toDisplayLanguageCode(language))}`, {
-        headers: getAuthHeaders(),
-      });
+      const res = await apiFetch(`/translate/languages?display_language=${encodeURIComponent(toDisplayLanguageCode(language))}`);
       if (!res.ok) throw await readApiError(res);
       const data = await res.json() as { languages?: SupportedLanguageAPIItem[] };
       const options = buildLanguageOptions(data.languages || []);
@@ -382,15 +371,10 @@ export default function TranslatorPage() {
   };
 
   const loadHistoryList = async () => {
-    const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!readAuthState().user) return;
     setHistoryLoading(true);
     try {
-      const res = await fetch(`/api/conversations?skill_key=${TRANSLATOR_SKILL_KEY}&limit=100`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = await apiJson<any>(`/conversations?skill_key=${TRANSLATOR_SKILL_KEY}&limit=100`);
       setHistory(data.conversations || []);
     } finally {
       setHistoryLoading(false);
@@ -411,14 +395,9 @@ export default function TranslatorPage() {
 
 
   const loadHistoryConversation = async (id: number) => {
-    const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!readAuthState().user) return;
     try {
-      const res = await fetch(`/api/conversations/${id}/messages`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = await apiJson<any>(`/conversations/${id}/messages`);
       const messages = data.messages || [];
       const assistantMsg = messages.find((m: any) => m.role === "assistant");
       if (assistantMsg?.content) {
@@ -443,12 +422,10 @@ export default function TranslatorPage() {
   };
 
   const deleteHistoryItem = async (id: number) => {
-    const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!readAuthState().user) return;
     try {
-      const res = await fetch(`/api/conversations/${id}`, {
+      const res = await apiFetch(`/conversations/${id}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return;
       setHistory((prev) => prev.filter((h) => h.id !== id));
@@ -489,9 +466,8 @@ export default function TranslatorPage() {
       const convId = conversationId || (await createConversation(title || t("translator.defaultTitle"), TRANSLATOR_MODEL_LABEL, t)).id;
       setConversationId(convId);
 
-      const res = await fetch("/api/translate", {
+      const res = await apiFetch("/translate", {
         method: "POST",
-        headers: getAuthHeaders(),
         body: JSON.stringify({
           text,
           source_language: sourceLang,

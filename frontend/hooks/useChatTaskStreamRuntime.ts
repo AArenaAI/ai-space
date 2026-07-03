@@ -18,6 +18,7 @@ import {
 } from "@/lib/chatMessageStatePatch";
 import type { Message } from "@/lib/chatTypes";
 import { getConversationSnapshot, patchConversationSnapshot } from "@/lib/chatConversationCache";
+import { readAuthState } from "@/lib/auth/state";
 
 export type TaskStreamActiveState = {
   convId?: number;
@@ -122,7 +123,7 @@ export function createStartTaskEventStreamAction({
   setIsLoading,
   startBackgroundPolling,
   translate,
-  getToken = () => localStorage.getItem("token"),
+  getToken = () => readAuthState().token,
   getGuestId = defaultGetGuestId,
   createAbortController = () => new AbortController(),
   createTaskStreamEventHandler = defaultCreateTaskStreamEventHandler,

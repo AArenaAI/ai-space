@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { getGuestId } from "@/lib/guestId";
 import { useI18n } from "@/lib/i18n";
+import { apiFetch } from "@/lib/api/client";
+import { readAuthState } from "@/lib/auth/state";
 import { toast } from "sonner";
 
 export interface FavoriteItem {
@@ -30,20 +31,6 @@ interface FavoriteOptions {
   silent?: boolean;
 }
 
-function getHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-  const token = localStorage.getItem("token");
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  } else {
-    const guestId = getGuestId();
-    if (guestId) headers["X-Guest-ID"] = guestId;
-  }
-  return headers;
-}
-
 export function useFavorites() {
   const { t } = useI18n();
   const [favorites, setFavorites] = useState<Set<number>>(new Set());
@@ -58,13 +45,10 @@ export function useFavorites() {
   const checkBatch = useCallback(async (messageIds: number[]) => {
     const ids = Array.from(new Set(messageIds.filter((id) => id > 0))).filter((id) => !checkedIdsRef.current.has(id));
     if (ids.length === 0) return;
-    const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!readAuthState().user) return;
     ids.forEach((id) => checkedIdsRef.current.add(id));
     try {
-      const res = await fetch(`/api/favorites/check-batch?message_ids=${ids.join(",")}`, {
-        headers: getHeaders(),
-      });
+      const res = await apiFetch(`/favorites/check-batch?message_ids=${ids.join(",")}`);
       if (res.ok) {
         const data: Record<number, boolean> = await res.json();
         setFavorites((prev) => {
@@ -84,16 +68,14 @@ export function useFavorites() {
 
   // 收藏消息
   const addFavorite = useCallback(async (messageId: number, convId: number, options?: FavoriteOptions) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
+    if (!readAuthState().user) {
       if (!options?.silent) toast.warning(t("chat.toast.favoriteLoginRequired"));
       return false;
     }
     setLoading(true);
     try {
-      const res = await fetch("/api/favorites", {
+      const res = await apiFetch("/favorites", {
         method: "POST",
-        headers: getHeaders(),
         body: JSON.stringify({ message_id: messageId, conv_id: convId }),
       });
       if (res.ok || res.status === 409) {
@@ -117,16 +99,14 @@ export function useFavorites() {
 
   // 取消收藏
   const removeFavorite = useCallback(async (messageId: number) => {
-    const token = localStorage.getItem("token");
-    if (!token) {
+    if (!readAuthState().user) {
       toast.warning(t("chat.toast.favoriteLoginRequired"));
       return false;
     }
     setLoading(true);
     try {
-      const res = await fetch(`/api/favorites/${messageId}`, {
+      const res = await apiFetch(`/favorites/${messageId}`, {
         method: "DELETE",
-        headers: getHeaders(),
       });
       if (res.ok) {
         setFavorites((prev) => {
@@ -165,17 +145,14 @@ export function useFavorites() {
 
   // 获取收藏列表
   const fetchList = useCallback(async (page = 1, pageSize = 20, append = false, keyword?: string) => {
-    const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!readAuthState().user) return;
     setListLoading(true);
     try {
-      let url = `/api/favorites?page=${page}&page_size=${pageSize}`;
+      let url = `/favorites?page=${page}&page_size=${pageSize}`;
       if (keyword?.trim()) {
         url += `&q=${encodeURIComponent(keyword.trim())}`;
       }
-      const res = await fetch(url, {
-        headers: getHeaders(),
-      });
+      const res = await apiFetch(url);
       if (res.ok) {
         const data: FavoritesResponse = await res.json();
         setFavoriteList((prev) => append ? [...prev, ...data.items] : data.items);

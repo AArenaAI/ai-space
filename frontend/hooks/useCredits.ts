@@ -2,8 +2,8 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { getErrorMessage, readApiError } from "@/lib/errors";
-
-const API_BASE_URL = "";
+import { apiFetch } from "@/lib/api/client";
+import { readAuthState } from "@/lib/auth/state";
 
 export interface CreditsData {
   basic_credits: number;
@@ -121,17 +121,12 @@ export function useCredits() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const token =
-    typeof window !== "undefined" ? localStorage.getItem("token") : null;
-
   const fetchCredits = useCallback(async () => {
-    if (!token) return;
+    if (!readAuthState().user) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/user/credits`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await apiFetch("/user/credits");
       if (!res.ok) throw await readApiError(res);
       const data = await res.json();
       setCredits(data);
@@ -140,11 +135,11 @@ export function useCredits() {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, []);
 
   const fetchBetaConfig = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/beta/config`);
+      const res = await fetch("/api/beta/config");
       if (!res.ok) return;
       const data = (await res.json()) as BetaPublicConfig;
       if (data.batch_model_rules) {
@@ -168,14 +163,10 @@ export function useCredits() {
 
   const deductCredits = useCallback(
     async (modelId: string, amount?: number): Promise<DeductResult | null> => {
-      if (!token) return null;
+      if (!readAuthState().user) return null;
       try {
-        const res = await fetch(`${API_BASE_URL}/api/user/credits/deduct`, {
+        const res = await apiFetch("/user/credits/deduct", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
           body: JSON.stringify(amount && amount > 0 ? { model_id: modelId, amount } : { model_id: modelId }),
         });
         if (!res.ok) {
@@ -202,7 +193,7 @@ export function useCredits() {
         return null;
       }
     },
-    [token]
+    []
   );
 
   const getModelCostFen = useCallback((modelId: string): number => {
@@ -271,10 +262,10 @@ export function useCredits() {
 
   useEffect(() => {
     fetchBetaConfig();
-    if (token) {
+    if (readAuthState().user) {
       fetchCredits();
     }
-  }, [token, fetchCredits, fetchBetaConfig]);
+  }, [fetchCredits, fetchBetaConfig]);
 
   // 检查是否处于内测阶段额度耗尽状态
   const isCreditExhausted = useCallback((): boolean => {

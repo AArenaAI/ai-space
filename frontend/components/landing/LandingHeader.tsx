@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import AuthAwareButton, { showLoginModal } from "./AuthAwareButton";
 import { useTheme } from "@/components/theme/ThemeProvider";
 import { useCredits } from "@/hooks/useCredits";
+import { useAuth } from "@/components/auth/AuthProvider";
 import { useI18n } from "@/lib/i18n";
 
 const navLinks = [
@@ -16,23 +17,14 @@ const navLinks = [
   { labelKey: "landing.nav.pricing", href: "/pricing" },
 ];
 
-function readStoredUser() {
-  if (typeof window === "undefined") return null;
-  try {
-    const s = localStorage.getItem("user");
-    return s ? JSON.parse(s) : null;
-  } catch {
-    return null;
-  }
-}
-
 export default function LandingHeader() {
   const { t } = useI18n();
   const themeCtx = useTheme();
   const theme = themeCtx?.theme || "light";
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [user, setUser] = useState<any>(null);
+  const auth = useAuth();
+  const user = auth.user;
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const { credits } = useCredits();
@@ -50,19 +42,6 @@ export default function LandingHeader() {
   }, []);
 
   useEffect(() => {
-    const readUser = () => setUser(readStoredUser());
-    readUser();
-    window.addEventListener("storage", readUser);
-    window.addEventListener("focus", readUser);
-    window.addEventListener("auth-state-changed", readUser);
-    return () => {
-      window.removeEventListener("storage", readUser);
-      window.removeEventListener("focus", readUser);
-      window.removeEventListener("auth-state-changed", readUser);
-    };
-  }, []);
-
-  useEffect(() => {
     if (!dropdownOpen) return;
     const handler = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
@@ -73,16 +52,14 @@ export default function LandingHeader() {
     return () => document.removeEventListener("mousedown", handler);
   }, [dropdownOpen]);
 
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    setUser(null);
+  const handleLogout = async () => {
+    await auth.logout();
     setDropdownOpen(false);
     window.location.href = "/";
   };
 
   const avatarEl = (size: number, textSize: string) => {
-    const src = user?.avatar;
+    const src = (user as any)?.avatar;
     const initial = (user?.name || user?.email || "?").charAt(0).toUpperCase();
     return src ? (
       <img src={src} alt={user?.name || ""} className="w-full h-full object-cover" />

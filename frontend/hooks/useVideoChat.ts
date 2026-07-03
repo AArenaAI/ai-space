@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { readApiError } from "@/lib/errors";
+import { apiFetch } from "@/lib/api/client";
 
 export interface VideoChat {
   id: number;
@@ -46,7 +47,6 @@ export interface VideoChatPayload {
   reference_image_role_mode?: "auto" | "reference" | "first_frame" | "first_last_frame";
 }
 
-const API_BASE_URL = "";
 
 async function safeJSON(res: Response): Promise<any> {
   const text = await res.text();
@@ -60,13 +60,6 @@ async function safeJSON(res: Response): Promise<any> {
   }
 }
 
-function getHeaders(): Record<string, string> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
-  return {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-}
 
 export function useVideoChats() {
   const [chats, setChats] = useState<VideoChat[]>([]);
@@ -75,7 +68,7 @@ export function useVideoChats() {
   const fetchChats = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/video-chats`, { headers: getHeaders() });
+      const res = await apiFetch("/video-chats");
       if (!res.ok) throw await readApiError(res);
       const data = await safeJSON(res);
       setChats(data.chats || []);
@@ -89,9 +82,8 @@ export function useVideoChats() {
   }, []);
 
   const createChat = useCallback(async (payload: VideoChatPayload) => {
-    const res = await fetch(`${API_BASE_URL}/api/video-chats`, {
+    const res = await apiFetch("/video-chats", {
       method: "POST",
-      headers: getHeaders(),
       body: JSON.stringify(payload),
     });
     if (!res.ok) throw await readApiError(res);
@@ -99,18 +91,16 @@ export function useVideoChats() {
   }, []);
 
   const deleteChat = useCallback(async (id: number) => {
-    const res = await fetch(`${API_BASE_URL}/api/video-chats/${id}`, {
+    const res = await apiFetch(`/video-chats/${id}`, {
       method: "DELETE",
-      headers: getHeaders(),
     });
     if (!res.ok) throw await readApiError(res);
     setChats((prev) => prev.filter((chat) => chat.id !== id));
   }, []);
 
   const updateChatTitle = useCallback(async (id: number, title: string) => {
-    const res = await fetch(`${API_BASE_URL}/api/video-chats/${id}`, {
+    const res = await apiFetch(`/video-chats/${id}`, {
       method: "PUT",
-      headers: getHeaders(),
       body: JSON.stringify({ title }),
     });
     if (!res.ok) throw await readApiError(res);
@@ -127,7 +117,7 @@ export function useVideoChatMessages() {
   const fetchMessages = useCallback(async (chatId: number) => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/video-chats/${chatId}/messages`, { headers: getHeaders() });
+      const res = await apiFetch(`/video-chats/${chatId}/messages`);
       if (!res.ok) throw await readApiError(res);
       const data = await safeJSON(res);
       const msgs: VideoChatMessage[] = data.messages || [];
@@ -142,9 +132,8 @@ export function useVideoChatMessages() {
   }, []);
 
   const sendMessage = useCallback(async (chatId: number, payload: VideoChatPayload) => {
-    const res = await fetch(`${API_BASE_URL}/api/video-chats/${chatId}/messages`, {
+    const res = await apiFetch(`/video-chats/${chatId}/messages`, {
       method: "POST",
-      headers: getHeaders(),
       body: JSON.stringify(payload),
     });
     if (!res.ok) throw await readApiError(res);

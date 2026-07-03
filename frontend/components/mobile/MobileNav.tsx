@@ -29,6 +29,7 @@ import { useTheme } from "@/components/theme/ThemeProvider";
 import { useAppBootstrap } from "@/lib/appBootstrapContext";
 import { sortSidebarConversations } from "@/lib/chatSidebarHistory";
 import { clearChatSidebarHistoryCache, useChatSidebarHistory, type SidebarConversation } from "@/hooks/useChatSidebarHistory";
+import { apiFetch, apiJson } from "@/lib/api/client";
 
 const navItems = [
   { icon: MessageSquare, label: "聊天", href: "/chat" },
@@ -240,18 +241,30 @@ export default function MobileNav() {
   }, [router]);
 
   const handleDelete = async (id: number) => {
-    const token = localStorage.getItem("token"); if (!token) return;
-    try { await fetch(`/api/conversations/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }); const next = conversations.filter(c => c.id !== id); setConversations(next); if (String(id) === currentConvId) router.push("/chat", { scroll: false }); } catch {}
+    try {
+      await apiFetch(`/conversations/${id}`, { method: "DELETE" });
+      const next = conversations.filter(c => c.id !== id);
+      setConversations(next);
+      if (String(id) === currentConvId) router.push("/chat", { scroll: false });
+    } catch {}
     setDeleteTarget(null);
   };
   const handleRename = async (newTitle: string) => {
-    if (!renameTarget) return; const token = localStorage.getItem("token"); if (!token) return;
-    try { const r = await fetch(`/api/conversations/${renameTarget.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ title: newTitle }) }); if (r.ok) { const u = await r.json(); const next = conversations.map(c => c.id === u.id ? { ...c, title: u.title } : c); setConversations(next); window.dispatchEvent(new CustomEvent("conversation-renamed", { detail: { id: u.id, title: u.title } })); } } catch {}
+    if (!renameTarget) return;
+    try {
+      const u = await apiJson<Conversation>(`/conversations/${renameTarget.id}`, { method: "PUT", body: JSON.stringify({ title: newTitle }) });
+      const next = conversations.map(c => c.id === u.id ? { ...c, title: u.title } : c);
+      setConversations(next);
+      window.dispatchEvent(new CustomEvent("conversation-renamed", { detail: { id: u.id, title: u.title } }));
+    } catch {}
     setRenameTarget(null);
   };
   const handleTogglePin = async (conv: Conversation) => {
-    const token = localStorage.getItem("token"); if (!token) return;
-    try { const r = await fetch(`/api/conversations/${conv.id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ pinned: !conv.pinned }) }); if (r.ok) { const u = await r.json(); const next = sortConversations(conversations.map(c => c.id === u.id ? { ...c, pinned: u.pinned } : c)); setConversations(next); } } catch {}
+    try {
+      const u = await apiJson<Conversation>(`/conversations/${conv.id}`, { method: "PUT", body: JSON.stringify({ pinned: !conv.pinned }) });
+      const next = sortConversations(conversations.map(c => c.id === u.id ? { ...c, pinned: u.pinned } : c));
+      setConversations(next);
+    } catch {}
   };
   const handleShareConv = (conv: Conversation) => { const url = `${window.location.origin}/chat?id=${conv.id}`; navigator.clipboard.writeText(url); };
 

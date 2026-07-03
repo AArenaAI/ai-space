@@ -20,6 +20,8 @@ import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { readApiError } from "@/lib/errors";
+import { apiFetch } from "@/lib/api/client";
+import { readAuthState } from "@/lib/auth/state";
 
 const TRANSLATION_LLM_SUPPORTED_LANGUAGE_CODES = new Set([
   "af", "sq", "am", "ar-sa", "ar", "hy", "az", "eu", "be",
@@ -116,13 +118,6 @@ const FALLBACK_LANGS: LangOption[] = [
   { labelKey: "translator.lang.eu", promptLabel: "巴斯克语", value: "eu" },
 ];
 
-function getAuthHeaders() {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
-  return {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-}
 
 function getLanguageLabel(option: LangOption, t: (key: string) => string) {
   return option.labelKey ? t(option.labelKey) : option.label || option.promptLabel || option.value;
@@ -187,9 +182,8 @@ function buildLanguageOptions(items: SupportedLanguageAPIItem[]) {
 }
 
 async function createLiveTranslateTicket(targetLanguage: string) {
-  const res = await fetch("/api/translate/live/ticket", {
+  const res = await apiFetch("/translate/live/ticket", {
     method: "POST",
-    headers: getAuthHeaders(),
     body: JSON.stringify({ target_language: toTranslationLLMLanguageCode(targetLanguage) }),
   });
   if (!res.ok) throw await readApiError(res);
@@ -437,9 +431,7 @@ export default function LiveTranslatePage() {
 
   const loadSupportedLanguages = async () => {
     try {
-      const res = await fetch(`/api/translate/languages?display_language=${encodeURIComponent(toDisplayLanguageCode(language))}`, {
-        headers: getAuthHeaders(),
-      });
+      const res = await apiFetch(`/translate/languages?display_language=${encodeURIComponent(toDisplayLanguageCode(language))}`);
       if (!res.ok) throw await readApiError(res);
       const data = await res.json() as { languages?: SupportedLanguageAPIItem[] };
       const options = buildLanguageOptions(data.languages || []);
@@ -623,7 +615,7 @@ export default function LiveTranslatePage() {
       toast.error(t("translator.live.error.unsupported"));
       return;
     }
-    if (!localStorage.getItem("token")) {
+    if (!readAuthState().user) {
       toast.error(t("translator.live.error.login"));
       return;
     }

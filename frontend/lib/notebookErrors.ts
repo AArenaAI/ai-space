@@ -1,5 +1,6 @@
 import { toast } from "sonner";
 import { getGuestId } from "@/lib/guestId";
+import { apiFetch } from "@/lib/api/client";
 
 export type NotebookErrorCategory =
   | "auth"
@@ -147,17 +148,12 @@ export const NOTEBOOK_SOURCE_FILE_ACCEPT = [
 ].join(",");
 
 export async function uploadNotebookSourceFile(file: File, workspaceId?: string | null) {
-  const token = localStorage.getItem("token");
-  const guestId = getGuestId();
-  const headers: Record<string, string> = {};
-  if (token && token !== "null" && token !== "undefined") headers.Authorization = `Bearer ${token}`;
-  if (guestId) headers["X-Guest-ID"] = guestId;
+  getGuestId();
   const form = new FormData();
   form.append("file", file);
   if (workspaceId) form.append("workspace_id", workspaceId);
-  const response = await fetch("/api/files/upload", {
+  const response = await apiFetch("/files/upload", {
     method: "POST",
-    headers,
     body: form,
   });
   const data = await parseNotebookResponse<{ public_id?: string }>(response, `${file.name} 上传失败，请重新选择文件。`);
