@@ -36,8 +36,7 @@ function resolveStableMarkdownPolicy({
   policy?: StableMarkdownPolicy;
 }): StableMarkdownPolicy {
   if (policy) return policy;
-  if ((phase === "streaming" || phase === "settling" || phase === "completed-visible") && shouldUsePlainDuringStreaming(content)) return "plain";
-  if (phase === "streaming" || phase === "settling" || phase === "completed-visible") return "token";
+  if (phase === "streaming" && shouldUsePlainDuringStreaming(content)) return "plain";
   return "token";
 }
 

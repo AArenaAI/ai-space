@@ -30,7 +30,7 @@ function promptForScenario({ scenario, round }) {
     return `稳定性测试第 ${round} 轮 ${suffix}：请用中文输出一段中等长度 Markdown，主题是富文本渲染稳定性。必须包含：一个二级标题、一个三级标题、3 个项目符号、3 个编号项、一个引用块、一个总结段。总字数控制在 450 字以内。`;
   }
   if (scenario === 'code_table') {
-    return `稳定性测试第 ${round} 轮 ${suffix}：请用中文回答，并包含一个 TypeScript 代码块、一个三列表格、一个简短列表，主题是聊天富文本渲染架构。`;
+    return `稳定性测试第 ${round} 轮 ${suffix}：请用中文简短回答，主题是聊天富文本渲染架构。必须包含：一个 5 行以内 TypeScript 代码块、一个 3 行以内三列表格、一个 2 项列表。总字数控制在 260 字以内。`;
   }
   return `稳定性测试第 ${round} 轮：请用中文只回答两句短句，主题是界面稳定。${suffix}`;
 }
