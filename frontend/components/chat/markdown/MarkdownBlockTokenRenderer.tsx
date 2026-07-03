@@ -49,12 +49,12 @@ export default function MarkdownBlockTokenRenderer({ token, nested = false, bloc
   }
 
   if (token.type === "code") {
-    return <div {...blockProps}><CodeBlock language={token.lang || ""} value={token.text} lightweight /></div>;
+    return <div {...blockProps} data-md-enhance-policy="block-local" data-md-enhance-stage="stable"><CodeBlock language={token.lang || ""} value={token.text} lightweight /></div>;
   }
 
   if (token.type === "table") {
     return (
-      <div {...blockProps} className="my-4 max-w-full overflow-x-auto rounded-xl border border-surface-border bg-surface-card/40">
+      <div {...blockProps} data-md-enhance-policy="block-local" data-md-enhance-stage="stable" className="my-4 max-w-full overflow-x-auto rounded-xl border border-surface-border bg-surface-card/40">
         <table className="min-w-full border-collapse text-left text-sm text-text-primary">
           {token.header.length > 0 && (
             <thead className="bg-surface-elevated/70 text-text-secondary">

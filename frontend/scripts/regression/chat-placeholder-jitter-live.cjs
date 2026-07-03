@@ -49,6 +49,9 @@ const installSampler = () => {
       const stableLayer = row.querySelector('[data-chat-answer-stable-layer="true"]');
       const tokenRenderer = row.querySelector('[data-markdown-token-renderer]');
       const streamingMarkdown = row.querySelector('[data-streaming-markdown-mode]');
+      const localEnhancementBlocks = Array.from(row.querySelectorAll('[data-md-enhance-policy="block-local"]'));
+      const codeBlocks = Array.from(row.querySelectorAll('[data-md-block-type="code"]'));
+      const tableBlocks = Array.from(row.querySelectorAll('[data-md-block-type="table"]'));
       const actionsNode = row.querySelector('[data-message-actions="true"]');
       const answerRect = answerNode?.getBoundingClientRect();
       const stableRect = stableLayer?.getBoundingClientRect();
@@ -67,6 +70,9 @@ const installSampler = () => {
         canonicalMatch: stableLayer?.getAttribute('data-chat-answer-canonical-match') || '',
         tokenRendererMode: tokenRenderer?.getAttribute('data-markdown-token-renderer') || '',
         streamingMarkdownMode: streamingMarkdown?.getAttribute('data-streaming-markdown-mode') || '',
+        blockLocalEnhancementCount: localEnhancementBlocks.length,
+        codeBlockCount: codeBlocks.length,
+        tableBlockCount: tableBlocks.length,
         top: Math.round(rect.top),
         height: Math.round(rect.height),
         answerHeight: Math.round(answerRect?.height || 0),
@@ -109,6 +115,9 @@ const installSampler = () => {
       latestContentSource: latestAssistant?.contentSource || '',
       latestTokenRendererMode: latestAssistant?.tokenRendererMode || '',
       latestStreamingMarkdownMode: latestAssistant?.streamingMarkdownMode || '',
+      latestBlockLocalEnhancementCount: latestAssistant?.blockLocalEnhancementCount || 0,
+      latestCodeBlockCount: latestAssistant?.codeBlockCount || 0,
+      latestTableBlockCount: latestAssistant?.tableBlockCount || 0,
       dupIds,
       oldSignatures,
       oldRowsById,
@@ -186,6 +195,10 @@ function analyzeRound(samples) {
   const tokenRendererModes = Array.from(new Set(activeSamples.map((s) => s.latestTokenRendererMode).filter(Boolean)));
   const streamingMarkdownModes = Array.from(new Set(activeSamples.map((s) => s.latestStreamingMarkdownMode).filter(Boolean)));
   const stableLayerMissingAfterContent = activeSamples.some((s) => s.latestTextPrefix && s.latestPlaceholderCount === 0 && !s.latestStableLayerPresent && (s.latestAnswerState === 'settling' || s.latestAnswerState === 'streaming'));
+  const blockLocalEnhancementSamples = activeSamples.map((s) => Number(s.latestBlockLocalEnhancementCount || 0));
+  const maxBlockLocalEnhancementCount = blockLocalEnhancementSamples.length ? Math.max(...blockLocalEnhancementSamples) : 0;
+  const maxCodeBlockCount = activeSamples.length ? Math.max(...activeSamples.map((s) => Number(s.latestCodeBlockCount || 0))) : 0;
+  const maxTableBlockCount = activeSamples.length ? Math.max(...activeSamples.map((s) => Number(s.latestTableBlockCount || 0))) : 0;
   return {
     distinctIds,
     latestIdChanged: distinctIds.length > 1,
@@ -208,6 +221,9 @@ function analyzeRound(samples) {
     contentSources,
     tokenRendererModes,
     streamingMarkdownModes,
+    maxBlockLocalEnhancementCount,
+    maxCodeBlockCount,
+    maxTableBlockCount,
     stableLayerMissingAfterContent,
     finalTextPrefix: last.latestTextPrefix || '',
   };
@@ -285,6 +301,8 @@ function analyzeRound(samples) {
     if (a.oldHeightChanges > Number(env('JITTER_MAX_OLD_HEIGHT_CHANGES', '0'))) failures.push(`round ${round.round}: old row height changes ${a.oldHeightChanges}`);
     if (a.oldTextChanges > Number(env('JITTER_MAX_OLD_TEXT_CHANGES', '0'))) failures.push(`round ${round.round}: old row text changes ${a.oldTextChanges}`);
     if (a.stableLayerMissingAfterContent) failures.push(`round ${round.round}: stable answer layer missing after content appeared`);
+    if (scenario === 'code_table' && a.maxCodeBlockCount > 0 && a.maxBlockLocalEnhancementCount < a.maxCodeBlockCount) failures.push(`round ${round.round}: code blocks missing block-local enhancement policy`);
+    if (scenario === 'code_table' && a.maxTableBlockCount > 0 && a.maxBlockLocalEnhancementCount < a.maxCodeBlockCount + a.maxTableBlockCount) failures.push(`round ${round.round}: code/table blocks missing block-local enhancement policy`);
   }
   if (pageErrors.length) failures.push(`page errors: ${pageErrors.join('; ')}`);
 

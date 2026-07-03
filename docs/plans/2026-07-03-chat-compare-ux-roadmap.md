@@ -23,11 +23,11 @@
 
 | 优先级 | 主题 | 状态 | 说明 |
 |---|---|---:|---|
-| P1 | 发送后的稳定感 | 🟡 | 已补 live jitter/旧行稳定 probe；当前 3 轮 testnet 验证无旧行 remount/高度/文本变化，后续继续扩大压力范围。 |
+| P1 | 发送后的稳定感 | 🟡 | 已补 live jitter/旧行稳定 probe；当前 3 轮 testnet 验证无旧行 remount/高度/文本变化；富文本完成态已统一到 stable token/block 渲染，后续继续做 block-level 增强。 |
 | P2 | 模型选择与 Compare 可控感 | ✅ | Compare 模型持久化已静默 PATCH 当前会话，并有 testnet live 回归覆盖刷新与新一轮 payload。 |
 | P3 | 阅读效率 | 🟡 | Compare 双列与 Activity 来源已显著改善，但长消息/移动端/滚动细节仍需继续。 |
 | P4 | 侧栏/历史体验 | 🟡 | “发送后会话移动到今天”等已修，hook 化未做。 |
-| P5 | 长期状态架构 | ⬜ | ConversationRuntimeStore / stream ownership / merge 版本机制仍是长期工作。 |
+| P5 | 长期状态架构 | 🟡 | Markdown 渲染长期主干已落地为 `StableMarkdownRenderer`；ConversationRuntimeStore / stream ownership / merge 版本机制仍是长期工作。 |
 
 ---
 
@@ -139,6 +139,91 @@ npm run test:chat-placeholder-jitter-live
   - `停止全部`
   - `左列已完成，右列生成中`
 - 恢复后台任务时避免新增重复 assistant placeholder，必须复用 serverMessageId / taskId。
+
+---
+
+### 4. 富文本完成态稳定渲染长期方案
+
+**状态:** ✅ 长期主干已落地，后续做 block-level 增强
+
+**目标:**
+
+> 落字即最终结果；回复完成后不整条刷新；旧消息读取时不因富文本 hydrate 出现高度/文本/DOM 跳动。
+
+**已完成:**
+
+- 新增统一入口 `StableMarkdownRenderer`，覆盖：
+  - `streaming`
+  - `settling`
+  - `completed-visible`
+  - `historical`
+- `StreamingMarkdownView` 已改为只转发到 `StableMarkdownRenderer`，不再自己决定 plain / token / rich。
+- 历史 / final message Markdown 入口已改为走 `StableMarkdownRenderer`，不再默认直接进入 full-message `MarkdownRenderer`。
+- 策略边界已固定：
+
+```txt
+streaming:
+  长/复杂内容允许 plain，降低流式阶段抖动
+
+settling / completed-visible / historical:
+  默认 token/block renderer，必须正常渲染 **粗体**、[链接](url)、列表、代码块、表格
+
+rich-deferred:
+  只能显式 policy 开启，不作为普通历史/完成态默认路径
+```
+
+- `MarkdownBlockTokenRenderer` 已给块级结构打稳定标记：
+
+```txt
+data-md-block-id
+data-md-block-type
+```
+
+覆盖：
+
+```txt
+heading / paragraph / blockquote / list / code / table / hr / html
+```
+
+- 针对截图中 `**加粗**`、`[链接](url)` 原样显示的问题，已修正为：只有真正 `streaming` 阶段才允许 plain；完成后立即进入 token/block 渲染。
+
+**不可回退规则:**
+
+1. 不允许为了“恢复富文本”把 completed/historical 默认切回整条 `MarkdownRenderer` hydrate。
+2. 不允许让 `completed-visible` 使用 plain fallback；plain 只属于真正 streaming 阶段。
+3. 不允许用消息级 remount 解决代码块/表格/公式渲染；后续增强必须在 `data-md-block-id` 容器内做局部升级。
+4. 历史消息默认保持 token/block stable；full rich 只能作为明确、延迟、可中断、受用户滚动窗口保护的 policy。
+
+**已验证:**
+
+```bash
+npm run build
+npm run test:chat-compare-unboxed-style
+npm run test:chat-compare-model-selection
+npm run test:chat-placeholder-jitter-live
+npm run test:chat-old-row-stability-live
+npm run test:chat-rich-markdown-stability-live
+```
+
+额外 DOM 验证：
+
+```txt
+**美国经济** -> <strong>
+[BEA](https://www.bea.gov) -> <a href="https://www.bea.gov">
+hasRawStrong: false
+hasRawMarkdownLink: false
+stablePolicy: token
+tokenMode: stable
+```
+
+**下一阶段:**
+
+- block-level progressive enhancement：
+  - code block：稳定 block 容器内局部升级 copy / highlight；不替换整条消息。
+  - table：稳定 block 容器内局部升级横向滚动 / sticky header；不替换整条消息。
+  - math / mermaid / 图表：先文本或占位，后续只升级对应 block。
+- block anchor：历史加载 / prepend / hydrate 时以 `messageId + data-md-block-id + offset` 恢复阅读位置。
+- 将 `AssistantAnswerRenderer` 继续收敛成显式 reducer/state machine，避免状态分支重新散落。
 
 ---
 
