@@ -35,7 +35,7 @@
 
 ### 1. 彻底压掉“旧消息刷新感”
 
-**状态:** 🟡 部分完成，已有 live probe 覆盖
+**状态:** ✅ 主要稳定性已用 5 轮 mixed rich live stress 覆盖，长期 identity 仍归入 P5
 
 **附件目标:**
 
@@ -47,12 +47,13 @@
 - Chat Activity 入口和面板逻辑已收敛到更稳定的单入口路径。
 - 已有 `chat-placeholder-jitter-live.cjs` 覆盖旧行 DOM node、height、text、duplicate id、latest assistant id、pending 高度跳变。
 - 2026-07-03 testnet 3 轮连续发送验证通过：无旧行 remount、无旧行高度变化、无旧行文本变化、无重复 id；pending/content 跳变在阈值内。
+- 2026-07-03 新增 `npm run test:chat-old-row-rich-stability-live`，真实 testnet 5 轮 mixed rich stress 已通过：短答、长 Markdown、代码/表格、数学/Mermaid、切会话返回全覆盖；旧消息 `oldNodeUidChanges=0`、`oldHeightChanges=0`、`oldTextChanges=0`、`completedStableChangeCount=0`、`dupIds=[]`。
 
-**未完成:**
+**未完成 / 长期项:**
 
 - 给旧消息对象做更强的 identity preservation。
 - restore/bootstrap 只 patch 当前 active/pending assistant，避免全量 remap 旧 messages。
-- 扩大 live stress probe 到 5-10 轮，并加入更长答案/含代码块/含表格场景。
+- 这些不再阻塞 P1 体验验收，归入 P5 `ConversationRuntimeStore / mergeConversationSnapshot` 长期状态架构。
 
 **补充优化项:**
 
@@ -409,7 +410,7 @@ npm run test:chat-activity-sources
 
 ### 9. 长消息性能和阅读定位
 
-**状态:** 🟡 部分完成
+**状态:** 🟡 部分完成，block anchor 第一版已落地
 
 **附件目标:**
 
@@ -418,12 +419,13 @@ npm run test:chat-activity-sources
 **已完成:**
 
 - 已有 lazy markdown、content visibility、overview 等基础能力。
+- 已新增会话滚动 block anchor：保存 `anchorMessageId + anchorBlockId + anchorOffset`，切会话返回时优先按 `data-md-block-id` 恢复阅读位置，失败再回退 `distanceToBottom / scrollTop`。
+- 新增 live 回归命令：`npm run test:chat-block-anchor-restore-live`。
 
 **未完成:**
 
 - 大 markdown 渲染分级：首屏 plain/light，进入视口再 rich。
 - 代码块 / table 单独延迟 hydrate。
-- 切会话恢复滚动位置更精确。
 - 回到某条消息时高亮稳定，避免二次跳动。
 - 加载历史 prepend 后 scrollTop 锚定继续强化。
 
@@ -439,16 +441,17 @@ npm run test:chat-activity-sources
 
 ### 10. 抽 `useChatSidebarHistory()`
 
-**状态:** ⬜ 未完成
+**状态:** ✅ 已完成适配层，后续只补专项 fixture
 
 **附件目标:**
 
 统一桌面 `AppSidebar` 和移动 `MobileNav` 的历史列表逻辑。
 
-**待做:**
+**已完成:**
 
-- 抽 `useChatSidebarHistory()`。
-- 统一管理：
+- 已抽出 `frontend/hooks/useChatSidebarHistory.ts`。
+- 桌面 `AppSidebar` 和移动 `MobileNav` 已共用该 hook。
+- 已统一管理：
   - bootstrap merge
   - canonical fetch
   - cursor pagination
@@ -456,6 +459,10 @@ npm run test:chat-activity-sources
   - optimistic reorder
   - workspace filter
   - loading more
+
+**待做:**
+
+- 为 hook 写 fixture 测试：bootstrap + event + cursor + optimistic reorder。
 
 **补充优化项:**
 

@@ -5,6 +5,11 @@ export type ChatConversationScrollState = {
   clientHeight: number;
   distanceToBottom: number;
   atBottom: boolean;
+  anchorMessageId?: string;
+  anchorServerMessageId?: string;
+  anchorBlockId?: string;
+  anchorBlockIndex?: number;
+  anchorOffset?: number;
   updatedAt: number;
 };
 

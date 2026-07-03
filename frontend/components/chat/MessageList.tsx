@@ -329,7 +329,16 @@ function MessageList({
     setReturnToBottomPreload(false);
   }, []);
 
+  const isRestoringBrowsePositionNow = useCallback(() => {
+    return Date.now() < restoringConversationScrollUntilRef.current
+      || pendingConversationScrollRestoreRef.current === conversationId
+      || Boolean(restoredConversationBrowseRef.current
+        && restoredConversationBrowseRef.current.conversationId === conversationId
+        && Date.now() < restoredConversationBrowseRef.current.until);
+  }, [conversationId]);
+
   const scrollToBottom = useCallback((behavior: "auto" | "smooth" = "auto", force = false) => {
+    if (isRestoringBrowsePositionNow()) return;
     if (!force && Date.now() < userScrollOverrideUntilRef.current) return;
     programmaticScrollUntilRef.current = Date.now() + 320;
     const el = scrollRef.current;
@@ -342,11 +351,12 @@ function MessageList({
       }
       lastScrollTopRef.current = el.scrollTop;
     }
-  }, []);
+  }, [isRestoringBrowsePositionNow]);
 
   const lockBottomAfterSmoothScroll = useCallback(() => {
     bottomLockTimersRef.current.forEach(window.clearTimeout);
     bottomLockTimersRef.current = [2600].map((delay) => window.setTimeout(() => {
+      if (isRestoringBrowsePositionNow()) return;
       if (Date.now() < userScrollOverrideUntilRef.current) return;
       const el = scrollRef.current;
       if (!el || !stickToBottomRef.current) return;
@@ -361,9 +371,10 @@ function MessageList({
       lastScrollTopRef.current = el.scrollTop;
       setReturnToBottomPreload(false);
     }, delay));
-  }, []);
+  }, [isRestoringBrowsePositionNow]);
 
   const smoothScrollScrollerToBottom = useCallback(() => {
+    if (isRestoringBrowsePositionNow()) return;
     const el = scrollRef.current;
     if (!el) {
       scrollToBottom("smooth");
@@ -437,7 +448,7 @@ function MessageList({
     };
 
     bottomSmoothRafRef.current = requestAnimationFrame(step);
-  }, [isCompare, scrollToBottom]);
+  }, [isCompare, isRestoringBrowsePositionNow, scrollToBottom]);
 
   const updateScrollProgressFromElement = useCallback((el: HTMLElement | null) => {
     if (!el) {
@@ -464,11 +475,58 @@ function MessageList({
     updateScrollProgressFromElement(el);
   }, [stopBottomLockForUserBrowse, updateScrollProgressFromElement]);
 
+  const captureVisibleBlockAnchor = useCallback((el: HTMLElement) => {
+    const scrollerTop = el.getBoundingClientRect().top;
+    const blocks = Array.from(el.querySelectorAll<HTMLElement>("[data-md-block-id]"));
+    for (const block of blocks) {
+      const rect = block.getBoundingClientRect();
+      if (rect.bottom < scrollerTop + 12) continue;
+      const row = block.closest<HTMLElement>('[data-chat-message-row="true"][data-message-id]');
+      const messageId = row?.getAttribute("data-message-id") || "";
+      const serverMessageId = row?.getAttribute("data-server-message-id") || "";
+      const blockId = block.getAttribute("data-md-block-id") || "";
+      if (!messageId || !blockId) continue;
+      const rowBlocks = row ? Array.from(row.querySelectorAll<HTMLElement>("[data-md-block-id]")) : [];
+      return {
+        anchorMessageId: messageId,
+        anchorServerMessageId: serverMessageId,
+        anchorBlockId: blockId,
+        anchorBlockIndex: Math.max(0, rowBlocks.indexOf(block)),
+        anchorOffset: Math.round(rect.top - scrollerTop),
+      };
+    }
+    return {};
+  }, []);
+
+  const restoreVisibleBlockAnchor = useCallback((el: HTMLElement, savedScroll: ReturnType<typeof getConversationScrollState>) => {
+    if (!savedScroll?.anchorMessageId || !savedScroll.anchorBlockId) return false;
+    const row = el.querySelector<HTMLElement>(`[data-chat-message-row="true"][data-message-id="${CSS.escape(savedScroll.anchorMessageId)}"]`)
+      || (savedScroll.anchorServerMessageId ? el.querySelector<HTMLElement>(`[data-chat-message-row="true"][data-server-message-id="${CSS.escape(savedScroll.anchorServerMessageId)}"]`) : null)
+      || (() => {
+        const candidates = Array.from(el.querySelectorAll<HTMLElement>('[data-chat-message-row="true"][data-message-role="assistant"]')).filter((candidate) => candidate.querySelector("[data-md-block-id]"));
+        return candidates[candidates.length - 1] || null;
+      })();
+    const block = row?.querySelector<HTMLElement>(`[data-md-block-id="${CSS.escape(savedScroll.anchorBlockId)}"]`)
+      || (typeof savedScroll.anchorBlockIndex === "number" ? row?.querySelectorAll<HTMLElement>("[data-md-block-id]")?.[savedScroll.anchorBlockIndex] : undefined)
+      || null;
+    if (!block) return false;
+    const scrollerTop = el.getBoundingClientRect().top;
+    const nextOffset = block.getBoundingClientRect().top - scrollerTop;
+    const targetDelta = nextOffset - (savedScroll.anchorOffset || 0);
+    if (Math.abs(targetDelta) <= 1) return true;
+    const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    el.scrollTop = Math.min(maxScrollTop, Math.max(0, el.scrollTop + targetDelta));
+    lastScrollTopRef.current = el.scrollTop;
+    updateScrollProgressFromElement(el);
+    return true;
+  }, [updateScrollProgressFromElement]);
+
   const saveCurrentConversationScrollState = useCallback((conversationIdOverride?: number) => {
     const el = scrollRef.current;
     const targetConversationId = conversationIdOverride || conversationId;
     if (!el || !targetConversationId) return;
     const distanceToBottom = Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight);
+    const blockAnchor = captureVisibleBlockAnchor(el);
     saveConversationScrollState({
       conversationId: targetConversationId,
       scrollTop: el.scrollTop,
@@ -476,9 +534,10 @@ function MessageList({
       clientHeight: el.clientHeight,
       distanceToBottom,
       atBottom: distanceToBottom <= AT_BOTTOM_THRESHOLD,
+      ...blockAnchor,
       updatedAt: Date.now(),
     });
-  }, [conversationId]);
+  }, [captureVisibleBlockAnchor, conversationId]);
 
   const shouldPreserveRestoredBrowsePosition = useCallback(() => {
     const restored = restoredConversationBrowseRef.current;
@@ -528,6 +587,21 @@ function MessageList({
         restoredConversationBrowseRef.current = { conversationId, distanceToBottom: savedScroll!.distanceToBottom, until };
         stickToBottomRef.current = false;
         userScrollOverrideUntilRef.current = until;
+        const restore = () => {
+          if (scrollRef.current !== el) return;
+          programmaticScrollUntilRef.current = Date.now() + 360;
+          if (restoreVisibleBlockAnchor(el, savedScroll)) return;
+          const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+          el.scrollTop = Math.max(0, Math.min(maxTop, el.scrollHeight - el.clientHeight - savedScroll!.distanceToBottom));
+          lastScrollTopRef.current = el.scrollTop;
+          updateScrollProgressFromElement(el);
+        };
+        window.requestAnimationFrame(() => {
+          restore();
+          window.requestAnimationFrame(restore);
+        });
+        window.setTimeout(restore, 180);
+        window.setTimeout(restore, 600);
       }
       if (!shouldRestoreBrowsePosition && !targetMessageId && (stickToBottomRef.current || !hasRenderedInitialRange)) {
         const lock = () => {
@@ -545,7 +619,7 @@ function MessageList({
       lastScrollTopRef.current = el.scrollTop;
       updateScrollProgressFromElement(el);
     }
-  }, [conversationId, hasRenderedInitialRange, targetMessageId, updateScrollProgressFromElement]);
+  }, [conversationId, hasRenderedInitialRange, restoreVisibleBlockAnchor, targetMessageId, updateScrollProgressFromElement]);
 
 
   const centerMessageRowInScroller = useCallback((messageId: string) => {
@@ -599,20 +673,26 @@ function MessageList({
     if (!isProgrammaticScroll && isScrollingUp && distanceToBottom > 1) {
       stopBottomLockForUserBrowse(isProgrammaticScroll ? 1200 : 2500);
     }
-    if (!isScrollingUp && distanceToBottom <= AT_BOTTOM_THRESHOLD) {
+    const isRestoringBrowsePosition = isRestoringBrowsePositionNow();
+    if (!isRestoringBrowsePosition && !isScrollingUp && distanceToBottom <= AT_BOTTOM_THRESHOLD) {
       stickToBottomRef.current = true;
       userScrollOverrideUntilRef.current = 0;
     }
     lastScrollTopRef.current = el.scrollTop;
     if (conversationId) {
       const existingSaved = getConversationScrollState(conversationId);
+      const isRestoringBrowsePosition = Date.now() < restoringConversationScrollUntilRef.current;
       const isInitialBottomOverwrite = Boolean(
         existingSaved
         && !existingSaved.atBottom
         && distanceToBottom <= AT_BOTTOM_THRESHOLD
-        && Date.now() < restoringConversationScrollUntilRef.current
+        && (
+          Date.now() < restoringConversationScrollUntilRef.current
+          || pendingConversationScrollRestoreRef.current === conversationId
+          || Date.now() - existingSaved.updatedAt < 10000
+        )
       );
-      if (!isInitialBottomOverwrite) {
+      if (!isInitialBottomOverwrite && !isRestoringBrowsePosition) {
         saveConversationScrollState({
           conversationId,
           scrollTop: el.scrollTop,
@@ -620,6 +700,7 @@ function MessageList({
           clientHeight: el.clientHeight,
           distanceToBottom: Math.max(0, distanceToBottom),
           atBottom: distanceToBottom <= AT_BOTTOM_THRESHOLD,
+          ...captureVisibleBlockAnchor(el),
           updatedAt: Date.now(),
         });
       }
@@ -627,7 +708,7 @@ function MessageList({
     updateScrollProgressFromElement(el);
     const nextAtBottom = distanceToBottom <= AT_BOTTOM_THRESHOLD;
     atBottomRef.current = nextAtBottom;
-    if (nextAtBottom && Date.now() >= userScrollOverrideUntilRef.current) {
+    if (!isRestoringBrowsePosition && nextAtBottom && Date.now() >= userScrollOverrideUntilRef.current) {
       stickToBottomRef.current = true;
       overviewBottomLockUntilRef.current = Date.now() + 450;
     }
@@ -731,7 +812,7 @@ function MessageList({
       userOverviewRafRef.current = window.requestAnimationFrame(updateActiveOverviewFromRows);
     }
 
-  }, [conversationId, hasMoreMessages, hasRenderedInitialRange, isCompare, isLoadingMore, markHistoryPrependSettling, onLoadMore, stopBottomLockForUserBrowse, targetMessageId, updateScrollProgressFromElement]);
+  }, [captureVisibleBlockAnchor, conversationId, hasMoreMessages, hasRenderedInitialRange, isCompare, isLoadingMore, isRestoringBrowsePositionNow, markHistoryPrependSettling, onLoadMore, stopBottomLockForUserBrowse, targetMessageId, updateScrollProgressFromElement]);
 
   const markUserBrowsing = useCallback((duration = 2500) => {
     setUserBrowsing(true);
@@ -799,6 +880,9 @@ function MessageList({
   const exportCardRef = useRef<HTMLDivElement>(null);
   const exportPreviewCardRef = useRef<HTMLDivElement>(null);
   const handleScrollToBottomClick = useCallback(() => {
+    restoringConversationScrollUntilRef.current = 0;
+    restoredConversationBrowseRef.current = null;
+    pendingConversationScrollRestoreRef.current = undefined;
     userScrollOverrideUntilRef.current = 0;
     setReturnToBottomPreload(true);
     programmaticScrollUntilRef.current = Date.now() + 3200;
@@ -1023,7 +1107,7 @@ function MessageList({
   const shouldDeferRowsForActiveBrowse = isCompare && userBrowsing;
 
   useEffect(() => {
-    if (isCompare || hasRenderedInitialRange || visibleMessages.length === 0 || targetMessageId) return;
+    if (isRestoringBrowsePositionNow() || isCompare || hasRenderedInitialRange || visibleMessages.length === 0 || targetMessageId) return;
     const lock = () => {
       const el = scrollRef.current
         ?? document.querySelector<HTMLElement>('[data-testid="chat-history-scroll-container"]');
@@ -1040,10 +1124,10 @@ function MessageList({
       window.cancelAnimationFrame(raf);
       timers.forEach(window.clearTimeout);
     };
-  }, [hasRenderedInitialRange, isCompare, targetMessageId, updateScrollProgressFromElement, visibleMessages.length]);
+  }, [hasRenderedInitialRange, isCompare, isRestoringBrowsePositionNow, targetMessageId, updateScrollProgressFromElement, visibleMessages.length]);
 
   useLayoutEffect(() => {
-    if (isCompare || hasRenderedInitialRange || visibleMessages.length === 0) return;
+    if (isRestoringBrowsePositionNow() || isCompare || hasRenderedInitialRange || visibleMessages.length === 0) return;
     let cancelled = false;
     let raf = 0;
     let attempts = 0;
@@ -1097,7 +1181,7 @@ function MessageList({
       cancelled = true;
       window.cancelAnimationFrame(raf);
     };
-  }, [hasRenderedInitialRange, isCompare, scrollToBottom, targetMessageId, visibleMessages.length]);
+  }, [hasRenderedInitialRange, isCompare, isRestoringBrowsePositionNow, scrollToBottom, targetMessageId, visibleMessages.length]);
 
   useLayoutEffect(() => {
     const anchor = loadMoreAnchorRef.current;
@@ -1229,7 +1313,13 @@ function MessageList({
       const shouldRestoreBrowsePosition = Boolean(savedScroll && !savedScroll.atBottom && !targetMessageId);
       stickToBottomRef.current = !shouldRestoreBrowsePosition;
       atBottomRef.current = !shouldRestoreBrowsePosition;
-      userScrollOverrideUntilRef.current = shouldRestoreBrowsePosition ? Date.now() + 1800 : 0;
+      if (shouldRestoreBrowsePosition) {
+        const until = Date.now() + 6000;
+        restoringConversationScrollUntilRef.current = until;
+        userScrollOverrideUntilRef.current = until;
+      } else {
+        userScrollOverrideUntilRef.current = 0;
+      }
       setAtBottom(!shouldRestoreBrowsePosition);
       setUserBrowsing(false);
       setHistoryRichLiteFallbackMessageIds(new Set());
@@ -1262,9 +1352,10 @@ function MessageList({
     const restore = () => {
       const el = scrollRef.current;
       if (!el) return;
+      programmaticScrollUntilRef.current = Date.now() + 360;
+      if (restoreVisibleBlockAnchor(el, saved)) return;
       const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
       const desiredTop = Math.max(0, Math.min(maxTop, el.scrollHeight - el.clientHeight - saved.distanceToBottom));
-      programmaticScrollUntilRef.current = Date.now() + 360;
       el.scrollTop = desiredTop;
       lastScrollTopRef.current = el.scrollTop;
       updateScrollProgressFromElement(el);
@@ -1275,7 +1366,46 @@ function MessageList({
     });
     const timer = window.setTimeout(restore, 220);
     return () => window.clearTimeout(timer);
-  }, [conversationId, messages.length, targetMessageId, updateScrollProgressFromElement]);
+  }, [conversationId, messages.length, restoreVisibleBlockAnchor, targetMessageId, updateScrollProgressFromElement]);
+
+  useEffect(() => {
+    if (!conversationId || targetMessageId || messages.length === 0) return;
+    const saved = getConversationScrollState(conversationId);
+    if (!saved || saved.atBottom || Date.now() - saved.updatedAt > 15000) return;
+
+    const until = Date.now() + 3000;
+    restoringConversationScrollUntilRef.current = Math.max(restoringConversationScrollUntilRef.current, until);
+    userScrollOverrideUntilRef.current = Math.max(userScrollOverrideUntilRef.current, until);
+    restoredConversationBrowseRef.current = { conversationId, distanceToBottom: saved.distanceToBottom, until };
+    stickToBottomRef.current = false;
+    atBottomRef.current = false;
+    setAtBottom(false);
+
+    const restore = () => {
+      const el = scrollRef.current;
+      if (!el) return;
+      programmaticScrollUntilRef.current = Date.now() + 360;
+      if (!restoreVisibleBlockAnchor(el, saved)) {
+        const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+        const desiredTop = Number.isFinite(saved.scrollTop)
+          ? Math.max(0, Math.min(maxTop, saved.scrollTop))
+          : Math.max(0, Math.min(maxTop, el.scrollHeight - el.clientHeight - saved.distanceToBottom));
+        el.scrollTop = desiredTop;
+        lastScrollTopRef.current = el.scrollTop;
+        updateScrollProgressFromElement(el);
+      }
+    };
+
+    const raf = window.requestAnimationFrame(() => {
+      restore();
+      window.requestAnimationFrame(restore);
+    });
+    const timers = [80, 220, 600, 1200].map((delay) => window.setTimeout(restore, delay));
+    return () => {
+      window.cancelAnimationFrame(raf);
+      timers.forEach(window.clearTimeout);
+    };
+  }, [conversationId, messages.length, restoreVisibleBlockAnchor, targetMessageId, updateScrollProgressFromElement]);
 
   const modelById = useMemo(() => {
     const map = new Map<string, ChatModel>();
@@ -1344,6 +1474,7 @@ function MessageList({
   }, [conversationId, targetMessageId]);
 
   useEffect(() => {
+    if (isRestoringBrowsePositionNow()) return;
     const savedScroll = pendingConversationScrollRestoreRef.current === conversationId ? getConversationScrollState(conversationId) : undefined;
     if (savedScroll && !savedScroll.atBottom && !targetMessageId) return;
     if (targetMessageId || isLoadingHistory || messages.length === 0 || Date.now() < historyPrependUntilRef.current || Date.now() < userScrollOverrideUntilRef.current || !stickToBottomRef.current) return;
@@ -1363,7 +1494,7 @@ function MessageList({
       setActiveOverviewMessageId((previous) => previous === lastUserId ? previous : lastUserId);
     }
     lockBottomAfterLayout(true);
-  }, [conversationId, targetMessageId, isLoadingHistory, messages, lockBottomAfterLayout]);
+  }, [conversationId, targetMessageId, isLoadingHistory, messages, lockBottomAfterLayout, isRestoringBrowsePositionNow]);
 
   const lastMessageGrowthKey = useMemo(() => {
     const last = messages[messages.length - 1];
@@ -1371,7 +1502,7 @@ function MessageList({
   }, [conversationId, messages]);
 
   useEffect(() => {
-    if (targetMessageId || isLoadingHistory || messages.length === 0 || shouldPreserveRestoredBrowsePosition()) return;
+    if (isRestoringBrowsePositionNow() || targetMessageId || isLoadingHistory || messages.length === 0 || shouldPreserveRestoredBrowsePosition()) return;
     const savedScroll = pendingConversationScrollRestoreRef.current === conversationId ? getConversationScrollState(conversationId) : undefined;
     if (savedScroll && !savedScroll.atBottom) return;
     if (!stickToBottomRef.current) return;
@@ -1379,7 +1510,7 @@ function MessageList({
     programmaticScrollUntilRef.current = Date.now() + 700;
     scrollToBottom("auto", true);
     lockBottomAfterLayout(false);
-  }, [conversationId, isLoadingHistory, lastMessageGrowthKey, lockBottomAfterLayout, messages.length, scrollToBottom, shouldPreserveRestoredBrowsePosition, targetMessageId]);
+  }, [conversationId, isLoadingHistory, isRestoringBrowsePositionNow, lastMessageGrowthKey, lockBottomAfterLayout, messages.length, scrollToBottom, shouldPreserveRestoredBrowsePosition, targetMessageId]);
 
   const activeCompareModels = useMemo(() => {
     if (!effectiveIsCompare) return [];
@@ -1453,7 +1584,7 @@ function MessageList({
       previous.firstId === firstId &&
       previous.lastId !== lastId;
 
-    if (isAppendAtTail && Date.now() >= historyPrependUntilRef.current) {
+    if (!isRestoringBrowsePositionNow() && isAppendAtTail && Date.now() >= historyPrependUntilRef.current) {
       const newMessages = messages.slice(previous.length);
       if (newMessages.some((m) => m.role === "user")) {
         stickToBottomRef.current = true;
@@ -1464,7 +1595,7 @@ function MessageList({
       }
     }
     previousMessageEdgeRef.current = { length: messages.length, firstId, lastId };
-  }, [messages, scrollToBottom]);
+  }, [isRestoringBrowsePositionNow, messages, scrollToBottom]);
 
   const handleCopy = useCallback((content: string) => {
     navigator.clipboard.writeText(content);
@@ -1826,6 +1957,7 @@ function MessageList({
         ) : (
           <div
             ref={(el) => handleChatScrollerRef(el)}
+            data-chat-scroll-container="true"
             className="chat-history-scroll-container"
             style={{
               height: "100%",
@@ -1979,6 +2111,7 @@ function MessageList({
       )}
       <div
         ref={(el) => handleChatScrollerRef(el)}
+        data-chat-scroll-container="true"
         className={cn("chat-history-scroll-container right-0 transition-[right] duration-200 ease-out", !isCompare && activeActivityMessage && CHAT_ACTIVITY_PANEL_WIDTH_CLASS)}
         style={{
           position: "absolute",
