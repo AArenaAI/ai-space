@@ -10,6 +10,30 @@ import type { MarkdownBlockToken, MarkdownInlineToken, MarkdownTokenDocument } f
 const COMPACT_PREVIEW_CHAR_LIMIT = 6_000;
 const COMPACT_PREVIEW_BLOCK_LIMIT = 160;
 
+function normalizeFootnoteId(id: string) {
+  return id.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9_-]/gi, "-");
+}
+
+function splitInlineTextEnhancements(text = ""): MarkdownInlineToken[] {
+  if (!text) return [];
+  const tokens: MarkdownInlineToken[] = [];
+  const pattern = /(\$([^$\n]+?)\$)|\[\^([^\]\n]+)\]/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text))) {
+    if (match.index > lastIndex) tokens.push({ type: "text", text: text.slice(lastIndex, match.index) });
+    if (match[2]) {
+      tokens.push({ type: "math", text: match[2].trim() });
+    } else if (match[3]) {
+      const label = match[3].trim();
+      tokens.push({ type: "footnoteRef", id: normalizeFootnoteId(label), label });
+    }
+    lastIndex = pattern.lastIndex;
+  }
+  if (lastIndex < text.length) tokens.push({ type: "text", text: text.slice(lastIndex) });
+  return tokens;
+}
+
 function slicePreviewContent(content: string, compactPreview: boolean) {
   if (!compactPreview || content.length <= COMPACT_PREVIEW_CHAR_LIMIT) {
     return { text: content, truncated: false };
@@ -34,7 +58,7 @@ function convertInlineTokens(tokens?: unknown[]): MarkdownInlineToken[] {
     switch (token.type) {
       case "text":
       case "escape":
-        return [{ type: "text", text: token.text || token.raw || "" }];
+        return splitInlineTextEnhancements(token.text || token.raw || "");
       case "strong":
         return [{ type: "strong", children: convertInlineTokens(token.tokens) }];
       case "em":
@@ -66,6 +90,19 @@ function paragraphFromInline(tokens?: unknown[], fallback = ""): MarkdownBlockTo
   return { type: "paragraph", children: children.length ? children : inlineFromText(fallback) };
 }
 
+function mathBlockFromText(text = ""): MarkdownBlockToken | null {
+  const match = text.trim().match(/^\$\$\s*([\s\S]*?)\s*\$\$$/);
+  if (!match) return null;
+  return { type: "math", text: match[1].trim() };
+}
+
+function footnoteDefinitionFromText(text = ""): MarkdownBlockToken | null {
+  const match = text.trim().match(/^\[\^([^\]\n]+)\]:\s*([\s\S]*)$/);
+  if (!match) return null;
+  const label = match[1].trim();
+  return { type: "footnoteDefinition", id: normalizeFootnoteId(label), label, children: inlineFromText(match[2].trim()) };
+}
+
 function convertMarkedInlineCell(cell: any): MarkdownInlineToken[] {
   const children = convertInlineTokens(cell?.tokens);
   return children.length ? children : inlineFromText(cell?.text || "");
@@ -81,8 +118,14 @@ function convertBlockTokens(tokens?: unknown[]): MarkdownBlockToken[] {
         return [{ type: "heading", depth: Math.min(6, Math.max(1, token.depth || 1)) as 1 | 2 | 3 | 4 | 5 | 6, children: convertMarkedInlineCell(token) }];
       case "paragraph":
       case "text":
-      case "escape":
-        return [paragraphFromInline(token.tokens, token.text || token.raw || "")];
+      case "escape": {
+        const rawText = token.text || token.raw || "";
+        const mathBlock = mathBlockFromText(rawText);
+        if (mathBlock) return [mathBlock];
+        const footnoteDefinition = footnoteDefinitionFromText(rawText);
+        if (footnoteDefinition) return [footnoteDefinition];
+        return [paragraphFromInline(token.tokens, rawText)];
+      }
       case "blockquote":
         return [{ type: "blockquote", children: convertBlockTokens(token.tokens) }];
       case "list":

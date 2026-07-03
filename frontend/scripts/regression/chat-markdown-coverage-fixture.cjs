@@ -23,16 +23,19 @@ const expectations = {
   codeBlock: { label: '围栏代码块', selector: '[data-testid="markdown-code-block"]', min: 1 },
   codeBlockPolicy: { label: '代码块 block-local 策略', selector: '[data-md-block-type="code"][data-md-enhance-policy="block-local"]', min: 1 },
   tablePolicy: { label: '表格 block-local 策略', selector: '[data-md-block-type="table"][data-md-enhance-policy="block-local"]', min: 1 },
+  inlineMath: { label: '行内数学 KaTeX', selector: '[data-md-math="inline"] .katex', min: 1 },
+  blockMath: { label: '块级数学 KaTeX', selector: '[data-md-block-type="math"] [data-md-math="block"] .katex-display', min: 1 },
+  blockMathPolicy: { label: '数学块 block-local 策略', selector: '[data-md-block-type="math"][data-md-enhance-policy="block-local"]', min: 1 },
+  footnoteRef: { label: '脚注引用', selector: '[data-md-footnote-ref="note"]', min: 1 },
+  footnoteDefinition: { label: '脚注定义', selector: '[data-md-block-type="footnoteDefinition"]#fn-note', min: 1 },
+  mermaid: { label: 'Mermaid 局部图表容器', selector: '[data-md-mermaid="true"]', min: 1 },
+  mermaidPolicy: { label: 'Mermaid block-local 策略', selector: '[data-md-block-type="code"][data-md-enhance-policy="block-local"] [data-md-mermaid="true"]', min: 1 },
   hr: { label: '分割线', selector: 'hr', min: 1 },
 };
 
 const unsupportedChecks = {
   html: { label: 'HTML 块/行内 HTML', raw: '<span data-custom-html' },
   image: { label: '图片语法 ![]()', raw: '![Alt 文本]' },
-  footnote: { label: '脚注', raw: '[^note]' },
-  mathInline: { label: '行内数学', raw: '$E=mc^2$' },
-  mathBlock: { label: '块级数学', raw: '$$' },
-  mermaid: { label: 'Mermaid 图表', raw: 'graph TD' },
 };
 
 (async () => {
@@ -68,6 +71,9 @@ const unsupportedChecks = {
         bold: text.includes('**list bold**') || text.includes('**paragraph bold**'),
         link: text.includes('[paragraph link](https://example.com/paragraph)') || text.includes('[list link](https://example.com/list)'),
         tableStrong: text.includes('**table bold**'),
+        footnote: text.includes('[^note]'),
+        inlineMath: text.includes('$E=mc^2$'),
+        blockMath: text.includes('$$'),
       },
       checks,
       unsupported,

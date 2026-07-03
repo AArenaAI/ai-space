@@ -2,6 +2,8 @@
 
 import type { MarkdownBlockToken } from "@/lib/markdown/markdownTokenTypes";
 import CodeBlock from "./CodeBlock";
+import MarkdownMath from "./MarkdownMath";
+import MermaidBlock from "./MermaidBlock";
 import MarkdownInlineTokenRenderer from "./MarkdownInlineTokenRenderer";
 
 function ListItemBlocks({ blocks, parentBlockId }: { blocks: MarkdownBlockToken[]; parentBlockId?: string }) {
@@ -49,7 +51,23 @@ export default function MarkdownBlockTokenRenderer({ token, nested = false, bloc
   }
 
   if (token.type === "code") {
+    if ((token.lang || "").toLowerCase().trim() === "mermaid") {
+      return <div {...blockProps} data-md-enhance-policy="block-local" data-md-enhance-stage="stable"><MermaidBlock value={token.text} blockId={blockId} /></div>;
+    }
     return <div {...blockProps} data-md-enhance-policy="block-local" data-md-enhance-stage="stable"><CodeBlock language={token.lang || ""} value={token.text} lightweight /></div>;
+  }
+
+  if (token.type === "math") {
+    return <div {...blockProps} data-md-enhance-policy="block-local" data-md-enhance-stage="stable"><MarkdownMath value={token.text} displayMode /></div>;
+  }
+
+  if (token.type === "footnoteDefinition") {
+    return (
+      <div {...blockProps} id={`fn-${token.id}`} className="mt-2 rounded-lg border-l-2 border-surface-border bg-surface-card/30 px-3 py-2 text-xs leading-relaxed text-text-secondary">
+        <span className="mr-2 font-semibold text-text-primary">[{token.label}]</span>
+        <MarkdownInlineTokenRenderer tokens={token.children} />
+      </div>
+    );
   }
 
   if (token.type === "table") {
@@ -76,5 +94,6 @@ export default function MarkdownBlockTokenRenderer({ token, nested = false, bloc
   if (token.type === "hr") return <hr {...blockProps} className="my-5 border-surface-border" />;
   if (token.type === "html") return <span {...blockProps} className="text-text-primary">{token.raw}</span>;
   if (token.type === "space") return null;
-  return <p {...blockProps} className="mb-4 text-[15px] leading-relaxed text-text-primary">{token.raw}</p>;
+  if (token.type === "unknown") return <p {...blockProps} className="mb-4 text-[15px] leading-relaxed text-text-primary">{token.raw}</p>;
+  return null;
 }
