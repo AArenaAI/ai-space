@@ -80,6 +80,8 @@ function convertBlockTokens(tokens?: unknown[]): MarkdownBlockToken[] {
       case "heading":
         return [{ type: "heading", depth: Math.min(6, Math.max(1, token.depth || 1)) as 1 | 2 | 3 | 4 | 5 | 6, children: convertMarkedInlineCell(token) }];
       case "paragraph":
+      case "text":
+      case "escape":
         return [paragraphFromInline(token.tokens, token.text || token.raw || "")];
       case "blockquote":
         return [{ type: "blockquote", children: convertBlockTokens(token.tokens) }];

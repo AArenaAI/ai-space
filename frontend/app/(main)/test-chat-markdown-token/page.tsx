@@ -7,6 +7,7 @@ const fixtureContent = `# Token Markdown Fixture
 This paragraph has **bold text**, *italic text*, ~~deleted text~~, \`inline code\`, and [a link](https://example.com).
 
 - first bullet
+- **list bold** with [list link](https://list.example.com)
 - [x] checked task
 - [ ] unchecked task
 
