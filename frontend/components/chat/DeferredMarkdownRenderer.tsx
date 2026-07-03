@@ -37,6 +37,15 @@ const EXTREME_MARKDOWN_TABLE_LINE_THRESHOLD = 100;
 let markdownHydrationSequence = 0;
 let heavyMarkdownHydrationSequence = 0;
 
+function getUserBrowseUntil() {
+  if (typeof window === "undefined") return 0;
+  return (window as Window & { __AI_SPACE_CHAT_USER_BROWSE_UNTIL?: number }).__AI_SPACE_CHAT_USER_BROWSE_UNTIL || 0;
+}
+
+function shouldDelayRichHydrationForUserBrowse() {
+  return Date.now() < getUserBrowseUntil();
+}
+
 function nextMarkdownHydrationDelay() {
   markdownHydrationSequence = (markdownHydrationSequence + 1) % 6;
   return markdownHydrationSequence * 70;
@@ -103,6 +112,7 @@ export function DeferredMarkdownRenderer({
   const [guardMinHeight, setGuardMinHeight] = useState<number | null>(null);
   const [hasRenderedRichFallback, setHasRenderedRichFallback] = useState(false);
   const [Renderer, setRenderer] = useState(() => MarkdownRendererModule);
+  const [hydrationRetryTick, setHydrationRetryTick] = useState(0);
   const hasRenderedMarkdownRef = useRef(false);
   const lastContentRef = useRef(content);
   const richFallbackEligible = priorityHydrateRichText || allowRichLiteFallback || shouldUseRichLiteFallback(content, complexity);
@@ -198,6 +208,21 @@ export function DeferredMarkdownRenderer({
         tableLines: complexity.tableLines,
       });
       return;
+    }
+
+    if (!priorityHydrateRichText && !keepRenderedOnContentChange && shouldDelayRichHydrationForUserBrowse()) {
+      if (!hasRenderedMarkdownRef.current) setShouldRenderMarkdown(false);
+      const retryDelay = Math.max(0, getUserBrowseUntil() - Date.now()) + 180;
+      emitChatRenderProfileEvent("markdown-hydrate-delayed-user-browse", {
+        contentLength: content.length,
+        codeBlocks: complexity.codeBlocks,
+        retryDelay,
+        tableLines: complexity.tableLines,
+      });
+      const retryTimer = window.setTimeout(() => {
+        if (hostRef.current) setHydrationRetryTick((tick) => tick + 1);
+      }, retryDelay);
+      return () => window.clearTimeout(retryTimer);
     }
 
     setShouldRenderMarkdown(false);
@@ -304,7 +329,7 @@ export function DeferredMarkdownRenderer({
       cancelled = true;
       cleanupIdle?.();
     };
-  }, [allowRichLiteFallback, complexity.codeBlocks, complexity.isExtreme, complexity.isHeavy, complexity.tableLines, content, idleTimeout, isStreaming, keepRenderedOnContentChange, priorityHydrateRichText, rootMargin, shouldHydrateRichText]);
+  }, [allowRichLiteFallback, complexity.codeBlocks, complexity.isExtreme, complexity.isHeavy, complexity.tableLines, content, hydrationRetryTick, idleTimeout, isStreaming, keepRenderedOnContentChange, priorityHydrateRichText, rootMargin, shouldHydrateRichText]);
 
   return (
     <div ref={hostRef} style={guardMinHeight !== null ? { minHeight: guardMinHeight } : undefined}>

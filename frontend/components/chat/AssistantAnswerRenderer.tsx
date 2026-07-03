@@ -77,8 +77,25 @@ export function AssistantAnswerRenderer({
   const renderState = resolveAnswerRenderState({ generating, runtimeState, shouldRenderStreamingText });
 
   if (shouldRenderStreamingText) {
+    const sourceCount = normalizeSearchSources(runtimeState.searchSources).length || runtimeState.searchSourcesCount || 0;
+    const hasReasoningSignal = Boolean(runtimeState.reasoningContent?.trim() || /<think>[\s\S]*?<\/think>/i.test(runtimeState.content || ""));
+    const showSourceOnlyActivityEntry = runtimeState.terminal && !hasReasoningSignal && sourceCount > 0 && !!onOpenActivity;
     return (
       <div data-chat-answer-renderer="true" data-chat-answer-render-state={renderState}>
+        {showSourceOnlyActivityEntry && (
+          <div className="mt-1 mb-2">
+            <button
+              type="button"
+              aria-expanded={false}
+              onClick={() => onOpenActivity?.()}
+              className="inline-flex max-w-full items-center gap-1.5 rounded-lg px-1.5 py-0.5 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
+            >
+              <span className="text-xs font-medium">来源 · {sourceCount}</span>
+              <ChevronDown className="h-3.5 w-3.5 -rotate-90 shrink-0 text-text-tertiary/80" />
+            </button>
+            {inlineActivity && <div className="mt-2">{inlineActivity}</div>}
+          </div>
+        )}
         <StreamingText
           messageId={message.id}
           content={runtimeState.content || ""}

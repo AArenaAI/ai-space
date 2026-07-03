@@ -110,10 +110,16 @@ export function AssistantMessageContent({
   const [keepCompletedStreaming, setKeepCompletedStreaming] = useState(false);
   const [keepCompletedVisualStable, setKeepCompletedVisualStable] = useState(false);
   const [keepReasoningExpanded, setKeepReasoningExpanded] = useState(false);
+  const hasRenderedStableAnswerLayerRef = useRef(false);
   const justStoppedStreaming = wasStreamingRef.current && !generating;
   const finalizingRealtime = !runtimeState.terminal && !generating && (justStoppedStreaming || keepCompletedStreaming) && realtimeHasVisiblePayload;
   const stableCompletedVisual = keepCompletedVisualStable && realtimeHasVisiblePayload && runtimeState.terminal;
-  const shouldRenderStreamingText = generating || finalizingRealtime || stableCompletedVisual || (!runtimeState.content && recoverEmptyContent && mayStillRecoverMessage(message));
+  const rawShouldRenderStreamingText = generating || finalizingRealtime || stableCompletedVisual || (!runtimeState.content && recoverEmptyContent && mayStillRecoverMessage(message));
+  if (rawShouldRenderStreamingText && (realtimeHasVisiblePayload || generating)) {
+    hasRenderedStableAnswerLayerRef.current = true;
+  }
+  const preserveCompletedStableLayer = hasRenderedStableAnswerLayerRef.current && runtimeState.terminal && Boolean(runtimeState.content?.trim() || runtimeState.answerContent?.trim());
+  const shouldRenderStreamingText = rawShouldRenderStreamingText || preserveCompletedStableLayer;
 
   useEffect(() => {
     if (!completedAt || !realtimeHasVisiblePayload) return;

@@ -20,8 +20,19 @@ async function createConversation(baseUrl, token, model) {
 }
 
 function makeDomSample(args) {
-  const { round, tick } = args;
-  return { round, tick, ...window.__AI_SPACE_JITTER_SAMPLE__?.() };
+  const { round, tick, phase } = args;
+  return { round, tick, phase, ...window.__AI_SPACE_JITTER_SAMPLE__?.() };
+}
+
+function promptForScenario({ scenario, round }) {
+  const suffix = `${Date.now()}-${round}`;
+  if (scenario === 'long_markdown') {
+    return `稳定性测试第 ${round} 轮 ${suffix}：请用中文输出一篇较长 Markdown 回答，包含三级标题、项目符号、编号列表、引用块和总结段，主题是富文本渲染稳定性。不要太短。`;
+  }
+  if (scenario === 'code_table') {
+    return `稳定性测试第 ${round} 轮 ${suffix}：请用中文回答，并包含一个 TypeScript 代码块、一个三列表格、一个简短列表，主题是聊天富文本渲染架构。`;
+  }
+  return `稳定性测试第 ${round} 轮：请用中文只回答两句短句，主题是界面稳定。${suffix}`;
 }
 
 const installSampler = () => {
@@ -35,8 +46,12 @@ const installSampler = () => {
       }
       const rect = row.getBoundingClientRect();
       const answerNode = row.querySelector('[data-chat-answer-renderer="true"]');
+      const stableLayer = row.querySelector('[data-chat-answer-stable-layer="true"]');
+      const tokenRenderer = row.querySelector('[data-markdown-token-renderer]');
+      const streamingMarkdown = row.querySelector('[data-streaming-markdown-mode]');
       const actionsNode = row.querySelector('[data-message-actions="true"]');
       const answerRect = answerNode?.getBoundingClientRect();
+      const stableRect = stableLayer?.getBoundingClientRect();
       const actionsRect = actionsNode?.getBoundingClientRect();
       const text = (row.textContent || '').replace(/\s+/g, ' ').trim();
       return {
@@ -46,6 +61,12 @@ const installSampler = () => {
         taskId: row.getAttribute('data-generation-task-id') || '',
         role: row.getAttribute('data-message-role') || '',
         answerState: answerNode?.getAttribute('data-chat-answer-render-state') || '',
+        stableLayerPresent: !!stableLayer,
+        stableLayerHeight: Math.round(stableRect?.height || 0),
+        contentSource: stableLayer?.getAttribute('data-chat-answer-content-source') || '',
+        canonicalMatch: stableLayer?.getAttribute('data-chat-answer-canonical-match') || '',
+        tokenRendererMode: tokenRenderer?.getAttribute('data-markdown-token-renderer') || '',
+        streamingMarkdownMode: streamingMarkdown?.getAttribute('data-streaming-markdown-mode') || '',
         top: Math.round(rect.top),
         height: Math.round(rect.height),
         answerHeight: Math.round(answerRect?.height || 0),
@@ -81,8 +102,13 @@ const installSampler = () => {
       latestAssistantId: latestAssistant?.id || '',
       latestAssistantHeight: latestAssistant?.height || 0,
       latestAssistantTop: latestAssistant?.top || 0,
-      latestPlaceholderCount: latestAssistant?.placeholderCount || 0,
+        latestPlaceholderCount: latestAssistant?.placeholderCount || 0,
       latestTextPrefix: latestAssistant?.textPrefix || '',
+      latestAnswerState: latestAssistant?.answerState || '',
+      latestStableLayerPresent: latestAssistant?.stableLayerPresent || false,
+      latestContentSource: latestAssistant?.contentSource || '',
+      latestTokenRendererMode: latestAssistant?.tokenRendererMode || '',
+      latestStreamingMarkdownMode: latestAssistant?.streamingMarkdownMode || '',
       dupIds,
       oldSignatures,
       oldRowsById,
@@ -92,12 +118,12 @@ const installSampler = () => {
   };
 };
 
-async function sampleFor(page, round, durationMs, intervalMs) {
+async function sampleFor(page, round, durationMs, intervalMs, phase = 'active') {
   const samples = [];
   const started = Date.now();
   let tick = 0;
   while (Date.now() - started < durationMs) {
-    samples.push(await page.evaluate(makeDomSample, { round, tick }));
+    samples.push(await page.evaluate(makeDomSample, { round, tick, phase }));
     tick += 1;
     await page.waitForTimeout(intervalMs);
   }
@@ -112,6 +138,10 @@ function analyzeRound(samples) {
   const heights = activeSamples.map((s) => s.latestAssistantHeight).filter((value) => value > 0);
   const heightDeltas = heights.slice(1).map((value, index) => value - heights[index]);
   const maxHeightJump = heightDeltas.length ? Math.max(...heightDeltas.map(Math.abs)) : 0;
+  const settleSamples = activeSamples.filter((s) => String(s.phase || '').includes('settle'));
+  const settleHeights = settleSamples.map((s) => s.latestAssistantHeight).filter((value) => value > 0);
+  const settleHeightDeltas = settleHeights.slice(1).map((value, index) => value - settleHeights[index]);
+  const maxSettleHeightJump = settleHeightDeltas.length ? Math.max(...settleHeightDeltas.map(Math.abs)) : 0;
   const placeholderHeights = activeSamples.filter((s) => s.latestPlaceholderCount > 0).map((s) => s.latestAssistantHeight).filter(Boolean);
   const firstContent = activeSamples.find((s) => s.latestTextPrefix && s.latestPlaceholderCount === 0 && s.latestAssistantHeight > 0);
   const last = activeSamples[activeSamples.length - 1] || samples[samples.length - 1] || {};
@@ -151,6 +181,11 @@ function analyzeRound(samples) {
     }
   }
   const dupIds = Array.from(new Set(activeSamples.flatMap((s) => s.dupIds || [])));
+  const answerStates = Array.from(new Set(activeSamples.map((s) => s.latestAnswerState).filter(Boolean)));
+  const contentSources = Array.from(new Set(activeSamples.map((s) => s.latestContentSource).filter(Boolean)));
+  const tokenRendererModes = Array.from(new Set(activeSamples.map((s) => s.latestTokenRendererMode).filter(Boolean)));
+  const streamingMarkdownModes = Array.from(new Set(activeSamples.map((s) => s.latestStreamingMarkdownMode).filter(Boolean)));
+  const stableLayerMissingAfterContent = activeSamples.some((s) => s.latestTextPrefix && s.latestPlaceholderCount === 0 && !s.latestStableLayerPresent && (s.latestAnswerState === 'settling' || s.latestAnswerState === 'streaming'));
   return {
     distinctIds,
     latestIdChanged: distinctIds.length > 1,
@@ -158,6 +193,8 @@ function analyzeRound(samples) {
     heights,
     heightDeltas,
     maxHeightJump,
+    settleHeightDeltas,
+    maxSettleHeightJump,
     placeholderHeights,
     firstContentHeight: firstContent?.latestAssistantHeight || 0,
     placeholderToContentJump: placeholderHeights.length && firstContent ? Math.abs(firstContent.latestAssistantHeight - placeholderHeights[placeholderHeights.length - 1]) : 0,
@@ -167,6 +204,11 @@ function analyzeRound(samples) {
     oldHeightChangeDetails: oldHeightChangeDetails.slice(0, 12),
     oldTextChanges,
     dupIds,
+    answerStates,
+    contentSources,
+    tokenRendererModes,
+    streamingMarkdownModes,
+    stableLayerMissingAfterContent,
     finalTextPrefix: last.latestTextPrefix || '',
   };
 }
@@ -174,8 +216,11 @@ function analyzeRound(samples) {
 (async () => {
   const baseUrl = env('TESTNET_BASE_URL', 'https://testnet.ai-space.xyz');
   const model = env('JITTER_MODEL', env('REAL_CHAT_MODEL', 'deepseek-v4-flash'));
+  const scenario = env('JITTER_SCENARIO', 'short');
+  const switchback = env('JITTER_SWITCHBACK', '0') === '1';
   const rounds = Math.max(1, Number(env('JITTER_ROUNDS', '3')));
-  const durationMs = Math.max(800, Number(env('JITTER_SAMPLE_MS', '4200')));
+  const durationMs = Math.max(800, Number(env('JITTER_SAMPLE_MS', scenario === 'short' ? '4200' : '9000')));
+  const settleMs = Math.max(300, Number(env('JITTER_SETTLE_SAMPLE_MS', scenario === 'short' ? '1200' : '3500')));
   const intervalMs = Math.max(30, Number(env('JITTER_INTERVAL_MS', '50')));
   const auth = await login({ baseUrl });
   const conversation = await createConversation(baseUrl, auth.token, model);
@@ -206,25 +251,40 @@ function analyzeRound(samples) {
 
   const roundsResult = [];
   for (let round = 1; round <= rounds; round += 1) {
-    await page.locator('textarea').last().fill(`稳定性测试第 ${round} 轮：请用中文只回答两句短句，主题是界面稳定。${Date.now()}`);
+    await page.locator('textarea').last().fill(promptForScenario({ scenario, round }));
     await page.locator('textarea').last().press('Enter');
-    const samples = await sampleFor(page, round, durationMs, intervalMs);
+    const activeSamples = await sampleFor(page, round, durationMs, intervalMs, 'active');
+    if (switchback) {
+      await page.goto(`${baseUrl}/chat/?jitter_switch_target=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.waitForTimeout(500);
+      await page.goto(`${baseUrl}/chat/?id=${conversation.id}&jitter_probe=${Date.now()}&switchback=${round}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.waitForSelector('textarea', { state: 'visible', timeout: 30000 });
+      await page.waitForTimeout(800);
+    }
+    const settleSamples = await sampleFor(page, round, settleMs, intervalMs, switchback ? 'switchback-settle' : 'settle');
+    const samples = [...activeSamples, ...settleSamples];
     roundsResult.push({ round, analysis: analyzeRound(samples), samples });
     await page.waitForTimeout(1200);
   }
   await browser.close();
 
   const failures = [];
+  const strictActiveHeight = scenario === 'short';
+  const maxPlaceholderJump = Number(env('JITTER_MAX_PLACEHOLDER_JUMP', strictActiveHeight ? '32' : '2000'));
+  const maxActiveHeightJump = Number(env('JITTER_MAX_HEIGHT_JUMP', strictActiveHeight ? '96' : '2000'));
+  const maxSettleHeightJump = Number(env('JITTER_MAX_SETTLE_HEIGHT_JUMP', strictActiveHeight ? '96' : '1200'));
   for (const round of roundsResult) {
     const a = round.analysis;
-    if (a.latestIdChanged) failures.push(`round ${round.round}: latest assistant id changed ${a.distinctIds.join(' -> ')}`);
+    if (a.latestIdChanged && !switchback) failures.push(`round ${round.round}: latest assistant id changed ${a.distinctIds.join(' -> ')}`);
     if (a.dupIds.length) failures.push(`round ${round.round}: duplicate ids ${a.dupIds.join(',')}`);
-    if (a.placeholderToContentJump > Number(env('JITTER_MAX_PLACEHOLDER_JUMP', '32'))) failures.push(`round ${round.round}: placeholder/content jump ${a.placeholderToContentJump}`);
-    if (a.maxHeightJump > Number(env('JITTER_MAX_HEIGHT_JUMP', '96'))) failures.push(`round ${round.round}: max height jump ${a.maxHeightJump}`);
+    if (a.placeholderToContentJump > maxPlaceholderJump) failures.push(`round ${round.round}: placeholder/content jump ${a.placeholderToContentJump}`);
+    if (a.maxHeightJump > maxActiveHeightJump) failures.push(`round ${round.round}: max height jump ${a.maxHeightJump}`);
+    if (a.maxSettleHeightJump > maxSettleHeightJump) failures.push(`round ${round.round}: settle height jump ${a.maxSettleHeightJump}`);
     if (a.oldSignatureChanges > Number(env('JITTER_MAX_OLD_SIGNATURE_CHANGES', '2'))) failures.push(`round ${round.round}: old signature changes ${a.oldSignatureChanges}`);
     if (a.oldNodeUidChanges > Number(env('JITTER_MAX_OLD_NODE_UID_CHANGES', '0'))) failures.push(`round ${round.round}: old row remounts ${a.oldNodeUidChanges}`);
     if (a.oldHeightChanges > Number(env('JITTER_MAX_OLD_HEIGHT_CHANGES', '0'))) failures.push(`round ${round.round}: old row height changes ${a.oldHeightChanges}`);
     if (a.oldTextChanges > Number(env('JITTER_MAX_OLD_TEXT_CHANGES', '0'))) failures.push(`round ${round.round}: old row text changes ${a.oldTextChanges}`);
+    if (a.stableLayerMissingAfterContent) failures.push(`round ${round.round}: stable answer layer missing after content appeared`);
   }
   if (pageErrors.length) failures.push(`page errors: ${pageErrors.join('; ')}`);
 
@@ -233,8 +293,11 @@ function analyzeRound(samples) {
     baseUrl,
     conversationId: conversation.id,
     model,
+    scenario,
+    switchback,
     rounds,
     durationMs,
+    settleMs,
     intervalMs,
     failures,
     summary: roundsResult.map((round) => ({ round: round.round, ...round.analysis, samples: undefined })),
