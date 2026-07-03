@@ -182,14 +182,12 @@ npm run test:chat-placeholder-jitter-live
 - 用户在 Compare 会话顶部改模型后，立即 PATCH 当前 conversation：
   - `compare_models`
 - 侧栏 / 恢复 / 刷新后保持一致。
-- 失败时提示：`模型选择未保存`。
+- 静默保存：成功不提示，失败也不打扰用户；保留当前本地 UI 状态，后台尽力 PATCH。
 
 **补充优化项:**
 
 - PATCH 防抖 300ms，避免快速连点模型频繁请求。
-- 保存状态轻提示：
-  - `已保存`
-  - `保存失败，刷新后可能恢复旧模型`
+- 不做保存状态轻提示：模型选择是体验增强，应静默持久化，避免额外通知打扰用户。
 - conversation restore 时优先 server `compare_models`，localStorage 只作为 fallback。
 
 **建议回归:**

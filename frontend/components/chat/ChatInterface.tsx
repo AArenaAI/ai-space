@@ -452,12 +452,8 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
       }).then((response) => {
         if (response.ok) {
           window.dispatchEvent(new CustomEvent("conversation-updated", { detail: { conversationId: targetConversationId } }));
-        } else {
-          toast.warning("对比模型选择未保存，刷新后可能恢复为旧模型");
         }
-      }).catch(() => {
-        toast.warning("对比模型选择未保存，刷新后可能恢复为旧模型");
-      });
+      }).catch(() => {});
     }, COMPARE_MODEL_PERSIST_DEBOUNCE_MS);
   }, [conversationId, currentConversation]);
 
