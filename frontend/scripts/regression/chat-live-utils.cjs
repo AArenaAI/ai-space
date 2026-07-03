@@ -19,8 +19,12 @@ async function login({ baseUrl = env('TESTNET_BASE_URL', DEFAULT_BASE), email = 
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
   });
-  if (!res.ok) throw new Error(`login ${res.status}: ${await res.text()}`);
-  return res.json();
+  const text = await res.text();
+  if (!res.ok) throw new Error(`login ${res.status}: ${text}`);
+  const data = text ? JSON.parse(text) : {};
+  const setCookie = res.headers.get('set-cookie') || '';
+  const refreshMatch = setCookie.match(/ai_space_refresh_token=([^;,]+)/);
+  return { ...data, refreshToken: refreshMatch?.[1] || '' };
 }
 
 async function apiGet(path, token, { baseUrl = env('TESTNET_BASE_URL', DEFAULT_BASE) } = {}) {
@@ -32,14 +36,19 @@ async function apiGet(path, token, { baseUrl = env('TESTNET_BASE_URL', DEFAULT_B
   return data;
 }
 
-async function openAuthedPage({ baseUrl = env('TESTNET_BASE_URL', DEFAULT_BASE), token, user, viewport = { width: 1440, height: 1000 } }) {
+async function openAuthedPage({ baseUrl = env('TESTNET_BASE_URL', DEFAULT_BASE), token, user, refreshToken = '', viewport = { width: 1440, height: 1000 } }) {
   const browser = await chromium.launch({ headless: env('HEADFUL') !== '1' });
-  const page = await browser.newPage({ viewport });
+  const context = await browser.newContext({ viewport });
+  if (refreshToken) {
+    await context.addCookies([{ name: 'ai_space_refresh_token', value: refreshToken, domain: new URL(baseUrl).hostname, path: '/', httpOnly: true, secure: true, sameSite: 'Lax' }]);
+  }
+  const page = await context.newPage();
   await page.addInitScript(({ token, user }) => {
     localStorage.setItem('token', token);
     localStorage.setItem('user', JSON.stringify(user));
+    if (user?.default_workspace_id) localStorage.setItem('current-workspace', String(user.default_workspace_id));
   }, { token, user });
-  return { browser, page, baseUrl };
+  return { browser, page, context, baseUrl };
 }
 
 function summarizeConsole(events) {

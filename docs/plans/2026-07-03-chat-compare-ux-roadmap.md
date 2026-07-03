@@ -23,8 +23,8 @@
 
 | 优先级 | 主题 | 状态 | 说明 |
 |---|---|---:|---|
-| P1 | 发送后的稳定感 | 🟡 | 之前修过部分旧行重渲染，但缺 live stress probe 和强 identity preservation。 |
-| P2 | 模型选择与 Compare 可控感 | 🟡 | 根因修过一部分，体验层和持久化还没闭环。 |
+| P1 | 发送后的稳定感 | 🟡 | 已补 live jitter/旧行稳定 probe；当前 3 轮 testnet 验证无旧行 remount/高度/文本变化，后续继续扩大压力范围。 |
+| P2 | 模型选择与 Compare 可控感 | ✅ | Compare 模型持久化已静默 PATCH 当前会话，并有 testnet live 回归覆盖刷新与新一轮 payload。 |
 | P3 | 阅读效率 | 🟡 | Compare 双列与 Activity 来源已显著改善，但长消息/移动端/滚动细节仍需继续。 |
 | P4 | 侧栏/历史体验 | 🟡 | “发送后会话移动到今天”等已修，hook 化未做。 |
 | P5 | 长期状态架构 | ⬜ | ConversationRuntimeStore / stream ownership / merge 版本机制仍是长期工作。 |
@@ -35,7 +35,7 @@
 
 ### 1. 彻底压掉“旧消息刷新感”
 
-**状态:** 🟡 部分完成
+**状态:** 🟡 部分完成，已有 live probe 覆盖
 
 **附件目标:**
 
@@ -45,12 +45,14 @@
 
 - 已修过一处 `onOpenActivity` 导致的旧行重渲染问题。
 - Chat Activity 入口和面板逻辑已收敛到更稳定的单入口路径。
+- 已有 `chat-placeholder-jitter-live.cjs` 覆盖旧行 DOM node、height、text、duplicate id、latest assistant id、pending 高度跳变。
+- 2026-07-03 testnet 3 轮连续发送验证通过：无旧行 remount、无旧行高度变化、无旧行文本变化、无重复 id；pending/content 跳变在阈值内。
 
 **未完成:**
 
 - 给旧消息对象做更强的 identity preservation。
 - restore/bootstrap 只 patch 当前 active/pending assistant，避免全量 remap 旧 messages。
-- 新增 live stress probe：连续发送 5-10 轮，采样旧行高度、文本、message id、DOM remount、`oldSignatureChanges`。
+- 扩大 live stress probe 到 5-10 轮，并加入更长答案/含代码块/含表格场景。
 
 **补充优化项:**
 
@@ -73,16 +75,17 @@ npm run test:chat-placeholder-jitter-live
 
 ### 2. Pending / 思考占位高度稳定
 
-**状态:** ⬜ 未完成
+**状态:** 🟡 已有 probe 监控，暂未发现超阈值问题
 
 **附件目标:**
 
 > 点发送后，回答区域平滑出现，不“蹦一下”。
 
-**已知问题:**
+**已知问题 / 当前验证:**
 
 - placeholder 初始高度可能 `216 → 180`。
 - 空占位到 reasoning token 有时会跳。
+- 当前 testnet `chat-placeholder-jitter-live` 3 轮结果：placeholder → content 最大跳变 25px，低于 32px 阈值；latest assistant 最大高度变化 41px，属于内容自然增长，低于 96px 阈值。
 
 **待做:**
 
@@ -90,6 +93,8 @@ npm run test:chat-placeholder-jitter-live
 - `AssistantMessageMeta`、model/status slot 预留稳定高度。
 - reasoning 开始前后保持布局一致。
 - Compare 两列 pending 高度一致。
+
+> 这项先不做无证据重构；后续 probe 出现超阈值再引入统一 `AssistantPendingShell`。
 
 **补充优化项:**
 
@@ -171,22 +176,23 @@ npm run test:chat-placeholder-jitter-live
 
 ### 5. Compare 模型选择需要保存到当前会话
 
-**状态:** ⬜ 未完成
+**状态:** ✅ 已实现并有 live 回归
 
 **附件目标:**
 
 > 刷新页面、切会话回来，Compare 模型仍是刚才选的。
 
-**待做:**
+**已完成:**
 
 - 用户在 Compare 会话顶部改模型后，立即 PATCH 当前 conversation：
   - `compare_models`
 - 侧栏 / 恢复 / 刷新后保持一致。
 - 静默保存：成功不提示，失败也不打扰用户；保留当前本地 UI 状态，后台尽力 PATCH。
+- PATCH 防抖 300ms，避免快速连点模型频繁请求。
+- 新增 `chat-compare-model-persistence-live.cjs`：真实 testnet 创建 Compare 会话 → UI 切换模型 → 后端确认 `compare_models` → 刷新确认 header 保留 → 新发一轮确认 payload 使用新模型。
 
 **补充优化项:**
 
-- PATCH 防抖 300ms，避免快速连点模型频繁请求。
 - 不做保存状态轻提示：模型选择是体验增强，应静默持久化，避免额外通知打扰用户。
 - conversation restore 时优先 server `compare_models`，localStorage 只作为 fallback。
 

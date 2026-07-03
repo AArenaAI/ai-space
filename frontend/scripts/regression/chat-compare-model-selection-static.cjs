@@ -29,8 +29,9 @@ assert.ok(
   'Compare header should show explicit next-turn model selection before historical group models'
 );
 assert.ok(
-  messageList.includes('compareModels={group.models.length >= 2 ? group.models : (activeCompareModels.length ? activeCompareModels : compareModels)}'),
-  'Historical compare groups should keep their original round models'
+  messageList.includes('compareModels={group.models.length > 0 ? group.models : (activeCompareModels.length ? activeCompareModels : compareModels)}')
+    && messageList.includes('const isSingleModelGroup = group.models.length < 2 && group.assistantMessages.length <= 1'),
+  'Historical compare groups should keep their original round models, while single-model normal groups stay left-aligned'
 );
 assert.ok(
   !compareHeader.includes('下一轮模型'),

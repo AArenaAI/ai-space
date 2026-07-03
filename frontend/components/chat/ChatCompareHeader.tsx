@@ -28,7 +28,7 @@ function ChatCompareHeader({
   onActivityLayoutChange,
 }: ChatCompareHeaderProps) {
   return (
-    <div className="relative z-[90] w-full shrink-0 bg-surface/80 px-4 py-1 backdrop-blur">
+    <div className="relative z-[90] w-full shrink-0 bg-surface/80 px-4 py-1 backdrop-blur" data-testid="chat-compare-header">
       <div className="mx-auto grid max-w-[1440px] grid-cols-1 items-center gap-5 lg:grid-cols-2 lg:gap-8 xl:gap-10">
         {compareModels.map((modelId, colIndex) => (
           <div key={modelId || colIndex} className="flex min-w-0">

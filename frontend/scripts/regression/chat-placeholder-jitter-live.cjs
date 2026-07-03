@@ -180,7 +180,11 @@ function analyzeRound(samples) {
   const auth = await login({ baseUrl });
   const conversation = await createConversation(baseUrl, auth.token, model);
   const browser = await chromium.launch({ headless: env('HEADFUL') !== '1' });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  if (auth.refreshToken) {
+    await context.addCookies([{ name: 'ai_space_refresh_token', value: auth.refreshToken, domain: new URL(baseUrl).hostname, path: '/', httpOnly: true, secure: true, sameSite: 'Lax' }]);
+  }
+  const page = await context.newPage();
   const consoleEvents = [];
   const pageErrors = [];
   page.on('console', (msg) => consoleEvents.push({ type: msg.type(), text: msg.text().slice(0, 300) }));
@@ -188,6 +192,7 @@ function analyzeRound(samples) {
   await page.addInitScript(({ token, user, model }) => {
     localStorage.setItem('token', token);
     localStorage.setItem('user', JSON.stringify(user));
+    if (user?.default_workspace_id) localStorage.setItem('current-workspace', String(user.default_workspace_id));
     localStorage.setItem('selected-model', model);
     localStorage.setItem('reasoning-mode', 'fast');
     localStorage.setItem('reasoning-enabled', 'false');

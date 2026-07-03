@@ -59,6 +59,7 @@
     "test:chat-local-action-coordinator": "node scripts/regression/chat-local-action-coordinator-regression.cjs",
     "test:chat-model-selection": "node scripts/regression/chat-model-selection-regression.cjs",
     "test:chat-compare-model-selection": "node scripts/regression/chat-compare-model-selection-static.cjs",
+    "test:chat-compare-model-persistence-live": "node scripts/regression/chat-compare-model-persistence-live.cjs",
     "test:chat-compare-unboxed-style": "node scripts/regression/chat-compare-unboxed-style-static.cjs",
     "test:chat-sidebar-history-hook": "node scripts/regression/chat-sidebar-history-hook-static.cjs",
     "test:chat-local-actions-hook": "node scripts/regression/chat-local-actions-hook-regression.cjs",
