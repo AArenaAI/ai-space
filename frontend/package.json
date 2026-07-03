@@ -119,6 +119,7 @@
     "test:chat-placeholder-jitter-live": "node scripts/regression/chat-placeholder-jitter-live.cjs",
     "test:chat-old-row-stability-live": "JITTER_SCENARIO=long_markdown JITTER_ROUNDS=1 JITTER_SAMPLE_MS=12000 JITTER_SETTLE_SAMPLE_MS=5000 node scripts/regression/chat-placeholder-jitter-live.cjs",
     "test:chat-rich-markdown-stability-live": "JITTER_SCENARIO=code_table JITTER_ROUNDS=2 JITTER_SWITCHBACK=1 JITTER_SAMPLE_MS=9000 JITTER_SETTLE_SAMPLE_MS=3500 node scripts/regression/chat-placeholder-jitter-live.cjs",
+    "test:chat-old-row-rich-stability-live": "JITTER_SCENARIO=mixed_rich JITTER_ROUNDS=5 JITTER_SWITCHBACK=1 JITTER_SAMPLE_MS=9500 JITTER_SETTLE_SAMPLE_MS=4200 JITTER_MAX_OLD_SIGNATURE_CHANGES=2 node scripts/regression/chat-placeholder-jitter-live.cjs",
     "test:chat-row-memo-fixture": "node scripts/regression/chat-row-memo-fixture.cjs"
   },
   "dependencies": {

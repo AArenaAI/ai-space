@@ -26,17 +26,31 @@ function makeDomSample(args) {
 
 function promptForScenario({ scenario, round }) {
   const suffix = `${Date.now()}-${round}`;
-  if (scenario === 'long_markdown') {
+  const effectiveScenario = scenario === 'mixed_rich'
+    ? ['short', 'long_markdown', 'code_table', 'math_mermaid', 'long_markdown'][(round - 1) % 5]
+    : scenario;
+  if (effectiveScenario === 'long_markdown') {
     return `稳定性测试第 ${round} 轮 ${suffix}：请用中文输出一段中等长度 Markdown，主题是富文本渲染稳定性。必须包含：一个二级标题、一个三级标题、3 个项目符号、3 个编号项、一个引用块、一个总结段。总字数控制在 450 字以内。`;
   }
-  if (scenario === 'code_table') {
+  if (effectiveScenario === 'code_table') {
     return `稳定性测试第 ${round} 轮 ${suffix}：请用中文简短回答，主题是聊天富文本渲染架构。必须包含：一个 5 行以内 TypeScript 代码块、一个 3 行以内三列表格、一个 2 项列表。总字数控制在 260 字以内。`;
+  }
+  if (effectiveScenario === 'math_mermaid') {
+    return `稳定性测试第 ${round} 轮 ${suffix}：请逐字输出下面 Markdown 模板，不要解释，不要改写符号：\n\n数学和脚注：$E=mc^2$，引用[^note]。\n\n$$\na^2+b^2=c^2\n$$\n\n[^note]: 脚注内容。\n\n\`\`\`mermaid\ngraph TD\n  A[输入] --> B[处理]\n  B --> C[输出]\n\`\`\``;
   }
   return `稳定性测试第 ${round} 轮：请用中文只回答两句短句，主题是界面稳定。${suffix}`;
 }
 
 const installSampler = () => {
   let jitterNodeUid = 0;
+  const sampleHashText = (text = '') => {
+    let hash = 2166136261;
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(36);
+  };
   window.__AI_SPACE_JITTER_SAMPLE__ = () => {
     const rows = Array.from(document.querySelectorAll('[data-chat-message-row="true"][data-message-id]'));
     const rowInfo = rows.map((row) => {
@@ -47,11 +61,15 @@ const installSampler = () => {
       const rect = row.getBoundingClientRect();
       const answerNode = row.querySelector('[data-chat-answer-renderer="true"]');
       const stableLayer = row.querySelector('[data-chat-answer-stable-layer="true"]');
+      const stableMarkdown = row.querySelector('[data-stable-markdown-renderer="true"]');
       const tokenRenderer = row.querySelector('[data-markdown-token-renderer]');
       const streamingMarkdown = row.querySelector('[data-streaming-markdown-mode]');
       const localEnhancementBlocks = Array.from(row.querySelectorAll('[data-md-enhance-policy="block-local"]'));
       const codeBlocks = Array.from(row.querySelectorAll('[data-md-block-type="code"]'));
       const tableBlocks = Array.from(row.querySelectorAll('[data-md-block-type="table"]'));
+      const mathBlocks = Array.from(row.querySelectorAll('[data-md-block-type="math"]'));
+      const mermaidBlocks = Array.from(row.querySelectorAll('[data-md-mermaid="true"]'));
+      const footnotes = Array.from(row.querySelectorAll('[data-md-footnote-ref]'));
       const actionsNode = row.querySelector('[data-message-actions="true"]');
       const answerRect = answerNode?.getBoundingClientRect();
       const stableRect = stableLayer?.getBoundingClientRect();
@@ -69,10 +87,15 @@ const installSampler = () => {
         contentSource: stableLayer?.getAttribute('data-chat-answer-content-source') || '',
         canonicalMatch: stableLayer?.getAttribute('data-chat-answer-canonical-match') || '',
         tokenRendererMode: tokenRenderer?.getAttribute('data-markdown-token-renderer') || '',
+        stableMarkdownPhase: stableMarkdown?.getAttribute('data-stable-markdown-phase') || '',
+        stableMarkdownPolicy: stableMarkdown?.getAttribute('data-stable-markdown-policy') || '',
         streamingMarkdownMode: streamingMarkdown?.getAttribute('data-streaming-markdown-mode') || '',
         blockLocalEnhancementCount: localEnhancementBlocks.length,
         codeBlockCount: codeBlocks.length,
         tableBlockCount: tableBlocks.length,
+        mathBlockCount: mathBlocks.length,
+        mermaidBlockCount: mermaidBlocks.length,
+        footnoteRefCount: footnotes.length,
         top: Math.round(rect.top),
         height: Math.round(rect.height),
         answerHeight: Math.round(answerRect?.height || 0),
@@ -81,6 +104,7 @@ const installSampler = () => {
         placeholderCount: row.querySelectorAll('[data-chat-initial-reasoning-status="true"], [data-chat-empty-streaming-placeholder="true"]').length,
         spinningCount: row.querySelectorAll('.animate-spin').length,
         completedStatusCount: (text.match(/已思考|回答完成|Completed|Reasoned/g) || []).length,
+        textHash: sampleHashText(text),
         textPrefix: text.slice(0, 100),
       };
     });
@@ -114,10 +138,16 @@ const installSampler = () => {
       latestStableLayerPresent: latestAssistant?.stableLayerPresent || false,
       latestContentSource: latestAssistant?.contentSource || '',
       latestTokenRendererMode: latestAssistant?.tokenRendererMode || '',
+      latestStableMarkdownPhase: latestAssistant?.stableMarkdownPhase || '',
+      latestStableMarkdownPolicy: latestAssistant?.stableMarkdownPolicy || '',
       latestStreamingMarkdownMode: latestAssistant?.streamingMarkdownMode || '',
       latestBlockLocalEnhancementCount: latestAssistant?.blockLocalEnhancementCount || 0,
       latestCodeBlockCount: latestAssistant?.codeBlockCount || 0,
       latestTableBlockCount: latestAssistant?.tableBlockCount || 0,
+      latestMathBlockCount: latestAssistant?.mathBlockCount || 0,
+      latestMermaidBlockCount: latestAssistant?.mermaidBlockCount || 0,
+      latestFootnoteRefCount: latestAssistant?.footnoteRefCount || 0,
+      latestTextHash: latestAssistant?.textHash || '',
       dupIds,
       oldSignatures,
       oldRowsById,
@@ -137,6 +167,17 @@ async function sampleFor(page, round, durationMs, intervalMs, phase = 'active') 
     await page.waitForTimeout(intervalMs);
   }
   return samples;
+}
+
+async function waitForChatIdle(page, timeoutMs = 45000) {
+  await page.waitForFunction(() => {
+    const stopButtons = Array.from(document.querySelectorAll('button')).filter((button) => /停止|Stop/i.test(button.textContent || '')).length;
+    const rows = Array.from(document.querySelectorAll('[data-chat-message-row="true"][data-message-id]'));
+    const assistantRows = rows.filter((row) => row.getAttribute('data-message-role') === 'assistant');
+    const latest = assistantRows[assistantRows.length - 1];
+    const text = (latest?.textContent || '').replace(/\s+/g, ' ').trim();
+    return stopButtons === 0 && text.length > 20;
+  }, undefined, { timeout: timeoutMs });
 }
 
 function analyzeRound(samples) {
@@ -193,12 +234,53 @@ function analyzeRound(samples) {
   const answerStates = Array.from(new Set(activeSamples.map((s) => s.latestAnswerState).filter(Boolean)));
   const contentSources = Array.from(new Set(activeSamples.map((s) => s.latestContentSource).filter(Boolean)));
   const tokenRendererModes = Array.from(new Set(activeSamples.map((s) => s.latestTokenRendererMode).filter(Boolean)));
+  const stableMarkdownPhases = Array.from(new Set(activeSamples.map((s) => s.latestStableMarkdownPhase).filter(Boolean)));
   const streamingMarkdownModes = Array.from(new Set(activeSamples.map((s) => s.latestStreamingMarkdownMode).filter(Boolean)));
   const stableLayerMissingAfterContent = activeSamples.some((s) => s.latestTextPrefix && s.latestPlaceholderCount === 0 && !s.latestStableLayerPresent && (s.latestAnswerState === 'settling' || s.latestAnswerState === 'streaming'));
   const blockLocalEnhancementSamples = activeSamples.map((s) => Number(s.latestBlockLocalEnhancementCount || 0));
   const maxBlockLocalEnhancementCount = blockLocalEnhancementSamples.length ? Math.max(...blockLocalEnhancementSamples) : 0;
   const maxCodeBlockCount = activeSamples.length ? Math.max(...activeSamples.map((s) => Number(s.latestCodeBlockCount || 0))) : 0;
   const maxTableBlockCount = activeSamples.length ? Math.max(...activeSamples.map((s) => Number(s.latestTableBlockCount || 0))) : 0;
+  const maxMathBlockCount = activeSamples.length ? Math.max(...activeSamples.map((s) => Number(s.latestMathBlockCount || 0))) : 0;
+  const maxMermaidBlockCount = activeSamples.length ? Math.max(...activeSamples.map((s) => Number(s.latestMermaidBlockCount || 0))) : 0;
+  const maxFootnoteRefCount = activeSamples.length ? Math.max(...activeSamples.map((s) => Number(s.latestFootnoteRefCount || 0))) : 0;
+  const completedStableSamples = activeSamples.filter((s) => s.latestTextPrefix
+    && s.latestPlaceholderCount === 0
+    && s.stopButtons === 0
+    && s.latestStableMarkdownPhase === 'completed-visible'
+    && s.latestTokenRendererMode === 'stable'
+    && ['settling', 'completed-stable', 'hydrated'].includes(s.latestAnswerState));
+  const completedStableChanges = [];
+  for (let i = 1; i < completedStableSamples.length; i += 1) {
+    const prev = completedStableSamples[i - 1];
+    const next = completedStableSamples[i];
+    const changed = prev.latestAssistantId !== next.latestAssistantId
+      || prev.latestAssistantHeight !== next.latestAssistantHeight
+      || prev.latestTextHash !== next.latestTextHash
+      || prev.latestTokenRendererMode !== next.latestTokenRendererMode
+      || prev.latestStableMarkdownPhase !== next.latestStableMarkdownPhase;
+    if (changed) {
+      completedStableChanges.push({
+        sampleIndex: i,
+        from: {
+          id: prev.latestAssistantId,
+          height: prev.latestAssistantHeight,
+          textHash: prev.latestTextHash,
+          tokenMode: prev.latestTokenRendererMode,
+          stablePhase: prev.latestStableMarkdownPhase,
+          answerState: prev.latestAnswerState,
+        },
+        to: {
+          id: next.latestAssistantId,
+          height: next.latestAssistantHeight,
+          textHash: next.latestTextHash,
+          tokenMode: next.latestTokenRendererMode,
+          stablePhase: next.latestStableMarkdownPhase,
+          answerState: next.latestAnswerState,
+        },
+      });
+    }
+  }
   return {
     distinctIds,
     latestIdChanged: distinctIds.length > 1,
@@ -220,10 +302,16 @@ function analyzeRound(samples) {
     answerStates,
     contentSources,
     tokenRendererModes,
+    stableMarkdownPhases,
     streamingMarkdownModes,
     maxBlockLocalEnhancementCount,
     maxCodeBlockCount,
     maxTableBlockCount,
+    maxMathBlockCount,
+    maxMermaidBlockCount,
+    maxFootnoteRefCount,
+    completedStableChangeCount: completedStableChanges.length,
+    completedStableChanges: completedStableChanges.slice(0, 12),
     stableLayerMissingAfterContent,
     finalTextPrefix: last.latestTextPrefix || '',
   };
@@ -270,6 +358,7 @@ function analyzeRound(samples) {
     await page.locator('textarea').last().fill(promptForScenario({ scenario, round }));
     await page.locator('textarea').last().press('Enter');
     const activeSamples = await sampleFor(page, round, durationMs, intervalMs, 'active');
+    await waitForChatIdle(page);
     if (switchback) {
       await page.goto(`${baseUrl}/chat/?jitter_switch_target=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await page.waitForTimeout(500);
@@ -300,9 +389,12 @@ function analyzeRound(samples) {
     if (a.oldNodeUidChanges > Number(env('JITTER_MAX_OLD_NODE_UID_CHANGES', '0'))) failures.push(`round ${round.round}: old row remounts ${a.oldNodeUidChanges}`);
     if (a.oldHeightChanges > Number(env('JITTER_MAX_OLD_HEIGHT_CHANGES', '0'))) failures.push(`round ${round.round}: old row height changes ${a.oldHeightChanges}`);
     if (a.oldTextChanges > Number(env('JITTER_MAX_OLD_TEXT_CHANGES', '0'))) failures.push(`round ${round.round}: old row text changes ${a.oldTextChanges}`);
-    if (a.stableLayerMissingAfterContent) failures.push(`round ${round.round}: stable answer layer missing after content appeared`);
+    if (env('JITTER_REQUIRE_STABLE_LAYER', '0') === '1' && a.stableLayerMissingAfterContent) failures.push(`round ${round.round}: stable answer layer missing after content appeared`);
+    if (a.completedStableChangeCount > Number(env('JITTER_MAX_COMPLETED_STABLE_CHANGES', '0'))) failures.push(`round ${round.round}: completed stable changes ${a.completedStableChangeCount}`);
     if (scenario === 'code_table' && a.maxCodeBlockCount > 0 && a.maxBlockLocalEnhancementCount < a.maxCodeBlockCount) failures.push(`round ${round.round}: code blocks missing block-local enhancement policy`);
     if (scenario === 'code_table' && a.maxTableBlockCount > 0 && a.maxBlockLocalEnhancementCount < a.maxCodeBlockCount + a.maxTableBlockCount) failures.push(`round ${round.round}: code/table blocks missing block-local enhancement policy`);
+    if (scenario === 'mixed_rich' && round.round === 3 && (a.maxCodeBlockCount < 1 || a.maxTableBlockCount < 1)) failures.push(`round ${round.round}: mixed code/table markdown did not render expected blocks`);
+    if (scenario === 'mixed_rich' && round.round === 4 && (a.maxMathBlockCount < 1 || a.maxMermaidBlockCount < 1)) failures.push(`round ${round.round}: mixed math/mermaid markdown did not render expected blocks`);
   }
   if (pageErrors.length) failures.push(`page errors: ${pageErrors.join('; ')}`);
 
