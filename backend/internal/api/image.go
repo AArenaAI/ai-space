@@ -1392,8 +1392,17 @@ func (h *ImageHandler) processImageEditJob(recordID uint, prompt, size, quality,
 		// 避免 Beta 资产/分镜参考图误入 OpenAI image edit 链路。
 		imageURL, b64Data, err = h.imageService.GenerateSeedreamImageWithReferences(ctx, prompt, size, referenceImagePaths)
 	} else if len(referenceImagePaths) > 0 {
-		// image-to-image / mask 编辑模式：基于参考图编辑
-		imageURL, b64Data, err = h.imageService.EditImageStream(ctx, prompt, size, quality, referenceImagePaths, maskPath, background, nil)
+		// image-to-image / mask 编辑模式：基于参考图编辑。
+		// 实验：普通图片生成入口的参考图生成（无 mask、非透明背景）改走 gpt-image-2；
+		// 六工具的 mask/inpaint/remove-bg 仍保持默认 gpt-image-1。
+		modelOverride := ""
+		if maskPath == "" && background == "" {
+			modelOverride = strings.TrimSpace(h.cfg.ImageGenModel)
+			if modelOverride == "" || modelOverride == "qwen-image-2.0-2026-03-03" || modelOverride == "qwen-image" {
+				modelOverride = "gpt-image-2"
+			}
+		}
+		imageURL, b64Data, err = h.imageService.EditImageStreamWithModel(ctx, prompt, size, quality, referenceImagePaths, maskPath, background, modelOverride, nil)
 	} else {
 		// 普通文生图模式
 		imageURL, b64Data, err = h.imageService.GenerateImage(ctx, prompt, size, quality)

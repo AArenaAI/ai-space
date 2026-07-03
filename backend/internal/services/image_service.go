@@ -8,6 +8,7 @@ import (
 	"mime"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	openai "github.com/openai/openai-go"
@@ -89,6 +90,10 @@ func (s *ImageService) EditImage(ctx context.Context, prompt string, size string
 // EditImageStream 基于参考图编辑生成图片，走 OpenAI SDK Images EditStreaming。
 // onEvent 会收到 image_edit.partial_image / image_edit.completed 的 base64 图片数据。
 func (s *ImageService) EditImageStream(ctx context.Context, prompt string, size string, quality string, referenceImagePaths []string, maskPath string, background string, onEvent func(ImageStreamEvent) error) (imageURL string, b64Data string, err error) {
+	return s.EditImageStreamWithModel(ctx, prompt, size, quality, referenceImagePaths, maskPath, background, "", onEvent)
+}
+
+func (s *ImageService) EditImageStreamWithModel(ctx context.Context, prompt string, size string, quality string, referenceImagePaths []string, maskPath string, background string, modelOverride string, onEvent func(ImageStreamEvent) error) (imageURL string, b64Data string, err error) {
 	apiKey := s.cfg.OpenAIOfficialKey
 	if apiKey == "" {
 		apiKey = s.cfg.ImageGenAPIKey
@@ -107,10 +112,13 @@ func (s *ImageService) EditImageStream(ctx context.Context, prompt string, size 
 		return "", "", fmt.Errorf("未指定参考图文件路径")
 	}
 
-	// OpenAI images/edits endpoint only supports gpt-image-1 and dall-e-2.
-	// gpt-image-2 is NOT supported for edits; using it causes fallback to dall-e-2
-	// which only outputs 1024x1024, breaking original aspect ratio.
-	model := "gpt-image-1"
+	// OpenAI mask/background edit flows stay on gpt-image-1. For the plain
+	// reference-image generation experiment, callers may override this to
+	// gpt-image-2 to test whether the provider accepts image input on edits.
+	model := strings.TrimSpace(modelOverride)
+	if model == "" {
+		model = "gpt-image-1"
+	}
 
 	files := make([]*os.File, 0, len(referenceImagePaths))
 	readers := make([]io.Reader, 0, len(referenceImagePaths))

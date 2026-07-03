@@ -31,6 +31,7 @@ import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotification
 import { normalizeError, readApiError, showUserError } from "@/lib/errors";
 import { getClipboardFiles } from "@/lib/clipboardFiles";
 import { toast } from "sonner";
+import { apiFetch } from "@/lib/api/client";
 import ImageLightbox from "@/components/ui/ImageLightbox";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import CreationHistoryPanel from "@/components/creative/CreationHistoryPanel";
@@ -411,9 +412,7 @@ function ImageChatPageInner() {
   }, [initialPromptFromUrl, urlChatId, searchParams]);
 
   const fetchImageChatMessagesDirect = useCallback(async (id: number): Promise<ImageChatMessage[]> => {
-    const token = localStorage.getItem("token");
-    const res = await fetch(`/api/image-chats/${id}/messages`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    const res = await apiFetch(`/image-chats/${id}/messages`, {
       cache: "no-store",
     });
     if (!res.ok) {
@@ -575,10 +574,8 @@ function ImageChatPageInner() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const token = localStorage.getItem("token");
-      const res = await fetch("/api/files/upload", {
+      const res = await apiFetch("/files/upload", {
         method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
       });
       if (!res.ok) {

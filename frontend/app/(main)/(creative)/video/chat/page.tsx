@@ -31,6 +31,7 @@ import { useI18n } from "@/lib/i18n";
 import { emitTaskFinished, registerBackgroundTask } from "@/lib/taskNotifications";
 import { normalizeError, readApiError, showUserError } from "@/lib/errors";
 import { getClipboardFiles } from "@/lib/clipboardFiles";
+import { apiFetch } from "@/lib/api/client";
 
 const ASPECT_RATIOS = [
   { value: "16:9", label: "16:9", w: 16, h: 9 },
@@ -632,10 +633,8 @@ function VideoChatPageInner() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const token = localStorage.getItem("token");
-      const res = await fetch("/api/files/upload", {
+      const res = await apiFetch("/files/upload", {
         method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
       });
       if (!res.ok) {

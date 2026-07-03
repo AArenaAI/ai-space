@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import BeforeAfterSlider from "@/components/ui/BeforeAfterSlider";
 import { resolveImageUrl } from "@/lib/resolveImageUrl";
 import CreationHistoryPanel, { type CreationHistoryItem } from "@/components/creative/CreationHistoryPanel";
-import { getGuestId } from "@/lib/guestId";
+import { apiFetch } from "@/lib/api/client";
 import { normalizeError, readApiError } from "@/lib/errors";
 import type { UserFacingError } from "@/lib/errors";
 
@@ -840,28 +840,11 @@ function ImageEditContent() {
     setRecognitionSourceFileId("");
   }, []);
 
-  const getStoredToken = useCallback(() => {
-    const token = localStorage.getItem("token")?.trim();
-    if (!token || token === "null" || token === "undefined") return "";
-    return token;
-  }, []);
-
-  const buildUploadHeaders = useCallback(() => {
-    const headers: Record<string, string> = {};
-    const token = getStoredToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
-    // 上传接口支持匿名兜底；即使浏览器残留过期 token，也要带 guest id，避免提交阶段卡在上传。
-    const guestId = getGuestId();
-    if (guestId) headers["X-Guest-ID"] = guestId;
-    return headers;
-  }, [getStoredToken]);
-
   const uploadRecognitionImage = useCallback(async (imageBlob: Blob) => {
     const formData = new FormData();
     formData.append("file", imageBlob, "recognition-image.jpg");
-    const uploadResp = await fetch(`${API_BASE_URL}/api/files/upload`, {
+    const uploadResp = await apiFetch("/files/upload", {
       method: "POST",
-      headers: buildUploadHeaders(),
       body: formData,
     });
     if (!uploadResp.ok) {
@@ -875,7 +858,7 @@ function ImageEditContent() {
     const publicId = uploadData?.public_id || "";
     if (!publicId) throw new Error(t("image.edit.error.sourceUploadFailed"));
     return publicId;
-  }, [buildUploadHeaders, t]);
+  }, [t]);
 
   const handleRecognizeRegion = useCallback(async () => {
     if (!maskEditorRef.current?.hasMask()) {
@@ -899,14 +882,8 @@ function ImageEditContent() {
       }
       // 识别阶段上传的是压缩图，只用于分割识别；最终编辑仍使用原图，保证输出尺寸不变。
       setRecognitionSourceFileId(recognitionFileId);
-      const token = localStorage.getItem("token");
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (token && token !== "null" && token !== "undefined") headers.Authorization = `Bearer ${token}`;
-      const guestId = getGuestId();
-      if (guestId) headers["X-Guest-ID"] = guestId;
-      const resp = await fetch(`${API_BASE_URL}/api/images/recognize-mask`, {
+      const resp = await apiFetch("/images/recognize-mask", {
         method: "POST",
-        headers,
         body: JSON.stringify({ image_url: recognitionFileId, overlay_data: payload.overlayData, mask_data: payload.maskData, edit_mode: editMode }),
       });
       const data = await resp.json().catch(() => null);
@@ -1055,9 +1032,8 @@ function ImageEditContent() {
         } else {
           throw new Error(t("image.edit.error.sourceReadFailed"));
         }
-        const uploadResp = await fetch(`${API_BASE_URL}/api/files/upload`, {
+        const uploadResp = await apiFetch("/files/upload", {
           method: "POST",
-          headers: buildUploadHeaders(),
           body: formData,
         });
         if (!uploadResp.ok) throw await readApiError(uploadResp);
@@ -1068,10 +1044,8 @@ function ImageEditContent() {
       if (!imagePublicId) {
         throw new Error(t("image.edit.error.sourceReadFailed"));
       }
-      const token = getStoredToken();
-      const res = await fetch(`${API_BASE_URL}/api/images/edit/preview`, {
+      const res = await apiFetch("/images/edit/preview", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ image_url: imagePublicId, sub_mode: selectedPrecisionRoute.subMode }),
       });
       if (!res.ok) throw await readApiError(res);
@@ -1123,11 +1097,6 @@ function ImageEditContent() {
       toast.error(t("image.edit.error.describeInpaint"));
       return;
     }
-    const token = getStoredToken();
-    if (!token) {
-      toast.error(t("image.edit.error.loginRequired"));
-      return;
-    }
     setIsEditing(true);
     setResult(null);
     try {
@@ -1144,9 +1113,8 @@ function ImageEditContent() {
           throw new Error(t("image.edit.error.sourceReadFailed"));
         }
 
-        const uploadResp = await fetch(`${API_BASE_URL}/api/files/upload`, {
+        const uploadResp = await apiFetch("/files/upload", {
           method: "POST",
-          headers: buildUploadHeaders(),
           body: formData,
         });
         if (!uploadResp.ok) {
@@ -1239,12 +1207,8 @@ function ImageEditContent() {
       }
       if (maskData) body.mask_data = maskData;
 
-      const res = await fetchWithTransientRetry(`${API_BASE_URL}/api/images/edit`, {
+      const res = await apiFetch("/images/edit", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
         body: JSON.stringify(body),
       });
       if (!res.ok) {
@@ -1266,9 +1230,7 @@ function ImageEditContent() {
         toast.info(t("image.edit.toast.processingStarted"));
         for (let i = 0; i < 120; i += 1) {
           await new Promise((resolve) => setTimeout(resolve, 3000));
-          const statusResp = await fetch(`${API_BASE_URL}/api/images/${data.id}`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
+          const statusResp = await apiFetch(`/images/${data.id}`);
           if (!statusResp.ok) continue;
           const statusData = await statusResp.json();
           upsertImage(statusData);
