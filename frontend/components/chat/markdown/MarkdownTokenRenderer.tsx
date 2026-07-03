@@ -197,7 +197,7 @@ export default function MarkdownTokenRenderer({
       data-markdown-token-renderer={doc.truncated ? "preview" : "stable"}
       style={guardMinHeight ? { minHeight: `${Math.ceil(guardMinHeight)}px` } : undefined}
     >
-      {visibleTokens.map((token, index) => <MarkdownBlockTokenRenderer key={index} token={token} />)}
+      {visibleTokens.map((token, index) => <MarkdownBlockTokenRenderer key={index} token={token} blockId={`${messageId || "message"}:${index}`} />)}
     </div>
   );
 }

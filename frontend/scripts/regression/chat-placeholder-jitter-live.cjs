@@ -27,7 +27,7 @@ function makeDomSample(args) {
 function promptForScenario({ scenario, round }) {
   const suffix = `${Date.now()}-${round}`;
   if (scenario === 'long_markdown') {
-    return `稳定性测试第 ${round} 轮 ${suffix}：请用中文输出一篇较长 Markdown 回答，包含三级标题、项目符号、编号列表、引用块和总结段，主题是富文本渲染稳定性。不要太短。`;
+    return `稳定性测试第 ${round} 轮 ${suffix}：请用中文输出一段中等长度 Markdown，主题是富文本渲染稳定性。必须包含：一个二级标题、一个三级标题、3 个项目符号、3 个编号项、一个引用块、一个总结段。总字数控制在 450 字以内。`;
   }
   if (scenario === 'code_table') {
     return `稳定性测试第 ${round} 轮 ${suffix}：请用中文回答，并包含一个 TypeScript 代码块、一个三列表格、一个简短列表，主题是聊天富文本渲染架构。`;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, memo, type ComponentType, type CSSProperties, type UIEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, memo, type CSSProperties, type UIEvent } from "react";
 import { cn } from "@/lib/utils";
 import { Message, ChatModel } from "@/lib/chatTypes";
 import { useFavorites } from "@/hooks/useFavorites";
@@ -10,53 +10,25 @@ const ShareDialog = dynamic(() => import("@/components/ui/ShareDialog"), { ssr: 
 import { useMessageStream } from "@/hooks/useMessageStream";
 import { dedupeAssistantsByModel, inferGroups, InferredGroup } from "@/lib/groups";
 import { useI18n } from "@/lib/i18n";
-import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
-import MarkdownPlainFallback from "./markdown/MarkdownPlainFallback";
+import StableMarkdownRenderer from "./StableMarkdownRenderer";
 import { preheatMarkdownTokens } from "@/lib/markdown/markdownTokenWorkerClient";
 import { emitChatRenderProfileEvent } from "@/lib/chatRenderProfile";
 import { getConversationScrollState, saveConversationScrollState } from "@/lib/chatConversationScrollState";
 
 type MarkdownRendererProps = { content: string; isStreaming?: boolean; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean; allowRichLiteFallback?: boolean; compactRichLitePreview?: boolean; messageId?: string | number };
-let markdownRendererPromise: Promise<{ default: ComponentType<MarkdownRendererProps> }> | null = null;
-let MarkdownRendererModule: ComponentType<MarkdownRendererProps> | null = null;
-
-function loadMarkdownRenderer() {
-  if (!markdownRendererPromise) {
-    markdownRendererPromise = import("./MarkdownRenderer").then((module) => {
-      MarkdownRendererModule = module.default;
-      return { default: module.default as ComponentType<MarkdownRendererProps> };
-    });
-  }
-  return markdownRendererPromise;
-}
 
 function LoadableMarkdownRenderer(props: MarkdownRendererProps) {
-  const { content } = props;
-  const [Renderer, setRenderer] = useState(() => MarkdownRendererModule);
-
-  useEffect(() => {
-    if (Renderer) return;
-    let cancelled = false;
-    loadMarkdownRenderer().then((module) => {
-      if (!cancelled) setRenderer(() => module.default);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [Renderer]);
-
-  if (props.allowRichLiteFallback) {
-    return <DeferredMarkdownRenderer {...props} />;
-  }
-
-  if (!Renderer) {
-    if (props.priorityHydrateRichText) {
-      return <DeferredMarkdownRenderer {...props} />;
-    }
-    return <MarkdownPlainFallback content={content} messageId={props.messageId} />;
-  }
-
-  return <Renderer {...props} />;
+  return (
+    <StableMarkdownRenderer
+      content={props.content}
+      phase={props.isStreaming ? "streaming" : "historical"}
+      messageId={props.messageId}
+      shouldHydrateRichText={props.shouldHydrateRichText}
+      priorityHydrateRichText={props.priorityHydrateRichText}
+      allowRichLiteFallback={props.allowRichLiteFallback}
+      compactRichLitePreview={props.compactRichLitePreview}
+    />
+  );
 }
 import ChatMessageListItem from "./ChatMessageListItem";
 import ChatCompareGroupRow from "./ChatCompareGroupRow";
@@ -200,7 +172,7 @@ function LazyMarkdownRenderer({ content, shouldHydrateRichText = true, priorityH
     return <MemoMarkdownRenderer content={content} shouldHydrateRichText={shouldHydrateRichText} priorityHydrateRichText={priorityHydrateRichText} allowRichLiteFallback={allowRichLiteFallback} compactRichLitePreview={compactRichLitePreview} messageId={messageId} />;
   }
 
-  return <DeferredMarkdownRenderer content={content} shouldHydrateRichText={shouldHydrateRichText} priorityHydrateRichText={priorityHydrateRichText} allowRichLiteFallback={allowRichLiteFallback} compactRichLitePreview={compactRichLitePreview} messageId={messageId} />;
+  return <MemoMarkdownRenderer content={content} shouldHydrateRichText={shouldHydrateRichText} priorityHydrateRichText={priorityHydrateRichText} allowRichLiteFallback={allowRichLiteFallback} compactRichLitePreview={compactRichLitePreview} messageId={messageId} />;
 }
 
 function MessageList({
